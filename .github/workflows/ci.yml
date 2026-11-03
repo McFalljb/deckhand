@@ -1,20 +1,19 @@
-# Build and quiet test-mode scenes on macOS arm64. It has not run on GitHub yet.
-# Known before the first run: the Odin release asset (odin-macos-arm64-<tag>.tar.gz, one top
-# folder, odin plus its own libLLVM in libs/; checked against dev-2026-09).
-# Still unknown until it runs:
-#   - Metal on the hosted runner's virtual GPU: the scenes render offscreen through Metal and
-#     take screenshots of their own window (a logged-in GUI session is expected on macOS runners);
-#   - CEF's GPU process on that virtual GPU (the browser, comments and app-tab scenes are
-#     therefore not required yet);
-#   - scene timings on a slower VM (each scene's waits have their own timeouts);
-#   - the time a cold CEF download (~135 MB) and build take (the cache key is vendor/cef/VERSION).
-# Promote a scene to the required list once it has passed here a few times.
+# Every push to main and every pull request: unit tests and the required test-mode scenes, in
+# parallel jobs so the run takes a few minutes. The slow and not-yet-required scenes run in
+# scenes-full.yml (nightly and on demand).
+#
+# Test-mode scenes: fake HOME, fake pi, temp data dir, no network, never real pi.
+# NEVER in CI: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh run a real pi
+# against paid models.
 name: CI
 
 on:
   push:
     branches: [main]
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
   pull_request:
+    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -23,93 +22,58 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  ODIN_VERSION: dev-2026-09
+  # sha256 of odin-macos-arm64-dev-2026-09.tar.gz (the release asset). Update with ODIN_VERSION.
+  ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
 jobs:
-  macos-arm64:
-    runs-on: macos-15 # arm64 (pi-desk itself needs macOS 14+)
-    timeout-minutes: 75
-    env:
-      ODIN_VERSION: dev-2026-09
-      # sha256 of odin-macos-arm64-dev-2026-09.tar.gz (the release asset; GitHub's asset
-      # digest says the same). Update with ODIN_VERSION.
-      ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
-      # test mode never opens the user's data; scenes use their own temp dirs under build/
-      HOMEBREW_NO_AUTO_UPDATE: "1"
+  unit:
+    runs-on: macos-15 # arm64
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
-        with:
-          submodules: recursive
-          persist-credentials: false
-
-      - name: Odin (pinned, checksummed)
-        run: |
-          # asset name checked for dev-2026-09; check it again when bumping ODIN_VERSION
-          curl -sSfL -o odin.tar.gz \
-            "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
-          echo "${ODIN_SHA256}  odin.tar.gz" | shasum -a 256 -c
-          mkdir -p "$RUNNER_TEMP/odin"
-          tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components 1
-          rm odin.tar.gz
-          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
-
-      - name: Check Odin
-        run: odin version
-
-      - name: Cache CEF
-        uses: actions/cache@v4
-        with:
-          # scripts/fetch-cef.sh keeps the archive in downloads/ and the unpacked tree beside it,
-          # and re-checks the archive's SHA-256 before reusing a cached tree
-          path: ~/Library/Caches/pi-desk/cef
-          key: cef-${{ runner.os }}-arm64-${{ hashFiles('vendor/cef/VERSION') }}
-
+        with: { submodules: recursive, persist-credentials: false }
+      - uses: ./.github/actions/setup
+        with: { cef: "false" }
       - name: Unit and binding tests
         run: ./build.sh test
 
+  # Required scenes, split so each shard takes about the same time (timings from the hosted
+  # runner: menus ~100 s, jobs ~80 s, the rest under 30 s each). Promote a scene from
+  # scenes-full.yml once it has passed there a few times.
+  scenes:
+    runs-on: macos-15
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        shard:
+          - menus fetch-cef-test projects
+          - jobs markdown restore term-links
+          - settings setup menu
+    name: scenes (${{ matrix.shard }})
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, persist-credentials: false }
+      - uses: ./.github/actions/setup
       - name: Build (with CEF)
         run: ./build.sh
-
-      - name: Git identity for scenes that make commits
-        run: |
-          git config --global user.name "CI"
-          git config --global user.email "ci@example.invalid"
-          git config --global init.defaultBranch main
-
-      # Test-mode scenes: fake HOME, fake pi, temp data dir, no network, never real pi.
-      # NEVER here: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh run your
-      # real pi against paid models. Left out as well: screenshot-only scenes (looks, font, shots,
-      # text-shots) and the environment-sensitive ones (persist-cpu: CPU numbers;
-      # browser-netpolicy: which hosts Chromium tries during a 20 s idle).
-      # Required: scenes without a GPU-timing or CEF dependency (fetch-cef-test has no window).
-      - name: Scenes (required)
+      - name: Scenes
         run: |
           fail=0
-          for s in fetch-cef-test jobs markdown menu menus settings setup projects restore term-links; do
+          for s in ${{ matrix.shard }}; do
             echo "::group::$s"
             if ! tests/scripts/$s.sh; then echo "::error::scene $s failed"; fail=1; fi
             echo "::endgroup::"
           done
           exit $fail
-
-      # Not required yet: CEF and app-tab scenes (virtual GPU), and scenes with large-folder or
-      # many-file timings. Reported, never failing the run, until they have a record here.
-      - name: Scenes (not required yet)
-        id: optional
-        continue-on-error: true
-        run: |
-          fail=0
-          for s in browser browser-rlz comments app-tab sidebar editor files changes worktrees \
-                   buttons bell reload panels agent polish; do
-            echo "::group::$s"
-            if ! tests/scripts/$s.sh; then echo "::warning::scene $s failed"; fail=1; fi
-            echo "::endgroup::"
-          done
-          exit $fail
-
       - name: Upload screenshots and logs on failure
-        if: failure() || steps.optional.outcome == 'failure'
+        if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: scene-output
+          name: scene-output-${{ strategy.job-index }}
           path: |
             build/shots
             build/**/*.log

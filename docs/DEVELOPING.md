@@ -293,6 +293,12 @@ still readable on white.
 > scene uses a fake HOME and a fake pi, never touches your data and needs no network. CI runs only
 > the fake ones.
 
+CI runs in two workflows. `ci.yml` runs on every push to main and every pull request (not for
+changes to Markdown and docs alone): the unit tests in one job and the required scenes split
+across three parallel jobs, so a run takes a few minutes. `scenes-full.yml` runs every scene,
+including those not required yet, nightly and on demand (**Actions › Scenes (full) › Run
+workflow**). A scene moves into `ci.yml` once it has passed there a few times.
+
 ### How test mode works
 
 `PI_DESK_SCRIPT=file build/pi-desk DIR` plays a script of synthetic events through the normal event

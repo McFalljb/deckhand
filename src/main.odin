@@ -121,6 +121,7 @@ init :: proc "c" () {
 		run_command(Add_Project{dir})
 		app.pending_start = true
 	}
+	update_init() // pi-desk's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
 	app.redraw = true
 }
@@ -542,6 +543,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it
 		case Hit_Reload:    reload_click(hit) // the hot-reload bars
+		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
@@ -671,6 +673,7 @@ confirm_pending :: proc(token: string) {
 		case Close_Tab: cmd = Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}
 		case Close_Session: cmd = Close_Session{session = c.session, confirm = token, ask = c.ask, comments = c.comments}
 		case Quit:      cmd = Quit{confirm = token}
+		case Update_Install: cmd = Update_Install{confirm = token}
 		case Pi_Reload: cmd = Pi_Reload{tab_id = c.tab_id, confirm = token}
 		case Pi_Reload_All: cmd = Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case Pi_Restart_Updated: cmd = Pi_Restart_Updated{confirm = token}

@@ -204,7 +204,7 @@ case "$MODE" in
     if command -v node >/dev/null; then node tests/browser_act_js_test.mjs; else echo "browser_act_js_test: skipped (no node)"; fi
     odin test tests -out:build/pi-desk-tests
     # command layer (src/*_test.odin); tests share the global State: one thread
-    odin test src -out:build/pi-desk-core-tests -define:ODIN_TEST_THREADS=1
+    odin test src -out:build/pi-desk-core-tests -define:ODIN_TEST_THREADS=1 -define:PI_DESK_UPDATE_TEST=true
     build_fake_app ;;
   fake-app) build_fake_app ;;
   release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES ;;

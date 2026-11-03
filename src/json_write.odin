@@ -238,6 +238,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Notifications_Clear: return "notifications_clear"
 	case Notify_Post:         return "notify_post"
 	case Set_Bell:            return "set_notifications"
+	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
+		return update_command_name(cmd)
 	case Job_List:            return "job_list"
 	case Job_Runs:            return "job_runs"
 	case Job_Run_Now:         return "job_run_now"
@@ -389,6 +391,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
+	case Update_Install:
+		token(&w, c.confirm, redact)
+	case Update_Check, Update_Skip, Update_Later, Update_Download, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
+		update_write(w.b, cmd) // update.odin: never the release body
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		reload_write(w.b, cmd) // reload.odin; confirmation tokens never
 	case New_Shell_Tab:
@@ -1147,6 +1153,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_u64(&n, "os_notified", u64(s.notices.os_sent))
 		obj_end(&n)
 	}
+	key(&w, "update") // pi-desk's own updates (update.odin): read-only for agents
+	update_state_json(b)
 	key(&w, "jobs")
 	write_job_rows(b, s.jobs[:], false)
 	key(&w, "jobs_unread")

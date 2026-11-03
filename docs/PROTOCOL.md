@@ -499,6 +499,7 @@ without asking. Exited tabs never ask.
  "home": {"session": 0, "tab_id": 0, "open": false},
  "agent": {"unread": 0, "needs_user": false, "model": "opencode-go/deepseek-v4.1-flash", "notified": 0},
  "notifications": {"count": 2, "unread": 1, "os_notified": 1},
+ "update": {"checks": true, "current": "0.1.0", "phase": "none", "available": true, "latest": "0.1.1", "skipped": "", "dismissed": false, "can_install": true, "last_check": 1793670783, "message": ""},
  "reload": {"gen": 1, "changed": ["/Users/me/.pi/agent/settings.json"], "changed_more": 0, "from_save": false, "dismissed": false, "pi_version": "1.4.0", "restart_dismissed": false},
  "focus": {"kind": "terminal", "tab_id": 2},
  "layout": {"left_width": 300, "right_width": 320, "left_open": true, "right_open": true, "drawer_width": 420, "drawer_pinned": false, "panels": [], "collapsed": ["shells"], "left_tab": "sessions"},
@@ -582,6 +583,24 @@ point (`command -v pi` in a login shell, on a worker: at the first pi tab, again
 show and before a restart, at most every 10 s; `PI_DESK_PI_PACKAGE` overrides it, test mode
 without it has none; a wrapper script gives none). `reload.pi_version` is the version on disk now; a tab whose `version` differs is
 offered a restart (`pi_restart_updated`). Atlas is a pi tab like the others here (idle only).
+
+#### Updates
+
+`update` is pi-desk's own update state (src/update.odin; GUIDE.md "Updates"): `checks` (the
+daily check is on), `current` (the running version; `""` for a development build, which never
+checks), `phase` (`none`, `checking`, `downloading`, `ready`: checked and waiting for Restart to
+update, `failed`: `message` says why, `installed`: test mode only), `available` (a newer, not
+skipped release is offered), `latest` (the newest release seen), `skipped`, `dismissed` (Later),
+`can_install` (this copy may replace itself: a writable folder, not translocated, a release key
+built in), `last_check` (Unix seconds of the last good check). No paths.
+
+Every update command is the user's (`who = .User`): `update_check`, `update_skip`,
+`update_later`, `update_download` (download and verify; nothing is installed),
+`update_install` (`confirm?`; confirmation class `app_quit`, asked of the user whatever the
+policy while sessions, shells or jobs run) and `set_update_check` (`on`). Agents and pi tabs get
+"not allowed for this caller". The internal `update_env`, `update_tick`, `update_checked` and
+`update_prepared` appear in events and the log (the release body never: only its size) but
+cannot be sent.
 
 #### The bell (notifications)
 

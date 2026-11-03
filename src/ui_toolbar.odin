@@ -218,6 +218,7 @@ Pop_Item :: enum {
 	Tidy_Projects, // the tidy project list (project_tidy.odin); last, so earlier rows keep their ids
 	Reload_Pi, // reload every pi tab (reload.odin); drawn after Rescan, last so earlier rows keep their ids
 	Setup, // "Set up pi-desk…": the first-run sheet (ui_setup.odin), its button once a main folder is set; last so earlier rows keep their ids
+	Update_Checks, // check for pi-desk updates about once a day (update.odin); last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -228,7 +229,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Reduce_Motion, .Notifications, .Agent_Model,
 	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
 	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
-	.Rescan, .Reload_Pi, .Shortcuts, .Settings_Files, .Setup, .Tidy_Projects,
+	.Rescan, .Reload_Pi, .Shortcuts, .Settings_Files, .Setup, .Tidy_Projects, .Update_Checks,
 }
 
 POP_ACTIONS := [Pop_Item]string {
@@ -259,6 +260,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Text_Large        = "text_large",
 	.Reload_Pi         = "reload_all_pi",
 	.Setup             = "setup",
+	.Update_Checks     = "update_checks",
 }
 
 settings_open :: proc() -> bool {return state.focus_widget == "settings"}
@@ -499,6 +501,7 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Settings_Files, nil)
 		pop_row(.Setup, nil)
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
+		pop_row(.Update_Checks, !upd.checks_off)
 	}
 }
 
@@ -780,6 +783,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return files_tip(x)
 	case Hit_Reload:
 		return reload_tip(x)
+	case Hit_Update:
+		return update_tip(x)
 	case Hit_Comments:
 		return comments_tip(x)
 	case Hit_Jobs:

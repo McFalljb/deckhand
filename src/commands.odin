@@ -395,6 +395,17 @@ Command :: union {
 	Notifications_Clear,
 	Notify_Post,
 	Set_Bell,
+	// updates (update.odin)
+	Update_Check,
+	Update_Skip,
+	Update_Later,
+	Update_Download,
+	Update_Install,
+	Set_Update_Check,
+	Update_Env,
+	Update_Tick,
+	Update_Checked,
+	Update_Prepared,
 	// jobs (jobs.odin)
 	Job_List,
 	Job_Runs,
@@ -1290,6 +1301,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return browser_act_apply(cmd, caller, request_id)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		return notify_apply(cmd, caller)
+	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
+		return update_apply(cmd, caller)
 	case Set_Home_Dir, Set_Folder, Setup_Sheet:
 		return folders_apply(cmd, caller)
 	case Job_List, Job_Runs, Job_Run_Now, Job_Stop, Jobs_Pause, Jobs_Resume, Job_Create, Job_Save, Job_Mark_Read, Job_Set_Enabled, Job_Delete, Job_Open, Set_Pi_Path, Set_Job_Limits, Jobs_Sync, Jobs_Tick, Job_Run_Done, Jobs_Env:
@@ -1542,6 +1555,9 @@ same_target :: proc(a, b: Command) -> bool {
 		return ok && x.session == y.session
 	case Quit:
 		_, ok := b.(Quit)
+		return ok
+	case Update_Install:
+		_, ok := b.(Update_Install)
 		return ok
 	case Reload_File:
 		y, ok := b.(Reload_File)

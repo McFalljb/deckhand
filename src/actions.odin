@@ -289,6 +289,18 @@ ACTIONS := [?]Action {
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (Command, bool) {
 		return Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
+	// pi-desk's own updates (update.odin)
+	{id = "check_updates", label = "Check for Updates…", make = proc() -> (Command, bool) {return Update_Check{}, true}, detail = proc() -> string {
+		if upd.offered do return fmt.tprintf("%s available", upd.release.version)
+		return upd.current != "" ? fmt.tprintf("pi-desk %s", upd.current) : ""
+	}},
+	{id = "update_checks", label = "Check for updates automatically", make = proc() -> (Command, bool) {
+		return Set_Update_Check{on = upd.checks_off}, true
+	}, detail = proc() -> string {return upd.checks_off ? "off" : "on (about once a day)"}},
+	{id = "update_install", label = "Restart to update pi-desk", make = proc() -> (Command, bool) {
+		if upd.phase != .Ready do return nil, false
+		return Update_Install{}, true
+	}, detail = proc() -> string {return upd.release.version}},
 	// hot reload (reload.odin): /reload every pi tab; restart them on a new pi
 	{id = "reload_all_pi", label = "Reload all pi tabs", make = proc() -> (Command, bool) {
 		for &s in state.open_sessions do if t := session_pi_tab(&s); t != nil && t.status == .Running do return Pi_Reload_All{}, true

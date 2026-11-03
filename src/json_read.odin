@@ -491,6 +491,12 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "agent_model_picker":  cmd = Agent_Model_Picker{}
 	case "set_notify":          cmd = Set_Notify{on = get_bool(&r, "on")}
 	case "set_tidy_projects":   cmd = Set_Tidy_Projects{on = get_bool(&r, "on")}
+	case "update_check":        cmd = Update_Check{}
+	case "update_skip":         cmd = Update_Skip{}
+	case "update_later":        cmd = Update_Later{}
+	case "update_download":     cmd = Update_Download{}
+	case "update_install":      cmd = Update_Install{confirm = get_str(&r, "confirm", optional = true)}
+	case "set_update_check":    cmd = Set_Update_Check{on = get_bool(&r, "on")}
 	case "set_confirm_policy":  cmd = Set_Confirm_Policy{caller = get_enum(&r, "caller", CALLER_NAMES), class = get_enum(&r, "class", CLASS_NAMES), mode = get_enum(&r, "mode", MODE_NAMES)}
 	case "set_close_confirm":   cmd = Set_Close_Confirm{tab_kind = get_enum(&r, "tab_kind", TAB_KIND_NAMES), rule = get_enum(&r, "rule", CLOSE_NAMES)}
 	case "set_theme":           cmd = Set_Theme{name = get_enum(&r, "name", THEME_NAMES)}

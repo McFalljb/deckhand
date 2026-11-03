@@ -10,7 +10,7 @@ made. The wire protocol has its own document, [PROTOCOL.md](PROTOCOL.md).
 2. [Building and running](#building-and-running)
 3. [Rebuilding libghostty-vt](#rebuilding-libghostty-vt)
 4. [Pinned versions](#pinned-versions)
-5. [Releases](#releases)
+5. [Releases](#releases) (and [update signing](#update-signing))
 6. [Contributing](#contributing)
 7. [Architecture](#architecture)
 8. [Looks](#looks)
@@ -93,16 +93,85 @@ so rerun it after bumping the tag.
 
 ## Releases
 
-`scripts/release.sh` packages a release: it builds, runs the tests, writes the version into
-`Info.plist`, signs the app, and writes the zip and its checksum. `.github/workflows/release.yml`
-runs it when a `v*` tag is pushed and drafts the GitHub Release. To try it locally,
-`scripts/release.sh --version 0.1.0 --no-upload` writes everything to `dist/`.
+Releases are built and signed on the release signer's Mac, in one command:
+`scripts/release.sh --version X.Y.Z`. CI (`ci.yml`, `scenes-full.yml`) tests every push but
+builds no releases. The script refuses, before it builds anything, unless the worktree is clean
+(no changes, no untracked files), HEAD is exactly the tag `vX.Y.Z`, `UPDATE_PUBLIC_KEY` is a
+real key and the key file's public half is that key. Then it runs `./build.sh test` and
+`./build.sh` (with CEF), checks that the app holds `UPDATE_PUBLIC_KEY` and not the test key,
+writes the version into every `Info.plist`, code-signs (ad hoc, or Developer ID and notarized
+when `MACOS_CERT_P12` and the rest are set), zips, unpacks the zip again to check its signature
+and CDHash against the built app, writes the `.sha256` and the updater's `.sig` from that
+bundle, and drafts the GitHub Release with `gh` (`--verify-tag`: the tag must already be pushed;
+a re-run replaces a draft's files but never a published release's). Last, it downloads the
+draft's `.sig` again and verifies it against the local zip. You check the draft and publish it.
 
-A release carries `pi-desk-<version>-macos-arm64.zip` and its `.sha256`. Unless a release says
+Each release:
+
+1. Commit everything, then `git tag vX.Y.Z` at that commit and `git push origin vX.Y.Z`.
+2. `scripts/release.sh --version X.Y.Z` (or first `--no-upload`, a dry run into `dist/` with no
+   GitHub calls, then `--upload-only` to draft what it left there, checked again).
+3. Open the draft on GitHub, check the notes and the three files, publish it.
+
+A release carries `pi-desk-<version>-macos-arm64.zip`, its `.sha256` and its `.sig` (below). Unless a release says
 it is notarized, the app is signed ad hoc rather than with an Apple Developer ID, so Gatekeeper
 refuses the first open (the README says how to get past that). The app is about 340 MB, mostly
 Chromium for the browser tab. The bundle carries the third-party licences in
 `Contents/Resources/licenses/`.
+
+### Update signing
+
+pi-desk updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust
+anchor is an Ed25519 key of its own, not GitHub or the TLS connection: an update installs only
+when its `.sig` verifies under the public key compiled into the app (`UPDATE_PUBLIC_KEY` in
+`src/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
+GitHub (no secret, no CI step), and `scripts/release.sh` signs only the bundle it has just
+built there, never anything downloaded.
+
+- **What is signed.** Not the zip's bytes directly but a short manifest
+  (`src/updatesig/updatesig.odin`):
+  `pi-desk update v2\nversion X.Y.Z\nfile pi-desk-X.Y.Z-macos-arm64.zip\nsize N\nsha256 HEX\ncdhash HEX\n`.
+  The CDHash is the app's main executable code directory hash (`codesign -dvvv`'s `CDHash=`),
+  which covers `Info.plist` and the resource seal and so every file in the bundle. A signature
+  is thus bound to one version (an old signed zip cannot be served as a newer release) and to
+  the exact app inside: pi-desk checks the CDHash again on the unpacked copy, on the staged copy
+  next to the running app, and right before it renames that copy into place. The `.sig` is
+  three lines: `pi-desk-update-sig v2`, `cdhash HEX`, `signature BASE64`. Pre-releases
+  (`X.Y.Z-suffix`) are never offered and are not signed.
+- **The tool.** `odin build tools/update-sign -out:build/update-sign`, then
+  `update-sign keygen FILE` (a new key: the base64 32-byte seed into FILE, created `0600`,
+  never overwritten; prints only the public key), `pubkey KEYFILE`,
+  `sign KEYFILE VERSION ZIP CDHASH SIG`, `verify PUBKEY VERSION ZIP SIG` and
+  `manifest VERSION ZIP CDHASH`. It reads the private key only from KEYFILE, never from the
+  environment, and never prints it. KEYFILE is opened without following a link and must be a
+  regular file you own with mode `600` or `400`, in a folder that neither group nor others can
+  write. `scripts/release.sh` takes it from `--key FILE`, `$PI_DESK_UPDATE_KEY_FILE` or, by
+  default, `~/.config/pi-desk/update.key`.
+- **Signing a release** is part of `scripts/release.sh` ("Releases" above): the CDHash comes
+  from the app it has just built and zipped, and the `.sig` goes up with the zip.
+- **Setting it up** (once): `mkdir -p ~/.config/pi-desk && chmod 700 ~/.config/pi-desk`,
+  `build/update-sign keygen ~/.config/pi-desk/update.key`, put the printed public key into
+  `UPDATE_PUBLIC_KEY` and commit. Back the key file up offline (an encrypted USB stick or a
+  password manager's secure file), not in iCloud Drive or a repository. Copies of pi-desk built
+  before this key exist cannot update themselves (install the first keyed release by hand).
+- **Backups.** An update keeps the replaced app next to it as `pi-desk.app.old-<version>` (rolled
+  back to if the swap fails) and removes it at the second start after the update, whatever
+  version is running then (also after a downgrade by hand).
+- **Losing the key** means installed copies can no longer be updated automatically: ship a new
+  key in a release that users install by hand. Keep the backup.
+- **Rotating it.** Generate a new key, ship a release whose `UPDATE_PUBLIC_KEY` is the new
+  public key **signed with the old key** (installed copies only trust the old one), then sign
+  the releases after it with the new key. `scripts/release.sh` refuses a key that does not
+  match the checkout's `UPDATE_PUBLIC_KEY`; for the bridge release say so:
+  `scripts/release.sh --version X.Y.Z --key OLDFILE --rotating-from OLDPUB`. If the
+  old key leaked, that bridge release is the risk window: publish it quickly and tell users of
+  older copies to update by hand from the releases page.
+- **Tests** use a throwaway key, `tests/update/test-key.txt`, public on purpose. Its public half
+  (`UPDATE_TEST_PUBLIC_KEY`) and test mode's update fixtures (`PI_DESK_UPDATE_URL` and the rest)
+  are compiled in only with `-define:PI_DESK_UPDATE_TEST=true` (`./build.sh test`'s unit tests
+  and the update scene's own binary). `tests/scripts/update.sh` plays the whole flow from
+  `file://` fixtures into a fake install folder; `tests/scripts/release-checks.sh` checks the
+  key-file rules and `release.sh`'s refusals against a fake `gh`.
 
 ## Contributing
 
@@ -148,6 +217,7 @@ sidebar.odin   left column model: which projects, chats and sessions show and in
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
 tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md)
+update*.odin   pi-desk's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
 notify.odin    the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands
 ui_bell.odin   the bell in the top bar (unread count) and its popover (Today/Earlier, mark all read, clear; an entry focuses its session)
 ui_toolbar.odin top bar buttons (each runs an action), search pill, settings popover (the gear), shortcuts sheet (⌘/), tooltips
@@ -407,6 +477,15 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   state, picking a worktree, a terminal and a pi session in one, Clean up through the
   confirmation bar, light and dark and idle CPU, then a relaunch that checks the worktree session
   and the tree's checkout came back.
+- **`update.sh`**: pi-desk's own updates, in a test build of its own, from local `file://`
+  fixtures (fake bundles signed ad hoc, the throwaway test key) into a fake install folder in
+  `build/update/`: the bar, Skip, Check for Updates…, Later, agents refused, Update, a staged
+  copy changed after its check refused at install, Try again, the confirmation while a pi tab
+  runs, the swap and the logged relaunch; then a second start that keeps the old bundle and
+  refuses a release whose signature does not match.
+- **`release-checks.sh`**: `build/update-sign`'s key-file rules and `scripts/release.sh`'s
+  refusals (dirty tree, HEAD not the tag, wrong or placeholder key, rotation), in a temp
+  repository with a fake `gh` and the test key; it builds no release.
 - **`browser.sh`**: the browser tab scenes ([BROWSER.md](BROWSER.md) §6), on local test pages
   only.
 

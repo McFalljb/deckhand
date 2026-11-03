@@ -1,0 +1,66 @@
+# pi-desk's own updates (tests/scripts/update.sh): a fake install of 0.1.0, release 0.1.1
+# from local files. Offer, Skip, Check for Updates, Later, Update, Restart to update.
+wait 1500
+waitstate 10000 update.available true
+assert_state update.current 0.1.0
+assert_state update.latest 0.1.1
+assert_state update.can_install true
+assert_state update.phase none
+assert_drawn pi-desk 0.1.1 is available
+shot update/available
+# agents read it but cannot act on it
+control_command {"type":"update_download"}
+assert_result error not allowed for this caller
+control_command {"type":"update_install"}
+assert_result error not allowed for this caller
+control_command {"type":"set_update_check","on":false}
+assert_result error not allowed for this caller
+# Skip this version: gone, and remembered
+hover update_skip
+wait 900
+assert_tip Do not offer this version again (Check for Updates… offers it again)
+clickid update_skip
+assert_state update.available false
+assert_state update.skipped 0.1.1
+assert_not_drawn is available
+# Check for Updates… (the menu bar) offers the skipped version again
+assert_menu check_updates enabled
+menu check_updates
+waitstate 10000 update.available true
+assert_state update.skipped 
+wait 300
+# Later hides it for now; a manual check shows it again
+clickid update_later
+assert_state update.dismissed true
+assert_not_drawn is available
+ui_command {"type":"update_check"}
+waitstate 10000 update.dismissed false
+wait 300
+# the setting (the gear's row, the palette's action)
+ui_command {"type":"set_update_check","on":false}
+assert_state update.checks false
+ui_command {"type":"set_update_check","on":true}
+assert_state update.checks true
+wait 300
+# Update: download, check (sha256, signature, names, links, bundle id, version, codesign), stage
+clickid update_go
+waitstate 30000 update.phase ready
+assert_state update.message 
+shot update/ready
+# the staged bundle changes after it was checked: refused right before the rename
+replace_in_file $cwd/build/update/install/.pi-desk-update-0.1.1.app/Contents/Info.plist APPL|APPX
+ui_command {"type":"update_install"}
+ui_command {"type":"update_install","confirm":"$token"}
+assert_result error the update's code signature does not verify, or it changed since it was checked
+assert_state update.phase failed
+wait 300
+# Try again: downloaded and checked afresh
+clickid update_go
+waitstate 30000 update.phase ready
+# a pi tab runs: Restart to update asks first, and only the user confirms
+ui_command {"type":"update_install"}
+assert_result error needs_confirmation
+assert_state update.phase ready
+ui_command {"type":"update_install","confirm":"$token"}
+assert_state update.phase installed
+quit

@@ -29,11 +29,12 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 11. [Jobs](#jobs)
 12. [The bell](#the-bell)
 13. [The palette and the gear](#the-palette-and-the-gear)
-14. [Your data](#your-data) (and [your folders](#your-folders))
-15. [Troubleshooting](#troubleshooting)
-16. [All shortcuts](#all-shortcuts)
-17. [All palette actions](#all-palette-actions)
-18. [Coming soon](#coming-soon)
+14. [Updates](#updates)
+15. [Your data](#your-data) (and [your folders](#your-folders))
+16. [Troubleshooting](#troubleshooting)
+17. [All shortcuts](#all-shortcuts)
+18. [All palette actions](#all-palette-actions)
+19. [Coming soon](#coming-soon)
 
 ## The window
 
@@ -911,8 +912,60 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Rescan sessions**, **Reload all pi tabs** (see [Hot reload](#hot-reload)), **Keyboard
   shortcuts** (⌘/) and **Edit settings files…** (⌘,).
 - **Set up pi-desk…**: the [first run](#the-first-run) sheet again (main folder, chats).
+- **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
+
+## Updates
+
+pi-desk checks for a newer release of itself a minute after it starts and then about once a day
+while it runs. It asks GitHub for the latest published release of `McFalljb/pi-desk` and sends
+nothing about you (only `User-Agent: pi-desk/<version>`). Pre-releases and drafts are never
+offered. If the check fails (offline, GitHub down) nothing shows; the attempt is in
+`commands.log`.
+
+**When a newer version exists**, a bar over the centre says "pi-desk 0.1.1 is available":
+
+- **Release notes**: the release's page on GitHub, in your browser.
+- **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers
+  it again.
+- **Later**: hides the bar until the next check finds a release.
+- **Update**: downloads the release and checks it. Nothing is replaced yet, and you can keep
+  working. Then the bar says "pi-desk 0.1.1 is ready" with **Restart to update**.
+- **Restart to update**: replaces pi-desk and restarts it. While sessions, shells or jobs run,
+  pi-desk asks first: restarting stops them (sessions resume from their files afterwards).
+
+**What is checked before anything is replaced.** The download goes into a private folder in the
+data dir. pi-desk refuses it unless its size matches the release, its SHA-256 matches the
+release's `.sha256`, and its **signature** (the release's `.sig`, made with pi-desk's release
+key, whose public half is built into pi-desk) is valid for that version, file, size and SHA-256.
+Only then is it unpacked. Then pi-desk also refuses it if it holds anything but `pi-desk.app`,
+a link pointing outside the app, or a setuid file, if its bundle id is not `dev.pi-desk.app`, if
+its version is not the release's, if a file in it is writable by others, if
+`codesign --verify --deep --strict` fails, or if the app's code hash (CDHash) is not the one the
+signature names. It never installs an older or the same version. Right before **Restart to
+update** replaces pi-desk, it checks the prepared copy once more (yours, same code hash, same
+version); a copy changed since is refused. The old app is kept as `pi-desk.app.old-<version>`
+next to the new one until pi-desk starts a second time after the update (whatever version you
+run then), which removes it.
+
+**When pi-desk cannot replace itself**, the bar says why and offers only **Release notes**:
+when it runs from a folder you cannot write to, from a disk image, or from macOS's temporary
+read-only copy (App Translocation: move `pi-desk.app` to Applications with Finder and open it
+from there). A development build (`build/pi-desk.app`) does not check for updates.
+
+**Check for Updates…** is in the pi-desk menu and the palette; it checks now, whatever the
+setting. **Check for updates automatically** (the gear, or the palette) turns the daily check
+off. Your choices (the setting, the skipped version, the last check's time) are in
+`<data dir>/update.json`.
+
+**To update by hand**, download the zip from the
+[releases page](https://github.com/McFalljb/pi-desk/releases), check it with
+`shasum -a 256 -c pi-desk-<version>-macos-arm64.zip.sha256`, quit pi-desk and replace
+`pi-desk.app` in Applications.
+
+Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
+download or install one: only you can.
 
 ## Your data
 
@@ -932,6 +985,8 @@ to you (`0700`), and its files are `0600`:
 | `home/` | Atlas's own pi sessions |
 | `jobs/<id>/` | each job's state, its runs (`runs/`) and pi's sessions of them (`sessions/`) |
 | `jobs/scheduler.log` | what the scheduler did: runs started, skipped and why |
+| `update.json` | [updates](#updates): the setting, a skipped version, when it last checked |
+| `updates/` | an update being downloaded and checked (removed afterwards) |
 
 Elsewhere:
 
@@ -996,7 +1051,8 @@ One **main folder** holds everything that is yours (new users: `~/pi-desk`; set 
 - pi-desk never shows, opens or logs credential files (pi's sign-ins, private files in pi's
   folder, `.env`), not in the Settings tab, the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
-- pi-desk has no network code of its own: only pi (and its extensions) talk to model providers.
+- pi-desk's only network call of its own is the [update check](#updates) (and the download
+  you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.
 
 ### Backups
 
@@ -1234,6 +1290,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Rescan sessions |  | read pi's store again |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |
+| Check for Updates… |  | check for a newer pi-desk now ([Updates](#updates)) |
+| Check for updates automatically |  | on or off: the daily check ([Updates](#updates)) |
+| Restart to update pi-desk |  | once an update is downloaded and checked: install it and restart ([Updates](#updates)) |
 | Restart pi tabs on the new pi |  | after a pi update: restart idle pi tabs on their sessions |
 | Add project… |  | pick a folder |
 | Rename project |  | rename the selected project |

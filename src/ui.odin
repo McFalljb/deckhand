@@ -477,6 +477,7 @@ centre :: proc(cs: ^Open_Session) {
 	th := theme()
 	if clay.UI(clay.ID("centre"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		empty := active_term() == nil && tab_editor() == nil && tab_browser() == nil && tab_app() == nil
+		update_bar() // a pi-desk update: available, downloading, ready (ui_update.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
 		app_bar_layout() // an app tab that exited or stopped drawing (app_tab.odin)
@@ -923,6 +924,7 @@ Hit :: union {
 	Hit_Editor_Tool, // the editor's toolbar (editor_view.odin)
 	Hit_Files, // the left column's tab switch and the Files tab (ui_files.odin)
 	Hit_Reload, // the hot-reload bars' buttons (ui_reload.odin)
+	Hit_Update, // the update bar's buttons (ui_update.odin)
 	Hit_Comments, // the pending comments' strip, list and close prompt (ui_comments.odin)
 	Hit_Bell, // the bell's popover (ui_bell.odin)
 	Hit_Jobs, // the Jobs tab (ui_jobs.odin)
@@ -990,6 +992,7 @@ ui_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("confirm_no")) do return Hit_Cancel(token)
 	}
 	if h := comments_hit(); h != nil do return h
+	if h := update_hit(); h != nil do return h
 	if h := reload_hit(); h != nil do return h
 	if h := changes_hit(); h != nil do return h
 	if h := editor_tool_hit(); h != nil do return h

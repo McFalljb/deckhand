@@ -198,6 +198,8 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return Notify_Post{job = {job_id = s(j.job_id, allocator), title = s(j.title, allocator), status = j.status, summary = s(j.summary, allocator), run_dir = s(j.run_dir, allocator)}}
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Set_Bell:
 		return cmd
+	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
+		return update_clone(cmd, allocator)
 	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_clone(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
@@ -264,6 +266,8 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		browser_agent_free(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		browser_act_free(cmd, allocator)
+	case Update_Install, Update_Env, Update_Checked, Update_Prepared:
+		update_free(cmd, allocator)
 	case Notify_Post:
 		delete(c.job.job_id, allocator)
 		delete(c.job.title, allocator)

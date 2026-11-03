@@ -51,6 +51,7 @@ SEP :: Bar_Item{sep = true}
 MENUBAR := [?]Bar_Item {
 	{title = "pi-desk", sub = []Bar_Item {
 		{id = "about", title = "About pi-desk", native = .About},
+		{action = "check_updates"}, // pi-desk's own updates (update.odin)
 		SEP,
 		{action = "settings", title = "Settings…"},
 		{action = "setup"}, // "Set up pi-desk…": the first-run sheet (ui_setup.odin)

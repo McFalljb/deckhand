@@ -1,0 +1,66 @@
+# Every test-mode scene, nightly and on demand: the required ones plus those not required yet
+# (CEF and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings).
+# Not-yet-required failures are reported as warnings and never fail the run.
+#
+# NEVER here: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh (real pi, paid
+# models). Left out as well: screenshot-only scenes (looks, font, shots, text-shots) and the
+# environment-sensitive ones (persist-cpu: CPU numbers; browser-netpolicy: which hosts Chromium
+# tries during a 20 s idle).
+name: Scenes (full)
+
+on:
+  schedule:
+    - cron: "17 7 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: scenes-full
+  cancel-in-progress: true
+
+env:
+  ODIN_VERSION: dev-2026-09
+  ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
+  HOMEBREW_NO_AUTO_UPDATE: "1"
+
+jobs:
+  scenes:
+    runs-on: macos-15
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - { required: true, shard: "menus fetch-cef-test projects jobs markdown restore term-links settings setup menu" }
+          - { required: false, shard: "browser" }
+          - { required: false, shard: "browser-rlz comments app-tab sidebar editor" }
+          - { required: false, shard: "files changes worktrees buttons bell reload panels agent polish" }
+    name: scenes (${{ matrix.shard }})
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, persist-credentials: false }
+      - uses: ./.github/actions/setup
+      - name: Build (with CEF)
+        run: ./build.sh
+      - name: Scenes
+        id: scenes
+        continue-on-error: ${{ !matrix.required }}
+        run: |
+          fail=0
+          for s in ${{ matrix.shard }}; do
+            echo "::group::$s"
+            if ! tests/scripts/$s.sh; then echo "::warning::scene $s failed"; fail=1; fi
+            echo "::endgroup::"
+          done
+          exit $fail
+      - name: Upload screenshots and logs on failure
+        if: failure() || steps.scenes.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-output-${{ strategy.job-index }}
+          path: |
+            build/shots
+            build/**/*.log
+          if-no-files-found: ignore

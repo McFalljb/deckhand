@@ -1,0 +1,38 @@
+# Shared setup for the CI jobs: pinned, checksummed Odin and the cached CEF download.
+name: setup
+description: Odin (pinned, checksummed) and the CEF cache
+inputs:
+  cef:
+    description: restore the CEF cache (jobs that build the app)
+    default: "true"
+runs:
+  using: composite
+  steps:
+    - name: Odin (pinned, checksummed)
+      shell: bash
+      run: |
+        # asset name checked for dev-2026-09; check it again when bumping ODIN_VERSION
+        curl -sSfL -o odin.tar.gz \
+          "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
+        echo "${ODIN_SHA256}  odin.tar.gz" | shasum -a 256 -c
+        mkdir -p "$RUNNER_TEMP/odin"
+        tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components 1
+        rm odin.tar.gz
+        echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+        "$RUNNER_TEMP/odin/odin" version
+
+    - name: Cache CEF
+      if: inputs.cef == 'true'
+      uses: actions/cache@v4
+      with:
+        # scripts/fetch-cef.sh keeps the archive in downloads/ and the unpacked tree beside it,
+        # and re-checks the archive's SHA-256 before reusing a cached tree
+        path: ~/Library/Caches/pi-desk/cef
+        key: cef-${{ runner.os }}-arm64-${{ hashFiles('vendor/cef/VERSION') }}
+
+    - name: Git identity for scenes that make commits
+      shell: bash
+      run: |
+        git config --global user.name "CI"
+        git config --global user.email "ci@example.invalid"
+        git config --global init.defaultBranch main

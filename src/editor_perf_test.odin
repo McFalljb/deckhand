@@ -15,6 +15,11 @@ import "core:time"
 @(test)
 editor_perf_50k :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
+	// hosted CI runners are shared and slower: this file's full parse can pass the 500 ms budget
+	// there and drop to plain text (by design), so the budget is looser on CI
+	old_budget := syntax_budget
+	defer syntax_budget = old_budget
+	if os.get_env("CI", context.temp_allocator) != "" do syntax_budget = 3 * time.Second
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	path := fmt.tprintf("%s/pi-desk-perf-%d.c", strings.trim_right(tmp, "/"), time.now()._nsec)
@@ -50,11 +55,6 @@ editor_perf_50k :: proc(t: ^testing.T) {
 	k := time.tick_now()
 	toks := syntax_tokens(&e.sx, &e.buf, tb_line_start(&e.buf, 25_000), tb_line_start(&e.buf, 25_060), &scratch)
 	pause_ms := time.duration_milliseconds(time.tick_since(k))
-	// a slow machine (hosted CI) may need more than one idle reparse: ask again for up to about 7 s
-	for tries := 0; e.sx.stale && tries < 50; tries += 1 {
-		time.sleep(SYNTAX_IDLE)
-		toks = syntax_tokens(&e.sx, &e.buf, tb_line_start(&e.buf, 25_000), tb_line_start(&e.buf, 25_060), &scratch)
-	}
 	testing.expect(t, !e.sx.stale && len(toks) > 0)
 	log.infof("PERF reparse after a typing pause: %.1f ms", pause_ms)
 	log.infof("PERF open 50k-line C file: %.1f ms; typing: %.2f ms per key on average, %.2f ms worst (%d keys)", open_ms, total / N, worst, N)

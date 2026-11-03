@@ -147,7 +147,9 @@ markdown_parse_1mb :: proc(t: ^testing.T) {
 		md_free(doc)
 	}
 	fmt.printfln("markdown: 1 MB parsed in %.1f ms (best of 3)", f64(best) / f64(time.Millisecond))
-	testing.expectf(t, best < 50 * time.Millisecond, "1 MB took %v (limit 50 ms)", best)
+	// hosted CI runners are shared and slower: a looser limit there (CI is set by GitHub Actions)
+	limit := os.get_env("CI", context.temp_allocator) != "" ? 150 * time.Millisecond : 50 * time.Millisecond
+	testing.expectf(t, best < limit, "1 MB took %v (limit %v)", best, limit)
 }
 
 @(test)

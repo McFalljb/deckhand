@@ -1,0 +1,115 @@
+# Settings tab (tests/scripts/settings.sh). A `wait` after anything that closes an overlay.
+# Rows at the start: 0 [pi (global)] 1 settings.json 2 models.json 3 AGENTS.md 4 prompts
+# 5 extensions 6 [This project · proj] 7 .pi/settings.json (create) 8 AGENTS.md (create)
+# 9 [Extensions] 10 pi-subagents config 11 subagent
+wait 1500
+assert_state open_sessions.# 1
+# ---- ⌘, shows the Settings tab with the keyboard; only allowlisted files; no credentials
+key comma cmd
+wait 300
+assert_state layout.left_tab settings
+assert_state focus.id files
+assert_files [pi (global)]\nsettings.json\nmodels.json\nAGENTS.md\nprompts\nextensions\n[This project · proj]\n.pi/settings.json (create)\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n
+# pi's sessions/ folder as a row (the Folders group's "sessions/: …" row is pi-desk's own)
+assert_not_files \nsessions\n
+assert_not_files \nsessions (
+assert_not_files npm
+assert_not_files logs
+shot settings/tree-dark
+assert_not_drawn auth.json
+assert_not_drawn models-store
+assert_not_drawn DUMMY-AUTH-SECRET
+hover lefttab 2
+wait 1000
+assert_tip pi's settings files ⌘,
+# ---- ⌘, again: back to Sessions; the gear's "Edit settings files…" shows it again
+key comma cmd
+wait 300
+assert_state layout.left_tab sessions
+clickid settings
+wait 300
+assert_state focus.id settings
+shot settings/gear
+clickid pop 19
+wait 300
+assert_state layout.left_tab settings
+# ---- a folder opens like the Files tab's; credentials stay hidden inside it
+clickid frow 4
+wait 300
+assert_files prompts/\n  fix.md\nextensions\n
+assert_not_files token.json
+assert_not_files .env
+assert_not_drawn token.json
+shot settings/prompts-open
+# ---- the row menu: no Rename or Trash for pi's config files; there for a prompt
+rclickid frow 1
+wait 200
+assert_drawn Reveal in Finder
+assert_not_drawn Move to Trash
+key escape
+wait 200
+rclickid frow 5
+wait 200
+assert_drawn Move to Trash
+assert_drawn New file
+shot settings/menu-prompt
+key escape
+wait 200
+# ---- settings.json opens in an editor tab (Enter keeps it)
+clickid frow 1
+wait 400
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.title settings.json
+key enter
+wait 200
+key escape
+wait 300
+assert_state focus.kind terminal
+# invalid JSON is not saved: the status line says where
+type x
+key s cmd
+wait 300
+assert_notice not saved: invalid JSON at line 1, column 1
+shot settings/invalid-json
+# fixed: saved, and pi's reload is offered
+key z cmd
+key s cmd
+wait 300
+assert_not_drawn not saved
+wait 300
+assert_state reload.from_save true
+shot settings/saved-bar
+clickid reload_later
+wait 300
+assert_not_drawn pi settings changed
+# ---- Create: the project's missing .pi/settings.json, made on the click, then opened
+hover fcreate 8
+wait 1000
+assert_tip Create this file, then open it
+clickid fcreate 8
+wait 400
+assert_state open_sessions.0.tabs.2.title settings.json
+assert_files .pi/settings.json\n
+assert_not_files .pi/settings.json (create)
+# ---- the palette has the files too
+key k cmd
+wait 200
+type edit pi models
+wait 200
+assert_palette 0 action:edit_pi_models
+key escape
+wait 200
+# ---- credential files never open, whoever asks
+command {"type":"open_file","path":"$homedir/.pi/agent/auth.json"}
+assert_result ok false
+assert_result error credentials file: managed by pi (/login), not opened
+ui_command {"type":"open_file","path":"$homedir/.pi/agent/prompts/token.json"}
+assert_result ok false
+# ---- light
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot settings/tree-light
+cpu_begin
+wait 1500
+cpu_end settings tree idle
+quit

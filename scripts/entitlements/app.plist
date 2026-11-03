@@ -1,0 +1,17 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- pi-desk.app under the hardened runtime (Developer ID builds only; scripts/release.sh).
+     allow-jit: Chromium's V8 runs in the browser process too.
+     allow-unsigned-executable-memory: kept to be safe; once a Developer ID build exists, try
+     removing it (current Chromium needs only allow-jit) and keep it out if pages still run.
+     Camera, microphone and location: a web page may ask for them (after the user's Allow in
+     its bar); the usage strings are in Info.plist (scripts/bundle-app.sh). -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.device.camera</key><true/>
+  <key>com.apple.security.device.audio-input</key><true/>
+  <key>com.apple.security.personal-information.location</key><true/>
+</dict>
+</plist>

@@ -1,0 +1,116 @@
+# Worktrees scene (tests/scripts/worktrees.sh). The switcher's rows: 0 main checkout,
+# 1 proj-a-merged, 2 proj-b-dirty, 3 proj-c-detached, 4 proj-d-gone, then branches 5 lonely, 6 topic.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+clickid lefttab 1
+wait 1500
+assert_state layout.left_tab files
+# ---- the switcher under the project's name; list_worktrees has the same state
+hover wt_switch
+wait 600
+assert_tip Worktrees and branches of this repository
+shot worktrees/closed
+command {"type":"list_worktrees"}
+assert_result data.loading false
+assert_result data.default_branch main
+assert_result data.worktrees.# 5
+assert_result data.worktrees.0.main true
+assert_result data.worktrees.0.path $homedir/proj
+assert_result data.worktrees.1.branch merged-wt
+assert_result data.worktrees.1.merged true
+assert_result data.worktrees.1.cleanable true
+assert_result data.worktrees.2.branch feature
+assert_result data.worktrees.2.dirty 2
+assert_result data.worktrees.2.ahead 1
+assert_result data.worktrees.2.cleanable <missing>
+assert_result data.worktrees.3.detached true
+assert_result data.worktrees.4.missing true
+assert_result data.branches.# 2
+assert_result data.branches.1.name topic
+assert_result data.branches.1.ahead 1
+assert_result data.branches.0.merged true
+# ---- the menu: checkouts with their state, branches
+clickid wt_switch
+wait 400
+hover wtrow 2
+wait 600
+assert_tip ~/proj-b-dirty · ahead/behind main
+shot worktrees/menu-dark
+# ---- pick the dirty worktree: the tree shows its folder
+clickid wtrow 2
+wait 600
+assert_state files.checkouts.0.path $homedir/proj-b-dirty
+assert_files f.txt\n
+assert_files new.txt\n
+shot worktrees/switched
+# ---- its actions: a terminal there
+clickid wt_switch
+wait 300
+hover wtrow 2
+wait 200
+clickid wtmore 2
+wait 300
+shot worktrees/row-menu
+clickid menurow 0
+wait 500
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.cwd $homedir/proj-b-dirty
+# ---- Clean up the merged worktree: the confirmation bar first
+clickid wt_switch
+wait 300
+hover wtrow 1
+wait 200
+clickid wtmore 1
+wait 300
+clickid menurow 8
+wait 1500
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Remove worktree ~/proj-a-merged and delete merged branch merged-wt? It also deletes 2 ignored paths (dist/, node_modules/).
+shot worktrees/confirm
+clickid confirm_yes
+wait 2500
+command {"type":"list_worktrees"}
+assert_result data.worktrees.# 4
+assert_result data.worktrees.1.path $homedir/proj-b-dirty
+# ---- light and dark
+command {"type":"set_appearance","mode":"light"}
+clickid wt_switch
+wait 500
+shot worktrees/menu-light
+key escape
+wait 200
+command {"type":"set_appearance","mode":"dark"}
+# ---- a pi session in the dirty worktree, listed under the project
+clickid wt_switch
+wait 300
+hover wtrow 1
+wait 200
+clickid wtmore 1
+wait 300
+clickid menurow 1
+waitfor ARGS: --session-dir 15000
+assert_state open_sessions.# 2
+assert_state open_sessions.1.cwd $homedir/proj-b-dirty
+# the Files tab follows the session: its base is the worktree now
+wait 1500
+command {"type":"list_worktrees"}
+assert_result data.base $homedir/proj-b-dirty
+assert_result data.worktrees.0.path $homedir/proj
+shot worktrees/session-in-worktree
+# ---- the tree of this session shows the main checkout (kept for the relaunch)
+clickid wt_switch
+wait 300
+clickid wtrow 0
+wait 500
+assert_state files.checkouts.0.base $homedir/proj-b-dirty
+assert_state files.checkouts.0.path $homedir/proj
+assert_files src\n.gitignore\nREADME.md\n
+# ---- idle: no redraws, no git
+wait 3000
+cpu_begin
+wait 3000
+cpu_end idle, Files tab with the checkout switcher
+quit

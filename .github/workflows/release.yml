@@ -1,0 +1,111 @@
+# Release: on a v* tag (or by hand for an existing tag), build pi-desk with CEF, run the
+# unit tests, package it with scripts/release.sh and draft a GitHub Release with the zip and
+# its SHA-256. The release stays a DRAFT until someone publishes it.
+#
+# Three steps, so secrets and the write token never meet the build:
+#   build and test   no secrets, no token (the checkout keeps no credentials)
+#   package          only the signing and notarization secrets
+#   upload           only GH_TOKEN
+# Signing is optional: MACOS_CERT_P12 (base64 .p12 holding a "Developer ID Application"
+# identity) and MACOS_CERT_PASSWORD sign under the hardened runtime; APPLE_ID, APPLE_TEAM_ID
+# and APPLE_APP_PASSWORD add notarization and stapling. Without them the app is signed ad hoc
+# and the notes tell users how to open it.
+#
+# CEF is not cached here: every release downloads it and checks its SHA-256
+# (vendor/cef/VERSION, scripts/fetch-cef.sh).
+#
+# Not yet known until it runs: the macos-15 runner's time for the CEF download and build,
+# and whether codesign/notarytool need anything more on a hosted runner.
+name: Release
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: "Existing tag to release (e.g. v0.1.0)"
+        required: true
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-${{ github.event.inputs.tag || github.ref_name }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    runs-on: macos-15 # arm64
+    timeout-minutes: 60
+    permissions:
+      contents: write # the upload step's gh release create / upload; this job only
+    env:
+      ODIN_VERSION: dev-2026-09
+      # sha256 of odin-macos-arm64-dev-2026-09.tar.gz (the release asset; GitHub's asset
+      # digest says the same). Update with ODIN_VERSION.
+      ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
+      TAG: ${{ github.event.inputs.tag || github.ref_name }}
+      HOMEBREW_NO_AUTO_UPDATE: "1"
+    steps:
+      - name: Check the tag
+        run: |
+          if ! printf %s "$TAG" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+([-+][0-9A-Za-z.-]+)?$'; then
+            echo "::error::not a release tag: $TAG (want vX.Y.Z or vX.Y.Z-suffix)"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+        with:
+          ref: refs/tags/${{ env.TAG }}
+          submodules: recursive
+          fetch-depth: 0 # --generate-notes compares with the previous tag
+          persist-credentials: false
+
+      - name: Odin (pinned, checksummed)
+        run: |
+          # the release tarball holds odin and its own libLLVM (libs/); no Homebrew LLVM needed
+          curl -sSfL -o odin.tar.gz \
+            "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
+          echo "${ODIN_SHA256}  odin.tar.gz" | shasum -a 256 -c
+          mkdir -p "$RUNNER_TEMP/odin"
+          tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components 1
+          rm odin.tar.gz
+          echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
+
+      - name: Check Odin
+        run: odin version
+
+      # step A: no secrets, no token
+      - name: Test and build (with CEF)
+        run: |
+          ./build.sh test
+          ./build.sh
+
+      # step B: the signing and notarization secrets only
+      - name: Package (version, signing, zip, checksum)
+        env:
+          MACOS_CERT_P12: ${{ secrets.MACOS_CERT_P12 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          APPLE_APP_PASSWORD: ${{ secrets.APPLE_APP_PASSWORD }}
+        run: scripts/release.sh --tag "$TAG" --skip-build --no-upload
+
+      # step C: GH_TOKEN only
+      - name: Draft the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: scripts/release.sh --tag "$TAG" --upload-only
+
+      - name: Keep the packaged files with the run
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pi-desk-${{ env.TAG }}
+          path: |
+            dist/*.zip
+            dist/*.sha256
+            dist/release-notes.md
+          if-no-files-found: ignore
+          retention-days: 14

@@ -1,0 +1,187 @@
+# Files scene (tests/scripts/files.sh). Project rows at the start:
+# 0 huge/  1 node_modules/  2 src/  3 .gitignore  4 debug.log  5 main.c  6 new.txt  7 README.md
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+# ---- the switch: Sessions | Files (button), the tree of the session's project
+hover lefttab 1
+wait 600
+assert_tip Files ⌘⇧E
+clickid lefttab 1
+wait 300
+assert_state layout.left_tab files
+assert_files huge\nnode_modules\nsrc\n.gitignore\ndebug.log\nmain.c\nnew.txt\nREADME.md\n
+wait 500
+shot files/tree
+# ---- expand a folder with a click; open a file: a preview tab (italic), the next replaces it
+clickid frow 2
+wait 200
+assert_files src/\n  app.c\n  util.c\n
+assert_state files.expanded.0.dirs.0 src
+clickid frow 3
+wait 300
+assert_state open_sessions.0.tabs.1.title app.c
+assert_state open_sessions.0.tabs.1.preview true
+clickid frow 4
+wait 300
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.title util.c
+shot files/preview
+# a double-click keeps it
+clickid frow 4
+clickid frow 4
+wait 300
+assert_state open_sessions.0.tabs.1.preview <missing>
+# ---- the keyboard: ↑ to app.c, Enter opens it for good; ← ← closes src
+assert_state focus.id files
+key up
+key enter
+wait 300
+assert_state open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.2.title app.c
+assert_state open_sessions.0.tabs.2.preview <missing>
+assert_state focus.id files
+# ---- new file from the header's button, in the selected file's folder (src)
+hover filestool 0
+wait 600
+assert_tip New file…
+clickid filestool 0
+wait 200
+assert_state focus.id files_name
+type notes.md
+shot files/new-file
+key enter
+wait 300
+assert_files   notes.md\n
+assert_state open_sessions.0.tabs.3.title notes.md
+# ---- rename inline (F2): the name before the extension is selected
+assert_state focus.id files
+key f2
+wait 200
+assert_state focus.id files_name
+assert_selection notes
+type todo
+shot files/rename
+key enter
+wait 300
+assert_files   todo.md\n
+assert_not_files notes.md
+assert_state open_sessions.0.tabs.3.title todo.md
+# ---- delete: ⌘⌫ asks in the confirmation bar first
+key backspace cmd
+wait 200
+assert_state pending_confirmations.# 1
+assert_files   todo.md\n
+shot files/delete-confirm
+clickid confirm_yes
+wait 300
+assert_state pending_confirmations.# 0
+assert_not_files todo.md
+# ---- the row menu ("…" on hover, right click): open a terminal in src
+hover frow 3
+wait 300
+clickid fmore 3
+wait 200
+shot files/menu
+key escape
+rclickid frow 2
+wait 200
+command {"type":"new_shell_tab","session":$session,"cwd":"$homedir/proj/src"}
+assert_result ok true
+key escape
+wait 800
+paste pwd\n
+waitfor proj/src 5000
+# a file made outside pi-desk shows up (the watcher); src stays open
+paste touch external.c\n
+wait 1500
+assert_files   external.c\n
+assert_files src/\n
+# ---- drag main.c onto the terminal: its quoted path is pasted
+assert_files main.c\n
+dragid frow 8 terminal
+wait 500
+assert_screen /proj/main.c'
+key backspace
+# ---- the active editor file is revealed: collapse all, then switch to app.c's tab
+clickid filestool 2
+wait 200
+assert_not_files   app.c
+clickid tab 2
+wait 400
+assert_files src/\n  app.c\n
+shot files/reveal
+# ---- filter: fuzzy over the project's paths
+clickid files_filter_box
+type utl
+wait 300
+assert_files src/util.c\n
+shot files/filter
+key escape
+wait 200
+assert_state files.filter 
+# ---- git letters and colours, light and dark (screenshots)
+command {"type":"set_appearance","mode":"light"}
+wait 300
+shot files/git-light
+command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot files/git-dark
+# ---- the 10k-file folder: listed once, then only visible rows laid out
+clickid frow 0
+wait 500
+assert_files   f9999.txt\n
+files_time 120 240
+files_time 60 -480
+# real frames: the wheel over the list, 20 steps
+cpu_begin
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+scroll -30 150 400
+wait 50
+cpu_end wheel-scrolling the 10k-file folder (20 steps, 50 ms apart)
+shot files/huge
+# ---- idle: no redraws
+wait 1000
+cpu_begin
+wait 3000
+cpu_end idle, Files tab with 10k rows open
+quit

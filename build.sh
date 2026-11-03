@@ -1,0 +1,221 @@
+#!/bin/sh
+# Build pi-desk. macOS only for now.
+#   ./build.sh          release build -> build/pi-desk
+#   ./build.sh debug    debug build
+#   ./build.sh run      release build, then run
+#   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
+#                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
+# With CEF (default on macOS arm64): build/pi-desk.app (the framework and the five
+# helper apps, signed ad hoc) and build/pi-desk, a wrapper that execs the app's
+# binary, so `build/pi-desk ARGS` works as before. PI_DESK_NO_CEF=1: the bare
+# binary at build/pi-desk, no browser (docs/BROWSER.md §1.5).
+# Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
+# comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
+set -eu
+ROOT=$(cd "$(dirname "$0")" && pwd)
+cd "$ROOT"
+MODE=${1:-release}
+# minimum macOS: 14 (libghostty-vt and the CEF framework target 13; current Chromium needs 12).
+# check_link_minos below fails the build on any linked object or bundled file newer than this.
+MACOS_MIN=14.0
+export MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN
+
+case "$(uname -s)-$(uname -m)" in
+  Darwin-arm64)  GHOSTTY_TARGET=aarch64-macos; SOKOL_ARCH=arm64 ;;
+  Darwin-x86_64) GHOSTTY_TARGET=x86_64-macos;  SOKOL_ARCH=x64 ;;
+  *) echo "pi-desk spike: only macOS is wired up so far"; exit 1 ;;
+esac
+
+GHOSTTY_LIB="vendor/libghostty-vt/$GHOSTTY_TARGET/lib/libghostty-vt.a"
+if [ ! -f "$GHOSTTY_LIB" ]; then
+  echo "missing $GHOSTTY_LIB: run scripts/build-ghostty.sh $GHOSTTY_TARGET (needs toolchain/ Zig)"
+  exit 1
+fi
+
+if [ ! -f vendor/sokol-odin/sokol/app/app.odin ]; then
+  git submodule update --init vendor/sokol-odin vendor/clay
+fi
+
+mkdir -p build
+
+# sokol C libraries (only the modules we use), built once into the sokol-odin tree
+# where its Odin bindings expect them.
+SDIR=vendor/sokol-odin/sokol
+for m in log:sokol_log gfx:sokol_gfx app:sokol_app glue:sokol_glue gl:sokol_gl time:sokol_time; do
+  dir=${m%%:*}; src=${m##*:}
+  out="$SDIR/$dir/${src}_macos_${SOKOL_ARCH}_metal_release.a"
+  if [ ! -f "$out" ]; then
+    echo "building $out"
+    arch=$SOKOL_ARCH; [ "$arch" = x64 ] && arch=x86_64
+    clang -c -O2 -x objective-c -arch "$arch" -DNDEBUG -DIMPL -DSOKOL_METAL \
+      "$SDIR/c/$src.c" -o "build/$src.o"
+    ar rcs "$out" "build/$src.o"
+  fi
+done
+
+# clay (the layout library): built from the pinned vendor/clay/clay.h for MACOS_MIN into
+# build/clay-odin/, next to a copy of the submodule's Odin bindings whose macOS foreign
+# import points at it (the submodule's prebuilt macOS clay.a targets macOS 15). src/ imports
+# build/clay-odin; the other OSes' paths point back into the submodule's prebuilt libraries.
+CLAY=vendor/clay
+CLAY_BIND=$CLAY/bindings/odin/clay-odin
+if [ ! -f build/clay-odin/clay.a ] || [ $CLAY/clay.h -nt build/clay-odin/clay.a ] || [ build.sh -nt build/clay-odin/clay.a ]; then
+  echo "building build/clay-odin/clay.a"
+  mkdir -p build/clay-odin
+  arch=$SOKOL_ARCH; [ "$arch" = x64 ] && arch=x86_64
+  clang -c -x c -O3 -fPIC -arch "$arch" -mmacosx-version-min=$MACOS_MIN -DCLAY_IMPLEMENTATION $CLAY/clay.h -o build/clay-odin/clay.o
+  rm -f build/clay-odin/clay.a
+  ar rcs build/clay-odin/clay.a build/clay-odin/clay.o
+fi
+if [ ! -f build/clay-odin/clay.odin ] || [ $CLAY_BIND/clay.odin -nt build/clay-odin/clay.odin ] || [ build.sh -nt build/clay-odin/clay.odin ]; then
+  sed -e 's|foreign import Clay "macos-arm64/clay.a"|foreign import Clay "clay.a"|' \
+      -e 's|foreign import Clay "macos/clay.a"|foreign import Clay "clay.a"|' \
+      -e 's|foreign import Clay "\([a-z]*/clay\.[a-z]*\)"|foreign import Clay "../../'"$CLAY_BIND"'/\1"|' \
+      $CLAY_BIND/clay.odin > build/clay-odin/clay.odin.tmp
+  # the bindings' import block changed upstream: update the rewrite above
+  if [ "$(grep -c '^[[:space:]]*foreign import Clay "clay.a"$' build/clay-odin/clay.odin.tmp)" != 2 ] ||
+     [ "$(grep -c '^[[:space:]]*foreign import Clay ' build/clay-odin/clay.odin.tmp)" != 5 ]; then
+    echo "build.sh: $CLAY_BIND/clay.odin's foreign imports are not the expected five; update the clay step"
+    exit 1
+  fi
+  mv build/clay-odin/clay.odin.tmp build/clay-odin/clay.odin
+fi
+
+# text backend (macOS: CoreText + CoreGraphics), rebuilt when its source changes
+if [ ! -f build/pd_text.a ] || [ src/native/text_coretext.c -nt build/pd_text.a ]; then
+  clang -c -O2 -Wall src/native/text_coretext.c -o build/pd_text.o
+  ar rcs build/pd_text.a build/pd_text.o
+fi
+
+# window pieces sokol lacks (macOS: title bar, input methods, window drag, the menu bar)
+if [ ! -f build/pd_platform.a ] || [ src/native/platform_macos.m -nt build/pd_platform.a ] || [ src/native/menubar_macos.m -nt build/pd_platform.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/platform_macos.m -o build/pd_platform.o
+  clang -c -O2 -Wall -fobjc-arc src/native/menubar_macos.m -o build/pd_menubar.o
+  rm -f build/pd_platform.a
+  ar rcs build/pd_platform.a build/pd_platform.o build/pd_menubar.o
+fi
+
+# editor and file-system model: FSEvents watcher, Trash, Finder (macOS)
+if [ ! -f build/pd_editor.a ] || [ src/native/editor_macos.m -nt build/pd_editor.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/editor_macos.m -o build/pd_editor.o
+  ar rcs build/pd_editor.a build/pd_editor.o
+fi
+
+# app tabs' frame channel (Mach + IOSurface + Metal; docs/ENGINE-BRIDGE.md §2)
+if [ ! -f build/pd_frames.a ] || [ src/native/frames_macos.m -nt build/pd_frames.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/frames_macos.m -o build/pd_frames.o
+  ar rcs build/pd_frames.a build/pd_frames.o
+fi
+
+# tree-sitter and the editor's grammars (vendor/tree-sitter, src/editor_syntax.odin):
+# compiled in parallel into build/ts.a, again only when a vendored source changes
+TS=vendor/tree-sitter
+if [ ! -f build/ts.a ] || [ -n "$(find "$TS" -newer build/ts.a \( -name '*.c' -o -name '*.h' \) | head -1)" ]; then
+  echo "building build/ts.a (tree-sitter + grammars)"
+  rm -rf build/ts && mkdir -p build/ts
+  ts_cc() { clang -c -O2 -w "$@" || touch build/ts/FAILED; }
+  ts_cc -I"$TS/lib/include" -I"$TS/lib/src" "$TS/lib/src/lib.c" -o build/ts/lib.o &
+  for g in "$TS"/grammars/*/; do
+    n=$(basename "$g"); [ "$n" = common ] && continue
+    ts_cc -I"$g/src" "$g/src/parser.c" -o "build/ts/$n-parser.o" &
+    if [ -f "$g/src/scanner.c" ]; then ts_cc -I"$g/src" "$g/src/scanner.c" -o "build/ts/$n-scanner.o" & fi
+  done
+  wait
+  if [ -f build/ts/FAILED ]; then echo "tree-sitter build failed"; exit 1; fi
+  ar rcs build/ts.a build/ts/*.o
+fi
+
+# stb_truetype (the text backend on other OSes; src/text_stb.odin), into build/
+if [ ! -f build/stb_truetype.a ]; then
+  clang -c -O2 "$(odin root)/vendor/stb/src/stb_truetype.c" -o build/stb_truetype.o
+  ar rcs build/stb_truetype.a build/stb_truetype.o
+fi
+
+# CEF (docs/BROWSER.md §1.5, §1.6): the pinned distribution (scripts/fetch-cef.sh),
+# the shim (src/native/cef_macos.m) and the helper (src/native/cef_helper.c),
+# against CEF's C API headers only: no C++ wrapper, no CMake.
+CEF_API_VERSION=15600 # the C API version the shim and helper are written against
+WITH_CEF=0
+if [ "${PI_DESK_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
+  case "$(uname -m)" in
+    arm64) WITH_CEF=1 ;;
+    *) echo "pi-desk: CEF is wired up for arm64 only so far; building without it" ;;
+  esac
+fi
+OUT=build/pi-desk
+DEFINES=""
+if [ $WITH_CEF = 1 ]; then
+  CEF=$(scripts/fetch-cef.sh)
+  CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
+  if [ ! -f build/pd_cef.a ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
+    clang -c $CEF_CFLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
+    rm -f build/pd_cef.a
+    ar rcs build/pd_cef.a build/pd_cef.o
+  fi
+  if [ ! -f build/cef_helper ] || [ src/native/cef_helper.c -nt build/cef_helper ] || [ vendor/cef/VERSION -nt build/cef_helper ]; then
+    clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper
+  fi
+  OUT=build/pi-desk.app/Contents/MacOS/pi-desk
+  DEFINES="-define:PI_DESK_CEF=true"
+  mkdir -p build/pi-desk.app/Contents/MacOS
+  # build/pi-desk (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
+  # bundle-app.sh rewrites it: a failed compile leaves the last working command in place
+fi
+# the fake app for app-tab scenes (tests/fake-app/): test builds only
+build_fake_app() {
+  if [ ! -f build/fake_render.a ] || [ tests/fake-app/render_macos.m -nt build/fake_render.a ]; then
+    clang -c -O2 -Wall -fobjc-arc tests/fake-app/render_macos.m -o build/fake_render.o
+    ar rcs build/fake_render.a build/fake_render.o
+  fi
+  odin build tests/fake-app -out:build/fake-app -minimum-os-version:$MACOS_MIN
+}
+
+# every native object linked into a build (the foreign imports, as Odin passes them to
+# the linker) must target MACOS_MIN or older: scripts/check-minos.sh lists the ones that
+# don't. Checked before linking, so a failure leaves the last good binary. Odin's own
+# objects are built for MACOS_MIN (-minimum-os-version).
+check_link_minos() { # odin build args (package and defines)
+  # a package that doesn't compile is left to the build itself to report
+  flags=$(odin build "$@" -out:build/.minos-probe -minimum-os-version:$MACOS_MIN -print-linker-flags 2>/dev/null) || return 0
+  set --
+  for f in $(printf '%s\n' "$flags" | grep -oE '"[^"]+\.(a|o|dylib)"' | tr -d '"'); do
+    if [ -e "$f" ]; then set -- "$@" "$f"; fi # Odin's own objects are not written yet
+  done
+  if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
+  scripts/check-minos.sh $MACOS_MIN "$@"
+}
+case "$MODE" in
+  test)     check_link_minos src; check_link_minos tests/fake-app ;;
+  fake-app) check_link_minos tests/fake-app ;;
+  *)        check_link_minos src $DEFINES ;;
+esac
+
+case "$MODE" in
+  debug)   odin build src -out:$OUT -debug -define:SOKOL_DEBUG=false -minimum-os-version:$MACOS_MIN $DEFINES ;;
+  test)
+    clang -Ivendor/libghostty-vt/include tests/abi_sizes.c -o build/abi_sizes
+    build/abi_sizes > build/abi_sizes.txt
+    # the CEF shim's popup slot matcher (pure C, no CEF needed)
+    clang -Wall tests/cef_popup_slots_test.c -o build/cef_popup_slots_test
+    build/cef_popup_slots_test
+    clang -Wall tests/cef_polish_pure_test.c -o build/cef_polish_pure_test
+    build/cef_polish_pure_test
+    # the agents' isolated-world script: the focus check and the sensitive-field rule (fake DOM)
+    if command -v node >/dev/null; then node tests/browser_act_js_test.mjs; else echo "browser_act_js_test: skipped (no node)"; fi
+    odin test tests -out:build/pi-desk-tests
+    # command layer (src/*_test.odin); tests share the global State: one thread
+    odin test src -out:build/pi-desk-core-tests -define:ODIN_TEST_THREADS=1
+    build_fake_app ;;
+  fake-app) build_fake_app ;;
+  release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES ;;
+  *) echo "usage: ./build.sh [release|debug|run|test|fake-app]"; exit 1 ;;
+esac
+
+if [ $WITH_CEF = 1 ]; then
+  scripts/bundle-app.sh "$CEF" "$MACOS_MIN"
+  # what the app ships: the CEF framework (prebuilt) and the helpers
+  scripts/check-minos.sh $MACOS_MIN build/pi-desk.app
+fi
+
+[ "$MODE" = run ] && exec build/pi-desk
+exit 0

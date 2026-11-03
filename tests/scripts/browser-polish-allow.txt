@@ -1,0 +1,36 @@
+# The permission bar's Allow (tests/scripts/browser.sh; docs/BROWSER.md step 3), on a profile of
+# its own: Chromium keeps the answer for the site (browser-polish.txt blocks on another profile).
+wait 1500
+command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+web_waitpaint 10000
+web_title Polish 10000
+web_click 100 290
+waitstate 5000 open_sessions.0.tabs.1.permission.what notifications
+assert_state open_sessions.0.tabs.1.permission.origin pidesk-test://web/
+wait 600
+clickid pg_perm_allow
+web_title perm=granted 5000
+assert_state open_sessions.0.tabs.1.permission <missing>
+# the grant is not kept: after a reload the page's permission is "default" again (review 1, item 5)
+command {"type":"browser_reload","tab_id":$last}
+wait 1500
+web_title Polish 10000
+web_js document.title = 'np=' + Notification.permission
+web_title np=default 3000
+# asked again: the bar again (nothing is kept per site); Block this time
+web_js document.title = 'again'
+web_title again 3000
+web_click 100 290
+waitstate 5000 open_sessions.0.tabs.1.permission.what notifications
+wait 600
+clickid pg_perm_block
+web_title perm=denied 5000
+assert_state open_sessions.0.tabs.1.permission <missing>
+# after a Block, Chromium itself holds the site's next asks for a while (no bar: "default")
+web_js document.title = 'again'
+web_title again 3000
+web_click 100 290
+web_title perm=default 5000
+assert_state open_sessions.0.tabs.1.permission <missing>
+web_assert overwrites 0
+quit

@@ -1,0 +1,218 @@
+# Comment mode (tests/scripts/browser.sh; docs/BROWSER.md §3, steps 4 and 6): Annotate, hover,
+# a click picks an element (the page gets no click), an area drag, markers and their badges
+# following scroll, a page JS cannot reach pi-desk's binding, navigation away and back.
+# Page coordinates are CSS px from the page's top-left (tests/web/annotate.html).
+wait 1500
+assert_state open_sessions.# 1
+web_open tests/web/annotate.html
+web_waitpaint 10000
+web_title Annotate fixture 5000
+waitstate 5000 open_sessions.0.tabs.1.annot_ready true
+assert_state open_sessions.0.tabs.1.mode browse
+assert_state open_sessions.0.tabs.1.markers.# 0
+# browse mode with no markers: a scroll sends pi-desk nothing
+web_js window.scrollTo(0, 50)
+wait 300
+annot_assert layouts 0
+web_js window.scrollTo(0, 0)
+# 1. Annotate (the bar's button): hovering outlines the element under the pointer
+clickid annot_toggle
+assert_state open_sessions.0.tabs.1.mode comment
+annot_move 100 40
+wait 300
+annot_assert hover yes
+annot_assert label button#save
+shot browser/annotate-hover
+# a click picks it: the comment bar opens with the keyboard; the page got no click
+web_click 100 40
+wait 400
+assert_state focus.id comment_new
+annot_assert bar button "Save"
+assert_drawn Comment on button "Save":
+shot browser/annotate-bar
+type Make this match Cancel
+key enter
+wait 250
+assert_state focus.id <missing>
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.comments.0.source browser
+assert_state open_sessions.0.comments.0.text Make this match Cancel
+assert_state open_sessions.0.comments.0.what button "Save" (selector "button#save", text "Save changes") at 20,20 200×40 on "Annotate fixture" ("file://$cwd/tests/web/annotate.html")
+# its marker, numbered 1 at the element's top-left
+waitstate 3000 open_sessions.0.tabs.1.markers.0.where on
+assert_state open_sessions.0.tabs.1.markers.# 1
+assert_state open_sessions.0.tabs.1.markers.0.n 1
+assert_state open_sessions.0.tabs.1.markers.0.kind element
+assert_state open_sessions.0.tabs.1.markers.0.selector button#save
+assert_state open_sessions.0.tabs.1.markers.0.box 20,20 200x40
+assert_state open_sessions.0.tabs.1.markers.0.badge 20,20
+# the crop was taken at the pick: the button and 24 px around it (cut at the page's edge)
+annot_assert crop 1 244 84
+web_js document.title = 'clicks=' + window.clicks
+web_title clicks=0
+# 2. the page's JS never saw the binding or the overlay, and no call of its own went through
+web_js document.title = window.probe
+web_title b=undefined p=element forged=0 cdp=false
+# the Runtime domain stays off (a bot check's tell; every console message would come through)
+annot_assert sent Runtime.enable 0
+web_js document.title = 'Annotate fixture'
+web_title Annotate fixture
+# 3. Esc leaves; ⌘⇧. comes back
+annot_key escape
+assert_state open_sessions.0.tabs.1.mode browse
+annot_key cmd_shift_period
+assert_state open_sessions.0.tabs.1.mode comment
+# 4. a second element, lower on the page
+web_click 100 450
+wait 400
+annot_assert bar div "A card"
+type The card
+key enter
+wait 250
+waitstate 3000 open_sessions.0.tabs.1.markers.1.where on
+assert_state open_sessions.0.tabs.1.markers.1.n 2
+assert_state open_sessions.0.tabs.1.markers.1.box 20,400 300x100
+assert_state open_sessions.0.tabs.1.markers.1.badge 20,400
+# 5. an area drag: what it covers is named; it keeps document coordinates
+annot_drag 400 30 600 120
+wait 400
+assert_state focus.id comment_new
+annot_assert bar area 400,30 200×90
+shot browser/annotate-area
+type This corner
+key enter
+wait 250
+assert_state open_sessions.0.comments.# 3
+assert_state open_sessions.0.comments.2.what area at 400,30 200×90 covering "div#box2" on "Annotate fixture" ("file://$cwd/tests/web/annotate.html")
+assert_state open_sessions.0.tabs.1.markers.2.kind area
+assert_state open_sessions.0.tabs.1.markers.2.where on
+annot_assert crop 3 248 138
+shot browser/annotate-markers
+# 6. scrolling: the badges follow; scrolled past, an edge arrow at the top
+web_js window.scrollTo(0, 150)
+waitstate 3000 open_sessions.0.tabs.1.markers.1.badge 20,250
+assert_state open_sessions.0.tabs.1.markers.1.where on
+assert_state open_sessions.0.tabs.1.markers.0.where above
+assert_state open_sessions.0.tabs.1.markers.0.badge 20,0
+assert_state open_sessions.0.tabs.1.markers.2.where above
+web_js window.scrollTo(0, 600)
+waitstate 3000 open_sessions.0.tabs.1.markers.1.where above
+assert_state open_sessions.0.tabs.1.markers.1.badge 20,0
+shot browser/annotate-scrolled
+web_js window.scrollTo(0, 0)
+waitstate 3000 open_sessions.0.tabs.1.markers.1.badge 20,400
+# 7. another page: the markers hide, the comments stay; back: they show again
+annot_key escape
+web_js location.href = 'annotate2.html'
+web_title Second page 5000
+waitstate 5000 open_sessions.0.tabs.1.markers.0.where other_page
+assert_state open_sessions.0.tabs.1.markers.2.where other_page
+assert_state open_sessions.0.comments.# 3
+web_js location.href = 'annotate.html'
+web_title Annotate fixture 5000
+waitstate 5000 open_sessions.0.tabs.1.markers.0.where on
+waitstate 3000 open_sessions.0.tabs.1.markers.1.where on
+assert_state open_sessions.0.tabs.1.markers.2.where on
+assert_state open_sessions.0.tabs.1.markers.1.badge 20,400
+# history back and forward (the page may come back from the cache)
+web_js location.href = 'annotate2.html'
+web_title Second page 5000
+waitstate 5000 open_sessions.0.tabs.1.markers.0.where other_page
+web_js history.back()
+web_title Annotate fixture 5000
+waitstate 5000 open_sessions.0.tabs.1.markers.0.where on
+# 8. a badge's click (browse mode) opens its comment in the list; Delete takes the marker
+wait 300
+shot browser/annotate-back
+web_click 24 24
+wait 250
+assert_state focus.id comment_edit
+key escape
+wait 250
+clickid cm_delete 0
+wait 250
+assert_state open_sessions.0.comments.# 2
+waitstate 3000 open_sessions.0.tabs.1.markers.# 2
+assert_state open_sessions.0.tabs.1.markers.0.n 1
+assert_state open_sessions.0.tabs.1.markers.0.selector div#card
+# 9. browse mode: clicks reach the page again
+web_click 100 40
+wait 200
+web_js document.title = 'clicks=' + window.clicks
+web_title clicks=1
+# 10. a form's values never reach pi: a password shown as text, a one-time code, a textarea, a select
+annot_key cmd_shift_period
+web_click 500 215
+wait 400
+type pw
+key enter
+wait 250
+annot_assert what 3 [value hidden]
+annot_assert what 3 "Password"
+annot_assert what_not 3 hunter2
+web_click 500 255
+wait 400
+type otp
+key enter
+wait 250
+annot_assert what 4 [value hidden]
+annot_assert what_not 4 482913
+web_click 500 300
+wait 400
+type note
+key enter
+wait 250
+annot_assert what 5 [value hidden]
+annot_assert what_not 5 private
+web_click 500 345
+wait 400
+type card
+key enter
+wait 250
+annot_assert what 6 [value hidden]
+annot_assert what_not 6 4111
+assert_state open_sessions.0.comments.# 6
+# 11. Esc right after a click: the late answer opens nothing
+web_click 100 40
+annot_key escape
+wait 400
+assert_state open_sessions.0.tabs.1.mode browse
+annot_assert bar -
+assert_state focus.id <missing>
+# 12. a click elsewhere while a comment is being typed keeps it
+annot_key cmd_shift_period
+web_click 100 40
+wait 400
+type keep me
+web_click 100 450
+wait 400
+annot_assert bar button "Save"
+# the click took the keyboard from the field; the text is still there
+clickid cm_new_box
+wait 100
+key enter
+wait 250
+assert_state open_sessions.0.comments.# 7
+assert_state open_sessions.0.comments.6.text keep me
+annot_assert what 7 button "Save"
+# 13. editable content the selector misses: in an open shadow root, or editable by CSS alone
+# (the list is open: the page is shorter; scrolled so both show)
+web_js window.scrollTo(0, 400)
+wait 300
+web_click 30 190
+wait 400
+type shadow
+key enter
+wait 250
+annot_assert what 8 [value hidden]
+annot_assert what_not 8 secret
+web_click 30 260
+wait 400
+type css
+key enter
+wait 250
+annot_assert what 9 [value hidden]
+annot_assert what_not 9 secret
+assert_state open_sessions.0.comments.# 9
+web_assert overwrites 0
+quit

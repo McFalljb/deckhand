@@ -1,0 +1,4 @@
+# restore.sh baseline: nothing restored.
+wait 500
+assert_state open_sessions.# 0
+quit

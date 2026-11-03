@@ -1,0 +1,23 @@
+# Real pi + the pi-kit bridge (run with tests/scripts/bridge-e2e.sh).
+wait 1000
+waitfor deepseek 30000
+wait 3000
+# the bridge said hello and reported: status known, no panels yet
+assert_state open_sessions.0.tabs.0.agent idle
+dump e2e-start
+shot panels/e2e-idle
+type Call bash_bg with command "sleep 300" and label "e2e sleep", then use the todo tool to add two todos: "check the panels" (in progress) and "write the report". Then stop; reply "ok".
+key enter
+wait 4000
+shot panels/e2e-working
+wait 26000
+assert_state open_sessions.0.tabs.0.panels.0.panel shells
+dump e2e-after
+state_json e2e-state
+shot panels/e2e-panels
+type Stop the background shell with shell_stop, then reply "done".
+key enter
+wait 25000
+state_json e2e-state-end
+shot panels/e2e-end
+quit

@@ -1,0 +1,796 @@
+# Every right-click menu (tests/scripts/menus.sh): each row is clicked as the
+# user does and its effect asserted, or the toast that says why it could not.
+# Projects by recent activity: alpha (1h), bravo (2h). bravo's sessions: b1
+# (a .jsonl WITH pi-subagents' same-named folder beside it), b2, b3 (no header).
+# Sections: session rows (Copy session info, Send to Atlas first), the ⓘ menu,
+# sort menus, project rows, "+", Files, editor, worktrees, Settings, jobs,
+# Close session. Rows are picked by label (clickmenu), menus checked whole
+# (assert_menurows).
+wait 1000
+assert_rows projects ~/code/alpha,~/code/bravo
+# ==== session rows: Copy session info and Send to Atlas (the user's report) ====
+# b1 open from bravo, then alpha selected: its Open row's menu looks it up in
+# bravo's store folder, where the folder sits beside the file
+# (a click on the selected project folds it: select the other one first)
+clickid proj 0
+wait 300
+clickid proj 1
+wait 300
+assert_rows sessions Subagents ran here,Plain session,No header
+clickid sess 0
+waitfor ARGS: --session 15000
+clickid proj 0
+wait 300
+assert_rows open Subagents ran here
+rclickid open 0
+wait 300
+assert_menurows Pin|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide|Close session
+shot menus/session-open-row
+clipboard_clear
+clickmenu Copy session info
+wait 300
+assert_clipboard id: b1
+assert_clipboard project: bravo
+assert_clipboard title: Subagents ran here
+assert_clipboard _b1.jsonl\n
+assert_toast Session info copied
+shot menus/session-info-copied
+rclickid open 0
+wait 300
+clickmenu Send to Atlas
+waitfor [pasted 9 lines] 15000
+assert_state home.open true
+assert_state focus.id agent_input
+assert_screen id: b1
+assert_screen title: Subagents ran here
+key j cmd
+wait 300
+assert_state home.open false
+# ---- the rest of b1's Open row menu: Reveal, Copy path, Pin/Unpin, Hide/Show again
+rclickid open 0
+wait 300
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed _b1.jsonl
+rclickid open 0
+wait 300
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard _b1.jsonl
+assert_toast Path copied
+rclickid open 0
+wait 300
+clickmenu Pin
+wait 300
+assert_state sidebar.pinned_sessions.# 1
+rclickid open 0
+wait 300
+assert_menurows Unpin|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide|Close session
+clickmenu Unpin
+wait 300
+assert_state sidebar.pinned_sessions.# 0
+rclickid open 0
+wait 300
+clickmenu Hide
+wait 300
+assert_state sidebar.hidden_sessions.# 1
+rclickid open 0
+wait 300
+clickmenu Show again
+wait 300
+assert_state sidebar.hidden_sessions.# 0
+# ==== bravo's session rows (the listing) ====
+clickid proj 1
+wait 300
+assert_rows sessions Subagents ran here,Plain session,No header
+rclickid sess 1
+wait 300
+assert_menurows Pin|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide
+clipboard_clear
+clickmenu Copy session info
+wait 300
+assert_clipboard id: b2
+assert_toast Session info copied
+# a session file without a header: the toast says why
+rclickid sess 2
+wait 300
+toast_clear
+clipboard_clear
+clickmenu Copy session info
+wait 300
+assert_toast Copy session info: the session file has no header
+assert_clipboard -
+shot menus/session-error-toast
+rclickid sess 2
+wait 300
+clickmenu Send to Atlas
+wait 300
+assert_toast Send to Atlas: the session file has no header
+# pinned sessions: Move up / Move down
+rclickid sess 1
+wait 300
+clickmenu Pin
+wait 300
+rclickid sess 2
+wait 300
+clickmenu Pin
+wait 300
+assert_state sidebar.pinned_sessions.0 b2
+assert_state sidebar.pinned_sessions.1 b3
+assert_rows sessions Plain session,No header,Subagents ran here
+rclickid sess 0
+wait 300
+assert_menurows Unpin|Move down|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide
+clickmenu Move down
+wait 300
+assert_state sidebar.pinned_sessions.0 b3
+assert_rows sessions No header,Plain session,Subagents ran here
+rclickid sess 1
+wait 300
+assert_menurows Unpin|Move up|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide
+clickmenu Move up
+wait 300
+assert_state sidebar.pinned_sessions.0 b2
+rclickid sess 0
+wait 300
+clickmenu Unpin
+wait 300
+rclickid sess 0
+wait 300
+clickmenu Unpin
+wait 300
+assert_state sidebar.pinned_sessions.# 0
+# Hide in the listing: gone from it; Show hidden (the sort menu) brings it back to Show again
+rclickid sess 1
+wait 300
+clickmenu Hide
+wait 300
+assert_rows sessions Subagents ran here,No header
+# ==== the ⓘ menu: the info, Copy session info, Send to Atlas ====
+hover sess 0
+wait 300
+clickid sessinfo 0
+wait 300
+assert_menurows -|Copy session info|Send to Atlas
+assert_drawn id: b1
+assert_drawn title: Subagents ran here
+clipboard_clear
+clickmenu Copy session info
+wait 300
+assert_clipboard id: b1
+assert_toast Session info copied
+hover sess 0
+wait 300
+clickid sessinfo 0
+wait 300
+clickmenu Send to Atlas
+waitfor [pasted 9 lines] 15000
+assert_state home.open true
+key j cmd
+wait 300
+# ==== the sort menus (header buttons: projects, chats): orders and Show hidden ====
+clickid sort 0
+wait 300
+assert_menurows Recent activity|Name|Created|-|Show hidden
+clickmenu Show hidden
+wait 300
+assert_state sidebar.show_hidden true
+assert_rows sessions Subagents ran here,Plain session,No header
+rclickid sess 1
+wait 300
+clickmenu Show again
+wait 300
+assert_state sidebar.hidden_sessions.# 0
+clickid sort 0
+wait 300
+clickmenu Show hidden
+wait 300
+assert_state sidebar.show_hidden false
+clickid sort 0
+wait 300
+clickmenu Name
+wait 300
+assert_state sidebar.sort.projects name
+clickid sort 0
+wait 300
+clickmenu Created
+wait 300
+assert_state sidebar.sort.projects created
+clickid sort 0
+wait 300
+clickmenu Recent activity
+wait 300
+assert_state sidebar.sort.projects recent
+clickid sort 2
+wait 300
+assert_menurows Recent activity|Name|Created|-|Show hidden
+clickmenu Name
+wait 300
+assert_state sidebar.sort.chats name
+clickid sort 2
+wait 300
+clickmenu Recent activity
+wait 300
+assert_state sidebar.sort.chats recent
+# ==== project rows ====
+rclickid proj 0
+wait 300
+assert_menurows Pin|New session|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|-|Reveal in Finder|Copy path|-|Hide
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed /code/alpha
+rclickid proj 0
+wait 300
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard /code/alpha
+assert_toast Path copied
+rclickid proj 1
+wait 300
+clickmenu Sessions by name
+wait 300
+assert_state sidebar.sort.sessions name
+assert_rows sessions No header,Plain session,Subagents ran here
+rclickid proj 1
+wait 300
+clickmenu Sessions by created
+wait 300
+assert_state sidebar.sort.sessions created
+rclickid proj 1
+wait 300
+clickmenu Sessions by recent activity
+wait 300
+assert_state sidebar.sort.sessions recent
+rclickid proj 1
+wait 300
+clickmenu Rename…
+wait 300
+assert_state focus.id rename_project
+key escape
+wait 300
+# pin both: Move up / Move down
+rclickid proj 1
+wait 300
+clickmenu Pin
+wait 300
+assert_rows projects ~/code/bravo,~/code/alpha
+rclickid proj 1
+wait 300
+clickmenu Pin
+wait 300
+assert_state sidebar.pinned_projects.# 2
+rclickid proj 0
+wait 300
+assert_menurows Unpin|Move down|New session|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|-|Reveal in Finder|Copy path|-|Hide
+clickmenu Move down
+wait 300
+assert_rows projects ~/code/alpha,~/code/bravo
+rclickid proj 1
+wait 300
+clickmenu Move up
+wait 300
+assert_rows projects ~/code/bravo,~/code/alpha
+rclickid proj 0
+wait 300
+clickmenu Unpin
+wait 300
+rclickid proj 0
+wait 300
+clickmenu Unpin
+wait 300
+assert_state sidebar.pinned_projects.# 0
+assert_rows projects ~/code/alpha,~/code/bravo
+# Hide, then Show hidden and Show again
+rclickid proj 1
+wait 300
+clickmenu Hide
+wait 300
+assert_rows projects ~/code/alpha
+command {"type":"set_filter","show_hidden":true}
+wait 300
+rclickid proj 1
+wait 300
+clickmenu Show again
+wait 300
+command {"type":"set_filter","show_hidden":false}
+wait 300
+assert_rows projects ~/code/alpha,~/code/bravo
+# New session: a pi session in alpha, current
+rclickid proj 0
+wait 300
+clickmenu New session
+waitfor ARGS: --session-id 15000
+assert_state open_sessions.# 3
+# ==== the tab strip's "+" menu (right click on +) ====
+rclickid newshell
+wait 300
+assert_menurows New shell tab|New browser tab|New app tab…|New chat|New session in bravo
+clickmenu New shell tab
+wait 500
+assert_state open_sessions.2.tabs.# 2
+assert_state open_sessions.2.tabs.1.kind shell
+rclickid newshell
+wait 300
+clickmenu New app tab…
+wait 300
+assert_state focus.id palette
+key escape
+wait 300
+rclickid newshell
+wait 300
+clickmenu New browser tab
+wait 1500
+assert_state open_sessions.2.tabs.# 3
+assert_state open_sessions.2.tabs.2.kind browser
+assert_state focus.id browser_url
+command {"type":"close_tab","tab_id":$tab}
+wait 500
+assert_state open_sessions.2.tabs.# 2
+rclickid newshell
+wait 300
+clickmenu New session in bravo
+waitfor ARGS: --session-id 15000
+assert_state open_sessions.# 4
+assert_state open_sessions.3.project_id $project
+rclickid newshell
+wait 300
+clickmenu New chat
+wait 1000
+assert_state open_sessions.# 5
+assert_state open_sessions.4.project_id $chats
+# ==== the Files tab's rows (alpha's session on screen) ====
+assert_rows open Untitled chat,Untitled session,Untitled session,Subagents ran here
+clickid open 2
+wait 500
+assert_state current_session $session
+assert_state open_sessions.2.id $session
+clickid lefttab 1
+wait 800
+assert_state layout.left_tab files
+assert_files sub\na.txt\nnotes.md\n
+# rows: 0 sub/, 1 a.txt, 2 notes.md
+rclickid frow 0
+wait 300
+assert_menurows New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+clickmenu Open terminal here
+wait 800
+assert_state open_sessions.2.tabs.# 3
+assert_state open_sessions.2.tabs.2.cwd $homedir/code/alpha/sub
+rclickid frow 0
+wait 300
+clipboard_clear
+clickmenu Copy relative path
+wait 300
+assert_clipboard sub
+assert_toast Path copied
+rclickid frow 1
+wait 300
+assert_menurows Open|Open in preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard /code/alpha/a.txt
+assert_toast Path copied
+rclickid frow 1
+wait 300
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed /code/alpha/a.txt
+rclickid frow 2
+wait 300
+assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path|Copy relative path|Open terminal here
+clickmenu Open Markdown preview
+wait 500
+assert_state open_sessions.2.tabs.# 4
+assert_state open_sessions.2.tabs.3.kind markdown
+assert_md Some text.
+rclickid frow 2
+wait 300
+clickmenu Open in preview
+wait 500
+assert_state open_sessions.2.tabs.# 5
+assert_state open_sessions.2.tabs.4.kind editor
+assert_state open_sessions.2.tabs.4.title notes.md
+# New file, New folder, Rename, Move to Trash (asks first)
+rclickid frow 1
+wait 300
+clickmenu New file…
+wait 300
+assert_state focus.id files_name
+type made.txt
+key enter
+wait 800
+assert_files made.txt\n
+rclickid frow 1
+wait 300
+clickmenu New folder…
+wait 300
+assert_state focus.id files_name
+type madedir
+key enter
+wait 800
+assert_files madedir\n
+# rows: 0 madedir/, 1 sub/, 2 a.txt, 3 made.txt, 4 notes.md
+rclickid frow 3
+wait 300
+clickmenu Rename…
+wait 300
+assert_state focus.id files_name
+type renamed
+key enter
+wait 800
+assert_files renamed.txt\n
+assert_not_files made.txt
+# rows: 0 madedir/, 1 sub/, 2 a.txt, 3 notes.md, 4 renamed.txt
+rclickid frow 4
+wait 300
+clickmenu Move to Trash…
+wait 300
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+wait 800
+assert_state pending_confirmations.# 0
+assert_not_files renamed.txt
+assert_files notes.md
+# Open: an editor tab; then its own menu
+rclickid frow 2
+wait 300
+clickmenu Open
+wait 800
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.path $homedir/code/alpha/a.txt
+# ==== the editor's text (a.txt, changed since HEAD) ====
+rclickid terminal
+wait 300
+assert_menurows Cut|Copy|Paste|Select all|-|Indent|Outdent|Find…|Go to line…|-|Diff with HEAD|Reveal in Finder
+clickmenu Select all
+wait 200
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.selection.from.line 1
+assert_result data.selection.to.line 4
+assert_result data.bytes 20
+rclickid terminal
+wait 300
+clipboard_clear
+clickmenu Copy
+wait 200
+assert_clipboard hello\nworld\nchanged\n
+rclickid terminal
+wait 300
+clickmenu Indent
+wait 200
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.dirty true
+assert_result data.bytes 32
+rclickid terminal
+wait 300
+clickmenu Outdent
+wait 200
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.bytes 20
+rclickid terminal
+wait 300
+clickmenu Select all
+wait 200
+rclickid terminal
+wait 300
+clipboard_clear
+clickmenu Cut
+wait 200
+assert_clipboard hello\nworld\nchanged\n
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.bytes 0
+rclickid terminal
+wait 300
+clickmenu Paste
+wait 200
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.bytes 20
+rclickid terminal
+wait 300
+clickmenu Find…
+wait 300
+assert_state focus.id editor_find
+key escape
+wait 300
+rclickid terminal
+wait 300
+clickmenu Go to line…
+wait 300
+assert_state focus.id editor_goto
+key escape
+wait 300
+rclickid terminal
+wait 300
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed /code/alpha/a.txt
+rclickid terminal
+wait 300
+clickmenu Diff with HEAD
+wait 800
+shot menus/diff-head
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.view head
+# ==== the worktree switcher's rows (Files tab): alpha's main checkout and alpha-wt (feature) ====
+clickid wt_switch
+wait 500
+shot menus/wt-switcher
+rclickid wtrow 1
+wait 300
+assert_menurows Open terminal here|New pi session here|Show changes|Reveal in Finder|-|Copy path|Copy branch name|-|Clean up…
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard /code/alpha-wt
+assert_toast Copied: 
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+clipboard_clear
+clickmenu Copy branch name
+wait 300
+assert_clipboard feature
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed /code/alpha-wt
+# Clean up… (merged and clean): git's checks, then the confirmation bar; No keeps it
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+clickmenu Clean up…
+wait 2000
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Remove worktree ~/code/alpha-wt and delete merged branch feature?
+clickid confirm_no
+wait 300
+assert_state pending_confirmations.# 0
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+clickmenu Open terminal here
+wait 800
+assert_state open_sessions.2.tabs.# 9
+assert_state open_sessions.2.tabs.8.kind shell
+assert_state open_sessions.2.tabs.8.cwd $homedir/code/alpha-wt
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+clickmenu Show changes
+wait 1500
+assert_state open_sessions.2.tabs.# 10
+assert_state open_sessions.2.tabs.9.kind changes
+# Clean up now: refused (a shell runs there), and the toast says so
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+toast_clear
+clickmenu Clean up…
+wait 1000
+assert_toast Clean up: a shell tab runs in it
+assert_state pending_confirmations.# 0
+clickid wt_switch
+wait 500
+rclickid wtrow 1
+wait 300
+clickmenu New pi session here
+waitfor ARGS: --session-dir 15000
+assert_state open_sessions.# 6
+assert_state open_sessions.5.cwd $homedir/code/alpha-wt
+# ==== the Settings tab's rows ====
+clickid lefttab 2
+wait 800
+assert_state layout.left_tab settings
+assert_files [pi (global)]\nsettings.json\nprompts\n
+rclickid frow 1
+wait 300
+assert_menurows Open|Open in preview|-|Reveal in Finder|Copy path
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard /.pi/agent/settings.json
+assert_toast Path copied
+rclickid frow 1
+wait 300
+revealed_clear
+clickmenu Reveal in Finder
+wait 300
+assert_revealed /.pi/agent/settings.json
+rclickid frow 1
+wait 300
+clickmenu Open in preview
+wait 500
+assert_state open_sessions.5.tabs.# 2
+assert_state open_sessions.5.tabs.1.title settings.json
+rclickid frow 1
+wait 300
+clickmenu Open
+wait 500
+assert_state open_sessions.5.tabs.# 2
+assert_state open_sessions.5.tabs.1.kind editor
+# a prompt: New file, Rename, Move to Trash, Markdown preview
+clickid frow 2
+wait 500
+assert_files prompts/\n  fix.md\n
+rclickid frow 3
+wait 300
+assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path
+clickmenu Open Markdown preview
+wait 500
+assert_state open_sessions.5.tabs.# 3
+assert_state open_sessions.5.tabs.2.kind markdown
+rclickid frow 3
+wait 300
+clickmenu New file…
+wait 300
+assert_state focus.id files_name
+type new.md
+key enter
+wait 800
+assert_files   new.md\n
+assert_file $homedir/.pi/agent/prompts/new.md 
+rclickid frow 3
+wait 300
+clickmenu New folder…
+wait 300
+type sub
+key enter
+wait 800
+assert_files   sub\n
+# rows: 0 [pi (global)], 1 settings.json, 2 prompts/, 3 sub, 4 fix.md, 5 new.md, 6 [This project], 7 .pi/settings.json (create)
+rclickid frow 5
+wait 300
+clickmenu Rename…
+wait 300
+assert_state focus.id files_name
+type renamed
+key enter
+wait 800
+assert_files   renamed.md\n
+rclickid frow 5
+wait 300
+clickmenu Move to Trash…
+wait 300
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+wait 800
+assert_not_files renamed.md
+assert_files   fix.md\n
+# rows now: ... 5 [This project], 6 .pi/settings.json (create), 7 AGENTS.md (create)
+# a file to create: only Copy path
+rclickid frow 7
+wait 300
+assert_menurows Copy path
+clipboard_clear
+clickmenu Copy path
+wait 300
+assert_clipboard /code/alpha/AGENTS.md
+# ==== jobs: the notes folder set, one job (m1, manual, fake pi) ====
+ui_command {"type":"set_pi_path","path":"$homedir/bin/pi"}
+ui_command {"type":"set_home_dir","path":"$homedir/notes"}
+assert_result ok true
+clickid lefttab 3
+wait 500
+assert_state layout.left_tab jobs
+waitstate 6000 jobs.# 1
+rclickid jobrow 0
+wait 300
+assert_menurows Run now|Pause|Enable|-|Edit…|Open note|-|Delete…
+clickmenu Enable
+wait 500
+assert_state jobs.0.enabled true
+rclickid jobrow 0
+wait 300
+assert_menurows Run now|Pause|Disable|-|Edit…|Open note|-|Delete…
+clickmenu Disable
+wait 500
+assert_state jobs.0.enabled false
+rclickid jobrow 0
+wait 300
+clickmenu Pause
+wait 500
+assert_state jobs.0.paused true
+rclickid jobrow 0
+wait 300
+assert_menurows Run now|Resume|Enable|-|Edit…|Open note|-|Delete…
+clickmenu Resume
+wait 500
+assert_state jobs.0.paused false
+rclickid jobrow 0
+wait 300
+clickmenu Edit…
+wait 500
+assert_state focus.id job_sheet
+assert_drawn Edit job
+key escape
+wait 300
+rclickid jobrow 0
+wait 300
+clickmenu Open note
+wait 800
+assert_state open_sessions.5.tabs.4.title menu-job.md
+# a run while pi-desk is behind: unread, so the menu offers Mark read
+window_active off
+rclickid jobrow 0
+wait 300
+clickmenu Run now
+waitstate 15000 jobs.0.last_status ok
+assert_state jobs.0.unread 1
+rclickid jobrow 0
+wait 300
+assert_menurows Run now|Pause|Enable|-|Edit…|Open note|Open last report|Open run folder|Mark read|-|Delete…
+clickmenu Mark read
+wait 500
+assert_state jobs.0.unread 0
+window_active on
+rclickid jobrow 0
+wait 300
+revealed_clear
+clickmenu Open run folder
+wait 300
+assert_revealed /jobs/m1/runs/
+rclickid jobrow 0
+wait 300
+clickmenu Open last report
+wait 800
+assert_state open_sessions.5.tabs.5.title summary.md
+rclickid jobrow 0
+wait 300
+clickmenu Delete…
+wait 500
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+waitstate 6000 jobs.# 0
+assert_not_file $homedir/notes/jobs/menu-job.md m1
+# the project menu's New job for this project… (a jobs folder now)
+clickid lefttab 0
+wait 500
+rclickid proj 0
+wait 300
+assert_menurows Pin|New session|New job for this project…|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|-|Reveal in Finder|Copy path|-|Hide
+clickmenu New job for this project…
+wait 500
+assert_state focus.id job_sheet
+assert_drawn for_project: ~/code/alpha
+key escape
+wait 300
+# ==== Close session (a session row of an open session): asks first ====
+# bravo's rows: the new session (no file yet: no file rows in its menu), b1, b2, b3
+clickid proj 1
+wait 500
+assert_rows sessions Untitled session,Subagents ran here,Plain session,No header
+rclickid sess 0
+wait 300
+assert_menurows Pin|-|Hide|Close session
+clickmenu Close session
+wait 500
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+wait 800
+assert_state open_sessions.# 5
+rclickid sess 0
+wait 300
+assert_menurows Pin|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Hide|Close session
+clickmenu Close session
+wait 500
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+wait 800
+assert_state open_sessions.# 4
+quit

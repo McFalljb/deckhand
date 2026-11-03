@@ -1,0 +1,50 @@
+# Screenshot scene (tests/scripts/shots.sh): writes build/shots/$OUT/.
+wait 800
+ui_command {"type":"set_theme","name":"graphite"}
+# open: a new (untitled) recipe-box session (launch DIR), two recipe-box sessions, a chat
+waitfor ARGS: 10000
+command {"type":"open_session","project_id":$project,"pi_session_id":"r2"}
+wait 300
+command {"type":"open_session","project_id":$chats,"pi_session_id":"c1"}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"r1"}
+wait 300
+command {"type":"open_file","path":"src/main.c"}
+wait 300
+command {"type":"open_file","path":"README.md"}
+wait 300
+command {"type":"new_shell_tab","session":$session}
+wait 300
+command {"type":"open_file","path":"src/main.c"}
+wait 500
+resize 1400 860
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 600
+shot $OUT/dark-sessions
+command {"type":"set_left_tab","tab":"files"}
+wait 600
+shot $OUT/dark-files-editor
+command {"type":"set_left_tab","tab":"sessions"}
+key comma cmd
+wait 400
+shot $OUT/dark-settings
+key escape
+resize 860 560
+wait 600
+shot $OUT/dark-narrow
+resize 1400 860
+ui_command {"type":"set_appearance","mode":"light"}
+wait 600
+shot $OUT/light-sessions
+command {"type":"set_left_tab","tab":"files"}
+wait 600
+shot $OUT/light-files-editor
+command {"type":"set_left_tab","tab":"sessions"}
+key comma cmd
+wait 400
+shot $OUT/light-settings
+key escape
+resize 860 560
+wait 600
+shot $OUT/light-narrow
+quit

@@ -1,0 +1,46 @@
+# Zoom and comment mode (tests/scripts/browser.sh; docs/BROWSER.md step 3): at 150% the CSS-to-tab
+# mapping takes the page's zoom, so hover, picks, areas, badges and crops land where the user
+# points. Page coordinates are logical px on screen; the fixture's are CSS px
+# (tests/web/annotate.html: #save at 20,20 200x40).
+wait 1500
+web_open tests/web/annotate.html
+web_waitpaint 10000
+web_title Annotate fixture 5000
+waitstate 5000 open_sessions.0.tabs.1.annot_ready true
+key equal cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 1.1
+key equal cmd
+key equal cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 1.5
+wait 500
+clickid annot_toggle
+assert_state open_sessions.0.tabs.1.mode comment
+# CSS 100,50 (inside #save) is 150,75 on screen at 150%; at 100% 150,75 is below it
+annot_move 150 75
+wait 300
+annot_assert hover yes
+annot_assert label button#save
+shot browser-polish/zoom-hover
+web_click 150 75
+wait 400
+annot_assert bar button "Save"
+type Zoomed
+key enter
+wait 250
+waitstate 3000 open_sessions.0.tabs.1.markers.0.where on
+assert_state open_sessions.0.tabs.1.markers.0.box 20,20 200x40
+assert_state open_sessions.0.tabs.1.markers.0.badge 30,30
+# the crop: the button and 24 px around it, in the tab's px (30,30 300x60 at 150%)
+annot_assert crop 1 348 108
+shot browser-polish/zoom-marker
+# an area drag: screen 600,45 -> 750,180 is CSS 400,30 -> 500,120
+annot_drag 600 45 750 180
+wait 400
+annot_assert bar area 400,30 100×90
+key escape
+# back to 100%: the badge follows the zoom
+key 0 cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 1
+waitstate 3000 open_sessions.0.tabs.1.markers.0.badge 20,20
+web_assert overwrites 0
+quit

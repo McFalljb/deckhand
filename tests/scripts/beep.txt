@@ -1,0 +1,53 @@
+# No AppKit beeps for keys pi-desk handles (run with tests/scripts/polish.sh
+# tests/scripts/beep.txt). Real NSEvents built in-process go through
+# keyDown:/keyUp: (the input system included); beeps are counted, not sounded.
+wait 1000
+waitfor new-1 10000
+beeps 0
+# ---- the pi tab has the keyboard (terminal)
+ime_key 0 a
+ime_key 1 s
+ime_key 0 A shift
+ime_key 49 space
+ime_key 18 1
+ime_key 43 ,
+ime_key 36 enter
+ime_key 51 backspace
+ime_key 123 left
+ime_key 124 right
+ime_key 126 up
+ime_key 125 down
+ime_key 48 tab
+ime_key 53 escape
+ime_key 8 c ctrl
+ime_key 3 f alt
+ime_key 0 a repeat
+beeps 0
+# ---- a shell tab (⌘T is a sokol chord)
+ime_key 17 t cmd
+wait 600
+ime_key 4 h
+ime_key 34 i
+ime_key 36 enter
+ime_key 51 backspace
+ime_key 123 left
+beeps 0
+# ---- the rename field: text, Option dead key, Enter
+# the rename field (the project row's menu has Rename… too)
+key k cmd
+type rename project
+key enter
+ime_key 0 a
+ime_key 51 backspace
+ime_key 14 e alt
+ime_key 14 e
+ime_key 123 left
+ime_key 36 enter
+beeps 0
+# ---- the palette
+ime_key 40 k cmd
+ime_key 13 w
+ime_key 125 down
+ime_key 53 escape
+beeps 0
+quit

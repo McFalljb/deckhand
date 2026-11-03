@@ -1,0 +1,61 @@
+# Right column panels and status dots (run with tests/scripts/panels.sh).
+wait 1000
+command {"type":"select_project","project_id":$project}
+wait 300
+# three listed sessions (newest first): an error, a question, waiting for you
+clickid sess 0
+waitfor cccc-3 10000
+clickid sess 1
+waitfor bbbb-2 10000
+clickid sess 2
+waitfor aaaa-1 10000
+wait 1500
+assert_state open_sessions.0.tabs.0.agent error
+assert_state open_sessions.1.tabs.0.question true
+assert_state open_sessions.2.tabs.0.waiting true
+assert_state open_sessions.0.tabs.0.panels.# 0
+assert_state layout.right_open true
+# a session without panels: the empty state
+shot panels/panels-empty
+# a new chat: the fake bridge publishes subagents, shells and todos, working
+command {"type":"new_chat","project_id":$project}
+waitfor new-1 10000
+wait 1500
+assert_state open_sessions.3.tabs.0.agent working
+assert_state open_sessions.3.tabs.0.panels.# 3
+assert_state open_sessions.3.tabs.0.panels.2.panel todos
+# only the tab's own bridge publishes panels: not a script
+command {"type":"panel.set","tab_id":$pitab,"panel":"x","rows":[]}
+assert_result error not allowed for this caller
+hover sess 1
+wait 500
+shot panels/panels-graphite
+# a shell tab of the same session still shows the pi tab's panels
+command {"type":"new_shell_tab","session":$session}
+wait 500
+shot panels/panels-shell-tab
+command {"type":"focus_tab","tab_id":$pitab}
+# fold a section by clicking its header (a command), unfold again
+clickid panelhead 1
+wait 300
+assert_state layout.collapsed.0 shells
+shot panels/panels-folded
+clickid panelhead 1
+wait 300
+assert_state layout.collapsed.# 0
+# the toggle: ⌥⌘B and the button in the tab strip
+key b cmd alt
+wait 300
+assert_state layout.right_open false
+shot panels/panels-hidden
+clickid togglepanels
+wait 300
+assert_state layout.right_open true
+ui_command {"type":"set_theme","name":"warm"}
+wait 500
+shot panels/panels-warm
+ui_command {"type":"set_theme","name":"ghostty"}
+wait 500
+shot panels/panels-ghostty
+ui_command {"type":"set_theme","name":"graphite"}
+quit

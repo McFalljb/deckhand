@@ -1,0 +1,136 @@
+# Markdown scene (tests/scripts/markdown.sh). Tabs: 0 pi, 1 README.md, 2 other.md, 3 the guide.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+# ---- open from the Files tab's row menu: Open, Open in preview, Open Markdown preview
+key e cmd shift
+wait 400
+rclickid frow 1
+wait 200
+clickid menurow 2
+wait 300
+key e cmd shift
+wait 200
+assert_state open_sessions.0.tabs.1.kind markdown
+assert_state open_sessions.0.tabs.1.title README.md
+assert_state open_sessions.0.tabs.1.source false
+wait 400
+assert_md Recipe box
+assert_md recipe
+assert_md Minutes
+assert_md import recipes
+assert_md fmt.Println
+assert_md a photo of soup
+assert_state open_sessions.0.tabs.1.links 3
+assert_state open_sessions.0.tabs.1.headings 2
+# a second open focuses the same tab
+command {"type":"markdown_open","path":"$homedir/proj/README.md"}
+assert_state open_sessions.0.tabs.# 2
+# ---- the mermaid block: a code block labelled until step 2 draws diagrams
+assert_md diagram (coming soon)
+assert_md graph TD
+shot markdown/preview
+# ---- toggle: the toolbar's first button, then ⇧⌘V back
+clickid ed_tool 0
+wait 200
+assert_state open_sessions.0.tabs.1.source true
+shot markdown/source
+key v cmd shift
+wait 200
+assert_state open_sessions.0.tabs.1.source false
+# ---- find in the preview: ⌘F, type, Enter steps, Esc closes
+key f cmd
+wait 100
+type needle
+wait 300
+assert_state open_sessions.0.tabs.1.matches 2
+key enter
+wait 100
+shot markdown/find
+key escape
+wait 100
+# ---- the toolbar's Find button opens the same bar
+clickid ed_tool 1
+wait 100
+assert_state focus.id editor_find
+key escape
+# ---- the file changes on disk: the preview follows
+replace_in_file $homedir/proj/README.md Version one|Version two
+wait 2600
+assert_md Version two
+assert_not_md Version one
+# ---- an external link: logged in test mode, never opened
+clickmd example site
+wait 200
+assert_opened https://example.com/
+# ---- an anchor in the page: the quote's link scrolls to Tasks
+clickmd link inside
+wait 300
+assert_state open_sessions.0.tabs.1.line 8
+# ---- a relative .md link with an anchor: other.md, at its far section
+clickmd other page
+wait 500
+assert_state open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.2.kind markdown
+assert_state open_sessions.0.tabs.2.title other.md
+assert_state open_sessions.0.tabs.2.line 125
+shot markdown/other-far
+# ---- and back to the top through its own anchor link
+clickmd to the top
+wait 300
+assert_state open_sessions.0.tabs.2.line 1
+# ---- markdown_scroll: to a heading by id
+command {"type":"markdown_scroll","tab_id":$tab,"anchor":"far-section"}
+wait 200
+assert_state open_sessions.0.tabs.2.line 125
+# ---- the user guide from the Help menu opens in a Markdown tab
+menu user_guide
+wait 500
+assert_state open_sessions.0.tabs.3.kind markdown
+assert_state open_sessions.0.tabs.3.title GUIDE.md
+assert_md Markdown tab
+shot markdown/guide
+# ---- Open in editor (the toolbar's third button): an editor tab of the same file
+command {"type":"markdown_open","path":"README.md"}
+wait 200
+clickid ed_tool 2
+wait 200
+assert_state open_sessions.0.tabs.# 5
+assert_state open_sessions.0.tabs.4.kind editor
+assert_state open_sessions.0.tabs.4.title README.md
+# the editor's own Preview button comes back to the Markdown tab
+command {"type":"markdown_open","path":"README.md"}
+wait 300
+# ---- idle CPU with a preview showing
+cpu_begin
+wait 2000
+cpu_end markdown idle
+# ---- four widths, dark and light
+resize 800 700
+wait 300
+shot markdown/w800-dark
+resize 1280 800
+wait 300
+shot markdown/w1280-dark
+resize 1600 900
+wait 300
+shot markdown/w1600-dark
+resize 2000 1000
+wait 300
+shot markdown/w2000-dark
+command {"type":"set_appearance","mode":"light"}
+resize 800 700
+wait 300
+shot markdown/w800-light
+resize 1280 800
+wait 300
+shot markdown/w1280-light
+resize 1600 900
+wait 300
+shot markdown/w1600-light
+resize 2000 1000
+wait 300
+shot markdown/w2000-light
+quit

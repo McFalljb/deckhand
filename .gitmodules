@@ -1,0 +1,11 @@
+[submodule "vendor/ghostty"]
+	path = vendor/ghostty
+	url = https://github.com/ghostty-org/ghostty.git
+	ignore = untracked
+[submodule "vendor/sokol-odin"]
+	path = vendor/sokol-odin
+	url = https://github.com/floooh/sokol-odin.git
+	ignore = untracked
+[submodule "vendor/clay"]
+	path = vendor/clay
+	url = https://github.com/nicbarker/clay.git

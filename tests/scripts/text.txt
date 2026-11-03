@@ -1,0 +1,17 @@
+# Text rendering screenshots (tests/scripts/text-shots.sh text.txt [BINARY]).
+# Shots go to build/shots/text/{sample,shell}.png; rename them for before/after pairs.
+wait 1000
+waitfor Emoji: 15000
+wait 500
+shot text/sample
+command {"type":"new_shell_tab","session":$session}
+wait 800
+type sh ../../tests/scripts/text-sample.sh
+key enter
+waitfor Braille 5000
+wait 500
+shot text/shell
+cpu_begin
+wait 5000
+cpu_end idle
+quit

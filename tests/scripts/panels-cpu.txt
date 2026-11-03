@@ -1,0 +1,17 @@
+# CPU and frames with the largest panel set while pi works (dot pulsing).
+# Run: PI_DESK_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
+wait 1000
+waitfor max 15000
+wait 2000
+assert_state open_sessions.0.tabs.0.agent working
+assert_state open_sessions.0.tabs.0.panels.# 16
+shot panels/panels-max
+cpu_begin
+wait 10000
+cpu_end max panels, pulsing
+ui_command {"type":"set_layout","right_open":false}
+wait 1000
+cpu_begin
+wait 10000
+cpu_end column hidden, pulsing
+quit

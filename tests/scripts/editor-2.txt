@@ -1,0 +1,14 @@
+# Run 2 of editor.sh: relaunch with the same data dir; the editor tabs are back
+# (the file on disk; unsaved edits are not kept).
+wait 500
+assert_state open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.2.kind editor
+assert_state open_sessions.0.tabs.2.title hello.c
+assert_state open_sessions.0.tabs.3.title big.c
+assert_state open_sessions.0.tabs.2.dirty false
+clickid tab 2
+wait 300
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.lines 2
+assert_result data.language c
+quit

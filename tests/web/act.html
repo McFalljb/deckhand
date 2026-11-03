@@ -1,0 +1,125 @@
+<!doctype html>
+<!-- Agents act on pages (tests/scripts/browser-act.txt; docs/BROWSER.md §4, step 8). Served as
+     pidesk-test://web/act.html (no network). What the agent does shows in #log (the agent reads it
+     with browser_read, a tab not on screen included): typed text for plain fields, only lengths
+     and key counts for the password and card fields (which must stay at 0).
+     Fixed positions (CSS px from the viewport's top-left):
+       #pos     500,10 80x30    a button for a click at x,y
+       #frm     500,60 200x60   an iframe with a field (focus there cannot be checked)
+       #under   500,140 100x30  a button with #cover on top of it
+       #prefrm  500,190 150x24  a field just before #frm in the tab order (Tab moves into the frame)
+     The frame's field reports its input and keys here (fi-len=, fi-key). #show flips #pw between
+     password and text ("show password"). #goform submits for real (to nav-a.html). #copy writes
+     the clipboard (a copy event's data). #search updates the address as you type (replaceState).
+     #widget is a focusable div pi-desk cannot classify.
+     #hop moves focus to #pw once it holds 3 characters (focus moving mid-type). #shadowcard is a
+     custom element (host autocomplete cc-exp) whose shadow root holds the field; #shadowpw holds a
+     password field in its shadow root (both delegate focus). #buy navigates to nav-a.html; #dl
+     downloads a blob; #pop opens nav-b.html in a popup; #tall makes the page scroll, #inner is a
+     scroller of its own; #far is at the bottom. -->
+<html><head><meta charset="utf-8"><title>Act fixture</title>
+<style>
+  html, body { margin: 0; background: #ffffff; font: 14px -apple-system, sans-serif; }
+  #top { width: 460px; padding: 4px; }
+  #log { white-space: pre-wrap; border: 1px solid #ccc; min-height: 20px; margin: 0; }
+  input, textarea, select, button { display: block; margin: 2px 0; }
+  #pos { position: fixed; left: 500px; top: 10px; width: 80px; height: 30px; margin: 0; }
+  #frm { position: fixed; left: 500px; top: 60px; width: 200px; height: 60px; border: 0; margin: 0; }
+  #prefrm { position: fixed; left: 500px; top: 190px; width: 150px; height: 24px; margin: 0; }
+  #under { position: fixed; left: 500px; top: 140px; width: 100px; height: 30px; margin: 0; }
+  #cover { position: fixed; left: 490px; top: 130px; width: 120px; height: 50px; background: rgba(255,0,0,0.3); }
+  #inner { height: 60px; width: 200px; overflow: auto; border: 1px solid #999; }
+  #tall { height: 3000px; }
+</style></head>
+<body>
+<div id="top">
+<h1 id="h">Act fixture</h1>
+<pre id="log"></pre>
+<form id="form">
+  <input id="name" aria-label="Name">
+  <input id="pw" type="password" aria-label="Password">
+  <input id="cc" aria-label="Card number" autocomplete="cc-number">
+  <input id="otp" aria-label="Code" autocomplete="one-time-code">
+  <input id="newpw" type="text" aria-label="New password" autocomplete="new-password">
+  <div id="payholder" autocomplete="billing cc-csc"><input id="csc" aria-label="CVC"></div>
+  <pay-box id="shadowcard" autocomplete="cc-exp"></pay-box>
+  <login-box id="shadowpw"></login-box>
+  <input id="hop" aria-label="Hop">
+  <textarea id="note" aria-label="Note"></textarea>
+  <select id="size" aria-label="Size"><option value="s">Small</option><option value="m">Medium</option><option value="l">Large</option></select>
+  <select id="expm" aria-label="Exp month" autocomplete="cc-exp-month"><option>01</option><option>02</option></select>
+  <button type="submit" id="send">Send</button>
+</form>
+<button id="show" onclick="const p = document.getElementById('pw'); p.type = p.type === 'password' ? 'text' : 'password'">Show password</button>
+<form id="goform" action="nav-a.html"><input id="q" name="q" aria-label="Query"></form>
+<button id="copy" onclick="document.execCommand('copy')">Copy</button>
+<input id="search" aria-label="Search" oninput="history.replaceState(null, '', '?q=' + encodeURIComponent(this.value))">
+<div id="widget" tabindex="0">A custom widget</div>
+<button id="buy" onclick="location.href = 'nav-a.html'">Buy</button>
+<a id="dl" download="agent-report.txt">Download report</a>
+<input type="file" id="file" multiple aria-label="Attachment">
+<input type="file" id="one" aria-label="Single">
+<button id="dis" disabled>Disabled</button>
+<div id="hov">Hover me</div>
+<div id="rc">Right here</div>
+<div id="dbl">Double</div>
+<button id="mod">Modified</button>
+<button id="pop" onclick="window.open('nav-b.html')">Popup</button>
+<div id="inner"><div style="height: 600px">inner scroller</div></div>
+</div>
+<button id="pos">Pos</button>
+<input id="prefrm" aria-label="Before frame">
+<iframe id="frm" srcdoc="<input id=fi aria-label=Framed style='margin:0;width:180px' oninput=&quot;parent.postMessage('fi-len='+this.value.length,'*')&quot; onkeydown=&quot;parent.postMessage('fi-key','*')&quot;>"></iframe>
+<button id="under">Under</button>
+<div id="cover"></div>
+<div id="tall"></div>
+<button id="far">Far away</button>
+<script>
+  const lines = [];
+  const log = (s) => {
+    lines.push(s);
+    if (lines.length > 40) lines.shift();
+    document.getElementById('log').textContent = lines.join('\n');
+  };
+  const $ = (id) => document.getElementById(id);
+  for (const [k, root] of [['pay-box', 'cc'], ['login-box', 'pw']]) {
+    customElements.define(k, class extends HTMLElement {
+      constructor() {
+        super();
+        const r = this.attachShadow({ mode: 'open', delegatesFocus: true });
+        const i = document.createElement('input');
+        if (root === 'pw') i.type = 'password';
+        i.setAttribute('aria-label', k);
+        i.addEventListener('input', () => log(`${k}-len=${i.value.length}`));
+        r.appendChild(i);
+      }
+    });
+  }
+  $('name').addEventListener('input', () => log(`name=${$('name').value}`));
+  $('hop').addEventListener('input', () => {
+    log(`hop=${$('hop').value}`);
+    if ($('hop').value.length >= 3) $('pw').focus(); // focus moves under the agent's keys
+  });
+  for (const id of ['pw', 'cc', 'otp', 'newpw', 'csc']) {
+    $(id).addEventListener('input', () => log(`${id}-len=${$(id).value.length}`));
+    $(id).addEventListener('keydown', () => log(`${id}-key`));
+  }
+  $('note').addEventListener('input', () => log(`note=${JSON.stringify($('note').value)}`));
+  $('size').addEventListener('change', () => log(`size=${$('size').value}`));
+  $('expm').addEventListener('change', () => log(`expm changed`));
+  $('form').addEventListener('submit', (e) => { e.preventDefault(); log('submitted'); });
+  $('file').addEventListener('change', () => log(`files=${Array.from($('file').files).map((f) => f.name + ':' + f.size).join(',')}`));
+  $('hov').addEventListener('mouseenter', () => log('hover'));
+  $('rc').addEventListener('contextmenu', () => log('context'));
+  $('dbl').addEventListener('dblclick', () => log('dblclick'));
+  $('mod').addEventListener('click', (e) => log(`mod shift=${e.shiftKey} meta=${e.metaKey}`));
+  $('pos').addEventListener('click', () => log('pos'));
+  $('under').addEventListener('click', () => log('under'));
+  $('far').addEventListener('click', () => log('far'));
+  window.addEventListener('message', (e) => log(String(e.data)));
+  document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'written by the page'); e.preventDefault(); log('copied'); });
+  document.addEventListener('keydown', (e) => { if (e.target === document.body) log(`key=${e.key}`); });
+  // a blob (downloads of pidesk-test:// addresses never start, as polish.html)
+  $('dl').href = URL.createObjectURL(new Blob(['pi-desk agent download\n'], { type: 'text/plain' }));
+</script>
+</body></html>

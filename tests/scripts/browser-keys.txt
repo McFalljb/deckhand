@@ -1,0 +1,30 @@
+# Key codes the page sees (tests/scripts/browser.sh; review fix 2): a
+# modifier alone is not a letter; punctuation and F keys keep their codes.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_click 170 130
+web_js keys.length = 0
+key shift
+key rshift
+# keys reach the page asynchronously: let them land before reading them
+wait 300
+web_js document.title = 'shift ' + (keys.includes('KeyA') ? 'KeyA' : 'noA') + ' ' + keys.join(',')
+web_title shift noA
+web_js keys.length = 0
+key semicolon
+key quote
+key lbracket
+key rbracket
+key backslash
+key equal
+key grave
+key f1
+key f12
+wait 300
+web_js document.title = 'keys ' + keys.join(',')
+web_title keys Semicolon,Quote,BracketLeft,BracketRight,Backslash,Equal,Backquote,F1,F12
+web_js document.title = 'val ' + document.getElementById('field').value
+web_title val ;'[]\=`
+quit

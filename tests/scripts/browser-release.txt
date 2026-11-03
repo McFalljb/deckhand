@@ -1,0 +1,27 @@
+# What the page holds is let go (tests/scripts/browser.sh; review polish):
+# a held button and key are released when the page loses the keyboard; the
+# pointer leaving reaches the page; with no browser left CEF stops pumping.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_click 170 130
+web_mouse down 300 300
+web_keydown a
+key k cmd
+assert_state focus.id palette
+wait 100
+web_js document.title = 'rel ups=' + ups + ' keyup=' + keyups.includes('KeyA')
+web_title rel ups=2 keyup=true
+key escape
+web_js window.l0 = leaves
+web_mouse leave 300 300
+web_js document.title = 'leave +' + (leaves - l0)
+web_title leave +1
+# the last browser closes: no more pumping (a 1 s pulse would give 3+)
+command {"type":"close_tab","tab_id":$tab}
+wait 1000
+web_mark
+wait 3000
+web_assert pumps_max 2
+quit

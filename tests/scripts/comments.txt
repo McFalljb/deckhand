@@ -1,0 +1,148 @@
+# Pending comments end to end (tests/scripts/comments.sh; docs/BROWSER.md §3.6-3.7): the browser
+# stub adds a comment with a crop of the page; the fake bridge gets pi.attach with text and a PNG;
+# a typed message takes it (pi.attached) and the comments clear; Send now sends pi.prompt with the
+# image; Edit and Delete in the list; closing the tab asks first; without a bridge they wait.
+wait 1500
+assert_state open_sessions.# 1
+waitstate 10000 open_sessions.0.tabs.0.agent idle
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+# 1. a comment: the strip shows (on the browser tab too) and pi's bridge holds it
+web_comment 280 30 60 40 Make the red box blue
+wait 250
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.comments.0.source browser
+assert_state open_sessions.0.comments.0.text Make the red box blue
+assert_state open_sessions.0.comments_wait 
+wait 300
+shot comments/strip-browser
+command {"type":"focus_tab","tab_id":$pitab}
+waitfor attach 5000
+assert_screen images=1 png=yes Comment: Make the red box blue
+shot comments/strip-pi
+# 2. the user's next message takes them: cleared only after pi.attached
+type please fix
+key enter
+waitfor took 5000
+waitstate 5000 open_sessions.0.comments.# 0
+# 3. Send now, from the browser tab's strip: pi.prompt with the image
+clickid tab 1
+wait 250
+web_comment 10 10 100 60 Send this one now
+wait 250
+assert_state open_sessions.0.comments.# 1
+clickid cm_send 0
+wait 250
+waitstate 5000 open_sessions.0.comments.# 0
+# 4. View, Edit (Enter saves) and Delete
+web_comment 10 10 100 60 First text
+wait 250
+clickid cm_view 0
+wait 250
+wait 200
+clickid cm_edit 0
+wait 250
+assert_state focus.id comment_edit
+key backspace
+type Second text
+key enter
+assert_state open_sessions.0.comments.0.text Second text
+shot comments/list
+clickid cm_delete 0
+wait 250
+assert_state open_sessions.0.comments.# 0
+# 5. closing the tab asks first; Cancel keeps it, Drop and close closes it
+web_comment 10 10 100 60 Keep or drop
+wait 250
+clickid tabclose 1
+wait 250
+assert_state open_sessions.0.tabs.# 2
+assert_state comments_ask.tab_id $tab
+shot comments/close-prompt
+clickid cm_ask_cancel 0
+wait 250
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.comments.# 1
+clickid tabclose 1
+wait 250
+clickid cm_ask_drop 0
+wait 250
+assert_state open_sessions.0.tabs.# 1
+assert_state open_sessions.0.comments.# 0
+# 5b. an app tab's Inspect box: a click opens the comment field; Enter adds it, with a crop
+app_open build/fake-app
+app_waitframe 5 5000
+clickid app_inspect
+wait 400
+assert_state open_sessions.0.tabs.1.boxes 3
+app_click 305 205
+wait 250
+assert_state focus.id comment_new
+assert_drawn Comment on box "coin":
+type Collect this coin
+shot comments/app-box
+key enter
+wait 250
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.comments.0.source app
+assert_state open_sessions.0.comments.0.what box "coin" ("e:3:1") at 300,200 16×16
+assert_state open_sessions.0.comments.0.text Collect this coin
+assert_state focus.id <missing>
+command {"type":"focus_tab","tab_id":$pitab}
+waitfor Collect this coin 5000
+type ok
+key enter
+waitfor message ok took 5000
+waitstate 5000 open_sessions.0.comments.# 0
+clickid tab 1
+wait 250
+clickid tabclose 1
+wait 250
+assert_state open_sessions.0.tabs.# 1
+# 5c. the browser's picker (browser_annotate.odin): comment mode, a click on an element whose text
+# tries to read as the user's comment; pi gets it quoted on the item's line, with the crop
+web_open tests/web/annotate.html
+web_waitpaint 10000
+web_title Annotate fixture 5000
+waitstate 5000 open_sessions.0.tabs.1.annot_ready true
+annot_key cmd_shift_period
+web_click 100 140
+wait 400
+assert_state focus.id comment_new
+type Fix the hostile one
+key enter
+wait 250
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.tabs.1.markers.0.selector div#evil
+command {"type":"focus_tab","tab_id":$pitab}
+waitfor Fix the hostile one 5000
+type picked
+key enter
+waitfor message picked took 5000
+waitstate 5000 open_sessions.0.comments.# 0
+clickid tab 1
+wait 250
+clickid tabclose 1
+wait 250
+assert_state open_sessions.0.tabs.# 1
+# 6. no bridge: comments wait, Send now does nothing
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"focus_tab","tab_id":$pitab}
+type quit-bridge
+key enter
+waitstate 5000 open_sessions.0.tabs.0.agent unknown
+clickid tab 1
+wait 250
+web_comment 10 10 100 60 Waits for pi
+wait 250
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.comments_wait pi-desk's bridge is not connected to pi in this session
+clickid cm_send 0
+wait 250
+wait 300
+assert_state open_sessions.0.comments.# 1
+assert_state open_sessions.0.comments_sending false
+shot comments/waiting
+quit

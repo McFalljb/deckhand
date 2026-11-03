@@ -1,0 +1,44 @@
+# A closed browser's slot is reused (tests/scripts/browser.sh; review fix 3):
+# nine open/close rounds in one process (the shim has 8 slots), then a tenth tab.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_assert message -
+quit

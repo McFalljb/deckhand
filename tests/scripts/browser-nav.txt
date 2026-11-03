@@ -1,0 +1,134 @@
+# Browser navigation (tests/scripts/browser.sh; docs/BROWSER.md §6 step 2): browser_open, a link,
+# back and forward by command and by the toolbar's buttons, the URL field, reload; State per tab
+# (url, title, loading, can_back, can_forward). Fixtures from tests/web via pidesk-test://web/.
+wait 1500
+assert_state open_sessions.# 1
+command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+assert_result ok true
+web_waitpaint 10000
+web_title Nav A 10000
+assert_state open_sessions.0.tabs.1.kind browser
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-a.html
+waitstate 5000 open_sessions.0.tabs.1.title Nav A
+waitstate 5000 open_sessions.0.tabs.1.loading false
+assert_state open_sessions.0.tabs.1.can_back false
+assert_state open_sessions.0.tabs.1.can_forward false
+# history is refused while there is none
+command {"type":"browser_back","tab_id":$last}
+assert_result error nothing to go back to
+# follow the link
+web_click 60 40
+web_title Nav B 5000
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+waitstate 5000 open_sessions.0.tabs.1.title Nav B
+waitstate 5000 open_sessions.0.tabs.1.can_back true
+shot browser-nav/page-b
+# back and forward by command
+command {"type":"browser_back","tab_id":$last}
+assert_result ok true
+web_title Nav A 5000
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-a.html
+waitstate 5000 open_sessions.0.tabs.1.can_forward true
+command {"type":"browser_forward","tab_id":$last}
+web_title Nav B 5000
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+waitstate 5000 open_sessions.0.tabs.1.can_forward false
+# the toolbar's buttons
+clickid br_back
+web_title Nav A 5000
+waitstate 5000 open_sessions.0.tabs.1.can_forward true
+clickid br_forward
+web_title Nav B 5000
+# reload: the page's own change goes away
+web_js document.title = 'changed'
+web_title changed 3000
+clickid br_reload
+web_title Nav B 5000
+command {"type":"browser_reload","tab_id":$last}
+assert_result ok true
+web_title Nav B 5000
+# the URL field: a click takes the keyboard (the page loses it); Enter goes; the page has it back
+clickid br_url_box
+assert_state focus.id browser_url
+wait 100
+web_assert focused no
+key a cmd
+type pidesk-test://web/nav-a.html
+key enter
+web_title Nav A 5000
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-a.html
+assert_state focus.id <missing>
+wait 100
+web_assert focused yes
+# a text that is not an address stays in the field with its reason
+clickid br_url_box
+key a cmd
+type two words
+key enter
+assert_state focus.id browser_url
+wait 300
+assert_state open_sessions.0.tabs.1.url pidesk-test://web/nav-a.html
+shot browser-nav/url-error
+key escape
+assert_state focus.id <missing>
+# ⌘L focuses the field too
+key l cmd
+assert_state focus.id browser_url
+key escape
+# browser_navigate normalises; refuses what is not an address
+command {"type":"browser_navigate","tab_id":$last,"url":"how to bake bread"}
+assert_result ok false
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-b.html"}
+assert_result ok true
+web_title Nav B 5000
+# New browser tab (the palette and the File menu): a blank page, its URL field focused
+menu new_browser_tab
+waitstate 3000 open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.2.url about:blank
+assert_state open_sessions.0.tabs.2.title New tab
+assert_state focus.id browser_url
+type pidesk-test://web/nav-a.html
+key enter
+web_title Nav A 5000
+waitstate 5000 open_sessions.0.tabs.2.url pidesk-test://web/nav-a.html
+# round 1: the address field belongs to the tab it was opened on: another tab on screen
+# drops it (Enter must never load the text into the wrong tab)
+clickid br_url_box
+assert_state focus.id browser_url
+key a cmd
+type pidesk-test://web/nav-b.html?wrong-tab
+command {"type":"focus_tab","tab_id":$last}
+wait 100
+assert_state focus.id <missing>
+key enter
+wait 500
+assert_state open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+assert_state open_sessions.0.tabs.2.url pidesk-test://web/nav-a.html
+shot browser-nav/toolbar
+# comment mode (browser-annotate) shares the toolbar: Annotate is its last button, and while on
+# its hint takes the address field's place, so the field lets go of the keyboard and ⌘L waits
+waitstate 5000 open_sessions.0.tabs.1.annot_ready true
+clickid br_url_box
+assert_state focus.id browser_url
+clickid annot_toggle
+assert_state open_sessions.0.tabs.1.mode comment
+wait 100
+assert_state focus.id <missing>
+key l cmd
+wait 100
+assert_state focus.id <missing>
+shot browser-nav/toolbar-annotate
+clickid annot_toggle
+assert_state open_sessions.0.tabs.1.mode browse
+# round 2: ⌘⇧. while the address field has the keyboard reaches Annotate (the field lets go)
+wait 100
+clickid br_url_box
+assert_state focus.id browser_url
+key period cmd shift
+wait 100
+assert_state open_sessions.0.tabs.1.mode comment
+assert_state focus.id <missing>
+key period cmd shift
+assert_state open_sessions.0.tabs.1.mode browse
+web_assert overwrites 0
+quit

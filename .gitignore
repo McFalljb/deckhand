@@ -1,0 +1,10 @@
+/build/
+/toolchain/
+/vendor/libghostty-vt/*.log
+.DS_Store
+# release packaging (scripts/release.sh)
+/dist/
+# never commit local secrets
+.env
+.env.*
+*.p12

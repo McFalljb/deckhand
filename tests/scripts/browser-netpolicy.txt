@@ -1,0 +1,8 @@
+# The network policy (tests/scripts/browser-netpolicy.sh): a page sits idle
+# while Chromium's net-log records what its background services try to reach.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+wait 20000
+quit

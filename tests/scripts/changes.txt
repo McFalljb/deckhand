@@ -1,0 +1,139 @@
+# Changes scene (tests/scripts/changes.sh). List rows at first: 0 Uncommitted, 1 Modified, 2 README.md,
+# 3 src/a.c, 4 Added, 5 added.txt, 6 Deleted, 7 gone.txt, 8 Renamed, 9 new.txt, 10 Untracked, 11 .env,
+# 12 notes.txt, 13 the branch's commits, 14 Added, 15 f.txt.
+# Tools: 0 Refresh, 1 Ask pi to review, 2 Merge, 3 Commit, 4 previous, 5 next, 6 Open, 7 Stage,
+# 8 Unstage, 9 Discard, 10 Show more.
+resize 1400 900
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+wait 1500
+# ---- the top bar's "±": the checkout's changed files
+hover changesbtn
+wait 800
+assert_tip Changes in this checkout: 8 files
+shot changes/button
+clickid changesbtn
+wait 1500
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.kind changes
+assert_state open_sessions.0.tabs.1.root $homedir/proj
+# ---- changes_list: paths and counts
+command {"type":"changes_list"}
+assert_result data.loading false
+assert_result data.branch feature
+assert_result data.default_branch main
+assert_result data.ahead 1
+assert_result data.files.# 8
+assert_result data.files.0.path README.md
+assert_result data.files.0.staged all
+assert_result data.files.1.path src/a.c
+assert_result data.files.1.added 5
+assert_result data.files.1.removed 1
+assert_result data.files.1.staged none
+assert_result data.files.3.status D
+assert_result data.files.4.status R
+assert_result data.files.4.old_path old.txt
+assert_result data.files.5.path .env
+assert_result data.files.5.credential true
+assert_result data.files.6.status untracked
+assert_result data.files.7.path f.txt
+assert_result data.files.7.scope committed
+shot changes/readme-dark
+# ---- a diff, the merge button (later), a credential file, j/k
+clickid chrow 3
+wait 800
+shot changes/diff-dark
+hover chtool 2
+wait 800
+assert_tip Merge into main coming later
+hover chtool 7
+wait 800
+assert_tip Stage this file (git add)
+clickid chrow 11
+wait 600
+shot changes/credential
+key j
+wait 400
+shot changes/key-j
+key k
+key k
+wait 400
+# ---- stage and unstage src/a.c
+clickid chrow 3
+wait 600
+clickid chtool 7
+wait 1500
+command {"type":"changes_list"}
+assert_result data.files.1.path src/a.c
+assert_result data.files.1.staged all
+clickid chtool 8
+wait 1500
+command {"type":"changes_list"}
+assert_result data.files.1.staged none
+# ---- Open at the hunk: an editor tab, then back
+clickid chtool 6
+wait 1000
+assert_state open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.2.kind editor
+assert_state open_sessions.0.tabs.2.path $homedir/proj/src/a.c
+clickid tab 1
+wait 800
+# ---- discard src/a.c: the confirmation bar first
+clickid chtool 9
+wait 400
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Discard the uncommitted changes to ~/proj/src/a.c? Staged and unstaged changes are lost.
+shot changes/confirm
+clickid confirm_yes
+wait 2500
+command {"type":"changes_list"}
+assert_result data.files.# 7
+assert_result data.files.1.path added.txt
+# ---- discard the untracked notes.txt (row 11 now): two questions, then the Trash
+clickid chrow 11
+wait 600
+clickid chtool 9
+wait 400
+assert_state pending_confirmations.0.summary Discard ~/proj/notes.txt? It is not in the last commit: it goes to the Trash (a second question follows).
+clickid confirm_yes
+wait 600
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.summary Really move ~/proj/notes.txt to the Trash? Git does not have this file, so it cannot bring it back.
+shot changes/confirm-second
+clickid confirm_yes
+wait 3000
+command {"type":"changes_list"}
+assert_result data.files.# 6
+# ---- commit what is staged (the pre-commit hook runs: changes.sh checks)
+clickid ch_field
+wait 300
+type Stage, rename and add from the Changes tab
+wait 300
+shot changes/commit
+key enter
+wait 3000
+command {"type":"changes_list"}
+assert_result data.ahead 2
+assert_result data.files.0.path .env
+assert_result data.files.0.scope uncommitted
+assert_result data.files.1.scope committed
+shot changes/committed-dark
+# ---- light
+command {"type":"set_appearance","mode":"light"}
+wait 600
+clickid chrow 4
+wait 800
+shot changes/committed-light
+clickid chrow 0
+wait 400
+command {"type":"set_appearance","mode":"dark"}
+wait 600
+# ---- idle: no redraws, no git
+wait 3000
+cpu_begin
+wait 3000
+cpu_end idle, Changes tab
+quit

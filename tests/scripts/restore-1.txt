@@ -1,0 +1,26 @@
+# Run 1 of restore.sh: open two sessions with shells, then quit through the
+# confirm flow (the quit saves the workspace).
+wait 500
+clickid proj 0
+wait 200
+clickid sess 0
+waitfor ARGS: 10000
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$tab,"text":"cd /\n"}
+clickid proj 1
+wait 200
+clickid sess 0
+waitfor ARGS: 10000
+command {"type":"new_shell_tab","session":$session}
+command {"type":"new_shell_tab","session":$session}
+ui_command {"type":"rename_project","project_id":$project,"name":"Second"}
+ui_command {"type":"set_layout","left_width":260,"right_open":false}
+ui_command {"type":"set_theme","name":"ghostty"}
+ui_command {"type":"set_confirm_policy","caller":"control","class":"tab_close","mode":"trusted"}
+wait 300
+assert_state open_sessions.# 2
+state_json restore-before
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

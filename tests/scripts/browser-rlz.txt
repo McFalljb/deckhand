@@ -1,0 +1,8 @@
+# RLZ never starts (tests/scripts/browser-rlz.sh): a page idles past
+# the point an RLZ ping was seen (about 80 s).
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+wait 100000
+quit

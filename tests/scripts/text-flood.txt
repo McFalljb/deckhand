@@ -1,0 +1,14 @@
+# Output flood in a shell tab: CPU and atlas while text scrolls fast.
+# tests/scripts/text-shots.sh tests/scripts/text-flood.txt [BINARY]
+wait 1000
+waitfor Emoji: 15000
+command {"type":"new_shell_tab","session":$session}
+wait 800
+type i=0; while [ $i -lt 400 ]; do sh ../../tests/scripts/text-sample.sh; i=$((i+1)); done; echo FLOOD-DONE
+key enter
+wait 300
+cpu_begin
+waitfor FLOOD-DONE 60000
+cpu_end flood
+atlas
+quit

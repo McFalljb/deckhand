@@ -1,0 +1,50 @@
+# The tab's frame ring (tests/scripts/browser.sh; docs/BROWSER.md §1.1): CEF
+# paints into ring slots pi-desk does not sample; a resize makes a new ring
+# and frees the old; a hidden tab keeps its frame and paints again when shown;
+# closing frees every surface and image. browser.sh runs it twice: shared
+# textures (OnAcceleratedPaint) and the CPU path (OnPaint).
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_pixel 300 50 ff0000
+web_assert surfaces 3
+web_assert shown held
+# 90 frames in a row (the swatch flips each animation frame): every paint goes
+# into a slot no drawn frame samples
+web_js window.n = 0; (function f() { document.getElementById('swatch').style.background = (n++ % 2) ? '#0000ff' : '#ffff00'; if (n < 90) requestAnimationFrame(f); else { document.getElementById('swatch').style.background = '#00c000'; document.title = 'anim done'; } })()
+web_title anim done 5000
+web_pixel 300 50 00c000
+web_assert overwrites 0
+web_assert inflight_writes 0
+web_assert shown held
+web_stats
+# resize: CEF paints at the new size into a new ring; the old one is freed
+resize 1100 700
+wait 600
+web_pixel 300 50 00c000
+web_assert surfaces 3
+resize 1300 800
+wait 600
+web_pixel 300 50 00c000
+web_assert surfaces 3
+web_assert shown held
+web_stats
+# hidden (the pi tab on screen): the page changes meanwhile; shown again, the
+# new frame comes (a paint that came while hidden went back undrawn)
+web_js setTimeout(() => { document.getElementById('swatch').style.background = '#ff00ff'; }, 300)
+command {"type":"focus_tab","tab_id":$pitab}
+wait 1000
+command {"type":"focus_tab","tab_id":$last}
+web_pixel 300 50 ff00ff 3000
+web_assert surfaces 3
+web_assert shown held
+web_assert overwrites 0
+web_assert inflight_writes 0
+web_stats
+# closed: no surface, image or tab left
+command {"type":"close_tab","tab_id":$last}
+assert_result ok true
+wait 300
+web_assert freed
+quit

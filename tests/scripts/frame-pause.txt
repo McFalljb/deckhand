@@ -1,0 +1,18 @@
+# Do frame callbacks continue while the window is minimised? (sokol macOS)
+wait 1500
+cpu_begin
+wait 5000
+cpu_end visible
+minimize
+wait 2000
+cpu_begin
+wait 30000
+cpu_end minimized
+# a command from another thread while minimised: applied via the main-queue wake
+thread_command {"type":"set_panel","panel":"wake-test","open":true}
+wait 500
+wakes
+assert_state layout.panels.0 wake-test
+restore
+wait 1000
+quit

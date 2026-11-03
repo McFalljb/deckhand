@@ -1,0 +1,271 @@
+# App tabs (tests/scripts/app-tab.sh): the fake app (tests/fake-app/) in an
+# app tab. Positions are the tab's logical px; pixels are read back from the
+# IOSurface on screen. $last is the last app tab opened.
+wait 1500
+assert_state open_sessions.# 1
+# as if the window were in front (quiet test mode never is): the app gets focus
+window front
+# ---- frames arrive: the square's colour, and its position changing
+app_open build/fake-app
+app_waitstatus running 5000
+app_waitframe 5 5000
+assert_app_pixel 5 5 202830
+assert_app_pixel 30 130 40A040
+assert_app_pixel 305 205 F0D020
+app_square
+app_waitframe 10
+app_square
+assert_app_moved
+assert_state open_sessions.0.tabs.1.kind app
+assert_state open_sessions.0.tabs.1.app_status running
+assert_state open_sessions.0.tabs.1.ring_gen 1
+cpu_begin
+wait 3000
+cpu_end app tab on screen, 60 fps
+app_stats
+# ---- keys, text and clicks reach the app (the fake logs each input message)
+type hi
+key left
+app_click 100 80
+app_waitlog "event":"mouse","action":"up" 3000
+assert_app_log "event":"focus","focused":true
+assert_app_log "event":"key","action":"down","key":"h"
+assert_app_log "event":"char","text":"h"
+assert_app_log "event":"char","text":"i"
+assert_app_log "event":"key","action":"up","key":"i"
+assert_app_log "key":"left"
+assert_app_log "event":"mouse","action":"down","button":"left","x":100.0,"y":80.0
+# a press in the tab keeps the moves and the release, even outside it
+app_drag 50 50 -20 -10
+app_waitlog "event":"mouse","action":"up","button":"left","x":-20.0 3000
+assert_app_log "event":"move","x":-20.0,"y":-10.0
+# a key still held when the tab goes away is released
+app_keydown g
+app_waitlog "action":"down","key":"g" 3000
+command {"type":"focus_tab","tab_id":$pitab}
+app_waitlog "action":"up","key":"g" 3000
+command {"type":"focus_tab","tab_id":$last}
+app_waitframe 3
+# an agent's input and calls
+command {"type":"app_input","tab_id":$last,"events":[{"event":"key","action":"down","key":"f9","mods":[]}]}
+assert_result ok true
+command {"type":"app_input","tab_id":$last,"events":[{"event":"key","type":"tab.quit"}]}
+assert_result ok false
+app_waitlog "key":"f9" 3000
+assert_app_log {"v":1,"type":"input","source":"agent",
+# ---- app_call passes any method through (the app's own: tab.describe lists them)
+command {"type":"app_call","tab_id":$last,"method":"tab.ping"}
+assert_finished ok true
+command {"type":"app_call","tab_id":$last,"method":"tab.describe"}
+assert_finished ok true
+assert_finished data.methods.0.name game.get
+command {"type":"app_call","tab_id":$last,"method":"game.set","params":{"path":"square","value":{"x":100,"y":60}}}
+assert_finished ok true
+assert_finished data.value.x 100
+app_waitlog game.set square 3000
+app_waitframe 3
+assert_app_pixel 120 80 FF4040
+assert_app_pixel 120 50 202830
+command {"type":"app_call","tab_id":$last,"method":"game.get","params":{"path":"square"}}
+assert_finished data.value.y 60
+assert_finished data.value.moving false
+# the app's error comes back as sent: its code and its other fields
+command {"type":"app_call","tab_id":$last,"method":"game.get","params":{"path":"nope"}}
+assert_finished ok false
+assert_finished error no such path
+assert_finished data.code no_path
+assert_finished data.path nope
+command {"type":"app_call","tab_id":$last,"method":"game.nope","params":{"n":1}}
+assert_finished data.code not_supported
+assert_finished data.method game.nope
+# pi-desk's own requests and the envelope's types are refused, never sent
+command {"type":"app_call","tab_id":$last,"method":"tab.quit"}
+assert_result ok false
+assert_result data.code reserved
+command {"type":"app_call","tab_id":$last,"method":"tab.visible","params":{"visible":false}}
+assert_result data.code reserved
+command {"type":"app_call","tab_id":$last,"method":"input","params":{"event":"key","action":"down","key":"q"}}
+assert_result data.code reserved
+command {"type":"app_call","tab_id":$last,"method":"game get"}
+assert_result data.code bad_args
+command {"type":"app_call","tab_id":$last,"method":"game.get","params":{"id":"a1"}}
+assert_result data.code bad_args
+wait 300
+assert_not_app_log quit requested
+assert_not_app_log "key":"q"
+# ---- app_screenshot: the frame on show as a PNG; a crop in the tab's logical px
+command {"type":"app_screenshot","tab_id":$last}
+assert_finished ok true
+assert_finished data.visible true
+assert_shot_pixel 4 4 202830
+command {"type":"app_screenshot","tab_id":$last,"rect":{"x":100,"y":60,"w":40,"h":40}}
+assert_finished ok true
+assert_shot_pixel 2 2 FF4040
+command {"type":"app_screenshot","tab_id":$last,"rect":{"x":300,"y":200,"w":16,"h":16}}
+assert_shot_pixel 1 1 F0D020
+command {"type":"app_screenshot","tab_id":$last,"rect":{"x":9000,"y":9000,"w":10,"h":10}}
+assert_result data.code bad_args
+# ---- Inspect: the app's boxes over the tab; hovering one shows its label
+assert_state open_sessions.0.tabs.1.inspect false
+assert_drawn Inspect
+clickid app_inspect
+assert_state open_sessions.0.tabs.1.inspect true
+wait 300
+assert_state open_sessions.0.tabs.1.boxes 3
+assert_drawn 3 boxes
+app_hover 110 70
+assert_app_hover square
+app_hover 305 205
+assert_app_hover coin
+app_hover 30 125
+assert_app_hover wall
+app_hover 5 5
+assert_app_hover -
+# the pointer leaving the window clears the hover
+app_hover 110 70
+assert_app_hover square
+app_leave
+assert_app_hover -
+# while inspecting, the mouse over the tab is pi-desk's: the app gets no click (off the boxes: a
+# click on a box opens a comment on it, tests/scripts/comments.txt)
+app_click 500 400
+wait 300
+assert_not_app_log "x":500.0
+assert_state focus.id <missing>
+# a press pi-desk took while inspecting: its release never reaches the app, even after Inspect is off
+app_mouse down 61 63
+clickid app_inspect
+assert_state open_sessions.0.tabs.1.inspect false
+app_mouse up 61 63
+wait 300
+assert_not_app_log "x":61.0
+command {"type":"app_call","tab_id":$last,"method":"game.set","params":{"path":"square","value":null}}
+assert_finished data.value.moving true
+app_waitframe 3
+wait 1200
+command {"type":"app_events","tab_id":$last,"topic":"log"}
+assert_result ok true
+result_file app-tab/events
+# ---- resize: a new ring at the pane's new size; the old ring is freed
+app_mark
+resize 1100 700
+app_waitring 5000
+app_waitframe 3
+wait 300
+assert_app_surfaces 3
+assert_state open_sessions.0.tabs.1.ring_gen 2
+# ---- hidden (the pi tab on screen): the app is told, pi-desk draws nothing
+command {"type":"focus_tab","tab_id":$pitab}
+app_waitlog visible: false 3000
+wait 500
+cpu_begin
+wait 3000
+cpu_end app tab hidden
+command {"type":"focus_tab","tab_id":$last}
+app_waitlog visible: true 3000
+app_waitframe 3
+# ---- Atlas's drawer has the keyboard: typing goes there, never to the app
+key j cmd
+wait 600
+assert_state focus.id agent_input
+assert_app_log "event":"focus","focused":false
+type qz
+wait 300
+assert_not_app_log "key":"q"
+assert_not_app_log "text":"q"
+key j cmd
+wait 300
+# the palette has the keyboard: the same
+key k cmd
+wait 200
+type xw
+wait 300
+assert_not_app_log "key":"x"
+key escape
+wait 200
+command {"type":"close_tab","tab_id":$last}
+assert_result ok true
+wait 500
+# closed (it quit on tab.quit): its surfaces, images and send right are gone
+assert_apps_freed
+# ---- a busy app (no frames, still answering): "No frames for Ns", the last frame stays
+app_open build/fake-app --freeze-after 60
+app_waitframe 20 5000
+app_waitstatus stalled 6000
+assert_app_pixel 5 5 202830
+assert_drawn No frames for
+command {"type":"get_state"}
+assert_result ok true
+command {"type":"close_tab","tab_id":$last}
+wait 300
+# ---- a hung app (reads nothing any more): not responding, then Restart
+app_open build/fake-app --hang-after 30 --once $datadir/hang.once
+app_waitframe 20 5000
+app_waitstatus not_responding 8000
+assert_app_pixel 5 5 202830
+assert_drawn is not responding
+assert_drawn Restart
+clickid app_restart
+app_waitstatus running 5000
+app_waitframe 5 5000
+wait 200
+assert_app_surfaces 3
+command {"type":"close_tab","tab_id":$last}
+wait 300
+# ---- a crash: the last frame stays, dimmed; the bar has Restart and Log
+app_open build/fake-app --crash-after 20 --once $datadir/crash.once
+app_waitframe 10 5000
+app_waitstatus exited 5000
+assert_app_dimmed yes
+assert_app_pixel 5 5 202830
+assert_drawn exited (code 134)
+assert_drawn Restart
+assert_drawn Log
+assert_app_surfaces 1
+clickid app_restart
+app_waitstatus running 5000
+app_waitframe 5 5000
+assert_app_dimmed no
+wait 200
+assert_app_surfaces 3
+command {"type":"close_tab","tab_id":$last}
+wait 300
+# a crashed app's tab closed without a restart: everything goes, pi-desk stays up
+app_open build/fake-app --crash-after 20
+app_waitframe 10 5000
+app_waitstatus exited 5000
+assert_app_surfaces 1
+command {"type":"close_tab","tab_id":$last}
+assert_result ok true
+wait 300
+assert_apps_freed
+# ---- exit 75: restarted by itself
+app_open build/fake-app --exit 75 --once $datadir/exit.once
+app_waitlog exit 75: restarting 5000
+app_waitstatus running 5000
+app_waitframe 5 5000
+command {"type":"close_tab","tab_id":$last}
+wait 300
+# ---- "New app tab…" from the palette: the project's .pi-desk/apps.json lists the fake
+key k cmd
+wait 200
+type new app tab
+wait 200
+key enter
+wait 300
+assert_state focus.id palette
+key enter
+app_waitstatus running 5000
+assert_state open_sessions.0.tabs.1.title fake
+app_waitframe 3 5000
+key escape
+command {"type":"close_tab","tab_id":$tab}
+wait 300
+# ---- a wrong key in HELLO is refused: no frames
+app_open build/fake-app --bad-key
+app_waitlog a HELLO was refused 5000
+wait 500
+assert_state open_sessions.0.tabs.1.frames 0
+command {"type":"close_tab","tab_id":$last}
+wait 300
+quit

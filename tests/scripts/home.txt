@@ -1,0 +1,133 @@
+# The agent's drawer (Home) and close_session in test mode. Run with tests/scripts/run.sh
+# (fake HOME and pi store, PI_DESK_CMD echoing pi's arguments).
+# Screenshots: build/shots/home/.
+wait 1000
+waitfor ARGS: 15000
+assert_state home.session 0
+# ⌘J: the agent starts (lazily: pi's terminal UI in the drawer; here the
+# fake that prints its arguments) in its own session dir, with its prompt
+# file, and its terminal takes the keyboard
+key j cmd
+wait 500
+assert_state home.open true
+assert_state open_sessions.1.home true
+assert_state open_sessions.1.project_id 0
+assert_state open_sessions.1.tabs.0.title Home
+assert_state open_sessions.1.tabs.0.status running
+assert_state focus.id agent_input
+assert_state current_session $session
+assert_state agent.model 
+# typing goes to Atlas's terminal, not the session's
+type hello home
+wait 300
+assert_screen hello home
+shot home/open
+# the Model button: pi's model selector key (Ctrl+L) into Atlas's terminal
+# once pi reports its status (the fake echoes it as ^L)
+hover drawer_model
+wait 1000
+assert_tip Change the model: pi's model selector ⌃L
+clickid drawer_model
+wait 200
+command {"type":"pi.status","tab_id":$hometab,"agent":"idle","waiting":false}
+wait 300
+assert_screen ^L
+assert_state focus.id agent_input
+shot home/model-key
+key a cmd
+key backspace
+# ⌘W while the field has the keyboard closes the drawer, never the hidden tab
+command {"type":"new_shell_tab","session":$session}
+assert_state home.open true
+key w cmd
+wait 300
+assert_state home.open false
+assert_state open_sessions.0.tabs.# 2
+assert_state pending_confirmations.# 0
+key j cmd
+wait 300
+# Esc is pi's (it stays open); ⌘J closes it, and the keyboard goes back to the terminal
+key escape
+wait 300
+assert_state home.open true
+key j cmd
+wait 400
+assert_state home.open false
+assert_state focus.tab_id $tab
+type in the session
+wait 300
+assert_screen in the session
+# the top bar's Home button and the palette open it again
+clickid homebutton
+wait 300
+assert_state home.open true
+key j cmd
+wait 300
+assert_state home.open false
+key k cmd
+type ask atlas
+key enter
+wait 300
+assert_state home.open true
+assert_state focus.id agent_input
+# the agent is no session tab
+command {"type":"focus_tab","tab_id":$hometab}
+assert_result error the agent is not a session tab: show it with set_home
+key j cmd
+wait 300
+assert_state home.open false
+# close_session from the session row: asks while pi's status is unknown
+clickid sess 1
+wait 500
+assert_state open_sessions.# 3
+assert_state current_session $session
+hover sess 1
+wait 200
+shot home/session-row-hover
+clickid sessclose 1
+wait 300
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.command.type close_session
+shot home/close-session-confirm
+clickid confirm_yes
+wait 300
+assert_state pending_confirmations.# 0
+assert_state open_sessions.# 2
+assert_state open_sessions.1.home true
+# the palette's Close session on the remaining one, then confirm
+command {"type":"pi.status","tab_id":$pitab,"agent":"idle","waiting":false}
+key k cmd
+type close session
+key enter
+wait 300
+assert_state open_sessions.# 1
+assert_state current_session 0
+# a second click on the bar right after it changes is ignored (double-click)
+command {"type":"new_chat","project_id":$project}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"sleep 300\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"sleep 300\n"}
+wait 600
+command {"type":"close_tab","tab_id":$last}
+command {"type":"focus_tab","tab_id":$pitab}
+key 2 cmd
+key w cmd
+wait 300
+assert_state pending_confirmations.# 2
+clickid confirm_yes
+wait 50
+clickid confirm_yes
+wait 100
+assert_state pending_confirmations.# 1
+wait 400
+clickid confirm_yes
+wait 200
+assert_state pending_confirmations.# 0
+assert_state open_sessions.1.tabs.# 1
+# Home survives: the button still shows it
+key j cmd
+wait 300
+assert_state home.open true
+shot home/home-only
+quit

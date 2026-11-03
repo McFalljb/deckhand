@@ -1,0 +1,8 @@
+# Files scene, run 2: the saved workspace brings the Files tab and its open folders back.
+wait 1500
+assert_state layout.left_tab files
+assert_state files.expanded.0.dirs.# 2
+assert_files src/\n
+assert_files huge/\n
+shot files/restored
+quit

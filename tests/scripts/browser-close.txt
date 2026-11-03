@@ -1,0 +1,12 @@
+# A page that calls window.close() is not reopened by itself
+# (tests/scripts/browser.sh; review fix 4): the tab says so, Reload opens it again.
+wait 1500
+web_open tests/web/close.html
+web_waitpaint 10000
+wait 2000
+web_assert opens 1
+web_assert message The page closed itself
+clickid browser_reload
+web_waitpaint 10000
+web_assert opens 2
+quit

@@ -1,0 +1,58 @@
+<!doctype html>
+<!-- Agents read pages (tests/scripts/browser-agent.txt; docs/BROWSER.md §4, step 7). Served as
+     pidesk-test://web/agent.html (no network). Fixed positions (CSS px from the page's top-left):
+       #swatch  0,0 200x60   solid #20c040 (the screenshot's pixel)
+     A form whose values never reach the agent: every value below holds "secret" and the scene
+     checks none of them is read (text, outline, html). #gone is display:none (not read).
+     After 1 s #late appears with "Late arrival" (browser_wait). Every 300 ms the page logs
+     "agent-log N" (console.log), every 400 ms it asks for nav-a.html?key=…&i=N (a secret parameter, masked) (an image: a request
+     browser_network sees) and once a second throws "agent-boom" (an exception).
+     #ed2 is a draft with a paragraph inside (a selector into it reads nothing of it); the head's
+     csrf meta and this script's text hold "secret" too (html mode drops them).
+     window.probe: whether a DevTools client turned the Runtime domain on (a console serializer
+     read the bait's stack): the scene checks it is off until browser_console. -->
+<html><head><meta charset="utf-8"><meta name="csrf-token" content="meta-secret-9"><title>Agent fixture</title>
+<style>
+  html, body { margin: 0; background: #ffffff; font: 16px -apple-system, sans-serif; }
+  #swatch { position: absolute; left: 0; top: 0; width: 200px; height: 60px; background: #20c040; }
+  #main { position: absolute; left: 0; top: 80px; width: 600px; }
+</style></head>
+<body>
+<div id="swatch"></div>
+<div id="main">
+<h1 id="top">Agent fixture</h1>
+<nav aria-label="Pages"><a href="nav-a.html">Page A</a> <a href="nav-b.html">Page B</a></nav>
+<p id="intro">This page is read by an agent.</p>
+<form id="form">
+  <input id="name" aria-label="Name" value="typed-secret-1">
+  <input id="pw" type="password" aria-label="Password" value="pw-secret-2">
+  <input type="hidden" name="csrf" value="token-secret-6">
+  <textarea id="note" aria-label="Note">note-secret-3</textarea>
+  <select id="card" aria-label="Card"><option>Visa 4111 secret-7</option><option>Other</option></select>
+  <label><input id="agree" type="checkbox" checked> Agree</label>
+  <div id="ed" contenteditable>editable-secret-4</div>
+  <div id="ed2" contenteditable aria-label="Draft"><p>draft-secret-8</p></div>
+  <button type="button" id="save">Save</button>
+</form>
+<div id="gone" style="display:none">hidden-text-5</div>
+<ul id="list"><li>One</li><li>Two</li></ul>
+</div>
+<script>
+  // script-secret-10 (a page script's text is not read in html mode)
+  let n = 0;
+  setInterval(() => console.log('agent-log', ++n), 300);
+  setInterval(() => { new Image().src = 'nav-a.html?key=k-secret-11&page=1&i=' + n; }, 400);
+  setInterval(() => setTimeout(() => { throw new Error('agent-boom'); }), 1000);
+  setTimeout(() => {
+    const d = document.createElement('div');
+    d.id = 'late';
+    d.textContent = 'Late arrival';
+    document.getElementById('main').appendChild(d);
+  }, 1000);
+  // the Runtime domain's tell (as tests/web/annotate.html): a console serializer reads the stack
+  let cdp = false;
+  const bait = new Error('bait');
+  Object.defineProperty(bait, 'stack', { get() { cdp = true; return ''; } });
+  setInterval(() => { console.debug(bait); window.probe = 'cdp=' + cdp; }, 100);
+</script>
+</body></html>

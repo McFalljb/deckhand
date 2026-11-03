@@ -1,0 +1,44 @@
+# ⌘T and ⌘W with the page focused (tests/scripts/browser.sh; docs/BROWSER.md §1.2): pi-desk takes
+# its shortcuts first, by the menu bar (AppKit's key equivalents) and by the view; the page never
+# sees them. ⌘T: a new shell tab; ⌘W: closes the browser tab.
+wait 1500
+command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+web_title Nav A 10000
+web_waitpaint 10000
+web_click 400 400
+wait 100
+web_assert focused yes
+# ⌘T through the menu bar
+menu_key 17 t cmd menu
+waitstate 3000 open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.2.kind shell
+command {"type":"focus_tab","tab_id":$last}
+web_click 400 400
+wait 100
+web_assert focused yes
+# ⌘T through the view (sokol's key path)
+key t cmd
+waitstate 3000 open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.3.kind shell
+command {"type":"focus_tab","tab_id":$last}
+web_click 400 400
+wait 100
+web_assert focused yes
+# the page got none of them
+web_js document.title = 'keys[' + keys.join(',') + ']'
+web_title keys[] 3000
+# ⌘W through the view closes the browser tab
+key w cmd
+waitstate 3000 open_sessions.0.tabs.# 3
+assert_state open_sessions.0.tabs.1.kind shell
+# ⌘W through the menu bar, on another browser tab with its page focused
+command {"type":"browser_open","url":"pidesk-test://web/nav-b.html"}
+web_title Nav B 10000
+web_waitpaint 10000
+web_click 400 400
+wait 100
+web_assert focused yes
+menu_key 13 w cmd menu
+waitstate 3000 open_sessions.0.tabs.# 3
+web_assert freed
+quit

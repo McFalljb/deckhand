@@ -1,0 +1,4 @@
+ghostty_tag=v1.4.0
+ghostty_commit=83fb95624b0439ee660c2679b43b38c8b63769cd
+zig_version=0.17.0
+optimize=ReleaseFast debug_info=stripped compiler_rt=weak (COFF: unchanged)

@@ -1,0 +1,70 @@
+# Screenshot scene for the UI font (build/shots/font/, run with tests/scripts/font.sh):
+# the main window, palette, bell popover, gear and Settings tab, dark and light.
+# font.sh puts its TAG argument in the shot names (before, after, ...). The text
+# size steps at the end need a build with set_text_size.
+wait 1000
+waitfor fake bridge 30000
+hover sess 1
+wait 1200
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot font/$FONT_TAG-main-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot font/$FONT_TAG-main-light
+key k cmd
+type set
+wait 300
+shot font/$FONT_TAG-palette-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot font/$FONT_TAG-palette-dark
+key escape
+wait 300
+clickid bell
+wait 300
+shot font/$FONT_TAG-bell-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot font/$FONT_TAG-bell-light
+key escape
+wait 300
+clickid settings
+wait 300
+shot font/$FONT_TAG-gear-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot font/$FONT_TAG-gear-dark
+key escape
+wait 300
+key comma cmd
+wait 400
+shot font/$FONT_TAG-settings-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot font/$FONT_TAG-settings-light
+# text sizes, from the gear (pop 20-23: Small, Medium, Default, Large); a no-op on builds without them
+key comma cmd
+wait 300
+clickid settings
+wait 300
+clickid pop 23
+wait 400
+assert_state settings.text_size large
+shot font/$FONT_TAG-gear-large-light
+clickid pop 20
+wait 400
+assert_state settings.text_size small
+shot font/$FONT_TAG-gear-small-light
+key escape
+wait 300
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot font/$FONT_TAG-main-small-dark
+ui_command {"type":"set_text_size","size":"large"}
+wait 400
+shot font/$FONT_TAG-main-large-dark
+ui_command {"type":"set_text_size","size":"default"}
+wait 400
+assert_state settings.text_size default
+quit

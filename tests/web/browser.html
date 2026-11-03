@@ -1,0 +1,50 @@
+<!doctype html>
+<!-- The browser spike's test page (tests/scripts/browser.sh). Fixed positions
+     (CSS px from the page's top-left) so the scene can click and read pixels:
+       #btn    20,20 200x60   a click turns #swatch green and counts
+       #swatch 260,20 100x60  red, green after a click
+       #field  20,110 300x40  a text input
+       #tall   below: 6000 px to scroll
+     The title reports the state: "ready c=CLICKS v=VALUE y=SCROLLY".
+     window.keys / keyups: the code of every keydown / keyup; downs, ups:
+     mouse presses and releases; leaves: the pointer left the page (the
+     focus, key and release scenes read them with web_js). -->
+<html><head><meta charset="utf-8"><title>loading</title>
+<style>
+  html, body { margin: 0; background: #ffffff; font: 16px -apple-system, sans-serif; }
+  #btn { position: absolute; left: 20px; top: 20px; width: 200px; height: 60px; font-size: 18px; }
+  #swatch { position: absolute; left: 260px; top: 20px; width: 100px; height: 60px; background: #ff0000; }
+  #field { position: absolute; left: 20px; top: 110px; width: 300px; height: 40px; font-size: 18px; box-sizing: border-box; }
+  #tall { position: absolute; left: 0; top: 180px; width: 100%; height: 6000px;
+          background: linear-gradient(#2040ff, #20c040); }
+</style></head>
+<body>
+<button id="btn">Press me</button>
+<div id="swatch"></div>
+<input id="field" type="text" placeholder="type here">
+<div id="tall"></div>
+<script>
+  let clicks = 0;
+  window.keys = [];
+  window.downs = 0;
+  window.ups = 0;
+  window.keyups = [];
+  window.leaves = 0;
+  addEventListener('keydown', e => keys.push(e.code), true);
+  addEventListener('keyup', e => keyups.push(e.code), true);
+  addEventListener('mousedown', () => downs++, true);
+  addEventListener('mouseup', () => ups++, true);
+  document.documentElement.addEventListener('mouseleave', () => leaves++);
+  const report = () => {
+    document.title = `ready c=${clicks} v=${document.getElementById('field').value} y=${Math.round(window.scrollY)}`;
+  };
+  document.getElementById('btn').addEventListener('click', () => {
+    clicks++;
+    document.getElementById('swatch').style.background = '#00c000';
+    report();
+  });
+  document.getElementById('field').addEventListener('input', report);
+  window.addEventListener('scroll', report);
+  report();
+</script>
+</body></html>

@@ -1,0 +1,6 @@
+# The Projects tree, run 2: the rows opened in run 1 are open again.
+wait 800
+assert_state sidebar.expanded.# 3
+assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,+++~/workspace/projects/_scratch/batch-run-1/try-C,+++~/workspace/projects/_scratch/batch-run-1/try-B,+++~/workspace/projects/_scratch/batch-run-1/A-long-review/fix2/fast-vs-steady,++~/workspace/projects/_scratch/ev-b,++~/workspace/projects/_scratch/ev-c,+~/workspace/projects/data/training-data,~
+shot projects/restored
+quit

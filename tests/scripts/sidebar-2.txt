@@ -1,0 +1,11 @@
+# Left column, run 2: relaunch with run 1's data dir.
+wait 800
+assert_state sidebar.sort.projects name
+assert_state sidebar.pinned_projects.# 1
+assert_state sidebar.hidden_projects.# 1
+assert_state sidebar.filter.text 
+assert_rows projects ~/code/charlie,~/code/brand-new,~/code/bravo,~/code/dropped
+assert_state layout.left_width 200
+assert_state layout.right_width 360
+shot sidebar/restored
+quit

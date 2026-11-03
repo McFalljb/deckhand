@@ -1,0 +1,46 @@
+# Keys and clicks reach the page only while it has pi-desk's keyboard
+# (tests/scripts/browser.sh; review fix 1). Page: tests/web/browser.html.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_click 170 130
+type ab
+web_title v=ab
+web_assert focused yes
+# Atlas's drawer has the keyboard: typing goes there, not into the page
+key j cmd
+assert_state focus.id agent_input
+wait 100
+web_assert focused no
+type zz
+key backspace
+web_js document.title = 'chk1 v=' + document.getElementById('field').value + ' z=' + keys.includes('KeyZ') + ' bs=' + keys.includes('Backspace')
+web_title chk1 v=ab z=false bs=false
+key j cmd
+# the palette is open: a click on the page does not reach it
+key k cmd
+assert_state focus.id palette
+web_click 120 50
+web_js document.title = 'chk2 c=' + clicks + ' d=' + downs
+web_title chk2 c=0 d=1
+key escape
+# the job sheet needs a main folder
+ui_command {"type":"set_home_dir","path":"$homedir"}
+assert_result ok true
+# the job sheet (modal) is open: neither clicks, the wheel nor keys reach the page
+ui_command {"type":"job_sheet","open":true}
+assert_result ok true
+wait 200
+assert_state focus.id job_sheet
+web_assert focused no
+web_click 170 130
+web_click 120 50
+web_scroll -10 400 400
+type qq
+key backspace
+web_js document.title = 'chk3 c=' + clicks + ' d=' + downs + ' y=' + Math.round(scrollY) + ' q=' + keys.includes('KeyQ') + ' bs=' + keys.includes('Backspace')
+web_title chk3 c=0 d=1 y=0 q=false bs=false
+key escape
+wait 200
+quit

@@ -1,0 +1,183 @@
+# Command palette, blended title bar, text input (run with tests/scripts/polish.sh).
+# Fake pi store and fake pi (fake-bridge.sh): no real pi, no network.
+wait 1000
+waitfor new-1 10000
+wait 800
+# ---- title bar: lights centred in the top bar over the left column; the
+# top bar is ours (tabs click, empty parts drag the window)
+lights
+hittest 27 20 titlebar
+hittest 337 20 view
+hittest 150 20 view
+hittest 900 20 view
+ui_command {"type":"set_theme","name":"graphite"}
+wait 300
+shot polish/titlebar-graphite
+# ---- palette: empty (actions, then tabs, sessions, projects)
+key k cmd
+wait 300
+assert_state focus.id palette
+shot polish/palette-empty
+# a query: look -> the three looks; Enter runs the best match through the inbox
+type warm
+wait 200
+shot polish/palette-query
+key enter
+wait 300
+assert_state settings.theme warm
+assert_state focus.kind terminal
+shot polish/titlebar-warm
+# recent first: the warm look leads an empty palette now
+key k cmd
+wait 200
+assert_palette 0 action:look_warm
+key escape
+# sessions: title + project; ⌘1 runs the first visible result
+key k cmd
+type title bar
+wait 200
+assert_palette 0 session:bbbb-2
+shot polish/palette-sessions
+key 1 cmd
+waitfor bbbb-2 10000
+assert_state open_sessions.# 2
+assert_state open_sessions.1.pi_session_id bbbb-2
+# Esc closes; ⌘K toggles
+key k cmd
+wait 100
+key escape
+wait 100
+assert_state focus.kind terminal
+key k cmd
+key k cmd
+assert_state focus.kind terminal
+# a destructive action from the palette still asks (same path as ⌘W)
+key k cmd
+type new shell
+assert_palette 0 action:new_shell_tab
+key enter
+wait 600
+assert_state focus.kind terminal
+assert_state open_sessions.1.tabs.# 2
+ui_command {"type":"set_close_confirm","tab_kind":"shell","rule":"always"}
+key k cmd
+type close tab
+assert_palette 0 action:close_tab
+key enter
+wait 300
+assert_state pending_confirmations.# 1
+assert_state pending_confirmations.0.command.type close_tab
+clickid confirm_no
+wait 200
+assert_state pending_confirmations.# 0
+# ghostty look via the palette, title bar shot
+key k cmd
+type ghostty
+assert_palette 0 action:look_ghostty
+key enter
+wait 300
+assert_state settings.theme ghostty
+command {"type":"focus_tab","tab_id":$pitab}
+wait 300
+shot polish/titlebar-ghostty
+# ---- text field: mouse and word moves (rename field: "~/code/pi-desk")
+# the rename field (the project row's menu has Rename… too)
+key k cmd
+type rename project
+key enter
+wait 200
+assert_selection ~/code/pi-desk
+clicktext 1 rename_text 3
+assert_selection 
+clicktext 2 rename_text 4
+assert_selection code
+key right alt
+key left alt shift
+assert_selection pi
+key end
+key left alt
+key left alt shift
+assert_selection pi-
+clicktext 3 rename_text 2
+assert_selection ~/code/pi-desk
+# input methods: a key press with no composition passes through the input
+# system to sokol (e); a dead key's composition (´), then its commit (é)
+key end
+ime_key 14 e
+ime_mark ´
+ime_commit é
+ime_mark にほん
+wait 200
+shot polish/ime-field
+ime_commit 日本
+key home shift
+assert_selection ~/code/pi-deskeé日本
+key end
+# the input method commits twice in one key press: both are kept
+ime_mark ab
+ime_press 0 x -- insert=A insert=B
+# no composition, but the input method's text differs from the key's (Pinyin , -> ，)
+ime_press 43 , -- insert=，
+# a held key (repeat) with no composition skips the input system: no accent popover
+ime_press 14 e repeat -- mark=è
+key home shift
+assert_selection ~/code/pi-deskeé日本AB，e
+key end
+# the key that ends a composition still acts: 한 + Enter commits, then submits the rename
+ime_mark 한
+ime_press 36 enter -- insert=한 cmd=insertNewline:
+wait 200
+assert_state focus.kind terminal
+assert_state projects.2.name ~/code/pi-deskeé日本AB，e한
+# emoji picker / character viewer: insertText outside a key press
+# ---- terminal: shell tab, IME composition at the cursor, word/line selection
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; echo 'hello-world foo.bar (baz) /tmp/x_y'\n"}
+wait 600
+ime_mark にほんご
+wait 200
+shot polish/ime-terminal
+ime_commit 日本語
+wait 300
+waitfor 日本語 3000
+key escape
+command {"type":"send_text","tab_id":$tab,"text":"\u0015"}
+# row 0 is the echo output: hello-world foo.bar (baz) /tmp/x_y
+clickcell 2 2 0
+assert_selection hello-world
+clickcell 2 14 0
+assert_selection foo.bar
+clickcell 2 2 0 14 0
+assert_selection hello-world foo.bar
+clickcell 2 22 0
+assert_selection baz
+clickcell 3 5 0
+assert_selection hello-world foo.bar (baz) /tmp/x_y
+clickcell 1 3 0 8 0
+assert_selection lo-wor
+clickcell 2 28 0
+assert_selection /tmp/x_y
+# a wide character is one word with its spacer cell (row 1: prompt + 日本語)
+clickcell 2 11 1
+assert_selection 日本語
+clickcell 2 28 0
+wait 300
+shot polish/terminal-selection
+# in the terminal too: 한 + Enter types 한, then Enter runs it
+ime_mark 한
+ime_press 36 enter -- insert=한 cmd=insertNewline:
+wait 500
+assert_screen 한: command not found
+# ---- idle CPU: palette open, then closed
+key k cmd
+wait 2000
+cpu_begin
+wait 10000
+cpu_end idle palette open
+key escape
+wait 2000
+cpu_begin
+wait 10000
+cpu_end idle
+quit

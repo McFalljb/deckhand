@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- The CEF helper apps (all but the Plugin helper) under the hardened runtime (Developer ID
+     builds only; scripts/release.sh). allow-jit: V8 in the renderer.
+     allow-unsigned-executable-memory: kept to be safe; once a Developer ID build exists, try
+     removing it (current Chromium needs only allow-jit). -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+</dict>
+</plist>

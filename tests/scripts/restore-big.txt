@@ -1,0 +1,9 @@
+# restore.sh run 3: 20 restored sessions, only the current one started.
+wait 500
+assert_state open_sessions.# 20
+assert_state open_sessions.7.tabs.0.status running
+assert_state open_sessions.7.tabs.1.status running
+assert_state open_sessions.8.tabs.0.status not_started
+assert_state open_sessions.0.tabs.0.status not_started
+waitfor ARGS: 10000
+quit

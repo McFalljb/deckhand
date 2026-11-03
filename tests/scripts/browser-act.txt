@@ -1,0 +1,329 @@
+# Agents act on pages (tests/scripts/browser.sh; docs/BROWSER.md §4, step 8): the session's pi
+# (pi_command: as its pi tab's bridge) clicks, types, presses keys, scrolls, chooses, hovers and
+# uploads in a page, first in a tab the user does not see, then on screen; the sensitive-field
+# rule (password, card, one-time-code fields, a holder, shadow DOM, focus moving between keys, an
+# iframe, Tab into an iframe), a page that navigates between keys (page_changed), downloads from
+# an agent's click asking first, the upload bar (its guard, Block, Allow, busy, full paths,
+# protected folders), a native file chooser (cancelled), the clipboard a page writes (put back),
+# Take over and Hand back (a double click), a revealed password (no screenshot), the user's own
+# click pausing the agent, Stop. Fixture: tests/web/act.html; browser.sh puts the files to upload
+# in $homedir/up/.
+wait 1500
+assert_state open_sessions.# 1
+# 1. the pi opens the page behind its pi tab (the user's view stays) and waits for it
+pi_command {"type":"browser_open","url":"pidesk-test://web/act.html"}
+assert_state open_sessions.0.active_tab $pitab
+pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":15000}
+assert_finished ok true
+# 2. typing in a tab not on screen: the text reaches the field, the result never repeats it
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#name","text":"Hello world"}
+assert_finished ok true
+assert_finished data.action type
+assert_finished data.chars 11
+assert_finished data.hit.name Name
+assert_finished data.navigated false
+agent_assert not finished data Hello
+assert_state open_sessions.0.active_tab $pitab
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text name=Hello world
+# clear first; submit presses Enter (the form's submit)
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#name","text":"New","clear":true,"submit":true}
+assert_finished ok true
+assert_finished data.submitted true
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text name=New
+agent_assert has finished data.text submitted
+# a textarea takes line breaks and text beyond ASCII (inserted text)
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#note","text":"a\nb é ✓"}
+assert_finished ok true
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text note="a\nb é ✓"
+# a single-line field takes no line break
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#name","text":"x\ny"}
+assert_finished data.code bad_args
+# 3. the sensitive-field rule: password, card, one-time code, new password, a sensitive holder,
+# shadow DOM (a card host, a password field in a shadow root); nothing reaches them
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#pw","text":"hunter2"}
+assert_finished ok false
+assert_finished data.code sensitive_field
+agent_assert has finished error Take over
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#cc","text":"4111111111111111"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#otp","text":"123456"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#newpw","text":"pw"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#csc","text":"123"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#shadowcard","text":"12/30"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_type","tab_id":$last,"selector":"#shadowpw","text":"pw"}
+assert_finished data.code sensitive_field
+# keys pressed there are refused too (focus is in the password field after the last call)
+pi_command {"type":"browser_press","tab_id":$last,"keys":"a"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_press","tab_id":$last,"selector":"#cc","keys":"Backspace"}
+assert_finished data.code sensitive_field
+# focus moving between keys: the page moves it to the password field after 3 characters; the
+# check before the 4th key finds it there and the call ends (one chord a check)
+pi_command {"type":"browser_press","tab_id":$last,"selector":"#hop","keys":"a b c d e f g h"}
+assert_finished ok false
+assert_finished data.code sensitive_field
+agent_assert has finished error 3 of 8 chords
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text hop=abc
+agent_assert not finished data.text hop=abcd
+agent_assert not finished data.text pw-len
+agent_assert not finished data.text pw-key
+agent_assert not finished data.text cc-len
+agent_assert not finished data.text cc-key
+agent_assert not finished data.text otp-len
+agent_assert not finished data.text csc-len
+agent_assert not finished data.text pay-box-len
+agent_assert not finished data.text login-box-len
+# a card select is refused; a plain one takes a label or a value
+pi_command {"type":"browser_select","tab_id":$last,"selector":"#expm","label":"02"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_select","tab_id":$last,"selector":"#size","label":"Medium"}
+assert_finished ok true
+assert_finished data.chosen.label Medium
+pi_command {"type":"browser_select","tab_id":$last,"selector":"#size","value":"l"}
+assert_finished data.chosen.label Large
+pi_command {"type":"browser_select","tab_id":$last,"selector":"#size","label":"Huge"}
+assert_finished data.code no_option
+agent_assert has finished error "Small","Medium","Large"
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text size=m
+agent_assert has finished data.text size=l
+agent_assert not finished data.text expm
+# the clipboard's chords are refused; unknown keys too
+pi_command {"type":"browser_press","tab_id":$last,"keys":"Meta+V"}
+assert_result data.code bad_keys
+# 4. targets: not found, covered, disabled, a ref from an outline, a point
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#nope"}
+assert_finished data.code not_found
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#under"}
+assert_finished data.code covered
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#dis"}
+assert_finished data.code disabled
+pi_command {"type":"browser_click","tab_id":$last,"selector":"input[type=password]"}
+assert_result data.code selector_unsupported
+pi_command {"type":"browser_read","tab_id":$last,"mode":"outline"}
+pi_command {"type":"browser_click","tab_id":$last,"selector":"ref=e1"}
+assert_finished ok true
+assert_finished data.hit.ref ref=e1
+assert_finished data.hit.role heading
+pi_command {"type":"browser_click","tab_id":$last,"x":540,"y":25}
+assert_finished ok true
+assert_finished data.hit.name Pos
+# hover, right-click (the page's contextmenu; pi-desk opens no menu), double, modifiers
+pi_command {"type":"browser_hover","tab_id":$last,"selector":"#hov"}
+assert_finished ok true
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#rc","button":"right"}
+assert_finished ok true
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#dbl","double":true}
+assert_finished ok true
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#mod","modifiers":["shift"]}
+assert_finished ok true
+pi_command {"type":"browser_press","tab_id":$last,"selector":"#h","keys":"Escape"}
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert has finished data.text pos
+agent_assert has finished data.text hover
+agent_assert has finished data.text context
+agent_assert has finished data.text dblclick
+agent_assert has finished data.text mod shift=true meta=false
+page_assert menu -
+# focus inside an iframe cannot be checked: typing there is refused
+pi_command {"type":"browser_click","tab_id":$last,"x":580,"y":70}
+assert_finished ok true
+pi_command {"type":"browser_type","tab_id":$last,"text":"framed"}
+assert_finished data.code frame_focused
+# Tab from a field of the page into the iframe, then letters: Tab goes (a navigation key), the
+# letters do not (focus is in the frame now)
+pi_command {"type":"browser_press","tab_id":$last,"selector":"#prefrm","keys":"Tab a b c"}
+assert_finished data.code frame_focused
+agent_assert has finished error 1 of 4 chords
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#log"}
+agent_assert not finished data.text fi-len
+agent_assert not finished data.text fi-key
+# 5. scrolling: the page by a wheel, a scroller of its own, an element into view
+pi_command {"type":"browser_scroll","tab_id":$last,"dy":500}
+assert_finished ok true
+assert_finished data.moved true
+pi_command {"type":"browser_scroll","tab_id":$last,"selector":"#inner","dy":200}
+assert_finished data.moved true
+pi_command {"type":"browser_scroll","tab_id":$last,"selector":"#far"}
+assert_finished data.moved true
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#far"}
+assert_finished ok true
+assert_state open_sessions.0.active_tab $pitab
+# 6. an agent's click is never the user's gesture: its download asks first
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#dl"}
+assert_finished ok true
+assert_finished data.download waiting_for_user
+waitstate 3000 open_sessions.0.tabs.1.download_ask.name agent-report.txt
+# 7. an upload: the bar asks (the tab is not on screen: the sidebar says an agent uses a page)
+pi_command_bg {"type":"browser_upload","tab_id":$last,"selector":"#file","paths":["$homedir/up/a.txt"]}
+waitstate 5000 open_sessions.0.tabs.1.upload_ask.files.0 a.txt
+assert_drawn pi is using a page
+shot browser-act/background
+# the agent cannot answer its own bar, nor act on the tab while it asks
+pi_command {"type":"browser_upload_answer","tab_id":$last,"allow":true}
+assert_result ok false
+pi_command {"type":"browser_click","tab_id":$last,"selector":"#buy"}
+assert_result data.code busy
+# the user looks at the tab: the bars (the download's and the upload's) and the strip
+command {"type":"focus_tab","tab_id":$last}
+web_waitpaint 10000
+assert_drawn wants to upload ~/up/a.txt to pidesk-test://web
+assert_drawn pi in
+assert_drawn Take over
+shot browser-act/upload-bar
+wait 700
+clickid pg_upload_allow
+await_bg 5000
+assert_finished ok true
+assert_finished data.files.0 a.txt
+agent_assert not finished data /up/
+clickid pg_dlask_block
+pi_command {"type":"browser_read","tab_id":$tab,"selector":"#log"}
+agent_assert has finished data.text files=a.txt:7
+# Block: nothing is sent
+pi_command_bg {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$homedir/up/b.txt","$homedir/up/a.txt"]}
+waitstate 5000 open_sessions.0.tabs.1.upload_ask.files.1 a.txt
+# a click on the bar right as it appeared is ignored (the bars' guard: 500 ms)
+clickid pg_upload_block
+assert_state open_sessions.0.tabs.1.upload_ask.files.1 a.txt
+wait 700
+clickid pg_upload_block
+await_bg 3000
+assert_finished data.code upload_blocked
+# a directory is never uploaded; nor anything from pi's or pi-desk's own folders; a single-file
+# input takes one
+pi_command {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$homedir/up"]}
+assert_result data.code bad_file
+pi_command {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$homedir/.pi/agent/auth.json"]}
+assert_result data.code path_not_allowed
+pi_command {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$datadir/state.json"]}
+assert_result data.code path_not_allowed
+# an agent's click on a file input: the system's file chooser is cancelled (browser_upload instead)
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#one"}
+assert_finished data.code use_browser_upload
+# a page changing the clipboard under an agent's click: the action went through, the agent and
+# the user are told, nothing is put back
+act_clipboard set the user's text
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#copy"}
+assert_finished ok true
+assert_finished data.clipboard_changed true
+act_assert clipboard written by the page
+assert_drawn changed your clipboard during pi's click
+pi_command {"type":"browser_read","tab_id":$tab,"selector":"#log"}
+agent_assert has finished data.text copied
+pi_command {"type":"browser_upload","tab_id":$tab,"selector":"#one","paths":["$homedir/up/a.txt","$homedir/up/b.txt"]}
+assert_finished data.code bad_args
+# 8. on screen: a click shows its ring; a popup from an agent's click opens behind
+pi_command {"type":"browser_scroll","tab_id":$tab,"selector":"#buy"}
+pi_command_bg {"type":"browser_click","tab_id":$tab,"selector":"#pop"}
+wait 250
+act_assert mark yes
+shot browser-act/click-ring
+await_bg 3000
+assert_finished ok true
+assert_state open_sessions.0.tabs.# 3
+assert_state open_sessions.0.active_tab $last
+# 9. the strip names what the agent does; Take over: every agent call returns user_has_control
+pi_command_bg {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$homedir/up/a.txt"]}
+waitstate 5000 open_sessions.0.tabs.1.upload_ask.files.0 a.txt
+assert_drawn pi is uploading to
+assert_drawn Take over
+assert_drawn Stop
+shot browser-act/strip
+clickid br_agent_takeover
+await_bg 3000
+assert_finished data.code user_has_control
+assert_state open_sessions.0.tabs.1.agent.control user
+act_assert control user
+assert_drawn You have control
+assert_drawn Hand back
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#buy"}
+assert_result data.code user_has_control
+pi_command {"type":"browser_read","tab_id":$tab}
+assert_result data.code user_has_control
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"pidesk-test://web/nav-a.html"}
+assert_result data.code user_has_control
+shot browser-act/taken-over
+clickid br_agent_handback
+act_assert control agent
+# 10. the user's own click while the agent presses keys: the agent pauses
+pi_command_bg {"type":"browser_press","tab_id":$tab,"selector":"#note","keys":"a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a"}
+wait 400
+web_click 300 5
+await_bg 3000
+assert_finished data.code user_has_control
+act_assert control user
+wait 600
+clickid br_agent_handback
+act_assert control agent
+# 11. Stop ends a running action
+pi_command_bg {"type":"browser_press","tab_id":$tab,"selector":"#note","keys":"a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a a"}
+wait 300
+clickid br_agent_stop
+await_bg 3000
+assert_finished data.code stopped
+act_assert ops 0
+act_assert control agent
+# Take over and Hand back sit in one place: a double click leaves the tab taken over
+pi_command {"type":"browser_scroll","tab_id":$tab,"dy":10}
+clickid br_agent_takeover
+wait 100
+clickid br_agent_handback
+act_assert control user
+# a password the user types (taken over), then shown by an agent's click on "Show password":
+# no screenshot while it shows; the field stays refused for typing
+web_js document.getElementById('pw').focus()
+type hunter
+wait 600
+clickid br_agent_handback
+act_assert control agent
+pi_command {"type":"browser_read","tab_id":$tab,"selector":"#log"}
+agent_assert has finished data.text pw-len=6
+pi_command {"type":"browser_scroll","tab_id":$tab,"selector":"#show"}
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#show"}
+assert_finished ok true
+pi_command {"type":"browser_screenshot","tab_id":$tab}
+assert_finished data.code sensitive_visible
+agent_assert not finished error hunter
+pi_command {"type":"browser_type","tab_id":$tab,"selector":"#pw","text":"x"}
+assert_finished data.code sensitive_field
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#show"}
+pi_command {"type":"browser_screenshot","tab_id":$tab}
+assert_finished ok true
+# an app updating its address as you type (replaceState) is the same page: keys go on
+pi_command {"type":"browser_scroll","tab_id":$tab,"selector":"#search"}
+pi_command {"type":"browser_press","tab_id":$tab,"selector":"#search","keys":"a b c"}
+assert_finished ok true
+assert_finished data.keys 3
+# keys like Backspace on an element pi-desk cannot classify (a focusable div): refused
+pi_command {"type":"browser_press","tab_id":$tab,"selector":"#widget","keys":"Backspace"}
+assert_finished data.code not_a_field
+# 12. a click that navigates: the result says so, with the new address
+pi_command {"type":"browser_click","tab_id":$tab,"selector":"#buy"}
+assert_finished ok true
+assert_finished data.navigated true
+agent_assert has finished data.url nav-a.html
+# a page that navigates between keys: Enter submits the form, the check before "a" finds a new
+# page coming and nothing more is pressed
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"pidesk-test://web/act.html"}
+pi_command {"type":"browser_wait","tab_id":$tab,"for":"load","timeout_ms":15000}
+pi_command {"type":"browser_press","tab_id":$tab,"selector":"#q","keys":"Enter a b c"}
+assert_finished data.code page_changed
+agent_assert has finished error 1 of 4 chords
+pi_command {"type":"browser_wait","tab_id":$tab,"for":"load","timeout_ms":15000}
+pi_command {"type":"browser_read","tab_id":$tab}
+agent_assert has finished data.url nav-a.html?q=
+# a page without pi-desk's world (the browser's error page): the screenshot is taken as before
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"http://127.0.0.1:9/"}
+wait 1500
+pi_command {"type":"browser_screenshot","tab_id":$tab}
+assert_finished ok true
+quit

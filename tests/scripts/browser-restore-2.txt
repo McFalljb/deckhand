@@ -1,0 +1,24 @@
+# Browser tabs across a relaunch, run 2 (tests/scripts/browser.sh): each session's tabs come back
+# in its own list with their URL and title; the session on screen loads its pages, the other one
+# once it is first focused.
+wait 1500
+assert_state open_sessions.# 2
+assert_state open_sessions.0.pi_session_id rrrr-1
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.kind browser
+assert_state open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+assert_state open_sessions.0.tabs.1.title Nav B
+assert_state open_sessions.1.pi_session_id rrrr-2
+assert_state open_sessions.1.tabs.# 2
+assert_state open_sessions.1.tabs.1.url pidesk-test://web/nav-a.html
+# the second session was on screen at quit: its page loads; the first waits
+waitstate 10000 open_sessions.1.tabs.1.status running
+web_title Nav A 10000
+assert_state open_sessions.0.tabs.1.status not_started
+menu prev_session
+assert_state current_session $session
+assert_state open_sessions.0.active_tab $tab
+waitstate 5000 open_sessions.0.tabs.1.status running
+web_title Nav B 10000
+waitstate 5000 open_sessions.0.tabs.1.can_back false
+quit

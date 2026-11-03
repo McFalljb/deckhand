@@ -1,0 +1,13 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<!-- "pi-desk Helper (Plugin).app" only (scripts/release.sh): helper.plist plus library
+     validation off, as Chromium's own helper-plugin entitlements (a plugin process loads code
+     not signed by our team). CEF still expects this helper bundle to exist.
+     allow-unsigned-executable-memory: try removing it once a Developer ID build exists. -->
+<plist version="1.0">
+<dict>
+  <key>com.apple.security.cs.allow-jit</key><true/>
+  <key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
+  <key>com.apple.security.cs.disable-library-validation</key><true/>
+</dict>
+</plist>

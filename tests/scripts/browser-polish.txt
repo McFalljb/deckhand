@@ -1,0 +1,198 @@
+# Tab polish (tests/scripts/browser.sh; docs/BROWSER.md §6 step 3): JS dialogs as a bar, find in
+# page, zoom, the right-click menu, tooltip and pointer shape, downloads, the blocked-popup bar,
+# the permission bar, the crash bar. Page coordinates: tests/web/polish.html.
+wait 1500
+command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+web_waitpaint 10000
+web_title Polish 10000
+waitstate 5000 open_sessions.0.tabs.1.zoom 1
+assert_state open_sessions.0.tabs.1.crashed false
+# 1. window.open without a user gesture (before any click: a click lets the page open one for a
+# few seconds): refused, with a bar; × closes it; Open opens it in a new tab of this session
+web_js window.tryOpen()
+waitstate 5000 open_sessions.0.tabs.1.blocked_popup pidesk-test://web/nav-b.html?from=script
+web_js document.title = window.opened
+web_title null 3000
+wait 600
+clickid pg_popup_close
+waitstate 3000 open_sessions.0.tabs.1.blocked_popup <missing>
+web_js window.tryOpen()
+waitstate 5000 open_sessions.0.tabs.1.blocked_popup pidesk-test://web/nav-b.html?from=script
+shot browser-polish/popup
+wait 600
+clickid pg_popup_open
+waitstate 5000 open_sessions.0.tabs.# 3
+waitstate 5000 open_sessions.0.tabs.2.url pidesk-test://web/nav-b.html?from=script
+assert_state open_sessions.0.tabs.1.blocked_popup <missing>
+assert_state open_sessions.# 1
+command {"type":"focus_tab","tab_id":$last}
+waitstate 3000 open_sessions.0.active_tab $last
+# 2. alert: a bar in the tab; OK lets the page go on
+web_click 100 40
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind alert
+assert_state open_sessions.0.tabs.1.dialog.message Hello from the page
+shot browser-polish/alert
+wait 600
+clickid pg_dialog_ok
+waitstate 5000 open_sessions.0.tabs.1.dialog <missing>
+web_title after alert 5000
+# confirm: Cancel, then OK
+web_click 100 90
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind confirm
+wait 600
+clickid pg_dialog_cancel
+web_title confirm=false 5000
+web_click 100 90
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind confirm
+wait 600
+clickid pg_dialog_ok
+web_title confirm=true 5000
+# prompt: its field has the keyboard and the page's default, selected; Enter answers
+web_click 100 140
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind prompt
+waitstate 2000 focus.id browser_prompt
+assert_selection Ada
+shot browser-polish/prompt
+type Grace
+wait 600
+key enter
+web_title prompt=Grace 5000
+assert_state focus.id <missing>
+web_click 100 140
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind prompt
+wait 600
+clickid pg_dialog_cancel
+web_title prompt=null 5000
+# 3. find in page: ⌘F, matches counted and highlighted (the active one orange), next and previous
+key f cmd
+waitstate 2000 focus.id browser_find
+type needle
+waitstate 5000 open_sessions.0.tabs.1.find.matches 3
+waitstate 3000 open_sessions.0.tabs.1.find.active 1
+web_pixel 254 40 ff9632 3000
+web_pixel 380 40 ffff00 3000
+key enter
+waitstate 3000 open_sessions.0.tabs.1.find.active 2
+web_pixel 380 40 ff9632 3000
+wait 600
+clickid pg_find_next
+waitstate 3000 open_sessions.0.tabs.1.find.active 3
+wait 600
+clickid pg_find_prev
+waitstate 3000 open_sessions.0.tabs.1.find.active 2
+shot browser-polish/find
+wait 600
+clickid pg_find_close
+waitstate 2000 open_sessions.0.tabs.1.find <missing>
+web_pixel 380 40 ffffff 3000
+# 4. zoom: ⌘+ twice, the toolbar's chip resets; ⌘−; the ⋯ menu
+key equal cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 1.1
+key equal cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 1.25
+shot browser-polish/zoom
+wait 600
+clickid pg_zoom
+waitstate 3000 open_sessions.0.tabs.1.zoom 1
+key minus cmd
+waitstate 3000 open_sessions.0.tabs.1.zoom 0.9
+wait 600
+clickid pg_more
+wait 200
+page_menu Actual size
+waitstate 3000 open_sessions.0.tabs.1.zoom 1
+# 5. the pointer over the link: a hand, and its title as a tooltip
+annot_move 100 190
+wait 1200
+page_assert cursor hand
+page_assert tooltip A link tooltip
+shot browser-polish/tooltip
+annot_move 400 400
+wait 500
+page_assert cursor default
+# 6. the right-click menu over the link; Open link in new tab opens in this tab's session
+page_rclick 100 190
+wait 600
+page_assert menu Reload|--|Open link in new tab|Copy link|--|Inspect
+shot browser-polish/menu
+page_menu Open link in new tab
+waitstate 5000 open_sessions.0.tabs.# 4
+waitstate 5000 open_sessions.0.tabs.3.url pidesk-test://web/nav-b.html
+assert_state open_sessions.# 1
+command {"type":"focus_tab","tab_id":$last}
+waitstate 3000 open_sessions.0.active_tab $last
+# over a text field: the edit rows
+page_rclick 100 335
+wait 600
+page_assert menu Reload|--|Paste|Select all|--|Inspect
+key escape
+page_assert menu -
+# 7. a download: a safe name in the test's downloads folder, never over another file
+web_click 100 240
+waitstate 10000 open_sessions.0.tabs.1.downloads.0.state done
+assert_state open_sessions.0.tabs.1.downloads.0.name hidden_ report.txt
+page_assert file 25 $datadir/downloads/hidden_ report.txt
+shot browser-polish/download
+web_click 100 240
+waitstate 10000 open_sessions.0.tabs.1.downloads.1.state done
+assert_state open_sessions.0.tabs.1.downloads.1.name hidden_ report (1).txt
+page_assert file 25 $datadir/downloads/hidden_ report (1).txt
+page_assert file 25 $datadir/downloads/hidden_ report.txt
+wait 600
+clickid pg_dl_reveal
+page_assert revealed $datadir/downloads/hidden_ report (1).txt
+wait 600
+clickid pg_dl_open
+page_assert opened file://$datadir/downloads/hidden_%20report%20%281%29.txt
+wait 600
+clickid pg_dl_close
+waitstate 2000 open_sessions.0.tabs.1.downloads.1.dismissed true
+# 8. a permission prompt (notifications): its bar; Block
+web_click 100 290
+waitstate 5000 open_sessions.0.tabs.1.permission.what notifications
+shot browser-polish/permission
+wait 600
+clickid pg_perm_block
+web_title perm=denied 5000
+assert_state open_sessions.0.tabs.1.permission <missing>
+# (Allow: browser-polish-allow.txt, on a fresh profile: Chromium keeps what was answered)
+# 9. leaving a page that asks first (beforeunload): Stay keeps it, Leave goes
+web_click 280 140
+web_title armed 3000
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind beforeunload
+shot browser-polish/leave
+wait 600
+clickid pg_dialog_cancel
+waitstate 3000 open_sessions.0.tabs.1.dialog <missing>
+wait 500
+web_title armed 3000
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind beforeunload
+wait 600
+clickid pg_dialog_ok
+web_title Nav A 5000
+waitstate 5000 open_sessions.0.tabs.1.can_back true
+command {"type":"browser_back","tab_id":$last}
+web_title Polish 5000
+# 10. the renderer dies: the crash bar; Reload brings the page back
+page_crash
+waitstate 10000 open_sessions.0.tabs.1.crashed true
+shot browser-polish/crash
+wait 600
+clickid pg_crash_reload
+waitstate 10000 open_sessions.0.tabs.1.crashed false
+web_title Polish 10000
+# 11. DevTools: Inspect from the right-click menu opens Chromium's own in a window; ⋯ closes it
+page_rclick 100 40
+wait 600
+page_menu Inspect
+waitstate 10000 open_sessions.0.tabs.1.devtools true
+shot browser-polish/devtools
+wait 600
+clickid pg_more
+wait 200
+page_menu Close DevTools
+waitstate 10000 open_sessions.0.tabs.1.devtools false
+web_assert overwrites 0
+quit

@@ -1,0 +1,62 @@
+# The Projects tree, run 1 (tests/scripts/projects.sh). Fake pi prints "ARGS: ... CWD=...".
+wait 800
+# collapsed: repositories top-level; github and projects hold nested rows; the _scratch group row
+# is inside projects (its parent project); the temp and the missing folder are hidden
+assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,~
+assert_state settings.tidy_projects true
+shot projects/collapsed
+# every row lists only its own sessions: github, then projects
+clickid proj 2
+wait 300
+assert_rows sessions Only github's own session
+clickid proj 6
+wait 300
+assert_rows sessions Look around the projects folder
+# open projects: the _scratch group row and data/training-data are inside
+clickid projkids 6
+wait 300
+assert_state sidebar.expanded.0 $homedir/workspace/projects
+assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,+~/workspace/projects/data/training-data,~
+# open the group row, then the parent row of batch-run-1
+clickid grp 0
+wait 300
+assert_state sidebar.expanded.1 $homedir/workspace/projects/_scratch
+assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,++~/workspace/projects/_scratch/ev-b,++~/workspace/projects/_scratch/ev-c,+~/workspace/projects/data/training-data,~
+clickid proj 7
+wait 300
+assert_rows sessions Plan the deep review
+clickid projkids 7
+wait 300
+assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,+++~/workspace/projects/_scratch/batch-run-1/try-C,+++~/workspace/projects/_scratch/batch-run-1/try-B,+++~/workspace/projects/_scratch/batch-run-1/A-long-review/fix2/fast-vs-steady,++~/workspace/projects/_scratch/ev-b,++~/workspace/projects/_scratch/ev-c,+~/workspace/projects/data/training-data,~
+shot projects/nested
+# a nested project: its own sessions; resume runs in exactly its folder
+clickid proj 8
+wait 300
+assert_rows sessions C: fast vs steady
+clickid sess 0
+waitfor ARGS: --session 15000
+assert_state open_sessions.0.cwd $homedir/workspace/projects/_scratch/batch-run-1/try-C
+assert_rows open C: fast vs steady
+# Show hidden: the temp and the missing folder, tagged
+command {"type":"set_filter","show_hidden":true}
+wait 200
+shot projects/show-hidden
+command {"type":"set_filter","show_hidden":false}
+# the filter opens the rows above a match (the group's and the parent's)
+command {"type":"set_row_expanded","path":"$homedir/workspace/projects","expanded":false}
+command {"type":"set_row_expanded","path":"$homedir/workspace/projects/_scratch","expanded":false}
+command {"type":"set_filter","text":"vs-steady"}
+wait 200
+assert_rows projects ~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,+++~/workspace/projects/_scratch/batch-run-1/A-long-review/fix2/fast-vs-steady
+shot projects/filter
+command {"type":"set_filter","text":""}
+command {"type":"set_row_expanded","path":"$homedir/workspace/projects","expanded":true}
+command {"type":"set_row_expanded","path":"$homedir/workspace/projects/_scratch","expanded":true}
+# off: every folder a top-level row
+ui_command {"type":"set_tidy_projects","on":false}
+wait 200
+assert_state settings.tidy_projects false
+shot projects/tidy-off
+ui_command {"type":"set_tidy_projects","on":true}
+wait 1500
+quit

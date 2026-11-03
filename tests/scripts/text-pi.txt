@@ -1,0 +1,17 @@
+# Real pi in the fullscreen TUI, for text screenshots. Run with
+# tests/scripts/text-pi.sh [BINARY] (real HOME and pi; one short prompt).
+wait 8000
+shot text/pi-start
+type Reply in under 90 words: a markdown table of 3 planets with one emoji each, then a 3-item checklist using ✓ and ✗, and one line of Japanese.
+key enter
+wait 1500
+cpu_begin
+wait 4000
+cpu_end streaming
+shot text/pi-stream
+wait 20000
+shot text/pi-reply
+cpu_begin
+wait 5000
+cpu_end idle
+quit

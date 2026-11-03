@@ -1,0 +1,1587 @@
+CommonMark spec 0.31.2 examples (174 of 652), copied verbatim from
+https://github.com/commonmark/commonmark-spec/blob/0.31.2/spec.txt
+Copyright (C) 2014-16 John MacFarlane, CC-BY-SA 4.0. See README.md.
+Format: the spec's own; "→" is a tab. Each header line: number, section.
+
+```````````````````````````````` example 1 Tabs
+→foo→baz→→bim
+.
+<pre><code>foo→baz→→bim
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 6 Tabs
+>→→foo
+.
+<blockquote>
+<pre><code>  foo
+</code></pre>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 11 Tabs
+*→*→*→
+.
+<hr />
+````````````````````````````````
+
+```````````````````````````````` example 12 Backslash escapes
+\!\"\#\$\%\&\'\(\)\*\+\,\-\.\/\:\;\<\=\>\?\@\[\\\]\^\_\`\{\|\}\~
+.
+<p>!&quot;#$%&amp;'()*+,-./:;&lt;=&gt;?@[\]^_`{|}~</p>
+````````````````````````````````
+
+```````````````````````````````` example 16 Backslash escapes
+foo\
+bar
+.
+<p>foo<br />
+bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 20 Backslash escapes
+<https://example.com?find=\*>
+.
+<p><a href="https://example.com?find=%5C*">https://example.com?find=\*</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 24 Backslash escapes
+``` foo\+bar
+foo
+```
+.
+<pre><code class="language-foo+bar">foo
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 25 Entity and numeric character references
+&nbsp; &amp; &copy; &AElig; &Dcaron;
+&frac34; &HilbertSpace; &DifferentialD;
+&ClockwiseContourIntegral; &ngE;
+.
+<p>  &amp; © Æ Ď
+¾ ℋ ⅆ
+∲ ≧̸</p>
+````````````````````````````````
+
+```````````````````````````````` example 29 Entity and numeric character references
+&copy
+.
+<p>&amp;copy</p>
+````````````````````````````````
+
+```````````````````````````````` example 33 Entity and numeric character references
+[foo]
+
+[foo]: /f&ouml;&ouml; "f&ouml;&ouml;"
+.
+<p><a href="/f%C3%B6%C3%B6" title="föö">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 37 Entity and numeric character references
+&#42;foo&#42;
+*foo*
+.
+<p>*foo*
+<em>foo</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 41 Entity and numeric character references
+[a](url &quot;tit&quot;)
+.
+<p>[a](url &quot;tit&quot;)</p>
+````````````````````````````````
+
+```````````````````````````````` example 42 Precedence
+- `one
+- two`
+.
+<ul>
+<li>`one</li>
+<li>two`</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 43 Thematic breaks
+***
+---
+___
+.
+<hr />
+<hr />
+<hr />
+````````````````````````````````
+
+```````````````````````````````` example 47 Thematic breaks
+ ***
+  ***
+   ***
+.
+<hr />
+<hr />
+<hr />
+````````````````````````````````
+
+```````````````````````````````` example 52 Thematic breaks
+ **  * ** * ** * **
+.
+<hr />
+````````````````````````````````
+
+```````````````````````````````` example 57 Thematic breaks
+- foo
+***
+- bar
+.
+<ul>
+<li>foo</li>
+</ul>
+<hr />
+<ul>
+<li>bar</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 61 Thematic breaks
+- Foo
+- * * *
+.
+<ul>
+<li>Foo</li>
+<li>
+<hr />
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 62 ATX headings
+# foo
+## foo
+### foo
+#### foo
+##### foo
+###### foo
+.
+<h1>foo</h1>
+<h2>foo</h2>
+<h3>foo</h3>
+<h4>foo</h4>
+<h5>foo</h5>
+<h6>foo</h6>
+````````````````````````````````
+
+```````````````````````````````` example 66 ATX headings
+# foo *bar* \*baz\*
+.
+<h1>foo <em>bar</em> *baz*</h1>
+````````````````````````````````
+
+```````````````````````````````` example 70 ATX headings
+foo
+    # bar
+.
+<p>foo
+# bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 75 ATX headings
+# foo#
+.
+<h1>foo#</h1>
+````````````````````````````````
+
+```````````````````````````````` example 79 ATX headings
+## 
+#
+### ###
+.
+<h2></h2>
+<h1></h1>
+<h3></h3>
+````````````````````````````````
+
+```````````````````````````````` example 80 Setext headings
+Foo *bar*
+=========
+
+Foo *bar*
+---------
+.
+<h1>Foo <em>bar</em></h1>
+<h2>Foo <em>bar</em></h2>
+````````````````````````````````
+
+```````````````````````````````` example 84 Setext headings
+   Foo
+---
+
+  Foo
+-----
+
+  Foo
+  ===
+.
+<h2>Foo</h2>
+<h2>Foo</h2>
+<h1>Foo</h1>
+````````````````````````````````
+
+```````````````````````````````` example 89 Setext headings
+Foo  
+-----
+.
+<h2>Foo</h2>
+````````````````````````````````
+
+```````````````````````````````` example 93 Setext headings
+> foo
+bar
+===
+.
+<blockquote>
+<p>foo
+bar
+===</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 97 Setext headings
+
+====
+.
+<p>====</p>
+````````````````````````````````
+
+```````````````````````````````` example 102 Setext headings
+\> foo
+------
+.
+<h2>&gt; foo</h2>
+````````````````````````````````
+
+```````````````````````````````` example 106 Setext headings
+Foo
+bar
+\---
+baz
+.
+<p>Foo
+bar
+---
+baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 107 Indented code blocks
+    a simple
+      indented code block
+.
+<pre><code>a simple
+  indented code block
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 113 Indented code blocks
+Foo
+    bar
+
+.
+<p>Foo
+bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 118 Indented code blocks
+    foo  
+.
+<pre><code>foo  
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 119 Fenced code blocks
+```
+<
+ >
+```
+.
+<pre><code>&lt;
+ &gt;
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 123 Fenced code blocks
+~~~
+aaa
+```
+~~~
+.
+<pre><code>aaa
+```
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 127 Fenced code blocks
+`````
+
+```
+aaa
+.
+<pre><code>
+```
+aaa
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 131 Fenced code blocks
+ ```
+ aaa
+aaa
+```
+.
+<pre><code>aaa
+aaa
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 135 Fenced code blocks
+```
+aaa
+  ```
+.
+<pre><code>aaa
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 139 Fenced code blocks
+~~~~~~
+aaa
+~~~ ~~
+.
+<pre><code>aaa
+~~~ ~~
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 143 Fenced code blocks
+~~~~    ruby startline=3 $%@#$
+def foo(x)
+  return 3
+end
+~~~~~~~
+.
+<pre><code class="language-ruby">def foo(x)
+  return 3
+end
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 147 Fenced code blocks
+```
+``` aaa
+```
+.
+<pre><code>``` aaa
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 148 HTML blocks
+<table><tr><td>
+<pre>
+**Hello**,
+
+_world_.
+</pre>
+</td></tr></table>
+.
+<table><tr><td>
+<pre>
+**Hello**,
+<p><em>world</em>.
+</pre></p>
+</td></tr></table>
+````````````````````````````````
+
+```````````````````````````````` example 152 HTML blocks
+<DIV CLASS="foo">
+
+*Markdown*
+
+</DIV>
+.
+<DIV CLASS="foo">
+<p><em>Markdown</em></p>
+</DIV>
+````````````````````````````````
+
+```````````````````````````````` example 157 HTML blocks
+<div class
+foo
+.
+<div class
+foo
+````````````````````````````````
+
+```````````````````````````````` example 161 HTML blocks
+<div></div>
+``` c
+int x = 33;
+```
+.
+<div></div>
+``` c
+int x = 33;
+```
+````````````````````````````````
+
+```````````````````````````````` example 165 HTML blocks
+</ins>
+*bar*
+.
+</ins>
+*bar*
+````````````````````````````````
+
+```````````````````````````````` example 170 HTML blocks
+<script type="text/javascript">
+// JavaScript example
+
+document.getElementById("demo").innerHTML = "Hello JavaScript!";
+</script>
+okay
+.
+<script type="text/javascript">
+// JavaScript example
+
+document.getElementById("demo").innerHTML = "Hello JavaScript!";
+</script>
+<p>okay</p>
+````````````````````````````````
+
+```````````````````````````````` example 174 HTML blocks
+> <div>
+> foo
+
+bar
+.
+<blockquote>
+<div>
+foo
+</blockquote>
+<p>bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 178 HTML blocks
+<script>
+foo
+</script>1. *bar*
+.
+<script>
+foo
+</script>1. *bar*
+````````````````````````````````
+
+```````````````````````````````` example 182 HTML blocks
+<![CDATA[
+function matchwo(a,b)
+{
+  if (a < b && a < 0) then {
+    return 1;
+
+  } else {
+
+    return 0;
+  }
+}
+]]>
+okay
+.
+<![CDATA[
+function matchwo(a,b)
+{
+  if (a < b && a < 0) then {
+    return 1;
+
+  } else {
+
+    return 0;
+  }
+}
+]]>
+<p>okay</p>
+````````````````````````````````
+
+```````````````````````````````` example 187 HTML blocks
+Foo
+<a href="bar">
+baz
+.
+<p>Foo
+<a href="bar">
+baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 191 HTML blocks
+<table>
+
+  <tr>
+
+    <td>
+      Hi
+    </td>
+
+  </tr>
+
+</table>
+.
+<table>
+  <tr>
+<pre><code>&lt;td&gt;
+  Hi
+&lt;/td&gt;
+</code></pre>
+  </tr>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 192 Link reference definitions
+[foo]: /url "title"
+
+[foo]
+.
+<p><a href="/url" title="title">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 196 Link reference definitions
+[foo]: /url '
+title
+line1
+line2
+'
+
+[foo]
+.
+<p><a href="/url" title="
+title
+line1
+line2
+">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 201 Link reference definitions
+[foo]: <bar>(baz)
+
+[foo]
+.
+<p>[foo]: <bar>(baz)</p>
+<p>[foo]</p>
+````````````````````````````````
+
+```````````````````````````````` example 205 Link reference definitions
+[FOO]: /url
+
+[Foo]
+.
+<p><a href="/url">Foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 209 Link reference definitions
+[foo]: /url "title" ok
+.
+<p>[foo]: /url &quot;title&quot; ok</p>
+````````````````````````````````
+
+```````````````````````````````` example 214 Link reference definitions
+# [Foo]
+[foo]: /url
+> bar
+.
+<h1><a href="/url">Foo</a></h1>
+<blockquote>
+<p>bar</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 218 Link reference definitions
+[foo]
+
+> [foo]: /url
+.
+<p><a href="/url">foo</a></p>
+<blockquote>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 219 Paragraphs
+aaa
+
+bbb
+.
+<p>aaa</p>
+<p>bbb</p>
+````````````````````````````````
+
+```````````````````````````````` example 226 Paragraphs
+aaa     
+bbb     
+.
+<p>aaa<br />
+bbb</p>
+````````````````````````````````
+
+```````````````````````````````` example 227 Blank lines
+  
+
+aaa
+  
+
+# aaa
+
+  
+.
+<p>aaa</p>
+<h1>aaa</h1>
+````````````````````````````````
+
+```````````````````````````````` example 228 Block quotes
+> # Foo
+> bar
+> baz
+.
+<blockquote>
+<h1>Foo</h1>
+<p>bar
+baz</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 232 Block quotes
+> # Foo
+> bar
+baz
+.
+<blockquote>
+<h1>Foo</h1>
+<p>bar
+baz</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 236 Block quotes
+>     foo
+    bar
+.
+<blockquote>
+<pre><code>foo
+</code></pre>
+</blockquote>
+<pre><code>bar
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 240 Block quotes
+>
+>  
+> 
+.
+<blockquote>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 244 Block quotes
+> foo
+>
+> bar
+.
+<blockquote>
+<p>foo</p>
+<p>bar</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 248 Block quotes
+> bar
+
+baz
+.
+<blockquote>
+<p>bar</p>
+</blockquote>
+<p>baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 252 Block quotes
+>     code
+
+>    not code
+.
+<blockquote>
+<pre><code>code
+</code></pre>
+</blockquote>
+<blockquote>
+<p>not code</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 253 List items
+A paragraph
+with two lines.
+
+    indented code
+
+> A block quote.
+.
+<p>A paragraph
+with two lines.</p>
+<pre><code>indented code
+</code></pre>
+<blockquote>
+<p>A block quote.</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 257 List items
+ -    one
+
+     two
+.
+<ul>
+<li>one</li>
+</ul>
+<pre><code> two
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 262 List items
+- foo
+
+
+  bar
+.
+<ul>
+<li>
+<p>foo</p>
+<p>bar</p>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 266 List items
+1234567890. not ok
+.
+<p>1234567890. not ok</p>
+````````````````````````````````
+
+```````````````````````````````` example 270 List items
+- foo
+
+      bar
+.
+<ul>
+<li>
+<p>foo</p>
+<pre><code>bar
+</code></pre>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 274 List items
+1.      indented code
+
+   paragraph
+
+       more code
+.
+<ol>
+<li>
+<pre><code> indented code
+</code></pre>
+<p>paragraph</p>
+<pre><code>more code
+</code></pre>
+</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 279 List items
+-   
+  foo
+.
+<ul>
+<li>foo</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 283 List items
+1. foo
+2.
+3. bar
+.
+<ol>
+<li>foo</li>
+<li></li>
+<li>bar</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 287 List items
+  1.  A paragraph
+      with two lines.
+
+          indented code
+
+      > A block quote.
+.
+<ol>
+<li>
+<p>A paragraph
+with two lines.</p>
+<pre><code>indented code
+</code></pre>
+<blockquote>
+<p>A block quote.</p>
+</blockquote>
+</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 291 List items
+  1.  A paragraph
+    with two lines.
+.
+<ol>
+<li>A paragraph
+with two lines.</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 296 List items
+10) foo
+    - bar
+.
+<ol start="10">
+<li>foo
+<ul>
+<li>bar</li>
+</ul>
+</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 300 List items
+- # Foo
+- Bar
+  ---
+  baz
+.
+<ul>
+<li>
+<h1>Foo</h1>
+</li>
+<li>
+<h2>Bar</h2>
+baz</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 301 Lists
+- foo
+- bar
++ baz
+.
+<ul>
+<li>foo</li>
+<li>bar</li>
+</ul>
+<ul>
+<li>baz</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 305 Lists
+The number of windows in my house is
+1.  The number of doors is 6.
+.
+<p>The number of windows in my house is</p>
+<ol>
+<li>The number of doors is 6.</li>
+</ol>
+````````````````````````````````
+
+```````````````````````````````` example 309 Lists
+-   foo
+
+    notcode
+
+-   foo
+
+<!-- -->
+
+    code
+.
+<ul>
+<li>
+<p>foo</p>
+<p>notcode</p>
+</li>
+<li>
+<p>foo</p>
+</li>
+</ul>
+<!-- -->
+<pre><code>code
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 313 Lists
+1. a
+
+  2. b
+
+    3. c
+.
+<ol>
+<li>
+<p>a</p>
+</li>
+<li>
+<p>b</p>
+</li>
+</ol>
+<pre><code>3. c
+</code></pre>
+````````````````````````````````
+
+```````````````````````````````` example 318 Lists
+- a
+- ```
+  b
+
+
+  ```
+- c
+.
+<ul>
+<li>a</li>
+<li>
+<pre><code>b
+
+
+</code></pre>
+</li>
+<li>c</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 322 Lists
+- a
+.
+<ul>
+<li>a</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 326 Lists
+- a
+  - b
+  - c
+
+- d
+  - e
+  - f
+.
+<ul>
+<li>
+<p>a</p>
+<ul>
+<li>b</li>
+<li>c</li>
+</ul>
+</li>
+<li>
+<p>d</p>
+<ul>
+<li>e</li>
+<li>f</li>
+</ul>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 327 Inlines
+`hi`lo`
+.
+<p><code>hi</code>lo`</p>
+````````````````````````````````
+
+```````````````````````````````` example 328 Code spans
+`foo`
+.
+<p><code>foo</code></p>
+````````````````````````````````
+
+```````````````````````````````` example 332 Code spans
+` a`
+.
+<p><code> a</code></p>
+````````````````````````````````
+
+```````````````````````````````` example 336 Code spans
+``
+foo 
+``
+.
+<p><code>foo </code></p>
+````````````````````````````````
+
+```````````````````````````````` example 341 Code spans
+*foo`*`
+.
+<p>*foo<code>*</code></p>
+````````````````````````````````
+
+```````````````````````````````` example 345 Code spans
+`<https://foo.bar.`baz>`
+.
+<p><code>&lt;https://foo.bar.</code>baz&gt;`</p>
+````````````````````````````````
+
+```````````````````````````````` example 349 Code spans
+`foo``bar``
+.
+<p>`foo<code>bar</code></p>
+````````````````````````````````
+
+```````````````````````````````` example 350 Emphasis and strong emphasis
+*foo bar*
+.
+<p><em>foo bar</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 354 Emphasis and strong emphasis
+*$*alpha.
+
+*£*bravo.
+
+*€*charlie.
+.
+<p>*$*alpha.</p>
+<p>*£*bravo.</p>
+<p>*€*charlie.</p>
+````````````````````````````````
+
+```````````````````````````````` example 358 Emphasis and strong emphasis
+_ foo bar_
+.
+<p>_ foo bar_</p>
+````````````````````````````````
+
+```````````````````````````````` example 362 Emphasis and strong emphasis
+пристаням_стремятся_
+.
+<p>пристаням_стремятся_</p>
+````````````````````````````````
+
+```````````````````````````````` example 366 Emphasis and strong emphasis
+*foo bar *
+.
+<p>*foo bar *</p>
+````````````````````````````````
+
+```````````````````````````````` example 370 Emphasis and strong emphasis
+*foo*bar
+.
+<p><em>foo</em>bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 375 Emphasis and strong emphasis
+_пристаням_стремятся
+.
+<p>_пристаням_стремятся</p>
+````````````````````````````````
+
+```````````````````````````````` example 379 Emphasis and strong emphasis
+** foo bar**
+.
+<p>** foo bar**</p>
+````````````````````````````````
+
+```````````````````````````````` example 383 Emphasis and strong emphasis
+__ foo bar__
+.
+<p>__ foo bar__</p>
+````````````````````````````````
+
+```````````````````````````````` example 387 Emphasis and strong emphasis
+5__6__78
+.
+<p>5__6__78</p>
+````````````````````````````````
+
+```````````````````````````````` example 391 Emphasis and strong emphasis
+**foo bar **
+.
+<p>**foo bar **</p>
+````````````````````````````````
+
+```````````````````````````````` example 395 Emphasis and strong emphasis
+**foo "*bar*" foo**
+.
+<p><strong>foo &quot;<em>bar</em>&quot; foo</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 399 Emphasis and strong emphasis
+_(__foo__)_
+.
+<p><em>(<strong>foo</strong>)</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 403 Emphasis and strong emphasis
+__(bar)__.
+.
+<p><strong>(bar)</strong>.</p>
+````````````````````````````````
+
+```````````````````````````````` example 407 Emphasis and strong emphasis
+_foo _bar_ baz_
+.
+<p><em>foo <em>bar</em> baz</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 411 Emphasis and strong emphasis
+*foo**bar**baz*
+.
+<p><em>foo<strong>bar</strong>baz</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 416 Emphasis and strong emphasis
+foo***bar***baz
+.
+<p>foo<em><strong>bar</strong></em>baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 420 Emphasis and strong emphasis
+** is not an empty emphasis
+.
+<p>** is not an empty emphasis</p>
+````````````````````````````````
+
+```````````````````````````````` example 424 Emphasis and strong emphasis
+__foo _bar_ baz__
+.
+<p><strong>foo <em>bar</em> baz</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 428 Emphasis and strong emphasis
+**foo *bar* baz**
+.
+<p><strong>foo <em>bar</em> baz</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 432 Emphasis and strong emphasis
+**foo *bar **baz**
+bim* bop**
+.
+<p><strong>foo <em>bar <strong>baz</strong>
+bim</em> bop</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 436 Emphasis and strong emphasis
+foo ***
+.
+<p>foo ***</p>
+````````````````````````````````
+
+```````````````````````````````` example 440 Emphasis and strong emphasis
+foo **\***
+.
+<p>foo <strong>*</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 444 Emphasis and strong emphasis
+***foo**
+.
+<p>*<strong>foo</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 448 Emphasis and strong emphasis
+foo ___
+.
+<p>foo ___</p>
+````````````````````````````````
+
+```````````````````````````````` example 452 Emphasis and strong emphasis
+foo __\___
+.
+<p>foo <strong>_</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 456 Emphasis and strong emphasis
+___foo__
+.
+<p>_<strong>foo</strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 461 Emphasis and strong emphasis
+*_foo_*
+.
+<p><em><em>foo</em></em></p>
+````````````````````````````````
+
+```````````````````````````````` example 465 Emphasis and strong emphasis
+____foo____
+.
+<p><strong><strong>foo</strong></strong></p>
+````````````````````````````````
+
+```````````````````````````````` example 469 Emphasis and strong emphasis
+*foo _bar* baz_
+.
+<p><em>foo _bar</em> baz_</p>
+````````````````````````````````
+
+```````````````````````````````` example 473 Emphasis and strong emphasis
+*[bar*](/url)
+.
+<p>*<a href="/url">bar*</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 477 Emphasis and strong emphasis
+__<a href="__">
+.
+<p>__<a href="__"></p>
+````````````````````````````````
+
+```````````````````````````````` example 481 Emphasis and strong emphasis
+__a<https://foo.bar/?q=__>
+.
+<p>__a<a href="https://foo.bar/?q=__">https://foo.bar/?q=__</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 482 Links
+[link](/uri "title")
+.
+<p><a href="/uri" title="title">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 486 Links
+[link](<>)
+.
+<p><a href="">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 490 Links
+[link](foo
+bar)
+.
+<p>[link](foo
+bar)</p>
+````````````````````````````````
+
+```````````````````````````````` example 494 Links
+[a](<b)c
+[a](<b)c>
+[a](<b>c)
+.
+<p>[a](&lt;b)c
+[a](&lt;b)c&gt;
+[a](<b>c)</p>
+````````````````````````````````
+
+```````````````````````````````` example 498 Links
+[link](foo\(and\(bar\))
+.
+<p><a href="foo(and(bar)">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 502 Links
+[link](foo\bar)
+.
+<p><a href="foo%5Cbar">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 506 Links
+[link](/url "title \"&quot;")
+.
+<p><a href="/url" title="title &quot;&quot;">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 510 Links
+[link](   /uri
+  "title"  )
+.
+<p><a href="/uri" title="title">link</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 514 Links
+[link [bar](/uri)
+.
+<p>[link <a href="/uri">bar</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 518 Links
+[foo [bar](/uri)](/uri)
+.
+<p>[foo <a href="/uri">bar</a>](/uri)</p>
+````````````````````````````````
+
+```````````````````````````````` example 522 Links
+[foo *bar](baz*)
+.
+<p><a href="baz*">foo *bar</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 526 Links
+[foo<https://example.com/?search=](uri)>
+.
+<p>[foo<a href="https://example.com/?search=%5D(uri)">https://example.com/?search=](uri)</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 531 Links
+[![moon](moon.jpg)][ref]
+
+[ref]: /uri
+.
+<p><a href="/uri"><img src="moon.jpg" alt="moon" /></a></p>
+````````````````````````````````
+
+```````````````````````````````` example 535 Links
+[foo *bar][ref]*
+
+[ref]: /uri
+.
+<p><a href="/uri">foo *bar</a>*</p>
+````````````````````````````````
+
+```````````````````````````````` example 539 Links
+[foo][BaR]
+
+[bar]: /url "title"
+.
+<p><a href="/url" title="title">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 543 Links
+[foo]
+[bar]
+
+[bar]: /url "title"
+.
+<p>[foo]
+<a href="/url" title="title">bar</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 547 Links
+[foo][ref[bar]]
+
+[ref[bar]]: /uri
+.
+<p>[foo][ref[bar]]</p>
+<p>[ref[bar]]: /uri</p>
+````````````````````````````````
+
+```````````````````````````````` example 551 Links
+[]
+
+[]: /uri
+.
+<p>[]</p>
+<p>[]: /uri</p>
+````````````````````````````````
+
+```````````````````````````````` example 555 Links
+[Foo][]
+
+[foo]: /url "title"
+.
+<p><a href="/url" title="title">Foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 559 Links
+[[*foo* bar]]
+
+[*foo* bar]: /url "title"
+.
+<p>[<a href="/url" title="title"><em>foo</em> bar</a>]</p>
+````````````````````````````````
+
+```````````````````````````````` example 563 Links
+\[foo]
+
+[foo]: /url "title"
+.
+<p>[foo]</p>
+````````````````````````````````
+
+```````````````````````````````` example 567 Links
+[foo]()
+
+[foo]: /url1
+.
+<p><a href="">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 571 Links
+[foo][bar][baz]
+
+[baz]: /url1
+[foo]: /url2
+.
+<p>[foo]<a href="/url1">bar</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 572 Images
+![foo](/url "title")
+.
+<p><img src="/url" alt="foo" title="title" /></p>
+````````````````````````````````
+
+```````````````````````````````` example 576 Images
+![foo *bar*][]
+
+[foo *bar*]: train.jpg "train & tracks"
+.
+<p><img src="train.jpg" alt="foo bar" title="train &amp; tracks" /></p>
+````````````````````````````````
+
+```````````````````````````````` example 580 Images
+![foo](<url>)
+.
+<p><img src="url" alt="foo" /></p>
+````````````````````````````````
+
+```````````````````````````````` example 585 Images
+![*foo* bar][]
+
+[*foo* bar]: /url "title"
+.
+<p><img src="/url" alt="foo bar" title="title" /></p>
+````````````````````````````````
+
+```````````````````````````````` example 589 Images
+![*foo* bar]
+
+[*foo* bar]: /url "title"
+.
+<p><img src="/url" alt="foo bar" title="title" /></p>
+````````````````````````````````
+
+```````````````````````````````` example 593 Images
+\![foo]
+
+[foo]: /url "title"
+.
+<p>!<a href="/url" title="title">foo</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 594 Autolinks
+<http://foo.bar.baz>
+.
+<p><a href="http://foo.bar.baz">http://foo.bar.baz</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 599 Autolinks
+<made-up-scheme://foo,bar>
+.
+<p><a href="made-up-scheme://foo,bar">made-up-scheme://foo,bar</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 603 Autolinks
+<https://example.com/\[\>
+.
+<p><a href="https://example.com/%5C%5B%5C">https://example.com/\[\</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 610 Autolinks
+<foo.bar.baz>
+.
+<p>&lt;foo.bar.baz&gt;</p>
+````````````````````````````````
+
+```````````````````````````````` example 613 Raw HTML
+<a><bab><c2c>
+.
+<p><a><bab><c2c></p>
+````````````````````````````````
+
+```````````````````````````````` example 618 Raw HTML
+<33> <__>
+.
+<p>&lt;33&gt; &lt;__&gt;</p>
+````````````````````````````````
+
+```````````````````````````````` example 623 Raw HTML
+</a></foo >
+.
+<p></a></foo ></p>
+````````````````````````````````
+
+```````````````````````````````` example 627 Raw HTML
+foo <?php echo $a; ?>
+.
+<p>foo <?php echo $a; ?></p>
+````````````````````````````````
+
+```````````````````````````````` example 632 Raw HTML
+<a href="\"">
+.
+<p>&lt;a href=&quot;&quot;&quot;&gt;</p>
+````````````````````````````````
+
+```````````````````````````````` example 633 Hard line breaks
+foo  
+baz
+.
+<p>foo<br />
+baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 638 Hard line breaks
+*foo  
+bar*
+.
+<p><em>foo<br />
+bar</em></p>
+````````````````````````````````
+
+```````````````````````````````` example 642 Hard line breaks
+<a href="foo  
+bar">
+.
+<p><a href="foo  
+bar"></p>
+````````````````````````````````
+
+```````````````````````````````` example 647 Hard line breaks
+### foo  
+.
+<h3>foo</h3>
+````````````````````````````````
+
+```````````````````````````````` example 648 Soft line breaks
+foo
+baz
+.
+<p>foo
+baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 649 Soft line breaks
+foo 
+ baz
+.
+<p>foo
+baz</p>
+````````````````````````````````
+
+```````````````````````````````` example 650 Textual content
+hello $.;'there
+.
+<p>hello $.;'there</p>
+````````````````````````````````
+
+```````````````````````````````` example 652 Textual content
+Multiple     spaces
+.
+<p>Multiple     spaces</p>
+````````````````````````````````
+

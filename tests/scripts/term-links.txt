@@ -1,0 +1,95 @@
+# Links in a terminal tab (term_links.odin): ⌘ held underlines the link under
+# the pointer and shows its target; ⌘-click opens it (http(s): a browser tab of
+# the session, in front; mailto: the mail app), ⇧⌘-click in the default
+# browser; right-click: Open link, Open in default browser, Copy link. An OSC 8
+# link with a javascript: target is no link. Run with tests/scripts/term-links.sh
+# (it writes ~/links.txt: an OSC 8 link, a URL in brackets, a refused OSC 8
+# link, a mail link and a URL that soft-wraps onto the next row).
+wait 1000
+waitfor ARGS: 15000
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; cat ~/links.txt\n"}
+waitfor ZEND 5000
+# no ⌘: no link
+mousecell hover 4 0
+assert_link -
+# ⌘ held: the OSC 8 link, its target in the tip
+mousecell hover 4 0 cmd
+assert_link https://example.com/osc8
+wait 100
+assert_drawn https://example.com/osc8
+shot term-links/hover
+mousecell hover 4 0
+assert_link -
+assert_not_drawn https://example.com/osc8
+# ⇧⌘-click: the default browser
+mousecell click 4 0 cmd shift
+assert_opened https://example.com/osc8
+# a URL in text: the bracket and the period are not part of it
+mousecell hover 10 1 cmd
+assert_link https://example.com/plain?q=1
+mousecell click 10 1 cmd shift
+assert_opened https://example.com/plain?q=1
+# mailto: the mail app, ⌘ alone
+mousecell click 8 3 cmd
+assert_opened mailto:a@example.invalid
+# a URL soft-wrapped onto the next row, clicked on its second row
+mousecell click 3 5 cmd shift
+assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+# javascript: from OSC 8 is never a link (nothing opens)
+mousecell hover 2 2 cmd
+assert_link -
+mousecell click 2 2 cmd
+assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+# a plain click on a link selects, nothing opens
+mousecell click 4 0
+assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
+# right-click on a link: its menu (the URL, Open link, Open in default browser, Copy link)
+mousecell rclick 4 0
+wait 200
+assert_drawn Open link
+assert_drawn Open in default browser
+assert_drawn Copy link
+shot term-links/menu
+clickid menurow 3
+assert_opened https://example.com/osc8
+# ⌘ let go while a field has the keyboard: the link is no longer underlined
+ui_command {"type":"set_focus","widget":"sidebar_filter"}
+mousecell hover 4 0 cmd
+assert_link https://example.com/osc8
+key lcmd
+assert_link -
+assert_not_drawn https://example.com/osc8
+ui_command {"type":"set_focus","widget":""}
+# ⌘ held over a link while a sheet covers the terminal: no tip, no link
+mousecell hover 4 0 cmd
+assert_link https://example.com/osc8
+ui_command {"type":"set_focus","widget":"shortcuts"}
+wait 200
+assert_link -
+assert_not_drawn https://example.com/osc8
+ui_command {"type":"set_focus","widget":""}
+mousecell hover 4 0
+# a program that tracks the mouse: ⌃-click on a link is the right-click menu,
+# ⌃-click elsewhere and ⌘⌃-click on a link go to the program (cat -v shows them)
+command {"type":"send_text","tab_id":$tab,"text":"clear; printf '\\033[?1000h\\033[?1006h'; cat ~/links.txt; echo TRACK''-ON; stty raw -echo; cat -v\n"}
+waitfor TRACK-ON 5000
+wait 300
+mousecell click 4 0 ctrl
+wait 200
+assert_drawn Open in default browser
+key escape
+wait 200
+mousecell click 20 2 ctrl
+mousecell click 4 0 cmd ctrl
+waitfor ^[[<16;5;1M 3000
+assert_screen ^[[<16;21;3M
+assert_opened https://example.com/osc8
+# ⌘-click an http link: a browser tab of this session, in front
+mousecell click 10 1 cmd
+wait 300
+assert_state open_sessions.0.tabs.2.kind browser
+assert_state open_sessions.0.tabs.2.url https://example.com/plain?q=1
+state_json term-links/state
+quit

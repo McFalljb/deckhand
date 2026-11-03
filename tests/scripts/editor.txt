@@ -1,0 +1,118 @@
+# Editor scene (tests/scripts/editor.sh). Tabs: 0 pi, 1 shell, 2 hello.c.
+# open the project's stored session (saved on quit, so run 2 can restore it)
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+assert_state open_sessions.# 1
+command {"type":"new_shell_tab","session":$session}
+wait 500
+# ---- open: tab titled by the file, cursor where asked; a second open focuses it
+command {"type":"open_file","path":"hello.c","line":2,"col":5}
+assert_result ok true
+assert_state open_sessions.0.tabs.2.kind editor
+assert_state open_sessions.0.tabs.2.title hello.c
+command {"type":"open_file","path":"$homedir/proj/hello.c"}
+assert_state open_sessions.0.tabs.# 3
+# git's HEAD text arrives from a worker
+wait 500
+command {"type":"editor_state","tab_id":$last}
+assert_result data.cursor.line 2
+assert_result data.cursor.col 5
+assert_result data.language c
+assert_result data.git.tracked true
+wait 300
+shot editor/open
+# ---- type, undo, redo with keys; save with ⌘S
+type abc
+command {"type":"editor_state","tab_id":$last}
+assert_result data.dirty true
+assert_state open_sessions.0.tabs.2.dirty true
+key z cmd
+command {"type":"editor_state","tab_id":$last}
+assert_result data.dirty false
+key z cmd shift
+# ⌘⌫ deletes to the line start, as in a terminal tab; ⌘Z brings it back
+key backspace cmd
+command {"type":"editor_state","tab_id":$last}
+assert_result data.cursor.col 1
+key z cmd
+command {"type":"editor_state","tab_id":$last}
+assert_result data.cursor.col 8
+type d
+key s cmd
+wait 200
+command {"type":"editor_state","tab_id":$last}
+assert_result data.dirty false
+assert_result data.disk same
+assert_result data.git.modified 1
+# ---- the toolbar: Undo (button 1) then Save (button 0)
+clickid ed_tool 1
+command {"type":"editor_state","tab_id":$last}
+assert_result data.dirty true
+hover ed_tool 0
+wait 600
+shot editor/toolbar-tooltip
+clickid ed_tool 0
+wait 200
+command {"type":"editor_state","tab_id":$last}
+assert_result data.dirty false
+# ---- right-click menu: Select all (row 3)
+rclickid terminal
+wait 200
+shot editor/menu
+clickid menurow 3
+command {"type":"editor_state","tab_id":$last}
+assert_result data.selection.from.line 1
+assert_result data.selection.to.line 4
+key right
+# ---- a clean buffer follows the disk (the shell appends a line)
+clickid tab 1
+wait 300
+paste echo 'int added;' >> hello.c\n
+wait 500
+clickid tab 2
+wait 800
+command {"type":"editor_state","tab_id":$last}
+assert_result data.lines 5
+assert_result data.dirty false
+assert_result data.disk same
+# ---- a dirty one gets the banner; Reload takes the disk's version
+type q
+clickid tab 1
+wait 300
+paste echo 'int theirs;' > hello.c\n
+wait 500
+clickid tab 2
+wait 800
+command {"type":"editor_state","tab_id":$last}
+assert_result data.disk changed
+assert_result data.dirty true
+shot editor/banner
+clickid ed_reload
+wait 200
+command {"type":"editor_state","tab_id":$last}
+assert_result data.disk same
+assert_result data.dirty false
+assert_result data.lines 2
+# ---- closing a dirty tab asks first
+type z
+command {"type":"close_tab","tab_id":$last}
+assert_result error needs_confirmation
+wait 200
+clickid confirm_no
+wait 100
+assert_state pending_confirmations.# 0
+# ---- a 50k-line file; then idle CPU with it open
+command {"type":"open_file","path":"big.c","line":25000}
+command {"type":"editor_state","tab_id":$last}
+assert_result data.lines 50001
+wait 500
+command {"type":"editor_state","tab_id":$last}
+assert_result data.cursor.line 25000
+shot editor/big
+cpu_begin
+wait 3000
+cpu_end idle, 50k-line editor open
+quit

@@ -1,0 +1,187 @@
+# Menu bar (tests/scripts/menu.sh). `menu ID` = a click on the item;
+# `menu_key CODE CHARS MODS [menu|view]` = a key press as AppKit handles it.
+wait 1500
+assert_state open_sessions.# 1
+menubar_dump shots/menu/menubar
+# ---- only the pi tab: what applies
+assert_menu new_shell_tab enabled
+assert_menu close_tab disabled
+assert_menu save_file disabled
+assert_menu undo disabled
+assert_menu find_next disabled
+assert_menu copy enabled
+assert_menu select_all disabled
+assert_menu next_tab disabled
+assert_menu next_session disabled
+assert_menu text_reset disabled
+assert_menu user_guide enabled
+assert_menu toggle_left checked
+assert_menu appearance_system checked
+assert_menu look_graphite checked
+assert_menu show_jobs unchecked
+# ---- View: switches and their checkmarks
+menu toggle_left
+assert_state layout.left_open false
+assert_menu toggle_left unchecked
+menu toggle_left
+assert_state layout.left_open true
+menu show_files
+wait 200
+assert_state layout.left_tab files
+assert_menu show_files checked
+assert_menu show_sessions unchecked
+menu show_sessions
+assert_state layout.left_tab sessions
+assert_state focus.kind terminal
+menu show_jobs
+assert_state layout.left_tab jobs
+assert_menu show_jobs checked
+menu show_sessions
+menu toggle_right
+assert_menu toggle_right unchecked
+menu toggle_right
+assert_menu toggle_right checked
+menu appearance_light
+wait 200
+assert_window light
+assert_menu appearance_light checked
+assert_menu appearance_system unchecked
+menu appearance_system
+menu look_warm
+assert_state settings.theme warm
+assert_menu look_warm checked
+menu look_graphite
+# ---- File and Window: tabs
+menu new_shell_tab
+wait 400
+assert_state open_sessions.0.tabs.# 2
+assert_state focus.tab_id $tab
+assert_menu close_tab enabled
+assert_menu next_tab enabled
+menu tab_1
+assert_state focus.tab_id $pitab
+menu next_tab
+assert_state open_sessions.0.active_tab $tab
+assert_state open_sessions.0.tabs.1.id $tab
+menu prev_tab
+assert_state focus.tab_id $pitab
+# ⇧⌘] and ⇧⌘[ as keys (the menu bar or event(): the same action)
+menu_key 30 } cmd shift
+assert_state open_sessions.0.tabs.1.id $tab
+menu_key 33 { cmd shift
+assert_state focus.tab_id $pitab
+# ⌘2 through the menu bar: to the view's keyDown, as without a menu
+menu_key 19 2 cmd menu
+assert_state open_sessions.0.tabs.1.id $tab
+# ---- terminal keys never match the menu bar: they reach the terminal
+menu_key 51 backspace cmd view
+menu_key 123 left cmd view
+menu_key 124 right cmd view
+menu_key 0 å alt view
+beeps 0
+# ---- ⌘K through the menu bar opens and closes the palette, once each
+menu_key 40 k cmd menu
+assert_state focus.id palette
+menu_key 40 k cmd menu
+assert_state focus.kind terminal
+# ---- another window has the keyboard (the About panel): no key reaches pi-desk
+menu_key 40 k cmd notkey
+assert_state focus.kind terminal
+menu_key 13 w cmd notkey
+assert_state open_sessions.0.tabs.# 2
+# ---- Edit acts on what has the keyboard: the palette's field
+menu palette
+assert_state focus.id palette
+type new
+assert_menu select_all enabled
+assert_menu undo disabled
+menu select_all
+assert_selection new
+key escape
+wait 200
+# ---- text size: View's Bigger, Smaller, Actual, and their keys
+menu text_bigger
+wait 200
+assert_state settings.terminal_text_size 15
+assert_menu text_reset enabled
+menu_key 24 = cmd
+wait 200
+assert_state settings.terminal_text_size 16
+atlas
+shot menu/text-16
+menu_key 27 - cmd
+assert_state settings.terminal_text_size 15
+menu text_reset
+assert_state settings.terminal_text_size 0
+menu_key 24 + cmd shift
+assert_state settings.terminal_text_size 15
+menu text_bigger
+assert_state settings.terminal_text_size 16
+# ---- the editor: Save only with changes; Undo and Redo; ⌘S through the menu bar
+command {"type":"open_file","path":"a.txt"}
+wait 300
+assert_state open_sessions.0.tabs.# 3
+assert_menu save_file disabled
+assert_menu find_next enabled
+type xy
+assert_menu save_file enabled
+assert_menu undo enabled
+menu undo
+assert_menu save_file disabled
+menu redo
+assert_menu save_file enabled
+menu_key 1 s cmd menu
+wait 300
+assert_menu save_file disabled
+menu find_in_file
+assert_state focus.id editor_find
+key escape
+wait 200
+# ---- ⌘W through the menu bar closes the editor tab
+menu_key 13 w cmd menu
+wait 300
+assert_state open_sessions.# 1
+assert_state open_sessions.0.tabs.# 2
+# ---- Window: sessions in order
+menu new_chat
+wait 500
+assert_state open_sessions.# 2
+assert_state open_sessions.1.id $session
+assert_menu next_session enabled
+menu prev_session
+assert_state open_sessions.0.id $session
+menu_key 125 down cmd alt
+assert_state open_sessions.1.id $session
+menu_key 126 up cmd alt
+assert_state open_sessions.0.id $session
+# ---- Help: the guide in a Markdown tab; the shortcuts sheet grouped like the menus
+menu user_guide
+wait 300
+assert_state open_sessions.0.tabs.2.title GUIDE.md
+assert_state open_sessions.0.tabs.2.kind markdown
+# Atlas's copy: read-only (typing and ⌘S change nothing)
+type zz
+assert_menu save_file disabled
+assert_not_md zz
+menu shortcuts
+wait 300
+assert_state focus.id shortcuts
+assert_drawn New session in project
+assert_drawn Settings…
+shot menu/sheet
+key escape
+wait 200
+# ---- Settings… shows the Settings tab; Quit asks while sessions run
+menu settings
+wait 200
+assert_state layout.left_tab settings
+assert_menu settings_tab checked
+menu show_sessions
+menu quit
+wait 200
+assert_state pending_confirmations.# 1
+clickid confirm_no
+wait 200
+assert_state pending_confirmations.# 0
+menubar_dump shots/menu/menubar-end
+quit

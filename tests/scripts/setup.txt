@@ -1,0 +1,91 @@
+# The first-run sheet (tests/scripts/setup.sh): no main folder, PI_DESK_FIRST_RUN=1.
+# A fake vault named in the fake ~/.pi/agent/AGENTS.md is found; separate chats
+# (~/Chats); Done makes the folders; the Jobs tab works; a new chat gets
+# PI_KIT_NOTES_DIR; the sheet reopens from the gear and the menu bar and closes with Esc.
+wait 1500
+assert_state focus.id setup
+assert_state settings.setup_seen false
+assert_state settings.home_dir
+shot setup/step1-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot setup/step1-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# the found notes folder is the first choice: Next
+hover setupbtn 3
+wait 1000
+assert_tip The next step Enter
+key enter
+wait 200
+shot setup/step2-dark
+# chats: a separate folder (pre-selected: ~/Chats has a chat); pick it again by click
+clickid setupopt 0
+wait 100
+clickid setupopt 1
+wait 100
+key enter
+wait 200
+shot setup/step3-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot setup/step3-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# Esc goes back a step, Enter forward again
+key escape
+wait 100
+key enter
+wait 100
+clickid setupbtn 3
+wait 500
+assert_state focus.kind terminal
+assert_state settings.setup_seen true
+assert_state settings.home_dir $homedir/notes/agents-demo
+assert_state settings.folders.jobs.path $homedir/notes/agents-demo/jobs
+assert_state settings.folders.chats.path $homedir/Chats
+assert_state settings.folders.chats.custom true
+assert_state settings.notes_env.value $homedir/notes/agents-demo
+assert_state settings.notes_env.yours false
+# the Jobs tab works: a draft job in the vault's jobs/
+ui_command {"type":"set_pi_path","path":"$homedir/bin/pi"}
+clickid lefttab 3
+wait 300
+ui_command {"type":"job_create","name":"Setup check"}
+waitstate 6000 jobs.# 1
+shot setup/jobs-dark
+# the Settings tab's Folders and Chats groups
+clickid lefttab 2
+wait 500
+shot setup/settings-folders-dark
+# a new chat: in ~/Chats, with PI_KIT_NOTES_DIR=<main folder>
+ui_command {"type":"new_chat","project_id":$chats}
+wait 1500
+# caller rules: the sheet and the folders are the user's
+command {"type":"setup_sheet","open":true}
+assert_result error not allowed for this caller
+command {"type":"set_home_dir","path":"$homedir"}
+assert_result error not allowed for this caller
+command {"type":"set_folder","kind":"jobs","path":"$homedir"}
+assert_result error not allowed for this caller
+# the gear's "Set up pi-desk…" (its button once a main folder is set) reopens it
+# at step 1 (pre-filled with the current main folder); Esc closes, nothing changes
+clickid settings
+wait 200
+shot setup/gear-dark
+clickid pop 26
+wait 200
+assert_state focus.id setup
+shot setup/reopened-dark
+key escape
+wait 200
+assert_state focus.kind terminal
+assert_state settings.home_dir $homedir/notes/agents-demo
+assert_state settings.folders.chats.path $homedir/Chats
+# the menu bar's pi-desk → Set up pi-desk… does the same
+menu setup
+wait 200
+assert_state focus.id setup
+key escape
+wait 200
+assert_state focus.kind terminal
+assert_state settings.home_dir $homedir/notes/agents-demo
+quit

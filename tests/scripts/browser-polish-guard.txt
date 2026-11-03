@@ -1,0 +1,122 @@
+# Tab polish, review round 1 (tests/scripts/browser.sh; docs/BROWSER.md "Step 3 results"): the
+# drawer over the bars, the bars' click guard, the bars' wording, a prompt's field per tab, a
+# camera request dropped by a navigation, downloads without the user's click, popup floods.
+# Page coordinates: tests/web/polish.html.
+wait 1500
+command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+web_waitpaint 10000
+web_title Polish 10000
+# the click guard: a bar that has just appeared ignores a click (it may have come under it)
+web_click 100 290
+waitstate 5000 open_sessions.0.tabs.1.permission.what notifications
+wait 100
+clickid pg_perm_block
+wait 300
+assert_state open_sessions.0.tabs.1.permission.what notifications
+# the permission bar's text: the asking origin, then always what it wants
+assert_drawn pidesk-test://web wants to show notifications
+# Atlas's drawer over the bar: a click on Allow under it never reaches the bar
+key j cmd
+wait 800
+clickid pg_perm_allow
+wait 300
+assert_state open_sessions.0.tabs.1.permission.what notifications
+key j cmd
+wait 800
+clickid pg_perm_block
+web_title perm=denied 5000
+assert_state open_sessions.0.tabs.1.permission <missing>
+# a dialog bar names the asking origin
+web_click 100 40
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind alert
+assert_drawn pidesk-test://web says: Hello from the page
+wait 600
+clickid pg_dialog_ok
+web_title after alert 5000
+# a camera request: its bar; a main-frame navigation denies it and the bar goes
+web_click 280 240
+waitstate 5000 open_sessions.0.tabs.1.permission.what camera
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+web_title Nav A 5000
+waitstate 3000 open_sessions.0.tabs.1.permission <missing>
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/polish.html"}
+web_title Polish 5000
+web_waitpaint 10000
+wait 500
+# tab A's prompt, answered with typed text
+web_click 100 140
+waitstate 5000 open_sessions.0.tabs.1.dialog.kind prompt
+waitstate 2000 focus.id browser_prompt
+type Zed
+wait 600
+key enter
+web_title prompt=Zed 5000
+web_js document.title = 'A'
+web_title A 3000
+# tab B's prompt comes while the address field has the keyboard: A's text is neither shown nor sent
+command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+web_waitpaint 10000
+web_title Polish 10000
+key l cmd
+waitstate 2000 focus.id browser_url
+web_js setTimeout(() => document.title = 'prompt=' + prompt('Again?', 'Bo'), 10)
+waitstate 5000 open_sessions.0.tabs.2.dialog.kind prompt
+assert_not_drawn Zed
+wait 600
+clickid pg_dialog_ok
+web_title prompt=Bo 5000
+key escape
+# a download the page starts without the user's click: a bar asks first; more are refused while
+# it waits (pi-desk's download_policy, or Chromium's own limit on automatic downloads first)
+web_js document.getElementById('dl').click()
+waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
+assert_drawn pidesk-test://web wants to download hidden_ report.txt
+web_js document.getElementById('dl').click()
+wait 1000
+assert_state open_sessions.0.tabs.2.downloads <missing>
+clickid pg_dlask_allow
+waitstate 10000 open_sessions.0.tabs.2.downloads.0.state done
+page_assert file 25 $datadir/downloads/hidden_ report.txt
+assert_state open_sessions.0.tabs.2.download_ask <missing>
+# Block (after a reload: Chromium holds a page's further automatic downloads itself)
+command {"type":"browser_reload","tab_id":$last}
+wait 1500
+web_title Polish 10000
+web_js document.getElementById('dl').click()
+waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
+wait 600
+clickid pg_dlask_block
+waitstate 3000 open_sessions.0.tabs.2.download_ask <missing>
+wait 1000
+assert_state open_sessions.0.tabs.2.downloads.# 1
+# one click allows one download: of three the page starts after it, one goes, the next asks
+web_click 600 400
+web_js for (let i = 0; i < 3; i++) document.getElementById('dl').click()
+waitstate 10000 open_sessions.0.tabs.2.downloads.1.state done
+waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
+wait 1000
+assert_state open_sessions.0.tabs.2.downloads.# 2
+wait 600
+clickid pg_dlask_block
+waitstate 3000 open_sessions.0.tabs.2.download_ask <missing>
+# a main-frame navigation drops a waiting download: its bar goes, nothing is downloaded
+command {"type":"browser_reload","tab_id":$last}
+wait 1500
+web_title Polish 10000
+web_js document.getElementById('dl').click()
+waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+web_title Nav A 5000
+waitstate 3000 open_sessions.0.tabs.2.download_ask <missing>
+wait 1000
+assert_state open_sessions.0.tabs.2.downloads.# 2
+command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/polish.html"}
+web_title Polish 5000
+web_waitpaint 10000
+wait 500
+# one click, then window.open every 50 ms: one popup at most, the rest counted on the bar
+web_click 280 190
+waitstate 15000 open_sessions.0.tabs.2.popups_blocked 9
+assert_state open_sessions.0.tabs.# 4
+web_assert overwrites 0
+quit

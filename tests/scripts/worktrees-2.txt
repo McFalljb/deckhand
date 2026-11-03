@@ -1,0 +1,9 @@
+# Worktrees scene, run 2: the session in the worktree and the checkout its tree shows come back.
+wait 1500
+assert_state layout.left_tab files
+assert_state open_sessions.# 2
+assert_state open_sessions.1.cwd $homedir/proj-b-dirty
+assert_state files.checkouts.0.base $homedir/proj-b-dirty
+assert_state files.checkouts.0.path $homedir/proj
+shot worktrees/restored
+quit

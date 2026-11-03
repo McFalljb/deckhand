@@ -1,0 +1,27 @@
+# Atlas with real pi in its terminal drawer (run with tests/scripts/home-e2e.sh).
+# The session of project demo is a fake pi.
+wait 1000
+waitfor ARGS: 15000
+ui_command {"type":"set_agent_model","model":"opencode-go/deepseek-v4.1-flash"}
+# ⌘J: Atlas's real pi starts with --model and its prompt; its bridge reports
+key j cmd
+wait 12000
+assert_state home.open true
+assert_state focus.id agent_input
+assert_state open_sessions.1.tabs.0.agent idle
+shot home/e2e-start
+type What is your name? Reply with just the name.
+key enter
+wait 30000
+assert_state open_sessions.1.tabs.0.agent idle
+assert_screen Atlas
+assert_state agent.model opencode-go/deepseek-v4.1-flash
+shot home/e2e-name
+type Use desk_state to list the pi-desk projects. Reply in one line with their names.
+key enter
+wait 40000
+assert_state open_sessions.1.tabs.0.agent idle
+assert_screen demo
+state_json e2e-after-2
+shot home/e2e-projects
+quit

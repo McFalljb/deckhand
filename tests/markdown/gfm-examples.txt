@@ -1,0 +1,436 @@
+GFM spec examples for the extensions (tables, task list items, strikethrough,
+autolinks), copied verbatim from https://github.com/github/cmark-gfm/blob/master/test/spec.txt
+(GitHub Flavored Markdown Spec 0.29-gfm, CC-BY-SA 4.0). Examples 9001+ are
+pi-desk's own, written to the same output format. See README.md.
+
+```````````````````````````````` example 198 Tables (extension) [table]
+| foo | bar |
+| --- | --- |
+| baz | bim |
+.
+<table>
+<thead>
+<tr>
+<th>foo</th>
+<th>bar</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>baz</td>
+<td>bim</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 199 Tables (extension) [table]
+| abc | defghi |
+:-: | -----------:
+bar | baz
+.
+<table>
+<thead>
+<tr>
+<th align="center">abc</th>
+<th align="right">defghi</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="center">bar</td>
+<td align="right">baz</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 200 Tables (extension) [table]
+| f\|oo  |
+| ------ |
+| b `\|` az |
+| b **\|** im |
+.
+<table>
+<thead>
+<tr>
+<th>f|oo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b <code>|</code> az</td>
+</tr>
+<tr>
+<td>b <strong>|</strong> im</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 201 Tables (extension) [table]
+| abc | def |
+| --- | --- |
+| bar | baz |
+> bar
+.
+<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+</tbody>
+</table>
+<blockquote>
+<p>bar</p>
+</blockquote>
+````````````````````````````````
+
+```````````````````````````````` example 202 Tables (extension) [table]
+| abc | def |
+| --- | --- |
+| bar | baz |
+bar
+
+bar
+.
+<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+<tr>
+<td>bar</td>
+<td></td>
+</tr>
+</tbody>
+</table>
+<p>bar</p>
+````````````````````````````````
+
+```````````````````````````````` example 203 Tables (extension) [table]
+| abc | def |
+| --- |
+| bar |
+.
+<p>| abc | def |
+| --- |
+| bar |</p>
+````````````````````````````````
+
+```````````````````````````````` example 204 Tables (extension) [table]
+| abc | def |
+| --- | --- |
+| bar |
+| bar | baz | boo |
+.
+<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>bar</td>
+<td></td>
+</tr>
+<tr>
+<td>bar</td>
+<td>baz</td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 205 Tables (extension) [table]
+| abc | def |
+| --- | --- |
+.
+<table>
+<thead>
+<tr>
+<th>abc</th>
+<th>def</th>
+</tr>
+</thead>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 279 Task list items (extension) [disabled]
+- [ ] foo
+- [x] bar
+.
+<ul>
+<li><input disabled="" type="checkbox"> foo</li>
+<li><input checked="" disabled="" type="checkbox"> bar</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 280 Task list items (extension) [disabled]
+- [x] foo
+  - [ ] bar
+  - [x] baz
+- [ ] bim
+.
+<ul>
+<li><input checked="" disabled="" type="checkbox"> foo
+<ul>
+<li><input disabled="" type="checkbox"> bar</li>
+<li><input checked="" disabled="" type="checkbox"> baz</li>
+</ul>
+</li>
+<li><input disabled="" type="checkbox"> bim</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 491 Strikethrough (extension) [strikethrough]
+~~Hi~~ Hello, world!
+.
+<p><del>Hi</del> Hello, world!</p>
+````````````````````````````````
+
+```````````````````````````````` example 492 Strikethrough (extension) [strikethrough]
+This ~~has a
+
+new paragraph~~.
+.
+<p>This ~~has a</p>
+<p>new paragraph~~.</p>
+````````````````````````````````
+
+```````````````````````````````` example 621 Autolinks (extension) [autolink]
+www.commonmark.org
+.
+<p><a href="http://www.commonmark.org">www.commonmark.org</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 622 Autolinks (extension) [autolink]
+Visit www.commonmark.org/help for more information.
+.
+<p>Visit <a href="http://www.commonmark.org/help">www.commonmark.org/help</a> for more information.</p>
+````````````````````````````````
+
+```````````````````````````````` example 623 Autolinks (extension) [autolink]
+Visit www.commonmark.org.
+
+Visit www.commonmark.org/a.b.
+.
+<p>Visit <a href="http://www.commonmark.org">www.commonmark.org</a>.</p>
+<p>Visit <a href="http://www.commonmark.org/a.b">www.commonmark.org/a.b</a>.</p>
+````````````````````````````````
+
+```````````````````````````````` example 624 Autolinks (extension) [autolink]
+www.google.com/search?q=Markup+(business)
+
+www.google.com/search?q=Markup+(business)))
+
+(www.google.com/search?q=Markup+(business))
+
+(www.google.com/search?q=Markup+(business)
+.
+<p><a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a></p>
+<p><a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a>))</p>
+<p>(<a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a>)</p>
+<p>(<a href="http://www.google.com/search?q=Markup+(business)">www.google.com/search?q=Markup+(business)</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 625 Autolinks (extension) [autolink]
+www.google.com/search?q=(business))+ok
+.
+<p><a href="http://www.google.com/search?q=(business))+ok">www.google.com/search?q=(business))+ok</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 626 Autolinks (extension) [autolink]
+www.google.com/search?q=commonmark&hl=en
+
+www.google.com/search?q=commonmark&hl;
+.
+<p><a href="http://www.google.com/search?q=commonmark&amp;hl=en">www.google.com/search?q=commonmark&amp;hl=en</a></p>
+<p><a href="http://www.google.com/search?q=commonmark">www.google.com/search?q=commonmark</a>&amp;hl;</p>
+````````````````````````````````
+
+```````````````````````````````` example 627 Autolinks (extension) [autolink]
+www.commonmark.org/he<lp
+.
+<p><a href="http://www.commonmark.org/he">www.commonmark.org/he</a>&lt;lp</p>
+````````````````````````````````
+
+```````````````````````````````` example 628 Autolinks (extension) [autolink]
+http://commonmark.org
+
+(Visit https://encrypted.google.com/search?q=Markup+(business))
+
+Anonymous FTP is available at ftp://foo.bar.baz.
+.
+<p><a href="http://commonmark.org">http://commonmark.org</a></p>
+<p>(Visit <a href="https://encrypted.google.com/search?q=Markup+(business)">https://encrypted.google.com/search?q=Markup+(business)</a>)</p>
+<p>Anonymous FTP is available at <a href="ftp://foo.bar.baz">ftp://foo.bar.baz</a>.</p>
+````````````````````````````````
+
+```````````````````````````````` example 629 Autolinks (extension) [autolink]
+foo@bar.baz
+.
+<p><a href="mailto:foo@bar.baz">foo@bar.baz</a></p>
+````````````````````````````````
+
+```````````````````````````````` example 630 Autolinks (extension) [autolink]
+hello@mail+xyz.example isn't valid, but hello+xyz@mail.example is.
+.
+<p>hello@mail+xyz.example isn't valid, but <a href="mailto:hello+xyz@mail.example">hello+xyz@mail.example</a> is.</p>
+````````````````````````````````
+
+```````````````````````````````` example 631 Autolinks (extension) [autolink]
+a.b-c_d@a.b
+
+a.b-c_d@a.b.
+
+a.b-c_d@a.b-
+
+a.b-c_d@a.b_
+.
+<p><a href="mailto:a.b-c_d@a.b">a.b-c_d@a.b</a></p>
+<p><a href="mailto:a.b-c_d@a.b">a.b-c_d@a.b</a>.</p>
+<p>a.b-c_d@a.b-</p>
+<p>a.b-c_d@a.b_</p>
+````````````````````````````````
+
+```````````````````````````````` example 9001 pi-desk: a table in a list item
+- | a | b |
+  | - | - |
+  | 1 | 2 |
+.
+<ul>
+<li>
+<table>
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>2</td>
+</tr>
+</tbody>
+</table>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 9002 pi-desk: an escaped pipe in code, alignment, a short row
+| a | b |
+|:--|--:|
+| `x\|y` |
+.
+<table>
+<thead>
+<tr>
+<th align="left">a</th>
+<th align="right">b</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td align="left"><code>x|y</code></td>
+<td align="right"></td>
+</tr>
+</tbody>
+</table>
+````````````````````````````````
+
+```````````````````````````````` example 9003 pi-desk: task items in a loose list
+- [x] done
+
+- [ ] open
+.
+<ul>
+<li>
+<p><input checked="" disabled="" type="checkbox"> done</p>
+</li>
+<li>
+<p><input disabled="" type="checkbox"> open</p>
+</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 9004 pi-desk: not task items
+- [ ]x
+
+* [a] b
+.
+<ul>
+<li>[ ]x</li>
+</ul>
+<ul>
+<li>[a] b</li>
+</ul>
+````````````````````````````````
+
+```````````````````````````````` example 9005 pi-desk: strikethrough runs must match
+~~a~~ ~b~ ~~~c~~~ ~~d~
+.
+<p><del>a</del> <del>b</del> ~~~c~~~ ~~d~</p>
+````````````````````````````````
+
+```````````````````````````````` example 9006 pi-desk: a paragraph before the header row, a blank line ends the table
+intro
+| a |
+| - |
+| b |
+
+after
+.
+<p>intro</p>
+<table>
+<thead>
+<tr>
+<th>a</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>b</td>
+</tr>
+</tbody>
+</table>
+<p>after</p>
+````````````````````````````````
+
+```````````````````````````````` example 9007 pi-desk: bare links and e-mail with trailing punctuation
+See www.example.com/a_b, or mail me@example.org.
+.
+<p>See <a href="http://www.example.com/a_b">www.example.com/a_b</a>, or mail <a href="mailto:me@example.org">me@example.org</a>.</p>
+````````````````````````````````
+
+```````````````````````````````` example 9008 pi-desk: a header-only table
+| a | b |
+| --- | --- |
+.
+<table>
+<thead>
+<tr>
+<th>a</th>
+<th>b</th>
+</tr>
+</thead>
+</table>
+````````````````````````````````
+

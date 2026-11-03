@@ -1,0 +1,416 @@
+# Atlas's jobs (tests/scripts/jobs.sh): a fake `pi --mode json`, a fake notes
+# folder. Rows by note file name: 0 atfile/at2 1 blocked/blk1 2 costly/cost1
+# 3 dash/dash1 4 fail/fail1 5 gone/gone1 6 late/late1 7 loop/loop1 8 ok/ok1
+# 9 once/at1 10 overlap/ovl1 11 secret/sec1 12 silent/sil1 13 spend/spend1
+# (14 zz-draft, made below).
+wait 1500
+window_active off
+ui_command {"type":"set_pi_path","path":"$homedir/bin/pi"}
+ui_command {"type":"set_job_limits","stall":3}
+# ---- the Jobs tab: the fourth left tab; without a notes folder it asks for one
+clickid lefttab 3
+wait 300
+assert_state layout.left_tab jobs
+hover lefttab 3
+wait 1000
+assert_tip Atlas's jobs
+shot jobs/no-notes-dark
+command {"type":"set_notes_dir","path":"$homedir/notes"}
+assert_result ok false
+# the Jobs tab's "Set up pi-desk…": the first-run sheet; another folder, chats inside it
+clickid jobs_notes_dir
+wait 300
+assert_state focus.id setup
+pick_folder $homedir/notes
+clickid setupopt 1
+wait 300
+key enter
+key enter
+key enter
+wait 300
+assert_state focus.kind terminal
+assert_state settings.home_dir $homedir/notes
+assert_state settings.folders.jobs.path $homedir/notes/jobs
+waitstate 6000 jobs.# 14
+# Atlas's prompt: copied into the notes folder (§8)
+assert_file $notesdir/atlas/ATLAS.md Custom prompt text
+# ---- no approvals: every note runs as written (job_approve is gone: jobs_test.odin)
+assert_not_drawn Approve
+assert_not_drawn Draft
+shot jobs/new-dark
+# ---- Run now: the user's on a disabled job (not a script's); every outcome
+command {"type":"job_run_now","job":"ok1"}
+assert_result error this job is disabled: only the user may run it now
+ui_command {"type":"job_run_now","job":"ok1"}
+assert_result ok true
+ui_command {"type":"job_run_now","job":"ok1"}
+assert_result error this job is running
+ui_command {"type":"job_run_now","job":"blk1"}
+ui_command {"type":"job_run_now","job":"cost1"}
+ui_command {"type":"job_run_now","job":"gone1"}
+ui_command {"type":"job_run_now","job":"loop1"}
+ui_command {"type":"job_run_now","job":"sec1"}
+ui_command {"type":"job_run_now","job":"sil1"}
+ui_command {"type":"job_run_now","job":"fail1"}
+ui_command {"type":"job_run_now","job":"dash1"}
+ui_command {"type":"job_run_now","job":"at2"}
+waitstate 15000 jobs.8.last_status ok
+waitstate 15000 jobs.3.last_status ok
+waitstate 15000 jobs.0.last_status ok
+waitstate 15000 jobs.1.last_status needs_you
+waitstate 15000 jobs.2.last_status over_limit
+waitstate 15000 jobs.5.last_status folder_missing
+waitstate 15000 jobs.5.paused true
+waitstate 15000 jobs.7.last_status looping
+waitstate 15000 jobs.11.last_status ok
+waitstate 20000 jobs.12.last_status stalled
+waitstate 15000 jobs.4.last_status failed
+assert_state jobs.8.unread 1
+assert_state jobs.1.needs_you.0 approve the force push
+# minimised: the watchdog still stops a silent run (the scheduler's timer)
+minimize
+wait 500
+ui_command {"type":"job_run_now","job":"sil1"}
+waitstate 20000 jobs.12.recent.# 2
+restore
+wait 500
+# 3 failures in a row → paused, and a nudge
+ui_command {"type":"job_run_now","job":"fail1"}
+waitstate 15000 jobs.4.recent.# 2
+ui_command {"type":"job_run_now","job":"fail1"}
+waitstate 15000 jobs.4.paused true
+assert_state jobs.4.paused_why 3 failures in a row
+# in front: no OS notification for this run (jobs.sh counts them)
+window_active on
+ui_command {"type":"job_run_now","job":"blk1"}
+waitstate 15000 jobs.1.recent.# 2
+window_active off
+# the read-only queries: any caller, redacted
+command {"type":"job_runs","job":"sec1"}
+assert_result ok true
+command {"type":"job_list","unread":true}
+assert_result ok true
+# the bell (notify.odin) got the runs: job.finished through jobs_deliver
+command {"type":"notifications_list","limit":50}
+assert_result ok true
+result_file jobs/bell
+shot jobs/list-dark
+jobs_ui blk1
+wait 300
+shot jobs/needs-you-dark
+jobs_ui ok1
+wait 300
+shot jobs/row-dark
+# Last report opens the summary and marks it read
+clickid jobbtn 3
+wait 500
+waitstate 3000 jobs.8.unread 0
+jobs_ui -
+# ---- schedules: late tick → one skipped line (asleep)
+ui_command {"type":"job_set_enabled","job":"late1","on":true}
+jobs_clock 0
+jobs_clock 1000
+waitstate 3000 jobs.6.recent.# 1
+ui_command {"type":"job_set_enabled","job":"late1","on":false}
+# an `at` job runs once, then disables itself
+ui_command {"type":"job_set_enabled","job":"at1","on":true}
+jobs_clock 0
+jobs_clock 3000
+waitstate 15000 jobs.9.last_status ok
+waitstate 3000 jobs.9.enabled false
+# overlap: a tick while the previous run goes on → skipped
+ui_command {"type":"job_set_enabled","job":"ovl1","on":true}
+jobs_clock 0
+jobs_clock 60
+waitstate 5000 jobs.10.running true
+jobs_clock 60
+ui_command {"type":"job_set_enabled","job":"ovl1","on":false}
+waitstate 20000 jobs.10.last_status ok
+# a daily limit reached mid-run: the run finishes, the next tick is skipped
+ui_command {"type":"job_set_enabled","job":"spend1","on":true}
+jobs_clock 0
+jobs_clock 60
+waitstate 5000 jobs.13.running true
+ui_command {"type":"set_job_limits","day":1}
+waitstate 15000 jobs.13.last_status ok
+jobs_clock 60
+wait 300
+ui_command {"type":"job_set_enabled","job":"spend1","on":false}
+ui_command {"type":"set_job_limits","day":0,"stall":600}
+# ---- a prompt edited in the file runs as edited: no review, no approval
+replace_in_file $notesdir/jobs/ok.md OK|OK as edited
+wait 2500
+ui_command {"type":"job_run_now","job":"ok1"}
+assert_result ok true
+waitstate 15000 jobs.8.recent.# 2
+assert_file $homedir/pi-env-ok1.txt -- OK as edited
+jobs_ui ok1
+wait 300
+assert_not_drawn Approve
+shot jobs/edited-dark
+jobs_ui -
+# ---- job_create from control (an agent): enabled, runs on its schedule with no
+# approval step; Delete → the Trash (confirmed)
+command {"type":"job_create","name":"zz draft","schedule":"every 1h","prompt":"OK"}
+assert_result ok true
+waitstate 6000 jobs.# 15
+assert_state jobs.14.enabled true
+jobs_clock 0
+jobs_clock 3600
+waitstate 15000 jobs.14.last_status ok
+assert_state jobs.14.recent.# 1
+scroll -2000 150 400
+wait 300
+rclickid jobrow 14
+wait 300
+shot jobs/menu-dark
+assert_drawn Disable
+assert_not_drawn Approve
+clickid menurow 10
+wait 300
+assert_state pending_confirmations.# 1
+clickid confirm_yes
+waitstate 6000 jobs.# 14
+# ---- grouped by owner (jobs_owner.odin): proj (fail, ok: folder ~/proj), then Other
+assert_state jobs.8.owner project
+assert_state jobs.8.owner_name proj
+assert_state jobs.4.owner project
+assert_state jobs.1.owner other
+assert_state jobs.1.owner_name Other
+scroll 2000 150 400
+wait 300
+scroll 2000 150 400
+wait 300
+assert_drawn Other
+shot jobs/grouped-dark
+hover jobgroup 0
+wait 1000
+assert_tip Go to proj (~/proj)
+clickid jobgroupfold 1
+wait 300
+assert_not_drawn Job blk1
+shot jobs/grouped-folded-dark
+clickid jobgroupfold 1
+wait 300
+assert_drawn Job blk1
+# ---- the job sheet: New job (+) opens a form; Create writes the note (enabled: true)
+clickid jobstool 0
+wait 300
+assert_state focus.id job_sheet
+assert_drawn New job
+shot jobs/sheet-new-dark
+type zz sheet job
+# an input method's composition shows in the field; its commit lands there
+ime_mark ´
+wait 200
+assert_drawn zz sheet job´
+ime_commit é
+wait 200
+assert_drawn zz sheet jobé
+key backspace
+wait 100
+# the sheet keeps the keyboard: ⌘ shortcuts and a script's set_focus leave it open
+key k cmd
+wait 200
+key f cmd shift
+wait 200
+key e cmd shift
+wait 200
+command {"type":"set_focus","widget":""}
+assert_result ok false
+wait 200
+assert_state focus.id job_sheet
+assert_drawn zz sheet job
+# the menu bar's actions wait too (Quit stays, behind the sheet's question)
+assert_menu setup disabled
+assert_menu toggle_agent disabled
+assert_menu quit enabled
+# opening it again does not wipe it
+ui_command {"type":"job_sheet","open":true}
+assert_result ok false
+assert_drawn zz sheet job
+# Quit with a changed sheet asks "Discard your changes?" first
+ui_command {"type":"quit"}
+assert_result ok false
+wait 200
+assert_state focus.id job_sheet
+assert_drawn Discard your changes?
+clickid jsowner 0
+wait 200
+clickid jspreset 3
+wait 300
+# the preset's own field has the keyboard
+key backspace
+key backspace
+key backspace
+key backspace
+key backspace
+type 08:15
+wait 200
+assert_drawn Next run:
+clickid jsfield 4
+type Check the build.
+key enter
+type Report failures only.
+wait 300
+assert_drawn schedule: "15 8 * * *"
+assert_drawn for_project: ~/proj
+shot jobs/sheet-filled-dark
+# Edit as note and Back to form
+clickid jsbtn 6
+wait 300
+assert_drawn Back to form
+shot jobs/sheet-note-dark
+clickid jsbtn 6
+wait 300
+assert_drawn Edit as note
+clickid jsbtn 9
+waitstate 6000 jobs.# 15
+assert_state focus.kind terminal
+assert_state jobs.14.name zz sheet job
+assert_state jobs.14.owner project
+assert_file $notesdir/jobs/zz-sheet-job.md for_project: ~/proj
+assert_file $notesdir/jobs/zz-sheet-job.md schedule: "15 8 * * *"
+assert_file $notesdir/jobs/zz-sheet-job.md Check the build.
+assert_file $notesdir/jobs/zz-sheet-job.md Report failures only.
+assert_file $notesdir/jobs/zz-sheet-job.md enabled: true
+# Edit (its menu): the same sheet, filled from the note; Save rewrites it
+rclickid jobrow 2
+wait 300
+clickid menurow 4
+wait 300
+assert_state focus.id job_sheet
+assert_drawn Edit job
+clickid jsfield 4
+type  Now.
+clickid jsbtn 6
+wait 300
+assert_drawn ## Recent runs
+clickid jsbtn 6
+wait 300
+# the note changes on disk meanwhile (a run, another editor): Save is refused
+# and the sheet keeps what was typed; Reload (after a confirm) reads the new note
+replace_in_file $notesdir/jobs/zz-sheet-job.md schedule: "15 8 * * *"|schedule: "45 9 * * *"
+clickid jsbtn 9
+wait 500
+assert_state focus.id job_sheet
+assert_drawn This job's note changed on disk since you opened it.
+assert_drawn Report failures only. Now.
+assert_not_file $notesdir/jobs/zz-sheet-job.md Report failures only. Now.
+assert_file $notesdir/jobs/zz-sheet-job.md schedule: "45 9 * * *"
+clickid jsbtn 10
+wait 300
+assert_drawn Discard your changes and load the new version?
+assert_drawn Report failures only. Now.
+clickid jsbtn 10
+wait 300
+assert_drawn schedule: "45 9 * * *"
+assert_not_drawn Report failures only. Now.
+assert_not_drawn This job's note changed on disk
+clickid jsfield 4
+type  Now.
+clickid jsbtn 9
+wait 500
+assert_state focus.kind terminal
+assert_file $notesdir/jobs/zz-sheet-job.md Report failures only. Now.
+assert_file $notesdir/jobs/zz-sheet-job.md ## Recent runs
+assert_file $notesdir/jobs/zz-sheet-job.md schedule: "45 9 * * *"
+# Cancel changes nothing
+rclickid jobrow 2
+wait 300
+clickid menurow 4
+wait 300
+clickid jsfield 0
+type  CHANGED
+# a changed sheet asks first: Cancel (or Esc) again discards
+clickid jsbtn 8
+wait 300
+assert_state focus.id job_sheet
+assert_drawn Discard your changes?
+key escape
+wait 300
+assert_state focus.kind terminal
+assert_not_file $notesdir/jobs/zz-sheet-job.md CHANGED
+# the group's "+": the sheet with that project chosen; Esc closes it
+hover jobgroup 0
+wait 300
+clickid jobgroupnew 0
+wait 300
+assert_state focus.id job_sheet
+assert_drawn for_project: ~/proj
+# files dropped while the sheet is open go nowhere (no new project)
+assert_state projects.# 2
+drop sidebar $notesdir/jobs
+wait 300
+assert_state projects.# 2
+assert_state focus.id job_sheet
+key escape
+wait 300
+assert_state focus.kind terminal
+# a group row goes to its project
+clickid jobgroup 0
+wait 300
+assert_state layout.left_tab sessions
+# the project's menu and the row under it open the sheet for it
+rclickid proj 0
+wait 300
+shot jobs/project-menu-dark
+clickid menurow 2
+wait 300
+assert_state focus.id job_sheet
+assert_drawn for_project: ~/proj
+key escape
+wait 300
+clickid newjob
+wait 300
+assert_state focus.id job_sheet
+assert_drawn for_project: ~/proj
+key escape
+wait 300
+clickid lefttab 3
+wait 300
+# ---- pause all from the header, resume from the banner; the limits
+clickid jobstool 1
+wait 300
+assert_state settings.jobs_paused true
+command {"type":"job_run_now","job":"ok1"}
+assert_result ok false
+shot jobs/paused-dark
+clickid jobs_resume_all
+wait 300
+assert_state settings.jobs_paused false
+clickid jobstool 2
+wait 300
+clickid joblimit 3
+wait 200
+assert_state settings.job_limits.day 1
+shot jobs/limits-dark
+clickid joblimit 3
+clickid joblimit 3
+clickid joblimit 3
+wait 200
+assert_state settings.job_limits.day 0
+# ---- light
+ui_command {"type":"set_appearance","mode":"light"}
+wait 500
+shot jobs/limits-light
+clickid jobstool 2
+jobs_ui blk1
+wait 300
+shot jobs/list-light
+jobs_ui -
+# ---- the Settings tab lists the notes folder and the job notes
+clickid lefttab 2
+wait 500
+assert_not_drawn sk-ant-api03
+shot jobs/settings-light
+ui_command {"type":"set_appearance","mode":"dark"}
+clickid lefttab 3
+wait 500
+assert_not_drawn sk-ant-api03
+# ---- idle: the scheduler's tick draws nothing
+wait 3000
+cpu_begin
+wait 10000
+cpu_end jobs idle
+quit

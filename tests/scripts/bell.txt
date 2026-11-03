@@ -1,0 +1,115 @@
+# The bell (run with tests/scripts/bell.sh): a fake bridge per session plays
+# working → idle (aaaa-1) and working → waiting (bbbb-2), 5 s apart.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+assert_state notifications.count 0
+shot bell/empty-bar
+# aaaa-1 starts working; then bbbb-2 takes the screen, so aaaa-1 runs in the background
+clickid sess 1
+waitfor aaaa-1 10000
+wait 1500
+assert_state open_sessions.0.tabs.0.agent working
+clickid sess 0
+waitfor bbbb-2 10000
+# the window goes to the background before bbbb-2 opens its dialog
+window back
+# aaaa-1 ends in the background: an entry, bell only (no OS notification)
+wait 4500
+assert_state notifications.count 1
+command {"type":"notifications_list"}
+assert_result data.notifications.0.kind finished
+assert_result data.notifications.0.project recipe-box
+assert_result data.notifications.0.title Import recipes from a CSV export
+assert_state notifications.os_notified 0
+# bbbb-2 waits for the user while the window is behind: an entry and an OS notification
+wait 3000
+assert_state open_sessions.1.tabs.0.waiting true
+assert_state notifications.count 2
+assert_state notifications.unread 2
+assert_state notifications.os_notified 1
+command {"type":"notifications_list","limit":1}
+assert_result data.notifications.# 1
+assert_result data.notifications.0.kind waiting
+# the window comes back: bbbb-2 is on screen, its entry is read
+window front
+assert_state notifications.unread 1
+shot bell/badge
+# the bell: its button, then the popover
+hover bell
+wait 700
+assert_tip Notifications
+clickid bell
+wait 300
+assert_state focus.id notifications
+shot bell/popover-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot bell/popover-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# a script cannot open it, mark or clear
+command {"type":"notifications_clear"}
+assert_result error not allowed for this caller
+# the newest first: bbbb-2's (read), then aaaa-1's: a click focuses aaaa-1 and reads it
+hover bellrow 1
+wait 700
+assert_tip Go to this session
+clickid bellrow 1
+wait 500
+assert_state focus.kind terminal
+assert_state notifications.unread 0
+assert_screen aaaa-1
+command {"type":"notifications_list"}
+assert_result data.notifications.1.read true
+# the gear: "Notify me about" (finished off, then on again) and macOS notifications
+clickid settings
+wait 300
+shot bell/gear
+clickid pop 8
+wait 200
+assert_state settings.bell.finished false
+clickid pop 8
+assert_state settings.bell.finished true
+clickid pop 12
+assert_state settings.bell.os false
+clickid pop 12
+assert_state settings.bell.os true
+key escape
+# another run ends in the background (aaaa-1, now behind bbbb-2): the badge
+command {"type":"pi_prompt","tab_id":$pitab,"text":"working"}
+command {"type":"pi_prompt","tab_id":$pitab,"text":"later:idle"}
+clickid sess 0
+waitfor bbbb-2 10000
+wait 6500
+assert_state notifications.unread 1
+shot bell/badge-1280
+resize 800 600
+wait 400
+shot bell/badge-800
+clickid bell
+wait 300
+shot bell/popover-800
+key escape
+command {"type":"set_layout","left_open":false}
+wait 300
+shot bell/badge-800-noleft
+command {"type":"set_layout","left_open":true}
+resize 1280 800
+wait 400
+# idle with the popover open: no frames
+clickid bell
+wait 500
+cpu_begin
+wait 3000
+cpu_end bell-open-idle
+# Mark all read, then Clear (the header's buttons)
+clickid bell_markall
+wait 200
+assert_state notifications.unread 0
+assert_state notifications.count 3
+clickid bell_clear
+wait 200
+assert_state notifications.count 0
+shot bell/cleared
+key escape
+quit

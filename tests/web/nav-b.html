@@ -1,0 +1,13 @@
+<!doctype html>
+<!-- Browser navigation fixture: the page nav-a.html links to (pidesk-test://web/nav-b.html).
+     Its title says whether it has an opener (a popup keeps window.opener):
+     "Nav B" or "Nav B opener". #to-a 20,20 200x40 links back. -->
+<html><head><meta charset="utf-8"><title>Nav B</title>
+<style>
+  html, body { margin: 0; background: #fff8e0; font: 16px -apple-system, sans-serif; }
+  #to-a { position: absolute; left: 20px; top: 20px; width: 200px; height: 40px; display: block; }
+</style></head>
+<body>
+<a id="to-a" href="nav-a.html">To A</a>
+<script>if (window.opener) document.title = 'Nav B opener';</script>
+</body></html>

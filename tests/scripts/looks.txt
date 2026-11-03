@@ -1,0 +1,100 @@
+# Screenshot scene for build/shots/looks/ (run with tests/scripts/looks.sh): the
+# same scene in every look, dark and light, with a fake pi; then appearance
+# checks (window, OS following) and idle CPU per look in light.
+wait 1000
+waitfor fake bridge 30000
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"sh \"$PI_DESK_TEXT_SAMPLE\"; ls ~/code; for i in 0 1 2 3 4 5 6 7; do printf '\\e[4%sm    \\e[0m' $i; done; echo; for i in 0 1 2 3 4 5 6 7; do printf '\\e[10%sm    \\e[0m' $i; done; echo; for i in 16 46 51 196 201 226 231 232 240 244 250 255; do printf '\\e[38;5;%sm%s \\e[0m' $i $i; done; echo"}
+key enter
+wait 800
+command {"type":"focus_tab","tab_id":$pitab}
+# confirmation bar (quit while sessions run) and the rename field, focused
+command {"type":"quit"}
+# the rename field (the project row's menu has Rename… too)
+key k cmd
+type rename project
+key enter
+key end
+key left shift
+key left shift
+key left shift
+key left shift
+# hover a session row
+hover sess 1
+wait 2500
+ui_command {"type":"set_appearance","mode":"dark"}
+assert_window dark
+ui_command {"type":"set_theme","name":"graphite"}
+wait 300
+shot looks/graphite-dark-pi
+command {"type":"focus_tab","tab_id":$last}
+wait 300
+shot looks/graphite-dark-shell
+ui_command {"type":"set_appearance","mode":"light"}
+assert_window light
+assert_state settings.light true
+wait 300
+shot looks/graphite-light-shell
+command {"type":"focus_tab","tab_id":$pitab}
+wait 300
+shot looks/graphite-light-pi
+ui_command {"type":"set_theme","name":"warm"}
+wait 300
+shot looks/warm-light-pi
+command {"type":"focus_tab","tab_id":$last}
+wait 300
+shot looks/warm-light-shell
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 300
+shot looks/warm-dark-shell
+command {"type":"focus_tab","tab_id":$pitab}
+wait 300
+shot looks/warm-dark-pi
+ui_command {"type":"set_theme","name":"ghostty"}
+wait 300
+shot looks/ghostty-dark-pi
+command {"type":"focus_tab","tab_id":$last}
+wait 300
+shot looks/ghostty-dark-shell
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot looks/ghostty-light-shell
+command {"type":"focus_tab","tab_id":$pitab}
+wait 300
+shot looks/ghostty-light-pi
+assert_state settings.theme ghostty
+assert_state settings.appearance light
+# the palette's appearance actions, in light
+key k cmd
+type appear
+wait 400
+shot looks/ghostty-light-palette
+assert_palette 0 action:appearance_system
+key escape
+# system: follows the OS (simulated through the platform callback's path)
+ui_command {"type":"set_appearance","mode":"system"}
+system_appearance light
+assert_state settings.light true
+system_appearance dark
+assert_state settings.light false
+assert_state settings.appearance system
+system_appearance light
+# idle CPU per look in light (pi idle, field focused, bar shown)
+ui_command {"type":"set_appearance","mode":"light"}
+ui_command {"type":"set_theme","name":"graphite"}
+wait 2000
+cpu_begin
+wait 10000
+cpu_end idle graphite light
+ui_command {"type":"set_theme","name":"warm"}
+wait 2000
+cpu_begin
+wait 10000
+cpu_end idle warm light
+ui_command {"type":"set_theme","name":"ghostty"}
+wait 2000
+cpu_begin
+wait 10000
+cpu_end idle ghostty light
+quit

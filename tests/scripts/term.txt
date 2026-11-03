@@ -1,0 +1,112 @@
+# Terminal input: selection drawn during a drag, drags reported to an app
+# with its button, macOS line-editing keys. Run with tests/scripts/run.sh.
+# Screenshots go to build/shots/term/.
+wait 1000
+waitfor ARGS: 15000
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; echo 'hello-world foo.bar (baz) /tmp/x_y'\n"}
+wait 800
+# ---- the selection is on screen while the button is still down
+mousecell down 2 0
+wait 100
+assert_drawn_selection 0
+mousecell move 8 0
+wait 200
+assert_drawn_selection 1
+assert_selection llo-wor
+mousecell move 18 0
+shot term/drag-mid
+assert_drawn_selection 1
+assert_selection llo-world foo.bar
+mousecell up 18 0
+wait 200
+assert_selection llo-world foo.bar
+# shift-click extends, a plain click clears
+mousecell down 22 0 shift
+mousecell up 22 0 shift
+assert_selection llo-world foo.bar (ba
+mousecell down 5 0
+mousecell up 5 0
+wait 200
+assert_selection 
+assert_drawn_selection 0
+# ---- a drag cut short by a tab switch (⌘1, ⌘2) or the window going to the
+# background ends there: back in the tab, a move past the top edge neither
+# extends the selection nor scrolls
+command {"type":"send_text","tab_id":$tab,"text":"clear; seq 1 300; echo END-MARK\n"}
+wait 800
+mousecell down 2 3
+mousecell move 2 5
+key 1 cmd
+wait 200
+key 2 cmd
+wait 200
+mousecell move 2 -3
+wait 800
+assert_screen END-MARK
+mousecell down 2 3
+mousecell move 2 5
+window back
+window front
+mousecell move 2 -3
+wait 800
+assert_screen END-MARK
+mousecell up 2 -3
+# ---- an app with button-motion mouse tracking (1002 + SGR) gets the drag
+# with its button (32 = left drag); cat -v shows the bytes
+command {"type":"send_text","tab_id":$tab,"text":"clear; printf '\\033[?1002h\\033[?1006h'; stty raw -echo; cat -v\n"}
+wait 800
+state
+mousecell down 2 3
+mousecell move 4 3
+mousecell move 6 3
+mousecell up 6 3
+command {"type":"send_text","tab_id":$tab,"text":"\n"}
+waitfor ^[[<0;3;4M^[[<32;5;4M^[[<32;7;4M^[[<0;7;4m 3000
+assert_screen ^[[<32;5;4M
+# shift+drag selects instead (nothing reported)
+mousecell down 0 0 shift
+mousecell move 4 0 shift
+wait 200
+assert_drawn_selection 1
+mousecell up 4 0 shift
+# ---- macOS line-editing keys, as Ghostty: ⌥⌫ ⌘⌫ ⌥← ⌥→ ⌘← ⌘→ ⌥⌦
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; stty raw -echo; cat -v\n"}
+wait 800
+# ⌘ chords without a mapping send nothing (they are the app's or nobody's)
+type X
+key left cmd shift
+key backspace cmd alt
+key right cmd ctrl
+type Y
+key backspace alt
+key backspace cmd
+key left alt
+key right alt
+key left cmd
+key right cmd
+key delete alt
+command {"type":"send_text","tab_id":$tab,"text":"\n"}
+waitfor ^[^?^U^[b^[f^A^E^[d 3000
+assert_screen XY^[^?^U^[b^[f^A^E^[d
+shot term/keys
+# the same keys through AppKit: keyDown: with NSEvents built in-process (the
+# input-method wrapper, then sokol), the ⌘ ones past the app's ⌘ shortcuts
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; stty raw -echo; cat -v\n"}
+wait 800
+ime_key 51 backspace alt
+ime_key 51 backspace cmd
+ime_key 123 left alt
+ime_key 124 right alt
+ime_key 123 left cmd
+ime_key 124 right cmd
+ime_key 117 delete alt
+command {"type":"send_text","tab_id":$tab,"text":"\n"}
+waitfor ^[^?^U^[b^[f^A^E^[d 3000
+assert_screen ^[^?^U^[b^[f^A^E^[d
+quit

@@ -1,0 +1,9 @@
+# CEF pin (docs/BROWSER.md §1.6). Read by scripts/fetch-cef.sh; binaries are never committed.
+# Source: https://cef-builds.spotifycdn.com/index.html, stable channel, minimal distribution.
+# SHA1 is the CDN's own; SHA256 is ours, taken at the first download (SHA1 matched the CDN).
+CEF_VERSION=156.0.15+gcf671c0+chromium-156.0.8078.80
+CEF_DIST=minimal
+CEF_FILE_macosarm64=cef_binary_156.0.15+gcf671c0+chromium-156.0.8078.80_macosarm64_minimal.tar.bz2
+CEF_SIZE_macosarm64=135024501
+CEF_SHA1_macosarm64=bcdd1877edb300b0fb91d8f71c0b14aae256cd0f
+CEF_SHA256_macosarm64=a27f1d856e84047657ed2a14caf355fb04480c4fe1963f04249a8a3184af1c30

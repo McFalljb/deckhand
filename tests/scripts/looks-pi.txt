@@ -1,0 +1,28 @@
+# Real pi follows pi-desk's light/dark (run with LOOKS_PI=real tests/scripts/looks.sh):
+# pi runs with --use-theme system, turns on mode 2031 and re-queries the
+# terminal's colours when pi-desk reports a switch. One short prompt to pi.
+wait 1000
+waitfor deepseek 30000
+wait 1000
+type Reply with one short sentence: what is a terminal emulator?
+key enter
+wait 9000
+state
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 1500
+shot looks/pi-real-graphite-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 1500
+shot looks/pi-real-graphite-light
+ui_command {"type":"set_theme","name":"warm"}
+wait 1500
+shot looks/pi-real-warm-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 1500
+shot looks/pi-real-warm-dark
+ui_command {"type":"set_theme","name":"ghostty"}
+ui_command {"type":"set_appearance","mode":"light"}
+wait 1500
+shot looks/pi-real-ghostty-light
+state
+quit

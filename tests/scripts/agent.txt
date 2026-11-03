@@ -1,0 +1,96 @@
+# Atlas in its terminal drawer (tests/scripts/agent.sh): pi's terminal UI
+# (a fake: tests/scripts/fake-atlas.py) with its bridge; the model setting,
+# the Model button (pi's selector key), unread and the needs-you tint from
+# the bridge status, pin, the prompt file. Screenshots: build/shots/agent/.
+wait 1000
+command {"type":"set_agent_model","model":"opencode-go/deepseek-v4.1-flash"}
+assert_result error not allowed for this caller
+ui_command {"type":"set_agent_model","model":"opencode-go/deepseek-v4.1-flash"}
+assert_state settings.agent_model opencode-go/deepseek-v4.1-flash
+key j cmd
+waitfor control token: yes 10000
+assert_screen model: opencode-go/deepseek-v4.1-flash
+assert_screen prompt: # Atlas
+assert_state home.open true
+assert_state focus.id agent_input
+assert_state agent.model opencode-go/deepseek-v4.1-flash
+shot agent/open
+# Send to Atlas: a session's info goes into Atlas's input, pasted, not sent
+command {"type":"session_info","project_id":$project,"pi_session_id":"demo-1","to":"agent"}
+assert_result error only the user sends to the agent
+command {"type":"session_info","project_id":$project,"pi_session_id":"demo-1"}
+assert_result ok true
+assert_result data.id demo-1
+assert_result data.title Fix the demo build
+key j cmd
+wait 300
+assert_state home.open false
+ui_command {"type":"session_info","project_id":$project,"pi_session_id":"demo-1","to":"agent"}
+assert_result ok true
+waitfor [pasted 9 lines] 8000
+assert_state home.open true
+assert_state focus.id agent_input
+assert_screen id: demo-1
+assert_screen title: Fix the demo build
+assert_screen project: demo
+shot agent/send-to-atlas
+# the Model button: pi's selector in Atlas's terminal
+clickid drawer_model
+waitfor [model selector] 5000
+assert_state focus.id agent_input
+shot agent/model-selector
+# the palette does the same
+key k cmd
+type change model
+assert_palette 0 action:agent_model
+key escape
+wait 200
+clickid drawer_term
+wait 200
+assert_state focus.id agent_input
+# a run that ends while the drawer is shut: unread, read on opening
+type go
+key enter
+key j cmd
+wait 2000
+assert_state home.open false
+assert_state agent.unread 1
+shot agent/unread
+key j cmd
+wait 300
+assert_state agent.unread 0
+assert_screen Done: two projects
+# a dialog while shut: the needs-you tint
+type ask
+key enter
+key j cmd
+wait 500
+assert_state agent.needs_user true
+shot agent/needs-you
+key j cmd
+wait 300
+type main
+key enter
+wait 300
+assert_state agent.needs_user false
+assert_screen answered: main
+# pinned as a column; the terminal follows
+clickid drawer_pin
+wait 400
+assert_state layout.drawer_pinned true
+shot agent/pinned
+clickid drawer_pin
+wait 400
+# the Settings tab's Atlas group: the prompt file, the model with Change…
+ui_command {"type":"set_left_tab","tab":"settings"}
+wait 300
+assert_files [Atlas]\nATLAS.md\nModel: opencode-go/deepseek-v4.1-flash [Change…]\n
+shot agent/settings-group
+# the palette's "edit prompt": the prompt file in an editor tab
+key k cmd
+type edit prompt
+key enter
+wait 500
+assert_state open_sessions.0.tabs.1.title ATLAS.md
+shot agent/prompt
+quit

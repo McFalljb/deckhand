@@ -1,0 +1,81 @@
+# A fast window drag (tests/scripts/browser.sh; review round 1): the pane changes
+# size every ~30 ms, 30 times. The ring must not be remade for every size CEF
+# paints at (at most 8 rings; 21 before headroom), at most two rings may be alive
+# at once (6 surfaces); the page ends up drawn
+# whole at the final size.
+wait 1500
+resize 1100 700
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+wait 300
+web_mark
+resize 1120 712
+wait 30
+resize 1140 724
+wait 30
+resize 1160 736
+wait 30
+resize 1180 748
+wait 30
+resize 1200 760
+wait 30
+resize 1220 772
+wait 30
+resize 1240 784
+wait 30
+resize 1260 796
+wait 30
+resize 1280 808
+wait 30
+resize 1300 820
+wait 30
+resize 1320 832
+wait 30
+resize 1340 844
+wait 30
+resize 1360 856
+wait 30
+resize 1380 868
+wait 30
+resize 1400 880
+wait 30
+resize 1420 892
+wait 30
+resize 1440 904
+wait 30
+resize 1460 916
+wait 30
+resize 1480 928
+wait 30
+resize 1500 940
+wait 30
+resize 1470 922
+wait 30
+resize 1440 904
+wait 30
+resize 1410 886
+wait 30
+resize 1380 868
+wait 30
+resize 1350 850
+wait 30
+resize 1320 832
+wait 30
+resize 1290 814
+wait 30
+resize 1260 796
+wait 30
+resize 1230 778
+wait 30
+resize 1200 760
+wait 30
+wait 800
+web_pixel 300 50 ff0000
+web_stats
+web_assert rings_max 8
+web_assert surfaces_peak_max 6
+web_assert overwrites 0
+web_assert inflight_writes 0
+web_assert surfaces 3
+quit

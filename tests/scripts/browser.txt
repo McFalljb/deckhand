@@ -1,0 +1,35 @@
+# Browser tab spike (tests/scripts/browser.sh; docs/BROWSER.md §6 step 1).
+# Page coordinates are CSS px from the page's top-left (tests/web/browser.html).
+wait 1500
+assert_state open_sessions.# 1
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+assert_state open_sessions.0.tabs.1.kind browser
+# rendered: the red swatch, read back from the tab's texture
+web_pixel 300 50 ff0000
+web_stats
+# click the button: the page changes
+web_click 120 50
+web_title c=1
+web_pixel 300 50 00c000
+# type into the input (pi-desk's key path: KEY_DOWN/CHAR/KEY_UP)
+web_click 170 130
+type hello World
+web_title v=hello World
+key backspace
+web_title v=hello Worl
+# no paint went into the texture pi-desk's last frame sampled (its GPU work may
+# still run: a torn frame); BROWSER.md §6 step 2
+web_assert overwrites 0
+web_assert inflight_writes 0
+shot browser/typed
+# scroll the long area
+web_scroll -10 400 400
+wait 600
+web_js document.title = 'scrolled ' + (window.scrollY > 100 ? 'yes' : 'no') + ' ' + Math.round(window.scrollY)
+web_title scrolled yes
+# what pi-desk drew (the page in the tab, chrome around it)
+shot browser/page
+web_stats
+quit

@@ -1,0 +1,632 @@
+# Atlas: jobs and memory (design)
+
+Status: draft 3, 2026-11-01. Step 1 (§9) is built: `src/jobs*.odin`, `src/ui_jobs.odin`; what
+it does differently from this design is listed under "Step 1 as built" in §9. Decisions taken
+after the first draft are in §10. How Atlas runs today:
+[PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent), `src/agent.odin`.
+
+Markers: **Decided** = a settled design decision (not reopened here) · **Proposal** = this doc's choice,
+open to change · **Unverified** = depends on platform behaviour nobody has tested yet · ❓ = open
+question (§10).
+
+The idea, in the spirit of Hermes Agent and OpenClaw: in the end it is a cron job with its own
+memory management. So: a clock that starts fresh pi runs, a folder of markdown memory every agent
+can read, and a way for results to reach the user. On safety: jobs exist to finish while no one is
+around, so stopping to ask on every run would defeat them. Runs never stop to ask; they finish and
+report.
+
+## 1. Goals and non-goals
+
+**Goals**
+- User-created jobs that start pi on a schedule, even when pi-desk is closed (**Decided**).
+- Jobs may act while the user is away; no jobs by default (**Decided**). Jobs need no approval:
+  any job note runs on its schedule, agents may create and edit jobs (**Decided** 2026-11-01, §10.3).
+- One memory folder shared by pi, Claude Code, Atlas and jobs: the user's notes folder
+  (pi-kit's `PI_KIT_NOTES_DIR`) (**Decided**).
+- Results reach the user: the Jobs tab, the notification centre (`job.finished`), a macOS notification (§7).
+- Cheap when idle: no-agent checks and a quiet heartbeat cost no model call when nothing changed.
+
+**Non-goals (for now)**
+- Slack, phone or email delivery (**Decided**: later; §7 names the hook point).
+- A sandbox in v1. Guardrails are pattern rails, not a boundary; phase 2 is §4.7 (**Decided**).
+- Embeddings over memory; plain text search first (§6).
+- Atlas writing new skills on its own (pi's skills folder; new skills ask first).
+- Linux and Windows helpers (macOS first).
+
+What we took from other systems, with links: §11.
+
+## 2. Folder layout (notes root)
+
+The notes root is pi-desk's main folder (setting `home_dir`, formerly `notes_dir`; GUIDE.md
+"Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (pi-desk's
+environment, else read once per start from the login shell) or a notes folder named in pi's
+global AGENTS.md, or `~/pi-desk`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
+`chats/`) may be overridden. pi-desk passes `PI_KIT_NOTES_DIR=<home_dir>` to every pi tab and
+job run unless the user's own environment sets it (theirs wins).
+
+```
+<notes root>/                    (may already hold other notes: sessions/, projects/, …)
+  atlas/
+    ATLAS.md                     Atlas's prompt (moved from pi-desk's data dir, §8)
+    HEARTBEAT.md                 the heartbeat checklist (§3.4)
+  memory/
+    USER.md                      who the user is, preferences      cap 1,500 chars
+    MEMORY.md                    durable facts, lessons, pointers  cap 4,000 chars
+    FORGOTTEN.md                 things the user asked to forget; never re-promoted
+    changes.log                  append-only: one line per USER/MEMORY change
+    daily/YYYY-MM-DD.md          append-only daily log
+    .history/YYYY-MM-DD.md       copy of USER/MEMORY before any rewrite
+  jobs/
+    <slug>.md                    one note per job: definition + recent runs
+```
+
+**Frontmatter** follows the notes folder's conventions (pi-kit's, when it is a pi-kit notes
+folder). Proposal: new `type` values `atlas`, `memory`, `daily`, `job`; `project: atlas`;
+`updated_by` gains `atlas`. pi-desk never edits the folder's own README for that.
+
+**Who writes what** (Proposal)
+
+| File | Writers | Rule |
+|---|---|---|
+| `atlas/*`, `jobs/<slug>.md` definition | the user; interactive Atlas or Claude | protected from job runs (§4.1); a note runs as written, no approval (§3.6) |
+| `jobs/<slug>.md` `## Recent runs` | pi-desk's scheduler only (code, not a model) | rewrites only that section, atomically |
+| `memory/USER.md`, `MEMORY.md` | the user or the curation job directly; everyone else through the memory tools or `pi-kit memory` | single writer: lock, caps, scans, backup (§6) |
+| `memory/daily/*.md` | memory tools (any agent, job runs included) | append-only, one tagged line per write |
+| `sessions/*` | each main session its own (pi `-pi-`, Claude, Atlas `-atlas-`) | unchanged |
+
+**Concurrent edits.** Writers are pi, Claude Code, Atlas, job runs, pi-desk and Obsidian. Every
+programmatic write re-reads the file, changes only its own section or line, writes a temp file
+in the same folder and renames it over the original, and retries once if the mtime changed in
+between. Appends use `O_APPEND`, one short line per write. `memory/.lock` (exclusive create,
+stale after 30 s) serialises USER/MEMORY changes across processes.
+
+**"Only main sessions write notes"** stays. A job run is not a main session: its record is the
+job note's run lines, written by the scheduler. Interactive Atlas is a main session and keeps
+`sessions/YYYY-MM-DD-atlas-<slug>.md`.
+
+**Git** (**Decided**): no commit per run. If the notes folder is a git repository, whatever
+commits it (a hook, the user) may refuse a staged secret-shaped string. So the scheduler redacts every summary with pi-kit's patterns
+(`extensions/guardrails/core.ts`) before writing it, and memory writes are scanned (§6).
+
+## 3. Jobs
+
+### 3.1 The job note
+
+`jobs/<slug>.md`. Definition fields live in frontmatter so Obsidian shows them as properties.
+pi-desk reads a strict flat YAML subset (`key: value`, quoted strings, `[a, b]` lists); anything
+else is an error on the job's row and the job does not run.
+
+```markdown
+---
+type: job
+project: atlas                 # notes frontmatter field, as in every note; not the job's scope
+date: 2026-11-01
+status: active
+summary: Morning triage of open PRs across my repos
+tags: [job]
+updated_by: claude
+id: 7f3a2c                     # stable; history follows the id, so renaming the file is safe
+enabled: true
+schedule: "0 7 * * 1-5"        # cron (local) | "every 30m" | "at 2026-11-03 09:00" | "manual"
+hours: "07-22"                 # optional: only start inside these local hours
+model: anthropic/claude-sonnet-4-5   # optional; else Atlas's agent_model, else pi's default
+folder: ~/code                 # the run's cwd and scope; default the home folder
+for_project: ~/code/pi-kit     # optional: who it belongs to (a project's folder or name, atlas, chats, none); else its folder decides
+access: read                   # read | workspace | full (§4.1)
+worktree: false                # true: run in a fresh git worktree of `folder` (§3.7)
+touches: [outside, private]    # optional: outside content / private data / act (§4.3)
+notify: always                 # always | attention | never (§7)
+# optional limits, off unless set (§4.4): max_cost: 0.50, timeout: 20m, max_turns: 40
+---
+# Morning PR triage
+
+## Prompt
+List open PRs in ~/code repos that wait on me, oldest first, with one line each.
+
+## Check
+(optional shell command; see §3.3)
+
+## Recent runs
+<!-- written by pi-desk; edits here are overwritten -->
+- 2026-11-01 07:00 ✅ 1m12s $0.08 — 3 PRs wait on you (oldest: pi-kit#9) · [run](file:///…/summary.md)
+```
+
+**Scope.** `folder` is the scope link; `for_project` only groups the job in the Jobs tab (its
+owner: a project, Atlas, Chats or Other; without it the folder decides; GUIDE.md "The Jobs tab",
+`src/jobs_owner.odin`). Removing a project from pi-desk never deletes or edits its jobs; they are
+grouped by their folder then.
+
+**Schedules.** Cron is local time (a DST-skipped time is skipped, a repeated hour runs once).
+`every` counts from the end of the previous run. `at` runs once, then the scheduler sets
+`enabled: false`. A job with a prompt scheduled more often than every 30 minutes
+gets a warning on its row (cost), not a refusal.
+
+### 3.2 The clock and missed runs
+
+**Wall-clock deadlines.** The scheduler stores each job's next due time as a wall-clock instant
+and checks every 30 s and on wake. It never sleeps for an interval: monotonic clocks pause while
+the Mac sleeps, so "fire in 30 min" drifts by the sleep time.
+
+**Missed runs** (**Decided**). A run that is late (Mac asleep, pi-desk and helper closed,
+previous run still going) starts only within a **grace window** of half the job's interval,
+clamped to 2 min–2 h (cron: the gap to the next fire time; `at`: 2 h). Past the window the tick is
+**skipped** and recorded with its reason: `skipped (asleep)`, `skipped (closed)`,
+`skipped (previous run still going)`, `skipped (outside hours)`, `skipped (paused)`,
+`skipped (limit reached)`. Several missed ticks make one skipped line, not a burst of runs. This
+is why we run our own clock: launchd's `StartCalendarInterval` coalesces missed fire times into
+one run on wake, with no grace window and no record of what was skipped.
+
+**Scheduled time.** Each run gets `PI_DESK_SCHEDULED_AT=<ISO time>` (the tick it serves, not the
+start time), and the preamble says it, so "since yesterday 07:00" means the right thing on a late
+start.
+
+### 3.3 No-agent check mode
+
+A job may have a `## Check` section with one fenced shell command. Each due tick the scheduler
+runs it (cwd = `folder`, environment as §3.7, timeout 60 s) and hashes stdout:
+- same hash as last time → `unchanged`, no model call, no delivery;
+- changed and the job has a prompt → pi runs with the prompt plus the old and new output;
+- changed and no prompt → the diff (capped at 4 KB) is delivered as is; no model at all;
+- exit code ≠ 0 → `check_failed`, delivered per `notify`.
+The last output is kept in the data dir, never in the vault.
+
+### 3.4 Heartbeat
+
+An ordinary user-created job, not a built-in: `jobs/heartbeat.md`, `schedule: "every 30m"`,
+`hours`, a cheap `model`, `notify: attention`, prompt: *"Read atlas/HEARTBEAT.md and work through
+it. If nothing needs the user's attention, reply HEARTBEAT_OK."* A reply that starts or ends
+with `HEARTBEAT_OK` (case-insensitive, ignoring whitespace and punctuation around it) is
+`quiet`: one run line, no delivery. "New heartbeat" in the Jobs tab writes this template
+disabled. `HEARTBEAT.md` is the user's checklist ("CI red on main?").
+
+### 3.5 Run history
+
+| In the job note (`## Recent runs`) | In `<data dir>/jobs/<id>/` |
+|---|---|
+| last 10 runs, one line each: time, status (with skip reason), duration, cost, headline, link | `runs/<UTC stamp>-<n>/`: `events.jsonl`, `stderr.log`, `check.out`, `summary.md` (redacted), `meta.json` (status, scheduled time, exit, cost, tokens, needs-you items, blocked actions, delivered, read) |
+| | `sessions/` (pi `--session-dir`), `state.json` (next due, last check hash, action allowlist, failure streak), `run.lock` |
+
+Statuses: `ok`, `quiet`, `unchanged`, `needs_you`, `failed`, `check_failed`, `timeout`,
+`over_limit`, `looping`, `stalled`, `folder_missing`, `skipped (<reason>)`. Retention: runs older
+than 30 days or beyond the newest 100 per job are deleted; skipped ticks keep only their line.
+
+**Folder gone.** If `folder` (or the project behind it) no longer exists at start, the run is
+`folder_missing`, the job pauses, the user is notified, and the note and history are kept.
+Nothing is ever deleted automatically.
+
+### 3.6 Creating, editing, deleting
+
+- **The user in the GUI:** Jobs tab → New job (the job sheet) writes the note (`enabled: true`).
+  **By editing the note** in any editor: the file watcher picks it up.
+- **Interactive Atlas or Claude:** `job_create` from `control`, or a file write. A note runs on
+  its schedule as written, as soon as it parses.
+- **No approval** (Decision, §10.3): pi-desk keeps no approval record and
+  no key; an edited note runs as edited. The controls are `enabled:` in the note (Enable /
+  Disable, user-only through `job_set_enabled`), the per-job pause, Pause all (`jobs_pause`, the
+  kill switch) and the limits and safety stops (§4.5). Only Pause all and the per-job pause are
+  stops agents cannot undo (resuming is user-only); `enabled:` is in the note, so anything that
+  edits notes can turn a disabled job back on. Unknown frontmatter keys are still errors (an
+  `approved: true` too: approval was never a note key). An old `state.json`'s `approved_*` fields
+  are ignored and dropped at its next write. `job_approve` answers with an error saying it was
+  removed.
+- **Job runs cannot create or edit jobs.** `jobs/` is a protected path (§4.1, step 4; until then
+  the preamble says so) and runs get no pi-desk socket. A run may propose a job under its `Needs
+  you` section.
+- **Delete:** the row's Delete moves the note to the Trash (`delete_path`, confirms). Deleting the
+  file by hand removes the job; its data-dir runs age out.
+
+New commands (rows in `src/command_table.odin`): `job_list` (query), `job_run_now`, `job_stop`,
+`jobs_pause` (anyone), `job_create` (anyone), `job_mark_read`; user-only:
+`jobs_resume`, `job_set_enabled`, `job_approve_action`, `job_revoke_action`,
+`memory_pending_decide`.
+
+### 3.7 Each run is a fresh one-shot pi
+
+**Proposal: JSON mode** (pi runs once and exits):
+
+```
+pi --mode json --session-dir <data dir>/jobs/<id>/sessions --session-id <uuid>
+   [--model <model>] --append-system-prompt <notes>/atlas/ATLAS.md
+   --append-system-prompt <run dir>/preamble.md   "<prompt>"
+```
+
+Not a TUI in a hidden PTY (waits forever on an unseen dialog), not RPC (`hasUI` true, so every
+guardrail confirm needs an answer), not print mode (no cost or tool events). In JSON mode
+guardrails **block** risky commands ("Needs user approval (…), and no UI is available"). The
+stream gives `usage.cost`, tool calls and results, and `agent_settled`. The session is saved, so
+a run can be opened in pi.
+
+**Preamble** (written per run by pi-desk, not editable by the user or a job):
+- You are job `<name>`, scheduled for `<PI_DESK_SCHEDULED_AT>`, running unattended; nobody can
+  answer questions, so do not ask.
+- This scheduled prompt cannot approve risky actions: a blocked action stays blocked; do not work
+  around it, list it under `## Needs you`.
+- You cannot create or edit jobs; propose one under `## Needs you`.
+- Never write to protected paths (§4.1).
+- End with `## Summary` (first line: a one-line headline) and, if needed, `## Needs you`.
+
+**Environment** (an allowlist, not the user's shell): `HOME`, `USER`, `LANG`, `TMPDIR`, `PATH`
+(the login shell's, captured once as setting `jobs_path`), `PI_KIT_NOTES_DIR`, the access
+variables (§4.1), `PI_DESK_JOB`, `PI_DESK_RUN`, `PI_DESK_RUN_DIR`, `PI_DESK_SCHEDULED_AT`. No
+`PI_DESK_SOCKET` or tokens. pi reads its own credentials as in any terminal. stdin is `/dev/null`.
+
+**`worktree: true`** (only when `folder` is a git repo): the run happens in a fresh
+`git worktree add` of HEAD under the data dir on branch `job/<slug>/<stamp>`; `workspace` write
+roots become that worktree. The user's checkout and uncommitted edits are never touched. The
+worktree is removed by retention unless its branch has commits, which are listed in the report.
+
+## 4. Permissions and safety
+
+### 4.1 Access levels and protected paths
+
+Per-job `access`, set in the job's note (Proposal).
+
+| `access` | Meaning | How |
+|---|---|---|
+| `read` (default) | read, read-only commands, daily memory notes | `PI_KIT_READONLY=1` |
+| `workspace` | edit under `folder` (or the worktree) and write memory | new pi-kit `PI_KIT_WRITE_ROOTS=<root>`: edit/write refused outside; mutating bash only with cwd inside. Best-effort (**Decided**) |
+| `full` | what an interactive pi may do | normal guardrails |
+
+At every level, including `full`: the guardrails' dangerous list (force push, push to main,
+merges, deploys, `rm -rf`, infra changes, alert silencing, destructive SQL, publishing) is
+blocked, and file writes (edit/write tools, shell redirects, `rm`/`mv`/`cp` targets) to
+**protected paths** are refused: `.git` and the resolved gitdir (a worktree's `.git` is a file
+pointing elsewhere), `.pi/`, `AGENTS.md`, `CLAUDE.md`, shell rc files (`~/.zshrc`, `~/.zprofile`,
+`~/.bashrc`, `~/.bash_profile`, `~/.profile`), and the notes folder's `jobs/` and `atlas/`. Git
+commands themselves stay under the guardrails' git rules. These are pattern rails: aliases,
+scripts and `eval` get past them until §4.7.
+
+### 4.2 Blocked actions: approve exactly that action
+
+Runs never stop for approval. The scheduler records each blocked tool call from the event stream
+as `{tool, command, cwd, sha256}` in `meta.json`; the run ends `needs_you` and the item shows on
+the job's row and in the delivery. The user can:
+- **Approve once:** pi-desk re-checks the hash and runs that stored command in that cwd with the
+  job's environment, appends the output to the run and delivers it. No model re-plans it.
+- **Always for this job:** the hash goes into the job's allowlist in `state.json`; later runs get
+  `PI_KIT_ALLOW_FILE=<file>` and guardrails let exactly that command + cwd through. Revocable on
+  the job's row (`job_revoke_action`); the list is shown with the job.
+- **Open in pi** (separate, clearly labelled): resumes the run's session in a pi tab, where the
+  user talks to a model and guardrails ask as usual. Not an approval of anything by itself.
+
+### 4.3 The "Rule of Two" note
+
+An agent that reads untrusted content, sees private data and can act or send is the risky
+combination. **Decided:** it never stops a run. The job note's optional `touches` list (GUI
+checkboxes: reads outside content / private data / can act or send) is informational. Approving
+a job with all three shows a one-time, non-blocking note naming the risk and suggesting dropping
+one; it is not shown again for that job.
+
+### 4.4 Limits (off unless set)
+
+**Decided:** no default limits. Settings → Jobs → Limits, each off until set:
+- per run: `max_cost` (USD from `usage.cost`), `timeout`, `max_turns` (global defaults, per-job
+  override in the note); hitting one stops that run (SIGTERM, SIGKILL after 5 s) → `over_limit`;
+- per day / per week / per month (USD across all jobs): when reached, no new model runs start
+  (ticks are `skipped (limit reached)`) until the period ends; a run already in progress finishes
+  (GitHub's model);
+- concurrency: max runs at once; extra due runs queue in due order.
+One run per job at a time is not a limit; it is the run lock (§5). Subscription providers may
+report cost 0, so cost limits do not bind there.
+
+### 4.5 Safety stops (always on)
+
+Separate from limits; they catch a broken run, not an expensive one.
+- **Loop detector:** the same tool call (tool + arguments hash) 5 times in a row → stopped,
+  `looping`.
+- **No-events watchdog:** no event from pi for 10 minutes → stopped, `stalled`.
+- **Auto-pause:** 3 failures in a row (`failed`, `timeout`, `looping`, `stalled`, `check_failed`)
+  → the job pauses. `folder_missing` pauses at once (§3.5).
+- **Notify each time** a safety stop fires (§7 failure alerts apply).
+Thresholds are settings; the stops cannot be turned off.
+
+### 4.6 Secrets, kill switch, logging
+
+**Secrets:** the environment allowlist; tools use their own credential stores; summaries are
+redacted; run dirs are mode `0700`. **Kill switch:** `jobs_pause` (Jobs tab, palette,
+`pi-desk --ctl`) stops new runs; Stop all ends running ones; resuming is user-only. **Logging:**
+the run folder; scheduler decisions (due, started, skipped + reason, stopped + reason) in `<data dir>/jobs/scheduler.log`, rotated like the command log.
+
+### 4.7 Phase 2: a real boundary (Proposal)
+
+Wrap pi's bash tool in Anthropic's **sandbox-runtime** (`srt`): Seatbelt profile on macOS with
+write access only to the write roots, credential paths unreadable, network only through srt's
+proxy with a per-job domain allowlist. Known gaps to document when it ships: the proxy filters by
+domain with no TLS inspection (an allowed domain can carry data out); Go-built tools that verify
+certificates through `trustd` can fail inside the profile; `open` and `osascript` hand work to
+processes outside the sandbox and must stay blocked; Seatbelt cannot nest, so tools that sandbox
+themselves fail inside it, and we wrap bash, not pi. Apple's `container` or Lima VMs come later.
+
+## 5. The background helper
+
+**Decided:** jobs run when pi-desk is closed, via a small login item. **Proposal:**
+`pi-desk --scheduler`, the same binary with no window, running the scheduler package (no sokol
+calls, ROADMAP §4). Step 1 runs that package inside the window; step 2 runs it under launchd.
+When the core/window split happens, the core owns the scheduler and the helper goes away.
+(Rejected: the full core split now, too big; one launchd plist per job, see §3.2 coalescing.)
+
+**Who schedules.** Whoever holds `<data dir>/jobs/scheduler.lock` (`flock`). The helper holds it
+while alive; the window takes it only when no helper does, and gives it up when the helper
+appears.
+
+**Per-job run lock.** Before starting a run the scheduler takes `<data dir>/jobs/<id>/run.lock`
+(`flock`, non-blocking) and passes the open descriptor to pi, so the lock lives exactly as long
+as the run. If it is held, the tick is `skipped (previous run still going)`. This closes the
+handover gap: a run the window started is still locked when the helper takes over scheduling.
+
+**Sharing state.** The disk is the shared state (job notes, run folders, `state.json`); the
+window watches it. Actions (Run now, Stop, Pause) go to the helper on
+`<data dir>/jobs.sock`, PROTOCOL.md §1 envelope, token in a `0600` file.
+
+**launchd.** LaunchAgent with `RunAtLoad` and `KeepAlive = {SuccessfulExit: false}`: launchd
+restarts the helper only after a crash. When the setting is off or the app is gone, the helper
+exits 0 and stays down (a plain `KeepAlive: true` would restart it every 10 s). Jobs only run
+while the user is logged in (a GUI-domain agent).
+
+**Login item.** Signed app on macOS 13+: `SMAppService.agent(plistName:)`; if its status is
+`requiresApproval`, the Jobs tab says so and opens System Settings → Login Items. Dev build or
+fallback: a plist in `~/Library/LaunchAgents/` with `AssociatedBundleIdentifiers` set so it shows
+under pi-desk in Login Items, `launchctl bootstrap gui/<uid>` / `bootout`. Settings → "Run jobs
+when pi-desk is closed" (user-only `jobs_background`).
+
+**Power.** During a run the scheduler holds an IOKit `PreventUserIdleSystemSleep` assertion so
+the Mac does not idle-sleep mid-run (closing the lid still sleeps). Before starting, it checks
+that the wake is a full wake, not a dark wake / Power Nap, and otherwise waits for the next full
+wake (grace window applies); **Unverified** how reliably a helper can tell the two apart. launchd does not wake the
+Mac; the helper sees the clock jump on wake.
+
+**Delivery when closed.** The helper posts the macOS notification itself (from inside the bundle,
+so it has the bundle id; to verify in step 2). Runs stay unread until opened (§7).
+
+## 6. Memory (pi-kit `memory` extension)
+
+Works in every pi with pi-kit and `PI_KIT_NOTES_DIR`. Paths are confined to the notes root;
+credential-looking files are never read; output is redacted like any tool result.
+
+| Tool | Does |
+|---|---|
+| `memory_search {terms[], since?, until?, folder?, limit?}` | notes containing all terms (case-insensitive, ripgrep), newest first, filtered by note date; `path:line` + snippet, at most 20 hits |
+| `memory_read {path, offset?, limit?}` | read a note under the notes root |
+| `memory_note {text, source}` | append `HH:MMZ <writer> [<source>] <text>` to `daily/<today>.md`; source = `user-said`, `agent-observed` or `job:<slug>` (forced in jobs) |
+| `memory_update {file: user\|memory, ops: [{op: add\|replace\|remove, text?, old?}]}` | a batch, all or nothing; `old` is a unique substring of one entry; the cap is checked on the final result |
+
+**Entries** in USER.md and MEMORY.md are bullet lines with provenance:
+`- Prefers worktrees for changes (2026-11-01, user-said, [[sessions/2026-11-01-pi-kit-x]])`.
+A replaced fact is marked `(superseded 2026-11-02)` rather than silently dropped; curation may
+drop superseded entries later (they stay in `.history/`).
+
+**Single writer.** Only the user and the curation job rewrite USER/MEMORY as files. Everyone else
+goes through `memory_update` (pi) or the `pi-kit memory` CLI (Claude Code: `search`, `note`,
+`update`), so the lock, caps, scans and log always apply. Before any rewrite the current files are
+copied to `.history/<date>.md`; each change appends one line to `changes.log` (time, writer,
+file, op, short text). A curation that would drop more than ~25% of entries is refused.
+
+**Job writes queue** (**Decided**). In a job (`PI_DESK_JOB` set), `memory_update` does not touch
+the files: the batch goes to `<PI_DESK_RUN_DIR>/memory-pending.json`, the tool reports "queued
+for the user's approval", and the run carries on. The Jobs tab shows pending changes as a diff
+with Approve / Reject (`memory_pending_decide`); Approve applies them via `pi-kit memory apply`
+under the lock and caps. Daily notes are written directly at any access level. Atlas and
+interactive sessions update directly, through the same checks.
+
+**Write scans** (every write, and job prompts at approval): secret-shaped strings (guardrails'
+redaction patterns) → refused; invisible Unicode (zero-width, bidi controls, tag characters) →
+refused; instruction-like text ("ignore previous instructions", "always run …", tool-call
+syntax) → refused for USER/MEMORY with the reason, so the agent rewrites it as a fact.
+
+**Curation** is a user-created job (template "New memory curation": nightly, `access: workspace`,
+`folder` = notes root). It reads recent daily and session notes and folds what lasts into
+USER/MEMORY within the caps. It promotes a `job:<slug>` item only when two separate sources
+support it or the user approved it, and never re-promotes anything matching `FORGOTTEN.md`
+(where "forget X" requests go).
+
+**Prompt** (**Decided**: Atlas and jobs only). At session start the extension adds a frozen
+snapshot of USER.md and MEMORY.md under a header with usage (`USER.md 1,120/1,500 ·
+MEMORY.md 3,410/4,000`) and a short guide: search before asking something the user may have said;
+durable facts via `memory_update`, passing events via `memory_note`; never store secrets or
+personal identifiers. Other sessions have the tools without the injection. When Slack/phone
+delivery arrives, MEMORY.md loads only in private contexts, never in a session answering a shared
+channel.
+
+**Misses.** Zero-hit searches are logged locally (outside the vault). Embeddings are considered
+only if that log shows misses growing.
+
+## 7. Delivery
+
+**Decided (2026-11-01, overrides draft 2):** job results are **not** pushed into Atlas's
+context; Atlas would only bloat its context with them. A run reaches the user through the Jobs
+tab, a macOS notification and the `job.finished` event, which pi-desk's notification centre (the
+bell in the top bar) consumes. Atlas reads job state on demand, when the user asks, through the
+read-only `job_list` / `job_runs` commands (any caller; results redacted).
+
+When a run ends, the scheduler writes its record, then delivers it in one place
+(`jobs_deliver`, `src/jobs.odin`). `notify`: `always`; `attention` (`needs_you`, failures and
+safety stops, `folder_missing`, a changed no-agent check); `never`. `quiet`, `unchanged` and
+skipped runs are never pushed, only listed.
+
+**The report** is the run's `## Summary` and `## Needs you` sections, taken from the final
+answer; if they are missing, the last message is used and the run is flagged "no summary".
+
+**Failure alerts.** One alert per distinct error (status + normalised first error line), then a
+6 h cooldown for the same error; a separate nudge when the third failure in a row auto-pauses the
+job. If a run fails on a network error within 2 minutes of wake, it is retried once before
+counting as a failure. (Step 1 has the nudge; the dedupe, cooldown and wake retry are step 6.)
+
+Delivery:
+1. **Event** `job.finished` (PROTOCOL.md §3), always emitted: `job`, `title`, `status`,
+   `headline` (the one-line summary), `run`, `run_dir`, `summary_path`, `scheduled_at`,
+   `needs_you[]`, `unread`. The bell consumes it; a later sink can run a user command with it on
+   stdin (the Slack/phone hook point).
+2. **Unread markers per run**, rolled up as a count on the Jobs tab (and a dot on its segment).
+   A run is read once its report is opened (Last report) or `job_mark_read` is called.
+3. **The bell** (notify.odin): every run with `notify` other than `never` goes to
+   `notify_job_finished` (job id, title, status finished/needs_you/failed, the one-line summary,
+   the run folder). The bell sends the macOS notification for runs that need the user or
+   failed, paced by its own rules, while pi-desk is in the background.
+4. **pi-desk's own macOS notification** only for what the bell does not notify: a finished run
+   with `notify: always` (at most one per 5 s), the auto-pause nudge, and every pushed run while
+   the bell's Jobs group is off. One run, one OS notification.
+5. **On demand for Atlas:** `job_list {unread?}` and `job_runs {job, limit?}`: anyone may call
+   them, a pi tab's bridge too, so a desk tool can fetch them when the user asks. No notice is
+   sent to Atlas's terminal.
+
+Optional (setting, off unless set): after N delivered runs of a job in a row go unread, its row
+suggests pausing it.
+
+**Jobs tab** (**Decided**: left column, next to Sessions and Files: the fourth segment, Sessions
+| Files | Settings | Jobs, icons when the column is too narrow for the labels). Rows: name,
+project (or global), status dot, next run, last result, unread dot, warnings (runs more
+often than 30 min, pending memory changes, blocked actions). A row expands to its last runs,
+skipped ticks included with their reason, and what needs the user. Row buttons: Run now, Stop,
+Edit, Open note, Last report, Mark read; its "…" (and a right click): Run now / Stop, Pause /
+Resume, Enable / Disable, Edit,
+Open note, Open last report, Open run folder, Mark read, Delete (confirmed; the note goes to the
+Trash, the history stays). Header: New job, Pause all / Resume all, Limits, unread count. New
+heartbeat and New memory curation come with steps 5 and 3.
+
+## 8. Migration: ATLAS.md
+
+Today: `<data dir>/atlas/ATLAS.md`. New: `<atlas folder>/ATLAS.md` (`<home_dir>/atlas/`). At Atlas's start:
+1. Notes copy exists → use it.
+2. Else data-dir copy exists → copy it to the notes folder with exclusive create (never
+   overwrite), add frontmatter (`type: atlas`), use the copy; the data-dir file stays as fallback.
+3. Neither → write the starter into the notes folder.
+4. no main folder, or the atlas folder unreachable → use the data-dir copy (or its starter) and show a one-line
+   warning in the drawer.
+Settings' Atlas group and "Atlas: edit prompt" open whichever copy is in use.
+
+## 9. Build plan
+
+Each step is its own PR with the repo's tests green. Steps 1, 2, 3 and 6 get review (unattended
+execution, permissions, memory integrity).
+
+**Step 1 — Scheduler in the window, job notes, Jobs tab, Run now.** Scheduler package, note
+parser, cron/every/at/manual, `hours`, wall-clock deadlines, grace window and skip reasons,
+`read`/`full` access, run lock, limits, safety stops, auto-pause, JSON-mode runs
+with preamble and env, run folders, report extraction, `## Recent runs` writer, `folder_missing`,
+`job.finished`, Jobs tab with unread markers, the job commands, the notes folder (now `home_dir`), migration (§8).
+Acceptance:
+- Unit: flat-YAML subset; cron next-due incl. DST; grace window clamps; the `enabled` and
+  `## Recent runs` writers; summary/Needs-you extraction and fallback; redaction.
+- Script tests with a fake `pi` (setting `pi_path`): Run now → run folder, `meta.json`, run line;
+  overlapping tick → `skipped (previous run still going)`; late tick past the window → one skipped
+  line; `at` job disables itself; per-run limit → `over_limit`; daily limit reached mid-run → the
+  run finishes, the next tick is skipped; 5 identical tool calls → `looping`; silence → `stalled`;
+  3 failures → paused + nudge; missing folder → `folder_missing`, paused, history kept; a
+  "Needs user approval" result → `needs_you` with the stored action; `PI_DESK_SCHEDULED_AT` set.
+- (Superseded 2026-11-01, no approvals:) a file edit to the prompt runs as edited; a job from
+  `job_create` from control runs on its schedule; `job_approve` is gone.
+
+**Step 1 as built (deviations and details).**
+- Delivery follows the 2026-11-01 decision in §7: no Atlas notices; `job_list` / `job_runs` are
+  Query commands any caller may use.
+- Commands added beyond the list: `job_delete {job, confirm?}` (Delete moves the note to the
+  Trash; `delete_path` only works inside projects), `job_open {job, what: note|report|run_folder}`,
+  `job_stop {job?}`, `jobs_pause` / `jobs_resume` with an optional `job` (one job, or all: the
+  kill switch), `job_set_enabled`, `set_notes_dir` (now `set_home_dir`), `set_pi_path`, `set_job_limits`. Caller
+  rules: `jobs_resume`, `job_set_enabled` and the settings are the user's only; `job_create`
+  from anyone writes an enabled note; a job run has no pi-desk socket or token, so jobs cannot
+  create jobs through pi-desk. (`job_approve` was removed on 2026-11-01.)
+- Runs get `PI_CODING_AGENT_DIR` too when it is set (pi's config location), besides the §3.7
+  allowlist.
+- A run over its `timeout` ends `timeout`; over its cost or turns, `over_limit`.
+- Skips of the same reason in a row are one run line with a count (`⏭ skipped (asleep) ×3`).
+- `## Check` is parsed but not run yet (a warning on the row; step 5).
+- Limits in the Jobs tab step through presets on click (Limits button); the safety stops have
+  presets but no "off".
+- Test mode never reads the login shell's `PATH` / `PI_KIT_NOTES_DIR`, so a test never sees the
+  real notes folder; the main folder is set explicitly there (`set_home_dir`).
+
+- Review round 1 (2026-11-01):
+  - The prompt goes after `--`; pi 1.4 still reads an `@…` argument there as a file to attach,
+    so a prompt starting with `@` gets a leading newline.
+  - `access: read` also passes pi's `--tools read,grep,find,ls --no-mcp` (pi 1.4's allowlist
+    covers extension tools; MCP tools are kept unless `--no-mcp`).
+  - `job_run_now` from anyone but the user refuses a paused or disabled job; the limits (spend
+    per day/week/month, runs at once) hold for the user too.
+  - Stops and quit signal pi's whole process tree (children walked with `proc_listchildpids`,
+    then each one's own process group): SIGTERM, SIGKILL 5 s later. Quit gives 1.5 s, then
+    SIGKILL, and records each run `stopped (quit)` (no notifications).
+  - A timer thread posts a scheduler tick every second while a run goes (else every 30 s), so
+    due checks and the watchdog run while frames are slowed or paused (minimised, hidden);
+    while any run goes pi-desk holds an `NSProcessInfo` activity, so App Nap does not delay
+    them (idle system sleep stays allowed). In test mode frames go on at 60/s minimised
+    (`tests/scripts/frame-pause.txt`); `jobs.sh` stops a silent run while minimised.
+  - `sessions/` is pruned like `runs/`; `events.jsonl` moves to `events.jsonl.1` at 5 MB.
+  - Review round 2: a stopped run's remembered tree gets SIGKILL when the run ends, also when pi exited on
+    SIGTERM within the grace (stop and quit); the run's pid is cleared once pi is reaped.
+  - Recent runs keep the note's CRLF; the writer renames its temp file over the note only if
+    the note did not change since it was read, and a user's edit is always re-read by the
+    next scan. pi is found on the jobs' `PATH` in absolute entries only.
+
+**Approvals removed (2026-11-01).** Step 1 first shipped HMAC approvals with a key in the login
+Keychain. Each rebuild is signed ad hoc, so macOS asked for Keychain access after every build.
+Why removed: the prompts cost more than the protection was worth. Removed: the key (Keychain and
+`<data dir>/jobs/approval.key`, which startup now deletes), the approval record and its review
+UI (Approve, Changed — review, the definition diff), and `job_approve`. pi-desk no longer links
+the Security framework. What this gives up: anything running as the user (an interactive agent,
+a full-access job run despite its preamble) can write a job note that then runs on its schedule.
+The old Keychain item ("pi-desk jobs approval key") is left alone (removing it would itself need
+Keychain access); the user may delete it.
+
+**Step 2 — Background helper.** `--scheduler`, scheduler lock, `jobs.sock`, SMAppService/plist
+install, KeepAlive, power assertion and full-wake check, wake retry, notifications from the
+helper. Acceptance: window quit → an `every 1m` job runs; window + helper → one run per tick (two
+processes); a run started by the window is not re-run after helper takeover; kill the helper → the
+window schedules within 30 s; toggle off → helper exits 0 and is not restarted.
+
+**Step 3 — Memory extension (pi-kit).** The four tools, batch ops, caps, lock, provenance, source
+tags, scans, `.history`, `changes.log`, 25% guard, `FORGOTTEN.md`, job queueing, `pi-kit memory`
+CLI, prompt snapshot with usage header, miss log. Acceptance (pi-kit tests): paths outside the root
+refused; a batch over the cap refused as a whole; concurrent updates both land; a job's update
+queues and the files are unchanged; secret / invisible Unicode / instruction text refused;
+backup written before rewrite; a curation dropping >25% refused.
+
+**Step 4 — `workspace` access, protected paths, worktree, exact-action approval.**
+`PI_KIT_WRITE_ROOTS`, protected paths at every level, `worktree: true`, `PI_KIT_ALLOW_FILE`,
+Approve once / Always / Revoke. Acceptance: writes outside roots and to each protected path
+refused at `full`; a worktree run leaves the checkout's dirty files untouched; Approve once runs
+exactly the stored command (a changed hash is refused); a revoked action is blocked again.
+
+**Step 5 — Heartbeat and no-agent checks.** Templates, loose `HEARTBEAT_OK`, `## Check`.
+Acceptance: `HEARTBEAT_OK` at start or end → `quiet`, no delivery; same check output twice → fake
+pi never started; no prompt → diff delivered; non-zero exit → `check_failed`.
+
+**Step 6 — Delivery polish.** Failure alert dedupe and cooldown, unread-nudge setting, pending
+memory review UI, Rule of Two note, the sink list (the bell consumes `job.finished`; no Atlas
+notices, §7). Acceptance: the same error twice within 6 h alerts once.
+
+**Phase 2 — srt sandbox** (§4.7), after the steps above are in use.
+
+## 10. Decided after the first draft (2026-11-01)
+
+1. ✅ **Curation applies directly.** The user-created curation job is the one job allowed to edit
+   USER/MEMORY directly, relying on `.history`, `changes.log`, the 25% guard and FORGOTTEN.md.
+   Every other job's USER/MEMORY changes still queue for approval.
+2. ✅ **Safety-stop thresholds:** start with 5 identical tool calls, 10 minutes of silence, 3
+   failures in a row; adjustable in settings; revisit after step 1 with real jobs (long builds can
+   be silent longer).
+
+3. ✅ **No job approvals** (2026-11-01). Any job note runs on its schedule; agents may create and
+   edit jobs freely. The controls are the per-job enable toggle, pause and Pause all, and the
+   limits and safety stops. No Keychain access for jobs (§9, "Approvals removed").
+
+## 11. Prior art
+
+What we took from whom (research of 2026-11-01; details may have moved since).
+
+| Source | Taken |
+|---|---|
+| OpenClaw: [cron](https://docs.openclaw.ai/automation/cron-jobs/how-it-works), [memory](https://docs.openclaw.ai/concepts/memory), [dreaming](https://docs.openclaw.ai/concepts/dreaming), [exec approvals](https://docs.openclaw.ai/tools/exec-approvals), [duplicate delivery](https://github.com/openclaw/openclaw/issues/15692) | heartbeat + `HEARTBEAT.md` + silent OK token; USER/MEMORY + daily notes; nightly curation; approve the exact command; per-job run lock |
+| Hermes Agent: [cron](https://hermes-agent.nousresearch.com/docs/user-guide/features/cron), [memory](https://hermes-agent.nousresearch.com/docs/user-guide/features/memory), [delivery bug](https://github.com/NousResearch/hermes-agent/issues/58075) | bounded USER/MEMORY injected at start; no-agent watchdog checks; jobs can't create jobs; delivery from the summary |
+| Letta: [sleep-time agents](https://docs.letta.com/guides/agents/architectures/sleeptime), [MemFS](https://docs.letta.com/letta-code/memfs), [benchmark](https://www.letta.com/blog/benchmarking-ai-agent-memory) | curation as a background job; memory as plain files; file search before embeddings |
+| [mem0](https://arxiv.org/abs/2504.19413), [Zep](https://arxiv.org/abs/2501.13956) | batch add/update/delete ops; provenance; superseded facts marked, not deleted |
+| Claude: [memory tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/memory-tool), [Claude Code memory](https://code.claude.com/docs/en/memory); ChatGPT memory | usage shown to the model; "forget" respected; memory only in private contexts |
+| [LongMemEval](https://arxiv.org/abs/2410.10813) | search with time filters and multiple terms |
+| [MINJA](https://arxiv.org/abs/2503.03704) | memory injection through ordinary interactions → write scans, source tags, two-source promotion |
+| [Goose](https://github.com/aaif-goose/goose), Agent Zero, n8n | loop detection on repeated tool calls; error alerts and retries |
+| Claude Code: [routines](https://code.claude.com/docs/en/routines), [desktop scheduled tasks](https://code.claude.com/docs/en/desktop-scheduled-tasks) | "a scheduled prompt cannot approve risky actions"; scheduled time passed to the run; skip-not-backfill |
+| [Codex](https://github.com/openai/codex), [ChatGPT/Codex automations](https://learn.chatgpt.com/docs/automations.md?surface=app), [Gemini scheduled actions](https://support.google.com/gemini/answer/16316416), Grok/Perplexity tasks | one-off `at` jobs; frequency warnings; worktree runs |
+| [Cursor automations](https://cursor.com/docs/cloud-agent/automations), [Devin scheduled sessions](https://docs.devin.ai/product-guides/scheduled-sessions), [GitHub Copilot automations](https://docs.github.com/en/copilot/how-tos/use-copilot-agents/cloud-agent/create-automations) | isolation for unattended edits; a spending limit doesn't kill a run in progress |
+| [The lethal trifecta](https://simonwillison.net/2025/Jun/16/the-lethal-trifecta/), Meta's Agents Rule of Two | the `touches` note (informational only) |
+| [sandbox-runtime](https://github.com/anthropic-experimental/sandbox-runtime), [Claude Code sandboxing](https://code.claude.com/docs/en/sandboxing) | phase 2 boundary and its known gaps |
+| Apple: [launchd scheduled jobs](https://developer.apple.com/library/archive/documentation/MacOSX/Conceptual/BPSystemStartup/Chapters/ScheduledJobs.html), [SMAppService](https://developer.apple.com/documentation/servicemanagement/smappservice) | login item and approval state; `KeepAlive`; `StartCalendarInterval` coalescing |

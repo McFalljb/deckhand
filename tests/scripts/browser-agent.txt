@@ -1,0 +1,241 @@
+# Agents read pages (tests/scripts/browser.sh; docs/BROWSER.md §4, step 7): the session's pi
+# (pi_command: as its pi tab's bridge) opens a page behind the user's view, lists its tabs, reads
+# the page as text, outline and HTML (form values never), waits for an element and a text, takes
+# screenshots (the tab hidden, then on screen), records console and network only once asked, and
+# the agent strip shows with a Stop that ends a command in flight. Fixture: tests/web/agent.html.
+wait 1500
+assert_state open_sessions.# 1
+# 1. the pi opens a page: behind its pi tab (the user's view stays)
+pi_command {"type":"browser_open","url":"pidesk-test://web/agent.html"}
+assert_state open_sessions.0.tabs.1.kind browser
+assert_state open_sessions.0.active_tab $pitab
+pi_command {"type":"browser_tabs"}
+assert_result data.tabs.# 1
+assert_result data.tabs.0.tab_id $last
+assert_result data.tabs.0.url pidesk-test://web/agent.html
+assert_result data.tabs.0.on_screen false
+# 2. waits for it to load (hidden: it never was on screen)
+pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":15000}
+assert_finished ok true
+# the strip's state while the agent reads (shown on the tab's toolbar)
+assert_state open_sessions.0.tabs.1.agent.who pi
+# 3. text: the visible text, headings and fields named; no value, no hidden element
+pi_command {"type":"browser_read","tab_id":$last}
+assert_finished ok true
+assert_finished data.mode text
+assert_finished data.title Agent fixture
+assert_finished data.truncated false
+agent_assert has finished data.text # Agent fixture
+agent_assert has finished data.text Page A
+agent_assert has finished data.text This page is read by an agent.
+agent_assert has finished data.text [textbox "Name": [value hidden]]
+agent_assert has finished data.text [password "Password": [value hidden]]
+agent_assert has finished data.text [combobox "Card": [value hidden]]
+agent_assert has finished data.text [checkbox "Agree": [value hidden]]
+agent_assert has finished data.text [editable "ed": [value hidden]]
+agent_assert has finished data.text - One
+agent_assert not finished data.text secret
+agent_assert not finished data.text hidden-text-5
+# 4. outline: roles, names, refs, link targets; no value
+pi_command {"type":"browser_read","tab_id":$last,"mode":"outline"}
+assert_finished ok true
+agent_assert has finished data.text e1 heading (level 1) "Agent fixture"
+agent_assert has finished data.text navigation "Pages"
+agent_assert has finished data.text link "Page A" -> nav-a.html
+agent_assert has finished data.text textbox "Name" [value hidden]
+agent_assert has finished data.text button "Save"
+agent_assert not finished data.text secret
+# a ref from the outline names its element
+pi_command {"type":"browser_read","tab_id":$last,"selector":"ref=e1"}
+assert_finished data.text # Agent fixture
+# 5. html of the form: values hidden (the hidden input's token too)
+pi_command {"type":"browser_read","tab_id":$last,"mode":"html","selector":"#form"}
+assert_finished ok true
+agent_assert has finished data.text [value hidden]
+agent_assert has finished data.text id="save"
+agent_assert not finished data.text secret
+# 5b. a selector that matches only inside a field, a select's options or a draft is a miss, the
+# same as a real one (text, outline, html; and a wait never finds it)
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#ed2 p"}
+assert_finished ok false
+assert_finished data.code bad_args
+assert_finished error nothing on the page matches #ed2 p
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#nope p"}
+assert_finished ok false
+assert_finished data.code bad_args
+assert_finished error nothing on the page matches #nope p
+pi_command {"type":"browser_read","tab_id":$last,"mode":"outline","selector":"#ed2 p"}
+assert_finished error nothing on the page matches #ed2 p
+pi_command {"type":"browser_read","tab_id":$last,"mode":"html","selector":"#ed2 p"}
+assert_finished error nothing on the page matches #ed2 p
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#card option"}
+assert_finished error nothing on the page matches #card option
+pi_command {"type":"browser_wait","tab_id":$last,"for":"selector","value":"#ed2 p","timeout_ms":600}
+assert_finished data.code timeout
+# the field itself still reads as hidden
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#ed2"}
+assert_finished ok true
+agent_assert has finished data.text [value hidden]
+agent_assert not finished data.text secret
+# only simple selectors (tags, #ids, .classes, spaces, >) or refs: the rest is refused
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#card option:checked"}
+assert_result ok false
+assert_result data.code selector_unsupported
+pi_command {"type":"browser_read","tab_id":$last,"selector":"input[/**/value^=\"a\"]"}
+assert_result data.code selector_unsupported
+pi_command {"type":"browser_wait","tab_id":$last,"for":"selector","value":"#agree:checked","timeout_ms":600}
+assert_result ok false
+assert_result data.code selector_unsupported
+pi_command {"type":"browser_read","tab_id":$last,"mode":"outline","selector":"main > #form"}
+assert_finished ok false
+pi_command {"type":"browser_read","tab_id":$last,"mode":"outline","selector":"#main > #form"}
+assert_finished ok true
+# html of the whole document: no script text, no csrf meta content
+pi_command {"type":"browser_read","tab_id":$last,"mode":"html","selector":"html"}
+assert_finished ok true
+agent_assert has finished data.text csrf-token
+agent_assert has finished data.text <script></script>
+agent_assert not finished data.text secret
+# 6. capped: max characters, truncated
+pi_command {"type":"browser_read","tab_id":$last,"max":100}
+assert_finished data.chars 100
+assert_finished data.truncated true
+pi_command {"type":"browser_read","tab_id":$last,"selector":"#nope"}
+assert_finished ok false
+agent_assert has finished error nothing on the page matches #nope
+# 7. waits: an element that comes later, a text, one that never comes
+pi_command {"type":"browser_wait","tab_id":$last,"for":"selector","value":"#late","timeout_ms":8000}
+assert_finished ok true
+pi_command {"type":"browser_wait","tab_id":$last,"for":"text","value":"Late arrival","timeout_ms":8000}
+assert_finished ok true
+pi_command {"type":"browser_wait","tab_id":$last,"for":"selector","value":"#never","timeout_ms":600}
+assert_finished ok false
+assert_finished data.code timeout
+# 8. a screenshot of the hidden tab: painted for it, unseen; the view stays
+pi_command {"type":"browser_screenshot","tab_id":$last,"rect":{"x":0,"y":0,"w":200,"h":60}}
+assert_finished ok true
+assert_finished data.on_screen false
+assert_shot_pixel 20 20 20c040
+agent_assert wake no tab=$last
+assert_state open_sessions.0.active_tab $pitab
+# 9. console and network: off until asked (no Runtime, Log or Network domain so far)
+agent_assert sent Runtime.enable 0 tab=$last
+agent_assert sent Network.enable 0 tab=$last
+command {"type":"focus_tab","tab_id":$last}
+# from here the tab is on screen: $tab (web_comment's comment becomes $last)
+web_waitpaint 10000
+web_js document.title = window.probe
+web_title cdp=false 3000
+web_js document.title = 'Agent fixture'
+web_title Agent fixture 3000
+# the pending comments of the page (none yet; then one the user made)
+pi_command {"type":"browser_comments","tab_id":$tab}
+assert_result data.comments.# 0
+web_comment 10 10 100 40 Make the swatch blue
+pi_command {"type":"browser_comments"}
+assert_result data.comments.0.text Make the swatch blue
+assert_result data.comments.0.source browser
+command {"type":"comments_clear","session":$session}
+# console: the first call starts recording (Runtime + Log), the next has messages
+pi_command {"type":"browser_console","tab_id":$tab}
+assert_result data.recording.started_now true
+wait 1500
+agent_assert sent Runtime.enable 1 tab=$tab
+agent_assert sent Log.enable 1 tab=$tab
+agent_assert sent Network.enable 0 tab=$tab
+pi_command {"type":"browser_console","tab_id":$tab}
+assert_result data.recording.started_now false
+agent_assert has result data.entries agent-log
+agent_assert has result data.entries agent-boom
+# network
+pi_command {"type":"browser_network","tab_id":$tab}
+assert_result data.recording.started_now true
+wait 1500
+agent_assert sent Network.enable 1 tab=$tab
+pi_command {"type":"browser_network","tab_id":$tab}
+agent_assert has result data.entries nav-a.html?key=
+agent_assert has result data.entries key=***&page=1
+# the strip says it records; the page sees the Runtime domain now
+waitstate 6000 open_sessions.0.tabs.1.agent.recording console,network
+agent_assert strip pi reading console,network
+assert_drawn Stop
+shot browser/agent-recording
+# 10. a command in flight: the strip shows it; Stop ends it and the recording
+pi_command_bg {"type":"browser_wait","tab_id":$tab,"for":"selector","value":"#never","timeout_ms":60000}
+wait 300
+assert_state open_sessions.0.tabs.1.agent.busy true
+assert_drawn pi is waiting on
+agent_assert strip pi waiting on console,network
+assert_drawn Stop
+shot browser/agent-strip
+clickid br_agent_stop
+await_bg 3000
+assert_finished ok false
+assert_finished data.code stopped
+agent_assert stops 1 tab=$tab
+wait 300
+agent_assert sent Runtime.disable 1 tab=$tab
+agent_assert sent Network.disable 1 tab=$tab
+assert_state open_sessions.0.tabs.1.agent <missing>
+agent_assert strip -
+assert_not_drawn pi is waiting
+# what was recorded went with the recording: from since 0 a new one has nothing of before
+pi_command {"type":"browser_console","tab_id":$tab}
+assert_result data.recording.started_now true
+assert_result data.entries.# 0
+pi_command {"type":"browser_network","tab_id":$tab}
+assert_result data.entries.# 0
+waitstate 3000 open_sessions.0.tabs.1.agent.recording console,network
+wait 300
+assert_drawn Stop
+clickid br_agent_stop
+wait 500
+agent_assert stops 2 tab=$tab
+agent_assert sent Runtime.disable 2 tab=$tab
+assert_state open_sessions.0.tabs.1.agent <missing>
+# comment mode's overlay still answers after the Runtime domain went on and off (its binding):
+# hover outlines the swatch, a click opens the comment bar, the comment arrives
+assert_state open_sessions.0.tabs.1.annot_ready true
+clickid annot_toggle
+assert_state open_sessions.0.tabs.1.mode comment
+annot_move 50 30
+wait 400
+annot_assert hover yes
+web_click 50 30
+wait 400
+assert_state focus.id comment_new
+type After the stop
+key enter
+wait 250
+pi_command {"type":"browser_comments","tab_id":$tab}
+assert_result data.comments.0.text After the stop
+clickid annot_toggle
+command {"type":"comments_clear","session":$session}
+# 11. a screenshot of the tab on screen
+pi_command {"type":"browser_screenshot","tab_id":$tab}
+assert_finished ok true
+assert_finished data.on_screen true
+assert_shot_pixel 20 20 20c040
+# right after the view's size changed: a frame painted at the new size (one from just after a
+# resize holds the old page scaled into it, black at the sides), the page's top-left corner green
+resize 1000 640
+pi_command {"type":"browser_screenshot","tab_id":$tab}
+assert_finished ok true
+assert_shot_pixel 2 2 20c040
+assert_shot_pixel 20 20 20c040
+# 12. file: stays the user's
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"file:///etc/hosts"}
+assert_result error file: addresses are opened by the user only
+# 13. three more pages behind the user's view: each loads within 3 s (CEF's pump keeps time while
+# every frame is drawn: the frame loop runs a pump its timer could not, cef_macos.m pd_cef_pump_due)
+pi_command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":3000}
+assert_finished ok true
+pi_command {"type":"browser_open","url":"pidesk-test://web/nav-b.html"}
+pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":3000}
+assert_finished ok true
+pi_command {"type":"browser_open","url":"pidesk-test://web/agent.html"}
+pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":3000}
+assert_finished ok true
+assert_state open_sessions.0.active_tab $tab
+quit

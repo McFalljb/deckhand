@@ -1,0 +1,20 @@
+# Browser tabs across a relaunch, run 1 (tests/scripts/browser.sh): two sessions, browser tabs in
+# each ; the second is on screen at quit, which saves them.
+wait 1500
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"rrrr-1"}
+assert_result ok true
+command {"type":"browser_open","session":$last,"url":"pidesk-test://web/nav-a.html"}
+web_title Nav A 10000
+web_waitpaint 10000
+web_click 60 40
+web_title Nav B 5000
+waitstate 5000 open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+command {"type":"open_session","project_id":$project,"pi_session_id":"rrrr-2"}
+assert_result ok true
+command {"type":"browser_open","session":$last,"url":"pidesk-test://web/nav-a.html"}
+web_title Nav A 10000
+web_waitpaint 10000
+assert_state open_sessions.# 2
+quit

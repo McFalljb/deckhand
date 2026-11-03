@@ -1,0 +1,47 @@
+<!doctype html>
+<!-- Tab polish fixture (tests/scripts/browser-polish*.txt; docs/BROWSER.md step 3), served as
+     pidesk-test://web/polish.html. Fixed positions (CSS px from the page's top-left):
+       #alert    20,20  160x40   alert(), then the title says "after alert"
+       #confirm  20,70  160x40   confirm(): the title says "confirm=true|false"
+       #prompt   20,120 160x40   prompt() with "Ada": the title says "prompt=<answer>"
+       #link     20,170 160x40   a link to nav-b.html with a title (the tooltip; a hand pointer)
+       #dl       20,220 160x40   a download (25 bytes, a blob) named ".hidden: report.txt" by the page
+       #notify   20,270 160x40   Notification.requestPermission(): the title says "perm=<result>"
+       #field    20,320 160x30   a text field (the right-click menu's Paste)
+       #words    200,20         "needle needle needle" in transparent 30 px Menlo (find in page:
+                                 each match's highlight fills its box, 7 characters apart)
+       #leave    200,120 160x40  arms a beforeunload question
+       #flood    200,170 160x40  window.open every 50 ms, 10 times (one click: one popup at most)
+       #cam      200,220 160x40  getUserMedia({video}): the title says "cam=<result>"
+     window.opened: what window.open returned last (the blocked-popup scene). -->
+<html><head><meta charset="utf-8"><title>Polish</title>
+<style>
+  html, body { margin: 0; background: #ffffff; font: 16px -apple-system, sans-serif; }
+  button, a, input { position: absolute; left: 20px; width: 160px; height: 40px; box-sizing: border-box; display: block; font-size: 15px; }
+  #alert { top: 20px; } #confirm { top: 70px; } #prompt { top: 120px; }
+  #link { top: 170px; background: #d0e0ff; } #dl { top: 220px; background: #d0ffd0; }
+  #notify { top: 270px; } #field { top: 320px; height: 30px; }
+  #words { position: absolute; left: 200px; top: 20px; width: 500px; font: 30px Menlo, monospace; line-height: 40px; color: transparent; white-space: pre; }
+  #leave { left: 200px; top: 120px; }
+  #flood { left: 200px; top: 170px; } #cam { left: 200px; top: 220px; }
+</style></head>
+<body>
+<button id="alert" onclick="alert('Hello from the page'); document.title = 'after alert'">alert</button>
+<button id="confirm" onclick="document.title = 'confirm=' + confirm('Sure?')">confirm</button>
+<button id="prompt" onclick="document.title = 'prompt=' + prompt('Your name?', 'Ada')">prompt</button>
+<a id="link" href="nav-b.html" title="A link tooltip">link</a>
+<a id="dl" download=".hidden: report.txt">download</a>
+<button id="notify" onclick="Notification.requestPermission().then(p => document.title = 'perm=' + p)">notify</button>
+<input id="field" type="text">
+<div id="words">needle needle needle</div>
+<button id="leave" onclick="window.onbeforeunload = e => { e.preventDefault(); e.returnValue = ''; }; document.title = 'armed'">leave</button>
+<button id="flood" onclick="let n = 0; const t = setInterval(() => { window.open('nav-b.html?flood=' + n); if (++n >= 10) clearInterval(t); }, 50)">flood</button>
+<button id="cam" onclick="navigator.mediaDevices.getUserMedia({video: true}).then(() => document.title = 'cam=ok', e => document.title = 'cam=' + e.name)">camera</button>
+<script>
+  window.opened = 'none';
+  // a blob (downloads of pidesk-test:// addresses never start: the download path does not see
+  // the test scheme's handler)
+  document.getElementById('dl').href = URL.createObjectURL(new Blob(['pi-desk download fixture\n'], {type: 'text/plain'}));
+  window.tryOpen = () => { const w = window.open('nav-b.html?from=script'); window.opened = w ? 'window' : 'null'; };
+</script>
+</body></html>

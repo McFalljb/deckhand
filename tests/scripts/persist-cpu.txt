@@ -1,0 +1,6 @@
+# persist-cpu.sh: CPU while a bridge reports status every second.
+wait 3000
+cpu_begin
+wait 20000
+cpu_end status every second
+quit

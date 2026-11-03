@@ -1,0 +1,26 @@
+<!doctype html>
+<!-- Browser navigation fixture (tests/scripts/browser-nav.txt, browser-popup.txt,
+     browser-tabkeys.txt, browser-restore-*.txt), served as pidesk-test://web/nav-a.html.
+     Fixed positions (CSS px from the page's top-left):
+       #to-b    20,20  200x40   a link to nav-b.html
+       #blank   20,80  200x40   the same with target=_blank (a popup: a new tab)
+       #open    20,140 200x40   a button: window.open('nav-b.html?from=open')
+     window.keys: the code of every keydown (the tab-keys scene reads it). -->
+<html><head><meta charset="utf-8"><title>Nav A</title>
+<style>
+  html, body { margin: 0; background: #ffffff; font: 16px -apple-system, sans-serif; }
+  a, button { position: absolute; left: 20px; width: 200px; height: 40px; display: block; font-size: 18px; box-sizing: border-box; }
+  #to-b { top: 20px; background: #d0e0ff; }
+  #blank { top: 80px; background: #d0ffd0; }
+  #open { top: 140px; }
+</style></head>
+<body>
+<a id="to-b" href="nav-b.html">To B</a>
+<a id="blank" href="nav-b.html?from=blank" target="_blank">B in a new tab</a>
+<button id="open" onclick="window.open('nav-b.html?from=open')">window.open</button>
+<script>
+  window.keys = []; window.downs = 0;
+  addEventListener('mousedown', () => downs++, true);
+  addEventListener('keydown', e => keys.push(e.code), true);
+</script>
+</body></html>

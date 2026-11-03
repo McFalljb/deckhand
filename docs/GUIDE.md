@@ -6,8 +6,9 @@ the middle, more tabs (shells, files) beside it, a built-in assistant, **Atlas**
 on the right, and **jobs**: prompts that pi runs for you on a schedule.
 
 This guide covers what is in pi-desk today. Developers: the wire protocol and every command are in
-[PROTOCOL.md](PROTOCOL.md); the saved workspace in [PERSISTENCE.md](PERSISTENCE.md); the design
-of jobs (and what comes next for them) in [ATLAS.md](ATLAS.md).
+[PROTOCOL.md](PROTOCOL.md); building and the code in [DEVELOPING.md](DEVELOPING.md); the saved
+workspace in [PERSISTENCE.md](PERSISTENCE.md); the design of jobs (and what comes next for
+them) in [ATLAS.md](ATLAS.md).
 
 Every action has a button and most have a shortcut, and the menu bar lists them by menu (pi-desk,
 File, Edit, View, Window, Help). When you forget one: **⌘K** searches every action by name, and

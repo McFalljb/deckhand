@@ -17,7 +17,7 @@ SRC="$ROOT/vendor/ghostty"
 OUT="$ROOT/vendor/libghostty-vt"
 TARGETS=${*:-"aarch64-macos x86_64-macos x86_64-linux-gnu aarch64-linux-gnu x86_64-windows-gnu"}
 
-[ -x "$ZIG" ] || { echo "missing $ZIG (see README: toolchain)"; exit 1; }
+[ -x "$ZIG" ] || { echo "missing $ZIG (see docs/DEVELOPING.md: Rebuilding libghostty-vt)"; exit 1; }
 # LLVM binutils (llvm-objcopy/llvm-ar handle Mach-O, ELF and COFF alike).
 LLVM_BIN=${LLVM_BIN:-$(dirname "$(readlink -f "$(command -v clang)")")}
 OBJCOPY="$LLVM_BIN/objcopy"; [ -x "$LLVM_BIN/llvm-objcopy" ] && OBJCOPY="$LLVM_BIN/llvm-objcopy"

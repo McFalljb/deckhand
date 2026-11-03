@@ -2,7 +2,7 @@
 
 The living plan for pi-desk: what it is for, the rules it follows, how it is built, what is done
 and what comes next. Update it when a decision is made or a phase moves; keep finished detail in
-commits and the README, not here.
+commits and [DEVELOPING.md](DEVELOPING.md), not here.
 
 Status key: ✅ done · 🔨 in progress · ⬜ not started · ❓ open question
 
@@ -70,7 +70,7 @@ TUI; everything around it is native UI.
 - **Stack:** Odin + [Clay](https://github.com/nicbarker/clay) (layout) +
   [sokol](https://github.com/floooh/sokol-odin) (window, input, Metal/D3D/GL) + Ghostty's
   **libghostty-vt** (terminal emulation, drawn by us from its render state). Versions are pinned in
-  the README.
+  [DEVELOPING.md](DEVELOPING.md#pinned-versions).
 - **libghostty-vt** is built once per pinned Ghostty version for every target with
   `scripts/build-ghostty.sh` (Zig 0.17 in `toolchain/`); app builds need only Odin.
 - **Process model (decided 2026-10-30):** pi-desk grows its own small tmux-like **core** that
@@ -391,7 +391,7 @@ From two early design reviews of the command layer and state.
 
 ## 9. Related
 
-- README (build, pinned versions, architecture detail).
+- [DEVELOPING.md](DEVELOPING.md) (build, pinned versions, architecture detail, tests, releases).
 - pi-kit: `GUIDE.md` (sidebar, extensions, updating), `AGENTS.md`.
 - [PROTOCOL.md](PROTOCOL.md) (socket, commands, state, events, bridge, panels), [TAB-PROTOCOL.md](TAB-PROTOCOL.md), [PERSISTENCE.md](PERSISTENCE.md).
 - [ATLAS.md](ATLAS.md): Atlas jobs and memory design (draft, 2026-11-01).

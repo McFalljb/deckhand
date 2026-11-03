@@ -1,0 +1,8 @@
+# Run 2: the interactive shell fails; pi is in a fallback folder.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"past-1"}
+waitfor FAKE PI fallback ARGS: 15000
+shot login-path/fallback
+quit

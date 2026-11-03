@@ -1858,14 +1858,18 @@ login_shell :: proc() -> string {
 	return shell != "" ? shell : "/bin/zsh"
 }
 
+// pi, or why there is none (the shell's own "command not found" says too little)
+@(private = "file")
+PI_TAB_CMD :: `command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found on your login shell's PATH:" "  $PATH" "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh, ~/.bash_profile for bash), then open this tab again."; exit 127; }; exec pi "$@"`
+
 @(private = "file")
 start_pi :: proc(t: ^Term, pi_session_id, path, session_dir, cwd: string, env: []string, extra: []string = nil) -> bool {
 	argv := make([dynamic]string, context.temp_allocator)
-	// A login shell finds pi on the user's PATH even when launched from Finder.
-	// PI_DESK_CMD replaces pi (benchmarks: e.g. "cat big.log"); it sees the
-	// pi arguments as "$@".
+	// A login shell finds pi on the user's PATH (from Finder or the Dock, PATH
+	// is the interactive shell's: login_env.odin). PI_DESK_CMD replaces pi (benchmarks: e.g.
+	// "cat big.log"); it sees the pi arguments as "$@".
 	cmd := os.get_env("PI_DESK_CMD", context.temp_allocator)
-	if cmd == "" do cmd = `exec pi "$@"`
+	if cmd == "" do cmd = PI_TAB_CMD
 	append(&argv, login_shell(), "-l", "-c", cmd, "pi")
 	if session_dir != "" do append(&argv, "--session-dir", session_dir)
 	if path != "" do append(&argv, "--session", path)

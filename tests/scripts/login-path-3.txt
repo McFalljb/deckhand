@@ -1,0 +1,8 @@
+# Run 3: no pi anywhere; the tab says why.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"past-1"}
+waitfor pi was not found 15000
+shot login-path/not-found
+quit

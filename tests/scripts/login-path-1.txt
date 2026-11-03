@@ -1,0 +1,9 @@
+# Started from the Dock (tests/scripts/login-path.sh, run 1): a past session
+# from the sidebar; its pi tab finds pi on the interactive shell's PATH.
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"past-1"}
+waitfor FAKE PI brew ARGS: 15000
+shot login-path/found
+quit

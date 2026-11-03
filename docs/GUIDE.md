@@ -1021,6 +1021,14 @@ never starts, check that `pi` runs in a Terminal (pi-desk starts it through your
 close the session from its row (**×** or **Close session**; it asks first) and open it again
 from the list: pi resumes it from its file.
 
+**A pi tab says "pi was not found on your login shell's PATH".** Started from the Dock or
+Finder, pi-desk takes the environment your interactive login shell has (`$SHELL -i -l`, as a
+Terminal window would; if that fails or takes over 4 s, it adds `/opt/homebrew/bin`,
+`/usr/local/bin`, `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin` and `~/.bun/bin` where they
+exist). So pi was not on that PATH either: check that `pi` runs in a new Terminal window, or put
+the line that adds its folder to PATH in `~/.zprofile`, then open the tab again (restart pi-desk
+after changing your shell setup).
+
 **A session shows "Session gone".** Its session file or folder no longer exists; click the button
 to close it.
 

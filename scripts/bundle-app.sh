@@ -34,6 +34,8 @@ plist() { # PATH EXECUTABLE ID NAME [LSUIElement]
     echo "  <key>LSMinimumSystemVersion</key><string>$MIN</string>"
     echo '  <key>NSHighResolutionCapable</key><true/>'
     echo '  <key>NSSupportsAutomaticGraphicsSwitching</key><true/>'
+    # the app's icon (assets/icon/pi-desk.icns, from pi-desk.svg); helpers have none
+    [ "${5:-}" = ui_element ] || echo '  <key>CFBundleIconFile</key><string>pi-desk</string>'
     [ "${5:-}" = ui_element ] && echo '  <key>LSUIElement</key><true/>'
     # KSBrandID "": Chromium takes the app's brand code (none, organic) and never
     # reads ~/Library/Google/Google Chrome Brand.plist, which Google Chrome shares
@@ -54,6 +56,7 @@ plist() { # PATH EXECUTABLE ID NAME [LSUIElement]
 
 mkdir -p "$C/MacOS" "$C/Frameworks" "$C/Resources"
 plist "$C/Info.plist" pi-desk "$ID" pi-desk
+cp assets/icon/pi-desk.icns "$C/Resources/pi-desk.icns"
 
 # licences (THIRD_PARTY_NOTICES.md): pi-desk's, the notices, CEF's and Chromium's credits
 L="$C/Resources/licenses"

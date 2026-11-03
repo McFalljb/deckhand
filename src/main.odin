@@ -972,6 +972,8 @@ main :: proc() {
 		} else do app_args.dir = a
 	}
 	app_context = context
+	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
+	login_env_startup()
 	// test mode is quiet unless PI_DESK_QUIET=0: the window never shows or takes focus
 	if os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" && os.get_env("PI_DESK_QUIET", context.temp_allocator) != "0" do platform_quiet()
 	sapp.run({

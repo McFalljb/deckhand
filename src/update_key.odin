@@ -4,11 +4,10 @@ package main
 // An update is installed only when its .sig verifies under UPDATE_PUBLIC_KEY
 // (src/updatesig). Base64 of the 32-byte Ed25519 public key.
 //
-// !!! PLACEHOLDER: no real key yet. While it is, this build checks for updates but refuses
-// to install any, and scripts/release.sh refuses to make a release. To go live:
-// `build/update-sign keygen ~/.config/pi-desk/update.key` on the release signer's Mac and put
-// the printed public key here. The private key stays in that file, never in GitHub.
-UPDATE_PUBLIC_KEY :: "PLACEHOLDER-no-release-key-yet"
+// The key was made on 2026-11-03 with `build/update-sign keygen`; the private half stays on the
+// release signer's Mac (~/.config/pi-desk/update.key), never in GitHub. Rotating it:
+// docs/DEVELOPING.md, "Update signing".
+UPDATE_PUBLIC_KEY :: "WLmBpaet8DK5313TmDQz0PdG2QDwJI684gSeYrcFyLI="
 
 // Test builds only (-define:PI_DESK_UPDATE_TEST=true: `./build.sh test` and the update
 // scene's own binary, tests/scripts/update.sh). A release build has neither the test key

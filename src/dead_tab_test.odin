@@ -45,6 +45,7 @@ d_reset :: proc() -> runtime.Allocator {
 d_done :: proc() {
 	inbox_drain()
 	for _, t in terms do reader_stop_and_close(t)
+	claude_installed_probe = nil
 	os.set_env("PI_DESK_CMD", "sleep 30")
 }
 
@@ -447,7 +448,7 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
-	claude_installed_probe = nil
+	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	dir := fmt.aprintf("%s/pi-desk-dead-model-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	wd, _ := os.get_working_directory(context.temp_allocator)
@@ -529,7 +530,7 @@ claude_restart_pick_model_user :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
-	claude_installed_probe = nil
+	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	dir := fmt.aprintf("%s/pi-desk-dead-pick-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	os.set_env("HOME", dir)

@@ -43,7 +43,7 @@ r_reset :: proc() -> runtime.Allocator {
 	}
 	persist = {}
 	dead_tab_reset()
-	claude_installed_probe = nil
+	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	r_clip, r_revealed = "", ""
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {r_clip = strings.clone(s, runtime.heap_allocator())}, reveal = proc(p: string) {r_revealed = strings.clone(p, runtime.heap_allocator())}}
 	os.set_env("SHELL", "/bin/sh")

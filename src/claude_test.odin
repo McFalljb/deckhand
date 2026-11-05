@@ -13,6 +13,11 @@ import "core:testing"
 import "core:time"
 import gh "ghostty"
 
+// The tests' stand-ins (PI_DESK_CMD, PI_DESK_CLAUDE_CMD: `sleep`, a shell line) count as an installed
+// pi and claude, whatever this machine has: unit tests run outside test mode, so the real lookup
+// reads the PATH and HOME (no claude on a CI runner). A test that checks the lookup sets its own.
+stand_in_installed :: proc() -> bool {return true}
+
 @(private = "file")
 CL_UI :: Caller{kind = .UI}
 @(private = "file")

@@ -571,6 +571,7 @@ cr_env :: proc(tag: string) -> (base, cfg, proj: string) {
 	os.unset_env("PI_DESK_CLAUDE_BIN")
 	claude_reload_watch_reset()
 	dead_tab_reset()
+	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	return
 }
 
@@ -579,6 +580,7 @@ cr_done :: proc() {
 	r_done()
 	claude_reload_watch_reset()
 	dead_tab_reset()
+	claude_installed_probe = nil
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	os.unset_env("PI_DESK_CLAUDE_BIN")
 	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")

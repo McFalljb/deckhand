@@ -44,6 +44,9 @@ setup :: proc() -> (home, proj: string) {
 	home_root = fmt.aprintf("%s/data", base) // Atlas's prompt file: the Settings tab's Atlas group
 	os.unset_env("PI_CODING_AGENT_DIR")
 	os.unset_env("XDG_CONFIG_HOME")
+	// pi's files and the Coding agents rows are listed as on a machine with pi and Claude Code
+	pi_installed_probe = stand_in_installed
+	claude_installed_probe = stand_in_installed
 	ad = fmt.tprintf("%s/.pi/agent", home)
 	write_mode(fmt.tprintf("%s/settings.json", ad), `{"defaultModel": "x", "packages": ["npm:pi-subagents@1.2.3", {"source": "../../pkgs/pi-kit"}]}`, 0o644)
 	write_mode(fmt.tprintf("%s/models.json", ad), `{"providers": {}}`, 0o600) // pi may make it private: still a config file
@@ -329,6 +332,7 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	home, proj := setup()
 	ad := fmt.tprintf("%s/.pi/agent", home)
 	for d in ([]string{"sessions/--x--", "npm/node_modules", "git", "bin", "logs", "skills/review", "extensions/subagent/lib"}) do os.make_directory_all(fmt.tprintf("%s/%s", ad, d))
+	write_mode(fmt.tprintf("%s/bin/pi", ad), "#!/bin/sh\nexit 1\n", 0o755) // a pi binary for the Coding agents rows (pi's managed install; never run)
 	write_mode(fmt.tprintf("%s/prompts/fix.md", ad), "fix", 0o644)
 	write_mode(fmt.tprintf("%s/prompts/token.json", ad), `{"t": "x"}`, 0o600) // private: a credential
 	write_mode(fmt.tprintf("%s/prompts/.env", ad), "K=v", 0o644)

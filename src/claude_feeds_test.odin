@@ -35,7 +35,7 @@ f_reset :: proc() -> runtime.Allocator {
 	}
 	persist = {}
 	dead_tab_reset()
-	claude_installed_probe = nil
+	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("PI_DESK_CMD", "sleep 30")

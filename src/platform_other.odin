@@ -34,6 +34,7 @@ platform_left_button :: proc() -> bool {return true}
 platform_clipboard_count :: proc() -> int {return 0}
 platform_run_later :: proc(p: proc()) {p()}
 test_beeps :: proc() -> int {return 0}
+test_panels :: proc() -> int {return 0}
 test_has_input_context :: proc() -> bool {return true}
 platform_menu_begin :: proc() {}
 platform_menu_push :: proc(title: string) {}

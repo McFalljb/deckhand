@@ -72,6 +72,7 @@
 #include "include/capi/cef_devtools_message_observer_capi.h"
 #include "include/capi/cef_display_handler_capi.h"
 #include "include/capi/cef_frame_capi.h"
+#include "include/capi/cef_keyboard_handler_capi.h"
 #include "include/capi/cef_life_span_handler_capi.h"
 #include "include/capi/cef_load_handler_capi.h"
 #include "include/capi/cef_registration_capi.h"
@@ -276,6 +277,7 @@ static cef_render_handler_t render;
 static cef_life_span_handler_t life;
 static cef_load_handler_t load;
 static cef_display_handler_t display;
+static cef_keyboard_handler_t keyboard;
 
 static void add_switch(cef_command_line_t* cl, const char* name) {
     cef_string_t s = str16(name);
@@ -528,6 +530,16 @@ static cef_render_handler_t* CEF_CALLBACK get_render(cef_client_t* self) { retur
 static cef_life_span_handler_t* CEF_CALLBACK get_life(cef_client_t* self) { return &life; }
 static cef_load_handler_t* CEF_CALLBACK get_load(cef_client_t* self) { return &load; }
 static cef_display_handler_t* CEF_CALLBACK get_display(cef_client_t* self) { return &display; }
+static cef_keyboard_handler_t* CEF_CALLBACK get_keyboard(cef_client_t* self) { return &keyboard; }
+
+// A key the page did not handle stops here. Else CEF offers it to the menu
+// bar (performKeyEquivalent: with an NSEvent of its own), where AppKit's
+// hidden Edit items take a plain key: e opened Emoji & Symbols (fn E), d
+// started dictation (fn D). Deckhand's own shortcuts are ⌘ keys and never
+// reach the page (browser_event); a ⌘ key that does still goes on.
+static int CEF_CALLBACK on_key_event(cef_keyboard_handler_t* self, cef_browser_t* b, const cef_key_event_t* e, cef_event_handle_t os) {
+    return (e->modifiers & EVENTFLAG_COMMAND_DOWN) == 0;
+}
 
 static void devtools_forget(int i); // the DevTools section below
 static void polish_install(void); // step 3 (cef_polish.inc, the end of this file)
@@ -1008,6 +1020,7 @@ int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file,
     client.get_life_span_handler = get_life;
     client.get_load_handler = get_load;
     client.get_display_handler = get_display;
+    client.get_keyboard_handler = get_keyboard;
     INIT_BASE(render);
     render.get_view_rect = get_view_rect;
     render.get_screen_info = get_screen_info;
@@ -1023,6 +1036,8 @@ int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file,
     INIT_BASE(display);
     display.on_title_change = on_title;
     display.on_address_change = on_address;
+    INIT_BASE(keyboard);
+    keyboard.on_key_event = on_key_event;
     polish_install(); // step 3: dialogs, find, zoom, downloads, permissions, menus, crashes (cef_polish.inc)
 
     pump_timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, dispatch_get_main_queue());

@@ -44,6 +44,7 @@ setup :: proc() -> (home, proj: string) {
 	home_root = fmt.aprintf("%s/data", base) // Atlas's prompt file: the Settings tab's Atlas group
 	os.unset_env("PI_CODING_AGENT_DIR")
 	os.unset_env("XDG_CONFIG_HOME")
+	os.unset_env("PI_KIT_NOTES_DIR") // the Folders group shows the user's own as a row
 	// pi's files and the Coding agents rows are listed as on a machine with pi and Claude Code
 	pi_installed_probe = stand_in_installed
 	claude_installed_probe = stand_in_installed

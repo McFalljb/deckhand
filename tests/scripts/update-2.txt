@@ -1,4 +1,4 @@
-# pi-desk's own updates, second start (tests/scripts/update.sh): now 0.1.1; the old
+# Deckhand's own updates, second start (tests/scripts/update.sh): now 0.1.1; the old
 # bundle is kept (its first start); 0.1.2's signature does not match its zip: refused, nothing installed.
 wait 1500
 # checked minutes ago (update.json): no check at this start

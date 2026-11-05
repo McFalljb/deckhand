@@ -5,12 +5,22 @@ package main
 // loop, and synthetic sokol events go through the normal event() handler.
 // OS-level input (Cocoa -> sokol) is therefore NOT covered by these runs.
 //
-//   wait MS                    sleep (frames keep running)
+//   wait MS                    sleep (frames keep running); for checks that something stays as it
+//                              was, timing and idle measurements. A check that waits for something
+//                              to happen uses `eventually` (docs/TESTING.md, "Waits")
+//   eventually [MS]            the checks (assert_*) right after this line are tried again every
+//                              frame until each passes, for up to MS (default 10 s); then they fail
+//                              as before. The first line that is not a check ends it
 //   waitfor TEXT [MS]          until TEXT is on screen (default 30 s)
+//   waitresult MS PATH VALUE   the `command` line before it (a read-only one: changes_list,
+//                              editor_state...) is run again until its result has VALUE at PATH
+//   (clickid, rclickid, hover, sweep, dragid, clickmenu, clickmd, clicktext, divider and drop read
+//   the last layout: they wait for a frame drawn after the last input, and for up to 5 s for an
+//   element that is not laid out yet, before failing as before)
 //   type TEXT                  KEY_DOWN/CHAR/KEY_UP per character
 //   key NAME [shift|ctrl|alt|cmd ...]   enter tab backspace escape up down left right
 //                              pageup pagedown home end space comma slash lcmd (⌘ alone), or a letter/digit
-//   paste TEXT                 clipboard + Cmd+V ("\n" -> newline)
+//   paste TEXT                 Cmd+V of TEXT ("\n" -> newline; the script's own pasteboard, not the system's)
 //   scroll DY X Y              wheel at logical X,Y
 //   click X Y                  left click at logical X,Y
 //   drag X1 Y1 X2 Y2 [shift]   left drag
@@ -25,6 +35,7 @@ package main
 //   beeps [WANT]               AppKit beeps for unhandled keys so far (counted, not sounded;
 //                              the first use starts counting); with WANT, assert the count
 //   assert_screen TEXT         TEXT is on the active terminal's screen now
+//   assert_not_screen TEXT     TEXT is not on the active terminal's screen now
 //   assert_palette INDEX KEY   the palette's result INDEX has KEY (action:new_chat, tab:3, ...)
 //   assert_selection TEXT      the focused field's selection, else the terminal's, equals TEXT
 //                              (read directly: the system clipboard is not touched)
@@ -41,7 +52,11 @@ package main
 //   system_appearance light|dark   as if the OS switched appearance (the KVO callback's path)
 //   assert_window light|dark   the window's effective appearance (title bar, traffic lights)
 //   clickid NAME [INDEX]       left click the centre of a Clay element (proj/sess/new)
-//   rclickid NAME [INDEX]      right click there (context menus)
+//   rclickid NAME [INDEX]      right click there (context menus); for the Files and Settings
+//                              rows (frow, fcreate...) INDEX may be @PATH: the drawn row whose
+//                              path ends with PATH (e.g. @.pi/settings.json; a setting row's
+//                              path is its id, e.g. @pi-desk:claude-default-flags), so a row
+//                              added above it does not move the click
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
 //   dragid FROM INDEX TO       left drag from element FROM INDEX to element TO (centres)
@@ -56,7 +71,12 @@ package main
 //   divider N DX [clicks]      drag column divider N (0 left, 1 right, 2 the agent drawer's
 //                              left edge) by DX logical px;
 //                              `clicks 2` double-clicks it instead
-//   hover NAME [INDEX]         move the pointer to the centre of a Clay element
+//   hover NAME [INDEX]         move the pointer to the centre of a Clay element (INDEX: as clickid)
+//   sweep NAME INDEX STEPS     move the pointer across a Clay element (left to right, mid
+//                              height) in STEPS moves, laying out between them as frames do;
+//                              at each point a second move (the jitter of a still hand) must
+//                              keep the hover: fails where it flips (hover drawn from a layout
+//                              that the hover itself changes)
 //   assert_tip [TEXT]          the tooltip showing now is TEXT ("label keys"); none without TEXT
 //   waitexit [MS]              until the child process has exited
 //   assert_not_drawn TEXT      no text drawn in the window (a fresh layout) contains TEXT
@@ -77,7 +97,8 @@ package main
 //                              mode only logs it; Markdown and terminal links)
 //   state                      log modes the app enabled (mouse, paste, kitty keys)
 //   resize W H                 window content size (logical px)
-//   shot NAME                  screenshot of this window to build/shots/NAME.png (raised without focus)
+//   shot NAME                  screenshot of this window to build/shots/NAME.png (raised without focus;
+//                              taken once 3 frames are drawn after the raise, at least 150 ms)
 //   dump NAME                  visible terminal text to build/NAME.txt
 //   cpu_begin / cpu_end LABEL  own process CPU% (getrusage) + frames drawn
 //   atlas                      glyph atlas size, cached glyphs, rasterised, evictions
@@ -97,7 +118,10 @@ package main
 //   command JSON               submit a command through the inbox as the script
 //                              caller and log its result, e.g.
 //                              command {"type":"close_tab","tab_id":$tab}
-//                              (waits for "finished" if the result is pending)
+//                              (waits for "finished" if the result is pending, at most
+//                              120 s or the command's timeout_ms + 10 s if longer, then
+//                              TIMEOUT (a later result is dropped); a finished event that
+//                              comes while the command runs is kept, never missed)
 //   ui_command JSON            the same as the user (caller ui), e.g. to change
 //                              confirmation settings, which scripts may not
 //   thread_command JSON        submit from a worker thread, as a socket would
@@ -126,6 +150,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:thread"
@@ -150,6 +175,9 @@ Autotest :: struct {
 	cpu_calls:    u64,
 	active:       bool,
 	wait_request: u64, // pending command: wait for its finished event
+	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
+	submitted:    u64, // the command script_command is running: its finished event may come in the same drain
+	submitted_done: bool, // it came (last_finished holds it)
 	last_result:  string, // JSON of the last command result
 	last_finished: string, // JSON of the last long-running command's finished result
 	last_created: u64,
@@ -166,7 +194,22 @@ Autotest :: struct {
 	bg_done:      bool,
 	bg_deadline:  time.Tick,
 	clipboard:    string, // what pi-desk last put on the clipboard (platform.set_clipboard)
+	pasteboard:   string, // what a paste inserts: the script's own, never the system's (autotest_platform)
 	revealed:     string, // the last path platform.reveal was asked to show
+	eventually_on:    bool, // `eventually`: a failing check right after it is tried again next frame
+	eventually_until: time.Tick, // until then (then it fails as before)
+	retry_line:   int, // the line being tried again (logged once), -1 = none
+	elem_until:   time.Tick, // an element-addressed line whose element is missing: tried until then
+	input_drawn:  u64, // app.frames_drawn when the last input went in: element lookups wait for a later frame
+	input_line:   string, // that input's line (owned)
+	shot_drawn:   u64, // app.frames_drawn when a shot raised the window
+	shot_at:      time.Tick,
+	audit:        bool, // PI_DESK_WAIT_AUDIT=1: log which checks after a `wait` already held before it
+	audit_wait:   int, // the `wait` line whose checks are running (C), -1 = none
+	audit_k:      int,
+	command_idx:  int, // the last `command` line (waitresult runs it again)
+	wr_idx:       int, // the waitresult line being waited on, -1 = none
+	wr_until:     time.Tick,
 }
 
 // Real keyboard/mouse input is dropped in test mode; script-driven native
@@ -185,6 +228,18 @@ autotest_init :: proc() {
 	}
 	autotest.lines = strings.split_lines(string(data))
 	autotest.active = true
+	autotest.retry_line, autotest.audit_wait, autotest.wr_idx, autotest.command_idx = -1, -1, -1, -1
+	autotest.audit = os.get_env("PI_DESK_WAIT_AUDIT", context.temp_allocator) == "1"
+	if autotest.audit do log("AUDIT script", path)
+	autotest_platform()
+}
+
+// A script's platform layer: never a modal panel, a Finder window, a browser or the system
+// pasteboard. Copies and pastes stay in the app (autotest.pasteboard): scenes run side by side,
+// beside other runs, and the pasteboard is shared, so one scene's copy could replace what another
+// scene's page just put there, bump the change count browser scenes watch, or replace the user's
+// own clipboard. A page (Chromium) still uses the system pasteboard (browser-act).
+autotest_platform :: proc() {
 	// never a modal panel or a Finder window from a script
 	platform.pick_folder = proc() -> string {
 		p := autotest.fake_folder
@@ -197,12 +252,13 @@ autotest_init :: proc() {
 		delete(autotest.revealed)
 		autotest.revealed = strings.clone(path)
 	}
-	// still the system clipboard (copy, then paste, in scenes); also kept for assert_clipboard
+	// kept for assert_clipboard, and what the next paste inserts
 	platform.set_clipboard = proc(text: string) {
 		delete(autotest.clipboard)
 		autotest.clipboard = strings.clone(text)
-		sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))
+		autotest_paste_set(text)
 	}
+	platform.get_clipboard = proc() -> string {return autotest.pasteboard}
 	platform.open_url = proc(url: string) -> bool {
 		log("open url", url)
 		delete(autotest.opened_url)
@@ -210,6 +266,11 @@ autotest_init :: proc() {
 		return true
 	}
 	platform.left_button = proc() -> bool {return autotest.left_down}
+}
+
+autotest_paste_set :: proc(text: string) {
+	delete(autotest.pasteboard)
+	autotest.pasteboard = strings.clone(text)
 }
 
 @(private = "file")
@@ -220,7 +281,11 @@ log :: proc(args: ..any) {
 
 // The terminal with the keyboard: Home's while its pane shows.
 screen_text :: proc() -> string {
-	t := key_term()
+	return term_screen_text(key_term())
+}
+
+// A terminal's visible text (temp-allocated).
+term_screen_text :: proc(t: ^Term) -> string {
 	if t == nil do return ""
 	gh.render_state_update(t.rs, t.gt)
 	b := strings.builder_make(context.temp_allocator)
@@ -255,6 +320,39 @@ send :: proc(e: sapp.Event) {
 	if e.mouse_button == .LEFT && e.type == .MOUSE_DOWN do autotest.left_down = true
 	if e.mouse_button == .LEFT && e.type == .MOUSE_UP do autotest.left_down = false
 	event(&ev)
+}
+
+// The sweep command: across element NAME INDEX's box at mid height, each point
+// moved to twice with a layout after each (a frame): the second must leave
+// the hover as the first did. The box is taken once, before the first move.
+@(private = "file")
+sweep_hover :: proc(name: string, index: u32, steps: int) {
+	_ = ui_layout(sapp.widthf(), sapp.heightf())
+	d := clay.GetElementData(clay.ID(name, index))
+	if !d.found {
+		script_fail("no element", name, index)
+		return
+	}
+	b := d.boundingBox
+	y := b.y + b.height / 2
+	flips := 0
+	for i in 0 ..< steps {
+		x := b.x + 1 + (b.width - 2) * f32(i) / f32(max(steps - 1, 1))
+		send({type = .MOUSE_MOVE, mouse_x = x, mouse_y = y})
+		_ = ui_layout(sapp.widthf(), sapp.heightf())
+		first := fmt.tprintf("%v %v", reflect.union_variant_typeid(ui_hover), ui_hover)
+		send({type = .MOUSE_MOVE, mouse_x = x, mouse_y = y})
+		_ = ui_layout(sapp.widthf(), sapp.heightf())
+		again := fmt.tprintf("%v %v", reflect.union_variant_typeid(ui_hover), ui_hover)
+		if first != again {
+			flips += 1
+			if flips <= 5 do log(fmt.tprintf("hover flips at x=%.0f: %s -> %s", x / app.dpi, first, again))
+		}
+	}
+	app.redraw = true
+	autotest.asserts += 1
+	if flips == 0 do log("assert ok: sweep", name, index, "steady at", steps, "points")
+	else do script_fail(fmt.tprintf("ASSERT FAILED sweep %s %d: the hover flips at %d of %d points", name, index, flips, steps))
 }
 
 @(private = "file")
@@ -347,6 +445,18 @@ num :: proc(s: string) -> f32 {
 }
 
 // Runs script lines until one has to wait. Called once per frame.
+// clickid's and rclickid's INDEX: a number (default 0), or @PATH for a drawn Files or Settings
+// row by its path's end (files_drawn_slot). A path no row has fails the script.
+script_index :: proc(args: []string) -> (u32, bool) {
+	if len(args) < 2 do return 0, true
+	if strings.has_prefix(args[1], "@") {
+		slot := files_drawn_slot(args[1][1:])
+		if slot < 0 do return 0, false // the caller tries again (script_retry), then fails
+		return u32(slot), true
+	}
+	return u32(num(args[1])), true
+}
+
 autotest_step :: proc() {
 	at := &autotest
 	if !at.active do return
@@ -358,7 +468,12 @@ autotest_step :: proc() {
 	}
 	now := time.tick_now()
 	if at.pending_shot != "" do app.redraw = true // keep presenting while raised
-	if time.tick_diff(at.wait_until, now) < 0 do return
+	if time.tick_diff(at.wait_until, now) < 0 {
+		// a shot: once the raised window has drawn SHOT_FRAMES frames (and SHOT_MIN passed), not the
+		// whole second wait_until allows
+		shot_ready := at.pending_shot != "" && app.frames_drawn >= at.shot_drawn + SHOT_FRAMES && time.tick_diff(at.shot_at, now) >= SHOT_MIN
+		if !shot_ready do return
+	}
 	if at.pending_shot != "" {
 		// window was brought forward for this shot; frames have redrawn since
 		png := fmt.tprintf("build/shots/%s.png", at.pending_shot)
@@ -375,7 +490,11 @@ autotest_step :: proc() {
 		log("child exited:", t == nil || !t.running)
 		at.wait_exit = false
 	}
-	if at.wait_request != 0 do return // autotest_on_event clears it
+	if at.wait_request != 0 { 	// autotest_on_event clears it
+		if time.tick_diff(at.wait_request_deadline, now) <= 0 do return
+		script_fail(fmt.tprintf("TIMEOUT waiting for request %d to finish (%v)", at.wait_request, script_finish_timeout))
+		at.wait_request = 0
+	}
 	if at.wait_state[0] != "" {
 		got := json_path(state_json(), at.wait_state[0])
 		if got == at.wait_state[1] {
@@ -403,15 +522,86 @@ autotest_step :: proc() {
 	if !browser_wait_done(proc(msg: string) {script_fail(msg)}) do return // a web_* wait (browser.odin)
 	if !app_wait_done(proc(msg: string) {script_fail(msg)}) do return // an app_* wait (app_tab.odin)
 	for at.next < len(at.lines) {
+		idx := at.next
 		line := strings.trim_space(at.lines[at.next])
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
 		cmd, _, rest := strings.partition(line, " ")
 		args := strings.fields(rest, context.temp_allocator)
-		log(line)
+		if idx != at.retry_line {
+			log(line)
+			at.elem_until = {}
+		}
+		at.retry_line = -1
+		if script_is_check(cmd) {
+			ok, msg := script_check(cmd, rest, args)
+			if !ok && at.eventually_on && time.tick_diff(at.eventually_until, time.tick_now()) < 0 {
+				at.retry_line, at.next = idx, idx // again next frame (drawn: some checks read the last layout)
+				app.redraw = true
+				return
+			}
+			if at.audit && at.audit_wait >= 0 {
+				log(fmt.tprintf("AUDIT C %d %d %s", at.audit_wait + 1, at.audit_k, ok ? "pass" : "fail"))
+				at.audit_k += 1
+			}
+			at.asserts += 1
+			if ok do log(msg)
+			else do script_fail(msg)
+			continue
+		}
+		if cmd != "eventually" do at.eventually_on = false
+		if at.audit do script_audit(idx, cmd)
+		// an element-addressed line reads the last layout: one drawn after the last input (not
+		// the same click again right after it: two clickid lines are a double-click)
+		if script_reads_layout(cmd) && app.frames_drawn <= at.input_drawn && line != at.input_line {
+			app.redraw = true
+			at.retry_line, at.next = idx, idx
+			return
+		}
+		if script_is_input(cmd) {
+			at.input_drawn = app.frames_drawn
+			delete(at.input_line)
+			at.input_line = strings.clone(line)
+		}
 		switch cmd {
+		case "waitresult": // waitresult MS PATH VALUE: the `command` line just before, run again until its result has VALUE at PATH
+			ms_s, _, pv := strings.partition(rest, " ")
+			path, _, want := strings.partition(strings.trim_space(pv), " ")
+			want = expand_vars(want)
+			got := json_path(at.last_result, path)
+			prev := at.command_idx >= 0 ? strings.trim_space(at.lines[at.command_idx]) : ""
+			_, _, prev_json := strings.partition(prev, " ")
+			type := json_path(expand_vars(prev_json), "type")
+			if got == want {
+				log("result reached:", path, "=", got)
+				at.wr_idx = -1
+				continue
+			}
+			if !script_read_only(type) {
+				script_fail(fmt.tprintf("waitresult: %q is not a read-only command (it would run again)", type))
+				continue
+			}
+			now2 := time.tick_now()
+			if at.wr_idx != idx {
+				at.wr_idx = idx
+				at.wr_until = time.tick_add(now2, time.Duration(num(ms_s)) * time.Millisecond)
+			}
+			if time.tick_diff(at.wr_until, now2) >= 0 {
+				script_fail(fmt.tprintf("TIMEOUT waiting for %s = %q in the result (got %q)", path, want, got))
+				at.wr_idx = -1
+				continue
+			}
+			at.retry_line, at.next = at.command_idx, at.command_idx // the command again, then this line
+			at.wait_until = time.tick_add(now2, 100 * time.Millisecond)
+			return
+		case "eventually": // eventually [MS]: the checks right after this line may take up to MS (10 s)
+			at.eventually_on = true
+			ms: f32 = 10000
+			if len(args) > 0 do ms = num(args[0])
+			at.eventually_until = time.tick_add(time.tick_now(), time.Duration(ms) * time.Millisecond)
 		case "wait":
-			at.wait_until = time.tick_add(now, time.Duration(num(rest)) * time.Millisecond)
+			// from now, not the frame's start: a step before it (a shot) may have taken a second
+			at.wait_until = time.tick_add(time.tick_now(), time.Duration(num(rest)) * time.Millisecond)
 			return
 		case "waitfor":
 			text := rest
@@ -422,13 +612,13 @@ autotest_step :: proc() {
 				}
 			}
 			at.waiting_for = strings.clone(text)
-			at.deadline = time.tick_add(now, time.Duration(ms) * time.Millisecond)
+			at.deadline = time.tick_add(time.tick_now(), time.Duration(ms) * time.Millisecond)
 			return
 		case "waitstate": // waitstate MS PATH VALUE…: until the state JSON has VALUE at PATH
 			ms_s, _, pv := strings.partition(rest, " ")
 			path, _, want := strings.partition(strings.trim_space(pv), " ")
 			at.wait_state = {strings.clone(path), strings.clone(expand_vars(want))}
-			at.deadline = time.tick_add(now, time.Duration(num(ms_s)) * time.Millisecond)
+			at.deadline = time.tick_add(time.tick_now(), time.Duration(num(ms_s)) * time.Millisecond)
 			return
 		case "jobs_clock": // jobs_clock SECONDS: the jobs' clock moves on, then a due check
 			jobs_clock_advance(i64(num(rest)))
@@ -443,36 +633,41 @@ autotest_step :: proc() {
 			out, n := strings.replace(string(data), old, new, 1, context.temp_allocator)
 			if !n do script_fail("replace_in_file: not found:", old)
 			else do _ = os.write_entire_file(path, transmute([]u8)out)
-		case "assert_file", "assert_not_file": // assert_file PATH TEXT: the file contains TEXT
-			path, _, text := strings.partition(strings.trim_space(expand_vars(rest)), " ")
-			data, _ := os.read_entire_file(path, context.temp_allocator)
-			has := strings.contains(string(data), text)
-			at.asserts += 1
-			if has == (cmd == "assert_file") do log("assert ok:", cmd, path)
-			else do script_fail(fmt.tprintf("ASSERT FAILED %s %s %q", cmd, path, text))
 		case "waitexit":
 			ms: f32 = 60000
 			if len(args) > 0 do ms = num(args[0])
 			at.wait_exit = true
-			at.deadline = time.tick_add(now, time.Duration(ms) * time.Millisecond)
+			at.deadline = time.tick_add(time.tick_now(), time.Duration(ms) * time.Millisecond)
 			return
 		case "hover":
 			args := strings.fields(expand_vars(rest), context.temp_allocator)
-			idx: u32 = 0
-			if len(args) > 1 do idx = u32(num(args[1]))
-			d := clay.GetElementData(clay.ID(args[0], idx))
+			eidx, iok := script_index(args)
+			if !iok {
+				if script_retry(idx) do return
+				script_fail("no drawn row ends with", args[1][1:])
+				continue
+			}
+			d := clay.GetElementData(clay.ID(args[0], eidx))
 			if !d.found {
+				if script_retry(idx) do return
 				log("no element", rest)
 				continue
 			}
 			b := d.boundingBox
 			send({type = .MOUSE_MOVE, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2})
+		case "sweep":
+			sweep_hover(args[0], u32(num(args[1])), int(num(args[2])))
 		case "clickid":
 			args := strings.fields(expand_vars(rest), context.temp_allocator)
-			idx: u32 = 0
-			if len(args) > 1 do idx = u32(num(args[1]))
-			d := clay.GetElementData(clay.ID(args[0], idx))
+			eidx, iok := script_index(args)
+			if !iok {
+				if script_retry(idx) do return
+				script_fail("no drawn row ends with", args[1][1:])
+				continue
+			}
+			d := clay.GetElementData(clay.ID(args[0], eidx))
 			if !d.found {
+				if script_retry(idx) do return
 				log("no element", rest)
 				continue
 			}
@@ -481,10 +676,15 @@ autotest_step :: proc() {
 			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 		case "rclickid":
-			idx: u32 = 0
-			if len(args) > 1 do idx = u32(num(args[1]))
-			d := clay.GetElementData(clay.ID(args[0], idx))
+			eidx, iok := script_index(args)
+			if !iok {
+				if script_retry(idx) do return
+				script_fail("no drawn row ends with", args[1][1:])
+				continue
+			}
+			d := clay.GetElementData(clay.ID(args[0], eidx))
 			if !d.found {
+				if script_retry(idx) do return
 				script_fail("no element", rest)
 				continue
 			}
@@ -492,55 +692,19 @@ autotest_step :: proc() {
 			x, y := b.x + b.width / 2, b.y + b.height / 2
 			send({type = .MOUSE_DOWN, mouse_button = .RIGHT, mouse_x = x, mouse_y = y})
 			send({type = .MOUSE_UP, mouse_button = .RIGHT, mouse_x = x, mouse_y = y})
-		case "assert_tip":
-			got := ""
-			if tip_due() do app.redraw = true // as this frame would after the step (frames may be throttled)
-			if tip.shown && !tip.off {
-				label, keys := hit_tip(ui_hover)
-				got = keys != "" ? fmt.tprintf("%s %s", label, keys) : label
-			}
-			at.asserts += 1
-			if got == rest do log("assert ok: tooltip", fmt.tprintf("%q", got))
-			else do script_fail(fmt.tprintf("ASSERT FAILED tooltip: got %q, want %q (hover %v, shown %v, off %v)", got, rest, ui_hover, tip.shown, tip.off))
-		case "assert_drawn", "assert_not_drawn":
-			// TEXT is (not) in any text drawn now
-			want_drawn := cmd == "assert_drawn"
-			cmds := ui_layout(sapp.widthf(), sapp.heightf())
-			found := false
-			for i in 0 ..< cmds.length {
-				c := &cmds.internalArray[i]
-				if c.commandType != .Text do continue
-				t := c.renderData.text
-				if strings.contains(string(t.stringContents.chars[:t.stringContents.length]), rest) do found = true
-			}
-			app.redraw = true
-			at.asserts += 1
-			if want_drawn {
-				if found do log("assert ok: drawn", fmt.tprintf("%q", rest))
-				else do script_fail(fmt.tprintf("ASSERT FAILED drawn: %q is not on screen", rest))
-			} else if !found do log("assert ok: not drawn", fmt.tprintf("%q", rest))
-			else do script_fail(fmt.tprintf("ASSERT FAILED drawn: %q is on screen", rest))
-		case "assert_md", "assert_not_md":
-			got := md_shown_text()
-			want := cmd == "assert_md"
-			at.asserts += 1
-			if strings.contains(got, rest) == want do log("assert ok:", cmd, fmt.tprintf("%q", rest))
-			else do script_fail(fmt.tprintf("ASSERT FAILED %s %q (preview: %q)", cmd, rest, got[:min(len(got), 400)]))
 		case "clickmd":
 			x, y, ok := md_piece_point(rest)
 			if !ok {
+				if script_retry(idx) do return
 				script_fail("no preview text", rest)
 				continue
 			}
 			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
-		case "assert_opened":
-			at.asserts += 1
-			if autotest.opened_url == rest do log("assert ok: opened", rest)
-			else do script_fail(fmt.tprintf("ASSERT FAILED opened %q, want %q", autotest.opened_url, rest))
 		case "clickmenu":
 			// left click the open context menu's row labelled TEXT (as drawn last frame)
 			if !menu.open {
+				if script_retry(idx) do return
 				script_fail("ASSERT FAILED clickmenu: no menu is open, want", rest)
 				continue
 			}
@@ -548,6 +712,7 @@ autotest_step :: proc() {
 			for it, i in menu_items() do if !it.sep && !it.note && it.label == rest {row = i; break}
 			d := clay.GetElementData(clay.ID("menurow", u32(max(row, 0))))
 			if row < 0 || !d.found {
+				if script_retry(idx) do return
 				script_fail(fmt.tprintf("ASSERT FAILED clickmenu: no row %q in %s", rest, menu_rows_text()))
 				continue
 			}
@@ -555,67 +720,23 @@ autotest_step :: proc() {
 			x, y := b.x + b.width / 2, b.y + b.height / 2
 			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
-		case "assert_menurows":
-			// the open context menu's rows: labels joined by "|", "-" for a divider, notes left out
-			got := menu.open ? menu_rows_text() : "<no menu>"
-			at.asserts += 1
-			if got == rest do log("assert ok: menu rows", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED menu rows: %q, want %q", got, rest))
-		case "assert_revealed":
-			// the last path shown in Finder (platform.reveal, or a Reveal_In_Finder) contains TEXT; "-" = none since revealed_clear
-			got := autotest.revealed != "" ? autotest.revealed : fs_model.revealed
-			at.asserts += 1
-			ok := rest == "-" ? got == "" : got != "" && strings.contains(got, rest)
-			if ok do log("assert ok: revealed", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED revealed: %q, want %q in it", got, rest))
 		case "revealed_clear":
 			delete(autotest.revealed)
 			autotest.revealed = ""
 			delete(fs_model.revealed)
 			fs_model.revealed = ""
-		case "assert_toast":
-			// the toast showing now contains TEXT; "-" = none shows
-			at.asserts += 1
-			ok := rest == "-" ? toast.text == "" : toast.text != "" && strings.contains(toast.text, rest)
-			if ok do log("assert ok: toast", fmt.tprintf("%q", toast.text))
-			else do script_fail(fmt.tprintf("ASSERT FAILED toast: %q, want %q", toast.text, rest))
 		case "toast_clear":
 			toast_clear()
-		case "assert_clipboard":
-			// what pi-desk last put on the clipboard contains TEXT ("\n" = a line break); "-" = nothing since clipboard_clear
-			want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
-			at.asserts += 1
-			ok := rest == "-" ? autotest.clipboard == "" : autotest.clipboard != "" && strings.contains(autotest.clipboard, want)
-			if ok do log("assert ok: clipboard", fmt.tprintf("%q", autotest.clipboard))
-			else do script_fail(fmt.tprintf("ASSERT FAILED clipboard: %q, want %q", autotest.clipboard, want))
 		case "clipboard_clear":
 			delete(autotest.clipboard)
 			autotest.clipboard = ""
-		case "assert_notice":
-			e := tab_editor()
-			got := e != nil ? e.notice : "<no editor>"
-			at.asserts += 1
-			if strings.contains(got, rest) do log("assert ok: notice", fmt.tprintf("%q", got))
-			else do script_fail(fmt.tprintf("ASSERT FAILED notice: %q, want %q", got, rest))
-		case "assert_files":
-			// the shown tree's rows (Files or Settings; files_rows_text) contain TEXT ("\n" = a line break)
-			want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
-			got := files_rows_text(tree_rows())
-			at.asserts += 1
-			if strings.contains(got, want) do log("assert ok: files rows contain", fmt.tprintf("%q", want))
-			else do script_fail(fmt.tprintf("ASSERT FAILED files rows: %q not in %q", want, got))
-		case "assert_not_files":
-			want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
-			got := files_rows_text(tree_rows())
-			at.asserts += 1
-			if !strings.contains(got, want) do log("assert ok: files rows lack", fmt.tprintf("%q", want))
-			else do script_fail(fmt.tprintf("ASSERT FAILED files rows: %q in %q", want, got))
 		case "dragid":
 			// a left drag from the centre of element FROM (index) to the centre of TO
 			args := strings.fields(expand_vars(rest), context.temp_allocator)
 			from := clay.GetElementData(clay.ID(args[0], u32(num(args[1]))))
 			to := clay.GetElementData(clay.ID(args[2]))
 			if !from.found || !to.found {
+				if script_retry(idx) do return
 				script_fail("no element", rest)
 				continue
 			}
@@ -639,42 +760,6 @@ autotest_step :: proc() {
 			ms := time.duration_milliseconds(time.tick_since(t0))
 			log(fmt.tprintf("FILES layout while scrolling: %d frames in %.1f ms (%.2f ms per frame), %d rows", n, ms, ms / f64(n), len(files_ui.rows)))
 			app.redraw = true
-		case "assert_rows":
-			section, _, want := strings.partition(rest, " ")
-			b := strings.builder_make(context.temp_allocator)
-			switch section {
-			case "open":
-				for s, i in sidebar_open() {
-					if i > 0 do strings.write_byte(&b, ',')
-					strings.write_string(&b, open_session_title(s))
-				}
-			case "projects":
-				for r, i in sidebar_projects() {
-					if i > 0 do strings.write_byte(&b, ',')
-					if r.project == nil do fmt.sbprintf(&b, "%s%s/", strings.repeat("+", r.depth, context.temp_allocator), r.name)
-					else do fmt.sbprintf(&b, "%s%s", strings.repeat("+", r.depth, context.temp_allocator), project_name(r.project^))
-				}
-			case "sessions", "chats":
-				for r, i in sidebar_sessions(section == "chats" ? .Chats : .Sessions) {
-					if i > 0 do strings.write_byte(&b, ',')
-					strings.write_string(&b, session_label(r.session^, section == "chats"))
-				}
-			case "tree":
-				// as drawn in the last layout: projects, the expanded one's sessions as >title
-				for id, i in drawn.proj {
-					if i > 0 do strings.write_byte(&b, ',')
-					if p := find_project(id); p != nil do strings.write_string(&b, project_name(p^))
-					if id != state.selected_project do continue
-					for sid in drawn.sess {
-						for l in sessions_with_new(.Sessions, state.sessions[:]) do if l.id == sid do fmt.sbprintf(&b, ",>%s", session_label(l))
-					}
-				}
-			}
-			got := strings.to_string(b)
-			if got == "" do got = "-"
-			at.asserts += 1
-			if got == want do log("assert ok: rows", section, "=", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED rows %s: got %q, want %q", section, got, want))
 		case "drop":
 			paths := make([dynamic]string, context.temp_allocator)
 			for a in args[1:] do append(&paths, expand_vars(a))
@@ -737,7 +822,7 @@ autotest_step :: proc() {
 			key_event(args[0], mods)
 		case "paste":
 			s, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
-			sapp.set_clipboard_string(strings.clone_to_cstring(s, context.temp_allocator))
+			autotest_paste_set(s)
 			send({type = .CLIPBOARD_PASTED})
 		case "scroll":
 			send({type = .MOUSE_SCROLL, scroll_y = num(args[0]), mouse_x = num(args[1]) * app.dpi, mouse_y = num(args[2]) * app.dpi})
@@ -811,22 +896,6 @@ autotest_step :: proc() {
 				send({type = .MOUSE_DOWN, mouse_button = .RIGHT, mouse_x = x, mouse_y = y, modifiers = m})
 				send({type = .MOUSE_UP, mouse_button = .RIGHT, mouse_x = x, mouse_y = y, modifiers = m})
 			}
-		case "assert_link":
-			// assert_link URL|-: the link underlined under the pointer (⌘ held), or none
-			t := active_term()
-			got := t != nil && t.link_on ? t.link.url : "-"
-			at.asserts += 1
-			if got == rest do log("assert ok: link", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED link %q, want %q", got, rest))
-		case "assert_drawn_selection":
-			// assert_drawn_selection N: selected cells in the last frame drawn
-			// (N > 0: "some"; 0: none)
-			t := active_term()
-			got := t != nil ? t.drawn_selected : -1
-			want := int(num(args[0]))
-			at.asserts += 1
-			if (want == 0 && got == 0) || (want > 0 && got > 0) do log("assert ok: drawn selected cells =", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED drawn selection: got %d cells, want %s", got, want > 0 ? "some" : "none"))
 		case "clicktext":
 			d := clay.GetElementData(clay.ID(args[1]))
 			f, _, _ := focused_field()
@@ -849,24 +918,6 @@ autotest_step :: proc() {
 				if fmt.tprint(n) == args[0] do log("assert ok: beeps =", n)
 				else do script_fail(fmt.tprintf("ASSERT FAILED beeps: got %d, want %s", n, args[0]))
 			}
-		case "assert_screen":
-			at.asserts += 1
-			if strings.contains(screen_text(), rest) do log("assert ok: on screen:", rest)
-			else do script_fail(fmt.tprintf("ASSERT FAILED screen: %q not found", rest))
-		case "assert_palette":
-			rs := palette_results()
-			i := int(num(args[0]))
-			got := i < len(rs) ? rs[i].key : "<none>"
-			at.asserts += 1
-			if got == args[1] do log("assert ok: palette", i, "=", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED palette %d: got %s, want %s", i, got, args[1]))
-		case "assert_selection":
-			got := ""
-			if f, _, _ := focused_field(); f != nil do got = tf_selected_text(f)
-			else if t := active_term(); t != nil do got = term_selection_text(t)
-			at.asserts += 1
-			if got == rest do log("assert ok: selection =", fmt.tprintf("%q", got))
-			else do script_fail(fmt.tprintf("ASSERT FAILED selection: got %q, want %q", got, rest))
 		case "ime_press":
 			head, _, tail := strings.partition(rest, " -- ")
 			ha := strings.fields(head, context.temp_allocator)
@@ -918,36 +969,16 @@ autotest_step :: proc() {
 			test_ime(2, text, int(num(args[0])), flags = flags)
 			at.injecting = false
 			log("marked:", fmt.tprintf("%q", ime.marked))
-		case "hittest":
-			got := test_hit(num(args[0]) * app.dpi, num(args[1]) * app.dpi)
-			name := got == 1 ? "view" : (got == 0 ? "titlebar" : "nothing")
-			at.asserts += 1
-			if name == args[2] do log("assert ok: hit", args[0], args[1], "=", name)
-			else do script_fail(fmt.tprintf("ASSERT FAILED hit %s %s: got %s, want %s", args[0], args[1], name, args[2]))
 		case "system_appearance":
 			// as if the OS switched (the platform's KVO callback path)
 			on_system_appearance(args[0] == "light")
 			inbox_drain()
-		case "assert_in_window":
-			// assert_in_window ID: the element is laid out, wholly inside the window
-			_ = ui_layout(sapp.widthf(), sapp.heightf())
-			d := clay.GetElementData(clay.ID(args[0]))
-			b := d.boundingBox
-			at.asserts += 1
-			if d.found && b.x >= -0.5 && b.y >= -0.5 && b.x + b.width <= sapp.widthf() + 0.5 && b.y + b.height <= sapp.heightf() + 0.5 do log("assert ok: in window", args[0])
-			else do script_fail(fmt.tprintf("ASSERT FAILED in window: %s at %v (found %v), window %vx%v", args[0], b, d.found, sapp.widthf(), sapp.heightf()))
-		case "assert_window":
-			// the window's own appearance (title bar, traffic lights, folder picker)
-			got := test_window_light() ? "light" : "dark"
-			at.asserts += 1
-			if got == args[0] do log("assert ok: window appearance", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED window appearance: got %s, want %s", got, args[0]))
 		case "lights":
 			x, y := test_light()
 			log(fmt.tprintf("traffic lights: close button centre %.1f,%.1f; top bar centre y %.1f", x, y, f32(TAB_STRIP_H) / 2))
 		case "copy":
 			key_event("c", sapp.MODIFIER_SUPER)
-			log("clipboard:", fmt.tprintf("%q", string(sapp.get_clipboard_string())))
+			log("clipboard:", fmt.tprintf("%q", clipboard_text()))
 		case "resize":
 			window_set_content_size(num(args[0]), num(args[1]))
 		case "shot":
@@ -957,7 +988,8 @@ autotest_step :: proc() {
 			app.redraw = true
 			if t := active_term(); t != nil do t.changed = true
 			at.pending_shot = strings.clone(args[0])
-			at.wait_until = time.tick_add(now, 1000 * time.Millisecond)
+			at.shot_drawn, at.shot_at = app.frames_drawn, now
+			at.wait_until = time.tick_add(now, 1000 * time.Millisecond) // at most
 			return
 		case "dump":
 			_ = os.write_entire_file(fmt.tprintf("build/%s.txt", args[0]), transmute([]u8)screen_text())
@@ -999,13 +1031,6 @@ autotest_step :: proc() {
 			at.injecting = true
 			menubar_run(it)
 			at.injecting = false
-		case "assert_menu":
-			it := menubar_find(args[0])
-			on, checked := menubar_state(menubar_tag(it)) // -1 when there is no such item: false, false
-			got := args[1] == "enabled" || args[1] == "disabled" ? (on ? "enabled" : "disabled") : (checked ? "checked" : "unchecked")
-			at.asserts += 1
-			if it != nil && got == args[1] do log("assert ok: menu", args[0], got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED menu %s: got %s, want %s", args[0], it != nil ? got : "no such item", args[1]))
 		case "menu_key":
 			chars := args[1]
 			switch chars {
@@ -1051,13 +1076,11 @@ autotest_step :: proc() {
 				script_fail("command parse error:", err)
 				continue
 			}
-			reply: Reply
+			at.command_idx = idx
 			kind: Caller_Kind = cmd == "ui_command" ? .UI : cmd == "control_command" ? .Control : strings.has_prefix(cmd, "pi_") ? .Panel : .Script
 			caller := Caller{kind = kind}
 			if kind == .Panel do if cs := cur(); cs != nil do caller.tab_id = cs.tabs[0].id
-			id := inbox_submit(c, caller, &reply)
-			inbox_drain() // main thread: runs it now, in order with anything queued before
-			r := reply.result
+			id, r, finished := script_command(c, caller)
 			delete(at.last_result)
 			at.last_result = strings.clone(result_json(r))
 			if r.created_id != 0 do at.prev_created, at.last_created = at.last_created, r.created_id
@@ -1068,11 +1091,12 @@ autotest_step :: proc() {
 			log("result", id, at.last_result)
 			result_free(r)
 			if r.pending && cmd == "pi_command_bg" {
-				at.bg_request, at.bg_done = id, false
+				at.bg_request, at.bg_done = id, finished
 				continue
 			}
-			if r.pending {
+			if r.pending && !finished {
 				at.wait_request = id
+				at.wait_request_deadline = time.tick_add(time.tick_now(), script_finish_wait(c))
 				return
 			}
 		case "await_bg": // await_bg MS: until pi_command_bg's command finished (its result: assert_finished)
@@ -1106,14 +1130,6 @@ autotest_step :: proc() {
 			})
 		case "wakes":
 			log("wakes so far:", app.wakes)
-		case "assert_state", "assert_result", "assert_finished":
-			path, _, want := strings.partition(strings.trim_space(rest), " ")
-			src := cmd == "assert_state" ? state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
-			got := json_path(src, path)
-			want = expand_vars(want)
-			at.asserts += 1
-			if got == want do log("assert ok:", path, "=", got)
-			else do script_fail(fmt.tprintf("ASSERT FAILED %s: got %q, want %q", path, got, want))
 		case "result_file": // result_file NAME: the last command's result to build/NAME.json
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)at.last_result)
 		case "state_json":
@@ -1153,6 +1169,41 @@ autotest_step :: proc() {
 	}
 }
 
+// How a script command runs: the inbox's drain (a test may stand in for it, e.g. to have an
+// app's reply processed before the drain returns).
+script_drain: proc() = inbox_drain
+
+// How long a script waits for a long-running command's finished result before it fails with
+// TIMEOUT: this, or the command's own timeout_ms + 10 s when that is longer (script_finish_wait).
+// It keeps a scene from hanging; a result that comes after the TIMEOUT is dropped.
+script_finish_timeout := 120 * time.Second
+
+// The wait for c's finished result: script_finish_timeout, or c's own timeout_ms + 10 s (so its
+// own timeout error comes first) when that is longer.
+script_finish_wait :: proc(c: Command) -> time.Duration {
+	own: time.Duration
+	#partial switch x in c {
+	case App_Call:          own = time.Duration(x.timeout_ms) * time.Millisecond
+	case Browser_Page_Wait: own = time.Duration(x.timeout_ms) * time.Millisecond
+	case Claude_Wait_Idle:  own = time.Duration(x.timeout_ms) * time.Millisecond
+	case Pi_Wait_Idle:      own = time.Duration(x.timeout_ms) * time.Millisecond
+	}
+	if own <= 0 do return script_finish_timeout
+	return max(script_finish_timeout, own + 10 * time.Second)
+}
+
+// Runs one script command now, in order with anything queued before (main thread). finished:
+// a long-running command's finished event already came (its result is in last_finished).
+script_command :: proc(c: Command, caller: Caller) -> (id: u64, r: Result, finished: bool) {
+	reply: Reply
+	id = inbox_submit(c, caller, &reply)
+	autotest.submitted, autotest.submitted_done = id, false
+	script_drain()
+	finished = autotest.submitted_done
+	autotest.submitted, autotest.submitted_done = 0, false
+	return id, reply.result, finished
+}
+
 @(private = "file")
 script_fail :: proc(args: ..any) {
 	autotest.failures += 1
@@ -1161,6 +1212,15 @@ script_fail :: proc(args: ..any) {
 
 // Called for every event (events.odin).
 autotest_on_event :: proc(ev: Event) {
+	// finished inside script_command's own drain (a fast app's reply): before the script knows
+	// it has to wait, so kept here
+	if f, ok := ev.(Finished_Event); ok && autotest.submitted != 0 && f.request_id == autotest.submitted {
+		log("finished", f.request_id, result_json(f.result))
+		delete(autotest.last_finished)
+		autotest.last_finished = strings.clone(result_json(f.result))
+		autotest.submitted_done = true
+		return
+	}
 	if f, ok := ev.(Finished_Event); ok && autotest.bg_request != 0 && f.request_id == autotest.bg_request {
 		log("finished", f.request_id, result_json(f.result))
 		delete(autotest.last_finished)
@@ -1264,4 +1324,289 @@ menu_rows_text :: proc() -> string {
 		n += 1
 	}
 	return strings.to_string(b)
+}
+
+// The script's checks that only read (no input, no side effect a second look would repeat):
+// what `eventually` may run again every frame, and what the wait audit runs early.
+script_is_check :: proc(cmd: string) -> bool {
+	switch cmd {
+	case "assert_file", "assert_not_file", "assert_tip", "assert_drawn", "assert_not_drawn", "assert_md", "assert_not_md",
+	     "assert_opened", "assert_menurows", "assert_revealed", "assert_toast", "assert_clipboard", "assert_notice",
+	     "assert_files", "assert_not_files", "assert_rows", "assert_link", "assert_drawn_selection", "assert_screen",
+	     "assert_not_screen", "assert_palette", "assert_selection", "hittest", "assert_in_window", "assert_window",
+	     "assert_menu", "assert_state", "assert_result", "assert_finished":
+		return true
+	}
+	return false
+}
+
+// Runs check cmd (script_is_check) now: ok, and what the log says either way (temp-allocated).
+script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: string) {
+	at := &autotest
+	switch cmd {
+	case "assert_file", "assert_not_file": // assert_file PATH TEXT: the file contains TEXT
+		path, _, text := strings.partition(strings.trim_space(expand_vars(rest)), " ")
+		data, _ := os.read_entire_file(path, context.temp_allocator)
+		ok = strings.contains(string(data), text) == (cmd == "assert_file")
+		msg = ok ? fmt.tprint("assert ok:", cmd, path) : fmt.tprintf("ASSERT FAILED %s %s %q", cmd, path, text)
+	case "assert_tip":
+		got := ""
+		if tip_due() do app.redraw = true // as this frame would after the step (frames may be throttled)
+		if tip.shown && !tip.off {
+			label, keys := hit_tip(ui_hover)
+			got = keys != "" ? fmt.tprintf("%s %s", label, keys) : label
+		}
+		ok = got == rest
+		msg = ok ? fmt.tprint("assert ok: tooltip", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED tooltip: got %q, want %q (hover %v, shown %v, off %v)", got, rest, ui_hover, tip.shown, tip.off)
+	case "assert_drawn", "assert_not_drawn":
+		// TEXT is (not) in any text drawn now
+		cmds := ui_layout(sapp.widthf(), sapp.heightf())
+		found := false
+		for i in 0 ..< cmds.length {
+			c := &cmds.internalArray[i]
+			if c.commandType != .Text do continue
+			t := c.renderData.text
+			if strings.contains(string(t.stringContents.chars[:t.stringContents.length]), rest) do found = true
+		}
+		app.redraw = true
+		ok = found == (cmd == "assert_drawn")
+		if cmd == "assert_drawn" do msg = ok ? fmt.tprint("assert ok: drawn", fmt.tprintf("%q", rest)) : fmt.tprintf("ASSERT FAILED drawn: %q is not on screen", rest)
+		else do msg = ok ? fmt.tprint("assert ok: not drawn", fmt.tprintf("%q", rest)) : fmt.tprintf("ASSERT FAILED drawn: %q is on screen", rest)
+	case "assert_md", "assert_not_md":
+		got := md_shown_text()
+		ok = strings.contains(got, rest) == (cmd == "assert_md")
+		msg = ok ? fmt.tprint("assert ok:", cmd, fmt.tprintf("%q", rest)) : fmt.tprintf("ASSERT FAILED %s %q (preview: %q)", cmd, rest, got[:min(len(got), 400)])
+	case "assert_opened":
+		ok = autotest.opened_url == rest
+		msg = ok ? fmt.tprint("assert ok: opened", rest) : fmt.tprintf("ASSERT FAILED opened %q, want %q", autotest.opened_url, rest)
+	case "assert_menurows":
+		// the open context menu's rows: labels joined by "|", "-" for a divider, notes left out
+		got := menu.open ? menu_rows_text() : "<no menu>"
+		ok = got == rest
+		msg = ok ? fmt.tprint("assert ok: menu rows", got) : fmt.tprintf("ASSERT FAILED menu rows: %q, want %q", got, rest)
+	case "assert_revealed":
+		// the last path shown in Finder (platform.reveal, or a Reveal_In_Finder) contains TEXT; "-" = none since revealed_clear
+		got := autotest.revealed != "" ? autotest.revealed : fs_model.revealed
+		ok = rest == "-" ? got == "" : got != "" && strings.contains(got, rest)
+		msg = ok ? fmt.tprint("assert ok: revealed", got) : fmt.tprintf("ASSERT FAILED revealed: %q, want %q in it", got, rest)
+	case "assert_toast":
+		// the toast showing now contains TEXT; "-" = none shows
+		ok = rest == "-" ? toast.text == "" : toast.text != "" && strings.contains(toast.text, rest)
+		msg = ok ? fmt.tprint("assert ok: toast", fmt.tprintf("%q", toast.text)) : fmt.tprintf("ASSERT FAILED toast: %q, want %q", toast.text, rest)
+	case "assert_clipboard":
+		// what pi-desk last put on the clipboard contains TEXT ("\n" = a line break); "-" = nothing since clipboard_clear
+		want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
+		ok = rest == "-" ? autotest.clipboard == "" : autotest.clipboard != "" && strings.contains(autotest.clipboard, want)
+		msg = ok ? fmt.tprint("assert ok: clipboard", fmt.tprintf("%q", autotest.clipboard)) : fmt.tprintf("ASSERT FAILED clipboard: %q, want %q", autotest.clipboard, want)
+	case "assert_notice":
+		e := tab_editor()
+		got := e != nil ? e.notice : "<no editor>"
+		ok = strings.contains(got, rest)
+		msg = ok ? fmt.tprint("assert ok: notice", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED notice: %q, want %q", got, rest)
+	case "assert_files", "assert_not_files":
+		// the shown tree's rows (Files or Settings; files_rows_text) contain TEXT ("\n" = a line break)
+		want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
+		got := files_rows_text(tree_rows())
+		has := strings.contains(got, want)
+		ok = has == (cmd == "assert_files")
+		if cmd == "assert_files" do msg = ok ? fmt.tprint("assert ok: files rows contain", fmt.tprintf("%q", want)) : fmt.tprintf("ASSERT FAILED files rows: %q not in %q", want, got)
+		else do msg = ok ? fmt.tprint("assert ok: files rows lack", fmt.tprintf("%q", want)) : fmt.tprintf("ASSERT FAILED files rows: %q in %q", want, got)
+	case "assert_rows":
+		section, _, want := strings.partition(rest, " ")
+		got := script_rows_text(section)
+		ok = got == want
+		msg = ok ? fmt.tprint("assert ok: rows", section, "=", got) : fmt.tprintf("ASSERT FAILED rows %s: got %q, want %q", section, got, want)
+	case "assert_link":
+		// assert_link URL|-: the link underlined under the pointer (⌘ held), or none
+		t := active_term()
+		got := t != nil && t.link_on ? t.link.url : "-"
+		ok = got == rest
+		msg = ok ? fmt.tprint("assert ok: link", got) : fmt.tprintf("ASSERT FAILED link %q, want %q", got, rest)
+	case "assert_drawn_selection":
+		// assert_drawn_selection N: selected cells in the last frame drawn (N > 0: "some"; 0: none)
+		t := active_term()
+		got := t != nil ? t.drawn_selected : -1
+		want := len(args) > 0 ? int(num(args[0])) : 0
+		ok = (want == 0 && got == 0) || (want > 0 && got > 0)
+		msg = ok ? fmt.tprint("assert ok: drawn selected cells =", got) : fmt.tprintf("ASSERT FAILED drawn selection: got %d cells, want %s", got, want > 0 ? "some" : "none")
+	case "assert_screen":
+		ok = strings.contains(screen_text(), rest)
+		msg = ok ? fmt.tprint("assert ok: on screen:", rest) : fmt.tprintf("ASSERT FAILED screen: %q not found", rest)
+	case "assert_not_screen":
+		ok = !strings.contains(screen_text(), rest)
+		msg = ok ? fmt.tprint("assert ok: not on screen:", rest) : fmt.tprintf("ASSERT FAILED screen: %q found", rest)
+	case "assert_palette":
+		rs := palette_results()
+		i := int(num(args[0]))
+		got := i < len(rs) ? rs[i].key : "<none>"
+		ok = got == args[1]
+		msg = ok ? fmt.tprint("assert ok: palette", i, "=", got) : fmt.tprintf("ASSERT FAILED palette %d: got %s, want %s", i, got, args[1])
+	case "assert_selection":
+		got := ""
+		if f, _, _ := focused_field(); f != nil do got = tf_selected_text(f)
+		else if t := active_term(); t != nil do got = term_selection_text(t)
+		ok = got == rest
+		msg = ok ? fmt.tprint("assert ok: selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED selection: got %q, want %q", got, rest)
+	case "hittest":
+		got := test_hit(num(args[0]) * app.dpi, num(args[1]) * app.dpi)
+		name := got == 1 ? "view" : (got == 0 ? "titlebar" : "nothing")
+		ok = name == args[2]
+		msg = ok ? fmt.tprint("assert ok: hit", args[0], args[1], "=", name) : fmt.tprintf("ASSERT FAILED hit %s %s: got %s, want %s", args[0], args[1], name, args[2])
+	case "assert_in_window":
+		// assert_in_window ID: the element is laid out, wholly inside the window
+		_ = ui_layout(sapp.widthf(), sapp.heightf())
+		d := clay.GetElementData(clay.ID(args[0]))
+		b := d.boundingBox
+		ok = d.found && b.x >= -0.5 && b.y >= -0.5 && b.x + b.width <= sapp.widthf() + 0.5 && b.y + b.height <= sapp.heightf() + 0.5
+		msg = ok ? fmt.tprint("assert ok: in window", args[0]) : fmt.tprintf("ASSERT FAILED in window: %s at %v (found %v), window %vx%v", args[0], b, d.found, sapp.widthf(), sapp.heightf())
+	case "assert_window":
+		// the window's own appearance (title bar, traffic lights, folder picker)
+		got := test_window_light() ? "light" : "dark"
+		ok = got == args[0]
+		msg = ok ? fmt.tprint("assert ok: window appearance", got) : fmt.tprintf("ASSERT FAILED window appearance: got %s, want %s", got, args[0])
+	case "assert_menu":
+		it := menubar_find(args[0])
+		on, checked := menubar_state(menubar_tag(it)) // -1 when there is no such item: false, false
+		got := args[1] == "enabled" || args[1] == "disabled" ? (on ? "enabled" : "disabled") : (checked ? "checked" : "unchecked")
+		ok = it != nil && got == args[1]
+		msg = ok ? fmt.tprint("assert ok: menu", args[0], got) : fmt.tprintf("ASSERT FAILED menu %s: got %s, want %s", args[0], it != nil ? got : "no such item", args[1])
+	case "assert_state", "assert_result", "assert_finished":
+		path, _, want := strings.partition(strings.trim_space(rest), " ")
+		src := cmd == "assert_state" ? state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
+		got := json_path(src, path)
+		want = expand_vars(want)
+		ok = got == want
+		msg = ok ? fmt.tprint("assert ok:", path, "=", got) : fmt.tprintf("ASSERT FAILED %s: got %q, want %q", path, got, want)
+	}
+	return
+}
+
+// assert_rows' text for a section of the left column (temp).
+@(private = "file")
+script_rows_text :: proc(section: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	switch section {
+	case "open":
+		for s, i in sidebar_open() {
+			if i > 0 do strings.write_byte(&b, ',')
+			strings.write_string(&b, open_session_title(s))
+		}
+	case "projects":
+		for r, i in sidebar_projects() {
+			if i > 0 do strings.write_byte(&b, ',')
+			if r.project == nil do fmt.sbprintf(&b, "%s%s/", strings.repeat("+", r.depth, context.temp_allocator), r.name)
+			else do fmt.sbprintf(&b, "%s%s", strings.repeat("+", r.depth, context.temp_allocator), project_name(r.project^))
+		}
+	case "sessions", "chats":
+		for r, i in sidebar_sessions(section == "chats" ? .Chats : .Sessions) {
+			if i > 0 do strings.write_byte(&b, ',')
+			strings.write_string(&b, session_label(r.session^, section == "chats"))
+		}
+	case "tree":
+		// as drawn in the last layout: projects, the expanded one's sessions as >title
+		for id, i in drawn.proj {
+			if i > 0 do strings.write_byte(&b, ',')
+			if p := find_project(id); p != nil do strings.write_string(&b, project_name(p^))
+			if id != state.selected_project do continue
+			for sid in drawn.sess {
+				for l in sessions_with_new(.Sessions, state.sessions[:]) do if l.id == sid do fmt.sbprintf(&b, ",>%s", session_label(l))
+			}
+		}
+	}
+	got := strings.to_string(b)
+	return got == "" ? "-" : got
+}
+
+// An element-addressed line whose element (menu row, preview text) is not laid out yet: true =
+// try the line again next frame, for up to ELEMENT_WAIT; false = time is up, fail as before.
+ELEMENT_WAIT :: 5 * time.Second
+
+@(private = "file")
+script_retry :: proc(idx: int) -> bool {
+	at := &autotest
+	now := time.tick_now()
+	if at.elem_until == {} do at.elem_until = time.tick_add(now, ELEMENT_WAIT)
+	if time.tick_diff(at.elem_until, now) >= 0 {
+		at.elem_until = {}
+		return false
+	}
+	app.redraw = true
+	at.retry_line, at.next = idx, idx
+	return true
+}
+
+// A shot is taken once the raised window has drawn this many frames and this long has passed
+// (it was a fixed second): the frame on screen is then one drawn after the raise.
+SHOT_FRAMES :: 3
+SHOT_MIN :: 150 * time.Millisecond
+
+// Lines that click, hover or drag an element where the last layout put it: they wait for a
+// frame drawn after the last input, so the layout they read shows what that input did.
+@(private = "file")
+script_reads_layout :: proc(cmd: string) -> bool {
+	switch cmd {
+	case "clickid", "rclickid", "hover", "sweep", "dragid", "clickmenu", "clickmd", "clicktext", "divider", "drop":
+		return true
+	}
+	return false
+}
+
+// Lines that put input in (or change what is laid out) as the user would.
+@(private = "file")
+script_is_input :: proc(cmd: string) -> bool {
+	switch cmd {
+	case "type", "key", "paste", "scroll", "click", "drag", "clicks", "clickcell", "mousecell", "clicktext", "clickid",
+	     "rclickid", "dragid", "hover", "sweep", "clickmenu", "clickmd", "divider", "drop", "menu", "menu_key", "ime_press",
+	     "ime_mark", "ime_commit", "ime_key", "command", "ui_command", "control_command", "pi_command", "pi_command_bg",
+	     "resize", "window", "system_appearance", "toast_clear", "jobs_ui", "jobs_clock", "window_active", "copy":
+		return true
+	}
+	return false
+}
+
+// PI_DESK_WAIT_AUDIT=1 (tests/wait_audit.py): for every `wait` followed by checks, whether each
+// check already held before the line ahead of the wait ran (A) and when the wait began (B); the
+// check's own run is C. A check that held at A did not need the wait to become true: it may be a
+// check that something stays as it was, so its wait is kept. Logged, never counted or failed.
+@(private = "file")
+script_audit :: proc(idx: int, cmd: string) {
+	at := &autotest
+	at.audit_wait = -1
+	if cmd == "wait" {
+		script_audit_block(idx, "B")
+		at.audit_wait, at.audit_k = idx, 0
+		return
+	}
+	// the next line that is not a comment: a wait?
+	for j in idx + 1 ..< len(at.lines) {
+		l := strings.trim_space(at.lines[j])
+		if l == "" || l[0] == '#' do continue
+		if strings.has_prefix(l, "wait ") do script_audit_block(j, "A")
+		break
+	}
+}
+
+@(private = "file")
+script_audit_block :: proc(wait_idx: int, phase: string) {
+	at := &autotest
+	k := 0
+	for j in wait_idx + 1 ..< len(at.lines) {
+		l := strings.trim_space(at.lines[j])
+		if l == "" || l[0] == '#' do continue
+		cmd, _, rest := strings.partition(l, " ")
+		if !script_is_check(cmd) do break
+		ok, _ := script_check(cmd, rest, strings.fields(rest, context.temp_allocator))
+		log(fmt.tprintf("AUDIT %s %d %d %s", phase, wait_idx + 1, k, ok ? "pass" : "fail"))
+		k += 1
+	}
+}
+
+// Commands waitresult may run again: they only read.
+@(private = "file")
+script_read_only :: proc(type: string) -> bool {
+	switch type {
+	case "changes_list", "editor_state", "list_worktrees", "app_events", "session_info", "get_state", "job_list":
+		return true
+	}
+	return false
 }

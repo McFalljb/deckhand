@@ -56,6 +56,8 @@ Session_Facts :: struct {
 	created:  string,
 	modified: string,
 	model:    string,
+	agent:    string, // "Claude Code" for a Claude row ("" = pi)
+	used:     string, // a Claude row: its last use (pi-desk's history)
 }
 
 // The facts in a session file: its header line and its metadata. The
@@ -118,7 +120,7 @@ time_iso :: proc(t: time.Time) -> string {
 // are one line each; the fence is longer than any run of backticks in them.
 session_info_text :: proc(f: Session_Facts) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	pairs := [?][2]string{{"id", f.id}, {"file", f.file}, {"project", f.project}, {"folder", f.cwd}, {"title", redact_secrets(f.title)}, {"created", f.created}, {"modified", f.modified}, {"model", f.model}}
+	pairs := [?][2]string{{"id", f.id}, {"agent", f.agent}, {"file", f.file}, {"project", f.project}, {"folder", f.cwd}, {"title", redact_secrets(f.title)}, {"created", f.created}, {"modified", f.modified}, {"used", f.used}, {"model", f.model}}
 	run := 0
 	for p in pairs {
 		n := 0
@@ -128,7 +130,7 @@ session_info_text :: proc(f: Session_Facts) -> string {
 		}
 	}
 	fence := strings.repeat("`", max(3, run + 1), context.temp_allocator)
-	fmt.sbprintf(&b, "%spi-session\n", fence)
+	fmt.sbprintf(&b, "%s%s\n", fence, f.agent != "" ? "claude-session" : "pi-session")
 	for p in pairs {
 		v := strings.trim_space(one_line(p[1], context.temp_allocator))
 		if v == "" do continue
@@ -141,6 +143,7 @@ session_info_text :: proc(f: Session_Facts) -> string {
 // A listed session's facts and its block (temp allocator); err: why not.
 session_info_build :: proc(project_id: u64, pi_session_id: string) -> (f: Session_Facts, text: string, err: string) {
 	if pi_session_id == "" do return f, "", "pi_session_id is empty"
+	if rec := claude_row_record(project_id, pi_session_id); rec != nil do return claude_facts(project_id, rec)
 	path, perr := sidebar_path(project_id, pi_session_id)
 	if perr != "" do return f, "", perr
 	ferr: string
@@ -157,6 +160,21 @@ session_info_build :: proc(project_id: u64, pi_session_id: string) -> (f: Sessio
 	return f, session_info_text(f), ""
 }
 
+// A Claude row's facts: pi-desk's own history entry (never Claude Code's files), its transcript
+// path only while it is still one under Claude's projects/ (claude_rows.odin).
+@(private = "file")
+claude_facts :: proc(project_id: u64, rec: ^Claude_Record) -> (f: Session_Facts, text: string, err: string) {
+	f.id = strings.clone(rec.id, context.temp_allocator)
+	f.agent = "Claude Code"
+	f.file, _ = claude_transcript_file(rec)
+	if p := find_project(project_id); p != nil do f.project = project_display(p^)
+	f.cwd = strings.clone(rec.cwd, context.temp_allocator)
+	f.title = cut_utf8(one_line(rec.title, context.temp_allocator), 200)
+	if rec.used > 0 do f.used = time_iso(time.unix(rec.used, 0))
+	f.model = strings.clone(rec.model, context.temp_allocator)
+	return f, session_info_text(f), ""
+}
+
 // The session_info command (commands.odin).
 session_info_apply :: proc(c: Session_Info, caller: Caller) -> (Result, bool) {
 	switch c.to {
@@ -169,7 +187,8 @@ session_info_apply :: proc(c: Session_Info, caller: Caller) -> (Result, bool) {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"text":`)
 	json_quote(&b, text)
-	for kv in ([?][2]string{{"id", f.id}, {"file", f.file}, {"project", f.project}, {"cwd", f.cwd}, {"title", redact_secrets(f.title)}, {"created", f.created}, {"modified", f.modified}, {"model", f.model}}) {
+	for kv in ([?][2]string{{"id", f.id}, {"file", f.file}, {"project", f.project}, {"cwd", f.cwd}, {"title", redact_secrets(f.title)}, {"created", f.created}, {"modified", f.modified}, {"model", f.model}, {"agent", f.agent}, {"used", f.used}}) {
+		if (kv[0] == "agent" || kv[0] == "used") && kv[1] == "" do continue // pi's answer as before
 		fmt.sbprintf(&b, `,"%s":`, kv[0])
 		json_quote(&b, kv[1])
 	}

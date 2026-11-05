@@ -1,0 +1,61 @@
+# A session's own pi opens its project's declared app (tests/scripts/app-open.sh): the fake bridge
+# (fake-bridge-apps.py) in the session's pi tab, the fake app (build/fake-app) declared in each
+# project's .pi-desk/apps.json. Another project's session has an app tab the user opened.
+wait 1000
+# the other session first, with the user's app tab, in front
+command {"type":"add_project","cwd":"$homedir/other"}
+command {"type":"new_chat","project_id":$last}
+assert_result ok true
+command {"type":"new_app_tab","name":"fake"}
+assert_result ok true
+waitstate 8000 open_sessions.0.tabs.1.app_status running
+assert_state open_sessions.0.active_tab $last
+# the session whose pi drives it, in front now, its pi tab on screen
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"new_chat","project_id":$last}
+assert_result ok true
+assert_state open_sessions.# 2
+waitfor fake apps bridge 10000
+# 1. open: its own declared app, at once (pi-desk asks nothing), behind the view; refused
+# elsewhere, by argv, by an unknown name
+type open
+key enter
+waitfor done open 30000
+assert_state pending_confirmations.# 0
+waitstate 5000 open_sessions.1.tabs.# 2
+assert_state open_sessions.1.tabs.1.kind app
+assert_state open_sessions.1.tabs.1.title fake
+assert_state open_sessions.1.active_tab $pitab
+assert_screen done open
+assert_state open_sessions.0.tabs.# 2
+# the same entry again: another tab (closed again); the first answers and draws its first frame
+# while hidden
+type again
+key enter
+waitfor done again 30000
+assert_state pending_confirmations.# 0
+waitstate 8000 open_sessions.1.tabs.# 2
+waitstate 8000 open_sessions.1.tabs.1.app_status running
+assert_state open_sessions.1.active_tab $pitab
+# a screenshot of it while hidden: a fresh frame each time
+type shot
+key enter
+waitfor done shot 30000
+assert_state open_sessions.1.active_tab $pitab
+# 2. another session's app tab: never restarted, closed or called
+type others
+key enter
+waitfor done others 60000
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.0.tabs.1.app_status running
+# 3. its own: restart, then close
+type restart
+key enter
+waitfor done restart 30000
+type close
+key enter
+waitfor done close 15000
+waitstate 8000 open_sessions.1.tabs.# 1
+assert_state open_sessions.1.active_tab $pitab
+assert_state open_sessions.0.tabs.# 2
+quit

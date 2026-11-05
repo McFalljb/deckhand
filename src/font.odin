@@ -112,8 +112,10 @@ Raster_Key :: struct {
 	glyph:   u32, // codepoint for sprites
 	scale_q: u16, // scale * 1024
 	subx:    u8, // quarter pixels
-	sprite:  u8, // 1: box drawing / block sprite (cell-sized)
+	sprite:  u8, // 1: box drawing / block sprite (cell-sized); LOGO_SPRITE: a logo (glyph = Logo, scale_q = px)
 }
+
+LOGO_SPRITE :: 2
 
 // A shaped run: a UI string, or one terminal cell's grapheme.
 Run :: struct {
@@ -332,7 +334,10 @@ raster_get :: proc(k: Raster_Key) -> (Atlas_Glyph, bool) {
 	g: Atlas_Glyph
 	scale := f32(k.scale_q) / 1024
 	subx := f32(k.subx) / 4
-	if k.sprite != 0 {
+	if k.sprite == LOGO_SPRITE {
+		side := i32(logo_side(Logo(k.glyph), int(k.scale_q))) // n, or more for a wide mark
+		g.w, g.h = side, side
+	} else if k.sprite != 0 {
 		g.w, g.h = i32(font.cell_w) * i32(max(1, k.scale_q / 1024)), i32(font.cell_h)
 		g.y_off = -i32(font.baseline)
 	} else {
@@ -343,7 +348,10 @@ raster_get :: proc(k: Raster_Key) -> (Atlas_Glyph, bool) {
 		if len(font.scratch) < n do resize(&font.scratch, n)
 		px := font.scratch[:n]
 		mem.zero_slice(px)
-		if k.sprite != 0 {
+		if k.sprite == LOGO_SPRITE {
+			if !logo_render(Logo(k.glyph), int(k.scale_q), px) do g.w = 0
+			g.color = true
+		} else if k.sprite != 0 {
 			if !sprite_render(rune(k.glyph), int(g.w), int(g.h), px) do g.w = 0
 		} else {
 			g.color = tb_glyph_render(k.face, k.glyph, scale, subx, g.x_off, g.y_off, g.w, g.h, px, int(g.w) * 4, font_config.thicken)
@@ -652,6 +660,25 @@ draw_run :: proc(ri: u32, x, baseline: f32, col: Rgba) {
 		sgl.v2f_t2f_c4b(gx + w, gy + h, u1, v1, c.r, c.g, c.b, c.a)
 		sgl.v2f_t2f_c4b(gx, gy + h, u0, v1, c.r, c.g, c.b, c.a)
 	}
+}
+
+// Draws `logo` (logos.odin) in its own colours, for the n framebuffer px square with its
+// top-left at (x, y) rounded to the pixel grid, faded by alpha a. A mark wider than the square
+// (logo_side) reaches past it equally on both sides.
+draw_logo :: proc(logo: Logo, x, y: f32, n: int, a: u8) {
+	if logo == .None || n <= 0 || n > 1024 || a == 0 do return
+	ag, ok := raster_get(Raster_Key{glyph = u32(logo), scale_q = u16(n), sprite = LOGO_SPRITE})
+	if !ok || ag.w == 0 do return
+	inv := 1 / f32(font.size)
+	over := f32((int(ag.w) - n) / 2) // logo_side: an even number of px more than n, or none
+	gx, gy := math.round(x) - over, math.round(y) - over
+	u0, v0 := f32(ag.x) * inv, f32(ag.y) * inv
+	u1, v1 := f32(ag.x + ag.w) * inv, f32(ag.y + ag.h) * inv
+	w, h := f32(ag.w), f32(ag.h)
+	sgl.v2f_t2f_c4b(gx, gy, u0, v0, 255, 255, 255, a)
+	sgl.v2f_t2f_c4b(gx + w, gy, u1, v0, 255, 255, 255, a)
+	sgl.v2f_t2f_c4b(gx + w, gy + h, u1, v1, 255, 255, 255, a)
+	sgl.v2f_t2f_c4b(gx, gy + h, u0, v1, 255, 255, 255, a)
 }
 
 // Draws a single-line string whose line box's top-left is (x, y). Returns

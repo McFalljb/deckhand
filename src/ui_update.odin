@@ -39,20 +39,20 @@ update_bar_parts :: proc() -> (msg: string, parts: [dynamic]Update_Part) {
 	v := upd.release.version
 	switch upd.phase {
 	case .Downloading:
-		msg = fmt.tprintf("Downloading pi-desk %s and checking its signature…", v)
+		msg = fmt.tprintf("Downloading Deckhand %s and checking its signature…", v)
 		append(&parts, Update_Part.Notes)
 	case .Ready:
-		msg = fmt.tprintf("pi-desk %s is ready", v)
+		msg = fmt.tprintf("Deckhand %s is ready", v)
 		if any_running() || jobs_any_running() do msg = fmt.tprintf("%s — restarting stops running sessions, shells and jobs", msg)
 		append(&parts, Update_Part.Later, Update_Part.Install)
 	case .Failed:
-		msg = fmt.tprintf("pi-desk %s not installed: %s", v, upd.message)
+		msg = fmt.tprintf("Deckhand %s not installed: %s", v, upd.message)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
 		if update_cannot_install() == "" do append(&parts, Update_Part.Update)
 	case .Installed:
-		msg = fmt.tprintf("pi-desk %s is installed: restarting…", v)
+		msg = fmt.tprintf("Deckhand %s is installed: restarting…", v)
 	case .None, .Checking:
-		msg = fmt.tprintf("pi-desk %s is available", v)
+		msg = fmt.tprintf("Deckhand %s is available", v)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
 		if why := update_cannot_install(); why != "" do msg = fmt.tprintf("%s — %s", msg, why)
 		else do append(&parts, Update_Part.Update)
@@ -108,7 +108,7 @@ update_tip :: proc(h: Hit_Update) -> (label, keys: string) {
 	case .Skip:    return "Do not offer this version again (Check for Updates… offers it again)", ""
 	case .Later:   return "Hide this until the next check finds a release", ""
 	case .Update:  return "Download it and check its signature; nothing is replaced until you restart", ""
-	case .Install: return "Replace pi-desk with the checked update and restart it (asks first while anything runs)", ""
+	case .Install: return "Replace Deckhand with the checked update and restart it (asks first while anything runs)", ""
 	}
 	return "", ""
 }

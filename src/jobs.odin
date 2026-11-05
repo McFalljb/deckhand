@@ -355,7 +355,7 @@ jobs_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 		j := job_by_id(c.job)
 		if j == nil do return fail("no such job"), false
 		if j.run != nil do return fail("this job is running: stop it first"), false
-		gr, go_on, ch := confirm_gate(Job_Delete{job = c.job}, .Delete, caller, c.confirm, fmt.tprintf("move job %q (%s) to the Trash? Its run history stays in pi-desk's data folder.", j.def.name, fs_display(j.path)))
+		gr, go_on, ch := confirm_gate(Job_Delete{job = c.job}, .Delete, caller, c.confirm, fmt.tprintf("move job %q (%s) to the Trash? Its run history stays in Deckhand's data folder.", j.def.name, fs_display(j.path)))
 		if !go_on do return gr, ch
 		if !fs_trash_fn(j.path) do return fail("could not move the note to the Trash"), ch
 		sched_log("%s: note moved to the Trash", j.def.id)
@@ -992,21 +992,27 @@ period_limit_reached :: proc(now: i64) -> bool {
 
 // ---- starting a run ----
 
-// pi: the setting pi_path, else `pi` on the jobs' PATH.
+// pi: the setting pi_path, else `pi` on the jobs' PATH, else pi's managed
+// install (login_env.odin; jobs_path is usually the login shell's, saved).
+// Test mode: only pi_path (a scene's fake) or PI_DESK_REAL_PI=1; never the real pi by search.
 job_pi_path :: proc() -> string {
 	if p := state.settings.pi_path; p != "" do return p
+	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
+		test_mode_refused("pi (jobs: no pi_path)")
+		return ""
+	}
 	for d in strings.split(jobs_env_path(), ":", context.temp_allocator) {
 		if !strings.has_prefix(d, "/") do continue // "", ".", relative: never pi from wherever the cwd is
 		p := fmt.tprintf("%s/pi", d)
 		if path_kind(p) == .File do return p
 	}
-	return ""
+	return pi_managed_path()
 }
 
 @(private = "file")
 jobs_env_path :: proc() -> string {
 	if p := state.settings.jobs_path; p != "" do return p
-	if p := os.get_env("PATH", context.temp_allocator); p != "" do return p
+	if p, _ := env_lookup(child_base_env(), "PATH"); p != "" do return p // refreshed (login_env.odin), else ours
 	return "/usr/bin:/bin:/usr/sbin:/sbin"
 }
 
@@ -1023,12 +1029,12 @@ job_atlas_prompt :: proc() -> string {
 
 @(private = "file")
 job_preamble :: proc(j: ^Job, scheduled: i64) -> string {
-	return fmt.tprintf(`# pi-desk job run
+	return fmt.tprintf(`# Deckhand job run
 
 - You are job "%s" (id %s), scheduled for %s, running unattended: nobody can answer questions, so do not ask any.
 - This scheduled prompt cannot approve risky actions: a blocked action stays blocked. Do not work around it; list it under "## Needs you".
 - You cannot create or edit jobs. To propose one, describe it under "## Needs you".
-- Never write to protected paths: .git, .pi/, AGENTS.md, CLAUDE.md, shell rc files, and pi-desk's jobs and atlas folders.
+- Never write to protected paths: .git, .pi/, AGENTS.md, CLAUDE.md, shell rc files, and Deckhand's jobs and atlas folders.
 - Your access: %s.
 - End your answer with "## Summary" (its first line: a one-line headline) and, only if something needs the user, "## Needs you" with one item per line.
 `, j.def.name, j.def.id, iso_local(scheduled), j.def.access == .Full ? "full (pi's normal guardrails)" : "read-only (PI_KIT_READONLY)")
@@ -1084,6 +1090,15 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 		return ""
 	}
 	pi := job_pi_path()
+	if j.def.access == .Read && pi_readonly_too_old() {
+		// its read-only flags would not hold on this pi: never started
+		r.spawn_error = strings.clone(PI_READONLY_JOB_TOO_OLD)
+		r.exit_code = -1
+		j.run = r
+		sched_log("%s: %s (pi %s)", j.def.id, PI_READONLY_JOB_TOO_OLD, state.reload.pi_version)
+		job_finish(r)
+		return ""
+	}
 	preamble := fmt.tprintf("%s/preamble.md", dir)
 	_ = os.write_entire_file(preamble, transmute([]u8)job_preamble(j, scheduled))
 	argv := job_argv(pi, fmt.tprintf("%s/sessions", jd), new_uuid(), j.def.model, job_atlas_prompt(), preamble, j.def.prompt, j.def.access)
@@ -1096,7 +1111,7 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	if j.def.access == .Read do append(&env, "PI_KIT_READONLY=1")
 	append(&env, fmt.tprintf("PI_DESK_JOB=%s", j.def.id), fmt.tprintf("PI_DESK_RUN=%s", name), fmt.tprintf("PI_DESK_RUN_DIR=%s", dir), fmt.tprintf("PI_DESK_SCHEDULED_AT=%s", iso_local(scheduled)))
 	if pi == "" || !run_spawn(r, argv[:], env[:], j.def.folder, fmt.tprintf("%s/stderr.log", dir)) {
-		r.spawn_error = strings.clone(pi == "" ? "pi not found on the jobs' PATH (or set pi_path)" : "could not start pi")
+		r.spawn_error = strings.clone(pi == "" ? JOBS_NEED_PI : "could not start pi")
 		r.exit_code = -1
 		j.run = r
 		job_finish(r)
@@ -1111,14 +1126,16 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 // pi's command line for a run (temp allocator). The prompt comes after
 // `--`, so it is never read as an option; pi still reads an argument
 // starting with "@" there as a file to attach, so such a prompt starts with
-// a newline. Read jobs get pi's built-in read tools only (pi 1.4 `--tools`,
-// an allowlist that also covers extension tools) and no MCP tools, on top of
-// PI_KIT_READONLY.
+// a newline. Read jobs get pi's built-in read tools only and no MCP tools
+// (PI_READONLY_ARGS, as read-only chats), on top of PI_KIT_READONLY.
 job_argv :: proc(pi, session_dir, session_id, model, atlas_prompt, preamble, prompt: string, access: Job_Access) -> []string {
 	argv := make([dynamic]string, context.temp_allocator)
 	append(&argv, pi, "--mode", "json", "--session-dir", session_dir, "--session-id", session_id)
 	if model != "" do append(&argv, "--model", model)
-	if access == .Read do append(&argv, "--tools", "read,grep,find,ls", "--no-mcp")
+	if access == .Read {
+		ro := PI_READONLY_ARGS
+		append(&argv, ..ro[:])
+	}
 	if atlas_prompt != "" do append(&argv, "--append-system-prompt", atlas_prompt)
 	append(&argv, "--append-system-prompt", preamble, "--", strings.has_prefix(prompt, "@") ? strings.concatenate({"\n", prompt}, context.temp_allocator) : prompt)
 	return argv[:]
@@ -1172,7 +1189,7 @@ job_finish :: proc(r: ^Job_Run) {
 	case "stalled":        headline = fmt.tprintf("stopped: no event from pi for %s", dur_text(r.stall))
 	case "over_limit":     headline = "stopped: over a per-run limit (cost or turns)"
 	case "timeout":        headline = fmt.tprintf("stopped: over its timeout (%s)", dur_text(r.timeout))
-	case "stopped (quit)": headline = "stopped: pi-desk quit"
+	case "stopped (quit)": headline = "stopped: Deckhand quit"
 	case "failed":
 		if stop == .User do headline = "stopped by the user"
 		else if r.spawn_error != "" do headline = r.spawn_error
@@ -1377,7 +1394,7 @@ jobs_notify :: proc(title, body: string, urgent: bool) {
 // returns its path. Never over an existing file.
 job_create :: proc(name_, schedule_, prompt_, folder_: string, for_project_ := "") -> (string, string) {
 	notes := folder_of(.Jobs)
-	if notes == "" do return "", "no main folder (Set up pi-desk…, in the Jobs tab)"
+	if notes == "" do return "", "no main folder (Set up Deckhand…, in the Jobs tab)"
 	// the owner: its for_project value, and its folder when none is given
 	for_project, owner_folder, oerr := job_owner_for_create(one_line(for_project_, context.temp_allocator))
 	if oerr != "" do return "", oerr
@@ -1414,7 +1431,7 @@ job_new_id_date :: proc() -> (id, date: string) {
 // over an existing file; returns its path (temp).
 job_note_write_new :: proc(name, text: string) -> (string, string) {
 	dir := folder_of(.Jobs)
-	if dir == "" do return "", "no main folder (Set up pi-desk…, in the Jobs tab)"
+	if dir == "" do return "", "no main folder (Set up Deckhand…, in the Jobs tab)"
 	os.make_directory_all(dir)
 	slug := strings.builder_make(context.temp_allocator)
 	for r in strings.to_lower(name, context.temp_allocator) {
@@ -1455,7 +1472,7 @@ job_note_hash :: proc(text: string) -> string {
 }
 
 job_note_save :: proc(path, text_: string, based_on := "") -> (string, string) {
-	if folder_of(.Jobs) == "" do return "", "no main folder (Set up pi-desk…, in the Jobs tab)"
+	if folder_of(.Jobs) == "" do return "", "no main folder (Set up Deckhand…, in the Jobs tab)"
 	if len(text_) > JOB_NOTE_MAX do return "", "the note is too long"
 	text := text_
 	if path == "" {
@@ -1515,7 +1532,7 @@ jobs_env_start :: proc() {
 	thread.run(proc() {
 		shell := os.get_env("SHELL", context.temp_allocator)
 		if shell == "" do shell = "/bin/zsh"
-		out, ok := run_bounded("", {shell, "-l", "-c", `printf '%s\n%s' "$PATH" "$PI_KIT_NOTES_DIR"`}, 10 * time.Second)
+		out, ok := run_bounded("", shell_script_argv(shell, `printf '%s\n%s' "$PATH" "$PI_KIT_NOTES_DIR"`, "sh")[:], 10 * time.Second) // fish and co.: /bin/sh
 		if !ok do return
 		path, _, notes := strings.partition(strings.trim_right(out, "\n"), "\n")
 		inbox_submit(Jobs_Env{path = strings.clone(path), notes = strings.clone(strings.trim_space(notes)), login = true}, {kind = .Internal})

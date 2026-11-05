@@ -130,7 +130,10 @@ tidy_paths :: proc(t: ^testing.T) {
 	roots := temp_roots()
 	testing.expect(t, is_temp_path(fmt.tprintf("%s/run-1", link), roots), "$TMPDIR as set")
 	testing.expect(t, is_temp_path(fmt.tprintf("%s/run-1", real), roots), "$TMPDIR's real path")
-	testing.expect(t, !is_temp_path(fmt.tprintf("%s/other", base), roots) || strings.has_prefix(base, "/private/var/folders") || strings.has_prefix(base, "/var/folders"), "a sibling only by /var/folders")
+	// (unless TMPDIR is itself inside a system temp root: /var/folders, or /tmp as tests/unit.py sets it)
+	in_root := false
+	for r in ([]string{"/private/var/folders", "/var/folders", "/private/tmp/", "/tmp/"}) do in_root ||= strings.has_prefix(base, r)
+	testing.expect(t, !is_temp_path(fmt.tprintf("%s/other", base), roots) || in_root, "a sibling only by a system temp root")
 	for p in ([]string{"/tmp", "/tmp/x", "/private/tmp/y", "/var/folders/ab/cd/T/z", "/private/var/folders/ab"}) do testing.expectf(t, is_temp_path(p, roots), "temp: %s", p)
 	// /tmp is a symlink on macOS: pi records the real path, also temp
 	testing.expect(t, is_temp_path(fmt.tprintf("%s/run-1", real_path("/tmp")), roots), "the real /tmp")

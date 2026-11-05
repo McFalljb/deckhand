@@ -9,8 +9,10 @@
 #   and dark, idle CPU
 # Screenshots go to build/shots/changes/. Usage: tests/scripts/changes.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/changes"
 rm -rf "$W" build/test-trash
 FAKE_HOME="$W/home"
@@ -38,7 +40,7 @@ printf '#!/bin/sh\ntouch "%s/pre-commit-ran"\n' "$W" > "$PROJ/.git/hooks/pre-com
 chmod +x "$PROJ/.git/hooks/pre-commit"
 run() { # script log
   HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk > "$2" 2>&1 || true
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "changes scene failed (log: $2)"; exit 1

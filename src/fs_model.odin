@@ -130,7 +130,6 @@ fs_real :: proc(path: string, allocator := context.temp_allocator) -> string {
 	return strings.clone(p == "/" && rest != "" ? strings.concatenate({"/", rest}, context.temp_allocator) : p, allocator)
 }
 
-@(private = "file")
 within :: proc(path, root: string) -> bool {
 	return path == root || (strings.has_prefix(path, root) && len(path) > len(root) && path[len(root)] == '/')
 }
@@ -393,22 +392,23 @@ fs_list_dir :: proc(dir: string, with_ignored := false) -> (entries: []Fs_Entry,
 
 // A folder's entries without git codes (the Files tree looks those up as it
 // draws): .git and .DS_Store left out; gitignored entries left out unless
-// with_ignored (then marked). In an ignored folder (parent_ignored) every
+// with_ignored (then marked). An error names the folder, or with for_user
+// says what the user can do (fs_list_error_text). In an ignored folder (parent_ignored) every
 // entry is ignored and git is not asked. Folders first, then natural order.
 // Temp allocator.
-fs_read_dir :: proc(dir: string, with_ignored := false, parent_ignored := false) -> (entries: []Fs_Entry, err: string) {
-	infos, oerr := os.read_all_directory_by_path(dir, context.temp_allocator)
-	if oerr != nil do return nil, fmt.tprintf("cannot list %s: %v", dir, oerr)
+fs_read_dir :: proc(dir: string, with_ignored := false, parent_ignored := false, for_user := false) -> (entries: []Fs_Entry, err: string) {
+	names_read, lerr := fs_read_names(dir)
+	if lerr != nil {
+		if for_user do return nil, fs_list_error_text(lerr) // the Files tab's row: what to do about it
+		return nil, fmt.tprintf("cannot list %s: %s", dir, strings.to_lower(string(posix.strerror(lerr)), context.temp_allocator))
+	}
 	watch_folder(fs_root_of(dir))
-	out := make([dynamic]Fs_Entry, 0, len(infos), context.temp_allocator)
-	names := make([dynamic]string, 0, len(infos), context.temp_allocator)
-	for fi in infos {
-		if fi.name == ".git" || fi.name == ".DS_Store" do continue
-		k := Fs_Kind.File
-		if fi.type == .Directory do k = .Dir
-		if fi.type == .Symlink do k = path_kind(fi.fullpath) == .Dir ? .Dir : .Symlink
-		append(&out, Fs_Entry{name = strings.clone(fi.name, context.temp_allocator), kind = k, ignored = parent_ignored})
-		append(&names, out[len(out) - 1].name)
+	out := make([dynamic]Fs_Entry, 0, len(names_read), context.temp_allocator)
+	names := make([dynamic]string, 0, len(names_read), context.temp_allocator)
+	for e in names_read {
+		if e.name == ".git" || e.name == ".DS_Store" do continue
+		append(&out, Fs_Entry{name = e.name, kind = e.kind, ignored = parent_ignored})
+		append(&names, e.name)
 	}
 	kept := out
 	if !parent_ignored {
@@ -479,6 +479,14 @@ git_ignored :: proc(dir: string, names: []string) -> map[string]bool {
 fs_root_longest :: proc(path: string) -> string {
 	best := ""
 	for r in fs_roots() do if within(path, r) && len(r) > len(best) do best = r
+	return best
+}
+
+// The innermost known folder strictly above path ("" = none): where a
+// folder's open state is kept (files_expand_key). Path as written.
+fs_root_above :: proc(path: string) -> string {
+	best := ""
+	for r in fs_roots() do if path != r && within(path, r) && len(r) > len(best) do best = r
 	return best
 }
 
@@ -752,4 +760,62 @@ fs_list_json :: proc(path: string, caller: Caller, with_ignored := false) -> (da
 	}
 	strings.write_string(&b, "]}")
 	return strings.to_string(b), ""
+}
+
+// A folder's names and kinds, unsorted (temp allocator). Unlike
+// os.read_all_directory, an entry that cannot be stat'ed does not fail the
+// listing: one that vanished meanwhile is left out, any other keeps the kind
+// readdir gives (a folder that is readable but not searchable lists its
+// names). A symlink to a folder is a folder; a dangling one stays a symlink.
+// err: opendir's (or a failed first readdir's) errno.
+fs_read_names :: proc(dir: string) -> (entries: []Fs_Entry, err: posix.Errno) {
+	d := posix.opendir(strings.clone_to_cstring(dir, context.temp_allocator))
+	if d == nil do return nil, posix.errno()
+	defer posix.closedir(d)
+	fd := posix.dirfd(d)
+	out := make([dynamic]Fs_Entry, context.temp_allocator)
+	for {
+		posix.set_errno(nil)
+		ent := posix.readdir(d)
+		if ent == nil {
+			if e := posix.errno(); e != nil && len(out) == 0 do return nil, e
+			break
+		}
+		cname := cstring(raw_data(ent.d_name[:]))
+		if cname == "." || cname == ".." do continue
+		kind := Fs_Kind.File
+		st: posix.stat_t
+		if posix.fstatat(fd, cname, &st, {.SYMLINK_NOFOLLOW}) == .OK {
+			switch {
+			case posix.S_ISDIR(st.st_mode): kind = .Dir
+			case posix.S_ISLNK(st.st_mode):
+				kind = .Symlink
+				if posix.fstatat(fd, cname, &st, {}) == .OK && posix.S_ISDIR(st.st_mode) do kind = .Dir
+			}
+		} else {
+			if posix.errno() == .ENOENT do continue // gone since readdir
+			#partial switch ent.d_type {
+			case .DIR: kind = .Dir
+			case .LNK: kind = .Symlink
+			}
+		}
+		append(&out, Fs_Entry{name = strings.clone(string(cname), context.temp_allocator), kind = kind})
+	}
+	return out[:], nil
+}
+
+// What the Files tree says about a folder it cannot list, by errno. EPERM
+// on a folder the user owns is macOS privacy (TCC: Desktop, Documents,
+// Downloads, iCloud Drive, removable and network volumes): only System
+// Settings changes that.
+fs_list_error_text :: proc(e: posix.Errno) -> string {
+	#partial switch e {
+	case .EPERM:
+		return "Can't open: macOS needs permission. Allow Deckhand in System Settings › Privacy & Security › Files and Folders (or Full Disk Access)"
+	case .EACCES:
+		return "Can't open: permission denied"
+	case .ENOENT:
+		return "Can't open: it is not there any more"
+	}
+	return fmt.tprintf("Can't open: %s", strings.to_lower(string(posix.strerror(e)), context.temp_allocator))
 }

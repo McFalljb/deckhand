@@ -1,0 +1,98 @@
+# Every test-mode scene, read by tests/scenes.py (the runner): docs/TESTING.md says what each one
+# protects and why it is here. One line per scene; columns are separated by "|":
+#
+#   scene    a name (the default command is tests/scripts/<scene>.sh)
+#   tier     required  CI on every pull request (ci.yml) and every --all run
+#            full      every --all run and the nightly CI run (scenes-full.yml)
+#            manual    run only when named: screenshot and benchmark tools, nothing to assert
+#            paid      starts a REAL pi on paid models: the runner never runs it
+#   tags     smoke      also runs for every --changed run, whatever changed
+#            test-data  writes build/test-data (no PI_DESK_DATA_DIR): one at a time
+#            test-trash test mode's trash, build/test-trash: one at a time
+#            cef        starts Chromium: at most --cef-jobs at a time (memory)
+#            alone      runs with nothing else beside it (CPU or timing numbers)
+#            idle       sleeps through most of its run (an idle period is what it tests): takes no
+#                       -j slot (with cef, still a Chromium slot: memory); at most two at a time
+#            noci       not in CI (results depend on the machine; see docs/TESTING.md)
+#   secs     a typical serial run on a dev Mac (M-series, lightly loaded): orders and shards runs
+#   areas    globs (fnmatch, "*" crosses "/") of the files whose change should run it
+#   command  when not tests/scripts/<scene>.sh
+#
+# "@all" lists files that every scene depends on: a change to one runs everything. "@unit" lists
+# source files covered by the unit tests only (tests/scenes.py --check-map wants every src/ file
+# in one of the two or in some scene's areas).
+
+@all  | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term.odin src/term_text.odin src/pty*.odin src/tabhost.odin src/socket*.odin src/ctl.odin src/sessions.odin src/persist.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/* vendor/* build.sh scripts/bundle-app.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
+@unit | | | | src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
+
+# scene             | tier     | tags                  | secs | areas | command
+agent-status        | full     |                       |   34 | src/agent_status*.odin src/ui_sidebar.odin tests/scripts/agent-status.* tests/scripts/fake-7501.py
+agent-show          | full     |                       |   12 | src/show_file.odin src/markdown_view.odin src/editor_commands.odin src/editor_file.odin tools/pi-desk-cli/* integrations/claude-code/* integrations/pi/extensions/browser/* integrations/pi/lib/show.ts tests/scripts/agent-show.* tests/scripts/fake-bridge-show.py tests/scripts/fake-claude.py
+agent               | full     | test-data             |   18 | src/agent.odin src/home.odin src/drawer.odin integrations/pi/* docs/GUIDE.md tests/scripts/agent.* tests/scripts/fake-atlas.py
+app-calls           | full     |                       |   25 | src/app_tab.odin src/frames.odin src/native/frames_macos.m tests/fake-app/* tests/scripts/app-calls.sh
+app-open            | full     |                       |    4 | src/app_tab.odin tests/fake-app/* tests/scripts/app-open.* tests/scripts/fake-bridge-apps.py
+app-tab             | full     |                       |   28 | src/app_tab.odin src/frames.odin src/native/frames_macos.m tests/fake-app/* tests/scripts/app-tab.*
+bell                | full     |                       |   39 | src/notify.odin src/ui_bell.odin src/toast.odin tests/scripts/bell.* tests/scripts/fake-bridge-bell.py
+browser-a           | full     | cef                   |   50 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser.txt tests/scripts/browser-polish.txt tests/scripts/browser-polish-zoom.txt | tests/scripts/browser.sh --group a
+browser-b           | full     | cef                   |   40 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser-polish-guard.txt tests/scripts/browser-polish-allow.txt tests/scripts/browser-focus.txt | tests/scripts/browser.sh --group b
+browser-c           | full     | cef                   |   40 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser-annotate.txt tests/scripts/browser-close.txt tests/scripts/browser-drag.txt tests/scripts/browser-keys.txt | tests/scripts/browser.sh --group c
+browser-d           | full     | cef                   |   40 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser-ring.txt tests/scripts/browser-slots.txt tests/scripts/browser-release.txt | tests/scripts/browser.sh --group d
+browser-e           | full     | cef                   |   40 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser-act.txt tests/scripts/browser-read.txt tests/scripts/browser-restore-*.txt | tests/scripts/browser.sh --group e
+browser-f           | full     | cef                   |   40 | src/browser*.odin src/native/cef* src/native/browser_*.js scripts/fetch-cef.sh tests/web/* tests/scripts/browser.sh tests/scripts/browser-agent.txt tests/scripts/browser-nav.txt tests/scripts/browser-popup.txt tests/scripts/browser-tabkeys.txt tests/scripts/browser-pages.txt | tests/scripts/browser.sh --group f
+browser-netpolicy   | full     | cef,idle,noci         |   25 | src/browser_cef.odin src/native/cef_macos.m scripts/fetch-cef.sh tests/scripts/browser-netpolicy.*
+browser-rlz         | full     | cef,idle              |  105 | src/browser_cef.odin src/native/cef_macos.m src/native/cef_helper.c scripts/fetch-cef.sh tests/scripts/browser-rlz.*
+buttons             | full     |                       |   38 | src/ui_toolbar.odin src/actions.odin src/ui_sidebar.odin src/palette.odin src/toast.odin tests/scripts/buttons.*
+changes             | full     | test-trash            |   49 | src/changes*.odin src/ui_changes.odin src/editor_git.odin src/fs_model.odin tests/scripts/changes.*
+claude              | full     | cef                   |   35 | src/claude*.odin src/ui_claude*.odin src/comments.odin src/app_tab.odin tools/pi-desk-cli/* integrations/claude-code/* tests/fake-app/* tests/scripts/claude.sh tests/scripts/claude-[12].txt tests/scripts/claude-check.py tests/scripts/fake-claude.py
+claude-accounts     | full     |                       |   15 | src/claude_accounts.odin src/claude_disk.odin src/claude_rows.odin src/ui_sidebar.odin tests/scripts/claude-accounts.* tests/scripts/fake-claude.py
+claude-feeds        | full     |                       |   38 | src/claude_status.odin src/claude_panels.odin src/claude.odin src/ui_claude.odin tools/pi-desk-cli/* integrations/claude-code/* tests/scripts/claude-feeds.* tests/scripts/fake-claude.py
+claude-readonly     | full     |                       |   36 | src/claude.odin src/claude_disk.odin tools/pi-desk-cli/* integrations/claude-code/* tests/readonly-vectors.json tests/scripts/claude-readonly* tests/scripts/fake-claude.py
+claude-runtime      | full     |                       |   37 | src/claude_reload.odin src/ui_claude_reload.odin src/claude.odin src/dead_tab.odin src/settings_files.odin tests/scripts/claude-runtime.* tests/scripts/fake-claude.py
+claude-sessions     | full     |                       |   40 | src/claude.odin src/claude_rows.odin src/claude_disk.odin src/sidebar.odin src/ui_sidebar.odin src/session_info.odin tests/scripts/claude-sessions* tests/scripts/fake-claude.py
+claude-wait         | full     |                       |    8 | src/claude_wait.odin src/claude_status.odin src/agent.odin tests/scripts/claude-wait.* tests/scripts/fake-claude.py
+comments            | full     | cef                   |   19 | src/comments.odin src/ui_comments.odin src/browser_annotate.odin src/native/browser_overlay.js src/app_tab.odin tests/fake-app/* tests/web/browser.html tests/scripts/comments.* tests/scripts/fake-bridge-attach.py
+dead-tab            | full     | test-data             |   13 | src/dead_tab.odin tests/scripts/dead-tab.* tests/scripts/fake-pi-dead.py
+editor              | full     |                       |   21 | src/editor*.odin src/native/editor_macos.m src/textfield.odin vendor/tree-sitter/* tests/scripts/editor*
+fetch-cef-test      | required |                       |    5 | scripts/fetch-cef.sh tests/scripts/fetch-cef-test.sh
+files               | full     | test-trash            |   37 | src/files.odin src/fs_model.odin src/ui_files.odin src/editor_watch.odin src/native/editor_macos.m tests/scripts/files*
+files-nested        | full     |                       |   20 | src/files.odin src/fs_model.odin src/ui_files.odin src/project_tidy.odin tests/scripts/files-nested.*
+fish-shell          | full     |                       |    6 | src/login_env.odin src/harness.odin tests/scripts/fish-shell.* tests/scripts/fake-fish.sh tests/scripts/fake-claude.py
+harness-setup       | full     |                       |   40 | src/harness_install.odin src/harness_manifest.odin src/ui_harness.odin src/ui_setup.odin tests/scripts/harness-setup* tests/scripts/fake-install.sh
+jobs                | required | test-trash            |   79 | src/jobs*.odin src/ui_jobs.odin src/ui_job_sheet.odin src/notify.odin src/agent.odin tests/scripts/jobs.* tests/scripts/fake-pi-json.py
+login-path          | full     |                       |   27 | src/login_env.odin src/harness.odin tests/scripts/login-path*
+markdown            | required |                       |   30 | src/markdown*.odin src/menubar.odin docs/GUIDE.md tests/markdown/* tests/scripts/markdown.*
+menu                | required | smoke                 |   10 | src/menubar.odin src/native/menubar_macos.m src/actions.odin tests/scripts/menu.*
+menus               | required |                       |  108 | src/ui_*.odin src/actions.odin src/palette.odin src/sidebar.odin src/worktrees.odin src/files.odin src/editor_view.odin src/settings_files.odin src/jobs_owner.odin src/toast.odin tests/scripts/menus.* tests/scripts/fake-atlas.py tests/scripts/fake-pi-json.py
+panels              | full     | test-data             |   18 | src/claude_panels.odin tests/scripts/panels.* tests/scripts/fake-bridge.sh
+persist-cpu         | manual   | alone                 |   23 | src/persist.odin tests/scripts/persist-cpu.* tests/scripts/fake-bridge-status.py
+pi-chat-readonly    | full     | smoke                 |    8 | src/agent.odin integrations/pi/* tests/scripts/pi-chat-readonly*
+pi-login-lookup     | full     |                       |   22 | src/harness.odin src/login_env.odin tests/scripts/pi-login-lookup*
+polish              | full     | test-data             |   50 | src/palette.odin src/textfield.odin src/ui_toolbar.odin tests/scripts/polish.* tests/scripts/fake-bridge.sh
+polish-beep         | full     | test-data             |    10 | src/textfield.odin src/term.odin src/native/platform_macos.m tests/scripts/beep.txt tests/scripts/polish.sh | tests/scripts/polish.sh tests/scripts/beep.txt
+projects            | required |                       |   20 | src/project_tidy.odin src/sidebar.odin src/ui_sidebar.odin tests/scripts/projects*
+reload              | full     |                       |   60 | src/reload.odin src/ui_reload.odin src/editor_watch.odin tests/scripts/reload.* tests/scripts/fake-bridge-reload.py
+release-checks      | full     |                       |    8 | scripts/release.sh tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh
+restore             | required | smoke                 |   20 | src/titles.odin src/home.odin tests/scripts/restore*
+run-home            | full     | test-data             |   15 | src/home.odin src/drawer.odin src/agent.odin tests/scripts/run.sh tests/scripts/home.txt | tests/scripts/run.sh tests/scripts/home.txt
+settings            | required |                       |   21 | src/settings_files.odin src/files.odin src/ui_files.odin tests/scripts/settings.*
+setup               | required |                       |   42 | src/ui_setup.odin src/folders.odin src/claude_accounts.odin src/jobs_form.odin tests/scripts/setup* tests/scripts/fake-pi-json.py
+sidebar             | full     |                       |   35 | src/sidebar.odin src/ui_sidebar.odin src/titles.odin tests/scripts/sidebar*
+term-links          | required | smoke                 |    8 | src/term_links.odin tests/scripts/term-links.*
+update              | full     |                       |   25 | src/update*.odin src/ui_update.odin src/updatesig/* tools/update-sign/* tests/update/* tests/scripts/update*
+worktrees           | full     |                       |   37 | src/worktrees.odin src/ui_worktrees.odin src/editor_git.odin tests/scripts/worktrees*
+
+# Tools, not tests: run them by name when you want their screenshots or numbers
+font                | manual   | test-data             |   20 | tests/scripts/font.* | tests/scripts/font.sh shots
+looks               | manual   | test-data             |   60 | tests/scripts/looks.* tests/scripts/text-sample.sh
+readme-shot         | manual   | cef                   |   30 | tests/scripts/readme-shot.* tests/scripts/demo-pi.py tests/web/demo.html
+run-frame-pause     | manual   | test-data,alone       |   45 | tests/scripts/frame-pause.txt | env PI_DESK_QUIET=0 tests/scripts/run.sh tests/scripts/frame-pause.txt
+panels-cpu          | manual   | test-data,alone       |   30 | tests/scripts/panels-cpu.txt tests/scripts/fake-bridge-max.py | env PI_DESK_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
+shots               | manual   |                       |   20 | tests/scripts/shots.*
+text-shots          | manual   | test-data             |   15 | tests/scripts/text-shots.sh tests/scripts/text.txt tests/scripts/text-sample.sh | tests/scripts/text-shots.sh tests/scripts/text.txt
+text-flood          | manual   | test-data,alone       |   15 | tests/scripts/text-flood.txt | tests/scripts/text-shots.sh tests/scripts/text-flood.txt
+
+# Real pi, billed: never run by the runner (docs/DEVELOPING.md, "Test mode and scenes")
+bridge-e2e          | paid     |                       |   60 | tests/scripts/bridge-e2e.*
+home-e2e            | paid     |                       |   90 | tests/scripts/home-e2e.*
+text-pi             | paid     |                       |   45 | tests/scripts/text-pi.*
+looks-real          | paid     |                       |   80 | tests/scripts/looks-pi.txt | env LOOKS_PI=real tests/scripts/looks.sh

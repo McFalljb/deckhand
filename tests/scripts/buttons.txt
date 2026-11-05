@@ -11,103 +11,105 @@ waitfor ARGS: --session-id 15000
 assert_state open_sessions.# 1
 # ---- the tab strip: "+" is a shell tab; its chevron and a right click open the menu
 clickid newshell
-wait 300
+eventually
 assert_state open_sessions.0.tabs.# 2
 clickid newmenu
 wait 200
 shot buttons/new-menu
 clickid menurow 0
-wait 300
+eventually
 assert_state open_sessions.0.tabs.# 3
 rclickid newshell
-wait 200
 clickmenu New chat
-wait 300
+eventually
 assert_state open_sessions.# 2
 # ---- every tab has a close button: a shell's closes it, the pi tab's closes the session (confirmed)
 clickid newshell
-wait 300
+eventually
 assert_state open_sessions.1.tabs.# 2
 clickid tabclose 1
-wait 300
+eventually
 assert_state open_sessions.1.tabs.# 1
 clickid tabclose 0
-wait 200
+eventually
 assert_state pending_confirmations.# 1
 clickid confirm_yes
-wait 300
+eventually
 assert_state open_sessions.# 1
 # ---- New chat (compose) by the traffic lights
 clickid newchat
-wait 300
+eventually
 assert_state open_sessions.# 2
 # ⌘W on a pi tab does what its × does: close the session, after a confirmation
 key w cmd
-wait 200
+eventually
 assert_state pending_confirmations.# 1
+# a bar shown right after the last one was clicked takes no click for BAR_GUARD (300 ms: main.odin)
+wait 400
 clickid confirm_no
 wait 300
 assert_state open_sessions.# 2
+assert_state pending_confirmations.# 0
 # ---- the search pill opens the palette
 clickid search
-wait 200
+eventually
 assert_state focus.id palette
 key escape
 wait 150
 # ---- the columns
 clickid toggleleft
-wait 200
+eventually
 assert_state layout.left_open false
 shot buttons/left-hidden
 clickid newchat
-wait 300
+eventually
 assert_state open_sessions.# 3
 clickid toggleleft
-wait 200
+eventually
 assert_state layout.left_open true
 clickid togglepanels
-wait 200
+eventually
 assert_state layout.right_open false
 clickid togglepanels
-wait 200
+eventually
 assert_state layout.right_open true
 # ---- the settings popover: every row (choices and switches keep it open)
 clickid settings
-wait 200
+eventually
 assert_state focus.id settings
 shot buttons/settings
 clickid pop 1
-wait 100
+eventually
 assert_state settings.appearance light
 clickid pop 2
-wait 100
+eventually
 assert_state settings.appearance dark
 clickid pop 0
-wait 100
+eventually
 assert_state settings.appearance system
 clickid pop 4
-wait 100
+eventually
 assert_state settings.theme warm
 clickid pop 5
-wait 100
+eventually
 assert_state settings.theme ghostty
 clickid pop 3
-wait 100
+eventually
 assert_state settings.theme graphite
 clickid pop 6
-wait 100
+eventually
 assert_state settings.reduce_motion true
 clickid pop 6
-wait 100
+eventually
 assert_state settings.reduce_motion false
 clickid pop 7
-wait 100
+eventually
 assert_state settings.notify false
 clickid pop 7
-wait 100
+eventually
 assert_state settings.notify true
 clickid pop 14
-wait 100
+eventually
 assert_state settings.chats_readonly true
 clickid pop 14
 wait 100
@@ -116,7 +118,7 @@ assert_state focus.id settings
 # the folder picker (faked) after the popover closes
 pick_folder $homedir/Chats-elsewhere
 clickid pop 15
-wait 300
+eventually
 assert_state focus.kind terminal
 assert_state settings.folders.chats.path $homedir/Chats-elsewhere
 # back to ~/Chats: a row only while another folder is set; it keeps the popover open
@@ -128,13 +130,13 @@ wait 200
 assert_state settings.folders.chats.custom false
 assert_state focus.id settings
 clickid pop 17
-wait 300
+eventually
 assert_state focus.kind terminal
 # a shortcut while it is open closes it and runs
 clickid settings
 wait 200
 key t cmd
-wait 300
+eventually
 assert_state focus.kind terminal
 assert_state open_sessions.2.tabs.# 2
 # keyboard in the popover: arrows and Enter run a row, Esc closes
@@ -143,46 +145,46 @@ wait 200
 key down
 key down
 key enter
-wait 100
+eventually
 assert_state settings.appearance light
 key escape
-wait 150
+eventually
 assert_state focus.kind terminal
 # a click outside closes it and does nothing else
 clickid settings
 wait 200
 clickid tab 0
-wait 150
+eventually
 assert_state focus.kind terminal
 # ---- the shortcuts sheet: from the popover, its close button, outside, ⌘/
 clickid settings
 wait 200
 clickid pop 18
-wait 200
+eventually
 assert_state focus.id shortcuts
 shot buttons/shortcuts
 clickid sheet_close
-wait 150
+eventually
 assert_state focus.kind terminal
 key slash cmd
-wait 150
+eventually
 assert_state focus.id shortcuts
 key escape
-wait 150
+eventually
 assert_state focus.kind terminal
 key comma cmd
-wait 150
+eventually
 assert_state layout.left_tab settings
 assert_state focus.id files
 key comma cmd
-wait 150
+eventually
 assert_state layout.left_tab sessions
 assert_state focus.kind terminal
 key b cmd
-wait 150
+eventually
 assert_state layout.left_open false
 key b cmd
-wait 150
+eventually
 assert_state layout.left_open true
 # ---- left column rows: "…" opens the row's context menu
 hover proj 0
@@ -191,14 +193,14 @@ clickid projmore 0
 wait 200
 shot buttons/row-menu
 clickid menurow 0
-wait 200
+eventually
 assert_state sidebar.pinned_projects.# 1
 hover sess 0
 wait 200
 clickid sessmore 0
 wait 200
 clickid menurow 0
-wait 200
+eventually
 assert_state sidebar.pinned_sessions.# 1
 hover open 0
 wait 200
@@ -210,38 +212,38 @@ wait 150
 hover newchat
 wait 100
 assert_tip
-wait 700
+eventually
 assert_tip New chat ⌘N
 shot buttons/tooltip
 hover settings
-wait 700
+eventually
 assert_tip Quick settings
 hover search
-wait 700
+eventually
 assert_tip Search or run a command ⌘K
 hover togglepanels
-wait 700
+eventually
 assert_tip Toggle right column ⌥⌘B
 hover toggleleft
-wait 700
+eventually
 assert_tip Toggle left column ⌘B
 hover newshell
-wait 700
+eventually
 assert_tip New shell tab ⌘T
 hover tabclose 0
-wait 700
+eventually
 assert_tip Close session
 hover homebutton
-wait 700
+eventually
 assert_tip Toggle Atlas ⌘J
 hover proj 0
 wait 200
 hover projmore 0
-wait 700
+eventually
 assert_tip More actions
 # a click hides it until the pointer moves to another control
 hover togglepanels
-wait 700
+eventually
 assert_tip Toggle right column ⌥⌘B
 clickid togglepanels
 wait 700
@@ -251,7 +253,7 @@ wait 150
 # idle with a tooltip showing: no frames drawn (after the shell tab's activity
 # pulse from the column toggles above has stopped)
 hover newchat
-wait 2500
+eventually
 assert_tip New chat ⌘N
 cpu_begin
 wait 2000

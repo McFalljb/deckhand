@@ -184,7 +184,7 @@ drawer_notes_warning :: proc(dw: f32) {
 	msg := agent_prompt_warning()
 	if msg == "" do return
 	th := theme()
-	label := "Set up pi-desk…"
+	label := "Set up Deckhand…"
 	bw := text_w(label, FONT_UI_SMALL) + px(2 * SP_2)
 	if clay.UI(clay.ID("drawer_notes_line"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(DRAWER_PAD), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
@@ -273,7 +273,7 @@ drawer_tip :: proc(h: Hit_Agent) -> (label, keys: string) {
 	case .Model:  return "Change the model: pi's model selector", "⌃L"
 	case .Pin:    return state.layout.drawer_pinned ? "Unpin: slide over" : "Pin as a column", ""
 	case .Close:  return "Hide", "⌘J"
-	case .Notes:  return "Set up pi-desk's main folder: Atlas's prompt moves to its atlas/ (a copy; the old file stays)", ""
+	case .Notes:  return "Set up Deckhand's main folder: Atlas's prompt moves to its atlas/ (a copy; the old file stays)", ""
 	case .Term:
 	}
 	return "", ""

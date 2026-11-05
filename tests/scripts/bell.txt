@@ -8,14 +8,14 @@ shot bell/empty-bar
 # aaaa-1 starts working; then bbbb-2 takes the screen, so aaaa-1 runs in the background
 clickid sess 1
 waitfor aaaa-1 10000
-wait 1500
+eventually
 assert_state open_sessions.0.tabs.0.agent working
 clickid sess 0
 waitfor bbbb-2 10000
 # the window goes to the background before bbbb-2 opens its dialog
 window back
 # aaaa-1 ends in the background: an entry, bell only (no OS notification)
-wait 4500
+eventually
 assert_state notifications.count 1
 command {"type":"notifications_list"}
 assert_result data.notifications.0.kind finished
@@ -23,7 +23,7 @@ assert_result data.notifications.0.project recipe-box
 assert_result data.notifications.0.title Import recipes from a CSV export
 assert_state notifications.os_notified 0
 # bbbb-2 waits for the user while the window is behind: an entry and an OS notification
-wait 3000
+eventually
 assert_state open_sessions.1.tabs.0.waiting true
 assert_state notifications.count 2
 assert_state notifications.unread 2
@@ -37,10 +37,10 @@ assert_state notifications.unread 1
 shot bell/badge
 # the bell: its button, then the popover
 hover bell
-wait 700
+eventually
 assert_tip Notifications
 clickid bell
-wait 300
+eventually
 assert_state focus.id notifications
 shot bell/popover-dark
 ui_command {"type":"set_appearance","mode":"light"}
@@ -52,10 +52,10 @@ command {"type":"notifications_clear"}
 assert_result error not allowed for this caller
 # the newest first: bbbb-2's (read), then aaaa-1's: a click focuses aaaa-1 and reads it
 hover bellrow 1
-wait 700
+eventually
 assert_tip Go to this session
 clickid bellrow 1
-wait 500
+eventually
 assert_state focus.kind terminal
 assert_state notifications.unread 0
 assert_screen aaaa-1
@@ -66,7 +66,7 @@ clickid settings
 wait 300
 shot bell/gear
 clickid pop 8
-wait 200
+eventually
 assert_state settings.bell.finished false
 clickid pop 8
 assert_state settings.bell.finished true
@@ -75,12 +75,14 @@ assert_state settings.bell.os false
 clickid pop 12
 assert_state settings.bell.os true
 key escape
-# another run ends in the background (aaaa-1, now behind bbbb-2): the badge
+# another run ends in the background (aaaa-1, now behind bbbb-2): the badge. More than
+# NOTICE_COALESCE (10 s) after aaaa-1's first entry, or the new one replaces it (count 2, not 3)
+wait 10000
 command {"type":"pi_prompt","tab_id":$pitab,"text":"working"}
 command {"type":"pi_prompt","tab_id":$pitab,"text":"later:idle"}
 clickid sess 0
 waitfor bbbb-2 10000
-wait 6500
+eventually
 assert_state notifications.unread 1
 shot bell/badge-1280
 resize 800 600
@@ -108,7 +110,7 @@ wait 200
 assert_state notifications.unread 0
 assert_state notifications.count 3
 clickid bell_clear
-wait 200
+eventually
 assert_state notifications.count 0
 shot bell/cleared
 key escape

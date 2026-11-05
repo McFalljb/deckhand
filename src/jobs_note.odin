@@ -378,10 +378,10 @@ job_parse :: proc(text, path: string, allocator: runtime.Allocator) -> (d: Job_D
 	case "full":     d.access = .Full
 	case "workspace":
 		d.access = .Workspace
-		bad(&d, "access: workspace is not supported yet (a later pi-desk step); use read or full")
+		bad(&d, "access: workspace is not supported yet (a later Deckhand step); use read or full")
 	case: bad(&d, "access: read or full")
 	}
-	if wt, _ := str(vals, "worktree"); wt == "true" do bad(&d, "worktree: true is not supported yet (a later pi-desk step)")
+	if wt, _ := str(vals, "worktree"); wt == "true" do bad(&d, "worktree: true is not supported yet (a later Deckhand step)")
 	else if wt != "" && wt != "false" do bad(&d, "worktree: true or false")
 	nt, _ := str(vals, "notify")
 	switch nt {
@@ -417,7 +417,7 @@ job_parse :: proc(text, path: string, allocator: runtime.Allocator) -> (d: Job_D
 	check_sec, has_check := note_section(body, "check")
 	if has_check do d.check = strings.clone(fenced(check_sec))
 	if d.prompt == "" do bad(&d, "## Prompt is empty")
-	if d.check != "" do append(&warns, "## Check is not run yet (a later pi-desk step): the prompt runs every time")
+	if d.check != "" do append(&warns, "## Check is not run yet (a later Deckhand step): the prompt runs every time")
 	return
 }
 

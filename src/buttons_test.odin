@@ -164,6 +164,9 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	run_command(Set_Focus{"settings"}, {kind = .UI})
 	_ = ui_layout(1400, 860) // the popover anchors to the button's last box
 	for it in Pop_Item {
+		// Reload all pi tabs, Restart all Claude tabs: only while such a tab runs (pop_item_shown);
+		// tests/scripts/claude-runtime.txt clicks the Claude one
+		if !pop_item_shown(it) do continue
 		h, found := hit_at("pop", u32(it))
 		testing.expectf(t, found && h == Hit(Hit_Pop(it)), "popover %v: hits %v", it, h)
 		if it >= .Look_Graphite && it <= .Look_Ghostty do expect_tip(t, h, POP_ACTIONS[it])
@@ -345,6 +348,23 @@ drawer_edge_resizes_not_terminal :: proc(t: ^testing.T) {
 		drawer_event(&e)
 		inbox_drain()
 		testing.expectf(t, !divider.active && state.layout.drawer_width == DRAWER_WIDTH_DEFAULT, "pinned=%v: reset, %v", pinned, state.layout.drawer_width)
+		// the clamps (moved from the drawer-resize scene): its minimum, 320; the room there is:
+		// sliding over, 70% of the space right of the left column (0.7 * 1300); pinned, what
+		// the panels (320) and the centre's minimum (360) leave of 1300
+		Clamp :: struct {
+			dx:   f32,
+			want: f32,
+		}
+		for c in ([]Clamp{{400, 320}, {-2000, pinned ? 620 : 910}}) {
+			app.clicks = 1
+			_ = ui_layout(1600, 900)
+			e.mouse_x = clay.GetElementData(clay.ID("drawer")).boundingBox.x + 2
+			drawer_event(&e)
+			divider_move(e.mouse_x + c.dx)
+			divider_release()
+			inbox_drain()
+			testing.expectf(t, state.layout.drawer_width == c.want, "pinned=%v: dragged %v, width %v, want %v", pinned, c.dx, state.layout.drawer_width, c.want)
+		}
 	}
 }
 
@@ -498,6 +518,63 @@ rename_field_keeps_tree_indent :: proc(t: ^testing.T) {
 	testing.expectf(t, abs(nested - top - px(TREE_INDENT)) < 0.5, "nested %v, top %v: one level in (%v)", nested, top, px(TREE_INDENT))
 }
 
+// The rename field's keys (moved from the phase05 scene): typing replaces the
+// selected name, Backspace edits, Enter renames and gives focus back, Cmd-A
+// then typing replaces everything, Escape leaves the name as it was.
+@(test)
+rename_field_keys :: proc(t: ^testing.T) {
+	context.allocator = bt_reset()
+	defer {
+		state.focus_widget = ""
+		clear(&state.projects)
+		tf_set(&rename_field, "")
+	}
+	append(&state.projects, Project{id = 201, group = .Projects, cwd = "/pd-test/proj", label = "proj"})
+	state.selected_project = 201
+	key :: proc(code: sapp.Keycode, mods: u32 = 0) {
+		e := sapp.Event{type = .KEY_DOWN, key_code = code, modifiers = mods}
+		widget_event(&e)
+	}
+	type :: proc(s: string) {
+		for r in s {
+			e := sapp.Event{type = .CHAR, char_code = u32(r)}
+			widget_event(&e)
+		}
+	}
+	open :: proc() {
+		run_command(Set_Focus{widget = "rename_project"}, {kind = .UI})
+		tf_set(&rename_field, project_name(find_project(201)^)) // as the palette's Rename project does
+	}
+
+	open()
+	testing.expect_value(t, tf_selected_text(&rename_field), "proj")
+	type("Renamed 1")
+	key(.BACKSPACE)
+	type("x")
+	key(.LEFT)
+	key(.LEFT, sapp.MODIFIER_SHIFT)
+	key(.C, sapp.MODIFIER_SUPER) // copy leaves the text alone
+	key(.ENTER)
+	inbox_drain()
+	testing.expect_value(t, find_project(201).name, "Renamed x")
+	testing.expect_value(t, state.focus_widget, "")
+
+	open()
+	key(.A, sapp.MODIFIER_SUPER)
+	type("Other")
+	key(.ESCAPE)
+	inbox_drain()
+	testing.expect_value(t, find_project(201).name, "Renamed x")
+	testing.expect_value(t, state.focus_widget, "")
+
+	open()
+	key(.A, sapp.MODIFIER_SUPER)
+	type("Pasted name")
+	key(.ENTER)
+	inbox_drain()
+	testing.expect_value(t, find_project(201).name, "Pasted name")
+}
+
 // A panel whose only row is its head row (pi-kit's "Todos 3/3" with the
 // done items hidden) is just a header: no fold arrow, no empty body, not a
 // toggle. A panel with rows keeps its arrow and folds.
@@ -551,4 +628,64 @@ panel_head_only_is_not_a_dropdown :: proc(t: ^testing.T) {
 		if i == 0 do testing.expectf(t, h == nil, "a head-only header is not a toggle: %v", h)
 		else do testing.expectf(t, h == Hit(Hit_Panel_Head("shells")), "the shells header folds: %v", h)
 	}
+}
+
+// The New chat buttons (top bar, the empty centre) open the harness picker under the button, not
+// mid-window (harness.odin).
+@(test)
+new_chat_button_picker_at_button :: proc(t: ^testing.T) {
+	context.allocator = bt_reset()
+	if !bt_ui() {
+		testing.fail_now(t, "no fonts")
+	}
+	pi_installed_probe = proc() -> bool {return true}
+	claude_installed_probe = proc() -> bool {return true}
+	defer {
+		pi_installed_probe = nil
+		claude_installed_probe = nil
+		if menu.open do menu_close()
+	}
+	// Chats needs a data dir; an empty pi store under a temp HOME (as buttons_reachable_in_layout)
+	dir := fmt.tprintf("%s/pd-bt-nchat-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	os.make_directory_all(dir)
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
+	os.set_env("HOME", fmt.tprintf("%s/home", dir))
+	defer os.set_env("HOME", old_home)
+	old_root := home_root
+	home_root = fmt.tprintf("%s/data", dir)
+	defer home_root = old_root
+	rescan_now()
+	testing.expect(t, chats_project() != nil, "a Chats project")
+	for b in ([]Button{.New_Chat, .Empty_New_Chat}) {
+		_ = ui_layout(1400, 860)
+		d := clay.GetElementData(clay.ID(BUTTONS[b].element))
+		if !d.found do continue // the empty centre's button: only with no session open
+		button_click(b)
+		testing.expectf(t, menu.open, "%v: the picker opens", b)
+		_, is_ns := menu.target.(Menu_New_Session)
+		testing.expectf(t, is_ns, "%v: the harness picker", b)
+		bb := d.boundingBox
+		testing.expectf(t, abs(menu.at.x - bb.x) < 1 && menu.at.y >= bb.y + bb.height && menu.at.y < bb.y + bb.height + px(SP_4), "%v: at the button %v, not %v", b, bb, menu.at)
+		if menu.open do menu_close()
+	}
+}
+
+// A command's long absolute path breaks after a "/" inside the setup card instead of widening it
+// past the sheet (its button off screen); the words that fit are left alone.
+@(test)
+harness_command_breaks_long_paths :: proc(t: ^testing.T) {
+	context.allocator = bt_reset()
+	if !testing.expect(t, bt_ui(), "fonts") do return
+	cmd := "$ /Users/someone/workspace/projects/deckhand-harness-setup/build/harness-setup/home-old/.pi/agent/bin/pi update --self"
+	room := text_width("$ /Users/someone/workspace/projects/", .Mono)
+	shown := break_long_words(cmd, room, .Mono)
+	joined, _ := strings.replace_all(shown, "\n", "", context.temp_allocator)
+	testing.expect_value(t, joined, cmd)
+	for line in strings.split(shown, "\n", context.temp_allocator) {
+		for word in strings.fields(line, context.temp_allocator) do testing.expectf(t, text_width(word, .Mono) <= room, "%q fits", word)
+	}
+	testing.expect(t, strings.contains(shown, "/\n"), "breaks after a slash")
+	testing.expect_value(t, break_long_words("$ npm update", room, .Mono), "$ npm update")
+	long := strings.repeat("x", 200, context.temp_allocator)
+	testing.expect_value(t, strings.count(break_long_words(long, room, .Mono), "\n") > 0, true)
 }

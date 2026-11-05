@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 """A fake pi for Atlas (pi-desk's agent) in its terminal tab, for tests/scripts/agent.sh.
 
-It plays pi's terminal UI just enough and pi-kit's desk-bridge over pi-desk's
-socket (PI_DESK_SOCKET, the single-use PI_DESK_TOKEN): hello, pi.session,
+It plays pi's terminal UI just enough and the pi integration's bridge over pi-desk's
+socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN): hello, pi.session,
 pi.status. It prints what pi-desk gave it: --model, --append-system-prompt
-(and the prompt's first line), whether PI_DESK_CONTROL_TOKEN is set (never
+(and the prompt's first line), whether DECKHAND_CONTROL_TOKEN is set (never
 the token). Keys (the terminal is raw):
   Ctrl+L       "[model selector]" with a few models (as pi's app.model.select)
   a line "go"  a run: working, a reply, then idle
@@ -12,7 +12,7 @@ the token). Keys (the terminal is raw):
   Enter        anything else is echoed as a user message
   a bracketed paste (it turns the mode on, as pi does): "[pasted N lines]" and
                the lines, not sent (pi's editor keeps a paste until Enter)
-Args: pi's (--session-dir, --session/--session-id, --model, --append-system-prompt).
+Args: pi's (-e per extension of Deckhand's pi integration, --session-dir, --session/--session-id, --model, --append-system-prompt).
 """
 import json, os, socket, sys, termios, time, tty
 
@@ -45,10 +45,10 @@ def status(agent, waiting=False):
     send({"id": "st", "type": "pi.status", "agent": agent, "waiting": waiting, "blockers": []})
 
 
-if os.environ.get("PI_DESK_SOCKET") and os.environ.get("PI_DESK_TOKEN"):
+if os.environ.get("DECKHAND_SOCKET") and os.environ.get("DECKHAND_TOKEN"):
     sock = socket.socket(socket.AF_UNIX)
-    sock.connect(os.environ["PI_DESK_SOCKET"])
-    send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+    sock.connect(os.environ["DECKHAND_SOCKET"])
+    send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
     sid = arg("--session-id") or os.path.basename(arg("--session") or "x").split("_")[-1].replace(".jsonl", "")
     send({"id": "s", "type": "pi.session", "pi_session_id": sid, "session_file": "", "cwd": os.getcwd()})
 
@@ -60,7 +60,18 @@ if prompt and os.path.isfile(prompt):
 out("\x1b[2J\x1b[H\x1b[1mpi\x1b[0m  fake Atlas\n")
 out("model: %s\n" % (arg("--model") or "(pi's default)"))
 out("prompt: %s\n" % (first or "(none)"))
-out("control token: %s\n\n> " % ("yes" if os.environ.get("PI_DESK_CONTROL_TOKEN") else "no"))
+out("control token: %s\n" % ("yes" if os.environ.get("DECKHAND_CONTROL_TOKEN") else "no"))
+# Deckhand's pi integration: the -e paths it got (first in argv, each an extension folder with
+# an index.ts), and which bridge variables it got (DECKHAND_*, never pi-kit's PI_DESK_*)
+ext, i = [], 0
+while i + 1 < len(args) and args[i] == "-e":
+    ext.append(os.path.basename(args[i + 1]) if os.path.isfile(os.path.join(args[i + 1], "index.ts")) else "MISSING:" + args[i + 1])
+    i += 2
+out("integration: %s\n" % (" ".join(ext) or "none"))
+BRIDGE = ["SOCKET", "TOKEN", "CONTROL_TOKEN", "SHOTS_DIR"]  # short lines: the drawer is narrow
+# counts (the drawer is narrow): DECKHAND_SOCKET, _TOKEN, _CONTROL_TOKEN, _SHOTS_DIR; PI_DESK_ the same
+out("deckhand env: %d of 4\n" % sum(1 for k in BRIDGE if os.environ.get("DECKHAND_" + k)))
+out("pi-desk env: %d\n\n> " % sum(1 for k in BRIDGE if os.environ.get("PI_DESK_" + k)))
 out("\x1b[?2004h")  # bracketed paste, as pi's editor asks for it
 status("idle")
 

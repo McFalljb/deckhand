@@ -534,3 +534,23 @@ browser_agent_retry_waits :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(agent_ops), 1)
 	testing.expect(t, op.next_try != {} && time.tick_diff(time.tick_now(), op.next_try) > 0, "the next try waits")
 }
+
+// A load wait right after browser_open waits for the new page's document, not the blank one the
+// tab starts with (its readyState is "complete" too): browser_open marks the navigation as the
+// other navigation commands do. Seen as an empty read under load (browser-read, run at -j 9).
+@(test)
+browser_agent_open_marks_navigation :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _, pa, _, _, _ := ba_reset()
+	defer {
+		ba_clear()
+		for id, _ in browsers do browser_drop(id)
+	}
+	r := run_command(Browser_Open{session = a, url = "https://c.example"}, {kind = .Panel, tab_id = pa})
+	testing.expect(t, r.ok)
+	at := agent_tab_of(r.created_id)
+	testing.expect(t, at != nil && at.nav_at != {}, "browser_open: a load wait waits for its document")
+	// the user's own: no agent state (no strip on a script's or the user's read of it)
+	u := run_command(Browser_Open{session = a, url = "https://d.example"}, {kind = .UI})
+	testing.expect(t, agent_tab_of(u.created_id) == nil, "the user's browser_open: no agent state")
+}

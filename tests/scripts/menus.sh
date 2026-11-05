@@ -9,11 +9,15 @@
 # project tabs and fake Atlas (tests/scripts/fake-atlas.py), a temp data dir.
 # Never the user's ~/.pi, data dir or notes. Usage: tests/scripts/menus.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
+. tests/scripts/claude-stub.sh
 W="$ROOT/build/menus"
 rm -rf "$W" build/shots/menus
 FAKE_HOME="$W/home"
+claude_stub "$FAKE_HOME" # Claude Code "installed": the menus read as with it (docs/CLAUDE.md §1)
 STORE="$FAKE_HOME/.pi/agent/sessions"
 A="$FAKE_HOME/code/alpha"
 B="$FAKE_HOME/code/bravo"
@@ -64,8 +68,8 @@ printf -- '---\ntype: job\nproject: atlas\ndate: 2026-11-01\nstatus: active\nsum
 
 # Atlas's pi gets --append-system-prompt: the fake Atlas; anything else is a fake pi
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/menus.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD="case \" \$* \" in *' --append-system-prompt '*) exec python3 -I '$ROOT/tests/scripts/fake-atlas.py' \"\$@\";; *) echo \"ARGS: \$*\"; exec sleep 600;; esac" \
-  build/pi-desk > "$W/run.log" 2>&1 || true
+  PI_DESK_CMD="case \" \$* \" in *' --append-system-prompt '*) exec python3 -I '$ROOT/tests/scripts/fake-atlas.py' \"\$@\";; *) while [ \"\${1:-}\" = -e ]; do shift 2; done; echo \"ARGS: \$*\"; exec sleep 600;; esac" \
+  build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|TIMEOUT|done:|no element|unknown command|toast:" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi

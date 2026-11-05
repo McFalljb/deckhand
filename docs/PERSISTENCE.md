@@ -1,6 +1,6 @@
 # Workspace persistence
 
-What pi-desk saves so the next start restores the workspace: projects, open sessions, tabs,
+What Deckhand saves so the next start restores the workspace: projects, open sessions, tabs,
 layout, focus and settings. Code: `src/persist.odin`; tests: `src/persist_test.odin`,
 `tests/scripts/restore.sh`.
 
@@ -15,8 +15,9 @@ saved; a restore creates new ones. Saved data uses identities that outlive a run
 | session | pi's session id (UUID) + `cwd` + `session_dir` (`""` = pi's default store) |
 | tab | position in its session + kind (+ kind-specific fields) |
 
-Not the session file path: it encodes cwd and timestamps, and chats will use `--session-dir`.
-pi-desk picks the UUID for new chats (`pi --session-id <uuid>`). On restore the session file is
+Not the session file path: it encodes cwd and timestamps, and a session may live in its own
+`--session-dir` (Home does).
+Deckhand picks the UUID for new chats (`pi --session-id <uuid>`). On restore the session file is
 looked up by UUID (in `session_dir`, else the project's folder in pi's store) and pi resumes it with
 `pi --session <file>` in `cwd` (plus `--session-dir` when set). A session whose file or cwd is gone
 is restored marked `missing` ("gone"): never started, never recreated empty.
@@ -24,7 +25,8 @@ is restored marked `missing` ("gone"): never started, never recreated empty.
 ## File
 
 `<data dir>/workspace.json` (macOS: `~/Library/Application Support/pi-desk/workspace.json`; Linux:
-`$XDG_DATA_HOME/pi-desk`, default `~/.local/share/pi-desk`; `PI_DESK_DATA_DIR` overrides). Mode
+`$XDG_DATA_HOME/pi-desk`, default `~/.local/share/pi-desk`; `PI_DESK_DATA_DIR` overrides). The
+data dir keeps Deckhand's former name, pi-desk, so existing workspaces carry over. Mode
 `0600`, written whole and atomically (temp file in the same dir, fsync, rename) one second after
 the first change to saved data (pi status, panel, focus and tab-exit updates do not count), only
 when the content changed, and once more at quit (before the
@@ -48,7 +50,7 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
 - `open_sessions`: sessions restored from the file are always kept, even while gone (a volume may
   come back); sessions opened this run are saved once their session file exists (a new chat pi has
   not written yet is left out). File lookups are cached: a found file costs a stat, a missing one a
-  stat of its dir until that dir changes. `tabs[0]` is always the pi tab; shell tabs save
+  stat of its dir until that dir changes. `tabs[0]` is the pi tab (a Claude-only session's: its Claude tab, below); shell tabs save
   their title and the live shell's cwd (read from the process; the start dir if unknown).
   Editor tabs save their file's `path` (diff views are not saved; unsaved edits are not kept:
   the tab reopens the file as it is on disk). Browser tabs save `url` and `title`
@@ -56,10 +58,46 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   own session and load once shown (docs/BROWSER.md §2.4). A user name and password in the
   URL (`user:pw@`) are never saved (nor shown in State); the query string and fragment are kept as
   they are, and may hold sign-in tokens (an OAuth `code` or `access_token`). Unknown tab kinds are skipped on restore.
+  Claude tabs save `{"kind":"claude","claude_session_id"?,"cwd","args"?,"readonly"?,"account"?}` (docs/CLAUDE.md): Claude
+  Code's session id once its SessionStart hook reported it, where it ran, the user's extra
+  flags, and `readonly: true` when it started with Deckhand's read-only profile (§1a: it starts
+  read-only again, whatever the setting; `claude_sessions` entries carry the same field), and
+  `account`: its account's config folder (§1b; it starts there again; left out from older files:
+  the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
+- A Claude-only session (docs/CLAUDE.md §1) is saved in `open_sessions` as
+  `{"agent":"claude","claude_session_id","pi_session_id":"","cwd","project","tabs":[{"kind":"claude",…},…],"active_tab"}`:
+  `tabs[0]` is its main Claude tab (same id), never a pi tab; saved once Claude reported its
+  session id. `pi_session_id` is `""` so a Deckhand from before Claude sessions skips it. Restored
+  with `restore_session` and `agent: claude`; a saved id that is not a session id, or a first tab
+  that is not that Claude tab, drops the session. Files from before have no `agent` (pi
+  sessions): they load as they did.
+- `claude_sessions`: `[{id, cwd, project, title?, used, args?, named?, transcript?, model?, account}]`, most recent first, at most 100:
+  the Claude sessions Deckhand ran, the Claude rows of each project's session list. `title` is the
+  first prompt's first line or the user's rename (≤ 80 characters); `used` the last prompt (or
+  close). `named: true` when `title` is the user's rename (pushed to Claude
+  Code as its session title, docs/CLAUDE.md §4b). `transcript`: Claude Code's transcript file as
+  SessionStart reported it, kept only under Claude's config dir's `projects/` (checked again on
+  load: one that is not is dropped); never read. `model`: the last model reported (SessionStart,
+  PostModelSwitch). `account`: the config folder it ran under (written at each start; left out
+  for an older entry, which means the default account as resolved when it is used, never stamped
+  at load). `transcript` may be under any account's `projects/`. Restored with
+  `claude_restore_history` (internal).
 - `current_session` and `active_tab` are positions in the saved lists (left out if none).
 - `home`: `{"pi_session_id", "model_applied"?}` of the Home session, once it was opened. Its
-  session dir (`<data dir>/home`) and cwd (the user's home folder) are pi-desk's own and not
-  saved. Restored not started; the first open of the agent's drawer resumes it in its terminal
+  session dir (`<data dir>/home`) and cwd (the main folder when set and reachable, else
+  `<data dir>/home`; never `~`, for macOS privacy prompts; looked up at each start) are
+  Deckhand's own and not saved. `fork_from`: Atlas's old session file while its fork is
+  pending: when the session's header (first line only) records a cwd other than Atlas's
+  (after realpath), Atlas's start moves to id `home_fork_id(old id, folder)` (a name-based
+  UUID: every attempt at the same move gets the same id) and runs `pi --fork <old file>
+  --session-id <that id>`; if that id's file already exists it is resumed instead. Nothing
+  is saved at that moment (the start can run mid-restore); the normal save cycle saves the
+  id and `fork_from`. Until the id's file is in `<data dir>/home` the next start asks for
+  the same fork; then `fork_from` goes. If pi exits without writing it, the fork is dropped:
+  back to the old id, resumed (not forked again until the next launch), with a note in the
+  terminal. No fork: pi older than 1.4.0, an unreadable header or no cwd, or a main folder
+  set but unreachable (a pending fork is dropped then too). The old file is never touched
+  (home.odin `home_session_start`, `home_fork_exited`). Restored not started; the first open of the agent's drawer resumes it in its terminal
   (`pi --session-dir <data dir>/home --session <file>`, or `--session-id <id>` if pi never wrote
   it). `model_applied` is the `agent_model` it last ran with (recorded at pi's first status): `--model` is passed again only
   when the setting differs (docs/PROTOCOL.md §8). Home is not in `open_sessions`. Its prompt
@@ -80,14 +118,23 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   `settings.tidy_projects: false` (when off). The tidy list's state (temp, missing, nesting) is
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
-  ones do). `sidebar.expanded`: the Projects tree's parent and group rows you opened, by folder
+  ones do); restored as saved (`added` absent: a found row that nests), never selected one by
+  one. A folder only Claude Code ran in (docs/CLAUDE.md §4c) is saved with `"claude": true`: the
+  Rescan after launch keeps it while an account still has its transcripts, else drops it
+  (unless added, named or open). `sidebar.expanded`: the Projects tree's parent and group rows you opened, by folder
   path (collapsed by default; restored with `set_row_expanded`).
 - `close_session` removes a session from the open sessions, so the next save drops it.
-- Chats: the Chats entry is not in `projects` (it is always there when pi-desk has a data dir).
+- Chats: the Chats entry is not in `projects` (it is always there when Deckhand has a data dir).
   An open chat is saved like any session plus `"chat": true` (`cwd` = the Chats folder, pi's
   normal store) and goes back into Chats while chats still run in that folder; a chat from an
   earlier Chats folder (the chats folder changed) goes back into that folder's project.
   `settings.chats_readonly` is saved when set.
+- Claude Code accounts (`src/claude_accounts.odin`, docs/CLAUDE.md §1b): `settings.claude_accounts`
+  (`[{dir, label?, added?, removed?}]`: only what the user changed: a name of their own, a folder
+  they added, one they removed; absolute folders, at most 64), `settings.claude_account_default`
+  (the chosen default's folder; left out: the environment's) and `settings.claude_account_last`
+  (the account a Claude session last started with). Folders and names only, never a secret or a
+  file's content. Restored in place (no command); found folders are looked for again at start.
 - Folders (`src/folders.odin`): `settings.home_dir` (the main folder), `settings.folders`
   (`{"chats": "/abs", …}`: only overridden subfolders) and `settings.setup_seen: true` (the
   first-run sheet was done or skipped), each when set. Restored with `set_folder` (overrides
@@ -98,7 +145,7 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   `~/Chats` (it becomes the override), so nothing moves. The old keys are not written again.
   Nothing is ever moved between folders.
 - `sidebar`: only what differs from the defaults. Pins (in pinned order) and hidden items by
-  identity (project cwd with symlinks resolved, pi session id), so they survive rescans; project
+  identity (project cwd with symlinks resolved, pi session id or a Claude row's Claude session id), so they survive rescans; project
   entries whose folder no longer exists are dropped at save;
   the sort per section (`projects`, `sessions`, `chats`; default `recent`), folded sections and
   `show_hidden`. The filter text and quick filters are not saved. Restored with the internal
@@ -112,7 +159,7 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
 
 ## Restore
 
-At startup, after the store scan and before `pi-desk DIR`, the file is replayed as ordinary
+At startup, after the store scan and before `deckhand DIR`, the file is replayed as ordinary
 commands with caller `internal` (so they appear in the command log): `set_theme`,
 `set_reduce_motion`, `set_appearance`, `set_text_size`, `set_confirm_policy`, `set_close_confirm`, `add_project` (projects the scan
 did not find), `rename_project`, `restore_session` (internal only: an open session with its tabs
@@ -120,13 +167,16 @@ did not find), `rename_project`, `restore_session` (internal only: an open sessi
 layout (the pane has a size) a `focus_tab` on the saved current tab starts that session; every
 other session starts when it is focused (lazy restore). Shell tabs restart as a new login shell in
 their saved cwd (the session's cwd if that is gone) and print a dim note that the old history is
-not kept. `pi-desk DIR` opening a new chat skips the restored focus.
+not kept. Claude tabs start `claude --plugin-dir … --resume <id> <flags>` in their saved
+cwd (without `--resume` when no id was reported), with a new token; a Claude-only session's
+main tab the same. With Claude Code no longer installed they do not start: the tab says why and
+shows as exited (docs/CLAUDE.md §1). `deckhand DIR` opening a new chat skips the restored focus.
 The terminals' text size (`settings.terminal_text_size`, saved only when not the look's) is
 replayed with the other settings, as `set_terminal_text_size`.
 
 - Corrupt file, unknown `v`, not a regular file, or over 4 MB (checked before reading) → moved aside to `workspace.json.bad-<unix time>`, start
   empty. Nothing is changed before the file is validated.
-- `pi-desk --fresh` → no restore; an existing file is moved aside to `workspace.json.bak-<unix time>`
+- `deckhand --fresh` → no restore; an existing file is moved aside to `workspace.json.bak-<unix time>`
   and the new run saves normally.
 - Restore time is logged to stderr (`workspace restored … in N ms`, `restored session started N ms
   after launch`).

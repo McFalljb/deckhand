@@ -4,11 +4,13 @@ package main
 // Stubs until Linux/Windows get their own versions (frames drain the inbox).
 
 platform_wake :: proc() {}
+platform_alert :: proc(title, text: string) {}
 cpu_seconds :: proc() -> f64 {return 0}
 window_raise_without_focus :: proc() {}
 window_send_back :: proc() {}
 window_set_content_size :: proc(w, h: f32) {}
 window_minimize :: proc() {}
+platform_test_scale :: proc(scale: f64) {}
 window_restore :: proc() {}
 app_deactivate :: proc() {}
 window_capture :: proc(path: string) {}

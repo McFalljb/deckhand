@@ -11,7 +11,9 @@ package main
 //        bridge's blockers, which the confirmation lists) are queued and
 //        reloaded when they report idle with no blockers.
 //   "pi updated to X — Restart N idle tabs"       pi_restart_updated: the
-//        pi package on disk has another version than a tab started with;
+//        pi package on disk has another version than a tab started with
+//        (or "pi extensions changed": the user turned an optional extension
+//        of Deckhand's pi integration on or off since: pi_integration.odin);
 //        idle tabs start again on their session (`pi --session <file>`),
 //        busy ones are queued the same way.
 //
@@ -23,7 +25,8 @@ package main
 //   every pi tab  the agent dir's config, context and system-prompt files,
 //                 its extensions/, skills/, prompts/, themes/ (and where
 //                 their top-level symlinks lead), and the local packages
-//                 and resource paths its settings.json lists
+//                 and resource paths its settings.json lists; Deckhand's
+//                 own pi integration (pi_integration.odin)
 //   a folder      a pi tab's cwd/.pi (config files, the four resource
 //                 folders, local packages of its settings.json), and the
 //                 context files (AGENTS.override.md, AGENTS.md, CLAUDE.md)
@@ -109,6 +112,9 @@ Tab_Reload :: struct {
 	stopped:   time.Tick, // when it was hung up on
 	sent_gen:  u64, // State.reload.gen when it was sent
 	note:      string, // the last outcome, for Details ("reloaded", "reload failed: …")
+	flags:     bool, // Claude tabs: a queued restart replays the user's saved flags (the user asked)
+	all:       bool, // Claude tabs: a queued restart from restart-all (due though nothing changed)
+	extras:    u64, // pi tabs: the optional extensions of the pi integration it started with (pi_integration_extras)
 }
 
 // The bar's model (State.reload). Changed by commands only.
@@ -120,6 +126,7 @@ Reload_Info :: struct {
 	dismissed:         bool, // Later: the reload bar hides until the next change
 	pi_version:        string, // pi's version on disk now ("" = unknown)
 	restart_dismissed: bool, // Later on the restart bar: until the next version
+	claude:            Claude_Reload_Info, // Claude Code's bars (claude_reload.odin)
 }
 
 // pi_reload_all: reload every running pi tab (only_changed: those a watched
@@ -161,7 +168,7 @@ Reload_Class :: enum u8 {
 	Idle,
 	Busy, // working, or a dialog is open
 	Blocked, // idle, but with background work a reload would stop
-	No_Bridge, // no status from pi-kit's desk-bridge: pi-desk cannot reach it
+	No_Bridge, // no status from the pi integration's bridge: pi-desk cannot reach it
 }
 
 reload_class :: proc(t: ^Tab) -> Reload_Class {
@@ -190,8 +197,21 @@ running_pi :: proc(s: ^Open_Session) -> ^Tab {
 	return t
 }
 
-// Whether a pi tab started with another pi than the one on disk.
+// Whether a pi tab needs a restart: it started with another pi than the one on disk, or with
+// other optional extensions of the pi integration than the user's choices now (pi_integration.odin).
 reload_outdated :: proc(t: ^Tab) -> bool {
+	return reload_version_outdated(t) || pi_extras_outdated(t)
+}
+
+// Whether the restart is about a pi update: some running pi tab started on another version (else
+// only the pi extensions changed).
+restart_on_version :: proc() -> bool {
+	for &s in state.open_sessions do if t := running_pi(&s); t != nil && reload_version_outdated(t) do return true
+	return false
+}
+
+// Whether a pi tab started with another pi than the one on disk (not counting the extensions).
+reload_version_outdated :: proc(t: ^Tab) -> bool {
 	v := state.reload.pi_version
 	return v != "" && t.reload.version != "" && t.reload.version != v
 }
@@ -236,7 +256,8 @@ blocked_list :: proc(tabs: []^Tab) -> string {
 @(private = "file")
 reload_summary :: proc(restart: bool, now, later: []^Tab) -> string {
 	n := len(now) + len(later)
-	what := restart ? fmt.tprintf("restart %d pi tab%s on pi %s? Each starts again on its session.", n, n == 1 ? "" : "s", state.reload.pi_version) : fmt.tprintf("reload %d pi tab%s?", n, n == 1 ? "" : "s")
+	on := restart_on_version() ? fmt.tprintf(" on pi %s", state.reload.pi_version) : ""
+	what := restart ? fmt.tprintf("restart %d pi tab%s%s? Each starts again on its session.", n, n == 1 ? "" : "s", on) : fmt.tprintf("reload %d pi tab%s?", n, n == 1 ? "" : "s")
 	if bl := blocked_list(later); bl != "" {
 		return fmt.tprintf("%s Background work that a %s would stop: %s. Those tabs wait until it ends.", what, restart ? "restart" : "reload", bl)
 	}
@@ -275,7 +296,7 @@ kick :: proc(t: ^Tab, op: Reload_Op) {
 }
 
 // How long the bridge has to say pi is idle before a restart (pi.wait_idle:
-// pi-kit's bridge answers once pi has been idle, with nothing queued and no
+// the pi integration's bridge answers once pi has been idle, with nothing queued and no
 // background work, for 250 ms; else "timeout").
 RESTART_IDLE_CHECK_MS :: 1500
 // After this the old pi gets SIGKILL (it was hung up on).
@@ -312,8 +333,8 @@ reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			}
 		}
 		if len(now) + len(later) == 0 {
-			if len(cut) > 0 do return fail("no pi tab here reports to pi-desk (pi-kit's desk-bridge): restart them by hand"), false
-			if restart do return fail("no pi tab runs an older pi"), false
+			if len(cut) > 0 do return fail("no pi tab here reports to Deckhand (its pi integration did not connect): restart them by hand"), false
+			if restart do return fail("no pi tab runs an older pi or other pi extensions"), false
 			return fail(only_changed ? "no pi tab needs a reload" : "no pi tab is running"), false
 		}
 		// the user's own click is the decision; background work is warned
@@ -409,7 +430,7 @@ reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			t.reload.started = true
 			set_version(t, state.reload.pi_version)
 			t.reload.stale = false
-			set_note(t, fmt.tprintf("restarted on pi %s", state.reload.pi_version))
+			set_note(t, state.reload.pi_version != "" ? fmt.tprintf("restarted on pi %s", state.reload.pi_version) : "restarted")
 			return {ok = true}, true
 		}
 		// only a kick that is due: never a second reload for one queue entry
@@ -534,7 +555,9 @@ write_reload :: proc(b: ^strings.Builder, r: Reload_Info) {
 	write_strings(b, r.changed[:])
 	fmt.sbprintf(b, `,"changed_more":%d,"from_save":%v,"dismissed":%v,"pi_version":`, r.changed_more, r.from_save, r.dismissed)
 	json_quote(b, r.pi_version)
-	fmt.sbprintf(b, `,"restart_dismissed":%v}}`, r.restart_dismissed)
+	fmt.sbprintf(b, `,"restart_dismissed":%v,"claude":`, r.restart_dismissed)
+	write_claude_reload(b, r.claude) // claude_reload.odin
+	strings.write_byte(b, '}')
 }
 
 write_tab_reload :: proc(b: ^strings.Builder, t: Tab_Reload) {
@@ -902,6 +925,12 @@ probe_again :: proc() {
 	thread.create_and_start(probe_worker, self_cleanup = true)
 }
 
+// Looks for pi's package again (an install or update from the harness checklist ended).
+pi_version_probe_again :: proc() {
+	rw.last_probe = {}
+	probe_again()
+}
+
 // Worker: where pi's package.json is, as a login shell finds pi (a
 // wrapper script gives none: no version, no restart offer).
 @(private = "file")
@@ -909,12 +938,15 @@ probe_worker :: proc() {
 	defer free_all(context.temp_allocator)
 	shell := os.get_env("SHELL", context.temp_allocator)
 	if shell == "" do shell = "/bin/zsh"
-	out, ok := run_bounded("", {shell, "-l", "-c", "command -v pi"}, 10 * time.Second)
+	out, ok := run_bounded("", shell_script_argv(shell, "command -v pi", "sh")[:], 10 * time.Second) // fish and co.: /bin/sh
 	found := ""
 	if ok {
 		lines := strings.split_lines(strings.trim_space(out), context.temp_allocator)
 		bin := len(lines) > 0 ? strings.trim_space(lines[len(lines) - 1]) : ""
 		if filepath.is_abs(bin) do found = pi_package_of(bin)
+	}
+	if found == "" {
+		if m := pi_managed_path(); m != "" do found = pi_package_of(m) // as PI_TAB_CMD falls back (login_env.odin)
 	}
 	sync.lock(&probe.lock)
 	delete(probe.result, runtime.heap_allocator())
@@ -925,15 +957,72 @@ probe_worker :: proc() {
 	if platform.wake != nil do platform.wake()
 }
 
-// The package.json above pi's real entry point ("" = none with a version).
+PI_PACKAGE :: "@earendil-works/pi-coding-agent"
+
+// The package.json of the pi that bin runs ("" = none with a version), looked at, never run:
+// a wrapper or shim script's target (pnpm's shim, nix's makeWrapper: script_target), else the
+// first package.json above pi's real entry point (npm, bun, mise's npm backend: links into a
+// node_modules) that is pi's (a package.json of something else, like a home folder's, is skipped).
 pi_package_of :: proc(bin: string) -> string {
-	d := filepath.dir(fs_real(bin))
+	real := fs_real(bin)
+	if real == "" do real = bin
+	if pkg := script_target(real, "node_modules/" + PI_PACKAGE); pkg != "" {
+		p := strings.concatenate({pkg, "/package.json"}, context.temp_allocator)
+		if pkg_version(p) != "" do return p
+	}
+	d := filepath.dir(real)
 	for i := 0; i < 8 && d != "/" && d != "" && d != "."; i += 1 {
 		p := strings.concatenate({d, "/package.json"}, context.temp_allocator)
-		if path_kind(p) == .File && pkg_version(p) != "" do return p
+		if path_kind(p) == .File && pkg_version(p) != "" {
+			name := pkg_name(p)
+			if name == "" || strings.has_suffix(name, "pi-coding-agent") do return p
+		}
 		d = filepath.dir(d)
 	}
 	return ""
+}
+
+// A package.json's "name" ("" = none or unreadable).
+pkg_name :: proc(path: string) -> string {
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	if err != nil do return ""
+	v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+	if jerr != nil do return ""
+	obj, ok := v.(json.Object)
+	if !ok do return ""
+	s, _ := obj["name"].(json.String)
+	return s
+}
+
+// SCRIPT_TARGET_MAX: wrapper and shim scripts are small; anything bigger is a program, not read.
+@(private = "file")
+SCRIPT_TARGET_MAX :: 64 * 1024
+
+// Where a wrapper or shim script (a small text file starting with "#!": pnpm's shims, nix's
+// makeWrapper, npm's .bin scripts) points: the first absolute path in it, or one relative to its
+// folder ("$basedir/…", as pnpm writes), that contains marker, cut just after marker; it must be a
+// folder. Read only, never run. "" = not a script, or no such path.
+script_target :: proc(script, marker: string) -> string {
+	k, st := path_stat(script)
+	if k != .File || st.size > SCRIPT_TARGET_MAX do return ""
+	data, err := os.read_entire_file(script, context.temp_allocator)
+	if err != nil || len(data) < 2 || data[0] != '#' || data[1] != '!' do return ""
+	text := string(data)
+	from := 0
+	for {
+		i := strings.index(text[from:], marker)
+		if i < 0 do return ""
+		at := from + i
+		from = at + len(marker)
+		if from < len(text) && text[from] != '/' && text[from] != '"' && text[from] != '\'' && text[from] != ' ' && text[from] != '\n' do continue // a longer name
+		j := at
+		for j > 0 && !strings.contains_rune("\"' \t\n=:(`", rune(text[j - 1])) do j -= 1
+		p := text[j:from]
+		if strings.has_prefix(p, "$basedir/") do p = strings.concatenate({filepath.dir(script), p[len("$basedir"):]}, context.temp_allocator)
+		if !filepath.is_abs(p) do continue
+		c, _ := filepath.clean(p, context.temp_allocator)
+		if path_kind(c) == .Dir do return c
+	}
 }
 
 // ---- the sources ----
@@ -982,6 +1071,14 @@ reload_build :: proc(cwds: []string) {
 				if d == "/" || d == "" || d == "." do break
 				d = filepath.dir(d)
 			}
+		}
+		// Deckhand's pi integration (pi_integration.odin): every pi tab loads it with -e. After the
+		// projects', so under RELOAD_DIRS_MAX a project's .pi never loses its watch to it.
+		if pd := pi_integration_dir(); pd != "" {
+			add_file(fmt.tprintf("%s/extensions.json", pd), "")
+			add_dir(fmt.tprintf("%s/extensions", pd), "")
+			add_dir(fmt.tprintf("%s/lib", pd), "")
+			add_dir(fmt.tprintf("%s/skills", pd), RELOAD_SCOPE_ATLAS) // Atlas's desk skill
 		}
 	}
 	// keep what was known of sources still watched

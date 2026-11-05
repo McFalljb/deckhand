@@ -1,0 +1,30 @@
+# Read-only pi chats, run 1 (tests/scripts/pi-chat-readonly.sh): Chats: read-only on; the user's
+# new chat, a script's new chat (as an agent's), its restart once pi exited, a resumed chat.
+wait 1500
+ui_command {"type":"set_chats_readonly","on":true}
+assert_result ok true
+ui_command {"type":"new_chat","project_id":$chats}
+assert_result ok true
+waitfor FAKE PI ARGS: 10000
+command {"type":"new_chat","project_id":$chats}
+assert_result ok true
+waitfor FAKE PI ARGS: 10000
+assert_state open_sessions.# 2
+# the script's chat (on screen): its pi exits, then Restart
+type exit
+key enter
+waitstate 10000 open_sessions.1.tabs.0.status exited
+command {"type":"pi_restart","tab_id":$pitab}
+assert_result ok true
+waitstate 10000 open_sessions.1.tabs.0.status running
+waitfor FAKE PI ARGS: 10000
+# a chat from before, resumed
+command {"type":"open_session","project_id":$chats,"pi_session_id":"c0de0000-1111-4222-8333-444455556666"}
+assert_result ok true
+waitfor FAKE PI ARGS: 10000
+assert_state open_sessions.# 3
+wait 500
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

@@ -1,5 +1,5 @@
 // pi-desk's CEF helper (docs/BROWSER.md §1.5): one binary cloned into the
-// five "pi-desk Helper (…).app" bundles. Chromium starts it for renderer,
+// five "Deckhand Helper (…).app" bundles. Chromium starts it for renderer,
 // GPU, network, plugin and alert processes. It starts the sandbox, loads the
 // framework at run time (sandboxed helpers must not link it), checks the API
 // hash and hands over to cef_execute_process, with an app that registers
@@ -25,7 +25,7 @@ static void* load(const char* dir, const char* rel) {
     char path[PATH_MAX];
     snprintf(path, sizeof path, "%s/%s", dir, rel);
     void* h = dlopen(path, RTLD_LAZY | RTLD_LOCAL | RTLD_FIRST);
-    if (!h) fprintf(stderr, "pi-desk Helper: dlopen %s: %s\n", path, dlerror());
+    if (!h) fprintf(stderr, "Deckhand Helper: dlopen %s: %s\n", path, dlerror());
     return h;
 }
 
@@ -49,7 +49,7 @@ int main(int argc, char** argv) {
     char exe[PATH_MAX];
     uint32_t n = sizeof exe;
     if (_NSGetExecutablePath(exe, &n) != 0) return 1;
-    // …/Contents/Frameworks/pi-desk Helper (X).app/Contents/MacOS/pi-desk Helper (X)
+    // …/Contents/Frameworks/Deckhand Helper (X).app/Contents/MacOS/Deckhand Helper (X)
     char dir[PATH_MAX];
     strncpy(dir, dirname(exe), sizeof dir - 1);
     dir[sizeof dir - 1] = 0;
@@ -58,7 +58,7 @@ int main(int argc, char** argv) {
     if (!sb) return 1;
     __typeof__(cef_sandbox_initialize)* sandbox_init = (__typeof__(cef_sandbox_initialize)*)dlsym(sb, "cef_sandbox_initialize");
     if (!sandbox_init || !sandbox_init(argc, argv)) {
-        fprintf(stderr, "pi-desk Helper: sandbox did not start\n");
+        fprintf(stderr, "Deckhand Helper: sandbox did not start\n");
         return 1;
     }
 
@@ -71,7 +71,7 @@ int main(int argc, char** argv) {
     if (!api_hash || !execute || !to16 || !clear16) return 1;
     const char* hash = api_hash(CEF_API_VERSION, 0);
     if (!hash || strcmp(hash, CEF_API_HASH_PLATFORM) != 0) {
-        fprintf(stderr, "pi-desk Helper: CEF API hash mismatch\n");
+        fprintf(stderr, "Deckhand Helper: CEF API hash mismatch\n");
         return 1;
     }
     cef_main_args_t args = {.argc = argc, .argv = argv};

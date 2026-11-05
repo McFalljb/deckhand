@@ -1,0 +1,14 @@
+# pi only on the login shell's PATH; the interactive shell hangs (tests/scripts/pi-login-lookup.sh, run 1)
+wait 800
+command {"type":"add_project","cwd":"$homedir/code/demo"}
+waitstate 20000 pi_installed true
+# the login shell answered by now (the probe gave up after 4 s; `-l -c` answers at once): still there
+wait 6000
+assert_state pi_installed true
+shot pi-login-lookup/found
+rclickid proj 0
+wait 300
+clickmenu New session
+waitfor FAKE PI login ARGS: 20000
+shot pi-login-lookup/pi-tab
+quit

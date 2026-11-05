@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A fake pi for tests/scripts/comments.sh: a pi-like screen and pi-kit's bridge over pi-desk's
-socket (PI_DESK_SOCKET, the single-use PI_DESK_TOKEN), playing the pending-comments half of the
+"""A fake pi for tests/scripts/comments.sh: a pi-like screen and the pi integration's bridge over pi-desk's
+socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN), playing the pending-comments half of the
 pi-tab schema (docs/PROTOCOL.md §4):
   pi.attach        kept (the next typed line takes it); logged with its image count, whether
                    each image is a PNG, and its text's first comment line
@@ -24,7 +24,7 @@ def note(line):
 
 
 sock = socket.socket(socket.AF_UNIX)
-sock.connect(os.environ["PI_DESK_SOCKET"])
+sock.connect(os.environ["DECKHAND_SOCKET"])
 
 
 def send(m):
@@ -53,7 +53,7 @@ def first_comment(text):
 
 
 print("\x1b[2J\x1b[H\x1b[1mpi\x1b[0m  fake attach bridge\n", flush=True)
-send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
 send({"id": "s", "type": "pi.session", "pi_session_id": who, "session_file": "", "cwd": os.getcwd()})
 send({"id": "st", "type": "pi.status", "agent": "idle", "waiting": False, "blockers": []})
 held = None

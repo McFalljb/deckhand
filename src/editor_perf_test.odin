@@ -15,11 +15,12 @@ import "core:time"
 @(test)
 editor_perf_50k :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	// hosted CI runners are shared and slower: this file's full parse can pass the 500 ms budget
-	// there and drop to plain text (by design), so the budget is looser on CI
+	// the parse budget is wall time: on a busy machine (a CI runner, other builds, the other test
+	// processes) this file's full parse can pass the 500 ms budget and drop to plain text (by
+	// design), so the budget is looser here; the bounds below are CPU time
 	old_budget := syntax_budget
 	defer syntax_budget = old_budget
-	if os.get_env("CI", context.temp_allocator) != "" do syntax_budget = 3 * time.Second
+	syntax_budget = 3 * time.Second
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	path := fmt.tprintf("%s/pi-desk-perf-%d.c", strings.trim_right(tmp, "/"), time.now()._nsec)
@@ -29,24 +30,24 @@ editor_perf_50k :: proc(t: ^testing.T) {
 	defer os.remove(path)
 
 	// open: read, detect format, index lines, parse; then the first screen's colours
-	t0 := time.tick_now()
+	t0 := thread_cpu_now()
 	e := new(Editor)
 	editor_load(e, path)
 	scratch: [dynamic]u8
 	defer delete(scratch)
 	syntax_tokens(&e.sx, &e.buf, tb_line_start(&e.buf, 25_000), tb_line_start(&e.buf, 25_060), &scratch)
-	open_ms := time.duration_milliseconds(time.tick_since(t0))
+	open_ms := time.duration_milliseconds(thread_cpu_since(t0))
 
 	// typing in the middle: per key, the edit + incremental reparse + the screen's colours
 	ed_set_cursor(e, tb_line_start(&e.buf, 25_010) + 4, false)
 	worst, total: f64
 	N :: 300
 	for i in 0 ..< N {
-		k := time.tick_now()
+		k := thread_cpu_now()
 		if i % 10 == 9 do ed_backspace(e)
 		else do ed_insert(e, "a")
 		syntax_tokens(&e.sx, &e.buf, tb_line_start(&e.buf, 25_000), tb_line_start(&e.buf, 25_060), &scratch)
-		d := time.duration_milliseconds(time.tick_since(k))
+		d := time.duration_milliseconds(thread_cpu_since(k))
 		total += d
 		worst = max(worst, d)
 	}
@@ -57,7 +58,7 @@ editor_perf_50k :: proc(t: ^testing.T) {
 	pause_ms := time.duration_milliseconds(time.tick_since(k))
 	testing.expect(t, !e.sx.stale && len(toks) > 0)
 	log.infof("PERF reparse after a typing pause: %.1f ms", pause_ms)
-	log.infof("PERF open 50k-line C file: %.1f ms; typing: %.2f ms per key on average, %.2f ms worst (%d keys)", open_ms, total / N, worst, N)
+	log.infof("PERF (CPU time) open 50k-line C file: %.1f ms; typing: %.2f ms per key on average, %.2f ms worst (%d keys)", open_ms, total / N, worst, N)
 	testing.expect(t, open_ms < 2000)
 	testing.expect(t, total / N < 50)
 	editor_free(e) // frees e too

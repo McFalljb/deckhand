@@ -1,0 +1,172 @@
+# Claude-only sessions, run 1 (tests/scripts/claude-sessions.sh; docs/CLAUDE.md §1, §4): a fake
+# claude. + New session (the picker: Claude Code) under the selected project; its row beside the pi session, marked
+# Claude; the row's menu (Pin, Rename…); the filter; closed, its row resumes it; quit (run 2).
+wait 1500
+# the window in front: the tab on screen is seen (a turn's end leaves no unseen dot; the fake
+# claude reports no OSC 7501, so its dots come from the hooks: docs/CLAUDE.md §5a)
+window_active on
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+wait 300
+assert_state claude_installed true
+assert_rows sessions Tidy the README
+shot claude-sessions/before
+# 1. + New session under the project's sessions: the harness picker (pi and Claude Code), then
+# Claude Code (key 2): a session whose only tab is Claude
+clickid new
+eventually
+assert_menurows pi|Claude Code
+key 2
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+assert_state open_sessions.0.tabs.# 1
+assert_state open_sessions.0.tabs.0.kind claude
+assert_state open_sessions.0.id $session
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.0.claude_session_id 5e551011-1111-4222-8333-444455556666
+waitstate 5000 open_sessions.0.tabs.0.turn idle
+# its model (SessionStart), in the snapshot and the tab's tooltip
+assert_state open_sessions.0.tabs.0.model claude-opus-5
+hover tab 0
+eventually
+assert_tip Claude Code · model claude-opus-5
+# its main tab closes only with the session
+ui_command {"type":"close_tab","tab_id":$tab}
+assert_result error a Claude session's main tab cannot be closed: close the session
+type plan the parser
+key enter
+waitfor PROMPT: plan the parser 10000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_state claude_sessions.0.title plan the parser
+# 2. its row, marked Claude, beside the pi session (most recent first); in the Open group too
+assert_rows sessions plan the parser,Tidy the README
+assert_rows open plan the parser
+wait 300
+shot claude-sessions/new-session
+# its model switched (PostModelSwitch, async)
+type !model claude-sonnet-5
+key enter
+waitstate 10000 open_sessions.0.tabs.0.model claude-sonnet-5
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_state claude_sessions.0.model claude-sonnet-5
+# a last answer asking something: the question dot; a StopFailure: the error dot
+type !ask
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot question
+assert_state open_sessions.0.agent_status question
+shot claude-sessions/question
+type !fail
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot error
+assert_state open_sessions.0.tabs.0.turn idle
+type plan the parser again
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot none
+# the question dot stays through Notification idle_prompt (idle a while after the Stop)
+type !idle-prompt
+key enter
+waitfor idle prompt 10000
+assert_state open_sessions.0.tabs.0.agent_status.dot question
+# a Stop is authoritative: a turn with no prompt (a background wake) ending with a statement
+# clears an old question or error dot
+type !ask-wake
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot question
+waitfor woke: working 10000
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot none
+type !fail-wake
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot error
+waitfor woke: working 10000
+waitstate 10000 open_sessions.0.tabs.0.agent_status.dot none
+# a Claude row keeps its hover (and its buttons) while the pointer moves across it
+sweep sess 0 80
+hover search
+wait 200
+# 3. the row's menu: Pin and Rename… (pi-desk's own title), Reveal and Copy path (its transcript),
+# its info (pi-desk's record)
+rclickid sess 0
+eventually
+assert_menurows Pin|New Claude tab here|Rename…|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Mark as unread|Hide|Close session
+clickmenu Copy path
+eventually
+assert_clipboard /.claude/projects/-fake/5e551011-1111-4222-8333-444455556666.jsonl
+rclickid sess 0
+clickmenu Reveal in Finder
+eventually
+assert_revealed /.claude/projects/-fake/5e551011-1111-4222-8333-444455556666.jsonl
+rclickid sess 0
+clickmenu Copy session info
+eventually
+assert_clipboard ```claude-session
+assert_clipboard model: claude-sonnet-5
+assert_clipboard agent: Claude Code
+# the ⓘ on its row
+hover sess 0
+wait 300
+clickid sessinfo 0
+eventually
+assert_drawn id: 5e551011-1111-4222-8333-444455556666
+assert_drawn model: claude-sonnet-5
+assert_drawn Copy session info
+shot claude-sessions/row-info
+key escape
+wait 200
+rclickid sess 0
+wait 300
+shot claude-sessions/row-menu
+clickmenu Pin
+wait 200
+rclickid sess 0
+clickmenu Rename…
+wait 300
+type Parser design
+shot claude-sessions/rename
+key enter
+eventually
+assert_state claude_sessions.0.title Parser design
+assert_rows sessions Parser design,Tidy the README
+# 4. the filter matches Claude rows as pi rows
+command {"type":"set_filter","text":"parsr"}
+eventually
+assert_rows sessions Parser design
+command {"type":"set_filter","text":""}
+# 5. closed: the row stays; a click resumes it in a Claude-only session with --resume
+ui_command {"type":"close_session","session":$session}
+assert_result ok true
+wait 300
+assert_state open_sessions.# 0
+assert_rows sessions Parser design,Tidy the README
+shot claude-sessions/closed-row
+clickid sess 0
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+assert_state open_sessions.0.claude_session_id 5e551011-1111-4222-8333-444455556666
+waitfor --resume 5e551011 10000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+shot claude-sessions/resumed
+# ⇧⌘N (the File menu's key): the picker, Claude Code first now (used last), so Enter starts
+# another Claude session in the selected project
+menu_key 45 n cmd shift menu
+eventually
+assert_menurows Claude Code|pi
+key enter
+eventually
+assert_state open_sessions.# 2
+assert_state open_sessions.1.agent claude
+assert_state open_sessions.1.id $session
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+wait 1000
+# (the fake reuses its session id, which the first one holds: refused, so it stays unsaved; its
+# hook still reports the idle turn, so it is idle and closes without asking)
+waitstate 10000 open_sessions.1.tabs.0.turn idle
+ui_command {"type":"close_session","session":$session}
+assert_result ok true
+wait 300
+assert_state open_sessions.# 1
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

@@ -102,7 +102,7 @@ command {"type":"close_tab","tab_id":$last}
 assert_result error needs_confirmation
 wait 200
 clickid confirm_no
-wait 100
+eventually
 assert_state pending_confirmations.# 0
 # ---- a 50k-line file; then idle CPU with it open
 command {"type":"open_file","path":"big.c","line":25000}

@@ -5,7 +5,8 @@ package main
 // (ui_sidebar.odin), the tests and the scripted scenes.
 //
 // Order in each section: the pinned group first (in pinned order), then the
-// rest by the section's sort (Recent activity, Name, Created). With filter
+// rest by the section's sort (Recent activity, Name, Created, Attention: a
+// row's status tier, agent_status.odin, then recent activity). With filter
 // text, each group is ordered by match score first, then by the sort.
 // Filter words match fuzzily, like the palette (fuzzy_score): projects by
 // name and path, sessions by title. A selected project that matches the
@@ -49,6 +50,7 @@ Sidebar_Row :: struct {
 	created: i64,
 	name:    string,
 	node:    int, // (sidebar_projects)
+	attn:    int, // the attention sort's tier (agent_status.odin: attention_tier; group rows: their rows' highest)
 }
 
 list_index :: proc(list: []string, key: string) -> int {
@@ -109,12 +111,48 @@ sidebar_make_room :: proc(list: ^[dynamic]string, is_project: bool) -> bool {
 	return len(list) < SIDEBAR_LIST_MAX
 }
 
+// Which agent a session row runs: an icon on every row (ui_sidebar.odin), the New session
+// picker (harness.odin) and agent tabs. A new harness adds one entry to HARNESSES.
+Harness :: enum u8 {
+	Pi,
+	Claude,
+}
+
+// A harness's name, its logo (an Icon that draws a logos.odin mark; .None while it has none)
+// and the plain glyph drawn without a logo.
+Harness_Mark :: struct {
+	name:  string,
+	logo:  Icon,
+	glyph: Icon,
+}
+HARNESSES := [Harness]Harness_Mark {
+	.Pi     = {name = "pi", logo = .Logo_Pi, glyph = .Harness_Pi},
+	.Claude = {name = "Claude Code", logo = .Logo_Claude if LOGO_CLAUDE_ON else .None, glyph = .Harness_Claude}, // logos.odin: LOGO_CLAUDE_ON
+}
+
+// The icon a harness shows: its logo, else its glyph.
+harness_mark_icon :: proc(m: Harness_Mark) -> Icon {return m.logo != .None ? m.logo : m.glyph}
+harness_icon :: proc(h: Harness) -> Icon {return harness_mark_icon(HARNESSES[h])}
+
+// A session row's harness icon. A dimmed row (hidden, its folder gone) gets the plain glyph,
+// drawn in the muted colour: a logo keeps its own colours and is never faded.
+harness_row_icon :: proc(h: Harness, dimmed: bool) -> Icon {return dimmed ? HARNESSES[h].glyph : harness_icon(h)}
+
+session_harness :: proc(s: Session) -> Harness {return s.claude ? .Claude : .Pi}
+
+// A Claude row's account label while there are several accounts ("" = no tag).
+session_account_tag :: proc(s: Session) -> string {
+	if !s.claude do return ""
+	return claude_account_tag(s.account)
+}
+
 session_waiting :: proc(id: string) -> bool {return session_status(id) == .Waiting}
 
 // Listed (the selected project's or a chat) or open.
 session_known :: proc(id: string) -> bool {
 	if session_listed(state.sessions[:], id) || session_listed(state.chats[:], id) do return true
 	for s in state.open_sessions do if !s.home && s.pi_session_id == id do return true
+	if r, _ := claude_record(id); r != nil do return true // a Claude session's row (claude.odin)
 	return false
 }
 
@@ -125,26 +163,40 @@ sidebar_path :: proc(project_id: u64, pi_session_id: string) -> (path: string, e
 	if p == nil do return "", "no such project"
 	if pi_session_id != "" {
 		path = find_session_file(p^, pi_session_id)
-		if path == "" do return "", "no such session in this project"
-		return path, ""
+		if path != "" do return path, ""
+		// a Claude row: its transcript, if pi-desk was told one under Claude's projects/ (claude_rows.odin)
+		if rec := claude_row_record(project_id, pi_session_id); rec != nil do return claude_transcript_file(rec)
+		return "", "no such session in this project"
 	}
 	path = p.group == .Chats ? p.dir : p.cwd
 	if !os.exists(path) do return "", "the folder is gone"
 	return strings.clone(path, context.temp_allocator), ""
 }
 
-// The strongest status of a project's open sessions (waiting outranks running).
+// The strongest status of a project's open sessions (agent_status.odin:
+// status_rank; waiting outranks everything): its row's dot.
 project_status :: proc(project_id: u64) -> Row_Status {
 	best := Row_Status.None
 	for &s in state.open_sessions {
 		if s.home || s.project_id != project_id do continue
-		pt := session_pi_tab(&s)
-		if pt == nil do continue
-		st := pi_tab_status(pt^)
-		if st == .Waiting do return .Waiting
-		if st == .Running do best = .Running
+		st, _ := session_row_status(&s)
+		if status_rank(st) > status_rank(best) do best = st
 	}
 	return best
+}
+
+// What the quick filters see of a project: waiting if any of its open
+// sessions waits, else running if any runs, else its dot.
+@(private = "file")
+project_quick_status :: proc(project_id: u64, best: Row_Status) -> Row_Status {
+	running := false
+	for &s in state.open_sessions {
+		if s.home || s.project_id != project_id do continue
+		st := session_quick_status(&s)
+		if st == .Waiting do return .Waiting
+		if st == .Running do running = true
+	}
+	return running ? .Running : best
 }
 
 // Sum of the best score of each filter word over texts; false if a word
@@ -213,7 +265,8 @@ sidebar_projects :: proc() -> []Sidebar_Row {
 		if p.group != .Projects do continue
 		reason := project_hide_reason(p)
 		r := Sidebar_Row{project = &p, pin = project_pinned(p), hidden = reason != .None, reason = reason}
-		st := project_status(p.id)
+		st := project_quick_status(p.id, project_status(p.id))
+		r.attn = attention_tier(project_status(p.id))
 		score, ok := filter_score(words, project_name(p), p.cwd)
 		pass := true
 		if st != .Waiting { 	// waiting work always shows
@@ -284,6 +337,7 @@ sidebar_projects :: proc() -> []Sidebar_Row {
 				n.row.score = max(n.row.score, c.row.score)
 				n.row.active = max(n.row.active, c.row.active)
 				n.row.created = max(n.row.created, c.row.created)
+				n.row.attn = max(n.row.attn, c.row.attn)
 			}
 		}
 	}
@@ -348,8 +402,7 @@ project_sessions_match :: proc(p: Project) -> bool {
 	words := filter_words()
 	for &o in state.open_sessions {
 		if o.home || o.project_id != p.id do continue
-		st := Row_Status.None
-		if pt := session_pi_tab(&o); pt != nil do st = pi_tab_status(pt^)
+		st := session_quick_status(&o)
 		if _, ok := filter_score(words, open_session_title(&o)); ok && quick_ok(st, session_pinned(o.pi_session_id) >= 0) do return true
 	}
 	return false
@@ -370,6 +423,9 @@ sidebar_sessions :: proc(section: Sort_Section) -> []Sidebar_Row {
 	for &s in sessions_with_new(section, list) {
 		r := Sidebar_Row{session = &s, pin = session_pinned(s.id), hidden = session_hidden(s.id)}
 		st := session_status(s.id)
+		r.attn = attention_tier(st)
+		for &o in state.open_sessions do if !o.home && o.pi_session_id == s.id do st = session_quick_status(&o) // the quick filters' view
+		if s.claude && open_session_any(s.id) == 0 do if id := claude_open_tab(s.id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do st = tab_status_view(tab^).dot // a Claude tab in a pi session
 		if r.hidden && !state.sidebar.show_hidden && st != .Waiting do continue // hiding never conceals waiting work
 		score, ok := filter_score(words, session_label(s, section == .Chats))
 		if !ok || !quick_ok(st, r.pin >= 0) do continue
@@ -393,18 +449,45 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session) -> []Session {
 	append(&out, ..list)
 	if pid == 0 do return out[:]
 	for &o in state.open_sessions {
-		if o.home || o.project_id != pid || session_listed(list, o.pi_session_id) do continue
+		if o.home || o.project_id != pid || o.agent == .Claude || session_listed(list, o.pi_session_id) do continue // Claude-only: below
 		title := open_session_title(&o)
 		if o.title == "" do title = "" // not named yet: the section's "Untitled …"
 		// no file yet: when it was last made current (stable from frame to frame, so the order is)
 		modified := o.mtime != {} ? o.mtime : time.Time{_nsec = o.shown_at}
 		append(&out, Session{id = o.pi_session_id, path = o.session_file, when_ = utc_minute(modified), title = title, modified = modified})
 	}
+	if p := find_project(pid); p != nil do claude_rows(p^, &out) // Claude chats too
 	return out[:]
 }
 
-// "2026-08-21 01:20" (UTC), as session file names give it (temp).
+// A project's Claude sessions as session rows (claude = true): pi-desk's own history, plus an open
+// Claude-only session the history no longer holds, plus the transcripts found on disk for the
+// selected project and Chats (claude_disk.odin; never one pi-desk already has). Titles: the
+// first prompt or the user's; "last active": when it was last used; "created": the transcript's
+// birth time when the scan saw it. A history entry whose transcript is gone is greyed.
 @(private = "file")
+claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
+	row :: proc(r: Claude_Record) -> Session {
+		t := time.unix(r.used, 0)
+		s := Session{id = r.id, title = r.title, untitled = "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account}
+		if f := claude_disk_of(r.id); f != nil {
+			if f.created != {} do s.when_ = utc_minute(f.created)
+			s.gone = f.gone
+		}
+		return s
+	}
+	for r in state.claude_history do if r.project == p.cwd && !session_listed(out[:], r.id) do append(out, row(r)) // a pi session's id is its row (older data)
+	for &o in state.open_sessions {
+		if o.home || o.agent != .Claude || o.project_id != p.id || o.pi_session_id == "" || session_listed(out[:], o.pi_session_id) do continue
+		if r, _ := claude_record(o.pi_session_id); r == nil {
+			t := time.unix(o.shown_at / 1e9, 0)
+			append(out, Session{id = o.pi_session_id, untitled = "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true})
+		}
+	}
+	claude_disk_rows(p, out)
+}
+
+// "2026-08-21 01:20" (UTC), as session file names give it (temp).
 utc_minute :: proc(t: time.Time) -> string {
 	y, mo, d := time.date(t)
 	h, mi, _ := time.clock(t)
@@ -440,18 +523,19 @@ sort_rows :: proc(rows: []Sidebar_Row, section: Sort_Section) {
 		if ap != bp do return ap
 		if ap do return a.pin < b.pin
 		if a.score != b.score do return a.score > b.score
+		if sorting == .Attention && a.attn != b.attn do return a.attn > b.attn
 		if a.session == nil { 	// project and group rows
 			switch sorting {
-			case .Recent:  return a.active > b.active
-			case .Created: return a.created > b.created
-			case .Name:    return name_less(a.name, b.name)
+			case .Recent, .Attention: return a.active > b.active
+			case .Created:            return a.created > b.created
+			case .Name:               return name_less(a.name, b.name)
 			}
 		}
 		x, y := a.session^, b.session^
 		switch sorting {
-		case .Recent:  return x.modified._nsec > y.modified._nsec
-		case .Created: return x.when_ > y.when_
-		case .Name:    return name_less(session_label(x), session_label(y))
+		case .Recent, .Attention: return x.modified._nsec > y.modified._nsec
+		case .Created:            return x.when_ > y.when_
+		case .Name:               return name_less(session_label(x), session_label(y))
 		}
 		return false
 	})
@@ -472,8 +556,7 @@ sidebar_open :: proc() -> []^Open_Session {
 	words := filter_words()
 	for &s in state.open_sessions {
 		if s.home do continue
-		st := Row_Status.None
-		if pt := session_pi_tab(&s); pt != nil do st = pi_tab_status(pt^)
+		st := session_quick_status(&s)
 		if st != .Waiting { 	// waiting work always shows
 			if _, ok := filter_score(words, open_session_title(&s), session_project_name(&s)); !ok do continue
 			if !quick_ok(st, session_pinned(s.pi_session_id) >= 0) do continue
@@ -555,6 +638,10 @@ open_session_refresh :: proc(s: ^Open_Session) {
 
 // "5m" since the session file last changed; "new" before pi wrote it.
 open_session_age :: proc(s: ^Open_Session) -> string {
+	if s.agent == .Claude { 	// its history entry's last use (claude.odin)
+		if r, _ := claude_record(s.pi_session_id); r != nil do return ago(time.unix(r.used, 0))
+		return "new"
+	}
 	if s.session_file == "" do return "new"
 	open_session_refresh(s)
 	return ago(s.mtime)

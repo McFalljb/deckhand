@@ -1,0 +1,12 @@
+# Read-only Claude chats, run 3: a Claude Code that ignores pi-desk's --settings (the fake with
+# FAKE_CLAUDE_IGNORE_SETTINGS=1): the restored read-only chat starts, its plugin reports the
+# session, but the profile never acks: pi-desk stops it within 10 s and says why.
+wait 1500
+assert_state open_sessions.# 1
+waitfor --resume 7e5d0000 15000
+waitfor read-only guard not confirmed: stopped. A startup dialog 30000
+waitstate 10000 open_sessions.0.tabs.0.status exited
+shot claude-readonly/not-confirmed
+# nothing runs any more: quit needs no confirmation
+ui_command {"type":"quit"}
+wait 2000

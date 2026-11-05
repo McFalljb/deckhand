@@ -26,6 +26,11 @@ trashed: [dynamic]string
 @(private = "file")
 setup :: proc() -> string {
 	context.allocator = runtime.heap_allocator()
+	// a git read of the last test's still on a worker must not land on this test's editors: let
+	// those finish, and keep the ids going (a fresh State would start them again, and a late
+	// Git_Head_Done for the old tab would name a tab of this test)
+	settle(proc() -> bool {return !any_git_loading()})
+	next_id := state.next_id
 	ids := make([dynamic]u64, context.temp_allocator)
 	for id, _ in editors do append(&ids, id)
 	for id in ids do editor_drop(id)
@@ -35,7 +40,7 @@ setup :: proc() -> string {
 	}
 	clear(&terms)
 	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
+	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}, next_id = next_id}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"

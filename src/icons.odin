@@ -47,6 +47,23 @@ Icon :: enum u8 {
 	Play, // a triangle: run now
 	Pause, // two bars: pause
 	Info, // a ring with an "i": a session's info (ui_sidebar.odin)
+	// which agent a session runs (sidebar.odin: HARNESSES): its real logo (logos.odin), in its
+	// own colours; the plain glyphs stay as the fallback for a harness without one
+	Logo_Pi,
+	Logo_Claude,
+	Harness_Pi, // "π": a bar on two legs
+	Harness_Claude, // a six-pointed asterisk
+}
+
+// The logo an icon draws (.None: a vector icon in the caller's colour).
+icon_logo :: proc(ic: Icon) -> Logo {
+	#partial switch ic {
+	case .Logo_Pi:
+		return .Pi
+	case .Logo_Claude:
+		return .Claude
+	}
+	return .None
 }
 
 ICON_GRID :: 16
@@ -71,6 +88,12 @@ icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (Icon, Rgba) {
 // Draws `ic` into the box (framebuffer px), inside draw_begin/draw_end.
 draw_icon :: proc(ic: Icon, x, y, w, h: f32, col: Rgba) {
 	if col.a == 0 do return
+	if logo := icon_logo(ic); logo != .None {
+		// a logo: rasterised at the box's whole-px size, centred on the pixel grid
+		n := int(math.round(min(w, h)))
+		draw_logo(logo, x + (w - f32(n)) / 2, y + (h - f32(n)) / 2, n, col.a)
+		return
+	}
 	s := min(w, h) / ICON_GRID // grid unit in px
 	ox := math.round(x + (w - s * ICON_GRID) / 2)
 	oy := math.round(y + (h - s * ICON_GRID) / 2)
@@ -80,7 +103,7 @@ draw_icon :: proc(ic: Icon, x, y, w, h: f32, col: Rgba) {
 	snap :: proc(v, sw: f32) -> f32 {return int(sw) % 2 == 1 ? math.floor(v) + 0.5 : math.round(v)}
 	X :: proc(ox, s, sw, v: f32) -> f32 {return snap(ox + v * s, sw)}
 	switch ic {
-	case .None:
+	case .None, .Logo_Pi, .Logo_Claude:
 	case .Search:
 		cx, cy, r := P(ox, s, 7), P(oy, s, 7), 4.5 * s
 		stroke_ring(cx, cy, r, sw, col)
@@ -229,6 +252,21 @@ draw_icon :: proc(ic: Icon, x, y, w, h: f32, col: Rgba) {
 		c := X(ox, s, sw, 8)
 		stroke_line(c, P(oy, s, 6), c, P(oy, s, 9), sw, col)
 		fill_disc(c, P(oy, s, 11.25), max(0.9 * s, sw * 0.7), col)
+	case .Harness_Pi:
+		// π: the bar, a straight left leg, a right leg that turns out at its foot
+		t := X(oy, s, sw, 4.5)
+		stroke_line(P(ox, s, 2.5), t, P(ox, s, 13.5), t, sw, col, true)
+		stroke_line(P(ox, s, 6), t, P(ox, s, 5.5), P(oy, s, 13), sw, col, true)
+		stroke_line(P(ox, s, 10.5), t, P(ox, s, 10.5), P(oy, s, 11.5), sw, col, true)
+		stroke_line(P(ox, s, 10.5), P(oy, s, 11.5), P(ox, s, 12.5), P(oy, s, 13), sw, col, true)
+	case .Harness_Claude:
+		// an asterisk: three strokes through the middle
+		cx, cy, r := P(ox, s, 8), P(oy, s, 8), 5.5 * s
+		for deg in ([3]f32{90, 30, 150}) {
+			a := deg * math.PI / 180
+			dx, dy := r * math.cos(a), r * math.sin(a)
+			stroke_line(cx - dx, cy - dy, cx + dx, cy + dy, sw, col, true)
+		}
 	case .Info:
 		cx, cy := X(ox, s, sw, 8), X(oy, s, sw, 8)
 		stroke_ring(cx, cy, 6 * s, sw, col)

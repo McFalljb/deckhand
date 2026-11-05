@@ -1,12 +1,12 @@
 #!/bin/sh
-# Make a pi-desk release, on the release signer's Mac, in one command (docs/DEVELOPING.md,
+# Make a Deckhand release, on the release signer's Mac, in one command (docs/DEVELOPING.md,
 # "Releases"): checks, build (with CEF) and tests, the version in Info.plist, code signing
 # (optional Developer ID and notarization), the zip and its SHA-256, the updater's signature
 # (.sig) from the bundle just built, then a DRAFT GitHub Release with the three files, whose
 # .sig is downloaded again and verified against the local zip. Publish the draft on GitHub.
 #
 # Usage: scripts/release.sh --version X.Y.Z [--no-upload | --upload-only] [--key FILE]
-#                           [--repo OWNER/NAME] [--rotating-from OLDPUB]
+#                           [--repo OWNER/NAME [--allow-other-repo]] [--rotating-from OLDPUB]
 #   --version      the version; HEAD must be exactly the tag vX.Y.Z (git describe
 #                  --exact-match), already pushed to the release repository
 #   --no-upload    a dry run: everything into dist/, no GitHub calls at all
@@ -14,7 +14,11 @@
 #   --key FILE     the update key (default: $PI_DESK_UPDATE_KEY_FILE, else
 #                  ~/.config/pi-desk/update.key); a 600 file of yours in a private folder,
 #                  read only by build/update-sign
-#   --repo         the GitHub repository (default: $PI_DESK_RELEASE_REPO, else McFalljb/pi-desk)
+#   --repo         the GitHub repository (default: $PI_DESK_RELEASE_REPO, else UPDATE_REPO in
+#                  src/update_core.odin, the repository the app's updater reads)
+#   --allow-other-repo
+#                  release to a repository that is not UPDATE_REPO (a fork, a test): installed
+#                  copies never look there
 #   --rotating-from OLDPUB
 #                  the key-rotation bridge release only: this checkout's UPDATE_PUBLIC_KEY is the
 #                  NEW key, and the release is signed with the OLD key (--key OLDFILE, whose
@@ -31,14 +35,18 @@
 #   and APPLE_APP_PASSWORD (an app-specific password): notarized and stapled. Without them:
 #   signed ad hoc (as build.sh already does), not notarized; the notes say how to open it.
 #
-# Writes dist/pi-desk-<version>-macos-arm64.zip, its .sha256, its .sig and release-notes.md.
+# Writes dist/deckhand-<version>-macos-arm64.zip (holding Deckhand.app), its .sha256, its .sig and
+# release-notes.md.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM=""
+VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0
 KEY=${PI_DESK_UPDATE_KEY_FILE:-$HOME/.config/pi-desk/update.key}
-REPO=${PI_DESK_RELEASE_REPO:-McFalljb/pi-desk}
+# the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
+APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
+[ -n "$APP_REPO" ] || { echo "release: no UPDATE_REPO in src/update_core.odin" >&2; exit 1; }
+REPO=${PI_DESK_RELEASE_REPO:-$APP_REPO}
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION=${2:?--version needs a value}; shift 2 ;;
@@ -47,10 +55,15 @@ while [ $# -gt 0 ]; do
     --key) KEY=${2:?--key needs a file}; shift 2 ;;
     --repo) REPO=${2:?--repo needs OWNER/NAME}; shift 2 ;;
     --rotating-from) ROTATING_FROM=${2:?--rotating-from needs the old public key}; shift 2 ;;
-    -h|--help) sed -n '2,30p' "$0"; exit 0 ;;
+    --allow-other-repo) ALLOW_OTHER_REPO=1; shift ;;
+    -h|--help) sed -n '2,/^set -eu/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "release: unknown argument $1" >&2; exit 2 ;;
   esac
 done
+if [ "$REPO" != "$APP_REPO" ] && [ $ALLOW_OTHER_REPO = 0 ]; then
+  echo "release: $REPO (from --repo or PI_DESK_RELEASE_REPO) is not the repository the app updates from ($APP_REPO, UPDATE_REPO in src/update_core.odin): installed copies would never see this release. Pass --allow-other-repo if that is what you want" >&2
+  exit 1
+fi
 if [ $PACKAGE = 0 ] && [ $UPLOAD = 0 ]; then
   echo "release: --upload-only and --no-upload leave nothing to do" >&2; exit 2
 fi
@@ -60,7 +73,7 @@ fi
 
 # --- what is released: a clean tree at exactly the tag ----------------------------------------
 VERSION=${VERSION#v}
-case "$VERSION" in *-*|*+*) echo "release: $VERSION is a pre-release: pi-desk releases X.Y.Z only (the updater never offers pre-releases)" >&2; exit 1 ;; esac
+case "$VERSION" in *-*|*+*) echo "release: $VERSION is a pre-release: Deckhand releases X.Y.Z only (the updater never offers pre-releases)" >&2; exit 1 ;; esac
 if ! printf %s "$VERSION" | grep -Eq '^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$'; then
   echo "release: --version X.Y.Z is needed (got '$VERSION')" >&2
   exit 1
@@ -97,10 +110,18 @@ else
 fi
 
 DIST=dist
-NAME="pi-desk-$VERSION-macos-arm64"
+# the app, and the release files the updater looks for: read from its source, never typed here
+# (src/update_core.odin UPDATE_APP; src/updatesig/updatesig.odin ZIP_PREFIX and ZIP_SUFFIX)
+APP_NAME=$(sed -n 's/^UPDATE_APP :: "\(.*\)"$/\1/p' src/update_core.odin)
+ZIP_PREFIX=$(sed -n 's/^ZIP_PREFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)
+ZIP_SUFFIX=$(sed -n 's/^ZIP_SUFFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)
+case "$APP_NAME" in */*|"") echo "release: no usable UPDATE_APP in src/update_core.odin" >&2; exit 1 ;; *.app) ;; *) echo "release: UPDATE_APP in src/update_core.odin is not an .app" >&2; exit 1 ;; esac
+case "$ZIP_PREFIX" in */*|"") echo "release: no usable ZIP_PREFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; esac
+case "$ZIP_SUFFIX" in */*|"") echo "release: no usable ZIP_SUFFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; *.zip) ;; *) echo "release: ZIP_SUFFIX in src/updatesig/updatesig.odin does not end in .zip" >&2; exit 1 ;; esac
+NAME="$ZIP_PREFIX$VERSION${ZIP_SUFFIX%.zip}"
 NOTES="$DIST/release-notes.md"
 
-TMP=$(mktemp -d "${TMPDIR:-/tmp}/pi-desk-release.XXXXXX")
+TMP=$(mktemp -d "${TMPDIR:-/tmp}/deckhand-release.XXXXXX")
 KC=""
 OLD_KEYCHAINS=""
 cleanup() {
@@ -119,26 +140,29 @@ trap 'cleanup; exit 130' INT TERM
 if [ $PACKAGE = 1 ]; then
 # --- build and test ------------------------------------------------------------------
 ./build.sh test
-./build.sh # release build with CEF; bundle-app.sh lays out and ad-hoc signs build/pi-desk.app
-[ -x build/pi-desk.app/Contents/MacOS/pi-desk ] || { echo "release: no build/pi-desk.app (run ./build.sh)" >&2; exit 1; }
+./build.sh # release build with CEF; bundle-app.sh lays out and ad-hoc signs build/Deckhand.app
+BUILT=build/$APP_NAME
+EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)
+EXE=$BUILT/Contents/MacOS/$EXE_NAME
+[ -n "$EXE_NAME" ] && [ -x "$EXE" ] || { echo "release: no $BUILT with its executable (run ./build.sh; UPDATE_APP must be what build.sh makes)" >&2; exit 1; }
 # the app must trust the release key, and never the test key (a test build would trust the
 # public test key: -define:PI_DESK_UPDATE_TEST)
-LC_ALL=C grep -aqF "$APP_PUB" build/pi-desk.app/Contents/MacOS/pi-desk ||
-  { echo "release: build/pi-desk.app does not contain UPDATE_PUBLIC_KEY" >&2; exit 1; }
+LC_ALL=C grep -aqF "$APP_PUB" "$EXE" ||
+  { echo "release: $BUILT does not contain UPDATE_PUBLIC_KEY" >&2; exit 1; }
 TEST_PUB=$(sed -n 's/^.*UPDATE_TEST_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/update_key.odin)
-if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" build/pi-desk.app/Contents/MacOS/pi-desk; then
-  echo "release: build/pi-desk.app has the update TEST key in it (a test build?)" >&2
+if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
+  echo "release: $BUILT has the update TEST key in it (a test build?)" >&2
   exit 1
 fi
-[ -d "build/pi-desk.app/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
-  { echo "release: build/pi-desk.app has no CEF framework (a PI_DESK_NO_CEF build?)" >&2; exit 1; }
+[ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
+  { echo "release: $BUILT has no CEF framework (a PI_DESK_NO_CEF build?)" >&2; exit 1; }
 
 STAGE="$DIST/stage"
-APP="$STAGE/pi-desk.app"
+APP="$STAGE/$APP_NAME"
 FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
 rm -rf "$STAGE" "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" "$NOTES"
 mkdir -p "$STAGE"
-ditto build/pi-desk.app "$APP"
+ditto "$BUILT" "$APP"
 
 # --- version into every Info.plist ---------------------------------------------------
 PB=/usr/libexec/PlistBuddy
@@ -182,6 +206,7 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ]; then
       *) sign --entitlements scripts/entitlements/helper.plist "$h" ;;
     esac
   done
+  sign "$APP/Contents/MacOS/pi-desk-cli" # Claude tabs' CLI (src/claude.odin)
   sign --entitlements scripts/entitlements/app.plist "$APP"
   SIGNED=developer-id
 else
@@ -228,9 +253,9 @@ ditto -c -k --keepParent "$APP" "$DIST/$NAME.zip"
 
 # --- release notes -------------------------------------------------------------------
 {
-  echo "pi-desk $VERSION for macOS 14 or later on Apple silicon (arm64)."
+  echo "Deckhand $VERSION for macOS 14 or later on Apple silicon (arm64)."
   echo
-  echo "pi-desk checks for new releases about once a day and asks before it updates itself;"
+  echo "Deckhand checks for new releases about once a day and asks before it updates itself;"
   echo "\`$NAME.zip.sig\` is the signature it checks. To install by hand, download"
   echo "\`$NAME.zip\` and check it against \`$NAME.zip.sha256\`:"
   echo
@@ -242,29 +267,29 @@ ditto -c -k --keepParent "$APP" "$DIST/$NAME.zip"
     echo "The app is signed with a Developer ID and notarized by Apple."
   else
     echo "**This app is not signed with an Apple Developer ID or notarized** (it is signed ad hoc),"
-    echo "so macOS refuses to open it the first time. After unzipping and moving \`pi-desk.app\` to"
+    echo "so macOS refuses to open it the first time. After unzipping and moving \`$APP_NAME\` to"
     echo "Applications, either right-click it and choose **Open** (macOS 14), or open it once and then"
     echo "click **Open Anyway** in System Settings › Privacy & Security (macOS 15 and later), or clear"
     echo "the quarantine flag:"
     echo
     echo '```sh'
-    echo "xattr -dr com.apple.quarantine /Applications/pi-desk.app"
+    echo "xattr -dr com.apple.quarantine /Applications/$APP_NAME"
     echo '```'
   fi
   echo
-  echo "pi-desk runs your own [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent);"
+  echo "Deckhand runs your own [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent);"
   echo "[pi-kit](https://github.com/McFalljb/pi-kit) is optional. Third-party licences are in"
-  echo "\`pi-desk.app/Contents/Resources/licenses/\`."
+  echo "\`$APP_NAME/Contents/Resources/licenses/\`."
 } > "$NOTES"
 
 # --- the update signature: from the bundle just built, never from anything downloaded -----
 # what the zip holds is what was zipped: unpack it, check it, take the CDHash from it
 mkdir "$TMP/check"
 ditto -x -k "$DIST/$NAME.zip" "$TMP/check"
-[ "$(ls -A "$TMP/check")" = pi-desk.app ] || { echo "release: the zip does not hold exactly pi-desk.app" >&2; exit 1; }
-codesign --verify --deep --strict "$TMP/check/pi-desk.app"
+[ "$(ls -A "$TMP/check")" = "$APP_NAME" ] || { echo "release: the zip does not hold exactly $APP_NAME" >&2; exit 1; }
+codesign --verify --deep --strict "$TMP/check/$APP_NAME"
 CDHASH=$(codesign -d -vvv "$APP" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
-CHECK_CDHASH=$(codesign -d -vvv "$TMP/check/pi-desk.app" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
+CHECK_CDHASH=$(codesign -d -vvv "$TMP/check/$APP_NAME" 2>&1 | sed -n 's/^CDHash=//p' | head -1)
 [ -n "$CDHASH" ] && [ "$CDHASH" = "$CHECK_CDHASH" ] ||
   { echo "release: the zipped app's CDHash ($CHECK_CDHASH) is not the built one's ($CDHASH)" >&2; exit 1; }
 build/update-sign sign "$KEY" "$VERSION" "$DIST/$NAME.zip" "$CDHASH" "$DIST/$NAME.zip.sig"
@@ -280,7 +305,7 @@ if [ $UPLOAD = 0 ]; then
   echo "release: --no-upload: stopping before GitHub (scripts/release.sh --version $VERSION --upload-only drafts it)"
   exit 0
 fi
-[ -n "$TMP" ] || TMP=$(mktemp -d "${TMPDIR:-/tmp}/pi-desk-release.XXXXXX")
+[ -n "$TMP" ] || TMP=$(mktemp -d "${TMPDIR:-/tmp}/deckhand-release.XXXXXX")
 for f in "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" "$NOTES"; do
   [ -s "$f" ] || { echo "release: $f missing (run without --upload-only first)" >&2; exit 1; }
 done
@@ -300,7 +325,7 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   gh release upload "$TAG" --repo "$REPO" --clobber "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig"
 else
   # --verify-tag: the tag must already be on GitHub (gh would otherwise make one)
-  gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "pi-desk $VERSION" \
+  gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "Deckhand $VERSION" \
     --notes-file "$NOTES" --generate-notes "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig"
 fi
 # the round trip: what GitHub serves is what was signed here

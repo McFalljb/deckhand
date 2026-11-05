@@ -6,8 +6,10 @@
 # the gear's toggles, narrow widths, light and dark, idle CPU.
 # Screenshots go to build/shots/bell/. Usage: tests/scripts/bell.sh [SCRIPT]
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 SCRIPT=${1:-tests/scripts/bell.txt}
 W="$ROOT/build/bell"
 rm -rf "$W"
@@ -23,7 +25,7 @@ for s in "aaaa-1|Import recipes from a CSV export" "bbbb-2|Which unit should the
 done
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
   PI_DESK_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-bell.py' \"\$@\"" \
-  build/pi-desk > "$W/run.log" 2>&1 || true
+  build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU|notify:" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "bell scene failed (log: $W/run.log)"

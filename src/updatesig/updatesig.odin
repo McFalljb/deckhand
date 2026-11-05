@@ -26,6 +26,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
+// the formats' names, kept from pi-desk (the rename to Deckhand changed no format)
 MANIFEST_HEAD :: "pi-desk update v2"
 SIG_FILE_HEAD :: "pi-desk-update-sig v2"
 SIG_SIZE :: ed25519.SIGNATURE_SIZE // 64
@@ -70,9 +71,13 @@ sig_file_parse :: proc(text: string) -> (cdhash, sig_b64: string, ok: bool) {
 	return cdhash, sig_b64, true
 }
 
+// A release's zip: ZIP_PREFIX + X.Y.Z + ZIP_SUFFIX (scripts/release.sh reads both from here)
+ZIP_PREFIX :: "deckhand-"
+ZIP_SUFFIX :: "-macos-arm64.zip"
+
 // The release asset's name for a version.
 zip_name :: proc(version: string, allocator := context.allocator) -> string {
-	return fmt.aprintf("pi-desk-%s-macos-arm64.zip", version, allocator = allocator)
+	return fmt.aprintf("%s%s%s", ZIP_PREFIX, version, ZIP_SUFFIX, allocator = allocator)
 }
 
 // Base64 of exactly n bytes (surrounding whitespace ignored), or ok = false.

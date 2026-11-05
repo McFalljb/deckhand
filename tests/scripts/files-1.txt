@@ -7,7 +7,7 @@ clickid sess 0
 waitfor ARGS: --session 15000
 # ---- the switch: Sessions | Files (button), the tree of the session's project
 hover lefttab 1
-wait 600
+eventually
 assert_tip Files ⌘⇧E
 clickid lefttab 1
 wait 300
@@ -17,11 +17,11 @@ wait 500
 shot files/tree
 # ---- expand a folder with a click; open a file: a preview tab (italic), the next replaces it
 clickid frow 2
-wait 200
+eventually
 assert_files src/\n  app.c\n  util.c\n
 assert_state files.expanded.0.dirs.0 src
 clickid frow 3
-wait 300
+eventually
 assert_state open_sessions.0.tabs.1.title app.c
 assert_state open_sessions.0.tabs.1.preview true
 clickid frow 4
@@ -45,21 +45,21 @@ assert_state open_sessions.0.tabs.2.preview <missing>
 assert_state focus.id files
 # ---- new file from the header's button, in the selected file's folder (src)
 hover filestool 0
-wait 600
+eventually
 assert_tip New file…
 clickid filestool 0
-wait 200
+eventually
 assert_state focus.id files_name
 type notes.md
 shot files/new-file
 key enter
-wait 300
+eventually
 assert_files   notes.md\n
 assert_state open_sessions.0.tabs.3.title notes.md
 # ---- rename inline (F2): the name before the extension is selected
 assert_state focus.id files
 key f2
-wait 200
+eventually
 assert_state focus.id files_name
 assert_selection notes
 type todo
@@ -102,7 +102,7 @@ assert_files src/\n
 # ---- drag main.c onto the terminal: its quoted path is pasted
 assert_files main.c\n
 dragid frow 8 terminal
-wait 500
+eventually
 assert_screen /proj/main.c'
 key backspace
 # ---- the active editor file is revealed: collapse all, then switch to app.c's tab
@@ -110,17 +110,17 @@ clickid filestool 2
 wait 200
 assert_not_files   app.c
 clickid tab 2
-wait 400
+eventually
 assert_files src/\n  app.c\n
 shot files/reveal
 # ---- filter: fuzzy over the project's paths
 clickid files_filter_box
 type utl
-wait 300
+eventually
 assert_files src/util.c\n
 shot files/filter
 key escape
-wait 200
+eventually
 assert_state files.filter 
 # ---- git letters and colours, light and dark (screenshots)
 command {"type":"set_appearance","mode":"light"}
@@ -131,7 +131,7 @@ wait 300
 shot files/git-dark
 # ---- the 10k-file folder: listed once, then only visible rows laid out
 clickid frow 0
-wait 500
+eventually
 assert_files   f9999.txt\n
 files_time 120 240
 files_time 60 -480

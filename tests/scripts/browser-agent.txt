@@ -202,7 +202,7 @@ annot_move 50 30
 wait 400
 annot_assert hover yes
 web_click 50 30
-wait 400
+eventually
 assert_state focus.id comment_new
 type After the stop
 key enter

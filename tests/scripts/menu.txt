@@ -26,7 +26,7 @@ assert_menu toggle_left unchecked
 menu toggle_left
 assert_state layout.left_open true
 menu show_files
-wait 200
+eventually
 assert_state layout.left_tab files
 assert_menu show_files checked
 assert_menu show_sessions unchecked
@@ -42,7 +42,7 @@ assert_menu toggle_right unchecked
 menu toggle_right
 assert_menu toggle_right checked
 menu appearance_light
-wait 200
+eventually
 assert_window light
 assert_menu appearance_light checked
 assert_menu appearance_system unchecked
@@ -101,11 +101,11 @@ key escape
 wait 200
 # ---- text size: View's Bigger, Smaller, Actual, and their keys
 menu text_bigger
-wait 200
+eventually
 assert_state settings.terminal_text_size 15
 assert_menu text_reset enabled
 menu_key 24 = cmd
-wait 200
+eventually
 assert_state settings.terminal_text_size 16
 atlas
 shot menu/text-16
@@ -131,7 +131,7 @@ assert_menu save_file disabled
 menu redo
 assert_menu save_file enabled
 menu_key 1 s cmd menu
-wait 300
+eventually
 assert_menu save_file disabled
 menu find_in_file
 assert_state focus.id editor_find
@@ -144,7 +144,11 @@ assert_state open_sessions.# 1
 assert_state open_sessions.0.tabs.# 2
 # ---- Window: sessions in order
 menu new_chat
-wait 500
+eventually
+# pi and Claude Code installed: the harness picker (harness.odin); pi
+assert_menurows pi|Claude Code
+key 1
+eventually
 assert_state open_sessions.# 2
 assert_state open_sessions.1.id $session
 assert_menu next_session enabled
@@ -156,7 +160,7 @@ menu_key 126 up cmd alt
 assert_state open_sessions.0.id $session
 # ---- Help: the guide in a Markdown tab; the shortcuts sheet grouped like the menus
 menu user_guide
-wait 300
+eventually
 assert_state open_sessions.0.tabs.2.title GUIDE.md
 assert_state open_sessions.0.tabs.2.kind markdown
 # Atlas's copy: read-only (typing and ⌘S change nothing)
@@ -164,7 +168,7 @@ type zz
 assert_menu save_file disabled
 assert_not_md zz
 menu shortcuts
-wait 300
+eventually
 assert_state focus.id shortcuts
 assert_drawn New session in project
 assert_drawn Settings…
@@ -173,15 +177,26 @@ key escape
 wait 200
 # ---- Settings… shows the Settings tab; Quit asks while sessions run
 menu settings
-wait 200
+eventually
 assert_state layout.left_tab settings
 assert_menu settings_tab checked
 menu show_sessions
 menu quit
-wait 200
+eventually
 assert_state pending_confirmations.# 1
 clickid confirm_no
-wait 200
+eventually
 assert_state pending_confirmations.# 0
+# ---- ⌥⌘T is Claude's (a Claude tab), not ⌘T's shell; ⌥⌘N is gone (⌘N's picker offers Claude Code)
+# (Claude Code: the fake HOME's stand-in, never run; PI_DESK_CLAUDE_CMD echoes and sleeps)
+menu_key 17 t cmd alt menu
+waitstate 5000 open_sessions.0.tabs.3.kind claude
+# ⌥⌘N is no shortcut any more; ⌘N's picker gives a Claude chat (2)
+menu_key 45 n cmd alt
+menu_key 45 n cmd menu
+wait 300
+key 2
+waitstate 5000 open_sessions.2.agent claude
+assert_state open_sessions.# 3
 menubar_dump shots/menu/menubar-end
 quit

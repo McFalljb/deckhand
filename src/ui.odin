@@ -21,6 +21,7 @@ import sgl "../vendor/sokol-odin/sokol/gl"
 
 // Renaming the selected project (its row in the left column).
 rename_field: Text_Field
+rename_session: string // the Claude session whose row the rename field takes (focus widget rename_session; ui_sidebar.odin)
 
 ui_memory: []u8
 
@@ -199,6 +200,18 @@ Row_Status :: enum {
 	Question, // pi's last answer asked something (softer)
 	Error, // pi's last run ended in an error
 	Exited, // pi exited
+	Unseen, // finished while you were not looking (or marked unread): agent_status.odin
+}
+
+// A tab's dot in the tab strip: its status (the bridge, OSC 7501 or unseen:
+// agent_status.odin), else recent output or an agent acting in a browser tab.
+tab_strip_status :: proc(tab: Tab, active: bool) -> Row_Status {
+	view := tab_status_view(tab)
+	_, is_pi := tab.kind.(Pi_Tab)
+	if view.dot != .None || is_pi do return view.dot // a status (done or idle: no dot) leaves room for recent output
+	if tab.status == .Running && tab_busy(tab.id) do return .Running // recent output
+	if !active && browser_act_recent(tab.id) do return .Running // an agent acts in this tab behind (browser_act.odin)
+	return .None
 }
 
 tab_busy :: proc(tab_id: u64) -> bool {
@@ -218,12 +231,16 @@ pi_tab_status :: proc(tab: Tab) -> Row_Status {
 	return .None
 }
 
+// A session's dot: the strongest of its open tabs (agent_status.odin).
 session_status :: proc(pi_session_id: string) -> Row_Status {
+	if pi_session_id == "" do return .None
 	for &s in state.open_sessions {
 		if s.pi_session_id != pi_session_id do continue
-		if pt := session_pi_tab(&s); pt != nil do return pi_tab_status(pt^)
-		return .None
+		st, _ := session_row_status(&s)
+		return st
 	}
+	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
+	if id := claude_open_tab(pi_session_id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do return tab_status_view(tab^).dot
 	return .None
 }
 
@@ -236,6 +253,7 @@ status_color :: proc(st: Row_Status) -> Rgba {
 	case .Question: return with_alpha(th.waiting, QUESTION_ALPHA)
 	case .Error:    return th.error
 	case .Exited:   return with_alpha(th.text_muted, EXITED_ALPHA)
+	case .Unseen:   return th.done
 	}
 	return {}
 }
@@ -379,8 +397,9 @@ field_text :: proc(id: clay.ElementId, f: ^Text_Field, placeholder: string) {
 // The focused text field, its text element and its box (for clicks).
 focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 	if job_sheet_open() do return &job_sheet.fields[job_sheet.focus], clay.ID("jstext"), clay.ID("jsfield", u32(job_sheet.focus))
+	if setup_open() && setup_ui.edit != SETUP_EDIT_NONE do return &setup_ui.field, clay.ID("setup_field_text"), clay.ID("setup_field_box") // the setup sheet's accounts step
 	switch state.focus_widget {
-	case "rename_project": return &rename_field, clay.ID("rename_text"), clay.ID("rename_field")
+	case "rename_project", "rename_session": return &rename_field, clay.ID("rename_text"), clay.ID("rename_field")
 	case "palette":        return &palette.field, clay.ID("palette_text"), clay.ID("palette_input")
 	case "sidebar_filter": return &filter_field, clay.ID("filter_text"), clay.ID("filter_box")
 	case "files_filter":   return &files_filter_field, clay.ID("files_filter_text"), clay.ID("files_filter_box")
@@ -479,8 +498,11 @@ centre :: proc(cs: ^Open_Session) {
 		empty := active_term() == nil && tab_editor() == nil && tab_browser() == nil && tab_app() == nil
 		update_bar() // a pi-desk update: available, downloading, ready (ui_update.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
+		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
+		claude_bars() // a Claude tab's held messages (ui_claude.odin)
 		app_bar_layout() // an app tab that exited or stopped drawing (app_tab.odin)
+		dead_tab_bar_layout() // a pi tab whose process exited: how, Restart (dead_tab.odin)
 		browser_bar_layout() // a browser tab: Back, Forward, Reload / Stop, the URL field, Annotate (browser_nav.odin)
 		changes_bars_layout() // a Changes tab: branch, actions, commit (ui_changes.odin)
 		editor_bars_layout() // find, replace, go to line, changed on disk (editor_view.odin)
@@ -606,10 +628,7 @@ tab_strip :: proc(cs: ^Open_Session, w: f32) {
 				hovered := ui_hover == Hit(Hit_Tab(tab.id)) || close_hover
 				bg, em := overlay(id, active, hovered)
 				ic, label, extra := tab_label(cs, tab)
-				st := Row_Status.None
-				if _, is_pi := tab.kind.(Pi_Tab); is_pi do st = pi_tab_status(tab)
-				else if tab.status == .Running && tab_busy(tab.id) do st = .Running
-				else if !active && browser_act_recent(tab.id) do st = .Running // an agent acts in this tab behind (browser_act.odin)
+				st := tab_strip_status(tab, active)
 				show_dot := st != .None && st != .Exited
 				dirty := editor_dirty(editor_of(tab.id))
 				font: u16 = WEIGHT_REGULAR
@@ -672,8 +691,32 @@ tab_strip :: proc(cs: ^Open_Session, w: f32) {
 // note (exited, not started).
 tab_label :: proc(cs: ^Open_Session, tab: Tab) -> (ic: Icon, label, extra: string) {
 	label = tab.title
-	if _, is_pi := tab.kind.(Pi_Tab); is_pi && cs != nil && !cs.home do ic, label = session_place(cs)
+	if _, is_pi := tab.kind.(Pi_Tab); is_pi && cs != nil && !cs.home {
+		_, label = session_place(cs)
+		ic = harness_icon(.Pi) // which agent (sidebar.odin: Harness); the place is in the label
+	}
+	ct, is_claude := tab.kind.(Claude_Tab)
+	tag := ""
+	if is_claude {
+		ic = harness_icon(.Claude)
+		// several accounts: which one (claude_accounts.odin)
+		tag = claude_account_tag(ct.account)
+		if tag != "" do label = fmt.tprintf("%s · %s", tab.title, tag)
+	}
+	// a Claude-only session's main tab: Claude and where it runs
+	if cs != nil && cs.agent == .Claude && len(cs.tabs) > 0 && cs.tabs[0].id == tab.id {
+		_, place := session_place(cs)
+		label = tag != "" ? fmt.tprintf("Claude · %s · %s", tag, place) : fmt.tprintf("Claude · %s", place)
+	}
+	if is_claude {
+		// what the process started with (ct.readonly); a tab not started yet: what it will start as
+		if tab.status == .Not_Started {
+			if claude_tab_readonly(cs, &ct) do extra = "read-only"
+		} else if ct.readonly do extra = "read-only"
+		else if claude_tab_readonly(cs, &ct) do extra = "read-only after restart"
+	}
 	if tab.status == .Exited do extra = "exited"
+	if is_claude && ct.guard_stopped do extra = "read-only guard not confirmed: stopped"
 	if tab.status == .Not_Started do extra = cs != nil && cs.missing ? "gone" : "not started"
 	return
 }
@@ -733,6 +776,7 @@ agent_button :: proc() {
 	th := theme()
 	id := clay.ID("homebutton")
 	ch := &state.agent
+	if !atlas_offered() do return // Atlas runs on pi: without it, no button (harness.odin; ⌘J says why)
 	needs := !state.home_open && agent_needs_user()
 	bg, em := overlay(id, state.home_open, ui_hover == Hit(Hit_Home{}))
 	if needs do bg = cc(mix(to_rgba(bg), with_alpha(th.waiting, 1), 0.14))
@@ -777,7 +821,9 @@ right_column :: proc(cs: ^Open_Session) {
 	if divider.active && divider.which == 1 do edge = th.accent
 	else if d, ok := ui_hover.(Hit_Divider); ok && int(d) == 1 do edge = mix(th.border, th.accent, 0.6)
 	inner_w := col_w - px(2 * SP_2) // inside the column's padding
-	pt := session_pi_tab(cs)
+	pt := right_panels_tab(cs) // the active Claude tab's, else pi's (claude_panels.odin)
+	from_claude := false
+	if pt != nil do _, from_claude = pt.kind.(Claude_Tab)
 	if clay.UI(clay.ID("right"))({
 		layout = {
 			sizing = {clay.SizingFixed(col_w), clay.SizingGrow()},
@@ -792,7 +838,8 @@ right_column :: proc(cs: ^Open_Session) {
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
 			if pt == nil || len(pt.panels) == 0 {
-				empty_state("Nothing running", "Subagents, shells and todos from pi show here", inner_w)
+				if from_claude do empty_state("Nothing running", "Todos and subagents from Claude", inner_w)
+				else do empty_state("Nothing running", RIGHT_EMPTY_HINT, inner_w)
 			} else {
 				for &p, i in pt.panels {
 					if i > 0 do gap(SP_2)
@@ -924,8 +971,11 @@ Hit :: union {
 	Hit_Editor_Tool, // the editor's toolbar (editor_view.odin)
 	Hit_Files, // the left column's tab switch and the Files tab (ui_files.odin)
 	Hit_Reload, // the hot-reload bars' buttons (ui_reload.odin)
+	Hit_Claude_Reload, // Claude Code's (ui_claude_reload.odin)
+	Hit_Dead_Tab, // the bar over a pi tab whose process exited (dead_tab.odin)
 	Hit_Update, // the update bar's buttons (ui_update.odin)
 	Hit_Comments, // the pending comments' strip, list and close prompt (ui_comments.odin)
+	Hit_Claude, // a Claude tab's held messages bar (ui_claude.odin)
 	Hit_Bell, // the bell's popover (ui_bell.odin)
 	Hit_Jobs, // the Jobs tab (ui_jobs.odin)
 	Hit_Changes, // the Changes tab and the top bar's "±" (ui_changes.odin)
@@ -992,14 +1042,17 @@ ui_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("confirm_no")) do return Hit_Cancel(token)
 	}
 	if h := comments_hit(); h != nil do return h
+	if h := claude_hit(); h != nil do return h
 	if h := update_hit(); h != nil do return h
 	if h := reload_hit(); h != nil do return h
+	if h := claude_reload_hit(); h != nil do return h
+	if h := dead_tab_hit(); h != nil do return h
 	if h := changes_hit(); h != nil do return h
 	if h := editor_tool_hit(); h != nil do return h
 	if h := files_hit(); h != nil do return h
 	if h := jobs_hit(); h != nil do return h
 	if h := sidebar_hit(); h != nil do return h
-	if pt := session_pi_tab(cur()); pt != nil && state.layout.right_open {
+	if pt := right_panels_tab(cur()); pt != nil && state.layout.right_open {
 		for p, i in pt.panels do if panel_has_body(p) && clay.PointerOver(clay.ID("panelhead", u32(i))) do return Hit_Panel_Head(p.id)
 	}
 	if cs := cur(); cs != nil {
@@ -1133,3 +1186,6 @@ ui_draw :: proc(cmds: clay.ClayArray(clay.RenderCommand), from, to: i32) {
 		}
 	}
 }
+
+// The right column's empty state.
+RIGHT_EMPTY_HINT :: "Subagents, shells and todos show here"

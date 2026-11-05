@@ -17,9 +17,10 @@ package main
 // Log). Exit code 75 restarts by itself (three times in 30 s at most).
 // Closing sends tab.quit, then SIGTERM to the group after 2 s, SIGKILL after 5 s.
 //
-// Left out (later steps): .pi-desk/apps.json beyond the palette's list,
-// saving app tabs in the workspace, the activity strip for agent input, pi
-// tabs driving their own session's app tabs. Clicking an inspected box opens
+// .pi-desk/apps.json: the palette's list, and what a session's own agents (pi
+// and Claude tabs) may open, by name, in their own session (new_app_tab).
+// Left out (later steps): saving app tabs in the workspace, the activity strip
+// for agent input. Clicking an inspected box opens
 // a comment on it for the session's pi (comments.odin, ui_comments.odin).
 
 import "base:runtime"
@@ -68,7 +69,8 @@ App_Tab :: struct {
 
 // Commands (rows in command_table.odin).
 New_App_Tab :: struct {
-	session: u64, // 0 = the one on screen
+	session: u64, // 0 = the one on screen (a pi or Claude tab: its own)
+	name:    string, // an app the session's .pi-desk/apps.json declares (a pi or Claude tab: only this), or
 	argv:    []string, // what to run (argv[0] on PATH), or
 	command: string, // a command line for /bin/sh -c
 	cwd:     string, // inside the session's folder ("" = it)
@@ -76,6 +78,16 @@ New_App_Tab :: struct {
 }
 App_Restart :: struct {
 	tab_id: u64,
+}
+// Close an app tab: close_tab for an app tab, which a session's own agents may send too.
+App_Close :: struct {
+	tab_id:   u64,
+	confirm:  string, // the user's close rule may ask (close_needs_confirm)
+	comments: Comments_Choice, // pending comments made on it: send or drop (as close_tab)
+}
+// The apps a session's .pi-desk/apps.json declares (what new_app_tab's name opens).
+App_Declared :: struct {
+	session: u64, // 0 = the caller's own (the user and scripts: the one on screen)
 }
 App_Input :: struct {
 	tab_id: u64,
@@ -186,6 +198,48 @@ App_Proc :: struct {
 	hx, hy:      f32, // the pointer while inspecting (logical tab px)
 	hin:         bool, // it is over the tab
 	shots:       u64, // screenshots taken (their file names)
+	session:     u64, // the session it was opened in
+	by_agent:    bool, // a pi or Claude tab opened it (APP_AGENT_MAX)
+	// a hidden tab draws on demand: its first frame, and one per app_screenshot (app_frames_tick)
+	framed:      bool, // this process gave a frame pi-desk took
+	shot_waits:  [dynamic]Shot_Wait,
+}
+
+// An app_screenshot of a hidden app tab, waiting for a frame newer than seq.
+Shot_Wait :: struct {
+	request_id: u64,
+	rect:       App_Rect,
+	has_rect:   bool,
+	seq:        u64,
+	deadline:   time.Tick,
+}
+
+// How long a hidden tab's screenshot waits for a fresh frame (then: the last one, or no_frame).
+APP_PEEK_TIMEOUT :: 3 * time.Second
+
+// App tabs a session's agents may have running at once (also while closing).
+APP_AGENT_MAX :: 8
+
+// An agent's app tab title: one line of at most this many characters.
+APP_TITLE_MAX :: 80
+// apps.json is read only up to this size.
+APP_JSON_MAX :: 256 * 1024
+// App tabs a session's agents opened that still run, closing ones included.
+app_agent_running :: proc(session: u64) -> int {
+	n := 0
+	for _, a in apps do if a.by_agent && a.session == session && a.pid != 0 do n += 1
+	for a in dying do if a.by_agent && a.session == session && a.pid != 0 do n += 1
+	return n
+}
+
+// Whether the caller is a pi tab started read-only (chat_env: a chat under Chats: read-only);
+// what it was started with, not today's setting.
+pi_chat_readonly :: proc(caller: Caller) -> bool {
+	if caller.kind != .Panel || caller.claude do return false
+	_, tab, _ := find_tab(caller.tab_id)
+	if tab == nil do return false
+	pt, is := tab.kind.(Pi_Tab)
+	return is && pt.readonly
 }
 
 // An app tab's output: the last APP_LOG_LINES lines and the log file.
@@ -221,12 +275,10 @@ Reader_Arg :: struct {
 
 apps: map[u64]^App_Proc
 app_sampler: sg.Sampler
-@(private = "file")
 dying: [dynamic]^App_Proc // closed tabs whose process is still going
 @(private = "file")
 reap: [dynamic]posix.pid_t // SIGKILLed: waited for with WNOHANG, never blocking the frame loop
-@(private = "file")
-frames_ok: int // 0 = not tried, 1 = serving, -1 = failed
+frames_ok: int // 0 = not tried, 1 = serving, -1 = failed (unit tests set it: no frame server)
 
 // pi-desk's own requests to apps (wire id "a<N>") and agents' app_call.
 App_Pending :: struct {
@@ -284,19 +336,59 @@ app_tab_of :: proc(id: u64) -> (^Open_Session, ^Tab, ^App_Tab) {
 // ---- commands ----
 
 app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
+	// a pi or Claude tab (panel) reaches only its own session's app tabs, as its browser tabs, and
+	// opens apps only there (new_app_tab, app_declared: app_session)
+	if caller.kind == .Panel {
+		tab_id: u64
+		#partial switch c in cmd {
+		case New_App_Tab, App_Declared:
+		case App_Restart:    tab_id = c.tab_id
+		case App_Close:      tab_id = c.tab_id
+		case App_Input:      tab_id = c.tab_id
+		case App_Events:     tab_id = c.tab_id
+		case App_Call:       tab_id = c.tab_id
+		case App_Screenshot: tab_id = c.tab_id
+		case:                return fail("not allowed for this caller"), false
+		}
+		if tab_id != 0 {
+			ts, _, _ := find_tab(tab_id)
+			own := caller_session(caller)
+			if ts == nil || own == nil || ts != own do return fail("a pi or Claude tab reaches only its own session's app tabs"), false
+		}
+		// a read-only chat's pi (Chats: read-only, as chat_env starts it) reads apps but runs none
+		#partial switch _ in cmd {
+		case New_App_Tab, App_Restart, App_Close:
+			if !caller.claude && pi_chat_readonly(caller) do return fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), false
+		}
+	}
 	#partial switch c in cmd {
 	case New_App_Tab:
-		s := c.session != 0 ? find_session(c.session) : caller_session(caller)
-		if s != nil && s.home && c.session == 0 do s = cur()
-		if s == nil do return fail("no open session to open the app in"), false
+		s, serr := app_session(caller, c.session)
+		if s == nil do return fail(serr), false
 		if s.home do return fail("Home has only its pi tab"), false
+		agent := caller.kind == .Panel
+		by_agent := agent // behind the view, counted against APP_AGENT_MAX, its title cleaned
 		argv: []string
-		if len(c.argv) > 0 do argv = c.argv
+		cwd_arg, title := c.cwd, c.title
+		if c.name != "" {
+			// what the project declares, as the palette's "New app tab…" runs it
+			if len(c.argv) > 0 || c.command != "" do return fail("name, or argv or command: not both"), false
+			if agent && c.cwd != "" do return fail("cwd comes from .pi-desk/apps.json for a pi or Claude tab"), false
+			e, found := app_entry(s.cwd, c.name)
+			if !found do return fail(app_not_declared(s.cwd, c.name)), false
+			argv = e.argv
+			if cwd_arg == "" do cwd_arg = e.cwd
+			if title == "" do title = e.name
+		} else if agent {
+			// a session's own agent runs only what its project declares (apps.json: the agent's own
+			// authority, as its shell; docs/ENGINE-BRIDGE.md, trust model)
+			return fail("a pi or Claude tab opens only the apps its project declares in .pi-desk/apps.json, by name (app_declared lists them)"), false
+		} else if len(c.argv) > 0 do argv = c.argv
 		else if strings.trim_space(c.command) != "" do argv = []string{"/bin/sh", "-c", c.command}
 		else do return fail("argv or command is needed"), false
 		cwd := s.cwd
-		if c.cwd != "" {
-			p := c.cwd
+		if cwd_arg != "" {
+			p := cwd_arg
 			if !filepath.is_abs(p) do p, _ = filepath.join({s.cwd, p}, context.temp_allocator)
 			p, _ = filepath.clean(p, context.temp_allocator)
 			base := fs_real(s.cwd)
@@ -305,7 +397,6 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 			if !os.is_dir(rp) do return fail("cwd is not a folder"), false
 			cwd = rp
 		}
-		title := c.title
 		if title == "" {
 			// the program's name (a command line's first word)
 			prog := argv[0]
@@ -315,18 +406,40 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 			}
 			title = filepath.base(prog)
 		}
+		if by_agent {
+			// the agent's text (its title, or an apps.json name it may have written) in the chrome
+			title = strings.trim_space(one_line(title, context.temp_allocator))
+			if n := strings.rune_count(title); n > APP_TITLE_MAX {
+				i, k := 0, 0
+				for _, j in title {
+					if k == APP_TITLE_MAX {
+						i = j
+						break
+					}
+					k += 1
+				}
+				title = title[:i]
+			}
+			if title == "" do title = "app"
+			if running := app_agent_running(s.id); running >= APP_AGENT_MAX do return fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", running)), false
+		}
 		owned := make([]string, len(argv))
 		for a, i in argv do owned[i] = strings.clone(a)
 		tab := Tab{id = new_id(), kind = App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
 		append(&s.tabs, tab)
-		s.active_tab = tab.id
-		focus_session(s.id)
+		if !by_agent {
+			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
+			// the user's, a script's and Home's come to the front
+			s.active_tab = tab.id
+			focus_session(s.id, caller)
+		}
 		a := new(App_Proc)
 		a.tab_id = tab.id
 		a.title = strings.clone(title)
 		a.sent_visible = -1
 		a.hover = -1
 		a.ring.shown_slot = -1
+		a.session, a.by_agent = s.id, by_agent
 		apps[tab.id] = a
 		if !app_spawn(a, owned, cwd) {
 			_, t, at := app_tab_of(tab.id)
@@ -341,6 +454,10 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		if tab == nil do return fail("no such app tab"), false
 		a := app_of(c.tab_id)
 		if a == nil do return fail("no such app tab"), false
+		// an agent starting an exited app again: one more running against its session's cap
+		if caller.kind == .Panel && a.by_agent && a.pid == 0 && app_agent_running(a.session) >= APP_AGENT_MAX {
+			return fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", app_agent_running(a.session))), false
+		}
 		if a.pid != 0 {
 			// a hung app: its group goes first; its ring with it (the last frame stays)
 			posix.killpg(a.pid, .SIGKILL)
@@ -352,6 +469,33 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		at.app_status = ok ? .Starting : .Exited
 		tab.status = ok ? .Running : .Exited
 		return {ok = ok, error = ok ? "" : "could not start the app"}, true
+	case App_Close:
+		// close_tab's close (its confirmation rule, comments, tab.quit then SIGTERM), for app tabs only
+		if _, tab, _ := app_tab_of(c.tab_id); tab == nil do return fail("no such app tab"), false
+		return close_tab_apply(Close_Tab{tab_id = c.tab_id, confirm = c.confirm, comments = c.comments}, caller, request_id)
+	case App_Declared:
+		s, serr := app_session(caller, c.session)
+		if s == nil do return fail(serr), false
+		b := strings.builder_make(context.temp_allocator)
+		fmt.sbprintf(&b, `{{"session":%d,"apps":[`, s.id)
+		for e, i in app_entries(s.cwd) {
+			if i > 0 do strings.write_byte(&b, ',')
+			strings.write_string(&b, `{"name":`)
+			json_quote(&b, e.name)
+			strings.write_string(&b, `,"argv":[`)
+			for x, j in e.argv {
+				if j > 0 do strings.write_byte(&b, ',')
+				json_quote(&b, x)
+			}
+			strings.write_byte(&b, ']')
+			if e.cwd != "" {
+				strings.write_string(&b, `,"cwd":`)
+				json_quote(&b, e.cwd)
+			}
+			strings.write_byte(&b, '}')
+		}
+		strings.write_string(&b, "]}")
+		return {ok = true, data = strings.to_string(b)}, false
 	case App_Input:
 		_, tab, _ := app_tab_of(c.tab_id)
 		if tab == nil do return fail("no such app tab"), false
@@ -449,7 +593,7 @@ app_call_check :: proc(method, params: string) -> (error, code: string) {
 		if i == 0 && !letter do return "method must start with a letter", "bad_args"
 		if !letter && !(ch >= '0' && ch <= '9') && !strings.contains_rune("_.:/-", rune(ch)) do return "method may have letters, digits and _ . : / - only", "bad_args"
 	}
-	for r in APP_RESERVED do if strings.equal_fold(method, r) do return fmt.tprintf("%s is pi-desk's own, not passed to the app", method), "reserved"
+	for r in APP_RESERVED do if strings.equal_fold(method, r) do return fmt.tprintf("%s is Deckhand's own, not passed to the app", method), "reserved"
 	if len(params) > APP_PARAMS_MAX do return fmt.tprintf("params are over %d KB", APP_PARAMS_MAX / 1024), "bad_args"
 	// sent verbatim: a raw CR or LF would end the app's line early (see app_line_ok)
 	if strings.contains_any(params, "\r\n") do return "params cannot contain a raw line break (CR or LF)", "bad_args"
@@ -470,7 +614,7 @@ app_input_event_check :: proc(ev: string) -> string {
 	obj, is := v.(json.Object)
 	if err != nil || !is do return "each event must be a JSON object"
 	if _, has := obj["event"].(json.String); !has do return "each event needs \"event\""
-	for k in ([]string{"type", "v", "id", "source"}) do if k in obj do return fmt.tprintf("an event cannot set %q (pi-desk's envelope)", k)
+	for k in ([]string{"type", "v", "id", "source"}) do if k in obj do return fmt.tprintf("an event cannot set %q (Deckhand's envelope)", k)
 	for k in obj do if strings.contains_rune(k, 0) do return "an event's keys cannot contain NUL"
 	return ""
 }
@@ -591,7 +735,8 @@ app_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Comma
 		return out
 	}
 	#partial switch c in cmd {
-	case New_App_Tab:   return New_App_Tab{session = c.session, argv = ss(c.argv, allocator), command = s(c.command, allocator), cwd = s(c.cwd, allocator), title = s(c.title, allocator)}
+	case New_App_Tab:   return New_App_Tab{session = c.session, name = s(c.name, allocator), argv = ss(c.argv, allocator), command = s(c.command, allocator), cwd = s(c.cwd, allocator), title = s(c.title, allocator)}
+	case App_Close:     return App_Close{tab_id = c.tab_id, confirm = s(c.confirm, allocator), comments = c.comments}
 	case App_Input:     return App_Input{tab_id = c.tab_id, events = ss(c.events, allocator)}
 	case App_Events:    return App_Events{tab_id = c.tab_id, topic = s(c.topic, allocator), since = c.since, limit = c.limit}
 	case App_Call:      return App_Call{tab_id = c.tab_id, method = s(c.method, allocator), params = s(c.params, allocator), timeout_ms = c.timeout_ms}
@@ -608,9 +753,11 @@ app_command_free :: proc(cmd: Command, allocator := context.allocator) {
 	#partial switch c in cmd {
 	case New_App_Tab:
 		ss(c.argv, allocator)
+		delete(c.name, allocator)
 		delete(c.command, allocator)
 		delete(c.cwd, allocator)
 		delete(c.title, allocator)
+	case App_Close:  delete(c.confirm, allocator)
 	case App_Input:  ss(c.events, allocator)
 	case App_Events: delete(c.topic, allocator)
 	case App_Call:
@@ -651,7 +798,7 @@ app_shots_dir :: proc(allocator := context.allocator) -> string {
 // socket, a fresh single-use `app` token for this tab and PI_DESK_APP=1.
 @(private = "file")
 app_env :: proc(tab_id: u64) -> []string {
-	env, _ := os.environ(context.temp_allocator)
+	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
 	for e in env do if !strings.has_prefix(e, "PI_DESK_") && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
 	append(&out, ..socket_child_env({kind = .App, tab_id = tab_id}))
@@ -668,6 +815,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 		app_shots_prune(app_shots_dir(context.temp_allocator), 24 * time.Hour) // the first app tab of this run
 	}
 	a.connected, a.stalled, a.sock_seen, a.ping_answered = false, false, false, false
+	a.framed = false
 	delete(a.ping_wire)
 	a.ping_wire = ""
 	a.sent_visible = -1
@@ -691,7 +839,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 		a.out.refs = 1
 		a.out.log_fd = posix.open(strings.clone_to_cstring(a.log_path, context.temp_allocator), {.WRONLY, .CREAT, .APPEND, .CLOEXEC}, {.IRUSR, .IWUSR})
 	}
-	app_log_line(a, fmt.tprintf("[pi-desk] starting: %s", strings.join(argv, " ", context.temp_allocator)))
+	app_log_line(a, fmt.tprintf("[Deckhand] starting: %s", strings.join(argv, " ", context.temp_allocator)))
 	c_argv := make([]cstring, len(argv) + 1, context.temp_allocator)
 	for x, i in argv do c_argv[i] = strings.clone_to_cstring(x, context.temp_allocator)
 	env := app_env(a.tab_id)
@@ -722,7 +870,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	posix.close(fds[1])
 	if err != .NONE {
 		posix.close(fds[0])
-		app_log_line(a, fmt.tprintf("[pi-desk] could not start %s (%v)", argv[0], err))
+		app_log_line(a, fmt.tprintf("[Deckhand] could not start %s (%v)", argv[0], err))
 		socket_forget_tab(a.tab_id)
 		return false
 	}
@@ -810,13 +958,19 @@ app_gone :: proc(a: ^App_Proc, code: int) {
 	if frames_ok == 1 do pd_frames_chan_stop(a.tab_id)
 	socket_forget_tab(a.tab_id)
 	app_fail_pending(a.tab_id, "the app exited", "tab_gone", shots = false)
+	// hidden screenshots waiting for a frame: answered now (the last frame, or no_frame)
+	for w in a.shot_waits {
+		r := app_shot_now(a.tab_id, a, w.rect, w.has_rect, w.request_id)
+		if !r.pending do emit_event(Finished_Event{request_id = w.request_id, result = r})
+	}
+	clear(&a.shot_waits)
 	app_boxes_forget(a.tab_id) // its boxes went with it
 	a.hover = -1
 	delete(a.ping_wire)
 	a.ping_wire = ""
 	a.ring.cur_gen = 0
 	app_free_rings(a, true)
-	app_log_line(a, fmt.tprintf("[pi-desk] exited (code %d)", code))
+	app_log_line(a, fmt.tprintf("[Deckhand] exited (code %d)", code))
 }
 
 // Frees the generations that may go (frames.odin's rule). app_gone: all
@@ -875,7 +1029,7 @@ app_ring_new :: proc(a: ^App_Proc, w, h: int, scale: f32) {
 	}
 	append(&a.ring.gens, g)
 	a.ring.cur_gen = gen
-	app_log_line(a, fmt.tprintf("[pi-desk] ring %d: %dx%d px, scale %.2f", gen, w, h, scale))
+	app_log_line(a, fmt.tprintf("[Deckhand] ring %d: %dx%d px, scale %.2f", gen, w, h, scale))
 }
 
 // ---- the frame loop (main.odin) ----
@@ -907,7 +1061,7 @@ app_frames_tick :: proc() -> bool {
 				for len(a.restarts) > 0 && time.tick_diff(a.restarts[0], now) > APP_RESTART_WINDOW do ordered_remove(&a.restarts, 0)
 				if code == APP_EXIT_RESTART && len(a.restarts) < 3 {
 					append(&a.restarts, now)
-					app_log_line(a, "[pi-desk] exit 75: restarting")
+					app_log_line(a, "[Deckhand] exit 75: restarting")
 					if app_spawn(a, at.argv, at.cwd) {
 						run_command(App_Update{tab_id = id, status = .Starting})
 						continue
@@ -922,24 +1076,28 @@ app_frames_tick :: proc() -> bool {
 		if socket_app_connected(id) do a.sock_seen = true
 		else if a.sock_seen && !a.closing {
 			a.sock_seen = false
-			app_log_line(a, "[pi-desk] the app closed its connection: stopping it")
+			app_log_line(a, "[Deckhand] the app closed its connection: stopping it")
 			posix.killpg(a.pid, .SIGTERM)
 		}
 		visible := a == on_screen
+		// a hidden tab is told it shows until it gives its first frame and while a screenshot waits
+		// for one (TAB-PROTOCOL: a tab told it is hidden draws nothing)
+		peek := !visible && (!a.framed || len(a.shot_waits) > 0)
+		told := visible || peek
 		p: Frames_Poll
 		if frames_ok == 1 do pd_frames_poll(id, &p) // cheap: one lock, a copy
 		if p.flags & FRAMES_F_CONNECTED != 0 {
 			a.connected = true
-			app_log_line(a, "[pi-desk] frame channel connected")
+			app_log_line(a, "[Deckhand] frame channel connected")
 		}
-		if p.flags & FRAMES_F_REJECTED != 0 do app_log_line(a, "[pi-desk] a HELLO was refused (key or sender)")
+		if p.flags & FRAMES_F_REJECTED != 0 do app_log_line(a, "[Deckhand] a HELLO was refused (key or sender)")
 		if p.flags & FRAMES_F_DEAD != 0 && a.connected {
 			a.connected = false
-			app_log_line(a, "[pi-desk] the frame channel died")
+			app_log_line(a, "[Deckhand] the frame channel died")
 		}
 		if p.flags & FRAMES_F_STALLED != 0 && !a.stalled {
 			a.stalled = true
-			app_log_line(a, "[pi-desk] a Mach send timed out: not responding")
+			app_log_line(a, "[Deckhand] a Mach send timed out: not responding")
 		}
 		if p.done_gen > a.ring.done_gen do a.ring.done_gen = p.done_gen
 		// rings: the first one, and a new one when the pane's size settled
@@ -951,23 +1109,37 @@ app_frames_tick :: proc() -> bool {
 		}
 		// a frame
 		if p.has_frame != 0 {
-			if visible {
+			if told {
 				og, os_, retire := ring_take(&a.ring, p.gen, p.slot, p.seq, p.tick)
 				if retire do pd_frames_retire(id, og, u32(os_))
-				pd_frames_shown(id, p.recv_ms)
 				a.ring.last_frame = now
-				redraw = true
+				a.framed = true
+				if visible {
+					pd_frames_shown(id, p.recv_ms)
+					redraw = true
+				}
 			} else {
 				if ring_may_release_now(&a.ring, p.gen, p.slot) do pd_frames_release_now(id, p.gen, p.slot) // never drawn
 				a.ring.last_frame = now
 			}
 		}
 		app_free_rings(a, false)
+		// hidden screenshots: a frame newer than the ask, or (late) the last one
+		for i := 0; i < len(a.shot_waits); {
+			w := a.shot_waits[i]
+			if !visible && !(a.ring.shown_gen != 0 && a.ring.shown_seq > w.seq) && time.tick_diff(w.deadline, now) <= 0 {
+				i += 1
+				continue
+			}
+			ordered_remove(&a.shot_waits, i)
+			r := app_shot_now(id, a, w.rect, w.has_rect, w.request_id)
+			if !r.pending do emit_event(Finished_Event{request_id = w.request_id, result = r})
+		}
 		// visibility: tab.visible when it changes
-		if a.sent_visible != int(visible) && socket_app_connected(id) {
-			if w := app_own_request(id, "tab.visible", fmt.tprintf(`{{"visible":%v}}`, visible), APP_CALL_TIMEOUT); w != "" {
+		if a.sent_visible != int(told) && socket_app_connected(id) {
+			if w := app_own_request(id, "tab.visible", fmt.tprintf(`{{"visible":%v}}`, told), APP_CALL_TIMEOUT); w != "" {
 				delete(w)
-				a.sent_visible = int(visible)
+				a.sent_visible = int(told)
 				if visible do a.ring.last_frame = now // silence while hidden is no stall
 			}
 		}
@@ -1096,6 +1268,8 @@ app_drop :: proc(tab_id: u64) {
 	delete_key(&apps, tab_id)
 	app_release_input(a)
 	app_fail_pending(tab_id, "the tab closed", "tab_gone")
+	for w in a.shot_waits do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the tab closed", data = `{"code":"tab_gone"}`}})
+	clear(&a.shot_waits)
 	// the surfaces go now, whatever the process does; `a` is freed last
 	for &g in a.ring.gens do for s in 0 ..< FRAME_SLOTS do slot_destroy(&g, s)
 	clear(&a.ring.gens)
@@ -1145,6 +1319,7 @@ app_proc_free :: proc(a: ^App_Proc) {
 	delete(a.title)
 	delete(a.log_path)
 	delete(a.ping_wire)
+	delete(a.shot_waits)
 	free(a)
 }
 
@@ -1275,6 +1450,18 @@ app_screenshot :: proc(cmd: App_Screenshot, request_id: u64) -> Result {
 	_, tab, _ := app_tab_of(cmd.tab_id)
 	a := app_of(cmd.tab_id)
 	if tab == nil || a == nil do return fail("no such app tab")
+	// hidden and running: it draws one frame for this (app_frames_tick), at most APP_PEEK_TIMEOUT
+	if tab_app() != a && a.pid != 0 && frames_ok == 1 && request_id != 0 {
+		if len(a.shot_waits) >= APP_SHOTS_IN_FLIGHT do return {error = "screenshots are still being taken; try again", data = `{"code":"busy"}`}
+		append(&a.shot_waits, Shot_Wait{request_id = request_id, rect = cmd.rect, has_rect = cmd.has_rect, seq = a.ring.shown_seq, deadline = time.tick_add(time.tick_now(), APP_PEEK_TIMEOUT)})
+		return {ok = true, pending = true}
+	}
+	return app_shot_now(cmd.tab_id, a, cmd.rect, cmd.has_rect, request_id)
+}
+
+// app_screenshot of the frame pi-desk holds for the tab now.
+app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: App_Rect, has_rect: bool, request_id: u64) -> Result {
+	cmd := App_Screenshot{tab_id = tab_id, rect = rect, has_rect = has_rect}
 	g := ring_gen(&a.ring, a.ring.shown_gen)
 	if a.ring.shown_gen == 0 || g == nil || frames_ok != 1 do return {error = "the app has shown no frame yet", data = `{"code":"no_frame"}`}
 	x, y, w, h, ok := app_shot_rect(cmd.rect, cmd.has_rect, g.scale, g.w, g.h)
@@ -1806,23 +1993,76 @@ App_Entry :: struct {
 
 app_entries :: proc(cwd: string) -> []App_Entry {
 	path, _ := filepath.join({cwd, ".pi-desk", "apps.json"}, context.temp_allocator)
-	data, err := os.read_entire_file(path, context.temp_allocator)
-	if err != nil do return nil
+	data, ok := app_json_read(path)
+	if !ok do return nil
 	v, perr := json.parse(data, .JSON, true, context.temp_allocator)
 	if perr != nil do return nil
-	list, _ := v.(json.Object)["apps"].(json.Array)
+	root, _ := v.(json.Object) // another shape lists nothing (an agent may have written the file)
+	list, _ := root["apps"].(json.Array)
 	out := make([dynamic]App_Entry, context.temp_allocator)
 	for x in list {
 		o, _ := x.(json.Object)
 		name, _ := o["name"].(json.String)
 		av, _ := o["argv"].(json.Array)
 		cw, _ := o["cwd"].(json.String)
-		if name == "" || len(av) == 0 do continue
+		if name == "" || strings.rune_count(name) > APP_TITLE_MAX || len(av) == 0 do continue
 		argv := make([]string, len(av), context.temp_allocator)
 		for s, i in av do argv[i] = s.(json.String) or_else ""
 		append(&out, App_Entry{name = name, argv = argv, cwd = cw})
 	}
 	return out[:]
+}
+
+// apps.json's bytes (temp): a regular file, not a symbolic link, at most APP_JSON_MAX bytes.
+// Opened without following a link and without blocking (a FIFO), then checked on the open file
+// (an agent may have written it); never more than APP_JSON_MAX+1 bytes read.
+@(private = "file")
+app_json_read :: proc(path: string) -> ([]u8, bool) {
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.CLOEXEC, .NOFOLLOW, .NONBLOCK})
+	if fd < 0 do return nil, false
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) || st.st_size > APP_JSON_MAX do return nil, false
+	buf := make([]u8, APP_JSON_MAX + 1, context.temp_allocator)
+	n := 0
+	for n < len(buf) {
+		want: int = len(buf) - n
+		got := posix.read(fd, raw_data(buf[n:]), uint(want))
+		if got < 0 && posix.errno() == .EINTR do continue
+		if got <= 0 do break
+		n += int(got)
+	}
+	if n > APP_JSON_MAX do return nil, false // grew since fstat
+	return buf[:n], true
+}
+
+// The entry of the session's apps.json named `name`.
+app_entry :: proc(cwd, name: string) -> (App_Entry, bool) {
+	for e in app_entries(cwd) do if e.name == name do return e, true
+	return {}, false
+}
+
+// Why `name` cannot open: the names the session declares.
+app_not_declared :: proc(cwd, name: string) -> string {
+	names := make([dynamic]string, context.temp_allocator)
+	for e in app_entries(cwd) do append(&names, fmt.tprintf("%q", e.name))
+	if len(names) == 0 do return fmt.tprintf("no app %q: the session's folder declares none (.pi-desk/apps.json)", name)
+	return fmt.tprintf("no app %q in the session's .pi-desk/apps.json (declared: %s)", name, strings.join(names[:], ", ", context.temp_allocator))
+}
+
+// The session new_app_tab and app_declared act in: a pi or Claude tab's own, never another;
+// else the one named, or the caller's (Home's and an unbound caller's: the one on screen).
+app_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+	if caller.kind == .Panel {
+		own := caller_session(caller)
+		if own == nil do return nil, "the calling tab has no session"
+		if session != 0 && session != own.id do return nil, "a pi or Claude tab opens and lists apps in its own session only"
+		return own, ""
+	}
+	s := session != 0 ? find_session(session) : caller_session(caller)
+	if s != nil && s.home && session == 0 do s = cur()
+	if s == nil do return nil, "no open session to open the app in"
+	return s, ""
 }
 
 // The palette's app mode: the typed command line, then the session's

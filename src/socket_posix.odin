@@ -146,3 +146,36 @@ sock_write_all :: proc(fd: Sock_Fd, data: []u8) -> bool {
 sock_shutdown :: proc(fd: Sock_Fd) {posix.shutdown(fd, .RDWR)}
 sock_close :: proc(fd: Sock_Fd) {posix.close(fd)}
 sock_unlink :: proc(path: string) {posix.unlink(strings.clone_to_cstring(path, context.temp_allocator))}
+
+// The process at the other end of a connected Unix socket (its pid when it connected), and a
+// process's parent: what tells pi-desk that a Claude tab's token comes from that tab's own
+// processes (socket.odin, socket_claude_peer_ok). 0 = unknown.
+when ODIN_OS == .Darwin {
+	foreign import sockpeer "system:System"
+	@(default_calling_convention = "c")
+	foreign sockpeer {
+		@(link_name = "getsockopt")
+		peer_getsockopt :: proc(fd: c.int, level: c.int, name: c.int, value: rawptr, len: ^u32) -> c.int ---
+	}
+	SOL_LOCAL :: 0
+	LOCAL_PEERPID :: 0x002
+	PROC_PIDTBSDINFO :: 3
+	PROC_BSDINFO_SIZE :: 136 // struct proc_bsdinfo; pbi_ppid at offset 16
+
+	sock_peer_pid :: proc(fd: Sock_Fd) -> i32 {
+		pid: c.int
+		n := u32(size_of(pid))
+		if peer_getsockopt(c.int(fd), SOL_LOCAL, LOCAL_PEERPID, &pid, &n) != 0 do return 0
+		return i32(pid)
+	}
+
+	pid_parent :: proc(pid: i32) -> i32 {
+		if pid <= 0 do return 0
+		buf: [PROC_BSDINFO_SIZE]u8
+		if proc_pidinfo(c.int(pid), PROC_PIDTBSDINFO, 0, &buf, size_of(buf)) != size_of(buf) do return 0
+		return (^i32)(&buf[16])^
+	}
+} else {
+	sock_peer_pid :: proc(fd: Sock_Fd) -> i32 {return 0} // Linux: SO_PEERCRED (later)
+	pid_parent :: proc(pid: i32) -> i32 {return 0}
+}

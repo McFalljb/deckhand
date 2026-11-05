@@ -1,0 +1,50 @@
+# Read-only Claude chats, run 1 (tests/scripts/claude-readonly.sh; docs/CLAUDE.md §1a): with
+# Chats: read-only on, + New chat's Claude Code starts claude with pi-desk's profile (the fake logs its
+# argv); its guard (pi-desk hook readonly, from --settings) blocks a mutating command, an edit and
+# an act verb and lets reads through; pi-desk refuses the tab's act verbs itself; quit.
+wait 1500
+ui_command {"type":"set_chats_readonly","on":true}
+assert_result ok true
+clickid newchatrow
+wait 300
+clickmenu Claude Code
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+assert_state open_sessions.0.tabs.0.kind claude
+waitfor FAKE CLAUDE ARGS: --plugin-dir 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_state open_sessions.0.tabs.0.readonly true
+shot claude-readonly/chat
+type !bash git commit -m x
+key enter
+waitfor TOOL Bash -> blocked 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+type !bash echo x >/dev/null 2>&1
+key enter
+waitfor TOOL Bash -> runs 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+type !tool Edit
+key enter
+waitfor TOOL Edit -> blocked 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+type !tool Read
+key enter
+waitfor TOOL Read -> runs 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+type !bash pi-desk click 1 --selector x
+key enter
+waitfor TOOL Bash -> blocked 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+# the CLI straight (as if the guard had not run): pi-desk refuses it from this token
+type !cli click 1 #x
+key enter
+waitfor CLI click 1 #x -> exit 1 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+# acked: still running well past the ack's 10 s
+wait 11000
+assert_state open_sessions.0.tabs.0.status running
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

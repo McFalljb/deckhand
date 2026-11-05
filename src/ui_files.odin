@@ -3,7 +3,7 @@ package main
 // The left column's tab switch (Sessions | Files | Settings) and the two
 // trees: the Files tab and the Settings tab (settings_files.odin builds its
 // rows; the same rows, keys, filter and menus here). The header (the
-// project's name, or "pi settings", and their buttons), the filter field,
+// project's name, or the Settings tab's title, and their buttons), the filter field,
 // then the tree (files.odin) as a virtualised list: only the rows in view
 // are laid out.
 // Every action is a command (ui_do) or an action from actions.odin, and has
@@ -40,6 +40,9 @@ Files_Hit_Kind :: enum u8 {
 	Create, // a missing settings file's Create button (index: the drawn slot)
 	Folder_Reset, // a Folders row's Reset (folders.odin)
 	Folder_Reveal, // a Folders row's Reveal in Finder
+	Account_Remove, // a Claude account's Remove (claude_accounts.odin)
+	Account_Default, // a Claude account's Make default
+	Retry, // a folder that could not be listed: list it again (index: the drawn slot)
 	// the checkout switcher and its menu (ui_worktrees.odin)
 	Switcher,
 	Wt_Row, // index: the menu's row
@@ -280,7 +283,7 @@ files_panel :: proc(row_w_: f32) {
 		}) {
 			if len(rows) == 0 && settings {
 				if state.files.filter != "" do empty_state("No matching settings files", "Esc in the filter clears it", row_w)
-				else do empty_state("No settings files", "pi makes them as you use it", row_w)
+				else do empty_state("No settings files", settings_empty_hint(), row_w)
 			} else if len(rows) == 0 {
 				d := files_dir(root, false)
 				if state.files.filter != "" do empty_state("No matching files", "Esc in the filter clears it", row_w)
@@ -305,7 +308,29 @@ files_panel :: proc(row_w_: f32) {
 	}
 }
 
-// The Settings tab's header: "pi settings", then its buttons.
+// The Settings tab's header, its tooltip and its empty state: they name the harness installed, or
+// neither when both are (or none).
+settings_title :: proc() -> string {
+	pi, cl := pi_installed(), claude_installed()
+	if pi && !cl do return "pi settings"
+	if cl && !pi do return "Claude Code settings"
+	return "Settings"
+}
+settings_tip :: proc() -> string {
+	pi, cl := pi_installed(), claude_installed()
+	if pi && !cl do return "pi's settings files"
+	if cl && !pi do return "Claude Code's settings files"
+	return "Settings files"
+}
+settings_empty_hint :: proc() -> string {
+	pi, cl := pi_installed(), claude_installed()
+	if pi && !cl do return "pi makes them as you use it"
+	if cl && !pi do return "Claude Code makes them as you use it"
+	if pi && cl do return "pi and Claude Code make them as you use them"
+	return "Your agents make them as you use them"
+}
+
+// The Settings tab's header: its title, then its buttons.
 @(private = "file")
 settings_head :: proc(row_w: f32) {
 	th := theme()
@@ -315,7 +340,7 @@ settings_head :: proc(row_w: f32) {
 		room := row_w - px(PAD_ROW + KIND_ICON + GAP_INLINE + GAP_GROUP) - f32(len(Settings_Tool)) * px(FILES_TOOL + GAP_BUTTONS)
 		icon(.Sliders, th.text_muted, KIND_ICON)
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
-		clay.TextDynamic(clip("pi settings", room, WEIGHT_BOLD), txt(th.text_secondary, WEIGHT_BOLD))
+		clay.TextDynamic(clip(settings_title(), room, WEIGHT_BOLD), txt(th.text_secondary, WEIGHT_BOLD))
 		if clay.UI()({layout = {sizing = {clay.SizingGrow({min = px(GAP_GROUP - 2 * GAP_BUTTONS)}), clay.SizingFit()}}}) {}
 		for tool in Settings_Tool {
 			id := clay.ID("settool", u32(tool))
@@ -334,13 +359,44 @@ settings_head :: proc(row_w: f32) {
 	}
 }
 
+// Test mode (autotest's `@PATH` row index): the slot of the drawn Files/Settings row whose path
+// ends with suffix (a whole path component or more), else -1.
+files_drawn_slot :: proc(suffix: string) -> int {
+	for p, i in fu.drawn {
+		if p == "" || !strings.has_suffix(p, suffix) do continue
+		if len(p) == len(suffix) || suffix[0] == '/' || p[len(p) - len(suffix) - 1] == '/' do return i
+	}
+	return -1
+}
+
 // One tree row (or "N more…"), drawn as slot `slot`.
 @(private = "file")
 files_row :: proc(r: Files_Row, slot: int, row_w: f32, a: runtime.Allocator) {
 	th := theme()
-	append(&fu.drawn, r.more > 0 ? "" : strings.clone(r.path, a))
+	append(&fu.drawn, r.more > 0 || r.error != "" ? "" : strings.clone(r.path, a))
 	append(&fu.drawn_dir, r.kind == .Dir)
 	id := clay.ID("frow", u32(slot))
+	if r.error != "" {
+		// a folder that could not be listed: why, and Retry (never an empty-looking folder)
+		retry_w := text_w("Retry", FONT_UI_SMALL) + px(2 * SP_2)
+		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + SP_3), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+			room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - retry_w
+			clay.TextDynamic(clip(r.error, room, FONT_UI_SMALL), txt(th.error, FONT_UI_SMALL))
+			spacer()
+			rid := clay.ID("fretry", u32(slot))
+			rh := ui_hover == Hit(Hit_Files{what = .Retry, index = slot})
+			rbg, rem := overlay(rid, false, rh)
+			if !rh do rbg = cc(mix(th.bg_elevated, th.text, TINT_BUTTON))
+			if clay.UI(rid)({
+				layout = {sizing = {clay.SizingFixed(retry_w), clay.SizingFixed(px(FILES_ROW_H - 4))}, childAlignment = {x = .Center, y = .Center}},
+				backgroundColor = rbg,
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+			}) {
+				clay.TextDynamic("Retry", txt(mix(th.text_secondary, th.text, rem), FONT_UI_SMALL))
+			}
+		}
+		return
+	}
 	if r.more > 0 {
 		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2 + FILES_INDENT * f32(r.depth) + SP_3), 0, 0, 0}, childAlignment = {y = .Center}}}) {
 			clay.TextDynamic(fmt.tprintf("%d more…", r.more), txt(th.text_muted, FONT_UI_SMALL))
@@ -387,7 +443,7 @@ files_row :: proc(r: Files_Row, slot: int, row_w: f32, a: runtime.Allocator) {
 		blabel := r.button != "" ? r.button : "Create" // a missing file's Create, or a setting row's button
 		create_w := r.missing || r.button != "" ? text_w(blabel, FONT_UI_SMALL) + px(2 * SP_2) : 0
 		// a Folders row's icon buttons (Reset, Reveal in Finder) before its Change…
-		icons_w := f32(int(r.reset) + int(r.reveal)) * px(ROW_BUTTON - SP_1 + SP_1)
+		icons_w := f32(int(r.reset) + int(r.reveal) + int(r.remove) + int(r.make_default)) * px(ROW_BUTTON - SP_1 + SP_1)
 		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - max(px(ROW_BUTTON + SP_1), create_w + icons_w + px(SP_1))
 		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" {
 			files_name_box(room)
@@ -411,7 +467,7 @@ files_row :: proc(r: Files_Row, slot: int, row_w: f32, a: runtime.Allocator) {
 				what: Files_Hit_Kind,
 				name: string,
 				ic:   Icon,
-			}{{r.reset, .Folder_Reset, "freset", .Refresh}, {r.reveal, .Folder_Reveal, "freveal", .Reveal}}) {
+			}{{r.reset, .Folder_Reset, "freset", .Refresh}, {r.reveal, .Folder_Reveal, "freveal", .Reveal}, {r.make_default, .Account_Default, "fdefault", .Check}, {r.remove, .Account_Remove, "fremove", .Close}}) {
 			if !b.on do continue
 			bid := clay.ID(b.name, u32(slot))
 			bh := ui_hover == Hit(Hit_Files{what = b.what, index = slot})
@@ -600,10 +656,13 @@ files_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("files_name_box")) do return Hit_Files{what = .Name}
 	if !clay.PointerOver(clay.ID("files_list")) do return nil
 	for p, i in fu.drawn {
+		if clay.PointerOver(clay.ID("fretry", u32(i))) do return Hit_Files{what = .Retry, index = i} // an error row (drawn "")
 		if p == "" do continue
 		if clay.PointerOver(clay.ID("fcreate", u32(i))) do return Hit_Files{what = .Create, index = i}
 		if clay.PointerOver(clay.ID("freset", u32(i))) do return Hit_Files{what = .Folder_Reset, index = i}
 		if clay.PointerOver(clay.ID("freveal", u32(i))) do return Hit_Files{what = .Folder_Reveal, index = i}
+		if clay.PointerOver(clay.ID("fremove", u32(i))) do return Hit_Files{what = .Account_Remove, index = i}
+		if clay.PointerOver(clay.ID("fdefault", u32(i))) do return Hit_Files{what = .Account_Default, index = i}
 		if clay.PointerOver(clay.ID("fmore", u32(i))) do return Hit_Files{what = .More, index = i}
 		if clay.PointerOver(clay.ID("frow", u32(i))) do return Hit_Files{what = .Row, index = i}
 	}
@@ -616,7 +675,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 	case .Tab_Files:
 		if a := action_by_id("show_files"); a != nil do return a.label, a.keys
 	case .Tab_Settings:
-		if a := action_by_id("settings"); a != nil do return "pi's settings files", a.keys
+		if a := action_by_id("settings"); a != nil do return settings_tip(), a.keys
 	case .Tab_Jobs:
 		return state.jobs_unread > 0 ? fmt.tprintf("%s's jobs: %d unread", agent_name(), state.jobs_unread) : fmt.tprintf("%s's jobs", agent_name()), ""
 	case .Tool:
@@ -624,10 +683,22 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 		if a := action_by_id(id); a != nil do return action_label(a), a.keys
 	case .Create:
 		if h.index >= 0 && h.index < len(fu.drawn) && fu.drawn[h.index] == ATLAS_MODEL_ROW do return "Open pi's model selector in Atlas", "⌃L"
+		if h.index >= 0 && h.index < len(fu.drawn) && strings.has_prefix(fu.drawn[h.index], PI_EXT_ROW) {
+			name := fu.drawn[h.index][len(PI_EXT_ROW):]
+			return fmt.tprintf("%s %s in the pi tabs started from now on (running tabs: the restart bar)", pi_extension_on(name) ? "Turn off" : "Turn on", name), ""
+		}
+		if h.index >= 0 && h.index < len(fu.drawn) && fu.drawn[h.index] == CLAUDE_FLAGS_ROW {
+			if a := action_by_id("claude_skip_permissions"); a != nil do return state.settings.claude_skip_permissions ? "New Claude tabs you start ask before tools again (open tabs keep their flags)" : "Start the Claude tabs you start with --dangerously-skip-permissions (never agents' tabs or read-only chats)", a.keys
+		}
 		if h.index >= 0 && h.index < len(fu.drawn) {
 			p := fu.drawn[h.index]
-			if p == FOLDER_MAIN_ROW do return state.settings.home_dir != "" ? "Pick another main folder (nothing is moved; the old one is offered in Finder)" : "Set up pi-desk: choose the main folder", ""
+			if tip := harness_settings_tip(p, true); tip != "" do return tip, ""
+			if p == FOLDER_MAIN_ROW do return state.settings.home_dir != "" ? "Pick another main folder (nothing is moved; the old one is offered in Finder)" : "Set up Deckhand: choose the main folder", ""
 			if p == FOLDER_PREV_ROW do return "Show the old main folder in Finder", ""
+			if p == CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
+			if p == CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
+			if p == CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
+			if strings.has_prefix(p, CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
 			if k, ok := folder_row_kind(p); ok do return fmt.tprintf("Pick the %s folder (%s)", FOLDER_NAMES[k], FOLDER_DOES[k]), ""
 		}
 		return "Create this file, then open it", ""
@@ -635,9 +706,15 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 		// the Settings tab's rows: where the file is and what it is
 		if !on_settings() || h.index < 0 || h.index >= len(fu.drawn) || fu.drawn[h.index] == "" do break
 		p := fu.drawn[h.index]
+		if tip := harness_settings_tip(p, false); tip != "" do return tip, ""
 		if p == ATLAS_MODEL_ROW do return fmt.tprintf("%s's model: %s", agent_name(), sf_model_note()), ""
+		if p == CLAUDE_FLAGS_HEAD_ROW || p == CLAUDE_FLAGS_ROW || p == CLAUDE_FLAGS_WARN_ROW do return fmt.tprintf("Default Claude Code flags for new tabs: %s. Only the tabs you start (new tab, session, chat, your resume); never agents', panels' or apps', nor a read-only chat. With it, Claude edits files and runs commands without asking.", state.settings.claude_skip_permissions ? "--dangerously-skip-permissions" : "none"), ""
+		if strings.has_prefix(p, PI_EXT_ROW) {
+			name := p[len(PI_EXT_ROW):]
+			for e in pi_integration_optional() do if e.name == name do return fmt.tprintf("%s: %s. %s; default %s. Deckhand ships it and loads it into pi tabs, not jobs (pi -e); a change applies at a tab's next start.", e.name, e.does, e.on ? "On" : "Off", e.default_on ? "on" : "off"), ""
+		}
 		if p == FOLDER_MAIN_ROW do return fmt.tprintf("Main folder: %s", state.settings.home_dir != "" ? fs_display(state.settings.home_dir) : "not set"), ""
-		if p == FOLDER_ENV_ROW do return "Your environment sets PI_KIT_NOTES_DIR: pi-desk passes it on as it is", ""
+		if p == FOLDER_ENV_ROW do return "Your environment sets PI_KIT_NOTES_DIR: Deckhand passes it on as it is", ""
 		if p == FOLDER_PREV_ROW do return fmt.tprintf("The main folder before: %s", fs_display(state.home_dir_prev)), ""
 		if k, ok := folder_row_kind(p); ok {
 			f := folder_of(k)
@@ -655,6 +732,10 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			}
 		}
 	case .Folder_Reveal: return "Reveal in Finder", ""
+	case .Retry:
+		if r, ok := files_error_row(h.index); ok do return fmt.tprintf("%s. Retry lists the folder again", r.error), ""
+	case .Account_Remove: return "Remove this account from Deckhand's list (its folder is not touched)", ""
+	case .Account_Default: return "Make this the default account: new Claude sessions start in it unless their project last used another", ""
 	case .Filter:       return on_settings() ? "Filter settings files" : "Filter files", ""
 	case .Filter_Clear: return "Clear the filter", "Esc"
 	case .More:         return "More actions", ""
@@ -694,10 +775,20 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		case .Tool:         action_run(on_settings() ? SETTINGS_TOOLS[Settings_Tool(h.index)].action : FILES_TOOLS[Files_Tool(h.index)].action)
 		case .Create:
 			if fu.drawn[h.index] == ATLAS_MODEL_ROW do action_run("agent_model") // the Atlas group's model: pi's selector
+			else if fu.drawn[h.index] == CLAUDE_FLAGS_ROW do action_run("claude_skip_permissions") // the Claude Code group's default flags
+			else if p := fu.drawn[h.index]; strings.has_prefix(p, PI_EXT_ROW) { 	// the pi extensions group
+				name := p[len(PI_EXT_ROW):]
+				ui_do(Set_Pi_Extension{name = name, on = !pi_extension_on(name)})
+			}
 			else if settings_folder_button(fu.drawn[h.index]) {} // the Folders group (folders.odin)
+			else if harness_settings_button(fu.drawn[h.index]) {} // the Coding agents group (ui_harness.odin)
 			else if fu.drawn[h.index] != "" do settings_create(fu.drawn[h.index]) // the explicit click: then it opens
 		case .Folder_Reset:
 			if k, ok := folder_row_kind(fu.drawn[h.index]); ok do ui_do(Set_Folder{kind = k, path = ""})
+		case .Account_Remove:
+			if p := fu.drawn[h.index]; strings.has_prefix(p, CLAUDE_ACCOUNT_ROW) do ui_do(Remove_Claude_Account{account = p[len(CLAUDE_ACCOUNT_ROW):]})
+		case .Account_Default:
+			if p := fu.drawn[h.index]; strings.has_prefix(p, CLAUDE_ACCOUNT_ROW) do ui_do(Set_Claude_Account_Default{account = p[len(CLAUDE_ACCOUNT_ROW):]})
 		case .Folder_Reveal:
 			p := fu.drawn[h.index]
 			if p == FOLDER_MAIN_ROW do ui_do(Reveal_In_Finder{path = state.settings.home_dir})
@@ -709,6 +800,8 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 				ui_do(Set_Focus{"files_filter"})
 			}
 		case .Filter_Clear: ui_do(Set_Files_Filter{text = ""})
+		case .Retry:
+			if r, ok := files_error_row(h.index); ok do files_retry(r.path)
 		case .More:
 			if d := clay.GetElementData(clay.ID("fmore", u32(h.index))); d.found {
 				b := d.boundingBox
@@ -793,18 +886,9 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	app.redraw = true
 	rows := tree_rows()
 	i := files_row_of(rows, tree_view().cursor)
-	move :: proc(rows: []Files_Row, to: int) {
-		if len(rows) == 0 do return
-		j := clamp(to, 0, len(rows) - 1)
-		if rows[j].more > 0 && j > 0 do j -= 1
-		// the Settings tab's group headings are passed over, in the way of the move
-		k := j
-		for k < len(rows) && rows[k].head do k += 1
-		if k >= len(rows) {
-			k = j
-			for k > 0 && rows[k].head do k -= 1
-		}
-		if rows[k].head do return
+	move :: proc(rows: []Files_Row, to: int, back := false) {
+		k := files_move_target(rows, to, back)
+		if k < 0 do return
 		files_select_in(tree_view(), rows[k].path)
 		tree_view().reveal = false
 		files_scroll_to(k, len(rows))
@@ -814,13 +898,11 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .ESCAPE: ui_do(Set_Focus{""})
 	case .UP:
 		// up past a heading: the row above it
-		to := cmd ? 0 : (i < 0 ? 0 : i - 1)
-		for to > 0 && rows[to].head do to -= 1
-		move(rows, to)
+		move(rows, cmd ? 0 : (i < 0 ? 0 : i - 1), back = true)
 	case .DOWN:   move(rows, cmd ? len(rows) - 1 : i + 1)
 	case .HOME:   move(rows, 0)
 	case .END:    move(rows, len(rows) - 1)
-	case .PAGE_UP: move(rows, i - page)
+	case .PAGE_UP: move(rows, i - page, back = true)
 	case .PAGE_DOWN: move(rows, i + page)
 	case .LEFT:
 		if i < 0 do break
@@ -843,17 +925,18 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	return true
 }
 
-// Opens or closes a folder.
+// Opens or closes a folder; a failure shows (never a click that does nothing).
 files_toggle :: proc(path: string) {
-	if on_settings() {
-		ui_do(Files_Expand{path = path, expanded = !files_is_open(path)})
-		return
-	}
-	open := false
-	if root := files_root(); root != "" && strings.has_prefix(path, strings.concatenate({root, "/"}, context.temp_allocator)) {
-		for d in files_expanded_dirs(root) do if d == path[len(root) + 1:] do open = true
-	}
-	ui_do(Files_Expand{path = path, expanded = !open})
+	ui_do_menu(Files_Expand{path = path, expanded = !files_is_open(path)}, "Open folder")
+}
+
+// The error row drawn at slot (files_row: rows [fu.first, ...) are drawn).
+@(private = "file")
+files_error_row :: proc(slot: int) -> (Files_Row, bool) {
+	rows := tree_rows()
+	i := fu.first + slot
+	if slot < 0 || i >= len(rows) || rows[i].error == "" do return {}, false
+	return rows[i], true
 }
 
 // The session files open in: the one on screen (0 = the command's default).
@@ -1017,6 +1100,19 @@ files_commit_edit :: proc() {
 		app.redraw = true
 		return
 	}
+	// a Claude account's name (Settings → Claude accounts): no file is renamed
+	if fu.edit == .Rename && strings.has_prefix(fu.target, CLAUDE_ACCOUNT_ROW) {
+		ar := ui_run(Rename_Claude_Account{account = fu.target[len(CLAUDE_ACCOUNT_ROW):], label = name})
+		if !ar.ok {
+			delete(fu.edit_err)
+			fu.edit_err = strings.clone(ar.error)
+			app.redraw = true
+			return
+		}
+		fu.edit = .None
+		ui_do(Set_Focus{"files"})
+		return
+	}
 	r: Result
 	path := ""
 	switch fu.edit {
@@ -1105,6 +1201,20 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 // A Folders row's main button (folders.odin): Change… (the folder picker),
 // Set up… (the sheet), Reveal (the old main folder). False: not such a row.
 settings_folder_button :: proc(path: string) -> bool {
+	// a Claude account's Rename… (the row's name field), Add account… (a folder picker)
+	if path == CLAUDE_ACCOUNT_ADD_ROW || path == CLAUDE_ACCOUNT_MORE_ROW {
+		action_run("claude_account_add")
+		return true
+	}
+	if path == CLAUDE_ACCOUNT_SCAN_ROW {
+		ui_do(Rescan{}) // looks for config folders again, then their projects and sessions
+		return true
+	}
+	if strings.has_prefix(path, CLAUDE_ACCOUNT_ROW) {
+		label := claude_account_label_now(path[len(CLAUDE_ACCOUNT_ROW):])
+		files_begin_edit(.Rename, path, label)
+		return true
+	}
 	switch path {
 	case FOLDER_MAIN_ROW:
 		if state.settings.home_dir == "" do action_run("setup")
@@ -1122,4 +1232,18 @@ settings_folder_button :: proc(path: string) -> bool {
 		return true
 	}
 	return false
+}
+
+// Where a keyboard move to row `to` lands: past the Settings tab's group
+// headings and folders' error rows (no file of their own), on in the
+// direction of travel (back: upwards), else the other way; -1 = nowhere.
+files_move_target :: proc(rows: []Files_Row, to: int, back: bool) -> int {
+	if len(rows) == 0 do return -1
+	skip :: proc(r: Files_Row) -> bool {return r.head || r.error != ""}
+	j := clamp(to, 0, len(rows) - 1)
+	if rows[j].more > 0 && j > 0 do j -= 1
+	step := back ? -1 : 1
+	for k := j; k >= 0 && k < len(rows); k += step do if !skip(rows[k]) do return k
+	for k := j; k >= 0 && k < len(rows); k -= step do if !skip(rows[k]) do return k
+	return -1
 }

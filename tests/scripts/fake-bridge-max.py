@@ -1,13 +1,13 @@
-# A fake pi-kit bridge that publishes the largest panel set a bridge may send
+# A fake pi-integration bridge that publishes the largest panel set a bridge may send
 # (16 panels x 200 rows x 512-byte rows, far past pi-desk's caps) and stays
 # connected with pi working, so the status dot pulses. For tests/scripts/panels-cpu.txt.
 import json, os, socket, sys, time
 s = socket.socket(socket.AF_UNIX)
-s.connect(os.environ["PI_DESK_SOCKET"])
+s.connect(os.environ["DECKHAND_SOCKET"])
 def send(m):
     m.setdefault("v", 1)
     s.sendall((json.dumps(m) + "\n").encode())
-send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
 send({"id": "s", "type": "pi.status", "agent": "working", "waiting": False, "blockers": []})
 row = ("● worker step " + "x" * 600)[:512]
 for p in range(16):

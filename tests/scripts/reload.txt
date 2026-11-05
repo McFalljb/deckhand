@@ -1,5 +1,5 @@
 # Hot reload (run with tests/scripts/reload.sh): two sessions whose fake pi
-# bridges report idle; pi's package.json at 1.0.0.
+# bridges report idle; pi's package.json at 1.4.0.
 wait 800
 command {"type":"select_project","project_id":$project}
 wait 300
@@ -10,31 +10,31 @@ waitfor bbbb-2 10000
 wait 2500
 assert_state open_sessions.0.tabs.0.agent idle
 assert_state open_sessions.1.tabs.0.agent idle
-assert_state reload.pi_version 1.0.0
-assert_state open_sessions.0.tabs.0.reload.version 1.0.0
-assert_state open_sessions.1.tabs.0.reload.version 1.0.0
+assert_state reload.pi_version 1.4.0
+assert_state open_sessions.0.tabs.0.reload.version 1.4.0
+assert_state open_sessions.1.tabs.0.reload.version 1.4.0
 assert_not_drawn pi settings changed
 # bbbb-2 (on screen) works
 command {"type":"pi_prompt","tab_id":$pitab,"text":"working"}
-wait 300
+eventually
 assert_state open_sessions.1.tabs.0.agent working
 # ---- a shell tab edits pi's settings.json (stat poll, then the 1 s debounce)
 command {"type":"new_shell_tab","session":$session}
 wait 1000
 command {"type":"send_text","tab_id":$last,"text":"sh ~/edit-settings.sh\n"}
-wait 4000
+eventually
 assert_state reload.changed.0 $homedir/.pi/agent/settings.json
 assert_state open_sessions.0.tabs.0.reload.stale true
 assert_state open_sessions.1.tabs.0.reload.stale true
 shot reload/bar-dark
 hover reload_go
-wait 700
+eventually
 assert_tip Reload the idle pi tabs now (/reload; sessions stay); busy ones once idle
 hover reload_later
-wait 700
+eventually
 assert_tip Hide this until the next change (stops waiting reloads)
 hover reload_details
-wait 700
+eventually
 assert_tip Which files changed, and what each pi tab does
 clickid reload_details
 wait 300
@@ -62,12 +62,12 @@ assert_not_drawn pi settings changed
 command {"type":"pi_prompt","tab_id":$pitab,"text":"blocked"}
 wait 300
 command {"type":"send_text","tab_id":$last,"text":"sh ~/edit-ext.sh\n"}
-wait 2500
+eventually
 assert_state reload.changed.0 $homedir/.pi/agent/extensions/demo/index.ts
 assert_state open_sessions.1.tabs.0.reload.stale true
 shot reload/bar-blocked
 clickid reload_go
-wait 300
+eventually
 assert_state pending_confirmations.0.summary Reload 2 pi tabs? Background work that a reload would stop: ~/code/recipe-box (shell sh1: npm test). Those tabs wait until it ends.
 shot reload/confirm-blockers
 # a narrow window: the summary wraps, the bar grows, Cancel and Confirm stay in the window
@@ -80,24 +80,24 @@ shot reload/confirm-narrow
 resize 1400 860
 wait 500
 clickid confirm_yes
-wait 1000
+eventually
 assert_state open_sessions.0.tabs.0.reload.stale false
 assert_state open_sessions.1.tabs.0.reload.queued reload
 assert_state open_sessions.1.tabs.0.reload.note waits for shell sh1: npm test
 command {"type":"pi_prompt","tab_id":$pitab,"text":"idle"}
-wait 1000
+eventually
 assert_state open_sessions.1.tabs.0.reload.stale false
 # ---- pi is updated: restart both (idle) on their sessions
 command {"type":"send_text","tab_id":$last,"text":"sh ~/bump.sh\n"}
-wait 4000
-assert_state reload.pi_version 1.1.0
+eventually
+assert_state reload.pi_version 1.5.0
 shot reload/restart-offer-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 300
 shot reload/restart-offer-light
 ui_command {"type":"set_appearance","mode":"dark"}
 hover restart_go
-wait 700
+eventually
 assert_tip Restart the idle pi tabs on the new pi (same session); busy ones once idle
 clickid restart_details
 wait 300
@@ -111,9 +111,9 @@ wait 3000
 cpu_end restart-bar-idle
 clickid restart_go
 wait 2500
-assert_state open_sessions.0.tabs.0.reload.version 1.1.0
-assert_state open_sessions.1.tabs.0.reload.version 1.1.0
-assert_state open_sessions.0.tabs.0.reload.note restarted on pi 1.1.0
+assert_state open_sessions.0.tabs.0.reload.version 1.5.0
+assert_state open_sessions.1.tabs.0.reload.version 1.5.0
+assert_state open_sessions.0.tabs.0.reload.note restarted on pi 1.5.0
 assert_state open_sessions.0.tabs.0.agent idle
 assert_state open_sessions.1.tabs.0.agent idle
 assert_not_drawn pi updated
@@ -121,11 +121,11 @@ assert_not_drawn pi updated
 clickid settings
 wait 300
 hover pop 25
-wait 700
+eventually
 assert_tip Reload every idle pi tab now (/reload); busy ones once idle
 shot reload/gear
 clickid pop 25
-wait 1000
+eventually
 assert_state open_sessions.0.tabs.0.reload.note reloaded
 assert_state open_sessions.1.tabs.0.reload.note reloaded
 # pi writes keys of its own (the model it last used, the changelog): no bar

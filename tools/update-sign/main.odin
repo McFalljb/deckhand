@@ -61,7 +61,7 @@ run :: proc(args: []string) -> int {
 		}
 		cd, b64, pok := sig.sig_file_parse(string(data))
 		if !pok {
-			fmt.eprintln("update-sign: not a pi-desk .sig file")
+			fmt.eprintln("update-sign: not a Deckhand .sig file")
 			return 1
 		}
 		m, ok := manifest_of(args[2], args[3], cd)

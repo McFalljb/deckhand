@@ -44,8 +44,12 @@ sk_start :: proc(t: ^testing.T) -> string {
 	rdir, ok := sock_runtime_dir(context.temp_allocator)
 	testing.expect(t, ok, "runtime dir")
 	testing.expect(t, socket_start(rdir), "socket_start")
+	sk_pin = pi_integration_for_test(t) // pi tabs load the integration, so they get DECKHAND_*
 	return dir
 }
+
+@(private = "file")
+sk_pin: string
 
 @(private = "file")
 sk_stop :: proc() {
@@ -54,6 +58,8 @@ sk_stop :: proc() {
 	socket_out_cap = 4 << 20
 	socket_hello_ms = 5000
 	socket_max_conns = 64
+	if sk_pin != "" do pi_integration_test_done(sk_pin)
+	sk_pin = ""
 }
 
 @(private = "file")
@@ -169,7 +175,7 @@ socket_handshake :: proc(t: ^testing.T) {
 
 	// bad version, unknown token, no hello first: an error, then closed
 	bad := [?][2]string {
-		{fmt.tprintf(`{{"id":"h","v":2,"type":"hello","token":"%s"}}`, tok), "unsupported protocol version 2 (pi-desk speaks 1)"},
+		{fmt.tprintf(`{{"id":"h","v":2,"type":"hello","token":"%s"}}`, tok), "unsupported protocol version 2 (Deckhand speaks 1)"},
 		{`{"id":"h","v":1,"type":"hello","token":"nope"}`, "unknown token"},
 		{`{"id":"h","v":1,"type":"hello"}`, "missing field token"},
 		{`{"id":"h","v":1,"type":"command","command":{"type":"get_state"}}`, "the first message must be hello"},
@@ -199,7 +205,7 @@ socket_bridge_and_capabilities :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	tokfile := fmt.tprintf("%s/tab-token", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$PI_DESK_TOKEN" > %s; exec sleep 30`, tokfile))
+	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
 	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
 	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
 	pitab := find_session(sess).tabs[0].id
@@ -318,7 +324,7 @@ socket_confirmation_modes :: proc(t: ^testing.T) {
 	testing.expect_value(t, json_path(r, "result.needs_confirmation.token"), "<missing>")
 	user_token := strings.clone(state.pending_confirmations[0].token)
 	r = tc_cmd(c, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, user_token))
-	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in pi-desk")
+	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
 	// the socket cannot raise its own mode
 	r = tc_cmd(c, `{"type":"set_confirm_policy","caller":"control","class":"tab_close","mode":"auto"}`)
 	testing.expect_value(t, json_path(r, "result.error"), "not allowed for this caller")
@@ -334,7 +340,7 @@ socket_confirmation_modes :: proc(t: ^testing.T) {
 	other, _ := tc_hello(socket_mint_token({kind = .Script}))
 	run_command(Set_Confirm_Policy{caller = .Script, class = .Tab_Close, mode = .Trusted}, sk_ui)
 	r = tc_cmd(other, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, tok))
-	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in pi-desk")
+	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
 	r = tc_cmd(c, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, tok))
 	testing.expect_value(t, json_path(r, "result.ok"), "true")
 
@@ -540,7 +546,7 @@ socket_hostile_lines :: proc(t: ^testing.T) {
 @(private = "file")
 sk_pi_tab :: proc(t: ^testing.T, dir: string) -> (sess, pitab: u64, env_tok: string) {
 	tokfile := fmt.tprintf("%s/tab-token-%d", dir, time.now()._nsec)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$PI_DESK_TOKEN" > %s; exec sleep 30`, tokfile))
+	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
 	if state.selected_project == 0 do run_command(Add_Project{cwd = "/tmp"}, sk_ui)
 	sess = run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
 	pitab = find_session(sess).tabs[0].id
@@ -734,7 +740,7 @@ socket_bridge_lifecycle :: proc(t: ^testing.T) {
 }
 
 // A pi session (a pi tab, Atlas) learns where app screenshots go in
-// PI_DESK_SHOTS_DIR (pi-kit checks app_screenshot files are directly in it);
+// DECKHAND_SHOTS_DIR (the pi integration checks app_screenshot files are directly in it);
 // app tabs do not. PI_DESK_DATA_DIR is never passed on, nor inherited: it
 // would point a test-mode pi-desk an agent starts at the user's real data dir.
 @(test)
@@ -754,30 +760,30 @@ socket_child_env_has_the_shots_dir :: proc(t: ^testing.T) {
 		for e in env do if strings.has_prefix(e, prefix) do n += 1
 		return
 	}
-	want := "PI_DESK_SHOTS_DIR=/tmp/pd-data-dir-test/apps/shots"
+	want := "DECKHAND_SHOTS_DIR=/tmp/pd-data-dir-test/apps/shots"
 	os.set_env("PI_DESK_DATA_DIR", "/inherited")
 	defer os.unset_env("PI_DESK_DATA_DIR")
-	os.set_env("PI_DESK_SHOTS_DIR", "/inherited/apps/shots")
-	defer os.unset_env("PI_DESK_SHOTS_DIR")
-	pi_tab := child_env(socket_child_env({kind = .Panel, tab_id = 4242}))
+	os.set_env("DECKHAND_SHOTS_DIR", "/inherited/apps/shots")
+	defer os.unset_env("DECKHAND_SHOTS_DIR")
+	pi_tab := child_env(socket_pi_env({kind = .Panel, tab_id = 4242}))
 	testing.expect(t, has(pi_tab, want), "a session's pi tab")
-	testing.expect_value(t, count(pi_tab, "PI_DESK_SHOTS_DIR="), 1)
+	testing.expect_value(t, count(pi_tab, "DECKHAND_SHOTS_DIR="), 1)
 	testing.expect_value(t, count(pi_tab, "PI_DESK_DATA_DIR="), 0)
 	atlas := child_env(agent_env(4242))
 	testing.expect(t, has(atlas, want), "Atlas")
-	testing.expect_value(t, count(atlas, "PI_DESK_SHOTS_DIR="), 1)
+	testing.expect_value(t, count(atlas, "DECKHAND_SHOTS_DIR="), 1)
 	testing.expect_value(t, count(atlas, "PI_DESK_DATA_DIR="), 0)
 	app := socket_child_env({kind = .App, tab_id = 4242})
-	testing.expect_value(t, count(app, "PI_DESK_SHOTS_DIR="), 0)
+	testing.expect_value(t, count(app, "DECKHAND_SHOTS_DIR=") + count(app, "PI_DESK_SHOTS_DIR="), 0)
 	testing.expect_value(t, count(app, "PI_DESK_DATA_DIR="), 0)
 	shell := child_env()
-	testing.expect_value(t, count(shell, "PI_DESK_SHOTS_DIR="), 0)
+	testing.expect_value(t, count(shell, "DECKHAND_SHOTS_DIR="), 0)
 	testing.expect_value(t, count(shell, "PI_DESK_DATA_DIR="), 0)
 	// test mode without a data dir: still absolute, where the shots are written
 	home_root = ""
 	seen := false
-	for e in socket_child_env({kind = .Panel, tab_id = 4242}) do if strings.has_prefix(e, "PI_DESK_SHOTS_DIR=") {
-		v := e[len("PI_DESK_SHOTS_DIR="):]
+	for e in socket_pi_env({kind = .Panel, tab_id = 4242}) do if strings.has_prefix(e, "DECKHAND_SHOTS_DIR=") {
+		v := e[len("DECKHAND_SHOTS_DIR="):]
 		seen = true
 		testing.expectf(t, strings.has_prefix(v, "/") && strings.has_suffix(v, "/build/test-data/apps/shots"), "%s", v)
 	}
@@ -842,4 +848,336 @@ socket_request_cancel :: proc(t: ^testing.T) {
 	}
 	testing.expect_value(t, len(act_ops), 0)
 	tc_close(c)
+}
+
+// A Claude tab's token (claude.odin, socket_claude_env): minted at its start, multi-use, valid only
+// from the tab's own processes, scoped like its session's pi tab (minus the bridge's reports, plus
+// its own claude.* reports), and dead once the tab closes.
+@(test)
+socket_claude_token_scope :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	wd, _ := os.get_working_directory(context.temp_allocator)
+	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	sess, pitab, pi_tok := sk_pi_tab(t, dir)
+	run_command(Add_Project{cwd = "/"}, sk_ui)
+	other, _, _ := sk_pi_tab(t, dir)
+	run_command(Focus_Session{session = sess}, sk_ui)
+	tokfile := fmt.tprintf("%s/claude-token-%d", dir, time.now()._nsec)
+	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf %%s "$PI_DESK_CLAUDE_TOKEN" > %s; exec sleep 30`, tokfile))
+	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
+	testing.expect(t, r.ok, r.error)
+	ctab := r.created_id
+	tok := ""
+	for _ in 0 ..< 200 {
+		data, err := os.read_entire_file(tokfile, context.temp_allocator)
+		if err == nil && len(data) == 64 {
+			tok = strings.clone(string(data))
+			break
+		}
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expect_value(t, len(tok), 64)
+	// a process outside the tab (this test) holding the token: refused
+	x, rx := tc_hello(tok)
+	testing.expect_value(t, json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
+	tc_close(x)
+	// as if this test were the tab's process: accepted, and again (multi-use)
+	socket_claude_pid(ctab, i32(os.get_pid()))
+	c, rc := tc_hello(tok)
+	testing.expect_value(t, json_path(rc, "result.ok"), "true")
+	testing.expect_value(t, json_path(rc, "result.data.caller"), "claude")
+	testing.expect_value(t, json_path(rc, "result.data.tab_id"), fmt.tprint(ctab))
+	testing.expect(t, len(json_path(rc, "result.data.reconnect_token")) != 64, "no reconnect token: the env token is the one")
+	c2, rc2 := tc_hello(tok)
+	testing.expect_value(t, json_path(rc2, "result.ok"), "true")
+	tc_close(c2)
+	sid := "11111111-2222-3333-4444-555555555555"
+	// its own reports: the tab id is its own
+	d := tc_cmd(c, fmt.tprintf(`{{"type":"claude.session","session_id":"%s","source":"startup"}}`, sid))
+	testing.expect_value(t, json_path(d, "result.ok"), "true")
+	_, _, ct := claude_tab_of(ctab)
+	testing.expect_value(t, ct.session_id, sid)
+	d = tc_cmd(c, fmt.tprintf(`{{"type":"claude.session","tab_id":%d,"session_id":"%s"}}`, pitab, sid))
+	testing.expect_value(t, json_path(d, "result.ok"), "false")
+	d = tc_cmd(c, `{"type":"claude.turn","state":"idle"}`)
+	testing.expect_value(t, json_path(d, "result.ok"), "true")
+	// no pi bridge, no control set, no reaching another session
+	for cmd in ([]string {
+		`{"type":"pi.status","agent":"idle","waiting":false}`,
+		`{"type":"panel.set","panel":"x","rows":[]}`,
+		`{"type":"pi.attached","attachment_id":1}`,
+		fmt.tprintf(`{{"type":"send_text","tab_id":%d,"text":"x"}}`, pitab),
+		fmt.tprintf(`{{"type":"pi_prompt","tab_id":%d,"text":"x"}}`, pitab),
+		fmt.tprintf(`{{"type":"close_tab","tab_id":%d}}`, pitab),
+		fmt.tprintf(`{{"type":"new_claude_tab","session":%d}}`, sess),
+		fmt.tprintf(`{{"type":"claude_prompt","tab_id":%d,"text":"x"}}`, ctab),
+		fmt.tprintf(`{{"type":"claude_held","tab_id":%d,"op":"drop"}}`, ctab),
+		`{"type":"set_home","open":true}`,
+		fmt.tprintf(`{{"type":"browser_tabs","session":%d}}`, other),
+		fmt.tprintf(`{{"type":"browser_comments","session":%d}}`, other),
+	}) {
+		d = tc_cmd(c, cmd)
+		e := json_path(d, "result.error")
+		testing.expectf(t, json_path(d, "result.ok") == "false" && (e == "not allowed for this caller" || strings.contains(e, "own session")), "refused: %s -> %s", cmd, d)
+	}
+	// its snapshot: its own session, and no Claude history
+	d = tc_cmd(c, `{"type":"get_state"}`)
+	testing.expect_value(t, json_path(d, "result.data.open_sessions.#"), "1")
+	testing.expect_value(t, json_path(d, "result.data.open_sessions.0.id"), fmt.tprint(sess))
+	testing.expect(t, !strings.contains(d, `"claude_sessions":[{`), "the history is the user's")
+	testing.expect(t, strings.contains(state_json(), `"claude_sessions":[{`), "the full snapshot has it")
+	// a pi tab never reports for a Claude tab
+	p, rp := tc_hello(pi_tok)
+	testing.expect_value(t, json_path(rp, "result.data.caller"), "panel")
+	d = tc_cmd(p, fmt.tprintf(`{{"type":"claude.session","tab_id":%d,"session_id":"%s"}}`, ctab, sid))
+	testing.expect_value(t, json_path(d, "result.ok"), "false")
+	tc_close(p)
+	// closed: the token dies with the tab, and its connections with it
+	run_command(Close_Tab{tab_id = ctab}, sk_ui)
+	testing.expect(t, tc_closed(c), "its open connections are shut")
+	tc_close(c)
+	c3, rc3 := tc_hello(tok)
+	testing.expect_value(t, json_path(rc3, "result.error"), "unknown token")
+	tc_close(c3)
+}
+
+// The process check with real processes: a grandchild of the tab's process (sh -c 'sh -c client')
+// is accepted; the same client re-parented to launchd (double fork) is refused.
+@(test)
+socket_claude_token_process_tree :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	wd, _ := os.get_working_directory(context.temp_allocator)
+	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.make_directory_all(dir)
+	client := fmt.tprintf("%s/client.py", dir)
+	src := `import json, os, socket, sys, time
+out, orphan = sys.argv[1], sys.argv[2] == "orphan"
+if orphan:
+    if os.fork() != 0:
+        os._exit(0)
+    for _ in range(100):
+        if os.getppid() == 1:
+            break
+        time.sleep(0.02)
+time.sleep(0.3)
+s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+s.connect(os.environ["PI_DESK_SOCKET"])
+s.sendall((json.dumps({"id": "h", "v": 1, "type": "hello", "token": os.environ["PI_DESK_CLAUDE_TOKEN"]}) + "\n").encode())
+line = s.makefile().readline()
+with open(out + ".tmp", "w") as f:
+    f.write(json.dumps({"ppid": os.getppid(), "reply": json.loads(line)}))
+os.rename(out + ".tmp", out)
+`
+	_ = os.write_entire_file(client, transmute([]u8)src)
+	ok_out, orphan_out := fmt.tprintf("%s/grandchild.json", dir), fmt.tprintf("%s/orphan.json", dir)
+	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`sh -c "sh -c 'python3 -I %s %s child'"; python3 -I %s %s orphan; exec sleep 30`, client, ok_out, client, orphan_out))
+	sess, _, _ := sk_pi_tab(t, dir)
+	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
+	testing.expect(t, r.ok, r.error)
+	read :: proc(path: string) -> string {
+		for _ in 0 ..< 300 {
+			inbox_drain()
+			if data, err := os.read_entire_file(path, context.temp_allocator); err == nil do return string(data)
+			time.sleep(20 * time.Millisecond)
+		}
+		return ""
+	}
+	g := read(ok_out)
+	testing.expectf(t, json_path(g, "reply.result.ok") == "true" && json_path(g, "reply.result.data.caller") == "claude", "grandchild: %s", g)
+	o := read(orphan_out)
+	testing.expect_value(t, json_path(o, "ppid"), "1")
+	testing.expect_value(t, json_path(o, "reply.result.error"), "this token works only from its Claude tab's own processes")
+	run_command(Close_Tab{tab_id = r.created_id}, sk_ui)
+}
+
+// A panel caller whose tab pi-desk does not know (yet: before it is in its session) sees no events.
+@(test)
+socket_panel_events_fail_closed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sk_start(t)
+	defer sk_stop()
+	c, _ := tc_hello(socket_mint_token({kind = .Panel, tab_id = 987654}))
+	testing.expect_value(t, json_path(tc_req(c, "s", `{"id":"s","v":1,"type":"subscribe"}`), "result.ok"), "true")
+	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
+	testing.expect_value(t, tc_event(c, 500), "")
+	tc_close(c)
+}
+
+// An app hears nothing before its hello reply (docs/TAB-PROTOCOL.md §3): pi-desk's main thread
+// sends tab.visible or an agent's app_call as soon as the connection counts as the app's, so that
+// must not happen before the reply is queued. A thread sends to the tab without pause while the
+// app says hello; the first line the app reads is the reply, every time.
+@(test)
+socket_app_hears_nothing_before_its_hello_reply :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sk_start(t)
+	defer sk_stop()
+	Spam :: struct {
+		tab:  u64,
+		stop: bool,
+	}
+	TAB :: 777001
+	early, sent := 0, 0
+	for i in 0 ..< 40 {
+		sp := Spam{tab = TAB}
+		th := thread.create_and_start_with_poly_data(&sp, proc(sp: ^Spam) {
+			for !sync.atomic_load(&sp.stop) {
+				socket_app_send(sp.tab, `{"id":"a0","v":1,"type":"tab.visible","visible":true}`)
+			}
+		})
+		c := tc_connect()
+		tc_send(c, fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s"}}`, socket_mint_token({kind = .App, tab_id = TAB}, context.temp_allocator)))
+		first := tc_recv(c)
+		sync.atomic_store(&sp.stop, true)
+		thread.join(th)
+		thread.destroy(th)
+		if json_path(first, "id") != "h" do early += 1
+		testing.expectf(t, first != "", "round %d: no line at all", i)
+		// the thread's lines do arrive, right after the reply
+		if tc_recv(c, 1000) != "" do sent += 1
+		tc_close(c)
+		// the connection is gone before the next round (the newest open one gets the lines)
+		for _ in 0 ..< 200 {
+			if !socket_app_connected(TAB) do break
+			time.sleep(time.Millisecond)
+		}
+	}
+	testing.expectf(t, early == 0, "%d of 40 apps read a request before their hello reply", early)
+	testing.expectf(t, sent > 0, "the sending thread never reached an app (%d)", sent)
+}
+
+// An app tab's process is gone (Restart of a hung app, its exit): its connection no longer counts as
+// the tab's at once, not only once its reader thread has seen the end. Otherwise the frame loop saw
+// the old connection still open right after a Restart, then gone before the new process connected,
+// and stopped the new process ("the app closed its connection"): app-tab's Restart once ended
+// "exited" under load.
+@(test)
+socket_forget_tab_ends_the_connection_at_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sk_start(t)
+	defer sk_stop()
+	still := 0
+	for i in 0 ..< 20 {
+		tab, c := sk_app_tab(t)
+		testing.expectf(t, socket_app_connected(tab), "round %d: connected after its hello", i)
+		socket_forget_tab(tab)
+		if socket_app_connected(tab) do still += 1
+		tc_close(c)
+	}
+	testing.expectf(t, still == 0, "%d of 20 forgotten tabs still had an open connection", still)
+}
+
+// ---- test-script mode and a fast app (docs/DEVELOPING.md "Test mode") ----
+
+@(private = "file")
+fast_app: ^Tc
+@(private = "file")
+fast_tab: u64
+
+// A session with an app tab whose program is the test: its hello is said, it answers nothing yet.
+@(private = "file")
+sk_app_tab :: proc(t: ^testing.T) -> (tab: u64, c: ^Tc) {
+	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
+	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	s := find_session(sess)
+	testing.expect(t, s != nil, "a session")
+	tab = new_id()
+	append(&s.tabs, Tab{id = tab, kind = App_Tab{exit_code = -1}, title = strings.clone("app"), status = .Running})
+	r: string
+	c, r = tc_hello(socket_mint_token({kind = .App, tab_id = tab}))
+	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	return
+}
+
+// A script's app_call whose reply comes while pi-desk is still draining the inbox (a fast app; the
+// script runs the command and drains in one step) finishes the call: the finished result is kept,
+// never lost with the script then waiting for it forever.
+@(test)
+script_keeps_a_reply_that_comes_inside_the_drain :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sk_start(t)
+	defer sk_stop()
+	fast_tab, fast_app = sk_app_tab(t)
+	defer tc_close(fast_app)
+	script_drain = proc() {
+		inbox_drain() // app_call sends its line
+		req := tc_recv(fast_app)
+		tc_send(fast_app, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{"x":7}}}}}}`, json_path(req, "id")))
+		// the reply is read and run before this drain returns
+		for _ in 0 ..< 1000 {
+			inbox_drain()
+			left := false
+			for _, p in pending do if p.tab_id == fast_tab do left = true
+			if !left do break
+			time.sleep(time.Millisecond)
+		}
+	}
+	defer script_drain = inbox_drain
+	// only what this test changes (last_finished: the finished result it gets)
+	was_finished := autotest.last_finished
+	autotest.last_finished = ""
+	defer {
+		delete(autotest.last_finished)
+		autotest.last_finished = was_finished
+	}
+	_, r, finished := script_command(App_Call{tab_id = fast_tab, method = strings.clone("game.get")}, {kind = .Script})
+	testing.expect(t, r.ok && r.pending, "app_call is long-running")
+	testing.expect(t, finished, "its finished result already came")
+	testing.expect_value(t, json_path(autotest.last_finished, "data.x"), "7")
+	result_free(r)
+}
+
+// A script waiting for a long-running command's finished result gives up with a TIMEOUT failure
+// after script_finish_timeout, or after the command's own timeout_ms + 10 s when that is longer:
+// a scene ends, it never hangs, and never gives up before the command's own timeout could fire.
+@(test)
+script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sk_start(t)
+	defer sk_stop()
+	tab, c := sk_app_tab(t)
+	defer tc_close(c)
+	// only what this test changes
+	was_active, was_started, was_next, was_failures, was_lines := autotest.active, autotest.started, autotest.next, autotest.failures, autotest.lines
+	was_wait, was_until, was_deadline := autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline
+	was_timeout := script_finish_timeout
+	defer {
+		autotest.active, autotest.started, autotest.next, autotest.failures, autotest.lines = was_active, was_started, was_next, was_failures, was_lines
+		autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline = was_wait, was_until, was_deadline
+		script_finish_timeout = was_timeout
+	}
+	script_finish_timeout = 200 * time.Millisecond
+	run :: proc(lines: []string, ms: time.Duration) {
+		autotest.active, autotest.started, autotest.next, autotest.failures = true, true, 0, 0
+		autotest.wait_request, autotest.wait_until = 0, {}
+		autotest.lines = lines
+		autotest_step()
+		start := time.tick_now()
+		for autotest.failures == 0 && time.tick_since(start) < ms {
+			inbox_drain()
+			autotest_step()
+			time.sleep(10 * time.Millisecond)
+		}
+	}
+	// no timeout_ms of its own (app_call's default is 10 s): the script's ceiling
+	run({fmt.tprintf(`command {{"type":"app_call","tab_id":%d,"method":"game.never"}}`, tab)}, 3 * time.Second)
+	testing.expect_value(t, autotest.failures, 1)
+	testing.expect_value(t, autotest.wait_request, 0)
+	app_fail_pending(tab, "the test ended", "tab_gone")
+	inbox_drain()
+	// timeout_ms 600 s: the script still waits after its own 200 ms (until 610 s)
+	run({fmt.tprintf(`command {{"type":"app_call","tab_id":%d,"method":"game.never","timeout_ms":600000}}`, tab)}, 800 * time.Millisecond)
+	testing.expect_value(t, autotest.failures, 0)
+	testing.expect(t, autotest.wait_request != 0, "still waiting for the call")
+	d := time.tick_diff(time.tick_now(), autotest.wait_request_deadline)
+	testing.expectf(t, d > 600 * time.Second && d <= 610 * time.Second, "deadline in %v", d)
+	app_fail_pending(tab, "the test ended", "tab_gone")
+	inbox_drain()
+	testing.expect_value(t, autotest.wait_request, 0)
 }

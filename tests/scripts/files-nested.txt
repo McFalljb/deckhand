@@ -1,0 +1,49 @@
+# Files-nested scene (tests/scripts/files-nested.sh). Project rows at the start:
+# 0 golf/ (repo)  1 handmade/ (repo)  2 linked/ (symlink)  3 locked/ (000)  4 plain/
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 200
+clickid sess 0
+waitfor ARGS: --session 15000
+# golf and handmade are projects of their own too (the user's case: nothing opened)
+command {"type":"add_project","cwd":"@PROJ@/golf"}
+command {"type":"add_project","cwd":"@PROJ@/handmade"}
+wait 300
+clickid lefttab 1
+wait 400
+assert_files golf\nhandmade\nlinked\nlocked\nplain\n
+shot files-nested/tree
+# a folder that is its own repository opens with a click
+clickid frow 0
+eventually
+assert_files golf/\n  src\nhandmade\n
+clickid frow 2
+eventually
+assert_files handmade/\n  code\nlinked\n
+# and the folders below it
+clickid frow 1
+eventually
+assert_files golf/\n  src/\n    golf.c\nhandmade/\n
+# a symlinked folder opens in place
+clickid frow 5
+eventually
+assert_files linked/\n  e.txt\nlocked\n
+# a folder that cannot be listed says why, with Retry
+clickid frow 7
+eventually
+assert_files locked/\n  ! Can't open: permission denied\nplain\n
+hover fretry 8
+eventually
+assert_tip Can't open: permission denied. Retry lists the folder again
+wait 600
+shot files-nested/expanded
+# Retry while it still cannot be listed: listed again, the same answer
+clickid fretry 8
+wait 300
+assert_files locked/\n  ! Can't open: permission denied\nplain\n
+# a plain folder opens
+clickid frow 9
+eventually
+assert_files plain/\n  p.txt\n
+shot files-nested/all
+quit

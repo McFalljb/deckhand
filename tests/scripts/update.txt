@@ -1,4 +1,4 @@
-# pi-desk's own updates (tests/scripts/update.sh): a fake install of 0.1.0, release 0.1.1
+# Deckhand's own updates (tests/scripts/update.sh): a fake install of 0.1.0, release 0.1.1
 # from local files. Offer, Skip, Check for Updates, Later, Update, Restart to update.
 wait 1500
 waitstate 10000 update.available true
@@ -6,7 +6,7 @@ assert_state update.current 0.1.0
 assert_state update.latest 0.1.1
 assert_state update.can_install true
 assert_state update.phase none
-assert_drawn pi-desk 0.1.1 is available
+assert_drawn Deckhand 0.1.1 is available
 shot update/available
 # agents read it but cannot act on it
 control_command {"type":"update_download"}
@@ -17,7 +17,7 @@ control_command {"type":"set_update_check","on":false}
 assert_result error not allowed for this caller
 # Skip this version: gone, and remembered
 hover update_skip
-wait 900
+eventually
 assert_tip Do not offer this version again (Check for Updates… offers it again)
 clickid update_skip
 assert_state update.available false
@@ -48,7 +48,7 @@ waitstate 30000 update.phase ready
 assert_state update.message 
 shot update/ready
 # the staged bundle changes after it was checked: refused right before the rename
-replace_in_file $cwd/build/update/install/.pi-desk-update-0.1.1.app/Contents/Info.plist APPL|APPX
+replace_in_file $cwd/build/update/install/.deckhand-update-0.1.1.app/Contents/Info.plist APPL|APPX
 ui_command {"type":"update_install"}
 ui_command {"type":"update_install","confirm":"$token"}
 assert_result error the update's code signature does not verify, or it changed since it was checked

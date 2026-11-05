@@ -147,7 +147,7 @@ comments_strip_session :: proc() -> ^Open_Session {
 	t := active_tab()
 	if t == nil do return nil
 	#partial switch _ in t.kind {
-	case Pi_Tab, Browser_Tab, App_Tab: return s
+	case Pi_Tab, Browser_Tab, App_Tab, Claude_Tab: return s
 	}
 	return nil
 }
@@ -159,7 +159,9 @@ plural :: proc(n: int) -> string {return n == 1 ? "comment" : "comments"}
 comments_message :: proc(s: ^Open_Session) -> (msg: string, can_send: bool, why: string) {
 	n := len(s.comments)
 	can_send, why = comments_can_send(s)
-	if s.attach.sending != 0 do return fmt.tprintf("Sending %d %s to pi…", n, plural(n)), false, why
+	if s.attach.sending != 0 do return fmt.tprintf("Sending %d %s to %s…", n, plural(n), comments_to_word(s)), false, why
+	// Send now goes into the Claude tab on screen; the next message there takes them too
+	if comments_claude_target(s) != nil do return fmt.tprintf("%d %s will go with your next message", n, plural(n)), can_send, why
 	if ok, wait := comments_ready(s); !ok do return fmt.tprintf("%d %s wait: %s", n, plural(n), wait), can_send, why
 	return fmt.tprintf("%d %s will go with your next message", n, plural(n)), can_send, why
 }
@@ -232,17 +234,30 @@ labels_w :: proc(labels: []string) -> f32 {
 	return w
 }
 
+// Who a session's comments go to, in words: its Claude in a Claude-only session (no pi), else pi.
+comments_agent_word :: proc(s: ^Open_Session) -> string {
+	return s != nil && s.agent == .Claude ? "Claude" : "pi"
+}
+
+// Who the strip's comments go to now: the Claude tab on screen (comments_claude_target) or a
+// Claude-only session's Claude, else pi.
+comments_to_word :: proc(s: ^Open_Session) -> string {
+	if s != nil && comments_claude_target(s) != nil do return "Claude"
+	return comments_agent_word(s)
+}
+
+// The close prompt's line and its send button (a tab's close, or the session's: tab nil).
+comments_ask_text :: proc(s: ^Open_Session, tab: ^Tab, n: int) -> (msg, send: string) {
+	agent := comments_agent_word(s)
+	if tab != nil do return fmt.tprintf("Close %q? %d %s on it %s not sent to %s yet", tab.title, n, plural(n), n == 1 ? "is" : "are", agent), "Send and close"
+	return fmt.tprintf("Close this session? %d %s %s not sent to %s yet (closing stops %s)", n, plural(n), n == 1 ? "is" : "are", agent, agent), "Send now"
+}
+
 @(private = "file")
 ask_bar :: proc(s: ^Open_Session, tab: ^Tab, n: int) {
 	th := theme()
-	msg: string
-	send := "Send and close"
-	if tab != nil do msg = fmt.tprintf("Close %q? %d %s on it %s not sent to pi yet", tab.title, n, plural(n), n == 1 ? "is" : "are")
-	else {
-		msg = fmt.tprintf("Close this session? %d %s %s not sent to its pi yet (closing stops pi)", n, plural(n), n == 1 ? "is" : "are")
-		send = "Send now"
-	}
-	can, _ := comments_can_send(s)
+	msg, send := comments_ask_text(s, tab, n)
+	can, _ := comments_can_send(s, for_tab = tab != nil) // a tab's: pi's path (comments_send_now with tab_id)
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + labels_w({"Cancel", "Drop and close", send})
 	if clay.UI(clay.ID("cm_ask_bar"))(bar_layout()) {
 		dot(th.waiting)
@@ -273,7 +288,7 @@ new_bar :: proc() {
 		}) {
 			shown, _, _ := tf_display(&comment_new_field, focused ? ime.marked : "")
 			if clay.UI(clay.ID("cm_new_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
-				if shown == "" && !focused do clay.Text("What should pi know about it?", txt(th.text_muted))
+				if shown == "" && !focused do clay.TextDynamic(fmt.tprintf("What should %s know about it?", comments_to_word(comments_strip_session())), txt(th.text_muted))
 				else do clay.TextDynamic(shown, txt(th.text))
 			}
 		}
@@ -288,6 +303,7 @@ strip :: proc(s: ^Open_Session) {
 	th := theme()
 	msg, can, _ := comments_message(s)
 	ready, _ := comments_ready(s)
+	if comments_claude_target(s) != nil do ready = true // Claude's next message takes them
 	view := comments_ui.open ? "Hide" : "View"
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + labels_w({view, "Clear", "Send now"})
 	if clay.UI(clay.ID("cm_strip"))(bar_layout()) {
@@ -381,6 +397,7 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 	case .Send:
 		if s := comments_strip_session(); s != nil {
 			if ok, why := comments_can_send(s); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
+			if comments_claude_target(s) != nil || s.agent == .Claude do return "Send the comments to Claude now, as a message of their own", ""
 		}
 		return "Send the comments to pi now, as a message of their own", ""
 	case .Edit:   return "Change this comment's text", ""
@@ -389,13 +406,17 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 	case .Cancel: return "Keep the comment as it was", "Esc"
 	case .Field:  return "", ""
 	case .Ask_Send:
+		agent := "pi"
 		if s, _, _ := ask_target(); s != nil {
-			if ok, why := comments_can_send(s); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
+			if ok, why := comments_can_send(s, for_tab = state.comments_ask.tab_id != 0); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
+			agent = comments_agent_word(s)
+			// a Claude-only session's Send and close: Claude's hook takes all of its comments
+			if s.agent == .Claude && state.comments_ask.tab_id != 0 do return "Send the session's comments to Claude now (its next message takes them all), then close the tab", ""
 		}
-		return state.comments_ask.tab_id != 0 ? "Send its comments to pi now, then close the tab" : "Send the comments to pi now; the session stays open", ""
+		return state.comments_ask.tab_id != 0 ? fmt.tprintf("Send its comments to %s now, then close the tab", agent) : fmt.tprintf("Send the comments to %s now; the session stays open", agent), ""
 	case .Ask_Drop:   return "Remove the comments and close", ""
 	case .Ask_Cancel: return "Keep it open, with its comments", ""
-	case .New_Add:    return "Add the comment: it goes to this session's pi with your next message", "Enter"
+	case .New_Add:    return fmt.tprintf("Add the comment: it goes to this session's %s with your next message", comments_to_word(comments_strip_session())), "Enter"
 	case .New_Cancel: return "Forget this comment", "Esc"
 	case .New_Field:  return "", ""
 	}
@@ -422,7 +443,7 @@ comments_click :: proc(h: Hit_Comments) {
 	case .Ask_Send:
 		s, _, _ := ask_target()
 		if s == nil do return
-		if ok, _ := comments_can_send(s); !ok do return // disabled
+		if ok, _ := comments_can_send(s, for_tab = a.tab_id != 0); !ok do return // disabled
 		if a.tab_id != 0 do ui_do(Close_Tab{tab_id = a.tab_id, comments = .Send})
 		else {
 			ui_do(Comments_Send_Now{session = a.session})

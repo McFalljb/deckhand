@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- pi-desk.app under the hardened runtime (Developer ID builds only; scripts/release.sh).
+<!-- Deckhand.app under the hardened runtime (Developer ID builds only; scripts/release.sh).
      allow-jit: Chromium's V8 runs in the browser process too.
      allow-unsigned-executable-memory: kept to be safe; once a Developer ID build exists, try
      removing it (current Chromium needs only allow-jit) and keep it out if pages still run.

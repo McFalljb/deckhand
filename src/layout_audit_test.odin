@@ -216,8 +216,19 @@ au_session :: proc(home, cwd, id, title: string, minute: int) {
 	_ = os.write_entire_file(path, transmute([]u8)text)
 }
 
+// The sweep below in four parts (every fourth width/look/appearance), each a test of its own, so
+// tests/unit.py runs them in parallel: together they are the whole sweep.
+LAYOUT_PARTS :: 4
 @(test)
-layout_no_overlap :: proc(t: ^testing.T) {
+layout_no_overlap_1 :: proc(t: ^testing.T) {layout_no_overlap(t, 0)}
+@(test)
+layout_no_overlap_2 :: proc(t: ^testing.T) {layout_no_overlap(t, 1)}
+@(test)
+layout_no_overlap_3 :: proc(t: ^testing.T) {layout_no_overlap(t, 2)}
+@(test)
+layout_no_overlap_4 :: proc(t: ^testing.T) {layout_no_overlap(t, 3)}
+
+layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	root := fmt.tprintf("%s/pd-audit-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	os.make_directory_all(root)
 	buf: [posix.PATH_MAX]u8
@@ -410,6 +421,7 @@ layout_no_overlap :: proc(t: ^testing.T) {
 	}
 	// every width at every text size; the looks, light and dark at the default size
 	widths, sizes := AUDIT_WIDTHS, TEXT_SIZE_ORDER
+	combo := 0 // the width/look/appearance combinations so far: this part takes every LAYOUT_PARTS-th
 	for run in 0 ..< len(Text_Size) * len(widths) {
 		w := widths[run % len(widths)]
 		if size := sizes[run / len(widths)]; size != state.settings.text_size {
@@ -419,6 +431,8 @@ layout_no_overlap :: proc(t: ^testing.T) {
 		for look in Theme_Id {
 			for light in ([]bool{false, true}) {
 				if state.settings.text_size != .Default && (look != .Graphite || light) do continue
+				combo += 1
+				if (combo - 1) % LAYOUT_PARTS != part do continue // another part's
 				state.settings.theme = look
 				state.settings.appearance = light ? .Light : .Dark
 				for cols in 0 ..< 4 {
@@ -543,7 +557,15 @@ layout_no_overlap :: proc(t: ^testing.T) {
 						delete(setup_ui.why)
 						setup_ui.why = strings.clone("named in ~/.pi/agent/AGENTS.md; it has a sessions/ folder")
 						state.focus_widget = "setup"
-						for step in 0 ..< SETUP_STEPS {
+						// the accounts step: found ones, one typed in without Claude Code's files, a long label, a warning
+						for d, k in ([]string{"/Users/someone/.claude", "/Users/someone/.claude-work", "/Volumes/External/a-very-long-folder-name-for-claude/config-of-the-team"}) {
+							append(&setup_ui.accounts, Setup_Account{dir = strings.clone(d), label = strings.clone(k == 2 ? "A rather long account name for here" : claude_account_label_of(d)), orig_label = strings.clone(""), keep = k != 1, fixed = k == 0, hand = k == 2, marked = k != 2})
+						}
+						setup_ui.acct_show = true
+						setup_ui.acct_default = 2
+						delete(setup_ui.acct_msg)
+						setup_ui.acct_msg = strings.clone("It has no Claude Code files yet (.claude.json, .credentials.json): added anyway; Claude Code makes them when you sign in there.")
+						for step in 0 ..< setup_steps() {
 							setup_ui.step = step
 							for variant in 0 ..< 2 {
 								setup_ui.main = variant == 0 ? .Detected : .Other
@@ -560,6 +582,7 @@ layout_no_overlap :: proc(t: ^testing.T) {
 						}
 						ui_hover = nil
 						state.focus_widget = ""
+						setup_ui.acct_show = false
 					}
 					// the bell's popover over it all, a row hovered
 					state.focus_widget = "notifications"
@@ -753,9 +776,9 @@ markdown_layout_pathological :: proc(t: ^testing.T) {
 	run :: proc(t: ^testing.T, name, text: string, limit: time.Duration) -> bool {
 		v := new(Md_View)
 		v.doc = md_parse(text)
-		t0 := time.tick_now()
+		t0 := thread_cpu_now() // CPU time: a busy machine does not fail it
 		for w in ([]f32{700, 1300}) do md_layout(v, w)
-		d := time.tick_since(t0)
+		d := thread_cpu_since(t0)
 		fmt.printfln("markdown layout: %s (%d KB) in %.1f ms", name, len(text) / 1000, f64(d) / f64(time.Millisecond))
 		md_free(v.doc)
 		lay_free(&v.lay)
@@ -776,9 +799,9 @@ markdown_html_pathological :: proc(t: ^testing.T) {
 	if !testing.expect(t, audit_ui(), "fonts") do return
 	v := new(Md_View)
 	v.doc = md_parse(strings.concatenate({"<div>\n", strings.repeat("<a ", 350_000, context.temp_allocator), "\n"}, context.temp_allocator))
-	t0 := time.tick_now()
+	t0 := thread_cpu_now() // CPU time: a busy machine does not fail it
 	md_layout(v, 700)
-	d := time.tick_since(t0)
+	d := thread_cpu_since(t0)
 	fmt.printfln("markdown layout: an unclosed '<' in HTML, 1 MB, in %.1f ms", f64(d) / f64(time.Millisecond))
 	testing.expectf(t, d < time.Second, "took %v", d)
 	md_free(v.doc)

@@ -6,8 +6,10 @@
 # Also opens a 50k-line C file and measures idle CPU with an editor open.
 # Screenshots go to build/shots/editor/. Usage: tests/scripts/editor.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/editor"
 rm -rf "$W"
 FAKE_HOME="$W/home"
@@ -21,7 +23,7 @@ awk 'BEGIN { for (i = 0; i < 50000; i++) printf "int f%d(int x) { return x; } //
 run() { # script log [args]
   s=$1; l=$2; shift 2
   HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$s" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$@" > "$l" 2>&1 || true
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@" > "$l" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$l" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$l" || ! grep -q "done:" "$l"; then
     echo "editor scene failed (log: $l)"; exit 1

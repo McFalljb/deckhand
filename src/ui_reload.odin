@@ -2,7 +2,8 @@ package main
 
 // The hot-reload bars over the centre (reload.odin has the model): one for
 // changed pi files ("pi settings changed — Reload N idle tabs") and one
-// for a pi update ("pi updated to X — Restart N idle tabs"). Each has
+// for a pi update ("pi updated to X — Restart N idle tabs") or changed pi
+// extensions ("pi extensions changed — …", Settings: pi_integration.odin). Each has
 // Details (which files changed, what each tab does), Later and its action.
 // They replace the editor's old "reload pi" bar after saving a settings
 // file: that save shows the reload bar at once.
@@ -79,7 +80,7 @@ reload_bar_shows :: proc() -> bool {
 }
 
 restart_bar_shows :: proc() -> bool {
-	if state.reload.restart_dismissed || state.reload.pi_version == "" do return false
+	if state.reload.restart_dismissed do return false
 	n := reload_counts(true)
 	return n.idle + n.busy + n.no_bridge + n.queued + n.reloading > 0
 }
@@ -100,7 +101,9 @@ tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
 reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 	n := reload_counts(restart)
 	if restart {
-		head := fmt.tprintf("pi updated to %s", state.reload.pi_version)
+		version := restart_on_version() // else only the pi extensions changed
+		head := version ? fmt.tprintf("pi updated to %s", state.reload.pi_version) : "pi extensions changed"
+		on := version ? fmt.tprintf(" on pi %s", state.reload.pi_version) : ""
 		switch {
 		case n.idle > 0:
 			msg = fmt.tprintf("%s — Restart %d idle %s", head, n.idle, tabs_word(n.idle))
@@ -109,11 +112,11 @@ reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 		case n.busy > 0:
 			return fmt.tprintf("%s — %d busy %s restart when idle", head, n.busy, tabs_word(n.busy)), true
 		case n.queued > 0:
-			return fmt.tprintf("Restarting on pi %s — %d %s wait until idle", state.reload.pi_version, n.queued, tabs_word(n.queued)), false
+			return fmt.tprintf("Restarting%s — %d %s wait until idle", on != "" ? on : " pi tabs", n.queued, tabs_word(n.queued)), false
 		case n.reloading > 0:
-			return fmt.tprintf("Restarting %d pi %s on pi %s…", n.reloading, tabs_word(n.reloading), state.reload.pi_version), false
+			return fmt.tprintf("Restarting %d pi %s%s…", n.reloading, tabs_word(n.reloading), on), false
 		}
-		return fmt.tprintf("%s — %d %s without pi-desk's bridge: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
+		return fmt.tprintf("%s — %d %s without Deckhand's bridge: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
 	}
 	head := "pi settings changed"
 	if ap := agent_prompt_path(); ap != "" && len(state.reload.changed) > 0 {
@@ -133,7 +136,7 @@ reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 	case n.reloading > 0:
 		return fmt.tprintf("Reloading %d pi %s…", n.reloading, tabs_word(n.reloading)), false
 	case n.no_bridge > 0:
-		return fmt.tprintf("%s — %d %s without pi-desk's bridge: /reload there by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
+		return fmt.tprintf("%s — %d %s without Deckhand's bridge: /reload there by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
 	}
 	return fmt.tprintf("%s — new pi tabs use it", head), false
 }
@@ -158,7 +161,7 @@ tab_line :: proc(s: ^Open_Session, t: ^Tab, restart: bool) -> string {
 		what = restart ? "restarting" : "reloading"
 	case restart ? reload_outdated(t) : t.reload.stale:
 		switch reload_class(t) {
-		case .Idle:      what = restart ? fmt.tprintf("idle, on pi %s", t.reload.version) : "idle"
+		case .Idle:      what = restart ? (reload_version_outdated(t) ? fmt.tprintf("idle, on pi %s", t.reload.version) : "idle, started with other pi extensions") : "idle"
 		case .Busy:      what = t.waiting ? "waiting for you" : "working"
 		case .Blocked:   what = fmt.tprintf("background work: %s", t.blockers[0])
 		case .No_Bridge: what = "no status from its bridge"

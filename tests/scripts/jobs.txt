@@ -9,25 +9,27 @@ ui_command {"type":"set_pi_path","path":"$homedir/bin/pi"}
 ui_command {"type":"set_job_limits","stall":3}
 # ---- the Jobs tab: the fourth left tab; without a notes folder it asks for one
 clickid lefttab 3
-wait 300
+eventually
 assert_state layout.left_tab jobs
 hover lefttab 3
-wait 1000
+eventually
 assert_tip Atlas's jobs
 shot jobs/no-notes-dark
 command {"type":"set_notes_dir","path":"$homedir/notes"}
 assert_result ok false
 # the Jobs tab's "Set up pi-desk…": the first-run sheet; another folder, chats inside it
 clickid jobs_notes_dir
-wait 300
+eventually
 assert_state focus.id setup
+key enter
+wait 100
 pick_folder $homedir/notes
 clickid setupopt 1
 wait 300
 key enter
 key enter
 key enter
-wait 300
+eventually
 assert_state focus.kind terminal
 assert_state settings.home_dir $homedir/notes
 assert_state settings.folders.jobs.path $homedir/notes/jobs
@@ -167,7 +169,7 @@ shot jobs/menu-dark
 assert_drawn Disable
 assert_not_drawn Approve
 clickid menurow 10
-wait 300
+eventually
 assert_state pending_confirmations.# 1
 clickid confirm_yes
 waitstate 6000 jobs.# 14
@@ -184,28 +186,28 @@ wait 300
 assert_drawn Other
 shot jobs/grouped-dark
 hover jobgroup 0
-wait 1000
+eventually
 assert_tip Go to proj (~/proj)
 clickid jobgroupfold 1
 wait 300
 assert_not_drawn Job blk1
 shot jobs/grouped-folded-dark
 clickid jobgroupfold 1
-wait 300
+eventually
 assert_drawn Job blk1
 # ---- the job sheet: New job (+) opens a form; Create writes the note (enabled: true)
 clickid jobstool 0
-wait 300
+eventually
 assert_state focus.id job_sheet
 assert_drawn New job
 shot jobs/sheet-new-dark
 type zz sheet job
 # an input method's composition shows in the field; its commit lands there
 ime_mark ´
-wait 200
+eventually
 assert_drawn zz sheet job´
 ime_commit é
-wait 200
+eventually
 assert_drawn zz sheet jobé
 key backspace
 wait 100
@@ -246,7 +248,7 @@ key backspace
 key backspace
 key backspace
 type 08:15
-wait 200
+eventually
 assert_drawn Next run:
 clickid jsfield 4
 type Check the build.
@@ -258,11 +260,11 @@ assert_drawn for_project: ~/proj
 shot jobs/sheet-filled-dark
 # Edit as note and Back to form
 clickid jsbtn 6
-wait 300
+eventually
 assert_drawn Back to form
 shot jobs/sheet-note-dark
 clickid jsbtn 6
-wait 300
+eventually
 assert_drawn Edit as note
 clickid jsbtn 9
 waitstate 6000 jobs.# 15
@@ -278,7 +280,7 @@ assert_file $notesdir/jobs/zz-sheet-job.md enabled: true
 rclickid jobrow 2
 wait 300
 clickid menurow 4
-wait 300
+eventually
 assert_state focus.id job_sheet
 assert_drawn Edit job
 clickid jsfield 4
@@ -345,24 +347,24 @@ wait 300
 assert_state projects.# 2
 assert_state focus.id job_sheet
 key escape
-wait 300
+eventually
 assert_state focus.kind terminal
 # a group row goes to its project
 clickid jobgroup 0
-wait 300
+eventually
 assert_state layout.left_tab sessions
 # the project's menu and the row under it open the sheet for it
 rclickid proj 0
 wait 300
 shot jobs/project-menu-dark
-clickid menurow 2
-wait 300
+clickmenu New job for this project…
+eventually
 assert_state focus.id job_sheet
 assert_drawn for_project: ~/proj
 key escape
 wait 300
 clickid newjob
-wait 300
+eventually
 assert_state focus.id job_sheet
 assert_drawn for_project: ~/proj
 key escape
@@ -371,24 +373,24 @@ clickid lefttab 3
 wait 300
 # ---- pause all from the header, resume from the banner; the limits
 clickid jobstool 1
-wait 300
+eventually
 assert_state settings.jobs_paused true
 command {"type":"job_run_now","job":"ok1"}
 assert_result ok false
 shot jobs/paused-dark
 clickid jobs_resume_all
-wait 300
+eventually
 assert_state settings.jobs_paused false
 clickid jobstool 2
 wait 300
 clickid joblimit 3
-wait 200
+eventually
 assert_state settings.job_limits.day 1
 shot jobs/limits-dark
 clickid joblimit 3
 clickid joblimit 3
 clickid joblimit 3
-wait 200
+eventually
 assert_state settings.job_limits.day 0
 # ---- light
 ui_command {"type":"set_appearance","mode":"light"}
@@ -408,9 +410,14 @@ ui_command {"type":"set_appearance","mode":"dark"}
 clickid lefttab 3
 wait 500
 assert_not_drawn sk-ant-api03
-# ---- idle: the scheduler's tick draws nothing
+# ---- idle: the scheduler's tick draws nothing. A due check first, so what the clock jumps above
+# made due or changed shows before the window (when the window met the first real 30 s check it
+# drew that change); then one inside the window, where nothing changed, and the 2 s note scans
+jobs_clock 0
 wait 3000
 cpu_begin
-wait 10000
+wait 5000
+jobs_clock 0
+wait 5000
 cpu_end jobs idle
 quit

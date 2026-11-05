@@ -7,8 +7,10 @@
 # Writes build/shots/menu/ (the native menu bar as text, screenshots).
 # Usage: tests/scripts/menu.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/menu"
 rm -rf "$W" build/shots/menu
 FAKE_HOME="$W/home"
@@ -17,8 +19,12 @@ mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--" "$FAKE_HOME/
 printf '{"type":"session","version":3,"id":"mmmm-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_mmmm-1.jsonl"
 printf 'hello\n' > "$PROJ/a.txt"
+# Claude Code "installed" (a stand-in, never run) and every Claude tab runs an echo instead: never a
+# real claude, whatever this machine has on PATH (⌥⌘T, New session's picker)
+. tests/scripts/claude-stub.sh
+claude_stub "$FAKE_HOME"
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/menu.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$PROJ" > "$W/run.log" 2>&1 || true
+  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' PI_DESK_CLAUDE_CMD='echo "CLAUDE ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|menu:|unknown command" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|menu: |unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi

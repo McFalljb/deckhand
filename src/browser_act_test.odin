@@ -59,7 +59,7 @@ code_of :: proc(r: Result) -> string {
 
 @(private = "file")
 tmp_file :: proc(name: string) -> string {
-	dir := fmt.tprintf("build/test-data/act-%d", new_id())
+	dir := fmt.tprintf("build/test-data/act-%d-%d", os.get_pid(), new_id())
 	os.make_directory_all(dir)
 	p := fmt.tprintf("%s/%s", dir, name)
 	_ = os.write_entire_file(p, transmute([]u8)string("x"))
@@ -683,4 +683,41 @@ browser_act_activity_lingers :: proc(t: ^testing.T) {
 	act_linger[tb] = time.tick_add(time.tick_now(), -ACT_LINGER - time.Second)
 	testing.expect(t, !browser_act_session_background(s), "gone after the linger")
 	testing.expect(t, !browser_act_recent(tb), "the dot too")
+}
+
+// The sidebar names the tab that acts, not the session's harness: a Claude tab in a pi session
+// is "Claude is using a page".
+@(test)
+browser_act_sidebar_names_actor :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, b, _, pb, _, tb := act_reset()
+	defer act_done()
+	s := &state.open_sessions[1]
+	testing.expect_value(t, browser_act_session_text(s), "")
+	run_command(Browser_Click{tab_id = tb, target = {selector = "#a"}}, Caller{kind = .Panel, tab_id = pb}, 572)
+	testing.expect_value(t, browser_act_session_text(s), "pi is using a page")
+	browser_act_cancel(tb, "stopped", "stopped")
+	run_command(Browser_Click{tab_id = tb, target = {selector = "#a"}}, Caller{kind = .Panel, tab_id = pb, claude = true}, 573)
+	testing.expect_value(t, browser_act_session_text(s), "Claude is using a page")
+	browser_act_cancel(tb, "stopped", "stopped")
+	_ = b
+}
+
+// A Claude tab's actions are named for Claude, not pi: the upload bar and the agent strip.
+@(test)
+browser_act_claude_named :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, _, pa, _, ta, _ := act_reset()
+	defer act_done()
+	ends := ends_new()
+	defer ends_free(ends)
+	claude := Caller{kind = .Panel, tab_id = pa, claude = true}
+	f := tmp_file("report.pdf")
+	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, claude, 402)
+	testing.expect(t, act_test_to_bar(ta), "asking")
+	ask := act_upload_asking(ta)
+	testing.expect(t, ask != nil && strings.has_prefix(ask.who_text, "Claude in "), ask != nil ? ask.who_text : "no bar")
+	b := strings.builder_make(context.temp_allocator)
+	browser_agent_tab_json(&b, ta)
+	testing.expectf(t, strings.contains(strings.to_string(b), `"who":"Claude"`), "%s", strings.to_string(b))
 }

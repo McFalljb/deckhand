@@ -1,11 +1,12 @@
-# Every test-mode scene, nightly and on demand: the required ones plus those not required yet
-# (CEF and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings).
-# Not-yet-required failures are reported as warnings and never fail the run.
+# Every test-mode scene, nightly and on demand: tiers required and full in tests/scenes.txt (CEF
+# and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings). Failures
+# of the not-yet-required (full) scenes are warnings and never fail the run; a required one fails
+# it. What runs where and why: docs/TESTING.md.
 #
 # NEVER here: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh (real pi, paid
-# models). Left out as well: screenshot-only scenes (looks, font, shots, text-shots) and the
-# environment-sensitive ones (persist-cpu: CPU numbers; browser-netpolicy: which hosts Chromium
-# tries during a 20 s idle).
+# models; tier "paid", which tests/scenes.py refuses). Left out as well: the manual tier
+# (screenshot and benchmark tools: looks, font, shots, text-shots, persist-cpu, ...) and scenes
+# tagged noci (browser-netpolicy: which hosts Chromium tries during a 20 s idle).
 name: Scenes (full)
 
 on:
@@ -32,35 +33,28 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - { required: true, shard: "menus fetch-cef-test projects jobs markdown restore term-links settings setup menu" }
-          - { required: false, shard: "browser" }
-          - { required: false, shard: "browser-rlz comments app-tab sidebar editor" }
-          - { required: false, shard: "files changes worktrees buttons bell reload panels agent polish" }
-    name: scenes (${{ matrix.shard }})
+        shard: [1, 2, 3, 4]
+    name: scenes (${{ matrix.shard }}/4)
+    env:
+      SCENE_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive, persist-credentials: false }
       - uses: ./.github/actions/setup
-      - name: Build (with CEF)
-        run: ./build.sh
+      - name: Build (with CEF) and the fake app
+        run: ./build.sh && ./build.sh fake-app
+      - name: Which scenes
+        run: python3 tests/scenes.py --all --ci --shard ${{ matrix.shard }}/4 --list
       - name: Scenes
         id: scenes
-        continue-on-error: ${{ !matrix.required }}
-        run: |
-          fail=0
-          for s in ${{ matrix.shard }}; do
-            echo "::group::$s"
-            if ! tests/scripts/$s.sh; then echo "::warning::scene $s failed"; fail=1; fi
-            echo "::endgroup::"
-          done
-          exit $fail
-      - name: Upload screenshots and logs on failure
-        if: failure() || steps.scenes.outcome == 'failure'
+        run: python3 tests/scenes.py --all --ci --shard ${{ matrix.shard }}/4 --no-build --soft-tier full
+      - name: Upload screenshots and logs
+        if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: scene-output-${{ strategy.job-index }}
+          name: scene-output-${{ matrix.shard }}
           path: |
+            build/scenes
             build/shots
             build/**/*.log
           if-no-files-found: ignore

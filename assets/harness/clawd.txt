@@ -1,0 +1,32 @@
+Clawd, Claude Code's mascot: reference copy, as read from Claude Code 2.1.318's native binary
+(~/.local/share/claude/versions/2.1.318) on 2026-11-04. Read with a script, never run.
+
+1. The welcome-screen art (its default pose; the bundle's EH constant, the same rows its pose
+   tables compose for eyes "open", arms "down", feet "both"). Quadrant block characters, each
+   quadrant one cell wide and two tall in a terminal:
+
+ ▐▛███▛█
+▝▜██████▀
+ ▝▝   ▝▝
+
+   Colours (theme keys, the same in its dark, light and both daltonized themes; the two
+   ANSI-only themes use redBright / black): clawd_body rgb(215,119,87) = #D77757, clawd_background rgb(0,0,0),
+   which shows through the block characters' gaps as the eyes.
+
+2. The pixel-art Clawd (the "Clawd stirs a steaming pot" SVG Claude Code ships,
+   shape-rendering="crispEdges", 8 units a cell): its body path, fill #d77757, is the same
+   13 x 8 body, 2-cell arms and four 1 x 2 legs; its eyes are 1 x 2 cells, fill #141414
+   (shifted one cell right in that pose, looking at the pot).
+
+As drawn by Deckhand (src/logos.odin: LOGO_CLAWD), square cells, '#' body, 'e' eye:
+
+..#############..
+..#############..
+..##e#######e##..
+..##e#######e##..
+#################
+#################
+..#############..
+..#############..
+..#.#.......#.#..
+..#.#.......#.#..

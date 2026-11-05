@@ -1,0 +1,51 @@
+# Claude-only sessions, run 3 (tests/scripts/claude-sessions.sh): no Claude Code anywhere. The
+# restored Claude session does not start (its tab says why); no Claude rows in the menus and no
+# picker (pi alone: New session starts it at once); the row still lists; pi works as ever.
+wait 1500
+assert_state claude_installed false
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+waitstate 5000 open_sessions.0.tabs.0.status exited
+assert_screen Claude Code is not installed
+assert_rows sessions Parser design,Tidy the README
+wait 300
+shot claude-sessions/missing-restored
+# the menus have no Claude rows (a one-harness user sees nothing extra)
+rclickid proj 0
+eventually
+assert_menurows Pin|New session|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+shot claude-sessions/missing-menu
+key escape
+wait 300
+# + New session: pi at once, no picker
+clickid new
+eventually
+assert_state open_sessions.# 2
+assert_state open_sessions.1.agent pi
+shot claude-sessions/missing-new-pi
+ui_command {"type":"close_session","session":$session}
+ui_command {"type":"close_session","session":$session,"confirm":"$token"}
+wait 500
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+# a closed Claude row: the same message, no session
+ui_command {"type":"close_session","session":$session}
+assert_result ok true
+wait 300
+toast_clear
+clickid sess 0
+wait 300
+assert_toast Claude Code is not installed
+assert_state open_sessions.# 0
+# agents get the refusal too
+command {"type":"new_claude_session","project_id":$project}
+assert_result ok false
+# pi as ever
+ui_command {"type":"open_session","project_id":$project,"pi_session_id":"pppp-1"}
+assert_result ok true
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent pi
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

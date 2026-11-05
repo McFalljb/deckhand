@@ -1,0 +1,101 @@
+# Claude status feeds (tests/scripts/claude-feeds.sh; docs/CLAUDE.md §5a, §6a, §6b): a fake claude
+# (no OSC 7501) in Claude tabs, a fake claude install at 2.1.250 (never run).
+wait 1500
+window_active on
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
+assert_result ok true
+command {"type":"new_claude_tab","session":$session}
+assert_result ok true
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+# 1. an old Claude Code: the minimum-version bar (its version by where `claude` links to)
+waitstate 6000 reload.claude.version 2.1.250
+wait 500
+assert_state open_sessions.0.tabs.1.claude_version_old 2.1.250
+assert_drawn Claude Code 2.1.250 is older than 2.1.295
+shot claude-feeds/version-bar
+hover cl_status_go
+eventually
+assert_tip Copy “claude update” to paste into a shell tab
+clickid cl_status_go
+eventually
+assert_clipboard claude update
+assert_toast Copied: claude update
+clickid cl_status_dismiss
+wait 300
+assert_not_drawn is older than 2.1.295
+# 2. dots from the hooks: a permission dialog (Notification) is the waiting dot
+type !perm
+key enter
+waitstate 8000 open_sessions.0.tabs.1.agent_status.dot waiting
+assert_state open_sessions.0.tabs.1.agent_status.source none
+assert_state open_sessions.0.agent_status waiting
+shot claude-feeds/dot-waiting
+type y
+key enter
+waitstate 8000 open_sessions.0.tabs.1.agent_status.dot none
+# 3. background work: a background shell, then Stop's snapshot (a shell, a monitor, a cron)
+type !bg
+key enter
+waitstate 8000 open_sessions.0.tabs.1.background 2
+wait 300
+assert_drawn Background · 2 running
+assert_drawn As of Claude's last turn
+assert_drawn ● shell · Start the dev server
+assert_drawn ● monitor · watch CI
+assert_drawn ⏲ */5 * * * * · repeats
+assert_drawn Deckhand can't stop these: ask Claude
+assert_state open_sessions.0.tabs.1.turn idle
+# background work changes no dot: the turn is over
+assert_state open_sessions.0.tabs.1.agent_status.dot none
+shot claude-feeds/background-panel
+# a wait ends and its result lists what runs (descriptions; never a command)
+control_command {"type":"claude_wait_idle","tab_id":$tab,"timeout_ms":5000}
+assert_finished ok true
+assert_finished data.background_count 2
+assert_finished data.background.0.label Start the dev server
+assert_finished data.background.1.label watch CI
+# 4. a subagent at work: its current tool, its own todos
+type !sub-work
+key enter
+waitstate 8000 open_sessions.0.tabs.1.turn idle
+eventually
+assert_drawn ● Plan
+assert_drawn · Read
+assert_drawn Plan the migration
+assert_drawn Todos 1/3
+assert_drawn ▸ Drafting the steps
+shot claude-feeds/subagent
+# 5. nothing runs any more: finished, and the dot is not working
+type !bg-done
+key enter
+wait 1500
+assert_drawn ✓ shell · Start the dev server
+assert_state open_sessions.0.tabs.1.agent_status.dot none
+control_command {"type":"claude_wait_idle","tab_id":$tab,"timeout_ms":5000}
+assert_finished ok true
+# 6. a Claude tab whose hooks never run (disableAllHooks, a managed policy): the bar, after the grace
+command {"type":"new_claude_tab","session":$session,"args":["--fake-no-hooks"]}
+assert_result ok true
+waitstate 40000 open_sessions.0.tabs.2.hooks silent
+eventually
+assert_drawn Deckhand's Claude Code hooks aren't running here
+shot claude-feeds/hooks-bar
+hover newmenu
+wait 200
+hover cl_status_go
+eventually
+assert_tip Show Claude Code's settings files (the Settings tab)
+clickid cl_status_go
+eventually
+assert_drawn Claude Code (global)
+shot claude-feeds/hooks-settings
+clickid cl_status_dismiss
+wait 300
+assert_not_drawn hooks aren't running here
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

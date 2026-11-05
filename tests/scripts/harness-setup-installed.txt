@@ -1,0 +1,47 @@
+# The coding agents checklist (tests/scripts/harness-setup.sh, run 1): pi 1.5.0 from its installer
+# with both recommended packages, Claude Code 2.1.300 from its native installer. Everything is
+# ticked and nothing offers an action; the Settings tab's Coding agents group lists the same.
+wait 1500
+assert_state focus.id setup
+assert_state focus.step agents
+assert_state focus.steps 4
+assert_state focus.agents.# 6
+assert_state focus.agents.0.id pi
+assert_state focus.agents.0.state ok
+assert_state focus.agents.0.version 1.5.0
+assert_state focus.agents.0.layout official installer
+assert_state focus.agents.0.action none
+assert_state focus.agents.1.id pi-integration
+assert_state focus.agents.1.state built_in
+assert_state focus.agents.2.id pi-subagents
+assert_state focus.agents.2.state ok
+assert_state focus.agents.2.version 0.84.0
+assert_state focus.agents.3.id rpiv-todo
+assert_state focus.agents.3.state ok
+assert_state focus.agents.4.id claude
+assert_state focus.agents.4.state ok
+assert_state focus.agents.4.version 2.1.300
+assert_state focus.agents.4.layout official installer
+assert_state focus.agents.5.id claude-plugin
+assert_state focus.agents.5.state built_in
+shot harness-setup/installed-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot harness-setup/installed-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 100
+# Next: the main folder; Esc comes back
+key enter
+eventually
+assert_state focus.step main
+key escape
+eventually
+assert_state focus.step agents
+# Skip, then the Settings tab's Coding agents group
+key escape
+eventually
+assert_state focus.kind terminal
+clickid lefttab 2
+wait 500
+shot harness-setup/settings-installed-dark
+quit

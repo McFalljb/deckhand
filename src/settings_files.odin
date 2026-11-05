@@ -47,10 +47,16 @@ import "core:strings"
 import "core:time"
 import clay "../build/clay-odin"
 
-// pi's agent directory: PI_CODING_AGENT_DIR, else ~/.pi/agent.
+// pi's agent directory: PI_CODING_AGENT_DIR, else ~/.pi/agent. As pi reads it (getAgentDir,
+// expandTildePath): "~" is the home folder, "~/x" under it; a relative one (pi would take it from
+// its cwd, which differs per tab) falls back to ~/.pi/agent.
 pi_agent_dir :: proc() -> string {
-	if d := os.get_env("PI_CODING_AGENT_DIR", context.temp_allocator); d != "" do return d
-	return strings.concatenate({os.get_env("HOME", context.temp_allocator), "/.pi/agent"}, context.temp_allocator)
+	home := os.get_env("HOME", context.temp_allocator)
+	d := os.get_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	if d == "~" do d = home
+	else if strings.has_prefix(d, "~/") do d = strings.concatenate({strings.trim_right(home, "/"), d[1:]}, context.temp_allocator)
+	if d != "" && strings.has_prefix(d, "/") do return d
+	return strings.concatenate({home, "/.pi/agent"}, context.temp_allocator)
 }
 
 CREDENTIAL_REFUSED :: "credentials file: managed by pi (/login), not opened"
@@ -90,7 +96,7 @@ settings_credential :: proc(path: string, ids: []Cred_Id = nil) -> bool {
 			}
 			if k, st := path_stat(p); k == .File && st.mode & 0o077 == 0 do return true
 		}
-		return false
+		return claude_credential(p) // Claude Code's credentials, account state, transcripts (claude_reload.odin)
 	}
 	clean, _ := filepath.clean(path, context.temp_allocator)
 	if check(clean) || check(fs_real(clean)) do return true
@@ -111,6 +117,7 @@ credential_ids :: proc() -> []Cred_Id {
 	}
 	add(&out, fmt.tprintf("%s/auth.json", ad))
 	add(&out, fmt.tprintf("%s/models-store.json", ad))
+	for p in claude_credential_files() do add(&out, p) // .credentials.json, .claude.json
 	for dir in ([2]string{ad, fmt.tprintf("%s/intercom", ad)}) {
 		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 		if err != nil do continue
@@ -152,17 +159,43 @@ Settings_File_Row :: struct {
 	button: string, // not a file: a setting shown as text (note) with this button (ATLAS_MODEL_ROW)
 	reset:  bool, // a folder row (folders.odin): a Reset button (back to the default)
 	reveal: bool, // a folder row: a Reveal in Finder button
+	remove: bool, // a Claude account's row (claude_accounts.odin): a Remove button
+	make_default: bool, // a Claude account's row: a Make default button
 }
+
+// The Settings tab's Claude accounts group (claude_accounts.odin): an account's row is
+// CLAUDE_ACCOUNT_ROW + its folder (Rename…, Remove); the last row adds one (a folder picker).
+CLAUDE_ACCOUNT_ROW :: "pi-desk:claude-account:"
+CLAUDE_ACCOUNT_ADD_ROW :: "pi-desk:claude-account-add"
+CLAUDE_ACCOUNT_SCAN_ROW :: "pi-desk:claude-account-scan"
+CLAUDE_ACCOUNT_MORE_ROW :: "pi-desk:claude-account-more"
+
 
 // The Settings tab's Atlas group: its model is a row that is no file; its
 // button opens pi's model selector in Atlas's terminal.
 ATLAS_MODEL_ROW :: "pi-desk:atlas-model"
+
+// The Claude Code group's default flags for new tabs (Set_Claude_Default_Flags): the setting's
+// row (what is on), the flag's toggle row and its warning line.
+CLAUDE_FLAGS_HEAD_ROW :: "pi-desk:claude-default-flags-head"
+CLAUDE_FLAGS_ROW :: "pi-desk:claude-default-flags"
+CLAUDE_FLAGS_WARN_ROW :: "pi-desk:claude-default-flags-warning"
+
+// The pi extensions group (pi_integration.odin): one row per optional extension of Deckhand's pi
+// integration, PI_EXT_ROW + its name, with a Turn on / Turn off button (Set_Pi_Extension).
+PI_EXT_ROW :: "pi-desk:pi-extension:"
 
 // A row that is a setting, not a file.
 settings_setting_row :: proc(path: string) -> bool {return strings.has_prefix(path, "pi-desk:")}
 
 // The folders of pi's agent folder the tree shows (and that open).
 SETTINGS_FOLDERS :: [?]string{"prompts", "skills", "extensions"}
+
+// The folders of Claude Code's config folder the tree shows (and that open; never anything else
+// of that folder: claude_credential).
+CLAUDE_SETTINGS_FOLDERS :: [?]struct {
+	name, detail: string,
+}{{"agents", "subagents"}, {"skills", "skills"}, {"commands", "slash commands"}, {"output-styles", "output styles"}, {"rules", "rules"}}
 
 // pi's agent folder as written, cleaned (the tree's paths start here).
 settings_agent_dir :: proc() -> string {
@@ -196,26 +229,63 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		for x in out do if x.path == row.path do return
 		append(out, row)
 	}
-	add(&out, {group = "pi", label = "settings.json", detail = "model, theme, packages…", path = j(ad, "settings.json"), pi = true})
-	add(&out, {group = "pi", label = "models.json", detail = "may hold API keys", path = j(ad, "models.json"), pi = true})
-	add(&out, {group = "pi", label = "modes.json", detail = "modes", path = j(ad, "modes.json"), pi = true})
-	add(&out, {group = "pi", label = "keybindings.json", detail = "pi's keys", path = j(ad, "keybindings.json"), pi = true})
-	add(&out, {group = "pi", label = "mcp.json", detail = "MCP servers (may hold tokens)", path = j(ad, "mcp.json"), pi = true})
-	if name := context_file(ad); name != "" do add(&out, {group = "pi", label = name, detail = "instructions for every project", path = j(ad, name), pi = true})
-	add(&out, {group = "pi", label = "SYSTEM.md", detail = "replaces pi's system prompt", path = j(ad, "SYSTEM.md"), pi = true})
-	add(&out, {group = "pi", label = "APPEND_SYSTEM.md", detail = "added to pi's system prompt", path = j(ad, "APPEND_SYSTEM.md"), pi = true})
-	add(&out, {group = "pi", label = "prompts", detail = "prompt templates", path = j(ad, "prompts"), kind = .Folder})
-	add(&out, {group = "pi", label = "skills", detail = "skills", path = j(ad, "skills"), kind = .Folder})
-	add(&out, {group = "pi", label = "extensions", detail = "local extensions", path = j(ad, "extensions"), kind = .Folder})
-	if cwd := settings_project_cwd(); cwd != "" {
-		add(&out, {group = "project", label = ".pi/settings.json", detail = "overrides pi's settings here", path = j(cwd, ".pi/settings.json"), create = true, seed = "{}\n", pi = true})
-		if name := context_file(cwd); name != "" do add(&out, {group = "project", label = name, detail = "this project's instructions", path = j(cwd, name), pi = true})
-		else do add(&out, {group = "project", label = "AGENTS.md", detail = "this project's instructions", path = j(cwd, "AGENTS.md"), create = true, seed = "", pi = true})
+	// pi's groups only with pi installed (harness.odin): someone with Claude Code alone sees none
+	if pi_installed() {
+		add(&out, {group = "pi", label = "settings.json", detail = "model, theme, packages…", path = j(ad, "settings.json"), pi = true})
+		add(&out, {group = "pi", label = "models.json", detail = "may hold API keys", path = j(ad, "models.json"), pi = true})
+		add(&out, {group = "pi", label = "modes.json", detail = "modes", path = j(ad, "modes.json"), pi = true})
+		add(&out, {group = "pi", label = "keybindings.json", detail = "pi's keys", path = j(ad, "keybindings.json"), pi = true})
+		add(&out, {group = "pi", label = "mcp.json", detail = "MCP servers (may hold tokens)", path = j(ad, "mcp.json"), pi = true})
+		if name := context_file(ad); name != "" do add(&out, {group = "pi", label = name, detail = "instructions for every project", path = j(ad, name), pi = true})
+		add(&out, {group = "pi", label = "SYSTEM.md", detail = "replaces pi's system prompt", path = j(ad, "SYSTEM.md"), pi = true})
+		add(&out, {group = "pi", label = "APPEND_SYSTEM.md", detail = "added to pi's system prompt", path = j(ad, "APPEND_SYSTEM.md"), pi = true})
+		add(&out, {group = "pi", label = "prompts", detail = "prompt templates", path = j(ad, "prompts"), kind = .Folder})
+		add(&out, {group = "pi", label = "skills", detail = "skills", path = j(ad, "skills"), kind = .Folder})
+		add(&out, {group = "pi", label = "extensions", detail = "local extensions", path = j(ad, "extensions"), kind = .Folder})
+		// Deckhand's optional pi extensions: on or off for the pi tabs started from now on
+		for e in pi_integration_optional() {
+			add(&out, {group = "pi-ext", label = e.name, detail = fmt.tprintf("%s · %s (default %s; pi tabs, not jobs)", e.on ? "ON" : "off", e.does, e.default_on ? "on" : "off"), path = strings.concatenate({PI_EXT_ROW, e.name}, context.temp_allocator), button = e.on ? "Turn off" : "Turn on"})
+		}
+		if cwd := settings_project_cwd(); cwd != "" {
+			add(&out, {group = "project", label = ".pi/settings.json", detail = "overrides pi's settings here", path = j(cwd, ".pi/settings.json"), create = true, seed = "{}\n", pi = true})
+			if name := context_file(cwd); name != "" do add(&out, {group = "project", label = name, detail = "this project's instructions", path = j(cwd, name), pi = true})
+			else do add(&out, {group = "project", label = "AGENTS.md", detail = "this project's instructions", path = j(cwd, "AGENTS.md"), create = true, seed = "", pi = true})
+		}
+		for c in extension_configs() do add(&out, {group = "ext", label = c.label, detail = c.detail, path = c.path, kind = c.folder ? .Folder : .File, pi = !c.folder})
 	}
-	for c in extension_configs() do add(&out, {group = "ext", label = c.label, detail = c.detail, path = c.path, kind = c.folder ? .Folder : .File, pi = !c.folder})
+	// Claude Code (claude_reload.odin), once it has a config folder here (it has been used): its
+	// config only, never its credentials or state (.credentials.json, ~/.claude.json, projects/,
+	// sessions…: claude_credential refuses them)
+	// one group per account (claude_accounts.odin) once there are several
+	claude_used := false
+	accts := claude_accounts()
+	for a in accts {
+		cd := a.dir
+		if !os.is_dir(cd) do continue
+		claude_used = true
+		g := len(accts) > 1 ? strings.concatenate({"claude:", a.label}, context.temp_allocator) : "claude"
+		add(&out, {group = g, label = "settings.json", detail = "permissions, hooks, env, model (applied live)", path = j(cd, "settings.json")})
+		add(&out, {group = g, label = "CLAUDE.md", detail = "instructions for every project", path = j(cd, "CLAUDE.md"), create = true, seed = ""})
+		add(&out, {group = g, label = "keybindings.json", detail = "Claude Code's keys", path = j(cd, "keybindings.json")})
+		for f in CLAUDE_SETTINGS_FOLDERS do add(&out, {group = g, label = f.name, detail = f.detail, path = j(cd, f.name), kind = .Folder})
+	}
+	// the default flags for the Claude tabs the user starts (claude_with_defaults): off by default
+	if claude_used {
+		on := state.settings.claude_skip_permissions
+		add(&out, {group = "claude", label = "Default flags for new tabs", detail = on ? "--dangerously-skip-permissions" : "none", path = CLAUDE_FLAGS_HEAD_ROW})
+		add(&out, {group = "claude", label = "Skip permissions", detail = on ? "ON" : "off", path = CLAUDE_FLAGS_ROW, button = on ? "Turn off" : "Turn on"})
+		add(&out, {group = "claude", label = "Warning:", detail = on ? "Claude acts without asking" : "on, Claude acts without asking", path = CLAUDE_FLAGS_WARN_ROW})
+	}
+	if cwd := settings_project_cwd(); cwd != "" && claude_used {
+		add(&out, {group = "claude-project", label = ".claude/settings.json", detail = "the project's Claude Code settings (shared)", path = j(cwd, ".claude/settings.json"), create = true, seed = "{}\n"})
+		add(&out, {group = "claude-project", label = ".claude/settings.local.json", detail = "your settings here (not committed)", path = j(cwd, ".claude/settings.local.json")})
+		add(&out, {group = "claude-project", label = "CLAUDE.md", detail = "this project's instructions for Claude", path = j(cwd, "CLAUDE.md"), create = true, seed = ""})
+		add(&out, {group = "claude-project", label = "CLAUDE.local.md", detail = "your instructions here (not committed)", path = j(cwd, "CLAUDE.local.md")})
+		add(&out, {group = "claude-project", label = ".mcp.json", detail = "the project's MCP servers (may hold tokens)", path = j(cwd, ".mcp.json")})
+	}
 	// Atlas (agent.odin): its prompt file (made on its first start; Create
 	// writes the starter), its model
-	if p := agent_prompt_path(); p != "" {
+	if p := agent_prompt_path(); p != "" && pi_installed() {
 		add(&out, {group = "atlas", label = ATLAS_PROMPT_FILE, detail = "Atlas's prompt, added to pi's", path = p, create = true, seed = ATLAS_PROMPT_STARTER})
 		m := agent_model()
 		add(&out, {group = "atlas", label = "Model", detail = m != "" ? m : "pi's default", path = ATLAS_MODEL_ROW, button = "Change…"})
@@ -228,7 +298,7 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			entries, _ := os.read_all_directory_by_path(jd, context.temp_allocator)
 			slice.sort_by(entries, proc(a, b: os.File_Info) -> bool {return a.name < b.name})
 			for e in entries do if e.type == .Regular && strings.has_suffix(e.name, ".md") && !strings.has_prefix(e.name, ".") {
-				add(&out, {group = "jobs", label = fmt.tprintf("jobs/%s", e.name), detail = "a job note (runs on its schedule while pi-desk is open)", path = e.fullpath})
+				add(&out, {group = "jobs", label = fmt.tprintf("jobs/%s", e.name), detail = "a job note (runs on its schedule while Deckhand is open)", path = e.fullpath})
 			}
 		}
 	}
@@ -252,6 +322,23 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		if prev := state.home_dir_prev; prev != "" && os.is_dir(prev) do add(&out, {group = "folders", label = "Old main folder", detail = fmt.tprintf("%s (nothing moved)", fs_display(prev)), path = FOLDER_PREV_ROW, button = "Reveal"})
 		if u := notes_env_user(); u != "" do add(&out, {group = "folders", label = "PI_KIT_NOTES_DIR", detail = fmt.tprintf("yours: %s (pi-kit's notes go there)", fs_display(u)), path = FOLDER_ENV_ROW})
 	}
+	// Claude Code's accounts (claude_accounts.odin), last: the accounts themselves: each one's row once there are several, and Add account… (a
+	// config folder anywhere) once Claude Code has a config folder
+	if claude_used {
+		if len(accts) > 1 do for a in accts {
+			what := a.chosen ? "default" : a.default ? "your shell's" : CLAUDE_ACCOUNT_SOURCE_NAMES[a.source]
+			add(&out, {group = "claude-accounts", label = a.label, detail = fmt.tprintf("%s · %s", fs_display(a.dir), what), path = strings.concatenate({CLAUDE_ACCOUNT_ROW, a.dir}, context.temp_allocator), button = "Rename…", remove = !a.default, make_default = !a.chosen})
+		}
+		if len(accts) > 1 {
+			add(&out, {group = "claude-accounts", label = "Add account…", detail = "a Claude Code config folder (CLAUDE_CONFIG_DIR)", path = CLAUDE_ACCOUNT_ADD_ROW, button = "Add…"})
+			add(&out, {group = "claude-accounts", label = "Scan again", detail = "look for config folders in ~/.claude*, ~/.config/claude*", path = CLAUDE_ACCOUNT_SCAN_ROW, button = "Scan"})
+		} else {
+			// one account (most setups): one quiet row
+			add(&out, {group = "claude-accounts", label = "More accounts…", detail = "another Claude Code config folder", path = CLAUDE_ACCOUNT_MORE_ROW, button = "Add…"})
+		}
+	}
+	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
+	for r in harness_settings_rows() do add(&out, r)
 	return out[:]
 }
 
@@ -370,6 +457,12 @@ settings_json_kind :: proc(path: string) -> Json_Kind {
 		if rp == strings.concatenate({ad, "/", name}, context.temp_allocator) do return name == "models.json" ? .Comments : .Strict
 	}
 	if strings.has_suffix(rp, "/.pi/settings.json") do return .Strict
+	// Claude Code's settings files are strict JSON (its docs: a comment or a trailing comma is a
+	// Settings Error at the next start)
+	for d in claude_account_dirs() do if cd := fs_real(d); cd != "" {
+		for name in ([]string{"settings.json", "keybindings.json"}) do if rp == strings.concatenate({cd, "/", name}, context.temp_allocator) do return .Strict
+	}
+	if strings.has_suffix(rp, "/.claude/settings.json") || strings.has_suffix(rp, "/.claude/settings.local.json") do return .Strict
 	return .None
 }
 
@@ -586,6 +679,7 @@ atlas_reloadable :: proc() -> u64 {
 // Then the hot-reload bar shows at once (reload.odin), for the pi tabs that
 // read it: Atlas's prompt only Atlas, a project's file that project's.
 settings_after_save :: proc(tab_id: u64, path: string) {
+	claude_reload_note_save(path) // a file a running Claude reads only at start (claude_reload.odin)
 	rp := fs_real(path)
 	if ap := agent_prompt_path(); ap != "" && fs_real(ap) == rp {
 		reload_note_save(path, RELOAD_SCOPE_ATLAS)
@@ -612,6 +706,10 @@ settings_tree_root :: proc(path: string) -> string {
 	for sub in SETTINGS_FOLDERS {
 		d := strings.concatenate({ad, "/", sub}, context.temp_allocator)
 		if p == d || under(p, d) do return ad
+	}
+	for cd in claude_account_dirs() do for f in CLAUDE_SETTINGS_FOLDERS {
+		d := strings.concatenate({cd, "/", f.name}, context.temp_allocator)
+		if p == d || under(p, d) do return cd
 	}
 	return ""
 }
@@ -711,11 +809,17 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "pi":      return "pi (global)"
 	case "project": return fmt.tprintf("This project · %s", filepath.base(cwd))
 	case "ext":     return "Extensions"
+	case "pi-ext":  return "pi extensions (Deckhand's)"
 	case "atlas":   return agent_name()
 	case "jobs":    return fmt.tprintf("%s's jobs", agent_name())
 	case "chats":   return "Chats"
 	case "folders": return "Folders"
+	case "claude":  return "Claude Code (global)"
+	case "claude-accounts": return "Claude accounts"
+	case "agents":  return "Coding agents"
+	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
 	}
+	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
 	return group
 }
 
@@ -749,7 +853,8 @@ settings_tree_rows :: proc() -> []Files_Row {
 			}
 			tree_row(v, r.path, r.label, r.kind == .Folder ? .Dir : .File, r.detail, !r.exists, a)
 			if r.button != "" do v.rows[len(v.rows) - 1].button = strings.clone(r.button, a)
-			v.rows[len(v.rows) - 1].reset, v.rows[len(v.rows) - 1].reveal = r.reset, r.reveal
+			v.rows[len(v.rows) - 1].reset, v.rows[len(v.rows) - 1].reveal, v.rows[len(v.rows) - 1].remove = r.reset, r.reveal, r.remove
+			v.rows[len(v.rows) - 1].make_default = r.make_default
 			if r.group != "project" || r.label != ".pi/settings.json" do continue
 			// the rest of the project's .pi/ folder
 			dir := strings.concatenate({cwd, "/.pi"}, context.temp_allocator)

@@ -1,0 +1,197 @@
+# Agent status for every terminal tab (run with tests/scripts/agent-status.sh):
+# a fake agent (fake-7501.py) in a shell tab of aaaa-1 reports over OSC 7501.
+wait 800
+# in front (looking at a tab needs the window in front: the bell's rule)
+window front
+command {"type":"select_project","project_id":$project}
+wait 300
+# aaaa-1 (older: row 1), then bbbb-2 (row 0); then back to aaaa-1 (the Open group's row 1)
+clickid sess 1
+waitfor ARGS 10000
+clickid sess 0
+wait 500
+clickid open 1
+wait 300
+assert_state open_sessions.0.pi_session_id aaaa-1
+assert_state current_session $session
+# a shell tab in aaaa-1 ($last from here on) runs the fake agent
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$last,"text":"python3 $homedir/fake-7501.py\n"}
+# the handshake: pi-desk answers OSC 7501 ; ? with what it accepts
+waitfor HANDSHAKE-OK 10000
+assert_screen ?:states=idle,working,done,blocked,error:kinds=permission,question,auth
+assert_state open_sessions.0.tabs.1.agent_status.dot none
+assert_state open_sessions.0.tabs.1.agent_status.source none
+# ---- working, on screen: the tab, its row and project show it
+command {"type":"send_text","tab_id":$last,"text":"work\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot working
+assert_state open_sessions.0.tabs.1.agent_status.source osc7501
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.app fake-agent
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.message Thinking
+assert_state open_sessions.0.agent_status working
+assert_state open_sessions.1.agent_status none
+wait 300
+shot agent-status/working
+# the tab's tooltip: where the status came from and when
+hover tab 1
+eventually
+assert_tip fake-agent: working · OSC 7501, now — Thinking
+# ---- blocked: waiting for you
+command {"type":"send_text","tab_id":$last,"text":"block\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot waiting
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.kind permission
+assert_state open_sessions.0.agent_status waiting
+hover open 0
+eventually
+assert_tip shell 1: fake-agent: waiting for permission · OSC 7501, now — Edit main.odin?
+shot agent-status/blocked
+# ---- done while the user looks at another tab: unseen, a bell entry
+command {"type":"focus_tab","tab_id":$pitab}
+wait 200
+command {"type":"send_text","tab_id":$last,"text":"done\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot unseen
+assert_state open_sessions.0.tabs.1.agent_status.unseen true
+assert_state open_sessions.0.agent_status unseen
+command {"type":"notifications_list","limit":1}
+assert_result data.notifications.0.kind finished
+wait 300
+shot agent-status/unseen
+# looking at the tab marks it seen
+command {"type":"focus_tab","tab_id":$last}
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.unseen false
+assert_state open_sessions.0.agent_status none
+# ---- Mark as unread / Mark as read from the row's menu (the Open group's current row)
+rclickid open 0
+eventually
+assert_menurows Pin|New Claude tab here|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Mark as unread|Hide|Close session
+clickmenu Mark as unread
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.unseen true
+assert_state open_sessions.0.agent_status unseen
+shot agent-status/marked-unread
+rclickid open 0
+clickmenu Mark as read
+eventually
+assert_state open_sessions.0.agent_status none
+# marked unread, then looked at again: read
+rclickid open 0
+clickmenu Mark as unread
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.unseen true
+clickid open 1
+wait 300
+clickid open 1
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.unseen false
+# ---- the window behind: a finish is unseen even on the active tab; coming back reads it
+command {"type":"send_text","tab_id":$last,"text":"work\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot working
+window back
+command {"type":"send_text","tab_id":$last,"text":"idle\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.unseen true
+window front
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.unseen false
+# ---- nested ids: the most urgent record shows; clearing a parent takes its children
+command {"type":"send_text","tab_id":$last,"text":"nest\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.osc7501.records 3
+assert_state open_sessions.0.tabs.1.agent_status.dot waiting
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.id sub/1
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.kind question
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.title Sub one
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.app fake-agent
+command {"type":"send_text","tab_id":$last,"text":"clearsub\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.osc7501.records 1
+assert_state open_sessions.0.tabs.1.agent_status.dot working
+# ---- malformed and oversized input: dropped or bounded, the app keeps going
+command {"type":"send_text","tab_id":$last,"text":"bad\n"}
+waitfor ok:bad 5000
+wait 300
+state_json agent-status-bad
+# the unknown state and the 64 KiB report are dropped; the unknown kind is blocked with no kind;
+# bad base64 loses only its message
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.state blocked
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.records 2
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.app fake-agent
+command {"type":"send_text","tab_id":$last,"text":"long\n"}
+waitfor ok:long 5000
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.message BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB
+command {"type":"send_text","tab_id":$last,"text":"flood\n"}
+waitfor ok:flood 10000
+waitstate 5000 open_sessions.0.tabs.1.agent_status.osc7501.records 256
+command {"type":"send_text","tab_id":$last,"text":"clear\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.source none
+# ---- a new prompt (OSC 133 A) ends working and blocked; an error not seen yet stays
+command {"type":"send_text","tab_id":$last,"text":"work\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot working
+command {"type":"focus_tab","tab_id":$pitab}
+command {"type":"send_text","tab_id":$last,"text":"error\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot error
+assert_state open_sessions.0.tabs.1.agent_status.unseen true
+command {"type":"send_text","tab_id":$last,"text":"prompt\n"}
+wait 1500
+assert_state open_sessions.0.tabs.1.agent_status.dot error
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.records 1
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.message Build failed
+wait 300
+shot agent-status/error
+# looked at, with its program gone: it goes
+command {"type":"focus_tab","tab_id":$last}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.source none
+# ---- the program exits while working: the shell takes the foreground back, working goes
+command {"type":"send_text","tab_id":$last,"text":"clear\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.source none
+command {"type":"send_text","tab_id":$last,"text":"work\n"}
+waitstate 5000 open_sessions.0.tabs.1.agent_status.dot working
+command {"type":"send_text","tab_id":$last,"text":"exit\n"}
+waitfor BYE 5000
+waitstate 5000 open_sessions.0.tabs.1.agent_status.source none
+# ---- a report read after its program exited (`cat` a log): the shell holds the foreground, nothing waits
+command {"type":"send_text","tab_id":$last,"text":"/bin/cat $homedir/evil.log; echo CAT-DONE\n"}
+waitfor CAT-DONE 5000
+wait 1500
+assert_state open_sessions.0.tabs.1.agent_status.dot none
+assert_state open_sessions.0.agent_status none
+# ---- the attention sort: needs you first, whatever the order by recent activity
+command {"type":"send_text","tab_id":$last,"text":"python3 $homedir/fake-7501.py -2\n"}
+waitfor HANDSHAKE-OK-2 10000
+command {"type":"send_text","tab_id":$last,"text":"block\n"}
+waitstate 5000 open_sessions.0.agent_status waiting
+assert_rows sessions Which unit should the search index use,Import recipes from a CSV export
+# the project row's menu sorts its sessions: "Sessions by attention"
+rclickid proj 0
+eventually
+assert_menurows Pin|New session|New Claude tab|Rename…|-|Sessions by recent activity|Sessions by name|Sessions by created|Sessions by attention|-|Reveal in Finder|Copy path|-|Hide
+shot agent-status/sessions-sort-menu
+clickmenu Sessions by attention
+eventually
+assert_state sidebar.sort.sessions attention
+assert_rows sessions Import recipes from a CSV export,Which unit should the search index use
+shot agent-status/attention-sort
+# projects too, from the sort button on the PROJECTS heading (the project row rolls its sessions up)
+clickid sort 0
+eventually
+assert_menurows Recent activity|Name|Created|Needs attention|-|Show hidden
+shot agent-status/sort-menu
+clickmenu Needs attention
+eventually
+assert_state sidebar.sort.projects attention
+# back to recent
+command {"type":"set_sort","section":"sessions","by":"recent"}
+assert_rows sessions Which unit should the search index use,Import recipes from a CSV export
+# light look, one shot
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot agent-status/blocked-light
+ui_command {"type":"set_appearance","mode":"dark"}
+command {"type":"send_text","tab_id":$last,"text":"exit\n"}
+wait 300
+# ---- the shell exec's into an agent (same pid, its own process group): its reports stand
+command {"type":"send_text","tab_id":$last,"text":"exec python3 $homedir/fake-7501.py -3\n"}
+waitfor HANDSHAKE-OK-3 10000
+command {"type":"send_text","tab_id":$last,"text":"work\n"}
+eventually
+assert_state open_sessions.0.tabs.1.agent_status.dot working
+quit

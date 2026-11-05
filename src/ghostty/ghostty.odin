@@ -176,6 +176,8 @@ Terminal_Option :: enum c.int {
 	Selection            = 21,
 	Scrollback_Max_Bytes = 27,
 	Mode                 = 34, // Mode_Config*
+	Semantic_Prompt      = 42, // Semantic_Prompt_Fn: OSC 133 steps (a new prompt clears program status)
+	Program_Status       = 46, // Program_Status_Fn: OSC 7501 reports; while set, `OSC 7501 ; ?` is answered through Write_Pty
 }
 
 Terminal_Data :: enum c.int {
@@ -239,6 +241,61 @@ String :: struct {
 Write_Pty_Fn :: #type proc "c" (t: Terminal, userdata: rawptr, data: [^]u8, len: c.size_t)
 Title_Changed_Fn :: #type proc "c" (t: Terminal, userdata: rawptr)
 Color_Scheme_Fn :: #type proc "c" (t: Terminal, userdata: rawptr, out_scheme: ^Color_Scheme) -> bool
+
+// OSC 7501, the program status protocol (terminal.h: GhosttyTerminalProgramStatus;
+// https://www.superlogical.com/rex/docs/build/program-status). Only reports that
+// pass the spec's checks reach the callback; msg and title arrive decoded with no
+// control characters. Strings are valid during the call only.
+Program_Status_State :: enum c.int {
+	Idle    = 0,
+	Working = 1,
+	Done    = 2,
+	Blocked = 3,
+	Error   = 4,
+	Clear   = 5, // not a state: remove the record `id` and those under it ("" = all)
+}
+Program_Status_Kind :: enum c.int {
+	None       = 0,
+	Permission = 1,
+	Question   = 2,
+	Auth       = 3,
+}
+Program_Status :: struct {
+	size:     c.size_t,
+	state:    Program_Status_State,
+	kind:     Program_Status_Kind,
+	progress: i8, // 0-100, -1 = none
+	id:       String, // "" = the root record; "a/b" is a child of "a"
+	app:      String, // a stable name ("claude-code"), not a label
+	title:    String,
+	message:  String,
+}
+Program_Status_Fn :: #type proc "c" (t: Terminal, userdata: rawptr, report: ^Program_Status)
+
+// OSC 133 shell integration (terminal.h: GhosttyTerminalSemanticPrompt).
+Semantic_Prompt_Kind :: enum c.int {
+	Invalid      = 0,
+	Prompt_Start = 1,
+	Input_Start  = 2,
+	Output_Start = 3,
+	Command_End  = 4,
+}
+Semantic_Prompt_Prompt_Kind :: enum c.int {
+	Primary      = 0,
+	Right        = 1,
+	Continuation = 2,
+	Secondary    = 3,
+}
+Semantic_Prompt :: struct {
+	size:          c.size_t,
+	kind:          Semantic_Prompt_Kind,
+	prompt_kind:   Semantic_Prompt_Prompt_Kind,
+	has_exit_code: bool,
+	exit_code:     i32,
+	command:       String,
+	error:         String,
+}
+Semantic_Prompt_Fn :: #type proc "c" (t: Terminal, userdata: rawptr, event: ^Semantic_Prompt)
 
 // device.h: the light/dark report of mode 2031 and CSI ? 996 n
 Color_Scheme :: enum c.int {

@@ -1,0 +1,16 @@
+{
+  "name": "deckhand",
+  "version": "0.1.0",
+  "description": "Use Deckhand from a Deckhand Claude tab: its browser tabs, app tabs and the user's pending comments, through the deckhand command (no MCP server).",
+  "author": {
+    "name": "Deckhand"
+  },
+  "homepage": "https://github.com/McFalljb/deckhand",
+  "repository": "https://github.com/McFalljb/deckhand",
+  "license": "MIT",
+  "keywords": [
+    "deckhand",
+    "browser",
+    "desktop"
+  ]
+}

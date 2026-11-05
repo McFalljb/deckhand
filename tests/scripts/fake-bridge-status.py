@@ -1,12 +1,12 @@
-# A fake pi-kit bridge for tests/scripts/persist-cpu.sh: reports pi.status
+# A fake pi-integration bridge for tests/scripts/persist-cpu.sh: reports pi.status
 # and a todos panel once a second, as a working agent does.
 import json, os, socket, time
 s = socket.socket(socket.AF_UNIX)
-s.connect(os.environ["PI_DESK_SOCKET"])
+s.connect(os.environ["DECKHAND_SOCKET"])
 def send(m):
     m.setdefault("v", 1)
     s.sendall((json.dumps(m) + "\n").encode())
-send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
 print("\x1b[2J\x1b[Hpi  fake status bridge", flush=True)
 s.setblocking(False)
 i = 0

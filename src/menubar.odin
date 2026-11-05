@@ -49,14 +49,14 @@ Bar_Item :: struct {
 SEP :: Bar_Item{sep = true}
 
 MENUBAR := [?]Bar_Item {
-	{title = "pi-desk", sub = []Bar_Item {
-		{id = "about", title = "About pi-desk", native = .About},
+	{title = "Deckhand", sub = []Bar_Item {
+		{id = "about", title = "About Deckhand", native = .About},
 		{action = "check_updates"}, // pi-desk's own updates (update.odin)
 		SEP,
 		{action = "settings", title = "Settings…"},
-		{action = "setup"}, // "Set up pi-desk…": the first-run sheet (ui_setup.odin)
+		{action = "setup"}, // "Set up Deckhand…": the first-run sheet (ui_setup.odin)
 		SEP,
-		{id = "hide", title = "Hide pi-desk", keys = "⌘H", native = .Hide},
+		{id = "hide", title = "Hide Deckhand", keys = "⌘H", native = .Hide},
 		{id = "hide_others", title = "Hide others", keys = "⌥⌘H", native = .Hide_Others},
 		{id = "show_all", title = "Show all", native = .Show_All},
 		SEP,
@@ -66,6 +66,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "new_chat"},
 		{action = "new_session", title = "New session in project"},
 		{action = "new_shell_tab"},
+		{action = "new_claude_tab"},
 		{action = "new_browser_tab"},
 		{action = "add_project"},
 		{action = "open_file"},

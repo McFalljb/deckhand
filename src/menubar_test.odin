@@ -88,7 +88,7 @@ menubar_built_from_the_action_table :: proc(t: ^testing.T) {
 	}
 	// the sheet: grouped like the menus, every menu shortcut on it
 	rows := shortcut_rows()
-	testing.expect(t, rows[0].head && rows[0].label == "pi-desk")
+	testing.expect(t, rows[0].head && rows[0].label == "Deckhand")
 	for it in menubar_items() {
 		k := menubar_keys(it)
 		if k == "" || strings.has_prefix(it.action, "tab_") do continue
@@ -113,6 +113,10 @@ menubar_key_lookup :: proc(t: ^testing.T) {
 	testing.expect_value(t, menubar_key_action(.BACKSPACE, S), "") // the terminal's
 	testing.expect_value(t, menubar_key_action(.LEFT, S), "")
 	testing.expect_value(t, menubar_key_action(.N, S | SH), "new_session")
+	// ⌥⌘T: a Claude tab; new chats and sessions are one action each, the harness picked after (harness.odin)
+	testing.expect_value(t, menubar_key_action(.N, S | A), "")
+	testing.expect_value(t, menubar_key_action(.T, S | A), "new_claude_tab")
+	testing.expect_value(t, menubar_key_action(.N, S | SH | A), "")
 	k, ok := parse_keys("⇧⌘N")
 	testing.expect(t, ok && k.code == .N && k.mods == S | SH && k.equiv == "n" && k.ns_mods == NS_COMMAND | NS_SHIFT)
 	k, ok = parse_keys("⌃⌘F")

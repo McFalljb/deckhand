@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- "pi-desk Helper (Plugin).app" only (scripts/release.sh): helper.plist plus library
+<!-- "Deckhand Helper (Plugin).app" only (scripts/release.sh): helper.plist plus library
      validation off, as Chromium's own helper-plugin entitlements (a plugin process loads code
      not signed by our team). CEF still expects this helper bundle to exist.
      allow-unsigned-executable-memory: try removing it once a Developer ID build exists. -->

@@ -146,7 +146,7 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 			if !is || et.view != .File || fs_real(et.path) != rp do continue
 			s.active_tab = tab.id
 			if !c.preview do et.preview = false // opened for good (double-click, Enter)
-			focus_session(s.id)
+			focus_session(s.id, caller)
 			if e := editor_of(tab.id); e != nil && c.line > 0 do ed_goto(e, c.line, c.col)
 			return {ok = true, created_id = tab.id}, true
 		}
@@ -176,7 +176,7 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 			append(&s.tabs, tab)
 		}
 		s.active_tab = tab.id
-		focus_session(s.id)
+		focus_session(s.id, caller)
 		r = {ok = true, created_id = tab.id}
 		if e.refused != "" do r.data = fmt.aprintf(`{{"refused":%s}}`, quoted(e.refused))
 		return r, true

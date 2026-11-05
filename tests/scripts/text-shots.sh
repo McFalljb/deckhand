@@ -3,9 +3,11 @@
 # and long names, a fake pi, and a shell tab printing tests/scripts/text-sample.sh.
 # Usage: tests/scripts/text-shots.sh SCRIPT [BINARY]   (shots land in build/shots/)
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
+export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-BIN=${2:-build/pi-desk}
+BIN=${2:-build/deckhand}
 FAKE_HOME="$ROOT/build/text-home"
 PROJ="$ROOT/build/text-proj"
 rm -rf "$FAKE_HOME" build/test-data

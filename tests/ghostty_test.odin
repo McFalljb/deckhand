@@ -5,6 +5,8 @@ package tests
 //     (build/abi_sizes.txt, produced by `./build.sh test` from tests/abi_sizes.c);
 //  2. an end-to-end pass through the calls pi-desk makes.
 
+import "base:runtime"
+import "core:c"
 import "core:os"
 import "core:strconv"
 import "core:strings"
@@ -55,6 +57,18 @@ abi_matches_c :: proc(t: ^testing.T) {
 		{"Grid_Row_Data.Wrap value", int(gh.Grid_Row_Data.Wrap)},
 		{"Grid_Row_Data.Hyperlink value", int(gh.Grid_Row_Data.Hyperlink)},
 		{"Grid_Row size", int(size_of(gh.Grid_Row))},
+		{"Program_Status size", int(size_of(gh.Program_Status))},
+		{"Program_Status.progress offset", int(offset_of(gh.Program_Status, progress))},
+		{"Program_Status.id offset", int(offset_of(gh.Program_Status, id))},
+		{"Program_Status.message offset", int(offset_of(gh.Program_Status, message))},
+		{"Semantic_Prompt size", int(size_of(gh.Semantic_Prompt))},
+		{"Semantic_Prompt.exit_code offset", int(offset_of(gh.Semantic_Prompt, exit_code))},
+		{"Semantic_Prompt.error offset", int(offset_of(gh.Semantic_Prompt, error))},
+		{"Terminal_Option.Program_Status value", int(gh.Terminal_Option.Program_Status)},
+		{"Terminal_Option.Semantic_Prompt value", int(gh.Terminal_Option.Semantic_Prompt)},
+		{"Program_Status_State.Clear value", int(gh.Program_Status_State.Clear)},
+		{"Program_Status_Kind.Auth value", int(gh.Program_Status_Kind.Auth)},
+		{"Semantic_Prompt_Kind.Prompt_Start value", int(gh.Semantic_Prompt_Kind.Prompt_Start)},
 	}
 	seen := 0
 	text := string(data)
@@ -219,4 +233,97 @@ utf32_to_string :: proc(rs: []rune) -> string {
 	b := strings.builder_make()
 	for r in rs do strings.write_rune(&b, r)
 	return strings.to_string(b)
+}
+
+// OSC 7501 (program status): the query is answered only while the callback
+// is set; a report arrives decoded (msg base64), a malformed one does not.
+Ps_Probe :: struct {
+	reply:   [dynamic]u8,
+	reports: int,
+	state:   gh.Program_Status_State,
+	kind:    gh.Program_Status_Kind,
+	app:     string,
+	msg:     string,
+	id:      string,
+	prompts: int,
+}
+
+@(test)
+program_status_osc7501 :: proc(t: ^testing.T) {
+	term: gh.Terminal
+	testing.expect_value(t, gh.terminal_new(nil, &term, 40, 4), gh.Result.Success)
+	defer gh.terminal_free(term)
+	probe: Ps_Probe
+	defer {
+		delete(probe.reply)
+		delete(probe.app)
+		delete(probe.msg)
+		delete(probe.id)
+	}
+	gh.terminal_set(term, .Userdata, &probe)
+	write_pty :: proc "c" (gt: gh.Terminal, ud: rawptr, data: [^]u8, n: c.size_t) {
+		context = runtime.default_context()
+		p := (^Ps_Probe)(ud)
+		append(&p.reply, ..data[:n])
+	}
+	on_status :: proc "c" (gt: gh.Terminal, ud: rawptr, r: ^gh.Program_Status) {
+		context = runtime.default_context()
+		p := (^Ps_Probe)(ud)
+		p.reports += 1
+		p.state, p.kind = r.state, r.kind
+		delete(p.app)
+		delete(p.msg)
+		delete(p.id)
+		p.app = strings.clone(string(r.app.ptr[:r.app.len]))
+		p.msg = strings.clone(string(r.message.ptr[:r.message.len]))
+		p.id = strings.clone(string(r.id.ptr[:r.id.len]))
+	}
+	on_prompt :: proc "c" (gt: gh.Terminal, ud: rawptr, e: ^gh.Semantic_Prompt) {
+		p := (^Ps_Probe)(ud)
+		if e.kind == .Prompt_Start do p.prompts += 1
+	}
+	gh.terminal_set(term, .Write_Pty, rawptr(write_pty))
+	w :: proc(term: gh.Terminal, s: string) {gh.terminal_vt_write(term, raw_data(s), len(s))}
+
+	// no callback: no reply
+	w(term, "\x1b]7501;?\x1b\\")
+	testing.expect_value(t, len(probe.reply), 0)
+
+	gh.terminal_set(term, .Program_Status, rawptr(on_status))
+	gh.terminal_set(term, .Semantic_Prompt, rawptr(on_prompt))
+	w(term, "\x1b]7501;?\x1b\\")
+	reply := string(probe.reply[:])
+	testing.expectf(t, strings.has_prefix(reply, "\x1b]7501;?:states="), "reply %q", reply)
+	testing.expect(t, strings.contains(reply, "blocked"))
+	testing.expect(t, strings.contains(reply, "kinds=permission"))
+
+	// "Apply?" in base64
+	w(term, "\x1b]7501;state=blocked:kind=permission:app=claude-code:msg=QXBwbHk/\x07")
+	testing.expect_value(t, probe.reports, 1)
+	testing.expect_value(t, probe.state, gh.Program_Status_State.Blocked)
+	testing.expect_value(t, probe.kind, gh.Program_Status_Kind.Permission)
+	testing.expect_value(t, probe.app, "claude-code")
+	testing.expect_value(t, probe.msg, "Apply?")
+
+	w(term, "\x1b]7501;state=working:id=build/test\x07")
+	testing.expect_value(t, probe.reports, 2)
+	testing.expect_value(t, probe.id, "build/test")
+
+	// malformed: an unknown state is dropped; bad base64 drops only the message
+	w(term, "\x1b]7501;state=sleeping\x07")
+	testing.expect_value(t, probe.reports, 2)
+	w(term, "\x1b]7501;state=done:msg=!!!\x07")
+	testing.expect_value(t, probe.reports, 3)
+	testing.expect_value(t, probe.state, gh.Program_Status_State.Done)
+	testing.expect_value(t, probe.msg, "")
+
+	// RIS: a clear with an empty id
+	w(term, "\x1bc")
+	testing.expect_value(t, probe.reports, 4)
+	testing.expect_value(t, probe.state, gh.Program_Status_State.Clear)
+	testing.expect_value(t, probe.id, "")
+
+	// OSC 133 A: a new prompt
+	w(term, "\x1b]133;A\x07")
+	testing.expect_value(t, probe.prompts, 1)
 }

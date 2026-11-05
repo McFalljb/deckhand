@@ -47,7 +47,7 @@ mousecell click 4 0
 assert_opened https://example.com/wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww
 # right-click on a link: its menu (the URL, Open link, Open in default browser, Copy link)
 mousecell rclick 4 0
-wait 200
+eventually
 assert_drawn Open link
 assert_drawn Open in default browser
 assert_drawn Copy link
@@ -77,7 +77,7 @@ command {"type":"send_text","tab_id":$tab,"text":"clear; printf '\\033[?1000h\\0
 waitfor TRACK-ON 5000
 wait 300
 mousecell click 4 0 ctrl
-wait 200
+eventually
 assert_drawn Open in default browser
 key escape
 wait 200
@@ -88,7 +88,7 @@ assert_screen ^[[<16;21;3M
 assert_opened https://example.com/osc8
 # ⌘-click an http link: a browser tab of this session, in front
 mousecell click 10 1 cmd
-wait 300
+eventually
 assert_state open_sessions.0.tabs.2.kind browser
 assert_state open_sessions.0.tabs.2.url https://example.com/plain?q=1
 state_json term-links/state

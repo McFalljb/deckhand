@@ -1,0 +1,39 @@
+# Run 4 (tests/scripts/login-path.sh, issue #2): started with a non-bare PATH
+# (Nix-like) as a GUI launch. pi is only in ~/.pi/agent/bin; Homebrew's folder
+# and LE_SCENE_MARK come from the interactive shell (probe-1 at startup).
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"past-1"}
+waitfor FAKE PI managed ARGS: 15000
+assert_screen pi is installed at
+shot login-path/managed
+command {"type":"new_shell_tab","session":$session}
+wait 800
+type le-tool; echo "MARK=$LE_SCENE_MARK"
+key enter
+waitfor MARK=probe-1 10000
+assert_screen LE TOOL OK
+shot login-path/merged
+# the gear's Refresh shell environment: the shell is asked again (probe-2)
+clickid settings
+wait 300
+hover pop 28
+wait 200
+shot login-path/refresh-row
+clickid pop 28
+wait 1500
+shot login-path/refreshed
+# a new shell tab gets the new answer
+command {"type":"new_shell_tab","session":$session}
+wait 800
+type echo "NEW=$LE_SCENE_MARK"
+key enter
+waitfor NEW=probe-2 10000
+# the open one keeps the environment it started with
+command {"type":"focus_tab","tab_id":$prev}
+wait 300
+type echo "OLD=$LE_SCENE_MARK"
+key enter
+waitfor OLD=probe-1 10000
+quit

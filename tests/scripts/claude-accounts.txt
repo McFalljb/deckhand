@@ -1,0 +1,34 @@
+# Claude Code accounts (tests/scripts/claude-accounts.sh): two fake accounts with a fake transcript
+# each, run outside pi-desk; a pi session beside them.
+wait 2000
+assert_state claude_accounts.# 2
+assert_state claude_accounts.1.label Work
+assert_rows sessions Untitled session,Tidy the README,Fix the login bug,Plan the parser
+shot claude-accounts/rows-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot claude-accounts/rows-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 100
+# + New session: the harness picker, Claude Code once per account (harness.odin)
+clickid new
+eventually
+assert_menurows pi|Claude Code · Claude|Claude Code · Work
+shot claude-accounts/picker-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot claude-accounts/picker-light
+ui_command {"type":"set_appearance","mode":"dark"}
+wait 100
+key escape
+wait 100
+# a found row: resumed under its account
+ui_command {"type":"open_session","project_id":$project,"pi_session_id":"22222222-0000-4000-8000-000000000002"}
+wait 1500
+shot claude-accounts/resumed-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot claude-accounts/resumed-light
+ui_command {"type":"quit"}
+ui_command {"type":"quit","confirm":"$token"}
+wait 1000

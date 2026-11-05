@@ -252,6 +252,9 @@ assert_result data.code user_has_control
 pi_command {"type":"browser_navigate","tab_id":$tab,"url":"pidesk-test://web/nav-a.html"}
 assert_result data.code user_has_control
 shot browser-act/taken-over
+# the bar takes no click for BARS_GUARD (500 ms) after control changed hands (the shot used to
+# take a second, which hid it)
+wait 600
 clickid br_agent_handback
 act_assert control agent
 # 10. the user's own click while the agent presses keys: the agent pauses

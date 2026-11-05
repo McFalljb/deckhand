@@ -1,11 +1,11 @@
 package main
 
-// pi-desk updates itself (docs/GUIDE.md "Updates", docs/DEVELOPING.md "Update signing").
+// Deckhand updates itself (docs/GUIDE.md "Updates", docs/DEVELOPING.md "Update signing").
 //
 //   check     a minute after start and then about once a day while running (setting
 //             update_check, on by default), and on "Check for Updates…": GET the latest
-//             published release of McFalljb/pi-desk from GitHub's API with curl, nothing
-//             sent but "User-Agent: pi-desk/<version>". Failures are only logged
+//             published release of UPDATE_REPO (update_core.odin) from GitHub's API with curl, nothing
+//             sent but "User-Agent: Deckhand/<version>". Failures are only logged
 //             (commands.log, the update_checked event).
 //   offer     a newer X.Y.Z (no pre-releases, not the skipped one): a bar over the centre
 //             (ui_update.odin) with Release notes, Skip this version, Later and Update.
@@ -14,11 +14,11 @@ package main
 //             private folder in the data dir, checks size, SHA-256 and the Ed25519
 //             signature (src/updatesig, src/update_key.odin) BEFORE unpacking, unpacks
 //             with ditto, checks the names, links, bundle id, version and codesign, and
-//             copies the bundle next to the running one (.pi-desk-update-<v>.app).
+//             copies the bundle next to the running one (.deckhand-update-<v>.app).
 //   install   (Restart to update, the user's; confirmed while anything runs) the running
 //             bundle is renamed to <name>.app.old-<v>, the new one renamed into place, a
 //             detached /bin/sh waits for this process to exit and opens the new app, and
-//             pi-desk quits. The next start removes the old bundle.
+//             Deckhand quits. The next start removes the old bundle.
 //
 // Agents can read the state (get_state "update") but cannot check, download or install:
 // every update command is the user's (command_table.odin).
@@ -160,11 +160,11 @@ update_init :: proc() {
 update_env_find :: proc(test: bool, test_version, test_app: string) -> (version, bundle, why: string) {
 	if test {
 		if test_app == "" || under_applications(test_app) do return test_version, "", "test mode installs only into a fake folder (PI_DESK_UPDATE_APP), never under /Applications"
-		b, w := install_decision(upath(test_app, "Contents", "MacOS", "pi-desk"), path_writable)
+		b, w := install_decision(upath(test_app, "Contents", "MacOS", "Deckhand"), path_writable)
 		return test_version, b, w
 	}
 	exe := executable_path()
-	if exe == "" do return "", "", "cannot find pi-desk's own executable"
+	if exe == "" do return "", "", "cannot find Deckhand's own executable"
 	b, w := install_decision(exe, path_writable)
 	app := b
 	if app == "" {
@@ -224,7 +224,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		return {ok = true}, true
 	case Update_Check:
 		if upd.url == "" do return fail("update checks are off in test mode"), false
-		if !upd.known do return fail("pi-desk is still starting: try again in a moment"), false
+		if !upd.known do return fail("Deckhand is still starting: try again in a moment"), false
 		if upd.current == "" do return fail("this is a development build: it does not update itself"), false
 		if upd.phase == .Checking do return {ok = true}, false
 		if upd.phase == .Downloading do return fail("an update is downloading"), false
@@ -250,7 +250,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		update_set(&upd.message, "")
 		if (upd.phase == .Downloading || upd.phase == .Ready || upd.phase == .Installed) && r.version != upd.release.version {
 			// the update under way stays; a newer one is offered once this one runs
-			if manual do toast_show(fmt.tprintf("pi-desk %s is ready to install first (then %s)", upd.release.version, r.version))
+			if manual do toast_show(fmt.tprintf("Deckhand %s is ready to install first (then %s)", upd.release.version, r.version))
 			release_free(&r)
 			return {ok = true}, true
 		}
@@ -269,7 +269,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 					update_set(&upd.skipped, "")
 					update_save()
 					upd.offered = true
-				} else do toast_show(fmt.tprintf("pi-desk %s is up to date", upd.current))
+				} else do toast_show(fmt.tprintf("Deckhand %s is up to date", upd.current))
 			}
 		}
 		return {ok = true}, true
@@ -319,8 +319,8 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		if upd.bundle == "" do return fail(upd.why_not), false
 		if job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then restart to update"), true
 		if any_running() || jobs_any_running() {
-			what := fmt.tprintf("restart pi-desk to update to %s? Running sessions, shells and jobs will be stopped.", upd.release.version)
-			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("restart pi-desk to update to %s? Running sessions, shells and jobs will be stopped, and %d file%s with unsaved changes will be lost.", upd.release.version, n, n == 1 ? "" : "s")
+			what := fmt.tprintf("restart Deckhand to update to %s? Running sessions, shells and jobs will be stopped.", upd.release.version)
+			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("restart Deckhand to update to %s? Running sessions, shells and jobs will be stopped, and %d file%s with unsaved changes will be lost.", upd.release.version, n, n == 1 ? "" : "s")
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what, force_ask = true)
 			if !go_on do return gr, ch
 		}
@@ -337,7 +337,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 // Why Update cannot go ahead here ("" = it can).
 // release = false: only this copy of pi-desk (where it runs, its key), not the release.
 update_cannot_install :: proc(release := true) -> string {
-	if upd.bundle == "" do return upd.why_not != "" ? upd.why_not : "pi-desk cannot find its own app bundle"
+	if upd.bundle == "" do return upd.why_not != "" ? upd.why_not : "Deckhand cannot find its own app bundle"
 	if sig.is_placeholder(update_key()) do return "this build has no update key: update from the release page"
 	if release && !upd.release.has_sig do return "this release has no signature (.sig): update from the release page"
 	return ""
@@ -385,7 +385,7 @@ update_check_start :: proc(manual: bool) {
 }
 
 update_user_agent :: proc() -> string {
-	return fmt.tprintf("pi-desk/%s", upd.current != "" ? upd.current : "dev")
+	return fmt.tprintf("Deckhand/%s", upd.current != "" ? upd.current : "dev")
 }
 
 // curl with nothing from the user's curlrc (-q first), https only (file: in test mode),
@@ -522,7 +522,7 @@ remove_tree :: proc(path: string) {
 
 // The staged bundle's path for a version, next to the running bundle.
 update_staged_path :: proc(bundle, version: string) -> string {
-	return upath(filepath.dir(bundle), fmt.tprintf(".pi-desk-update-%s.app", version))
+	return upath(filepath.dir(bundle), fmt.tprintf("%s%s.app", UPDATE_STAGED_PREFIX, version))
 }
 
 // Any thread. The new bundle's path next to the running one, or why not.
@@ -563,7 +563,7 @@ update_prepare :: proc(p: Prep) -> (staged, cdhash: string, err: string) {
 	sig_text, serr := os.read_entire_file(sig_path, context.temp_allocator)
 	if serr != nil do return "", "", "cannot read the signature"
 	signed_cd, sig_b64, sok := sig.sig_file_parse(string(sig_text))
-	if !sok do return "", "", "its signature file is not one pi-desk reads"
+	if !sok do return "", "", "its signature file is not one Deckhand reads"
 	manifest := sig.manifest(p.version, name, size, sum, signed_cd, context.temp_allocator)
 	if !sig.verify(p.key, transmute([]byte)manifest, sig_b64) do return "", "", "its signature is not valid"
 
@@ -578,7 +578,7 @@ update_prepare :: proc(p: Prep) -> (staged, cdhash: string, err: string) {
 	// nothing writable by group or others (links are not followed: chmod -R is -P)
 	run_group({"/bin/chmod", "-R", "go-w", x}, 120 * time.Second, cap = 1 << 20)
 	if why := extract_check(x); why != "" do return "", "", why
-	app := upath(x, "pi-desk.app")
+	app := upath(x, UPDATE_APP)
 	if why := bundle_check(app, p.version, signed_cd); why != "" do return "", "", why
 
 	// next to the running bundle (same folder, so the swap is a rename)
@@ -586,7 +586,7 @@ update_prepare :: proc(p: Prep) -> (staged, cdhash: string, err: string) {
 	remove_tree(staged)
 	if _, st := run_group({"/usr/bin/ditto", app, staged}, 600 * time.Second, cap = 1 << 20); st != .Ok {
 		remove_tree(staged)
-		return "", "", fmt.tprintf("cannot copy the new pi-desk next to %s", filepath.base(p.bundle))
+		return "", "", fmt.tprintf("cannot copy the new Deckhand next to %s", filepath.base(p.bundle))
 	}
 	// the quarantine flag only from the bundle that passed (ditto keeps xattrs); no flag is fine
 	run_group({"/usr/bin/xattr", "-d", "-r", "com.apple.quarantine", staged}, 120 * time.Second, cap = 1 << 20)
@@ -630,7 +630,7 @@ install_check :: proc(staged, version, cdhash: string) -> string {
 bundle_check :: proc(app, version, cdhash: string) -> string {
 	if !sig.cdhash_valid(cdhash) do return "the update has no signed CDHash"
 	plist := upath(app, "Contents", "Info.plist")
-	if id := plist_value(plist, "CFBundleIdentifier"); id != UPDATE_BUNDLE_ID do return fmt.tprintf("the update is not pi-desk (bundle id %q)", id)
+	if id := plist_value(plist, "CFBundleIdentifier"); id != UPDATE_BUNDLE_ID do return fmt.tprintf("the update is not Deckhand (bundle id %q)", id)
 	if v := plist_value(plist, "CFBundleShortVersionString"); v != version do return fmt.tprintf("the update's version is %q, not %s", v, version)
 	exe := plist_value(plist, "CFBundleExecutable")
 	if exe == "" || strings.contains_any(exe, "/\x00") do return "the update names no executable"
@@ -655,7 +655,7 @@ update_swap :: proc() -> string {
 	bundle, staged := upd.bundle, upd.staged
 	st: posix.stat_t
 	if posix.lstat(strings.clone_to_cstring(staged, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return "the prepared update is gone: click Update again"
-	if !staged_path_ok(staged, bundle) do return "the prepared update is not next to pi-desk"
+	if !staged_path_ok(staged, bundle) do return "the prepared update is not next to Deckhand"
 	// right before the rename: still ours, still the signed bundle, still that version
 	if why := install_check(staged, upd.release.version, upd.cdhash); why != "" {
 		update_drop_staged()
@@ -681,7 +681,7 @@ update_swap :: proc() -> string {
 			os.rename(backup, bundle)
 			update_set(&upd.backup, "")
 			update_save()
-			return "cannot move the new pi-desk into place"
+			return "cannot move the new Deckhand into place"
 		}
 		old_at = backup
 	} else if os.rename(staged, backup) == nil {
@@ -743,7 +743,7 @@ relaunch_spawn :: proc(bundle: string) -> bool {
 		"/bin/sh",
 		"-c",
 		script,
-		"pi-desk-relaunch",
+		"deckhand-relaunch",
 		strings.clone_to_cstring(fmt.tprintf("%d", posix.getpid()), context.temp_allocator),
 		strings.clone_to_cstring(bundle, context.temp_allocator),
 		nil,
@@ -839,7 +839,7 @@ update_save :: proc() {
 	fmt.sbprintf(&b, `,"backup_starts":%d,"staged":`, upd.backup_starts)
 	json_quote(&b, upd.staged)
 	strings.write_string(&b, "}\n")
-	if e := write_atomic(p, strings.to_string(b)); e != "" do fmt.eprintln("pi-desk: could not save", p, ":", e)
+	if e := write_atomic(p, strings.to_string(b)); e != "" do fmt.eprintln("Deckhand: could not save", p, ":", e)
 }
 
 // ---- the wire ----

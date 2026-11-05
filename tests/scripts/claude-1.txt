@@ -1,0 +1,259 @@
+# Claude Code tabs, run 1 (tests/scripts/claude.sh; docs/CLAUDE.md): a fake claude
+# (fake-claude.py) that runs the bundled plugin's hooks and its `pi-desk` CLI as Claude Code would.
+# A browser page and the fake app beside it; the "+" menu's New Claude tab; its session id from the
+# SessionStart hook; the CLI against both tabs; the token refused outside the tab's processes; an
+# agent's text held while the user types; comments with the next message; closed, its row in the
+# project's list resumes it in a Claude-only session; quit (run 2 restores both).
+wait 1500
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
+assert_result ok true
+assert_state open_sessions.# 1
+# 1. a page and an app tab in the session
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+app_open build/fake-app
+app_waitstatus running 20000
+app_waitframe 3 20000
+assert_state open_sessions.0.tabs.# 3
+# 2. the "+" menu: a Claude tab in the session, on screen, started with the plugin
+clickid newmenu
+wait 300
+shot claude/plus-menu
+clickmenu New Claude tab
+eventually
+assert_state open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.3.kind claude
+assert_state open_sessions.0.tabs.3.id $tab
+# (its turn starts unknown: claude_test.odin; here the fake's SessionStart may beat this line)
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+assert_screen claude-code
+# its SessionStart hook: the session id with the tab and in the history; the turn idle
+waitstate 10000 open_sessions.0.tabs.3.claude_session_id 0c1a0de0-1111-4222-8333-444455556666
+waitstate 5000 open_sessions.0.tabs.3.turn idle
+assert_state claude_sessions.# 1
+assert_state claude_sessions.0.id 0c1a0de0-1111-4222-8333-444455556666
+assert_state claude_sessions.0.open true
+shot claude/new-tab
+# 3. the CLI from inside the tab: its session's browser and app tabs (each a turn: hooks run)
+type !cli tabs
+key enter
+waitfor CLI tabs -> exit 0 15000
+waitstate 5000 open_sessions.0.tabs.3.turn idle
+assert_state claude_sessions.0.title !cli tabs
+type !cli read {browser}
+key enter
+waitfor CLI read  15000
+waitstate 10000 open_sessions.0.tabs.3.turn idle
+type !cli screenshot {browser}
+key enter
+waitfor CLI screenshot  15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli app call {app} tab.describe
+key enter
+waitfor CLI app call  15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli app screenshot {app}
+key enter
+waitfor CLI app screenshot  15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli state
+key enter
+waitfor CLI state -> 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# its project's declared app: opened behind the user's view (the Claude tab stays on screen),
+# restarted and closed; an undeclared name refused
+type !cli app list-declared
+key enter
+waitfor CLI app list-declared -> exit 0 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli app open fake
+key enter
+waitfor CLI app open fake -> exit 0 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# at once: pi-desk asks nothing (Claude's own permission mode is the gate)
+assert_state pending_confirmations.# 0
+assert_state open_sessions.0.tabs.# 5
+assert_state open_sessions.0.tabs.4.kind app
+assert_state open_sessions.0.tabs.4.title fake
+assert_state open_sessions.0.tabs.3.id $tab
+assert_screen CLI app open fake
+type !cli app open nope
+key enter
+waitfor CLI app open nope -> exit 1 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+assert_state open_sessions.0.tabs.# 5
+# behind the view, it still draws for a screenshot
+type !cli app screenshot {lastapp}
+key enter
+waitfor CLI app screenshot 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli app restart {lastapp}
+key enter
+waitfor CLI app restart 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type !cli app close {lastapp}
+key enter
+waitfor CLI app close 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+waitstate 5000 open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.3.id $tab
+# refused for a Claude tab as for a pi tab: JavaScript, and the user's own pages
+type !cli navigate {browser} javascript:alert(1)
+key enter
+waitfor CLI navigate  15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# the same token from a process outside the tab's tree: refused
+type !orphan state
+key enter
+waitfor ORPHAN state 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+shot claude/cli
+# 3b. Claude's todos and subagents: its own panels in the right column while its tab shows
+type !todo
+key enter
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+waitstate 5000 open_sessions.0.tabs.3.panels.0.panel todos
+assert_state open_sessions.0.tabs.3.panels.0.rows.0.text Todos 1/3
+assert_state open_sessions.0.tabs.3.panels.0.rows.2.text ▸ Fixing the header
+type !agent
+key enter
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+waitstate 5000 open_sessions.0.tabs.3.panels.0.panel subagents
+assert_state open_sessions.0.tabs.3.panels.0.rows.0.text Subagents · 1 running
+assert_state open_sessions.0.tabs.3.panels.0.rows.2.text   Find the config files
+assert_state open_sessions.0.tabs.0.panels.# 0
+wait 300
+assert_drawn Fixing the header
+assert_drawn Find the config files
+shot claude/panels
+type !agent-done
+key enter
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# done (its row also says how long it ran: "✓ Explore · 2s")
+waitstate 5000 open_sessions.0.tabs.3.panels.0.rows.0.text Subagents
+wait 300
+assert_drawn ✓ Explore
+# the pi tab's right column: pi's own (nothing from Claude)
+clickid tab 0
+eventually
+assert_drawn Nothing running
+clickid tab 3
+wait 300
+# 4. an agent's text waits while the user types; it goes after their message and Claude's turn
+type half typed
+wait 200
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"from atlas"}
+assert_result ok true
+assert_result data.waits you are typing a message
+assert_state open_sessions.0.tabs.3.held 1
+assert_state open_sessions.0.tabs.3.typed true
+wait 300
+assert_drawn 1 message from Atlas waits: you are typing a message
+shot claude/held
+# send_text into a Claude tab is refused for agents
+control_command {"type":"send_text","tab_id":$tab,"text":"x"}
+assert_result error send prompts to a Claude tab with claude_prompt, not send_text
+key enter
+waitfor PROMPT: half typed 10000
+waitfor PROMPT: from atlas 15000
+waitstate 5000 open_sessions.0.tabs.3.held 0
+waitstate 10000 open_sessions.0.tabs.3.turn idle
+# the bar's Drop
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"never sent"}
+assert_result ok true
+type x
+wait 300
+assert_state open_sessions.0.tabs.3.held 1
+clickid cl_held_drop
+eventually
+assert_state open_sessions.0.tabs.3.held 0
+key backspace
+# 5. a comment on the page goes with the next message to Claude, once
+clickid tab 1
+wait 300
+web_comment 280 30 60 40 Make the red box blue
+eventually
+assert_state open_sessions.0.comments.# 1
+clickid tab 3
+wait 300
+shot claude/comments-strip
+type please look
+key enter
+waitfor CONTEXT> Deckhand comments 15000
+waitstate 5000 open_sessions.0.comments.# 0
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+type and again
+key enter
+waitfor PROMPT: and again 15000
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# 5b. the strip's Send now on the Claude tab: a fixed line goes in; the comments go as its hook context
+clickid tab 1
+wait 300
+web_comment 280 30 60 40 Now make it green
+eventually
+assert_state open_sessions.0.comments.# 1
+clickid tab 3
+wait 300
+waitstate 5000 open_sessions.0.tabs.3.turn idle
+shot claude/send-now-strip
+clickid cm_send
+waitfor PROMPT: Here are my comments. 15000
+waitstate 5000 open_sessions.0.comments.# 0
+waitstate 15000 open_sessions.0.tabs.3.turn idle
+# 6. closed: a row of the project's list (pi-desk's own history, marked Claude); a click resumes
+# it in a Claude-only session (no pi tab) with --resume
+ui_command {"type":"close_tab","tab_id":$tab}
+assert_result ok true
+wait 300
+assert_state open_sessions.0.tabs.# 3
+assert_state claude_sessions.0.open false
+assert_rows sessions !cli tabs,Untitled session · 2026-10-30 10:00
+rclickid proj 0
+wait 300
+shot claude/project-menu
+key escape
+wait 200
+clickid sess 0
+wait 300
+assert_state open_sessions.# 2
+assert_state open_sessions.1.agent claude
+assert_state open_sessions.1.tabs.# 1
+assert_state open_sessions.1.tabs.0.kind claude
+assert_state open_sessions.1.tabs.0.claude_session_id 0c1a0de0-1111-4222-8333-444455556666
+assert_state open_sessions.1.claude_session_id 0c1a0de0-1111-4222-8333-444455556666
+assert_state open_sessions.1.id $session
+assert_state open_sessions.0.tabs.# 3
+waitfor --resume 0c1a0de0 10000
+waitstate 10000 open_sessions.1.tabs.0.turn idle
+assert_state claude_sessions.0.open true
+shot claude/claude-session
+# 7. Claude exits in the Claude-only session: the dead tab's bar, and Restart resumes it in the same tab
+type !exit 3
+key enter
+waitstate 15000 open_sessions.1.tabs.0.status exited
+eventually
+assert_drawn Claude exited (code 3)
+shot claude/dead
+clickid dead_restart
+waitstate 10000 open_sessions.1.tabs.0.status running
+waitfor --resume 0c1a0de0 10000
+waitstate 10000 open_sessions.1.tabs.0.turn idle
+assert_state open_sessions.1.tabs.0.panels.# 0
+# not found (exit 127): said so; Restart looks again (here the fake is "installed") and starts it
+type !exit 127
+key enter
+waitstate 15000 open_sessions.1.tabs.0.status exited
+eventually
+assert_drawn Claude Code isn't installed (or not on your login PATH)
+shot claude/not-found
+clickid dead_restart
+waitstate 10000 open_sessions.1.tabs.0.status running
+waitstate 10000 open_sessions.1.tabs.0.turn idle
+state_json claude-before
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

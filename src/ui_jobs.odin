@@ -24,7 +24,7 @@ Jobs_Hit_Kind :: enum u8 {
 	More, // a row's "…"
 	Button, // index: ju.buttons
 	Limit, // index: Job_Limit_Row
-	Notes_Dir, // "Set up pi-desk…" (no main folder)
+	Notes_Dir, // "Set up Deckhand…" (no main folder)
 	Resume_All, // the paused banner's button
 	List,
 	Group, // index: the drawn group: go to its project (Atlas, Chats), or fold Other
@@ -294,7 +294,7 @@ jobs_panel :: proc(row_w: f32) {
 	if folder_of(.Jobs) == "" {
 		empty_state("No main folder", "Job notes live in its jobs/ folder", row_w)
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), 0, 0, 0}}}) {
-			small_button(clay.ID("jobs_notes_dir"), "Set up pi-desk…", ui_hover == Hit(Hit_Jobs{what = .Notes_Dir}))
+			small_button(clay.ID("jobs_notes_dir"), "Set up Deckhand…", ui_hover == Hit(Hit_Jobs{what = .Notes_Dir}))
 		}
 		return
 	}

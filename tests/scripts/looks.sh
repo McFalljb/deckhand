@@ -8,8 +8,11 @@
 # the terminal's light/dark; script looks-pi.txt.
 # Usage: [LOOKS_PI=real] tests/scripts/looks.sh [SCRIPT]
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
+export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 LOOKS_PI=${LOOKS_PI:-fake}
 if [ "$LOOKS_PI" = real ]; then SCRIPT=${1:-tests/scripts/looks-pi.txt}; else SCRIPT=${1:-tests/scripts/looks.txt}; fi
 FAKE_HOME="$ROOT/build/looks-home"
@@ -48,10 +51,11 @@ RC
 if [ "$LOOKS_PI" = real ]; then
   PI=$(command -v pi)
   REAL_HOME=$HOME
+  export PI_DESK_REAL_PI=1 # test mode's opt-in to the real pi (docs/DEVELOPING.md "Test mode")
   CMD="HOME='$REAL_HOME' exec '$PI' --model opencode-go/deepseek-v4.1-flash --use-theme system --session-dir '$STORE/--code-pi-desk--' \"\$@\""
 else
   CMD="exec sh '$ROOT/tests/scripts/fake-bridge.sh' \"\$@\""
 fi
 HOME="$FAKE_HOME" SHELL=/bin/zsh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_TEXT_SAMPLE="$ROOT/tests/scripts/text-sample.sh" \
-  PI_DESK_BIN="$ROOT/build/pi-desk" PI_DESK_CMD="$CMD" \
-  build/pi-desk "$FAKE_HOME/code/pi-desk"
+  PI_DESK_BIN="$ROOT/build/deckhand" PI_DESK_CMD="$CMD" \
+  build/deckhand "$FAKE_HOME/code/pi-desk"

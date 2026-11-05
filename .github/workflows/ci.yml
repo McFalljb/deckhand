@@ -1,18 +1,21 @@
 # Every push to main and every pull request: unit tests and the required test-mode scenes, in
 # parallel jobs so the run takes a few minutes. The slow and not-yet-required scenes run in
-# scenes-full.yml (nightly and on demand).
+# scenes-full.yml (nightly and on demand). What runs where and why: docs/TESTING.md.
 #
 # Test-mode scenes: fake HOME, fake pi, temp data dir, no network, never real pi.
 # NEVER in CI: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh run a real pi
-# against paid models.
+# against paid models (tests/scenes.py refuses them: tier "paid" in tests/scenes.txt).
 name: CI
 
+# Not for Markdown and docs alone, except the two docs the build reads: docs/GUIDE.md is built
+# into the binary (Atlas's guide, the Help menu) and src/docs_test.odin checks it and
+# docs/PROTOCOL.md list every action and command.
 on:
   push:
     branches: [main]
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    paths: ["**", "!**.md", "!docs/**", "!LICENSE", "docs/GUIDE.md", "docs/PROTOCOL.md"]
   pull_request:
-    paths-ignore: ["**.md", "docs/**", "LICENSE"]
+    paths: ["**", "!**.md", "!docs/**", "!LICENSE", "docs/GUIDE.md", "docs/PROTOCOL.md"]
   workflow_dispatch:
 
 permissions:
@@ -40,41 +43,38 @@ jobs:
       - name: Unit and binding tests
         run: ./build.sh test
 
-  # Required scenes, split so each shard takes about the same time (timings from the hosted
-  # runner: menus ~100 s, jobs ~80 s, the rest under 30 s each). Promote a scene from
-  # scenes-full.yml once it has passed there a few times.
+  # The required scenes (tier "required" in tests/scenes.txt), in two shards balanced by their
+  # typical times, two scenes at a time on each runner (tests/scenes.py; SCENE_JOBS: 1 runs them
+  # one at a time). A failed scene is retried once; one that then passes is reported as flaky
+  # (a warning) and does not fail the run. Promote a scene from scenes-full.yml by setting its
+  # tier to required once it has passed there a few times.
   scenes:
     runs-on: macos-15
-    timeout-minutes: 20
+    timeout-minutes: 25
     strategy:
       fail-fast: false
       matrix:
-        shard:
-          - menus fetch-cef-test projects
-          - jobs markdown restore term-links
-          - settings setup menu
-    name: scenes (${{ matrix.shard }})
+        shard: [1, 2]
+    name: scenes (${{ matrix.shard }}/2)
+    env:
+      SCENE_JOBS: "2"
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive, persist-credentials: false }
       - uses: ./.github/actions/setup
       - name: Build (with CEF)
-        run: ./build.sh
+        run: ./build.sh && ./build.sh fake-app
+      - name: Which scenes
+        run: python3 tests/scenes.py --required --ci --shard ${{ matrix.shard }}/2 --list
       - name: Scenes
-        run: |
-          fail=0
-          for s in ${{ matrix.shard }}; do
-            echo "::group::$s"
-            if ! tests/scripts/$s.sh; then echo "::error::scene $s failed"; fail=1; fi
-            echo "::endgroup::"
-          done
-          exit $fail
+        run: python3 tests/scenes.py --required --ci --shard ${{ matrix.shard }}/2 --no-build
       - name: Upload screenshots and logs on failure
         if: failure()
         uses: actions/upload-artifact@v4
         with:
-          name: scene-output-${{ strategy.job-index }}
+          name: scene-output-${{ matrix.shard }}
           path: |
+            build/scenes
             build/shots
             build/**/*.log
           if-no-files-found: ignore

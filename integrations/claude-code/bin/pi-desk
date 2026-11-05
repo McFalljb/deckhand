@@ -1,0 +1,4 @@
+#!/bin/sh
+# pi-desk: the deckhand command's old name, kept as an alias (pi-kit's extensions and Claude
+# sessions started before the rename call it). Exactly bin/deckhand.
+exec "$(dirname "$0")/deckhand" "$@"

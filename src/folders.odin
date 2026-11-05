@@ -143,8 +143,7 @@ folder_row_kind :: proc(path: string) -> (Folder_Kind, bool) {
 	return {}, false
 }
 
-// ~/x -> $HOME/x; then absolute and clean, or an error.
-@(private = "file")
+// ~/x -> $HOME/x; then absolute and clean, or an error (also the setup sheet's typed account folder).
 folder_arg :: proc(p: string) -> (string, string) {
 	path := strings.trim_space(p)
 	if path == "" do return "", ""
@@ -195,6 +194,7 @@ folders_changed :: proc(chats_before: string) {
 home_dir_apply :: proc(c: Set_Home_Dir, caller: Caller) -> (r: Result, changed: bool) {
 	path, err := folder_arg(c.path)
 	if err != "" do return fail(err), false
+	if l := claude_account_holding(path); l != "" && caller.kind != .Internal do return fail(fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)), false
 	if path != "" {
 		if c.create do os.make_directory_all(path)
 		// a saved main folder on a drive that is not there stays set
@@ -240,6 +240,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 		path, err := folder_arg(c.path)
 		if err != "" do return fail(err), false
 		if path != "" {
+			if l := claude_account_holding(path); l != "" && caller.kind != .Internal do return fail(fmt.tprintf("that folder is inside the Claude account %s's config folder (Settings → Claude accounts)", l)), false
 			if c.kind == .Sessions && filepath.base(path) != "sessions" do return fail("pi-kit writes session notes to <notes root>/sessions/: pick a folder named sessions"), false
 			if c.kind == .Chats do path = real_path(path) // pi's cwd, and so its store dir, has no symlinks; made on the first chat
 			else if !os.is_dir(path) && caller.kind != .Internal do return fail("no such folder"), false
@@ -256,6 +257,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 		folders_changed(before)
 		return {ok = true}, true
 	case Setup_Sheet:
+		if !c.open && harness_run_holds_sheet() do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
 		if c.open {
 			setup_begin()
 			if state.focus_widget != "setup" {
@@ -283,6 +285,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 // why says how it was found ("" path = none).
 detect_notes_folder :: proc(env_value, agents_md: string) -> (path: string, why: string) {
 	if env_value != "" && os.is_dir(env_value) do return env_value, "PI_KIT_NOTES_DIR is set to it"
+	if settings_credential(agents_md) do return "", "" // never a sign-in or Claude's state, by any name
 	if k, st := path_stat(agents_md); k != .File || st.size > 1 << 20 do return "", ""
 	data, err := os.read_entire_file(agents_md, context.temp_allocator)
 	if err != nil do return "", ""
@@ -329,9 +332,29 @@ path_under :: proc(q, p: string) -> bool {
 }
 
 // The detection for this machine: the user's PI_KIT_NOTES_DIR, else pi's
-// global AGENTS.md (only that file: never CLAUDE.md or an override).
+// global AGENTS.md (only that file: never pi's CLAUDE.md or an override),
+// else Claude Code's global CLAUDE.md (its config folder's: CLAUDE_CONFIG_DIR
+// or ~/.claude; that folder, which has a sessions/ of its own, is never the
+// answer). Read in pi-desk only; the sheet shows only the path found.
 setup_detect :: proc() -> (string, string) {
-	return detect_notes_folder(notes_env_user(), fmt.tprintf("%s/AGENTS.md", pi_agent_dir()))
+	if p, why := detect_notes_folder(notes_env_user(), fmt.tprintf("%s/AGENTS.md", pi_agent_dir())); p != "" do return p, why
+	if cd := claude_config_dir(); cd != "" do return detect_notes_folder("", fmt.tprintf("%s/CLAUDE.md", cd))
+	return "", ""
+}
+
+// The setup sheet's line about the harnesses (pi_installed, claude_installed: looked for, never
+// run; harness.odin): which are installed, and what that means.
+setup_claude_line :: proc() -> string {
+	pi, claude := pi_installed(), claude_installed()
+	if !pi && !claude do return NO_HARNESS
+	if claude {
+		// one account (a config folder there): which; several: the step before listed them
+		which := "Claude Code is installed"
+		if accts := claude_accounts(); len(accts) == 1 && path_kind(accts[0].dir) == .Dir do which = fmt.tprintf("Claude Code is installed (its account: %s)", path_tilde(accts[0].dir))
+		if !pi do return fmt.tprintf("%s: New session starts it. pi isn't installed (optional: Atlas and jobs run on pi).", which)
+		return fmt.tprintf("%s, and pi: New session asks which one to start.%s", which, pi_setup_note())
+	}
+	return fmt.tprintf("Claude Code isn't installed (optional): install it to open Claude tabs and sessions; everything else works without it.%s", pi_setup_note()) // here pi is installed (neither: NO_HARNESS above)
 }
 
 // ---- the chats' instructions (pi reads AGENTS.md from its cwd) ----

@@ -30,7 +30,7 @@ def assistant(text, cost=0.0, stop="stop", err=None):
     out({"type": "message_end", "message": m})
     out({"type": "turn_end", "message": m, "toolResults": []})
 
-WITH_VALUE = {"--mode", "--session-dir", "--session-id", "--model", "--append-system-prompt", "--tools"}
+WITH_VALUE = {"--mode", "--session-dir", "--session-id", "--model", "--append-system-prompt", "--tools", "--exclude-tools"}
 FLAGS = {"--no-mcp"}
 messages, args, i = [], sys.argv[1:], 0
 while i < len(args):

@@ -25,7 +25,7 @@ drop terminal $homedir/code/dropped
 waitfor code/dropped' 5000
 assert_state projects.0.cwd $homedir/code/brand-new
 drop sidebar $homedir/code/dropped $homedir/.pi/agent/sessions/--code-bravo--/nope.txt
-wait 200
+eventually
 assert_state projects.0.cwd $homedir/code/dropped
 # ---- browsing projects never changes what the centre shows
 command {"type":"select_project","project_id":$project}
@@ -42,17 +42,25 @@ wait 200
 assert_rows open Fix the flaky test,Untitled session
 # the Open group's second row: focuses it and selects its project
 clickid open 1
-wait 300
+eventually
 assert_rows open Untitled session,Fix the flaky test
+# ---- every row keeps its hover (and its buttons) while the pointer moves across it
+sweep open 0 80
+sweep open 1 80
+sweep proj 0 80
+sweep proj 2 80
+sweep sess 0 80
+hover search
+wait 200
 shot sidebar/open-group
 # ---- a session's info (session_info.odin): the ⓘ on its row, its menu; header only
 clickid open 1
-wait 300
+eventually
 assert_rows sessions Fix the flaky test
 hover sess 0
 wait 300
 clickid sessinfo 0
-wait 300
+eventually
 assert_drawn id: b1
 assert_drawn title: Fix the flaky test
 assert_drawn project: bravo
@@ -62,10 +70,10 @@ shot sidebar/session-info
 key escape
 wait 200
 hover sessinfo 0
-wait 1000
+eventually
 assert_tip Session info: copy it, or send it to Atlas
 rclickid sess 0
-wait 300
+eventually
 assert_drawn Copy session info
 assert_drawn Send to Atlas
 shot sidebar/session-menu
@@ -78,54 +86,52 @@ assert_result data.project bravo
 command {"type":"session_info","project_id":$project,"pi_session_id":"b1","to":"agent"}
 assert_result error only the user sends to the agent
 clickid open 1
-wait 300
+eventually
 assert_rows open Untitled session,Fix the flaky test
 # ---- pin (row button, on hover) and the pinned group on top
 hover proj 3
 wait 200
 clickid projpin 3
-wait 200
+eventually
 assert_rows projects ~/code/charlie,~/code/dropped,~/code/brand-new,~/code/bravo,~/code/alpha
 assert_state sidebar.pinned_projects.# 1
 # ---- sort projects by name (header menu); pinned stay on top
 clickid sort 0
 wait 200
 clickid menurow 1
-wait 200
+eventually
 assert_state sidebar.sort.projects name
 assert_rows projects ~/code/charlie,~/code/alpha,~/code/brand-new,~/code/bravo,~/code/dropped
-# ---- context menu: hide alpha (row 1: Pin, New session, Rename…, -, three session
-# sorts, -, Reveal, Copy path, -, Hide)
+# ---- context menu: hide alpha (row 1)
 rclickid proj 1
 wait 200
 shot sidebar/context-menu
-clickid menurow 11
-wait 200
+clickmenu Hide
+eventually
 assert_state sidebar.hidden_projects.# 1
 assert_rows projects ~/code/charlie,~/code/brand-new,~/code/bravo,~/code/dropped
-# show hidden from the sort menu (row 4), then off again
+# show hidden from the sort menu (row 5), then off again
 clickid sort 0
 wait 200
-clickid menurow 4
-wait 200
+clickid menurow 5
+eventually
 assert_rows projects ~/code/charlie,~/code/alpha,~/code/brand-new,~/code/bravo,~/code/dropped
 command {"type":"set_filter","show_hidden":false}
 # reveal and copy path from the menu go through commands (logged, no Finder in test mode)
 rclickid proj 0
-wait 200
-clickid menurow 9
+clickmenu Copy path
 wait 100
 # ---- filter: ⌘⇧F, fuzzy, Esc clears
 key f cmd shift
-wait 100
+eventually
 assert_state focus.id sidebar_filter
 type brav
-wait 200
+eventually
 assert_state sidebar.filter.text brav
 assert_rows projects ~/code/bravo
 shot sidebar/filter
 key escape
-wait 200
+eventually
 assert_state sidebar.filter.text 
 assert_state focus.kind terminal
 command {"type":"set_filter","text":"zzzz"}
@@ -134,7 +140,7 @@ shot sidebar/filter-empty
 command {"type":"set_filter","text":""}
 # quick filter chip: pinned only
 clickid chip 2
-wait 200
+eventually
 assert_rows projects ~/code/charlie
 clickid chip 2
 wait 200
@@ -152,15 +158,15 @@ assert_state settings.chats_readonly true
 ui_command {"type":"set_chats_readonly","on":false}
 # ⌘N is a new chat (Chats), ⇧⌘N a new session in the selected project; "+ New chat" under Chats
 key n cmd
-wait 400
+eventually
 assert_state open_sessions.# 4
 assert_state open_sessions.3.cwd $homedir/Chats
 key n cmd shift
-wait 400
+eventually
 assert_state open_sessions.# 5
 assert_state open_sessions.4.project_id $project
 clickid newchatrow
-wait 400
+eventually
 assert_state open_sessions.# 6
 assert_state open_sessions.5.cwd $homedir/Chats
 # ---- the project tree: a click on another project (bravo, row 2) selects it and shows its
@@ -169,28 +175,28 @@ command {"type":"set_filter","pinned":false,"running":false,"waiting":false,"tex
 clickid proj 3
 wait 300
 clickid proj 2
-wait 300
+eventually
 assert_rows tree ~/code/charlie,~/code/brand-new,~/code/bravo,>Fix the flaky test,~/code/dropped
 shot sidebar/tree
 clickid proj 2
-wait 300
+eventually
 assert_rows tree ~/code/charlie,~/code/brand-new,~/code/bravo,~/code/dropped
 clickid proj 2
-wait 300
+eventually
 assert_rows tree ~/code/charlie,~/code/brand-new,~/code/bravo,>Fix the flaky test,~/code/dropped
 # ---- dividers: drag the left one 60 px wider, the right one 40 px wider; double-click resets
 divider 0 60
-wait 200
+eventually
 assert_state layout.left_width 360
 divider 1 -40
-wait 200
+eventually
 assert_state layout.right_width 360
 shot sidebar/resized
 divider 0 clicks 2
-wait 200
+eventually
 assert_state layout.left_width 300
 divider 0 -300
-wait 200
+eventually
 assert_state layout.left_width 200
 # ---- idle: a hovered row and a hovered divider draw nothing more once still
 hover proj 1

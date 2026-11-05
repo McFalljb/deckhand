@@ -20,7 +20,7 @@ shot panels/panels-empty
 # a new chat: the fake bridge publishes subagents, shells and todos, working
 command {"type":"new_chat","project_id":$project}
 waitfor new-1 10000
-wait 1500
+eventually
 assert_state open_sessions.3.tabs.0.agent working
 assert_state open_sessions.3.tabs.0.panels.# 3
 assert_state open_sessions.3.tabs.0.panels.2.panel todos
@@ -37,19 +37,19 @@ shot panels/panels-shell-tab
 command {"type":"focus_tab","tab_id":$pitab}
 # fold a section by clicking its header (a command), unfold again
 clickid panelhead 1
-wait 300
+eventually
 assert_state layout.collapsed.0 shells
 shot panels/panels-folded
 clickid panelhead 1
-wait 300
+eventually
 assert_state layout.collapsed.# 0
 # the toggle: ⌥⌘B and the button in the tab strip
 key b cmd alt
-wait 300
+eventually
 assert_state layout.right_open false
 shot panels/panels-hidden
 clickid togglepanels
-wait 300
+eventually
 assert_state layout.right_open true
 ui_command {"type":"set_theme","name":"warm"}
 wait 500

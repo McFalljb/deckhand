@@ -20,8 +20,10 @@
 # tried. Needs a CEF build. Writes build/browser-rlz.noindex/. About 2 minutes.
 # Usage: tests/scripts/browser-rlz.sh   (RLZ_DIR=... to run two at once)
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 # .noindex: Spotlight would read the sentinels (and move their access times)
 W="${RLZ_DIR:-$ROOT/build/browser-rlz.noindex}"
 rm -rf "$W"; FAKE_HOME="$W/home"; PROJ="$FAKE_HOME/proj"
@@ -56,7 +58,7 @@ done
 before=$(stamps)
 HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-rlz.txt \
   PI_DESK_DATA_DIR="$W/data" PI_DESK_CEF_NETLOG="$W/netlog.json" PI_DESK_CMD='exec sleep 600' \
-  build/pi-desk "$PROJ" > "$W/run.log" 2>&1 || true
+  build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 fail=0
 grep -q "done: .* 0 failed" "$W/run.log" || { echo "rlz: the scene failed (log: $W/run.log)"; fail=1; }
 after=$(stamps); after_ls=$(listings)

@@ -339,10 +339,11 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/.pi/prompts", proj))
 	write_mode(fmt.tprintf("%s/.pi/prompts/p.md", proj), "p", 0o644)
 	write_mode(fmt.tprintf("%s/.pi/.env", proj), "K=v", 0o644)
+	harness_checklist_forget() // the Coding agents rows look at this HOME (another test's are cached)
 	run_command(Set_Left_Tab{tab = .Settings}, ui)
 	tree :: proc() -> string {return files_rows_text(settings_tree_rows())}
 	got := tree()
-	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\n.pi/prompts\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n"
+	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\n.pi/prompts\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n[Coding agents]\npi\n  Deckhand integration\n  pi-subagents\n  rpiv-todo: Not installed [Install…]\nClaude Code\n  Deckhand integration\n" // the harness checklist (ui_harness.odin)
 	testing.expect_value(t, got, want)
 	// pi's own folders (the Folders group's sessions/ is pi-desk's, below [Chats])
 	pis := got[:max(strings.index(got, "[Chats]"), 0)]
@@ -524,4 +525,255 @@ review_collapse_all_only_dot_pi :: proc(t: ^testing.T) {
 review_settings_reveal_not_in_palette :: proc(t: ^testing.T) {
 	a := action_by_id("settings_reveal_finder")
 	testing.expect(t, a != nil && a.no_palette, "settings_reveal_finder is a button only")
+}
+
+// ---- Claude Code's files (settings_files.odin, claude_reload.odin) ----
+
+// A fake Claude config folder (CLAUDE_CONFIG_DIR) under the temp HOME, with what Claude Code
+// keeps there: config the user edits, and credentials, account state and transcripts that
+// pi-desk must never list or open. Returns the config folder.
+@(private = "file")
+claude_setup :: proc(home, proj: string) -> string {
+	cfg := fmt.aprintf("%s/claude-cfg", home)
+	for d in ([]string{"projects/-proj", "sessions", "backups", "file-history/s1", "todos", "shell-snapshots", "plugins/cache", "agents", "skills/s1", "commands", "output-styles", "rules"}) do os.make_directory_all(fmt.tprintf("%s/%s", cfg, d))
+	write_mode(fmt.tprintf("%s/settings.json", cfg), `{"model": "opus"}`, 0o644)
+	write_mode(fmt.tprintf("%s/CLAUDE.md", cfg), "# mine\n", 0o644)
+	write_mode(fmt.tprintf("%s/keybindings.json", cfg), `{"bindings": []}`, 0o644)
+	write_mode(fmt.tprintf("%s/skills/s1/SKILL.md", cfg), "---\nname: s1\n---\n", 0o644)
+	write_mode(fmt.tprintf("%s/agents/a.md", cfg), "---\nname: a\n---\n", 0o600) // private but config
+	write_mode(fmt.tprintf("%s/.credentials.json", cfg), fmt.tprintf(`{{"token":"%s"}}`, SECRET), 0o600)
+	write_mode(fmt.tprintf("%s/.claude.json", cfg), `{"oauthAccount": {}}`, 0o600) // with CLAUDE_CONFIG_DIR it lives here
+	write_mode(fmt.tprintf("%s/.claude.json", home), `{"oauthAccount": {}}`, 0o600) // without: in HOME
+	write_mode(fmt.tprintf("%s/projects/-proj/abc.jsonl", cfg), "{}\n", 0o600)
+	write_mode(fmt.tprintf("%s/history.jsonl", cfg), "{}\n", 0o600)
+	write_mode(fmt.tprintf("%s/sessions/123.json", cfg), "{}", 0o644)
+	write_mode(fmt.tprintf("%s/backups/.claude.json.backup.1", cfg), "{}", 0o600)
+	write_mode(fmt.tprintf("%s/file-history/s1/x", cfg), "x", 0o644)
+	write_mode(fmt.tprintf("%s/stats-cache.json", cfg), "{}", 0o644)
+	write_mode(fmt.tprintf("%s/remote-settings.json", cfg), "{}", 0o644)
+	write_mode(fmt.tprintf("%s/plugins/installed_plugins.json", cfg), "{}", 0o644)
+	os.make_directory_all(fmt.tprintf("%s/.claude", proj))
+	write_mode(fmt.tprintf("%s/.claude/settings.local.json", proj), `{"permissions": {}}`, 0o644)
+	write_mode(fmt.tprintf("%s/CLAUDE.md", proj), "# proj\n", 0o644)
+	os.set_env("CLAUDE_CONFIG_DIR", cfg)
+	return cfg
+}
+
+// Every path of Claude Code's that pi-desk must never list, read or open.
+@(private = "file")
+claude_secret_paths :: proc(home, cfg: string) -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	append(&out,
+		fmt.tprintf("%s/.credentials.json", cfg),
+		fmt.tprintf("%s/.claude.json", cfg),
+		fmt.tprintf("%s/.claude.json", home),
+		fmt.tprintf("%s/projects/-proj/abc.jsonl", cfg),
+		fmt.tprintf("%s/history.jsonl", cfg),
+		fmt.tprintf("%s/sessions/123.json", cfg),
+		fmt.tprintf("%s/backups/.claude.json.backup.1", cfg),
+		fmt.tprintf("%s/file-history/s1/x", cfg),
+		fmt.tprintf("%s/stats-cache.json", cfg),
+		fmt.tprintf("%s/remote-settings.json", cfg),
+		fmt.tprintf("%s/plugins/installed_plugins.json", cfg),
+	)
+	return out[:]
+}
+
+@(test)
+settings_files_claude_rows :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	cfg := claude_setup(home, proj)
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	rows := settings_file_rows()
+	b := strings.builder_make(context.temp_allocator)
+	for r in rows do fmt.sbprintf(&b, "%s|%s|%s|%v\n", r.group, r.label, r.path, r.exists)
+	got := strings.to_string(b)
+	want := []string {
+		fmt.tprintf("claude|settings.json|%s/settings.json|true", cfg),
+		fmt.tprintf("claude|CLAUDE.md|%s/CLAUDE.md|true", cfg),
+		fmt.tprintf("claude|keybindings.json|%s/keybindings.json|true", cfg),
+		fmt.tprintf("claude|agents|%s/agents|true", cfg),
+		fmt.tprintf("claude|skills|%s/skills|true", cfg),
+		fmt.tprintf("claude|commands|%s/commands|true", cfg),
+		fmt.tprintf("claude|output-styles|%s/output-styles|true", cfg),
+		fmt.tprintf("claude|rules|%s/rules|true", cfg),
+		fmt.tprintf("claude-project|.claude/settings.json|%s/.claude/settings.json|false", proj), // offered: Create
+		fmt.tprintf("claude-project|.claude/settings.local.json|%s/.claude/settings.local.json|true", proj),
+		fmt.tprintf("|CLAUDE.md|%s/CLAUDE.md|true", proj), // pi's instructions file here too: listed once
+	}
+	for w in want do testing.expectf(t, strings.contains(got, w), "missing %q in\n%s", w, got)
+	for p in claude_secret_paths(home, cfg) do testing.expectf(t, !strings.contains(got, p), "%s listed:\n%s", p, got)
+	for never in ([]string{".credentials", ".claude.json", "/projects", "history.jsonl", "/sessions", "backups", "file-history", "todos", "shell-snapshots", "plugins", "stats-cache"}) {
+		testing.expectf(t, !strings.contains(got, never), "%s listed:\n%s", never, got)
+	}
+	// with an AGENTS.md (pi's), the project's CLAUDE.md shows in Claude's group
+	write_mode(fmt.tprintf("%s/AGENTS.md", proj), "# pi\n", 0o644)
+	b2 := strings.builder_make(context.temp_allocator)
+	for r in settings_file_rows() do fmt.sbprintf(&b2, "%s|%s|%s|%v\n", r.group, r.label, r.path, r.exists)
+	testing.expectf(t, strings.contains(strings.to_string(b2), fmt.tprintf("claude-project|CLAUDE.md|%s/CLAUDE.md|true", proj)), "%s", strings.to_string(b2))
+	testing.expect_value(t, settings_group_label("claude", proj), "Claude Code (global)")
+	testing.expect_value(t, settings_group_label("claude-project", proj), "Claude Code · proj")
+	// the palette's Claude entries (pi's parity: edit_pi_settings…): listed while the file is there
+	edit :: proc(id: string) -> string {
+		a := action_by_id(id)
+		if a == nil do return "no such action"
+		c, ok := a.make()
+		if !ok do return ""
+		return c.(Open_File).path
+	}
+	testing.expect_value(t, edit("edit_claude_settings"), fmt.tprintf("%s/settings.json", cfg))
+	testing.expect_value(t, edit("edit_claude_md"), fmt.tprintf("%s/CLAUDE.md", cfg))
+	testing.expect_value(t, edit("edit_claude_project_settings"), "") // not there yet: the tree's Create
+	// Create makes the project's missing settings file ({}), then opens it
+	settings_create(fmt.tprintf("%s/.claude/settings.json", proj))
+	testing.expect_value(t, read(fmt.tprintf("%s/.claude/settings.json", proj)), "{}\n")
+	testing.expect_value(t, edit("edit_claude_project_settings"), fmt.tprintf("%s/.claude/settings.json", proj))
+	// JSON Claude Code reads strictly: a bad save is refused like pi's
+	for p in ([]string{fmt.tprintf("%s/settings.json", cfg), fmt.tprintf("%s/keybindings.json", cfg), fmt.tprintf("%s/.claude/settings.local.json", proj), fmt.tprintf("%s/.claude/settings.json", proj)}) {
+		testing.expectf(t, settings_json_kind(p) == .Strict, "%s: strict JSON", p)
+	}
+	// the global folders open in the tree (their open state kept under the config folder)
+	testing.expect_value(t, settings_tree_root(fmt.tprintf("%s/skills/s1", cfg)), cfg)
+	testing.expect_value(t, settings_tree_root(fmt.tprintf("%s/projects/-proj", cfg)), "")
+	testing.expect_value(t, settings_tree_root(cfg), "")
+}
+
+// The Claude Code group's default flags for new tabs: a setting row (no file) with a one-click
+// Turn on / Turn off for --dangerously-skip-permissions, and its warning line; off by default.
+@(test)
+settings_files_claude_default_flags :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	claude_setup(home, proj)
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	run_command(Set_Left_Tab{tab = .Settings}, ui)
+	rows :: proc() -> string {return files_rows_text(settings_tree_rows())}
+	got := rows()
+	warning :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for r in settings_file_rows() do if r.path == CLAUDE_FLAGS_HEAD_ROW || r.path == CLAUDE_FLAGS_WARN_ROW do fmt.sbprintf(&b, "%s %s|", r.label, r.detail)
+		return strings.to_string(b)
+	}
+	testing.expectf(t, strings.contains(got, "rules\nDefault flags for new tabs\nSkip permissions: off [Turn on]\nWarning:\n"), "the rows, off:\n%s", got)
+	testing.expect_value(t, warning(), "Default flags for new tabs none|Warning: on, Claude acts without asking|")
+	testing.expect(t, settings_setting_row(CLAUDE_FLAGS_HEAD_ROW) && settings_setting_row(CLAUDE_FLAGS_ROW) && settings_setting_row(CLAUDE_FLAGS_WARN_ROW), "settings, not files")
+	// the button's action (the palette's too) turns it on: the row says so
+	action_run("claude_skip_permissions")
+	inbox_drain()
+	testing.expect(t, !state.settings.claude_skip_permissions, "not before the user confirms")
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 {
+		p := state.pending_confirmations[0]
+		testing.expect_value(t, p.summary, CLAUDE_SKIP_CONFIRM)
+		testing.expect(t, run_command(Set_Claude_Default_Flags{skip_permissions = true, confirm = p.token}, ui).ok)
+	}
+	testing.expect(t, state.settings.claude_skip_permissions)
+	got = rows()
+	testing.expectf(t, strings.contains(got, "Default flags for new tabs\nSkip permissions: ON [Turn off]\nWarning:\n"), "the rows, on:\n%s", got)
+	testing.expect_value(t, warning(), "Default flags for new tabs --dangerously-skip-permissions|Warning: Claude acts without asking|")
+	action_run("claude_skip_permissions")
+	inbox_drain()
+	testing.expect(t, !state.settings.claude_skip_permissions)
+	testing.expect(t, strings.contains(rows(), "[Turn on]"))
+}
+
+// Claude Code's credentials, account state, transcripts and caches: never listed, never opened by
+// anyone (the user too), not inside an opened folder, not under another name; config files are.
+@(test)
+settings_files_claude_credentials_refused :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	cfg := claude_setup(home, proj)
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	for p in claude_secret_paths(home, cfg) {
+		testing.expectf(t, settings_credential(p), "%s is refused", p)
+		for c in ([]Caller{ui, {kind = .Control}, {kind = .Script}}) {
+			r := run_command(Open_File{path = p}, c)
+			testing.expectf(t, !r.ok && r.error == CREDENTIAL_REFUSED, "%s opened: %v", p, r)
+		}
+	}
+	for p in ([]string{fmt.tprintf("%s/settings.json", cfg), fmt.tprintf("%s/CLAUDE.md", cfg), fmt.tprintf("%s/keybindings.json", cfg), fmt.tprintf("%s/skills/s1/SKILL.md", cfg), fmt.tprintf("%s/agents/a.md", cfg), fmt.tprintf("%s/.claude/settings.local.json", proj), fmt.tprintf("%s/CLAUDE.md", proj)}) {
+		testing.expectf(t, !settings_credential(p), "%s is config, not refused", p)
+	}
+	// the folder itself, and anything new Claude Code may add there: refused unless config
+	testing.expect(t, settings_credential(fmt.tprintf("%s/some-new-state.json", cfg)), "unknown files in the config folder are refused")
+	// another name for the credentials file: a symlink, a hard link
+	ln := fmt.tprintf("%s/innocent.json", proj)
+	os.symlink(fmt.tprintf("%s/.credentials.json", cfg), ln)
+	testing.expect(t, settings_credential(ln), "a symlink to .credentials.json")
+	hl := fmt.tprintf("%s/innocent2.json", proj)
+	os.link(fmt.tprintf("%s/.credentials.json", cfg), hl)
+	testing.expect(t, settings_credential(hl), "a hard link to .credentials.json")
+	hl2 := fmt.tprintf("%s/innocent3.json", proj)
+	os.link(fmt.tprintf("%s/.claude.json", home), hl2)
+	testing.expect(t, settings_credential(hl2), "a hard link to ~/.claude.json")
+	// opening a refused folder's contents in the tree: they are hidden
+	testing.expect(t, settings_hidden(fmt.tprintf("%s/.credentials.json", cfg)))
+	// without CLAUDE_CONFIG_DIR: ~/.claude
+	os.unset_env("CLAUDE_CONFIG_DIR")
+	dflt := fmt.tprintf("%s/.claude", home)
+	os.make_directory_all(fmt.tprintf("%s/projects", dflt))
+	write_mode(fmt.tprintf("%s/.credentials.json", dflt), "{}", 0o600)
+	testing.expect_value(t, claude_config_dir(), dflt)
+	testing.expect(t, settings_credential(fmt.tprintf("%s/.credentials.json", dflt)))
+	testing.expect(t, settings_credential(fmt.tprintf("%s/projects/x.jsonl", dflt)))
+	testing.expect(t, !settings_credential(fmt.tprintf("%s/settings.json", dflt)))
+	// a config folder that is HOME itself (or above it) never makes all of HOME refused
+	os.set_env("CLAUDE_CONFIG_DIR", home)
+	testing.expect(t, !settings_credential(fmt.tprintf("%s/notes.md", proj)), "HOME's files stay openable")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/.credentials.json", home)), "the credentials file by name still")
+	os.set_env("CLAUDE_CONFIG_DIR", "relative/dir") // not absolute: ignored
+	testing.expect_value(t, claude_config_dir(), dflt)
+}
+
+// Every Claude Code config folder is guarded, not only the one CLAUDE_CONFIG_DIR names now:
+// ~/.claude too (another profile's), and any folder that holds Claude's sign-in or account file
+// (a third profile). A config folder that is HOME by another name never refuses all of HOME.
+@(test)
+settings_files_claude_every_config_folder :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	home, proj := setup()
+	third := claude_setup(home, proj) // holds .credentials.json and .claude.json
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	work := fmt.tprintf("%s/.claude-work", home)
+	os.make_directory_all(fmt.tprintf("%s/projects/-w", work))
+	os.set_env("CLAUDE_CONFIG_DIR", work)
+	dflt := fmt.tprintf("%s/.claude", home)
+	os.make_directory_all(fmt.tprintf("%s/projects/-p", dflt))
+	write_mode(fmt.tprintf("%s/projects/-p/s.jsonl", dflt), "{}\n", 0o600)
+	write_mode(fmt.tprintf("%s/history.jsonl", dflt), "{}\n", 0o600)
+	write_mode(fmt.tprintf("%s/settings.json", dflt), "{}", 0o644)
+	only := fmt.tprintf("%s/acct-only", home) // holds just an account file
+	os.make_directory_all(fmt.tprintf("%s/projects/-q", only))
+	write_mode(fmt.tprintf("%s/.claude.json", only), "{}", 0o600)
+	write_mode(fmt.tprintf("%s/projects/-q/s.jsonl", only), "{}\n", 0o600)
+	for p in ([]string{
+		fmt.tprintf("%s/projects/-p/s.jsonl", dflt),
+		fmt.tprintf("%s/history.jsonl", dflt),
+		fmt.tprintf("%s/.credentials.json", dflt),
+		fmt.tprintf("%s/projects/-w/s.jsonl", work),
+		fmt.tprintf("%s/projects/-proj/abc.jsonl", third),
+		fmt.tprintf("%s/history.jsonl", third),
+		fmt.tprintf("%s/projects/-q/s.jsonl", only),
+	}) {
+		testing.expectf(t, settings_credential(p), "%s is refused", p)
+		r := run_command(Open_File{path = p}, ui)
+		testing.expectf(t, !r.ok && r.error == CREDENTIAL_REFUSED, "%s opened: %v", p, r)
+	}
+	for p in ([]string{
+		fmt.tprintf("%s/settings.json", dflt),
+		fmt.tprintf("%s/settings.json", third),
+		fmt.tprintf("%s/skills/s1/SKILL.md", third),
+		fmt.tprintf("%s/notes.md", proj),
+		fmt.tprintf("%s/notes.md", home), // HOME holds .claude.json: still not a config folder
+	}) {
+		testing.expectf(t, !settings_credential(p), "%s is not refused", p)
+	}
+	// CLAUDE_CONFIG_DIR naming HOME through a symlink: HOME's files stay openable
+	link := fmt.tprintf("%s-link", home)
+	os.symlink(home, link)
+	os.set_env("CLAUDE_CONFIG_DIR", link)
+	testing.expect(t, !settings_credential(fmt.tprintf("%s/notes.md", proj)), "HOME by another name")
+	testing.expect(t, settings_credential(fmt.tprintf("%s/projects/-p/s.jsonl", dflt)), "~/.claude still")
 }

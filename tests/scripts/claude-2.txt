@@ -1,0 +1,21 @@
+# Claude Code tabs, run 2 (tests/scripts/claude.sh): the Claude-only session came back beside the
+# pi session (its app tab is not kept) and resumes its conversation when shown; the history too.
+wait 1500
+assert_state open_sessions.# 2
+assert_state claude_sessions.# 1
+assert_state claude_sessions.0.title !cli tabs
+assert_state open_sessions.0.tabs.# 2
+assert_state open_sessions.1.agent claude
+assert_state open_sessions.1.tabs.0.kind claude
+assert_state open_sessions.1.tabs.0.claude_session_id 0c1a0de0-1111-4222-8333-444455556666
+assert_state open_sessions.1.id $session
+assert_state open_sessions.1.active_tab $tab
+assert_state open_sessions.1.tabs.0.id $tab
+waitfor --resume 0c1a0de0 15000
+waitstate 10000 open_sessions.1.tabs.0.turn idle
+assert_rows open !cli tabs,Untitled session · 2026-10-30 10:00
+shot claude/restored
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

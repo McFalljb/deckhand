@@ -1,0 +1,18 @@
+# Read-only pi chats, run 2 (tests/scripts/pi-chat-readonly.sh): the workspace restores and the
+# chat on screen starts again, read-only; then read-only off: another restored chat starts full.
+wait 1500
+assert_state settings.chats_readonly true
+assert_state open_sessions.# 3
+waitfor FAKE PI ARGS: 10000
+wait 500
+ui_command {"type":"set_chats_readonly","on":false}
+assert_result ok true
+# the previous open session (the script's chat): not started until shown, now full pi
+key up alt cmd
+waitstate 10000 open_sessions.1.tabs.0.status running
+waitfor FAKE PI ARGS: 10000
+wait 500
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

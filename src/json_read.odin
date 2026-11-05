@@ -104,6 +104,100 @@ opt_u64 :: proc(r: ^Rd, k: string) -> u64 {
 	return get_u64(r, k)
 }
 
+// claude.todos' list (claude_panels.odin): at most CLAUDE_TODOS_IN_MAX, each with a content
+// string; status and active_form optional strings.
+@(private = "file")
+get_todos :: proc(r: ^Rd, k: string) -> []Claude_Todo_In {
+	v, ok := r.obj[k]
+	if !ok {
+		if r.err == "" do r.err = strings.concatenate({"missing field ", k}, context.temp_allocator)
+		return nil
+	}
+	a, is := v.(json.Array)
+	if !is {
+		if r.err == "" do r.err = strings.concatenate({k, " must be a list"}, context.temp_allocator)
+		return nil
+	}
+	if len(a) > CLAUDE_TODOS_IN_MAX {
+		if r.err == "" do r.err = fmt.tprintf("at most %d todos", CLAUDE_TODOS_IN_MAX)
+		return nil
+	}
+	out := make([]Claude_Todo_In, len(a), r.a)
+	for x, i in a {
+		o, oo := x.(json.Object)
+		content, cs := o["content"].(json.String)
+		if !oo || !cs {
+			if r.err == "" do r.err = "each todo needs a content string"
+			return out
+		}
+		out[i].content = strings.clone(content, r.a)
+		if st, has := o["status"].(json.String); has do out[i].status = strings.clone(st, r.a)
+		if af, has := o["active_form"].(json.String); has do out[i].active_form = strings.clone(af, r.a)
+	}
+	return out
+}
+
+// claude.background's snapshot lists (claude_panels.odin): absent = empty; at most
+// CLAUDE_BG_IN_MAX tasks and CLAUDE_CRONS_IN_MAX crons, each with an id string.
+@(private = "file")
+get_bg_tasks :: proc(r: ^Rd, k: string) -> []Claude_Bg_In {
+	v, ok := r.obj[k]
+	if !ok || v == nil do return nil
+	a, is := v.(json.Array)
+	if !is {
+		if r.err == "" do r.err = strings.concatenate({k, " must be a list"}, context.temp_allocator)
+		return nil
+	}
+	if len(a) > CLAUDE_BG_IN_MAX {
+		if r.err == "" do r.err = fmt.tprintf("at most %d background tasks", CLAUDE_BG_IN_MAX)
+		return nil
+	}
+	out := make([]Claude_Bg_In, len(a), r.a)
+	for x, i in a {
+		o, oo := x.(json.Object)
+		id, is_id := o["id"].(json.String)
+		if !oo || !is_id {
+			if r.err == "" do r.err = "each background task needs an id string"
+			return out
+		}
+		out[i].id = strings.clone(id, r.a)
+		if v, has := o["kind"].(json.String); has do out[i].kind = strings.clone(v, r.a)
+		if v, has := o["status"].(json.String); has do out[i].status = strings.clone(v, r.a)
+		if v, has := o["description"].(json.String); has do out[i].description = strings.clone(v, r.a)
+		if v, has := o["command"].(json.String); has do out[i].command = strings.clone(v, r.a)
+	}
+	return out
+}
+
+@(private = "file")
+get_bg_crons :: proc(r: ^Rd, k: string) -> []Claude_Cron_In {
+	v, ok := r.obj[k]
+	if !ok || v == nil do return nil
+	a, is := v.(json.Array)
+	if !is {
+		if r.err == "" do r.err = strings.concatenate({k, " must be a list"}, context.temp_allocator)
+		return nil
+	}
+	if len(a) > CLAUDE_CRONS_IN_MAX {
+		if r.err == "" do r.err = fmt.tprintf("at most %d crons", CLAUDE_CRONS_IN_MAX)
+		return nil
+	}
+	out := make([]Claude_Cron_In, len(a), r.a)
+	for x, i in a {
+		o, oo := x.(json.Object)
+		id, is_id := o["id"].(json.String)
+		if !oo || !is_id {
+			if r.err == "" do r.err = "each cron needs an id string"
+			return out
+		}
+		out[i].id = strings.clone(id, r.a)
+		if v, has := o["schedule"].(json.String); has do out[i].schedule = strings.clone(v, r.a)
+		if v, has := o["recurring"].(json.Boolean); has do out[i].recurring = bool(v)
+		if v, has := o["prompt"].(json.String); has do out[i].prompt = strings.clone(v, r.a)
+	}
+	return out
+}
+
 @(private = "file")
 get_strings :: proc(r: ^Rd, k: string) -> []string {
 	v, ok := r.obj[k]
@@ -468,6 +562,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "set_panel":           cmd = Set_Panel{panel = get_str(&r, "panel"), open = get_bool(&r, "open")}
 	case "cancel_confirmation": cmd = Cancel_Confirmation{token = get_str(&r, "token")}
 	case "rescan":              cmd = Rescan{}
+	case "refresh_shell_env":   cmd = Refresh_Shell_Env{}
 	case "quit":                cmd = Quit{confirm = get_str(&r, "confirm", optional = true)}
 	case "get_state":           cmd = Get_State{}
 	case "list_commands":       cmd = List_Commands{}
@@ -477,6 +572,8 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "set_folder":          cmd = Set_Folder{kind = get_enum(&r, "kind", FOLDER_NAMES), path = get_str(&r, "path", optional = true)}
 	case "setup_sheet":         cmd = Setup_Sheet{open = get_bool(&r, "open")}
 	case "set_chats_readonly":  cmd = Set_Chats_Readonly{on = get_bool(&r, "on")}
+	case "set_pi_extension":    cmd = Set_Pi_Extension{name = get_str(&r, "name"), on = get_bool(&r, "on")}
+	case "set_claude_default_flags": cmd = Set_Claude_Default_Flags{skip_permissions = get_bool(&r, "skip_permissions"), confirm = get_str(&r, "confirm", optional = true)}
 	case "set_pinned":          cmd = Set_Pinned{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), pinned = get_bool(&r, "pinned"), index = opt_index(&r, "index")}
 	case "set_hidden":          cmd = Set_Hidden{cwd = get_str(&r, "cwd", optional = true), project_id = opt_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), hidden = get_bool(&r, "hidden")}
 	case "set_sort":            cmd = Set_Sort{section = get_enum(&r, "section", SORT_SECTION_NAMES), by = get_enum(&r, "by", SORT_BY_NAMES)}
@@ -511,6 +608,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "panel.remove":        cmd = Panel_Remove{tab_id = opt_u64(&r, "tab_id"), panel = get_str(&r, "panel")}
 	case "set_panel_collapsed": cmd = Set_Panel_Collapsed{panel = get_str(&r, "panel"), collapsed = get_bool(&r, "collapsed")}
 	case "pi_prompt":           cmd = Pi_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text"), images = get_images(&r, "images")}
+	case "pi_restart":          cmd = Pi_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
 	case "pi_reload":           cmd = Pi_Reload{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true)}
 	case "pi_reload_all":       cmd = Pi_Reload_All{only_changed = opt_bool(&r, "only_changed").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
 	case "pi_restart_updated":  cmd = Pi_Restart_Updated{confirm = get_str(&r, "confirm", optional = true)}
@@ -546,12 +644,15 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "changes_unstage":     cmd = Changes_Unstage{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true)}
 	case "changes_discard":     cmd = Changes_Discard{tab_id = get_u64(&r, "tab_id"), path = get_str(&r, "path"), status = get_str(&r, "status", optional = true), confirm = get_str(&r, "confirm", optional = true), second = opt_bool(&r, "second").? or_else false}
 	case "changes_commit":      cmd = Changes_Commit{tab_id = get_u64(&r, "tab_id"), message = get_str(&r, "message")}
+	case "show_file":           cmd = Show_File{path = get_str(&r, "path"), line = int(min(opt_u64(&r, "line"), 1 << 30)), anchor = get_str(&r, "anchor", optional = true), session = opt_u64(&r, "session")}
 	case "markdown_open":       cmd = Markdown_Open{path = get_str(&r, "path"), session = opt_u64(&r, "session"), anchor = get_str(&r, "anchor", optional = true)}
 	case "markdown_view":       cmd = Markdown_Set_View{tab_id = get_u64(&r, "tab_id"), source = opt_bool(&r, "source").? or_else false}
 	case "markdown_scroll":     cmd = Markdown_Scroll{tab_id = get_u64(&r, "tab_id"), anchor = get_str(&r, "anchor", optional = true), line = int(opt_u64(&r, "line"))}
 	case "markdown_link":       cmd = Markdown_Follow{tab_id = get_u64(&r, "tab_id"), url = get_str(&r, "url"), confirm = get_str(&r, "confirm", optional = true)}
-	case "new_app_tab":         cmd = New_App_Tab{session = opt_u64(&r, "session"), argv = get_strings(&r, "argv"), command = get_str(&r, "command", optional = true), cwd = get_str(&r, "cwd", optional = true), title = get_str(&r, "title", optional = true)}
+	case "new_app_tab":         cmd = New_App_Tab{session = opt_u64(&r, "session"), name = get_str(&r, "name", optional = true), argv = get_strings(&r, "argv"), command = get_str(&r, "command", optional = true), cwd = get_str(&r, "cwd", optional = true), title = get_str(&r, "title", optional = true)}
 	case "app_restart":         cmd = App_Restart{tab_id = get_u64(&r, "tab_id")}
+	case "app_close":           cmd = App_Close{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
+	case "app_declared":        cmd = App_Declared{session = opt_u64(&r, "session")}
 	case "app_input":           cmd = App_Input{tab_id = get_u64(&r, "tab_id"), events = get_raw_list(&r, "events")}
 	case "app_events":          cmd = App_Events{tab_id = get_u64(&r, "tab_id"), topic = get_str(&r, "topic"), since = opt_u64(&r, "since"), limit = int(min(opt_u64(&r, "limit"), 500))}
 	case "app_call":            cmd = App_Call{tab_id = get_u64(&r, "tab_id"), method = get_str(&r, "method"), params = "params" in r.obj ? get_raw(&r, "params") : "", timeout_ms = int(min(opt_u64(&r, "timeout_ms"), 600000))}
@@ -567,6 +668,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 		cmd = sc
 	case "app_inspect":         cmd = App_Inspect{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
 	case "notifications_list":  cmd = Notifications_List{limit = int(min(opt_u64(&r, "limit"), NOTICES_MAX))}
+	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
 	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
 	case "notifications_clear": cmd = Notifications_Clear{}
 	case "set_notifications":   cmd = Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os")}
@@ -598,6 +700,31 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "comments_send_now":   cmd = Comments_Send_Now{session = get_u64(&r, "session"), tab_id = opt_u64(&r, "tab_id")}
 	case "comments_ask_cancel": cmd = Comments_Ask_Cancel{}
 	case "pi.attached":         cmd = Pi_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
+	// Claude Code tabs (claude.odin)
+	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true)}
+	case "add_claude_account":  cmd = Add_Claude_Account{dir = get_str(&r, "dir"), label = get_str(&r, "label", optional = true)}
+	case "rename_claude_account": cmd = Rename_Claude_Account{account = get_str(&r, "account"), label = get_str(&r, "label", optional = true)}
+	case "remove_claude_account": cmd = Remove_Claude_Account{account = get_str(&r, "account")}
+	case "set_claude_account_default": cmd = Set_Claude_Account_Default{account = get_str(&r, "account", optional = true)}
+	case "claude_resume":       cmd = Claude_Resume{claude_session_id = get_str(&r, "claude_session_id")}
+	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true)}
+	case "claude_rename":       cmd = Claude_Rename{claude_session_id = get_str(&r, "claude_session_id"), title = get_str(&r, "title")}
+	case "claude_wait_idle":    cmd = Claude_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms"), prompt_id = opt_u64(&r, "prompt_id")}
+	case "claude_prompt":       cmd = Claude_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
+	case "claude_held":         cmd = Claude_Held_Op{tab_id = get_u64(&r, "tab_id"), op = get_str(&r, "op")}
+	case "claude.session":      cmd = Claude_Session_Report{tab_id = opt_u64(&r, "tab_id"), session_id = get_str(&r, "session_id"), cwd = get_str(&r, "cwd", optional = true), source = get_str(&r, "source", optional = true), transcript_path = get_str(&r, "transcript_path", optional = true), model = get_str(&r, "model", optional = true)}
+	case "claude.readonly_ack": cmd = Claude_Readonly_Ack{tab_id = opt_u64(&r, "tab_id"), nonce = get_str(&r, "nonce")}
+	case "claude.turn":         cmd = Claude_Turn_Report{tab_id = opt_u64(&r, "tab_id"), state = get_str(&r, "state"), title = get_str(&r, "title", optional = true), question = opt_bool(&r, "question").? or_else false, idle_prompt = opt_bool(&r, "idle_prompt").? or_else false}
+	case "claude.comments":     cmd = Claude_Comments{tab_id = opt_u64(&r, "tab_id"), max = int(min(opt_u64(&r, "max"), 1 << 20))}
+	case "claude.attached":     cmd = Claude_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
+	case "claude_restart":      cmd = Claude_Restart{tab_id = get_u64(&r, "tab_id"), pick_model = opt_bool(&r, "pick_model").? or_else false}
+	case "claude_restart_changed": cmd = Claude_Restart_Changed{update = opt_bool(&r, "update").? or_else false, all = opt_bool(&r, "all").? or_else false, confirm = get_str(&r, "confirm", optional = true)}
+	case "claude_reload_later": cmd = Claude_Reload_Later{update = opt_bool(&r, "update").? or_else false}
+	case "claude.todos":        cmd = Claude_Todos{tab_id = opt_u64(&r, "tab_id"), todos = get_todos(&r, "todos"), agent_id = get_str(&r, "agent_id", optional = true), seq = opt_u64(&r, "seq")}
+	case "claude.task":         cmd = Claude_Task{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id"), subject = get_str(&r, "subject", optional = true), active_form = get_str(&r, "active_form", optional = true), status = get_str(&r, "status", optional = true), seq = opt_u64(&r, "seq")}
+	case "claude.model":        cmd = Claude_Model_Report{tab_id = opt_u64(&r, "tab_id"), model = get_str(&r, "model")}
+	case "claude.subagent":     cmd = Claude_Subagent{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), agent_id = get_str(&r, "agent_id", optional = true), agent_type = get_str(&r, "agent_type", optional = true), description = get_str(&r, "description", optional = true), tool_name = get_str(&r, "tool_name", optional = true), seq = opt_u64(&r, "seq")}
+	case "claude.background":   cmd = Claude_Background{tab_id = opt_u64(&r, "tab_id"), event = get_str(&r, "event"), task_id = get_str(&r, "task_id", optional = true), kind = get_str(&r, "kind", optional = true), description = get_str(&r, "description", optional = true), command = get_str(&r, "command", optional = true), tasks = get_bg_tasks(&r, "tasks"), crons = get_bg_crons(&r, "crons"), seq = opt_u64(&r, "seq")}
 	case "":                    return nil, "missing field type"
 	case:
 		bc, ok := browser_command_parse(t, &r) // below
@@ -636,7 +763,7 @@ parse_request :: proc(line: string, allocator := context.allocator) -> (m: Reque
 	m.type = get_str(&r, "type")
 	m.v = int(get_u64(&r, "v"))
 	if r.err != "" do return m, r.err
-	if m.v != PROTOCOL_VERSION do return m, fmt.tprintf("unsupported protocol version %d (pi-desk speaks %d)", m.v, PROTOCOL_VERSION)
+	if m.v != PROTOCOL_VERSION do return m, fmt.tprintf("unsupported protocol version %d (Deckhand speaks %d)", m.v, PROTOCOL_VERSION)
 	switch m.type {
 	case "hello":
 		m.token = get_str(&r, "token")
@@ -739,6 +866,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 			active_tab    = get_u64(&o, "active_tab"),
 			missing       = opt_bool(&o, "missing").? or_else false,
 		}
+		if a, has := oo["agent"].(json.String); has && a == "claude" do os.agent = .Claude
 		for tv in arr(oo, "tabs") {
 			t := Rd{obj = tv.(json.Object) or_else nil, a = allocator}
 			tab := Tab{id = get_u64(&t, "id"), title = get_str(&t, "title"), cwd = get_str(&t, "cwd", optional = true)}
@@ -758,6 +886,8 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 				bt.can_back = opt_bool(&t, "can_back").? or_else false
 				bt.can_forward = opt_bool(&t, "can_forward").? or_else false
 				tab.kind = bt
+			case "claude":
+				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true)}
 			case "app":
 				at := App_Tab{argv = get_strings(&t, "argv"), cwd = get_str(&t, "app_cwd", optional = true), exit_code = -1}
 				if s, has := t.obj["app_status"].(json.String); has do for name, k in APP_STATUS_NAMES do if name == s do at.app_status = k
@@ -848,6 +978,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 			}
 		}
 		s.settings.chats_readonly = opt_bool(&sr, "chats_readonly").? or_else false
+		s.settings.claude_skip_permissions = opt_bool(&sr, "claude_skip_permissions").? or_else false
 		s.settings.agent_name = get_str(&sr, "agent_name", optional = true)
 		s.settings.agent_model = get_str(&sr, "agent_model", optional = true)
 		s.settings.notify_off = !(opt_bool(&sr, "notify").? or_else true)

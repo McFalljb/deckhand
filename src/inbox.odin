@@ -108,6 +108,8 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Panel:           return Set_Panel{panel = s(c.panel, allocator), open = c.open}
 	case Cancel_Confirmation: return Cancel_Confirmation{token = s(c.token, allocator)}
 	case Quit:                return Quit{confirm = s(c.confirm, allocator)}
+	case Set_Claude_Default_Flags: return Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = s(c.confirm, allocator)}
+	case Set_Pi_Extension:    return Set_Pi_Extension{name = s(c.name, allocator), on = c.on}
 	case Pi_Session_Update:   return Pi_Session_Update{tab_id = c.tab_id, pi_session_id = s(c.pi_session_id, allocator), session_file = s(c.session_file, allocator), cwd = s(c.cwd, allocator)}
 	case Pi_Status_Update:
 		b := make([]string, len(c.blockers), allocator)
@@ -128,6 +130,9 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Home_Dir:        return Set_Home_Dir{path = s(c.path, allocator), create = c.create, setup = c.setup}
 	case Set_Folder:          return Set_Folder{kind = c.kind, path = s(c.path, allocator)}
 	case Set_Row_Expanded:    return Set_Row_Expanded{path = s(c.path, allocator), expanded = c.expanded}
+	case Set_Unread:          return Set_Unread{tab_id = c.tab_id, pi_session_id = s(c.pi_session_id, allocator), unread = c.unread}
+	case Program_Status: 	// internal, run at once (status_pump); never queued: its strings stay borrowed
+		return cmd
 	case Set_Hidden:          return Set_Hidden{cwd = s(c.cwd, allocator), project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), hidden = c.hidden}
 	case Reveal_Path:         return Reveal_Path{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator)}
 	case Session_Info:        return Session_Info{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), to = s(c.to, allocator)}
@@ -146,8 +151,12 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Set_Panel_Collapsed: return Set_Panel_Collapsed{panel = s(c.panel, allocator), collapsed = c.collapsed}
 	case Restore_Session:
 		tabs := make([]Restore_Tab, len(c.tabs), allocator)
-		for t, i in c.tabs do tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active}
-		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home}
+		for t, i in c.tabs {
+			args := make([]string, len(t.args), allocator)
+			for x, j in t.args do args[j] = s(x, allocator)
+			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, readonly = t.readonly, account = s(t.account, allocator)}
+		}
+		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent}
 	case Set_Agent_Name:      return Set_Agent_Name{name = s(c.name, allocator)}
 	case Set_Agent_Model:     return Set_Agent_Model{model = s(c.model, allocator)}
 	case Open_File:           return Open_File{path = s(c.path, allocator), line = c.line, col = c.col, session = c.session, preview = c.preview}
@@ -204,12 +213,25 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return changes_command_clone(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		return md_command_clone(cmd, allocator)
-	case New_App_Tab, App_Restart, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
+	case Show_File:
+		return Show_File{path = strings.clone(c.path, allocator), line = c.line, anchor = strings.clone(c.anchor, allocator), session = c.session}
+	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
 		return app_command_clone(cmd, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		return reload_clone(cmd, allocator)
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+		return claude_reload_clone(cmd, allocator)
 	case Comment_Add:         return Comment_Add{source = c.source, tab_id = c.tab_id, what = s(c.what, allocator), text = s(c.text, allocator), crop = s(c.crop, allocator)}
 	case Comment_Edit:        return Comment_Edit{comment_id = c.comment_id, text = s(c.text, allocator)}
+	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
+		return claude_command_clone(cmd, allocator)
+	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
+		return claude_account_clone(cmd, allocator)
+	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
+		return claude_extra_clone(cmd, allocator)
+	case Claude_Model_Report: return Claude_Model_Report{tab_id = c.tab_id, model = s(c.model, allocator)}
+	case Claude_Wait_Idle, Claude_Wait_Tick:
+		return cmd
 	case Comment_Delete, Comments_Clear, Comments_Send_Now, Comments_Ask_Cancel, Pi_Attached:
 		return cmd
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
@@ -220,7 +242,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return browser_agent_clone(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		return browser_act_clone(cmd, allocator)
-	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Copy_Selection, Set_Layout, Rescan, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle:
+	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
 		return cmd
 	}
 	return cmd
@@ -239,6 +261,8 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Set_Panel:           delete(c.panel, allocator)
 	case Cancel_Confirmation: delete(c.token, allocator)
 	case Quit:                delete(c.confirm, allocator)
+	case Set_Claude_Default_Flags: delete(c.confirm, allocator)
+	case Set_Pi_Extension:    delete(c.name, allocator)
 	case Pi_Session_Update:
 		delete(c.pi_session_id, allocator)
 		delete(c.session_file, allocator)
@@ -258,6 +282,14 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.text, allocator)
 		delete(c.crop, allocator)
 	case Comment_Edit:        delete(c.text, allocator)
+	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
+		claude_command_free(cmd, allocator)
+	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
+		claude_account_free(cmd, allocator)
+	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
+		claude_extra_free(cmd, allocator)
+	case Claude_Model_Report: delete(c.model, allocator)
+	case Claude_Wait_Idle, Claude_Wait_Tick:
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
 		browser_command_free(cmd, allocator)
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
@@ -277,6 +309,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Set_Agent_Model:     delete(c.model, allocator)
 	case Pi_Reload:           delete(c.confirm, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Reload_Watch: reload_free(cmd, allocator)
+	case Claude_Restart_Changed, Claude_Reload_Watch: claude_reload_free(cmd, allocator)
 	case Bridge_Done:         delete(c.error, allocator)
 	case Panel_Set:
 		delete(c.panel, allocator)
@@ -299,6 +332,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.to, allocator)
 	case Set_Filter:          if t, ok := c.text.?; ok do delete(t, allocator)
 	case Set_Row_Expanded:    delete(c.path, allocator)
+	case Set_Unread:          delete(c.pi_session_id, allocator)
 	case Restore_Sidebar:
 		for l in ([4][]string{c.pinned_projects, c.pinned_sessions, c.hidden_projects, c.hidden_sessions}) {
 			for x in l do delete(x, allocator)
@@ -389,12 +423,18 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		changes_command_free(cmd, allocator)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		md_command_free(cmd, allocator)
-	case New_App_Tab, App_Restart, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
+	case Show_File:
+		delete(c.path, allocator)
+		delete(c.anchor, allocator)
+	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
 		app_command_free(cmd, allocator)
 	case Restore_Session:
 		delete(c.pi_session_id, allocator)
 		delete(c.session_dir, allocator)
 		for t in c.tabs {
+			delete(t.claude_id, allocator)
+			for x in t.args do delete(x, allocator)
+			delete(t.args, allocator)
 			delete(t.title, allocator)
 			delete(t.cwd, allocator)
 		}

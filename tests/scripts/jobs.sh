@@ -17,8 +17,10 @@
 # idle CPU. Screenshots: build/shots/jobs/ (dark and light).
 # Usage: tests/scripts/jobs.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/jobs"
 rm -rf "$W" build/shots/jobs build/test-trash
 FAKE_HOME="$W/home"
@@ -55,7 +57,7 @@ note silent sil1 manual SILENT
 note spend spend1 "* * * * *" SPEND "access: full"
 
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/jobs.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$PROJ" > "$W/run.log" 2>&1 || true
+  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|TIMEOUT|done:|no element|CPU|unknown command" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi
@@ -72,10 +74,10 @@ chk "ok1 preamble" 'grep -q "running unattended" "$D"/ok1/runs/*/preamble.md'
 chk "PI_DESK_SCHEDULED_AT" 'grep -q "^PI_DESK_SCHEDULED_AT=20" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "PI_KIT_READONLY" 'grep -q "^PI_KIT_READONLY=1" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "PI_KIT_NOTES_DIR" 'grep -q "^PI_KIT_NOTES_DIR=$NOTES" "$FAKE_HOME/pi-env-ok1.txt"'
-chk "no socket/tokens" '! grep -qE "^PI_DESK_(SOCKET|TOKEN|CONTROL_TOKEN)=" "$FAKE_HOME"/pi-env-*.txt'
+chk "no socket/tokens" '! grep -qE "^(PI_DESK|DECKHAND)_(SOCKET|TOKEN|CONTROL_TOKEN)=" "$FAKE_HOME"/pi-env-*.txt'
 chk "full access: not read-only" '! grep -q "^PI_KIT_READONLY" "$FAKE_HOME/pi-env-spend1.txt"'
 chk "argv" 'grep -q "ARGS: --mode json --session-dir $D/ok1/sessions --session-id" "$FAKE_HOME/pi-env-ok1.txt"'
-chk "read: pi's read tools only, no MCP" 'grep -q -- "--tools read,grep,find,ls --no-mcp" "$FAKE_HOME/pi-env-ok1.txt"'
+chk "read: pi's read tools only, no MCP" 'grep -q -- "--tools read,grep,find,ls --exclude-tools mcp__\* --no-mcp" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "full: pi's own tools" '! grep -q -- "--tools" "$FAKE_HOME/pi-env-spend1.txt"'
 chk "a prompt starting with - or @ runs as a prompt" 'grep -q "\"status\":\"ok\"" "$D"/dash1/runs/*/meta.json && grep -q "\"status\":\"ok\"" "$D"/at2/runs/*/meta.json'
 chk "the prompt after --" 'grep -q -- " -- -OK" "$FAKE_HOME/pi-env-dash1.txt"'
@@ -120,8 +122,8 @@ chk "edited prompt ran" 'grep -q -- " -- OK as edited" "$FAKE_HOME/pi-env-ok1.tx
 chk "no approval key file" '[ ! -e "$D/approval.key" ]'
 chk "no approval record in state.json" '! grep -lq "approved" "$D"/*/state.json'
 # no Keychain code path: the binary neither links the Security framework nor calls SecItem*
-BIN=build/pi-desk
-[ -f build/pi-desk.app/Contents/MacOS/pi-desk ] && BIN=build/pi-desk.app/Contents/MacOS/pi-desk
+BIN=build/deckhand
+[ -f build/Deckhand.app/Contents/MacOS/Deckhand ] && BIN=build/Deckhand.app/Contents/MacOS/Deckhand
 chk "no SecItem/SecKeychain symbols" '! nm -u "$BIN" | grep -qE "_Sec(Item|Keychain)"'
 chk "no Security framework" '! otool -L "$BIN" | grep -q Security.framework'
 # nothing outside the fake places: no notes written to the real vault

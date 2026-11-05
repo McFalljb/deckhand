@@ -139,6 +139,33 @@ jobs_argv_prompt_and_tools :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(joined, "--no-mcp"), "read: no MCP tools: %s", joined)
 }
 
+// A read job on a known pi older than 1.0.4 never starts pi (its read-only flags would not
+// hold); a full job still runs.
+@(test)
+jobs_read_needs_pi_1_0_4 :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	fx := fx_setup()
+	defer fx_done(fx)
+	saved_v := state.reload.pi_version
+	defer state.reload.pi_version = saved_v
+	state.reload.pi_version = "1.0.3"
+	ran := fmt.tprintf("%s/ran", fx.dir)
+	fake_pi(fx, fmt.tprintf("touch %s\necho '{\"type\":\"agent_end\"}'", ran))
+	note(fx, "r", "r1", "manual", "OK")
+	note(fx, "f", "f1", "manual", "OK", "access: full")
+	sync_rows()
+	testing.expect(t, run_command(Job_Run_Now{job = "r1"}, UI).ok)
+	wait_done(t, "r1")
+	testing.expect(t, !os.exists(ran), "the read job's pi never ran")
+	if r := row("r1"); r != nil {
+		testing.expect_value(t, r.last_status, "failed")
+		testing.expect_value(t, r.last_headline, PI_READONLY_JOB_TOO_OLD)
+	}
+	testing.expect(t, run_command(Job_Run_Now{job = "f1"}, UI).ok)
+	wait_done(t, "f1")
+	testing.expect(t, os.exists(ran), "a full job runs")
+}
+
 // 2: a Recent runs write right after the user's edit (no scan between)
 // must not hide the edit from the next scan.
 @(test)
@@ -361,7 +388,20 @@ jobs_small_fixes :: proc(t: ^testing.T) {
 	_ = os.write_entire_file(fmt.tprintf("%s/pi", fx.dir), transmute([]u8)string("#!/bin/sh\n"))
 	state.settings.pi_path = ""
 	state.settings.jobs_path = "rel:.::/nonexistent"
+	// pi's managed install is looked for too: none under this HOME (never the machine's)
+	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
+	defer os.set_env("HOME", old_home)
+	old_cad, had_cad := os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
+	defer if had_cad do os.set_env("PI_CODING_AGENT_DIR", old_cad)
+	os.unset_env("PI_CODING_AGENT_DIR")
+	os.set_env("HOME", fmt.tprintf("%s/rel", fx.dir))
 	testing.expect_value(t, job_pi_path(), "")
+	// with one there: that pi
+	mbin := fmt.tprintf("%s/rel/.pi/agent/bin", fx.dir)
+	os.make_directory_all(mbin)
+	_ = os.write_entire_file(fmt.tprintf("%s/pi", mbin), transmute([]u8)string("#!/bin/sh\n"))
+	_ = os.chmod(fmt.tprintf("%s/pi", mbin), os.perm_number(0o755))
+	testing.expect_value(t, job_pi_path(), fmt.tprintf("%s/pi", mbin))
 }
 
 @(private = "file")

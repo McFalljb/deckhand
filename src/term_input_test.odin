@@ -55,6 +55,24 @@ mouse :: proc(term: ^Term, type: sapp.Event_Type, col, row: f32, mods: u32 = 0, 
 	}
 }
 
+// Selected cells as term_draw counts them (drawn_selected; the scene's assert_drawn_selection):
+// the render state's .Selected flag, read without drawing.
+@(private = "file")
+render_selected_cells :: proc(t: ^Term) -> int {
+	gh.render_state_update(t.rs, t.gt)
+	gh.render_state_get(t.rs, .Row_Iterator, &t.it)
+	n := 0
+	for gh.render_state_row_iterator_next(t.it) {
+		gh.render_state_row_get(t.it, .Cells, &t.cells)
+		for gh.render_state_row_cells_next(t.cells) {
+			selected: bool
+			gh.render_state_row_cells_get(t.cells, .Selected, &selected)
+			if selected do n += 1
+		}
+	}
+	return n
+}
+
 @(test)
 mac_line_editing_keys :: proc(t: ^testing.T) {
 	SUPER, ALT, SHIFT: u32 = sapp.MODIFIER_SUPER, sapp.MODIFIER_ALT, sapp.MODIFIER_SHIFT
@@ -117,6 +135,7 @@ selection_updates_during_drag :: proc(t: ^testing.T) {
 	mouse(&term, .MOUSE_MOVE, 8, 0)
 	testing.expect_value(t, term_selection_text(&term), "llo-wor") // before any release
 	testing.expect(t, term.changed, "a drag step must ask for a redraw")
+	testing.expect(t, render_selected_cells(&term) > 0, "the frame drawn now shows the selection")
 	mouse(&term, .MOUSE_MOVE, 12, 0)
 	testing.expect_value(t, term_selection_text(&term), "llo-world f")
 	mouse(&term, .MOUSE_UP, 12, 0)
@@ -130,6 +149,7 @@ selection_updates_during_drag :: proc(t: ^testing.T) {
 	mouse(&term, .MOUSE_DOWN, 4, 0)
 	mouse(&term, .MOUSE_UP, 4, 0)
 	testing.expect_value(t, term_selection_text(&term), "")
+	testing.expect_value(t, render_selected_cells(&term), 0)
 	// double-click a word, triple-click the line
 	mouse(&term, .MOUSE_DOWN, 14, 0, clicks = 2)
 	mouse(&term, .MOUSE_UP, 14, 0)
@@ -258,4 +278,63 @@ drag_ends_without_the_button :: proc(t: ^testing.T) {
 	testing.expect(t, !term.selecting && !term.mouse_down, "drag still on")
 	term_drag_tick(&term, true)
 	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), n)
+}
+
+// Through the app's event handler (moved from the term scene): ⌘ chords without a mapping send
+// the terminal nothing (they are the app's or nobody's), ⌘← alone is line editing; a drag
+// belongs to the tab it started in: a tab switch, or the window going to the background, ends
+// it, so a later move past the top edge neither extends the selection nor scrolls.
+@(test)
+terminal_through_the_app :: proc(t: ^testing.T) {
+	a, b: Term
+	fda := test_term(&a)
+	fdb := test_term(&b)
+	s := Open_Session{id = 9101}
+	append(&s.tabs, Tab{id = 9102, kind = Shell_Tab{}}, Tab{id = 9103, kind = Shell_Tab{}})
+	s.active_tab = 9102
+	saved_sessions, saved_current := state.open_sessions, state.current_session
+	state.open_sessions = {}
+	append(&state.open_sessions, s)
+	state.current_session = 9101
+	terms[9102], terms[9103] = &a, &b
+	defer {
+		delete_key(&terms, 9102)
+		delete_key(&terms, 9103)
+		delete(state.open_sessions[0].tabs)
+		delete(state.open_sessions)
+		state.open_sessions, state.current_session = saved_sessions, saved_current
+		term_free(&a); term_free(&b)
+		posix.close(fda); posix.close(fdb)
+	}
+	app_key :: proc(k: sapp.Keycode, mods: u32) {
+		e := sapp.Event{type = .KEY_DOWN, key_code = k, modifiers = mods}
+		event(&e)
+		e.type = .KEY_UP
+		event(&e)
+	}
+	app_key(.LEFT, sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT)
+	app_key(.BACKSPACE, sapp.MODIFIER_SUPER | sapp.MODIFIER_ALT)
+	app_key(.RIGHT, sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL)
+	testing.expect_value(t, sent(fda), "")
+	app_key(.LEFT, sapp.MODIFIER_SUPER)
+	testing.expect_value(t, sent(fda), "\x01")
+
+	drags_follow_focus()
+	mouse(&a, .MOUSE_DOWN, 2, 2)
+	mouse(&a, .MOUSE_MOVE, 2, 3)
+	testing.expect(t, a.selecting, "dragging")
+	state.open_sessions[0].active_tab = 9103 // ⌘2
+	drags_follow_focus()
+	state.open_sessions[0].active_tab = 9102 // ⌘1
+	drags_follow_focus()
+	testing.expect(t, !a.selecting && !a.mouse_down, "a tab switch ends the drag")
+
+	mouse(&a, .MOUSE_DOWN, 2, 2)
+	mouse(&a, .MOUSE_MOVE, 2, 3)
+	testing.expect(t, a.selecting, "dragging again")
+	e := sapp.Event{type = .UNFOCUSED}
+	event(&e)
+	testing.expect(t, !a.selecting && !a.mouse_down, "the window going to the background ends the drag")
+	e.type = .FOCUSED
+	event(&e)
 }

@@ -446,7 +446,7 @@ download_open_check :: proc(d: ^Page_Download) -> string {
 	ext := strings.to_lower(filepath.ext(d.path), context.temp_allocator)
 	switch ext {
 	case ".command", ".fileloc", ".inetloc", ".webloc", ".terminal", ".tool", ".workflow", ".action", ".mobileconfig":
-		return fmt.tprintf("pi-desk does not open %s files: use Show in Finder", ext)
+		return fmt.tprintf("Deckhand does not open %s files: use Show in Finder", ext)
 	}
 	return ""
 }

@@ -1,0 +1,17 @@
+# Claude-only sessions, run 2 (tests/scripts/claude-sessions.sh): the session came back as a
+# Claude-only session, pinned, renamed, and resumes when shown.
+wait 1500
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+assert_state open_sessions.0.tabs.0.kind claude
+assert_state open_sessions.0.claude_session_id 5e551011-1111-4222-8333-444455556666
+assert_state open_sessions.0.id $session
+waitfor --resume 5e551011 15000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_rows sessions Parser design,Tidy the README
+assert_rows open Parser design
+shot claude-sessions/restored
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

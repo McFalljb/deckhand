@@ -18,6 +18,7 @@ import sapp "../vendor/sokol-odin/sokol/app"
 
 OPTION_AS_ALT :: gh.Option_As_Alt.True // macOS: Option+key sends Alt (pi's Alt+Enter)
 READ_BUDGET :: 4 * 1024 * 1024 // max PTY bytes parsed per frame
+EXIT_REAP_WAIT :: time.Second // after a child's output ended, how long it may take to exit
 
 Term :: struct {
 	gt:           gh.Terminal,
@@ -31,6 +32,9 @@ Term :: struct {
 	pty:          Pty,
 	reader:       Reader,
 	running:      bool,
+	exit:         Exit_Info, // once it exited: how (waitpid)
+	eof_at:       time.Tick, // its output ended; waiting to reap it (EXIT_REAP_WAIT)
+	hung_pid:     i32, // not reaped by then: hung up on, maybe still dying (a restart waits for it)
 	cols, rows:   u16,
 	x, y, w, h:   f32, // pane rect in framebuffer px
 	// input state
@@ -66,6 +70,8 @@ Term :: struct {
 	link_key:     Link_Key, // what that lookup depended on
 	link_scanned: bool, // link_key is current
 	link_scans:   int, // lookups made (tests)
+	// what the program reports over OSC 7501 (agent_status.odin); its summary goes to the tab
+	prog:         Prog_Records,
 }
 
 // Pixels between the pane edge and the cell grid.
@@ -116,6 +122,7 @@ term_init :: proc(t: ^Term, cols, rows: u16) -> bool {
 	gh.terminal_set(t.gt, .Userdata, t)
 	gh.terminal_set(t.gt, .Write_Pty, rawptr(on_write_pty))
 	gh.terminal_set(t.gt, .Color_Scheme, rawptr(on_color_scheme))
+	term_status_register(t) // OSC 7501 and OSC 133 (agent_status.odin)
 	max_bytes: uint = 20 * 1024 * 1024
 	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
 	term_apply_theme(t)
@@ -160,6 +167,7 @@ term_free :: proc(t: ^Term) {
 	gh.render_state_row_iterator_free(t.it)
 	gh.render_state_free(t.rs)
 	gh.terminal_free(t.gt)
+	prog_free(&t.prog)
 }
 
 // Starts argv on a fresh terminal (old child hung up, screen reset).
@@ -173,11 +181,15 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	gh.terminal_set(t.gt, .Userdata, t)
 	gh.terminal_set(t.gt, .Write_Pty, rawptr(on_write_pty))
 	gh.terminal_set(t.gt, .Color_Scheme, rawptr(on_color_scheme))
+	term_status_register(t) // OSC 7501 and OSC 133 (agent_status.odin)
+	prog_reset(&t.prog) // a new process: the old one's status goes
+	t.prog.dirty = true // and the tab re-syncs at the next pump, whatever it showed
 	max_bytes: uint = 20 * 1024 * 1024
 	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
 	term_apply_theme(t)
 	grapheme_clusters(t)
 	gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
+	t.exit, t.eof_at, t.hung_pid = {}, {}, 0
 	p, ok := pty_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows)
 	if !ok {
 		msg := "\x1b[31mfailed to start process\x1b[0m\r\n"
@@ -195,17 +207,22 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 
 // Environment for the child: ours, minus the identity of whatever terminal
 // launched pi-desk (and any pi-desk token it had), plus our own TERM and
-// `extra` (a pi tab's PI_DESK_SOCKET and PI_DESK_TOKEN).
+// `extra` (a pi tab's DECKHAND_SOCKET and DECKHAND_TOKEN).
 child_env :: proc(extra: []string = nil) -> []string {
-	env, _ := os.environ(context.temp_allocator)
+	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
-	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_DESK_SOCKET=", "PI_DESK_TOKEN=", "PI_DESK_CONTROL_TOKEN=", "PI_DESK_DATA_DIR=", "PI_DESK_SHOTS_DIR=", "PI_KIT_READONLY="} // a chat sets its own PI_KIT_READONLY
+	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_DESK_SOCKET=", "PI_DESK_TOKEN=", "PI_DESK_CONTROL_TOKEN=", "DECKHAND_SOCKET=", "DECKHAND_TOKEN=", "DECKHAND_CONTROL_TOKEN=", "DECKHAND_SHOTS_DIR=", "PI_DESK_DATA_DIR=", "PI_DESK_SHOTS_DIR=", "PI_DESK_CLAUDE_TOKEN=", "PI_DESK_CLI=", "PI_DESK_CLAUDE_TAB=", "PI_DESK_GUI_LAUNCH=", "PI_KIT_READONLY=", "PI_DESK_CLAUDE_READONLY=", "PI_DESK_CLAUDE_ACCOUNT="} // a chat sets its own PI_KIT_READONLY, a read-only Claude tab its PI_DESK_CLAUDE_READONLY, a Claude tab its account
+	// a Claude tab's account (claude_accounts.odin): its CLAUDE_CONFIG_DIR replaces the inherited
+	// one; "!CLAUDE_CONFIG_DIR" drops it
+	own_config := false
+	for x in extra do if strings.has_prefix(x, "CLAUDE_CONFIG_DIR=") || x == "!CLAUDE_CONFIG_DIR" do own_config = true
 	outer: for e in env {
 		for d in drop do if strings.has_prefix(e, d) do continue outer
+		if own_config && strings.has_prefix(e, "CLAUDE_CONFIG_DIR=") do continue
 		append(&out, e)
 	}
 	append(&out, "TERM=xterm-256color", "COLORTERM=truecolor", "TERM_PROGRAM=pi-desk")
-	append(&out, ..extra)
+	for x in extra do if !strings.has_prefix(x, "!") do append(&out, x)
 	return out[:]
 }
 
@@ -281,8 +298,20 @@ term_pump :: proc(t: ^Term) {
 		t.last_output = time.tick_now()
 	}
 	if eof && t.running {
+		// how it ended: its terminal closes a moment before the process is
+		// reaped, so it may take a frame or two; one that keeps running
+		// without its terminal is hung up on after EXIT_REAP_WAIT (unknown)
+		if !t.exit.known {
+			if e, reaped := pty_try_reap(&t.pty); reaped do t.exit = e
+			else {
+				if t.eof_at == {} do t.eof_at = time.tick_now()
+				if time.tick_since(t.eof_at) < EXIT_REAP_WAIT do return
+			}
+		}
 		t.running = false
-		msg := "\r\n\x1b[2m[process exited]\x1b[0m"
+		if !t.exit.known do t.hung_pid = t.pty.pid // reader_stop_and_close hangs up on it
+		how := exit_text(t.exit)
+		msg := how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
 		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
 		t.changed = true
 		reader_stop_and_close(t)

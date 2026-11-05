@@ -1,0 +1,43 @@
+# claude_wait_idle (tests/scripts/claude-wait.sh; docs/PROTOCOL.md): Atlas (control_command, as an
+# agent) prompts a fake claude and waits until it is idle. The fake's own OSC 7501 status says idle
+# 1.5 s after its Stop hook does: the wait ends only once both do. Then a wait that times out while
+# the user types, and a pi tab's bridge refused.
+wait 1500
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
+assert_result ok true
+command {"type":"new_claude_tab","session":$session}
+assert_result ok true
+assert_state open_sessions.0.tabs.1.kind claude
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+# 1. Atlas prompts, then waits (long-running: the script waits for its finished event)
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"from atlas"}
+assert_result ok true
+control_command {"type":"claude_wait_idle","tab_id":$tab,"timeout_ms":20000}
+assert_finished ok true
+assert_screen PROMPT: from atlas
+assert_screen OSC IDLE
+assert_state open_sessions.0.tabs.1.turn idle
+assert_state open_sessions.0.tabs.1.held 0
+assert_state open_sessions.0.tabs.1.agent_status.osc7501.state idle
+shot claude-wait/idle
+# 2. idle already: it ends after the settle
+control_command {"type":"claude_wait_idle","tab_id":$tab,"timeout_ms":5000}
+assert_finished ok true
+# 3. the user is typing: a short wait times out and says why
+type half
+eventually
+assert_state open_sessions.0.tabs.1.typed true
+control_command {"type":"claude_wait_idle","tab_id":$tab,"timeout_ms":800}
+assert_finished ok false
+assert_finished data.code timeout
+assert_finished error still not idle after 0.8 s: the user is typing in it
+# 4. not from a tab's own connection (a pi tab's bridge)
+pi_command {"type":"claude_wait_idle","tab_id":$tab}
+assert_result error not allowed for this caller
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

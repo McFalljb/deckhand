@@ -1,0 +1,87 @@
+# The first-run sheet's Claude accounts step (tests/scripts/setup.sh, second home): two
+# accounts found besides ~/.claude, one added by the picker (outside HOME), one typed in
+# without Claude Code's files (a warning, still added); a label renamed, one unticked, the
+# default chosen; Done writes the accounts setting Settings edits.
+wait 1500
+assert_state focus.id setup
+assert_state focus.steps 5
+key enter
+wait 100
+key enter
+wait 100
+key enter
+wait 200
+assert_state focus.step accounts
+assert_state focus.accounts.# 3
+assert_state focus.accounts.0.label Claude
+assert_state focus.accounts.0.default true
+assert_state focus.accounts.1.label Work
+assert_state focus.accounts.2.label Personal
+shot setup/accounts-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot setup/accounts-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# Add folder…: a picked folder outside HOME
+hover setupbtn 10
+eventually
+assert_tip Pick a Claude Code config folder (hidden folders: ⌘⇧.)
+pick_folder $datadir/../outside/Team Claude
+clickid setupbtn 10
+eventually
+assert_state focus.accounts.# 4
+assert_state focus.accounts.3.label Team Claude
+assert_state focus.accounts.3.added true
+# a typed path without Claude Code's files: a warning, added anyway
+clickid setuppath
+wait 100
+type ~/plain-folder
+key enter
+eventually
+assert_state focus.accounts.# 5
+assert_state focus.accounts.4.marked false
+assert_state focus.message It has no Claude Code files yet (.claude.json, .credentials.json): added anyway; Claude Code makes them when you sign in there.
+# a folder that is not there: refused, the list unchanged
+type ~/nowhere
+key enter
+wait 100
+assert_state focus.accounts.# 5
+key escape
+wait 100
+assert_state focus.step accounts
+# rename Work, untick Personal, Work is the default
+clickid setuplabel 1
+wait 100
+type Job
+key enter
+eventually
+assert_state focus.accounts.1.label Job
+clickid setupkeep 2
+eventually
+assert_state focus.accounts.2.keep false
+clickid setupdef 1
+eventually
+assert_state focus.accounts.1.default true
+shot setup/accounts-filled-dark
+ui_command {"type":"set_appearance","mode":"light"}
+wait 200
+shot setup/accounts-filled-light
+ui_command {"type":"set_appearance","mode":"dark"}
+# nothing written before Done
+assert_state claude_accounts.# 3
+key enter
+eventually
+assert_state focus.step folders
+clickid setupbtn 3
+eventually
+assert_state focus.kind terminal
+assert_state claude_accounts.# 4
+assert_state claude_accounts.1.label Job
+assert_state claude_accounts.1.chosen true
+assert_state claude_accounts.2.label Team Claude
+assert_state claude_accounts.3.label Plain-folder
+# Settings → Claude accounts: the same list, Scan again, Add account…
+clickid lefttab 2
+wait 500
+shot setup/settings-accounts-dark
+quit

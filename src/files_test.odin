@@ -434,3 +434,209 @@ files_new_names_are_checked :: proc(t: ^testing.T) {
 	for bad in ([]string{"", " ", ".", "..", "a/b", "/x"}) do testing.expectf(t, files_name_error(bad) != "", "%q accepted", bad)
 	for good in ([]string{"ok.txt", ".env", "a b", "x..y"}) do testing.expectf(t, files_name_error(good) == "", "%q refused", good)
 }
+
+// A symlink to a folder is a folder in the tree and opens in place, wherever
+// it points: outside the project (its own entries show under the link), or
+// inside it (the link opens, not the folder it points at).
+@(test)
+files_symlinked_folders_open :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "real/r.txt", "")
+	out := fmt.tprintf("%s-outside", dir)
+	fwrite(out, "o.txt", "")
+	defer os.remove_all(out)
+	testing.expect(t, os.symlink(out, fmt.tprintf("%s/out-link", dir)) == nil)
+	testing.expect(t, os.symlink(fmt.tprintf("%s/real", dir), fmt.tprintf("%s/in-link", dir)) == nil)
+	testing.expect_value(t, tree(), "in-link\nout-link\nreal\n")
+	r := run_command(Files_Expand{path = "out-link", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "in-link\nout-link/\n  o.txt\nreal\n")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/out-link", dir)))
+	r = run_command(Files_Expand{path = "in-link", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "in-link/\n  r.txt\nout-link/\n  o.txt\nreal\n")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/in-link", dir)) && !files_is_open(fmt.tprintf("%s/real", dir)))
+	// and closes again
+	testing.expect(t, run_command(Files_Expand{path = "out-link", expanded = false}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "in-link/\n  r.txt\nout-link\nreal\n")
+}
+
+// A folder of the tree that is itself a known folder (another project, or
+// a session's worktree inside this project) opens like any other, and so
+// do the folders below it.
+@(test)
+files_nested_project_folders_open :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "sub/inner/x.txt", "")
+	append(&state.projects, Project{id = new_id(), cwd = strings.clone(fmt.tprintf("%s/sub", dir)), label = "sub"})
+	testing.expect_value(t, tree(), "sub\n")
+	r := run_command(Files_Expand{path = "sub", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "sub/\n  inner\n")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/sub", dir)))
+	r = run_command(Files_Expand{path = "sub/inner", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "sub/\n  inner/\n    x.txt\n")
+	testing.expect(t, files_is_open(fmt.tprintf("%s/sub/inner", dir)))
+	// reveal opens the folders above, nested known folder included (sub's own
+	// "inner" closed too, so only reveal can open it)
+	testing.expect(t, run_command(Files_Expand{path = "sub/inner", expanded = false}, {kind = .UI}).ok)
+	testing.expect(t, run_command(Files_Collapse_All{root = dir}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "sub\n")
+	testing.expect(t, run_command(Files_Reveal{path = "sub/inner/x.txt"}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "sub/\n  inner/\n    x.txt\n")
+}
+
+// A folder that cannot be listed never looks empty: its open row is
+// followed by a row that says why, and Retry lists it again.
+@(test)
+files_unlistable_folder_says_why :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "locked/secret.txt", "")
+	locked := fmt.tprintf("%s/locked", dir)
+	testing.expect(t, os.chmod(locked, {}) == nil)
+	defer os.chmod(locked, os.Permissions_Default_Directory)
+	r := run_command(Files_Expand{path = "locked", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	rows := files_rows(dir)
+	testing.expect_value(t, len(rows), 2)
+	if len(rows) == 2 {
+		testing.expect_value(t, rows[1].depth, 1)
+		testing.expect(t, strings.contains(rows[1].error, "ermission denied"), rows[1].error)
+		testing.expect_value(t, rows[1].path, locked)
+	}
+	testing.expect_value(t, tree(), "locked/\n  ! Can't open: permission denied\n")
+	// fixed outside, then Retry: listed again
+	testing.expect(t, os.chmod(locked, os.Permissions_Default_Directory) == nil)
+	files_retry(locked)
+	testing.expect_value(t, tree(), "locked/\n  secret.txt\n")
+}
+
+// The listing message for an opendir error: macOS privacy (EPERM) points at
+// System Settings; other errors say what they are.
+@(test)
+files_list_error_messages :: proc(t: ^testing.T) {
+	testing.expect(t, strings.contains(fs_list_error_text(.EPERM), "Privacy & Security"))
+	testing.expect_value(t, fs_list_error_text(.EACCES), "Can't open: permission denied")
+	testing.expect(t, strings.has_prefix(fs_list_error_text(.ENOTDIR), "Can't open: "))
+}
+
+// A folder that can be read but not searched (r--): its names list even
+// though no entry can be stat'ed (os.read_all_directory gives up on the
+// first entry it cannot stat, so one bad entry emptied the whole folder).
+@(test)
+files_listing_survives_entries_that_cannot_be_statted :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "ronly/a.txt", "")
+	fwrite(dir, "ronly/d/x.txt", "")
+	ronly := fmt.tprintf("%s/ronly", dir)
+	testing.expect(t, os.chmod(ronly, {.Read_User}) == nil)
+	defer os.chmod(ronly, os.Permissions_Default_Directory)
+	entries, err := fs_read_dir(ronly)
+	testing.expect_value(t, err, "")
+	testing.expect_value(t, len(entries), 2)
+	if len(entries) == 2 {
+		testing.expect_value(t, entries[0].name, "d")
+		testing.expect_value(t, entries[0].kind, Fs_Kind.Dir)
+		testing.expect_value(t, entries[1].name, "a.txt")
+	}
+}
+
+// A project that is not a repository, with folders that are their own
+// repositories (and one that is not): every one of them opens, and so do
+// the folders below them. The same inside a project that is a repository.
+@(test)
+files_nested_repositories_open :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "golf/src/main.c", "")
+	fwrite(dir, "handmade/code/h.c", "")
+	fwrite(dir, "plain/p.txt", "")
+	for r in ([]string{"golf", "handmade"}) {
+		if _, ok := git_run(fmt.tprintf("%s/%s", dir, r), "init", "-q"); !ok do return // no git
+	}
+	testing.expect_value(t, tree(), "golf\nhandmade\nplain\n")
+	for name in ([]string{"golf", "handmade", "plain"}) {
+		r := run_command(Files_Expand{path = name, expanded = true}, {kind = .UI})
+		testing.expect(t, r.ok, r.error)
+	}
+	testing.expect_value(t, tree(), "golf/\n  src\nhandmade/\n  code\nplain/\n  p.txt\n")
+	testing.expect(t, run_command(Files_Expand{path = "golf/src", expanded = true}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "golf/\n  src/\n    main.c\nhandmade/\n  code\nplain/\n  p.txt\n")
+	// the project itself a repository too
+	if _, ok := git_run(dir, "init", "-q"); !ok do return
+	files_refresh()
+	testing.expect(t, strings.contains(tree(), "handmade/\n  code\n"), tree())
+}
+
+// The keyboard moves past a folder's error row: it stands for no file, so
+// ↓ from the unlistable folder goes to the row below it, ↑ back over it,
+// and End on a last error row stays on its folder.
+@(test)
+files_keyboard_passes_error_rows :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "locked/s.txt", "")
+	fwrite(dir, "zz.txt", "")
+	locked := fmt.tprintf("%s/locked", dir)
+	testing.expect(t, os.chmod(locked, {}) == nil)
+	defer os.chmod(locked, os.Permissions_Default_Directory)
+	testing.expect(t, run_command(Files_Expand{path = "locked", expanded = true}, {kind = .UI}).ok)
+	rows := files_rows(dir)
+	testing.expect_value(t, files_rows_text(rows), "locked/\n  ! Can't open: permission denied\nzz.txt\n")
+	testing.expect_value(t, files_move_target(rows, 1, false), 2) // ↓ from locked
+	testing.expect_value(t, files_move_target(rows, 1, true), 0) // ↑ from zz.txt
+	testing.expect_value(t, files_move_target(rows[:2], 1, false), 0) // End: the error row is last
+}
+
+// A symlinked folder open in place is listed again when something changes
+// in it: the change is reported by its real path.
+@(test)
+files_symlinked_folder_follows_changes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "real/r.txt", "")
+	testing.expect(t, os.symlink(fmt.tprintf("%s/real", dir), fmt.tprintf("%s/in-link", dir)) == nil)
+	testing.expect(t, run_command(Files_Expand{path = "in-link", expanded = true}, {kind = .UI}).ok)
+	testing.expect_value(t, tree(), "in-link/\n  r.txt\nreal\n")
+	r := run_command(Create_File{path = fmt.tprintf("%s/in-link/x.txt", dir)}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "in-link/\n  r.txt\n  x.txt\nreal\n")
+}
+
+// Only the user's own clicks open a symlinked folder that leads out of the
+// project; the control socket and scripts keep the real-path boundary.
+@(test)
+files_expand_through_links_is_ui_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	out := fmt.tprintf("%s-outside", dir)
+	fwrite(out, "o.txt", "")
+	defer os.remove_all(out)
+	testing.expect(t, os.symlink(out, fmt.tprintf("%s/out-link", dir)) == nil)
+	testing.expect_value(t, run_command(Files_Expand{path = "out-link", expanded = true}, {kind = .Control}).error, "only inside a project folder")
+	testing.expect_value(t, run_command(Files_Expand{path = "out-link", expanded = true}, {kind = .Script}).error, "only inside a project folder")
+	testing.expect_value(t, tree(), "out-link\n")
+	r := run_command(Files_Expand{path = "out-link", expanded = true}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, tree(), "out-link/\n  o.txt\n")
+}
+
+// list_dir (agents) names the folder it could not list, in plain words;
+// the Files tab's row has the user-facing wording.
+@(test)
+files_list_dir_error_names_the_path :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fsetup()
+	fwrite(dir, "locked/s.txt", "")
+	locked := fmt.tprintf("%s/locked", dir)
+	testing.expect(t, os.chmod(locked, {}) == nil)
+	defer os.chmod(locked, os.Permissions_Default_Directory)
+	_, err := fs_list_json("locked", {kind = .Script})
+	testing.expect(t, strings.contains(err, locked) && strings.contains(err, "ermission denied"), err)
+	testing.expect(t, !strings.contains(err, "Can't open"), err)
+}

@@ -123,6 +123,8 @@ TREE_CHEVRON :: SP_3 // the fold chevron's box on a project row
 TREE_INDENT :: TREE_CHEVRON + GAP_INLINE // a project's sessions line up with its icon
 TREE_SHOW :: 8 // sessions shown under a project before "Show more"
 KIND_ICON :: ICON_SIZE_SM // folder (project) or bubble (chat) on rows and tabs
+HARNESS_ICON_SIZE :: ICON_SIZE_SM // pi or Claude on session rows and agent tabs (sidebar.odin: Harness)
+MENU_LOGO_SIZE :: ICON_SIZE // a harness's logo in a menu (the New session picker)
 FIELD_H :: 28 // the filter field
 ROW_BUTTON :: ROW_H - SP_3 // pin, new chat and close buttons on a hovered row
 // The left column's tabs (Sessions | Files) and the Files tab (ui_files.odin).

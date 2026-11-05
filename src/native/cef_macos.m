@@ -130,7 +130,7 @@ static int shared_textures;
 
 static void say(NSString* s) {
     if (cb.log) cb.log(s.UTF8String);
-    else fprintf(stderr, "pi-desk cef: %s\n", s.UTF8String);
+    else fprintf(stderr, "Deckhand cef: %s\n", s.UTF8String);
 }
 
 static cef_string_t str16(const char* s) {
@@ -947,7 +947,7 @@ int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file,
     NSString* fw = [NSBundle.mainBundle.privateFrameworksPath
         stringByAppendingPathComponent:@"Chromium Embedded Framework.framework/Chromium Embedded Framework"];
     if (!NSBundle.mainBundle.bundleIdentifier || ![NSFileManager.defaultManager fileExistsAtPath:fw]) {
-        say(@"not running from pi-desk.app (no framework): browser unavailable");
+        say(@"not running from Deckhand.app (no framework): browser unavailable");
         return 0;
     }
     double t0 = now_s();

@@ -10,7 +10,7 @@ web_waitpaint 10000
 web_title ready 5000
 # 1. a comment: the strip shows (on the browser tab too) and pi's bridge holds it
 web_comment 280 30 60 40 Make the red box blue
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 1
 assert_state open_sessions.0.comments.0.source browser
 assert_state open_sessions.0.comments.0.text Make the red box blue
@@ -30,7 +30,7 @@ waitstate 5000 open_sessions.0.comments.# 0
 clickid tab 1
 wait 250
 web_comment 10 10 100 60 Send this one now
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 1
 clickid cm_send 0
 wait 250
@@ -42,7 +42,7 @@ clickid cm_view 0
 wait 250
 wait 200
 clickid cm_edit 0
-wait 250
+eventually
 assert_state focus.id comment_edit
 key backspace
 type Second text
@@ -50,7 +50,7 @@ key enter
 assert_state open_sessions.0.comments.0.text Second text
 shot comments/list
 clickid cm_delete 0
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 0
 # 5. closing the tab asks first; Cancel keeps it, Drop and close closes it
 web_comment 10 10 100 60 Keep or drop
@@ -67,23 +67,23 @@ assert_state open_sessions.0.comments.# 1
 clickid tabclose 1
 wait 250
 clickid cm_ask_drop 0
-wait 250
+eventually
 assert_state open_sessions.0.tabs.# 1
 assert_state open_sessions.0.comments.# 0
 # 5b. an app tab's Inspect box: a click opens the comment field; Enter adds it, with a crop
 app_open build/fake-app
-app_waitframe 5 5000
+app_waitframe 5 20000
 clickid app_inspect
 wait 400
 assert_state open_sessions.0.tabs.1.boxes 3
 app_click 305 205
-wait 250
+eventually
 assert_state focus.id comment_new
 assert_drawn Comment on box "coin":
 type Collect this coin
 shot comments/app-box
 key enter
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 1
 assert_state open_sessions.0.comments.0.source app
 assert_state open_sessions.0.comments.0.what box "coin" ("e:3:1") at 300,200 16×16
@@ -98,7 +98,7 @@ waitstate 5000 open_sessions.0.comments.# 0
 clickid tab 1
 wait 250
 clickid tabclose 1
-wait 250
+eventually
 assert_state open_sessions.0.tabs.# 1
 # 5c. the browser's picker (browser_annotate.odin): comment mode, a click on an element whose text
 # tries to read as the user's comment; pi gets it quoted on the item's line, with the crop
@@ -108,11 +108,11 @@ web_title Annotate fixture 5000
 waitstate 5000 open_sessions.0.tabs.1.annot_ready true
 annot_key cmd_shift_period
 web_click 100 140
-wait 400
+eventually
 assert_state focus.id comment_new
 type Fix the hostile one
 key enter
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 1
 assert_state open_sessions.0.tabs.1.markers.0.selector div#evil
 command {"type":"focus_tab","tab_id":$pitab}
@@ -124,7 +124,7 @@ waitstate 5000 open_sessions.0.comments.# 0
 clickid tab 1
 wait 250
 clickid tabclose 1
-wait 250
+eventually
 assert_state open_sessions.0.tabs.# 1
 # 6. no bridge: comments wait, Send now does nothing
 web_open tests/web/browser.html
@@ -136,9 +136,9 @@ waitstate 5000 open_sessions.0.tabs.0.agent unknown
 clickid tab 1
 wait 250
 web_comment 10 10 100 60 Waits for pi
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 1
-assert_state open_sessions.0.comments_wait pi-desk's bridge is not connected to pi in this session
+assert_state open_sessions.0.comments_wait Deckhand's bridge is not connected to pi in this session
 clickid cm_send 0
 wait 250
 wait 300

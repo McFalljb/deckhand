@@ -4,8 +4,15 @@
 # PI_KIT_NOTES_DIR; the sheet reopens from the gear and the menu bar and closes with Esc.
 wait 1500
 assert_state focus.id setup
+assert_state focus.steps 4
 assert_state settings.setup_seen false
 assert_state settings.home_dir
+# first the coding agents checklist (harness-setup.sh tests it): Next
+assert_state focus.step agents
+shot setup/step0-dark
+key enter
+eventually
+assert_state focus.step main
 shot setup/step1-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200
@@ -13,7 +20,7 @@ shot setup/step1-light
 ui_command {"type":"set_appearance","mode":"dark"}
 # the found notes folder is the first choice: Next
 hover setupbtn 3
-wait 1000
+eventually
 assert_tip The next step Enter
 key enter
 wait 200
@@ -67,12 +74,12 @@ assert_result error not allowed for this caller
 command {"type":"set_folder","kind":"jobs","path":"$homedir"}
 assert_result error not allowed for this caller
 # the gear's "Set up pi-desk…" (its button once a main folder is set) reopens it
-# at step 1 (pre-filled with the current main folder); Esc closes, nothing changes
+# at its first step, the coding agents (the main folder pre-filled); Esc closes, nothing changes
 clickid settings
 wait 200
 shot setup/gear-dark
 clickid pop 26
-wait 200
+eventually
 assert_state focus.id setup
 shot setup/reopened-dark
 key escape
@@ -82,7 +89,7 @@ assert_state settings.home_dir $homedir/notes/agents-demo
 assert_state settings.folders.chats.path $homedir/Chats
 # the menu bar's pi-desk → Set up pi-desk… does the same
 menu setup
-wait 200
+eventually
 assert_state focus.id setup
 key escape
 wait 200

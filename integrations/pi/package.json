@@ -1,0 +1,11 @@
+{
+  "name": "deckhand-pi",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Deckhand's pi integration, loaded per pi tab with `pi -e` (extensions.json lists the extensions). Not a pi package to install.",
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "test": "node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts"
+  }
+}

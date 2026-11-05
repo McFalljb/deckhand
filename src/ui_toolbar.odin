@@ -73,7 +73,16 @@ button_click :: proc(b: Button) {
 		ui_do(Set_Focus{state.focus_widget == "settings" ? "" : "settings"})
 	case .Bell:
 		ui_do(Set_Focus{bell_open() ? "" : "notifications"})
-	case .Toggle_Left, .New_Chat, .Search, .New_Tab, .Toggle_Right, .Empty_New_Chat, .Empty_Close:
+	case .New_Chat, .Empty_New_Chat: // the harness picker under the button (harness.odin)
+		c := chats_project()
+		d := clay.GetElementData(clay.ID(BUTTONS[b].element))
+		if c == nil || !d.found || job_sheet_open() {
+			action_run(BUTTONS[b].action)
+			return
+		}
+		bb := d.boundingBox
+		new_session_ui(c.id, at = [2]f32{bb.x, bb.y + bb.height + px(SP_1)})
+	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close:
 		action_run(BUTTONS[b].action)
 	}
 }
@@ -217,8 +226,10 @@ Pop_Item :: enum {
 	Text_Large,
 	Tidy_Projects, // the tidy project list (project_tidy.odin); last, so earlier rows keep their ids
 	Reload_Pi, // reload every pi tab (reload.odin); drawn after Rescan, last so earlier rows keep their ids
-	Setup, // "Set up pi-desk…": the first-run sheet (ui_setup.odin), its button once a main folder is set; last so earlier rows keep their ids
+	Setup, // "Set up Deckhand…": the first-run sheet (ui_setup.odin), its button once a main folder is set; last so earlier rows keep their ids
 	Update_Checks, // check for pi-desk updates about once a day (update.odin); last so earlier rows keep their ids
+	Refresh_Env, // ask the login shell for its environment again (login_env.odin); drawn after Reload pi; last so earlier rows keep their ids
+	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -229,7 +240,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Reduce_Motion, .Notifications, .Agent_Model,
 	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
 	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
-	.Rescan, .Reload_Pi, .Shortcuts, .Settings_Files, .Setup, .Tidy_Projects, .Update_Checks,
+	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Shortcuts, .Settings_Files, .Setup, .Tidy_Projects, .Update_Checks,
 }
 
 POP_ACTIONS := [Pop_Item]string {
@@ -261,9 +272,21 @@ POP_ACTIONS := [Pop_Item]string {
 	.Reload_Pi         = "reload_all_pi",
 	.Setup             = "setup",
 	.Update_Checks     = "update_checks",
+	.Refresh_Env       = "refresh_shell_env",
+	.Restart_Claude    = "restart_all_claude",
 }
 
 settings_open :: proc() -> bool {return state.focus_widget == "settings"}
+
+// A gear row that may not apply now: Reload all pi tabs and Restart all Claude tabs only while
+// such a tab runs (so someone with one harness never sees the other's); Atlas's model needs pi.
+pop_item_shown :: proc(it: Pop_Item) -> bool {
+	#partial switch it {
+	case .Reload_Pi, .Restart_Claude: return action_ok(POP_ACTIONS[it])
+	case .Agent_Model: return atlas_offered()
+	}
+	return true
+}
 
 popover: struct {
 	selected: int, // keyboard selection (Pop_Item), -1 = none
@@ -274,7 +297,7 @@ popover: struct {
 // at once); the others close it first.
 pop_run :: proc(it: Pop_Item) {
 	#partial switch it {
-	case .Chats_Folder, .Rescan, .Reload_Pi, .Setup:
+	case .Chats_Folder, .Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Setup:
 		ui_do(Set_Focus{""})
 	}
 	if !action_ok(POP_ACTIONS[it]) do return // not now (no other folder to go back from)
@@ -328,7 +351,7 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 		if on, ok := toggle.?; ok {
 			switch_control(on)
 		} else {
-			if (it == .Chats_Folder || it == .Agent_Model) && a.detail != nil {
+			if (it == .Chats_Folder || it == .Agent_Model || it == .Refresh_Env) && a.detail != nil {
 				clay.TextDynamic(clip(a.detail(), px(POPOVER_W / 3)), txt(th.text_muted, FONT_UI_SMALL))
 			}
 			if a.keys != "" do clay.TextDynamic(a.keys, txt(th.text_muted, FONT_UI_SMALL))
@@ -466,7 +489,7 @@ settings_layout :: proc(w, h: f32) {
 		}
 		pop_row(.Reduce_Motion, state.settings.reduce_motion)
 		pop_row(.Notifications, !state.settings.notify_off)
-		pop_row(.Agent_Model, nil)
+		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
 		pop_sep()
 		// the bell: what it collects (one chip per group), and macOS notifications
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
@@ -496,7 +519,9 @@ settings_layout :: proc(w, h: f32) {
 		if action_ok(POP_ACTIONS[.Chats_Folder_Default]) do pop_row(.Chats_Folder_Default, nil)
 		pop_sep()
 		pop_row(.Rescan, nil)
-		pop_row(.Reload_Pi, nil)
+		if pop_item_shown(.Reload_Pi) do pop_row(.Reload_Pi, nil)
+		if pop_item_shown(.Restart_Claude) do pop_row(.Restart_Claude, nil)
+		pop_row(.Refresh_Env, nil)
 		pop_row(.Shortcuts, nil)
 		pop_row(.Settings_Files, nil)
 		pop_row(.Setup, nil)
@@ -532,7 +557,7 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 			i := at < 0 && d != 1 ? 0 : at
 			for _ in 0 ..< n {
 				i = (i + d) %% n
-				if action_ok(POP_ACTIONS[order[i]]) do break // a row that shows
+				if action_ok(POP_ACTIONS[order[i]]) && pop_item_shown(order[i]) do break // a row that shows
 			}
 			popover.selected = int(order[i])
 		case .ENTER, .KP_ENTER, .SPACE: if popover.selected >= 0 do pop_run(Pop_Item(popover.selected))
@@ -762,6 +787,7 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return "Drag to resize, double-click to reset", ""
 	case Hit_Pop:
 		if Pop_Item(x) == .Reload_Pi do return "Reload every idle pi tab now (/reload); busy ones once idle", ""
+		if Pop_Item(x) == .Restart_Claude do return "Restart every idle Claude tab now (each resumes its conversation; background work stops); busy ones once idle", ""
 		if Pop_Item(x) >= .Look_Graphite && Pop_Item(x) <= .Look_Ghostty do return act(POP_ACTIONS[Pop_Item(x)])
 		if Pop_Item(x) >= .Text_Small && Pop_Item(x) <= .Text_Large do return act(POP_ACTIONS[Pop_Item(x)])
 		if Pop_Item(x) >= .Bell_Finished && Pop_Item(x) <= .Bell_Jobs {
@@ -783,16 +809,41 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return files_tip(x)
 	case Hit_Reload:
 		return reload_tip(x)
+	case Hit_Claude_Reload:
+		return claude_reload_tip(x)
+	case Hit_Dead_Tab:
+		return dead_tab_tip_for(x)
+	case Hit_Tab:
+		// a dead pi tab: how it ended; else its status dot's source and age (agent_status.odin)
+		_, tab, _ := find_tab(u64(x))
+		if tip := dead_tab_hover_tip(tab); tip != "" do return tip, ""
+		if tab != nil {
+			// a Claude tab: its model too (claude_rows.odin)
+			st, model := status_explain(tab^), claude_tab_tip(tab^)
+			if st != "" && model != "" do return fmt.tprintf("%s — %s", model, st), ""
+			return model != "" ? model : st, ""
+		}
+	case Hit_Open_Row:
+		s := find_session(u64(x))
+		if tip := dead_tab_hover_tip(session_pi_tab(s)); tip != "" do return tip, ""
+		return session_explain(s), ""
 	case Hit_Update:
 		return update_tip(x)
 	case Hit_Comments:
 		return comments_tip(x)
+	case Hit_Claude:
+		return claude_tip(x)
 	case Hit_Jobs:
 		return jobs_tip(x)
 	case Hit_Changes:
 		return changes_tip(x)
 	case Hit_Group, Hit_Kids:
 		return tree_tip(h), ""
+	// a status dot's source and age (agent_status.odin); none without a dot
+	case Hit_Session:
+		if id := open_session_any(string(x)); id != 0 do return session_explain(find_session(id)), ""
+	case Hit_Chat:
+		if id := open_session_any(string(x)); id != 0 do return session_explain(find_session(id)), ""
 	}
 	return "", ""
 }

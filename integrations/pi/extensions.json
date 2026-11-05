@@ -1,0 +1,12 @@
+{
+  "about": "Deckhand's pi integration (docs/HARNESSES.md). Deckhand starts every pi tab with one `-e <this folder>/extensions/<name>` per extension listed here that is required, or optional and turned on in Settings (the Settings tab's \"pi extensions\" group; `default` until the user chooses), in this order. Optional ones show `does` as their one line there. Nothing is written to pi's settings.",
+  "extensions": [
+    {"name": "bridge", "required": true, "does": "the pi tab's connection to Deckhand: status, session id, waits, prompts, reload, comments, panels and other extensions' commands"},
+    {"name": "desk", "required": true, "does": "Atlas's tools (Home only): desk_state, desk_run, desk_prompt, desk_wait, desk_watch, desk_events and the app tools"},
+    {"name": "browser", "required": true, "does": "browser_* tools, desk_show (a file shown to the user in a tab) and a pi tab's app_* tools, for its own session's tabs"},
+    {"name": "panels", "required": true, "does": "the Todos (rpiv-todo), Subagents (pi-subagents) and Shells (shell, or pi-kit's) panels; steps back for a producer that claims them"},
+    {"name": "guardrails", "required": false, "default": true, "does": "your ask/block rules on shell commands, read-only chats enforced, secrets redacted from tool output"},
+    {"name": "shell", "required": false, "default": true, "does": "background shells, monitors and timers (bash_bg, monitor, wake_later) with a Shells panel; off beside another such shell"},
+    {"name": "notes", "required": false, "default": false, "does": "reminds the session to update its session note before pi compacts; for people who keep notes"}
+  ]
+}

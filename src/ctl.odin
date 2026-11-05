@@ -24,7 +24,7 @@ ctl_main :: proc(args: []string) -> int {
 	path := os.get_env("PI_DESK_SOCKET", context.allocator)
 	token := os.get_env("PI_DESK_TOKEN", context.allocator)
 	if path == "" || token == "" {
-		fmt.eprintln("pi-desk --ctl: PI_DESK_SOCKET and PI_DESK_TOKEN must be set (see pi-desk --print-token)")
+		fmt.eprintln("deckhand --ctl: PI_DESK_SOCKET and PI_DESK_TOKEN must be set (see deckhand --print-token)")
 		return 2
 	}
 	rest := args
@@ -35,7 +35,7 @@ ctl_main :: proc(args: []string) -> int {
 	}
 	fd, ok := sock_connect(path)
 	if !ok {
-		fmt.eprintln("pi-desk --ctl: cannot connect to", path)
+		fmt.eprintln("deckhand --ctl: cannot connect to", path)
 		return 1
 	}
 	defer sock_close(fd)
@@ -44,7 +44,7 @@ ctl_main :: proc(args: []string) -> int {
 	if !ctl_send(fd, hello) do return 1
 	line, got := ctl_next(&r, 5000)
 	if !got || json_path(line, "result.ok") != "true" {
-		fmt.eprintln("pi-desk --ctl: hello failed:", line)
+		fmt.eprintln("deckhand --ctl: hello failed:", line)
 		return 1
 	}
 	status := 0
@@ -52,7 +52,7 @@ ctl_main :: proc(args: []string) -> int {
 		v, err := json.parse_string(arg, .JSON, true, context.temp_allocator)
 		obj, is_obj := v.(json.Object)
 		if err != nil || !is_obj {
-			fmt.eprintln("pi-desk --ctl: not a JSON object:", arg)
+			fmt.eprintln("deckhand --ctl: not a JSON object:", arg)
 			return 2
 		}
 		id := fmt.tprintf("c%d", i + 1)
@@ -103,7 +103,7 @@ Ctl_Reader :: struct {
 @(private = "file")
 ctl_send :: proc(fd: Sock_Fd, line: string) -> bool {
 	ok := sock_write_all(fd, transmute([]u8)strings.concatenate({line, "\n"}, context.temp_allocator))
-	if !ok do fmt.eprintln("pi-desk --ctl: connection closed")
+	if !ok do fmt.eprintln("deckhand --ctl: connection closed")
 	return ok
 }
 

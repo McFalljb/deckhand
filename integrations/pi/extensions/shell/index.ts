@@ -1,0 +1,721 @@
+/**
+ * Deckhand's optional shell extension (Settings → pi extensions; on by default), from pi-kit's
+ * extensions/shell. Background shells and monitors, modelled on Claude Code's background Bash,
+ * Monitor and TaskStop.
+ *
+ * - bash_bg: start a command in its own process group; output goes to a file; a notice wakes the
+ *   session when it exits (exit code, last lines, output path).
+ * - monitor: run a command (or watch a bash_bg task) and send a notice for new output lines that
+ *   match a pattern, batched, until it exits, is stopped, or times out.
+ * - wake_later: a one-shot timer that wakes the session with a prompt (for checks no shell sees).
+ * - shell_stop: kill a task's whole process group (or end only its watch, or cancel a timer).
+ *   shell_list and /shells: running and recent tasks (/shells can stop one). A widget above the editor
+ *   shows each active task and timer and the footer counts them, except where Deckhand draws panels
+ *   (MODE_EVENT: the bundled `panels` publishes them as the Shells panel) or pi-kit's sidebar
+ *   shows them (`kit:sidebar`).
+ * - Publishes its rows on SHELL_ROWS_EVENT (`kit:shell:rows`, pi-kit's contract): the bundled
+ *   `panels` makes them the Shells panel and the bridge reports them as blockers (Deckhand's reload
+ *   and restart wait for them: a reload kills every task).
+ *
+ * Every command goes through lib/guardrails.ts's checkCommand (the user's opt-in command rules, the
+ * same files as pi-kit's guardrails), whether or not the guardrails extension is on. Every
+ * delivered line is redacted like bash output before it is cut, and private key blocks are dropped. Not registered
+ * in read-only sessions (PI_KIT_READONLY=1). Tasks belong to this pi process: they are killed
+ * when the session ends or reloads and do not survive a restart. Processes left in a task's
+ * group after bash exits are reported and stay killable; a process that leaves its group
+ * (setsid, a daemonizing server) escapes shell_stop and cleanup.
+ *
+ * Next to pi-kit's shell (or any extension with one of these tool names): pi refuses to start when
+ * two extensions register one tool name while loading, so this one registers its tools at
+ * session_start, and only when none of them is loaded yet. Otherwise it steps back whole (a notice
+ * says so) and publishes nothing, so the Shells panel and the bridge's blockers are the other
+ * shell's (`kit:shell:rows`, pi-kit's contract). /shells likewise only when no other is loaded (pi
+ * would name two `/shells:1` and `/shells:2`). Its widget, footer and notices use their own keys
+ * (`deckhand-shell`).
+ */
+
+import { type ChildProcess, spawn } from "node:child_process";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { StringDecoder } from "node:string_decoder";
+import { Type } from "typebox";
+import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
+import { truncateToWidth } from "@earendil-works/pi-tui";
+import { loadedCommands, loadedTools } from "../../lib/claims.ts";
+import { checkCommand, redact } from "../../lib/guardrails.ts";
+import { MODE_EVENT, OUR_SHELL_ROWS, SHELL_ROWS_EVENT } from "../../lib/protocol.ts";
+import {
+	afterOpenKey,
+	checkinText,
+	clip,
+	compilePattern,
+	duration,
+	evictable,
+	footerText,
+	groupGone,
+	groupSize,
+	keyFilter,
+	lastLines,
+	lineMatcher,
+	MATCH_BUDGET_MS,
+	MATCH_CAP,
+	MAX_BATCH,
+	panelRows,
+	splitLines,
+} from "../../lib/shell.ts";
+
+const POLL_MS = 250; // how often a watch reads new output
+const BATCH_MS = 1000; // a watch sends at most one notice per this window
+const MAX_NOTICES = 50; // per watch; then the watch ends and the task keeps running
+const KEEP_FINISHED = 20;
+// A headless session waiting on tasks or timers sends a check-in notice after this long with no
+// notice; it never kills them on a deadline. PI_KIT_SHELL_CHECKIN_MS is for tests.
+const HEADLESS_CHECKIN_MS = Math.max(500, Number(process.env.PI_KIT_SHELL_CHECKIN_MS) || 30 * 60 * 1000);
+const READ_CAP = 1 << 20; // bytes a watch reads per poll; a flood is read over several polls
+const BACKLOG_CAP = 8 << 20; // unread bytes beyond which a watch skips ahead to the newest output
+const TAIL_BYTES = 64 << 10; // bytes of the end of the output read for the exit notice's last lines
+// A task whose output file grows past this is killed. PI_KIT_SHELL_LOG_CAP (bytes) is for tests.
+const LOG_CAP = Number(process.env.PI_KIT_SHELL_LOG_CAP) || 1 << 30;
+const WAKE_MIN = 60;
+const WAKE_MAX = 3600;
+const KEY = "deckhand-shell"; // the widget, footer status and notice type (pi-kit's copy uses "shell" and "kit-shell")
+
+interface Watch {
+	re?: RegExp;
+	match?: ReturnType<typeof lineMatcher>; // tests lines against re in a worker, with a time budget
+	owns: boolean; // the monitor started the command (it is killed when the watch must end)
+	failed?: string; // why the watch had to end early
+	pending: string[]; // at most MAX_BATCH lines; the rest are only counted
+	skipped: number;
+	skippedBytes: number; // output skipped because the reader fell behind
+	resync: boolean; // the next lines may start inside a key block (after a skip, or attached mid-file)
+	partial: boolean; // and the first of them is a partial line
+	inKey: boolean; // inside a private key block: lines are dropped until its END line
+	matches: number;
+	notices: number;
+	offset: number;
+	carry: string;
+	decoder: StringDecoder;
+	poll: NodeJS.Timeout;
+	flush?: NodeJS.Timeout;
+	until?: NodeJS.Timeout;
+}
+
+interface Task {
+	id: string;
+	command: string;
+	cwd: string;
+	out: string;
+	child: ChildProcess;
+	pid: number;
+	started: number;
+	ended?: number;
+	code?: number | null;
+	signal?: NodeJS.Signals | null;
+	reason?: string; // why we killed it: "timed out after 30s", "stopped"
+	quiet?: boolean; // stopped on request: no exit notice
+	timer?: NodeJS.Timeout;
+	cap?: NodeJS.Timeout; // checks the output file size
+	reap?: NodeJS.Timeout; // after exit, until the processes left in the group are gone
+	gone?: boolean; // the process group is known to be empty: never signal it again (its id may be reused)
+	watch?: Watch;
+}
+
+/** Its tools, in the order it registers them. */
+export const TOOL_NAMES = ["bash_bg", "monitor", "wake_later", "shell_stop", "shell_list"] as const;
+
+interface Wake {
+	id: string;
+	prompt: string;
+	due: number;
+	timer: NodeJS.Timeout;
+}
+
+export default function (pi: ExtensionAPI) {
+	if (process.env.PI_KIT_READONLY === "1") return;
+
+	const tasks = new Map<string, Task>();
+	const wakes = new Map<string, Wake>();
+	let seq = 0;
+	let dir: string | undefined;
+	let ui: ExtensionContext["ui"] | undefined;
+	let mode: ExtensionContext["mode"] | undefined;
+	let tui: { requestRender(): void } | undefined; // set while the widget is shown
+	let tick: NodeJS.Timeout | undefined;
+	let rows: ReturnType<typeof panelRows> = [];
+	let closed = false;
+	let registered = false; // its tools are registered (session_start)
+	let off = ""; // why it stepped back ("" = it did not): it then publishes nothing
+	let sidebar = false; // pi-kit's sidebar shows the rows and counts instead of the widget and footer
+	let panels = false; // Deckhand draws them as its Shells panel (MODE_EVENT)
+	// Notices sent and notices that reached the conversation: while sent > delivered a notice is
+	// queued and will start a turn. A notice consumed inside the run that sent it counts as delivered.
+	let sent = 0;
+	let delivered = 0;
+	let wake: (() => void) | undefined; // resolves the headless wait
+
+	const running = () => [...tasks.values()].filter((t) => t.ended === undefined);
+	const busy = () => running().length + wakes.size;
+
+	const leftover = (t: Task) => t.ended !== undefined && !groupGone(t);
+	const allRows = (cap?: number) => panelRows([...tasks.values()].map((t) => ({ ...t, leftover: leftover(t) })), [...wakes.values()], Date.now(), cap);
+
+	/** Update the footer and the widget; a 1 s tick keeps them current while anything is active. */
+	function refresh() {
+		if (closed || off) return;
+		rows = allRows();
+		pi.events.emit(SHELL_ROWS_EVENT, Object.assign([...rows], { [OUR_SHELL_ROWS]: true })); // tagged: lib/protocol.ts shellRows
+		const run = running();
+		const elsewhere = sidebar || panels;
+		try {
+			ui?.setStatus(KEY, elsewhere ? undefined : footerText({ shells: run.length, monitors: run.filter((t) => t.watch).length, timers: wakes.size, leftovers: [...tasks.values()].filter(leftover).length }));
+			if (mode === "tui" && (!rows.length || elsewhere)) ui?.setWidget(KEY, undefined);
+			else if (mode === "tui" && !tui)
+				ui?.setWidget(KEY, (t, theme) => {
+					tui = t;
+					const line = (r: (typeof rows)[number]) =>
+						r.id ? `${theme.fg("accent", r.id)}  ${theme.fg(r.warn ? "warning" : "muted", r.status)}  ${r.label}` : theme.fg("muted", r.status);
+					return { render: (width: number) => rows.map((r) => truncateToWidth(` ${line(r)}`, width)), invalidate() {}, dispose: () => void (tui = undefined) };
+				});
+			else tui?.requestRender();
+		} catch {}
+		if (rows.length && !tick) tick = setInterval(refresh, 1000).unref();
+		else if (!rows.length && tick) {
+			clearInterval(tick);
+			tick = undefined;
+		}
+	}
+
+	function notify(text: string) {
+		if (closed) return;
+		sent++;
+		try {
+			pi.sendMessage({ customType: KEY, content: redact(text, true), display: true, details: undefined }, { triggerTurn: true, deliverAs: "followUp" });
+		} catch {
+			sent--;
+		}
+		wake?.();
+	}
+
+	function killGroup(t: Task, sig: NodeJS.Signals) {
+		if (groupGone(t)) return;
+		try {
+			process.kill(-t.pid, sig);
+		} catch {}
+	}
+
+	/** Kill the task's group: SIGTERM, then SIGKILL after 2 s to whatever is left. */
+	function stop(t: Task, reason: string) {
+		if (groupGone(t)) return;
+		if (t.ended === undefined) t.reason ??= reason;
+		killGroup(t, "SIGTERM");
+		setTimeout(() => killGroup(t, "SIGKILL"), 2000).unref();
+	}
+
+	function scan(w: Watch, chunk: string, final: boolean) {
+		if (w.failed) return;
+		const { lines, rest } = splitLines(w.carry, chunk);
+		w.carry = rest.length > 65536 ? rest.slice(0, 65536) : rest; // a huge unterminated line: keep its start
+		if (final && w.carry) lines.push(w.carry);
+		if (w.resync && lines.length) {
+			w.resync = false;
+			lines.splice(0, Math.max(w.partial ? 1 : 0, afterOpenKey(lines)));
+		}
+		const kept: string[] = [];
+		for (const line of lines) {
+			const k = keyFilter(w, line);
+			if (k !== undefined) kept.push(k);
+		}
+		let hits = kept;
+		if (w.match) {
+			const ok = w.match.test(kept.map((l) => l.slice(0, MATCH_CAP)));
+			if (!ok) {
+				w.failed = `pattern /${w.re!.source}/ took over ${MATCH_BUDGET_MS / 1000}s on one batch of lines`;
+				return;
+			}
+			hits = kept.filter((_, i) => ok[i]);
+		}
+		for (const line of hits) {
+			w.matches++;
+			if (w.pending.length < MAX_BATCH) w.pending.push(clip(line));
+			else w.skipped++;
+		}
+	}
+
+	/** Read new output in READ_CAP chunks: one per poll, or all of it when final. */
+	function readNew(t: Task, w: Watch, final: boolean) {
+		try {
+			const fd = fs.openSync(t.out, "r");
+			try {
+				const size = fs.fstatSync(fd).size;
+				if (size - w.offset > BACKLOG_CAP) {
+					// Fell behind: skip to the newest READ_CAP bytes (this also bounds the final drain).
+					w.skippedBytes += size - READ_CAP - w.offset;
+					w.offset = size - READ_CAP;
+					w.carry = "";
+					w.decoder = new StringDecoder("utf8");
+					w.inKey = false;
+					w.resync = w.partial = true;
+				}
+				do {
+					const n = Math.min(size - w.offset, READ_CAP);
+					if (n <= 0) break;
+					const buf = Buffer.alloc(n);
+					fs.readSync(fd, buf, 0, n, w.offset);
+					w.offset += n;
+					scan(w, w.decoder.write(buf), false);
+				} while (final && !w.failed);
+			} finally {
+				fs.closeSync(fd);
+			}
+		} catch {}
+		if (final) scan(w, w.decoder.end(), true);
+		else if (w.failed) failWatch(t, w);
+		else if ((w.pending.length || w.skippedBytes) && !w.flush) w.flush = setTimeout(() => flush(t), BATCH_MS);
+	}
+
+	/** End a watch whose pattern ran out of time; a command the monitor started is stopped too. */
+	function failWatch(t: Task, w: Watch) {
+		const left = endWatch(t);
+		if (w.owns) {
+			t.quiet = true;
+			stop(t, "stopped: monitor pattern too slow");
+		}
+		notify(`Monitor ${t.id} ended: ${w.failed}. ${w.owns ? "Its command was stopped." : "The task keeps running."} Output: ${t.out}${left.length ? `\n${left.join("\n")}` : ""}`);
+	}
+
+	function flush(t: Task) {
+		const w = t.watch;
+		if (!w) return;
+		w.flush = undefined;
+		if (!w.pending.length && !w.skippedBytes) return;
+		const n = w.pending.length + w.skipped;
+		const lines = takePending(w);
+		w.notices++;
+		const capped = w.notices >= MAX_NOTICES;
+		notify(
+			`Monitor ${t.id}: ${n} new ${w.re ? "matching " : ""}line${n === 1 ? "" : "s"} from \`${clip(t.command)}\`\n${lines.join("\n")}` +
+				(capped ? `\n\nNotice cap (${MAX_NOTICES}) reached: watch ended, the task keeps running. Output: ${t.out}` : ""),
+		);
+		if (capped) endWatch(t);
+	}
+
+	function takePending(w: Watch): string[] {
+		const lines = w.pending.splice(0);
+		if (w.skipped) lines.push(`… ${w.skipped} more matching line${w.skipped === 1 ? "" : "s"} (see the output file)`);
+		if (w.skippedBytes) lines.push(`… ${w.skippedBytes} bytes skipped: output came faster than the monitor reads (see the output file)`);
+		w.skipped = 0;
+		w.skippedBytes = 0;
+		return lines;
+	}
+
+	/** Stop watching; returns lines not yet delivered. */
+	function endWatch(t: Task): string[] {
+		const w = t.watch;
+		if (!w) return [];
+		clearInterval(w.poll);
+		clearTimeout(w.flush);
+		clearTimeout(w.until);
+		w.match?.close();
+		t.watch = undefined;
+		return takePending(w);
+	}
+
+	function atLineStart(file: string, offset: number): boolean {
+		const b = Buffer.alloc(1);
+		let fd: number | undefined;
+		try {
+			fd = fs.openSync(file, "r");
+			return fs.readSync(fd, b, 0, 1, offset - 1) === 1 && b[0] === 10;
+		} catch {
+			return false;
+		} finally {
+			if (fd !== undefined) fs.closeSync(fd);
+		}
+	}
+
+	function watch(t: Task, re: RegExp | undefined, timeoutSec: number | undefined, ownsTask: boolean) {
+		// A command the monitor started is read from the start; an attached task from now on.
+		const offset = ownsTask ? 0 : (fs.statSync(t.out, { throwIfNoEntry: false })?.size ?? 0);
+		const w: Watch = {
+			re,
+			match: re && lineMatcher(re),
+			owns: ownsTask,
+			pending: [],
+			skipped: 0,
+			skippedBytes: 0,
+			resync: offset > 0, // an attached watch may start inside a key block
+			partial: offset > 0 && !atLineStart(t.out, offset),
+			inKey: false,
+			matches: 0,
+			notices: 0,
+			offset,
+			carry: "",
+			decoder: new StringDecoder("utf8"),
+			poll: setInterval(() => readNew(t, w, false), POLL_MS),
+		};
+		t.watch = w;
+		if (timeoutSec) {
+			w.until = setTimeout(() => {
+				if (ownsTask) return stop(t, `monitor timed out after ${timeoutSec}s`);
+				readNew(t, w, true);
+				const left = endWatch(t);
+				notify(`Monitor ${t.id} timed out after ${timeoutSec}s (${w.matches} lines matched); the task keeps running.${left.length ? `\n${left.join("\n")}` : ""}`);
+			}, timeoutSec * 1000);
+		}
+	}
+
+	function onExit(t: Task, code: number | null, signal: NodeJS.Signals | null) {
+		t.ended = Date.now();
+		t.code = code;
+		t.signal = signal;
+		clearTimeout(t.timer);
+		let left: string[] = [];
+		let matched: number | undefined;
+		let failed: string | undefined;
+		if (t.watch) {
+			readNew(t, t.watch, true);
+			matched = t.watch.matches;
+			failed = t.watch.failed;
+			left = endWatch(t);
+		}
+		// bash has exited, but what it started in the background may still run in its group.
+		const leftover = !groupGone(t);
+		// Leftovers keep writing to the output file, so the log cap runs until the group is gone.
+		if (leftover) {
+			t.reap = setInterval(() => {
+				if (groupGone(t)) {
+					clearInterval(t.reap);
+					clearInterval(t.cap);
+				}
+			}, 1000).unref();
+		} else clearInterval(t.cap);
+		refresh();
+		for (const old of evictable([...tasks.values()], KEEP_FINISHED)) tasks.delete(old.id);
+		if (t.quiet) return wake?.();
+		const status = t.reason ? `${t.reason} (${signal ?? `code ${code}`})` : signal ? `killed by ${signal}` : `exited with code ${code}`;
+		let text = `Background shell ${t.id} ${status} after ${duration(t.ended - t.started)}: \`${clip(t.command)}\`\nOutput: ${t.out}`;
+		if (leftover && !t.reason) {
+			const n = groupSize(t.pid); // 0: emptied since the check; undefined: no pgrep
+			if (n !== 0) text += `\n${n ? `${n} process${n === 1 ? " is" : "es are"}` : "Processes are"} still running in its group; shell_stop ${t.id} kills them.`;
+		}
+		if (failed) text += `\nMonitor ended early: ${failed}.`;
+		if (left.length) text += `\nUndelivered monitor lines:\n${left.join("\n")}`;
+		if (matched !== undefined) text += `\nMonitor total: ${matched} matching line${matched === 1 ? "" : "s"}.`;
+		else {
+			let tail = "";
+			try {
+				const size = fs.statSync(t.out).size;
+				const fd = fs.openSync(t.out, "r");
+				const buf = Buffer.alloc(Math.min(size, TAIL_BYTES));
+				fs.readSync(fd, buf, 0, buf.length, size - buf.length);
+				fs.closeSync(fd);
+				tail = lastLines(buf.toString("utf8"), 10, buf.length === size).join("\n");
+			} catch {}
+			text += tail ? `\nLast lines:\n${tail}` : "\n(no output)";
+		}
+		notify(text);
+	}
+
+	async function start(command: string, cwdParam: string | undefined, timeoutSec: number | undefined, ctx: ExtensionContext): Promise<Task> {
+		ui = ctx.ui;
+		mode = ctx.mode;
+		const blocked = await checkCommand(command, false, ctx);
+		if (blocked) throw new Error(blocked);
+		const cwd = path.resolve(ctx.cwd, cwdParam ?? ".");
+		if (!fs.statSync(cwd, { throwIfNoEntry: false })?.isDirectory()) throw new Error(`cwd ${cwd} is not a directory`);
+		dir ??= fs.mkdtempSync(path.join(os.tmpdir(), "pi-shell-"));
+		const id = `sh${++seq}`;
+		const out = path.join(dir, `${id}.log`);
+		const fd = fs.openSync(out, "a", 0o600);
+		let child: ChildProcess;
+		try {
+			child = spawn("bash", ["-c", command], { cwd, detached: true, stdio: ["ignore", fd, fd] });
+		} finally {
+			fs.closeSync(fd);
+		}
+		child.on("error", (e) => fs.appendFileSync(out, `\n[deckhand] ${e.message}\n`)); // before any throw: an unhandled error would crash pi
+		if (child.pid === undefined) throw new Error(`could not start bash for ${id}`);
+		const t: Task = { id, command, cwd, out, child, pid: child.pid, started: Date.now() };
+		tasks.set(id, t);
+		child.on("exit", (code, signal) => onExit(t, code, signal));
+		if (timeoutSec) t.timer = setTimeout(() => stop(t, `timed out after ${timeoutSec}s`), timeoutSec * 1000);
+		t.cap = setInterval(() => {
+			if ((fs.statSync(out, { throwIfNoEntry: false })?.size ?? 0) > LOG_CAP) stop(t, `killed: output file passed ${Math.round(LOG_CAP / 2 ** 20)} MiB`);
+		}, 1000).unref();
+		refresh();
+		return t;
+	}
+
+	function describe(t: Task): string {
+		const state =
+			t.ended === undefined
+				? `running ${duration(Date.now() - t.started)}`
+				: (t.reason ?? (t.signal ? `killed by ${t.signal}` : `exit ${t.code}`)) + (groupGone(t) ? "" : ", processes left in its group");
+		const w = t.watch ? `, watching ${t.watch.re ? `/${t.watch.re.source}/` : "all lines"} (${t.watch.matches} matched)` : "";
+		return `${t.id}  ${state}${w}  \`${clip(t.command)}\`  ${t.out}`;
+	}
+
+	function listText(): string {
+		const all = [...tasks.values()].map(describe);
+		for (const w of wakes.values()) all.push(`${w.id}  wakes in ${duration(w.due - Date.now())}: ${clip(w.prompt)}`);
+		return all.length ? all.join("\n") : "No background shells or timers in this session.";
+	}
+
+	/** The stop path shared by shell_stop and the /shells picker; returns what was done. */
+	async function stopTask(id: string, watchOnly?: boolean): Promise<string> {
+		const wk = wakes.get(id);
+		if (wk) {
+			clearTimeout(wk.timer);
+			wakes.delete(id);
+			refresh();
+			return `Cancelled timer ${id}.`;
+		}
+		const t = tasks.get(id);
+		if (!t) throw new Error(`No task ${id}. Known: ${[...tasks.keys()].join(", ") || "none"}`);
+		if (watchOnly) {
+			if (t.watch) readNew(t, t.watch, true);
+			const left = endWatch(t);
+			return `Stopped watching ${t.id}; it keeps running.${left.length ? `\nUndelivered lines:\n${left.join("\n")}` : ""}`;
+		}
+		// End the watch first, so no monitor notice arrives after the stop.
+		if (t.watch) readNew(t, t.watch, true);
+		const left = endWatch(t);
+		const undelivered = left.length ? `\nUndelivered monitor lines:\n${left.join("\n")}` : "";
+		if (t.ended !== undefined) {
+			if (groupGone(t)) return `${t.id} already finished: ${describe(t)}`;
+			stop(t, "stopped");
+			for (let i = 0; i < 30 && !groupGone(t); i++) await new Promise((r) => setTimeout(r, 100));
+			return groupGone(t) ? `Killed the processes left in ${t.id}'s group.` : `Sent SIGTERM to the processes left in ${t.id}'s group; SIGKILL follows.`;
+		}
+		t.quiet = true;
+		stop(t, "stopped");
+		await new Promise<void>((resolve) => {
+			const deadline = setTimeout(resolve, 3000);
+			t.child.once("exit", () => {
+				clearTimeout(deadline);
+				resolve();
+			});
+		});
+		return (t.ended !== undefined ? `Stopped ${t.id} (${t.signal ?? `code ${t.code}`}). Output: ${t.out}` : `Sent SIGTERM to ${t.id}; SIGKILL follows.`) + undelivered;
+	}
+
+	const text = (s: string) => ({ content: [{ type: "text" as const, text: s }], details: undefined });
+	const timeout = Type.Optional(Type.Number({ description: "Seconds before it is killed (bash_bg) or the watch ends (monitor). Default: none.", minimum: 1 }));
+	const cwd = Type.Optional(Type.String({ description: "Working directory, relative to the session's. Default: the session's." }));
+
+	// Registered at session_start, never while loading: pi refuses to start when two extensions register
+	// one tool name while loading (lib/claims.ts). Next to another extension with any of these names
+	// (pi-kit's shell, or anyone's) this copy steps back whole: its tools share their tasks.
+	function registerTools() {
+		pi.registerTool({
+			name: "bash_bg",
+			label: "Background shell",
+			description:
+				"Run a shell command in the background (dev servers, long builds, test suites). Returns at once with an id and an output file. When the command exits, a notice with its exit code, last lines and output path arrives on its own: do not sleep, poll or re-read the file in a loop. Stop it with shell_stop when you no longer need it. In a subagent child the task dies when your turn ends and no notice reaches you, so there run anything whose result you need with bash.",
+			promptSnippet: "Run a long command in the background; a notice arrives when it exits",
+			promptGuidelines: ["Run dev servers, watchers and long builds or test runs with bash_bg, not bash."],
+			parameters: Type.Object({ command: Type.String({ description: "Bash command" }), cwd, timeout }),
+			async execute(_id, p, _signal, _onUpdate, ctx) {
+				const t = await start(p.command, p.cwd, p.timeout, ctx);
+				return text(`Started ${t.id} (pid ${t.pid}) in ${t.cwd}.\nOutput: ${t.out}\nA notice arrives when it exits.`);
+			},
+		});
+
+		pi.registerTool({
+			name: "monitor",
+			label: "Monitor",
+			description:
+				"Watch output and get a notice for each new line matching `pattern` (a JavaScript regex; every line if omitted), batched about once a second. Either give `command` to run and watch it (it is killed at `timeout`), or `id` of a running bash_bg task to watch its output. Ends when the command exits, on shell_stop, or at `timeout`. For \"tell me when X\" use a command that prints when X happens and exits, e.g. `until curl -sf localhost:3000; do sleep 2; done; echo ready`.",
+			promptSnippet: "Get notified on each output line matching a pattern, or when a condition becomes true",
+			promptGuidelines: ['For "tell me when X" or "on each error", use monitor instead of checking again yourself.'],
+			parameters: Type.Object({
+				command: Type.Optional(Type.String({ description: "Bash command to run and watch" })),
+				id: Type.Optional(Type.String({ description: "Watch this running bash_bg task instead of starting a command" })),
+				pattern: Type.Optional(Type.String({ description: "JavaScript regex; lines that match are delivered. Omit for every line." })),
+				cwd,
+				timeout,
+			}),
+			async execute(_id, p, _signal, _onUpdate, ctx) {
+				if (!!p.command === !!p.id) throw new Error("Give exactly one of `command` or `id`.");
+				const re = compilePattern(p.pattern);
+				let t: Task | undefined;
+				if (p.command) {
+					t = await start(p.command, p.cwd, undefined, ctx);
+				} else {
+					t = tasks.get(p.id!);
+					if (!t || t.ended !== undefined) throw new Error(`No running task ${p.id}. Running: ${running().map((x) => x.id).join(", ") || "none"}`);
+					if (t.watch) throw new Error(`${t.id} already has a monitor. End it first with shell_stop ${t.id} watch_only, then start the new one.`);
+				}
+				watch(t, re, p.timeout, !!p.command);
+				refresh();
+				return text(`Monitoring ${t.id} for ${re ? `/${re.source}/` : "every line"}.\nOutput: ${t.out}\nMatching lines arrive as notices; stop with shell_stop.`);
+			},
+		});
+
+		pi.registerTool({
+			name: "wake_later",
+			label: "Wake later",
+			description: `Wake this session once after \`seconds\` (clamped to ${WAKE_MIN}-${WAKE_MAX}) with \`prompt\` as a notice. Only for checks no shell command can observe; when the check is a command, use monitor or bash_bg instead. Cancel with shell_stop.`,
+			promptSnippet: "Wake this session once later, for checks no shell command can observe",
+			parameters: Type.Object({
+				seconds: Type.Number({ description: `Delay in seconds (${WAKE_MIN}-${WAKE_MAX})` }),
+				prompt: Type.String({ description: "What to do when it fires; written for your future self" }),
+			}),
+			async execute(_id, p, _signal, _onUpdate, ctx) {
+				ui = ctx.ui;
+				mode = ctx.mode;
+				const sec = Math.min(WAKE_MAX, Math.max(WAKE_MIN, Math.round(p.seconds)));
+				const id = `wk${++seq}`;
+				const timer = setTimeout(() => {
+					wakes.delete(id);
+					refresh();
+					notify(`Wake-up ${id} after ${duration(sec * 1000)}: ${p.prompt}`);
+				}, sec * 1000);
+				wakes.set(id, { id, prompt: p.prompt, due: Date.now() + sec * 1000, timer });
+				refresh();
+				return text(`Timer ${id} wakes this session in ${sec}s${sec !== p.seconds ? ` (clamped from ${p.seconds})` : ""}. Cancel with shell_stop.`);
+			},
+		});
+
+		pi.registerTool({
+			name: "shell_stop",
+			label: "Stop shell",
+			description:
+				"Stop a background task: kill its whole process group (SIGTERM, then SIGKILL after 2s), including processes left in the group of a task that has exited. With watch_only, end only the monitor on it and leave the task running. A wake_later id cancels that timer.",
+			promptSnippet: "Stop a background task or its monitor, or cancel a wake_later timer",
+			parameters: Type.Object({
+				id: Type.String({ description: "Task id (sh1) or timer id (wk2)" }),
+				watch_only: Type.Optional(Type.Boolean({ description: "End only the monitor; keep the task running" })),
+			}),
+			async execute(_id, p) {
+				return text(await stopTask(p.id, p.watch_only));
+			},
+		});
+
+		pi.registerTool({
+			name: "shell_list",
+			label: "List shells",
+			description: "List this session's background tasks (running and recently finished) with state, watch and output path, and pending wake_later timers.",
+			promptSnippet: "List background tasks and pending wake_later timers",
+			parameters: Type.Object({}),
+			async execute() {
+				return text(listText());
+			},
+		});
+	}
+
+	function registerCommand() {
+		pi.registerCommand("shells", {
+			description: "List background shells and monitors",
+			handler: async (_args, ctx) => {
+				ctx.ui.notify(listText(), "info");
+				const picks = ctx.hasUI ? allRows(Infinity).map((r) => `${r.id}  ${r.status}  ${r.label}`) : [];
+				if (!picks.length) return;
+				const pick = await ctx.ui.select("Stop a background task? (Esc keeps them all)", picks);
+				if (!pick) return;
+				try {
+					ctx.ui.notify(await stopTask(pick.split(" ")[0]), "info");
+				} catch (e) {
+					ctx.ui.notify((e as Error).message, "error");
+				}
+			},
+		});
+	}
+
+	pi.on("session_start", (_e, ctx) => {
+		ui = ctx.ui;
+		mode = ctx.mode;
+		if (registered || off) return;
+		const taken = loadedTools(pi, TOOL_NAMES);
+		if (taken.size) {
+			const from = [...new Set(taken.values())].map((p) => p || "another extension").join(", ");
+			off = `${[...taken.keys()].join(", ")} ${taken.size > 1 ? "are" : "is"} already loaded from ${from}`;
+			try {
+				if (ctx.hasUI) ctx.ui.notify(`Deckhand's shell stepped back: ${off}.`, "info");
+			} catch {}
+			return;
+		}
+		registered = true;
+		registerTools();
+		if (!loadedCommands(pi, ["shells"]).size) registerCommand();
+	});
+	pi.events.on("kit:sidebar", (on) => {
+		sidebar = on === true;
+		refresh();
+	});
+	pi.events.on(MODE_EVENT, (on) => {
+		panels = on === true;
+		refresh();
+	});
+	pi.on("message_end", (e) => {
+		const m = e.message as { role?: string; customType?: string };
+		if (m.role === "custom" && m.customType === KEY) delivered++;
+	});
+
+	// Headless (print/json, subagent children): pi would exit with tasks or timers pending, so wait
+	// for the next notice (it starts a follow-up run) or for all of them to end. There is no
+	// deadline: after HEADLESS_CHECKIN_MS with no notice and a task still running, a check-in notice
+	// lists what still runs and starts a turn, so the model can stop a stuck task. That turn's own
+	// agent_end waits again. Timers alone get no check-in: they fire on their own.
+	// pi's hasPendingMessages() does not count extension follow-ups, so queued notices are counted here.
+	const pending = (ctx: ExtensionContext) => sent > delivered || ctx.hasPendingMessages();
+	const lastOutput = (t: Task) => {
+		try {
+			const st = fs.statSync(t.out, { throwIfNoEntry: false });
+			return st?.size ? st.mtimeMs : undefined;
+		} catch {
+			return undefined;
+		}
+	};
+	pi.on("agent_end", async (_e, ctx) => {
+		if (ctx.hasUI || pending(ctx) || busy() === 0) return;
+		let since = Date.now();
+		while (!closed && busy() > 0 && !pending(ctx)) {
+			const left = since + HEADLESS_CHECKIN_MS - Date.now();
+			if (left <= 0) {
+				const now = Date.now();
+				if (!running().length) {
+					since = now;
+					continue;
+				}
+				notify(checkinText(running().map((t) => ({ ...t, lastOutput: lastOutput(t) })), [...wakes.values()], now - since, now, HEADLESS_CHECKIN_MS));
+				break;
+			}
+			await new Promise<void>((resolve) => {
+				wake = resolve;
+				setTimeout(resolve, Math.min(1000, left)).unref();
+			});
+			wake = undefined;
+		}
+	});
+
+	const killAll = () => {
+		for (const t of tasks.values()) killGroup(t, "SIGKILL");
+	};
+	process.on("exit", killAll);
+
+	pi.on("session_shutdown", async () => {
+		if (closed) return;
+		closed = true;
+		for (const w of wakes.values()) clearTimeout(w.timer);
+		wakes.clear();
+		for (const t of tasks.values()) {
+			endWatch(t);
+			clearTimeout(t.timer);
+			clearInterval(t.cap);
+			clearInterval(t.reap);
+			killGroup(t, "SIGTERM"); // also leftovers of finished tasks still in their group
+		}
+		if ([...tasks.values()].some((t) => !groupGone(t))) await new Promise((r) => setTimeout(r, 500));
+		killAll();
+		process.off("exit", killAll);
+		if (dir) fs.rmSync(dir, { recursive: true, force: true });
+		clearInterval(tick);
+		try {
+			ui?.setStatus(KEY, undefined);
+			if (mode === "tui") ui?.setWidget(KEY, undefined);
+		} catch {}
+	});
+}

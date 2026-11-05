@@ -147,6 +147,11 @@ tool_w :: proc(t: Changes_Tool) -> f32 {return text_w(tool_label(t)) + px(2 * SP
 
 @(private = "file")
 tool_label :: proc(t: Changes_Tool) -> string {
+	if t == .Review {
+		if v := active_changes(); v != nil {
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
+		}
+	}
 	if t == .Merge {
 		if v := active_changes(); v != nil {
 			if r := changes_repo(v.root); r != nil && r.default_branch != "" do return fmt.tprintf("Merge into %s…", r.default_branch)
@@ -164,6 +169,12 @@ changes_tool_state :: proc(v: ^Changes_View, t: Changes_Tool) -> (enabled: bool,
 		return true, ""
 	case .Review:
 		s, _, _ := find_tab(v.tab_id)
+		if s != nil && s.agent == .Claude {
+			// a Claude-only session: its main Claude tab (claude_prompt holds the text until it is idle)
+			if len(s.tabs) == 0 || s.tabs[0].status != .Running do return false, "this session's Claude is not running"
+			if _, is := s.tabs[0].kind.(Claude_Tab); !is do return false, "this session's Claude is not running"
+			return true, ""
+		}
 		pt := session_pi_tab(s)
 		if pt == nil || pt.status != .Running do return false, "this session's pi is not running"
 		if pt.waiting do return false, "pi is waiting for you"
@@ -579,7 +590,9 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		tip, keys := "", ""
 		switch t {
 		case .Refresh: tip = "Read the changes again"
-		case .Review:  tip = "Ask this session's pi to review these changes"
+		case .Review:
+			tip = "Ask this session's pi to review these changes"
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
 		case .Merge:   tip = fmt.tprintf("%s coming later", strings.trim_suffix(tool_label(.Merge), "…"))
 		case .Commit:  tip, keys = "Commit the staged files (your git hooks run)", "Enter"
 		case .Prev:    tip, keys = "Previous file", "K"
@@ -605,7 +618,7 @@ changes_tool_run :: proc(v: ^Changes_View, t: Changes_Tool) {
 	switch t {
 	case .Refresh: changes_refresh(r)
 	case .Review:
-		if pt := session_pi_tab(s); pt != nil do ui_do(Pi_Prompt{tab_id = pt.id, text = changes_review_prompt(v, r)})
+		if cmd, _ := changes_review_command(s, changes_review_prompt(v, r)); cmd != nil do ui_do(cmd)
 	case .Merge:
 	case .Commit:
 		ui_do(Changes_Commit{tab_id = v.tab_id, message = tf_text(&changes_message_field)})
@@ -620,6 +633,18 @@ changes_tool_run :: proc(v: ^Changes_View, t: Changes_Tool) {
 	case .More:    changes_show_more(v)
 	}
 	app.redraw = true
+}
+
+// What the review button sends, and its label.
+changes_review_command :: proc(s: ^Open_Session, text: string) -> (Command, string) {
+	if s == nil do return nil, ""
+	if s.agent == .Claude {
+		if len(s.tabs) == 0 do return nil, ""
+		if _, is := s.tabs[0].kind.(Claude_Tab); !is do return nil, ""
+		return Claude_Prompt{tab_id = s.tabs[0].id, text = text}, "Ask Claude to review"
+	}
+	if pt := session_pi_tab(s); pt != nil do return Pi_Prompt{tab_id = pt.id, text = text}, TOOL_LABEL[.Review]
+	return nil, ""
 }
 
 // The prompt "Ask pi to review" sends to the session's pi.

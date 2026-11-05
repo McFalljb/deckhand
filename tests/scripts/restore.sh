@@ -7,8 +7,10 @@
 #   3. a big workspace (10 projects, 20 sessions): launch time, one session started
 # Usage: tests/scripts/restore.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/restore"
 rm -rf "$W"
 mkdir -p "$W/home" "$W/data" "$W/alpha" "$W/beta"
@@ -22,7 +24,7 @@ store "$W/beta" bbbb-2 02
 run() { # script data-dir [args]
   s=$1 d=$2; shift 2
   HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT="$s" PI_DESK_DATA_DIR="$d" \
-    PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$@"
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@"
 }
 
 echo "== run 1: open, quit (confirm flow)"
@@ -56,12 +58,43 @@ mkdir -p "$W/big"
 } > "$W/data/workspace.json"
 for n in 1 2 3; do
   run tests/scripts/restore-big.txt "$W/data" > "$W/run3-$n.log" 2>&1 || { cat "$W/run3-$n.log"; exit 1; }
-  grep -E "ASSERT|pi-desk:" "$W/run3-$n.log"
+  grep -E "ASSERT|Deckhand:|pi-desk:" "$W/run3-$n.log"
   cp "$W/data/workspace.json" "$W/big-$n.json"
 done
 echo "== baseline: same HOME, --fresh"
 for n in 1 2 3; do
   run tests/scripts/restore-fresh.txt "$W/data-fresh" --fresh > "$W/fresh-$n.log" 2>&1 || { cat "$W/fresh-$n.log"; exit 1; }
-  grep -E "ASSERT|pi-desk:" "$W/fresh-$n.log" || true
+  grep -E "ASSERT|Deckhand:|pi-desk:" "$W/fresh-$n.log" || true
 done
+echo "== run 4: Atlas's session from another folder: forked once into the main folder"
+A="$W/atlas"
+mkdir -p "$A/data/home" "$A/main"
+MAIN=$(cd "$A/main" && pwd -P)
+OLD="$A/data/home/2026-10-30T10-00-00-000Z_atlas-1.jsonl"
+printf '{"type":"session","version":3,"id":"atlas-1","cwd":"%s"}\n{"type":"message","message":{"role":"user","content":"hi"}}\n' "$W/home" > "$OLD"
+cp "$OLD" "$A/old.copy"
+printf '{"v":1,"projects":[],"open_sessions":[],"home":{"pi_session_id":"atlas-1"},"layout":{"left_width":300,"right_width":320,"right_open":true,"panels":[],"collapsed":[]},"settings":{"home_dir":"%s","setup_seen":true}}\n' "$MAIN" > "$A/data/workspace.json"
+atlas_run() { # log
+  rm -f "$A/args"
+  HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/restore-atlas.txt PI_DESK_DATA_DIR="$A/data" \
+    PI_DESK_CMD='case " $* " in *" --append-system-prompt "*) ;; *) exec sleep 600;; esac; while [ "${1:-}" = -e ]; do shift 2; done; printf "%s\n" "$@" > "'"$A"'/args.tmp"; pwd -P >> "'"$A"'/args.tmp"; mv "'"$A"'/args.tmp" "'"$A"'/args"; exec sleep 600' \
+    build/deckhand > "$1" 2>&1 || { cat "$1"; exit 1; }
+  grep -E "ASSERT|done:" "$1"
+  ! grep -q TIMEOUT "$1" || { echo "a waitfor timed out"; exit 1; }
+}
+atlas_run "$W/run4.log"
+grep -qx -- "--fork" "$A/args" || { cat "$A/args"; echo "Atlas was not forked"; exit 1; }
+NEW=$(sed -n 's/.*"home":{"pi_session_id":"\([^"]*\)".*/\1/p' "$A/data/workspace.json")
+[ -n "$NEW" ] && [ "$NEW" != atlas-1 ] || { cat "$A/data/workspace.json"; echo "the new Atlas id was not saved"; exit 1; }
+grep -A1 -x -- "--session-id" "$A/args" | grep -qx "$NEW" || { cat "$A/args"; echo "fork not into the saved id"; exit 1; }
+tail -1 "$A/args" | grep -qx "$MAIN" || { cat "$A/args"; echo "Atlas not in the main folder"; exit 1; }
+cmp -s "$OLD" "$A/old.copy" || { echo "the old session file changed"; exit 1; }
+# pi wrote the copy (the fake did not): the next launch resumes it, no fork
+printf '{"type":"session","version":3,"id":"%s","cwd":"%s"}\n' "$NEW" "$MAIN" > "$A/data/home/2026-11-04T10-00-00-000Z_$NEW.jsonl"
+atlas_run "$W/run5.log"
+! grep -qx -- "--fork" "$A/args" || { cat "$A/args"; echo "Atlas forked again"; exit 1; }
+grep -A1 -x -- "--session" "$A/args" | grep -q "_$NEW.jsonl" || { cat "$A/args"; echo "Atlas did not resume its fork"; exit 1; }
+! grep -q fork_from "$A/data/workspace.json" || { echo "fork_from still saved"; exit 1; }
+# pi tabs never fork (run 2 resumed them)
+! grep -q -- "--fork" "$W/run2.log" || { echo "a pi tab was forked"; exit 1; }
 echo "restore.sh: ok"

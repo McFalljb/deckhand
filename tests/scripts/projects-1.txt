@@ -5,33 +5,48 @@ wait 800
 assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,~
 assert_state settings.tidy_projects true
 shot projects/collapsed
+# a parent row's buttons stay while the pointer moves across it, its "1 folder" too (the
+# count beside the buttons must not slide under the pointer as they come and go)
+assert_drawn 1 folder
+sweep proj 3 120
+hover projkids 3
+wait 100
+assert_drawn ☆
+shot projects/hover-kids
+sweep proj 2 120
+# the pointer off the rows again (a hovered row's count sits under its centre, where clickid clicks)
+hover search
+wait 200
 # every row lists only its own sessions: github, then projects
 clickid proj 2
-wait 300
+eventually
 assert_rows sessions Only github's own session
 clickid proj 6
-wait 300
+eventually
 assert_rows sessions Look around the projects folder
 # open projects: the _scratch group row and data/training-data are inside
 clickid projkids 6
-wait 300
+eventually
 assert_state sidebar.expanded.0 $homedir/workspace/projects
 assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,+~/workspace/projects/data/training-data,~
 # open the group row, then the parent row of batch-run-1
 clickid grp 0
-wait 300
+eventually
 assert_state sidebar.expanded.1 $homedir/workspace/projects/_scratch
+sweep grp 0 60
+hover search
+wait 200
 assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,++~/workspace/projects/_scratch/ev-b,++~/workspace/projects/_scratch/ev-c,+~/workspace/projects/data/training-data,~
 clickid proj 7
-wait 300
+eventually
 assert_rows sessions Plan the deep review
 clickid projkids 7
-wait 300
+eventually
 assert_rows projects ~/workspace/projects/webstore,~/github/project1,~/github,~/workspace/projects/dataloader,~/workspace/pi-kit,~/github/project2,~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,+++~/workspace/projects/_scratch/batch-run-1/try-C,+++~/workspace/projects/_scratch/batch-run-1/try-B,+++~/workspace/projects/_scratch/batch-run-1/A-long-review/fix2/fast-vs-steady,++~/workspace/projects/_scratch/ev-b,++~/workspace/projects/_scratch/ev-c,+~/workspace/projects/data/training-data,~
 shot projects/nested
 # a nested project: its own sessions; resume runs in exactly its folder
 clickid proj 8
-wait 300
+eventually
 assert_rows sessions C: fast vs steady
 clickid sess 0
 waitfor ARGS: --session 15000
@@ -46,7 +61,7 @@ command {"type":"set_filter","show_hidden":false}
 command {"type":"set_row_expanded","path":"$homedir/workspace/projects","expanded":false}
 command {"type":"set_row_expanded","path":"$homedir/workspace/projects/_scratch","expanded":false}
 command {"type":"set_filter","text":"vs-steady"}
-wait 200
+eventually
 assert_rows projects ~/workspace/projects,+_scratch/,++~/workspace/projects/_scratch/batch-run-1,+++~/workspace/projects/_scratch/batch-run-1/A-long-review/fix2/fast-vs-steady
 shot projects/filter
 command {"type":"set_filter","text":""}
@@ -54,7 +69,7 @@ command {"type":"set_row_expanded","path":"$homedir/workspace/projects","expande
 command {"type":"set_row_expanded","path":"$homedir/workspace/projects/_scratch","expanded":true}
 # off: every folder a top-level row
 ui_command {"type":"set_tidy_projects","on":false}
-wait 200
+eventually
 assert_state settings.tidy_projects false
 shot projects/tidy-off
 ui_command {"type":"set_tidy_projects","on":true}

@@ -100,7 +100,7 @@ update_offer_rules :: proc(t: ^testing.T) {
 @(private = "file")
 release_json :: proc(tag: string, extra := "", zip_size := 1000, assets := "") -> string {
 	v := strings.trim_prefix(tag, "v")
-	z := fmt.tprintf("pi-desk-%s-macos-arm64.zip", v)
+	z := fmt.tprintf("deckhand-%s-macos-arm64.zip", v)
 	a := assets
 	if a == "" do a = fmt.tprintf(`[{{"name":"%s","size":%d,"browser_download_url":"https://evil.example/x.zip"}},{{"name":"%s.sig","size":89}},{{"name":"%s.sha256","size":100}}]`, z, zip_size, z, z)
 	return fmt.tprintf(`{{"tag_name":"%s","draft":false,"prerelease":false,"html_url":"https://evil.example/notes","body":"notes"%s,"assets":%s}}`, tag, extra, a)
@@ -114,7 +114,7 @@ update_release_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.tag, "v0.1.1")
 	testing.expect_value(t, r.zip_size, i64(1000))
 	testing.expect(t, r.has_sig && r.has_sha)
-	testing.expect_value(t, r.notes_url, "https://github.com/McFalljb/pi-desk/releases/tag/v0.1.1") // never the JSON's html_url
+	testing.expect_value(t, r.notes_url, "https://github.com/McFalljb/deckhand/releases/tag/v0.1.1") // never the JSON's html_url
 
 	_, err = release_parse(release_json("v0.1.1", `,"draft":true`), context.temp_allocator)
 	testing.expect(t, err != "", "a draft (the later key wins in the parser? either way refused)")
@@ -128,13 +128,16 @@ update_release_parse :: proc(t: ^testing.T) {
 	}
 	_, err = release_parse(release_json("v0.1.1", assets = `[]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
-	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"pi-desk-0.1.1-macos-x64.zip","size":5}]`), context.temp_allocator)
+	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"deckhand-0.1.1-macos-x64.zip","size":5}]`), context.temp_allocator)
+	testing.expect_value(t, err, "the release has no macOS arm64 zip")
+	// a pi-desk-named zip (0.1.x's) is not a Deckhand release's
+	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"pi-desk-0.1.1-macos-arm64.zip","size":5},{"name":"pi-desk-0.1.1-macos-arm64.zip.sig","size":5}]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
 	_, err = release_parse(release_json("v0.1.1", zip_size = (1 << 30) + 1), context.temp_allocator)
 	testing.expect_value(t, err, "the release's zip is over 1 GB")
 	_, err = release_parse(release_json("v0.1.1", zip_size = 0), context.temp_allocator)
 	testing.expect_value(t, err, "the release's zip has no size")
-	r, err = release_parse(release_json("v0.1.1", assets = `[{"name":"pi-desk-0.1.1-macos-arm64.zip","size":7}]`), context.temp_allocator)
+	r, err = release_parse(release_json("v0.1.1", assets = `[{"name":"deckhand-0.1.1-macos-arm64.zip","size":7}]`), context.temp_allocator)
 	testing.expect(t, err == "" && !r.has_sig && !r.has_sha, "no .sig: offered, not installable")
 	for bad in ([]string{"", "[]", "null", "{", `"x"`, `{"assets":[]}`}) {
 		_, err = release_parse(bad, context.temp_allocator)
@@ -151,11 +154,11 @@ update_release_parse :: proc(t: ^testing.T) {
 @(test)
 update_sha256_file :: proc(t: ^testing.T) {
 	h := strings.repeat("ab", 32, context.temp_allocator)
-	got, ok := sha256_file_parse(fmt.tprintf("%s  pi-desk-0.1.1-macos-arm64.zip\n", h), "pi-desk-0.1.1-macos-arm64.zip")
+	got, ok := sha256_file_parse(fmt.tprintf("%s  deckhand-0.1.1-macos-arm64.zip\n", h), "deckhand-0.1.1-macos-arm64.zip")
 	testing.expect(t, ok && got == h)
-	got, ok = sha256_file_parse(fmt.tprintf("%s  other.zip\n", h), "pi-desk-0.1.1-macos-arm64.zip")
+	got, ok = sha256_file_parse(fmt.tprintf("%s  other.zip\n", h), "deckhand-0.1.1-macos-arm64.zip")
 	testing.expect(t, !ok, "another file's")
-	_, ok = sha256_file_parse("abc  pi-desk-0.1.1-macos-arm64.zip", "pi-desk-0.1.1-macos-arm64.zip")
+	_, ok = sha256_file_parse("abc  deckhand-0.1.1-macos-arm64.zip", "deckhand-0.1.1-macos-arm64.zip")
 	testing.expect(t, !ok, "short hash")
 	_, ok = sha256_file_parse(fmt.tprintf("%sZZ  x", strings.repeat("a", 62, context.temp_allocator)), "x")
 	testing.expect(t, !ok, "not hex")
@@ -168,7 +171,7 @@ update_signatures :: proc(t: ^testing.T) {
 	pub, ok := sig.public_of(seed)
 	testing.expect(t, ok)
 	testing.expect_value(t, pub, UPDATE_TEST_PUBLIC_KEY)
-	m := sig.manifest("0.1.1", "pi-desk-0.1.1-macos-arm64.zip", 1234, strings.repeat("AB", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator)
+	m := sig.manifest("0.1.1", "deckhand-0.1.1-macos-arm64.zip", 1234, strings.repeat("AB", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator)
 	testing.expect(t, strings.contains(m, "sha256 abab"), "hex lower-cased")
 	s, sok := sig.sign(seed, transmute([]byte)m)
 	testing.expect(t, sok)
@@ -176,10 +179,10 @@ update_signatures :: proc(t: ^testing.T) {
 	testing.expect(t, sig.verify(UPDATE_TEST_PUBLIC_KEY, transmute([]byte)m, fmt.tprintf("  %s\n", s)), "whitespace around it")
 	// another version, size or hash: the same signature fails
 	for other in ([]string{
-		sig.manifest("0.1.2", "pi-desk-0.1.1-macos-arm64.zip", 1234, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
-		sig.manifest("0.1.1", "pi-desk-0.1.1-macos-arm64.zip", 1235, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
-		sig.manifest("0.1.1", "pi-desk-0.1.1-macos-arm64.zip", 1234, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("ce", 20, context.temp_allocator), context.temp_allocator),
-		sig.manifest("0.1.1", "pi-desk-0.1.1-macos-arm64.zip", 1234, strings.repeat("ac", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
+		sig.manifest("0.1.2", "deckhand-0.1.1-macos-arm64.zip", 1234, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
+		sig.manifest("0.1.1", "deckhand-0.1.1-macos-arm64.zip", 1235, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
+		sig.manifest("0.1.1", "deckhand-0.1.1-macos-arm64.zip", 1234, strings.repeat("ab", 32, context.temp_allocator), strings.repeat("ce", 20, context.temp_allocator), context.temp_allocator),
+		sig.manifest("0.1.1", "deckhand-0.1.1-macos-arm64.zip", 1234, strings.repeat("ac", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator),
 	}) {
 		testing.expect(t, !sig.verify(UPDATE_TEST_PUBLIC_KEY, transmute([]byte)other, s), "bound to version, size, hash, cdhash")
 	}
@@ -220,29 +223,29 @@ u_writable_parent_only :: proc(path: string) -> bool {return !strings.has_suffix
 
 @(test)
 update_install_decision :: proc(t: ^testing.T) {
-	b, why := install_decision("/Applications/pi-desk.app/Contents/MacOS/pi-desk", u_writable_all)
+	b, why := install_decision("/Applications/Deckhand.app/Contents/MacOS/Deckhand", u_writable_all)
 	testing.expect_value(t, why, "")
-	testing.expect_value(t, b, "/Applications/pi-desk.app")
-	b, why = install_decision("/Users/me/Apps/My pi.app/Contents/MacOS/pi-desk", u_writable_all)
+	testing.expect_value(t, b, "/Applications/Deckhand.app")
+	b, why = install_decision("/Users/me/Apps/My pi.app/Contents/MacOS/Deckhand", u_writable_all)
 	testing.expect(t, why == "" && b == "/Users/me/Apps/My pi.app", "renamed and elsewhere is fine")
-	_, why = install_decision("/private/var/folders/x/T/AppTranslocation/ABC/d/pi-desk.app/Contents/MacOS/pi-desk", u_writable_all)
+	_, why = install_decision("/private/var/folders/x/T/AppTranslocation/ABC/d/Deckhand.app/Contents/MacOS/Deckhand", u_writable_all)
 	testing.expect(t, strings.contains(why, "App Translocation"), why)
 	_, why = install_decision("/usr/local/bin/pi-desk", u_writable_all)
-	testing.expect_value(t, why, "pi-desk is not running from an app bundle")
-	_, why = install_decision("/x/pi-desk.app/Contents/Resources/pi-desk", u_writable_all)
-	testing.expect_value(t, why, "pi-desk is not running from an app bundle")
-	_, why = install_decision("/Applications/pi-desk.app/Contents/MacOS/pi-desk", u_writable_none)
+	testing.expect_value(t, why, "Deckhand is not running from an app bundle")
+	_, why = install_decision("/x/Deckhand.app/Contents/Resources/Deckhand", u_writable_all)
+	testing.expect_value(t, why, "Deckhand is not running from an app bundle")
+	_, why = install_decision("/Applications/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
 	testing.expect(t, strings.contains(why, "cannot write to /Applications"), why)
-	_, why = install_decision("/Applications/pi-desk.app/Contents/MacOS/pi-desk", u_writable_parent_only)
-	testing.expect(t, strings.contains(why, "cannot write to /Applications/pi-desk.app"), why)
-	_, why = install_decision("/Volumes/pi-desk/pi-desk.app/Contents/MacOS/pi-desk", u_writable_none)
+	_, why = install_decision("/Applications/Deckhand.app/Contents/MacOS/Deckhand", u_writable_parent_only)
+	testing.expect(t, strings.contains(why, "cannot write to /Applications/Deckhand.app"), why)
+	_, why = install_decision("/Volumes/pi-desk/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
 	testing.expect(t, strings.contains(why, "disk image"), why)
-	// a development build: build/pi-desk.app beside build.sh
+	// a development build: build/Deckhand.app beside build.sh
 	repo := u_tmp("repo")
 	defer {os.remove_all(repo); delete(repo, runtime.heap_allocator())}
 	os.make_directory_all(upath(repo, "build"))
 	_ = os.write_entire_file(upath(repo, "build.sh"), transmute([]byte)string("#!/bin/sh\n"))
-	_, why = install_decision(upath(repo, "build", "pi-desk.app", "Contents", "MacOS", "pi-desk"), u_writable_all)
+	_, why = install_decision(upath(repo, "build", "Deckhand.app", "Contents", "MacOS", "Deckhand"), u_writable_all)
 	testing.expect(t, strings.contains(why, "development build"), why)
 }
 
@@ -251,29 +254,31 @@ update_links_and_names :: proc(t: ^testing.T) {
 	// CEF's framework links, as they are
 	testing.expect(t, link_inside("Contents/Frameworks/C.framework/Resources", "Versions/Current/Resources"))
 	testing.expect(t, link_inside("Contents/Frameworks/C.framework/Versions/Current", "A"))
-	testing.expect(t, link_inside("Contents/a/b/l", "../../MacOS/pi-desk"))
+	testing.expect(t, link_inside("Contents/a/b/l", "../../MacOS/Deckhand"))
 	testing.expect(t, !link_inside("Contents/l", "../../x"), "above the bundle")
 	testing.expect(t, !link_inside("Contents/l", ".."), "the bundle itself")
-	testing.expect(t, !link_inside("l", "../pi-desk.app/x"), "out and back in is still out")
+	testing.expect(t, !link_inside("l", "../Deckhand.app/x"), "out and back in is still out")
 	testing.expect(t, !link_inside("Contents/l", "/etc/passwd"), "absolute")
 	testing.expect(t, !link_inside("Contents/l", ""), "empty")
 	testing.expect(t, link_inside("Contents/a/l", "b/../../../x"), "down to the bundle's top, still inside")
-	testing.expect(t, !link_inside("Contents/a/l", "b/../../../../pi-desk.app/x"), "climbs out midway and back")
+	testing.expect(t, !link_inside("Contents/a/l", "b/../../../../Deckhand.app/x"), "climbs out midway and back")
 
-	testing.expect_value(t, zip_names_check("pi-desk.app/\npi-desk.app/Contents/\npi-desk.app/Contents/._MacOS\n"), "")
-	testing.expect_value(t, zip_names_check("pi-desk.app/../../x\n"), "the zip has a path with ..")
+	testing.expect_value(t, zip_names_check("Deckhand.app/\nDeckhand.app/Contents/\nDeckhand.app/Contents/._MacOS\n"), "")
+	testing.expect_value(t, zip_names_check("Deckhand.app/../../x\n"), "the zip has a path with ..")
 	testing.expect_value(t, zip_names_check("/etc/x\n"), "the zip has an absolute path")
-	testing.expect_value(t, zip_names_check("pi-desk.app/\nother.app/x\n"), "the zip holds more than pi-desk.app")
-	testing.expect_value(t, zip_names_check("pi-desk.application/x\n"), "the zip holds more than pi-desk.app")
+	testing.expect_value(t, zip_names_check("Deckhand.app/\nother.app/x\n"), "the zip holds more than Deckhand.app")
+	testing.expect_value(t, zip_names_check("Deckhand.application/x\n"), "the zip holds more than Deckhand.app")
+	// pi-desk's bundle name (0.1.x releases): not what a Deckhand release holds
+	testing.expect_value(t, zip_names_check("pi-desk.app/\npi-desk.app/Contents/\n"), "the zip holds more than Deckhand.app")
 	testing.expect_value(t, zip_names_check(""), "the zip is empty")
 }
 
 @(private = "file")
 u_mkapp :: proc(root: string) -> string {
-	app := upath(root, "pi-desk.app")
+	app := upath(root, "Deckhand.app")
 	os.make_directory_all(upath(app, "Contents", "MacOS"))
 	os.make_directory_all(upath(app, "Contents", "Frameworks", "C.framework", "Versions", "A"))
-	_ = os.write_entire_file(upath(app, "Contents", "MacOS", "pi-desk"), transmute([]byte)string("x"))
+	_ = os.write_entire_file(upath(app, "Contents", "MacOS", "Deckhand"), transmute([]byte)string("x"))
 	os.symlink("A", upath(app, "Contents", "Frameworks", "C.framework", "Versions", "Current"))
 	return app
 }
@@ -305,28 +310,28 @@ update_extract_check :: proc(t: ^testing.T) {
 	os.remove(fifo)
 
 	os.make_directory(upath(root, "extra"))
-	testing.expect_value(t, extract_check(root), "the zip does not hold exactly pi-desk.app")
+	testing.expect_value(t, extract_check(root), "the zip does not hold exactly Deckhand.app")
 	os.remove(upath(root, "extra"))
 
-	// pi-desk.app itself a link to elsewhere
+	// Deckhand.app itself a link to elsewhere
 	root2 := u_tmp("x2")
 	defer {os.remove_all(root2); delete(root2, runtime.heap_allocator())}
-	os.symlink(app, upath(root2, "pi-desk.app"))
-	testing.expect_value(t, extract_check(root2), "pi-desk.app in the zip is not a folder")
+	os.symlink(app, upath(root2, "Deckhand.app"))
+	testing.expect_value(t, extract_check(root2), "the app in the zip is not a folder")
 }
 
 // A minimal bundle with an Info.plist, signed ad hoc (codesign, PlistBuddy: local tools only).
 @(private = "file")
 u_bundle :: proc(root, id, version: string) -> string {
 	app := u_mkapp(root)
-	os.remove(upath(app, "Contents", "MacOS", "pi-desk"))
-	run_group({"/bin/cp", "/usr/bin/true", upath(app, "Contents", "MacOS", "pi-desk")}, 10 * time.Second)
+	os.remove(upath(app, "Contents", "MacOS", "Deckhand"))
+	run_group({"/bin/cp", "/usr/bin/true", upath(app, "Contents", "MacOS", "Deckhand")}, 10 * time.Second)
 	os.remove_all(upath(app, "Contents", "Frameworks"))
 	plist := fmt.tprintf(`<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0"><dict>
 <key>CFBundleIdentifier</key><string>%s</string>
-<key>CFBundleExecutable</key><string>pi-desk</string>
+<key>CFBundleExecutable</key><string>Deckhand</string>
 <key>CFBundlePackageType</key><string>APPL</string>
 <key>CFBundleShortVersionString</key><string>%s</string>
 </dict></plist>
@@ -351,7 +356,7 @@ update_bundle_check :: proc(t: ^testing.T) {
 	root2 := u_tmp("bundle2")
 	defer {os.remove_all(root2); delete(root2, runtime.heap_allocator())}
 	other := u_bundle(root2, "com.example.other", "0.1.1")
-	testing.expect(t, strings.contains(bundle_check(other, "0.1.1", codesign_cdhash(other)), "not pi-desk"), "another bundle id")
+	testing.expect(t, strings.contains(bundle_check(other, "0.1.1", codesign_cdhash(other)), "not Deckhand"), "another bundle id")
 }
 
 @(test)
@@ -385,7 +390,7 @@ update_offer_flow :: proc(t: ^testing.T) {
 	old_root := home_root
 	home_root = dir
 	defer home_root = old_root
-	run_command(Update_Env{version = "0.1.0", bundle = "/Applications/pi-desk.app"})
+	run_command(Update_Env{version = "0.1.0", bundle = "/Applications/Deckhand.app"})
 	testing.expect(t, upd.known && upd.current == "0.1.0")
 	// a check's answer: offered
 	run_command(Update_Checked{body = release_json("v0.1.1")})
@@ -436,7 +441,7 @@ update_download_refusals :: proc(t: ^testing.T) {
 	defer home_root = old_root
 	r := run_command(Update_Download{}, U_UI)
 	testing.expect(t, !r.ok, "nothing offered")
-	run_command(Update_Env{version = "0.1.0", why_not = "you cannot write to /Applications, where pi-desk.app is"})
+	run_command(Update_Env{version = "0.1.0", why_not = "you cannot write to /Applications, where Deckhand.app is"})
 	run_command(Update_Checked{body = release_json("v0.1.1")})
 	r = run_command(Update_Download{}, U_UI)
 	testing.expect(t, !r.ok && strings.contains(r.error, "cannot write"), r.error)
@@ -444,7 +449,7 @@ update_download_refusals :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(msg, "cannot write"), msg)
 	for p in parts do testing.expect(t, p != .Update, "no Update button where it cannot install")
 	// an installable place, but this build's key is the placeholder (not test mode)
-	run_command(Update_Env{version = "0.1.0", bundle = "/Applications/pi-desk.app"})
+	run_command(Update_Env{version = "0.1.0", bundle = "/Applications/Deckhand.app"})
 	upd.phase = .None
 	if sig.is_placeholder(UPDATE_PUBLIC_KEY) {
 		r = run_command(Update_Download{}, U_UI)
@@ -453,7 +458,7 @@ update_download_refusals :: proc(t: ^testing.T) {
 	// no .sig on the release
 	upd.test = true
 	upd.phase = .None
-	run_command(Update_Checked{body = release_json("v0.1.3", assets = `[{"name":"pi-desk-0.1.3-macos-arm64.zip","size":7}]`)})
+	run_command(Update_Checked{body = release_json("v0.1.3", assets = `[{"name":"deckhand-0.1.3-macos-arm64.zip","size":7}]`)})
 	r = run_command(Update_Download{}, U_UI)
 	testing.expect(t, !r.ok && strings.contains(r.error, "no signature"), r.error)
 	// install with nothing ready
@@ -465,7 +470,7 @@ update_download_refusals :: proc(t: ^testing.T) {
 update_swap_is_atomic :: proc(t: ^testing.T) {
 	root := u_tmp("swap")
 	defer {os.remove_all(root); delete(root, runtime.heap_allocator())}
-	a, b := upath(root, ".pi-desk-update-0.1.1.app"), upath(root, "pi-desk.app")
+	a, b := upath(root, ".deckhand-update-0.1.1.app"), upath(root, "Deckhand.app")
 	os.make_directory_all(a)
 	os.make_directory_all(b)
 	_ = os.write_entire_file(upath(a, "v"), transmute([]byte)string("new"))
@@ -517,17 +522,17 @@ update_install_check_staged :: proc(t: ^testing.T) {
 // 2. Test mode never installs into /Applications, however the path is spelled.
 @(test)
 update_under_applications :: proc(t: ^testing.T) {
-	for p in ([]string{"/Applications/pi-desk.app", "//Applications/pi-desk.app", "/Applications/../Applications/pi-desk.app", "/System/Volumes/Data/Applications/pi-desk.app", "/applications/pi-desk.app", "/Applications"}) {
+	for p in ([]string{"/Applications/Deckhand.app", "//Applications/Deckhand.app", "/Applications/../Applications/Deckhand.app", "/System/Volumes/Data/Applications/Deckhand.app", "/applications/Deckhand.app", "/Applications"}) {
 		testing.expectf(t, under_applications(p), "%q is under /Applications", p)
 	}
-	for p in ([]string{"/Users/me/Applications/pi-desk.app", "/tmp/Applications-x/pi-desk.app", "/ApplicationsX/pi-desk.app"}) {
+	for p in ([]string{"/Users/me/Applications/Deckhand.app", "/tmp/Applications-x/Deckhand.app", "/ApplicationsX/Deckhand.app"}) {
 		testing.expectf(t, !under_applications(p), "%q is not", p)
 	}
 	// a link to /Applications
 	root := u_tmp("applink")
 	defer {os.remove_all(root); delete(root, runtime.heap_allocator())}
 	os.symlink("/Applications", upath(root, "apps"))
-	testing.expect(t, under_applications(upath(root, "apps", "pi-desk.app")), "through a link")
+	testing.expect(t, under_applications(upath(root, "apps", "Deckhand.app")), "through a link")
 	when PI_DESK_UPDATE_TEST {
 		upd.test = true
 		testing.expect_value(t, update_key(), UPDATE_TEST_PUBLIC_KEY)
@@ -575,16 +580,16 @@ update_remove_tree :: proc(t: ^testing.T) {
 // 5. update.json's paths: only our own names, next to the bundle.
 @(test)
 update_saved_paths :: proc(t: ^testing.T) {
-	b := "/Applications/pi-desk.app"
-	testing.expect(t, staged_path_ok("/Applications/.pi-desk-update-0.1.1.app", b))
-	testing.expect(t, backup_path_ok("/Applications/pi-desk.app.old-0.1.0", b))
-	for p in ([]string{"/Applications/.pi-desk-update-0.1.1.app/..", "/Users/me/.pi-desk-update-0.1.1.app", "/Applications/.pi-desk-update-x.app", "/Applications/.pi-desk-update-0.1.1.appx", "/Applications/../Users/.pi-desk-update-0.1.1.app", "/Applications/.pi-desk-update-.app", ""}) {
+	b := "/Applications/Deckhand.app"
+	testing.expect(t, staged_path_ok("/Applications/.deckhand-update-0.1.1.app", b))
+	testing.expect(t, backup_path_ok("/Applications/Deckhand.app.old-0.1.0", b))
+	for p in ([]string{"/Applications/.deckhand-update-0.1.1.app/..", "/Users/me/.deckhand-update-0.1.1.app", "/Applications/.deckhand-update-x.app", "/Applications/.deckhand-update-0.1.1.appx", "/Applications/../Users/.deckhand-update-0.1.1.app", "/Applications/.deckhand-update-.app", ""}) {
 		testing.expectf(t, !staged_path_ok(p, b), "staged %q refused", p)
 	}
-	for p in ([]string{"/Applications/pi-desk.app.old-0.1.0/../../Users", "/Applications/pi-desk.app.old-", "/Applications/pi-desk.app.old-0.1.0x", "/Users/me/pi-desk.app.old-0.1.0", "/Applications/pi-desk.app", "/Applications/../Applications/pi-desk.app.old-0.1.0", ""}) {
+	for p in ([]string{"/Applications/Deckhand.app.old-0.1.0/../../Users", "/Applications/Deckhand.app.old-", "/Applications/Deckhand.app.old-0.1.0x", "/Users/me/Deckhand.app.old-0.1.0", "/Applications/Deckhand.app", "/Applications/../Applications/Deckhand.app.old-0.1.0", ""}) {
 		testing.expectf(t, !backup_path_ok(p, b), "backup %q refused", p)
 	}
-	testing.expect(t, !staged_path_ok("/Applications/.pi-desk-update-0.1.1.app", ""), "no bundle: nothing is ours")
+	testing.expect(t, !staged_path_ok("/Applications/.deckhand-update-0.1.1.app", ""), "no bundle: nothing is ours")
 }
 
 // 6. The old bundle stays until the new version has started a second time.
@@ -598,7 +603,7 @@ update_backup_kept_until_second_start :: proc(t: ^testing.T) {
 	old_root := home_root
 	home_root = dir
 	defer home_root = old_root
-	bundle := upath(dir, "pi-desk.app")
+	bundle := upath(dir, "Deckhand.app")
 	backup := fmt.tprintf("%s.old-0.1.0", bundle)
 	os.make_directory_all(bundle)
 	os.make_directory_all(backup)
@@ -621,7 +626,7 @@ update_extract_group_writable :: proc(t: ^testing.T) {
 	root := u_tmp("gw")
 	defer {os.remove_all(root); delete(root, runtime.heap_allocator())}
 	app := u_mkapp(root)
-	f := upath(app, "Contents", "MacOS", "pi-desk")
+	f := upath(app, "Contents", "MacOS", "Deckhand")
 	posix.chmod(strings.clone_to_cstring(f, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IWGRP})
 	testing.expect(t, strings.contains(extract_check(root), "writable by others"), extract_check(root))
 	posix.chmod(strings.clone_to_cstring(f, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
@@ -638,14 +643,14 @@ update_check_keeps_ready :: proc(t: ^testing.T) {
 	old_root := home_root
 	home_root = ""
 	defer home_root = old_root
-	run_command(Update_Env{version = "0.1.0", bundle = "/x/pi-desk.app"})
+	run_command(Update_Env{version = "0.1.0", bundle = "/x/Deckhand.app"})
 	run_command(Update_Checked{body = release_json("v0.1.1")})
 	upd.phase = .Ready
-	update_set_staged_for_test("/x/.pi-desk-update-0.1.1.app")
+	update_set_staged_for_test("/x/.deckhand-update-0.1.1.app")
 	run_command(Update_Checked{body = release_json("v0.1.2")})
 	testing.expect_value(t, upd.phase, Update_Phase.Ready)
 	testing.expect_value(t, upd.release.version, "0.1.1")
-	testing.expect_value(t, upd.staged, "/x/.pi-desk-update-0.1.1.app")
+	testing.expect_value(t, upd.staged, "/x/.deckhand-update-0.1.1.app")
 }
 
 // 9. Install waits for the job sheet's unsaved changes, as Quit does.
@@ -655,10 +660,10 @@ update_install_respects_job_sheet :: proc(t: ^testing.T) {
 	u_reset()
 	defer u_reset()
 	defer job_sheet = {}
-	run_command(Update_Env{version = "0.1.0", bundle = "/nonexistent/pi-desk.app"})
+	run_command(Update_Env{version = "0.1.0", bundle = "/nonexistent/Deckhand.app"})
 	run_command(Update_Checked{body = release_json("v0.1.1")})
 	upd.phase = .Ready
-	update_set_staged_for_test("/nonexistent/.pi-desk-update-0.1.1.app")
+	update_set_staged_for_test("/nonexistent/.deckhand-update-0.1.1.app")
 	job_sheet.open = true
 	job_sheet.start = "not what the sheet holds"
 	r := run_command(Update_Install{}, U_UI)
@@ -691,7 +696,7 @@ update_backup_after_downgrade :: proc(t: ^testing.T) {
 	old_root := home_root
 	home_root = dir
 	defer home_root = old_root
-	bundle := upath(dir, "pi-desk.app")
+	bundle := upath(dir, "Deckhand.app")
 	backup := fmt.tprintf("%s.old-0.1.0", bundle)
 	os.make_directory_all(bundle)
 	os.make_directory_all(backup)

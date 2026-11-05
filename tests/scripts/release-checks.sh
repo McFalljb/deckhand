@@ -44,6 +44,7 @@ R="$W/repo"
 mkdir -p "$R/scripts" "$R/src/updatesig" "$R/tools/update-sign" "$R/build" "$W/bin"
 cp scripts/release.sh "$R/scripts/"
 cp src/updatesig/updatesig.odin "$R/src/updatesig/"
+cp src/update_core.odin "$R/src/" # UPDATE_REPO, the repository release.sh uploads to
 cp tools/update-sign/main.odin "$R/tools/update-sign/"
 cp build/update-sign "$R/build/"
 touch "$R/build/update-sign"
@@ -92,6 +93,22 @@ refused "a pre-release" "pre-release" --version 0.5.0-rc.1 --no-upload
 OTHER_PUB=$(build/update-sign pubkey "$K/private/other")
 refused "--rotating-from with a key that is not OLDPUB" "is not OLDPUB" --version 0.5.0 --no-upload --rotating-from "$OTHER_PUB"
 refused "--rotating-from the key the app already has" "they are the same here" --version 0.5.0 --no-upload --rotating-from "$TEST_PUB"
+# the repository: the app's (UPDATE_REPO) unless --allow-other-repo says otherwise
+refused "--repo another repository" "is not the repository the app updates from" --version 0.5.0 --no-upload --repo someone/fork
+(export PI_DESK_RELEASE_REPO=someone/fork; refused "PI_DESK_RELEASE_REPO another repository" "is not the repository the app updates from" --version 0.5.0 --no-upload)
+if rel --version 0.5.0 --upload-only --repo someone/fork --allow-other-repo; then bad "--allow-other-repo: went ahead with no dist/"
+elif grep -q "is not the repository" "$W/out.txt"; then bad "--allow-other-repo: still refused for the repository"
+else ok "--allow-other-repo lets another repository through"; fi
+# the release's names come from the app's source: none there, no release
+sed -i '' '/^UPDATE_APP ::/d' "$R/src/update_core.odin"
+git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qam noapp
+git -C "$R" tag v0.6.0
+refused "no UPDATE_APP in src/update_core.odin" "UPDATE_APP" --version 0.6.0 --no-upload
+git -C "$R" checkout -q HEAD~1 -- src/update_core.odin
+sed -i '' '/^ZIP_PREFIX ::/d' "$R/src/updatesig/updatesig.odin"
+git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qam nozip
+git -C "$R" tag v0.7.0
+refused "no ZIP_PREFIX in src/updatesig/updatesig.odin" "ZIP_PREFIX" --version 0.7.0 --no-upload
 
 if [ $fail = 1 ]; then echo "release checks failed (last output: $W/out.txt)"; exit 1; fi
 echo "release checks ok"

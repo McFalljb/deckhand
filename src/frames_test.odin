@@ -186,7 +186,12 @@ app_commands_parse_and_permissions :: proc(t: ^testing.T) {
 	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, Get_State{}), "app: no queries")
 	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, New_App_Tab{}), "app: no commands")
 	testing.expect(t, caller_may({kind = .Control}, App_Call{}), "control may call apps")
-	testing.expect(t, !caller_may({kind = .Panel, tab_id = 2}, App_Input{}), "pi tabs: not in step 1")
+	// pi and Claude tabs (panel): their own session's app tabs only (app_apply checks the tab)
+	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Input{}), "pi tabs: their own session's app tabs")
+	// and open, restart and close their own session's (app_apply checks the session: app_open_test.odin)
+	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, New_App_Tab{}), "pi tabs: new app tabs in their own session")
+	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Restart{}), "pi tabs: their own session's restarts")
+	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Close{}), "pi tabs: their own session's app tabs closed")
 	testing.expect(t, !caller_may({kind = .Script}, App_Update{}), "internal only")
 	testing.expect(t, !caller_may({kind = .Control}, App_Call_Done{}), "internal only")
 }

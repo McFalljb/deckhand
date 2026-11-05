@@ -1008,7 +1008,7 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		for tab in s.tabs {
 			if ct, is := tab.kind.(Changes_Tab); is && ct.root == root {
 				s.active_tab = tab.id
-				focus_session(s.id)
+				focus_session(s.id, caller)
 				changes_refresh(changes_repo(root))
 				return {ok = true, created_id = tab.id}, true
 			}
@@ -1018,7 +1018,7 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		tab := Tab{id = new_id(), kind = Changes_Tab{root = strings.clone(root)}, title = strings.clone(title), status = .Running}
 		append(&s.tabs, tab)
 		s.active_tab = tab.id
-		focus_session(s.id)
+		focus_session(s.id, caller)
 		changes_view_new(tab.id, root)
 		return {ok = true, created_id = tab.id}, true
 	case Changes_List:
@@ -1261,8 +1261,9 @@ changes_commit_start :: proc(v: ^Changes_View, request_id: u64, msg: string) {
 		// when pi-desk started from Finder), their hooks, its own process group
 		shell := os.get_env("SHELL", context.temp_allocator)
 		if shell == "" do shell = "/bin/zsh"
-		argv := []string{shell, "-l", "-c", `cd "$1" && exec git commit -F -`, "pi-desk-commit", job.root}
-		out, st := run_group(argv, changes_commit_timeout, input = strings.concatenate({job.msg, "\n"}, context.temp_allocator), cap = 1 << 20, merge_stderr = true)
+		argv := shell_script_argv(shell, `cd "$1" && exec git commit -F -`, "pi-desk-commit") // fish and co.: /bin/sh
+		append(&argv, job.root)
+		out, st := run_group(argv[:], changes_commit_timeout, input = strings.concatenate({job.msg, "\n"}, context.temp_allocator), cap = 1 << 20, merge_stderr = true)
 		err := ""
 		switch st {
 		case .Ok:

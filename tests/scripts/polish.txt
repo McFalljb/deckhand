@@ -15,7 +15,7 @@ wait 300
 shot polish/titlebar-graphite
 # ---- palette: empty (actions, then tabs, sessions, projects)
 key k cmd
-wait 300
+eventually
 assert_state focus.id palette
 shot polish/palette-empty
 # a query: look -> the three looks; Enter runs the best match through the inbox
@@ -23,7 +23,7 @@ type warm
 wait 200
 shot polish/palette-query
 key enter
-wait 300
+eventually
 assert_state settings.theme warm
 assert_state focus.kind terminal
 shot polish/titlebar-warm
@@ -35,7 +35,7 @@ key escape
 # sessions: title + project; ⌘1 runs the first visible result
 key k cmd
 type title bar
-wait 200
+eventually
 assert_palette 0 session:bbbb-2
 shot polish/palette-sessions
 key 1 cmd
@@ -46,7 +46,7 @@ assert_state open_sessions.1.pi_session_id bbbb-2
 key k cmd
 wait 100
 key escape
-wait 100
+eventually
 assert_state focus.kind terminal
 key k cmd
 key k cmd
@@ -56,7 +56,7 @@ key k cmd
 type new shell
 assert_palette 0 action:new_shell_tab
 key enter
-wait 600
+eventually
 assert_state focus.kind terminal
 assert_state open_sessions.1.tabs.# 2
 ui_command {"type":"set_close_confirm","tab_kind":"shell","rule":"always"}
@@ -64,18 +64,18 @@ key k cmd
 type close tab
 assert_palette 0 action:close_tab
 key enter
-wait 300
+eventually
 assert_state pending_confirmations.# 1
 assert_state pending_confirmations.0.command.type close_tab
 clickid confirm_no
-wait 200
+eventually
 assert_state pending_confirmations.# 0
 # ghostty look via the palette, title bar shot
 key k cmd
 type ghostty
 assert_palette 0 action:look_ghostty
 key enter
-wait 300
+eventually
 assert_state settings.theme ghostty
 command {"type":"focus_tab","tab_id":$pitab}
 wait 300
@@ -85,7 +85,7 @@ shot polish/titlebar-ghostty
 key k cmd
 type rename project
 key enter
-wait 200
+eventually
 assert_selection ~/code/pi-desk
 clicktext 1 rename_text 3
 assert_selection 
@@ -126,7 +126,7 @@ key end
 # the key that ends a composition still acts: 한 + Enter commits, then submits the rename
 ime_mark 한
 ime_press 36 enter -- insert=한 cmd=insertNewline:
-wait 200
+eventually
 assert_state focus.kind terminal
 assert_state projects.2.name ~/code/pi-deskeé日本AB，e한
 # emoji picker / character viewer: insertText outside a key press
@@ -167,7 +167,7 @@ shot polish/terminal-selection
 # in the terminal too: 한 + Enter types 한, then Enter runs it
 ime_mark 한
 ime_press 36 enter -- insert=한 cmd=insertNewline:
-wait 500
+eventually
 assert_screen 한: command not found
 # ---- idle CPU: palette open, then closed
 key k cmd

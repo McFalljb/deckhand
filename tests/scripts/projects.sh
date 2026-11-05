@@ -8,8 +8,10 @@
 # its own folder. Run 2 relaunches: the opened rows stay open.
 # Screenshots go to build/shots/projects/. Usage: tests/scripts/projects.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/projects"
 rm -rf "$W"
 FAKE_HOME="$W/home"
@@ -34,6 +36,7 @@ P="$H/workspace/projects"
 session "$P" 10 p1 "Look around the projects folder"
 session "$P/webstore" 2 t1 "Store: fix the cart total"; repo "$P/webstore"
 session "$P/dataloader" 7 bt1 "Loader: speed up import"; repo "$P/dataloader"
+session "$P/dataloader/bench" 16 bb1 "Bench the loader" # dataloader: "1 folder"
 session "$P/data/training-data" 11 td1 "Clean the training data"
 E="$P/_scratch"
 session "$E/batch-run-1" 6 f1 "Plan the deep review"
@@ -55,7 +58,7 @@ session "$H/code/unplugged" 3 u1 "On a drive that is gone" gone
 fail=0
 for n in 1 2; do
   HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/projects-$n.txt PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='echo "ARGS: $* CWD=$(pwd)"; exec sleep 600' build/pi-desk > "$W/run$n.log" 2>&1 || true
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $* CWD=$(pwd)"; exec sleep 600' build/deckhand > "$W/run$n.log" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element" "$W/run$n.log" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run$n.log" || ! grep -q "done:" "$W/run$n.log"; then fail=1; fi
 done

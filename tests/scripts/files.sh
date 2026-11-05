@@ -10,8 +10,10 @@
 #   2. relaunch: the Files tab and its open folders come back
 # Screenshots go to build/shots/files/. Usage: tests/scripts/files.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/files"
 rm -rf "$W" build/test-trash
 # the fake HOME under a short temp path, so a path dropped on the terminal
@@ -40,7 +42,7 @@ printf 'new\n' > "$PROJ/new.txt"                                # untracked
 printf 'log\n' > "$PROJ/debug.log"                              # ignored
 run() { # script log
   HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk > "$2" 2>&1 || true
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU|FILES" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "files scene failed (log: $2)"; exit 1

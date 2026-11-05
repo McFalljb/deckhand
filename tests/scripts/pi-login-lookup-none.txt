@@ -1,0 +1,7 @@
+# no pi anywhere, the login shell's PATH included (tests/scripts/pi-login-lookup.sh, run 2): once the
+# login shell answers, pi is not installed
+wait 800
+command {"type":"add_project","cwd":"$homedir/code/demo"}
+waitstate 20000 pi_installed false
+shot pi-login-lookup/none
+quit

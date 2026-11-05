@@ -1,20 +1,25 @@
 #!/bin/sh
-# Build pi-desk. macOS only for now.
-#   ./build.sh          release build -> build/pi-desk
+# Build Deckhand. macOS only for now.
+#   ./build.sh          release build -> build/deckhand
 #   ./build.sh debug    debug build
 #   ./build.sh run      release build, then run
 #   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
 #                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
-# With CEF (default on macOS arm64): build/pi-desk.app (the framework and the five
-# helper apps, signed ad hoc) and build/pi-desk, a wrapper that execs the app's
-# binary, so `build/pi-desk ARGS` works as before. PI_DESK_NO_CEF=1: the bare
-# binary at build/pi-desk, no browser (docs/BROWSER.md §1.5).
+#   ./build.sh scenes [ARGS]   build, then the test-mode scenes (tests/scenes.py ARGS; e.g.
+#                       --changed, --all, NAME...): docs/TESTING.md
+# With CEF (default on macOS arm64): build/Deckhand.app (the framework and the five
+# helper apps, signed ad hoc) and build/deckhand, a wrapper that execs the app's
+# binary, so `build/deckhand ARGS` works as before (build/pi-desk is the same wrapper,
+# for older scripts). PI_DESK_NO_CEF=1: the bare binary at build/deckhand (and a
+# build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
 set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
 MODE=${1:-release}
+# the scenes: tests/scenes.py builds (./build.sh, ./build.sh fake-app) and runs them
+if [ "$MODE" = scenes ]; then shift; exec python3 tests/scenes.py "$@"; fi
 # minimum macOS: 14 (libghostty-vt and the CEF framework target 13; current Chromium needs 12).
 # check_link_minos below fails the build on any linked object or bundled file newer than this.
 MACOS_MIN=14.0
@@ -23,7 +28,7 @@ export MACOSX_DEPLOYMENT_TARGET=$MACOS_MIN
 case "$(uname -s)-$(uname -m)" in
   Darwin-arm64)  GHOSTTY_TARGET=aarch64-macos; SOKOL_ARCH=arm64 ;;
   Darwin-x86_64) GHOSTTY_TARGET=x86_64-macos;  SOKOL_ARCH=x64 ;;
-  *) echo "pi-desk spike: only macOS is wired up so far"; exit 1 ;;
+  *) echo "Deckhand: only macOS is wired up so far"; exit 1 ;;
 esac
 
 GHOSTTY_LIB="vendor/libghostty-vt/$GHOSTTY_TARGET/lib/libghostty-vt.a"
@@ -139,10 +144,10 @@ WITH_CEF=0
 if [ "${PI_DESK_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
   case "$(uname -m)" in
     arm64) WITH_CEF=1 ;;
-    *) echo "pi-desk: CEF is wired up for arm64 only so far; building without it" ;;
+    *) echo "Deckhand: CEF is wired up for arm64 only so far; building without it" ;;
   esac
 fi
-OUT=build/pi-desk
+OUT=build/deckhand
 DEFINES=""
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
@@ -155,10 +160,10 @@ if [ $WITH_CEF = 1 ]; then
   if [ ! -f build/cef_helper ] || [ src/native/cef_helper.c -nt build/cef_helper ] || [ vendor/cef/VERSION -nt build/cef_helper ]; then
     clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper
   fi
-  OUT=build/pi-desk.app/Contents/MacOS/pi-desk
+  OUT=build/Deckhand.app/Contents/MacOS/Deckhand
   DEFINES="-define:PI_DESK_CEF=true"
-  mkdir -p build/pi-desk.app/Contents/MacOS
-  # build/pi-desk (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
+  mkdir -p build/Deckhand.app/Contents/MacOS
+  # build/deckhand (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
   # bundle-app.sh rewrites it: a failed compile leaves the last working command in place
 fi
 # the fake app for app-tab scenes (tests/fake-app/): test builds only
@@ -184,6 +189,25 @@ check_link_minos() { # odin build args (package and defines)
   if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
+# Claude Code tabs (src/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
+# (and its alias bin/pi-desk) runs (tools/pi-desk-cli; no dependency on src/), and the plugin itself next to the binary
+# (build/claude-code; bundle-app.sh copies both into the app)
+build_claude() {
+  odin build tools/pi-desk-cli -out:build/pi-desk-cli -o:speed -minimum-os-version:$MACOS_MIN
+  rm -rf build/claude-code
+  cp -R integrations/claude-code build/claude-code
+  build_pi
+}
+# pi tabs (src/pi_integration.odin, docs/HARNESSES.md): Deckhand's pi integration, loaded per tab
+# with `pi -e`, next to the binary (build/pi; bundle-app.sh copies it into the app). Its tests stay
+# behind: only what pi loads ships.
+build_pi() {
+  rm -rf build/pi
+  mkdir -p build/pi
+  cp -R integrations/pi/extensions integrations/pi/lib integrations/pi/skills build/pi/
+  cp integrations/pi/extensions.json integrations/pi/package.json integrations/pi/README.md build/pi/
+}
+
 case "$MODE" in
   test)     check_link_minos src; check_link_minos tests/fake-app ;;
   fake-app) check_link_minos tests/fake-app ;;
@@ -191,7 +215,7 @@ case "$MODE" in
 esac
 
 case "$MODE" in
-  debug)   odin build src -out:$OUT -debug -define:SOKOL_DEBUG=false -minimum-os-version:$MACOS_MIN $DEFINES ;;
+  debug)   odin build src -out:$OUT -debug -define:SOKOL_DEBUG=false -minimum-os-version:$MACOS_MIN $DEFINES; build_claude ;;
   test)
     clang -Ivendor/libghostty-vt/include tests/abi_sizes.c -o build/abi_sizes
     build/abi_sizes > build/abi_sizes.txt
@@ -202,20 +226,31 @@ case "$MODE" in
     build/cef_polish_pure_test
     # the agents' isolated-world script: the focus check and the sensitive-field rule (fake DOM)
     if command -v node >/dev/null; then node tests/browser_act_js_test.mjs; else echo "browser_act_js_test: skipped (no node)"; fi
+    # the pi integration's unit tests (integrations/pi; Node 22.18+ strips the types; never runs pi)
+    if command -v node >/dev/null; then (cd integrations/pi && node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts) >build/pi-integration-tests.log 2>&1 || { tail -40 build/pi-integration-tests.log; echo "integrations/pi tests failed (build/pi-integration-tests.log)"; exit 1; }; grep -E '^# (pass|fail)|^ℹ (pass|fail)' build/pi-integration-tests.log; else echo "integrations/pi tests: skipped (no node)"; fi
+    # the page reader's walk (text, outline): frames, boxless containers, shadow slots (fake DOM)
+    if command -v node >/dev/null; then node tests/browser_read_js_test.mjs; else echo "browser_read_js_test: skipped (no node)"; fi
     odin test tests -out:build/pi-desk-tests
-    # command layer (src/*_test.odin); tests share the global State: one thread
-    odin test src -out:build/pi-desk-core-tests -define:ODIN_TEST_THREADS=1 -define:PI_DESK_UPDATE_TEST=true
+    # command layer (src/*_test.odin); tests share the global State: one thread per process,
+    # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
+    python3 tests/unit.py
+    # the pi-desk CLI for Claude tabs (its tests share a fake environment: one thread)
+    odin test tools/pi-desk-cli -out:build/pi-desk-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
+    build_claude
     build_fake_app ;;
   fake-app) build_fake_app ;;
-  release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES ;;
-  *) echo "usage: ./build.sh [release|debug|run|test|fake-app]"; exit 1 ;;
+  release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES; build_claude ;;
+  *) echo "usage: ./build.sh [release|debug|run|test|fake-app|scenes ARGS]"; exit 1 ;;
 esac
 
 if [ $WITH_CEF = 1 ]; then
   scripts/bundle-app.sh "$CEF" "$MACOS_MIN"
   # what the app ships: the CEF framework (prebuilt) and the helpers
-  scripts/check-minos.sh $MACOS_MIN build/pi-desk.app
+  scripts/check-minos.sh $MACOS_MIN build/Deckhand.app
+elif [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
+  # a bare binary (PI_DESK_NO_CEF): build/pi-desk runs it too, for older scripts
+  rm -f build/pi-desk && ln -s deckhand build/pi-desk
 fi
 
-[ "$MODE" = run ] && exec build/pi-desk
+[ "$MODE" = run ] && exec build/deckhand
 exit 0

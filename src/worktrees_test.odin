@@ -505,3 +505,34 @@ wt_session_in_a_worktree :: proc(t: ^testing.T) {
 	testing.expect(t, run_command(Reveal_In_Finder{path = f.unmerged}, {kind = .Script}).ok)
 	testing.expect(t, !run_command(New_Shell_Tab{session = state.open_sessions[0].id, cwd = fmt.tprintf("%s/home", f.root)}, {kind = .Script}).ok, "not elsewhere")
 }
+
+// A worktree row's New session here, Claude Code picked: a Claude-only session of the project in a checkout
+// outside the project folder (kept with its project's rows); elsewhere is refused.
+@(test)
+wt_claude_session_in_a_worktree :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f, ok := wt_setup()
+	defer wt_teardown(f)
+	if !ok do return
+	os.set_env("SHELL", "/bin/sh")
+	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 5")
+	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	wd, _ := os.get_working_directory(context.temp_allocator)
+	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	claude_found = .Yes
+	wt_scan_now(f.main)
+	p := state.projects[0]
+	testing.expect(t, !run_command(New_Claude_Session{project_id = p.id, cwd = fmt.tprintf("%s/home", f.root)}, {kind = .UI}).ok, "not elsewhere")
+	r := run_command(New_Claude_Session{project_id = p.id, cwd = f.dirty}, {kind = .UI})
+	if !testing.expect(t, r.ok, r.error) do return
+	s := find_session(r.created_id)
+	if !testing.expect(t, s != nil && s.agent == .Claude) do return
+	testing.expect_value(t, s.project_id, p.id)
+	testing.expect_value(t, s.tabs[0].cwd, f.dirty)
+	// its history entry resumes there
+	sid := "b1b1b1b1-0000-4000-8000-000000000001"
+	testing.expect(t, run_command(Claude_Session_Report{tab_id = s.tabs[0].id, session_id = sid, source = "startup"}, {kind = .Script}).ok)
+	rec, _ := claude_record(sid)
+	if testing.expect(t, rec != nil) do testing.expect_value(t, rec.cwd, f.dirty)
+	for _, tm in terms do reader_stop_and_close(tm)
+}

@@ -1,15 +1,18 @@
 #!/bin/sh
-# The README's screenshot (docs/images/pi-desk.png): demo data only. A fake
+# The README's screenshot (docs/images/deckhand.png): demo data only. A fake
 # HOME with three made-up projects and a few chats, a demo pi that draws a
 # made-up conversation and publishes a todos panel (tests/scripts/demo-pi.py,
 # never a real pi), a Markdown tab, a browser tab on a local test page
 # (tests/web/demo.html) and a shell tab; dark graphite, 1400x860.
-# Needs a CEF build (./build.sh). Writes build/shots/readme/pi-desk.png; copy
+# Needs a CEF build (./build.sh). Writes build/shots/readme/deckhand.png; copy
 # it to docs/images/ after checking it by eye.
 # Usage: tests/scripts/readme-shot.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
+export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/readme-shot"
 rm -rf "$W" build/shots/readme
 FAKE_HOME="$W/home"
@@ -63,9 +66,9 @@ MD
   && git -c user.name=demo -c user.email=demo@example.invalid -c commit.gpgsign=false commit -qm init)
 
 HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/zsh PI_DESK_SCRIPT=tests/scripts/readme-shot.txt \
-  PI_DESK_DATA_DIR="$W/data" PI_DESK_BIN="$ROOT/build/pi-desk" \
+  PI_DESK_DATA_DIR="$W/data" PI_DESK_BIN="$ROOT/build/deckhand" \
   PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/demo-pi.py' \"\$@\"" \
-  build/pi-desk "$P/recipe-box" > "$W/run.log" 2>&1 || true
+  build/deckhand "$P/recipe-box" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "readme shot failed (log: $W/run.log)"; exit 1

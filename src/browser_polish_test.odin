@@ -66,7 +66,7 @@ browser_download_safe_names :: proc(t: ^testing.T) {
 // An existing file is never overwritten: the next free "name (n).ext" is reserved.
 @(test)
 browser_download_never_overwrites :: proc(t: ^testing.T) {
-	dir := fmt.tprintf("build/test-data/bp-dl-%d", new_id())
+	dir := fmt.tprintf("build/test-data/bp-dl-%d-%d", os.get_pid(), new_id())
 	os.make_directory_all(dir)
 	defer os.remove_all(dir)
 	keep := fmt.tprintf("%s/a.txt", dir)
@@ -480,7 +480,7 @@ browser_download_ask_keeps_url :: proc(t: ^testing.T) {
 	p.ask_id = 7
 	p.ask_name = strings.clone("x.txt")
 	p.ask_url = strings.clone("https://a.example/x.txt")
-	home_root = fmt.aprintf("build/test-data/bp-ask-%d", new_id())
+	home_root = fmt.aprintf("build/test-data/bp-ask-%d-%d", os.get_pid(), new_id())
 	defer {os.remove_all(home_root); home_root = ""}
 	r = run_command(Browser_Download{download_id = 7, op = .Allow}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)

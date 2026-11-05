@@ -2,8 +2,8 @@
 """A demo pi for the README screenshot (tests/scripts/readme-shot.sh). Never a real pi.
 
 It draws a static, pi-like conversation about the fake recipe-box project, then
-plays pi-kit's desk-bridge over pi-desk's socket (pi-desk --ctl with the tab's
-single-use PI_DESK_TOKEN): pi.session, pi.status idle, and a todos panel. Every
+plays the pi integration's bridge over Deckhand's socket (deckhand --ctl with the tab's
+single-use DECKHAND_TOKEN): pi.session, pi.status idle, and a todos panel. Every
 word on screen is made up for the picture.
 """
 import json, os, re, shutil, sys
@@ -89,9 +89,12 @@ msgs = [{"id": "s", "v": 1, "type": "pi.session", "pi_session_id": sid, "session
 if sid == "r1":
     msgs += [todos, shells]
 pidesk = os.environ.get("PI_DESK_BIN")
-if pidesk and os.environ.get("PI_DESK_SOCKET"):
+if pidesk and os.environ.get("DECKHAND_SOCKET"):
     null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(null, 1)
     os.dup2(null, 2)
+    # --ctl reads PI_DESK_SOCKET/PI_DESK_TOKEN; a pi tab gets DECKHAND_SOCKET/DECKHAND_TOKEN
+    os.environ["PI_DESK_SOCKET"] = os.environ["DECKHAND_SOCKET"]
+    os.environ["PI_DESK_TOKEN"] = os.environ.get("DECKHAND_TOKEN", "")
     os.execv(pidesk, [pidesk, "--ctl", "--wait", "600000"] + [json.dumps(m) for m in msgs])
 os.execvp("sleep", ["sleep", "600"])

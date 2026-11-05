@@ -13,6 +13,7 @@ package main
 //   pty_reap()                            collect exited children (call each frame)
 //   pty_foreground_busy(&p) -> bool       a program other than the child itself is in
 //                                         the foreground (e.g. a shell running a command)
+//   pty_foreground_pgrp(&p) -> i32        the foreground process group (0 = unknown)
 
 Pty :: struct {
 	fd:      i32, // master side (posix)

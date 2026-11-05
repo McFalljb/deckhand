@@ -105,6 +105,7 @@ editor_tick :: proc() {
 	fs_model_tick()
 	settings_poll() // the Settings tab's folders outside projects (settings_files.odin)
 	reload_tick() // hot reload: pi's config files and version (reload.odin)
+	claude_reload_tick() // and Claude Code's (claude_reload.odin)
 	if sync.atomic_load(&watch.any) {
 		sync.mutex_lock(&watch.lock)
 		paths := watch.pending

@@ -1,0 +1,20 @@
+# The first-run sheet with one Claude Code account (tests/scripts/setup.sh, third home): no
+# accounts step; the last step's line names the account.
+wait 1500
+assert_state focus.id setup
+assert_state focus.steps 4
+key enter
+wait 100
+key enter
+wait 100
+key enter
+eventually
+assert_state focus.step folders
+shot setup/one-account-dark
+key escape
+eventually
+assert_state focus.step chats
+ui_command {"type":"setup_sheet","open":false}
+eventually
+assert_state focus.kind terminal
+quit

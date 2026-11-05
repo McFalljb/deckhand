@@ -130,7 +130,8 @@ markdown_spec_report :: proc(t: ^testing.T) {
 	fmt.printfln("total %d/%d", ok, all)
 }
 
-// A 1 MB document of every construct parses in under 50 ms.
+// A 1 MB document of every construct parses in under 50 ms of CPU time (the best of 5: a busy
+// machine slows a run down, never speeds it up).
 @(test)
 markdown_parse_1mb :: proc(t: ^testing.T) {
 	sb := strings.builder_make(context.temp_allocator)
@@ -138,15 +139,15 @@ markdown_parse_1mb :: proc(t: ^testing.T) {
 	for strings.builder_len(sb) < 1 << 20 do strings.write_string(&sb, chunk)
 	text := strings.to_string(sb)
 	best := time.Duration(1 << 62)
-	for _ in 0 ..< 3 {
-		t0 := time.tick_now()
+	for _ in 0 ..< 5 {
+		t0 := thread_cpu_now()
 		doc := md_parse(text)
-		d := time.tick_since(t0)
+		d := thread_cpu_since(t0)
 		best = min(best, d)
 		testing.expect(t, len(doc.root.children) > 1000, "parsed")
 		md_free(doc)
 	}
-	fmt.printfln("markdown: 1 MB parsed in %.1f ms (best of 3)", f64(best) / f64(time.Millisecond))
+	fmt.printfln("markdown: 1 MB parsed in %.1f ms of CPU time (best of 5)", f64(best) / f64(time.Millisecond))
 	// hosted CI runners are shared and slower: a looser limit there (CI is set by GitHub Actions)
 	limit := os.get_env("CI", context.temp_allocator) != "" ? 150 * time.Millisecond : 50 * time.Millisecond
 	testing.expectf(t, best < limit, "1 MB took %v (limit %v)", best, limit)

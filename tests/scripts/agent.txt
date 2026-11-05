@@ -9,6 +9,10 @@ ui_command {"type":"set_agent_model","model":"opencode-go/deepseek-v4.1-flash"}
 assert_state settings.agent_model opencode-go/deepseek-v4.1-flash
 key j cmd
 waitfor control token: yes 10000
+# Deckhand's pi integration, -e per extension (integrations/pi/extensions.json), and only its own bridge variables
+assert_screen integration: bridge desk browser panels
+assert_screen deckhand env: 4 of 4
+assert_screen pi-desk env: 0
 assert_screen model: opencode-go/deepseek-v4.1-flash
 assert_screen prompt: # Atlas
 assert_state home.open true
@@ -23,7 +27,7 @@ assert_result ok true
 assert_result data.id demo-1
 assert_result data.title Fix the demo build
 key j cmd
-wait 300
+eventually
 assert_state home.open false
 ui_command {"type":"session_info","project_id":$project,"pi_session_id":"demo-1","to":"agent"}
 assert_result ok true
@@ -46,51 +50,51 @@ assert_palette 0 action:agent_model
 key escape
 wait 200
 clickid drawer_term
-wait 200
+eventually
 assert_state focus.id agent_input
 # a run that ends while the drawer is shut: unread, read on opening
 type go
 key enter
 key j cmd
-wait 2000
+eventually
 assert_state home.open false
 assert_state agent.unread 1
 shot agent/unread
 key j cmd
-wait 300
+eventually
 assert_state agent.unread 0
 assert_screen Done: two projects
 # a dialog while shut: the needs-you tint
 type ask
 key enter
 key j cmd
-wait 500
+eventually
 assert_state agent.needs_user true
 shot agent/needs-you
 key j cmd
 wait 300
 type main
 key enter
-wait 300
+eventually
 assert_state agent.needs_user false
 assert_screen answered: main
 # pinned as a column; the terminal follows
 clickid drawer_pin
-wait 400
+eventually
 assert_state layout.drawer_pinned true
 shot agent/pinned
 clickid drawer_pin
 wait 400
 # the Settings tab's Atlas group: the prompt file, the model with Change…
 ui_command {"type":"set_left_tab","tab":"settings"}
-wait 300
+eventually
 assert_files [Atlas]\nATLAS.md\nModel: opencode-go/deepseek-v4.1-flash [Change…]\n
 shot agent/settings-group
 # the palette's "edit prompt": the prompt file in an editor tab
 key k cmd
 type edit prompt
 key enter
-wait 500
+eventually
 assert_state open_sessions.0.tabs.1.title ATLAS.md
 shot agent/prompt
 quit

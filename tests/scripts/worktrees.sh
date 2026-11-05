@@ -9,8 +9,10 @@
 #   2. relaunch: the worktree session and the tree's checkout come back
 # Screenshots go to build/shots/worktrees/. Usage: tests/scripts/worktrees.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/worktrees"
 rm -rf "$W"
 FAKE_HOME="$W/home"
@@ -18,7 +20,10 @@ PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ/src" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 printf '{"type":"session","version":3,"id":"wwww-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_wwww-1.jsonl"
-g() { HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 git -c user.name=t -c user.email=t@example.invalid \
+# one commit date for every fixture commit: the branch list sorts by date, then name, so the
+# order must not depend on whether the commits fell in the same second (they did not, under load)
+g() { HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 GIT_COMMITTER_DATE="2026-10-30T10:00:00Z" \
+  GIT_AUTHOR_DATE="2026-10-30T10:00:00Z" git -c user.name=t -c user.email=t@example.invalid \
   -c commit.gpgsign=false -c init.defaultBranch=main "$@"; }
 printf '# proj\n' > "$PROJ/README.md"
 printf 'node_modules/\ndist/\n.env*\n' > "$PROJ/.gitignore"
@@ -39,7 +44,7 @@ rm -rf "$FAKE_HOME/proj-d-gone"
 # a fake pi that prints its arguments; given --session-dir (a session in a
 # worktree, kept with the project's) it writes the session file, as pi would
 cat > "$W/fake-pi.sh" <<'PI'
-echo "ARGS: $*"
+while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"
 d=""; i=""
 while [ $# -gt 0 ]; do
   case "$1" in --session-dir) d=$2; shift ;; --session-id) i=$2; shift ;; esac
@@ -53,7 +58,7 @@ exec sleep 600
 PI
 run() { # script log
   HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD="exec sh '$W/fake-pi.sh' \"\$@\"" build/pi-desk > "$2" 2>&1 || true
+    PI_DESK_CMD="exec sh '$W/fake-pi.sh' \"\$@\"" build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "worktrees scene failed (log: $2)"; exit 1

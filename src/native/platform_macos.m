@@ -517,6 +517,17 @@ int pd_mac_left_button_down(void) { return ([NSEvent pressedMouseButtons] & 1) !
 
 long pd_mac_pasteboard_count(void) { return (long)[[NSPasteboard generalPasteboard] changeCount]; }
 
+// A modal alert with one Quit button (instance.odin: another Deckhand or pi-desk runs).
+void pd_mac_alert(const char* title, const char* text) {
+    [NSApp activateIgnoringOtherApps:YES];
+    NSAlert* a = [[NSAlert alloc] init];
+    a.alertStyle = NSAlertStyleWarning;
+    a.messageText = @(title);
+    a.informativeText = @(text);
+    [a addButtonWithTitle:@"Quit"];
+    [a runModal];
+}
+
 void pd_mac_quiet(void) {
     Class app = [NSApplication class];
     replace(app, @selector(setActivationPolicy:), (IMP)quiet_set_policy, &orig_set_policy);
@@ -527,13 +538,31 @@ void pd_mac_quiet(void) {
     [NSApplication sharedApplication].activationPolicy = NSApplicationActivationPolicyAccessory;
 }
 
+// ---- test mode's backing scale (PI_DESK_SCALE; docs/DEVELOPING.md) ----
+//
+// pi-desk renders at the same backing scale on every Mac: `scale`, whatever the display's (a
+// Retina display is 2, most others and CI runners 1). Every screen and window reports it, so
+// sokol's dpi_scale, the drawable's size, app tabs' rings, app_screenshot PNGs and pi-desk's own
+// conversions (pd_mac_test_hit, the IME's rectangle) all agree. Not the window server: the
+// `shot` command's screencapture records the window at the real display's scale. Before sokol
+// starts.
+
+static CGFloat test_scale = 1;
+static CGFloat test_backing_scale(id self, SEL _cmd) { return test_scale; }
+
+void pd_mac_test_scale(double scale) {
+    test_scale = scale;
+    replace([NSScreen class], @selector(backingScaleFactor), (IMP)test_backing_scale, NULL);
+    replace([NSWindow class], @selector(backingScaleFactor), (IMP)test_backing_scale, NULL);
+}
+
 // ---- jobs (src/jobs.odin) ----
 
 // No App Nap while a job runs (its timers stay on time).
 static id job_activity;
 void pd_mac_activity(int on) {
     if (on && !job_activity) {
-        job_activity = [[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"pi-desk job running"];
+        job_activity = [[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Deckhand job running"];
     } else if (!on && job_activity) {
         [[NSProcessInfo processInfo] endActivity:job_activity];
         job_activity = nil;

@@ -80,11 +80,26 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		files_state_gen += 1
 		return {ok = true}, true
 	case Files_Expand:
-		p, root, err := files_tree_check(c.path, caller)
-		if err != "" do return fail(err), false
+		// keyed by the path as the tree shows it: a symlinked folder opens in
+		// place (fs_check would follow the link, out of the project or onto
+		// the folder it points at), and a known folder inside the tree (a
+		// nested project, a session's worktree) opens in its parent's tree
+		p := fs_abs(c.path, caller)
+		if p == "" do return fail("path is empty (or relative with no project selected)"), false
+		if caller.kind != .UI {
+			// the control socket and scripts keep the real-path boundary: only
+			// the user's own clicks follow a symlinked folder out of the project
+			if _, _, err := files_tree_check(c.path, caller); err != "" do return fail(err), false
+		}
+		root, rel := files_expand_key(p)
+		if root == "" {
+			_, _, err := files_tree_check(c.path, caller)
+			if err != "" do return fail(err), false
+			if !c.expanded do return fail("a tree's root is always open"), false
+			return {ok = true}, false // already open: a tree's root always is
+		}
+		if strings.contains(strings.concatenate({"/", rel, "/"}, context.temp_allocator), "/.git/") do return fail("not inside .git"), false
 		if c.expanded && path_kind(p) != .Dir do return fail("not a folder"), false
-		if p == root do return {ok = true}, false // a tree's root is always open
-		rel := p[len(root) + 1:]
 		if !files_set_expanded(root, rel, c.expanded) do return {ok = true}, false
 		return {ok = true}, true
 	case Files_Collapse_All:
@@ -101,13 +116,17 @@ files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 	case Files_Reveal:
 		p, _, err := fs_check(c.path, caller, allow_root = true)
 		if err != "" do return fail(err), false
-		root := fs_root_longest(p)
+		// every folder above it opens, up to the outermost known folder
+		// (a nested project's folder opens in its parent's tree too)
+		above := make([dynamic]string, context.temp_allocator)
+		for d := filepath.dir(p); len(d) > 1; d = filepath.dir(d) {
+			if root, _ := files_expand_key(d); root == "" do break
+			append(&above, d)
+		}
 		ch := false
-		if p != root {
-			rel := p[len(root) + 1:]
-			for i := 0; i < len(rel); i += 1 {
-				if rel[i] == '/' && files_set_expanded(root, rel[:i], true) do ch = true
-			}
+		#reverse for d in above { 	// outermost first: the saved order is the order they opened
+			root, rel := files_expand_key(d)
+			if files_set_expanded(root, rel, true) do ch = true
 		}
 		files_select(p) // the row the keyboard moves from (UI state)
 		return {ok = true}, ch
@@ -130,12 +149,18 @@ files_tree_check :: proc(path: string, caller: Caller) -> (abs, root, err: strin
 	return "", "", e
 }
 
-// Where Files_Expand keeps path's open state: (root, rel), root "" = nowhere.
+// Where Files_Expand keeps an absolute path's open state: (root, rel),
+// root "" = nowhere (outside every tree, or a tree's root itself). The root
+// is the innermost known folder strictly above the path as written, so a
+// row's own path (the tree's root, then names: below a symlinked folder
+// too) finds its state without resolving links. A path written another way
+// (/tmp for /private/tmp) is tried with its parent's real path.
 files_expand_key :: proc(path: string) -> (root, rel: string) {
-	parent := fs_real(filepath.dir(path))
-	full := strings.concatenate({parent, "/", filepath.base(path)}, context.temp_allocator)
-	if r := fs_root_longest(full); r != "" && full != r do return r, full[len(r) + 1:]
-	if r := settings_tree_root(path); r != "" do return r, path[len(r) + 1:]
+	p, _ := filepath.clean(path, context.temp_allocator)
+	if r := fs_root_above(p); r != "" do return r, p[len(r) + 1:]
+	full := strings.concatenate({fs_real(filepath.dir(p)), "/", filepath.base(p)}, context.temp_allocator)
+	if r := fs_root_above(full); r != "" do return r, full[len(r) + 1:]
+	if r := settings_tree_root(p); r != "" && r != p do return r, p[len(r) + 1:]
 	return "", ""
 }
 
@@ -267,12 +292,16 @@ Files_Dir :: struct {
 	err:     string, // owned; "" = listed
 	stale:   bool, // something changed in it: listed again when next needed
 	ignored: bool, // listed as ignored (inside an ignored folder)
+	real:    string, // owned; the folder's real path where it differs (below a symlinked folder): changes come by it
 }
 
 @(private = "file")
 files_cache: map[string]^Files_Dir // folder (abs, owned key) -> its listing
 @(private = "file")
 walked: map[string]bool // folders the last rebuild listed (keys borrowed from files_cache)
+
+@(private = "file")
+walk_roots: []string // the known folders, while files_rows walks (temp allocator)
 
 // Bumped whenever a listing is (re)loaded or marked stale.
 files_cache_gen: u64
@@ -289,9 +318,10 @@ files_dir :: proc(dir: string, ignored: bool) -> ^Files_Dir {
 	d.stale, d.ignored = false, ignored
 	fs_stats.relists += 1
 	t0 := time.tick_now()
-	entries, err := fs_read_dir(dir, with_ignored = true, parent_ignored = ignored)
+	entries, err := fs_read_dir(dir, with_ignored = true, parent_ignored = ignored, for_user = true)
 	if autotest.active && time.tick_since(t0) > 20 * time.Millisecond do fmt.eprintf("FILES listed %s: %d entries in %.1f ms\n", dir, len(entries), time.duration_milliseconds(time.tick_since(t0)))
 	if err != "" do d.err = strings.clone(err)
+	if r := fs_real(dir); r != dir do d.real = strings.clone(r)
 	reserve(&d.entries, len(entries))
 	for e in entries do append(&d.entries, Fs_Entry{name = strings.clone(e.name), kind = e.kind, ignored = e.ignored})
 	files_cache_gen += 1
@@ -304,6 +334,8 @@ files_dir_clear :: proc(d: ^Files_Dir) {
 	clear(&d.entries)
 	delete(d.err)
 	d.err = ""
+	delete(d.real)
+	d.real = ""
 }
 
 // Something changed at path (the watcher, or a file command): its folder's
@@ -313,9 +345,14 @@ files_path_changed :: proc(path: string) {
 	if len(files_cache) == 0 do return
 	dir := filepath.dir(path)
 	gitignore := filepath.base(path) == ".gitignore"
+	below := strings.concatenate({dir, "/"}, context.temp_allocator)
+	hit :: proc(k, path, dir, below: string, gitignore: bool) -> bool {
+		return k == path || k == dir || (gitignore && strings.has_prefix(k, below))
+	}
 	for k, d in files_cache {
 		if d.stale do continue
-		if k == path || k == dir || (gitignore && (k == dir || strings.has_prefix(k, strings.concatenate({dir, "/"}, context.temp_allocator)))) {
+		// by the path the tree shows, or by its real path (a folder open below a symlink)
+		if hit(k, path, dir, below, gitignore) || (d.real != "" && hit(d.real, path, dir, below, gitignore)) {
 			d.stale = true
 			files_cache_gen += 1
 		}
@@ -355,6 +392,9 @@ Files_Row :: struct {
 	button:   string, // a row that is a setting, not a file (path ATLAS_MODEL_ROW): its button's label
 	reset:    bool, // a folder row (folders.odin): Reset and Reveal in Finder buttons too
 	reveal:   bool,
+	remove:   bool, // a Claude account's row (claude_accounts.odin): a Remove button
+	make_default: bool, // a Claude account's row: a Make default button
+	error:    string, // a folder that could not be listed (path): why, with a Retry button
 }
 
 Files_View :: struct {
@@ -418,7 +458,9 @@ files_rows :: proc(root: string) -> []Files_Row {
 	} else {
 		open := make(map[string]bool, context.temp_allocator)
 		for d in files_expanded_dirs(root) do open[d] = true
+		walk_roots = fs_roots() // once per rebuild (realpath per project)
 		files_walk(&files_ui, root, "", 0, false, open, a)
+		walk_roots = nil
 		// listings of folders no longer shown are dropped: memory follows what is open
 		drop := make([dynamic]string, context.temp_allocator)
 		for k, _ in files_cache do if !(k in walked) do append(&drop, k)
@@ -443,6 +485,11 @@ files_rows :: proc(root: string) -> []Files_Row {
 files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, open: map[string]bool, a: runtime.Allocator, settings := false) {
 	d := files_dir(dir, ignored)
 	walked[dir] = true
+	if d.err != "" {
+		// never an empty-looking folder: why, and a Retry (ui_files.odin)
+		append(&v.rows, Files_Row{path = strings.clone(dir, a), depth = depth, error = strings.clone(d.err, a)})
+		return
+	}
 	shown := 0
 	for e, i in d.entries {
 		if len(v.rows) >= FILES_ROWS_MAX || shown >= FILES_DIR_MAX {
@@ -455,7 +502,16 @@ files_walk :: proc(v: ^Files_View, dir, rel: string, depth: int, ignored: bool, 
 		r := rel == "" ? e.name : strings.concatenate({rel, "/", e.name}, context.temp_allocator)
 		is_open := e.kind == .Dir && (settings ? files_is_open(full) : r in open)
 		append(&v.rows, Files_Row{path = full, name = full[len(dir) + 1:], depth = depth, kind = e.kind, ignored = e.ignored, expanded = is_open})
-		if is_open do files_walk(v, full, r, depth + 1, e.ignored, open, a, settings)
+		if !is_open do continue
+		if !settings && list_index(walk_roots, full) >= 0 {
+			// a known folder (nested project, session worktree): the state of
+			// the folders below it is kept under it (files_expand_key)
+			sub := make(map[string]bool, context.temp_allocator)
+			for x in files_expanded_dirs(full) do sub[x] = true
+			files_walk(v, full, "", depth + 1, e.ignored, sub, a, settings)
+		} else {
+			files_walk(v, full, r, depth + 1, e.ignored, open, a, settings)
+		}
 	}
 }
 
@@ -516,7 +572,7 @@ files_filter_rows :: proc(root: string, a: runtime.Allocator) {
 
 // The row index of path (-1 = not shown).
 files_row_of :: proc(rows: []Files_Row, path: string) -> int {
-	for r, i in rows do if r.more == 0 && r.path == path do return i
+	for r, i in rows do if r.more == 0 && r.error == "" && r.path == path do return i
 	return -1
 }
 
@@ -548,7 +604,8 @@ files_rows_text :: proc(rows: []Files_Row) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for r in rows {
 		for _ in 0 ..< r.depth do strings.write_string(&b, "  ")
-		if r.more > 0 do fmt.sbprintf(&b, "%d more…", r.more)
+		if r.error != "" do fmt.sbprintf(&b, "! %s", r.error)
+		else if r.more > 0 do fmt.sbprintf(&b, "%d more…", r.more)
 		else if r.head do fmt.sbprintf(&b, "[%s]", r.name)
 		else if r.rel != "" do strings.write_string(&b, r.rel)
 		else do strings.write_string(&b, r.name)
@@ -578,4 +635,13 @@ files_keep_edited_preview :: proc() {
 		et, is := tab.kind.(Editor_Tab)
 		if is && et.preview && editor_dirty(editor_of(tab.id)) do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
 	}
+}
+
+// Lists a folder again when next needed (an error row's Retry).
+files_retry :: proc(dir: string) {
+	if d := files_cache[dir]; d != nil {
+		d.stale = true
+		files_cache_gen += 1
+	}
+	app.redraw = true
 }

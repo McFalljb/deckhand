@@ -245,6 +245,14 @@ main :: proc() {
 		os.exit(1)
 	}
 	v, _ := json.parse_string(line, .JSON, true)
+	// pi-desk sends nothing before the hello reply (docs/PROTOCOL.md §2)
+	first, _ := v.(json.Object)
+	first_id, _ := first["id"].(json.String)
+	first_type, _ := first["type"].(json.String)
+	if first_id != "1" || first_type != "result" {
+		say("fake-app: a line before the hello reply:", line)
+		os.exit(1)
+	}
 	res, _ := v.(json.Object)["result"].(json.Object)
 	data, _ := res["data"].(json.Object)
 	if okv, _ := res["ok"].(json.Boolean); !okv {

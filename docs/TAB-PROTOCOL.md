@@ -1,17 +1,19 @@
-# pi-desk tab protocol (draft)
+# Deckhand tab protocol (draft)
 
-What a program does to be built into pi-desk as a tab: show itself inside the window, take input
-from pi-desk, and expose its own commands, state and events to pi-desk and its agents. Terminals,
+What a program does to be built into Deckhand as a tab: show itself inside the window, take input
+from Deckhand, and expose its own commands, state and events to Deckhand and its agents. Terminals,
 the markdown viewer, game engines and browsers all meet the same contract in different ways.
 Programs that do not implement it still run, in a native view or their own window, with less
 integration.
 
-This replaces the earlier, looser "tab-host contract" from the first design review.
+Status: app tabs ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) and browser tabs ([BROWSER.md](BROWSER.md))
+implement the texture path and the control pass-through; the native-view and own-window modes are
+not built.
 
 ## 1. Display
 
-Preferred: **shared GPU texture.** pi-desk creates (or imports) a texture the program renders
-into, and draws it with Clay as an image, so pi-desk's overlays (palette, confirmation bar,
+Preferred: **shared GPU texture.** Deckhand creates (or imports) a texture the program renders
+into, and draws it with Clay as an image, so Deckhand's overlays (palette, confirmation bar,
 annotation boxes, focus rings) and shortcuts keep working on top.
 
 | OS | Shared surface | Into sokol_gfx |
@@ -22,26 +24,26 @@ annotation boxes, focus rings) and shortcuts keep working on top.
 
 sokol_gfx supports wrapping native textures ("ADVANCED TOPIC: Injecting native 3D-API textures"
 in `vendor/sokol-odin/sokol/c/sokol_gfx.h`). Frame handshake: the program signals "frame ready"
-(control channel event or a shared fence); pi-desk redraws on it, so idle tabs cost nothing. The
-size follows the pane: pi-desk sends `resize{w, h, scale}`; the program reallocates or pi-desk
+(control channel event or a shared fence); Deckhand redraws on it, so idle tabs cost nothing. The
+size follows the pane: Deckhand sends `resize{w, h, scale}`; the program reallocates or Deckhand
 hands it a new surface.
 
 Fallback: **native child view.** The program's own view is attached to the window's native
 handle (`sapp_macos_get_window`, `sapp_win32_get_hwnd`, `sapp_x11_get_window`) and positioned
-over the tab's pane. It sits above GL content, so pi-desk disables overlays over that pane (the
+over the tab's pane. It sits above GL content, so Deckhand disables overlays over that pane (the
 palette and confirmation bar move outside it or temporarily hide the view), and the view keeps the
-keyboard while focused (pi-desk's shortcuts work only when focus leaves it).
+keyboard while focused (Deckhand's shortcuts work only when focus leaves it).
 
 Last resort: **own window.** The program keeps its own window; the tab shows its status and the
 control channel still works.
 
-pi-desk-drawn tabs (terminals, markdown) are a fourth case: pi-desk renders them itself
+Deckhand-drawn tabs (terminals, markdown) are a fourth case: Deckhand renders them itself
 (`Tab_Display.Drawn`).
 
 ## 2. Input
 
-pi-desk owns input. Keyboard, text (including IME, once the macOS `NSTextInputClient` patch
-exists), mouse and scroll go to the focused tab only, after pi-desk took its own shortcuts.
+Deckhand owns input. Keyboard, text (including IME, through `NSTextInputClient` on macOS),
+mouse and scroll go to the focused tab only, after Deckhand took its own shortcuts.
 Texture tabs receive events over the control channel in tab coordinates (logical px + scale):
 
 ```json
@@ -56,9 +58,11 @@ Native views get native events directly (degraded mode).
 ## 3. Control
 
 The program exposes commands, state and events over the envelope in [PROTOCOL.md](PROTOCOL.md)
-(NDJSON, `{id, type, v, …}`, `hello` with version and token). pi-desk starts the program with
+(NDJSON, `{id, type, v, …}`, `hello` with version and token). Deckhand starts the program with
 `PI_DESK_SOCKET` and a per-tab `PI_DESK_TOKEN`, or connects to an address the program announces.
-Which requests a program answers is its own business: pi-desk passes any method through
+The program speaks first (`hello`); Deckhand's hello reply is the first line it gets, and nothing
+(requests, `input`) is sent before that reply.
+Which requests a program answers is its own business: Deckhand passes any method through
 (`app_call {method, params}`, PROTOCOL.md) and keeps only `tab.quit` and `tab.visible` for itself.
 Agents ask the program with `tab.describe` first. Suggested common requests:
 
@@ -66,38 +70,40 @@ Agents ask the program with `tab.describe` first. Suggested common requests:
 |---|---|
 | `tab.describe` | name, version, display mode, the commands it supports |
 | `tab.hit_test` `{x, y}` | what is at that point (element, entity, cell…), with an id usable in other commands |
-| `tab.capture` `{x, y, w, h}` | PNG (base64) of a region; for texture tabs pi-desk takes it itself from the frame it shows (`app_screenshot`) |
+| `tab.capture` `{x, y, w, h}` | PNG (base64) of a region; for texture tabs Deckhand takes it itself from the frame it shows (`app_screenshot`) |
 | `tab.inspect` `{id}` | the state of one thing (DOM node, entity, file section) |
 | `tab.act` `{action, …}` | do something (click, type, set a value, step a frame) |
 | `tab.state` / `subscribe` | the program's own state and events |
 
-pi-desk's agents reach these through pi-desk (caller capabilities and confirmation apply), and pi
+Deckhand's agents reach these through Deckhand (caller capabilities and confirmation apply), and pi
 extensions expose them as general tools (`app_call`, `app_screenshot`, `app_input`,
 `app_events`), not one tool per request. A program may send `tab.boxes` (`[{id, label, rect}]`
-in logical px) for pi-desk's Inspect overlay.
+in logical px) for Deckhand's Inspect overlay.
 
 ## 4. How each tab kind fits
 
 | Tab | Display | Input | Control |
 |---|---|---|---|
-| terminal (pi, shell) | drawn by pi-desk from libghostty-vt in process | encoded by libghostty-vt to the PTY | pi tabs: the bridge (PROTOCOL.md §4) |
-| markdown | drawn by pi-desk (own parser, `src/markdown.odin`) | pi-desk | pi-desk commands (open, scroll, find) |
-| game engine | texture, via a small Odin package linked into the engine | forwarded input events | the package implements `tab.*` — this **is** the engine bridge (G6): inspect/set state, pause/step, capture, inject input, hit test |
+| terminal (pi, shell, Claude) | drawn by Deckhand from libghostty-vt in process | encoded by libghostty-vt to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md) |
+| markdown | drawn by Deckhand (own parser, `src/markdown.odin`) | Deckhand | Deckhand commands (open, scroll, find) |
+| game engine | texture, via a small Odin package linked into the engine | forwarded input events | the package implements `tab.*`: this **is** the engine bridge ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)): inspect/set state, pause/step, capture, inject input, hit test |
 | browser | CEF off-screen rendering into the texture | forwarded to CEF | Chrome DevTools Protocol behind an adapter that answers `tab.*` (hit test, capture, act) |
 | any other app | native view or own window | native | none, or whatever it implements |
 
 ## 5. In code
 
 `src/tabhost.odin` has the in-process interface as types: `Tab_Display` and `Tab_Host` (draw,
-texture, input, capture, control). Terminal tabs fill in `draw`; the frame draws the active tab
-through `tab_host(kind).draw`. Input still goes to terminals directly (`main.odin`), and texture
-display, capture and control are stubs until the markdown tab (phase 2) and the engine bridge
-(phase 4). Clay `.Image` render commands are not drawn yet (`ui_draw`).
+texture, input, capture, control), and `tab_host(kind)` picks the host for each tab kind. The
+frame draws the active tab through `tab_host(kind).draw`. Terminal, editor, Changes and Markdown
+tabs are `.Drawn`; browser tabs (`src/browser.odin`) and app tabs (`src/app_tab.odin`, frames
+over IOSurface) are `.Texture` and draw their texture themselves. Input is routed per tab kind in
+`main.odin`, and an app's control requests go through `app_call` on the socket (PROTOCOL.md), not
+through `Tab_Host.control`. Clay `.Image` render commands are not used (`ui_draw`).
 
 ## Open questions
 
-- Who allocates the shared surface (pi-desk, so it controls size and format, is the default) and
+- Who allocates the shared surface (Deckhand, so it controls size and format, is the default) and
   how a crashed program's surface is released.
 - Linux: dmabuf import needs EGL; sokol's Linux backend uses GLX by default.
-- Whether a separate window process (phase "process split") renders the same tab protocol
-  textures from the core, or each window imports them directly.
+- Whether a separate window process (the planned process split, [ROADMAP.md](ROADMAP.md))
+  renders the same tab protocol textures from the core, or each window imports them directly.

@@ -9,7 +9,7 @@ package main
 // the two sources so far). Comments belong to the session that holds the tab, never to the session
 // on screen, and stay with it when the tab closes (closing asks first: send or drop).
 //
-// Delivery, per session, to its pi tab's bridge (pi-kit extensions/desk-bridge, PROTOCOL.md §4):
+// Delivery, per session, to its pi tab's bridge (integrations/pi extensions/bridge, PROTOCOL.md §4):
 //   - whenever the pending set changes, and after every bridge handshake (pi.session), pi-desk
 //     sends `pi.attach {attachment_id, text, images}` (replacing what the bridge held), or
 //     `pi.attach_clear` once nothing is left;
@@ -190,13 +190,30 @@ comments_ready :: proc(s: ^Open_Session) -> (ok: bool, why: string) {
 	pt := session_pi_tab(s)
 	if pt == nil do return false, "this session has no pi tab"
 	if pt.status != .Running do return false, "pi is not running in this session"
-	if pt.agent == .Unknown do return false, "pi-desk's bridge is not connected to pi in this session"
+	if pt.agent == .Unknown do return false, "Deckhand's bridge is not connected to pi in this session"
 	return true, ""
 }
 
-// Whether Send now may go: ready, no dialog open, nothing on its way already.
-comments_can_send :: proc(s: ^Open_Session) -> (ok: bool, why: string) {
+// Whether Send now may go: ready, no dialog open, nothing on its way already. Into the Claude
+// tab on screen (comments_claude_target) only when Claude can take a message now. for_tab: only one
+// tab's comments (the close prompt's Send): always pi's path, since Claude's hook takes all of the
+// session's comments.
+comments_can_send :: proc(s: ^Open_Session, for_tab := false) -> (ok: bool, why: string) {
 	if s == nil || len(s.comments) == 0 do return false, "no comments to send"
+	// a Claude-only session has no pi: one tab's comments (Send and close) go to its main Claude
+	// tab, whose hook takes all of the session's with that message
+	if for_tab && s.agent == .Claude {
+		main := comments_claude_main(s)
+		if main == nil do return false, "Claude is not running in this session"
+		if s.attach.sending != 0 do return false, "the comments are being sent"
+		if why := claude_send_refusal(main); why != "" do return false, why
+		return true, ""
+	}
+	if tab := comments_claude_target(s); tab != nil && !for_tab {
+		if s.attach.sending != 0 do return false, "the comments are being sent"
+		if why := claude_send_refusal(tab); why != "" do return false, why
+		return true, ""
+	}
 	if ok, why := comments_ready(s); !ok do return false, why
 	if pt := session_pi_tab(s); pt.waiting do return false, "pi is waiting for you (a dialog is open)"
 	if s.attach.sending != 0 do return false, "the comments are being sent"
@@ -248,7 +265,8 @@ comments_block :: proc(list: []Pending_Comment, nos: []int) -> string {
 		case nos[i] == -2: strings.write_string(&body, " · image missing")
 		}
 		strings.write_string(&body, "\n   Comment: ")
-		for line, j in strings.split_lines(c.text, context.temp_allocator) {
+		// invisible characters go before the fence is measured (they could split a run of backticks)
+		for line, j in strings.split_lines(drop_hidden(c.text), context.temp_allocator) {
 			if j > 0 do strings.write_string(&body, "\n   ")
 			strings.write_string(&body, line)
 		}
@@ -261,11 +279,23 @@ comments_block :: proc(list: []Pending_Comment, nos: []int) -> string {
 		run = max(run, n)
 	}
 	fence := strings.repeat("`", max(3, run + 1), context.temp_allocator)
-	fmt.sbprintf(&b, "pi-desk comments (%d). %s\n%spi-desk-comments\n%s%s", len(list), COMMENTS_NOTE, fence, text, fence)
+	fmt.sbprintf(&b, "Deckhand comments (%d). %s\n%spi-desk-comments\n%s%s", len(list), COMMENTS_NOTE, fence, text, fence)
+	return strings.to_string(b)
+}
+
+// s without invisible or reordering characters (rune_hidden; temp).
+@(private = "file")
+drop_hidden :: proc(s: string) -> string {
+	b := strings.builder_make(0, len(s), context.temp_allocator)
+	for r in s do if !rune_hidden(r) do strings.write_rune(&b, r)
 	return strings.to_string(b)
 }
 
 COMMENTS_SEND_NOW_HEAD :: "Here are my comments:"
+// What Send now types into a Claude tab: a fixed line, never comment or page text (Claude Code may
+// read `@path` in a message as a file to attach). The comments go as its UserPromptSubmit hook's
+// context of that message (claude.comments), as with a message the user types.
+CLAUDE_SEND_NOW_LINE :: "Here are my comments."
 
 // The comments of `refs`, in their order in the session (temp allocator).
 @(private = "file")
@@ -456,7 +486,7 @@ send_now :: proc(s: ^Open_Session, refs: []Comment_Ref, request_id: u64) -> (r: 
 		s.attach.sending = 0
 		clear(&s.attach.sending_refs)
 		comments_sync(s)
-		if comments_connected(pt.id) do return fail("pi-desk's connection to pi is busy, try again"), true
+		if comments_connected(pt.id) do return fail("Deckhand's connection to pi is busy, try again"), true
 		return fail("no bridge connected for this tab"), true
 	}
 	return {ok = true, pending = true}, true
@@ -479,7 +509,7 @@ comments_close_check :: proc(s: ^Open_Session, tab_id: u64, choice: Comments_Cho
 		return fail(fmt.tprintf("%d %s from %s not sent to pi yet: close again with comments \"send\" or \"drop\"", n, n == 1 ? "comment" : "comments", what)), false, false
 	case .Send:
 		if tab_id == 0 do return fail("closing a session stops its pi: send the comments first (comments_send_now), or drop them"), false, false
-		if ok, why := comments_can_send(s); !ok do return fail(fmt.tprintf("cannot send the comments: %s", why)), false, false
+		if ok, why := comments_can_send(s, for_tab = true); !ok do return fail(fmt.tprintf("cannot send the comments: %s", why)), false, false
 	case .Drop:
 	}
 	return {}, true, false
@@ -562,8 +592,11 @@ comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Res
 		refs := make([dynamic]Comment_Ref, context.temp_allocator)
 		for x in s.comments do if c.tab_id == 0 || x.tab_id == c.tab_id do append(&refs, Comment_Ref{x.id, x.rev})
 		if len(refs) == 0 do return fail("no comments to send"), false
-		if ok, why := comments_can_send(s); !ok do return fail(why), false
+		if ok, why := comments_can_send(s, for_tab = c.tab_id != 0); !ok do return fail(why), false
 		if owns_session(caller, s.id) do return fail("a caller cannot act on its own tab"), false
+		// one tab's comments go by pi's path: Claude's hook would take all of the session's
+		if tab := comments_claude_target(s); tab != nil && c.tab_id == 0 do return send_now_claude(s, tab)
+		if c.tab_id != 0 && s.agent == .Claude do if main := comments_claude_main(s); main != nil do return send_now_claude(s, main) // no pi here
 		return send_now(s, refs[:], request_id)
 	case Comments_Ask_Cancel:
 		if state.comments_ask == {} do return {ok = true}, false
@@ -730,4 +763,161 @@ comments_shutdown :: proc() {
 		delete(d.crop)
 		d.crop = ""
 	}
+}
+
+// ---- Claude tabs (claude.odin) ----
+
+// A Claude tab's UserPromptSubmit hook takes the session's pending comments for the user's
+// message (claude.comments): as many whole comments, in order, as fit in `limit` characters of
+// text, as the same block pi gets, with their crops as PNG files Claude can open with Read
+// (copied into the shots folder, comment-<attachment>-<n>.png, so they outlive the comments).
+// They stay pending until claude.attached names the attachment (comments_claude_attached), as
+// pi.attached does. data {count, attachment_id, text, images, more}; count 0 = nothing.
+// The hook's heading before the image lines (tools/pi-desk-cli/hooks.odin IMAGES_HEAD), rounded up.
+CLAUDE_IMAGES_HEAD :: 120
+
+// A crop copied for Claude to read: created 0600 (never readable by others, not even briefly).
+@(private = "file")
+copy_private :: proc(from, to: string) -> bool {
+	data, err := os.read_entire_file(from, context.temp_allocator)
+	if err != nil do return false
+	f, ferr := os.open(to, {.Write, .Create, .Trunc}, os.perm_number(0o600))
+	if ferr != nil do return false
+	defer os.close(f)
+	_, werr := os.write(f, data)
+	return werr == nil
+}
+
+comments_claude_take :: proc(s: ^Open_Session, limit: int) -> Result {
+	if s == nil || len(s.comments) == 0 do return {ok = true, data = `{"count":0}`}
+	list := make([dynamic]Pending_Comment, context.temp_allocator)
+	for c in s.comments {
+		if in_refs(s.attach.sending_refs[:], c.id) do continue // Send now has them on their way to pi
+		append(&list, c)
+	}
+	if len(list) == 0 do return {ok = true, data = `{"count":0}`}
+	// the crops copied first (0600 from the start), each numbered as the block names it ("image
+	// K"); a crop that cannot be copied is named as gone. Then whole comments are cut until the text
+	// and the hook's image lines fit: the hook prints all of it or nothing.
+	id := new_id()
+	shots := app_shots_dir(context.temp_allocator)
+	os.make_directory_all(shots)
+	nos := make([]int, len(list), context.temp_allocator)
+	paths := make([]string, len(list), context.temp_allocator)
+	k := 0
+	for c, i in list {
+		if c.crop == "" do continue
+		path := fmt.tprintf("%s/comment-%d-%d.png", shots, id, k + 1)
+		if !copy_private(c.crop, path) {
+			nos[i] = -2
+			continue
+		}
+		k += 1
+		nos[i], paths[i] = k, path
+	}
+	cost :: proc(text: string, paths: []string) -> int {
+		n := len(text)
+		any := false
+		for p in paths do if p != "" {
+			n += len(p) + 16 // "image K: " and the line break
+			any = true
+		}
+		return any ? n + CLAUDE_IMAGES_HEAD : n
+	}
+	n := len(list)
+	text := comments_block(list[:n], nos[:n])
+	for n > 1 && cost(text, paths[:n]) > limit {
+		n -= 1
+		text = comments_block(list[:n], nos[:n])
+	}
+	// one comment always fits: COMMENT_TEXT_MAX + COMMENT_WHAT_MAX, the note and one image line stay under the minimum limit
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"count":%d,"attachment_id":%d,"text":`, n, id)
+	json_quote(&b, text)
+	strings.write_string(&b, `,"images":[`)
+	m := 0
+	for p, i in paths[:n] {
+		if p == "" do continue
+		if m > 0 do strings.write_byte(&b, ',')
+		m += 1
+		fmt.sbprintf(&b, `{{"no":%d,"path":`, nos[i])
+		json_quote(&b, p)
+		strings.write_byte(&b, '}')
+	}
+	fmt.sbprintf(&b, `],"more":%d}}`, len(list) - n)
+	h := Attach_Sent{id = id}
+	for c in list[:n] do append(&h.refs, Comment_Ref{c.id, c.rev})
+	if len(s.attach.history) >= ATTACH_HISTORY_MAX {
+		delete(s.attach.history[0].refs)
+		ordered_remove(&s.attach.history, 0)
+	}
+	append(&s.attach.history, h)
+	return {ok = true, data = strings.to_string(b)}
+}
+
+// claude.attached: the Claude tab's message took that attachment; its comments go (those edited
+// since stay), and pi's bridge gets the rest again or a clear (comments_sync). True if any went.
+comments_claude_attached :: proc(s: ^Open_Session, attachment_id: u64) -> bool {
+	if s == nil do return false
+	at := -1
+	for h, i in s.attach.history do if h.id == attachment_id do at = i
+	if at < 0 do return false // not this session's, or long gone
+	h := s.attach.history[at]
+	ordered_remove(&s.attach.history, at)
+	removed := remove_delivered(s, h.refs[:])
+	delete(h.refs)
+	if removed {
+		clear(&s.attach.sent) // what pi's bridge holds repeats them: sent again without them, or cleared
+		comments_settled(s)
+		comments_sync(s)
+	}
+	return removed
+}
+
+// ---- Send now into a Claude tab ----
+
+// Where Send now goes: the session's active tab when it is a running Claude tab, else nil (its
+// pi, as before). With no Claude tab, or a dead one, nothing changes for pi.
+// A Claude-only session's main Claude tab while it runs (nil = none, or a pi session).
+comments_claude_main :: proc(s: ^Open_Session) -> ^Tab {
+	if s == nil || s.home || s.agent != .Claude || len(s.tabs) == 0 do return nil
+	tab := &s.tabs[0]
+	if tab.status != .Running do return nil
+	if _, is := tab.kind.(Claude_Tab); !is do return nil
+	return tab
+}
+
+comments_claude_target :: proc(s: ^Open_Session) -> ^Tab {
+	if s == nil || s.home do return nil
+	_, tab, _ := find_tab(s.active_tab)
+	if tab == nil || tab.status != .Running do return nil
+	if _, is := tab.kind.(Claude_Tab); !is do return nil
+	return tab
+}
+
+// Why Send now cannot go into the Claude tab now ("" = it can): the held-prompt rules (CLAUDE.md
+// §5): idle per its hooks and its OSC 7501 status, bracketed paste on, nothing typed, no Enter due.
+// Never into a dialog or a half-typed prompt.
+@(private = "file")
+claude_send_refusal :: proc(tab: ^Tab) -> string {
+	ct := &tab.kind.(Claude_Tab)
+	ok, why := claude_ready(tab, ct)
+	if ok do return ""
+	switch why {
+	case "Claude is working", "sending":           return "Claude is working: wait for its turn to end"
+	case "Claude is waiting for you":               return "Claude is waiting for you: answer Claude first"
+	case "Claude is starting":                      return "Claude is starting: wait until it is ready"
+	case "you are typing a message":                return "you are typing a message in Claude: send or clear it first"
+	}
+	return why
+}
+
+// Send now into a Claude tab: only CLAUDE_SEND_NOW_LINE is pasted (then Enter); its
+// UserPromptSubmit hook takes the pending comments as that message's context (claude.comments,
+// claude.attached), whole comments and crops as file paths, exactly as for a typed message. They
+// stay pending until then (if Claude's hooks do not run, they wait for the next message).
+@(private = "file")
+send_now_claude :: proc(s: ^Open_Session, tab: ^Tab) -> (r: Result, changed: bool) {
+	if why := claude_paste_message(tab, CLAUDE_SEND_NOW_LINE); why != "" do return fail(why), false
+	return {ok = true}, true
 }

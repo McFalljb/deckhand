@@ -468,7 +468,7 @@ folders_setup_done_fails :: proc(t: ^testing.T) {
 	gone := fmt.tprintf("%s/gone", dir)
 	setup_picked(false, gone) // a picked folder, removed before Done
 	setup_ui.separate = false
-	setup_ui.step = SETUP_STEPS - 1
+	setup_ui.step = setup_steps() - 1
 	e := sapp.Event{type = .KEY_DOWN, key_code = .ENTER}
 	setup_event(&e)
 	inbox_drain()
@@ -484,4 +484,73 @@ folders_setup_done_fails :: proc(t: ^testing.T) {
 	testing.expect(t, state.settings.setup_seen, "seen")
 	testing.expect_value(t, state.settings.home_dir, gone)
 	testing.expect_value(t, setup_ui.err, "")
+}
+
+// The setup sheet also finds a notes folder named in Claude Code's own CLAUDE.md (the config
+// folder's: CLAUDE_CONFIG_DIR, else ~/.claude), after pi's AGENTS.md, by the same rule: a folder
+// with a sessions/ folder, never the config folder itself (it has a sessions/ of its own). Only
+// the path found is shown. And it says whether Claude Code is installed (by looking, never run).
+@(test)
+folders_detect_claude_md :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fo_dir()
+	saved := fo_begin(dir)
+	defer fo_end(saved, dir)
+	old_cad := strings.clone(os.get_env("PI_CODING_AGENT_DIR", context.temp_allocator))
+	os.unset_env("PI_CODING_AGENT_DIR")
+	defer if old_cad != "" do os.set_env("PI_CODING_AGENT_DIR", old_cad)
+	os.unset_env("CLAUDE_CONFIG_DIR")
+	defer os.unset_env("CLAUDE_CONFIG_DIR")
+	home := os.get_env("HOME", context.temp_allocator)
+	cfg := fmt.tprintf("%s/.claude", home)
+	os.make_directory_all(fmt.tprintf("%s/sessions", cfg))
+	vault := fmt.tprintf("%s/notes/vault", dir)
+	os.make_directory_all(fmt.tprintf("%s/sessions", vault))
+	md := fmt.tprintf("%s/CLAUDE.md", cfg)
+	_ = os.write_entire_file(md, transmute([]u8)fmt.tprintf("State in %s\nNotes live in %s/\n", cfg, vault))
+	got, why := setup_detect()
+	testing.expect_value(t, got, vault)
+	testing.expectf(t, strings.contains(why, "~/.claude/CLAUDE.md"), "says where: %s", why)
+	// the config folder itself is never suggested
+	_ = os.write_entire_file(md, transmute([]u8)fmt.tprintf("State in %s\n", cfg))
+	got, _ = setup_detect()
+	testing.expect_value(t, got, "")
+	// CLAUDE_CONFIG_DIR is Claude's folder
+	other := fmt.tprintf("%s/claude-other", dir)
+	os.make_directory_all(other)
+	_ = os.write_entire_file(fmt.tprintf("%s/CLAUDE.md", other), transmute([]u8)fmt.tprintf("Notes: %s\n", vault))
+	os.set_env("CLAUDE_CONFIG_DIR", other)
+	got, _ = setup_detect()
+	testing.expect_value(t, got, vault)
+	// never read through a credential: a notes file that links to Claude's sign-in file (fake here)
+	cred := fmt.tprintf("%s/.credentials.json", other)
+	_ = os.write_entire_file(cred, transmute([]u8)fmt.tprintf("Notes: %s\n", vault))
+	ln := fmt.tprintf("%s/linked.md", dir)
+	os.symlink(cred, ln)
+	got, _ = detect_notes_folder("", ln)
+	testing.expect_value(t, got, "")
+	// pi's AGENTS.md first
+	vault2 := fmt.tprintf("%s/notes/pi-vault", dir)
+	os.make_directory_all(fmt.tprintf("%s/sessions", vault2))
+	agent := fmt.tprintf("%s/.pi/agent", home)
+	os.make_directory_all(agent)
+	_ = os.write_entire_file(fmt.tprintf("%s/AGENTS.md", agent), transmute([]u8)fmt.tprintf("Notes live in %s\n", vault2))
+	got, _ = setup_detect()
+	testing.expect_value(t, got, vault2)
+	// Claude Code's presence, for the sheet
+	defer claude_installed_probe = nil
+	defer pi_installed_probe = nil
+	pi_installed_probe = proc() -> bool {return true}
+	claude_installed_probe = proc() -> bool {return true}
+	testing.expect(t, strings.has_prefix(setup_claude_line(), "Claude Code is installed"), setup_claude_line())
+	testing.expect(t, strings.contains(setup_claude_line(), "New session asks which"), setup_claude_line()) // both: the picker
+	claude_installed_probe = proc() -> bool {return false}
+	testing.expect(t, strings.has_prefix(setup_claude_line(), "Claude Code isn't installed"), setup_claude_line())
+	// pi-desk without pi (harness.odin): Claude Code alone, or nothing
+	pi_installed_probe = proc() -> bool {return false}
+	claude_installed_probe = proc() -> bool {return true}
+	testing.expect(t, strings.has_prefix(setup_claude_line(), "Claude Code is installed"), setup_claude_line())
+	testing.expect(t, strings.contains(setup_claude_line(), "pi isn't installed"), setup_claude_line())
+	claude_installed_probe = proc() -> bool {return false}
+	testing.expect_value(t, setup_claude_line(), NO_HARNESS)
 }

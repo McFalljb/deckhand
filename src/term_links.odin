@@ -528,7 +528,7 @@ term_link_apply :: proc(c: Terminal_Link, caller: Caller) -> (Result, bool) {
 	s, tab, _ := find_tab(c.tab_id)
 	if tab == nil do return fail("no such tab"), false
 	#partial switch _ in tab.kind {
-	case Pi_Tab, Shell_Tab:
+	case Pi_Tab, Shell_Tab, Claude_Tab:
 	case:
 		return fail("not a terminal tab"), false
 	}

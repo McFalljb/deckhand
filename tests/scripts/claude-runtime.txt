@@ -1,0 +1,149 @@
+# Claude Code runtime operations (tests/scripts/claude-runtime.sh; docs/CLAUDE.md §4a): a fake claude
+# in a Claude tab, a fake ~/.claude and a fake claude install (never run).
+wait 1500
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"cccc-1"}
+assert_result ok true
+command {"type":"new_claude_tab","session":$session}
+assert_result ok true
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.0.tabs.1.claude_session_id 0c1a0de0-2222-4222-8333-444455556666
+waitstate 5000 open_sessions.0.tabs.1.turn idle
+# the claude on disk (by where it links: stat only), and the version the tab started with
+waitstate 6000 reload.claude.version 2.1.300
+wait 500
+assert_state open_sessions.0.tabs.1.reload.version 2.1.300
+assert_not_drawn Claude Code settings changed
+assert_not_drawn Claude Code updated
+# 1. Claude's global CLAUDE.md edited outside (read only at start): the Claude bar
+replace_in_file $homedir/.claude/CLAUDE.md mine|mine, edited
+waitstate 8000 open_sessions.0.tabs.1.reload.stale true
+assert_state reload.claude.changed.0 $homedir/.claude/CLAUDE.md
+assert_not_drawn pi settings changed
+assert_drawn Claude Code settings changed — Restart 1 idle Claude tab
+shot claude-runtime/bar
+hover creload_go
+eventually
+assert_tip Restart the idle Claude tabs (each resumes its conversation; background work stops); busy ones once idle
+clickid creload_details
+eventually
+assert_drawn ~/.claude/CLAUDE.md
+shot claude-runtime/details
+ui_command {"type":"set_appearance","mode":"light"}
+wait 300
+shot claude-runtime/details-light
+ui_command {"type":"set_appearance","mode":"dark"}
+clickid creload_details
+# Restart: confirmed first (Claude's background work stops), then the same conversation again
+clickid creload_go
+eventually
+assert_state pending_confirmations.0.summary Restart 1 Claude tab? Each resumes its conversation; background work Claude started there (background shells, monitors) stops.
+shot claude-runtime/confirm
+clickid confirm_yes
+waitfor --resume 0c1a0de0-2222 10000
+waitstate 10000 open_sessions.0.tabs.1.status running
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+assert_state open_sessions.0.tabs.1.reload.stale false
+wait 300
+assert_not_drawn Claude Code settings changed
+# Claude's settings.json is applied live by Claude Code: no bar for it
+replace_in_file $homedir/.claude/settings.json opus|sonnet
+wait 4000
+assert_not_drawn Claude Code settings changed
+assert_state open_sessions.0.tabs.1.reload.stale false
+# 2. Claude Code updated: claude now links to 2.1.301
+command {"type":"new_shell_tab","session":$session}
+wait 1000
+command {"type":"send_text","tab_id":$last,"text":"sh ~/update-claude.sh\n"}
+waitstate 8000 reload.claude.version 2.1.301
+wait 300
+command {"type":"close_tab","tab_id":$tab}
+assert_result ok true
+wait 300
+assert_drawn Claude Code updated to 2.1.301 — Restart 1 idle Claude tab
+shot claude-runtime/update-bar
+clickid cupdate_details
+wait 300
+shot claude-runtime/update-details
+clickid cupdate_details
+clickid cupdate_go
+wait 300
+clickid confirm_yes
+waitstate 10000 open_sessions.0.tabs.1.status running
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+waitstate 5000 open_sessions.0.tabs.1.reload.version 2.1.301
+wait 300
+assert_not_drawn Claude Code updated
+# 2b. Restart all Claude tabs (the gear's row; also the palette): nothing changed, still asked
+# first, then the same conversation again in a new process (the old screen's text is gone)
+type zzmark
+key enter
+waitfor PROMPT: zzmark 5000
+waitstate 5000 open_sessions.0.tabs.1.turn idle
+clickid settings
+wait 300
+hover pop 29
+eventually
+assert_tip Restart every idle Claude tab now (each resumes its conversation; background work stops); busy ones once idle
+shot claude-runtime/gear-restart-all
+clickid pop 29
+eventually
+assert_state pending_confirmations.0.summary Restart 1 Claude tab? Each resumes its conversation; background work Claude started there (background shells, monitors) stops.
+clickid confirm_yes
+waitfor --resume 0c1a0de0-2222 10000
+waitstate 10000 open_sessions.0.tabs.1.status running
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+assert_not_screen PROMPT: zzmark
+# 3. the Settings tab: Claude Code's config files, never its credentials or transcripts
+key comma cmd
+wait 500
+assert_state layout.left_tab settings
+assert_drawn Claude Code (global)
+assert_drawn Claude Code · proj
+assert_not_drawn .credentials.json
+assert_not_drawn .claude.json
+assert_not_drawn projects
+shot claude-runtime/settings
+# the default flags for new tabs: off; its button turns --dangerously-skip-permissions on, and off
+assert_files [Claude Code (global)]\nsettings.json\nCLAUDE.md\ncommands\nDefault flags for new tabs\nSkip permissions: off [Turn on]\nWarning:\n
+assert_drawn Default flags for new tabs
+assert_drawn Turn on
+hover fcreate @pi-desk:claude-default-flags
+eventually
+assert_tip Start the Claude tabs you start with --dangerously-skip-permissions (never agents' tabs or read-only chats)
+clickid fcreate @pi-desk:claude-default-flags
+wait 300
+assert_state settings.claude_skip_permissions false
+assert_state pending_confirmations.0.summary Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs and read-only chats never get it.
+shot claude-runtime/settings-skip-confirm
+clickid confirm_yes
+wait 300
+assert_state settings.claude_skip_permissions true
+assert_drawn Turn off
+shot claude-runtime/settings-skip-on
+clickid fcreate @pi-desk:claude-default-flags
+eventually
+assert_state settings.claude_skip_permissions false
+# 4. Claude exits with an error: Restart with model… resumes it and opens Claude's model picker
+ui_command {"type":"set_focus","widget":""}
+wait 300
+type !exit 3
+key enter
+waitstate 15000 open_sessions.0.tabs.1.status exited
+eventually
+assert_drawn Claude exited (code 3)
+assert_drawn Restart with model…
+shot claude-runtime/dead
+hover dead_restart_model
+eventually
+assert_tip Start Claude Code again, resuming its conversation, then pick another model (/model)
+clickid dead_restart_model
+waitstate 10000 open_sessions.0.tabs.1.status running
+waitfor PROMPT: /model 15000
+shot claude-runtime/model
+waitstate 10000 open_sessions.0.tabs.1.turn idle
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

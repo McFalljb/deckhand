@@ -141,6 +141,11 @@ palette_items :: proc() -> [dynamic]Palette_Item {
 // file grows); "Untitled session · <created>" (a project's) or "Untitled
 // chat · …" while the file has no title, plain while there is no file yet.
 open_session_title :: proc(s: ^Open_Session) -> string {
+	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
+	if s.agent == .Claude {
+		if r, _ := claude_record(s.pi_session_id); r != nil && r.title != "" do return strings.clone(r.title, context.temp_allocator)
+		return "Untitled Claude session"
+	}
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"
 	for l in state.sessions do if l.id == s.pi_session_id do return session_label(l)
 	if s.session_file == "" do return untitled
@@ -314,7 +319,7 @@ palette_run :: proc(it: Palette_Item) {
 		ui_do(Focus_Tab{it.id})
 	case .Session:
 		if it.session != "" do ui_do(Open_Session_Cmd{it.project, it.session})
-		else do ui_do(Focus_Session{it.id})
+		else do ui_do(Focus_Session{session = it.id, reopen = true})
 	case .Project:
 		ui_do(Select_Project{it.id})
 	case .File:
@@ -373,6 +378,10 @@ run_action :: proc(a: ^Action, menu := "") {
 		return
 	}
 	if a.prepare != nil do a.prepare()
+	if a.ui != nil {
+		a.ui()
+		return
+	}
 	if menu != "" do ui_do_menu(cmd, menu)
 	else do ui_do(cmd)
 }

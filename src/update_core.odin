@@ -10,12 +10,21 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
+import usig "updatesig"
 
-UPDATE_REPO :: "McFalljb/pi-desk"
+// The GitHub repository releases come from: the one place the source names it (scripts/release.sh
+// reads it from here; the plugin manifest and the docs link to it too).
+UPDATE_REPO :: "McFalljb/deckhand"
 UPDATE_API_URL :: "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest"
 UPDATE_DOWNLOAD_URL :: "https://github.com/" + UPDATE_REPO + "/releases/download/" // + tag/name
 UPDATE_RELEASES_URL :: "https://github.com/" + UPDATE_REPO + "/releases"
+// pi-desk's bundle id, kept by Deckhand (macOS keeps permissions and notification settings by it)
 UPDATE_BUNDLE_ID :: "dev.pi-desk.app"
+// The bundle a release zip holds, exactly; updates install under the running bundle's own name.
+// (scripts/release.sh reads it from here.)
+UPDATE_APP :: "Deckhand.app"
+// The prepared bundle next to the running one: UPDATE_STAGED_PREFIX + X.Y.Z + ".app"
+UPDATE_STAGED_PREFIX :: ".deckhand-update-"
 UPDATE_ZIP_MAX :: i64(1) << 30 // 1 GB: no release comes near it (about 340 MB)
 UPDATE_SMALL_MAX :: 4096 // the .sig and the .sha256
 UPDATE_JSON_MAX :: 1 << 20 // the release JSON (its notes can be long)
@@ -117,7 +126,7 @@ release_parse :: proc(body: string, allocator := context.allocator) -> (r: Relea
 	if tag[1:] != version do return {}, "the release's tag is not vX.Y.Z"
 	assets, has_assets := o["assets"].(json.Array)
 	if !has_assets do return {}, "the release has no assets"
-	zip := fmt.tprintf("pi-desk-%s-macos-arm64.zip", version)
+	zip := usig.zip_name(version, context.temp_allocator)
 	sig := fmt.tprintf("%s.sig", zip)
 	sha := fmt.tprintf("%s.sha256", zip)
 	found_zip := false
@@ -194,22 +203,22 @@ update_due :: proc(now, last_ok, last_try: i64, enabled: bool) -> bool {
 // it, why. `writable` is posix access(W_OK) (tests pass their own).
 install_decision :: proc(exe: string, writable: proc(path: string) -> bool) -> (bundle: string, why: string) {
 	if strings.contains(exe, "/AppTranslocation/") {
-		return "", "macOS runs this copy from a temporary read-only place (App Translocation). Move pi-desk.app to Applications with Finder, open it from there, then update"
+		return "", "macOS runs this copy from a temporary read-only place (App Translocation). Move Deckhand.app to Applications with Finder, open it from there, then update"
 	}
 	macos := filepath.dir(exe)
 	contents := filepath.dir(macos)
 	bundle = filepath.dir(contents)
 	if filepath.base(macos) != "MacOS" || filepath.base(contents) != "Contents" || !strings.has_suffix(bundle, ".app") || len(bundle) <= len(".app") {
-		return "", "pi-desk is not running from an app bundle"
+		return "", "Deckhand is not running from an app bundle"
 	}
 	parent := filepath.dir(bundle)
 	if filepath.base(parent) == "build" && os.exists(upath(parent, "..", "build.sh")) {
-		return "", "this is a development build (build/pi-desk.app): rebuild it instead"
+		return "", "this is a development build (build/Deckhand.app): rebuild it instead"
 	}
 	if strings.has_prefix(bundle, "/Volumes/") && !writable(parent) {
-		return "", "pi-desk runs from a read-only disk image. Copy pi-desk.app to Applications, open it from there, then update"
+		return "", "Deckhand runs from a read-only disk image. Copy Deckhand.app to Applications, open it from there, then update"
 	}
-	if !writable(parent) do return "", fmt.tprintf("you cannot write to %s, where pi-desk.app is", parent)
+	if !writable(parent) do return "", fmt.tprintf("you cannot write to %s, where %s is", parent, filepath.base(bundle))
 	if !writable(bundle) do return "", fmt.tprintf("you cannot write to %s", bundle)
 	return bundle, ""
 }
@@ -220,13 +229,13 @@ path_writable :: proc(path: string) -> bool {
 
 // ---- the unpacked bundle ----
 
-// `root` holds what the zip unpacked to: exactly one entry, `pi-desk.app`, a real folder,
+// `root` holds what the zip unpacked to: exactly one entry, UPDATE_APP (`Deckhand.app`), a real folder,
 // whose tree passes bundle_tree_check. "" = safe.
 extract_check :: proc(root: string) -> (why: string) {
 	entries, err := os.read_all_directory_by_path(root, context.temp_allocator)
 	if err != nil do return "cannot read the unpacked update"
-	if len(entries) != 1 || entries[0].name != "pi-desk.app" do return "the zip does not hold exactly pi-desk.app"
-	return bundle_tree_check(upath(root, "pi-desk.app"))
+	if len(entries) != 1 || entries[0].name != UPDATE_APP do return "the zip does not hold exactly " + UPDATE_APP
+	return bundle_tree_check(upath(root, UPDATE_APP))
 }
 
 // An app bundle's tree: the bundle a real folder; inside it only folders, regular files and
@@ -235,8 +244,8 @@ extract_check :: proc(root: string) -> (why: string) {
 // included; a dangling link is refused). Links are read, never written through. "" = safe.
 bundle_tree_check :: proc(app: string) -> (why: string) {
 	st: posix.stat_t
-	if posix.lstat(strings.clone_to_cstring(app, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return "pi-desk.app in the zip is not a folder"
-	if .IWGRP in st.st_mode || .IWOTH in st.st_mode do return "pi-desk.app is writable by others"
+	if posix.lstat(strings.clone_to_cstring(app, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return "the app in the zip is not a folder"
+	if .IWGRP in st.st_mode || .IWOTH in st.st_mode do return "the app in the zip is writable by others"
 	real: [4096]u8
 	rp := posix.realpath(strings.clone_to_cstring(app, context.temp_allocator), &real[0])
 	if rp == nil do return "cannot read the unpacked update"
@@ -262,10 +271,10 @@ bundle_tree_check :: proc(app: string) -> (why: string) {
 			case posix.S_ISLNK(st.st_mode):
 				target, lerr := os.read_link(p, context.temp_allocator)
 				if lerr != nil do return fmt.tprintf("cannot read the link %s in the update", r)
-				if !link_inside(r, target) do return fmt.tprintf("the link %s in the update points outside pi-desk.app", r)
+				if !link_inside(r, target) do return fmt.tprintf("the link %s in the update points outside the app", r)
 				real: [4096]u8
 				rp := posix.realpath(cp, &real[0])
-				if rp == nil || !strings.has_prefix(string(rp), strings.concatenate({app_real, "/"}, context.temp_allocator)) do return fmt.tprintf("the link %s in the update points outside pi-desk.app (or nowhere)", r)
+				if rp == nil || !strings.has_prefix(string(rp), strings.concatenate({app_real, "/"}, context.temp_allocator)) do return fmt.tprintf("the link %s in the update points outside the app (or nowhere)", r)
 			case posix.S_ISDIR(st.st_mode):
 				if .IWGRP in st.st_mode || .IWOTH in st.st_mode do return fmt.tprintf("%s in the update is writable by others", r)
 				if why := walk(p, app_real, r, depth + 1, count); why != "" do return why
@@ -300,7 +309,7 @@ link_inside :: proc(rel, target: string) -> bool {
 }
 
 // The tar-style names a zip listing gives (one per line): none absolute, none with a ".."
-// part, all inside pi-desk.app/. "" = fine.
+// part, all inside UPDATE_APP/ (Deckhand.app/). "" = fine.
 zip_names_check :: proc(listing: string) -> string {
 	n := 0
 	rest := listing
@@ -310,7 +319,7 @@ zip_names_check :: proc(listing: string) -> string {
 		if n > UPDATE_EXTRACT_MAX_ENTRIES do return "the zip has too many entries"
 		if strings.has_prefix(line, "/") do return "the zip has an absolute path"
 		for p in strings.split(line, "/", context.temp_allocator) do if p == ".." do return "the zip has a path with .."
-		if line != "pi-desk.app/" && !strings.has_prefix(line, "pi-desk.app/") do return "the zip holds more than pi-desk.app"
+		if line != UPDATE_APP + "/" && !strings.has_prefix(line, UPDATE_APP + "/") do return "the zip holds more than " + UPDATE_APP
 	}
 	if n == 0 do return "the zip is empty"
 	return ""
@@ -360,13 +369,13 @@ release_version_ok :: proc(v: string) -> bool {
 	return ok && !sv.pre && !strings.has_prefix(v, "v") && !strings.contains_rune(v, '+')
 }
 
-// update.json's staged path: <bundle's folder>/.pi-desk-update-X.Y.Z.app, plain.
+// update.json's staged path: <bundle's folder>/.deckhand-update-X.Y.Z.app, plain.
 staged_path_ok :: proc(path, bundle: string) -> bool {
 	if bundle == "" || !path_plain(path) || !path_plain(bundle) do return false
 	if filepath.dir(path) != filepath.dir(bundle) do return false
 	b := filepath.base(path)
-	if !strings.has_prefix(b, ".pi-desk-update-") || !strings.has_suffix(b, ".app") do return false
-	return release_version_ok(b[len(".pi-desk-update-"):len(b) - len(".app")])
+	if !strings.has_prefix(b, UPDATE_STAGED_PREFIX) || !strings.has_suffix(b, ".app") do return false
+	return release_version_ok(b[len(UPDATE_STAGED_PREFIX):len(b) - len(".app")])
 }
 
 // update.json's backup path: <bundle>.old-X.Y.Z, plain.

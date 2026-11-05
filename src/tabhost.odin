@@ -36,7 +36,7 @@ terminal_host := Tab_Host {
 
 tab_host :: proc(kind: Tab_Kind) -> ^Tab_Host {
 	switch _ in kind {
-	case Pi_Tab, Shell_Tab:
+	case Pi_Tab, Shell_Tab, Claude_Tab:
 		return &terminal_host
 	case Editor_Tab:
 		return &editor_host // editor_view.odin

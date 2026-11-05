@@ -5,6 +5,14 @@ it does differently from this design is listed under "Step 1 as built" in §9. D
 after the first draft are in §10. How Atlas runs today:
 [PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent), `src/agent.odin`.
 
+**Where Atlas runs.** Interactive Atlas starts in Deckhand's main folder (§2), or in the data
+dir's `home/` while no main folder is set or it cannot be reached. It never starts in the user's
+home folder (`~`), even when `~` is the main folder: Atlas runs as part of Deckhand, so a plain
+`ls` or `grep -r` from `~` would walk into Desktop, Documents and Downloads and trigger macOS
+privacy prompts. An Atlas conversation recorded in another folder is copied once into the new
+folder with pi's `--fork` (`src/home.odin`; GUIDE.md "Where it works"). Job runs are separate:
+each runs in its job's `folder` (§3.1).
+
 Markers: **Decided** = a settled design decision (not reopened here) · **Proposal** = this doc's choice,
 open to change · **Unverified** = depends on platform behaviour nobody has tested yet · ❓ = open
 question (§10).
@@ -18,11 +26,11 @@ report.
 ## 1. Goals and non-goals
 
 **Goals**
-- User-created jobs that start pi on a schedule, even when pi-desk is closed (**Decided**).
+- User-created jobs that start pi on a schedule, even when Deckhand is closed (**Decided**).
 - Jobs may act while the user is away; no jobs by default (**Decided**). Jobs need no approval:
   any job note runs on its schedule, agents may create and edit jobs (**Decided** 2026-11-01, §10.3).
-- One memory folder shared by pi, Claude Code, Atlas and jobs: the user's notes folder
-  (pi-kit's `PI_KIT_NOTES_DIR`) (**Decided**).
+- One memory folder shared by pi, Claude Code, Atlas and jobs: Deckhand's main folder, which can
+  be the user's existing notes folder (`PI_KIT_NOTES_DIR`) (**Decided**; §2).
 - Results reach the user: the Jobs tab, the notification centre (`job.finished`), a macOS notification (§7).
 - Cheap when idle: no-agent checks and a quiet heartbeat cost no model call when nothing changed.
 
@@ -35,19 +43,27 @@ report.
 
 What we took from other systems, with links: §11.
 
+**Atlas drives pi and Claude tabs alike.** The desk tools in Deckhand's bundled pi integration
+(`integrations/pi`) (`desk_prompt`, `desk_wait`,
+`desk_watch`) take a pi tab, a Claude tab, or an open session (its pi tab; a Claude-only
+session's Claude tab). For a Claude tab they send `claude_prompt` (held until Claude is idle and
+the user types nothing; the tool says "held: <why>"), wait with `claude_wait_idle` (idle per
+Claude's hooks **and** its OSC 7501 status, nothing held, nobody typing; PROTOCOL.md) and watch
+the tab's `claude.turn` and `program_status` events. Atlas itself still runs on pi.
+
 ## 2. Folder layout (notes root)
 
-The notes root is pi-desk's main folder (setting `home_dir`, formerly `notes_dir`; GUIDE.md
-"Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (pi-desk's
+The notes root is Deckhand's main folder (setting `home_dir`, formerly `notes_dir`; GUIDE.md
+"Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (Deckhand's
 environment, else read once per start from the login shell) or a notes folder named in pi's
 global AGENTS.md, or `~/pi-desk`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
-`chats/`) may be overridden. pi-desk passes `PI_KIT_NOTES_DIR=<home_dir>` to every pi tab and
+`chats/`) may be overridden. Deckhand passes `PI_KIT_NOTES_DIR=<home_dir>` to every pi tab and
 job run unless the user's own environment sets it (theirs wins).
 
 ```
 <notes root>/                    (may already hold other notes: sessions/, projects/, …)
   atlas/
-    ATLAS.md                     Atlas's prompt (moved from pi-desk's data dir, §8)
+    ATLAS.md                     Atlas's prompt (moved from Deckhand's data dir, §8)
     HEARTBEAT.md                 the heartbeat checklist (§3.4)
   memory/
     USER.md                      who the user is, preferences      cap 1,500 chars
@@ -62,19 +78,19 @@ job run unless the user's own environment sets it (theirs wins).
 
 **Frontmatter** follows the notes folder's conventions (pi-kit's, when it is a pi-kit notes
 folder). Proposal: new `type` values `atlas`, `memory`, `daily`, `job`; `project: atlas`;
-`updated_by` gains `atlas`. pi-desk never edits the folder's own README for that.
+`updated_by` gains `atlas`. Deckhand never edits the folder's own README for that.
 
 **Who writes what** (Proposal)
 
 | File | Writers | Rule |
 |---|---|---|
 | `atlas/*`, `jobs/<slug>.md` definition | the user; interactive Atlas or Claude | protected from job runs (§4.1); a note runs as written, no approval (§3.6) |
-| `jobs/<slug>.md` `## Recent runs` | pi-desk's scheduler only (code, not a model) | rewrites only that section, atomically |
+| `jobs/<slug>.md` `## Recent runs` | Deckhand's scheduler only (code, not a model) | rewrites only that section, atomically |
 | `memory/USER.md`, `MEMORY.md` | the user or the curation job directly; everyone else through the memory tools or `pi-kit memory` | single writer: lock, caps, scans, backup (§6) |
 | `memory/daily/*.md` | memory tools (any agent, job runs included) | append-only, one tagged line per write |
 | `sessions/*` | each main session its own (pi `-pi-`, Claude, Atlas `-atlas-`) | unchanged |
 
-**Concurrent edits.** Writers are pi, Claude Code, Atlas, job runs, pi-desk and Obsidian. Every
+**Concurrent edits.** Writers are pi, Claude Code, Atlas, job runs, Deckhand and Obsidian. Every
 programmatic write re-reads the file, changes only its own section or line, writes a temp file
 in the same folder and renames it over the original, and retries once if the mtime changed in
 between. Appends use `O_APPEND`, one short line per write. `memory/.lock` (exclusive create,
@@ -93,7 +109,7 @@ commits it (a hook, the user) may refuse a staged secret-shaped string. So the s
 ### 3.1 The job note
 
 `jobs/<slug>.md`. Definition fields live in frontmatter so Obsidian shows them as properties.
-pi-desk reads a strict flat YAML subset (`key: value`, quoted strings, `[a, b]` lists); anything
+Deckhand reads a strict flat YAML subset (`key: value`, quoted strings, `[a, b]` lists); anything
 else is an error on the job's row and the job does not run.
 
 ```markdown
@@ -127,13 +143,13 @@ List open PRs in ~/code repos that wait on me, oldest first, with one line each.
 (optional shell command; see §3.3)
 
 ## Recent runs
-<!-- written by pi-desk; edits here are overwritten -->
+<!-- written by Deckhand; edits here are overwritten -->
 - 2026-11-01 07:00 ✅ 1m12s $0.08 — 3 PRs wait on you (oldest: pi-kit#9) · [run](file:///…/summary.md)
 ```
 
 **Scope.** `folder` is the scope link; `for_project` only groups the job in the Jobs tab (its
 owner: a project, Atlas, Chats or Other; without it the folder decides; GUIDE.md "The Jobs tab",
-`src/jobs_owner.odin`). Removing a project from pi-desk never deletes or edits its jobs; they are
+`src/jobs_owner.odin`). Removing a project from Deckhand never deletes or edits its jobs; they are
 grouped by their folder then.
 
 **Schedules.** Cron is local time (a DST-skipped time is skipped, a repeated hour runs once).
@@ -147,7 +163,7 @@ gets a warning on its row (cost), not a refusal.
 and checks every 30 s and on wake. It never sleeps for an interval: monotonic clocks pause while
 the Mac sleeps, so "fire in 30 min" drifts by the sleep time.
 
-**Missed runs** (**Decided**). A run that is late (Mac asleep, pi-desk and helper closed,
+**Missed runs** (**Decided**). A run that is late (Mac asleep, Deckhand and helper closed,
 previous run still going) starts only within a **grace window** of half the job's interval,
 clamped to 2 min–2 h (cron: the gap to the next fire time; `at`: 2 h). Past the window the tick is
 **skipped** and recorded with its reason: `skipped (asleep)`, `skipped (closed)`,
@@ -200,7 +216,7 @@ Nothing is ever deleted automatically.
   **By editing the note** in any editor: the file watcher picks it up.
 - **Interactive Atlas or Claude:** `job_create` from `control`, or a file write. A note runs on
   its schedule as written, as soon as it parses.
-- **No approval** (Decision, §10.3): pi-desk keeps no approval record and
+- **No approval** (Decision, §10.3): Deckhand keeps no approval record and
   no key; an edited note runs as edited. The controls are `enabled:` in the note (Enable /
   Disable, user-only through `job_set_enabled`), the per-job pause, Pause all (`jobs_pause`, the
   kill switch) and the limits and safety stops (§4.5). Only Pause all and the per-job pause are
@@ -210,7 +226,7 @@ Nothing is ever deleted automatically.
   are ignored and dropped at its next write. `job_approve` answers with an error saying it was
   removed.
 - **Job runs cannot create or edit jobs.** `jobs/` is a protected path (§4.1, step 4; until then
-  the preamble says so) and runs get no pi-desk socket. A run may propose a job under its `Needs
+  the preamble says so) and runs get no Deckhand socket. A run may propose a job under its `Needs
   you` section.
 - **Delete:** the row's Delete moves the note to the Trash (`delete_path`, confirms). Deleting the
   file by hand removes the job; its data-dir runs age out.
@@ -236,7 +252,7 @@ guardrails **block** risky commands ("Needs user approval (…), and no UI is av
 stream gives `usage.cost`, tool calls and results, and `agent_settled`. The session is saved, so
 a run can be opened in pi.
 
-**Preamble** (written per run by pi-desk, not editable by the user or a job):
+**Preamble** (written per run by Deckhand, not editable by the user or a job):
 - You are job `<name>`, scheduled for `<PI_DESK_SCHEDULED_AT>`, running unattended; nobody can
   answer questions, so do not ask.
 - This scheduled prompt cannot approve risky actions: a blocked action stays blocked; do not work
@@ -281,7 +297,7 @@ scripts and `eval` get past them until §4.7.
 Runs never stop for approval. The scheduler records each blocked tool call from the event stream
 as `{tool, command, cwd, sha256}` in `meta.json`; the run ends `needs_you` and the item shows on
 the job's row and in the delivery. The user can:
-- **Approve once:** pi-desk re-checks the hash and runs that stored command in that cwd with the
+- **Approve once:** Deckhand re-checks the hash and runs that stored command in that cwd with the
   job's environment, appends the output to the run and delivers it. No model re-plans it.
 - **Always for this job:** the hash goes into the job's allowlist in `state.json`; later runs get
   `PI_KIT_ALLOW_FILE=<file>` and guardrails let exactly that command + cwd through. Revocable on
@@ -324,7 +340,7 @@ Thresholds are settings; the stops cannot be turned off.
 
 **Secrets:** the environment allowlist; tools use their own credential stores; summaries are
 redacted; run dirs are mode `0700`. **Kill switch:** `jobs_pause` (Jobs tab, palette,
-`pi-desk --ctl`) stops new runs; Stop all ends running ones; resuming is user-only. **Logging:**
+`deckhand --ctl`) stops new runs; Stop all ends running ones; resuming is user-only. **Logging:**
 the run folder; scheduler decisions (due, started, skipped + reason, stopped + reason) in `<data dir>/jobs/scheduler.log`, rotated like the command log.
 
 ### 4.7 Phase 2: a real boundary (Proposal)
@@ -339,8 +355,8 @@ themselves fail inside it, and we wrap bash, not pi. Apple's `container` or Lima
 
 ## 5. The background helper
 
-**Decided:** jobs run when pi-desk is closed, via a small login item. **Proposal:**
-`pi-desk --scheduler`, the same binary with no window, running the scheduler package (no sokol
+**Decided:** jobs run when Deckhand is closed, via a small login item. **Proposal:**
+`deckhand --scheduler`, the same binary with no window, running the scheduler package (no sokol
 calls, ROADMAP §4). Step 1 runs that package inside the window; step 2 runs it under launchd.
 When the core/window split happens, the core owns the scheduler and the helper goes away.
 (Rejected: the full core split now, too big; one launchd plist per job, see §3.2 coalescing.)
@@ -366,8 +382,8 @@ while the user is logged in (a GUI-domain agent).
 **Login item.** Signed app on macOS 13+: `SMAppService.agent(plistName:)`; if its status is
 `requiresApproval`, the Jobs tab says so and opens System Settings → Login Items. Dev build or
 fallback: a plist in `~/Library/LaunchAgents/` with `AssociatedBundleIdentifiers` set so it shows
-under pi-desk in Login Items, `launchctl bootstrap gui/<uid>` / `bootout`. Settings → "Run jobs
-when pi-desk is closed" (user-only `jobs_background`).
+under Deckhand in Login Items, `launchctl bootstrap gui/<uid>` / `bootout`. Settings → "Run jobs
+when Deckhand is closed" (user-only `jobs_background`).
 
 **Power.** During a run the scheduler holds an IOKit `PreventUserIdleSystemSleep` assertion so
 the Mac does not idle-sleep mid-run (closing the lid still sleeps). Before starting, it checks
@@ -434,7 +450,7 @@ only if that log shows misses growing.
 
 **Decided (2026-11-01, overrides draft 2):** job results are **not** pushed into Atlas's
 context; Atlas would only bloat its context with them. A run reaches the user through the Jobs
-tab, a macOS notification and the `job.finished` event, which pi-desk's notification centre (the
+tab, a macOS notification and the `job.finished` event, which Deckhand's notification centre (the
 bell in the top bar) consumes. Atlas reads job state on demand, when the user asks, through the
 read-only `job_list` / `job_runs` commands (any caller; results redacted).
 
@@ -461,8 +477,8 @@ Delivery:
 3. **The bell** (notify.odin): every run with `notify` other than `never` goes to
    `notify_job_finished` (job id, title, status finished/needs_you/failed, the one-line summary,
    the run folder). The bell sends the macOS notification for runs that need the user or
-   failed, paced by its own rules, while pi-desk is in the background.
-4. **pi-desk's own macOS notification** only for what the bell does not notify: a finished run
+   failed, paced by its own rules, while Deckhand is in the background.
+4. **Deckhand's own macOS notification** only for what the bell does not notify: a finished run
    with `notify: always` (at most one per 5 s), the auto-pause nudge, and every pushed run while
    the bell's Jobs group is off. One run, one OS notification.
 5. **On demand for Atlas:** `job_list {unread?}` and `job_runs {job, limit?}`: anyone may call
@@ -496,8 +512,8 @@ Settings' Atlas group and "Atlas: edit prompt" open whichever copy is in use.
 
 ## 9. Build plan
 
-Each step is its own PR with the repo's tests green. Steps 1, 2, 3 and 6 get review (unattended
-execution, permissions, memory integrity).
+Each step is its own PR with the repo's tests green. Steps 1, 2, 3 and 6 carry the most risk
+(unattended execution, permissions, memory integrity).
 
 **Step 1 — Scheduler in the window, job notes, Jobs tab, Run now.** Scheduler package, note
 parser, cron/every/at/manual, `hours`, wall-clock deadlines, grace window and skip reasons,
@@ -524,8 +540,8 @@ Acceptance:
   `job_stop {job?}`, `jobs_pause` / `jobs_resume` with an optional `job` (one job, or all: the
   kill switch), `job_set_enabled`, `set_notes_dir` (now `set_home_dir`), `set_pi_path`, `set_job_limits`. Caller
   rules: `jobs_resume`, `job_set_enabled` and the settings are the user's only; `job_create`
-  from anyone writes an enabled note; a job run has no pi-desk socket or token, so jobs cannot
-  create jobs through pi-desk. (`job_approve` was removed on 2026-11-01.)
+  from anyone writes an enabled note; a job run has no Deckhand socket or token, so jobs cannot
+  create jobs through Deckhand. (`job_approve` was removed on 2026-11-01.)
 - Runs get `PI_CODING_AGENT_DIR` too when it is set (pi's config location), besides the §3.7
   allowlist.
 - A run over its `timeout` ends `timeout`; over its cost or turns, `over_limit`.
@@ -536,33 +552,35 @@ Acceptance:
 - Test mode never reads the login shell's `PATH` / `PI_KIT_NOTES_DIR`, so a test never sees the
   real notes folder; the main folder is set explicitly there (`set_home_dir`).
 
-- Review round 1 (2026-11-01):
-  - The prompt goes after `--`; pi 1.4 still reads an `@…` argument there as a file to attach,
-    so a prompt starting with `@` gets a leading newline.
-  - `access: read` also passes pi's `--tools read,grep,find,ls --no-mcp` (pi 1.4's allowlist
-    covers extension tools; MCP tools are kept unless `--no-mcp`).
-  - `job_run_now` from anyone but the user refuses a paused or disabled job; the limits (spend
-    per day/week/month, runs at once) hold for the user too.
-  - Stops and quit signal pi's whole process tree (children walked with `proc_listchildpids`,
-    then each one's own process group): SIGTERM, SIGKILL 5 s later. Quit gives 1.5 s, then
-    SIGKILL, and records each run `stopped (quit)` (no notifications).
-  - A timer thread posts a scheduler tick every second while a run goes (else every 30 s), so
-    due checks and the watchdog run while frames are slowed or paused (minimised, hidden);
-    while any run goes pi-desk holds an `NSProcessInfo` activity, so App Nap does not delay
-    them (idle system sleep stays allowed). In test mode frames go on at 60/s minimised
-    (`tests/scripts/frame-pause.txt`); `jobs.sh` stops a silent run while minimised.
-  - `sessions/` is pruned like `runs/`; `events.jsonl` moves to `events.jsonl.1` at 5 MB.
-  - Review round 2: a stopped run's remembered tree gets SIGKILL when the run ends, also when pi exited on
-    SIGTERM within the grace (stop and quit); the run's pid is cleared once pi is reaped.
-  - Recent runs keep the note's CRLF; the writer renames its temp file over the note only if
-    the note did not change since it was read, and a user's edit is always re-read by the
-    next scan. pi is found on the jobs' `PATH` in absolute entries only.
+- **The prompt** goes after `--`. pi still reads an `@…` argument there as a file to attach,
+  so a prompt starting with `@` gets a leading newline.
+- **`access: read`** also passes pi's `--tools read,grep,find,ls --no-mcp`: pi's `--tools`
+  allowlist covers extension tools too, and MCP tools stay unless `--no-mcp` is given.
+- **Who may run what.** `job_run_now` from anyone but the user refuses a paused or disabled job.
+  The limits (spend per day/week/month, runs at once) hold for the user too.
+- **Stopping a run.** Stops and quit signal pi's whole process tree (children walked with
+  `proc_listchildpids`, then each one's own process group): SIGTERM, then SIGKILL 5 s later.
+  Quit waits 1.5 s, then sends SIGKILL and records each run `stopped (quit)` (no
+  notifications). A stopped run's remembered tree gets SIGKILL when the run ends, even when pi
+  exited on SIGTERM within the grace, so no child outlives its run; the run's pid is cleared
+  once pi is reaped.
+- **Ticks while hidden.** A timer thread posts a scheduler tick every second while a run goes
+  (else every 30 s), so due checks and the watchdog run while frames are slowed or paused
+  (minimised, hidden). While any run goes, Deckhand holds an `NSProcessInfo` activity so App Nap
+  does not delay it (idle system sleep stays allowed). In test mode frames go on at 60/s
+  minimised (`tests/scripts/frame-pause.txt`); `jobs.sh` stops a silent run while minimised.
+- **Disk.** `sessions/` is pruned like `runs/`; `events.jsonl` moves to `events.jsonl.1` at 5 MB.
+- **The note is the user's.** `## Recent runs` keeps the note's CRLF. The writer renames its
+  temp file over the note only if the note did not change since it was read, and a user's edit
+  is always re-read by the next scan.
+- **Finding pi.** pi is found on the jobs' `PATH` in absolute entries only, so a relative entry
+  cannot make a run start a different `pi`.
 
 **Approvals removed (2026-11-01).** Step 1 first shipped HMAC approvals with a key in the login
 Keychain. Each rebuild is signed ad hoc, so macOS asked for Keychain access after every build.
 Why removed: the prompts cost more than the protection was worth. Removed: the key (Keychain and
 `<data dir>/jobs/approval.key`, which startup now deletes), the approval record and its review
-UI (Approve, Changed — review, the definition diff), and `job_approve`. pi-desk no longer links
+UI (Approve, Changed — review, the definition diff), and `job_approve`. Deckhand no longer links
 the Security framework. What this gives up: anything running as the user (an interactive agent,
 a full-access job run despite its preamble) can write a job note that then runs on its schedule.
 The old Keychain item ("pi-desk jobs approval key") is left alone (removing it would itself need

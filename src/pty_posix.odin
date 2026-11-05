@@ -181,6 +181,33 @@ pty_foreground_busy :: proc(p: ^Pty) -> bool {
 	return pg > 0 && pg != p.pid
 }
 
+// The terminal's foreground process group, or 0 if unknown (agent_status.odin:
+// a program that reported working leaves the foreground when it exits).
+pty_foreground_pgrp :: proc(p: ^Pty) -> i32 {
+	if p.fd < 0 || p.pid <= 0 do return 0
+	return i32(max(tcgetpgrp(p.fd), 0))
+}
+
+// Reaps the child if it has exited (not blocking): how it ended. The pid
+// is forgotten then, so closing the pty hangs up nobody.
+pty_try_reap :: proc(p: ^Pty) -> (e: Exit_Info, reaped: bool) {
+	if p.pid <= 0 do return {}, false
+	status: c.int
+	r := waitpid(p.pid, &status, WNOHANG)
+	if r != p.pid do return {}, false
+	p.pid = 0
+	return exit_info_from_wait(status), true
+}
+
+// A waitpid status as an exit code or a signal (WIFEXITED / WIFSIGNALED;
+// the same encoding on macOS and Linux).
+exit_info_from_wait :: proc(status: c.int) -> Exit_Info {
+	low := int(status) & 0x7f
+	if low == 0 do return {known = true, code = (int(status) >> 8) & 0xff}
+	if low != 0x7f do return {known = true, signal = low}
+	return {} // stopped, not ended
+}
+
 // True once the child process has exited (reaps it).
 pty_child_exited :: proc(p: ^Pty) -> bool {
 	if p.pid <= 0 do return true
@@ -195,6 +222,15 @@ when ODIN_OS == .Darwin {
 	@(default_calling_convention = "c")
 	foreign libproc {
 		proc_pidinfo :: proc(pid: c.int, flavor: c.int, arg: u64, buffer: rawptr, size: c.int) -> c.int ---
+		proc_pidpath :: proc(pid: c.int, buffer: rawptr, size: u32) -> c.int ---
+	}
+	// The executable the child runs now (an `exec` changes it, not the pid), or "". Temp-allocated.
+	pty_child_exe :: proc(p: ^Pty) -> string {
+		if p.pid <= 0 do return ""
+		buf: [4 * MAXPATHLEN]u8 // PROC_PIDPATHINFO_MAXSIZE
+		n := proc_pidpath(p.pid, &buf, size_of(buf))
+		if n <= 0 do return ""
+		return strings.clone(string(buf[:n]), context.temp_allocator)
 	}
 	PROC_PIDVNODEPATHINFO :: 9
 	VNODE_INFO_SIZE :: 152 // struct vnode_info; then char vip_path[MAXPATHLEN]
@@ -210,6 +246,23 @@ when ODIN_OS == .Darwin {
 		return strings.clone(string(path[:n]), context.temp_allocator)
 	}
 } else {
+	pty_child_exe :: proc(p: ^Pty) -> string {
+		if p.pid <= 0 do return ""
+		buf: [4096]u8
+		link := strings.clone_to_cstring(fmt_proc_path(p.pid, "exe"), context.temp_allocator)
+		n := readlink(link, &buf[0], len(buf))
+		if n <= 0 do return ""
+		return strings.clone(string(buf[:n]), context.temp_allocator)
+	}
+	@(private = "file")
+	fmt_proc_path :: proc(pid: i32, what: string) -> string {
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_string(&b, "/proc/")
+		strings.write_int(&b, int(pid))
+		strings.write_string(&b, "/")
+		strings.write_string(&b, what)
+		return strings.to_string(b)
+	}
 	pty_child_cwd :: proc(p: ^Pty) -> string {
 		if p.pid <= 0 do return ""
 		buf: [4096]u8

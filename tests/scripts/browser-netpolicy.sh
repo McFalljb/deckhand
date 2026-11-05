@@ -5,15 +5,17 @@
 # Allowed: Safe Browsing only. Needs a CEF build. Writes build/browser-netpolicy/.
 # Usage: tests/scripts/browser-netpolicy.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/browser-netpolicy"
 rm -rf "$W"; FAKE_HOME="$W/home"; PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 printf '{"type":"session","version":3,"id":"nnnn-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_nnnn-1.jsonl"
 HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-netpolicy.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CEF_NETLOG="$W/netlog.json" PI_DESK_CMD='exec sleep 600' build/pi-desk "$PROJ" > "$W/run.log" 2>&1 || true
+  PI_DESK_CEF_NETLOG="$W/netlog.json" PI_DESK_CMD='exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -q "done: .* 0 failed" "$W/run.log" || { echo "netpolicy: the scene failed (log: $W/run.log)"; exit 1; }
 [ -s "$W/netlog.json" ] || { echo "netpolicy: no net-log written"; exit 1; }
 # hosts in URLs and host fields of the log (it may be cut short at exit: read it as text)

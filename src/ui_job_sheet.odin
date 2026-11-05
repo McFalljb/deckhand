@@ -251,9 +251,10 @@ job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 		if state.focus_widget == "job_sheet" do state.focus_widget = ""
 		return {ok = true}, true
 	}
+	if harness_run_holds_sheet() do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
 	// open already: the user's fields stay (save or cancel it first)
 	if job_sheet_open() do return fail("the job sheet is open (save or cancel it first)"), false
-	if folder_of(.Jobs) == "" do return fail("no main folder (Set up pi-desk…, in the Jobs tab)"), false
+	if folder_of(.Jobs) == "" do return fail("no main folder (Set up Deckhand…, in the Jobs tab)"), false
 	set_s(&u.err, "")
 	set_s(&u.path, "")
 	set_s(&u.orig, "")
@@ -840,7 +841,7 @@ job_sheet_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, string(sapp.get_clipboard_string()))
+		tf_insert(f, clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_MOVE:

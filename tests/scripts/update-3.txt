@@ -1,4 +1,4 @@
-# pi-desk's own updates, third start (tests/scripts/update.sh): the new version's second start
+# Deckhand's own updates, third start (tests/scripts/update.sh): the new version's second start
 # removes the old bundle (checked by the shell script).
 wait 1000
 waitstate 10000 update.current 0.1.1

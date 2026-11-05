@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A fake pi for tests/scripts/reload.sh: a pi-like screen and pi-kit's bridge over
-pi-desk's socket (PI_DESK_SOCKET, the single-use PI_DESK_TOKEN). It reports its
+"""A fake pi for tests/scripts/reload.sh: a pi-like screen and the pi integration's bridge over
+pi-desk's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It reports its
 session (the --session file pi-desk gave it, so a restart can resume it) and
 idle, and answers:
   pi.prompt  the text is the next status: working, idle, waiting, or blocked
@@ -26,7 +26,7 @@ def note(line):
 
 
 sock = socket.socket(socket.AF_UNIX)
-sock.connect(os.environ["PI_DESK_SOCKET"])
+sock.connect(os.environ["DECKHAND_SOCKET"])
 state = {"agent": "idle", "waiting": False, "blockers": []}
 reloads = 0
 
@@ -45,7 +45,7 @@ def show(what):
 
 
 note("start %s" % who)
-send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
 send({"id": "s", "type": "pi.session", "pi_session_id": who, "session_file": path, "cwd": os.getcwd()})
 print("\x1b[2J\x1b[H\x1b[1mpi\x1b[0m  fake reload bridge · session %s\n" % who, flush=True)
 status()

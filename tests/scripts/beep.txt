@@ -50,4 +50,22 @@ ime_key 13 w
 ime_key 125 down
 ime_key 53 escape
 beeps 0
+# ---- macOS line-editing keys through AppKit, as Ghostty (moved from the term scene):
+# keyDown: with NSEvents built in-process (the input-method wrapper, then sokol),
+# the ⌘ ones past the app's ⌘ shortcuts; cat -v shows the bytes
+command {"type":"new_shell_tab","session":$session}
+wait 800
+command {"type":"send_text","tab_id":$tab,"text":"clear; stty raw -echo; cat -v\n"}
+wait 800
+ime_key 51 backspace alt
+ime_key 51 backspace cmd
+ime_key 123 left alt
+ime_key 124 right alt
+ime_key 123 left cmd
+ime_key 124 right cmd
+ime_key 117 delete alt
+command {"type":"send_text","tab_id":$tab,"text":"\n"}
+waitfor ^[^?^U^[b^[f^A^E^[d 3000
+assert_screen ^[^?^U^[b^[f^A^E^[d
+beeps 0
 quit

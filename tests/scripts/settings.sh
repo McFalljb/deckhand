@@ -13,8 +13,10 @@
 # Screenshots: build/shots/settings/.
 # Usage: tests/scripts/settings.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 W="$ROOT/build/settings"
 rm -rf "$W" build/shots/settings
 FAKE_HOME="$W/home"
@@ -38,7 +40,7 @@ chmod 600 "$AD/prompts/token.json"
 printf 'KEY=%s\n' "$SECRET" > "$AD/prompts/.env"
 cp "$AD/settings.json" "$W/settings.before"
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/settings.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$PROJ" > "$W/run.log" 2>&1 || true
+  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi

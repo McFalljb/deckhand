@@ -18,5 +18,5 @@ command {"type":"new_shell_tab","session":$session}
 wait 800
 command {"type":"focus_tab","tab_id":$pitab}
 wait 1500
-shot readme/pi-desk
+shot readme/deckhand
 quit

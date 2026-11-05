@@ -538,7 +538,7 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	#partial switch ev.type {
 	case .CLIPBOARD_PASTED:
 		if e.readonly do return true
-		ed_insert(e, string(sapp.get_clipboard_string()), .Other)
+		ed_insert(e, clipboard_text(), .Other)
 		return true
 	case .CHAR:
 		if cmd || ctrl do return true
@@ -1089,7 +1089,7 @@ editor_run_action :: proc(tab_id: u64, a: Editor_Action) {
 		lo, hi := ed_copy_range(e)
 		if platform.set_clipboard != nil do platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
 		ed_replace(e, lo, hi, "", .Other)
-	case .Paste:          if !ro do ed_insert(e, string(sapp.get_clipboard_string()), .Other)
+	case .Paste:          if !ro do ed_insert(e, clipboard_text(), .Other)
 	case .Select_All:     ed_select_all(e)
 	case .Toggle_Comment: if !ro do ed_toggle_comment(e)
 	case .Indent:         if !ro do ed_indent_lines(e, false)

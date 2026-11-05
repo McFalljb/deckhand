@@ -6,11 +6,11 @@ wait 200
 clickid sess 0
 waitfor ARGS: --session 15000
 clickid lefttab 1
-wait 1500
+eventually
 assert_state layout.left_tab files
 # ---- the switcher under the project's name; list_worktrees has the same state
 hover wt_switch
-wait 600
+eventually
 assert_tip Worktrees and branches of this repository
 shot worktrees/closed
 command {"type":"list_worktrees"}
@@ -36,12 +36,15 @@ assert_result data.branches.0.merged true
 clickid wt_switch
 wait 400
 hover wtrow 2
-wait 600
+eventually
 assert_tip ~/proj-b-dirty · ahead/behind main
+sweep wtrow 2 60
+hover wtrow 2
+wait 600
 shot worktrees/menu-dark
 # ---- pick the dirty worktree: the tree shows its folder
 clickid wtrow 2
-wait 600
+eventually
 assert_state files.checkouts.0.path $homedir/proj-b-dirty
 assert_files f.txt\n
 assert_files new.txt\n
@@ -55,7 +58,7 @@ clickid wtmore 2
 wait 300
 shot worktrees/row-menu
 clickid menurow 0
-wait 500
+eventually
 assert_state open_sessions.0.tabs.# 2
 assert_state open_sessions.0.tabs.1.cwd $homedir/proj-b-dirty
 # ---- Clean up the merged worktree: the confirmation bar first
@@ -65,8 +68,8 @@ hover wtrow 1
 wait 200
 clickid wtmore 1
 wait 300
-clickid menurow 8
-wait 1500
+clickmenu Clean up…
+eventually
 assert_state pending_confirmations.# 1
 assert_state pending_confirmations.0.summary Remove worktree ~/proj-a-merged and delete merged branch merged-wt? It also deletes 2 ignored paths (dist/, node_modules/).
 shot worktrees/confirm
@@ -90,7 +93,8 @@ hover wtrow 1
 wait 200
 clickid wtmore 1
 wait 300
-clickid menurow 1
+# New session here: pi is the only harness here, so it starts at once (no picker)
+clickmenu New session here
 waitfor ARGS: --session-dir 15000
 assert_state open_sessions.# 2
 assert_state open_sessions.1.cwd $homedir/proj-b-dirty
@@ -104,7 +108,7 @@ shot worktrees/session-in-worktree
 clickid wt_switch
 wait 300
 clickid wtrow 0
-wait 500
+eventually
 assert_state files.checkouts.0.base $homedir/proj-b-dirty
 assert_state files.checkouts.0.path $homedir/proj
 assert_files src\n.gitignore\nREADME.md\n

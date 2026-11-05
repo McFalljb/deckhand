@@ -10,6 +10,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -25,6 +26,7 @@ OUTPUT_FRAME :: 15 * time.Millisecond
 App :: struct {
 	dpi:            f32,
 	pending_start:  bool, // `pi-desk DIR`: open a new chat once the pane has a size
+	launch_project: u64, // its project (launch_project)
 	pane:           [4]f32, // terminal pane rect x, y, w, h (framebuffer px)
 	redraw:         bool,
 	drag_tab:       u64, // the tab on screen when drags were last checked (drags_follow_focus)
@@ -69,7 +71,7 @@ init :: proc "c" () {
 	app.font_theme = state.settings.theme
 	app.font_size = state.settings.text_size
 	if !font_init(app.dpi) {
-		fmt.eprintln("pi-desk: could not load a font (", TEXT_BACKEND, ")")
+		fmt.eprintln("Deckhand: could not load a font (", TEXT_BACKEND, ")")
 		os.exit(1)
 	}
 	ui_init()
@@ -87,6 +89,18 @@ init :: proc "c" () {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
 	} else do home_root = data_dir()
+	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
+	// anything is written there; test mode looks for pi-desk only in a runtime dir of its own
+	check_old := !autotest.active || os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator) != ""
+	if why := instance_guard(home_root, check_old); why != "" {
+		if autotest.active {
+			fmt.println("[autotest] instance refused:", why)
+			os.exit(3)
+		}
+		fmt.eprintln("Deckhand:", why)
+		platform_alert("Deckhand can't start", why)
+		os.exit(1)
+	}
 	event_log_open(home_root)
 	// Atlas's prompt (an unedited older starter) and its copy of the guide (agent.odin)
 	if home_root != "" {
@@ -96,7 +110,8 @@ init :: proc "c" () {
 	}
 	// the session-title cache (titles.odin): same rule as the workspace
 	if !autotest.active || os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) != "" do titles_load(data_dir(context.temp_allocator))
-	rescan_now()
+	claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
+	rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
 	dir, token_kind := app_args.dir, app_args.token_kind
@@ -109,8 +124,14 @@ init :: proc "c" () {
 	// PI_DESK_DATA_DIR, so scripts never read or write the user's
 	if !autotest.active || os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) != "" {
 		persist_init(data_dir(context.temp_allocator))
+		claude_disk_launching = true // no transcript read on the main thread while it comes back
 		persist_load(app_args.fresh)
+		claude_disk_launching = false
 	}
+	harness_no_sudo_sweep(at_quit = false) // no-sudo folders of runs whose Deckhand is gone (harness_install.odin)
+	// Claude's projects (claude_disk.odin), on the Rescan worker, with the saved accounts (added
+	// ones in, removed ones out)
+	if claude_startup_rescan_due() do run_command(Rescan{}, {kind = .Internal})
 	// the chats folder's instructions (folders.odin), then the first-run sheet
 	// once while no main folder is set (test mode: only when a scene asks)
 	// (not while setup is due: Done writes it where the user puts chats)
@@ -118,8 +139,11 @@ init :: proc "c" () {
 	if setup_due() && (!autotest.active || os.get_env("PI_DESK_FIRST_RUN", context.temp_allocator) == "1") do run_command(Setup_Sheet{open = true})
 	// `pi-desk DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
-		run_command(Add_Project{dir})
-		app.pending_start = true
+		r := run_command(Add_Project{dir})
+		// only in DIR's own project: a failed add starts nothing (never the one selected before)
+		app.launch_project = launch_project(r)
+		if app.launch_project != 0 do app.pending_start = true
+		else do fmt.eprintfln("Deckhand: %s: %s", dir, r.error)
 	}
 	update_init() // pi-desk's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
@@ -131,6 +155,7 @@ init :: proc "c" () {
 platform_app :: proc() -> Platform {
 	return {
 		set_clipboard = proc(text: string) {sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))},
+		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
 		quit = proc() {
 			app.quitting = true
 			sapp.request_quit()
@@ -180,6 +205,9 @@ frame :: proc "c" () {
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	jobs_tick() // Atlas's jobs: notes, the clock, running runs (jobs.odin)
 	agent_pending_tick() // Send to Atlas text that waited too long for pi (session_info.odin)
+	claude_tick() // Claude tabs: held texts that can go now, their Enter (claude.odin)
+	claude_wait_tick() // claude_wait_idle: waits whose Claude tab is idle, gone or past its deadline (claude_wait.odin)
+	dead_tab_tick() // Restart with model…: pi's selector once the new pi is up (dead_tab.odin)
 	browser_debug_tick() // PI_DESK_DEBUG_BROWSER (browser.odin, spike)
 	t := active_term()
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
@@ -219,6 +247,8 @@ frame :: proc "c" () {
 	if at != nil {
 		if x, y, tw, th, ok := drawer_term_rect(); ok do term_set_rect(at, x, y, tw, th)
 	}
+	harness_run_keep_sheet() // a running install keeps the setup sheet (harness_install.odin)
+	harness_term_layout() // the setup sheet's install terminal (ui_harness.odin)
 	if x, y, tw, th, ok := ui_terminal_rect(); ok {
 		app.pane = {x, y, tw, th}
 		// (not while a Changes tab shows: its diff pane is narrower, and pi would reflow for nothing)
@@ -230,7 +260,9 @@ frame :: proc "c" () {
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
 	if app.pending_start && app.pane.z > 0 {
 		app.pending_start = false
-		run_command(New_Chat{state.selected_project})
+		cmd := launch_start(app_args.claude, app.launch_project)
+		if _, is := cmd.(New_Claude_Session); is do run_command(cmd, {kind = .UI}) // the user's: in front, toast if Claude Code is missing
+		else if cmd != nil do run_command(cmd)
 		t = active_term()
 	}
 
@@ -253,6 +285,7 @@ frame :: proc "c" () {
 		}
 	}
 	ui_draw(cmds, overlay, cmds.length) // the palette, above the terminals
+	if setup_open() do harness_term_draw() // the setup sheet's install terminal, on the sheet
 	ui_draw_field_cursor(cmds)
 	draw_end()
 	update_window_title()
@@ -376,7 +409,7 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
-	// ⇧⌘N: a new session in the selected project (⌘N is a new chat)
+	// ⇧⌘N: a new session in the selected project (⌘N is a new chat; both the harness picker, harness.odin)
 	if e.type == .KEY_DOWN && e.key_code == .N && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 		ime_cancel()
 		if menu.open do menu_close()
@@ -455,8 +488,11 @@ event :: proc(e: ^sapp.Event) {
 			#partial switch e.key_code {
 			case .C: if ktab != nil do ui_do(Copy_Selection{ktab.id})
 			case .Q: ui_do(Quit{})
-			case .N: action_run("new_chat") // a chat (Chats); ⇧⌘N: a session in the selected project
-			case .T: if cs != nil do ui_do(New_Shell_Tab{session = cs.id})
+			// ⌘N: a chat (Chats; the harness picker, harness.odin); ⇧⌘N: a session in the selected project. ⌥⌘T: a Claude tab
+			case .N: if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("new_chat")
+			case .T:
+				if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
+				else if cs != nil do ui_do(New_Shell_Tab{session = cs.id})
 			case .L: // a browser tab: its URL field (browser_nav.odin); else the menu bar's (Go to line)
 				if tab_browser() != nil do browser_url_focus()
 				else if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
@@ -470,19 +506,26 @@ event :: proc(e: ^sapp.Event) {
 				i := int(e.key_code) - int(sapp.Keycode._1)
 				if cs != nil && i < len(cs.tabs) do ui_do(Focus_Tab{cs.tabs[i].id})
 			case .BACKSPACE, .LEFT, .RIGHT: // ⌘⌫ ⌘← ⌘→ alone: line editing (term.odin, mac_key_text)
-				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" do term_key_down(kt, e)
+				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" {
+					claude_note_typed(ktab)
+					term_key_down(kt, e)
+				}
 			case: // shortcuts only the menu bar has (⌘+, ⇧⌘], ⌥⌘↓…; menubar.odin)
 				if id := menubar_key_action(e.key_code, e.modifiers); id != "" && (id != "markdown_preview" || md_takes_keys()) do action_run(id)
 			}
 			return // Cmd+V arrives as CLIPBOARD_PASTED
 		}
+		// a Claude tab's prompt holds text now: pi-desk holds what it would send (claude.odin);
+		// Enter submits it (its hook says so) and Esc does not add text
+		if kt != nil && e.key_code != .ENTER && e.key_code != .KP_ENTER && e.key_code != .ESCAPE do claude_note_typed(ktab)
 		if kt != nil do term_key_down(kt, e)
 	case .KEY_UP:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_key_up(kt, e)
 	case .CHAR:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
-		if ktab != nil do ui_do(Send_Text{ktab.id, string(sapp.get_clipboard_string())})
+		claude_note_typed(ktab)
+		if ktab != nil do ui_do(Send_Text{ktab.id, clipboard_text()})
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))
@@ -524,7 +567,7 @@ event :: proc(e: ^sapp.Event) {
 		switch hit in hit {
 		case Hit_Project:   project_row_click(u64(hit)) // select and expand; again: fold
 		case Hit_Session:   ui_do(Open_Session_Cmd{state.selected_project, string(hit)})
-		case Hit_New:       ui_do(New_Chat{state.selected_project})
+		case Hit_New:       new_session_ui(state.selected_project, at = [2]f32{e.mouse_x, e.mouse_y}) // the harness picker (harness.odin)
 		case Hit_Tab:
 			ui_do(Focus_Tab{u64(hit)})
 			// a double-click keeps a preview tab
@@ -543,8 +586,11 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it
 		case Hit_Reload:    reload_click(hit) // the hot-reload bars
+		case Hit_Claude_Reload: claude_reload_click(hit) // Claude Code's (ui_claude_reload.odin)
+		case Hit_Dead_Tab:  dead_tab_click(hit) // a dead pi tab's Restart (dead_tab.odin)
 		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
+		case Hit_Claude:    claude_click(hit) // a Claude tab's held messages (ui_claude.odin)
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
@@ -581,6 +627,7 @@ event :: proc(e: ^sapp.Event) {
 		app.window_active = true
 		// the session on screen is seen now: its bell entries are read
 		if notify_wants_seen(state.current_session) do inbox_submit(Notifications_Mark_Read{session = state.current_session}, {kind = .Internal})
+		if id := status_wants_seen(); id != 0 do inbox_submit(Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
 		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
@@ -677,6 +724,7 @@ confirm_pending :: proc(token: string) {
 		case Pi_Reload: cmd = Pi_Reload{tab_id = c.tab_id, confirm = token}
 		case Pi_Reload_All: cmd = Pi_Reload_All{only_changed = c.only_changed, confirm = token}
 		case Pi_Restart_Updated: cmd = Pi_Restart_Updated{confirm = token}
+		case Claude_Restart_Changed: cmd = Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
 		case Reload_File: cmd = Reload_File{tab_id = c.tab_id, confirm = token}
 		case Delete_Path: cmd = Delete_Path{path = c.path, confirm = token}
 		case Create_File: cmd = Create_File{path = c.path, confirm = token}
@@ -686,6 +734,7 @@ confirm_pending :: proc(token: string) {
 		case Job_Delete:  cmd = Job_Delete{job = c.job, confirm = token}
 		case Changes_Discard: cmd = Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
 		case Markdown_Follow: cmd = Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
+		case Set_Claude_Default_Flags: cmd = Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
 		}
 		ui_do(cmd)
 		return
@@ -750,6 +799,9 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 				palette_run_index(palette.selected)
 			} else if in_filter {
 				filter_enter()
+			} else if state.focus_widget == "rename_session" {
+				ui_do(Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				ui_do(Set_Focus{""})
 			} else {
 				ui_do(Rename_Project{state.selected_project, tf_text(f)})
 				ui_do(Set_Focus{""})
@@ -785,7 +837,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, string(sapp.get_clipboard_string()))
+		tf_insert(f, clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_DOWN:
@@ -884,6 +936,7 @@ ime_commit :: proc(text: string) {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
 	} else if t := key_term(); t != nil {
+		claude_note_typed(key_tab())
 		term_text_input(t, text)
 	} else if ed := active_editor(); ed != nil {
 		editor_ime_commit(ed, text)
@@ -921,10 +974,10 @@ ime_anchor :: proc() -> [4]f32 {
 // Window title (hidden in the title bar; Mission Control, the Window menu
 // and ⌘` show it): the current session's title.
 update_window_title :: proc() {
-	title := "pi-desk"
+	title := "Deckhand"
 	if cs := cur(); cs != nil {
 		_, place := session_place(cs)
-		title = fmt.tprintf("%s · %s — pi-desk", place, open_session_title(cs))
+		title = fmt.tprintf("%s · %s — Deckhand", place, open_session_title(cs))
 	}
 	if title == app.window_title do return
 	delete(app.window_title)
@@ -939,6 +992,8 @@ utf8_string :: proc(r: rune) -> string {
 
 cleanup :: proc "c" () {
 	context = app_context
+	login_env_kill_probe() // a refresh's shell still running (login_env.odin)
+	harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)
 	persist_quit()
 	titles_save()
 	socket_stop()
@@ -953,32 +1008,84 @@ cleanup :: proc "c" () {
 }
 
 // Command line, checked before any window opens.
-app_args: struct {
+App_Args :: struct {
 	dir:        string,
 	token_kind: string, // "script" | "control" | ""
 	fresh:      bool, // --fresh: do not restore the saved workspace
+	claude:     bool, // --claude DIR: a Claude session there instead of a pi chat
+}
+app_args: App_Args
+
+APP_USAGE :: "usage: deckhand [--fresh] [--print-token script|control] [--claude] [DIR]   |   deckhand --ctl [--wait MS] JSON..."
+
+// The command line (after the program's name; --ctl is handled before). --claude needs DIR.
+app_args_parse :: proc(args: []string) -> (a: App_Args, ok: bool) {
+	for i := 0; i < len(args); i += 1 {
+		x := args[i]
+		if x == "--print-token" && i + 1 < len(args) && (args[i + 1] == "script" || args[i + 1] == "control") {
+			a.token_kind = args[i + 1]
+			i += 1
+		} else if x == "--fresh" {
+			a.fresh = true
+		} else if x == "--claude" {
+			a.claude = true
+		} else if strings.has_prefix(x, "-") || a.dir != "" {
+			return {}, false
+		} else do a.dir = x
+	}
+	if a.claude && a.dir == "" do return {}, false
+	return a, true
+}
+
+// The project `pi-desk DIR` starts in: the one Add_Project made or selected for DIR; 0 = none.
+launch_project :: proc(r: Result) -> u64 {
+	return r.ok ? r.created_id : 0
+}
+
+// What `pi-desk DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
+// Claude Code is the only harness installed), or with --claude a
+// Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
+// how to install it).
+launch_start :: proc(claude: bool, pid: u64) -> Command {
+	if pid == 0 || find_project(pid) == nil do return nil // never the project that happened to be selected
+	if claude do return New_Claude_Session{project_id = pid}
+	if !pi_installed() && claude_installed() do return New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
+	return New_Chat{pid}
+}
+
+// Test mode's backing scale from PI_DESK_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty
+// is 1, so a scene's pixels are the same on every Mac; else a number from 1 to 4.
+test_scale_parse :: proc(env: string) -> (scale: f64, ok: bool) {
+	s := strings.trim_space(env)
+	if s == "" do return 1, true
+	v, parsed := strconv.parse_f64(s)
+	if !parsed || !(v >= 1 && v <= 4) do return 0, false // NaN fails both
+	return v, true
 }
 
 main :: proc() {
 	persist.launch = time.tick_now()
 	if len(os.args) > 1 && os.args[1] == "--ctl" do os.exit(ctl_main(os.args[2:]))
-	for i := 1; i < len(os.args); i += 1 {
-		a := os.args[i]
-		if a == "--print-token" && i + 1 < len(os.args) && (os.args[i + 1] == "script" || os.args[i + 1] == "control") {
-			app_args.token_kind = os.args[i + 1]
-			i += 1
-		} else if a == "--fresh" {
-			app_args.fresh = true
-		} else if strings.has_prefix(a, "-") || app_args.dir != "" {
-			fmt.eprintln("usage: pi-desk [--fresh] [--print-token script|control] [DIR]   |   pi-desk --ctl [--wait MS] JSON...")
-			os.exit(2)
-		} else do app_args.dir = a
+	ok: bool
+	app_args, ok = app_args_parse(os.args[1:])
+	if !ok {
+		fmt.eprintln(APP_USAGE)
+		os.exit(2)
 	}
 	app_context = context
 	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
 	login_env_startup()
 	// test mode is quiet unless PI_DESK_QUIET=0: the window never shows or takes focus
 	if os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" && os.get_env("PI_DESK_QUIET", context.temp_allocator) != "0" do platform_quiet()
+	// test mode: the same backing scale on every Mac (PI_DESK_SCALE, default 1), quiet or not
+	if os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" {
+		scale, sok := test_scale_parse(os.get_env("PI_DESK_SCALE", context.temp_allocator))
+		if !sok {
+			fmt.eprintln("Deckhand: PI_DESK_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
+			os.exit(2)
+		}
+		platform_test_scale(scale)
+	}
 	sapp.run({
 		init_cb = init,
 		frame_cb = frame,
@@ -987,7 +1094,7 @@ main :: proc() {
 		width = 1400,
 		height = 860,
 		high_dpi = true,
-		window_title = "pi-desk",
+		window_title = "Deckhand",
 		enable_clipboard = true,
 		enable_dragndrop = true, // folders dropped on the window become projects
 		max_dropped_files = 16,

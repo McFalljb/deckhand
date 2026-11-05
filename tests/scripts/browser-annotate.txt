@@ -32,7 +32,7 @@ assert_drawn Comment on button "Save":
 shot browser/annotate-bar
 type Make this match Cancel
 key enter
-wait 250
+eventually
 assert_state focus.id <missing>
 assert_state open_sessions.0.comments.# 1
 assert_state open_sessions.0.comments.0.source browser
@@ -125,12 +125,12 @@ waitstate 5000 open_sessions.0.tabs.1.markers.0.where on
 wait 300
 shot browser/annotate-back
 web_click 24 24
-wait 250
+eventually
 assert_state focus.id comment_edit
 key escape
 wait 250
 clickid cm_delete 0
-wait 250
+eventually
 assert_state open_sessions.0.comments.# 2
 waitstate 3000 open_sessions.0.tabs.1.markers.# 2
 assert_state open_sessions.0.tabs.1.markers.0.n 1

@@ -1,13 +1,13 @@
 # Third-party notices
 
-pi-desk itself is MIT licensed (see [LICENSE](LICENSE)). It builds on the software below. Each
-entry names what pi-desk uses, how it gets into the build, and its licence. The full licence texts
-of everything vendored in this repository or compiled into pi-desk follow the table; the CEF and Chromium texts come with
+Deckhand itself is MIT licensed (see [LICENSE](LICENSE)). It builds on the software below. Each
+entry names what Deckhand uses, how it gets into the build, and its licence. The full licence texts
+of everything vendored in this repository or compiled into Deckhand follow the table; the CEF and Chromium texts come with
 the CEF distribution and are copied into the app bundle (see "In the app bundle").
 
 | Component | Used for | How it is included | Licence |
 |---|---|---|---|
-| [Chromium Embedded Framework (CEF)](https://bitbucket.org/chromiumembedded/cef) | browser tabs | downloaded by `scripts/fetch-cef.sh` (pinned in `vendor/cef/VERSION`), copied into `pi-desk.app` | BSD-3-Clause (CEF); Chromium and its third-party components: see `CREDITS.html` |
+| [Chromium Embedded Framework (CEF)](https://bitbucket.org/chromiumembedded/cef) | browser tabs | downloaded by `scripts/fetch-cef.sh` (pinned in `vendor/cef/VERSION`), copied into `Deckhand.app` | BSD-3-Clause (CEF); Chromium and its third-party components: see `CREDITS.html` |
 | [Chromium](https://www.chromium.org/) | inside CEF | part of the CEF framework | BSD-3-Clause and many others, listed in CEF's `CREDITS.html` |
 | [Ghostty](https://github.com/ghostty-org/ghostty) (libghostty-vt) | terminal emulation | prebuilt static libraries in `vendor/libghostty-vt/`, built by `scripts/build-ghostty.sh` (Zig 0.17.0, ReleaseFast, debug info stripped) from Ghostty `v1.4.0`, commit `83fb95624b0439ee660c2679b43b38c8b63769cd` (recorded in `vendor/libghostty-vt/VERSION`); headers in `vendor/libghostty-vt/include/`; the same source as the `vendor/ghostty` submodule | MIT |
 | [simdutf](https://github.com/simdutf/simdutf) | UTF-8 handling inside libghostty-vt | compiled into `libghostty-vt.a` | Apache-2.0 OR MIT (used under MIT) |
@@ -19,15 +19,16 @@ the CEF distribution and are copied into the app bundle (see "In the app bundle"
 | [Clay](https://github.com/nicbarker/clay) | UI layout | `vendor/clay` submodule (`clay.h` compiled by `build.sh`, and its Odin bindings) | zlib |
 | [tree-sitter](https://github.com/tree-sitter/tree-sitter) | editor syntax highlighting | sources in `vendor/tree-sitter/lib/` | MIT |
 | tree-sitter's Unicode tables (from ICU) | inside tree-sitter | `vendor/tree-sitter/lib/src/unicode/` | Unicode License (ICU 58 and later) |
-| tree-sitter's wasm stdlib (from musl) | vendored with tree-sitter, not used by pi-desk's build | `vendor/tree-sitter/lib/src/wasm-stdlib/` | MIT |
+| tree-sitter's wasm stdlib (from musl) | vendored with tree-sitter, not used by Deckhand's build | `vendor/tree-sitter/lib/src/wasm-stdlib/` | MIT |
 | tree-sitter grammars: bash, c, go, javascript, json, python, rust, typescript, tsx | editor syntax highlighting | `vendor/tree-sitter/grammars/` (versions in `vendor/tree-sitter/VERSIONS`) | MIT |
 | tree-sitter grammars: markdown, odin, toml, yaml | editor syntax highlighting | `vendor/tree-sitter/grammars/` (markdown's `highlights.scm` is the file from the grammar's repository, whose first line says it came from [nvim-treesitter](https://github.com/nvim-treesitter/nvim-treesitter), Apache-2.0; its text is below) | MIT |
 | nvim-treesitter (the markdown highlight query) | editor syntax highlighting of Markdown | `vendor/tree-sitter/grammars/markdown/queries/highlights.scm`, built into the binary (`src/editor_syntax.odin`) | Apache-2.0 |
 | [Odin](https://github.com/odin-lang/Odin) core and runtime libraries | the language's runtime, `core:` packages | linked in by the Odin compiler | zlib |
 | [stb_truetype, stb_image](https://github.com/nothings/stb) (via Odin's `vendor:stb`) | text on non-macOS backends; images | compiled from the Odin distribution by `build.sh` / linked from it | MIT OR Public Domain (Unlicense) |
+| pi logo, Clawd (Claude Code's mascot) | which agent a session runs (rows, tabs, picker) | the marks' pixel grids and colours in `src/logos.odin`; reference copies and sources in `assets/harness/` (Clawd: from Claude Code 2.1.318's own terminal art) | pi: MIT (pi's licence); Clawd: © Anthropic, PBC, its marks under Anthropic's trademark guidelines, see `assets/harness/README.md` |
 | [Tomorrow theme](https://github.com/chriskempson/tomorrow-theme) colours | the `ghostty` look's light variant (`src/theme.odin`) | colour values only | MIT |
 
-Fonts: pi-desk bundles no fonts; it uses the system's fonts through CoreText.
+Fonts: Deckhand bundles no fonts; it uses the system's fonts through CoreText.
 
 Test data, not shipped in the app: `tests/markdown/commonmark-examples.txt` (examples from the
 CommonMark spec 0.31.2, Copyright (C) 2014-16 John MacFarlane) and `tests/markdown/gfm-examples.txt`
@@ -42,7 +43,7 @@ this list against `vendor/ghostty/build.zig.zon` when libghostty-vt is rebuilt.
 
 ## In the app bundle
 
-`scripts/bundle-app.sh` copies into `pi-desk.app/Contents/Resources/licenses/`: pi-desk's
+`scripts/bundle-app.sh` copies into `Deckhand.app/Contents/Resources/licenses/`: Deckhand's
 `LICENSE`, this file, and CEF's `LICENSE.txt` and `CREDITS.html` (Chromium's credits) from the
 pinned CEF distribution.
 

@@ -39,6 +39,18 @@ int main(void) {
   printf("Cell_Data.Has_Hyperlink value %d\n", (int)GHOSTTY_CELL_DATA_HAS_HYPERLINK);
   printf("Grid_Row_Data.Wrap value %d\n", (int)GHOSTTY_ROW_DATA_WRAP);
   printf("Grid_Row_Data.Hyperlink value %d\n", (int)GHOSTTY_ROW_DATA_HYPERLINK);
+  S("Program_Status", GhosttyTerminalProgramStatus);
+  O("Program_Status", GhosttyTerminalProgramStatus, progress);
+  O("Program_Status", GhosttyTerminalProgramStatus, id);
+  O("Program_Status", GhosttyTerminalProgramStatus, message);
+  S("Semantic_Prompt", GhosttyTerminalSemanticPrompt);
+  O("Semantic_Prompt", GhosttyTerminalSemanticPrompt, exit_code);
+  O("Semantic_Prompt", GhosttyTerminalSemanticPrompt, error);
+  printf("Terminal_Option.Program_Status value %d\n", (int)GHOSTTY_TERMINAL_OPT_PROGRAM_STATUS);
+  printf("Terminal_Option.Semantic_Prompt value %d\n", (int)GHOSTTY_TERMINAL_OPT_SEMANTIC_PROMPT);
+  printf("Program_Status_State.Clear value %d\n", (int)GHOSTTY_PROGRAM_STATUS_STATE_CLEAR);
+  printf("Program_Status_Kind.Auth value %d\n", (int)GHOSTTY_PROGRAM_STATUS_KIND_AUTH);
+  printf("Semantic_Prompt_Kind.Prompt_Start value %d\n", (int)GHOSTTY_SEMANTIC_PROMPT_PROMPT_START);
   printf("Grid_Row size %zu\n", sizeof(GhosttyRow));
   printf("Point_Coordinate size %zu\n", sizeof(GhosttyPointCoordinate));
   return 0;

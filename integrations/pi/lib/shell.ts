@@ -1,0 +1,219 @@
+// Helpers for the optional shell extension (unit-tested in test/kit.test.ts). From pi-kit's
+// extensions/shell/lines.ts; clip, duration, MAX_LINE and MATCH_CAP are lib/text.ts's (the same code).
+
+import { spawnSync } from "node:child_process";
+import { MessageChannel, receiveMessageOnPort, Worker } from "node:worker_threads";
+import { clip, duration, MATCH_CAP, MAX_LINE } from "./text.ts";
+
+export { clip, duration, MATCH_CAP, MAX_LINE };
+export const MAX_BATCH = 20; // lines kept per monitor notice; the rest are counted
+export const MATCH_BUDGET_MS = 1000; // a pattern gets this long per batch of lines, then the watch ends
+export const KEY_REDACTED = "[private key block redacted]";
+
+const KEY_BEGIN = /-----BEGIN [A-Z ]*PRIVATE KEY-----/;
+const KEY_END = /-----END [A-Z ]*PRIVATE KEY-----/;
+
+/** Split a new chunk of output into complete lines; `rest` is the unterminated tail to carry over. */
+export function splitLines(carry: string, chunk: string): { lines: string[]; rest: string } {
+	const parts = (carry + chunk).split(/\r?\n/);
+	const rest = parts.pop() ?? "";
+	return { lines: parts, rest };
+}
+
+/**
+ * Drop the lines of a private key block that spans several lines: the BEGIN line becomes
+ * KEY_REDACTED, the lines up to and including END are dropped (undefined).
+ */
+export function keyFilter(state: { inKey: boolean }, line: string): string | undefined {
+	if (state.inKey) {
+		if (KEY_END.test(line)) state.inKey = false;
+		return undefined;
+	}
+	const at = line.search(KEY_BEGIN);
+	if (at < 0 || KEY_END.test(line.slice(at))) return line;
+	state.inKey = true;
+	return line.slice(0, at) + KEY_REDACTED;
+}
+
+/**
+ * Where to start reading lines that may begin inside a key block (a window into the output, or the
+ * output after a skip): just past an END marker that has no BEGIN before it, else 0.
+ */
+export function afterOpenKey(lines: string[]): number {
+	const end = lines.findIndex((l) => KEY_END.test(l));
+	return end >= 0 && !lines.slice(0, end + 1).some((l) => KEY_BEGIN.test(l)) ? end + 1 : 0;
+}
+
+/**
+ * The last `n` non-empty lines of the end of an output file, clipped and redacted. `fromStart` says
+ * whether `text` starts at the start of the file; if not, its first (partial) line is dropped, and
+ * so is everything before an END marker whose BEGIN lies before the window.
+ */
+export function lastLines(text: string, n: number, fromStart = true): string[] {
+	let lines = text.split(/\r?\n/);
+	if (!fromStart) lines = lines.slice(1);
+	const out: string[] = [];
+	const start = afterOpenKey(lines);
+	if (start > 0) {
+		lines = lines.slice(start);
+		out.push(KEY_REDACTED);
+	}
+	const state = { inKey: false };
+	for (const l of lines) {
+		const kept = keyFilter(state, l);
+		if (kept !== undefined && kept.trim() !== "") out.push(clip(kept));
+	}
+	return out.slice(-n);
+}
+
+// A repeated group that itself contains a repeat, like (a+)+ or (\w+\s?)*: exponential backtracking.
+const NESTED_QUANTIFIER = /\((?:[^()\\]|\\.)*(?:[*+]|\{\d+,\d*\})(?:[^()\\]|\\.)*\)(?:[*+]|\{\d+,)/;
+
+/** Compile a monitor pattern; undefined means every line. Throws a readable error when invalid. */
+export function compilePattern(pattern: string | undefined): RegExp | undefined {
+	if (pattern === undefined || pattern === "") return undefined;
+	let re: RegExp;
+	try {
+		re = new RegExp(pattern);
+	} catch (e) {
+		throw new Error(`Invalid pattern ${JSON.stringify(pattern)}: ${(e as Error).message}`);
+	}
+	if (NESTED_QUANTIFIER.test(pattern)) {
+		throw new Error(`Pattern ${JSON.stringify(pattern)} repeats a group that itself repeats (like (a+)+), which can take exponential time. Rewrite it without the nested repeat.`);
+	}
+	return re;
+}
+
+const MATCHER_JS = `
+const { workerData: { source, flags, flag, port } } = require("node:worker_threads");
+const re = new RegExp(source, flags);
+const done = new Int32Array(flag);
+port.on("message", (lines) => {
+	port.postMessage(lines.map((l) => re.test(l)));
+	Atomics.store(done, 0, 1);
+	Atomics.notify(done, 0);
+});`;
+
+/**
+ * Test lines against `re` in a worker thread, waiting at most `budgetMs` per batch. Returns one
+ * boolean per line, or undefined when the budget ran out (the worker is then terminated and the
+ * matcher must not be used again). Any regex can backtrack for minutes on one line; this bounds it.
+ */
+export function lineMatcher(re: RegExp, budgetMs = MATCH_BUDGET_MS): { test(lines: string[]): boolean[] | undefined; close(): void } {
+	const flag = new SharedArrayBuffer(4);
+	const done = new Int32Array(flag);
+	const { port1, port2 } = new MessageChannel();
+	const worker = new Worker(MATCHER_JS, { eval: true, workerData: { source: re.source, flags: re.flags, flag, port: port2 }, transferList: [port2] });
+	worker.on("error", () => {}); // an uncaught error in the worker must not take pi down; test() then times out
+	worker.unref();
+	port1.unref();
+	const close = () => {
+		port1.close();
+		void worker.terminate();
+	};
+	return {
+		test(lines) {
+			if (!lines.length) return [];
+			Atomics.store(done, 0, 0);
+			port1.postMessage(lines);
+			if (Atomics.wait(done, 0, 0, budgetMs) === "timed-out") {
+				close();
+				return undefined;
+			}
+			return receiveMessageOnPort(port1)?.message as boolean[] | undefined;
+		},
+		close,
+	};
+}
+
+/** Whether any process is left in process group `pgid` (signal 0 sends nothing). */
+export function groupAlive(pgid: number): boolean {
+	try {
+		process.kill(-pgid, 0);
+		return true;
+	} catch (e) {
+		return (e as NodeJS.ErrnoException).code === "EPERM"; // exists, but owned by another user
+	}
+}
+
+/** How many processes are in process group `pgid`, or undefined when pgrep cannot say. */
+export function groupSize(pgid: number): number | undefined {
+	const r = spawnSync("pgrep", ["-g", String(pgid)], { encoding: "utf8", timeout: 2000 });
+	if (r.status !== 0 && r.status !== 1) return undefined;
+	return r.stdout.split("\n").filter(Boolean).length;
+}
+
+/**
+ * Whether a task's process group is known to be gone. Latched: once the group is empty its id may
+ * be reused by an unrelated group, so a later check could wrongly say it is back.
+ */
+export function groupGone(t: { pid: number; ended?: number; gone?: boolean }, alive = groupAlive): boolean {
+	if (!t.gone && t.ended !== undefined && !alive(t.pid)) t.gone = true;
+	return !!t.gone;
+}
+
+/** Finished tasks to forget beyond the newest `keep`: never one whose group may still be alive. */
+export function evictable<T extends { ended?: number; gone?: boolean }>(tasks: T[], keep: number): T[] {
+	const finished = tasks.filter((t) => t.ended !== undefined && t.gone).sort((a, b) => a.ended! - b.ended!);
+	return finished.slice(0, Math.max(0, finished.length - keep));
+}
+
+/** A command or prompt as one short, redacted line for the widget and the /shells picker. */
+export function short(s: string, n = 48): string {
+	const one = clip(s).replace(/\s+/g, " ").trim();
+	return one.length > n ? `${one.slice(0, n - 1)}…` : one;
+}
+
+export interface CheckinTask {
+	id: string;
+	command: string;
+	started: number;
+	lastOutput?: number; // when its log file last changed; undefined while it is empty
+}
+
+/**
+ * The notice a headless session sends after `waited` ms with no notice: what still runs, how long
+ * each task has been quiet (flagged at `interval` or more), pending timers. Nothing is stopped.
+ */
+export function checkinText(tasks: CheckinTask[], wakes: { id: string; prompt: string; due: number }[], waited: number, now: number, interval: number): string {
+	const lines = [`Background shells check-in: no notice for ${duration(waited)}. Nothing was stopped; still pending:`];
+	for (const t of tasks) {
+		const quiet = now - (t.lastOutput ?? t.started);
+		const out = quiet >= interval ? `nothing written to its log for ${duration(quiet)}` : t.lastOutput === undefined ? "nothing written to its log yet" : `last wrote to its log ${duration(quiet)} ago`;
+		lines.push(`- ${t.id} running ${duration(now - t.started)}, ${out}: \`${clip(t.command)}\``);
+	}
+	for (const w of wakes) lines.push(`- ${w.id} timer, wakes in ${duration(Math.max(0, w.due - now))}: ${short(w.prompt, 200)}`);
+	lines.push(
+		`This headless run cannot finish until every task listed stops. Stop servers, watchers and anything whose result you do not need now with shell_stop <id>, and any task that looks stuck; only wait for work you expect to finish: end your turn and the next check-in comes in ${duration(interval)} unless a notice arrives first.`,
+	);
+	return lines.join("\n");
+}
+
+export interface PanelRow {
+	id: string; // "" for the "+N more" row
+	status: string;
+	label: string;
+	warn?: boolean;
+}
+
+type PanelTask = { id: string; command: string; started: number; ended?: number; leftover?: boolean; watch?: { re?: RegExp; matches: number } };
+const plural = (n: number, word: string, many = `${word}s`) => `${n} ${n === 1 ? word : many}`;
+
+/** Widget rows: running shells, finished shells with processes left in their group, pending timers. */
+export function panelRows(tasks: PanelTask[], wakes: { id: string; prompt: string; due: number }[], now: number, cap = 5): PanelRow[] {
+	const rows: PanelRow[] = [];
+	for (const t of tasks) {
+		if (t.ended !== undefined) continue;
+		const w = t.watch && (t.watch.re ? ` · watching /${short(t.watch.re.source, 24)}/ · ${plural(t.watch.matches, "match", "matches")}` : ` · watching all lines · ${plural(t.watch.matches, "line")}`);
+		rows.push({ id: t.id, status: duration(now - t.started) + (w || ""), label: short(t.command) });
+	}
+	for (const t of tasks) if (t.ended !== undefined && t.leftover) rows.push({ id: t.id, status: "exited, processes left in its group", label: short(t.command), warn: true });
+	for (const w of wakes) rows.push({ id: w.id, status: `wakes in ${duration(Math.max(0, w.due - now))}`, label: short(w.prompt) });
+	return rows.length > cap ? [...rows.slice(0, cap), { id: "", status: `+${rows.length - cap} more · /shells`, label: "" }] : rows;
+}
+
+/** Footer text, e.g. "2 shells · 1 monitor · 1 timer · /shells"; undefined when nothing is active. */
+export function footerText(n: { shells: number; monitors: number; timers: number; leftovers: number }): string | undefined {
+	const parts = [plural(n.shells, "shell"), plural(n.monitors, "monitor"), plural(n.timers, "timer"), plural(n.leftovers, "leftover")].filter((p) => !p.startsWith("0 "));
+	return parts.length ? `${parts.join(" · ")} · /shells` : undefined;
+}

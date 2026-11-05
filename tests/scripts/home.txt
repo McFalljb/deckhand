@@ -13,6 +13,8 @@ assert_state home.open true
 assert_state open_sessions.1.home true
 assert_state open_sessions.1.project_id 0
 assert_state open_sessions.1.tabs.0.title Home
+# no main folder: Atlas works in the data dir's home/, never in $HOME (macOS privacy prompts)
+assert_state open_sessions.1.cwd $datadir/home
 assert_state open_sessions.1.tabs.0.status running
 assert_state focus.id agent_input
 assert_state current_session $session

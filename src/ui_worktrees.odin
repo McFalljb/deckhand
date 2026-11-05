@@ -6,7 +6,7 @@ package main
 // checkouts (main first) with their state, then the local branches without
 // a checkout. Picking a checkout shows it in the tree (files_set_root);
 // each row's "…" opens its actions (the context menu, ui_sidebar.odin):
-// terminal and pi session there, Reveal, copy path or branch, and Clean up
+// terminal or a session (the harness picker) there, Reveal, copy path or branch, and Clean up
 // for a merged, clean worktree (worktree_cleanup asks in the confirmation
 // bar). Branches are listed, never checked out here.
 //
@@ -473,7 +473,7 @@ wt_menu_actions :: proc(i: int, at: [2]f32) {
 	}
 }
 
-// A worktree row's actions: open a terminal or a pi session there, Reveal,
+// A worktree row's actions: open a terminal or a session there, Reveal,
 // copy its path or branch; Clean up for a merged, clean worktree.
 wt_menu_items :: proc(t: Menu_Worktree, items: ^[dynamic]Menu_Item) {
 	sep :: proc(items: ^[dynamic]Menu_Item) {append(items, Menu_Item{sep = true})}
@@ -481,7 +481,11 @@ wt_menu_items :: proc(t: Menu_Worktree, items: ^[dynamic]Menu_Item) {
 	c := wt_checkout(r, t.path)
 	if t.path != "" && c != nil && !c.missing && !c.bare {
 		if cs := cur(); cs != nil && !cs.home do append(items, Menu_Item{label = "Open terminal here", cmd = New_Shell_Tab{session = cs.id, cwd = t.path}})
-		if p := files_project(); p != nil do append(items, Menu_Item{label = "New pi session here", cmd = Worktree_Session{project_id = p.id, path = t.path}})
+		if p := files_project(); p != nil {
+			// a session in the checkout: the installed harnesses' picker (harness.odin; pi: a worktree
+			// session, Claude: a Claude-only session kept with the project's)
+			append(items, Menu_Item{label = "New session here", picker = Menu_New_Session{project_id = p.id, cwd = t.path}})
+		}
 		if cs := cur(); cs != nil && !cs.home do append(items, Menu_Item{label = "Show changes", cmd = Changes_Open{session = cs.id, path = t.path}})
 		append(items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_In_Finder{path = t.path}})
 		sep(items)

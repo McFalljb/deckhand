@@ -10,8 +10,12 @@
 # A fake HOME with one project and session, a fake pi, a temp data dir.
 # Usage: tests/scripts/app-tab.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
+# backing scale 2 on any Mac (test mode's default is 1): logical px vs ring px stays tested
+export PI_DESK_SCALE=2
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 [ -x build/fake-app ] || { echo "build/fake-app missing: ./build.sh test (or ./build.sh fake-app)"; exit 1; }
 W="$ROOT/build/app-tab"
 rm -rf "$W"
@@ -25,7 +29,7 @@ printf '{"type":"session","version":3,"id":"aaaa-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_aaaa-1.jsonl"
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/app-tab.txt PI_DESK_DATA_DIR="$W/data" \
   PI_DESK_RUNTIME_DIR="$W/run" APP_TAB_ONCE="$W" \
-  PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$PROJ" > "$W/run.log" 2>&1 &
+  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 &
 PID=$!
 # pi-desk's memory while the scene runs (RSS, KB): before the first app tab
 # (the script waits 1.5 s first) and the peak

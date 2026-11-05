@@ -25,6 +25,7 @@ Action :: struct {
 	detail:      proc() -> string, // optional: current value, shown muted
 	prepare:     proc(),
 	pick_folder: bool, // make receives the picked folder in action_folder
+	ui:          proc(), // runs instead of make's command (a UI step: the harness picker); make still says whether it applies
 	no_palette:  bool, // a button and a shortcut only (the palette itself)
 }
 
@@ -38,21 +39,25 @@ ACTIONS := [?]Action {
 		if !palette_is_open() do palette_reset()
 	}, make = proc() -> (Command, bool) {return Set_Focus{"palette"}, true}},
 	// a chat: outside any project (Chats); a session: in a project
+	// both: the installed harnesses' picker, or the only one at once (harness.odin)
 	{id = "new_chat", label = "New chat", keys = "⌘N", make = proc() -> (Command, bool) {
 		c := chats_project()
 		if c == nil do return nil, false
 		return New_Chat{c.id}, true
-	}},
+	}, ui = proc() {if c := chats_project(); c != nil do new_session_ui(c.id)}},
 	{id = "new_session", label = "New session", keys = "⇧⌘N", make = proc() -> (Command, bool) {
 		if find_project(state.selected_project) == nil do return nil, false
 		return New_Chat{state.selected_project}, true
-	}, detail = proc() -> string {
+	}, ui = proc() {new_session_ui(state.selected_project)}, detail = proc() -> string {
 		p := find_project(state.selected_project)
 		return p != nil ? fmt.tprintf("in %s", project_name(p^)) : ""
 	}},
 	{id = "chats_readonly", label = "Chats: read-only", make = proc() -> (Command, bool) {
 		return Set_Chats_Readonly{on = !state.settings.chats_readonly}, true
-	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full pi)"}},
+	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}},
+	{id = "claude_skip_permissions", label = "Claude Code: skip permissions in new tabs", make = proc() -> (Command, bool) {
+		return Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
+	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "on: --dangerously-skip-permissions in the tabs you start" : "off"}},
 	{id = "chats_dir", label = "Chats folder…", pick_folder = true, make = proc() -> (Command, bool) {
 		if action_folder == "" do return Set_Folder{kind = .Chats, path = state.settings.folders[.Chats]}, true // listing
 		return Set_Folder{kind = .Chats, path = action_folder}, true
@@ -83,6 +88,24 @@ ACTIONS := [?]Action {
 		cs := cur()
 		if cs == nil do return nil, false
 		return New_Shell_Tab{session = cs.id}, true
+	}},
+	// Claude Code (claude.odin): claude with pi-desk's plugin, in the session on screen's folder
+	{id = "new_claude_tab", label = "New Claude tab", keys = "⌥⌘T", title = proc() -> string {return claude_label("New Claude tab")}, make = proc() -> (Command, bool) {
+		cs := cur()
+		if cs == nil || cs.home || cs.missing do return nil, false // in chats too (read-only while chats are: claude.odin)
+		return New_Claude_Tab{session = cs.id}, true
+	}},
+	{id = "claude_held_send", label = "Claude: send the waiting message now", make = proc() -> (Command, bool) {
+		t := active_tab()
+		if t == nil do return nil, false
+		if ct, is := t.kind.(Claude_Tab); !is || len(ct.held) == 0 do return nil, false
+		return Claude_Held_Op{tab_id = t.id, op = "send"}, true
+	}},
+	{id = "claude_held_drop", label = "Claude: drop the waiting messages", make = proc() -> (Command, bool) {
+		t := active_tab()
+		if t == nil do return nil, false
+		if ct, is := t.kind.(Claude_Tab); !is || len(ct.held) == 0 do return nil, false
+		return Claude_Held_Op{tab_id = t.id, op = "drop"}, true
 	}},
 	// browser tabs (browser_nav.odin): a blank page in the session on screen, its URL field focused
 	{id = "new_browser_tab", label = "New browser tab", make = proc() -> (Command, bool) {
@@ -159,13 +182,16 @@ ACTIONS := [?]Action {
 		return Close_Session{session = cs.id}, true
 	}},
 	{id = "ask_agent", label = "Ask Atlas…", title = proc() -> string {return fmt.tprintf("Ask %s…", agent_name())}, make = proc() -> (Command, bool) {
+		if !atlas_offered() do return nil, false // Atlas runs on pi (harness.odin)
 		return Set_Home{open = true}, true // its terminal takes the keyboard
 	}},
 	// pi's own model selector in Atlas's terminal (agent.odin); the gear's row says "Atlas model…"
 	{id = "agent_model", label = "Atlas: change model", title = proc() -> string {return fmt.tprintf("%s: change model", agent_name())}, make = proc() -> (Command, bool) {
+		if !atlas_offered() do return nil, false
 		return Agent_Model_Picker{}, true
 	}, detail = proc() -> string {m := agent_model_short(); return m != "" ? m : "pi's default"}},
 	{id = "agent_model_pop", label = "Atlas model…", title = proc() -> string {return fmt.tprintf("%s model…", agent_name())}, no_palette = true, make = proc() -> (Command, bool) {
+		if !atlas_offered() do return nil, false
 		return Agent_Model_Picker{}, true
 	}, detail = proc() -> string {m := agent_model_short(); return m != "" ? m : "pi's default"}},
 	// Atlas's prompt file (<data dir>/atlas/ATLAS.md), in an editor tab
@@ -184,7 +210,7 @@ ACTIONS := [?]Action {
 		return Job_Sheet{open = true}, true // the job sheet (ui_job_sheet.odin)
 	}},
 	// the main folder and its subfolders (folders.odin), the first-run sheet (ui_setup.odin)
-	{id = "setup", label = "Set up pi-desk…", make = proc() -> (Command, bool) {
+	{id = "setup", label = "Set up Deckhand…", make = proc() -> (Command, bool) {
 		return Setup_Sheet{open = true}, true
 	}, detail = proc() -> string {return state.settings.home_dir != "" ? fs_display(state.settings.home_dir) : "no main folder"}},
 	{id = "home_dir", label = "Main folder…", pick_folder = true, make = proc() -> (Command, bool) {
@@ -196,9 +222,18 @@ ACTIONS := [?]Action {
 		if action_folder == "" do return Set_Folder{kind = folder_pick_kind, path = state.settings.folders[folder_pick_kind]}, true
 		return Set_Folder{kind = folder_pick_kind, path = action_folder}, true
 	}},
+	// Settings → Claude accounts → Add account…: a Claude Code config folder (claude_accounts.odin)
+	{id = "claude_account_add", label = "Add Claude account…", pick_folder = true, make = proc() -> (Command, bool) {
+		if action_folder == "" do return nil, false
+		return Add_Claude_Account{dir = action_folder}, true
+	}},
 	// the setup sheet's "Choose…" buttons: the picked folder goes into the sheet
 	{id = "setup_pick_main", label = "Choose another folder…", no_palette = true, pick_folder = true, make = proc() -> (Command, bool) {
 		if action_folder != "" do setup_picked(false, action_folder)
+		return Set_Focus{"setup"}, true
+	}},
+	{id = "setup_pick_account", label = "Add folder…", no_palette = true, pick_folder = true, make = proc() -> (Command, bool) {
+		if action_folder != "" do setup_account_picked(action_folder)
 		return Set_Focus{"setup"}, true
 	}},
 	{id = "setup_pick_chats", label = "Choose separate folder…", no_palette = true, pick_folder = true, make = proc() -> (Command, bool) {
@@ -218,6 +253,7 @@ ACTIONS := [?]Action {
 		return nil, false
 	}},
 	{id = "toggle_agent", label = "Toggle Atlas", title = proc() -> string {return fmt.tprintf("Toggle %s", agent_name())}, keys = "⌘J", make = proc() -> (Command, bool) {
+		if !atlas_offered() do return nil, false // Atlas runs on pi (harness.odin)
 		return Set_Home{open = !state.home_open}, true
 	}, detail = proc() -> string {return state.home_open ? "shown" : ""}},
 	{id = "pin_agent", label = "Dock the agent's drawer", make = proc() -> (Command, bool) {
@@ -269,6 +305,10 @@ ACTIONS := [?]Action {
 	{id = "edit_pi_models", label = "Edit pi models (models.json)", make = proc() -> (Command, bool) {return settings_file_action("pi", "models.json")}},
 	{id = "edit_pi_agents_md", label = "Edit global AGENTS.md", make = proc() -> (Command, bool) {return settings_file_action("pi", "AGENTS.md")}},
 	{id = "edit_project_settings", label = "Edit project pi settings (.pi/settings.json)", make = proc() -> (Command, bool) {return settings_file_action("project", ".pi/settings.json")}},
+	// Claude Code's (settings_files.odin: the Settings tab's Claude groups; listed once Claude Code has its folder)
+	{id = "edit_claude_settings", label = "Edit Claude settings (settings.json)", make = proc() -> (Command, bool) {return settings_file_action("claude", "settings.json")}},
+	{id = "edit_claude_md", label = "Edit global CLAUDE.md", make = proc() -> (Command, bool) {return settings_file_action("claude", "CLAUDE.md")}},
+	{id = "edit_claude_project_settings", label = "Edit project Claude settings", make = proc() -> (Command, bool) {return settings_file_action("claude-project", ".claude/settings.json")}, detail = proc() -> string {return ".claude/settings.json"}},
 	{id = "shortcuts", label = "Keyboard shortcuts", keys = "⌘/", make = proc() -> (Command, bool) {
 		return Set_Focus{"shortcuts"}, true // the shortcuts sheet (ui_toolbar.odin)
 	}},
@@ -286,18 +326,22 @@ ACTIONS := [?]Action {
 		return Set_Reduce_Motion{!state.settings.reduce_motion}, true
 	}, detail = proc() -> string {return state.settings.reduce_motion ? "on" : "off"}},
 	{id = "rescan", label = "Rescan sessions", make = proc() -> (Command, bool) {return Rescan{}, true}},
+	// login_env.odin: Dock and Finder launches only (a terminal's environment is that terminal's)
+	{id = "refresh_shell_env", label = "Refresh shell environment", make = proc() -> (Command, bool) {return Refresh_Shell_Env{}, true}, detail = proc() -> string {
+		return login_env.gui ? "new tabs only" : "uses the terminal's"
+	}},
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (Command, bool) {
 		return Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
 	// pi-desk's own updates (update.odin)
 	{id = "check_updates", label = "Check for Updates…", make = proc() -> (Command, bool) {return Update_Check{}, true}, detail = proc() -> string {
 		if upd.offered do return fmt.tprintf("%s available", upd.release.version)
-		return upd.current != "" ? fmt.tprintf("pi-desk %s", upd.current) : ""
+		return upd.current != "" ? fmt.tprintf("Deckhand %s", upd.current) : ""
 	}},
 	{id = "update_checks", label = "Check for updates automatically", make = proc() -> (Command, bool) {
 		return Set_Update_Check{on = upd.checks_off}, true
 	}, detail = proc() -> string {return upd.checks_off ? "off" : "on (about once a day)"}},
-	{id = "update_install", label = "Restart to update pi-desk", make = proc() -> (Command, bool) {
+	{id = "update_install", label = "Restart to update Deckhand", make = proc() -> (Command, bool) {
 		if upd.phase != .Ready do return nil, false
 		return Update_Install{}, true
 	}, detail = proc() -> string {return upd.release.version}},
@@ -310,6 +354,19 @@ ACTIONS := [?]Action {
 		for &s in state.open_sessions do if t := session_pi_tab(&s); t != nil && t.status == .Running && reload_outdated(t) do return Pi_Restart_Updated{}, true
 		return nil, false
 	}, detail = proc() -> string {return state.reload.pi_version != "" ? fmt.tprintf("pi %s", state.reload.pi_version) : ""}},
+	// Claude tabs (claude_reload.odin): no /reload; a restart resumes each conversation, always confirmed
+	{id = "restart_changed_claude", label = "Restart Claude tabs for changed settings", make = proc() -> (Command, bool) {
+		for x in running_claude() do if x.t.reload.stale do return Claude_Restart_Changed{}, true
+		return nil, false
+	}},
+	{id = "restart_updated_claude", label = "Restart Claude tabs on the new Claude Code", make = proc() -> (Command, bool) {
+		for x in running_claude() do if claude_reload_outdated(x.t) do return Claude_Restart_Changed{update = true}, true
+		return nil, false
+	}, detail = proc() -> string {return state.reload.claude.version != "" ? fmt.tprintf("Claude Code %s", claude_version_label(state.reload.claude.version)) : ""}},
+	{id = "restart_all_claude", label = "Restart all Claude tabs", make = proc() -> (Command, bool) {
+		if len(running_claude()) == 0 do return nil, false
+		return Claude_Restart_Changed{all = true}, true
+	}},
 	{id = "add_project", label = "Add project…", pick_folder = true, make = proc() -> (Command, bool) {
 		if action_folder == "" do return Add_Project{}, true // listing: always available
 		return Add_Project{cwd = action_folder}, true
@@ -366,7 +423,7 @@ ACTIONS := [?]Action {
 	{id = "sort_projects", label = "Sort projects (next order)", make = proc() -> (Command, bool) {return next_sort(.Projects), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Projects]]}},
 	{id = "sort_sessions", label = "Sort sessions (next order)", make = proc() -> (Command, bool) {return next_sort(.Sessions), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Sessions]]}},
 	{id = "sort_chats", label = "Sort chats (next order)", make = proc() -> (Command, bool) {return next_sort(.Chats), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Chats]]}},
-	{id = "quit", label = "Quit pi-desk", keys = "⌘Q", make = proc() -> (Command, bool) {return Quit{}, true}},
+	{id = "quit", label = "Quit Deckhand", keys = "⌘Q", make = proc() -> (Command, bool) {return Quit{}, true}},
 	// the terminals' and the editor's text size (the menu bar's View menu)
 	{id = "text_bigger", label = "Bigger text", keys = "⌘+", make = proc() -> (Command, bool) {
 		pt := int(term_text_pt())
@@ -397,7 +454,7 @@ ACTIONS := [?]Action {
 	{id = "next_session", label = "Next session", keys = "⌥⌘↓", make = proc() -> (Command, bool) {return session_step(1)}},
 	{id = "prev_session", label = "Previous session", keys = "⌥⌘↑", make = proc() -> (Command, bool) {return session_step(-1)}},
 	// the guide's copy in the data dir (agent.odin), in a Markdown tab: read-only (editor_load)
-	{id = "user_guide", label = "pi-desk user guide", make = proc() -> (Command, bool) {
+	{id = "user_guide", label = "Deckhand user guide", make = proc() -> (Command, bool) {
 		p := agent_guide_path()
 		if cur() == nil || p == "" || !os.exists(p) do return nil, false
 		return Markdown_Open{path = p}, true
@@ -547,6 +604,7 @@ ACTIONS := [?]Action {
 		files_path_changed(ad)
 		for d in files_cached_dirs(ad) do files_path_changed(d)
 		if cwd := settings_project_cwd(); cwd != "" do fs_model_changed(strings.concatenate({cwd, "/.pi"}, context.temp_allocator))
+		harness_checklist_refresh() // the Coding agents group looks again (ui_harness.odin)
 		settings_gen += 1
 	}},
 	{id = "settings_reveal_finder", label = "Reveal in Finder", no_palette = true, make = proc() -> (Command, bool) {
@@ -580,8 +638,8 @@ tab_nth :: proc(i: int) -> (Command, bool) {
 session_step :: proc(d: int) -> (Command, bool) {
 	rows := sidebar_open()
 	if len(rows) == 0 || (len(rows) == 1 && rows[0].id == state.current_session) do return nil, false
-	for s, i in rows do if s.id == state.current_session do return Focus_Session{rows[(i + d + len(rows)) % len(rows)].id}, true
-	return Focus_Session{rows[0].id}, true
+	for s, i in rows do if s.id == state.current_session do return Focus_Session{session = rows[(i + d + len(rows)) % len(rows)].id}, true
+	return Focus_Session{session = rows[0].id}, true
 }
 
 // Recent → Name → Created → Recent.

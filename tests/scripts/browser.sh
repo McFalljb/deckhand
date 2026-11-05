@@ -9,27 +9,55 @@
 # tests/web through pidesk-test://web/), and browser-restore: two runs on one
 # data dir, the second restoring the first's tabs.
 # Usage: tests/scripts/browser.sh [NAME...]   (default: every scene)
+#        tests/scripts/browser.sh --group a|b|c|d|e|f (a sixth of them, in build/browser-<group>/:
+#        tests/scenes.py runs them side by side)
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
-W="$ROOT/build/browser"
-rm -rf "$W" build/shots/browser
+. tests/scripts/fresh-build.sh
+# six groups of about the same length (tests/scenes.txt runs them as browser-a ... browser-f)
+GROUP_A="browser-polish browser-polish-zoom browser"
+GROUP_B="browser-polish-guard browser-polish-allow browser-focus"
+GROUP_C="browser-annotate browser-close browser-drag browser-keys"
+GROUP_D="browser-ring browser-ring-cpu browser-ring-lag browser-slots browser-release"
+GROUP_E="browser-act browser-read browser-restore"
+GROUP_F="browser-agent browser-nav browser-popup browser-tabkeys browser-pages"
+if [ "${1:-}" = --group ]; then
+  g=${2:-}
+  case "$g" in
+    a) set -- $GROUP_A ;;
+    b) set -- $GROUP_B ;;
+    c) set -- $GROUP_C ;;
+    d) set -- $GROUP_D ;;
+    e) set -- $GROUP_E ;;
+    f) set -- $GROUP_F ;;
+    *) echo "browser.sh: --group a, b, c, d, e or f"; exit 2 ;;
+  esac
+  W="$ROOT/build/browser-$g" # its own folder: the groups run at the same time
+  # a Chromium helper of a run that just ended may still be writing its profile: try again
+  rm -rf "$W" 2>/dev/null || { sleep 3; rm -rf "$W"; }
+else
+  W="$ROOT/build/browser"
+  rm -rf "$W" build/shots/browser
+fi
 FAKE_HOME="$W/home"
 PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 printf '{"type":"session","version":3,"id":"wwww-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_wwww-1.jsonl"
-if [ ! -x build/pi-desk.app/Contents/MacOS/pi-desk ]; then echo "browser scene: no CEF build (run ./build.sh)"; exit 1; fi
+if [ ! -x build/Deckhand.app/Contents/MacOS/Deckhand ]; then echo "browser scene: no CEF build (run ./build.sh)"; exit 1; fi
 fail=0
 tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }
 # the main scene, then one script per review fix (focus, keys, slots, window.close, release),
-# comment mode (browser-annotate: docs/BROWSER.md §3), agents reading pages (browser-agent: §4)
+# comment mode (browser-annotate: docs/BROWSER.md §3), agents reading pages (browser-agent: §4;
+# browser-read: around frames and boxless containers)
 # and acting on them (browser-act: step 8)
 # and the frame ring on both paint paths (browser-ring-cpu: browser-ring.txt with
 # PI_DESK_CEF_SHARED_TEXTURE=0, OnPaint), with a slow GPU (browser-ring-lag) and
 # under a fast drag (browser-drag); while each runs, every socket of its
 # processes is listed: none may leave the machine
-ALL="browser browser-polish browser-polish-allow browser-polish-zoom browser-polish-guard browser-focus browser-keys browser-slots browser-close browser-release browser-ring browser-ring-cpu browser-ring-lag browser-drag browser-annotate browser-agent browser-act browser-nav browser-popup browser-tabkeys browser-pages browser-restore"
+ALL="$GROUP_A $GROUP_B $GROUP_C $GROUP_D $GROUP_E $GROUP_F"
 NAMES=${*:-$ALL}
 # two sessions of the fake pi in the project (browser-restore opens them by id)
 STORE_DIR="$FAKE_HOME/.pi/agent/sessions/--proj--" # beside wwww-1 (its project's store)
@@ -43,7 +71,7 @@ for name in $NAMES; do
     rm -rf "$W/data" && mkdir -p "$W/data"
     for n in 1 2; do
       HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-restore-$n.txt PI_DESK_DATA_DIR="$W/data" \
-        PI_DESK_CMD='exec sleep 600' build/pi-desk > "$W/browser-restore-$n.log" 2>&1 || true
+        PI_DESK_CMD='exec sleep 600' build/deckhand > "$W/browser-restore-$n.log" 2>&1 || true
       grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|no element" "$W/browser-restore-$n.log" | sed "s/^/browser-restore-$n: /" || true
       if grep -qE "ASSERT FAILED|TIMEOUT|unknown command|no element" "$W/browser-restore-$n.log" || ! grep -q "done:" "$W/browser-restore-$n.log"; then
         echo "browser-restore-$n: FAILED (log: $W/browser-restore-$n.log)"; fail=1
@@ -60,7 +88,7 @@ for name in $NAMES; do
   # did not wait for the GPU would hand CEF a slot still sampled (inflight_writes)
   if [ $name = browser-ring-lag ]; then script=browser-ring; lag=150; fi
   HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/$script.txt PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CEF_SHARED_TEXTURE=$shared PI_DESK_TEST_GPU_LAG_MS=$lag PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk "$PROJ" > "$W/$name.log" 2>&1 &
+    PI_DESK_CEF_SHARED_TEXTURE=$shared PI_DESK_TEST_GPU_LAG_MS=$lag PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/$name.log" 2>&1 &
   pid=$!
   : > "$W/$name.sockets"
   while kill -0 $pid 2>/dev/null; do

@@ -74,7 +74,7 @@ a_status :: proc(a: Agent_State, waiting := false) {
 a_start :: proc(t: ^testing.T, dir: string) -> string {
 	args := fmt.tprintf("%s/args", dir)
 	os.remove(args)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s'; exec sleep 30`, args))
+	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
 	if ht := home_tab(); ht != nil && ht.status == .Running do run_command(Tab_Exited{tab_id = ht.id})
 	r := run_command(Set_Home{open = true}, A_UI)
 	testing.expect(t, r.ok, r.error)
@@ -199,8 +199,8 @@ agent_guide_installed_and_passed :: proc(t: ^testing.T) {
 	data, _ = os.read_entire_file(path, context.temp_allocator)
 	testing.expect_value(t, string(data), ATLAS_GUIDE)
 	got := strings.join(agent_extra_args(true), "\n", context.temp_allocator)
-	testing.expect(t, strings.contains(got, fmt.tprintf("--append-system-prompt\npi-desk user guide: %s", path)), got)
-	testing.expect(t, strings.contains(ATLAS_PROMPT_STARTER, "pi-desk user guide:"), "the starter names the line")
+	testing.expect(t, strings.contains(got, fmt.tprintf("--append-system-prompt\nDeckhand user guide: %s", path)), got)
+	testing.expect(t, strings.contains(ATLAS_PROMPT_STARTER, "Deckhand user guide:"), "the starter names the line")
 }
 
 @(test)

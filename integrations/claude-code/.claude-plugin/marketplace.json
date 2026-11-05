@@ -1,0 +1,12 @@
+{
+  "name": "deckhand",
+  "owner": {"name": "Deckhand"},
+  "description": "The Deckhand plugin for Claude Code (Deckhand loads it by itself in its Claude tabs).",
+  "plugins": [
+    {
+      "name": "deckhand",
+      "source": "./",
+      "description": "Use Deckhand's browser tabs, app tabs and the user's pending comments from a Deckhand Claude tab."
+    }
+  ]
+}

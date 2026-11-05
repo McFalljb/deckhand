@@ -154,6 +154,7 @@ Agent_Net :: struct {
 Agent_Tab :: struct {
 	tab_id:        u64,
 	who:           Caller_Kind, // the last agent that used it
+	who_claude:    bool, // ... a Claude tab (caller panel + claude)
 	doing:         Agent_Doing,
 	last:          time.Tick, // its last command ({} = none, or Stop)
 	want_console:  bool, // recording asked for (until capture_until)
@@ -411,9 +412,9 @@ agent_origin :: proc(url: string) -> string {
 }
 
 // Who the strip names.
-agent_who :: proc(k: Caller_Kind) -> string {
+agent_who :: proc(k: Caller_Kind, claude := false) -> string {
 	#partial switch k {
-	case .Panel:   return "pi"
+	case .Panel:   return claude ? "Claude" : "pi"
 	case .Control: return agent_name()
 	}
 	return "An agent"
@@ -515,6 +516,10 @@ browser_agent_nav_ran :: proc(cmd: Command, caller: Caller, r: Result) {
 	#partial switch _ in cmd {
 	case Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload:
 		agent_tab(tab_id).nav_at = time.tick_now()
+	case Browser_Open:
+		// an agent's: the new tab's first document (blank) is "complete" before its page's. Only an
+		// agent's: the agent state (and its strip) is made for an agent's tab, not the user's
+		if caller.kind == .Panel || caller.kind == .Control do agent_tab(tab_id).nav_at = time.tick_now()
 	}
 	agent_touch(tab_id, caller, .Driving)
 }
@@ -522,7 +527,7 @@ browser_agent_nav_ran :: proc(cmd: Command, caller: Caller, r: Result) {
 agent_touch :: proc(tab_id: u64, caller: Caller, doing: Agent_Doing) {
 	if caller.kind != .Panel && caller.kind != .Control do return // the user's own and scripts': no strip
 	t := agent_tab(tab_id)
-	t.who, t.doing, t.last = caller.kind, doing, time.tick_now()
+	t.who, t.who_claude, t.doing, t.last = caller.kind, caller.claude, doing, time.tick_now()
 	app.redraw = true
 }
 
@@ -1281,7 +1286,7 @@ browser_agent_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 	t := agent_tab_of(tab_id)
 	if t == nil || !agent_strip_on(t) do return
 	strings.write_string(b, `,"agent":{"who":`)
-	json_quote(b, agent_who(t.who))
+	json_quote(b, agent_who(t.who, t.who_claude))
 	fmt.sbprintf(b, `,"doing":"%s","busy":%v,"recording":"%s"`, AGENT_DOING_NAMES[t.doing], agent_busy(tab_id), recording(t))
 	if t.act_target != "" {
 		strings.write_string(b, `,"target":`)
@@ -1335,7 +1340,7 @@ browser_agent_strip_w :: proc(b: ^Browser) -> f32 {
 strip_text :: proc(b: ^Browser) -> (what: string, on: bool) {
 	t := agent_tab_of(b.tab_id)
 	if t == nil || !agent_strip_on(t) do return "", false
-	who := agent_who(t.who)
+	who := agent_who(t.who, t.who_claude)
 	doing := t.last != {} || agent_busy(b.tab_id)
 	rec := recording(t)
 	if rec != "" do rec = rec == "console,network" ? "recording console, network" : fmt.tprintf("recording %s", rec)
@@ -1383,7 +1388,7 @@ agent_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string,
 		if i := strings.index(want, " tab="); i >= 0 do want = want[:i]
 		got = "-"
 		if t != nil && agent_strip_on(t) {
-			got = fmt.tprintf("%s %s %s", agent_who(t.who), AGENT_DOING_NAMES[t.doing], recording(t))
+			got = fmt.tprintf("%s %s %s", agent_who(t.who, t.who_claude), AGENT_DOING_NAMES[t.doing], recording(t))
 			if strings.contains(got, want) do got = want
 		}
 	case "wake":

@@ -1,7 +1,7 @@
-# Developing pi-desk
+# Developing Deckhand
 
 This is the developer's companion to the [README](../README.md) and the [user guide](GUIDE.md):
-how to build pi-desk, how the code is laid out, how the test scenes work and how a release is
+how to build Deckhand, how the code is laid out, how the test scenes work and how a release is
 made. The wire protocol has its own document, [PROTOCOL.md](PROTOCOL.md).
 
 ## Contents
@@ -19,10 +19,12 @@ made. The wire protocol has its own document, [PROTOCOL.md](PROTOCOL.md).
 ## Requirements
 
 You need macOS 14 or later on Apple silicon (arm64), [Odin](https://odin-lang.org/) `dev-2026-09`,
-and `clang` from the Xcode command line tools. Intel Macs can build pi-desk too, but without the
+and `clang` from the Xcode command line tools. Intel Macs can build Deckhand too, but without the
 browser tab, because CEF is wired up for arm64 only. To run what you build you need
-[pi](https://github.com/earendil-works) on your login shell's `PATH`, and optionally
-[pi-kit](https://github.com/McFalljb/pi-kit) for the bridge and the agent tools (see the README).
+[pi](https://pi.dev) 1.4.0 or newer, or Claude Code, or both, on your login
+shell's `PATH` (Atlas and jobs need pi). The pi bridge and the agent tools ship with Deckhand
+(`integrations/pi` and `integrations/claude-code`, [HARNESSES.md](HARNESSES.md));
+[pi-kit](https://github.com/McFalljb/pi-kit) is optional extras.
 
 The build does **not** need Zig: libghostty-vt comes prebuilt from `vendor/libghostty-vt/`. Zig is
 only needed to [rebuild that library](#rebuilding-libghostty-vt).
@@ -30,12 +32,12 @@ only needed to [rebuild that library](#rebuilding-libghostty-vt).
 ## Building and running
 
 ```sh
-git clone --recursive https://github.com/McFalljb/pi-desk.git
-cd pi-desk
-./build.sh            # release build -> build/pi-desk (first build downloads CEF, ~135 MB)
+git clone --recursive https://github.com/McFalljb/deckhand.git
+cd deckhand
+./build.sh            # release build -> build/deckhand (first build downloads CEF, ~135 MB)
 ./build.sh run        # build and run
-./build.sh test       # binding tests (ABI sizes vs C, encoders, render state) + command-layer tests
-build/pi-desk [DIR]   # optional DIR: open a new pi chat there on start
+./build.sh test       # binding tests (ABI sizes vs C, encoders, render state) + command-layer tests + the pi integration's node tests
+build/deckhand [DIR]  # optional DIR: open a new pi chat there on start
 ```
 
 In a clone made without `--recursive`, run `git submodule update --init` (`build.sh` does this
@@ -43,9 +45,16 @@ itself when sokol-odin is missing).
 
 `./build.sh` fetches the pinned [CEF](https://bitbucket.org/chromiumembedded/cef) build
 (`vendor/cef/VERSION`) with `scripts/fetch-cef.sh`, checks its checksum, keeps it in
-`~/Library/Caches/pi-desk/cef`, and lays out `build/pi-desk.app` around it. `build/pi-desk` is a
+`~/Library/Caches/pi-desk/cef`, and lays out `build/Deckhand.app` around it. `build/deckhand` is a
 small wrapper that runs the bundle's binary directly, so arguments, the environment and stdio pass
-through. `PI_DESK_NO_CEF=1 ./build.sh` builds without the browser tab and without the download.
+through (`build/pi-desk` is the same wrapper under its old name, so older scripts keep working).
+`PI_DESK_NO_CEF=1 ./build.sh` builds without the browser tab and without the download.
+
+Deckhand used to be called pi-desk, and some internal names keep the old name on purpose, so
+existing installs, scripts and signed updates keep working: the bundle id `dev.pi-desk.app`, the
+data dir `~/Library/Application Support/pi-desk`, the CEF cache, the `PI_DESK_*` environment
+variables, `TERM_PROGRAM=pi-desk`, `tools/pi-desk-cli/`, `.pi-desk/apps.json` and the update
+manifest's header lines.
 
 On its first run `build.sh` also compiles the sokol C libraries (into the sokol-odin submodule
 tree), Clay, the CoreText text backend and stb_truetype (into `build/`). Clay is compiled from the
@@ -56,9 +65,9 @@ prebuilt macOS `clay.a` targets macOS 15, which is why it is not used.
 
 The minimum macOS is 14.0 (Sonoma). `build.sh` sets `MACOS_MIN` and enforces it twice. Before
 linking, `scripts/check-minos.sh` reads the minimum macOS of every native library Odin links (each
-archive member, from `otool -l`); after bundling it checks every Mach-O file in `pi-desk.app`,
+archive member, from `otool -l`); after bundling it checks every Mach-O file in `Deckhand.app`,
 including the CEF framework and the helpers. Anything newer than `MACOS_MIN` fails the build.
-pi-desk has not yet been run on a real macOS 14 machine.
+Deckhand has not yet been run on a real macOS 14 machine.
 
 ## Rebuilding libghostty-vt
 
@@ -113,15 +122,22 @@ Each release:
    GitHub calls, then `--upload-only` to draft what it left there, checked again).
 3. Open the draft on GitHub, check the notes and the three files, publish it.
 
-A release carries `pi-desk-<version>-macos-arm64.zip`, its `.sha256` and its `.sig` (below). Unless a release says
-it is notarized, the app is signed ad hoc rather than with an Apple Developer ID, so Gatekeeper
-refuses the first open (the README says how to get past that). The app is about 340 MB, mostly
+The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/update_core.odin` (the
+updater asks that repository for releases, and `scripts/release.sh` reads it from there; another
+`--repo` or `PI_DESK_RELEASE_REPO` is refused without `--allow-other-repo`). The release's names
+come from the source too: the app from `UPDATE_APP` (`src/update_core.odin`), the zip's from
+`ZIP_PREFIX` and `ZIP_SUFFIX` (`src/updatesig/updatesig.odin`).
+
+A release, titled "Deckhand X.Y.Z", carries `deckhand-<version>-macos-arm64.zip` (holding exactly
+`Deckhand.app`), its `.sha256` and its `.sig` (below). Unless a release says it is notarized,
+the app is signed ad hoc rather than with an Apple Developer ID, so Gatekeeper refuses the first
+open (the README says how to get past that). The app is about 340 MB, mostly
 Chromium for the browser tab. The bundle carries the third-party licences in
 `Contents/Resources/licenses/`.
 
 ### Update signing
 
-pi-desk updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust
+Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust
 anchor is an Ed25519 key of its own, not GitHub or the TLS connection: an update installs only
 when its `.sig` verifies under the public key compiled into the app (`UPDATE_PUBLIC_KEY` in
 `src/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
@@ -130,11 +146,11 @@ built there, never anything downloaded.
 
 - **What is signed.** Not the zip's bytes directly but a short manifest
   (`src/updatesig/updatesig.odin`):
-  `pi-desk update v2\nversion X.Y.Z\nfile pi-desk-X.Y.Z-macos-arm64.zip\nsize N\nsha256 HEX\ncdhash HEX\n`.
+  `pi-desk update v2\nversion X.Y.Z\nfile deckhand-X.Y.Z-macos-arm64.zip\nsize N\nsha256 HEX\ncdhash HEX\n`.
   The CDHash is the app's main executable code directory hash (`codesign -dvvv`'s `CDHash=`),
   which covers `Info.plist` and the resource seal and so every file in the bundle. A signature
   is thus bound to one version (an old signed zip cannot be served as a newer release) and to
-  the exact app inside: pi-desk checks the CDHash again on the unpacked copy, on the staged copy
+  the exact app inside: Deckhand checks the CDHash again on the unpacked copy, on the staged copy
   next to the running app, and right before it renames that copy into place. The `.sig` is
   three lines: `pi-desk-update-sig v2`, `cdhash HEX`, `signature BASE64`. Pre-releases
   (`X.Y.Z-suffix`) are never offered and are not signed.
@@ -152,9 +168,9 @@ built there, never anything downloaded.
 - **Setting it up** (once): `mkdir -p ~/.config/pi-desk && chmod 700 ~/.config/pi-desk`,
   `build/update-sign keygen ~/.config/pi-desk/update.key`, put the printed public key into
   `UPDATE_PUBLIC_KEY` and commit. Back the key file up offline (an encrypted USB stick or a
-  password manager's secure file), not in iCloud Drive or a repository. Copies of pi-desk built
+  password manager's secure file), not in iCloud Drive or a repository. Copies of Deckhand built
   before this key exist cannot update themselves (install the first keyed release by hand).
-- **Backups.** An update keeps the replaced app next to it as `pi-desk.app.old-<version>` (rolled
+- **Backups.** An update keeps the replaced app next to it as `Deckhand.app.old-<version>` (rolled
   back to if the swap fails) and removes it at the second start after the update, whatever
   version is running then (also after a downgrade by hand).
 - **Losing the key** means installed copies can no longer be updated automatically: ship a new
@@ -187,7 +203,7 @@ previous one to `ATLAS_PROMPT_OLD_STARTERS` so that unedited copies are replaced
 
 ## Architecture
 
-pi-desk is written in **Odin** with **Clay** for layout, **sokol** for the window and the GPU
+Deckhand is written in **Odin** with **Clay** for layout, **sokol** for the window and the GPU
 (Metal, GL or D3D), **libghostty-vt** for terminal emulation and **CEF** for browser tabs. It
 targets macOS for now, but the platform-specific pieces (the PTY, fonts, test hooks) sit behind
 small files so that Linux and Windows can follow.
@@ -205,8 +221,11 @@ drawer.odin    the agent's drawer: frame, header (name, status, model, Model, pi
 inbox.odin     command inbox: any thread submits, the main thread drains; reply slots
 events.odin    events (command run, long command finished), command log, own-event filter
 socket.odin    control socket: listener, hello + tokens, subscriptions, pi-tab bridge routing
-socket_posix.odin  Unix socket + per-user 0700 dir (the OS side of socket.odin)
-ctl.odin       `pi-desk --ctl`: tiny socket client for scripts and tests
+socket_posix.odin  Unix socket + per-user 0700 dir, peer pid and parent pid (the OS side of socket.odin)
+claude.odin    Claude Code tabs (docs/CLAUDE.md): start, commands, history, held prompts; ui_claude.odin the held bar
+../tools/pi-desk-cli/  the `deckhand` CLI the bundled Claude Code plugin (../integrations/claude-code/) runs: browser and app tools, hooks
+pi_integration.odin  the bundled pi integration (../integrations/pi/, docs/HARNESSES.md): where it is, the `-e` arguments every pi start gets, the minimum pi and its bar
+ctl.odin       `deckhand --ctl`: tiny socket client for scripts and tests
 json_*.odin    hand-written JSON: command parser, encoders for commands/results/events/state (docs/PROTOCOL.md)
 platform*.odin what commands may ask of the window layer (clipboard, quit, wake, folder picker); macOS hooks
 native/platform_macos.m  macOS: blended title bar, input methods (NSTextInputClient on sokol's view), window drag, appearance (OS light/dark, window)
@@ -217,12 +236,14 @@ sidebar.odin   left column model: which projects, chats and sessions show and in
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
 tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md)
-update*.odin   pi-desk's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
+update*.odin   Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
+agent_status.odin  status of every terminal tab: OSC 7501 records, bridge > OSC 7501 precedence, unseen ("done, not seen yet"), roll-ups, the attention sort's tiers, set_unread, the tooltip line
 notify.odin    the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands
 ui_bell.odin   the bell in the top bar (unread count) and its popover (Today/Earlier, mark all read, clear; an entry focuses its session)
 ui_toolbar.odin top bar buttons (each runs an action), search pill, settings popover (the gear), shortcuts sheet (⌘/), tooltips
 settings_files.odin settings as files: the left column's Settings tab (⌘,): pi's settings files by an allowlist (settings.json, models.json, AGENTS.md…, prompts/, skills/, extensions/), the project's .pi/ and instructions file (Create when missing), extensions' config files and folders, as a tree drawn by ui_files.odin; credential files never shown or opened; pi's JSON settings saved only when pi can read them; Reload pi sessions after a save
 icons.odin     a small vector icon set (lines, rings, dots) drawn with sokol_gl, crisp at any scale
+logos.odin     the harnesses' real logos (pi, Claude Code's Clawd) as pixel grids, rasterised into the glyph atlas per pixel size in whole-px cells (assets/harness/: sources, terms)
 editor*.odin   editor tabs: piece-table buffer (editor_buffer), edits and undo (editor), tree-sitter highlighting (editor_syntax), load/save/disk sync (editor_file), git gutter and diffs (editor_git), watching (editor_watch), drawing, input, toolbar, find bars (editor_view), ⌘P finder (editor_finder), commands (editor_commands)
 fs_model.odin  file-system model: listing (gitignore, git status), project files, file commands inside projects
 files.odin     the Files tab's model: expanded folders per tree (State), cached listings, flat rows, its commands
@@ -241,7 +262,7 @@ term.odin      one terminal: PTY + reader thread + libghostty-vt, drawing, input
 pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
 ghostty/       Odin bindings for the libghostty-vt calls used
 autotest.odin  PI_DESK_SCRIPT test mode
-*_test.odin    command-layer tests (odin test src, single-threaded)
+*_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```
 
 Atlas's prompt is `ATLAS.md` in the main folder's `atlas/` (setting `home_dir`, chosen in the
@@ -281,14 +302,15 @@ Raw keystrokes and mouse bytes for the focused terminal are forwarded directly, 
 
 ### The control socket
 
-pi-desk listens on a Unix socket in a per-user `0700` directory and gives each pi tab
-`PI_DESK_SOCKET` and its own `PI_DESK_TOKEN` (caller `panel`). With these the pi-kit bridge reports
+Deckhand listens on a Unix socket in a per-user `0700` directory and gives each pi tab
+`DECKHAND_SOCKET` and its own `DECKHAND_TOKEN` (caller `panel`). With these the bridge of
+Deckhand's pi integration (`integrations/pi`, loaded with `pi -e`; [HARNESSES.md](HARNESSES.md)) reports
 `pi.session` and `pi.status`, publishes panels with `panel.set` (drawn in the right column, which
 ⌥⌘B toggles) and receives `pi.prompt`, `pi.reload` and `pi.wait_idle`. Atlas drives the app through
-the same socket with pi-kit's `desk` tools (PROTOCOL.md §8).
+the same socket with the integration's `desk` tools (PROTOCOL.md §8).
 
-For local scripts, `build/pi-desk --print-token script DIR` prints one
-`export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` line, after which `build/pi-desk --ctl '{"type":"get_state"}'`
+For local scripts, `build/deckhand --print-token script DIR` prints one
+`export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` line, after which `build/deckhand --ctl '{"type":"get_state"}'`
 talks to the running app. See PROTOCOL.md §9.
 
 ### Sessions
@@ -301,7 +323,7 @@ otherwise the first user message with text, then a `/goal` objective, and otherw
 
 Clicking a session runs `pi --session <file>` in its cwd, or focuses it if it is already open
 (sessions are identified by pi's session id). "+ New session" and "+ New chat" run
-`pi --session-id <uuid>` with a UUID that pi-desk picks. Both go through `$SHELL -l -c`, so pi is
+`pi --session-id <uuid>` with a UUID that Deckhand picks. Both go through `$SHELL -l -c`, so pi is
 found on the user's `PATH`.
 
 ### Tabs
@@ -310,20 +332,20 @@ found on the user's `PATH`.
 and so on). Each open session has one pi tab at index 0 plus any other tabs. Every terminal tab
 owns its own PTY and libghostty-vt instance. Sessions you switch away from keep running, and their
 output is still read in the background. A Markdown tab is a read-only editor (source, find, disk
-reload) plus a preview laid out by `src/markdown_view.odin` from pi-desk's own parser
+reload) plus a preview laid out by `src/markdown_view.odin` from Deckhand's own parser
 (`src/markdown.odin`, `src/markdown_inline.odin`). Browser tabs are described in
 [BROWSER.md](BROWSER.md), and the tab protocol sketch in [TAB-PROTOCOL.md](TAB-PROTOCOL.md).
 
 ### Terminals
 
 The child process gets `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PROGRAM=pi-desk`,
-and the identity variables of whatever terminal launched pi-desk are removed.
+and the identity variables of whatever terminal launched Deckhand are removed.
 
 Printable keys travel as text from the CHAR event, which is correct for any keyboard layout.
 Ctrl and Alt combinations and special keys are encoded from KEY_DOWN. Option acts as Alt (for pi's
 Alt+Enter), so Option+letter sends ESC+letter rather than a special character. The macOS
 line-editing keys are Ghostty's defaults (`mac_key_text` in `term.odin`): ⌘⌫ sends Ctrl-U, ⌘←
-Ctrl-A, ⌘→ Ctrl-E, ⌥← ESC b and ⌥→ ESC f. ⌥⌦ (ESC d) is pi-desk's own addition, and ⌥⌫ is ESC DEL
+Ctrl-A, ⌘→ Ctrl-E, ⌥← ESC b and ⌥→ ESC f. ⌥⌦ (ESC d) is Deckhand's own addition, and ⌥⌫ is ESC DEL
 from the encoder. ⌘K stays the palette, so Ghostty's clear-screen binding is not used.
 
 When the program in the terminal tracks the mouse (pi does), clicks, drags (with their button) and
@@ -363,15 +385,28 @@ still readable on white.
 > scene uses a fake HOME and a fake pi, never touches your data and needs no network. CI runs only
 > the fake ones.
 
+Which tests exist, what each protects, how long it takes and when it must run:
+[TESTING.md](TESTING.md). In short: `./build.sh test` for every change, `./build.sh scenes
+--changed` for the scenes covering what you changed (plus a smoke set), `./build.sh scenes --all`
+before a broad merge. `tests/scenes.py` (what `./build.sh scenes` runs) builds once, runs scenes
+side by side, retries a failure once and reports flaky ones; `tests/scenes.txt` lists every scene
+with its tier and the files it covers.
+
+Scenes run `build/deckhand` as it is; `./build.sh test` does not build it. Each scene sources
+`tests/scripts/fresh-build.sh` first and stops if any source file it is built from (`src/`
+except `*_test.odin`, the CLI, the bundled integrations) is newer than the binary (after a merge
+or checkout): run `./build.sh` first.
+
 CI runs in two workflows. `ci.yml` runs on every push to main and every pull request (not for
-changes to Markdown and docs alone): the unit tests in one job and the required scenes split
-across three parallel jobs, so a run takes a few minutes. `scenes-full.yml` runs every scene,
-including those not required yet, nightly and on demand (**Actions › Scenes (full) › Run
-workflow**). A scene moves into `ci.yml` once it has passed there a few times.
+changes to Markdown and docs alone, except `docs/GUIDE.md` and `docs/PROTOCOL.md`, which the build
+and the unit tests read): the unit tests in one job and the required scenes in two shards, so a
+run takes a few minutes. `scenes-full.yml` runs the required and full tiers nightly and on demand
+(**Actions › Scenes (full) › Run workflow**). A scene moves into the required tier once it has
+passed there a few times.
 
 ### How test mode works
 
-`PI_DESK_SCRIPT=file build/pi-desk DIR` plays a script of synthetic events through the normal event
+`PI_DESK_SCRIPT=file build/deckhand DIR` plays a script of synthetic events through the normal event
 handler; the script commands are listed at the top of `src/autotest.odin`. Scripts submit JSON
 commands through the inbox (`command {"type":"close_tab","tab_id":$tab}`) and check results with
 `assert_state PATH VALUE` and `assert_result PATH VALUE`. The app exits with status 1 if an assert
@@ -380,7 +415,8 @@ failed. While a script runs, real keyboard and mouse input is ignored.
 Test mode is quiet by default, so scenes can run while someone uses the Mac. The app never
 activates (no Dock icon, never frontmost or key), and its window sits behind the desktop picture
 and ignores the mouse. It is still on a display, so frames, idle-CPU numbers and screenshots work
-as usual, with the traffic lights drawn inactive. `PI_DESK_QUIET=0` shows the window so you can
+as usual, with the traffic lights drawn inactive. A script's copies and pastes stay in the app,
+so a run never replaces what is on the user's clipboard (a page in a browser tab still uses it). `PI_DESK_QUIET=0` shows the window so you can
 watch a run; in that mode test mode hands focus back at its first step. `frame-pause.txt`
 (minimize and restore) needs it, because otherwise the window animates into the Dock.
 
@@ -389,32 +425,163 @@ The `shot NAME` command raises the window without taking focus and captures only
 in test mode live in `build/test-data/home` and its prompt in `build/test-data/atlas/ATLAS.md`.
 Test mode saves and restores the workspace only when `PI_DESK_DATA_DIR` is set explicitly.
 
+Test mode draws at a fixed backing scale, so a scene's pixels are the same on every Mac (a
+Retina display is 2, most others and CI runners 1): `PI_DESK_SCALE`, a number from 1 to 4,
+default **1**. Every screen and window reports it, so the window's framebuffer, an app tab's ring
+and `app_screenshot` PNGs are logical px × `PI_DESK_SCALE`. The `shot` command's capture
+(`screencapture`) is the window server's, at the real display's scale. Outside test mode it is
+ignored.
+`app-tab.sh` runs at 2, so scale conversions stay tested.
+
+**Safety rule: test mode never starts a real `pi` or `claude` unless told to.** With
+`PI_DESK_SCRIPT` set, every launch path (new and restored tabs, Atlas, dead-tab restarts, Claude
+restarts, jobs) runs a stand-in or refuses:
+
+- **pi tabs** run `PI_DESK_CMD`. Without it, the tab prints "Deckhand test mode: no PI_DESK_CMD;
+  refusing to run the real pi" and exits 127, unless `PI_DESK_REAL_PI=1` opts in to the real pi
+  (the real-pi scenes above set it).
+- **Claude tabs** run `PI_DESK_CLAUDE_CMD`. Without it they print "Deckhand test mode: no
+  PI_DESK_CLAUDE_CMD; refusing to run the real claude" and exit 127. There is no opt-in.
+- **Jobs** run only the `pi_path` setting (a scene's fake), or pi from the jobs' PATH with
+  `PI_DESK_REAL_PI=1`. Otherwise the run fails with "Jobs run pi, which was not found…".
+- **Installs and updates** from the coding agents checklist (HARNESSES.md §7) run
+  `PI_DESK_INSTALL_CMD`, which gets the item's id and the exact command as `"$@"`
+  (`tests/scripts/fake-install.sh`). Without it the run prints "Deckhand test mode: no
+  PI_DESK_INSTALL_CMD; refusing to run the real install" and exits 127. There is no opt-in.
+
+**Which harnesses a scene has** (`src/harness.odin`): Deckhand looks for pi and Claude Code by stat,
+never running them, and what it finds decides the UI (the **New session** picker, Atlas's
+button). In test mode that look never uses PATH (unless `PI_DESK_REAL_PI=1`), only the install
+folders under the scene's fake HOME, so the developer's own pi and claude never change a scene:
+pi counts as installed when `PI_DESK_CMD` is set (it stands in for pi, in and out of test mode)
+or a stand-in is in `~/.pi/agent/bin`; Claude Code when `claude-stub.sh` put one in
+`~/.local/bin`. A scene with both gets the picker on **New session**; with one, it starts at once.
+
+Each refusal is also printed on Deckhand's stderr ("Deckhand: test mode: refusing to run the real
+…"), so a scene's log shows it. Apps and scripts that drive Deckhand in test mode can rely on this
+rule.
+
 Other environment variables help with tests and benchmarks. `PI_DESK_LOG_COMMANDS=1` prints every
 event as it happens. `PI_DESK_CMD="..."` replaces pi with any command, which gets pi's arguments as
-`"$@"`. `PI_DESK_DATA_DIR` moves the data dir. `pi-desk --fresh` starts without restoring the
+`"$@"`; `PI_DESK_CLAUDE_CMD` does the same for claude. `PI_DESK_DATA_DIR` moves the data dir. `deckhand --fresh` starts without restoring the
 saved workspace (`<data dir>/workspace.json`, see [PERSISTENCE.md](PERSISTENCE.md)) and keeps the
 old file as `workspace.json.bak-<time>`.
 
+### Test mode as an interface for external apps
+
+Programs that run in Deckhand's app tabs (docs/ENGINE-BRIDGE.md) can test themselves end to end
+in Deckhand's test mode, the way the fake app does in `app-tab.sh`. For them test mode is a
+**stable, documented interface**: these variables and their meaning stay as described here, and
+any change to one (its name, default, values or behaviour) is noted in the release's notes and in
+this section, with the version it lands in.
+
+| Variable | Meaning |
+|---|---|
+| `PI_DESK_SCRIPT` | the script to play (its commands: the top of `src/autotest.odin`); turns test mode on |
+| `PI_DESK_CMD` | replaces pi with this shell command (it gets pi's arguments as `"$@"`); a scene never runs a real pi |
+| `PI_DESK_DATA_DIR` | the data dir (workspace, app logs `apps/<tab_id>.log`, screenshots `apps/shots/`); set, test mode saves and restores the workspace there |
+| `PI_DESK_RUNTIME_DIR` | where the control socket lives (PROTOCOL.md §1); a fresh one per run keeps runs apart |
+| `PI_DESK_SCALE` | the backing scale, 1 to 4, default 1 (above) |
+| `PI_DESK_QUIET` | `0` shows the window; otherwise test mode is quiet (above) |
+
+What an app's test can rely on, beyond the variables:
+- `command {...}` runs a command now. A long-running one (`app_call`, `app_screenshot`) is waited
+  for. Its finished result is never missed, even when the app replies at once. A script waits at
+  most 120 s, or the command's own `timeout_ms` + 10 s when that is longer, then fails with
+  `TIMEOUT`, and a result that comes later is dropped. `app_call`'s own timeout (default 10 s)
+  normally ends it first, with `data.code` `timeout`.
+- The app's hello reply is the first line Deckhand sends it (PROTOCOL.md §2).
+- The exit status is 1 if an assert failed; the log has `ASSERT FAILED` or `TIMEOUT` lines and
+  ends with `done: N asserts, M failed`.
+
+`tests/scripts/app-calls.sh [ROUNDS] [CALLS]` (default 20 × 20) checks these promises under load
+with the fake app: it opens an app tab ROUNDS times and makes CALLS `app_call`s the moment each
+app is up. It also checks the default scale.
+
+### Launch environment
+
+`src/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
+launchd (pid 1: LaunchServices, so Dock, Finder, Spotlight, `open`) or whose `PATH` is launchd's
+bare one; `PI_DESK_GUI_LAUNCH=1` or `0` forces it (scenes; or to turn the import off), and test
+mode (`PI_DESK_SCRIPT`) is never a GUI launch without `PI_DESK_GUI_LAUNCH=1`. A GUI
+launch runs `$SHELL -i -l -c` (its own session, stdin `/dev/null`, 4 s then SIGKILL to its group),
+reads `env -0` between markers and merges (`login_env_compose`): the shell's values win (it
+inherited the same environment, so they differ only where an rc file set them), inherited
+variables it did not print are kept, `PWD`/`OLDPWD`/`SHLVL`/`_`/`PI_DESK_*` never come from it; `PATH` is the shell's
+order, then inherited folders it lacks, deduplicated. No answer: `PATH` plus the fallback folders
+that exist (`PI_DESK_PATH_DIRS` replaces the list in tests). A terminal launch is untouched,
+except for Claude Code's session markers. Those (`claude_session_marker`: `CLAUDECODE`,
+`CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_PID`,
+`CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_BRIDGE_SESSION_ID`, `CLAUDE_CODE_REMOTE_SESSION_ID`,
+`CLAUDE_JOB_DIR`, `CLAUDE_CODE_SESSION_*`, `CLAUDE_CODE_MESSAGING_*`: what a running claude sets
+in its own children, per code.claude.com/docs/en/env-vars) leave the process environment at every
+launch, never come from the shell, and `child_base_env` drops them again. Otherwise a Deckhand
+`open`ed from inside a Claude Code session passes them on, and its Claude tabs start as that
+session's children (no transcript saved). A launch from inside a Claude session
+(`CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_SESSION_ID` or `CLAUDE_PID` inherited; `CLAUDECODE`
+alone is an IDE's terminal) also asks the shell, as a GUI launch does
+(`login_env_shell_merge`, the refresh too). The parent session's other Claude settings
+(`claude_config_var`: `CLAUDE_*` such as its `CLAUDE_CONFIG_DIR`, `CLAUDE_EFFORT`, its settings'
+`env`) are left out of what the shell inherits, and when the shell answers, of the result: only
+what the login shell sets itself comes back. When the shell gives no answer (fails, times out)
+they stay as inherited; only the markers go. `ANTHROPIC_*` always stay (pi and Atlas read them
+too). To keep everything a Claude session passed on (bar the markers), start Deckhand with
+`PI_DESK_GUI_LAUNCH=0`. The
+process environment is set only there; **Refresh shell environment** (`refresh_shell_env`) asks
+again on a worker with the launch environment and keeps the result for `child_env`/`app_env`
+(new tabs and apps) and jobs' default PATH, never `setenv` after startup. Everything else keeps
+the startup environment: jobs' other variables (`jobs.odin`, run start), the reload probe
+(`reload.odin`), `pi_managed_path`, and the git the Changes tab and the editor run. Quitting
+kills a refresh's probe group (`login_env_kill_probe` in `cleanup`). Values are never printed or
+logged. `PI_TAB_CMD` and `CLAUDE_TAB_CMD` fall back to pi's managed install
+(`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`) and Claude's (`~/.local/bin`,
+`~/.claude/local`), absolute folders only (never one relative to the project); `pi_managed_path` does the same for jobs and the reload probe. Unit tests:
+`src/login_env_test.odin` (fake shells and a stub probe; never the user's shell).
+
+Deckhand's own sh scripts (`PI_TAB_CMD`, `CLAUDE_TAB_CMD`, a stand-in command, the Changes tab's
+commit, the jobs' PATH and the reload probe) run as `$SHELL -l -c SCRIPT` for a POSIX login shell
+(zsh, bash, sh, dash, ksh and any shell Deckhand does not know), as always. For a known non-POSIX
+one (fish, nushell, xonsh, elvish, ysh, tcsh/csh, pwsh, `shell_is_posix` in `src/commands.odin`),
+`/bin/sh -c SCRIPT` runs them instead, in the environment Deckhand took from the login shell
+(above) or the terminal it was started from. Shell tabs still open `$SHELL -l` itself.
+
+Whether pi is installed (`pi_installed`, `src/harness.odin`): a stat of the PATH new tabs get and
+pi's managed install, else the login shell's own `command -v pi` (that script, as above, on a
+worker, at most 10 s, pi never run). A stat that finds nothing is never the last word: until the
+shell answered, pi counts as there, so a pi only a `.zprofile` adds (nvm, fnm, mise, pnpm) is not
+reported missing when the interactive probe timed out. Only a clean answer says no (exit 0 without a
+runnable pi, or `command -v`'s exit 1); a timeout, a shell that cannot start or any other failure
+(127, a broken rc file, a signal) leaves pi counted as there. `pi_recheck` (Refresh shell environment, a
+pi tab that exited 127) asks again; each user-started New session stats again (`pi_installed_now`).
+`PI_CODING_AGENT_DIR` is read as pi reads it (a leading `~`, `~/` is the home folder); one that is
+still not absolute falls back to `~/.pi/agent`. `PI_CODING_AGENT_SESSION_DIR` and pi's
+`sessionDir` setting are not followed (pi keeps a custom session folder flat, all folders' sessions
+in one, unlike the default's `--<cwd>--` folders that `sessions.odin` reads).
+
 ### The scenes
 
-`tests/scripts/run.sh SCRIPT` runs any script against a fake HOME and a fake pi. The other scenes
+`tests/scripts/run.sh SCRIPT` runs any script against a fake HOME and a fake pi (one scene; the
+runner for many is `tests/scenes.py`). The other scenes
 have their own shell scripts in `tests/scripts/`, each setting up a fake HOME shaped for what it
 tests. Unless noted, they use a fake pi and write their screenshots to `build/shots/<scene>/`.
 
-- **`run.sh phase05.txt`**: a new chat, reopen, rename, confirmations, layout.
-- **`run.sh term.txt`**: the selection mid-drag, drags reported to an app, the macOS line-editing
-  keys (`build/shots/term/`).
 - **`run.sh frame-pause.txt`**: the frame rate while minimised and waking from a thread.
 - **`run.sh home.txt`**: the agent's drawer (⌘J, ⌘W, Esc, its button, the palette, the Model key)
   and closing sessions from their row and the palette.
-- **`panels.sh`**: a fake pi-kit bridge per tab (`fake-bridge.sh`, over `pi-desk --ctl`) for
+- **`panels.sh`**: a fake pi bridge per tab (`fake-bridge.sh`, over `deckhand --ctl`) for
   panels, folding, the toggle and status dots.
-- **`bridge-e2e.sh`** (real pi, billed): the same with real pi and the pi-kit bridge it loads,
+- **`bridge-e2e.sh`** (real pi, billed): the same with real pi and the bundled pi integration it loads,
   using two short prompts (a background shell and todos).
+- **`agent-show.sh`**: a session's own pi (a fake bridge, `fake-bridge-show.py`) and Claude (the fake
+  claude running `deckhand show`) show the user files with `show_file`: the tab kind, the session and
+  the place it lands in, behind the user's view; another session and a binary file refused.
+- **`app-open.sh`**: a session's own pi (a fake bridge, `fake-bridge-apps.py`) opens its
+  project's declared app (`.pi-desk/apps.json`) by name in its own session, at once (Deckhand asks
+  nothing), behind the view, and screenshots it while hidden; another session, an argv and an undeclared name are refused; another session's app tab is
+  never restarted, closed or called; its own restarts and closes (needs `build/fake-app`).
 - **`agent.sh`**: the drawer with a fake Atlas pi (`fake-atlas.py`, a pi-like screen and a
-  bridge): the model and prompt it got, the Model key, unread, a dialog's tint, pin, the Settings
-  tab's Atlas group and "edit prompt". `agent.sh tests/scripts/drawer-resize.txt` drags the
-  drawer's left edge, both sliding over and pinned.
+  bridge): the model and prompt it got, the pi integration's `-e` paths and bridge variables, the Model key, unread, a dialog's tint, pin, the Settings
+  tab's Atlas group and "edit prompt".
 - **`home-e2e.sh`** (real pi, billed): the agent as a real pi with the setting's model and its
   prompt, using two short prompts (its name, then the projects with `desk_state`).
 - **`sidebar.sh`**: the left column (adding a project with "+" and by drop, a new session in it,
@@ -424,9 +591,28 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
 - **`projects.sh`**: the Projects tree against a fake home shaped like a real one (repositories,
   an `_scratch` group row, nested rows, sessions resumed in their own folder, temp and missing
   folders hidden), then a relaunch that checks the opened rows came back.
+- **`login-path.sh`**: Deckhand under `env -i` with a fake HOME and fake shells: a bare PATH
+  takes `~/.zshrc`'s PATH; a failing shell, the fallback folders; no pi, the not-found message;
+  a Nix-like non-bare PATH (`PI_DESK_GUI_LAUNCH=1`) still merges the shell's environment, finds
+  the managed `~/.pi/agent/bin/pi`, and the gear's **Refresh shell environment** gives new shell
+  tabs the shell's new answer; started from inside a Claude Code session (its markers,
+  `CLAUDE_CONFIG_DIR` and `CLAUDE_EFFORT` inherited), the pi tab gets none of them
+  (`build/shots/login-path/`).
+- **`fish-shell.sh`**: `$SHELL` is a fish stand-in (`fake-fish.sh`, named `fish`) that refuses
+  POSIX sh syntax as fish does: the pi chat `deckhand DIR` opens, a Claude session and a shell tab
+  all start, and fish never gets a tab's sh script (`build/shots/fish/`).
+- **`pi-login-lookup.sh`**: started as from the Dock, with a shell whose interactive start hangs
+  (the probe times out) and whose login start adds a fake pi's folder to PATH: pi counts as
+  installed and New session starts it; the control run (no pi there either) says it is not
+  installed (`build/shots/pi-login-lookup/`).
 - **`settings.sh`**: ⌘, and the gear list the settings files with credential files absent;
   settings.json opens in an editor tab, invalid JSON is not saved, a valid save offers to reload pi,
   auth.json never opens, and a dummy secret is never drawn or logged.
+- **`agent-status.sh`**: agent status for every terminal tab with a fake OSC 7501 agent
+  (`fake-7501.py`) in a shell tab: the query/reply handshake, working/blocked/done/error dots on
+  the tab, rows and project, nested ids, malformed and oversized reports, a new prompt (OSC 133 A)
+  and the program's exit ending working, done → unseen → seen, Mark as unread/read from the row
+  menu, the window behind, tooltips and the attention sort (`build/shots/agent-status/`).
 - **`bell.sh`**: the bell with a fake bridge per session (`fake-bridge-bell.py`: working → idle,
   working → waiting). It checks entries only for sessions not on screen, the OS notification stub,
   that focus and a click read them, the gear's "Notify me about" toggles, narrow widths, light and
@@ -439,13 +625,21 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
 - **`looks.sh`**: the three looks in dark and light (fake store, fake pi).
   `LOOKS_PI=real tests/scripts/looks.sh` (real pi, billed) checks that real pi re-themes on a
   switch, with one short prompt on a cheap model.
-- **`readme-shot.sh`**: the README's screenshot, `docs/images/pi-desk.png`, from demo data only (a
+- **`readme-shot.sh`**: the README's screenshot, `docs/images/deckhand.png`, from demo data only (a
   made-up store and a demo pi, `demo-pi.py`, that draws a made-up conversation and a todos panel;
   a Markdown, a browser and a shell tab). It needs a CEF build and writes
-  `build/shots/readme/pi-desk.png`; check it by eye before copying it to `docs/images/`.
+  `build/shots/readme/deckhand.png`; check it by eye before copying it to `docs/images/`.
 - **`restore.sh`**: open sessions and shells, quit through the confirm flow, relaunch with the
   same temp data dir and check the workspace came back; also a 20-session launch.
 - **`persist-cpu.sh`**: CPU and save checks while a fake bridge reports status every second.
+- **`harness-setup.sh`**: the coding agents checklist (the setup sheet's first step, Settings →
+  Coding agents) against four fake HOMEs with fake install layouts: everything installed (no
+  action anywhere; pi's `settings.json` only read); nothing installed (both collapsed with the
+  official install command; Install runs the stand-in `fake-install.sh`, checked by its argv, the
+  sheet held while it runs, each item found afterwards and never offered again, a `sudo` in the
+  stand-in refused by Deckhand's shim); too old on npm
+  and the native installer (Update; test mode refuses the run without a stand-in); too old on nix
+  and mise (shown only, Copy). Light and dark (`build/shots/harness-setup/`).
 - **`setup.sh`**: the first-run sheet (`PI_DESK_FIRST_RUN=1`) against a fake HOME whose
   `~/.pi/agent/AGENTS.md` names a fake vault. The vault is found, chats are kept separate, Done
   makes only the missing subfolders, a job draft lands in its `jobs/`, a new chat gets
@@ -461,6 +655,10 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   a folder, an outside change, drag onto a terminal, reveal of the active file, filter,
   light/dark, layout time while scrolling the 10k folder and idle CPU, then a relaunch that checks
   the tab and its open folders came back.
+- **`files-nested.sh`**: the Files tree of a project that is not a repository, holding folders
+  that are repositories and projects of their own, a symlinked folder, a plain one and one that
+  cannot be listed (mode 000): each opens with a click (and the folders below), the unlistable
+  one says why with Retry.
 - **`markdown.sh`**: the Markdown tab in a project of `.md` files: open, a second open focusing
   the same tab, the preview/source toggle (toolbar and ⇧⌘V), find, a live reload after the file
   changes, a relative link and an anchor, an external link (test mode logs it and opens nothing),
@@ -477,7 +675,7 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   state, picking a worktree, a terminal and a pi session in one, Clean up through the
   confirmation bar, light and dark and idle CPU, then a relaunch that checks the worktree session
   and the tree's checkout came back.
-- **`update.sh`**: pi-desk's own updates, in a test build of its own, from local `file://`
+- **`update.sh`**: Deckhand's own updates, in a test build of its own, from local `file://`
   fixtures (fake bundles signed ad hoc, the throwaway test key) into a fake install folder in
   `build/update/`: the bar, Skip, Check for Updates…, Later, agents refused, Update, a staged
   copy changed after its check refused at install, Try again, the confirmation while a pi tab
@@ -488,6 +686,24 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   repository with a fake `gh` and the test key; it builds no release.
 - **`browser.sh`**: the browser tab scenes ([BROWSER.md](BROWSER.md) §6), on local test pages
   only.
+- **`claude.sh`**: Claude Code tabs ([CLAUDE.md](CLAUDE.md)) with a fake claude
+  (`fake-claude.py`, which runs the bundled plugin's hooks and CLI as Claude Code would): a new
+  tab from the "+" menu, its session id from the SessionStart hook, the CLI against browser and
+  app tabs, the token refused outside the tab, held text while typing, comments with the next
+  message, Resume from the project menu, and a relaunch that resumes it. Deckhand runs with a
+  Claude Code session's markers in its environment; no pi or Claude tab may get them. Never a
+  real claude.
+- **`pi-chat-readonly.sh`**: read-only pi chats with a fake pi that logs its argv and
+  environment: the user's and a script's new chat, a restart, a resumed chat and a relaunch's
+  restore all end with pi's read-only allowlist and carry `PI_KIT_READONLY=1`; with the setting
+  off, a restored chat starts full. Every one of those starts also begins with `-e` per extension
+  of the bundled pi integration (`build/Deckhand.app/Contents/Resources/pi`) and carries
+  `DECKHAND_SOCKET`, `DECKHAND_TOKEN` and `DECKHAND_SHOTS_DIR`, never pi-kit's `PI_DESK_*` bridge
+  variables (`agent.sh` checks the same for Atlas, with `DECKHAND_CONTROL_TOKEN`).
+- **`claude-readonly.sh`**: a read-only Claude chat ([CLAUDE.md](CLAUDE.md) §1a) with the fake
+  claude, which also runs the `--settings` hooks: the profile in argv, the guard's deny JSON for a
+  commit, an edit, an act verb and `rm`, reads passing, Deckhand refusing the tab's act verb, and a
+  relaunch with the setting off that still resumes it read-only.
 
 The layout audit (`src/layout_audit_test.odin`, part of `./build.sh test`) checks that no text or
 icon overlaps another or leaves its row, bar or column, at 800–2000 px, in every look, light and

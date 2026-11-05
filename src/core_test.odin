@@ -136,7 +136,7 @@ command_parse_errors :: proc(t: ^testing.T) {
 	m, err := parse_request(`{"id":"7","type":"command","v":1,"command":{"type":"focus_tab","tab_id":2}}`)
 	testing.expect(t, err == "" && m.id == "7" && m.command.(Focus_Tab).tab_id == 2, err)
 	_, err = parse_request(`{"id":"1","type":"hello","v":2,"token":"x"}`)
-	testing.expect_value(t, err, "unsupported protocol version 2 (pi-desk speaks 1)")
+	testing.expect_value(t, err, "unsupported protocol version 2 (Deckhand speaks 1)")
 }
 
 @(test)
@@ -431,8 +431,8 @@ confirmation_flow :: proc(t: ^testing.T) {
 	testing.expect(t, r.confirm_token == "" && r.confirm_by_user && r.confirm_summary != "")
 	testing.expect(t, state.version > v, "a pending confirmation is a state change")
 	token := strings.clone(state.pending_confirmations[0].token)
-	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = token}, agent).error, "only the user can confirm this, in pi-desk")
-	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = token}, script).error, "only the user can confirm this, in pi-desk")
+	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = token}, agent).error, "only the user can confirm this, in Deckhand")
+	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = token}, script).error, "only the user can confirm this, in Deckhand")
 	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = "wrong"}, ui).error, "unknown or expired confirmation token")
 	testing.expect_value(t, run_command(Close_Tab{tab_id = pitab, confirm = token}, ui).error, "a session's pi tab cannot be closed")
 	ok := run_command(Close_Tab{tab_id = tab, confirm = token}, ui)
@@ -454,13 +454,13 @@ confirmation_flow :: proc(t: ^testing.T) {
 	r = run_command(Close_Tab{tab_id = tab}, agent)
 	testing.expect(t, r.confirm_token != "" && !r.confirm_by_user)
 	other := Caller{kind = .Control, tab_id = 99}
-	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = r.confirm_token}, other).error, "only the user can confirm this, in pi-desk")
+	testing.expect_value(t, run_command(Close_Tab{tab_id = tab, confirm = r.confirm_token}, other).error, "only the user can confirm this, in Deckhand")
 	testing.expect(t, run_command(Close_Tab{tab_id = tab, confirm = r.confirm_token}, agent).ok)
 	// ...but not for classes it is not trusted with
 	q := run_command(Quit{}, agent)
 	testing.expect(t, q.error == "needs_confirmation" && q.confirm_token == "")
 	qt := strings.clone(state.pending_confirmations[0].token)
-	testing.expect_value(t, run_command(Quit{confirm = qt}, agent).error, "only the user can confirm this, in pi-desk")
+	testing.expect_value(t, run_command(Quit{confirm = qt}, agent).error, "only the user can confirm this, in Deckhand")
 	testing.expect_value(t, quits, 0)
 	testing.expect(t, run_command(Cancel_Confirmation{token = qt}, ui).ok)
 

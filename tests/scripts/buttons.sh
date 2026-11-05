@@ -6,8 +6,10 @@
 # CPU with the pointer resting on a button.
 # Screenshots go to build/shots/buttons/. Usage: tests/scripts/buttons.sh [SCRIPT]
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 SCRIPT=${1:-tests/scripts/buttons.txt}
 W="$ROOT/build/buttons"
 rm -rf "$W"
@@ -30,7 +32,7 @@ session alpha 9 a2 "Bump the parser"
 session bravo 30 b1 "Fix the flaky test"
 
 HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk > "$W/run.log" 2>&1 || true
+  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "buttons scene failed (log: $W/run.log)"

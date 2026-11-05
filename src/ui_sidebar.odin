@@ -171,6 +171,7 @@ Menu_Session :: struct {
 Menu_Sort :: distinct Sort_Section
 Menu_New :: struct {} // the tab strip's "+" menu (ui_toolbar.odin)
 Menu_Target :: union {
+	Menu_New_Session, // the harness picker of "New session" (harness.odin)
 	Menu_Project,
 	Menu_Session,
 	Menu_Sort,
@@ -203,6 +204,8 @@ Menu_Item :: struct {
 	files:  Files_Step, // a Files step that is not a command (rename, copy path…)
 	copy:   string, // copies this text (a path, a branch name)
 	note:   bool, // a muted line of text, not a choice (the ⓘ menu's info)
+	icon:   Icon, // drawn before the label (the harness picker's)
+	picker: Maybe(Menu_New_Session), // opens the harness picker for this place (harness.odin)
 }
 
 menu_open :: proc(target: Menu_Target, at: [2]f32) {
@@ -217,6 +220,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 		menu.target = m
 	}
 	if l, ok := target.(Menu_Term_Link); ok do menu.target = Menu_Term_Link{tab_id = l.tab_id, url = strings.clone(l.url)}
+	if n, ok := target.(Menu_New_Session); ok do menu.target = Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd)}
 	menu.at = at
 	menu.selected = -1
 	menu.open = true
@@ -232,6 +236,7 @@ menu_close :: proc() {
 	if j, ok := menu.target.(Menu_Job); ok do delete(j.id)
 	if m, ok := menu.target.(Menu_Browser); ok do delete(m.link)
 	if l, ok := menu.target.(Menu_Term_Link); ok do delete(l.url)
+	if n, ok := menu.target.(Menu_New_Session); ok do delete(n.cwd)
 	if w, ok := menu.target.(Menu_Worktree); ok {
 		delete(w.path)
 		delete(w.branch)
@@ -257,7 +262,11 @@ menu_items :: proc() -> []Menu_Item {
 		at := project_pinned(p^)
 		append(&items, Menu_Item{label = at >= 0 ? "Unpin" : "Pin", cmd = Set_Pinned{project_id = p.id, pinned = at < 0}})
 		pin_moves(&items, at, len(state.sidebar.pinned_projects), p.id, "")
-		append(&items, Menu_Item{label = "New session", cmd = New_Chat{p.id}})
+		// one "New session": the installed harnesses' picker (harness.odin)
+		append(&items, Menu_Item{label = "New session", picker = Menu_New_Session{project_id = p.id}})
+		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
+		// else a new one), once per account while there are several; only while it is installed
+		if p.group == .Projects && claude_installed() do claude_account_items(&items, "New Claude tab", New_Claude_Tab{project_id = p.id})
 		if folder_of(.Jobs) != "" do append(&items, Menu_Item{label = "New job for this project…", cmd = Job_Sheet{open = true, for_project = path_tilde(p.cwd)}})
 		append(&items, Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -286,26 +295,59 @@ menu_items :: proc() -> []Menu_Item {
 			append(&items, Menu_Item{label = at >= 0 ? "Unpin" : "Pin", cmd = Set_Pinned{pi_session_id = t.pi_session_id, pinned = at < 0}})
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
-		if _, err := sidebar_path(t.project_id, t.pi_session_id); err == "" {
+		if id := open_session_any(t.pi_session_id); id != 0 && claude_installed() do claude_account_items(&items, "New Claude tab here", New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
+		if r, _ := claude_record(t.pi_session_id); r != nil do append(&items, Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: pi-desk's own title
+		_, perr := sidebar_path(t.project_id, t.pi_session_id)
+		claude_row := claude_row_record(t.project_id, t.pi_session_id) != nil // its info from pi-desk's history (claude_rows.odin)
+		if perr == "" || claude_row {
 			if len(items) > 0 do sep(&items)
-			append(&items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
-			append(&items, Menu_Item{label = "Copy path", cmd = Copy_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
+			// a Claude row: its transcript, while pi-desk knows one under Claude's projects/
+			if perr == "" {
+				append(&items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
+				append(&items, Menu_Item{label = "Copy path", cmd = Copy_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
+			}
 			info_items(&items, t)
 		}
 		if len(items) > 0 do sep(&items)
+		if id := open_session_any(t.pi_session_id); id != 0 {
+			// "done, not seen yet" by hand (agent_status.odin); looking at it marks it seen
+			unread := false
+			if s := find_session(id); s != nil do for tab in s.tabs do if tab.unseen do unread = true
+			append(&items, Menu_Item{label = unread ? "Mark as read" : "Mark as unread", cmd = Set_Unread{pi_session_id = t.pi_session_id, unread = !unread}})
+		}
 		if known {
 			hidden := session_hidden(t.pi_session_id)
 			append(&items, Menu_Item{label = hidden ? "Show again" : "Hide", cmd = Set_Hidden{pi_session_id = t.pi_session_id, hidden = !hidden}})
 		}
-		if id := open_session_any(t.pi_session_id); id != 0 do append(&items, Menu_Item{label = "Close session", cmd = Close_Session{session = id}})
+		if id := open_session_any(t.pi_session_id); id != 0 {
+			append(&items, Menu_Item{label = "Close session", cmd = Close_Session{session = id}})
+		}
 	case Menu_New:
-		for id in ([]string{"new_shell_tab", "new_browser_tab", "new_app_tab", "new_chat", "new_session"}) {
+		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_browser_tab", "new_app_tab", "new_chat", "new_session"}) {
 			a := action_by_id(id)
 			if a == nil || !action_ok(id) do continue
 			label := a.label
-			if id == "new_session" do if p := find_project(state.selected_project); p != nil do label = fmt.tprintf("New session in %s", project_display(p^))
+			// New chat, New session: the harness picker (harness.odin), under this menu
+			if id == "new_session" do if p := find_project(state.selected_project); p != nil {
+				append(&items, Menu_Item{label = fmt.tprintf("New session in %s", project_display(p^)), keys = a.keys, picker = Menu_New_Session{project_id = p.id}})
+				continue
+			}
+			if id == "new_chat" do if c := chats_project(); c != nil {
+				append(&items, Menu_Item{label = label, keys = a.keys, picker = Menu_New_Session{project_id = c.id}})
+				continue
+			}
+			if id == "new_claude_tab" do label = action_label(a)
+			// several Claude accounts: one row per account (claude_accounts.odin)
+			if strings.has_prefix(id, "new_claude_") && claude_accounts_many() && claude_installed() {
+				if c, ok := a.make(); ok {
+					claude_account_items(&items, strings.trim_suffix(label, CLAUDE_MISSING_NOTE), c)
+					continue
+				}
+			}
 			append(&items, Menu_Item{label = label, keys = a.keys, action = id})
 		}
+	case Menu_New_Session:
+		new_session_menu_items(t, &items)
 	case Menu_Editor:
 		editor_menu_items(u64(t), &items)
 	case Menu_Files:
@@ -333,7 +375,26 @@ menu_run :: proc(i: int) {
 	if i < 0 || i >= len(items) || items[i].sep || items[i].note do return
 	it := items[i]
 	target := menu.target
+	if ns, ok := it.picker.?; ok {
+		// another menu's "New session": the picker opens where that menu was (harness.odin)
+		at := menu.at
+		cwd := strings.clone(ns.cwd, context.temp_allocator)
+		menu_close()
+		new_session_ui(ns.project_id, cwd, at)
+		return
+	}
+	if _, ok := target.(Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if it.rename {
+		if t, ok := target.(Menu_Session); ok {
+			// a Claude session's row: its field takes the row (claude_rename on Enter)
+			delete(rename_session)
+			rename_session = strings.clone(t.pi_session_id)
+			title := ""
+			if r, _ := claude_record(t.pi_session_id); r != nil do title = r.title
+			tf_set(&rename_field, title)
+			tf_select_all(&rename_field) // typing replaces it
+			ui_do(Set_Focus{"rename_session"})
+		}
 		if p, ok := target.(Menu_Project); ok {
 			ui_do(Select_Project{u64(p)})
 			if pp := find_project(u64(p)); pp != nil do tf_set(&rename_field, project_name(pp^))
@@ -361,6 +422,7 @@ menu_run :: proc(i: int) {
 // Not a command that finishes later or asks first (the confirmation bar).
 menu_result :: proc(label: string, cmd: Command, r: Result) {
 	if r.pending || r.error == "needs_confirmation" do return
+	if r.error == CLAUDE_MISSING do return // the command said how to install it already (claude.odin)
 	if !r.ok {
 		why := r.error != "" ? r.error : "it did not work"
 		toast_show(fmt.tprintf("%s: %s", strings.trim_suffix(label, "…"), why), err = true)
@@ -375,6 +437,10 @@ menu_result :: proc(label: string, cmd: Command, r: Result) {
 // Input while a menu is open: the keyboard moves and runs, a click outside
 // closes it. Everything is consumed.
 menu_event :: proc(e: ^sapp.Event) -> bool {
+	if new_session_target_gone() {
+		menu_close() // its project went (harness.odin)
+		return true
+	}
 	#partial switch e.type {
 	case .KEY_DOWN:
 		app.redraw = true
@@ -383,6 +449,7 @@ menu_event :: proc(e: ^sapp.Event) -> bool {
 		case .UP:                       menu_step(-1)
 		case .DOWN, .TAB:               menu_step(1)
 		case .ENTER, .KP_ENTER, .SPACE: if menu.selected >= 0 do menu_run(menu.selected)
+		case: new_session_number(e.key_code, e.modifiers) // the harness picker's 1-9 (harness.odin)
 		}
 		return true
 	case .MOUSE_MOVE:
@@ -661,9 +728,9 @@ nav_header :: proc(name: string, fold: Sidebar_Fold, count: int, sort: Maybe(Sor
 	}
 }
 
-SORT_SHORT := [Sort_By]string{.Recent = "Recent", .Name = "Name", .Created = "Created"}
-SORT_LABELS := [Sort_By]string{.Recent = "Recent activity", .Name = "Name", .Created = "Created"}
-SORT_SESSIONS := [Sort_By]string{.Recent = "Sessions by recent activity", .Name = "Sessions by name", .Created = "Sessions by created"}
+SORT_SHORT := [Sort_By]string{.Recent = "Recent", .Name = "Name", .Created = "Created", .Attention = "Attention"}
+SORT_LABELS := [Sort_By]string{.Recent = "Recent activity", .Name = "Name", .Created = "Created", .Attention = "Needs attention"}
+SORT_SESSIONS := [Sort_By]string{.Recent = "Sessions by recent activity", .Name = "Sessions by name", .Created = "Sessions by created", .Attention = "Sessions by attention"}
 
 // A section's sort button: an icon (its menu names the current order).
 @(private = "file")
@@ -738,14 +805,13 @@ open_group :: proc(cs: ^Open_Session, text_w_max: f32) {
 		hovered := ui_hover == Hit(Hit_Open_Row(s.id)) || close_hover || more_hover
 		bg, em := overlay(id, current, hovered)
 		if clay.UI(id)(row_cfg(bg)) {
-			st := Row_Status.None
-			if pt := session_pi_tab(s); pt != nil do st = pi_tab_status(pt^)
+			st, _ := session_row_status(s) // the strongest of its tabs (agent_status.odin)
 			ic, place := session_place(s)
 			chat := ic == .Chat
 			when_ := st == .Waiting ? "Waiting for you" : open_session_age(s)
 			// an agent acts in one of its browser tabs the user does not see (browser_act.odin)
 			acting := st != .Waiting && browser_act_session_background(s)
-			if acting do when_ = "pi is using a page"
+			if acting do when_ = browser_act_session_text(s) // the acting tab's harness
 			// children: icon, [place ·], title, spacer, then time and dot, or the buttons
 			right: f32
 			n := 3 // icon, title, spacer
@@ -772,7 +838,15 @@ open_group :: proc(cs: ^Open_Session, text_w_max: f32) {
 				clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
 				room -= pw
 			}
+			// which agent it runs (a Claude-only session, else pi), and the account of several
+			harness := s.agent == .Claude ? Harness.Claude : Harness.Pi
+			tag := ""
+			if s.agent == .Claude && len(s.tabs) > 0 do if ct, is := s.tabs[0].kind.(Claude_Tab); is do tag = claude_account_tag(ct.account)
+			room -= px(HARNESS_ICON_SIZE + GAP_INLINE)
+			if tag != "" do room -= text_w(tag, FONT_UI_SMALL) + px(GAP_INLINE)
+			icon(harness_icon(harness), th.text_muted, HARNESS_ICON_SIZE)
 			clay.TextDynamic(clip(title, room), txt(mix(th.text_secondary, th.text, em)))
+			if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
 			if !hovered do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
 			if st != .None do dot(status_color(st))
@@ -793,6 +867,16 @@ projects_section :: proc(cs: ^Open_Session, text_w_max, row_w: f32) {
 	if state.focus_widget == "rename_project" {
 		drawn_row := false
 		if !state.sidebar.folded[.Projects] do for r in rows do if r.project != nil && r.project.id == state.selected_project do drawn_row = true
+		if !drawn_row do rename_field_layout()
+	}
+	// renaming a Claude session's row that is not shown (its project folded or not selected, the
+	// row filtered out or past Show more): the field on top, as for a project
+	if state.focus_widget == "rename_session" {
+		drawn_row := false
+		if !state.sidebar.folded[.Projects] && !tree.folded do for r in rows do if r.project != nil && r.project.id == state.selected_project {
+			shown, _ := capped_rows(sidebar_sessions(.Sessions), tree.all_sessions)
+			for x in shown do if x.session.id == rename_session do drawn_row = true
+		}
 		if !drawn_row do rename_field_layout()
 	}
 	if state.sidebar.folded[.Projects] do return
@@ -829,7 +913,9 @@ project_row :: proc(r: Sidebar_Row, i: int, cs: ^Open_Session, text_w_max: f32, 
 	pin_hover := ui_hover == Hit(Hit_Pin_Project(p.id))
 	new_hover := ui_hover == Hit(Hit_New_In(p.id))
 	more_hover := ui_hover == Hit(Hit_More_Project(p.id))
-	hovered := ui_hover == Hit(Hit_Project(p.id)) || pin_hover || new_hover || more_hover
+	// the "N folders" toggle is part of the row: the buttons stay while the pointer is on it (else
+	// they go, the toggle slides right from under the pointer, the row is hovered, they come back: a flicker)
+	hovered := ui_hover == Hit(Hit_Project(p.id)) || ui_hover == Hit(Hit_Kids(p.id)) || pin_hover || new_hover || more_hover
 	selected := p.id == state.selected_project
 	expanded := selected && !tree.folded
 	// the expanded project is not "selected" in colour: its sessions carry the selection
@@ -981,7 +1067,7 @@ project_sessions :: proc(p: ^Project, cs: ^Open_Session, text_w_max: f32, depth_
 	shown, more := capped_rows(rows, tree.all_sessions)
 	session_rows(shown, p.id, cs, "sess", text_w_max, ind)
 	if more > 0 do action_row(clay.ID("showmore", 0), Hit_Show_More(0), .None, fmt.tprintf("Show %d more", more), ind, text_w_max)
-	action_row(clay.ID("new"), Hit_New{}, .Plus, "New session", ind, text_w_max)
+	action_row(clay.ID("new"), Hit_New{}, .Plus, "New session", ind, text_w_max) // the harness picker (harness.odin)
 	// a job for this project (its owner and folder; ui_jobs.odin has the rest)
 	if folder_of(.Jobs) != "" do action_row(clay.ID("newjob"), Hit_New_Job_In(p.id), .Clock, "New job…", ind, text_w_max)
 }
@@ -999,7 +1085,7 @@ chats_section :: proc(cs: ^Open_Session, text_w_max, row_w: f32) {
 	shown, more := capped_rows(rows, tree.all_chats)
 	session_rows(shown, c.id, cs, "chat", text_w_max, 0)
 	if more > 0 do action_row(clay.ID("showmore", 1), Hit_Show_More(1), .None, fmt.tprintf("Show %d more", more), KIND_ICON + GAP_INLINE, text_w_max)
-	action_row(clay.ID("newchatrow"), Hit_New_In(c.id), .Plus, "New chat", 0, text_w_max)
+	action_row(clay.ID("newchatrow"), Hit_New_In(c.id), .Plus, "New chat", 0, text_w_max) // the harness picker (harness.odin)
 }
 
 // Session rows (a project's, indented under it, or Chats, each with a
@@ -1026,46 +1112,63 @@ session_rows :: proc(rows: []Sidebar_Row, project_id: u64, cs: ^Open_Session, pr
 		bg, em := overlay(id, current, hovered)
 		cfg := row_cfg(bg)
 		cfg.layout.padding.left = pu(PAD_ROW + indent)
+		if state.focus_widget == "rename_session" && s.id == rename_session {
+			rename_field_layout(indent) // renaming this Claude row (claude_rename on Enter)
+			continue
+		}
 		if clay.UI(id)(cfg) {
 			st := session_status(s.id)
 			// "needs you" outranks the time
 			when_ := st == .Waiting ? "Waiting for you" : (r.hidden ? "hidden" : rel_time(s.when_))
 			if st != .Waiting && !r.hidden && state.sidebar.sort[chat ? .Chats : .Sessions] == .Recent do when_ = ago(s.modified)
-			if st != .Waiting && !r.hidden && s.path == "" do when_ = "new" // pi has not written it yet
-			// children: [bubble], title, spacer, then time and dot, or the buttons
+			if st != .Waiting && !r.hidden && s.path == "" && !s.claude do when_ = "new" // pi has not written it yet
+			if st != .Waiting && s.gone do when_ = "transcript gone" // Claude Code removed it (claude_disk.odin)
+			tag := session_account_tag(s^) // several Claude accounts: which one (claude_accounts.odin)
+			// children: harness icon, title, [account], spacer, then time and dot, or the buttons
 			right: f32
-			n := 2
+			n := 3
 			if hovered {
 				nb := open_id != 0 ? 4 : 3
+				if !session_row_has_info(s^) do nb -= 1 // no ⓘ
 				right = f32(nb) * px(ROW_BUTTON)
 				n += nb
 			} else {
 				right = text_w(when_)
 				n += 1
 			}
+			if tag != "" {
+				right += text_w(tag, FONT_UI_SMALL)
+				n += 1
+			}
 			if st != .None {
 				right += px(DOT)
 				n += 1
 			}
-			lead: f32 = 0
-			if chat {
-				lead = px(KIND_ICON)
-				n += 1
-			}
+			lead := px(HARNESS_ICON_SIZE)
 			room := text_w_max - px(indent) - lead - right - f32(n - 1) * px(GAP_INLINE)
 			col := mix(th.text_secondary, th.text, em)
-			if r.hidden do col = th.text_muted
-			if chat do icon(.Chat, th.text_muted, KIND_ICON)
+			if r.hidden || s.gone do col = th.text_muted
+			// which agent it runs (pi or Claude Code): every row, in Chats too (in the bubble's place)
+			icon(harness_row_icon(session_harness(s^), r.hidden || s.gone), th.text_muted, HARNESS_ICON_SIZE)
 			clay.TextDynamic(clip(session_label(s^, chat), room), txt(col))
+			if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
 			if !hovered do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : th.text_muted))
 			if st != .None do dot(status_color(st))
 			row_button(clay.ID(chat ? "chatpin" : "sesspin", u32(i)), r.pin >= 0 ? "★" : "☆", hovered, pin_hover)
-			row_button(clay.ID(chat ? "chatinfo" : "sessinfo", u32(i)), "", hovered, info_hover, .Info)
+			if session_row_has_info(s^) do row_button(clay.ID(chat ? "chatinfo" : "sessinfo", u32(i)), "", hovered, info_hover, .Info) // a Claude row's: pi-desk's own record
 			row_button(clay.ID(chat ? "chatmore" : "sessmore", u32(i)), "", hovered, more_hover, .More)
 			if open_id != 0 do row_button(clay.ID(chat ? "chatclose" : "sessclose", u32(i)), "", hovered, close_hover, .Close)
 		}
 	}
+}
+
+// Whether a row has its ⓘ: a pi row's comes from its file; a Claude row's from pi-desk's history
+// entry (an open Claude-only session not in it yet has none).
+session_row_has_info :: proc(s: Session) -> bool {
+	if !s.claude do return true
+	r, _ := claude_record(s.id)
+	return r != nil
 }
 
 // A small button on a row, shown while the row is hovered (fades).
@@ -1169,6 +1272,7 @@ menu_layout :: proc(w, h: f32) {
 				backgroundColor = bg,
 				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 			}) {
+				if it.icon != .None do icon(it.icon, mix(th.text_muted, th.text_secondary, em), menu_icon_size(it.icon))
 				clay.TextDynamic(clip(it.label, inner - (menu_row_need(it) - text_w(it.label))), txt(mix(th.text_secondary, th.text, em)))
 				spacer()
 				if it.keys != "" do clay.TextDynamic(it.keys, txt(th.text_muted, FONT_UI_SMALL))
@@ -1178,11 +1282,16 @@ menu_layout :: proc(w, h: f32) {
 	}
 }
 
+// A menu row's icon: a harness's logo a little larger (the New session picker).
+@(private = "file")
+menu_icon_size :: proc(ic: Icon) -> f32 {return icon_logo(ic) != .None ? MENU_LOGO_SIZE : HARNESS_ICON_SIZE}
+
 // A menu row's width without padding: label, then the shortcut or check
 // after a spacer (two gaps).
 @(private = "file")
 menu_row_need :: proc(it: Menu_Item) -> f32 {
 	w := it.note ? text_w(it.label, FONT_UI_SMALL) : text_w(it.label)
+	if it.icon != .None do w += px(menu_icon_size(it.icon) + GAP_INLINE)
 	if it.keys != "" do w += text_w(it.keys, FONT_UI_SMALL) + 2 * px(GAP_INLINE)
 	if it.check do w += px(ICON_SIZE_SM) + 2 * px(GAP_INLINE)
 	if it.keys != "" && it.check do w -= px(GAP_INLINE)
@@ -1273,7 +1382,7 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 	case Hit_Open_Row:
 		// focus it and show its project's sessions
 		if s := find_session(u64(h)); s != nil {
-			ui_do(Focus_Session{s.id})
+			ui_do(Focus_Session{session = s.id, reopen = true}) // a dead pi starts again (dead_tab.odin)
 			if p := find_project(s.project_id); p != nil && p.group == .Projects && p.id != state.selected_project do ui_do(Select_Project{p.id})
 		}
 	case Hit_Pin_Project:
@@ -1281,7 +1390,7 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 	case Hit_Pin_Session:
 		ui_do(Set_Pinned{pi_session_id = string(h), pinned = session_pinned(string(h)) < 0})
 	case Hit_New_In:
-		ui_do(New_Chat{u64(h)})
+		new_session_ui(u64(h), at = at) // the harness picker (harness.odin)
 	case Hit_Add_Project:
 		add_project_dialog()
 	case Hit_Sort:

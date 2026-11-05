@@ -9,6 +9,7 @@ import "core:path/filepath"
 
 Platform :: struct {
 	set_clipboard:  proc(text: string),
+	get_clipboard:  proc() -> string, // what a paste inserts (clipboard_text)
 	quit:           proc(), // the user confirmed: close the app
 	wake:           proc(), // any thread: get the main thread to drain the inbox soon
 	pick_folder:    proc() -> string, // asks the user for a folder (modal); "" = cancelled
@@ -25,6 +26,12 @@ Platform :: struct {
 }
 
 platform: Platform
+
+// What a paste inserts: the system clipboard (a script's own pasteboard under autotest); "" with
+// no platform (unit tests).
+clipboard_text :: proc() -> string {
+	return platform.get_clipboard != nil ? platform.get_clipboard() : ""
+}
 
 // Where pi-desk keeps its own files (command log; later the saved
 // workspace). PI_DESK_DATA_DIR overrides.

@@ -84,6 +84,7 @@ Server :: struct {
 	origins:      map[u64]Origin, // request id -> the connection that sent it
 	bridge_calls: map[string]Bridge_Call, // our request id on a bridge -> the command waiting for it
 	tab_session:  map[u64]u64, // tab -> open session, kept from State (ids are never reused)
+	claude_pids:  map[u64]i32, // a Claude tab -> its process (the login shell that execs claude): its token's hellos must come from below it
 	next_ref:     u64,
 	next_conn:    u64,
 	next_bridge:  u64,
@@ -100,14 +101,14 @@ socket_start :: proc(dir := "") -> bool {
 		ok: bool
 		d, ok = sock_runtime_dir(context.temp_allocator)
 		if !ok {
-			fmt.eprintln("pi-desk: control socket: unsafe or missing runtime dir", d)
+			fmt.eprintln("Deckhand: control socket: unsafe or missing runtime dir", d)
 			return false
 		}
 	}
 	path := fmt.aprintf("%s/pi-desk-%d.sock", d, os.get_pid())
 	fd, ok := sock_listen(path)
 	if !ok {
-		fmt.eprintln("pi-desk: control socket: cannot listen on", path)
+		fmt.eprintln("Deckhand: control socket: cannot listen on", path)
 		delete(path)
 		return false
 	}
@@ -117,7 +118,7 @@ socket_start :: proc(dir := "") -> bool {
 	srv.running = true
 	srv.accept = thread.create_and_start(accept_loop)
 	if srv.accept == nil {
-		fmt.eprintln("pi-desk: control socket: cannot start the accept thread")
+		fmt.eprintln("Deckhand: control socket: cannot start the accept thread")
 		sock_close(fd)
 		sock_unlink(path)
 		delete(path)
@@ -186,19 +187,73 @@ random_token :: proc(allocator := context.allocator) -> string {
 	return string(hex.encode(raw[:], allocator))
 }
 
-// PI_DESK_SOCKET and a new PI_DESK_TOKEN for a child (temp allocator), or
-// nil when the socket is not running.
+// PI_DESK_SOCKET and a new PI_DESK_TOKEN for an app tab's program (temp allocator;
+// docs/ENGINE-BRIDGE.md: a stable interface), or nil when the socket is not running.
 socket_child_env :: proc(caller: Caller) -> []string {
 	if !srv.running do return nil
 	tok := socket_mint_token(caller, context.temp_allocator, single_use = true)
-	env := make([dynamic]string, 0, 3, context.temp_allocator)
+	env := make([dynamic]string, 0, 2, context.temp_allocator)
 	append(&env, fmt.tprintf("PI_DESK_SOCKET=%s", srv.path), fmt.tprintf("PI_DESK_TOKEN=%s", tok))
-	// a pi session (a pi tab, Atlas) learns where app screenshots go: pi-kit
-	// checks app_screenshot's files are directly in it. Never PI_DESK_DATA_DIR:
-	// pi-desk reads that, so a test-mode pi-desk an agent starts would use the
-	// user's real data dir. App programs need neither.
-	if caller.kind != .App do append(&env, fmt.tprintf("PI_DESK_SHOTS_DIR=%s", app_shots_dir(context.temp_allocator)))
 	return env[:]
+}
+
+// A pi session's (a pi tab, Atlas) environment for Deckhand's pi integration (temp allocator;
+// pi_integration.odin), or nil when the socket is not running: DECKHAND_SOCKET, a new
+// single-use DECKHAND_TOKEN and DECKHAND_SHOTS_DIR, where app screenshots go (the integration
+// checks app_screenshot's files are directly in it). Never pi-kit's PI_DESK_SOCKET and
+// PI_DESK_TOKEN: its desk extensions switch on with those, and stay inert without them. Never
+// PI_DESK_DATA_DIR: Deckhand reads that, so a test-mode Deckhand an agent starts would use the
+// user's real data dir. Also nil when the pi will not load the integration (pi_integration_args:
+// none in this build, or a pi too old): no token is minted that nothing would use, which its bash
+// and ! commands would inherit.
+socket_pi_env :: proc(caller: Caller) -> []string {
+	if !srv.running || len(pi_integration_args()) == 0 do return nil
+	tok := socket_mint_token(caller, context.temp_allocator, single_use = true)
+	env := make([dynamic]string, 0, 3, context.temp_allocator)
+	append(&env, fmt.tprintf("DECKHAND_SOCKET=%s", srv.path), fmt.tprintf("DECKHAND_TOKEN=%s", tok))
+	append(&env, fmt.tprintf("DECKHAND_SHOTS_DIR=%s", app_shots_dir(context.temp_allocator)))
+	return env[:]
+}
+
+// The environment a Claude tab's process gets (claude.odin; temp allocator): PI_DESK_SOCKET, a
+// fresh MULTI-use token in PI_DESK_CLAUDE_TOKEN (the CLI and the hooks are a new process per call,
+// so a single-use token cannot work; see docs/CLAUDE.md for what that costs and why the hello
+// checks the caller's process), PI_DESK_CLI (the bundled CLI, so plugin and app match),
+// PI_DESK_SHOTS_DIR and PI_DESK_CLAUDE_TAB. Tokens the tab had before are revoked first. Nil when
+// the socket is not running.
+socket_claude_env :: proc(tab_id: u64, cli: string) -> []string {
+	if !srv.running do return nil
+	socket_forget_tab(tab_id)
+	tok := socket_mint_token({kind = .Panel, tab_id = tab_id, claude = true}, context.temp_allocator)
+	env := make([dynamic]string, 0, 5, context.temp_allocator)
+	append(&env, fmt.tprintf("PI_DESK_SOCKET=%s", srv.path), fmt.tprintf("PI_DESK_CLAUDE_TOKEN=%s", tok))
+	if cli != "" do append(&env, fmt.tprintf("PI_DESK_CLI=%s", cli))
+	append(&env, fmt.tprintf("PI_DESK_SHOTS_DIR=%s", app_shots_dir(context.temp_allocator)), fmt.tprintf("PI_DESK_CLAUDE_TAB=%d", tab_id))
+	return env[:]
+}
+
+// The Claude tab's process started (its pid): its token's hellos must come from it or below it.
+socket_claude_pid :: proc(tab_id: u64, pid: i32) {
+	sync.lock(&srv.mu)
+	srv.claude_pids[tab_id] = pid
+	sync.unlock(&srv.mu)
+}
+
+// Whether a hello with a Claude tab's token comes from that tab's own processes: the connecting
+// process (its pid when it connected) is the tab's process or descends from it (at most 64
+// parents up). A token read from the environment by any other process of the user is refused.
+// srv.mu held.
+@(private = "file")
+socket_claude_peer_ok :: proc(c: ^Conn, tab_id: u64) -> bool {
+	root, has := srv.claude_pids[tab_id]
+	if !has || root <= 1 do return false
+	pid := sock_peer_pid(c.fd)
+	for _ in 0 ..< 64 {
+		if pid <= 1 do return false
+		if pid == root do return true
+		pid = pid_parent(pid)
+	}
+	return false
 }
 
 // The tab is gone (closed, exited, failed to start): revoke its tokens and
@@ -213,7 +268,17 @@ socket_forget_tab :: proc(tab_id: u64) {
 		delete_key(&srv.tokens, k)
 		delete(k)
 	}
-	for c in srv.conns do if c.caller.tab_id == tab_id do sock_shutdown(c.fd)
+	for c in srv.conns {
+		if c.caller.tab_id != tab_id do continue
+		sock_shutdown(c.fd) // the reader sees the end and cleans up
+		// no longer the tab's at once (socket_app_connected): its process is gone, and a new one
+		// (Restart) must not be taken for having closed it
+		sync.lock(&c.mu)
+		c.closing = true
+		sync.cond_broadcast(&c.cond)
+		sync.unlock(&c.mu)
+	}
+	delete_key(&srv.claude_pids, tab_id)
 }
 
 // ---- events (main thread) ----
@@ -255,14 +320,19 @@ socket_publish :: proc(ev: Event) {
 @(private = "file")
 event_matches :: proc(c: ^Conn, ev: Event) -> bool {
 	session, tab := c.sub_session, c.sub_tab
-	if c.caller.kind == .Panel do session, tab = srv.tab_session[c.caller.tab_id] or_else 0, 0
+	if c.caller.kind == .Panel {
+		// its own session only; a tab pi-desk does not know (yet) sees nothing
+		own, known := srv.tab_session[c.caller.tab_id]
+		if !known || own == 0 do return false
+		session, tab = own, 0
+	}
 	if session == 0 && tab == 0 do return true
 	e, ok := ev.(Command_Event)
 	if !ok do return false // finished events only go to unfiltered subscribers
 	tabs := [3]u64{command_tab(e.command), e.caller.tab_id, 0}
 	sessions := [2]u64{command_session(e.command), 0}
 	#partial switch _ in e.command {
-	case New_Shell_Tab, Browser_Open:   tabs[2] = e.result.created_id
+	case New_Shell_Tab, Browser_Open, Show_File: tabs[2] = e.result.created_id
 	case New_Chat, Open_Session_Cmd:    sessions[1] = e.result.created_id
 	}
 	for t in tabs do if t != 0 {
@@ -282,10 +352,13 @@ command_tab :: proc(cmd: Command) -> u64 {
 	case Terminal_Link:     return c.tab_id
 	case Send_Text:         return c.tab_id
 	case Tab_Exited:        return c.tab_id
+	case Program_Status:    return c.tab_id
+	case Set_Unread:        return c.tab_id
 	case Pi_Session_Update: return c.tab_id
 	case Pi_Status_Update:  return c.tab_id
 	case Pi_Prompt:         return c.tab_id
 	case Pi_Reload:         return c.tab_id
+	case Pi_Restart:        return c.tab_id
 	case Pi_Wait_Idle:      return c.tab_id
 	case Panel_Set:         return c.tab_id
 	case Panel_Remove:      return c.tab_id
@@ -306,6 +379,7 @@ command_session :: proc(cmd: Command) -> u64 {
 	case Close_Session: return c.session
 	case New_Shell_Tab: return c.session
 	case Browser_Open:  return c.session
+	case Show_File:     return c.session
 	}
 	return 0
 }
@@ -322,7 +396,7 @@ socket_bridge_send :: proc(tab_id: u64, request_id: u64, cmd: Command) -> bool {
 	// the newest open connection of the tab (one already closing would only fail later)
 	target: ^Conn
 	for c in srv.conns {
-		if c.ref == 0 || c.caller.kind != .Panel || c.caller.tab_id != tab_id do continue
+		if c.ref == 0 || c.caller.kind != .Panel || c.caller.claude || c.caller.tab_id != tab_id do continue
 		sync.lock(&c.mu)
 		closing := c.closing
 		sync.unlock(&c.mu)
@@ -366,7 +440,7 @@ socket_bridge_connected :: proc(tab_id: u64) -> bool {
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	for c in srv.conns {
-		if c.ref == 0 || c.caller.kind != .Panel || c.caller.tab_id != tab_id do continue
+		if c.ref == 0 || c.caller.kind != .Panel || c.caller.claude || c.caller.tab_id != tab_id do continue
 		sync.lock(&c.mu)
 		closing := c.closing
 		sync.unlock(&c.mu)
@@ -381,7 +455,7 @@ socket_bridge_notify :: proc(tab_id: u64, body: string) -> bool {
 	defer sync.unlock(&srv.mu)
 	target: ^Conn
 	for c in srv.conns {
-		if c.ref == 0 || c.caller.kind != .Panel || c.caller.tab_id != tab_id do continue
+		if c.ref == 0 || c.caller.kind != .Panel || c.caller.claude || c.caller.tab_id != tab_id do continue
 		sync.lock(&c.mu)
 		closing := c.closing
 		sync.unlock(&c.mu)
@@ -592,9 +666,9 @@ conn_finish :: proc(c: ^Conn) {
 	sync.lock(&srv.mu)
 	for x, i in srv.conns do if x == c {ordered_remove(&srv.conns, i); break}
 	// another connection of this pi tab still open: the bridge is reconnecting
-	bridge := c.ref != 0 && c.caller.kind == .Panel
+	bridge := c.ref != 0 && c.caller.kind == .Panel && !c.caller.claude // a Claude tab's CLI is no pi bridge
 	others := false
-	if bridge do for x in srv.conns do if x.ref != 0 && x.caller.kind == .Panel && x.caller.tab_id == c.caller.tab_id do others = true
+	if bridge do for x in srv.conns do if x.ref != 0 && x.caller.kind == .Panel && !x.caller.claude && x.caller.tab_id == c.caller.tab_id do others = true
 	why := others ? "the pi tab's bridge is reconnecting" : "the pi tab's bridge disconnected"
 	owed := make([dynamic]string, context.temp_allocator)
 	for k, call in srv.bridge_calls do if call.conn == c.id do append(&owed, k)
@@ -651,12 +725,19 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 	if c.ref == 0 {
 		if err == "" && m.type != "hello" do err = "the first message must be hello"
 		reconnect: string
+		ref: u64
 		if err == "" {
 			sync.lock(&srv.mu)
 			e, known := srv.tokens[m.token]
+			// a Claude tab's token works only from that tab's own processes
+			if known && e.caller.claude && !socket_claude_peer_ok(c, e.caller.tab_id) {
+				sync.unlock(&srv.mu)
+				conn_push(c, reply_json(m.id, fail("this token works only from its Claude tab's own processes")), force = true)
+				return false
+			}
 			if known {
-				c.caller = e.caller
-				c.ref = e.ref
+				c.caller = e.caller // socket_forget_tab finds it from here on
+				ref = e.ref
 				if e.single_use {
 					// swap the env token for one only this bridge knows (same caller)
 					k, _ := delete_key(&srv.tokens, m.token)
@@ -672,7 +753,14 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 			conn_push(c, reply_json(m.id, fail(err)), force = true)
 			return false
 		}
-		conn_push(c, reply_json(m.id, {ok = true, data = welcome_json(c.caller, reconnect)}), force = true)
+		// The reply is queued in the same step that makes the connection count as its caller's
+		// (c.ref: socket_app_send, socket_bridge_send and events look for it), so nothing that
+		// pi-desk sends it can come before its hello reply (TAB-PROTOCOL.md §3).
+		welcome := reply_json(m.id, {ok = true, data = welcome_json(c.caller, reconnect)})
+		sync.lock(&srv.mu)
+		c.ref = ref
+		conn_push(c, welcome, force = true)
+		sync.unlock(&srv.mu)
 		return true
 	}
 	if c.caller.kind == .App {
@@ -729,6 +817,16 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		case Panel_Set:         if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		case Panel_Remove:      if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		case Pi_Attached:       if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Session_Report: if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Turn_Report:    if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Readonly_Ack:   if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Comments:       if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Attached:       if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Todos:          if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Task:           if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Subagent:       if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Background:     if x.tab_id == 0 do x.tab_id = c.caller.tab_id
+		case Claude_Model_Report:   if x.tab_id == 0 do x.tab_id = c.caller.tab_id
 		}
 		r := Conn_Reply{conn = c, id = m.id}
 		r.deliver = deliver_reply
@@ -746,12 +844,12 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	caps: string
 	switch caller.kind {
-	case .Panel:                             caps = `["pi_tab","panels","state","events"]`
+	case .Panel:                             caps = caller.claude ? `["claude_tab","state","events"]` : `["pi_tab","panels","state","events"]`
 	case .Control, .Script, .UI, .Internal:  caps = `["commands","state","events"]`
 	case .App:                               caps = `["app","frames","input"]`
 	}
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, `{{"v":%d,"app":"pi-desk","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, CALLER_NAMES[caller.kind], caller.tab_id, caps)
+	fmt.sbprintf(&b, `{{"v":%d,"app":"pi-desk","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
 	if reconnect != "" do fmt.sbprintf(&b, `,"reconnect_token":"%s"`, reconnect)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
 	when ODIN_OS == .Darwin do if caller.kind == .App {
@@ -762,4 +860,13 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	}
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
+}
+
+// The connection that sent request `request_id` (its Conn id), 0 if none (the user, a script, pi-desk).
+socket_request_conn :: proc(request_id: u64) -> u64 {
+	if request_id == 0 do return 0
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	if o, ok := srv.origins[request_id]; ok do return u64(o.conn)
+	return 0
 }

@@ -6,6 +6,7 @@
 #   2. relaunch with the same data dir: pins, sort, hidden items and widths back
 # Screenshots go to build/shots/sidebar/. Usage: tests/scripts/sidebar.sh
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 W="$ROOT/build/sidebar"
@@ -38,7 +39,7 @@ session charlie 10 c1 "Draw the logo"
 
 run() { # script
   HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='echo "ARGS: $*"; exec sleep 600' build/pi-desk
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand
 }
 fail=0
 for n in 1 2; do

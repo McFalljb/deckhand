@@ -7,8 +7,8 @@ assert_state open_sessions.# 1
 window front
 # ---- frames arrive: the square's colour, and its position changing
 app_open build/fake-app
-app_waitstatus running 5000
-app_waitframe 5 5000
+app_waitstatus running 20000
+app_waitframe 5 20000
 assert_app_pixel 5 5 202830
 assert_app_pixel 30 130 40A040
 assert_app_pixel 305 205 F0D020
@@ -100,6 +100,9 @@ assert_finished data.visible true
 assert_shot_pixel 4 4 202830
 command {"type":"app_screenshot","tab_id":$last,"rect":{"x":100,"y":60,"w":40,"h":40}}
 assert_finished ok true
+# PI_DESK_SCALE=2 (app-tab.sh): the crop is 2 px per logical px on any Mac
+assert_finished data.w 80
+assert_finished data.h 80
 assert_shot_pixel 2 2 FF4040
 command {"type":"app_screenshot","tab_id":$last,"rect":{"x":300,"y":200,"w":16,"h":16}}
 assert_shot_pixel 1 1 F0D020
@@ -190,7 +193,7 @@ wait 500
 assert_apps_freed
 # ---- a busy app (no frames, still answering): "No frames for Ns", the last frame stays
 app_open build/fake-app --freeze-after 60
-app_waitframe 20 5000
+app_waitframe 20 20000
 app_waitstatus stalled 6000
 assert_app_pixel 5 5 202830
 assert_drawn No frames for
@@ -200,22 +203,22 @@ command {"type":"close_tab","tab_id":$last}
 wait 300
 # ---- a hung app (reads nothing any more): not responding, then Restart
 app_open build/fake-app --hang-after 30 --once $datadir/hang.once
-app_waitframe 20 5000
+app_waitframe 20 20000
 app_waitstatus not_responding 8000
 assert_app_pixel 5 5 202830
 assert_drawn is not responding
 assert_drawn Restart
 clickid app_restart
-app_waitstatus running 5000
-app_waitframe 5 5000
+app_waitstatus running 20000
+app_waitframe 5 20000
 wait 200
 assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # ---- a crash: the last frame stays, dimmed; the bar has Restart and Log
 app_open build/fake-app --crash-after 20 --once $datadir/crash.once
-app_waitframe 10 5000
-app_waitstatus exited 5000
+app_waitframe 10 20000
+app_waitstatus exited 20000
 assert_app_dimmed yes
 assert_app_pixel 5 5 202830
 assert_drawn exited (code 134)
@@ -223,8 +226,8 @@ assert_drawn Restart
 assert_drawn Log
 assert_app_surfaces 1
 clickid app_restart
-app_waitstatus running 5000
-app_waitframe 5 5000
+app_waitstatus running 20000
+app_waitframe 5 20000
 assert_app_dimmed no
 wait 200
 assert_app_surfaces 3
@@ -232,8 +235,8 @@ command {"type":"close_tab","tab_id":$last}
 wait 300
 # a crashed app's tab closed without a restart: everything goes, pi-desk stays up
 app_open build/fake-app --crash-after 20
-app_waitframe 10 5000
-app_waitstatus exited 5000
+app_waitframe 10 20000
+app_waitstatus exited 20000
 assert_app_surfaces 1
 command {"type":"close_tab","tab_id":$last}
 assert_result ok true
@@ -241,9 +244,9 @@ wait 300
 assert_apps_freed
 # ---- exit 75: restarted by itself
 app_open build/fake-app --exit 75 --once $datadir/exit.once
-app_waitlog exit 75: restarting 5000
-app_waitstatus running 5000
-app_waitframe 5 5000
+app_waitlog exit 75: restarting 20000
+app_waitstatus running 20000
+app_waitframe 5 20000
 command {"type":"close_tab","tab_id":$last}
 wait 300
 # ---- "New app tab…" from the palette: the project's .pi-desk/apps.json lists the fake
@@ -255,9 +258,9 @@ key enter
 wait 300
 assert_state focus.id palette
 key enter
-app_waitstatus running 5000
+app_waitstatus running 20000
 assert_state open_sessions.0.tabs.1.title fake
-app_waitframe 3 5000
+app_waitframe 3 20000
 key escape
 command {"type":"close_tab","tab_id":$tab}
 wait 300

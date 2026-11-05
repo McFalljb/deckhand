@@ -1,0 +1,44 @@
+{
+  "description": "Deckhand: report the Claude session (resume), turn start and end (Deckhand types into the tab only when idle), what still runs in the background at a turn's end (Stop, SubagentStop), attach the user's pending comments to the submitted message, show Claude's todos, subagents (their current tool and own todos) and background shells in Deckhand's right column and its model (async, nothing added to Claude's context), and the question and error dots (Stop, StopFailure)",
+  "hooks": {
+    "SessionStart": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook session-start", "timeout": 10}]}
+    ],
+    "UserPromptSubmit": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook prompt-submit", "timeout": 20}]}
+    ],
+    "Stop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook stop", "timeout": 10}]}
+    ],
+    "StopFailure": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook stop-failure", "timeout": 10}]}
+    ],
+    "PostModelSwitch": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook model", "async": true, "timeout": 10}]}
+    ],
+    "Notification": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook notification", "timeout": 10}]}
+    ],
+    "PostToolUse": [
+      {"matcher": "TodoWrite", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook todos", "async": true, "timeout": 10}]},
+      {"matcher": "TaskUpdate", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook task-update", "async": true, "timeout": 10}]},
+      {"matcher": "Bash", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook bash-bg", "async": true, "timeout": 10}]}
+    ],
+    "TaskCreated": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook task-created", "async": true, "timeout": 10}]}
+    ],
+    "TaskCompleted": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook task-completed", "async": true, "timeout": 10}]}
+    ],
+    "PreToolUse": [
+      {"matcher": "Agent|Task", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook agent-launch", "async": true, "timeout": 10}]},
+      {"matcher": "*", "hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook agent-tool", "async": true, "timeout": 10}]}
+    ],
+    "SubagentStart": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook subagent-start", "async": true, "timeout": 10}]}
+    ],
+    "SubagentStop": [
+      {"hooks": [{"type": "command", "command": "\"${CLAUDE_PLUGIN_ROOT}\"/bin/deckhand hook subagent-stop", "async": true, "timeout": 10}]}
+    ]
+  }
+}

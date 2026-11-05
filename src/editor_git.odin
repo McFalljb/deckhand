@@ -84,11 +84,19 @@ git_run_input :: proc(dir, input: string, args: ..string) -> (out: string, ok: b
 // the timeout (then not ok). Output (and input, if any) goes through
 // temporary files, so a large one never blocks the child on a full pipe.
 run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, ok: bool) {
+	o, code, ran := run_bounded_exit(dir, cmd, timeout, input)
+	if !ran || code != 0 do return "", false
+	return o, true
+}
+
+// run_bounded with the exit code: ran = it started, ended within timeout and its output was read
+// (code: its exit status, or the signal that ended it); out is read whatever the code.
+run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, code: int, ran: bool) {
 	tmpdir := os.get_env("TMPDIR", context.temp_allocator)
 	if tmpdir == "" do tmpdir = "/tmp"
 	path := fmt.tprintf("%s/pi-desk-run-%d-%d.out", strings.trim_right(tmpdir, "/"), os.get_pid(), sync.atomic_add(&run_seq, 1))
 	f, ferr := os.open(path, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
-	if ferr != nil do return "", false
+	if ferr != nil do return "", 0, false
 	defer {
 		os.close(f)
 		os.remove(path)
@@ -99,23 +107,22 @@ run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input :=
 		ipath := fmt.tprintf("%s.in", path)
 		ierr: os.Error
 		stdin, ierr = os.open(ipath, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
-		if ierr != nil do return "", false
+		if ierr != nil do return "", 0, false
 		os.remove(ipath) // the open handle keeps it until closed
-		if _, werr := os.write_string(stdin, input); werr != nil do return "", false
-		if _, serr := os.seek(stdin, 0, .Start); serr != nil do return "", false
+		if _, werr := os.write_string(stdin, input); werr != nil do return "", 0, false
+		if _, serr := os.seek(stdin, 0, .Start); serr != nil do return "", 0, false
 	}
 	p, perr := os.process_start({command = cmd, working_dir = dir, stdout = f, stdin = stdin})
-	if perr != nil do return "", false
+	if perr != nil do return "", 0, false
 	st, werr := os.process_wait(p, timeout)
 	if werr != nil || !st.exited {
 		_ = os.process_kill(p)
 		_, _ = os.process_wait(p)
-		return "", false
+		return "", 0, false
 	}
-	if st.exit_code != 0 do return "", false
 	data, rerr := os.read_entire_file(path, context.temp_allocator)
-	if rerr != nil do return "", false
-	return string(data), true
+	if rerr != nil do return "", 0, false
+	return string(data), st.exit_code, true
 }
 
 // The repository root holding path ("" = not in a repository).

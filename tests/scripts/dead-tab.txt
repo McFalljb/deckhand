@@ -1,0 +1,90 @@
+# A pi tab whose process exits (tests/scripts/dead-tab.sh; fake pi
+# tests/scripts/fake-pi-dead.py, never a model). Screenshots: build/shots/dead-tab/.
+wait 1000
+command {"type":"open_session","project_id":$project,"pi_session_id":"demo-1"}
+assert_result ok true
+waitfor fake pi (dies) 10000
+assert_screen model: (the session's)
+assert_state open_sessions.0.tabs.0.status running
+# a rate limit kills this pi (code 1): its output stays, the bar says how
+type limit
+key enter
+waitfor [process exited: code 1] 5000
+assert_screen rate_limit_error
+assert_state open_sessions.0.tabs.0.status exited
+assert_state open_sessions.0.tabs.0.exit code 1
+hover dead_restart
+eventually
+assert_tip Start pi again in this tab, on the same session
+hover dead_restart_model
+eventually
+assert_tip Start pi again on the same session, then pick another model in pi's selector
+hover open 0
+eventually
+assert_tip pi exited (code 1) — open it again to restart
+shot dead-tab/rate-limit
+system_appearance light
+wait 200
+shot dead-tab/rate-limit-light
+system_appearance dark
+# Restart with model…: the same tab and session, then pi's model selector
+clickid dead_restart_model
+waitfor [model selector] 10000
+assert_screen session: 2026-10-30T10-00-00-000Z_demo-1.jsonl
+assert_state open_sessions.# 1
+assert_state open_sessions.0.tabs.# 1
+assert_state open_sessions.0.tabs.0.status running
+shot dead-tab/model-selector
+# a hangup: the signal is said
+type hup
+key enter
+waitfor [process exited: signal 1 (SIGHUP)] 5000
+assert_state open_sessions.0.tabs.0.exit signal 1 (SIGHUP)
+shot dead-tab/sighup
+# Restart
+clickid dead_restart
+waitfor fake pi (dies) 10000
+assert_state open_sessions.0.tabs.0.status running
+assert_state open_sessions.# 1
+# the listed session's row opens it again: restarts
+type hup
+key enter
+waitfor [process exited: signal 1 (SIGHUP)] 5000
+clickid sess 0
+waitfor fake pi (dies) 10000
+assert_state open_sessions.0.tabs.0.status running
+assert_state open_sessions.# 1
+# its row in the Open section: restarts
+type hup
+key enter
+waitfor [process exited: signal 1 (SIGHUP)] 5000
+clickid open 0
+waitfor fake pi (dies) 10000
+assert_state open_sessions.0.tabs.0.status running
+# an agent's pi_restart: refused while it runs, restarts once it exited
+command {"type":"pi_restart","tab_id":$pitab}
+assert_result error pi is running in this tab (pi_reload restarts a running one)
+type hup
+key enter
+waitfor [process exited: signal 1 (SIGHUP)] 5000
+command {"type":"pi_restart","tab_id":$pitab}
+assert_result ok true
+waitfor fake pi (dies) 10000
+assert_state open_sessions.0.tabs.0.status running
+# a clean exit (/quit) offers Restart only
+type quit
+key enter
+waitfor [process exited: code 0] 5000
+assert_state open_sessions.0.tabs.0.exit code 0
+assert_not_drawn Restart with model
+shot dead-tab/clean-exit
+# a narrow window: the short label keeps both buttons whole
+clickid dead_restart
+waitfor fake pi (dies) 10000
+type limit
+key enter
+waitfor [process exited: code 1] 5000
+resize 760 600
+wait 300
+shot dead-tab/narrow
+quit

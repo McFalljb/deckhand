@@ -14,6 +14,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:slice"
 import "core:strings"
 import "core:time"
 import gh "ghostty"
@@ -58,7 +59,7 @@ persist_on_event :: proc(ev: Event) {
 		// the page's address and title are saved; loading and history are not
 		// (an empty `what`: a popup's new tab, saved)
 		if c := e.command.(Browser_Update); c.what != {} && c.what & {.Url, .Title} == {} do return
-	case Pi_Status_Update, Panel_Set, Panel_Remove, Set_Focus, Set_Files_Filter, Tab_Exited, Cancel_Confirmation, Bridge_Done, Agent_Model_Picker, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared, Jobs_Sync, Jobs_Tick, Job_Run_Done, Job_Mark_Read, Job_Run_Now, Job_Stop, Job_Open, App_Update, App_Restart, App_Input, App_Call, App_Call_Done, App_Screenshot, App_Inspect, Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop, Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
+	case Pi_Status_Update, Program_Status, Set_Unread, Panel_Set, Panel_Remove, Set_Focus, Set_Files_Filter, Tab_Exited, Cancel_Confirmation, Bridge_Done, Agent_Model_Picker, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared, Jobs_Sync, Jobs_Tick, Job_Run_Done, Job_Mark_Read, Job_Run_Now, Job_Stop, Job_Open, App_Update, App_Restart, App_Input, App_Call, App_Call_Done, App_Screenshot, App_Inspect, Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop, Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel, Claude_Comments, Claude_Prompt, Claude_Wait_Idle, Claude_Wait_Tick, Claude_Held_Op, Claude_Deliver, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background, Claude_Readonly_Ack:
 		return
 	}
 	persist.gen += 1
@@ -92,7 +93,7 @@ persist_save :: proc() {
 	if text == persist.last_written do return
 	persist.writes += 1
 	if err := write_atomic(persist.path, text); err != "" {
-		fmt.eprintln("pi-desk: could not save the workspace:", err)
+		fmt.eprintln("Deckhand: could not save the workspace:", err)
 		return
 	}
 	delete(persist.last_written)
@@ -105,7 +106,7 @@ persist_quit :: proc() {
 	if persist.done do return
 	persist_save()
 	persist.done = true
-	if persist.path != "" && os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" do fmt.eprintf("pi-desk: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
+	if persist.path != "" && os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" do fmt.eprintf("Deckhand: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
 }
 
 // Writes `text` to `path` through a temp file in the same dir and a rename,
@@ -202,7 +203,12 @@ workspace_json :: proc() -> string {
 	ki(&w, "v", WORKSPACE_VERSION)
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
-	for &s in state.open_sessions do if !s.home && (s.restored || session_on_disk(s)) do append(&saved, &s)
+	for &s in state.open_sessions {
+		if s.home do continue
+		// a Claude-only session once its Claude session id came (claude.session), a pi session once its file is there
+		keep := s.agent == .Claude ? s.pi_session_id != "" : s.restored || session_on_disk(s)
+		if keep do append(&saved, &s)
+	}
 
 	// projects: added by hand, renamed, selected, or holding a saved session
 	strings.write_string(&w.b, ",\n")
@@ -221,6 +227,7 @@ workspace_json :: proc() -> string {
 		ks(&w, "cwd", p.cwd)
 		if p.name != "" do ks(&w, "name", p.name)
 		if p.by_hand do kb(&w, "added", true) // its own row (project_tidy.odin)
+		if p.claude && p.dir == "" do kb(&w, "claude", true) // only Claude ran there: the next Rescan confirms it
 		close_obj(&w)
 	}
 	strings.write_byte(&w.b, ']')
@@ -236,7 +243,13 @@ workspace_json :: proc() -> string {
 		if s.id == state.current_session do current = i
 		p := find_project(s.project_id)
 		open_obj(&w)
-		ks(&w, "pi_session_id", s.pi_session_id)
+		if s.agent == .Claude {
+			// a Claude-only session (claude.odin): its main tab's Claude session; pi_session_id ""
+			// so that an older pi-desk leaves it out
+			ks(&w, "agent", "claude")
+			ks(&w, "claude_session_id", s.pi_session_id)
+			ks(&w, "pi_session_id", "")
+		} else do ks(&w, "pi_session_id", s.pi_session_id)
 		ks(&w, "cwd", s.cwd)
 		ks(&w, "session_dir", s.session_dir)
 		ks(&w, "project", p != nil ? p.cwd : s.cwd)
@@ -255,6 +268,17 @@ workspace_json :: proc() -> string {
 			}
 			if et, is_ed := tab.kind.(Editor_Tab); is_ed && et.view == .File do ks(&w, "path", et.path) // diff views are not kept
 			if mt, is_md := tab.kind.(Markdown_Tab); is_md do ks(&w, "path", mt.path)
+			if ct, is_cl := tab.kind.(Claude_Tab); is_cl {
+				// Claude Code (claude.odin): its session (resumed on restore), folder and the user's flags
+				if ct.session_id != "" do ks(&w, "claude_session_id", ct.session_id)
+				ks(&w, "cwd", tab.cwd != "" ? tab.cwd : s.cwd)
+				if ct.readonly do kb(&w, "readonly", true) // pi-desk's read-only profile: kept at every start
+				if ct.account != "" do ks(&w, "account", ct.account) // its Claude Code account's folder (claude_accounts.odin)
+				if len(ct.args) > 0 {
+					k(&w, "args")
+					write_strings(&w.b, ct.args)
+				}
+			}
 			if bt, is_web := tab.kind.(Browser_Tab); is_web {
 				// its address now and its title (browser_nav.odin); the back/forward list is not kept
 				ks(&w, "url", bt.url)
@@ -276,6 +300,7 @@ workspace_json :: proc() -> string {
 		open_obj(&w)
 		ks(&w, "pi_session_id", hs.pi_session_id)
 		if state.home_model != "" do ks(&w, "model_applied", state.home_model) // the --model of its last start
+		if state.home_fork_from != "" do ks(&w, "fork_from", state.home_fork_from) // a fork pi has not written yet (home.odin)
 		close_obj(&w)
 	}
 
@@ -337,6 +362,42 @@ workspace_json :: proc() -> string {
 			strings.write_byte(&w.b, ']')
 		}
 		close_obj(&w)
+	}
+
+	// Claude sessions that ran read-only (claude.odin §1a): kept apart from the history's cap
+	if len(state.claude_readonly_ids) > 0 {
+		strings.write_string(&w.b, ",\n")
+		w.first = true
+		k(&w, "claude_readonly_ids")
+		write_strings(&w.b, state.claude_readonly_ids[:])
+	}
+
+	// Claude Code sessions pi-desk ran (claude.odin): Resume in a project's menu
+	if len(state.claude_history) > 0 {
+		strings.write_string(&w.b, ",\n")
+		w.first = true
+		k(&w, "claude_sessions")
+		strings.write_byte(&w.b, '[')
+		for r, i in state.claude_history {
+			if i > 0 do strings.write_byte(&w.b, ',')
+			open_obj(&w)
+			ks(&w, "id", r.id)
+			ks(&w, "cwd", r.cwd)
+			ks(&w, "project", r.project)
+			if r.title != "" do ks(&w, "title", r.title)
+			ki(&w, "used", int(r.used))
+			if r.readonly do kb(&w, "readonly", true)
+			if r.named do kb(&w, "named", true)
+			if r.transcript != "" do ks(&w, "transcript", r.transcript)
+			if r.model != "" do ks(&w, "model", r.model)
+			if r.account != "" do ks(&w, "account", r.account)
+			if len(r.args) > 0 {
+				k(&w, "args")
+				write_strings(&w.b, r.args)
+			}
+			close_obj(&w)
+		}
+		strings.write_byte(&w.b, ']')
 	}
 
 	// the left column: only what differs from the defaults (the filter is not saved)
@@ -414,10 +475,18 @@ workspace_json :: proc() -> string {
 	if st.appearance != .System do ks(&w, "appearance", APPEARANCE_NAMES[st.appearance])
 	if st.text_size != .Default do ks(&w, "text_size", TEXT_SIZE_NAMES[st.text_size])
 	if st.chats_readonly do kb(&w, "chats_readonly", true)
+	if st.claude_skip_permissions do kb(&w, "claude_skip_permissions", true)
+	if len(st.pi_extensions) > 0 {
+		k(&w, "pi_extensions")
+		open_obj(&w)
+		for e in st.pi_extensions do kb(&w, e.name, e.on)
+		close_obj(&w)
+	}
 	if st.agent_name != "" do ks(&w, "agent_name", st.agent_name)
 	if st.agent_model != "" do ks(&w, "agent_model", st.agent_model)
 	if st.notify_off do kb(&w, "notify", false)
 	if st.tidy_off do kb(&w, "tidy_projects", false)
+	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
 	if st.bell_off != {} || st.bell_os_off {
 		k(&w, "bell")
 		open_obj(&w)
@@ -425,6 +494,23 @@ workspace_json :: proc() -> string {
 		if st.bell_os_off do kb(&w, "os", false)
 		close_obj(&w)
 	}
+	// Claude Code accounts (claude_accounts.odin): what the user changed, and the last used
+	if len(st.claude_accounts) > 0 {
+		k(&w, "claude_accounts")
+		strings.write_byte(&w.b, '[')
+		for a, i in st.claude_accounts {
+			if i > 0 do strings.write_byte(&w.b, ',')
+			open_obj(&w)
+			ks(&w, "dir", a.dir)
+			if a.label != "" do ks(&w, "label", a.label)
+			if a.added do kb(&w, "added", true)
+			if a.removed do kb(&w, "removed", true)
+			close_obj(&w)
+		}
+		strings.write_byte(&w.b, ']')
+	}
+	if st.claude_account_last != "" do ks(&w, "claude_account_last", st.claude_account_last)
+	if st.claude_account_default != "" do ks(&w, "claude_account_default", st.claude_account_default)
 	if st.home_dir != "" do ks(&w, "home_dir", st.home_dir)
 	if st.folders != {} {
 		k(&w, "folders")
@@ -462,33 +548,33 @@ persist_load :: proc(fresh := false) {
 	start := time.tick_now()
 	fi, serr := os.stat(persist.path, context.temp_allocator)
 	if serr != nil {
-		fmt.eprintln("pi-desk: could not read the saved workspace:", serr)
+		fmt.eprintln("Deckhand: could not read the saved workspace:", serr)
 		return
 	}
 	if fi.type != .Regular || fi.size > WORKSPACE_MAX {
-		fmt.eprintln("pi-desk: saved workspace not restored:", fi.type != .Regular ? "not a regular file" : "file too big")
+		fmt.eprintln("Deckhand: saved workspace not restored:", fi.type != .Regular ? "not a regular file" : "file too big")
 		move_aside("bad")
 		return
 	}
 	data, err := os.read_entire_file(persist.path, context.temp_allocator)
 	if err != nil {
-		fmt.eprintln("pi-desk: could not read the saved workspace:", err)
+		fmt.eprintln("Deckhand: could not read the saved workspace:", err)
 		return
 	}
 	if rerr := workspace_restore(string(data)); rerr != "" {
-		fmt.eprintln("pi-desk: saved workspace not restored:", rerr)
+		fmt.eprintln("Deckhand: saved workspace not restored:", rerr)
 		move_aside("bad")
 		return
 	}
 	persist.last_written = strings.clone(string(data))
-	fmt.eprintf("pi-desk: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
+	fmt.eprintf("Deckhand: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
 }
 
 @(private = "file")
 move_aside :: proc(tag: string) {
 	to := fmt.tprintf("%s.%s-%d", persist.path, tag, time.time_to_unix(time.now()))
-	if err := os.rename(persist.path, to); err != nil do fmt.eprintln("pi-desk: could not move", persist.path, "aside:", err)
-	else do fmt.eprintln("pi-desk: kept the old workspace as", to)
+	if err := os.rename(persist.path, to); err != nil do fmt.eprintln("Deckhand: could not move", persist.path, "aside:", err)
+	else do fmt.eprintln("Deckhand: kept the old workspace as", to)
 }
 
 // Restores State from a workspace file's text through commands. Returns an
@@ -504,7 +590,7 @@ workspace_restore :: proc(text: string) -> string {
 	if !ok do return "not a JSON object"
 	ver, has_v := root["v"].(json.Integer)
 	if !has_v do return "no version"
-	if ver != WORKSPACE_VERSION do return fmt.tprintf("unknown version %d (pi-desk reads %d)", ver, WORKSPACE_VERSION)
+	if ver != WORKSPACE_VERSION do return fmt.tprintf("unknown version %d (Deckhand reads %d)", ver, WORKSPACE_VERSION)
 
 	run :: proc(c: Command) -> Result {return run_command(c, {kind = .Internal})}
 
@@ -529,10 +615,19 @@ workspace_restore :: proc(text: string) -> string {
 		if ap, aok := enum_of(st, "appearance", APPEARANCE_NAMES); aok do run(Set_Appearance{mode = ap})
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})
 		if ro, rok := st["chats_readonly"].(json.Boolean); rok do run(Set_Chats_Readonly{on = bool(ro)})
+		if sp, sok := st["claude_skip_permissions"].(json.Boolean); sok do run(Set_Claude_Default_Flags{skip_permissions = bool(sp)})
+		if pe, pok := st["pi_extensions"].(json.Object); pok {
+			names := make([dynamic]string, context.temp_allocator)
+			for n in pe do append(&names, n)
+			slice.sort(names[:]) // the saved order is not kept by the parsed object
+			for n in names do if on, ok := pe[n].(json.Boolean); ok do run(Set_Pi_Extension{name = n, on = bool(on)})
+		}
 		if an, aok := st["agent_name"].(json.String); aok do run(Set_Agent_Name{name = an})
 		if am, aok := st["agent_model"].(json.String); aok do run(Set_Agent_Model{model = am})
 		if no, nok := st["notify"].(json.Boolean); nok do run(Set_Notify{on = bool(no)})
 		if tp, tok := st["tidy_projects"].(json.Boolean); tok do run(Set_Tidy_Projects{on = bool(tp)})
+		claude_accounts_restore(st) // claude_accounts.odin
+		if lh, lok := enum_of(st, "last_harness", HARNESS_KEYS); lok do state.settings.last_harness = lh // harness.odin
 		if bo, bok := st["bell"].(json.Object); bok {
 			on :: proc(o: json.Object, k: string) -> Maybe(bool) {
 				if v, ok := o[k].(json.Boolean); ok do return bool(v)
@@ -586,7 +681,10 @@ workspace_restore :: proc(text: string) -> string {
 		p := ensure_project(cwd)
 		name, _ := po["name"].(json.String)
 		if p != nil && name != "" && name != p.name do run(Rename_Project{project_id = p.id, name = name})
-		if added, _ := po["added"].(json.Boolean); p != nil && added do p.by_hand = true
+		if p == nil do continue
+		added, _ := po["added"].(json.Boolean)
+		p.by_hand = bool(added)
+		if claude, _ := po["claude"].(json.Boolean); claude && p.dir == "" do p.claude = true
 	}
 	projects_tidy() // hand-added ones keep their rows
 
@@ -600,6 +698,10 @@ workspace_restore :: proc(text: string) -> string {
 		id, _ := so["pi_session_id"].(json.String)
 		pcwd, _ := so["project"].(json.String)
 		if pcwd == "" do pcwd, _ = so["cwd"].(json.String)
+		// a Claude-only session (claude.odin): known by its Claude session id (a Claude chat too)
+		agent, _ := so["agent"].(json.String)
+		claude := agent == "claude"
+		if claude do id, _ = so["claude_session_id"].(json.String)
 		if id == "" || !strings.has_prefix(pcwd, "/") do continue
 		// a chat goes back into Chats while chats still run in its folder;
 		// from an earlier Chats folder it belongs to that folder's project
@@ -631,13 +733,24 @@ workspace_restore :: proc(text: string) -> string {
 				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active)})
 				continue
 			}
+			if kind == "claude" {
+				// Claude Code: resumed with --resume once its session is focused (claude.odin)
+				id, _ := to["claude_session_id"].(json.String)
+				cwd, _ := to["cwd"].(json.String)
+				args := make([dynamic]string, context.temp_allocator)
+				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
+				ro, _ := to["readonly"].(json.Boolean)
+				acct, _ := to["account"].(json.String)
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active)})
+				continue
+			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
 			title, _ := to["title"].(json.String)
 			cwd, _ := to["cwd"].(json.String)
 			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active)})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
-		r := run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:]})
+		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:]})
 		if r.ok && has_current && i64(i) == i64(current) {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
@@ -649,6 +762,10 @@ workspace_restore :: proc(text: string) -> string {
 		if m, mok := h["model_applied"].(json.String); mok {
 			delete(state.home_model)
 			state.home_model = strings.clone(string(m))
+		}
+		if ff, fok := h["fork_from"].(json.String); fok && strings.has_prefix(string(ff), "/") {
+			delete(state.home_fork_from)
+			state.home_fork_from = strings.clone(string(ff))
 		}
 	}
 
@@ -694,6 +811,35 @@ workspace_restore :: proc(text: string) -> string {
 		}
 	}
 
+	// Claude Code sessions pi-desk ran, and the conversations that ran read-only (one command:
+	// the saved id list goes first, then the history's read-only records while there is room)
+	recs := make([dynamic]Claude_Record, context.temp_allocator)
+	ro_ids := make([dynamic]string, context.temp_allocator)
+	if list, is := root["claude_sessions"].(json.Array); is {
+		for v in list {
+			o, ok := v.(json.Object)
+			if !ok do continue
+			id, _ := o["id"].(json.String)
+			cwd, _ := o["cwd"].(json.String)
+			project, _ := o["project"].(json.String)
+			title, _ := o["title"].(json.String)
+			used, _ := o["used"].(json.Integer)
+			ro, _ := o["readonly"].(json.Boolean)
+			named, _ := o["named"].(json.Boolean)
+			transcript, _ := o["transcript"].(json.String)
+			model, _ := o["model"].(json.String)
+			acct, _ := o["account"].(json.String)
+			args := make([dynamic]string, context.temp_allocator)
+			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
+			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
+			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), readonly = bool(ro), account = string(acct)})
+		}
+	}
+	if list, is := root["claude_readonly_ids"].(json.Array); is {
+		for v in list do if x, ok := v.(json.String); ok do append(&ro_ids, string(x))
+	}
+	if len(recs) > 0 || len(ro_ids) > 0 do run(Claude_Restore_History{records = recs[:], readonly_ids = ro_ids[:]})
+
 	// the left column: pins and hidden items by identity, sort, folds
 	if sb, is := root["sidebar"].(json.Object); is {
 		strs :: proc(o: json.Object, key: string) -> []string {
@@ -722,12 +868,19 @@ workspace_restore :: proc(text: string) -> string {
 	return ""
 }
 
-// The project with this cwd, added (by hand) if the scan did not find it.
+// The project with this cwd, listed if the scan did not find it: not as added by hand (the
+// saved "added" says that) and not selected (the saved selection is restored after).
 @(private = "file")
 ensure_project :: proc(cwd: string) -> ^Project {
 	for &p in state.projects do if p.cwd == cwd do return &p
-	r := run_command(Add_Project{cwd = cwd}, {kind = .Internal})
-	return r.ok ? find_project(r.created_id) : nil
+	want, _ := filepath.clean(cwd, context.temp_allocator)
+	want = real_path(want)
+	if c := chats_project(); c != nil && c.cwd == want do return nil
+	if p := project_by_cwd(want); p != nil do return p
+	if claude_account_holding(want) != "" do return nil
+	c := strings.clone(want)
+	inject_at(&state.projects, 0, Project{id = new_id(), cwd = c, label = short_label(c), missing = !os.exists(c), repo = is_repo_root(c)})
+	return &state.projects[0]
 }
 
 @(private = "file")
@@ -752,14 +905,14 @@ num_of :: proc(obj: json.Object, key: string) -> (f32, bool) {
 persist_after_layout :: proc(skip: bool) {
 	if persist.launch != {} && !persist.laid_out {
 		persist.laid_out = true
-		fmt.eprintf("pi-desk: first layout %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
+		fmt.eprintf("Deckhand: first layout %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
 	}
 	id := persist.focus_tab
 	if id == 0 do return
 	persist.focus_tab = 0
 	if skip do return
 	run_command(Focus_Tab{tab_id = id}, {kind = .Internal})
-	if persist.launch != {} do fmt.eprintf("pi-desk: restored session started %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
+	if persist.launch != {} do fmt.eprintf("Deckhand: restored session started %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
 }
 
 // A dim line in a terminal before its child starts (restored shells).

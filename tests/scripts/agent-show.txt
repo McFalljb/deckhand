@@ -1,0 +1,61 @@
+# A session's own agents show the user files (tests/scripts/agent-show.sh): the fake pi bridge
+# (fake-bridge-show.py) in the session's pi tab, then a fake claude (fake-claude.py) in a Claude tab
+# of the same session running `deckhand show`. Another project's session is open too.
+wait 1000
+# the other session first
+command {"type":"add_project","cwd":"$homedir/other"}
+command {"type":"new_chat","project_id":$last}
+assert_result ok true
+# the session whose agents show files, in front, its pi tab on screen
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"new_chat","project_id":$last}
+assert_result ok true
+assert_state open_sessions.# 2
+waitfor fake show bridge 10000
+# 1. the pi tab: README.md, notes.txt and a file outside every project, each right after the pi
+# tab, behind the view; another session refused; a binary file refused; README.md not twice
+type show
+key enter
+waitfor done show 60000
+assert_state open_sessions.1.tabs.# 4
+assert_state open_sessions.1.tabs.0.kind pi
+assert_state open_sessions.1.tabs.1.kind markdown
+assert_state open_sessions.1.tabs.1.title sre-interview-questions.md
+assert_state open_sessions.1.tabs.2.kind editor
+assert_state open_sessions.1.tabs.2.title notes.txt
+assert_state open_sessions.1.tabs.3.kind markdown
+assert_state open_sessions.1.tabs.3.title README.md
+assert_state open_sessions.1.active_tab $pitab
+assert_state current_session $session
+assert_state open_sessions.0.tabs.# 1
+assert_state pending_confirmations.# 0
+# 2. a Claude tab in the same session: `deckhand show` from its CLI (Claude's turn runs the hooks)
+command {"type":"new_claude_tab","session":$session}
+assert_result ok true
+waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
+waitstate 10000 open_sessions.1.tabs.4.turn idle
+assert_state open_sessions.1.tabs.4.kind claude
+assert_state open_sessions.1.active_tab $last
+type !cli show docs/plan.md --anchor setup
+key enter
+waitfor CLI show docs/plan.md --anchor setup -> exit 0 15000
+waitstate 10000 open_sessions.1.tabs.4.turn idle
+type !cli show docs/todo.txt --line 2
+key enter
+waitfor CLI show docs/todo.txt --line 2 -> exit 0 15000
+waitstate 10000 open_sessions.1.tabs.4.turn idle
+type !cli show logo.png
+key enter
+waitfor CLI show logo.png -> exit 1 15000
+waitstate 10000 open_sessions.1.tabs.4.turn idle
+# right after the Claude tab (the newest first), behind the view: the Claude tab stays in front
+assert_state open_sessions.1.tabs.# 7
+assert_state open_sessions.1.tabs.5.kind editor
+assert_state open_sessions.1.tabs.5.title todo.txt
+assert_state open_sessions.1.tabs.6.kind markdown
+assert_state open_sessions.1.tabs.6.title plan.md
+assert_state open_sessions.1.active_tab $last
+assert_state current_session $session
+assert_state open_sessions.0.tabs.# 1
+shot agent-show/claude-behind
+quit

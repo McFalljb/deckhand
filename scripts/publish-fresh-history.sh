@@ -14,7 +14,7 @@
 set -eu
 AUTHOR_NAME="McFalljb"
 AUTHOR_EMAIL="27719482+McFalljb@users.noreply.github.com"
-REPO="McFalljb/pi-desk"
+REPO="McFalljb/deckhand"
 
 [ $# -ge 2 ] || { sed -n '2,13p' "$0"; exit 2; }
 SRC=$(cd "$(dirname "$0")/.." && pwd)

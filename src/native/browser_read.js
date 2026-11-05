@@ -20,7 +20,8 @@
 // has_text never finds anything there. html mode drops scripts' text and the content of
 // csrf/token/nonce metas. Selectors are simple CSS (tags, #ids, .classes, spaces, >) or refs,
 // checked before this runs (browser_agent.odin, agent_selector_ok). Iframes are not looked into (frames:
-// how many there are). `max` caps the text (chars), cut at the end with truncated: true.
+// how many are read as markers): a visible one is a marker, an invisible one (a tracking frame) is skipped
+// (embedOf); either way the rest of its container is read. `max` caps the text (chars), cut at the end with truncated: true.
 ((mode, selector, max, value) => {
   const out = (o) => JSON.stringify(o);
   const one = (s, n) => String(s == null ? "" : s).replace(/\s+/g, " ").trim().slice(0, n);
@@ -28,12 +29,69 @@
   const SKIP = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEMPLATE", "HEAD", "META", "LINK", "TITLE"]);
   const BLOCK = new Set(["ADDRESS", "ARTICLE", "ASIDE", "BLOCKQUOTE", "BODY", "DD", "DETAILS", "DIALOG", "DIV", "DL", "DT", "FIELDSET", "FIGCAPTION", "FIGURE", "FOOTER", "FORM", "H1", "H2", "H3", "H4", "H5", "H6", "HEADER", "HR", "LI", "MAIN", "NAV", "OL", "P", "PRE", "SECTION", "SUMMARY", "TABLE", "TR", "UL", "CAPTION", "THEAD", "TBODY", "TFOOT", "LEGEND", "OPTION"]);
   const WALK_MAX = 50000; // nodes looked at; past it the text says it stopped
+  const HIDDEN_MAX = 20000; // nodes looked at inside visibility:hidden (apart: a big hidden menu leaves the page's budget whole); past it, skipped
   const cap = Math.max(100, Math.min(Number(max) || 20000, 200000));
 
   const visible = (el) => {
     if (typeof el.checkVisibility === "function") return el.checkVisibility({ visibilityProperty: true });
     const s = getComputedStyle(el);
     return s.display !== "none" && s.visibility !== "hidden";
+  };
+  // Whether a rendered element's own text and boxless children show: not a closed details' (only
+  // its summary does) nor a content-visibility:hidden box's (hidden="until-found" is one).
+  // checkVisibility answers this for a child with a box, not for text or display:contents; a
+  // range's client rects do not either (Chromium lays such content out for the question).
+  const textShows = (el) => !(el.tagName === "DETAILS" && !el.open) && getComputedStyle(el).contentVisibility !== "hidden";
+  // A walk's lit: whether a node's own text shows. true, false, or the rendered parent element
+  // (asked only when there is text to show: textShows, once per element).
+  const litMemo = new Map();
+  const on = (lit) => {
+    if (typeof lit === "boolean") return lit;
+    if (!litMemo.has(lit)) litMemo.set(lit, textShows(lit));
+    return litMemo.get(lit);
+  };
+  // How a walk takes an element: SHOW (it is rendered: read it), PASS (no box of its own, but its
+  // children may have one: display:contents, as a slot is; visibility:hidden with a
+  // visibility:visible child; its own text shows only with PASS_LIT: visible, and its parent's
+  // text shows, lit) or NONE (nothing in it shows: display:none, a box under
+  // content-visibility:hidden or display:none, …). checkVisibility is false for every boxless
+  // element, so taking false as NONE dropped all a display:contents container held (an article
+  // read as nothing but the footer); a display:contents one in a content-visibility:hidden box or
+  // a closed details is PASS (its children are walked unlit, as a visibility:hidden one's).
+  const SHOW = 3, PASS_LIT = 2, PASS = 1, NONE = 0;
+  const renderOf = (el, lit) => {
+    if (visible(el)) return SHOW;
+    const s = getComputedStyle(el);
+    if (s.display === "none") return NONE;
+    if (s.display === "contents") return s.visibility === "visible" && on(lit) ? PASS_LIT : PASS;
+    return s.visibility === "visible" ? NONE : PASS;
+  };
+  // shown to has_selector (browser_wait): rendered, or display:contents (a slot), visible, in
+  // the nearest box above that is rendered and shows its content (as the walk's PASS_LIT)
+  const shown = (el) => {
+    if (visible(el)) return true;
+    const s = getComputedStyle(el);
+    if (s.display !== "contents" || s.visibility !== "visible") return false;
+    for (let p = parentOf(el); p; p = parentOf(p)) {
+      if (getComputedStyle(p).display !== "contents") return visible(p) && textShows(p);
+    }
+    return true;
+  };
+  // An embedded document or plugin: a frame (iframe, frame) or an object or embed showing one (an
+  // object's fallback content, when that is what it shows, is read as any content). "" if the
+  // element is none of those, or one the reader cannot see: zero or 1px in size, or aria-hidden
+  // (tracking frames): skipped, not a marker.
+  const FRAME = new Set(["IFRAME", "FRAME", "EMBED", "OBJECT"]);
+  const embedOf = (el) => {
+    if (!FRAME.has(el.tagName)) return "";
+    if (el.tagName === "OBJECT") {
+      const r = document.createRange();
+      r.selectNodeContents(el);
+      if (r.getClientRects().length) return ""; // its fallback is shown: read it
+    }
+    const box = el.getBoundingClientRect();
+    if (box.width < 2 || box.height < 2 || el.getAttribute("aria-hidden") === "true") return "skip";
+    return el.tagName === "IFRAME" || el.tagName === "FRAME" ? "frame" : "embed";
   };
   const cssEditable = (n) => {
     const m = getComputedStyle(n).getPropertyValue("-webkit-user-modify");
@@ -104,7 +162,8 @@
     }
     return Array.from(n.childNodes);
   };
-  const frames = document.querySelectorAll("iframe, frame").length;
+  // the frames a read shows as markers (tracking frames are skipped: embedOf)
+  const frames = Array.from(document.querySelectorAll("iframe, frame")).filter((f) => visible(f) && embedOf(f) === "frame").length;
   let root = document.body || document.documentElement;
   // The first element matching a CSS selector that is not inside a field, a select's options or
   // editable content (and visible, if asked): what is in there never counts, so a selector that
@@ -117,7 +176,7 @@
     } catch (e) {
       return { error: `not a valid CSS selector: ${one(sel, 200)}` };
     }
-    for (const el of all) if (!inside(el) && (!mustShow || visible(el))) return { el };
+    for (const el of all) if (!inside(el) && (!mustShow || shown(el))) return { el };
     return { el: null };
   };
   if (mode === "has_selector") {
@@ -148,31 +207,43 @@
   const textOf = (start) => {
     const parts = [];
     let seen = 0;
+    let hidden = 0;
     let stopped = false;
-    const walk = (n) => {
+    // lit: whether n's own text shows (on)
+    const walk = (n, lit) => {
       if (stopped) return;
-      if (++seen > WALK_MAX) {
+      if (lit === false) {
+        if (++hidden > HIDDEN_MAX) return;
+      } else if (++seen > WALK_MAX) {
         stopped = true;
         return;
       }
       if (n.nodeType === 3) {
         const t = n.data.replace(/\s+/g, " ");
-        if (t.trim()) parts.push(t);
+        if (t.trim() && on(lit)) parts.push(t);
         return;
       }
-      if (n.nodeType === 11) return kids(n).forEach(walk);
+      if (n.nodeType === 11) return kids(n).forEach((k) => walk(k, lit));
       if (n.nodeType !== 1) return;
       const el = n;
       if (SKIP.has(el.tagName)) return;
-      if (!visible(el) && el !== start) return;
+      const r = el === start ? SHOW : renderOf(el, lit);
+      if (r === NONE) return;
       const kind = fieldKind(el);
       if (kind === "hidden") return;
+      // boxless: a field, frame or image shows nothing; a visibility:hidden element only what is
+      // inside it (a visible boxless one is read as any: a display:contents heading is a heading)
+      if (r !== SHOW) {
+        if (kind || FRAME.has(el.tagName) || el.tagName === "IMG") return;
+        if (r === PASS) return void kids(el).forEach((k) => walk(k, false));
+      }
       if (kind) {
         parts.push(" " + fieldLine(el, kind) + " ");
         return;
       }
-      if (el.tagName === "IFRAME" || el.tagName === "FRAME") {
-        parts.push(" [frame] ");
+      const embed = embedOf(el);
+      if (embed) {
+        if (embed !== "skip") parts.push(` [${embed}] `);
         return;
       }
       if (el instanceof HTMLInputElement) {
@@ -191,10 +262,10 @@
       if (head) parts.push("#".repeat(Number(el.tagName[1])) + " ");
       if (el.tagName === "LI") parts.push("- ");
       if (el.tagName === "TD" || el.tagName === "TH") parts.push(" | ");
-      kids(el).forEach(walk);
+      kids(el).forEach((k) => walk(k, r === SHOW ? el : true));
       if (block) parts.push("\n");
     };
-    walk(start);
+    walk(start, true);
     let s = parts.join("").split("\n").map((l) => l.replace(/[ \t]+/g, " ").trim()).join("\n").replace(/\n{3,}/g, "\n\n").trim();
     if (stopped) s += "\n[stopped: the page is too big to read whole; read a part with selector]";
     return s;
@@ -233,6 +304,7 @@
     const refs = new Map();
     let next = 0;
     let seen = 0;
+    let hidden = 0;
     let stopped = false;
     let size = 0;
     const add = (depth, s) => {
@@ -241,27 +313,41 @@
       size += l.length + 1;
       if (size > cap) stopped = true;
     };
-    const walk = (n, depth) => {
+    // lit: as textOf's
+    const walk = (n, depth, lit) => {
       if (stopped) return;
-      if (++seen > WALK_MAX) {
+      if (lit === false) {
+        if (++hidden > HIDDEN_MAX) return;
+      } else if (++seen > WALK_MAX) {
         stopped = true;
         return;
       }
       if (n.nodeType === 3) {
         const t = one(n.data, 300);
-        if (t) add(depth, `text ${JSON.stringify(t)}`);
+        if (t && on(lit)) add(depth, `text ${JSON.stringify(t)}`);
         return;
       }
-      if (n.nodeType === 11) return kids(n).forEach((k) => walk(k, depth));
+      if (n.nodeType === 11) return kids(n).forEach((k) => walk(k, depth, lit));
       if (n.nodeType !== 1) return;
       const el = n;
       if (SKIP.has(el.tagName)) return;
-      if (!visible(el) && el !== start) return;
+      const r = el === start ? SHOW : renderOf(el, lit);
+      if (r === NONE) return;
       if (el.getAttribute("aria-hidden") === "true") return;
-      if (el.tagName === "IFRAME" || el.tagName === "FRAME") return void add(depth, "frame (not looked into)");
+      // boxless: as textOf
+      if (r !== SHOW) {
+        if (fieldKind(el) || FRAME.has(el.tagName) || el.tagName === "IMG") return;
+        if (r === PASS) return void kids(el).forEach((k) => walk(k, depth, false));
+      }
+      const embed = embedOf(el);
+      if (embed) {
+        if (embed !== "skip") add(depth, `${embed} (not looked into)`);
+        return;
+      }
       const role = roleOf(el);
       if (role === "hidden") return;
-      if (!role || role === "none" || role === "presentation" || role === "generic") return kids(el).forEach((k) => walk(k, depth));
+      const inner = r === SHOW ? el : true;
+      if (!role || role === "none" || role === "presentation" || role === "generic") return kids(el).forEach((k) => walk(k, depth, inner));
       let line = role;
       if (ACTIVE.has(role) || role === "heading") {
         next++;
@@ -280,9 +366,9 @@
       add(depth, line);
       // what a named control holds is its name already; a field's inside is its value
       if (fieldKind(el) || role === "link" || role === "button" || role === "heading" || role === "img" || role === "option" || role === "tab" || role === "menuitem") return;
-      kids(el).forEach((k) => walk(k, depth + 1));
+      kids(el).forEach((k) => walk(k, depth + 1, inner));
     };
-    walk(start, 0);
+    walk(start, 0, true);
     globalThis.__pdRefs = refs;
     let s = lines.join("\n");
     if (stopped) s += "\n[stopped: the outline is too big; read a part with selector]";

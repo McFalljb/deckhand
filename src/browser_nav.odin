@@ -79,10 +79,10 @@ browser_url_normalize :: proc(text: string, allocator := context.temp_allocator)
 			if len(t) == i + 3 do return "", "the address has nothing after ://"
 			return strings.clone(t, allocator), ""
 		}
-		return "", fmt.tprintf("pi-desk does not open %s: addresses (http, https and file only)", scheme)
+		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", scheme)
 	}
 	if strings.has_prefix(lower, "about:") || strings.has_prefix(lower, "javascript:") || strings.has_prefix(lower, "data:") || strings.has_prefix(lower, "mailto:") || strings.has_prefix(lower, "chrome:") {
-		return "", fmt.tprintf("pi-desk does not open %s: addresses (http, https and file only)", lower[:strings.index_byte(lower, ':')])
+		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", lower[:strings.index_byte(lower, ':')])
 	}
 	// a bare host, maybe with a port and a path
 	end := len(t)
@@ -219,7 +219,7 @@ browser_nav_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 		agent := caller.kind == .Panel || caller.kind == .Control
 		id, oerr := browser_tab_open(s.id, url, background = agent)
 		if id == 0 do return fail(oerr), false
-		if blank {
+		if blank && !harness_run_holds_sheet() {
 			// the user's New browser tab: the keyboard goes to its URL field
 			tf_set(&browser_url_field, "")
 			browser_url_tab = id

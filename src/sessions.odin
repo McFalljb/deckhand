@@ -37,6 +37,7 @@ Project :: struct {
 	missing: bool, // cwd does not exist (any more)
 	repo:    bool, // cwd has a .git (a repository's root, or a worktree): always a top-level row
 	by_hand: bool, // added by hand (add_project; saved): a top-level row
+	claude:  bool, // only found in a Claude Code account's projects/ (claude_disk.odin; saved): a Rescan that does not find it again drops it
 	// project_tidy.odin: a temp folder; the listed project this one's row is
 	// nested under (0 = none), or the folder of the group row it is in ("" = none)
 	temp:      bool,
@@ -53,6 +54,10 @@ Session :: struct {
 	title:    string, // name, first prompt or goal (titles.odin); "" = none
 	untitled: string, // "Untitled session · <when_>" for a file without a title
 	modified: time.Time, // the file's modification time: last activity
+	claude:   bool, // a Claude Code session (pi-desk's history, or found on disk: claude_disk.odin), not a pi file
+	account:  string, // Claude: its account's config folder ("" = the default)
+	found:    bool, // Claude: a transcript found on disk, not in pi-desk's history
+	gone:     bool, // Claude: pi-desk's history entry whose transcript is gone (greyed)
 }
 
 @(private = "file")
@@ -63,9 +68,9 @@ chats_arena: virtual.Arena
 SCAN_CHUNK :: 64 * 1024
 MAX_SESSIONS :: 300
 
+// pi's session store: <agent dir>/sessions (pi_agent_dir: PI_CODING_AGENT_DIR, else ~/.pi/agent).
 sessions_root :: proc(allocator := context.allocator) -> string {
-	home := os.get_env("HOME", context.temp_allocator)
-	p, _ := filepath.join({home, ".pi", "agent", "sessions"}, allocator)
+	p, _ := filepath.join({pi_agent_dir(), "sessions"}, allocator)
 	return p
 }
 
@@ -87,8 +92,7 @@ scan_projects :: proc(scan: ^Scan_Result) {
 	scan.projects = make([dynamic]Project)
 
 	root := sessions_root()
-	dirs, err := os.read_all_directory_by_path(root, context.allocator)
-	if err != nil do return
+	dirs, _ := os.read_all_directory_by_path(root, context.allocator) // none: no pi sessions (Claude's may still be there)
 	for d in dirs {
 		if d.type != .Directory do continue
 		files, ferr := os.read_all_directory_by_path(d.fullpath, context.allocator)
@@ -104,6 +108,7 @@ scan_projects :: proc(scan: ^Scan_Result) {
 		if cwd == "" do cwd = decode_dir_name(d.name)
 		append(&scan.projects, Project{dir = d.fullpath, cwd = cwd, label = short_label(cwd), newest = newest.modification_time, created = oldest.modification_time, missing = !os.exists(cwd), repo = is_repo_root(cwd)})
 	}
+	claude_scan_projects(&scan.projects) // folders where only Claude Code ran (claude_disk.odin)
 	slice.sort_by(scan.projects[:], proc(a, b: Project) -> bool {return time.diff(b.newest, a.newest) < 0})
 }
 
@@ -145,7 +150,16 @@ apply_scan :: proc(scan: ^Scan_Result) {
 		}
 		found := home_root != "" && o.cwd == chats.cwd // a project added at the Chats folder goes
 		for p in scan.projects do if p.cwd == o.cwd do found = true
-		if !found && o.dir == "" do append(&kept, Project{id = o.id, cwd = strings.clone(o.cwd), label = strings.clone(o.label), name = strings.clone(o.name), added = o.added, by_hand = o.by_hand, missing = !os.exists(o.cwd), repo = is_repo_root(o.cwd)})
+		if !found && o.dir == "" {
+			// a folder only Claude ran in that this scan did not find (its account removed, its
+			// transcripts gone): dropped unless the user added or named it or a session is open in it
+			if o.claude && !o.by_hand && o.name == "" {
+				open := false
+				for s in state.open_sessions do if s.project_id == o.id do open = true
+				if !open do continue
+			}
+			append(&kept, Project{id = o.id, cwd = strings.clone(o.cwd), label = strings.clone(o.label), name = strings.clone(o.name), added = o.added, by_hand = o.by_hand, claude = o.claude, missing = !os.exists(o.cwd), repo = is_repo_root(o.cwd)})
+		}
 	}
 	inject_at(&scan.projects, 0, ..kept[:])
 	if home_root != "" {
@@ -173,6 +187,7 @@ apply_scan :: proc(scan: ^Scan_Result) {
 	if p := find_project(state.selected_project); p != nil && p.dir != "" do scan_sessions(p^, &budget)
 	else do clear(&state.sessions)
 	scan_chats(&budget)
+	claude_disk_rescan() // Claude Code's transcripts of the selected project and Chats (claude_disk.odin)
 }
 
 // A copy of s that lives as long as the project list (Project fields).
@@ -208,7 +223,19 @@ scan_chats :: proc(budget: ^i64 = nil) {
 }
 
 // Synchronous scan (startup).
-rescan_now :: proc() {
+rescan_now :: proc(claude := true) {
+	// a Rescan's worker reads the account folders now: leave them, and scan once more after it
+	if scan_thread != nil {
+		claude_rescan_again = true
+		scan := new(Scan_Result)
+		scan_projects(scan)
+		apply_scan(scan)
+		return
+	}
+	claude_scan_prepare() // each account's folder, for the scan (claude_disk.odin)
+	// the launch's: no transcript read on the main thread, and the saved accounts are not back
+	// yet; a Rescan after them finds Claude's projects (claude_startup_rescan_due)
+	if !claude do claude_scan_clear()
 	scan := new(Scan_Result)
 	scan_projects(scan)
 	apply_scan(scan)

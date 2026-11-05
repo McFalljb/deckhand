@@ -338,7 +338,7 @@ static int pol_quarantine(const char* path, const char* url) {
         NSURL* file = [NSURL fileURLWithPath:@(path)];
         NSMutableDictionary* q = [@{
             (__bridge NSString*)kLSQuarantineTypeKey : (__bridge NSString*)kLSQuarantineTypeWebDownload,
-            (__bridge NSString*)kLSQuarantineAgentNameKey : @"pi-desk",
+            (__bridge NSString*)kLSQuarantineAgentNameKey : @"Deckhand",
         } mutableCopy];
         char rec[2048];
         NSURL* from = url && pd_url_for_record(url, rec, sizeof rec) ? [NSURL URLWithString:@(rec)] : nil;

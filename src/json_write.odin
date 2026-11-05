@@ -122,6 +122,7 @@ TAB_KIND_NAMES := [Tab_Kind_Id]string {
 	.Markdown = "markdown",
 	.Browser = "browser",
 	.App = "app",
+	.Claude = "claude",
 }
 SORT_SECTION_NAMES := [Sort_Section]string {
 	.Projects = "projects",
@@ -132,6 +133,7 @@ SORT_BY_NAMES := [Sort_By]string {
 	.Recent  = "recent",
 	.Name    = "name",
 	.Created = "created",
+	.Attention = "attention",
 }
 FOLD_NAMES := [Sidebar_Fold]string {
 	.Open     = "open",
@@ -161,6 +163,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Panel:           return "set_panel"
 	case Cancel_Confirmation: return "cancel_confirmation"
 	case Rescan:              return "rescan"
+	case Refresh_Shell_Env:   return "refresh_shell_env"
 	case Quit:                return "quit"
 	case Get_State:           return "get_state"
 	case List_Commands:       return "list_commands"
@@ -169,6 +172,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Folder:          return "set_folder"
 	case Setup_Sheet:         return "setup_sheet"
 	case Set_Chats_Readonly:  return "set_chats_readonly"
+	case Set_Claude_Default_Flags: return "set_claude_default_flags"
+	case Set_Pi_Extension:    return "set_pi_extension"
 	case Set_Pinned:          return "set_pinned"
 	case Set_Hidden:          return "set_hidden"
 	case Set_Sort:            return "set_sort"
@@ -196,12 +201,16 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Status_Update:    return "pi.status"
 	case Pi_Prompt:           return "pi_prompt"
 	case Pi_Reload:           return "pi_reload"
+	case Pi_Restart:          return "pi_restart"
 	case Pi_Wait_Idle:        return "pi_wait_idle"
 	case Panel_Set:           return "panel.set"
 	case Panel_Remove:        return "panel.remove"
 	case Set_Panel_Collapsed: return "set_panel_collapsed"
 	case Tab_Exited:          return "tab_exited"
+	case Program_Status:      return "program_status"
+	case Set_Unread:          return "set_unread"
 	case Rescan_Done:         return "rescan_done"
+	case Refresh_Shell_Env_Done: return "refresh_shell_env_done"
 	case Bridge_Done:         return "bridge_done"
 	case Restore_Session:     return "restore_session"
 	case Open_File:           return "open_file"
@@ -262,11 +271,14 @@ command_type :: proc(cmd: Command) -> string {
 	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_command_type(cmd)
 	case Markdown_Open:       return "markdown_open"
+	case Show_File:           return "show_file"
 	case Markdown_Set_View:   return "markdown_view"
 	case Markdown_Scroll:     return "markdown_scroll"
 	case Markdown_Follow:     return "markdown_link"
 	case New_App_Tab:         return "new_app_tab"
 	case App_Restart:         return "app_restart"
+	case App_Close:           return "app_close"
+	case App_Declared:        return "app_declared"
 	case App_Input:           return "app_input"
 	case App_Events:          return "app_events"
 	case App_Call:            return "app_call"
@@ -279,6 +291,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Pi_Reload_Later:     return "pi_reload_later"
 	case Reload_Watch:        return "reload_watch"
 	case Reload_Kick:      return "reload_kick"
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+		return claude_reload_type(cmd)
 	case Comment_Add:         return "comment_add"
 	case Comment_Edit:        return "comment_edit"
 	case Comment_Delete:      return "comment_delete"
@@ -286,6 +300,15 @@ command_type :: proc(cmd: Command) -> string {
 	case Comments_Send_Now:   return "comments_send_now"
 	case Comments_Ask_Cancel: return "comments_ask_cancel"
 	case Pi_Attached:         return "pi.attached"
+	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
+		return claude_command_type(cmd)
+	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
+		return claude_account_type(cmd)
+	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
+		return claude_extra_type(cmd)
+	case Claude_Model_Report: return "claude.model"
+	case Claude_Wait_Idle:    return "claude_wait_idle"
+	case Claude_Wait_Tick:    return "claude_wait_tick"
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
 		return browser_command_type(cmd)
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
@@ -296,6 +319,16 @@ command_type :: proc(cmd: Command) -> string {
 		return browser_act_command_type(cmd)
 	}
 	return ""
+}
+
+// A pi tab's blocker as events and the log show it: "shell sh1" and "timer wk2" (the bridge's
+// "<kind> <id>: <text>"), "subagent", else "<redacted>" (temp-allocated).
+blocker_redacted :: proc(b: string) -> string {
+	head, sep, _ := strings.partition(b, ": ")
+	kind, _, id := strings.partition(head, " ")
+	if sep != "" && (kind == "shell" || kind == "timer") && id != "" && !strings.contains_any(id, " :") do return strings.concatenate({kind, " ", id}, context.temp_allocator)
+	if strings.has_prefix(b, "subagent ") || b == "subagent" do return "subagent"
+	return "<redacted>"
 }
 
 // redact: for events and logs. Pasted text becomes its length, tokens vanish.
@@ -336,6 +369,12 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "open", c.open)
 	case Set_Chats_Readonly:
 		kv_bool(&w, "on", c.on)
+	case Set_Pi_Extension:
+		kv_str(&w, "name", c.name)
+		kv_bool(&w, "on", c.on)
+	case Set_Claude_Default_Flags:
+		kv_bool(&w, "skip_permissions", c.skip_permissions)
+		token(&w, c.confirm, redact)
 	case Set_Pinned:
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
 		if c.project_id != 0 do kv_u64(&w, "project_id", c.project_id)
@@ -397,6 +436,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		update_write(w.b, cmd) // update.odin: never the release body
 	case Pi_Reload_All, Pi_Restart_Updated, Pi_Reload_Later, Reload_Watch, Reload_Kick:
 		reload_write(w.b, cmd) // reload.odin; confirmation tokens never
+	case Claude_Restart_Changed, Claude_Reload_Later, Claude_Reload_Watch, Claude_Reload_Kick:
+		claude_reload_write(w.b, cmd) // claude_reload.odin; confirmation tokens never
 	case New_Shell_Tab:
 		kv_u64(&w, "session", c.session)
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
@@ -461,7 +502,13 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "waiting", c.waiting)
 		kv_bool(&w, "question", c.question)
 		key(&w, "blockers")
-		write_strings(w.b, c.blockers)
+		// events and the log: what kind and which id only ("shell sh1"), never a command or a
+		// task, as panel rows are only counted; the state keeps the text (Tab.blockers)
+		if redact {
+			masked := make([]string, len(c.blockers), context.temp_allocator)
+			for x, i in c.blockers do masked[i] = blocker_redacted(x)
+			write_strings(w.b, masked)
+		} else do write_strings(w.b, c.blockers)
 	case Pi_Prompt:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
@@ -472,6 +519,9 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Reload:
 		kv_u64(&w, "tab_id", c.tab_id)
 		token(&w, c.confirm, redact)
+	case Pi_Restart:
+		kv_u64(&w, "tab_id", c.tab_id)
+		if c.pick_model do kv_bool(&w, "pick_model", true)
 	case Pi_Wait_Idle:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "timeout_ms", c.timeout_ms)
@@ -495,13 +545,29 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.error != "" do kv_str(&w, "error", c.error)
 	case Tab_Exited:
 		kv_u64(&w, "tab_id", c.tab_id)
+		if how := exit_text(c.exit); how != "" do kv_str(&w, "exit", how) // a crash or a hangup (dead_tab.odin)
+	case Program_Status:
+		// what the program said, not its title or message (untrusted text; the snapshot has them)
+		kv_u64(&w, "tab_id", c.tab_id)
+		kv_str(&w, "state", PROG_STATE_NAMES[c.summary.state])
+		if c.summary.kind != .None do kv_str(&w, "kind", PROG_KIND_NAMES[c.summary.kind])
+		if c.summary.app != "" do kv_str(&w, "app", c.summary.app)
+		kv_u64(&w, "records", u64(c.summary.records))
+	case Set_Unread:
+		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
+		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
+		kv_bool(&w, "unread", c.unread)
 	case Rescan_Done:
 		kv_u64(&w, "request_id", c.request_id)
+	case Refresh_Shell_Env_Done:
+		kv_u64(&w, "request_id", c.request_id) // never the values
+		kv_bool(&w, "ok", c.ok)
 	case Restore_Session:
 		kv_u64(&w, "project_id", c.project_id)
 		kv_str(&w, "pi_session_id", c.pi_session_id)
 		kv_str(&w, "session_dir", c.session_dir)
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
+		if c.agent == .Claude do kv_str(&w, "agent", "claude")
 		key(&w, "tabs")
 		strings.write_byte(w.b, '[')
 		for t, i in c.tabs {
@@ -688,6 +754,11 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Markdown_Set_View:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_bool(&w, "source", c.source)
+	case Show_File:
+		kv_str(&w, "path", c.path)
+		if c.line > 0 do kv_u64(&w, "line", u64(c.line))
+		if c.anchor != "" do kv_str(&w, "anchor", c.anchor)
+		if c.session != 0 do kv_u64(&w, "session", c.session)
 	case Markdown_Scroll:
 		kv_u64(&w, "tab_id", c.tab_id)
 		if c.anchor != "" do kv_str(&w, "anchor", c.anchor)
@@ -712,8 +783,15 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		}
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
 		if c.title != "" do kv_str(&w, "title", c.title)
+		if c.name != "" do kv_str(&w, "name", c.name)
 	case App_Restart:
 		kv_u64(&w, "tab_id", c.tab_id)
+	case App_Close:
+		kv_u64(&w, "tab_id", c.tab_id)
+		token(&w, c.confirm, redact)
+		if c.comments != .Ask do kv_str(&w, "comments", COMMENTS_CHOICE_NAMES[c.comments])
+	case App_Declared:
+		if c.session != 0 do kv_u64(&w, "session", c.session)
 	case App_Input:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "events", u64(len(c.events)))
@@ -765,7 +843,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Attached:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "attachment_id", c.attachment_id)
-	case Rescan, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel:
+	case Rescan, Refresh_Shell_Env, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel:
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
 		browser_command_write(&w, cmd, redact) // below
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
@@ -774,6 +852,18 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		browser_agent_write(b, cmd, redact) // browser_agent.odin
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		browser_act_write(b, cmd, redact) // browser_act.odin
+	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
+		claude_command_write(b, cmd, redact) // claude.odin: never prompt text, titles or flags
+	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
+		claude_account_write(b, cmd) // claude_accounts.odin
+	case Claude_Restart, Claude_Todos, Claude_Task, Claude_Subagent, Claude_Background:
+		claude_extra_write(b, cmd) // claude_panels.odin: never their text
+	case Claude_Model_Report:
+		fmt.sbprintf(b, `,"tab_id":%d,"model":`, c.tab_id)
+		json_quote(b, c.model)
+	case Claude_Wait_Idle:
+		claude_wait_write(b, c) // claude_wait.odin
+	case Claude_Wait_Tick:
 	}
 	obj_end(&w)
 }
@@ -861,6 +951,40 @@ write_rows :: proc(b: ^strings.Builder, rows: []Panel_Row) {
 	strings.write_byte(b, ']')
 }
 
+// A terminal tab's status in the snapshot (agent_status.odin): the dot, its
+// source (bridge, osc7501, none), when it last reported, unseen, and OSC
+// 7501's record (app, kind, title, message: untrusted one-line text).
+status_tab_json :: proc(b: ^strings.Builder, t: Tab) {
+	v := tab_status_view(t)
+	w := obj_begin(b)
+	kv_str(&w, "dot", ROW_STATUS_NAMES[v.dot])
+	kv_str(&w, "source", STATUS_SOURCE_NAMES[v.source])
+	kv_bool(&w, "unseen", t.unseen)
+	if v.at != {} do kv_str(&w, "at", iso_utc(v.at))
+	if t.prog.state != .None {
+		key(&w, "osc7501")
+		p := obj_begin(b)
+		kv_str(&p, "state", PROG_STATE_NAMES[t.prog.state])
+		if t.prog.kind != .None do kv_str(&p, "kind", PROG_KIND_NAMES[t.prog.kind])
+		if t.prog.progress >= 0 && (t.prog.state == .Working || t.prog.state == .Blocked) do kv_u64(&p, "progress", u64(t.prog.progress))
+		if t.prog.app != "" do kv_str(&p, "app", t.prog.app)
+		if t.prog.id != "" do kv_str(&p, "id", t.prog.id)
+		if t.prog.title != "" do kv_str(&p, "title", t.prog.title)
+		if t.prog.msg != "" do kv_str(&p, "message", t.prog.msg)
+		kv_u64(&p, "records", u64(t.prog.records))
+		kv_str(&p, "at", iso_utc(t.prog.at))
+		obj_end(&p)
+	}
+	obj_end(&w)
+}
+
+// "2026-11-03T10:20:30Z" (temp).
+iso_utc :: proc(t: time.Time) -> string {
+	y, mo, d := time.date(t)
+	h, mi, sec := time.clock(t)
+	return fmt.tprintf("%04d-%02d-%02dT%02d:%02d:%02dZ", y, int(mo), d, h, mi, sec)
+}
+
 write_strings :: proc(b: ^strings.Builder, list: []string) {
 	strings.write_byte(b, '[')
 	for x, i in list {
@@ -897,6 +1021,7 @@ tab_kind_name :: proc(k: Tab_Kind) -> string {
 	case Markdown_Tab: return "markdown"
 	case Browser_Tab: return "browser"
 	case App_Tab: return "app"
+	case Claude_Tab: return "claude"
 	}
 	return ""
 }
@@ -927,9 +1052,15 @@ session_state_json :: proc(tab_id: u64) -> string {
 		if state.current_session == s.id do v.current_session = s.id
 	}
 	b := strings.builder_make(context.temp_allocator)
+	writing_tab_view = true
 	write_state(&b, v)
+	writing_tab_view = false
 	return strings.to_string(b)
 }
+
+// A pi or Claude tab's own view is being written (session_state_json): no account folders.
+@(private = "file")
+writing_tab_view: bool
 
 write_state :: proc(b: ^strings.Builder, s: State) {
 	w := obj_begin(b)
@@ -1015,6 +1146,10 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if i > 0 do strings.write_byte(b, ',')
 		o := obj_begin(b)
 		kv_u64(&o, "id", os.id)
+		// a Claude-only session (claude.odin): its main tab is a Claude tab, and its id (here and as
+		// claude_session_id) is that tab's Claude session id
+		kv_str(&o, "agent", os.agent == .Claude ? "claude" : "pi")
+		if os.agent == .Claude do kv_str(&o, "claude_session_id", os.pi_session_id)
 		kv_str(&o, "pi_session_id", os.pi_session_id)
 		kv_str(&o, "session_dir", os.session_dir)
 		kv_str(&o, "session_file", os.session_file)
@@ -1047,6 +1182,11 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			kv_str(&o, "comments_wait", why)
 			kv_bool(&o, "comments_sending", os.attach.sending != 0)
 		}
+		{
+			sos := os
+			st, _ := session_row_status(&sos)
+			kv_str(&o, "agent_status", ROW_STATUS_NAMES[st]) // the row's dot: the strongest of its tabs
+		}
 		key(&o, "tabs")
 		strings.write_byte(b, '[')
 		for t, j in os.tabs {
@@ -1056,6 +1196,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			kv_str(&to, "kind", tab_kind_name(t.kind))
 			kv_str(&to, "title", t.title)
 			kv_str(&to, "status", TAB_STATUS_NAMES[t.status])
+			if t.status == .Exited do if how := exit_text(t.exit); how != "" do kv_str(&to, "exit", how)
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {
 				kv_str(&to, "path", et.path)
@@ -1092,6 +1233,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 					}
 				}
 			}
+			if _, is_cl := t.kind.(Claude_Tab); is_cl do claude_tab_json(b, t) // claude.odin
 			if mt, is_md := t.kind.(Markdown_Tab); is_md {
 				kv_str(&to, "path", mt.path)
 				kv_bool(&to, "source", mt.source)
@@ -1103,6 +1245,10 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 					if matches >= 0 do kv_u64(&to, "matches", u64(matches))
 				}
 			}
+			if tab_is_terminal(t) {
+				key(&to, "agent_status") // the dot and where it came from (agent_status.odin)
+				status_tab_json(b, t)
+			}
 			if _, is_pi := t.kind.(Pi_Tab); is_pi {
 				kv_str(&to, "agent", AGENT_NAMES[t.agent])
 				kv_bool(&to, "waiting", t.waiting)
@@ -1112,17 +1258,13 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				key(&to, "reload") // hot reload (reload.odin)
 				write_tab_reload(b, t.reload)
 				key(&to, "panels")
-				strings.write_byte(b, '[')
-				for p, k in t.panels {
-					if k > 0 do strings.write_byte(b, ',')
-					po := obj_begin(b)
-					kv_str(&po, "panel", p.id)
-					kv_str(&po, "title", p.title)
-					key(&po, "rows")
-					write_rows(b, p.rows[:])
-					obj_end(&po)
-				}
-				strings.write_byte(b, ']')
+				write_panels(b, t.panels[:])
+			}
+			if _, is_cl := t.kind.(Claude_Tab); is_cl {
+				key(&to, "reload") // hot reload and version (claude_reload.odin)
+				write_tab_reload(b, t.reload)
+				key(&to, "panels") // Claude's todos and subagents (claude_panels.odin)
+				write_panels(b, t.panels[:])
 			}
 			obj_end(&to)
 		}
@@ -1131,6 +1273,10 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	}
 	strings.write_byte(b, ']')
 	kv_u64(&w, "current_session", s.current_session)
+	fmt.sbprintf(b, `,"pi_installed":%v`, pi_installed()) // pi found (harness.odin): stat, else the login shell's answer
+	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
+	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
+	claude_history_json(b, s.claude_history[:], s.claude_disk[:], s.claude_disk_chats[:]) // Claude sessions pi-desk ran (claude.odin); not in a pi or Claude tab's own view
 	key(&w, "home")
 	{
 		h := obj_begin(b)
@@ -1169,6 +1315,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if s.focus_widget != "" {
 			kv_str(&f, "kind", "widget")
 			kv_str(&f, "id", s.focus_widget)
+			if s.focus_widget == "setup" do setup_json(&f) // the first-run sheet's step (ui_setup.odin)
 		} else {
 			kv_str(&f, "kind", "terminal")
 			tab: u64
@@ -1270,6 +1417,12 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_bool(&st, "light", s.settings.appearance == .System ? s.system_light : s.settings.appearance == .Light) // what shows now
 		kv_str(&st, "text_size", TEXT_SIZE_NAMES[s.settings.text_size])
 		kv_bool(&st, "chats_readonly", s.settings.chats_readonly)
+		kv_bool(&st, "claude_skip_permissions", s.settings.claude_skip_permissions)
+		// the pi integration's optional extensions, on or off for the pi tabs started from now on
+		key(&st, "pi_extensions")
+		pe := obj_begin(b)
+		for e in pi_integration_optional() do kv_bool(&pe, e.name, e.on)
+		obj_end(&pe)
 		kv_str(&st, "agent_model", s.settings.agent_model)
 		kv_str(&st, "agent_name", s.settings.agent_name)
 		kv_bool(&st, "notify", !s.settings.notify_off)
@@ -1319,6 +1472,8 @@ list_commands_json :: proc(caller: Caller) -> string {
 	n := 0
 	for s in COMMAND_SPECS {
 		if s.who == .Internal || !who_allows(caller.kind, s.who) do continue
+		// a pi tab's bridge and a Claude tab (both panel) report different things (caller_may)
+		if caller.kind == .Panel && (s.who == .Claude) != caller.claude && (s.who == .Claude || s.who == .Report || s.who == .Bridge) do continue
 		if n > 0 do strings.write_byte(&b, ',')
 		n += 1
 		w := obj_begin(&b)
@@ -1373,4 +1528,81 @@ browser_command_write :: proc(w: ^Jw, cmd: Command, redact := false) {
 		}
 		if .Blocked in c.what do kv_str(w, "blocked_popup", c.blocked)
 	}
+}
+
+// A tab's panels: [{panel, title, rows}].
+@(private = "file")
+write_panels :: proc(b: ^strings.Builder, panels: []Panel) {
+	strings.write_byte(b, '[')
+	for p, k in panels {
+		if k > 0 do strings.write_byte(b, ',')
+		po := obj_begin(b)
+		kv_str(&po, "panel", p.id)
+		kv_str(&po, "title", p.title)
+		key(&po, "rows")
+		write_rows(b, p.rows[:])
+		obj_end(&po)
+	}
+	strings.write_byte(b, ']')
+}
+
+// The harness checklist (harness_manifest.odin) as the sheet shows it: each item's state, what it
+// found, its action and command; the run.
+@(private = "file")
+harness_json :: proc(f: ^Jw) {
+	key(f, "agents")
+	strings.write_byte(f.b, '[')
+	for it, i in harness_items {
+		if i > 0 do strings.write_byte(f.b, ',')
+		r := HARNESS_MANIFEST[it.row]
+		o := obj_begin(f.b)
+		kv_str(&o, "id", r.id)
+		kv_str(&o, "harness", HARNESS_KEYS[r.harness])
+		kv_str(&o, "kind", r.kind == .Harness ? "harness" : r.kind == .Built_In ? "built_in" : "third_party")
+		kv_str(&o, "need", r.need == .Required ? "required" : "recommended")
+		kv_str(&o, "state", HARNESS_STATE_NAMES[it.state])
+		if it.version != "" do kv_str(&o, "version", it.version)
+		if r.kind == .Harness && it.where_ != "" do kv_str(&o, "layout", INSTALL_LAYOUT_NAMES[it.layout])
+		kv_str(&o, "action", it.action == .Install ? "install" : it.action == .Update ? "update" : "none")
+		if it.command != "" do kv_str(&o, "command", it.command)
+		if it.action != .None do kv_bool(&o, "runnable", it.runnable)
+		obj_end(&o)
+	}
+	strings.write_byte(f.b, ']')
+	if harness_run.status == .None do return
+	key(f, "run")
+	o := obj_begin(f.b)
+	kv_str(&o, "item", harness_run.item)
+	names := [Harness_Run_Status]string{.None = "none", .Running = "running", .Done = "done", .Failed = "failed"}
+	kv_str(&o, "status", names[harness_run.status])
+	if harness_run.exit.known do kv_u64(&o, "code", u64(harness_run.exit.code))
+	obj_end(&o)
+}
+
+// The sheet in the snapshot's focus: its step, how many, and the accounts step's list (labels
+// and folders the user sees; nothing written yet).
+@(private = "file")
+setup_json :: proc(f: ^Jw) {
+	u := &setup_ui // ui_setup.odin
+	names := [Setup_Step]string{.Agents = "agents", .Main = "main", .Chats = "chats", .Accounts = "accounts", .Folders = "folders"}
+	kv_str(f, "step", names[setup_step_kind()])
+	kv_u64(f, "steps", u64(setup_steps()))
+	if u.err != "" do kv_str(f, "error", u.err)
+	harness_json(f)
+	if !u.acct_show do return
+	key(f, "accounts")
+	strings.write_byte(f.b, '[')
+	for a, i in u.accounts {
+		if i > 0 do strings.write_byte(f.b, ',')
+		o := obj_begin(f.b)
+		kv_str(&o, "label", a.label)
+		kv_str(&o, "dir", a.dir)
+		kv_bool(&o, "keep", a.keep)
+		kv_bool(&o, "marked", a.marked)
+		if i == u.acct_default && a.keep do kv_bool(&o, "default", true)
+		if a.hand do kv_bool(&o, "added", true)
+		obj_end(&o)
+	}
+	strings.write_byte(f.b, ']')
+	if u.acct_msg != "" do kv_str(f, "message", u.acct_msg)
 }

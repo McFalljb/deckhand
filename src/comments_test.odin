@@ -290,7 +290,7 @@ comments_wait_without_bridge :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(why, "bridge is not connected"), why)
 	r = run_command(Comments_Send_Now{session = a}, C_UI)
 	testing.expect(t, !r.ok && strings.contains(r.error, "bridge"), r.error)
-	testing.expect(t, strings.contains(state_json(), `"comments_wait":"pi-desk's bridge is not connected to pi in this session"`))
+	testing.expect(t, strings.contains(state_json(), `"comments_wait":"Deckhand's bridge is not connected to pi in this session"`))
 	msg, can, _ := comments_message(s)
 	testing.expect(t, !can)
 	testing.expect(t, strings.contains(msg, "wait"), msg)
@@ -473,7 +473,7 @@ comments_block_text :: proc(t: ^testing.T) {
 		{source = .Browser, what = "", text = "third"},
 	}
 	out := comments_block(list, {1, -1, -2})
-	testing.expect(t, strings.has_prefix(out, "pi-desk comments (3). "), out)
+	testing.expect(t, strings.has_prefix(out, "Deckhand comments (3). "), out)
 	testing.expect(t, strings.contains(out, COMMENTS_NOTE))
 	testing.expect(t, strings.contains(out, "````pi-desk-comments\n"), "the fence is longer than the backticks inside")
 	testing.expect(t, strings.has_suffix(out, "\n````"), out)

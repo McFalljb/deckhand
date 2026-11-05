@@ -11,8 +11,9 @@ import "core:time"
 // State only changes inside run_command (commands.odin). Readers may look at
 // it anywhere on the main thread.
 //
-// Model: Project -> Session -> Tabs. An open session has exactly one pi tab
-// (the first) plus any number of other tabs. A tab belongs to exactly one
+// Model: Project -> Session -> Tabs. An open session has one main tab (the
+// first): its pi tab, or for a Claude-only session (agent .Claude,
+// claude.odin) its Claude tab and no pi tab; plus any number of other tabs. A tab belongs to exactly one
 // session for its whole life: it is created in a named session (a user's
 // action in the session on screen, a command or agent in its own), never moves
 // to another (no command or drag moves tabs between sessions), and what it
@@ -23,7 +24,9 @@ import "core:time"
 // never by list position. Identity that outlives a run (docs/PERSISTENCE.md):
 // a project is its cwd, a session is pi's session id + cwd (+ session dir).
 
-Pi_Tab :: struct {}
+Pi_Tab :: struct {
+	readonly: bool, // started read-only (chat_env: a chat while Chats: read-only is on)
+}
 Shell_Tab :: struct {}
 Tab_Kind :: union {
 	Pi_Tab,
@@ -33,12 +36,22 @@ Tab_Kind :: union {
 	Markdown_Tab, // a .md file drawn as a document (markdown_view.odin); its source is a read-only editor in `editors`
 	Browser_Tab, // a web page (browser.odin; CEF, docs/BROWSER.md)
 	App_Tab, // a program rendering into the tab (app_tab.odin; docs/ENGINE-BRIDGE.md)
+	Claude_Tab, // Claude Code in a terminal, with pi-desk's plugin (claude.odin; docs/CLAUDE.md)
 }
 
 Tab_Status :: enum {
 	Running,
 	Exited,
 	Not_Started, // restored from the saved workspace; starts when its session is focused
+}
+
+// How a tab's process ended (its waitpid status), once pi-desk reaped it.
+// Unknown when it could not be reaped (it kept running after closing its
+// terminal, and was hung up on).
+Exit_Info :: struct {
+	known:  bool,
+	code:   int, // exited: its status
+	signal: int, // killed by this signal (0 = it exited)
 }
 
 // What a pi tab's bridge last reported (pi.status, docs/PROTOCOL.md §4).
@@ -55,6 +68,7 @@ Tab :: struct {
 	kind:     Tab_Kind,
 	title:    string,
 	status:   Tab_Status,
+	exit:     Exit_Info, // status Exited: how its process ended (dead_tab.odin)
 	cwd:      string, // shell tabs: where the shell starts ("" = the session's cwd)
 	// pi tabs only, from the bridge
 	agent:    Agent_State,
@@ -63,6 +77,10 @@ Tab :: struct {
 	blockers: [dynamic]string,
 	panels:   [dynamic]Panel, // published by the bridge (panel.set), in arrival order
 	reload:   Tab_Reload, // pi tabs: hot reload's bookkeeping (reload.odin)
+	bridge_at: time.Time, // pi tabs: when the bridge last reported (the status tooltip)
+	// any terminal tab: what its program reports over OSC 7501 (agent_status.odin)
+	prog:     Prog_Summary,
+	unseen:   bool, // its agent finished while the user was not looking, or "Mark as unread"; not saved
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,
@@ -98,9 +116,16 @@ PANEL_ID_MAX :: 64
 PANEL_TITLE_MAX :: 128
 COLLAPSED_MAX :: 64
 
+// What runs in an open session's main tab (its first): pi, or Claude Code (a Claude-only session).
+Session_Agent :: enum u8 {
+	Pi,
+	Claude,
+}
+
 Open_Session :: struct {
 	id:            u64,
-	pi_session_id: string, // pi's session id (a UUID; pi-desk picks it for new chats)
+	agent:         Session_Agent,
+	pi_session_id: string, // pi's session id (a UUID; pi-desk picks it for new chats); agent .Claude: its main tab's Claude session id ("" until reported)
 	session_dir:   string, // "" = pi's default store
 	session_file:  string, // as the bridge last reported it (pi.session); "" = unknown
 	project_id:    u64,
@@ -204,6 +229,7 @@ Tab_Kind_Id :: enum {
 	Markdown,
 	Browser,
 	App,
+	Claude,
 }
 
 // User settings. confirm and confirm_close are user-only (an agent can never
@@ -216,7 +242,8 @@ Settings :: struct {
 	appearance:    Appearance, // light or dark: system (follows the OS), light, dark
 	reduce_motion: bool, // no fades, no pulse
 	text_size:     Text_Size, // the chrome's text (theme.odin); terminals keep their size
-	chats_readonly: bool, // chats start with PI_KIT_READONLY=1
+	chats_readonly: bool, // chats' pi starts with its read tools only (chat_args) and PI_KIT_READONLY=1
+	claude_skip_permissions: bool, // the user's default flag for Claude tabs THEY start (claude_with_defaults); user-only, off by default
 	agent_name:    string, // the built-in agent's name ("" = AGENT_NAME_DEFAULT)
 	agent_model:   string, // the agent's model, "provider/id[:thinking]" ("" = pi's default); user-only
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background
@@ -232,6 +259,13 @@ Settings :: struct {
 	jobs_paused:   bool, // the kill switch: no new runs
 	job_limits:    Job_Limits,
 	tidy_off:      bool, // the project list as found: no temp or missing folders hidden, no subfolders folded (project_tidy.odin)
+	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
+	// added, removed folders) and the account a new Claude session last started with
+	claude_accounts:     [dynamic]Claude_Account_Setting,
+	claude_account_last: string,
+	last_harness: Harness, // the harness the user last started a session with from "New session" (harness.odin): the picker's first row
+	claude_account_default: string, // the user's default account ("" = the environment's: CLAUDE_CONFIG_DIR, else ~/.claude)
+	pi_extensions: [dynamic]Pi_Extension_Choice, // the user's on/off for the pi integration's optional extensions (pi_integration.odin; user-only); one not listed has the manifest's default
 }
 
 // Left column sections, each sorted on its own.
@@ -245,6 +279,7 @@ Sort_By :: enum {
 	Recent, // last activity first (newest session file)
 	Name, // A to Z
 	Created, // newest first
+	Attention, // needs you, then finished and not seen, then working, then the rest (agent_status.odin: attention_tier); ties by recent activity
 }
 
 // How the left column shows projects and sessions (sidebar.odin). Pins and
@@ -292,6 +327,7 @@ State :: struct {
 	home_open:             bool, // the agent's chat drawer shows
 	agent:                 Agent_Info, // the agent's unread count (agent.odin), from its bridge status
 	home_model:            string, // agent_model when Atlas last started (agent.odin: --model again only when it changed)
+	home_fork_from:        string, // Atlas's old session file while its fork into home_cwd() is not on disk yet (home.odin; "" = none)
 	notices:               Notices, // the bell's entries (notify.odin; not saved)
 	reload:                Reload_Info, // the hot-reload bar (reload.odin; not saved)
 	next_id:               u64,
@@ -302,6 +338,10 @@ State :: struct {
 	jobs_notified:         int, // OS notifications sent for jobs (tests)
 	home_dir_prev:         string, // the main folder before the user changed it (offered in Finder; not saved)
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
+	claude_history:        [dynamic]Claude_Record, // Claude Code sessions pi-desk ran, most recent first (claude.odin; saved)
+	claude_readonly_ids:   [dynamic]string, // Claude sessions that ran read-only, outside the history's cap (claude.odin §1a; saved)
+	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
+	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
 }
 
 LEFT_WIDTH_DEFAULT :: 300
@@ -390,6 +430,7 @@ tab_kind_id :: proc(k: Tab_Kind) -> Tab_Kind_Id {
 	case Markdown_Tab: return .Markdown
 	case Browser_Tab: return .Browser
 	case App_Tab: return .App
+	case Claude_Tab: return .Claude
 	}
 	return .Shell
 }

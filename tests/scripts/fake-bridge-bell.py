@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
-"""A fake pi for tests/scripts/bell.sh: a pi-like screen and pi-kit's bridge over
-pi-desk's socket (PI_DESK_SOCKET, the single-use PI_DESK_TOKEN). It plays a
+"""A fake pi for tests/scripts/bell.sh: a pi-like screen and the pi integration's bridge over
+pi-desk's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It plays a
 status script per session (aaaa-1, bbbb-2 of the fake store), BELL_DELAY
 seconds apart (default 5):
   aaaa-1  working, then idle      (a run that ends: "finished")
@@ -14,7 +14,7 @@ import json, os, select, socket, sys, time
 args = sys.argv[1:]
 who = next((a for a in ("aaaa-1", "bbbb-2") if any(a in x for x in args)), "new-1")
 sock = socket.socket(socket.AF_UNIX)
-sock.connect(os.environ["PI_DESK_SOCKET"])
+sock.connect(os.environ["DECKHAND_SOCKET"])
 
 
 def send(m):
@@ -27,7 +27,7 @@ def status(s):
     print("status: %s" % s, flush=True)
 
 
-send({"id": "h", "type": "hello", "token": os.environ["PI_DESK_TOKEN"]})
+send({"id": "h", "type": "hello", "token": os.environ["DECKHAND_TOKEN"]})
 send({"id": "s", "type": "pi.session", "pi_session_id": who, "session_file": "", "cwd": os.getcwd()})
 print("\x1b[2J\x1b[H\x1b[1mpi\x1b[0m  fake bell bridge · session %s\n" % who, flush=True)
 plan = {"aaaa-1": ["working", "idle"], "bbbb-2": ["working", "waiting"]}.get(who, ["idle"])

@@ -723,7 +723,7 @@ worktrees_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Re
 		// commands.odin starts it (open_new_session); the checks are here
 		return fail("unknown command"), false
 	case Worktree_Cleanup:
-		if caller.kind != .UI do return fail("only the user can clean up a worktree, in pi-desk"), false
+		if caller.kind != .UI do return fail("only the user can clean up a worktree, in Deckhand"), false
 		p := fs_real(fs_abs(c.path, caller))
 		main, err := wt_cleanup_pre(p)
 		if err != "" do return fail(err), false

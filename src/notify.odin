@@ -81,6 +81,7 @@ Notice :: struct {
 	job_id:        string,
 	run_dir:       string, // jobs: where the run's output is
 	read:          bool,
+	claude:        bool, // .Exited: a Claude tab's, not pi's
 }
 
 Notices :: struct {
@@ -231,15 +232,21 @@ notify_pi_status :: proc(s: ^Open_Session, tab: ^Tab, agent: Agent_State, waitin
 }
 
 // A tab's process exited (Tab_Exited): pi's makes an entry.
-notify_tab_exited :: proc(s: ^Open_Session, tab: ^Tab) {
+notify_tab_exited :: proc(s: ^Open_Session, tab: ^Tab, exit: Exit_Info = {}) {
 	if s == nil || tab == nil || s.home do return
+	// a Claude tab's error exit; not the user's own /exit (0) nor "not installed" (127: no restart loop)
+	if _, is_claude := tab.kind.(Claude_Tab); is_claude {
+		if exit.known && exit.signal == 0 && exit.code != 0 && exit.code != 127 do notify_session(s, tab, .Exited, claude = true)
+		return
+	}
 	if _, is_pi := tab.kind.(Pi_Tab); !is_pi do return
 	notify_session(s, tab, .Exited)
 }
 
-// An entry for a session, unless the user is looking at it.
-notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind) -> bool {
-	if notify_on_screen(s.id) do return false
+// An entry for a session, unless the user is looking at it (its pi tab, or
+// with tab_shown the reporting tab itself: OSC 7501, agent_status.odin).
+notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown := false, claude := false) -> bool {
+	if claude ? status_on_screen(s, tab.id) : (tab_shown ? status_on_screen(s, tab.id) : notify_on_screen(s.id)) do return false
 	_, place := session_place(s)
 	n := Notice {
 		kind          = kind,
@@ -249,6 +256,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind) -> bool {
 		pi_session_id = strings.clone(s.pi_session_id),
 		title         = notice_text(open_session_title(s)),
 		place         = notice_text(place),
+		claude        = claude,
 	}
 	return notice_post(n)
 }
@@ -270,6 +278,7 @@ notify_on_screen :: proc(session: u64) -> bool {
 @(private = "file")
 notify_pi_shown :: proc(session: u64) -> bool {
 	s := find_session(session)
+	if s != nil && s.agent == .Claude && len(s.tabs) > 0 do return s.active_tab == s.tabs[0].id // a Claude-only session's main tab
 	pt := session_pi_tab(s)
 	return pt != nil && s.active_tab == pt.id
 }
@@ -395,7 +404,7 @@ notify_os :: proc(n: Notice) {
 		// the rest of the burst in one; the bell lists them
 		need := 0
 		for x in ns.items do if !x.read && x.kind in NOTICE_OS_KINDS do need += 1
-		platform.notify("pi-desk", fmt.tprintf("%d sessions need you", need))
+		platform.notify("Deckhand", fmt.tprintf("%d sessions need you", need))
 	case:
 		return
 	}
@@ -408,7 +417,7 @@ notice_label :: proc(n: Notice) -> string {
 	case .Finished:      return "Finished"
 	case .Waiting:       return "Waiting for you"
 	case .Error:         return n.session == 0 && n.job_id == "" ? "Did not work" : "Stopped with an error" // notify_failed's
-	case .Exited:        return "pi exited"
+	case .Exited:        return n.claude ? "Claude exited" : "pi exited"
 	case .Job_Finished:  return "Job finished"
 	case .Job_Needs_You: return "Job needs you"
 	case .Job_Failed:    return "Job failed"

@@ -4,8 +4,10 @@
 # bridge of panels.sh). Screenshots go to build/shots/polish/.
 # Usage: tests/scripts/polish.sh [SCRIPT]   (default tests/scripts/polish.txt)
 set -eu
+unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
+. tests/scripts/fresh-build.sh
 SCRIPT=${1:-tests/scripts/polish.txt}
 FAKE_HOME="$ROOT/build/polish-home"
 STORE="$FAKE_HOME/.pi/agent/sessions"
@@ -27,6 +29,6 @@ session pi-desk 1 aaaa-1 "Command palette ranking"
 session pi-desk 3 bbbb-2 "Blend the title bar into the top bar"
 session pi-desk 26 cccc-3 "Double-click selects a word in the terminal"
 
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_BIN="$ROOT/build/pi-desk" \
+HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_BIN="$ROOT/build/deckhand" \
   PI_DESK_CMD="exec sh '$ROOT/tests/scripts/fake-bridge.sh' \"\$@\"" \
-  build/pi-desk "$FAKE_HOME/code/pi-desk"
+  build/deckhand "$FAKE_HOME/code/pi-desk"

@@ -1,0 +1,12 @@
+# restore.sh run 4: Atlas's saved session was recorded in another folder ($HOME); the
+# main folder is set. Opening Atlas asks pi to fork it once into the main folder (a new
+# id, saved at once); the next launch, once pi wrote the copy, resumes it.
+# The fake pi writes its arguments and cwd to a file (restore.sh checks it). Run 5
+# starts with the drawer open, as run 4 quit: set_home opens it either way.
+wait 500
+command {"type":"set_home","open":true}
+assert_state home.open true
+waitstate 10000 open_sessions.0.tabs.0.status running
+wait 1500
+state_json restore-atlas
+quit

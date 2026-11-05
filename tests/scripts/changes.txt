@@ -12,11 +12,11 @@ waitfor ARGS: --session 15000
 wait 1500
 # ---- the top bar's "±": the checkout's changed files
 hover changesbtn
-wait 800
+eventually
 assert_tip Changes in this checkout: 8 files
 shot changes/button
 clickid changesbtn
-wait 1500
+eventually
 assert_state open_sessions.0.tabs.# 2
 assert_state open_sessions.0.tabs.1.kind changes
 assert_state open_sessions.0.tabs.1.root $homedir/proj
@@ -47,10 +47,10 @@ clickid chrow 3
 wait 800
 shot changes/diff-dark
 hover chtool 2
-wait 800
+eventually
 assert_tip Merge into main coming later
 hover chtool 7
-wait 800
+eventually
 assert_tip Stage this file (git add)
 clickid chrow 11
 wait 600
@@ -75,7 +75,7 @@ command {"type":"changes_list"}
 assert_result data.files.1.staged none
 # ---- Open at the hunk: an editor tab, then back
 clickid chtool 6
-wait 1000
+eventually
 assert_state open_sessions.0.tabs.# 3
 assert_state open_sessions.0.tabs.2.kind editor
 assert_state open_sessions.0.tabs.2.path $homedir/proj/src/a.c
@@ -83,7 +83,7 @@ clickid tab 1
 wait 800
 # ---- discard src/a.c: the confirmation bar first
 clickid chtool 9
-wait 400
+eventually
 assert_state pending_confirmations.# 1
 assert_state pending_confirmations.0.summary Discard the uncommitted changes to ~/proj/src/a.c? Staged and unstaged changes are lost.
 shot changes/confirm
@@ -96,7 +96,7 @@ assert_result data.files.1.path added.txt
 clickid chrow 11
 wait 600
 clickid chtool 9
-wait 400
+eventually
 assert_state pending_confirmations.0.summary Discard ~/proj/notes.txt? It is not in the last commit: it goes to the Trash (a second question follows).
 clickid confirm_yes
 wait 600
@@ -104,9 +104,8 @@ assert_state pending_confirmations.# 1
 assert_state pending_confirmations.0.summary Really move ~/proj/notes.txt to the Trash? Git does not have this file, so it cannot bring it back.
 shot changes/confirm-second
 clickid confirm_yes
-wait 3000
 command {"type":"changes_list"}
-assert_result data.files.# 6
+waitresult 30000 data.files.# 6
 # ---- commit what is staged (the pre-commit hook runs: changes.sh checks)
 clickid ch_field
 wait 300
@@ -114,10 +113,12 @@ type Stage, rename and add from the Changes tab
 wait 300
 shot changes/commit
 key enter
-wait 3000
+# the commit runs the hooks, then git status again: until the list shows the new commit. Waits on
+# the files (.env first once the staged ones are committed), not on ahead: a listing that ran
+# while the commit landed has the old files with the new ahead (git status runs before rev-list)
 command {"type":"changes_list"}
+waitresult 30000 data.files.0.path .env
 assert_result data.ahead 2
-assert_result data.files.0.path .env
 assert_result data.files.0.scope uncommitted
 assert_result data.files.1.scope committed
 shot changes/committed-dark

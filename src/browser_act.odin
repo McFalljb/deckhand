@@ -60,7 +60,8 @@ package main
 // and queued actions (stopped). Take over (or the user's own click or key in the page while an
 // action runs) pauses agents on the tab until Hand back: every agent call on it returns
 // user_has_control at once. A tab not on screen that an agent acts on shows a dot in the tab bar
-// and "pi is using a page" on its session's sidebar row (both linger ACT_LINGER after the last).
+// and "pi is using a page" (or Claude, or Atlas: whoever acted) on its session's sidebar row (both
+// linger ACT_LINGER after the last).
 //
 // Actions on one tab run one at a time, in order (the others wait); each has ACT_TIMEOUT from
 // when pi-desk accepted it. A requester's cancel (socket.odin's cancel line) or its connection
@@ -85,7 +86,7 @@ ACT_SETTLE :: 300 * time.Millisecond // after the input: a navigation, a downloa
 ACT_NAV_WAIT :: 5 * time.Second // a navigation the action started: its load, at most this long
 ACT_KEY_GAP :: 50 * time.Millisecond // between two chords of browser_press (each checked)
 ACT_ENTER_GAP :: 300 * time.Millisecond // after an Enter: a form it submitted starts navigating
-ACT_LINGER :: 5 * time.Second // the tab's dot and the sidebar's "pi is using a page" after the last action
+ACT_LINGER :: 5 * time.Second // the tab's dot and the sidebar's "… is using a page" after the last action
 ACT_TEXT_MAX :: 5000 // bytes browser_type types at most
 ACT_KEYS_MAX :: 50 // chords browser_press presses at most
 ACT_FILES_MAX :: 20
@@ -208,7 +209,7 @@ act_keys_parse :: proc(keys: string) -> (out: []Act_Key, err: string) {
 			}
 			ok: bool
 			k, ok = act_key_named(p, k.mods)
-			if !ok do return nil, fmt.tprintf("%q: %q is not a key pi-desk knows (named keys: Enter, Tab, Escape, Backspace, Delete, Space, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, F1-F12; or one letter, digit or punctuation mark)", chord, p)
+			if !ok do return nil, fmt.tprintf("%q: %q is not a key Deckhand knows (named keys: Enter, Tab, Escape, Backspace, Delete, Space, ArrowUp/Down/Left/Right, Home, End, PageUp, PageDown, F1-F12; or one letter, digit or punctuation mark)", chord, p)
 		}
 		if k.mods & ACT_MOD_META != 0 && (k.code == "KeyC" || k.code == "KeyV" || k.code == "KeyX") do return nil, fmt.tprintf("%q: copy, cut and paste are refused (the clipboard is the user's)", chord)
 		if k.mods & ACT_MOD_META != 0 && k.code == "KeyA" do k.command = "selectAll"
@@ -299,7 +300,7 @@ act_files_check :: proc(paths: []string) -> (code, err: string) {
 		if !filepath.is_abs(p) do return "bad_file", fmt.tprintf("%q is not an absolute path", p)
 		// protected folders first (by name: nothing there is opened or even looked at)
 		clean, _ := filepath.clean(p, context.temp_allocator)
-		if act_path_protected(clean) do return "path_not_allowed", fmt.tprintf("%s is in a folder agents never upload from (keys, credentials, pi's and pi-desk's own files)", act_path_shown(clean))
+		if act_path_protected(clean) do return "path_not_allowed", fmt.tprintf("%s is in a folder agents never upload from (keys, credentials, pi's and Deckhand's own files)", act_path_shown(clean))
 		// a symlink (the file itself) goes nowhere else; any folder link is followed for the check
 		if li, lerr := os.lstat(clean, context.temp_allocator); lerr == nil && li.type == .Symlink {
 			return "path_not_allowed", fmt.tprintf("%s is a symbolic link: give the file's real path", act_path_shown(clean))
@@ -508,16 +509,36 @@ browser_act_recent :: proc(tab_id: u64) -> bool {
 // Some browser tab of the session that is not on screen has an agent acting on it (or did in
 // the last ACT_LINGER).
 browser_act_session_background :: proc(s: ^Open_Session) -> bool {
+	_, ok := browser_act_background_tab(s)
+	return ok
+}
+
+// Which such tab (the one acted on last).
+@(private = "file")
+browser_act_background_tab :: proc(s: ^Open_Session) -> (tab_id: u64, ok: bool) {
 	seen := make(map[u64]bool, context.temp_allocator)
 	for op in act_ops do seen[op.tab_id] = true
 	for id, at in act_linger do if time.tick_since(at) < ACT_LINGER do seen[id] = true
+	best: time.Tick
 	for id in seen {
 		os_, tab, _ := find_tab(id)
 		if os_ != s || tab == nil do continue
 		if state.current_session == s.id && s.active_tab == tab.id do continue
-		return true
+		at := agent_tab_of(id)
+		last := at != nil ? at.last : time.Tick{}
+		if !ok || time.tick_diff(best, last) > 0 do tab_id, best, ok = id, last, true
 	}
-	return false
+	return
+}
+
+// The sidebar row's text while an agent acts in a tab of s not on screen ("" = none).
+browser_act_session_text :: proc(s: ^Open_Session) -> string {
+	id, ok := browser_act_background_tab(s)
+	if !ok do return ""
+	// the agent that acted (a Claude tab in a pi session is Claude), else the session's harness
+	who := s.agent == .Claude ? "Claude" : "pi"
+	if at := agent_tab_of(id); at != nil && (at.who == .Panel || at.who == .Control) do who = agent_who(at.who, at.who_claude)
+	return fmt.tprintf("%s is using a page", who)
 }
 
 // A native file chooser is opening in the tab (cef_polish.inc's dialog handler): while an agent's
@@ -552,6 +573,7 @@ act_request_cancel :: proc(c: Request_Cancel) -> Result {
 		return {ok = true}
 	}
 	if agent_request_end(c.request_id, why, "cancelled") do return {ok = true}
+	if claude_wait_cancel(c.request_id, why) do return {ok = true} // claude_wait.odin
 	return fail("no running request with that id")
 }
 
@@ -790,9 +812,9 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 				real, rok := act_real_path(p)
 				append(&op.paths, strings.clone(rok ? real : p))
 			}
-			who := agent_who(caller.kind)
+			who := agent_who(caller.kind, caller.claude)
 			if caller.kind == .Panel {
-				if s := caller_session(caller); s != nil do who = fmt.tprintf("pi in “%s”", open_session_title(s))
+				if s := caller_session(caller); s != nil do who = fmt.tprintf("%s in “%s”", who, open_session_title(s))
 			}
 			op.who_text = strings.clone(who)
 		}
@@ -988,18 +1010,18 @@ act_refusal :: proc(kind: string, plain: bool, want: Act_Key_Kind) -> (code, msg
 	if want == .Nav do return "", ""
 	switch kind {
 	case "frame":
-		return "frame_focused", "focus is inside an embedded frame, which pi-desk cannot check for password or card fields: nothing was sent there. Ask the user to press Take over and type there themselves"
+		return "frame_focused", "focus is inside an embedded frame, which Deckhand cannot check for password or card fields: nothing was sent there. Ask the user to press Take over and type there themselves"
 	case "sensitive":
 		return "sensitive_field", ACT_SENSITIVE
 	case "opaque":
-		return "not_a_field", "focus is on an element pi-desk cannot look inside (a custom element with a closed shadow root, or an unknown one): agents only type into plain text fields"
+		return "not_a_field", "focus is on an element Deckhand cannot look inside (a custom element with a closed shadow root, or an unknown one): agents only type into plain text fields"
 	case "text":
 		return "", ""
 	}
 	if want == .Text do return "not_a_field", kind == "none" ? "nothing that takes text has focus (the page itself, a button or a link): pass selector (a text field) or click one first" : "the focused element is not a plain text field (text, search, email, url, tel or number input, a textarea, or editable content)"
 	// other keys (Backspace, Delete, shortcuts): a field, the page itself, or an element focusable
 	// by nature (a button, a link); not an element pi-desk cannot classify (a custom widget)
-	if kind == "none" && !plain do return "not_a_field", "focus is on an element pi-desk cannot classify (not a field, the page itself, a button or a link): keys like Backspace or shortcuts are not sent there; click a field or the page first"
+	if kind == "none" && !plain do return "not_a_field", "focus is on an element Deckhand cannot classify (not a field, the page itself, a button or a link): keys like Backspace or shortcuts are not sent there; click a field or the page first"
 	return "", ""
 }
 

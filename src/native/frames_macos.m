@@ -445,12 +445,12 @@ int pd_frames_serve_start(void* mtl_device) {
     snprintf(g_service, sizeof g_service, "dev.pi-desk.frames.%d", getpid());
     kern_return_t kr = bootstrap_check_in(bootstrap_port, g_service, &g_port);
     if (kr != KERN_SUCCESS) {
-        fprintf(stderr, "pi-desk: frames: bootstrap_check_in(%s) = %d (%s)\n", g_service, kr, bootstrap_strerror(kr));
+        fprintf(stderr, "Deckhand: frames: bootstrap_check_in(%s) = %d (%s)\n", g_service, kr, bootstrap_strerror(kr));
         return 0;
     }
     mach_port_limits_t lim = {.mpl_qlimit = PDF_QLIMIT_SERVE};
     kr = mach_port_set_attributes(mach_task_self(), g_port, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&lim, MACH_PORT_LIMITS_INFO_COUNT);
-    if (kr != KERN_SUCCESS) fprintf(stderr, "pi-desk: frames: queue limit not raised (%d)\n", kr);
+    if (kr != KERN_SUCCESS) fprintf(stderr, "Deckhand: frames: queue limit not raised (%d)\n", kr);
     if (!g_q) g_q = dispatch_queue_create("dev.pi-desk.frames", DISPATCH_QUEUE_SERIAL);
     g_src = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, g_port, 0, g_q);
     dispatch_source_set_event_handler(g_src, ^{ q_drain(); });

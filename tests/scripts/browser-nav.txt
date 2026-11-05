@@ -98,7 +98,7 @@ assert_state focus.id browser_url
 key a cmd
 type pidesk-test://web/nav-b.html?wrong-tab
 command {"type":"focus_tab","tab_id":$last}
-wait 100
+eventually
 assert_state focus.id <missing>
 key enter
 wait 500
@@ -125,7 +125,7 @@ wait 100
 clickid br_url_box
 assert_state focus.id browser_url
 key period cmd shift
-wait 100
+eventually
 assert_state open_sessions.0.tabs.1.mode comment
 assert_state focus.id <missing>
 key period cmd shift

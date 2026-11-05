@@ -119,6 +119,7 @@ foreign pdplatform {
 	pd_mac_test_hit :: proc(x, y: f32) -> c.int ---
 	pd_mac_test_light :: proc(x, y: ^f32) ---
 	pd_mac_test_beeps :: proc() -> c.int ---
+	pd_mac_test_panels :: proc() -> c.int ---
 	pd_mac_test_has_input_context :: proc() -> c.int ---
 	pd_mac_system_light :: proc() -> c.int ---
 	pd_mac_watch_appearance :: proc(changed: proc "c" (light: c.int)) ---
@@ -221,6 +222,7 @@ test_ime :: proc(kind: int, text: string, key_code := 0, alt := false, repeat :=
 	pd_mac_test_ime(c.int(kind), strings.clone_to_cstring(text, context.temp_allocator), c.int(key_code), f, strings.clone_to_cstring(ops, context.temp_allocator))
 }
 test_beeps :: proc() -> int {return int(pd_mac_test_beeps())}
+test_panels :: proc() -> int {return int(pd_mac_test_panels())}
 test_has_input_context :: proc() -> bool {return pd_mac_test_has_input_context() != 0}
 
 // ---- the menu bar (src/native/menubar_macos.m; built by menubar.odin) ----

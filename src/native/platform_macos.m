@@ -446,6 +446,24 @@ int pd_mac_test_beeps(void) {
     return beeps;
 }
 
+// Test mode: counts AppKit's Emoji & Symbols panel and dictation (the Edit
+// menu's own items) instead of opening them. Returns the count so far; the
+// first call installs the counter.
+static int panels;
+static void count_panel(id self, SEL _cmd, id sender) { panels++; }
+int pd_mac_test_panels(void) {
+    static BOOL installed;
+    if (!installed) {
+        installed = YES;
+        SEL sels[] = {@selector(orderFrontCharacterPalette:), @selector(startDictation:)};
+        for (int i = 0; i < 2; i++) {
+            Method m = class_getInstanceMethod([NSApplication class], sels[i]);
+            if (m) method_setImplementation(m, (IMP)count_panel);
+        }
+    }
+    return panels;
+}
+
 // Test mode: whether sokol's view has an input context (input methods need one).
 int pd_mac_test_has_input_context(void) { return view.inputContext != nil; }
 

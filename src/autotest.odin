@@ -34,6 +34,8 @@ package main
 //   clicktext N NAME OFFSET    N quick clicks in a text element at byte OFFSET of its text
 //   beeps [WANT]               AppKit beeps for unhandled keys so far (counted, not sounded;
 //                              the first use starts counting); with WANT, assert the count
+//   panels [WANT]              AppKit's Emoji & Symbols panel and dictation opened so far
+//                              (counted, not opened; the first use starts counting)
 //   assert_screen TEXT         TEXT is on the active terminal's screen now
 //   assert_not_screen TEXT     TEXT is not on the active terminal's screen now
 //   assert_palette INDEX KEY   the palette's result INDEX has KEY (action:new_chat, tab:3, ...)
@@ -917,6 +919,14 @@ autotest_step :: proc() {
 				at.asserts += 1
 				if fmt.tprint(n) == args[0] do log("assert ok: beeps =", n)
 				else do script_fail(fmt.tprintf("ASSERT FAILED beeps: got %d, want %s", n, args[0]))
+			}
+		case "panels":
+			n := test_panels()
+			log(fmt.tprintf("panels: %d", n))
+			if len(args) > 0 {
+				at.asserts += 1
+				if fmt.tprint(n) == args[0] do log("assert ok: panels =", n)
+				else do script_fail(fmt.tprintf("ASSERT FAILED panels: got %d, want %s", n, args[0]))
 			}
 		case "ime_press":
 			head, _, tail := strings.partition(rest, " -- ")

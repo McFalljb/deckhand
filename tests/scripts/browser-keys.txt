@@ -27,4 +27,18 @@ web_js document.title = 'keys ' + keys.join(',')
 web_title keys Semicolon,Quote,BracketLeft,BracketRight,Backslash,Equal,Backquote,F1,F12
 web_js document.title = 'val ' + document.getElementById('field').value
 web_title val ;'[]\=`
+# letters through keyDown: (real NSEvents): a key the page does not handle is
+# not offered to the menu bar, whose hidden Edit items took e (Emoji & Symbols,
+# fn E) and d (dictation, fn D)
+panels 0
+web_js document.getElementById('field').value = ''
+ime_key 14 e
+ime_key 2 d
+ime_key 0 a
+type e
+wait 300
+web_js document.title = 'typed ' + document.getElementById('field').value
+web_title typed edae
+# the page has all four keys: an unhandled one went to the menu bar before this
+panels 0
 quit

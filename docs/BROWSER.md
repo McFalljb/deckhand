@@ -95,6 +95,9 @@ Step 8 results).
   `unmodified_character`; `RAWKEYDOWN`, `CHAR`, `KEYUP`). sokol drops these, so the native layer
   (`platform_macos.m`, which already intercepts `keyDown:` for input methods) passes the NSEvent's
   fields along for browser tabs. ⌘C/V/X/A/Z go to the frame's edit commands (`Copy`, `Paste`, …).
+  A key the page does not handle stops in the keyboard handler (`on_key_event`): CEF would offer
+  it to the menu bar, where AppKit's hidden Edit items take a plain e (Emoji & Symbols) and d
+  (dictation). A ⌘ key still goes on (scene `browser-keys.txt`, test op `panels`).
 - **IME**: the existing `NSTextInputClient` path feeds `ime_set_composition` / `ime_commit_text`
   / `ime_finish_composing_text`; `OnImeCompositionRangeChanged` gives the caret rect so the
   candidate window sits in the right place.

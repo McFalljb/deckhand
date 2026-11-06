@@ -14,7 +14,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterEach, test } from "node:test";
 import * as protocol from "../lib/protocol.ts";
-import { MODE_EVENT, PANELS_EVENT } from "../lib/protocol.ts";
+import { MODE_EVENT, PANELS_EVENT, SHELL_ROWS_EVENT } from "../lib/protocol.ts";
 import { piRules } from "./pi-rules.ts";
 
 const TMP_ROOT = mkdtempSync(path.join(os.tmpdir(), "deckhand-test-"));
@@ -22,6 +22,7 @@ process.on("exit", () => rmSync(TMP_ROOT, { recursive: true, force: true }));
 
 // pi-kit's sidebar (PI_KIT_DIR) imports pi-tui; nothing here draws, so names are enough
 const stubs: Record<string, string> = {
+	typebox: "export const Type = new Proxy({}, { get: () => (...a) => ({}) });", // the shells' tool schemas
 	"@earendil-works/pi-tui":
 		"export const truncateToWidth = (s) => s; export const visibleWidth = (s) => String(s).length; export const isViewportTUI = () => false;" +
 		"export class HStack { constructor(c) { this.c = c; } } export class ScrollView { constructor(c) { this.c = c; } render() { return []; } invalidate() {} }",
@@ -56,6 +57,8 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 	const dir = mkdtempSync(path.join(TMP_ROOT, "m-"));
 	const sock = path.join(dir, "s");
 	const hellos: string[] = [];
+	const got: any[] = []; // every other message, in order
+	const waiters = new Set<() => void>(); // waitFor's, checked on each message
 	const conns = new Set<net.Socket>();
 	const server = net.createServer((c) => {
 		conns.add(c);
@@ -73,7 +76,11 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 				if (m.type === "hello") {
 					hellos.push(m.token);
 					if (!opts.silent) setTimeout(() => reply({ result: { ok: true, data: { tab_id: 4, reconnect_token: `r${hellos.length}`, capabilities: ["pi_tab", "panels", "state", "events"] } } }), opts.delay ?? 0);
-				} else reply({ result: { ok: true } });
+				} else {
+					got.push(m);
+					for (const w of [...waiters]) w();
+					reply({ result: { ok: true } });
+				}
 			}
 		});
 	});
@@ -82,7 +89,21 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 		for (const c of conns) c.destroy();
 		server.close();
 	};
-	return { sock, hellos, close };
+	/** The first message so far or to come that `match` accepts; fails after `ms` saying `what`. */
+	const waitFor = (what: string, match: (m: any) => boolean, ms = 4000) =>
+		new Promise<any>((resolve, reject) => {
+			const check = () => {
+				const m = got.find(match);
+				if (!m) return;
+				done();
+				resolve(m);
+			};
+			const timer = setTimeout(() => (done(), reject(new Error(`no ${what} within ${ms} ms (got ${JSON.stringify(got.map((m) => [m.type, m.panel, m.rows?.map((r: any) => r.text) ?? m.blockers]))})`))), ms);
+			const done = () => (clearTimeout(timer), waiters.delete(check));
+			waiters.add(check);
+			check();
+		});
+	return { sock, hellos, got, waitFor, close };
 }
 
 /**
@@ -269,4 +290,52 @@ test("mode (PI_KIT_DIR): pi-kit's own sidebar, after a slow session_start, hands
 	} finally {
 		dh.close();
 	}
+});
+
+/**
+ * A shell started in a Deckhand pi tab reaches Deckhand as a Shells panel row and a pi.status
+ * blocker. The bridge loads first and says the mode during its own session_start, before a shell
+ * extension after it has run its session_start (and before ours has decided to step back).
+ */
+const OUR_SHELL = path.join(import.meta.dirname, "../extensions/shell/index.ts");
+const fromFile = async (file: string): Promise<[string, (pi: any) => unknown]> => [file, (await import(`${file}?${Math.random()}`)).default];
+
+async function shellReachesDeckhand(shells: [string, (pi: any) => unknown][], owner: string) {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const { pi } = await runtime([await fromFile(path.join(import.meta.dirname, "../extensions/panels/index.ts")), ...shells]);
+			const bg = pi.tools().find((t: any) => t.name === "bash_bg");
+			assert.equal(bg?.owner, owner);
+			await bg.tool.execute("1", { command: "sleep 5", description: "a long build" }, undefined, undefined, pi.ctx);
+			// the bridge sends panels at most once a second
+			await dh.waitFor("Shells panel.set listing sh1", (m) => m.type === "panel.set" && m.panel === "shells" && m.rows?.some((r: any) => /^sh1 /.test(r.text)));
+			await dh.waitFor("pi.status listing sh1 as a blocker", (m) => m.type === "pi.status" && m.blockers?.some((b: string) => /^shell sh1: /.test(b)));
+		});
+	} finally {
+		dh.close();
+	}
+}
+
+/** Another shell with our tool names, as pi-kit's (extensions/shell/index.ts): it registers them at load and publishes untagged rows. */
+const otherShell = (pi: any) => {
+	const tool = (name: string, execute = async () => ({ content: [{ type: "text", text: "ok" }] })) => pi.registerTool({ name, label: name, description: name, parameters: {}, execute });
+	tool("bash_bg", async () => {
+		pi.events.emit(SHELL_ROWS_EVENT, [{ id: "sh1", status: "0s", label: "a long build" }]);
+		return { content: [{ type: "text", text: "Started sh1" }] };
+	});
+	for (const name of ["monitor", "wake_later", "shell_stop", "shell_list"]) tool(name);
+};
+
+test("mode: our shell alone (it stands): a running shell is a Shells panel row and a blocker", async () => {
+	await shellReachesDeckhand([await fromFile(OUR_SHELL)], OUR_SHELL);
+});
+
+test("mode: next to another shell with our tool names (ours steps back) and no sidebar, its running shell is a Shells panel row and a blocker", async () => {
+	await shellReachesDeckhand([await fromFile(OUR_SHELL), ["/user/other-shell", otherShell]], "/user/other-shell");
+});
+
+test("mode (PI_KIT_DIR): next to pi-kit's shell (ours steps back) and no sidebar, pi-kit's running shell is a Shells panel row and a blocker", { skip: noKit }, async () => {
+	const kitShell = path.join(KIT, "shell/index.ts");
+	await shellReachesDeckhand([await fromFile(OUR_SHELL), await fromFile(kitShell)], kitShell);
 });

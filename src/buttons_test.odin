@@ -630,6 +630,67 @@ panel_head_only_is_not_a_dropdown :: proc(t: ^testing.T) {
 	}
 }
 
+// The right column scrolled down a long panel list, then shows a shorter one (another session's,
+// or its own rows removed): the panels are in view, not left above it until the next wheel. Clay
+// keeps one scroll offset per container and clamps it only on scroll input.
+@(test)
+panels_scroll_follows_shorter_content :: proc(t: ^testing.T) {
+	context.allocator = bt_reset()
+	if !testing.expect(t, bt_ui(), "fonts") do return
+	session :: proc(pi_id: string, rows: int) -> Open_Session {
+		s := Open_Session{id = new_id(), pi_session_id = pi_id, cwd = "/pd-test"}
+		pi := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
+		p := Panel{id = strings.clone("subagents"), title = strings.clone("Subagents")}
+		append(&p.rows, Panel_Row{text = strings.clone("Subagents"), head = true})
+		for i in 0 ..< rows do append(&p.rows, Panel_Row{text = fmt.aprintf("● agent %d", i)})
+		append(&pi.panels, p)
+		append(&s.tabs, pi)
+		s.active_tab = pi.id
+		return s
+	}
+	append(&state.open_sessions, session("pi-long", 120), session("pi-short", 3))
+	long, short := state.open_sessions[0].id, state.open_sessions[1].id
+	defer {
+		state.current_session = 0
+		clear(&state.open_sessions)
+	}
+	// the first header's top is inside the column's scroll box
+	in_view :: proc() -> (bool, f32, f32) {
+		col := clay.GetElementData(clay.ID("panels"))
+		head := clay.GetElementData(clay.ID("panelhead", 0))
+		if !col.found || !head.found do return false, -1, -1
+		return head.boundingBox.y >= col.boundingBox.y - 0.5, head.boundingBox.y, col.boundingBox.y
+	}
+	scroll_down :: proc() {
+		for _ in 0 ..< 20 { // a wheel event between frames, as main.odin's event does
+			_ = ui_layout(1400, 860)
+			b := clay.GetElementData(clay.ID("panels")).boundingBox
+			clay.SetPointerState({b.x + b.width / 2, b.y + b.height / 2}, false)
+			clay.UpdateScrollContainers(false, {0, -40}, 1.0 / 60)
+		}
+		_ = ui_layout(1400, 860)
+	}
+	// another session's shorter list: in view on the first layout after the switch
+	state.current_session = long
+	scroll_down()
+	ok, y, top := in_view()
+	testing.expectf(t, !ok, "the long list scrolled down (header at %v, column at %v)", y, top)
+	state.current_session = short
+	_ = ui_layout(1400, 860)
+	ok, y, top = in_view()
+	testing.expectf(t, ok, "after the switch the short list is in view (header at %v, column at %v)", y, top)
+	// the same session's rows removed while scrolled: in view by the next frame
+	state.current_session = long
+	scroll_down()
+	ok, y, top = in_view()
+	testing.expectf(t, !ok, "the long list scrolled down again (header at %v, column at %v)", y, top)
+	resize(&state.open_sessions[0].tabs[0].panels[0].rows, 4)
+	_ = ui_layout(1400, 860)
+	_ = ui_layout(1400, 860)
+	ok, y, top = in_view()
+	testing.expectf(t, ok, "after its rows went the list is in view (header at %v, column at %v)", y, top)
+}
+
 // The New chat buttons (top bar, the empty centre) open the harness picker under the button, not
 // mid-window (harness.odin).
 @(test)

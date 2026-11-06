@@ -379,7 +379,9 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		toast_layout(w, h) // a menu choice's outcome (toast.odin)
 		tooltip_layout(w, h)
 	}
-	return clay.EndLayout(0)
+	cmds := clay.EndLayout(0)
+	if panels_scroll_clamp() do app.redraw = true // drawn again at the clamped offset
+	return cmds
 }
 
 // A text field's text (with an input method's composition at the caret);
@@ -810,6 +812,22 @@ open_session_of :: proc(project_id: u64, pi_session_id: string) -> u64 {
 	return 0
 }
 
+// The tab whose panels the right column showed last (0 = none).
+@(private = "file")
+panels_shown: u64
+
+// Clay clamps a scroll offset only on wheel input: when the panels get shorter while scrolled
+// (rows removed), the offset is clamped to the new end after the layout. Whether it moved.
+@(private = "file")
+panels_scroll_clamp :: proc() -> bool {
+	d := clay.GetScrollContainerData(clay.ID("panels"))
+	if !d.found do return false
+	end := -max(d.contentDimensions.height - d.scrollContainerDimensions.height, 0)
+	if d.scrollPosition.y >= end do return false
+	d.scrollPosition.y = end
+	return true
+}
+
 // Right column: the current session's pi tab panels, published by its
 // bridge (subagents, shells, todos), as foldable sections.
 @(private = "file")
@@ -833,6 +851,13 @@ right_column :: proc(cs: ^Open_Session) {
 		backgroundColor = cc(th.bg_panel),
 		border = {color = cc(edge), width = {left = pu(BORDER_W)}},
 	}) {
+		// another tab's panels start at the top: Clay keeps the offset by element id, so the last
+		// tab's would carry over (past the end of a shorter list)
+		shown := pt != nil ? pt.id : 0
+		if shown != panels_shown {
+			panels_shown = shown
+			if d := clay.GetScrollContainerData(clay.ID("panels")); d.found do d.scrollPosition^ = {}
+		}
 		if clay.UI(clay.ID("panels"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},

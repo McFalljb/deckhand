@@ -684,11 +684,20 @@ panels_scroll_follows_shorter_content :: proc(t: ^testing.T) {
 	scroll_down()
 	ok, y, top = in_view()
 	testing.expectf(t, !ok, "the long list scrolled down again (header at %v, column at %v)", y, top)
+	// as frame() runs: the frame that lays out the shorter list was built at the old offset, then
+	// app.redraw is overwritten after drawing (font_frame_done); the next frame's start must still
+	// want a frame, or the column stays blank until some other event
 	resize(&state.open_sessions[0].tabs[0].panels[0].rows, 4)
 	_ = ui_layout(1400, 860)
+	app.redraw = false
+	testing.expect(t, ui_wants_frame(), "a frame is wanted after the offset was clamped")
 	_ = ui_layout(1400, 860)
 	ok, y, top = in_view()
 	testing.expectf(t, ok, "after its rows went the list is in view (header at %v, column at %v)", y, top)
+	// and the offset is within the content now: the clamp does not ask again (no frame loop)
+	d := clay.GetScrollContainerData(clay.ID("panels"))
+	end := -max(d.contentDimensions.height - d.scrollContainerDimensions.height, 0)
+	if testing.expect(t, d.found, "the panels scroll container") do testing.expectf(t, d.scrollPosition.y >= end, "the offset %v is within the content (end %v)", d.scrollPosition.y, end)
 }
 
 // The New chat buttons (top bar, the empty centre) open the harness picker under the button, not

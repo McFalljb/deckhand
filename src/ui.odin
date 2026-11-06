@@ -184,9 +184,12 @@ pulse :: proc() -> f32 {
 	return PULSE_MIN + (1 - PULSE_MIN) * f32(wave)
 }
 
-// True if the next frame must be drawn for motion alone.
+// True if the next frame must be drawn for motion alone, or once more after the right column's
+// offset was clamped (that layout was built at the old one).
 ui_wants_frame :: proc() -> bool {
-	return animating || (pulsing && pulse_step() != pulse_drawn)
+	again := panels_clamped
+	panels_clamped = false
+	return again || animating || (pulsing && pulse_step() != pulse_drawn)
 }
 
 // ---- status ----
@@ -380,7 +383,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		tooltip_layout(w, h)
 	}
 	cmds := clay.EndLayout(0)
-	if panels_scroll_clamp() do app.redraw = true // drawn again at the clamped offset
+	if panels_scroll_clamp() do panels_clamped = true // drawn again at the clamped offset (ui_wants_frame)
 	return cmds
 }
 
@@ -815,6 +818,10 @@ open_session_of :: proc(project_id: u64, pi_session_id: string) -> u64 {
 // The tab whose panels the right column showed last (0 = none).
 @(private = "file")
 panels_shown: u64
+
+// The last layout clamped the panels' offset: one more frame (ui_wants_frame clears it).
+@(private = "file")
+panels_clamped: bool
 
 // Clay clamps a scroll offset only on wheel input: when the panels get shorter while scrolled
 // (rows removed), the offset is clamped to the new end after the layout. Whether it moved.

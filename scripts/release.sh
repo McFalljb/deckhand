@@ -92,6 +92,7 @@ APP_PUB=$(sed -n 's/^UPDATE_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/update_key.odin)
 case "$APP_PUB" in
   ""|PLACEHOLDER*) echo "release: src/update_key.odin still has the placeholder update key: put the real public key in first (docs/DEVELOPING.md, \"Update signing\")" >&2; exit 1 ;;
 esac
+mkdir -p build
 [ -x build/update-sign ] && [ ! tools/update-sign/main.odin -nt build/update-sign ] && [ ! src/updatesig/updatesig.odin -nt build/update-sign ] ||
   odin build tools/update-sign -out:build/update-sign
 KEY_PUB=$(build/update-sign pubkey "$KEY") || { echo "release: the update key file is not usable: $KEY" >&2; exit 1; }

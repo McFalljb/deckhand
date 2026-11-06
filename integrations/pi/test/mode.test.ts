@@ -22,6 +22,7 @@ process.on("exit", () => rmSync(TMP_ROOT, { recursive: true, force: true }));
 
 // pi-kit's sidebar (PI_KIT_DIR) imports pi-tui; nothing here draws, so names are enough
 const stubs: Record<string, string> = {
+	typebox: "export const Type = new Proxy({}, { get: () => (...a) => ({}) });", // the shells' tool schemas
 	"@earendil-works/pi-tui":
 		"export const truncateToWidth = (s) => s; export const visibleWidth = (s) => String(s).length; export const isViewportTUI = () => false;" +
 		"export class HStack { constructor(c) { this.c = c; } } export class ScrollView { constructor(c) { this.c = c; } render() { return []; } invalidate() {} }",
@@ -56,6 +57,7 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 	const dir = mkdtempSync(path.join(TMP_ROOT, "m-"));
 	const sock = path.join(dir, "s");
 	const hellos: string[] = [];
+	const got: any[] = []; // every other message, in order
 	const conns = new Set<net.Socket>();
 	const server = net.createServer((c) => {
 		conns.add(c);
@@ -73,7 +75,10 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 				if (m.type === "hello") {
 					hellos.push(m.token);
 					if (!opts.silent) setTimeout(() => reply({ result: { ok: true, data: { tab_id: 4, reconnect_token: `r${hellos.length}`, capabilities: ["pi_tab", "panels", "state", "events"] } } }), opts.delay ?? 0);
-				} else reply({ result: { ok: true } });
+				} else {
+					got.push(m);
+					reply({ result: { ok: true } });
+				}
 			}
 		});
 	});
@@ -82,7 +87,7 @@ async function fakeDeckhand(opts: { delay?: number; silent?: boolean } = {}) {
 		for (const c of conns) c.destroy();
 		server.close();
 	};
-	return { sock, hellos, close };
+	return { sock, hellos, got, close };
 }
 
 /**
@@ -269,4 +274,40 @@ test("mode (PI_KIT_DIR): pi-kit's own sidebar, after a slow session_start, hands
 	} finally {
 		dh.close();
 	}
+});
+
+/**
+ * A shell started in a Deckhand pi tab reaches Deckhand as a Shells panel row and a pi.status
+ * blocker. The bridge loads first and says the mode during its own session_start, before a shell
+ * extension after it has run its session_start (and before ours has decided to step back).
+ */
+async function shellReachesDeckhand(shells: string[], owner: string) {
+	const dh = await fakeDeckhand();
+	try {
+		await withEnv({ DECKHAND_SOCKET: dh.sock, DECKHAND_TOKEN: "t" }, async () => {
+			const exts: [string, (pi: any) => unknown][] = [["/deckhand/pi/extensions/panels", (await import(`../extensions/panels/index.ts?${Math.random()}`)).default]];
+			for (const file of shells) exts.push([file, (await import(`${file}?${Math.random()}`)).default]);
+			const { pi } = await runtime(exts);
+			const bg = pi.tools().find((t: any) => t.name === "bash_bg");
+			assert.equal(bg?.owner, owner);
+			await bg.tool.execute("1", { command: "sleep 5", description: "a long build" }, undefined, undefined, pi.ctx);
+			await sleep(1300); // the bridge sends panels at most once a second
+			const set = dh.got.filter((m) => m.type === "panel.set" && m.panel === "shells").at(-1);
+			assert.ok(set?.rows?.some((r: any) => /^sh1 /.test(r.text)), `the Shells panel lists sh1 (got ${JSON.stringify(dh.got.filter((m) => String(m.type).startsWith("panel")))})`);
+			const status = dh.got.filter((m) => m.type === "pi.status").at(-1);
+			assert.ok(status?.blockers?.some((b: string) => /^shell sh1: /.test(b)), `pi.status lists sh1 as a blocker (got ${JSON.stringify(status?.blockers)})`);
+		});
+	} finally {
+		dh.close();
+	}
+}
+
+test("mode: our shell alone (it stands): a running shell is a Shells panel row and a blocker", async () => {
+	const ours = path.join(import.meta.dirname, "../extensions/shell/index.ts");
+	await shellReachesDeckhand([ours], ours);
+});
+
+test("mode (PI_KIT_DIR): next to pi-kit's shell (ours steps back) and no sidebar, pi-kit's running shell is a Shells panel row and a blocker", { skip: noKit }, async () => {
+	const kitShell = path.join(KIT, "shell/index.ts");
+	await shellReachesDeckhand([path.join(import.meta.dirname, "../extensions/shell/index.ts"), kitShell], kitShell);
 });

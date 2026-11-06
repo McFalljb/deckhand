@@ -161,9 +161,13 @@ export default function (pi: ExtensionAPI) {
 	const leftover = (t: Task) => t.ended !== undefined && !groupGone(t);
 	const allRows = (cap?: number) => panelRows([...tasks.values()].map((t) => ({ ...t, leftover: leftover(t) })), [...wakes.values()], Date.now(), cap);
 
-	/** Update the footer and the widget; a 1 s tick keeps them current while anything is active. */
+	/**
+	 * Update the footer and the widget; a 1 s tick keeps them current while anything is active.
+	 * Nothing before session_start has decided whether we stand: the bridge (loaded first) says
+	 * MODE_EVENT during its own session_start, and our tagged rows would hide pi-kit's (shellRows).
+	 */
 	function refresh() {
-		if (closed || off) return;
+		if (closed || off || !registered) return;
 		rows = allRows();
 		pi.events.emit(SHELL_ROWS_EVENT, Object.assign([...rows], { [OUR_SHELL_ROWS]: true })); // tagged: lib/protocol.ts shellRows
 		const run = running();

@@ -1487,7 +1487,7 @@ over_overlay :: proc() -> bool {
 }
 
 @(private = "file")
-hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(clay.ID(name), e.mouse_x, e.mouse_y)}
+hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(cid(name), e.mouse_x, e.mouse_y)}
 
 // The user's own click or key reached the page (browser.odin, as it sends it): a download the
 // page starts in the next DOWNLOAD_GESTURE goes without asking, once (download_take).
@@ -1612,7 +1612,7 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 		took := true
 		switch {
 		case hit("pg_more", e):
-			if d := clay.GetElementData(clay.ID("pg_more")); d.found {
+			if d := clay.GetElementData(cid("pg_more")); d.found {
 				bb := d.boundingBox
 				menu_open(Menu_Browser{tab_id = b.tab_id, more = true}, {bb.x + bb.width - px(220), bb.y + bb.height + px(SP_1)})
 			}
@@ -1726,7 +1726,7 @@ pg_bar :: proc() -> clay.ElementDeclaration {
 @(private = "file")
 pg_room :: proc(reserve: f32) -> f32 {
 	room := px(300)
-	if d := clay.GetElementData(clay.ID("browser_bar")); d.found do room = max(d.boundingBox.width - reserve, px(80))
+	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(d.boundingBox.width - reserve, px(80))
 	return room
 }
 
@@ -1762,8 +1762,8 @@ browser_zoomed :: proc(b: ^Browser) -> bool {
 
 // The toolbar's end (browser_nav.odin's browser_bar_layout): the zoom chip (not at 100%) and ⋯.
 browser_polish_toolbar_layout :: proc(b: ^Browser) {
-	if browser_zoomed(b) do pg_button(clay.ID("pg_zoom"), zoom_percent(page_extras[b.tab_id].zoom_level))
-	pg_button(clay.ID("pg_more"), "⋯")
+	if browser_zoomed(b) do pg_button(cid("pg_zoom"), zoom_percent(page_extras[b.tab_id].zoom_level))
+	pg_button(cid("pg_more"), "⋯")
 }
 
 // The bars under the toolbar (browser_nav.odin's browser_bar_layout, after the toolbar), and the
@@ -1775,59 +1775,59 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 	bt, _ := tab.kind.(Browser_Tab)
 	p := page_extras[b.tab_id]
 	if p != nil && p.crashed {
-		if clay.UI(clay.ID("pg_crash"))(pg_bar()) {
+		if clay.UI(cid("pg_crash"))(pg_bar()) {
 			dot(th.error)
-			pg_text(clay.ID("pg_crash_text"), "This page crashed", th.text, px(200))
+			pg_text(cid("pg_crash_text"), "This page crashed", th.text, px(200))
 			pg_grow()
-			pg_button(clay.ID("pg_crash_reload"), "Reload", true)
+			pg_button(cid("pg_crash_reload"), "Reload", true)
 		}
 	}
 	if p != nil && p.dialog {
-		if clay.UI(clay.ID("pg_dialog"))(pg_bar()) {
+		if clay.UI(cid("pg_dialog"))(pg_bar()) {
 			dot(th.waiting)
 			leave := p.dialog_kind == .Leave || p.dialog_kind == .Leave_Reload
 			reserve := px(p.dialog_kind == .Prompt ? 560 : 260)
-			pg_text(clay.ID("pg_dialog_text"), dialog_bar_text(p.dialog_kind, p.dialog_msg, p.dialog_origin, bt.url), th.text, reserve)
+			pg_text(cid("pg_dialog_text"), dialog_bar_text(p.dialog_kind, p.dialog_msg, p.dialog_origin, bt.url), th.text, reserve)
 			if p.dialog_kind == .Prompt {
 				// the shared answer field only when it is this tab's; else this prompt's default
-				if page_prompt_tab == b.tab_id do pg_field(clay.ID("pg_prompt_box"), clay.ID("pg_prompt_text"), &page_prompt_field, "Answer", state.focus_widget == "browser_prompt", 240)
+				if page_prompt_tab == b.tab_id do pg_field(cid("pg_prompt_box"), cid("pg_prompt_text"), &page_prompt_field, "Answer", state.focus_widget == "browser_prompt", 240)
 				else {
 					f: Text_Field
 					tf_set(&f, p.prompt_default)
-					pg_field(clay.ID("pg_prompt_box"), clay.ID("pg_prompt_text_idle"), &f, "Answer", false, 240)
+					pg_field(cid("pg_prompt_box"), cid("pg_prompt_text_idle"), &f, "Answer", false, 240)
 					delete(f.buf)
 				}
 			}
 			pg_grow()
-			if p.dialog_kind != .Alert do pg_button(clay.ID("pg_dialog_cancel"), leave ? "Stay" : "Cancel")
-			pg_button(clay.ID("pg_dialog_ok"), leave ? (p.dialog_kind == .Leave_Reload ? "Reload" : "Leave") : "OK", true)
+			if p.dialog_kind != .Alert do pg_button(cid("pg_dialog_cancel"), leave ? "Stay" : "Cancel")
+			pg_button(cid("pg_dialog_ok"), leave ? (p.dialog_kind == .Leave_Reload ? "Reload" : "Leave") : "OK", true)
 		}
 	}
 	if p != nil && p.perm != 0 {
-		if clay.UI(clay.ID("pg_perm"))(pg_bar()) {
+		if clay.UI(cid("pg_perm"))(pg_bar()) {
 			dot(th.waiting)
-			pg_wants_text(clay.ID("pg_perm_text"), p.perm_origin, fmt.tprintf(" wants to %s", perm_phrase(p.perm)), th.text, px(260))
+			pg_wants_text(cid("pg_perm_text"), p.perm_origin, fmt.tprintf(" wants to %s", perm_phrase(p.perm)), th.text, px(260))
 			pg_grow()
-			pg_button(clay.ID("pg_perm_block"), "Block")
-			pg_button(clay.ID("pg_perm_allow"), "Allow", true)
+			pg_button(cid("pg_perm_block"), "Block")
+			pg_button(cid("pg_perm_allow"), "Allow", true)
 		}
 	}
 	if p != nil && p.ask_id != 0 {
-		if clay.UI(clay.ID("pg_dlask"))(pg_bar()) {
+		if clay.UI(cid("pg_dlask"))(pg_bar()) {
 			dot(th.waiting)
 			measure :: proc(s: string) -> f32 {return text_w(s)}
 			line := ask_bar_text(one_line(url_origin(bt.url), context.temp_allocator), one_line(p.ask_name, context.temp_allocator), pg_room(px(260)), px(140), measure)
-			if clay.UI(clay.ID("pg_dlask_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
+			if clay.UI(cid("pg_dlask_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				clay.TextDynamic(line, txt(th.text))
 			}
 			pg_grow()
-			pg_button(clay.ID("pg_dlask_block"), "Block")
-			pg_button(clay.ID("pg_dlask_allow"), "Allow", true)
+			pg_button(cid("pg_dlask_block"), "Block")
+			pg_button(cid("pg_dlask_allow"), "Allow", true)
 		}
 	}
 	// an agent asks to upload files (browser_act.odin): who, which files (names), to which site
 	if who, names, asking := browser_act_upload_words(b.tab_id); asking {
-		if clay.UI(clay.ID("pg_upload"))(pg_bar()) {
+		if clay.UI(cid("pg_upload"))(pg_bar()) {
 			dot(th.waiting)
 			measure :: proc(s: string) -> f32 {return text_w(s)}
 			// the origin clipped from the left (its end names the site), who at most 30 %, the
@@ -1838,27 +1838,27 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			tail := fmt.tprintf(" to %s", origin)
 			names_room := max(room - text_w(asker) - text_w(" wants to upload ") - text_w(tail), px(60))
 			line := strings.concatenate({asker, " wants to upload ", clip_middle_keep_ext(one_line(names, context.temp_allocator), names_room, measure), tail}, context.temp_allocator)
-			if clay.UI(clay.ID("pg_upload_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
+			if clay.UI(cid("pg_upload_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				clay.TextDynamic(line, txt(th.text))
 			}
 			pg_grow()
-			pg_button(clay.ID("pg_upload_block"), "Block")
-			pg_button(clay.ID("pg_upload_allow"), "Allow", true)
+			pg_button(cid("pg_upload_block"), "Block")
+			pg_button(cid("pg_upload_allow"), "Allow", true)
 		}
 	}
 	if bt.blocked_popup != "" {
-		if clay.UI(clay.ID("pg_popup"))(pg_bar()) {
+		if clay.UI(cid("pg_popup"))(pg_bar()) {
 			dot(th.text_muted)
 			n := p != nil ? p.popups_blocked : 1
 			what := n > 1 ? fmt.tprintf("%d popups blocked", n) : "Popup blocked"
-			pg_text(clay.ID("pg_popup_text"), fmt.tprintf("%s: %s", what, browser_url_public(bt.blocked_popup)), th.text, px(260))
+			pg_text(cid("pg_popup_text"), fmt.tprintf("%s: %s", what, browser_url_public(bt.blocked_popup)), th.text, px(260))
 			pg_grow()
-			pg_button(clay.ID("pg_popup_close"), "×")
-			pg_button(clay.ID("pg_popup_open"), "Open", true)
+			pg_button(cid("pg_popup_close"), "×")
+			pg_button(cid("pg_popup_open"), "Open", true)
 		}
 	}
 	if d := page_bar_download(b.tab_id); d != nil {
-		if clay.UI(clay.ID("pg_dl"))(pg_bar()) {
+		if clay.UI(cid("pg_dl"))(pg_bar()) {
 			msg: string
 			switch d.state {
 			case .Going:
@@ -1868,34 +1868,34 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			case .Failed:    msg = fmt.tprintf("Download failed: %s", d.name)
 			}
 			dot(d.state == .Failed ? th.error : d.state == .Done ? th.accent : th.text_muted)
-			pg_text(clay.ID("pg_dl_text"), msg, th.text, px(360))
+			pg_text(cid("pg_dl_text"), msg, th.text, px(360))
 			pg_grow()
-			if d.state == .Going do pg_button(clay.ID("pg_dl_cancel"), "Cancel")
+			if d.state == .Going do pg_button(cid("pg_dl_cancel"), "Cancel")
 			if d.state == .Done {
 				// Open only for a file macOS checks before it runs (download_open_check)
 				openable := download_open_check(d) == ""
-				pg_button(clay.ID("pg_dl_reveal"), "Show in Finder", !openable)
-				if openable do pg_button(clay.ID("pg_dl_open"), "Open", true)
+				pg_button(cid("pg_dl_reveal"), "Show in Finder", !openable)
+				if openable do pg_button(cid("pg_dl_open"), "Open", true)
 			}
-			pg_button(clay.ID("pg_dl_close"), "×")
+			pg_button(cid("pg_dl_close"), "×")
 		}
 	}
 	if p != nil && p.find_open {
-		if clay.UI(clay.ID("pg_find"))(pg_bar()) {
+		if clay.UI(cid("pg_find"))(pg_bar()) {
 			focused := state.focus_widget == "browser_find" && page_find_tab == b.tab_id
-			if focused do pg_field(clay.ID("pg_find_box"), clay.ID("pg_find_text"), &page_find_field, "Find in page", true, 260)
+			if focused do pg_field(cid("pg_find_box"), cid("pg_find_text"), &page_find_field, "Find in page", true, 260)
 			else {
 				f: Text_Field
 				tf_set(&f, p.find_text)
-				pg_field(clay.ID("pg_find_box"), clay.ID("pg_find_text_idle"), &f, "Find in page", false, 260)
+				pg_field(cid("pg_find_box"), cid("pg_find_text_idle"), &f, "Find in page", false, 260)
 				delete(f.buf)
 			}
 			count := p.find_text == "" ? "" : p.find_matches == 0 ? "No matches" : fmt.tprintf("%d of %d", p.find_active, p.find_matches)
 			clay.TextDynamic(count, txt(th.text_muted))
 			pg_grow()
-			pg_button(clay.ID("pg_find_prev"), "‹")
-			pg_button(clay.ID("pg_find_next"), "›")
-			pg_button(clay.ID("pg_find_close"), "×")
+			pg_button(cid("pg_find_prev"), "‹")
+			pg_button(cid("pg_find_next"), "›")
+			pg_button(cid("pg_find_close"), "×")
 		}
 	}
 	// the page's tooltip (its title text) under the pointer

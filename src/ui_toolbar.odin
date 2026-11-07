@@ -166,8 +166,8 @@ lights_buttons :: proc(lead: f32, trail: f32 = 0) {
 // from their titles).
 search_wide :: proc(cs: ^Open_Session, bar_w: f32) -> bool {
 	used := top_bar_fixed_w()
-	if cs != nil {
-		max_tab, squeezed := tab_max_w(cs, bar_w)
+	if cs != nil && len(cs.panes) <= 1 { // split: the tabs are in the panes' strips
+		max_tab, squeezed := tab_max_w(cs, bar_w - top_bar_fixed_w())
 		for tab in cs.tabs {
 			ic, label, extra := tab_label(cs, tab)
 			close := !squeezed || tab.id == cs.active_tab

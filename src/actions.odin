@@ -439,6 +439,27 @@ ACTIONS := [?]Action {
 		if state.settings.term_text_pt == 0 do return nil, false
 		return Set_Terminal_Text_Size{pt = 0}, true
 	}},
+	// panes (panes_commands.odin, ui_panes.odin; the Window menu)
+	{id = "split_right", label = "Split pane right", keys = "⌘D", make = proc() -> (Command, bool) {return pane_split_action(.Right)}},
+	{id = "split_down", label = "Split pane down", keys = "⇧⌘D", make = proc() -> (Command, bool) {return pane_split_action(.Down)}},
+	{id = "close_pane", label = "Close pane (its tabs stay)", keys = "⇧⌘W", make = proc() -> (Command, bool) {
+		cs := cur()
+		if cs == nil || len(cs.panes) <= 1 do return nil, false
+		return Close_Pane{pane = cs.focused_pane}, true
+	}},
+	{id = "equalize_panes", label = "Even out panes", make = proc() -> (Command, bool) {
+		cs := cur()
+		if cs == nil || len(cs.panes) <= 1 do return nil, false
+		return Equalize_Panes{session = cs.id}, true
+	}},
+	{id = "focus_pane_left", label = "Focus pane left", keys = "⌃⌘←", make = proc() -> (Command, bool) {return pane_focus_action(.Left)}},
+	{id = "focus_pane_right", label = "Focus pane right", keys = "⌃⌘→", make = proc() -> (Command, bool) {return pane_focus_action(.Right)}},
+	{id = "focus_pane_up", label = "Focus pane up", keys = "⌃⌘↑", make = proc() -> (Command, bool) {return pane_focus_action(.Up)}},
+	{id = "focus_pane_down", label = "Focus pane down", keys = "⌃⌘↓", make = proc() -> (Command, bool) {return pane_focus_action(.Down)}},
+	{id = "move_tab_left", label = "Move tab to the pane left", keys = "⇧⌃⌘←", make = proc() -> (Command, bool) {return pane_move_action(.Left)}},
+	{id = "move_tab_right", label = "Move tab to the pane right", keys = "⇧⌃⌘→", make = proc() -> (Command, bool) {return pane_move_action(.Right)}},
+	{id = "move_tab_up", label = "Move tab to the pane above", keys = "⇧⌃⌘↑", make = proc() -> (Command, bool) {return pane_move_action(.Up)}},
+	{id = "move_tab_down", label = "Move tab to the pane below", keys = "⇧⌃⌘↓", make = proc() -> (Command, bool) {return pane_move_action(.Down)}},
 	// tabs and sessions in order (the Window menu)
 	{id = "next_tab", label = "Next tab", keys = "⇧⌘]", make = proc() -> (Command, bool) {return tab_step(1)}},
 	{id = "prev_tab", label = "Previous tab", keys = "⇧⌘[", make = proc() -> (Command, bool) {return tab_step(-1)}},

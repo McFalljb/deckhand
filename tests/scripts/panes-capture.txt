@@ -1,0 +1,40 @@
+# Pointer capture across panes (ui_panes.odin; docs/plans/split-panes.md §3.4 H2, H3): a press
+# belongs to the pane it started in. A selection pressed in pane A's terminal and dragged over pane
+# B, released there, selects in A; B gets no selection and no click; A has the keyboard (the press
+# focused it at once and its own drag survived that). The same with an editor in A. Run with
+# tests/scripts/panes.sh panes-capture.txt.
+wait 1000
+waitfor ARGS: 15000
+key d cmd
+waitstate 5000 open_sessions.0.panes.# 2
+wait 800
+type echo BEE
+key enter
+waitfor BEE 5000
+assert_state open_sessions.0.focused_pane $pane1
+# press in A (the pi tab's terminal), drag over B, release in B
+mousecell down 0 0 pane=0
+wait 50
+mousecell move 4 0 pane=1
+wait 50
+mousecell move 8 1 pane=1
+wait 50
+mousecell up 8 1 pane=1
+wait 100
+assert_state open_sessions.0.focused_pane $pane0
+assert_pane_selection 0 ARGS: --session-id $pisession
+assert_pane_selection 1 
+# the same with an editor in A
+command {"type":"open_file","path":"$homedir/proj/notes.txt"}
+wait 800
+assert_state open_sessions.0.focused_pane $pane0
+mousecell click 2 0 pane=1
+assert_state open_sessions.0.focused_pane $pane1
+drag 400 200 900 300 held
+wait 100
+assert_state open_sessions.0.focused_pane $pane0
+command {"type":"editor_state","tab_id":$tab}
+assert_result data.selection.from.line 5
+assert_result data.selection.to.line 10
+assert_pane_selection 1 
+quit

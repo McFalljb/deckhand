@@ -1316,12 +1316,12 @@ browser_agent_strip_layout :: proc(b: ^Browser) {
 	what, on := strip_text(b)
 	if !on do return
 	th := theme()
-	if clay.UI(clay.ID("br_agent"))({layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(BUTTON_H))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
+	if clay.UI(cid("br_agent"))({layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(BUTTON_H))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 		dot(t.user_control ? th.waiting : th.accent)
 		clay.TextDynamic(what, txt(th.text))
-		if t.user_control do button(clay.ID("br_agent_handback"), "Hand back", false, clay.PointerOver(clay.ID("br_agent_handback")))
-		else do button(clay.ID("br_agent_takeover"), "Take over", false, clay.PointerOver(clay.ID("br_agent_takeover")))
-		button(clay.ID("br_agent_stop"), "Stop", false, clay.PointerOver(clay.ID("br_agent_stop")))
+		if t.user_control do button(cid("br_agent_handback"), "Hand back", false, clay.PointerOver(cid("br_agent_handback")))
+		else do button(cid("br_agent_takeover"), "Take over", false, clay.PointerOver(cid("br_agent_takeover")))
+		button(cid("br_agent_stop"), "Stop", false, clay.PointerOver(cid("br_agent_stop")))
 	}
 }
 
@@ -1354,7 +1354,7 @@ strip_text :: proc(b: ^Browser) -> (what: string, on: bool) {
 	}
 	// at most a third of the bar (cut with …)
 	room := px(200)
-	if d := clay.GetElementData(clay.ID("browser_bar")); d.found do room = max(d.boundingBox.width / 3 - px(DOT + 2 * SP_2), px(80))
+	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(d.boundingBox.width / 3 - px(DOT + 2 * SP_2), px(80))
 	return clip(what, room), true
 }
 

@@ -453,11 +453,17 @@ tabs_belong_to_one_session :: proc(t: ^testing.T) {
 	append(&state.open_sessions, home)
 	id, err = browser_tab_open(home.id, "file:///z.html")
 	testing.expect(t, id == 0, "Home has only its pi tab")
-	// no command moves tabs: none is named for it, and none takes a tab and another session
+	// no command moves tabs between sessions: none is named for it but move_tab (between the panes
+	// of one session), and none takes a tab and another session
 	for spec in COMMAND_SPECS {
-		moves := strings.contains(spec.type, "move") && !strings.contains(spec.type, "remove")
+		moves := strings.contains(spec.type, "move") && !strings.contains(spec.type, "remove") && spec.type != "move_tab"
 		testing.expectf(t, !moves, "command %s moves something: tabs never change session", spec.type)
 	}
+	session_panes_init(c_sess(a))
+	session_panes_init(c_sess(b))
+	r := run_command(Move_Tab{tab_id = c_sess(b).tabs[0].id, pane = c_sess(a).panes[0].id, index = -1}, {kind = .UI})
+	testing.expect_value(t, r.error, "not a pane of the tab's session")
+	testing.expect_value(t, len(c_sess(a).tabs), 2)
 	// a comment always names its own tab's session
 	c_add(c_web(b), "on beta")
 	testing.expect_value(t, len(c_sess(b).comments), 1)

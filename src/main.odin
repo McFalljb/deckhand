@@ -27,7 +27,8 @@ App :: struct {
 	dpi:            f32,
 	pending_start:  bool, // `pi-desk DIR`: open a new chat once the pane has a size
 	launch_project: u64, // its project (launch_project)
-	pane:           [4]f32, // terminal pane rect x, y, w, h (framebuffer px)
+	pane:           [4]f32, // the focused pane's content rect x, y, w, h (framebuffer px)
+	centre:         [4]f32, // the panes' area: every pane and divider of the session on screen (framebuffer px)
 	redraw:         bool,
 	drag_tab:       u64, // the tab on screen when drags were last checked (drags_follow_focus)
 	frames_drawn:   u64,
@@ -216,7 +217,9 @@ frame :: proc "c" () {
 	left_down := platform.left_button == nil || platform.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
-	if ((t != nil && t.changed) || (at != nil && at.changed && drawer_laid_out)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
+	shown_changed := false // a terminal in another pane on screen (panes.odin)
+	for x in terms_on_screen() do if x != t && x.changed do shown_changed = true
+	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
@@ -252,12 +255,12 @@ frame :: proc "c" () {
 	if x, y, tw, th, ok := ui_terminal_rect(); ok {
 		app.pane = {x, y, tw, th}
 		cs := cur()
-		if p := session_focused_pane(cs); p != nil do p.rect = app.pane // one pane for now: the centre's (panes.odin)
+		ui_pane_rects(cs) // each pane's content rect (panes.odin)
+		if cs != nil && len(cs.panes) == 0 do if p := session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
-		// (not while a Changes tab shows: its diff pane is narrower, and pi would reflow for nothing)
-		if cs != nil && active_changes() == nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil {
-			r := tab_rect(tab.id)
-			term_set_rect(t, r.x, r.y, r.z, r.w)
+		if cs != nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil {
+			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
+			if r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
 		}
 	}
 	if app.pane.z > 0 do persist_after_layout(skip = app.pending_start)
@@ -280,13 +283,12 @@ frame :: proc "c" () {
 	drawer_at := min(ui_overlay_start(cmds, "drawer"), overlay)
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
-	// the tab each pane shows (one pane for now: panes.odin), at its pane's rect; marked text in the focused one's
-	if p := focused_pane(); p != nil {
-		if tab := pane_shown(p); tab != nil && (term_of(tab.id) != nil || editor_of(tab.id) != nil || browser_of(tab.id) != nil || app_of(tab.id) != nil) {
-			r := pane_rect(p)
-			tab_host(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
-			if pt := term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
-		}
+	// the tab each pane shows, in its pane; marked text in the focused one's (panes.odin). A page
+	// or an app in a pane without the keyboard: its "Click to show" placeholder instead (the plan's P4)
+	if cs := cur(); cs != nil && len(cs.panes) > 1 {
+		for &p in cs.panes do if !pane_placeholder(cs, &p) do pane_draw(&p, t, typing)
+	} else if p := focused_pane(); p != nil {
+		pane_draw(p, t, typing)
 	} // else the layout's empty state shows
 	ui_draw(cmds, drawer_at, overlay)
 	if at != nil && agent_running() {
@@ -312,6 +314,7 @@ frame :: proc "c" () {
 	browser_frames_committed() // the same for browser tabs
 	app.redraw = font_frame_done() // the atlas grew or started over: draw again
 	if t != nil do t.changed = false
+	for x in terms_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false
 	app.frames_drawn += 1
 	platform_frame_drawn()
@@ -355,6 +358,9 @@ event_os :: proc "c" (e: ^sapp.Event) {
 
 event :: proc(e: ^sapp.Event) {
 	defer inbox_drain()
+	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
+	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
+	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
@@ -430,6 +436,14 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
+	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⇧⌃⌘arrows move the tab,
+	// ⇧⌘W unsplit; from anywhere but a text field
+	if e.type == .KEY_DOWN && state.focus_widget == "" && pane_key(e) {
+		ime_cancel()
+		if menu.open do menu_close()
+		app.key_taken = true
+		return
+	}
 	// ⌘⇧E: the Files tab with the keyboard, from anywhere; again: back to Sessions
 	if e.type == .KEY_DOWN && e.key_code == .E && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 		ime_cancel()
@@ -468,15 +482,41 @@ event :: proc(e: ^sapp.Event) {
 			return
 		}
 	}
+	// and a pane divider (ui_panes.odin)
+	if pane_drag.active {
+		#partial switch e.type {
+		case .MOUSE_MOVE:
+			pane_divider_move(e.mouse_x, e.mouse_y)
+			return
+		case .MOUSE_UP, .MOUSE_LEAVE:
+			pane_divider_release()
+			pane_release()
+			return
+		}
+	}
 	// the settings popover and the shortcuts sheet take all input while open
 	if settings_open() && settings_event(e) do return
 	if shortcuts_open() && shortcuts_event(e) do return
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
-	// the per-tab handlers get the pane the event is for: the focused one for now (panes.odin)
-	fp := focused_pane()
+	// a press on a pane divider drags it; a press in a pane without the keyboard focuses it first,
+	// then acts in it (a "Click to show" placeholder's only focuses: ui_panes.odin)
+	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) {
+		if split := pane_divider_at(e.mouse_x, e.mouse_y); split != 0 {
+			pane_divider_press(split, app.clicks)
+			app.redraw = true
+			return
+		}
+	}
+	if e.type == .MOUSE_DOWN && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) && pane_press(e) do return
+	// the per-tab handlers get the pane the event is for: the pointer's (the press's while a
+	// button is held), the focused one's for keys; their Clay ids are its (cid)
+	fp := event_pane(e)
+	old_ids := ids_pane_begin(fp)
+	defer ids_pane_end(old_ids)
+	if pointer_over_placeholder(e) do return
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
-	if editor_bar_focused() && editor_bar_event(fp, e) do return
+	if editor_bar_focused() && editor_bar_event(focused_pane(), e) do return // its field has the keyboard
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
 	if comments_field_key(e) do return // a comment's edit field: Enter and Esc (ui_comments.odin)
 	if browser_url_key(fp, e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
@@ -488,11 +528,12 @@ event :: proc(e: ^sapp.Event) {
 	if markdown_event(fp, e) do return // a Markdown tab's preview: wheel, keys, links (markdown_view.odin)
 	// an editor tab: its keys while it has the keyboard, mouse and wheel over it
 	// (under a Markdown preview only its toolbar and find bar: the source editor is hidden)
-	if ed := pane_editor(fp); ed != nil && (!md_preview_shown() || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
+	if ed := pane_editor(fp); ed != nil && (!md_preview_shown(fp) || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
 	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
 	t := active_term()
+	mt := pane_term(fp) // the pointer's: the pane under it (or holding its press)
 	tab := active_tab()
 	cs := cur()
 	kt := key_term()
@@ -551,13 +592,13 @@ event :: proc(e: ^sapp.Event) {
 			return
 		}
 		in_drawer := state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)
-		if t != nil && in_pane(t, e.mouse_x, e.mouse_y) && !in_drawer {
+		if mt != nil && in_pane(mt, e.mouse_x, e.mouse_y) && !in_drawer {
 			// a click in the current tab takes the keyboard back; a sliding
 			// (unpinned) drawer goes away
 			if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
 			else if state.focus_widget == "agent_input" do ui_do(Set_Focus{""})
-			if term_link_mouse_down(t, e) do return // ⌘-click or right-click on a link (term_links.odin)
-			term_mouse_down(t, e, app.clicks)
+			if term_link_mouse_down(mt, e) do return // ⌘-click or right-click on a link (term_links.odin)
+			term_mouse_down(mt, e, app.clicks)
 			return
 		}
 		clay.SetPointerState(app.pointer, true)
@@ -601,10 +642,12 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Files: // files_event took it
 		case Hit_Reload:    reload_click(hit) // the hot-reload bars
 		case Hit_Claude_Reload: claude_reload_click(hit) // Claude Code's (ui_claude_reload.odin)
-		case Hit_Dead_Tab:  dead_tab_click(focused_pane(), hit) // a dead pi tab's Restart (dead_tab.odin)
+		case Hit_Dead_Tab:  dead_tab_click(fp, hit) // a dead pi tab's Restart (dead_tab.odin)
 		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
-		case Hit_Claude:    claude_click(focused_pane(), hit) // a Claude tab's held messages (ui_claude.odin)
+		case Hit_Claude:    claude_click(fp, hit) // a Claude tab's held messages (ui_claude.odin)
+		case Hit_Pane_New:  pane_click(hit) // a pane strip's "+" (ui_panes.odin)
+		case Hit_Pane_Divider: // pane_divider_press took it
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
@@ -612,19 +655,23 @@ event :: proc(e: ^sapp.Event) {
 		clay.SetPointerState(app.pointer, false)
 		app.redraw = true
 	case .MOUSE_UP:
-		if t != nil do term_mouse_up(t, e)
+		if mt != nil do term_mouse_up(mt, e)
 	case .MOUSE_MOVE:
 		app.pointer = {e.mouse_x, e.mouse_y}
 		if d := divider_at(e.mouse_x, e.mouse_y); d >= 0 && e.modifiers & sapp.MODIFIER_LMB == 0 {
 			set_hover(Hit_Divider(d), false)
 			return
 		}
-		in_term := (t != nil && in_pane(t, e.mouse_x, e.mouse_y) && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))) || editor_text_hit(tab_editor(), e.mouse_x, e.mouse_y)
+		if split := pane_divider_at(e.mouse_x, e.mouse_y); split != 0 && e.modifiers & sapp.MODIFIER_LMB == 0 && !over_overlay() {
+			set_hover(Hit_Pane_Divider(split), false)
+			return
+		}
+		in_term := (mt != nil && in_pane(mt, e.mouse_x, e.mouse_y) && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))) || editor_text_hit(pane_editor(fp), e.mouse_x, e.mouse_y)
 		set_hover(in_term ? nil : chrome_hit(app.pointer), in_term)
 		markdown_hover(e.mouse_x, e.mouse_y) // a link under the pointer (markdown_view.odin)
 		// ⌘ held over a terminal's link: underlined, a hand and its URL (term_links.odin)
 		term_links_frame()
-		if t != nil do term_mouse_move(t, e)
+		if mt != nil do term_mouse_move(mt, e)
 	case .MOUSE_LEAVE:
 		set_hover(nil, false)
 	case .MOUSE_SCROLL:
@@ -632,8 +679,8 @@ event :: proc(e: ^sapp.Event) {
 			clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
 			clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
 			app.redraw = true
-		} else if t != nil {
-			term_scroll(t, e)
+		} else if mt != nil {
+			term_scroll(mt, e)
 		}
 	case .RESIZED, .RESTORED, .RESUMED:
 		app.redraw = true
@@ -687,6 +734,16 @@ bar_click_ok :: proc(token: string) -> bool {
 	return true
 }
 
+// Pane p's tab at its draw rect; IME marked text when its terminal (t) has the keyboard.
+pane_draw :: proc(p: ^Pane, t: ^Term, typing: bool) {
+	tab := pane_shown(p)
+	if tab == nil || (term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
+	r := pane_draw_rect(p)
+	if r.z <= 0 || r.w <= 0 do return
+	tab_host(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
+	if pt := term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
+}
+
 // Hit under the pointer from the last layout (no click).
 chrome_hit :: proc(p: [2]f32) -> Hit {
 	clay.SetPointerState(p, false)
@@ -697,6 +754,7 @@ chrome_hit :: proc(p: [2]f32) -> Hit {
 set_hover :: proc(h: Hit, over_terminal: bool) {
 	cursor := over_terminal ? sapp.Mouse_Cursor.IBEAM : (h != nil && !hit_inert(h) ? .POINTING_HAND : .DEFAULT)
 	if _, is := h.(Hit_Divider); is do cursor = .RESIZE_EW
+	if d, is := h.(Hit_Pane_Divider); is do cursor = pane_divider_across(u64(d)) ? .RESIZE_EW : .RESIZE_NS
 	if sapp.get_mouse_cursor() != cursor do sapp.set_mouse_cursor(cursor)
 	if h == ui_hover do return
 	// own copies: session ids and tokens point into lists that get replaced

@@ -69,13 +69,6 @@ TOOL_LABEL := [Changes_Tool]string {
 
 CHANGES_ROWS_DRAWN_MAX :: 128
 
-// What the list drew last (slot -> row index into changes_rows), for hits.
-@(private = "file")
-drawn: [CHANGES_ROWS_DRAWN_MAX]int
-@(private = "file")
-drawn_n: int
-@(private = "file")
-last_active: u64 // the Changes tab laid out last (a new one is read again: "on focus")
 
 // The Changes tab on screen (nil = another tab).
 active_changes :: proc() -> ^Changes_View {
@@ -223,7 +216,7 @@ changes_tool_state :: proc(v: ^Changes_View, t: Changes_Tool) -> (enabled: bool,
 @(private = "file")
 tool :: proc(v: ^Changes_View, t: Changes_Tool, primary := false) {
 	th := theme()
-	id := clay.ID("chtool", u32(t))
+	id := cid("chtool", u32(t))
 	enabled, _ := changes_tool_state(v, t)
 	hovered := enabled && ui_hover == Hit(Hit_Changes{what = .Tool, index = int(t)})
 	bg := hovered ? mix(th.bg_app, th.text, TINT_BUTTON_HOVER) : mix(th.bg_app, th.text, TINT_BUTTON)
@@ -277,20 +270,17 @@ branch_text :: proc(r: ^Changes_Repo) -> string {
 // before the editor's bars).
 changes_bars_layout :: proc(p: ^Pane) {
 	v := pane_changes(p)
-	if v == nil {
-		last_active = 0
-		return
-	}
+	if v == nil do return
 	r := changes_repo(v.root)
 	changes_ask(r)
-	if last_active != v.tab_id {
-		last_active = v.tab_id
-		changes_refresh(r) // focused: read again
-	}
+	// not laid out in the last pass (or ever): it came on screen, read again. Per view, as each
+	// pane's bars are laid out in turn
+	if v.laid_pass == 0 || v.laid_pass + 1 < ui_layout_pass do changes_refresh(r)
+	v.laid_pass = ui_layout_pass
 	th := theme()
-	avail := centre_width() - px(2 * TERM_PAD)
+	avail := pane_width() - px(2 * TERM_PAD)
 	// header: branch and path, the status slot, Refresh, Ask pi to review, Merge
-	if clay.UI(clay.ID("ch_head"))(bar(clay.ID("ch_head"), EDITOR_TOOLBAR_H)) {
+	if clay.UI(cid("ch_head"))(bar(cid("ch_head"), EDITOR_TOOLBAR_H)) {
 		tools := []Changes_Tool{.Refresh, .Review, .Merge}
 		n := fit(tools, avail)
 		used: f32 = 0
@@ -316,19 +306,19 @@ changes_bars_layout :: proc(p: ^Pane) {
 		}
 		spacer()
 		if slot > 0 {
-			if clay.UI(clay.ID("ch_status"))({layout = {sizing = {clay.SizingFixed(slot), clay.SizingFit()}}}) {
+			if clay.UI(cid("ch_status"))({layout = {sizing = {clay.SizingFixed(slot), clay.SizingFit()}}}) {
 				if status != "" do clay.TextDynamic(status, txt(th.text_muted, FONT_UI_SMALL))
 			}
 		}
 		for t in tools[:n] do tool(v, t)
 	}
 	// the commit row: message and Commit
-	if clay.UI(clay.ID("ch_commit"))(bar(clay.ID("ch_commit"), EDITOR_BAR_H)) {
+	if clay.UI(cid("ch_commit"))(bar(cid("ch_commit"), EDITOR_BAR_H)) {
 		cw := tool_w(.Commit)
 		field_w := avail - cw - px(GAP_INLINE)
-		focused := state.focus_widget == "changes_message"
+		focused := state.focus_widget == "changes_message" && pane_keys(p)
 		if field_w > px(SP_6 * 3) {
-			if clay.UI(clay.ID("ch_field"))({
+			if clay.UI(cid("ch_field"))({
 				layout = {sizing = {clay.SizingFixed(field_w), clay.SizingFixed(px(BUTTON_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_field),
 				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
@@ -336,7 +326,7 @@ changes_bars_layout :: proc(p: ^Pane) {
 				clip = {horizontal = true, childOffset = {}},
 			}) {
 				shown, _, _ := tf_display(&changes_message_field, focused ? ime.marked : "")
-				if clay.UI(clay.ID("ch_field_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
+				if clay.UI(cid("ch_field_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 					if shown == "" && !focused do clay.TextDynamic(clip("Commit message for the staged files", field_w - px(2 * SP_2)), txt(th.text_muted))
 					else do clay.TextDynamic(shown, txt(th.text))
 				}
@@ -348,7 +338,7 @@ changes_bars_layout :: proc(p: ^Pane) {
 	// the last action's outcome, or what runs now
 	msg := v.busy != "" ? v.busy : v.notice
 	if msg != "" {
-		if clay.UI(clay.ID("ch_notice"))(bar(clay.ID("ch_notice"), EDITOR_BAR_H - SP_2)) {
+		if clay.UI(cid("ch_notice"))(bar(cid("ch_notice"), EDITOR_BAR_H - SP_2)) {
 			col := v.notice_err && v.busy == "" ? th.error : th.text_secondary
 			dot(v.notice_err && v.busy == "" ? th.error : (v.busy != "" ? th.running : th.done))
 			if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
@@ -360,7 +350,7 @@ changes_bars_layout :: proc(p: ^Pane) {
 // The list's width: a third of the centre, within bounds.
 @(private = "file")
 list_w :: proc() -> f32 {
-	return clamp(centre_width() * 0.32, px(150), px(340))
+	return clamp(pane_width() * 0.32, px(150), px(340))
 }
 
 @(private = "file")
@@ -377,12 +367,12 @@ changes_list_layout :: proc(p: ^Pane) {
 	lw := list_w()
 	// rows that fit: the list's height at the last layout
 	h := px(600)
-	if d := clay.GetElementData(clay.ID("ch_list")); d.found && d.boundingBox.height > 0 do h = d.boundingBox.height
+	if d := clay.GetElementData(cid("ch_list")); d.found && d.boundingBox.height > 0 do h = d.boundingBox.height
 	fitn := max(int((h - px(2 * SP_1)) / px(ROW)), 1)
-	changes_list_rows_fit = fitn
+	v.rows_fit = fitn
 	v.list_top = clamp(v.list_top, 0, max(len(rows) - fitn, 0))
-	drawn_n = 0
-	if clay.UI(clay.ID("ch_list"))({
+	v.drawn_n = 0
+	if clay.UI(cid("ch_list"))({
 		layout = {sizing = {clay.SizingFixed(lw), clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = {pu(SP_1), pu(SP_1), pu(SP_1), pu(SP_1)}},
 		backgroundColor = cc(th.bg_app),
 		border = {color = cc(th.border), width = {right = pu(BORDER_W)}},
@@ -402,12 +392,12 @@ changes_list_layout :: proc(p: ^Pane) {
 			return
 		}
 		for i in v.list_top ..< min(len(rows), v.list_top + fitn + 1) {
-			if drawn_n >= CHANGES_ROWS_DRAWN_MAX do break
+			if v.drawn_n >= CHANGES_ROWS_DRAWN_MAX do break
 			row := rows[i]
-			slot := drawn_n
-			drawn[slot] = i
-			drawn_n += 1
-			id := clay.ID("chrow", u32(slot))
+			slot := v.drawn_n
+			v.drawn[slot] = i
+			v.drawn_n += 1
+			id := cid("chrow", u32(slot))
 			if row.head != "" {
 				if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW))}, padding = {pu(PAD_ROW), pu(PAD_ROW), row.scope ? pu(SP_1) : 0, 0}, childAlignment = {y = .Center}}}) {
 					clay.TextDynamic(clip(row.head, inner - px(2 * PAD_ROW), row.scope ? WEIGHT_BOLD : WEIGHT_REGULAR), txt(row.scope ? th.text_secondary : th.text_muted, row.scope ? WEIGHT_BOLD : WEIGHT_REGULAR))
@@ -470,8 +460,8 @@ changes_file_bar_layout :: proc(p: ^Pane) {
 	if v == nil do return
 	th := theme()
 	_, f := changes_selected(v)
-	avail := centre_width() - list_w() - px(2 * TERM_PAD)
-	if clay.UI(clay.ID("ch_file"))(bar(clay.ID("ch_file"), EDITOR_TOOLBAR_H)) {
+	avail := pane_width() - list_w() - px(2 * TERM_PAD)
+	if clay.UI(cid("ch_file"))(bar(cid("ch_file"), EDITOR_TOOLBAR_H)) {
 		nav := []Changes_Tool{.Prev, .Next}
 		acts := []Changes_Tool{.Open, .Stage, .Unstage, .Discard}
 		nn := fit(nav, avail)
@@ -498,8 +488,8 @@ changes_more_layout :: proc(p: ^Pane) {
 	v := pane_changes(p)
 	if v == nil || v.diff_lines <= v.shown do return
 	th := theme()
-	avail := centre_width() - list_w() - px(2 * TERM_PAD)
-	if clay.UI(clay.ID("ch_more"))(bar(clay.ID("ch_more"), EDITOR_BAR_H)) {
+	avail := pane_width() - list_w() - px(2 * TERM_PAD)
+	if clay.UI(cid("ch_more"))(bar(cid("ch_more"), EDITOR_BAR_H)) {
 		label := fmt.tprintf("Showing %d of %d lines", v.shown, v.diff_lines)
 		room := avail - tool_w(.More) - px(GAP_INLINE)
 		if room > px(SP_6) do clay.TextDynamic(clip(label, room), txt(th.text_muted))
@@ -542,11 +532,12 @@ status_letter :: proc(s: u8) -> string {
 
 changes_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("changesbtn")) do return Hit_Changes{what = .Button}
-	if active_changes() == nil do return nil
-	for t in Changes_Tool do if clay.PointerOver(clay.ID("chtool", u32(t))) do return Hit_Changes{what = .Tool, index = int(t)}
-	for slot in 0 ..< drawn_n do if clay.PointerOver(clay.ID("chrow", u32(slot))) do return Hit_Changes{what = .Row, index = slot}
-	if clay.PointerOver(clay.ID("ch_field")) do return Hit_Changes{what = .Field}
-	if clay.PointerOver(clay.ID("ch_list")) do return Hit_Changes{what = .List}
+	v := pane_changes(hit_pane()) // the pane under the pointer's (ui_hit set its ids)
+	if v == nil do return nil
+	for t in Changes_Tool do if clay.PointerOver(cid("chtool", u32(t))) do return Hit_Changes{what = .Tool, index = int(t)}
+	for slot in 0 ..< v.drawn_n do if clay.PointerOver(cid("chrow", u32(slot))) do return Hit_Changes{what = .Row, index = slot}
+	if clay.PointerOver(cid("ch_field")) do return Hit_Changes{what = .Field}
+	if clay.PointerOver(cid("ch_list")) do return Hit_Changes{what = .List}
 	return nil
 }
 
@@ -562,11 +553,11 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 	case .List:
 		return "", ""
 	case .Row:
-		v := active_changes()
+		v := pane_changes(hit_pane())
 		r := v != nil ? changes_repo(v.root) : nil
 		rows := changes_rows(r)
-		if h.index >= drawn_n || drawn[h.index] >= len(rows) do return "", ""
-		row := rows[drawn[h.index]]
+		if v == nil || h.index >= v.drawn_n || v.drawn[h.index] >= len(rows) do return "", ""
+		row := rows[v.drawn[h.index]]
 		if row.head != "" || r == nil do return "", ""
 		f := r.files[row.file]
 		b := strings.builder_make(context.temp_allocator)
@@ -693,11 +684,11 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		case .Tool:
 			if v != nil do changes_tool_run(v, Changes_Tool(h.index))
 		case .Row:
-			if v == nil || h.index >= drawn_n do return true
+			if v == nil || h.index >= v.drawn_n do return true
 			r := changes_repo(v.root)
 			rows := changes_rows(r)
-			if drawn[h.index] >= len(rows) do return true
-			row := rows[drawn[h.index]]
+			if v.drawn[h.index] >= len(rows) do return true
+			row := rows[v.drawn[h.index]]
 			if row.head == "" do changes_select(v, r.files[row.file].path, r.files[row.file].scope, r.files[row.file].status)
 		case .Field:
 			if state.focus_widget != "changes_message" do ui_do(Set_Focus{"changes_message"})
@@ -706,7 +697,7 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		return true
 	case .MOUSE_SCROLL:
 		v := pane_changes(p)
-		if v == nil || !inside(clay.ID("ch_list"), e.mouse_x, e.mouse_y) do return false
+		if v == nil || !inside(cid("ch_list"), e.mouse_x, e.mouse_y) do return false
 		step := int(-e.scroll_y)
 		if step == 0 do step = e.scroll_y < 0 ? 1 : (e.scroll_y > 0 ? -1 : 0)
 		v.list_top = max(v.list_top + step, 0) // clamped at the next layout

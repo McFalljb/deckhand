@@ -1,0 +1,81 @@
+# Split panes (panes.odin, panes_commands.odin, ui_panes.odin; docs/plans/split-panes.md P2):
+# ⌘D and ⇧⌘D split with a new shell, typing goes to the focused pane's shell, ⌃⌘arrows and a
+# click move the keyboard, a pane divider's drag resizes the panes and their shells, ⇧⌃⌘arrows
+# move a tab, ⌘W on a pane's last tab collapses it, ⇧⌘W unsplits. Run with tests/scripts/panes.sh.
+wait 1000
+waitfor ARGS: 15000
+assert_state open_sessions.0.panes.# 1
+# ⌘D: the pi tab's pane splits right, a new shell in the new pane has the keyboard
+key d cmd
+waitstate 5000 open_sessions.0.panes.# 2
+assert_state open_sessions.0.focused_pane $pane1
+assert_state open_sessions.0.layout.dir right
+assert_state open_sessions.0.panes.1.tabs.# 1
+wait 800
+type echo RIGHT-ONE
+key enter
+waitfor RIGHT-ONE 5000
+# ⇧⌘D: the right pane splits down
+key d cmd shift
+waitstate 5000 open_sessions.0.panes.# 3
+assert_state open_sessions.0.focused_pane $pane2
+assert_state open_sessions.0.layout.b.dir down
+wait 800
+type echo DOWN-TWO
+key enter
+waitfor DOWN-TWO 5000
+assert_not_screen RIGHT-ONE
+shot panes/three
+# ⌃⌘↑: the pane above; its shell has the keyboard
+key up cmd ctrl
+assert_state open_sessions.0.focused_pane $pane1
+assert_screen RIGHT-ONE
+# ⌃⌘←: the pi tab's pane
+key left cmd ctrl
+assert_state open_sessions.0.focused_pane $pane0
+assert_screen ARGS:
+# a click in the bottom pane's shell gives it the keyboard
+mousecell click 3 3 pane=2
+assert_state open_sessions.0.focused_pane $pane2
+assert_screen DOWN-TWO
+# the divider right of the pi tab's pane: double-click evens it, a drag moves it and the shells follow
+divider pane 0 clicks 2
+waitstate 3000 open_sessions.0.layout.ratio 0.5
+assert_state open_sessions.0.panes.0.rect.w 390
+assert_pane_cols 0
+assert_pane_cols 1
+wait 700
+divider pane 0 -120
+waitstate 3000 open_sessions.0.layout.ratio 0.347
+assert_state open_sessions.0.panes.0.rect.w 270
+assert_state open_sessions.0.panes.1.rect.w 508
+wait 300
+assert_pane_cols 0
+assert_pane_cols 1
+assert_pane_cols 2
+# dragged past the pi tab's pane's minimum (240): it stops there
+wait 700
+divider pane 0 -200
+waitstate 3000 open_sessions.0.panes.0.rect.w 240
+# ⌘T: a second shell in the bottom pane; ⇧⌃⌘← moves it to the pi tab's pane
+key t cmd
+waitstate 5000 open_sessions.0.panes.2.tabs.# 2
+key left cmd ctrl shift
+assert_state open_sessions.0.panes.0.tabs.# 2
+assert_state open_sessions.0.focused_pane $pane0
+assert_state open_sessions.0.panes.2.tabs.# 1
+# ⌘W on the bottom pane's last tab: the pane collapses, the keyboard goes back to the pane used last
+mousecell click 3 3 pane=2
+assert_state open_sessions.0.focused_pane $pane2
+key w cmd
+waitstate 5000 open_sessions.0.panes.# 2
+assert_state open_sessions.0.focused_pane $pane0
+# ⇧⌘W: unsplit; the right pane's shell joins the pi tab's pane
+key right cmd ctrl
+assert_state open_sessions.0.focused_pane $pane1
+key w cmd shift
+waitstate 3000 open_sessions.0.panes.# 1
+assert_state open_sessions.0.tabs.# 3
+assert_state open_sessions.0.panes.0.tabs.# 3
+shot panes/one
+quit

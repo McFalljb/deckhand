@@ -326,7 +326,7 @@ term_set_rect :: proc(t: ^Term, x, y, w, h: f32) {
 	if cols == t.cols && rows == t.rows do return
 	// a column divider is being dragged: the grid (and the child's PTY)
 	// follows at most every RESIZE_THROTTLE; the release resizes it exactly
-	if divider.active && t.cols != 0 && time.tick_since(t.resized) < RESIZE_THROTTLE do return
+	if (divider.active || pane_dragging()) && t.cols != 0 && time.tick_since(t.resized) < RESIZE_THROTTLE do return
 	t.resized = time.tick_now()
 	t.cols, t.rows = cols, rows
 	gh.terminal_resize(t.gt, cols, rows, u32(font.cell_w), u32(font.cell_h))

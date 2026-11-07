@@ -99,16 +99,16 @@ claude_bars :: proc(p: ^Pane) {
 	th := theme()
 	msg := claude_held_message(t, ct)
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + text_w("Drop", WEIGHT_BOLD) + text_w("Send now", WEIGHT_BOLD) + px(4 * SP_3 + 2 * SP_2)
-	if clay.UI(clay.ID("cl_held_bar"))({
+	if clay.UI(cid("cl_held_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
 		dot(th.waiting)
-		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(th.text))
+		clay.TextDynamic(clip(msg, max(pane_width() - used, px(80))), txt(th.text))
 		spacer()
-		button(clay.ID(CLAUDE_BAR_IDS[1]), "Drop", false, ui_hover == Hit(Hit_Claude(1)))
-		button(clay.ID(CLAUDE_BAR_IDS[0]), "Send now", true, ui_hover == Hit(Hit_Claude(0)))
+		button(cid(CLAUDE_BAR_IDS[1]), "Drop", false, ui_hover == Hit(Hit_Claude(1)))
+		button(cid(CLAUDE_BAR_IDS[0]), "Send now", true, ui_hover == Hit(Hit_Claude(0)))
 	}
 }
 
@@ -120,8 +120,8 @@ status_bar :: proc(p: ^Pane) {
 	th := theme()
 	go_label := status_go_label(hooks)
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + text_w(go_label, WEIGHT_BOLD) + text_w("Dismiss") + px(4 * SP_3 + 2 * SP_2)
-	text, n := wrap_clip(msg, max(centre_width() - used, px(80)), STATUS_LINES)
-	if clay.UI(clay.ID("cl_status_bar"))({
+	text, n := wrap_clip(msg, max(pane_width() - used, px(80)), STATUS_LINES)
+	if clay.UI(cid("cl_status_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(max(px(BAR_H), f32(n) * text_line_height(.UI) + px(2 * SP_2)))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
@@ -129,19 +129,19 @@ status_bar :: proc(p: ^Pane) {
 		dot(hooks ? th.error : th.waiting)
 		clay.TextDynamic(text, txt(th.text))
 		spacer()
-		button(clay.ID(STATUS_IDS[1]), "Dismiss", false, ui_hover == Hit(Hit_Claude(3)))
+		button(cid(STATUS_IDS[1]), "Dismiss", false, ui_hover == Hit(Hit_Claude(3)))
 		// no command to copy for nix or mise (claude_update_command): their package manager updates it
-		if hooks || status_update_command(t) != "" do button(clay.ID(STATUS_IDS[0]), go_label, true, ui_hover == Hit(Hit_Claude(2)))
+		if hooks || status_update_command(t) != "" do button(cid(STATUS_IDS[0]), go_label, true, ui_hover == Hit(Hit_Claude(2)))
 	}
 }
 
 claude_hit :: proc() -> Hit {
-	p := focused_pane() // the bars' hit tests: the focused pane's for now (panes.odin)
+	p := hit_pane() // the bars' hit tests: the pane under the pointer (ui_panes.odin)
 	if t, _, _ := status_tab(p); t != nil {
-		for id, i in STATUS_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Claude(2 + i)
+		for id, i in STATUS_IDS do if clay.PointerOver(cid(id)) do return Hit_Claude(2 + i)
 	}
 	if t, _ := held_tab(p); t == nil do return nil
-	for id, i in CLAUDE_BAR_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Claude(i)
+	for id, i in CLAUDE_BAR_IDS do if clay.PointerOver(cid(id)) do return Hit_Claude(i)
 	return nil
 }
 
@@ -150,7 +150,7 @@ claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	case 0: return "Send the first waiting message now, into whatever is typed in Claude's prompt", ""
 	case 1: return "Drop the waiting messages (nothing is sent)", ""
 	case 2:
-		t, _, hooks := status_tab(focused_pane())
+		t, _, hooks := status_tab(hit_pane())
 		if hooks do return "Show Claude Code's settings files (the Settings tab)", ""
 		if t != nil do return fmt.tprintf("Copy “%s” to paste into a shell tab", status_update_command(t)), ""
 		return "", ""

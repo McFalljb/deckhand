@@ -284,14 +284,14 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 	// a restart waiting for the old process: said, no buttons
 	if s := cur(); s != nil && !s.home {
 		if tab := pane_shown(p); tab != nil && tab.status == .Exited && restart_waiting(tab.id) {
-			if clay.UI(clay.ID("dead_bar"))({
+			if clay.UI(cid("dead_bar"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
 				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 			}) {
 				dot(th.text_muted)
 				_, is_claude := tab.kind.(Claude_Tab)
-				clay.TextDynamic(clip(is_claude ? "Restarting: waiting for the old Claude to exit…" : "Restarting: waiting for the old pi to exit…", max(centre_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
+				clay.TextDynamic(clip(is_claude ? "Restarting: waiting for the old Claude to exit…" : "Restarting: waiting for the old pi to exit…", max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
 			}
 			return
 		}
@@ -310,9 +310,9 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 		return w
 	}
 	fixed := px(2 * TERM_PAD + DOT + 2 * SP_2)
-	if model && centre_width() - fixed - buttons_w(model_label, model) < px(80) do model_label = DEAD_MODEL_SHORT
-	room := max(centre_width() - fixed - buttons_w(model_label, model), px(40))
-	if clay.UI(clay.ID("dead_bar"))({
+	if model && pane_width() - fixed - buttons_w(model_label, model) < px(80) do model_label = DEAD_MODEL_SHORT
+	room := max(pane_width() - fixed - buttons_w(model_label, model), px(40))
+	if clay.UI(cid("dead_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
@@ -320,19 +320,19 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 		dot(failed ? th.error : th.text_muted)
 		clay.TextDynamic(clip(msg, room), txt(th.text))
 		spacer()
-		if model do button(clay.ID(DEAD_IDS[.Restart_Model]), model_label, false, ui_hover == Hit(Hit_Dead_Tab{.Restart_Model}))
-		button(clay.ID(DEAD_IDS[.Restart]), DEAD_LABELS[.Restart], true, ui_hover == Hit(Hit_Dead_Tab{.Restart}))
+		if model do button(cid(DEAD_IDS[.Restart_Model]), model_label, false, ui_hover == Hit(Hit_Dead_Tab{.Restart_Model}))
+		button(cid(DEAD_IDS[.Restart]), DEAD_LABELS[.Restart], true, ui_hover == Hit(Hit_Dead_Tab{.Restart}))
 	}
 }
 
 dead_tab_hit :: proc() -> Hit {
-	if dead_shown(focused_pane()) == nil do return nil // the focused pane's bar for now (panes.odin)
-	for id, part in DEAD_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Dead_Tab{part}
+	if dead_shown(hit_pane()) == nil do return nil // the bar of the pane under the pointer (ui_panes.odin)
+	for id, part in DEAD_IDS do if clay.PointerOver(cid(id)) do return Hit_Dead_Tab{part}
 	return nil
 }
 
 dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
-	if tab := dead_shown(focused_pane()); tab != nil {
+	if tab := dead_shown(hit_pane()); tab != nil {
 		if _, is := tab.kind.(Claude_Tab); is {
 			if h.part == .Restart_Model do return "Start Claude Code again, resuming its conversation, then pick another model (/model)", ""
 			return "Start Claude Code again in this tab, resuming its conversation", ""

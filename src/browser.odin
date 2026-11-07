@@ -753,7 +753,7 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if e.type == .MOUSE_DOWN && !(palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()) && browser_bar_click(p, e) do return true
 	if b.cef == 0 {
 		// the page closed itself: its Reload button (ui.odin) opens it again
-		if e.type == .MOUSE_DOWN && b.closed_by_page && inside(clay.ID("browser_reload"), e.mouse_x, e.mouse_y) {
+		if e.type == .MOUSE_DOWN && b.closed_by_page && inside(cid("browser_reload"), e.mouse_x, e.mouse_y) {
 			ui_do(Browser_Reload{b.tab_id})
 			return true
 		}
@@ -1218,7 +1218,7 @@ browser_debug_tick :: proc() {
 
 // The Reload button under "The page closed itself" (ui.odin's centre).
 browser_reload_button :: proc() {
-	button(clay.ID("browser_reload"), "Reload", true, false)
+	button(cid("browser_reload"), "Reload", true, false)
 }
 
 // The folder that holds the browser's profile, cache and log (its "browser" folder).

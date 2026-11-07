@@ -400,23 +400,23 @@ browser_bar_layout :: proc(p: ^Pane) {
 	bt, _ := tab.kind.(Browser_Tab)
 	th := theme()
 	focused := state.focus_widget == "browser_url"
-	if clay.UI(clay.ID("browser_bar"))({
+	if clay.UI(cid("browser_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
-		nav_button(clay.ID("br_back"), "‹", bt.can_back)
-		nav_button(clay.ID("br_forward"), "›", bt.can_forward)
-		if bt.loading do nav_button(clay.ID("br_stop"), "✕", true)
-		else do nav_button(clay.ID("br_reload"), "↻", true)
+		nav_button(cid("br_back"), "‹", bt.can_back)
+		nav_button(cid("br_forward"), "›", bt.can_forward)
+		if bt.loading do nav_button(cid("br_stop"), "✕", true)
+		else do nav_button(cid("br_reload"), "↻", true)
 		// comment mode: its hint takes the address field's place (browser_annotate.odin)
-		if annot_hint_layout(b) {} else if clay.UI(clay.ID("br_url_box"))({
+		if annot_hint_layout(b) {} else if clay.UI(cid("br_url_box"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BUTTON_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 			backgroundColor = cc(th.bg_field),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 			border = {color = cc(focused ? th.accent : th.border), width = {pu(FOCUS_RING_W), pu(FOCUS_RING_W), pu(FOCUS_RING_W), pu(FOCUS_RING_W), 0}},
 		}) {
-			if clay.UI(clay.ID("br_url_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
+			if clay.UI(cid("br_url_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				if focused {
 					shown, _, _ := tf_display(&browser_url_field, ime.marked)
 					if shown == "" do clay.Text("Type a web address", txt(th.text_muted))
@@ -424,15 +424,15 @@ browser_bar_layout :: proc(p: ^Pane) {
 				} else {
 					u := bt.url == BROWSER_BLANK ? "" : bt.url
 					room := px(400) // the box's width last frame, inside its padding (px)
-					if d := clay.GetElementData(clay.ID("br_url_box")); d.found do room = max(d.boundingBox.width - px(2 * SP_2), px(40))
+					if d := clay.GetElementData(cid("br_url_box")); d.found do room = max(d.boundingBox.width - px(2 * SP_2), px(40))
 					// and no more than the bar leaves it beside its other parts (last frame): the
 					// address gives way to the agent strip and its buttons (browser_agent.odin)
 					// (a part's box is last frame's; the strip's width is computed: it comes and goes)
-					if bar := clay.GetElementData(clay.ID("browser_bar")); bar.found {
+					if bar := clay.GetElementData(cid("browser_bar")); bar.found {
 						others := px(2 * TERM_PAD + 2 * SP_2) + browser_agent_strip_w(b)
 						for part in ([]string{"br_back", "br_forward", bt.loading ? "br_stop" : "br_reload", "annot_toggle", "pg_more", browser_zoomed(b) ? "pg_zoom" : ""}) {
 							if part == "" do continue
-							if d := clay.GetElementData(clay.ID(part)); d.found do others += d.boundingBox.width + px(SP_1)
+							if d := clay.GetElementData(cid(part)); d.found do others += d.boundingBox.width + px(SP_1)
 						}
 						room = max(min(room, bar.boundingBox.width - others), px(40))
 					}
@@ -442,7 +442,7 @@ browser_bar_layout :: proc(p: ^Pane) {
 			}
 		}
 		if focused && browser_url_error != "" do clay.TextDynamic(browser_url_error, txt(th.error))
-		if focused do nav_button(clay.ID("br_go"), "Go", true)
+		if focused do nav_button(cid("br_go"), "Go", true)
 		browser_agent_strip_layout(b) // an agent uses this page · Stop (browser_agent.odin)
 		annot_button_layout(b) // comment mode's switch (browser_annotate.odin)
 		browser_polish_toolbar_layout(b) // the zoom chip and ⋯ (browser_polish.odin)
@@ -486,9 +486,9 @@ browser_url_go :: proc() {
 browser_bar_click :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if e.type != .MOUSE_DOWN || e.mouse_button != .LEFT do return false
 	b := pane_browser(p)
-	if b == nil || !inside(clay.ID("browser_bar"), e.mouse_x, e.mouse_y) do return false
-	if inside(clay.ID("annot_toggle"), e.mouse_x, e.mouse_y) do return false // annot_event's
-	hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(clay.ID(name), e.mouse_x, e.mouse_y)}
+	if b == nil || !inside(cid("browser_bar"), e.mouse_x, e.mouse_y) do return false
+	if inside(cid("annot_toggle"), e.mouse_x, e.mouse_y) do return false // annot_event's
+	hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(cid(name), e.mouse_x, e.mouse_y)}
 	switch {
 	case hit("br_back", e):    if browser_can(b.tab_id, .Back) do ui_do(Browser_Back{b.tab_id})
 	case hit("br_forward", e): if browser_can(b.tab_id, .Forward) do ui_do(Browser_Forward{b.tab_id})

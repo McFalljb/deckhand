@@ -205,7 +205,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 		return
 	}
 	m := metrics(e, x, y, w, h)
-	e.area, e.area_drawn = m, true // its own: each pane draws its editor (panes.odin)
+	e.area, e.area_drawn = m, true // its own: each pane draws its editor (panes.odin); cleared each draw pass (editors_frame_begin)
 	e.view_rows = m.rows
 	if e.view == .File do git_gutter_update(e)
 	if e.follow do follow_cursor(e, m)
@@ -450,6 +450,12 @@ offset_at :: proc(e: ^Editor, mx, my: f32) -> int {
 	}
 }
 
+// A draw pass starts (frame(), before the tabs are drawn): no editor counts as drawn until it is
+// drawn again, so one not shown this frame (another tab, a Markdown preview over it) takes no hits.
+editors_frame_begin :: proc() {
+	for _, e in editors do e.area_drawn = false
+}
+
 // The point is over editor e's text, in its pane (panes.odin), not under the drawer or the palette.
 editor_text_hit :: proc(e: ^Editor, mx, my: f32) -> bool {
 	if e == nil || !e.area_drawn do return false
@@ -522,6 +528,15 @@ editor_event :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	return false
 }
 
+// The metrics keys move by: where e was last drawn; never drawn yet (a key before its first
+// frame), its pane's rect now.
+@(private = "file")
+key_metrics :: proc(e: ^Editor) -> Layout_Metrics {
+	if e.area.lh > 0 do return e.area
+	r := tab_rect(e.tab_id)
+	return metrics(e, r.x, r.y, r.z, r.w)
+}
+
 @(private = "file")
 editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	mods := ev.modifiers
@@ -529,7 +544,7 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	cmd := mods & sapp.MODIFIER_SUPER != 0
 	alt := mods & sapp.MODIFIER_ALT != 0
 	ctrl := mods & sapp.MODIFIER_CTRL != 0
-	m := e.area
+	m := key_metrics(e)
 	#partial switch ev.type {
 	case .CLIPBOARD_PASTED:
 		if e.readonly do return true

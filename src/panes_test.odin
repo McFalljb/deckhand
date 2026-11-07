@@ -16,6 +16,7 @@ import "core:reflect"
 import "core:strings"
 import "core:testing"
 import clay "../build/clay-odin"
+import sapp "../vendor/sokol-odin/sokol/app"
 
 // Every unit test's commands keep every session's panes whole.
 @(init)
@@ -561,4 +562,119 @@ panes_tab_rect :: proc(t: ^testing.T) {
 	// one pane: exactly the centre, as before panes
 	s := pt_one(1)
 	testing.expect_value(t, tab_rect(s.tabs[1].id), app.pane)
+}
+
+// Fonts and Clay once, at 1x, without a window (layout only, no drawing): as buttons_test.odin.
+@(private = "file")
+pt_ui :: proc() -> bool {
+	@(static) ready: bool
+	if ready do return true
+	app.dpi = 1
+	font.size = ATLAS_MIN
+	font.pixels = make([]u8, ATLAS_MIN * ATLAS_MIN * 4)
+	if !fonts_apply(theme_font_config(theme()), 1) do return false
+	ui_init()
+	ready = true
+	return true
+}
+
+// An editor only takes hits where it was drawn in the last frame drawn: Markdown tab M shown as
+// source (its editor drawn), then editor E, then M's preview (M's editor not drawn): the pointer
+// over M's preview is not over M's text (no I-beam, the chrome's hover stays).
+@(test)
+panes_editor_hits_only_where_drawn :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	s := pt_one(2)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}
+	_ = ui_layout(1400, 860)
+	d := clay.GetElementData(clay.ID("terminal"))
+	if !testing.expect(t, d.found, "the content laid out") do return
+	cx, cy := d.boundingBox.x + d.boundingBox.width / 2, d.boundingBox.y + d.boundingBox.height / 2
+	m, e := new(Editor), new(Editor)
+	m.tab_id, e.tab_id = s.tabs[1].id, s.tabs[2].id
+	editors[m.tab_id], editors[e.tab_id] = m, e
+	defer {
+		delete_key(&editors, m.tab_id)
+		delete_key(&editors, e.tab_id)
+	}
+	drawn :: proc(x: ^Editor) {x.area, x.area_drawn = {lh = 20, cw = 8, rows = 10, cols = 40}, true} // as editor_draw
+	editors_frame_begin() // M as source
+	drawn(m)
+	testing.expect(t, editor_text_hit(m, cx, cy), "drawn: hit")
+	editors_frame_begin() // E
+	drawn(e)
+	editors_frame_begin() // M's preview: its editor is not drawn
+	testing.expect(t, !editor_text_hit(m, cx, cy), "not drawn this frame: no hit")
+	testing.expect(t, !editor_text_hit(e, cx, cy), "E is not on screen either")
+}
+
+// Page Down and Page Up in an editor that was never drawn (keys before its first frame) move by a
+// page of its pane, not to the end of the file.
+@(test)
+panes_editor_keys_before_its_first_draw :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	s := pt_one(1)
+	saved := app.pane
+	defer app.pane = saved
+	app.pane = {0, 0, 800, 600}
+	b := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< 500 do fmt.sbprintf(&b, "line %d\n", i)
+	e := new(Editor)
+	e.tab_id, e.goal_col, e.readonly = s.tabs[1].id, -1, true
+	e.eol, e.indent_w = "\n", 4
+	tb_init(&e.buf, transmute([]u8)strings.clone(strings.to_string(b)))
+	editors[e.tab_id] = e
+	defer delete_key(&editors, e.tab_id)
+	up := sapp.Event{type = .KEY_DOWN, key_code = .PAGE_UP}
+	editor_event(e, &up)
+	testing.expect_value(t, e.top, 0)
+	down := sapp.Event{type = .KEY_DOWN, key_code = .PAGE_DOWN}
+	editor_event(e, &down)
+	testing.expectf(t, e.top > 0 && e.top < 100, "one page down: top %d", e.top)
+}
+
+// A tab with no pane in a session that has panes (added around pane_add_tab) is adopted by the
+// focused pane: focus_tab shows it, closing it hands over, s.active_tab never names a closed tab.
+@(test)
+panes_orphan_tab_adopted :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(1)
+	saved := after_command_check
+	after_command_check = nil // the orphan breaks the check until adopted
+	defer after_command_check = saved
+	orphan := Tab{id = new_id(), kind = Shell_Tab{}, title = "orphan", status = .Not_Started}
+	append(&s.tabs, orphan)
+	testing.expect(t, run_command(Focus_Tab{tab_id = orphan.id}, {kind = .UI}).ok, "focus")
+	testing.expect_value(t, s.active_tab, orphan.id)
+	testing.expect_value(t, s.panes[0].active, orphan.id)
+	testing.expect_value(t, session_check(s), "")
+	// another orphan named by s.active_tab (written around session_show_tab), then closed
+	o2 := Tab{id = new_id(), kind = Shell_Tab{}, title = "o2", status = .Not_Started}
+	append(&s.tabs, o2)
+	s.active_tab = o2.id
+	testing.expect(t, run_command(Close_Tab{tab_id = o2.id}, {kind = .UI}).ok, "close")
+	_, gone, _ := find_tab(s.active_tab)
+	testing.expect(t, gone != nil, "s.active_tab names an open tab")
+	testing.expect_value(t, session_check(s), "")
+}
+
+// pidi packs slot and index without collisions; slot 0 is clay.ID(name, i), as before panes.
+@(test)
+panes_pidi_no_collisions :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	seen := make(map[u32]string, context.temp_allocator)
+	for slot in 0 ..< 4 {
+		p := Pane{slot = slot}
+		for i in ([]int{0, 1, 65535, 65536, 65537, 1 << 20}) {
+			id := pidi(&p, "chrow", i)
+			if slot == 0 do testing.expect_value(t, id, clay.ID("chrow", u32(i)))
+			key := fmt.tprintf("slot %d row %d", slot, i)
+			if other, dup := seen[id.id]; dup do testing.expectf(t, false, "%s collides with %s", key, other)
+			seen[id.id] = key
+		}
+		// pid is its slot's index 0, as clay.ID(x) is clay.ID(x, 0)
+		testing.expect_value(t, pid(&p, "chrow").id, pidi(&p, "chrow", 0).id)
+	}
 }

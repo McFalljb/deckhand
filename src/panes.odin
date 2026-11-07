@@ -212,15 +212,18 @@ tab_rect :: proc(tab_id: u64) -> [4]f32 {
 	return app.pane
 }
 
-// A Clay id for an element of pane p: slot 0 gives exactly clay.ID(name) (clay.ID(x) is
-// clay.ID(x, 0)), so a session with one pane keeps every id scripts and tests click.
+// A Clay id for an element of pane p: slot 0 gives exactly clay.ID(name), so a session with one
+// pane keeps every id scripts and tests click; another slot hashes its own label ("name#slot"),
+// so no slot's id can meet another's whatever the index.
 pid :: proc(p: ^Pane, name: string) -> clay.ElementId {
-	return clay.ID(name, u32(p != nil ? p.slot : 0))
+	return pidi(p, name, 0)
 }
 
-// pid for an element that already takes an index (rows, buttons): the slot in the high bits.
+// pid for an element that already takes an index (rows, buttons): slot 0 is clay.ID(name, i).
 pidi :: proc(p: ^Pane, name: string, i: int) -> clay.ElementId {
-	return clay.ID(name, u32((p != nil ? p.slot : 0) << 16 | (i & 0xffff)))
+	slot := p != nil ? p.slot : 0
+	if slot == 0 do return clay.ID(name, u32(i))
+	return clay.ID(fmt.tprintf("%s#%d", name, slot), u32(i)) // temp: an id lives for its frame
 }
 
 // ---- writing ----
@@ -263,11 +266,26 @@ mirror_sync :: proc(s: ^Open_Session) {
 session_show_tab :: proc(s: ^Open_Session, tab_id: u64, focus := true) {
 	if s == nil do return
 	session_panes_init(s)
-	p := pane_of_tab(s, tab_id)
+	p := pane_adopt(s, tab_id)
 	if p == nil do return
 	p.active = tab_id
 	if focus do pane_focus(s, p.id)
 	mirror_sync(s)
+}
+
+// The pane of tab `tab_id` of s. A tab in no pane of a session that has panes (one added around
+// pane_add_tab) is adopted by the focused pane; when s.active_tab names it, it is that pane's
+// shown tab (what the mirror said). nil: no such tab, or s has no panes.
+pane_adopt :: proc(s: ^Open_Session, tab_id: u64) -> ^Pane {
+	if p := pane_of_tab(s, tab_id); p != nil do return p
+	fp := session_pane(s, s.focused_pane)
+	if fp == nil do return nil
+	for &t in s.tabs do if t.id == tab_id {
+		t.pane = fp.id
+		if s.active_tab == tab_id do fp.active = tab_id
+		return fp
+	}
+	return nil
 }
 
 // Pane `pane_id` gets the keyboard (most recent in pane_mru).
@@ -310,7 +328,7 @@ pane_add_tab :: proc(s: ^Open_Session, tab: Tab, pane: u64 = 0, after: u64 = 0) 
 // it, the pane's next tab takes over (else its previous one: the last tab's rule), within the
 // pane. A pane it leaves empty closes (pane_remove). Call before removing it from s.tabs.
 pane_tab_gone :: proc(s: ^Open_Session, tab_id: u64) {
-	p := pane_of_tab(s, tab_id)
+	p := pane_adopt(s, tab_id)
 	if p == nil do return
 	pane_id := p.id
 	if p.active == tab_id {

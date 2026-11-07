@@ -272,6 +272,7 @@ frame :: proc "c" () {
 		t = active_term()
 	}
 
+	editors_frame_begin() // an editor takes hits only where this frame draws it (editor_view.odin)
 	draw_begin(w, h)
 	// chrome, the current tab, the sliding drawer, then the palette, menus, popover, sheet, tooltip
 	overlay := cmds.length

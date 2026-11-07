@@ -56,6 +56,7 @@ hit_pane :: proc() -> ^Pane {
 pane_press :: proc(e: ^sapp.Event) -> bool {
 	s := cur()
 	if s == nil || len(s.panes) <= 1 do return false
+	if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false
 	p := pane_at(e.mouse_x, e.mouse_y)
 	if p == nil {
 		pointer_capture = {window = true}
@@ -189,6 +190,9 @@ pane_key :: proc(e: ^sapp.Event) -> bool {
 		else if m == CMD | CT | SH do id = fmt.tprintf("move_tab_%s", names[k])
 	}
 	if id == "" do return false
+	a := action_by_id(id)
+	if a == nil do return false
+	if _, ok := a.make(); !ok do return false // not here (one pane, Home…): ⌘W's close, the menu bar's
 	action_run(id)
 	return true
 }
@@ -227,6 +231,7 @@ pane_move_action :: proc(d: Pane_Dir) -> (Command, bool) {
 pointer_over_placeholder :: proc(e: ^sapp.Event) -> bool {
 	#partial switch e.type {
 	case .MOUSE_DOWN, .MOUSE_MOVE, .MOUSE_SCROLL, .MOUSE_UP:
+		if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false // the palette's, a menu's, the drawer's
 		s := cur()
 		p := event_pane(e)
 		if s == nil || !pane_placeholder(s, p) do return false

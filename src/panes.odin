@@ -774,3 +774,41 @@ terms_on_screen :: proc() -> []^Term {
 	for &p in s.panes do if t := pane_term(&p); t != nil do append(&out, t)
 	return out[:]
 }
+
+// The least size of s's whole tree along one axis (across: widths) with pane `grow` split that way
+// (two panes and a divider where it is), min_w or min_h per pane: what the centre needs for it.
+pane_room_need :: proc(s: ^Open_Session, grow: u64, across: bool, divider, min_w, min_h: f32) -> f32 {
+	if s == nil || len(s.nodes) == 0 do return across ? 2 * min_w + divider : 2 * min_h + divider
+	walk :: proc(s: ^Open_Session, n: int, grow: u64, across: bool, div, m: f32) -> f32 {
+		node := s.nodes[n]
+		if node.leaf do return node.pane == grow ? 2 * m + div : m
+		a, b := walk(s, node.a, grow, across, div, m), walk(s, node.b, grow, across, div, m)
+		if (node.dir == .Right) == across do return a + div + b
+		return max(a, b)
+	}
+	return walk(s, s.root, grow, across, divider, across ? min_w : min_h)
+}
+
+// The rect a terminal tab is sized to (framebuffer px). Shown in its pane of the current session:
+// where it draws (its "terminal" element: only its own bars, a Claude tab's or a dead pi tab's,
+// take room). Hidden: its pane's content without any tab's bars (the pane less its strip), what it
+// gets when shown without bars of its own; so a tab with bars (a Changes header, a browser's
+// toolbar) coming and going never resizes the pane's other terminals. Else tab_rect.
+term_target_rect :: proc(tab_id: u64) -> [4]f32 {
+	s, tab, _ := find_tab(tab_id)
+	if s == nil || tab == nil || s.id != state.current_session do return tab_rect(tab_id)
+	p := pane_of_tab(s, tab_id)
+	if p == nil || p.frame.z <= 0 do return tab_rect(tab_id)
+	if p.active == tab_id {
+		if d := clay.GetElementData(pid(p, "terminal")); d.found && d.boundingBox.width > 0 {
+			b := d.boundingBox
+			return {b.x, b.y, b.width, b.height}
+		}
+	}
+	f := p.frame
+	if len(s.panes) > 1 {
+		strip := min(px(TAB_STRIP_H), f.w)
+		f = {f.x, f.y + strip, f.z, f.w - strip}
+	}
+	return f
+}

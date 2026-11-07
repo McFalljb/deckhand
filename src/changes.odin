@@ -192,6 +192,11 @@ Changes_View :: struct {
 	busy:         string, // an action running ("Staging…"); "" = none
 	notice:       string, // the last action's outcome (owned)
 	notice_err:   bool,
+	// its list at its last layout (ui_changes.odin): drawn slot -> row index, rows that fit
+	drawn:        [CHANGES_ROWS_DRAWN_MAX]int,
+	drawn_n:      int,
+	rows_fit:     int,
+	laid_pass:    u64, // the layout pass that last laid it out (ui_layout_pass): 0 = never
 }
 
 changes_views: map[u64]^Changes_View
@@ -761,7 +766,7 @@ changes_keep_visible :: proc(v: ^Changes_View) {
 	at := -1
 	for row, i in rows do if row.head == "" && changes_is_selected(v, r.files[row.file]) do at = i
 	if at < 0 do return
-	fit := max(changes_list_rows_fit, 1)
+	fit := max(v.rows_fit > 0 ? v.rows_fit : 20, 1) // rows that fit at its last layout
 	if at - 1 < v.list_top do v.list_top = max(at - 1, 0) // its header too, if it is right above
 	if at >= v.list_top + fit do v.list_top = at - fit + 1
 }
@@ -770,9 +775,6 @@ changes_keep_visible :: proc(v: ^Changes_View) {
 changes_is_selected :: proc(v: ^Changes_View, f: Change_File) -> bool {
 	return f.path == v.sel_path && f.scope == v.sel_scope && f.status == v.sel_status
 }
-
-// Rows the list showed at its last layout (ui_changes.odin sets it).
-changes_list_rows_fit: int = 20
 
 // A scan arrived: the selection stays on its file if it is still listed,
 // else the nearest one; its diff is read again.

@@ -343,7 +343,11 @@ empty_state :: proc(title, hint: string, width: f32) {
 
 // ---- layout ----
 
+// Layout passes so far (ui_layout): what was laid out in the last one is on screen.
+ui_layout_pass: u64
+
 ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
+	ui_layout_pass += 1
 	animating, pulsing = false, false
 	drawer_laid_out = false
 	pulse_drawn = pulse_step()
@@ -409,15 +413,20 @@ focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 	case "sidebar_filter": return &filter_field, clay.ID("filter_text"), clay.ID("filter_box")
 	case "files_filter":   return &files_filter_field, clay.ID("files_filter_text"), clay.ID("files_filter_box")
 	case "files_name":     return &files_name_field, clay.ID("files_name_text"), clay.ID("files_name_box")
-	case "changes_message": return &changes_message_field, clay.ID("ch_field_text"), clay.ID("ch_field")
+	case "changes_message": return &changes_message_field, fid("ch_field_text"), fid("ch_field")
 	case "comment_edit":   return &comment_edit_field, clay.ID("cm_edit_text"), clay.ID("cm_edit_box")
 	case "comment_new":    return &comment_new_field, clay.ID("cm_new_text"), clay.ID("cm_new_box")
-	case "browser_url":    return &browser_url_field, clay.ID("br_url_text"), clay.ID("br_url_box") // browser_nav.odin
-	case "browser_find":   return &page_find_field, clay.ID("pg_find_text"), clay.ID("pg_find_box") // browser_polish.odin
-	case "browser_prompt": return &page_prompt_field, clay.ID("pg_prompt_text"), clay.ID("pg_prompt_box")
+	case "browser_url":    return &browser_url_field, fid("br_url_text"), fid("br_url_box") // browser_nav.odin
+	case "browser_find":   return &page_find_field, fid("pg_find_text"), fid("pg_find_box") // browser_polish.odin
+	case "browser_prompt": return &page_prompt_field, fid("pg_prompt_text"), fid("pg_prompt_box")
 	case:                  return editor_focused_field()
 	}
 }
+
+// A per-tab bar's field id: the focused pane's (the keyboard's field is always in it), wherever
+// the pointer or the layout is.
+@(private = "file")
+fid :: proc(name: string) -> clay.ElementId {return pid(focused_pane(), name)}
 
 // ---- command palette ----
 
@@ -525,7 +534,9 @@ pane_tree_layout :: proc(cs: ^Open_Session, n: int) {
 	ratio := pane_drag_ratio(node.id, node.ratio) // a divider being dragged: where it is now
 	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same)
 	if d := clay.GetElementData(clay.ID("pane_split", u32(node.id))); d.found {
-		ratio = pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W))
+		kept := pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W))
+		if abs(kept - ratio) > 0.0005 do app.redraw = true // laid out at last frame's size: once more at this one's
+		ratio = kept
 	}
 	sz_a := across ? clay.Sizing{clay.SizingPercent(ratio), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingPercent(ratio)}
 	sz_div := across ? clay.Sizing{clay.SizingFixed(px(BORDER_W)), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}

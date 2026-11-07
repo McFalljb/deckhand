@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import clay "../build/clay-odin"
 
 // The pane commands (docs/PROTOCOL.md "Panes"; docs/plans/split-panes.md §4): split_pane,
 // close_pane, focus_pane, move_tab, set_split, equalize_panes. Who: Anyone (the user, scripts,
@@ -89,7 +90,7 @@ panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		for &s in state.open_sessions {
 			for n in s.nodes do if !n.leaf && n.id == c.split {
 				if c.ratio <= 0 || c.ratio >= 1 do return fail("ratio: between 0 and 1"), false
-				pane_set_ratio(&s, c.split, c.ratio)
+				pane_set_ratio(&s, c.split, pane_ratio_kept(&s, c.split, c.ratio))
 				return {ok = true}, true
 			}
 		}
@@ -127,19 +128,21 @@ pane_split_dir :: proc(d: Pane_Dir) -> (Split_Dir, bool) {
 	return .Right, false
 }
 
-// Pane `pane` of s can be split that way: both halves keep PANE_MIN_W (or _H) once laid out. Not
-// laid out (no window yet, tests): yes.
+// Pane `pane` of s can be split that way: once laid out, every pane keeps PANE_MIN_W x PANE_MIN_H
+// (the split one's two halves, and every other pane along that axis). The split pane's own room
+// too (pane_rects squeezes a tree whose minimums do not fit). Not laid out (no window yet,
+// tests): yes.
 pane_has_room :: proc(s: ^Open_Session, pane: u64, d: Pane_Dir) -> bool {
 	if app.centre.z <= 0 || app.dpi <= 0 do return true
-	for r in pane_rects(s, app.centre, px(BORDER_W), 0, 0) do if r.pane == pane {
-		across := d == .Left || d == .Right
-		size := (across ? r.rect.z : r.rect.w) / app.dpi
-		need := 2 * f32(across ? PANE_MIN_W : PANE_MIN_H) + BORDER_W
-		return size >= need
+	across := d == .Left || d == .Right
+	div, mw, mh := px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)
+	if pane_room_need(s, pane, across, div, mw, mh) > (across ? app.centre.z : app.centre.w) + 0.5 do return false
+	for r in pane_rects(s, app.centre, div, mw, mh) do if r.pane == pane {
+		size := across ? r.rect.z : r.rect.w
+		return size + 0.5 >= 2 * (across ? mw : mh) + div
 	}
 	return true
 }
-
 // Every divider by the panes on each side along its direction, so equal panes get equal room.
 panes_equalize :: proc(s: ^Open_Session) {
 	along :: proc(s: ^Open_Session, n: int, dir: Split_Dir) -> int {
@@ -151,4 +154,17 @@ panes_equalize :: proc(s: ^Open_Session) {
 		a, b := along(s, n.a, n.dir), along(s, n.b, n.dir)
 		n.ratio = clamp(f32(a) / f32(a + b), RATIO_MIN, 1 - RATIO_MIN)
 	}
+}
+
+// A split's ratio kept so neither side goes under its panes' minimum sizes, at the split's last
+// laid-out size (when it was laid out and there is room for both).
+pane_ratio_kept :: proc(s: ^Open_Session, split: u64, ratio: f32) -> f32 {
+	for n, i in s.nodes {
+		if n.leaf || n.id != split do continue
+		d := clay.GetElementData(clay.ID("pane_split", u32(split)))
+		if !d.found || s.id != state.current_session do return ratio
+		total := (n.dir == .Right ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W)
+		return pane_split_share(s, i, ratio, total)
+	}
+	return ratio
 }

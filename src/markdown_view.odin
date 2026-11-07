@@ -1439,8 +1439,8 @@ markdown_hover :: proc(mx, my: f32) {
 }
 
 // Whether the shown tab is a Markdown preview (the editor stays out of its input).
-md_preview_shown :: proc() -> bool {
-	tab := active_tab()
+md_preview_shown :: proc(p: ^Pane) -> bool {
+	tab := pane_shown(p)
 	return tab != nil && md_preview(tab.id) != nil
 }
 

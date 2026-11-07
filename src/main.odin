@@ -259,7 +259,7 @@ frame :: proc "c" () {
 		if cs != nil && len(cs.panes) == 0 do if p := session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
 		if cs != nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil {
-			r := tab_rect(tab.id)
+			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
 			if r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
 		}
 	}
@@ -358,7 +358,9 @@ event_os :: proc "c" (e: ^sapp.Event) {
 
 event :: proc(e: ^sapp.Event) {
 	defer inbox_drain()
-	defer if e.type == .MOUSE_UP || e.type == .MOUSE_LEAVE || e.type == .UNFOCUSED do pane_release() // the press's pane lets go (ui_panes.odin)
+	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
+	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
+	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
@@ -514,7 +516,7 @@ event :: proc(e: ^sapp.Event) {
 	defer ids_pane_end(old_ids)
 	if pointer_over_placeholder(e) do return
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
-	if editor_bar_focused() && editor_bar_event(fp, e) do return
+	if editor_bar_focused() && editor_bar_event(focused_pane(), e) do return // its field has the keyboard
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
 	if comments_field_key(e) do return // a comment's edit field: Enter and Esc (ui_comments.odin)
 	if browser_url_key(fp, e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
@@ -526,7 +528,7 @@ event :: proc(e: ^sapp.Event) {
 	if markdown_event(fp, e) do return // a Markdown tab's preview: wheel, keys, links (markdown_view.odin)
 	// an editor tab: its keys while it has the keyboard, mouse and wheel over it
 	// (under a Markdown preview only its toolbar and find bar: the source editor is hidden)
-	if ed := pane_editor(fp); ed != nil && (!md_preview_shown() || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
+	if ed := pane_editor(fp); ed != nil && (!md_preview_shown(fp) || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
 	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)

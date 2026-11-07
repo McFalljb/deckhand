@@ -834,10 +834,11 @@ goto_run :: proc(e: ^Editor) {
 editor_focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 	e := active_editor()
 	if e == nil do return nil, {}, {}
+	p := focused_pane() // the focused pane's ids (its editor has the keyboard), wherever the pointer is
 	switch state.focus_widget {
-	case "editor_find":    return &e.find.query, cid("ed_find_text"), cid("ed_find_box")
-	case "editor_replace": return &e.find.replace, cid("ed_replace_text"), cid("ed_replace_box")
-	case "editor_goto":    return &e.find.goto_line, cid("ed_goto_text"), cid("ed_goto_box")
+	case "editor_find":    return &e.find.query, pid(p, "ed_find_text"), pid(p, "ed_find_box")
+	case "editor_replace": return &e.find.replace, pid(p, "ed_replace_text"), pid(p, "ed_replace_box")
+	case "editor_goto":    return &e.find.goto_line, pid(p, "ed_goto_text"), pid(p, "ed_goto_box")
 	}
 	return nil, {}, {}
 }
@@ -847,6 +848,7 @@ editor_bar_focused :: proc() -> bool {return strings.has_prefix(state.focus_widg
 // Keys of a bar field before the generic text-field handling (main.odin):
 // Enter, Esc, Tab between fields, ⌘G, ⌥⌘F, ⌘S. True if consumed.
 editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+	if ev.type != .KEY_DOWN do return false // keys only: the pointer over another pane keeps the field
 	e := pane_editor(p)
 	if e == nil {
 		if editor_bar_focused() do ui_do(Set_Focus{""})

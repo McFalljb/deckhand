@@ -1108,3 +1108,178 @@ panes_press_focuses_its_pane :: proc(t: ^testing.T) {
 	pane_release()
 	testing.expect_value(t, pointer_capture.pane, u64(0))
 }
+
+// ---- P2 review fixes ----
+
+// A split session with a Changes tab in one pane and a shell in the other: the Changes tab is read
+// again when it comes on screen, not on every layout (each pane's bars are laid out in turn).
+@(test)
+panes_changes_not_refreshed_every_layout :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	s := pt_one(1)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	root := "/tmp/pt-changes"
+	r := new(Changes_Repo)
+	r.root = root
+	append(&changes_repos, r)
+	defer {
+		pop(&changes_repos)
+		free(r)
+	}
+	ct := pane_add_tab(s, Tab{id = new_id(), kind = Changes_Tab{root = root}, title = "Changes", status = .Running})
+	cid_ := ct.id
+	v := new(Changes_View)
+	v.tab_id, v.root = cid_, root
+	changes_views[cid_] = v
+	defer {
+		delete_key(&changes_views, cid_)
+		free(v)
+	}
+	res := run_command(Split_Pane{direction = .Right, tab_id = s.tabs[1].id}, PT_UI) // the shell to B; A shows Changes
+	if !testing.expectf(t, res.ok, "split: %s", res.error) do return
+	session_show_tab(s, cid_, focus = false)
+	_ = ui_layout(1400, 860)
+	gen := r.gen
+	_ = ui_layout(1400, 860)
+	testing.expect_value(t, r.gen, gen)
+	_ = ui_layout(1400, 860)
+	testing.expect_value(t, r.gen, gen)
+}
+
+// A field's caret and hits are its pane's: a browser's URL field in pane slot 1 is found by
+// focused_field (so it keeps the keyboard on a click inside, and draws its caret there).
+@(test)
+panes_field_in_second_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	state.focus_widget = "browser_url"
+	browser_url_tab = x.browser
+	defer {
+		state.focus_widget = ""
+		browser_url_tab = 0
+	}
+	_ = ui_layout(1400, 860)
+	testing.expect(t, clay.GetElementData(pid(session_pane(x.s, x.b), "br_url_box")).found, "B's URL field laid out")
+	f, text_id, box_id := focused_field()
+	testing.expect(t, f == &browser_url_field, "the URL field")
+	testing.expect(t, clay.GetElementData(box_id).found && clay.GetElementData(text_id).found, "focused_field finds it in slot 1")
+	testing.expect_value(t, box_id.id, pid(session_pane(x.s, x.b), "br_url_box").id)
+}
+
+// A placeholder under an overlay (the palette) or the agent's drawer takes no events.
+@(test)
+panes_placeholder_under_an_overlay :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	run_command(Focus_Pane{pane = x.a}, PT_UI)
+	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
+	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
+	state.focus_widget = "palette"
+	testing.expect(t, !pointer_over_placeholder(&e), "the palette's click")
+	testing.expect(t, !pane_press(&e), "nor a press")
+	state.focus_widget = ""
+	inbox_drain()
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect(t, pointer_over_placeholder(&e), "without it: the placeholder's")
+	inbox_drain()
+}
+
+// The editor's find bar keeps the keyboard when the pointer moves over another pane; the bar's
+// keys act on the focused pane's editor.
+@(test)
+panes_editor_bar_keeps_focus_on_moves :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	session_show_tab(x.s, x.editor) // B focused, its editor
+	state.focus_widget = "editor_find"
+	defer state.focus_widget = ""
+	mv := sapp.Event{type = .MOUSE_MOVE, mouse_x = 10, mouse_y = 10}
+	testing.expect(t, !editor_bar_event(session_pane(x.s, x.a), &mv), "a move is not the bar's")
+	inbox_drain()
+	testing.expect_value(t, state.focus_widget, "editor_find")
+}
+
+// The wheel and moves over a pane's Markdown preview are that pane's, not the focused tab's.
+@(test)
+panes_markdown_preview_of_the_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	_, ed, _ := find_tab(x.editor)
+	ed.kind = Markdown_Tab{path = "/tmp/pt/a.md"}
+	mv := new(Md_View)
+	md_views[x.editor] = mv
+	defer {
+		delete_key(&md_views, x.editor)
+		free(mv)
+	}
+	session_show_tab(x.s, x.editor, focus = false) // B shows the preview
+	run_command(Focus_Pane{pane = x.a}, PT_UI) // A (its shell) has the keyboard
+	testing.expect(t, md_preview_shown(session_pane(x.s, x.b)), "B's preview")
+	testing.expect(t, !md_preview_shown(session_pane(x.s, x.a)), "A's shell")
+}
+
+// split_pane's room check counts every pane's minimum (not only the split one's halves), and
+// set_split keeps every pane at its minimum.
+@(test)
+panes_room_and_ratio_keep_minimums :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	s := pt_one(3)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	ids := [4]u64{s.tabs[0].id, s.tabs[1].id, s.tabs[2].id, s.tabs[3].id}
+	a := s.focused_pane
+	r := run_command(Split_Pane{direction = .Right, tab_id = ids[3]}, PT_UI)
+	b := r.created_id
+	split := s.nodes[s.root].id
+	_ = ui_layout(1000, 860) // the centre: 700 wide
+	ui_pane_rects(s)
+	// set_split 0.95: B would be 35 wide; kept at its minimum
+	testing.expect(t, run_command(Set_Split{split = split, ratio = 0.95}, PT_UI).ok, "set")
+	_ = ui_layout(1000, 860)
+	ui_pane_rects(s)
+	testing.expectf(t, session_pane(s, b).rect.z >= PANE_MIN_W - 1, "B kept at its minimum: %v (ratio %v)", session_pane(s, b).rect, s.nodes[s.root].ratio)
+	// A is about 459 wide now; splitting it right needs 481 for its halves, and B's 240 too
+	r = run_command(Split_Pane{pane = a, direction = .Right, tab_id = ids[1]}, PT_UI)
+	testing.expect_value(t, r.error, "not enough room")
+}
+
+// ⇧⌘W with one pane is not the panes' key (⌘W's tab close and the menu bar get it); ⌘D on Home
+// is not either.
+@(test)
+panes_keys_fall_through_when_they_do_not_apply :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	w := sapp.Event{type = .KEY_DOWN, key_code = .W, modifiers = sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT}
+	run_command(Close_Pane{pane = x.b}, PT_UI)
+	testing.expect(t, !pane_key(&w), "one pane: not taken")
+	d := sapp.Event{type = .KEY_DOWN, key_code = .D, modifiers = sapp.MODIFIER_SUPER}
+	testing.expect(t, pane_key(&d), "⌘D splits")
+	inbox_drain()
+}
+
+// A hidden terminal is sized to its pane's content without any tab's bars (the pane less its
+// strip), so showing a tab with bars (a Changes header) and back never resizes the others.
+@(test)
+panes_terminal_rect_ignores_other_tabs_bars :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	app.dpi = 1
+	pa := session_pane(x.s, x.a)
+	pa.frame = {0, 0, 500, 600}
+	pa.rect = {0, 140, 500, 460} // under a Changes tab's header
+	session_show_tab(x.s, x.pi, focus = false) // A shows its pi tab: the shell is hidden
+	testing.expect_value(t, term_target_rect(x.shell), [4]f32{0, TAB_STRIP_H, 500, 600 - TAB_STRIP_H})
+}

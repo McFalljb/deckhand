@@ -69,13 +69,6 @@ TOOL_LABEL := [Changes_Tool]string {
 
 CHANGES_ROWS_DRAWN_MAX :: 128
 
-// What the list drew last (slot -> row index into changes_rows), for hits.
-@(private = "file")
-drawn: [CHANGES_ROWS_DRAWN_MAX]int
-@(private = "file")
-drawn_n: int
-@(private = "file")
-last_active: u64 // the Changes tab laid out last (a new one is read again: "on focus")
 
 // The Changes tab on screen (nil = another tab).
 active_changes :: proc() -> ^Changes_View {
@@ -277,16 +270,13 @@ branch_text :: proc(r: ^Changes_Repo) -> string {
 // before the editor's bars).
 changes_bars_layout :: proc(p: ^Pane) {
 	v := pane_changes(p)
-	if v == nil {
-		last_active = 0
-		return
-	}
+	if v == nil do return
 	r := changes_repo(v.root)
 	changes_ask(r)
-	if last_active != v.tab_id {
-		last_active = v.tab_id
-		changes_refresh(r) // focused: read again
-	}
+	// not laid out in the last pass (or ever): it came on screen, read again. Per view, as each
+	// pane's bars are laid out in turn
+	if v.laid_pass == 0 || v.laid_pass + 1 < ui_layout_pass do changes_refresh(r)
+	v.laid_pass = ui_layout_pass
 	th := theme()
 	avail := pane_width() - px(2 * TERM_PAD)
 	// header: branch and path, the status slot, Refresh, Ask pi to review, Merge
@@ -379,9 +369,9 @@ changes_list_layout :: proc(p: ^Pane) {
 	h := px(600)
 	if d := clay.GetElementData(cid("ch_list")); d.found && d.boundingBox.height > 0 do h = d.boundingBox.height
 	fitn := max(int((h - px(2 * SP_1)) / px(ROW)), 1)
-	changes_list_rows_fit = fitn
+	v.rows_fit = fitn
 	v.list_top = clamp(v.list_top, 0, max(len(rows) - fitn, 0))
-	drawn_n = 0
+	v.drawn_n = 0
 	if clay.UI(cid("ch_list"))({
 		layout = {sizing = {clay.SizingFixed(lw), clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = {pu(SP_1), pu(SP_1), pu(SP_1), pu(SP_1)}},
 		backgroundColor = cc(th.bg_app),
@@ -402,11 +392,11 @@ changes_list_layout :: proc(p: ^Pane) {
 			return
 		}
 		for i in v.list_top ..< min(len(rows), v.list_top + fitn + 1) {
-			if drawn_n >= CHANGES_ROWS_DRAWN_MAX do break
+			if v.drawn_n >= CHANGES_ROWS_DRAWN_MAX do break
 			row := rows[i]
-			slot := drawn_n
-			drawn[slot] = i
-			drawn_n += 1
+			slot := v.drawn_n
+			v.drawn[slot] = i
+			v.drawn_n += 1
 			id := cid("chrow", u32(slot))
 			if row.head != "" {
 				if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW))}, padding = {pu(PAD_ROW), pu(PAD_ROW), row.scope ? pu(SP_1) : 0, 0}, childAlignment = {y = .Center}}}) {
@@ -542,9 +532,10 @@ status_letter :: proc(s: u8) -> string {
 
 changes_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("changesbtn")) do return Hit_Changes{what = .Button}
-	if active_changes() == nil do return nil
+	v := pane_changes(hit_pane()) // the pane under the pointer's (ui_hit set its ids)
+	if v == nil do return nil
 	for t in Changes_Tool do if clay.PointerOver(cid("chtool", u32(t))) do return Hit_Changes{what = .Tool, index = int(t)}
-	for slot in 0 ..< drawn_n do if clay.PointerOver(cid("chrow", u32(slot))) do return Hit_Changes{what = .Row, index = slot}
+	for slot in 0 ..< v.drawn_n do if clay.PointerOver(cid("chrow", u32(slot))) do return Hit_Changes{what = .Row, index = slot}
 	if clay.PointerOver(cid("ch_field")) do return Hit_Changes{what = .Field}
 	if clay.PointerOver(cid("ch_list")) do return Hit_Changes{what = .List}
 	return nil
@@ -562,11 +553,11 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 	case .List:
 		return "", ""
 	case .Row:
-		v := active_changes()
+		v := pane_changes(hit_pane())
 		r := v != nil ? changes_repo(v.root) : nil
 		rows := changes_rows(r)
-		if h.index >= drawn_n || drawn[h.index] >= len(rows) do return "", ""
-		row := rows[drawn[h.index]]
+		if v == nil || h.index >= v.drawn_n || v.drawn[h.index] >= len(rows) do return "", ""
+		row := rows[v.drawn[h.index]]
 		if row.head != "" || r == nil do return "", ""
 		f := r.files[row.file]
 		b := strings.builder_make(context.temp_allocator)
@@ -693,11 +684,11 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		case .Tool:
 			if v != nil do changes_tool_run(v, Changes_Tool(h.index))
 		case .Row:
-			if v == nil || h.index >= drawn_n do return true
+			if v == nil || h.index >= v.drawn_n do return true
 			r := changes_repo(v.root)
 			rows := changes_rows(r)
-			if drawn[h.index] >= len(rows) do return true
-			row := rows[drawn[h.index]]
+			if v.drawn[h.index] >= len(rows) do return true
+			row := rows[v.drawn[h.index]]
 			if row.head == "" do changes_select(v, r.files[row.file].path, r.files[row.file].scope, r.files[row.file].status)
 		case .Field:
 			if state.focus_widget != "changes_message" do ui_do(Set_Focus{"changes_message"})

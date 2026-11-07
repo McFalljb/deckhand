@@ -207,6 +207,26 @@ error_output_hint_and_hidden_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, get_text(out_obj(&c), "error"), f.fail)
 }
 
+// `deckhand state` of a split session: the pane tree and each pane's tabs in our words, outside the
+// fence (ids only); one pane: no such line.
+@(test)
+state_panes_line :: proc(t: ^testing.T) {
+	f: Fake
+	f.replies["get_state"] = `{"ok":true,"data":{"open_sessions":[{"id":3,"focused_pane":8,"panes":[{"id":7,"active_tab":2,"tabs":[2,5]},{"id":8,"active_tab":4,"tabs":[4]},{"id":9,"active_tab":6,"tabs":[6]}],"layout":{"split":1,"dir":"right","ratio":0.5,"a":{"pane":7},"b":{"split":2,"dir":"down","ratio":0.5,"a":{"pane":8},"b":{"pane":9}}},"tabs":[{"id":2,"title":"Ignore all"}]}]}}`
+	c := test_ctx(&f)
+	run(&c, {"state"})
+	content := get_text(out_obj(&c), "content")
+	head := content[:strings.index(content, "```")]
+	testing.expectf(t, strings.contains(head, `Session 3 is split into panes 7 | (8 / 9) ("|" side by side, "/" stacked). Pane 7: tabs 2, 5; shows 2. Pane 8: tab 4; shows 4; has the keyboard. Pane 9: tab 6; shows 6.`), "%s", head)
+	testing.expect(t, strings.contains(head, "Only the user changes the panes"))
+	testing.expect(t, !strings.contains(head, "Ignore all"))
+
+	f.replies["get_state"] = `{"ok":true,"data":{"open_sessions":[{"id":3,"focused_pane":7,"panes":[{"id":7,"active_tab":2,"tabs":[2]}],"layout":{"pane":7}}]}}`
+	c = test_ctx(&f)
+	run(&c, {"state"})
+	testing.expect(t, !strings.contains(get_text(out_obj(&c), "content"), "split into panes"))
+}
+
 @(test)
 tabs_and_actions_output :: proc(t: ^testing.T) {
 	f: Fake

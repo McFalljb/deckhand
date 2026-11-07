@@ -420,6 +420,10 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   - Each session's panes come back when Deckhand restarts: the same splits and sizes, the
     same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
     Deckhand from before panes opens the same workspace with every tab back in one pane.)
+  - **Agents and panes.** A session's pi or Claude tab can't split panes or move tabs; it sees
+    which tabs sit side by side, and the tabs it opens still go behind what you see (a file it
+    shows: next to its own tab, in its pane; a page or an app: in the pane with the keyboard).
+    Atlas can split, move and focus panes when you ask it to.
 - **If pi exits** (it crashed, failed to start, or you quit it), its tab keeps its last output
   under a bar that says how it ended ("pi exited (code 1)", or the signal that stopped it, such
   as "signal 1 (SIGHUP)"); the tab and its row in the Open section say so too when you point at
@@ -1704,8 +1708,8 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 |---|---|---|
 | Minimize | ⌘M | |
 | Zoom |  | |
-| Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the session's tabs |
-| Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | in the palette: run its rows |
+| Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the tabs of the pane with the keyboard |
+| Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |

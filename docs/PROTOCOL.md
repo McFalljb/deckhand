@@ -331,7 +331,7 @@ control callers for any open session but Home.
 | `browser_back`, `browser_forward` | `tab_id` | history; refused (`"nothing to go back to"`, `"nothing to go forward to"`) when `can_back` / `can_forward` is false, and while the page is not loaded yet |
 | `browser_reload` | `tab_id` | reload; a page that closed itself (`window.close()`) opens again |
 | `browser_stop` | `tab_id` | stop loading |
-| `browser_tabs` | `session`? | the browser tabs: a pi tab's own session's (naming another is refused); a control caller's, the user's or a script's: the session named, else every session's → `data.tabs` `[{tab_id, session, title, url, loading, page, on_screen, comments, recording?}]` |
+| `browser_tabs` | `session`? | the browser tabs: a pi tab's own session's (naming another is refused); a control caller's, the user's or a script's: the session named, else every session's → `data.tabs` `[{tab_id, session, title, url, loading, page, on_screen, comments, recording?}]` (`on_screen`: shown in any pane of the session on screen, not only the one with the keyboard) |
 | `browser_read` | `tab_id`, `mode`?, `selector`?, `max`? | **long-running.** Read the page, in Deckhand's isolated world (the page's scripts cannot see or change the reader): `mode` `text` (default: the visible text, blocks on their own lines, headings as `#`), `outline` (one line per heading, landmark, link, control, image and text run, indented; links, controls and headings get a ref `e1`… usable as `selector` `"ref=e1"` until the next outline or navigation) or `html` (the element's markup). `selector`: simple CSS (tag names, `#id`s and `.class`es joined by spaces or `>`, e.g. `div.card > a#buy`) or an outline's `ref=eN`; anything else (attributes, pseudo-classes, escapes, comments, `,` `+` `~` `*` `|`) is refused with code `selector_unsupported`; the whole page without. `max`: characters (default 20000, 100 to 200000; `truncated` says it was cut). **Form values are never read**: an input's, textarea's or select's value, a checkbox's state and editable content are `[value hidden]` with the field's kind and name; a match inside a field, a select's options or editable content never counts (a selector matching only there is "nothing on the page matches", as a real miss); html mode drops scripts' text and csrf/token/nonce metas' content. Iframes are not looked into (`frames` counts them). An unloaded tab loads into a free page slot (never another tab's; `no_slot` if none frees in time). → `data {mode, url, title, text, chars, truncated, frames}` (`url` with secret-looking parameters masked, as `browser_network`). The data is the page's (untrusted): **only the requester gets it**; the event log and other subscribers see `{"private_bytes": N}`. Codes: `timeout`, `no_page`, `no_slot`, `tab_gone`, `bad_args` (nothing matches the selector), `selector_unsupported`, `stopped` |
 | `browser_screenshot` | `tab_id`, `rect`? | **long-running.** A PNG of the page now, from the tab's frame ring (as `app_screenshot`; `<data dir>/apps/shots/<tab>-<n>.png`, PI_DESK_SHOTS_DIR): a tab on screen paints again once its view's size has been still for 200 ms (a frame from just after a resize holds the old page scaled into it); a tab not on screen is painted for it (CEF un-hides it; the user's view never changes) → `data {path, w, h, bytes, scale, rect, on_screen}`. `rect` `{x, y, w, h}`: the page's CSS px from the viewport's top-left. It shows what the page shows, typed text in visible fields included. Codes: `no_frame`, `bad_args`, `busy`, `stopped`. Refused while a password field shows its text (type flipped by "show password", or a password autocomplete, with text in it): `sensitive_visible`; a page without Deckhand's world (an error page) is taken as is after 1 s |
 | `browser_wait` | `tab_id`, `for`, `value`?, `timeout_ms`? | **long-running.** Until the page has loaded (`for` `load`: right after a navigation command, its new document first, then not loading and `readyState` complete), shows a visible element matching the CSS selector `value` (`selector`), or shows the text `value` (`text`, as `browser_read` reads it); never an element or text inside a field or editable content; `timeout_ms` default 10000, at most 120000 → `data {waited_ms}`; codes `timeout`, `selector_unsupported` (the selector forms of `browser_read`) |
@@ -618,7 +618,9 @@ without asking. Exited tabs never ask.
              "filter": {"text": "", "running": false, "waiting": false, "pinned": false}},
  "open_sessions": [{"id": 3, "pi_session_id": "7df2…", "session_dir": "", "project_id": 1, "cwd": "/w/app",
                     "session_file": "", "active_tab": 2, "agent_status": "working",
-                    "tabs": [{"id": 2, "kind": "pi", "title": "pi", "status": "running",
+                    "focused_pane": 5, "panes": [{"id": 5, "slot": 0, "active_tab": 2, "tabs": [2], "rect": {"x": 300, "y": 40, "w": 900, "h": 760}}],
+                    "layout": {"pane": 5},
+                    "tabs": [{"id": 2, "kind": "pi", "title": "pi", "status": "running", "pane": 5, "on_screen": true,
                               "agent_status": {"dot": "working", "source": "bridge", "unseen": false, "at": "2026-11-03T10:20:30Z"},
                               "agent": "working", "waiting": false, "question": false, "blockers": [],
                               "panels": [{"panel": "todos", "title": "Todos", "rows": [{"text": "Todos 1/2", "head": true}, {"text": "○ next"}]}]}]}],
@@ -698,10 +700,15 @@ pane's strip in order, `rect` its content's last laid-out rect in points `{"x","
 (the current session only) — and `layout`, the tree: `{"pane": id}` or `{"split": id, "dir":
 "right"|"down", "ratio", "a", "b"}` (`right`: `a` left of `b`; `down`: `a` above `b`). Each tab
 has `pane` (its pane's id) and `on_screen` (shown in its pane of the current session: any pane's,
-browser and app tabs too; only the focused pane's tab gets keys). Every session has one pane until it is split; its panes are saved
-with the workspace and come back at restart. Pane and split ids are runtime ids, new at each launch. A session read back from an older
-snapshot without panes shows one pane with id 0. Who: anyone but a pi or Claude tab's bridge
-and an app (`"not allowed for this caller"`); Home is refused.
+browser and app tabs too; only the focused pane's tab gets keys). Every session has one pane until it is split. The layout
+is saved with the workspace and restored ([PERSISTENCE.md](PERSISTENCE.md), `panes`), but pane
+and split ids are runtime ids, new at each launch. A session read back from an older
+snapshot without panes shows one pane with id 0. Who changes panes: anyone but a pi or Claude
+tab and an app (`"not allowed for this caller"`), so the user, scripts and Atlas; Home is
+refused. Agents see them: Atlas's `desk_state` summary prints a split session's tree (`panes: 7 |
+(8 / 9)`, `|` side by side, `/` stacked) and each tab's pane, and a Claude tab's `deckhand state`
+says the same above its JSON. An agent's tabs still open behind the user's view: `show_file`
+right after the agent's tab, in its pane; `browser_open` and `new_app_tab` in the focused pane.
 
 `notifications` counts the bell's entries (`count`, `unread`) and the OS notifications they
 raised (`os_notified`); the entries are in `notifications_list`. A pi tab's snapshot has zeros.

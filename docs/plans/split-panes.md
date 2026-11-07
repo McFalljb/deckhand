@@ -1,7 +1,12 @@
 # Deckhand split panes: implementation plan
 
-Status: P1 in progress (branch `panes-p1`); the rest is plan. Investigated at `main` 7904ea7. fff MCP tools were not
-available to the worker, so searches used `rg` (read-only).
+Status (2026-11-07): all phases built. P1–P3 merged (`main` 8d3cf47); P4 (live browser and app
+tabs, branch `panes-p4`), P5 (dragging tabs, `panes-p5`) and P6 (agent-facing text and docs,
+`panes-p6`) on branches in review. Left for later: a maximize-pane toggle, one file in two panes,
+agents splitting or opening beside themselves (Q5). Deviation from §4: an agent's `browser_open`
+and `new_app_tab` land in the focused pane (behind its shown tab), not the agent tab's pane;
+`show_file` lands in the agent tab's pane. Investigated at `main` 7904ea7 (searches used `rg`:
+fff MCP tools were not available to the worker).
 
 Revision 2 (after review): the implicit `pane_ctx` is gone. `active_tab()`, `key_tab()`,
 `key_term()`, every tick and every action mean strictly **the focused pane's tab**. An explicit
@@ -545,7 +550,9 @@ script command. Tests: unit — zone geometry (`drop_zone_at(rect, x, y)`), no-o
 before the pi tab lands after it; scene `panes-drag.txt` (reorder, move to other strip,
 split by edge drop in all 4 directions, drop on own pane no-op).
 
-**P6 — Agent-facing polish.** `desk_state` summary per pane (`state.ts`), CLI texts,
+**P6 — Agent-facing polish.** (Built: `desk_state`'s `panes:` line and per-tab pane marks,
+`commands.ts` pane rows for Atlas, "not on screen" = in no pane, `deckhand state`'s panes line,
+the skills, manual and docs. No `pane` args for agent opens: Q5 said no.) `desk_state` summary per pane (`state.ts`), CLI texts,
 `browser.ts`/`app.ts` "not on screen" wording, optional `pane` args for agent opens (only if
 Q5 says so), ENGINE-BRIDGE/TAB-PROTOCOL/BROWSER docs. Tests: `integrations/pi` unit tests,
 `agent-show.txt` additions.

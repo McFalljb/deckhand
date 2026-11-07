@@ -11,6 +11,9 @@ export interface Cmd {
 	long_running?: boolean; // returns `pending`, then a `finished` event
 }
 
+/** The pane commands' note: Atlas (and the user) may change a session's panes; pi and Claude tabs may not (Deckhand refuses them). */
+const PANES_ONLY = " (you and the user only: pi and Claude tabs cannot change panes)";
+
 /** PROTOCOL.md §3, the commands a `control` caller may send (not the user-only, bridge-only or test-only ones). */
 export const COMMANDS: Cmd[] = [
 	{ type: "get_state", does: "the state snapshot (use desk_state)" },
@@ -20,9 +23,15 @@ export const COMMANDS: Cmd[] = [
 	{ type: "open_session", args: "project_id, pi_session_id", does: "resume a pi session (focuses it if open); created_id = open session id" },
 	{ type: "new_chat", args: "project_id", does: "start a new pi session; created_id = open session id" },
 	{ type: "focus_session", args: "session", does: "show an open session" },
-	{ type: "new_shell_tab", args: "session", does: "open a shell tab in an open session; created_id = tab id" },
+	{ type: "new_shell_tab", args: "session, pane?", does: "open a shell tab in an open session (in its pane `pane`, default the focused one); created_id = tab id" },
 	{ type: "close_tab", args: "tab_id", does: "close a shell tab (a pi tab cannot be closed)", confirm_class: "tab_close" },
-	{ type: "focus_tab", args: "tab_id", does: "focus a tab and make its session current" },
+	{ type: "focus_tab", args: "tab_id", does: "focus a tab (its pane gets the keyboard) and make its session current" },
+	{ type: "split_pane", args: "pane?, direction, tab_id?, focus?", does: `split a pane (default: the current session's focused one) "right", "down", "left" or "up"; tab_id: move that tab of the session into the new pane (not a pane's only tab), else a new shell opens there; focus false: the keyboard stays; created_id = the new pane id; at most 8 panes${PANES_ONLY}` },
+	{ type: "close_pane", args: "pane", does: `unsplit: the pane goes and its tabs join the neighbouring pane (nothing closes)${PANES_ONLY}` },
+	{ type: "focus_pane", args: "pane? | direction", does: `focus a pane (its tab gets the keyboard, its session current), or the current session's pane "left", "right", "up", "down", "next" or "prev" of the focused one${PANES_ONLY}` },
+	{ type: "move_tab", args: "tab_id, pane, index?", does: `move a tab into another pane of its session at strip position index (default the end), or reorder it in its pane; a pane left empty closes${PANES_ONLY}` },
+	{ type: "set_split", args: "split, ratio", does: `a divider's place: the share (0.05-0.95) of a split's first side; split = a split id from the session's layout (full: true)${PANES_ONLY}` },
+	{ type: "equalize_panes", args: "session?", does: `even every divider of a session (default the current one)${PANES_ONLY}` },
 	{ type: "copy_selection", args: "tab_id", does: "copy a tab's terminal selection" },
 	{ type: "send_text", args: "tab_id, text", does: "paste text into a terminal (raw keystrokes into a pi tab; use desk_prompt for pi)" },
 	{ type: "set_focus", args: "widget", does: 'focus a widget ("" = terminal; rename_project)' },

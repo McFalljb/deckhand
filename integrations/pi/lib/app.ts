@@ -99,7 +99,7 @@ export function shotFile(tab: number, file: unknown, shotsDir: string | undefine
 /** app_screenshot's text: size, frame and file. */
 export function shotText(tab: number, d: R): string {
 	const where = d.rect && (d.rect.x || d.rect.y) ? ` (from ${d.rect.x},${d.rect.y})` : "";
-	const hidden = d.visible === false ? " The tab is not on screen: the last frame it showed." : "";
+	const hidden = d.visible === false ? " The tab is not on screen (no pane shows it): the last frame it showed." : "";
 	return `Tab ${tab}'s frame (seq ${d.seq}, tick ${d.tick}): ${d.w}×${d.h} px at scale ${d.scale}${where}, PNG ${d.bytes} bytes at ${d.path}${hidden}`;
 }
 

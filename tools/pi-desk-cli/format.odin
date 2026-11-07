@@ -509,8 +509,66 @@ state_out :: proc(req: ^Req, result: json.Object) -> string {
 	data := "{}"
 	if v, has := result["data"]; has do data = json_text(v)
 	w := ok_begin(req)
-	jw_str(&w, "content", fenced("Deckhand's state as this Claude tab sees it (its own session; tab titles and addresses are the pages'):", "deckhand state", cap_text(data, TEXT_MAX)))
+	head := "Deckhand's state as this Claude tab sees it (its own session; tab titles and addresses are the pages'):"
+	if p := panes_line(get_obj(result, "data")); p != "" do head = fmt.aprintf("%s\n%s", p, head)
+	jw_str(&w, "content", fenced(head, "deckhand state", cap_text(data, TEXT_MAX)))
 	return jw_end(&w)
+}
+
+// A split session's panes in our words (ids only, so it stands outside the fence): which tabs sit
+// side by side, e.g. `Session 3 is split into panes 7 | (8 / 9) ("|" side by side, "/" stacked).
+// Pane 7: tabs 2, 5; shows 2. Pane 8: tab 4; shows 4; has the keyboard.` "" for one pane.
+panes_line :: proc(d: json.Object) -> string {
+	lines := make([dynamic]string)
+	for sv in get_arr(d, "open_sessions") {
+		s, _ := sv.(json.Object)
+		panes := get_arr(s, "panes")
+		if len(panes) < 2 do continue
+		b := strings.builder_make()
+		sid, _ := get_int(s, "id")
+		fmt.sbprintf(&b, "Session %d is split into panes ", sid)
+		if lo := get_obj(s, "layout"); lo != nil do pane_tree(&b, lo, true)
+		strings.write_string(&b, ` ("|" side by side, "/" stacked).`)
+		focused, _ := get_int(s, "focused_pane")
+		for pv in panes {
+			p, _ := pv.(json.Object)
+			id, _ := get_int(p, "id")
+			tabs := get_arr(p, "tabs")
+			fmt.sbprintf(&b, " Pane %d: tab%s", id, len(tabs) == 1 ? "" : "s")
+			for tv, i in tabs {
+				n: i64
+				#partial switch x in tv {
+				case json.Integer: n = i64(x)
+				case json.Float:   n = i64(x)
+				}
+				fmt.sbprintf(&b, "%s %d", i > 0 ? "," : "", n)
+			}
+			if a, ok := get_int(p, "active_tab"); ok do fmt.sbprintf(&b, "; shows %d", a)
+			strings.write_string(&b, id == focused ? "; has the keyboard." : ".")
+		}
+		append(&lines, strings.to_string(b))
+	}
+	if len(lines) == 0 do return ""
+	append(&lines, "Only the user changes the panes; a tab you open goes behind the tab its pane shows (`deckhand show`: in your pane).")
+	return strings.join(lines[:], "\n")
+}
+
+// A layout node: `{"pane": id}` or `{"split", "dir", "a", "b"}`; nested splits in parentheses.
+pane_tree :: proc(b: ^strings.Builder, n: json.Object, top: bool) {
+	if id, ok := get_int(n, "pane"); ok {
+		fmt.sbprintf(b, "%d", id)
+		return
+	}
+	a, b2 := get_obj(n, "a"), get_obj(n, "b")
+	if a == nil || b2 == nil {
+		strings.write_string(b, "?")
+		return
+	}
+	if !top do strings.write_byte(b, '(')
+	pane_tree(b, a, false)
+	strings.write_string(b, get_text(n, "dir") == "down" ? " / " : " | ")
+	pane_tree(b, b2, false)
+	if !top do strings.write_byte(b, ')')
 }
 
 // show: the tab Deckhand opened (or found), its kind and where; what to tell the user.

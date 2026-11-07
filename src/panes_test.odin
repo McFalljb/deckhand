@@ -944,10 +944,10 @@ panes_split_layout :: proc(t: ^testing.T) {
 		testing.expectf(t, p.rect.z >= PANE_MIN_W && p.rect.w >= PANE_MIN_H - TAB_STRIP_H, "pane %d: %v", p.slot, p.rect)
 	}
 	// a split that leaves no room for two panes is refused (in a 1000 px window B is 350 wide: two
-	// need 481)
+	// need 481); a new shell, not the pi tab: alone in A, it would take A's room with it
 	_ = ui_layout(1000, 860)
 	ui_pane_rects(s)
-	r = run_command(Split_Pane{pane = b, direction = .Right, tab_id = ids[0]}, PT_UI)
+	r = run_command(Split_Pane{pane = b, direction = .Right}, PT_UI)
 	testing.expect_value(t, r.error, "not enough room")
 	app.centre = {}
 }

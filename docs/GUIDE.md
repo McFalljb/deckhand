@@ -404,10 +404,12 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
       tinted; drop to split that pane that way with the tab in the new half. This is also how a
       session with one pane gets its first split from the title bar;
     - over the middle of another pane: the pane is tinted; drop to move the tab into it.
-    Elsewhere the pointer shows that the tab can't go there. Press Esc, or leave the window, to
-    cancel. A split the session has no room for (8 panes, or a pane too small for two halves)
-    shows red with why, and dropping there changes nothing. The session's pi tab (or Claude main
-    tab) can move to another pane or split one too, but it always stays first in its strip.
+    Elsewhere the pointer shows that the tab can't go there, and letting go there (or outside
+    the window) changes nothing. Press Esc to cancel. A split the session has no room for (8
+    panes, or a pane too small for two halves) shows red with why, and dropping there changes
+    nothing; a pane's only tab dropped beside another pane is never refused for the 8-pane limit,
+    since its own pane closes. The session's pi tab (or Claude main tab) can move to another pane
+    or split one too, but it always stays first in its strip.
   - **To resize panes**, drag the line between them; double-click it to make the two sides
     equal. **Even out panes** (palette, Window menu) gives every pane equal room.
   - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join

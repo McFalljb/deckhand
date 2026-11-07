@@ -4,7 +4,7 @@ package main
 // from rects alone (the zones of a pane's body, a strip's gaps, the pi tab's place, the limits),
 // the command each drop runs, what its indicator covers; then the drag itself on a laid-out
 // window: a press that moves less than the threshold is a click, a reorder in the title bar, the
-// first split by an edge, a move between strips, the pi tab moved, Esc and leaving the window.
+// first split by an edge, a move between strips, the pi tab moved, Esc.
 
 import "base:runtime"
 import "core:testing"
@@ -166,7 +166,7 @@ tab_drop_previews :: proc(t: ^testing.T) {
 
 // The drag on a laid-out window (one pane, then two): the threshold, a reorder in the title bar,
 // the first split by an edge drop, a move to the other pane's strip, the pi tab to another pane
-// (still tabs[0]), Esc and leaving the window cancel.
+// (still tabs[0]), Esc cancels.
 @(test)
 tab_drag_on_the_window :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -229,7 +229,7 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	testing.expect(t, !tab_drag_event(&up), "cancelled: the release goes on")
 	inbox_drain()
 	testing.expect_value(t, pane_of_tab(s, s2).id, s.panes[0].id)
-	// leaving the window cancels too
+	// a leave (sokol sends none while the button is held; should one come) cancels too
 	tab_drag_arm(s2, x, y)
 	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
 	leave := sapp.Event{type = .MOUSE_LEAVE}
@@ -256,4 +256,109 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(s.panes), 1)
 	testing.expect_value(t, s.tabs[0].id, pi)
 	testing.expect_value(t, pt_strip_titles(s, s.panes[0].id), "pi,shell 1,shell 2")
+}
+
+// ---- review fixes ----
+
+// A lone tab from another pane dropped on an edge adds no pane (its own pane goes): at the limit
+// it is not refused.
+@(test)
+tab_drop_lone_tab_at_the_limit :: proc(t: ^testing.T) {
+	full := pd_input(3, 20)
+	full.at_max = true
+	full.from_count = 1
+	d := tab_drop_at(full, 10, 300) // A's left edge, s2 alone in B
+	testing.expect_value(t, d.refused, "")
+	cmd, ok := tab_drop_command(d, 3)
+	testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 10, direction = .Left, tab_id = 3}, "split_pane")
+	full.from_count = 2
+	d = tab_drop_at(full, 10, 300)
+	testing.expect_value(t, d.refused, "at most 8 panes") // a tab with company: one more pane
+}
+
+// split_pane with a lone tab of another pane: at 8 panes it ends with 8 panes; and its room is the
+// tree's without the pane the tab leaves.
+@(test)
+panes_cmd_split_lone_tab :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(PANES_MAX - 1)
+	shells := make([]u64, PANES_MAX - 1, context.temp_allocator)
+	for i in 0 ..< PANES_MAX - 1 do shells[i] = s.tabs[i + 1].id
+	for id in shells {
+		r := run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = id}, PT_UI)
+		testing.expectf(t, r.ok, "split: %s", r.error)
+	}
+	testing.expect_value(t, len(s.panes), PANES_MAX)
+	r := run_command(Split_Pane{pane = pane_of_tab(s, shells[0]).id, direction = .Down}, PT_UI)
+	testing.expect_value(t, r.error, "at most 8 panes") // a new shell: one more pane
+	r = run_command(Split_Pane{pane = pane_of_tab(s, shells[0]).id, direction = .Down, tab_id = shells[1]}, PT_UI)
+	testing.expectf(t, r.ok, "a lone tab from another pane: %s", r.error)
+	testing.expect_value(t, len(s.panes), PANES_MAX)
+	testing.expect_value(t, session_check(s), "")
+	// room: pi | (s1 | s2) in 740 px; s2 (alone) beside pi needs pi's and s1's room, not s2's
+	s = pt_one(2)
+	pi, s1, s2 := s.tabs[0].id, s.tabs[1].id, s.tabs[2].id
+	run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s1}, PT_UI)
+	run_command(Split_Pane{pane = pane_of_tab(s, s1).id, direction = .Right, tab_id = s2}, PT_UI)
+	pane_set_ratio(s, s.nodes[s.root].id, 0.7)
+	old_c, old_d := app.centre, app.dpi
+	defer app.centre, app.dpi = old_c, old_d
+	app.centre, app.dpi = {0, 0, 740, 600}, 1
+	r = run_command(Split_Pane{pane = pane_of_tab(s, pi).id, direction = .Right, tab_id = s2}, PT_UI)
+	testing.expectf(t, r.ok, "room without s2's pane: %s", r.error)
+	testing.expect_value(t, len(s.panes), 3)
+}
+
+// A press whose button went up somewhere else (a menu, the job sheet took the release) never
+// stays armed: a move without the button, or with a menu open, ends it.
+@(test)
+tab_drag_ends_without_the_button :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	defer tab_drag = {}
+	s := pt_one(1)
+	tab_drag_arm(s.tabs[1].id, 100, 10)
+	held := sapp.Event{type = .MOUSE_MOVE, mouse_x = 101, mouse_y = 10, modifiers = sapp.MODIFIER_LMB}
+	testing.expect(t, tab_drag_event(&held), "a held move under the threshold is the press's")
+	testing.expect(t, tab_drag.tab != 0, "still armed")
+	free := sapp.Event{type = .MOUSE_MOVE, mouse_x = 300, mouse_y = 300}
+	testing.expect(t, !tab_drag_event(&free), "a move without the button goes on as any")
+	testing.expect_value(t, tab_drag.tab, u64(0))
+	tab_drag_arm(s.tabs[1].id, 100, 10)
+	menu.open = true
+	defer menu.open = false
+	tab_drag_event(&held)
+	testing.expect_value(t, tab_drag.tab, u64(0))
+}
+
+// Nothing drops under the drawer sliding over the panes.
+@(test)
+tab_drop_not_under_the_drawer :: proc(t: ^testing.T) {
+	input := pd_input(3, 20)
+	input.covered = {300, 0, 500, 600}
+	testing.expect_value(t, tab_drop_at(input, 350, 300).kind, Tab_Drop_Kind.None)
+	testing.expect_value(t, tab_drop_at(input, 350, 15).kind, Tab_Drop_Kind.None) // a strip under it too
+	testing.expect_value(t, tab_drop_at(input, 200, 300).kind, Tab_Drop_Kind.Centre)
+}
+
+// The dragged tab closes mid-drag: the drag ends at the next layout (no preview of a gone tab).
+@(test)
+tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	defer tab_drag = {}
+	s := pt_one(2)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	_ = ui_layout(1400, 860)
+	ui_pane_rects(s)
+	b := clay.GetElementData(clay.ID("tab", 2)).boundingBox
+	z := s.panes[0].frame
+	id := s.tabs[2].id
+	tab_drag_arm(id, b.x + b.width / 2, b.y + b.height / 2)
+	tab_drag_move(z.x + z.z - 10, z.y + z.w / 2)
+	testing.expect(t, tab_dragging(), "a drag")
+	r := run_command(Close_Tab{tab_id = id}, PT_UI)
+	testing.expectf(t, r.ok, "close: %s", r.error)
+	_ = ui_layout(1400, 860)
+	testing.expect_value(t, tab_drag.tab, u64(0))
 }

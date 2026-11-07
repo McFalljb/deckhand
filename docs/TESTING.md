@@ -96,7 +96,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `term-links` | terminal links: ⌘-hover/click, OSC 8, wrapped URLs, `javascript:` refused, opening only logged | 7 | smoke |
 | `panes` | split panes: ⌘D and ⇧⌘D with a new shell, typing per pane, ⌃⌘arrows and click focus, a pane divider's drag and its minimum (the shells' columns follow), ⇧⌃⌘arrows, a pane's last tab closing, ⇧⌘W | 9 | |
 | `panes-capture` | pointer capture: a selection pressed in one pane's terminal (and editor) and released over another stays in the first; that pane has the keyboard | 6 | |
-| `panes-drag` | dragging tabs (`dragtab`): a press moved 2 px is a click, a reorder in the title bar (never before the pi tab), the first split by an edge drop, the drop indicator while held, Esc and leaving the window cancel, a move to another pane's strip, the pi tab moved (its pane collapses) and split down, staying `tabs[0]` | 5 | |
+| `panes-drag` | dragging tabs (`dragtab`): a press moved 2 px is a click, a reorder in the title bar (never before the pi tab), the first split by an edge drop, the drop indicator while held, Esc cancels, a release outside the window drops nothing, a move to another pane's strip, the pi tab moved (its pane collapses) and split down, staying `tabs[0]` | 5 | |
 | `panes-restore` | split panes across a quit and relaunch: the tree, its ratios, each pane's tabs and shown tab, the focused pane, every shell sized to its pane | 6 | |
 | `fetch-cef-test` | `scripts/fetch-cef.sh`: a bad archive deleted, concurrent fetches, a stale tree not reused | 13 | not an app scene |
 

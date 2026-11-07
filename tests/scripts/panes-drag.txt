@@ -1,7 +1,7 @@
 # Dragging tabs (panes_drag.odin; docs/plans/split-panes.md P5): a press that moves a few px is
 # still a click; a drag in the title bar reorders (never before the pi tab); a drop on a pane's
 # edge splits it with the tab (the first split from the title bar); a drop on another strip moves
-# the tab there; Esc and leaving the window cancel; the pi tab moves to another pane and splits
+# the tab there; Esc cancels, a release outside the window drops nothing; the pi tab moves to another pane and splits
 # one, staying tabs[0]. Run with tests/scripts/panes.sh panes-drag.txt.
 wait 1000
 waitfor ARGS: 15000
@@ -35,8 +35,8 @@ hover tab_drop
 key escape
 assert_state open_sessions.0.panes.0.tabs.# 2
 assert_state open_sessions.0.panes.1.tabs.# 1
-# and the pointer leaving the window before the release
-dragtab 1 centre 1 leave
+# and a release outside the window (AppKit still reports it; sokol sends no leave while held)
+dragtab 1 outside
 assert_state open_sessions.0.panes.0.tabs.# 2
 # B to the right pane's strip, after A
 dragtab 1 strip 1 1

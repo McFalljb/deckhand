@@ -14,7 +14,8 @@ import sapp "../vendor/sokol-odin/sokol/app"
 //     that way with the tab (split_pane with tab_id), its centre moves the tab into that pane
 //     (move_tab); a translucent rectangle shows the area the tab would take;
 //   - anywhere else: nothing (the pointer says not allowed).
-// Esc, the pointer leaving the window or the window losing focus cancel it. A drop the commands
+// Esc or the window losing focus cancel it; a release outside the window (or anywhere no tab
+// goes) drops nothing. A drag whose tab closes, or whose release a menu took, ends. A drop the commands
 // would refuse (PANES_MAX, a pane too small to split) is shown refused while hovered and says
 // why when dropped. The pi/main tab can move to another pane or split one; it stays tabs[0], so it
 // is always first in its strip and other tabs land after it (pane_move_tab).
@@ -69,6 +70,7 @@ Tab_Drop_Input :: struct {
 	edge_min:      f32, // TAB_DROP_EDGE_MIN, TAB_DROP_EDGE_MAX in framebuffer px
 	edge_max:      f32,
 	mark_w:        f32,
+	covered:       [4]f32, // over the panes, where nothing drops (the drawer sliding over them; {}: none)
 }
 
 // Which part of rect r the point is in: an edge's zone (the side it is nearest, relative to the
@@ -95,6 +97,7 @@ drop_zone_at :: proc(r: [4]f32, x, y, edge_min, edge_max: f32) -> (dir: Pane_Dir
 
 // Where a drop at (x, y) lands (framebuffer px): a strip first, then a pane's body.
 tab_drop_at :: proc(input: Tab_Drop_Input, x, y: f32) -> Tab_Drop {
+	if rect_has(input.covered, x, y) do return {}
 	for p in input.panes do if rect_has(p.strip, x, y) do return strip_drop(input, p, x)
 	for p in input.panes {
 		dir, edge, ok := drop_zone_at(p.zone, x, y, input.edge_min, input.edge_max)
@@ -103,7 +106,8 @@ tab_drop_at :: proc(input: Tab_Drop_Input, x, y: f32) -> Tab_Drop {
 		d := Tab_Drop{kind = .Edge, pane = p.id, dir = dir}
 		if p.id == input.from && input.from_count <= 1 {
 			d.noop = true // a pane's only tab beside itself
-		} else if input.at_max {
+		} else if input.at_max && input.from_count > 1 {
+			// (a lone tab's own pane closes: the split adds no pane)
 			d.refused = "at most 8 panes"
 		} else if !p.room[dir] {
 			d.refused = "not enough room"
@@ -281,6 +285,11 @@ tab_drag_cancel :: proc() {
 // true: taken.
 tab_drag_event :: proc(e: ^sapp.Event) -> bool {
 	if tab_drag.tab == 0 do return false
+	// the release went to something else (a menu, the job sheet): no press is held any more
+	if menu.open || job_sheet_open() || (e.type == .MOUSE_MOVE && e.modifiers & sapp.MODIFIER_LMB == 0) {
+		tab_drag_cancel()
+		return false
+	}
 	#partial switch e.type {
 	case .MOUSE_MOVE:
 		tab_drag_move(e.mouse_x, e.mouse_y)
@@ -290,6 +299,8 @@ tab_drag_event :: proc(e: ^sapp.Event) -> bool {
 	case .MOUSE_DOWN:
 		tab_drag_cancel() // another button
 	case .MOUSE_LEAVE, .UNFOCUSED:
+		// (sokol sends no MOUSE_LEAVE while the button is held: a release outside the window lands
+		// outside every pane and strip, so it drops nothing; this covers a leave if one comes)
 		was := tab_drag.active
 		tab_drag_cancel()
 		return was && e.type == .MOUSE_LEAVE
@@ -347,10 +358,13 @@ tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
 			right := last.x + last.z + px(TAB_MIN_W)
 			dp.strip = {first.x, bar.w > 0 ? bar.y : first.y, right - first.x, bar.w > 0 ? bar.w : first.w}
 		}
-		for d in Pane_Dir do dp.room[d] = pane_has_room(s, p.id, d)
+		// a lone tab takes its own pane's room with it (split_pane checks the same)
+		leaving := input.from_count <= 1 ? input.from : 0
+		for d in Pane_Dir do dp.room[d] = pane_has_room_leaving(s, p.id, d, leaving)
 		panes[k] = dp
 	}
 	input.panes = panes
+	if state.home_open && !state.layout.drawer_pinned do input.covered = box(clay.ID("drawer")) // it slides over the panes
 	return input
 }
 
@@ -359,6 +373,7 @@ tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
 // The drop indicator and the tab's ghost under the pointer, above the panes' tabs ("tab_drop"
 // and "tab_ghost" are drawn after them: main.odin frame()).
 tab_drag_layout :: proc() {
+	if tab_drag.tab != 0 && (pane_of_tab(cur(), tab_drag.tab) == nil || menu.open || job_sheet_open()) do tab_drag_cancel() // its tab closed, or something took over
 	if !tab_dragging() do return
 	th := theme()
 	d := tab_drag.drop

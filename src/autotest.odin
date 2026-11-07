@@ -65,13 +65,14 @@ package main
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
 //   dragid FROM INDEX TO       left drag from element FROM INDEX to element TO (centres)
-//   dragtab TAB WHERE [SLOT] [GAP] [esc|leave|hold]   left drag of tab TAB (its index in the open
+//   dragtab TAB WHERE [SLOT] [GAP] [esc|hold]   left drag of tab TAB (its index in the open
 //                              session's tabs) to WHERE: `strip SLOT GAP` (pane SLOT's strip, or
 //                              the title bar's with one pane, before its GAP-th tab), `centre SLOT`,
 //                              `left|right|up|down SLOT` (that edge's drop zone of pane SLOT's
 //                              body), `by DX DY` (logical px from the tab's centre: under the
-//                              threshold it is a click); `esc` presses Escape and `leave` moves the
-//                              pointer out of the window before the release; `hold` never releases
+//                              threshold it is a click), `outside` (released past the window's
+//                              right edge, as AppKit still reports it); `esc` presses Escape
+//                              before the release; `hold` never releases
 //                              (for a shot; `key escape` cancels it) (panes_drag.odin)
 //   files_time N DY            lay out N frames, scrolling the Files tree by DY each: time per frame
 //   assert_rows SECTION LIST   the left column's rows (open|projects|sessions|chats) as
@@ -670,7 +671,8 @@ autotest_step :: proc() {
 				continue
 			}
 			b := d.boundingBox
-			send({type = .MOUSE_MOVE, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2})
+			held: u32 = tab_drag.tab != 0 ? sapp.MODIFIER_LMB : 0 // a held dragtab's button is still down
+			send({type = .MOUSE_MOVE, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2, modifiers = held})
 		case "sweep":
 			sweep_hover(args[0], u32(num(args[1])), int(num(args[2])))
 		case "clickid":
@@ -779,7 +781,6 @@ autotest_step :: proc() {
 			}
 			switch args[len(args) - 1] {
 			case "esc": key_event("escape", 0)
-			case "leave": send({type = .MOUSE_LEAVE, mouse_x = x2, mouse_y = y2})
 			case "hold": continue // the button stays down (a shot of the indicator; `key escape` ends it)
 			}
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x2, mouse_y = y2})
@@ -1345,6 +1346,7 @@ script_tab_drag_points :: proc(args: []string) -> (x1, y1, x2, y2: f32, ok: bool
 	if !d.found do return
 	b := d.boundingBox
 	x1, y1 = b.x + b.width / 2, b.y + b.height / 2
+	if args[1] == "outside" do return x1, y1, sapp.widthf() + 40 * app.dpi, y1 + 100 * app.dpi, true
 	if args[1] == "by" {
 		if len(args) < 4 do return
 		return x1, y1, x1 + num(args[2]) * app.dpi, y1 + num(args[3]) * app.dpi, true

@@ -373,10 +373,11 @@ pane_next_tab :: proc(s: ^Open_Session, pane_id, gone: u64) -> u64 {
 
 // Splits pane `pane_id` in direction dir: its leaf becomes a split of the old pane and a new,
 // empty pane (ratio 0.5); first: the new pane comes first (left of or above the old one). Returns
-// the new pane's id, 0 when refused (Home, no such pane, PANES_MAX). The caller gives the new
+// the new pane's id, 0 when refused (Home, no such pane, `limit` panes: PANES_MAX, one more
+// only when the caller then closes one). The caller gives the new
 // pane a tab (pane_add_tab or pane_move_tab) before anything reads it.
-pane_split :: proc(s: ^Open_Session, pane_id: u64, dir: Split_Dir, first := false) -> u64 {
-	if s == nil || s.home || len(s.panes) >= PANES_MAX do return 0
+pane_split :: proc(s: ^Open_Session, pane_id: u64, dir: Split_Dir, first := false, limit := PANES_MAX) -> u64 {
+	if s == nil || s.home || len(s.panes) >= limit do return 0
 	session_panes_init(s)
 	leaf := node_of_pane(s, pane_id)
 	if leaf < 0 do return 0

@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core:slice"
 import clay "../build/clay-odin"
 
 // The pane commands (docs/PROTOCOL.md "Panes"; docs/plans/split-panes.md §4): split_pane,
@@ -15,17 +16,21 @@ panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		s, p := pane_find(c.pane)
 		if p == nil do return fail("no such pane"), false
 		if s.home do return fail(HOME_NOT_A_SESSION), false
-		if len(s.panes) >= PANES_MAX do return fail(fmt.tprintf("at most %d panes", PANES_MAX)), false
-		if !pane_has_room(s, p.id, c.direction) do return fail("not enough room"), false
 		moving: ^Tab
+		leaving: u64 // the pane the moving tab empties (it closes): the split adds no pane then
 		if c.tab_id != 0 {
 			ts, tab, _ := find_tab(c.tab_id)
 			if tab == nil || ts.id != s.id do return fail("no such tab in this pane's session"), false
-			if pane_tab_count(s, tab.pane) <= 1 && tab.pane == p.id do return fail("a pane's only tab cannot move to a new pane"), false
+			if pane_tab_count(s, tab.pane) <= 1 {
+				if tab.pane == p.id do return fail("a pane's only tab cannot move to a new pane"), false
+				leaving = tab.pane
+			}
 			moving = tab
 		}
+		if len(s.panes) - (leaving != 0 ? 1 : 0) >= PANES_MAX do return fail(fmt.tprintf("at most %d panes", PANES_MAX)), false
+		if !pane_has_room_leaving(s, p.id, c.direction, leaving) do return fail("not enough room"), false
 		split, first := pane_split_dir(c.direction)
-		np := pane_split(s, p.id, split, first)
+		np := pane_split(s, p.id, split, first, limit = PANES_MAX + (leaving != 0 ? 1 : 0)) // one over for a moment: `leaving` closes below
 		if np == 0 do return fail("could not split"), false
 		shown: u64
 		if moving != nil {
@@ -144,6 +149,23 @@ pane_has_room :: proc(s: ^Open_Session, pane: u64, d: Pane_Dir) -> bool {
 	}
 	return true
 }
+// pane_has_room once pane `leaving` (0: none) has gone from the tree: a lone tab moving to a new
+// pane beside another takes its own pane's room with it. Worked out on a copy of the tree.
+pane_has_room_leaving :: proc(s: ^Open_Session, pane: u64, d: Pane_Dir, leaving: u64) -> bool {
+	if leaving == 0 || leaving == pane || len(s.panes) <= 1 do return pane_has_room(s, pane, d)
+	c := s^
+	c.panes = slice.clone_to_dynamic(s.panes[:])
+	c.nodes = slice.clone_to_dynamic(s.nodes[:])
+	c.pane_mru = slice.clone_to_dynamic(s.pane_mru[:])
+	pane_remove(&c, leaving) // touches only the copies (and s.tabs, not at all)
+	defer {
+		delete(c.panes)
+		delete(c.nodes)
+		delete(c.pane_mru)
+	}
+	return pane_has_room(&c, pane, d)
+}
+
 // Every divider by the panes on each side along its direction, so equal panes get equal room.
 panes_equalize :: proc(s: ^Open_Session) {
 	along :: proc(s: ^Open_Session, n: int, dir: Split_Dir) -> int {

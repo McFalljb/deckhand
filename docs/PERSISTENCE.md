@@ -64,6 +64,42 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   read-only again, whatever the setting; `claude_sessions` entries carry the same field), and
   `account`: its account's config folder (§1b; it starts there again; left out from older files:
   the default). A saved id that is not a session id, or flags Deckhand sets itself, drop the tab.
+- **Panes** (docs/GUIDE.md, split panes): a session split into panes also saves `panes`; a
+  session with one pane has no `panes` key (its entry is exactly as before panes):
+
+  ```json
+  {"pi_session_id":"…","tabs":[{"kind":"pi"},{"kind":"shell",…},{"kind":"shell",…},{"kind":"shell",…}],"active_tab":1,
+   "panes":{"tree":{"split":"right","ratio":0.347,"a":{"pane":0},
+                    "b":{"split":"down","ratio":0.500,"a":{"pane":1},"b":{"pane":2}}},
+            "tab_pane":[1,0,1,2],"active":[1,0,3],"focused":0}}
+  ```
+
+  `tree` is the layout: a pane `{"pane":N}` or a split `{"split":"right"|"down","ratio","a","b"}`
+  (`right`: `a` left of `b`; `down`: `a` above `b`; `ratio`: `a`'s share, 3 decimals). Panes are
+  numbered in the tree's order (left to right, top to bottom). `tab_pane[j]` is the pane of the
+  saved tab `j` (the pi tab, `tabs[0]`, may be in any pane), `active[N]` the saved tab pane `N`
+  shows, `focused` the pane with the keyboard; `active_tab` stays the focused pane's shown tab,
+  so a file read by a Deckhand from before panes gives the same tab. Pane ids, sizes, the focus
+  history and drags are not saved. `WORKSPACE_VERSION` is unchanged: **a Deckhand from before
+  panes reads a file with `panes` and silently drops the layout** (every tab back in one pane,
+  the focused pane's tab active); its next save leaves the key out.
+  Restored with `restore_session` (`persist.odin` `panes_parse`, `panes_restore.odin`). The tabs
+  always come back from `tabs`; `panes` only places them, and a layout that does not fit never
+  fails the restore:
+  - **One pane** (as from a file without `panes`): `panes` not an object; no `tree`, or a tree
+    that is not one (a node neither a pane nor a split; a split whose `split` is not `right` or
+    `down`, whose `ratio` is not a number or that lacks `a` or `b`; a pane number not an
+    integer, used twice or not below the number of panes); a single pane; more than 8 panes;
+    and, after the rules below, anything the session's pane checks refuse.
+  - A `ratio` out of 0.05–0.95 is clamped into it.
+  - A tab whose `tab_pane` entry is missing, not an integer or not a pane goes to the focused
+    pane. A `focused` that is not a pane: the first pane.
+  - A pane shows its `active` tab when that is one of its tabs and came back; else the saved
+    `active_tab` when it is in that pane; else its first tab.
+  - A pane none of whose tabs came back (an app tab, a diff view, a file that is no longer a
+    regular file, a URL that does not open, a bad Claude session: the tabs every restore drops)
+    is removed and the split around it closes; if it had the keyboard, the first pane left
+    gets it.
 - A Claude-only session (docs/CLAUDE.md §1) is saved in `open_sessions` as
   `{"agent":"claude","claude_session_id","pi_session_id":"","cwd","project","tabs":[{"kind":"claude",…},…],"active_tab"}`:
   `tabs[0]` is its main Claude tab (same id), never a pi tab; saved once Claude reported its

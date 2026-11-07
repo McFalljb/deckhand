@@ -6,7 +6,8 @@ import clay "../build/clay-odin"
 // The pane commands (docs/PROTOCOL.md "Panes"; docs/plans/split-panes.md §4): split_pane,
 // close_pane, focus_pane, move_tab, set_split, equalize_panes. Who: Anyone (the user, scripts,
 // control callers), never a pi or Claude tab's bridge nor an app (who_allows): agents do not
-// change the layout. Home has one pane and is refused. Panes are not saved yet (the plan's P3).
+// change the layout. Home has one pane and is refused. The layout is saved per session
+// (persist.odin write_panes; restored by panes_restore.odin).
 
 panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {
@@ -161,8 +162,10 @@ panes_equalize :: proc(s: ^Open_Session) {
 pane_ratio_kept :: proc(s: ^Open_Session, split: u64, ratio: f32) -> f32 {
 	for n, i in s.nodes {
 		if n.leaf || n.id != split do continue
+		// laid out only in the current session, and only once Clay runs (not before the window, nor in tests)
+		if s.id != state.current_session || clay.GetCurrentContext() == nil do return ratio
 		d := clay.GetElementData(clay.ID("pane_split", u32(split)))
-		if !d.found || s.id != state.current_session do return ratio
+		if !d.found do return ratio
 		total := (n.dir == .Right ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W)
 		return pane_split_share(s, i, ratio, total)
 	}

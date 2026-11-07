@@ -321,6 +321,22 @@ Restore_Tab :: struct {
 	args:  []string, // Claude tabs: the user's extra flags
 	readonly: bool, // Claude tabs: started with pi-desk's read-only profile (kept: claude.odin)
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
+	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
+	pane_active: bool, // with a layout: the tab its pane showed
+}
+// A restored session's saved panes (persist.odin panes_parse; restored by restore_panes in
+// panes_restore.odin). nodes[0] is the tree's root; no nodes: one pane holding every tab.
+Restore_Layout :: struct {
+	nodes:   []Restore_Node,
+	panes:   int, // how many panes (the tree's leaves, numbered 0..panes-1)
+	focused: int, // the pane with the keyboard
+}
+Restore_Node :: struct {
+	leaf:  bool,
+	pane:  int, // leaf: its pane's index
+	dir:   Split_Dir, // split
+	ratio: f32, // split: child a's share, in [RATIO_MIN, 1 - RATIO_MIN]
+	a, b:  int, // split: indices into nodes
 }
 Restore_Session :: struct {
 	project_id:    u64,
@@ -330,6 +346,9 @@ Restore_Session :: struct {
 	tabs:          []Restore_Tab, // the tabs after the pi tab (agent claude: all of them, the main Claude tab first)
 	home:          bool, // the Home session (no project, no other tabs; session dir and cwd are pi-desk's)
 	agent:         Session_Agent, // claude: a Claude-only session; pi_session_id is its Claude session id
+	layout:        Restore_Layout, // its panes ({}: one pane)
+	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
+	pi_active:     bool, // with a layout: the pi tab was its pane's shown tab
 }
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
@@ -1581,7 +1600,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		}
 		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started})
 		s.id = new_id()
-		restore_tabs(&s, c.tabs)
+		restore_tabs(&s, c.tabs, c.layout, c.pi_pane, c.pi_active)
 		if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
 		append(&state.open_sessions, s)
 		return {ok = true, created_id = s.id}, true
@@ -1589,48 +1608,54 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	return fail("unknown command"), false
 }
 
-// The saved tabs of a restored session, after what it has (Restore_Session), not started.
-restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab) {
+// The saved tabs of a restored session, after what it has (Restore_Session), not started; then
+// its saved panes (layout: restore_panes, panes_restore.odin), the tabs it had already (the pi
+// tab) in pane `pi_pane`. Tabs that do not come back (restore_tab) leave their panes' places.
+restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab, layout: Restore_Layout = {}, pi_pane: Maybe(int) = nil, pi_active := false) {
 	session_panes_init(s) // one pane (a Claude-only session's: empty until its main tab)
+	places := make([dynamic]Restore_Place, context.temp_allocator)
+	for t in s.tabs do append(&places, Restore_Place{tab = t.id, pane = pi_pane.? or_else -1, active = pi_active})
 	for rt in tabs {
-		if rt.kind == .Editor {
-			// rt.cwd is the file's path; it opens when the session starts.
-			// Not a regular file now (a FIFO, a device): left out
-			if !regular_or_missing(rt.cwd) do continue
-			added := pane_add_tab(s, Tab{id = new_id(), kind = Editor_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
-			if rt.active do session_show_tab(s, added.id)
-			continue
-		}
-		if rt.kind == .Markdown {
-			if !regular_or_missing(rt.cwd) do continue
-			added := pane_add_tab(s, Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
-			if rt.active do session_show_tab(s, added.id)
-			continue
-		}
-		if rt.kind == .Browser {
-			// rt.cwd is its URL; the page loads once the session is focused
-			url, err := browser_url_normalize(rt.cwd)
-			if err != "" do continue
-			added := pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started})
-			if rt.active do session_show_tab(s, added.id)
-			continue
-		}
-		if rt.kind == .Claude {
-			if rt.claude_id != "" && !claude_id_ok(rt.claude_id) do continue
-			if claude_args_check(rt.args) != "" do continue
-			args := make([]string, len(rt.args))
-			for a, i in rt.args do args[i] = strings.clone(a)
-			// its account: an absolute folder; checked again at its start (claude_start: configured only)
-			acct := filepath.is_abs(rt.account) ? rt.account : ""
-			added := pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct)}, title = strings.clone("Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)})
-			if rt.active do session_show_tab(s, added.id)
-			continue
-		}
-		if rt.kind != .Shell do continue
-		title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
-		added := pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)})
-		if rt.active do session_show_tab(s, added.id)
+		added := restore_tab(s, rt)
+		if added == 0 do continue
+		append(&places, Restore_Place{tab = added, pane = rt.pane.? or_else -1, active = rt.pane_active})
+		if rt.active do session_show_tab(s, added)
 	}
+	restore_panes(s, layout, places[:])
+}
+
+// One saved tab back into s (its focused pane), not started; its id, 0 when it does not come
+// back (a file that is not a regular one, a bad URL or Claude session, an unknown kind).
+@(private = "file")
+restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
+	if rt.kind == .Editor {
+		// rt.cwd is the file's path; it opens when the session starts.
+		// Not a regular file now (a FIFO, a device): left out
+		if !regular_or_missing(rt.cwd) do return 0
+		return pane_add_tab(s, Tab{id = new_id(), kind = Editor_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started}).id
+	}
+	if rt.kind == .Markdown {
+		if !regular_or_missing(rt.cwd) do return 0
+		return pane_add_tab(s, Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started}).id
+	}
+	if rt.kind == .Browser {
+		// rt.cwd is its URL; the page loads once the session is focused
+		url, err := browser_url_normalize(rt.cwd)
+		if err != "" do return 0
+		return pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started}).id
+	}
+	if rt.kind == .Claude {
+		if rt.claude_id != "" && !claude_id_ok(rt.claude_id) do return 0
+		if claude_args_check(rt.args) != "" do return 0
+		args := make([]string, len(rt.args))
+		for a, i in rt.args do args[i] = strings.clone(a)
+		// its account: an absolute folder; checked again at its start (claude_start: configured only)
+		acct := filepath.is_abs(rt.account) ? rt.account : ""
+		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct)}, title = strings.clone("Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
+	}
+	if rt.kind != .Shell do return 0
+	title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
+	return pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 }
 
 // Policy check for a destructive command of `class`. Auto: go ahead.

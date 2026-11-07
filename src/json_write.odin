@@ -603,9 +603,36 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 			kv_str(&o, "title", t.title)
 			kv_str(&o, "cwd", t.cwd)
 			if t.active do kv_bool(&o, "active", true)
+			if len(c.layout.nodes) > 0 {
+				if pn, ok := t.pane.?; ok { // its saved pane (left out: not known)
+					key(&o, "pane")
+					strings.write_int(w.b, pn)
+				}
+				if t.pane_active do kv_bool(&o, "pane_active", true)
+			}
 			obj_end(&o)
 		}
 		strings.write_byte(w.b, ']')
+		if len(c.layout.nodes) > 0 {
+			// the saved panes (persist.odin panes_parse): the tree in pre-order, the pi tab's pane (left out: not known)
+			if pn, ok := c.pi_pane.?; ok && c.agent != .Claude {
+				key(&w, "pi_pane")
+				strings.write_int(w.b, pn)
+			}
+			key(&w, "panes")
+			lo := obj_begin(w.b)
+			kv_u64(&lo, "count", u64(c.layout.panes))
+			kv_u64(&lo, "focused", u64(c.layout.focused))
+			key(&lo, "tree")
+			strings.write_byte(w.b, '[')
+			for n, i in c.layout.nodes {
+				if i > 0 do strings.write_byte(w.b, ',')
+				if n.leaf do fmt.sbprintf(w.b, `{{"pane":%d}}`, n.pane)
+				else do fmt.sbprintf(w.b, `{{"split":"%s","ratio":%.3f,"a":%d,"b":%d}}`, n.dir == .Right ? "right" : "down", n.ratio, n.a, n.b)
+			}
+			strings.write_byte(w.b, ']')
+			obj_end(&lo)
+		}
 		if c.home do kv_bool(&w, "home", true)
 	case Open_File:
 		kv_str(&w, "path", c.path)

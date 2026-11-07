@@ -67,6 +67,7 @@ panels              | full     | test-data             |   18 | src/claude_panel
 persist-cpu         | manual   | alone                 |   23 | src/persist.odin tests/scripts/persist-cpu.* tests/scripts/fake-bridge-status.py
 panes               | required |                       |   12 | src/panes*.odin src/ui_panes.odin tests/scripts/panes.sh tests/scripts/panes.txt | tests/scripts/panes.sh
 panes-capture       | required |                       |    8 | src/panes*.odin src/ui_panes.odin src/editor_view.odin tests/scripts/panes.sh tests/scripts/panes-capture.txt | tests/scripts/panes.sh panes-capture.txt
+panes-restore       | required |                       |    6 | src/panes*.odin src/ui_panes.odin src/persist.odin tests/scripts/panes-restore* |
 pi-chat-readonly    | full     | smoke                 |    8 | src/agent.odin integrations/pi/* tests/scripts/pi-chat-readonly*
 pi-login-lookup     | full     |                       |   22 | src/harness.odin src/login_env.odin tests/scripts/pi-login-lookup*
 polish              | full     | test-data             |   50 | src/palette.odin src/textfield.odin src/ui_toolbar.odin tests/scripts/polish.* tests/scripts/fake-bridge.sh

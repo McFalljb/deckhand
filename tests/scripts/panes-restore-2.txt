@@ -1,0 +1,29 @@
+# Run 2 of panes-restore.sh: the panes from run 1 are back (tree, ratios, each pane's tabs and
+# shown tab, the focused pane: panes-restore.sh compares the two states), the session started,
+# every shell sized to its own pane.
+wait 300
+waitstate 5000 open_sessions.0.panes.# 3
+assert_state open_sessions.0.layout.dir right
+assert_state open_sessions.0.layout.ratio 0.347
+assert_state open_sessions.0.layout.b.dir down
+assert_state open_sessions.0.layout.b.ratio 0.5
+assert_state open_sessions.0.focused_pane $pane1
+assert_state open_sessions.0.panes.1.active_tab $tab
+assert_state open_sessions.0.panes.0.active_tab $pitab
+assert_state open_sessions.0.panes.0.tabs.# 1
+assert_state open_sessions.0.panes.1.tabs.# 1
+assert_state open_sessions.0.panes.2.tabs.# 2
+waitstate 5000 open_sessions.0.tabs.0.status running
+waitstate 5000 open_sessions.0.tabs.3.status running
+assert_state open_sessions.0.panes.0.rect.w 270
+waitfor Restored tab 5000
+wait 500
+assert_pane_cols 0
+assert_pane_cols 1
+assert_pane_cols 2
+# typing goes to the focused pane's shell
+type echo AFTER-RESTORE
+key enter
+waitfor AFTER-RESTORE 5000
+state_json panes-restore-after
+quit

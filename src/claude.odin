@@ -988,7 +988,7 @@ claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool
 	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || claude_args_check(c.tabs[0].args) != "" do return fail("a Claude session's first tab is its Claude tab"), false
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
-	restore_tabs(&s, c.tabs)
+	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
 	s.id = new_id()
 	if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
 	append(&state.open_sessions, s)

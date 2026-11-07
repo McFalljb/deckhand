@@ -1944,7 +1944,8 @@ app_bar_layout :: proc(p: ^Pane) {
 	}
 	th := theme()
 	if clay.UI(cid("app_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
@@ -1965,19 +1966,19 @@ app_bar_layout :: proc(p: ^Pane) {
 // A click on the bar's buttons. True if it took it.
 @(private = "file")
 app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
-	if inside(cid("app_inspect"), x, y) {
+	if cinside("app_inspect", x, y) {
 		ui_do(App_Inspect{tab_id = a.tab_id, on = !a.inspect})
 		return true
 	}
-	if inside(cid("app_restart"), x, y) {
+	if cinside("app_restart", x, y) {
 		ui_do(App_Restart{tab_id = a.tab_id})
 		return true
 	}
-	if inside(cid("app_log"), x, y) {
+	if cinside("app_log", x, y) {
 		if s, _, _ := find_tab(a.tab_id); s != nil do ui_do(Open_File{path = a.log_path, session = s.id})
 		return true
 	}
-	if inside(cid("app_wait"), x, y) {
+	if cinside("app_wait", x, y) {
 		// keep waiting: the next silence starts a new ping
 		a.ping_at, a.ping_answered = time.tick_now(), false
 		a.ring.last_frame = time.tick_now()

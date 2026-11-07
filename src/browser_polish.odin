@@ -1490,7 +1490,7 @@ over_overlay :: proc() -> bool {
 }
 
 @(private = "file")
-hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(cid(name), e.mouse_x, e.mouse_y)}
+hit :: proc(name: string, e: ^sapp.Event) -> bool {return cinside(name, e.mouse_x, e.mouse_y)} // within its pane (pane_inside)
 
 // The user's own click or key reached the page (browser.odin, as it sends it): a download the
 // page starts in the next DOWNLOAD_GESTURE goes without asking, once (download_take).
@@ -1727,7 +1727,8 @@ pg_field :: proc(box, text_id: clay.ElementId, f: ^Text_Field, placeholder: stri
 pg_bar :: proc() -> clay.ElementDeclaration {
 	th := theme()
 	return {
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}
@@ -1737,7 +1738,7 @@ pg_bar :: proc() -> clay.ElementDeclaration {
 @(private = "file")
 pg_room :: proc(reserve: f32) -> f32 {
 	room := px(300)
-	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(d.boundingBox.width - reserve, px(80))
+	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(min(d.boundingBox.width, pane_width()) - reserve, px(80)) // never wider for a wide bar
 	return room
 }
 

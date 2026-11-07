@@ -401,8 +401,12 @@ browser_bar_layout :: proc(p: ^Pane) {
 	bt, _ := tab.kind.(Browser_Tab)
 	th := theme()
 	focused := state.focus_widget == "browser_url" && pane_keys(p) // the field is the focused pane's
+	// the agent strip on a row of its own when the toolbar has no room for it beside the least
+	// address (a narrow pane): its buttons always whole (browser_agent.odin)
+	own_row := browser_agent_strip_w(b) > 0 && toolbar_parts_w(b, bt) + px(URL_LEAST + STRIP_TEXT_LEAST) + browser_agent_strip_buttons_w(b) > pane_width()
 	if clay.UI(cid("browser_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
@@ -430,11 +434,7 @@ browser_bar_layout :: proc(p: ^Pane) {
 					// address gives way to the agent strip and its buttons (browser_agent.odin)
 					// (a part's box is last frame's; the strip's width is computed: it comes and goes)
 					if bar := clay.GetElementData(cid("browser_bar")); bar.found {
-						others := px(2 * TERM_PAD + 2 * SP_2) + browser_agent_strip_w(b)
-						for part in ([]string{"br_back", "br_forward", bt.loading ? "br_stop" : "br_reload", "annot_toggle", "pg_more", browser_zoomed(b) ? "pg_zoom" : ""}) {
-							if part == "" do continue
-							if d := clay.GetElementData(cid(part)); d.found do others += d.boundingBox.width + px(SP_1)
-						}
+						others := px(2 * SP_2) + toolbar_parts_w(b, bt) + (own_row ? 0 : browser_agent_strip_w(b))
 						// the bar's own width, at most its pane's (a long address must not widen the pane)
 						room = max(min(room, min(bar.boundingBox.width, pane_width()) - others), px(40))
 					}
@@ -445,11 +445,29 @@ browser_bar_layout :: proc(p: ^Pane) {
 		}
 		if focused && browser_url_error != "" do clay.TextDynamic(browser_url_error, txt(th.error))
 		if focused do nav_button(cid("br_go"), "Go", true)
-		browser_agent_strip_layout(b) // an agent uses this page · Stop (browser_agent.odin)
+		if !own_row do browser_agent_strip_layout(b, false) // an agent uses this page · Stop (browser_agent.odin)
 		annot_button_layout(b) // comment mode's switch (browser_annotate.odin)
 		browser_polish_toolbar_layout(b) // the zoom chip and ⋯ (browser_polish.odin)
 	}
+	if own_row do browser_agent_strip_layout(b, true) // under the toolbar, its own bar
 	browser_polish_bars_layout(b) // crash, dialog, permission, popup, download and find bars (browser_polish.odin)
+}
+
+// The toolbar beside its address field and the agent strip may give way to: the least address
+// (logical px) and the least of the strip's text, before the strip takes a row of its own.
+URL_LEAST :: 80
+STRIP_TEXT_LEAST :: 60
+
+// What the toolbar's other parts take (last frame's boxes): its padding, Back, Forward, Reload
+// or Stop, Annotate, the zoom chip, ⋯ (px).
+@(private = "file")
+toolbar_parts_w :: proc(b: ^Browser, bt: Browser_Tab) -> f32 {
+	w := px(2 * TERM_PAD)
+	for part in ([]string{"br_back", "br_forward", bt.loading ? "br_stop" : "br_reload", "annot_toggle", "pg_more", browser_zoomed(b) ? "pg_zoom" : ""}) {
+		if part == "" do continue
+		if d := clay.GetElementData(cid(part)); d.found do w += d.boundingBox.width + px(SP_1)
+	}
+	return w
 }
 
 // The URL field takes the keyboard with the tab's address selected.
@@ -488,9 +506,9 @@ browser_url_go :: proc() {
 browser_bar_click :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if e.type != .MOUSE_DOWN || e.mouse_button != .LEFT do return false
 	b := pane_browser(p)
-	if b == nil || !inside(cid("browser_bar"), e.mouse_x, e.mouse_y) do return false
-	if inside(cid("annot_toggle"), e.mouse_x, e.mouse_y) do return false // annot_event's
-	hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(cid(name), e.mouse_x, e.mouse_y)}
+	if b == nil || (!cinside("browser_bar", e.mouse_x, e.mouse_y) && !cinside("br_agent_bar", e.mouse_x, e.mouse_y)) do return false // the toolbar, or the strip on its own row
+	if cinside("annot_toggle", e.mouse_x, e.mouse_y) do return false // annot_event's
+	hit :: proc(name: string, e: ^sapp.Event) -> bool {return cinside(name, e.mouse_x, e.mouse_y)}
 	switch {
 	case hit("br_back", e):    if browser_can(b.tab_id, .Back) do ui_do(Browser_Back{b.tab_id})
 	case hit("br_forward", e): if browser_can(b.tab_id, .Forward) do ui_do(Browser_Forward{b.tab_id})

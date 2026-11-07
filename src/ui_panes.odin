@@ -70,6 +70,27 @@ pane_press :: proc(e: ^sapp.Event) {
 	app.redraw = true
 }
 
+// The pane the last pointer move was for (event_pane): when the next is for another, the one it
+// left gets a mouse-leave, as when the pointer leaves the window (a page's hover and CEF's
+// pointer state, an app's Inspect hover).
+pointer_pane: u64
+
+pane_pointer_moved :: proc(fp: ^Pane) {
+	now := fp != nil ? fp.id : 0
+	if now == pointer_pane do return
+	before := pointer_pane
+	pointer_pane = now
+	s := cur()
+	if before == 0 || s == nil do return
+	old := session_pane(s, before)
+	if old == nil do return
+	ids := ids_pane_begin(old)
+	defer ids_pane_end(ids)
+	leave := sapp.Event{type = .MOUSE_LEAVE}
+	browser_event(old, &leave)
+	app_event(old, &leave)
+}
+
 // The button is up, the pointer left the window or the window lost focus: no capture.
 pane_release :: proc() {pointer_capture = {}}
 

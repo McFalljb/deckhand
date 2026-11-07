@@ -714,7 +714,7 @@ annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	overlay := palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()
 	covered := overlay || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
 	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !covered {
-		if inside(cid("annot_toggle"), e.mouse_x, e.mouse_y) {
+		if cinside("annot_toggle", e.mouse_x, e.mouse_y) {
 			annot_set(b, !a.on)
 			return true
 		}

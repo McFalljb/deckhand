@@ -617,6 +617,16 @@ agent_take_over :: proc(tab_id: u64, on: bool) {
 	app.redraw = true
 }
 
+// The agent state of the focused pane's page while its strip shows (the palette's Take over, Hand
+// back and Stop: actions.odin).
+browser_agent_shown :: proc() -> ^Agent_Tab {
+	b := tab_browser()
+	if b == nil do return nil
+	t := agent_tab_of(b.tab_id)
+	if t == nil || !agent_strip_on(t) do return nil
+	return t
+}
+
 // The strip's Take over / Hand back takes a click: not within BARS_GUARD of the last toggle.
 browser_agent_toggle_ok :: proc(tab_id: u64) -> bool {
 	t := agent_tab_of(tab_id)
@@ -1311,10 +1321,32 @@ agent_strip_on :: proc(t: ^Agent_Tab) -> bool {
 
 // "pi is reading this page · Take over · Stop" on the toolbar while an agent uses the tab ("pi is
 // clicking 'Buy'" for an action); "You have control · pi waits · Hand back · Stop" after Take over.
-browser_agent_strip_layout :: proc(b: ^Browser) {
+// own_row: on a bar of its own under the toolbar (a narrow pane: browser_nav.odin), its text the
+// room its buttons leave.
+browser_agent_strip_layout :: proc(b: ^Browser, own_row: bool) {
 	t := agent_tab_of(b.tab_id)
+	th := theme()
+	if own_row {
+		room := pane_width() - px(2 * TERM_PAD + DOT + 3 * SP_2) - browser_agent_strip_buttons_w(b)
+		what, on := strip_text(b, max(room, 0))
+		if !on do return
+		if clay.UI(cid("br_agent_bar"))({
+			clip = {horizontal = true},
+			layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childAlignment = {y = .Center}},
+			backgroundColor = cc(th.bg_elevated),
+			border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		}) {
+			strip_parts(t, what)
+		}
+		return
+	}
 	what, on := strip_text(b)
 	if !on do return
+	strip_parts(t, what)
+}
+
+@(private = "file")
+strip_parts :: proc(t: ^Agent_Tab, what: string) {
 	th := theme()
 	if clay.UI(cid("br_agent"))({layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(BUTTON_H))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 		dot(t.user_control ? th.waiting : th.accent)
@@ -1330,14 +1362,20 @@ browser_agent_strip_layout :: proc(b: ^Browser) {
 browser_agent_strip_w :: proc(b: ^Browser) -> f32 {
 	what, on := strip_text(b)
 	if !on do return 0
+	return px(DOT) + text_w(what) + browser_agent_strip_buttons_w(b) + px(3 * SP_2)
+}
+
+// The strip's buttons (Take over or Hand back, Stop) with their gap: what it always shows (px).
+browser_agent_strip_buttons_w :: proc(b: ^Browser) -> f32 {
 	t := agent_tab_of(b.tab_id)
+	if t == nil do return 0
 	button_w :: proc(label: string) -> f32 {return text_w(label) + px(2 * SP_3)}
-	return px(DOT) + text_w(what) + button_w(t.user_control ? "Hand back" : "Take over") + button_w("Stop") + px(3 * SP_2)
+	return button_w(t.user_control ? "Hand back" : "Take over") + button_w("Stop") + px(SP_2)
 }
 
 // The strip's text, cut to a third of the bar.
 @(private = "file")
-strip_text :: proc(b: ^Browser) -> (what: string, on: bool) {
+strip_text :: proc(b: ^Browser, room := f32(-1)) -> (what: string, on: bool) {
 	t := agent_tab_of(b.tab_id)
 	if t == nil || !agent_strip_on(t) do return "", false
 	who := agent_who(t.who, t.who_claude)
@@ -1352,7 +1390,8 @@ strip_text :: proc(b: ^Browser) -> (what: string, on: bool) {
 	case doing:              what = fmt.tprintf("%s is %s %s", who, AGENT_DOING_NAMES[t.doing], target)
 	case:                    what = fmt.tprintf("%s is %s", who, rec)
 	}
-	// at most a third of the bar (cut with …)
+	// at most a third of the bar (cut with …); on its own row the room its buttons leave
+	if room >= 0 do return room < text_w("…") * 2 ? "" : clip(what, room), true
 	room := px(200)
 	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(min(d.boundingBox.width, pane_width()) / 3 - px(DOT + 2 * SP_2), px(80)) // at most its pane's: never wider for being wide
 	return clip(what, room), true

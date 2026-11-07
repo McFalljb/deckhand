@@ -512,6 +512,7 @@ event :: proc(e: ^sapp.Event) {
 	// the per-tab handlers get the pane the event is for: the pointer's (the press's while a
 	// button is held), the focused one's for keys; their Clay ids are its (cid)
 	fp := event_pane(e)
+	if e.type == .MOUSE_MOVE do pane_pointer_moved(fp) // the pane it left hears it leave (ui_panes.odin)
 	old_ids := ids_pane_begin(fp)
 	defer ids_pane_end(old_ids)
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first

@@ -785,7 +785,11 @@ PROTOCOL.md "Browser tabs" has the commands' fields, data and codes.
   the same way (an upload waiting at its bar is not "running"), synchronously before their input
   is forwarded. Take over and Hand back share a place: a click within 500 ms of the last toggle
   (a double click) is ignored. The tab's dot and the sidebar's "… is using a page" linger 5 s
-  after the last action. The address field gives the strip its room, so its buttons always show.
+  after the last action. The address field gives the strip its room, so its buttons always show;
+  a pane too narrow for the strip beside the least address puts it on a row of its own under
+  the toolbar (its buttons whole down to the least pane width), and the palette has Take over,
+  Hand back and Stop for the page in the focused pane. A pane's bars are each at most its width
+  and clipped there; a press is a bar's only inside its pane (`pane_inside`).
 - **Log**: typed text is never logged or sent to other subscribers (its size only).
 
 Not built: drag; per-site permissions or Ask (decision 4); actions inside iframes (the agent can

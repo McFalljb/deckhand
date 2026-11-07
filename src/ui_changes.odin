@@ -250,7 +250,8 @@ fit :: proc(tools: []Changes_Tool, avail: f32) -> int {
 bar :: proc(id: clay.ElementId, h: f32) -> clay.ElementDeclaration {
 	th := theme()
 	return {
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(h))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(h))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}
@@ -697,7 +698,7 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		return true
 	case .MOUSE_SCROLL:
 		v := pane_changes(p)
-		if v == nil || !inside(cid("ch_list"), e.mouse_x, e.mouse_y) do return false
+		if v == nil || !cinside("ch_list", e.mouse_x, e.mouse_y) do return false
 		step := int(-e.scroll_y)
 		if step == 0 do step = e.scroll_y < 0 ? 1 : (e.scroll_y > 0 ? -1 : 0)
 		v.list_top = max(v.list_top + step, 0) // clamped at the next layout

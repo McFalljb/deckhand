@@ -535,7 +535,9 @@ Deckhand's own shortcuts come first even then: ⌘T opens a shell tab, ⌘W clos
   Atlas names the session (see PROTOCOL.md). pi can also read pages and act on them: click, type,
   press keys, scroll, choose, hover and upload. A strip on the tab says what it does, with
   **Take over** (pi waits until you press **Hand back**; your own click or key in the page while
-  pi acts does the same) and **Stop**. pi never types into password, card or one-time-code
+  pi acts does the same) and **Stop**; in a narrow pane the strip takes a row of its own under
+  the toolbar, and the palette has them too ("Browser: take over from the agent",
+  "Browser: hand back to the agent", "Browser: stop the agent"). pi never types into password, card or one-time-code
   fields; an upload asks you first in a bar (**Allow** / **Block**); a page that changes your
   clipboard while pi acts is named in a toast. Details: BROWSER.md, step 8.
 - **App tabs by agents**: a session's pi (or Claude) can open the apps your project lists in

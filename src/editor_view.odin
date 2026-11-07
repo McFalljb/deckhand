@@ -464,7 +464,7 @@ editor_text_hit :: proc(e: ^Editor, mx, my: f32) -> bool {
 	s := cur()
 	p := pane_of_tab(s, e.tab_id)
 	if p == nil do p = session_focused_pane(s) // a session with no panes yet: its implicit one
-	return inside(pid(p, "terminal"), mx, my)
+	return pane_inside(p, pid(p, "terminal"), mx, my)
 }
 
 // ---- input ----
@@ -900,14 +900,15 @@ editor_bars_layout :: proc(p: ^Pane) {
 	if e.disk_changed {
 		{
 			if clay.UI(cid("ed_banner"))({
-				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+				clip = {horizontal = true}, // its pane's width at most (bar_w)
+				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
 				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 			}) {
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(px(DOT)), clay.SizingFixed(px(DOT))}}, backgroundColor = cc(th.waiting), cornerRadius = clay.CornerRadiusAll(px(DOT / 2))}) {}
 				// cut to the room left of the buttons: a long file name never pushes them out of the window
 				used := px(2 * TERM_PAD + DOT + 5 * SP_2 + 6 * SP_3) + text_w("Compare") + text_w("Keep mine") + text_w("Reload", WEIGHT_BOLD)
-				clay.TextDynamic(clip(fmt.tprintf("%s changed on disk. You have unsaved changes.", filepath.base(e.path)), max(pane_width() - used, px(80))), txt(th.text))
+				clay.TextDynamic(clip(fmt.tprintf("%s changed on disk. You have unsaved changes.", filepath.base(e.path)), max(pane_width() - used, 0)), txt(th.text)) // a narrow pane: the buttons first
 				grow()
 				bar_button(cid("ed_compare"), "Compare", false)
 				bar_button(cid("ed_keep"), "Keep mine", false)
@@ -917,7 +918,8 @@ editor_bars_layout :: proc(p: ^Pane) {
 	}
 	if e.bar == .None do return
 	if clay.UI(cid("ed_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD), pu(TERM_PAD), pu(SP_1), pu(SP_1)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFit()}, padding = {pu(TERM_PAD), pu(TERM_PAD), pu(SP_1), pu(SP_1)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
@@ -1220,7 +1222,8 @@ toolbar_layout :: proc(e: ^Editor) {
 	path := fs_display(e.path)
 	path_room := avail - toolbar_width(tools[:shown]) - px(GAP_GROUP)
 	if clay.UI(cid("ed_tools"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_TOOLBAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_TOOLBAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {

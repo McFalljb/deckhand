@@ -1347,3 +1347,136 @@ pane_width_of :: proc(s: ^Open_Session, pane: u64) -> f32 {
 	for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == pane do return r.rect.z
 	return 0
 }
+
+// P4 review 1: a narrow right pane with the right column open, a page asking for a permission and
+// a prompt: each bar is its pane's width at most (one wide bar never stretches the others), and a
+// press beside the pane at a bar's height (the right column) is never a bar's: it grants nothing
+// and reaches the column.
+@(test)
+panes_bars_hit_only_inside_their_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	defer delete_key(&page_extras, x.browser)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}
+	p := page_extra(x.browser)
+	p.perm = PERM_NOTIFICATIONS
+	p.dialog, p.dialog_kind = true, .Prompt
+	W :: 1180 // the centre about 600: B about 300
+	for _ in 0 ..< 3 {
+		_ = ui_layout(W, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	right := pb.frame.x + pb.frame.z
+	testing.expectf(t, right < W - px(100), "the right column is beside B: %v", pb.frame)
+	for name in ([]string{"browser_bar", "pg_perm", "pg_dialog"}) {
+		d := clay.GetElementData(pid(pb, name))
+		testing.expectf(t, d.found, "%s laid out", name)
+		testing.expectf(t, d.boundingBox.x + d.boundingBox.width <= right + 0.5, "%s within B: %v, B ends at %v", name, d.boundingBox, right)
+	}
+	// presses right of B along every bar's row: none is a bar's (none sends a command)
+	old := ids_pane_begin(pb)
+	defer ids_pane_end(old)
+	for name in ([]string{"browser_bar", "pg_perm", "pg_dialog"}) {
+		d := clay.GetElementData(pid(pb, name))
+		y := d.boundingBox.y + d.boundingBox.height / 2
+		for xx := right + 2; xx < W - 2; xx += 8 {
+			e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = xx, mouse_y = y}
+			testing.expectf(t, !browser_polish_event(pb, &e), "%s's row at x=%v: the bars took it", name, xx)
+			testing.expectf(t, !browser_bar_click(pb, &e), "%s's row at x=%v: the toolbar took it", name, xx)
+			testing.expectf(t, !annot_event(pb, &e), "%s's row at x=%v: Annotate took it", name, xx)
+		}
+	}
+	inbox_drain()
+}
+
+// P4 review 2: at its least width a page's pane still shows the agent strip's buttons whole (the
+// address and the strip's text give way first): Take over / Hand back and Stop are always in reach.
+@(test)
+panes_agent_strip_buttons_fit_a_narrow_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	_, bt, _ := find_tab(x.browser)
+	bt.kind = Browser_Tab{url = "https://a-rather-long-host-name.example.com/and/a/long/path?with=a&query=too"}
+	x.s.nodes[0].ratio = 0.95 // B at its least width (clamped)
+	at := agent_tab(x.browser)
+	defer {delete_key(&agent_tabs, x.browser); free(at)}
+	at.want_console, at.want_net = true, true // the strip shows: "pi is recording console, network"
+	for handback in ([]bool{false, true}) {
+		at.user_control = handback
+		for _ in 0 ..< 3 {
+			_ = ui_layout(1100, 860)
+			ui_pane_rects(x.s)
+		}
+		pb := session_pane(x.s, x.b)
+		testing.expectf(t, abs(pb.frame.z - px(PANE_MIN_W)) < 2, "B at its least width: %v", pb.frame)
+		right := pb.frame.x + pb.frame.z
+		for name in ([]string{handback ? "br_agent_handback" : "br_agent_takeover", "br_agent_stop"}) {
+			d := clay.GetElementData(pid(pb, name))
+			testing.expectf(t, d.found, "%s laid out", name)
+			testing.expectf(t, d.boundingBox.x >= pb.frame.x && d.boundingBox.x + d.boundingBox.width <= right + 0.5, "%s whole in B: %v, B %v", name, d.boundingBox, pb.frame)
+			// and a press there is the button's
+			old := ids_pane_begin(pb)
+			e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = d.boundingBox.x + d.boundingBox.width / 2, mouse_y = d.boundingBox.y + d.boundingBox.height / 2}
+			testing.expectf(t, browser_bar_click(pb, &e), "a press on %s is the toolbar's", name)
+			ids_pane_end(old)
+		}
+	}
+	// the palette offers the strip's buttons too
+	at.user_control = true
+	testing.expect(t, pt_action_offered("browser_agent_handback"), "the palette's Hand back")
+	testing.expect(t, pt_action_offered("browser_agent_stop"), "the palette's Stop")
+	at.user_control = false
+	testing.expect(t, !pt_action_offered("browser_agent_handback"), "no Hand back while the agent has it")
+	testing.expect(t, pt_action_offered("browser_agent_takeover"), "the palette's Take over")
+	clear_inbox_for_test()
+}
+
+@(private = "file")
+pt_action_offered :: proc(id: string) -> bool {
+	for a in ACTIONS do if a.id == id {
+		_, ok := a.make()
+		return ok
+	}
+	return false
+}
+
+@(private = "file")
+clear_inbox_for_test :: proc() {
+	// what the presses queued: against stand-ins (no page), refused and gone
+	inbox_drain()
+}
+
+// P4 review 3: the pointer moving from one pane into another: the pane it left hears it leave
+// (an app's hover goes; a page gets CEF's mouse-leave), as when it leaves the window.
+@(test)
+panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	session_show_tab(x.s, x.app_id)
+	ap := apps[x.app_id]
+	ap.inspect = true // its hover is pi-desk's: a.hin says the pointer is over it
+	for _ in 0 ..< 3 {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(x.s)
+	}
+	pa, pb := session_pane(x.s, x.a), session_pane(x.s, x.b)
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expect(t, ap.hin, "over the app")
+	e = {type = .MOUSE_MOVE, mouse_x = pa.rect.x + pa.rect.z / 2, mouse_y = pa.rect.y + pa.rect.w / 2}
+	event(&e)
+	testing.expect(t, !ap.hin, "the pointer left the app's pane: its hover went")
+	inbox_drain()
+}

@@ -100,7 +100,8 @@ claude_bars :: proc(p: ^Pane) {
 	msg := claude_held_message(t, ct)
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + text_w("Drop", WEIGHT_BOLD) + text_w("Send now", WEIGHT_BOLD) + px(4 * SP_3 + 2 * SP_2)
 	if clay.UI(cid("cl_held_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
@@ -122,7 +123,8 @@ status_bar :: proc(p: ^Pane) {
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + text_w(go_label, WEIGHT_BOLD) + text_w("Dismiss") + px(4 * SP_3 + 2 * SP_2)
 	text, n := wrap_clip(msg, max(pane_width() - used, px(80)), STATUS_LINES)
 	if clay.UI(cid("cl_status_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(max(px(BAR_H), f32(n) * text_line_height(.UI) + px(2 * SP_2)))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(max(px(BAR_H), f32(n) * text_line_height(.UI) + px(2 * SP_2)))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {

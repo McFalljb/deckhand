@@ -472,9 +472,9 @@ event :: proc(e: ^sapp.Event) {
 	if shortcuts_open() && shortcuts_event(e) do return
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
-	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
 	// the per-tab handlers get the pane the event is for: the focused one for now (panes.odin)
 	fp := focused_pane()
+	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
 	if editor_bar_focused() && editor_bar_event(fp, e) do return
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
 	if comments_field_key(e) do return // a comment's edit field: Enter and Esc (ui_comments.odin)

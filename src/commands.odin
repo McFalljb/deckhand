@@ -605,11 +605,11 @@ Caller :: struct {
 
 fail :: proc(msg: string) -> Result {return {error = msg}}
 
-// Runs one command on the main thread. request_id ties it to its events.
 // Run after every command by the unit tests (panes_test.odin sets it: every session's panes stay
 // whole); nil in the app.
 after_command_check: proc(cmd: Command)
 
+// Runs one command on the main thread. request_id ties it to its events.
 run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id: u64 = 0) -> Result {
 	r: Result
 	changed := false

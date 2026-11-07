@@ -533,3 +533,32 @@ panes_drags_follow_the_screen :: proc(t: ^testing.T) {
 	drags_follow_focus()
 	testing.expect(t, !x.term.mouse_down, "ended")
 }
+
+// Where a tab is drawn: its pane's laid-out rect in the current session; else, before a layout
+// or in another session, its place in the tree inside the window's last centre (app.pane), the
+// size it will get when shown. A terminal, a page or an app ring started there is sized by it.
+@(test)
+panes_tab_rect :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	saved := app.pane
+	defer app.pane = saved
+	app.pane = {100, 50, 1000, 600}
+	// not laid out: from the tree ([A | B] at 0.5, no divider yet)
+	testing.expect_value(t, tab_rect(x.shell), [4]f32{100, 50, 500, 600})
+	testing.expect_value(t, tab_rect(x.app_id), [4]f32{600, 50, 500, 600})
+	// laid out: the pane's own rect
+	session_pane(x.s, x.b).rect = {610, 52, 480, 590}
+	testing.expect_value(t, tab_rect(x.browser), [4]f32{610, 52, 480, 590})
+	testing.expect_value(t, pane_rect(session_pane(x.s, x.b)), [4]f32{610, 52, 480, 590})
+	// another session current: from the tree again (its rects are last time's)
+	state.current_session = 0
+	testing.expect_value(t, tab_rect(x.browser), [4]f32{600, 50, 500, 600})
+	state.current_session = x.s.id
+	// a tab not added yet (new_term before pane_add_tab), or unknown: the window's
+	testing.expect_value(t, tab_rect(987654), app.pane)
+	// one pane: exactly the centre, as before panes
+	s := pt_one(1)
+	testing.expect_value(t, tab_rect(s.tabs[1].id), app.pane)
+}

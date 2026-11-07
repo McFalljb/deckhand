@@ -38,7 +38,6 @@ editor_host := Tab_Host {
 
 // ---- metrics ----
 
-@(private = "file")
 Layout_Metrics :: struct {
 	x, y, w, h:   f32, // text area (without gutter and status line)
 	gutter_x:     f32,
@@ -64,13 +63,6 @@ metrics :: proc(e: ^Editor, x, y, w, h: f32) -> (m: Layout_Metrics) {
 	m.cols = max(int(m.w / m.cw), 8)
 	m.rows = max(int(m.h / m.lh), 1)
 	return
-}
-
-// The last drawn area, for mouse hits.
-@(private = "file")
-last_area: struct {
-	tab: u64,
-	m:   Layout_Metrics,
 }
 
 // Row starts (byte offsets into text) of a line when soft-wrapped at cols:
@@ -213,7 +205,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 		return
 	}
 	m := metrics(e, x, y, w, h)
-	last_area = {e.tab_id, m}
+	e.area, e.area_drawn = m, true // its own: each pane draws its editor (panes.odin)
 	e.view_rows = m.rows
 	if e.view == .File do git_gutter_update(e)
 	if e.follow do follow_cursor(e, m)
@@ -432,7 +424,7 @@ draw_status_line :: proc(e: ^Editor, x, y, w, h: f32) {
 // The byte offset under (mx, my) in the last drawn area (clamped to it).
 @(private = "file")
 offset_at :: proc(e: ^Editor, mx, my: f32) -> int {
-	m := last_area.m
+	m := e.area
 	n := tb_line_count(&e.buf)
 	ry := m.y - e.frac
 	line, sub := e.top, e.top_sub
@@ -458,12 +450,15 @@ offset_at :: proc(e: ^Editor, mx, my: f32) -> int {
 	}
 }
 
-editor_text_hit :: proc(mx, my: f32) -> bool {
-	e := tab_editor()
-	if e == nil || last_area.tab != e.tab_id do return false
+// The point is over editor e's text, in its pane (panes.odin), not under the drawer or the palette.
+editor_text_hit :: proc(e: ^Editor, mx, my: f32) -> bool {
+	if e == nil || !e.area_drawn do return false
 	if state.home_open && inside(clay.ID("drawer"), mx, my) do return false
 	if palette_is_open() do return false
-	return inside(clay.ID("terminal"), mx, my)
+	s := cur()
+	p := pane_of_tab(s, e.tab_id)
+	if p == nil do p = session_focused_pane(s) // a session with no panes yet: its implicit one
+	return inside(pid(p, "terminal"), mx, my)
 }
 
 // ---- input ----
@@ -478,7 +473,7 @@ editor_event :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	case .MOUSE_DOWN:
 		if palette_is_open() || (state.home_open && inside(clay.ID("drawer"), ev.mouse_x, ev.mouse_y)) do return false
 		if ev.mouse_button == .LEFT && bar_click(e, ev.mouse_x, ev.mouse_y) do return true
-		if !editor_text_hit(ev.mouse_x, ev.mouse_y) do return false
+		if !editor_text_hit(e, ev.mouse_x, ev.mouse_y) do return false
 		right := ev.mouse_button == .RIGHT || (ev.mouse_button == .LEFT && ev.modifiers & sapp.MODIFIER_CTRL != 0)
 		if right {
 			// the menu acts on the selection, or where the click was
@@ -504,7 +499,7 @@ editor_event :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 			e.dragging = false
 			return false
 		}
-		m := last_area.m
+		m := e.area
 		if ev.mouse_y < m.y do editor_scroll_by(e, -m.lh, m.lh, m.cols)
 		if ev.mouse_y > m.y + m.h do editor_scroll_by(e, m.lh, m.lh, m.cols)
 		ed_drag(e, offset_at(e, ev.mouse_x, ev.mouse_y))
@@ -515,8 +510,8 @@ editor_event :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 		e.dragging = false
 		return true
 	case .MOUSE_SCROLL:
-		if !editor_text_hit(ev.mouse_x, ev.mouse_y) do return false
-		m := last_area.m
+		if !editor_text_hit(e, ev.mouse_x, ev.mouse_y) do return false
+		m := e.area
 		dy, dx := ev.scroll_y, ev.scroll_x
 		if ev.modifiers & sapp.MODIFIER_SHIFT != 0 && dx == 0 do dx, dy = dy, 0
 		if dy != 0 do editor_scroll_by(e, -dy * m.lh, m.lh, m.cols)
@@ -534,7 +529,7 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	cmd := mods & sapp.MODIFIER_SUPER != 0
 	alt := mods & sapp.MODIFIER_ALT != 0
 	ctrl := mods & sapp.MODIFIER_CTRL != 0
-	m := last_area.m
+	m := e.area
 	#partial switch ev.type {
 	case .CLIPBOARD_PASTED:
 		if e.readonly do return true
@@ -836,8 +831,8 @@ editor_bar_focused :: proc() -> bool {return strings.has_prefix(state.focus_widg
 
 // Keys of a bar field before the generic text-field handling (main.odin):
 // Enter, Esc, Tab between fields, ⌘G, ⌥⌘F, ⌘S. True if consumed.
-editor_bar_event :: proc(ev: ^sapp.Event) -> bool {
-	e := active_editor()
+editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+	e := pane_editor(p)
 	if e == nil {
 		if editor_bar_focused() do ui_do(Set_Focus{""})
 		return false
@@ -880,8 +875,8 @@ editor_bar_event :: proc(ev: ^sapp.Event) -> bool {
 
 // Clay: the bars above the editor text (called inside ui.odin's centre
 // column, before the "terminal" element that becomes the text area).
-editor_bars_layout :: proc() {
-	e := tab_editor()
+editor_bars_layout :: proc(p: ^Pane) {
+	e := pane_editor(p)
 	if e == nil do return
 	th := theme()
 	if e.view != .Changes do toolbar_layout(e) // a Changes tab has its own bars (ui_changes.odin)

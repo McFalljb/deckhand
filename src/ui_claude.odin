@@ -23,11 +23,11 @@ STATUS_IDS := [2]string{"cl_status_go", "cl_status_dismiss"}
 @(private = "file")
 STATUS_LINES :: 3
 
-// The Claude or pi tab on screen while it has a status bar, else nil; its text and whether it is
+// The Claude or pi tab pane p shows while it has a status bar, else nil; its text and whether it is
 // the hooks bar (else a version bar).
 @(private = "file")
-status_tab :: proc() -> (tab: ^Tab, msg: string, hooks: bool) {
-	t := active_tab()
+status_tab :: proc(p: ^Pane) -> (tab: ^Tab, msg: string, hooks: bool) {
+	t := pane_shown(p)
 	if t == nil do return nil, "", false
 	if _, is := t.kind.(Pi_Tab); is {
 		m := pi_status_message(t)
@@ -49,10 +49,10 @@ status_update_command :: proc(t: ^Tab) -> string {
 	return claude_update_command_now()
 }
 
-// The Claude tab on screen while it holds texts, else nil.
+// The Claude tab pane p shows while it holds texts, else nil.
 @(private = "file")
-held_tab :: proc() -> (^Tab, ^Claude_Tab) {
-	t := active_tab()
+held_tab :: proc(p: ^Pane) -> (^Tab, ^Claude_Tab) {
+	t := pane_shown(p)
 	if t == nil do return nil, nil
 	ct, is := &t.kind.(Claude_Tab)
 	if !is || len(ct.held) == 0 do return nil, nil
@@ -92,9 +92,9 @@ held_preview :: proc(text: string) -> string {
 	return strings.concatenate({cut_utf8(line, HELD_PREVIEW_MAX), "…"}, context.temp_allocator)
 }
 
-claude_bars :: proc() {
-	status_bar()
-	t, ct := held_tab()
+claude_bars :: proc(p: ^Pane) {
+	status_bar(p)
+	t, ct := held_tab(p)
 	if t == nil do return
 	th := theme()
 	msg := claude_held_message(t, ct)
@@ -114,8 +114,8 @@ claude_bars :: proc() {
 
 // A Claude tab's status: its hooks never reported, or its Claude Code is old (claude_status.odin).
 @(private = "file")
-status_bar :: proc() {
-	t, msg, hooks := status_tab()
+status_bar :: proc(p: ^Pane) {
+	t, msg, hooks := status_tab(p)
 	if t == nil do return
 	th := theme()
 	go_label := status_go_label(hooks)
@@ -136,10 +136,11 @@ status_bar :: proc() {
 }
 
 claude_hit :: proc() -> Hit {
-	if t, _, _ := status_tab(); t != nil {
+	p := focused_pane() // the bars' hit tests: the focused pane's for now (panes.odin)
+	if t, _, _ := status_tab(p); t != nil {
 		for id, i in STATUS_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Claude(2 + i)
 	}
-	if t, _ := held_tab(); t == nil do return nil
+	if t, _ := held_tab(p); t == nil do return nil
 	for id, i in CLAUDE_BAR_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Claude(i)
 	return nil
 }
@@ -149,7 +150,7 @@ claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	case 0: return "Send the first waiting message now, into whatever is typed in Claude's prompt", ""
 	case 1: return "Drop the waiting messages (nothing is sent)", ""
 	case 2:
-		t, _, hooks := status_tab()
+		t, _, hooks := status_tab(focused_pane())
 		if hooks do return "Show Claude Code's settings files (the Settings tab)", ""
 		if t != nil do return fmt.tprintf("Copy “%s” to paste into a shell tab", status_update_command(t)), ""
 		return "", ""
@@ -157,9 +158,9 @@ claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	return "Hide this bar (the hooks bar until Claude restarts here; the version hint for this version)", ""
 }
 
-claude_click :: proc(h: Hit_Claude) {
+claude_click :: proc(p: ^Pane, h: Hit_Claude) {
 	if h >= 2 {
-		t, _, hooks := status_tab()
+		t, _, hooks := status_tab(p)
 		if t == nil do return
 		_, pi := t.kind.(Pi_Tab)
 		switch {
@@ -174,7 +175,7 @@ claude_click :: proc(h: Hit_Claude) {
 		}
 		return
 	}
-	t, _ := held_tab()
+	t, _ := held_tab(p)
 	if t == nil do return
 	ui_do(Claude_Held_Op{tab_id = t.id, op = h == 0 ? "send" : "drop"})
 }

@@ -575,8 +575,8 @@ browser_tick :: proc() {
 			b.hidden = paint_hidden
 			pd_cef_set_hidden(b.cef, paint_hidden ? 1 : 0)
 		}
-		if !hidden && app.pane.z > 0 {
-			vw, vh := c.int(app.pane.z / app.dpi), c.int(app.pane.w / app.dpi)
+		if r := tab_rect(b.tab_id); !hidden && r.z > 0 {
+			vw, vh := c.int(r.z / app.dpi), c.int(r.w / app.dpi)
 			if vw != b.view_w || vh != b.view_h || app.dpi != b.view_scale {
 				b.view_w, b.view_h, b.view_scale = vw, vh, app.dpi
 				b.resized_at = now
@@ -632,7 +632,8 @@ browser_pages :: proc() {
 			b.waiting, b.message = false, "The browser has no frame channel left (too many tabs)"
 			continue
 		}
-		w, h := c.int(app.pane.z / app.dpi), c.int(app.pane.w / app.dpi)
+		r := tab_rect(b.tab_id) // its pane's size (panes.odin)
+		w, h := c.int(r.z / app.dpi), c.int(r.w / app.dpi)
 		b.cef = pd_cef_open(strings.clone_to_cstring(b.url, context.temp_allocator), w, h, app.dpi, b.tab_id)
 		if b.cef == 0 {
 			// no slot yet (one is still closing): wait; else it failed
@@ -737,19 +738,19 @@ cef_mods :: proc(m: u32, buttons: c.int) -> c.int {
 }
 
 @(private = "file")
-in_page :: proc(x, y: f32) -> bool {
-	p := app.pane
+in_page :: proc(p: [4]f32, x, y: f32) -> bool {
 	return p.z > 0 && x >= p.x && y >= p.y && x < p.x + p.z && y < p.y + p.w
 }
 
-// Forwards the event to the browser on screen. True if it took it. As for
+// Forwards the event to the browser pane p shows. True if it took it. As for
 // an editor tab (editor_event): keys only while no widget has the keyboard;
 // the mouse not under the palette, a menu or a sheet, nor in Atlas's drawer.
-browser_event :: proc(e: ^sapp.Event) -> bool {
-	b := tab_browser()
+browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+	b := pane_browser(p)
 	if b == nil do return false
+	r := pane_rect(p)
 	// the toolbar: Back, Forward, Reload / Stop, the URL field (browser_nav.odin)
-	if e.type == .MOUSE_DOWN && !(palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()) && browser_bar_click(e) do return true
+	if e.type == .MOUSE_DOWN && !(palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()) && browser_bar_click(p, e) do return true
 	if b.cef == 0 {
 		// the page closed itself: its Reload button (ui.odin) opens it again
 		if e.type == .MOUSE_DOWN && b.closed_by_page && inside(clay.ID("browser_reload"), e.mouse_x, e.mouse_y) {
@@ -758,7 +759,7 @@ browser_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return false
 	}
-	vx, vy := c.int((e.mouse_x - app.pane.x) / app.dpi), c.int((e.mouse_y - app.pane.y) / app.dpi)
+	vx, vy := c.int((e.mouse_x - r.x) / app.dpi), c.int((e.mouse_y - r.y) / app.dpi)
 	button: c.int = e.mouse_button == .RIGHT ? 2 : e.mouse_button == .MIDDLE ? 1 : 0
 	flag: c.int = button == 0 ? CEF_FLAG_LEFT_BUTTON : button == 1 ? 1 << 5 : 1 << 6
 	// drawer.odin's over_overlay (file-private there): the palette, a menu, a popover, a sheet;
@@ -779,7 +780,7 @@ browser_event :: proc(e: ^sapp.Event) -> bool {
 	}
 	#partial switch e.type {
 	case .MOUSE_DOWN:
-		if !in_page(e.mouse_x, e.mouse_y) do return false
+		if !in_page(r, e.mouse_x, e.mouse_y) do return false
 		// a click in the page takes the keyboard back; a sliding drawer goes away
 		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
 		if state.focus_widget != "" do ui_do(Set_Focus{""})
@@ -795,14 +796,14 @@ browser_event :: proc(e: ^sapp.Event) -> bool {
 		pd_cef_mouse_click(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), button, 1, c.int(max(app.clicks, 1)))
 		return true
 	case .MOUSE_MOVE:
-		if !in_page(e.mouse_x, e.mouse_y) && b.buttons == 0 do return false
+		if !in_page(r, e.mouse_x, e.mouse_y) && b.buttons == 0 do return false
 		pd_cef_mouse_move(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), 0)
-		return in_page(e.mouse_x, e.mouse_y)
+		return in_page(r, e.mouse_x, e.mouse_y)
 	case .MOUSE_LEAVE:
 		pd_cef_mouse_move(b.cef, b.last_x, b.last_y, cef_mods(e.modifiers, b.buttons), 1)
 		return false // pi-desk's hover goes too
 	case .MOUSE_SCROLL:
-		if !in_page(e.mouse_x, e.mouse_y) do return false
+		if !in_page(r, e.mouse_x, e.mouse_y) do return false
 		// sokol's deltas are lines-ish; Chromium wants pixels
 		pd_cef_wheel(b.cef, vx, vy, cef_mods(e.modifiers, 0), c.int(e.scroll_x * 40), c.int(e.scroll_y * 40))
 		return true
@@ -1073,7 +1074,8 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 			if neg do v[i] = -v[i]
 		}
 		if cmd == "web_click" {
-			x, y := app.pane.x + f32(v[0]) * app.dpi, app.pane.y + f32(v[1]) * app.dpi
+			r := tab_rect(b.tab_id)
+			x, y := r.x + f32(v[0]) * app.dpi, r.y + f32(v[1]) * app.dpi
 			app.clicks = 1
 			e := sapp.Event{type = .MOUSE_MOVE, mouse_x = x, mouse_y = y}
 			event(&e)
@@ -1082,7 +1084,8 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 			e = {type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y}
 			event(&e)
 		} else {
-			e := sapp.Event{type = .MOUSE_SCROLL, scroll_y = f32(v[0]), mouse_x = app.pane.x + f32(v[1]) * app.dpi, mouse_y = app.pane.y + f32(v[2]) * app.dpi}
+			r := tab_rect(b.tab_id)
+			e := sapp.Event{type = .MOUSE_SCROLL, scroll_y = f32(v[0]), mouse_x = r.x + f32(v[1]) * app.dpi, mouse_y = r.y + f32(v[2]) * app.dpi}
 			event(&e)
 		}
 		return "", true
@@ -1103,7 +1106,8 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		if len(args) < 3 do return "web_mouse down|up|leave X Y", false
 		x, _ := strconv.parse_f64(args[1])
 		y, _ := strconv.parse_f64(args[2])
-		e := sapp.Event{mouse_button = .LEFT, mouse_x = app.pane.x + f32(x) * app.dpi, mouse_y = app.pane.y + f32(y) * app.dpi}
+		r := tab_rect(b.tab_id)
+		e := sapp.Event{mouse_button = .LEFT, mouse_x = r.x + f32(x) * app.dpi, mouse_y = r.y + f32(y) * app.dpi}
 		switch args[0] {
 		case "down": e.type = .MOUSE_DOWN
 		case "up": e.type = .MOUSE_UP

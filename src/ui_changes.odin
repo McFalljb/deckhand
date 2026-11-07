@@ -275,8 +275,8 @@ branch_text :: proc(r: ^Changes_Repo) -> string {
 
 // Clay: the bars above the list and the diff (ui.odin's centre column,
 // before the editor's bars).
-changes_bars_layout :: proc() {
-	v := active_changes()
+changes_bars_layout :: proc(p: ^Pane) {
+	v := pane_changes(p)
 	if v == nil {
 		last_active = 0
 		return
@@ -367,8 +367,8 @@ list_w :: proc() -> f32 {
 ROW :: ROW_H - 4
 
 // Clay: the file list (left of the diff, inside ui.odin's centre row).
-changes_list_layout :: proc() {
-	v := active_changes()
+changes_list_layout :: proc(p: ^Pane) {
+	v := pane_changes(p)
 	if v == nil do return
 	th := theme()
 	ec := editor_colors()
@@ -465,8 +465,8 @@ changes_list_layout :: proc() {
 }
 
 // Clay: the selected file's bar (over the diff, inside ui.odin's centre).
-changes_file_bar_layout :: proc() {
-	v := active_changes()
+changes_file_bar_layout :: proc(p: ^Pane) {
+	v := pane_changes(p)
 	if v == nil do return
 	th := theme()
 	_, f := changes_selected(v)
@@ -494,8 +494,8 @@ changes_file_bar_layout :: proc() {
 }
 
 // Clay: "Show more" under a cut diff.
-changes_more_layout :: proc() {
-	v := active_changes()
+changes_more_layout :: proc(p: ^Pane) {
+	v := pane_changes(p)
 	if v == nil || v.diff_lines <= v.shown do return
 	th := theme()
 	avail := centre_width() - list_w() - px(2 * TERM_PAD)
@@ -676,7 +676,7 @@ changes_field_key :: proc(e: ^sapp.Event) -> bool {
 
 // Clicks on the "±" button and the tab's bars and list, the list's wheel,
 // j/k and ↑/↓ (main.odin, after the focused field's handling). True if consumed.
-changes_event :: proc(e: ^sapp.Event) -> bool {
+changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	#partial switch e.type {
 	case .MOUSE_DOWN:
 		if palette_is_open() || menu.open do return false
@@ -686,7 +686,7 @@ changes_event :: proc(e: ^sapp.Event) -> bool {
 		if e.mouse_button != .LEFT do return true
 		app.redraw = true
 		tip_dismiss()
-		v := active_changes()
+		v := pane_changes(p)
 		switch h.what {
 		case .Button:
 			if cs := cur(); cs != nil do ui_do(Changes_Open{session = cs.id})
@@ -705,7 +705,7 @@ changes_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .MOUSE_SCROLL:
-		v := active_changes()
+		v := pane_changes(p)
 		if v == nil || !inside(clay.ID("ch_list"), e.mouse_x, e.mouse_y) do return false
 		step := int(-e.scroll_y)
 		if step == 0 do step = e.scroll_y < 0 ? 1 : (e.scroll_y > 0 ? -1 : 0)
@@ -713,7 +713,7 @@ changes_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .KEY_DOWN, .CHAR:
-		v := active_changes()
+		v := pane_changes(p)
 		if v == nil || state.focus_widget != "" || palette_is_open() || menu.open do return false
 		if e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) != 0 do return false
 		if e.type == .CHAR do return e.char_code == 'j' || e.char_code == 'k' // taken with their keys

@@ -1936,6 +1936,9 @@ refresh_listing :: proc(s: ^Open_Session) {
 // run with the user's saved flags (docs/CLAUDE.md §3, §4); they stay not started until the user
 // (or pi-desk itself, or a test script) shows the session.
 focus_session :: proc(id: u64, caller: Caller) {
+	// a session made current is laid out again; until then its panes' rects come from its tree
+	// inside the window's last centre (tab_rect, panes.odin)
+	if id != state.current_session do if s := find_session(id); s != nil do for &p in s.panes do p.rect = {}
 	state.current_session = id
 	if s := find_session(id); s != nil do s.shown_at = time.now()._nsec
 	notify_seen(id) // its bell entries are read (notify.odin)
@@ -2166,8 +2169,9 @@ chat_env :: proc(project_id: u64, env: []string) -> []string {
 new_term :: proc(tab_id: u64) -> ^Term {
 	t := new(Term)
 	term_init(t, 80, 24)
-	// size it to the pane before the child starts, so it sees the right grid
-	if app.pane.z > 0 do term_set_rect(t, app.pane.x, app.pane.y, app.pane.z, app.pane.w)
+	// size it to its pane before the child starts, so it sees the right grid (panes.odin; a tab
+	// not added yet: the focused pane's)
+	if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
 	terms[tab_id] = t
 	return t
 }

@@ -149,12 +149,12 @@ markdown_shortcut_needs_the_keyboard :: proc(t: ^testing.T) {
 	_, tab := md_setup(t, "a.md", "# A\n")
 	ev := sapp.Event{type = .KEY_DOWN, key_code = .V, modifiers = sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT}
 	state.focus_widget = "agent_input" // typing in Atlas's terminal
-	testing.expect(t, !markdown_event(&ev), "Atlas keeps ⇧⌘V")
+	testing.expect(t, !markdown_event(focused_pane(), &ev), "Atlas keeps ⇧⌘V")
 	testing.expect(t, !md_takes_keys(), "nor does the menu shortcut path take it")
 	inbox_drain()
 	testing.expect(t, !md_tab_of(tab).source, "still the preview")
 	state.focus_widget = ""
-	testing.expect(t, markdown_event(&ev), "the tab's own shortcut")
+	testing.expect(t, markdown_event(focused_pane(), &ev), "the tab's own shortcut")
 	inbox_drain()
 	testing.expect(t, md_tab_of(tab).source, "the source now")
 }
@@ -175,24 +175,24 @@ markdown_links_follow_on_mouse_up :: proc(t: ^testing.T) {
 	testing.expect(t, x >= 0, "a link piece")
 	click :: proc(x, y: f32, mods: u32) {
 		down := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y, modifiers = mods}
-		markdown_event(&down)
+		markdown_event(focused_pane(), &down)
 		inbox_drain()
 	}
 	click(x, y, 0)
 	testing.expect_value(t, len(opened), 0) // the button is still down
 	up := sapp.Event{type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y}
-	markdown_event(&up)
+	markdown_event(focused_pane(), &up)
 	inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 	click(x, y, sapp.MODIFIER_CTRL)
 	up.modifiers = sapp.MODIFIER_CTRL
-	markdown_event(&up)
+	markdown_event(focused_pane(), &up)
 	inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 	// pressed on the link, released elsewhere: nothing
 	click(x, y, 0)
 	off := sapp.Event{type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = 899, mouse_y = 599}
-	markdown_event(&off)
+	markdown_event(focused_pane(), &off)
 	inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 }

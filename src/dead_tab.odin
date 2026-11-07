@@ -268,22 +268,22 @@ DEAD_LABELS := [Dead_Part]string {
 @(private = "file")
 DEAD_MODEL_SHORT :: "Model…" // the narrow bar's
 
-// The current session's pi tab when it shows and is dead (Home is the
+// The tab pane p shows when it is a dead pi or Claude tab (Home is the
 // drawer's, with its own "stopped").
 @(private = "file")
-dead_shown :: proc() -> ^Tab {
+dead_shown :: proc(p: ^Pane) -> ^Tab {
 	s := cur()
 	if s == nil || s.home do return nil
-	tab := active_tab()
+	tab := pane_shown(p)
 	if !tab_is_dead(tab) do return nil
 	return tab
 }
 
-dead_tab_bar_layout :: proc() {
+dead_tab_bar_layout :: proc(p: ^Pane) {
 	th := theme()
 	// a restart waiting for the old process: said, no buttons
 	if s := cur(); s != nil && !s.home {
-		if tab := active_tab(); tab != nil && tab.status == .Exited && restart_waiting(tab.id) {
+		if tab := pane_shown(p); tab != nil && tab.status == .Exited && restart_waiting(tab.id) {
 			if clay.UI(clay.ID("dead_bar"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
@@ -296,7 +296,7 @@ dead_tab_bar_layout :: proc() {
 			return
 		}
 	}
-	tab := dead_shown()
+	tab := dead_shown(p)
 	if tab == nil do return
 	failed := exit_failed(tab.exit)
 	model := dead_tab_offers_model(tab) // "Restart with model…"
@@ -326,13 +326,13 @@ dead_tab_bar_layout :: proc() {
 }
 
 dead_tab_hit :: proc() -> Hit {
-	if dead_shown() == nil do return nil
+	if dead_shown(focused_pane()) == nil do return nil // the focused pane's bar for now (panes.odin)
 	for id, part in DEAD_IDS do if clay.PointerOver(clay.ID(id)) do return Hit_Dead_Tab{part}
 	return nil
 }
 
 dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
-	if tab := dead_shown(); tab != nil {
+	if tab := dead_shown(focused_pane()); tab != nil {
 		if _, is := tab.kind.(Claude_Tab); is {
 			if h.part == .Restart_Model do return "Start Claude Code again, resuming its conversation, then pick another model (/model)", ""
 			return "Start Claude Code again in this tab, resuming its conversation", ""
@@ -345,8 +345,8 @@ dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
 	return "", ""
 }
 
-dead_tab_click :: proc(h: Hit_Dead_Tab) {
-	tab := dead_shown()
+dead_tab_click :: proc(p: ^Pane, h: Hit_Dead_Tab) {
+	tab := dead_shown(p)
 	if tab == nil do return
 	if _, is := tab.kind.(Claude_Tab); is do ui_do(Claude_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
 	else do ui_do(Pi_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})

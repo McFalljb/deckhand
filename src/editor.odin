@@ -92,6 +92,8 @@ Editor :: struct {
 	wrap:        bool,
 	follow:      bool, // scroll so the cursor is visible at the next draw
 	view_rows:   int, // text rows that fit (last draw)
+	area:        Layout_Metrics, // where it was last drawn (mouse hits; editor_view.odin)
+	area_drawn:  bool, // area is set
 	find:        Find,
 	bar:         Editor_Bar,
 	last_edit:   time.Tick,

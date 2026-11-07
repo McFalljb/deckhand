@@ -251,8 +251,14 @@ frame :: proc "c" () {
 	harness_term_layout() // the setup sheet's install terminal (ui_harness.odin)
 	if x, y, tw, th, ok := ui_terminal_rect(); ok {
 		app.pane = {x, y, tw, th}
+		cs := cur()
+		if p := session_focused_pane(cs); p != nil do p.rect = app.pane // one pane for now: the centre's (panes.odin)
+		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
 		// (not while a Changes tab shows: its diff pane is narrower, and pi would reflow for nothing)
-		if cs := cur(); cs != nil && active_changes() == nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil do term_set_rect(t, x, y, tw, th)
+		if cs != nil && active_changes() == nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil {
+			r := tab_rect(tab.id)
+			term_set_rect(t, r.x, r.y, r.z, r.w)
+		}
 	}
 	if app.pane.z > 0 do persist_after_layout(skip = app.pending_start)
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
@@ -273,9 +279,13 @@ frame :: proc "c" () {
 	drawer_at := min(ui_overlay_start(cmds, "drawer"), overlay)
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
-	if tab := active_tab(); tab != nil && (t != nil || editor_of(tab.id) != nil || browser_of(tab.id) != nil || app_of(tab.id) != nil) {
-		tab_host(tab.kind).draw(tab.id, app.pane.x, app.pane.y, app.pane.z, app.pane.w)
-		if t != nil && typing do term_draw_marked(t, ime.marked, ime.caret)
+	// the tab each pane shows (one pane for now: panes.odin), at its pane's rect; marked text in the focused one's
+	if p := focused_pane(); p != nil {
+		if tab := pane_shown(p); tab != nil && (term_of(tab.id) != nil || editor_of(tab.id) != nil || browser_of(tab.id) != nil || app_of(tab.id) != nil) {
+			r := pane_rect(p)
+			tab_host(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
+			if pt := term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
+		}
 	} // else the layout's empty state shows
 	ui_draw(cmds, drawer_at, overlay)
 	if at != nil && agent_running() {
@@ -463,22 +473,24 @@ event :: proc(e: ^sapp.Event) {
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
-	if editor_bar_focused() && editor_bar_event(e) do return
+	// the per-tab handlers get the pane the event is for: the focused one for now (panes.odin)
+	fp := focused_pane()
+	if editor_bar_focused() && editor_bar_event(fp, e) do return
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
 	if comments_field_key(e) do return // a comment's edit field: Enter and Esc (ui_comments.odin)
-	if browser_url_key(e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
-	if browser_polish_event(e) do return // a browser tab's bars, ⋯, ⌘F, zoom keys, pointer shape (browser_polish.odin)
+	if browser_url_key(fp, e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
+	if browser_polish_event(fp, e) do return // a browser tab's bars, ⋯, ⌘F, zoom keys, pointer shape (browser_polish.odin)
 	if state.focus_widget != "" && widget_event(e) do return
 	if drawer_event(e) do return // the drawer: resizing, the mouse in Atlas's terminal
 	if files_event(e) do return // the Files tab: rows, drag, its keys (ui_files.odin)
-	if changes_event(e) do return // the Changes tab's list, bars and keys, the "±" button (ui_changes.odin)
-	if markdown_event(e) do return // a Markdown tab's preview: wheel, keys, links (markdown_view.odin)
+	if changes_event(fp, e) do return // the Changes tab's list, bars and keys, the "±" button (ui_changes.odin)
+	if markdown_event(fp, e) do return // a Markdown tab's preview: wheel, keys, links (markdown_view.odin)
 	// an editor tab: its keys while it has the keyboard, mouse and wheel over it
 	// (under a Markdown preview only its toolbar and find bar: the source editor is hidden)
-	if ed := tab_editor(); ed != nil && (!md_preview_shown() || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
-	if annot_event(e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
-	if browser_event(e) do return // a browser tab on screen: the page gets it (browser.odin)
-	if app_event(e) do return // an app tab on screen: the app gets it (app_tab.odin)
+	if ed := pane_editor(fp); ed != nil && (!md_preview_shown() || e.type == .MOUSE_DOWN) && editor_event(ed, e) do return
+	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
+	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
+	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
 	t := active_term()
 	tab := active_tab()
 	cs := cur()
@@ -588,10 +600,10 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Files: // files_event took it
 		case Hit_Reload:    reload_click(hit) // the hot-reload bars
 		case Hit_Claude_Reload: claude_reload_click(hit) // Claude Code's (ui_claude_reload.odin)
-		case Hit_Dead_Tab:  dead_tab_click(hit) // a dead pi tab's Restart (dead_tab.odin)
+		case Hit_Dead_Tab:  dead_tab_click(focused_pane(), hit) // a dead pi tab's Restart (dead_tab.odin)
 		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
-		case Hit_Claude:    claude_click(hit) // a Claude tab's held messages (ui_claude.odin)
+		case Hit_Claude:    claude_click(focused_pane(), hit) // a Claude tab's held messages (ui_claude.odin)
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
@@ -606,7 +618,7 @@ event :: proc(e: ^sapp.Event) {
 			set_hover(Hit_Divider(d), false)
 			return
 		}
-		in_term := (t != nil && in_pane(t, e.mouse_x, e.mouse_y) && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))) || editor_text_hit(e.mouse_x, e.mouse_y)
+		in_term := (t != nil && in_pane(t, e.mouse_x, e.mouse_y) && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))) || editor_text_hit(tab_editor(), e.mouse_x, e.mouse_y)
 		set_hover(in_term ? nil : chrome_hit(app.pointer), in_term)
 		markdown_hover(e.mouse_x, e.mouse_y) // a link under the pointer (markdown_view.odin)
 		// ⌘ held over a terminal's link: underlined, a hand and its URL (term_links.odin)

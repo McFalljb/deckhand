@@ -208,8 +208,11 @@ md_preview :: proc(tab_id: u64) -> ^Md_View {
 }
 
 // The current tab's Markdown view and editor (nil: another kind of tab).
-md_active :: proc() -> (^Md_View, ^Editor, ^Tab) {
-	tab := active_tab()
+md_active :: proc() -> (^Md_View, ^Editor, ^Tab) {return md_of_pane(focused_pane())}
+
+// The Markdown tab pane p shows: its view, editor and tab (all nil for another kind).
+md_of_pane :: proc(p: ^Pane) -> (^Md_View, ^Editor, ^Tab) {
+	tab := pane_shown(p)
 	if tab == nil do return nil, nil, nil
 	if _, is := tab.kind.(Markdown_Tab); !is do return nil, nil, nil
 	v := md_view_of(tab.id)
@@ -1355,8 +1358,8 @@ over_pane :: proc(v: ^Md_View, mx, my: f32) -> bool {
 // The preview's input: wheel and keys scroll, links follow, ⌘F/⌘G find,
 // ⇧⌘V shows the source. True if consumed. In the source view only ⇧⌘V is
 // taken here (the editor has the rest).
-markdown_event :: proc(ev: ^sapp.Event) -> bool {
-	v, e, tab := md_active()
+markdown_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+	v, e, tab := md_of_pane(p)
 	if v == nil do return false
 	mt := tab.kind.(Markdown_Tab)
 	cmd := ev.modifiers & sapp.MODIFIER_SUPER != 0

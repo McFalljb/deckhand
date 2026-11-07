@@ -1159,7 +1159,8 @@ on_page_menu :: proc "c" (id: c.int, flags, edit: c.int, link: cstring) {
 		b.buttons &~= RIGHT
 		pd_cef_mouse_click(b.cef, b.last_x, b.last_y, b.buttons, 2, 1, 1)
 	}
-	at := [2]f32{app.pane.x + f32(b.last_x) * app.dpi, app.pane.y + f32(b.last_y) * app.dpi}
+	r := tab_rect(b.tab_id)
+	at := [2]f32{r.x + f32(b.last_x) * app.dpi, r.y + f32(b.last_y) * app.dpi}
 	menu_open(Menu_Browser{tab_id = b.tab_id, link = string(link), flags = flags, edit = edit, x = i32(b.last_x), y = i32(b.last_y)}, at)
 }
 
@@ -1540,8 +1541,8 @@ pg_bar_at :: proc(e: ^sapp.Event) -> Pg_Bar {
 
 // The bars' buttons and fields, ⋯ and the zoom chip, ⌘F ⌘G ⌘+ ⌘− ⌘0, Enter and Esc in the find and
 // prompt fields; the pointer's shape over the page. True if it took the event.
-browser_polish_event :: proc(e: ^sapp.Event) -> bool {
-	b := tab_browser()
+browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
+	b := pane_browser(pn)
 	if b == nil do return false
 	p := page_extra(b.tab_id)
 	mods := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT)
@@ -1658,7 +1659,7 @@ browser_polish_event :: proc(e: ^sapp.Event) -> bool {
 		}
 	case .MOUSE_MOVE:
 		// the page's pointer shape and tooltip while the pointer is over it (the page gets the move)
-		pane := app.pane
+		pane := pane_rect(pn)
 		in_pg := pane.z > 0 && e.mouse_x >= pane.x && e.mouse_y >= pane.y && e.mouse_x < pane.x + pane.z && e.mouse_y < pane.y + pane.w
 		in_pg = in_pg && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
 		if in_pg != page_pointer_in || (in_pg && p.tooltip != "") do app.redraw = true
@@ -1947,7 +1948,8 @@ page_script :: proc(cmd: string, args_raw: []string, rest: string) -> (msg: stri
 		if len(args) < 2 do return "page_rclick X Y", false
 		x, _ := strconv.parse_f64(args[0])
 		y, _ := strconv.parse_f64(args[1])
-		mx, my := app.pane.x + f32(x) * app.dpi, app.pane.y + f32(y) * app.dpi
+		r := tab_rect(b.tab_id)
+		mx, my := r.x + f32(x) * app.dpi, r.y + f32(y) * app.dpi
 		app.clicks = 1
 		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = mx, mouse_y = my}
 		event(&e)

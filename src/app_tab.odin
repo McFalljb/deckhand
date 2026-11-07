@@ -426,11 +426,11 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		owned := make([]string, len(argv))
 		for a, i in argv do owned[i] = strings.clone(a)
 		tab := Tab{id = new_id(), kind = App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
-		append(&s.tabs, tab)
+		pane_add_tab(s, tab)
 		if !by_agent {
 			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
 			// the user's, a script's and Home's come to the front
-			s.active_tab = tab.id
+			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
 		}
 		a := new(App_Proc)
@@ -1101,8 +1101,8 @@ app_frames_tick :: proc() -> bool {
 		}
 		if p.done_gen > a.ring.done_gen do a.ring.done_gen = p.done_gen
 		// rings: the first one, and a new one when the pane's size settled
-		if a.connected && !a.stalled && app.pane.z > 0 {
-			w, h := int(math.round(app.pane.z)), int(math.round(app.pane.w))
+		if r := tab_rect(id); a.connected && !a.stalled && r.z > 0 {
+			w, h := int(math.round(r.z)), int(math.round(r.w)) // its pane's size (panes.odin)
 			if a == on_screen || a.ring.cur_gen == 0 {
 				if ring_wants_new(&a.ring, w, h, app.dpi, now) do app_ring_new(a, w, h, app.dpi)
 			}
@@ -1790,9 +1790,8 @@ app_release_input :: proc(a: ^App_Proc) {
 // and the window is active; any other app lets go.
 app_focus_tick :: proc() {
 	if len(apps) == 0 do return
-	on := tab_app()
 	for _, a in apps {
-		want := a == on && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
+		want := app_wants_keys(a)
 		if want == a.focused do continue
 		if !want do app_release_input(a)
 		else if socket_app_connected(a.tab_id) {
@@ -1802,34 +1801,40 @@ app_focus_tick :: proc() {
 	}
 }
 
+// The app has the keyboard: its tab is the focused one (panes.odin), it runs, no widget has the
+// keyboard, the job sheet is shut and the window is in front.
+app_wants_keys :: proc(a: ^App_Proc) -> bool {
+	return tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
+}
+
 @(private = "file")
-in_tab :: proc(x, y: f32) -> bool {
-	p := app.pane
+in_tab :: proc(p: [4]f32, x, y: f32) -> bool {
 	return p.z > 0 && x >= p.x && y >= p.y && x < p.x + p.z && y < p.y + p.w
 }
 
-// Forwards the event to the app on screen. True if it took it. Keys only
+// Forwards the event to the app pane p shows. True if it took it. Keys only
 // while no widget has the keyboard (and never under the modal job sheet);
 // the mouse not under the palette, a menu, a popover, a sheet or Atlas's
 // drawer; a press keeps the moves and the release until the button is up.
-app_event :: proc(e: ^sapp.Event) -> bool {
-	a := tab_app()
+app_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+	a := pane_app(p)
 	if a == nil do return false
+	r := pane_rect(p)
 	if e.type == .MOUSE_DOWN && app_bar_click(a, e.mouse_x, e.mouse_y) do return true
 	if a.pid == 0 do return false
 	overlay := palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open() || bell_open()
 	covered := overlay || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
-	x, y := (e.mouse_x - app.pane.x) / app.dpi, (e.mouse_y - app.pane.y) / app.dpi
+	x, y := (e.mouse_x - r.x) / app.dpi, (e.mouse_y - r.y) / app.dpi
 	// inspecting: the mouse over the tab is pi-desk's (hover shows a box's
 	// label); a press already held in the app still gets its moves and release
 	if a.inspect && a.buttons == {} {
 		#partial switch e.type {
 		case .MOUSE_MOVE:
-			a.hx, a.hy, a.hin = x, y, !covered && in_tab(e.mouse_x, e.mouse_y)
+			a.hx, a.hy, a.hin = x, y, !covered && in_tab(r, e.mouse_x, e.mouse_y)
 			if app_hover_at(a, x, y, a.hin) do app.redraw = true
 			return a.hin
 		case .MOUSE_DOWN, .MOUSE_UP, .MOUSE_SCROLL:
-			if covered || !in_tab(e.mouse_x, e.mouse_y) do return false
+			if covered || !in_tab(r, e.mouse_x, e.mouse_y) do return false
 			// a click on a box: a comment on it for this tab's session's pi
 			if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT {
 				// copied under the lock; the crop and the bar after it (they take their time)
@@ -1884,7 +1889,7 @@ app_event :: proc(e: ^sapp.Event) -> bool {
 		send_input(a, fmt.tprintf(`{{"v":1,"type":"input","event":"char","text":%s}}`, strings.to_string(b)))
 		return true
 	case .MOUSE_DOWN:
-		if !in_tab(e.mouse_x, e.mouse_y) do return false
+		if !in_tab(r, e.mouse_x, e.mouse_y) do return false
 		// a click in the tab takes the keyboard back; a sliding drawer goes away
 		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
 		if state.focus_widget != "" do ui_do(Set_Focus{""})
@@ -1902,14 +1907,14 @@ app_event :: proc(e: ^sapp.Event) -> bool {
 		send_input(a, fmt.tprintf(`{{"v":1,"type":"input","event":"mouse","action":"up","button":"%s","x":%.1f,"y":%.1f,"clicks":%d,"mods":%s}}`, button_name(e.mouse_button), x, y, max(app.clicks, 1), mods_json(e.modifiers)))
 		return true
 	case .MOUSE_MOVE:
-		inside_tab := in_tab(e.mouse_x, e.mouse_y)
+		inside_tab := in_tab(r, e.mouse_x, e.mouse_y)
 		if !inside_tab && a.buttons == {} do return false
 		dx, dy := x - a.last_x, y - a.last_y
 		a.last_x, a.last_y = x, y
 		send_input(a, fmt.tprintf(`{{"v":1,"type":"input","event":"move","x":%.1f,"y":%.1f,"dx":%.1f,"dy":%.1f}}`, x, y, dx, dy))
 		return inside_tab
 	case .MOUSE_SCROLL:
-		if !in_tab(e.mouse_x, e.mouse_y) do return false
+		if !in_tab(r, e.mouse_x, e.mouse_y) do return false
 		send_input(a, fmt.tprintf(`{{"v":1,"type":"input","event":"scroll","dx":%.2f,"dy":%.2f,"x":%.1f,"y":%.1f}}`, e.scroll_x, e.scroll_y, x, y))
 		return true
 	}
@@ -1918,8 +1923,8 @@ app_event :: proc(e: ^sapp.Event) -> bool {
 
 // ---- the bar (ui.odin's centre): Inspect; exited / not responding / no frames ----
 
-app_bar_layout :: proc() {
-	a := tab_app()
+app_bar_layout :: proc(p: ^Pane) {
+	a := pane_app(p)
 	if a == nil do return
 	_, tab, at := app_tab_of(a.tab_id)
 	if tab == nil do return
@@ -2182,7 +2187,8 @@ app_wait_done :: proc(fail: proc(msg: string)) -> bool {
 			got = done ? "in the log" : "not in the log"
 		case "ring":
 			g := ring_gen(&a.ring, a.ring.shown_gen)
-			w_px, h_px := int(math.round(app.pane.z)), int(math.round(app.pane.w))
+			r := tab_rect(a.tab_id)
+			w_px, h_px := int(math.round(r.z)), int(math.round(r.w))
 			done = g != nil && a.ring.shown_gen > app_marks.gen && g.w == w_px && g.h == h_px
 			got = g != nil ? fmt.tprintf("shown gen %d %dx%d, pane %dx%d", g.gen, g.w, g.h, w_px, h_px) : "nothing shown"
 		}
@@ -2286,7 +2292,8 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		return "", true
 	case "app_click":
 		if a == nil || len(args) < 2 do return "app_click X Y (an app tab on screen)", false
-		x, y := app.pane.x + f32(num_arg(args, 0, 0)) * app.dpi, app.pane.y + f32(num_arg(args, 1, 0)) * app.dpi
+		r := tab_rect(a.tab_id)
+		x, y := r.x + f32(num_arg(args, 0, 0)) * app.dpi, r.y + f32(num_arg(args, 1, 0)) * app.dpi
 		app.clicks = 1
 		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = x, mouse_y = y}
 		event(&e)
@@ -2308,8 +2315,9 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		// a left drag in tab coordinates; the end may be outside the tab (the app keeps the capture)
 		if a == nil || len(args) < 4 do return "app_drag X1 Y1 X2 Y2", false
 		p := [4]f32{f32(num_arg(args, 0, 0)), f32(num_arg(args, 1, 0)), f32(num_arg(args, 2, 0)), f32(num_arg(args, 3, 0))}
-		x1, y1 := app.pane.x + p[0] * app.dpi, app.pane.y + p[1] * app.dpi
-		x2, y2 := app.pane.x + p[2] * app.dpi, app.pane.y + p[3] * app.dpi
+		r := tab_rect(a.tab_id)
+		x1, y1 := r.x + p[0] * app.dpi, r.y + p[1] * app.dpi
+		x2, y2 := r.x + p[2] * app.dpi, r.y + p[3] * app.dpi
 		app.clicks = 1
 		e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x1, mouse_y = y1}
 		event(&e)
@@ -2337,12 +2345,14 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		return "", true
 	case "app_hover":
 		if a == nil || len(args) < 2 do return "app_hover X Y (an app tab on screen)", false
-		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = app.pane.x + f32(num_arg(args, 0, 0)) * app.dpi, mouse_y = app.pane.y + f32(num_arg(args, 1, 0)) * app.dpi}
+		r := tab_rect(a.tab_id)
+		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = r.x + f32(num_arg(args, 0, 0)) * app.dpi, mouse_y = r.y + f32(num_arg(args, 1, 0)) * app.dpi}
 		event(&e)
 		return "", true
 	case "app_mouse":
 		if a == nil || len(args) < 3 do return "app_mouse down|up X Y", false
-		e := sapp.Event{type = args[0] == "down" ? .MOUSE_DOWN : .MOUSE_UP, mouse_button = .LEFT, mouse_x = app.pane.x + f32(num_arg(args, 1, 0)) * app.dpi, mouse_y = app.pane.y + f32(num_arg(args, 2, 0)) * app.dpi}
+		r := tab_rect(a.tab_id)
+		e := sapp.Event{type = args[0] == "down" ? .MOUSE_DOWN : .MOUSE_UP, mouse_button = .LEFT, mouse_x = r.x + f32(num_arg(args, 1, 0)) * app.dpi, mouse_y = r.y + f32(num_arg(args, 2, 0)) * app.dpi}
 		app.clicks = 1
 		event(&e)
 		return "", true

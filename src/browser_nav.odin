@@ -392,8 +392,8 @@ nav_button :: proc(id: clay.ElementId, label: string, enabled: bool) {
 	}
 }
 
-browser_bar_layout :: proc() {
-	b := tab_browser()
+browser_bar_layout :: proc(p: ^Pane) {
+	b := pane_browser(p)
 	if b == nil do return
 	_, tab, _ := find_tab(b.tab_id)
 	if tab == nil do return
@@ -483,9 +483,9 @@ browser_url_go :: proc() {
 }
 
 // A click on the toolbar (browser_event, before the page). True if it took it.
-browser_bar_click :: proc(e: ^sapp.Event) -> bool {
+browser_bar_click :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if e.type != .MOUSE_DOWN || e.mouse_button != .LEFT do return false
-	b := tab_browser()
+	b := pane_browser(p)
 	if b == nil || !inside(clay.ID("browser_bar"), e.mouse_x, e.mouse_y) do return false
 	if inside(clay.ID("annot_toggle"), e.mouse_x, e.mouse_y) do return false // annot_event's
 	hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(clay.ID(name), e.mouse_x, e.mouse_y)}
@@ -521,7 +521,7 @@ browser_can :: proc(tab_id: u64, what: Browser_Can) -> bool {
 
 // The URL field's Enter and Esc (main.odin, before the generic text field).
 // True if consumed.
-browser_url_key :: proc(e: ^sapp.Event) -> bool {
+browser_url_key :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if state.focus_widget != "browser_url" do return false
 	if browser_url_check() do return false
 	if e.type != .KEY_DOWN do return false
@@ -540,7 +540,7 @@ browser_url_key :: proc(e: ^sapp.Event) -> bool {
 		mods := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT)
 		if mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 			ui_do(Set_Focus{""})
-			return annot_event(e)
+			return annot_event(p, e)
 		}
 	}
 	return false
@@ -658,9 +658,9 @@ browser_url_redacted :: proc(url: string) -> string {
 // loads its text into the wrong tab. True: dropped.
 browser_url_check :: proc() -> bool {
 	if state.focus_widget != "browser_url" do return false
-	b := tab_browser()
-	// comment mode's hint has the field's place (browser_annotate.odin)
-	if b != nil && b.tab_id == browser_url_tab && !annot_on(b) do return false
+	// the field's own tab, while it has the keyboard (panes.odin); comment mode's hint has the
+	// field's place (browser_annotate.odin)
+	if b := browsers[browser_url_tab]; b != nil && tab_focused(browser_url_tab) && !annot_on(b) do return false
 	ui_do(Set_Focus{""})
 	return true
 }

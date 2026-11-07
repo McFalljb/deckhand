@@ -693,16 +693,16 @@ annot_set :: proc(b: ^Browser, on: bool) {
 // ---- input (main.odin: before browser_event) ----
 
 @(private = "file")
-in_pane :: proc(x, y: f32) -> bool {
-	p := app.pane
+in_pane :: proc(p: [4]f32, x, y: f32) -> bool {
 	return p.z > 0 && x >= p.x && y >= p.y && x < p.x + p.z && y < p.y + p.w
 }
 
 // The Annotate button, ⌘⇧., badge clicks, and in comment mode the mouse over the page and the
 // keys (the page gets neither). True if it took the event.
-annot_event :: proc(e: ^sapp.Event) -> bool {
-	b := tab_browser()
+annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+	b := pane_browser(p)
 	if b == nil do return false
+	r := pane_rect(p)
 	a := annots[b.tab_id]
 	if a == nil do return false
 	mods := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT)
@@ -719,7 +719,7 @@ annot_event :: proc(e: ^sapp.Event) -> bool {
 			return true
 		}
 		// a badge (either mode): its comment, to edit in the list
-		if in_pane(e.mouse_x, e.mouse_y) do #reverse for h in badges {
+		if in_pane(r, e.mouse_x, e.mouse_y) do #reverse for h in badges {
 			r := h.rect
 			if e.mouse_x >= r.x && e.mouse_y >= r.y && e.mouse_x < r.x + r[2] && e.mouse_y < r.y + r[3] {
 				comments_edit_open(h.comment_id)
@@ -741,13 +741,13 @@ annot_event :: proc(e: ^sapp.Event) -> bool {
 		return false // a key held in the page before gets its release (browser_event)
 	}
 	if covered && !a.press do return false
-	p := annot_fb_to_css({e.mouse_x, e.mouse_y}, a.zoom, app.dpi, {app.pane.x, app.pane.y})
-	inside_page := in_pane(e.mouse_x, e.mouse_y)
+	pt := annot_fb_to_css({e.mouse_x, e.mouse_y}, a.zoom, app.dpi, {r.x, r.y})
+	inside_page := in_pane(r, e.mouse_x, e.mouse_y)
 	#partial switch e.type {
 	case .MOUSE_MOVE:
-		a.ptr, a.ptr_in = p, inside_page
+		a.ptr, a.ptr_in = pt, inside_page
 		if a.press {
-			d := (p - a.press_at) * a.zoom
+			d := (pt - a.press_at) * a.zoom
 			if !a.dragging && d.x * d.x + d.y * d.y >= ANNOT_DRAG_MIN * ANNOT_DRAG_MIN do a.dragging = true
 			app.redraw = true
 			return true
@@ -764,8 +764,8 @@ annot_event :: proc(e: ^sapp.Event) -> bool {
 		if !inside_page do return false
 		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
 		if e.mouse_button == .LEFT {
-			a.press, a.press_at, a.dragging = true, p, false
-			a.ptr = p
+			a.press, a.press_at, a.dragging = true, pt, false
+			a.ptr = pt
 		}
 		return true // the page gets no clicks while commenting
 	case .MOUSE_UP:
@@ -779,13 +779,13 @@ annot_event :: proc(e: ^sapp.Event) -> bool {
 		a.pick_seq = a.seq
 		if a.dragging {
 			a.dragging = false
-			x0, y0 := min(a.press_at.x, p.x), min(a.press_at.y, p.y)
-			x1, y1 := max(a.press_at.x, p.x), max(a.press_at.y, p.y)
+			x0, y0 := min(a.press_at.x, pt.x), min(a.press_at.y, pt.y)
+			x1, y1 := max(a.press_at.x, pt.x), max(a.press_at.y, pt.y)
 			x0, y0 = max(x0, 0), max(y0, 0)
 			if a.view.x > 0 do x1 = min(x1, a.view.x)
 			if a.view.y > 0 do y1 = min(y1, a.view.y)
 			run(a, b, fmt.tprintf(`__pd.area(%.0f,%.0f,%.0f,%.0f,%d)`, x0, y0, max(x1 - x0, 1), max(y1 - y0, 1), a.seq), a.ctx)
-		} else do run(a, b, fmt.tprintf(`__pd.probe("pick",%.1f,%.1f,%d)`, p.x, p.y, a.seq), a.ctx)
+		} else do run(a, b, fmt.tprintf(`__pd.probe("pick",%.1f,%.1f,%d)`, pt.x, pt.y, a.seq), a.ctx)
 		app.redraw = true
 		return true
 	case .MOUSE_LEAVE:
@@ -973,18 +973,19 @@ annot_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string,
 		v, _ := strconv.parse_f64(s)
 		return f32(v)
 	}
-	at :: proc(x, y: f32) -> (f32, f32) {return app.pane.x + x * app.dpi, app.pane.y + y * app.dpi}
+	org := tab_rect(b.tab_id) // the page's pane (panes.odin)
+	at :: proc(o: [4]f32, x, y: f32) -> (f32, f32) {return o.x + x * app.dpi, o.y + y * app.dpi}
 	switch cmd {
 	case "annot_move":
 		if len(args) < 2 do return "annot_move X Y", false
-		mx, my := at(f(args[0]), f(args[1]))
+		mx, my := at(org, f(args[0]), f(args[1]))
 		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = mx, mouse_y = my}
 		event(&e)
 		return "", true
 	case "annot_drag":
 		if len(args) < 4 do return "annot_drag X1 Y1 X2 Y2", false
-		x1, y1 := at(f(args[0]), f(args[1]))
-		x2, y2 := at(f(args[2]), f(args[3]))
+		x1, y1 := at(org, f(args[0]), f(args[1]))
+		x2, y2 := at(org, f(args[2]), f(args[3]))
 		app.clicks = 1
 		e := sapp.Event{type = .MOUSE_MOVE, mouse_x = x1, mouse_y = y1}
 		event(&e)

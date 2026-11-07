@@ -621,17 +621,24 @@ ACTIONS := [?]Action {
 }
 
 // The tab `d` steps from the current one, round the session's tabs.
+// The tab `d` steps from the focused one, within the focused pane's strip (panes.odin).
 tab_step :: proc(d: int) -> (Command, bool) {
 	cs := cur()
-	if cs == nil || len(cs.tabs) < 2 do return nil, false
-	for t, i in cs.tabs do if t.id == cs.active_tab do return Focus_Tab{cs.tabs[(i + d + len(cs.tabs)) % len(cs.tabs)].id}, true
-	return Focus_Tab{cs.tabs[0].id}, true
+	if cs == nil do return nil, false
+	p := session_focused_pane(cs)
+	strip := pane_strip(cs, p)
+	if len(strip) < 2 do return nil, false
+	for id, i in strip do if id == p.active do return Focus_Tab{strip[(i + d + len(strip)) % len(strip)]}, true
+	return Focus_Tab{strip[0]}, true
 }
 
+// The focused pane's i-th tab (panes.odin).
 tab_nth :: proc(i: int) -> (Command, bool) {
 	cs := cur()
-	if cs == nil || i >= len(cs.tabs) do return nil, false
-	return Focus_Tab{cs.tabs[i].id}, true
+	if cs == nil do return nil, false
+	strip := pane_strip(cs, session_focused_pane(cs))
+	if i >= len(strip) do return nil, false
+	return Focus_Tab{strip[i]}, true
 }
 
 // The open session `d` steps from the current one, in the Open section's order.

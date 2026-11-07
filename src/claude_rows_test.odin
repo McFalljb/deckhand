@@ -398,7 +398,7 @@ claude_rows_send_and_close :: proc(t: ^testing.T) {
 	run_command(Claude_Session_Report{tab_id = main, session_id = "a6a6a6a6-0000-4000-8000-000000000001", source = "startup"}, R_SCRIPT)
 	s := find_session(sess)
 	b := Tab{id = new_id(), kind = Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
-	append(&s.tabs, b)
+	pane_add_tab(s, b) // in its pane (panes.odin)
 	br := b.id
 	testing.expect(t, run_command(Comment_Add{source = .Browser, tab_id = br, what = "w", text = "make it blue"}).ok)
 	run_command(Focus_Tab{tab_id = br}, R_UI)

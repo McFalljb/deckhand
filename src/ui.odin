@@ -500,23 +500,26 @@ palette_row :: proc(it: Palette_Item, i: int, width: f32) {
 centre :: proc(cs: ^Open_Session) {
 	th := theme()
 	if clay.UI(clay.ID("centre"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-		empty := active_term() == nil && tab_editor() == nil && tab_browser() == nil && tab_app() == nil
+		// the session's panes; one for now, the focused one (panes.odin). Its bars resolve their tab
+		// from it, never from the focused accessors
+		p := session_focused_pane(cs)
+		empty := pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
 		update_bar() // a pi-desk update: available, downloading, ready (ui_update.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
-		claude_bars() // a Claude tab's held messages (ui_claude.odin)
-		app_bar_layout() // an app tab that exited or stopped drawing (app_tab.odin)
-		dead_tab_bar_layout() // a pi tab whose process exited: how, Restart (dead_tab.odin)
-		browser_bar_layout() // a browser tab: Back, Forward, Reload / Stop, the URL field, Annotate (browser_nav.odin)
-		changes_bars_layout() // a Changes tab: branch, actions, commit (ui_changes.odin)
-		editor_bars_layout() // find, replace, go to line, changed on disk (editor_view.odin)
+		claude_bars(p) // a Claude tab's held messages (ui_claude.odin)
+		app_bar_layout(p) // an app tab that exited or stopped drawing (app_tab.odin)
+		dead_tab_bar_layout(p) // a pi tab whose process exited: how, Restart (dead_tab.odin)
+		browser_bar_layout(p) // a browser tab: Back, Forward, Reload / Stop, the URL field, Annotate (browser_nav.odin)
+		changes_bars_layout(p) // a Changes tab: branch, actions, commit (ui_changes.odin)
+		editor_bars_layout(p) // find, replace, go to line, changed on disk (editor_view.odin)
 		// a Changes tab's file list sits left of its diff (ui_changes.odin); other tabs: the pane alone
-		if clay.UI(clay.ID("centre_row"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			changes_list_layout()
-			if clay.UI(clay.ID("centre_main"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-				changes_file_bar_layout()
-				if clay.UI(clay.ID("terminal"))({
+		if clay.UI(pid(p, "centre_row"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
+			changes_list_layout(p)
+			if clay.UI(pid(p, "centre_main"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
+				changes_file_bar_layout(p)
+				if clay.UI(pid(p, "terminal"))({
 					layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = pu(SP_2), childAlignment = {x = .Center, y = .Center}},
 					backgroundColor = cc(th.bg_app),
 				}) {
@@ -524,7 +527,7 @@ centre :: proc(cs: ^Open_Session) {
 						clay.Text("Session gone", txt(th.text_secondary))
 						clay.Text("Its session file or folder no longer exists", txt(th.text_muted))
 						action_button(.Empty_Close, false)
-					} else if b := tab_browser(); b != nil && b.message != "" {
+					} else if b := pane_browser(p); b != nil && b.message != "" {
 						clay.TextDynamic(b.message, txt(th.text_secondary))
 						if b.closed_by_page do browser_reload_button() // browser.odin
 					} else if empty {
@@ -533,7 +536,7 @@ centre :: proc(cs: ^Open_Session) {
 						if button_enabled(.Empty_New_Chat) do action_button(.Empty_New_Chat, true)
 					}
 				}
-				changes_more_layout()
+				changes_more_layout(p)
 			}
 		}
 	}
@@ -1139,8 +1142,9 @@ field_offset_at :: proc(f: ^Text_Field, text_id: clay.ElementId, x: f32) -> int 
 	return text_offset_at(tf_text(f), x - d.boundingBox.x, .UI)
 }
 
+// The focused pane's content rect (its "terminal" element) at the last layout.
 ui_terminal_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
-	d := clay.GetElementData(clay.ID("terminal"))
+	d := clay.GetElementData(pid(focused_pane(), "terminal"))
 	if !d.found do return
 	b := d.boundingBox
 	return b.x, b.y, b.width, b.height, true

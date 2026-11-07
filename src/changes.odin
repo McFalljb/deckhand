@@ -1007,7 +1007,7 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		if err != "" do return fail(err), false
 		for tab in s.tabs {
 			if ct, is := tab.kind.(Changes_Tab); is && ct.root == root {
-				s.active_tab = tab.id
+				session_show_tab(s, tab.id)
 				focus_session(s.id, caller)
 				changes_refresh(changes_repo(root))
 				return {ok = true, created_id = tab.id}, true
@@ -1016,8 +1016,8 @@ changes_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		title := "Changes"
 		if root != fs_real(s.cwd) && changes_root_of(s.cwd) != root do title = fmt.tprintf("Changes · %s", filepath.base(root))
 		tab := Tab{id = new_id(), kind = Changes_Tab{root = strings.clone(root)}, title = strings.clone(title), status = .Running}
-		append(&s.tabs, tab)
-		s.active_tab = tab.id
+		pane_add_tab(s, tab)
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 		changes_view_new(tab.id, root)
 		return {ok = true, created_id = tab.id}, true

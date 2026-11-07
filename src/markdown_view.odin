@@ -208,8 +208,11 @@ md_preview :: proc(tab_id: u64) -> ^Md_View {
 }
 
 // The current tab's Markdown view and editor (nil: another kind of tab).
-md_active :: proc() -> (^Md_View, ^Editor, ^Tab) {
-	tab := active_tab()
+md_active :: proc() -> (^Md_View, ^Editor, ^Tab) {return md_of_pane(focused_pane())}
+
+// The Markdown tab pane p shows: its view, editor and tab (all nil for another kind).
+md_of_pane :: proc(p: ^Pane) -> (^Md_View, ^Editor, ^Tab) {
+	tab := pane_shown(p)
 	if tab == nil do return nil, nil, nil
 	if _, is := tab.kind.(Markdown_Tab); !is do return nil, nil, nil
 	v := md_view_of(tab.id)
@@ -1355,8 +1358,8 @@ over_pane :: proc(v: ^Md_View, mx, my: f32) -> bool {
 // The preview's input: wheel and keys scroll, links follow, ⌘F/⌘G find,
 // ⇧⌘V shows the source. True if consumed. In the source view only ⇧⌘V is
 // taken here (the editor has the rest).
-markdown_event :: proc(ev: ^sapp.Event) -> bool {
-	v, e, tab := md_active()
+markdown_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+	v, e, tab := md_of_pane(p)
 	if v == nil do return false
 	mt := tab.kind.(Markdown_Tab)
 	cmd := ev.modifiers & sapp.MODIFIER_SUPER != 0
@@ -1477,7 +1480,7 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 		for &tab in s.tabs {
 			mt, is := tab.kind.(Markdown_Tab)
 			if !is || fs_real(mt.path) != rp do continue
-			s.active_tab = tab.id
+			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
 			if v := md_view_of(tab.id); v != nil && c.anchor != "" {
 				delete(v.want)
@@ -1489,8 +1492,8 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 		tab := Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(p)}, title = strings.clone(filepath.base(p)), status = .Running}
 		v := md_view_new(tab.id, p)
 		if c.anchor != "" do v.want = strings.clone(c.anchor)
-		append(&s.tabs, tab)
-		s.active_tab = tab.id
+		pane_add_tab(s, tab)
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 		return {ok = true, created_id = tab.id}, true
 	case Markdown_Set_View:

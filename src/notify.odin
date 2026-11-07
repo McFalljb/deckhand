@@ -274,13 +274,13 @@ notify_on_screen :: proc(session: u64) -> bool {
 	return session != 0 && state.current_session == session && notify_pi_shown(session) && notify_window_active()
 }
 
-// The session's pi tab is the tab it shows.
+// The session's pi tab is shown (in any of its panes: panes.odin).
 @(private = "file")
 notify_pi_shown :: proc(session: u64) -> bool {
 	s := find_session(session)
-	if s != nil && s.agent == .Claude && len(s.tabs) > 0 do return s.active_tab == s.tabs[0].id // a Claude-only session's main tab
+	if s != nil && s.agent == .Claude && len(s.tabs) > 0 do return session_tab_shown(s, s.tabs[0].id) // a Claude-only session's main tab
 	pt := session_pi_tab(s)
-	return pt != nil && s.active_tab == pt.id
+	return pt != nil && session_tab_shown(s, pt.id)
 }
 
 // A page changed the user's clipboard during an agent's action (browser_act.odin): an entry in

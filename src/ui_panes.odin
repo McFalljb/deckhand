@@ -70,13 +70,16 @@ pane_press :: proc(e: ^sapp.Event) {
 	app.redraw = true
 }
 
-// The pane the last pointer move was for (event_pane): when the next is for another, the one it
-// left gets a mouse-leave, as when the pointer leaves the window (a page's hover and CEF's
-// pointer state, an app's Inspect hover).
+// The pane the pointer was last over (0: none, a column, the sidebar, a divider; a held press's
+// pane while it is held): when it moves off it, that pane gets a mouse-leave, as when the pointer
+// leaves the window (a page's hover and CEF's pointer state, an app's Inspect hover). Not
+// event_pane's: off any pane that is the focused one, which would never hear it leave.
 pointer_pane: u64
 
-pane_pointer_moved :: proc(fp: ^Pane) {
-	now := fp != nil ? fp.id : 0
+pane_pointer_moved :: proc(e: ^sapp.Event) {
+	now: u64
+	if pointer_capture.pane != 0 do now = pointer_capture.pane
+	else if p := pane_at(e.mouse_x, e.mouse_y); p != nil do now = p.id
 	if now == pointer_pane do return
 	before := pointer_pane
 	pointer_pane = now

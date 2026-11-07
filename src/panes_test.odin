@@ -1480,3 +1480,71 @@ panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
 	testing.expect(t, !ap.hin, "the pointer left the app's pane: its hover went")
 	inbox_drain()
 }
+
+// P4 round 2, 1: the focused prompt field reaching past its narrow pane's edge: a press there,
+// beside the pane, is not the field's (the field's editing ends; the press goes on as usual).
+@(test)
+panes_field_press_only_inside_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	defer delete_key(&page_extras, x.browser)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}
+	p := page_extra(x.browser)
+	p.dialog, p.dialog_kind = true, .Prompt
+	page_prompt_tab = x.browser
+	defer page_prompt_tab = 0
+	state.focus_widget = "browser_prompt"
+	W :: 1180
+	for _ in 0 ..< 3 {
+		_ = ui_layout(W, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	right := pb.frame.x + pb.frame.z
+	d := clay.GetElementData(pid(pb, "pg_prompt_box"))
+	if !testing.expectf(t, d.found && d.boundingBox.x + d.boundingBox.width > right + 4, "the field reaches past B's edge: %v, B ends at %v", d.boundingBox, right) do return
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = right + 2, mouse_y = d.boundingBox.y + d.boundingBox.height / 2}
+	testing.expect(t, !widget_event(&e), "beside B: not the field's")
+	inbox_drain()
+	testing.expectf(t, state.focus_widget == "", "the field's editing ended: %q", state.focus_widget)
+}
+
+// P4 round 2, 2: the pointer leaving the focused pane for no pane (a column): it hears it leave.
+@(test)
+panes_pointer_leaves_for_a_column :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	session_show_tab(x.s, x.app_id)
+	ap := apps[x.app_id]
+	ap.inspect = true
+	for _ in 0 ..< 3 {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	testing.expect(t, x.s.focused_pane == x.b, "B has the keyboard")
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expect(t, ap.hin, "over the app")
+	e = {type = .MOUSE_MOVE, mouse_x = px(40), mouse_y = pb.rect.y + pb.rect.w / 2} // the left column
+	event(&e)
+	testing.expect(t, !ap.hin, "the pointer left for the left column: its hover went")
+	// the pane it left is known to have been left (a page there gets CEF's leave; cef 0 here)
+	testing.expectf(t, pointer_pane == 0, "over no pane now: %v", pointer_pane)
+	// a held press keeps its pane: no leave while it drags outside
+	e = {type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	pointer_capture = {pane = x.b}
+	defer pointer_capture = {}
+	e = {type = .MOUSE_MOVE, mouse_x = px(40), mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expectf(t, pointer_pane == x.b, "the press's pane while held: %v", pointer_pane)
+	inbox_drain()
+}

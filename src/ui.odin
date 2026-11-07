@@ -428,6 +428,17 @@ focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 @(private = "file")
 fid :: proc(name: string) -> clay.ElementId {return pid(focused_pane(), name)}
 
+// A press on the focused field's box (focused_field): a pane's field (fid, the editor's bars) only
+// inside its pane, where it shows (pane_inside: a field reaching past a narrow pane's edge is cut
+// there); the others anywhere on their box.
+field_inside :: proc(box_id: clay.ElementId, x, y: f32) -> bool {
+	switch state.focus_widget {
+	case "changes_message", "browser_url", "browser_find", "browser_prompt", "editor_find", "editor_replace", "editor_goto":
+		return pane_inside(focused_pane(), box_id, x, y)
+	}
+	return inside(box_id, x, y)
+}
+
 // ---- command palette ----
 
 // A scrim over the window and a box near its top: the query field, then the

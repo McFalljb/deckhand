@@ -18,6 +18,7 @@
 # Usage: tests/scripts/jobs.sh
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
+unset PI_KIT_NOTES_DIR # the user's own makes the first-run sheet offer it first: "setupopt 1" would be Create ~/Deckhand
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh

@@ -817,8 +817,11 @@ clip_rect :: proc(r: [4]f32, x, y, w, h: f32) -> (out: [4]f32, ok: bool) {
 
 // The overlay over the page: markers (outline, numbered badge or edge arrow), the picked
 // element while its comment is being written, the hover outline and its label, a drag's area.
+// Each drawn frame starts with no badges (main.odin): every pane's page adds its own (their rects
+// are in its pane, so a click finds the one under it).
+annot_frame_begin :: proc() {clear(&badges)}
+
 annot_draw :: proc(tab_id: u64, x, y, w, h: f32) {
-	clear(&badges)
 	a := annots[tab_id]
 	if a == nil do return
 	th := theme()

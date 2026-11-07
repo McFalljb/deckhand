@@ -22,6 +22,7 @@ package main
 import "base:runtime"
 import "core:c"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
@@ -399,7 +400,7 @@ browser_bar_layout :: proc(p: ^Pane) {
 	if tab == nil do return
 	bt, _ := tab.kind.(Browser_Tab)
 	th := theme()
-	focused := state.focus_widget == "browser_url"
+	focused := state.focus_widget == "browser_url" && pane_keys(p) // the field is the focused pane's
 	if clay.UI(cid("browser_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -434,7 +435,8 @@ browser_bar_layout :: proc(p: ^Pane) {
 							if part == "" do continue
 							if d := clay.GetElementData(cid(part)); d.found do others += d.boundingBox.width + px(SP_1)
 						}
-						room = max(min(room, bar.boundingBox.width - others), px(40))
+						// the bar's own width, at most its pane's (a long address must not widen the pane)
+						room = max(min(room, min(bar.boundingBox.width, pane_width()) - others), px(40))
 					}
 					if u == "" do clay.Text("Type a web address", txt(th.text_muted))
 					else do clay.TextDynamic(clip(u, room), txt(th.text_secondary))
@@ -559,10 +561,11 @@ browser_shown :: proc() -> (^Browser_Tab, u64) {
 //
 // Every browser tab with a runtime may want a page; CEF holds at most 8.
 // Rules (browser_page_plan, pure; docs/BROWSER.md "Pages"):
-//  - only the user unloads a page: the tab on screen (only the user puts one
-//    there; an agent's browser_open never does) gets a page first, and when no
-//    slot is free the least recently shown hidden page goes for it, its own
-//    session's first, then any session's (its URL stays; it loads when shown);
+//  - only the user unloads a page: the tabs on screen (one per pane showing a
+//    page; only the user puts one there, an agent's browser_open never does)
+//    get a page first, and when no slot is free the least recently shown hidden
+//    page goes for each, its own session's first, then any session's, never one
+//    twice nor an on-screen one (its URL stays; it loads when shown);
 //  - every other tab that wants a page (an agent's, a background popup's)
 //    loads while slots are free, the first to ask first; otherwise it waits
 //    ("too many open pages") and loads when one frees. It never unloads one;
@@ -588,7 +591,8 @@ browser_page_plan :: proc(pages: []Page_Info, free_slots: int, allocator := cont
 	p.unload = make([dynamic]int, allocator)
 	p.wait = make([dynamic]int, allocator)
 	slots := free_slots
-	// 1. the tab on screen
+	taken := make([dynamic]int, context.temp_allocator) // victims already chosen
+	// 1. the tabs on screen (one per pane showing a page)
 	for x, i in pages {
 		if !x.visible || !x.wants do continue
 		if slots > 0 {
@@ -600,6 +604,7 @@ browser_page_plan :: proc(pages: []Page_Info, free_slots: int, allocator := cont
 		victim := -1
 		for y, k in pages {
 			if !y.live || y.visible || y.pinned do continue
+			if slice.contains(taken[:], k) do continue
 			if victim < 0 {victim = k; continue}
 			v := pages[victim]
 			own, vown := y.session == x.session, v.session == x.session
@@ -611,6 +616,7 @@ browser_page_plan :: proc(pages: []Page_Info, free_slots: int, allocator := cont
 			append(&p.wait, i)
 			continue
 		}
+		append(&taken, victim)
 		append(&p.unload, victim)
 		append(&p.load, i)
 	}

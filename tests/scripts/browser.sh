@@ -23,6 +23,7 @@ GROUP_C="browser-annotate browser-close browser-drag browser-keys"
 GROUP_D="browser-ring browser-ring-cpu browser-ring-lag browser-slots browser-release"
 GROUP_E="browser-act browser-read browser-restore"
 GROUP_F="browser-agent browser-nav browser-popup browser-tabkeys browser-pages"
+GROUP_G="browser-split app-split" # pages and apps live in every pane (docs/plans/split-panes.md P4)
 if [ "${1:-}" = --group ]; then
   g=${2:-}
   case "$g" in
@@ -32,7 +33,8 @@ if [ "${1:-}" = --group ]; then
     d) set -- $GROUP_D ;;
     e) set -- $GROUP_E ;;
     f) set -- $GROUP_F ;;
-    *) echo "browser.sh: --group a, b, c, d, e or f"; exit 2 ;;
+    g) set -- $GROUP_G ;;
+    *) echo "browser.sh: --group a, b, c, d, e, f or g"; exit 2 ;;
   esac
   W="$ROOT/build/browser-$g" # its own folder: the groups run at the same time
   # a Chromium helper of a run that just ended may still be writing its profile: try again
@@ -57,7 +59,7 @@ tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }
 # PI_DESK_CEF_SHARED_TEXTURE=0, OnPaint), with a slow GPU (browser-ring-lag) and
 # under a fast drag (browser-drag); while each runs, every socket of its
 # processes is listed: none may leave the machine
-ALL="$GROUP_A $GROUP_B $GROUP_C $GROUP_D $GROUP_E $GROUP_F"
+ALL="$GROUP_A $GROUP_B $GROUP_C $GROUP_D $GROUP_E $GROUP_F $GROUP_G"
 NAMES=${*:-$ALL}
 # two sessions of the fake pi in the project (browser-restore opens them by id)
 STORE_DIR="$FAKE_HOME/.pi/agent/sessions/--proj--" # beside wwww-1 (its project's store)
@@ -81,6 +83,7 @@ for name in $NAMES; do
   fi
   rm -rf "$W/data" && mkdir -p "$W/data"
   # the files an agent uploads (browser-act): two small files beside the data
+  if [ $name = app-split ] && [ ! -x build/fake-app ]; then echo "app-split: build/fake-app missing (./build.sh fake-app)"; fail=1; continue; fi
   if [ $name = browser-act ]; then mkdir -p "$FAKE_HOME/up" && printf 'alpha\n\n' > "$FAKE_HOME/up/a.txt" && printf 'b\n' > "$FAKE_HOME/up/b.txt"; fi
   script=$name; shared=1; lag=0
   if [ $name = browser-ring-cpu ]; then script=browser-ring; shared=0; fi

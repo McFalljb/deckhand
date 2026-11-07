@@ -411,8 +411,10 @@ browser_bars_guard_per_tab :: proc(t: ^testing.T) {
 	testing.expect(t, !bars_click_ok(ta, bp_at(601)), "the bars changed: held")
 	testing.expect(t, !bars_click_ok(ta, bp_at(1000)), "still held")
 	testing.expect(t, bars_click_ok(ta, bp_at(1102)), "500 ms after the change")
-	// another tab on screen, then this one again: held
-	testing.expect(t, !bars_click_ok(tb, bp_at(2000)), "the other tab came on screen")
+	// another tab on screen (this one off it: the frame's tick notes it), then this one again: held
+	session_show_tab(find_session(a), tb)
+	browser_polish_pending_tick()
+	session_show_tab(find_session(a), ta)
 	testing.expect(t, !bars_click_ok(ta, bp_at(3000)), "back to this tab: held")
 	testing.expect(t, bars_click_ok(ta, bp_at(3500)), "500 ms later")
 	// a new request in the same bar (another download id) is a change

@@ -1,0 +1,51 @@
+# An app tab (the fake app, tests/fake-app/) beside a browser tab, both live (docs/plans/split-panes.md
+# P4; tests/scripts/browser.sh): the app keeps framing and is never told it is hidden while the
+# page's pane has the keyboard; its screenshot says visible; a click in it gives its pane the
+# keyboard and reaches it at its own pane's coordinates; keys then go to the app, not the page; a
+# divider drag gives it a ring of its new pane size, and the page a view of its own.
+wait 1500
+window front
+app_open build/fake-app
+app_waitstatus running 20000
+app_waitframe 5 20000
+# the app splits off right (⇧⌃⌘→); a page opens in the pi tab's pane, which gets the keyboard
+key right cmd ctrl shift
+waitstate 5000 open_sessions.0.panes.# 2
+key left cmd ctrl
+assert_state open_sessions.0.focused_pane $pane0
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+assert_state open_sessions.0.panes.0.active_tab $ptab0
+# both on screen: the app frames on, without the keyboard
+app_waitframe 10 5000
+assert_state open_sessions.0.panes.1.active_tab $ptab1
+assert_app_log visible: true
+assert_not_app_log visible: false
+web_assert focused yes
+command {"type":"app_screenshot","tab_id":$ptab1}
+assert_finished ok true
+assert_finished data.visible true
+shot app-split/beside
+assert_state open_sessions.0.tabs.1.ring_w 389
+assert_state open_sessions.0.tabs.1.on_screen true
+assert_state open_sessions.0.tabs.2.on_screen true
+web_assert view 390x744
+# a click in the app: its pane gets the keyboard, the app the click (its own coordinates)
+app_click 100 80
+app_waitlog "event":"mouse","action":"down","button":"left","x":100.0,"y":80.0 3000
+assert_state open_sessions.0.focused_pane $pane1
+web_assert focused no
+type q
+app_waitlog "event":"char","text":"q" 3000
+web_js document.title = 'chk z=' + keys.includes('KeyQ')
+web_title chk z=false
+# the divider moves: the app's ring follows its pane once it settles; the page's view its own
+wait 700
+divider pane 0 -120
+waitstate 5000 open_sessions.0.tabs.1.ring_w 509
+assert_state open_sessions.0.tabs.1.ring_h 744
+web_assert view 270x744
+app_waitframe 5 5000
+assert_app_pixel 5 5 202830
+quit

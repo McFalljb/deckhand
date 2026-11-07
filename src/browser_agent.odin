@@ -675,7 +675,7 @@ agent_tabs_list :: proc(caller: Caller, session: u64) -> Result {
 			json_quote(&b, tab.title)
 			strings.write_string(&b, `,"url":`)
 			json_quote(&b, bt.url)
-			on_screen := state.current_session == s.id && s.active_tab == tab.id
+			on_screen := tab_on_screen(tab.id) // shown in a pane of the session on screen (panes.odin)
 			comments := 0
 			for cm in s.comments do if cm.tab_id == tab.id do comments += 1
 			fmt.sbprintf(&b, `,"loading":%v,"page":"%s","on_screen":%v,"comments":%d`, bt.loading, page, on_screen, comments)
@@ -1233,7 +1233,7 @@ op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, privat
 @(private = "file")
 shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (done: bool, r: Result, private: bool) {
 	t := agent_tab(op.tab_id)
-	on_screen := tab_browser() == b
+	on_screen := tab_on_screen(b.tab_id) // in any pane: it paints, the user sees it
 	ready := b.ring.shown_gen != 0 && b.content_w > 0
 	if !on_screen {
 		if !op.woke {
@@ -1354,7 +1354,7 @@ strip_text :: proc(b: ^Browser) -> (what: string, on: bool) {
 	}
 	// at most a third of the bar (cut with …)
 	room := px(200)
-	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(d.boundingBox.width / 3 - px(DOT + 2 * SP_2), px(80))
+	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(min(d.boundingBox.width, pane_width()) / 3 - px(DOT + 2 * SP_2), px(80)) // at most its pane's: never wider for being wide
 	return clip(what, room), true
 }
 

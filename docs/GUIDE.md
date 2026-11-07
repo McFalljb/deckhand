@@ -400,9 +400,9 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     equal. **Even out panes** (palette, Window menu) gives every pane equal room.
   - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join
     the pane next to it; nothing is closed.
-  - A browser or app tab shows live only in the pane with the keyboard for now: in another pane
-    it says **Click to show**, and a click there only gives that pane the keyboard (the page or
-    app does not get the click).
+  - Browser and app tabs are live in every pane: pages load, play and scroll beside a shell,
+    and each page or app fits its own pane. Only the pane with the keyboard gets your typing; a
+    click in another pane's page gives that pane the keyboard and clicks there too.
   - Each session's panes come back when Deckhand restarts: the same splits and sizes, the
     same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
     Deckhand from before panes opens the same workspace with every tab back in one pane.)

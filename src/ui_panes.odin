@@ -12,8 +12,8 @@ import sapp "../vendor/sokol-odin/sokol/app"
 // release go to that pane, wherever the pointer is: a selection dragged from pane A over pane B
 // keeps selecting in A. Without a button, moves and the wheel go to the pane under the pointer.
 // A press in a pane without the keyboard focuses it first (synchronously: the inbox drains
-// after the event, too late for this click), then acts (click-through), except on a "Click to
-// show" placeholder, which it only focuses.
+// after the event, too late for this click), then acts there (click-through), on a page or an
+// app too.
 
 Pointer_Capture :: struct {
 	pane:   u64, // the pane a press started in (0 = none held)
@@ -51,26 +51,23 @@ hit_pane :: proc() -> ^Pane {
 	return focused_pane()
 }
 
-// A press: records its pane (capture) and focuses it when it has not the keyboard. True: the
-// press is used up (it only focused a placeholder pane).
-pane_press :: proc(e: ^sapp.Event) -> bool {
+// A press: records its pane (capture) and focuses it when it has not the keyboard.
+pane_press :: proc(e: ^sapp.Event) {
 	s := cur()
-	if s == nil || len(s.panes) <= 1 do return false
-	if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false
+	if s == nil || len(s.panes) <= 1 do return
+	if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return
 	p := pane_at(e.mouse_x, e.mouse_y)
 	if p == nil {
 		pointer_capture = {window = true}
-		return false
+		return
 	}
 	pointer_capture = {pane = p.id}
-	if p.id == s.focused_pane do return false
-	placeholder := pane_placeholder(s, p)
+	if p.id == s.focused_pane do return
 	run_command(Focus_Pane{pane = p.id}, {kind = .UI}) // now: this same click acts in it
 	// the click's own drag must outlive the focus change (drags_follow_focus ends the drags of
 	// tabs that left the screen; this one's did not, but the focused tab changed)
 	if tab := active_tab(); tab != nil do app.drag_tab = tab.id
 	app.redraw = true
-	return placeholder
 }
 
 // The button is up, the pointer left the window or the window lost focus: no capture.
@@ -222,32 +219,6 @@ pane_move_action :: proc(d: Pane_Dir) -> (Command, bool) {
 	if n := pane_neighbour(cs, cs.focused_pane, d); n != 0 do return Move_Tab{tab_id = tab, pane = n, index = -1}, true
 	if pane_tab_count(cs, cs.focused_pane) <= 1 || len(cs.panes) >= PANES_MAX do return nil, false
 	return Split_Pane{pane = cs.focused_pane, direction = d, tab_id = tab}, true
-}
-
-// The pointer is over a "Click to show" pane's content (the plan's P4 makes pages and apps live
-// in every pane), no press held elsewhere: the page or app under it is not live, so nothing
-// reaches it; a press there only focuses the pane (pane_press does that first). True: the event
-// is used up.
-pointer_over_placeholder :: proc(e: ^sapp.Event) -> bool {
-	#partial switch e.type {
-	case .MOUSE_DOWN, .MOUSE_MOVE, .MOUSE_SCROLL, .MOUSE_UP:
-		if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return false // the palette's, a menu's, the drawer's
-		s := cur()
-		p := event_pane(e)
-		if s == nil || !pane_placeholder(s, p) do return false
-		r := p.rect
-		if !(r.z > 0 && e.mouse_x >= r.x && e.mouse_y >= r.y && e.mouse_x < r.x + r.z && e.mouse_y < r.y + r.w) do return false // its strip still hovers
-		#partial switch e.type {
-		case .MOUSE_MOVE:
-			app.pointer = {e.mouse_x, e.mouse_y}
-			set_hover(nil, false)
-		case .MOUSE_DOWN:
-			ui_do(Focus_Pane{pane = p.id})
-			app.redraw = true
-		}
-		return true
-	}
-	return false
 }
 // A divider's line runs top to bottom (its split's panes are side by side).
 pane_divider_across :: proc(split: u64) -> bool {

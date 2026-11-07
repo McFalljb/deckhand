@@ -697,9 +697,8 @@ An open session's centre is split into panes (`src/panes.odin`, `src/panes_comma
 pane's strip in order, `rect` its content's last laid-out rect in points `{"x","y","w","h"}`
 (the current session only) — and `layout`, the tree: `{"pane": id}` or `{"split": id, "dir":
 "right"|"down", "ratio", "a", "b"}` (`right`: `a` left of `b`; `down`: `a` above `b`). Each tab
-has `pane` (its pane's id) and `on_screen` (shown in its pane of the current session). Until
-browser and app tabs draw live in every pane, one shown in a pane without the keyboard is not
-`on_screen` ("Click to show"). Every session has one pane until it is split; panes are not saved
+has `pane` (its pane's id) and `on_screen` (shown in its pane of the current session: any pane's,
+browser and app tabs too; only the focused pane's tab gets keys). Every session has one pane until it is split; panes are not saved
 yet. Pane and split ids are runtime ids, new at each launch. A session read back from an older
 snapshot without panes shows one pane with id 0. Who: anyone but a pi or Claude tab's bridge
 and an app (`"not allowed for this caller"`); Home is refused.

@@ -551,7 +551,16 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
 	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session")}
 	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
-	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true)}
+	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true), pane = opt_u64(&r, "pane")}
+	case "split_pane":
+		d, ok := pane_dir_parse(get_str(&r, "direction"))
+		if !ok && r.err == "" do r.err = "direction: right, down, left or up"
+		cmd = Split_Pane{pane = opt_u64(&r, "pane"), direction = d, tab_id = opt_u64(&r, "tab_id"), no_focus = !(opt_bool(&r, "focus").? or_else true)}
+	case "close_pane":          cmd = Close_Pane{pane = get_u64(&r, "pane")}
+	case "focus_pane":          cmd = Focus_Pane{pane = opt_u64(&r, "pane"), direction = get_str(&r, "direction", optional = true)}
+	case "move_tab":            cmd = Move_Tab{tab_id = get_u64(&r, "tab_id"), pane = get_u64(&r, "pane"), index = opt_index(&r, "index").? or_else -1}
+	case "set_split":           cmd = Set_Split{split = get_u64(&r, "split"), ratio = opt_f32(&r, "ratio").? or_else -1}
+	case "equalize_panes":      cmd = Equalize_Panes{session = opt_u64(&r, "session")}
 	case "close_tab":           cmd = Close_Tab{tab_id = get_u64(&r, "tab_id"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
 	case "focus_tab":           cmd = Focus_Tab{tab_id = get_u64(&r, "tab_id")}
 	case "copy_selection":      cmd = Copy_Selection{tab_id = get_u64(&r, "tab_id")}

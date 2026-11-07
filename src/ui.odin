@@ -498,32 +498,80 @@ palette_row :: proc(it: Palette_Item, i: int, width: f32) {
 
 @(private = "file")
 centre :: proc(cs: ^Open_Session) {
-	th := theme()
 	if clay.UI(clay.ID("centre"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-		// the session's panes; one for now, the focused one (panes.odin). Its bars resolve their tab
-		// from it, never from the focused accessors
-		p := session_focused_pane(cs)
-		empty := pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
 		update_bar() // a pi-desk update: available, downloading, ready (ui_update.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
-		claude_bars(p) // a Claude tab's held messages (ui_claude.odin)
-		app_bar_layout(p) // an app tab that exited or stopped drawing (app_tab.odin)
-		dead_tab_bar_layout(p) // a pi tab whose process exited: how, Restart (dead_tab.odin)
-		browser_bar_layout(p) // a browser tab: Back, Forward, Reload / Stop, the URL field, Annotate (browser_nav.odin)
-		changes_bars_layout(p) // a Changes tab: branch, actions, commit (ui_changes.odin)
-		editor_bars_layout(p) // find, replace, go to line, changed on disk (editor_view.odin)
+		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane
+		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
+			if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
+			else do pane_layout(cs, session_focused_pane(cs))
+		}
+	}
+}
+
+// A node of cs's layout tree: a split lays out child a at its share, the divider, then child b
+// in the rest (so b takes the divider and any rounding); a leaf, its pane.
+@(private = "file")
+pane_tree_layout :: proc(cs: ^Open_Session, n: int) {
+	node := cs.nodes[n]
+	if node.leaf {
+		pane_layout(cs, session_pane(cs, node.pane))
+		return
+	}
+	th := theme()
+	across := node.dir == .Right
+	ratio := node.ratio
+	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same)
+	if d := clay.GetElementData(clay.ID("pane_split", u32(node.id))); d.found {
+		ratio = pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W))
+	}
+	sz_a := across ? clay.Sizing{clay.SizingPercent(ratio), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingPercent(ratio)}
+	sz_div := across ? clay.Sizing{clay.SizingFixed(px(BORDER_W)), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}
+	if clay.UI(clay.ID("pane_split", u32(node.id)))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = across ? .LeftToRight : .TopToBottom}}) {
+		if clay.UI(clay.ID("pane_side_a", u32(node.id)))({layout = {sizing = sz_a}}) do pane_tree_layout(cs, node.a)
+		if clay.UI(clay.ID("pane_div", u32(node.id)))({layout = {sizing = sz_div}, backgroundColor = cc(th.border)}) {}
+		if clay.UI(clay.ID("pane_side_b", u32(node.id)))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) do pane_tree_layout(cs, node.b)
+	}
+}
+
+// One pane: its strip when the session is split (the tabs leave the title bar), its tab's bars,
+// then its content (pid(p, "pane_body"): the rect its tabs are sized to) holding the
+// "terminal" element its tab draws in. Every id inside is the pane's (cid, pid).
+@(private = "file")
+pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
+	th := theme()
+	old := ids_pane_begin(p)
+	defer ids_pane_end(old)
+	split := cs != nil && len(cs.panes) > 1
+	empty := pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
+	placeholder := split && pane_placeholder(cs, p)
+	if clay.UI(pid(p, "pane"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
+		if split do pane_strip_layout(cs, p)
+		if !placeholder {
+			claude_bars(p) // a Claude tab's held messages (ui_claude.odin)
+			app_bar_layout(p) // an app tab that exited or stopped drawing (app_tab.odin)
+			dead_tab_bar_layout(p) // a pi tab whose process exited: how, Restart (dead_tab.odin)
+			browser_bar_layout(p) // a browser tab: Back, Forward, Reload / Stop, the URL field, Annotate (browser_nav.odin)
+			changes_bars_layout(p) // a Changes tab: branch, actions, commit (ui_changes.odin)
+			editor_bars_layout(p) // find, replace, go to line, changed on disk (editor_view.odin)
+		}
 		// a Changes tab's file list sits left of its diff (ui_changes.odin); other tabs: the pane alone
-		if clay.UI(pid(p, "centre_row"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			changes_list_layout(p)
+		if clay.UI(pid(p, "pane_body"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
+			if !placeholder do changes_list_layout(p)
 			if clay.UI(pid(p, "centre_main"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-				changes_file_bar_layout(p)
+				if !placeholder do changes_file_bar_layout(p)
 				if clay.UI(pid(p, "terminal"))({
 					layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = pu(SP_2), childAlignment = {x = .Center, y = .Center}},
 					backgroundColor = cc(th.bg_app),
 				}) {
-					if empty && cs != nil && cs.missing {
+					if placeholder {
+						// a page or an app in a pane without the keyboard: not live yet (the plan's P4)
+						tab := pane_shown(p)
+						clay.TextDynamic(tab != nil ? tab.title : "", txt(th.text_secondary))
+						clay.Text("Click to show", txt(th.text_muted))
+					} else if empty && cs != nil && cs.missing {
 						clay.Text("Session gone", txt(th.text_secondary))
 						clay.Text("Its session file or folder no longer exists", txt(th.text_muted))
 						action_button(.Empty_Close, false)
@@ -536,8 +584,32 @@ centre :: proc(cs: ^Open_Session) {
 						if button_enabled(.Empty_New_Chat) do action_button(.Empty_New_Chat, true)
 					}
 				}
-				changes_more_layout(p)
+				if !placeholder do changes_more_layout(p)
 			}
+		}
+	}
+}
+
+// A pane's own strip (the session is split): its tabs, then "+" (a new shell in it). The focused
+// pane's strip has an accent line along its bottom.
+@(private = "file")
+pane_strip_layout :: proc(cs: ^Open_Session, p: ^Pane) {
+	th := theme()
+	focused := p.id == cs.focused_pane
+	if clay.UI(pid(p, "pane_strip"))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(TAB_STRIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
+		backgroundColor = cc(th.bg_app),
+		border = {color = cc(focused ? th.accent : th.border), width = {bottom = pu(BORDER_W)}},
+	}) {
+		new_w := px(TOOL_BUTTON + SP_1)
+		strip_tabs(cs, p, pane_width() - px(2 * SP_2) - new_w)
+		hovered := ui_hover == Hit(Hit_Pane_New(p.id))
+		if clay.UI(pid(p, "pane_new"))({
+			layout = {sizing = {clay.SizingFixed(px(TOOL_BUTTON)), clay.SizingFixed(px(TOOL_BUTTON))}, childAlignment = {x = .Center, y = .Center}},
+			backgroundColor = cc(mix(th.bg_app, th.text, hovered ? TINT_BUTTON_HOVER : 0)),
+			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
+		}) {
+			icon(.Plus, th.text_secondary, ICON_SIZE_SM)
 		}
 	}
 }
@@ -626,57 +698,9 @@ tab_strip :: proc(cs: ^Open_Session, w: f32) {
 	}) {
 		if !state.layout.left_open do lights_buttons(px(LIGHTS_X + LIGHTS_W + SP_2 - TERM_PAD), px(SP_2))
 		if cs != nil {
-			left, _ := column_widths()
-			max_tab, squeezed := tab_max_w(cs, w - left * app.dpi)
-			for tab, i in cs.tabs {
-				id := clay.ID("tab", u32(i))
-				active := tab.id == cs.active_tab
-				close_id := clay.ID("tabclose", u32(i))
-				close_hover := ui_hover == Hit(Hit_Close_Tab(tab.id))
-				hovered := ui_hover == Hit(Hit_Tab(tab.id)) || close_hover
-				bg, em := overlay(id, active, hovered)
-				ic, label, extra := tab_label(cs, tab)
-				st := tab_strip_status(tab, active)
-				show_dot := st != .None && st != .Exited
-				dirty := editor_dirty(editor_of(tab.id))
-				font: u16 = WEIGHT_REGULAR
-				if et, is := tab.kind.(Editor_Tab); is && et.preview do font |= FONT_ITALIC // a preview: the next one replaces it
-				// the title is cut to the widest a tab may be; a short tab is padded to TAB_MIN_W
-				// squeezed: only the active tab keeps its close button (the others: ⌘W once active)
-				close := !squeezed || active
-				fixed := tab_fixed_w(ic, show_dot, dirty, extra, close)
-				room := max_tab + (close ? tab_close_w() : 0) - fixed
-				title := clip(label, room, font)
-				if clay.UI(id)({
-					layout = {
-						sizing = {clay.SizingFit({min = px(TAB_MIN_W)}), clay.SizingFixed(px(TAB_H))},
-						padding = {pu(SP_3), pu(SP_1), 0, 0},
-						childGap = pu(SP_2),
-						childAlignment = {y = .Center},
-					},
-					backgroundColor = bg,
-					cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-				}) {
-					if show_dot do dot(status_color(st))
-					if dirty do dot(th.text_secondary) // unsaved changes
-					col := mix(th.text_secondary, th.text, em)
-					if tab.status != .Running do col = th.text_muted
-					if ic != .None do icon(ic, col, KIND_ICON)
-					clay.TextDynamic(title, txt(col, font))
-					if extra != "" do clay.TextDynamic(extra, txt(th.text_muted))
-					spacer() // the close button sits at the right edge of a padded tab
-					if close {
-						cbg, _ := overlay(close_id, false, close_hover)
-						show := max(em, f32(active ? 1 : 0))
-						if clay.UI(close_id)({
-							layout = {sizing = {clay.SizingFixed(px(TAB_H - SP_2)), clay.SizingFixed(px(TAB_H - SP_2))}, childAlignment = {x = .Center, y = .Center}},
-							backgroundColor = cbg,
-							cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-						}) {
-							icon(.Close, with_alpha(close_hover ? th.text : th.text_muted, show), ICON_SIZE_SM)
-						}
-					}
-				}
+			if len(cs.panes) <= 1 {
+				left, _ := column_widths()
+				strip_tabs(cs, nil, w - left * app.dpi - top_bar_fixed_w())
 			}
 			tool_button(.New_Tab)
 			tool_button(.New_Menu, menu.open && menu.target == Menu_Target(Menu_New{}))
@@ -691,6 +715,67 @@ tab_strip :: proc(cs: ^Open_Session, w: f32) {
 		tool_button(.Settings, settings_open())
 		tool_button(.Toggle_Right)
 		agent_button() // far right
+	}
+}
+
+// The tabs of a strip: every tab of cs (p nil: the top bar of a session with one pane) or pane p's
+// (its own strip, when split), in room px. Ids are by index in cs.tabs, unique across strips.
+@(private = "file")
+strip_tabs :: proc(cs: ^Open_Session, p: ^Pane, room: f32) {
+	th := theme()
+	max_tab, squeezed := tab_max_w(cs, room, p)
+	for tab, i in cs.tabs {
+		if p != nil && tab.pane != p.id do continue
+		id := clay.ID("tab", u32(i))
+		active := p != nil ? tab.id == p.active : tab.id == cs.active_tab
+		// an unfocused pane's shown tab: a quieter tint than the focused one's
+		quiet := active && p != nil && p.id != cs.focused_pane
+		close_id := clay.ID("tabclose", u32(i))
+		close_hover := ui_hover == Hit(Hit_Close_Tab(tab.id))
+		hovered := ui_hover == Hit(Hit_Tab(tab.id)) || close_hover
+		bg, em := overlay(id, active && !quiet, hovered || quiet)
+		ic, label, extra := tab_label(cs, tab)
+		st := tab_strip_status(tab, active)
+		show_dot := st != .None && st != .Exited
+		dirty := editor_dirty(editor_of(tab.id))
+		font: u16 = WEIGHT_REGULAR
+		if et, is := tab.kind.(Editor_Tab); is && et.preview do font |= FONT_ITALIC // a preview: the next one replaces it
+		// the title is cut to the widest a tab may be; a short tab is padded to TAB_MIN_W
+		// squeezed: only the active tab keeps its close button (the others: ⌘W once active)
+		close := !squeezed || active
+		fixed := tab_fixed_w(ic, show_dot, dirty, extra, close)
+		room := max_tab + (close ? tab_close_w() : 0) - fixed
+		title := clip(label, room, font)
+		if clay.UI(id)({
+			layout = {
+				sizing = {clay.SizingFit({min = px(TAB_MIN_W)}), clay.SizingFixed(px(TAB_H))},
+				padding = {pu(SP_3), pu(SP_1), 0, 0},
+				childGap = pu(SP_2),
+				childAlignment = {y = .Center},
+			},
+			backgroundColor = bg,
+			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
+		}) {
+			if show_dot do dot(status_color(st))
+			if dirty do dot(th.text_secondary) // unsaved changes
+			col := mix(th.text_secondary, th.text, em)
+			if tab.status != .Running do col = th.text_muted
+			if ic != .None do icon(ic, col, KIND_ICON)
+			clay.TextDynamic(title, txt(col, font))
+			if extra != "" do clay.TextDynamic(extra, txt(th.text_muted))
+			spacer() // the close button sits at the right edge of a padded tab
+			if close {
+				cbg, _ := overlay(close_id, false, close_hover)
+				show := max(em, f32(active ? 1 : 0))
+				if clay.UI(close_id)({
+					layout = {sizing = {clay.SizingFixed(px(TAB_H - SP_2)), clay.SizingFixed(px(TAB_H - SP_2))}, childAlignment = {x = .Center, y = .Center}},
+					backgroundColor = cbg,
+					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+				}) {
+					icon(.Close, with_alpha(close_hover ? th.text : th.text_muted, show), ICON_SIZE_SM)
+				}
+			}
+		}
 	}
 }
 
@@ -733,12 +818,15 @@ tab_label :: proc(cs: ^Open_Session, tab: Tab) -> (ic: Icon, label, extra: strin
 // the session's tabs would not fit the top bar beside its buttons (never
 // under TAB_MIN_W). Squeezed: they do not fit at their natural widths; only
 // the active tab keeps its close button then.
-tab_max_w :: proc(cs: ^Open_Session, bar_w: f32) -> (max_w: f32, squeezed: bool) {
+tab_max_w :: proc(cs: ^Open_Session, room: f32, p: ^Pane = nil) -> (max_w: f32, squeezed: bool) {
 	if cs == nil || len(cs.tabs) == 0 do return px(TAB_MAX_W), false
-	n := f32(len(cs.tabs))
-	avail := bar_w - top_bar_fixed_w() - n * px(SP_1)
+	n: f32 = 0
+	for tab in cs.tabs do if p == nil || tab.pane == p.id do n += 1
+	if n == 0 do return px(TAB_MAX_W), false
+	avail := room - n * px(SP_1)
 	natural: f32 = 0
 	for tab in cs.tabs {
+		if p != nil && tab.pane != p.id do continue
 		ic, label, extra := tab_label(cs, tab)
 		natural += clamp(text_w(label) + tab_fixed_w(ic, true, false, extra), px(TAB_MIN_W), px(TAB_MAX_W))
 	}
@@ -967,6 +1055,7 @@ Hit :: union {
 	Hit_New,
 	Hit_Tab,
 	Hit_Close_Tab,
+	Hit_Pane_New,
 	Hit_Confirm,
 	Hit_Cancel,
 	Hit_Panel_Head,
@@ -1021,6 +1110,7 @@ Hit_Session :: distinct string // pi session id
 Hit_New :: struct {}
 Hit_Tab :: distinct u64 // tab id
 Hit_Close_Tab :: distinct u64 // tab id (a pi tab's closes its session)
+Hit_Pane_New :: distinct u64 // a pane strip's "+": a new shell in that pane (pane id)
 Hit_Confirm :: distinct string // confirmation token
 Hit_Cancel :: distinct string
 Hit_Panel_Head :: distinct string // panel id: folds its section
@@ -1067,6 +1157,10 @@ ui_hit :: proc() -> Hit {
 	if menu.open do return menu_hit() // the menu covers everything too
 	if wt_menu.open do return wt_menu_hit() // and the checkout switcher's (ui_worktrees.odin)
 	if h := toolbar_hit(); h != nil do return h
+	// the per-tab bars below are tested with the ids of the pane under the pointer (cid)
+	old_ids := ids_pane_begin(hit_pane())
+	defer ids_pane_end(old_ids)
+	if h := pane_hit(); h != nil do return h // a pane strip's "+" (ui_panes.odin)
 	if clay.PointerOver(clay.ID("homebutton")) do return Hit_Home{}
 	if state.home_open && clay.PointerOver(clay.ID("drawer")) do return drawer_hit() // nothing under the drawer is hit
 	if h := empty_hit(); h != nil do return h
@@ -1148,6 +1242,32 @@ ui_terminal_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
 	if !d.found do return
 	b := d.boundingBox
 	return b.x, b.y, b.width, b.height, true
+}
+
+// Every pane of cs from the last layout: p.rect its content container (pid(p, "pane_body")),
+// p.frame the whole pane; app.centre the panes' area. A pane not laid out: {}.
+ui_pane_rects :: proc(cs: ^Open_Session) {
+	box :: proc(id: clay.ElementId) -> [4]f32 {
+		d := clay.GetElementData(id)
+		if !d.found do return {}
+		b := d.boundingBox
+		return {b.x, b.y, b.width, b.height}
+	}
+	app.centre = box(clay.ID("panes"))
+	if cs == nil do return
+	for &p in cs.panes {
+		p.rect = box(pid(&p, "pane_body"))
+		p.frame = box(pid(&p, "pane"))
+	}
+}
+
+// Where pane p's tab draws: its "terminal" element (a Changes tab's diff, right of its list),
+// else its content rect.
+pane_draw_rect :: proc(p: ^Pane) -> [4]f32 {
+	d := clay.GetElementData(pid(p, "terminal"))
+	if !d.found do return pane_rect(p)
+	b := d.boundingBox
+	return {b.x, b.y, b.width, b.height}
 }
 
 // A filled rectangle with rounded corners, drawn as one quad per pixel row

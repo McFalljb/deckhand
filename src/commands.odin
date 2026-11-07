@@ -57,6 +57,7 @@ Close_Session :: struct {
 New_Shell_Tab :: struct {
 	session: u64,
 	cwd:     string, // where the shell starts: a folder inside a project ("" = the session's folder)
+	pane:    u64, // the pane of the session it opens in (0 = the focused one; panes.odin)
 }
 Close_Tab :: struct {
 	tab_id:   u64, // a session's pi tab cannot be closed
@@ -65,6 +66,32 @@ Close_Tab :: struct {
 }
 Focus_Tab :: struct {
 	tab_id: u64, // also makes its session current
+}
+// Panes (panes_commands.odin; docs/plans/split-panes.md).
+Split_Pane :: struct {
+	pane:      u64, // 0 = the current session's focused pane
+	direction: Pane_Dir, // where the new pane goes
+	tab_id:    u64, // moved into the new pane (0: a new shell tab there)
+	no_focus:  bool, // the wire's focus: false (the new pane gets the keyboard by default)
+}
+Close_Pane :: struct {
+	pane: u64, // its tabs join the neighbouring pane
+}
+Focus_Pane :: struct {
+	pane:      u64, // a pane, or 0 with a direction from the current session's focused pane
+	direction: string, // left, right, up, down, next, prev ("" with a pane)
+}
+Move_Tab :: struct {
+	tab_id: u64,
+	pane:   u64, // a pane of the tab's session (its own: a reorder)
+	index:  int, // strip position there (-1 = the end)
+}
+Set_Split :: struct {
+	split: u64, // a divider: a split node's id (the snapshot's layout)
+	ratio: f32, // its first child's share
+}
+Equalize_Panes :: struct {
+	session: u64, // 0 = the current session
 }
 Copy_Selection :: struct {
 	tab_id: u64,
@@ -335,6 +362,12 @@ Command :: union {
 	New_Shell_Tab,
 	Close_Tab,
 	Focus_Tab,
+	Split_Pane,
+	Close_Pane,
+	Focus_Pane,
+	Move_Tab,
+	Set_Split,
+	Equalize_Panes,
 	Copy_Selection,
 	Terminal_Link, // a link in a terminal tab (term_links.odin)
 	Send_Text,
@@ -859,17 +892,12 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if path_kind(p) != .Dir do return fail("not a folder"), false
 			cwd = p
 		}
-		tab := Tab{id = new_id(), kind = Shell_Tab{}, title = fmt.aprintf("shell %d", len(s.tabs))}
-		if cwd != s.cwd do tab.cwd = strings.clone(cwd)
-		t := new_term(tab.id)
-		if !term_start(t, {login_shell(), "-l"}, cwd) {
-			drop_term(tab.id)
-			return fail("could not start the shell"), false
-		}
-		pane_add_tab(s, tab)
-		session_show_tab(s, tab.id)
+		if c.pane != 0 && session_pane(s, c.pane) == nil do return fail("no such pane in this session"), false
+		id, err := shell_tab_start(s, cwd, c.pane)
+		if err != "" do return fail(err), false
+		session_show_tab(s, id)
 		focus_session(s.id, caller)
-		return {ok = true, created_id = tab.id}, true
+		return {ok = true, created_id = id}, true
 	case Close_Tab:
 		s, tab, i := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
@@ -1460,6 +1488,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return markdown_apply(cmd, caller)
 	case Show_File:
 		return show_file_apply(c, caller)
+	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes:
+		return panes_apply(cmd, caller) // panes_commands.odin
 	case Terminal_Link:
 		return term_link_apply(c, caller)
 	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
@@ -1938,7 +1968,7 @@ refresh_listing :: proc(s: ^Open_Session) {
 focus_session :: proc(id: u64, caller: Caller) {
 	// a session made current is laid out again; until then its panes' rects come from its tree
 	// inside the window's last centre (tab_rect, panes.odin)
-	if id != state.current_session do if s := find_session(id); s != nil do for &p in s.panes do p.rect = {}
+	if id != state.current_session do if s := find_session(id); s != nil do for &p in s.panes do p.rect, p.frame = {}, {}
 	state.current_session = id
 	if s := find_session(id); s != nil do s.shown_at = time.now()._nsec
 	notify_seen(id) // its bell entries are read (notify.odin)
@@ -2164,6 +2194,27 @@ chat_env :: proc(project_id: u64, env: []string) -> []string {
 	copy(out, env)
 	out[len(env)] = "PI_KIT_READONLY=1"
 	return out
+}
+
+// A new shell tab of s in pane `pane` (0: the focused one), started in cwd, not shown yet: its id,
+// or why not.
+shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0) -> (u64, string) {
+	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = fmt.aprintf("shell %d", len(s.tabs))}
+	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
+	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
+	t := new_term(id)
+	if !term_start(t, {login_shell(), "-l"}, cwd) {
+		drop_term(id)
+		pane_tab_gone(s, id)
+		for x, i in s.tabs do if x.id == id {
+			delete(x.title)
+			delete(x.cwd)
+			ordered_remove(&s.tabs, i)
+			break
+		}
+		return 0, "could not start the shell"
+	}
+	return id, ""
 }
 
 new_term :: proc(tab_id: u64) -> ^Term {

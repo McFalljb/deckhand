@@ -325,7 +325,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 		sub = 0
 	}
 	// cursor (and an input method's composition there)
-	focused := state.focus_widget == "" // no field (the agent's included) has the keyboard
+	focused := state.focus_widget == "" && tab_focused(e.tab_id) // no field (the agent's included) has the keyboard, and its pane has (panes.odin)
 	if cursor_xy.x >= 0 && !e.readonly {
 		cx, cy := cursor_xy.x, cursor_xy.y
 		if focused && ime.marked != "" {
@@ -835,9 +835,9 @@ editor_focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.Element
 	e := active_editor()
 	if e == nil do return nil, {}, {}
 	switch state.focus_widget {
-	case "editor_find":    return &e.find.query, clay.ID("ed_find_text"), clay.ID("ed_find_box")
-	case "editor_replace": return &e.find.replace, clay.ID("ed_replace_text"), clay.ID("ed_replace_box")
-	case "editor_goto":    return &e.find.goto_line, clay.ID("ed_goto_text"), clay.ID("ed_goto_box")
+	case "editor_find":    return &e.find.query, cid("ed_find_text"), cid("ed_find_box")
+	case "editor_replace": return &e.find.replace, cid("ed_replace_text"), cid("ed_replace_box")
+	case "editor_goto":    return &e.find.goto_line, cid("ed_goto_text"), cid("ed_goto_box")
 	}
 	return nil, {}, {}
 }
@@ -897,7 +897,7 @@ editor_bars_layout :: proc(p: ^Pane) {
 	if e.view != .Changes do toolbar_layout(e) // a Changes tab has its own bars (ui_changes.odin)
 	if e.disk_changed {
 		{
-			if clay.UI(clay.ID("ed_banner"))({
+			if clay.UI(cid("ed_banner"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
 				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
@@ -905,16 +905,16 @@ editor_bars_layout :: proc(p: ^Pane) {
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(px(DOT)), clay.SizingFixed(px(DOT))}}, backgroundColor = cc(th.waiting), cornerRadius = clay.CornerRadiusAll(px(DOT / 2))}) {}
 				// cut to the room left of the buttons: a long file name never pushes them out of the window
 				used := px(2 * TERM_PAD + DOT + 5 * SP_2 + 6 * SP_3) + text_w("Compare") + text_w("Keep mine") + text_w("Reload", WEIGHT_BOLD)
-				clay.TextDynamic(clip(fmt.tprintf("%s changed on disk. You have unsaved changes.", filepath.base(e.path)), max(centre_width() - used, px(80))), txt(th.text))
+				clay.TextDynamic(clip(fmt.tprintf("%s changed on disk. You have unsaved changes.", filepath.base(e.path)), max(pane_width() - used, px(80))), txt(th.text))
 				grow()
-				bar_button(clay.ID("ed_compare"), "Compare", false)
-				bar_button(clay.ID("ed_keep"), "Keep mine", false)
-				bar_button(clay.ID("ed_reload"), "Reload", true)
+				bar_button(cid("ed_compare"), "Compare", false)
+				bar_button(cid("ed_keep"), "Keep mine", false)
+				bar_button(cid("ed_reload"), "Reload", true)
 			}
 		}
 	}
 	if e.bar == .None do return
-	if clay.UI(clay.ID("ed_bar"))({
+	if clay.UI(cid("ed_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD), pu(TERM_PAD), pu(SP_1), pu(SP_1)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
@@ -922,32 +922,32 @@ editor_bars_layout :: proc(p: ^Pane) {
 		if e.bar == .Goto {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 				clay.Text("Go to line", txt(th.text_secondary))
-				bar_field(clay.ID("ed_goto_box"), clay.ID("ed_goto_text"), &e.find.goto_line, "line or line:column", state.focus_widget == "editor_goto")
+				bar_field(cid("ed_goto_box"), cid("ed_goto_text"), &e.find.goto_line, "line or line:column", state.focus_widget == "editor_goto" && pane_keys(p))
 				clay.TextDynamic(fmt.tprintf("1–%d", tb_line_count(&e.buf)), txt(th.text_muted))
 			}
 			return
 		}
 		f := &e.find
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
-			bar_field(clay.ID("ed_find_box"), clay.ID("ed_find_text"), &f.query, "Find", state.focus_widget == "editor_find")
-			bar_toggle(clay.ID("ed_case"), "Aa", f.case_sensitive)
-			bar_toggle(clay.ID("ed_regex"), ".*", f.regex)
+			bar_field(cid("ed_find_box"), cid("ed_find_text"), &f.query, "Find", state.focus_widget == "editor_find" && pane_keys(p))
+			bar_toggle(cid("ed_case"), "Aa", f.case_sensitive)
+			bar_toggle(cid("ed_regex"), ".*", f.regex)
 			count := "No results"
 			if f.error != "" do count = f.error
 			else if len(f.matches) > 0 do count = fmt.tprintf("%d of %d%s", f.current + 1, len(f.matches), f.capped ? "+" : "")
 			else if tf_text(&f.query) == "" do count = ""
 			clay.TextDynamic(count, txt(f.error != "" ? th.error : th.text_muted))
 			grow()
-			bar_button(clay.ID("ed_prev"), "↑", false)
-			bar_button(clay.ID("ed_next"), "↓", false)
-			bar_button(clay.ID("ed_replace_toggle"), e.bar == .Replace ? "Hide replace" : "Replace", false)
-			bar_button(clay.ID("ed_close"), "×", false)
+			bar_button(cid("ed_prev"), "↑", false)
+			bar_button(cid("ed_next"), "↓", false)
+			bar_button(cid("ed_replace_toggle"), e.bar == .Replace ? "Hide replace" : "Replace", false)
+			bar_button(cid("ed_close"), "×", false)
 		}
 		if e.bar == .Replace {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
-				bar_field(clay.ID("ed_replace_box"), clay.ID("ed_replace_text"), &f.replace, "Replace", state.focus_widget == "editor_replace")
-				bar_button(clay.ID("ed_replace_one"), "Replace", false)
-				bar_button(clay.ID("ed_replace_all"), "All", false)
+				bar_field(cid("ed_replace_box"), cid("ed_replace_text"), &f.replace, "Replace", state.focus_widget == "editor_replace" && pane_keys(p))
+				bar_button(cid("ed_replace_one"), "Replace", false)
+				bar_button(cid("ed_replace_all"), "All", false)
 			}
 		}
 	}
@@ -1010,7 +1010,7 @@ bar_click :: proc(e: ^Editor, mx, my: f32) -> bool {
 		app.redraw = true
 		return true
 	}
-	hit :: proc(name: string) -> bool {return clay.PointerOver(clay.ID(name))}
+	hit :: proc(name: string) -> bool {return clay.PointerOver(cid(name))}
 	switch {
 	case hit("ed_reload"):  ui_do(Reload_File{tab_id = e.tab_id})
 	case hit("ed_keep"):    ui_do(Keep_Buffer{e.tab_id})
@@ -1187,7 +1187,7 @@ editor_tools :: proc(e: ^Editor) -> []Tool {
 editor_tool_hit :: proc() -> Hit {
 	e := tab_editor()
 	if e == nil do return nil
-	for _, i in editor_tools(e) do if clay.PointerOver(clay.ID("ed_tool", u32(i))) do return Hit_Editor_Tool(i)
+	for _, i in editor_tools(e) do if clay.PointerOver(cid("ed_tool", u32(i))) do return Hit_Editor_Tool(i)
 	return nil
 }
 
@@ -1211,20 +1211,20 @@ editor_tool_tip :: proc(i: int) -> (label, keys: string) {
 toolbar_layout :: proc(e: ^Editor) {
 	th := theme()
 	tools := editor_tools(e)
-	avail := centre_width() - px(2 * TERM_PAD)
+	avail := pane_width() - px(2 * TERM_PAD)
 	shown := len(tools)
 	for shown > 0 && toolbar_width(tools[:shown]) > avail do shown -= 1
 	for shown > 0 && shown < len(tools) && !tools[shown].gap do shown -= 1 // whole groups
 	path := fs_display(e.path)
 	path_room := avail - toolbar_width(tools[:shown]) - px(GAP_GROUP)
-	if clay.UI(clay.ID("ed_tools"))({
+	if clay.UI(cid("ed_tools"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_TOOLBAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
 		for t, i in tools[:shown] {
 			if t.gap && i > 0 do group_separator()
-			id := clay.ID("ed_tool", u32(i))
+			id := cid("ed_tool", u32(i))
 			hovered := ui_hover == Hit(Hit_Editor_Tool(i)) && t.enabled
 			bg := t.on ? with_alpha(th.accent, 0.3) : (hovered ? mix(th.bg_app, th.text, TINT_BUTTON_HOVER) : Rgba{})
 			col := !t.enabled ? th.text_muted : (hovered || t.on ? th.text : th.text_secondary)
@@ -1257,12 +1257,12 @@ toolbar_width :: proc(tools: []Tool) -> f32 {
 @(private = "file")
 toolbar_click :: proc(e: ^Editor) -> bool {
 	for t, i in editor_tools(e) {
-		if !clay.PointerOver(clay.ID("ed_tool", u32(i))) do continue
+		if !clay.PointerOver(cid("ed_tool", u32(i))) do continue
 		if !t.enabled do return true
 		tip_dismiss()
 		if t.act != "" do action_run(t.act) // as from the palette (prepare included)
 		else if t.step != .None do editor_run_action(e.tab_id, t.step)
 		return true
 	}
-	return clay.PointerOver(clay.ID("ed_tools"))
+	return clay.PointerOver(cid("ed_tools"))
 }

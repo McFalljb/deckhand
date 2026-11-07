@@ -348,6 +348,8 @@ command_tab :: proc(cmd: Command) -> u64 {
 	#partial switch c in cmd {
 	case Close_Tab:         return c.tab_id
 	case Focus_Tab:         return c.tab_id
+	case Move_Tab:          return c.tab_id
+	case Split_Pane:        return c.tab_id
 	case Copy_Selection:    return c.tab_id
 	case Terminal_Link:     return c.tab_id
 	case Send_Text:         return c.tab_id

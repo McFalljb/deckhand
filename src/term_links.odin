@@ -410,7 +410,7 @@ term_link_clear :: proc(t: ^Term) {
 // pointer is over it); every other terminal has none. The pointer becomes a
 // hand over one.
 term_links_frame :: proc() {
-	t, at := active_term(), agent_term()
+	t, at := pane_term(hit_pane()), agent_term() // the terminal of the pane under the pointer (panes.odin)
 	p := app.pointer
 	none := [2]f32{-1e9, -1e9}
 	in_drawer := state.home_open && inside(clay.ID("drawer"), p.x, p.y)

@@ -35,7 +35,8 @@ RATIO_MIN :: 0.05 // a split's share of either child, at least
 Pane :: struct {
 	id:     u64, // new_id(); runtime only
 	active: u64, // the tab it shows (always one of its tabs)
-	rect:   [4]f32, // its content's last laid-out rect (framebuffer px: x, y, w, h); {} = not laid out
+	rect:   [4]f32, // its content's last laid-out rect, pid(p, "pane_body") (framebuffer px: x, y, w, h; not the inner "terminal" element a Changes tab's list narrows); {} = not laid out
+	frame:  [4]f32, // the whole pane's: its strip, its tab's bars and the content (pointer routing)
 	slot:   int, // its place among the session's leaves, left to right, top to bottom (Clay ids, scripts)
 }
 
@@ -45,12 +46,18 @@ Split_Dir :: enum {
 	Down,
 }
 
-// Directions to a neighbouring pane.
+// Directions to a neighbouring pane, and where split_pane puts the new one.
 Pane_Dir :: enum {
 	Left,
 	Right,
 	Up,
 	Down,
+}
+PANE_DIR_NAMES := [Pane_Dir]string{.Left = "left", .Right = "right", .Up = "up", .Down = "down"}
+
+pane_dir_parse :: proc(s: string) -> (Pane_Dir, bool) {
+	for name, d in PANE_DIR_NAMES do if name == s do return d, true
+	return .Right, false
 }
 
 Layout_Node :: struct {
@@ -113,7 +120,21 @@ session_focused_tab :: proc(s: ^Open_Session) -> ^Tab {
 session_tab_shown :: proc(s: ^Open_Session, tab_id: u64) -> bool {
 	if s == nil || tab_id == 0 do return false
 	if len(s.panes) == 0 do return s.active_tab == tab_id
-	for p in s.panes do if p.active == tab_id do return true
+	for &p in s.panes do if p.active == tab_id do return !pane_placeholder(s, &p)
+	return false
+}
+
+// Pane p of a split session shows a page or an app without having the keyboard: until those are
+// live in every pane (the plan's P4) it shows "Click to show" instead, a click only focuses it,
+// and its tab is not on screen (not seen, not visible to the page plan).
+pane_placeholder :: proc(s: ^Open_Session, p: ^Pane) -> bool {
+	if s == nil || p == nil || len(s.panes) <= 1 || p.id == s.focused_pane do return false
+	for t in s.tabs do if t.id == p.active {
+		#partial switch _ in t.kind {
+		case Browser_Tab, App_Tab: return true
+		}
+		return false
+	}
 	return false
 }
 
@@ -190,7 +211,7 @@ pane_at :: proc(x, y: f32) -> ^Pane {
 	if s == nil do return nil
 	laid := false
 	for &p in s.panes {
-		r := p.rect
+		r := p.frame.z > 0 ? p.frame : p.rect
 		if r.z <= 0 do continue
 		laid = true
 		if x >= r.x && y >= r.y && x < r.x + r.z && y < r.y + r.w do return &p
@@ -207,8 +228,14 @@ tab_rect :: proc(tab_id: u64) -> [4]f32 {
 	p := session_pane(s, tab.pane)
 	if p == nil do return app.pane
 	if s.id == state.current_session && p.rect.z > 0 do return p.rect
-	if app.pane.z <= 0 do return app.pane
-	for r in pane_rects(s, app.pane, 0, 0, 0) do if r.pane == p.id do return r.rect
+	centre := app.centre.z > 0 ? app.centre : app.pane
+	if centre.z <= 0 do return app.pane
+	if len(s.panes) <= 1 do return app.pane // one pane: its content is the centre's (under the session's bars)
+	// the pane's place in the tree, less its strip (its tab's bars are not counted)
+	for r in pane_rects(s, centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id {
+		strip := min(px(TAB_STRIP_H), r.rect.w)
+		return {r.rect.x, r.rect.y + strip, r.rect.z, r.rect.w - strip}
+	}
 	return app.pane
 }
 
@@ -674,4 +701,76 @@ session_check :: proc(s: ^Open_Session) -> string {
 	if leaves != len(s.panes) || len(pane_leaf_order(s)) != len(s.panes) do return "leaves are not the panes"
 	for p, i in s.panes do if p.slot != i do return fmt.tprintf("pane %d: slot %d at %d", p.id, p.slot, i)
 	return ""
+}
+
+// ---- the pane the per-tab bars' Clay ids are for ----
+//
+// The per-tab bars (a browser's toolbar, an editor's find bar, a Changes tab's list…) are laid
+// out once per pane, so their Clay ids carry the pane's slot (pid): cid(name) is pid(the pane
+// being laid out, hit-tested or handled, name). pane_layout sets it while it lays a pane out,
+// the per-pane handlers and hit tests while they look at one; elsewhere (key handling, the
+// fields' cursors, ticks) it is the focused pane, whose tab has the keyboard. Only ids: which
+// tab a bar acts on still comes from its pane explicitly (pane_shown and friends).
+
+@(private = "file")
+ids_pane_at: ^Pane
+
+// Clay ids from now on are pane p's; returns the one before, for ids_pane_end.
+ids_pane_begin :: proc(p: ^Pane) -> ^Pane {
+	old := ids_pane_at
+	ids_pane_at = p
+	return old
+}
+ids_pane_end :: proc(old: ^Pane) {ids_pane_at = old}
+
+// The pane the per-tab bars' ids are for now.
+ids_pane :: proc() -> ^Pane {return ids_pane_at != nil ? ids_pane_at : focused_pane()}
+
+cid :: proc(name: string, i: u32 = 0) -> clay.ElementId {return pidi(ids_pane(), name, int(i))}
+
+// The width (framebuffer px) the per-tab bars of the pane being laid out have: the centre's with
+// one pane, else that pane's (its last layout, else its place in the tree).
+pane_width :: proc() -> f32 {
+	s := cur()
+	if s == nil || len(s.panes) <= 1 do return centre_width()
+	p := ids_pane()
+	if p == nil do return centre_width()
+	if p.rect.z > 0 do return p.rect.z
+	if app.centre.z > 0 do for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
+	return centre_width()
+}
+
+// The least sizes along split node n's direction of its two children (min_w or min_h per pane,
+// dividers between them).
+pane_split_mins :: proc(s: ^Open_Session, n: int, divider, min_w, min_h: f32) -> (a, b: f32) {
+	node := s.nodes[n]
+	across := node.dir == .Right
+	m := across ? min_w : min_h
+	return node_min(s, node.a, across, divider, m), node_min(s, node.b, across, divider, m)
+}
+
+// The share split node n gives child a in `total` px (its size less the divider): its ratio, kept
+// so neither side is under its minimum when there is room for both, as pane_rects does.
+pane_split_share :: proc(s: ^Open_Session, n: int, ratio, total: f32) -> f32 {
+	if total <= 0 do return ratio
+	ma, mb := pane_split_mins(s, n, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H))
+	la := total * ratio
+	if total >= ma + mb do la = clamp(la, ma, total - mb)
+	return la / total
+}
+
+// Pane p has the keyboard: its session's focused pane (or the implicit one). A field in another
+// pane's bars shows as static text; a click there focuses that pane first (ui_panes.odin).
+pane_keys :: proc(p: ^Pane) -> bool {
+	fp := focused_pane()
+	return p != nil && fp != nil && p.id == fp.id
+}
+
+// The terminals the current session's panes show (drawn this frame). Temp-allocated.
+terms_on_screen :: proc() -> []^Term {
+	out := make([dynamic]^Term, context.temp_allocator)
+	s := cur()
+	if s == nil do return out[:]
+	for &p in s.panes do if t := pane_term(&p); t != nil do append(&out, t)
+	return out[:]
 }

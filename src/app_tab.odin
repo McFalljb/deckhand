@@ -1942,7 +1942,7 @@ app_bar_layout :: proc(p: ^Pane) {
 	case .Starting, .Running:
 	}
 	th := theme()
-	if clay.UI(clay.ID("app_bar"))({
+	if clay.UI(cid("app_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
@@ -1954,29 +1954,29 @@ app_bar_layout :: proc(p: ^Pane) {
 		spacer()
 		if a.inspect do clay.TextDynamic(fmt.tprintf("%d boxes", app_box_count(a.tab_id)), txt(th.text_muted))
 		// the app's boxes over the tab (tab.boxes); on: highlighted
-		button(clay.ID("app_inspect"), "Inspect", a.inspect, clay.PointerOver(clay.ID("app_inspect")))
-		if wait do button(clay.ID("app_wait"), "Wait", false, clay.PointerOver(clay.ID("app_wait")))
-		if text != "" do button(clay.ID("app_log"), "Log", false, clay.PointerOver(clay.ID("app_log")))
-		if restart do button(clay.ID("app_restart"), "Restart", true, clay.PointerOver(clay.ID("app_restart")))
+		button(cid("app_inspect"), "Inspect", a.inspect, clay.PointerOver(cid("app_inspect")))
+		if wait do button(cid("app_wait"), "Wait", false, clay.PointerOver(cid("app_wait")))
+		if text != "" do button(cid("app_log"), "Log", false, clay.PointerOver(cid("app_log")))
+		if restart do button(cid("app_restart"), "Restart", true, clay.PointerOver(cid("app_restart")))
 	}
 }
 
 // A click on the bar's buttons. True if it took it.
 @(private = "file")
 app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
-	if inside(clay.ID("app_inspect"), x, y) {
+	if inside(cid("app_inspect"), x, y) {
 		ui_do(App_Inspect{tab_id = a.tab_id, on = !a.inspect})
 		return true
 	}
-	if inside(clay.ID("app_restart"), x, y) {
+	if inside(cid("app_restart"), x, y) {
 		ui_do(App_Restart{tab_id = a.tab_id})
 		return true
 	}
-	if inside(clay.ID("app_log"), x, y) {
+	if inside(cid("app_log"), x, y) {
 		if s, _, _ := find_tab(a.tab_id); s != nil do ui_do(Open_File{path = a.log_path, session = s.id})
 		return true
 	}
-	if inside(clay.ID("app_wait"), x, y) {
+	if inside(cid("app_wait"), x, y) {
 		// keep waiting: the next silence starts a new ping
 		a.ping_at, a.ping_answered = time.tick_now(), false
 		a.ring.last_frame = time.tick_now()

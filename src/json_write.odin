@@ -155,6 +155,12 @@ command_type :: proc(cmd: Command) -> string {
 	case New_Shell_Tab:       return "new_shell_tab"
 	case Close_Tab:           return "close_tab"
 	case Focus_Tab:           return "focus_tab"
+	case Split_Pane:          return "split_pane"
+	case Close_Pane:          return "close_pane"
+	case Focus_Pane:          return "focus_pane"
+	case Move_Tab:            return "move_tab"
+	case Set_Split:           return "set_split"
+	case Equalize_Panes:      return "equalize_panes"
 	case Copy_Selection:      return "copy_selection"
 	case Terminal_Link:       return "terminal_link"
 	case Send_Text:           return "send_text"
@@ -441,6 +447,26 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case New_Shell_Tab:
 		kv_u64(&w, "session", c.session)
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
+		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
+	case Split_Pane:
+		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
+		kv_str(&w, "direction", PANE_DIR_NAMES[c.direction])
+		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
+		if c.no_focus do kv_bool(&w, "focus", false)
+	case Close_Pane:
+		kv_u64(&w, "pane", c.pane)
+	case Focus_Pane:
+		if c.pane != 0 do kv_u64(&w, "pane", c.pane)
+		if c.direction != "" do kv_str(&w, "direction", c.direction)
+	case Move_Tab:
+		kv_u64(&w, "tab_id", c.tab_id)
+		kv_u64(&w, "pane", c.pane)
+		if c.index >= 0 do kv_u64(&w, "index", u64(c.index))
+	case Set_Split:
+		kv_u64(&w, "split", c.split)
+		fmt.sbprintf(w.b, `,"ratio":%.3f`, c.ratio)
+	case Equalize_Panes:
+		if c.session != 0 do kv_u64(&w, "session", c.session)
 	case Close_Tab:
 		kv_u64(&w, "tab_id", c.tab_id)
 		token(&w, c.confirm, redact)
@@ -1156,6 +1182,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_u64(&o, "project_id", os.project_id)
 		kv_str(&o, "cwd", os.cwd)
 		kv_u64(&o, "active_tab", os.active_tab)
+		panes_json(b, &o, os) // its panes and their layout (panes.odin)
 		if os.missing do kv_bool(&o, "missing", true)
 		if os.home do kv_bool(&o, "home", true)
 		// pending comments for its pi (comments.odin), and why they wait ("" = they go with the next message)
@@ -1196,6 +1223,12 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			kv_str(&to, "kind", tab_kind_name(t.kind))
 			kv_str(&to, "title", t.title)
 			kv_str(&to, "status", TAB_STATUS_NAMES[t.status])
+			{
+				sos := os
+				pn := session_pane(&sos, t.pane)
+				kv_u64(&to, "pane", pn != nil ? pn.id : 0)
+				kv_bool(&to, "on_screen", os.id == s.current_session && session_tab_shown(&sos, t.id))
+			}
 			if t.status == .Exited do if how := exit_text(t.exit); how != "" do kv_str(&to, "exit", how)
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {
@@ -1605,4 +1638,67 @@ setup_json :: proc(f: ^Jw) {
 	}
 	strings.write_byte(f.b, ']')
 	if u.acct_msg != "" do kv_str(f, "message", u.acct_msg)
+}
+
+// An open session's panes (panes.odin): "focused_pane", "panes" (in leaf order: id, slot, the
+// tab it shows, its tabs in strip order, its content rect in logical px once laid out) and
+// "layout", the tree: {"pane": id} or {"split": id, "dir": "right"|"down", "ratio", "a", "b"}.
+// A session with no panes yet (one read back from a snapshot): its implicit one, id 0.
+@(private = "file")
+panes_json :: proc(b: ^strings.Builder, o: ^Jw, os: Open_Session) {
+	s := os
+	fp := session_focused_pane(&s)
+	kv_u64(o, "focused_pane", fp != nil ? fp.id : 0)
+	key(o, "panes")
+	strings.write_byte(b, '[')
+	if len(s.panes) == 0 && fp != nil {
+		po := obj_begin(b)
+		kv_u64(&po, "id", 0)
+		kv_u64(&po, "slot", 0)
+		kv_u64(&po, "active_tab", fp.active)
+		key(&po, "tabs")
+		write_ids(b, pane_strip(&s, fp))
+		obj_end(&po)
+	}
+	for &p, i in s.panes {
+		if i > 0 do strings.write_byte(b, ',')
+		po := obj_begin(b)
+		kv_u64(&po, "id", p.id)
+		kv_u64(&po, "slot", u64(p.slot))
+		kv_u64(&po, "active_tab", p.active)
+		key(&po, "tabs")
+		write_ids(b, pane_strip(&s, &p))
+		if p.rect.z > 0 && app.dpi > 0 {
+			key(&po, "rect")
+			r := p.rect / app.dpi
+			fmt.sbprintf(b, `{{"x":%d,"y":%d,"w":%d,"h":%d}}`, int(r.x), int(r.y), int(r.z), int(r.w))
+		}
+		obj_end(&po)
+	}
+	strings.write_byte(b, ']')
+	if len(s.nodes) == 0 do return
+	key(o, "layout")
+	node :: proc(b: ^strings.Builder, s: ^Open_Session, n: int) {
+		x := s.nodes[n]
+		if x.leaf {
+			fmt.sbprintf(b, `{{"pane":%d}}`, x.pane)
+			return
+		}
+		fmt.sbprintf(b, `{{"split":%d,"dir":"%s","ratio":%.3f,"a":`, x.id, x.dir == .Right ? "right" : "down", x.ratio)
+		node(b, s, x.a)
+		strings.write_string(b, `,"b":`)
+		node(b, s, x.b)
+		strings.write_byte(b, '}')
+	}
+	node(b, &s, s.root)
+}
+
+@(private = "file")
+write_ids :: proc(b: ^strings.Builder, ids: []u64) {
+	strings.write_byte(b, '[')
+	for id, i in ids {
+		if i > 0 do strings.write_byte(b, ',')
+		strings.write_u64(b, id)
+	}
+	strings.write_byte(b, ']')
 }

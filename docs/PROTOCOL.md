@@ -173,9 +173,15 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `session_info` | `project_id`, `pi_session_id`, `to`? | a session's info, read from its session file's header (the first line) and the file's dates only, never its messages (`src/session_info.odin`): `data` = `{text, id, file, project, cwd, title, created, modified, model}`; `text` is a fenced `pi-session` block of `key: value` lines (empty ones left out; `title` from the title cache). A Claude row's id (`claude_sessions`) gives Deckhand's own record instead (never Claude Code's files): a `claude-session` block and `data` with `agent: "Claude Code"`, `id`, `file` (its transcript, as `reveal`; left out when none), `project`, `cwd`, `title`, `used` (last use) and `model` (the last one reported). `to`: `"clipboard"` also copies `text`; `"agent"` (**user only**) opens the agent's drawer and pastes `text` into its input without sending it (bracketed paste; if its pi has not turned that on, `text` is copied instead and the result says so) |
 | `focus_session` | `session` | |
 | `close_session` | `session`, `confirm`?, `comments`? | **confirms** (class `tab_close`) while any of its tabs would ask to close, and always when the user closes it from its pi tab (× or ⌘W); stops its tabs, removes it from the open sessions and the saved workspace (pi's session file stays). With pending comments (§3, Pending comments): the user gets the close prompt; others must pass `comments: "drop"` (`"send"` is refused: closing stops its pi; send first with `comments_send_now`) |
-| `new_shell_tab` | `session`, `cwd`? | → tab id; `cwd`: a folder inside a project where the shell starts (default: the session's folder) |
+| `new_shell_tab` | `session`, `cwd`?, `pane`? | → tab id; `cwd`: a folder inside a project where the shell starts (default: the session's folder); `pane`: in that pane of the session (default: the focused one) |
 | `close_tab` | `tab_id`, `confirm`?, `comments`? | **confirms** per the close rule; a pi tab cannot be closed. With pending comments made on it: the user gets the close prompt; others must pass `comments: "send"` (Send now for its comments, then close; refused when they cannot go now) or `"drop"` |
-| `focus_tab` | `tab_id` | also makes its session current |
+| `focus_tab` | `tab_id` | also makes its session current; its pane gets the keyboard |
+| `split_pane` | `pane`?, `direction`, `tab_id`?, `focus`? | splits a pane (default: the current session's focused one) `right`, `down`, `left` or `up` (left and up: the new pane comes first) → the new pane's id. `tab_id`: that tab of the session moves into the new pane (not the pane's only tab: `"a pane's only tab cannot move to a new pane"`); without it a new shell tab opens there. `focus: false` leaves the keyboard where it was. Refused: Home (`HOME_NOT_A_SESSION`), a session's 9th pane (`"at most 8 panes"`), a pane too small for two of at least 240 × 140 (`"not enough room"`). See Panes below |
+| `close_pane` | `pane` | unsplits: the pane goes and its tabs join the neighbouring pane (nothing stops); a session's last pane cannot close |
+| `focus_pane` | `pane` \| `direction` | the pane's tab gets the keyboard and its session becomes current; or, with `direction` (`left`, `right`, `up`, `down`, `next`, `prev`), the current session's pane that way from the focused one (`"no pane that way"`) |
+| `move_tab` | `tab_id`, `pane`, `index`? | moves a tab into another pane of its session at strip position `index` (default: the end), or reorders it within its own pane. The pi tab may move but stays first in `tabs`, and nothing goes before it. The moved tab is shown in its new pane; the keyboard follows it if it had it. A pane it leaves empty closes |
+| `set_split` | `split`, `ratio` | a divider's place: the share (0–1, clamped to 0.05–0.95) of the split's first child; `split` is a split node's id in the session's `layout`. Drawn kept off the panes' minimum sizes |
+| `equalize_panes` | `session`? | evens every divider of a session (default: the current one) by the panes on each side |
 | `copy_selection` | `tab_id` | side effect only |
 | `terminal_link` | `tab_id`, `url`, `external`? | **user only** (a ⌘-click on a link in a terminal tab, or its right-click menu; `src/term_links.odin`): http and https open in a new browser tab of that tab's session, in front (→ its tab id); with `external`, from Home's terminal, or without a working browser, in the default browser; mailto in the mail app. Other schemes are refused (`"only http, https and mailto links open from a terminal"`) |
 | `send_text` | `tab_id`, `text` | pasted into the terminal (bracketed if asked); raw keystrokes into pi's TUI. From `control`: refused into a pi tab (`"send prompts to a pi tab with pi_prompt, not send_text"`) and into any tab of a session whose pi is `waiting` (`"pi in this session is waiting for the user"`); only at a shell prompt, never while another program runs in the tab's foreground (`"a program is running in this tab; …"`) |
@@ -682,6 +688,21 @@ pi tab and whether the agent's drawer shows. `agent` is `{"unread", "needs_user"
 the model it runs as far as Deckhand can tell, OS notifications sent. The Home session is in `open_sessions` with `"home": true`,
 `project_id` 0 and only its pi tab; it is never `current_session`, and `focus_session`,
 `focus_tab`, `new_shell_tab` and `close_session` refuse it.
+
+#### Panes
+
+An open session's centre is split into panes (`src/panes.odin`, `src/panes_commands.odin`):
+`focused_pane` (the pane with the keyboard; its tab is `active_tab`), `panes` in leaf order
+(left to right, top to bottom) as `{"id", "slot", "active_tab", "tabs", "rect"?}` — `tabs` the
+pane's strip in order, `rect` its content's last laid-out rect in points `{"x","y","w","h"}`
+(the current session only) — and `layout`, the tree: `{"pane": id}` or `{"split": id, "dir":
+"right"|"down", "ratio", "a", "b"}` (`right`: `a` left of `b`; `down`: `a` above `b`). Each tab
+has `pane` (its pane's id) and `on_screen` (shown in its pane of the current session). Until
+browser and app tabs draw live in every pane, one shown in a pane without the keyboard is not
+`on_screen` ("Click to show"). Every session has one pane until it is split; panes are not saved
+yet. Pane and split ids are runtime ids, new at each launch. A session read back from an older
+snapshot without panes shows one pane with id 0. Who: anyone but a pi or Claude tab's bridge
+and an app (`"not allowed for this caller"`); Home is refused.
 
 `notifications` counts the bell's entries (`count`, `unread`) and the OS notifications they
 raised (`os_notified`); the entries are in `notifications_list`. A pi tab's snapshot has zeros.

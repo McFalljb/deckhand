@@ -714,7 +714,7 @@ annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	overlay := palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()
 	covered := overlay || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
 	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !covered {
-		if inside(clay.ID("annot_toggle"), e.mouse_x, e.mouse_y) {
+		if inside(cid("annot_toggle"), e.mouse_x, e.mouse_y) {
 			annot_set(b, !a.on)
 			return true
 		}
@@ -898,11 +898,11 @@ annot_hint_layout :: proc(b: ^Browser) -> bool {
 	a := annots[b.tab_id]
 	if a == nil || !a.on do return false
 	th := theme()
-	if clay.UI(clay.ID("annot_hint"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BUTTON_H))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
+	if clay.UI(cid("annot_hint"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BUTTON_H))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 		dot(th.accent)
 		msg := a.ctx != 0 ? "Click an element or drag over an area to comment · Esc leaves" : "Waiting for the page…"
 		room := px(200)
-		if d := clay.GetElementData(clay.ID("annot_hint")); d.found do room = max(d.boundingBox.width - px(DOT + SP_2), px(80))
+		if d := clay.GetElementData(cid("annot_hint")); d.found do room = max(d.boundingBox.width - px(DOT + SP_2), px(80))
 		clay.TextDynamic(clip(msg, room), txt(th.text))
 	}
 	return true
@@ -918,7 +918,7 @@ annot_on :: proc(b: ^Browser) -> bool {
 annot_button_layout :: proc(b: ^Browser) {
 	if b.message != "" do return
 	a := annots[b.tab_id]
-	button(clay.ID("annot_toggle"), "Annotate ⌘⇧.", a != nil && a.on, clay.PointerOver(clay.ID("annot_toggle")))
+	button(cid("annot_toggle"), "Annotate ⌘⇧.", a != nil && a.on, clay.PointerOver(cid("annot_toggle")))
 }
 
 // ---- the state snapshot (json_write.odin, inside a browser tab's object) ----

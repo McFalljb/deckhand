@@ -388,7 +388,7 @@ panes_keyboard_targets :: proc(t: ^testing.T) {
 	testing.expect(t, app_wants_keys(ap) && !browser_wants_keys(br), "B's app now")
 	// B's app on screen but A focused: no keys for it
 	session_show_tab(x.s, x.shell)
-	testing.expect(t, tab_on_screen(x.app_id), "still on screen")
+	testing.expect(t, !tab_on_screen(x.app_id), "B's app behind its \"Click to show\" placeholder (until the plan's P4)")
 	testing.expect(t, !app_wants_keys(ap), "not focused: no keys")
 	session_show_tab(x.s, x.app_id)
 	state.focus_widget = "palette"
@@ -546,16 +546,17 @@ panes_tab_rect :: proc(t: ^testing.T) {
 	saved := app.pane
 	defer app.pane = saved
 	app.pane = {100, 50, 1000, 600}
-	// not laid out: from the tree ([A | B] at 0.5, no divider yet)
-	testing.expect_value(t, tab_rect(x.shell), [4]f32{100, 50, 500, 600})
-	testing.expect_value(t, tab_rect(x.app_id), [4]f32{600, 50, 500, 600})
+	// not laid out: from the tree ([A | B] at 0.5, a divider of BORDER_W), under each pane's strip
+	app.dpi = 1
+	testing.expect_value(t, tab_rect(x.shell), [4]f32{100, 50 + TAB_STRIP_H, 499.5, 600 - TAB_STRIP_H})
+	testing.expect_value(t, tab_rect(x.app_id), [4]f32{600.5, 50 + TAB_STRIP_H, 499.5, 600 - TAB_STRIP_H})
 	// laid out: the pane's own rect
 	session_pane(x.s, x.b).rect = {610, 52, 480, 590}
 	testing.expect_value(t, tab_rect(x.browser), [4]f32{610, 52, 480, 590})
 	testing.expect_value(t, pane_rect(session_pane(x.s, x.b)), [4]f32{610, 52, 480, 590})
 	// another session current: from the tree again (its rects are last time's)
 	state.current_session = 0
-	testing.expect_value(t, tab_rect(x.browser), [4]f32{600, 50, 500, 600})
+	testing.expect_value(t, tab_rect(x.browser), [4]f32{600.5, 50 + TAB_STRIP_H, 499.5, 600 - TAB_STRIP_H})
 	state.current_session = x.s.id
 	// a tab not added yet (new_term before pane_add_tab), or unknown: the window's
 	testing.expect_value(t, tab_rect(987654), app.pane)
@@ -677,4 +678,314 @@ panes_pidi_no_collisions :: proc(t: ^testing.T) {
 		// pid is its slot's index 0, as clay.ID(x) is clay.ID(x, 0)
 		testing.expect_value(t, pid(&p, "chrow").id, pidi(&p, "chrow", 0).id)
 	}
+}
+
+// ---- P2: the pane commands ----
+
+@(private = "file")
+PT_UI :: Caller{kind = .UI}
+
+// split_pane with a tab: the tab moves into the new pane, which gets the keyboard; created_id is
+// the pane. Directions: left/up put the new pane first. Refusals: no such pane, a pane's only
+// tab, Home, PANES_MAX.
+@(test)
+panes_cmd_split :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	r := run_command(Split_Pane{pane = x.b, direction = .Down, tab_id = x.editor}, PT_UI)
+	testing.expectf(t, r.ok, "split: %s", r.error)
+	np := r.created_id
+	testing.expect_value(t, len(x.s.panes), 3)
+	testing.expect_value(t, x.s.focused_pane, np)
+	_, ed, _ := find_tab(x.editor)
+	testing.expect_value(t, ed.pane, np)
+	testing.expect_value(t, session_focused_id(x.s), x.editor)
+	testing.expect_value(t, pane_neighbour(x.s, x.b, .Down), np)
+	// left: the new pane comes first, the keyboard stays with focus: false
+	r = run_command(Split_Pane{pane = x.a, direction = .Left, tab_id = x.shell, no_focus = true}, PT_UI)
+	testing.expectf(t, r.ok, "split left: %s", r.error)
+	testing.expect_value(t, pane_leaf_order(x.s)[0], r.created_id)
+	testing.expect_value(t, x.s.focused_pane, np)
+	// refusals
+	testing.expect_value(t, run_command(Split_Pane{pane = 12345, direction = .Right}, PT_UI).error, "no such pane")
+	testing.expect_value(t, run_command(Split_Pane{pane = r.created_id, direction = .Right, tab_id = x.shell}, PT_UI).error, "a pane's only tab cannot move to a new pane")
+	// PANES_MAX
+	s := pt_one(PANES_MAX + 1)
+	ids: [PANES_MAX + 2]u64
+	for tab, i in s.tabs do ids[i] = tab.id
+	first := s.focused_pane
+	for i in 1 ..< PANES_MAX do testing.expectf(t, run_command(Split_Pane{pane = first, direction = .Down, tab_id = ids[i + 1]}, PT_UI).ok, "split %d", i)
+	testing.expect_value(t, len(s.panes), PANES_MAX)
+	testing.expect_value(t, run_command(Split_Pane{pane = first, direction = .Right, tab_id = ids[1]}, PT_UI).error, fmt.tprintf("at most %d panes", PANES_MAX))
+	// the wire: direction names, focus false
+	cmd, err := parse_command(`{"type":"split_pane","direction":"up","tab_id":7,"focus":false}`)
+	testing.expectf(t, err == "", "parse: %s", err)
+	sp := cmd.(Split_Pane)
+	testing.expect(t, sp.direction == .Up && sp.tab_id == 7 && sp.no_focus && sp.pane == 0, "parsed")
+	_, err = parse_command(`{"type":"split_pane","direction":"sideways"}`)
+	testing.expect(t, err != "", "a bad direction is refused")
+}
+
+// Callers: Anyone, so control callers may; a pi or Claude tab's bridge (panel) and an app may
+// not. Home has one pane.
+@(test)
+panes_cmd_callers_and_home :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	not :: "not allowed for this caller"
+	testing.expect_value(t, run_command(Focus_Pane{pane = x.a}, {kind = .Panel, tab_id = x.pi}).error, not)
+	testing.expect_value(t, run_command(Move_Tab{tab_id = x.shell, pane = x.b, index = -1}, {kind = .App, tab_id = x.app_id}).error, not)
+	r := run_command(Focus_Pane{pane = x.a}, {kind = .Control})
+	testing.expectf(t, r.ok, "control: %s", r.error)
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	// Home
+	hs := Open_Session{id = new_id(), home = true, cwd = "/tmp/pt"}
+	append(&hs.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "agent", status = .Not_Started})
+	hs.active_tab = hs.tabs[0].id
+	session_panes_init(&hs)
+	hp := hs.panes[0].id
+	append(&state.open_sessions, hs)
+	x.s = &state.open_sessions[0]
+	h := &state.open_sessions[1]
+	testing.expect_value(t, run_command(Split_Pane{pane = hp, direction = .Right, tab_id = h.tabs[0].id}, PT_UI).error, HOME_NOT_A_SESSION)
+	testing.expect_value(t, run_command(Focus_Pane{pane = hp}, PT_UI).error, HOME_NOT_A_SESSION)
+	testing.expect_value(t, run_command(Move_Tab{tab_id = h.tabs[0].id, pane = hp, index = -1}, PT_UI).error, HOME_NOT_A_SESSION)
+	testing.expect_value(t, run_command(Equalize_Panes{session = h.id}, PT_UI).error, HOME_NOT_A_SESSION)
+	testing.expect_value(t, len(h.panes), 1)
+	// unknown ids
+	testing.expect_value(t, run_command(Close_Pane{pane = 999}, PT_UI).error, "no such pane")
+	testing.expect_value(t, run_command(Focus_Pane{pane = 999}, PT_UI).error, "no such pane")
+	testing.expect_value(t, run_command(Move_Tab{tab_id = 999, pane = x.a, index = -1}, PT_UI).error, "no such tab")
+	testing.expect_value(t, run_command(Move_Tab{tab_id = x.shell, pane = hp, index = -1}, PT_UI).error, "not a pane of the tab's session")
+	testing.expect_value(t, run_command(Set_Split{split = 999, ratio = 0.5}, PT_UI).error, "no such split")
+	testing.expect_value(t, run_command(Equalize_Panes{session = 999}, PT_UI).error, "no such session")
+}
+
+// close_pane: non-destructive, its tabs join the neighbour (nothing stops); the last pane stays.
+// The pane's shown tab stays shown there; focus goes to the most recently used pane.
+@(test)
+panes_cmd_close :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	n := len(x.s.tabs)
+	r := run_command(Close_Pane{pane = x.b}, PT_UI)
+	testing.expectf(t, r.ok, "close: %s", r.error)
+	testing.expect_value(t, len(x.s.panes), 1)
+	testing.expect_value(t, len(x.s.tabs), n)
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	for tab in x.s.tabs do testing.expect_value(t, tab.pane, x.a)
+	testing.expect_value(t, x.s.tabs[0].id, x.pi)
+	testing.expect_value(t, run_command(Close_Pane{pane = x.a}, PT_UI).error, "a session's last pane cannot close")
+}
+
+// A pane collapses when its last tab closes; the keyboard goes to the most recently used pane.
+@(test)
+panes_last_tab_closes_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	// three panes: A, B, and C (the shell); focus order A, then C
+	r := run_command(Split_Pane{pane = x.a, direction = .Down, tab_id = x.shell}, PT_UI)
+	c := r.created_id
+	run_command(Focus_Pane{pane = x.b}, PT_UI)
+	run_command(Focus_Pane{pane = x.a}, PT_UI)
+	run_command(Focus_Pane{pane = c}, PT_UI)
+	delete_key(&terms, x.shell) // closes without a terminal
+	rc := run_command(Close_Tab{tab_id = x.shell, confirm = "", comments = .Drop}, PT_UI)
+	testing.expectf(t, rc.ok, "close tab: %s", rc.error)
+	testing.expect_value(t, len(x.s.panes), 2)
+	testing.expect(t, session_pane(x.s, c) == nil, "C collapsed")
+	testing.expect_value(t, x.s.focused_pane, x.a) // the most recently used before C
+}
+
+// focus_pane: by id or direction (left/right/up/down, next/prev cycle); the pane's tab gets the
+// keyboard; nothing that way is refused.
+@(test)
+panes_cmd_focus :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	testing.expect(t, run_command(Focus_Pane{direction = "left"}, PT_UI).ok, "left of B: A")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, session_focused_id(x.s), x.shell)
+	testing.expect_value(t, run_command(Focus_Pane{direction = "left"}, PT_UI).error, "no pane that way")
+	testing.expect_value(t, run_command(Focus_Pane{direction = "up"}, PT_UI).error, "no pane that way")
+	testing.expect(t, run_command(Focus_Pane{direction = "next"}, PT_UI).ok, "next")
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect(t, run_command(Focus_Pane{direction = "next"}, PT_UI).ok, "next wraps")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect(t, run_command(Focus_Pane{direction = "prev"}, PT_UI).ok, "prev wraps")
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect_value(t, run_command(Focus_Pane{direction = "sideways"}, PT_UI).error, "direction: left, right, up, down, next or prev")
+	testing.expect_value(t, run_command(Focus_Pane{pane = x.a, direction = "left"}, PT_UI).error, "pane or direction, not both")
+	testing.expect(t, run_command(Focus_Pane{pane = x.a}, PT_UI).ok, "by id")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+}
+
+// move_tab: into another pane at an index or the end, or a reorder within its pane; the pi tab
+// moves but stays tabs[0]; nothing lands before it; the keyboard follows the focused tab; a pane
+// it leaves empty closes.
+@(test)
+panes_cmd_move_tab :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	// the browser (focused) to A at index 0: never before the pi tab (tabs[0])
+	testing.expect(t, run_command(Move_Tab{tab_id = x.browser, pane = x.a, index = 0}, PT_UI).ok, "browser to A")
+	testing.expect_value(t, x.s.focused_pane, x.a) // the keyboard followed it
+	testing.expect_value(t, session_focused_id(x.s), x.browser)
+	testing.expect_value(t, pt_strip_titles(x.s, x.a), "pi,Browser,shell 1")
+	testing.expect_value(t, x.s.tabs[0].id, x.pi)
+	// the pi tab to B: it moves (B shows it) but stays tabs[0]; the keyboard stays in A
+	testing.expect(t, run_command(Move_Tab{tab_id = x.pi, pane = x.b, index = -1}, PT_UI).ok, "pi to B")
+	testing.expect_value(t, x.s.tabs[0].id, x.pi)
+	testing.expect_value(t, pane_of_tab(x.s, x.pi).id, x.b)
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.pi)
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, pt_strip_titles(x.s, x.a), "Browser,shell 1")
+	// a reorder within A
+	testing.expect(t, run_command(Move_Tab{tab_id = x.browser, pane = x.a, index = -1}, PT_UI).ok, "reorder")
+	testing.expect_value(t, pt_strip_titles(x.s, x.a), "shell 1,Browser")
+	testing.expect_value(t, x.s.tabs[0].id, x.pi)
+	// A's tabs all go to B: A closes
+	run_command(Move_Tab{tab_id = x.browser, pane = x.b, index = -1}, PT_UI)
+	run_command(Move_Tab{tab_id = x.shell, pane = x.b, index = -1}, PT_UI)
+	testing.expect_value(t, len(x.s.panes), 1)
+	testing.expect(t, session_pane(x.s, x.a) == nil, "A closed")
+}
+
+// set_split clamps to [RATIO_MIN, 1-RATIO_MIN] (bad ratios refused); equalize_panes gives equal
+// panes equal room along each direction.
+@(test)
+panes_cmd_set_split_equalize :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	split := x.s.nodes[x.s.root].id
+	testing.expect(t, run_command(Set_Split{split = split, ratio = 0.7}, PT_UI).ok, "set")
+	testing.expect_value(t, x.s.nodes[x.s.root].ratio, f32(0.7))
+	testing.expect(t, run_command(Set_Split{split = split, ratio = 0.999}, PT_UI).ok, "clamped")
+	testing.expect_value(t, x.s.nodes[x.s.root].ratio, f32(1 - RATIO_MIN))
+	testing.expect_value(t, run_command(Set_Split{split = split, ratio = 1.5}, PT_UI).error, "ratio: between 0 and 1")
+	testing.expect_value(t, run_command(Set_Split{split = split, ratio = -1}, PT_UI).error, "ratio: between 0 and 1")
+	// A | B | C (B split right again): the root gives A a third
+	run_command(Split_Pane{pane = x.b, direction = .Right, tab_id = x.app_id}, PT_UI)
+	testing.expect(t, run_command(Equalize_Panes{}, PT_UI).ok, "equalize")
+	root := x.s.nodes[x.s.root]
+	testing.expectf(t, abs(root.ratio - f32(1.0 / 3.0)) < 0.001, "root %v", root.ratio)
+	testing.expectf(t, abs(x.s.nodes[root.b].ratio - 0.5) < 0.001, "inner %v", x.s.nodes[root.b].ratio)
+	// a split across (down) counts as one along the other way
+	run_command(Split_Pane{pane = x.a, direction = .Down, tab_id = x.shell}, PT_UI)
+	run_command(Equalize_Panes{}, PT_UI)
+	root = x.s.nodes[x.s.root]
+	testing.expectf(t, abs(root.ratio - f32(1.0 / 3.0)) < 0.001, "root %v after a down split", root.ratio)
+}
+
+// The snapshot: per session focused_pane, panes (id, slot, active_tab, tabs) and the layout tree;
+// per tab its pane and on_screen.
+@(test)
+panes_snapshot :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	js := state_json()
+	split := x.s.nodes[x.s.root].id
+	want := []string {
+		fmt.tprintf(`"focused_pane":%d`, x.b),
+		fmt.tprintf(`"panes":[{{"id":%d,"slot":0,"active_tab":%d,"tabs":[%d,%d]}},{{"id":%d,"slot":1,"active_tab":%d,"tabs":[%d,%d,%d]}}]`, x.a, x.shell, x.pi, x.shell, x.b, x.browser, x.editor, x.browser, x.app_id),
+		fmt.tprintf(`"layout":{{"split":%d,"dir":"right","ratio":0.500,"a":{{"pane":%d}},"b":{{"pane":%d}}}}`, split, x.a, x.b),
+		fmt.tprintf(`"id":%d,"kind":"shell","title":"shell 1","status":"running","pane":%d,"on_screen":true`, x.shell, x.a),
+		fmt.tprintf(`"id":%d,"kind":"pi","title":"pi","status":"running","pane":%d,"on_screen":false`, x.pi, x.a),
+	}
+	for w in want do testing.expectf(t, strings.contains(js, w), "snapshot has %s", w)
+}
+
+// The P2 placeholder: a page or an app shown in a pane without the keyboard is not on screen (not
+// seen), and a press there only focuses its pane; a terminal there is live.
+@(test)
+panes_placeholder :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	testing.expect(t, tab_on_screen(x.browser), "B focused: its page is live")
+	run_command(Focus_Pane{pane = x.a}, PT_UI)
+	testing.expect(t, pane_placeholder(x.s, session_pane(x.s, x.b)), "B's page without the keyboard")
+	testing.expect(t, !tab_on_screen(x.browser), "a placeholder is not on screen")
+	testing.expect(t, tab_on_screen(x.shell), "A's shell is")
+	x.s.tabs[3].unseen = true // the browser
+	status_seen(x.s)
+	_, br, _ := find_tab(x.browser)
+	testing.expect(t, br.unseen, "not seen behind its placeholder")
+	// a press in B (laid out right of A): focuses B and is used up; moves over it go nowhere
+	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
+	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
+	mv := sapp.Event{type = .MOUSE_MOVE, mouse_x = 150, mouse_y = 50}
+	testing.expect(t, pointer_over_placeholder(&mv), "a move over the placeholder is used up")
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
+	testing.expect(t, pointer_over_placeholder(&e), "the placeholder's press is swallowed")
+	inbox_drain()
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect(t, tab_on_screen(x.browser), "live once focused")
+	testing.expect(t, !pointer_over_placeholder(&e), "and no placeholder any more")
+	// A's terminal is no placeholder
+	e.mouse_x = 50
+	testing.expect(t, !pointer_over_placeholder(&e), "a terminal pane takes its events")
+}
+
+// A split session laid out (1400 × 860, the default columns): one strip per pane and none of its
+// tabs in the title bar; the panes' rects from their pane_body, side by side with a divider
+// between; a tab in the second strip and its "+" are hit there (ids by tab index and pane slot);
+// three panes (right, then down) keep every pane at least its minimum.
+@(test)
+panes_split_layout :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	s := pt_one(2)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	ids := [3]u64{s.tabs[0].id, s.tabs[1].id, s.tabs[2].id}
+	r := run_command(Split_Pane{direction = .Right, tab_id = ids[2]}, PT_UI)
+	if !testing.expectf(t, r.ok, "split: %s", r.error) do return
+	b := r.created_id
+	_ = ui_layout(1400, 860)
+	ui_pane_rects(s)
+	pa, pb := session_pane(s, s.panes[0].id), session_pane(s, b)
+	testing.expect(t, pa.rect.z > 0 && pb.rect.z > 0, "both laid out")
+	testing.expectf(t, abs(pb.rect.x - (pa.rect.x + pa.rect.z + BORDER_W)) < 1, "B right of A past the divider: %v %v", pa.rect, pb.rect)
+	testing.expectf(t, abs(pa.rect.z - pb.rect.z) <= 1, "even: %v %v", pa.rect.z, pb.rect.z)
+	testing.expect(t, clay.GetElementData(pid(pa, "pane_strip")).found && clay.GetElementData(pid(pb, "pane_strip")).found, "a strip per pane")
+	strip := clay.GetElementData(pid(pb, "pane_strip")).boundingBox
+	testing.expectf(t, pb.frame.y == strip.y && pb.rect.y >= strip.y + strip.height, "B's content under its strip: %v %v", pb.rect, strip)
+	// the second strip's tab (s.tabs index 2) and "+": hit where they are
+	idx := -1
+	for tab, i in s.tabs do if tab.id == ids[2] do idx = i
+	tb := clay.GetElementData(clay.ID("tab", u32(idx)))
+	if !testing.expect(t, tb.found, "B's tab laid out") do return
+	testing.expectf(t, tb.boundingBox.x >= pb.frame.x && tb.boundingBox.y >= strip.y, "in B's strip: %v", tb.boundingBox)
+	app.pointer = {tb.boundingBox.x + 4, tb.boundingBox.y + tb.boundingBox.height / 2}
+	clay.SetPointerState(app.pointer, false)
+	_ = ui_layout(1400, 860)
+	testing.expect_value(t, ui_hit(), Hit(Hit_Tab(ids[2])))
+	nb := clay.GetElementData(pid(pb, "pane_new")).boundingBox
+	app.pointer = {nb.x + nb.width / 2, nb.y + nb.height / 2}
+	clay.SetPointerState(app.pointer, false)
+	_ = ui_layout(1400, 860)
+	testing.expect_value(t, ui_hit(), Hit(Hit_Pane_New(b)))
+	// three panes: B split down; nobody under the minimum
+	r = run_command(Split_Pane{pane = b, direction = .Down, tab_id = ids[1]}, PT_UI)
+	testing.expectf(t, r.ok, "split down: %s", r.error)
+	_ = ui_layout(1400, 860)
+	ui_pane_rects(s)
+	for p in s.panes {
+		testing.expectf(t, p.rect.z >= PANE_MIN_W && p.rect.w >= PANE_MIN_H - TAB_STRIP_H, "pane %d: %v", p.slot, p.rect)
+	}
+	// a split that leaves no room for two panes is refused (in a 1000 px window B is 350 wide: two
+	// need 481)
+	_ = ui_layout(1000, 860)
+	ui_pane_rects(s)
+	r = run_command(Split_Pane{pane = b, direction = .Right, tab_id = ids[0]}, PT_UI)
+	testing.expect_value(t, r.error, "not enough room")
+	app.centre = {}
 }

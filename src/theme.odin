@@ -148,6 +148,8 @@ LEFT_MAX :: 480
 RIGHT_MIN :: 240
 RIGHT_MAX :: 560
 CENTRE_MIN :: 360 // the terminal never gets narrower; small windows shrink the columns first
+PANE_MIN_W :: 240 // a pane's content, at least (logical px; ~28 columns); split_pane refuses less
+PANE_MIN_H :: 140 // (~6 rows)
 WINDOW_MIN_W :: LEFT_MIN + CENTRE_MIN + RIGHT_MIN // the window's smallest size (its layout is audited down to it)
 WINDOW_MIN_H :: 480
 RESIZE_THROTTLE :: 120 * time.Millisecond // terminal grid (and PTY) resizes while a divider is dragged

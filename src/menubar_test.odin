@@ -63,8 +63,9 @@ menubar_built_from_the_action_table :: proc(t: ^testing.T) {
 		testing.expectf(t, pk.mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL) != 0, "%s: %q is not a ⌘ or ⌃ chord", id, k)
 		// ⌃ without ⌘ is the terminal's (readline ⌃G, ⌃A…): a menu item would flash on every press
 		testing.expectf(t, pk.mods & sapp.MODIFIER_SUPER != 0 || it.native != .None, "%s: %q is a ⌃ key without ⌘", id, k)
-		// ⌘⌫ ⌘← ⌘→ are the terminal's line editing: never a menu's
-		testing.expectf(t, !(pk.code == .BACKSPACE || pk.code == .LEFT || pk.code == .RIGHT), "%s: %q is a terminal key", id, k)
+		// ⌘⌫ ⌘← ⌘→ (and ⇧⌘← ⇧⌘→, ⌥⌘…) are the terminal's line editing: never a menu's; with ⌃ (the
+		// panes' ⌃⌘← ⇧⌃⌘←) they are not
+		testing.expectf(t, !(pk.code == .BACKSPACE || pk.code == .LEFT || pk.code == .RIGHT) || pk.mods & sapp.MODIFIER_CTRL != 0, "%s: %q is a terminal key", id, k)
 		norm := fmt.tprintf("%v+%d", pk.code, pk.mods)
 		testing.expectf(t, norm not_in keys, "shortcut %s on both %s and %s", k, keys[norm], id)
 		keys[norm] = id

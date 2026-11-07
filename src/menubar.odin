@@ -147,6 +147,19 @@ MENUBAR := [?]Bar_Item {
 		{action = "tab_8"},
 		{action = "tab_9"},
 		SEP,
+		{action = "split_right"},
+		{action = "split_down"},
+		{action = "close_pane"},
+		{action = "equalize_panes"},
+		{action = "focus_pane_left"},
+		{action = "focus_pane_right"},
+		{action = "focus_pane_up"},
+		{action = "focus_pane_down"},
+		{action = "move_tab_left"},
+		{action = "move_tab_right"},
+		{action = "move_tab_up"},
+		{action = "move_tab_down"},
+		SEP,
 		{action = "next_session"},
 		{action = "prev_session"},
 		SEP,
@@ -354,6 +367,8 @@ parse_keys :: proc(keys: string) -> (k: Bar_Key, ok: bool) {
 	case "−", "-": k.code, k.equiv = .MINUS, "-"
 	case "↑": k.code, k.equiv = .UP, "\uF700" // AppKit's NSUpArrowFunctionKey
 	case "↓": k.code, k.equiv = .DOWN, "\uF701" // NSDownArrowFunctionKey
+	case "←": k.code, k.equiv = .LEFT, "\uF702" // NSLeftArrowFunctionKey
+	case "→": k.code, k.equiv = .RIGHT, "\uF703" // NSRightArrowFunctionKey
 	case:
 		if len(rest) != 1 do return {}, false
 		c := rest[0]

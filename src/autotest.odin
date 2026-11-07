@@ -23,12 +23,13 @@ package main
 //   paste TEXT                 Cmd+V of TEXT ("\n" -> newline; the script's own pasteboard, not the system's)
 //   scroll DY X Y              wheel at logical X,Y
 //   click X Y                  left click at logical X,Y
-//   drag X1 Y1 X2 Y2 [shift]   left drag
+//   drag X1 Y1 X2 Y2 [shift] [held]   left drag (held: the moves say the button is down, as macOS's do)
 //   clicks N X Y               N quick left clicks at logical X,Y (2 = double-click)
 //   clickcell N COL ROW [COL2 ROW2]  N quick clicks on a terminal cell (then drag to COL2,ROW2)
 //   mousecell down|move|up COL ROW [shift|cmd|ctrl ...]   one step of a press held across frames
 //                              (a drag the frame loop draws in between); COL/ROW may be off the grid;
-//                              hover (a move, no button), click, rclick (right button) too
+//                              hover (a move, no button), click, rclick (right button) too;
+//                              pane=SLOT: in that pane's terminal (else the focused tab's)
 //   assert_link URL|-          the terminal link underlined under the pointer (⌘ held), or none
 //   assert_drawn_selection N   the last drawn frame showed selected terminal cells (N > 0) or none (0)
 //   clicktext N NAME OFFSET    N quick clicks in a text element at byte OFFSET of its text
@@ -41,6 +42,8 @@ package main
 //   assert_palette INDEX KEY   the palette's result INDEX has KEY (action:new_chat, tab:3, ...)
 //   assert_selection TEXT      the focused field's selection, else the terminal's, equals TEXT
 //                              (read directly: the system clipboard is not touched)
+//   assert_pane_selection SLOT TEXT  the terminal selection of the tab pane SLOT shows ("" = none)
+//   assert_pane_cols SLOT      the terminal pane SLOT shows has the columns of its pane's width now
 //   ime_mark TEXT              an input method's composition (setMarkedText), as macOS sends it
 //   ime_commit TEXT            committed text outside a key press (emoji picker), insertText
 //   ime_key CODE TEXT [alt|cmd|ctrl|shift|repeat ...]   a key press and release through
@@ -72,7 +75,9 @@ package main
 //   pick_folder PATH           what the next folder picker returns (test mode never opens it)
 //   divider N DX [clicks]      drag column divider N (0 left, 1 right, 2 the agent drawer's
 //                              left edge) by DX logical px;
-//                              `clicks 2` double-clicks it instead
+//                              `clicks 2` double-clicks it instead;
+//                              `divider pane SLOT D [clicks N]`: the divider right of (or below)
+//                              pane SLOT, by D logical px across it
 //   hover NAME [INDEX]         move the pointer to the centre of a Clay element (INDEX: as clickid)
 //   sweep NAME INDEX STEPS     move the pointer across a Clay element (left to right, mid
 //                              height) in STEPS moves, laying out between them as frames do;
@@ -776,6 +781,10 @@ autotest_step :: proc() {
 			delete(at.fake_folder)
 			at.fake_folder = strings.clone(expand_vars(rest))
 		case "divider":
+			if args[0] == "pane" {
+				if !script_pane_divider(args[1:]) do script_fail("divider pane: no divider after pane", args[1])
+				continue
+			}
 			which := int(num(args[0]))
 			l, r := column_widths()
 			x := which == 0 ? l * app.dpi : ui_win_w - r * app.dpi
@@ -835,10 +844,11 @@ autotest_step :: proc() {
 		case "drag":
 			x1, y1, x2, y2 := num(args[0]) * app.dpi, num(args[1]) * app.dpi, num(args[2]) * app.dpi, num(args[3]) * app.dpi
 			m: u32 = len(args) > 4 && args[4] == "shift" ? sapp.MODIFIER_SHIFT : 0
+			held: u32 = args[len(args) - 1] == "held" ? sapp.MODIFIER_LMB : 0
 			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x1, mouse_y = y1, modifiers = m})
 			for i in 1 ..= 8 {
 				f := f32(i) / 8
-				send({type = .MOUSE_MOVE, mouse_x = x1 + (x2 - x1) * f, mouse_y = y1 + (y2 - y1) * f, modifiers = m})
+				send({type = .MOUSE_MOVE, mouse_x = x1 + (x2 - x1) * f, mouse_y = y1 + (y2 - y1) * f, modifiers = m | held})
 			}
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x2, mouse_y = y2, modifiers = m})
 		case "clicks":
@@ -872,6 +882,7 @@ autotest_step :: proc() {
 			// mousecell down|move|up COL ROW [shift]: one step of a press held
 			// across frames (a drag the frame loop draws in between)
 			t := active_term()
+			for a in args[3:] do if strings.has_prefix(a, "pane=") do t = script_pane_term(a[5:])
 			if t == nil {
 				script_fail("mousecell: no terminal")
 				continue
@@ -1276,7 +1287,63 @@ expand_vars :: proc(s: string) -> string {
 	}
 	out := s
 	for v in vars do out, _ = strings.replace_all(out, v[0], v[1], context.temp_allocator)
+	// $pane0 … $pane7: the current session's panes by slot (panes.odin)
+	if cs != nil && strings.contains(out, "$pane") do for p in cs.panes {
+		out, _ = strings.replace_all(out, fmt.tprintf("$pane%d", p.slot), fmt.tprint(p.id), context.temp_allocator)
+	}
 	return out
+}
+
+// The terminal of the tab pane SLOT of the current session shows (nil: none).
+@(private = "file")
+script_pane_term :: proc(slot: string) -> ^Term {
+	cs := cur()
+	if cs == nil do return nil
+	n := int(num(slot))
+	for &p in cs.panes do if p.slot == n do return pane_term(&p)
+	return nil
+}
+
+// divider pane SLOT D [clicks N]: drags (or clicks) the divider of the nearest split that has pane
+// SLOT before it (in its first child), D logical px across the divider's line.
+@(private = "file")
+script_pane_divider :: proc(args: []string) -> bool {
+	cs := cur()
+	if cs == nil || len(args) < 2 do return false
+	n := int(num(args[0]))
+	pane: u64
+	for p in cs.panes do if p.slot == n do pane = p.id
+	leaf := -1
+	for x, i in cs.nodes do if x.leaf && x.pane == pane do leaf = i
+	if leaf < 0 do return false
+	split := u64(0)
+	across := true
+	for at := leaf; cs.nodes[at].parent >= 0; at = cs.nodes[at].parent {
+		par := cs.nodes[cs.nodes[at].parent]
+		if par.a == at {
+			split, across = par.id, par.dir == .Right
+			break
+		}
+	}
+	if split == 0 do return false
+	d := clay.GetElementData(clay.ID("pane_div", u32(split)))
+	if !d.found do return false
+	b := d.boundingBox
+	x, y := b.x + b.width / 2, b.y + b.height / 2
+	if args[1] == "clicks" {
+		for _ in 0 ..< (len(args) > 2 ? int(num(args[2])) : 2) {
+			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
+			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
+		}
+		return true
+	}
+	dd := num(args[1]) * app.dpi
+	dx, dy := across ? dd : 0, across ? 0 : dd
+	send({type = .MOUSE_MOVE, mouse_x = x, mouse_y = y})
+	send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
+	for i in 1 ..= 8 do send({type = .MOUSE_MOVE, mouse_x = x + dx * f32(i) / 8, mouse_y = y + dy * f32(i) / 8, modifiers = sapp.MODIFIER_LMB})
+	send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x + dx, mouse_y = y + dy})
+	return true
 }
 
 // The value at a dotted path in a JSON document, as text: strings bare,
@@ -1343,7 +1410,7 @@ script_is_check :: proc(cmd: string) -> bool {
 	case "assert_file", "assert_not_file", "assert_tip", "assert_drawn", "assert_not_drawn", "assert_md", "assert_not_md",
 	     "assert_opened", "assert_menurows", "assert_revealed", "assert_toast", "assert_clipboard", "assert_notice",
 	     "assert_files", "assert_not_files", "assert_rows", "assert_link", "assert_drawn_selection", "assert_screen",
-	     "assert_not_screen", "assert_palette", "assert_selection", "hittest", "assert_in_window", "assert_window",
+	     "assert_not_screen", "assert_palette", "assert_selection", "assert_pane_selection", "assert_pane_cols", "hittest", "assert_in_window", "assert_window",
 	     "assert_menu", "assert_state", "assert_result", "assert_finished":
 		return true
 	}
@@ -1451,6 +1518,20 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		got := i < len(rs) ? rs[i].key : "<none>"
 		ok = got == args[1]
 		msg = ok ? fmt.tprint("assert ok: palette", i, "=", got) : fmt.tprintf("ASSERT FAILED palette %d: got %s, want %s", i, got, args[1])
+	case "assert_pane_cols":
+		t := script_pane_term(args[0])
+		cs := cur()
+		w: f32
+		if cs != nil do for p in cs.panes do if p.slot == int(num(args[0])) do w = p.rect.z
+		want := u16(max(2, int((w - 2 * term_pad()) / font.cell_w)))
+		ok = t != nil && t.cols == want && t.w == w
+		msg = ok ? fmt.tprint("assert ok: pane", args[0], "cols =", want) : fmt.tprintf("ASSERT FAILED pane %s cols: got %d (%.0f px), want %d (%.0f px)", args[0], t != nil ? t.cols : 0, t != nil ? t.w : 0, want, w)
+	case "assert_pane_selection":
+		slot, _, want := strings.partition(strings.trim_space(expand_vars(rest)), " ")
+		t := script_pane_term(slot)
+		got := t != nil ? term_selection_text(t) : "<no terminal>"
+		ok = got == want
+		msg = ok ? fmt.tprint("assert ok: pane", slot, "selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED pane %s selection: got %q, want %q", slot, got, want)
 	case "assert_selection":
 		got := ""
 		if f, _, _ := focused_field(); f != nil do got = tf_selected_text(f)

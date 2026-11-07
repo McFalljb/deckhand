@@ -382,6 +382,27 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   ⌥⌘↓ and ⌥⌘↑ go to the next and previous open session (Window menu).
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
   running a command, or an editor with unsaved changes.
+- **To split the centre into panes**, press ⌘D (**Split pane right**) or ⇧⌘D (**Split pane
+  down**): the pane with the keyboard splits in two and a new shell opens in the new half. A
+  session has at most 8 panes, and a split needs room for two panes of at least 240 × 140
+  points. Once split, each pane has its own strip of tabs (they leave the title bar), with a
+  **+** for a new shell in that pane; the pane with the keyboard has an accent line under its
+  strip. Click in a pane to give it the keyboard (the click also acts there, so a click in a
+  shell starts a selection at once), or press ⌃⌘←, ⌃⌘→, ⌃⌘↑ or ⌃⌘↓ (**Focus pane left**,
+  **Focus pane right**, **Focus pane up**, **Focus pane down**). A selection you drag from one
+  pane over another stays in the pane where you pressed. ⌘1–⌘9, ⇧⌘] and ⇧⌘[ and ⌘W act on
+  the tabs of the pane with the keyboard.
+  - **To move a tab to another pane**, press ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑ or ⇧⌃⌘↓ (**Move tab to the pane
+    left**, **Move tab to the pane right**, **Move tab to the pane above**, **Move tab to the pane
+    below**); with no pane that way, the tab splits off into a new pane there. A pane whose last
+    tab closes or moves away closes too, and the keyboard goes back to the pane you used last.
+  - **To resize panes**, drag the line between them; double-click it to make the two sides
+    equal. **Even out panes** (palette, Window menu) gives every pane equal room.
+  - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join
+    the pane next to it; nothing is closed.
+  - A browser or app tab shows live only in the pane with the keyboard for now: in another pane
+    it says **Click to show**, and a click there only gives that pane the keyboard (the page or
+    app does not get the click). Panes are not remembered yet when Deckhand restarts.
 - **If pi exits** (it crashed, failed to start, or you quit it), its tab keeps its last output
   under a bar that says how it ended ("pi exited (code 1)", or the signal that stopped it, such
   as "signal 1 (SIGHUP)"); the tab and its row in the Open section say so too when you point at
@@ -1667,6 +1688,11 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | round the session's tabs |
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
+| Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
+| Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
+| Even out panes |  | every pane gets equal room |
+| Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | the neighbouring pane gets the keyboard |
+| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑, ⇧⌃⌘↓ | or into a new pane that way |
 | Bring all to front |  | |
 
 **Help**
@@ -1767,6 +1793,11 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | |
+| Split pane right, Split pane down | ⌘D, ⇧⌘D | |
+| Close pane (its tabs stay) | ⇧⌘W | |
+| Even out panes |  | |
+| Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | |
+| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑, ⇧⌃⌘↓ | |
 | Deckhand user guide |  | this guide in a Markdown tab |
 | Markdown preview | ⇧⌘V | a `.md` file as a document, or its source |
 | Open in editor |  | edit the Markdown tab's file in an editor tab |

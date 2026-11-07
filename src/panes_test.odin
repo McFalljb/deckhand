@@ -989,3 +989,122 @@ panes_split_layout :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.error, "not enough room")
 	app.centre = {}
 }
+
+
+// H3: a press in unfocused pane A's terminal focuses A synchronously and its own drag survives the
+// focus change; capture keeps the press's pane for moves over another pane until the release.
+@(test)
+panes_press_keeps_its_drag :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
+	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
+	drags_follow_focus()
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 50, mouse_y = 50, mouse_button = .LEFT}
+	testing.expect(t, !pane_press(&e), "click-through")
+	x.term.mouse_down = true // the selection term_mouse_down starts
+	drags_follow_focus() // the next event
+	testing.expect(t, x.term.mouse_down, "the press's own drag survives the focus change")
+	mv := sapp.Event{type = .MOUSE_MOVE, mouse_x = 150, mouse_y = 50}
+	testing.expect_value(t, event_pane(&mv).id, x.a) // held: still A's
+	pane_release()
+	testing.expect_value(t, event_pane(&mv).id, x.b) // released: the pane under the pointer
+	k := sapp.Event{type = .KEY_DOWN}
+	testing.expect_value(t, event_pane(&k).id, x.a) // keys: the focused pane
+}
+
+
+// The panes' actions: ⌘D splits right (a new shell: the command, not run here), ⇧⌃⌘arrows move
+// the tab to the neighbour or split that way; ⇧⌘W closes the pane; ⌃⌘arrows only where a pane is.
+@(test)
+panes_actions :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	cmd, ok := pane_split_action(.Right)
+	testing.expect(t, ok && cmd.(Split_Pane).direction == .Right && cmd.(Split_Pane).tab_id == 0, "⌘D: a new shell in a new pane")
+	cmd, ok = pane_move_action(.Left)
+	testing.expect(t, ok, "move left")
+	mt := cmd.(Move_Tab)
+	testing.expect(t, mt.tab_id == x.browser && mt.pane == x.a, "to A")
+	cmd, ok = pane_move_action(.Down)
+	sp := cmd.(Split_Pane)
+	testing.expect(t, ok && sp.tab_id == x.browser && sp.direction == .Down && sp.pane == x.b, "no pane below: split down with the tab")
+	_, ok = pane_focus_action(.Right)
+	testing.expect(t, !ok, "nothing right of B")
+	cmd, ok = pane_focus_action(.Left)
+	testing.expect(t, ok && cmd.(Focus_Pane).direction == "left", "⌃⌘←")
+	// one pane: no pane actions but the splits
+	run_command(Close_Pane{pane = x.b}, PT_UI)
+	_, ok = pane_focus_action(.Left)
+	testing.expect(t, !ok, "one pane: no focus moves")
+	cmd, ok = pane_move_action(.Right)
+	testing.expect(t, ok && cmd.(Split_Pane).tab_id == x.browser, "one pane: ⇧⌃⌘→ splits with the tab")
+	for a in ACTIONS do if a.id == "close_pane" {
+		_, ok = a.make()
+		testing.expect(t, !ok, "⇧⌘W with one pane")
+	}
+	// the keys parse (the menu bar shows them)
+	k, kok := parse_keys("⇧⌃⌘←")
+	testing.expect(t, kok && k.code == .LEFT && k.mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT | sapp.MODIFIER_CTRL, "⇧⌃⌘←")
+}
+
+
+// A pane divider: hit DIVIDER_HIT wide across its line; a drag follows the pointer live (the
+// layout's ratio) and sets the split once, on release, kept off the panes' minimum; a
+// double-click evens it.
+@(test)
+panes_divider_drag :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	s := pt_one(1)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	r := run_command(Split_Pane{direction = .Right, tab_id = s.tabs[1].id}, PT_UI)
+	if !testing.expectf(t, r.ok, "split: %s", r.error) do return
+	split := s.nodes[s.root].id
+	_ = ui_layout(1400, 860)
+	div := clay.GetElementData(clay.ID("pane_div", u32(split))).boundingBox
+	x, y := div.x, div.y + 100
+	testing.expect_value(t, pane_divider_at(x + DIVIDER_HIT / 2 - 0.5, y), split)
+	testing.expect_value(t, pane_divider_at(x + DIVIDER_HIT, y), u64(0))
+	pane_divider_press(split, 1)
+	pane_divider_move(x - 100, y)
+	testing.expect(t, pane_drag.active && pane_drag.ratio < 0.5, "live")
+	testing.expect_value(t, s.nodes[s.root].ratio, f32(0.5)) // not set until the release
+	pane_divider_move(0, y) // far past A's minimum
+	pane_divider_release()
+	inbox_drain()
+	_ = ui_layout(1400, 860)
+	ui_pane_rects(s)
+	testing.expectf(t, abs(s.panes[0].rect.z - PANE_MIN_W) < 1, "A at its minimum: %v", s.panes[0].rect)
+	pane_divider_press(split, 2)
+	inbox_drain()
+	testing.expect_value(t, s.nodes[s.root].ratio, f32(0.5))
+	testing.expect(t, !pane_drag.active, "a double-click is no drag")
+}
+
+// A press in a pane without the keyboard focuses it at once (pane_press, before the handlers):
+// on a "Click to show" placeholder that is all it does; in a terminal the click goes on there
+// (click-through) and the pane holds the press until the release.
+@(test)
+panes_press_focuses_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	run_command(Focus_Pane{pane = x.a}, PT_UI)
+	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
+	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
+	testing.expect(t, pane_press(&e), "the placeholder's press is swallowed")
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect(t, tab_on_screen(x.browser), "live once focused")
+	pane_release()
+	e.mouse_x = 50
+	testing.expect(t, !pane_press(&e), "click-through")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, pointer_capture.pane, x.a)
+	pane_release()
+	testing.expect_value(t, pointer_capture.pane, u64(0))
+}

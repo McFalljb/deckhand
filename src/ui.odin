@@ -522,7 +522,7 @@ pane_tree_layout :: proc(cs: ^Open_Session, n: int) {
 	}
 	th := theme()
 	across := node.dir == .Right
-	ratio := node.ratio
+	ratio := pane_drag_ratio(node.id, node.ratio) // a divider being dragged: where it is now
 	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same)
 	if d := clay.GetElementData(clay.ID("pane_split", u32(node.id))); d.found {
 		ratio = pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W))
@@ -531,7 +531,8 @@ pane_tree_layout :: proc(cs: ^Open_Session, n: int) {
 	sz_div := across ? clay.Sizing{clay.SizingFixed(px(BORDER_W)), clay.SizingGrow()} : clay.Sizing{clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}
 	if clay.UI(clay.ID("pane_split", u32(node.id)))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = across ? .LeftToRight : .TopToBottom}}) {
 		if clay.UI(clay.ID("pane_side_a", u32(node.id)))({layout = {sizing = sz_a}}) do pane_tree_layout(cs, node.a)
-		if clay.UI(clay.ID("pane_div", u32(node.id)))({layout = {sizing = sz_div}, backgroundColor = cc(th.border)}) {}
+		hot := pane_divider_hot(node.id)
+		if clay.UI(clay.ID("pane_div", u32(node.id)))({layout = {sizing = sz_div}, backgroundColor = cc(hot ? th.accent : th.border)}) {}
 		if clay.UI(clay.ID("pane_side_b", u32(node.id)))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) do pane_tree_layout(cs, node.b)
 	}
 }
@@ -1056,6 +1057,7 @@ Hit :: union {
 	Hit_Tab,
 	Hit_Close_Tab,
 	Hit_Pane_New,
+	Hit_Pane_Divider,
 	Hit_Confirm,
 	Hit_Cancel,
 	Hit_Panel_Head,
@@ -1111,6 +1113,7 @@ Hit_New :: struct {}
 Hit_Tab :: distinct u64 // tab id
 Hit_Close_Tab :: distinct u64 // tab id (a pi tab's closes its session)
 Hit_Pane_New :: distinct u64 // a pane strip's "+": a new shell in that pane (pane id)
+Hit_Pane_Divider :: distinct u64 // a divider between panes (its split's id)
 Hit_Confirm :: distinct string // confirmation token
 Hit_Cancel :: distinct string
 Hit_Panel_Head :: distinct string // panel id: folds its section

@@ -358,6 +358,7 @@ event_os :: proc "c" (e: ^sapp.Event) {
 
 event :: proc(e: ^sapp.Event) {
 	defer inbox_drain()
+	defer if e.type == .MOUSE_UP || e.type == .MOUSE_LEAVE || e.type == .UNFOCUSED do pane_release() // the press's pane lets go (ui_panes.odin)
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
@@ -433,6 +434,14 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
+	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⇧⌃⌘arrows move the tab,
+	// ⇧⌘W unsplit; from anywhere but a text field
+	if e.type == .KEY_DOWN && state.focus_widget == "" && pane_key(e) {
+		ime_cancel()
+		if menu.open do menu_close()
+		app.key_taken = true
+		return
+	}
 	// ⌘⇧E: the Files tab with the keyboard, from anywhere; again: back to Sessions
 	if e.type == .KEY_DOWN && e.key_code == .E && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 		ime_cancel()
@@ -471,18 +480,39 @@ event :: proc(e: ^sapp.Event) {
 			return
 		}
 	}
+	// and a pane divider (ui_panes.odin)
+	if pane_drag.active {
+		#partial switch e.type {
+		case .MOUSE_MOVE:
+			pane_divider_move(e.mouse_x, e.mouse_y)
+			return
+		case .MOUSE_UP, .MOUSE_LEAVE:
+			pane_divider_release()
+			pane_release()
+			return
+		}
+	}
 	// the settings popover and the shortcuts sheet take all input while open
 	if settings_open() && settings_event(e) do return
 	if shortcuts_open() && shortcuts_event(e) do return
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
-	// a "Click to show" pane takes no pointer events; a press there only focuses it (ui_panes.odin)
-	if !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) && pointer_over_placeholder(e) do return
-	// the per-tab handlers get the focused pane (a click elsewhere only hits the panes' strips:
-	// ui_hit); their Clay ids are its (cid)
-	fp := focused_pane()
+	// a press on a pane divider drags it; a press in a pane without the keyboard focuses it first,
+	// then acts in it (a "Click to show" placeholder's only focuses: ui_panes.odin)
+	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) {
+		if split := pane_divider_at(e.mouse_x, e.mouse_y); split != 0 {
+			pane_divider_press(split, app.clicks)
+			app.redraw = true
+			return
+		}
+	}
+	if e.type == .MOUSE_DOWN && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) && pane_press(e) do return
+	// the per-tab handlers get the pane the event is for: the pointer's (the press's while a
+	// button is held), the focused one's for keys; their Clay ids are its (cid)
+	fp := event_pane(e)
 	old_ids := ids_pane_begin(fp)
 	defer ids_pane_end(old_ids)
+	if pointer_over_placeholder(e) do return
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
 	if editor_bar_focused() && editor_bar_event(fp, e) do return
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
@@ -501,7 +531,7 @@ event :: proc(e: ^sapp.Event) {
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
 	t := active_term()
-	mt := pane_term(fp) // the pointer's terminal: the focused pane's
+	mt := pane_term(fp) // the pointer's: the pane under it (or holding its press)
 	tab := active_tab()
 	cs := cur()
 	kt := key_term()
@@ -610,11 +640,12 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Files: // files_event took it
 		case Hit_Reload:    reload_click(hit) // the hot-reload bars
 		case Hit_Claude_Reload: claude_reload_click(hit) // Claude Code's (ui_claude_reload.odin)
-		case Hit_Dead_Tab:  dead_tab_click(hit_pane(), hit) // a dead pi tab's Restart (dead_tab.odin)
+		case Hit_Dead_Tab:  dead_tab_click(fp, hit) // a dead pi tab's Restart (dead_tab.odin)
 		case Hit_Update:    update_click(hit) // the update bar (ui_update.odin)
 		case Hit_Comments:  comments_click(hit) // pending comments (ui_comments.odin)
-		case Hit_Claude:    claude_click(hit_pane(), hit) // a Claude tab's held messages (ui_claude.odin)
+		case Hit_Claude:    claude_click(fp, hit) // a Claude tab's held messages (ui_claude.odin)
 		case Hit_Pane_New:  pane_click(hit) // a pane strip's "+" (ui_panes.odin)
+		case Hit_Pane_Divider: // pane_divider_press took it
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
@@ -627,6 +658,10 @@ event :: proc(e: ^sapp.Event) {
 		app.pointer = {e.mouse_x, e.mouse_y}
 		if d := divider_at(e.mouse_x, e.mouse_y); d >= 0 && e.modifiers & sapp.MODIFIER_LMB == 0 {
 			set_hover(Hit_Divider(d), false)
+			return
+		}
+		if split := pane_divider_at(e.mouse_x, e.mouse_y); split != 0 && e.modifiers & sapp.MODIFIER_LMB == 0 && !over_overlay() {
+			set_hover(Hit_Pane_Divider(split), false)
 			return
 		}
 		in_term := (mt != nil && in_pane(mt, e.mouse_x, e.mouse_y) && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))) || editor_text_hit(pane_editor(fp), e.mouse_x, e.mouse_y)
@@ -717,6 +752,7 @@ chrome_hit :: proc(p: [2]f32) -> Hit {
 set_hover :: proc(h: Hit, over_terminal: bool) {
 	cursor := over_terminal ? sapp.Mouse_Cursor.IBEAM : (h != nil && !hit_inert(h) ? .POINTING_HAND : .DEFAULT)
 	if _, is := h.(Hit_Divider); is do cursor = .RESIZE_EW
+	if d, is := h.(Hit_Pane_Divider); is do cursor = pane_divider_across(u64(d)) ? .RESIZE_EW : .RESIZE_NS
 	if sapp.get_mouse_cursor() != cursor do sapp.set_mouse_cursor(cursor)
 	if h == ui_hover do return
 	// own copies: session ids and tokens point into lists that get replaced

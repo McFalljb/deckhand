@@ -402,7 +402,10 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     the pane next to it; nothing is closed.
   - A browser or app tab shows live only in the pane with the keyboard for now: in another pane
     it says **Click to show**, and a click there only gives that pane the keyboard (the page or
-    app does not get the click). Panes are not remembered yet when Deckhand restarts.
+    app does not get the click).
+  - Each session's panes come back when Deckhand restarts: the same splits and sizes, the
+    same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
+    Deckhand from before panes opens the same workspace with every tab back in one pane.)
 - **If pi exits** (it crashed, failed to start, or you quit it), its tab keeps its last output
   under a bar that says how it ended ("pi exited (code 1)", or the signal that stopped it, such
   as "signal 1 (SIGHUP)"); the tab and its row in the Open section say so too when you point at

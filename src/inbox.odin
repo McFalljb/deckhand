@@ -154,9 +154,12 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		for t, i in c.tabs {
 			args := make([]string, len(t.args), allocator)
 			for x, j in t.args do args[j] = s(x, allocator)
-			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, readonly = t.readonly, account = s(t.account, allocator)}
+			tabs[i] = {kind = t.kind, title = s(t.title, allocator), cwd = s(t.cwd, allocator), active = t.active, claude_id = s(t.claude_id, allocator), args = args, readonly = t.readonly, account = s(t.account, allocator), pane = t.pane, pane_active = t.pane_active}
 		}
-		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent}
+		layout := c.layout
+		layout.nodes = make([]Restore_Node, len(c.layout.nodes), allocator)
+		copy(layout.nodes, c.layout.nodes)
+		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active}
 	case Set_Agent_Name:      return Set_Agent_Name{name = s(c.name, allocator)}
 	case Set_Agent_Model:     return Set_Agent_Model{model = s(c.model, allocator)}
 	case Open_File:           return Open_File{path = s(c.path, allocator), line = c.line, col = c.col, session = c.session, preview = c.preview}
@@ -438,6 +441,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 			delete(t.title, allocator)
 			delete(t.cwd, allocator)
 		}
+		delete(c.layout.nodes, allocator)
 		delete(c.tabs, allocator)
 	}
 }

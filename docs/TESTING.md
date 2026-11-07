@@ -96,6 +96,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `term-links` | terminal links: ⌘-hover/click, OSC 8, wrapped URLs, `javascript:` refused, opening only logged | 7 | smoke |
 | `panes` | split panes: ⌘D and ⇧⌘D with a new shell, typing per pane, ⌃⌘arrows and click focus, a pane divider's drag and its minimum (the shells' columns follow), ⇧⌃⌘arrows, a pane's last tab closing, ⇧⌘W | 9 | |
 | `panes-capture` | pointer capture: a selection pressed in one pane's terminal (and editor) and released over another stays in the first; that pane has the keyboard | 6 | |
+| `panes-restore` | split panes across a quit and relaunch: the tree, its ratios, each pane's tabs and shown tab, the focused pane, every shell sized to its pane | 6 | |
 | `fetch-cef-test` | `scripts/fetch-cef.sh`: a bad archive deleted, concurrent fetches, a stale tree not reused | 13 | not an app scene |
 
 ### Full (nightly, `--all`)

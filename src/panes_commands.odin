@@ -6,7 +6,8 @@ import clay "../build/clay-odin"
 // The pane commands (docs/PROTOCOL.md "Panes"; docs/plans/split-panes.md §4): split_pane,
 // close_pane, focus_pane, move_tab, set_split, equalize_panes. Who: Anyone (the user, scripts,
 // control callers), never a pi or Claude tab's bridge nor an app (who_allows): agents do not
-// change the layout. Home has one pane and is refused. Panes are not saved yet (the plan's P3).
+// change the layout. Home has one pane and is refused. The layout is saved per session
+// (persist.odin write_panes; restored by panes_restore.odin).
 
 panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {

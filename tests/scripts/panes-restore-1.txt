@@ -1,0 +1,31 @@
+# Run 1 of panes-restore.sh: split a session into three panes (the right one split down, its
+# bottom pane with two tabs showing the first), move the first divider, put the keyboard in the
+# upper right pane, then quit through the confirm flow (the quit saves the workspace).
+wait 500
+command {"type":"add_project","cwd":"$cwd/build/panes-restore/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"pppp-1"}
+assert_result ok true
+waitfor ARGS: 10000
+key d cmd
+waitstate 5000 open_sessions.0.panes.# 2
+wait 800
+type echo RIGHT-ONE
+key enter
+waitfor RIGHT-ONE 5000
+key d cmd shift
+waitstate 5000 open_sessions.0.panes.# 3
+key t cmd
+waitstate 5000 open_sessions.0.panes.2.tabs.# 2
+key 1 cmd
+assert_state open_sessions.0.panes.2.active_tab $tab
+divider pane 0 -120
+waitstate 3000 open_sessions.0.layout.ratio 0.347
+key up cmd ctrl
+assert_state open_sessions.0.focused_pane $pane1
+wait 300
+state_json panes-restore-before
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

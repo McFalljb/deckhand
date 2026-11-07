@@ -196,6 +196,56 @@ open_obj :: proc(w: ^W) {strings.write_byte(&w.b, '{'); w.first = true}
 @(private = "file")
 close_obj :: proc(w: ^W) {strings.write_byte(&w.b, '}'); w.first = false}
 
+// A split session's "panes" (docs/PERSISTENCE.md "Panes"): its tree with the ratios (3
+// decimals), per saved tab its pane, per pane the saved tab it shows, the focused pane. Panes
+// are numbered in leaf order, tabs by their place in the saved list (every tab is written).
+@(private = "file")
+write_panes :: proc(w: ^W, s: ^Open_Session) {
+	order := pane_leaf_order(s)
+	index :: proc(order: []u64, id: u64) -> int {
+		for x, i in order do if x == id do return i
+		return 0
+	}
+	node :: proc(w: ^W, s: ^Open_Session, order: []u64, n: int) {
+		x := s.nodes[n]
+		open_obj(w)
+		if x.leaf do ki(w, "pane", index(order, x.pane))
+		else {
+			ks(w, "split", x.dir == .Right ? "right" : "down")
+			k(w, "ratio")
+			fmt.sbprintf(&w.b, "%.3f", x.ratio)
+			k(w, "a")
+			node(w, s, order, x.a)
+			k(w, "b")
+			node(w, s, order, x.b)
+		}
+		close_obj(w)
+	}
+	k(w, "panes")
+	open_obj(w)
+	k(w, "tree")
+	node(w, s, order, s.root)
+	k(w, "tab_pane")
+	strings.write_byte(&w.b, '[')
+	for t, j in s.tabs {
+		if j > 0 do strings.write_byte(&w.b, ',')
+		strings.write_int(&w.b, index(order, t.pane))
+	}
+	strings.write_byte(&w.b, ']')
+	k(w, "active")
+	strings.write_byte(&w.b, '[')
+	for id, i in order {
+		if i > 0 do strings.write_byte(&w.b, ',')
+		at := 0
+		if p := session_pane(s, id); p != nil do for t, j in s.tabs do if t.id == p.active do at = j
+		strings.write_int(&w.b, at)
+	}
+	strings.write_byte(&w.b, ']')
+	f := session_focused_pane(s)
+	ki(w, "focused", f != nil ? index(order, f.id) : 0)
+	close_obj(w)
+}
+
 // The workspace file's content (temp allocator). See docs/PERSISTENCE.md.
 workspace_json :: proc() -> string {
 	w := W{b = strings.builder_make(context.temp_allocator)}
@@ -288,6 +338,7 @@ workspace_json :: proc() -> string {
 		}
 		strings.write_byte(&w.b, ']')
 		ki(&w, "active_tab", active)
+		if len(s.panes) > 1 do write_panes(&w, s) // one pane: no key (the file as before panes)
 		close_obj(&w)
 	}
 	strings.write_byte(&w.b, ']')
@@ -714,23 +765,27 @@ workspace_restore :: proc(text: string) -> string {
 		tabs := make([dynamic]Restore_Tab, context.temp_allocator)
 		want_active, _ := so["active_tab"].(json.Integer)
 		saved_tabs, _ := so["tabs"].(json.Array)
+		// the saved panes: by the saved tab's place, before dropped tabs shift the places (panes_parse)
+		layout, tab_pane, pane_active := panes_parse(so["panes"], len(saved_tabs))
+		pi_pane, pi_active := -1, false
 		for tv, j in saved_tabs {
 			to, _ := tv.(json.Object)
 			kind, _ := to["kind"].(json.String)
+			if j == 0 && kind == "pi" do pi_pane, pi_active = tab_pane[0], pane_active[0]
 			if kind == "editor" {
 				// a file tab: reopens when its session starts (unsaved edits are not kept)
-				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Editor, cwd = path, active = i64(j) == i64(want_active)})
+				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Editor, cwd = path, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "markdown" {
-				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Markdown, cwd = path, active = i64(j) == i64(want_active)})
+				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Markdown, cwd = path, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "browser" {
 				// a web page (browser_nav.odin): its URL (in cwd), loaded once its session is focused
 				url, _ := to["url"].(json.String)
 				title, _ := to["title"].(json.String)
-				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active)})
+				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "claude" {
@@ -741,16 +796,16 @@ workspace_restore :: proc(text: string) -> string {
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				ro, _ := to["readonly"].(json.Boolean)
 				acct, _ := to["account"].(json.String)
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active)})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
 			title, _ := to["title"].(json.String)
 			cwd, _ := to["cwd"].(json.String)
-			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active)})
+			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
-		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:]})
+		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active})
 		if r.ok && has_current && i64(i) == i64(current) {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
@@ -866,6 +921,78 @@ workspace_restore :: proc(text: string) -> string {
 		}
 	}
 	return ""
+}
+
+// An open session's saved "panes" (write_panes) for a session saved with `ntabs` tabs: its
+// layout, and per saved tab its pane (-1 = not known) and whether its pane showed it. The shape
+// is checked here: not an object, a tree that is not one (a node neither a pane nor a split of
+// "right" or "down" with a numeric ratio and two children, a pane number twice or not below the
+// count of panes), more than PANES_MAX panes, or one pane → no layout (one pane, as from a file
+// from before panes). A ratio is clamped to [RATIO_MIN, 1 - RATIO_MIN]. A tab's pane that is not
+// a pane, or missing → -1; a pane's shown tab that is not one of its tabs → none (its first tab
+// then, restore_panes); a focused pane that is not one → the first pane. Which tabs come back is
+// the restore's business (restore_panes).
+panes_parse :: proc(v: json.Value, ntabs: int) -> (layout: Restore_Layout, tab_pane: []int, pane_active: []bool) {
+	tab_pane = make([]int, ntabs, context.temp_allocator)
+	pane_active = make([]bool, ntabs, context.temp_allocator)
+	for &x in tab_pane do x = -1
+	o, is := v.(json.Object)
+	if !is do return
+	nodes := make([dynamic]Restore_Node, context.temp_allocator)
+	// the subtree at v as nodes (pre-order: a node before its children), its index; -1: not a tree
+	node :: proc(v: json.Value, nodes: ^[dynamic]Restore_Node) -> int {
+		o, is := v.(json.Object)
+		if !is || len(nodes) >= 2 * PANES_MAX - 1 do return -1
+		if pv, leaf := o["pane"]; leaf {
+			n, nok := pv.(json.Integer)
+			if !nok || n < 0 || n >= PANES_MAX || "split" in o do return -1
+			append(nodes, Restore_Node{leaf = true, pane = int(n)})
+			return len(nodes) - 1
+		}
+		dir: Split_Dir
+		switch d, _ := o["split"].(json.String); d {
+		case "right": dir = .Right
+		case "down":  dir = .Down
+		case:         return -1
+		}
+		ratio, rok := num_of(o, "ratio")
+		if !rok || ratio != ratio do return -1
+		i := len(nodes)
+		append(nodes, Restore_Node{dir = dir, ratio = clamp(ratio, RATIO_MIN, 1 - RATIO_MIN)})
+		a := node(o["a"], nodes)
+		if a < 0 do return -1
+		b := node(o["b"], nodes)
+		if b < 0 do return -1
+		nodes[i].a, nodes[i].b = a, b
+		return i
+	}
+	if node(o["tree"], &nodes) != 0 do return
+	n := 0
+	for x in nodes do if x.leaf do n += 1
+	if n <= 1 || n > PANES_MAX do return
+	seen := make([]bool, n, context.temp_allocator)
+	for x in nodes do if x.leaf {
+		if x.pane >= n || seen[x.pane] do return
+		seen[x.pane] = true
+	}
+	layout = {nodes = nodes[:], panes = n}
+	if f, fok := o["focused"].(json.Integer); fok && f >= 0 && f < i64(n) do layout.focused = int(f)
+	else {
+		at := 0
+		for !nodes[at].leaf do at = nodes[at].a
+		layout.focused = nodes[at].pane
+	}
+	tp, _ := o["tab_pane"].(json.Array)
+	for x, j in tp {
+		if j >= ntabs do break
+		if p, pok := x.(json.Integer); pok && p >= 0 && p < i64(n) do tab_pane[j] = int(p)
+	}
+	act, _ := o["active"].(json.Array)
+	for x, k in act {
+		if k >= n do break
+		if j, jok := x.(json.Integer); jok && j >= 0 && j < i64(ntabs) && tab_pane[j] == k do pane_active[j] = true
+	}
+	return
 }
 
 // The project with this cwd, listed if the scan did not find it: not as added by hand (the

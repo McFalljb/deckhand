@@ -221,10 +221,9 @@ panes_saved_round_trip :: proc(t: ^testing.T) {
 	pi_pane := s.tabs[0].pane
 	r = run_command(Split_Pane{pane = pi_pane, direction = .Down, tab_id = sh3})
 	testing.expect(t, r.ok, r.error)
-	// the ratios set directly: set_split reads the laid-out split from Clay (pane_ratio_kept),
-	// which this test process never initialises
-	for n in s.nodes do if !n.leaf && n.dir == .Right do pane_set_ratio(s, n.id, 0.3472)
-	for n in s.nodes do if !n.leaf && n.dir == .Down do pane_set_ratio(s, n.id, 0.62)
+	// set_split before Clay ever ran in this process (no layout to keep the ratio at)
+	for n in s.nodes do if !n.leaf && n.dir == .Right do testing.expect(t, run_command(Set_Split{split = n.id, ratio = 0.3472}).ok)
+	for n in s.nodes do if !n.leaf && n.dir == .Down do testing.expect(t, run_command(Set_Split{split = n.id, ratio = 0.62}).ok)
 	run_command(Focus_Tab{tab_id = sh2}) // pi's pane shows shell 2
 	gen := persist.gen
 	run_command(Focus_Pane{pane = left}) // the left pane has the keyboard
@@ -285,4 +284,37 @@ panes_saved_claude_and_chat :: proc(t: ^testing.T) {
 	s = &state.open_sessions[0]
 	testing.expect_value(t, s.project_id, c.id)
 	testing.expect_value(t, pp_desc(s), "down(0.500 [pi*] @[A*])")
+}
+
+// A Restore_Session built without pane fields (no saved pane: the zero value) puts those tabs,
+// the pi tab too, in the focused pane, not in pane 0.
+@(test)
+panes_saved_unset_pane_is_focused :: proc(t: ^testing.T) {
+	context.allocator = pp_reset()
+	pp_home()
+	rescan_now()
+	nodes := []Restore_Node{{dir = .Right, ratio = 0.5, a = 1, b = 2}, {leaf = true, pane = 0}, {leaf = true, pane = 1}}
+	tabs := []Restore_Tab{{kind = .Shell, title = "A"}, {kind = .Shell, title = "B", pane = 0}}
+	r := run_command(Restore_Session{project_id = state.projects[0].id, pi_session_id = "aaaa-1", tabs = tabs, layout = {nodes = nodes, panes = 2, focused = 1}})
+	testing.expect(t, r.ok, r.error)
+	if s := find_session(r.created_id); s != nil do testing.expect_value(t, pp_desc(s), "right(0.500 [B*] @[pi*,A])")
+}
+
+// The empty-pane sweep ends even when a pane cannot be removed (a pane the tree does not hold):
+// the session check then refuses the session (the restore falls back to one pane).
+@(test)
+panes_saved_drop_empty_ends :: proc(t: ^testing.T) {
+	context.allocator = pp_reset()
+	s := Open_Session{id = 1}
+	defer {
+		delete(s.tabs)
+		session_panes_free(&s)
+	}
+	append(&s.tabs, Tab{id = 10, kind = Pi_Tab{}, title = "pi", pane = 100})
+	append(&s.panes, Pane{id = 100, active = 10}, Pane{id = 200, slot = 1})
+	append(&s.nodes, Layout_Node{id = 100, leaf = true, pane = 100, parent = -1}) // pane 200 in no leaf
+	s.focused_pane = 100
+	panes_drop_empty(&s)
+	testing.expect_value(t, len(s.panes), 2)
+	testing.expect(t, session_check(&s) != "", "refused")
 }

@@ -321,7 +321,7 @@ Restore_Tab :: struct {
 	args:  []string, // Claude tabs: the user's extra flags
 	readonly: bool, // Claude tabs: started with pi-desk's read-only profile (kept: claude.odin)
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
-	pane:  int, // with a layout: its saved pane, an index into the layout's panes (-1 = not known: the focused pane)
+	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
 }
 // A restored session's saved panes (persist.odin panes_parse; restored by restore_panes in
@@ -347,7 +347,7 @@ Restore_Session :: struct {
 	home:          bool, // the Home session (no project, no other tabs; session dir and cwd are pi-desk's)
 	agent:         Session_Agent, // claude: a Claude-only session; pi_session_id is its Claude session id
 	layout:        Restore_Layout, // its panes ({}: one pane)
-	pi_pane:       int, // with a layout: the pi tab's saved pane (-1 = not known); a Claude-only session's main tab is tabs[0]
+	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
 	pi_active:     bool, // with a layout: the pi tab was its pane's shown tab
 }
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
@@ -1611,14 +1611,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 // The saved tabs of a restored session, after what it has (Restore_Session), not started; then
 // its saved panes (layout: restore_panes, panes_restore.odin), the tabs it had already (the pi
 // tab) in pane `pi_pane`. Tabs that do not come back (restore_tab) leave their panes' places.
-restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab, layout: Restore_Layout = {}, pi_pane := -1, pi_active := false) {
+restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab, layout: Restore_Layout = {}, pi_pane: Maybe(int) = nil, pi_active := false) {
 	session_panes_init(s) // one pane (a Claude-only session's: empty until its main tab)
 	places := make([dynamic]Restore_Place, context.temp_allocator)
-	for t in s.tabs do append(&places, Restore_Place{tab = t.id, pane = pi_pane, active = pi_active})
+	for t in s.tabs do append(&places, Restore_Place{tab = t.id, pane = pi_pane.? or_else -1, active = pi_active})
 	for rt in tabs {
 		added := restore_tab(s, rt)
 		if added == 0 do continue
-		append(&places, Restore_Place{tab = added, pane = rt.pane, active = rt.pane_active})
+		append(&places, Restore_Place{tab = added, pane = rt.pane.? or_else -1, active = rt.pane_active})
 		if rt.active do session_show_tab(s, added)
 	}
 	restore_panes(s, layout, places[:])

@@ -89,12 +89,7 @@ restore_panes :: proc(s: ^Open_Session, layout: Restore_Layout, places: []Restor
 	s.focused_pane = focus
 	clear(&s.pane_mru)
 	append(&s.pane_mru, focus)
-	for {
-		empty: u64
-		for p in s.panes do if pane_tab_count(s, p.id) == 0 do empty = p.id
-		if empty == 0 || len(s.panes) <= 1 do break
-		pane_remove(s, empty)
-	}
+	panes_drop_empty(s)
 	// leaf order and slots
 	order := pane_leaf_order(s)
 	sorted := make([dynamic]Pane, 0, len(s.panes))
@@ -115,5 +110,18 @@ restore_panes :: proc(s: ^Open_Session, layout: Restore_Layout, places: []Restor
 		session_panes_free(s)
 		s.active_tab = one_pane_active
 		session_panes_init(s)
+	}
+}
+
+// Removes s's panes that hold no tab (pane_remove: the tree closes over each), never the last;
+// stops at one pane_remove cannot take.
+panes_drop_empty :: proc(s: ^Open_Session) {
+	for {
+		empty: u64
+		for p in s.panes do if pane_tab_count(s, p.id) == 0 do empty = p.id
+		if empty == 0 || len(s.panes) <= 1 do break
+		n := len(s.panes)
+		pane_remove(s, empty)
+		if len(s.panes) == n do break // not removable (not in the tree): session_check refuses s
 	}
 }

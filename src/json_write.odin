@@ -604,18 +604,20 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 			kv_str(&o, "cwd", t.cwd)
 			if t.active do kv_bool(&o, "active", true)
 			if len(c.layout.nodes) > 0 {
-				key(&o, "pane") // its saved pane (-1: not known)
-				strings.write_int(w.b, t.pane)
+				if pn, ok := t.pane.?; ok { // its saved pane (left out: not known)
+					key(&o, "pane")
+					strings.write_int(w.b, pn)
+				}
 				if t.pane_active do kv_bool(&o, "pane_active", true)
 			}
 			obj_end(&o)
 		}
 		strings.write_byte(w.b, ']')
 		if len(c.layout.nodes) > 0 {
-			// the saved panes (persist.odin panes_parse): the tree in pre-order, the pi tab's pane (-1: not known)
-			if c.agent != .Claude {
+			// the saved panes (persist.odin panes_parse): the tree in pre-order, the pi tab's pane (left out: not known)
+			if pn, ok := c.pi_pane.?; ok && c.agent != .Claude {
 				key(&w, "pi_pane")
-				strings.write_int(w.b, c.pi_pane)
+				strings.write_int(w.b, pn)
 			}
 			key(&w, "panes")
 			lo := obj_begin(w.b)

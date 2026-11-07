@@ -767,25 +767,26 @@ workspace_restore :: proc(text: string) -> string {
 		saved_tabs, _ := so["tabs"].(json.Array)
 		// the saved panes: by the saved tab's place, before dropped tabs shift the places (panes_parse)
 		layout, tab_pane, pane_active := panes_parse(so["panes"], len(saved_tabs))
-		pi_pane, pi_active := -1, false
+		pi_pane: Maybe(int)
+		pi_active := false
 		for tv, j in saved_tabs {
 			to, _ := tv.(json.Object)
 			kind, _ := to["kind"].(json.String)
-			if j == 0 && kind == "pi" do pi_pane, pi_active = tab_pane[0], pane_active[0]
+			if j == 0 && kind == "pi" do pi_pane, pi_active = known(tab_pane[0]), pane_active[0]
 			if kind == "editor" {
 				// a file tab: reopens when its session starts (unsaved edits are not kept)
-				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Editor, cwd = path, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
+				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Editor, cwd = path, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "markdown" {
-				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Markdown, cwd = path, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
+				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Markdown, cwd = path, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "browser" {
 				// a web page (browser_nav.odin): its URL (in cwd), loaded once its session is focused
 				url, _ := to["url"].(json.String)
 				title, _ := to["title"].(json.String)
-				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
+				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 				continue
 			}
 			if kind == "claude" {
@@ -796,13 +797,13 @@ workspace_restore :: proc(text: string) -> string {
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				ro, _ := to["readonly"].(json.Boolean)
 				acct, _ := to["account"].(json.String)
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
 			title, _ := to["title"].(json.String)
 			cwd, _ := to["cwd"].(json.String)
-			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = tab_pane[j], pane_active = pane_active[j]})
+			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
 		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active})
@@ -994,6 +995,10 @@ panes_parse :: proc(v: json.Value, ntabs: int) -> (layout: Restore_Layout, tab_p
 	}
 	return
 }
+
+// A saved pane from panes_parse (-1: not known) as Restore_Tab.pane / Restore_Session.pi_pane.
+@(private = "file")
+known :: proc(pane: int) -> Maybe(int) {return pane >= 0 ? pane : nil}
 
 // The project with this cwd, listed if the scan did not find it: not as added by hand (the
 // saved "added" says that) and not selected (the saved selection is restored after).

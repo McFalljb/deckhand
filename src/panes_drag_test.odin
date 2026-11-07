@@ -362,3 +362,46 @@ tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
 	_ = ui_layout(1400, 860)
 	testing.expect_value(t, tab_drag.tab, u64(0))
 }
+
+// Through event() (P4's pointer routing beside it): a press on a tab in A's strip arms the drag;
+// held moves over B's app are the drag's (the app hears nothing, the pointer's pane stays A's, no
+// leave fires); the release over B's middle moves the tab there.
+@(test)
+tab_drag_owns_the_pointer_in_event :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	defer tab_drag = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	session_show_tab(x.s, x.app_id)
+	apps[x.app_id].inspect = true
+	for _ in 0 ..< 3 {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(x.s)
+	}
+	tb := clay.GetElementData(clay.ID("tab", 1)).boundingBox // the shell, in A's strip
+	pb := session_pane(x.s, x.b)
+	cx, cy := pb.rect.x + pb.rect.z / 2, pb.rect.y + pb.rect.w / 2
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = tb.x + tb.width / 2, mouse_y = tb.y + tb.height / 2}
+	event(&e)
+	e = {type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = tb.x + tb.width / 2, mouse_y = tb.y + tb.height / 2}
+	event(&e)
+	testing.expect_value(t, tab_drag.tab, x.shell)
+	testing.expect_value(t, pointer_pane, x.a)
+	for i in 1 ..= 4 {
+		f := f32(i) / 4
+		e = {type = .MOUSE_MOVE, modifiers = sapp.MODIFIER_LMB, mouse_x = tb.x + (cx - tb.x) * f, mouse_y = tb.y + (cy - tb.y) * f}
+		event(&e)
+	}
+	testing.expect(t, tab_dragging(), "a drag")
+	testing.expect(t, !apps[x.app_id].hin, "B's app heard no move")
+	testing.expect_value(t, pointer_pane, x.a)
+	testing.expect(t, tab_drag.drop.kind == .Centre && tab_drag.drop.pane == x.b, "B's middle")
+	e = {type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = cx, mouse_y = cy}
+	event(&e)
+	testing.expect_value(t, pane_of_tab(x.s, x.shell).id, x.b)
+	testing.expect_value(t, tab_drag.tab, u64(0))
+	testing.expect_value(t, pointer_capture.pane, u64(0))
+}

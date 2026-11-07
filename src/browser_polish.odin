@@ -1393,9 +1393,9 @@ browser_polish_tick :: proc() {
 		}
 		page_zoom_to_annot(id, p.zoom_level)
 	}
-	// the find field and the prompt field belong to the tab they were opened on
-	if state.focus_widget == "browser_find" && (on_screen == nil || on_screen.tab_id != page_find_tab) do ui_do(Set_Focus{""})
-	if state.focus_widget == "browser_prompt" && (on_screen == nil || on_screen.tab_id != page_prompt_tab) do ui_do(Set_Focus{""})
+	// the find field and the prompt field belong to the tab they were opened on, while it has the keyboard (panes.odin)
+	if state.focus_widget == "browser_find" && !tab_focused(page_find_tab) do ui_do(Set_Focus{""})
+	if state.focus_widget == "browser_prompt" && !tab_focused(page_prompt_tab) do ui_do(Set_Focus{""})
 	// the find field searches as it is typed
 	if state.focus_widget == "browser_find" && on_screen != nil {
 		p := page_extra(on_screen.tab_id)

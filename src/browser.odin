@@ -144,8 +144,8 @@ browser_tab_open :: proc(session: u64, url: string, background := false) -> (id:
 	title := url == "about:blank" ? "New tab" : "Browser"
 	// State never holds a user name or password (browser_url_public); the page gets the URL as given
 	tab := Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(browser_url_public(url))}, title = strings.clone(title), status = .Running}
-	append(&cs.tabs, tab)
-	if !background do cs.active_tab = tab.id
+	pane_add_tab(cs, tab)
+	if !background do session_show_tab(cs, tab.id)
 	browser_attach(tab.id, url)
 	return tab.id, ""
 }
@@ -563,8 +563,7 @@ browser_tick :: proc() {
 		hidden := b != on_screen
 		// a popup's browser is not there until CEF made it (on_after_created)
 		if b.cef == 0 || pd_cef_ready(b.cef) == 0 do continue
-		// the page has pi-desk's keyboard while on screen and no widget has it
-		focused := !hidden && state.focus_widget == ""
+		focused := browser_wants_keys(b)
 		if focused != b.focused {
 			if !focused do release_input(b) // before it hides: held keys and buttons are let go
 			b.focused = focused
@@ -585,6 +584,12 @@ browser_tick :: proc() {
 			pd_cef_resize(b.cef, vw, vh, app.dpi)
 		}
 	}
+}
+
+// The page has Deckhand's keyboard: its tab is the focused one (panes.odin) and no widget has
+// the keyboard.
+browser_wants_keys :: proc(b: ^Browser) -> bool {
+	return tab_focused(b.tab_id) && state.focus_widget == ""
 }
 
 BROWSER_WAIT_MESSAGE :: "Too many open pages: this one opens when another closes"

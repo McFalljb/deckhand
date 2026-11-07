@@ -922,9 +922,9 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		delete(tab.cwd)
 		return fail("could not start Claude Code"), false
 	}
-	append(&s.tabs, tab)
+	pane_add_tab(s, tab)
 	if focus {
-		s.active_tab = tab.id
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 	}
 	if resume != "" {
@@ -953,10 +953,11 @@ claude_open_session :: proc(p: ^Project, cwd, resume: string, args: []string, ca
 		delete(s.cwd)
 		delete(s.pi_session_id)
 		delete(s.tabs)
+		session_panes_free(s)
 		pop(&state.open_sessions)
 		return r, false
 	}
-	s.active_tab = r.created_id
+	session_show_tab(s, r.created_id)
 	return {ok = true, created_id = id}, true
 }
 
@@ -989,7 +990,7 @@ claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs)
 	s.id = new_id()
-	if s.active_tab == 0 do s.active_tab = s.tabs[0].id
+	if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
 	append(&state.open_sessions, s)
 	return {ok = true, created_id = s.id}, true
 }

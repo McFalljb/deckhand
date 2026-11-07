@@ -1,0 +1,535 @@
+package main
+
+// Panes (panes.odin; docs/plans/split-panes.md): the layout tree's pure operations, and a
+// session split in two built directly in State (no UI, no commands that split: those come with
+// the plan's P2), to check that every focused accessor means the focused pane's tab, that "on
+// screen" means any pane's, and that the bell, the keyboard's targets, the tab keys and a close
+// pick the right tab. Every command any unit test runs is followed by session_check
+// (after_command_check, set below). Same rules as core_test.odin: shared global State, one
+// thread.
+
+import "base:runtime"
+import "core:fmt"
+import "core:log"
+import "core:os"
+import "core:reflect"
+import "core:strings"
+import "core:testing"
+import clay "../build/clay-odin"
+
+// Every unit test's commands keep every session's panes whole.
+@(init)
+pt_check_every_command :: proc "contextless" () {
+	after_command_check = proc(cmd: Command) {
+		for &s in state.open_sessions {
+			if why := session_check(&s); why != "" do log.errorf("panes broken after %v: session %d: %s", reflect.union_variant_typeid(cmd), s.id, why)
+		}
+	}
+}
+
+@(private = "file")
+pt_active: bool
+
+// One session in State with a pane: its pi tab and n shells (not started). Current.
+@(private = "file")
+pt_one :: proc(n: int) -> ^Open_Session {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	pt_active = true
+	platform = {window_active = proc() -> bool {return pt_active}}
+	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-pt"), cwd = "/tmp/pt"}
+	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started})
+	for i in 0 ..< n do append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, title = fmt.aprintf("shell %d", i + 1), status = .Not_Started})
+	s.active_tab = s.tabs[0].id
+	session_panes_init(&s)
+	append(&state.open_sessions, s)
+	state.current_session = s.id
+	return &state.open_sessions[0]
+}
+
+// The fixture of the plan: pane A (left) holds the pi tab and a shell, pane B (right) an editor,
+// a browser and an app tab; B is focused and shows the browser, A shows the shell. Built as a
+// State literal, with stand-in runtime objects (never started) for the lookups.
+@(private = "file")
+Two :: struct {
+	s:                                  ^Open_Session,
+	a, b:                               u64, // panes
+	pi, shell, editor, browser, app_id: u64, // tabs
+	term:                               ^Term,
+}
+
+@(private = "file")
+pt_two :: proc() -> Two {
+	context.allocator = runtime.heap_allocator()
+	inbox_drain()
+	state = State{}
+	pt_active = true
+	platform = {window_active = proc() -> bool {return pt_active}}
+	x: Two
+	x.a, x.b = new_id(), new_id()
+	split := new_id()
+	x.pi, x.shell, x.editor, x.browser, x.app_id = new_id(), new_id(), new_id(), new_id(), new_id()
+	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-two"), cwd = "/tmp/pt"}
+	append(&s.tabs, Tab{id = x.pi, kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle, pane = x.a})
+	append(&s.tabs, Tab{id = x.shell, kind = Shell_Tab{}, title = "shell 1", status = .Running, pane = x.a})
+	append(&s.tabs, Tab{id = x.editor, kind = Editor_Tab{path = "/tmp/pt/a.txt"}, title = "a.txt", status = .Running, pane = x.b})
+	append(&s.tabs, Tab{id = x.browser, kind = Browser_Tab{url = "about:blank"}, title = "Browser", status = .Running, pane = x.b})
+	append(&s.tabs, Tab{id = x.app_id, kind = App_Tab{}, title = "app", status = .Running, pane = x.b})
+	append(&s.panes, Pane{id = x.a, active = x.shell, slot = 0}, Pane{id = x.b, active = x.browser, slot = 1})
+	append(&s.nodes, Layout_Node{id = split, dir = .Right, ratio = 0.5, a = 1, b = 2, parent = -1})
+	append(&s.nodes, Layout_Node{id = x.a, leaf = true, pane = x.a, parent = 0}, Layout_Node{id = x.b, leaf = true, pane = x.b, parent = 0})
+	s.root = 0
+	s.focused_pane = x.b
+	append(&s.pane_mru, x.a, x.b)
+	s.active_tab = x.browser
+	append(&state.open_sessions, s)
+	state.current_session = s.id
+	x.s = &state.open_sessions[0]
+	// stand-ins: found by the lookups, never run
+	x.term = new(Term)
+	terms[x.shell] = x.term
+	ed := new(Editor)
+	ed.tab_id = x.editor
+	editors[x.editor] = ed
+	br := new(Browser)
+	br.tab_id = x.browser
+	browsers[x.browser] = br
+	ap := new(App_Proc)
+	ap.tab_id, ap.pid = x.app_id, 1 // "running": app_wants_keys asks
+	apps[x.app_id] = ap
+	app.window_active = true
+	return x
+}
+
+// The stand-ins go (never freed through drop_term: they never started).
+@(private = "file")
+pt_two_done :: proc(x: Two) {
+	delete_key(&terms, x.shell)
+	delete_key(&editors, x.editor)
+	delete_key(&browsers, x.browser)
+	delete_key(&apps, x.app_id)
+	platform = {}
+}
+
+@(private = "file")
+pt_strip_titles :: proc(s: ^Open_Session, pane: u64) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for t in s.tabs do if t.pane == pane {
+		if strings.builder_len(b) > 0 do strings.write_string(&b, ",")
+		strings.write_string(&b, t.title)
+	}
+	return strings.to_string(b)
+}
+
+// ---- the tree ----
+
+@(test)
+panes_one_per_session :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(2)
+	testing.expect_value(t, session_check(s), "")
+	testing.expect_value(t, len(s.panes), 1)
+	testing.expect_value(t, len(s.nodes), 1)
+	for tab in s.tabs do testing.expect_value(t, tab.pane, s.panes[0].id)
+	testing.expect_value(t, s.panes[0].active, s.tabs[0].id)
+	testing.expect_value(t, s.focused_pane, s.panes[0].id)
+	testing.expect_value(t, s.panes[0].slot, 0)
+	// slot 0: exactly today's Clay ids, so scripts and tests keep clicking them
+	p := &s.panes[0]
+	testing.expect_value(t, pid(p, "terminal"), clay.ID("terminal"))
+	testing.expect_value(t, pidi(p, "chrow", 7), clay.ID("chrow", 7))
+	q := Pane{slot = 2}
+	testing.expect(t, pid(&q, "terminal") != pid(p, "terminal"), "another slot: another id")
+	testing.expect(t, pidi(&q, "chrow", 7) != pidi(p, "chrow", 7), "another slot: another row id")
+	// a session with no panes yet (a snapshot, a test's literal) reads as one implicit pane
+	bare := Open_Session{id = new_id()}
+	append(&bare.tabs, Tab{id = new_id(), kind = Pi_Tab{}}, Tab{id = new_id(), kind = Shell_Tab{}})
+	bare.active_tab = bare.tabs[1].id
+	testing.expect_value(t, session_focused_id(&bare), bare.tabs[1].id)
+	testing.expect(t, session_tab_shown(&bare, bare.tabs[1].id) && !session_tab_shown(&bare, bare.tabs[0].id), "its active tab only")
+	testing.expect_value(t, len(pane_strip(&bare, session_focused_pane(&bare))), 2)
+	testing.expect_value(t, session_check(&bare), "")
+	// its first write gives it its pane
+	session_show_tab(&bare, bare.tabs[0].id)
+	testing.expect_value(t, len(bare.panes), 1)
+	testing.expect_value(t, bare.active_tab, bare.tabs[0].id)
+	testing.expect_value(t, session_check(&bare), "")
+}
+
+@(test)
+panes_split_remove_collapse :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(3)
+	a := s.panes[0].id
+	sh1, sh2, sh3 := s.tabs[1].id, s.tabs[2].id, s.tabs[3].id // moves reorder s.tabs: by id
+	// right of a: [a | b]
+	b := pane_split(s, a, .Right)
+	testing.expect(t, b != 0, "split")
+	testing.expect(t, pane_move_tab(s, sh3, b), "a tab into the new pane")
+	testing.expect_value(t, session_check(s), "")
+	testing.expect_value(t, len(s.panes), 2)
+	testing.expect_value(t, pane_leaf_order(s)[0], a)
+	testing.expect_value(t, pane_leaf_order(s)[1], b)
+	testing.expect_value(t, session_pane(s, b).slot, 1)
+	// below b: [a | (b / c)]; left of a, first: [(d | a) | (b / c)]
+	c := pane_split(s, b, .Down)
+	pane_move_tab(s, sh2, c)
+	d := pane_split(s, a, .Right, first = true)
+	pane_move_tab(s, sh1, d)
+	testing.expect_value(t, session_check(s), "")
+	order := pane_leaf_order(s)
+	testing.expect_value(t, len(order), 4)
+	testing.expect(t, order[0] == d && order[1] == a && order[2] == b && order[3] == c, "leaf order d a b c")
+	for p, i in s.panes do testing.expect_value(t, p.slot, i)
+	// neighbours by the tree's geometry
+	testing.expect_value(t, pane_neighbour(s, a, .Left), d)
+	testing.expect_value(t, pane_neighbour(s, a, .Right), b) // b's centre is nearer than c's
+	testing.expect_value(t, pane_neighbour(s, c, .Up), b)
+	testing.expect_value(t, pane_neighbour(s, b, .Down), c)
+	testing.expect_value(t, pane_neighbour(s, d, .Left), 0)
+	// focus c, then b: removing b (its tab moved away) collapses (b / c) into c; focus goes back to c
+	pane_focus(s, c)
+	pane_focus(s, b)
+	testing.expect_value(t, s.active_tab, session_pane(s, b).active)
+	pane_move_tab(s, sh3, a) // b's only tab: b empties and goes
+	testing.expect(t, session_pane(s, b) == nil, "the emptied pane closed")
+	testing.expect_value(t, session_check(s), "")
+	testing.expect_value(t, s.focused_pane, c)
+	testing.expect_value(t, len(s.nodes), 5) // (d | a) | c: two splits, three leaves
+	// close d (unsplit): its tab joins a, which shows it
+	dt := session_pane(s, d).active
+	pane_close(s, d)
+	testing.expect(t, session_pane(s, d) == nil, "closed")
+	testing.expect_value(t, pane_of_tab(s, dt).id, a)
+	testing.expect_value(t, session_pane(s, a).active, dt)
+	testing.expect_value(t, session_check(s), "")
+	// the last pane never goes
+	pane_close(s, c)
+	testing.expect_value(t, len(s.panes), 1)
+	pane_remove(s, s.panes[0].id)
+	pane_close(s, s.panes[0].id)
+	testing.expect_value(t, len(s.panes), 1)
+	testing.expect_value(t, len(s.nodes), 1)
+	testing.expect_value(t, session_check(s), "")
+}
+
+@(test)
+panes_limits_and_rects :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(PANES_MAX + 1)
+	shells := make([]u64, len(s.tabs), context.temp_allocator)
+	for tab, i in s.tabs do shells[i] = tab.id // by id: moves reorder s.tabs
+	for i in 1 ..< PANES_MAX {
+		np := pane_split(s, s.panes[len(s.panes) - 1].id, i % 2 == 0 ? .Right : .Down)
+		testing.expectf(t, np != 0, "split %d", i)
+		pane_move_tab(s, shells[i], np)
+	}
+	testing.expect_value(t, len(s.panes), PANES_MAX)
+	testing.expect_value(t, pane_split(s, s.panes[0].id, .Right), 0) // at most PANES_MAX
+	testing.expect_value(t, session_check(s), "")
+	// Home is never split
+	h := Open_Session{id = new_id(), home = true}
+	append(&h.tabs, Tab{id = new_id(), kind = Pi_Tab{}})
+	session_panes_init(&h)
+	testing.expect_value(t, pane_split(&h, h.panes[0].id, .Right), 0)
+	// rects: [a | b] in 1000×600 with a 2 px divider, then a ratio past the minimum is held at it
+	s2 := pt_one(1)
+	a := s2.panes[0].id
+	b := pane_split(s2, a, .Right)
+	pane_move_tab(s2, s2.tabs[1].id, b)
+	split := s2.nodes[s2.root].id
+	rs := pane_rects(s2, {10, 20, 1000, 600}, 2, 240, 140)
+	testing.expect_value(t, len(rs), 2)
+	testing.expect_value(t, rs[0].rect, [4]f32{10, 20, 499, 600})
+	testing.expect_value(t, rs[1].rect, [4]f32{511, 20, 499, 600})
+	testing.expect(t, pane_set_ratio(s2, split, 0.1), "set")
+	rs = pane_rects(s2, {0, 0, 1000, 600}, 2, 240, 140)
+	testing.expect_value(t, rs[0].rect.z, 240) // a's minimum
+	testing.expect_value(t, rs[1].rect.z, 758)
+	// a ratio is kept in [RATIO_MIN, 1 - RATIO_MIN]
+	pane_set_ratio(s2, split, 2)
+	testing.expect_value(t, s2.nodes[s2.root].ratio, 1 - RATIO_MIN)
+	testing.expect(t, !pane_set_ratio(s2, 12345, 0.5), "no such split")
+	// too small for both minimums: squeezed by the ratio, never hidden
+	pane_set_ratio(s2, split, 0.5)
+	rs = pane_rects(s2, {0, 0, 300, 600}, 0, 240, 140)
+	testing.expect_value(t, rs[0].rect.z, 150)
+	testing.expect_value(t, rs[1].rect.z, 150)
+	testing.expect_value(t, session_check(s2), "")
+}
+
+// The pi tab is tabs[0] whatever moves: another tab never lands before it, and it changes only
+// its pane, never its place.
+@(test)
+panes_main_tab_stays_first :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(3)
+	pi := s.tabs[0].id
+	a := s.panes[0].id
+	sh1, sh2, sh3 := s.tabs[1].id, s.tabs[2].id, s.tabs[3].id
+	// reorder within the pane: to strip position 0 (before the pi tab) lands right after it
+	testing.expect(t, pane_move_tab(s, sh3, a, 0), "reorder")
+	testing.expect_value(t, s.tabs[0].id, pi)
+	testing.expect_value(t, s.tabs[1].id, sh3)
+	testing.expect_value(t, pt_strip_titles(s, a), "pi,shell 3,shell 1,shell 2")
+	// into the pi tab's pane at index 0, from another pane: after the pi tab too
+	b := pane_split(s, a, .Right)
+	pane_move_tab(s, sh1, b)
+	testing.expect_value(t, pt_strip_titles(s, b), "shell 1")
+	pane_move_tab(s, sh2, b) // shell 2 too, so b stays when shell 1 leaves
+	pane_move_tab(s, sh1, a, 0)
+	testing.expect_value(t, s.tabs[0].id, pi)
+	testing.expect_value(t, pt_strip_titles(s, a), "pi,shell 1,shell 3")
+	// the pi tab itself moves to b: its pane changes, it stays tabs[0]
+	pane_move_tab(s, pi, b, 1)
+	testing.expect_value(t, s.tabs[0].id, pi)
+	testing.expect_value(t, s.tabs[0].pane, b)
+	testing.expect_value(t, session_pane(s, b).active, pi)
+	// a new tab never goes before it either
+	nt := pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = "late"}, pane = b, after = 0)
+	testing.expect(t, nt != nil && s.tabs[0].id == pi, "appended")
+	testing.expect_value(t, session_check(s), "")
+}
+
+// ---- a session split in two ----
+
+// Every focused accessor means pane B's tab; "on screen" means either pane's.
+@(test)
+panes_accessors_mean_the_focused_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	testing.expect_value(t, session_check(x.s), "")
+	testing.expect_value(t, active_tab().id, x.browser)
+	testing.expect_value(t, key_tab().id, x.browser)
+	testing.expect(t, key_term() == nil && active_term() == nil, "B shows no terminal")
+	testing.expect(t, tab_browser() == browsers[x.browser], "B's browser")
+	testing.expect(t, tab_editor() == nil && tab_app() == nil, "nothing else of B's")
+	testing.expect_value(t, focused_pane().id, x.b)
+	// B shows its editor, then its app
+	session_show_tab(x.s, x.editor)
+	testing.expect(t, tab_editor() == editors[x.editor] && active_editor() == editors[x.editor], "B's editor")
+	testing.expect(t, tab_browser() == nil, "not the hidden browser")
+	session_show_tab(x.s, x.app_id)
+	testing.expect(t, tab_app() == apps[x.app_id], "B's app")
+	testing.expect_value(t, x.s.active_tab, x.app_id) // the mirror
+	// on screen: both panes' active tabs; focused: B's only
+	testing.expect(t, tab_on_screen(x.shell) && tab_on_screen(x.app_id), "both actives on screen")
+	testing.expect(t, !tab_on_screen(x.pi) && !tab_on_screen(x.editor) && !tab_on_screen(x.browser), "hidden tabs are not")
+	testing.expect(t, tab_focused(x.app_id) && !tab_focused(x.shell), "B's is focused, A's is not")
+	// another session current: none of them
+	state.current_session = 0
+	testing.expect(t, !tab_on_screen(x.shell) && !tab_focused(x.app_id), "not on screen")
+	state.current_session = x.s.id
+	// A gets the keyboard: its shell's terminal is key_term now
+	session_show_tab(x.s, x.shell)
+	testing.expect(t, key_term() == x.term && active_term() == x.term, "A's terminal")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, x.s.active_tab, x.shell)
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.app_id) // B still shows its app
+	testing.expect_value(t, session_check(x.s), "")
+	// the bars and handlers' pane lookups (pane_shown and friends) follow the pane given, not the focus
+	b := session_pane(x.s, x.b)
+	testing.expect(t, pane_app(b) == apps[x.app_id] && pane_term(b) == nil, "B's app")
+	testing.expect(t, pane_term(session_pane(x.s, x.a)) == x.term, "A's terminal")
+}
+
+// The bell and unread: a tab visible in an unfocused pane counts as seen (the user's answer to
+// the plan's Q7).
+@(test)
+panes_bell_counts_every_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	// A shows its pi tab, B (focused) its editor
+	session_show_tab(x.s, x.pi, focus = false)
+	session_show_tab(x.s, x.editor)
+	testing.expect_value(t, focused_pane().id, x.b)
+	testing.expect(t, status_on_screen(x.s, x.pi), "pi shown in the unfocused pane: on screen")
+	testing.expect(t, status_on_screen(x.s, x.editor), "the focused tab: on screen")
+	testing.expect(t, !status_on_screen(x.s, x.browser), "a hidden tab is not")
+	testing.expect(t, notify_on_screen(x.s.id), "the session's pi tab is shown: its bell entries are seen")
+	pt_active = false
+	testing.expect(t, !status_on_screen(x.s, x.pi) && !notify_on_screen(x.s.id), "window behind: nothing seen")
+	pt_active = true
+	// seen: every pane's shown tab, not the hidden ones
+	for &tab in x.s.tabs do tab.unseen = true
+	ids := status_wants_seen()
+	testing.expect_value(t, len(ids), 2)
+	status_seen(x.s)
+	for tab in x.s.tabs {
+		shown := tab.id == x.pi || tab.id == x.editor
+		testing.expectf(t, tab.unseen != shown, "%s: unseen %v", tab.title, tab.unseen)
+	}
+	// a pi tab only hidden in its pane: not on screen, the bell takes its entries
+	session_show_tab(x.s, x.shell, focus = false)
+	testing.expect(t, !notify_on_screen(x.s.id), "pi hidden behind the shell")
+	// a pi run that ends while shown in the unfocused pane is not unseen
+	session_show_tab(x.s, x.pi, focus = false)
+	run_command(Pi_Status_Update{tab_id = x.pi, agent = .Working}, {kind = .Panel, tab_id = x.pi})
+	run_command(Pi_Status_Update{tab_id = x.pi, agent = .Idle}, {kind = .Panel, tab_id = x.pi})
+	_, pt, _ := find_tab(x.pi)
+	testing.expect(t, !pt.unseen, "seen in pane A")
+	testing.expect_value(t, len(state.notices.items), 0)
+}
+
+// The keyboard's targets: the page and the app get keys only while their tab is the focused one.
+@(test)
+panes_keyboard_targets :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	br, ap := browsers[x.browser], apps[x.app_id]
+	testing.expect(t, browser_wants_keys(br), "B's page has the keyboard")
+	testing.expect(t, !app_wants_keys(ap), "the hidden app has not")
+	session_show_tab(x.s, x.app_id)
+	testing.expect(t, app_wants_keys(ap) && !browser_wants_keys(br), "B's app now")
+	// B's app on screen but A focused: no keys for it
+	session_show_tab(x.s, x.shell)
+	testing.expect(t, tab_on_screen(x.app_id), "still on screen")
+	testing.expect(t, !app_wants_keys(ap), "not focused: no keys")
+	session_show_tab(x.s, x.app_id)
+	state.focus_widget = "palette"
+	testing.expect(t, !app_wants_keys(ap), "a widget has the keyboard")
+	state.focus_widget = ""
+	// the URL field belongs to its tab while that tab is focused
+	session_show_tab(x.s, x.browser)
+	state.focus_widget = "browser_url"
+	browser_url_tab = x.browser
+	testing.expect(t, !browser_url_check(), "kept on its own focused tab")
+	session_show_tab(x.s, x.shell) // A focused: the field lets go
+	testing.expect(t, browser_url_check(), "dropped")
+	inbox_drain()
+	state.focus_widget = ""
+	browser_url_tab = 0
+}
+
+// ⌘1–9, ⇧⌘[ ] and ⌘W act in the focused pane.
+@(test)
+panes_tab_keys_in_the_focused_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	first := func_focus(tab_nth(0))
+	testing.expect_value(t, first, x.editor) // B's first, not the session's (the pi tab)
+	testing.expect_value(t, func_focus(tab_nth(2)), x.app_id)
+	_, ok := tab_nth(3)
+	testing.expect(t, !ok, "B has three tabs")
+	testing.expect_value(t, func_focus(tab_step(1)), x.app_id)
+	testing.expect_value(t, func_focus(tab_step(-1)), x.editor)
+	session_show_tab(x.s, x.app_id)
+	testing.expect_value(t, func_focus(tab_step(1)), x.editor) // wraps within B
+	// ⌘W: B's tab
+	for a in ACTIONS do if a.id == "close_tab" {
+		cmd, ok2 := a.make()
+		ct, is := cmd.(Close_Tab)
+		testing.expect(t, ok2 && is && ct.tab_id == x.app_id, "closes B's tab")
+	}
+	// A focused: its strip
+	session_show_tab(x.s, x.shell)
+	testing.expect_value(t, func_focus(tab_nth(0)), x.pi)
+	testing.expect_value(t, func_focus(tab_step(1)), x.pi)
+}
+
+@(private = "file")
+func_focus :: proc(cmd: Command, ok: bool) -> u64 {
+	if !ok do return 0
+	f, is := cmd.(Focus_Tab)
+	return is ? f.tab_id : 0
+}
+
+// A closed tab hands over within its pane; the last tab of a pane closes it; focus_tab focuses
+// the tab's pane.
+@(test)
+panes_close_hands_over_within_the_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	// no runtime for the closes below (the stand-ins are not real ones to free)
+	pt_two_done(x)
+	platform = {window_active = proc() -> bool {return pt_active}}
+	// B shows its browser (the middle one): its next tab, the app, takes over; A keeps its shell
+	r := run_command(Close_Tab{tab_id = x.browser}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.app_id)
+	testing.expect_value(t, session_pane(x.s, x.a).active, x.shell)
+	testing.expect_value(t, x.s.active_tab, x.app_id)
+	// the last tab of B: the one before it
+	run_command(Close_Tab{tab_id = x.app_id}, {kind = .UI})
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.editor)
+	// focus_tab on A's pi tab focuses A
+	testing.expect(t, run_command(Focus_Tab{tab_id = x.pi}, {kind = .UI}).ok, "focus")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, x.s.active_tab, x.pi)
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.editor)
+	// closing a tab hidden in an unfocused pane changes nothing shown
+	run_command(Close_Tab{tab_id = x.shell}, {kind = .UI})
+	testing.expect_value(t, session_pane(x.s, x.a).active, x.pi)
+	// B's only tab, closed while B is not focused: B goes, A stays focused
+	run_command(Close_Tab{tab_id = x.editor}, {kind = .UI})
+	testing.expect(t, session_pane(x.s, x.b) == nil, "the emptied pane closed")
+	testing.expect_value(t, len(x.s.panes), 1)
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, session_check(x.s), "")
+	// and when the focused pane empties, focus goes to the pane focused before it
+	b := pane_split(x.s, x.a, .Right)
+	tab := pane_add_tab(x.s, Tab{id = new_id(), kind = Editor_Tab{path = "/tmp/pt/b.txt"}, title = "b.txt", status = .Running}, pane = b)
+	session_show_tab(x.s, tab.id)
+	testing.expect_value(t, x.s.focused_pane, b)
+	run_command(Close_Tab{tab_id = tab.id}, {kind = .UI})
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	testing.expect_value(t, x.s.active_tab, x.pi)
+	testing.expect_value(t, session_check(x.s), "")
+}
+
+// An agent's open goes behind: into its own pane (after its tab), never shown, never focused,
+// whichever pane the user looks at.
+@(test)
+panes_background_open_leaves_panes_alone :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	pt_two_done(x)
+	platform = {window_active = proc() -> bool {return pt_active}}
+	dir := fmt.aprintf("%s/pt-show-%d", os.get_env("TMPDIR", context.temp_allocator), os.get_pid())
+	os.make_directory_all(dir)
+	defer os.remove_all(dir)
+	_ = os.write_entire_file(fmt.tprintf("%s/notes.txt", dir), transmute([]u8)string("one\ntwo\n"))
+	append(&state.projects, Project{id = new_id(), cwd = fs_real(dir)})
+	x.s.cwd = fs_real(dir)
+	x.s.project_id = state.projects[0].id
+	r := run_command(Show_File{path = "notes.txt"}, {kind = .Panel, tab_id = x.pi}) // pi, in pane A
+	testing.expectf(t, r.ok, "shown: %s", r.error)
+	_, tab, i := find_tab(r.created_id)
+	testing.expect(t, tab != nil && tab.pane == x.a, "in the agent's pane")
+	testing.expect_value(t, i, 1) // right after the pi tab
+	testing.expect_value(t, session_pane(x.s, x.a).active, x.shell) // A's view unchanged
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.browser)
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect_value(t, x.s.active_tab, x.browser)
+	testing.expect_value(t, session_check(x.s), "")
+	run_command(Close_Tab{tab_id = r.created_id}, {kind = .Internal})
+	// the user's open of the same kind comes to the front in the focused pane
+	r2 := run_command(Open_File{path = fmt.tprintf("%s/notes.txt", dir), session = x.s.id}, {kind = .UI})
+	testing.expectf(t, r2.ok, "opened: %s", r2.error)
+	testing.expect_value(t, pane_of_tab(x.s, r2.created_id).id, x.b)
+	testing.expect_value(t, x.s.active_tab, r2.created_id)
+	run_command(Close_Tab{tab_id = r2.created_id}, {kind = .Internal})
+}
+
+// A drag ends when its tab leaves the screen, not when another pane gets the focus.
+@(test)
+panes_drags_follow_the_screen :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	session_show_tab(x.s, x.shell)
+	drags_follow_focus()
+	testing.expect_value(t, app.drag_tab, x.shell)
+	x.term.mouse_down = true
+	session_show_tab(x.s, x.browser) // B focused: A's shell is still on screen
+	drags_follow_focus()
+	testing.expect(t, x.term.mouse_down, "kept: still on screen")
+	session_show_tab(x.s, x.pi) // A shows its pi tab: the shell left the screen
+	drags_follow_focus()
+	testing.expect(t, !x.term.mouse_down, "ended")
+}

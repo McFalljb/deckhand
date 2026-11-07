@@ -306,15 +306,17 @@ frame :: proc "c" () {
 	platform_frame_drawn()
 }
 
-// A drag belongs to the tab it started in: when the tab on screen changes
-// (a tab or session switch from a key, a click or a command), drags in
-// progress end, so a release that lands elsewhere cannot leave one going.
+// A drag belongs to the tab it started in: when the focused tab changes (a
+// tab or session switch from a key, a click or a command), drags in tabs
+// that left the screen end, so a release that lands elsewhere cannot leave
+// one going. A tab still on screen (another pane's: panes.odin) keeps its
+// drag.
 drags_follow_focus :: proc() {
 	id: u64
 	if tab := active_tab(); tab != nil do id = tab.id
 	if id == app.drag_tab do return
 	app.drag_tab = id
-	for _, x in terms do term_cancel_drag(x)
+	for tab_id, x in terms do if !tab_on_screen(tab_id) do term_cancel_drag(x)
 }
 
 over_sidebar :: proc(x: f32) -> bool {
@@ -503,8 +505,7 @@ event :: proc(e: ^sapp.Event) {
 				if e.modifiers & sapp.MODIFIER_ALT != 0 do ui_do(Set_Layout{right_open = !state.layout.right_open})
 				else do ui_do(Set_Layout{left_open = !state.layout.left_open})
 			case ._1 ..= ._9:
-				i := int(e.key_code) - int(sapp.Keycode._1)
-				if cs != nil && i < len(cs.tabs) do ui_do(Focus_Tab{cs.tabs[i].id})
+				if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
 			case .BACKSPACE, .LEFT, .RIGHT: // ⌘⌫ ⌘← ⌘→ alone: line editing (term.odin, mac_key_text)
 				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" {
 					claude_note_typed(ktab)
@@ -627,7 +628,7 @@ event :: proc(e: ^sapp.Event) {
 		app.window_active = true
 		// the session on screen is seen now: its bell entries are read
 		if notify_wants_seen(state.current_session) do inbox_submit(Notifications_Mark_Read{session = state.current_session}, {kind = .Internal})
-		if id := status_wants_seen(); id != 0 do inbox_submit(Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
+		for id in status_wants_seen() do inbox_submit(Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
 		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false

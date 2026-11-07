@@ -1477,7 +1477,7 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 		for &tab in s.tabs {
 			mt, is := tab.kind.(Markdown_Tab)
 			if !is || fs_real(mt.path) != rp do continue
-			s.active_tab = tab.id
+			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
 			if v := md_view_of(tab.id); v != nil && c.anchor != "" {
 				delete(v.want)
@@ -1489,8 +1489,8 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 		tab := Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(p)}, title = strings.clone(filepath.base(p)), status = .Running}
 		v := md_view_new(tab.id, p)
 		if c.anchor != "" do v.want = strings.clone(c.anchor)
-		append(&s.tabs, tab)
-		s.active_tab = tab.id
+		pane_add_tab(s, tab)
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 		return {ok = true, created_id = tab.id}, true
 	case Markdown_Set_View:

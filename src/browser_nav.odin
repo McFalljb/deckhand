@@ -658,9 +658,9 @@ browser_url_redacted :: proc(url: string) -> string {
 // loads its text into the wrong tab. True: dropped.
 browser_url_check :: proc() -> bool {
 	if state.focus_widget != "browser_url" do return false
-	b := tab_browser()
-	// comment mode's hint has the field's place (browser_annotate.odin)
-	if b != nil && b.tab_id == browser_url_tab && !annot_on(b) do return false
+	// the field's own tab, while it has the keyboard (panes.odin); comment mode's hint has the
+	// field's place (browser_annotate.odin)
+	if b := browsers[browser_url_tab]; b != nil && tab_focused(browser_url_tab) && !annot_on(b) do return false
 	ui_do(Set_Focus{""})
 	return true
 }

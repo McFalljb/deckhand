@@ -426,11 +426,11 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		owned := make([]string, len(argv))
 		for a, i in argv do owned[i] = strings.clone(a)
 		tab := Tab{id = new_id(), kind = App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
-		append(&s.tabs, tab)
+		pane_add_tab(s, tab)
 		if !by_agent {
 			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
 			// the user's, a script's and Home's come to the front
-			s.active_tab = tab.id
+			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
 		}
 		a := new(App_Proc)
@@ -1790,9 +1790,8 @@ app_release_input :: proc(a: ^App_Proc) {
 // and the window is active; any other app lets go.
 app_focus_tick :: proc() {
 	if len(apps) == 0 do return
-	on := tab_app()
 	for _, a in apps {
-		want := a == on && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
+		want := app_wants_keys(a)
 		if want == a.focused do continue
 		if !want do app_release_input(a)
 		else if socket_app_connected(a.tab_id) {
@@ -1800,6 +1799,12 @@ app_focus_tick :: proc() {
 			a.focused = true
 		}
 	}
+}
+
+// The app has the keyboard: its tab is the focused one (panes.odin), it runs, no widget has the
+// keyboard, the job sheet is shut and the window is in front.
+app_wants_keys :: proc(a: ^App_Proc) -> bool {
+	return tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
 }
 
 @(private = "file")

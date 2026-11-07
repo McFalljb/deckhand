@@ -1088,7 +1088,7 @@ sk_app_tab :: proc(t: ^testing.T) -> (tab: u64, c: ^Tc) {
 	s := find_session(sess)
 	testing.expect(t, s != nil, "a session")
 	tab = new_id()
-	append(&s.tabs, Tab{id = tab, kind = App_Tab{exit_code = -1}, title = strings.clone("app"), status = .Running})
+	pane_add_tab(s, Tab{id = tab, kind = App_Tab{exit_code = -1}, title = strings.clone("app"), status = .Running}) // in its pane (panes.odin)
 	r: string
 	c, r = tc_hello(socket_mint_token({kind = .App, tab_id = tab}))
 	testing.expect_value(t, json_path(r, "result.ok"), "true")

@@ -124,7 +124,9 @@ editor_tick :: proc() {
 		watch.last_poll = time.tick_now()
 		for _, e in editors do editor_check_disk(e)
 	}
-	if e := active_editor(); e != nil {
+	// the editor with the keyboard (panes.odin: typing happens there)
+	for id, e in editors {
+		if !tab_focused(id) do continue
 		files_keep_edited_preview()
 		git_gutter_update(e)
 		// a slow reparse waited for typing to pause (editor_syntax.odin): now

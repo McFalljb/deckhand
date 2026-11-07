@@ -559,7 +559,7 @@ x_comment_setup :: proc(t: ^testing.T, tag: string) -> (sess, br, id: u64, got: 
 	got = fmt.tprintf("%s/claude-stdin", dir)
 	s := find_session(sess)
 	b := Tab{id = new_id(), kind = Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
-	append(&s.tabs, b)
+	pane_add_tab(s, b) // in the session's pane (panes.odin)
 	br = b.id
 	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
 	id = run_command(New_Claude_Tab{session = sess}, X_UI).created_id

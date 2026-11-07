@@ -488,26 +488,28 @@ prog_summary_free :: proc(p: ^Prog_Summary) {
 
 // ---- seen ----
 
-// The user is looking at this tab now: its session is current, it is the
-// session's active tab, and the window is in front (the bell's rule).
+// The user is looking at this tab now: its session is current, one of its
+// panes shows it (focused or not: panes.odin), and the window is in front
+// (the bell's rule).
 status_on_screen :: proc(s: ^Open_Session, tab_id: u64) -> bool {
-	return s != nil && !s.home && state.current_session == s.id && s.active_tab == tab_id && notify_window_active()
+	return s != nil && !s.home && state.current_session == s.id && session_tab_shown(s, tab_id) && notify_window_active()
 }
 
-// The user looks at the session's active tab now (focus_session, a closed
-// tab handing over): it is seen. Inside run_command.
+// The user looks at the session's shown tabs now (focus_session, a closed
+// tab handing over): they are seen. Inside run_command.
 status_seen :: proc(s: ^Open_Session) {
 	if s == nil || s.home || !notify_window_active() do return
-	for &t in s.tabs do if t.id == s.active_tab do t.unseen = false
+	for &t in s.tabs do if session_tab_shown(s, t.id) do t.unseen = false
 }
 
-// The tab on screen is unseen (main.odin: the window coming to the front
-// sends set_unread false for it); 0 = none.
-status_wants_seen :: proc() -> u64 {
+// The tabs on screen that are unseen (main.odin: the window coming to the
+// front sends set_unread false for each). Temp-allocated.
+status_wants_seen :: proc() -> []u64 {
+	out := make([dynamic]u64, context.temp_allocator)
 	s := cur()
-	if s == nil || s.home do return 0
-	for t in s.tabs do if t.id == s.active_tab && t.unseen do return t.id
-	return 0
+	if s == nil || s.home do return out[:]
+	for t in s.tabs do if t.unseen && session_tab_shown(s, t.id) do append(&out, t.id)
+	return out[:]
 }
 
 // A pi tab's bridge reported (Pi_Status_Update, before the tab takes it): a

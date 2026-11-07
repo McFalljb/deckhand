@@ -606,6 +606,10 @@ Caller :: struct {
 fail :: proc(msg: string) -> Result {return {error = msg}}
 
 // Runs one command on the main thread. request_id ties it to its events.
+// Run after every command by the unit tests (panes_test.odin sets it: every session's panes stay
+// whole); nil in the app.
+after_command_check: proc(cmd: Command)
+
 run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id: u64 = 0) -> Result {
 	r: Result
 	changed := false
@@ -616,6 +620,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	} else {
 		r, changed = apply(cmd, caller, request_id)
 	}
+	if after_command_check != nil do after_command_check(cmd) // the unit tests' (panes_test.odin)
 	// what the tidy project list depends on (project_tidy.odin)
 	#partial switch _ in cmd {
 	case Add_Project, Rename_Project, Set_Pinned, Set_Hidden, Restore_Sidebar, Set_Tidy_Projects:
@@ -861,8 +866,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			drop_term(tab.id)
 			return fail("could not start the shell"), false
 		}
-		append(&s.tabs, tab)
-		s.active_tab = tab.id
+		pane_add_tab(s, tab)
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 		return {ok = true, created_id = tab.id}, true
 	case Close_Tab:
@@ -889,17 +894,16 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		tab_clear_panels(tab)
 		delete(tab.panels)
 		prog_summary_free(&tab.prog)
+		shown := session_tab_shown(s, c.tab_id)
+		pane_tab_gone(s, c.tab_id) // its pane's next tab takes over (panes.odin)
 		ordered_remove(&s.tabs, i)
-		if s.active_tab == c.tab_id {
-			s.active_tab = s.tabs[min(i, len(s.tabs) - 1)].id
-			if s.id == state.current_session do status_seen(s) // the tab that shows now is seen (agent_status.odin)
-		}
+		if shown && s.id == state.current_session do status_seen(s) // the tab that shows now is seen (agent_status.odin)
 		return {ok = true}, true
 	case Focus_Tab:
 		s, tab, _ := find_tab(c.tab_id)
 		if tab == nil do return fail("no such tab"), false
 		if s.home do return fail(HOME_NOT_A_SESSION), false
-		s.active_tab = tab.id
+		session_show_tab(s, tab.id) // and its pane gets the keyboard
 		focus_session(s.id, caller)
 		return {ok = true}, true
 	case Copy_Selection:
@@ -1059,6 +1063,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			}
 			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
 			s.active_tab = s.tabs[0].id
+			session_panes_init(&s)
 			append(&state.open_sessions, s)
 			state.home = s.id
 		}
@@ -1519,6 +1524,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			s := Open_Session{id = new_id(), pi_session_id = strings.clone(c.pi_session_id), session_dir = home_dir(), cwd = home_cwd(), home = true, restored = true}
 			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
 			s.active_tab = s.tabs[0].id
+			session_panes_init(&s)
 			append(&state.open_sessions, s)
 			state.home = s.id
 			return {ok = true, created_id = s.id}, true
@@ -1546,7 +1552,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started})
 		s.id = new_id()
 		restore_tabs(&s, c.tabs)
-		if s.active_tab == 0 do s.active_tab = s.tabs[0].id
+		if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
 		append(&state.open_sessions, s)
 		return {ok = true, created_id = s.id}, true
 	}
@@ -1555,27 +1561,28 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 
 // The saved tabs of a restored session, after what it has (Restore_Session), not started.
 restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab) {
+	session_panes_init(s) // one pane (a Claude-only session's: empty until its main tab)
 	for rt in tabs {
 		if rt.kind == .Editor {
 			// rt.cwd is the file's path; it opens when the session starts.
 			// Not a regular file now (a FIFO, a device): left out
 			if !regular_or_missing(rt.cwd) do continue
-			append(&s.tabs, Tab{id = new_id(), kind = Editor_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
-			if rt.active do s.active_tab = s.tabs[len(s.tabs) - 1].id
+			added := pane_add_tab(s, Tab{id = new_id(), kind = Editor_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
+			if rt.active do session_show_tab(s, added.id)
 			continue
 		}
 		if rt.kind == .Markdown {
 			if !regular_or_missing(rt.cwd) do continue
-			append(&s.tabs, Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
-			if rt.active do s.active_tab = s.tabs[len(s.tabs) - 1].id
+			added := pane_add_tab(s, Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(rt.cwd)}, title = strings.clone(filepath.base(rt.cwd)), status = .Not_Started})
+			if rt.active do session_show_tab(s, added.id)
 			continue
 		}
 		if rt.kind == .Browser {
 			// rt.cwd is its URL; the page loads once the session is focused
 			url, err := browser_url_normalize(rt.cwd)
 			if err != "" do continue
-			append(&s.tabs, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started})
-			if rt.active do s.active_tab = s.tabs[len(s.tabs) - 1].id
+			added := pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started})
+			if rt.active do session_show_tab(s, added.id)
 			continue
 		}
 		if rt.kind == .Claude {
@@ -1585,14 +1592,14 @@ restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab) {
 			for a, i in rt.args do args[i] = strings.clone(a)
 			// its account: an absolute folder; checked again at its start (claude_start: configured only)
 			acct := filepath.is_abs(rt.account) ? rt.account : ""
-			append(&s.tabs, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct)}, title = strings.clone("Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)})
-			if rt.active do s.active_tab = s.tabs[len(s.tabs) - 1].id
+			added := pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct)}, title = strings.clone("Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)})
+			if rt.active do session_show_tab(s, added.id)
 			continue
 		}
 		if rt.kind != .Shell do continue
 		title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
-		append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)})
-		if rt.active do s.active_tab = s.tabs[len(s.tabs) - 1].id
+		added := pane_add_tab(s, Tab{id = new_id(), kind = Shell_Tab{}, title = title, status = .Not_Started, cwd = strings.clone(rt.cwd)})
+		if rt.active do session_show_tab(s, added.id)
 	}
 }
 
@@ -1853,6 +1860,7 @@ close_session :: proc(id: u64, caller: Caller) {
 		if c, is := state.pending_confirmations[i].command.(Close_Session); is && c.session == id do ordered_remove(&state.pending_confirmations, i)
 	}
 	delete(s.tabs)
+	session_panes_free(s)
 	comments_free(s) // its pending comments go with it (their crops too)
 	for o, i in state.open_sessions do if o.id == id {
 		ordered_remove(&state.open_sessions, i)
@@ -1933,7 +1941,9 @@ focus_session :: proc(id: u64, caller: Caller) {
 	notify_seen(id) // its bell entries are read (notify.odin)
 	status_seen(find_session(id)) // its tab on screen is seen (agent_status.odin)
 	if s := find_session(id); s != nil do start_restored_tabs(s, claude = caller.kind != .Control && caller.kind != .Panel && caller.kind != .App)
-	if t := active_term(); t != nil do t.changed = true
+	if s := find_session(id); s != nil do for tab in s.tabs do if session_tab_shown(s, tab.id) {
+		if t := term_of(tab.id); t != nil do t.changed = true // drawn again (every pane's)
+	}
 }
 
 // Lazy restore: starts the tabs of a restored session that have not started
@@ -2085,6 +2095,7 @@ open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd :=
 		active_tab    = tab.id,
 	}
 	append(&s.tabs, tab)
+	session_panes_init(&s)
 	append(&state.open_sessions, s)
 	focus_session(s.id, {kind = .Internal}) // a new session: nothing restored in it to start
 	return {ok = true, created_id = s.id}, true

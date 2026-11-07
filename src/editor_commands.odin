@@ -144,7 +144,7 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 		for &tab in s.tabs {
 			et, is := &tab.kind.(Editor_Tab)
 			if !is || et.view != .File || fs_real(et.path) != rp do continue
-			s.active_tab = tab.id
+			session_show_tab(s, tab.id)
 			if !c.preview do et.preview = false // opened for good (double-click, Enter)
 			focus_session(s.id, caller)
 			if e := editor_of(tab.id); e != nil && c.line > 0 do ed_goto(e, c.line, c.col)
@@ -171,11 +171,13 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 			delete(old.panels)
 			if et, is := old.kind.(Editor_Tab); is do delete(et.path)
 			delete(old.title)
+			tab.pane = old.pane // in its place: its pane, and shown where it was shown
+			for &pn in s.panes do if pn.active == old.id do pn.active = tab.id
 			old^ = tab
 		} else {
-			append(&s.tabs, tab)
+			pane_add_tab(s, tab)
 		}
-		s.active_tab = tab.id
+		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)
 		r = {ok = true, created_id = tab.id}
 		if e.refused != "" do r.data = fmt.aprintf(`{{"refused":%s}}`, quoted(e.refused))
@@ -279,7 +281,7 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 			et, is := t.kind.(Editor_Tab)
 			if !is || et.view != c.against || et.path != path do continue
 			if d := editor_of(t.id); d != nil do editor_set_text(d, text)
-			s.active_tab = t.id
+			session_show_tab(s, t.id)
 			return {ok = true, created_id = t.id}, true
 		}
 		nt := Tab{id = new_id(), kind = Editor_Tab{path = strings.clone(path), view = c.against}, title = title_for(path, c.against), status = .Running}
@@ -289,8 +291,8 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 		d.eol, d.indent_w = "\n", 4
 		tb_init(&d.buf, transmute([]u8)strings.clone(text))
 		editors[nt.id] = d
-		append(&s.tabs, nt)
-		s.active_tab = nt.id
+		pane_add_tab(s, nt)
+		session_show_tab(s, nt.id)
 		return {ok = true, created_id = nt.id}, true
 	case Set_Wrap:
 		_, _, e := editor_tab(c.tab_id)

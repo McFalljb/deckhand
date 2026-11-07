@@ -115,7 +115,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		return fmt.aprintf(`{{"kind":%q,"path":%s,"session":%d,"already_open":%v}}`, kind, strings.to_string(b), session, again)
 	}
 	front :: proc(s: ^Open_Session, id: u64, caller: Caller) {
-		s.active_tab = id
+		session_show_tab(s, id)
 		focus_session(s.id, caller)
 	}
 	// already open (the same kind of tab): not opened twice; scrolled to what was asked
@@ -127,7 +127,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		}
 		if open_path == "" || fs_real(open_path) != rp do continue
 		// an agent moves only a tab it opened itself, and never the one the user looks at
-		moves := !agent || (show_agent_tabs[tab.id] == caller.tab_id && tab.id in show_agent_tabs && !(s.id == state.current_session && s.active_tab == tab.id))
+		moves := !agent || (show_agent_tabs[tab.id] == caller.tab_id && tab.id in show_agent_tabs && !(s.id == state.current_session && tab_on_screen(tab.id)))
 		if !moves {
 			return {ok = true, created_id = tab.id, data = data(kind, open_path, s.id, true)}, false
 		}
@@ -164,10 +164,10 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		e := editor_new(tab.id, p)
 		if c.line > 0 do ed_goto(e, c.line, 1)
 	}
-	// a pi or Claude tab's: right after its own tab (else at the end)
-	at := len(s.tabs)
-	if caller.kind == .Panel do for t, i in s.tabs do if t.id == caller.tab_id do at = i + 1
-	inject_at(&s.tabs, at, tab)
+	// a pi or Claude tab's: right after its own tab, in its pane (else at the end of the focused pane)
+	after: u64
+	if caller.kind == .Panel do for t in s.tabs do if t.id == caller.tab_id do after = t.id
+	pane_add_tab(s, tab, after = after)
 	if agent {
 		// forget the tabs that closed since (ids are never reused), then remember this one
 		for id in show_agent_tabs do if _, t, _ := find_tab(id); t == nil do delete_key(&show_agent_tabs, id)

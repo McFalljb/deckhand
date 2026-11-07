@@ -81,6 +81,7 @@ Tab :: struct {
 	// any terminal tab: what its program reports over OSC 7501 (agent_status.odin)
 	prog:     Prog_Summary,
 	unseen:   bool, // its agent finished while the user was not looking, or "Mark as unread"; not saved
+	pane:     u64, // the pane of its session it sits in (panes.odin); not saved
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,
@@ -130,8 +131,8 @@ Open_Session :: struct {
 	session_file:  string, // as the bridge last reported it (pi.session); "" = unknown
 	project_id:    u64,
 	cwd:           string,
-	tabs:          [dynamic]Tab,
-	active_tab:    u64, // tab id
+	tabs:          [dynamic]Tab, // the main tab (pi, or Claude's) is always tabs[0]
+	active_tab:    u64, // tab id: always the focused pane's active tab (a mirror kept by panes.odin)
 	missing:       bool, // restored, but its session file or cwd is gone: shown "gone", never started
 	restored:      bool, // came from the saved workspace: kept in it even while gone
 	home:          bool, // the Home session (state.home): no project, only its pi tab, not listed
@@ -142,6 +143,13 @@ Open_Session :: struct {
 	mtime:         time.Time, // session_file's modification time then
 	comments:      [dynamic]Pending_Comment, // made on this session's tabs, for its pi (comments.odin); at most COMMENTS_MAX
 	attach:        Comments_Attach, // their delivery to the pi tab's bridge (not in the snapshot)
+	// its panes (panes.odin; docs/plans/split-panes.md): a binary layout tree whose leaves are
+	// the panes, each showing one of its tabs. One pane for now. Not saved, not in the snapshot.
+	panes:         [dynamic]Pane,
+	nodes:         [dynamic]Layout_Node, // the tree, nodes[root]
+	root:          int,
+	focused_pane:  u64, // the pane that gets the keyboard
+	pane_mru:      [dynamic]u64, // panes most recently focused last: where focus goes when one closes
 }
 
 // Left column and right panel sizes in logical px.
@@ -401,11 +409,9 @@ cur :: proc() -> ^Open_Session {
 	return find_session(state.current_session)
 }
 
+// The focused tab: the current session's focused pane's active tab (panes.odin), or nil.
 active_tab :: proc() -> ^Tab {
-	s := cur()
-	if s == nil do return nil
-	for &t in s.tabs do if t.id == s.active_tab do return &t
-	return nil
+	return session_focused_tab(cur())
 }
 
 term_of :: proc(tab_id: u64) -> ^Term {

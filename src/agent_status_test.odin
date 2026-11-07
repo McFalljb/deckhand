@@ -194,10 +194,11 @@ status_unseen_and_bell :: proc(t: ^testing.T) {
 	run_command(Focus_Session{session = a}, {kind = .UI}) // the window is still behind: not seen
 	testing.expect(t, sh.unseen)
 	as_active = true
-	testing.expect_value(t, status_wants_seen(), a_sh)
-	run_command(Set_Unread{tab_id = status_wants_seen(), unread = false}, {kind = .Internal})
+	testing.expect_value(t, len(status_wants_seen()), 1)
+	testing.expect_value(t, status_wants_seen()[0], a_sh)
+	run_command(Set_Unread{tab_id = a_sh, unread = false}, {kind = .Internal})
 	testing.expect(t, !sh.unseen)
-	testing.expect_value(t, status_wants_seen(), 0)
+	testing.expect_value(t, len(status_wants_seen()), 0)
 	// working again clears a Mark unread
 	run_command(Focus_Session{session = b}, {kind = .UI})
 	run_command(Set_Unread{tab_id = a_sh, unread = true}, {kind = .UI})

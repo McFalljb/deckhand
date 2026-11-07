@@ -278,7 +278,7 @@ claude_comments_once :: proc(t: ^testing.T) {
 	_, sess := cl_session(t, "cm")
 	s := find_session(sess)
 	br := Tab{id = new_id(), kind = Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
-	append(&s.tabs, br)
+	pane_add_tab(s, br) // in its pane (panes.odin)
 	id := run_command(New_Claude_Tab{session = sess}, CL_UI).created_id
 	// a crop as a source writes one
 	crop := comments_crop_path()
@@ -569,7 +569,7 @@ claude_comment_images_numbered :: proc(t: ^testing.T) {
 	_, sess := cl_session(t, "img")
 	s := find_session(sess)
 	br := Tab{id = new_id(), kind = Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
-	append(&s.tabs, br)
+	pane_add_tab(s, br) // in its pane (panes.odin)
 	id := run_command(New_Claude_Tab{session = sess}, CL_UI).created_id
 	png := []u8{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1}
 	crop1 := comments_crop_path()

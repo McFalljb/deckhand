@@ -374,6 +374,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		}
 		if !state.layout.drawer_pinned do drawer_floating(w, h)
 		files_drag_layout()
+		tab_drag_layout() // a tab being dragged: its drop indicator and ghost (panes_drag.odin)
 		wt_menu_layout(w, h)
 		menu_layout(w, h)
 		settings_layout(w, h)

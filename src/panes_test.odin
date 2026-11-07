@@ -33,7 +33,6 @@ pt_check_every_command :: proc "contextless" () {
 pt_active: bool
 
 // One session in State with a pane: its pi tab and n shells (not started). Current.
-@(private = "file")
 pt_one :: proc(n: int) -> ^Open_Session {
 	context.allocator = runtime.heap_allocator()
 	inbox_drain()
@@ -53,7 +52,6 @@ pt_one :: proc(n: int) -> ^Open_Session {
 // The fixture of the plan: pane A (left) holds the pi tab and a shell, pane B (right) an editor,
 // a browser and an app tab; B is focused and shows the browser, A shows the shell. Built as a
 // State literal, with stand-in runtime objects (never started) for the lookups.
-@(private = "file")
 Two :: struct {
 	s:                                  ^Open_Session,
 	a, b:                               u64, // panes
@@ -61,7 +59,6 @@ Two :: struct {
 	term:                               ^Term,
 }
 
-@(private = "file")
 pt_two :: proc() -> Two {
 	context.allocator = runtime.heap_allocator()
 	inbox_drain()
@@ -105,7 +102,6 @@ pt_two :: proc() -> Two {
 }
 
 // The stand-ins go (never freed through drop_term: they never started).
-@(private = "file")
 pt_two_done :: proc(x: Two) {
 	delete_key(&terms, x.shell)
 	delete_key(&editors, x.editor)
@@ -114,7 +110,6 @@ pt_two_done :: proc(x: Two) {
 	platform = {}
 }
 
-@(private = "file")
 pt_strip_titles :: proc(s: ^Open_Session, pane: u64) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	for t in s.tabs do if t.pane == pane {
@@ -567,7 +562,6 @@ panes_tab_rect :: proc(t: ^testing.T) {
 }
 
 // Fonts and Clay once, at 1x, without a window (layout only, no drawing): as buttons_test.odin.
-@(private = "file")
 pt_ui :: proc() -> bool {
 	@(static) ready: bool
 	if ready do return true
@@ -683,7 +677,6 @@ panes_pidi_no_collisions :: proc(t: ^testing.T) {
 
 // ---- P2: the pane commands ----
 
-@(private = "file")
 PT_UI :: Caller{kind = .UI}
 
 // split_pane with a tab: the tab moves into the new pane, which gets the keyboard; created_id is
@@ -951,10 +944,10 @@ panes_split_layout :: proc(t: ^testing.T) {
 		testing.expectf(t, p.rect.z >= PANE_MIN_W && p.rect.w >= PANE_MIN_H - TAB_STRIP_H, "pane %d: %v", p.slot, p.rect)
 	}
 	// a split that leaves no room for two panes is refused (in a 1000 px window B is 350 wide: two
-	// need 481)
+	// need 481); a new shell, not the pi tab: alone in A, it would take A's room with it
 	_ = ui_layout(1000, 860)
 	ui_pane_rects(s)
-	r = run_command(Split_Pane{pane = b, direction = .Right, tab_id = ids[0]}, PT_UI)
+	r = run_command(Split_Pane{pane = b, direction = .Right}, PT_UI)
 	testing.expect_value(t, r.error, "not enough room")
 	app.centre = {}
 }

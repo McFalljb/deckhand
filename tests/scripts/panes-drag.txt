@@ -1,0 +1,68 @@
+# Dragging tabs (panes_drag.odin; docs/plans/split-panes.md P5): a press that moves a few px is
+# still a click; a drag in the title bar reorders (never before the pi tab); a drop on a pane's
+# edge splits it with the tab (the first split from the title bar); a drop on another strip moves
+# the tab there; Esc cancels, a release outside the window drops nothing; the pi tab moves to another pane and splits
+# one, staying tabs[0]. Run with tests/scripts/panes.sh panes-drag.txt.
+wait 1000
+waitfor ARGS: 15000
+command {"type":"new_shell_tab","session":$session}
+command {"type":"new_shell_tab","session":$session}
+waitstate 5000 open_sessions.0.tabs.# 3
+wait 500
+# tabs: pi, A ($prev), B ($last); B shown. A press on A that moves 2 px: a click (A shows, nothing moves)
+dragtab 1 by 2 1
+assert_state open_sessions.0.active_tab $prev
+assert_state open_sessions.0.tabs.1.id $prev
+assert_state open_sessions.0.panes.# 1
+# B dragged before the pi tab in the title bar: it lands right after it
+dragtab 2 strip 0 0
+waitstate 3000 open_sessions.0.tabs.1.id $last
+assert_state open_sessions.0.tabs.2.id $prev
+assert_state open_sessions.0.tabs.0.id $pitab
+assert_state open_sessions.0.panes.# 1
+# A (tabs.2) to the pane's right edge: the first split, A alone in the new right pane, focused
+dragtab 2 right 0
+waitstate 3000 open_sessions.0.panes.# 2
+assert_state open_sessions.0.layout.dir right
+assert_state open_sessions.0.panes.1.tabs.0 $prev
+assert_state open_sessions.0.panes.0.tabs.# 2
+assert_state open_sessions.0.focused_pane $pane1
+# B held over the right pane's centre: the indicator shows; Esc cancels, nothing moves
+dragtab 1 centre 1 hold
+hover tab_drop
+shot panes-drag/indicator
+hover tab_drop
+key escape
+assert_state open_sessions.0.panes.0.tabs.# 2
+assert_state open_sessions.0.panes.1.tabs.# 1
+# and a release outside the window (AppKit still reports it; sokol sends no leave while held)
+dragtab 1 outside
+assert_state open_sessions.0.panes.0.tabs.# 2
+# B to the right pane's strip, after A
+dragtab 1 strip 1 1
+waitstate 3000 open_sessions.0.panes.1.tabs.# 2
+assert_state open_sessions.0.panes.1.tabs.1 $last
+assert_state open_sessions.0.panes.0.tabs.# 1
+assert_state open_sessions.0.focused_pane $pane1
+# the pi tab, alone in the left pane, to the right pane's strip: it goes first there, the left pane
+# collapses, it stays tabs[0]
+dragtab 0 strip 1 2
+waitstate 3000 open_sessions.0.panes.# 1
+assert_state open_sessions.0.panes.0.tabs.0 $pitab
+assert_state open_sessions.0.tabs.0.id $pitab
+assert_state open_sessions.0.tabs.# 3
+# the pi tab to the bottom edge: a split down with it in the new bottom pane, still tabs[0]
+dragtab 0 down 0
+waitstate 3000 open_sessions.0.panes.# 2
+assert_state open_sessions.0.layout.dir down
+assert_state open_sessions.0.panes.1.tabs.0 $pitab
+assert_state open_sessions.0.tabs.0.id $pitab
+# B (tabs.2) to the top pane's left edge: a third pane, left of A
+dragtab 2 left 0
+waitstate 3000 open_sessions.0.panes.# 3
+assert_state open_sessions.0.panes.0.tabs.0 $last
+assert_state open_sessions.0.panes.1.tabs.0 $prev
+assert_state open_sessions.0.panes.2.tabs.0 $pitab
+assert_state open_sessions.0.layout.a.dir right
+shot panes-drag/three
+quit

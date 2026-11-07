@@ -65,6 +65,15 @@ package main
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
 //   dragid FROM INDEX TO       left drag from element FROM INDEX to element TO (centres)
+//   dragtab TAB WHERE [SLOT] [GAP] [esc|hold]   left drag of tab TAB (its index in the open
+//                              session's tabs) to WHERE: `strip SLOT GAP` (pane SLOT's strip, or
+//                              the title bar's with one pane, before its GAP-th tab), `centre SLOT`,
+//                              `left|right|up|down SLOT` (that edge's drop zone of pane SLOT's
+//                              body), `by DX DY` (logical px from the tab's centre: under the
+//                              threshold it is a click), `outside` (released past the window's
+//                              right edge, as AppKit still reports it); `esc` presses Escape
+//                              before the release; `hold` never releases
+//                              (for a shot; `key escape` cancels it) (panes_drag.odin)
 //   files_time N DY            lay out N frames, scrolling the Files tree by DY each: time per frame
 //   assert_rows SECTION LIST   the left column's rows (open|projects|sessions|chats) as
 //                              sidebar.odin lists them, comma-separated names/titles ("-" =
@@ -662,7 +671,8 @@ autotest_step :: proc() {
 				continue
 			}
 			b := d.boundingBox
-			send({type = .MOUSE_MOVE, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2})
+			held: u32 = tab_drag.tab != 0 ? sapp.MODIFIER_LMB : 0 // a held dragtab's button is still down
+			send({type = .MOUSE_MOVE, mouse_x = b.x + b.width / 2, mouse_y = b.y + b.height / 2, modifiers = held})
 		case "sweep":
 			sweep_hover(args[0], u32(num(args[1])), int(num(args[2])))
 		case "clickid":
@@ -754,6 +764,24 @@ autotest_step :: proc() {
 			for i in 1 ..= 8 {
 				f := f32(i) / 8
 				send({type = .MOUSE_MOVE, mouse_x = x1 + (x2 - x1) * f, mouse_y = y1 + (y2 - y1) * f, modifiers = sapp.MODIFIER_LMB})
+			}
+			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x2, mouse_y = y2})
+		case "dragtab":
+			x1, y1, x2, y2, ok := script_tab_drag_points(strings.fields(expand_vars(rest), context.temp_allocator))
+			if !ok {
+				if script_retry(idx) do return
+				script_fail("dragtab: no such tab or place", rest)
+				continue
+			}
+			send({type = .MOUSE_MOVE, mouse_x = x1, mouse_y = y1})
+			send({type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x1, mouse_y = y1})
+			for i in 1 ..= 8 {
+				f := f32(i) / 8
+				send({type = .MOUSE_MOVE, mouse_x = x1 + (x2 - x1) * f, mouse_y = y1 + (y2 - y1) * f, modifiers = sapp.MODIFIER_LMB})
+			}
+			switch args[len(args) - 1] {
+			case "esc": key_event("escape", 0)
+			case "hold": continue // the button stays down (a shot of the indicator; `key escape` ends it)
 			}
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x2, mouse_y = y2})
 		case "files_time":
@@ -1306,6 +1334,53 @@ script_pane_term :: proc(slot: string) -> ^Term {
 	return nil
 }
 
+// dragtab's press (the centre of tab TAB) and release points (framebuffer px), from the last
+// layout's rects (the same tab_drop_input a drag reads).
+@(private = "file")
+script_tab_drag_points :: proc(args: []string) -> (x1, y1, x2, y2: f32, ok: bool) {
+	cs := cur()
+	if cs == nil || len(args) < 2 do return
+	i := int(num(args[0]))
+	if i < 0 || i >= len(cs.tabs) do return
+	d := clay.GetElementData(clay.ID("tab", u32(i)))
+	if !d.found do return
+	b := d.boundingBox
+	x1, y1 = b.x + b.width / 2, b.y + b.height / 2
+	if args[1] == "outside" do return x1, y1, sapp.widthf() + 40 * app.dpi, y1 + 100 * app.dpi, true
+	if args[1] == "by" {
+		if len(args) < 4 do return
+		return x1, y1, x1 + num(args[2]) * app.dpi, y1 + num(args[3]) * app.dpi, true
+	}
+	if len(args) < 3 do return
+	input := tab_drop_input(cs, cs.tabs[i].id)
+	slot := int(num(args[2]))
+	p: Drop_Pane
+	found := false
+	for &x in cs.panes do if x.slot == slot do for dp in input.panes do if dp.id == x.id {
+		p = dp
+		found = true
+	}
+	if !found do return
+	z := p.zone
+	in_edge := px(TAB_DROP_EDGE_MIN) / 2
+	switch args[1] {
+	case "strip":
+		if len(args) < 4 || p.strip.z <= 0 do return
+		gap := int(num(args[3]))
+		y2 = p.strip.y + p.strip.w / 2
+		if gap < len(p.tabs) do x2 = p.tabs[gap].rect.x + px(2)
+		else if n := len(p.tabs); n > 0 do x2 = p.tabs[n - 1].rect.x + p.tabs[n - 1].rect.z + px(4)
+		else do x2 = p.strip.x + px(4)
+	case "centre": x2, y2 = z.x + z.z / 2, z.y + z.w / 2
+	case "left":   x2, y2 = z.x + in_edge, z.y + z.w / 2
+	case "right":  x2, y2 = z.x + z.z - in_edge, z.y + z.w / 2
+	case "up":     x2, y2 = z.x + z.z / 2, z.y + in_edge
+	case "down":   x2, y2 = z.x + z.z / 2, z.y + z.w - in_edge
+	case: return
+	}
+	return x1, y1, x2, y2, z.z > 0
+}
+
 // divider pane SLOT D [clicks N]: drags (or clicks) the divider of the nearest split that has pane
 // SLOT before it (in its first child), D logical px across the divider's line.
 @(private = "file")
@@ -1638,7 +1713,7 @@ SHOT_MIN :: 150 * time.Millisecond
 @(private = "file")
 script_reads_layout :: proc(cmd: string) -> bool {
 	switch cmd {
-	case "clickid", "rclickid", "hover", "sweep", "dragid", "clickmenu", "clickmd", "clicktext", "divider", "drop":
+	case "clickid", "rclickid", "hover", "sweep", "dragid", "dragtab", "clickmenu", "clickmd", "clicktext", "divider", "drop":
 		return true
 	}
 	return false
@@ -1649,7 +1724,7 @@ script_reads_layout :: proc(cmd: string) -> bool {
 script_is_input :: proc(cmd: string) -> bool {
 	switch cmd {
 	case "type", "key", "paste", "scroll", "click", "drag", "clicks", "clickcell", "mousecell", "clicktext", "clickid",
-	     "rclickid", "dragid", "hover", "sweep", "clickmenu", "clickmd", "divider", "drop", "menu", "menu_key", "ime_press",
+	     "rclickid", "dragid", "dragtab", "hover", "sweep", "clickmenu", "clickmd", "divider", "drop", "menu", "menu_key", "ime_press",
 	     "ime_mark", "ime_commit", "ime_key", "command", "ui_command", "control_command", "pi_command", "pi_command_bg",
 	     "resize", "window", "system_appearance", "toast_clear", "jobs_ui", "jobs_clock", "window_active", "copy":
 		return true

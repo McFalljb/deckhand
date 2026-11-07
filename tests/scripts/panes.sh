@@ -1,9 +1,10 @@
 #!/bin/sh
 # Split panes in test mode (panes.odin, ui_panes.odin; docs/plans/split-panes.md P2):
-# the script (default panes.txt; panes-capture.txt: pointer capture across panes).
+# the script (default panes.txt; panes-capture.txt: pointer capture across panes; panes-drag.txt:
+# dragging tabs).
 # A fake HOME with one project and session, a fake pi, a temp data dir.
 # Writes build/<script>/ and build/shots/<script>/.
-# Usage: tests/scripts/panes.sh [panes-capture.txt]
+# Usage: tests/scripts/panes.sh [panes-capture.txt | panes-drag.txt]
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)

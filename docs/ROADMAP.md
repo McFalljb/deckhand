@@ -227,7 +227,7 @@ Groundwork for the command layer and state.
   Known limits: saving replaces the file (hard links keep the old text; extended attributes and
   ACLs are not copied); files outside every project, or in the home folder itself, are followed
   by a 2 s poll rather than the watcher.
-  Not yet: multi-cursor, LSP, project search, split view, `$1` groups in regex
+  Not yet: multi-cursor, LSP, project search, one file in two panes, `$1` groups in regex
   replace, Markdown inline highlighting, unsaved edits kept across restarts.
 - ✅ Left column clarity and spacing (2026-11-01): Sessions tab as Open / Projects (a tree: the
   selected project expands inline with its sessions, "Show N more" past 8, "+ New session"; a
@@ -251,8 +251,15 @@ Groundwork for the command layer and state.
   watcher; open folders saved per project. Commands: `set_left_tab`, `files_expand`,
   `files_collapse_all`, `files_reveal`, `set_files_filter`, `keep_tab`, `open_file preview`,
   `new_shell_tab cwd`, `list_dir ignored`. Not yet: drag within the tree to move, multi-select,
-  open to the side (no split view yet).
-- ⬜ Step 2: LSP, multi-cursor, split view, project-wide search, a fuller diff view.
+  open to the side (into another pane).
+- ⬜ Step 2: LSP, multi-cursor, one file in two panes (an editor split view of one buffer),
+  project-wide search, a fuller diff view.
+- ✅ Split panes (2026-11-07, [plans/split-panes.md](plans/split-panes.md)): a session's centre splits
+  right or down, nested, up to 8 panes, each with its own strip of tabs; every tab kind in any
+  pane (browser and app tabs live side by side); ⌘D ⇧⌘D, ⌃⌘ arrows, ⇧⌃⌘ arrows, ⇧⌘W, dividers,
+  dragging tabs to reorder, move and split; saved and restored per session; agents read the
+  layout (`desk_state`, `deckhand state`) but only the user and Atlas change it. Not yet: a
+  maximize-pane toggle, one file in two panes, agents opening beside themselves.
 
 ### Phase 2 — Home, Settings, markdown, annotations
 - 🔨 Home session + Deckhand control tools (G9): a Home pi in its own session dir
@@ -396,6 +403,7 @@ Groundwork for the command layer and state.
 | 2026-10-31 | Left-column pins and hidden items are kept by identity (project cwd, pi session id), not runtime ids; the filter is State but not saved | Survive rescans and restarts; agents see and set the same filter the user sees. |
 | 2026-10-31 | (superseded 2026-11-01) The Home agent runs `pi --mode rpc` behind a native chat drawer (not a terminal pane); no bridge in it, status from the RPC stream; its chat is State through quiet internal commands | A calm, always-there assistant (dots / Grok-style) with buttons, cards and inline questions a TUI cannot draw; one writer of State stays true. |
 | 2026-10-31 | (superseded 2026-11-01: no offers) Offered buttons run their command as the user who clicks (confirmations apply); user-only settings, `agent_*` commands and buttons from an earlier run never run | The agent proposes, the user decides; ids from an earlier run may name other things now. |
+| 2026-11-07 | Split panes: free splits (right/down, nested, draggable dividers), a tab strip per pane once split, a layout per open session saved and restored, every tab kind in a pane; ⌘D opens a new shell in the new pane; a pane closes with its last tab; ⌘1–9 within the focused pane; visible unfocused tabs count as seen; pi and Claude tabs cannot change panes in v1; no one file in two panes in v1 | The user's answers to [plans/split-panes.md](plans/split-panes.md) §8; the pane commands are `Anyone`, which already excludes agent tabs and apps. |
 | 2026-10-31 | Native editor in steps: step 1 here (editing, highlighting, save and file sync, find, git gutter, file-system model); step 2: LSP, multi-cursor, split view, project-wide search, diff view | A usable editor now; the rest on the same buffer and command layer. |
 | 2026-10-31 | Editor buffer = piece table (original + add buffers, per-piece newline counts, lazy prefix sums); tree-sitter v0.27.1 + 13 grammars vendored as C sources at pinned tags, compiled once by build.sh; git through the `git` CLI (HEAD text, status, check-ignore, ls-files) | Piece table: cheap inserts anywhere, zero-copy reads for tree-sitter, undo stores only the edited text; simpler than a rope at our sizes. Vendored C: no network or toolchain at build time. git CLI: no libgit2 to vendor; calls are rare and debounced. |
 | 2026-10-31 | File commands resolve paths for the caller (a tab-bound caller's own session), park the absolute path in confirmations, and a `control` caller creating or renaming outside its own project confirms under a new class `fs_write` (deleting is always class `delete`) | A confirmation must act on the file it showed; Atlas may work across projects, but not silently. |

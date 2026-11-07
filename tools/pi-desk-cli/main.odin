@@ -171,11 +171,11 @@ shot_out :: proc(req: ^Req, d: json.Object, shots_dir: string) -> (string, int) 
 	}
 	if req.kind == .Shot {
 		if v, has := get_bool(d, "on_screen"); has do jw_bool(&w, "on_screen", v)
-		hidden := is_false(d, "on_screen") ? " The tab is not on screen: Deckhand painted it for this, unseen." : ""
+		hidden := is_false(d, "on_screen") ? " The tab is not on screen (no pane shows it): Deckhand painted it for this, unseen." : ""
 		jw_str(&w, "note", strings.concatenate({SHOT_NOTE, hidden, READ_IT}))
 	} else {
 		if v, has := get_bool(d, "visible"); has do jw_bool(&w, "visible", v)
-		hidden := is_false(d, "visible") ? " The tab is not on screen: the last frame it showed." : ""
+		hidden := is_false(d, "visible") ? " The tab is not on screen (no pane shows it): the last frame it showed." : ""
 		jw_str(&w, "note", strings.concatenate({APP_SHOT_NOTE, hidden, READ_IT}))
 	}
 	return jw_end(&w), 0

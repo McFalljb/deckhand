@@ -143,7 +143,7 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
 - **3 IOSurfaces** per app tab, created by Deckhand.
   - `kIOSurfacePixelFormat 'BGRA'`, 4 bytes per element, bytes per row aligned with
     `IOSurfaceAlignProperty`, not global.
-  - **Size:** `round(pane_w × scale) × round(pane_h × scale)`.
+  - **Size:** `round(pane_w × scale) × round(pane_h × scale)` (the tab's own pane).
   - **Contents:** values already display-encoded, the same as sokol's BGRA8 window swapchain.
 - With 3 slots, one is on screen, one waits for Deckhand's GPU to finish sampling it, and one is
   free for the engine. Neither side waits on the other at 60 Hz.
@@ -160,7 +160,9 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
     then frees the old ring. If the engine dies first, Deckhand frees it then.
   - The RING message *is* the resize for texture tabs. TAB-PROTOCOL's `resize` message is dropped
     for them.
-- **Visibility:** `tab.visible {visible}` (NDJSON). A hidden tab gets no frames. The engine keeps
+- **Visibility:** `tab.visible {visible}` (NDJSON). Visible = shown in any pane of the session on
+  screen (several app tabs can be visible at once when the session is split; only the pane with
+  the keyboard gets input). A hidden tab gets no frames. The engine keeps
   simulating unless it is paused and only skips rendering. Free slots are never needed while the
   tab is hidden. **On demand:** a tab that opens hidden (an agent's, behind the view) is told it
   shows until its first frame arrives, and an `app_screenshot` of a hidden tab tells it so again

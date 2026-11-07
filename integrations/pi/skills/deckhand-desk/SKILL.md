@@ -20,6 +20,13 @@ exist only in Atlas's own pi, which Deckhand starts with its integration.
   `working`, `error`, `unknown`; `waiting` = a dialog is open there, the user must answer;
   `question` = its last answer asked something; `blockers` = background shells or workers) and
   any number of **shell tabs**. A pi tab cannot be closed.
+- **Panes**: the user may split an open session's centre into panes (at most 8), side by side or
+  stacked, each with its own strip of tabs and one tab shown. desk_state then prints a `panes:`
+  line (`7 | (8 / 9)`: `|` side by side, `/` stacked) and marks each tab with its pane: `[active,
+  pane 8]` (it has the keyboard), `[shown in pane 7]` (its pane shows it), `[pane 7]` (behind).
+  With one pane the active tab is just `[active]`. You (like the user) may change panes with
+  `split_pane`, `move_tab`, `focus_pane`, `close_pane`, `set_split` and `equalize_panes` when the
+  user asks; pi and Claude tabs cannot. A page or app is "on screen" when any pane shows it.
 - **Panels**: a pi tab's sidebar sections (todos, shells, subagents) in Deckhand's right column.
   Only that tab publishes them; you read them in desk_state.
 - Ids are integers that never change or get reused while Deckhand runs. Read them from

@@ -698,7 +698,7 @@ PROTOCOL.md "Browser tabs" has the commands' fields, data and codes.
   (`cancelled`).
 - **Hidden tabs: allowed.** The tab is woken for the action as for a screenshot (CEF un-hides it,
   never the user's view: a hidden page's pointer moves and wheel wait for a frame that never
-  comes) and hidden again; the page sees itself visible meanwhile. A tab not on screen that an
+  comes) and hidden again; the page sees itself visible meanwhile. A tab not on screen (shown in no pane) that an
   agent acts on shows a dot in the tab bar and "pi is using a page" on its session's sidebar row
   (named for the tab that acted: "Claude is using a page" for a Claude tab, Atlas's name for Atlas);
   the strip shows on the tab once it is on screen. Agent actions never focus a tab or change what
@@ -1025,7 +1025,7 @@ Scenes: `browser-polish`, `browser-polish-allow`, `browser-polish-zoom`, `browse
   Each tick plans which tabs have one (no per-session cap):
   - **only the user unloads a page.** The tabs on screen (one per pane showing a page) get a
     page first (only the user puts a tab on screen: an agent's `browser_open` opens behind the
-    session's active tab). With every slot taken, the least recently shown hidden page goes for
+    tab the focused pane shows). With every slot taken, the least recently shown hidden page goes for
     each: its own session's first, then any session's; never one twice, never one on screen. A
     popup whose browser is on its way is never unloaded. Every page on screen is shown now
     (`shown_at`), so the least recently shown is never one in a pane.

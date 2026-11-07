@@ -8,7 +8,8 @@ definitions in Claude's context):
   in a tab next to the Claude tab: Markdown rendered, other text in the editor), your session's
   browser tabs (tabs, open, read, screenshot, wait, click, type, press, scroll, select, hover,
   upload, console, network, comments) and app tabs (list-declared, open, restart, close, call,
-  screenshot, input, events). It runs the CLI inside the Deckhand app that started the tab (`$PI_DESK_CLI`), so the
+  screenshot, input, events), and `state` (your session as data; when the user split it into
+  panes, which tabs sit side by side: only the user splits). It runs the CLI inside the Deckhand app that started the tab (`$PI_DESK_CLI`), so the
   plugin and the app always match. One JSON object per call; page and app content only inside a
   fenced `content` string, as untrusted data.
 - **Skill** (`skills/deckhand`): a short stub, so only its name and description sit in context; it

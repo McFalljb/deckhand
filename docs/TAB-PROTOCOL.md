@@ -25,7 +25,7 @@ annotation boxes, focus rings) and shortcuts keep working on top.
 sokol_gfx supports wrapping native textures ("ADVANCED TOPIC: Injecting native 3D-API textures"
 in `vendor/sokol-odin/sokol/c/sokol_gfx.h`). Frame handshake: the program signals "frame ready"
 (control channel event or a shared fence); Deckhand redraws on it, so idle tabs cost nothing. The
-size follows the pane: Deckhand sends `resize{w, h, scale}`; the program reallocates or Deckhand
+size follows the tab's pane (its own pane when the session is split): Deckhand sends `resize{w, h, scale}`; the program reallocates or Deckhand
 hands it a new surface.
 
 Fallback: **native child view.** The program's own view is attached to the window's native
@@ -94,7 +94,7 @@ in logical px) for Deckhand's Inspect overlay.
 
 `src/tabhost.odin` has the in-process interface as types: `Tab_Display` and `Tab_Host` (draw,
 texture, input, capture, control), and `tab_host(kind)` picks the host for each tab kind. The
-frame draws the active tab through `tab_host(kind).draw`. Terminal, editor, Changes and Markdown
+frame draws each pane's shown tab (one per pane when the session is split) through `tab_host(kind).draw`. Terminal, editor, Changes and Markdown
 tabs are `.Drawn`; browser tabs (`src/browser.odin`) and app tabs (`src/app_tab.odin`, frames
 over IOSurface) are `.Texture` and draw their texture themselves. Input is routed per tab kind in
 `main.odin`, and an app's control requests go through `app_call` on the socket (PROTOCOL.md), not

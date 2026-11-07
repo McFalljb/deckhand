@@ -581,6 +581,36 @@ test("desk: state summary is compact and readable; filters narrow it", () => {
 	assert.equal(summarize(null), "Deckhand sent no state.");
 });
 
+test("desk: a split session's summary has its pane tree, and each tab its pane and whether it shows", () => {
+	const split = {
+		version: 23,
+		projects: [{ id: 1, cwd: "/w/app", label: "~/w/app", name: "App" }],
+		open_sessions: [
+			{ id: 3, pi_session_id: "aaaa", project_id: 1, active_tab: 4, focused_pane: 8,
+				panes: [{ id: 7, slot: 0, active_tab: 2, tabs: [2, 5] }, { id: 8, slot: 1, active_tab: 4, tabs: [4] }, { id: 9, slot: 2, active_tab: 6, tabs: [6] }],
+				layout: { split: 1, dir: "right", ratio: 0.5, a: { pane: 7 }, b: { split: 2, dir: "down", ratio: 0.5, a: { pane: 8 }, b: { pane: 9 } } },
+				tabs: [
+					{ id: 2, kind: "pi", title: "pi", status: "running", agent: "idle", pane: 7, on_screen: true },
+					{ id: 4, kind: "shell", title: "shell 1", status: "running", pane: 8, on_screen: true },
+					{ id: 5, kind: "shell", title: "shell 2", status: "running", pane: 7, on_screen: false },
+					{ id: 6, kind: "browser", title: "Docs", status: "running", pane: 9, on_screen: true },
+				] },
+		],
+		current_session: 3,
+	};
+	assert.deepEqual(summarize(split).split("\n").slice(4), [
+		'    - panes: 7 | (8 / 9) ("|" side by side, "/" stacked; each pane shows one of its tabs; pane 8 has the keyboard)',
+		'    - tab 2 pi "pi" · idle [shown in pane 7]',
+		'    - tab 4 shell "shell 1" [active, pane 8]',
+		'    - tab 5 shell "shell 2" [pane 7]',
+		'    - tab 6 browser "Docs" [shown in pane 9]',
+	]);
+	const one = { ...split.open_sessions[0], panes: [{ id: 7, slot: 0, active_tab: 2, tabs: [2] }], layout: { pane: 7 }, active_tab: 2, tabs: [split.open_sessions[0].tabs[0]] };
+	assert.deepEqual(summarize({ ...split, open_sessions: [one] }).split("\n").slice(4), ['    - tab 2 pi "pi" · idle [active]'], "one pane: no panes line, as before");
+	const d = runDescription(COMMANDS);
+	for (const c of ["split_pane", "close_pane", "focus_pane", "move_tab", "set_split", "equalize_panes"]) assert.match(d, new RegExp(`^- ${c} .*pi and Claude tabs cannot change panes\\)$`, "m"), c);
+});
+
 test("desk: status changes worth a watch are waiting, error, question and finished runs; watch messages are labelled", () => {
 	const seen = seenFrom(deskState);
 	const ev = (tab_id: number, agent: string, waiting = false, question = false) => ({ event: "command", caller: "panel", command: { type: "pi.status", tab_id, agent, waiting, question, blockers: [] }, result: { ok: true } });
@@ -726,7 +756,7 @@ test("desk apps: screenshots are described with their size and frame; input even
 		shotText(13, { path: "/d/apps/shots/13-1.png", w: 80, h: 80, bytes: 377, seq: 225, tick: 227, scale: 2, rect: { x: 200, y: 120, w: 80, h: 80 }, visible: true }),
 		"Tab 13's frame (seq 225, tick 227): 80×80 px at scale 2 (from 200,120), PNG 377 bytes at /d/apps/shots/13-1.png",
 	);
-	assert.match(shotText(13, { path: "/p.png", w: 1, h: 1, bytes: 9, seq: 1, tick: 1, scale: 1, rect: { x: 0, y: 0, w: 1, h: 1 }, visible: false }), /not on screen: the last frame it showed/);
+	assert.match(shotText(13, { path: "/p.png", w: 1, h: 1, bytes: 9, seq: 1, tick: 1, scale: 1, rect: { x: 0, y: 0, w: 1, h: 1 }, visible: false }), /not on screen \(no pane shows it\): the last frame it showed/);
 	assert.ok(APP_IMAGE_MAX >= 1_000_000);
 	assert.deepEqual(appInputEvents([{ event: "key", action: "down", key: "w" }]), [{ event: "key", action: "down", key: "w" }]);
 	for (const bad of [[], "key w", [{ action: "down" }], [{ event: "key", type: "tab.quit" }], [{ event: "key", source: "user" }], [3]]) assert.throws(() => appInputEvents(bad as any), /event/);

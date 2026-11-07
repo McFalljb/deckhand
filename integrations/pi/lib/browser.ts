@@ -266,7 +266,7 @@ export function readText(tab: number, d: R): string {
 /** browser_screenshot's text (the PNG goes as an image). */
 export function screenshotText(tab: number, d: R): string {
 	const r = d?.rect ?? {};
-	const where = d?.on_screen === false ? " The tab is not on screen: Deckhand painted it for this, unseen." : "";
+	const where = d?.on_screen === false ? " The tab is not on screen (no pane shows it): Deckhand painted it for this, unseen." : "";
 	return `Tab ${tab}'s page: ${d?.w}×${d?.h} px at scale ${d?.scale}${r.x || r.y ? ` (from ${r.x},${r.y} px)` : ""}, PNG ${d?.bytes} bytes.${where}\n${SHOT_NOTE}`;
 }
 

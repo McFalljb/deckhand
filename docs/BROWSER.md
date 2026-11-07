@@ -785,7 +785,11 @@ PROTOCOL.md "Browser tabs" has the commands' fields, data and codes.
   the same way (an upload waiting at its bar is not "running"), synchronously before their input
   is forwarded. Take over and Hand back share a place: a click within 500 ms of the last toggle
   (a double click) is ignored. The tab's dot and the sidebar's "… is using a page" linger 5 s
-  after the last action. The address field gives the strip its room, so its buttons always show.
+  after the last action. The address field gives the strip its room, so its buttons always show;
+  a pane too narrow for the strip beside the least address puts it on a row of its own under
+  the toolbar (its buttons whole down to the least pane width), and the palette has Take over,
+  Hand back and Stop for the page in the focused pane. A pane's bars are each at most its width
+  and clipped there; a press is a bar's only inside its pane (`pane_inside`).
 - **Log**: typed text is never logged or sent to other subscribers (its size only).
 
 Not built: drag; per-site permissions or Ask (decision 4); actions inside iframes (the agent can
@@ -905,7 +909,7 @@ on (bot detection, §1.3): everything goes through CEF's C API.
 | Context menu | Chromium's own is emptied; Deckhand's menu: Back, Forward, Reload; over a link **Open link in new tab** (`browser_open` in the tab's **own** session) and Copy link; Cut, Copy, Paste, Select all as the page allows; Inspect | the menu | unit `browser_menu_link_stays_in_session`; scene: new tab in the same session, field menu rows |
 | JS dialogs | alert, confirm, prompt, beforeunload (Leave / Stay; on reload: Reload / Stay) as a bar; the page waits; State `dialog` | OK, Cancel, prompt field | scene: all four |
 | Find | ⌘F (browser tab on screen), Edit ▸ Find in page, ⋯; find as you type, "N of M", ‹ › (Enter, ⇧Enter, ⌘G, ⇧⌘G), × or Esc; State `find` | bar | scene: counts and highlight pixels |
-| Zoom | ⌘+ ⌘− ⌘0 with a browser tab on screen (else the text size, as before), View ▸ Zoom page in/out/Page actual size, ⋯, the toolbar chip ("125%", click: 100%); Chrome's steps 25 %–500 %; Chromium keeps it per host; polled each frame for the tab on screen; State `zoom`; comment mode's CSS-to-tab mapping takes it (`Annot.zoom`) | ⋯, chip, View menu | unit `browser_zoom_steps`; scene `browser-polish-zoom`: pick, marker, crop and area at 150 % |
+| Zoom | ⌘+ ⌘− ⌘0 with a browser tab on screen (else the text size, as before), View ▸ Zoom page in/out/Page actual size, ⋯, the toolbar chip ("125%", click: 100%); Chrome's steps 25 %–500 %; Chromium keeps it per host; polled each frame for every tab on screen (any pane's); State `zoom`; comment mode's CSS-to-tab mapping takes it (`Annot.zoom`) | ⋯, chip, View menu | unit `browser_zoom_steps`; scene `browser-polish-zoom`: pick, marker, crop and area at 150 % |
 | Downloads | to `~/Downloads` (test mode: the data folder's `downloads/`); `download_safe_name` (no folder part, control or bidi characters, `:`, leading dots or spaces; ≤ 200 bytes, extension kept; "download" when empty); `download_reserve` makes the file with `O_CREAT|O_EXCL|O_NOFOLLOW` (an existing file is never overwritten: "name (1).ext"), and CEF writes there; the quarantine flag is set when it lands (Chromium's CEF build sets only "where from"); a bar with progress, Cancel, Open, Show in Finder, ×; State `downloads` | bar; ⋯ Show downloads folder | unit `browser_download_safe_names`, `browser_download_never_overwrites`; scene: two downloads, safe name, "(1)", quarantine xattr |
 | Blocked popup | the bar for `blocked_popup`: Open (a new tab in the **opener's** session), × | bar; palette | unit `browser_popup_opens_in_session`; scene |
 | Permissions | notifications, location, camera, microphone (CEF's prompt and media-access handlers): a bar, Allow / Block, this time only; anything else is refused. The app's Info.plist now has camera, microphone and location usage strings | bar | scenes `browser-polish` (Block → denied) and `browser-polish-allow` (Allow → granted) |
@@ -1019,10 +1023,12 @@ Scenes: `browser-polish`, `browser-polish-allow`, `browser-polish-zoom`, `browse
 - **Pages** (`browser_page_plan`, pure, unit test `browser_page_planning`; scene
   `browser-pages`): CEF has 8 browser slots for the whole app, so not every tab can hold a page.
   Each tick plans which tabs have one (no per-session cap):
-  - **only the user unloads a page.** The tab on screen gets a page first (only the user puts a
-    tab on screen: an agent's `browser_open` opens behind the session's active tab). With every
-    slot taken, the least recently shown hidden page goes for it: its own session's first, then
-    any session's. A popup whose browser is on its way is never unloaded.
+  - **only the user unloads a page.** The tabs on screen (one per pane showing a page) get a
+    page first (only the user puts a tab on screen: an agent's `browser_open` opens behind the
+    session's active tab). With every slot taken, the least recently shown hidden page goes for
+    each: its own session's first, then any session's; never one twice, never one on screen. A
+    popup whose browser is on its way is never unloaded. Every page on screen is shown now
+    (`shown_at`), so the least recently shown is never one in a pane.
   - every other tab that wants a page (an agent's, a background popup's) loads while a slot is
     free, the first to ask first; otherwise it waits, showing "Too many open pages: this one opens
     when another closes", and loads when a slot frees. It never unloads anything.

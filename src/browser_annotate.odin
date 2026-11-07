@@ -714,7 +714,7 @@ annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	overlay := palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()
 	covered := overlay || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
 	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !covered {
-		if inside(cid("annot_toggle"), e.mouse_x, e.mouse_y) {
+		if cinside("annot_toggle", e.mouse_x, e.mouse_y) {
 			annot_set(b, !a.on)
 			return true
 		}
@@ -817,8 +817,11 @@ clip_rect :: proc(r: [4]f32, x, y, w, h: f32) -> (out: [4]f32, ok: bool) {
 
 // The overlay over the page: markers (outline, numbered badge or edge arrow), the picked
 // element while its comment is being written, the hover outline and its label, a drag's area.
+// Each drawn frame starts with no badges (main.odin): every pane's page adds its own (their rects
+// are in its pane, so a click finds the one under it).
+annot_frame_begin :: proc() {clear(&badges)}
+
 annot_draw :: proc(tab_id: u64, x, y, w, h: f32) {
-	clear(&badges)
 	a := annots[tab_id]
 	if a == nil do return
 	th := theme()

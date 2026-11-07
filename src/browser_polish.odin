@@ -283,12 +283,12 @@ Page_Extra :: struct {
 	ask_url:          string, // owned: the waiting download's address
 	bars_sig:         string, // owned: which bars the tab shows (page_bars_sig)
 	bars_changed_at:  time.Tick, // when that changed, or the tab came on screen (bars_click_ok)
+	bars_on_screen:   bool, // its bars were on screen at the last note (any pane: one guard per tab)
 }
 
 // ---- pure: review round 2 ----
 
 BARS_GUARD :: 500 * time.Millisecond
-page_bars_tab: u64 // the tab whose bars were on screen last
 
 // Which bars the tab shows, from state (not layout): each bar's kind and its request.
 page_bars_sig :: proc(tab_id: u64) -> string {
@@ -312,8 +312,8 @@ page_bars_sig :: proc(tab_id: u64) -> string {
 // when its set of bars changed or when it has just come on screen.
 bars_note :: proc(tab_id: u64, now: time.Tick) {
 	p := page_extra(tab_id)
-	if tab_id != page_bars_tab {
-		page_bars_tab = tab_id
+	if !p.bars_on_screen {
+		p.bars_on_screen = true
 		p.bars_changed_at = now
 	}
 	if sig := page_bars_sig(tab_id); sig != p.bars_sig {
@@ -487,6 +487,7 @@ page_prompt_field: Text_Field
 page_prompt_tab: u64
 page_pointer: [2]f32 // the pointer over the page (framebuffer px; the tooltip goes there)
 page_pointer_in: bool
+page_pointer_tab: u64 // the page the pointer is over (its pane's: its shape and tooltip)
 page_revealed: string // test mode: the last download shown in Finder
 @(private = "file")
 next_download_id: u64
@@ -1112,7 +1113,7 @@ on_page_cursor :: proc "c" (id: c.int, type: c.int) {
 	b, p := page_by_cef(id)
 	if b == nil do return
 	p.cursor = cef_cursor(int(type))
-	if b == tab_browser() && page_pointer_in && !annot_on(b) && sapp.get_mouse_cursor() != p.cursor do sapp.set_mouse_cursor(p.cursor)
+	if b.tab_id == page_pointer_tab && page_pointer_in && !annot_on(b) && sapp.get_mouse_cursor() != p.cursor do sapp.set_mouse_cursor(p.cursor)
 }
 
 // cef_cursor_type_t -> sokol's pointer shapes (the nearest; the rest: the arrow).
@@ -1365,7 +1366,7 @@ browser_polish_tick :: proc() {
 		page_free(page_extras[id])
 		delete_key(&page_extras, id)
 	}
-	on_screen := tab_browser()
+	on_screen := tab_browser() // the focused pane's page: its find and prompt fields
 	for id, b in browsers {
 		p := page_extra(id)
 		if b.cef != p.cef {
@@ -1380,7 +1381,7 @@ browser_polish_tick :: proc() {
 			p.crashed = false
 			browser_report({tab_id = id})
 		}
-		if b != on_screen do continue
+		if !tab_on_screen(id) do continue // every page on screen (any pane's)
 		// zoom is Chromium's per host (another tab, a navigation): follow it
 		if pd_cef_ready(b.cef) != 0 {
 			if z := pd_cef_zoom_get(b.cef); abs(z - p.zoom_level) > 0.0001 {
@@ -1418,9 +1419,11 @@ browser_polish_tick :: proc() {
 // the once-a-second limit are reported once the second has passed. True: something changed.
 browser_polish_pending_tick :: proc() -> bool {
 	changed := false
-	// the bars' click guard follows the tab on screen and its bars (bars_note)
-	if b := tab_browser(); b != nil do bars_note(b.tab_id, time.tick_now())
-	else do page_bars_tab = 0
+	// the bars' click guard follows every tab on screen and its bars (bars_note); one that left
+	// the screen starts again when it comes back
+	now := time.tick_now()
+	for id, b in browsers do if tab_on_screen(id) do bars_note(b.tab_id, now)
+	for id, p in page_extras do if p.bars_on_screen && !tab_on_screen(id) do p.bars_on_screen = false
 	for id, p in page_extras {
 		if !p.popup_dirty || time.tick_diff(p.popup_said, time.tick_now()) < time.Second do continue
 		p.popup_said, p.popup_dirty = time.tick_now(), false
@@ -1487,7 +1490,7 @@ over_overlay :: proc() -> bool {
 }
 
 @(private = "file")
-hit :: proc(name: string, e: ^sapp.Event) -> bool {return inside(cid(name), e.mouse_x, e.mouse_y)}
+hit :: proc(name: string, e: ^sapp.Event) -> bool {return cinside(name, e.mouse_x, e.mouse_y)} // within its pane (pane_inside)
 
 // The user's own click or key reached the page (browser.odin, as it sends it): a download the
 // page starts in the next DOWNLOAD_GESTURE goes without asking, once (download_take).
@@ -1543,7 +1546,13 @@ pg_bar_at :: proc(e: ^sapp.Event) -> Pg_Bar {
 // prompt fields; the pointer's shape over the page. True if it took the event.
 browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 	b := pane_browser(pn)
-	if b == nil do return false
+	if b == nil {
+		if e.type == .MOUSE_MOVE && page_pointer_in { // over another pane now: no page's tooltip
+			page_pointer_in, page_pointer_tab = false, 0
+			app.redraw = true
+		}
+		return false
+	}
 	p := page_extra(b.tab_id)
 	mods := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT)
 	#partial switch e.type {
@@ -1663,7 +1672,9 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 		in_pg := pane.z > 0 && e.mouse_x >= pane.x && e.mouse_y >= pane.y && e.mouse_x < pane.x + pane.z && e.mouse_y < pane.y + pane.w
 		in_pg = in_pg && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y))
 		if in_pg != page_pointer_in || (in_pg && p.tooltip != "") do app.redraw = true
+		if in_pg && page_pointer_tab != b.tab_id do app.redraw = true // another pane's page
 		page_pointer_in, page_pointer = in_pg, {e.mouse_x, e.mouse_y}
+		page_pointer_tab = in_pg ? b.tab_id : 0
 		if in_pg && b.cef != 0 && !annot_on(b) && sapp.get_mouse_cursor() != p.cursor do sapp.set_mouse_cursor(p.cursor)
 	case .MOUSE_LEAVE:
 		page_pointer_in = false
@@ -1716,7 +1727,8 @@ pg_field :: proc(box, text_id: clay.ElementId, f: ^Text_Field, placeholder: stri
 pg_bar :: proc() -> clay.ElementDeclaration {
 	th := theme()
 	return {
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}
@@ -1726,7 +1738,7 @@ pg_bar :: proc() -> clay.ElementDeclaration {
 @(private = "file")
 pg_room :: proc(reserve: f32) -> f32 {
 	room := px(300)
-	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(d.boundingBox.width - reserve, px(80))
+	if d := clay.GetElementData(cid("browser_bar")); d.found do room = max(min(d.boundingBox.width, pane_width()) - reserve, px(80)) // never wider for a wide bar
 	return room
 }
 
@@ -1899,7 +1911,7 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 		}
 	}
 	// the page's tooltip (its title text) under the pointer
-	if p != nil && p.tooltip != "" && page_pointer_in && b.cef != 0 && !annot_on(b) {
+	if p != nil && p.tooltip != "" && page_pointer_in && page_pointer_tab == b.tab_id && b.cef != 0 && !annot_on(b) {
 		w, h := f32(sapp.width()), f32(sapp.height())
 		tw := text_w(p.tooltip, FONT_UI_SMALL) + px(2 * SP_2)
 		tw = min(tw, w - px(2 * SP_1))

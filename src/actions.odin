@@ -144,6 +144,22 @@ ACTIONS := [?]Action {
 		p := page_extras[b.tab_id]
 		return Browser_Devtools{tab_id = b.tab_id, x = -1, y = -1, close = p != nil && p.devtools}, true
 	}},
+	// the agent strip's buttons (browser_agent.odin), also when a narrow pane cuts its toolbar short
+	{id = "browser_agent_takeover", label = "Browser: take over from the agent", make = proc() -> (Command, bool) {
+		t := browser_agent_shown()
+		if t == nil || t.user_control do return nil, false
+		return Browser_Agent_Take_Over{tab_id = t.tab_id, on = true}, true
+	}},
+	{id = "browser_agent_handback", label = "Browser: hand back to the agent", make = proc() -> (Command, bool) {
+		t := browser_agent_shown()
+		if t == nil || !t.user_control do return nil, false
+		return Browser_Agent_Take_Over{tab_id = t.tab_id, on = false}, true
+	}},
+	{id = "browser_agent_stop", label = "Browser: stop the agent", make = proc() -> (Command, bool) {
+		t := browser_agent_shown()
+		if t == nil do return nil, false
+		return Browser_Agent_Stop{t.tab_id}, true
+	}},
 	{id = "browser_external", label = "Browser: open in default browser", make = proc() -> (Command, bool) {
 		bt, id := browser_shown()
 		if bt == nil || !browser_external_ok(bt.url) do return nil, false

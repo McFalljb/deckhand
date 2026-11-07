@@ -276,6 +276,7 @@ frame :: proc "c" () {
 	}
 
 	editors_frame_begin() // an editor takes hits only where this frame draws it (editor_view.odin)
+	annot_frame_begin() // and comment badges where this frame draws them (browser_annotate.odin)
 	draw_begin(w, h)
 	// chrome, the current tab, the sliding drawer, then the palette, menus, popover, sheet, tooltip
 	overlay := cmds.length
@@ -283,10 +284,9 @@ frame :: proc "c" () {
 	drawer_at := min(ui_overlay_start(cmds, "drawer"), overlay)
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
-	// the tab each pane shows, in its pane; marked text in the focused one's (panes.odin). A page
-	// or an app in a pane without the keyboard: its "Click to show" placeholder instead (the plan's P4)
+	// the tab each pane shows, in its pane (pages and apps too); marked text in the focused one's (panes.odin)
 	if cs := cur(); cs != nil && len(cs.panes) > 1 {
-		for &p in cs.panes do if !pane_placeholder(cs, &p) do pane_draw(&p, t, typing)
+		for &p in cs.panes do pane_draw(&p, t, typing)
 	} else if p := focused_pane(); p != nil {
 		pane_draw(p, t, typing)
 	} // else the layout's empty state shows
@@ -500,7 +500,7 @@ event :: proc(e: ^sapp.Event) {
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
 	// a press on a pane divider drags it; a press in a pane without the keyboard focuses it first,
-	// then acts in it (a "Click to show" placeholder's only focuses: ui_panes.odin)
+	// then acts in it, a page or an app too (click-through: ui_panes.odin)
 	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) {
 		if split := pane_divider_at(e.mouse_x, e.mouse_y); split != 0 {
 			pane_divider_press(split, app.clicks)
@@ -508,13 +508,13 @@ event :: proc(e: ^sapp.Event) {
 			return
 		}
 	}
-	if e.type == .MOUSE_DOWN && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) && pane_press(e) do return
+	if e.type == .MOUSE_DOWN && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do pane_press(e)
 	// the per-tab handlers get the pane the event is for: the pointer's (the press's while a
 	// button is held), the focused one's for keys; their Clay ids are its (cid)
 	fp := event_pane(e)
+	if e.type == .MOUSE_MOVE do pane_pointer_moved(e) // the pane it left hears it leave (ui_panes.odin)
 	old_ids := ids_pane_begin(fp)
 	defer ids_pane_end(old_ids)
-	if pointer_over_placeholder(e) do return
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
 	if editor_bar_focused() && editor_bar_event(focused_pane(), e) do return // its field has the keyboard
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
@@ -924,8 +924,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 				ui_do(Set_Focus{""}) // a click outside closes it (and does nothing else)
 				return true
 			}
-			if !inside(box_id, e.mouse_x, e.mouse_y) do return true
-		} else if !inside(box_id, e.mouse_x, e.mouse_y) {
+			if !field_inside(box_id, e.mouse_x, e.mouse_y) do return true
+		} else if !field_inside(box_id, e.mouse_x, e.mouse_y) {
 			// a click outside the field ends editing (and is handled normally)
 			ime_cancel()
 			ui_do(Set_Focus{""})

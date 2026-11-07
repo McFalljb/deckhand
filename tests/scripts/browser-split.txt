@@ -1,0 +1,53 @@
+# A page live in a pane without the keyboard (docs/plans/split-panes.md P4; tests/scripts/browser.sh):
+# beside the pi tab's pane it keeps painting and loading, is not hidden from CEF, gets no keys,
+# and its CEF view is its own pane's size (a divider drag resizes it). A click in it gives its pane
+# the keyboard and reaches the page; an agent's screenshot says it is on screen.
+wait 1500
+web_open tests/web/browser.html
+web_waitpaint 10000
+web_title ready 5000
+web_assert view 779x784
+# the page splits off into its own pane right of the pi tab's (⇧⌃⌘→); the keyboard goes back left
+key right cmd ctrl shift
+waitstate 5000 open_sessions.0.panes.# 2
+assert_state open_sessions.0.focused_pane $pane1
+key left cmd ctrl
+assert_state open_sessions.0.focused_pane $pane0
+wait 300
+# on screen, painting, without keys
+assert_state open_sessions.0.tabs.1.on_screen true
+web_assert hidden no
+web_assert focused no
+web_assert view 389x744
+web_js document.getElementById('swatch').style.background = '#0000ff'
+web_pixel 300 40 0000FF 5000
+shot browser-split/beside-pi
+# keys go to the pi tab's pane, not the page
+type zz
+web_js document.title = 'chk1 z=' + keys.includes('KeyZ')
+web_title chk1 z=false
+# a click in the page: its pane gets the keyboard and the page the click (click-through)
+web_click 120 50
+web_title ready c=1 5000
+assert_state open_sessions.0.focused_pane $pane1
+web_assert focused yes
+web_click 170 130
+type ab
+web_title v=ab 5000
+# the divider moves: the page's view follows its pane
+wait 700
+divider pane 0 120
+wait 800
+web_assert view 268x744
+web_js document.title = 'w=' + innerWidth
+web_title w=268 5000
+# (after the resize: the agent's strip, on its own row in a pane this narrow, would take the
+# page's height)
+# an agent's screenshot of the page while the pi tab's pane has the keyboard: it is on screen
+key left cmd ctrl
+pi_command {"type":"browser_tabs"}
+assert_result data.tabs.0.on_screen true
+pi_command {"type":"browser_screenshot","tab_id":$ptab1}
+assert_finished ok true
+assert_finished data.on_screen true
+quit

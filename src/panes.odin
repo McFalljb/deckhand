@@ -120,21 +120,7 @@ session_focused_tab :: proc(s: ^Open_Session) -> ^Tab {
 session_tab_shown :: proc(s: ^Open_Session, tab_id: u64) -> bool {
 	if s == nil || tab_id == 0 do return false
 	if len(s.panes) == 0 do return s.active_tab == tab_id
-	for &p in s.panes do if p.active == tab_id do return !pane_placeholder(s, &p)
-	return false
-}
-
-// Pane p of a split session shows a page or an app without having the keyboard: until those are
-// live in every pane (the plan's P4) it shows "Click to show" instead, a click only focuses it,
-// and its tab is not on screen (not seen, not visible to the page plan).
-pane_placeholder :: proc(s: ^Open_Session, p: ^Pane) -> bool {
-	if s == nil || p == nil || len(s.panes) <= 1 || p.id == s.focused_pane do return false
-	for t in s.tabs do if t.id == p.active {
-		#partial switch _ in t.kind {
-		case Browser_Tab, App_Tab: return true
-		}
-		return false
-	}
+	for p in s.panes do if p.active == tab_id do return true // every pane's: pages and apps too (live in every pane)
 	return false
 }
 
@@ -728,6 +714,24 @@ ids_pane :: proc() -> ^Pane {return ids_pane_at != nil ? ids_pane_at : focused_p
 
 cid :: proc(name: string, i: u32 = 0) -> clay.ElementId {return pidi(ids_pane(), name, int(i))}
 
+// A pane's element (cid/pid) under x, y as the pane shows it: inside its box and its pane's frame.
+// A bar is clipped to its pane; what is cut off there is never hit (a box can reach into the
+// next pane or a column while its pane gets the event: event_pane's focused pane off any pane).
+pane_inside :: proc(p: ^Pane, id: clay.ElementId, x, y: f32) -> bool {
+	if !inside(id, x, y) do return false
+	if p == nil || p.frame.z <= 0 do return true // not laid out yet
+	f := p.frame
+	return x >= f.x && x < f.x + f.z && y >= f.y && y < f.y + f.w
+}
+
+// pane_inside for the ids of the pane the event is for (cid).
+cinside :: proc(name: string, x, y: f32, i: u32 = 0) -> bool {return pane_inside(ids_pane(), cid(name, i), x, y)}
+
+// A bar's width across its pane: grows to the pane, never past it (with clip = {horizontal =
+// true} on the bar: its content's width is never its minimum, so one wide bar does not stretch
+// the others or the pane).
+bar_w :: proc() -> clay.SizingAxis {return clay.SizingGrow({max = pane_width()})}
+
 // The width (framebuffer px) the per-tab bars of the pane being laid out have: the centre's with
 // one pane, else that pane's (its last layout, else its place in the tree).
 pane_width :: proc() -> f32 {
@@ -735,8 +739,10 @@ pane_width :: proc() -> f32 {
 	if s == nil || len(s.panes) <= 1 do return centre_width()
 	p := ids_pane()
 	if p == nil do return centre_width()
-	if p.rect.z > 0 do return p.rect.z
+	// its place in the tree in the centre (as laid out: not its content's last width, which a bar
+	// wider than the pane would feed back into)
 	if app.centre.z > 0 do for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
+	if p.rect.z > 0 do return p.rect.z
 	return centre_width()
 }
 

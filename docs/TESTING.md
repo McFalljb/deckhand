@@ -104,6 +104,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | Scene | Protects | Secs | Flags |
 |---|---|---|---|
 | `browser-a` … `-f` | the browser tab (24 scripts in six groups of ~35–45 s): rendering, input, polish (downloads quarantined, zoom, guards), focus, keys, popup slots, close/release, the frame ring on both paint paths and a slow GPU, comment mode, agents reading and acting on pages, navigation, popups, restore; every socket of every run is loopback only; the profile is 0700 | ~230 | |
+| `browser-g` | pages and apps live in every pane (split panes P4): a page beside the pi tab's pane paints, is not hidden, gets no keys, its view is its pane's (a divider drag resizes it), a click gives its pane the keyboard, an agent's screenshot says on screen; the fake app beside a page frames on, is never told hidden, takes clicks at its own coordinates and keys once focused, and gets a ring of its new pane size | ~30 | |
 | `browser-rlz` | Chromium never reads or writes the Google Chrome files in the home folder (RLZ, brand, enrollment, Skia, Local State) during a 100 s idle | 105 | idle by design (an RLZ ping was once seen at ~80 s) |
 | `reload` | pi hot reload: settings/extension edits, queued reloads, version bump restart offer | 62 | |
 | `changes` | the Changes tab: list, diffs, stage/unstage, discard to the (test) Trash, commit with the user's hook | 49 | |

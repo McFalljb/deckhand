@@ -15,6 +15,7 @@ import "core:os"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -388,7 +389,7 @@ panes_keyboard_targets :: proc(t: ^testing.T) {
 	testing.expect(t, app_wants_keys(ap) && !browser_wants_keys(br), "B's app now")
 	// B's app on screen but A focused: no keys for it
 	session_show_tab(x.s, x.shell)
-	testing.expect(t, !tab_on_screen(x.app_id), "B's app behind its \"Click to show\" placeholder (until the plan's P4)")
+	testing.expect(t, tab_on_screen(x.app_id), "B's app is still on screen (live in every pane)")
 	testing.expect(t, !app_wants_keys(ap), "not focused: no keys")
 	session_show_tab(x.s, x.app_id)
 	state.focus_widget = "palette"
@@ -903,38 +904,6 @@ panes_snapshot :: proc(t: ^testing.T) {
 	for w in want do testing.expectf(t, strings.contains(js, w), "snapshot has %s", w)
 }
 
-// The P2 placeholder: a page or an app shown in a pane without the keyboard is not on screen (not
-// seen), and a press there only focuses its pane; a terminal there is live.
-@(test)
-panes_placeholder :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	x := pt_two()
-	defer pt_two_done(x)
-	testing.expect(t, tab_on_screen(x.browser), "B focused: its page is live")
-	run_command(Focus_Pane{pane = x.a}, PT_UI)
-	testing.expect(t, pane_placeholder(x.s, session_pane(x.s, x.b)), "B's page without the keyboard")
-	testing.expect(t, !tab_on_screen(x.browser), "a placeholder is not on screen")
-	testing.expect(t, tab_on_screen(x.shell), "A's shell is")
-	x.s.tabs[3].unseen = true // the browser
-	status_seen(x.s)
-	_, br, _ := find_tab(x.browser)
-	testing.expect(t, br.unseen, "not seen behind its placeholder")
-	// a press in B (laid out right of A): focuses B and is used up; moves over it go nowhere
-	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
-	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
-	mv := sapp.Event{type = .MOUSE_MOVE, mouse_x = 150, mouse_y = 50}
-	testing.expect(t, pointer_over_placeholder(&mv), "a move over the placeholder is used up")
-	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
-	testing.expect(t, pointer_over_placeholder(&e), "the placeholder's press is swallowed")
-	inbox_drain()
-	testing.expect_value(t, x.s.focused_pane, x.b)
-	testing.expect(t, tab_on_screen(x.browser), "live once focused")
-	testing.expect(t, !pointer_over_placeholder(&e), "and no placeholder any more")
-	// A's terminal is no placeholder
-	e.mouse_x = 50
-	testing.expect(t, !pointer_over_placeholder(&e), "a terminal pane takes its events")
-}
-
 // A split session laid out (1400 × 860, the default columns): one strip per pane and none of its
 // tabs in the title bar; the panes' rects from their pane_body, side by side with a divider
 // between; a tab in the second strip and its "+" are hit there (ids by tab index and pane slot);
@@ -1002,7 +971,7 @@ panes_press_keeps_its_drag :: proc(t: ^testing.T) {
 	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
 	drags_follow_focus()
 	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 50, mouse_y = 50, mouse_button = .LEFT}
-	testing.expect(t, !pane_press(&e), "click-through")
+	pane_press(&e) // click-through
 	x.term.mouse_down = true // the selection term_mouse_down starts
 	drags_follow_focus() // the next event
 	testing.expect(t, x.term.mouse_down, "the press's own drag survives the focus change")
@@ -1086,8 +1055,8 @@ panes_divider_drag :: proc(t: ^testing.T) {
 }
 
 // A press in a pane without the keyboard focuses it at once (pane_press, before the handlers):
-// on a "Click to show" placeholder that is all it does; in a terminal the click goes on there
-// (click-through) and the pane holds the press until the release.
+// then the click goes on there (click-through: a page gets it, and the keyboard), and the pane
+// holds the press until the release.
 @(test)
 panes_press_focuses_its_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -1097,12 +1066,12 @@ panes_press_focuses_its_pane :: proc(t: ^testing.T) {
 	session_pane(x.s, x.a).rect = {0, 0, 100, 100}
 	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
 	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
-	testing.expect(t, pane_press(&e), "the placeholder's press is swallowed")
+	pane_press(&e) // on B's page: focuses B, and the click goes on to the page (click-through)
 	testing.expect_value(t, x.s.focused_pane, x.b)
-	testing.expect(t, tab_on_screen(x.browser), "live once focused")
+	testing.expect(t, browser_wants_keys(browsers[x.browser]), "the page has the keyboard now")
 	pane_release()
 	e.mouse_x = 50
-	testing.expect(t, !pane_press(&e), "click-through")
+	pane_press(&e)
 	testing.expect_value(t, x.s.focused_pane, x.a)
 	testing.expect_value(t, pointer_capture.pane, x.a)
 	pane_release()
@@ -1172,9 +1141,9 @@ panes_field_in_second_pane :: proc(t: ^testing.T) {
 	testing.expect_value(t, box_id.id, pid(session_pane(x.s, x.b), "br_url_box").id)
 }
 
-// A placeholder under an overlay (the palette) or the agent's drawer takes no events.
+// A press under an overlay (the palette) or the agent's drawer focuses no pane and holds none.
 @(test)
-panes_placeholder_under_an_overlay :: proc(t: ^testing.T) {
+panes_press_under_an_overlay :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	x := pt_two()
 	defer pt_two_done(x)
@@ -1183,13 +1152,11 @@ panes_placeholder_under_an_overlay :: proc(t: ^testing.T) {
 	session_pane(x.s, x.b).rect = {101, 0, 100, 100}
 	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 150, mouse_y = 50, mouse_button = .LEFT}
 	state.focus_widget = "palette"
-	testing.expect(t, !pointer_over_placeholder(&e), "the palette's click")
-	testing.expect(t, !pane_press(&e), "nor a press")
+	pane_press(&e) // the palette's click
 	state.focus_widget = ""
 	inbox_drain()
 	testing.expect_value(t, x.s.focused_pane, x.a)
-	testing.expect(t, pointer_over_placeholder(&e), "without it: the placeholder's")
-	inbox_drain()
+	testing.expect_value(t, pointer_capture.pane, u64(0))
 }
 
 // The editor's find bar keeps the keyboard when the pointer moves over another pane; the bar's
@@ -1282,4 +1249,302 @@ panes_terminal_rect_ignores_other_tabs_bars :: proc(t: ^testing.T) {
 	pa.rect = {0, 140, 500, 460} // under a Changes tab's header
 	session_show_tab(x.s, x.pi, focus = false) // A shows its pi tab: the shell is hidden
 	testing.expect_value(t, term_target_rect(x.shell), [4]f32{0, TAB_STRIP_H, 500, 600 - TAB_STRIP_H})
+}
+
+// ---- P4: browser and app tabs live in every pane ----
+
+// A page or an app shown in a pane without the keyboard is on screen (drawn, seen, visible to the
+// page plan and the app), but only the focused one gets keys.
+@(test)
+panes_texture_tabs_live_in_every_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	run_command(Focus_Pane{pane = x.a}, PT_UI) // A's shell has the keyboard; B shows its page
+	testing.expect(t, tab_on_screen(x.browser), "B's page is on screen")
+	testing.expect(t, !browser_wants_keys(browsers[x.browser]), "but has no keys")
+	for &tab in x.s.tabs do tab.unseen = true
+	status_seen(x.s)
+	_, br, _ := find_tab(x.browser)
+	testing.expect(t, !br.unseen, "seen in B")
+	session_show_tab(x.s, x.app_id, focus = false)
+	testing.expect(t, tab_on_screen(x.app_id), "B's app is on screen")
+	testing.expect(t, !app_wants_keys(apps[x.app_id]), "without keys")
+	// the agent's view: browser_tabs says on screen for B's page
+	session_show_tab(x.s, x.browser, focus = false)
+	r := run_command(Browser_Tabs{session = x.s.id}, {kind = .Control})
+	testing.expectf(t, strings.contains(r.data, `"on_screen":true`), "browser_tabs: %s", r.data)
+}
+
+// Several visible pages and no free slot: each takes a different hidden page's slot, never the
+// same one twice, and never a visible one's; one that finds none waits.
+@(test)
+panes_page_plan_several_visible :: proc(t: ^testing.T) {
+	pages := []Page_Info {
+		{session = 1, wants = true, visible = true, shown = 10},
+		{session = 1, wants = true, visible = true, shown = 11},
+		{session = 1, live = true, shown = 5}, // hidden: the one victim
+		{session = 1, live = true, visible = true, shown = 12}, // on screen in a third pane: never
+	}
+	p := browser_page_plan(pages, 0)
+	testing.expect_value(t, len(p.unload), 1)
+	testing.expect_value(t, len(p.load), 1)
+	testing.expect_value(t, len(p.wait), 1)
+	if len(p.unload) == 1 do testing.expect_value(t, p.unload[0], 2)
+}
+
+// The bars' click guard is per tab: two pages on screen at once keep their own "bars unchanged
+// since"; a tab that leaves the screen starts its guard again when it comes back.
+@(test)
+panes_bars_guard_per_tab :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	other := new_id()
+	pane_add_tab(x.s, Tab{id = other, kind = Browser_Tab{url = "about:blank"}, title = "Other", status = .Running}, pane = x.a)
+	br := new(Browser)
+	br.tab_id = other
+	browsers[other] = br
+	defer delete_key(&browsers, other)
+	session_show_tab(x.s, other, focus = false) // A shows Other, B the browser: both on screen
+	t0 := time.tick_now()
+	bars_note(x.browser, t0)
+	bars_note(other, t0)
+	later := time.tick_add(t0, BARS_GUARD + time.Millisecond)
+	bars_note(other, later)
+	testing.expect(t, bars_click_ok(x.browser, later), "B's bars stayed: its click counts")
+	testing.expect(t, bars_click_ok(other, later), "and A's")
+	// Other leaves the screen and comes back: its guard starts again
+	session_show_tab(x.s, x.shell, focus = false)
+	browser_polish_pending_tick()
+	session_show_tab(x.s, other, focus = false)
+	testing.expect(t, !bars_click_ok(other, time.tick_add(later, time.Millisecond)), "just came back")
+}
+
+// A page's toolbar wider than its narrow pane (buttons, an agent's strip) hides its end: the pane
+// and its content keep their share of the centre, so the page's view is its pane's size.
+@(test)
+panes_bars_never_widen_a_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	for _ in 0 ..< 3 {
+		_ = ui_layout(800, 860) // the centre: 500 wide, B about 250
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	bar := clay.GetElementData(pid(pb, "browser_bar"))
+	testing.expect(t, bar.found, "B's toolbar laid out")
+	testing.expectf(t, abs(pb.rect.z - pane_width_of(x.s, x.b)) < 1, "B's content keeps its share: %v, share %v (toolbar %v)", pb.rect, pane_width_of(x.s, x.b), bar.boundingBox.width)
+	testing.expectf(t, pb.frame.x + pb.frame.z <= 800 + 0.5, "inside the window: %v", pb.frame)
+}
+
+@(private = "file")
+pane_width_of :: proc(s: ^Open_Session, pane: u64) -> f32 {
+	for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == pane do return r.rect.z
+	return 0
+}
+
+// P4 review 1: a narrow right pane with the right column open, a page asking for a permission and
+// a prompt: each bar is its pane's width at most (one wide bar never stretches the others), and a
+// press beside the pane at a bar's height (the right column) is never a bar's: it grants nothing
+// and reaches the column.
+@(test)
+panes_bars_hit_only_inside_their_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	defer delete_key(&page_extras, x.browser)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}
+	p := page_extra(x.browser)
+	p.perm = PERM_NOTIFICATIONS
+	p.dialog, p.dialog_kind = true, .Prompt
+	W :: 1180 // the centre about 600: B about 300
+	for _ in 0 ..< 3 {
+		_ = ui_layout(W, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	right := pb.frame.x + pb.frame.z
+	testing.expectf(t, right < W - px(100), "the right column is beside B: %v", pb.frame)
+	for name in ([]string{"browser_bar", "pg_perm", "pg_dialog"}) {
+		d := clay.GetElementData(pid(pb, name))
+		testing.expectf(t, d.found, "%s laid out", name)
+		testing.expectf(t, d.boundingBox.x + d.boundingBox.width <= right + 0.5, "%s within B: %v, B ends at %v", name, d.boundingBox, right)
+	}
+	// presses right of B along every bar's row: none is a bar's (none sends a command)
+	old := ids_pane_begin(pb)
+	defer ids_pane_end(old)
+	for name in ([]string{"browser_bar", "pg_perm", "pg_dialog"}) {
+		d := clay.GetElementData(pid(pb, name))
+		y := d.boundingBox.y + d.boundingBox.height / 2
+		for xx := right + 2; xx < W - 2; xx += 8 {
+			e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = xx, mouse_y = y}
+			testing.expectf(t, !browser_polish_event(pb, &e), "%s's row at x=%v: the bars took it", name, xx)
+			testing.expectf(t, !browser_bar_click(pb, &e), "%s's row at x=%v: the toolbar took it", name, xx)
+			testing.expectf(t, !annot_event(pb, &e), "%s's row at x=%v: Annotate took it", name, xx)
+		}
+	}
+	inbox_drain()
+}
+
+// P4 review 2: at its least width a page's pane still shows the agent strip's buttons whole (the
+// address and the strip's text give way first): Take over / Hand back and Stop are always in reach.
+@(test)
+panes_agent_strip_buttons_fit_a_narrow_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	_, bt, _ := find_tab(x.browser)
+	bt.kind = Browser_Tab{url = "https://a-rather-long-host-name.example.com/and/a/long/path?with=a&query=too"}
+	x.s.nodes[0].ratio = 0.95 // B at its least width (clamped)
+	at := agent_tab(x.browser)
+	defer {delete_key(&agent_tabs, x.browser); free(at)}
+	at.want_console, at.want_net = true, true // the strip shows: "pi is recording console, network"
+	for handback in ([]bool{false, true}) {
+		at.user_control = handback
+		for _ in 0 ..< 3 {
+			_ = ui_layout(1100, 860)
+			ui_pane_rects(x.s)
+		}
+		pb := session_pane(x.s, x.b)
+		testing.expectf(t, abs(pb.frame.z - px(PANE_MIN_W)) < 2, "B at its least width: %v", pb.frame)
+		right := pb.frame.x + pb.frame.z
+		for name in ([]string{handback ? "br_agent_handback" : "br_agent_takeover", "br_agent_stop"}) {
+			d := clay.GetElementData(pid(pb, name))
+			testing.expectf(t, d.found, "%s laid out", name)
+			testing.expectf(t, d.boundingBox.x >= pb.frame.x && d.boundingBox.x + d.boundingBox.width <= right + 0.5, "%s whole in B: %v, B %v", name, d.boundingBox, pb.frame)
+			// and a press there is the button's
+			old := ids_pane_begin(pb)
+			e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = d.boundingBox.x + d.boundingBox.width / 2, mouse_y = d.boundingBox.y + d.boundingBox.height / 2}
+			testing.expectf(t, browser_bar_click(pb, &e), "a press on %s is the toolbar's", name)
+			ids_pane_end(old)
+		}
+	}
+	// the palette offers the strip's buttons too
+	at.user_control = true
+	testing.expect(t, pt_action_offered("browser_agent_handback"), "the palette's Hand back")
+	testing.expect(t, pt_action_offered("browser_agent_stop"), "the palette's Stop")
+	at.user_control = false
+	testing.expect(t, !pt_action_offered("browser_agent_handback"), "no Hand back while the agent has it")
+	testing.expect(t, pt_action_offered("browser_agent_takeover"), "the palette's Take over")
+	clear_inbox_for_test()
+}
+
+@(private = "file")
+pt_action_offered :: proc(id: string) -> bool {
+	for a in ACTIONS do if a.id == id {
+		_, ok := a.make()
+		return ok
+	}
+	return false
+}
+
+@(private = "file")
+clear_inbox_for_test :: proc() {
+	// what the presses queued: against stand-ins (no page), refused and gone
+	inbox_drain()
+}
+
+// P4 review 3: the pointer moving from one pane into another: the pane it left hears it leave
+// (an app's hover goes; a page gets CEF's mouse-leave), as when it leaves the window.
+@(test)
+panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	session_show_tab(x.s, x.app_id)
+	ap := apps[x.app_id]
+	ap.inspect = true // its hover is pi-desk's: a.hin says the pointer is over it
+	for _ in 0 ..< 3 {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(x.s)
+	}
+	pa, pb := session_pane(x.s, x.a), session_pane(x.s, x.b)
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expect(t, ap.hin, "over the app")
+	e = {type = .MOUSE_MOVE, mouse_x = pa.rect.x + pa.rect.z / 2, mouse_y = pa.rect.y + pa.rect.w / 2}
+	event(&e)
+	testing.expect(t, !ap.hin, "the pointer left the app's pane: its hover went")
+	inbox_drain()
+}
+
+// P4 round 2, 1: the focused prompt field reaching past its narrow pane's edge: a press there,
+// beside the pane, is not the field's (the field's editing ends; the press goes on as usual).
+@(test)
+panes_field_press_only_inside_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	defer delete_key(&page_extras, x.browser)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}
+	p := page_extra(x.browser)
+	p.dialog, p.dialog_kind = true, .Prompt
+	page_prompt_tab = x.browser
+	defer page_prompt_tab = 0
+	state.focus_widget = "browser_prompt"
+	W :: 1180
+	for _ in 0 ..< 3 {
+		_ = ui_layout(W, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	right := pb.frame.x + pb.frame.z
+	d := clay.GetElementData(pid(pb, "pg_prompt_box"))
+	if !testing.expectf(t, d.found && d.boundingBox.x + d.boundingBox.width > right + 4, "the field reaches past B's edge: %v, B ends at %v", d.boundingBox, right) do return
+	e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = right + 2, mouse_y = d.boundingBox.y + d.boundingBox.height / 2}
+	testing.expect(t, !widget_event(&e), "beside B: not the field's")
+	inbox_drain()
+	testing.expectf(t, state.focus_widget == "", "the field's editing ended: %q", state.focus_widget)
+}
+
+// P4 round 2, 2: the pointer leaving the focused pane for no pane (a column): it hears it leave.
+@(test)
+panes_pointer_leaves_for_a_column :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	x := pt_two()
+	defer pt_two_done(x)
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	session_show_tab(x.s, x.app_id)
+	ap := apps[x.app_id]
+	ap.inspect = true
+	for _ in 0 ..< 3 {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(x.s)
+	}
+	pb := session_pane(x.s, x.b)
+	testing.expect(t, x.s.focused_pane == x.b, "B has the keyboard")
+	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expect(t, ap.hin, "over the app")
+	e = {type = .MOUSE_MOVE, mouse_x = px(40), mouse_y = pb.rect.y + pb.rect.w / 2} // the left column
+	event(&e)
+	testing.expect(t, !ap.hin, "the pointer left for the left column: its hover went")
+	// the pane it left is known to have been left (a page there gets CEF's leave; cef 0 here)
+	testing.expectf(t, pointer_pane == 0, "over no pane now: %v", pointer_pane)
+	// a held press keeps its pane: no leave while it drags outside
+	e = {type = .MOUSE_MOVE, mouse_x = pb.rect.x + pb.rect.z / 2, mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	pointer_capture = {pane = x.b}
+	defer pointer_capture = {}
+	e = {type = .MOUSE_MOVE, mouse_x = px(40), mouse_y = pb.rect.y + pb.rect.w / 2}
+	event(&e)
+	testing.expectf(t, pointer_pane == x.b, "the press's pane while held: %v", pointer_pane)
+	inbox_drain()
 }

@@ -392,20 +392,19 @@ browser_free_rings :: proc(b: ^Browser) {
 }
 
 // Every frame, before `if !app.redraw` (main.odin): the newest frame CEF
-// handed over becomes the shown one on the tab on screen, and the slot it
-// replaces goes back after this frame's GPU work; a hidden tab's goes back
-// at once (never its shown slot). True: redraw.
+// handed over becomes the shown one on every tab on screen (any pane's), and
+// the slot it replaces goes back after this frame's GPU work; a hidden tab's
+// goes back at once (never its shown slot). True: redraw.
 browser_frames_tick :: proc() -> bool {
 	if len(browsers) == 0 do return false
 	redraw := false
-	on_screen := tab_browser()
 	now := time.tick_now()
 	for id, b in browsers {
 		if !b.chan do continue
 		p: Frames_Poll
 		pd_frames_poll(id, &p)
 		if p.has_frame != 0 {
-			if b == on_screen || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
+			if tab_on_screen(id) || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
 				og, os_, retire := ring_take(&b.ring, p.gen, p.slot, p.seq, p.tick)
 				if retire do pd_frames_retire(id, og, u32(os_))
 				if b.ring.shown_gen == p.gen && b.ring.shown_slot == int(p.slot) do b.content_w, b.content_h = int(p.content_w), int(p.content_h)
@@ -546,21 +545,21 @@ release_input :: proc(b: ^Browser) {
 	}
 }
 
-// Every frame, before layout: create browsers that have a pane, follow the
-// pane's size and the scale, hide browsers that are not on screen, and wrap
-// a new texture when the shim made one.
+// Every frame, before layout: create browsers that have a pane, follow each
+// one's pane size and the scale, hide browsers that are not on screen (in no
+// pane), and wrap a new texture when the shim made one. Only the focused
+// pane's page has the keyboard.
 browser_tick :: proc() {
 	browser_url_check() // the URL field belongs to the tab it was opened on (browser_nav.odin)
 	if len(browsers) == 0 do return
-	on_screen := tab_browser()
 	now := time.tick_now()
-	if on_screen != nil {
-		on_screen.shown_at = now
-		on_screen.lazy = false // shown: its page opens
+	for _, b in browsers do if tab_on_screen(b.tab_id) {
+		b.shown_at = now // the page plan's LRU: never an on-screen page's slot
+		b.lazy = false // shown: its page opens
 	}
 	browser_pages()
 	for _, b in browsers {
-		hidden := b != on_screen
+		hidden := !tab_on_screen(b.tab_id)
 		// a popup's browser is not there until CEF made it (on_after_created)
 		if b.cef == 0 || pd_cef_ready(b.cef) == 0 do continue
 		focused := browser_wants_keys(b)
@@ -601,7 +600,6 @@ browser_pages :: proc() {
 	if app.pane.z <= 0 do return
 	list := make([dynamic]^Browser, context.temp_allocator)
 	pages := make([dynamic]Page_Info, context.temp_allocator)
-	on_screen := tab_browser()
 	for _, b in browsers {
 		s, _, _ := find_tab(b.tab_id)
 		if s == nil do continue
@@ -609,7 +607,7 @@ browser_pages :: proc() {
 		wants := !live && !b.lazy && (b.message == "" || b.waiting)
 		if !live && !wants do continue
 		append(&list, b)
-		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = b == on_screen, pinned = live && pd_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
+		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = tab_on_screen(b.tab_id), pinned = live && pd_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
 	}
 	if len(pages) == 0 do return
 	want_any := false
@@ -753,7 +751,7 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if e.type == .MOUSE_DOWN && !(palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || job_sheet_open()) && browser_bar_click(p, e) do return true
 	if b.cef == 0 {
 		// the page closed itself: its Reload button (ui.odin) opens it again
-		if e.type == .MOUSE_DOWN && b.closed_by_page && inside(cid("browser_reload"), e.mouse_x, e.mouse_y) {
+		if e.type == .MOUSE_DOWN && b.closed_by_page && cinside("browser_reload", e.mouse_x, e.mouse_y) {
 			ui_do(Browser_Reload{b.tab_id})
 			return true
 		}
@@ -990,7 +988,7 @@ rgb_near :: proc(a, b: u32) -> bool {
 browser_wait_done :: proc(fail: proc(msg: string)) -> bool {
 	w := &browser_wait
 	if w.kind == "" do return true
-	b := tab_browser()
+	b := script_browser()
 	done := false
 	got := ""
 	if b != nil do switch w.kind {
@@ -1015,8 +1013,16 @@ browser_wait_done :: proc(fail: proc(msg: string)) -> bool {
 }
 
 // One web_* line. ok=false: a failure message for the script.
+// The script's page: the focused tab's, else one on screen in another pane of the session (a
+// split: the keyboard in a shell beside it).
+script_browser :: proc() -> ^Browser {
+	if b := tab_browser(); b != nil do return b
+	if s := cur(); s != nil do for &p in s.panes do if b := pane_browser(&p); b != nil do return b
+	return nil
+}
+
 browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, ok: bool) {
-	b := tab_browser()
+	b := script_browser()
 	switch cmd {
 	case "web_open":
 		url := rest
@@ -1165,6 +1171,8 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		case "opens": got = fmt.tprint(b.opens)
 		case "message": got = b.message != "" ? b.message : "-"
 		case "focused": got = b.focused ? "yes" : "no"
+		case "hidden": got = b.hidden ? "yes" : "no" // CEF told the page is hidden (no pane shows it)
+		case "view": got = fmt.tprintf("%dx%d", b.view_w, b.view_h) // its CEF view, logical px: its pane's
 		case "overwrites": got = fmt.tprint(b.overwrites)
 		case "inflight_writes": got = fmt.tprint(pd_frames_inflight_writes())
 		case "surfaces": got = fmt.tprint(pd_frames_surface_count(b.tab_id))

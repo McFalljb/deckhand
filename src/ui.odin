@@ -428,6 +428,17 @@ focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 @(private = "file")
 fid :: proc(name: string) -> clay.ElementId {return pid(focused_pane(), name)}
 
+// A press on the focused field's box (focused_field): a pane's field (fid, the editor's bars) only
+// inside its pane, where it shows (pane_inside: a field reaching past a narrow pane's edge is cut
+// there); the others anywhere on their box.
+field_inside :: proc(box_id: clay.ElementId, x, y: f32) -> bool {
+	switch state.focus_widget {
+	case "changes_message", "browser_url", "browser_find", "browser_prompt", "editor_find", "editor_replace", "editor_goto":
+		return pane_inside(focused_pane(), box_id, x, y)
+	}
+	return inside(box_id, x, y)
+}
+
 // ---- command palette ----
 
 // A scrim over the window and a box near its top: the query field, then the
@@ -558,10 +569,11 @@ pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 	defer ids_pane_end(old)
 	split := cs != nil && len(cs.panes) > 1
 	empty := pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
-	placeholder := split && pane_placeholder(cs, p)
 	if clay.UI(pid(p, "pane"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		if split do pane_strip_layout(cs, p)
-		if !placeholder {
+		// the tab's bars, clipped across: a bar wider than a narrow pane (its buttons, an agent's
+		// strip) hides its end rather than widening the pane (a clip container has no minimum width)
+		if clay.UI(pid(p, "pane_bars"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom}, clip = {horizontal = true}}) {
 			claude_bars(p) // a Claude tab's held messages (ui_claude.odin)
 			app_bar_layout(p) // an app tab that exited or stopped drawing (app_tab.odin)
 			dead_tab_bar_layout(p) // a pi tab whose process exited: how, Restart (dead_tab.odin)
@@ -571,19 +583,14 @@ pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 		}
 		// a Changes tab's file list sits left of its diff (ui_changes.odin); other tabs: the pane alone
 		if clay.UI(pid(p, "pane_body"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			if !placeholder do changes_list_layout(p)
+			changes_list_layout(p)
 			if clay.UI(pid(p, "centre_main"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-				if !placeholder do changes_file_bar_layout(p)
+				changes_file_bar_layout(p)
 				if clay.UI(pid(p, "terminal"))({
 					layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = pu(SP_2), childAlignment = {x = .Center, y = .Center}},
 					backgroundColor = cc(th.bg_app),
 				}) {
-					if placeholder {
-						// a page or an app in a pane without the keyboard: not live yet (the plan's P4)
-						tab := pane_shown(p)
-						clay.TextDynamic(tab != nil ? tab.title : "", txt(th.text_secondary))
-						clay.Text("Click to show", txt(th.text_muted))
-					} else if empty && cs != nil && cs.missing {
+					if empty && cs != nil && cs.missing {
 						clay.Text("Session gone", txt(th.text_secondary))
 						clay.Text("Its session file or folder no longer exists", txt(th.text_muted))
 						action_button(.Empty_Close, false)
@@ -596,7 +603,7 @@ pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 						if button_enabled(.Empty_New_Chat) do action_button(.Empty_New_Chat, true)
 					}
 				}
-				if !placeholder do changes_more_layout(p)
+				changes_more_layout(p)
 			}
 		}
 	}
@@ -608,7 +615,9 @@ pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 pane_strip_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 	th := theme()
 	focused := p.id == cs.focused_pane
+	// clipped across like the bars: many tabs in a narrow pane never widen it
 	if clay.UI(pid(p, "pane_strip"))({
+		clip = {horizontal = true},
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(TAB_STRIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
 		border = {color = cc(focused ? th.accent : th.border), width = {bottom = pu(BORDER_W)}},

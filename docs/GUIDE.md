@@ -400,9 +400,9 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     equal. **Even out panes** (palette, Window menu) gives every pane equal room.
   - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join
     the pane next to it; nothing is closed.
-  - A browser or app tab shows live only in the pane with the keyboard for now: in another pane
-    it says **Click to show**, and a click there only gives that pane the keyboard (the page or
-    app does not get the click).
+  - Browser and app tabs are live in every pane: pages load, play and scroll beside a shell,
+    and each page or app fits its own pane. Only the pane with the keyboard gets your typing; a
+    click in another pane's page gives that pane the keyboard and clicks there too.
   - Each session's panes come back when Deckhand restarts: the same splits and sizes, the
     same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
     Deckhand from before panes opens the same workspace with every tab back in one pane.)
@@ -535,7 +535,9 @@ Deckhand's own shortcuts come first even then: ⌘T opens a shell tab, ⌘W clos
   Atlas names the session (see PROTOCOL.md). pi can also read pages and act on them: click, type,
   press keys, scroll, choose, hover and upload. A strip on the tab says what it does, with
   **Take over** (pi waits until you press **Hand back**; your own click or key in the page while
-  pi acts does the same) and **Stop**. pi never types into password, card or one-time-code
+  pi acts does the same) and **Stop**; in a narrow pane the strip takes a row of its own under
+  the toolbar, and the palette has them too ("Browser: take over from the agent",
+  "Browser: hand back to the agent", "Browser: stop the agent"). pi never types into password, card or one-time-code
   fields; an upload asks you first in a bar (**Allow** / **Block**); a page that changes your
   clipboard while pi acts is named in a toast. Details: BROWSER.md, step 8.
 - **App tabs by agents**: a session's pi (or Claude) can open the apps your project lists in

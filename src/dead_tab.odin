@@ -285,7 +285,8 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 	if s := cur(); s != nil && !s.home {
 		if tab := pane_shown(p); tab != nil && tab.status == .Exited && restart_waiting(tab.id) {
 			if clay.UI(cid("dead_bar"))({
-				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+				clip = {horizontal = true}, // its pane's width at most (bar_w)
+				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
 				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 			}) {
@@ -313,7 +314,8 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 	if model && pane_width() - fixed - buttons_w(model_label, model) < px(80) do model_label = DEAD_MODEL_SHORT
 	room := max(pane_width() - fixed - buttons_w(model_label, model), px(40))
 	if clay.UI(cid("dead_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {

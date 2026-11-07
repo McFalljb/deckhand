@@ -523,7 +523,7 @@ browser_act_background_tab :: proc(s: ^Open_Session) -> (tab_id: u64, ok: bool) 
 	for id in seen {
 		os_, tab, _ := find_tab(id)
 		if os_ != s || tab == nil do continue
-		if state.current_session == s.id && s.active_tab == tab.id do continue
+		if tab_on_screen(tab.id) do continue // the user sees it (any pane)
 		at := agent_tab_of(id)
 		last := at != nil ? at.last : time.Tick{}
 		if !ok || time.tick_diff(best, last) > 0 do tab_id, best, ok = id, last, true

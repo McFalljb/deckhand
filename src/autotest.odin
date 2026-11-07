@@ -150,7 +150,8 @@ package main
 // confirmation token), $project (selected project), $session (current open
 // session), $tab (its active tab), $pitab (its pi tab), $pisession (its pi
 // session id), $hometab (Home's pi tab), $chats (the Chats entry's project
-// id), $homedir ($HOME), $notesdir (the main folder, home_dir), $datadir (the data dir), $cwd (pi-desk's working directory). assert_screen, waitfor and dump read
+// id), $homedir ($HOME), $notesdir (the main folder, home_dir), $datadir (the data dir), $cwd (pi-desk's working directory), $pane0…$pane7 (the
+// current session's panes by slot), $ptab0…$ptab7 (the tab each shows). assert_screen, waitfor and dump read
 // the terminal with the keyboard (Home's while its pane shows).
 
 import "core:encoding/json"
@@ -1287,9 +1288,10 @@ expand_vars :: proc(s: string) -> string {
 	}
 	out := s
 	for v in vars do out, _ = strings.replace_all(out, v[0], v[1], context.temp_allocator)
-	// $pane0 … $pane7: the current session's panes by slot (panes.odin)
-	if cs != nil && strings.contains(out, "$pane") do for p in cs.panes {
+	// $pane0 … $pane7: the current session's panes by slot; $ptab0 …: the tab each shows (panes.odin)
+	if cs != nil && strings.contains(out, "$p") do for p in cs.panes {
 		out, _ = strings.replace_all(out, fmt.tprintf("$pane%d", p.slot), fmt.tprint(p.id), context.temp_allocator)
+		out, _ = strings.replace_all(out, fmt.tprintf("$ptab%d", p.slot), fmt.tprint(p.active), context.temp_allocator)
 	}
 	return out
 }

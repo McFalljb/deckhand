@@ -1041,11 +1041,12 @@ app_frames_tick :: proc() -> bool {
 	redraw := false
 	if frames_ok == 1 && pd_frames_take_wake() != 0 do redraw = true // something arrived
 	now := time.tick_now()
-	on_screen := tab_app()
-	// new boxes: an inspected tab on screen redraws, its hover follows them
-	if sync.atomic_exchange(&boxes_dirty, false) && on_screen != nil && on_screen.inspect {
-		app_hover_at(on_screen, on_screen.hx, on_screen.hy, on_screen.hin)
-		redraw = true
+	// new boxes: an inspected tab on screen (any pane's) redraws, its hover follows them
+	if sync.atomic_exchange(&boxes_dirty, false) {
+		for id, a in apps do if a.inspect && tab_on_screen(id) {
+			app_hover_at(a, a.hx, a.hy, a.hin)
+			redraw = true
+		}
 	}
 	for id, a in apps {
 		_, tab, at := app_tab_of(id)
@@ -1079,7 +1080,7 @@ app_frames_tick :: proc() -> bool {
 			app_log_line(a, "[Deckhand] the app closed its connection: stopping it")
 			posix.killpg(a.pid, .SIGTERM)
 		}
-		visible := a == on_screen
+		visible := tab_on_screen(id) // shown in any pane of the session on screen (panes.odin)
 		// a hidden tab is told it shows until it gives its first frame and while a screenshot waits
 		// for one (TAB-PROTOCOL: a tab told it is hidden draws nothing)
 		peek := !visible && (!a.framed || len(a.shot_waits) > 0)
@@ -1103,7 +1104,7 @@ app_frames_tick :: proc() -> bool {
 		// rings: the first one, and a new one when the pane's size settled
 		if r := tab_rect(id); a.connected && !a.stalled && r.z > 0 {
 			w, h := int(math.round(r.z)), int(math.round(r.w)) // its pane's size (panes.odin)
-			if a == on_screen || a.ring.cur_gen == 0 {
+			if visible || a.ring.cur_gen == 0 { // a ring of its own pane's size
 				if ring_wants_new(&a.ring, w, h, app.dpi, now) do app_ring_new(a, w, h, app.dpi)
 			}
 		}
@@ -1451,7 +1452,7 @@ app_screenshot :: proc(cmd: App_Screenshot, request_id: u64) -> Result {
 	a := app_of(cmd.tab_id)
 	if tab == nil || a == nil do return fail("no such app tab")
 	// hidden and running: it draws one frame for this (app_frames_tick), at most APP_PEEK_TIMEOUT
-	if tab_app() != a && a.pid != 0 && frames_ok == 1 && request_id != 0 {
+	if !tab_on_screen(cmd.tab_id) && a.pid != 0 && frames_ok == 1 && request_id != 0 {
 		if len(a.shot_waits) >= APP_SHOTS_IN_FLIGHT do return {error = "screenshots are still being taken; try again", data = `{"code":"busy"}`}
 		append(&a.shot_waits, Shot_Wait{request_id = request_id, rect = cmd.rect, has_rect = cmd.has_rect, seq = a.ring.shown_seq, deadline = time.tick_add(time.tick_now(), APP_PEEK_TIMEOUT)})
 		return {ok = true, pending = true}
@@ -1467,7 +1468,7 @@ app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: App_Rect, has_rect: bool, 
 	x, y, w, h, ok := app_shot_rect(cmd.rect, cmd.has_rect, g.scale, g.w, g.h)
 	if !ok do return {error = "the rect is outside the frame", data = `{"code":"bad_args"}`}
 	a.shots += 1
-	meta := fmt.tprintf(`"seq":%d,"tick":%d,"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"visible":%v`, a.ring.shown_seq, a.ring.shown_tick, g.scale, x, y, w, h, tab_app() == a)
+	meta := fmt.tprintf(`"seq":%d,"tick":%d,"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"visible":%v`, a.ring.shown_seq, a.ring.shown_tick, g.scale, x, y, w, h, tab_on_screen(tab_id))
 	return frame_shot(cmd.tab_id, g.gen, a.ring.shown_slot, x, y, w, h, a.shots, meta, request_id)
 }
 
@@ -1943,7 +1944,8 @@ app_bar_layout :: proc(p: ^Pane) {
 	}
 	th := theme()
 	if clay.UI(cid("app_bar"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		clip = {horizontal = true}, // its pane's width at most (bar_w)
+		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
 	}) {
@@ -1964,19 +1966,19 @@ app_bar_layout :: proc(p: ^Pane) {
 // A click on the bar's buttons. True if it took it.
 @(private = "file")
 app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
-	if inside(cid("app_inspect"), x, y) {
+	if cinside("app_inspect", x, y) {
 		ui_do(App_Inspect{tab_id = a.tab_id, on = !a.inspect})
 		return true
 	}
-	if inside(cid("app_restart"), x, y) {
+	if cinside("app_restart", x, y) {
 		ui_do(App_Restart{tab_id = a.tab_id})
 		return true
 	}
-	if inside(cid("app_log"), x, y) {
+	if cinside("app_log", x, y) {
 		if s, _, _ := find_tab(a.tab_id); s != nil do ui_do(Open_File{path = a.log_path, session = s.id})
 		return true
 	}
-	if inside(cid("app_wait"), x, y) {
+	if cinside("app_wait", x, y) {
 		// keep waiting: the next silence starts a new ping
 		a.ping_at, a.ping_answered = time.tick_now(), false
 		a.ring.last_frame = time.tick_now()

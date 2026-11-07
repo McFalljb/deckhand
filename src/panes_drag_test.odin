@@ -1,0 +1,259 @@
+package main
+
+// Dragging a tab (panes_drag.odin; docs/plans/split-panes.md P5): where a drop lands, worked out
+// from rects alone (the zones of a pane's body, a strip's gaps, the pi tab's place, the limits),
+// the command each drop runs, what its indicator covers; then the drag itself on a laid-out
+// window: a press that moves less than the threshold is a click, a reorder in the title bar, the
+// first split by an edge, a move between strips, the pi tab moved, Esc and leaving the window.
+
+import "base:runtime"
+import "core:testing"
+import clay "../build/clay-odin"
+import sapp "../vendor/sokol-odin/sokol/app"
+
+// Two panes side by side, 400 px each and a divider: strips 30 px high, A holds the pi tab and
+// s1, B s2 and s3 (100 px tabs). Ids: pi 1, s1 2, s2 3, s3 4; panes A 10, B 20.
+@(private = "file")
+pd_input :: proc(tab, from: u64) -> Tab_Drop_Input {
+	a_tabs := make([]Drop_Tab, 2, context.temp_allocator)
+	a_tabs[0], a_tabs[1] = {1, {0, 0, 100, 30}}, {2, {100, 0, 100, 30}}
+	b_tabs := make([]Drop_Tab, 2, context.temp_allocator)
+	b_tabs[0], b_tabs[1] = {3, {401, 0, 100, 30}}, {4, {501, 0, 100, 30}}
+	panes := make([]Drop_Pane, 2, context.temp_allocator)
+	all := [Pane_Dir]bool{.Left = true, .Right = true, .Up = true, .Down = true}
+	panes[0] = {id = 10, zone = {0, 30, 400, 570}, strip = {0, 0, 400, 30}, tabs = a_tabs, room = all}
+	panes[1] = {id = 20, zone = {401, 30, 399, 570}, strip = {401, 0, 399, 30}, tabs = b_tabs, room = all}
+	return {panes = panes, tab = tab, from = from, from_count = 2, main = 1, edge_min = 40, edge_max = 120, mark_w = 2}
+}
+
+@(test)
+tab_drop_zones :: proc(t: ^testing.T) {
+	r := [4]f32{0, 0, 400, 300} // edge zones: 100 px across (a quarter), 75 px down
+	check :: proc(t: ^testing.T, r: [4]f32, x, y: f32, want: Pane_Dir, want_edge: bool, loc := #caller_location) {
+		dir, edge, ok := drop_zone_at(r, x, y, 40, 120)
+		testing.expect(t, ok, "inside", loc = loc)
+		testing.expect_value(t, edge, want_edge, loc = loc)
+		if want_edge do testing.expect_value(t, dir, want, loc = loc)
+	}
+	check(t, r, 10, 150, .Left, true)
+	check(t, r, 99, 150, .Left, true)
+	check(t, r, 395, 150, .Right, true)
+	check(t, r, 200, 5, .Up, true)
+	check(t, r, 200, 295, .Down, true)
+	check(t, r, 200, 150, .Left, false) // the centre
+	check(t, r, 101, 150, .Left, false)
+	check(t, r, 10, 20, .Left, true) // a corner: the nearer edge for its zone's size (10/100 < 20/75)
+	check(t, r, 60, 5, .Up, true) // 60/100 > 5/75
+	_, _, ok := drop_zone_at(r, 400, 10, 40, 120)
+	testing.expect(t, !ok, "right of it: outside")
+	// sizes clamp: 40 px at least (a third of a small pane at most), 120 px at most
+	_, edge, _ := drop_zone_at({0, 0, 2000, 1000}, 130, 500, 40, 120)
+	testing.expect(t, !edge, "a wide pane's edge zone stops at 120 px")
+	dir, edge2, _ := drop_zone_at({0, 0, 120, 120}, 39, 60, 40, 120)
+	testing.expect(t, edge2 && dir == .Left, "40 px at least…")
+	_, edge3, _ := drop_zone_at({0, 0, 90, 90}, 31, 45, 40, 120)
+	testing.expect(t, !edge3, "…but never past a third of the pane")
+}
+
+// Strips: the mark between tabs, its own place a no-op, never before the pi tab, the pi tab
+// always first; every drop's command.
+@(test)
+tab_drop_strips :: proc(t: ^testing.T) {
+	// s3 (B's second) to the front of B: before s2
+	d := tab_drop_at(pd_input(4, 20), 410, 15)
+	testing.expect(t, d.kind == .Strip && d.pane == 20 && d.gap == 0 && d.index == 0 && !d.noop, "s3 first in B")
+	cmd, ok := tab_drop_command(d, 4)
+	testing.expect(t, ok && cmd.(Move_Tab) == Move_Tab{tab_id = 4, pane = 20, index = 0}, "move_tab B 0")
+	// s2 (B's first) to B's end: after s3, index counted without s2
+	d = tab_drop_at(pd_input(3, 20), 700, 15)
+	testing.expect(t, d.kind == .Strip && d.gap == 2 && d.index == 1 && !d.noop, "s2 last in B")
+	// s2 just right of itself (left half of s3): its own place
+	d = tab_drop_at(pd_input(3, 20), 540, 15)
+	testing.expect(t, d.gap == 1 && d.noop, "its own place")
+	_, ok = tab_drop_command(d, 3)
+	testing.expect(t, !ok, "no command for its own place")
+	// s1 dropped before the pi tab in its own strip: lands after it, its own place
+	d = tab_drop_at(pd_input(2, 10), 10, 15)
+	testing.expect(t, d.gap == 1 && d.index == 1 && d.noop, "never before the pi tab")
+	// s2 into A's strip before the pi tab: after it
+	d = tab_drop_at(pd_input(3, 20), 10, 15)
+	testing.expect(t, d.kind == .Strip && d.pane == 10 && d.gap == 1 && d.index == 1 && !d.noop, "after the pi tab in A")
+	// the pi tab into B's strip anywhere: first there
+	d = tab_drop_at(pd_input(1, 10), 700, 15)
+	testing.expect(t, d.kind == .Strip && d.pane == 20 && d.gap == 0 && d.index == 0 && !d.noop, "the pi tab first in B")
+	cmd, ok = tab_drop_command(d, 1)
+	testing.expect(t, ok && cmd.(Move_Tab).pane == 20, "the pi tab moves")
+	// the pi tab in its own strip: it cannot leave index 0
+	d = tab_drop_at(pd_input(1, 10), 190, 15)
+	testing.expect(t, d.noop && d.gap == 0, "the pi tab stays first")
+	// nowhere: right of the window's panes, or in the gap no strip covers
+	d = tab_drop_at(pd_input(3, 20), 900, 15)
+	testing.expect_value(t, d.kind, Tab_Drop_Kind.None)
+	_, ok = tab_drop_command(d, 3)
+	testing.expect(t, !ok, "nothing runs")
+}
+
+// Bodies: the centre moves the tab into that pane (its own: nothing), an edge splits that pane
+// with it (its pane's only tab beside itself: nothing); PANES_MAX and a pane too small are refused.
+@(test)
+tab_drop_bodies :: proc(t: ^testing.T) {
+	d := tab_drop_at(pd_input(3, 20), 200, 300) // s2 to A's centre
+	testing.expect(t, d.kind == .Centre && d.pane == 10 && !d.noop, "A's centre")
+	cmd, ok := tab_drop_command(d, 3)
+	testing.expect(t, ok && cmd.(Move_Tab) == Move_Tab{tab_id = 3, pane = 10, index = -1}, "move_tab to A's end")
+	d = tab_drop_at(pd_input(3, 20), 600, 300) // its own pane's centre
+	testing.expect(t, d.kind == .Centre && d.noop, "its own centre")
+	_, ok = tab_drop_command(d, 3)
+	testing.expect(t, !ok, "no command")
+	// each edge of A: split_pane with the tab
+	for c in ([]struct {
+			x, y: f32,
+			dir:  Pane_Dir,
+		}{{10, 300, .Left}, {390, 300, .Right}, {200, 40, .Up}, {200, 590, .Down}}) {
+		d = tab_drop_at(pd_input(3, 20), c.x, c.y)
+		testing.expectf(t, d.kind == .Edge && d.pane == 10 && d.dir == c.dir && !d.noop && d.refused == "", "A's %v edge: %v", c.dir, d)
+		cmd, ok = tab_drop_command(d, 3)
+		testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 10, direction = c.dir, tab_id = 3}, "split_pane with the tab")
+	}
+	// its own pane's edge: a split of its own pane with it (it has another tab)…
+	d = tab_drop_at(pd_input(3, 20), 790, 300)
+	testing.expect(t, d.kind == .Edge && d.pane == 20 && d.dir == .Right && !d.noop, "own pane, two tabs: splits")
+	// … unless it is that pane's only tab
+	in1 := pd_input(3, 20)
+	in1.from_count = 1
+	d = tab_drop_at(in1, 790, 300)
+	testing.expect(t, d.kind == .Edge && d.noop, "its only tab beside itself: nothing")
+	_, ok = tab_drop_command(d, 3)
+	testing.expect(t, !ok, "no command")
+	// the pi tab may split another pane
+	d = tab_drop_at(pd_input(1, 10), 410, 300)
+	cmd, ok = tab_drop_command(d, 1)
+	testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 20, direction = .Left, tab_id = 1}, "the pi tab splits B")
+	// limits: refused with why, no command
+	full := pd_input(3, 20)
+	full.at_max = true
+	d = tab_drop_at(full, 10, 300)
+	testing.expect_value(t, d.refused, "at most 8 panes")
+	_, ok = tab_drop_command(d, 3)
+	testing.expect(t, !ok, "refused: no command")
+	tight := pd_input(3, 20)
+	tight.panes[0].room[.Left] = false
+	d = tab_drop_at(tight, 10, 300)
+	testing.expect_value(t, d.refused, "not enough room")
+	d = tab_drop_at(tight, 390, 300)
+	testing.expect_value(t, d.refused, "") // room the other way
+	// a centre drop is never refused (no new pane), even at the limit
+	d = tab_drop_at(full, 200, 300)
+	testing.expect(t, d.kind == .Centre && d.refused == "", "a move at the limit")
+}
+
+// What the indicator covers: the half an edge's new pane takes, the whole pane for its centre,
+// a thin mark in a strip's gap; nothing for a no-op body drop.
+@(test)
+tab_drop_previews :: proc(t: ^testing.T) {
+	input := pd_input(3, 20)
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 390, 300)), [4]f32{200, 30, 200, 570})
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 200, 40)), [4]f32{0, 30, 400, 285})
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 200, 590)), [4]f32{0, 315, 400, 285})
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 10, 300)), [4]f32{0, 30, 200, 570})
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 200, 300)), [4]f32{0, 30, 400, 570})
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 600, 300)), [4]f32{}) // its own centre
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 410, 15)), [4]f32{398, 0, 2, 30}) // before s2
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 540, 15)), [4]f32{500, 0, 2, 30}) // between s2 and s3
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 700, 15)), [4]f32{602, 0, 2, 30}) // after s3
+	testing.expect_value(t, tab_drop_preview(input, tab_drop_at(input, 900, 15)), [4]f32{})
+}
+
+// The drag on a laid-out window (one pane, then two): the threshold, a reorder in the title bar,
+// the first split by an edge drop, a move to the other pane's strip, the pi tab to another pane
+// (still tabs[0]), Esc and leaving the window cancel.
+@(test)
+tab_drag_on_the_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, pt_ui(), "fonts") do return
+	defer app.centre = {}
+	defer tab_drag = {}
+	s := pt_one(2) // pi, shell 1, shell 2
+	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	lay :: proc(s: ^Open_Session) {
+		_ = ui_layout(1400, 860)
+		ui_pane_rects(s)
+	}
+	centre :: proc(i: int) -> (f32, f32) {
+		b := clay.GetElementData(clay.ID("tab", u32(i))).boundingBox
+		return b.x + b.width / 2, b.y + b.height / 2
+	}
+	lay(s)
+	pi, s1, s2 := s.tabs[0].id, s.tabs[1].id, s.tabs[2].id
+	// under the threshold: a click (nothing moves, the release goes on)
+	x, y := centre(1)
+	tab_drag_arm(s1, x, y)
+	tab_drag_move(x + 3, y)
+	testing.expect(t, !tab_dragging(), "3 px: not a drag")
+	testing.expect(t, !tab_drag_release(x + 3, y), "the release is a click's")
+	testing.expect_value(t, tab_drag.tab, u64(0))
+	// a reorder in the title bar: shell 2 before shell 1 (dropped before the pi tab: after it)
+	x, y = centre(2)
+	px0, _ := centre(0)
+	tab_drag_arm(s2, x, y)
+	tab_drag_move(px0 - 20, y)
+	testing.expect(t, tab_dragging(), "a drag")
+	testing.expect(t, tab_drag.drop.kind == .Strip && tab_drag.drop.gap == 1, "the mark after the pi tab")
+	testing.expect(t, tab_drag.preview.z > 0, "a mark shows")
+	testing.expect(t, tab_drag_release(px0 - 20, y), "the drag's release")
+	inbox_drain()
+	testing.expect_value(t, pt_strip_titles(s, s.panes[0].id), "pi,shell 2,shell 1")
+	// the first split: shell 1 (now tabs[2]) to the pane's right edge
+	lay(s)
+	x, y = centre(2)
+	z := s.panes[0].frame
+	tab_drag_arm(s1, x, y)
+	tab_drag_move(z.x + z.z - 10, z.y + z.w / 2)
+	testing.expect(t, tab_drag.drop.kind == .Edge && tab_drag.drop.dir == .Right, "the right edge")
+	testing.expectf(t, abs(tab_drag.preview.z - z.z / 2) < 1, "the right half previewed: %v", tab_drag.preview)
+	tab_drag_release(z.x + z.z - 10, z.y + z.w / 2)
+	inbox_drain()
+	if !testing.expect_value(t, len(s.panes), 2) do return
+	testing.expect_value(t, pane_of_tab(s, s1).id, s.panes[1].id)
+	testing.expect_value(t, s.tabs[0].id, pi)
+	// Esc cancels a drag; nothing moves
+	lay(s)
+	x, y = centre(1) // shell 2, in the left pane's strip now
+	b := s.panes[1].frame
+	tab_drag_arm(s2, x, y)
+	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
+	testing.expect(t, tab_drag.drop.kind == .Centre && tab_drag.drop.pane == s.panes[1].id, "the right pane's centre")
+	esc := sapp.Event{type = .KEY_DOWN, key_code = .ESCAPE}
+	testing.expect(t, tab_drag_event(&esc), "Esc is the drag's")
+	up := sapp.Event{type = .MOUSE_UP, mouse_x = b.x + b.z / 2, mouse_y = b.y + b.w / 2, mouse_button = .LEFT}
+	testing.expect(t, !tab_drag_event(&up), "cancelled: the release goes on")
+	inbox_drain()
+	testing.expect_value(t, pane_of_tab(s, s2).id, s.panes[0].id)
+	// leaving the window cancels too
+	tab_drag_arm(s2, x, y)
+	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
+	leave := sapp.Event{type = .MOUSE_LEAVE}
+	testing.expect(t, tab_drag_event(&leave), "the leave is the drag's")
+	testing.expect(t, !tab_dragging(), "no drag")
+	// shell 2 to the right pane's strip, after shell 1
+	sb := clay.GetElementData(pid(&s.panes[1], "pane_strip")).boundingBox
+	tab_drag_arm(s2, x, y)
+	tab_drag_move(sb.x + sb.width - 40, sb.y + sb.height / 2)
+	testing.expect(t, tab_drag.drop.kind == .Strip && tab_drag.drop.pane == s.panes[1].id && tab_drag.drop.gap == 1, "the end of the right strip")
+	tab_drag_release(sb.x + sb.width - 40, sb.y + sb.height / 2)
+	inbox_drain()
+	if !testing.expect_value(t, pane_of_tab(s, s2).id, s.panes[1].id) do return
+	testing.expect_value(t, pt_strip_titles(s, s.panes[1].id), "shell 1,shell 2")
+	// the pi tab, alone in the left pane now, to the right pane's centre: that pane holds every
+	// tab, the left one closes, the pi tab is still tabs[0] and first in its strip
+	lay(s)
+	x, y = centre(0)
+	b = s.panes[1].frame
+	tab_drag_arm(pi, x, y)
+	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
+	tab_drag_release(b.x + b.z / 2, b.y + b.w / 2)
+	inbox_drain()
+	testing.expect_value(t, len(s.panes), 1)
+	testing.expect_value(t, s.tabs[0].id, pi)
+	testing.expect_value(t, pt_strip_titles(s, s.panes[0].id), "pi,shell 1,shell 2")
+}

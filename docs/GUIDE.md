@@ -396,6 +396,18 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     left**, **Move tab to the pane right**, **Move tab to the pane above**, **Move tab to the pane
     below**); with no pane that way, the tab splits off into a new pane there. A pane whose last
     tab closes or moves away closes too, and the keyboard goes back to the pane you used last.
+  - **To drag a tab**, press it and move the pointer a few points (a click without moving still
+    just shows the tab). A copy of the tab follows the pointer and shows where it will land:
+    - over a strip of tabs (a pane's, or the title bar's while there is one pane): a line
+      between two tabs; drop to put the tab there, which also reorders tabs in their own strip;
+    - over a pane's edge (its outer quarter on each side): the half the tab would take is
+      tinted; drop to split that pane that way with the tab in the new half. This is also how a
+      session with one pane gets its first split from the title bar;
+    - over the middle of another pane: the pane is tinted; drop to move the tab into it.
+    Elsewhere the pointer shows that the tab can't go there. Press Esc, or leave the window, to
+    cancel. A split the session has no room for (8 panes, or a pane too small for two halves)
+    shows red with why, and dropping there changes nothing. The session's pi tab (or Claude main
+    tab) can move to another pane or split one too, but it always stays first in its strip.
   - **To resize panes**, drag the line between them; double-click it to make the two sides
     equal. **Even out panes** (palette, Window menu) gives every pane equal room.
   - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join

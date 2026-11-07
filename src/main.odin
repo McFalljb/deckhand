@@ -278,9 +278,9 @@ frame :: proc "c" () {
 	editors_frame_begin() // an editor takes hits only where this frame draws it (editor_view.odin)
 	annot_frame_begin() // and comment badges where this frame draws them (browser_annotate.odin)
 	draw_begin(w, h)
-	// chrome, the current tab, the sliding drawer, then the palette, menus, popover, sheet, tooltip
+	// chrome, the current tab, the sliding drawer, then a tab drag's drop indicator and ghost, the palette, menus, popover, sheet, tooltip
 	overlay := cmds.length
-	for name in ([]string{"palette_scrim", "wt_menu_shadow", "wt_menu", "menu_shadow", "menu", "settings_shadow", "settings_pop", "bell_shadow", "bell_pop", "sheet_scrim", "setup_scrim", "jobsheet_scrim", "linktip", "toast", "tooltip"}) do overlay = min(overlay, ui_overlay_start(cmds, name))
+	for name in ([]string{"tab_drop", "tab_ghost", "palette_scrim", "wt_menu_shadow", "wt_menu", "menu_shadow", "menu", "settings_shadow", "settings_pop", "bell_shadow", "bell_pop", "sheet_scrim", "setup_scrim", "jobsheet_scrim", "linktip", "toast", "tooltip"}) do overlay = min(overlay, ui_overlay_start(cmds, name))
 	drawer_at := min(ui_overlay_start(cmds, "drawer"), overlay)
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
@@ -494,6 +494,8 @@ event :: proc(e: ^sapp.Event) {
 			return
 		}
 	}
+	// a press on a tab owns the pointer until its release; past a few px it drags the tab (panes_drag.odin)
+	if tab_drag_event(e) do return
 	// the settings popover and the shortcuts sheet take all input while open
 	if settings_open() && settings_event(e) do return
 	if shortcuts_open() && shortcuts_event(e) do return
@@ -625,6 +627,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_New:       new_session_ui(state.selected_project, at = [2]f32{e.mouse_x, e.mouse_y}) // the harness picker (harness.odin)
 		case Hit_Tab:
 			ui_do(Focus_Tab{u64(hit)})
+			tab_drag_arm(u64(hit), e.mouse_x, e.mouse_y) // moved a few px, it drags (panes_drag.odin)
 			// a double-click keeps a preview tab
 			if _, t, _ := find_tab(u64(hit)); t != nil && app.clicks == 2 {
 				if et, is := t.kind.(Editor_Tab); is && et.preview do ui_do(Keep_Tab{tab_id = t.id})

@@ -363,10 +363,11 @@ json_guard_limits_fit_a_small_thread_stack :: proc(t: ^testing.T) {
 // count, for the calls or for the guards. A guard is `!check(ARG` with the
 // call's own first argument, then a return, earlier in the same proc and at
 // most 12 lines before (check: json_valid: strict RFC 8259, UTF-8, 64 deep;
-// jg.shape_ok / json_shape_ok). A call on a parser (&p) counts as guarded
-// when its proc made that parser from guarded text. core:encoding/json
-// imported under another name is refused outright. Each site is listed with
-// its limit and spec, so one that moves or changes either is noticed too.
+// jg.shape_ok; holderwire's json_shape_ok, a jg.shape_ok). A call on a
+// parser (&p) counts as guarded when its proc made that parser from guarded
+// text. core:encoding/json imported under another name is refused outright.
+// Each site is listed with its limit and spec, so one that moves or changes
+// either is noticed too.
 @(private = "file")
 Parse_Site :: struct {file, proc_name, call, limit, spec: string}
 
@@ -501,6 +502,8 @@ scan_source :: proc(file, text: string) -> []Parse_Site {
 						limit = "UNGUARDED"
 						guard: for j := i; j >= max(proc_start, i - 12); j -= 1 {
 							for g in JSON_GUARDS {
+								// holderwire's own (hw.json_shape_ok elsewhere), not another package's of that name
+								if g == "json_shape_ok" && !strings.has_prefix(file, "src/holderwire/") do continue
 								needle := strings.concatenate({"!", g, "(", arg}, context.temp_allocator)
 								c := strings.index(lines[j], needle)
 								if c < 0 do continue

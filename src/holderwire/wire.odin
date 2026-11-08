@@ -41,6 +41,7 @@ WIRE_MIN :: 1 // the oldest it accepts
 
 PING_INTERVAL :: 5 * time.Second // the core pings this often
 PONG_TIMEOUT :: 30 * time.Second // a core that misses pongs this long is dropped
+SUCCESSOR_TTL :: 60 * time.Second // a successor secret (GOODBYE{successor}): valid this long, for one HELLO (§7.2)
 
 // Kind numbers never change or get reused.
 Kind :: enum u8 {
@@ -209,7 +210,10 @@ Exited :: struct {
 }
 
 Goodbye :: struct {
-	mode: string, // handover | shutdown
+	mode:      string, // handover | shutdown
+	// handover only: a successor is named (the updater's relaunch, §7.2): GOODBYE_ACK carries a
+	// fresh successor secret, and for SUCCESSOR_TTL only a HELLO with it is welcomed
+	successor: bool `json:"successor,omitempty"`,
 }
 
 Ack_Terminal :: struct {

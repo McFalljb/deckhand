@@ -17,7 +17,7 @@
     {"name": "SIGNAL", "kind": 23, "frozen": false, "payload": "json", "fields": [{"name": "signal", "type": "int", "required": true}, {"name": "target", "type": "string", "required": true}]},
     {"name": "RELEASE", "kind": 24, "frozen": false, "payload": "json", "fields": []},
     {"name": "EXITED", "kind": 25, "frozen": false, "payload": "json", "fields": [{"name": "code", "type": "int", "required": true}, {"name": "signal", "type": "int", "required": true}, {"name": "offset", "type": "int", "required": true}]},
-    {"name": "GOODBYE", "kind": 26, "frozen": false, "payload": "json", "fields": [{"name": "mode", "type": "string", "required": true}]},
+    {"name": "GOODBYE", "kind": 26, "frozen": false, "payload": "json", "fields": [{"name": "mode", "type": "string", "required": true}, {"name": "successor", "type": "bool", "required": false}]},
     {"name": "GOODBYE_ACK", "kind": 27, "frozen": false, "payload": "json", "fields": [{"name": "terminals", "type": "objects", "required": true, "items": [{"name": "id", "type": "int", "required": true}, {"name": "offset", "type": "int", "required": true}]}, {"name": "successor_secret", "type": "string", "required": true}]},
     {"name": "FOREGROUND", "kind": 28, "frozen": false, "payload": "json", "fields": []},
     {"name": "FOREGROUND_IS", "kind": 29, "frozen": false, "payload": "json", "fields": [{"name": "pgid", "type": "int", "required": true}]},

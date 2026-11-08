@@ -138,7 +138,10 @@ Welcome_Terminal :: struct {
 	xpixel: i64,
 	ypixel: i64,
 	offset: u64, // output bytes produced so far
-	exit:   Maybe(Exit_Status), // null while running
+	exit:   Maybe(Exit_Status), // null while running; code -1: it ended unseen (unknown)
+	// not the holder's child: a keeper adopted it after a failed upgrade (§7.3 step 6). Output,
+	// input, signals and exit codes work; no waitpid or parent-based job control.
+	degraded: Maybe(bool) `json:"degraded,omitempty"`, // omitted (nil) unless true
 	bad:    bool `json:"-"`, // set by decode: a size out of range (never on the wire)
 }
 
@@ -150,6 +153,9 @@ Welcome :: struct {
 	previous:   string, // none | handover | crash | upgrade
 	hmac_key:   string, // hex
 	terminals:  []Welcome_Terminal,
+	// set when an upgrade's new image did not take the terminals and its keeper serves them
+	// (previous = upgrade): why ("the new holder image failed verification ...")
+	upgrade_error: string `json:"upgrade_error,omitempty"`,
 }
 
 Refused :: struct {
@@ -415,6 +421,9 @@ type_matches :: proc(v: json.Value, t: Field_Type) -> bool {
 		return ok
 	case .Object:
 		_, ok := v.(json.Object)
+		return ok
+	case .Bool:
+		_, ok := v.(json.Boolean)
 		return ok
 	}
 	return false

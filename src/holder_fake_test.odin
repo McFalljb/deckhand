@@ -41,6 +41,11 @@ Fake_Holder :: struct {
 	terms:     []hw.Welcome_Terminal,
 	tails:     [][]u8, // one per terminal (its offset - len = the TAIL's start)
 	output:    []u8, // sent as OUTPUT of the first terminal right after the TAILs (while the app attaches)
+	// UPGRADE: the fake closes the connection, as the exec does, and answers the reattach with
+	// WELCOME{previous: upgrade}, the TAILs and then, in the same write, this as OUTPUT of the
+	// first terminal and its EXITED (code 7). After that it sends nothing more, PONG included.
+	upgrade_output: []u8,
+	upgraded:  bool,
 	key:       [32]u8,
 	dir:       string, // the runtime dir (also home_root/..)
 	path:      string,
@@ -186,19 +191,22 @@ fake_serve :: proc(f: ^Fake_Holder) {
 					return
 				case .Silent, .Hangup:
 				case .Welcome:
-					w := hw.Welcome{wire = hw.WIRE, instance = f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
-					fake_send(f, .Welcome, 0, w)
+					w := hw.Welcome{wire = hw.WIRE, instance = f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.upgraded ? "upgrade" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
+					out := make([dynamic]u8, context.temp_allocator)
+					hw.encode(&out, .Welcome, 0, w)
 					for wt, i in f.terms {
 						tail := i < len(f.tails) ? f.tails[i] : nil
-						out := make([dynamic]u8, context.temp_allocator)
 						hw.encode_output(&out, .Tail, u32(wt.id), wt.offset - u64(len(tail)), tail)
-						sock_write_all(f.cfd, out[:])
 					}
-					if len(f.output) > 0 && len(f.terms) > 0 {
-						out := make([dynamic]u8, context.temp_allocator)
+					if len(f.output) > 0 && len(f.terms) > 0 && !f.upgraded {
 						hw.encode_output(&out, .Output, u32(f.terms[0].id), f.terms[0].offset, f.output)
-						sock_write_all(f.cfd, out[:])
 					}
+					if f.upgraded && len(f.upgrade_output) > 0 && len(f.terms) > 0 {
+						t0 := f.terms[0]
+						hw.encode_output(&out, .Output, u32(t0.id), t0.offset, f.upgrade_output)
+						hw.encode(&out, .Exited, u32(t0.id), hw.Exited{code = 7, offset = t0.offset + u64(len(f.upgrade_output))})
+					}
+					sock_write_all(f.cfd, out[:]) // one write: what follows the TAILs arrives with them
 				}
 				continue
 			}
@@ -207,7 +215,13 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			case .Spawn:
 				fake_send(f, .Spawned, fr.terminal, hw.Spawned{pid = i64(posix.getpid()), pgid = i64(posix.getpid())})
 			case .Ping:
-				fake_send(f, .Pong, 0, hw.Empty{})
+				if !f.upgraded do fake_send(f, .Pong, 0, hw.Empty{})
+			case .Upgrade:
+				f.upgraded = true
+				sync.lock(&f.mu)
+				append(&f.got, g)
+				sync.unlock(&f.mu)
+				return // the exec: this connection closes; the next one is the new image's
 			case .Goodbye:
 				m: hw.Goodbye
 				hw.decode(fr, .Goodbye, &m, context.temp_allocator)

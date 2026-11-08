@@ -120,3 +120,82 @@ holder_start_table :: proc(t: ^testing.T) {
 		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
 	}
 }
+
+// The keeper's gate (§7.3 step 4): only the holder's own pid, after an exec (new pidversion).
+@(test)
+successor_image_table :: proc(t: ^testing.T) {
+	me :: u32(501)
+	cases := []struct {
+		peer: Peer,
+		want: Decision,
+	} {
+		{Peer{ok = true, pid = 100, pidversion = 8, euid = me}, .Allow}, // the holder, exec'd
+		{Peer{ok = true, pid = 100, pidversion = 7, euid = me}, .Not_Exec}, // the old image itself
+		{Peer{ok = true, pid = 101, pidversion = 8, euid = me}, .Changed}, // another process
+		{Peer{ok = true, pid = 100, pidversion = 8, euid = 0}, .Other_User},
+		{Peer{}, .No_Peer}, // it exited (EINVAL)
+	}
+	for c, i in cases do testing.expectf(t, successor_image_allowed(.Adhoc, me, 100, 7, c.peer) == c.want, "case %d: %v", i, successor_image_allowed(.Adhoc, me, 100, 7, c.peer))
+	// a holder pid we do not know never matches
+	testing.expect(t, successor_image_allowed(.Adhoc, me, 0, 7, Peer{ok = true, pid = 0, pidversion = 8, euid = me}) == .Changed)
+}
+
+// The dry run's gate: the child we forked, whatever it exec'd.
+@(test)
+dry_run_peer_table :: proc(t: ^testing.T) {
+	p := Peer{ok = true, pid = 42, pidversion = 9, euid = 501}
+	testing.expect(t, dry_run_peer_allowed(.Adhoc, 501, 42, p) == .Allow)
+	testing.expect(t, dry_run_peer_allowed(.Adhoc, 501, 43, p) == .Changed)
+	testing.expect(t, dry_run_peer_allowed(.Adhoc, 501, 0, p) == .Changed)
+	testing.expect(t, dry_run_peer_allowed(.Adhoc, 502, 42, p) == .Other_User)
+	testing.expect(t, dry_run_peer_allowed(.Adhoc, 501, 42, Peer{}) == .No_Peer)
+}
+
+// What ran (or will run) must carry our own signing identifier, with a valid signature (ad hoc:
+// identifier only, §5.4, §7.3 4.6).
+@(test)
+image_allowed_table :: proc(t: ^testing.T) {
+	own := Code_Identity{ok = true, valid = true, identifier = "dev.deckhand.core"}
+	cases := []struct {
+		own, got: Code_Identity,
+		want:     Decision,
+	} {
+		{own, own, .Allow},
+		{own, Code_Identity{ok = true, valid = true, identifier = "dev.deckhand.evil"}, .Wrong_Identity},
+		{own, Code_Identity{ok = true, valid = true, identifier = "dev.deckhand.core.x"}, .Wrong_Identity},
+		{own, Code_Identity{ok = true, valid = false, identifier = "dev.deckhand.core"}, .Bad_Signature},
+		{own, Code_Identity{ok = true, valid = true, identifier = ""}, .Wrong_Identity},
+		{own, Code_Identity{}, .No_Code}, // no code for the token (it exec'd again, or exited)
+		{Code_Identity{}, own, .No_Code}, // our own identity unknown: nothing passes
+		{Code_Identity{ok = true, valid = true, identifier = ""}, Code_Identity{ok = true, valid = true, identifier = ""}, .No_Code},
+	}
+	for c, i in cases do testing.expectf(t, image_allowed(.Adhoc, c.own, c.got) == c.want, "case %d: %v", i, image_allowed(.Adhoc, c.own, c.got))
+}
+
+// The live reads: our own token and code, and a file's static code.
+@(test)
+self_identity_reads :: proc(t: ^testing.T) {
+	me := self_peer()
+	testing.expect(t, me.ok)
+	testing.expect_value(t, me.pid, i32(posix.getpid()))
+	testing.expect_value(t, me.euid, own_uid())
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer posix.close(fds[0])
+	defer posix.close(fds[1])
+	b := [1]u8{1}
+	posix.write(fds[1], &b[0], 1)
+	p, tok := peer_read_token(fds[0])
+	testing.expect(t, p.ok && p.pid == me.pid && p.pidversion == me.pidversion)
+	// the test binary is linker-signed: some identifier, and the token's code is ours
+	own := code_identity_self()
+	testing.expect(t, own.ok && own.valid && own.identifier != "", "own code identity")
+	got := code_identity_of_token(tok)
+	testing.expectf(t, got.ok && got.identifier == own.identifier, "token code %v, own %v", got, own)
+	testing.expect(t, image_allowed(.Adhoc, own, got) == .Allow)
+	// a file: a system binary is Apple's, not ours; a missing file has no code
+	sh := code_identity_of_file("/bin/sh")
+	testing.expect(t, sh.ok && sh.identifier == "com.apple.sh", "/bin/sh")
+	testing.expect(t, image_allowed(.Adhoc, own, sh) == .Wrong_Identity)
+	testing.expect(t, !code_identity_of_file("/nonexistent/deckhand-core").ok)
+}

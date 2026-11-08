@@ -51,6 +51,18 @@ POLLERR :: 0x0008
 POLLHUP :: 0x0010
 POLLNVAL :: 0x0020
 
+ESRCH :: 3
+ECHILD :: 10
+SCM_RIGHTS :: 1
+F_GETFD :: 1
+EVFILT_PROC :: -5
+EV_ADD :: 0x0001
+EV_ONESHOT :: 0x0010
+EV_ERROR :: 0x4000
+NOTE_EXIT :: 0x80000000
+NOTE_EXITSTATUS :: 0x04000000
+SIGUSR2 :: 31
+
 POSIX_SPAWN_SETEXEC :: 0x0040
 RTLD_DEFAULT :: rawptr(~uintptr(1)) // (void *)-2
 
@@ -77,6 +89,43 @@ Sockaddr_Un :: struct {
 	sun_path:   [104]u8,
 }
 
+Iovec :: struct {
+	base: rawptr,
+	len:  c.size_t,
+}
+
+Msghdr :: struct {
+	name:       rawptr,
+	namelen:    u32,
+	iov:        ^Iovec,
+	iovlen:     c.int,
+	control:    rawptr,
+	controllen: u32,
+	flags:      c.int,
+}
+
+// struct cmsghdr; its data starts 4-aligned right after it (12 bytes) on Darwin
+Cmsghdr :: struct {
+	len:   u32,
+	level: c.int,
+	type:  c.int,
+}
+
+// struct kevent (64-bit Darwin)
+Kevent :: struct {
+	ident:  uintptr,
+	filter: i16,
+	flags:  u16,
+	fflags: u32,
+	data:   int,
+	udata:  rawptr,
+}
+
+Timespec :: struct {
+	sec:  int,
+	nsec: int,
+}
+
 // struct sigaction (the user-side one: handler, mask, flags)
 Sigaction :: struct {
 	handler: uintptr, // SIG_DFL 0, SIG_IGN 1, or a proc "c" (c.int)
@@ -93,6 +142,7 @@ foreign libc {
 	read :: proc(fd: c.int, buf: rawptr, n: c.size_t) -> c.ssize_t ---
 	write :: proc(fd: c.int, buf: rawptr, n: c.size_t) -> c.ssize_t ---
 	close :: proc(fd: c.int) -> c.int ---
+	dup :: proc(fd: c.int) -> c.int ---
 	kill :: proc(pid: c.int, sig: c.int) -> c.int ---
 	waitpid :: proc(pid: c.int, status: ^c.int, options: c.int) -> c.int ---
 	getpid :: proc() -> c.int ---
@@ -127,6 +177,11 @@ foreign libc {
 	posix_spawnattr_setflags :: proc(attr: ^rawptr, flags: c.short) -> c.int ---
 	posix_spawnattr_destroy :: proc(attr: ^rawptr) -> c.int ---
 	_NSGetEnviron :: proc() -> ^[^]cstring ---
+	sendmsg :: proc(fd: c.int, msg: ^Msghdr, flags: c.int) -> c.ssize_t ---
+	recvmsg :: proc(fd: c.int, msg: ^Msghdr, flags: c.int) -> c.ssize_t ---
+	kqueue :: proc() -> c.int ---
+	kevent :: proc(kq: c.int, changes: [^]Kevent, nchanges: c.int, events: [^]Kevent, nevents: c.int, timeout: ^Timespec) -> c.int ---
+
 	__error :: proc() -> ^c.int ---
 	getrlimit :: proc(resource: c.int, rlp: ^Rlimit) -> c.int ---
 	setrlimit :: proc(resource: c.int, rlp: ^Rlimit) -> c.int ---
@@ -136,11 +191,17 @@ foreign import libproc "system:proc"
 @(default_calling_convention = "c")
 foreign libproc {
 	proc_pidpath :: proc(pid: c.int, buffer: rawptr, size: u32) -> c.int ---
+	proc_pidinfo :: proc(pid: c.int, flavor: c.int, arg: u64, buffer: rawptr, size: c.int) -> c.int ---
 }
 
 errno :: proc "contextless" () -> c.int {return __error()^}
 
 set_cloexec :: proc(fd: c.int) {fcntl(fd, F_SETFD, c.int(FD_CLOEXEC))}
+
+// The one fd an exec'd image is meant to inherit (an upgrade's socketpair end).
+clear_cloexec :: proc "contextless" (fd: c.int) {fcntl(fd, F_SETFD, c.int(0))}
+
+is_cloexec :: proc(fd: c.int) -> bool {return fcntl(fd, F_GETFD) & FD_CLOEXEC != 0}
 
 set_nonblock :: proc(fd: c.int) {
 	flags := fcntl(fd, F_GETFL)

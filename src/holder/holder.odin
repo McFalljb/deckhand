@@ -29,7 +29,11 @@ import "core:time"
 import "../holderwire"
 import "../trust"
 
-HOLDER_REV :: 1
+// The holder's revision, in WELCOME. Bump it (by hand) whenever the holder's code changes: src/holder,
+// src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
+// checks src/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
+// whose holder_rev is older than its own (UPGRADE, §7.3).
+HOLDER_REV :: 2
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -100,6 +104,7 @@ Term :: struct {
 	exec_fd:                    c.int,
 	spawned_at:                 time.Tick,
 	requester:                  u64, // the asking connection's serial
+	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from kqueue
 }
 
 Conn :: struct {
@@ -111,6 +116,7 @@ Conn :: struct {
 	last_rx:       time.Tick,
 	accepted_at:   time.Tick,
 	welcomed:      bool,
+	wire:          i64, // the wire WELCOME agreed on
 	closing:       bool, // send what is queued, then close (REFUSED, GOODBYE_ACK)
 	linger:        bool, // closing after GOODBYE_ACK: once sent, wait for the core's EOF (or LINGER)
 	closing_since: time.Tick,
@@ -126,6 +132,10 @@ Holder :: struct {
 	sock_path:         string,
 	lock_fd:           c.int,
 	wake_fd:           c.int, // SIGCHLD self-pipe's read end, or -1
+	kq:                c.int, // kqueue watching orphans' exits (NOTE_EXITSTATUS), or -1
+	upgrade_error:     string, // the keeper adopted the terminals: why the new image did not get them (WELCOME)
+	can_upgrade:       bool, // the holder binary (never an in-process test holder): UPGRADE may exec
+	keeper_pid:        c.int, // after an upgrade: the keeper (our child) until it is reaped, else 0
 	terms:             [dynamic]^Term,
 	conns:             [dynamic]^Conn,
 	core:              ^Conn, // the attached (WELCOMEd) core, or nil
@@ -144,6 +154,7 @@ Holder :: struct {
 	listen_paused:     bool, // accept failed for want of fds (EMFILE, ENFILE): back off
 	accept_logged:     bool, // that was logged; again only after an accept worked
 	listen_paused_at:  time.Tick,
+	owns_dirs:         bool, // cfg.run_dir and data_dir are ours to free (state_decode)
 }
 
 Start_Error :: enum {
@@ -167,17 +178,7 @@ hlog :: proc(h: ^Holder, format: string, args: ..any) {
 // A holder. With cfg.run_dir it listens on <run>/holder-<rand8>.sock; with cfg.data_dir it holds
 // <data>/instance.lock shared. On an error nothing is left open (and the result is nil).
 holder_new :: proc(cfg: Config) -> (h: ^Holder, err: Start_Error) {
-	h = new(Holder)
-	h.cfg = cfg
-	h.cfg.tail_cap = min(cfg.tail_cap, holderwire.MAX_OUTPUT_CHUNK) // one TAIL frame per terminal
-	h.listen_fd, h.lock_fd, h.wake_fd = -1, -1, -1
-	h.previous = "none"
-	h.buf = make([]u8, READ_CHUNK)
-	crypto.rand_bytes(h.key[:])
-	id: [8]u8
-	crypto.rand_bytes(id[:])
-	h.instance = string(hex.encode(id[:]))
-	h.idle, h.idle_since = true, time.tick_now()
+	h = holder_alloc(cfg)
 
 	if cfg.data_dir != "" {
 		path := strings.clone_to_cstring(fmt.tprintf("%s/instance.lock", cfg.data_dir), context.temp_allocator)
@@ -205,6 +206,22 @@ holder_new :: proc(cfg: Config) -> (h: ^Holder, err: Start_Error) {
 		}
 	}
 	return h, .None
+}
+
+// A holder with nothing open: a fresh key and instance id (state_decode replaces both).
+holder_alloc :: proc(cfg: Config) -> ^Holder {
+	h := new(Holder)
+	h.cfg = cfg
+	h.cfg.tail_cap = min(cfg.tail_cap, holderwire.MAX_OUTPUT_CHUNK) // one TAIL frame per terminal
+	h.listen_fd, h.lock_fd, h.wake_fd, h.kq = -1, -1, -1, -1
+	h.previous = "none"
+	h.buf = make([]u8, READ_CHUNK)
+	crypto.rand_bytes(h.key[:])
+	id: [8]u8
+	crypto.rand_bytes(id[:])
+	h.instance = string(hex.encode(id[:]))
+	h.idle, h.idle_since = true, time.tick_now()
+	return h
 }
 
 // Why the run dir is not safe to put the socket in ("" if it is): it must be a real directory
@@ -287,13 +304,19 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 			kill(-t.pgid, SIGKILL)
 			kill(t.pid, SIGKILL)
 			st: c.int
-			waitpid(t.pid, &st, 0)
+			if !t.orphan do waitpid(t.pid, &st, 0)
 		}
 		term_free(t)
 	}
 	delete(h.terms)
 	stop_listening(h)
 	if h.lock_fd >= 0 do close(h.lock_fd)
+	if h.kq >= 0 do close(h.kq)
+	if h.owns_dirs {
+		delete(h.cfg.run_dir)
+		delete(h.cfg.data_dir)
+	}
+	delete(h.upgrade_error)
 	delete(h.instance)
 	delete(h.buf)
 	free(h)
@@ -347,6 +370,7 @@ holder_attach :: proc(h: ^Holder, fd: c.int) -> bool {
 Poll_Who :: enum {
 	Listen,
 	Wake,
+	Orphans,
 	Conn,
 	Term,
 	Spawn, // a pending terminal's exec_fd
@@ -368,6 +392,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	if h.listen_fd >= 0 && !h.shutting_down && !h.listen_paused do add(&fds, &who, &idx, h.listen_fd, POLLIN, .Listen, 0)
 	if h.wake_fd >= 0 do add(&fds, &who, &idx, h.wake_fd, POLLIN, .Wake, 0)
 	input_pause(h)
+	if h.kq >= 0 do add(&fds, &who, &idx, h.kq, POLLIN, .Orphans, 0)
 	for cn, i in h.conns {
 		ev: c.short
 		if (!cn.closing || cn.linger) && !(cn == h.core && h.input_paused) do ev |= POLLIN
@@ -394,6 +419,8 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 			case .Wake:
 				drain: [64]u8
 				for read(h.wake_fd, &drain, size_of(drain)) > 0 {}
+			case .Orphans:
+				orphans_read(h)
 			case .Conn:
 				cn := h.conns[idx[k]]
 				if pfd.revents & POLLOUT != 0 do conn_flush(h, cn)
@@ -464,7 +491,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	}
 	for term in h.terms {
 		if term.pending do t = min(t, ms_until(term.spawned_at, h.cfg.spawn_timeout))
-		if !term.reaped do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
+		if !term.reaped && !term.orphan do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
 		else if !term.final do t = min(t, ms_until(term.reaped_at, h.cfg.exit_grace))
 	}
 	if h.idle do t = min(t, ms_until(h.idle_since, h.cfg.idle_exit))
@@ -689,7 +716,7 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		case: hlog(h, "GOODBYE mode %q unknown", m.mode)
 		}
 	case .Upgrade:
-		send_msg(cn, .Upgrade_Failed, 0, holderwire.Upgrade_Failed{error = "this holder does not upgrade yet"})
+		handle_upgrade(h, cn, f) // returns only if it did not happen (upgrade.odin)
 	case:
 		hlog(h, "ignoring a %d frame from the core", f.kind)
 	}
@@ -725,19 +752,20 @@ welcome :: proc(h: ^Holder, cn: ^Conn, wire: i64) {
 			offset = t.offset,
 		}
 		if t.final do wt.exit = t.exit
+		if t.orphan do wt.degraded = true
 		append(&terms, wt)
 	}
 	send_msg(cn, .Welcome, 0, holderwire.Welcome {
 		wire = wire, instance = h.instance, pid = i64(getpid()), holder_rev = HOLDER_REV,
 		previous = h.previous, hmac_key = string(hex.encode(h.key[:], context.temp_allocator)),
-		terminals = terms[:],
+		terminals = terms[:], upgrade_error = h.upgrade_error,
 	})
 	for t in h.terms {
 		if t.released || t.pending do continue
 		tail := ring_bytes(&t.tail)
 		holderwire.encode_output(&cn.out, .Tail, t.id, t.offset - u64(len(tail)), tail)
 	}
-	cn.welcomed = true
+	cn.welcomed, cn.wire = true, wire
 	h.core = cn
 	hlog(h, "a core attached (previous %s, %d terminals)", h.previous, len(terms))
 }
@@ -891,10 +919,14 @@ timers :: proc(h: ^Holder) {
 			conn_drop(h, cn, "no HELLO in time")
 		}
 	}
+	if h.keeper_pid > 0 {
+		st: c.int
+		if r := waitpid(h.keeper_pid, &st, WNOHANG); r == h.keeper_pid || (r < 0 && errno() == ECHILD) do h.keeper_pid = 0
+	}
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {
 		t := h.terms[i]
 		if t.pending && time.tick_since(t.spawned_at) >= h.cfg.spawn_timeout do spawn_resolve(h, t, true)
-		if !t.reaped {
+		if !t.reaped && !t.orphan {
 			st: c.int
 			if waitpid(t.pid, &st, WNOHANG) == t.pid {
 				code, sig, ended := exit_from_wait(st)
@@ -961,24 +993,41 @@ on_sigchld :: proc "c" (sig: c.int) {
 	__error()^ = saved
 }
 
-// `deckhand-core hold --run DIR --data DIR [--ready PATH]`. Exit codes: 0 done (idle or
-// GOODBYE{shutdown}), 1 a start failure, 2 usage, 3 instance.lock held exclusively.
+// `deckhand-core hold --run DIR --data DIR [--ready PATH]`, or after an UPGRADE's exec
+// `hold --resume FD --run DIR --data DIR` (the new image) and `hold --dry-run-resume FD --run DIR
+// --data DIR` (its dry run; upgrade.odin).
+// Exit codes: 0 done (idle or GOODBYE{shutdown}), 1 a start failure, 2 usage, 3 instance.lock
+// held exclusively.
 hold_main :: proc(args: []string) -> int {
-	run_dir, data_dir, ready: string
+	run_dir, data_dir, ready, resume, dry: string
 	for i := 0; i < len(args); i += 1 {
 		if i + 1 >= len(args) do return usage()
 		switch args[i] {
 		case "--run": run_dir = args[i + 1]
 		case "--data": data_dir = args[i + 1]
 		case "--ready": ready = args[i + 1]
+		case "--resume": resume = args[i + 1]
+		case "--dry-run-resume": dry = args[i + 1]
 		case: return usage()
 		}
 		i += 1
 	}
+	// first, before any child: a launcher's leaked fds never reach the sessions; an exec keeps
+	// ignored signals and the blocked mask (P1, S2). A new image after an UPGRADE inherits only
+	// the keeper's socket, used by its number (holder_resume).
+	cloexec_inherited()
+	reset_signals()
+
+	if resume != "" || dry != "" {
+		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") do return usage()
+		raise_fd_limit() // before it takes every master; a resource limit survives exec, but not the raise
+		h := holder_resume(dry != "" ? dry : resume, dry != "", run_dir, data_dir)
+		if h == nil do return 1
+		install_sigchld(h)
+		return holder_serve(h)
+	}
 	if run_dir == "" || data_dir == "" do return usage()
 
-	cloexec_inherited() // a launcher's leaked fds never reach the sessions
-	reset_signals()
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
 	raise_fd_limit() // after it: the re-exec'd holder would take the raised limit for the original
 
@@ -1002,17 +1051,31 @@ hold_main :: proc(args: []string) -> int {
 	case .Lock_Busy: return 3
 	case .Run_Dir, .Listen, .Lock: return 1
 	}
+	h.can_upgrade = true
+	install_sigchld(h)
+	return holder_serve(h)
+}
 
+// The SIGCHLD self-pipe: a child's exit wakes poll at once (the loop's waitpid finds it).
+install_sigchld :: proc(h: ^Holder) {
 	wake: [2]c.int
-	if pipe(&wake) == 0 {
-		for fd in wake {
-			set_cloexec(fd)
-			set_nonblock(fd)
-		}
-		h.wake_fd, wake_write_fd = wake[0], wake[1]
-		act := Sigaction{handler = uintptr(rawptr(on_sigchld)), flags = SA_RESTART}
-		sigaction(SIGCHLD, &act, nil)
-	}
+	sync_lock()
+	ok := pipe(&wake) == 0
+	if ok do for fd in wake do set_cloexec(fd)
+	sync_unlock()
+	if !ok do return
+	for fd in wake do set_nonblock(fd)
+	h.wake_fd, wake_write_fd = wake[0], wake[1]
+	install_sigchld_handler()
+}
+
+install_sigchld_handler :: proc() {
+	act := Sigaction{handler = uintptr(rawptr(on_sigchld)), flags = SA_RESTART}
+	sigaction(SIGCHLD, &act, nil)
+}
+
+// The loop, until the holder is done; its exit code.
+holder_serve :: proc(h: ^Holder) -> int {
 	for !h.done {
 		holder_step(h, 60 * 1000)
 		free_all(context.temp_allocator)

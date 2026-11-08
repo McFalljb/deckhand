@@ -15,6 +15,7 @@ Field_Type :: enum {
 	Strings, // array of strings
 	Objects, // array of objects (items lists their fields)
 	Object,
+	Bool,
 }
 
 FIELD_TYPE_NAMES := [Field_Type]string {
@@ -23,6 +24,7 @@ FIELD_TYPE_NAMES := [Field_Type]string {
 	.Strings = "strings",
 	.Objects = "objects",
 	.Object  = "object",
+	.Bool    = "bool",
 }
 
 Payload :: enum {
@@ -67,6 +69,7 @@ WELCOME_TERMINAL := []Field_Spec {
 	{name = "ypixel", type = .Int, required = true},
 	{name = "offset", type = .Int, required = true},
 	{name = "exit", type = .Object, nullable = true, items = EXIT_STATUS},
+	{name = "degraded", type = .Bool},
 }
 
 @(private)
@@ -82,6 +85,7 @@ SPECS := []Kind_Spec {
 		{name = "previous", type = .String, required = true},
 		{name = "hmac_key", type = .String, required = true},
 		{name = "terminals", type = .Objects, required = true, items = WELCOME_TERMINAL},
+		{name = "upgrade_error", type = .String},
 	}},
 	{"REFUSED", .Refused, true, .Json, {{name = "code", type = .String, required = true}, {name = "error", type = .String, required = true}}},
 	{"UPGRADE", .Upgrade, true, .Json, {{name = "path", type = .String, required = true}}},

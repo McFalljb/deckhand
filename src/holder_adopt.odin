@@ -201,7 +201,8 @@ holder_handover :: proc() -> bool {
 	os.remove(probe)
 	handover_clear()
 	hc.handover = true
-	if !holder_goodbye("handover") do return true // lost: whatever the holder kept, the next launch finds
+	feed :: proc(d: rawptr) {for t in (^[dynamic]^Term)(d)^ do handover_feed(t)}
+	if !holder_goodbye("handover", feed, &held) do return true // lost or left: whatever the holder kept, the next launch finds
 	// the holder sends every OUTPUT before the ack and nothing after it
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
 	for {

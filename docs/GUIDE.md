@@ -1412,6 +1412,10 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
   example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
   then stop when Deckhand quits.
+  In a development build (one you built from source), the palette's **Restart session holder**
+  upgrades the running holder in place to the holder you just built: same process, every session
+  keeps running and nothing is redrawn. If the new holder fails to start or to verify, the old
+  one's keeper keeps the sessions (marked degraded: they work, and their exit codes still show).
 
 ## Updates
 
@@ -1857,6 +1861,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | Experimental, off by default: on or off (the gear's Experimental section) |
+| Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |
 | Check for Updates… |  | check for a newer Deckhand now ([Updates](#updates)) |
 | Check for updates automatically |  | on or off: the daily check ([Updates](#updates)) |

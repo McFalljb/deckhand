@@ -210,7 +210,8 @@ build_pi() {
 }
 
 # the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed ad
-# hoc with its own identifier (bundle-app.sh copies it into the app). Links only libSystem.
+# hoc with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
+# Security and CoreFoundation (an upgrade checks the new image's code: src/trust/code_darwin.odin).
 # Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
 # keeps its file (a signed binary changed in place is killed at its next page-in).
 build_core() {
@@ -218,6 +219,17 @@ build_core() {
   odin build src/holder -out:build/.deckhand-core.new -o:speed -minimum-os-version:$MACOS_MIN
   codesign -f -s - -i dev.deckhand.core build/.deckhand-core.new 2>/dev/null
   mv -f build/.deckhand-core.new build/deckhand-core
+}
+# test builds only: the holder with its test hooks (src/holder/keeper.odin) for the re-exec tests,
+# and the same binary signed with another identifier (the swapped binary they must refuse)
+build_core_hooks() {
+  rm -f build/.deckhand-core-hooks.new build/.deckhand-core-swapped.new
+  odin build src/holder -out:build/.deckhand-core-hooks.new -define:DECKHAND_TEST_HOOKS=true -minimum-os-version:$MACOS_MIN
+  codesign -f -s - -i dev.deckhand.core build/.deckhand-core-hooks.new 2>/dev/null
+  cp build/.deckhand-core-hooks.new build/.deckhand-core-swapped.new
+  codesign -f -s - -i dev.deckhand.swapped build/.deckhand-core-swapped.new 2>/dev/null
+  mv -f build/.deckhand-core-hooks.new build/deckhand-core-hooks
+  mv -f build/.deckhand-core-swapped.new build/deckhand-core-swapped
 }
 
 case "$MODE" in
@@ -249,7 +261,9 @@ case "$MODE" in
     # who may talk to the holder, its launcher and the app (src/trust): pure table tests
     odin test src/trust -out:build/trust-tests
     # the session holder (src/holder): an in-process holder and a fake core over a socketpair,
-    # /bin/sh children; its half of the launcher's ready handshake
+    # /bin/sh children; its half of the launcher's ready handshake; and UPGRADE with real
+    # processes (build/deckhand-core-hooks: 5 re-execs under load, refusals, the keeper adopting)
+    build_core_hooks
     odin test src/holder -out:build/holder-tests
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)

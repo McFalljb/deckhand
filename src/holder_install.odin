@@ -55,7 +55,7 @@ holder_bin_find :: proc(allocator := context.allocator) -> string {
 // identical), development builds included. path in the heap allocator. why: why not (bin
 // unreadable, the copy fails codesign, a write failed).
 holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
-	if autotest.active do return strings.clone(bin), true, ""
+	if autotest_active do return strings.clone(bin), true, ""
 	src, rerr := os.read_entire_file(bin, context.temp_allocator)
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)

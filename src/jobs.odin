@@ -334,7 +334,7 @@ jobs_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 	case Job_Save:
 		path, err := job_note_save(c.path, c.text, c.based_on)
 		// the sheet closes (the Jobs tab shows, its row open), or says why
-		if caller.kind == .UI && job_sheet_saved(path, err) {
+		if caller.kind == .UI && window_job_sheet_saved(path, err) {
 			state.layout.left_open = true
 			state.layout.left_tab = .Jobs
 		}
@@ -432,7 +432,7 @@ jobs_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 		if n := strings.trim_right(c.notes, "/"); n != folders_login_notes {
 			delete(folders_login_notes)
 			folders_login_notes = strings.clone(n)
-			setup_detect_again()
+			window_setup_sheet(.Detect_Again)
 			ch = true
 		}
 		return {ok = true}, ch
@@ -1306,7 +1306,7 @@ jobs_running_changed :: proc() {
 	n := 0
 	for j in sched.jobs do if j.run != nil do n += 1
 	sync.atomic_store(&sched.running, n)
-	platform_activity(n > 0)
+	if platform.activity != nil do platform.activity(n > 0)
 }
 
 // Delivery (§7), all in one place: the Jobs tab's unread marker, the
@@ -1530,7 +1530,7 @@ jobs_env_start :: proc() {
 	// test mode never reads the user's shell. Every start: the user's
 	// PI_KIT_NOTES_DIR may have changed (it wins over the main folder).
 	// Unit tests never read it either; they send Jobs_Env themselves.
-	if autotest.active {
+	if autotest_active {
 		sched.env_known = true
 		return
 	}

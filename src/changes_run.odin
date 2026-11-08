@@ -7,6 +7,9 @@ package main
 // `cap` bytes the reading stops and the group is stopped (Too_Big). Any
 // thread; output in the temp allocator.
 
+import "core:fmt"
+import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -30,6 +33,26 @@ foreign spawnlib {
 }
 
 POSIX_SPAWN_SETPGROUP :: 0x02 // macOS and glibc
+
+// More of posix_spawn (app tabs, app_tab.odin; the updater's relaunch, update.odin).
+when ODIN_OS == .Darwin {
+	foreign import applib "system:System"
+	@(default_calling_convention = "c")
+	foreign applib {
+		posix_spawn_file_actions_addchdir_np :: proc(fa: rawptr, path: cstring) -> posix.Errno ---
+		posix_spawn_file_actions_addopen :: proc(fa: rawptr, fd: i32, path: cstring, oflag: i32, mode: u16) -> posix.Errno ---
+	}
+	POSIX_SPAWN_SETSID :: 0x0400
+} else {
+	foreign import applib "system:c"
+	@(default_calling_convention = "c")
+	foreign applib {
+		posix_spawn_file_actions_addchdir_np :: proc(fa: rawptr, path: cstring) -> posix.Errno ---
+		posix_spawn_file_actions_addopen :: proc(fa: rawptr, fd: i32, path: cstring, oflag: i32, mode: u16) -> posix.Errno ---
+	}
+	POSIX_SPAWN_SETSID :: 0x0080 // glibc
+}
+
 // macOS: the child gets only the descriptors the file actions give it (0, 1, 2)
 when ODIN_OS == .Darwin {
 	POSIX_SPAWN_CLOEXEC_DEFAULT :: 0x4000
@@ -153,4 +176,88 @@ git_group :: proc(dir: string, timeout: time.Duration, cap: int, args: ..string)
 	append(&cmd, "-C", dir)
 	append(&cmd, ..args)
 	return run_group(cmd[:], timeout, cap = cap)
+}
+
+GIT_TIMEOUT :: 5 * time.Second
+
+// Every git run: no optional locks, no fsmonitor program, no hooks (a
+// repository's hooks are programs we would otherwise start, e.g.
+// reference-transaction on git branch -d).
+GIT_FLAGS :: [?]string{"git", "--no-optional-locks", "-c", "core.fsmonitor=false", "-c", "core.hooksPath=/dev/null"}
+
+// Runs git in dir (bounded; see the top); stdout on success (temp allocator).
+git_run :: proc(dir: string, args: ..string) -> (out: string, ok: bool) {
+	cmd := make([dynamic]string, context.temp_allocator)
+	flags := GIT_FLAGS
+	append(&cmd, ..flags[:])
+	append(&cmd, "-C", dir)
+	append(&cmd, ..args)
+	return run_bounded("", cmd[:], GIT_TIMEOUT)
+}
+
+@(private = "file")
+run_seq: int // unique output file names (atomic)
+
+// Git with input on stdin (git_run otherwise).
+git_run_input :: proc(dir, input: string, args: ..string) -> (out: string, ok: bool) {
+	cmd := make([dynamic]string, context.temp_allocator)
+	flags := GIT_FLAGS
+	append(&cmd, ..flags[:])
+	append(&cmd, "-C", dir)
+	append(&cmd, ..args)
+	return run_bounded("", cmd[:], GIT_TIMEOUT, input)
+}
+
+// Runs cmd in dir (""= ours); stdout on exit 0 (temp allocator). Killed at
+// the timeout (then not ok). Output (and input, if any) goes through
+// temporary files, so a large one never blocks the child on a full pipe.
+run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, ok: bool) {
+	o, code, ran := run_bounded_exit(dir, cmd, timeout, input)
+	if !ran || code != 0 do return "", false
+	return o, true
+}
+
+// run_bounded with the exit code: ran = it started, ended within timeout and its output was read
+// (code: its exit status, or the signal that ended it); out is read whatever the code.
+run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, code: int, ran: bool) {
+	tmpdir := os.get_env("TMPDIR", context.temp_allocator)
+	if tmpdir == "" do tmpdir = "/tmp"
+	path := fmt.tprintf("%s/deckhand-run-%d-%d.out", strings.trim_right(tmpdir, "/"), os.get_pid(), sync.atomic_add(&run_seq, 1))
+	f, ferr := os.open(path, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
+	if ferr != nil do return "", 0, false
+	defer {
+		os.close(f)
+		os.remove(path)
+	}
+	stdin: ^os.File
+	defer if stdin != nil do os.close(stdin)
+	if input != "" {
+		ipath := fmt.tprintf("%s.in", path)
+		ierr: os.Error
+		stdin, ierr = os.open(ipath, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
+		if ierr != nil do return "", 0, false
+		os.remove(ipath) // the open handle keeps it until closed
+		if _, werr := os.write_string(stdin, input); werr != nil do return "", 0, false
+		if _, serr := os.seek(stdin, 0, .Start); serr != nil do return "", 0, false
+	}
+	sync.rw_mutex_shared_lock(&fork_lock) // a plain fork (fork_lock, pty.odin)
+	p, perr := os.process_start({command = cmd, working_dir = dir, stdout = f, stdin = stdin})
+	sync.rw_mutex_shared_unlock(&fork_lock)
+	if perr != nil do return "", 0, false
+	st, werr := os.process_wait(p, timeout)
+	if werr != nil || !st.exited {
+		_ = os.process_kill(p)
+		_, _ = os.process_wait(p)
+		return "", 0, false
+	}
+	data, rerr := os.read_entire_file(path, context.temp_allocator)
+	if rerr != nil do return "", 0, false
+	return string(data), st.exit_code, true
+}
+
+// The repository root holding path ("" = not in a repository).
+git_toplevel :: proc(path: string) -> string {
+	out, ok := git_run(filepath.dir(path), "rev-parse", "--show-toplevel")
+	if !ok do return ""
+	return strings.trim_space(out)
 }

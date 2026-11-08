@@ -268,7 +268,7 @@ agent_send_failed :: proc(text, why: string) -> Result {
 @(private = "file")
 agent_deliver :: proc(tab: u64, text: string) -> string {
 	if AGENT_SEND_SUBMITS {
-		ui_do(Pi_Prompt{tab_id = tab, text = strings.trim_right(text, "\n")})
+		inbox_submit(Pi_Prompt{tab_id = tab, text = strings.trim_right(text, "\n")}, {kind = .UI}) // as the user typed it (ui_do)
 		return ""
 	}
 	t := term_of(tab)

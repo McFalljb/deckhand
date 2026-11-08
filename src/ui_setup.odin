@@ -426,6 +426,22 @@ setup_failed :: proc(why: string) {
 	set_str(&setup_ui.err, fmt.tprintf("Could not use %s: %s. Choose another folder.", fs_display(setup_main_path()), why))
 }
 
+// What the core tells the sheet (window.setup_sheet, window_hooks.odin).
+setup_sheet_op :: proc(op: Setup_Sheet_Op, why: string) {
+	switch op {
+	case .Begin:        setup_begin()
+	case .Clear_Error:  setup_clear_error()
+	case .Detect_Again: setup_detect_again()
+	case .Failed:       setup_failed(why)
+	}
+}
+
+// The sheet as get_state shows it (window.setup_state).
+setup_state_now :: proc() -> (Setup_State, bool) {
+	u := &setup_ui
+	return {step = setup_step_kind(), steps = setup_steps(), err = u.err, acct_show = u.acct_show, accounts = u.accounts[:], acct_default = u.acct_default, acct_msg = u.acct_msg}, true
+}
+
 @(private = "file")
 setup_back :: proc() {
 	edit_end(true)
@@ -800,3 +816,4 @@ field_event :: proc(e: ^sapp.Event) -> bool {
 	}
 	return false
 }
+

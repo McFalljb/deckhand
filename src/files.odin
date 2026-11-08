@@ -319,7 +319,7 @@ files_dir :: proc(dir: string, ignored: bool) -> ^Files_Dir {
 	fs_stats.relists += 1
 	t0 := time.tick_now()
 	entries, err := fs_read_dir(dir, with_ignored = true, parent_ignored = ignored, for_user = true)
-	if autotest.active && time.tick_since(t0) > 20 * time.Millisecond do fmt.eprintf("FILES listed %s: %d entries in %.1f ms\n", dir, len(entries), time.duration_milliseconds(time.tick_since(t0)))
+	if autotest_active && time.tick_since(t0) > 20 * time.Millisecond do fmt.eprintf("FILES listed %s: %d entries in %.1f ms\n", dir, len(entries), time.duration_milliseconds(time.tick_since(t0)))
 	if err != "" do d.err = strings.clone(err)
 	if r := fs_real(dir); r != dir do d.real = strings.clone(r)
 	reserve(&d.entries, len(entries))
@@ -633,7 +633,7 @@ files_visible :: proc(n: int, scroll, view_h, row_h: f32) -> (first, last: int, 
 files_keep_edited_preview :: proc() {
 	for s in state.open_sessions do for tab in s.tabs {
 		et, is := tab.kind.(Editor_Tab)
-		if is && et.preview && editor_dirty(editor_of(tab.id)) do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
+		if is && et.preview && window_tab_dirty(tab.id) do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
 	}
 }
 

@@ -3,6 +3,17 @@ package main
 // The core's tick: what runs whether or not a frame is drawn (design §10.2, M2-A). frame()
 // calls it first; M2-C also calls it from a timer while no frames run.
 
+import "base:runtime"
+
+// The context Odin code runs in from C callbacks (ghostty's, the platform's, CEF's); main sets it
+// at start.
+app_context: runtime.Context
+
+// The run's end and its frames (main.odin's App keeps the window's own state):
+app_quitting: bool // quit confirmed (or nothing to confirm): the window may close, timers stop
+app_stop_sessions: bool // that quit stops the session holder's sessions too (Quit.stop_sessions)
+app_frames_called: u64 // frame callbacks, drawn or not (frame-pause measurements; per-frame caches)
+
 core_tick :: proc() {
 	inbox_drain()
 	if window.test_step != nil do window.test_step() // test mode's script (autotest.odin)

@@ -48,7 +48,7 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 	if len(run) + RUNTIME_HOLDER_NEED > SUN_PATH_MAX {
 		return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket (sun_path is %d bytes)", run, SUN_PATH_MAX + 1)
 	}
-	if autotest.active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env)
+	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, holder_label_prefix)
 	if lok do return lpid, true, ""
 	fmt.eprintln("Deckhand: session holder: the launchd launch failed:", lwhy, "- starting it directly")

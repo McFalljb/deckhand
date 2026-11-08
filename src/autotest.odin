@@ -172,8 +172,6 @@ package main
 // current session's panes by slot), $ptab0…$ptab7 (the tab each shows). assert_screen, waitfor and dump read
 // the terminal with the keyboard (Home's while its pane shows).
 
-import "core:encoding/json"
-import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -200,7 +198,6 @@ Autotest :: struct {
 	cpu_frames:   u64,
 	cpu_bytes:    int,
 	cpu_calls:    u64,
-	active:       bool,
 	wait_request: u64, // pending command: wait for its finished event
 	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
 	submitted:    u64, // the command script_command is running: its finished event may come in the same drain
@@ -244,7 +241,7 @@ Autotest :: struct {
 
 // Real keyboard/mouse input is dropped in test mode; script-driven native
 // input (ime_*) is let through.
-autotest_allows_input :: proc() -> bool {return !autotest.active || autotest.injecting}
+autotest_allows_input :: proc() -> bool {return !autotest_active || autotest.injecting}
 
 autotest: Autotest
 
@@ -257,7 +254,7 @@ autotest_init :: proc() {
 		return
 	}
 	autotest.lines = strings.split_lines(string(data))
-	autotest.active = true
+	autotest_active = true
 	autotest.retry_line, autotest.audit_wait, autotest.wr_idx, autotest.command_idx = -1, -1, -1, -1
 	autotest.audit = hook_env(.Wait_Audit) == "1"
 	autotest.fail_fast = hook_env(.Script_Fail_Fast) == "1"
@@ -493,7 +490,7 @@ script_index :: proc(args: []string) -> (u32, bool) {
 
 autotest_step :: proc() {
 	at := &autotest
-	if !at.active do return
+	if !autotest_active do return
 	if !at.started {
 		// sokol activates the app at launch: hand focus straight back so the
 		// user's keystrokes stay in their app (real input is dropped anyway)
@@ -550,7 +547,7 @@ autotest_step :: proc() {
 			msg := strings.concatenate({"TIMEOUT waiting for ", at.waiting_for}, context.temp_allocator)
 			at.waiting_for = ""
 			script_fail(msg)
-			if !at.active do return
+			if !autotest_active do return
 		} else {
 			return
 		}
@@ -1068,11 +1065,11 @@ autotest_step :: proc() {
 			at.cpu_start = cpu_seconds()
 			at.cpu_frames = app.frames_drawn
 			at.cpu_bytes = total_bytes_in()
-			at.cpu_calls = app.frames_called
+			at.cpu_calls = app_frames_called
 		case "cpu_end":
 			wall := time.duration_seconds(time.tick_diff(at.cpu_wall, now))
 			cpu := cpu_seconds() - at.cpu_start
-			calls := app.frames_called - at.cpu_calls
+			calls := app_frames_called - at.cpu_calls
 			log(fmt.tprintf("CPU %s: %.1f%% over %.1fs, %d frames drawn, %d frame callbacks (%.1f/s), %d pty bytes", rest, 100 * cpu / wall, wall, app.frames_drawn - at.cpu_frames, calls, f64(calls) / wall, total_bytes_in() - at.cpu_bytes))
 		case "atlas":
 			size, glyphs, rasterised, evictions, runs := font_stats()
@@ -1211,9 +1208,9 @@ autotest_step :: proc() {
 			}
 		case "quit":
 			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
-			app.quitting = true // the script ends the run: no confirmation
+			app_quitting = true // the script ends the run: no confirmation
 			sapp.request_quit()
-			at.active = false
+			autotest_active = false
 			return
 		case "web_open", "web_waitpaint", "web_title", "web_pixel", "web_click", "web_scroll", "web_js", "web_stats", "web_assert", "web_mouse", "web_keydown", "web_mark", "web_comment":
 			if msg, ok := browser_script(cmd, args, rest); !ok do script_fail(msg)
@@ -1289,7 +1286,7 @@ script_fail :: proc(args: ..any) {
 	if strings.has_prefix(msg, "ASSERT FAILED") || strings.has_prefix(msg, "TIMEOUT") do log(msg)
 	else do log("ASSERT FAILED", msg)
 	at := &autotest
-	if !at.fail_fast || !at.active do return
+	if !at.fail_fast || !autotest_active do return
 	// fail fast: stop here, as `quit` does (exit status 1: main.odin); no "done:" line, which the
 	// scene scripts read as a script that ran to its end
 	line := at.next > 0 && at.next <= len(at.lines) ? strings.trim_space(at.lines[at.next - 1]) : ""
@@ -1299,9 +1296,9 @@ script_fail :: proc(args: ..any) {
 	at.next = len(at.lines)
 	at.waiting_for = ""
 	at.eventually_on = false
-	app.quitting = true // the script ends the run: no confirmation
+	app_quitting = true // the script ends the run: no confirmation
 	sapp.request_quit()
-	at.active = false
+	autotest_active = false
 }
 
 // The line starting now (DECKHAND_SCRIPT_STEP), so a hung or killed run says where it was.
@@ -1472,43 +1469,6 @@ script_pane_divider :: proc(args: []string) -> bool {
 	for i in 1 ..= 8 do send({type = .MOUSE_MOVE, mouse_x = x + dx * f32(i) / 8, mouse_y = y + dy * f32(i) / 8, modifiers = sapp.MODIFIER_LMB})
 	send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x + dx, mouse_y = y + dy})
 	return true
-}
-
-// The value at a dotted path in a JSON document, as text: strings bare,
-// numbers and bools as written, "#" = length of the array/object before it.
-json_path :: proc(text, path: string) -> string {
-	v, err := jg.parse_string(text, .JSON, true, context.temp_allocator)
-	if err != nil do return "<invalid json>"
-	p := path
-	for part in strings.split_iterator(&p, ".") {
-		if part == "#" {
-			#partial switch x in v {
-			case json.Array:  return fmt.tprint(len(x))
-			case json.Object: return fmt.tprint(len(x))
-			}
-			return "<not a list>"
-		}
-		#partial switch x in v {
-		case json.Object:
-			nv, ok := x[part]
-			if !ok do return "<missing>"
-			v = nv
-		case json.Array:
-			i, ok := strconv.parse_int(part)
-			if !ok || i < 0 || i >= len(x) do return "<missing>"
-			v = x[i]
-		case:
-			return "<missing>"
-		}
-	}
-	#partial switch x in v {
-	case json.String:  return x
-	case json.Integer: return fmt.tprint(x)
-	case json.Float:   return fmt.tprint(x)
-	case json.Boolean: return x ? "true" : "false"
-	case json.Null:    return "null"
-	}
-	return "<object>"
 }
 
 total_bytes_in :: proc() -> int {

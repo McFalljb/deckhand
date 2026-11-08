@@ -7,7 +7,6 @@ package main
 // committing it is a command (e.g. Rename_Project).
 
 import "core:strings"
-import "core:unicode"
 import "core:unicode/utf8"
 
 Text_Field :: struct {
@@ -113,9 +112,6 @@ tf_select_all :: proc(f: ^Text_Field) {
 }
 
 // ---- words (⌥ arrows, ⌥⌫, double-click) ----
-
-// Letters, digits and _ make words; everything else separates them.
-is_word_rune :: proc(r: rune) -> bool {return r == '_' || unicode.is_letter(r) || unicode.is_digit(r)}
 
 // Start of the word at or before off (skips separators first), as ⌥← does.
 word_left :: proc(s: string, off: int) -> int {

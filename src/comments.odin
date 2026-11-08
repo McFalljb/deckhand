@@ -24,8 +24,6 @@ package main
 // Not saved across a relaunch yet (browser tabs are not saved either); crops are files in
 // <data dir>/comments, removed with their comment.
 
-import "base:runtime"
-import "core:c"
 import "core:encoding/base64"
 import "core:fmt"
 import "core:os"
@@ -34,7 +32,6 @@ import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
-import stbi "vendor:stb/image"
 
 Comment_Source :: enum u8 {
 	Browser, // a browser tab's page (browser_comment_add)
@@ -654,70 +651,7 @@ comments_crop_path :: proc() -> string {
 	return fmt.aprintf("%s/c-%d-%d.png", dir, os.get_pid(), crop_n)
 }
 
-// Crops box (logical px of the frame's top-left, margin added) from the slot on screen of a frame
-// ring into a new crop file: the frame read app_screenshot uses (dh_frames_read), scaled down to
-// COMMENT_CROP_SIDE, PNG by stb. "" = no frame to crop.
-@(private = "file")
-ring_crop :: proc(tab_id: u64, ring: ^Frame_Ring, content_w, content_h: int, scale: f32, box: [4]int) -> string {
-	when ODIN_OS != .Darwin do return ""
-	if ring.shown_gen == 0 || content_w <= 0 || content_h <= 0 do return ""
-	m := COMMENT_CROP_MARGIN
-	x0, y0 := max(int(f32(box[0] - m) * scale), 0), max(int(f32(box[1] - m) * scale), 0)
-	x1, y1 := min(int(f32(box[0] + box[2] + m) * scale), content_w), min(int(f32(box[1] + box[3] + m) * scale), content_h)
-	w, h := x1 - x0, y1 - y0
-	if w <= 0 || h <= 0 do return ""
-	px := make([]u8, w * h * 4, context.temp_allocator)
-	if window.frames_read == nil || !window.frames_read(tab_id, ring.shown_gen, ring.shown_slot, x0, y0, w, h, px) do return ""
-	// down to COMMENT_CROP_SIDE on the long side (nearest pixel); BGRA -> RGBA, opaque
-	k := min(1, f32(COMMENT_CROP_SIDE) / f32(max(w, h)))
-	dw, dh := max(int(f32(w) * k), 1), max(int(f32(h) * k), 1)
-	out := make([]u8, dw * dh * 4, context.temp_allocator)
-	for y in 0 ..< dh {
-		sy := min(int(f32(y) / k), h - 1)
-		for x in 0 ..< dw {
-			sx := min(int(f32(x) / k), w - 1)
-			s, d := (sy * w + sx) * 4, (y * dw + x) * 4
-			out[d], out[d + 1], out[d + 2], out[d + 3] = px[s + 2], px[s + 1], px[s], 255
-		}
-	}
-	png := make([dynamic]u8, 0, len(out) / 4, context.temp_allocator)
-	sink :: proc "c" (ctx: rawptr, data: rawptr, size: c.int) {
-		context = runtime.default_context()
-		dst := (^[dynamic]u8)(ctx)
-		append(dst, ..([^]u8)(data)[:size])
-	}
-	if stbi.write_png_to_func(sink, &png, c.int(dw), c.int(dh), 4, raw_data(out), c.int(dw * 4)) == 0 do return ""
-	path := comments_crop_path()
-	if os.write_entire_file(path, png[:], {.Read_User, .Write_User}) != nil {
-		delete(path)
-		return ""
-	}
-	return path
-}
-
 // ---- sources ----
-
-// The browser's picker (step 4 of docs/BROWSER.md §6 calls this with the picked element): a
-// comment on box (page CSS px in the viewport: x, y, w, h) of the tab's page, cropped from the
-// frame on screen. what: the picked element ("button \"Save\" form#settings button.primary") or
-// "" for an area; the page's title and address are added.
-browser_comment_add :: proc(tab_id: u64, box: [4]int, what, text: string) -> (id: u64, err: string) {
-	b := browser_of(tab_id)
-	if b == nil do return 0, "no such browser tab"
-	crop := ring_crop(tab_id, &b.ring, b.content_w, b.content_h, app.dpi, box)
-	r := run_command(Comment_Add{source = .Browser, tab_id = tab_id, what = browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, {kind = .Internal})
-	if !r.ok && crop != "" do os.remove(crop)
-	if crop != "" do delete(crop)
-	return r.created_id, r.error
-}
-
-// The browser's picker (browser_annotate.odin): box (viewport CSS px: x, y, w, h) of the tab's
-// page cropped at the pick, from the frame on screen: a new crop file, "" if there is no frame.
-browser_box_crop :: proc(tab_id: u64, box: [4]int) -> string {
-	b := browser_of(tab_id)
-	if b == nil do return ""
-	return ring_crop(tab_id, &b.ring, b.content_w, b.content_h, app.dpi, box)
-}
 
 // A browser comment's label (temp allocator): the picked element, or the area, then the page's
 // title and address. What the page controls (the element's text, the title, the address) is
@@ -726,17 +660,6 @@ browser_comment_what :: proc(box: [4]int, what, title, url: string) -> string {
 	q :: proc(s: string) -> string {return fmt.tprintf("%q", one_line(s, context.temp_allocator))}
 	pick := what != "" ? q(what) : fmt.tprintf("area %d,%d %d×%d", box[0], box[1], box[2], box[3])
 	return fmt.tprintf("%s on %s (%s)", pick, q(title != "" ? title : "untitled page"), q(url))
-}
-
-// An app tab's Inspect box, cropped at the click (app_tab.odin; before the comment bar opens and
-// moves the content) from the frame on screen through app_screenshot's frame read: a new crop
-// file, "" if there is no frame. rect: logical tab px, as the app sent it in tab.boxes.
-app_box_crop :: proc(tab_id: u64, rect: App_Rect) -> string {
-	a := app_of(tab_id)
-	if a == nil do return ""
-	g := ring_gen(&a.ring, a.ring.shown_gen)
-	if g == nil do return ""
-	return ring_crop(tab_id, &a.ring, g.w, g.h, g.scale, {int(rect.x), int(rect.y), int(rect.w), int(rect.h)})
 }
 
 // A comment on an app tab's Inspect box (ui_comments.odin: the comment bar's Add): box `box_id`
@@ -755,11 +678,6 @@ comments_shutdown :: proc() {
 		os.remove(c.crop)
 		delete(c.crop)
 		c.crop = ""
-	}
-	if d := &comments_ui.draft; d.crop != "" {
-		os.remove(d.crop)
-		delete(d.crop)
-		d.crop = ""
 	}
 }
 

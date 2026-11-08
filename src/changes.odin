@@ -176,7 +176,8 @@ Changes_Repo :: struct {
 
 changes_repos: [dynamic]^Changes_Repo
 
-// One Changes tab's runtime side (its diff text is in editors[tab_id]).
+// One Changes tab's runtime side (its diff text is in the window's read-only editor for the tab:
+// window.changes_diff).
 Changes_View :: struct {
 	tab_id:       u64,
 	root:         string, // owned
@@ -633,19 +634,14 @@ changes_count :: proc(r: ^Changes_Repo) -> int {
 
 // ---- the tab's view ----
 
-// The tab's view and its read-only diff editor (editors[tab_id]).
+// The tab's view, and its read-only diff editor in the window (window.view_open).
 changes_view_new :: proc(tab_id: u64, root: string) -> ^Changes_View {
 	v := new(Changes_View)
 	v.tab_id = tab_id
 	v.root = strings.clone(root)
 	v.shown = CHANGES_LINES_STEP
 	changes_views[tab_id] = v
-	e := new(Editor)
-	e.tab_id, e.view, e.readonly, e.goal_col = tab_id, .Changes, true, -1
-	e.path = strings.clone(root)
-	e.eol, e.indent_w = "\n", 4
-	tb_init(&e.buf, nil)
-	editors[tab_id] = e
+	window_view_open(tab_id, Changes_Tab{root = root})
 	changes_message(v, "Reading the changes…")
 	if r := changes_repo(root); r != nil {
 		changes_ask(r)
@@ -654,7 +650,7 @@ changes_view_new :: proc(tab_id: u64, root: string) -> ^Changes_View {
 	return v
 }
 
-// The tab closed (drop_term): its view goes (its editor goes with editor_drop).
+// The tab closed (drop_term): its view goes (its editor goes with window.view_drop).
 changes_drop :: proc(tab_id: u64) {
 	v := changes_view(tab_id)
 	if v == nil do return
@@ -670,12 +666,7 @@ changes_drop :: proc(tab_id: u64) {
 // refused editor as a message with the path under it).
 @(private = "file")
 changes_message :: proc(v: ^Changes_View, msg: string, path := "") {
-	e := editor_of(v.tab_id)
-	if e == nil do return
-	delete(e.refused)
-	e.refused = strings.clone(msg)
-	delete(e.path)
-	e.path = strings.clone(path != "" ? path : v.root)
+	if !window_changes_diff(v.tab_id, path != "" ? path : v.root, "", msg) do return
 	window_state_changed()
 }
 
@@ -737,10 +728,7 @@ changes_select :: proc(v: ^Changes_View, path: string, scope: Change_Scope, stat
 		v.sel_scope = scope
 		v.sel_status = status
 		v.shown = CHANGES_LINES_STEP
-		if e := editor_of(v.tab_id); e != nil {
-			e.top, e.top_sub, e.frac, e.scroll_x = 0, 0, 0, 0
-			e.cursor, e.anchor = 0, 0
-		}
+		window_changes_rewind(v.tab_id)
 	}
 	changes_diff_start(v)
 	window_state_changed()
@@ -914,11 +902,8 @@ changes_diff_done :: proc(c: Changes_Diff_Done) {
 	changes_show(v, abs)
 }
 
-// Puts the first v.shown lines of the diff in the editor.
-@(private = "file")
+// Puts the first v.shown lines of the diff in the editor (ui_changes.odin's Show more too).
 changes_show :: proc(v: ^Changes_View, abs: string) {
-	e := editor_of(v.tab_id)
-	if e == nil do return
 	text := v.diff
 	if v.diff_lines > v.shown {
 		end := 0
@@ -929,30 +914,7 @@ changes_show :: proc(v: ^Changes_View, abs: string) {
 		}
 		text = text[:end]
 	}
-	delete(e.refused)
-	e.refused = ""
-	delete(e.path)
-	e.path = strings.clone(abs)
-	editor_set_text(e, text) // keeps the scroll position (a refresh of the same file)
-}
-
-// "Show more": CHANGES_LINES_STEP more lines of a long diff.
-changes_show_more :: proc(v: ^Changes_View) {
-	if v.diff_lines <= v.shown do return
-	v.shown += CHANGES_LINES_STEP
-	e := editor_of(v.tab_id)
-	top := e != nil ? e.top : 0
-	changes_show(v, e != nil ? strings.clone(e.path, context.temp_allocator) : v.root)
-	if e != nil do e.top = top
-}
-
-// The new file's line at the diff editor's cursor: the hunk above it
-// ("@@ -a,b +c,d @@"), counted down to the cursor's line (0 = no hunk).
-changes_line_at_cursor :: proc(v: ^Changes_View) -> int {
-	e := editor_of(v.tab_id)
-	if e == nil || e.refused != "" do return 0
-	text := tb_text(&e.buf, context.temp_allocator)
-	return diff_new_line(text, tb_line_of(&e.buf, e.cursor))
+	window_changes_diff(v.tab_id, abs, text) // keeps the scroll position (a refresh of the same file)
 }
 
 // The new file's line for diff line `at` (0-based) of a unified diff's
@@ -1324,7 +1286,7 @@ changes_op_done :: proc(c: Changes_Op_Done) -> (r: Result, changed: bool) {
 		case c.what == "commit": v.notice = strings.clone("Committed")
 		case:                    v.notice = ""
 		}
-		if c.what == "commit" && err == "" do tf_set(&changes_message_field, "")
+		if c.what == "commit" && err == "" do window_commit_message_clear()
 	}
 	window_state_changed()
 	res := Result{ok = err == ""}
@@ -1332,9 +1294,6 @@ changes_op_done :: proc(c: Changes_Op_Done) -> (r: Result, changed: bool) {
 	emit_event(Finished_Event{request_id = c.request_id, result = res})
 	return {ok = true}, false
 }
-
-// The commit message field (ui_changes.odin; focus widget changes_message).
-changes_message_field: Text_Field
 
 // changes_list's data: paths and counts, never diff text (temp allocator).
 changes_json :: proc(r: ^Changes_Repo) -> string {

@@ -36,9 +36,6 @@ App :: struct {
 	last_draw:      time.Tick,
 	pointer:        [2]f32,
 	ready:          bool, // init done: the inbox may be drained
-	quitting:       bool, // quit confirmed (or nothing to confirm): let the window close
-	stop_sessions:  bool, // that quit stops the session holder's sessions too (Quit.stop_sessions)
-	frames_called:  u64, // frame callbacks, drawn or not (frame-pause measurements)
 	wakes:          u64, // platform wakes that ran
 	font_theme:     Theme_Id, // the look the fonts were opened for
 	font_size:      Text_Size, // and the text size
@@ -63,7 +60,6 @@ Ime :: struct {
 ime: Ime
 
 app: App
-app_context: runtime.Context
 
 init :: proc "c" () {
 	context = app_context
@@ -86,9 +82,9 @@ init :: proc "c" () {
 	run_command(System_Appearance{light = platform_system_light()})
 	platform_watch_appearance()
 	autotest_init()
-	if autotest.active do platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
+	if autotest_active do platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
 	// test mode keeps its log out of the user's data dir
-	if autotest.active && hook_env(.Data_Dir) == "" {
+	if autotest_active && hook_env(.Data_Dir) == "" {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
 	} else do home_root = data_dir()
@@ -102,9 +98,9 @@ init :: proc "c" () {
 	}
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
 	// anything is written there; test mode looks for Deckhand only in a runtime dir of its own
-	check_old := !autotest.active || hook_env(.Runtime_Dir) != ""
+	check_old := !autotest_active || hook_env(.Runtime_Dir) != ""
 	if why := instance_guard(home_root, check_old); why != "" {
-		if autotest.active {
+		if autotest_active {
 			fmt.println("[autotest] instance refused:", why)
 			os.exit(3)
 		}
@@ -120,7 +116,7 @@ init :: proc "c" () {
 		agent_guide_install()
 	}
 	// the session-title cache (titles.odin): same rule as the workspace
-	if !autotest.active || hook_env(.Data_Dir) != "" do titles_load(data_dir(context.temp_allocator))
+	if !autotest_active || hook_env(.Data_Dir) != "" do titles_load(data_dir(context.temp_allocator))
 	claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
 	rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
 	// control socket (socket.odin); `--print-token script|control` mints a
@@ -138,7 +134,7 @@ init :: proc "c" () {
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// DECKHAND_DATA_DIR, so scripts never read or write the user's
 	state.settings.keep_sessions = keep_sessions_default() // until the saved workspace says otherwise
-	if !autotest.active || hook_env(.Data_Dir) != "" {
+	if !autotest_active || hook_env(.Data_Dir) != "" {
 		persist_init(data_dir(context.temp_allocator))
 		claude_disk_launching = true // no transcript read on the main thread while it comes back
 		persist_load(app_args.fresh)
@@ -154,8 +150,8 @@ init :: proc "c" () {
 	// the chats folder's instructions (folders.odin), then the first-run sheet
 	// once while no main folder is set (test mode: only when a scene asks)
 	// (not while setup is due: Done writes it where the user puts chats)
-	if (!autotest.active || hook_env(.Data_Dir) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
-	if setup_due() && (!autotest.active || hook_env(.First_Run) == "1") do run_command(Setup_Sheet{open = true})
+	if (!autotest_active || hook_env(.Data_Dir) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
+	if setup_due() && (!autotest_active || hook_env(.First_Run) == "1") do run_command(Setup_Sheet{open = true})
 	// `deckhand DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
 		r := run_command(Add_Project{dir})
@@ -176,7 +172,7 @@ platform_app :: proc() -> Platform {
 		set_clipboard = proc(text: string) {sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))},
 		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
 		quit = proc() {
-			app.quitting = true
+			app_quitting = true
 			sapp.request_quit()
 		},
 		wake = platform_wake,
@@ -191,6 +187,8 @@ platform_app :: proc() -> Platform {
 		clipboard_count = platform_clipboard_count,
 		set_clipboard_secret = platform_clipboard_set_secret,
 		clear_clipboard_if = platform_clipboard_clear_if,
+		trash = fs_trash, // editor_platform_*.odin
+		activity = platform_activity,
 	}
 }
 
@@ -238,6 +236,31 @@ window_hooks_app :: proc() -> Window_Hooks {
 		},
 		tab_host_apply = tab_host_apply_app, // tabhost.odin
 		test_step = autotest_step,
+		test_event = autotest_on_event,
+		// tab views (tab_views.odin)
+		view_open = tab_view_open,
+		view_goto = tab_view_goto,
+		view_drop = tab_view_drop,
+		view_moved = tab_view_moved,
+		files_deleted = tab_views_files_deleted,
+		changes_diff = tab_view_changes_diff,
+		changes_rewind = tab_view_changes_rewind,
+		commit_message_clear = proc() {tf_set(&changes_message_field, "")}, // ui_changes.odin
+		unsaved_files = tab_views_unsaved,
+		tab_dirty = tab_view_dirty,
+		// terminals' views (term_view.odin)
+		term_view_new = term_view_init,
+		term_view_free = term_view_free,
+		term_drag_cancel = term_cancel_drag,
+		term_fit = proc(t: ^Term, tab_id: u64) {if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)},
+		// sheets (ui_job_sheet.odin, ui_setup.odin)
+		job_sheet = job_sheet_apply,
+		job_sheet_open = job_sheet_open,
+		job_sheet_holds_quit = job_sheet_holds_quit,
+		job_sheet_saved = job_sheet_saved,
+		setup_sheet = setup_sheet_op,
+		setup_state = setup_state_now,
+		dpi = proc() -> f32 {return app.dpi},
 	}
 }
 
@@ -269,7 +292,7 @@ frame :: proc "c" () {
 	context = app_context
 	defer free_all(context.temp_allocator)
 
-	app.frames_called += 1
+	app_frames_called += 1
 	core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
@@ -414,7 +437,7 @@ over_right_column :: proc(x: f32) -> bool {
 event_os :: proc "c" (e: ^sapp.Event) {
 	context = app_context
 	defer free_all(context.temp_allocator)
-	if autotest.active && !autotest.injecting {
+	if autotest_active && !autotest.injecting {
 		#partial switch e.type {
 		case .KEY_DOWN, .KEY_UP, .CHAR, .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL, .CLIPBOARD_PASTED, .MOUSE_ENTER, .MOUSE_LEAVE, .FILES_DROPPED:
 			return
@@ -769,7 +792,7 @@ event :: proc(e: ^sapp.Event) {
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
 		// window close / Cmd+Q from the menu: ask first if anything runs
-		if !app.quitting {
+		if !app_quitting {
 			sapp.cancel_quit()
 			ui_do(Quit{})
 			return
@@ -777,10 +800,10 @@ event :: proc(e: ^sapp.Event) {
 		// the window goes first: the handover can wait seconds (an upgrade in flight, the ack, the
 		// snapshots), and nothing is drawn meanwhile
 		platform_hide_windows()
-		if autotest.active do fmt.println("[autotest] quit: windows hidden")
+		if autotest_active do fmt.println("[autotest] quit: windows hidden")
 		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
 		// otherwise they are released as direct ones are hung up
-		if app.stop_sessions do holder_shutdown()
+		if app_stop_sessions do holder_shutdown()
 		else do holder_handover()
 		relaunch_helper_send("") // an update's helper without a secret (none was handed over): it only relaunches
 		persist_quit() // while the shells still run (their cwd is saved; held ids with a handover)
@@ -1154,6 +1177,7 @@ cleanup :: proc "c" () {
 	browser_shutdown() // CEF before sokol (browser.odin)
 	app_shutdown() // app tabs' processes (app_tab.odin)
 	comments_shutdown() // this run's crops (comments.odin)
+	comments_draft_shutdown() // and the comment bar's (ui_comments.odin)
 	sgl.shutdown()
 	sg.shutdown()
 	if autotest.failures > 0 do os.exit(1)

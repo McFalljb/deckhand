@@ -719,3 +719,27 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	}
 	return false
 }
+
+// ---- the diff editor (the window's; changes.odin keeps the tab's view state) ----
+
+// The commit message field (focus widget changes_message).
+changes_message_field: Text_Field
+
+// "Show more": CHANGES_LINES_STEP more lines of a long diff.
+changes_show_more :: proc(v: ^Changes_View) {
+	if v.diff_lines <= v.shown do return
+	v.shown += CHANGES_LINES_STEP
+	e := editor_of(v.tab_id)
+	top := e != nil ? e.top : 0
+	changes_show(v, e != nil ? strings.clone(e.path, context.temp_allocator) : v.root)
+	if e != nil do e.top = top
+}
+
+// The new file's line at the diff editor's cursor: the hunk above it
+// ("@@ -a,b +c,d @@"), counted down to the cursor's line (0 = no hunk).
+changes_line_at_cursor :: proc(v: ^Changes_View) -> int {
+	e := editor_of(v.tab_id)
+	if e == nil || e.refused != "" do return 0
+	text := tb_text(&e.buf, context.temp_allocator)
+	return diff_new_line(text, tb_line_of(&e.buf, e.cursor))
+}

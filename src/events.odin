@@ -94,7 +94,7 @@ emit_event :: proc(ev: Event) {
 	line := event_json(ev)
 	log_write(line)
 	if hook_env(.Log_Commands) != "" do fmt.println("[event]", line)
-	autotest_on_event(ev)
+	window_test_event(ev) // test mode's script (autotest.odin)
 	persist_on_event(ev)
 	socket_publish(ev)
 }

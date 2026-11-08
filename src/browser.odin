@@ -201,7 +201,7 @@ cef_start :: proc() -> bool {
 	if !CEF_BUILT_IN do return false
 	// macOS's Library lookups ignore $HOME: a scene without CFFIXED_USER_HOME
 	// on its fake home would let Chromium write the user's ~/Library (RLZ)
-	if autotest.active && os.get_env("CFFIXED_USER_HOME", context.temp_allocator) == "" {
+	if autotest_active && os.get_env("CFFIXED_USER_HOME", context.temp_allocator) == "" {
 		fmt.println("[browser] test mode: CEF needs CFFIXED_USER_HOME (the scene's fake home)")
 		return false
 	}
@@ -230,12 +230,12 @@ cef_start :: proc() -> bool {
 	}
 	// test mode never touches the network (SPIKE: the real policy for Chromium's
 	// Google services is open, see the report)
-	no_network: c.int = autotest.active || hook_env(.Cef_Offline) == "1" ? 1 : 0
+	no_network: c.int = autotest_active || hook_env(.Cef_Offline) == "1" ? 1 : 0
 	t0 := time.tick_now()
 	ok := dh_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
 	cef_start_ms = time.duration_milliseconds(time.tick_since(t0))
 	if ok do cef_state = .Running
-	if ok && autotest.active {
+	if ok && autotest_active {
 		// deckhand-test://web/NAME: the fixtures in tests/web (no network)
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		web, _ := filepath.join({cwd, "tests", "web"}, context.temp_allocator)
@@ -507,7 +507,7 @@ browser_chan :: proc(b: ^Browser) -> bool {
 	if b.chan do return true
 	b.chan = dh_frames_local_open(b.tab_id, sg.mtl_device()) == 1
 	browser_frames ||= b.chan
-	if autotest.active {
+	if autotest_active {
 		// count writes into any texture an uncompleted GPU frame samples;
 		// DECKHAND_TEST_GPU_LAG_MS: a slow GPU (the completed handler's work waits)
 		lag, _ := strconv.parse_int(hook_env(.Gpu_Lag_Ms))
@@ -691,7 +691,7 @@ browser_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	dw, dh := min(f32(b.content_w), w), min(f32(b.content_h), h)
 	u, v := dw / f32(g.w), dh / f32(g.h)
 	b.drawn_tex = dh_frames_slot_texture(b.tab_id, g.gen, c.int(b.ring.shown_slot))
-	if autotest.active do dh_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
+	if autotest_active do dh_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
 	sgl.end()
 	sgl.texture({g.view[b.ring.shown_slot]}, browser_sampler)
 	sgl.begin_quads()

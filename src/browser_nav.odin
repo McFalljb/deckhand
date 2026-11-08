@@ -19,7 +19,6 @@ package main
 // What CEF reports (browser.odin's callbacks) comes back as Browser_Update
 // (internal, through the inbox), so State and events follow the page.
 
-import "core:fmt"
 import "core:slice"
 import "core:strings"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -59,71 +58,6 @@ Browser_Update :: struct {
 BROWSER_BLANK :: "about:blank"
 
 // ---- URL normalising (the URL field and browser_open/browser_navigate) ----
-
-// What the URL field's text becomes: a URL with a scheme Deckhand opens
-// (http, https, file, about, deckhand-test: test fixtures) as is; a bare host
-// ("example.com", "example.com/path", "host:8080") gets https://, a local one
-// (localhost, 127.x, [::1]) http://. Anything else (words, spaces) is not a
-// web address: search is not built in yet (BROWSER.md §2.2). Pure.
-browser_url_normalize :: proc(text: string, allocator := context.temp_allocator) -> (url: string, err: string) {
-	t := strings.trim_space(text)
-	if t == "" do return "", "type a web address"
-	if strings.contains_any(t, " \t\n\r") do return "", "not a web address (search is not built in yet)"
-	lower := strings.to_lower(t, context.temp_allocator)
-	if lower == BROWSER_BLANK do return strings.clone(BROWSER_BLANK, allocator), ""
-	if i := strings.index(lower, "://"); i > 0 {
-		scheme := lower[:i]
-		switch scheme {
-		case "http", "https", "file", "deckhand-test":
-			if len(t) == i + 3 do return "", "the address has nothing after ://"
-			return strings.clone(t, allocator), ""
-		}
-		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", scheme)
-	}
-	if strings.has_prefix(lower, "about:") || strings.has_prefix(lower, "javascript:") || strings.has_prefix(lower, "data:") || strings.has_prefix(lower, "mailto:") || strings.has_prefix(lower, "chrome:") {
-		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", lower[:strings.index_byte(lower, ':')])
-	}
-	// a bare host, maybe with a port and a path
-	end := len(t)
-	if k := strings.index_any(t, "/?#"); k >= 0 do end = k
-	hostport := lower[:end]
-	// user@host: never typed as a bare host here (127.0.0.1@evil.com is evil.com)
-	if strings.contains_rune(hostport, '@') do return "", "not a web address (a user name before @ is not opened from here)"
-	host := hostport
-	if strings.has_prefix(host, "[") {
-		// [::1]:8080
-		k := strings.index_byte(host, ']')
-		if k < 0 do return "", "not a web address"
-		rest := host[k + 1:]
-		host = host[:k + 1]
-		if rest != "" && !port_ok(rest) do return "", "not a web address"
-	} else if k := strings.index_byte(host, ':'); k >= 0 {
-		if !port_ok(host[k:]) do return "", "not a web address (search is not built in yet)"
-		host = host[:k]
-	}
-	if host == "" do return "", "not a web address"
-	local := host == "localhost" || strings.has_suffix(host, ".localhost") || host == "[::1]" || strings.has_prefix(host, "127.")
-	if !local {
-		// letters, digits, - and . with a dot inside and a top-level part of letters (or an IPv4 address)
-		if !strings.contains_rune(host, '.') || strings.has_prefix(host, ".") || strings.has_suffix(host, ".") do return "", "not a web address (search is not built in yet)"
-		for r in host do if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r > 0x7f) do return "", "not a web address (search is not built in yet)"
-		tld := host[strings.last_index_byte(host, '.') + 1:]
-		ipv4 := true
-		for r in host do if !(r >= '0' && r <= '9' || r == '.') do ipv4 = false
-		if !ipv4 {
-			for r in tld do if r >= '0' && r <= '9' do return "", "not a web address (search is not built in yet)"
-			if len(tld) < 2 do return "", "not a web address (search is not built in yet)"
-		}
-	}
-	return strings.concatenate({local ? "http://" : "https://", t}, allocator), ""
-
-	port_ok :: proc(s: string) -> bool {
-		// ":" then 1-5 digits
-		if len(s) < 2 || len(s) > 6 || s[0] != ':' do return false
-		for r in s[1:] do if r < '0' || r > '9' do return false
-		return true
-	}
-}
 
 // ---- which session browser_open opens in ----
 
@@ -302,10 +236,9 @@ browser_step :: proc(caller: Caller, tab_id: u64, back: bool) -> Result {
 
 // Restored tabs (start_restored_tabs): the tab gets its runtime; CEF opens
 // the page once the pane has a size (browser_tick).
-browser_restore :: proc(tab: ^Tab) {
-	bt, is := &tab.kind.(Browser_Tab)
-	if !is || browser_of(tab.id) != nil do return
-	b := browser_attach(tab.id, bt.url != "" ? bt.url : BROWSER_BLANK)
+browser_restore :: proc(tab_id: u64, url: string) {
+	if browser_of(tab_id) != nil do return
+	b := browser_attach(tab_id, url != "" ? url : BROWSER_BLANK)
 	b.lazy = true // its page opens when the tab is first shown
 }
 

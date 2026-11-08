@@ -32,6 +32,8 @@ Platform :: struct {
 	// after it, for clear_clipboard_if. nil: set_clipboard (tests, test mode's own pasteboard)
 	set_clipboard_secret: proc(text: string) -> int,
 	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
+	trash:                proc(path: string) -> bool, // moves path to the Trash; nil or false: not moved
+	activity:             proc(on: bool), // holds off App Nap while on (jobs running); nil: nothing
 }
 
 platform: Platform

@@ -350,7 +350,7 @@ notice_post :: proc(n: Notice, any_group := false) -> bool {
 	n := n
 	// quitting: pi processes ending are not news
 	group_off := notice_group(n.kind) in state.settings.bell_off
-	if app.quitting || (!any_group && group_off) {
+	if app_quitting || (!any_group && group_off) {
 		notice_free(&n)
 		return false
 	}

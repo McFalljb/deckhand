@@ -667,3 +667,47 @@ HARNESS_STATE_NAMES := [Harness_Item_State]string {
 	.Needs_Harness = "needs_harness",
 	.Unchecked     = "unchecked",
 }
+
+// What an item says about itself on the sheet and in Settings.
+harness_item_text :: proc(it: Harness_Item) -> string {
+	r := HARNESS_MANIFEST[it.row]
+	switch it.state {
+	case .Missing:       return "Not installed"
+	case .Needs_Harness: return fmt.tprintf("Needs %s first", HARNESS_MANIFEST[harness_first_row(r.harness)].name)
+	case .Built_In:      return "Built in"
+	case .Unchecked:     return "Found, version not checked"
+	case .Not_Loaded:    return it.note
+	case .Too_Old:       return fmt.tprintf("%s, older than %s", it.version != "" ? it.version : "an old version", r.min_version)
+	case .Ok:
+		v := it.version != "" ? it.version : "version unknown"
+		if r.kind == .Harness && it.where_ != "" do return fmt.tprintf("%s · %s", v, INSTALL_LAYOUT_NAMES[it.layout])
+		return v
+	}
+	return ""
+}
+
+HARNESS_SETTINGS_ROW :: "deckhand:harness:"
+
+// The group's rows (settings_file_rows): per harness, its row; once installed, its integration and
+// recommended items. Install… and Update… open the sheet's checklist.
+harness_settings_rows :: proc() -> []Settings_File_Row {
+	out := make([dynamic]Settings_File_Row, context.temp_allocator)
+	if len(harness_items) == 0 do harness_checklist_refresh(bump = false)
+	for h in Harness {
+		installed := harness_item_installed(h)
+		for it in harness_items {
+			r := HARNESS_MANIFEST[it.row]
+			if r.harness != h || (!installed && r.kind != .Harness) do continue
+			button := ""
+			if it.action != .None do button = it.runnable ? (it.action == .Install ? "Install…" : "Update…") : "Show…"
+			label := r.name
+			switch r.kind {
+			case .Harness:
+			case .Built_In:    label = "  Deckhand integration"
+			case .Third_Party: label = fmt.tprintf("  %s", r.name)
+			}
+			append(&out, Settings_File_Row{group = "agents", label = label, detail = harness_item_text(it), path = strings.concatenate({HARNESS_SETTINGS_ROW, r.id}, context.temp_allocator), button = button})
+		}
+	}
+	return out[:]
+}

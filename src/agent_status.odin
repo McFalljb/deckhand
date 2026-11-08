@@ -705,3 +705,42 @@ session_explain :: proc(s: ^Open_Session) -> string {
 	if _, is_pi := from.kind.(Pi_Tab); !is_pi do line = fmt.tprintf("%s: %s", cut_utf8(one_line(from.title, context.temp_allocator), 60), line)
 	return line
 }
+
+// "5m", "3h", ... since t; "" for none.
+ago :: proc(t: time.Time) -> string {
+	if t == {} do return ""
+	m := int(time.duration_minutes(time.since(t)))
+	switch {
+	case m < 1:             return "now"
+	case m < 60:            return fmt.tprintf("%dm", m)
+	case m < 24 * 60:       return fmt.tprintf("%dh", m / 60)
+	case m < 7 * 24 * 60:   return fmt.tprintf("%dd", m / (24 * 60))
+	case m < 365 * 24 * 60: return fmt.tprintf("%dw", m / (7 * 24 * 60))
+	}
+	return fmt.tprintf("%dy", m / (365 * 24 * 60))
+}
+
+pi_tab_status :: proc(tab: Tab) -> Row_Status {
+	if tab.status == .Exited do return .Exited
+	if tab.waiting do return .Waiting
+	switch tab.agent {
+	case .Error:   return .Error
+	case .Working: return .Running
+	case .Idle:    return tab.question ? .Question : .None
+	case .Unknown: return .None
+	}
+	return .None
+}
+
+// A session's dot: the strongest of its open tabs (agent_status.odin).
+session_status :: proc(pi_session_id: string) -> Row_Status {
+	if pi_session_id == "" do return .None
+	for &s in state.open_sessions {
+		if s.pi_session_id != pi_session_id do continue
+		st, _ := session_row_status(&s)
+		return st
+	}
+	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
+	if id := claude_open_tab(pi_session_id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do return tab_status_view(tab^).dot
+	return .None
+}

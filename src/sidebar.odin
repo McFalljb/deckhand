@@ -27,9 +27,12 @@ package main
 
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:time"
+import "core:unicode"
+import "core:unicode/utf8"
 
 Sidebar_Row :: struct {
 	project: ^Project, // project rows
@@ -646,3 +649,115 @@ open_session_age :: proc(s: ^Open_Session) -> string {
 	open_session_refresh(s)
 	return ago(s.mtime)
 }
+
+// Fuzzy match of one query word in text (case-insensitive subsequence).
+// Higher is better: whole-text prefix, word starts and runs of consecutive
+// characters score more. matched marks the text runes used (first 64).
+fuzzy_score :: proc(word, text: string) -> (score: int, matched: u64, ok: bool) {
+	if word == "" do return 0, 0, true
+	lw := strings.to_lower(word, context.temp_allocator)
+	lt := strings.to_lower(text, context.temp_allocator)
+	// a substring wins over a scattered match: prefer it, at a word start
+	if at := strings.index(lt, lw); at >= 0 {
+		best := at
+		for i := at; i >= 0 && i < len(lt); {
+			if word_start(lt, i) {
+				best = i
+				break
+			}
+			next := strings.index(lt[i + 1:], lw)
+			if next < 0 do break
+			i += 1 + next
+		}
+		ri := strings.rune_count(lt[:best])
+		n := strings.rune_count(lw)
+		for k in ri ..< min(ri + n, 64) do matched |= 1 << u64(k)
+		score = 10 * n + (best == 0 ? 30 : 0) + (word_start(lt, best) ? 15 : 0)
+		return score, matched, true
+	}
+	qi := 0
+	q := utf8.string_to_runes(lw, context.temp_allocator)
+	prev := -2
+	ri := 0
+	for r, off in lt {
+		defer ri += 1
+		if qi == len(q) do break
+		if r != q[qi] do continue
+		s := 1
+		if word_start(lt, off) do s += 6
+		if ri == prev + 1 do s += 4
+		score += s
+		if ri < 64 do matched |= 1 << u64(ri)
+		prev = ri
+		qi += 1
+	}
+	if qi < len(q) do return 0, 0, false
+	return score, matched, true
+}
+
+@(private = "file")
+word_start :: proc(s: string, off: int) -> bool {
+	if off == 0 do return true
+	r, _ := utf8.decode_last_rune(s[:off])
+	c, _ := utf8.decode_rune(s[off:])
+	if !is_word_rune(r) do return true
+	return unicode.is_lower(r) && unicode.is_upper(c)
+}
+
+// The open session of a pi session in any project (0 = not open).
+open_session_any :: proc(pi_session_id: string) -> u64 {
+	for s in state.open_sessions do if !s.home && s.pi_session_id == pi_session_id do return s.id
+	return 0
+}
+
+// Whether an open session runs in Chats (not in a project).
+open_session_is_chat :: proc(s: ^Open_Session) -> bool {
+	c := chats_project()
+	return c != nil && s != nil && !s.home && s.project_id == c.id
+}
+
+// A project's short name for rows, tabs and the palette: its own name, else
+// its folder's name; the ~ path when another project has the same folder name.
+project_display :: proc(p: Project) -> string {
+	if p.name != "" do return p.name
+	base := filepath.base(p.cwd)
+	for q in state.projects do if q.group == .Projects && q.id != p.id && q.name == "" && filepath.base(q.cwd) == base do return p.label
+	return base
+}
+
+// The kind icon and short name of an open session's place: a folder and its
+// project, or a bubble and "Chat".
+session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
+	if open_session_is_chat(s) do return .Chat, "Chat"
+	if p := find_project(s.project_id); p != nil do return .Folder, project_display(p^)
+	return .Folder, short_label(s.cwd)
+}
+
+// A title for an open session, in any project: its listed title (the
+// selected project's), else read from its session file (cached until the
+// file grows); "Untitled session · <created>" (a project's) or "Untitled
+// chat · …" while the file has no title, plain while there is no file yet.
+open_session_title :: proc(s: ^Open_Session) -> string {
+	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
+	if s.agent == .Claude {
+		if r, _ := claude_record(s.pi_session_id); r != nil && r.title != "" do return strings.clone(r.title, context.temp_allocator)
+		return "Untitled Claude session"
+	}
+	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"
+	for l in state.sessions do if l.id == s.pi_session_id do return session_label(l)
+	if s.session_file == "" do return untitled
+	open_session_refresh(s) // at most once a second (sidebar.odin)
+	// a copy for this frame: a later call may replace the cached one while
+	// earlier palette items still point at it
+	if s.title != "" do return strings.clone(s.title, context.temp_allocator)
+	// a file without a title yet: when it was created, from its name
+	if s.mtime != {} {
+		context.allocator = context.temp_allocator
+		base := filepath.base(s.session_file)
+		if when_ := name_time(base); when_ != base do return untitled_label(open_session_is_chat(s), when_)
+	}
+	return untitled
+}
+
+// Letters, digits and _ make words; everything else separates them.
+is_word_rune :: proc(r: rune) -> bool {return r == '_' || unicode.is_letter(r) || unicode.is_digit(r)}

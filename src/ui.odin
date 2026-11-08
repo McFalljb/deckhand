@@ -222,31 +222,6 @@ tab_busy :: proc(tab_id: u64) -> bool {
 	return t != nil && t.running && t.last_output != {} && time.tick_since(t.last_output) < ACTIVITY_WINDOW
 }
 
-pi_tab_status :: proc(tab: Tab) -> Row_Status {
-	if tab.status == .Exited do return .Exited
-	if tab.waiting do return .Waiting
-	switch tab.agent {
-	case .Error:   return .Error
-	case .Working: return .Running
-	case .Idle:    return tab.question ? .Question : .None
-	case .Unknown: return .None
-	}
-	return .None
-}
-
-// A session's dot: the strongest of its open tabs (agent_status.odin).
-session_status :: proc(pi_session_id: string) -> Row_Status {
-	if pi_session_id == "" do return .None
-	for &s in state.open_sessions {
-		if s.pi_session_id != pi_session_id do continue
-		st, _ := session_row_status(&s)
-		return st
-	}
-	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
-	if id := claude_open_tab(pi_session_id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do return tab_status_view(tab^).dot
-	return .None
-}
-
 status_color :: proc(st: Row_Status) -> Rgba {
 	th := theme()
 	switch st {

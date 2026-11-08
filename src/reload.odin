@@ -1250,3 +1250,12 @@ reload_sources_for_test :: proc() -> map[string]string {
 	for s in rw.srcs do m[s.dir ? strings.concatenate({s.path, "/"}, context.temp_allocator) : s.path] = s.scope
 	return m
 }
+
+// Whether a reload (restart) of this tab is under way.
+reload_step_is :: proc(t: ^Tab, restart: bool) -> bool {
+	#partial switch t.reload.step {
+	case .Reload_Kicked, .Reload_Sent: return !restart
+	case .Restart_Kicked, .Restart_Asking, .Restart_Exiting: return restart
+	}
+	return false
+}

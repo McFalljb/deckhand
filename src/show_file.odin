@@ -131,18 +131,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		if !moves {
 			return {ok = true, created_id = tab.id, data = data(kind, open_path, s.id, true)}, false
 		}
-		if md {
-			if v := md_view_of(tab.id); v != nil {
-				if anchor != "" {
-					delete(v.want)
-					v.want = strings.clone(anchor)
-				} else if c.line > 0 {
-					v.want_line = c.line
-				}
-			}
-		} else if e := editor_of(tab.id); e != nil && c.line > 0 {
-			ed_goto(e, c.line, 1)
-		}
+		window_view_goto(tab.id, c.line, anchor) // the Markdown view scrolls, the editor goes to the line
 		if !agent do front(s, tab.id, caller)
 		window_state_changed()
 		return {ok = true, created_id = tab.id, data = data(kind, open_path, s.id, true)}, true
@@ -154,16 +143,9 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		if n >= SHOW_FILE_MAX_TABS do return refuse("too_many_tabs", fmt.tprintf("%d tabs agents opened are open in this session", n), "ask the user to close some of the tabs you showed; a file already open answers without a new tab"), false
 	}
 	tab := Tab{id = new_id(), title = strings.clone(filepath.base(p)), status = .Running}
-	if md {
-		tab.kind = Markdown_Tab{path = strings.clone(p)}
-		v := md_view_new(tab.id, p)
-		if anchor != "" do v.want = strings.clone(anchor)
-		else if c.line > 0 do v.want_line = c.line
-	} else {
-		tab.kind = Editor_Tab{path = strings.clone(p)}
-		e := editor_new(tab.id, p)
-		if c.line > 0 do ed_goto(e, c.line, 1)
-	}
+	if md do tab.kind = Markdown_Tab{path = strings.clone(p)}
+	else do tab.kind = Editor_Tab{path = strings.clone(p)}
+	window_view_open(tab.id, tab.kind, c.line, anchor) // the editor's buffer reads the file now
 	// a pi or Claude tab's: right after its own tab, in its pane (open_pane; else at the end of the
 	// focused pane)
 	after: u64
@@ -256,4 +238,10 @@ show_file_peek :: proc(path: string) -> string {
 	if rerr != nil && rerr != .EOF do return fmt.tprintf("Cannot read: %v", rerr)
 	if looks_binary(buf[:max(n, 0)]) do return "Binary file: not shown"
 	return ""
+}
+
+// Whether a path is a Markdown file (by its extension).
+md_is_markdown_path :: proc(path: string) -> bool {
+	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
+	return ext == ".md" || ext == ".markdown" || ext == ".mdx"
 }

@@ -135,3 +135,40 @@ ctl_next :: proc(r: ^Ctl_Reader, ms: int) -> (string, bool) {
 		append(&r.buf, ..chunk[:n])
 	}
 }
+
+// The value at a dotted path in a JSON document, as text: strings bare,
+// numbers and bools as written, "#" = length of the array/object before it.
+json_path :: proc(text, path: string) -> string {
+	v, err := jg.parse_string(text, .JSON, true, context.temp_allocator)
+	if err != nil do return "<invalid json>"
+	p := path
+	for part in strings.split_iterator(&p, ".") {
+		if part == "#" {
+			#partial switch x in v {
+			case json.Array:  return fmt.tprint(len(x))
+			case json.Object: return fmt.tprint(len(x))
+			}
+			return "<not a list>"
+		}
+		#partial switch x in v {
+		case json.Object:
+			nv, ok := x[part]
+			if !ok do return "<missing>"
+			v = nv
+		case json.Array:
+			i, ok := strconv.parse_int(part)
+			if !ok || i < 0 || i >= len(x) do return "<missing>"
+			v = x[i]
+		case:
+			return "<missing>"
+		}
+	}
+	#partial switch x in v {
+	case json.String:  return x
+	case json.Integer: return fmt.tprint(x)
+	case json.Float:   return fmt.tprint(x)
+	case json.Boolean: return x ? "true" : "false"
+	case json.Null:    return "null"
+	}
+	return "<object>"
+}

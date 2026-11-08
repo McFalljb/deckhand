@@ -16,9 +16,7 @@ import "core:fmt"
 import "core:math"
 import "core:mem/virtual"
 import "core:os"
-import "core:path/filepath"
 import "core:strings"
-import "core:time"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -417,23 +415,6 @@ menu_run :: proc(i: int) {
 	menu_close()
 }
 
-// What a menu row's command did, where nothing else on screen shows it: a
-// failure always (else a click seems to do nothing), a copy when it worked.
-// Not a command that finishes later or asks first (the confirmation bar).
-menu_result :: proc(label: string, cmd: Command, r: Result) {
-	if r.pending || r.error == "needs_confirmation" do return
-	if r.error == CLAUDE_MISSING do return // the command said how to install it already (claude.odin)
-	if !r.ok {
-		why := r.error != "" ? r.error : "it did not work"
-		toast_show(fmt.tprintf("%s: %s", strings.trim_suffix(label, "…"), why), err = true)
-		return
-	}
-	#partial switch c in cmd {
-	case Session_Info: if c.to == "clipboard" do toast_show("Session info copied")
-	case Copy_Path:    toast_show("Path copied")
-	}
-}
-
 // Input while a menu is open: the keyboard moves and runs, a click outside
 // closes it. Everything is consumed.
 menu_event :: proc(e: ^sapp.Event) -> bool {
@@ -490,12 +471,6 @@ menu_hit :: proc() -> Hit {
 	return nil
 }
 
-// The open session of a pi session in any project (0 = not open).
-open_session_any :: proc(pi_session_id: string) -> u64 {
-	for s in state.open_sessions do if !s.home && s.pi_session_id == pi_session_id do return s.id
-	return 0
-}
-
 // ---- layout ----
 
 // The project tree's view state (not saved): the selected project is the
@@ -527,29 +502,6 @@ project_row_click :: proc(id: u64) {
 		return
 	}
 	ui_do(Select_Project{id})
-}
-
-// Whether an open session runs in Chats (not in a project).
-open_session_is_chat :: proc(s: ^Open_Session) -> bool {
-	c := chats_project()
-	return c != nil && s != nil && !s.home && s.project_id == c.id
-}
-
-// A project's short name for rows, tabs and the palette: its own name, else
-// its folder's name; the ~ path when another project has the same folder name.
-project_display :: proc(p: Project) -> string {
-	if p.name != "" do return p.name
-	base := filepath.base(p.cwd)
-	for q in state.projects do if q.group == .Projects && q.id != p.id && q.name == "" && filepath.base(q.cwd) == base do return p.label
-	return base
-}
-
-// The kind icon and short name of an open session's place: a folder and its
-// project, or a bubble and "Chat".
-session_place :: proc(s: ^Open_Session) -> (ic: Icon, name: string) {
-	if open_session_is_chat(s) do return .Chat, "Chat"
-	if p := find_project(s.project_id); p != nil do return .Folder, project_display(p^)
-	return .Folder, short_label(s.cwd)
 }
 
 sidebar :: proc(cs: ^Open_Session, h: f32) {
@@ -1189,20 +1141,6 @@ row_button :: proc(id: clay.ElementId, glyph: string, shown, hovered: bool, ic :
 	}
 }
 
-// "5m", "3h", ... since t; "" for none.
-ago :: proc(t: time.Time) -> string {
-	if t == {} do return ""
-	m := int(time.duration_minutes(time.since(t)))
-	switch {
-	case m < 1:             return "now"
-	case m < 60:            return fmt.tprintf("%dm", m)
-	case m < 24 * 60:       return fmt.tprintf("%dh", m / 60)
-	case m < 7 * 24 * 60:   return fmt.tprintf("%dd", m / (24 * 60))
-	case m < 365 * 24 * 60: return fmt.tprintf("%dw", m / (7 * 24 * 60))
-	}
-	return fmt.tprintf("%dy", m / (365 * 24 * 60))
-}
-
 
 // The rename field takes the selected project's row while it has focus: an
 // accent focus ring around the field surface.
@@ -1566,4 +1504,10 @@ waiting_filtered_row :: proc() {
 		spacer()
 		clay.Text("Clear filter", txt(th.text_muted, FONT_UI_SMALL))
 	}
+}
+
+// The picker's project is gone (a rescan dropped it): the menu closes.
+new_session_target_gone :: proc() -> bool {
+	t, ok := menu.target.(Menu_New_Session)
+	return ok && find_project(t.project_id) == nil
 }

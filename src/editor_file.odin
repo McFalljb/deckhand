@@ -19,45 +19,9 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
-import "core:unicode/utf8"
 
 EDITOR_MAX_BYTES :: 20 * 1024 * 1024
 EDITOR_POLL :: 2 * time.Second
-
-Disk_Stamp :: struct {
-	size:  i64,
-	mtime: i64, // ns
-	inode: u64,
-	dev:   u64,
-	mode:  u32, // permission bits
-}
-
-Path_Kind :: enum {
-	Missing,
-	File, // regular
-	Dir,
-	Other, // FIFO, device, socket
-}
-
-// stat(2) (symlinks followed) without opening anything: core:os's stat
-// opens the path, which blocks on a FIFO.
-path_stat :: proc(path: string) -> (kind: Path_Kind, st: Disk_Stamp) {
-	sb: posix.stat_t
-	if posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &sb) != .OK do return .Missing, {}
-	switch {
-	case posix.S_ISREG(sb.st_mode): kind = .File
-	case posix.S_ISDIR(sb.st_mode): kind = .Dir
-	case: kind = .Other
-	}
-	return kind, stamp_of_stat(&sb)
-}
-
-path_kind :: proc(path: string) -> Path_Kind {k, _ := path_stat(path); return k}
-
-@(private = "file")
-stamp_of_stat :: proc(sb: ^posix.stat_t) -> Disk_Stamp {
-	return {size = i64(sb.st_size), mtime = i64(sb.st_mtim.tv_sec) * 1e9 + i64(sb.st_mtim.tv_nsec), inode = u64(sb.st_ino), dev = u64(sb.st_dev), mode = u32(transmute(posix._mode_t)sb.st_mode) & 0o7777}
-}
 
 text_hash :: proc(data: []u8) -> u64 {return hash.fnv64a(data)}
 
@@ -70,32 +34,6 @@ buffer_hash :: proc(b: ^Text_Buffer) -> u64 {
 		at += len(c)
 	}
 	return h
-}
-
-// Binary: a NUL byte in the first 8 KB, or mostly bytes that are neither
-// UTF-8 nor text controls.
-looks_binary :: proc(data: []u8) -> bool {
-	head := data[:min(len(data), 8192)]
-	bad := 0
-	i := 0
-	for i < len(head) {
-		c := head[i]
-		if c == 0 do return true
-		if c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != 0x1b && c != 0x0c && c != 0x08 do bad += 1
-		if c < 0x80 {
-			i += 1
-			continue
-		}
-		r, n := utf8.decode_rune(head[i:])
-		if r == utf8.RUNE_ERROR && n <= 1 {
-			// a sequence cut by the 8 KB window is fine
-			if len(head) - i < 4 && len(head) < len(data) do break
-			bad += 1
-			n = 1
-		}
-		i += n
-	}
-	return bad * 10 > len(head) // more than 10%
 }
 
 // Line endings and indentation, from the first lines of the text.
@@ -207,18 +145,9 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 	return buf[:], ff, ""
 }
 
-// One read for disk_read (tests swap in a failing one).
-disk_read_chunk: proc(f: ^os.File, p: []u8) -> (int, os.Error) = proc(f: ^os.File, p: []u8) -> (int, os.Error) {return os.read(f, p)}
-
 @(private = "file")
 too_large :: proc(size: i64) -> string {
 	return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), EDITOR_MAX_BYTES >> 20)
-}
-
-// Whether path is a regular file, or not there at all (restored tabs).
-regular_or_missing :: proc(path: string) -> bool {
-	k := path_kind(path)
-	return k == .Missing || k == .File
 }
 
 // Reads path into e (a fresh editor). False with e.refused set when the

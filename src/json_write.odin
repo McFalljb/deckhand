@@ -1287,7 +1287,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "path", et.path)
 				if et.view != .File do kv_str(&to, "view", EDITOR_VIEW_NAMES[et.view])
 				if et.preview do kv_bool(&to, "preview", true)
-				kv_bool(&to, "dirty", editor_dirty(editor_of(t.id)))
+				kv_bool(&to, "dirty", window_tab_dirty(t.id))
 			}
 			if ct, is_ch := t.kind.(Changes_Tab); is_ch do kv_str(&to, "root", ct.root)
 			// the window's: comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask
@@ -1663,16 +1663,18 @@ harness_json :: proc(f: ^Jw) {
 }
 
 // The sheet in the snapshot's focus: its step, how many, and the accounts step's list (labels
-// and folders the user sees; nothing written yet).
+// and folders the user sees; nothing written yet). The sheet is the window's (window.setup_state).
 @(private = "file")
 setup_json :: proc(f: ^Jw) {
-	u := &setup_ui // ui_setup.odin
+	u, ok := window_setup_state()
 	names := [Setup_Step]string{.Agents = "agents", .Main = "main", .Chats = "chats", .Accounts = "accounts", .Folders = "folders"}
-	kv_str(f, "step", names[setup_step_kind()])
-	kv_u64(f, "steps", u64(setup_steps()))
-	if u.err != "" do kv_str(f, "error", u.err)
+	if ok {
+		kv_str(f, "step", names[u.step])
+		kv_u64(f, "steps", u64(u.steps))
+		if u.err != "" do kv_str(f, "error", u.err)
+	}
 	harness_json(f)
-	if !u.acct_show do return
+	if !ok || !u.acct_show do return
 	key(f, "accounts")
 	strings.write_byte(f.b, '[')
 	for a, i in u.accounts {
@@ -1718,9 +1720,9 @@ panes_json :: proc(b: ^strings.Builder, o: ^Jw, os: Open_Session) {
 		kv_u64(&po, "active_tab", p.active)
 		key(&po, "tabs")
 		write_ids(b, pane_strip(&s, &p))
-		if p.rect.z > 0 && app.dpi > 0 {
+		if dpi := window_dpi(); p.rect.z > 0 && dpi > 0 {
 			key(&po, "rect")
-			r := p.rect / app.dpi
+			r := p.rect / dpi
 			fmt.sbprintf(b, `{{"x":%d,"y":%d,"w":%d,"h":%d}}`, int(r.x), int(r.y), int(r.z), int(r.w))
 		}
 		obj_end(&po)

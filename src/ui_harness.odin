@@ -252,7 +252,7 @@ run_block :: proc(w: f32) {
 	hgt := f32(HARNESS_TERM_ROWS) * font.cell_h + 2 * term_pad()
 	if clay.UI(clay.ID("setup_term"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(hgt)}},
-		backgroundColor = cc(th.term_bg),
+		backgroundColor = cc(term_colors().bg),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 	}) {}
 	term_laid_out = true

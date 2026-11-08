@@ -85,14 +85,14 @@ Term :: struct {
 // Pixels between the pane edge and the cell grid.
 term_pad :: proc() -> f32 {return f32(TERM_PAD) * app.dpi}
 
-// Default fg/bg/cursor/palette from the active look (theme.odin). Programs
+// Default fg/bg/cursor/palette from the active look (term_palette.odin). Programs
 // that set their own colours (OSC 4/10/11) keep them.
 term_apply_theme :: proc(t: ^Term) {
-	th := theme()
-	fg := gh.Color_Rgb{th.term_fg.r, th.term_fg.g, th.term_fg.b}
-	bg := gh.Color_Rgb{th.term_bg.r, th.term_bg.g, th.term_bg.b}
-	cc := gh.Color_Rgb{th.term_cursor.r, th.term_cursor.g, th.term_cursor.b}
-	pal := theme_palette(th)
+	tc := term_colors()
+	fg := gh.Color_Rgb{tc.fg.r, tc.fg.g, tc.fg.b}
+	bg := gh.Color_Rgb{tc.bg.r, tc.bg.g, tc.bg.b}
+	cc := gh.Color_Rgb{tc.cursor.r, tc.cursor.g, tc.cursor.b}
+	pal := term_palette(tc)
 	gh.terminal_set(t.gt, .Color_Foreground, &fg)
 	gh.terminal_set(t.gt, .Color_Background, &bg)
 	gh.terminal_set(t.gt, .Color_Cursor, &cc)
@@ -1137,13 +1137,13 @@ term_text_input :: proc(t: ^Term, text: string) {
 // underlined, with a caret.
 term_draw_marked :: proc(t: ^Term, marked: string, caret: int) {
 	if marked == "" do return
-	th := theme()
+	tc := term_colors()
 	x, y := t.cursor_px.x, t.cursor_px.y
 	w := text_width(marked, .Mono)
-	draw_rect(x, y, w, font.cell_h, th.term_bg)
-	draw_text(x, y, marked, th.term_fg, .Mono)
-	draw_rect(x, y + font.cell_h - font.line_thick, w, font.line_thick, th.term_fg)
-	draw_rect(x + text_width(marked[:clamp(caret, 0, len(marked))], .Mono), y, max(1, font.line_thick), font.cell_h, th.term_cursor)
+	draw_rect(x, y, w, font.cell_h, tc.bg)
+	draw_text(x, y, marked, tc.fg, .Mono)
+	draw_rect(x, y + font.cell_h - font.line_thick, w, font.line_thick, tc.fg)
+	draw_rect(x + text_width(marked[:clamp(caret, 0, len(marked))], .Mono), y, max(1, font.line_thick), font.cell_h, tc.cursor)
 }
 
 // Wheel: to the app as button 4/5 when it tracks the mouse, as arrow keys on

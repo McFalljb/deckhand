@@ -17,6 +17,7 @@ theme_contrast :: proc(t: ^testing.T) {
 	}
 	for look in Theme_Id do for light in ([]bool{false, true}) {
 		th := light ? &THEMES_LIGHT[look] : &THEMES[look]
+		tc := term_colors_of(look, light)
 		name := fmt.tprintf("%s %s", THEME_NAMES[look], light ? "light" : "dark")
 		surfaces := [?]struct {
 			n: string,
@@ -34,16 +35,16 @@ theme_contrast :: proc(t: ^testing.T) {
 			check(t, fmt.tprintf("%s error on %s", name, s.n), th.error, s.c, status)
 		}
 		check(t, fmt.tprintf("%s text_on_accent", name), th.text_on_accent, th.accent, 4.5)
-		check(t, fmt.tprintf("%s term_fg", name), th.term_fg, th.term_bg, 4.5)
-		check(t, fmt.tprintf("%s term_fg on term_selection", name), th.term_fg, th.term_selection, 4.5)
-		check(t, fmt.tprintf("%s term_cursor", name), th.term_cursor, th.term_bg, 3)
+		check(t, fmt.tprintf("%s term_fg", name), tc.fg, tc.bg, 4.5)
+		check(t, fmt.tprintf("%s term_fg on term_selection", name), tc.fg, th.term_selection, 4.5)
+		check(t, fmt.tprintf("%s term_cursor", name), tc.cursor, tc.bg, 3)
 		for i in ([]int{1, 2, 3, 4, 5, 6, 9, 10, 11, 12, 13, 14}) {
 			// light variants: the normal colours carry text, 4.5:1
 			want := light && i < 8 ? f32(4.5) : 3
-			check(t, fmt.tprintf("%s ansi %d", name, i), th.ansi[i], th.term_bg, want)
+			check(t, fmt.tprintf("%s ansi %d", name, i), tc.ansi[i], tc.bg, want)
 		}
 		// the chrome's centre column is the terminal's background
-		testing.expectf(t, th.bg_app == th.term_bg, "%s: bg_app != term_bg", name)
-		testing.expectf(t, (contrast_ratio(th.term_fg, th.term_bg) > 1) && (light == (lab_of(th.term_fg).l < lab_of(th.term_bg).l)), "%s: variant is the wrong way round", name)
+		testing.expectf(t, th.bg_app == tc.bg, "%s: bg_app != term_bg", name)
+		testing.expectf(t, (contrast_ratio(tc.fg, tc.bg) > 1) && (light == (lab_of(tc.fg).l < lab_of(tc.bg).l)), "%s: variant is the wrong way round", name)
 	}
 }

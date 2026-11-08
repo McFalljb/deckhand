@@ -335,7 +335,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 			draw_rect(cx, cy + m.lh - font.line_thick, mw, font.line_thick, th.text)
 			cx += text_width(ime.marked[:clamp(ime.caret, 0, len(ime.marked))], .Mono)
 		}
-		draw_rect(cx, cy, max(px(CARET_W), 1), m.lh, focused ? th.term_cursor : th.text_muted)
+		draw_rect(cx, cy, max(px(CARET_W), 1), m.lh, focused ? term_colors().cursor : th.text_muted)
 		ime.caret_rect = {cx, cy, font.cell_w, m.lh}
 	}
 	sgl_scissor(0, 0, 1 << 15, 1 << 15)

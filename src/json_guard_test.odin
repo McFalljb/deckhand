@@ -223,6 +223,7 @@ SITES := [?]Site {
 		p := jg_tmp_file("settings.json", s)
 		return !pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
 	}},
+	{"handover_parse (holder handover.json, after its MAC)", proc(s: string) -> bool {_, ok, _ := handover_parse(s); return !ok}},
 	{"app_entries (.pi-desk/apps.json)", proc(s: string) -> bool {
 		p := jg_tmp_file(".pi-desk/apps.json", s)
 		return len(app_entries(strings.trim_suffix(p, "/.pi-desk/apps.json"))) == 0
@@ -643,6 +644,9 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/titles.odin", "title_line", "jg.parse", "transcript", ""},
 		{"src/update.odin", "update_load", "jg.parse", "", ""},
 		{"src/update_core.odin", "release_parse", "jg.parse_string", "", ""}, // the network
+		{"src/holder_adopt.odin", "handover_parse", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
+		{"src/holder_adopt.odin", "handover_parse", "jg.unmarshal_string", "custom", ""},
+		{"src/socket.odin", "tokens_load", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
 		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
 		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
 		{"src/holderwire/wire.odin", "decode", "json.parse", "json_shape_ok", ""},

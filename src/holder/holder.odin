@@ -140,6 +140,7 @@ Holder :: struct {
 	serials:           u64,
 	input_paused:      bool, // a terminal has input_cap of INPUT queued: the core is not read
 	input_paused_at:   time.Tick,
+	logged:            int, // log lines so far (tests)
 	listen_paused:     bool, // accept failed for want of fds (EMFILE, ENFILE): back off
 	listen_paused_at:  time.Tick,
 }
@@ -157,6 +158,7 @@ log_line :: proc(msg: string) {
 }
 
 hlog :: proc(h: ^Holder, format: string, args: ..any) {
+	h.logged += 1 // tests count them (quiet or not)
 	if h.cfg.quiet do return
 	log_line(fmt.tprintf(format, ..args))
 }

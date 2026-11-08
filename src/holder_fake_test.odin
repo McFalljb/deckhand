@@ -23,6 +23,7 @@ Fake_Mode :: enum {
 	Welcome,
 	Refuse,
 	Silent, // accepts, never answers
+	Hangup, // accepts one connection, closes it unanswered and goes away (a holder shutting down)
 }
 
 Fake_Got :: struct {
@@ -140,6 +141,14 @@ fake_holder_main :: proc(data: rawptr) {
 	for !sync.atomic_load(&f.stop) {
 		fd, ok := sock_accept(f.lfd, 50)
 		if !ok do continue
+		if f.mode == .Hangup {
+			sock_close(f.lfd)
+			sock_unlink(f.path)
+			f.lfd = -1
+			time.sleep(20 * time.Millisecond) // the app has sent HELLO: EOF, not a refusal
+			sock_close(fd)
+			return
+		}
 		f.cfd = fd
 		fake_serve(f)
 		sock_close(fd)
@@ -175,7 +184,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				case .Refuse:
 					fake_send(f, .Refused, 0, hw.Refused{code = "wire", error = "fake: no common wire"})
 					return
-				case .Silent:
+				case .Silent, .Hangup:
 				case .Welcome:
 					w := hw.Welcome{wire = hw.WIRE, instance = f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
 					fake_send(f, .Welcome, 0, w)

@@ -6,12 +6,14 @@ package main
 // stays false: holder_client_start never connects or launches under odin test).
 
 import "base:runtime"
+import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
 import "core:testing"
+import "core:thread"
 import "core:time"
 import gh "ghostty"
 import hw "holderwire"
@@ -533,4 +535,70 @@ holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 	saved := workspace_json()
 	testing.expect(t, strings.contains(saved, `"held":3`), saved)
 	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
+}
+
+// macOS refuses a connect with ECONNREFUSED when the listen backlog is full, too: a live
+// holder's socket refused once is tried again before it is taken for a dead one and removed.
+@(test)
+holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{no_listen = true}
+	fake_holder_start(t, &f, keep = false)
+	defer fake_holder_stop(&f)
+	path := fmt.tprintf("%s/holder-0000b10c.sock", f.dir)
+	lfd := posix.socket(.UNIX, .STREAM)
+	defer posix.close(lfd)
+	addr: posix.sockaddr_un
+	addr.sun_family = .UNIX
+	for i in 0 ..< len(path) do addr.sun_path[i] = c.char(path[i])
+	testing.expect(t, posix.bind(lfd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
+	testing.expect(t, posix.listen(lfd, 1) == .OK)
+	defer posix.unlink(strings.clone_to_cstring(path, context.temp_allocator))
+	// fill the backlog: connects are refused now
+	filled := make([dynamic]Sock_Fd, context.temp_allocator)
+	for _ in 0 ..< 8 {
+		fd, ok, refused := sock_connect_why(path)
+		if !ok {
+			testing.expect(t, refused, "not refused")
+			break
+		}
+		append(&filled, fd)
+	}
+	_, ok0, _ := sock_connect_why(path)
+	testing.expect(t, !ok0, "the backlog is not full")
+	// a moment later the holder accepts them (it was busy)
+	drain := thread.create_and_start_with_data(rawptr(uintptr(lfd)), proc(p: rawptr) {
+		lfd := posix.FD(uintptr(p))
+		time.sleep(20 * time.Millisecond)
+		posix.fcntl(lfd, .SETFL, posix.O_Flags{.NONBLOCK})
+		for _ in 0 ..< 30 {
+			for {
+				fd := posix.accept(lfd, nil, nil)
+				if fd < 0 do break
+				posix.close(fd)
+			}
+			time.sleep(10 * time.Millisecond)
+		}
+	})
+	testing.expect(t, !holder_client_start())
+	thread.join(drain)
+	thread.destroy(drain)
+	for fd in filled do sock_close(fd)
+	testing.expect(t, os.exists(path), "a live holder's socket was removed")
+}
+
+// A holder that closes an attaching app's connection without a byte (or never answers it) may be
+// one that was shutting down ("Quit and Stop All Sessions", then a relaunch at once): looked for
+// again once a moment later, and gone by then, it is no "holder that runs but does not answer".
+@(test)
+holder_hangup_rescanned :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Hangup}
+	fake_holder_start(t, &f, keep = false)
+	defer fake_holder_stop(&f)
+	toast_clear()
+	testing.expect(t, !holder_client_start())
+	testing.expect(t, !hc.unreachable, "taken for a holder that runs and does not answer")
+	testing.expect(t, !strings.contains(toast.text, "isn't answering"), toast.text)
+	testing.expect(t, !hc.tried, "the start is used up: a holder is never launched this run")
 }

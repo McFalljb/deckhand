@@ -636,6 +636,56 @@ goodbye_shutdown :: proc(t: ^testing.T) {
 	testing.expect(t, f.eof)
 }
 
+// A run dir of the test's own (0700), for a holder that listens. Removed by the caller (rmdir).
+test_run_dir :: proc(t: ^testing.T, name: string) -> (run: string, crun: cstring) {
+	r: [4]u8
+	crypto.rand_bytes(r[:])
+	tmp := strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")
+	if tmp == "" do tmp = "/tmp"
+	run = fmt.tprintf("%s/dh-%s-%s", tmp, name, string(hex.encode(r[:], context.temp_allocator)))
+	crun = strings.clone_to_cstring(run, context.temp_allocator)
+	testing.expect_value(t, mkdir(crun, 0o700), 0)
+	return
+}
+
+// Once a shutdown starts (and while it reaps, up to shutdown_wait) or an idle exit is decided,
+// the socket is gone: a launch right after "Quit and Stop All Sessions" finds no holder that
+// accepts and never answers (its HELLO would time out: "a holder runs but does not answer").
+@(test)
+shutdown_stops_listening :: proc(t: ^testing.T) {
+	run, crun := test_run_dir(t, "shut")
+	defer rmdir(crun)
+	cfg := test_cfg()
+	cfg.run_dir = run
+	cfg.shutdown_wait = 2 * time.Second
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	if h == nil do return
+	path := strings.clone(h.sock_path, context.temp_allocator)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	spawn_ok(t, h, f, 1, `trap "" HUP; exec /bin/sleep 5`) // outlives the hangup: the shutdown waits
+	fake_send(f, .Goodbye, 0, holderwire.Goodbye{mode = "shutdown"})
+	start := time.tick_now()
+	for !h.shutting_down && time.tick_since(start) < time.Second do holder_step(h, 10)
+	testing.expect(t, h.shutting_down && !h.done, "not reaping")
+	testing.expect(t, !os.exists(path), "the socket is still there while it shuts down")
+	testing.expect_value(t, h.listen_fd, c.int(-1))
+
+	icfg := test_cfg()
+	icfg.run_dir = run
+	icfg.idle_exit = 50 * time.Millisecond
+	h2 := new_test_holder(t, icfg)
+	defer holder_free(h2, true)
+	if h2 == nil do return
+	path2 := strings.clone(h2.sock_path, context.temp_allocator)
+	start = time.tick_now()
+	for !h2.done && time.tick_since(start) < time.Second do holder_step(h2, 20)
+	testing.expect(t, h2.done)
+	testing.expect(t, !os.exists(path2), "the socket is still there after the idle exit was decided")
+}
+
 @(test)
 idle_exit :: proc(t: ^testing.T) {
 	cfg := test_cfg()
@@ -932,12 +982,14 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	testing.expect(t, posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
 
 	steps := 0
+	logged := h.logged
 	start := time.tick_now()
 	for time.tick_since(start) < 300 * time.Millisecond {
 		holder_step(h, 50)
 		steps += 1
 	}
 	testing.expectf(t, steps < 30, "%d loop iterations in 300 ms with accept failing", steps)
+	testing.expectf(t, h.logged - logged == 1, "%d log lines in 300 ms out of fds (one until an accept works)", h.logged - logged)
 	h.cfg.test_accept_errno = 0
 	start = time.tick_now()
 	for len(h.conns) == 0 && time.tick_since(start) < time.Second do holder_step(h, 20)
@@ -983,15 +1035,20 @@ child_holds_only_stdio :: proc(t: ^testing.T) {
 	spawn_ok(t, h, f, 2, `exec /bin/ls /dev/fd`)
 	_, ok := exited_of(t, h, f, 2)
 	testing.expect(t, ok)
+	// an inherited one the child has (a sibling test may have made them close-on-exec since:
+	// cloexec_inherited) is allowed, and ls's two then come after it
+	fields := strings.fields(output_of(t, f, 2), context.temp_allocator)
+	present := make(map[int]bool, context.temp_allocator)
+	for s in fields do if n, is_num := strconv.parse_int(s); is_num && n > 2 && fd_inherited(n) do present[n] = true
 	got := make([dynamic]string, context.temp_allocator)
-	for s in strings.fields(output_of(t, f, 2), context.temp_allocator) {
-		n, is_num := strconv.parse_int(s)
-		if is_num && n > 2 && fd_inherited(n) do continue
+	for s in fields {
+		n, _ := strconv.parse_int(s)
+		if present[n] do continue
 		append(&got, s)
 	}
 	want := make([dynamic]string, context.temp_allocator)
 	append(&want, "0", "1", "2")
-	for fd := 3; len(want) < 5; fd += 1 do if !fd_inherited(fd) do append(&want, fmt.tprintf("%d", fd))
+	for fd := 3; len(want) < 5; fd += 1 do if !present[fd] do append(&want, fmt.tprintf("%d", fd))
 	slice.sort(got[:])
 	slice.sort(want[:])
 	testing.expectf(t, slice_eq(got[:], want[:]), "the child holds more than 0-2: %v (inherited by the tests: %v)", got[:], inherited_fds[:min(inherited_n, len(inherited_fds))])
@@ -1001,4 +1058,45 @@ slice_eq :: proc(a, b: []string) -> bool {
 	if len(a) != len(b) do return false
 	for x, i in a do if x != b[i] do return false
 	return true
+}
+
+// raise_fd_limit is the holder's own: a session starts with the soft limit the holder was
+// started with (launchd's 256, a shell's), not the raised one.
+@(test)
+child_gets_original_fd_limit :: proc(t: ^testing.T) {
+	orig: Rlimit
+	testing.expect_value(t, getrlimit(RLIMIT_NOFILE, &orig), 0)
+	defer setrlimit(RLIMIT_NOFILE, &orig)
+	low := orig
+	low.cur = min(orig.cur, 256)
+	testing.expect_value(t, setrlimit(RLIMIT_NOFILE, &low), 0)
+	raise_fd_limit()
+	now: Rlimit
+	getrlimit(RLIMIT_NOFILE, &now)
+	testing.expect(t, now.cur > low.cur || low.cur >= min(orig.max, OPEN_MAX), "not raised")
+	h := new_test_holder(t)
+	defer holder_free(h, true)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	spawn_ok(t, h, f, 1, "ulimit -n")
+	_, ok := exited_of(t, h, f, 1)
+	testing.expect(t, ok)
+	testing.expect_value(t, strings.trim_space(output_of(t, f, 1)), fmt.tprintf("%d", low.cur))
+}
+
+// At start the holder makes every fd above 2 it inherited close-on-exec: a launcher that
+// leaked one (a shell, a CI runner) never hands it to the sessions.
+@(test)
+inherited_fds_made_cloexec :: proc(t: ^testing.T) {
+	F_GETFD :: 1
+	sync.mutex_lock(&fork_lock)
+	fds: [2]c.int
+	testing.expect_value(t, pipe(&fds), 0) // not close-on-exec, as inherited
+	cloexec_inherited()
+	sync.mutex_unlock(&fork_lock)
+	defer close(fds[0])
+	defer close(fds[1])
+	for fd in fds do testing.expectf(t, fcntl(fd, F_GETFD) & FD_CLOEXEC != 0, "fd %d is not close-on-exec", fd)
+	for fd in c.int(0) ..< 3 do testing.expectf(t, fcntl(fd, F_GETFD) & FD_CLOEXEC == 0, "stdio fd %d was made close-on-exec", fd)
 }

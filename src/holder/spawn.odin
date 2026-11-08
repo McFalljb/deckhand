@@ -29,6 +29,9 @@ reset_signals :: proc "contextless" () {
 	sigprocmask(SIG_SETMASK, &empty, nil)
 }
 
+// TODO
+cloexec_inherited :: proc() {}
+
 // argv[0] must be an absolute path (no PATH search); env entries are "K=V". The child gets the
 // PTY's slave as 0, 1, 2 and is its session leader (forkpty: pgid == pid).
 //

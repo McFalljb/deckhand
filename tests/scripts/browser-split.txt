@@ -61,4 +61,18 @@ assert_state open_sessions.0.tabs.2.pane $pane0
 assert_state open_sessions.0.panes.0.active_tab $pitab
 assert_state open_sessions.0.panes.1.active_tab $ptab1
 assert_state open_sessions.0.focused_pane $pane1
+# a popup the pi's click opens in the page's pane (a target=_blank link): it lands behind, in the
+# pi tab's pane too (Act_Op.who_tab -> browser_popup_pane), not in its opener's focused pane
+pi_command {"type":"browser_navigate","tab_id":$ptab1,"url":"pidesk-test://web/nav-a.html"}
+assert_result ok true
+pi_command {"type":"browser_wait","tab_id":$ptab1,"for":"load","timeout_ms":10000}
+assert_finished ok true
+pi_command_bg {"type":"browser_click","tab_id":$ptab1,"selector":"#blank"}
+await_bg 5000
+assert_finished ok true
+waitstate 5000 open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.3.kind browser
+assert_state open_sessions.0.tabs.3.pane $pane0
+assert_state open_sessions.0.panes.0.active_tab $pitab
+assert_state open_sessions.0.focused_pane $pane1
 quit

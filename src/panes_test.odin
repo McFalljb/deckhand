@@ -576,7 +576,9 @@ panes_agent_opens_land_in_its_pane :: proc(t: ^testing.T) {
 	lands(t, x, &opened, run_command(Show_File{path = "notes.txt"}, claude), x.a, "show_file after a move")
 	// restarting its app (in A) leaves it there, wherever the agent is
 	testing.expect(t, run_command(Move_Tab{tab_id = cl, pane = x.b, index = -1}, PT_UI).ok, "move back")
-	run_command(App_Restart{tab_id = app_in_a}, claude)
+	// (its program is not there: the restart is reached and fails to start, the tab stays)
+	rr := run_command(App_Restart{tab_id = app_in_a}, claude)
+	testing.expectf(t, rr.error == "could not start the app", "the restart was reached: %v", rr)
 	testing.expect_value(t, pane_of_tab(x.s, app_in_a).id, x.a)
 	// A closes (its tabs join B): the pi tab's opens go where it is now
 	testing.expect(t, run_command(Close_Pane{pane = x.a}, PT_UI).ok, "close A")

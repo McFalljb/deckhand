@@ -6,6 +6,7 @@ package main
 // what the app asked for (legacy, kitty keyboard, SGR mouse, bracketed paste).
 
 import "core:c"
+import "core:fmt"
 import "core:math"
 import "core:os"
 import "core:strings"
@@ -73,6 +74,11 @@ Term :: struct {
 	// what the program reports over OSC 7501 (agent_status.odin); its summary goes to the tab
 	prog:         Prog_Records,
 	cont_fed:     int, // bytes fed since the continuation buffer was last trimmed
+	// a terminal adopted from the session holder (holder_adopt.odin)
+	inexact:      bool, // not rebuilt byte-exactly (no snapshot, or the holder's tail had a gap)
+	holder_lost:  bool, // its process ran in a holder that went away
+	mute_replies: bool, // feeding replayed bytes: query replies are dropped (§7.2 P4)
+	replies_dropped: int, // how many (tests)
 }
 
 // Pixels between the pane edge and the cell grid.
@@ -213,7 +219,24 @@ grapheme_clusters :: proc(t: ^Term) {
 on_write_pty :: proc "c" (gt: gh.Terminal, userdata: rawptr, data: [^]u8, n: c.size_t) {
 	context = app_context
 	t := (^Term)(userdata)
+	if t.mute_replies {
+		t.replies_dropped += 1
+		return
+	}
 	pty_write(&t.pty, data[:n])
+}
+
+// Bytes the program printed while no Deckhand was reading (the holder's tail, at adopt): into
+// the terminal, but every reply to a query in them is dropped, all of them (§7.2 P4). The
+// program asked long ago; a stale `^[[?1;2c` must never land in vim. TUIs handle the timeout.
+term_feed_replayed :: proc(t: ^Term, bytes: []u8) {
+	if len(bytes) == 0 do return
+	t.mute_replies = true
+	gh.terminal_vt_write(t.gt, raw_data(bytes), len(bytes))
+	t.mute_replies = false
+	t.cont_fed += len(bytes)
+	if t.cont_fed >= CONT_TRIM_EVERY && term_continuation_trim(t.gt) do t.cont_fed = 0
+	t.changed = true
 }
 
 term_free :: proc(t: ^Term) {
@@ -244,7 +267,22 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	t.prog.dirty = true // and the tab re-syncs at the next pump, whatever it showed
 	gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
 	t.exit, t.eof_at, t.hung_pid = {}, {}, 0
-	p, ok := pty_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows)
+	t.inexact, t.holder_lost = false, false
+	px_w, px_h := u32(f32(t.cols) * font.cell_w), u32(f32(t.rows) * font.cell_h)
+	// keep_sessions: a tab's process lives in the session holder (holder_client.odin)
+	tab_id: u64
+	for id, x in terms do if x == t do tab_id = id
+	p: Pty
+	ok: bool
+	// a tab's (it may not be in its session yet: a new session's pi tab), not the setup sheet's install run
+	if tab_id != 0 && tab_id != harness_run.term_id && holder_wanted() {
+		p, ok = holder_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows, px_w, px_h)
+		if ok do socket_tokens_bind(tab_id, p.held) // its tokens (minted for its env) are kept with it
+		else do fmt.eprintln("Deckhand: session holder: SPAWN failed; this tab runs on its own PTY (it stops at quit)")
+	}
+	if !ok {
+		p, ok = pty_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows)
+	}
 	if !ok {
 		msg := "\x1b[31mfailed to start process\x1b[0m\r\n"
 		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
@@ -252,8 +290,12 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	} else {
 		t.pty = p
 		t.running = true
-		reader_start(t)
-		pty_resize(&t.pty, t.cols, t.rows, u32(f32(t.cols) * font.cell_w), u32(f32(t.rows) * font.cell_h))
+		if p.held == 0 {
+			reader_start(t)
+			pty_resize(&t.pty, t.cols, t.rows, px_w, px_h)
+		} else {
+			t.reader.eof = false // the holder client feeds the inbox (holder_pull); SPAWN had the size
+		}
 	}
 	t.changed = true
 	return ok
@@ -330,14 +372,15 @@ reader_stop_and_close :: proc(t: ^Term) {
 		thread.destroy(t.reader.thread)
 		t.reader.thread = nil
 	}
-	if t.pty.fd >= 0 do pty_close(&t.pty)
+	if pty_open(&t.pty) do pty_close(&t.pty)
 	clear(&t.reader.inbox)
 }
 
 // Feeds queued child output to the terminal. Call every frame.
 term_pump :: proc(t: ^Term) {
-	if t.pty.fd < 0 do return
+	if !pty_open(&t.pty) do return
 	pty_flush(&t.pty)
+	if t.pty.held != 0 do holder_pull(t.pty.held, &t.reader)
 	sync.lock(&t.reader.mu)
 	n := min(len(t.reader.inbox), READ_BUDGET)
 	if n > 0 {
@@ -367,7 +410,8 @@ term_pump :: proc(t: ^Term) {
 		t.running = false
 		if !t.exit.known do t.hung_pid = t.pty.pid // reader_stop_and_close hangs up on it
 		how := exit_text(t.exit)
-		msg := how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
+		if t.pty.held != 0 && holder_term_lost(t.pty.held) do t.holder_lost = true
+		msg := t.holder_lost ? "\r\n\x1b[2m[the session holder stopped]\x1b[0m" : how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
 		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
 		t.changed = true
 		reader_stop_and_close(t)

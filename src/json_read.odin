@@ -572,7 +572,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "cancel_confirmation": cmd = Cancel_Confirmation{token = get_str(&r, "token")}
 	case "rescan":              cmd = Rescan{}
 	case "refresh_shell_env":   cmd = Refresh_Shell_Env{}
-	case "quit":                cmd = Quit{confirm = get_str(&r, "confirm", optional = true)}
+	case "quit":                cmd = Quit{confirm = get_str(&r, "confirm", optional = true), stop_sessions = opt_bool(&r, "stop_sessions").? or_else false}
 	case "get_state":           cmd = Get_State{}
 	case "list_commands":       cmd = List_Commands{}
 	case "set_home":            cmd = Set_Home{open = get_bool(&r, "open")}

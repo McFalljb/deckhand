@@ -443,6 +443,7 @@ ACTIONS := [?]Action {
 	{id = "sort_sessions", label = "Sort sessions (next order)", make = proc() -> (Command, bool) {return next_sort(.Sessions), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Sessions]]}},
 	{id = "sort_chats", label = "Sort chats (next order)", make = proc() -> (Command, bool) {return next_sort(.Chats), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Chats]]}},
 	{id = "quit", label = "Quit Deckhand", keys = "⌘Q", make = proc() -> (Command, bool) {return Quit{}, true}},
+	{id = "quit_stop_sessions", label = "Quit Deckhand and Stop All Sessions…", make = proc() -> (Command, bool) {return Quit{stop_sessions = true}, true}},
 	// the terminals' and the editor's text size (the menu bar's View menu)
 	{id = "text_bigger", label = "Bigger text", keys = "⌘+", make = proc() -> (Command, bool) {
 		pt := int(term_text_pt())

@@ -501,6 +501,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "token", redact ? "<redacted>" : c.token)
 	case Quit:
 		token(&w, c.confirm, redact)
+		if c.stop_sessions do kv_bool(&w, "stop_sessions", true)
 	case Set_Confirm_Policy:
 		kv_str(&w, "caller", CALLER_NAMES[c.caller])
 		kv_str(&w, "class", CLASS_NAMES[c.class])
@@ -1260,6 +1261,15 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "on_screen", os.id == s.current_session && session_tab_shown(&sos, t.id))
 			}
 			if t.status == .Exited do if how := exit_text(t.exit); how != "" do kv_str(&to, "exit", how)
+			if x := term_of(t.id); x != nil {
+				// keep_sessions (holder_client.odin): its process runs in the session holder's terminal `held`
+				if x.pty.held != 0 {
+					kv_u64(&to, "held", u64(x.pty.held))
+					if x.pty.pid > 0 do kv_u64(&to, "pid", u64(x.pty.pid))
+				}
+				if x.inexact do kv_bool(&to, "inexact", true) // adopted, not rebuilt byte-exactly
+				if x.holder_lost do kv_bool(&to, "holder_lost", true) // the session holder stopped
+			}
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {
 				kv_str(&to, "path", et.path)

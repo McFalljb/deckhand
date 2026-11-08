@@ -588,7 +588,7 @@ claude_readonly_stop :: proc(tab: ^Tab, ct: ^Claude_Tab, note := CLAUDE_GUARD_ST
 	socket_forget_tab(tab.id) // nothing more from its token
 	if t := term_of(tab.id); t != nil {
 		term_note(t, note)
-		if t.pty.pid > 0 do posix.killpg(posix.pid_t(t.pty.pid), .SIGKILL) // claude and what it runs
+		pty_kill_group(&t.pty, i32(posix.Signal.SIGKILL)) // claude and what it runs (in the holder: SIGNAL{pgroup})
 	}
 	toast_show(toast, err = true)
 	app.redraw = true

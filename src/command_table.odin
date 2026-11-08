@@ -74,7 +74,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "cancel_confirmation", args = "token", does = "drop a pending confirmation", who = .Anyone},
 	{type = "rescan", does = "rescan projects and sessions", who = .Anyone, long_running = true},
 	{type = "refresh_shell_env", does = "ask the login shell for its environment again (Deckhand started from the Dock or Finder) and merge it in for new tabs; open tabs keep theirs; refused when started from a terminal; the user's", who = .User, long_running = true},
-	{type = "quit", args = "confirm?", does = "quit Deckhand", who = .Anyone, confirm = .App_Quit},
+	{type = "quit", args = "confirm?, stop_sessions?", does = "quit Deckhand (stop_sessions: the session holder's sessions too; keep_sessions)", who = .Anyone, confirm = .App_Quit},
 	{type = "pi_prompt", args = "tab_id, text, images?", does = "send a prompt to a pi tab as a user message, with images [{mime, data (base64)}] if given (at most 8, 2 MB; refused while it waits for the user)", who = .Anyone, long_running = true},
 	{type = "pi_wait_idle", args = "tab_id, timeout_ms?", does = "wait until a pi tab is idle", who = .Anyone, long_running = true},
 	{type = "pi_restart", args = "tab_id, pick_model?", does = "start pi again in a pi tab whose process exited, on the same session (the dead tab's Restart); pick_model: pi's model selector opens once it is up (Restart with model…)", who = .Anyone},

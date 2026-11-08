@@ -153,6 +153,7 @@ package main
 //   assert_result PATH VALUE   same, on the last command's result JSON
 //   assert_finished PATH VALUE same, on the last long-running command's finished result
 //   state_json NAME            app state as JSON to build/NAME.json
+//   screen_hashes              log every terminal's screen_hash (tab id, holder terminal, hash)
 //   quit                       quit without confirmation; exit status 1 if an assert failed
 //
 // PI_DESK_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
@@ -1201,6 +1202,11 @@ autotest_step :: proc() {
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)at.last_result)
 		case "state_json":
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)state_json())
+		case "screen_hashes": // screen_hashes: per terminal tab "[autotest] screen_hash <tab id> <held> <hash>" (snapshot.odin)
+			for id, x in terms {
+				h, _ := screen_hash(x.gt)
+				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
+			}
 		case "quit":
 			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
 			app.quitting = true // the script ends the run: no confirmation

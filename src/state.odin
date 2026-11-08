@@ -82,6 +82,7 @@ Tab :: struct {
 	prog:     Prog_Summary,
 	unseen:   bool, // its agent finished while the user was not looking, or "Mark as unread"; not saved
 	pane:     u64, // the pane of its session it sits in (panes.odin); not saved
+	held:     u32, // restored with a session holder terminal id (workspace.json "held"): adopted at launch, then 0
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,
@@ -444,6 +445,25 @@ tab_kind_id :: proc(k: Tab_Kind) -> Tab_Kind_Id {
 
 any_running :: proc() -> bool {
 	for s in state.open_sessions do for t in s.tabs do if t.status == .Running do return true
+	return false
+}
+
+// Whether quitting stops something running: any running tab (as any_running), except, when
+// keeps (the session holder keeps sessions at this quit), terminal tabs whose process runs in
+// the holder and tabs that come back by themselves (editors, Markdown, browser pages, Changes:
+// unsaved edits are asked about apart).
+quit_would_stop :: proc(keeps: bool) -> bool {
+	if !keeps do return any_running()
+	for s in state.open_sessions do for t in s.tabs {
+		if t.status != .Running do continue
+		switch _ in t.kind {
+		case Editor_Tab, Markdown_Tab, Browser_Tab, Changes_Tab:
+			continue
+		case Shell_Tab, Pi_Tab, Claude_Tab, App_Tab:
+		}
+		if x := term_of(t.id); x != nil && x.pty.held != 0 do continue
+		return true
+	}
 	return false
 }
 

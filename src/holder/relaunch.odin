@@ -106,6 +106,7 @@ relaunch_main :: proc(args: []string) -> int {
 		waitpid(opened, &st, 0)
 	}
 	if !lok || secret == "" do return 0
+	defer trust.wipe(transmute([]u8)secret)
 	relaunch_serve(lfd, secret, a.exe, time.tick_add(time.tick_now(), holderwire.SUCCESSOR_TTL))
 	return 0
 }
@@ -145,6 +146,7 @@ relaunch_read_secret :: proc(fd: c.int) -> string {
 		n += int(r)
 		if buf[n - 1] == '\n' do break
 	}
+	defer trust.wipe(buf[:])
 	line := string(buf[:n])
 	if len(line) != 65 || line[64] != '\n' || !hex64(line[:64]) do return ""
 	return strings.clone(line[:64])
@@ -224,7 +226,10 @@ relaunch_one :: proc(cfd: c.int, secret, want_exe: string, deadline: time.Tick) 
 	if d := trust.ready_peer_allowed(.Adhoc, trust.own_uid(), claimed, at_accept); d != .Allow do return fmt.tprintf("%v", d)
 	if got := real_path(pid_path(claimed)); got != want_exe do return fmt.tprintf("pid %d runs %q, not the new app", claimed, got)
 	if trust.peer_still(at_accept, trust.peer_read(posix.FD(cfd))) != .Allow do return "the peer changed"
-	if !write_all(cfd, fmt.tprintf("%s\n", secret)) do return "it left before the secret"
+	out := fmt.tprintf("%s\n", secret)
+	sent := write_all(cfd, out)
+	trust.wipe(transmute([]u8)out)
+	if !sent do return "it left before the secret"
 	ack, aok := read_line(cfd, 4, deadline)
 	if !aok || ack != "ok\n" do return "no ack"
 	return ""

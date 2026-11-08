@@ -16,6 +16,7 @@
 package trust
 
 import "core:c"
+import "core:mem"
 import "core:sys/posix"
 
 Mode :: enum {
@@ -237,3 +238,8 @@ when ODIN_OS == .Darwin {
 }
 
 own_uid :: proc() -> u32 {return u32(posix.geteuid())}
+
+// Zeroes b in a way the compiler keeps (a secret's bytes once used: the successor secret).
+wipe :: proc(b: []u8) {
+	if len(b) > 0 do mem.zero_explicit(raw_data(b), len(b))
+}

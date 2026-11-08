@@ -648,6 +648,10 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 			conn_drop(h, cn, fmt.tprintf("bad HELLO: %v", e))
 			return
 		}
+		defer if hello.successor_secret != "" {
+			trust.wipe(transmute([]u8)hello.successor_secret) // the decoded copy and the frame's bytes
+			trust.wipe(f.payload)
+		}
 		wire, wire_ok := holderwire.negotiate(hello.wire)
 		successor_expire(h)
 		switch trust.hello_answer(h.core != nil, wire_ok, h.successor != "", trust.successor_secret_ok(h.successor, hello.successor_secret)) {
@@ -877,6 +881,7 @@ goodbye_handover :: proc(h: ^Holder, cn: ^Conn, successor: bool) {
 		raw: [32]u8
 		crypto.rand_bytes(raw[:])
 		h.successor = string(hex.encode(raw[:]))
+		trust.wipe(raw[:])
 		h.successor_until = time.tick_add(time.tick_now(), h.cfg.successor_ttl)
 	}
 	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor})
@@ -890,6 +895,7 @@ goodbye_handover :: proc(h: ^Holder, cn: ^Conn, successor: bool) {
 @(private)
 successor_clear :: proc(h: ^Holder) {
 	if h.successor == "" do return
+	trust.wipe(transmute([]u8)h.successor)
 	delete(h.successor)
 	h.successor = ""
 }

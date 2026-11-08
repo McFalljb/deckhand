@@ -357,7 +357,9 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	}
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE, successor_secret = secret})
-	if !sock_write_all(fd, out[:]) do return fail("cannot send HELLO")
+	sent := sock_write_all(fd, out[:])
+	if secret != "" do trust.wipe(out[:]) // the HELLO held the successor secret
+	if !sent do return fail("cannot send HELLO")
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
 
 	f, fok := handshake_frame(deadline)
@@ -522,6 +524,24 @@ holder_frames :: proc() -> bool {
 	}
 }
 
+// GOODBYE_ACK's offsets into hc.ack and its successor secret into hc.successor (the one copy, until
+// it goes to the relaunch helper); the frame's bytes and the decoded copy are wiped. False: bad.
+goodbye_ack_take :: proc(f: hw.Frame) -> bool {
+	m: hw.Goodbye_Ack
+	e := hw.decode(f, .Goodbye_Ack, &m, context.temp_allocator)
+	defer {
+		trust.wipe(transmute([]u8)m.successor_secret)
+		trust.wipe(f.payload)
+	}
+	if e != .None do return false
+	for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
+	if len(m.successor_secret) == len(hc.successor) {
+		copy(hc.successor[:], m.successor_secret)
+		hc.successor_len = len(hc.successor)
+	}
+	return true
+}
+
 // One frame from the holder (reader thread).
 @(private = "file")
 holder_frame :: proc(f: hw.Frame) {
@@ -568,14 +588,11 @@ holder_frame :: proc(f: hw.Frame) {
 		if h == nil || hw.decode(f, .Foreground_Is, &m, context.temp_allocator) != .None do return
 		h.fg = i32(clamp(m.pgid, 0, i64(max(i32))))
 	case .Goodbye_Ack:
-		m: hw.Goodbye_Ack
-		e := hw.decode(f, .Goodbye_Ack, &m, context.temp_allocator)
-		if !hc.handed || hc.acked || e != .None do return
-		for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
-		if len(m.successor_secret) == len(hc.successor) {
-			copy(hc.successor[:], m.successor_secret)
-			hc.successor_len = len(hc.successor)
+		if !hc.handed || hc.acked {
+			trust.wipe(f.payload)
+			return
 		}
+		if !goodbye_ack_take(f) do return
 		hc.acked = true
 		sync.cond_broadcast(&hc.cond)
 	case .Upgrade_Failed:

@@ -870,3 +870,27 @@ holder_upgrade_due_rule :: proc(t: ^testing.T) {
 	}
 	for c, i in cases do testing.expectf(t, holder_upgrade_due(c.tried, c.adopt_done, c.wanted, c.running) == c.want, "case %d", i)
 }
+
+// GOODBYE_ACK's successor secret is kept in hc's fixed buffer only: the frame's bytes (in the
+// reader's stream) and the decoded copy are wiped once it is taken.
+@(test)
+goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	secret := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Goodbye_Ack, 0, hw.Goodbye_Ack{terminals = {{id = 3, offset = 9}}, successor_secret = secret})
+	rx: hw.Stream
+	defer hw.stream_destroy(&rx)
+	hw.stream_feed(&rx, out[:])
+	f, err := hw.stream_next(&rx)
+	testing.expect_value(t, err, hw.Frame_Error.None)
+	testing.expect(t, goodbye_ack_take(f))
+	testing.expect_value(t, string(hc.successor[:hc.successor_len]), secret)
+	testing.expect_value(t, hc.ack[3], u64(9))
+	for b, i in f.payload do if b != 0 {
+		testing.expectf(t, false, "payload byte %d not wiped", i)
+		break
+	}
+}

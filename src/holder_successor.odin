@@ -121,6 +121,7 @@ relaunch_helper_send :: proc(secret: string) {
 	if relaunch_helper.fd < 0 do return
 	line := len(secret) == 64 ? fmt.tprintf("%s\n", secret) : "\n"
 	rest := transmute([]u8)line
+	defer if len(secret) == 64 do trust.wipe(transmute([]u8)line)
 	for len(rest) > 0 {
 		n := posix.write(relaunch_helper.fd, raw_data(rest), uint(len(rest)))
 		if n < 0 && posix.errno() == .EINTR do continue
@@ -151,6 +152,7 @@ successor_secret_take :: proc(run: string) -> string {
 	}
 	if !sock_write_all(fd, transmute([]u8)fmt.tprintf("%d\n", posix.getpid())) do return ""
 	buf: [80]u8
+	defer trust.wipe(buf[:]) // the caller's copy is the one kept (and it wipes that)
 	n := 0
 	deadline := time.tick_add(time.tick_now(), SUCCESSOR_TAKE_WAIT)
 	for n < len(buf) && (n == 0 || buf[n - 1] != '\n') {

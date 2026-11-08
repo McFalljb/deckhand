@@ -159,7 +159,7 @@ browser_attach :: proc(tab_id: u64, url: string) -> ^Browser {
 	b.url = strings.clone(url)
 	b.opened_at = time.tick_now()
 	b.shown_at = b.opened_at
-	if !CEF_BUILT_IN do b.message = "Browser not built in (PI_DESK_NO_CEF build)"
+	if !CEF_BUILT_IN do b.message = "Browser not built in (a build without CEF)" // no PI_DESK_ name: scripts/check-release-build.sh
 	browsers[tab_id] = b
 	app.redraw = true
 	return b

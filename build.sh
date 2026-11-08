@@ -160,10 +160,15 @@ fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
-  if [ ! -f build/pd_cef.a ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
-    clang -c $CEF_CFLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
+  # a release shim has no PI_DESK_CEF_SPARE or PI_DESK_CEF_NETLOG (src/test_hooks.odin);
+  # build/pd_cef.mode says which one build/pd_cef.a is
+  CEF_MODE=dev CEF_SHIM_FLAGS=$CEF_CFLAGS
+  if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DPD_RELEASE=1"; fi
+  if [ ! -f build/pd_cef.a ] || [ "$(cat build/pd_cef.mode 2>/dev/null)" != $CEF_MODE ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
+    clang -c $CEF_SHIM_FLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
     rm -f build/pd_cef.a
     ar rcs build/pd_cef.a build/pd_cef.o
+    echo $CEF_MODE > build/pd_cef.mode
   fi
   if [ ! -f build/cef_helper ] || [ src/native/cef_helper.c -nt build/cef_helper ] || [ vendor/cef/VERSION -nt build/cef_helper ]; then
     clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper

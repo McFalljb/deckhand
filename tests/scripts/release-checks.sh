@@ -9,7 +9,7 @@
 #   whose key is not the old one: refused
 #   test hooks (src/test_hooks.odin): src built with -define:DECKHAND_TEST_HOOKS=false holds no
 #   hook name, --print-token or test key (scripts/check-release-build.sh passes it), binaries
-#   planted with a single hook string fail it;
+#   planted with a single hook string, or any PI_DESK_ name the check does not allow, fail it;
 #   release.sh builds with DECKHAND_RELEASE=1 and runs the check; build.sh refuses it for tests
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
 set -eu
@@ -124,6 +124,16 @@ for s in PI_DESK_SCRIPT PI_DESK_DATA_DIR PI_DESK_RUNTIME_DIR PI_DESK_UPDATE_URL 
   printf 'x%sx' "$s" >> "$H/planted"
   scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
 done
+# the catch-all: any other PI_DESK_ name fails too (a knob outside HOOK_ENV); the allowed ones pass
+for s in PI_DESK_NEW_KNOB PI_DESK_CEF_NETLOG PI_DESK_CEF_SPARE PI_DESK_x; do
+  cp /usr/bin/true "$H/planted"
+  printf '\001%s\001' "$s" >> "$H/planted"
+  scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
+done
+cp /usr/bin/true "$H/planted"
+printf '\001PI_DESK_SOCKET\001PI_DESK_GUI_LAUNCH\001PI_DESK_*\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowed PI_DESK_ names pass" || bad "an allowed name refused: $(cat "$H/out.txt")"
+grep -q -- '-DPD_RELEASE=1' build.sh && grep -q '#ifndef PD_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost PD_RELEASE"
 grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"
 grep -q 'scripts/check-release-build.sh "$EXE"' scripts/release.sh && ok "release.sh checks its binaries" || bad "release.sh does not run check-release-build.sh"
 DECKHAND_RELEASE=1 ./build.sh test >"$H/out.txt" 2>&1 && bad "build.sh test ran without hooks" || ok "build.sh refuses DECKHAND_RELEASE=1 for tests"

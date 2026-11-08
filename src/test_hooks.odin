@@ -4,7 +4,9 @@ package main
 // "A genuine binary under attacker config"): a signed Deckhand passes every identity check whatever
 // its environment, so a release build must not be steerable by it. scripts/release.sh builds with
 // -define:DECKHAND_TEST_HOOKS=false (DECKHAND_RELEASE=1 ./build.sh) and then checks the binaries
-// for every name below (scripts/check-release-build.sh): none may be left.
+// for every name below, and for any PI_DESK_ name not in its ALLOWED list (scripts/check-release-build.sh):
+// none may be left. The CEF shim's knobs (PI_DESK_CEF_SPARE, PI_DESK_CEF_NETLOG) are compiled out
+// with -DPD_RELEASE=1 (build.sh).
 //
 // With the hooks off:
 //   - every hook_env() is "" (test mode never starts: no PI_DESK_SCRIPT), and the names
@@ -13,9 +15,11 @@ package main
 //   - `--print-token` is not accepted (Settings › Copy a control token mints one, the user's).
 // Test and development builds (./build.sh, ./build.sh test, every scene) keep them.
 //
-// Not hooks, so kept: PI_DESK_SOCKET and PI_DESK_TOKEN (what Deckhand gives its tabs, read by
-// `deckhand --ctl`), PI_DESK_GUI_LAUNCH and PI_DESK_CEF_SHARED_TEXTURE (the user's workarounds,
-// docs/DEVELOPING.md, docs/BROWSER.md). Neither steers who Deckhand trusts or what it runs.
+// Not hooks, so kept (each in check-release-build.sh's ALLOWED, with why): PI_DESK_SOCKET and
+// PI_DESK_TOKEN (what Deckhand gives its tabs, read by `deckhand --ctl`) and the other names it
+// sets in its tabs' and jobs' environments, PI_DESK_GUI_LAUNCH and PI_DESK_CEF_SHARED_TEXTURE (the
+// user's workarounds, docs/DEVELOPING.md, docs/BROWSER.md). None steers who Deckhand trusts or
+// what it runs.
 
 import "core:os"
 

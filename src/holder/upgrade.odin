@@ -17,9 +17,12 @@ package holder
 //      it the state and dup'd masters, and wants back "DRY rev wire_min wire" with a wire range
 //      that holds the core's, and exit 0. It proves the new binary reads this state.
 //   5. forks the keeper (keeper.odin), which alone holds the fds through the exec.
-//   6. execve(path, hold --resume FD). Its own copies of the masters, listener, lock and the
-//      core's connection are close-on-exec (checked just before), so the kernel closes them in
-//      the same step that starts the new image: the new image starts holding none of them.
+//   6. execve(path, hold --resume FD), the soft RLIMIT_NOFILE put back to the one the holder was
+//      started with (the new image raises it again and gives its sessions the original). Its own
+//      copies of the masters, listener, lock and the core's connection are close-on-exec (checked
+//      just before), so the kernel closes them in the same step that starts the new image: the
+//      new image starts holding none of them, only the keeper's socket (CLOEXEC cleared for it
+//      alone; hold_main's cloexec_inherited marks it again, holder_resume uses it by number).
 //      (The doc's version closes them before execve and has the keeper give them back if execve
 //      fails; keeping close-on-exec copies gives the new image exactly as little, and a failed
 //      execve then simply carries on, with no round trip that could lose the sessions.)
@@ -140,10 +143,20 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	if to, on := hook("swap", true); on do posix.rename(strings.clone_to_cstring(to, context.temp_allocator), cpath)
 	exec_path := cpath
 	if _, on := hook("exec-fail", true); on do exec_path = "/nonexistent/deckhand-core"
+	// the new image records the limit it starts with as the sessions' (raise_fd_limit): hand it
+	// the one this holder was first started with, not the raised one. Lowering the soft limit
+	// closes nothing; the keeper (forked above) keeps the raised one, and so does a failed exec.
+	raised: Rlimit
+	lowered := child_nofile_set && getrlimit(RLIMIT_NOFILE, &raised) == 0 && raised.cur != child_nofile.cur
+	if lowered {
+		orig := Rlimit{cur = child_nofile.cur, max = raised.max}
+		lowered = setrlimit(RLIMIT_NOFILE, &orig) == 0
+	}
 	execve(exec_path, raw_data(argv[:]), _NSGetEnviron()^)
 
 	// still here: the old image carries on with everything it had
 	e := errno()
+	if lowered do setrlimit(RLIMIT_NOFILE, &raised)
 	kill(c.int(keeper), SIGKILL)
 	ks: c.int
 	waitpid(c.int(keeper), &ks, 0)

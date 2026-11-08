@@ -26,7 +26,7 @@ No test run should take more than 3 minutes. Run the smallest set that covers th
 |---|---|---|
 | Every change (each fix while you work) | `./build.sh test` (all unit layers), and `./build.sh scenes --changed` if it touches the app or a scene | test ~40–60 s; scenes: the matched scenes + the smoke set, ~0.5–2 min |
 | A scene failed | rerun that scene by name (`./build.sh scenes NAME`), not the set: the log says the script line it stopped at | its own time |
-| Before opening or merging a pull request | the same as every change; CI (`ci.yml`) runs the unit tests and the required scenes | CI ~3–4 min |
+| Before opening or merging a pull request | the same as every change; CI (`ci.yml`) runs the unit tests and the required scenes, never the full tier | CI ~3–4 min |
 | A change to an `@all` file (the build, `vendor/`, the runner, `fresh-build.sh`) or a large refactor | `./build.sh scenes --all` (`--changed` selects all of it anyway) | ~3 min + the build when stale |
 | Release | `./build.sh test`, `./build.sh scenes --all`, the release steps in [DEVELOPING.md](DEVELOPING.md#releases) | ~4–5 min |
 | Nightly (`scenes-full.yml`) | every required and full scene in CI; perf warnings in the unit job's log | |
@@ -34,11 +34,18 @@ No test run should take more than 3 minutes. Run the smallest set that covers th
 
 What `--changed` selects (`--list` prints it, with the reason per scene): the scenes whose areas
 hold a changed file, plus the smoke set. A change to an `@core` file (`main.odin`,
-`commands.odin`, `state.odin`, the terminal, the socket… in `tests/scenes.txt`) adds the required
-scenes and every scene whose area name its changed lines mention (a `Browser_Open` case in
-`commands.odin`: the browser scenes; `claude_` anything: the Claude scenes), and runs everything
-once the core change is over 300 lines. An `@all` file runs everything. The nightly run and
-`--all` before a release catch what a narrower `--changed` misses.
+`commands.odin`, `state.odin`, `autotest.odin`… in `tests/scenes.txt`) adds the required scenes
+and every scene whose area name (singular or plural) its changed lines, or the `case` and proc
+they are in, mention: an edit anywhere in `commands.odin`'s `case Worktree_Remove:` runs
+`worktrees`, one in a `Browser_*` case the browser scenes. A core change over 300 lines runs
+everything. An `@all` file runs everything: the build, `vendor/`, the runner, and the terminal,
+pty, socket and persistence files, which nearly every scene drives. `tests/scenes_test.py`
+(in `./build.sh test`) checks the selection.
+
+Nothing runs the full-tier scenes before a merge: CI gates on the unit tests and the required
+scenes. What a narrower `--changed` leaves out is caught after the merge, by the nightly run
+(`scenes-full.yml`), or by `--all` before a release; run `--all` yourself when a change is broad
+and its scenes are not obvious.
 
 `./build.sh scenes` builds (`./build.sh`, `./build.sh fake-app`, each only when its output is older
 than a file it is built from; `--build` builds anyway) and then runs `tests/scenes.py` with the
@@ -421,8 +428,8 @@ dev Mac, load noted per run):
 | `./build.sh test` | 67 s (cold build; load 6 → 10) | 54 s (load 5–6); time budgets never fail it below 10× |
 
 Past commits on main, as `--changed` would select for each: of 21, 10 selected every scene
-before; 4 still do (`build.sh`, `bundle-app.sh`, or 685 lines of core files), the other 6 select
-15–44.
+before; 6 still do (`build.sh`, `bundle-app.sh`, the terminal, pty, socket or persistence files,
+or over 300 lines of core files), the other 4 select 21–41.
 
 ### What was tried and left out
 

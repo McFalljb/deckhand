@@ -234,6 +234,8 @@ case "$MODE" in
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py
+    # the scenes runner's --changed selection (no app, no git)
+    python3 tests/scenes_test.py -q
     # the pi-desk CLI for Claude tabs (its tests share a fake environment: one thread)
     odin test tools/pi-desk-cli -out:build/pi-desk-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude

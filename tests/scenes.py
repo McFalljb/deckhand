@@ -116,21 +116,56 @@ def changed_files(base):
     return base, sorted(files)
 
 
+CASE_RE = re.compile(r"^\s*case\s+([^:]+):")
+PROC_RE = re.compile(r"^\s*(\w+)\s*::\s*(?:proc|struct|enum|union)\b")
+
+
+def enclosing_names(lines, lineno):
+    """The case labels and the proc (or type) around line lineno (1-based) of a file's lines,
+    lower-case: an edit in a command's body names its command (case Worktree_Remove:)."""
+    names, case_seen = [], False
+    for ln in reversed(lines[:max(0, lineno)]):
+        m = CASE_RE.match(ln)
+        if m and not case_seen:
+            names += [w.strip().lower() for w in m.group(1).split(",") if w.strip()]
+            case_seen = True
+            continue
+        m = PROC_RE.match(ln)
+        if m:
+            names.append(m.group(1).lower())
+            break
+    return names
+
+
 def core_changes(base, files):
-    """The changed lines (added or removed, lower-case) of these files since base, and their count."""
+    """The changed lines (added or removed, lower-case) of these files since base, with the names of
+    the cases and procs they are in, and the number of changed lines."""
     out, n = [], 0
     for f in files:
         try:
             diff = git("diff", "-U0", base, "--", f)
         except subprocess.CalledProcessError:
             diff = ""
-        if not diff.strip() and os.path.exists(os.path.join(ROOT, f)):  # untracked: all of it
-            diff = "\n".join("+" + ln for ln in open(os.path.join(ROOT, f), errors="replace"))
+        path = os.path.join(ROOT, f)
+        try:
+            lines = open(path, errors="replace").read().split("\n")
+        except OSError:
+            lines = []
+        if not diff.strip() and lines:  # untracked: all of it
+            diff = "\n".join("+" + ln for ln in lines)
         for ln in diff.splitlines():
-            if ln[:1] in "+-" and not ln.startswith(("+++", "---")):
+            m = re.match(r"@@ -\d+(?:,\d+)? \+(\d+)", ln)
+            if m:
+                out += enclosing_names(lines, int(m.group(1)))
+            elif ln[:1] in "+-" and not ln.startswith(("+++", "---")):
                 out.append(ln[1:].lower())
                 n += 1
     return "\n".join(out), n
+
+
+def core_pick(s, text):
+    """The first of s's area names that text mentions, or None."""
+    return next((m for m in area_stems(s) if mentions(text, m)), None)
 
 
 def area_stems(s):
@@ -149,8 +184,10 @@ def area_stems(s):
 
 
 def mentions(text, stem):
-    """stem starts an identifier or a word of text (claude in new_claude_session, Claude_Wait)."""
-    return re.search(r"(?<![a-z0-9])" + re.escape(stem), text) is not None
+    """stem starts an identifier or a word of text (claude in new_claude_session, Claude_Wait),
+    singular or plural (worktree_remove for worktrees)."""
+    forms = {stem, stem[:-1]} if stem.endswith("s") and len(stem) > 4 else {stem}
+    return any(re.search(r"(?<![a-z0-9])" + re.escape(f), text) for f in forms)
 
 
 def select(a, scenes, special):
@@ -186,7 +223,7 @@ def select(a, scenes, special):
                         if s.tier == "required":
                             core_why[s.name] = f"{core[0]} (required)"
                         else:
-                            stem = next((m for m in area_stems(s) if mentions(text, m)), None)
+                            stem = core_pick(s, text)
                             if stem:
                                 core_why[s.name] = f"{core[0]} mentions {stem}"
         out = []

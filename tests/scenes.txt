@@ -18,15 +18,15 @@
 #   areas    globs (fnmatch, "*" crosses "/") of the files whose change should run it
 #   command  when not tests/scripts/<scene>.sh
 #
-# "@all" lists what every scene runs on (the build, the script engine, the runner): a change to one
+# "@all" lists what every scene runs on (the build, the runner, the terminal, the socket, saving): a change to one
 # runs everything. "@core" lists the app's core files (main loop, commands, state, terminals...):
 # a change to one runs the required scenes, the smoke set and the scenes whose area names its changed
 # lines mention (commands.odin's Browser_Open case: the browser scenes), and everything when it is
 # large (tests/scenes.py CORE_MAX_LINES). "@unit" lists source files covered by the unit tests only
 # (tests/scenes.py --check-map wants every src/ file in one of these or in some scene's areas).
 
-@all  | | | | vendor/* build.sh scripts/bundle-app.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
-@core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term.odin src/term_text.odin src/pty*.odin src/tabhost.odin src/socket*.odin src/ctl.odin src/sessions.odin src/persist.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
+@all  | | | | src/term.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
+@core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
 @unit | | | | src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
 
 # scene             | tier     | tags                  | secs | areas | command

@@ -34,6 +34,10 @@ HANDOVER_DIR :: "handover"
 HANDOVER_READER :: 1 // the newest handover.json format this build reads (its min_reader floor)
 HANDOVER_SNAP_MAX :: 256 * 1024 * 1024 // one snapshot file (20 MiB scrollback, compressed: far less)
 
+// workspace.json's "holder": the instance of the holder its held ids were saved with
+// (persist.odin); adopt uses them only with that same holder.
+held_holder: string
+
 Handover_Term :: struct {
 	term:    i64,
 	offset:  u64,
@@ -301,12 +305,21 @@ handover_take :: proc() -> map[u32]Handover_Snap {
 // At launch, after the workspace is restored: the held tabs get their terminals (see the top).
 // Every tab's saved held id is cleared, adopted or not.
 holder_adopt_all :: proc() {
+	defer hc.adopt_done = true
 	any_held := false
 	for s in state.open_sessions do for t in s.tabs do if t.held != 0 do any_held = true
 	started := holder_client_start()
 	if !started {
 		for &s in state.open_sessions do for &t in s.tabs do t.held = 0
 		return
+	}
+	// the held ids are this holder's only if saved with it (two holders both number from 1)
+	same := held_holder != "" && held_holder == hc.instance
+	if any_held && !same do fmt.eprintln("Deckhand: session holder: workspace.json's held ids are another holder's: not adopted")
+	listed := make(map[u32]bool, 16, context.temp_allocator)
+	for &s in state.open_sessions do for &t in s.tabs do if t.held != 0 {
+		listed[t.held] = true
+		if !same do t.held = 0 // restored as without a holder
 	}
 	if !hc.tokens_loaded && any_held && hc.tokens_why != "missing" do fmt.eprintln("Deckhand: tokens.json not used:", hc.tokens_why) // enabled at attach (holder_connect)
 	snaps := handover_take()
@@ -351,22 +364,36 @@ holder_adopt_all :: proc() {
 		}
 	}
 	// entries for terminals the holder no longer lists: an id can come back for a new one
-	listed := make([dynamic]u32, context.temp_allocator)
+	welcomed := make([dynamic]u32, context.temp_allocator)
 	sync.lock(&hc.mu)
-	for id, h in hc.held do if h.welcomed do append(&listed, id)
+	for id, h in hc.held do if h.welcomed do append(&welcomed, id)
 	sync.unlock(&hc.mu)
-	socket_tokens_prune(listed[:])
-	if untrusted > 0 do toast_show(fmt.tprintf("%d session%s kept running but can't reach Deckhand: restart %s to reconnect", untrusted, untrusted == 1 ? "" : "s", untrusted == 1 ? "it" : "them"), err = true)
-	// terminals no restored tab claimed
+	socket_tokens_prune(welcomed[:])
+	note := untrusted > 0 ? fmt.tprintf("%d session%s kept running but can't reach Deckhand: restart %s to reconnect.", untrusted, untrusted == 1 ? "" : "s", untrusted == 1 ? "it" : "them") : ""
+	// terminals no restored tab claimed: hung up only when nothing can be lost, else kept unseen
 	gone := make([dynamic]u32, context.temp_allocator)
+	kept := 0
 	sync.lock(&hc.mu)
-	for id, h in hc.held do if h.welcomed && !h.claimed do append(&gone, id)
+	for id, h in hc.held do if h.welcomed && !h.claimed {
+		if held_release_unclaimed(h.eof && h.exit.known, persist.restored_clean, same, listed[id]) {
+			append(&gone, id)
+		} else {
+			h.kept, h.tail_len = true, 0
+			clear(&h.buf)
+			kept += 1
+		}
+	}
 	sync.unlock(&hc.mu)
 	for id in gone {
 		fmt.eprintln("Deckhand: session holder: releasing terminal", id, "(no tab claims it)")
 		socket_tokens_release(id)
 		holder_release(id)
 	}
+	if kept > 0 {
+		fmt.eprintln("Deckhand: session holder:", kept, "terminal(s) no restored tab claims: kept running")
+		note = strings.concatenate({holder_kept_text(kept), note == "" ? "" : " ", note}, context.temp_allocator)
+	}
+	if note != "" do toast_show(note, err = true)
 }
 
 // Adopts holder terminal id into tab (its Term made now); saved: what tokens.json says it was

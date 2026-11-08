@@ -269,6 +269,7 @@ workspace_json :: proc() -> string {
 	w := W{b = strings.builder_make(context.temp_allocator)}
 	open_obj(&w)
 	ki(&w, "v", WORKSPACE_VERSION)
+	if holder_keeps_sessions() && hc.instance != "" do ks(&w, "holder", hc.instance) // the holder its held ids are in
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	for &s in state.open_sessions {
@@ -667,6 +668,9 @@ workspace_restore :: proc(text: string) -> string {
 	ver, has_v := root["v"].(json.Integer)
 	if !has_v do return "no version"
 	if ver != WORKSPACE_VERSION do return fmt.tprintf("unknown version %d (Deckhand reads %d)", ver, WORKSPACE_VERSION)
+	delete(held_holder)
+	held_holder = ""
+	if hs, hok := root["holder"].(json.String); hok && len(hs) <= 64 do held_holder = strings.clone(string(hs)) // the held ids' holder (holder_adopt_all)
 
 	run :: proc(c: Command) -> Result {return run_command(c, {kind = .Internal})}
 

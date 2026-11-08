@@ -338,3 +338,105 @@ holder_adopt_checks_start :: proc(t: ^testing.T) {
 	_, f6 := socket_tokens_start_of(6)
 	testing.expect(t, !f6, "term 6 is no longer listed: pruned")
 }
+
+// Terminals no restored tab claims are hung up only when that is known to be safe: the saved
+// workspace restored cleanly and listed them (or they already ended). Otherwise (--fresh, a
+// workspace moved aside, a crash before the first save) they keep running in the holder, their
+// output not kept by the app, and a toast says so: a launch never hangs up a kept pi or Claude
+// it knows nothing about.
+@(test)
+holder_unclaimed_kept :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	ended := fake_term(7, "")
+	ended.exit = hw.Exit_Status{code = 0}
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), ended}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	toast_clear()
+	adopt_run(t, &f, `{"v":1,"projects":[],"open_sessions":[]}`, nil, clean = false) // as --fresh
+	wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 0)
+	testing.expect_value(t, fake_holder_count(&f, .Release, 7), 1) // it ended: nothing to lose
+	testing.expect(t, strings.contains(toast.text, "1 kept session wasn't restored"), toast.text)
+	sync.lock(&hc.mu)
+	h := hc.held[3]
+	testing.expect(t, h != nil && h.kept, "kept, not shown")
+	sync.unlock(&hc.mu)
+}
+
+// A clean restore whose tab listed the terminal but could not take it (here: tokens.json says it
+// was started as a pi, the tab is a shell): released, as before. One nobody listed: kept.
+@(test)
+holder_unclaimed_released_when_known :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(8, "")}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	binds[8] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"bbbb-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, proj)
+	adopt_run(t, &f, text, binds)
+	wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 1)
+	testing.expect_value(t, fake_holder_count(&f, .Release, 8), 0)
+}
+
+// workspace.json's held ids are for the holder they were saved with (its instance id): another
+// holder's terminals with the same numbers are never adopted (two holders both count from 1).
+@(test)
+holder_adopt_needs_same_instance :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"another-holder","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"cccc-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":0}}]}}`, proj, proj, proj, proj)
+	adopt_run(t, &f, text, binds)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started)
+	wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 0) // not this workspace's: kept
+	// and the instance is saved with the held ids
+	x := new_term(9201)
+	x.running, x.pty = true, Pty{fd = -1, held = 3}
+	defer {
+		x.pty.held, x.running = 0, false
+		drop_term(9201)
+	}
+	testing.expect(t, strings.contains(workspace_json(), fmt.tprintf(`"holder":"%s"`, f.instance)), workspace_json())
+}
+
+// A holder attached mid-run (after the launch's adopt) that lists terminals keeps them, not shown.
+@(test)
+holder_midrun_lists_kept :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	hc.adopt_done = true
+	testing.expect(t, holder_wanted(), "attached")
+	sync.lock(&hc.mu)
+	h := hc.held[3]
+	testing.expect(t, h != nil && h.kept && len(h.buf) == 0, "kept, its output not kept")
+	sync.unlock(&hc.mu)
+}
+
+@(test)
+held_release_unclaimed_rule :: proc(t: ^testing.T) {
+	cases := []struct {
+		ended, clean, same, listed, want: bool,
+	} {
+		{true, false, false, false, true}, // ended: nothing to lose
+		{false, true, true, true, true}, // a clean restore listed it, and no tab could take it
+		{false, false, true, true, false}, // --fresh, moved aside, missing
+		{false, true, false, true, false}, // saved with another holder
+		{false, true, true, false, false}, // a crash before the save that would have listed it
+	}
+	for c, i in cases do testing.expectf(t, held_release_unclaimed(c.ended, c.clean, c.same, c.listed) == c.want, "case %d", i)
+}

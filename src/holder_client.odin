@@ -56,6 +56,7 @@ Held :: struct {
 	spawn:       enum u8 {Waiting, Spawned, Failed},
 	welcomed:    bool, // listed in this connection's WELCOME (the adopt candidates)
 	claimed:     bool, // a restored tab adopted it
+	kept:        bool, // listed, no tab took it, not safe to hang up: runs on unseen, its output dropped
 }
 
 Holder_Client :: struct {
@@ -83,6 +84,7 @@ Holder_Client :: struct {
 	dying:     [dynamic]i32, // pids of released terminals, until they are gone (pty_dying)
 	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
 	tokens_why:    string, // why not
+	adopt_done:    bool, // the launch's adopt ran: terminals a later WELCOME lists are kept unseen
 }
 
 hc := Holder_Client{fd = -1}
@@ -115,6 +117,19 @@ held_tail_skip :: proc(snap_offset, tail_start, tail_end: u64) -> (skip: int, ex
 	if tail_start > tail_end || snap_offset > tail_end do return 0, false, false
 	if tail_start > snap_offset do return 0, false, true // bytes between the two are gone: inexact
 	return int(snap_offset - tail_start), true, true
+}
+
+// Whether a launch hangs up a holder terminal that no restored tab took (holder_adopt_all):
+// only when nothing can be lost: it already ended, or the saved workspace restored cleanly (not
+// missing, --fresh or moved aside), was saved with this holder, and listed this terminal (so a
+// tab knew it and could not take it). Otherwise it is kept running, unseen: a pi or Claude the
+// launch knows nothing about is never hung up.
+held_release_unclaimed :: proc(ended, clean, same_holder, listed: bool) -> bool {
+	return ended || (clean && same_holder && listed)
+}
+
+holder_kept_text :: proc(n: int) -> string {
+	return fmt.tprintf("%d kept session%s restored: %s running in the session holder. Quit Deckhand and Stop All Sessions ends %s.", n, n == 1 ? " wasn't" : "s weren't", n == 1 ? "it keeps" : "they keep", n == 1 ? "it" : "them")
 }
 
 // ---- connecting ----
@@ -300,6 +315,14 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	delete(hc.tokens_why)
 	hc.tokens_loaded, hc.tokens_why = loaded, strings.clone(twhy)
 	hc.reader = thread.create_and_start(holder_reader)
+	if hc.adopt_done && len(w.terminals) > 0 {
+		// attached after the launch's adopt (a holder that appeared since): nothing claims these
+		for _, h in hc.held do if h.welcomed {
+			h.kept, h.tail_len = true, 0
+			clear(&h.buf)
+		}
+		toast_show(holder_kept_text(len(w.terminals)), err = true)
+	}
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
 	return .Welcomed
 }
@@ -383,6 +406,10 @@ holder_frame :: proc(f: hw.Frame) {
 	case .Output:
 		start, bytes, e := hw.decode_output(f)
 		if h == nil || e != .None || h.eof do return
+		if h.kept {
+			h.next = max(h.next, start + u64(len(bytes))) // nobody shows it: the holder keeps its tail
+			return
+		}
 		skip, gap := held_output_place(h.next, start, len(bytes))
 		if gap {
 			h.gap = true // the bytes in between never came: what follows is still shown

@@ -710,6 +710,28 @@ downgrades. A core not in Deckhand's folder gets the command shown instead and i
 an update is a session-keeping handover. Lag is safe under grow-only but invisible. One click (not
 automatic) lets the user pick the moment, because the remote sessions pause briefly.
 
+### 8.6 Every core is a full Deckhand (decided, 2026-11-08)
+
+- **Each core is fully featured.** Every machine's core runs its own sessions, jobs, scheduler
+  and Atlas, whether or not a window is attached. A remote job runs on its own machine on schedule
+  while the laptop is asleep or disconnected (on Linux, with linger; §8.4). With Deckhand closed,
+  jobs need M5's login agent.
+- **The window is a view.** It shows its own machine and every connected machine, grouped by
+  machine (§8.1). It runs no sessions or jobs of its own.
+- **The local Atlas is the hub.** It can read and act on the sessions and jobs of every connected
+  machine, through the local core with its own caller kind (`on_behalf`, §8.3). Each remote core
+  applies that kind's rules again.
+- **Remote Atlases stay on their machine.** Each one handles its own machine and never reaches
+  back: a remote core is capped at `panel` scope for its own sessions (§8.3).
+- **No live Atlas-to-Atlas channel.** The hub learns what happened elsewhere from each machine's
+  job results, run records and Atlas notes when it connects. A remote job that needs the user
+  shows up as state on that machine. The **local core** turns it into a notification, because
+  remote cores can't use `window.request`.
+- **Transport:** SSH first (§8.1). The core-to-core wire is plain frames with nothing specific
+  to SSH, so a direct transport (for example TCP over a Tailscale tailnet, using its identity) can
+  be added later without changing the protocol. Roaming (Wi-Fi changes, sleep) is handled by
+  reconnecting and resuming from byte offsets, not by UDP.
+
 ---
 
 ## 9. Alternatives

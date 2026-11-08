@@ -4,14 +4,14 @@
 // and speaks the holder wire (src/holderwire). No ghostty, sokol or Clay: it never parses what
 // the programs print.
 //
-//   deckhand-core hold --run DIR --data DIR   serve (holder.odin)
+//   deckhand-core hold --run DIR --data DIR [--ready PATH]   serve (holder.odin)
 //   deckhand-core __detach                    launchd job entry: fork, setsid, exec hold (detach.odin)
 package holder
 
 import "core:fmt"
 import "core:os"
 
-USAGE :: "usage: deckhand-core hold --run DIR --data DIR | __detach"
+USAGE :: "usage: deckhand-core hold --run DIR --data DIR [--ready PATH] | __detach"
 
 main :: proc() {
 	if len(os.args) < 2 {

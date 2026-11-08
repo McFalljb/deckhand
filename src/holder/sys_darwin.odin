@@ -41,6 +41,7 @@ SOCK_STREAM :: 1
 SOL_SOCKET :: 0xffff
 SO_NOSIGPIPE :: 0x1022
 MSG_NOSIGNAL :: 0x80000
+SHUT_WR :: 1
 
 POLLIN :: 0x0001
 POLLOUT :: 0x0004
@@ -102,6 +103,8 @@ foreign libc {
 	setsockopt :: proc(fd: c.int, level, name: c.int, value: rawptr, len: u32) -> c.int ---
 	send :: proc(fd: c.int, buf: rawptr, n: c.size_t, flags: c.int) -> c.ssize_t ---
 	recv :: proc(fd: c.int, buf: rawptr, n: c.size_t, flags: c.int) -> c.ssize_t ---
+	@(link_name = "shutdown")
+	sock_shutdown :: proc(fd: c.int, how: c.int) -> c.int ---
 	unlink :: proc(path: cstring) -> c.int ---
 	chmod :: proc(path: cstring, mode: u16) -> c.int ---
 	umask :: proc(mask: u16) -> u16 ---

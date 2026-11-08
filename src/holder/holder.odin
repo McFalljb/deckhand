@@ -13,7 +13,9 @@ package holder
 //   was reaped (or exit_grace after the reap if the master stays open). A terminal that ended
 //   while no core was attached is listed with `exit` in the next WELCOME instead and gets no
 //   EXITED. Ended terminals stay until RELEASE.
-// - GOODBYE_ACK follows every OUTPUT up to each acked offset; nothing is sent after it.
+// - GOODBYE_ACK follows every OUTPUT up to each acked offset; nothing is sent after it. The
+//   connection then stays open until the core closes it (at most LINGER): a peer that closed its
+//   end can no longer be read (LOCAL_PEERTOKEN fails), and the core checks it on the ack.
 // - The HMAC key is in WELCOME and nowhere else.
 
 import "core:c"
@@ -35,6 +37,7 @@ MAX_COLS :: holderwire.MAX_COLS // the grid limits (PR A); SPAWN/RESIZE outside 
 MAX_ROWS :: holderwire.MAX_ROWS
 READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
+LINGER :: 5 * time.Second // after GOODBYE_ACK: how long the core may take to close
 
 Config :: struct {
 	run_dir:       string, // "": no listening socket (tests hand fds to holder_attach)
@@ -87,6 +90,7 @@ Conn :: struct {
 	last_rx:       time.Tick,
 	welcomed:      bool,
 	closing:       bool, // send what is queued, then close (REFUSED, GOODBYE_ACK)
+	linger:        bool, // closing after GOODBYE_ACK: once sent, wait for the core's EOF (or LINGER)
 	closing_since: time.Tick,
 	dead:          bool,
 }
@@ -320,7 +324,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	if h.wake_fd >= 0 do add(&fds, &who, &idx, h.wake_fd, POLLIN, .Wake, 0)
 	for cn, i in h.conns {
 		ev: c.short
-		if !cn.closing do ev |= POLLIN
+		if !cn.closing || cn.linger do ev |= POLLIN
 		if queued(cn) > 0 do ev |= POLLOUT
 		add(&fds, &who, &idx, cn.fd, ev, .Conn, i)
 	}
@@ -346,7 +350,10 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 			case .Conn:
 				cn := h.conns[idx[k]]
 				if pfd.revents & POLLOUT != 0 do conn_flush(h, cn)
-				if pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL) != 0 && !cn.dead && !cn.closing do conn_read(h, cn)
+				if pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL) != 0 && !cn.dead {
+					if !cn.closing do conn_read(h, cn)
+					else if cn.linger do conn_linger_read(h, cn)
+				}
 			case .Term:
 				t := h.terms[idx[k]]
 				if pfd.revents & POLLOUT != 0 do term_flush(t)
@@ -379,7 +386,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	t := max(int)
 	if h.shutting_down do return 10
 	for cn in h.conns {
-		if cn.closing do t = min(t, ms_until(cn.closing_since, h.cfg.pong_timeout))
+		if cn.closing do t = min(t, ms_until(cn.closing_since, cn.linger ? LINGER : h.cfg.pong_timeout))
 		else do t = min(t, ms_until(cn.last_rx, h.cfg.pong_timeout))
 	}
 	for term in h.terms {
@@ -453,7 +460,16 @@ conn_flush :: proc(h: ^Holder, cn: ^Conn) {
 		resize(&cn.out, len(cn.out) - cn.out_head)
 		cn.out_head = 0
 	}
-	if cn.closing && queued(cn) == 0 do cn.dead = true
+	if cn.closing && queued(cn) == 0 && !cn.linger do cn.dead = true
+}
+
+// After GOODBYE_ACK: whatever the core still sends is not acted on; its EOF (or an error) ends
+// the connection.
+@(private)
+conn_linger_read :: proc(h: ^Holder, cn: ^Conn) {
+	n := recv(cn.fd, raw_data(h.buf), len(h.buf), 0)
+	if n < 0 && (errno() == EAGAIN || errno() == EINTR) do return
+	if n <= 0 do cn.dead = true
 }
 
 // A core gone without GOODBYE (EOF, error, silence, changed peer): its slot is free and the
@@ -680,6 +696,7 @@ goodbye_handover :: proc(h: ^Holder, cn: ^Conn) {
 	// successor secrets come with PR D (§7.2); until then any core with the DR may follow
 	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = ""})
 	conn_close_after(cn)
+	cn.linger = true
 	h.core = nil
 	h.previous = "handover"
 	hlog(h, "handover: the core said goodbye (%d terminals)", len(acks))
@@ -732,7 +749,7 @@ timers :: proc(h: ^Holder) {
 	for cn in h.conns {
 		if cn.dead do continue
 		if cn.closing {
-			if time.tick_since(cn.closing_since) >= h.cfg.pong_timeout do cn.dead = true
+			if time.tick_since(cn.closing_since) >= (cn.linger ? LINGER : h.cfg.pong_timeout) do cn.dead = true
 		} else if time.tick_since(cn.last_rx) >= h.cfg.pong_timeout {
 			conn_drop(h, cn, "no frame within the pong timeout")
 		}

@@ -124,6 +124,9 @@ wait_for :: proc(h: ^Holder, f: ^Fake, kind: holderwire.Kind, term: u32 = 0, tim
 	}
 }
 
+// The fake core is done sending (shutdown of its write half): the holder sees EOF.
+fake_hangup :: proc(f: ^Fake) {sock_shutdown(f.fd, SHUT_WR)}
+
 // Steps until the fake core's end reads EOF (the holder closed it).
 wait_eof :: proc(h: ^Holder, f: ^Fake, timeout := 3 * time.Second) -> bool {
 	start := time.tick_now()
@@ -430,6 +433,7 @@ tail_cap_without_core :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	ack: holderwire.Goodbye_Ack
 	decode_got(g, .Goodbye_Ack, &ack)
+	fake_hangup(a)
 	testing.expect(t, wait_eof(h, a))
 	// no core: let it run to the end
 	start := time.tick_now()
@@ -481,6 +485,9 @@ handover_then_second_core :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(ack.terminals), 1)
 	got_a := output_of(t, a, 1)
 	testing.expect_value(t, ack.terminals[0].offset, u64(len(got_a)))
+	pump(h, 100 * time.Millisecond, a)
+	testing.expect(t, !a.eof, "the holder closed right after GOODBYE_ACK (the core can't check its peer on the ack then)")
+	fake_hangup(a)
 	testing.expect(t, wait_eof(h, a))
 	testing.expect_value(t, a.frames[len(a.frames) - 1].kind, holderwire.Kind.Goodbye_Ack)
 
@@ -646,6 +653,9 @@ idle_exit :: proc(t: ^testing.T) {
 	hello(t, h2, f)
 	spawn_ok(t, h2, f, 1, "read x; exit 0")
 	fake_send(f, .Goodbye, 0, holderwire.Goodbye{mode = "handover"})
+	_, gok := wait_for(h2, f, .Goodbye_Ack)
+	testing.expect(t, gok)
+	fake_hangup(f)
 	testing.expect(t, wait_eof(h2, f))
 	pump(h2, 200 * time.Millisecond)
 	testing.expect(t, !h2.done, "exited with a terminal running")

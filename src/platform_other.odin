@@ -5,6 +5,7 @@ package main
 
 platform_wake :: proc() {}
 platform_alert :: proc(title, text: string) {}
+platform_hide_windows :: proc() {}
 cpu_seconds :: proc() -> f64 {return 0}
 window_raise_without_focus :: proc() {}
 window_send_back :: proc() {}

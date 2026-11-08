@@ -62,6 +62,10 @@ start 1; finish 1
 [ -n "$(holders)" ] || { echo "no session holder running after run 1"; exit 1; }
 grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$W/data/workspace.json"; exit 1; }
 [ -f "$W/data/handover.json" ] || { echo "no handover.json"; exit 1; }
+# the window goes away before the handover's waits (no beachball over a frozen window at quit)
+h=$(grep -n "windows hidden" "$W/run1.log" | head -1 | cut -d: -f1)
+f=$(grep -n "\[autotest\] handover " "$W/run1.log" | head -1 | cut -d: -f1)
+[ -n "$h" ] && [ -n "$f" ] && [ "$h" -lt "$f" ] || { echo "run 1: the window was not hidden before the handover (hidden at line ${h:-none}, handover at ${f:-none})"; exit 1; }
 
 # 2: adopted exactly, the kept pi's bridge reconnects with its token; the holder restarted in
 #    place (Restart session holder); then the app is killed

@@ -129,6 +129,7 @@ foreign pdplatform {
 	pd_mac_notify :: proc(title, body: cstring) ---
 	pd_mac_quiet :: proc() ---
 	pd_mac_alert :: proc(title, text: cstring) ---
+	pd_mac_hide_windows :: proc() ---
 	pd_mac_test_scale :: proc(scale: f64) ---
 	pd_mac_left_button_down :: proc() -> c.int ---
 	pd_mac_pasteboard_count :: proc() -> c.long ---
@@ -144,6 +145,7 @@ platform_activity :: proc(on: bool) {pd_mac_activity(on ? 1 : 0)}
 // (src/native/platform_macos.m).
 platform_quiet :: proc() {pd_mac_quiet()}
 // A modal alert with one Quit button (before the window is of use: instance.odin)
+platform_hide_windows :: proc() {pd_mac_hide_windows()}
 platform_alert :: proc(title, text: string) {pd_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator))}
 
 // Test mode, before sokol starts: every screen and window reports this backing scale

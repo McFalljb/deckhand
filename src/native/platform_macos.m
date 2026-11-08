@@ -552,6 +552,12 @@ void pd_mac_pasteboard_clear_if(long count) {
     if ((long)[pb changeCount] == count) [pb clearContents];
 }
 
+// Quit: every window out of sight before the session holder's handover and the final save (they
+// can take seconds; a frozen window under a beachball looks hung). The app keeps running.
+void pd_mac_hide_windows(void) {
+    for (NSWindow* w in [NSApp windows]) [w orderOut:nil];
+}
+
 // A modal alert with one Quit button (instance.odin: another Deckhand or pi-desk runs).
 void pd_mac_alert(const char* title, const char* text) {
     [NSApp activateIgnoringOtherApps:YES];

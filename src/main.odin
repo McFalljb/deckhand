@@ -730,6 +730,10 @@ event :: proc(e: ^sapp.Event) {
 			ui_do(Quit{})
 			return
 		}
+		// the window goes first: the handover can wait seconds (an upgrade in flight, the ack, the
+		// snapshots), and nothing is drawn meanwhile
+		platform_hide_windows()
+		if autotest.active do fmt.println("[autotest] quit: windows hidden")
 		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
 		// otherwise they are released as direct ones are hung up
 		if app.stop_sessions do holder_shutdown()

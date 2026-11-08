@@ -314,15 +314,16 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	loaded, twhy := socket_tokens_enable(tpath, hc.key[:])
 	delete(hc.tokens_why)
 	hc.tokens_loaded, hc.tokens_why = loaded, strings.clone(twhy)
-	hc.reader = thread.create_and_start(holder_reader)
 	if hc.adopt_done && len(w.terminals) > 0 {
-		// attached after the launch's adopt (a holder that appeared since): nothing claims these
+		// attached after the launch's adopt (a holder that appeared since): nothing claims these.
+		// Before the reader starts: from then on hc.mu guards every Held field
 		for _, h in hc.held do if h.welcomed {
 			h.kept, h.tail_len = true, 0
 			clear(&h.buf)
 		}
 		toast_show(holder_kept_text(len(w.terminals)), err = true)
 	}
+	hc.reader = thread.create_and_start(holder_reader)
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
 	return .Welcomed
 }
@@ -357,6 +358,8 @@ holder_reader :: proc() {
 	buf := make([]u8, 256 * 1024)
 	defer delete(buf)
 	last_ping := time.tick_now()
+	// frames that came behind the TAILs are in hc.rx already (handshake_frame read them)
+	if !holder_frames() do return
 	for !sync.atomic_load(&hc.stop) {
 		if time.tick_since(last_ping) >= hw.PING_INTERVAL {
 			last_ping = time.tick_now()
@@ -383,16 +386,22 @@ holder_reader :: proc() {
 			return
 		}
 		hw.stream_feed(&hc.rx, buf[:n])
-		for {
-			f, err := hw.stream_next(&hc.rx)
-			if err == .Need_More do break
-			if err == .Too_Large {
-				holder_lose("a frame too large")
-				return
-			}
-			holder_frame(f)
-		}
+		if !holder_frames() do return
 		free_all(context.temp_allocator)
+	}
+}
+
+// Every whole frame in hc.rx (reader thread); false once the holder is lost.
+@(private = "file")
+holder_frames :: proc() -> bool {
+	for {
+		f, err := hw.stream_next(&hc.rx)
+		if err == .Need_More do return true
+		if err == .Too_Large {
+			holder_lose("a frame too large")
+			return false
+		}
+		holder_frame(f)
 	}
 }
 

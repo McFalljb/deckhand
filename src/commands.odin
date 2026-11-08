@@ -761,6 +761,18 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	return r
 }
 
+// The focus_widget string focus_take made (heap). Other writers set literals or clones nobody
+// frees, so only this one is freed when the keyboard moves on (as browser_nav did).
+@(private = "file")
+focus_taken: string
+
+// Frees the current focus_widget when focus_take made it; anything else is left alone.
+@(private = "file")
+focus_taken_free :: proc() {
+	if focus_taken != "" && raw_data(state.focus_widget) == raw_data(focus_taken) do delete(state.focus_widget)
+	focus_taken = ""
+}
+
 // Capabilities, from the command table (command_table.odin): panel callers
 // (pi tabs) may query, report their own tab's pi session and status, and
 // publish their own tab's panels (nobody else may: not control, not
@@ -1056,11 +1068,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true
 	case Focus_Take:
 		if c.widget == state.focus_widget do return {ok = true}, false
-		state.focus_widget = strings.clone(c.widget) // the old one is not freed: some writers set literals (as Set_Focus)
+		focus_taken_free()
+		state.focus_widget = strings.clone(c.widget)
+		focus_taken = state.focus_widget
 		return {ok = true}, true
 	case Focus_Release:
 		if c.widget == "" || state.focus_widget != c.widget do return {ok = true}, false
-		state.focus_widget = "" // not freed: it may be a literal
+		focus_taken_free()
+		state.focus_widget = ""
 		return {ok = true}, true
 	case Set_Last_Harness:
 		if state.settings.last_harness == c.harness do return {ok = true}, false

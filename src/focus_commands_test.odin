@@ -3,6 +3,7 @@ package main
 // The commands that replaced the window's direct State writes (design §10.2, M2-A):
 // focus_take, focus_release, set_last_harness. Deckhand's own; no outside caller sends them.
 
+import "core:mem"
 import "core:testing"
 
 @(private = "file")
@@ -61,4 +62,25 @@ focus_install_keeps_the_setup_sheet :: proc(t: ^testing.T) {
 	harness_run_keep_sheet()
 	testing.expect_value(t, state.focus_widget, "setup")
 	setup_ui.step = 0
+}
+
+// focus_take frees the string it made when the keyboard moves on or is released, and never one it
+// did not make (a literal, another writer's).
+@(test)
+focus_take_frees_only_its_own :: proc(t: ^testing.T) {
+	inbox_drain()
+	state = State{}
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	context.allocator = mem.tracking_allocator(&track)
+	state.focus_widget = "palette" // a literal: left alone
+	run_command(Focus_Take{widget = "setup"})
+	run_command(Focus_Take{widget = "browser_url"})
+	testing.expect_value(t, state.focus_widget, "browser_url")
+	run_command(Focus_Release{widget = "browser_url"})
+	testing.expect_value(t, state.focus_widget, "")
+	n := 0
+	for _, e in track.allocation_map do if e.size == len("setup") || e.size == len("browser_url") do n += 1
+	testing.expectf(t, n == 0, "focus_take's strings freed: %d left", n)
 }

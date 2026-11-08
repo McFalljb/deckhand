@@ -45,6 +45,7 @@ Hook :: enum u8 {
 	Install_Cmd,
 	Gpu_Lag_Ms,
 	Holder_Direct,
+	Holder_Rev, // the bundled holder's rev as the app sees it (holder_upgrade_wanted): a scene's upgrade at attach
 	Temp_Roots,
 	Debug_Browser,
 	Cef_Offline,
@@ -78,6 +79,7 @@ when TEST_HOOKS {
 		.Install_Cmd      = "PI_DESK_INSTALL_CMD",
 		.Gpu_Lag_Ms       = "PI_DESK_TEST_GPU_LAG_MS",
 		.Holder_Direct    = "PI_DESK_HOLDER_DIRECT",
+		.Holder_Rev       = "PI_DESK_HOLDER_REV",
 		.Temp_Roots       = "PI_DESK_TEMP_ROOTS",
 		.Debug_Browser    = "PI_DESK_DEBUG_BROWSER",
 		.Cef_Offline      = "PI_DESK_CEF_OFFLINE",

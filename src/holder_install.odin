@@ -30,7 +30,7 @@ import "core:time"
 
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh)
 HOLDER_BIN :: "deckhand-core"
-HOLDER_REV :: 2 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 3 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 
 // The bundled binary: <exe dir>/../Helpers/deckhand-core (Deckhand.app), else build/deckhand-core

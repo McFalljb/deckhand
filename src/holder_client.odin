@@ -31,6 +31,7 @@ package main
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -639,6 +640,9 @@ holder_write :: proc(frame: []u8) -> bool {
 // connected or launched on first use).
 holder_wanted :: proc() -> bool {
 	if !state.settings.keep_sessions || hc.lost || hc.handed do return false
+	// mid-upgrade a SPAWN would wait for the new image (seconds; holder_spawn gives up after
+	// HOLDER_WAIT): a tab opened then runs directly and stops at quit
+	if holder_upgrading() do return false
 	return holder_client_start()
 }
 
@@ -875,23 +879,39 @@ HOLDER_UPGRADE_WAIT :: 13 * time.Second + HOLDER_REATTACH_WAIT + 2 * time.Second
 // At quit, an upgrade in flight is waited for this long, then the app leaves crash-style.
 holder_quit_upgrade_wait := 10 * time.Second
 
-// Whether the attached holder should and can be upgraded to the one this app bundles (PR D's
-// updater then calls holder_upgrade with the installed bundled binary).
+// Whether the attached holder should and can be upgraded to the one this app bundles:
+// holder_upgrade_tick (holder_restart.odin) then upgrades it once, after the launch's adopt.
 holder_upgrade_wanted :: proc() -> bool {
+	bundled := holder_rev_bundled()
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	return hc.on && !hc.lost && !hc.handed && holder_upgradable(hc.holder_rev, HOLDER_REV, hc.upgrade_error_seen != "")
+	return hc.on && !hc.lost && !hc.handed && holder_upgradable(hc.holder_rev, bundled, hc.upgrade_error_seen != "")
 }
 
 // Why the attached holder, older than the bundled one, cannot be upgraded in place ("" when it
 // can, or is not older): plain words to say once, never an error.
 holder_upgrade_unavailable :: proc() -> string {
+	bundled := holder_rev_bundled()
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	if !hc.on || hc.lost || hc.handed || hc.holder_rev < 1 || hc.holder_rev >= HOLDER_REV do return ""
+	if !hc.on || hc.lost || hc.handed || hc.holder_rev < 1 || hc.holder_rev >= bundled do return ""
 	if hc.upgrade_error_seen != "" do return "Your kept sessions are running in a backup session holder after an update didn't take; it's replaced once those sessions end."
 	if hc.holder_rev < HOLDER_UPGRADE_MIN_REV do return "Your kept sessions are running in an older session holder that can't be updated in place; it's replaced once those sessions end."
 	return ""
+}
+
+// HOLDER_REV, or in a test build PI_DESK_HOLDER_REV (a scene makes the running holder look old).
+@(private = "file")
+holder_rev_bundled :: proc() -> i64 {
+	if v := hook_env(.Holder_Rev); v != "" {
+		if n, ok := strconv.parse_i64(v); ok do return n
+	}
+	return HOLDER_REV
+}
+
+// An upgrade is in flight (UPGRADE sent, no outcome yet).
+holder_upgrading :: proc() -> bool {
+	return sync.atomic_load(&hc.upgrading) // cleared once what waited has gone out (upgrade_release)
 }
 
 // UPGRADE{path}: the holder re-execs into the binary at path (an absolute path to an installed,

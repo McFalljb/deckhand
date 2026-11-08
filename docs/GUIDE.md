@@ -1413,6 +1413,10 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
   example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
   then stop when Deckhand quits.
+  When a newer Deckhand (after an update, or one you put in place yourself) finds the holder
+  from an older one, it upgrades that holder in place by itself, once: the same process, every
+  session kept, nothing to see. Only if that fails does a message say so; the sessions keep
+  running either way. Tabs you open during those few seconds stop when Deckhand quits.
   In a development build (one you built from source), the palette's **Restart session holder**
   upgrades the running holder in place to the holder you just built: same process, every session
   keeps running and nothing is redrawn. If the new holder fails to start or to verify, the old

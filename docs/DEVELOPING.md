@@ -186,8 +186,12 @@ The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
 holder only upgrades to a newer `holder_rev`, so **bump `HOLDER_REV`** in `src/holder/holder.odin`
 and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
-(tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. In a development build the
-palette's *Restart session holder* upgrades the running holder to the one you just built. The
+(tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. The app upgrades an attached
+holder older than the one it bundles by itself, once per run, after the launch's adopt
+(`holder_upgrade_tick`, `src/holder_restart.odin`): after an update that is the new app, attached
+as the named successor. In a development build the palette's *Restart session holder* upgrades
+the running holder to the one you just built. `PI_DESK_HOLDER_REV=N` (test builds) makes the app
+take its bundled holder for rev N (the keep-sessions scene's automatic upgrade). The
 re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
 `-define:DECKHAND_TEST_HOOKS=true`; never in a release).
 

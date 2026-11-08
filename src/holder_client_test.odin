@@ -816,3 +816,19 @@ holder_reattach_frames_behind_tails :: proc(t: ^testing.T) {
 	if h != nil do testing.expect_value(t, h.exit, Exit_Info{known = true, code = 7})
 	sync.unlock(&hc.mu)
 }
+
+// The automatic upgrade (holder_upgrade_tick): once per run, only after the launch's adopt, only
+// for an older holder, never beside a running one (the palette's Restart).
+@(test)
+holder_upgrade_due_rule :: proc(t: ^testing.T) {
+	cases := []struct {
+		tried, adopt_done, wanted, running, want: bool,
+	} {
+		{false, true, true, false, true},
+		{true, true, true, false, false}, // once: a failed upgrade is not tried again this run
+		{false, false, true, false, false}, // the adopt first (its tabs claim their terminals)
+		{false, true, false, false, false}, // same rev, newer, or no holder
+		{false, true, true, true, false}, // Restart session holder runs
+	}
+	for c, i in cases do testing.expectf(t, holder_upgrade_due(c.tried, c.adopt_done, c.wanted, c.running) == c.want, "case %d", i)
+}

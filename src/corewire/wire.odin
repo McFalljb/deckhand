@@ -58,6 +58,7 @@ is_known :: proc(kind: u8) -> bool {
 
 // ---- encoding ----
 
+@(private)
 header_bytes :: proc(channel: u32, kind: u8, n: int) -> (h: [HEADER_SIZE]u8) {
 	endian.put_u32(h[0:4], .Little, channel)
 	h[4] = kind
@@ -65,7 +66,10 @@ header_bytes :: proc(channel: u32, kind: u8, n: int) -> (h: [HEADER_SIZE]u8) {
 	return
 }
 
+// Raw headers, for encode and the tests (an unknown kind, a header with no payload yet).
+@(private)
 put_header :: proc(out: ^[dynamic]u8, channel: u32, kind: u8, n: int) {
+	assert(n >= 0 && n <= MAX_PAYLOAD)
 	h := header_bytes(channel, kind, n)
 	append(out, ..h[:])
 }
@@ -108,6 +112,15 @@ Stream :: struct {
 	failed: bool,
 }
 
+// Fixes the allocator the buffer lives in. Without it the buffer takes whatever
+// context.allocator is current at the first feed, which may be a temp arena.
+stream_init :: proc(s: ^Stream, allocator := context.allocator) {
+	s^ = {buf = make([dynamic]u8, allocator)}
+}
+
+// Appends bytes. Drain with stream_next after every feed: the buffer holds
+// whatever has not been taken out, so a feeder that never drains grows it
+// without bound (next_frame refuses a frame over MAX_PAYLOAD at its header).
 stream_feed :: proc(s: ^Stream, b: []u8) {
 	if s.failed do return
 	if s.head > 0 && s.head == len(s.buf) {

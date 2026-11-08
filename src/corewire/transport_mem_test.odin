@@ -38,27 +38,93 @@ mem_limits :: proc(t: ^testing.T) {
 	defer mem_destroy(&tr)
 	a, b := mem_open(&tr, cap = 100)
 	big := make([]u8, MAX_PAYLOAD + 1, context.temp_allocator)
-	testing.expect_value(t, mem_send(a, 1, .Snapshot, big, force = true), Send_Error.Too_Large)
+	testing.expect_value(t, mem_send(a, 0, .Data, big), Send_Error.Too_Large)
 	testing.expect_value(t, mem_unread(a), 0)
 	// the cap counts unread bytes, headers included
 	testing.expect_value(t, mem_send(a, 1, .Data, big[:100 - HEADER_SIZE]), Send_Error.None)
 	testing.expect_value(t, mem_send(a, 1, .Data, nil), Send_Error.Full)
-	testing.expect_value(t, mem_send(a, 0, .Data, big[:50], force = true), Send_Error.None) // channel 0 never blocks
-	testing.expect_value(t, mem_unread(a), 100 + HEADER_SIZE + 50)
+	testing.expect_value(t, mem_send(a, 1, .Credit, nil), Send_Error.Full)
 	testing.expect_value(t, mem_unread(b), 0) // the other direction is unaffected
 	testing.expect_value(t, mem_send(b, 1, .Data, big[:92]), Send_Error.Full)
 	testing.expect_value(t, mem_send(b, 1, .Data, big[:91 - HEADER_SIZE]), Send_Error.None)
 	// reading makes room
 	mem_recv(b)
-	mem_recv(b)
 	testing.expect_value(t, mem_unread(a), 0)
 	testing.expect_value(t, mem_send(a, 1, .Data, big[:100 - HEADER_SIZE]), Send_Error.None)
-	// the largest frame goes through, forced past the cap
-	testing.expect_value(t, mem_send(a, 1, .Snapshot, big[:MAX_PAYLOAD], force = true), Send_Error.None)
+	// the largest frame goes through (a snapshot: past the cap)
+	testing.expect_value(t, mem_send(a, 1, .Snapshot, big[:MAX_PAYLOAD]), Send_Error.None)
 	mem_recv(b)
 	f, e := mem_recv(b)
 	testing.expect_value(t, e, Recv_Error.None)
 	testing.expect_value(t, len(f.payload), MAX_PAYLOAD)
+	free_all(context.temp_allocator)
+}
+
+// Past the cap only channel 0 and SNAPSHOT go (§5.6), decided by the frame, not the caller.
+@(test)
+mem_cap_exemptions :: proc(t: ^testing.T) {
+	tr: Mem_Transport
+	defer mem_destroy(&tr)
+	a, _ := mem_open(&tr, cap = 100)
+	big := make([]u8, 200, context.temp_allocator)
+	testing.expect_value(t, mem_send(a, 1, .Data, big), Send_Error.Full)
+	testing.expect_value(t, mem_send(a, 1, .Resize, big), Send_Error.Full)
+	testing.expect_value(t, mem_send(a, 0, .Data, big), Send_Error.None) // channel 0 never blocks
+	testing.expect_value(t, mem_send(a, 7, .Snapshot, big), Send_Error.None)
+	testing.expect_value(t, mem_send(a, 7, .Data, nil), Send_Error.Full)
+	testing.expect_value(t, mem_unread(a), 2 * (HEADER_SIZE + 200))
+	free_all(context.temp_allocator)
+}
+
+// A reader that never reads: exempt sends stop at the hard ceiling, which closes the transport.
+@(test)
+mem_hard_ceiling :: proc(t: ^testing.T) {
+	tr: Mem_Transport
+	defer mem_destroy(&tr)
+	a, b := mem_open(&tr, cap = 100)
+	chunk := make([]u8, 1 << 20, context.temp_allocator)
+	sent := 0
+	e: Send_Error
+	for _ in 0 ..< 100 {
+		e = mem_send(a, sent % 2 == 0 ? 0 : 3, sent % 2 == 0 ? .Data : .Snapshot, chunk)
+		if e != .None do break
+		sent += 1
+	}
+	testing.expect_value(t, e, Send_Error.Overflow)
+	testing.expect(t, mem_unread(a) <= mem_ceiling(&tr), "the queue passed its ceiling")
+	testing.expect_value(t, sent, (mem_ceiling(&tr)) / (HEADER_SIZE + len(chunk)))
+	testing.expect_value(t, mem_send(a, 0, .Data, nil), Send_Error.Closed)
+	testing.expect_value(t, mem_send(b, 0, .Data, nil), Send_Error.Closed)
+	// what was queued still drains, then Closed
+	n := 0
+	for {
+		_, re := mem_recv(b)
+		if re != .None {testing.expect_value(t, re, Recv_Error.Closed); break}
+		n += 1
+		free_all(context.temp_allocator)
+	}
+	testing.expect_value(t, n, sent)
+	free_all(context.temp_allocator)
+}
+
+// The queues use the allocator given at mem_open, whatever context.allocator a send runs under.
+@(test)
+mem_queue_allocator :: proc(t: ^testing.T) {
+	tr: Mem_Transport
+	defer mem_destroy(&tr)
+	a, b := mem_open(&tr)
+	{
+		context.allocator = context.temp_allocator
+		testing.expect_value(t, mem_send(a, 0, .Data, transmute([]u8)string("kept")), Send_Error.None)
+		testing.expect_value(t, mem_send(b, 0, .Data, transmute([]u8)string("also")), Send_Error.None)
+	}
+	free_all(context.temp_allocator)
+	_ = make([]u8, 4096, context.temp_allocator) // reuse what was freed
+	for q in tr.q do testing.expect(t, q.buf.allocator.procedure != context.temp_allocator.procedure, "a queue in the temp arena")
+	f, e := mem_recv(b)
+	testing.expect(t, e == .None && string(f.payload) == "kept")
+	f, e = mem_recv(a)
+	testing.expect(t, e == .None && string(f.payload) == "also")
 	free_all(context.temp_allocator)
 }
 
@@ -71,7 +137,7 @@ mem_close_drains :: proc(t: ^testing.T) {
 	mem_send(b, 5, .Close, nil)
 	mem_close(b)
 	testing.expect_value(t, mem_send(a, 0, .Data, nil), Send_Error.Closed)
-	testing.expect_value(t, mem_send(b, 0, .Data, nil, force = true), Send_Error.Closed)
+	testing.expect_value(t, mem_send(b, 0, .Data, nil), Send_Error.Closed)
 	f, e := mem_recv(b) // what was sent before the close is still read
 	testing.expect(t, e == .None && string(f.payload) == "last")
 	_, e = mem_recv(b)

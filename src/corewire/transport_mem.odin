@@ -2,10 +2,15 @@ package corewire
 
 // The in-memory transport (§10.2 M3-E, used by M3-F's in-process window): a
 // pair of byte queues, one per direction, carrying the same frames and limits
-// as core.sock in framed mode. A frame over MAX_PAYLOAD is refused; without
-// `force`, a send is refused once the peer has `cap` bytes unread (the socket's
-// socket_out_cap, after which a connection's subscription drops; channel 0
-// replies and snapshots pass force, §5.6). Either end may run on any thread.
+// as core.sock in framed mode.
+// - A frame over MAX_PAYLOAD is refused (Too_Large).
+// - Once the peer has `cap` bytes unread (the socket's socket_out_cap, after
+//   which a connection's subscription drops), a send is refused (Full), except
+//   on channel 0 and for SNAPSHOT, which never wait on credit (§5.6).
+// - Those exempt sends stop at a hard ceiling, cap + 2 largest frames: past it
+//   the send fails with Overflow and the transport closes (a reader that is
+//   stuck; dropping a channel 0 message would leave the two ends out of step).
+// Either end may run on any thread.
 
 import "core:sync"
 
@@ -18,6 +23,9 @@ Mem_Transport :: struct {
 	cap:    int,
 }
 
+// The most one direction may hold unread.
+mem_ceiling :: proc(t: ^Mem_Transport) -> int {return t.cap + 2 * (HEADER_SIZE + MAX_PAYLOAD)}
+
 Mem_End :: struct {
 	t:    ^Mem_Transport,
 	side: int, // 0 or 1
@@ -27,7 +35,8 @@ Send_Error :: enum {
 	None,
 	Closed,
 	Too_Large, // payload over MAX_PAYLOAD
-	Full, // the peer has cap bytes unread (and force was not set)
+	Full, // the peer has cap bytes unread (not for channel 0 or SNAPSHOT)
+	Overflow, // the hard ceiling: the transport is now closed
 }
 
 Recv_Error :: enum {
@@ -36,18 +45,25 @@ Recv_Error :: enum {
 	Closed, // closed and every frame sent before it was read
 }
 
-mem_open :: proc(t: ^Mem_Transport, cap := OUT_CAP) -> (a, b: Mem_End) {
+// Both queues live in `allocator`, whatever context.allocator later sends run under.
+mem_open :: proc(t: ^Mem_Transport, cap := OUT_CAP, allocator := context.allocator) -> (a, b: Mem_End) {
 	t.cap = cap
+	for &q in t.q do stream_init(&q, allocator)
 	return {t, 0}, {t, 1}
 }
 
-mem_send :: proc(e: Mem_End, channel: u32, kind: Kind, payload: []u8, force := false) -> Send_Error {
+mem_send :: proc(e: Mem_End, channel: u32, kind: Kind, payload: []u8) -> Send_Error {
 	t := e.t
 	sync.guard(&t.mu)
 	if t.closed do return .Closed
 	if len(payload) > MAX_PAYLOAD do return .Too_Large
 	q := &t.q[e.side]
-	if !force && stream_pending(q) + HEADER_SIZE + len(payload) > t.cap do return .Full
+	after := stream_pending(q) + HEADER_SIZE + len(payload)
+	if after > t.cap && channel != JSON_CHANNEL && kind != .Snapshot do return .Full
+	if after > mem_ceiling(t) {
+		t.closed = true
+		return .Overflow
+	}
 	h := header_bytes(channel, u8(kind), len(payload))
 	stream_feed(q, h[:])
 	stream_feed(q, payload)

@@ -54,8 +54,14 @@ golden_vectors :: proc(t: ^testing.T) {
 		testing.expect_value(t, used, len(want))
 		testing.expect(t, is_known(f.kind))
 	}
-	// every kind has a vector
-	testing.expect_value(t, len(golden_frames()), len(Kind) + 1)
+	// every kind has a vector, and every vector is of a kind
+	covered: bit_set[Kind]
+	for g in golden_frames() {
+		f, _, _ := next_frame(g.bytes)
+		testing.expect(t, is_known(f.kind))
+		covered += {Kind(f.kind)}
+	}
+	testing.expect_value(t, covered, ~bit_set[Kind]{})
 	free_all(context.temp_allocator)
 }
 
@@ -116,6 +122,35 @@ frame_limits :: proc(t: ^testing.T) {
 	stream_feed(&s, out[:])
 	_, e = stream_next(&s)
 	testing.expect_value(t, e, Frame_Error.Too_Large)
+	free_all(context.temp_allocator)
+}
+
+// Compaction keeps a partial frame whole: a frame over 64 KiB is read (so head passes the
+// threshold), then part of the next arrives, then the rest.
+@(test)
+stream_compaction :: proc(t: ^testing.T) {
+	big := make([]u8, 100_000, context.temp_allocator)
+	for i in 0 ..< len(big) do big[i] = u8(i * 13)
+	small := make([]u8, 30_000, context.temp_allocator)
+	for i in 0 ..< len(small) do small[i] = u8(i * 7 + 1)
+	b := make([dynamic]u8, context.temp_allocator)
+	encode(&b, 1, .Snapshot, big)
+	first := len(b)
+	encode(&b, 2, .Data, small)
+	s: Stream
+	stream_init(&s)
+	defer stream_destroy(&s)
+	cut := first + 10_000
+	stream_feed(&s, b[:cut])
+	f, e := stream_next(&s)
+	testing.expect(t, e == .None && f.channel == 1 && string(f.payload) == string(big))
+	_, e = stream_next(&s)
+	testing.expect_value(t, e, Frame_Error.Need_More)
+	stream_feed(&s, b[cut:]) // compacts: head > 64 KiB and more than half the buffer
+	testing.expect_value(t, s.head, 0)
+	f, e = stream_next(&s)
+	testing.expect(t, e == .None && f.channel == 2 && string(f.payload) == string(small))
+	testing.expect_value(t, stream_pending(&s), 0)
 	free_all(context.temp_allocator)
 }
 

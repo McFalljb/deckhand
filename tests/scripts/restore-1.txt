@@ -6,7 +6,10 @@ wait 200
 clickid sess 0
 waitfor ARGS: 10000
 command {"type":"new_shell_tab","session":$session}
-command {"type":"send_text","tab_id":$tab,"text":"cd /\n"}
+command {"type":"send_text","tab_id":$tab,"text":"cd /; echo now-in-$(pwd)-dir\n"}
+# the shell has run it before the quit saves its cwd: under load it once had not (the typed line
+# shows "$(pwd)", only the output "now-in-/-dir")
+waitfor now-in-/-dir 15000
 clickid proj 1
 wait 200
 clickid sess 0

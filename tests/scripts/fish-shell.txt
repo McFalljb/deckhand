@@ -7,5 +7,7 @@ command {"type":"new_claude_session","project_id":$project}
 waitfor FAKE CLAUDE STARTED 15000
 shot fish/claude
 command {"type":"new_shell_tab","session":$session}
-wait 1500
+# the shell tab runs fish itself (fake-fish.sh says so on its screen); a fixed wait here was too
+# short under load (the app quit before the shell had started)
+waitfor FAKE FISH INTERACTIVE 15000
 quit

@@ -8,7 +8,10 @@ assert_result error not allowed for this caller
 ui_command {"type":"set_agent_model","model":"opencode-go/deepseek-v4.1-flash"}
 assert_state settings.agent_model opencode-go/deepseek-v4.1-flash
 key j cmd
-waitfor control token: yes 10000
+# the fake prints these lines one by one: wait for the last, not the first (under load the
+# screen was read between them)
+waitfor pi-desk env: 10000
+assert_screen control token: yes
 # Deckhand's pi integration, -e per extension (integrations/pi/extensions.json), and only its own bridge variables
 assert_screen integration: bridge desk browser panels
 assert_screen deckhand env: 4 of 4

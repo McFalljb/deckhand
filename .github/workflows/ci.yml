@@ -32,6 +32,19 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: "1"
 
 jobs:
+  # The session holder's code changed only with a holder_rev bump (docs/plans/background-core.md
+  # §7.3): running holders upgrade only to a newer holder_rev. Git only, no build.
+  holder-rev:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { fetch-depth: 0, persist-credentials: false }
+      - name: holder_rev bumped if the holder changed
+        env:
+          BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || 'origin/main' }}
+        run: scripts/check-holder-rev.sh "$BASE"
+
   unit:
     runs-on: macos-15 # arm64
     timeout-minutes: 20

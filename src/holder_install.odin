@@ -30,7 +30,7 @@ import "core:time"
 
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh)
 HOLDER_BIN :: "deckhand-core"
-HOLDER_REV :: "1" // the holder's wire generation (its WELCOME's holder_rev): the install dir's prefix
+HOLDER_REV :: 2 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 
 // The bundled binary: <exe dir>/../Helpers/deckhand-core (Deckhand.app), else build/deckhand-core
@@ -59,7 +59,7 @@ holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: strin
 	src, rerr := os.read_entire_file(bin, context.temp_allocator)
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)
-	dir := fmt.tprintf("%s/core/%s-%s", strings.trim_right(data, "/"), HOLDER_REV, sum[:12])
+	dir := fmt.tprintf("%s/core/%d-%s", strings.trim_right(data, "/"), HOLDER_REV, sum[:12])
 	dest := fmt.tprintf("%s/%s", dir, HOLDER_BIN)
 	if have, err := os.read_entire_file(dest, context.temp_allocator); err == nil && holder_sha256(have) == sum {
 		holder_unquarantine(dest) // identical to one that was checked; a stray mark would kill it

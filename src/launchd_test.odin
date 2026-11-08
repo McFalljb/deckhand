@@ -53,7 +53,7 @@ holder_install_copies :: proc(t: ^testing.T) {
 	path, ok, why := holder_install(bin, data)
 	if !testing.expectf(t, ok, "install: %s", why) do return
 	defer delete(path)
-	testing.expect(t, strings.has_prefix(path, fmt.tprintf("%s/core/%s-", data, HOLDER_REV)), "versioned dir")
+	testing.expect(t, strings.has_prefix(path, fmt.tprintf("%s/core/%d-", data, HOLDER_REV)), "versioned dir")
 	testing.expect(t, strings.has_suffix(path, "/deckhand-core"))
 	testing.expect(t, !holder_quarantined(path), "the copy has no quarantine")
 	testing.expect_value(t, holder_verify(path), "")

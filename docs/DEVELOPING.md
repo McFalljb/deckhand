@@ -286,7 +286,10 @@ ghostty/       Odin bindings for the libghostty-vt calls used
 snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
 holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
 jsonguard/     the check in front of every json.parse/unmarshal of input Deckhand does not control
-               (depth, invalid UTF-8, raw control bytes; core:encoding/json crashes on those)
+               (depth, invalid UTF-8, raw control bytes, JSON5 hex prefixes and comment runs;
+               core:encoding/json crashes on those). Strict JSON unless a caller asks for JSON5.
+               The CLI (tools/pi-desk-cli) uses it too; json_guard_test.odin fails on a parse
+               anywhere in src/ or tools/ that skips it
 autotest.odin  PI_DESK_SCRIPT test mode
 *_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```

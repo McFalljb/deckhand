@@ -191,7 +191,7 @@ check_link_minos() { # odin build args (package and defines)
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
 # Claude Code tabs (src/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
-# (and its alias bin/pi-desk) runs (tools/pi-desk-cli; no dependency on src/), and the plugin itself next to the binary
+# (and its alias bin/pi-desk) runs (tools/pi-desk-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {
   odin build tools/pi-desk-cli -out:build/pi-desk-cli -o:speed -minimum-os-version:$MACOS_MIN

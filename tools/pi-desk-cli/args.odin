@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:math"
 import "core:strconv"
 import "core:strings"
+import jg "../../src/jsonguard"
 
 Kind :: enum {
 	Tabs,
@@ -514,7 +515,7 @@ parse_cli :: proc(args: []string, read_stdin: proc() -> string = nil) -> (req: R
 			bad := `EVENTS_JSON must be a non-empty list of input objects, e.g. [{"event":"key","action":"down","key":"w"}]`
 			if len(f.pos) < 2 do e = bad
 			else {
-				v, perr := json.parse_string(f.pos[1], .JSON, true)
+				v, perr := jg.parse_string(f.pos[1], .JSON, true)
 				arr, is_arr := v.(json.Array)
 				if perr != nil || !is_arr || len(arr) == 0 do e = bad
 				for ev in arr {

@@ -1372,6 +1372,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		s, tab := pi_tab(c.tab_id)
 		if tab == nil do return fail("no such pi tab"), false
 		if tab.status == .Running do return fail("pi is running in this tab (pi_reload restarts a running one)"), false
+		if tab_held_away(tab) != 0 do return fail("this session still runs in the session holder, which isn't answering: quit and reopen Deckhand to get it back"), false
 		if tab.status == .Not_Started do return fail("pi has not started in this tab yet: it starts when its session is shown"), false
 		if reload_step_is(tab, true) || restart_waiting(tab.id) do return fail("this tab is restarting"), false
 		if s.missing do return fail("its session file or folder no longer exists"), false
@@ -2037,6 +2038,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 	if s.missing do return
 	for &tab in s.tabs {
 		if tab.status != .Not_Started do continue
+		if tab_held_away(&tab) != 0 do continue // it runs on in the session holder (holder_client.odin)
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3); in a chat read-only while chats are (claude_start)
 		if et, is_ed := tab.kind.(Editor_Tab); is_ed {
 			// no process: the file opens again (a gone file says so in its tab)

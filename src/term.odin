@@ -77,6 +77,7 @@ Term :: struct {
 	// a terminal adopted from the session holder (holder_adopt.odin)
 	inexact:      bool, // not rebuilt byte-exactly (no snapshot, or the holder's tail had a gap)
 	holder_lost:  bool, // its process ran in a holder that went away
+	holder_away:  u32, // that holder still runs (lost, not gone): its terminal id, the process runs on there
 	mute_replies: bool, // feeding replayed bytes: query replies are dropped (§7.2 P4)
 	replies_dropped: int, // how many (tests)
 }
@@ -267,7 +268,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	t.prog.dirty = true // and the tab re-syncs at the next pump, whatever it showed
 	gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
 	t.exit, t.eof_at, t.hung_pid = {}, {}, 0
-	t.inexact, t.holder_lost = false, false
+	t.inexact, t.holder_lost, t.holder_away = false, false, 0
 	px_w, px_h := u32(f32(t.cols) * font.cell_w), u32(f32(t.rows) * font.cell_h)
 	// keep_sessions: a tab's process lives in the session holder (holder_client.odin)
 	tab_id: u64
@@ -410,8 +411,11 @@ term_pump :: proc(t: ^Term) {
 		t.running = false
 		if !t.exit.known do t.hung_pid = t.pty.pid // reader_stop_and_close hangs up on it
 		how := exit_text(t.exit)
-		if t.pty.held != 0 && holder_term_lost(t.pty.held) do t.holder_lost = true
-		msg := t.holder_lost ? "\r\n\x1b[2m[the session holder stopped]\x1b[0m" : how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
+		if t.pty.held != 0 && holder_term_lost(t.pty.held) {
+			t.holder_lost = true
+			if holder_alive() do t.holder_away = t.pty.held // it runs on there: never restarted here (tab_held_away)
+		}
+		msg := t.holder_away != 0 ? "\r\n\x1b[2m[the session holder isn't answering: this session runs on in it]\x1b[0m" : t.holder_lost ? "\r\n\x1b[2m[the session holder stopped]\x1b[0m" : how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
 		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
 		t.changed = true
 		reader_stop_and_close(t)

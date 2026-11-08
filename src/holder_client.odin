@@ -84,6 +84,7 @@ Holder_Client :: struct {
 	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
 	tokens_why:    string, // why not
 	adopt_done:    bool, // the launch's adopt ran: terminals a later WELCOME lists are kept unseen
+	unreachable:   bool, // a holder answered but did not attach (Warn_Running): it may run kept sessions
 }
 
 hc := Holder_Client{fd = -1}
@@ -163,7 +164,7 @@ holder_client_start :: proc() -> bool {
 	case .Without:
 		return false // only dead holders' sockets (removed): tried again once the setting is on
 	case .Warn_Running:
-		hc.tried = true
+		hc.tried, hc.unreachable = true, true
 		fmt.eprintln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
 		toast_show("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
 		return false
@@ -501,11 +502,34 @@ holder_wanted :: proc() -> bool {
 }
 
 // Whether held tabs are saved with their terminal ids (workspace.json "held"): while the
-// holder keeps sessions at quit, and after a handover.
+// holder keeps sessions at quit, after a handover, and after the holder was lost while it still
+// runs (a send timed out, it stopped answering): it keeps them (crash-style) for the next launch,
+// whatever the setting says now.
 holder_keeps_sessions :: proc() -> bool {
 	if hc.handover do return true
-	return hc.on && !hc.lost && !hc.handed && state.settings.keep_sessions
+	if hc.handed do return false
+	if hc.lost do return holder_alive()
+	return hc.on && state.settings.keep_sessions
 }
+
+// The holder this run attached to still runs (it may be lost: not answering, not gone). Not after
+// a GOODBYE: a shutdown hangs everything up.
+holder_alive :: proc() -> bool {
+	if hc.pid <= 0 || hc.handed do return false
+	return posix.kill(posix.pid_t(hc.pid), posix.Signal(0)) == .OK
+}
+
+// The holder terminal a tab's process still runs in although this run cannot reach it (held_away
+// at launch, or its holder lost mid-run while alive), else 0. Such a tab is never started or
+// restarted here: that would be a second pi or Claude on its session file.
+tab_held_away :: proc(tab: ^Tab) -> u32 {
+	if tab == nil do return 0
+	if tab.held_away != 0 do return tab.held_away
+	if t := term_of(tab.id); t != nil do return t.holder_away
+	return 0
+}
+
+HELD_AWAY_TEXT :: "This session still runs in the session holder, which isn't answering. It isn't started here, so it never runs twice: quit and reopen Deckhand to get it back."
 
 // SPAWN through the holder; waits up to HOLDER_WAIT for SPAWNED. The terminal id is picked
 // here (max + 1, never reused within this connection).
@@ -700,4 +724,10 @@ holder_client_forget :: proc() {
 	delete(hc.tokens_why)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
+}
+
+// Some tab waits for an unreachable holder that kept its process at launch (Tab.held_away).
+held_away_any :: proc() -> bool {
+	for s in state.open_sessions do for t in s.tabs do if t.held_away != 0 do return true
+	return false
 }

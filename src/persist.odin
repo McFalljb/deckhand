@@ -165,8 +165,10 @@ session_on_disk :: proc(s: Open_Session) -> bool {
 }
 
 // The session holder terminal a tab's process runs in, while the holder keeps it at quit
-// (holder_keeps_sessions); 0 = none. Saved as "held", so the next launch adopts it.
+// (holder_keeps_sessions), or still runs in though unreachable (tab_held_away); 0 = none. Saved
+// as "held", so the next launch adopts it.
 tab_held :: proc(tab_id: u64) -> u32 {
+	if _, tab, _ := find_tab(tab_id); tab != nil do if away := tab_held_away(tab); away != 0 do return away
 	t := term_of(tab_id)
 	if t == nil || !t.running || t.pty.held == 0 || !holder_keeps_sessions() do return 0
 	return t.pty.held
@@ -269,7 +271,9 @@ workspace_json :: proc() -> string {
 	w := W{b = strings.builder_make(context.temp_allocator)}
 	open_obj(&w)
 	ki(&w, "v", WORKSPACE_VERSION)
-	if holder_keeps_sessions() && hc.instance != "" do ks(&w, "holder", hc.instance) // the holder its held ids are in
+	// the holder its held ids are in: this run's, or (not attached) the one they were saved with
+	if holder_keeps_sessions() && hc.instance != "" do ks(&w, "holder", hc.instance)
+	else if held_away_any() && held_holder != "" do ks(&w, "holder", held_holder)
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	for &s in state.open_sessions {

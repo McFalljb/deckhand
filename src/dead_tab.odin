@@ -75,7 +75,7 @@ CLAUDE_PICKER_WAIT :: 30 * time.Second
 // A pi or Claude tab that exited by itself (not one a restart is stopping,
 // or one whose restart waits for the old process).
 tab_is_dead :: proc(tab: ^Tab) -> bool {
-	if tab == nil || tab.status != .Exited do return false
+	if tab == nil || tab.status != .Exited || tab_held_away(tab) != 0 do return false // still runs in the holder: no Restart
 	switch _ in tab.kind {
 	case Pi_Tab, Claude_Tab:
 	case Shell_Tab, Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab:
@@ -293,6 +293,21 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 				dot(th.text_muted)
 				_, is_claude := tab.kind.(Claude_Tab)
 				clay.TextDynamic(clip(is_claude ? "Restarting: waiting for the old Claude to exit…" : "Restarting: waiting for the old pi to exit…", max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
+			}
+			return
+		}
+	}
+	// its process runs on in a holder that stopped answering: said, no Restart (a second copy)
+	if s := cur(); s != nil && !s.home {
+		if tab := pane_shown(p); tab != nil && tab.status == .Exited && tab_held_away(tab) != 0 {
+			if clay.UI(cid("dead_bar"))({
+				clip = {horizontal = true},
+				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+				backgroundColor = cc(th.bg_elevated),
+				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+			}) {
+				dot(th.text_muted)
+				clay.TextDynamic(clip(HELD_AWAY_TEXT, max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
 			}
 			return
 		}

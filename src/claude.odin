@@ -892,6 +892,7 @@ claude_resume_open :: proc(id: string, caller: Caller) -> (r: Result, open: bool
 	tid := claude_tab_of_session(id)
 	if tid == 0 do return {}, false
 	s, tab, _ := find_tab(tid)
+	if tab_held_away(tab) != 0 do return fail("this Claude still runs in the session holder, which isn't answering: quit and reopen Deckhand to get it back"), true
 	if tab.status == .Exited {
 		if restart_waiting(tab.id) do return fail("this tab is restarting"), true // never an agent's flagless restart over the user's
 		if s.missing do return fail("this session is gone"), true

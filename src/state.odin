@@ -83,6 +83,10 @@ Tab :: struct {
 	unseen:   bool, // its agent finished while the user was not looking, or "Mark as unread"; not saved
 	pane:     u64, // the pane of its session it sits in (panes.odin); not saved
 	held:     u32, // restored with a session holder terminal id (workspace.json "held"): adopted at launch, then 0
+	// its process still runs in a session holder this run could not attach to (it answered but
+	// gave no WELCOME): never started here (that would be a second pi or Claude on one session),
+	// saved as "held" again so the launch that reaches the holder adopts it (holder_adopt_all)
+	held_away: u32,
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,

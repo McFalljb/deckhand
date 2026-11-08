@@ -309,7 +309,12 @@ holder_adopt_all :: proc() {
 	for s in state.open_sessions do for t in s.tabs do if t.held != 0 do any_held = true
 	started := holder_client_start()
 	if !started {
-		for &s in state.open_sessions do for &t in s.tabs do t.held = 0
+		// a holder answered but did not attach: what it kept runs on there, so those tabs wait
+		// (not started, held ids saved again) rather than start a second copy beside it
+		for &s in state.open_sessions do for &t in s.tabs {
+			if hc.unreachable && t.held != 0 && t.status == .Not_Started do t.held_away = t.held
+			t.held = 0
+		}
 		return
 	}
 	// the held ids are this holder's only if saved with it (two holders both number from 1)

@@ -5,8 +5,12 @@ window closes) and [#5](https://github.com/McFalljb/deckhand/issues/5) (every ma
 sidebar). Design only: no app code has changed. Investigated at `main` 6ee5586. Modelled on
 Herdr 2 (herdr-core cd12ddd, herdr-app 7fe7ac3, Apache-2.0).
 
-Status (2026-11-07): revision 4. Both spikes are done and folded in here. Q0 is merged (#18).
-M1 is broken into PRs in §10.1. The user's decisions are in §2.
+Status (2026-11-07): revision 5. Both spikes are done and folded in here. Q0 is merged (#18),
+and so is M1's PR A (#21). M1 is broken into PRs in §10.1, M2 and M3 in §10.2. The user's
+decisions are in §2.
+
+Revision 5: §10.2 (M2 and M3 in PRs, checked against `main` 5b2927d), new sizes for M2 and M3
+in §10, R9 and R14–R16 in §11, rows in §12, Q9–Q11 in §13.
 
 - **S1 (VT snapshot): GO,** via libghostty-vt's binary snapshot (GHOSTSNP v1). It was exact in
   360/360 runs. Branch `spike/vt-snapshot` 6bf748e, `tools/vt-snapshot-spike/`.
@@ -746,14 +750,16 @@ Every step ships on its own.
 | S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit, logout (manual, before M1 ships). | §5.3, §6, §7.3 | done (14/15 owed) |
 | M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
 | D0 | **Developer ID** (the user's timing): certificate; `release.sh`'s existing Developer ID and notarization path as the default; CEF signed under the team; library validation on; DR checks switched on | M4 may start | ~1 week |
-| M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop | Compiler-checked split; hidden windows stop stalling parsing | 2–3 weeks |
-| M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing | The real protocol under every test | 4–6 weeks |
+| M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop. **Three PRs in §10.2.** | Compiler-checked split; hidden windows stop stalling parsing | 2.5–3.5 weeks |
+| M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
 | M4 | **Separate core** (`Deckhand Core.app`), **after D0**. It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`; `released-v1.json`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 5–7 weeks |
 | M5 | Login agent; jobs while closed | Scheduled jobs with Deckhand closed | 1–2 weeks |
 | M6 | **Remote:** connect, install, update, caps (§8.3, the CEF request handler), sidebar, offline states, file fetch, harness setup, plus a **headless Linux core and release target** | **#5 done** | 7–11 weeks + 2–3 for Linux |
 | M7 | Several windows | More windows | 2–4 weeks |
 
-Remaining: about 31–46 weeks, now that Q0, S1 and S2 are done. M1 grew by 2 weeks, for the snapshot bindings and the keeper gate.
+Remaining: about 33–48 weeks, now that Q0, S1 and S2 are done. M1 grew by 2 weeks, for the
+snapshot bindings and the keeper gate. M2 grew by half a week (types and handlers that live in
+window files, §10.2) and M3 by a week (the tab host's page events and the window's own replies).
 
 ### 10.1 M1 in four PRs
 
@@ -775,6 +781,100 @@ merges on its own, keeps `main` releasable, and runs its tests in under 3 minute
 Sizes: A 1.5 weeks, B 3–3.5, C 1.5–2, D 1–1.5, so **7–9 weeks** for M1, reviews included. Order:
 A → B → C+D, with C and D on stacked branches and merged together after their combined review. M1 alone delivers most of #4's value.
 
+### 10.2 M2 and M3 in PRs
+
+Checked against `main` 5b2927d (split panes #11–#16, snapshots and `src/holderwire` #21). M2
+starts after M1's B, C and D merge, so it plans against `main` plus those: the holder-backed
+`Pty` in `pty.odin`, `core.sock` in `socket.odin`, MAC'd files in `persist.odin`,
+`src/launchd_darwin.odin`, the `src/holder/` package and the compiled-out test hooks.
+
+**What the code shows** (the map's §2, re-measured):
+- Everything is still `package main` (204 files, 77k lines). The only packages are
+  `ghostty`, `holderwire` and `updatesig`. `holderwire` is the model for the split: its own
+  folder, its own `odin test`.
+- About 74 files (43k lines) belong in the core. Of those, 23 set `app.redraw` (64 places),
+  6 call `toast_show` (18), and 4 import sokol or Clay: `term.odin` (`sapp` keycodes, 38
+  `font.` uses, the theme palette), `harness.odin`/`harness_install.odin` (`sapp`), `panes.odin`
+  and `panes_commands.odin` (Clay ids, `app.centre`, `clay.GetElementData`), plus `dead_tab.odin`
+  and `settings_files.odin` (Clay views in the same file). `socket.odin` and `comments.odin`
+  call `pd_frames_*`.
+- **New since the map: State and the command union use types that live in window files.**
+  `Browser_Tab`, `App_Tab`, `Markdown_Tab`, `Appearance`, `Theme_Id`, `Text_Size`, `Harness`
+  and about 60 `Browser_*`/`App_*` command structs are declared in `browser*.odin`,
+  `app_tab.odin`, `markdown_view.odin` and `theme.odin`. Their handlers (`browser_nav_apply`,
+  `browser_agent_apply`, `browser_act_apply`, `browser_polish_apply`, `app_apply`,
+  `markdown_apply`) are in window files too, and mix State changes with CEF and frame calls.
+- 10 window files write `state.` fields directly (18 places: `ui_job_sheet`, `harness_install`,
+  `browser_nav`, `browser_polish`). The window calls `run_command` in 176 places and **uses
+  the result at once in 104**.
+- Editor buffers stay in the window (§4), so `editor*.odin` goes with the window and only the
+  `Editor_Tab` record is the core's. View state stays in the core (§4), so M3 needs no
+  `Core_State`/`View_State` split; only `Pane.rect`/`frame` (pixels) become window-only.
+
+**How the compiler enforces the boundary:**
+1. `src/core` is a package. Odin forbids import cycles and `package main` can't be imported, so
+   any core reference to a window symbol is a compile error.
+2. `scripts/check-core-boundary.sh`, run by `./build.sh test` and `ci.yml` (< 1 s), fails if a
+   file in `src/core/` or `src/holder/`:
+   - imports anything but `base:*`, `core:*` (minus `core:sys/darwin/Foundation` and other
+     Obj-C bindings), `../ghostty`, `../holderwire` and `../updatesig` (the holder: not
+     `ghostty` either);
+   - has a `foreign import` other than `system:` libraries, so no `build/pd_*.a` (the Obj-C shims);
+   - uses `intrinsics.objc_*` or an `@(objc_*)` attribute.
+
+   A test plants each forbidden import in a temporary copy and expects the script to fail.
+3. `odin test src/core` builds the core and its tests with no window code, so most unit tests
+   no longer link sokol, Clay or CEF.
+
+**Decisions this section makes:**
+- **Qualified names, no alias file.** Window code says `core.run_command`, `core.Tab`. One
+  exception: the window declares `state: ^core.State`, set at init to `&core.state`, so the
+  34k lines of UI keep writing `state.x`. M3 points it at the replica.
+- **Window hooks, then messages.** M2 adds `core.window: Window_Hooks`, a proc table filled by
+  `main` beside today's `platform` table: `state_changed` (was `app.redraw`), `toast`,
+  `frames_info`, `tab_host_apply` (browser, app, markdown and editor commands), and the test
+  hooks. M3 replaces each entry with a message; the table's shape is the message list.
+- **Every terminal keeps one emulator in M2.** The core owns `Term` (ghostty terminal, PTY,
+  status). A window-side `Term_View` holds render state, selection, links and encoders, and
+  reads the core's terminal in process. M3's PR H gives `Term_View` its own terminal.
+- The existing `Tab_Host` struct (tabhost.odin: draw, input, capture) is renamed `Tab_View` in
+  M2, so "tab host" means only the §4 routing.
+
+| PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
+|---|---|---|---|---|---|
+| **M2-A. The seams, in place** (still `package main`; behaviour unchanged) | `Window_Hooks` as above; all 64 `app.redraw` and 18 `toast_show` calls in core files go through it. `term_start`/`term_resize` take cols, rows and cell pixels; the window works them out from its pane and font. `Term` and `Term_View` split. The terminal palette moves out of `theme.odin`, because the core answers colour queries. Pane room and ratio checks take a centre size the window sends (§4) and no longer call Clay. The 18 direct `state.` writes become commands. `core_tick()` is taken out of `frame()` (inbox, pump, reap, persist, titles, jobs, pending, Claude, waits, dead tab) and is still called from it, in the same order. Clay views move out of `dead_tab.odin`, `settings_files.odin`, `harness*.odin` into `ui_*` files. | `src/main.odin`, `src/term.odin` (+ new `src/term_view.odin`), `src/theme.odin`, `src/panes.odin`, `src/panes_commands.odin`, `src/commands.odin`, `src/claude*.odin`, `src/changes.odin`, `src/harness*.odin`, `src/dead_tab.odin`, `src/settings_files.odin`, `src/socket.odin`, `src/comments.odin`, `src/tabhost.odin`, `src/ui_job_sheet.odin`, `src/browser_nav.odin`, `src/browser_polish.odin`, `src/platform.odin` | `./build.sh test` (~1 min) with new unit tests: room and ratio from a given centre size; `term_resize` by cols and rows; every former direct write as a command; a hook-count test (redraw fires once per changed command, as before). `term.odin` and `socket.odin` are `@all`, so the scenes are `./build.sh scenes --all --shard i/3`, three runs of ~2.5 min. | One round | Nothing should change. Worth a look: splits and divider drags (room checks), resizing a window with a TUI open, toasts after a menu choice, a sheet's focus. |
+| **M2-B. The move to `src/core`** (mechanical) | `scripts/core-move.py` moves the core files and the types from window files into `src/core/`, then runs `odin check src` and adds `core.` at each position the compiler reports as undeclared, until it builds. The command-layer tests move with their files (`src/core/*_test.odin`, package `core`); window tests stay in `src/`. Also: `check-core-boundary.sh`, `tests/unit.py` for both packages, `tests/scenes.txt` area globs and `--check-map`, `build.sh`. **A verifier**, `scripts/core-move-verify.py`, strips every added `core.` prefix and every moved block and shows the remainder is empty, apart from a short list of hand edits (`state` pointer, `@(init)` order, `@(private)` names). | `src/core/*` (~75 files moved), every window file (prefixes only), `scripts/core-move.py`, `scripts/core-move-verify.py`, `scripts/check-core-boundary.sh`, `build.sh`, `tests/unit.py`, `tests/scenes.txt`, `ci.yml`, DEVELOPING.md (layout) | `./build.sh test` (~1 min, core tests without sokol); the boundary script and its planted-import test (< 1 s); scenes `--all --shard i/3` (3 × ~2.5 min). | **No full review.** The reviewer checks the two scripts and the verifier's output, not the diff. | Nothing visible. A developer who adds `import sapp …` to a core file gets a failing `./build.sh test`. |
+| **M2-C. The core loop runs when frames don't** | When no frame has run for 50 ms (hidden, minimised, App Nap), a main-queue timer calls `core_tick()`, so parsing, status dots, exits, bells and saving go on. A `core_ticking`/`in_frame` guard stops it running inside `frame()` or inside a modal loop that `frame()` started (`pick_folder`, alerts). Jobs' and Claude waits' own timers stay. While a terminal has had output in the last 2 s, the core holds `platform_activity` (Q11). | `src/core/core_loop.odin` (new), `src/main.odin`, `src/core/platform.odin`, `src/platform_darwin.odin`, new `tests/scripts/hidden-window.sh` | Unit: the guard (a nested call is skipped and run after), the 50 ms rule on a fake clock (< 1 s). Scene `hidden-window.sh` (~25 s): hide the window, a fake pi prints 20 MiB and sets status, a shell exits; while hidden, `get_state` shows the status and the exit banner and the bell fires; unhidden, the screen hash matches. `./build.sh scenes --changed` (~2.5 min: `@core`, required + smoke). | One round | Hide Deckhand (⌘H) during a long pi turn: the Dock badge and bell arrive while it is hidden, and the screen is current the moment it comes back. |
+| **M3-E. Protocol libraries** (no behaviour change) | The framed codec (§5.1: channel, kind, length; golden vectors). State by section: the encoder (from `json_write.odin`'s `get_state`) and a **new decoder into a `core.State`-shaped replica**, with `state.full`/`state.delta` (§5.8). JSON round trips for every command the window sends, under the `ui` caller. The in-memory transport: a pair of byte queues with the socket's framing and limits. | new `src/core/frames_wire.odin`, `src/core/state_wire.odin`, `src/core/state_read.odin` (+ tests), `src/core/transport_mem.odin`, `tests/framed-wire/v1/*.bin`, `schema/released-v1.json` (first cut, §7.5) | Golden vectors and a fuzz pass over the frame decoder (< 1 s). **Replica round trip:** populated states (projects, splits, panels, jobs, confirmations) encode → decode → encode, equal. **Completeness:** a test walks `State`'s type info and fails on any field neither encoded nor listed as core-only. Command round trip over the command table (< 1 s). All in `./build.sh test` (+~5 s). | One round | Nothing visible. |
+| **M3-F. The window as a client for state and commands** | The window attaches through the in-memory transport and gets `state.full`, then deltas. `state` points at the replica. Window commands are encoded, sent, parsed by the core's socket code and run as `ui`; **the window waits for its own reply, and the core sends the delta before the reply** (Q9), so the 104 call sites stay as they are. **The `ui` path:** the in-memory connection is the only way to get `ui`. It is created by `core_attach_window()`, which no socket path can reach. Core → window: `toast`, `confirmation.parked`, `window.request{op}`/`window.reply` for clipboard, open_url, reveal, pick_folder, appearance and `window_active`, replacing those `Window_Hooks` and `platform` entries. In test mode, after every script step the core compares the replica with its own state, and a difference fails the scene. | `src/core/socket.odin` (an in-memory connection type), `src/core/commands.odin`, `src/core/command_table.odin` (caller rules), new `src/client.odin`, `src/main.odin`, `src/autotest.odin` (the divergence check), `src/platform_darwin.odin`, PROTOCOL.md (window messages, marked "M4: over `core.sock`") | Unit: no socket hello, token or `ctl` path yields `ui`; delta-before-reply ordering; `window.request` with no window (`no_window`) (< 1 s). `./build.sh test` (~1 min). Scenes `--all --shard i/3` (3 × ~2.5 min), with the divergence check in every scene. | **Two security rounds** (the `ui` path and caller rules) | Nothing should change. Dev builds: `PI_DESK_PROTO_LOG=1` logs the window's frames, so the protocol can be watched. |
+| **M3-G. Tab host routing** | Browser, app, markdown and editor commands from agents reach the core, which sends `tab_host.call` to the window hosting the tab and answers with `finished` (the bridges' `pending`/`finished` path, socket.odin). The handlers split: **records change in the core** (`Browser_Update`, titles, URLs, app status), and **CEF and frames work in the window**. Page-driven events (popups, titles, downloads, dialogs: `on_cef_popup` today changes State inside a CEF callback) come back as `tab_host.event`s under a **`tab_host` caller**, answers and records only, never `ui` (Q10). No window: `{"ok":false,"code":"no_window"}`. A test-mode `detach_window`/`attach_window` pair runs M4's no-window cases now. | `src/browser*.odin`, `src/app_tab.odin`, `src/markdown_view.odin`, `src/editor_commands.odin`, `src/core/tabhost_route.odin` (new), `src/core/socket.odin`, `src/core/command_table.odin`, `src/frames.odin` (hello info as a window reply), PROTOCOL.md (`no_window`) | Unit: routing with a fake host; a `tab_host` caller can't confirm, change settings or open tabs in another session; `no_window` for every routed command (< 1 s). Scenes `./build.sh scenes --changed`: the six browser groups, `app-*`, `agent-show` (~2.5 min, `--cef-jobs 3`), plus new `no-window.sh` (~15 s). | **Combined with H:** one round over G+H | Pi's browser tools and app tabs work as before. Dev palette *Detach window*: pi's next browser call reports `no_window`; *Attach window* brings the pages back. |
+| **M3-H. Terminal streams** (option a, §5.5) | `term.attach`/`detach`, `SNAPSHOT` (GHOSTSNP from PR A's `snapshot.odin`, screen first), `DATA` coalesced at 8 ms or 64 KiB, `RESIZE` at a byte offset, `CREDIT`, `FOCUS`, input as window `DATA`. `Term_View` gets its own ghostty terminal, with the callbacks and theme through the shared helper and `write_pty` dropped. Hidden tabs detach after 2 s. In test mode, after every script step each shown tab's screen hash must equal the core's. | `src/term_view.odin`, `src/core/term.odin`, `src/core/term_stream.odin` (new), `src/client.odin`, `src/main.odin` (resize from the pane), `src/autotest.odin` | Unit (~4 s): stream determinism, resizes and snapshots at random offsets, compared by screen hash; credit exhaustion leads to a fresh snapshot; detach and reattach. `term.odin` is `@all`: scenes `--all --shard i/3` (3 × ~2.5 min) with the screen-hash check. The CPU and frame benchmarks (`alone`) gate the double parse: within 10% of M2's. | (with G) | Switch to a tab with 10k lines of scrollback: it shows at once. `cat` a 100 MB file in one tab and type in another: no lag. Select, ⌘-click links and scroll back as before. |
+
+Sizes: M2-A 1–1.5 weeks, B 1, C 0.5–1, so **2.5–3.5 weeks** for M2. M3-E 1–1.5, F 2–2.5, G 1,
+H 1–2, so **5–7 weeks** for M3, reviews included. Order: A → B → C, then E → F → G+H, with G and
+H on stacked branches merged after their combined review. M2-B is prepared while A is open: a
+trial run of `core-move.py` is how A finds every leak, and the move lands right after A, before
+other work touches 200 files.
+
+**Riskiest parts:**
+- **M3-F, the `ui` path and its replies.** `ui` confirms for agents and replays Claude's flags,
+  so its only door must be the in-process attach. The wait-for-reply rule hides M4's latency, so
+  M4 must measure it (Q9). A UI write that bypasses commands shows up as replica divergence, so
+  the test-mode check carries the weight.
+- **M3-G, page events as callers.** Web content drives popups, dialogs and downloads. If those
+  rode the user's `ui` capability, a page could approve a parked confirmation. They get the
+  `tab_host` caller.
+- **M3-H, two emulators.** S1 settled snapshot fidelity, but resize ordering, the double parse's
+  CPU, and selection and links on the window's copy are new. The per-step screen-hash check and
+  the benchmarks are the gate.
+- **M2-C, re-entry and timing.** The timer must never run `core_tick()` inside `frame()` or a
+  modal loop. Scenes that assumed ticks happen only in `frame()` may change (R9).
+- **M2-B, init order.** Package-level globals and `@(init)` procs in `core` now run before
+  `main`'s. The verifier lists each one by hand.
+- **Holder backpressure (from M1 PR B).** The holder stops reading a PTY once 8 MiB waits for
+  the core (§5.6). The holder-backed `Pty`'s reader thread must drain whether frames run or not;
+  M2-C's scene checks it with 20 MiB of output.
+
 ---
 
 ## 11. Risks
@@ -789,11 +889,14 @@ A → B → C+D, with C and D on stacked branches and merged together after thei
 | R6 | Ad-hoc TCC re-prompts and silent Full Disk Access loss | Ends with the Developer ID. Documented until then. |
 | R7 | M1's closed-app gap | Hooks must fail safe; the read-only guard never needs the socket (checked in M1); M4 closes the gap |
 | R8 | Bundle-relative paths under live sessions | Everything lives in `core/<v>/`, collected only when unused |
-| R9 | Moving ticks off `frame()` changes scene timing | M2 keeps `core_tick()` from `frame()` until M4 |
+| R9 | Moving ticks off `frame()` changes scene timing | M2 keeps calling `core_tick()` from `frame()` until M4, and a timer runs it only when no frame has run for 50 ms (M2-C), never inside `frame()` or a modal loop |
 | R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own work item; the handler checks the resolved address on every request |
 | R11 | Scope | Every step ships on its own |
 | R12 | S2 ran only on macOS 26.6.2 (the minimum is 14) | Run S2's programs on 14 and 15, plus Force Quit and logout, before M1's PR B ships (§10.1) |
 | R13 | An unfinished over-limit sequence (a large OSC 52) blocks snapshots | A limit sized to the largest accepted sequence, retry after ground, VT `inexact` at a handover |
+| R14 | The replica drifts from the core's State (a UI write that bypasses commands, a missed delta) | The completeness test (M3-E) and the per-step divergence check in every scene (M3-F) |
+| R15 | A web page's events reach the core with the user's `ui` capability | The `tab_host` caller, answers and records only (M3-G, Q10) |
+| R16 | The 200-file move collides with other work, or hides a hand edit | It is scripted and checked by a verifier, and lands right after M2-A (§10.2) |
 
 ---
 
@@ -812,6 +915,11 @@ A → B → C+D, with C and D on stacked branches and merged together after thei
 | libghostty bump | Old-encode/new-decode round trip of the corpus (snapshots from the previous version kept in `tests/vt-corpus/`) | ~2 s | unit, on bump |
 | Handover | Scene: a test-mode core, 6 fake terminals, 5 handovers under load. Checks: screens `exact`, no replayed query replies, tokens reconnect (pi reconnect, Claude ancestry). Variants: kill -9 the core (`inexact`); kill -9 the holder; a new core crashing twice (rollback, `SUPERVISE`) | ~40 s | scene |
 | Downgrade lock | A pre-M1-style `instance.lock` EX taker fails while a holder lives | < 1 s | unit |
+| Core boundary (M2) | `check-core-boundary.sh` over `src/core` and `src/holder`, plus a planted forbidden import in a temporary copy | < 1 s | unit |
+| Hidden window (M2-C) | 20 MiB of output, a status change and an exit while hidden; state current, screen hash equal when shown | ~25 s | scene |
+| Replica (M3) | Encode → decode → encode of populated states; a type-info walk fails on an unlisted `State` field; command JSON round trips | < 1 s | unit |
+| Divergence (M3) | In test mode, after every script step: replica = core State, and each shown tab's screen hash = the core's | in every scene | scene |
+| No window (M3-G) | `detach_window`, then every routed command answers `no_window`; reattach restores pages | ~15 s | scene |
 | Window attach | Close the window, output continues, reopen, compare | ~30 s | scene |
 | Remote | A second core with its own dirs via `--via 'deckhand-core connect'` (no sshd): install, caps (`window.request` refused, OSC 52 ignored, a loopback URL blocked), reconnect | ~30 s | scene |
 | launchd, real signing | S2's manual checks; one nightly scene on a Developer ID build | — | nightly |
@@ -832,6 +940,9 @@ Test builds keep the hooks and use per-test dirs; they skip DR checks as ad-hoc 
 | Q6 | Several windows (M7): which window do agents steer? | The most recently focused |
 | Q7 | Holder upgrades: automatic on a `holder_rev` change, or ask first? | Automatic, named in the release notes |
 | Q8 | When D0 happens (it gates M4) | Before M3 ends |
+| Q9 | Does the window wait for its own command replies? 104 window call sites use the result at once. | Yes: the core sends the state delta before the reply. In process (M3) the wait is nil; M4 measures it over `core.sock` and bounds it (250 ms, then the call shows as pending). |
+| Q10 | Which caller do a page's own events (popups, dialogs, downloads) use? | A new `tab_host` caller: answers and tab records only, never `ui` |
+| Q11 | Does a hidden window keep App Nap off while terminals produce output? Parsing then keeps up, but it costs energy. | Yes, while a terminal has had output in the last 2 s (M2-C) |
 
 ---
 

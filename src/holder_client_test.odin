@@ -894,3 +894,23 @@ goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
 		break
 	}
 }
+
+// A tab opened while the holder upgrades runs on its own PTY (it stops at quit): the user is told
+// once per upgrade, not at every tab.
+@(test)
+holder_upgrading_told_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	saved := state.settings.keep_sessions
+	defer state.settings.keep_sessions = saved
+	state.settings.keep_sessions = true
+	hc.on, hc.tried, hc.upgrading = true, true, true
+	toast_clear()
+	testing.expect(t, !holder_wanted(), "spawned in the holder mid-upgrade")
+	testing.expect(t, strings.contains(toast.text, "upgrad"), toast.text)
+	toast_clear()
+	testing.expect(t, !holder_wanted())
+	testing.expect_value(t, toast.text, "")
+	hc.upgrading = false
+}

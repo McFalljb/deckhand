@@ -120,6 +120,7 @@ Holder_Client :: struct {
 	path:      string, // the socket connected to (an upgrade reconnects to it)
 	holder_rev: i64, // WELCOME.holder_rev
 	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
+	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
 	up_done:   bool, // the outcome is in up_result (mu)
 	up_result: Holder_Upgrade_Result,
@@ -665,7 +666,13 @@ holder_wanted :: proc() -> bool {
 	if !state.settings.keep_sessions || hc.lost || hc.handed do return false
 	// mid-upgrade a SPAWN would wait for the new image (seconds; holder_spawn gives up after
 	// HOLDER_WAIT): a tab opened then runs directly and stops at quit
-	if holder_upgrading() do return false
+	if holder_upgrading() {
+		if !hc.upgrade_told {
+			hc.upgrade_told = true // once per upgrade (holder_upgrade clears it)
+			toast_show("The session holder is upgrading: tabs opened in the next few seconds stop when Deckhand quits")
+		}
+		return false
+	}
 	return holder_client_start()
 }
 
@@ -954,7 +961,7 @@ holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
 		sync.unlock(&hc.wmu)
 		return {error = strings.clone(busy ? "an upgrade is already running" : "no session holder is attached")}
 	}
-	hc.upgrading, hc.up_done = true, false
+	hc.upgrading, hc.up_done, hc.upgrade_told = true, false, false
 	sync.unlock(&hc.mu)
 	sent := sock_write_all(hc.fd, out[:])
 	sync.unlock(&hc.wmu)

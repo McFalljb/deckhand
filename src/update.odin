@@ -342,15 +342,23 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 // What restarting to update does to what runs (the confirmation and the bar, ui_update.odin).
 // keeps: the session holder keeps sessions through it (keep_sessions).
 update_restart_effects :: proc(keeps: bool) -> string {
-	if !keeps do return "Running sessions, shells and jobs will be stopped."
-	stops := quit_would_stop(true)
-	jobs := jobs_any_running()
-	switch {
-	case stops && jobs: return "Sessions kept running carry on; other tabs' programs and running jobs will be stopped, browser pages will reload."
-	case stops:         return "Sessions kept running carry on; other tabs' programs will be stopped, browser pages will reload."
-	case jobs:          return "Sessions carry on; running jobs will be stopped, browser pages will reload and app tabs will restart."
-	}
-	return "Sessions carry on; browser pages will reload and app tabs will restart."
+	browsers := false
+	for s in state.open_sessions do for t in s.tabs do if _, is := t.kind.(Browser_Tab); is do browsers = true
+	return update_effects_text(keeps, quit_would_stop(keeps), jobs_any_running(), held_away_any(), browsers)
+}
+
+// The words (update_effects_wording): stops: programs Deckhand runs itself (app tabs too) stop;
+// away: tabs wait for a session holder this run could not reach (their programs run on in it).
+update_effects_text :: proc(keeps, stops, jobs, away, browsers: bool) -> string {
+	parts := make([dynamic]string, context.temp_allocator)
+	if keeps do append(&parts, stops ? "Sessions kept running carry on" : "Sessions carry on")
+	if stops do append(&parts, keeps ? "other tabs' programs will be stopped" : "Running sessions, shells and app tabs will be stopped")
+	if jobs do append(&parts, "running jobs will be stopped")
+	if away && !keeps do append(&parts, "sessions waiting for the session holder keep running in it")
+	if browsers do append(&parts, "browser pages will reload")
+	if len(parts) == 0 do return ""
+	s := strings.join(parts[:], "; ", context.temp_allocator)
+	return fmt.tprintf("%s%s.", strings.to_upper(s[:1], context.temp_allocator), s[1:])
 }
 
 // Why Update cannot go ahead here ("" = it can).
@@ -689,7 +697,7 @@ update_swap :: proc() -> string {
 			if exe, iok, iwhy := holder_install(bin, home_root); iok {
 				helper = strings.clone(exe, context.temp_allocator)
 				delete(exe)
-			} else do fmt.eprintln("Deckhand: update: no relaunch helper (", iwhy, "): sessions are kept, the new app finds them after a minute")
+			} else do fmt.eprintln("Deckhand: update: no relaunch helper (", iwhy, "): sessions are kept; the new app attaches to them as after a quit (no successor is named)")
 		}
 	}
 	backup := fmt.tprintf("%s.old-%s", bundle, upd.current)

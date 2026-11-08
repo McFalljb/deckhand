@@ -1402,7 +1402,7 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Experimental › Keep sessions when quitting** (the palette's **Keep sessions running when
   Deckhand quits**): off by default and not finished yet. With it on, a session holder keeps your
   tabs' programs running while Deckhand is closed, and reopening Deckhand picks them up again. Only
-  you can turn it on (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
+  you can change it (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
   still guarded after reopening, it stops that tab (Restart starts it again). With it on, ⌘Q
   asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
   Deckhand menu) quits and stops them too. Screens come back exactly after a quit; after a crash

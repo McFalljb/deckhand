@@ -538,40 +538,61 @@ holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 }
 
 // macOS refuses a connect with ECONNREFUSED when the listen backlog is full, too: a live
-// holder's socket refused once is tried again before it is taken for a dead one and removed.
+// holder's socket refused is tried again, with backoff (HOLDER_RECHECKS), before it is taken
+// for a dead one's and removed.
+@(private = "file")
+Backlog :: struct {
+	path:     string,
+	lfd:      posix.FD,
+	filled:   [dynamic]Sock_Fd,
+}
+
+// A listening socket at <dir>/holder-0000b10c.sock with its backlog full: connects are refused.
+@(private = "file")
+backlog_full :: proc(t: ^testing.T, dir: string) -> (b: Backlog) {
+	b.path = fmt.tprintf("%s/holder-0000b10c.sock", dir)
+	b.lfd = posix.socket(.UNIX, .STREAM)
+	addr: posix.sockaddr_un
+	addr.sun_family = .UNIX
+	for i in 0 ..< len(b.path) do addr.sun_path[i] = c.char(b.path[i])
+	testing.expect(t, posix.bind(b.lfd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
+	testing.expect(t, posix.listen(b.lfd, 1) == .OK)
+	b.filled = make([dynamic]Sock_Fd, context.temp_allocator)
+	for _ in 0 ..< 8 {
+		fd, ok, refused := sock_connect_why(b.path)
+		if !ok {
+			testing.expect(t, refused, "not refused")
+			break
+		}
+		append(&b.filled, fd)
+	}
+	_, ok0, _ := sock_connect_why(b.path)
+	testing.expect(t, !ok0, "the backlog is not full")
+	return
+}
+
+@(private = "file")
+backlog_done :: proc(b: ^Backlog) {
+	for fd in b.filled do sock_close(fd)
+	posix.close(b.lfd)
+	posix.unlink(strings.clone_to_cstring(b.path, context.temp_allocator))
+}
+
 @(test)
 holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	f := Fake_Holder{no_listen = true}
 	fake_holder_start(t, &f, keep = false)
 	defer fake_holder_stop(&f)
-	path := fmt.tprintf("%s/holder-0000b10c.sock", f.dir)
-	lfd := posix.socket(.UNIX, .STREAM)
-	defer posix.close(lfd)
-	addr: posix.sockaddr_un
-	addr.sun_family = .UNIX
-	for i in 0 ..< len(path) do addr.sun_path[i] = c.char(path[i])
-	testing.expect(t, posix.bind(lfd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
-	testing.expect(t, posix.listen(lfd, 1) == .OK)
-	defer posix.unlink(strings.clone_to_cstring(path, context.temp_allocator))
-	// fill the backlog: connects are refused now
-	filled := make([dynamic]Sock_Fd, context.temp_allocator)
-	for _ in 0 ..< 8 {
-		fd, ok, refused := sock_connect_why(path)
-		if !ok {
-			testing.expect(t, refused, "not refused")
-			break
-		}
-		append(&filled, fd)
-	}
-	_, ok0, _ := sock_connect_why(path)
-	testing.expect(t, !ok0, "the backlog is not full")
-	// a moment later the holder accepts them (it was busy)
-	drain := thread.create_and_start_with_data(rawptr(uintptr(lfd)), proc(p: rawptr) {
+	b := backlog_full(t, f.dir)
+	defer backlog_done(&b)
+	// the holder is busy for longer than the first recheck, and starts accepting well inside the
+	// retry window (HOLDER_RECHECKS adds up to 750 ms; a slow machine has 600 ms of slack)
+	drain := thread.create_and_start_with_data(rawptr(uintptr(b.lfd)), proc(p: rawptr) {
 		lfd := posix.FD(uintptr(p))
-		time.sleep(20 * time.Millisecond)
+		time.sleep(150 * time.Millisecond)
 		posix.fcntl(lfd, .SETFL, posix.O_Flags{.NONBLOCK})
-		for _ in 0 ..< 100 { // past the rescan too: every connect of holder_client_start is taken and closed
+		for _ in 0 ..< 150 { // past the rescan too: every connect of holder_client_start is taken and closed
 			for {
 				fd := posix.accept(lfd, nil, nil)
 				if fd < 0 do break
@@ -583,8 +604,25 @@ holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 	testing.expect(t, !holder_client_start())
 	thread.join(drain)
 	thread.destroy(drain)
-	for fd in filled do sock_close(fd)
-	testing.expect(t, os.exists(path), "a live holder's socket was removed")
+	testing.expect(t, os.exists(b.path), "a live holder's socket was removed")
+}
+
+// A socket whose backlog never drains (nothing will ever accept) is still a dead holder's once
+// the retries are used up: removed, within the retry window.
+@(test)
+holder_never_drained_unlinked :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{no_listen = true}
+	fake_holder_start(t, &f, keep = false)
+	defer fake_holder_stop(&f)
+	b := backlog_full(t, f.dir)
+	defer backlog_done(&b)
+	start := time.tick_now()
+	testing.expect(t, !holder_client_start())
+	took := time.tick_since(start)
+	testing.expect(t, !os.exists(b.path), "a socket nobody accepts on is left")
+	testing.expectf(t, took >= 700 * time.Millisecond, "removed after %v: before the retries were used up", took)
+	testing.expectf(t, took < 3 * time.Second, "removed after %v", took)
 }
 
 // A holder that closes an attaching app's connection without a byte (or never answers it) may be

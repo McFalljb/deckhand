@@ -36,7 +36,9 @@ import "trust"
 HOLDER_WAIT :: 5 * time.Second // the socket after a launch, WELCOME + TAILs, SPAWNED, GOODBYE_ACK
 HOLDER_MAX_TERMS :: 4096
 HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal
-HOLDER_RECHECK :: 50 * time.Millisecond // a refused connect is tried again after this (a full backlog)
+// A refused connect is tried again after each of these (macOS refuses on a full listen backlog
+// too: a busy live holder); 750 ms in all before its socket is taken for a dead one's.
+HOLDER_RECHECKS := [?]time.Duration{50 * time.Millisecond, 100 * time.Millisecond, 200 * time.Millisecond, 400 * time.Millisecond}
 HOLDER_RESCAN :: 300 * time.Millisecond // the sockets are looked at again after a silent holder
 
 // One holder terminal as the app knows it. hc.mu guards every field after the reader started.
@@ -162,10 +164,11 @@ holder_client_start :: proc() -> bool {
 				continue next
 			}
 			r := holder_connect(path)
-			if r == .Stale {
-				// macOS also refuses when the listen backlog is full: a busy live holder. Once more
-				// before its socket is taken for a dead one's
-				time.sleep(HOLDER_RECHECK)
+			// macOS also refuses when the listen backlog is full: a busy live holder. Tried again,
+			// with backoff, before its socket is taken for a dead one's (only a refusal: .Stale)
+			for wait in HOLDER_RECHECKS {
+				if r != .Stale do break
+				time.sleep(wait)
 				r = holder_connect(path)
 			}
 			switch r {

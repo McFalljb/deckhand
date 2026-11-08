@@ -80,6 +80,8 @@ Holder_Client :: struct {
 	acked:     bool,
 	ack:       map[u32]u64, // GOODBYE_ACK: id -> offset
 	dying:     [dynamic]i32, // pids of released terminals, until they are gone (pty_dying)
+	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
+	tokens_why:    string, // why not
 }
 
 hc := Holder_Client{fd = -1}
@@ -287,6 +289,13 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	copy(hc.key[:], key)
 	hc.next_id = max_id + 1
 	hc.on, hc.lost, hc.handed, hc.stop = true, false, false, false
+	// tokens.json from now on, whenever the holder was attached (at launch or mid-run): its
+	// processes keep their tokens across a quit. A new holder's key verifies no older file.
+	tpath := fmt.tprintf("%s/tokens.json", strings.trim_right(home_root, "/"))
+	if hc.previous == "none" && len(w.terminals) == 0 do os.remove(tpath)
+	loaded, twhy := socket_tokens_enable(tpath, hc.key[:])
+	delete(hc.tokens_why)
+	hc.tokens_loaded, hc.tokens_why = loaded, strings.clone(twhy)
 	hc.reader = thread.create_and_start(holder_reader)
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
 	return .Welcomed
@@ -640,6 +649,7 @@ holder_client_forget :: proc() {
 	delete(hc.dying)
 	delete(hc.instance)
 	delete(hc.previous)
+	delete(hc.tokens_why)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
 }

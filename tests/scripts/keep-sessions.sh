@@ -1,11 +1,13 @@
 #!/bin/sh
 # keep_sessions (holder_client.odin, holder_adopt.odin; docs/plans/background-core.md §7.2, §7.7):
-# 1. turns the setting on, starts a session with 6 shells printing counters and quits mid-output;
+# 1. turns the setting on, starts a session (a fake pi holding a bridge connection,
+#    fake-pi-keep.py) with 6 shells printing counters and quits mid-output;
 #    the session holder (build/deckhand-core, spawned directly: test mode never uses launchd)
 #    keeps them running.
 # 2. relaunches: every terminal is adopted from its snapshot, its screen hash equal to the one at
 #    the handover and, against a reference terminal fed every byte, equal with the probes; the
-#    same processes (pids) run on and the counters kept counting. Then the app is killed (-9).
+#    same processes (pids) run on and the counters kept counting; the kept pi's bridge reconnects
+#    with its reconnect token (tokens.json). Then the app is killed (-9).
 # 3. relaunches after that crash: adopted from the tails (inexact), same pids; then "Quit
 #    Deckhand and Stop All Sessions": the holder must be gone after it.
 # 4. relaunches: fresh shells in a new holder, which is killed (-9): every tab says holder_lost.
@@ -36,7 +38,7 @@ printf '{"type":"session","version":3,"id":"kkkk-1","cwd":"%s"}\n' "$PROJ" > "$S
 
 start() { # n: the app in the background (APP: its pid)
   HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="tests/scripts/keep-sessions-$1.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run$1.log" 2>&1 &
+    KEEP_BRIDGE_LOG="$W/bridge.log" PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-keep.py' \"\$@\"" build/deckhand > "$W/run$1.log" 2>&1 &
   APP=$!
 }
 wait_log() { # n TEXT: until run n's log has TEXT (20 s)
@@ -58,11 +60,14 @@ start 1; finish 1
 grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$W/data/workspace.json"; exit 1; }
 [ -f "$W/data/handover.json" ] || { echo "no handover.json"; exit 1; }
 
-# 2: adopted exactly; then the app is killed
+# 2: adopted exactly, the kept pi's bridge reconnects with its token; then the app is killed
 start 2
 wait_log 2 "screen_hash"
+for _ in $(seq 50); do [ "$(grep -c 'hello ok' "$W/bridge.log")" -ge 2 ] && break; sleep 0.2; done
 kill -9 "$APP"
 finish 2 killed
+[ "$(grep -c 'hello ok' "$W/bridge.log")" -ge 2 ] || { echo "the kept pi's bridge did not reconnect after the relaunch:"; cat "$W/bridge.log"; exit 1; }
+! grep -q "can't reach Deckhand" "$W/run2.log" || { echo "run 2: a kept session can't reach Deckhand (its token was not kept)"; exit 1; }
 python3 - "$W/run1.log" "$W/run2.log" "$ROOT/build/keep-sessions-before.json" "$ROOT/build/keep-sessions-after.json" "$ROOT/build/keep-sessions-before.txt" "$ROOT/build/keep-sessions-after.txt" <<'PY'
 import json, re, sys
 log1, log2 = open(sys.argv[1]).read(), open(sys.argv[2]).read()

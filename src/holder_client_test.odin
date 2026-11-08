@@ -191,3 +191,19 @@ holder_stale_socket_removed :: proc(t: ^testing.T) {
 	testing.expect(t, !os.exists(stale), "the dead holder's socket is removed")
 	testing.expect(t, !hc.tried, "the start is not used up")
 }
+
+// A holder started mid-run (keep_sessions turned on, then the first new tab) writes tokens.json
+// from then on, as one attached at launch does: else a quit and relaunch finds no tokens for
+// the tabs it spawned (pi "can't reach Deckhand", every read-only Claude stopped).
+@(test)
+holder_midrun_writes_tokens :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, previous = "none"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	testing.expect(t, holder_wanted(), "attached")
+	socket_tokens_bind(101, 1)
+	path := fmt.tprintf("%s/tokens.json", home_root)
+	_, ok, why := macfile_read(path, TOKENS_KIND, f.key[:], context.temp_allocator)
+	testing.expect(t, ok, why)
+}

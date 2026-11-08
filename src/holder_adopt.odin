@@ -306,7 +306,7 @@ holder_adopt_all :: proc() {
 		for &s in state.open_sessions do for &t in s.tabs do t.held = 0
 		return
 	}
-	if loaded, why := socket_tokens_enable(data_path("tokens.json"), hc.key[:]); !loaded && any_held && why != "missing" do fmt.eprintln("Deckhand: tokens.json not used:", why)
+	if !hc.tokens_loaded && any_held && hc.tokens_why != "missing" do fmt.eprintln("Deckhand: tokens.json not used:", hc.tokens_why) // enabled at attach (holder_connect)
 	snaps := handover_take()
 	untrusted := 0
 	for &s in state.open_sessions do for &tab in s.tabs {

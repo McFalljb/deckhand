@@ -48,17 +48,34 @@ data_dir :: proc(allocator := context.allocator) -> string {
 }
 
 // The data dir under home; "" when home is not an absolute path (never one relative to the cwd:
-// the launch then refuses to start, main.odin).
+// the launch then refuses to start, main.odin). The rename (0.1.7) reads both names:
+// ~/Library/Application Support/Deckhand when it is there (or neither is: a new install), else
+// the old ~/Library/Application Support/pi-desk, where every install up to 0.1.6 keeps its data.
+// Nothing is moved yet (0.1.8 moves it, with a link back), so a downgrade still finds it.
 data_dir_under :: proc(home: string, allocator := context.allocator) -> string {
 	if !strings.has_prefix(home, "/") do return ""
+	new, old := data_dir_names(home, context.temp_allocator)
+	return strings.clone(data_dir_pick(new, old), allocator)
+}
+
+// The data dir's new and old place under home (temp allocator by default).
+data_dir_names :: proc(home: string, allocator := context.temp_allocator) -> (new, old: string) {
 	when ODIN_OS == .Darwin {
-		p, _ := filepath.join({home, "Library", "Application Support", "deckhand"}, allocator)
+		new, _ = filepath.join({home, "Library", "Application Support", "Deckhand"}, allocator)
+		old, _ = filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
 	} else {
 		base := os.get_env("XDG_DATA_HOME", context.temp_allocator)
 		if !strings.has_prefix(base, "/") do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
-		p, _ := filepath.join({base, "deckhand"}, allocator)
+		new, _ = filepath.join({base, "deckhand"}, allocator)
+		old, _ = filepath.join({base, "pi-desk"}, allocator)
 	}
-	return p
+	return
+}
+
+// new when it is a folder or old is not one; else old. A link counts as what it points to.
+data_dir_pick :: proc(new, old: string) -> string {
+	if os.is_dir(new) || !os.is_dir(old) do return new
+	return old
 }
 
 // The home the data dir lives under. A release build: the account's (the user database), never

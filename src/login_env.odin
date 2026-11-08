@@ -369,7 +369,9 @@ login_env_merge_path :: proc(shell_path, inherited_path: string) -> string {
 @(private = "file")
 login_env_skipped :: proc(k: string) -> bool {
 	skip := LOGIN_ENV_SKIP
-	return slice.contains(skip[:], k) || strings.has_prefix(k, "DECKHAND_") || strings.has_prefix(k, "DECKHAND_")
+	// an explicit list (env_names.odin), not the DECKHAND_ prefix: the user's own
+	// DECKHAND_SIGN_IDENTITY and the like come from the shell like any variable
+	return slice.contains(skip[:], k) || env_desk_owned(k)
 }
 
 // The environment a GUI launch gives its children: the inherited one merged
@@ -476,7 +478,7 @@ login_env_startup :: proc() {
 	path := os.get_env("PATH", context.temp_allocator)
 	test_mode := hook_env(.Script) != ""
 	env, _ := os.environ(context.temp_allocator)
-	gui := login_env_gui_launch(int(posix.getppid()), path, os.get_env("DECKHAND_GUI_LAUNCH", context.temp_allocator), test_mode, login_env_from_claude(env))
+	gui := login_env_gui_launch(int(posix.getppid()), path, login_env_gui_switch(), test_mode, login_env_from_claude(env))
 	login_env.gui = gui
 	login_env.from_claude = login_env_from_claude(env)
 	if gui do login_env.launch = env_clone(login_env_strip_claude(env, false)) // a refresh asks with it (markers out)
@@ -576,3 +578,9 @@ login_env_refresh_done :: proc(ok: bool, env: []string) {
 }
 
 
+
+// DECKHAND_GUI_LAUNCH, else its old name PI_DESK_GUI_LAUNCH (env_names.odin).
+login_env_gui_switch :: proc() -> string {
+	if v, ok := os.lookup_env("DECKHAND_GUI_LAUNCH", context.temp_allocator); ok do return v
+	return os.get_env("PI_DESK_GUI_LAUNCH", context.temp_allocator)
+}

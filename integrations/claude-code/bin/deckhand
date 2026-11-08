@@ -6,6 +6,11 @@
 if [ -n "${DECKHAND_CLI:-}" ] && [ -x "$DECKHAND_CLI" ]; then
   exec "$DECKHAND_CLI" "$@"
 fi
+# its old name: a tab started before Deckhand 0.1.7 (or held across the update) has only
+# PI_DESK_CLI, …/MacOS/pi-desk-cli, a link to deckhand-cli in the bundle
+if [ -z "${DECKHAND_CLI:-}" ] && [ -n "${PI_DESK_CLI:-}" ] && [ -x "$PI_DESK_CLI" ]; then
+  exec "$PI_DESK_CLI" "$@"
+fi
 if [ "${1:-}" = hook ] && [ "${2:-}" = readonly ]; then
   # the read-only guard never passes a call it could not check (Deckhand runs it by its own path)
   echo "deckhand: the read-only guard is not available here: denied" >&2

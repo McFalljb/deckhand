@@ -419,7 +419,8 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	append(&env, ..claude_account_env(ct.account)) // its account: CLAUDE_CONFIG_DIR (none for the default)
 	if ro do append(&env, "DECKHAND_CLAUDE_READONLY=1")
 	claude_shots_tidy()
-	if !term_start(t, argv[:], cwd, env[:], {kind = .Claude}) {
+	// every DECKHAND_ name with its PI_DESK_ twin (env_names.odin)
+	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Claude}) {
 		socket_forget_tab(tab_id)
 		return false
 	}

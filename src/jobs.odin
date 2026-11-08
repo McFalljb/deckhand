@@ -1114,7 +1114,8 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	append(&env, fmt.tprintf("PATH=%s", jobs_env_path()))
 	if n := notes_env_job(); n != "" do append(&env, n) // the user's own, else the main folder (folders.odin)
 	if j.def.access == .Read do append(&env, "PI_KIT_READONLY=1")
-	append(&env, fmt.tprintf("DECKHAND_JOB=%s", j.def.id), fmt.tprintf("DECKHAND_RUN=%s", name), fmt.tprintf("DECKHAND_RUN_DIR=%s", dir), fmt.tprintf("DECKHAND_SCHEDULED_AT=%s", iso_local(scheduled)))
+	run_env := []string{fmt.tprintf("DECKHAND_JOB=%s", j.def.id), fmt.tprintf("DECKHAND_RUN=%s", name), fmt.tprintf("DECKHAND_RUN_DIR=%s", dir), fmt.tprintf("DECKHAND_SCHEDULED_AT=%s", iso_local(scheduled))}
+	append(&env, ..env_with_legacy(run_env)) // and their PI_DESK_ twins (env_names.odin)
 	if pi == "" || !run_spawn(r, argv[:], env[:], j.def.folder, fmt.tprintf("%s/stderr.log", dir)) {
 		r.spawn_error = strings.clone(pi == "" ? JOBS_NEED_PI : "could not start pi")
 		r.exit_code = -1

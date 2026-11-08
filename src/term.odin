@@ -253,18 +253,22 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 }
 
 // Environment for the child: ours, minus the identity of whatever terminal
-// launched Deckhand (and any Deckhand token it had), plus our own TERM and
+// launched Deckhand (and any Deckhand token it had, under either name), plus our own TERM and
 // `extra` (a pi tab's DECKHAND_SOCKET and DECKHAND_TOKEN).
 child_env :: proc(extra: []string = nil) -> []string {
 	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
-	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "DECKHAND_SOCKET=", "DECKHAND_TOKEN=", "DECKHAND_CONTROL_TOKEN=", "DECKHAND_SOCKET=", "DECKHAND_TOKEN=", "DECKHAND_CONTROL_TOKEN=", "DECKHAND_SHOTS_DIR=", "DECKHAND_SHOTS_DIR=", "DECKHAND_CLAUDE_TOKEN=", "DECKHAND_CLI=", "DECKHAND_CLAUDE_TAB=", "DECKHAND_GUI_LAUNCH=", "PI_KIT_READONLY=", "DECKHAND_CLAUDE_READONLY=", "DECKHAND_CLAUDE_ACCOUNT="} // a chat sets its own PI_KIT_READONLY, a read-only Claude tab its DECKHAND_CLAUDE_READONLY, a Claude tab its account
+	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_KIT_READONLY="} // a chat sets its own PI_KIT_READONLY; what Deckhand sets its tabs (env_desk_set, both names) goes below
 	// a Claude tab's account (claude_accounts.odin): its CLAUDE_CONFIG_DIR replaces the inherited
 	// one; "!CLAUDE_CONFIG_DIR" drops it
 	own_config := false
 	for x in extra do if strings.has_prefix(x, "CLAUDE_CONFIG_DIR=") || x == "!CLAUDE_CONFIG_DIR" do own_config = true
 	outer: for e in env {
 		for d in drop do if strings.has_prefix(e, d) do continue outer
+		// Deckhand's own names (tokens, the CLI, a read-only Claude tab's DECKHAND_CLAUDE_READONLY, a
+		// Claude tab's account), new and old: an explicit list, so the user's DECKHAND_SIGN_IDENTITY
+		// and the like pass (env_names.odin)
+		if env_desk_set(env_key(e)) do continue outer
 		// a data dir of test mode's never reaches a tab (release builds have no such variable)
 		when TEST_HOOKS do if strings.has_prefix(e, HOOK_ENV[.Data_Dir]) && strings.has_prefix(e[len(HOOK_ENV[.Data_Dir]):], "=") do continue outer
 		if own_config && strings.has_prefix(e, "CLAUDE_CONFIG_DIR=") do continue

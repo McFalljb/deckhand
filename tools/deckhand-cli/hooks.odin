@@ -208,7 +208,7 @@ background_snapshot :: proc(c: ^Ctx, input: json.Object) -> string {
 }
 
 run_hook :: proc(c: ^Ctx, event: string) {
-	if c.getenv("DECKHAND_SOCKET") == "" || c.getenv("DECKHAND_CLAUDE_TOKEN") == "" {
+	if path, token := tab_env(c); path == "" || token == "" {
 		if c.read_stdin != nil do c.read_stdin() // drained; outside Deckhand a hook does nothing
 		return
 	}

@@ -24,6 +24,11 @@ import "core:time"
 ctl_main :: proc(args: []string) -> int {
 	path := os.get_env("DECKHAND_SOCKET", context.allocator)
 	token := os.get_env("DECKHAND_TOKEN", context.allocator)
+	if path == "" && token == "" {
+		// the old names, as a pair (a control token copied before 0.1.7, a held session's env)
+		path = os.get_env("PI_DESK_SOCKET", context.allocator)
+		token = os.get_env("PI_DESK_TOKEN", context.allocator)
+	}
 	if path == "" || token == "" {
 		fmt.eprintln("deckhand --ctl: DECKHAND_SOCKET and DECKHAND_TOKEN must be set (Settings › Copy a control token gives both)")
 		return 2

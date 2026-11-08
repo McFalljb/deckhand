@@ -660,15 +660,18 @@ when ODIN_OS == .Darwin {
 	POSIX_SPAWN_SETSID :: 0x0400
 }
 
-// The app's environment: Deckhand's minus DECKHAND_* and PI_KIT_*, plus its
-// socket, a fresh single-use `app` token for this tab and DECKHAND_APP=1.
+// The app's environment: Deckhand's minus its own names (env_desk_owned: what it sets, the old
+// PI_DESK_* and the test hooks) and PI_KIT_*, plus its socket, a fresh single-use `app` token for
+// this tab and DECKHAND_APP=1, each with its PI_DESK_ twin (env_names.odin; forge reads those).
 @(private = "file")
 app_env :: proc(tab_id: u64) -> []string {
 	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
-	for e in env do if !strings.has_prefix(e, "DECKHAND_") && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
-	append(&out, ..socket_child_env({kind = .App, tab_id = tab_id}))
-	append(&out, "DECKHAND_APP=1")
+	for e in env do if !env_desk_owned(env_key(e)) && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
+	own := make([dynamic]string, context.temp_allocator)
+	append(&own, ..socket_child_env({kind = .App, tab_id = tab_id}))
+	append(&own, "DECKHAND_APP=1")
+	append(&out, ..env_with_legacy(own[:]))
 	return out[:]
 }
 
@@ -1691,9 +1694,18 @@ App_Entry :: struct {
 	cwd:  string,
 }
 
-app_entries :: proc(cwd: string) -> []App_Entry {
+// The project file: <cwd>/.deckhand/apps.json, else its name before the rename (0.1.7),
+// <cwd>/.pi-desk/apps.json, read for good (it is committed in the user's repos; never moved).
+// Both there: .deckhand/ only. Temp-allocated.
+app_json_path :: proc(cwd: string) -> string {
 	path, _ := filepath.join({cwd, ".deckhand", "apps.json"}, context.temp_allocator)
-	data, ok := app_json_read(path)
+	if os.exists(path) do return path
+	old, _ := filepath.join({cwd, ".pi-desk", "apps.json"}, context.temp_allocator)
+	return os.exists(old) ? old : path
+}
+
+app_entries :: proc(cwd: string) -> []App_Entry {
+	data, ok := app_json_read(app_json_path(cwd))
 	if !ok do return nil
 	v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if perr != nil do return nil

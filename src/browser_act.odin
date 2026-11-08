@@ -340,6 +340,10 @@ act_path_protected :: proc(path: string) -> bool {
 		}
 	}
 	append(&dirs, data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator))
+	if home != "" { // both of the data dir's places (the rename: platform.odin data_dir_names)
+		new, old := data_dir_names(home)
+		append(&dirs, new, old)
+	}
 	for d in dirs {
 		if under(path, d) do return true
 		// the folder's own real path too (a home folder behind a link)

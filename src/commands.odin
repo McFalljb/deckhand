@@ -1381,7 +1381,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// multi-use (each `deckhand --ctl` says hello with it anew), so the clipboard is the risk:
 		// marked concealed and transient, and cleared after CONTROL_TOKEN_CLIP_TTL if still there
 		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
-		exports := fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", socket_path(), tok)
+		// with the old names too, for scripts that read them (env_names.odin)
+		exports := fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s' PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok, socket_path(), tok)
 		if platform.set_clipboard_secret != nil {
 			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
 		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)

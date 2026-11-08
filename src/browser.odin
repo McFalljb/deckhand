@@ -214,7 +214,9 @@ cef_start :: proc() -> bool {
 	for d in ([]string{browser_dir, profile}) do posix.chmod(strings.clone_to_cstring(d, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	rlz_off(profile)
 	log_file, _ := filepath.join({root, "browser", "cef.log"}, context.temp_allocator)
-	shared: c.int = os.get_env("DECKHAND_CEF_SHARED_TEXTURE", context.temp_allocator) == "0" ? 0 : 1
+	shared_env, set := os.lookup_env("DECKHAND_CEF_SHARED_TEXTURE", context.temp_allocator)
+	if !set do shared_env = os.get_env("PI_DESK_CEF_SHARED_TEXTURE", context.temp_allocator) // its old name
+	shared: c.int = shared_env == "0" ? 0 : 1
 	cbs := Cef_Callbacks {
 		painted = on_cef_painted,
 		ring = on_cef_ring,

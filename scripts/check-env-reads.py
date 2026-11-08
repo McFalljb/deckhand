@@ -25,6 +25,9 @@ KNOWN = {
     "CFFIXED_USER_HOME",  # browser.odin: only a test-mode check that the scene set it
     "DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CLAUDE_TOKEN", "DECKHAND_SHOTS_DIR",  # the CLIs' transport
     "DECKHAND_GUI_LAUNCH", "DECKHAND_CEF_SHARED_TEXTURE",  # the user's workarounds
+    # their old names, read after the new ones (src/env_names.odin: the rename's fallback)
+    "PI_DESK_SOCKET", "PI_DESK_TOKEN", "PI_DESK_CLAUDE_TOKEN", "PI_DESK_SHOTS_DIR",
+    "PI_DESK_GUI_LAUNCH", "PI_DESK_CEF_SHARED_TEXTURE",
 }
 # Test and development knobs read outside hook_env, each compiled out of release builds where it
 # is read (the check on the release binary forbids the name too).

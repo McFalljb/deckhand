@@ -910,8 +910,8 @@ ro_allowed :: proc(t: ^testing.T, stdin: string, loc := #caller_location) {
 
 @(test)
 hook_readonly_bash :: proc(t: ^testing.T) {
-	for c in ([]string{"git commit -m x", "echo x > file", "sed -i s/a/b/ f", "cd x && rm -rf y", "pi-desk click 3 --selector '#buy'", "pi-desk type 3 hello", "pi-desk app call 4 save", "ls; pi-desk-cli upload 3 '#f' /etc/passwd", "pi-desk app open game", "pi-desk app close 4", "pi-desk app restart 4", "deckhand click 3 e1", "deckhand app call 4 save", "x=1 /opt/bin/deckhand type 3 hi", "deckhand --timeout 5 press 3 Enter", "Deckhand click 3 e1", "PI-DESK click 3 e1", "Pi-Desk-Cli upload 3 '#f' /etc/passwd", "/Applications/Deckhand.app/Contents/MacOS/../../Resources/claude-code/bin/DECKHAND type 3 hi", "DeckHand app call 4 save"}) do ro_denied(t, ro_bash(c))
-	for c in ([]string{"echo x >/dev/null", "make 2>&1 | tail", "git status", "ls -la", "pi-desk read 3", "pi-desk screenshot 3", "pi-desk tabs", "pi-desk app list-declared", "pi-desk app screenshot 4", "deckhand read 3", "deckhand tabs", "deckhand app list-declared", "deckhand show README.md", "deckhand show notes.txt --line 3", "pi-desk show a.md", "mydeckhand click 3", "deckhands click 3", "deckhand-tool click 3", "Deckhand read 3", "PI-DESK tabs", "MyDeckhand click 3"}) do ro_allowed(t, ro_bash(c))
+	for c in ([]string{"git commit -m x", "echo x > file", "sed -i s/a/b/ f", "cd x && rm -rf y", "pi-desk click 3 --selector '#buy'", "pi-desk type 3 hello", "pi-desk app call 4 save", "ls; pi-desk-cli upload 3 '#f' /etc/passwd", "pi-desk app open game", "pi-desk app close 4", "pi-desk app restart 4", "deckhand click 3 e1", "deckhand app call 4 save", "x=1 /opt/bin/deckhand type 3 hi", "deckhand --timeout 5 press 3 Enter", "Deckhand click 3 e1", "PI-DESK click 3 e1", "Pi-Desk-Cli upload 3 '#f' /etc/passwd", "deckhand-cli upload 3 '#f' /etc/passwd", "/Applications/Deckhand.app/Contents/MacOS/deckhand-cli click 3 e1", "Deckhand-Cli type 3 hi", "x=1 deckhand-cli app call 4 save", "/Applications/Deckhand.app/Contents/MacOS/../../Resources/claude-code/bin/DECKHAND type 3 hi", "DeckHand app call 4 save"}) do ro_denied(t, ro_bash(c))
+	for c in ([]string{"echo x >/dev/null", "make 2>&1 | tail", "git status", "ls -la", "pi-desk read 3", "pi-desk screenshot 3", "pi-desk tabs", "pi-desk app list-declared", "pi-desk app screenshot 4", "deckhand read 3", "deckhand tabs", "deckhand app list-declared", "deckhand show README.md", "deckhand show notes.txt --line 3", "pi-desk show a.md", "mydeckhand click 3", "deckhands click 3", "deckhand-tool click 3", "deckhand-cli read 3", "deckhand-clix click 3", "deckhand-cli-old click 3", "Deckhand read 3", "PI-DESK tabs", "MyDeckhand click 3"}) do ro_allowed(t, ro_bash(c))
 	ro_denied(t, ro_bash("ls", bg = true)) // background commands, as pi's read-only bash_bg
 }
 
@@ -1060,4 +1060,35 @@ skill_and_manual_say_show :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(MANUAL, "## Showing the user a file"), "a manual section")
 	testing.expect(t, strings.contains(MANUAL, "deckhand show PATH"), "its usage")
 	testing.expect(t, strings.contains(USAGE, "show PATH"), "in --help")
+}
+
+// The rename's bridge (0.1.7): a Claude tab started before it (or held across the update) has
+// only the old names, PI_DESK_SOCKET, PI_DESK_CLAUDE_TOKEN and PI_DESK_SHOTS_DIR; the CLI reads
+// them when the new ones are not set, as a pair, never one of each.
+@(test)
+cli_reads_old_env_names :: proc(t: ^testing.T) {
+	f := Fake{}
+	env := make(map[string]string, context.temp_allocator)
+	env["HOME"] = "/h" // not empty: test_ctx gives an empty map its default tab
+	c := test_ctx(&f, env = env)
+	p, k := tab_env(&c)
+	testing.expect(t, p == "" && k == "", "nothing set: no tab")
+	env["PI_DESK_SOCKET"] = "/old.sock"
+	env["PI_DESK_CLAUDE_TOKEN"] = "old"
+	env["PI_DESK_SHOTS_DIR"] = "/old-shots"
+	c = test_ctx(&f, env = env)
+	p, k = tab_env(&c)
+	testing.expect(t, p == "/old.sock" && k == "old", "the old names")
+	testing.expect_value(t, shots_env(&c), "/old-shots")
+	env["DECKHAND_SOCKET"] = "/new.sock"
+	env["DECKHAND_CLAUDE_TOKEN"] = "new"
+	env["DECKHAND_SHOTS_DIR"] = "/new-shots"
+	c = test_ctx(&f, env = env)
+	p, k = tab_env(&c)
+	testing.expect(t, p == "/new.sock" && k == "new", "the new names first")
+	testing.expect_value(t, shots_env(&c), "/new-shots")
+	delete_key(&env, "DECKHAND_CLAUDE_TOKEN")
+	c = test_ctx(&f, env = env)
+	p, k = tab_env(&c)
+	testing.expect(t, p == "/new.sock" && k == "", "a half-set new pair is not mixed with the old token")
 }

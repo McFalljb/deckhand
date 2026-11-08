@@ -220,7 +220,8 @@ m_sed_i :: proc(s: string) -> bool {
 
 // Whether the command runs Deckhand's CLI with a verb that acts on a page or an app (Deckhand
 // refuses them from a read-only tab's token too; this says so before the call). A `deckhand`,
-// `pi-desk` (its old name, an alias) or `pi-desk-cli` word followed, after options, by an act verb.
+// `deckhand-cli`, `pi-desk` (its old name, an alias) or `pi-desk-cli` (the CLI's old name, a link
+// to it in the bundle) word followed, after options, by an act verb.
 // In any case (`Deckhand click`, `PI-DESK click`): macOS file names ignore case, so those run too.
 desk_act :: proc(cmd: string) -> bool {
 	s := strings.to_lower(cmd, context.temp_allocator)
@@ -231,6 +232,7 @@ desk_act :: proc(cmd: string) -> bool {
 		switch {
 		case strings.has_prefix(s[k:], "deckhand"):
 			j = k + len("deckhand")
+			if strings.has_prefix(s[j:], "-cli") do j += 4
 		case strings.has_prefix(s[k:], "pi-desk"):
 			j = k + len("pi-desk")
 			if strings.has_prefix(s[j:], "-cli") do j += 4

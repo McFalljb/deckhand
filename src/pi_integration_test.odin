@@ -88,8 +88,9 @@ pi_integration_args_follow_the_manifest :: proc(t: ^testing.T) {
 
 // A pi tab's and Atlas's environment: DECKHAND_SOCKET, DECKHAND_TOKEN (Atlas: also
 // DECKHAND_CONTROL_TOKEN) and DECKHAND_SHOTS_DIR; never pi-kit's PI_DESK_SOCKET, PI_DESK_TOKEN
-// or PI_DESK_CONTROL_TOKEN, so an installed pi-kit's desk extensions stay inert. App tabs keep
-// PI_DESK_SOCKET and PI_DESK_TOKEN (docs/ENGINE-BRIDGE.md). Inherited ones are dropped.
+// or PI_DESK_CONTROL_TOKEN, so an installed pi-kit's desk extensions stay inert. App tabs get
+// DECKHAND_SOCKET and DECKHAND_TOKEN, and their PI_DESK_ twins (env_names.odin; the app tab's own
+// environment adds those: env_names_test.odin). Inherited ones are dropped.
 @(test)
 pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -105,8 +106,7 @@ pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 		out := make([dynamic]string, context.temp_allocator)
 		for e in env {
 			k, _, _ := strings.partition(e, "=")
-			bridge := k == "PI_DESK_SOCKET" || k == "PI_DESK_TOKEN" || k == "PI_DESK_CONTROL_TOKEN" || k == "PI_DESK_SHOTS_DIR"
-			if bridge || strings.has_prefix(k, "DECKHAND_") do append(&out, k) // the bridge's (the test run's own DECKHAND_CMD and the rest are inherited)
+			if env_desk_set(k) do append(&out, k) // the bridge's, either name (the test run's own DECKHAND_CMD and the rest are inherited)
 		}
 		return strings.join(out[:], " ", context.temp_allocator)
 	}
@@ -119,7 +119,8 @@ pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 	defer for k in ([]string{"DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "PI_DESK_SOCKET", "PI_DESK_TOKEN"}) do os.unset_env(k)
 	testing.expect_value(t, names(child_env(socket_pi_env({kind = .Panel, tab_id = 4343}))), "DECKHAND_SOCKET DECKHAND_TOKEN DECKHAND_SHOTS_DIR")
 	testing.expect_value(t, names(child_env(agent_env(4343))), "DECKHAND_SOCKET DECKHAND_TOKEN DECKHAND_CONTROL_TOKEN DECKHAND_SHOTS_DIR")
-	testing.expect_value(t, names(socket_child_env({kind = .App, tab_id = 4343})), "PI_DESK_SOCKET PI_DESK_TOKEN")
+	testing.expect_value(t, names(socket_child_env({kind = .App, tab_id = 4343})), "DECKHAND_SOCKET DECKHAND_TOKEN")
+	testing.expect_value(t, names(env_with_legacy(socket_child_env({kind = .App, tab_id = 4343}))), "DECKHAND_SOCKET PI_DESK_SOCKET DECKHAND_TOKEN PI_DESK_TOKEN")
 	testing.expect_value(t, names(child_env()), "") // a shell tab inherits none of them
 	for e in agent_env(4343) do if strings.has_prefix(e, "DECKHAND_CONTROL_TOKEN=") do testing.expect_value(t, len(e), len("DECKHAND_CONTROL_TOKEN=") + 64)
 	// a pi that will not load the integration (too old, or none in this build) gets no token at

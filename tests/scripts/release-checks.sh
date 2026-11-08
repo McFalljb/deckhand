@@ -130,7 +130,8 @@ for s in DECKHAND_SCRIPT DECKHAND_DATA_DIR DECKHAND_RUNTIME_DIR DECKHAND_UPDATE_
   scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
 done
 # the catch-all: any other DECKHAND_ name fails too (a knob outside HOOK_ENV); the allowed ones pass
-for s in DECKHAND_NEW_KNOB DECKHAND_CEF_NETLOG DECKHAND_CEF_SPARE DECKHAND_x; do
+# (the old PI_DESK_ names too: an old hook name, a knob under the old prefix)
+for s in DECKHAND_NEW_KNOB DECKHAND_CEF_NETLOG DECKHAND_CEF_SPARE DECKHAND_x PI_DESK_SCRIPT PI_DESK_DATA_DIR PI_DESK_NEW_KNOB PI_DESK_x; do
   cp /usr/bin/true "$H/planted"
   printf '\001%s\001' "$s" >> "$H/planted"
   scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
@@ -138,6 +139,9 @@ done
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_SOCKET\001DECKHAND_GUI_LAUNCH\001DECKHAND_*\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowed DECKHAND_ names pass" || bad "an allowed name refused: $(cat "$H/out.txt")"
+cp /usr/bin/true "$H/planted"
+printf '\001PI_DESK_SOCKET\001PI_DESK_CLAUDE_TOKEN\001PI_DESK_CLI\001PI_DESK_GUI_LAUNCH\001PI_DESK_\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the old names the rename still sets pass" || bad "an allowed old name refused: $(cat "$H/out.txt")"
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"
@@ -153,6 +157,8 @@ lint "a built name" fail 'v := os.get_env(fmt.tprintf("DECKHAND_%s", x))'
 lint "an unknown literal" fail 'v := os.get_env("DECKHAND_NEW_KNOB")'
 lint "a C getenv of a knob" fail 'const char* v = getenv("DECKHAND_NEW_KNOB");'
 lint "a known literal" pass 'v := os.get_env("HOME")'
+lint "an old name the rename reads" pass 'v := os.get_env("PI_DESK_SOCKET")'
+lint "an old test hook's name" fail 'v := os.get_env("PI_DESK_SCRIPT")'
 lint "env_lookup of a built name" fail 'v, _ := env_lookup(child_base_env(), fmt.tprintf("DECKHAND_%s", x))'
 lint "env_lookup of an unknown literal" fail 'v, _ := env_lookup(child_base_env(), "DECKHAND_NEW_KNOB")'
 lint "env_lookup of a known literal" pass 'v, _ := env_lookup(child_base_env(), "PATH")'

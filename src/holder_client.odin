@@ -460,7 +460,12 @@ holder_reader :: proc() {
 		if why != "" {
 			// mid-upgrade, the old image's connection closes at its exec: the new image (or the
 			// keeper) serves the same socket
-			if sync.atomic_load(&hc.upgrading) && holder_reattach() do continue
+			if sync.atomic_load(&hc.upgrading) && holder_reattach() {
+				// frames that came behind the new image's TAILs are in hc.rx already (a quiet
+				// session sends nothing more), as after a first attach
+				if !holder_frames() do return
+				continue
+			}
 			holder_lose(why)
 			return
 		}

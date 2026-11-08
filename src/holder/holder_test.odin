@@ -10,6 +10,8 @@ import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
+import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -942,22 +944,57 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(h.conns), 1)
 }
 
-// A SPAWNed program holds only 0, 1 and 2: no master of another terminal, no socket, no lock.
+// The fds this process inherited open without close-on-exec, before any test ran: a CI runner
+// hands its shells some (GitHub's macOS one: 131, 140, ...). They are no leak of the holder's (it
+// is started with only 0-2: holder_launch_direct's POSIX_SPAWN_CLOEXEC_DEFAULT, launchd), so
+// child_holds_only_stdio allows them and nothing else.
+inherited_fds: [256]c.int
+inherited_n: int
+
+@(init)
+inherited_fds_init :: proc "contextless" () {
+	F_GETFD :: 1
+	for fd in c.int(3) ..< 4096 {
+		flags := fcntl(fd, F_GETFD)
+		if flags < 0 || flags & FD_CLOEXEC != 0 do continue
+		if inherited_n < len(inherited_fds) do inherited_fds[inherited_n] = fd
+		inherited_n += 1
+	}
+}
+
+fd_inherited :: proc(fd: int) -> bool {
+	for i in 0 ..< min(inherited_n, len(inherited_fds)) do if int(inherited_fds[i]) == fd do return true
+	return false
+}
+
+// A SPAWNed program holds only 0, 1 and 2 (and what the test process itself inherited, above):
+// no master of another terminal, no socket, no lock.
 @(test)
 child_holds_only_stdio :: proc(t: ^testing.T) {
+	if !testing.expectf(t, inherited_n <= len(inherited_fds), "%d inherited fds: more than listed", inherited_n) do return
 	h := new_test_holder(t)
 	defer holder_free(h, true)
 	f := fake_connect(t, h)
 	defer fake_free(f)
 	hello(t, h, f)
 	spawn_ok(t, h, f, 1, "exec /bin/sleep 5") // another terminal's master is open meanwhile
-	// ls lists what it inherited plus the two it opens to read the directory (3 and 4, the lowest
-	// free ones, if none leaked; as from a clean shell)
+	// ls lists what it inherited plus the two it opens to read the directory (the two lowest
+	// free ones, if none leaked: 3 and 4 from a clean shell; as from a clean shell)
 	spawn_ok(t, h, f, 2, `exec /bin/ls /dev/fd`)
 	_, ok := exited_of(t, h, f, 2)
 	testing.expect(t, ok)
-	out := strings.fields(output_of(t, f, 2), context.temp_allocator)
-	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "the child holds more than 0-2: %v", out)
+	got := make([dynamic]string, context.temp_allocator)
+	for s in strings.fields(output_of(t, f, 2), context.temp_allocator) {
+		n, is_num := strconv.parse_int(s)
+		if is_num && n > 2 && fd_inherited(n) do continue
+		append(&got, s)
+	}
+	want := make([dynamic]string, context.temp_allocator)
+	append(&want, "0", "1", "2")
+	for fd := 3; len(want) < 5; fd += 1 do if !fd_inherited(fd) do append(&want, fmt.tprintf("%d", fd))
+	slice.sort(got[:])
+	slice.sort(want[:])
+	testing.expectf(t, slice_eq(got[:], want[:]), "the child holds more than 0-2: %v (inherited by the tests: %v)", got[:], inherited_fds[:min(inherited_n, len(inherited_fds))])
 }
 
 slice_eq :: proc(a, b: []string) -> bool {

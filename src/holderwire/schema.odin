@@ -41,7 +41,7 @@ Field_Spec :: struct {
 	type:     Field_Type,
 	required: bool,
 	nullable: bool, // null allowed (and means absent)
-	items:    []Field_Spec, // .Objects: each element's fields
+	items:    []Field_Spec, // .Objects: each element's fields; .Object: its fields
 }
 
 Kind_Spec :: struct {
@@ -53,6 +53,9 @@ Kind_Spec :: struct {
 }
 
 @(private)
+EXIT_STATUS := []Field_Spec{{name = "code", type = .Int, required = true}, {name = "signal", type = .Int, required = true}}
+
+@(private)
 WELCOME_TERMINAL := []Field_Spec {
 	{name = "id", type = .Int, required = true},
 	{name = "pid", type = .Int, required = true},
@@ -62,7 +65,7 @@ WELCOME_TERMINAL := []Field_Spec {
 	{name = "xpixel", type = .Int, required = true},
 	{name = "ypixel", type = .Int, required = true},
 	{name = "offset", type = .Int, required = true},
-	{name = "exit", type = .Object, nullable = true},
+	{name = "exit", type = .Object, nullable = true, items = EXIT_STATUS},
 }
 
 @(private)
@@ -208,6 +211,7 @@ field_problems :: proc(out: ^[dynamic]string, where_: string, rf, cf: json.Array
 		if boolean(c["nullable"]) != boolean(r["nullable"]) do append(out, fmt.aprintf("%s.%s: nullable changed", where_, name, allocator = allocator))
 		ri, rhas := r["items"].(json.Array)
 		ci, chas := c["items"].(json.Array)
+		if rhas && !chas do append(out, fmt.aprintf("%s.%s: items removed", where_, name, allocator = allocator))
 		if rhas && chas do field_problems(out, fmt.tprintf("%s.%s[]", where_, name), ri, ci, allocator)
 	}
 	for cx in cf {

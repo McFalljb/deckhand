@@ -4,6 +4,8 @@ package main
 
 import "base:runtime"
 import "core:c"
+import "core:encoding/endian"
+import "core:encoding/json"
 import "core:fmt"
 import "core:math/rand"
 import "core:os"
@@ -200,10 +202,6 @@ snap_same :: proc(t: ^testing.T, a, b: gh.Terminal, what: string) -> bool {
 	return false
 }
 
-// Probes the same bytes into both: hidden state (pen and charset, tab stops,
-// saved cursor, scroll region, pending wrap, the other screen) shows up.
-SNAP_PROBES := [?]string{"Pqx\tT\tT" + ESC + "8R" + ESC + "[999;1HA\n\n\nB" + ESC + "MC" + ESC + "[1;1HD" + ESC + "[5SE" + ESC + "[2TF", ESC + "[?1049l" + ESC + "[?47lQ" + ESC + "8S" + ESC + "[999;999HZ"}
-
 // Snapshot at a random byte of a random event, rebuild, feed both the rest
 // (resizes at the same offset), compare before and after the probes.
 @(private = "file")
@@ -256,13 +254,7 @@ snap_roundtrip :: proc(t: ^testing.T, cs: Snap_Case, seed: u64, formats: []strin
 	}
 	if b == nil do b = take(t, a, formats, cs, &meta)
 	if b == nil do return false, meta
-	exact = snap_dump(a) == snap_dump(b)
-	for p in SNAP_PROBES {
-		snap_write(a, p)
-		snap_write(b, p)
-		exact = exact && snap_dump(a) == snap_dump(b)
-	}
-	return exact, meta
+	return screen_equal_probed(a, b), meta
 }
 
 @(test)
@@ -468,7 +460,10 @@ snapshot_stored_corpus :: proc(t: ^testing.T) {
 @(test)
 snapshot_adopt :: proc(t: ^testing.T) {
 	app_context = context
+	font.cell_w, font.cell_h = 10, 20
 	src := snap_gt(30, 6)
+	small := uint(1024 * 1024)
+	gh.terminal_set(src, .Scrollback_Max_Bytes, &small)
 	snap_write(src, "restored " + ESC + "[1;31mred")
 	blob, _, _ := snapshot_encode(src, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
 	gh.terminal_free(src)
@@ -487,13 +482,78 @@ snapshot_adopt :: proc(t: ^testing.T) {
 	limit: c.size_t
 	gh.terminal_get(term.gt, .Continuation_Max_Bytes, &limit)
 	testing.expect_value(t, limit, TERM_CONTINUATION_MAX)
+	// as term_start sets them: the scrollback limit and the cell pixel size (CSI 14 t below)
+	sbmax: c.size_t
+	gh.terminal_get(term.gt, .Scrollback_Max_Bytes, &sbmax)
+	testing.expect_value(t, sbmax, TERM_SCROLLBACK_MAX)
 	snap_write(term.gt, ESC + "[6n") // cursor position report: answered through Write_Pty
 	posix.fcntl(fds[0], .SETFL, posix.O_NONBLOCK)
 	buf: [64]u8
 	n := posix.read(fds[0], &buf[0], len(buf))
 	testing.expect_value(t, n > 0 ? string(buf[:n]) : "", ESC + "[1;13R")
+	w, h: u32
+	gh.terminal_get(term.gt, .Width_Px, &w)
+	gh.terminal_get(term.gt, .Height_Px, &h)
+	testing.expect_value(t, w, 300) // 30x6 cells of 10x20 px
+	testing.expect_value(t, h, 120)
 	term.running = false
 	term_free(term)
 	posix.close(fds[0])
+	free_all(context.temp_allocator)
+}
+
+// Review findings 1 and 2: hostile meta (deep nesting, huge, an absurd size) is
+// refused before parsing or allocating a grid.
+@(test)
+snapshot_hostile_meta :: proc(t: ^testing.T) {
+	pack :: proc(meta: string, body: string) -> []u8 {
+		out := make([dynamic]u8, context.temp_allocator)
+		n: [4]u8
+		endian.put_u32(n[:], .Little, u32(len(meta)))
+		append(&out, ..n[:])
+		append(&out, meta)
+		append(&out, body)
+		return out[:]
+	}
+	deep := strings.concatenate({`{"format":"vt","cols":20,"rows":4,"x":`, strings.repeat("[", 100_000, context.temp_allocator)}, context.temp_allocator)
+	_, _, err := snapshot_decode(pack(deep, ""))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	big := strings.concatenate({`{"format":"vt","cols":20,"rows":4,"pad":"`, strings.repeat("x", 70_000, context.temp_allocator), `"}`}, context.temp_allocator)
+	_, _, err = snapshot_decode(pack(big, ""))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":65535,"rows":65535}`, "hello\x1b[2J"))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":1001,"rows":4}`, ""))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	// GHOSTSNP whose grid disagrees with its meta
+	gt := snap_gt(30, 6)
+	defer gh.terminal_free(gt)
+	blob, _, _ := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	meta, body, _ := snapshot_unpack(blob)
+	meta.cols = 31
+	mj, _ := json.marshal(meta, {}, context.temp_allocator)
+	_, _, err = snapshot_decode(pack(string(mj), string(body)))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	free_all(context.temp_allocator)
+}
+
+// The advertised "ghostsnp/1" is what the library writes: GHOSTSNP version 1
+// (body bytes 8-9, LE). A bump that changes it must add the new format name.
+@(test)
+snapshot_ghostsnp_version :: proc(t: ^testing.T) {
+	gt := snap_gt(10, 2)
+	defer gh.terminal_free(gt)
+	p: [^]u8
+	n: c.size_t
+	testing.expect_value(t, gh.snapshot_encode_alloc(gt, nil, &p, &n), gh.Result.Success)
+	defer gh.free(nil, p, n)
+	testing.expect_value(t, string(p[:8]), "GHOSTSNP")
+	ver := u16(p[8]) | u16(p[9]) << 8
+	testing.expect_value(t, ver, 1)
+	testing.expect_value(t, SNAPSHOT_GHOSTSNP, fmt.tprintf("ghostsnp/%d", ver))
+	blob, _, _ := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	meta, body, _ := snapshot_unpack(blob)
+	testing.expect_value(t, meta.format, SNAPSHOT_GHOSTSNP)
+	testing.expect_value(t, u16(body[8]) | u16(body[9]) << 8, 1)
 	free_all(context.temp_allocator)
 }

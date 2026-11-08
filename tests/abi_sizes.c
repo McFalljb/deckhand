@@ -73,6 +73,17 @@ int main(void) {
   printf("Terminal_Data.Pwd value %d\n", (int)GHOSTTY_TERMINAL_DATA_PWD);
   printf("Terminal_Data.Total_Rows value %d\n", (int)GHOSTTY_TERMINAL_DATA_TOTAL_ROWS);
   printf("Terminal_Data.Scrollback_Rows value %d\n", (int)GHOSTTY_TERMINAL_DATA_SCROLLBACK_ROWS);
+  printf("Terminal_Data.Width_Px value %d\n", (int)GHOSTTY_TERMINAL_DATA_WIDTH_PX);
+  printf("Terminal_Data.Height_Px value %d\n", (int)GHOSTTY_TERMINAL_DATA_HEIGHT_PX);
+  printf("Terminal_Data.Cursor_Y value %d\n", (int)GHOSTTY_TERMINAL_DATA_CURSOR_Y);
+  printf("Terminal_Data.Color_Background value %d\n", (int)GHOSTTY_TERMINAL_DATA_COLOR_BACKGROUND);
+  printf("Terminal_Data.Color_Cursor value %d\n", (int)GHOSTTY_TERMINAL_DATA_COLOR_CURSOR);
+  printf("Cell_Data.Has_Text value %d\n", (int)GHOSTTY_CELL_DATA_HAS_TEXT);
+  printf("Cell_Data.Style_Id value %d\n", (int)GHOSTTY_CELL_DATA_STYLE_ID);
+  printf("Cell_Semantic_Content.Prompt value %d\n", (int)GHOSTTY_CELL_SEMANTIC_PROMPT);
+  printf("Snapshot_Decoder_Option.Max_Continuation_Bytes value %d\n", (int)GHOSTTY_SNAPSHOT_DECODER_OPT_MAX_CONTINUATION_BYTES);
+  printf("Snapshot_Decoder_Option.Kitty_Image_Storage_Limit value %d\n", (int)GHOSTTY_SNAPSHOT_DECODER_OPT_KITTY_IMAGE_STORAGE_LIMIT);
+  printf("Snapshot_Decoder_Data.History_Rows_Alternate value %d\n", (int)GHOSTTY_SNAPSHOT_DECODER_DATA_HISTORY_ROWS_ALTERNATE);
   printf("Terminal_Data.Color_Foreground value %d\n", (int)GHOSTTY_TERMINAL_DATA_COLOR_FOREGROUND);
   printf("Terminal_Data.Color_Palette value %d\n", (int)GHOSTTY_TERMINAL_DATA_COLOR_PALETTE);
   printf("Terminal_Data.Scrollback_Max_Bytes value %d\n", (int)GHOSTTY_TERMINAL_DATA_SCROLLBACK_MAX_BYTES);

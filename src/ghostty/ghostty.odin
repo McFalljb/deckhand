@@ -224,6 +224,8 @@ Terminal_Data :: enum c.int {
 	Pwd             = 13, // String, borrowed until the next mutating call
 	Total_Rows      = 14, // c.size_t: scrollback plus the active area
 	Scrollback_Rows = 15, // c.size_t
+	Width_Px        = 16, // u32: cols * the cell width given to terminal_resize
+	Height_Px       = 17, // u32
 	Color_Foreground = 18, // Color_Rgb; No_Value when unset
 	Color_Background = 19,
 	Color_Cursor     = 20,

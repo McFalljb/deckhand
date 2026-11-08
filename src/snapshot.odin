@@ -22,16 +22,21 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
 import gh "ghostty"
+import hw "holderwire"
 
 SNAPSHOT_GHOSTSNP :: "ghostsnp/1"
 SNAPSHOT_VT :: "vt"
 // What this side decodes, best first: the hello's `snapshot` list (§5.2).
 SNAPSHOT_FORMATS := [?]string{SNAPSHOT_GHOSTSNP, SNAPSHOT_VT}
 
+// The meta is small; anything larger is refused before it is parsed (see
+// holderwire.json_shape_ok for why the parser needs guarding).
+SNAPSHOT_META_MAX :: 64 * 1024
+
 // Beside the terminal: what Deckhand keeps about the stream. Grow-only JSON;
 // unknown fields are ignored. (OSC 7501 status joins in M1 PR B, with the
-// holder that needs it.) Fields are 8 bytes wide: see holderwire's note on
-// core:encoding/json.
+// holder that needs it.) After decoding, `format` is always one of the
+// SNAPSHOT_* constants, so the meta holds no allocation.
 Snapshot_Meta :: struct {
 	format:      string, // SNAPSHOT_GHOSTSNP or SNAPSHOT_VT
 	offset:      u64, // the PTY stream offset the snapshot is at
@@ -161,12 +166,19 @@ snapshot_pack :: proc(meta: Snapshot_Meta, body: []u8, allocator := context.allo
 snapshot_unpack :: proc(blob: []u8) -> (meta: Snapshot_Meta, body: []u8, err: Snapshot_Error) {
 	if len(blob) < 4 do return {}, nil, .Bad_Snapshot
 	n, _ := endian.get_u32(blob[:4], .Little)
-	if u64(n) > u64(len(blob) - 4) do return {}, nil, .Bad_Snapshot
+	if u64(n) > u64(len(blob) - 4) || n > SNAPSHOT_META_MAX do return {}, nil, .Bad_Snapshot
+	if !hw.json_shape_ok(blob[4:4 + n], 8, 256) do return {}, nil, .Bad_Snapshot
 	v, perr := json.parse(blob[4:4 + n], .JSON, true, context.temp_allocator)
 	if perr != nil do return {}, nil, .Bad_Snapshot
 	if _, ok := v.(json.Object); !ok do return {}, nil, .Bad_Snapshot
 	if json.unmarshal(blob[4:4 + n], &meta, .JSON, context.temp_allocator) != nil do return {}, nil, .Bad_Snapshot
-	if meta.cols < 1 || meta.rows < 1 || meta.cols > 0xFFFF || meta.rows > 0xFFFF do return {}, nil, .Bad_Snapshot
+	if !hw.size_ok(meta.cols, meta.rows, meta.xpixel, meta.ypixel) do return {}, nil, .Bad_Snapshot
+	// the parsed string lives in temp memory: swap in the constant
+	switch meta.format {
+	case SNAPSHOT_GHOSTSNP: meta.format = SNAPSHOT_GHOSTSNP
+	case SNAPSHOT_VT: meta.format = SNAPSHOT_VT
+	case: meta.format = ""
+	}
 	return meta, blob[4 + n:], .None
 }
 
@@ -188,7 +200,10 @@ snapshot_decode :: proc(blob: []u8) -> (gt: gh.Terminal, meta: Snapshot_Meta, er
 		gh.snapshot_decoder_set(d, .Compress_History, &compress)
 		if gh.snapshot_decoder_decode(d, &gt) != .Success do return nil, meta, .Bad_Snapshot
 		used: c.size_t
-		if gh.snapshot_decoder_get(d, .Source_Offset, &used) != .Success || int(used) != len(body) {
+		cols, rows: u16
+		gh.terminal_get(gt, .Cols, &cols)
+		gh.terminal_get(gt, .Rows, &rows)
+		if gh.snapshot_decoder_get(d, .Source_Offset, &used) != .Success || int(used) != len(body) || i64(cols) != meta.cols || i64(rows) != meta.rows {
 			gh.terminal_free(gt)
 			return nil, meta, .Bad_Snapshot
 		}
@@ -212,15 +227,51 @@ SCREEN_MODES_ANSI := [?]u16{2, 4, 12, 20}
 @(private = "file")
 SCREEN_MODES_DEC := [?]u16{1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 67, 69, 1000, 1002, 1003, 1004, 1005, 1006, 1007, 1015, 1016, 1035, 1036, 1039, 1045, 1047, 1048, 1049, 2004, 2026, 2027, 2031, 2033, 2048, 5522}
 
-// FNV-1a 64 of screen_dump: equal hashes mean the same screens for every
-// purpose the tests and the handover check care about. `both` is false when
-// the alt screen is up and the primary couldn't be read (see screen_dump).
+// FNV-1a 64 of screen_dump. `both` is false when the alt screen is up and the
+// primary couldn't be read (see screen_dump).
+//
+// What it does not prove. The cursor shape and the inactive screen are read
+// from a GHOSTSNP clone on each side, so between a terminal and one decoded
+// from its GHOSTSNP snapshot those two facts are checked only as far as the
+// codec carries them to itself. And it leaves out state no getter exposes:
+// the DECSC saved cursor, the scroll and left/right margins, tab stops,
+// charsets, the kitty keyboard stack (only the current flags are in) and
+// modifyOtherKeys. To check those, compare against a reference terminal fed
+// the same bytes with screen_equal_probed, which writes SCREEN_PROBES into
+// both so that hidden state shows on screen.
 screen_hash :: proc(gt: gh.Terminal) -> (h: u64, both: bool) {
 	sb := strings.builder_make(context.temp_allocator)
 	both = screen_dump(gt, &sb)
 	h = 0xcbf29ce484222325
 	for b in sb.buf[:] {h = (h ~ u64(b)) * 0x100000001b3}
 	return
+}
+
+// Sequences that make hidden state visible: the pen and charset (P q x),
+// tab stops, the saved cursor (ESC 8), the scroll region (LFs at the bottom,
+// RI, SU/SD), pending wrap, then the other screen (leaving the alt screen).
+SCREEN_PROBES := [?]string{"Pqx\tT\tT\x1b8R\x1b[999;1HA\n\n\nB\x1bMC\x1b[1;1HD\x1b[5SE\x1b[2TF", "\x1b[?1049l\x1b[?47lQ\x1b8S\x1b[999;999HZ"}
+
+// True if a and b dump the same now and after each of SCREEN_PROBES. It writes
+// the probes into both, so pass terminals you can spend (clones: gt_clone).
+// For scenes: b is the terminal under test (a restored or attached one), a a
+// reference fed the same bytes.
+screen_equal_probed :: proc(a, b: gh.Terminal) -> bool {
+	da := strings.builder_make(context.temp_allocator)
+	db := strings.builder_make(context.temp_allocator)
+	screen_dump(a, &da)
+	screen_dump(b, &db)
+	if strings.to_string(da) != strings.to_string(db) do return false
+	for p in SCREEN_PROBES {
+		gh.terminal_vt_write(a, raw_data(p), len(p))
+		gh.terminal_vt_write(b, raw_data(p), len(p))
+		strings.builder_reset(&da)
+		strings.builder_reset(&db)
+		screen_dump(a, &da)
+		screen_dump(b, &db)
+		if strings.to_string(da) != strings.to_string(db) do return false
+	}
+	return true
 }
 
 // One line per fact: size, cursor (position, pending wrap, visibility, shape),

@@ -157,14 +157,18 @@ term_attach_gt :: proc(t: ^Term) {
 }
 
 // Replaces t's terminal with gt (decoded from a snapshot; t takes ownership)
-// and re-attaches Deckhand's callbacks and theme. Modes, scrollback limit and
-// grapheme clustering come from the snapshot.
+// and re-attaches Deckhand's callbacks, scrollback limit, cell pixel size and
+// theme, as term_start sets them. Modes and grapheme clustering come from the
+// snapshot.
 term_adopt_gt :: proc(t: ^Term, gt: gh.Terminal) {
 	term_cancel_drag(t) // its tracked ends belong to the old terminal
 	if t.gt != nil do gh.terminal_free(t.gt)
 	t.gt = gt
 	gh.terminal_get(gt, .Cols, &t.cols)
 	gh.terminal_get(gt, .Rows, &t.rows)
+	max_bytes := uint(TERM_SCROLLBACK_MAX)
+	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
+	gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
 	term_attach_gt(t)
 	t.changed = true
 }

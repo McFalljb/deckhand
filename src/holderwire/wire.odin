@@ -19,7 +19,20 @@ import "core:encoding/json"
 import "core:time"
 
 HEADER_SIZE :: 9
-MAX_PAYLOAD :: 16 * 1024 * 1024
+MAX_PAYLOAD :: 16 * 1024 * 1024 // INPUT, OUTPUT, TAIL and unknown kinds
+MAX_CONTROL :: 1024 * 1024 // a JSON control payload of a known kind
+
+// core:encoding/json parses recursively with no depth limit and allocas per
+// object key, so a hostile payload (100 KB of "[", or MBs of keys) overflows
+// the stack. json_shape_ok refuses those before anything parses them.
+JSON_MAX_DEPTH :: 32
+JSON_MAX_KEYS :: 4096
+
+// Terminal sizes the wire accepts (Deckhand's largest grid has room to spare);
+// checked on decode, before anyone converts them to u16.
+MAX_COLS :: 1000
+MAX_ROWS :: 500
+MAX_PIXELS :: 65535 // winsize's ws_xpixel/ws_ypixel are unsigned short
 
 WIRE :: 1 // the newest wire this code speaks
 WIRE_MIN :: 1 // the oldest it accepts
@@ -81,12 +94,12 @@ Msg_Error :: enum {
 	Missing_Field, // a required field is absent or null
 	Wrong_Type, // a known field has the wrong JSON type
 	Short_Payload, // OUTPUT/TAIL shorter than its offset
+	Out_Of_Range, // a size outside MAX_COLS/MAX_ROWS/MAX_PIXELS
 }
 
 // ---- messages ----
-// Numbers are i64 and there are no bools: core:encoding/json's unmarshal
-// flags adjacent small fields as duplicates (its used-field bitmap keys on
-// byte offsets), and every number on this wire fits an i64.
+// Numbers are i64 (every number on this wire fits one). Duplicate keys are
+// rejected by json.parse, which decode runs before unmarshal.
 
 Refuse_Code :: enum {
 	Wire, // no common wire version
@@ -233,6 +246,7 @@ next_frame :: proc(b: []u8) -> (f: Frame, used: int, err: Frame_Error) {
 	h, ok := parse_header(b)
 	if !ok do return {}, 0, .Need_More
 	if h.len > MAX_PAYLOAD do return {}, 0, .Too_Large
+	if spec, known := spec_of(h.kind); known && spec.payload == .Json && h.len > MAX_CONTROL do return {}, 0, .Too_Large
 	end := HEADER_SIZE + int(h.len)
 	if len(b) < end do return {}, 0, .Need_More
 	return Frame{h.kind, h.terminal, b[HEADER_SIZE:end]}, end, .None
@@ -278,7 +292,7 @@ encode :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, msg: $T) -> bool {
 	spec, _ := spec_of(u8(kind))
 	assert(spec.payload == .Json, "encode: not a JSON kind")
 	data, err := json.marshal(msg, {}, context.temp_allocator)
-	if err != nil || len(data) > MAX_PAYLOAD do return false
+	if err != nil || len(data) > MAX_CONTROL do return false
 	put_header(out, u8(kind), terminal, len(data))
 	append(out, ..data)
 	return true
@@ -317,13 +331,50 @@ decode :: proc(f: Frame, kind: Kind, msg: ^$T, allocator := context.allocator) -
 	spec, known := spec_of(f.kind)
 	if !known do return .Unknown_Kind
 	if spec.payload != .Json do return .Wrong_Kind
+	if len(f.payload) > MAX_CONTROL || !json_shape_ok(f.payload) do return .Bad_Json
 	v, perr := json.parse(f.payload, .JSON, true, context.temp_allocator)
 	if perr != nil do return .Bad_Json
 	obj, is_obj := v.(json.Object)
 	if !is_obj do return .Bad_Json
 	if e := check_fields(obj, spec.fields); e != .None do return e
 	if json.unmarshal(f.payload, msg, .JSON, allocator) != nil do return .Wrong_Type
+	when T == Resize || T == Spawn {
+		if !size_ok(msg.cols, msg.rows, msg.xpixel, msg.ypixel) do return .Out_Of_Range
+	} else when T == Welcome {
+		for w in msg.terminals do if !size_ok(w.cols, w.rows, w.xpixel, w.ypixel) do return .Out_Of_Range
+	}
 	return .None
+}
+
+size_ok :: proc(cols, rows, xpixel, ypixel: i64) -> bool {
+	return cols >= 1 && cols <= MAX_COLS && rows >= 1 && rows <= MAX_ROWS && xpixel >= 0 && xpixel <= MAX_PIXELS && ypixel >= 0 && ypixel <= MAX_PIXELS
+}
+
+// A cheap scan of JSON text: false if it nests deeper than max_depth or holds
+// more than max_keys object keys (counted as ':' outside strings). Says nothing
+// about validity; json.parse decides that after.
+json_shape_ok :: proc(b: []u8, max_depth := JSON_MAX_DEPTH, max_keys := JSON_MAX_KEYS) -> bool {
+	depth, keys := 0, 0
+	in_str, esc := false, false
+	for c in b {
+		if in_str {
+			if esc do esc = false
+			else if c == '\\' do esc = true
+			else if c == '"' do in_str = false
+			continue
+		}
+		switch c {
+		case '"': in_str = true
+		case '{', '[':
+			depth += 1
+			if depth > max_depth do return false
+		case '}', ']': depth -= 1
+		case ':':
+			keys += 1
+			if keys > max_keys do return false
+		}
+	}
+	return true
 }
 
 // OUTPUT/TAIL: the start offset and the bytes (borrowed).
@@ -344,13 +395,16 @@ check_fields :: proc(obj: json.Object, fields: []Field_Spec) -> Msg_Error {
 			continue
 		}
 		if !type_matches(val, fs.type) do return .Wrong_Type
-		if fs.items != nil {
-			arr := val.(json.Array)
-			for item in arr {
+		if fs.items == nil do continue
+		#partial switch fs.type {
+		case .Objects:
+			for item in val.(json.Array) {
 				o, ok := item.(json.Object)
 				if !ok do return .Wrong_Type
 				if e := check_fields(o, fs.items); e != .None do return e
 			}
+		case .Object:
+			if e := check_fields(val.(json.Object), fs.items); e != .None do return e
 		}
 	}
 	return .None

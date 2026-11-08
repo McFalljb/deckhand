@@ -1,6 +1,6 @@
 package main
 
-// An app tab's frame ring, pi-desk side (docs/ENGINE-BRIDGE.md §2): the
+// An app tab's frame ring, Deckhand side (docs/ENGINE-BRIDGE.md §2): the
 // bindings to src/native/frames_macos.m and the bookkeeping the frame loop
 // does with them. The native side owns the Mach channel and the IOSurfaces;
 // this file owns which ring generations are alive, which slot is on screen,
@@ -10,16 +10,16 @@ package main
 // poll what arrived; a newer frame becomes the shown slot and the old one is
 // retired (released after this frame's GPU work); a ring the app gave back
 // (RING_DONE) and no longer on screen is freed. After sg.commit,
-// pd_frames_committed posts the releases.
+// dh_frames_committed posts the releases.
 //
 // Browser tabs use the same ring and rules through a local channel: CEF,
-// in pi-desk's own process, is the producer (browser.odin; docs/BROWSER.md §1.1).
+// in Deckhand's own process, is the producer (browser.odin; docs/BROWSER.md §1.1).
 
 import "core:c"
 import "core:time"
 
 when ODIN_OS == .Darwin {
-	foreign import pdframes {"../build/pd_frames.a", "system:Metal.framework", "system:IOSurface.framework", "system:Foundation.framework", "system:bsm"}
+	foreign import pdframes {"../build/dh_frames.a", "system:Metal.framework", "system:IOSurface.framework", "system:Foundation.framework", "system:bsm"}
 
 	Frames_Poll :: struct {
 		flags:     u32,
@@ -39,50 +39,50 @@ when ODIN_OS == .Darwin {
 
 	@(default_calling_convention = "c")
 	foreign pdframes {
-		pd_frames_serve_start :: proc(mtl_device: rawptr) -> c.int ---
-		pd_frames_service :: proc() -> cstring ---
-		pd_frames_device_id :: proc() -> u64 ---
-		pd_frames_qlimit :: proc() -> c.int ---
-		pd_frames_take_wake :: proc() -> c.int ---
-		pd_frames_chan_open :: proc(tab_id: u64, key: [^]u8, pgid, sid: c.int) -> c.int ---
-		pd_frames_chan_set_proc :: proc(tab_id: u64, pgid, sid: c.int) ---
-		pd_frames_chan_key :: proc(tab_id: u64, out: [^]u8) -> c.int ---
-		pd_frames_chan_stop :: proc(tab_id: u64) ---
-		pd_frames_chan_close :: proc(tab_id: u64) ---
-		pd_frames_ring_new :: proc(tab_id: u64, w, h: c.int, scale: f32) -> u32 ---
-		pd_frames_ring_free :: proc(tab_id: u64, gen: u32, keep_slot: c.int) ---
-		pd_frames_slot_texture :: proc(tab_id: u64, gen: u32, slot: c.int) -> rawptr ---
-		pd_frames_poll :: proc(tab_id: u64, out: ^Frames_Poll) -> c.int ---
-		pd_frames_release_now :: proc(tab_id: u64, gen, slot: u32) ---
-		pd_frames_retire :: proc(tab_id: u64, gen, slot: u32) ---
-		pd_frames_shown :: proc(tab_id: u64, recv_ms: f64) ---
-		pd_frames_committed :: proc(mtl_queue: rawptr) ---
-		pd_frames_latency :: proc(tab_id: u64, out: [^]f64, cap: c.int) -> c.int ---
-		pd_frames_pixel :: proc(tab_id: u64, gen: u32, slot: c.int, x, y: c.int, rgb: ^u32) -> c.int ---
-		pd_frames_read :: proc(tab_id: u64, gen: u32, slot: c.int, x, y, w, h: c.int, dst: [^]u8) -> c.int ---
-		pd_frames_surface_count :: proc(tab_id: u64) -> c.int ---
-		pd_frames_surface_total :: proc() -> c.int ---
-		pd_frames_peers :: proc() -> c.int ---
+		dh_frames_serve_start :: proc(mtl_device: rawptr) -> c.int ---
+		dh_frames_service :: proc() -> cstring ---
+		dh_frames_device_id :: proc() -> u64 ---
+		dh_frames_qlimit :: proc() -> c.int ---
+		dh_frames_take_wake :: proc() -> c.int ---
+		dh_frames_chan_open :: proc(tab_id: u64, key: [^]u8, pgid, sid: c.int) -> c.int ---
+		dh_frames_chan_set_proc :: proc(tab_id: u64, pgid, sid: c.int) ---
+		dh_frames_chan_key :: proc(tab_id: u64, out: [^]u8) -> c.int ---
+		dh_frames_chan_stop :: proc(tab_id: u64) ---
+		dh_frames_chan_close :: proc(tab_id: u64) ---
+		dh_frames_ring_new :: proc(tab_id: u64, w, h: c.int, scale: f32) -> u32 ---
+		dh_frames_ring_free :: proc(tab_id: u64, gen: u32, keep_slot: c.int) ---
+		dh_frames_slot_texture :: proc(tab_id: u64, gen: u32, slot: c.int) -> rawptr ---
+		dh_frames_poll :: proc(tab_id: u64, out: ^Frames_Poll) -> c.int ---
+		dh_frames_release_now :: proc(tab_id: u64, gen, slot: u32) ---
+		dh_frames_retire :: proc(tab_id: u64, gen, slot: u32) ---
+		dh_frames_shown :: proc(tab_id: u64, recv_ms: f64) ---
+		dh_frames_committed :: proc(mtl_queue: rawptr) ---
+		dh_frames_latency :: proc(tab_id: u64, out: [^]f64, cap: c.int) -> c.int ---
+		dh_frames_pixel :: proc(tab_id: u64, gen: u32, slot: c.int, x, y: c.int, rgb: ^u32) -> c.int ---
+		dh_frames_read :: proc(tab_id: u64, gen: u32, slot: c.int, x, y, w, h: c.int, dst: [^]u8) -> c.int ---
+		dh_frames_surface_count :: proc(tab_id: u64) -> c.int ---
+		dh_frames_surface_total :: proc() -> c.int ---
+		dh_frames_peers :: proc() -> c.int ---
 		// local channels (browser tabs: the producer is CEF, in process; browser.odin)
-		pd_frames_local_open :: proc(tab_id: u64, mtl_device: rawptr) -> c.int ---
-		pd_frames_local_acquire :: proc(tab_id: u64, w, h: c.int, gen: ^u32, slot: ^c.int, texture: ^rawptr, surface: ^rawptr) -> c.int --- // (the producer, cef_macos.m; tests)
-		pd_frames_local_unacquire :: proc(tab_id: u64, gen: u32, slot: c.int) ---
-		pd_frames_local_frame :: proc(tab_id: u64, gen: u32, slot: c.int, seq: u64, w, h: c.int) -> c.int ---
-		pd_frames_device_for :: proc(registry_id: u64) -> rawptr --- // (tests: the default device, retained)
-		pd_frames_local_slot_state :: proc(tab_id: u64, gen: u32, slot: c.int) -> c.int ---
-		pd_frames_local_reclaimed :: proc(tab_id: u64) -> u64 ---
-		pd_frames_surface_total_local :: proc() -> c.int ---
-		pd_frames_surface_bytes :: proc(tab_id: u64) -> u64 ---
-		pd_frames_local_chans :: proc() -> c.int --- // local channels used or still draining (tests)
+		dh_frames_local_open :: proc(tab_id: u64, mtl_device: rawptr) -> c.int ---
+		dh_frames_local_acquire :: proc(tab_id: u64, w, h: c.int, gen: ^u32, slot: ^c.int, texture: ^rawptr, surface: ^rawptr) -> c.int --- // (the producer, cef_macos.m; tests)
+		dh_frames_local_unacquire :: proc(tab_id: u64, gen: u32, slot: c.int) ---
+		dh_frames_local_frame :: proc(tab_id: u64, gen: u32, slot: c.int, seq: u64, w, h: c.int) -> c.int ---
+		dh_frames_device_for :: proc(registry_id: u64) -> rawptr --- // (tests: the default device, retained)
+		dh_frames_local_slot_state :: proc(tab_id: u64, gen: u32, slot: c.int) -> c.int ---
+		dh_frames_local_reclaimed :: proc(tab_id: u64) -> u64 ---
+		dh_frames_surface_total_local :: proc() -> c.int ---
+		dh_frames_surface_bytes :: proc(tab_id: u64) -> u64 ---
+		dh_frames_local_chans :: proc() -> c.int --- // local channels used or still draining (tests)
 		// test mode: writes into textures GPU frames not completed yet sample (browser.odin)
-		pd_frames_test_track :: proc(on: c.int, lag_ms: c.int) ---
-		pd_frames_sampled :: proc(tex: rawptr) ---
-		pd_frames_inflight_writes :: proc() -> u64 ---
+		dh_frames_test_track :: proc(on: c.int, lag_ms: c.int) ---
+		dh_frames_sampled :: proc(tex: rawptr) ---
+		dh_frames_inflight_writes :: proc() -> u64 ---
 		// pure rules (frames_test.odin)
-		pd_frames_key_equal :: proc(a, b: [^]u8) -> c.int ---
-		pd_frames_sender_in :: proc(sender_pgid, sender_sid, pgid, sid: c.int) -> c.int ---
-		pd_frames_on_frame :: proc(cur_gen: u32, has_latest: c.int, latest_slot, gen, slot: u32, release_slot: ^u32) -> c.int ---
-		pd_frames_encode :: proc(id: c.int, a, b: u32, c_, d: u64, buf: [^]u8) -> c.int ---
+		dh_frames_key_equal :: proc(a, b: [^]u8) -> c.int ---
+		dh_frames_sender_in :: proc(sender_pgid, sender_sid, pgid, sid: c.int) -> c.int ---
+		dh_frames_on_frame :: proc(cur_gen: u32, has_latest: c.int, latest_slot, gen, slot: u32, release_slot: ^u32) -> c.int ---
+		dh_frames_encode :: proc(id: c.int, a, b: u32, c_, d: u64, buf: [^]u8) -> c.int ---
 	}
 }
 
@@ -90,10 +90,10 @@ FRAMES_F_CONNECTED :: 1
 FRAMES_F_DEAD :: 2
 FRAMES_F_STALLED :: 4
 FRAMES_F_REJECTED :: 8
-// a local channel's slot (pd_frames_local_slot_state)
+// a local channel's slot (dh_frames_local_slot_state)
 FRAMES_SLOT_FREE :: 0
 FRAMES_SLOT_WRITING :: 1
-FRAMES_SLOT_PIDESK :: 2
+FRAMES_SLOT_DECKHAND :: 2
 FRAME_SLOTS :: 3
 RING_SETTLE :: 100 * time.Millisecond // a new ring once the pane's size stayed this long
 
@@ -169,7 +169,7 @@ ring_gen :: proc(r: ^Frame_Ring, gen: u32) -> ^Ring_Gen {
 }
 
 // A hidden tab's frame goes back at once, unless it names the slot on show
-// (an app that sends a slot again must not get the one pi-desk samples).
+// (an app that sends a slot again must not get the one Deckhand samples).
 ring_may_release_now :: proc(r: ^Frame_Ring, gen: u32, slot: u32) -> bool {
 	return !(r.shown_gen == gen && r.shown_slot == int(slot))
 }

@@ -1,6 +1,6 @@
-# Read-only Claude chats, run 3: a Claude Code that ignores pi-desk's --settings (the fake with
+# Read-only Claude chats, run 3: a Claude Code that ignores Deckhand's --settings (the fake with
 # FAKE_CLAUDE_IGNORE_SETTINGS=1): the restored read-only chat starts, its plugin reports the
-# session, but the profile never acks: pi-desk stops it within 10 s and says why.
+# session, but the profile never acks: Deckhand stops it within 10 s and says why.
 wait 1500
 assert_state open_sessions.# 1
 waitfor --resume 7e5d0000 15000

@@ -31,7 +31,7 @@ setup :: proc() -> (home, proj: string) {
 	reload_watch_reset()
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	base := fmt.tprintf("%s/pi-desk-settings-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	base := fmt.tprintf("%s/deckhand-settings-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	ad := fmt.tprintf("%s/home/.pi/agent", base)
 	os.make_directory_all(fmt.tprintf("%s/extensions/subagent", ad))
 	os.make_directory_all(fmt.tprintf("%s/intercom", ad))
@@ -39,7 +39,7 @@ setup :: proc() -> (home, proj: string) {
 	os.make_directory_all(fmt.tprintf("%s/home/proj", base))
 	home = fs_real(fmt.tprintf("%s/home", base), context.allocator)
 	proj = fs_real(fmt.tprintf("%s/home/proj", base), context.allocator)
-	ensure(strings.contains(home, "/pi-desk-settings-test-"), "settings tests: no temp HOME") // never the user's ~/.pi
+	ensure(strings.contains(home, "/deckhand-settings-test-"), "settings tests: no temp HOME") // never the user's ~/.pi
 	os.set_env("HOME", home)
 	home_root = fmt.aprintf("%s/data", base) // Atlas's prompt file: the Settings tab's Atlas group
 	os.unset_env("PI_CODING_AGENT_DIR")
@@ -350,7 +350,7 @@ settings_tree_contents :: proc(t: ^testing.T) {
 	got := tree()
 	want := "[pi (global)]\nsettings.json\nmodels.json\nprompts\nskills\nextensions\n[This project · proj]\n.pi/settings.json (create)\n.pi/prompts\nAGENTS.md (create)\n[Extensions]\npi-subagents config\nsubagent\n[Atlas]\nATLAS.md (create)\nModel: pi's default [Change…]\n[Chats]\nChat instructions (AGENTS.md) (create)\n[Folders]\nMain folder: not set [Set up…]\nsessions/: no main folder [Change…]\njobs/: no main folder [Change…]\nmemory/: no main folder [Change…]\natlas/: no main folder [Change…]\nchats/: default · ~/Chats [Change…]\n[Coding agents]\npi\n  Deckhand integration\n  pi-subagents\n  rpiv-todo: Not installed [Install…]\nClaude Code\n  Deckhand integration\n" // the harness checklist (ui_harness.odin)
 	testing.expect_value(t, got, want)
-	// pi's own folders (the Folders group's sessions/ is pi-desk's, below [Chats])
+	// pi's own folders (the Folders group's sessions/ is Deckhand's, below [Chats])
 	pis := got[:max(strings.index(got, "[Chats]"), 0)]
 	for never in ([]string{"auth", "sessions", "npm", "git", "bin", "logs", "intercom", "private-thing", "cursor-sdk", "models-store", ".env"}) {
 		testing.expectf(t, !strings.contains(pis, never), "%s shown:\n%s", never, got)
@@ -536,7 +536,7 @@ review_settings_reveal_not_in_palette :: proc(t: ^testing.T) {
 
 // A fake Claude config folder (CLAUDE_CONFIG_DIR) under the temp HOME, with what Claude Code
 // keeps there: config the user edits, and credentials, account state and transcripts that
-// pi-desk must never list or open. Returns the config folder.
+// Deckhand must never list or open. Returns the config folder.
 @(private = "file")
 claude_setup :: proc(home, proj: string) -> string {
 	cfg := fmt.aprintf("%s/claude-cfg", home)
@@ -564,7 +564,7 @@ claude_setup :: proc(home, proj: string) -> string {
 	return cfg
 }
 
-// Every path of Claude Code's that pi-desk must never list, read or open.
+// Every path of Claude Code's that Deckhand must never list, read or open.
 @(private = "file")
 claude_secret_paths :: proc(home, cfg: string) -> []string {
 	out := make([dynamic]string, context.temp_allocator)

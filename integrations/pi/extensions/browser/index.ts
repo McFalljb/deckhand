@@ -26,7 +26,7 @@
  * - App tabs, in a pi tab (not Home: the desk extension has its own): app_tabs, app_call,
  *   app_screenshot, app_input and app_events over the same route, for its own session's app tabs
  *   only (Deckhand's rule for caller `panel`); app_open opens an app its project declares in
- *   .pi-desk/apps.json, by name, in its own session, behind the user's view (Deckhand refuses argv
+ *   .deckhand/apps.json, by name, in its own session, behind the user's view (Deckhand refuses argv
  *   and other sessions for a pi tab); app_restart and app_close. Short descriptions: every pi tab
  *   pays for them.
  *
@@ -387,7 +387,7 @@ export default function (pi: ExtensionAPI) {
 			pi.registerTool({
 				name: "app_open",
 				label: "Open an app tab",
-				description: "Open an app your project declares in .pi-desk/apps.json (app_tabs lists them), by name, in a new app tab of your session behind the user's view. Returns the tab id.",
+				description: "Open an app your project declares in .deckhand/apps.json (app_tabs lists them), by name, in a new app tab of your session behind the user's view. Returns the tab id.",
 				promptSnippet: "Open a declared app in a Deckhand app tab",
 				parameters: Type.Object({ name: Type.String() }),
 				async execute(_id, p, signal) {

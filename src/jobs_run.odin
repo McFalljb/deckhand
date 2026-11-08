@@ -3,7 +3,7 @@ package main
 
 // One job run (docs/ATLAS.md §3.7, §4.4, §4.5): a fresh one-shot
 // `pi --mode json` in the job's folder, with a preamble, an environment
-// allowlist (no pi-desk socket or tokens) and stdin /dev/null, in its own
+// allowlist (no Deckhand socket or tokens) and stdin /dev/null, in its own
 // process group. A reader thread copies pi's JSON events to the run
 // folder's events.jsonl and watches them:
 //
@@ -23,7 +23,7 @@ package main
 // Job_Run_Done; jobs.odin writes the record and delivers.
 //
 // The run lock: <data dir>/jobs/<id>/run.lock (flock, non-blocking), held
-// by pi-desk and inherited by pi, so it lives exactly as long as the run.
+// by Deckhand and inherited by pi, so it lives exactly as long as the run.
 
 import "base:runtime"
 import "core:c"
@@ -68,7 +68,7 @@ Run_Stop :: enum u8 {
 	Over_Limit,
 	Timeout,
 	User, // job_stop
-	Quit, // pi-desk quit
+	Quit, // Deckhand quit
 }
 
 Blocked_Action :: struct {

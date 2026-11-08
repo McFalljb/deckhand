@@ -10,7 +10,7 @@ package main
 // on screen, and stay with it when the tab closes (closing asks first: send or drop).
 //
 // Delivery, per session, to its pi tab's bridge (integrations/pi extensions/bridge, PROTOCOL.md §4):
-//   - whenever the pending set changes, and after every bridge handshake (pi.session), pi-desk
+//   - whenever the pending set changes, and after every bridge handshake (pi.session), Deckhand
 //     sends `pi.attach {attachment_id, text, images}` (replacing what the bridge held), or
 //     `pi.attach_clear` once nothing is left;
 //   - the bridge adds the attachment to the next message the user types in pi and answers
@@ -69,7 +69,7 @@ Attach_Sent :: struct {
 
 // One session's delivery bookkeeping (not in the snapshot but `comments_wait`).
 Comments_Attach :: struct {
-	sent_id:      u64, // the attachment the bridge holds (0 = none, as far as pi-desk knows)
+	sent_id:      u64, // the attachment the bridge holds (0 = none, as far as Deckhand knows)
 	sent:         [dynamic]Comment_Ref, // its comments; emptied when the bridge's copy went stale
 	history:      [dynamic]Attach_Sent, // attachments sent lately (pi.attached names one)
 	sending:      u64, // Send now: the request whose pi.prompt carries sending_refs (0 = none)
@@ -279,7 +279,7 @@ comments_block :: proc(list: []Pending_Comment, nos: []int) -> string {
 		run = max(run, n)
 	}
 	fence := strings.repeat("`", max(3, run + 1), context.temp_allocator)
-	fmt.sbprintf(&b, "Deckhand comments (%d). %s\n%spi-desk-comments\n%s%s", len(list), COMMENTS_NOTE, fence, text, fence)
+	fmt.sbprintf(&b, "Deckhand comments (%d). %s\n%sdeckhand-comments\n%s%s", len(list), COMMENTS_NOTE, fence, text, fence)
 	return strings.to_string(b)
 }
 
@@ -629,11 +629,11 @@ comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Res
 crop_n: int
 
 // Where a source writes its next crop: <data dir>/comments/c-<pid>-<n>.png (a temp folder without
-// a data dir). The first use in a run removes crops a pi-desk that is gone left behind.
+// a data dir). The first use in a run removes crops a Deckhand that is gone left behind.
 comments_crop_path :: proc() -> string {
 	dir: string
 	if home_root != "" do dir, _ = filepath.join({home_root, "comments"}, context.temp_allocator)
-	else do dir = fmt.tprintf("%s/pi-desk-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
+	else do dir = fmt.tprintf("%s/deckhand-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
 	if crop_n == 0 {
 		os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User})
 		if infos, rerr := os.read_all_directory_by_path(dir, context.temp_allocator); rerr == nil {
@@ -655,7 +655,7 @@ comments_crop_path :: proc() -> string {
 }
 
 // Crops box (logical px of the frame's top-left, margin added) from the slot on screen of a frame
-// ring into a new crop file: the frame read app_screenshot uses (pd_frames_read), scaled down to
+// ring into a new crop file: the frame read app_screenshot uses (dh_frames_read), scaled down to
 // COMMENT_CROP_SIDE, PNG by stb. "" = no frame to crop.
 @(private = "file")
 ring_crop :: proc(tab_id: u64, ring: ^Frame_Ring, content_w, content_h: int, scale: f32, box: [4]int) -> string {
@@ -749,7 +749,7 @@ app_comment_add :: proc(tab_id: u64, box_id, label: string, rect: App_Rect, text
 	return r.created_id, r.error
 }
 
-// pi-desk quits: this run's crops go (comments are not kept across runs yet).
+// Deckhand quits: this run's crops go (comments are not kept across runs yet).
 comments_shutdown :: proc() {
 	for &s in state.open_sessions do for &c in s.comments do if c.crop != "" {
 		os.remove(c.crop)
@@ -771,7 +771,7 @@ comments_shutdown :: proc() {
 // (copied into the shots folder, comment-<attachment>-<n>.png, so they outlive the comments).
 // They stay pending until claude.attached names the attachment (comments_claude_attached), as
 // pi.attached does. data {count, attachment_id, text, images, more}; count 0 = nothing.
-// The hook's heading before the image lines (tools/pi-desk-cli/hooks.odin IMAGES_HEAD), rounded up.
+// The hook's heading before the image lines (tools/deckhand-cli/hooks.odin IMAGES_HEAD), rounded up.
 CLAUDE_IMAGES_HEAD :: 120
 
 // A crop copied for Claude to read: created 0600 (never readable by others, not even briefly).

@@ -3,7 +3,7 @@ package main
 // Claude tabs, part two (docs/CLAUDE.md §6a, §6b, §9): Claude's todos, subagents and background
 // work as right-column panels, and claude_restart (a dead Claude tab's Restart, dead_tab.odin).
 //
-// The plugin's async hooks (integrations/claude-code/hooks/hooks.json, tools/pi-desk-cli/
+// The plugin's async hooks (integrations/claude-code/hooks/hooks.json, tools/deckhand-cli/
 // hooks.odin) report what Claude Code tells them, for the token's own tab only (caller_may,
 // claude_command_tab):
 //   - claude.todos: the whole list from TodoWrite (PostToolUse);
@@ -11,7 +11,7 @@ package main
 //     TaskCompleted), by its id;
 //   - claude.subagent: launch (PreToolUse on the Agent tool: its type and description), start and
 //     stop (SubagentStart, SubagentStop: the agent's id and type), tool (PreToolUse inside a
-//     subagent: its current tool; pi-desk counts the steps and times start to stop). A launch and
+//     subagent: its current tool; Deckhand counts the steps and times start to stop). A launch and
 //     a start are paired by type, in whichever order they arrive. A TodoWrite inside a subagent
 //     (claude.todos with agent_id) is that subagent's own list, shown under it;
 //   - claude.background (§6b): launch (PostToolUse on a background Bash: its task id) and snapshot
@@ -19,9 +19,9 @@ package main
 //     It blocks nothing (as pi's blockers, which feed only pi's reload confirmation): the restart
 //     confirmation names it (claude_reload.odin), a claude_wait_idle result lists it
 //     (claude_wait.odin); the dot never changes for it (claude_status.odin). Only a snapshot's
-//     running tasks are counted; a launch no Stop confirms ends at the next Stop without one. Display only: pi-desk cannot stop Claude's
+//     running tasks are counted; a launch no Stop confirms ends at the next Stop without one. Display only: Deckhand cannot stop Claude's
 //     background tasks (no documented way from outside), and the panel says so.
-// The text is Claude's and untrusted: pi-desk keeps it bounded (counts and bytes), one line,
+// The text is Claude's and untrusted: Deckhand keeps it bounded (counts and bytes), one line,
 // without control, bidi or invisible characters, and builds the panel rows itself (a Claude tab
 // never sends rows, tones or panel ids). The panels live on the Claude tab (Tab.panels), never on
 // pi's tab, and pi's bridge cannot set them (panel.set is pi tabs' only). They show in the right
@@ -135,7 +135,7 @@ Agent :: struct {
 	kind:      string,
 	desc:      string,
 	done:      bool,
-	started:   time.Tick, // when pi-desk heard of it (its start, or a stop before it)
+	started:   time.Tick, // when Deckhand heard of it (its start, or a stop before it)
 	last:      time.Tick, // its last report (start, tool, todos): a run with none for CLAUDE_AGENT_STALE stops being redrawn
 	ended:     time.Tick, // its stop
 	tool:      string, // its current tool (PreToolUse inside it)
@@ -757,7 +757,7 @@ claude_extra_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Re
 		if len(c.todos) > CLAUDE_TODOS_IN_MAX do return fail(fmt.tprintf("at most %d todos", CLAUDE_TODOS_IN_MAX)), false
 		w := work_of(tab.id)
 		if c.agent_id != "" {
-			// a subagent's own list, under it; a subagent pi-desk does not know (its start not
+			// a subagent's own list, under it; a subagent Deckhand does not know (its start not
 			// here yet, an in-process teammate): nowhere, never the main list
 			if !key_ok(c.agent_id) do return fail("agent_id must be an agent id"), false
 			a := find_agent(w, c.agent_id)
@@ -833,7 +833,7 @@ claude_extra_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Re
 			append(&w.launches, Launch{kind = strings.clone(kind), desc = strings.clone(desc)})
 			return {ok = true}, false
 		case "tool":
-			// its current tool (PreToolUse inside it); an agent pi-desk does not know: nothing
+			// its current tool (PreToolUse inside it); an agent Deckhand does not know: nothing
 			if !key_ok(c.agent_id) do return fail("agent_id must be an agent id"), false
 			a := find_agent(w, c.agent_id)
 			if a == nil || a.done do return {ok = true}, false

@@ -22,8 +22,8 @@ awk 'BEGIN { for (i = 0; i < 50000; i++) printf "int f%d(int x) { return x; } //
 (cd "$PROJ" && git init -q && git add hello.c && git -c user.name=t -c user.email=t@example.invalid commit -qm init)
 run() { # script log [args]
   s=$1; l=$2; shift 2
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$s" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@" > "$l" 2>&1 || true
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$s" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@" > "$l" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$l" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$l" || ! grep -q "done:" "$l"; then
     echo "editor scene failed (log: $l)"; exit 1

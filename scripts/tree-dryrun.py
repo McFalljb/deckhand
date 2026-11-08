@@ -1,6 +1,6 @@
 """Input for the Projects tree dry run (src/project_tree_dryrun_test.odin).
 Header-only read of pi's session store: for each store folder, the newest
-.jsonl's FIRST LINE only, keeping only its "cwd" field (as pi-desk's
+.jsonl's FIRST LINE only, keeping only its "cwd" field (as Deckhand's
 scan_projects does). Prints TSV: store_dir, cwd, newest_ns, oldest_ns.
 Nothing else from any session is read or printed.
 Usage: python3 -I scripts/tree-dryrun.py > /tmp/store.tsv"""
@@ -25,7 +25,7 @@ for d in sorted(os.scandir(root), key=lambda e: e.name):
         except ValueError:
             pass
     del line
-    if not cwd:  # pi-desk's lossy fallback: the folder name
+    if not cwd:  # Deckhand's lossy fallback: the folder name
         cwd = "/" + d.name.strip("-").replace("-", "/")
     if "\t" in cwd or "\n" in cwd:
         continue

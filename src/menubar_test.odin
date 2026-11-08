@@ -28,7 +28,7 @@ reset :: proc() {
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tf_set(&palette.field, "")
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 }
 
 @(private = "file")
@@ -174,7 +174,7 @@ menubar_enable_and_check_rules :: proc(t: ^testing.T) {
 	// an editor: Save only with changes; undo, find
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	dir := fmt.tprintf("%s/pi-desk-menubar-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	dir := fmt.tprintf("%s/deckhand-menubar-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	defer os.remove_all(dir)
 	append(&state.projects, Project{id = new_id(), cwd = strings.clone(dir), label = "proj"})
@@ -239,7 +239,7 @@ menubar_terminal_text_size :: proc(t: ^testing.T) {
 	run_command(Set_Terminal_Text_Size{pt = 0})
 }
 
-// Help › pi-desk user guide: Atlas's copy of the guide, read-only, only when
+// Help › Deckhand user guide: Atlas's copy of the guide, read-only, only when
 // it exists.
 @(test)
 menubar_user_guide_read_only :: proc(t: ^testing.T) {
@@ -247,7 +247,7 @@ menubar_user_guide_read_only :: proc(t: ^testing.T) {
 	reset()
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	dir := fmt.aprintf("%s/pi-desk-guide-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	dir := fmt.aprintf("%s/deckhand-guide-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(fmt.tprintf("%s/atlas", dir))
 	defer os.remove_all(dir)
 	was := home_root

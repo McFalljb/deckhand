@@ -24,7 +24,7 @@ Drawer_Hit_Kind :: enum {
 	Close,
 	Model, // pi's model selector
 	Term, // Atlas's terminal
-	Notes, // the atlas-folder warning's Set up pi-desk… (docs/ATLAS.md §8)
+	Notes, // the atlas-folder warning's Set up Deckhand… (docs/ATLAS.md §8)
 }
 
 Hit_Agent :: struct {
@@ -140,7 +140,7 @@ drawer_header :: proc(dw: f32) {
 		if ht != nil && ht.agent == .Working do dot(with_alpha(th.running, 1))
 		if status != "" do clay.TextDynamic(status, txt(col, FONT_UI_SMALL))
 		spacer()
-		// the model as pi-desk knows it, then the button that opens pi's selector
+		// the model as Deckhand knows it, then the button that opens pi's selector
 		if room >= px(24) {
 			if clay.UI(clay.ID("drawer_model_name"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				clay.TextDynamic(clip(model, room, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))

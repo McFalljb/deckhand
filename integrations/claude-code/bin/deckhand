@@ -1,9 +1,14 @@
 #!/bin/sh
 # The deckhand command (Deckhand's Claude tabs; docs/GUIDE.md). It runs the CLI that ships inside
-# the Deckhand app running this tab ($PI_DESK_CLI), so plugin and app always match. Outside a
+# the Deckhand app running this tab ($DECKHAND_CLI), so plugin and app always match. Outside a
 # Deckhand Claude tab it says so; its hooks then do nothing, so they never disturb Claude.
 # bin/pi-desk is the same command under its old name (pi-kit and older sessions call it).
-if [ -n "${PI_DESK_CLI:-}" ] && [ -x "$PI_DESK_CLI" ]; then
+if [ -n "${DECKHAND_CLI:-}" ] && [ -x "$DECKHAND_CLI" ]; then
+  exec "$DECKHAND_CLI" "$@"
+fi
+# its old name: a tab started before Deckhand 0.1.7 (or held across the update) has only
+# PI_DESK_CLI, …/MacOS/pi-desk-cli, a link to deckhand-cli in the bundle
+if [ -z "${DECKHAND_CLI:-}" ] && [ -n "${PI_DESK_CLI:-}" ] && [ -x "$PI_DESK_CLI" ]; then
   exec "$PI_DESK_CLI" "$@"
 fi
 if [ "${1:-}" = hook ] && [ "${2:-}" = readonly ]; then
@@ -14,5 +19,5 @@ fi
 if [ "${1:-}" = hook ]; then
   exit 0
 fi
-echo '{"ok":false,"error":"not inside a Deckhand Claude tab (PI_DESK_CLI is not set)"}'
+echo '{"ok":false,"error":"not inside a Deckhand Claude tab (DECKHAND_CLI is not set)"}'
 exit 2

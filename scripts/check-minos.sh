@@ -1,5 +1,5 @@
 #!/bin/sh
-# Fail if any Mach-O object linked into (or shipped with) pi-desk targets a newer
+# Fail if any Mach-O object linked into (or shipped with) Deckhand targets a newer
 # macOS than MIN. Reads LC_BUILD_VERSION / LC_VERSION_MIN_MACOSX with otool -l,
 # per archive member and per architecture.
 # Usage: scripts/check-minos.sh [-v] MIN PATH...

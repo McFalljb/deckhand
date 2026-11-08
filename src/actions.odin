@@ -89,7 +89,7 @@ ACTIONS := [?]Action {
 		if cs == nil do return nil, false
 		return New_Shell_Tab{session = cs.id}, true
 	}},
-	// Claude Code (claude.odin): claude with pi-desk's plugin, in the session on screen's folder
+	// Claude Code (claude.odin): claude with Deckhand's plugin, in the session on screen's folder
 	{id = "new_claude_tab", label = "New Claude tab", keys = "⌥⌘T", title = proc() -> string {return claude_label("New Claude tab")}, make = proc() -> (Command, bool) {
 		cs := cur()
 		if cs == nil || cs.home || cs.missing do return nil, false // in chats too (read-only while chats are: claude.odin)
@@ -358,7 +358,7 @@ ACTIONS := [?]Action {
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (Command, bool) {
 		return Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
-	// pi-desk's own updates (update.odin)
+	// Deckhand's own updates (update.odin)
 	{id = "check_updates", label = "Check for Updates…", make = proc() -> (Command, bool) {return Update_Check{}, true}, detail = proc() -> string {
 		if upd.offered do return fmt.tprintf("%s available", upd.release.version)
 		return upd.current != "" ? fmt.tprintf("Deckhand %s", upd.current) : ""
@@ -527,7 +527,7 @@ ACTIONS := [?]Action {
 		if !is do return nil, false
 		return Open_File{path = mt.path}, true
 	}},
-	// app tabs (app_tab.odin): the palette asks for a command line, or lists .pi-desk/apps.json's
+	// app tabs (app_tab.odin): the palette asks for a command line, or lists .deckhand/apps.json's
 	{id = "new_app_tab", label = "New app tab…", make = proc() -> (Command, bool) {
 		cs := cur()
 		if cs == nil || cs.home do return nil, false

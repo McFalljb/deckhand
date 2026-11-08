@@ -4,6 +4,8 @@ package main
 // never call sokol or OS UI APIs; main.odin fills these in at startup (tests
 // leave them nil or set fakes). A headless core would provide its own.
 
+import "base:runtime"
+import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -40,25 +42,73 @@ clipboard_text :: proc() -> string {
 	return platform.get_clipboard != nil ? platform.get_clipboard() : ""
 }
 
-// Where pi-desk keeps its own files (command log; later the saved
-// workspace). PI_DESK_DATA_DIR overrides.
+// Where Deckhand keeps its own files (command log; later the saved
+// workspace). DECKHAND_DATA_DIR overrides.
 data_dir :: proc(allocator := context.allocator) -> string {
 	if d := hook_env(.Data_Dir, allocator); d != "" do return d
 	return data_dir_under(data_home(TEST_HOOKS, context.temp_allocator), allocator)
 }
 
 // The data dir under home; "" when home is not an absolute path (never one relative to the cwd:
-// the launch then refuses to start, main.odin).
+// the launch then refuses to start, main.odin). The rename (0.1.7) reads both names:
+// ~/Library/Application Support/Deckhand when it is there (or neither is: a new install), else
+// the old ~/Library/Application Support/pi-desk, where every install up to 0.1.6 keeps its data.
+// Nothing is moved yet (0.1.8 moves it, with a link back), so a downgrade still finds it.
 data_dir_under :: proc(home: string, allocator := context.allocator) -> string {
 	if !strings.has_prefix(home, "/") do return ""
+	new, old := data_dir_names(home, context.temp_allocator)
+	return strings.clone(data_dir_pick(new, old), allocator)
+}
+
+// The data dir's new and old place under home (temp allocator by default).
+data_dir_names :: proc(home: string, allocator := context.temp_allocator) -> (new, old: string) {
 	when ODIN_OS == .Darwin {
-		p, _ := filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
+		new, _ = filepath.join({home, "Library", "Application Support", "Deckhand"}, allocator)
+		old, _ = filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
 	} else {
 		base := os.get_env("XDG_DATA_HOME", context.temp_allocator)
 		if !strings.has_prefix(base, "/") do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
-		p, _ := filepath.join({base, "pi-desk"}, allocator)
+		new, _ = filepath.join({base, "deckhand"}, allocator)
+		old, _ = filepath.join({base, "pi-desk"}, allocator)
 	}
-	return p
+	return
+}
+
+// What data_dir_pick last said about its choice ("" = nothing to say; tests).
+data_dir_note: string
+
+// new when it is a folder or old is not one; else old. A link counts as what it points to. Both
+// there (a dev copy, a downgrade, or 0.1.8 moved it and the link came back as a folder): old
+// while a session holder answers under it (its held sessions must never be orphaned), else new;
+// said once on stderr either way.
+data_dir_pick :: proc(new, old: string) -> string {
+	if !os.is_dir(old) do return new
+	if !os.is_dir(new) do return old
+	pick, note := new, fmt.tprintf("Deckhand: both %s and %s exist: using %s", new, old, new)
+	if data_dir_holder_alive(old) {
+		pick, note = old, fmt.tprintf("Deckhand: both %s and %s exist: using %s, where a session holder still runs", new, old, old)
+	}
+	if note != data_dir_note {
+		delete(data_dir_note, runtime.heap_allocator())
+		data_dir_note = strings.clone(note, runtime.heap_allocator())
+		fmt.eprintln(note)
+	}
+	return pick
+}
+
+// Whether a holder (or a running Deckhand's core) answers on a socket in <dir>/run.
+data_dir_holder_alive :: proc(dir: string) -> bool {
+	run := fmt.tprintf("%s/run", dir)
+	files, err := os.read_all_directory_by_path(run, context.temp_allocator)
+	if err != nil do return false
+	for f in files {
+		if !strings.has_suffix(f.name, ".sock") || !(strings.has_prefix(f.name, "holder-") || f.name == "core.sock") do continue
+		if fd, ok := sock_connect(f.fullpath); ok {
+			sock_close(fd)
+			return true
+		}
+	}
+	return false
 }
 
 // The home the data dir lives under. A release build: the account's (the user database), never

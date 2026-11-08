@@ -296,12 +296,12 @@ menu_items :: proc() -> []Menu_Item {
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
 		if id := open_session_any(t.pi_session_id); id != 0 && claude_installed() do claude_account_items(&items, "New Claude tab here", New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
-		if r, _ := claude_record(t.pi_session_id); r != nil do append(&items, Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: pi-desk's own title
+		if r, _ := claude_record(t.pi_session_id); r != nil do append(&items, Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		_, perr := sidebar_path(t.project_id, t.pi_session_id)
-		claude_row := claude_row_record(t.project_id, t.pi_session_id) != nil // its info from pi-desk's history (claude_rows.odin)
+		claude_row := claude_row_record(t.project_id, t.pi_session_id) != nil // its info from Deckhand's history (claude_rows.odin)
 		if perr == "" || claude_row {
 			if len(items) > 0 do sep(&items)
-			// a Claude row: its transcript, while pi-desk knows one under Claude's projects/
+			// a Claude row: its transcript, while Deckhand knows one under Claude's projects/
 			if perr == "" {
 				append(&items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
 				append(&items, Menu_Item{label = "Copy path", cmd = Copy_Path{project_id = t.project_id, pi_session_id = t.pi_session_id}})
@@ -1156,14 +1156,14 @@ session_rows :: proc(rows: []Sidebar_Row, project_id: u64, cs: ^Open_Session, pr
 			if !hovered do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : th.text_muted))
 			if st != .None do dot(status_color(st))
 			row_button(clay.ID(chat ? "chatpin" : "sesspin", u32(i)), r.pin >= 0 ? "★" : "☆", hovered, pin_hover)
-			if session_row_has_info(s^) do row_button(clay.ID(chat ? "chatinfo" : "sessinfo", u32(i)), "", hovered, info_hover, .Info) // a Claude row's: pi-desk's own record
+			if session_row_has_info(s^) do row_button(clay.ID(chat ? "chatinfo" : "sessinfo", u32(i)), "", hovered, info_hover, .Info) // a Claude row's: Deckhand's own record
 			row_button(clay.ID(chat ? "chatmore" : "sessmore", u32(i)), "", hovered, more_hover, .More)
 			if open_id != 0 do row_button(clay.ID(chat ? "chatclose" : "sessclose", u32(i)), "", hovered, close_hover, .Close)
 		}
 	}
 }
 
-// Whether a row has its ⓘ: a pi row's comes from its file; a Claude row's from pi-desk's history
+// Whether a row has its ⓘ: a pi row's comes from its file; a Claude row's from Deckhand's history
 // entry (an open Claude-only session not in it yet has none).
 session_row_has_info :: proc(s: Session) -> bool {
 	if !s.claude do return true

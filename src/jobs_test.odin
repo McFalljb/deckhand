@@ -47,7 +47,7 @@ List open PRs that wait on me.
 ` + "```sh\ngh pr list\n```" + `
 
 ## Recent runs
-<!-- written by pi-desk; edits here are overwritten -->
+<!-- written by Deckhand; edits here are overwritten -->
 - 2026-11-01 07:00 ✅ ok 1m12s $0.08 — 3 PRs
 `
 

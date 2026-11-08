@@ -1,7 +1,7 @@
 # Read-only Claude chats, run 1 (tests/scripts/claude-readonly.sh; docs/CLAUDE.md §1a): with
-# Chats: read-only on, + New chat's Claude Code starts claude with pi-desk's profile (the fake logs its
-# argv); its guard (pi-desk hook readonly, from --settings) blocks a mutating command, an edit and
-# an act verb and lets reads through; pi-desk refuses the tab's act verbs itself; quit.
+# Chats: read-only on, + New chat's Claude Code starts claude with Deckhand's profile (the fake logs its
+# argv); its guard (deckhand hook readonly, from --settings) blocks a mutating command, an edit and
+# an act verb and lets reads through; Deckhand refuses the tab's act verbs itself; quit.
 wait 1500
 ui_command {"type":"set_chats_readonly","on":true}
 assert_result ok true
@@ -32,11 +32,11 @@ type !tool Read
 key enter
 waitfor TOOL Read -> runs 15000
 waitstate 10000 open_sessions.0.tabs.0.turn idle
-type !bash pi-desk click 1 --selector x
+type !bash deckhand click 1 --selector x
 key enter
 waitfor TOOL Bash -> blocked 15000
 waitstate 10000 open_sessions.0.tabs.0.turn idle
-# the CLI straight (as if the guard had not run): pi-desk refuses it from this token
+# the CLI straight (as if the guard had not run): Deckhand refuses it from this token
 type !cli click 1 #x
 key enter
 waitfor CLI click 1 #x -> exit 1 15000

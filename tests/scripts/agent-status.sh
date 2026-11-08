@@ -23,7 +23,7 @@ PROJ="$FAKE_HOME/code/recipe-box"
 DIR="$FAKE_HOME/.pi/agent/sessions/--status--"
 mkdir -p "$PROJ" "$DIR" "$W/data"
 cp tests/scripts/fake-7501.py "$FAKE_HOME/fake-7501.py"
-# a log holding a report: `cat` prints it and is gone before pi-desk reads it
+# a log holding a report: `cat` prints it and is gone before Deckhand reads it
 printf '\033]7501;state=blocked:kind=permission:app=spoof\007' > "$FAKE_HOME/evil.log"
 i=0
 for s in "aaaa-1|Import recipes from a CSV export" "bbbb-2|Which unit should the search index use"; do
@@ -31,8 +31,8 @@ for s in "aaaa-1|Import recipes from a CSV export" "bbbb-2|Which unit should the
   printf '{"type":"session","version":3,"id":"%s","cwd":"%s"}\n{"type":"message","message":{"role":"user","content":"%s"}}\n' \
     "$id" "$PROJ" "$title" > "$DIR/2026-10-2${i}T0${i}-00-00-000Z_$id.jsonl"
 done
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' \
   build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then

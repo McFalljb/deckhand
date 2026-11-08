@@ -17,8 +17,8 @@ mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--$(printf '%s' "${PRO
 printf '{"type":"session","version":3,"id":"pppp-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--$(printf '%s' "${PROJ#/}" | tr / -)--/2026-10-30T10-00-00-000Z_pppp-1.jsonl"
 run() { # n
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="tests/scripts/panes-restore-$1.txt" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run$1.log" 2>&1 || true
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="tests/scripts/panes-restore-$1.txt" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run$1.log" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run$1.log" | sed "s/^/run $1: /" || true
   # run 1 ends at its quit (no "done:"): its last line is the final save
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run$1.log" || ! grep -qE "done:|workspace save checks" "$W/run$1.log"; then

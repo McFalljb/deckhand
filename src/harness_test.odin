@@ -1,6 +1,6 @@
 package main
 
-// General setups (`./build.sh test`): pi-desk without pi or without Claude Code (harness.odin),
+// General setups (`./build.sh test`): Deckhand without pi or without Claude Code (harness.odin),
 // the one "New session" picker, pi's sessions under PI_CODING_AGENT_DIR, non-POSIX login shells,
 // and versions read from other install layouts (nix, mise, bun, pnpm). Same rules as core_test.odin:
 // shared global State, one thread, `sleep` standing in for pi and claude; never a real pi or claude.
@@ -32,10 +32,10 @@ h_reset :: proc() -> runtime.Allocator {
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	toast_clear()
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	// a fresh HOME and Claude Code's default account (earlier tests leave theirs, maybe deleted)
 	os.set_env("HOME", h_dir("home"))
 	os.unset_env("CLAUDE_CONFIG_DIR")
@@ -55,7 +55,7 @@ h_done :: proc() {
 
 @(private = "file")
 h_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-hs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-hs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	return d
 }
@@ -99,9 +99,9 @@ pi_detect_places :: proc(t: ^testing.T) {
 	h_write(fmt.tprintf("%s/.pi/agent/bin/pi", home), fake, exec = true)
 	testing.expect(t, pi_detect("/usr/bin", home, ""), "in ~/.pi/agent/bin")
 	testing.expect(t, !pi_detect("/usr/bin", "relative", "agent"), "relative folders are never looked in")
-	// PI_DESK_CMD replaces pi: it counts as installed (scenes, benchmarks)
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	testing.expect(t, pi_installed(), "PI_DESK_CMD stands in for pi")
+	// DECKHAND_CMD replaces pi: it counts as installed (scenes, benchmarks)
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	testing.expect(t, pi_installed(), "DECKHAND_CMD stands in for pi")
 }
 
 // ---- the one "New session": a picker of the installed harnesses ----
@@ -427,7 +427,7 @@ gear_reload_pi_row_needs_pi :: proc(t: ^testing.T) {
 	testing.expect(t, pop_item_shown(.Rescan), "other rows as ever")
 }
 
-// `pi-desk DIR` without --claude: pi, or Claude Code when it is the only harness installed.
+// `deckhand DIR` without --claude: pi, or Claude Code when it is the only harness installed.
 @(test)
 launch_dir_without_pi :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
@@ -456,7 +456,7 @@ h_wait_lookup :: proc() -> bool {
 }
 
 // A pi only the login shell finds (.zprofile: nvm, fnm, asdf, mise, pnpm) is never "not installed":
-// before saying no, pi-desk asks the login shell (`command -v pi`, never pi itself); while it
+// before saying no, Deckhand asks the login shell (`command -v pi`, never pi itself); while it
 // asks, pi counts as there. A re-look (the user's New session) stats again but does not ask again.
 @(test)
 pi_detect_asks_login_shell :: proc(t: ^testing.T) {
@@ -464,8 +464,8 @@ pi_detect_asks_login_shell :: proc(t: ^testing.T) {
 	defer h_done()
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
-	os.set_env("PI_DESK_CMD", "")
-	defer os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "")
+	defer os.set_env("DECKHAND_CMD", "sleep 30")
 	os.set_env("PI_CODING_AGENT_DIR", "")
 	dir := h_dir("lookup")
 	empty := fmt.tprintf("%s/empty", dir)
@@ -508,8 +508,8 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 	defer h_done()
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator))
 	defer os.set_env("PATH", old_path)
-	os.set_env("PI_DESK_CMD", "")
-	defer os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "")
+	defer os.set_env("DECKHAND_CMD", "sleep 30")
 	os.set_env("PI_CODING_AGENT_DIR", "")
 	old_cap := pi_lookup_timeout
 	defer pi_lookup_timeout = old_cap
@@ -558,7 +558,7 @@ pi_lookup_unanswered_is_there :: proc(t: ^testing.T) {
 }
 
 // PI_CODING_AGENT_DIR as pi reads it: a leading ~ is the home folder; a relative one (pi would take
-// it from its cwd, which pi-desk cannot know) falls back to ~/.pi/agent.
+// it from its cwd, which Deckhand cannot know) falls back to ~/.pi/agent.
 @(test)
 pi_agent_dir_tilde_and_relative :: proc(t: ^testing.T) {
 	context.allocator = h_reset()

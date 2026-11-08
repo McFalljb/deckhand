@@ -17,7 +17,7 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 		{"  http://example.com  ", "http://example.com"},
 		{"HTTPS://Example.com", "HTTPS://Example.com"},
 		{"file:///tmp/x.html", "file:///tmp/x.html"},
-		{"pidesk-test://web/nav-a.html", "pidesk-test://web/nav-a.html"},
+		{"deckhand-test://web/nav-a.html", "deckhand-test://web/nav-a.html"},
 		{"about:blank", "about:blank"},
 		// a bare host gets https://
 		{"example.com", "https://example.com"},
@@ -36,7 +36,7 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 		got, err := browser_url_normalize(c[0])
 		testing.expectf(t, err == "" && got == c[1], "%q -> %q (%s), want %q", c[0], got, err, c[1])
 	}
-	// not addresses: search is not built in yet; schemes pi-desk does not open
+	// not addresses: search is not built in yet; schemes Deckhand does not open
 	bad := []string{"", "   ", "how to bake bread", "foo", "example", "a.b1", "example.c", ".example.com", "example.com.", "host:port", "host:123456", "javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "chrome://settings", "ftp://x.org", "about:config", "https://", "ex ample.com", "under_score.com"}
 	for b in bad {
 		got, err := browser_url_normalize(b)
@@ -120,7 +120,7 @@ browser_open_session_per_caller :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok && strings.contains(r.error, "Home"), r.error)
 	r = open({kind = .Control, tab_id = bn_pi(home)}, a)
 	testing.expect(t, r.ok && bn_session_of(r.created_id) == a, r.error)
-	// pi-desk itself names it; an app's program sends no commands
+	// Deckhand itself names it; an app's program sends no commands
 	r = open({kind = .Internal}, 0)
 	testing.expect(t, !r.ok, "internal: the session is needed")
 	r = open({kind = .App, tab_id = 1}, a)
@@ -187,7 +187,7 @@ browser_tabs_driven_and_reported :: proc(t: ^testing.T) {
 	// a refused popup is shown to agents
 	run_command(Browser_Update{tab_id = ta, what = {.Blocked}, blocked = "https://ads.example/"}, {kind = .Internal})
 	testing.expect(t, strings.contains(state_json(), `"blocked_popup":"https://ads.example/"`))
-	// only pi-desk reports
+	// only Deckhand reports
 	r = run_command(Browser_Update{tab_id = ta, what = {.Url}, url = "https://evil.example"}, {kind = .Script})
 	testing.expect(t, !r.ok)
 	// over the wire: parsed by name, written back the same

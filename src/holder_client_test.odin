@@ -130,9 +130,9 @@ held_ids_persist :: proc(t: ^testing.T) {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	proj := fmt.aprintf("%s/pi-desk-held-%d", strings.trim_right(tmp, "/"), os.get_pid())
+	proj := fmt.aprintf("%s/deckhand-held-%d", strings.trim_right(tmp, "/"), os.get_pid())
 	os.make_directory_all(proj)
 	defer os.remove(proj)
 
@@ -321,7 +321,7 @@ adopt_run :: proc(t: ^testing.T, f: ^Fake_Holder, text: string, binds: map[u32]H
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	path := fmt.tprintf("%s/tokens.json", home_root)
 	socket_tokens_enable(path, f.key[:])
 	tab := u64(900)
@@ -338,7 +338,7 @@ adopt_run :: proc(t: ^testing.T, f: ^Fake_Holder, text: string, binds: map[u32]H
 @(private = "file")
 adopt_proj :: proc() -> string {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	proj := fmt.aprintf("%s/pi-desk-adopt-%d", strings.trim_right(tmp, "/"), os.get_pid())
+	proj := fmt.aprintf("%s/deckhand-adopt-%d", strings.trim_right(tmp, "/"), os.get_pid())
 	os.make_directory_all(proj)
 	return proj
 }

@@ -1,7 +1,7 @@
-package pi_desk_cli
+package deckhand_cli
 
 // Small JSON helpers: a writer for the objects this tool prints and sends, a compact
-// serializer for values pi-desk returned (app replies, events), and readers that never fail.
+// serializer for values Deckhand returned (app replies, events), and readers that never fail.
 
 import "core:encoding/json"
 import "core:fmt"
@@ -95,7 +95,7 @@ jw_end :: proc(w: ^JW) -> string {
 	return strings.to_string(w.b)
 }
 
-// ---- values pi-desk returned ----
+// ---- values Deckhand returned ----
 
 // Compact JSON of a parsed value (object key order is not kept).
 json_text :: proc(v: json.Value) -> string {

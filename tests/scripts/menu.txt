@@ -84,7 +84,7 @@ menu_key 40 k cmd menu
 assert_state focus.id palette
 menu_key 40 k cmd menu
 assert_state focus.kind terminal
-# ---- another window has the keyboard (the About panel): no key reaches pi-desk
+# ---- another window has the keyboard (the About panel): no key reaches Deckhand
 menu_key 40 k cmd notkey
 assert_state focus.kind terminal
 menu_key 13 w cmd notkey
@@ -188,7 +188,7 @@ clickid confirm_no
 eventually
 assert_state pending_confirmations.# 0
 # ---- ⌥⌘T is Claude's (a Claude tab), not ⌘T's shell; ⌥⌘N is gone (⌘N's picker offers Claude Code)
-# (Claude Code: the fake HOME's stand-in, never run; PI_DESK_CLAUDE_CMD echoes and sleeps)
+# (Claude Code: the fake HOME's stand-in, never run; DECKHAND_CLAUDE_CMD echoes and sleeps)
 menu_key 17 t cmd alt menu
 waitstate 5000 open_sessions.0.tabs.3.kind claude
 # ⌥⌘N is no shortcut any more; ⌘N's picker gives a Claude chat (2)

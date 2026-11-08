@@ -2,7 +2,7 @@
 # End to end with real pi and Deckhand's pi integration (integrations/pi,
 # loaded with -e: the bridge and the panels producer; the user's pi-kit, if
 # installed, stays inert but for its sidebar, which hands its panels over): pi
-# in a pi-desk tab connects, sees the `panels` capability and publishes shells
+# in a Deckhand tab connects, sees the `panels` capability and publishes shells
 # and todos to the right column. Like looks.sh, pi runs with
 # the real HOME (its login and packages) on a cheap model and writes its
 # session into a fake store. Two short prompts. Screenshots: build/shots/panels/e2e-*.
@@ -20,6 +20,6 @@ rm -rf "$FAKE_HOME" build/test-data
 mkdir -p "$PROJ" "$STORE"
 PI=$(command -v pi)
 REAL_HOME=$HOME
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_REAL_PI=1 \
-  PI_DESK_CMD="HOME='$REAL_HOME' exec '$PI' --model opencode-go/deepseek-v4.1-flash --session-dir '$STORE' \"\$@\"" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_REAL_PI=1 \
+  DECKHAND_CMD="HOME='$REAL_HOME' exec '$PI' --model opencode-go/deepseek-v4.1-flash --session-dir '$STORE' \"\$@\"" \
   build/deckhand "$PROJ"

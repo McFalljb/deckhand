@@ -17,7 +17,7 @@ assert_state open_sessions.1.tabs.0.agent idle
 assert_screen Atlas
 assert_state agent.model opencode-go/deepseek-v4.1-flash
 shot home/e2e-name
-type Use desk_state to list the pi-desk projects. Reply in one line with their names.
+type Use desk_state to list the Deckhand projects. Reply in one line with their names.
 key enter
 wait 40000
 assert_state open_sessions.1.tabs.0.agent idle

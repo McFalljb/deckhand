@@ -524,10 +524,10 @@ panes_agent_opens_land_in_its_pane :: proc(t: ^testing.T) {
 	defer pt_two_done(x)
 	frames_ok = -1 // no frame server in unit tests
 	dir := fmt.aprintf("%s/pt-agent-%d", os.get_env("TMPDIR", context.temp_allocator), os.get_pid())
-	os.make_directory_all(fmt.tprintf("%s/.pi-desk", dir))
+	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
 	defer os.remove_all(dir)
 	_ = os.write_entire_file(fmt.tprintf("%s/notes.txt", dir), transmute([]u8)string("one\n"))
-	_ = os.write_entire_file(fmt.tprintf("%s/.pi-desk/apps.json", dir), transmute([]u8)string(`{"apps":[{"name":"fake","argv":["/nonexistent/pi-desk-test-app"]}]}`))
+	_ = os.write_entire_file(fmt.tprintf("%s/.deckhand/apps.json", dir), transmute([]u8)string(`{"apps":[{"name":"fake","argv":["/nonexistent/deckhand-test-app"]}]}`))
 	append(&state.projects, Project{id = new_id(), cwd = fs_real(dir)})
 	x.s.cwd = fs_real(dir)
 	x.s.project_id = state.projects[0].id
@@ -1545,7 +1545,7 @@ panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
 	session_show_tab(x.s, x.app_id)
 	ap := apps[x.app_id]
-	ap.inspect = true // its hover is pi-desk's: a.hin says the pointer is over it
+	ap.inspect = true // its hover is Deckhand's: a.hin says the pointer is over it
 	for _ in 0 ..< 3 {
 		_ = ui_layout(1400, 860)
 		ui_pane_rects(x.s)

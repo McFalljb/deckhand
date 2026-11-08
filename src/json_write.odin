@@ -1063,7 +1063,7 @@ write_strings :: proc(b: ^strings.Builder, list: []string) {
 }
 
 // Reply envelope to a request with client id `id`. request_id (commands
-// over the socket) is pi-desk's id for the request: a `pending` result's
+// over the socket) is Deckhand's id for the request: a `pending` result's
 // `finished` event carries the same one.
 reply_json :: proc(id: string, r: Result, request_id: u64 = 0) -> string {
 	b := strings.builder_make(context.temp_allocator)
@@ -1358,7 +1358,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	fmt.sbprintf(b, `,"pi_installed":%v`, pi_installed()) // pi found (harness.odin): stat, else the login shell's answer
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
-	claude_history_json(b, s.claude_history[:], s.claude_disk[:], s.claude_disk_chats[:]) // Claude sessions pi-desk ran (claude.odin); not in a pi or Claude tab's own view
+	claude_history_json(b, s.claude_history[:], s.claude_disk[:], s.claude_disk_chats[:]) // Claude sessions Deckhand ran (claude.odin); not in a pi or Claude tab's own view
 	key(&w, "home")
 	{
 		h := obj_begin(b)
@@ -1381,7 +1381,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_u64(&n, "os_notified", u64(s.notices.os_sent))
 		obj_end(&n)
 	}
-	key(&w, "update") // pi-desk's own updates (update.odin): read-only for agents
+	key(&w, "update") // Deckhand's own updates (update.odin): read-only for agents
 	update_state_json(b)
 	key(&w, "jobs")
 	write_job_rows(b, s.jobs[:], false)
@@ -1573,7 +1573,7 @@ list_commands_json :: proc(caller: Caller) -> string {
 
 
 // The agent in the state snapshot: unread runs, whether it waits for the
-// user, the model it runs as far as pi-desk can tell (agent_model).
+// user, the model it runs as far as Deckhand can tell (agent_model).
 write_agent :: proc(b: ^strings.Builder, a: Agent_Info) {
 	w := obj_begin(b)
 	kv_u64(&w, "unread", u64(a.unread))

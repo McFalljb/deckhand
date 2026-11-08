@@ -17,8 +17,8 @@ PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data"
 if [ ! -x build/Deckhand.app/Contents/MacOS/Deckhand ]; then echo "comments scene: no CEF build (run ./build.sh)"; exit 1; fi
 [ -x build/fake-app ] || { echo "build/fake-app missing: ./build.sh test"; exit 1; }
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/comments.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_RUNTIME_DIR="$W/run" ATTACH_LOG="$W/attach.log" PI_DESK_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-attach.py' \"\$@\"" \
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/comments.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_RUNTIME_DIR="$W/run" ATTACH_LOG="$W/attach.log" DECKHAND_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-attach.py' \"\$@\"" \
   build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|no element" "$W/run.log" || true
 fail=0

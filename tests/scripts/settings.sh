@@ -9,7 +9,7 @@
 # an editor tab; invalid JSON is not saved; a valid save offers to reload
 # pi; the row menu has no Rename/Trash for pi's config files; credential
 # files are never shown (also inside an opened folder) or opened; the dummy
-# secret never shows (not drawn, not in the log or pi-desk's data).
+# secret never shows (not drawn, not in the log or Deckhand's data).
 # Screenshots: build/shots/settings/.
 # Usage: tests/scripts/settings.sh
 set -eu
@@ -39,12 +39,12 @@ printf '{"token":"%s"}\n' "$SECRET" > "$AD/prompts/token.json"
 chmod 600 "$AD/prompts/token.json"
 printf 'KEY=%s\n' "$SECRET" > "$AD/prompts/.env"
 cp "$AD/settings.json" "$W/settings.before"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/settings.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/settings.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi
-# the dummy secret: never in the log (results, events) or pi-desk's data (the script's own line aside)
+# the dummy secret: never in the log (results, events) or Deckhand's data (the script's own line aside)
 if grep -rh DUMMY-AUTH-SECRET "$W/run.log" "$W/data" | grep -v "assert_not_drawn\|assert ok: not drawn"; then echo "SECRET LEAKED"; fail=1; fi
 cmp -s "$AD/settings.json" "$W/settings.before" || { echo "settings.json changed (an invalid save was written?)"; fail=1; }
 grep -qF "$SECRET" "$AD/auth.json" || { echo "auth.json changed"; fail=1; }

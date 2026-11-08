@@ -1,7 +1,7 @@
 package main
 
 // claude_wait_idle (docs/PROTOCOL.md §3, Claude Code tabs): Atlas, scripts and the user wait until
-// a Claude tab is idle, as pi_wait_idle does for a pi tab through its bridge. pi-desk answers it
+// a Claude tab is idle, as pi_wait_idle does for a pi tab through its bridge. Deckhand answers it
 // itself: a Claude tab has no bridge, its turn comes from the plugin's hooks (claude.turn) and
 // Claude's own OSC 7501 status (agent_status.odin).
 //
@@ -48,7 +48,7 @@ CLAUDE_DROPPED_KEEP :: 64
 Claude_Waiter :: struct {
 	request_id: u64,
 	tab_id:     u64,
-	conn:       u64, // the requester's connection (0: none: the user, a script, pi-desk)
+	conn:       u64, // the requester's connection (0: none: the user, a script, Deckhand)
 	start:      u64, // the tab's claude_start count when the wait began
 	prompt_id:  u64,
 	deadline:   time.Tick, // zero: none

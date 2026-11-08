@@ -2,7 +2,7 @@
 # page, zoom, the right-click menu, tooltip and pointer shape, downloads, the blocked-popup bar,
 # the permission bar, the crash bar. Page coordinates: tests/web/polish.html.
 wait 1500
-command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+command {"type":"browser_open","url":"deckhand-test://web/polish.html"}
 web_waitpaint 10000
 web_title Polish 10000
 waitstate 5000 open_sessions.0.tabs.1.zoom 1
@@ -10,19 +10,19 @@ assert_state open_sessions.0.tabs.1.crashed false
 # 1. window.open without a user gesture (before any click: a click lets the page open one for a
 # few seconds): refused, with a bar; × closes it; Open opens it in a new tab of this session
 web_js window.tryOpen()
-waitstate 5000 open_sessions.0.tabs.1.blocked_popup pidesk-test://web/nav-b.html?from=script
+waitstate 5000 open_sessions.0.tabs.1.blocked_popup deckhand-test://web/nav-b.html?from=script
 web_js document.title = window.opened
 web_title null 3000
 wait 600
 clickid pg_popup_close
 waitstate 3000 open_sessions.0.tabs.1.blocked_popup <missing>
 web_js window.tryOpen()
-waitstate 5000 open_sessions.0.tabs.1.blocked_popup pidesk-test://web/nav-b.html?from=script
+waitstate 5000 open_sessions.0.tabs.1.blocked_popup deckhand-test://web/nav-b.html?from=script
 shot browser-polish/popup
 wait 600
 clickid pg_popup_open
 waitstate 5000 open_sessions.0.tabs.# 3
-waitstate 5000 open_sessions.0.tabs.2.url pidesk-test://web/nav-b.html?from=script
+waitstate 5000 open_sessions.0.tabs.2.url deckhand-test://web/nav-b.html?from=script
 assert_state open_sessions.0.tabs.1.blocked_popup <missing>
 assert_state open_sessions.# 1
 command {"type":"focus_tab","tab_id":$last}
@@ -117,7 +117,7 @@ page_assert menu Reload|--|Open link in new tab|Copy link|--|Inspect
 shot browser-polish/menu
 page_menu Open link in new tab
 waitstate 5000 open_sessions.0.tabs.# 4
-waitstate 5000 open_sessions.0.tabs.3.url pidesk-test://web/nav-b.html
+waitstate 5000 open_sessions.0.tabs.3.url deckhand-test://web/nav-b.html
 assert_state open_sessions.# 1
 command {"type":"focus_tab","tab_id":$last}
 waitstate 3000 open_sessions.0.active_tab $last
@@ -159,7 +159,7 @@ assert_state open_sessions.0.tabs.1.permission <missing>
 # 9. leaving a page that asks first (beforeunload): Stay keeps it, Leave goes
 web_click 280 140
 web_title armed 3000
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/nav-a.html"}
 waitstate 5000 open_sessions.0.tabs.1.dialog.kind beforeunload
 shot browser-polish/leave
 wait 600
@@ -167,7 +167,7 @@ clickid pg_dialog_cancel
 waitstate 3000 open_sessions.0.tabs.1.dialog <missing>
 wait 500
 web_title armed 3000
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/nav-a.html"}
 waitstate 5000 open_sessions.0.tabs.1.dialog.kind beforeunload
 wait 600
 clickid pg_dialog_ok

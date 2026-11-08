@@ -58,7 +58,7 @@ Session_Facts :: struct {
 	modified: string,
 	model:    string,
 	agent:    string, // "Claude Code" for a Claude row ("" = pi)
-	used:     string, // a Claude row: its last use (pi-desk's history)
+	used:     string, // a Claude row: its last use (Deckhand's history)
 }
 
 // The facts in a session file: its header line and its metadata. The
@@ -161,7 +161,7 @@ session_info_build :: proc(project_id: u64, pi_session_id: string) -> (f: Sessio
 	return f, session_info_text(f), ""
 }
 
-// A Claude row's facts: pi-desk's own history entry (never Claude Code's files), its transcript
+// A Claude row's facts: Deckhand's own history entry (never Claude Code's files), its transcript
 // path only while it is still one under Claude's projects/ (claude_rows.odin).
 @(private = "file")
 claude_facts :: proc(project_id: u64, rec: ^Claude_Record) -> (f: Session_Facts, text: string, err: string) {

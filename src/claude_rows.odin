@@ -5,7 +5,7 @@ package main
 // session info, Reveal and Copy path, the question and error dots (Stop, StopFailure), and the
 // user's rename pushed to Claude Code as its session title.
 //
-// pi-desk still never reads Claude Code's files: the transcript path is only a name the hook
+// Deckhand still never reads Claude Code's files: the transcript path is only a name the hook
 // reported, kept when it is a .jsonl under Claude's config dir's projects/ (real paths, so no `..`
 // and no symlink out of it), checked again before Reveal or Copy path use it.
 

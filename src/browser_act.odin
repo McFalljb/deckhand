@@ -7,11 +7,11 @@ package main
 // Who: as step 7's reads (table class Own_Session, browser_target): a pi tab acts only on its own
 // session's browser tabs; Atlas and control callers on any. No site list (BROWSER.md §8 decision
 // 4); actions are refused on file:, chrome:, devtools: and every page that is not http(s),
-// about:blank or test mode's pidesk-test: (act_page_allowed).
+// about:blank or test mode's deckhand-test: (act_page_allowed).
 //
 // How: the input is CDP's Input domain (Input.dispatchMouseEvent, dispatchKeyEvent, insertText)
 // through the tab's DevTools session, as the reads' Runtime.evaluate (cdp_send; our ids from
-// AGENT_MSG_BASE up), not CEF's host input (pd_cef_mouse_click, pd_cef_key): that is the user's
+// AGENT_MSG_BASE up), not CEF's host input (dh_cef_mouse_click, dh_cef_key): that is the user's
 // path (browser.odin's browser_event: held keys and buttons, the user's gesture for downloads),
 // and CDP's coordinates are the page's CSS px whatever the tab's size, on screen or not.
 // Finding targets and checking fields is src/native/browser_act.js in the overlay's isolated
@@ -41,7 +41,7 @@ package main
 //  - an upload shows a bar on the tab ("<agent> wants to upload <full paths> to <origin>": Allow /
 //    Block, the bars' click guard): nothing is sent before Allow; files are checked when asked
 //    and again at Allow (regular files only; never a symbolic link, nor anything under ~/.ssh,
-//    ~/.gnupg, ~/Library/Keychains, ~/.aws, ~/.config/gh, ~/.netrc, ~/.pi or pi-desk's own data
+//    ~/.gnupg, ~/Library/Keychains, ~/.aws, ~/.config/gh, ~/.netrc, ~/.pi or Deckhand's own data
 //    and browser profile: path_not_allowed); the bar's origin is checked again at Allow and
 //    right before the files go, to an <input type=file> only; unanswered in ACT_UPLOAD_WAIT:
 //    waiting_for_user. While the bar asks, the tab takes no other agent action (busy);
@@ -53,7 +53,7 @@ package main
 //    gesture the user just made is used up when an agent's action is accepted, so a download an
 //    agent's click starts asks first (the result says "download":"waiting_for_user");
 //  - no JavaScript evaluation for agents (BROWSER.md: deliberately left out);
-//  - an agent's popup opens behind (on_cef_popup), its right-click opens no pi-desk menu.
+//  - an agent's popup opens behind (on_cef_popup), its right-click opens no Deckhand menu.
 //
 // The user: the agent strip (browser_agent.odin) says what the agent does ("pi is clicking
 // 'Buy'") with Take over and Stop, and a brief ring marks each click. Stop ends the tab's running
@@ -64,7 +64,7 @@ package main
 // linger ACT_LINGER after the last).
 //
 // Actions on one tab run one at a time, in order (the others wait); each has ACT_TIMEOUT from
-// when pi-desk accepted it. A requester's cancel (socket.odin's cancel line) or its connection
+// when Deckhand accepted it. A requester's cancel (socket.odin's cancel line) or its connection
 // closing ends its actions (cancelled).
 
 import "core:c"
@@ -81,7 +81,7 @@ import sapp "../vendor/sokol-odin/sokol/app"
 
 BROWSER_ACT_JS :: #load("native/browser_act.js", string)
 ACT_INIT_JS :: "(" + BROWSER_ACT_JS + `)({"op":"init"})` // the password tracker (browser_annotate.odin: every document)
-ACT_TIMEOUT :: 30 * time.Second // an action, from when pi-desk accepted it (time queued counts)
+ACT_TIMEOUT :: 30 * time.Second // an action, from when Deckhand accepted it (time queued counts)
 ACT_UPLOAD_WAIT :: 120 * time.Second // the upload bar waits this long for the user
 ACT_SETTLE :: 300 * time.Millisecond // after the input: a navigation, a download or a dialog starts
 ACT_NAV_WAIT :: 5 * time.Second // a navigation the action started: its load, at most this long
@@ -159,7 +159,7 @@ Browser_Upload_Answer :: struct {
 	tab_id: u64,
 	allow:  bool,
 }
-// A requester's cancel (socket.odin: its cancel line, or its connection closing): pi-desk's own.
+// A requester's cancel (socket.odin: its cancel line, or its connection closing): Deckhand's own.
 Request_Cancel :: struct {
 	request_id: u64,
 	closed:     bool, // the connection closed
@@ -282,7 +282,7 @@ act_key_named :: proc(name: string, mods: int) -> (k: Act_Key, ok: bool) {
 // user's), chrome:, devtools:, view-source:, extensions, data: or anything else.
 act_page_allowed :: proc(url: string) -> bool {
 	u := strings.to_lower(url, context.temp_allocator)
-	if strings.has_prefix(u, "https://") || strings.has_prefix(u, "http://") || strings.has_prefix(u, "pidesk-test://") do return true
+	if strings.has_prefix(u, "https://") || strings.has_prefix(u, "http://") || strings.has_prefix(u, "deckhand-test://") do return true
 	return u == "about:blank" || strings.has_prefix(u, "about:blank#") || strings.has_prefix(u, "about:blank?")
 }
 
@@ -317,7 +317,7 @@ act_files_check :: proc(paths: []string) -> (code, err: string) {
 
 
 
-// Folders agents never upload from: keys and credentials, pi's own, pi-desk's data and browser
+// Folders agents never upload from: keys and credentials, pi's own, Deckhand's data and browser
 // profile. path is clean and absolute.
 act_path_protected :: proc(path: string) -> bool {
 	home := os.get_env("HOME", context.temp_allocator)
@@ -340,6 +340,10 @@ act_path_protected :: proc(path: string) -> bool {
 		}
 	}
 	append(&dirs, data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator))
+	if home != "" { // both of the data dir's places (the rename: platform.odin data_dir_names)
+		new, old := data_dir_names(home)
+		append(&dirs, new, old)
+	}
 	for d in dirs {
 		if under(path, d) do return true
 		// the folder's own real path too (a home folder behind a link)
@@ -1024,7 +1028,7 @@ act_refusal :: proc(kind: string, plain: bool, want: Act_Key_Kind) -> (code, msg
 	}
 	if want == .Text do return "not_a_field", kind == "none" ? "nothing that takes text has focus (the page itself, a button or a link): pass selector (a text field) or click one first" : "the focused element is not a plain text field (text, search, email, url, tel or number input, a textarea, or editable content)"
 	// other keys (Backspace, Delete, shortcuts): a field, the page itself, or an element focusable
-	// by nature (a button, a link); not an element pi-desk cannot classify (a custom widget)
+	// by nature (a button, a link); not an element Deckhand cannot classify (a custom widget)
 	if kind == "none" && !plain do return "not_a_field", "focus is on an element Deckhand cannot classify (not a field, the page itself, a button or a link): keys like Backspace or shortcuts are not sent there; click a field or the page first"
 	return "", ""
 }
@@ -1110,7 +1114,7 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 	case .Page:
 		if ctx == 0 do return false, {}
 		t.wake = true // a hidden tab paints and takes input while the action runs
-		pd_cef_invalidate(b.cef)
+		dh_cef_invalidate(b.cef)
 		op.nav0 = t.navigated_at
 		op.navs0 = p != nil ? p.nav_started : {}
 		op.ctx0 = ctx
@@ -1299,7 +1303,7 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 			if ctx == 0 do return false, {}
 			if url_origin(bt.url) != op.origin do return true, code_err("page_changed", "the page moved to another site after Allow: nothing was sent")
 			t.wake = true
-			pd_cef_invalidate(b.cef)
+			dh_cef_invalidate(b.cef)
 			req := strings.builder_make(context.temp_allocator)
 			strings.write_string(&req, `{"op":"file_el","sel":`)
 			json_quote(&req, op.selector)

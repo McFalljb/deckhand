@@ -35,8 +35,8 @@ printf '# Global rules\n\n- Work in `%s` for the repo.\n- Notes live in `%s/`, s
 cp tests/scripts/fake-pi-json.py "$FAKE_HOME/bin/pi"
 chmod 755 "$FAKE_HOME/bin/pi"
 CMD='printf "%s\n" "${PI_KIT_NOTES_DIR:-unset}" >> "$HOME/pi-env.txt"; while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600'
-env -u PI_KIT_NOTES_DIR HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/setup.txt PI_DESK_DATA_DIR="$W/data" PI_DESK_FIRST_RUN=1 \
-  PI_DESK_CMD="$CMD" build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+env -u PI_KIT_NOTES_DIR HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/setup.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_FIRST_RUN=1 \
+  DECKHAND_CMD="$CMD" build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi
@@ -50,7 +50,7 @@ chk "the session note untouched" '[ "$(cat "$VAULT/sessions/2026-10-30-x.md")" =
 chk "the vault: only the subfolders added" '[ "$(lsq "$VAULT")" = "README.md atlas jobs memory projects sessions " ]'
 chk "the repo untouched" '[ "$(lsq "$REPO")" = "README.md " ]'
 chk "pi's AGENTS.md untouched" 'grep -q "^- Notes live in" "$FAKE_HOME/.pi/agent/AGENTS.md" && [ "$(lsq "$FAKE_HOME/.pi/agent")" = "AGENTS.md sessions " ]'
-chk "no ~/pi-desk" '[ ! -e "$FAKE_HOME/pi-desk" ]'
+chk "no ~/Deckhand" '[ ! -e "$FAKE_HOME/deckhand" ]'
 chk "the job draft in the vault" '[ -f "$VAULT/jobs/setup-check.md" ]'
 chk "chat instructions" 'head -1 "$FAKE_HOME/Chats/AGENTS.md" | grep -qx "# Chats"'
 chk "a new chat got PI_KIT_NOTES_DIR" 'grep -qx "$VAULT" "$FAKE_HOME/pi-env.txt"'
@@ -58,8 +58,8 @@ chk "saved" 'grep -q "\"home_dir\":\"$VAULT\"" "$W/data/workspace.json" && grep 
 # second start: no sheet; the user's own PI_KIT_NOTES_DIR wins
 mkdir -p "$W/theirs"
 : > "$FAKE_HOME/pi-env.txt"
-PI_KIT_NOTES_DIR="$W/theirs" HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/setup-2.txt PI_DESK_DATA_DIR="$W/data" PI_DESK_FIRST_RUN=1 \
-  PI_DESK_CMD="$CMD" build/deckhand "$PROJ" > "$W/run-2.log" 2>&1 || true
+PI_KIT_NOTES_DIR="$W/theirs" HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/setup-2.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_FIRST_RUN=1 \
+  DECKHAND_CMD="$CMD" build/deckhand "$PROJ" > "$W/run-2.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-2.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-2.log" || ! grep -q "done:" "$W/run-2.log"; then fail=1; fi
 chk "theirs wins" 'grep -qx "$W/theirs" "$FAKE_HOME/pi-env.txt" && ! grep -qx "$VAULT" "$FAKE_HOME/pi-env.txt"'
@@ -69,8 +69,8 @@ chk "theirs wins" 'grep -qx "$W/theirs" "$FAKE_HOME/pi-env.txt" && ! grep -qx "$
 H2="$W/home2"
 mkdir -p "$H2/proj" "$W/data2" "$H2/.claude" "$H2/.claude-work" "$H2/.config/claude-personal" "$W/outside/Team Claude" "$H2/plain-folder" "$H2/.claude-cache"
 for d in "$H2/.claude" "$H2/.claude-work" "$H2/.config/claude-personal" "$W/outside/Team Claude"; do printf '{"fake":true}\n' > "$d/.claude.json"; done
-env -u PI_KIT_NOTES_DIR -u XDG_CONFIG_HOME HOME="$H2" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/setup-accounts.txt PI_DESK_DATA_DIR="$W/data2" PI_DESK_FIRST_RUN=1 \
-  PI_DESK_CMD="$CMD" build/deckhand "$H2/proj" > "$W/run-accounts.log" 2>&1 || true
+env -u PI_KIT_NOTES_DIR -u XDG_CONFIG_HOME HOME="$H2" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/setup-accounts.txt DECKHAND_DATA_DIR="$W/data2" DECKHAND_FIRST_RUN=1 \
+  DECKHAND_CMD="$CMD" build/deckhand "$H2/proj" > "$W/run-accounts.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-accounts.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-accounts.log" || ! grep -q "done:" "$W/run-accounts.log"; then fail=1; fi
 chk "the accounts setting saved" 'grep -q "\"claude_account_default\":\"$H2/.claude-work\"" "$W/data2/workspace.json" && grep -q "\"removed\":true" "$W/data2/workspace.json" && grep -q "\"label\":\"Job\"" "$W/data2/workspace.json"'
@@ -79,8 +79,8 @@ chk "the account folders untouched" '[ "$(lsq "$H2/.claude-work")" = ".claude.js
 H3="$W/home3"
 mkdir -p "$H3/proj" "$W/data3" "$H3/.claude"
 printf '{"fake":true}\n' > "$H3/.claude/.claude.json"
-env -u PI_KIT_NOTES_DIR -u XDG_CONFIG_HOME HOME="$H3" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/setup-one-account.txt PI_DESK_DATA_DIR="$W/data3" PI_DESK_FIRST_RUN=1 \
-  PI_DESK_CMD="$CMD" build/deckhand "$H3/proj" > "$W/run-one.log" 2>&1 || true
+env -u PI_KIT_NOTES_DIR -u XDG_CONFIG_HOME HOME="$H3" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/setup-one-account.txt DECKHAND_DATA_DIR="$W/data3" DECKHAND_FIRST_RUN=1 \
+  DECKHAND_CMD="$CMD" build/deckhand "$H3/proj" > "$W/run-one.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-one.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-one.log" || ! grep -q "done:" "$W/run-one.log"; then fail=1; fi
 if [ $fail = 1 ]; then echo "setup scene failed (log: $W/run.log, $W/run-2.log, $W/run-accounts.log, $W/run-one.log)"; exit 1; fi

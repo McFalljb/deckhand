@@ -38,10 +38,10 @@ f_reset :: proc() -> runtime.Allocator {
 	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	return runtime.heap_allocator()
 }
 
@@ -51,13 +51,13 @@ f_done :: proc() {
 	for _, t in terms do reader_stop_and_close(t)
 	claude_installed_probe = nil
 	claude_wait_reset()
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }
 
 // A project at a temp folder, one open session (its pi a `sleep`) and a Claude tab in it, on screen.
 @(private = "file")
 f_claude :: proc(t: ^testing.T, tag: string) -> (sess, id: u64) {
-	d := fmt.aprintf("%s/pi-desk-feeds-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-feeds-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	pid := run_command(Add_Project{cwd = d}, F_UI).created_id
 	r := run_command(New_Chat{project_id = pid}, F_UI)
@@ -508,7 +508,7 @@ claude_version_hint :: proc(t: ^testing.T) {
 	testing.expect_value(t, claude_update_command("/nix/store/abc-claude/bin/claude"), "") // nix updates it (harness_test.odin)
 	// dismissed: gone for that version only, and saved (a relaunch keeps it hidden)
 	saved_root := home_root
-	home_root = fmt.aprintf("%s/pi-desk-feeds-hints-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	home_root = fmt.aprintf("%s/deckhand-feeds-hints-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	defer home_root = saved_root
 	os.make_directory_all(home_root)
 	claude_status_dismiss(tab, now)

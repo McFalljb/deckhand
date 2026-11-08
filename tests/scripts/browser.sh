@@ -3,10 +3,10 @@
 # CEF page (tests/web/browser.html, a file URL: no network) renders into a
 # tab; a click, typing and the wheel reach it. A fake HOME, a fake pi, a
 # temp data dir (its browser/profile is the test's own Chromium profile).
-# Needs a CEF build (./build.sh without PI_DESK_NO_CEF). Writes build/browser/
+# Needs a CEF build (./build.sh without DECKHAND_NO_CEF). Writes build/browser/
 # (NAME.log per script; CEF's log in data/browser/cef.log) and build/shots/browser/.
 # Step 2 (navigation): browser-nav, browser-popup, browser-tabkeys, browser-pages (pages from
-# tests/web through pidesk-test://web/), and browser-restore: two runs on one
+# tests/web through deckhand-test://web/), and browser-restore: two runs on one
 # data dir, the second restoring the first's tabs.
 # Usage: tests/scripts/browser.sh [NAME...]   (default: every scene)
 #        tests/scripts/browser.sh --group a|b|c|d|e|f (a sixth of them, in build/browser-<group>/:
@@ -56,7 +56,7 @@ tree() { for c in $(pgrep -P "$1"); do tree "$c"; done; echo "$1"; }
 # browser-read: around frames and boxless containers)
 # and acting on them (browser-act: step 8)
 # and the frame ring on both paint paths (browser-ring-cpu: browser-ring.txt with
-# PI_DESK_CEF_SHARED_TEXTURE=0, OnPaint), with a slow GPU (browser-ring-lag) and
+# DECKHAND_CEF_SHARED_TEXTURE=0, OnPaint), with a slow GPU (browser-ring-lag) and
 # under a fast drag (browser-drag); while each runs, every socket of its
 # processes is listed: none may leave the machine
 ALL="$GROUP_A $GROUP_B $GROUP_C $GROUP_D $GROUP_E $GROUP_F $GROUP_G"
@@ -72,8 +72,8 @@ for name in $NAMES; do
     # run 1 saves two sessions' browser tabs, run 2 restores them (no DIR: no new chat)
     rm -rf "$W/data" && mkdir -p "$W/data"
     for n in 1 2; do
-      HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-restore-$n.txt PI_DESK_DATA_DIR="$W/data" \
-        PI_DESK_CMD='exec sleep 600' build/deckhand > "$W/browser-restore-$n.log" 2>&1 || true
+      HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/browser-restore-$n.txt DECKHAND_DATA_DIR="$W/data" \
+        DECKHAND_CMD='exec sleep 600' build/deckhand > "$W/browser-restore-$n.log" 2>&1 || true
       grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|no element" "$W/browser-restore-$n.log" | sed "s/^/browser-restore-$n: /" || true
       if grep -qE "ASSERT FAILED|TIMEOUT|unknown command|no element" "$W/browser-restore-$n.log" || ! grep -q "done:" "$W/browser-restore-$n.log"; then
         echo "browser-restore-$n: FAILED (log: $W/browser-restore-$n.log)"; fail=1
@@ -90,8 +90,8 @@ for name in $NAMES; do
   # a slow GPU (each frame's completion work held back 150 ms): a release that
   # did not wait for the GPU would hand CEF a slot still sampled (inflight_writes)
   if [ $name = browser-ring-lag ]; then script=browser-ring; lag=150; fi
-  HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/$script.txt PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CEF_SHARED_TEXTURE=$shared PI_DESK_TEST_GPU_LAG_MS=$lag PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/$name.log" 2>&1 &
+  HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/$script.txt DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CEF_SHARED_TEXTURE=$shared DECKHAND_TEST_GPU_LAG_MS=$lag DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/$name.log" 2>&1 &
   pid=$!
   : > "$W/$name.sockets"
   while kill -0 $pid 2>/dev/null; do

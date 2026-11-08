@@ -52,13 +52,13 @@ runtime_dir_checks :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(why, "another user"), "not ours: %q", why)
 
 	// the default: <data root>/run, the control socket core.sock in it (a stale one replaced)
-	saved := strings.clone(os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator), context.temp_allocator)
-	os.unset_env("PI_DESK_RUNTIME_DIR")
+	saved := strings.clone(os.get_env("DECKHAND_RUNTIME_DIR", context.temp_allocator), context.temp_allocator)
+	os.unset_env("DECKHAND_RUNTIME_DIR")
 	saved_root := home_root
 	home_root = fmt.tprintf("%s/data", d)
 	defer {
 		home_root = saved_root
-		if saved != "" do os.set_env("PI_DESK_RUNTIME_DIR", saved)
+		if saved != "" do os.set_env("DECKHAND_RUNTIME_DIR", saved)
 	}
 	rd, rwhy := sock_runtime_dir_why(context.temp_allocator)
 	testing.expect_value(t, rwhy, "")
@@ -76,10 +76,10 @@ runtime_dir_checks :: proc(t: ^testing.T) {
 	testing.expect(t, nwhy != "", "no data root, no runtime dir")
 	// the old place pi-desk 0.1.x used: never made, only found
 	testing.expect_value(t, sock_legacy_runtime_dir(context.temp_allocator), sock_legacy_runtime_dir(context.temp_allocator))
-	os.set_env("PI_DESK_RUNTIME_DIR", fmt.tprintf("%s/none", d))
+	os.set_env("DECKHAND_RUNTIME_DIR", fmt.tprintf("%s/none", d))
 	testing.expect_value(t, sock_legacy_runtime_dir(context.temp_allocator), "")
 	testing.expect(t, !os.exists(fmt.tprintf("%s/none", d)))
-	os.set_env("PI_DESK_RUNTIME_DIR", ok_dir)
+	os.set_env("DECKHAND_RUNTIME_DIR", ok_dir)
 	testing.expect_value(t, sock_legacy_runtime_dir(context.temp_allocator), ok_dir)
-	os.unset_env("PI_DESK_RUNTIME_DIR")
+	os.unset_env("DECKHAND_RUNTIME_DIR")
 }

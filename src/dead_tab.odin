@@ -2,7 +2,7 @@ package main
 
 // A pi or Claude tab whose process exited (a "dead tab"). A Claude tab's bar has Restart:
 // claude again in the same tab with --resume <its Claude session id> (claude_tab_restart), plus
-// "Restart with model…" when it failed: then pi-desk pastes its own /model (Claude Code's model
+// "Restart with model…" when it failed: then Deckhand pastes its own /model (Claude Code's model
 // picker) once the new Claude is idle with bracketed paste on and nothing typed (as Send now
 // pastes), so the user picks from the models Claude Code offers them.
 // A pi tab whose process exited (a "dead tab"). How it ended (exit code or
@@ -65,7 +65,7 @@ dead_tab_offers_model :: proc(tab: ^Tab) -> bool {
 	return exit_failed(tab.exit) && !exit_not_found(tab.exit)
 }
 
-// What pi-desk pastes into a restarted Claude for "Restart with model…": Claude Code's model
+// What Deckhand pastes into a restarted Claude for "Restart with model…": Claude Code's model
 // picker (its built-in slash command; a key binding could be rebound).
 CLAUDE_MODEL_COMMAND :: "/model"
 // How long a restarted Claude has to be ready for it.

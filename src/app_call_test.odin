@@ -1,7 +1,7 @@
 package main
 
 // Engine bridge step 2, the parts that need no GPU or second process:
-// app_call's passthrough envelope (any method of the app's own, pi-desk's
+// app_call's passthrough envelope (any method of the app's own, Deckhand's
 // reserved ones refused, params kept), the app's replies kept as sent,
 // app_screenshot's crop and the app's inspect boxes. The live side is the
 // app-tab scene (tests/scripts/app-tab.sh).
@@ -30,7 +30,7 @@ app_call_parses_method_and_params :: proc(t: ^testing.T) {
 }
 
 // Only the envelope is checked: any method name of the app's own goes
-// through; pi-desk's own (lifecycle, visibility) and the envelope's message
+// through; Deckhand's own (lifecycle, visibility) and the envelope's message
 // types are refused, as are params that would set envelope fields.
 @(test)
 app_call_checks_only_the_envelope :: proc(t: ^testing.T) {
@@ -44,7 +44,7 @@ app_call_checks_only_the_envelope :: proc(t: ^testing.T) {
 	}
 	ok(t, "tab.describe", "")
 	ok(t, "game.get", `{"path":"square"}`)
-	ok(t, "tab.ping", "") // harmless: pi-desk's own pings use their own wire ids
+	ok(t, "tab.ping", "") // harmless: Deckhand's own pings use their own wire ids
 	ok(t, "editor:spawn_entity", `{}`)
 	ok(t, "a", "")
 	bad(t, "", "", "bad_args")
@@ -174,7 +174,7 @@ app_inspect_parses :: proc(t: ^testing.T) {
 }
 
 // An app's own method may be called "app_screenshot": when the app exits, a
-// call of it fails at once like any other (only pi-desk's own screenshots,
+// call of it fails at once like any other (only Deckhand's own screenshots,
 // whose frame is copied already, go on).
 @(test)
 app_exit_fails_calls_whatever_their_method :: proc(t: ^testing.T) {
@@ -184,10 +184,10 @@ app_exit_fails_calls_whatever_their_method :: proc(t: ^testing.T) {
 	defer app_fail_pending(9, "", "")
 	app_fail_pending(9, "the app exited", "tab_gone", shots = false)
 	testing.expect(t, !("a901" in pending), "the app's own method named app_screenshot: failed")
-	testing.expect(t, "s902" in pending, "pi-desk's screenshot: goes on")
+	testing.expect(t, "s902" in pending, "Deckhand's screenshot: goes on")
 }
 
-// Review round 1, finding 1: an app's result can never finish pi-desk's own
+// Review round 1, finding 1: an app's result can never finish Deckhand's own
 // screenshot (an "s…" wire), and a worker's never an app call.
 @(test)
 app_results_cannot_forge_screenshots :: proc(t: ^testing.T) {
@@ -270,13 +270,13 @@ app_call_refuses_raw_line_breaks :: proc(t: ^testing.T) {
 	// escaped ones inside strings are fine
 	e, _ := app_call_check("m", `{"a":"x\r\ny"}`)
 	testing.expect_value(t, e, "")
-	// the backstop on every line pi-desk sends an app
+	// the backstop on every line Deckhand sends an app
 	testing.expect(t, app_line_ok(`{"v":1,"type":"m","a":1}`), "a plain line")
 	testing.expect(t, !app_line_ok("{\"v\":1,\"type\":\"m\",\"a\":1}\r{\"type\":\"tab.quit\"}"), "CR")
 	testing.expect(t, !app_line_ok("{\"v\":1,\"type\":\"m\"\n}"), "LF")
 }
 
-// "type\u0000" is not "type" to pi-desk but is to a C-string parser.
+// "type\u0000" is not "type" to Deckhand but is to a C-string parser.
 @(test)
 app_keys_cannot_hold_nul :: proc(t: ^testing.T) {
 	e, code := app_call_check("m", `{"type\u0000":"tab.quit"}`)

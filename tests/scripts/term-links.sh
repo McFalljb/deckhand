@@ -27,8 +27,8 @@ WS=$(printf 'w%.0s' $(seq 1 400))
   printf 'mail mailto:a@example.invalid\n'
   printf 'W https://example.com/%s ZEND\n' "$WS"
 } > "$FAKE_HOME/links.txt"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/term-links.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/term-links.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "term-links scene failed (log: $W/run.log)"; exit 1

@@ -9,7 +9,7 @@
 #      Code's Install runs the stand-in (Esc is held while it runs), then pi's, then pi-subagents':
 #      each found afterwards and never offered again; sudo inside each run hits Deckhand's refusing shim.
 #   3. too old: pi 1.3.0 (npm) and Claude Code 2.1.100 (native): Update, pi's integration not loaded;
-#      without PI_DESK_INSTALL_CMD test mode refuses the run (exit 127).
+#      without DECKHAND_INSTALL_CMD test mode refuses the run (exit 127).
 #   4. nix and mise: pi 1.3.0 in a nix store, Claude Code 2.1.100 under mise: shown only, Copy.
 # Screenshots: build/shots/harness-setup/. Needs ./build.sh.
 # Usage: tests/scripts/harness-setup.sh
@@ -41,8 +41,8 @@ run() { # NAME HOME [VAR=VALUE...]
   name=$1 home=$2
   shift 2
   mkdir -p "$W/data-$name"
-  env -u PI_KIT_NOTES_DIR -u PI_DESK_CMD -u PI_DESK_INSTALL_CMD HOME="$home" CFFIXED_USER_HOME="$home" SHELL=/bin/sh \
-    PI_DESK_SCRIPT="tests/scripts/harness-setup-$name.txt" PI_DESK_DATA_DIR="$W/data-$name" PI_DESK_FIRST_RUN=1 \
+  env -u PI_KIT_NOTES_DIR -u DECKHAND_CMD -u DECKHAND_INSTALL_CMD HOME="$home" CFFIXED_USER_HOME="$home" SHELL=/bin/sh \
+    DECKHAND_SCRIPT="tests/scripts/harness-setup-$name.txt" DECKHAND_DATA_DIR="$W/data-$name" DECKHAND_FIRST_RUN=1 \
     "$@" build/deckhand > "$W/run-$name.log" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-$name.log" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-$name.log" || ! grep -q "done:" "$W/run-$name.log"; then echo "FAILED: run $name ($W/run-$name.log)"; fail=1; fi
@@ -61,7 +61,7 @@ chk "nothing ran" '[ ! -e "$H1/install-argv.txt" ]'
 # 2. missing: the stand-in installs
 H2="$W/home-missing"
 mkdir -p "$H2"
-run missing "$H2" PI_DESK_INSTALL_CMD="$ROOT/tests/scripts/fake-install.sh" FAKE_INSTALL_SLOW=4
+run missing "$H2" DECKHAND_INSTALL_CMD="$ROOT/tests/scripts/fake-install.sh" FAKE_INSTALL_SLOW=4
 P="curl --proto '=https' --proto-redir '=https' -fsSL"
 printf 'claude\t%s https://claude.ai/install.sh | bash\npi\t%s https://pi.dev/install.sh | sh\npi-subagents\t%s install npm:pi-subagents@0.84.0\n' "$P" "$P" "$H2/.pi/agent/bin/pi" > "$W/install-argv-want.txt"
 chk "the stand-in got each item's id and its exact command, once each" 'cmp -s "$H2/install-argv.txt" "$W/install-argv-want.txt"'
@@ -82,7 +82,7 @@ chk "nothing ran" '[ ! -e "$H3/install-argv.txt" ]'
 H4="$W/home-nix"
 fake_pi "$H4" "$H4/fake/nix/store/0abc-pi-coding-agent-1.3.0/lib/node_modules/@earendil-works/pi-coding-agent" 1.3.0
 fake_claude "$H4" "$H4/.local/share/mise/installs/claude-code/2.1.100/bin/claude"
-run nix "$H4" PI_DESK_INSTALL_CMD="$ROOT/tests/scripts/fake-install.sh"
+run nix "$H4" DECKHAND_INSTALL_CMD="$ROOT/tests/scripts/fake-install.sh"
 chk "nothing ran" '[ ! -e "$H4/install-argv.txt" ]'
 
 if [ $fail = 1 ]; then echo "harness-setup scene failed (logs: $W/run-*.log)"; exit 1; fi

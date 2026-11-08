@@ -45,16 +45,44 @@ itself when sokol-odin is missing).
 
 `./build.sh` fetches the pinned [CEF](https://bitbucket.org/chromiumembedded/cef) build
 (`vendor/cef/VERSION`) with `scripts/fetch-cef.sh`, checks its checksum, keeps it in
-`~/Library/Caches/pi-desk/cef`, and lays out `build/Deckhand.app` around it. `build/deckhand` is a
+`~/Library/Caches/deckhand/cef`, and lays out `build/Deckhand.app` around it. `build/deckhand` is a
 small wrapper that runs the bundle's binary directly, so arguments, the environment and stdio pass
 through (`build/pi-desk` is the same wrapper under its old name, so older scripts keep working).
-`PI_DESK_NO_CEF=1 ./build.sh` builds without the browser tab and without the download.
+`DECKHAND_NO_CEF=1 ./build.sh` builds without the browser tab and without the download.
 
-Deckhand used to be called pi-desk, and some internal names keep the old name on purpose, so
-existing installs, scripts and signed updates keep working: the bundle id `dev.pi-desk.app`, the
-data dir `~/Library/Application Support/pi-desk`, the CEF cache, the `PI_DESK_*` environment
-variables, `TERM_PROGRAM=pi-desk`, `tools/pi-desk-cli/`, `.pi-desk/apps.json` and the update
-manifest's header lines.
+### The rename
+
+Deckhand used to be called pi-desk. The rename takes two releases, because Deckhand 0.1.6 and older
+update only to a bundle with the old bundle id and a signature in the old format:
+
+- **0.1.7 (the bridge).** Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
+  `tools/deckhand-cli/`, `.deckhand/apps.json`, `~/Library/Caches/deckhand/cef`,
+  `~/.config/deckhand/update.key`, `TERM_PROGRAM=Deckhand`), and the old ones still work
+  (`src/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
+  runs are set under both names (`DECKHAND_SOCKET` and `PI_DESK_SOCKET`, …; never in pi tabs, where
+  pi-kit's desk extensions would switch on), and every reader takes the new name first, then the
+  old; the scrubs drop an explicit list of Deckhand's names (both families), never every
+  `DECKHAND_` variable, so your own `DECKHAND_SIGN_IDENTITY` reaches a shell tab. The bundle ships
+  `Contents/MacOS/deckhand-cli` and a link `pi-desk-cli -> deckhand-cli` (Claude tabs started
+  before 0.1.7, and held ones, run it by that absolute path; a read-only tab's guard fails closed
+  without it), and the plugin keeps `bin/pi-desk`. The data dir is
+  `~/Library/Application Support/Deckhand` when it is there, else `…/pi-desk`, where every older
+  install keeps its data (nothing is moved yet); `.deckhand/apps.json` is read first, else
+  `.pi-desk/apps.json`. `fetch-cef.sh` moves the CEF cache once (with a link back) and
+  `release.sh` falls back to the key's old place with a warning. The bundle id stays
+  `dev.pi-desk.app` and releases are still signed in the v2 format (`pi-desk update v2`), but the
+  updater also accepts `dev.deckhand.app` and the v3 format (`deckhand update v3`), so 0.1.7 can
+  take 0.1.8. `scripts/rename-pi-desk.py` did the mechanical part (re-runnable:
+  `scripts/rename-pi-desk-rebase.sh`).
+- **0.1.8 (the flip).** The bundle id becomes `dev.deckhand.app`, releases are signed v3, and the
+  data dir moves to `…/Deckhand` (with a link from the old place). Deckhand 0.1.6 and older cannot
+  take it: they update to 0.1.7 first, or are reinstalled by hand.
+- **0.2.0, or three releases after 0.1.7, whichever is later:** the old names stop being set and
+  shipped (`PI_DESK_*` in tabs, `pi-desk-cli`, `bin/pi-desk`, `build/pi-desk`). Reading them stays.
+
+Names that keep the old product's name for good: the instance guard's look for a running
+`pi-desk.app` (and its `$TMPDIR/pi-desk-<uid>` sockets), the old Atlas prompt starters it
+recognises, the titles cache's format line and the user's own `~/pi-desk` main folder.
 
 On its first run `build.sh` also compiles the sokol C libraries (into the sokol-odin submodule
 tree), Clay, the CoreText text backend and stb_truetype (into `build/`). Clay is compiled from the
@@ -99,7 +127,7 @@ codesign -dr - build/Deckhand.app
 
 Signed inside out, no `--deep`, no hardened runtime: the CEF framework's libraries and the
 framework (again only when the pin or the identity changed: `build/.cef-signed-as`), the five
-helpers, `pi-desk-cli`, `deckhand-core` (identifier `dev.deckhand.core`, which `holder_install`
+helpers, `deckhand-cli`, `deckhand-core` (identifier `dev.deckhand.core`, which `holder_install`
 checks), then the app. A designated requirement of `identifier … and certificate leaf = …` is the
 default codesign makes for a self-signed certificate; none is written by hand, so a Developer ID
 gets its own default (the Apple anchor and its team) with no other change.
@@ -194,21 +222,21 @@ against the local zip. You check the draft and publish it.
 
 **No test hooks in a release** (docs/plans/background-core.md §5.3: a genuine binary must not be
 steerable by its environment). Every test and development knob goes through `hook_env()` in
-`src/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`PI_DESK_SCRIPT` and the
-rest), `PI_DESK_DATA_DIR`, `PI_DESK_RUNTIME_DIR`, the pi and Claude stand-ins, the updater's
+`src/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`DECKHAND_SCRIPT` and the
+rest), `DECKHAND_DATA_DIR`, `DECKHAND_RUNTIME_DIR`, the pi and Claude stand-ins, the updater's
 fixtures. `-define:DECKHAND_TEST_HOOKS=false` (what `DECKHAND_RELEASE=1 ./build.sh` passes)
 compiles the table out, so a release build uses the fixed data and runtime dirs, never enters
 test mode, and has no `--print-token` (Settings › Copy a control token mints a control token
 instead). `scripts/check-release-build.sh BINARY...` fails if any of those names, `--print-token`
 or the update test key is in a binary; `tests/scripts/release-checks.sh` builds `src` without
-hooks and runs it. A new knob goes into `HOOK_ENV`, never a bare `os.get_env("PI_DESK_…")`.
+hooks and runs it. A new knob goes into `HOOK_ENV`, never a bare `os.get_env("DECKHAND_…")`.
 After a release build, run `./build.sh` again before the scenes: they need the hooks.
 
 **The current release's updater** (`tests/scripts/update-from-release.sh ZIP VERSION [--prev
 TAG]`, release only). A published release binary cannot be pointed at a local zip (it has no
 fixtures, by design), so the test builds the updater from the current release's tag (the latest
 published one, by `gh`; `--prev` names it) in a temporary worktree, as the update scene builds it
-(`-define:PI_DESK_UPDATE_TEST=true`), offers it the new zip from `file://` fixtures with a `.sig`
+(`-define:DECKHAND_UPDATE_TEST=true`), offers it the new zip from `file://` fixtures with a `.sig`
 made with that tag's throwaway test key (the real `.sig` is verified by `update-sign verify`,
 the same code), and lets it download, check and swap the new bundle into a fake install. The
 installed bundle must be the new version, verify, and carry no test hooks. `release.sh
@@ -223,7 +251,7 @@ Each release:
 
 The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/update_core.odin` (the
 updater asks that repository for releases, and `scripts/release.sh` reads it from there; another
-`--repo` or `PI_DESK_RELEASE_REPO` is refused without `--allow-other-repo`). The release's names
+`--repo` or `DECKHAND_RELEASE_REPO` is refused without `--allow-other-repo`). The release's names
 come from the source too: the app from `UPDATE_APP` (`src/update_core.odin`), the zip's from
 `ZIP_PREFIX` and `ZIP_SUFFIX` (`src/updatesig/updatesig.odin`).
 
@@ -251,7 +279,7 @@ and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` 
 holder older than the one it bundles by itself, once per run, after the launch's adopt
 (`holder_upgrade_tick`, `src/holder_restart.odin`): after an update that is the new app, attached
 as the named successor. In a development build the palette's *Restart session holder* upgrades
-the running holder to the one you just built. `PI_DESK_HOLDER_REV=N` (test builds) makes the app
+the running holder to the one you just built. `DECKHAND_HOLDER_REV=N` (test builds) makes the app
 take its bundled holder for rev N (the keep-sessions scene's automatic upgrade). The
 re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
 `-define:DECKHAND_TEST_HOOKS=true`; never in a release).
@@ -282,12 +310,12 @@ built there, never anything downloaded.
   `manifest VERSION ZIP CDHASH`. It reads the private key only from KEYFILE, never from the
   environment, and never prints it. KEYFILE is opened without following a link and must be a
   regular file you own with mode `600` or `400`, in a folder that neither group nor others can
-  write. `scripts/release.sh` takes it from `--key FILE`, `$PI_DESK_UPDATE_KEY_FILE` or, by
-  default, `~/.config/pi-desk/update.key`.
+  write. `scripts/release.sh` takes it from `--key FILE`, `$DECKHAND_UPDATE_KEY_FILE` or, by
+  default, `~/.config/deckhand/update.key`.
 - **Signing a release** is part of `scripts/release.sh` ("Releases" above): the CDHash comes
   from the app it has just built and zipped, and the `.sig` goes up with the zip.
-- **Setting it up** (once): `mkdir -p ~/.config/pi-desk && chmod 700 ~/.config/pi-desk`,
-  `build/update-sign keygen ~/.config/pi-desk/update.key`, put the printed public key into
+- **Setting it up** (once): `mkdir -p ~/.config/deckhand && chmod 700 ~/.config/deckhand`,
+  `build/update-sign keygen ~/.config/deckhand/update.key`, put the printed public key into
   `UPDATE_PUBLIC_KEY` and commit. Back the key file up offline (an encrypted USB stick or a
   password manager's secure file), not in iCloud Drive or a repository. Copies of Deckhand built
   before this key exist cannot update themselves (install the first keyed release by hand).
@@ -304,8 +332,8 @@ built there, never anything downloaded.
   old key leaked, that bridge release is the risk window: publish it quickly and tell users of
   older copies to update by hand from the releases page.
 - **Tests** use a throwaway key, `tests/update/test-key.txt`, public on purpose. Its public half
-  (`UPDATE_TEST_PUBLIC_KEY`) and test mode's update fixtures (`PI_DESK_UPDATE_URL` and the rest)
-  are compiled in only with `-define:PI_DESK_UPDATE_TEST=true` (`./build.sh test`'s unit tests
+  (`UPDATE_TEST_PUBLIC_KEY`) and test mode's update fixtures (`DECKHAND_UPDATE_URL` and the rest)
+  are compiled in only with `-define:DECKHAND_UPDATE_TEST=true` (`./build.sh test`'s unit tests
   and the update scene's own binary). `tests/scripts/update.sh` plays the whole flow from
   `file://` fixtures into a fake install folder; `tests/scripts/release-checks.sh` checks the
   key-file rules and `release.sh`'s refusals against a fake `gh`.
@@ -344,7 +372,7 @@ events.odin    events (command run, long command finished), command log, own-eve
 socket.odin    control socket: listener, hello + tokens, subscriptions, pi-tab bridge routing
 socket_posix.odin  Unix socket + per-user 0700 dir, peer pid and parent pid (the OS side of socket.odin)
 claude.odin    Claude Code tabs (docs/CLAUDE.md): start, commands, history, held prompts; ui_claude.odin the held bar
-../tools/pi-desk-cli/  the `deckhand` CLI the bundled Claude Code plugin (../integrations/claude-code/) runs: browser and app tools, hooks
+../tools/deckhand-cli/  the `deckhand` CLI the bundled Claude Code plugin (../integrations/claude-code/) runs: browser and app tools, hooks
 pi_integration.odin  the bundled pi integration (../integrations/pi/, docs/HARNESSES.md): where it is, the `-e` arguments every pi start gets, the minimum pi and its bar
 ctl.odin       `deckhand --ctl`: tiny socket client for scripts and tests
 json_*.odin    hand-written JSON: command parser, encoders for commands/results/events/state (docs/PROTOCOL.md)
@@ -394,9 +422,9 @@ corewire/      the window/core framed wire (§5.1 of docs/plans/background-core.
 jsonguard/     the check in front of every json.parse/unmarshal of input Deckhand does not control
                (depth, invalid UTF-8, raw control bytes, JSON5 hex prefixes and comment runs;
                core:encoding/json crashes on those). Strict JSON unless a caller asks for JSON5.
-               The CLI (tools/pi-desk-cli) uses it too; json_guard_test.odin fails on a parse
+               The CLI (tools/deckhand-cli) uses it too; json_guard_test.odin fails on a parse
                anywhere in src/ or tools/ that skips it
-autotest.odin  PI_DESK_SCRIPT test mode
+autotest.odin  DECKHAND_SCRIPT test mode
 *_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```
 
@@ -445,7 +473,7 @@ Deckhand's pi integration (`integrations/pi`, loaded with `pi -e`; [HARNESSES.md
 the same socket with the integration's `desk` tools (PROTOCOL.md §8).
 
 For local scripts, `build/deckhand --print-token script DIR` prints one
-`export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` line, after which `build/deckhand --ctl '{"type":"get_state"}'`
+`export DECKHAND_SOCKET=… DECKHAND_TOKEN=…` line, after which `build/deckhand --ctl '{"type":"get_state"}'`
 talks to the running app. See PROTOCOL.md §9. Development and test builds only: a release build
 has no `--print-token` (Releases, "No test hooks"); there the gear's **Copy a control token**
 puts the same line on the clipboard.
@@ -475,7 +503,7 @@ reload) plus a preview laid out by `src/markdown_view.odin` from Deckhand's own 
 
 ### Terminals
 
-The child process gets `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PROGRAM=pi-desk`,
+The child process gets `TERM=xterm-256color`, `COLORTERM=truecolor` and `TERM_PROGRAM=Deckhand`,
 and the identity variables of whatever terminal launched Deckhand are removed.
 
 Printable keys travel as text from the CHAR event, which is correct for any keyboard layout.
@@ -544,7 +572,7 @@ passed there a few times.
 
 ### How test mode works
 
-`PI_DESK_SCRIPT=file build/deckhand DIR` plays a script of synthetic events through the normal event
+`DECKHAND_SCRIPT=file build/deckhand DIR` plays a script of synthetic events through the normal event
 handler; the script commands are listed at the top of `src/autotest.odin`. Scripts submit JSON
 commands through the inbox (`command {"type":"close_tab","tab_id":$tab}`) and check results with
 `assert_state PATH VALUE` and `assert_result PATH VALUE`. The app exits with status 1 if an assert
@@ -554,44 +582,44 @@ Test mode is quiet by default, so scenes can run while someone uses the Mac. The
 activates (no Dock icon, never frontmost or key), and its window sits behind the desktop picture
 and ignores the mouse. It is still on a display, so frames, idle-CPU numbers and screenshots work
 as usual, with the traffic lights drawn inactive. A script's copies and pastes stay in the app,
-so a run never replaces what is on the user's clipboard (a page in a browser tab still uses it). `PI_DESK_QUIET=0` shows the window so you can
+so a run never replaces what is on the user's clipboard (a page in a browser tab still uses it). `DECKHAND_QUIET=0` shows the window so you can
 watch a run; in that mode test mode hands focus back at its first step. `frame-pause.txt`
 (minimize and restore) needs it, because otherwise the window animates into the Dock.
 
 The `shot NAME` command raises the window without taking focus and captures only this window into
 `build/shots/NAME.png` (not committed). Test mode logs to `build/test-data/`. The agent's sessions
 in test mode live in `build/test-data/home` and its prompt in `build/test-data/atlas/ATLAS.md`.
-Test mode saves and restores the workspace only when `PI_DESK_DATA_DIR` is set explicitly.
+Test mode saves and restores the workspace only when `DECKHAND_DATA_DIR` is set explicitly.
 
 Test mode draws at a fixed backing scale, so a scene's pixels are the same on every Mac (a
-Retina display is 2, most others and CI runners 1): `PI_DESK_SCALE`, a number from 1 to 4,
+Retina display is 2, most others and CI runners 1): `DECKHAND_SCALE`, a number from 1 to 4,
 default **1**. Every screen and window reports it, so the window's framebuffer, an app tab's ring
-and `app_screenshot` PNGs are logical px × `PI_DESK_SCALE`. The `shot` command's capture
+and `app_screenshot` PNGs are logical px × `DECKHAND_SCALE`. The `shot` command's capture
 (`screencapture`) is the window server's, at the real display's scale. Outside test mode it is
 ignored.
 `app-tab.sh` runs at 2, so scale conversions stay tested.
 
 **Safety rule: test mode never starts a real `pi` or `claude` unless told to.** With
-`PI_DESK_SCRIPT` set, every launch path (new and restored tabs, Atlas, dead-tab restarts, Claude
+`DECKHAND_SCRIPT` set, every launch path (new and restored tabs, Atlas, dead-tab restarts, Claude
 restarts, jobs) runs a stand-in or refuses:
 
-- **pi tabs** run `PI_DESK_CMD`. Without it, the tab prints "Deckhand test mode: no PI_DESK_CMD;
-  refusing to run the real pi" and exits 127, unless `PI_DESK_REAL_PI=1` opts in to the real pi
+- **pi tabs** run `DECKHAND_CMD`. Without it, the tab prints "Deckhand test mode: no DECKHAND_CMD;
+  refusing to run the real pi" and exits 127, unless `DECKHAND_REAL_PI=1` opts in to the real pi
   (the real-pi scenes above set it).
-- **Claude tabs** run `PI_DESK_CLAUDE_CMD`. Without it they print "Deckhand test mode: no
-  PI_DESK_CLAUDE_CMD; refusing to run the real claude" and exit 127. There is no opt-in.
+- **Claude tabs** run `DECKHAND_CLAUDE_CMD`. Without it they print "Deckhand test mode: no
+  DECKHAND_CLAUDE_CMD; refusing to run the real claude" and exit 127. There is no opt-in.
 - **Jobs** run only the `pi_path` setting (a scene's fake), or pi from the jobs' PATH with
-  `PI_DESK_REAL_PI=1`. Otherwise the run fails with "Jobs run pi, which was not found…".
+  `DECKHAND_REAL_PI=1`. Otherwise the run fails with "Jobs run pi, which was not found…".
 - **Installs and updates** from the coding agents checklist (HARNESSES.md §7) run
-  `PI_DESK_INSTALL_CMD`, which gets the item's id and the exact command as `"$@"`
+  `DECKHAND_INSTALL_CMD`, which gets the item's id and the exact command as `"$@"`
   (`tests/scripts/fake-install.sh`). Without it the run prints "Deckhand test mode: no
-  PI_DESK_INSTALL_CMD; refusing to run the real install" and exits 127. There is no opt-in.
+  DECKHAND_INSTALL_CMD; refusing to run the real install" and exits 127. There is no opt-in.
 
 **Which harnesses a scene has** (`src/harness.odin`): Deckhand looks for pi and Claude Code by stat,
 never running them, and what it finds decides the UI (the **New session** picker, Atlas's
-button). In test mode that look never uses PATH (unless `PI_DESK_REAL_PI=1`), only the install
+button). In test mode that look never uses PATH (unless `DECKHAND_REAL_PI=1`), only the install
 folders under the scene's fake HOME, so the developer's own pi and claude never change a scene:
-pi counts as installed when `PI_DESK_CMD` is set (it stands in for pi, in and out of test mode)
+pi counts as installed when `DECKHAND_CMD` is set (it stands in for pi, in and out of test mode)
 or a stand-in is in `~/.pi/agent/bin`; Claude Code when `claude-stub.sh` put one in
 `~/.local/bin`. A scene with both gets the picker on **New session**; with one, it starts at once.
 
@@ -599,9 +627,9 @@ Each refusal is also printed on Deckhand's stderr ("Deckhand: test mode: refusin
 …"), so a scene's log shows it. Apps and scripts that drive Deckhand in test mode can rely on this
 rule.
 
-Other environment variables help with tests and benchmarks. `PI_DESK_LOG_COMMANDS=1` prints every
-event as it happens. `PI_DESK_CMD="..."` replaces pi with any command, which gets pi's arguments as
-`"$@"`; `PI_DESK_CLAUDE_CMD` does the same for claude. `PI_DESK_DATA_DIR` moves the data dir. `deckhand --fresh` starts without restoring the
+Other environment variables help with tests and benchmarks. `DECKHAND_LOG_COMMANDS=1` prints every
+event as it happens. `DECKHAND_CMD="..."` replaces pi with any command, which gets pi's arguments as
+`"$@"`; `DECKHAND_CLAUDE_CMD` does the same for claude. `DECKHAND_DATA_DIR` moves the data dir. `deckhand --fresh` starts without restoring the
 saved workspace (`<data dir>/workspace.json`, see [PERSISTENCE.md](PERSISTENCE.md)) and keeps the
 old file as `workspace.json.bak-<time>`.
 
@@ -615,12 +643,12 @@ this section, with the version it lands in.
 
 | Variable | Meaning |
 |---|---|
-| `PI_DESK_SCRIPT` | the script to play (its commands: the top of `src/autotest.odin`); turns test mode on |
-| `PI_DESK_CMD` | replaces pi with this shell command (it gets pi's arguments as `"$@"`); a scene never runs a real pi |
-| `PI_DESK_DATA_DIR` | the data dir (workspace, app logs `apps/<tab_id>.log`, screenshots `apps/shots/`); set, test mode saves and restores the workspace there |
-| `PI_DESK_RUNTIME_DIR` | where the control socket lives (PROTOCOL.md §1); a fresh one per run keeps runs apart |
-| `PI_DESK_SCALE` | the backing scale, 1 to 4, default 1 (above) |
-| `PI_DESK_QUIET` | `0` shows the window; otherwise test mode is quiet (above) |
+| `DECKHAND_SCRIPT` | the script to play (its commands: the top of `src/autotest.odin`); turns test mode on |
+| `DECKHAND_CMD` | replaces pi with this shell command (it gets pi's arguments as `"$@"`); a scene never runs a real pi |
+| `DECKHAND_DATA_DIR` | the data dir (workspace, app logs `apps/<tab_id>.log`, screenshots `apps/shots/`); set, test mode saves and restores the workspace there |
+| `DECKHAND_RUNTIME_DIR` | where the control socket lives (PROTOCOL.md §1); a fresh one per run keeps runs apart |
+| `DECKHAND_SCALE` | the backing scale, 1 to 4, default 1 (above) |
+| `DECKHAND_QUIET` | `0` shows the window; otherwise test mode is quiet (above) |
 
 What an app's test can rely on, beyond the variables:
 - `command {...}` runs a command now. A long-running one (`app_call`, `app_screenshot`) is waited
@@ -640,14 +668,14 @@ app is up. It also checks the default scale.
 
 `src/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
 launchd (pid 1: LaunchServices, so Dock, Finder, Spotlight, `open`) or whose `PATH` is launchd's
-bare one; `PI_DESK_GUI_LAUNCH=1` or `0` forces it (scenes; or to turn the import off), and test
-mode (`PI_DESK_SCRIPT`) is never a GUI launch without `PI_DESK_GUI_LAUNCH=1`. A GUI
+bare one; `DECKHAND_GUI_LAUNCH=1` or `0` forces it (scenes; or to turn the import off), and test
+mode (`DECKHAND_SCRIPT`) is never a GUI launch without `DECKHAND_GUI_LAUNCH=1`. A GUI
 launch runs `$SHELL -i -l -c` (its own session, stdin `/dev/null`, 4 s then SIGKILL to its group),
 reads `env -0` between markers and merges (`login_env_compose`): the shell's values win (it
 inherited the same environment, so they differ only where an rc file set them), inherited
-variables it did not print are kept, `PWD`/`OLDPWD`/`SHLVL`/`_`/`PI_DESK_*` never come from it; `PATH` is the shell's
+variables it did not print are kept, `PWD`/`OLDPWD`/`SHLVL`/`_`/`DECKHAND_*` never come from it; `PATH` is the shell's
 order, then inherited folders it lacks, deduplicated. No answer: `PATH` plus the fallback folders
-that exist (`PI_DESK_PATH_DIRS` replaces the list in tests). A terminal launch is untouched,
+that exist (`DECKHAND_PATH_DIRS` replaces the list in tests). A terminal launch is untouched,
 except for Claude Code's session markers. Those (`claude_session_marker`: `CLAUDECODE`,
 `CLAUDE_CODE_CHILD_SESSION`, `CLAUDE_CODE_ENTRYPOINT`, `CLAUDE_CODE_EXECPATH`, `CLAUDE_PID`,
 `CLAUDE_CODE_SSE_PORT`, `CLAUDE_CODE_BRIDGE_SESSION_ID`, `CLAUDE_CODE_REMOTE_SESSION_ID`,
@@ -664,7 +692,7 @@ alone is an IDE's terminal) also asks the shell, as a GUI launch does
 what the login shell sets itself comes back. When the shell gives no answer (fails, times out)
 they stay as inherited; only the markers go. `ANTHROPIC_*` always stay (pi and Atlas read them
 too). To keep everything a Claude session passed on (bar the markers), start Deckhand with
-`PI_DESK_GUI_LAUNCH=0`. The
+`DECKHAND_GUI_LAUNCH=0`. The
 process environment is set only there; **Refresh shell environment** (`refresh_shell_env`) asks
 again on a worker with the launch environment and keeps the result for `child_env`/`app_env`
 (new tabs and apps) and jobs' default PATH, never `setenv` after startup. Everything else keeps
@@ -714,7 +742,7 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   claude running `deckhand show`) show the user files with `show_file`: the tab kind, the session and
   the place it lands in, behind the user's view; another session and a binary file refused.
 - **`app-open.sh`**: a session's own pi (a fake bridge, `fake-bridge-apps.py`) opens its
-  project's declared app (`.pi-desk/apps.json`) by name in its own session, at once (Deckhand asks
+  project's declared app (`.deckhand/apps.json`) by name in its own session, at once (Deckhand asks
   nothing), behind the view, and screenshots it while hidden; another session, an argv and an undeclared name are refused; another session's app tab is
   never restarted, closed or called; its own restarts and closes (needs `build/fake-app`).
 - **`agent.sh`**: the drawer with a fake Atlas pi (`fake-atlas.py`, a pi-like screen and a
@@ -731,7 +759,7 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   folders hidden), then a relaunch that checks the opened rows came back.
 - **`login-path.sh`**: Deckhand under `env -i` with a fake HOME and fake shells: a bare PATH
   takes `~/.zshrc`'s PATH; a failing shell, the fallback folders; no pi, the not-found message;
-  a Nix-like non-bare PATH (`PI_DESK_GUI_LAUNCH=1`) still merges the shell's environment, finds
+  a Nix-like non-bare PATH (`DECKHAND_GUI_LAUNCH=1`) still merges the shell's environment, finds
   the managed `~/.pi/agent/bin/pi`, and the gear's **Refresh shell environment** gives new shell
   tabs the shell's new answer; started from inside a Claude Code session (its markers,
   `CLAUDE_CONFIG_DIR` and `CLAUDE_EFFORT` inherited), the pi tab gets none of them
@@ -778,7 +806,7 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   stand-in refused by Deckhand's shim); too old on npm
   and the native installer (Update; test mode refuses the run without a stand-in); too old on nix
   and mise (shown only, Copy). Light and dark (`build/shots/harness-setup/`).
-- **`setup.sh`**: the first-run sheet (`PI_DESK_FIRST_RUN=1`) against a fake HOME whose
+- **`setup.sh`**: the first-run sheet (`DECKHAND_FIRST_RUN=1`) against a fake HOME whose
   `~/.pi/agent/AGENTS.md` names a fake vault. The vault is found, chats are kept separate, Done
   makes only the missing subfolders, a job draft lands in its `jobs/`, a new chat gets
   `PI_KIT_NOTES_DIR`, and the gear and the menu bar reopen the sheet. A second start shows no
@@ -836,7 +864,7 @@ tests. Unless noted, they use a fake pi and write their screenshots to `build/sh
   restore all end with pi's read-only allowlist and carry `PI_KIT_READONLY=1`; with the setting
   off, a restored chat starts full. Every one of those starts also begins with `-e` per extension
   of the bundled pi integration (`build/Deckhand.app/Contents/Resources/pi`) and carries
-  `DECKHAND_SOCKET`, `DECKHAND_TOKEN` and `DECKHAND_SHOTS_DIR`, never pi-kit's `PI_DESK_*` bridge
+  `DECKHAND_SOCKET`, `DECKHAND_TOKEN` and `DECKHAND_SHOTS_DIR`, never pi-kit's `DECKHAND_*` bridge
   variables (`agent.sh` checks the same for Atlas, with `DECKHAND_CONTROL_TOKEN`).
 - **`claude-readonly.sh`**: a read-only Claude chat ([CLAUDE.md](CLAUDE.md) §1a) with the fake
   claude, which also runs the `--settings` hooks: the profile in argv, the guard's deny JSON for a
@@ -852,5 +880,5 @@ dry run. It prints paths only and reads just the `cwd` of each folder's newest s
 
 ```sh
 python3 -I scripts/tree-dryrun.py > /tmp/store.tsv
-PI_DESK_TREE_DRYRUN=/tmp/store.tsv odin test src -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=main.tree_dryrun
+DECKHAND_TREE_DRYRUN=/tmp/store.tsv odin test src -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=main.tree_dryrun
 ```

@@ -4,7 +4,7 @@ package main
 // in the app and loads into every pi tab with `pi -e <path>`, as it loads its Claude Code plugin
 // with --plugin-dir. Nothing is written to pi's settings.
 //
-//   - Where: PI_DESK_PI_INTEGRATION (test mode only: scenes), else the bundle's Contents/Resources/pi, else
+//   - Where: DECKHAND_PI_INTEGRATION (test mode only: scenes), else the bundle's Contents/Resources/pi, else
 //     pi next to the binary (a bare build). It must hold extensions.json.
 //   - What: extensions.json lists the extensions in load order, each required or optional. Every
 //     pi start (start_pi: new tabs, chats, Atlas, restores, restarts) gets one `-e
@@ -109,9 +109,9 @@ pi_integration_dir :: proc() -> string {
 	return ""
 }
 
-// PI_DESK_PI_INTEGRATION's folder: in test mode only, absolute, holding extensions.json; else "".
-// Test mode (PI_DESK_SCRIPT) is switched on by the environment too, so this is the same trust
-// boundary as PI_DESK_CMD (the command a pi tab runs): whoever sets Deckhand's environment.
+// DECKHAND_PI_INTEGRATION's folder: in test mode only, absolute, holding extensions.json; else "".
+// Test mode (DECKHAND_SCRIPT) is switched on by the environment too, so this is the same trust
+// boundary as DECKHAND_CMD (the command a pi tab runs): whoever sets Deckhand's environment.
 pi_integration_from_env :: proc(test: bool) -> string {
 	if !test do return ""
 	p := hook_env(.Pi_Integration)

@@ -2,7 +2,7 @@ package main
 
 // Hot reload (ROADMAP G11). pi reads its settings, extensions, skills,
 // prompts, themes and context files (AGENTS.md…) when it starts or on
-// /reload, and its own code only when it starts. pi-desk watches those
+// /reload, and its own code only when it starts. Deckhand watches those
 // files and offers, in a bar over the centre (ui_reload.odin):
 //
 //   "pi settings changed — Reload N idle tabs"   pi_reload_all {only_changed}:
@@ -41,7 +41,7 @@ package main
 //
 // pi's version: the pi package's package.json, found once by a worker from
 // `command -v pi` in a login shell (as pi tabs start pi), or
-// PI_DESK_PI_PACKAGE (tests). Each pi tab records the version on disk when
+// DECKHAND_PI_PACKAGE (tests). Each pi tab records the version on disk when
 // it is first seen running (Tab.reload.version).
 
 import "base:runtime"
@@ -169,7 +169,7 @@ Reload_Class :: enum u8 {
 	Idle,
 	Busy, // working, or a dialog is open
 	Blocked, // idle, but with background work a reload would stop
-	No_Bridge, // no status from the pi integration's bridge: pi-desk cannot reach it
+	No_Bridge, // no status from the pi integration's bridge: Deckhand cannot reach it
 }
 
 reload_class :: proc(t: ^Tab) -> Reload_Class {
@@ -906,7 +906,7 @@ pkg_version :: proc(path: string) -> string {
 }
 
 // Looks for pi's package (again): at the first pi tab, when the bar may
-// show, before a restart. A worker, at most every 10 s; PI_DESK_PI_PACKAGE
+// show, before a restart. A worker, at most every 10 s; DECKHAND_PI_PACKAGE
 // at once (tests). The result is taken by reload_tick.
 @(private = "file")
 probe_again :: proc() {

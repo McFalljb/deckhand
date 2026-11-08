@@ -109,10 +109,10 @@ shot claude-runtime/settings
 assert_files [Claude Code (global)]\nsettings.json\nCLAUDE.md\ncommands\nDefault flags for new tabs\nSkip permissions: off [Turn on]\nWarning:\n
 assert_drawn Default flags for new tabs
 assert_drawn Turn on
-hover fcreate @pi-desk:claude-default-flags
+hover fcreate @deckhand:claude-default-flags
 eventually
 assert_tip Start the Claude tabs you start with --dangerously-skip-permissions (never agents' tabs or read-only chats)
-clickid fcreate @pi-desk:claude-default-flags
+clickid fcreate @deckhand:claude-default-flags
 wait 300
 assert_state settings.claude_skip_permissions false
 assert_state pending_confirmations.0.summary Start the Claude tabs you start with --dangerously-skip-permissions? Claude will edit files and run commands without asking you first. Agents' tabs and read-only chats never get it.
@@ -122,7 +122,7 @@ wait 300
 assert_state settings.claude_skip_permissions true
 assert_drawn Turn off
 shot claude-runtime/settings-skip-on
-clickid fcreate @pi-desk:claude-default-flags
+clickid fcreate @deckhand:claude-default-flags
 eventually
 assert_state settings.claude_skip_permissions false
 # 4. Claude exits with an error: Restart with model… resumes it and opens Claude's model picker

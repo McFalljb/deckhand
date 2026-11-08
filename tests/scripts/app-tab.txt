@@ -78,7 +78,7 @@ assert_finished data.path nope
 command {"type":"app_call","tab_id":$last,"method":"game.nope","params":{"n":1}}
 assert_finished data.code not_supported
 assert_finished data.method game.nope
-# pi-desk's own requests and the envelope's types are refused, never sent
+# Deckhand's own requests and the envelope's types are refused, never sent
 command {"type":"app_call","tab_id":$last,"method":"tab.quit"}
 assert_result ok false
 assert_result data.code reserved
@@ -100,7 +100,7 @@ assert_finished data.visible true
 assert_shot_pixel 4 4 202830
 command {"type":"app_screenshot","tab_id":$last,"rect":{"x":100,"y":60,"w":40,"h":40}}
 assert_finished ok true
-# PI_DESK_SCALE=2 (app-tab.sh): the crop is 2 px per logical px on any Mac
+# DECKHAND_SCALE=2 (app-tab.sh): the crop is 2 px per logical px on any Mac
 assert_finished data.w 80
 assert_finished data.h 80
 assert_shot_pixel 2 2 FF4040
@@ -129,13 +129,13 @@ app_hover 110 70
 assert_app_hover square
 app_leave
 assert_app_hover -
-# while inspecting, the mouse over the tab is pi-desk's: the app gets no click (off the boxes: a
+# while inspecting, the mouse over the tab is Deckhand's: the app gets no click (off the boxes: a
 # click on a box opens a comment on it, tests/scripts/comments.txt)
 app_click 500 400
 wait 300
 assert_not_app_log "x":500.0
 assert_state focus.id <missing>
-# a press pi-desk took while inspecting: its release never reaches the app, even after Inspect is off
+# a press Deckhand took while inspecting: its release never reaches the app, even after Inspect is off
 app_mouse down 61 63
 clickid app_inspect
 assert_state open_sessions.0.tabs.1.inspect false
@@ -157,7 +157,7 @@ app_waitframe 3
 wait 300
 assert_app_surfaces 3
 assert_state open_sessions.0.tabs.1.ring_gen 2
-# ---- hidden (the pi tab on screen): the app is told, pi-desk draws nothing
+# ---- hidden (the pi tab on screen): the app is told, Deckhand draws nothing
 command {"type":"focus_tab","tab_id":$pitab}
 app_waitlog visible: false 3000
 wait 500
@@ -233,7 +233,7 @@ wait 200
 assert_app_surfaces 3
 command {"type":"close_tab","tab_id":$last}
 wait 300
-# a crashed app's tab closed without a restart: everything goes, pi-desk stays up
+# a crashed app's tab closed without a restart: everything goes, Deckhand stays up
 app_open build/fake-app --crash-after 20
 app_waitframe 10 20000
 app_waitstatus exited 20000
@@ -249,7 +249,7 @@ app_waitstatus running 20000
 app_waitframe 5 20000
 command {"type":"close_tab","tab_id":$last}
 wait 300
-# ---- "New app tab…" from the palette: the project's .pi-desk/apps.json lists the fake
+# ---- "New app tab…" from the palette: the project's .deckhand/apps.json lists the fake
 key k cmd
 wait 200
 type new app tab

@@ -6,7 +6,7 @@ package main
 //      an earlier name), set by /name at any time, anywhere in the file;
 //   2. else the first `message` entry with role "user" that has text: its
 //      content string, or its "text" blocks joined with " ";
-//   3. (pi-desk only) else the objective of the first pi-goal (`custom`
+//   3. (Deckhand only) else the objective of the first pi-goal (`custom`
 //      entry, customType "pi-goal", data.goal.objective): a session started
 //      by /goal before any typed prompt;
 //   4. else "" (shown as "Untitled session · <created>", sidebar.odin).

@@ -104,7 +104,7 @@ Deckhand finds more than one Claude Code account):
      or `$CLAUDE_CONFIG_DIR/CLAUDE.md`), that has a `sessions/` folder. Those two files are the
      only ones it reads, and only the path it finds is shown. pi's and Claude Code's own folders
      (`~/.pi/agent`, `~/.claude` and above), your home folder and git checkouts are never offered.
-   - **Create ~/pi-desk**: the default when nothing is found.
+   - **Create ~/Deckhand**: the default when nothing is found.
    - **Choose another folder…**: any folder.
 2. **Chats**: **Inside the main folder (chats/)** or a **Separate folder** (pre-selected when you
    picked one before, or when `~/Chats` already has chats; **Choose separate folder…** picks
@@ -361,7 +361,7 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   in the session's folder. The Files tab's row menu also has **Open terminal here**.
 - **To open an app tab** (a program that draws into the tab, such as a game engine), pick
   **New app tab…** in the **+** menu or the palette, then type the command to run (or pick one
-  of the project's `.pi-desk/apps.json` entries) and press Enter. It runs in the session's
+  of the project's `.deckhand/apps.json` entries) and press Enter. It runs in the session's
   folder; its output goes to a log. Keys, clicks and the wheel go to the app while it is on
   screen and nothing else has the keyboard. If the app exits, its last picture stays, dimmed,
   under a bar with **Restart** and **Log**; if it stops drawing, the bar says "No frames for Ns",
@@ -561,7 +561,7 @@ Deckhand's own shortcuts come first even then: ⌘T opens a shell tab, ⌘W clos
   fields; an upload asks you first in a bar (**Allow** / **Block**); a page that changes your
   clipboard while pi acts is named in a toast. Details: BROWSER.md, step 8.
 - **App tabs by agents**: a session's pi (or Claude) can open the apps your project lists in
-  `.pi-desk/apps.json`, by name, in its own session: never another program, never another
+  `.deckhand/apps.json`, by name, in its own session: never another program, never another
   session. Deckhand does not ask you first: an agent that can write apps.json can already run
   that program from its own shell. A Claude tab's open, restart and close go through Claude
   Code's own permission mode (it asks unless you run it with permissions bypassed). The tab opens
@@ -1295,7 +1295,7 @@ the job sheet, Atlas or another agent), and an edited note runs as edited. What 
 
 Check new and changed jobs in the Jobs tab and the note itself.
 
-Deckhand keeps nothing about jobs in your macOS Keychain. Older versions kept a "pi-desk jobs
+Deckhand keeps nothing about jobs in your macOS Keychain. Older versions kept a "Deckhand jobs
 approval key" there; it is no longer used, and you may delete it in Keychain Access.
 
 ### Running
@@ -1486,9 +1486,9 @@ it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)).
   applying. After an update, check **System Settings › Privacy & Security › Full Disk Access**,
   remove the old Deckhand entry and add the new one.
 
-Release builds have no test or development switches: no test mode, no `PI_DESK_*` overrides of
+Release builds have no test or development switches: no test mode, no `DECKHAND_*` overrides of
 where data and sockets live, and no token printed at start. To drive Deckhand from a terminal, take a token
-with **Copy a control token** (the gear): it puts `export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` on the
+with **Copy a control token** (the gear): it puts `export DECKHAND_SOCKET=… DECKHAND_TOKEN=…` on the
 clipboard for `deckhand --ctl` (it works until you quit Deckhand).
 
 **When Deckhand cannot replace itself**, the bar says why and offers only **Release notes**:
@@ -1515,14 +1515,21 @@ Applications. Your projects, sessions, settings, Atlas, jobs and Claude accounts
 While pi-desk runs, Deckhand does not start: it says so and quits. From Deckhand on, releases come
 as `deckhand-<version>-macos-arm64.zip`.
 
-**Names kept from pi-desk, on purpose.** Some internal names still say pi-desk, so that your data
-and setup carry over and nothing you rely on breaks. They are not leftovers to rename:
+**Old names that still work.** From 0.1.7 everything is named Deckhand, and the old names keep
+working, so your data and setup carry over and nothing you rely on breaks:
 
-- the bundle id, `dev.pi-desk.app`;
-- the data dir, `~/Library/Application Support/pi-desk` (see [Where it lives](#where-it-lives));
-- the `PI_DESK_*` environment variables Deckhand sets in its tabs;
+- the data dir: Deckhand uses `~/Library/Application Support/pi-desk` while that is where your data
+  is (0.1.8 moves it to `…/Deckhand`; see [Where it lives](#where-it-lives));
+- the environment variables Deckhand sets in Claude tabs, app tabs and job runs are set under both
+  names, `DECKHAND_*` and the old `PI_DESK_*`, until 0.2.0; `DECKHAND_GUI_LAUNCH` and
+  `DECKHAND_CEF_SHARED_TEXTURE` are read under their old names too;
 - the `pi-desk` command in Claude tabs, an alias of `deckhand`;
-- the project file `.pi-desk/apps.json` and the default main folder `~/pi-desk`.
+- the project file: `.deckhand/apps.json`, or `.pi-desk/apps.json` if that is the one you have
+  (Deckhand never moves it: `git mv` it when you like);
+- your main folder, wherever it is (`~/pi-desk` stays `~/pi-desk`).
+
+The bundle id is still `dev.pi-desk.app` in 0.1.7; 0.1.8 changes it to `dev.deckhand.app`, and macOS
+then asks once more for folder access and notifications.
 
 Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
 download or install one: only you can.
@@ -1531,10 +1538,11 @@ download or install one: only you can.
 
 ### Where it lives
 
-Deckhand's data dir is `~/Library/Application Support/pi-desk` on macOS (Linux:
-`~/.local/share/pi-desk`; a release build always uses this one; a development build can move it,
-docs/DEVELOPING.md). The name is kept
-from Deckhand's old name ([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
+Deckhand's data dir is `~/Library/Application Support/Deckhand` on macOS (Linux:
+`~/.local/share/deckhand`; a release build always uses this one; a development build can move it,
+docs/DEVELOPING.md). An install from before the rename keeps using `~/Library/Application
+Support/pi-desk` (Linux: `~/.local/share/pi-desk`) until 0.1.8 moves it
+([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
 to you (`0700`), and its files are `0600`:
 
 | File | What |
@@ -1562,7 +1570,7 @@ Elsewhere:
 
 ### Your folders
 
-One **main folder** holds everything that is yours (new users: `~/pi-desk`; set it up in the
+One **main folder** holds everything that is yours (new users: `~/Deckhand`; set it up in the
 [first run](#the-first-run) sheet). Its standard subfolders:
 
 | Folder | What |

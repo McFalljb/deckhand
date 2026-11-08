@@ -33,7 +33,7 @@ RUNTIME_HOLDER_NEED :: len("/holder-xxxxxxxx.sock")
 
 // The runtime dir (docs/plans/background-core.md §5.1): <data root>/run, the data root being
 // home_root (data_dir(), or test mode's build/test-data); not $TMPDIR, which macOS cleans under
-// long-lived processes. PI_DESK_RUNTIME_DIR overrides (tests). It must be ours, a real
+// long-lived processes. DECKHAND_RUNTIME_DIR overrides (tests). It must be ours, a real
 // directory (no symlink) and 0700 (group/other bits are removed if set), and core.sock's path
 // in it must fit in sun_path. why: what is wrong ("" = fine).
 sock_runtime_dir :: proc(allocator := context.allocator) -> (dir: string, ok: bool) {
@@ -72,7 +72,7 @@ runtime_dir_prepare :: proc(dir: string, need: int) -> string {
 }
 
 // The runtime dir of pi-desk 0.1.x and of Deckhand before M1, where instance_guard looks for a
-// running pi-desk: PI_DESK_RUNTIME_DIR, else macOS $TMPDIR/pi-desk-<uid> ($TMPDIR is already
+// running pi-desk: DECKHAND_RUNTIME_DIR, else macOS $TMPDIR/pi-desk-<uid> ($TMPDIR is already
 // per user), Linux $XDG_RUNTIME_DIR/pi-desk, else /tmp/pi-desk-<uid>. Never made; "" unless it
 // is a real directory of ours.
 sock_legacy_runtime_dir :: proc(allocator := context.allocator) -> string {
@@ -200,7 +200,7 @@ sock_close :: proc(fd: Sock_Fd) {posix.close(fd)}
 sock_unlink :: proc(path: string) {posix.unlink(strings.clone_to_cstring(path, context.temp_allocator))}
 
 // The process at the other end of a connected Unix socket (its pid when it connected), and a
-// process's parent: what tells pi-desk that a Claude tab's token comes from that tab's own
+// process's parent: what tells Deckhand that a Claude tab's token comes from that tab's own
 // processes (socket.odin, socket_claude_peer_ok). 0 = unknown.
 when ODIN_OS == .Darwin {
 	foreign import sockpeer "system:System"

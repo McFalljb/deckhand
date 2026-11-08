@@ -19,7 +19,7 @@ import "base:runtime"
 import "core:strings"
 import sapp "../vendor/sokol-odin/sokol/app"
 
-// AppKit's own items (menubar_macos.m's PD_* numbers).
+// AppKit's own items (menubar_macos.m's DH_* numbers).
 Bar_Native :: enum {
 	None,
 	About,
@@ -51,7 +51,7 @@ SEP :: Bar_Item{sep = true}
 MENUBAR := [?]Bar_Item {
 	{title = "Deckhand", sub = []Bar_Item {
 		{id = "about", title = "About Deckhand", native = .About},
-		{action = "check_updates"}, // pi-desk's own updates (update.odin)
+		{action = "check_updates"}, // Deckhand's own updates (update.odin)
 		SEP,
 		{action = "settings", title = "Settings…"},
 		{action = "setup"}, // "Set up Deckhand…": the first-run sheet (ui_setup.odin)

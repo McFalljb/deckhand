@@ -55,10 +55,10 @@ ch_setup :: proc() -> (f: Ch_Fixture, ok: bool) {
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-changes-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-changes-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	f.root = fs_real(made, context.allocator)
-	ensure(strings.contains(f.root, "/pi-desk-changes-test-") && os.is_directory(f.root), "changes tests: no temp folder")
+	ensure(strings.contains(f.root, "/deckhand-changes-test-") && os.is_directory(f.root), "changes tests: no temp folder")
 	f.old_home = strings.clone(os.get_env("HOME", context.temp_allocator))
 	os.make_directory_all(fmt.tprintf("%s/home", f.root))
 	os.set_env("HOME", fmt.tprintf("%s/home", f.root))
@@ -370,7 +370,7 @@ changes_commit_runs_hooks :: proc(t: ^testing.T) {
 	put(fmt.tprintf("%s/pre-commit", hooks), fmt.tprintf("#!/bin/sh\ntouch '%s'\n", marker))
 	put(fmt.tprintf("%s/commit-msg", hooks), "#!/bin/sh\ngrep -q WIP \"$1\" && { echo 'commit-msg: no WIP commits' >&2; exit 1; }\nexit 0\n")
 	_, _ = run_bounded("", {"chmod", "+x", fmt.tprintf("%s/pre-commit", hooks), fmt.tprintf("%s/commit-msg", hooks)}, GIT_TIMEOUT)
-	// a tool the hook needs is only on the login shell's PATH (as when pi-desk starts from Finder)
+	// a tool the hook needs is only on the login shell's PATH (as when Deckhand starts from Finder)
 	home := os.get_env("HOME", context.temp_allocator)
 	os.make_directory_all(fmt.tprintf("%s/bin", home))
 	tool_marker := fmt.tprintf("%s/login-path-tool-ran", f.root)

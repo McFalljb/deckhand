@@ -1,13 +1,13 @@
 package main
 
 // A Claude tab's held texts on screen (claude.odin): while the Claude tab on screen holds text
-// pi-desk was asked to send (claude_prompt: Atlas, a script), a bar at the top of the centre says
+// Deckhand was asked to send (claude_prompt: Atlas, a script), a bar at the top of the centre says
 // whose and why it waits ("1 message from Atlas waits: you are typing a message"), with Drop and
 // Send now (the first goes at once, into whatever is typed). Every action is a button; the
 // palette has both too.
 //
 // Below it, the tab's status bar (claude_status.odin): its hooks never reported (Show settings,
-// Dismiss), or its Claude Code is older than pi-desk's minimum (Copy update command, Dismiss).
+// Dismiss), or its Claude Code is older than Deckhand's minimum (Copy update command, Dismiss).
 // A pi tab gets the same bar when its pi is older than PI_MIN_VERSION (pi_integration.odin).
 
 import "core:fmt"

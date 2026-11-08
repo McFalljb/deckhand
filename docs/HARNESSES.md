@@ -72,9 +72,9 @@ The Claude integration already lived in Deckhand (`integrations/claude-code`, `-
 
 `integrations/pi/` (its [README](../integrations/pi/README.md)), copied into the app as
 `Contents/Resources/pi` by `build.sh` and `scripts/bundle-app.sh` (`build/pi` beside a bare build;
-`PI_DESK_PI_INTEGRATION` overrides it in test mode only. Test mode (`PI_DESK_SCRIPT`) is itself
+`DECKHAND_PI_INTEGRATION` overrides it in test mode only. Test mode (`DECKHAND_SCRIPT`) is itself
 switched on by the environment, so whoever sets Deckhand's environment can point it at other
-extensions: the same trust boundary as `PI_DESK_CMD`, which names the command a pi tab runs). It
+extensions: the same trust boundary as `DECKHAND_CMD`, which names the command a pi tab runs). It
 is watched like pi's own extensions: a change shows the reload bar over pi tabs. Tests: `node --test` on
 `integrations/pi/test/*.test.ts`, run by `./build.sh test`; they never start pi.
 
@@ -131,16 +131,16 @@ not it.
    `DECKHAND_TOKEN`, `DECKHAND_CONTROL_TOKEN` and `DECKHAND_SHOTS_DIR`, keeps tokens under
    `Symbol.for("deckhand.*")`, uses `deckhand:*` for its internal events
    (`deckhand:command`, `deckhand:control:command`, `deckhand:control`, `deckhand:tab`) and
-   `/deckhand-reload`. Deckhand no longer sets `PI_DESK_SOCKET`, `PI_DESK_TOKEN` or
-   `PI_DESK_CONTROL_TOKEN` for pi tabs. pi-kit's desk-bridge and desk-browser switch on only with
-   `PI_DESK_SOCKET` + `PI_DESK_TOKEN` (or its `Symbol.for("pi-kit.desk-bridge.token")`), and desk
-   with `PI_DESK_SOCKET` + `PI_DESK_CONTROL_TOKEN`, so **every installed pi-kit goes inert by
+   `/deckhand-reload`. Deckhand no longer sets `DECKHAND_SOCKET`, `DECKHAND_TOKEN` or
+   `DECKHAND_CONTROL_TOKEN` for pi tabs. pi-kit's desk-bridge and desk-browser switch on only with
+   `DECKHAND_SOCKET` + `DECKHAND_TOKEN` (or its `Symbol.for("pi-kit.desk-bridge.token")`), and desk
+   with `DECKHAND_SOCKET` + `DECKHAND_CONTROL_TOKEN`, so **every installed pi-kit goes inert by
    itself**: no duplicate tools, no second bridge, nothing to edit. The internal event names had to
    change too: pi-kit's bridge and desk register their `kit:desk:command` and
    `kit:desk:control:command` listeners at load, active or not, and would answer "not connected"
-   first; its bridge registers `/desk-reload` at load. App tabs keep `PI_DESK_SOCKET` and
-   `PI_DESK_TOKEN` ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)), Claude tabs their own variables, and test
-   mode's `PI_DESK_*` (DEVELOPING.md) are unchanged.
+   first; its bridge registers `/desk-reload` at load. App tabs keep `DECKHAND_SOCKET` and
+   `DECKHAND_TOKEN` ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)), Claude tabs their own variables, and test
+   mode's `DECKHAND_*` (DEVELOPING.md) are unchanged.
 2. **The event bus as a public contract.** The bridge keeps emitting `kit:desk:mode` and accepting
    `kit:desk:panels` (now merged by panel name, so several producers can publish). pi-kit's
    sidebar keeps handing its panels over and doesn't draw its column in Deckhand. The mode is said
@@ -187,7 +187,7 @@ described in [CLAUDE.md](CLAUDE.md).
 - `--plugin-dir` loads the folder as `<name>@inline` for that session only, in place; nothing goes
   into `~/.claude`.
 - A plugin the user installed with the same name is **silently replaced** for that session.
-  Outside Deckhand the installed copy is inert (its hooks exit 0 without `PI_DESK_*`).
+  Outside Deckhand the installed copy is inert (its hooks exit 0 without `DECKHAND_*`).
 - It can fail to load: managed settings that name the plugin id win; an admin can turn the flag
   off; `"<name>@inline": false` disables it. Deckhand's "hooks silent" bar catches all of these.
 - **Minimum Claude Code 2.1.295** (`CLAUDE_MIN_VERSION`): OSC 7501 and hook `onFailure`.
@@ -294,7 +294,7 @@ official command.
 `pi install` writes pi's own `settings.json`: that is pi's package manager doing it on the user's
 click; Deckhand itself only reads it.
 
-**Test mode** never runs a real install: `PI_DESK_INSTALL_CMD` stands in and gets the item's id and
+**Test mode** never runs a real install: `DECKHAND_INSTALL_CMD` stands in and gets the item's id and
 the exact command as `"$@"` (`tests/scripts/fake-install.sh`); without it the run prints a refusal
 and exits 127, and Deckhand's stderr says "test mode: refusing to run the real install command".
 Afterwards the existing "restart N idle tabs" bars take over for tabs on the old version.

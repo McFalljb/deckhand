@@ -6,7 +6,7 @@ restore, comments, and how text from agents is kept out of a half-typed prompt. 
 is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PROTOCOL.md)
 (§2 tokens, §3 "Claude Code tabs"). Code: `src/claude.odin`, `src/ui_claude.odin`, `src/claude_panels.odin`, `src/claude_status.odin`, `src/dead_tab.odin`,
 `src/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/claude_accounts.odin`, `src/claude_disk.odin`,
-`integrations/claude-code/`, `tools/pi-desk-cli/`.
+`integrations/claude-code/`, `tools/deckhand-cli/`.
 
 ## 1. The tab
 
@@ -21,7 +21,7 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
   otherwise start its Claude tabs as that session's children (no transcript saved). Started
   there, the parent's `CLAUDE_CONFIG_DIR` and other `CLAUDE_*` settings count only when the login
   shell sets them too, or gives no answer (docs/DEVELOPING.md, "Launch environment";
-  `PI_DESK_GUI_LAUNCH=0` keeps them). When `claude`
+  `DECKHAND_GUI_LAUNCH=0` keeps them). When `claude`
   is not on that PATH, the tab prints why and how to fix it (exit 127).
 - **Where it opens.** `new_claude_tab` with `session`; or with `project_id`: the project's session
   on screen, else its most recently shown open session, else a new pi session is started to hold
@@ -84,12 +84,12 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
   sets or that pick another conversation (`--plugin-dir`, `--resume`/`-r`, `--continue`/`-c`,
   `--session-id`, `--fork-session`, `--print`/`-p`) are refused. They are kept with the tab and
   the history entry and passed again on resume and restore. Only their count is logged.
-- **Plugin path.** `PI_DESK_CLAUDE_PLUGIN` (absolute; development), else
+- **Plugin path.** `DECKHAND_CLAUDE_PLUGIN` (absolute; development), else
   `Deckhand.app/Contents/Resources/claude-code`, else `claude-code` next to the binary (a bare
   build: `build.sh` copies `integrations/claude-code` to `build/claude-code`). The CLI is
-  `pi-desk-cli` next to Deckhand's binary (`Contents/MacOS/pi-desk-cli`), passed in `PI_DESK_CLI`,
+  `deckhand-cli` next to Deckhand's binary (`Contents/MacOS/deckhand-cli`), passed in `DECKHAND_CLI`,
   so the plugin and the app always match.
-- **Tests.** `PI_DESK_CLAUDE_CMD` replaces the whole command line after `-c` (like `PI_DESK_CMD`
+- **Tests.** `DECKHAND_CLAUDE_CMD` replaces the whole command line after `-c` (like `DECKHAND_CMD`
   for pi); it gets the same arguments as `"$@"`. `tests/scripts/fake-claude.py` is a fake claude
   that runs the plugin's hooks with Claude Code's JSON and logs what it got.
 
@@ -118,9 +118,9 @@ setting off later does not loosen them; a new chat starts full); `--settings` is
   and git verbs: Claude Code applies a deny rule to every subcommand, a layer that holds if the
   guard does not run), `disableAllHooks: false` (a project setting cannot turn the guard off),
   `disableSkillShellExecution: true` (skills' `` !`cmd` `` never runs: it bypasses PreToolUse; Claude Code's bundled and managed skills are exempt), and
-  the guard: a sync PreToolUse hook, matcher `*`, `'<pi-desk-cli>' hook readonly || exit 2`,
+  the guard: a sync PreToolUse hook, matcher `*`, `'<deckhand-cli>' hook readonly || exit 2`,
   `timeout` 30, `onFailure: "block"`; and the **ack**: a SessionStart hook
-  `'<pi-desk-cli>' hook readonly-ack <nonce>` (below).
+  `'<deckhand-cli>' hook readonly-ack <nonce>` (below).
 - `--disallowedTools Edit Write NotebookEdit MultiEdit PowerShell Monitor Agent Task Workflow
   CronCreate CronDelete ScheduleWakeup RemoteTrigger EnterWorktree ExitWorktree Artifact mcp__*
   ListMcpResourcesTool ReadMcpResourceTool ExitPlanMode` (`CLAUDE_READONLY_DENY`). A bare tool
@@ -128,7 +128,7 @@ setting off later does not loosen them; a new chat starts full); `--settings` is
   `--allowedTools` or settings level below managed can give it back
   ([permissions](https://code.claude.com/docs/en/permissions): "If a tool is denied at any level,
   no other level can allow it").
-- Environment: `PI_DESK_CLAUDE_READONLY=1` (for Claude's commands and the user's own hooks to see;
+- Environment: `DECKHAND_CLAUDE_READONLY=1` (for Claude's commands and the user's own hooks to see;
   the guard does not need it). Never inherited by other children (`term.odin` `child_env`).
 
 **The user's flags** in a read-only tab: only `--model`, `--effort`, `--fallback-model` (with a
@@ -139,14 +139,14 @@ that loosens it, e.g. `--dangerously-skip-permissions`, `--permission-mode`, `--
 `new_claude_tab`: "… cannot go into a read-only chat …") and left out of a start when saved (from
 before the tab was read-only); the tab and history keep them.
 
-**The guard** (`tools/pi-desk-cli/readonly.odin`, `deckhand hook readonly`): reads PreToolUse's
+**The guard** (`tools/deckhand-cli/readonly.odin`, `deckhand hook readonly`): reads PreToolUse's
 JSON; Bash: denies pi-kit's MUTATING (ported by hand: Odin's regex has no lookahead; the same
 cases as pi-kit in `tests/readonly-vectors.json`), background commands (`run_in_background`, as
-pi's read-only `bash_bg`), and `deckhand`/`pi-desk-cli` act verbs; other tools: allowed only from
+pi's read-only `bash_bg`), and `deckhand`/`deckhand-cli` act verbs; other tools: allowed only from
 `READONLY_TOOLS` (Read, Glob, Grep, WebFetch, WebSearch, todos and tasks, AskUserQuestion,
 EnterPlanMode, ToolSearch, LSP, Skill), so a tool a newer Claude Code adds is denied until
-listed. Deckhand adds checks pi-kit's list does not have yet (`m_pidesk`; the vectors'
-`deny_pidesk`): `git clean|restore|pull|add|init|update-ref`, `git
+listed. Deckhand adds checks pi-kit's list does not have yet (`m_deckhand`; the vectors'
+`deny_deckhand`): `git clean|restore|pull|add|init|update-ref`, `git
 config` unless it only reads (`--get…`, `--list`; any set or unset is blocked), `rmdir`,
 `unlink`, `ln`, `truncate`, `wget`, `dd of=`, `find -delete`, `perl -i` (the switch, not
 `-MList::Util`), `curl` writing a file (`-o`, `-O`, `--output`, `--remote-name`, `-c`, `-D`),
@@ -175,7 +175,7 @@ the CLI is named by its absolute path in Deckhand's own `--settings` (no PATH, n
 **The ack: the profile must prove it loaded.** A Claude Code that rejects or ignores a key of
 Deckhand's `--settings` (older than `onFailure`'s v2.1.295, or a different build) could lose the
 guard and the deny rules silently. So the same `--settings` holds a SessionStart hook,
-`'<pi-desk-cli>' hook readonly-ack <nonce>`: a fresh 128-bit nonce per start, sent with the tab's
+`'<deckhand-cli>' hook readonly-ack <nonce>`: a fresh 128-bit nonce per start, sent with the tab's
 token as `claude.readonly_ack` (the tab's own, once). Deckhand **stops** the tab (kills its process
 group, revokes its token, the terminal says why, the label reads "read-only guard not confirmed:
 stopped") when no ack came within 10 s of its session report or 120 s after Claude's prompt came
@@ -264,11 +264,11 @@ inherits the login environment as before. Deckhand stores folders and names, nev
 |---|---|
 | `.claude-plugin/plugin.json` | name `deckhand` |
 | `.claude-plugin/marketplace.json` | lets the folder be added as a marketplace; **not published** (Deckhand passes `--plugin-dir`, nothing is installed) |
-| `bin/deckhand` (and `bin/pi-desk`, an alias kept for pi-kit and older sessions) | on Claude's Bash PATH: `exec "$PI_DESK_CLI" "$@"`. Outside a Deckhand Claude tab: `hook readonly` exits 2 (denied), other `hook …` exit 0 silently, anything else prints an error JSON (exit 2) |
+| `bin/deckhand` (and `bin/pi-desk`, an alias kept for pi-kit and older sessions) | on Claude's Bash PATH: `exec "$DECKHAND_CLI" "$@"`. Outside a Deckhand Claude tab: `hook readonly` exits 2 (denied), other `hook …` exit 0 silently, anything else prints an error JSON (exit 2) |
 | `hooks/hooks.json` | SessionStart → `deckhand hook session-start`; UserPromptSubmit → `prompt-submit`; Stop → `stop`; StopFailure → `stop-failure`; Notification → `notification`; async (§6a): PostModelSwitch → `model`, PostToolUse `TodoWrite` → `todos`, PostToolUse `TaskUpdate` → `task-update`, PostToolUse `Bash` → `bash-bg`, TaskCreated → `task-created`, TaskCompleted → `task-completed`, PreToolUse `Agent\|Task` → `agent-launch`, PreToolUse `*` → `agent-tool`, SubagentStart → `subagent-start`, SubagentStop → `subagent-stop` |
-| `skills/deckhand/SKILL.md` | a short stub: what the command is for; `deckhand --skill` prints the manual (`tools/pi-desk-cli/manual.md`, embedded in the CLI) |
+| `skills/deckhand/SKILL.md` | a short stub: what the command is for; `deckhand --skill` prints the manual (`tools/deckhand-cli/manual.md`, embedded in the CLI) |
 
-**The CLI** (`tools/pi-desk-cli/`, Odin, no dependencies) mirrors the pi integration's `browser` and
+**The CLI** (`tools/deckhand-cli/`, Odin, no dependencies) mirrors the pi integration's `browser` and
 `desk` extensions (`integrations/pi/extensions/`): `tabs`, `open`, `navigate`/`back`/`forward`/`reload`/`stop`, `read`,
 `screenshot`, `wait`, `click`, `type`, `press`, `scroll`, `select`, `hover`, `upload`,
 `console`, `network`, `comments`, `state`, `app call|screenshot|input|events`,
@@ -277,7 +277,7 @@ inherits the login environment as before. Deckhand stores folders and names, nev
 user's view; display only, so a read-only tab may use it). `deckhand --help` lists them. It prints one
 JSON object per call. Page and app text is never a top-level field: it goes in `content`, after
 the same untrusted-data note as the pi integration's browser tools and inside a fence longer than
-any run of backticks in it. Screenshots are PNG files Deckhand writes in `PI_DESK_SHOTS_DIR`; the CLI checks the path
+any run of backticks in it. Screenshots are PNG files Deckhand writes in `DECKHAND_SHOTS_DIR`; the CLI checks the path
 is directly in that folder, named `<tab>-<n>.png`, a PNG and at most 8 MB, then prints it (Claude
 opens it with Read). Refusals keep Deckhand's `code` and add the same `hint` as the pi integration.
 
@@ -317,8 +317,8 @@ to deny, §1a):
 
 **What the tab gets.** At each start Deckhand mints a fresh 256-bit token (any earlier token of
 the tab is revoked first) and puts it in the claude process's environment as
-`PI_DESK_CLAUDE_TOKEN`, with `PI_DESK_SOCKET`, `PI_DESK_CLI`, `PI_DESK_SHOTS_DIR` and
-`PI_DESK_CLAUDE_TAB`; also `PI_KIT_NOTES_DIR` as pi tabs get it (`notes_env_pi`: the main folder,
+`DECKHAND_CLAUDE_TOKEN`, with `DECKHAND_SOCKET`, `DECKHAND_CLI`, `DECKHAND_SHOTS_DIR` and
+`DECKHAND_CLAUDE_TAB`; also `PI_KIT_NOTES_DIR` as pi tabs get it (`notes_env_pi`: the main folder,
 unless the user's own environment sets it). Shell tabs and other children never get these (they are removed from their
 environment, `term.odin` `child_env`). The token is never in State, events, replies, the command
 log or the workspace file.
@@ -389,7 +389,7 @@ revoked and its open connections are shut (`socket_forget_tab`); held messages a
 | Leaving plan mode in a read-only chat | ExitPlanMode is denied (Claude cannot ask); the denied tools stay denied in every mode; bypass and auto mode are disabled; the guard runs in every mode | the user's own Shift+Tab: in default or acceptEdits mode Claude Code may run more Bash without asking (acceptEdits: some file commands) — the guard and the scoped deny rules still block Deckhand's list |
 | A read-only tab acting on pages or apps through `deckhand` | Deckhand refuses the act commands from its token (`claude_readonly_refuses`); the guard denies the CLI's act verbs | none (pi's read-only chats have no such tools at all) |
 | A user's own `deckhand` or `pi-desk` executable earlier on PATH shadows the plugin's `bin/deckhand` or `bin/pi-desk` | none (Claude Code appends plugin `bin/` to PATH) | it would get the token from the environment like any child; document, do not ship such a tool |
-| The comment crops Claude reads | copies in `PI_DESK_SHOTS_DIR` (the user's data dir), created 0600, removed after a day | — |
+| The comment crops Claude reads | copies in `DECKHAND_SHOTS_DIR` (the user's data dir), created 0600, removed after a day | — |
 | Same-user code that can read Claude's memory or ptrace it | none: out of scope (as for pi tabs) | — |
 
 The error for a wrong process (vs `unknown token`) tells a caller holding a valid token that it
@@ -494,14 +494,14 @@ is valid; it learns nothing it can use from outside the tab.
   (pnpm's shim, nix's makeWrapper; that script and the package.json are the only files read),
   else the file's identity ("a new build": a mise shim, for one). **Never run** (`claude --version` would
   start Claude Code's own config and update checks). Each Claude tab records it when first seen
-  running; another one on disk shows the update bar. Tests: `PI_DESK_CLAUDE_BIN`; none while
-  `PI_DESK_CLAUDE_CMD` replaces claude.
+  running; another one on disk shows the update bar. Tests: `DECKHAND_CLAUDE_BIN`; none while
+  `DECKHAND_CLAUDE_CMD` replaces claude.
 - **A Deckhand update** replaces the app and relaunches it. With Keep sessions on (the default),
   Claude tabs run on through it in the session holder (GUIDE.md "Updates"), still on the plugin,
   hooks and `deckhand` CLI they started with: the plugin bar then offers the Restart that moves
   each to the new plugin (as for kept sessions above), and nothing restarts by itself. With it off,
   every Claude tab starts again on the new plugin anyway. The plugin's files are watched for
-  development builds (`PI_DESK_CLAUDE_PLUGIN`, `build/claude-code`).
+  development builds (`DECKHAND_CLAUDE_PLUGIN`, `build/claude-code`).
 - **Never touched** (`claude_credential`, also via `settings_credential` for the Settings tab, the
   editor, Files and the reload watchers): `.credentials.json`, `.claude.json` and its backups
   anywhere, and everything in a Claude config folder except `settings.json`, `settings.local.json`,
@@ -813,7 +813,7 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
   `src/dead_tab_test.odin` `claude_restart_with_model`, `src/folders_test.odin`
   `folders_detect_claude_md`, `src/socket_test.odin`
   `socket_claude_token_scope` (the process check, scope, revocation),
-  `tools/pi-desk-cli/cli_test.odin` (the CLI's parsing, output, fencing, shots and hooks; the
+  `tools/deckhand-cli/cli_test.odin` (the CLI's parsing, output, fencing, shots and hooks; the
   read-only guard and `tests/readonly-vectors.json`, the cases shared with pi-kit's guardrails:
   `node tests/scripts/readonly-vectors-pikit.mjs <pi-kit>/extensions/guardrails/core.ts
   tests/readonly-vectors.json` checks them against pi-kit's regexes).

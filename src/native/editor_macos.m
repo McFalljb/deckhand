@@ -6,11 +6,11 @@
 #import <Cocoa/Cocoa.h>
 #include <CoreServices/CoreServices.h>
 
-typedef void (*pd_fsw_cb)(const char *path, unsigned flags);
+typedef void (*dh_fsw_cb)(const char *path, unsigned flags);
 
 static FSEventStreamRef stream;
 static dispatch_queue_t queue;
-static pd_fsw_cb callback;
+static dh_fsw_cb callback;
 
 static void on_events(ConstFSEventStreamRef s, void *info, size_t n, void *paths, const FSEventStreamEventFlags flags[], const FSEventStreamEventId ids[]) {
 	char **p = (char **)paths;
@@ -18,7 +18,7 @@ static void on_events(ConstFSEventStreamRef s, void *info, size_t n, void *paths
 }
 
 // Replaces the watched folders (n == 0 stops watching).
-void pd_fsw_set(const char **paths, int n, pd_fsw_cb cb) {
+void dh_fsw_set(const char **paths, int n, dh_fsw_cb cb) {
 	if (stream) {
 		FSEventStreamStop(stream);
 		FSEventStreamInvalidate(stream);
@@ -26,7 +26,7 @@ void pd_fsw_set(const char **paths, int n, pd_fsw_cb cb) {
 		stream = NULL;
 	}
 	if (n == 0) return;
-	if (!queue) queue = dispatch_queue_create("pi-desk.fswatch", DISPATCH_QUEUE_SERIAL);
+	if (!queue) queue = dispatch_queue_create("deckhand.fswatch", DISPATCH_QUEUE_SERIAL);
 	callback = cb;
 	CFMutableArrayRef list = CFArrayCreateMutable(NULL, n, &kCFTypeArrayCallBacks);
 	for (int i = 0; i < n; i++) {
@@ -45,7 +45,7 @@ void pd_fsw_set(const char **paths, int n, pd_fsw_cb cb) {
 }
 
 // Moves path to the Trash. 0 on success.
-int pd_trash(const char *path) {
+int dh_trash(const char *path) {
 	@autoreleasepool {
 		NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
 		NSError *err = nil;
@@ -55,7 +55,7 @@ int pd_trash(const char *path) {
 }
 
 // Shows path selected in a Finder window.
-void pd_reveal(const char *path) {
+void dh_reveal(const char *path) {
 	@autoreleasepool {
 		NSURL *url = [NSURL fileURLWithPath:[NSString stringWithUTF8String:path]];
 		[[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[ url ]];

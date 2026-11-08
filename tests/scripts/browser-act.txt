@@ -11,7 +11,7 @@
 wait 1500
 assert_state open_sessions.# 1
 # 1. the pi opens the page behind its pi tab (the user's view stays) and waits for it
-pi_command {"type":"browser_open","url":"pidesk-test://web/act.html"}
+pi_command {"type":"browser_open","url":"deckhand-test://web/act.html"}
 assert_state open_sessions.0.active_tab $pitab
 pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":15000}
 assert_finished ok true
@@ -116,7 +116,7 @@ assert_finished data.hit.role heading
 pi_command {"type":"browser_click","tab_id":$last,"x":540,"y":25}
 assert_finished ok true
 assert_finished data.hit.name Pos
-# hover, right-click (the page's contextmenu; pi-desk opens no menu), double, modifiers
+# hover, right-click (the page's contextmenu; Deckhand opens no menu), double, modifiers
 pi_command {"type":"browser_hover","tab_id":$last,"selector":"#hov"}
 assert_finished ok true
 pi_command {"type":"browser_click","tab_id":$last,"selector":"#rc","button":"right"}
@@ -175,7 +175,7 @@ assert_result data.code busy
 # the user looks at the tab: the bars (the download's and the upload's) and the strip
 command {"type":"focus_tab","tab_id":$last}
 web_waitpaint 10000
-assert_drawn wants to upload ~/up/a.txt to pidesk-test://web
+assert_drawn wants to upload ~/up/a.txt to deckhand-test://web
 assert_drawn pi in
 assert_drawn Take over
 shot browser-act/upload-bar
@@ -198,7 +198,7 @@ wait 700
 clickid pg_upload_block
 await_bg 3000
 assert_finished data.code upload_blocked
-# a directory is never uploaded; nor anything from pi's or pi-desk's own folders; a single-file
+# a directory is never uploaded; nor anything from pi's or Deckhand's own folders; a single-file
 # input takes one
 pi_command {"type":"browser_upload","tab_id":$tab,"selector":"#file","paths":["$homedir/up"]}
 assert_result data.code bad_file
@@ -249,7 +249,7 @@ pi_command {"type":"browser_click","tab_id":$tab,"selector":"#buy"}
 assert_result data.code user_has_control
 pi_command {"type":"browser_read","tab_id":$tab}
 assert_result data.code user_has_control
-pi_command {"type":"browser_navigate","tab_id":$tab,"url":"pidesk-test://web/nav-a.html"}
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"deckhand-test://web/nav-a.html"}
 assert_result data.code user_has_control
 shot browser-act/taken-over
 # the bar takes no click for BARS_GUARD (500 ms) after control changed hands (the shot used to
@@ -306,7 +306,7 @@ pi_command {"type":"browser_scroll","tab_id":$tab,"selector":"#search"}
 pi_command {"type":"browser_press","tab_id":$tab,"selector":"#search","keys":"a b c"}
 assert_finished ok true
 assert_finished data.keys 3
-# keys like Backspace on an element pi-desk cannot classify (a focusable div): refused
+# keys like Backspace on an element Deckhand cannot classify (a focusable div): refused
 pi_command {"type":"browser_press","tab_id":$tab,"selector":"#widget","keys":"Backspace"}
 assert_finished data.code not_a_field
 # 12. a click that navigates: the result says so, with the new address
@@ -316,7 +316,7 @@ assert_finished data.navigated true
 agent_assert has finished data.url nav-a.html
 # a page that navigates between keys: Enter submits the form, the check before "a" finds a new
 # page coming and nothing more is pressed
-pi_command {"type":"browser_navigate","tab_id":$tab,"url":"pidesk-test://web/act.html"}
+pi_command {"type":"browser_navigate","tab_id":$tab,"url":"deckhand-test://web/act.html"}
 pi_command {"type":"browser_wait","tab_id":$tab,"for":"load","timeout_ms":15000}
 pi_command {"type":"browser_press","tab_id":$tab,"selector":"#q","keys":"Enter a b c"}
 assert_finished data.code page_changed
@@ -324,7 +324,7 @@ agent_assert has finished error 1 of 4 chords
 pi_command {"type":"browser_wait","tab_id":$tab,"for":"load","timeout_ms":15000}
 pi_command {"type":"browser_read","tab_id":$tab}
 agent_assert has finished data.url nav-a.html?q=
-# a page without pi-desk's world (the browser's error page): the screenshot is taken as before
+# a page without Deckhand's world (the browser's error page): the screenshot is taken as before
 pi_command {"type":"browser_navigate","tab_id":$tab,"url":"http://127.0.0.1:9/"}
 wait 1500
 pi_command {"type":"browser_screenshot","tab_id":$tab}

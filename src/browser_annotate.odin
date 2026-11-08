@@ -8,17 +8,17 @@ package main
 // in the session's list) at the element or area, following scroll and resize, an edge arrow when
 // it is off screen; a click on a badge edits the comment in the list.
 //
-// The page finds, pi-desk draws (§3.2). The overlay script (src/native/browser_overlay.js) runs
-// in the "pi-desk" isolated world of the page's top frame, through the DevTools protocol in
-// process (cef_macos.m: pd_cef_devtools_send and its observer; no debugging port). It answers
-// pi-desk's questions (what is at x,y; what does this area cover; where are these markers now)
+// The page finds, Deckhand draws (§3.2). The overlay script (src/native/browser_overlay.js) runs
+// in the "deckhand" isolated world of the page's top frame, through the DevTools protocol in
+// process (cef_macos.m: dh_cef_devtools_send and its observer; no debugging port). It answers
+// Deckhand's questions (what is at x,y; what does this area cover; where are these markers now)
 // through a binding that exists in that world only (Runtime.addBinding with
 // executionContextName), so page scripts cannot call it. Only calls from the context of the
 // latest document's overlay are taken (its `hello` names it); a reply to an older question is
-// dropped (seq). Nothing of pi-desk's is added to the page's DOM. The Runtime domain stays off
+// dropped (seq). Nothing of Deckhand's is added to the page's DOM. The Runtime domain stays off
 // (Runtime.enable is what bot checks look for, and would send every console message here). The
 // binding's calls arrive without it, but Runtime.addBinding then reaches only contexts that exist
-// when it is called: on each top-frame Page.frameNavigated, pi-desk takes our world's context on
+// when it is called: on each top-frame Page.frameNavigated, Deckhand takes our world's context on
 // the new document (Page.createIsolatedWorld), adds the binding to it and runs the overlay there
 // (already running from the document's start, it says hello again). A question the old document
 // never answers is asked again (ANNOT_HOVER_RETRY).
@@ -46,7 +46,7 @@ import "core:time"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
 
-ANNOT_WORLD :: "pi-desk"
+ANNOT_WORLD :: "deckhand"
 ANNOT_BINDING :: "__pdAnnot"
 ANNOT_JS :: #load("native/browser_overlay.js", string)
 ANNOT_DRAG_MIN :: 4 // logical px the pointer moves before a press becomes an area drag
@@ -316,7 +316,7 @@ cdp :: proc(a: ^Annot, b: ^Browser, method: string, params: string, call := Anno
 	s := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&s, `%s"id":%d,"method":"%s","params":%s%s`, "{", id, method, params, "}")
 	msg := strings.to_string(s)
-	if pd_cef_devtools_send(b.cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
+	if dh_cef_devtools_send(b.cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
 	if call != .None do a.pending[id] = call
 	if autotest.active {
 		if _, has := a.sent[method]; !has do a.sent[strings.clone(method)] = 0
@@ -340,7 +340,7 @@ run :: proc(a: ^Annot, b: ^Browser, code: string, ctx: i64) {
 @(private = "file")
 install :: proc(a: ^Annot, b: ^Browser) {
 	if !callback_set {
-		pd_cef_devtools_callback(on_cef_devtools)
+		dh_cef_devtools_callback(on_cef_devtools)
 		callback_set = true
 	}
 	a.cef = b.cef
@@ -686,8 +686,8 @@ annot_set :: proc(b: ^Browser, on: bool) {
 	a.on = on
 	a.has_hover, a.press, a.dragging, a.hover_seq = false, false, false, 0
 	a.pick_seq = 0 // a pick's answer still on its way opens nothing now
-	// the page's own hover ends: the pointer is pi-desk's while commenting
-	if on && b.cef != 0 do pd_cef_mouse_move(b.cef, b.last_x, b.last_y, 0, 1)
+	// the page's own hover ends: the pointer is Deckhand's while commenting
+	if on && b.cef != 0 do dh_cef_mouse_move(b.cef, b.last_x, b.last_y, 0, 1)
 	app.redraw = true
 }
 
@@ -957,7 +957,7 @@ annot_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 
 // ---- test mode (autotest.odin) ----
 //
-//   annot_move X Y             the pointer to page X,Y (logical px) through pi-desk's event path
+//   annot_move X Y             the pointer to page X,Y (logical px) through Deckhand's event path
 //   annot_drag X1 Y1 X2 Y2     a left drag in the page (press, two moves, release)
 //   annot_key cmd_shift_period | escape   ⌘⇧. or Esc through the event path
 //   annot_assert crop N W H    comment N's crop (1-based, the session on screen) is a PNG of

@@ -158,7 +158,7 @@ job_owner_resolve :: proc(for_project, folder: string, projects: []Owner_Project
 	return
 }
 
-// A job row's owner now (from the projects pi-desk lists now).
+// A job row's owner now (from the projects Deckhand lists now).
 job_owner_of :: proc(r: Job_Row, projects: []Owner_Project) -> Job_Owner {
 	return job_owner_resolve(r.project, r.folder, projects, folder_of(.Atlas), folder_of(.Chats))
 }

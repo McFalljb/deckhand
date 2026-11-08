@@ -1,5 +1,5 @@
 # Claude Code accounts (tests/scripts/claude-accounts.sh): two fake accounts with a fake transcript
-# each, run outside pi-desk; a pi session beside them.
+# each, run outside Deckhand; a pi session beside them.
 wait 2000
 assert_state claude_accounts.# 2
 assert_state claude_accounts.1.label Work

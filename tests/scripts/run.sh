@@ -13,6 +13,6 @@ rm -rf "$FAKE_HOME" build/test-data
 mkdir -p "$PROJ" "$FAKE_HOME/.pi/agent/sessions/--p05--"
 printf '{"type":"session","version":3,"id":"dddd-4","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--p05--/2026-10-30T10-00-00-000Z_dddd-4.jsonl"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' \
   build/deckhand "$PROJ"

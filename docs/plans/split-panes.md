@@ -39,7 +39,7 @@ and app tabs included.
 | Derived "the tab on screen" | `tab_editor()` (`src/editor.odin:110`, 28 uses), `tab_browser()` (`src/browser.odin:131`, 32 uses), `tab_app()` (`src/app_tab.odin:322`, 10), `active_changes()` (`src/ui_changes.odin:81`, 15), `md_preview_shown()`; `active_tab()` 24 uses; `s.active_tab` 49 uses in 22 files; ~30 writers `s.active_tab = …` (commands.odin, editor_commands.odin, app_tab.odin:433, browser.odin:148, claude.odin:927/959/992, changes.odin, markdown_view.odin, show_file.odin:118) | |
 | "On screen" checks | `status_on_screen`/`status_seen`/`status_wants_seen` (`src/agent_status.odin:493-510`), `notify_on_screen`/`notify_pi_shown` (`src/notify.odin:273-284`), `browser_agent.odin:678` (`on_screen` in `browser_tabs`), `browser_act.odin:526`, `app_frames_tick` `visible := a == tab_app()` (`src/app_tab.odin:1082`), `app_screenshot`/`app_shot_now` `"visible"` (`:1454`, `:1470`), `browser_tick`/`browser_frames_tick`/`browser_pages` `on_screen := tab_browser()` (`src/browser.odin:398-640`), `browser_page_plan` "the tab on screen" (`src/browser_nav.odin:586`) | exactly one visible tab |
 | App tabs | ring sized to `app.pane` (`app_tab.odin:1104-1108`, `:2185`); `in_tab`, `app_event` coords from `app.pane` (`:1806-1822`); `app_focus_tick` keyboard focus = `tab_app()`; `tab.visible` told = visible‖peek; test-mode `app_script` coords (`:2289-2345`) | |
-| Browser tabs | CEF view size `app.pane/dpi` (`browser.odin:579-592`, `:630`); `in_page`/`browser_event` coords (`:735-760`); `pd_cef_set_hidden`, `pd_cef_focus` from `hidden := b != on_screen`; script coords (`:1071-1101`); polish/annotate overlays use `app.pane` (`browser_polish.odin:1162,1661,1950`, `browser_annotate.odin:696-744,976`) | CEF is windowless (off-screen, texture) so any rect works; 8 CEF slots app-wide |
+| Browser tabs | CEF view size `app.pane/dpi` (`browser.odin:579-592`, `:630`); `in_page`/`browser_event` coords (`:735-760`); `dh_cef_set_hidden`, `dh_cef_focus` from `hidden := b != on_screen`; script coords (`:1071-1101`); polish/annotate overlays use `app.pane` (`browser_polish.odin:1162,1661,1950`, `browser_annotate.odin:696-744,976`) | CEF is windowless (off-screen, texture) so any rect works; 8 CEF slots app-wide |
 | Editor | `editor_view.odin:71` global `last_area {tab, m}` (one editor's metrics); `editor_text_hit` uses `clay.ID("terminal")` (`:461-467`); `editor_bars_layout()` for `tab_editor()` | one editor drawn |
 | Per-tab bars | `centre()` (`src/ui.odin:497-540`): `claude_bars`, `app_bar_layout`, `dead_tab_bar_layout`, `browser_bar_layout`, `changes_bars_layout`, `editor_bars_layout`, `changes_list_layout`, `changes_file_bar_layout`, `changes_more_layout`; empty/"gone" states | for the active tab; global Clay ids (`br_url_box`, `ed_tool`, `chtool`…) |
 | Singleton fields | `browser_url_field` (`browser_nav.odin:378`, `browser_url_check`), `page_find_field`, `page_prompt_field` (`browser_polish.odin:484-486`), `changes_message_field`, editor find bars; `state.focus_widget` | bound to the tab on screen |
@@ -50,7 +50,7 @@ and app tabs included.
 | Right column | `right_panels_tab(s)` (`claude_panels.odin:452`): the active tab if Claude, else pi tab | follows the active tab |
 | Persistence | `workspace_json` (`persist.odin:200-292`): `tabs` + `active_tab` index; load (`persist.odin:700-760`) → `Restore_Tab{active}` → `Restore_Session` (`commands.odin:288-310`, apply `:1515-1600`); `persist.focus_tab` → `persist_after_layout` | `WORKSPACE_VERSION` mismatch moves the file aside (`persist.odin:591-593`) |
 | Snapshot | `json_write.odin:1158` `active_tab`, tabs `:1190-1270`, `focus.tab_id` `:1316-1320` | |
-| Agents | `integrations/pi/lib/state.ts:69` "[active]"; `integrations/pi/lib/commands.ts` mirrors the command table; `tools/pi-desk-cli/format.odin` `on_screen`; `browser.ts`/`app.ts` "not on screen" texts | |
+| Agents | `integrations/pi/lib/state.ts:69` "[active]"; `integrations/pi/lib/commands.ts` mirrors the command table; `tools/deckhand-cli/format.odin` `on_screen`; `browser.ts`/`app.ts` "not on screen" texts | |
 | Test mode | `autotest.odin` `$tab` = `cs.active_tab` (`:1255`), `clickid tab N`, `rclickid terminal` (12 uses), `divider N DX` (`:778`), `web_*`/`app_*` script commands act on `tab_browser()`/`tab_app()`; 10 scripts assert `open_sessions.N.active_tab` (plus `restore.sh` writes it in a fixture) |
 | Other ticks keyed to "the tab on screen" | `editor_tick` gutter/reparse via `active_editor()` (`editor_watch.odin:104-130`, `editor.odin:117`); `shot_step` (`browser_agent.odin:1234`, hidden-tab screenshots); `browser_polish_tick` zoom/devtools and find/prompt field ownership (`browser_polish.odin:1342-1415`); `browser_polish_pending_tick` bar guard `bars_note`/`page_bars_tab` (`browser_polish.odin:291-330`, `:1420`); `browser_tick` `lazy`/`shown_at` (LRU for page eviction) (`browser.odin:552-560`); `browser_url_check`/`browser_url_tab` (`browser_nav.odin:380-480`); `term_links_frame` (`term_links.odin:412`) | one tab | |
 | Layout tests | `layout_audit_test.odin` (no overlapping text, 4 widths × every look), `buttons_test.odin` (tab close hits by index) | |
@@ -213,7 +213,7 @@ already per tab and the right helper is chosen):
 |---|---|---|
 | `status_on_screen`, `status_seen` (all on-screen tabs), `status_wants_seen` (list), `notify_pi_shown`, `notify_on_screen` | `tab_on_screen` | bell/unread: the user can see it (Q7) |
 | `app_focus_tick` keyboard focus | `tab_focused` | keyboard |
-| `browser_tick` `focused`/`pd_cef_focus`, `release_input` | `tab_focused` | keyboard |
+| `browser_tick` `focused`/`dh_cef_focus`, `release_input` | `tab_focused` | keyboard |
 | `browser_url_check`, `browser_polish_tick` find/prompt ownership | own tab id (`browser_url_tab`, `page_find_tab`, `page_prompt_tab`) + `tab_focused` (M3, below) | a field belongs to its tab |
 | `editor_tick` gutter/reparse (`active_editor()`) | `tab_focused` in P1; on screen in P4 | typing happens in the focused one |
 | `term_links_frame` | pointer owner's terminal | hover |
@@ -226,7 +226,7 @@ until P4 they stay on `tab_focused`, which is why P2 needs the placeholder:
 |---|---|---|
 | `app_frames_tick` `visible`, `peek`, ring sizing, `tab.visible`, stall pings | `app_tab.odin:1039-1170` | per tab `tab_on_screen`; ring = its pane's rect |
 | `app_screenshot` hidden path / `"visible"` meta | `app_tab.odin:1449-1470` | `tab_on_screen` |
-| `browser_tick` `hidden`, `pd_cef_set_hidden`, view size, **`lazy = false` and `shown_at = now` for every on-screen page** (`shown_at` is the LRU the page plan evicts by) | `browser.odin:552-592` | per tab `tab_on_screen`, its pane's rect |
+| `browser_tick` `hidden`, `dh_cef_set_hidden`, view size, **`lazy = false` and `shown_at = now` for every on-screen page** (`shown_at` is the LRU the page plan evicts by) | `browser.odin:552-592` | per tab `tab_on_screen`, its pane's rect |
 | `browser_frames_tick` frame take vs release | `browser.odin:398-420` | `tab_on_screen` |
 | `browser_pages` `Page_Info.visible`; `browser_page_plan` with several visible | `browser.odin:595-640`, `browser_nav.odin:586` | `tab_on_screen` |
 | `shot_step` hidden-tab screenshot painting | `browser_agent.odin:1234` | hidden = `!tab_on_screen` |
@@ -360,7 +360,7 @@ and restored starts before the first layout).
   demand the docs rows.
 - `integrations/pi/lib/state.ts`: "[active]" → "[active in pane N]"/"[on screen]", one line
   per pane when split; `integrations/pi/lib/commands.ts` rows; `integrations/pi/test/unit.test.ts`.
-- `tools/pi-desk-cli/format.odin`: nothing needed (reads `on_screen`); its tests stay.
+- `tools/deckhand-cli/format.odin`: nothing needed (reads `on_screen`); its tests stay.
 - `docs/PROTOCOL.md` (commands, snapshot example around line 614), `docs/PERSISTENCE.md`
   (the `panes` key), `docs/GUIDE.md` (splitting, keys), `docs/TAB-PROTOCOL.md` +
   `docs/ENGINE-BRIDGE.md` (`tab.visible` = on screen in any pane; size = the pane's),

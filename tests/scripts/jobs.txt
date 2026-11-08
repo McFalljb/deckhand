@@ -17,7 +17,7 @@ assert_tip Atlas's jobs
 shot jobs/no-notes-dark
 command {"type":"set_notes_dir","path":"$homedir/notes"}
 assert_result ok false
-# the Jobs tab's "Set up pi-desk…": the first-run sheet; another folder, chats inside it
+# the Jobs tab's "Set up Deckhand…": the first-run sheet; another folder, chats inside it
 clickid jobs_notes_dir
 eventually
 assert_state focus.id setup

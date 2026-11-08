@@ -91,7 +91,7 @@ window_capture :: proc(path: string) {
 // ---- window pieces sokol lacks (src/native/platform_macos.m) ----
 
 foreign import pdplatform {
-	"../build/pd_platform.a",
+	"../build/dh_platform.a",
 	"system:Cocoa.framework",
 	"system:UserNotifications.framework",
 }
@@ -106,54 +106,54 @@ Ime_Callbacks :: struct {
 
 @(default_calling_convention = "c")
 foreign pdplatform {
-	pd_mac_init :: proc(window: rawptr, cb: ^Ime_Callbacks, bar_h, light_x, min_w, min_h: f32) ---
-	pd_mac_ime_cancel :: proc() ---
-	pd_mac_place_lights :: proc() ---
-	pd_mac_ime_caret_moved :: proc() ---
-	pd_mac_window_drag :: proc() ---
-	pd_mac_titlebar_double_click :: proc() ---
-	pd_mac_double_click_interval :: proc() -> f64 ---
-	pd_mac_pick_folder :: proc(buf: [^]u8, cap: c.int) -> c.int ---
-	pd_mac_reveal :: proc(path: cstring) ---
-	pd_mac_open_url :: proc(url: cstring) -> c.int ---
-	pd_mac_test_hit :: proc(x, y: f32) -> c.int ---
-	pd_mac_test_light :: proc(x, y: ^f32) ---
-	pd_mac_test_beeps :: proc() -> c.int ---
-	pd_mac_test_panels :: proc() -> c.int ---
-	pd_mac_test_has_input_context :: proc() -> c.int ---
-	pd_mac_system_light :: proc() -> c.int ---
-	pd_mac_watch_appearance :: proc(changed: proc "c" (light: c.int)) ---
-	pd_mac_set_appearance :: proc(mode: c.int) ---
-	pd_mac_test_window_light :: proc() -> c.int ---
-	pd_mac_test_ime :: proc(kind: c.int, text: cstring, key_code: c.int, alt: c.int, ops: cstring) ---
-	pd_mac_notify :: proc(title, body: cstring) ---
-	pd_mac_quiet :: proc() ---
-	pd_mac_alert :: proc(title, text: cstring) ---
-	pd_mac_hide_windows :: proc() ---
-	pd_mac_test_scale :: proc(scale: f64) ---
-	pd_mac_left_button_down :: proc() -> c.int ---
-	pd_mac_pasteboard_count :: proc() -> c.long ---
-	pd_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
-	pd_mac_pasteboard_clear_if :: proc(count: c.long) ---
-	pd_mac_activity :: proc(on: c.int) ---
+	dh_mac_init :: proc(window: rawptr, cb: ^Ime_Callbacks, bar_h, light_x, min_w, min_h: f32) ---
+	dh_mac_ime_cancel :: proc() ---
+	dh_mac_place_lights :: proc() ---
+	dh_mac_ime_caret_moved :: proc() ---
+	dh_mac_window_drag :: proc() ---
+	dh_mac_titlebar_double_click :: proc() ---
+	dh_mac_double_click_interval :: proc() -> f64 ---
+	dh_mac_pick_folder :: proc(buf: [^]u8, cap: c.int) -> c.int ---
+	dh_mac_reveal :: proc(path: cstring) ---
+	dh_mac_open_url :: proc(url: cstring) -> c.int ---
+	dh_mac_test_hit :: proc(x, y: f32) -> c.int ---
+	dh_mac_test_light :: proc(x, y: ^f32) ---
+	dh_mac_test_beeps :: proc() -> c.int ---
+	dh_mac_test_panels :: proc() -> c.int ---
+	dh_mac_test_has_input_context :: proc() -> c.int ---
+	dh_mac_system_light :: proc() -> c.int ---
+	dh_mac_watch_appearance :: proc(changed: proc "c" (light: c.int)) ---
+	dh_mac_set_appearance :: proc(mode: c.int) ---
+	dh_mac_test_window_light :: proc() -> c.int ---
+	dh_mac_test_ime :: proc(kind: c.int, text: cstring, key_code: c.int, alt: c.int, ops: cstring) ---
+	dh_mac_notify :: proc(title, body: cstring) ---
+	dh_mac_quiet :: proc() ---
+	dh_mac_alert :: proc(title, text: cstring) ---
+	dh_mac_hide_windows :: proc() ---
+	dh_mac_test_scale :: proc(scale: f64) ---
+	dh_mac_left_button_down :: proc() -> c.int ---
+	dh_mac_pasteboard_count :: proc() -> c.long ---
+	dh_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
+	dh_mac_pasteboard_clear_if :: proc(count: c.long) ---
+	dh_mac_activity :: proc(on: c.int) ---
 }
 
 // While a job runs: no App Nap (timers on time; the system may still sleep).
-platform_activity :: proc(on: bool) {pd_mac_activity(on ? 1 : 0)}
+platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
 
 // Quiet test mode, before sokol starts: never activates, window off-screen
 // (src/native/platform_macos.m).
-platform_quiet :: proc() {pd_mac_quiet()}
+platform_quiet :: proc() {dh_mac_quiet()}
 // A modal alert with one Quit button (before the window is of use: instance.odin)
-platform_hide_windows :: proc() {pd_mac_hide_windows()}
-platform_alert :: proc(title, text: string) {pd_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator))}
+platform_hide_windows :: proc() {dh_mac_hide_windows()}
+platform_alert :: proc(title, text: string) {dh_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator))}
 
 // Test mode, before sokol starts: every screen and window reports this backing scale
-// (PI_DESK_SCALE; src/native/platform_macos.m).
-platform_test_scale :: proc(scale: f64) {pd_mac_test_scale(scale)}
+// (DECKHAND_SCALE; src/native/platform_macos.m).
+platform_test_scale :: proc(scale: f64) {dh_mac_test_scale(scale)}
 
 platform_notify :: proc(title, body: string) {
-	pd_mac_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
+	dh_mac_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
 }
 
 // Blended title bar and input methods; call once the window exists.
@@ -177,59 +177,59 @@ platform_window_init :: proc() {
 			return ime_option_composes() ? 1 : 0
 		},
 	}
-	pd_mac_init(sapp.macos_get_window(), &cb, TAB_STRIP_H, LIGHTS_X, WINDOW_MIN_W, WINDOW_MIN_H)
+	dh_mac_init(sapp.macos_get_window(), &cb, TAB_STRIP_H, LIGHTS_X, WINDOW_MIN_W, WINDOW_MIN_H)
 }
 
-platform_ime_cancel :: proc() {pd_mac_ime_cancel()}
+platform_ime_cancel :: proc() {dh_mac_ime_cancel()}
 
 // The OS appearance now; changes arrive as System_Appearance commands
 // (KVO on the main thread, through the inbox).
-platform_system_light :: proc() -> bool {return pd_mac_system_light() != 0}
+platform_system_light :: proc() -> bool {return dh_mac_system_light() != 0}
 platform_watch_appearance :: proc() {
-	pd_mac_watch_appearance(proc "c" (light: c.int) {
+	dh_mac_watch_appearance(proc "c" (light: c.int) {
 		context = app_context
 		on_system_appearance(light != 0)
 	})
 }
 platform_set_appearance :: proc(mode: Appearance) {
-	pd_mac_set_appearance(c.int(mode == .Light ? 1 : mode == .Dark ? 2 : 0))
+	dh_mac_set_appearance(c.int(mode == .Light ? 1 : mode == .Dark ? 2 : 0))
 }
-test_window_light :: proc() -> bool {return pd_mac_test_window_light() != 0}
-platform_frame_drawn :: proc() {pd_mac_place_lights()}
+test_window_light :: proc() -> bool {return dh_mac_test_window_light() != 0}
+platform_frame_drawn :: proc() {dh_mac_place_lights()}
 
 // The left mouse button as the OS sees it now (not from our events).
-platform_left_button :: proc() -> bool {return pd_mac_left_button_down() != 0}
-platform_clipboard_count :: proc() -> int {return int(pd_mac_pasteboard_count())}
-platform_clipboard_set_secret :: proc(text: string) -> int {return int(pd_mac_pasteboard_set_secret(strings.clone_to_cstring(text, context.temp_allocator)))}
-platform_clipboard_clear_if :: proc(count: int) {pd_mac_pasteboard_clear_if(c.long(count))}
-platform_ime_caret_moved :: proc() {pd_mac_ime_caret_moved()}
-window_drag :: proc() {pd_mac_window_drag()}
-window_titlebar_double_click :: proc() {pd_mac_titlebar_double_click()}
-platform_double_click_interval :: proc() -> f64 {return pd_mac_double_click_interval()}
+platform_left_button :: proc() -> bool {return dh_mac_left_button_down() != 0}
+platform_clipboard_count :: proc() -> int {return int(dh_mac_pasteboard_count())}
+platform_clipboard_set_secret :: proc(text: string) -> int {return int(dh_mac_pasteboard_set_secret(strings.clone_to_cstring(text, context.temp_allocator)))}
+platform_clipboard_clear_if :: proc(count: int) {dh_mac_pasteboard_clear_if(c.long(count))}
+platform_ime_caret_moved :: proc() {dh_mac_ime_caret_moved()}
+window_drag :: proc() {dh_mac_window_drag()}
+window_titlebar_double_click :: proc() {dh_mac_titlebar_double_click()}
+platform_double_click_interval :: proc() -> f64 {return dh_mac_double_click_interval()}
 
 platform_pick_folder :: proc() -> string {
 	buf: [4096]u8
-	n := pd_mac_pick_folder(&buf[0], len(buf))
+	n := dh_mac_pick_folder(&buf[0], len(buf))
 	return n > 0 ? strings.clone(string(buf[:n]), context.temp_allocator) : ""
 }
 
-platform_reveal :: proc(path: string) {pd_mac_reveal(strings.clone_to_cstring(path, context.temp_allocator))}
-platform_open_url :: proc(url: string) -> bool {return pd_mac_open_url(strings.clone_to_cstring(url, context.temp_allocator)) == 1}
+platform_reveal :: proc(path: string) {dh_mac_reveal(strings.clone_to_cstring(path, context.temp_allocator))}
+platform_open_url :: proc(url: string) -> bool {return dh_mac_open_url(strings.clone_to_cstring(url, context.temp_allocator)) == 1}
 
 // Test mode: what a click at (x, y) framebuffer px reaches (1 our view, 0
 // the title bar, -1 nothing), the close button's centre, input method calls.
-test_hit :: proc(x, y: f32) -> int {return int(pd_mac_test_hit(x, y))}
+test_hit :: proc(x, y: f32) -> int {return int(dh_mac_test_hit(x, y))}
 test_light :: proc() -> (x, y: f32) {
-	pd_mac_test_light(&x, &y)
+	dh_mac_test_light(&x, &y)
 	return
 }
 test_ime :: proc(kind: int, text: string, key_code := 0, alt := false, repeat := false, ops := "", flags := 0) {
 	f := c.int(flags) | (alt ? 1 : 0) | (repeat ? 2 : 0)
-	pd_mac_test_ime(c.int(kind), strings.clone_to_cstring(text, context.temp_allocator), c.int(key_code), f, strings.clone_to_cstring(ops, context.temp_allocator))
+	dh_mac_test_ime(c.int(kind), strings.clone_to_cstring(text, context.temp_allocator), c.int(key_code), f, strings.clone_to_cstring(ops, context.temp_allocator))
 }
-test_beeps :: proc() -> int {return int(pd_mac_test_beeps())}
-test_panels :: proc() -> int {return int(pd_mac_test_panels())}
-test_has_input_context :: proc() -> bool {return pd_mac_test_has_input_context() != 0}
+test_beeps :: proc() -> int {return int(dh_mac_test_beeps())}
+test_panels :: proc() -> int {return int(dh_mac_test_panels())}
+test_has_input_context :: proc() -> bool {return dh_mac_test_has_input_context() != 0}
 
 // ---- the menu bar (src/native/menubar_macos.m; built by menubar.odin) ----
 
@@ -242,14 +242,14 @@ Menu_Callbacks :: struct {
 
 @(default_calling_convention = "c")
 foreign pdplatform {
-	pd_mac_menu_begin :: proc(window: rawptr, cb: ^Menu_Callbacks) ---
-	pd_mac_menu_push :: proc(title: cstring) ---
-	pd_mac_menu_pop :: proc() ---
-	pd_mac_menu_separator :: proc() ---
-	pd_mac_menu_item :: proc(title, key: cstring, mods: c.ulong, tag, native, live: c.int) ---
-	pd_mac_menu_end :: proc() ---
-	pd_mac_test_menu_key :: proc(chars: cstring, mods: c.ulong, key_code, key_window: c.int) -> c.int ---
-	pd_mac_menu_dump :: proc(buf: [^]u8, cap: c.int) -> c.int ---
+	dh_mac_menu_begin :: proc(window: rawptr, cb: ^Menu_Callbacks) ---
+	dh_mac_menu_push :: proc(title: cstring) ---
+	dh_mac_menu_pop :: proc() ---
+	dh_mac_menu_separator :: proc() ---
+	dh_mac_menu_item :: proc(title, key: cstring, mods: c.ulong, tag, native, live: c.int) ---
+	dh_mac_menu_end :: proc() ---
+	dh_mac_test_menu_key :: proc(chars: cstring, mods: c.ulong, key_code, key_window: c.int) -> c.int ---
+	dh_mac_menu_dump :: proc(buf: [^]u8, cap: c.int) -> c.int ---
 }
 
 platform_menu_begin :: proc() {
@@ -274,27 +274,27 @@ platform_menu_begin :: proc() {
 			return c.int(len(t))
 		},
 	}
-	pd_mac_menu_begin(sapp.macos_get_window(), &cb)
+	dh_mac_menu_begin(sapp.macos_get_window(), &cb)
 }
-platform_menu_push :: proc(title: string) {pd_mac_menu_push(strings.clone_to_cstring(title, context.temp_allocator))}
-platform_menu_pop :: proc() {pd_mac_menu_pop()}
-platform_menu_separator :: proc() {pd_mac_menu_separator()}
+platform_menu_push :: proc(title: string) {dh_mac_menu_push(strings.clone_to_cstring(title, context.temp_allocator))}
+platform_menu_pop :: proc() {dh_mac_menu_pop()}
+platform_menu_separator :: proc() {dh_mac_menu_separator()}
 platform_menu_item :: proc(title, key: string, mods: u64, tag, native: int, live: bool) {
-	pd_mac_menu_item(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(key, context.temp_allocator), c.ulong(mods), c.int(tag), c.int(native), live ? 1 : 0)
+	dh_mac_menu_item(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(key, context.temp_allocator), c.ulong(mods), c.int(tag), c.int(native), live ? 1 : 0)
 }
-platform_menu_end :: proc() {pd_mac_menu_end()}
+platform_menu_end :: proc() {dh_mac_menu_end()}
 
 // Test mode: a key press through the menu bar's key equivalents, else the
 // view (true: the menu bar took it); key_window false: as if another
 // window (the About panel) had the keyboard. chars: the key's characters; mods:
 // NSEventModifierFlags; key_code: the Mac virtual key code.
 test_menu_key :: proc(chars: string, mods: u64, key_code: int, key_window := true) -> bool {
-	return pd_mac_test_menu_key(strings.clone_to_cstring(chars, context.temp_allocator), c.ulong(mods), c.int(key_code), key_window ? 1 : 0) != 0
+	return dh_mac_test_menu_key(strings.clone_to_cstring(chars, context.temp_allocator), c.ulong(mods), c.int(key_code), key_window ? 1 : 0) != 0
 }
 
 // Test mode: the menu bar as text, validated now (temp allocator).
 test_menu_dump :: proc() -> string {
 	buf := make([]u8, 1 << 16, context.temp_allocator)
-	n := pd_mac_menu_dump(&buf[0], c.int(len(buf)))
+	n := dh_mac_menu_dump(&buf[0], c.int(len(buf)))
 	return string(buf[:n])
 }

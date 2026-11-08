@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """A fake pi for tests/scripts/bell.sh: a pi-like screen and the pi integration's bridge over
-pi-desk's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It plays a
+Deckhand's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It plays a
 status script per session (aaaa-1, bbbb-2 of the fake store), BELL_DELAY
 seconds apart (default 5):
   aaaa-1  working, then idle      (a run that ends: "finished")

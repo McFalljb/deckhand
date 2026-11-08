@@ -131,7 +131,7 @@ json_guard_socket_survives_hostile_hello :: proc(t: ^testing.T) {
 		hostile_line = line
 		ok, why := survives(proc() {
 			dir := fmt.aprintf("%s/pd-jg-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-			os.set_env("PI_DESK_RUNTIME_DIR", dir)
+			os.set_env("DECKHAND_RUNTIME_DIR", dir)
 			rdir, rok := sock_runtime_dir(context.temp_allocator)
 			if !rok || !socket_start(rdir) do posix._exit(4)
 			fd, cok := sock_connect(socket_path())
@@ -169,7 +169,7 @@ Site :: struct {
 @(private = "file")
 jg_tmp_file :: proc(name, text: string) -> string {
 	dir := fmt.tprintf("%s/pd-jg-files-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), posix.getpid())
-	os.make_directory_all(fmt.tprintf("%s/.pi-desk", dir))
+	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
 	path := fmt.tprintf("%s/%s", dir, name)
 	_ = os.write_entire_file(path, transmute([]u8)text)
 	return path
@@ -224,9 +224,9 @@ SITES := [?]Site {
 		return !pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
 	}},
 	{"handover_parse (holder handover.json, after its MAC)", proc(s: string) -> bool {_, ok, _ := handover_parse(s); return !ok}},
-	{"app_entries (.pi-desk/apps.json)", proc(s: string) -> bool {
-		p := jg_tmp_file(".pi-desk/apps.json", s)
-		return len(app_entries(strings.trim_suffix(p, "/.pi-desk/apps.json"))) == 0
+	{"app_entries (.deckhand/apps.json)", proc(s: string) -> bool {
+		p := jg_tmp_file(".deckhand/apps.json", s)
+		return len(app_entries(strings.trim_suffix(p, "/.deckhand/apps.json"))) == 0
 	}},
 }
 
@@ -651,8 +651,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
 		{"src/holderwire/wire.odin", "decode", "json.parse", "json_shape_ok", ""},
 		{"src/holderwire/wire.odin", "decode", "json.unmarshal", "json_shape_ok", ""},
-		{"tools/pi-desk-cli/json_util.odin", "parse_obj", "jg.parse_string", "", ""}, // Claude Code's hook input (the read-only guard), Deckhand's replies
-		{"tools/pi-desk-cli/args.odin", "parse_cli", "jg.parse_string", "", ""}, // app input's EVENTS_JSON
+		{"tools/deckhand-cli/json_util.odin", "parse_obj", "jg.parse_string", "", ""}, // Claude Code's hook input (the read-only guard), Deckhand's replies
+		{"tools/deckhand-cli/args.odin", "parse_cli", "jg.parse_string", "", ""}, // app input's EVENTS_JSON
 	}
 	got := make([dynamic]Parse_Site, context.temp_allocator)
 	for f in files do append(&got, ..scan_source(f[0], f[1]))

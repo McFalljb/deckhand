@@ -1,5 +1,5 @@
 {
-  "about": "Shell commands a read-only session blocks (deny) or lets run (allow). One list for pi-kit's guardrails MUTATING (extensions/guardrails/core.ts, commandVerdict(cmd, true)) and pi-desk's port (tools/pi-desk-cli/readonly.odin, mutating): both must agree on every line. Copied from pi-kit's test/unit.test.ts read-only cases, plus edge cases of each regex.",
+  "about": "Shell commands a read-only session blocks (deny) or lets run (allow). One list for pi-kit's guardrails MUTATING (extensions/guardrails/core.ts, commandVerdict(cmd, true)) and Deckhand's port (tools/deckhand-cli/readonly.odin, mutating): both must agree on every line. Copied from pi-kit's test/unit.test.ts read-only cases, plus edge cases of each regex.",
   "deny": [
     "git commit -m x",
     "git commit",
@@ -89,8 +89,8 @@
     "firm",
     "mvn test"
   ],
-  "about_pidesk": "pi-desk only for now (not yet in pi-kit's MUTATING): deny_pidesk is blocked and allow_pidesk runs in pi-desk's port only; the pi-kit parity check reads deny and allow alone.",
-  "deny_pidesk": [
+  "about_deckhand": "Deckhand only for now (not yet in pi-kit's MUTATING): deny_deckhand is blocked and allow_deckhand runs in Deckhand's port only; the pi-kit parity check reads deny and allow alone.",
+  "deny_deckhand": [
     "git clean -fdx",
     "git restore f",
     "git pull",
@@ -157,7 +157,7 @@
     "chroot / ln a b",
     "time -p wget https://x"
   ],
-  "allow_pidesk": [
+  "allow_deckhand": [
     "ls -ln",
     "git log --oneline",
     "git diff",

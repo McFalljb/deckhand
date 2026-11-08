@@ -40,8 +40,8 @@ printf '{"type":"session","version":3,"id":"kkkk-1","cwd":"%s"}\n' "$PROJ" > "$S
 
 start() { # n [VAR=value...]: the app in the background (APP: its pid)
   n=$1; shift
-  env "$@" HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="tests/scripts/keep-sessions-$n.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    KEEP_BRIDGE_LOG="$W/bridge.log" PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-keep.py' \"\$@\"" build/deckhand > "$W/run$n.log" 2>&1 &
+  env "$@" HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="tests/scripts/keep-sessions-$n.txt" DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+    KEEP_BRIDGE_LOG="$W/bridge.log" DECKHAND_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-keep.py' \"\$@\"" build/deckhand > "$W/run$n.log" 2>&1 &
   APP=$!
 }
 wait_log() { # n TEXT: until run n's log has TEXT (20 s)
@@ -108,9 +108,9 @@ grep -q "holder upgraded: ok true, adopted false, holder_rev" "$W/run2.log" || {
 [ ! -f "$W/data/handover.json" ] || { echo "handover.json left after it was read"; exit 1; }
 
 # 3: a crash restart: from the tails, inexact, the same processes; then Stop All Sessions
-# PI_DESK_HOLDER_REV: the app takes its bundled holder for a newer one, so it upgrades the running
+# DECKHAND_HOLDER_REV: the app takes its bundled holder for a newer one, so it upgrades the running
 # holder by itself once the adopt is done (holder_upgrade_tick), as after an update
-start 3 PI_DESK_HOLDER_REV=99; finish 3
+start 3 DECKHAND_HOLDER_REV=99; finish 3
 grep -q "holder upgraded: ok true, adopted false, holder_rev" "$W/run3.log" || { echo "run 3: the older holder was not upgraded at attach"; exit 1; }
 [ "$(grep -c "holder upgraded:" "$W/run3.log")" = 1 ] || { echo "run 3: more than one automatic upgrade"; exit 1; }
 python3 - "$W/run3.log" "$ROOT/build/keep-sessions-before.json" "$ROOT/build/keep-sessions-crash.json" <<'PY'

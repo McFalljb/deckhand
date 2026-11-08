@@ -1,5 +1,5 @@
 # CPU and frames with the largest panel set while pi works (dot pulsing).
-# Run: PI_DESK_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
+# Run: DECKHAND_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
 wait 1000
 waitfor max 15000
 wait 2000

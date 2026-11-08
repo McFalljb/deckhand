@@ -7,7 +7,7 @@
 # (before/after comparisons). Usage: [OUT=name] tests/scripts/shots.sh
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
-export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
+export DECKHAND_SCALE=${DECKHAND_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
@@ -52,8 +52,8 @@ session "$CH" 72 c3 ""
   && printf 'int main(void) {\n    return 1;\n}\n' > src/main.c && printf 'x\n' > notes.txt)
 
 sed "s|\$OUT|$OUT|g" tests/scripts/shots.txt > "$W/script.txt"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$W/script.txt" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$P/recipe-box" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$W/script.txt" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$P/recipe-box" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "shots scene failed (log: $W/run.log)"; exit 1

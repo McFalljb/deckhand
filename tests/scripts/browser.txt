@@ -13,13 +13,13 @@ web_stats
 web_click 120 50
 web_title c=1
 web_pixel 300 50 00c000
-# type into the input (pi-desk's key path: KEY_DOWN/CHAR/KEY_UP)
+# type into the input (Deckhand's key path: KEY_DOWN/CHAR/KEY_UP)
 web_click 170 130
 type hello World
 web_title v=hello World
 key backspace
 web_title v=hello Worl
-# no paint went into the texture pi-desk's last frame sampled (its GPU work may
+# no paint went into the texture Deckhand's last frame sampled (its GPU work may
 # still run: a torn frame); BROWSER.md §6 step 2
 web_assert overwrites 0
 web_assert inflight_writes 0
@@ -29,7 +29,7 @@ web_scroll -10 400 400
 wait 600
 web_js document.title = 'scrolled ' + (window.scrollY > 100 ? 'yes' : 'no') + ' ' + Math.round(window.scrollY)
 web_title scrolled yes
-# what pi-desk drew (the page in the tab, chrome around it)
+# what Deckhand drew (the page in the tab, chrome around it)
 shot browser/page
 web_stats
 quit

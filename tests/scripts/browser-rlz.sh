@@ -1,5 +1,5 @@
 #!/bin/sh
-# pi-desk's Chromium does not touch the Google Chrome files this test plants in
+# Deckhand's Chromium does not touch the Google Chrome files this test plants in
 # a fake home (docs/BROWSER.md §2.3): the home-folder
 # Google paths the CEF framework's strings name, which are RLZ's
 # ~/Library/Application Support/Google/RLZ/RlzStore.plist (Google's
@@ -16,7 +16,7 @@
 # a sentinel's folder moves the folder's. A page idles 100 s in test mode
 # (offline; an RLZ ping was once seen about 80 s in).
 # Fails if a sentinel or its folder is read or changed, or gets a file beside
-# it, or if RLZ's store is not in pi-desk's own folder, or if an RLZ ping was
+# it, or if RLZ's store is not in Deckhand's own folder, or if an RLZ ping was
 # tried. Needs a CEF build. Writes build/browser-rlz.noindex/. About 2 minutes.
 # Usage: tests/scripts/browser-rlz.sh   (RLZ_DIR=... to run two at once)
 set -eu
@@ -56,8 +56,8 @@ echo "$SENTINELS" | while IFS= read -r f; do
   touch -a -t 201901010000 "$f" "$d"
 done
 before=$(stamps)
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-rlz.txt \
-  PI_DESK_DATA_DIR="$W/data" PI_DESK_CEF_NETLOG="$W/netlog.json" PI_DESK_CMD='exec sleep 600' \
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/browser-rlz.txt \
+  DECKHAND_DATA_DIR="$W/data" DECKHAND_CEF_NETLOG="$W/netlog.json" DECKHAND_CMD='exec sleep 600' \
   build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 fail=0
 grep -q "done: .* 0 failed" "$W/run.log" || { echo "rlz: the scene failed (log: $W/run.log)"; fail=1; }
@@ -70,6 +70,6 @@ if [ "$before" != "$after" ]; then
 fi
 [ "$before_ls" = "$after_ls" ] || { echo "rlz FAILED: files appeared beside a sentinel:"; echo "$after_ls" | sed 's/^/  /'; fail=1; }
 OWN="$W/data/browser/home/Library/Application Support/Google/RLZ"
-[ -d "$OWN" ] || { echo "rlz FAILED: RLZ's store is not in pi-desk's folder ($OWN)"; fail=1; }
+[ -d "$OWN" ] || { echo "rlz FAILED: RLZ's store is not in Deckhand's folder ($OWN)"; fail=1; }
 if grep -q "clients1.google.com" "$W/netlog.json" 2>/dev/null; then echo "rlz FAILED: the RLZ ping was tried (clients1.google.com)"; fail=1; fi
 [ $fail = 0 ] && echo "rlz ok" || exit 1

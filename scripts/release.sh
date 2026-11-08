@@ -12,10 +12,10 @@
 #                  --exact-match), already pushed to the release repository
 #   --no-upload    a dry run: everything into dist/, no GitHub calls at all
 #   --upload-only  draft what an earlier --no-upload run left in dist/ (checked again first)
-#   --key FILE     the update key (default: $PI_DESK_UPDATE_KEY_FILE, else
-#                  ~/.config/pi-desk/update.key); a 600 file of yours in a private folder,
+#   --key FILE     the update key (default: $DECKHAND_UPDATE_KEY_FILE, else
+#                  ~/.config/deckhand/update.key); a 600 file of yours in a private folder,
 #                  read only by build/update-sign
-#   --repo         the GitHub repository (default: $PI_DESK_RELEASE_REPO, else UPDATE_REPO in
+#   --repo         the GitHub repository (default: $DECKHAND_RELEASE_REPO, else UPDATE_REPO in
 #                  src/update_core.odin, the repository the app's updater reads)
 #   --allow-other-repo
 #                  release to a repository that is not UPDATE_REPO (a fork, a test): installed
@@ -53,11 +53,16 @@ ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
 VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0 SKIP_PREV=0 PREV_TAG=""
-KEY=${PI_DESK_UPDATE_KEY_FILE:-$HOME/.config/pi-desk/update.key}
+KEY=${DECKHAND_UPDATE_KEY_FILE:-$HOME/.config/deckhand/update.key}
+# the key's place before the rename (0.1.7): used, with a warning, while the new one is missing
+if [ -z "${DECKHAND_UPDATE_KEY_FILE:-}" ] && [ ! -e "$KEY" ] && [ -e "$HOME/.config/pi-desk/update.key" ]; then
+  KEY=$HOME/.config/pi-desk/update.key
+  echo "release: warning: using the key at its old place, $KEY; move it to ~/.config/deckhand/ (mkdir -m 700 ~/.config/deckhand && mv \"$KEY\" ~/.config/deckhand/)" >&2
+fi
 # the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
 APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
 [ -n "$APP_REPO" ] || { echo "release: no UPDATE_REPO in src/update_core.odin" >&2; exit 1; }
-REPO=${PI_DESK_RELEASE_REPO:-$APP_REPO}
+REPO=${DECKHAND_RELEASE_REPO:-$APP_REPO}
 while [ $# -gt 0 ]; do
   case "$1" in
     --version) VERSION=${2:?--version needs a value}; shift 2 ;;
@@ -74,7 +79,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ "$REPO" != "$APP_REPO" ] && [ $ALLOW_OTHER_REPO = 0 ]; then
-  echo "release: $REPO (from --repo or PI_DESK_RELEASE_REPO) is not the repository the app updates from ($APP_REPO, UPDATE_REPO in src/update_core.odin): installed copies would never see this release. Pass --allow-other-repo if that is what you want" >&2
+  echo "release: $REPO (from --repo or DECKHAND_RELEASE_REPO) is not the repository the app updates from ($APP_REPO, UPDATE_REPO in src/update_core.odin): installed copies would never see this release. Pass --allow-other-repo if that is what you want" >&2
   exit 1
 fi
 if [ $PACKAGE = 0 ] && [ $UPLOAD = 0 ]; then
@@ -174,7 +179,7 @@ EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Conten
 EXE=$BUILT/Contents/MacOS/$EXE_NAME
 [ -n "$EXE_NAME" ] && [ -x "$EXE" ] || { echo "release: no $BUILT with its executable (run ./build.sh; UPDATE_APP must be what build.sh makes)" >&2; exit 1; }
 # the app must trust the release key, and never the test key (a test build would trust the
-# public test key: -define:PI_DESK_UPDATE_TEST)
+# public test key: -define:DECKHAND_UPDATE_TEST)
 LC_ALL=C grep -aqF "$APP_PUB" "$EXE" ||
   { echo "release: $BUILT does not contain UPDATE_PUBLIC_KEY" >&2; exit 1; }
 TEST_PUB=$(sed -n 's/^.*UPDATE_TEST_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/update_key.odin)
@@ -183,10 +188,13 @@ if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
   exit 1
 fi
 # no test hook in anything Deckhand runs: the env overrides, test mode, --print-token
-scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/pi-desk-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
+scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
   { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
+# the CLI's old name, a link Claude tabs started before 0.1.7 still run (scripts/bundle-app.sh)
+[ "$(readlink "$BUILT/Contents/MacOS/pi-desk-cli" 2>/dev/null)" = deckhand-cli ] ||
+  { echo "release: $BUILT has no Contents/MacOS/pi-desk-cli -> deckhand-cli link" >&2; exit 1; }
 [ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
-  { echo "release: $BUILT has no CEF framework (a PI_DESK_NO_CEF build?)" >&2; exit 1; }
+  { echo "release: $BUILT has no CEF framework (a DECKHAND_NO_CEF build?)" >&2; exit 1; }
 
 STAGE="$DIST/stage"
 APP="$STAGE/$APP_NAME"
@@ -239,7 +247,7 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ] || case "${
       *) sign --entitlements scripts/entitlements/helper.plist "$h" ;;
     esac
   done
-  sign "$APP/Contents/MacOS/pi-desk-cli" # Claude tabs' CLI (src/claude.odin)
+  sign "$APP/Contents/MacOS/deckhand-cli" # Claude tabs' CLI (src/claude.odin)
   # the session holder (src/holder): holder_install checks this identifier on its copy
   if [ -f "$APP/Contents/Helpers/deckhand-core" ]; then sign --identifier dev.deckhand.core "$APP/Contents/Helpers/deckhand-core"; fi
   sign --entitlements scripts/entitlements/app.plist "$APP"

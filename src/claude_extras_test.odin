@@ -38,10 +38,10 @@ x_reset :: proc() -> runtime.Allocator {
 	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	return runtime.heap_allocator()
 }
 
@@ -50,12 +50,12 @@ x_done :: proc() {
 	inbox_drain()
 	for _, t in terms do reader_stop_and_close(t)
 	claude_installed_probe = nil
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }
 
 @(private = "file")
 x_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-cx-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-cx-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	return d
 }
@@ -118,7 +118,7 @@ claude_dead_tab_bar :: proc(t: ^testing.T) {
 	context.allocator = x_reset()
 	defer x_done()
 	_, sess := x_session(t, "dead")
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 3")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 3")
 	id := run_command(New_Claude_Tab{session = sess}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id), "the fake exited")
 	_, tab, _ := find_tab(id)
@@ -143,7 +143,7 @@ claude_restart_resumes :: proc(t: ^testing.T) {
 	defer x_done()
 	dir, sess := x_session(t, "restart")
 	args := fmt.tprintf("%s/args", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 1")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
 	id := run_command(New_Claude_Tab{session = sess, args = {"--model", "opus"}}, X_UI).created_id
 	run_command(Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556666", source = "startup"}, X_SCRIPT)
 	testing.expect(t, x_wait_exit(id))
@@ -151,7 +151,7 @@ claude_restart_resumes :: proc(t: ^testing.T) {
 	testing.expect_value(t, run_command(Claude_Restart{tab_id = 999}, X_UI).error, "no such Claude tab")
 	testing.expect_value(t, run_command(Claude_Restart{tab_id = find_session(sess).tabs[0].id}, X_UI).error, "no such Claude tab")
 	// the user's Restart: --resume and the flags
-	os.set_env("PI_DESK_CLAUDE_CMD", x_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
 	r := run_command(Claude_Restart{tab_id = id}, X_UI)
 	testing.expect(t, r.ok, r.error)
 	_, tab, ct := claude_tab_of(id)
@@ -161,23 +161,23 @@ claude_restart_resumes :: proc(t: ^testing.T) {
 	testing.expect_value(t, run_command(Claude_Restart{tab_id = id}, X_UI).error, "Claude is running in this tab")
 	// an agent's restart: no flags replayed (the tab keeps them for the user)
 	drop_term(id)
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 1")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
 	cwd := tab.cwd != "" ? tab.cwd : find_session(sess).cwd
 	claude_start(find_session(sess), new_term(id), id, ct, cwd)
 	testing.expect(t, x_wait_exit(id))
 	os.remove(args)
-	os.set_env("PI_DESK_CLAUDE_CMD", x_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
 	r = run_command(Claude_Restart{tab_id = id}, X_CONTROL)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, x_file_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556666"), x_read(args))
 	testing.expect(t, !strings.contains(x_read(args), "--model"), x_read(args))
 	testing.expect_value(t, len(cl_args(id)), 2)
 	// a tab without a session id: a plain claude
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 1")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
 	id2 := run_command(New_Claude_Tab{session = sess}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id2))
 	os.remove(args)
-	os.set_env("PI_DESK_CLAUDE_CMD", x_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
 	testing.expect(t, run_command(Claude_Restart{tab_id = id2}, X_UI).ok)
 	testing.expect(t, x_file_has(args, "--plugin-dir"), x_read(args))
 	testing.expect(t, !strings.contains(x_read(args), "--resume"), x_read(args))
@@ -203,7 +203,7 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	context.allocator = x_reset()
 	defer x_done()
 	_, sess := x_session(t, "c127")
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 127")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 127")
 	id := run_command(New_Claude_Tab{session = sess}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
 	_, tab, _ := find_tab(id)
@@ -228,7 +228,7 @@ claude_restart_not_installed :: proc(t: ^testing.T) {
 	testing.expect_value(t, toast.text, "")
 	// installed since: Restart starts it
 	claude_installed_probe = proc() -> bool {return true}
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	testing.expect(t, run_command(Claude_Restart{tab_id = id}, X_UI).ok)
 	_, tab, _ = find_tab(id)
 	testing.expect_value(t, tab.status, Tab_Status.Running)
@@ -242,10 +242,10 @@ claude_dead_reopen_and_bell :: proc(t: ^testing.T) {
 	defer x_done()
 	dir, sess := x_session(t, "reopen")
 	args := fmt.tprintf("%s/args", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 2")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 2")
 	id := run_command(New_Claude_Tab{session = sess, args = {"--verbose"}}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
-	os.set_env("PI_DESK_CLAUDE_CMD", x_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", x_args_cmd(args))
 	run_command(Focus_Session{session = sess}, X_UI)
 	_, tab, _ := find_tab(id)
 	testing.expect_value(t, tab.status, Tab_Status.Exited)
@@ -255,7 +255,7 @@ claude_dead_reopen_and_bell :: proc(t: ^testing.T) {
 	testing.expect(t, x_file_has(args, "--verbose"), "the user's row click: their flags")
 	// not the tab shown: left alone
 	drop_term(id)
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 2")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 2")
 	_, _, ct := claude_tab_of(id)
 	claude_start(find_session(sess), new_term(id), id, ct, find_session(sess).cwd)
 	testing.expect(t, x_wait_exit(id))
@@ -265,7 +265,7 @@ claude_dead_reopen_and_bell :: proc(t: ^testing.T) {
 	_, tab, _ = find_tab(id)
 	testing.expect_value(t, tab.status, Tab_Status.Exited)
 	// the bell's entry about it: its tab shows, and Claude starts again
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	s := find_session(sess)
 	state.current_session = 0 // not on screen: its entry is made
 	_, ctab, _ := find_tab(id)
@@ -561,7 +561,7 @@ x_comment_setup :: proc(t: ^testing.T, tag: string) -> (sess, br, id: u64, got: 
 	b := Tab{id = new_id(), kind = Browser_Tab{url = "about:blank"}, title = strings.clone("Page"), status = .Running}
 	pane_add_tab(s, b) // in the session's pane (panes.odin)
 	br = b.id
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
 	id = run_command(New_Claude_Tab{session = sess}, X_UI).created_id
 	crop := comments_crop_path()
 	png := []u8{0x89, 'P', 'N', 'G', 0x0d, 0x0a, 0x1a, 0x0a, 1, 2, 3}
@@ -699,7 +699,7 @@ claude_comments_fence_after_cleaning :: proc(t: ^testing.T) {
 	nos := []int{0}
 	block := comments_block(list, nos)
 	testing.expect(t, !strings.contains_rune(block, 0x200b), block)
-	testing.expect(t, strings.contains(block, "```````pi-desk-comments"), block) // 6 in a row inside: a fence of 7
+	testing.expect(t, strings.contains(block, "```````deckhand-comments"), block) // 6 in a row inside: a fence of 7
 }
 
 // A refused claude_restart changes nothing (no event marked changed).
@@ -708,7 +708,7 @@ claude_restart_refused_unchanged :: proc(t: ^testing.T) {
 	context.allocator = x_reset()
 	defer x_done()
 	_, sess := x_session(t, "rrefused")
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 127")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 127")
 	id := run_command(New_Claude_Tab{session = sess}, X_UI).created_id
 	testing.expect(t, x_wait_exit(id))
 	claude_installed_probe = proc() -> bool {return false}

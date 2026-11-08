@@ -1,17 +1,17 @@
 #!/bin/sh
-# pi-desk started from the Dock or Finder: launchd's bare PATH
+# Deckhand started from the Dock or Finder: launchd's bare PATH
 # (/usr/bin:/bin:/usr/sbin:/sbin), with pi on a folder only the user's
 # interactive shell setup adds (Homebrew's `brew shellenv` in ~/.zshrc).
-# Each run starts pi-desk with `env -i` and a fake HOME, opens a past session
+# Each run starts Deckhand with `env -i` and a fake HOME, opens a past session
 # from the sidebar and checks which pi its tabs ran (the project argument
 # opens a new session too). The pis are tiny shell scripts: never a real pi.
 #   1. SHELL=/bin/zsh, ~/.zshrc puts ~/brew/bin first: the pi tabs find the
 #      fake pi there (src/login_env.odin takes `zsh -i -l -c`'s environment).
 #   2. a shell whose interactive start fails: the fallback folders
-#      (PI_DESK_PATH_DIRS stands in for /opt/homebrew/bin and the rest)
+#      (DECKHAND_PATH_DIRS stands in for /opt/homebrew/bin and the rest)
 #   3. no pi anywhere: the tab says so and names the profile to fix
 #   4. issue #2: launchd's PATH is NOT bare (Nix-like folders) and
-#      PI_DESK_GUI_LAUNCH=1 stands in for launchd as the parent: the shell's
+#      DECKHAND_GUI_LAUNCH=1 stands in for launchd as the parent: the shell's
 #      environment is still merged in (a fake Homebrew folder, a marker
 #      variable), pi is found in its managed install ~/.pi/agent/bin only,
 #      and the gear's "Refresh shell environment" gives NEW shell tabs the
@@ -54,7 +54,7 @@ SH
 chmod 755 "$W/fakesh"
 
 # never a real pi. Run 1: the fake pi comes first on the interactive shell's
-# PATH (pi-desk takes that environment), and a login shell that resets PATH
+# PATH (Deckhand takes that environment), and a login shell that resets PATH
 # (nix-darwin's /etc/zshenv without the flag it exports) finds none. The others: none.
 p1=$(env -i HOME="$FAKE_HOME" PATH=$BARE /bin/zsh -i -l -c 'printf "%s" "$PATH"' </dev/null 2>/dev/null | tail -1)
 got=$(env -i PATH="$p1" /bin/sh -c 'command -v pi' || true)
@@ -68,16 +68,16 @@ done
 
 fail=0
 chk() { if ! eval "$2"; then echo "FAILED: $1"; fail=1; fi; }
-# run N SHELL DIRS [PATH [GUI [SCRIPT]]]: pi-desk with launchd's environment and nothing else
+# run N SHELL DIRS [PATH [GUI [SCRIPT]]]: Deckhand with launchd's environment and nothing else
 # (and $EXTRA_ENV: K=V words). SCRIPT: another run's script (default: N's).
-# Test mode never asks the shell unless PI_DESK_GUI_LAUNCH=1 (GUI=1) stands in
+# Test mode never asks the shell unless DECKHAND_GUI_LAUNCH=1 (GUI=1) stands in
 # for launchd as the parent, so every run here passes it.
 run() {
   : > "$FAKE_HOME/pi-ran.txt"
   : > "$FAKE_HOME/pi-env.txt"
-  env -i HOME="$FAKE_HOME" PATH="${4:-$BARE}" SHELL="$2" PI_DESK_PATH_DIRS="$3" TMPDIR="${TMPDIR:-/tmp}" \
-    PI_DESK_GUI_LAUNCH="${5:-}" PI_DESK_REAL_PI=1 ${EXTRA_ENV:-} \
-    PI_DESK_SCRIPT="tests/scripts/login-path-${6:-$1}.txt" PI_DESK_DATA_DIR="$W/data-$1" \
+  env -i HOME="$FAKE_HOME" PATH="${4:-$BARE}" SHELL="$2" DECKHAND_PATH_DIRS="$3" TMPDIR="${TMPDIR:-/tmp}" \
+    DECKHAND_GUI_LAUNCH="${5:-}" DECKHAND_REAL_PI=1 ${EXTRA_ENV:-} \
+    DECKHAND_SCRIPT="tests/scripts/login-path-${6:-$1}.txt" DECKHAND_DATA_DIR="$W/data-$1" \
     build/deckhand "$PROJ" > "$W/run-$1.log" 2>&1 || true
   cp "$FAKE_HOME/pi-ran.txt" "$W/ran-$1.txt"
   cp "$FAKE_HOME/pi-env.txt" "$W/env-$1.txt"

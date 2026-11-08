@@ -84,8 +84,8 @@ waitstate 10000 open_sessions.0.tabs.0.agent_status.dot none
 sweep sess 0 80
 hover search
 wait 200
-# 3. the row's menu: Pin and Rename… (pi-desk's own title), Reveal and Copy path (its transcript),
-# its info (pi-desk's record)
+# 3. the row's menu: Pin and Rename… (Deckhand's own title), Reveal and Copy path (its transcript),
+# its info (Deckhand's record)
 rclickid sess 0
 eventually
 assert_menurows Pin|New Claude tab here|Rename…|-|Reveal in Finder|Copy path|Copy session info|Send to Atlas|-|Mark as unread|Hide|Close session

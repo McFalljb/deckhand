@@ -59,7 +59,7 @@ Native views get native events directly (degraded mode).
 
 The program exposes commands, state and events over the envelope in [PROTOCOL.md](PROTOCOL.md)
 (NDJSON, `{id, type, v, …}`, `hello` with version and token). Deckhand starts the program with
-`PI_DESK_SOCKET` and a per-tab `PI_DESK_TOKEN`, or connects to an address the program announces.
+`DECKHAND_SOCKET` and a per-tab `DECKHAND_TOKEN`, or connects to an address the program announces.
 The program speaks first (`hello`); Deckhand's hello reply is the first line it gets, and nothing
 (requests, `input`) is sent before that reply.
 Which requests a program answers is its own business: Deckhand passes any method through

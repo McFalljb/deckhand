@@ -9,7 +9,7 @@
 #   whose key is not the old one: refused
 #   test hooks (src/test_hooks.odin): src built with -define:DECKHAND_TEST_HOOKS=false holds no
 #   hook name, --print-token or test key (scripts/check-release-build.sh passes it), binaries
-#   planted with a single hook string, or any PI_DESK_ name the check does not allow, fail it;
+#   planted with a single hook string, or any DECKHAND_ name the check does not allow, fail it;
 #   the source lint (scripts/check-env-reads.py) refuses an env read of a built or unknown name;
 #   release.sh builds with DECKHAND_RELEASE=1 and runs the check; build.sh refuses it for tests
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
@@ -100,7 +100,7 @@ refused "--rotating-from with a key that is not OLDPUB" "is not OLDPUB" --versio
 refused "--rotating-from the key the app already has" "they are the same here" --version 0.5.0 --no-upload --rotating-from "$TEST_PUB"
 # the repository: the app's (UPDATE_REPO) unless --allow-other-repo says otherwise
 refused "--repo another repository" "is not the repository the app updates from" --version 0.5.0 --no-upload --repo someone/fork
-(export PI_DESK_RELEASE_REPO=someone/fork; refused "PI_DESK_RELEASE_REPO another repository" "is not the repository the app updates from" --version 0.5.0 --no-upload)
+(export DECKHAND_RELEASE_REPO=someone/fork; refused "DECKHAND_RELEASE_REPO another repository" "is not the repository the app updates from" --version 0.5.0 --no-upload)
 if rel --version 0.5.0 --upload-only --repo someone/fork --allow-other-repo; then bad "--allow-other-repo: went ahead with no dist/"
 elif grep -q "is not the repository" "$W/out.txt"; then bad "--allow-other-repo: still refused for the repository"
 else ok "--allow-other-repo lets another repository through"; fi
@@ -124,20 +124,24 @@ H="$W/hooks"
 mkdir -p "$H"
 odin build src -out:"$H/nohooks" -define:DECKHAND_TEST_HOOKS=false -minimum-os-version:14.0 >"$H/build.log" 2>&1 || { cat "$H/build.log"; bad "src did not build without hooks"; }
 scripts/check-release-build.sh "$H/nohooks" >"$H/out.txt" 2>&1 && ok "a build without hooks passes the check" || bad "a build without hooks: $(cat "$H/out.txt")"
-for s in PI_DESK_SCRIPT PI_DESK_DATA_DIR PI_DESK_RUNTIME_DIR PI_DESK_UPDATE_URL --print-token; do
+for s in DECKHAND_SCRIPT DECKHAND_DATA_DIR DECKHAND_RUNTIME_DIR DECKHAND_UPDATE_URL --print-token; do
   cp /usr/bin/true "$H/planted"
   printf 'x%sx' "$s" >> "$H/planted"
   scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
 done
-# the catch-all: any other PI_DESK_ name fails too (a knob outside HOOK_ENV); the allowed ones pass
-for s in PI_DESK_NEW_KNOB PI_DESK_CEF_NETLOG PI_DESK_CEF_SPARE PI_DESK_x; do
+# the catch-all: any other DECKHAND_ name fails too (a knob outside HOOK_ENV); the allowed ones pass
+# (the old PI_DESK_ names too: an old hook name, a knob under the old prefix)
+for s in DECKHAND_NEW_KNOB DECKHAND_CEF_NETLOG DECKHAND_CEF_SPARE DECKHAND_x PI_DESK_SCRIPT PI_DESK_DATA_DIR PI_DESK_NEW_KNOB PI_DESK_x; do
   cp /usr/bin/true "$H/planted"
   printf '\001%s\001' "$s" >> "$H/planted"
   scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
 done
 cp /usr/bin/true "$H/planted"
-printf '\001PI_DESK_SOCKET\001PI_DESK_GUI_LAUNCH\001PI_DESK_*\001' >> "$H/planted"
-scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowed PI_DESK_ names pass" || bad "an allowed name refused: $(cat "$H/out.txt")"
+printf '\001DECKHAND_SOCKET\001DECKHAND_GUI_LAUNCH\001DECKHAND_*\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowed DECKHAND_ names pass" || bad "an allowed name refused: $(cat "$H/out.txt")"
+cp /usr/bin/true "$H/planted"
+printf '\001PI_DESK_SOCKET\001PI_DESK_CLAUDE_TOKEN\001PI_DESK_CLI\001PI_DESK_GUI_LAUNCH\001PI_DESK_\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the old names the rename still sets pass" || bad "an allowed old name refused: $(cat "$H/out.txt")"
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"
@@ -149,20 +153,22 @@ lint() { # WHAT WANT(pass|fail) LINE
   if python3 -I scripts/check-env-reads.py --root "$L" >"$H/out.txt" 2>&1; then got=pass; else got=fail; fi
   [ "$got" = "$2" ] && ok "env lint: $1 ($2)" || bad "env lint: $1: $got, want $2: $(cat "$H/out.txt")"
 }
-lint "a built name" fail 'v := os.get_env(fmt.tprintf("PI_DESK_%s", x))'
-lint "an unknown literal" fail 'v := os.get_env("PI_DESK_NEW_KNOB")'
-lint "a C getenv of a knob" fail 'const char* v = getenv("PI_DESK_NEW_KNOB");'
+lint "a built name" fail 'v := os.get_env(fmt.tprintf("DECKHAND_%s", x))'
+lint "an unknown literal" fail 'v := os.get_env("DECKHAND_NEW_KNOB")'
+lint "a C getenv of a knob" fail 'const char* v = getenv("DECKHAND_NEW_KNOB");'
 lint "a known literal" pass 'v := os.get_env("HOME")'
-lint "env_lookup of a built name" fail 'v, _ := env_lookup(child_base_env(), fmt.tprintf("PI_DESK_%s", x))'
-lint "env_lookup of an unknown literal" fail 'v, _ := env_lookup(child_base_env(), "PI_DESK_NEW_KNOB")'
+lint "an old name the rename reads" pass 'v := os.get_env("PI_DESK_SOCKET")'
+lint "an old test hook's name" fail 'v := os.get_env("PI_DESK_SCRIPT")'
+lint "env_lookup of a built name" fail 'v, _ := env_lookup(child_base_env(), fmt.tprintf("DECKHAND_%s", x))'
+lint "env_lookup of an unknown literal" fail 'v, _ := env_lookup(child_base_env(), "DECKHAND_NEW_KNOB")'
 lint "env_lookup of a known literal" pass 'v, _ := env_lookup(child_base_env(), "PATH")'
-lint "the name on the next line" fail 'v := os.get_env(\n\t\t"PI_DESK_NEW_KNOB")'
-lint "a // inside a string before the call" fail 'u := "http://x"; v := os.get_env(fmt.tprintf("PI_DESK_%s", x))'
+lint "the name on the next line" fail 'v := os.get_env(\n\t\t"DECKHAND_NEW_KNOB")'
+lint "a // inside a string before the call" fail 'u := "http://x"; v := os.get_env(fmt.tprintf("DECKHAND_%s", x))'
 lint "a non-literal without the marker" fail 'v := os.get_env(name)'
 lint "a non-literal with the marker" pass 'v := os.get_env(name) // env-read-ok: test'
 lint "the marker in a string is no marker" fail 'v := os.get_env(name); s := "// env-read-ok: no"'
 python3 -I scripts/check-env-reads.py >"$H/out.txt" 2>&1 && ok "env lint: the tree passes" || bad "env lint: $(cat "$H/out.txt")"
-grep -q -- '-DPD_RELEASE=1' build.sh && grep -q '#ifndef PD_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost PD_RELEASE"
+grep -q -- '-DDH_RELEASE=1' build.sh && grep -q '#ifndef DH_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost DH_RELEASE"
 grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"
 grep -q 'scripts/check-release-build.sh "$EXE"' scripts/release.sh && ok "release.sh checks its binaries" || bad "release.sh does not run check-release-build.sh"
 DECKHAND_RELEASE=1 ./build.sh test >"$H/out.txt" 2>&1 && bad "build.sh test ran without hooks" || ok "build.sh refuses DECKHAND_RELEASE=1 for tests"

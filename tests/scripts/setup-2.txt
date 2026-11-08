@@ -1,5 +1,5 @@
 # setup.sh, second start: the main folder is set, so no sheet; the user's own
-# PI_KIT_NOTES_DIR (in pi-desk's environment) wins in a new chat.
+# PI_KIT_NOTES_DIR (in Deckhand's environment) wins in a new chat.
 wait 1500
 assert_state focus.kind terminal
 assert_state settings.home_dir $homedir/notes/agents-demo

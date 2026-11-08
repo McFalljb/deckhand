@@ -744,7 +744,7 @@ Request_Msg :: struct {
 	command: Command, // command, pi.session, pi.status
 	session: u64, // subscribe filter: an open session id (0 = all)
 	tab_id:  u64, // subscribe filter: a tab id (0 = all)
-	result:  Result, // result (a bridge answering pi-desk): ok and error only
+	result:  Result, // result (a bridge answering Deckhand): ok and error only
 	request_id: u64, // cancel: the request (one of this connection's) to end
 }
 

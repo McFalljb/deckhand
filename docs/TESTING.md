@@ -73,7 +73,7 @@ tool, or a scene tagged `noci`.
 | `tests/browser_read_js_test.mjs` (node) | `browser_read.js`'s page walk: frames, boxless containers, shadow slots | <1 s | every change |
 | `integrations/pi` tests (`node --test`) | the bundled pi integration (bridge, panels, desk tools) without running pi | ~1 s | every change |
 | `src/*_test.odin` (`tests/unit.py`, ~800 tests in ~70 processes) | the command layer: every command, caller rules, confirmations, persistence, the socket, Claude and pi launch arguments and environment, jobs, the editor, the layout audit (no overlapping text at 4 widths × every look × light/dark), the docs listing every action and command | ~30–40 s on 6 processes incl. the build (~2 min 15 s on one) | every change |
-| `tools/pi-desk-cli` tests | the `deckhand` CLI the Claude Code plugin runs: argument parsing, the read-only guard (`tests/readonly-vectors.json`) | <1 s | every change |
+| `tools/deckhand-cli` tests | the `deckhand` CLI the Claude Code plugin runs: argument parsing, the read-only guard (`tests/readonly-vectors.json`) | <1 s | every change |
 | `odin build` of the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s | every change |
 | Scenes (`tests/scenes.py`, below) | the real app end to end, in quiet test mode, with fakes | see below | by area (`--changed`); `--all` for `@all` changes and releases |
 
@@ -161,7 +161,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `dead-tab` | a pi tab that exited: the bar, Restart, Restart with model, every way of reopening | 13 | partial dup: `dead_tab_test.odin` |
 | `claude-wait` | Atlas's wait on a Claude tab whose status lags its Stop hook | 8 | |
 | `polish-beep` | no AppKit beep for keys Deckhand handles; the macOS line-editing keys reaching a shell through AppKit's `keyDown:` (`polish.sh beep.txt`) | ~8 | |
-| `pi-chat-readonly` | read-only pi chats get pi's allowlist and `PI_KIT_READONLY=1`; every start gets the bundled integration and `DECKHAND_*`, never pi-kit's `PI_DESK_*` | 6 | smoke |
+| `pi-chat-readonly` | read-only pi chats get pi's allowlist and `PI_KIT_READONLY=1`; every start gets the bundled integration and `DECKHAND_*`, never pi-kit's `DECKHAND_*` | 6 | smoke |
 | `fish-shell` | a fish login shell never gets an sh script; pi, Claude and shell tabs still start | 6 | |
 | `agent-show` | a session's pi (fake bridge) and Claude (fake, `deckhand show`) show the user a .md (Markdown tab) and a .txt (editor tab) in their own session, after their tab, behind the view; other sessions and binary files refused | 6 | |
 | `app-open` | a session's agent opens its project's declared app, and only its own | 3 | |
@@ -194,7 +194,7 @@ pi by hand before a release.
 Each scene has its own work folder (`build/<scene>/`), fake HOME and data dir, so most can run
 side by side. What they share, and how the runner keeps them apart:
 
-- **`build/test-data`**: scenes that set no `PI_DESK_DATA_DIR` use it as their data dir, so
+- **`build/test-data`**: scenes that set no `DECKHAND_DATA_DIR` use it as their data dir, so
   they would take each other's single-instance lock (`instance.lock`) and several
   `rm -rf` it. Tag `test-data`: one at a time.
 - **`build/test-trash`**: test mode's Trash (`fs_model.odin`); `jobs.sh` empties it and
@@ -208,7 +208,7 @@ side by side. What they share, and how the runner keeps them apart:
   take no `-j` slot (at most two at a time), but still a Chromium slot.
 - **The control socket**: `core.sock` in the runtime dir, `<data dir>/run` (test mode without a
   data dir: `build/test-data/run`, which the `test-data` lock keeps to one scene at a time); scenes
-  that look at the runtime dir set their own `PI_DESK_RUNTIME_DIR`. No ports are opened.
+  that look at the runtime dir set their own `DECKHAND_RUNTIME_DIR`. No ports are opened.
 - **Screenshots**: `build/shots/<scene>/`, one folder per scene.
 - **The clipboard**: under a script the app's copies and pastes use a pasteboard of its own
   (`autotest.pasteboard`), never the system's: one scene's copy cannot replace another's, nor the
@@ -223,9 +223,9 @@ it). Logs: `build/scenes/<scene>.log`, summary: `build/scenes/summary.txt`, last
 
 **Failing fast.** A scene stops at its first failed check, wait (`waitfor`, `waitstate`,
 `waitresult`, a command's TIMEOUT) or missing element: the app logs `ASSERT FAILED (stopped at line N
-of SCRIPT…)`, no `done:` line, and quits with exit status 1 (`PI_DESK_SCRIPT_FAIL_FAST=1`, which
+of SCRIPT…)`, no `done:` line, and quits with exit status 1 (`DECKHAND_SCRIPT_FAIL_FAST=1`, which
 `tests/scripts/fresh-build.sh` and the runner set; `--no-fail-fast` or
-`PI_DESK_SCRIPT_FAIL_FAST=0` runs every line, to see all of a new script's failures at once).
+`DECKHAND_SCRIPT_FAIL_FAST=0` runs every line, to see all of a new script's failures at once).
 A `waitfor` that times out is a failure (it used to be only logged). Every failed line is
 logged with `ASSERT FAILED` (or `TIMEOUT` for a wait), the markers the scene scripts read: most
 run the app with `|| true` and grep its log, so a failure worded otherwise (`dragtab: no such tab
@@ -237,7 +237,7 @@ A scene killed for its timeout is not retried. `--max-minutes` (`SCENE_MAX_MINUT
 the job's 25 min, nightly 32 of 45) is the whole run's budget: past it no scene starts (they are
 **NOT RUN**, a failure) and running ones are killed, so the summary table always prints.
 Each script line is written to `build/scenes/<scene>.step` as it starts
-(`PI_DESK_SCRIPT_STEP`), so a failed or killed scene's summary row says where it was:
+(`DECKHAND_SCRIPT_STEP`), so a failed or killed scene's summary row says where it was:
 `killed after its timeout; last script step: tests/scripts/menus.txt:188: wait 300`.
 
 Concurrency: `-j 8` on a Mac with 10+ CPUs, 4 with 8+, 2 otherwise (`SCENE_JOBS`, `SCENE_CEF_JOBS`
@@ -270,7 +270,7 @@ A scene script waits in three ways (commands: the top of `src/autotest.odin`):
 `shot` takes the screenshot once the raised window has drawn 3 frames (at least 150 ms; it was a
 fixed second).
 
-**How fixed waits are converted.** `PI_DESK_WAIT_AUDIT=1` makes the app log,
+**How fixed waits are converted.** `DECKHAND_WAIT_AUDIT=1` makes the app log,
 for every `wait` followed by checks, whether each check already held before the line ahead of
 the wait ran (A), when the wait began (B) and after it (C). `tests/wait_audit.py LOG...` reads
 those logs and turns a `wait` into `eventually` only when every check after it failed at A and
@@ -281,7 +281,7 @@ already held at A (it may check that something stays), a check that something is
 `act_assert`, `app_*`…), a script's first wait, and every wait followed by an action. Also
 dropped: the wait between `rclickid` and `clickmenu` (the menu opens in the click's own event).
 Result: 476 waits became `eventually`, 77 were dropped, 184 kept. To convert waits in a new
-script the same way: run its scene with `PI_DESK_WAIT_AUDIT=1`, then `tests/wait_audit.py
+script the same way: run its scene with `DECKHAND_WAIT_AUDIT=1`, then `tests/wait_audit.py
 --apply build/<scene>/*.log` and review the diff.
 
 Hidden timings this surfaced (each fixed in the script, with the guard named): `browser-act`'s
@@ -385,7 +385,7 @@ tab switch or on the window going to the background), then the break was reverte
    `reload_test.odin`, `buttons_test.odin`, `chat_readonly_test.odin`.
 
 Done: the `jobs.sh` "no socket/tokens" check looks for `DECKHAND_(SOCKET|TOKEN|CONTROL_TOKEN)`
-as well as the old `PI_DESK_*` names.
+as well as the old `DECKHAND_*` names.
 
 No helper file in `tests/` is unreferenced; nothing was removed as dead code.
 

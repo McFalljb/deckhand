@@ -24,7 +24,7 @@ autotest_clipboard_stays_in_the_app :: proc(t: ^testing.T) {
 	platform.set_clipboard("copied in a scene")
 	testing.expect_value(t, clipboard_text(), "copied in a scene")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene") // assert_clipboard
-	// `paste`: what the next paste reads, not what pi-desk copied
+	// `paste`: what the next paste reads, not what Deckhand copied
 	autotest_paste_set("typed by the script")
 	testing.expect_value(t, clipboard_text(), "typed by the script")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene")

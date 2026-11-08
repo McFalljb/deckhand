@@ -1,5 +1,5 @@
 #!/bin/sh
-# pi-desk started from the Dock by someone whose pi is on a folder only the login shell adds
+# Deckhand started from the Dock by someone whose pi is on a folder only the login shell adds
 # (nvm, fnm, mise or pnpm in ~/.zprofile), with an interactive shell that never answers (a slow
 # or stuck ~/.zshrc): the environment probe times out, no stat finds pi, and pi is still not
 # "not installed" (src/harness.odin asks `$SHELL -l -c 'command -v pi'`). New session then starts
@@ -19,7 +19,7 @@ BARE=/usr/bin:/bin:/usr/sbin:/sbin
 mkdir -p "$PROJ" "$FAKE_HOME/lpi/bin" "$W/empty" "$W/data"
 printf '#!/bin/sh\necho "FAKE PI login ARGS: $*"\nexec sleep 600\n' > "$FAKE_HOME/lpi/bin/pi"
 chmod 755 "$FAKE_HOME/lpi/bin/pi"
-# interactive: hangs (pi-desk's probe gives up); login only: adds ~/lpi/bin, as a .zprofile would
+# interactive: hangs (Deckhand's probe gives up); login only: adds ~/lpi/bin, as a .zprofile would
 cat > "$W/fakesh" <<'SH'
 #!/bin/sh
 for a in "$@"; do [ "$a" = -i ] && exec sleep 30; done
@@ -33,12 +33,12 @@ got=$(env -i HOME="$FAKE_HOME" PATH=$BARE "$W/fakesh" -l -c 'command -v pi' </de
 if [ "$got" != "$FAKE_HOME/lpi/bin/pi" ]; then echo "pi-login-lookup: unsafe, the login shell's pi would be '$got'"; exit 1; fi
 
 fail=0
-# run N HOME SCRIPT: pi-desk with launchd's environment and nothing else
+# run N HOME SCRIPT: Deckhand with launchd's environment and nothing else
 run() {
   mkdir -p "$W/data-$1"
-  env -i HOME="$2" PATH="$BARE" SHELL="$W/fakesh" PI_DESK_PATH_DIRS="$W/empty" TMPDIR="${TMPDIR:-/tmp}" \
-    PI_DESK_GUI_LAUNCH=1 PI_DESK_REAL_PI=1 \
-    PI_DESK_SCRIPT="tests/scripts/$3" PI_DESK_DATA_DIR="$W/data-$1" \
+  env -i HOME="$2" PATH="$BARE" SHELL="$W/fakesh" DECKHAND_PATH_DIRS="$W/empty" TMPDIR="${TMPDIR:-/tmp}" \
+    DECKHAND_GUI_LAUNCH=1 DECKHAND_REAL_PI=1 \
+    DECKHAND_SCRIPT="tests/scripts/$3" DECKHAND_DATA_DIR="$W/data-$1" \
     build/deckhand > "$W/run-$1.log" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-$1.log" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-$1.log" || ! grep -q "done:" "$W/run-$1.log"; then

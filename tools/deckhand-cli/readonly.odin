@@ -1,13 +1,13 @@
-package pi_desk_cli
+package deckhand_cli
 
-// `pi-desk hook readonly`: the PreToolUse guard of a read-only Claude tab (a chat while chats are
-// read-only; docs/CLAUDE.md §1a). pi-desk puts it in the tab's own `--settings` (an absolute path
+// `deckhand hook readonly`: the PreToolUse guard of a read-only Claude tab (a chat while chats are
+// read-only; docs/CLAUDE.md §1a). Deckhand puts it in the tab's own `--settings` (an absolute path
 // to this binary, matcher "*"), so it runs only in read-only tabs and needs nothing from the
 // environment. It is one layer of several: plan mode and Claude Code's own deny rules for the
 // tools that write come first; this catches what they let through:
 //   - Bash commands pi-kit's read-only guardrails block (MUTATING, ported below; the shared
 //     vectors in tests/readonly-vectors.json keep the two the same), background Bash, and
-//     `pi-desk` act verbs (pi-desk refuses those from a read-only tab anyway);
+//     `deckhand` act verbs (Deckhand refuses those from a read-only tab anyway);
 //   - any tool not on READONLY_TOOLS (a tool a newer Claude Code adds is denied until listed).
 // A denial exits 2 with the reason on stderr (Claude Code blocks the call on exit 2, whatever
 // else it reads) and the same reason as PreToolUse JSON on stdout. Anything it cannot read is
@@ -67,8 +67,8 @@ hook_readonly :: proc(c: ^Ctx) -> int {
 	return 2
 }
 
-// `pi-desk hook readonly-ack NONCE`: the read-only profile's SessionStart hook (pi-desk's
-// --settings, nowhere else). Tells pi-desk the profile loaded with this start's nonce; pi-desk
+// `deckhand hook readonly-ack NONCE`: the read-only profile's SessionStart hook (Deckhand's
+// --settings, nowhere else). Tells Deckhand the profile loaded with this start's nonce; Deckhand
 // stops a read-only tab that never says so (docs/CLAUDE.md §1a). Prints nothing (SessionStart
 // output goes into Claude's context) and never fails Claude.
 hook_readonly_ack :: proc(c: ^Ctx, nonce: string) {
@@ -85,15 +85,15 @@ hook_readonly_ack :: proc(c: ^Ctx, nonce: string) {
 // tests/readonly-vectors.json. ----
 
 // Whether a read-only session blocks this command: pi-kit's MUTATING (any regex matches), and
-// pi-desk's own additions (m_pidesk; not in pi-kit yet: tests/readonly-vectors.json deny_pidesk).
+// Deckhand's own additions (m_deckhand; not in pi-kit yet: tests/readonly-vectors.json deny_deckhand).
 mutating :: proc(cmd: string) -> bool {
-	return m_git(cmd, GIT_VERBS[:], true) || m_fs(cmd) || m_redirect(cmd) || m_sed_i(cmd) || m_pidesk(cmd)
+	return m_git(cmd, GIT_VERBS[:], true) || m_fs(cmd) || m_redirect(cmd) || m_sed_i(cmd) || m_deckhand(cmd)
 }
 
 @(private = "file")
 GIT_VERBS := [?]string{"commit", "push", "merge", "rebase", "reset", "checkout", "switch", "stash", "apply", "am", "cherry-pick", "revert", "tag"}
 @(private = "file")
-GIT_VERBS_PIDESK := [?]string{"clean", "restore", "pull", "add", "init", "config", "update-ref"}
+GIT_VERBS_DECKHAND := [?]string{"clean", "restore", "pull", "add", "init", "config", "update-ref"}
 
 @(private = "file")
 is_word :: proc(ch: u8) -> bool {
@@ -145,7 +145,7 @@ word_at :: proc(s: string, i: int, w: string) -> bool {
 
 // /\bgit\b[^|;&]*\b(?:commit|push|merge|rebase|reset|checkout|switch|stash|apply|am|cherry-pick|
 // revert|tag|branch\s+-[dDmM]|worktree\s+(?:add|remove))\b/
-// (pi-desk's extra git verbs reuse it without the branch and worktree forms.)
+// (Deckhand's extra git verbs reuse it without the branch and worktree forms.)
 @(private = "file")
 m_git :: proc(s: string, verbs: []string, forms: bool) -> bool {
 	for k := 0; k + 3 <= len(s); k += 1 {
@@ -216,11 +216,12 @@ m_sed_i :: proc(s: string) -> bool {
 	return false
 }
 
-// ---- pi-desk act verbs ----
+// ---- Deckhand act verbs ----
 
 // Whether the command runs Deckhand's CLI with a verb that acts on a page or an app (Deckhand
 // refuses them from a read-only tab's token too; this says so before the call). A `deckhand`,
-// `pi-desk` (its old name, an alias) or `pi-desk-cli` word followed, after options, by an act verb.
+// `deckhand-cli`, `pi-desk` (its old name, an alias) or `pi-desk-cli` (the CLI's old name, a link
+// to it in the bundle) word followed, after options, by an act verb.
 // In any case (`Deckhand click`, `PI-DESK click`): macOS file names ignore case, so those run too.
 desk_act :: proc(cmd: string) -> bool {
 	s := strings.to_lower(cmd, context.temp_allocator)
@@ -231,6 +232,7 @@ desk_act :: proc(cmd: string) -> bool {
 		switch {
 		case strings.has_prefix(s[k:], "deckhand"):
 			j = k + len("deckhand")
+			if strings.has_prefix(s[j:], "-cli") do j += 4
 		case strings.has_prefix(s[k:], "pi-desk"):
 			j = k + len("pi-desk")
 			if strings.has_prefix(s[j:], "-cli") do j += 4
@@ -253,7 +255,7 @@ desk_act :: proc(cmd: string) -> bool {
 	return false
 }
 
-// ---- pi-desk's additions (not in pi-kit's MUTATING yet) ----
+// ---- Deckhand's additions (not in pi-kit's MUTATING yet) ----
 // These match only where the program is the command word of a segment (or git's subcommand), so
 // `cat ln.txt`, `grep -rn unlink src` and `git log -- add.md` run. The command word: the first
 // word of a segment (split at | ; & ( ) { } ` and newlines, so `$(…)` and `if …; then …` count),
@@ -432,14 +434,14 @@ git_config_reads :: proc(args: []string) -> bool {
 // --cookie-jar, -D, --dump-header); tar extracting or creating (x, c, r, u, A; --extract, --get,
 // --create, --append, --update, --delete, --concatenate). Each as the command word only.
 @(private = "file")
-m_pidesk :: proc(s: string) -> bool {
+m_deckhand :: proc(s: string) -> bool {
 	for c in commands(s) {
 		switch c.name {
 		case "git":
 			sub, rest := git_sub(c.args)
 			if sub == "config" {
 				if !git_config_reads(rest) do return true
-			} else if has(GIT_VERBS_PIDESK[:], sub) do return true
+			} else if has(GIT_VERBS_DECKHAND[:], sub) do return true
 		case "rmdir", "unlink", "ln", "truncate", "wget":
 			return true
 		case "dd":

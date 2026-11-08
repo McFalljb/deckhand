@@ -363,16 +363,16 @@ harness_pi_packages_read :: proc(t: ^testing.T) {
 harness_facts_from_layouts :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // the checklist and the runner are global state
 	home := hm_dir("home")
-	saved := env_save("HOME", "PI_DESK_SCRIPT", "PI_DESK_CMD", "PI_DESK_CLAUDE_CMD", "PI_CODING_AGENT_DIR")
+	saved := env_save("HOME", "DECKHAND_SCRIPT", "DECKHAND_CMD", "DECKHAND_CLAUDE_CMD", "PI_CODING_AGENT_DIR")
 	defer {
 		env_restore(saved)
 		pi_recheck()
 		claude_recheck()
 	}
 	os.set_env("HOME", home)
-	os.set_env("PI_DESK_SCRIPT", "unit-test") // test mode: the install folders only, never PATH
-	os.set_env("PI_DESK_CMD", "")
-	os.set_env("PI_DESK_CLAUDE_CMD", "")
+	os.set_env("DECKHAND_SCRIPT", "unit-test") // test mode: the install folders only, never PATH
+	os.set_env("DECKHAND_CMD", "")
+	os.set_env("DECKHAND_CLAUDE_CMD", "")
 	os.unset_env("PI_CODING_AGENT_DIR")
 	pkg := fmt.tprintf("%s/.pi/agent/lib/node_modules/@earendil-works/pi-coding-agent", home)
 	hm_write(fmt.tprintf("%s/package.json", pkg), `{"name":"@earendil-works/pi-coding-agent","version":"1.3.0"}`)
@@ -547,7 +547,7 @@ harness_run_holds_the_sheet :: proc(t: ^testing.T) {
 harness_run_with_fake_command :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // the checklist and the runner are global state
 	home := hm_dir("run")
-	saved := env_save("HOME", "PI_DESK_SCRIPT", "PI_DESK_CLAUDE_CMD", "PI_DESK_INSTALL_CMD")
+	saved := env_save("HOME", "DECKHAND_SCRIPT", "DECKHAND_CLAUDE_CMD", "DECKHAND_INSTALL_CMD")
 	defer {
 		harness_run_dismiss()
 		env_restore(saved)
@@ -555,8 +555,8 @@ harness_run_with_fake_command :: proc(t: ^testing.T) {
 		pi_recheck()
 	}
 	os.set_env("HOME", home)
-	os.set_env("PI_DESK_SCRIPT", "unit-test")
-	os.set_env("PI_DESK_CLAUDE_CMD", "")
+	os.set_env("DECKHAND_SCRIPT", "unit-test")
+	os.set_env("DECKHAND_CLAUDE_CMD", "")
 	fake := fmt.tprintf("%s/fake-install.sh", home)
 	hm_write(fake, `#!/bin/sh
 printf '%s\n' "$@" > "$HOME/install-argv.txt"
@@ -565,7 +565,7 @@ printf '#!/bin/sh\nexit 0\n' > "$HOME/.local/share/claude/versions/2.1.300"
 chmod 755 "$HOME/.local/share/claude/versions/2.1.300"
 ln -s "$HOME/.local/share/claude/versions/2.1.300" "$HOME/.local/bin/claude"
 `, 0o755)
-	os.set_env("PI_DESK_INSTALL_CMD", fake)
+	os.set_env("DECKHAND_INSTALL_CMD", fake)
 	claude_recheck()
 	harness_checklist_refresh()
 	it := harness_item("claude")
@@ -693,11 +693,11 @@ harness_run_realpath_fails_closed :: proc(t: ^testing.T) {
 harness_no_sudo_folder :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	root := hm_dir("nosudo")
-	env := env_save("TMPDIR", "PI_DESK_SCRIPT", "PI_DESK_INSTALL_CMD")
+	env := env_save("TMPDIR", "DECKHAND_SCRIPT", "DECKHAND_INSTALL_CMD")
 	defer env_restore(env)
 	// test mode, no stand-in: even if harness_run_start went on, it would refuse (never a real run)
-	os.set_env("PI_DESK_SCRIPT", "unit-test")
-	os.unset_env("PI_DESK_INSTALL_CMD")
+	os.set_env("DECKHAND_SCRIPT", "unit-test")
+	os.unset_env("DECKHAND_INSTALL_CMD")
 	os.set_env("TMPDIR", root)
 	d := harness_no_sudo_dir("x")
 	testing.expect(t, d != "")

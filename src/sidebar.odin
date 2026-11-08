@@ -164,7 +164,7 @@ sidebar_path :: proc(project_id: u64, pi_session_id: string) -> (path: string, e
 	if pi_session_id != "" {
 		path = find_session_file(p^, pi_session_id)
 		if path != "" do return path, ""
-		// a Claude row: its transcript, if pi-desk was told one under Claude's projects/ (claude_rows.odin)
+		// a Claude row: its transcript, if Deckhand was told one under Claude's projects/ (claude_rows.odin)
 		if rec := claude_row_record(project_id, pi_session_id); rec != nil do return claude_transcript_file(rec)
 		return "", "no such session in this project"
 	}
@@ -460,9 +460,9 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session) -> []Session {
 	return out[:]
 }
 
-// A project's Claude sessions as session rows (claude = true): pi-desk's own history, plus an open
+// A project's Claude sessions as session rows (claude = true): Deckhand's own history, plus an open
 // Claude-only session the history no longer holds, plus the transcripts found on disk for the
-// selected project and Chats (claude_disk.odin; never one pi-desk already has). Titles: the
+// selected project and Chats (claude_disk.odin; never one Deckhand already has). Titles: the
 // first prompt or the user's; "last active": when it was last used; "created": the transcript's
 // birth time when the scan saw it. A history entry whose transcript is gone is greyed.
 @(private = "file")

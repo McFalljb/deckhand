@@ -1,9 +1,9 @@
 package main
 
-// Claude Code accounts (docs/CLAUDE.md §1b). An account in pi-desk is a Claude Code config folder:
+// Claude Code accounts (docs/CLAUDE.md §1b). An account in Deckhand is a Claude Code config folder:
 // what CLAUDE_CONFIG_DIR names (its sign-in, settings, transcripts). Sign-ins that come from the
 // environment (ANTHROPIC_API_KEY, apiKeyHelper, Bedrock, Vertex) are untouched: claude inherits
-// the login environment as before, and pi-desk never stores a secret.
+// the login environment as before, and Deckhand never stores a secret.
 //
 // Where accounts come from (all optional):
 //   - the default: CLAUDE_CONFIG_DIR in the environment Claude tabs get (when absolute: that is
@@ -91,9 +91,9 @@ Set_Claude_Account_Default :: struct {
 CLAUDE_ACCOUNT_LABEL_MAX :: 40
 
 // The shell line that sets the tab's account after the login profile ran (claude_start puts it
-// before the command): PI_DESK_CLAUDE_ACCOUNT set = this account (empty: ~/.claude, so
+// before the command): DECKHAND_CLAUDE_ACCOUNT set = this account (empty: ~/.claude, so
 // CLAUDE_CONFIG_DIR is unset); not set = the default (the environment as the profile left it).
-CLAUDE_ACCOUNT_SH :: `if [ -n "${PI_DESK_CLAUDE_ACCOUNT+x}" ]; then if [ -n "$PI_DESK_CLAUDE_ACCOUNT" ]; then CLAUDE_CONFIG_DIR=$PI_DESK_CLAUDE_ACCOUNT; export CLAUDE_CONFIG_DIR; else unset CLAUDE_CONFIG_DIR; fi; unset PI_DESK_CLAUDE_ACCOUNT; fi; `
+CLAUDE_ACCOUNT_SH :: `if [ -n "${DECKHAND_CLAUDE_ACCOUNT+x}" ]; then if [ -n "$DECKHAND_CLAUDE_ACCOUNT" ]; then CLAUDE_CONFIG_DIR=$DECKHAND_CLAUDE_ACCOUNT; export CLAUDE_CONFIG_DIR; else unset CLAUDE_CONFIG_DIR; fi; unset DECKHAND_CLAUDE_ACCOUNT; fi; `
 
 // Folders found by claude_accounts_refresh (heap), in a stable order.
 @(private = "file")
@@ -270,7 +270,7 @@ claude_account_label_now :: proc(dir: string) -> string {
 // More than one account: the pickers and the rows' tags show.
 claude_accounts_many :: proc() -> bool {return len(claude_accounts()) > 1}
 
-// Every folder pi-desk guards as Claude's (claude_credential): ~/.claude, the default, every
+// Every folder Deckhand guards as Claude's (claude_credential): ~/.claude, the default, every
 // account, and every folder found or added, also the removed ones. Temp.
 claude_account_dirs :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
@@ -337,16 +337,16 @@ claude_account_pick :: proc(p: ^Project) -> string {
 }
 
 // What a Claude tab's environment gets for its account (claude_start): nothing for the default;
-// else PI_DESK_CLAUDE_ACCOUNT for CLAUDE_ACCOUNT_SH (after the login profile), and
-// CLAUDE_CONFIG_DIR set or dropped here too (PI_DESK_CLAUDE_CMD replaces the shell line in tests).
+// else DECKHAND_CLAUDE_ACCOUNT for CLAUDE_ACCOUNT_SH (after the login profile), and
+// CLAUDE_CONFIG_DIR set or dropped here too (DECKHAND_CLAUDE_CMD replaces the shell line in tests).
 claude_account_env :: proc(account: string) -> []string {
 	d := claude_account_dir(account)
 	if d == "" || d == claude_config_dir() do return nil
 	out := make([dynamic]string, context.temp_allocator)
 	if d == claude_home_config() {
-		append(&out, "PI_DESK_CLAUDE_ACCOUNT=", "!CLAUDE_CONFIG_DIR")
+		append(&out, "DECKHAND_CLAUDE_ACCOUNT=", "!CLAUDE_CONFIG_DIR")
 	} else {
-		append(&out, fmt.tprintf("PI_DESK_CLAUDE_ACCOUNT=%s", d), fmt.tprintf("CLAUDE_CONFIG_DIR=%s", d))
+		append(&out, fmt.tprintf("DECKHAND_CLAUDE_ACCOUNT=%s", d), fmt.tprintf("CLAUDE_CONFIG_DIR=%s", d))
 	}
 	return out[:]
 }

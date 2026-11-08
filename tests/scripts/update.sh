@@ -19,7 +19,7 @@
 #   5. update-5.txt: the "new app" (this test binary as 0.1.3) takes the secret from the helper,
 #      is welcomed as the named successor and adopts all three: screen hashes equal to the
 #      handover's and to a reference terminal fed every byte, the same pids, counters going on.
-# The app runs as its own test build (-define:PI_DESK_UPDATE_TEST=true, without the browser):
+# The app runs as its own test build (-define:DECKHAND_UPDATE_TEST=true, without the browser):
 # a release build has neither the test key nor the fixture variables compiled in.
 # Usage: tests/scripts/update.sh   (needs ./build.sh's libraries; builds build/update-sign)
 set -eu
@@ -30,7 +30,7 @@ rm -rf "$W" build/shots/update
 mkdir -p "$W" build/shots/update
 odin build tools/update-sign -out:build/update-sign
 BIN="$W/deckhand-update-test"
-odin build src -out:"$BIN" -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0 &
+odin build src -out:"$BIN" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 &
 # the session holder and the relaunch helper (holder_bin_find: next to the app's binary)
 odin build src/holder -out:"$W/deckhand-core" -minimum-os-version:14.0 &
 wait
@@ -75,13 +75,13 @@ PLIST
 mkrelease() {
   v=$1 d="$W/rel/download/v$1" z="deckhand-$1-macos-arm64.zip"
   mkdir -p "$d" "$W/src-$v"
-  mkapp "$W/src-$v" "$v"
+  mkapp "$W/src-$v" "$v" "${ID:-dev.pi-desk.app}"
   # UPDATE_RELEASE_SIGN=IDENTITY: the releases signed with that certificate (the install stays ad
   # hoc): an ad-hoc install (0.1.6 and before) updating to a self-signed one (scripts/sign.sh)
   [ -z "${UPDATE_RELEASE_SIGN:-}" ] || codesign --force --sign "$UPDATE_RELEASE_SIGN" "$W/src-$v/Deckhand.app" 2>/dev/null
   (cd "$W/src-$v" && ditto -c -k --keepParent Deckhand.app "$d/$z")
   cd_=$(codesign -d -vvv "$W/src-$v/Deckhand.app" 2>&1 | sed -n 's/^CDHash=//p')
-  build/update-sign sign "$KEY" "$v" "$d/$z" "$cd_" "$d/$z.sig" >/dev/null
+  build/update-sign sign ${SIGFMT:+--$SIGFMT} "$KEY" "$v" "$d/$z" "$cd_" "$d/$z.sig" >/dev/null
   if [ "${GOOD:-1}" != 1 ]; then
     # signed, then the zip changes (its checksum follows): only the signature is wrong
     mkdir -p "$W/src-$v/Deckhand.app/Contents/Resources"
@@ -100,10 +100,10 @@ mkapp "$W/install" 0.1.0
 mkrelease 0.1.1
 
 run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the project]
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    PI_DESK_UPDATE_URL="file://$W/rel/latest.json" PI_DESK_UPDATE_DOWNLOAD="file://$W/rel/download/" \
-    PI_DESK_UPDATE_VERSION="$2" PI_DESK_UPDATE_APP="$W/install/Deckhand.app" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+    DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
+    DECKHAND_UPDATE_VERSION="$2" DECKHAND_UPDATE_APP="$W/install/Deckhand.app" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
 }
 fail=0
 check_log() { # LOG
@@ -143,7 +143,9 @@ check_log "$W/run3.log"
 [ -e "$W/install/Deckhand.app.old-0.1.0" ] && { echo "the old bundle was not removed at the new version's second start"; fail=1; }
 
 # 4 and 5: an update that keeps the sessions
-GOOD=1 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
+# 0.1.3 as 0.1.8 will ship (the rename's second step): the new bundle id, a v3 signature; this
+# build (the 0.1.7 bridge) takes it
+GOOD=1 ID=dev.deckhand.app SIGFMT=v3 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
 run tests/scripts/update-4.txt 0.1.1 "$W/run4.log" ""
 check_log4() { # like check_log, but the run ends by the update's quit (no "done:")
   grep -E "ASSERT FAILED|TIMEOUT|no element|unknown command|session holder|update relaunch" "$1" || true
@@ -153,6 +155,8 @@ check_log4 "$W/run4.log"
 grep -q "update relaunch: .*(with the successor helper)" "$W/run4.log" || { echo "run 4: no relaunch helper"; fail=1; }
 v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/Deckhand.app/Contents/Info.plist")
 [ "$v" = 0.1.3 ] || { echo "run 4: the fake install was not swapped to 0.1.3 (it is $v)"; fail=1; }
+id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$W/install/Deckhand.app/Contents/Info.plist")
+[ "$id" = dev.deckhand.app ] || { echo "run 4: the v3-signed dev.deckhand.app update was not installed (bundle id $id)"; fail=1; }
 [ -n "$(holders)" ] || { echo "run 4: no session holder after the update's quit"; fail=1; }
 [ -n "$(helpers)" ] || { echo "run 4: no relaunch helper waiting"; fail=1; }
 [ -S "$RUN/successor.sock" ] || { echo "run 4: no successor.sock"; fail=1; }
@@ -160,7 +164,7 @@ v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/D
 # 4b: another copy (another executable, its own data dir) in the minute the holder waits
 mkdir -p "$W/other" "$W/data-other"
 cp "$BIN" "$W/other/deckhand-update-test"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/update-4b.txt PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data-other" PI_DESK_RUNTIME_DIR="$RUN" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/update-4b.txt DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data-other" DECKHAND_RUNTIME_DIR="$RUN" \
   "$W/other/deckhand-update-test" > "$W/run4b.log" 2>&1 || true
 check_log "$W/run4b.log"
 grep -q "refused: secret" "$W/run4b.log" || { echo "run 4b: another Deckhand was not refused by the waiting holder"; fail=1; }

@@ -942,7 +942,7 @@ holder_upgrade_unavailable :: proc() -> string {
 	return ""
 }
 
-// HOLDER_REV, or in a test build PI_DESK_HOLDER_REV (a scene makes the running holder look old).
+// HOLDER_REV, or in a test build DECKHAND_HOLDER_REV (a scene makes the running holder look old).
 @(private = "file")
 holder_rev_bundled :: proc() -> i64 {
 	if v := hook_env(.Holder_Rev); v != "" {

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Which fixed `wait`s in the scene scripts can become `eventually` (docs/TESTING.md, "Waits").
 
-Run the scenes with PI_DESK_WAIT_AUDIT=1 (the app logs, for every `wait` followed by checks,
+Run the scenes with DECKHAND_WAIT_AUDIT=1 (the app logs, for every `wait` followed by checks,
 whether each check already held before the line ahead of the wait ran (A), when the wait began
 (B), and after it (C)), then:
 

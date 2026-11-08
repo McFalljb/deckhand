@@ -1,5 +1,5 @@
 // What an agent reads from a page (docs/BROWSER.md §4, step 7): browser_read and browser_wait
-// (src/browser_agent.odin, #load). Evaluated as one expression in the "pi-desk" isolated world of
+// (src/browser_agent.odin, #load). Evaluated as one expression in the "deckhand" isolated world of
 // the page's top frame (the overlay's world, Runtime.evaluate with its contextId): the page's
 // scripts share the DOM but not this world's globals or prototypes. Called as
 // (THIS)(mode, selector, max, value); returns a JSON string:

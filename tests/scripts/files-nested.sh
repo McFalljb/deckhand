@@ -15,7 +15,7 @@ rm -rf "$W"
 T=$(mktemp -d /tmp/pdn.XXXX) || exit 1
 FAKE_HOME=$(cd "$T" && pwd -P) || exit 1
 trap 'chmod -R u+rwx "$FAKE_HOME" 2>/dev/null; case "$FAKE_HOME" in /private/tmp/pdn.?*|/tmp/pdn.?*) rm -rf "$FAKE_HOME" ;; esac' EXIT
-export PI_DESK_TEMP_ROOTS=/nonexistent-temp-root
+export DECKHAND_TEMP_ROOTS=/nonexistent-temp-root
 PROJ="$FAKE_HOME/gamedev"
 mkdir -p "$PROJ/golf/src" "$PROJ/handmade/code" "$PROJ/plain" "$PROJ/locked" "$FAKE_HOME/elsewhere" "$W/data" \
   "$FAKE_HOME/.pi/agent/sessions/--gamedev--"
@@ -35,8 +35,8 @@ chmod 000 "$PROJ/locked"
 LOG="$W/run.log"
 # the script names the project's folders: @PROJ@ is filled in
 sed "s|@PROJ@|$PROJ|g" tests/scripts/files-nested.txt > "$W/script.txt"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$W/script.txt" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$LOG" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$W/script.txt" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$LOG" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element" "$LOG" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$LOG" || ! grep -q "done:" "$LOG"; then
   echo "files-nested scene failed (log: $LOG)"; exit 1

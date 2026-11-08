@@ -29,6 +29,6 @@ session pi-desk 1 aaaa-1 "Command palette ranking"
 session pi-desk 3 bbbb-2 "Blend the title bar into the top bar"
 session pi-desk 26 cccc-3 "Double-click selects a word in the terminal"
 
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_BIN="$ROOT/build/deckhand" \
-  PI_DESK_CMD="exec sh '$ROOT/tests/scripts/fake-bridge.sh' \"\$@\"" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_BIN="$ROOT/build/deckhand" \
+  DECKHAND_CMD="exec sh '$ROOT/tests/scripts/fake-bridge.sh' \"\$@\"" \
   build/deckhand "$FAKE_HOME/code/pi-desk"

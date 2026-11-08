@@ -1,6 +1,6 @@
 package main
 
-// The Home session (docs/ROADMAP.md G9): pi-desk's own pi, the built-in
+// The Home session (docs/ROADMAP.md G9): Deckhand's own pi, the built-in
 // agent ("Atlas", agent.odin), which drives the app through the control
 // socket (the pi integration's `desk` extension, integrations/pi). It is an open session without a
 // project, with only its pi tab (its terminal shows in the drawer, ⌘J), not
@@ -25,7 +25,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 
-// pi-desk's data dir as the app uses it (set at startup; test mode: the
+// Deckhand's data dir as the app uses it (set at startup; test mode: the
 // test data dir). "" = no Home.
 home_root: string
 

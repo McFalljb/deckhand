@@ -1,6 +1,6 @@
 package main
 
-// pi-desk's updater (update.odin, update_core.odin, src/updatesig): versions, the
+// Deckhand's updater (update.odin, update_core.odin, src/updatesig): versions, the
 // release JSON, signatures, when to check, where it may install, the unpacked bundle's
 // safety, the saved choices and who may send the commands (`./build.sh test`). No
 // network: the scene tests/scripts/update.sh plays the downloads from local files.
@@ -17,9 +17,9 @@ import sig "updatesig"
 @(private = "file")
 U_UI :: Caller{kind = .UI}
 
-// `odin build` type-checks this file too: a release build (no PI_DESK_UPDATE_TEST) has no test
+// `odin build` type-checks this file too: a release build (no DECKHAND_UPDATE_TEST) has no test
 // key, so these tests see an empty one there (they only run with the define: ./build.sh test).
-when !PI_DESK_UPDATE_TEST {
+when !DECKHAND_UPDATE_TEST {
 	@(private = "file")
 	UPDATE_TEST_PUBLIC_KEY :: ""
 }
@@ -130,7 +130,7 @@ update_release_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
 	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"deckhand-0.1.1-macos-x64.zip","size":5}]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
-	// a pi-desk-named zip (0.1.x's) is not a Deckhand release's
+	// a deckhand-named zip (0.1.x's) is not a Deckhand release's
 	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"pi-desk-0.1.1-macos-arm64.zip","size":5},{"name":"pi-desk-0.1.1-macos-arm64.zip.sig","size":5}]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
 	_, err = release_parse(release_json("v0.1.1", zip_size = (1 << 30) + 1), context.temp_allocator)
@@ -198,6 +198,13 @@ update_signatures :: proc(t: ^testing.T) {
 	testing.expect(t, !sig.verify(UPDATE_PUBLIC_KEY, transmute([]byte)m, s), "the release key never takes the test key's signatures")
 	testing.expect(t, !sig.verify("PLACEHOLDER-x", transmute([]byte)m, s), "a placeholder never verifies")
 	testing.expect(t, sig.is_placeholder(UPDATE_PUBLIC_KEY) || UPDATE_PUBLIC_KEY != UPDATE_TEST_PUBLIC_KEY, "the release key is never the test key")
+	// v3 (0.1.8's format): its own manifest head, so a v2 signature never verifies it
+	m3 := sig.manifest("0.1.1", "deckhand-0.1.1-macos-arm64.zip", 1234, strings.repeat("AB", 32, context.temp_allocator), strings.repeat("cd", 20, context.temp_allocator), context.temp_allocator, .V3)
+	testing.expect(t, m3 != m && strings.has_prefix(m3, "deckhand update v3\n"), m3)
+	testing.expect(t, !sig.verify(UPDATE_TEST_PUBLIC_KEY, transmute([]byte)m3, s), "a v2 signature does not verify a v3 manifest")
+	s3, s3ok := sig.sign(seed, transmute([]byte)m3)
+	testing.expect(t, s3ok && sig.verify(UPDATE_TEST_PUBLIC_KEY, transmute([]byte)m3, s3), "v3 signed and verified")
+	testing.expect(t, !sig.verify(UPDATE_TEST_PUBLIC_KEY, transmute([]byte)m, s3), "nor a v3 one a v2 manifest")
 	_, bad := sig.sign("short", transmute([]byte)m)
 	testing.expect(t, !bad, "a seed must be 32 bytes")
 }
@@ -238,7 +245,7 @@ update_install_decision :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(why, "cannot write to /Applications"), why)
 	_, why = install_decision("/Applications/Deckhand.app/Contents/MacOS/Deckhand", u_writable_parent_only)
 	testing.expect(t, strings.contains(why, "cannot write to /Applications/Deckhand.app"), why)
-	_, why = install_decision("/Volumes/pi-desk/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
+	_, why = install_decision("/Volumes/deckhand/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
 	testing.expect(t, strings.contains(why, "disk image"), why)
 	// a development build: build/Deckhand.app beside build.sh
 	repo := u_tmp("repo")
@@ -268,7 +275,7 @@ update_links_and_names :: proc(t: ^testing.T) {
 	testing.expect_value(t, zip_names_check("/etc/x\n"), "the zip has an absolute path")
 	testing.expect_value(t, zip_names_check("Deckhand.app/\nother.app/x\n"), "the zip holds more than Deckhand.app")
 	testing.expect_value(t, zip_names_check("Deckhand.application/x\n"), "the zip holds more than Deckhand.app")
-	// pi-desk's bundle name (0.1.x releases): not what a Deckhand release holds
+	// Deckhand's bundle name (0.1.x releases): not what a Deckhand release holds
 	testing.expect_value(t, zip_names_check("pi-desk.app/\npi-desk.app/Contents/\n"), "the zip holds more than Deckhand.app")
 	testing.expect_value(t, zip_names_check(""), "the zip is empty")
 }
@@ -357,6 +364,13 @@ update_bundle_check :: proc(t: ^testing.T) {
 	defer {os.remove_all(root2); delete(root2, runtime.heap_allocator())}
 	other := u_bundle(root2, "com.example.other", "0.1.1")
 	testing.expect(t, strings.contains(bundle_check(other, "0.1.1", codesign_cdhash(other)), "not Deckhand"), "another bundle id")
+	// the rename's bridge (0.1.7): 0.1.8's new bundle id is Deckhand too
+	root3 := u_tmp("bundle3")
+	defer {os.remove_all(root3); delete(root3, runtime.heap_allocator())}
+	next := u_bundle(root3, "dev.deckhand.app", "0.1.1")
+	testing.expect_value(t, bundle_check(next, "0.1.1", codesign_cdhash(next)), "")
+	testing.expect(t, update_bundle_id_ok("dev.pi-desk.app") && update_bundle_id_ok("dev.deckhand.app"))
+	for id in ([]string{"", "dev.deckhand.core", "dev.deckhand.app.helper", "DEV.DECKHAND.APP", "dev.pi-desk.app "}) do testing.expectf(t, !update_bundle_id_ok(id), "%q refused", id)
 }
 
 @(test)
@@ -490,10 +504,17 @@ update_sig_file_format :: proc(t: ^testing.T) {
 	CD :: "abababababababababababababababababababab"
 	cd := CD
 	text := sig.sig_file_make(cd, "QUJD", context.temp_allocator)
-	c, b, ok := sig.sig_file_parse(text)
-	testing.expect(t, ok && c == cd && b == "QUJD", text)
-	for bad in ([]string{"", "QUJD\n", "pi-desk-update-sig v2\ncdhash xyz\nsignature QUJD\n", "pi-desk-update-sig v1\ncdhash " + CD + "\nsignature QUJD\n", "pi-desk-update-sig v2\nsignature QUJD\ncdhash " + CD + "\n", "pi-desk-update-sig v2\ncdhash " + CD + "\nsignature QUJD\nextra\n"}) {
-		_, _, bok := sig.sig_file_parse(bad)
+	c, b, f, ok := sig.sig_file_parse(text)
+	testing.expect(t, ok && c == cd && b == "QUJD" && f == .V2, text)
+	// the rename's bridge (0.1.7): v3, the format 0.1.8 is signed with, is read too
+	text3 := sig.sig_file_make(cd, "QUJD", context.temp_allocator, .V3)
+	testing.expect(t, strings.has_prefix(text3, "deckhand-update-sig v3\n"), text3)
+	c, b, f, ok = sig.sig_file_parse(text3)
+	testing.expect(t, ok && c == cd && b == "QUJD" && f == .V3, text3)
+	testing.expect(t, strings.has_prefix(sig.manifest("0.1.8", "deckhand-0.1.8-macos-arm64.zip", 1, CD, CD, context.temp_allocator, .V3), "deckhand update v3\n"))
+	testing.expect(t, strings.has_prefix(sig.manifest("0.1.8", "deckhand-0.1.8-macos-arm64.zip", 1, CD, CD, context.temp_allocator), "pi-desk update v2\n"), "v2 stays the default (0.1.7 is signed v2)")
+	for bad in ([]string{"", "QUJD\n", "pi-desk-update-sig v2\ncdhash xyz\nsignature QUJD\n", "deckhand-update-sig v1\ncdhash " + CD + "\nsignature QUJD\n", "pi-desk-update-sig v2\nsignature QUJD\ncdhash " + CD + "\n", "pi-desk-update-sig v2\ncdhash " + CD + "\nsignature QUJD\nextra\n"}) {
+		_, _, _, bok := sig.sig_file_parse(bad)
 		testing.expectf(t, !bok, "%q refused", bad)
 	}
 }
@@ -533,7 +554,7 @@ update_under_applications :: proc(t: ^testing.T) {
 	defer {os.remove_all(root); delete(root, runtime.heap_allocator())}
 	os.symlink("/Applications", upath(root, "apps"))
 	testing.expect(t, under_applications(upath(root, "apps", "Deckhand.app")), "through a link")
-	when PI_DESK_UPDATE_TEST {
+	when DECKHAND_UPDATE_TEST {
 		upd.test = true
 		testing.expect_value(t, update_key(), UPDATE_TEST_PUBLIC_KEY)
 		upd.test = false

@@ -1,5 +1,5 @@
 #!/bin/sh
-# Stand-in for the harness checklist's install and update commands (PI_DESK_INSTALL_CMD,
+# Stand-in for the harness checklist's install and update commands (DECKHAND_INSTALL_CMD,
 # harness_install.odin): it gets the item's id and the exact command as "$@", records them in
 # $HOME/install-argv.txt and "installs" into the scene's fake HOME (never a real install).
 # FAKE_INSTALL_SLOW=N waits N seconds first (a run that is still going).

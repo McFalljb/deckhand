@@ -15,7 +15,7 @@ package main
 //   - Focusing a session while the window is active marks its entries read
 //     (focus_session, and the window coming to the front).
 //   - Per-group toggles (Settings.bell_off) and OS notifications while
-//     pi-desk is in the background for the kinds that need the user
+//     Deckhand is in the background for the kinds that need the user
 //     (waiting, errors, exits, jobs that need you or failed;
 //     Settings.bell_os_off). Finished runs only go to the bell.
 //   - Not saved: entries are gone after a restart (their session ids would
@@ -63,7 +63,7 @@ notice_group :: proc(k: Notice_Kind) -> Bell_Group {
 	return .Finished
 }
 
-// The kinds that also raise an OS notification while pi-desk is in the
+// The kinds that also raise an OS notification while Deckhand is in the
 // background (unless bell_os_off).
 NOTICE_OS_KINDS :: bit_set[Notice_Kind]{.Waiting, .Error, .Exited, .Job_Needs_You, .Job_Failed}
 
@@ -124,7 +124,7 @@ Job_Finished :: struct {
 }
 
 // Any thread: posts a job's result to the bell (through the inbox, as
-// pi-desk itself).
+// Deckhand itself).
 notify_job_finished :: proc(ev: Job_Finished) {
 	inbox_submit(Notify_Post{job = ev}, {kind = .Internal})
 }
@@ -261,7 +261,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 	return notice_post(n)
 }
 
-// An entry for something pi-desk could not do for the user (no session,
+// An entry for something Deckhand could not do for the user (no session,
 // no job): what, and why. In the bell whatever the groups: it answers the
 // user's own action (Send to Atlas: the only word of where the text went);
 // a macOS notification only while Errors is on.

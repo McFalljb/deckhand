@@ -6,7 +6,7 @@
 # Usage: scripts/publish-fresh-history.sh COMMIT DEST [MESSAGE]
 #   COMMIT   the commit to publish (e.g. main)
 #   DEST     a directory that does not exist yet (the new repository)
-#   MESSAGE  the commit message (default: "pi-desk: first public version")
+#   MESSAGE  the commit message (default: "Deckhand: first public version")
 #
 # git archive leaves submodules out (a gitlink is not a file), so each one is cloned from
 # its .gitmodules URL with `git submodule add` and checked out at the commit COMMIT pins.
@@ -20,7 +20,7 @@ REPO="McFalljb/deckhand"
 SRC=$(cd "$(dirname "$0")/.." && pwd)
 COMMIT=$(git -C "$SRC" rev-parse --verify "$1^{commit}")
 DEST=$2
-MESSAGE=${3:-"pi-desk: first public version"}
+MESSAGE=${3:-"Deckhand: first public version"}
 [ ! -e "$DEST" ] || { echo "publish: $DEST exists; give a new directory" >&2; exit 1; }
 TREE=$(git -C "$SRC" rev-parse "$COMMIT^{tree}")
 echo "publish: $COMMIT (tree $TREE) -> $DEST"

@@ -94,7 +94,7 @@ key escape
 wait 800
 paste pwd\n
 waitfor proj/src 5000
-# a file made outside pi-desk shows up (the watcher); src stays open
+# a file made outside Deckhand shows up (the watcher); src stays open
 paste touch external.c\n
 wait 1500
 assert_files   external.c\n

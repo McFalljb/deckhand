@@ -18,7 +18,7 @@ assert_state current_session $session
 command {"type":"new_shell_tab","session":$session}
 wait 800
 command {"type":"send_text","tab_id":$last,"text":"python3 $homedir/fake-7501.py\n"}
-# the handshake: pi-desk answers OSC 7501 ; ? with what it accepts
+# the handshake: Deckhand answers OSC 7501 ; ? with what it accepts
 waitfor HANDSHAKE-OK 10000
 assert_screen ?:states=idle,working,done,blocked,error:kinds=permission,question,auth
 assert_state open_sessions.0.tabs.1.agent_status.dot none

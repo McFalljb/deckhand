@@ -1,4 +1,4 @@
-# No AppKit beeps for keys pi-desk handles (run with tests/scripts/polish.sh
+# No AppKit beeps for keys Deckhand handles (run with tests/scripts/polish.sh
 # tests/scripts/beep.txt). Real NSEvents built in-process go through
 # keyDown:/keyUp: (the input system included); beeps are counted, not sounded.
 wait 1000

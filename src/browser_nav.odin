@@ -60,8 +60,8 @@ BROWSER_BLANK :: "about:blank"
 
 // ---- URL normalising (the URL field and browser_open/browser_navigate) ----
 
-// What the URL field's text becomes: a URL with a scheme pi-desk opens
-// (http, https, file, about, pidesk-test: test fixtures) as is; a bare host
+// What the URL field's text becomes: a URL with a scheme Deckhand opens
+// (http, https, file, about, deckhand-test: test fixtures) as is; a bare host
 // ("example.com", "example.com/path", "host:8080") gets https://, a local one
 // (localhost, 127.x, [::1]) http://. Anything else (words, spaces) is not a
 // web address: search is not built in yet (BROWSER.md §2.2). Pure.
@@ -74,7 +74,7 @@ browser_url_normalize :: proc(text: string, allocator := context.temp_allocator)
 	if i := strings.index(lower, "://"); i > 0 {
 		scheme := lower[:i]
 		switch scheme {
-		case "http", "https", "file", "pidesk-test":
+		case "http", "https", "file", "deckhand-test":
 			if len(t) == i + 3 do return "", "the address has nothing after ://"
 			return strings.clone(t, allocator), ""
 		}
@@ -251,14 +251,14 @@ browser_nav_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 			if !browser_reopen(b, bt.url) do return fail("the page is not loaded"), false
 			return {ok = true}, true
 		}
-		pd_cef_history(b.cef, CEF_RELOAD)
+		dh_cef_history(b.cef, CEF_RELOAD)
 		return {ok = true}, false
 	case Browser_Stop:
 		_, _, bt, err := browser_target(caller, c.tab_id)
 		if bt == nil do return fail(err), false
 		b := browser_of(c.tab_id)
 		if b == nil || b.cef == 0 do return fail("the page is not loaded"), false
-		pd_cef_history(b.cef, CEF_STOP)
+		dh_cef_history(b.cef, CEF_STOP)
 		return {ok = true}, false
 	case Browser_Update:
 		_, tab, _ := find_tab(c.tab_id)
@@ -296,7 +296,7 @@ browser_step :: proc(caller: Caller, tab_id: u64, back: bool) -> Result {
 	if b == nil || b.cef == 0 do return fail("the page is not loaded")
 	if back && !bt.can_back do return fail("nothing to go back to")
 	if !back && !bt.can_forward do return fail("nothing to go forward to")
-	pd_cef_history(b.cef, back ? CEF_BACK : CEF_FORWARD)
+	dh_cef_history(b.cef, back ? CEF_BACK : CEF_FORWARD)
 	return {ok = true}
 }
 

@@ -2,16 +2,16 @@ package main
 
 // A tiny control-socket client for testing and scripts:
 //
-//   pi-desk --ctl [--wait MS] JSON...
+//   Deckhand --ctl [--wait MS] JSON...
 //
-// Connects to $PI_DESK_SOCKET, says hello with $PI_DESK_TOKEN, then sends
+// Connects to $DECKHAND_SOCKET, says hello with $DECKHAND_TOKEN, then sends
 // each JSON argument in order and prints every line it receives. A plain
 // command object ({"type":"get_state"}) is wrapped in a command envelope; an
 // object with "v" is sent as it is (e.g. {"id":"s","v":1,"type":"subscribe"}
 // or a fake bridge's {"id":"b","v":1,"type":"pi.status",...}). It waits for
 // each request's reply (and for `finished` when the reply is pending), then
 // keeps printing incoming lines for --wait MS. Exit status 1 if a reply had
-// "ok": false. Get a token with `pi-desk --print-token script DIR`.
+// "ok": false. Get a token with `deckhand --print-token script DIR`.
 
 import "core:encoding/json"
 import jg "jsonguard"
@@ -22,10 +22,15 @@ import "core:strings"
 import "core:time"
 
 ctl_main :: proc(args: []string) -> int {
-	path := os.get_env("PI_DESK_SOCKET", context.allocator)
-	token := os.get_env("PI_DESK_TOKEN", context.allocator)
+	path := os.get_env("DECKHAND_SOCKET", context.allocator)
+	token := os.get_env("DECKHAND_TOKEN", context.allocator)
+	if path == "" && token == "" {
+		// the old names, as a pair (a control token copied before 0.1.7, a held session's env)
+		path = os.get_env("PI_DESK_SOCKET", context.allocator)
+		token = os.get_env("PI_DESK_TOKEN", context.allocator)
+	}
 	if path == "" || token == "" {
-		fmt.eprintln("deckhand --ctl: PI_DESK_SOCKET and PI_DESK_TOKEN must be set (Settings › Copy a control token gives both)")
+		fmt.eprintln("deckhand --ctl: DECKHAND_SOCKET and DECKHAND_TOKEN must be set (Settings › Copy a control token gives both)")
 		return 2
 	}
 	rest := args

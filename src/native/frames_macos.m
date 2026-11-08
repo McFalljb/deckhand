@@ -1,15 +1,15 @@
-// The frame channel between pi-desk and an app tab's process (docs/ENGINE-BRIDGE.md §2):
-// a ring of IOSurfaces pi-desk owns, moved to the app over plain Mach messages
+// The frame channel between Deckhand and an app tab's process (docs/ENGINE-BRIDGE.md §2):
+// a ring of IOSurfaces Deckhand owns, moved to the app over plain Mach messages
 // found through a per-process bootstrap name. Plain C; ObjC only for Metal.
 //
 // Two halves in one file:
-//  - serve (pi-desk, src/frames.odin): one checked-in receive port shared by
+//  - serve (Deckhand, src/frames.odin): one checked-in receive port shared by
 //    every app tab, drained on a serial background queue that only records
 //    what arrived (the frame loop never waits on it); rings, RELEASE after
-//    pi-desk's own GPU frame that last sampled a slot has completed.
-//    A local channel (browser tabs: CEF paints in pi-desk's own process) is
+//    Deckhand's own GPU frame that last sampled a slot has completed.
+//    A local channel (browser tabs: CEF paints in Deckhand's own process) is
 //    the same ring with no Mach peer: the producer takes a free slot
-//    (pd_frames_local_acquire), FRAME is a call (pd_frames_local_frame) and
+//    (dh_frames_local_acquire), FRAME is a call (dh_frames_local_frame) and
 //    RELEASE marks the slot free again, at the same moments as for an app.
 //  - connect (the app: tests/fake-app, later a real engine): bootstrap_look_up, HELLO,
 //    RING -> wrapped MTLTextures, FRAME from an empty command buffer's
@@ -18,7 +18,7 @@
 // Messages: fixed little-endian structs after the Mach header; msgh_id picks
 // the type. Only FRAME may be dropped (sent with a 0 timeout); HELLO and
 // RING_DONE are sent with no timeout; RING and RELEASE with 250 ms from
-// pi-desk's Mach queue (a timeout marks the app stalled; never retried).
+// Deckhand's Mach queue (a timeout marks the app stalled; never retried).
 
 #import <Foundation/Foundation.h>
 #import <Metal/Metal.h>
@@ -86,7 +86,7 @@ static void pdf_fill(mach_msg_header_t* h, uint32_t size, mach_port_t remote, in
 // ---- pure rules (unit-tested from src/frames_test.odin) ----
 
 // Constant-time compare of two 32-byte keys: 1 when equal.
-int pd_frames_key_equal(const uint8_t* a, const uint8_t* b) {
+int dh_frames_key_equal(const uint8_t* a, const uint8_t* b) {
     uint8_t d = 0;
     for (int i = 0; i < 32; i++) d |= a[i] ^ b[i];
     return d == 0;
@@ -94,7 +94,7 @@ int pd_frames_key_equal(const uint8_t* a, const uint8_t* b) {
 
 // The sender's pid may send for a tab whose process group is pgid and
 // session sid when it is in that group or that session.
-int pd_frames_sender_in(int sender_pgid, int sender_sid, int pgid, int sid) {
+int dh_frames_sender_in(int sender_pgid, int sender_sid, int pgid, int sid) {
     if (sender_pgid <= 0 && sender_sid <= 0) return 0;
     return (pgid > 0 && sender_pgid == pgid) || (sid > 0 && sender_sid == sid);
 }
@@ -103,7 +103,7 @@ int pd_frames_sender_in(int sender_pgid, int sender_sid, int pgid, int sid) {
 // app must use now; has_latest/latest_slot: an unshown frame already waiting.
 // Returns 0 = drop (stale gen or bad slot), 1 = take it, 2 = take it and
 // release *release_slot (the older unshown latest, replaced).
-int pd_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, uint32_t gen, uint32_t slot, uint32_t* release_slot) {
+int dh_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, uint32_t gen, uint32_t slot, uint32_t* release_slot) {
     if (gen != cur_gen || cur_gen == 0 || slot >= PDF_SLOTS) return 0;
     if (has_latest && latest_slot != slot) {
         *release_slot = latest_slot;
@@ -114,7 +114,7 @@ int pd_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, u
 
 // Message encodings, for the tests: fills buf (at least 128 bytes) and
 // returns the message size.
-int pd_frames_encode(int id, uint32_t a, uint32_t b, uint64_t c, uint64_t d, uint8_t* buf) {
+int dh_frames_encode(int id, uint32_t a, uint32_t b, uint64_t c, uint64_t d, uint8_t* buf) {
     switch (id) {
     case PDF_FRAME: {
         pdf_frame* m = (pdf_frame*)buf;
@@ -146,7 +146,7 @@ int pd_frames_encode(int id, uint32_t a, uint32_t b, uint64_t c, uint64_t d, uin
 }
 
 // ======================================================================
-// serve half (pi-desk)
+// serve half (Deckhand)
 // ======================================================================
 
 #define PDF_CHANS 64
@@ -166,7 +166,7 @@ typedef struct {
 enum {
     PDF_SLOT_FREE = 0, // the producer may write it
     PDF_SLOT_WRITING = 1, // acquired, its FRAME not given yet
-    PDF_SLOT_PIDESK = 2, // FRAME given: pi-desk's until RELEASE
+    PDF_SLOT_DECKHAND = 2, // FRAME given: Deckhand's until RELEASE
 };
 
 enum {
@@ -194,7 +194,7 @@ typedef struct {
     uint64_t latest_seq, latest_tick;
     double latest_t; // received (ms)
     uint64_t rx, replaced, stale, rejected;
-    double lat[PDF_LAT_N]; // received -> pi-desk's GPU frame that drew it completed (ms)
+    double lat[PDF_LAT_N]; // received -> Deckhand's GPU frame that drew it completed (ms)
     int lat_n;
     uint64_t reclaimed; // local: an unshown frame's slot written again (its frame replaced)
     uint32_t latest_cw, latest_ch; // local: the latest frame's content size (px, from the slot's top-left)
@@ -223,7 +223,7 @@ typedef struct { uint64_t tab_id; double t; } pdf_shown;
 static pdf_shown g_shown[64];
 static int g_shown_n;
 
-// Test mode (pd_frames_test_track): every texture a GPU frame not completed
+// Test mode (dh_frames_test_track): every texture a GPU frame not completed
 // yet samples, counted per frame that drew it; a producer handed one of them
 // is a write into a texture the GPU may still read (g_inflight_writes).
 // lag_ms holds back the completed handler's work (as a slow GPU would),
@@ -273,7 +273,7 @@ static pdf_ring_store* ring_of(pdf_chan* c, uint32_t gen) {
 static void local_release(pdf_chan* c, uint32_t gen, uint32_t slot) {
     os_unfair_lock_lock(&g_lock);
     pdf_ring_store* r = slot < PDF_SLOTS ? ring_of(c, gen) : NULL;
-    if (r && r->state[slot] == PDF_SLOT_PIDESK) r->state[slot] = PDF_SLOT_FREE;
+    if (r && r->state[slot] == PDF_SLOT_DECKHAND) r->state[slot] = PDF_SLOT_FREE;
     os_unfair_lock_unlock(&g_lock);
 }
 
@@ -312,7 +312,7 @@ static void q_hello(pdf_hello* m, mach_msg_audit_trailer_t* t) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(m->tab_id);
     if (c && c->local) c = NULL; // never an app's
-    int ok = c && c->accepting && pd_frames_key_equal(c->key, m->key) && pd_frames_sender_in(spg, ssid, c->pgid, c->sid) && reply != MACH_PORT_NULL;
+    int ok = c && c->accepting && dh_frames_key_equal(c->key, m->key) && dh_frames_sender_in(spg, ssid, c->pgid, c->sid) && reply != MACH_PORT_NULL;
     uint32_t epoch = c ? c->epoch : 0; // the epoch this HELLO was accepted in (a stop may bump it after the unlock)
     if (c && !ok) {
         c->rejected++;
@@ -360,9 +360,9 @@ static void q_frame(pdf_frame* m, mach_msg_audit_trailer_t* t) {
     os_unfair_lock_unlock(&g_lock);
     if (!c) return; // stale gen: dropped, never answered
     pid_t pid = audit_token_to_pid(t->msgh_audit);
-    if (pid <= 0 || !pd_frames_sender_in(getpgid(pid), getsid(pid), pgid, sid)) return;
+    if (pid <= 0 || !dh_frames_sender_in(getpgid(pid), getsid(pid), pgid, sid)) return;
     os_unfair_lock_lock(&g_lock);
-    action = c->cur_gen == m->gen ? pd_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, m->gen, m->slot, &rel) : 0;
+    action = c->cur_gen == m->gen ? dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, m->gen, m->slot, &rel) : 0;
     if (action == 0) c->stale++;
     else {
         if (action == 2) c->replaced++;
@@ -385,7 +385,7 @@ static void q_ring_done(pdf_ring_done* m, mach_msg_audit_trailer_t* t) {
     os_unfair_lock_lock(&g_lock);
     for (int i = 0; i < PDF_CHANS; i++) {
         pdf_chan* c = &g_chans[i];
-        if (!c->used || !pd_frames_sender_in(spg, ssid, c->pgid, c->sid)) continue;
+        if (!c->used || !dh_frames_sender_in(spg, ssid, c->pgid, c->sid)) continue;
         if (m->gen != c->cur_gen && m->gen > c->done_gen && m->gen < c->cur_gen) c->done_gen = m->gen;
     }
     os_unfair_lock_unlock(&g_lock);
@@ -436,13 +436,13 @@ static void q_drain(void) {
     }
 }
 
-// Checks in "dev.pi-desk.frames.<pid>" once per process and starts the queue.
+// Checks in "dev.deckhand.frames.<pid>" once per process and starts the queue.
 // mtl_device: sokol's MTLDevice (the app must render on the same GPU).
-int pd_frames_serve_start(void* mtl_device) {
+int dh_frames_serve_start(void* mtl_device) {
     if (g_started) return g_started > 0;
     g_started = -1;
     g_device = (__bridge id<MTLDevice>)mtl_device;
-    snprintf(g_service, sizeof g_service, "dev.pi-desk.frames.%d", getpid());
+    snprintf(g_service, sizeof g_service, "dev.deckhand.frames.%d", getpid());
     kern_return_t kr = bootstrap_check_in(bootstrap_port, g_service, &g_port);
     if (kr != KERN_SUCCESS) {
         fprintf(stderr, "Deckhand: frames: bootstrap_check_in(%s) = %d (%s)\n", g_service, kr, bootstrap_strerror(kr));
@@ -451,7 +451,7 @@ int pd_frames_serve_start(void* mtl_device) {
     mach_port_limits_t lim = {.mpl_qlimit = PDF_QLIMIT_SERVE};
     kr = mach_port_set_attributes(mach_task_self(), g_port, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&lim, MACH_PORT_LIMITS_INFO_COUNT);
     if (kr != KERN_SUCCESS) fprintf(stderr, "Deckhand: frames: queue limit not raised (%d)\n", kr);
-    if (!g_q) g_q = dispatch_queue_create("dev.pi-desk.frames", DISPATCH_QUEUE_SERIAL);
+    if (!g_q) g_q = dispatch_queue_create("dev.deckhand.frames", DISPATCH_QUEUE_SERIAL);
     g_src = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, g_port, 0, g_q);
     dispatch_source_set_event_handler(g_src, ^{ q_drain(); });
     dispatch_resume(g_src);
@@ -459,9 +459,9 @@ int pd_frames_serve_start(void* mtl_device) {
     return 1;
 }
 
-const char* pd_frames_service(void) { return g_service; }
-uint64_t pd_frames_device_id(void) { return g_device ? g_device.registryID : 0; }
-int pd_frames_qlimit(void) {
+const char* dh_frames_service(void) { return g_service; }
+uint64_t dh_frames_device_id(void) { return g_device ? g_device.registryID : 0; }
+int dh_frames_qlimit(void) {
     mach_port_limits_t lim = {0};
     mach_msg_type_number_t n = MACH_PORT_LIMITS_INFO_COUNT;
     if (mach_port_get_attributes(mach_task_self(), g_port, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&lim, &n) != KERN_SUCCESS) return -1;
@@ -469,12 +469,12 @@ int pd_frames_qlimit(void) {
 }
 
 // Something arrived since the last call (any thread set it; the frame loop reads it).
-int pd_frames_take_wake(void) { return atomic_exchange(&g_wake, 0); }
+int dh_frames_take_wake(void) { return atomic_exchange(&g_wake, 0); }
 
 // A channel for a tab (new, or reset for a restarted process): HELLO is
 // accepted once, from pgid's group or sid's session, with key. Rings stay
 // (the last frame shows until the new process draws).
-int pd_frames_chan_open(uint64_t tab_id, const uint8_t* key, int pgid, int sid) {
+int dh_frames_chan_open(uint64_t tab_id, const uint8_t* key, int pgid, int sid) {
     if (!g_started) return 0;
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
@@ -500,7 +500,7 @@ int pd_frames_chan_open(uint64_t tab_id, const uint8_t* key, int pgid, int sid) 
 
 // The process the channel belongs to, once spawned (HELLO, FRAME and
 // RING_DONE must come from its group or session; 0 matches nothing).
-void pd_frames_chan_set_proc(uint64_t tab_id, int pgid, int sid) {
+void dh_frames_chan_set_proc(uint64_t tab_id, int pgid, int sid) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     if (c) {
@@ -511,7 +511,7 @@ void pd_frames_chan_set_proc(uint64_t tab_id, int pgid, int sid) {
 }
 
 // The key of a tab's channel (for the hello reply; any thread). 1 if found.
-int pd_frames_chan_key(uint64_t tab_id, uint8_t* out) {
+int dh_frames_chan_key(uint64_t tab_id, uint8_t* out) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     if (c) memcpy(out, c->key, 32);
@@ -521,7 +521,7 @@ int pd_frames_chan_key(uint64_t tab_id, uint8_t* out) {
 
 // The app is gone (exited, or the tab closes): no more HELLO, its send right
 // is dropped, nothing more is sent. Rings stay until freed.
-void pd_frames_chan_stop(uint64_t tab_id) {
+void dh_frames_chan_stop(uint64_t tab_id) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     if (c) {
@@ -557,7 +557,7 @@ static void ring_store_free(pdf_ring_store* r, int keep_slot) {
 // Frees a ring's surfaces (main thread): all, or all but keep_slot (the
 // dimmed last frame of an app that died). Callers have destroyed their
 // sokol images of it first.
-void pd_frames_ring_free(uint64_t tab_id, uint32_t gen, int keep_slot) {
+void dh_frames_ring_free(uint64_t tab_id, uint32_t gen, int keep_slot) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c) return;
     for (int r = 0; r < PDF_RINGS; r++) if (c->rings[r].gen == gen) ring_store_free(&c->rings[r], keep_slot);
@@ -566,7 +566,7 @@ void pd_frames_ring_free(uint64_t tab_id, uint32_t gen, int keep_slot) {
 // The tab is closed: everything goes (main thread). The send right goes on
 // the Mach queue, keyed to the close itself (not to `used`, which is 0 by
 // then); the slot is reused only after that.
-void pd_frames_chan_close(uint64_t tab_id) {
+void dh_frames_chan_close(uint64_t tab_id) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c) return;
     for (int r = 0; r < PDF_RINGS; r++) ring_store_free(&c->rings[r], -1);
@@ -603,9 +603,9 @@ static IOSurfaceRef make_surface(int w, int h) {
 }
 
 // A new ring (gen+1) of 3 BGRA8 surfaces, w x h px, wrapped as textures
-// pi-desk samples; RING goes to the app from the Mach queue. Main thread.
+// Deckhand samples; RING goes to the app from the Mach queue. Main thread.
 // Returns the new gen (0 = failed: no channel, no room, no surfaces).
-uint32_t pd_frames_ring_new(uint64_t tab_id, int w, int h, float scale) {
+uint32_t dh_frames_ring_new(uint64_t tab_id, int w, int h, float scale) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c || w <= 0 || h <= 0 || !g_device) return 0;
     pdf_ring_store* slot = NULL;
@@ -672,7 +672,7 @@ uint32_t pd_frames_ring_new(uint64_t tab_id, int w, int h, float scale) {
 }
 
 // The texture of a ring slot (an unretained id<MTLTexture>) for sokol, or NULL.
-void* pd_frames_slot_texture(uint64_t tab_id, uint32_t gen, int slot) {
+void* dh_frames_slot_texture(uint64_t tab_id, uint32_t gen, int slot) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c || slot < 0 || slot >= PDF_SLOTS) return NULL;
     for (int r = 0; r < PDF_RINGS; r++) if (c->rings[r].gen == gen) return c->rings[r].tex[slot];
@@ -689,9 +689,9 @@ typedef struct {
     uint32_t cur_gen, done_gen;
     uint64_t rx, replaced, stale, rejected;
     uint32_t content_w, content_h; // local channels: the frame's size in the slot (px)
-} pd_frames_poll_t;
+} dh_frames_poll_t;
 
-int pd_frames_poll(uint64_t tab_id, pd_frames_poll_t* out) {
+int dh_frames_poll(uint64_t tab_id, dh_frames_poll_t* out) {
     memset(out, 0, sizeof *out);
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
@@ -720,8 +720,8 @@ int pd_frames_poll(uint64_t tab_id, pd_frames_poll_t* out) {
     return c != NULL;
 }
 
-// A slot pi-desk took but never drew (its tab is hidden): back at once.
-void pd_frames_release_now(uint64_t tab_id, uint32_t gen, uint32_t slot) {
+// A slot Deckhand took but never drew (its tab is hidden): back at once.
+void dh_frames_release_now(uint64_t tab_id, uint32_t gen, uint32_t slot) {
     if (!g_q) return;
     dispatch_async(g_q, ^{
         os_unfair_lock_lock(&g_lock);
@@ -734,12 +734,12 @@ void pd_frames_release_now(uint64_t tab_id, uint32_t gen, uint32_t slot) {
 
 // The frame being drawn no longer samples this slot (a newer frame replaced
 // it): it goes back after this frame's GPU work completes.
-void pd_frames_retire(uint64_t tab_id, uint32_t gen, uint32_t slot) {
+void dh_frames_retire(uint64_t tab_id, uint32_t gen, uint32_t slot) {
     if (g_retired_n < (int)(sizeof g_retired / sizeof g_retired[0])) g_retired[g_retired_n++] = (pdf_retired){tab_id, gen, slot};
 }
 
 // The frame being drawn shows a new frame received at recv_ms (latency).
-void pd_frames_shown(uint64_t tab_id, double recv_ms) {
+void dh_frames_shown(uint64_t tab_id, double recv_ms) {
     if (g_shown_n < (int)(sizeof g_shown / sizeof g_shown[0])) g_shown[g_shown_n++] = (pdf_shown){tab_id, recv_ms};
 }
 
@@ -761,17 +761,17 @@ static int inflight_has(void* t) { // under g_lock
     return 0;
 }
 
-void pd_frames_test_track(int on, int lag_ms) {
+void dh_frames_test_track(int on, int lag_ms) {
     g_track = on;
     g_lag_ms = lag_ms > 0 ? lag_ms : 0;
 }
 
 // The frame being built samples this slot texture (test mode; main thread).
-void pd_frames_sampled(void* tex) {
+void dh_frames_sampled(void* tex) {
     if (g_track && tex && g_sampled_n < 64) g_sampled[g_sampled_n++] = tex;
 }
 
-uint64_t pd_frames_inflight_writes(void) {
+uint64_t dh_frames_inflight_writes(void) {
     os_unfair_lock_lock(&g_lock);
     uint64_t n = g_inflight_writes;
     os_unfair_lock_unlock(&g_lock);
@@ -782,7 +782,7 @@ uint64_t pd_frames_inflight_writes(void) {
 // command buffer on sokol's queue; its completed handler fires after this
 // frame's work on that queue (empirically ordered: ENGINE-BRIDGE §2.3) and
 // posts the RELEASEs to the Mach queue.
-void pd_frames_committed(void* mtl_queue) {
+void dh_frames_committed(void* mtl_queue) {
     if ((g_retired_n == 0 && g_shown_n == 0 && g_sampled_n == 0) || !mtl_queue || !g_q) {
         g_sampled_n = 0;
         return;
@@ -832,7 +832,7 @@ void pd_frames_committed(void* mtl_queue) {
 }
 
 // Latency samples (ms, oldest first is not kept): copies up to cap, returns the count.
-int pd_frames_latency(uint64_t tab_id, double* out, int cap) {
+int dh_frames_latency(uint64_t tab_id, double* out, int cap) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     int n = 0;
@@ -846,8 +846,8 @@ int pd_frames_latency(uint64_t tab_id, double* out, int cap) {
 }
 
 // One pixel of a ring slot at framebuffer px (x, y), as 0xRRGGBB (tests,
-// later tab.capture). Safe while pi-desk holds the slot. 1 if read.
-int pd_frames_pixel(uint64_t tab_id, uint32_t gen, int slot, int x, int y, uint32_t* rgb) {
+// later tab.capture). Safe while Deckhand holds the slot. 1 if read.
+int dh_frames_pixel(uint64_t tab_id, uint32_t gen, int slot, int x, int y, uint32_t* rgb) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c || slot < 0 || slot >= PDF_SLOTS) return 0;
     for (int r = 0; r < PDF_RINGS; r++) {
@@ -865,9 +865,9 @@ int pd_frames_pixel(uint64_t tab_id, uint32_t gen, int slot, int x, int y, uint3
 }
 
 // A rect of a ring slot (framebuffer px, inside the surface) into dst as
-// BGRA rows of w*4 bytes (app_screenshot). Main thread; safe while pi-desk
+// BGRA rows of w*4 bytes (app_screenshot). Main thread; safe while Deckhand
 // holds the slot (the shown one, until a newer frame replaces it). 1 if read.
-int pd_frames_read(uint64_t tab_id, uint32_t gen, int slot, int x, int y, int w, int h, uint8_t* dst) {
+int dh_frames_read(uint64_t tab_id, uint32_t gen, int slot, int x, int y, int w, int h, uint8_t* dst) {
     pdf_chan* c = chan_by_tab(tab_id);
     if (!c || slot < 0 || slot >= PDF_SLOTS || w <= 0 || h <= 0 || x < 0 || y < 0) return 0;
     for (int r = 0; r < PDF_RINGS; r++) {
@@ -886,7 +886,7 @@ int pd_frames_read(uint64_t tab_id, uint32_t gen, int slot, int x, int y, int w,
 }
 
 // Surfaces alive for a tab (tests: old rings are freed).
-int pd_frames_surface_count(uint64_t tab_id) {
+int dh_frames_surface_count(uint64_t tab_id) {
     pdf_chan* c = chan_by_tab(tab_id);
     int n = 0;
     if (c) for (int r = 0; r < PDF_RINGS; r++) for (int s = 0; s < PDF_SLOTS; s++) n += c->rings[r].surf[s] != NULL;
@@ -905,13 +905,13 @@ static int surface_total(int local) {
 }
 
 // Surfaces alive in every app channel (tests: all freed once the app tabs closed).
-int pd_frames_surface_total(void) { return surface_total(0); }
+int dh_frames_surface_total(void) { return surface_total(0); }
 
 // Surfaces alive in every local channel (tests: all freed once the browser tabs closed).
-int pd_frames_surface_total_local(void) { return surface_total(1); }
+int dh_frames_surface_total_local(void) { return surface_total(1); }
 
 // Bytes of a tab's surfaces (IOSurface allocations; stats).
-uint64_t pd_frames_surface_bytes(uint64_t tab_id) {
+uint64_t dh_frames_surface_bytes(uint64_t tab_id) {
     pdf_chan* c = chan_by_tab(tab_id);
     uint64_t n = 0;
     if (c) for (int r = 0; r < PDF_RINGS; r++) for (int s = 0; s < PDF_SLOTS; s++) if (c->rings[r].surf[s]) n += IOSurfaceGetAllocSize(c->rings[r].surf[s]);
@@ -920,7 +920,7 @@ uint64_t pd_frames_surface_bytes(uint64_t tab_id) {
 
 // Send rights to apps the Mach queue still holds, in any channel slot, used
 // or not (tests: none once the app tabs closed).
-int pd_frames_peers(void) {
+int dh_frames_peers(void) {
     if (!g_q) return 0;
     __block int n = 0;
     dispatch_sync(g_q, ^{
@@ -933,9 +933,9 @@ int pd_frames_peers(void) {
 
 // A local channel for a tab (main thread): rings as for an app, the producer
 // is this process. mtl_device: sokol's. 1 = open.
-int pd_frames_local_open(uint64_t tab_id, void* mtl_device) {
+int dh_frames_local_open(uint64_t tab_id, void* mtl_device) {
     if (!g_device) g_device = (__bridge id<MTLDevice>)mtl_device;
-    if (!g_q) g_q = dispatch_queue_create("dev.pi-desk.frames", DISPATCH_QUEUE_SERIAL);
+    if (!g_q) g_q = dispatch_queue_create("dev.deckhand.frames", DISPATCH_QUEUE_SERIAL);
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     if (c && !c->local) c = NULL; // an app's tab id: never
@@ -952,13 +952,13 @@ int pd_frames_local_open(uint64_t tab_id, void* mtl_device) {
 
 // The producer wants a slot of the current ring to write a w x h px frame
 // into, at its top-left (the ring may be larger: headroom). Main thread. 1: *gen, *slot, *texture (id<MTLTexture>, borrowed) and
-// *surface (borrowed) are its, until pd_frames_local_frame or _unacquire.
-// A free slot first; else the slot of a frame pi-desk has not taken yet
+// *surface (borrowed) are its, until dh_frames_local_frame or _unacquire.
+// A free slot first; else the slot of a frame Deckhand has not taken yet
 // (never drawn: its frame is dropped for this one). 0: no ring of that size
-// (or larger: make one with pd_frames_ring_new, then ask again). -1: every slot is
-// pi-desk's (on screen, or drawn by a frame whose GPU work runs): drop the
+// (or larger: make one with dh_frames_ring_new, then ask again). -1: every slot is
+// Deckhand's (on screen, or drawn by a frame whose GPU work runs): drop the
 // frame. -2: no such local channel.
-int pd_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* slot, void** texture, IOSurfaceRef* surface) {
+int dh_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* slot, void** texture, IOSurfaceRef* surface) {
     int ret = -2;
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
@@ -968,7 +968,7 @@ int pd_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* s
         if (r && w <= r->w && h <= r->h && r->surf[0]) {
             int got = -1;
             for (int s = 0; s < PDF_SLOTS && got < 0; s++) if (r->state[s] == PDF_SLOT_FREE) got = s;
-            if (got < 0 && c->has_latest && c->latest_gen == r->gen && r->state[c->latest_slot] == PDF_SLOT_PIDESK) {
+            if (got < 0 && c->has_latest && c->latest_gen == r->gen && r->state[c->latest_slot] == PDF_SLOT_DECKHAND) {
                 got = (int)c->latest_slot;
                 c->has_latest = 0;
                 c->reclaimed++;
@@ -990,7 +990,7 @@ int pd_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* s
 }
 
 // The producer could not write the slot it acquired: it is free again.
-void pd_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot) {
+void dh_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     pdf_ring_store* r = c && c->local && slot >= 0 && slot < PDF_SLOTS ? ring_of(c, gen) : NULL;
@@ -999,26 +999,26 @@ void pd_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot) {
 }
 
 // FRAME, in process: the slot holds a finished w x h px frame at its
-// top-left (its GPU writes have completed). It is pi-desk's now; the frame loop takes it at its next poll.
+// top-left (its GPU writes have completed). It is Deckhand's now; the frame loop takes it at its next poll.
 // An older frame waiting unshown is replaced and its slot freed at once (it
 // was never drawn). 1 = taken.
-int pd_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq, int w, int h) {
+int dh_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq, int w, int h) {
     int action = 0;
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     pdf_ring_store* r = c && c->local && slot >= 0 && slot < PDF_SLOTS ? ring_of(c, gen) : NULL;
     if (r && r->state[slot] == PDF_SLOT_WRITING) {
         uint32_t rel = 0;
-        action = pd_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, gen, (uint32_t)slot, &rel);
+        action = dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, gen, (uint32_t)slot, &rel);
         if (action == 0) {
             c->stale++;
             r->state[slot] = PDF_SLOT_FREE;
         } else {
             if (action == 2) {
                 c->replaced++;
-                if (r->state[rel] == PDF_SLOT_PIDESK) r->state[rel] = PDF_SLOT_FREE;
+                if (r->state[rel] == PDF_SLOT_DECKHAND) r->state[rel] = PDF_SLOT_FREE;
             }
-            r->state[slot] = PDF_SLOT_PIDESK;
+            r->state[slot] = PDF_SLOT_DECKHAND;
             c->rx++;
             c->has_latest = 1;
             c->latest_gen = gen;
@@ -1036,7 +1036,7 @@ int pd_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq,
 }
 
 // A local slot's state (PDF_SLOT_*; -1: no such slot). Tests.
-int pd_frames_local_slot_state(uint64_t tab_id, uint32_t gen, int slot) {
+int dh_frames_local_slot_state(uint64_t tab_id, uint32_t gen, int slot) {
     int st = -1;
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
@@ -1047,7 +1047,7 @@ int pd_frames_local_slot_state(uint64_t tab_id, uint32_t gen, int slot) {
 }
 
 // Local channels open or still draining after a close (tests: none once the browser tabs closed).
-int pd_frames_local_chans(void) {
+int dh_frames_local_chans(void) {
     int n = 0;
     os_unfair_lock_lock(&g_lock);
     for (int i = 0; i < PDF_CHANS; i++) n += g_chans[i].local && (g_chans[i].used || g_chans[i].draining);
@@ -1055,7 +1055,7 @@ int pd_frames_local_chans(void) {
     return n;
 }
 
-uint64_t pd_frames_local_reclaimed(uint64_t tab_id) {
+uint64_t dh_frames_local_reclaimed(uint64_t tab_id) {
     os_unfair_lock_lock(&g_lock);
     pdf_chan* c = chan_by_tab(tab_id);
     uint64_t n = c ? c->reclaimed : 0;
@@ -1067,7 +1067,7 @@ uint64_t pd_frames_local_reclaimed(uint64_t tab_id) {
 // connect half (the app)
 // ======================================================================
 
-typedef struct pd_frames_conn {
+typedef struct dh_frames_conn {
     mach_port_t server, reply;
     dispatch_queue_t q;
     dispatch_source_t src;
@@ -1079,7 +1079,7 @@ typedef struct pd_frames_conn {
     int w, h;
     float scale;
     id<MTLTexture> tex[PDF_SLOTS];
-    int state[PDF_SLOTS]; // 0 = the app's and free, 1 = being rendered, 2 = pi-desk's (FRAME sent)
+    int state[PDF_SLOTS]; // 0 = the app's and free, 1 = being rendered, 2 = Deckhand's (FRAME sent)
     // a RING that arrived: adopted at the next frame boundary
     int pending;
     uint32_t p_gen;
@@ -1088,9 +1088,9 @@ typedef struct pd_frames_conn {
     id<MTLTexture> p_tex[PDF_SLOTS];
     int dead;
     uint64_t frames_sent, frames_dropped, rings;
-} pd_frames_conn;
+} dh_frames_conn;
 
-static void conn_ring(pd_frames_conn* c, pdf_ring* m) {
+static void conn_ring(dh_frames_conn* c, pdf_ring* m) {
     id<MTLTexture> t[PDF_SLOTS] = {nil};
     int ok = m->count == PDF_SLOTS && m->body.msgh_descriptor_count == PDF_SLOTS && m->w > 0 && m->hgt > 0;
     for (int s = 0; ok && s < PDF_SLOTS; s++) {
@@ -1116,7 +1116,7 @@ static void conn_ring(pd_frames_conn* c, pdf_ring* m) {
     os_unfair_lock_unlock(&c->lock);
 }
 
-static void conn_drain(pd_frames_conn* c) {
+static void conn_drain(dh_frames_conn* c) {
     for (;;) {
         pdf_rcv r;
         memset(&r.m.h, 0, sizeof r.m.h);
@@ -1152,8 +1152,8 @@ static void conn_drain(pd_frames_conn* c) {
 
 // Looks the service up, sends HELLO {key, tab_id} with a reply port (queue
 // limit 64), and starts draining it. NULL on failure (err says why).
-pd_frames_conn* pd_frames_connect(const char* service, const uint8_t* key, uint64_t tab_id, void* mtl_device, char* err, int errcap) {
-    pd_frames_conn* c = calloc(1, sizeof *c);
+dh_frames_conn* dh_frames_connect(const char* service, const uint8_t* key, uint64_t tab_id, void* mtl_device, char* err, int errcap) {
+    dh_frames_conn* c = calloc(1, sizeof *c);
     c->lock = OS_UNFAIR_LOCK_INIT;
     c->device = (__bridge id<MTLDevice>)mtl_device;
     kern_return_t kr = bootstrap_look_up(bootstrap_port, service, &c->server);
@@ -1167,7 +1167,7 @@ pd_frames_conn* pd_frames_connect(const char* service, const uint8_t* key, uint6
     mach_port_set_attributes(mach_task_self(), c->reply, MACH_PORT_LIMITS_INFO, (mach_port_info_t)&lim, MACH_PORT_LIMITS_INFO_COUNT);
     mach_port_t prev = MACH_PORT_NULL;
     mach_port_request_notification(mach_task_self(), c->server, MACH_NOTIFY_DEAD_NAME, 1, c->reply, MACH_MSG_TYPE_MAKE_SEND_ONCE, &prev);
-    c->q = dispatch_queue_create("dev.pi-desk.frames.app", DISPATCH_QUEUE_SERIAL);
+    c->q = dispatch_queue_create("dev.deckhand.frames.app", DISPATCH_QUEUE_SERIAL);
     c->src = dispatch_source_create(DISPATCH_SOURCE_TYPE_MACH_RECV, c->reply, 0, c->q);
     dispatch_source_set_event_handler(c->src, ^{ conn_drain(c); });
     dispatch_resume(c->src);
@@ -1186,13 +1186,13 @@ pd_frames_conn* pd_frames_connect(const char* service, const uint8_t* key, uint6
 }
 
 // Stops (or resumes) reading the reply port: a hung app (tests).
-void pd_frames_conn_suspend(pd_frames_conn* c, int on) {
+void dh_frames_conn_suspend(dh_frames_conn* c, int on) {
     if (on && !c->suspended) dispatch_suspend(c->src);
     if (!on && c->suspended) dispatch_resume(c->src);
     c->suspended = on;
 }
 
-int pd_frames_conn_dead(pd_frames_conn* c) {
+int dh_frames_conn_dead(dh_frames_conn* c) {
     os_unfair_lock_lock(&c->lock);
     int d = c->dead;
     os_unfair_lock_unlock(&c->lock);
@@ -1202,7 +1202,7 @@ int pd_frames_conn_dead(pd_frames_conn* c) {
 // A slot to render into this frame. At the frame boundary a RING that came
 // is adopted (RING_DONE {old gen} goes back first). Returns 0 when no slot
 // is held (skip rendering; keep ticking).
-int pd_frames_acquire(pd_frames_conn* c, uint32_t* gen, int* slot, int* w, int* h, float* scale, void** texture) {
+int dh_frames_acquire(dh_frames_conn* c, uint32_t* gen, int* slot, int* w, int* h, float* scale, void** texture) {
     uint32_t done = 0;
     os_unfair_lock_lock(&c->lock);
     if (c->pending) {
@@ -1240,7 +1240,7 @@ int pd_frames_acquire(pd_frames_conn* c, uint32_t* gen, int* slot, int* w, int* 
 }
 
 // Gives a slot back without a frame (rendering was skipped).
-void pd_frames_unacquire(pd_frames_conn* c, int slot) {
+void dh_frames_unacquire(dh_frames_conn* c, int slot) {
     os_unfair_lock_lock(&c->lock);
     if (slot >= 0 && slot < PDF_SLOTS && c->state[slot] == 1) c->state[slot] = 0;
     os_unfair_lock_unlock(&c->lock);
@@ -1248,8 +1248,8 @@ void pd_frames_unacquire(pd_frames_conn* c, int slot) {
 
 // After the frame's command buffers were committed on mtl_queue: one empty
 // command buffer whose completed handler sends FRAME (0 timeout: dropped
-// if pi-desk's queue is full; then the slot is the app's again at once).
-void pd_frames_present(pd_frames_conn* c, uint32_t gen, int slot, uint64_t seq, uint64_t tick, void* mtl_queue) {
+// if Deckhand's queue is full; then the slot is the app's again at once).
+void dh_frames_present(dh_frames_conn* c, uint32_t gen, int slot, uint64_t seq, uint64_t tick, void* mtl_queue) {
     id<MTLCommandQueue> q = (__bridge id<MTLCommandQueue>)mtl_queue;
     id<MTLCommandBuffer> cb = [q commandBuffer];
     mach_port_t server = c->server;
@@ -1275,7 +1275,7 @@ void pd_frames_present(pd_frames_conn* c, uint32_t gen, int slot, uint64_t seq, 
     [cb commit];
 }
 
-void pd_frames_conn_stats(pd_frames_conn* c, uint64_t* sent, uint64_t* dropped, uint64_t* rings, uint32_t* gen, int* w, int* h) {
+void dh_frames_conn_stats(dh_frames_conn* c, uint64_t* sent, uint64_t* dropped, uint64_t* rings, uint32_t* gen, int* w, int* h) {
     os_unfair_lock_lock(&c->lock);
     *sent = c->frames_sent;
     *dropped = c->frames_dropped;
@@ -1286,8 +1286,8 @@ void pd_frames_conn_stats(pd_frames_conn* c, uint64_t* sent, uint64_t* dropped, 
     os_unfair_lock_unlock(&c->lock);
 }
 
-// The MTLDevice with this registry id (pi-desk's GPU), or the default one.
-void* pd_frames_device_for(uint64_t registry_id) {
+// The MTLDevice with this registry id (Deckhand's GPU), or the default one.
+void* dh_frames_device_for(uint64_t registry_id) {
     NSArray<id<MTLDevice>>* all = MTLCopyAllDevices();
     for (id<MTLDevice> d in all) if (d.registryID == registry_id) return (void*)CFBridgingRetain(d);
     return (void*)CFBridgingRetain(MTLCreateSystemDefaultDevice());

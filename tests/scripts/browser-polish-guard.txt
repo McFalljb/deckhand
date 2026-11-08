@@ -3,7 +3,7 @@
 # camera request dropped by a navigation, downloads without the user's click, popup floods.
 # Page coordinates: tests/web/polish.html.
 wait 1500
-command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+command {"type":"browser_open","url":"deckhand-test://web/polish.html"}
 web_waitpaint 10000
 web_title Polish 10000
 # the click guard: a bar that has just appeared ignores a click (it may have come under it)
@@ -14,7 +14,7 @@ clickid pg_perm_block
 wait 300
 assert_state open_sessions.0.tabs.1.permission.what notifications
 # the permission bar's text: the asking origin, then always what it wants
-assert_drawn pidesk-test://web wants to show notifications
+assert_drawn deckhand-test://web wants to show notifications
 # Atlas's drawer over the bar: a click on Allow under it never reaches the bar
 key j cmd
 wait 800
@@ -29,17 +29,17 @@ assert_state open_sessions.0.tabs.1.permission <missing>
 # a dialog bar names the asking origin
 web_click 100 40
 waitstate 5000 open_sessions.0.tabs.1.dialog.kind alert
-assert_drawn pidesk-test://web says: Hello from the page
+assert_drawn deckhand-test://web says: Hello from the page
 wait 600
 clickid pg_dialog_ok
 web_title after alert 5000
 # a camera request: its bar; a main-frame navigation denies it and the bar goes
 web_click 280 240
 waitstate 5000 open_sessions.0.tabs.1.permission.what camera
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/nav-a.html"}
 web_title Nav A 5000
 waitstate 3000 open_sessions.0.tabs.1.permission <missing>
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/polish.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/polish.html"}
 web_title Polish 5000
 web_waitpaint 10000
 wait 500
@@ -54,7 +54,7 @@ web_title prompt=Zed 5000
 web_js document.title = 'A'
 web_title A 3000
 # tab B's prompt comes while the address field has the keyboard: A's text is neither shown nor sent
-command {"type":"browser_open","url":"pidesk-test://web/polish.html"}
+command {"type":"browser_open","url":"deckhand-test://web/polish.html"}
 web_waitpaint 10000
 web_title Polish 10000
 key l cmd
@@ -67,10 +67,10 @@ clickid pg_dialog_ok
 web_title prompt=Bo 5000
 key escape
 # a download the page starts without the user's click: a bar asks first; more are refused while
-# it waits (pi-desk's download_policy, or Chromium's own limit on automatic downloads first)
+# it waits (Deckhand's download_policy, or Chromium's own limit on automatic downloads first)
 web_js document.getElementById('dl').click()
 waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
-assert_drawn pidesk-test://web wants to download hidden_ report.txt
+assert_drawn deckhand-test://web wants to download hidden_ report.txt
 web_js document.getElementById('dl').click()
 wait 1000
 assert_state open_sessions.0.tabs.2.downloads <missing>
@@ -105,12 +105,12 @@ wait 1500
 web_title Polish 10000
 web_js document.getElementById('dl').click()
 waitstate 5000 open_sessions.0.tabs.2.download_ask.name hidden_ report.txt
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/nav-a.html"}
 web_title Nav A 5000
 waitstate 3000 open_sessions.0.tabs.2.download_ask <missing>
 wait 1000
 assert_state open_sessions.0.tabs.2.downloads.# 2
-command {"type":"browser_navigate","tab_id":$last,"url":"pidesk-test://web/polish.html"}
+command {"type":"browser_navigate","tab_id":$last,"url":"deckhand-test://web/polish.html"}
 web_title Polish 5000
 web_waitpaint 10000
 wait 500

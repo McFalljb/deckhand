@@ -19,9 +19,9 @@ Until 2026-11-04 the Claude mark was Anthropic's spark (<https://claude.ai/favic
 Clawd replaced it as the mark of Claude Code itself rather than of Anthropic or Claude.
 
 **Switching Clawd off.** One constant decides whether it is shown:
-`LOGO_CLAUDE_ON :: #config(PI_DESK_CLAUDE_LOGO, true)` in `src/logos.odin`. For a build
+`LOGO_CLAUDE_ON :: #config(DECKHAND_CLAUDE_LOGO, true)` in `src/logos.odin`. For a build
 without it, change its default to `false` (`./build.sh` passes no extra defines), or pass
-`-define:PI_DESK_CLAUDE_LOGO=false` when running `odin build src` / `odin test src` by hand.
+`-define:DECKHAND_CLAUDE_LOGO=false` when running `odin build src` / `odin test src` by hand.
 Every Claude row, tab and picker entry then shows the plain fallback glyph instead: an
 asterisk, drawn in the row's colour. Nothing else changes, and the unit tests pass both ways.
 

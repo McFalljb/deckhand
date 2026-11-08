@@ -39,9 +39,9 @@ sk_start :: proc(t: ^testing.T) -> string {
 	}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	dir := fmt.aprintf("%s/pd-sock-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	os.set_env("PI_DESK_RUNTIME_DIR", dir)
+	os.set_env("DECKHAND_RUNTIME_DIR", dir)
 	rdir, ok := sock_runtime_dir(context.temp_allocator)
 	testing.expect(t, ok, "runtime dir")
 	testing.expect(t, socket_start(rdir), "socket_start")
@@ -139,7 +139,7 @@ tc_hello :: proc(token: string) -> (^Tc, string) {
 	return c, tc_req(c, "h", fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s"}}`, token))
 }
 
-// The connection was closed by pi-desk.
+// The connection was closed by deckhand.
 @(private = "file")
 tc_closed :: proc(c: ^Tc) -> bool {
 	for !c.closed {
@@ -206,7 +206,7 @@ socket_bridge_and_capabilities :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	tokfile := fmt.tprintf("%s/tab-token", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
 	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
 	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
 	pitab := find_session(sess).tabs[0].id
@@ -543,11 +543,11 @@ socket_hostile_lines :: proc(t: ^testing.T) {
 }
 
 // A new pi tab (fake pi that saves its env token); returns the session, the
-// pi tab and the token pi-desk passed in PI_DESK_TOKEN.
+// pi tab and the token Deckhand passed in DECKHAND_TOKEN.
 @(private = "file")
 sk_pi_tab :: proc(t: ^testing.T, dir: string) -> (sess, pitab: u64, env_tok: string) {
 	tokfile := fmt.tprintf("%s/tab-token-%d", dir, time.now()._nsec)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
 	if state.selected_project == 0 do run_command(Add_Project{cwd = "/tmp"}, sk_ui)
 	sess = run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
 	pitab = find_session(sess).tabs[0].id
@@ -674,7 +674,7 @@ socket_hello_deadline_and_conn_cap :: proc(t: ^testing.T) {
 	testing.expect(t, tc_closed(extra))
 	tc_close(extra)
 	tc_close(a)
-	// a slot frees once pi-desk has seen the close
+	// a slot frees once Deckhand has seen the close
 	ok := false
 	for _ in 0 ..< 50 {
 		d, r := tc_hello(tok)
@@ -742,8 +742,8 @@ socket_bridge_lifecycle :: proc(t: ^testing.T) {
 
 // A pi session (a pi tab, Atlas) learns where app screenshots go in
 // DECKHAND_SHOTS_DIR (the pi integration checks app_screenshot files are directly in it);
-// app tabs do not. PI_DESK_DATA_DIR is never passed on, nor inherited: it
-// would point a test-mode pi-desk an agent starts at the user's real data dir.
+// app tabs do not. DECKHAND_DATA_DIR is never passed on, nor inherited: it
+// would point a test-mode Deckhand an agent starts at the user's real data dir.
 @(test)
 socket_child_env_has_the_shots_dir :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -762,24 +762,24 @@ socket_child_env_has_the_shots_dir :: proc(t: ^testing.T) {
 		return
 	}
 	want := "DECKHAND_SHOTS_DIR=/tmp/pd-data-dir-test/apps/shots"
-	os.set_env("PI_DESK_DATA_DIR", "/inherited")
-	defer os.unset_env("PI_DESK_DATA_DIR")
+	os.set_env("DECKHAND_DATA_DIR", "/inherited")
+	defer os.unset_env("DECKHAND_DATA_DIR")
 	os.set_env("DECKHAND_SHOTS_DIR", "/inherited/apps/shots")
 	defer os.unset_env("DECKHAND_SHOTS_DIR")
 	pi_tab := child_env(socket_pi_env({kind = .Panel, tab_id = 4242}))
 	testing.expect(t, has(pi_tab, want), "a session's pi tab")
 	testing.expect_value(t, count(pi_tab, "DECKHAND_SHOTS_DIR="), 1)
-	testing.expect_value(t, count(pi_tab, "PI_DESK_DATA_DIR="), 0)
+	testing.expect_value(t, count(pi_tab, "DECKHAND_DATA_DIR="), 0)
 	atlas := child_env(agent_env(4242))
 	testing.expect(t, has(atlas, want), "Atlas")
 	testing.expect_value(t, count(atlas, "DECKHAND_SHOTS_DIR="), 1)
-	testing.expect_value(t, count(atlas, "PI_DESK_DATA_DIR="), 0)
+	testing.expect_value(t, count(atlas, "DECKHAND_DATA_DIR="), 0)
 	app := socket_child_env({kind = .App, tab_id = 4242})
-	testing.expect_value(t, count(app, "DECKHAND_SHOTS_DIR=") + count(app, "PI_DESK_SHOTS_DIR="), 0)
-	testing.expect_value(t, count(app, "PI_DESK_DATA_DIR="), 0)
+	testing.expect_value(t, count(app, "DECKHAND_SHOTS_DIR=") + count(app, "DECKHAND_SHOTS_DIR="), 0)
+	testing.expect_value(t, count(app, "DECKHAND_DATA_DIR="), 0)
 	shell := child_env()
 	testing.expect_value(t, count(shell, "DECKHAND_SHOTS_DIR="), 0)
-	testing.expect_value(t, count(shell, "PI_DESK_DATA_DIR="), 0)
+	testing.expect_value(t, count(shell, "DECKHAND_DATA_DIR="), 0)
 	// test mode without a data dir: still absolute, where the shots are written
 	home_root = ""
 	seen := false
@@ -860,13 +860,13 @@ socket_claude_token_scope :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	sess, pitab, pi_tok := sk_pi_tab(t, dir)
 	run_command(Add_Project{cwd = "/"}, sk_ui)
 	other, _, _ := sk_pi_tab(t, dir)
 	run_command(Focus_Session{session = sess}, sk_ui)
 	tokfile := fmt.tprintf("%s/claude-token-%d", dir, time.now()._nsec)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf %%s "$PI_DESK_CLAUDE_TOKEN" > %s; exec sleep 30`, tokfile))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf %%s "$DECKHAND_CLAUDE_TOKEN" > %s; exec sleep 30`, tokfile))
 	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
 	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
 	testing.expect(t, r.ok, r.error)
@@ -953,7 +953,7 @@ socket_claude_token_process_tree :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	os.make_directory_all(dir)
 	client := fmt.tprintf("%s/client.py", dir)
 	src := `import json, os, socket, sys, time
@@ -967,8 +967,8 @@ if orphan:
         time.sleep(0.02)
 time.sleep(0.3)
 s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-s.connect(os.environ["PI_DESK_SOCKET"])
-s.sendall((json.dumps({"id": "h", "v": 1, "type": "hello", "token": os.environ["PI_DESK_CLAUDE_TOKEN"]}) + "\n").encode())
+s.connect(os.environ["DECKHAND_SOCKET"])
+s.sendall((json.dumps({"id": "h", "v": 1, "type": "hello", "token": os.environ["DECKHAND_CLAUDE_TOKEN"]}) + "\n").encode())
 line = s.makefile().readline()
 with open(out + ".tmp", "w") as f:
     f.write(json.dumps({"ppid": os.getppid(), "reply": json.loads(line)}))
@@ -976,7 +976,7 @@ os.rename(out + ".tmp", out)
 `
 	_ = os.write_entire_file(client, transmute([]u8)src)
 	ok_out, orphan_out := fmt.tprintf("%s/grandchild.json", dir), fmt.tprintf("%s/orphan.json", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`sh -c "sh -c 'python3 -I %s %s child'"; python3 -I %s %s orphan; exec sleep 30`, client, ok_out, client, orphan_out))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`sh -c "sh -c 'python3 -I %s %s child'"; python3 -I %s %s orphan; exec sleep 30`, client, ok_out, client, orphan_out))
 	sess, _, _ := sk_pi_tab(t, dir)
 	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
 	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
@@ -997,7 +997,7 @@ os.rename(out + ".tmp", out)
 	run_command(Close_Tab{tab_id = r.created_id}, sk_ui)
 }
 
-// A panel caller whose tab pi-desk does not know (yet: before it is in its session) sees no events.
+// A panel caller whose tab Deckhand does not know (yet: before it is in its session) sees no events.
 @(test)
 socket_panel_events_fail_closed :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -1010,7 +1010,7 @@ socket_panel_events_fail_closed :: proc(t: ^testing.T) {
 	tc_close(c)
 }
 
-// An app hears nothing before its hello reply (docs/TAB-PROTOCOL.md §3): pi-desk's main thread
+// An app hears nothing before its hello reply (docs/TAB-PROTOCOL.md §3): Deckhand's main thread
 // sends tab.visible or an agent's app_call as soon as the connection counts as the app's, so that
 // must not happen before the reply is queued. A thread sends to the tab without pause while the
 // app says hello; the first line the app reads is the reply, every time.
@@ -1096,7 +1096,7 @@ sk_app_tab :: proc(t: ^testing.T) -> (tab: u64, c: ^Tc) {
 	return
 }
 
-// A script's app_call whose reply comes while pi-desk is still draining the inbox (a fast app; the
+// A script's app_call whose reply comes while Deckhand is still draining the inbox (a fast app; the
 // script runs the command and drains in one step) finishes the call: the finished result is kept,
 // never lost with the script then waiting for it forever.
 @(test)
@@ -1522,8 +1522,8 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	r := run_command(Copy_Control_Token{}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.data, "")
-	testing.expect(t, strings.has_prefix(clip, fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='", socket_path())), clip)
-	_, _, rest := strings.partition(clip, "PI_DESK_TOKEN='")
+	testing.expect(t, strings.has_prefix(clip, fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='", socket_path())), clip)
+	_, _, rest := strings.partition(clip, "DECKHAND_TOKEN='")
 	tok, _, _ := strings.partition(rest, "'")
 	testing.expect_value(t, len(tok), 64)
 	testing.expect(t, !strings.contains(command_json(Copy_Control_Token{}), tok), "never in the log")
@@ -1541,7 +1541,7 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	defer platform.set_clipboard_secret, platform.clear_clipboard_if = nil, nil
 	clip = ""
 	testing.expect(t, run_command(Copy_Control_Token{}, sk_ui).ok)
-	testing.expect(t, strings.contains(secret, "PI_DESK_TOKEN='"), secret)
+	testing.expect(t, strings.contains(secret, "DECKHAND_TOKEN='"), secret)
 	testing.expect_value(t, clip, "") // not through the plain copy
 	control_token_clip_tick()
 	testing.expect_value(t, len(cleared), 0) // not before the deadline

@@ -6,8 +6,8 @@ package main
 // connection's requests run in order) and a writer thread (drains a bounded
 // outbound queue, so the main thread never blocks on a slow client).
 //
-// Tokens are routing + capability: pi-desk mints one per pi tab it starts
-// (caller panel, that tab) and passes it as PI_DESK_TOKEN; `--print-token`
+// Tokens are routing + capability: Deckhand mints one per pi tab it starts
+// (caller panel, that tab) and passes it as DECKHAND_TOKEN; `--print-token`
 // mints a script or control token for local use. The first line on a
 // connection must be `hello` with a known token, or the connection closes.
 //
@@ -212,22 +212,22 @@ random_token :: proc(allocator := context.allocator) -> string {
 	return string(hex.encode(raw[:], allocator))
 }
 
-// PI_DESK_SOCKET and a new PI_DESK_TOKEN for an app tab's program (temp allocator;
+// DECKHAND_SOCKET and a new DECKHAND_TOKEN for an app tab's program (temp allocator;
 // docs/ENGINE-BRIDGE.md: a stable interface), or nil when the socket is not running.
 socket_child_env :: proc(caller: Caller) -> []string {
 	if !srv.running do return nil
 	tok := socket_mint_token(caller, context.temp_allocator, single_use = true)
 	env := make([dynamic]string, 0, 2, context.temp_allocator)
-	append(&env, fmt.tprintf("PI_DESK_SOCKET=%s", srv.path), fmt.tprintf("PI_DESK_TOKEN=%s", tok))
+	append(&env, fmt.tprintf("DECKHAND_SOCKET=%s", srv.path), fmt.tprintf("DECKHAND_TOKEN=%s", tok))
 	return env[:]
 }
 
 // A pi session's (a pi tab, Atlas) environment for Deckhand's pi integration (temp allocator;
 // pi_integration.odin), or nil when the socket is not running: DECKHAND_SOCKET, a new
 // single-use DECKHAND_TOKEN and DECKHAND_SHOTS_DIR, where app screenshots go (the integration
-// checks app_screenshot's files are directly in it). Never pi-kit's PI_DESK_SOCKET and
-// PI_DESK_TOKEN: its desk extensions switch on with those, and stay inert without them. Never
-// PI_DESK_DATA_DIR: Deckhand reads that, so a test-mode Deckhand an agent starts would use the
+// checks app_screenshot's files are directly in it). Never pi-kit's DECKHAND_SOCKET and
+// DECKHAND_TOKEN: its desk extensions switch on with those, and stay inert without them. Never
+// DECKHAND_DATA_DIR: Deckhand reads that, so a test-mode Deckhand an agent starts would use the
 // user's real data dir. Also nil when the pi will not load the integration (pi_integration_args:
 // none in this build, or a pi too old): no token is minted that nothing would use, which its bash
 // and ! commands would inherit.
@@ -240,20 +240,20 @@ socket_pi_env :: proc(caller: Caller) -> []string {
 	return env[:]
 }
 
-// The environment a Claude tab's process gets (claude.odin; temp allocator): PI_DESK_SOCKET, a
-// fresh MULTI-use token in PI_DESK_CLAUDE_TOKEN (the CLI and the hooks are a new process per call,
+// The environment a Claude tab's process gets (claude.odin; temp allocator): DECKHAND_SOCKET, a
+// fresh MULTI-use token in DECKHAND_CLAUDE_TOKEN (the CLI and the hooks are a new process per call,
 // so a single-use token cannot work; see docs/CLAUDE.md for what that costs and why the hello
-// checks the caller's process), PI_DESK_CLI (the bundled CLI, so plugin and app match),
-// PI_DESK_SHOTS_DIR and PI_DESK_CLAUDE_TAB. Tokens the tab had before are revoked first. Nil when
+// checks the caller's process), DECKHAND_CLI (the bundled CLI, so plugin and app match),
+// DECKHAND_SHOTS_DIR and DECKHAND_CLAUDE_TAB. Tokens the tab had before are revoked first. Nil when
 // the socket is not running.
 socket_claude_env :: proc(tab_id: u64, cli: string) -> []string {
 	if !srv.running do return nil
 	socket_forget_tab(tab_id)
 	tok := socket_mint_token({kind = .Panel, tab_id = tab_id, claude = true}, context.temp_allocator)
 	env := make([dynamic]string, 0, 5, context.temp_allocator)
-	append(&env, fmt.tprintf("PI_DESK_SOCKET=%s", srv.path), fmt.tprintf("PI_DESK_CLAUDE_TOKEN=%s", tok))
-	if cli != "" do append(&env, fmt.tprintf("PI_DESK_CLI=%s", cli))
-	append(&env, fmt.tprintf("PI_DESK_SHOTS_DIR=%s", app_shots_dir(context.temp_allocator)), fmt.tprintf("PI_DESK_CLAUDE_TAB=%d", tab_id))
+	append(&env, fmt.tprintf("DECKHAND_SOCKET=%s", srv.path), fmt.tprintf("DECKHAND_CLAUDE_TOKEN=%s", tok))
+	if cli != "" do append(&env, fmt.tprintf("DECKHAND_CLI=%s", cli))
+	append(&env, fmt.tprintf("DECKHAND_SHOTS_DIR=%s", app_shots_dir(context.temp_allocator)), fmt.tprintf("DECKHAND_CLAUDE_TAB=%d", tab_id))
 	return env[:]
 }
 
@@ -350,7 +350,7 @@ socket_publish :: proc(ev: Event) {
 event_matches :: proc(c: ^Conn, ev: Event) -> bool {
 	session, tab := c.sub_session, c.sub_tab
 	if c.caller.kind == .Panel {
-		// its own session only; a tab pi-desk does not know (yet) sees nothing
+		// its own session only; a tab Deckhand does not know (yet) sees nothing
 		own, known := srv.tab_session[c.caller.tab_id]
 		if !known || own == 0 do return false
 		session, tab = own, 0
@@ -534,7 +534,7 @@ socket_app_connected :: proc(tab_id: u64) -> bool {
 }
 
 // A line from an app's connection (reader thread): a reply to one of
-// pi-desk's tab.* requests, or an event. Apps send no commands.
+// Deckhand's tab.* requests, or an event. Apps send no commands.
 @(private = "file")
 app_conn_line :: proc(c: ^Conn, line: string) {
 	// strict RFC 8259 and at most JSON_MAX_DEPTH deep (the parser recurses per
@@ -788,7 +788,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		}
 		// The reply is queued in the same step that makes the connection count as its caller's
 		// (c.ref: socket_app_send, socket_bridge_send and events look for it), so nothing that
-		// pi-desk sends it can come before its hello reply (TAB-PROTOCOL.md §3).
+		// Deckhand sends it can come before its hello reply (TAB-PROTOCOL.md §3).
 		welcome := reply_json(m.id, {ok = true, data = welcome_json(c.caller, reconnect)})
 		sync.lock(&srv.mu)
 		c.ref = ref
@@ -882,7 +882,7 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	case .App:                               caps = `["app","frames","input"]`
 	}
 	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, `{{"v":%d,"app":"pi-desk","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
+	fmt.sbprintf(&b, `{{"v":%d,"app":"deckhand","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
 	if reconnect != "" do fmt.sbprintf(&b, `,"reconnect_token":"%s"`, reconnect)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
 	if caller.kind == .App && window.frames_info != nil {
@@ -894,7 +894,7 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	return strings.to_string(b)
 }
 
-// The connection that sent request `request_id` (its Conn id), 0 if none (the user, a script, pi-desk).
+// The connection that sent request `request_id` (its Conn id), 0 if none (the user, a script, Deckhand).
 socket_request_conn :: proc(request_id: u64) -> u64 {
 	if request_id == 0 do return 0
 	sync.lock(&srv.mu)

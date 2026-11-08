@@ -1,4 +1,4 @@
-# Keys and clicks reach the page only while it has pi-desk's keyboard
+# Keys and clicks reach the page only while it has Deckhand's keyboard
 # (tests/scripts/browser.sh; review fix 1). Page: tests/web/browser.html.
 wait 1500
 web_open tests/web/browser.html

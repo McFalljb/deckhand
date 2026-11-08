@@ -23,7 +23,7 @@ assert_files notes: ON · reminds the session to update its session note before 
 clickid fcreate 9
 wait 300
 assert_state settings.pi_extensions.notes false
-# pi's sessions/ folder as a row (the Folders group's "sessions/: …" row is pi-desk's own)
+# pi's sessions/ folder as a row (the Folders group's "sessions/: …" row is Deckhand's own)
 assert_not_files \nsessions\n
 assert_not_files \nsessions (
 assert_not_files npm

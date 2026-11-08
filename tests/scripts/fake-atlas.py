@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""A fake pi for Atlas (pi-desk's agent) in its terminal tab, for tests/scripts/agent.sh.
+"""A fake pi for Atlas (Deckhand's agent) in its terminal tab, for tests/scripts/agent.sh.
 
-It plays pi's terminal UI just enough and the pi integration's bridge over pi-desk's
+It plays pi's terminal UI just enough and the pi integration's bridge over Deckhand's
 socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN): hello, pi.session,
-pi.status. It prints what pi-desk gave it: --model, --append-system-prompt
+pi.status. It prints what Deckhand gave it: --model, --append-system-prompt
 (and the prompt's first line), whether DECKHAND_CONTROL_TOKEN is set (never
 the token). Keys (the terminal is raw):
   Ctrl+L       "[model selector]" with a few models (as pi's app.model.select)

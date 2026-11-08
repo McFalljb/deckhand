@@ -2,7 +2,7 @@ package main
 
 // A session's own agents (a pi tab's bridge, a Claude tab's CLI: caller panel) open, restart and
 // close app tabs in their own session only, by the name the project declares in
-// .pi-desk/apps.json; never another session's, never an argv of their own, never in front of the
+// .deckhand/apps.json; never another session's, never an argv of their own, never in front of the
 // user. Home (control) keeps what it had: argv, any session it names, the tab in front.
 // The apps here never start (a program that is not there): what is checked is who may open what
 // and where; the live side is tests/scripts/app-open.sh and the claude scene.
@@ -18,7 +18,7 @@ import "core:testing"
 import "core:time"
 
 @(private = "file")
-AO_MISSING :: "/nonexistent/pi-desk-test-app" // posix_spawnp fails: no process, no GPU
+AO_MISSING :: "/nonexistent/deckhand-test-app" // posix_spawnp fails: no process, no GPU
 
 // Two sessions in real folders (a declares "fake" and "other", b declares "fake") and Home.
 @(private = "file")
@@ -31,9 +31,9 @@ ao_reset :: proc(t: ^testing.T) -> (a, b, home: u64, dir: string) {
 	dir = fmt.aprintf("build/test-data/app-open-%d", os.get_pid())
 	for name in ([]string{"alpha", "beta"}) {
 		cwd, _ := filepath.join({dir, name}, context.allocator)
-		os.make_directory_all(strings.concatenate({cwd, "/.pi-desk"}, context.temp_allocator))
+		os.make_directory_all(strings.concatenate({cwd, "/.deckhand"}, context.temp_allocator))
 		apps := name == "alpha" ? fmt.tprintf(`{{"apps":[{{"name":"fake","argv":[%q,"--x"]}},{{"name":"other","argv":[%q]}}]}}`, AO_MISSING, AO_MISSING) : fmt.tprintf(`{{"apps":[{{"name":"fake","argv":[%q]}}]}}`, AO_MISSING)
-		_ = os.write_entire_file(strings.concatenate({cwd, "/.pi-desk/apps.json"}, context.temp_allocator), transmute([]u8)apps)
+		_ = os.write_entire_file(strings.concatenate({cwd, "/.deckhand/apps.json"}, context.temp_allocator), transmute([]u8)apps)
 		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fs_real(cwd)}
 		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 		s.active_tab = s.tabs[0].id
@@ -218,7 +218,7 @@ app_declared_bad_file :: proc(t: ^testing.T) {
 	a, _, _, dir := ao_reset(t)
 	defer ao_done(dir)
 	pi := Caller{kind = .Panel, tab_id = ao_first(a)}
-	path := strings.concatenate({find_session(a).cwd, "/.pi-desk/apps.json"}, context.temp_allocator)
+	path := strings.concatenate({find_session(a).cwd, "/.deckhand/apps.json"}, context.temp_allocator)
 	for bad in ([]string{`[1,2]`, `"apps"`, `{"apps":{"name":"x"}}`, `{"apps":[1,{"name":"x","argv":"sh"},{"name":"y","argv":[1]}]}`, `not json`}) {
 		_ = os.write_entire_file(path, transmute([]u8)bad)
 		r := run_command(App_Declared{}, pi)
@@ -230,7 +230,7 @@ app_declared_bad_file :: proc(t: ^testing.T) {
 
 @(private = "file")
 ao_write_apps :: proc(session: u64, text: string) {
-	_ = os.write_entire_file(strings.concatenate({find_session(session).cwd, "/.pi-desk/apps.json"}, context.temp_allocator), transmute([]u8)text)
+	_ = os.write_entire_file(strings.concatenate({find_session(session).cwd, "/.deckhand/apps.json"}, context.temp_allocator), transmute([]u8)text)
 }
 
 // A read-only chat's pi (started under Chats: read-only) opens, restarts and closes no apps.
@@ -338,7 +338,7 @@ app_declared_not_a_regular_file :: proc(t: ^testing.T) {
 	a, _, _, dir := ao_reset(t)
 	defer ao_done(dir)
 	pi := Caller{kind = .Panel, tab_id = ao_first(a)}
-	path := strings.concatenate({find_session(a).cwd, "/.pi-desk/apps.json"}, context.temp_allocator)
+	path := strings.concatenate({find_session(a).cwd, "/.deckhand/apps.json"}, context.temp_allocator)
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	os.remove(path)
 	posix.symlink("/dev/zero", cpath)
@@ -411,7 +411,7 @@ app_open_read_only_as_started :: proc(t: ^testing.T) {
 	testing.expect(t, chat_readonly(p.id), "a chat starts read-only now")
 }
 
-// pi-desk asks nothing: an agent's open of a declared entry runs at once, with the agent's own
+// Deckhand asks nothing: an agent's open of a declared entry runs at once, with the agent's own
 // authority (docs/ENGINE-BRIDGE.md, trust model).
 @(test)
 app_open_never_asks :: proc(t: ^testing.T) {

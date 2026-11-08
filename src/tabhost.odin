@@ -1,16 +1,16 @@
 package main
 
-// In-process side of the pi-desk tab protocol (docs/TAB-PROTOCOL.md): what
+// In-process side of the Deckhand tab protocol (docs/TAB-PROTOCOL.md): what
 // the window layer needs from any tab kind. A sketch: terminal tabs fill in
 // the parts they have; texture display, capture and the control channel are
-// stubs (the Markdown tab is drawn by pi-desk too).
+// stubs (the Markdown tab is drawn by Deckhand too).
 
 import sapp "../vendor/sokol-odin/sokol/app"
 
 Tab_Display :: enum {
-	Drawn, // pi-desk draws it itself (terminal, markdown)
-	Texture, // the program renders into a shared GPU texture pi-desk draws as an image
-	Native_View, // a native child view over the window; no pi-desk overlays on top
+	Drawn, // Deckhand draws it itself (terminal, markdown)
+	Texture, // the program renders into a shared GPU texture Deckhand draws as an image
+	Native_View, // a native child view over the window; no Deckhand overlays on top
 	Own_Window, // the program keeps its own window; the tab only controls it
 }
 

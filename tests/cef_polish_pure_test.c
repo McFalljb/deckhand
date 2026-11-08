@@ -7,7 +7,7 @@ static int failed;
 
 static int rec(const char* in, const char* want) {
     char out[256];
-    int ok = pd_url_for_record(in, out, sizeof out);
+    int ok = dh_url_for_record(in, out, sizeof out);
     if (!want) return !ok;
     return ok && !strcmp(out, want);
 }
@@ -25,11 +25,11 @@ int main(void) {
     // at most one line a second; the skipped ones counted
     double last = 0;
     int skipped = 0;
-    EXPECT(pd_rate_ok(&last, &skipped, 100.0), "the first line");
-    EXPECT(!pd_rate_ok(&last, &skipped, 100.2), "0.2 s later: held");
-    EXPECT(!pd_rate_ok(&last, &skipped, 100.9), "0.9 s later: held");
+    EXPECT(dh_rate_ok(&last, &skipped, 100.0), "the first line");
+    EXPECT(!dh_rate_ok(&last, &skipped, 100.2), "0.2 s later: held");
+    EXPECT(!dh_rate_ok(&last, &skipped, 100.9), "0.9 s later: held");
     EXPECT(skipped == 2, "two held");
-    EXPECT(pd_rate_ok(&last, &skipped, 101.1), "1.1 s later: said");
+    EXPECT(dh_rate_ok(&last, &skipped, 101.1), "1.1 s later: said");
     if (failed) return 1;
     printf("cef_polish_pure: ok\n");
     return 0;

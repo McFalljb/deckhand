@@ -1,12 +1,12 @@
-package pi_desk_cli
+package deckhand_cli
 
-// `pi-desk`: the command Claude Code runs inside a pi-desk Claude tab (the plugin's bin/pi-desk
+// `deckhand`: the command Claude Code runs inside a Deckhand Claude tab (the plugin's bin/pi-desk
 // execs this binary, which ships inside Deckhand.app so plugin and app always match). It drives
-// the tab's own session's browser and app tabs through pi-desk's control socket, prints one JSON
+// the tab's own session's browser and app tabs through Deckhand's control socket, prints one JSON
 // object per call (page and app data only inside a fenced `content`), and is the plugin's hooks
-// (`pi-desk hook …`). pi-desk enforces every rule; this tool only shapes calls and output.
+// (`deckhand hook …`). Deckhand enforces every rule; this tool only shapes calls and output.
 //
-// Exit status: 0 ok, 1 the command failed (or pi-desk could not be reached), 2 usage.
+// Exit status: 0 ok, 1 the command failed (or Deckhand could not be reached), 2 usage.
 // Hooks always exit 0, but for `hook readonly` (2 = the tool call is denied).
 
 import "core:encoding/json"
@@ -67,12 +67,30 @@ stdin_all :: proc() -> string {
 	return string(b[:])
 }
 
-// The transport from PI_DESK_SOCKET and PI_DESK_CLAUDE_TOKEN, or why there is none.
+// The tab's socket and token: DECKHAND_SOCKET and DECKHAND_CLAUDE_TOKEN, else (both unset) their
+// old names PI_DESK_SOCKET and PI_DESK_CLAUDE_TOKEN: a Claude tab started before 0.1.7, or held
+// across the update, keeps the environment it started with.
+tab_env :: proc(c: ^Ctx) -> (path, token: string) {
+	path = c.getenv("DECKHAND_SOCKET")
+	token = c.getenv("DECKHAND_CLAUDE_TOKEN")
+	if path == "" && token == "" {
+		path = c.getenv("PI_DESK_SOCKET")
+		token = c.getenv("PI_DESK_CLAUDE_TOKEN")
+	}
+	return
+}
+
+// DECKHAND_SHOTS_DIR, else its old name PI_DESK_SHOTS_DIR (as tab_env).
+shots_env :: proc(c: ^Ctx) -> string {
+	if d := c.getenv("DECKHAND_SHOTS_DIR"); d != "" do return d
+	return c.getenv("PI_DESK_SHOTS_DIR")
+}
+
+// The transport from tab_env, or why there is none.
 transport :: proc(c: ^Ctx, hello_ms := 5000) -> (^Transport, string) {
 	if c.tr != nil do return c.tr, ""
-	path := c.getenv("PI_DESK_SOCKET")
-	token := c.getenv("PI_DESK_CLAUDE_TOKEN")
-	if path == "" || token == "" do return nil, "not inside a Deckhand Claude tab (PI_DESK_SOCKET or PI_DESK_CLAUDE_TOKEN is not set)"
+	path, token := tab_env(c)
+	if path == "" || token == "" do return nil, "not inside a Deckhand Claude tab (DECKHAND_SOCKET or DECKHAND_CLAUDE_TOKEN is not set)"
 	t := new(Transport)
 	t^ = real_transport(path, token, hello_ms)
 	c.tr = t
@@ -96,7 +114,7 @@ run :: proc(c: ^Ctx, args: []string) -> int {
 		return 0
 	}
 	if args[0] == "hook" && len(args) > 1 && args[1] == "readonly" {
-		// the read-only guard (readonly.odin): exit 2 denies; it never needs pi-desk's socket
+		// the read-only guard (readonly.odin): exit 2 denies; it never needs Deckhand's socket
 		return hook_readonly(c)
 	}
 	if args[0] == "hook" {
@@ -153,7 +171,7 @@ format_ok :: proc(c: ^Ctx, req: ^Req, result: json.Object) -> (string, int) {
 	case .State:      return state_out(req, result), 0
 	case .Show:       return show_out(req, result), 0
 	case .Shot, .App_Shot:
-		return shot_out(req, d, c.getenv("PI_DESK_SHOTS_DIR"))
+		return shot_out(req, d, shots_env(c))
 	}
 	return local_error(req.name, "unknown command kind"), 1
 }

@@ -1,6 +1,6 @@
 package main
 
-// Every command pi-desk knows, in one table: its wire name, arguments, what
+// Every command Deckhand knows, in one table: its wire name, arguments, what
 // it does, who may send it, its confirmation class and whether it is
 // long-running. caller_may (commands.odin) checks callers against `who`, and
 // `list_commands` answers from it, so a new command is listed for the
@@ -8,15 +8,15 @@ package main
 // command type has one).
 
 Command_Who :: enum {
-	Anyone, // the user, scripts, control callers (the Home agent) and pi-desk itself; not pi tabs
+	Anyone, // the user, scripts, control callers (the Home agent) and Deckhand itself; not pi tabs
 	Query, // anyone, pi tabs too
-	User, // the user (ui) and pi-desk itself: settings that bound what agents may do
-	Report, // a pi tab's bridge for its own tab, scripts (tests), the user, pi-desk; not control
+	User, // the user (ui) and Deckhand itself: settings that bound what agents may do
+	Report, // a pi tab's bridge for its own tab, scripts (tests), the user, Deckhand; not control
 	Bridge, // only the tab's own bridge (panel)
-	Internal, // pi-desk itself; never parsed from JSON
+	Internal, // Deckhand itself; never parsed from JSON
 	Own_Session, // anyone but apps; a pi or Claude tab only for its own session (the command checks: browser_*, app_*)
-	User_Control, // the user, control callers (the Home agent) and pi-desk itself: opens a Finder window
-	Claude, // a Claude tab's plugin for its own tab (caller panel + claude), scripts (tests), pi-desk; never a pi tab's bridge
+	User_Control, // the user, control callers (the Home agent) and Deckhand itself: opens a Finder window
+	Claude, // a Claude tab's plugin for its own tab (caller panel + claude), scripts (tests), Deckhand; never a pi tab's bridge
 }
 
 Command_Spec :: struct {
@@ -194,10 +194,10 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "markdown_view", args = "tab_id, source", does = "show a Markdown tab's source (true) or its preview (false), at the same place", who = .Anyone},
 	{type = "markdown_scroll", args = "tab_id, anchor? | line?", does = "scroll a Markdown tab's preview to a heading id or to the block at a source line (1-based)", who = .Anyone},
 	{type = "markdown_link", args = "tab_id, url, confirm?", does = "follow a link of a Markdown tab's document as a click does: #heading scrolls, a relative .md file opens in a Markdown tab, another file in the editor; http, https and mailto open in the browser, and from a caller other than the user only once the user confirms (class open_link); only links the document has", who = .Anyone, confirm = .Open_Link},
-	{type = "new_app_tab", args = "session?, name? | argv? | command?, cwd?, title?", does = "open an app tab in an open session (default: the one on screen): an app the session's .pi-desk/apps.json declares (name), argv (argv[0] on PATH) or a command line (/bin/sh -c), in the session's folder or cwd inside it, with PI_DESK_SOCKET and a single-use app token; it shows the app's frames and gets the tab's input (docs/ENGINE-BRIDGE.md); created_id = tab id. A pi or Claude tab: its own session only, by name only, behind the user's view (not in a read-only chat)", who = .Own_Session},
+	{type = "new_app_tab", args = "session?, name? | argv? | command?, cwd?, title?", does = "open an app tab in an open session (default: the one on screen): an app the session's .deckhand/apps.json declares (name), argv (argv[0] on PATH) or a command line (/bin/sh -c), in the session's folder or cwd inside it, with DECKHAND_SOCKET and a single-use app token; it shows the app's frames and gets the tab's input (docs/ENGINE-BRIDGE.md); created_id = tab id. A pi or Claude tab: its own session only, by name only, behind the user's view (not in a read-only chat)", who = .Own_Session},
 	{type = "app_restart", args = "tab_id", does = "restart an app tab's program (the same argv; a hung one is killed first); a pi or Claude tab: its own session's", who = .Own_Session},
 	{type = "app_close", args = "tab_id, confirm?, comments?", does = "close an app tab as close_tab does (the app gets tab.quit, then SIGTERM, SIGKILL); a pi or Claude tab: its own session's", who = .Own_Session, confirm = .Tab_Close},
-	{type = "app_declared", args = "session?", does = "the apps a session's .pi-desk/apps.json declares (what new_app_tab's name opens): data {session, apps [{name, argv, cwd?}]}; a pi or Claude tab: its own session's", who = .Own_Session},
+	{type = "app_declared", args = "session?", does = "the apps a session's .deckhand/apps.json declares (what new_app_tab's name opens): data {session, apps [{name, argv, cwd?}]}; a pi or Claude tab: its own session's", who = .Own_Session},
 	{type = "app_input", args = "tab_id, events", does = `send input to an app tab as the user's would go (events: TAB-PROTOCOL input objects, e.g. {"event":"key","action":"down","key":"w"}; sent with "source":"agent"); data.sent`, who = .Own_Session},
 	{type = "app_events", args = "tab_id, topic, since?, limit?", does = "an app tab's last events of a topic (log, …; the last 500 kept): data.events [{seq, event}], data.next (pass as since)", who = .Own_Session},
 	{type = "app_call", args = "tab_id, method, params?, timeout_ms?", does = `call a method of an app tab's program, answered with its reply (data, or error with data.code): the methods are the app's own, so ask it with method "tab.describe" first; params is a JSON object passed as given; tab.quit and tab.visible are Deckhand's (code reserved); timeout_ms default 10000; code tab_gone if the app exits first, timeout if it does not answer`, who = .Own_Session, long_running = true},

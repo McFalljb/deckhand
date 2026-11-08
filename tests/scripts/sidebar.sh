@@ -18,7 +18,7 @@ T=$(mktemp -d /tmp/pd.XXXX) || exit 1
 FAKE_HOME=$(cd "$T" && pwd -P) || exit 1
 # only ever the temp folder made here
 trap 'case "$FAKE_HOME" in /private/tmp/pd.?*|/tmp/pd.?*) rm -rf "$FAKE_HOME" ;; esac' EXIT
-export PI_DESK_TEMP_ROOTS=/nonexistent-temp-root
+export DECKHAND_TEMP_ROOTS=/nonexistent-temp-root
 STORE="$FAKE_HOME/.pi/agent/sessions"
 mkdir -p "$STORE" "$W/data" "$FAKE_HOME/code/brand-new" "$FAKE_HOME/code/dropped"
 
@@ -38,8 +38,8 @@ session bravo 2 b1 "Fix the flaky test"
 session charlie 10 c1 "Draw the logo"
 
 run() { # script
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand
 }
 fail=0
 for n in 1 2; do

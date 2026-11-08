@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """A fake pi for tests/scripts/reload.sh: a pi-like screen and the pi integration's bridge over
-pi-desk's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It reports its
-session (the --session file pi-desk gave it, so a restart can resume it) and
+Deckhand's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN). It reports its
+session (the --session file Deckhand gave it, so a restart can resume it) and
 idle, and answers:
   pi.prompt  the text is the next status: working, idle, waiting, or blocked
              (idle with a background shell: blockers ["shell sh1: npm test"])

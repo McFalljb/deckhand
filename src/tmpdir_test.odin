@@ -7,7 +7,7 @@ import "core:strings"
 import "core:sys/posix"
 
 // Every test process's temp folders go in one folder of its own, removed when the process exits:
-// the tests make folders and files in $TMPDIR (pi-desk-editor-test-*, pd-home-*, deckhand-hm-*,
+// the tests make folders and files in $TMPDIR (deckhand-editor-test-*, pd-home-*, deckhand-hm-*,
 // ...) and leave many behind; run outside tests/unit.py (which gives each process a TMPDIR it
 // removes), they piled up in the user's $TMPDIR by the hundred thousand. Under `odin test` only:
 // the app build compiles this file too.

@@ -19,10 +19,11 @@ suggested vocabulary, not a list Deckhand checks.
 ## Summary (recommendations)
 
 1. **App tab.** Deckhand starts the engine's windowless *desk host* as a child of a session, with
-   `PI_DESK_SOCKET` and a single-use `PI_DESK_TOKEN` (new caller kind `app`). Control stays NDJSON
-   on Deckhand's socket; the engine is a client, like a pi tab's bridge. (pi tabs moved to
-   `DECKHAND_SOCKET`/`DECKHAND_TOKEN` with Deckhand's bundled pi integration; an app keeps
-   `PI_DESK_SOCKET`/`PI_DESK_TOKEN`, a stable interface.)
+   `DECKHAND_SOCKET` and a single-use `DECKHAND_TOKEN` (new caller kind `app`). Control stays NDJSON
+   on Deckhand's socket; the engine is a client, like a pi tab's bridge. (`DECKHAND_SOCKET`/
+   `DECKHAND_TOKEN` are a stable interface. Until 0.2.0 an app also gets them under their names
+   from before the rename, `PI_DESK_SOCKET`/`PI_DESK_TOKEN`, which older engines read: read the
+   `DECKHAND_` names first.)
 2. **Frames over a Mach channel, not XPC.** Deckhand checks in a per-process bootstrap name
    (`bootstrap_check_in`, as Chromium's MachPortRendezvous does) and hands the
    engine its name and a 32-byte key in the hello reply. Surfaces travel as
@@ -66,7 +67,7 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
 
 **Starting one.**
 - Command `new_app_tab {session, name? | argv?, cwd?, title?}` → tab id. `name` names an entry in
-  the project's `.pi-desk/apps.json` (`app_declared` lists them), for example
+  the project's `.deckhand/apps.json` (`app_declared` lists them), for example
   `{"apps":[{"name":"sandbox","argv":["build/engine-desk","build/sandbox.dylib"],"cwd":"."}]}`.
   The tab bar's `+` menu and the palette list those entries ("New app tab › sandbox").
   `argv` runs anything (Home's agent can already run shells). The cwd must be inside the project.
@@ -74,7 +75,7 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
   behind the user's view, and the user sees and stops the tab like any other (its close button;
   `app_close` and `app_restart` let the agent manage the ones in its session). Read-only chats
   open, restart and close none (a read-only pi chat has no app tools at all: pi's `--tools` allowlist).
-- **apps.json's trust model.** `.pi-desk/apps.json` is a file in the project, so any agent that
+- **apps.json's trust model.** `.deckhand/apps.json` is a file in the project, so any agent that
   can write the project can write it: a name limits nothing by itself. An entry runs with **the
   agent's own authority**: an agent that can write apps.json can already run that program from
   its own shell, so Deckhand adds no question of its own. A pi tab opens a declared entry at once.
@@ -89,8 +90,10 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
   and Home's come to the front.
 - `posix_spawn` with no PTY, in its own process group. stdout and stderr go to a 2000-line ring
   and to `<data dir>/apps/<tab_id>.log`, which the tab's **Log** button opens.
-- Env: the parent's env minus the `PI_DESK_*` and `PI_KIT_*` variables, plus `PI_DESK_SOCKET`,
-  `PI_DESK_TOKEN` (fresh, single-use, caller `app`, bound to this tab) and `PI_DESK_APP=1`.
+- Env: the parent's env minus Deckhand's own variables (the ones it sets in tabs, any old
+  `PI_DESK_*`, the test hooks: `src/env_names.odin`) and `PI_KIT_*`, plus `DECKHAND_SOCKET`,
+  `DECKHAND_TOKEN` (fresh, single-use, caller `app`, bound to this tab) and `DECKHAND_APP=1`, each
+  also under its old name (`PI_DESK_SOCKET`, `PI_DESK_TOKEN`, `PI_DESK_APP`) until 0.2.0.
 - **Owner:** the session that holds the tab. Its pi tab may drive this tab. That is the same
   exception to the self-reference rule as browser tabs (BROWSER §4.1). Atlas reaches it through
   `control`.
@@ -100,10 +103,10 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
 **Hello** (engine → Deckhand, first line):
 
 ```json
-{"id":"1","v":1,"type":"hello","token":"<PI_DESK_TOKEN>","app":"my-engine","pid":4321}
-{"id":"1","v":1,"type":"result","result":{"ok":true,"data":{"v":1,"app":"pi-desk","caller":"app","tab_id":9,
+{"id":"1","v":1,"type":"hello","token":"<DECKHAND_TOKEN>","app":"my-engine","pid":4321}
+{"id":"1","v":1,"type":"result","result":{"ok":true,"data":{"v":1,"app":"deckhand","caller":"app","tab_id":9,
  "capabilities":["app","frames","input"],"reconnect_token":"<64 hex>",
- "frames":{"service":"dev.pi-desk.frames.812","key":"<64 hex>","device":4294969123}}}}
+ "frames":{"service":"dev.deckhand.frames.812","key":"<64 hex>","device":4294969123}}}}
 ```
 
 `device` is Deckhand's `MTLDevice.registryID`. The engine must render on that same GPU (pick it
@@ -197,7 +200,7 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
 - An `SMAppService` agent would add login-item approval UI, need a signed bundle in every dev
   build, and add a launchd job, all to move three ports.
 - Neither side is sandboxed: Deckhand is not, and the engine is a dev build. A sandboxed producer
-  would need a `mach-lookup` temporary-exception entitlement for `dev.pi-desk.frames.*`; noted,
+  would need a `mach-lookup` temporary-exception entitlement for `dev.deckhand.frames.*`; noted,
   not needed.
 - Code: `src/native/frames_macos.m`, plain C with ObjC only for Metal.
   - The *serve* half is Deckhand's.
@@ -206,7 +209,7 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
 
 **Bootstrap.**
 - **Check in once per process.** At its first app tab, Deckhand calls
-  `bootstrap_check_in(bootstrap_port, "dev.pi-desk.frames.<pid>", &recv)` and keeps the receive
+  `bootstrap_check_in(bootstrap_port, "dev.deckhand.frames.<pid>", &recv)` and keeps the receive
   right until it quits. A second check-in of the same name fails with 1103
   (`BOOTSTRAP_SERVICE_ACTIVE`), so later tabs reuse the port. A dispatch source on it runs on a
   serial background queue.
@@ -321,9 +324,9 @@ change trims padded IOSurface edges: `w`/`h` come from the view rect, not the su
 user of the ring and its tests already exist.
 
 **Done (branch `cef-ring`, after step 1).** The local producer is a *local channel* in
-`frames_macos.m`: the same ring stores, poll, `pd_frames_retire`/`pd_frames_committed` and
-`ring_freeable` as an app tab, with no Mach peer. `pd_frames_local_acquire` gives CEF a free slot
-(or the slot of a frame not yet polled, which was never drawn), `pd_frames_local_frame` is FRAME
+`frames_macos.m`: the same ring stores, poll, `dh_frames_retire`/`dh_frames_committed` and
+`ring_freeable` as an app tab, with no Mach peer. `dh_frames_local_acquire` gives CEF a free slot
+(or the slot of a frame not yet polled, which was never drawn), `dh_frames_local_frame` is FRAME
 in process, and RELEASE marks the slot free at the moments it would be sent to an app. Hidden
 tabs give frames back at once, never the shown slot. Two differences from an app: the ring
 follows the size CEF paints at, with headroom (rounded up to 256 px; each frame carries its
@@ -552,7 +555,7 @@ Loaded in every pi; inert when no app is reachable.
   Deckhand.
 
 **Behaviour.**
-- **Startup:** hello with `PI_DESK_TOKEN`, then the Mach `HELLO`, then wait for `RING`.
+- **Startup:** hello with `DECKHAND_TOKEN`, then the Mach `HELLO`, then wait for `RING`.
 - **Loop at 60 Hz** (a `mach_wait_until` timer). When not paused: `tick += round(scale)` (scale
   < 1 ticks every 1/scale frames). Then render if a slot is held.
 - **Render, with no shaders:**
@@ -597,7 +600,7 @@ Loaded in every pi; inert when no app is reachable.
 - **Logs** `tab.log` once a second, and `tab.reload {kind:"script"}` on `SIGUSR1`.
 
 **New autotest commands:**
-- `app_open NAME|ARGV…` (from a fixture `.pi-desk/apps.json`);
+- `app_open NAME|ARGV…` (from a fixture `.deckhand/apps.json`);
 - `app_waitframe [SEQ] [MS]`;
 - `assert_app_pixel X Y RRGGBB` (reads the shown IOSurface);
 - `app_call JSON WANT_SUBSTRING`;
@@ -652,8 +655,8 @@ Step 1 carries the most risk: it is native IPC and process-lifetime code.
 
 ## Engine side: what an engine implements
 
-1. A **desk host** (beside the engine's normal windowed host): no sokol_app window. It reads `PI_DESK_SOCKET` and
-   `PI_DESK_TOKEN`, sends `hello` (§1), swaps in the `reconnect_token`, and drains NDJSON on a
+1. A **desk host** (beside the engine's normal windowed host): no sokol_app window. It reads `DECKHAND_SOCKET` and
+   `DECKHAND_TOKEN`, sends `hello` (§1), swaps in the `reconnect_token`, and drains NDJSON on a
    background thread into the per-frame mailbox.
 2. **Metal setup:** pick the `MTLDevice` whose `registryID` matches the hello's `frames.device`,
    then `sg_setup` with it and no swapchain.

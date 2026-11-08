@@ -20,7 +20,7 @@ they are built from; --build to build anyway, --no-build to skip: each scene sti
 build/deckhand), runs -j scenes at a time (scenes that share a lock tag one at a time,
 --cef-jobs Chromium scenes at a time), retries a failed scene once and reports it as FLAKY if
 the retry passes, then prints a table: result, time, log. Each scene stops at its first failed
-check or wait (PI_DESK_SCRIPT_FAIL_FAST=1; --no-fail-fast to run every line) and is killed after
+check or wait (DECKHAND_SCRIPT_FAIL_FAST=1; --no-fail-fast to run every line) and is killed after
 its timeout (3x its typical time, at least 120 s; --timeout to set one for all); a failed or
 killed scene says which script line it was on (build/scenes/<scene>.step). Logs: build/scenes/<scene>.log (the
 first, failed attempt of a retried scene: <scene>.1.log). Exit status 1 if a scene failed both
@@ -322,7 +322,7 @@ def kill_tree(pid):
 # tests/scripts/fresh-build.sh checks most of it too): the build is skipped when every file here is
 # older than the output and the list of files is the one the last build saw (a deleted or renamed
 # file changes it: build/<output>.inputs)
-APP_INPUTS = ["src", "tools/pi-desk-cli", "integrations/claude-code", "integrations/pi/extensions",
+APP_INPUTS = ["src", "tools/deckhand-cli", "integrations/claude-code", "integrations/pi/extensions",
               "integrations/pi/lib", "integrations/pi/skills", "integrations/pi/extensions.json",
               "integrations/pi/package.json", "integrations/pi/README.md", "build.sh", "scripts/bundle-app.sh", "scripts/sign.sh",
               "scripts/fetch-cef.sh", "scripts/check-minos.sh", "scripts/entitlements", "assets", "vendor",
@@ -389,7 +389,7 @@ def mem_need(s):
 
 
 def last_step(name):
-    """The script line the scene was on (PI_DESK_SCRIPT_STEP: src/autotest.odin), or ""."""
+    """The script line the scene was on (DECKHAND_SCRIPT_STEP: src/autotest.odin), or ""."""
     try:
         return open(os.path.join(LOGS, name + ".step"), errors="replace").read().strip()
     except OSError:
@@ -449,7 +449,7 @@ class Runner:
             os.remove(step)
         except FileNotFoundError:
             pass
-        env = dict(os.environ, PI_DESK_SCRIPT_STEP=step, PI_DESK_SCRIPT_FAIL_FAST="1" if self.fail_fast else "0")
+        env = dict(os.environ, DECKHAND_SCRIPT_STEP=step, DECKHAND_SCRIPT_FAIL_FAST="1" if self.fail_fast else "0")
         with open(log, "w") as fh:
             fh.write(f"# {s.name}: {s.command}   (started {time.strftime('%H:%M:%S')}, load {os.getloadavg()[0]:.1f}, "
                      f"timeout {timeout:.0f} s)\n")
@@ -572,7 +572,7 @@ def main():
                     help="the whole run's budget: past it no scene starts and running ones are killed, so "
                     "the summary prints before a CI job's timeout (SCENE_MAX_MINUTES; default 0: none)")
     ap.add_argument("--no-fail-fast", action="store_true", help="run every script line after a failure "
-                    "(PI_DESK_SCRIPT_FAIL_FAST=0): to see all of a script's failures at once")
+                    "(DECKHAND_SCRIPT_FAIL_FAST=0): to see all of a script's failures at once")
     ap.add_argument("--no-build", action="store_true")
     ap.add_argument("--build", action="store_true", help="build even when build/deckhand and build/fake-app look fresh")
     ap.add_argument("--strict", action="store_true", help="a flaky scene fails the run")

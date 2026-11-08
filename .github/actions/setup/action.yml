@@ -27,7 +27,7 @@ runs:
       with:
         # scripts/fetch-cef.sh keeps the archive in downloads/ and the unpacked tree beside it,
         # and re-checks the archive's SHA-256 before reusing a cached tree
-        path: ~/Library/Caches/pi-desk/cef
+        path: ~/Library/Caches/deckhand/cef
         key: cef-${{ runner.os }}-arm64-${{ hashFiles('vendor/cef/VERSION') }}
 
     - name: Git identity for scenes that make commits

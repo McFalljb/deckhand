@@ -2,7 +2,7 @@ package main
 
 // Claude in chats and the read-only profile (claude.odin; docs/CLAUDE.md §1a, §3): Claude-only
 // chats and Claude tabs in pi chats. With chats read-only off they are like a project's; with it
-// on, every start of such a tab (new, resume, restore, restart; any caller) gets pi-desk's
+// on, every start of such a tab (new, resume, restore, restart; any caller) gets Deckhand's
 // profile last in argv, the user's flags only from a short list; the profile is the tab's (saved,
 // restored, kept by an agent's resume) and its token may not act on pages or apps.
 
@@ -26,7 +26,7 @@ CH_CONTROL :: Caller{kind = .Control}
 
 @(private = "file")
 ch_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-ch-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-ch-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -34,7 +34,7 @@ ch_dir :: proc(tag: string) -> string {
 }
 
 // A fresh state with a Chats entry (temp HOME and data dir); claude's argv goes to argf and its
-// PI_DESK_CLAUDE_READONLY to envf at each start.
+// DECKHAND_CLAUDE_READONLY to envf at each start.
 @(private = "file")
 Ch_Env :: struct {
 	home, root, argf, envf, cli: string,
@@ -53,9 +53,9 @@ ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	if !keep_dirs {
 		env.home = ch_dir("home")
@@ -66,7 +66,7 @@ ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 		// the CLI's path, with a space and a quote (the hook's command line quotes it)
 		cdir := fmt.aprintf("%s/it's here", ch_dir("cli"))
 		os.make_directory_all(cdir)
-		env.cli = fmt.aprintf("%s/pi-desk-cli", cdir)
+		env.cli = fmt.aprintf("%s/deckhand-cli", cdir)
 		_ = os.write_entire_file(env.cli, transmute([]u8)string("#!/bin/sh\nexit 0\n"))
 	}
 	claude_cli_override = env.cli
@@ -74,7 +74,7 @@ ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 	home_root = env.root
 	// the environment first, the argv last: once ch_argv sees this start's argv, its env file is
 	// there too (a start's env written after the next start's ch_clear would be read as the next's)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s' "${{PI_DESK_CLAUDE_READONLY:-unset}}" > '%s.tmp'; mv '%s.tmp' '%s'; printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, env.envf, env.envf, env.envf, env.argf, env.argf, env.argf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s' "${{DECKHAND_CLAUDE_READONLY:-unset}}" > '%s.tmp'; mv '%s.tmp' '%s'; printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, env.envf, env.envf, env.envf, env.argf, env.argf, env.argf))
 	rescan_now()
 	return runtime.heap_allocator()
 }
@@ -126,7 +126,7 @@ ch_after :: proc(argv: []string, f: string) -> string {
 	return ""
 }
 
-// pi-desk's read-only profile, last in argv, and its environment variable
+// Deckhand's read-only profile, last in argv, and its environment variable
 @(private = "file")
 ch_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #caller_location) {
 	joined := strings.join(argv, " ", context.temp_allocator)
@@ -168,7 +168,7 @@ ch_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #caller_l
 		cmd := string(h["command"].(json.String) or_else "")
 		testing.expectf(t, strings.has_prefix(cmd, claude_sh_quote(env.cli)) && strings.has_suffix(cmd, " hook readonly || exit 2"), "guard command: %s", cmd, loc = loc)
 	}
-	testing.expectf(t, ch_env_ro(env) == "1", "PI_DESK_CLAUDE_READONLY=1", loc = loc)
+	testing.expectf(t, ch_env_ro(env) == "1", "DECKHAND_CLAUDE_READONLY=1", loc = loc)
 }
 
 @(private = "file")
@@ -176,7 +176,7 @@ ch_not_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #call
 	joined := strings.join(argv, " ", context.temp_allocator)
 	testing.expectf(t, len(argv) > 0, "claude started", loc = loc)
 	testing.expectf(t, !ch_has(argv, "--disallowedTools") && !ch_has(argv, "plan") && !ch_has(argv, "--settings"), "no read-only profile: %s", joined, loc = loc)
-	testing.expectf(t, ch_env_ro(env) == "unset", "no PI_DESK_CLAUDE_READONLY", loc = loc)
+	testing.expectf(t, ch_env_ro(env) == "unset", "no DECKHAND_CLAUDE_READONLY", loc = loc)
 }
 
 // The user's flags a read-only tab keeps (an allowlist), the first it refuses.
@@ -291,7 +291,7 @@ ch_chats_readonly_new :: proc(t: ^testing.T) {
 	ch_not_readonly(t, env, ch_argv(env))
 }
 
-// Without pi-desk's CLI (the guard) a read-only tab does not start: never read-only without it.
+// Without Deckhand's CLI (the guard) a read-only tab does not start: never read-only without it.
 @(test)
 ch_readonly_needs_guard :: proc(t: ^testing.T) {
 	env: Ch_Env
@@ -387,7 +387,7 @@ ch_readonly_kept :: proc(t: ^testing.T) {
 	ch_readonly(t, env, ch_argv(env))
 }
 
-// A read-only tab's token may read pages but not act on them or on apps (pi-desk refuses it
+// A read-only tab's token may read pages but not act on them or on apps (Deckhand refuses it
 // whatever the guard let through).
 @(test)
 ch_readonly_no_act :: proc(t: ^testing.T) {
@@ -464,7 +464,7 @@ ch_guard_fails_closed :: proc(t: ^testing.T) {
 		_ = os.write_entire_file(path, transmute([]u8)strings.concatenate({"#!/bin/sh\n", body, "\n"}, context.temp_allocator))
 		posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	}
-	cli := fmt.tprintf("%s/pi-desk-cli", dir)
+	cli := fmt.tprintf("%s/deckhand-cli", dir)
 	sh :: proc(c: string) -> string {return fmt.tprintf("/bin/sh -c %s", claude_sh_quote(c))}
 	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 2) // missing
 	script(cli, "exit 1")
@@ -666,7 +666,7 @@ ch_readonly_polish :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(run_command(Browser_Hover{tab_id = 1}, me).error, "read-only"))
 }
 
-// Nothing pi-desk types (an agent's held message, Restart with model's /model) goes into a
+// Nothing Deckhand types (an agent's held message, Restart with model's /model) goes into a
 // read-only tab before its ack: a prompt before the ack would stop it (claude_ready waits).
 @(test)
 ch_ack_holds_messages :: proc(t: ^testing.T) {

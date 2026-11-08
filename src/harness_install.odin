@@ -9,7 +9,7 @@ package main
 //     short script that prints the exact command, refuses to install a harness that is already
 //     there (`command -v`, its managed install: never a second copy), runs the command and says
 //     how it ended.
-//   - Test mode never runs a real install: PI_DESK_INSTALL_CMD stands in (it gets the item's id
+//   - Test mode never runs a real install: DECKHAND_INSTALL_CMD stands in (it gets the item's id
 //     and the command as "$@"); without it the run prints a refusal and exits 127.
 //   - When it ends, the checklist looks everything up again (harness_checklist_refresh(full)), pi's
 //     version too; the existing restart bars take over for tabs on an old version.
@@ -138,7 +138,7 @@ harness_run_script :: proc(r: Harness_Row, action: Harness_Action, plan: Harness
 }
 
 // The argv that runs it: the login shell (or /bin/sh for fish and co.); in test mode the stand-in
-// (PI_DESK_INSTALL_CMD, given the item's id and the command, after the same prelude: no sudo), or
+// (DECKHAND_INSTALL_CMD, given the item's id and the command, after the same prelude: no sudo), or
 // a refusal (refused = true).
 harness_run_argv :: proc(r: Harness_Row, action: Harness_Action, plan: Harness_Run_Plan, test: bool, stand_in: string) -> (argv: [dynamic]string, refused: bool) {
 	if test {

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A fake pi for tests/scripts/comments.sh: a pi-like screen and the pi integration's bridge over pi-desk's
+"""A fake pi for tests/scripts/comments.sh: a pi-like screen and the pi integration's bridge over Deckhand's
 socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN), playing the pending-comments half of the
 pi-tab schema (docs/PROTOCOL.md §4):
   pi.attach        kept (the next typed line takes it); logged with its image count, whether

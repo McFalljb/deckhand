@@ -44,7 +44,7 @@ tt_reset :: proc() -> runtime.Allocator {
 	temp_roots_override = NO_TEMP_ROOTS[:]
 	platform = {quit = proc() {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 
@@ -294,7 +294,7 @@ tidy_tree :: proc(t: ^testing.T) {
 	testing.expect(t, run_command(Select_Project{project_id = notes.id}).ok)
 	testing.expect_value(t, len(state.sessions), 1)
 	out := fmt.aprintf("%s/args", w)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`echo "$* CWD=$(pwd)" > '%s'; exec sleep 30`, out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`echo "$* CWD=$(pwd)" > '%s'; exec sleep 30`, out))
 	r := run_command(Open_Session_Cmd{project_id = notes.id, pi_session_id = "n-1"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	args := ""
@@ -524,22 +524,22 @@ tidy_tree_follows_open :: proc(t: ^testing.T) {
 	for _, x in terms do reader_stop_and_close(x)
 }
 
-// PI_DESK_TEMP_ROOTS names the temp folders only in script mode (autotest
+// DECKHAND_TEMP_ROOTS names the temp folders only in script mode (autotest
 // running), and an empty piece is no root (it would make every path temp).
 @(test)
 tidy_temp_roots_env :: proc(t: ^testing.T) {
 	context.allocator = tt_reset()
 	temp_roots_override = nil
 	defer temp_roots_override = NO_TEMP_ROOTS[:]
-	old_script := strings.clone(os.get_env("PI_DESK_SCRIPT", context.temp_allocator), context.temp_allocator)
-	defer os.set_env("PI_DESK_SCRIPT", old_script)
-	defer os.unset_env("PI_DESK_TEMP_ROOTS")
+	old_script := strings.clone(os.get_env("DECKHAND_SCRIPT", context.temp_allocator), context.temp_allocator)
+	defer os.set_env("DECKHAND_SCRIPT", old_script)
+	defer os.unset_env("DECKHAND_TEMP_ROOTS")
 	was := autotest.active
 	defer autotest.active = was
-	os.set_env("PI_DESK_TEMP_ROOTS", "/pd-a::/pd-b:")
-	// not running a script: the env var (even with PI_DESK_SCRIPT set) is ignored
+	os.set_env("DECKHAND_TEMP_ROOTS", "/pd-a::/pd-b:")
+	// not running a script: the env var (even with DECKHAND_SCRIPT set) is ignored
 	autotest.active = false
-	os.set_env("PI_DESK_SCRIPT", "x.txt")
+	os.set_env("DECKHAND_SCRIPT", "x.txt")
 	testing.expect(t, slice.contains(temp_roots(), "/tmp"), "the system's roots")
 	// running a script: just the named ones, no empty piece
 	autotest.active = true

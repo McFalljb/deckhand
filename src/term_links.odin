@@ -520,7 +520,7 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]Menu_Item) {
 
 // ---- the command ----
 
-// Whether http(s) links can open in pi-desk's own browser.
+// Whether http(s) links can open in Deckhand's own browser.
 @(private = "file")
 browser_usable :: proc() -> bool {return CEF_BUILT_IN && cef_state != .Failed}
 

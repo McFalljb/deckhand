@@ -1,11 +1,11 @@
 package main
 
 // Browser tabs, step 3: tab polish (docs/BROWSER.md §6, "Step 3 results"). What CEF expects from
-// its host besides painting, drawn and decided by pi-desk (the shim only translates:
+// its host besides painting, drawn and decided by Deckhand (the shim only translates:
 // src/native/cef_polish.inc):
 //
 //  - the page's cursor and tooltips (the pointer over the page);
-//  - a right-click menu drawn by pi-desk (Chromium's own is emptied): Back, Forward, Reload; Cut,
+//  - a right-click menu drawn by Deckhand (Chromium's own is emptied): Back, Forward, Reload; Cut,
 //    Copy, Paste, Select all; Open link in new tab (in this tab's session: a tab never leaves its
 //    session, and neither do the tabs it opens), Copy link; Inspect;
 //  - JS dialogs (alert, confirm, prompt, beforeunload) as a bar in the tab: OK / Cancel;
@@ -27,7 +27,7 @@ package main
 // them is offered to agents (that is steps 7 and 8, with their own permissions).
 //
 // DPI changes (moving the window between displays) were already followed by browser_tick
-// (pd_cef_resize passes the scale: NotifyScreenInfoChanged + WasResized); the ring follows the
+// (dh_cef_resize passes the scale: NotifyScreenInfoChanged + WasResized); the ring follows the
 // new paint size.
 //
 // Runtime per tab (Page_Extra, keyed by tab id like the comment mode's Annot) holds what the page
@@ -62,44 +62,44 @@ Cef_Polish_Callbacks :: struct {
 	file_dialog:   proc "c" (id: c.int) -> c.int, // a native file chooser opens: 1 = cancel it
 }
 
-when PI_DESK_CEF && ODIN_OS == .Darwin {
+when DECKHAND_CEF && ODIN_OS == .Darwin {
 	foreign import pdcef_polish {
-		"../build/pd_cef.a",
+		"../build/dh_cef.a",
 		"system:CoreServices.framework", // LaunchServices' quarantine keys (cef_polish.inc)
 	}
 
 	@(default_calling_convention = "c")
 	foreign pdcef_polish {
-		pd_cef_polish_callbacks_set :: proc(cbs: ^Cef_Polish_Callbacks) ---
-		pd_cef_edit :: proc(id: c.int, op: c.int) ---
-		pd_cef_dialog_answer :: proc(id: c.int, ok: c.int, text: cstring) -> c.int ---
-		pd_cef_find :: proc(id: c.int, text: cstring, forward, next: c.int) ---
-		pd_cef_find_stop :: proc(id: c.int) ---
-		pd_cef_zoom_get :: proc(id: c.int) -> f64 ---
-		pd_cef_zoom_set :: proc(id: c.int, level: f64) ---
-		pd_cef_download_cancel :: proc(dl: u32) ---
-		pd_cef_download_answer :: proc(id: c.int, dl: u32, path: cstring) -> c.int ---
-		pd_cef_permission_answer :: proc(id: c.int, allow: c.int) -> c.int ---
-		pd_cef_devtools_show :: proc(id: c.int, x, y: c.int) -> c.int ---
-		pd_cef_devtools_open :: proc(id: c.int) -> c.int ---
-		pd_cef_devtools_close :: proc(id: c.int) ---
-		pd_cef_test_crash :: proc(id: c.int) ---
+		dh_cef_polish_callbacks_set :: proc(cbs: ^Cef_Polish_Callbacks) ---
+		dh_cef_edit :: proc(id: c.int, op: c.int) ---
+		dh_cef_dialog_answer :: proc(id: c.int, ok: c.int, text: cstring) -> c.int ---
+		dh_cef_find :: proc(id: c.int, text: cstring, forward, next: c.int) ---
+		dh_cef_find_stop :: proc(id: c.int) ---
+		dh_cef_zoom_get :: proc(id: c.int) -> f64 ---
+		dh_cef_zoom_set :: proc(id: c.int, level: f64) ---
+		dh_cef_download_cancel :: proc(dl: u32) ---
+		dh_cef_download_answer :: proc(id: c.int, dl: u32, path: cstring) -> c.int ---
+		dh_cef_permission_answer :: proc(id: c.int, allow: c.int) -> c.int ---
+		dh_cef_devtools_show :: proc(id: c.int, x, y: c.int) -> c.int ---
+		dh_cef_devtools_open :: proc(id: c.int) -> c.int ---
+		dh_cef_devtools_close :: proc(id: c.int) ---
+		dh_cef_test_crash :: proc(id: c.int) ---
 	}
 } else {
-	pd_cef_polish_callbacks_set :: proc(cbs: ^Cef_Polish_Callbacks) {}
-	pd_cef_edit :: proc(id: c.int, op: c.int) {}
-	pd_cef_dialog_answer :: proc(id: c.int, ok: c.int, text: cstring) -> c.int {return 0}
-	pd_cef_find :: proc(id: c.int, text: cstring, forward, next: c.int) {}
-	pd_cef_find_stop :: proc(id: c.int) {}
-	pd_cef_zoom_get :: proc(id: c.int) -> f64 {return 0}
-	pd_cef_zoom_set :: proc(id: c.int, level: f64) {}
-	pd_cef_download_cancel :: proc(dl: u32) {}
-	pd_cef_download_answer :: proc(id: c.int, dl: u32, path: cstring) -> c.int {return 0}
-	pd_cef_permission_answer :: proc(id: c.int, allow: c.int) -> c.int {return 0}
-	pd_cef_devtools_show :: proc(id: c.int, x, y: c.int) -> c.int {return 0}
-	pd_cef_devtools_open :: proc(id: c.int) -> c.int {return 0}
-	pd_cef_devtools_close :: proc(id: c.int) {}
-	pd_cef_test_crash :: proc(id: c.int) {}
+	dh_cef_polish_callbacks_set :: proc(cbs: ^Cef_Polish_Callbacks) {}
+	dh_cef_edit :: proc(id: c.int, op: c.int) {}
+	dh_cef_dialog_answer :: proc(id: c.int, ok: c.int, text: cstring) -> c.int {return 0}
+	dh_cef_find :: proc(id: c.int, text: cstring, forward, next: c.int) {}
+	dh_cef_find_stop :: proc(id: c.int) {}
+	dh_cef_zoom_get :: proc(id: c.int) -> f64 {return 0}
+	dh_cef_zoom_set :: proc(id: c.int, level: f64) {}
+	dh_cef_download_cancel :: proc(dl: u32) {}
+	dh_cef_download_answer :: proc(id: c.int, dl: u32, path: cstring) -> c.int {return 0}
+	dh_cef_permission_answer :: proc(id: c.int, allow: c.int) -> c.int {return 0}
+	dh_cef_devtools_show :: proc(id: c.int, x, y: c.int) -> c.int {return 0}
+	dh_cef_devtools_open :: proc(id: c.int) -> c.int {return 0}
+	dh_cef_devtools_close :: proc(id: c.int) {}
+	dh_cef_test_crash :: proc(id: c.int) {}
 }
 
 // cef_permission_request_types_t bits the bars name
@@ -429,7 +429,7 @@ download_open_check :: proc(d: ^Page_Download) -> string {
 	return ""
 }
 
-// CEF's own path for d, when it differs from the one pi-desk gave it.
+// CEF's own path for d, when it differs from the one Deckhand gave it.
 download_note_path :: proc(d: ^Page_Download, path: string) {
 	if path == "" || path == d.path do return
 	set_owned(&d.path, path)
@@ -721,8 +721,8 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		if err == "" do err = live(b)
 		if err != "" do return fail(err), false
 		p := page_extra(c.tab_id)
-		level := zoom_next(pd_cef_zoom_get(b.cef), c.step)
-		pd_cef_zoom_set(b.cef, level)
+		level := zoom_next(dh_cef_zoom_get(b.cef), c.step)
+		dh_cef_zoom_set(b.cef, level)
 		p.zoom_level = level
 		page_zoom_to_annot(c.tab_id, level)
 		return {ok = true}, true
@@ -735,21 +735,21 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		p.find_open = true
 		set_owned(&p.find_text, c.text)
 		if c.text == "" {
-			pd_cef_find_stop(b.cef)
+			dh_cef_find_stop(b.cef)
 			p.find_matches, p.find_active = 0, 0
 		} else {
 			t := strings.clone_to_cstring(c.text, context.temp_allocator)
 			// a new text: CEF's first request (a new session) highlights without selecting; the
 			// follow-up selects the first match, as typing in Chrome's find bar does
-			if !again do pd_cef_find(b.cef, t, c.back ? 0 : 1, 0)
-			pd_cef_find(b.cef, t, c.back ? 0 : 1, 1)
+			if !again do dh_cef_find(b.cef, t, c.back ? 0 : 1, 0)
+			dh_cef_find(b.cef, t, c.back ? 0 : 1, 1)
 		}
 		return {ok = true}, true
 	case Browser_Find_Close:
 		_, _, b, err := target(c.tab_id)
 		if err != "" do return fail(err), false
 		p := page_extra(c.tab_id)
-		if b != nil && b.cef != 0 do pd_cef_find_stop(b.cef)
+		if b != nil && b.cef != 0 do dh_cef_find_stop(b.cef)
 		p.find_open, p.find_matches, p.find_active = false, 0, 0
 		set_owned(&p.find_text, "")
 		if page_find_tab == c.tab_id do run_command(Focus_Release{widget = "browser_find"})
@@ -759,7 +759,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		if err == "" do err = live(b)
 		if err != "" do return fail(err), false
 		p := page_extra(c.tab_id)
-		if !p.dialog || pd_cef_dialog_answer(b.cef, c.ok ? 1 : 0, strings.clone_to_cstring(c.text, context.temp_allocator)) == 0 do return fail("no dialog is open"), false
+		if !p.dialog || dh_cef_dialog_answer(b.cef, c.ok ? 1 : 0, strings.clone_to_cstring(c.text, context.temp_allocator)) == 0 do return fail("no dialog is open"), false
 		page_dialog_clear(p) // and the answer field, when it was this tab's
 		return {ok = true}, true
 	case Browser_Permission:
@@ -767,7 +767,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		if err == "" do err = live(b)
 		if err != "" do return fail(err), false
 		p := page_extra(c.tab_id)
-		if p.perm == 0 || pd_cef_permission_answer(b.cef, c.allow ? 1 : 0) == 0 do return fail("nothing is asked"), false
+		if p.perm == 0 || dh_cef_permission_answer(b.cef, c.allow ? 1 : 0) == 0 do return fail("nothing is asked"), false
 		p.perm = 0
 		set_owned(&p.perm_origin, "")
 		return {ok = true}, true
@@ -782,7 +782,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 			set_owned(&p.popup_url, "")
 		}
 		if !c.open do return {ok = true}, true
-		// the page's own address for it: an address pi-desk opens (http, https, file, pidesk-test)
+		// the page's own address for it: an address Deckhand opens (http, https, file, deckhand-test)
 		nurl, nerr := browser_url_normalize(url)
 		if nerr != "" do return fail(nerr), true
 		if !file_link_ok(bt.url, nurl) do return fail("a file: address opens from a file: page only"), true
@@ -794,7 +794,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
 		if err != "" do return fail(err), false
-		pd_cef_edit(b.cef, i32(c.op))
+		dh_cef_edit(b.cef, i32(c.op))
 		return {ok = true}, false
 	case Browser_Devtools:
 		_, _, b, err := target(c.tab_id)
@@ -802,10 +802,10 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		if err != "" do return fail(err), false
 		p := page_extra(c.tab_id)
 		if c.close {
-			pd_cef_devtools_close(b.cef)
+			dh_cef_devtools_close(b.cef)
 			p.devtools = false
 		} else {
-			if pd_cef_devtools_show(b.cef, c.x, c.y) == 0 do return fail("DevTools could not open"), false
+			if dh_cef_devtools_show(b.cef, c.x, c.y) == 0 do return fail("DevTools could not open"), false
 			p.devtools = true
 		}
 		return {ok = true}, true
@@ -837,7 +837,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 				set_owned(&p.ask_url, "")
 				if b == nil || b.cef == 0 do return fail("the page is not loaded"), true
 				if c.op == .Block {
-					pd_cef_download_answer(b.cef, id, nil)
+					dh_cef_download_answer(b.cef, id, nil)
 					fmt.printfln("[browser] download %d blocked: %s", id, name)
 					return {ok = true}, true
 				}
@@ -845,11 +845,11 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 				os.make_directory_all(dir)
 				path := download_reserve(dir, name)
 				if path == "" {
-					pd_cef_download_answer(b.cef, id, nil)
+					dh_cef_download_answer(b.cef, id, nil)
 					return fail(fmt.tprintf("no free name for %q in the downloads folder", name)), true
 				}
 				download_record(tab_id, id, path, url)
-				if pd_cef_download_answer(b.cef, id, strings.clone_to_cstring(path, context.temp_allocator)) == 0 && CEF_BUILT_IN {
+				if dh_cef_download_answer(b.cef, id, strings.clone_to_cstring(path, context.temp_allocator)) == 0 && CEF_BUILT_IN {
 					os.remove(path) // CEF no longer waits for it: the empty file goes
 					if d := download_find(id); d != nil do d.state = .Failed
 					return fail("the download is gone"), true
@@ -871,7 +871,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 			if platform.reveal != nil do platform.reveal(d.path)
 		case .Cancel:
 			if d.state != .Going do return fail("the download is not running"), false
-			pd_cef_download_cancel(d.id)
+			dh_cef_download_cancel(d.id)
 		case .Dismiss:
 			d.dismissed = true
 		case .Allow, .Block: // above
@@ -1041,7 +1041,7 @@ on_page_menu :: proc "c" (id: c.int, flags, edit: c.int, link: cstring) {
 	RIGHT :: c.int(1 << 6)
 	if b.buttons & RIGHT != 0 {
 		b.buttons &~= RIGHT
-		pd_cef_mouse_click(b.cef, b.last_x, b.last_y, b.buttons, 2, 1, 1)
+		dh_cef_mouse_click(b.cef, b.last_x, b.last_y, b.buttons, 2, 1, 1)
 	}
 	r := tab_rect(b.tab_id)
 	at := [2]f32{r.x + f32(b.last_x) * app.dpi, r.y + f32(b.last_y) * app.dpi}
@@ -1139,7 +1139,7 @@ download_free :: proc(d: ^Page_Download) {
 on_page_download :: proc "c" (id: c.int, dl: u32, st: c.int, received, total: i64, path: cstring, quarantined: c.int) {
 	context = app_context
 	d := download_find(dl)
-	if d == nil do return // not one pi-desk named (refused, or waiting for its bar)
+	if d == nil do return // not one Deckhand named (refused, or waiting for its bar)
 	was := d.state
 	d.received, d.total = received, total
 	download_note_path(d, string(path)) // CEF's own, when it differs
@@ -1205,7 +1205,7 @@ on_page_navigated :: proc "c" (id: c.int) {
 	p.nav_started = time.tick_now()
 	changed := false
 	if p.ask_id != 0 {
-		pd_cef_download_answer(b.cef, p.ask_id, nil)
+		dh_cef_download_answer(b.cef, p.ask_id, nil)
 		fmt.printfln("[browser] download %d dropped: the page navigated (%s)", p.ask_id, p.ask_name)
 		p.ask_id, p.ask_said = 0, false
 		set_owned(&p.ask_name, "")
@@ -1240,7 +1240,7 @@ browser_polish_tick :: proc() {
 			navigated     = on_page_navigated,
 			file_dialog   = on_page_file_dialog,
 		}
-		pd_cef_polish_callbacks_set(&cbs)
+		dh_cef_polish_callbacks_set(&cbs)
 	}
 	if len(page_extras) == 0 && len(browsers) == 0 do return
 	gone := make([dynamic]u64, context.temp_allocator)
@@ -1266,12 +1266,12 @@ browser_polish_tick :: proc() {
 		}
 		if !tab_on_screen(id) do continue // every page on screen (any pane's)
 		// zoom is Chromium's per host (another tab, a navigation): follow it
-		if pd_cef_ready(b.cef) != 0 {
-			if z := pd_cef_zoom_get(b.cef); abs(z - p.zoom_level) > 0.0001 {
+		if dh_cef_ready(b.cef) != 0 {
+			if z := dh_cef_zoom_get(b.cef); abs(z - p.zoom_level) > 0.0001 {
 				p.zoom_level = z
 				browser_report({tab_id = id})
 			}
-			if d := pd_cef_devtools_open(b.cef) != 0; d != p.devtools {
+			if d := dh_cef_devtools_open(b.cef) != 0; d != p.devtools {
 				p.devtools = d
 				browser_report({tab_id = id})
 			}
@@ -1824,7 +1824,7 @@ size_text :: proc(n: i64) -> string {
 
 // ---- test mode (autotest.odin) ----
 //
-//   page_rclick X Y            a right click at page X,Y (logical px) through pi-desk's event path
+//   page_rclick X Y            a right click at page X,Y (logical px) through Deckhand's event path
 //   page_menu LABEL            click the open menu's row LABEL
 //   page_crash                 the page's renderer dies (chrome://crash)
 //   page_assert cursor NAME    the page's pointer shape (default, hand, ibeam, …)
@@ -1869,7 +1869,7 @@ page_script :: proc(cmd: string, args_raw: []string, rest: string) -> (msg: stri
 		return fmt.tprintf("page_menu: no row %q", rest), false
 	case "page_crash":
 		if b == nil || b.cef == 0 do return "page_crash: no page", false
-		pd_cef_test_crash(b.cef)
+		dh_cef_test_crash(b.cef)
 		return "", true
 	case "page_assert":
 		if len(args) < 1 do return "page_assert cursor|tooltip|menu|revealed|file …", false

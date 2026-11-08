@@ -3,10 +3,10 @@ package main
 // Job notes (docs/ATLAS.md §3.1): `<notes>/jobs/<slug>.md`, one job each.
 // The definition is the frontmatter (a strict flat YAML subset: `key:
 // value`, quoted strings, `[a, b]` lists, `#` comments) plus the `##
-// Prompt` and `## Check` sections. `## Recent runs` is pi-desk's, written by
+// Prompt` and `## Check` sections. `## Recent runs` is Deckhand's, written by
 // the scheduler only (job_note_set_recent). Anything the parser does not
 // know is an error on the job's row, and the job does not run: a job never
-// runs with a key pi-desk does not understand (an `approved: true` too:
+// runs with a key Deckhand does not understand (an `approved: true` too:
 // approval was never a note key, and jobs need none).
 //
 // Also here: the run report (§7: `## Summary`, `## Needs you`) and the
@@ -223,7 +223,7 @@ h2 :: proc(line: string) -> string {
 	return strings.trim_space(l[3:])
 }
 
-// The sections pi-desk reads; any other `## ` heading belongs to the
+// The sections Deckhand reads; any other `## ` heading belongs to the
 // section above it (a prompt may ask for its own headings).
 @(private = "file")
 known_section :: proc(name: string) -> bool {
@@ -421,9 +421,9 @@ job_parse :: proc(text, path: string, allocator: runtime.Allocator) -> (d: Job_D
 	return
 }
 
-// ---- writing the note (pi-desk's parts only) ----
+// ---- writing the note (Deckhand's parts only) ----
 
-RECENT_MARKER :: "<!-- written by pi-desk; edits here are overwritten -->"
+RECENT_MARKER :: "<!-- written by Deckhand; edits here are overwritten -->"
 RECENT_MAX :: 10
 
 // text with its `## Recent runs` section replaced by `lines` (newest
@@ -516,7 +516,7 @@ date: %s
 status: active
 summary: %s
 tags: [job]
-updated_by: pi-desk
+updated_by: deckhand
 id: %s
 enabled: true
 schedule: %s
@@ -698,7 +698,7 @@ note_front_values :: proc(text: string) -> (vals: map[string]string, err: string
 	return vals, "", true
 }
 
-// Whether a line is a level-2 heading pi-desk reads (## Prompt, ## Check, ## Recent runs).
+// Whether a line is a level-2 heading Deckhand reads (## Prompt, ## Check, ## Recent runs).
 note_known_heading :: proc(line: string) -> bool {
 	n := h2(line)
 	return n != "" && known_section(n)

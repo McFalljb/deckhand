@@ -37,7 +37,7 @@ h_reset :: proc(t: ^testing.T, socket := false) {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	h_dir = fmt.aprintf("%s/pd-home-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
 	os.make_directory_all(h_dir)
 	home_root = h_dir
@@ -45,7 +45,7 @@ h_reset :: proc(t: ^testing.T, socket := false) {
 	home_fork_skip = ""
 	if socket {
 		h_pin = pi_integration_for_test(t)
-		os.set_env("PI_DESK_RUNTIME_DIR", fmt.tprintf("%s/run", h_dir))
+		os.set_env("DECKHAND_RUNTIME_DIR", fmt.tprintf("%s/run", h_dir))
 		rdir, ok := sock_runtime_dir(context.temp_allocator)
 		testing.expect(t, ok, "runtime dir")
 		testing.expect(t, socket_start(rdir), "socket_start")
@@ -126,7 +126,7 @@ hc_close :: proc(c: ^Hc) {
 // to files; returns Home's tab and its env tokens (bridge and control).
 @(private = "file")
 h_open_home :: proc(t: ^testing.T) -> (tab: u64, panel_tok, control_tok: string) {
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s/args.tmp; mv %s/args.tmp %s/args; printf %%s "$DECKHAND_TOKEN" > %s/ptok; printf %%s "$DECKHAND_CONTROL_TOKEN" > %s/ctok; exec sleep 30`, h_dir, h_dir, h_dir, h_dir, h_dir))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s/args.tmp; mv %s/args.tmp %s/args; printf %%s "$DECKHAND_TOKEN" > %s/ptok; printf %%s "$DECKHAND_CONTROL_TOKEN" > %s/ctok; exec sleep 30`, h_dir, h_dir, h_dir, h_dir, h_dir))
 	r := run_command(Set_Home{open = true}, H_UI)
 	testing.expect(t, r.ok, r.error)
 	tab = r.created_id
@@ -143,7 +143,7 @@ h_open_home :: proc(t: ^testing.T) -> (tab: u64, panel_tok, control_tok: string)
 // A project session with a shell tab: (session, pi tab, shell tab).
 @(private = "file")
 h_session :: proc(t: ^testing.T) -> (sess, pitab, shell: u64) {
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	if state.selected_project == 0 do run_command(Add_Project{cwd = "/tmp"}, H_UI)
 	sess = run_command(New_Chat{project_id = state.selected_project}, H_UI).created_id
 	testing.expect(t, sess != 0, "new chat")
@@ -440,7 +440,7 @@ close_session_and_home_persist :: proc(t: ^testing.T) {
 	testing.expect_value(t, json_path(state_json(), "open_sessions.1.tabs.0.status"), "not_started")
 	// Home is never the current session and is not focusable as one
 	testing.expect_value(t, run_command(Focus_Session{session = hs.id}, H_UI).error, HOME_NOT_A_SESSION)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s/args.tmp; mv %s/args.tmp %s/args; exec sleep 30`, h_dir, h_dir, h_dir))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s/args.tmp; mv %s/args.tmp %s/args; exec sleep 30`, h_dir, h_dir, h_dir))
 	testing.expect(t, run_command(Set_Home{open = true}, H_UI).ok)
 	for _ in 0 ..< 200 {
 		if os.exists(fmt.tprintf("%s/args", h_dir)) do break
@@ -662,12 +662,12 @@ atlas_cwd_is_the_main_folder :: proc(t: ^testing.T) {
 	main2 := real_path(fmt.aprintf("%s/main2", h_dir))
 	data_home := real_path(home_dir())
 	cmd := fmt.aprintf(`printf '%%s\n' "$@" > %s/args; pwd -P > %s/pwd.tmp; mv %s/pwd.tmp %s/pwd; exec sleep 30`, h_dir, h_dir, h_dir, h_dir)
-	os.set_env("PI_DESK_CMD", cmd)
+	os.set_env("DECKHAND_CMD", cmd)
 	dir := h_dir
 	relaunch := proc(t: ^testing.T, dir, cmd, text: string, main: string) {
 		h_reset(t)
 		h_dir, home_root = dir, dir
-		os.set_env("PI_DESK_CMD", cmd)
+		os.set_env("DECKHAND_CMD", cmd)
 		testing.expect_value(t, workspace_restore(text), "")
 		state.settings.home_dir = main
 	}
@@ -741,7 +741,7 @@ hf_setup :: proc(t: ^testing.T, cwd: string, header := "", restore := true) -> H
 	line := header != "" ? header : fmt.tprintf(`{{"type":"session","version":3,"id":"old-1","cwd":"%s"}}`, at)
 	f.old = fmt.aprintf("%s/2026-10-30T10-00-00-000Z_old-1.jsonl", home_dir())
 	_ = os.write_entire_file(f.old, transmute([]u8)fmt.tprintf("%s\n{{\"type\":\"message\",\"message\":{{\"role\":\"user\",\"content\":\"hi\"}}}}\n", line))
-	os.set_env("PI_DESK_CMD", fmt.tprintf(HF_CMD, h_dir, h_dir, h_dir, h_dir))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(HF_CMD, h_dir, h_dir, h_dir, h_dir))
 	if restore do testing.expect(t, run_command(Restore_Session{pi_session_id = "old-1", home = true}, {kind = .Internal}).ok)
 	return f
 }
@@ -753,7 +753,7 @@ hf_relaunch :: proc(t: ^testing.T, text: string) {
 	h_reset(t)
 	h_dir, home_root = dir, dir
 	persist_init(h_dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(HF_CMD, h_dir, h_dir, h_dir, h_dir))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(HF_CMD, h_dir, h_dir, h_dir, h_dir))
 	testing.expect_value(t, workspace_restore(text), "")
 }
 

@@ -14,8 +14,8 @@ rm -rf "$W"; FAKE_HOME="$W/home"; PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 printf '{"type":"session","version":3,"id":"nnnn-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_nnnn-1.jsonl"
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/browser-netpolicy.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CEF_NETLOG="$W/netlog.json" PI_DESK_CMD='exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/browser-netpolicy.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CEF_NETLOG="$W/netlog.json" DECKHAND_CMD='exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -q "done: .* 0 failed" "$W/run.log" || { echo "netpolicy: the scene failed (log: $W/run.log)"; exit 1; }
 [ -s "$W/netlog.json" ] || { echo "netpolicy: no net-log written"; exit 1; }
 # hosts in URLs and host fields of the log (it may be cut short at exit: read it as text)

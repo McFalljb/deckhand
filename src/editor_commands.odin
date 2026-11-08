@@ -2,7 +2,7 @@ package main
 
 // Editor and file commands (rows in command_table.odin; docs/PROTOCOL.md).
 // run_command (commands.odin) hands them to editor_apply. Agents do not edit
-// buffers: they edit files with their own tools and pi-desk follows the disk
+// buffers: they edit files with their own tools and Deckhand follows the disk
 // (editor_file.odin). They open, inspect, save, move the cursor, resolve a
 // changed-on-disk conflict, and manage files inside project folders.
 

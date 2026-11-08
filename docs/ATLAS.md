@@ -56,7 +56,7 @@ the tab's `claude.turn` and `program_status` events. Atlas itself still runs on 
 The notes root is Deckhand's main folder (setting `home_dir`, formerly `notes_dir`; GUIDE.md
 "Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (Deckhand's
 environment, else read once per start from the login shell) or a notes folder named in pi's
-global AGENTS.md, or `~/pi-desk`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
+global AGENTS.md, or `~/Deckhand`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
 `chats/`) may be overridden. Deckhand passes `PI_KIT_NOTES_DIR=<home_dir>` to every pi tab and
 job run unless the user's own environment sets it (theirs wins).
 
@@ -172,7 +172,7 @@ clamped to 2 min–2 h (cron: the gap to the next fire time; `at`: 2 h). Past th
 is why we run our own clock: launchd's `StartCalendarInterval` coalesces missed fire times into
 one run on wake, with no grace window and no record of what was skipped.
 
-**Scheduled time.** Each run gets `PI_DESK_SCHEDULED_AT=<ISO time>` (the tick it serves, not the
+**Scheduled time.** Each run gets `DECKHAND_SCHEDULED_AT=<ISO time>` (the tick it serves, not the
 start time), and the preamble says it, so "since yesterday 07:00" means the right thing on a late
 start.
 
@@ -253,7 +253,7 @@ stream gives `usage.cost`, tool calls and results, and `agent_settled`. The sess
 a run can be opened in pi.
 
 **Preamble** (written per run by Deckhand, not editable by the user or a job):
-- You are job `<name>`, scheduled for `<PI_DESK_SCHEDULED_AT>`, running unattended; nobody can
+- You are job `<name>`, scheduled for `<DECKHAND_SCHEDULED_AT>`, running unattended; nobody can
   answer questions, so do not ask.
 - This scheduled prompt cannot approve risky actions: a blocked action stays blocked; do not work
   around it, list it under `## Needs you`.
@@ -263,8 +263,8 @@ a run can be opened in pi.
 
 **Environment** (an allowlist, not the user's shell): `HOME`, `USER`, `LANG`, `TMPDIR`, `PATH`
 (the login shell's, captured once as setting `jobs_path`), `PI_KIT_NOTES_DIR`, the access
-variables (§4.1), `PI_DESK_JOB`, `PI_DESK_RUN`, `PI_DESK_RUN_DIR`, `PI_DESK_SCHEDULED_AT`. No
-`PI_DESK_SOCKET` or tokens. pi reads its own credentials as in any terminal. stdin is `/dev/null`.
+variables (§4.1), `DECKHAND_JOB`, `DECKHAND_RUN`, `DECKHAND_RUN_DIR`, `DECKHAND_SCHEDULED_AT`. No
+`DECKHAND_SOCKET` or tokens. pi reads its own credentials as in any terminal. stdin is `/dev/null`.
 
 **`worktree: true`** (only when `folder` is a git repo): the run happens in a fresh
 `git worktree add` of HEAD under the data dir on branch `job/<slug>/<stamp>`; `workspace` write
@@ -417,8 +417,8 @@ goes through `memory_update` (pi) or the `pi-kit memory` CLI (Claude Code: `sear
 copied to `.history/<date>.md`; each change appends one line to `changes.log` (time, writer,
 file, op, short text). A curation that would drop more than ~25% of entries is refused.
 
-**Job writes queue** (**Decided**). In a job (`PI_DESK_JOB` set), `memory_update` does not touch
-the files: the batch goes to `<PI_DESK_RUN_DIR>/memory-pending.json`, the tool reports "queued
+**Job writes queue** (**Decided**). In a job (`DECKHAND_JOB` set), `memory_update` does not touch
+the files: the batch goes to `<DECKHAND_RUN_DIR>/memory-pending.json`, the tool reports "queued
 for the user's approval", and the run carries on. The Jobs tab shows pending changes as a diff
 with Approve / Reject (`memory_pending_decide`); Approve applies them via `pi-kit memory apply`
 under the lock and caps. Daily notes are written directly at any access level. Atlas and
@@ -528,7 +528,7 @@ Acceptance:
   line; `at` job disables itself; per-run limit → `over_limit`; daily limit reached mid-run → the
   run finishes, the next tick is skipped; 5 identical tool calls → `looping`; silence → `stalled`;
   3 failures → paused + nudge; missing folder → `folder_missing`, paused, history kept; a
-  "Needs user approval" result → `needs_you` with the stored action; `PI_DESK_SCHEDULED_AT` set.
+  "Needs user approval" result → `needs_you` with the stored action; `DECKHAND_SCHEDULED_AT` set.
 - (Superseded 2026-11-01, no approvals:) a file edit to the prompt runs as edited; a job from
   `job_create` from control runs on its schedule; `job_approve` is gone.
 

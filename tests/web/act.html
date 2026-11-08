@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Agents act on pages (tests/scripts/browser-act.txt; docs/BROWSER.md §4, step 8). Served as
-     pidesk-test://web/act.html (no network). What the agent does shows in #log (the agent reads it
+     deckhand-test://web/act.html (no network). What the agent does shows in #log (the agent reads it
      with browser_read, a tab not on screen included): typed text for plain fields, only lengths
      and key counts for the password and card fields (which must stay at 0).
      Fixed positions (CSS px from the viewport's top-left):
@@ -11,7 +11,7 @@
      The frame's field reports its input and keys here (fi-len=, fi-key). #show flips #pw between
      password and text ("show password"). #goform submits for real (to nav-a.html). #copy writes
      the clipboard (a copy event's data). #search updates the address as you type (replaceState).
-     #widget is a focusable div pi-desk cannot classify.
+     #widget is a focusable div Deckhand cannot classify.
      #hop moves focus to #pw once it holds 3 characters (focus moving mid-type). #shadowcard is a
      custom element (host autocomplete cc-exp) whose shadow root holds the field; #shadowpw holds a
      password field in its shadow root (both delegate focus). #buy navigates to nav-a.html; #dl
@@ -119,7 +119,7 @@
   window.addEventListener('message', (e) => log(String(e.data)));
   document.addEventListener('copy', (e) => { e.clipboardData.setData('text/plain', 'written by the page'); e.preventDefault(); log('copied'); });
   document.addEventListener('keydown', (e) => { if (e.target === document.body) log(`key=${e.key}`); });
-  // a blob (downloads of pidesk-test:// addresses never start, as polish.html)
-  $('dl').href = URL.createObjectURL(new Blob(['pi-desk agent download\n'], { type: 'text/plain' }));
+  // a blob (downloads of deckhand-test:// addresses never start, as polish.html)
+  $('dl').href = URL.createObjectURL(new Blob(['Deckhand agent download\n'], { type: 'text/plain' }));
 </script>
 </body></html>

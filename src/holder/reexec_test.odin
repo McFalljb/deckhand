@@ -467,8 +467,12 @@ adopt_case :: proc(t: ^testing.T, swap: bool) {
 	code, _, _ := exit_from_wait(st)
 	testing.expect_value(t, code, 1)
 	// output goes on, without a gap, input works, exits are known (NOTE_EXITSTATUS)
-	rig_pump(r, 200 * time.Millisecond)
-	for id in u32(1) ..= 3 do testing.expect(t, counters_ok(t, rig_text(r, id), id) > 10)
+	// counting on (a loaded runner forks /bin/sleep slowly: wait for the lines, not a fixed time)
+	counted := time.tick_now()
+	for id in u32(1) ..= 3 {
+		for counters_ok(t, rig_text(r, id), id) <= 10 && time.tick_since(counted) < 5 * time.Second && !r.f.eof do rig_read(r, 10)
+		testing.expectf(t, counters_ok(t, rig_text(r, id), id) > 10, "terminal %d stopped counting under the keeper", id)
+	}
 	testing.expect_value(t, r.gaps, 0)
 	rig_input(r, 4, transmute([]u8)string("x\n"))
 	g, eok := rig_wait(r, .Exited, 4)

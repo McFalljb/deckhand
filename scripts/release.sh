@@ -54,6 +54,11 @@ cd "$ROOT"
 
 VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0 SKIP_PREV=0 PREV_TAG=""
 KEY=${DECKHAND_UPDATE_KEY_FILE:-$HOME/.config/deckhand/update.key}
+# the key's place before the rename (0.1.7): used, with a warning, while the new one is missing
+if [ -z "${DECKHAND_UPDATE_KEY_FILE:-}" ] && [ ! -e "$KEY" ] && [ -e "$HOME/.config/pi-desk/update.key" ]; then
+  KEY=$HOME/.config/pi-desk/update.key
+  echo "release: warning: using the key at its old place, $KEY; move it to ~/.config/deckhand/ (mkdir -m 700 ~/.config/deckhand && mv \"$KEY\" ~/.config/deckhand/)" >&2
+fi
 # the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
 APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
 [ -n "$APP_REPO" ] || { echo "release: no UPDATE_REPO in src/update_core.odin" >&2; exit 1; }
@@ -185,6 +190,9 @@ fi
 # no test hook in anything Deckhand runs: the env overrides, test mode, --print-token
 scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
   { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
+# the CLI's old name, a link Claude tabs started before 0.1.7 still run (scripts/bundle-app.sh)
+[ "$(readlink "$BUILT/Contents/MacOS/pi-desk-cli" 2>/dev/null)" = deckhand-cli ] ||
+  { echo "release: $BUILT has no Contents/MacOS/pi-desk-cli -> deckhand-cli link" >&2; exit 1; }
 [ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
   { echo "release: $BUILT has no CEF framework (a DECKHAND_NO_CEF build?)" >&2; exit 1; }
 

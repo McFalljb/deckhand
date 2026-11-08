@@ -77,5 +77,18 @@ done < "$W/tokens"
 [ "$(sort -u "$W/tokens" | wc -l | tr -d ' ')" = 5 ] && echo "ok: a new token at each start" || { echo "FAILED: a token was reused"; fail=1; }
 # what the hooks must never pass on: a subagent's prompt and result
 if grep -rqsF "FAKE SECRET" "$W/run1.log" "$W/run2.log" "$W/data"; then echo "FAILED: a subagent's prompt or result reached Deckhand"; fail=1; else echo "ok: no subagent prompt or result in Deckhand's output or data"; fi
+# the rename's bridge (0.1.7): Claude tabs started before it (or held across the update) run the
+# CLI by its old name, Contents/MacOS/pi-desk-cli (PI_DESK_CLI, a read-only tab's guard hook)
+A="$ROOT/build/Deckhand.app/Contents/MacOS"
+[ "$(readlink "$A/pi-desk-cli")" = deckhand-cli ] && echo "ok: pi-desk-cli links to deckhand-cli in the bundle" || { echo "FAILED: no pi-desk-cli -> deckhand-cli link in the bundle"; fail=1; }
+rc=0; printf '%s' '{"tool_name":"Bash","tool_input":{"command":"rm -rf x"}}' | "$A/pi-desk-cli" hook readonly >/dev/null 2>&1 || rc=$?
+[ $rc = 2 ] && echo "ok: the read-only guard by its old path still denies" || { echo "FAILED: pi-desk-cli hook readonly exit $rc (want 2)"; fail=1; }
+rc=0; printf '%s' '{"tool_name":"Read","tool_input":{"file_path":"x"}}' | "$A/pi-desk-cli" hook readonly >/dev/null 2>&1 || rc=$?
+[ $rc = 0 ] && echo "ok: and allows a read" || { echo "FAILED: pi-desk-cli hook readonly on Read: exit $rc (want 0)"; fail=1; }
+old=$(env -i PATH=/usr/bin:/bin PI_DESK_CLI="$A/pi-desk-cli" PI_DESK_SOCKET=/nonexistent/old.sock PI_DESK_CLAUDE_TOKEN=x build/claude-code/bin/deckhand tabs 2>&1 || true)
+case "$old" in
+  *"not inside a Deckhand Claude tab"*|"") echo "FAILED: bin/deckhand with only the old names: $old"; fail=1 ;;
+  *) echo "ok: bin/deckhand runs the CLI from PI_DESK_CLI, which reads PI_DESK_SOCKET" ;;
+esac
 if [ $fail = 1 ]; then echo "claude scene failed (logs: $W)"; exit 1; fi
 echo "claude scene ok"

@@ -117,6 +117,10 @@ done
 if [ -f build/deckhand-cli ] && [ -d build/claude-code ]; then
   cp build/deckhand-cli "$C/MacOS/deckhand-cli"
   sign_code "$C/MacOS/deckhand-cli"
+  # its old name, a relative link sealed with the app: Claude tabs started before 0.1.7 (and held
+  # across the update) run …/MacOS/pi-desk-cli by its absolute path (PI_DESK_CLI, a read-only
+  # tab's guard hook). Kept until 0.2.0 at least (docs/DEVELOPING.md, "The rename").
+  ln -sfn deckhand-cli "$C/MacOS/pi-desk-cli"
   rm -rf "$C/Resources/claude-code"
   cp -R build/claude-code "$C/Resources/claude-code"
 fi

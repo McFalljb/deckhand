@@ -65,27 +65,26 @@ welcome_peer_table :: proc(t: ^testing.T) {
 
 @(test)
 handover_fresh_table :: proc(t: ^testing.T) {
+	// no boot time: the holder's instance id is per holder run, so it implies the boot
+	// (kern.boottime moves with wall-clock steps)
 	cases := []struct {
 		min_reader, ours: i64,
 		holder, instance: string,
-		boot, this_boot:  i64,
 		previous:         string,
 		want:             Handover_Decision,
 	} {
-		{1, 1, "ab", "ab", 100, 100, "handover", .Use},
-		{2, 1, "ab", "ab", 100, 100, "handover", .Too_New},
-		{0, 1, "ab", "ab", 100, 100, "handover", .Too_New}, // a missing min_reader is not "any"
-		{1, 2, "ab", "ab", 100, 100, "handover", .Use},
-		{1, 1, "ab", "cd", 100, 100, "handover", .Other_Holder},
-		{1, 1, "", "", 100, 100, "handover", .Other_Holder}, // an empty id never matches
-		{1, 1, "ab", "ab", 99, 100, "handover", .Other_Boot},
-		{1, 1, "ab", "ab", 0, 0, "handover", .Other_Boot}, // unknown boot time: not this boot
-		{1, 1, "ab", "ab", 100, 100, "crash", .No_Goodbye},
-		{1, 1, "ab", "ab", 100, 100, "none", .No_Goodbye},
-		{1, 1, "ab", "ab", 100, 100, "upgrade", .No_Goodbye},
+		{1, 1, "ab", "ab", "handover", .Use},
+		{2, 1, "ab", "ab", "handover", .Too_New},
+		{0, 1, "ab", "ab", "handover", .Too_New}, // a missing min_reader is not "any"
+		{1, 2, "ab", "ab", "handover", .Use},
+		{1, 1, "ab", "cd", "handover", .Other_Holder},
+		{1, 1, "", "", "handover", .Other_Holder}, // an empty id never matches
+		{1, 1, "ab", "ab", "crash", .No_Goodbye},
+		{1, 1, "ab", "ab", "none", .No_Goodbye},
+		{1, 1, "ab", "ab", "upgrade", .No_Goodbye},
 	}
 	for c, i in cases {
-		got := handover_fresh(c.min_reader, c.ours, c.holder, c.instance, c.boot, c.this_boot, c.previous)
+		got := handover_fresh(c.min_reader, c.ours, c.holder, c.instance, c.previous)
 		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
 	}
 }

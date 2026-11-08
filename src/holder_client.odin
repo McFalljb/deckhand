@@ -22,7 +22,6 @@ package main
 // Writes take hc.wmu and are whole frames; a write that fails or blocks 5 s (SO_SNDTIMEO) shuts
 // the socket (half a frame may be out), which loses the holder.
 
-import "core:c"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
@@ -701,24 +700,4 @@ holder_client_forget :: proc() {
 	delete(hc.tokens_why)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
-}
-
-// ---- boot time (handover.json's `boot`) ----
-
-when ODIN_OS == .Darwin {
-	foreign import hc_libc "system:System"
-	@(default_calling_convention = "c")
-	foreign hc_libc {
-		sysctlbyname :: proc(name: cstring, oldp: rawptr, oldlenp: ^c.size_t, newp: rawptr, newlen: c.size_t) -> c.int ---
-	}
-
-	// kern.boottime in seconds (0 unknown).
-	boot_time :: proc() -> i64 {
-		tv: posix.timeval
-		n := c.size_t(size_of(tv))
-		if sysctlbyname("kern.boottime", &tv, &n, nil, 0) != 0 || n != size_of(tv) do return 0
-		return i64(tv.tv_sec)
-	}
-} else {
-	boot_time :: proc() -> i64 {return 0} // never "this boot": handovers fail closed
 }

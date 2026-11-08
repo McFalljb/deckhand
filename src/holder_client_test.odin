@@ -70,7 +70,7 @@ held_tail_offsets :: proc(t: ^testing.T) {
 handover_parse_rules :: proc(t: ^testing.T) {
 	SHA :: "abababababababababababababababababababababababababababababababab"
 	sha := SHA
-	good := fmt.tprintf(`{{"v":1,"min_reader":1,"holder":"aa","boot":5,"written":9,"terminals":[{{"term":3,"offset":10,"sha256":"%s","format":"ghostsnp/1","inexact":false}}]}}`, sha)
+	good := fmt.tprintf(`{{"v":1,"min_reader":1,"holder":"aa","written":9,"terminals":[{{"term":3,"offset":10,"sha256":"%s","format":"ghostsnp/1","inexact":false}}]}}`, sha)
 	f, ok, why := handover_parse(good)
 	testing.expect(t, ok, why)
 	testing.expect(t, len(f.terminals) == 1 && f.terminals[0].term == 3 && f.terminals[0].offset == 10)

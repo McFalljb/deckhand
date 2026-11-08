@@ -1475,3 +1475,31 @@ socket_tokens_prune_gone :: proc(t: ^testing.T) {
 	_, f7 := socket_tokens_start_of(7)
 	testing.expect(t, f7, "term 7 is kept")
 }
+
+// tokens.json is written (fsync'd) without holding srv.mu: a slow disk must not stall every
+// thread that needs the socket's state (the main thread included) on each mint or hello.
+@(test)
+socket_tokens_write_unlocked :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	@(static) calls, locked: int
+	calls, locked = 0, 0
+	tokens_write_probe = proc() {
+		calls += 1
+		if !socket_mu_free() do locked += 1
+	}
+	defer tokens_write_probe = nil
+	key := sk_key(8)
+	socket_tokens_enable(fmt.tprintf("%s/tokens.json", dir), key[:])
+	env := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	socket_tokens_bind(101, 7, {kind = .Pi})
+	c, r := tc_hello(env) // swaps it for a reconnect token: a write from the connection's thread
+	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	tc_close(c)
+	socket_claude_pid(101, 4242)
+	socket_tokens_ro(101, true, true, "n")
+	socket_forget_tab(101)
+	testing.expect(t, calls >= 5, fmt.tprint(calls))
+	testing.expect_value(t, locked, 0)
+}

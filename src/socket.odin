@@ -90,6 +90,10 @@ Server :: struct {
 	tok_on:       bool,
 	tok_path:     string,
 	tok_key:      [MACFILE_KEY_LEN]u8,
+	tok_body:     string, // the newest tokens.json body (tokens_save), written by tokens_flush
+	tok_gen:      u64, // bumped by each tokens_save
+	tok_written:  u64, // the gen tokens_flush last wrote
+	tok_wmu:      sync.Mutex, // one tokens.json writer at a time (never held with mu while writing)
 	tab_term:     map[u64]u32, // a tab -> the holder terminal its process runs in
 	tab_ro:       map[u64]Ro_Saved, // a read-only Claude tab's ack state (claude.odin)
 	tab_start:    map[u64]Held_Start, // what a held tab's process was started as
@@ -194,6 +198,7 @@ socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single
 	srv.tokens[strings.clone(tok)] = {caller = caller, ref = srv.next_ref, single_use = single_use}
 	tokens_save()
 	sync.unlock(&srv.mu)
+	tokens_flush()
 	return tok
 }
 
@@ -255,6 +260,7 @@ socket_claude_pid :: proc(tab_id: u64, pid: i32) {
 	srv.claude_pids[tab_id] = pid
 	tokens_save()
 	sync.unlock(&srv.mu)
+	tokens_flush()
 }
 
 // Whether a hello with a Claude tab's token comes from that tab's own processes: the connecting
@@ -278,6 +284,7 @@ socket_claude_peer_ok :: proc(c: ^Conn, tab_id: u64) -> bool {
 // hang up its connections.
 socket_forget_tab :: proc(tab_id: u64) {
 	if tab_id == 0 do return
+	defer tokens_flush() // after the unlock below (defers run last first)
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	gone := make([dynamic]string, context.temp_allocator)
@@ -769,6 +776,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 				}
 			}
 			sync.unlock(&srv.mu)
+			tokens_flush()
 			if !known do err = "unknown token"
 		}
 		if err != "" {
@@ -928,6 +936,14 @@ socket_request_conn :: proc(request_id: u64) -> u64 {
 // for a reconnect token, which is): an unlisted token is unknown, as a used one must be.
 
 TOKENS_KIND :: "tokens"
+tokens_write_probe: proc() // tests: called right before tokens.json is written
+
+// Whether srv.mu is free right now (tests: tokens.json is never written while holding it).
+socket_mu_free :: proc() -> bool {
+	if !sync.mutex_try_lock(&srv.mu) do return false
+	sync.unlock(&srv.mu)
+	return true
+}
 TOKENS_VERSION :: 1
 TOKENS_MAX_TERMS :: 4096
 TOKENS_MAX_PER_TERM :: 64
@@ -968,6 +984,9 @@ Hashed_Token :: struct {
 @(private = "file")
 tokens_reset :: proc() {
 	srv.tok_on = false
+	delete(srv.tok_body)
+	srv.tok_body = ""
+	srv.tok_written = srv.tok_gen
 	delete(srv.tok_path)
 	srv.tok_path = ""
 	srv.tok_key = {}
@@ -982,6 +1001,7 @@ tokens_reset :: proc() {
 
 socket_tokens_enable :: proc(path: string, key: []u8) -> (loaded: bool, why: string) {
 	if len(key) != MACFILE_KEY_LEN do return false, "no key"
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	clear(&srv.hashed)
@@ -1014,6 +1034,7 @@ socket_tokens_disable :: proc(remove: bool) {
 
 socket_tokens_bind :: proc(tab_id: u64, term: u32, start: Held_Start) {
 	if tab_id == 0 || term == 0 do return
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	srv.tab_term[tab_id] = term
@@ -1035,6 +1056,7 @@ socket_tokens_start_of :: proc(term: u32) -> (start: Held_Start, found: bool) {
 
 // Drops what was loaded for terminals not in `keep` (the holder's WELCOME), not adopted yet.
 socket_tokens_prune :: proc(keep: []u32) {
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	kept :: proc(keep: []u32, term: u32) -> bool {
@@ -1058,6 +1080,7 @@ socket_tokens_prune :: proc(keep: []u32) {
 
 socket_tokens_adopt :: proc(term: u32, tab_id: u64, start: Held_Start = {}) -> (trusted: bool) {
 	if tab_id == 0 || term == 0 do return false
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	for _, &h in srv.hashed do if h.term == term && h.caller.tab_id == 0 {
@@ -1085,6 +1108,7 @@ socket_tokens_adopt :: proc(term: u32, tab_id: u64, start: Held_Start = {}) -> (
 }
 
 socket_tokens_release :: proc(term: u32) {
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	gone := make([dynamic][32]u8, context.temp_allocator)
@@ -1098,6 +1122,7 @@ socket_tokens_release :: proc(term: u32) {
 
 // A read-only Claude tab's ack state changed (claude.odin): saved with its term.
 socket_tokens_ro :: proc(tab_id: u64, need, acked: bool, nonce: string) {
+	defer tokens_flush() // after the unlock
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	srv.tab_ro[tab_id] = {need = need, acked = acked, nonce = token_hash(nonce)}
@@ -1152,7 +1177,8 @@ TOKEN_CALLERS := [Caller_Kind]string {
 	.App      = "app",
 }
 
-// Writes tokens.json when enabled. srv.mu held.
+// Builds tokens.json's body when enabled (srv.mu held); the caller writes it with tokens_flush
+// once srv.mu is released.
 @(private = "file")
 tokens_save :: proc() {
 	if !srv.tok_on do return
@@ -1225,9 +1251,35 @@ tokens_save :: proc() {
 		strings.write_string(&b, "]}")
 	}
 	strings.write_string(&b, "]}")
-	if ok, why := macfile_write(srv.tok_path, TOKENS_KIND, strings.to_string(b), srv.tok_key[:]); !ok {
+	delete(srv.tok_body)
+	srv.tok_body = strings.clone(strings.to_string(b))
+	srv.tok_gen += 1
+}
+
+// Writes the body tokens_save left, after srv.mu is released (every caller of tokens_save:
+// a slow or hung disk then holds up only that caller, never the threads that need srv.mu).
+// Writers queue on tok_wmu and the newest body wins: an older one is never written after it.
+@(private = "file")
+tokens_flush :: proc() {
+	sync.lock(&srv.tok_wmu)
+	defer sync.unlock(&srv.tok_wmu)
+	sync.lock(&srv.mu)
+	if srv.tok_written == srv.tok_gen || srv.tok_body == "" || srv.tok_path == "" {
+		sync.unlock(&srv.mu)
+		return
+	}
+	gen := srv.tok_gen
+	path := strings.clone(srv.tok_path, context.temp_allocator)
+	body := strings.clone(srv.tok_body, context.temp_allocator)
+	key := srv.tok_key
+	sync.unlock(&srv.mu)
+	if tokens_write_probe != nil do tokens_write_probe()
+	if ok, why := macfile_write(path, TOKENS_KIND, body, key[:]); !ok {
 		fmt.eprintln("Deckhand: cannot save tokens.json:", why)
 	}
+	sync.lock(&srv.mu)
+	srv.tok_written = gen
+	sync.unlock(&srv.mu)
 }
 
 // Reads tokens.json into srv.hashed, held_root and held_ro (srv.mu held). All or nothing: any

@@ -112,20 +112,19 @@ holder_start :: proc(answered, keep_sessions: bool) -> Holder_Start {
 
 // Whether a handover.json whose MAC verified describes the holder this launch attached to (§7.2,
 // §7.7). Anything else is a crash restart (tails, inexact): a file from another holder run (its
-// instance), another boot, a newer writer (min_reader), or a holder that says the last core did
-// not say goodbye (previous) never gives its snapshots to this launch.
+// instance, random per run: so also from before a reboot), a newer writer (min_reader), or a
+// holder that says the last core did not say goodbye (previous) never gives its snapshots to
+// this launch. No boot-time check: kern.boottime moves with wall-clock steps.
 Handover_Decision :: enum {
 	Use,
 	Too_New, // min_reader above what this reader understands
-	Other_Holder, // written for another holder run
-	Other_Boot, // written before a reboot
+	Other_Holder, // written for another holder run (or before a reboot)
 	No_Goodbye, // the holder's WELCOME.previous is not "handover"
 }
 
-handover_fresh :: proc(min_reader, our_reader: i64, file_holder, welcome_instance: string, file_boot, this_boot: i64, previous: string) -> Handover_Decision {
+handover_fresh :: proc(min_reader, our_reader: i64, file_holder, welcome_instance: string, previous: string) -> Handover_Decision {
 	if min_reader < 1 || min_reader > our_reader do return .Too_New
 	if file_holder == "" || file_holder != welcome_instance do return .Other_Holder
-	if file_boot <= 0 || file_boot != this_boot do return .Other_Boot
 	if previous != "handover" do return .No_Goodbye
 	return .Use
 }

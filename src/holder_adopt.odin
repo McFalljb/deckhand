@@ -50,7 +50,6 @@ Handover_File :: struct {
 	v:          i64,
 	min_reader: i64,
 	holder:     string, // WELCOME.instance of the holder it was written for
-	boot:       i64, // kern.boottime
 	written:    i64, // unix seconds
 	terminals:  []Handover_Term,
 }
@@ -65,7 +64,7 @@ handover_parse :: proc(body: string) -> (f: Handover_File, ok: bool, why: string
 	root, is := v.(json.Object)
 	if !is do return {}, false, "not an object"
 	// the types first: unmarshal would take "3" for 3
-	for k in ([]string{"v", "min_reader", "boot", "written"}) do if x, has := root[k]; has {
+	for k in ([]string{"v", "min_reader", "written"}) do if x, has := root[k]; has {
 		if _, n := x.(json.Integer); !n do return {}, false, "wrong types"
 	}
 	if x, has := root["holder"]; has {
@@ -214,7 +213,7 @@ holder_handover :: proc() -> bool {
 		fmt.eprintln("Deckhand: session holder: no GOODBYE_ACK; the next launch restores from the tails")
 		return true
 	}
-	file := Handover_File{v = 1, min_reader = 1, holder = hc.instance, boot = boot_time(), written = time.now()._nsec / 1e9}
+	file := Handover_File{v = 1, min_reader = 1, holder = hc.instance, written = time.now()._nsec / 1e9}
 	list := make([dynamic]Handover_Term, context.temp_allocator)
 	for t in held {
 		handover_feed(t)
@@ -285,7 +284,7 @@ handover_take :: proc() -> map[u32]Handover_Snap {
 		fmt.eprintln("Deckhand: handover.json not used:", pwhy)
 		return out
 	}
-	if d := trust.handover_fresh(f.min_reader, HANDOVER_READER, f.holder, hc.instance, f.boot, boot_time(), hc.previous); d != .Use {
+	if d := trust.handover_fresh(f.min_reader, HANDOVER_READER, f.holder, hc.instance, hc.previous); d != .Use {
 		fmt.eprintln("Deckhand: handover.json not used:", d)
 		return out
 	}

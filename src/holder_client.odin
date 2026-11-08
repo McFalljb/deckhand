@@ -246,8 +246,9 @@ holder_client_start :: proc() -> bool {
 	}
 	if hc.refused_secret {
 		// the holder waits (at most a minute) for the Deckhand an update is relaunching, and this
-		// is not it: never a second holder beside it
-		hc.tried = true
+		// is not it: never a second holder beside it, and the tabs it keeps wait for it
+		// (held_away, as for any holder that answers without a WELCOME: holder_adopt_all)
+		hc.tried, hc.unreachable = true, true
 		fmt.eprintln("Deckhand: session holder: it is waiting for the Deckhand an update is starting; running without it")
 		toast_show("Deckhand is updating and another copy is taking over the running sessions: quit this one and open Deckhand again in a minute", err = true)
 		return false

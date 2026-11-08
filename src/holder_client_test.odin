@@ -181,6 +181,23 @@ holder_answered_no_second_launch :: proc(t: ^testing.T) {
 	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
 }
 
+// A holder that waits for the Deckhand an update relaunches (REFUSED{secret}) runs every kept
+// session: like any holder that answers without a WELCOME, the restored tabs it keeps must wait
+// for it (hc.unreachable: held_away, their held ids saved again), never start a second copy.
+@(test)
+holder_refused_secret_unreachable :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	toast_clear()
+	testing.expect(t, !holder_client_start(), "attached to something")
+	testing.expect(t, hc.refused_secret)
+	testing.expect(t, hc.unreachable, "not taken for a holder that keeps sessions")
+	testing.expect(t, strings.contains(toast.text, "updating"), toast.text)
+	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+}
+
 // A dead holder's socket (nobody listening: kill -9) is removed, and with keep_sessions off it
 // does not use up the one start of this run: turning the setting on later still starts one.
 @(test)

@@ -61,6 +61,49 @@ hostile_hello_bad_utf8 :: proc() -> string {
 	return strings.concatenate({`{"id":"h","v":1,"type":"hello","token":"`, strings.repeat(HOSTILE_BAD_UTF8, 64, context.temp_allocator), `"}`}, context.temp_allocator)
 }
 
+// JSON5 inputs core:encoding/json's tokenizer reads differently from a naive
+// scan. After "0x" it swallows the next rune unseen, whatever it is (a quote,
+// a closer, a comment's '/'), and the parser ignores the Invalid_Number: a
+// scan that saw that rune opens a string the parser never sees, or closes a
+// level the parser keeps open. And it recurses once per comment in a row
+// (get_token -> get_token), so a long run of comments overflows the stack.
+HOSTILE_JSON5_N :: 60_000
+@(private = "file")
+hostile_json5 :: proc(n := HOSTILE_JSON5_N, comments := 1_000_000) -> [7]string {
+	opens := strings.repeat("[", n, context.temp_allocator)
+	return {
+		strings.concatenate({`[0x"`, opens}, context.temp_allocator),
+		strings.concatenate({`[0x'`, opens}, context.temp_allocator),
+		strings.repeat("[0x]", n, context.temp_allocator),
+		strings.repeat("[0x}", n, context.temp_allocator),
+		strings.concatenate({"[0x/*", opens}, context.temp_allocator),
+		strings.concatenate({"[", strings.repeat("/**/", comments / 10, context.temp_allocator), "1]"}, context.temp_allocator),
+		strings.concatenate({"[", strings.repeat("//\n", comments, context.temp_allocator), "1]"}, context.temp_allocator),
+	}
+}
+
+@(private = "file")
+json5_now: int
+
+@(test)
+json_guard_json5_desyncs_are_refused :: proc(t: ^testing.T) {
+	for s, i in hostile_json5() {
+		testing.expectf(t, jg.check(s, spec = .JSON5) != .None, "JSON5 input %d passes the scan", i)
+		json5_now = i
+		ok, why := survives(proc() {
+			s := hostile_json5()[json5_now]
+			if _, err := jg.parse_string(s, .JSON5, allocator = context.temp_allocator); err == nil do posix._exit(3)
+			if _, err := jg.parse_string(s, allocator = context.temp_allocator); err == nil do posix._exit(4) // the default spec
+			R :: struct {extensions: []struct {name: string}}
+			r: R
+			wrapped := strings.concatenate({`{"extensions":`, s, "}"}, context.temp_allocator)
+			if jg.unmarshal_string(wrapped, &r, .JSON5, context.temp_allocator) == nil do posix._exit(5)
+			if jg.unmarshal_string(wrapped, &r, allocator = context.temp_allocator) == nil do posix._exit(6)
+		})
+		testing.expectf(t, ok, "JSON5 input %d: %s", i, why)
+	}
+}
+
 @(test)
 json_guard_parse_request_survives_hostile_lines :: proc(t: ^testing.T) {
 	ok, why := survives(proc() {
@@ -149,6 +192,37 @@ SITES := [?]Site {
 	{"pkg_name (package.json)", proc(s: string) -> bool {return pkg_name(jg_tmp_file("package.json", s)) == ""}},
 	{"header_cwd (pi session header)", proc(s: string) -> bool {return header_cwd(jg_tmp_file("s.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))) == ""}},
 	{"session_facts_read (pi session header)", proc(s: string) -> bool {_, err := session_facts_read(jg_tmp_file("f.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))); return err != ""}},
+	{"title_scan_file (pi session lines)", proc(s: string) -> bool {
+		line := strings.concatenate({`{"type":"message","message":{"role":"user","content":`, s, "}}\n"}, context.temp_allocator)
+		sc: Title_Scan
+		title_scan_file(jg_tmp_file("t.jsonl", line), &sc, i64(len(line)))
+		return sc.first_user == ""
+	}},
+	{"update_load (update.json)", proc(s: string) -> bool {
+		home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", update_data_dir(), UPDATE_FILE), transmute([]u8)s)
+		upd.checks_off = false
+		update_load()
+		return !upd.checks_off
+	}},
+	{"hints_load (claude-hints.json)", proc(s: string) -> bool {
+		home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", update_data_dir(), CLAUDE_HINTS_FILE), transmute([]u8)s)
+		claude_status_reset()
+		tab := Tab{id = 1 << 40, kind = Claude_Tab{}}
+		tab.reload.version = "2.1.250" // older than CLAUDE_MIN_VERSION: the hint reads the file
+		return claude_status_message(&tab) != ""
+	}},
+	{"manifest_load (pi integration extensions.json)", proc(s: string) -> bool {
+		p := jg_tmp_file("extensions.json", s)
+		pi_integration_override = strings.trim_suffix(p, "/extensions.json")
+		pi_integration_forget()
+		return len(pi_integration_optional()) == 0
+	}},
+	{"pi_package_find (pi settings.json, JSON5)", proc(s: string) -> bool {
+		p := jg_tmp_file("settings.json", s)
+		return !pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
+	}},
 	{"app_entries (.pi-desk/apps.json)", proc(s: string) -> bool {
 		p := jg_tmp_file(".pi-desk/apps.json", s)
 		return len(app_entries(strings.trim_suffix(p, "/.pi-desk/apps.json"))) == 0
@@ -166,8 +240,12 @@ json_guard_every_reachable_site_refuses_hostile_json :: proc(t: ^testing.T) {
 		hostile_hello_bad_utf8(), // a string of invalid UTF-8 (the hello's shape: an object)
 		strings.concatenate({`{"type":"x","a":"`, strings.repeat("\xc3", 64, context.temp_allocator), `"}`}, context.temp_allocator),
 	}
+	all := make([dynamic]string, context.temp_allocator)
+	append(&all, ..inputs[:])
+	json5 := hostile_json5(comments = 100_000)
+	append(&all, ..json5[:])
 	for site, i in SITES {
-		for input, k in inputs {
+		for input, k in all {
 			site_now, hostile_line = i, input
 			ok, why := survives(proc() {
 				if !SITES[site_now].refused(hostile_line) do posix._exit(3)
@@ -206,6 +284,23 @@ json_guard_check_refuses_what_the_parser_mishandles :: proc(t: ^testing.T) {
 	// a quote inside a JSON5 comment cannot hide brackets after it
 	testing.expect_value(t, jg.check("/* \" */ [[[[[", 4, spec = .JSON5), R.Too_Deep)
 	testing.expect_value(t, jg.check("// \"\n[[[[[", 4, spec = .JSON5), R.Too_Deep)
+	// JSON5 hex: "0x" then [0-9A-Za-z] parses; anything else after it is refused (the tokenizer swallows it unseen)
+	for ok_s in ([]string{"{a: 0x1F, b: 0XaB, c: [0x0]}", "[0xg]", "{a: '0x\"'}", "// 0x\"\n[1]", "[10x]", "[-0x]", "{a0x: 1}", "[1e0x]", "0x"}) do testing.expectf(t, jg.check(ok_s, 4, spec = .JSON5) == .None, "%q: got %v", ok_s, jg.check(ok_s, 4, spec = .JSON5))
+	for bad in ([]string{`[0x"]`, `[0x']`, "[0x]", "[0X}", "[0x/**/]", "[0x ]", "[0x,1]", "[0x\u00e9]"}) do testing.expectf(t, jg.check(bad, 4, spec = .JSON5) != .None, "%q passes", bad)
+	testing.expect_value(t, jg.check(`["0x]"]`, 4, spec = .JSON), R.None) // strict JSON has no hex
+	// JSON5 comments in a row (only whitespace between): the tokenizer recurses per comment
+	COMMENT_RUN :: 64 // jg.MAX_COMMENT_RUN
+	run :: proc(n: int, sep: string) -> string {return strings.concatenate({"[", strings.repeat(sep, n, context.temp_allocator), "1]"}, context.temp_allocator)}
+	testing.expect_value(t, jg.check(run(COMMENT_RUN, "/**/ "), spec = .JSON5), R.None)
+	testing.expect(t, jg.check(run(COMMENT_RUN + 1, "/**/ "), spec = .JSON5) != .None, "a run of block comments")
+	testing.expect(t, jg.check(run(COMMENT_RUN + 1, "// x\n\t"), spec = .JSON5) != .None, "a run of line comments")
+	testing.expect_value(t, jg.check(run(1000, "/**/ 1,"), spec = .JSON5), R.None) // a token between: no recursion
+	// the default is strict JSON: JSON5 only when a caller asks
+	testing.expect_value(t, jg.check("{a: 1 /* [[[[[ */}", 4), R.Too_Deep)
+	_, derr := jg.parse_string("{a: 1}", allocator = context.temp_allocator)
+	testing.expect(t, derr != nil, "the default refuses JSON5")
+	_, derr = jg.parse_string("{a: 1}", .JSON5, allocator = context.temp_allocator)
+	testing.expect_value(t, derr, json.Error.None)
 	// in strict JSON a quote is only '"' (the tokenizer refuses ' and /)
 	testing.expect_value(t, jg.check(`['  [[[[`, 4, spec = .JSON), R.Too_Deep)
 	// depth: exactly the limit passes; the cap holds whatever is asked

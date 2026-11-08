@@ -18,6 +18,10 @@ package holder
 //                             (degraded) and reports their exit codes
 //   reexec_new_image_killed   the new image dies after taking the state, before DONE: the keeper
 //                             keeps the terminals, exit codes included
+//   reexec_keeps_fd_limit     a session spawned after an upgrade (or a failed one) gets the soft
+//                             RLIMIT_NOFILE the holder was first started with, not the raised one
+//   reexec_session_fds        a session spawned after an upgrade holds only its stdio: not the
+//                             keeper's socket, a master, or an fd the first launcher leaked
 
 import "core:c"
 import "core:crypto"
@@ -99,8 +103,10 @@ rig_hook :: proc(r: ^Rig, name: string, content := "") {
 	_ = os.write_entire_file(fmt.tprintf("%s/%s", r.hooks, name), transmute([]u8)content)
 }
 
-// The holder, started directly (its stderr in <dir>/holder.log), and its socket.
-rig_start :: proc(t: ^testing.T, r: ^Rig) -> bool {
+// The holder, started directly (its stderr in <dir>/holder.log), and its socket. nofile > 0: the
+// soft RLIMIT_NOFILE it is started with (a launchd-like 256). leak >= 0: an fd it inherits
+// without close-on-exec, as a careless launcher would hand it.
+rig_start :: proc(t: ^testing.T, r: ^Rig, nofile: u64 = 0, leak: c.int = -1) -> bool {
 	argv := []cstring{strings.clone_to_cstring(r.bin, context.temp_allocator), "hold", "--run", strings.clone_to_cstring(r.run, context.temp_allocator), "--data", strings.clone_to_cstring(r.data, context.temp_allocator), nil}
 	env := []cstring{"PATH=/usr/bin:/bin", strings.clone_to_cstring(fmt.tprintf("DECKHAND_HOLDER_HOOKS=%s", r.hooks), context.temp_allocator), nil}
 	logp := strings.clone_to_cstring(fmt.tprintf("%s/holder.log", r.dir), context.temp_allocator)
@@ -111,6 +117,13 @@ rig_start :: proc(t: ^testing.T, r: ^Rig) -> bool {
 		if fd >= 0 {
 			posix.dup2(posix.FD(fd), 1)
 			posix.dup2(posix.FD(fd), 2)
+		}
+		if leak >= 0 do clear_cloexec(leak)
+		if nofile > 0 {
+			rl: Rlimit
+			getrlimit(RLIMIT_NOFILE, &rl)
+			rl.cur = nofile
+			setrlimit(RLIMIT_NOFILE, &rl)
 		}
 		execve(argv[0], raw_data(argv), raw_data(env))
 		_exit(127)
@@ -480,3 +493,57 @@ reexec_swapped_binary :: proc(t: ^testing.T) {adopt_case(t, swap = true)}
 
 @(test)
 reexec_new_image_killed :: proc(t: ^testing.T) {adopt_case(t, swap = false)}
+
+// One session's output: `script` run to its exit.
+rig_run :: proc(t: ^testing.T, r: ^Rig, id: u32, script: string) -> string {
+	rig_spawn(t, r, id, script)
+	_, ok := rig_wait(r, .Exited, id)
+	testing.expectf(t, ok, "terminal %d did not exit", id)
+	return strings.trim_space(rig_text(r, id))
+}
+
+@(test)
+reexec_keeps_fd_limit :: proc(t: ^testing.T) {
+	r, ok := rig_new(t)
+	defer rig_free(t, r)
+	if !ok || !rig_start(t, r, nofile = 256) do return
+	rig_attach(t, r)
+	testing.expect_value(t, rig_run(t, r, 1, "ulimit -n"), "256")
+	// a failed exec: the holder carries on, its sessions still get 256
+	rig_hook(r, "exec-fail")
+	failed, closed := rig_upgrade(r, r.bin)
+	testing.expectf(t, !closed && strings.contains(failed, "execve"), "%q", failed)
+	if closed do return
+	testing.expect_value(t, rig_run(t, r, 2, "ulimit -n"), "256")
+	for k in 0 ..< 2 {
+		failed, closed = rig_upgrade(r, r.bin)
+		testing.expectf(t, closed, "upgrade %d: %q", k, failed)
+		if !closed do return
+		if _, aok := rig_attach(t, r); !aok do return
+		testing.expectf(t, rig_run(t, r, u32(3 + k), "ulimit -n") == "256", "after upgrade %d: %q", k, rig_text(r, u32(3 + k)))
+	}
+}
+
+@(test)
+reexec_session_fds :: proc(t: ^testing.T) {
+	r, ok := rig_new(t)
+	defer rig_free(t, r)
+	leak: [2]c.int
+	testing.expect_value(t, pipe(&leak), 0)
+	set_cloexec(leak[0])
+	set_cloexec(leak[1]) // this test process's own: only the holder's child clears one
+	defer close(leak[0])
+	defer close(leak[1])
+	if !ok || !rig_start(t, r, leak = leak[1]) do return
+	rig_attach(t, r)
+	rig_spawn(t, r, 1, COUNTER) // a master the next session must not hold
+	testing.expect(t, rig_wait_text(r, 1, "c3\r\n"))
+	failed, closed := rig_upgrade(r, r.bin)
+	testing.expectf(t, closed, "%q", failed)
+	if !closed do return
+	if _, aok := rig_attach(t, r); !aok do return
+	// ls lists what it inherited plus the two it opens to read the directory (3 and 4, the lowest
+	// free ones, if none leaked: child_holds_only_stdio)
+	out := strings.fields(rig_run(t, r, 2, "exec /bin/ls /dev/fd"), context.temp_allocator)
+	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "a session after the upgrade holds more than 0-2: %v", out)
+}

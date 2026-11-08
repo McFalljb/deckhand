@@ -19,7 +19,8 @@ package main
 //
 // Threads: the main thread connects, spawns and writes; a reader thread decodes frames into
 // the Held entries (hc.mu) and pings every 5 s (so a paused frame loop never gets us dropped).
-// Writes take hc.wmu and are whole frames; a write blocked 5 s (SO_SNDTIMEO) loses the holder.
+// Writes take hc.wmu and are whole frames; a write that fails or blocks 5 s (SO_SNDTIMEO) shuts
+// the socket (half a frame may be out), which loses the holder.
 
 import "core:c"
 import "core:encoding/hex"
@@ -85,6 +86,7 @@ Holder_Client :: struct {
 }
 
 hc := Holder_Client{fd = -1}
+holder_send_timeout := HOLDER_WAIT // a send blocked this long fails (SO_SNDTIMEO; tests lower it)
 holder_test_allowed: bool // unit tests: a test that wants a holder says so
 
 // ---- pure helpers (holder_client_test.odin) ----
@@ -200,7 +202,8 @@ holder_socks :: proc(run: string) -> []string {
 
 @(private = "file")
 set_timeouts :: proc(fd: Sock_Fd) {
-	tv := posix.timeval{tv_sec = posix.time_t(time.duration_seconds(HOLDER_WAIT))}
+	us := i64(time.duration_microseconds(holder_send_timeout))
+	tv := posix.timeval{tv_sec = posix.time_t(us / 1_000_000), tv_usec = posix.suseconds_t(us % 1_000_000)}
 	posix.setsockopt(fd, posix.SOL_SOCKET, .SNDTIMEO, &tv, size_of(tv))
 }
 
@@ -455,7 +458,11 @@ holder_write :: proc(frame: []u8) -> bool {
 	sync.lock(&hc.wmu)
 	defer sync.unlock(&hc.wmu)
 	if hc.fd < 0 || sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) do return false
-	return sock_write_all(hc.fd, frame) // a 5 s block (SO_SNDTIMEO) fails: the reader then sees the loss
+	if sock_write_all(hc.fd, frame) do return true
+	// a 5 s block (SO_SNDTIMEO) or an error, maybe part-way through the frame: nothing more can
+	// follow it on the wire. Shut the socket: the reader sees the end and loses the holder.
+	sock_shutdown(hc.fd)
+	return false
 }
 
 // ---- the Pty side (pty_posix.odin routes held ptys here) ----
@@ -624,7 +631,10 @@ holder_goodbye :: proc(mode: string) -> bool {
 	sync.lock(&hc.mu)
 	hc.handed = true // before it goes: the reader takes a GOODBYE_ACK only after a GOODBYE
 	sync.unlock(&hc.mu)
-	return hc.fd >= 0 && !sync.atomic_load(&hc.lost) && sock_write_all(hc.fd, out[:])
+	if hc.fd < 0 || sync.atomic_load(&hc.lost) do return false
+	if sock_write_all(hc.fd, out[:]) do return true
+	sock_shutdown(hc.fd) // part of it may be out (holder_write)
+	return false
 }
 
 // Ends the reader thread and closes the connection (cleanup).

@@ -9,7 +9,9 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sync"
 import "core:testing"
+import "core:time"
 import gh "ghostty"
 
 @(test)
@@ -206,4 +208,22 @@ holder_midrun_writes_tokens :: proc(t: ^testing.T) {
 	path := fmt.tprintf("%s/tokens.json", home_root)
 	_, ok, why := macfile_read(path, TOKENS_KIND, f.key[:], context.temp_allocator)
 	testing.expect(t, ok, why)
+}
+
+// A send that times out part-way (the holder stopped reading) leaves half a frame on the wire:
+// the connection is done for, the holder lost (never more frames after the half one).
+@(test)
+holder_partial_send_loses :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, previous = "none", no_read = true}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	was := holder_send_timeout
+	holder_send_timeout = 200 * time.Millisecond
+	defer holder_send_timeout = was
+	testing.expect(t, holder_wanted(), "attached")
+	big := make([]u8, 4 << 20)
+	defer delete(big)
+	holder_input(1, big) // fills the socket buffer, then times out
+	testing.expect(t, wait_until(2000, proc() -> bool {return sync.atomic_load(&hc.lost)}), "the holder is lost after a partial send")
 }

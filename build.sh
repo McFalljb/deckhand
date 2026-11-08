@@ -224,8 +224,8 @@ build_pi() {
   cp integrations/pi/extensions.json integrations/pi/package.json integrations/pi/README.md build/pi/
 }
 
-# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed ad
-# hoc with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
+# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed
+# (scripts/sign.sh) with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
 # Security and CoreFoundation (an upgrade checks the new image's code: src/trust/code_darwin.odin).
 # Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
 # keeps its file (a signed binary changed in place is killed at its next page-in).
@@ -237,7 +237,8 @@ build_core() {
   mv -f build/.deckhand-core.new build/deckhand-core
 }
 # test builds only: the holder with its test hooks (src/holder/keeper.odin) for the re-exec tests,
-# and the same binary signed with another identifier (the swapped binary they must refuse)
+# and the same binary signed with another identifier (the swapped binary they must refuse); ad hoc,
+# so CI and every Mac test the same thing (the checks look at the identifier, not the signer)
 build_core_hooks() {
   rm -f build/.deckhand-core-hooks.new build/.deckhand-core-swapped.new
   odin build src/holder -out:build/.deckhand-core-hooks.new -define:DECKHAND_TEST_HOOKS=true -minimum-os-version:$MACOS_MIN

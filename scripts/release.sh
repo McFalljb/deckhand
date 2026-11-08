@@ -167,7 +167,7 @@ fi
 python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
   { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
 # release build with CEF and without the test hooks (src/test_hooks.odin); bundle-app.sh lays out
-# and ad-hoc signs build/Deckhand.app
+# and signs build/Deckhand.app (scripts/sign.sh)
 DECKHAND_RELEASE=1 ./build.sh
 BUILT=build/$APP_NAME
 EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)

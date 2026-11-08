@@ -183,9 +183,10 @@ real key and the key file's public half is that key. Then it runs `./build.sh te
 `DECKHAND_RELEASE=1 ./build.sh` (with CEF, **without the test hooks**: below), checks that the
 app holds `UPDATE_PUBLIC_KEY` and not the test key and that none of its executables holds a test
 hook (`scripts/check-release-build.sh`), writes the version into every `Info.plist`, code-signs
-(ad hoc, or Developer ID and notarized when `MACOS_CERT_P12` and the rest are set), zips, unpacks
-the zip again to check its signature and CDHash against the built app, and writes the `.sha256`
-and the updater's `.sig` from that bundle. Then **the current release's updater installs the new
+(with the self-signed identity, [Code signing](#code-signing); ad hoc only when
+`DECKHAND_SIGN_IDENTITY=-` asks; or Developer ID and notarized when `MACOS_CERT_P12` and the rest
+are set), zips, unpacks the zip again to check its signature and CDHash against the built app, and
+writes the `.sha256` and the updater's `.sig` from that bundle. Then **the current release's updater installs the new
 zip** (`tests/scripts/update-from-release.sh`, about 1-2 min, below). Last, it drafts the GitHub
 Release with `gh` (`--verify-tag`: the tag must already be pushed; a re-run replaces a draft's
 files but never a published release's), downloads the draft's `.sig` again and verifies it

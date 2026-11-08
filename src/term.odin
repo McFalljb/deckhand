@@ -72,6 +72,7 @@ Term :: struct {
 	link_scans:   int, // lookups made (tests)
 	// what the program reports over OSC 7501 (agent_status.odin); its summary goes to the tab
 	prog:         Prog_Records,
+	cont_fed:     int, // bytes fed since the continuation buffer was last trimmed
 }
 
 // Pixels between the pane edge and the cell grid.
@@ -116,17 +117,73 @@ on_color_scheme :: proc "c" (gt: gh.Terminal, userdata: rawptr, out: ^gh.Color_S
 	return true
 }
 
-term_init :: proc(t: ^Term, cols, rows: u16) -> bool {
-	t.cols, t.rows = cols, rows
-	if gh.terminal_new(nil, &t.gt, cols, rows) != .Success do return false
+// The unfinished escape (or UTF-8) suffix every terminal keeps, so it can be
+// snapshotted at any byte offset (snapshot.odin, design §5.5). Sized to the
+// largest sequence the parser keeps whole, an OSC (8 MiB: osc.zig
+// MAX_ALLOCATING_BUF), with room for its introducer. A longer one (only an
+// unchunked kitty APC can be; clients send 4 KiB chunks) makes snapshots fail
+// until it ends. The suffix costs memory only while a sequence is open, but
+// the library keeps the buffer's high-water capacity, so term_pump trims it
+// (term_continuation_trim).
+TERM_CONTINUATION_MAX :: c.size_t(9 * 1024 * 1024)
+// trim the continuation buffer at most once per this much output
+CONT_TRIM_EVERY :: 1024 * 1024
+
+// A fresh libghostty terminal for t: Deckhand's defaults (scrollback, mode
+// 2027), then term_attach_gt.
+term_new_gt :: proc(t: ^Term) -> bool {
+	if gh.terminal_new(nil, &t.gt, t.cols, t.rows) != .Success do return false
+	max_bytes: uint = 20 * 1024 * 1024
+	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
+	grapheme_clusters(t)
+	term_attach_gt(t)
+	return true
+}
+
+// What Deckhand hangs on a terminal, which a snapshot does not carry: the
+// callbacks (query replies, colour scheme, OSC 7501/133), continuation
+// tracking, and the theme's default colours (programs' own colours stay).
+// Run on every new terminal and on one decoded from a snapshot (term_adopt_gt).
+term_attach_gt :: proc(t: ^Term) {
 	gh.terminal_set(t.gt, .Userdata, t)
 	gh.terminal_set(t.gt, .Write_Pty, rawptr(on_write_pty))
 	gh.terminal_set(t.gt, .Color_Scheme, rawptr(on_color_scheme))
 	term_status_register(t) // OSC 7501 and OSC 133 (agent_status.odin)
-	max_bytes: uint = 20 * 1024 * 1024
-	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
+	cont := TERM_CONTINUATION_MAX
+	gh.terminal_set(t.gt, .Continuation_Max_Bytes, &cont)
+	t.cont_fed = 0
 	term_apply_theme(t)
-	grapheme_clusters(t)
+}
+
+// Replaces t's terminal with gt (decoded from a snapshot; t takes ownership)
+// and re-attaches Deckhand's callbacks and theme. Modes, scrollback limit and
+// grapheme clustering come from the snapshot.
+term_adopt_gt :: proc(t: ^Term, gt: gh.Terminal) {
+	term_cancel_drag(t) // its tracked ends belong to the old terminal
+	if t.gt != nil do gh.terminal_free(t.gt)
+	t.gt = gt
+	gh.terminal_get(gt, .Cols, &t.cols)
+	gh.terminal_get(gt, .Rows, &t.rows)
+	term_attach_gt(t)
+	t.changed = true
+}
+
+// The continuation buffer keeps the capacity of the longest sequence it held
+// (a big OSC 52 paste: tens of MiB per terminal, measured). Re-arming tracking
+// at ground frees it; nothing is pending then, so nothing is lost.
+term_continuation_trim :: proc(gt: gh.Terminal) -> bool {
+	ground: bool
+	if gh.terminal_get(gt, .Vt_Ground, &ground) != .Success || !ground do return false
+	off: c.size_t = 0
+	gh.terminal_set(gt, .Continuation_Max_Bytes, &off)
+	cont := TERM_CONTINUATION_MAX
+	gh.terminal_set(gt, .Continuation_Max_Bytes, &cont)
+	return true
+}
+
+term_init :: proc(t: ^Term, cols, rows: u16) -> bool {
+	t.cols, t.rows = cols, rows
+	if !term_new_gt(t) do return false
 	gh.render_state_new(nil, &t.rs)
 	gh.render_state_row_iterator_new(nil, &t.it)
 	gh.render_state_row_cells_new(nil, &t.cells)
@@ -177,17 +234,9 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	term_cancel_drag(t) // its tracked ends belong to the old terminal
 	// a new terminal per process: clean modes, scrollback and kitty flags
 	gh.terminal_free(t.gt)
-	gh.terminal_new(nil, &t.gt, t.cols, t.rows)
-	gh.terminal_set(t.gt, .Userdata, t)
-	gh.terminal_set(t.gt, .Write_Pty, rawptr(on_write_pty))
-	gh.terminal_set(t.gt, .Color_Scheme, rawptr(on_color_scheme))
-	term_status_register(t) // OSC 7501 and OSC 133 (agent_status.odin)
+	term_new_gt(t)
 	prog_reset(&t.prog) // a new process: the old one's status goes
 	t.prog.dirty = true // and the tab re-syncs at the next pump, whatever it showed
-	max_bytes: uint = 20 * 1024 * 1024
-	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
-	term_apply_theme(t)
-	grapheme_clusters(t)
 	gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
 	t.exit, t.eof_at, t.hung_pid = {}, {}, 0
 	p, ok := pty_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows)
@@ -289,6 +338,8 @@ term_pump :: proc(t: ^Term) {
 	if n > 0 {
 		gh.terminal_vt_write(t.gt, raw_data(t.reader.inbox), uint(n))
 		remove_range(&t.reader.inbox, 0, n)
+		t.cont_fed += n
+		if t.cont_fed >= CONT_TRIM_EVERY && term_continuation_trim(t.gt) do t.cont_fed = 0
 	}
 	eof := t.reader.eof && len(t.reader.inbox) == 0
 	sync.unlock(&t.reader.mu)

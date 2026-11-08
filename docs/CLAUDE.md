@@ -459,6 +459,10 @@ is valid; it learns nothing it can use from outside the tab.
 `src/claude_reload.odin` (the bars: `src/ui_claude_reload.odin`), parity with pi's hot reload
 (PROTOCOL.md "Hot reload"):
 
+- **Kept sessions (Keep sessions on, GUIDE.md).** A Claude tab the session holder kept running
+  while Deckhand was closed keeps the plugin, hooks and CLI it started with. After an update of
+  Deckhand, the updated plugin reaches such a tab only when it restarts: the plugin bar offers
+  that Restart as for any other change to Deckhand's plugin.
 - **What is watched.** Only what a running Claude Code reads at start (its docs, "When edits take
   effect"; skills, subagents and memory pages): `CLAUDE.md`/`CLAUDE.local.md`/`.claude/CLAUDE.md`
   in the tab's folder and above it and the config folder's `CLAUDE.md`; `rules/`, `output-styles/`,

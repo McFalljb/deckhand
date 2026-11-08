@@ -443,6 +443,7 @@ class Runner:
     def attempt(self, s, log):
         t0 = time.monotonic()
         timeout = self.timeout_of(s)
+        own = self.timeout or max(TIMEOUT_MIN, TIMEOUT_X * max(s.secs, self.last.get(s.name, 0)))
         step = os.path.join(LOGS, s.name + ".step")
         try:
             os.remove(step)
@@ -464,7 +465,7 @@ class Runner:
                 p.wait()
                 rc = 124
                 fh.write(f"\n# scenes.py: killed after {timeout:.0f} s ("
-                         f"{'--timeout' if self.timeout else f'{TIMEOUT_X:g}x its typical time, at least {TIMEOUT_MIN} s'})\n"
+                         f"{'the run budget (--max-minutes)' if self.budget and timeout < own else '--timeout' if self.timeout else f'{TIMEOUT_X:g}x its typical time, at least {TIMEOUT_MIN} s'})\n"
                          f"# last script step: {last_step(s.name) or '(none: before the app ran a script line)'}\n")
             secs = time.monotonic() - t0
             if rc != 0 and rc != 124 and last_step(s.name):

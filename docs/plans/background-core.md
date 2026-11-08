@@ -647,7 +647,7 @@ crashing.**
 | Use previous core, normal case (Settings › About) | A named handover to `previous` through the running core | Kept |
 | `current` swapped by same-user code | Every launch checks the DR: refused, "the background core failed verification" (a denial of service). The supervisor uses the last healthy core. | Kept |
 | Old core crashes before `GOODBYE` | A crash restart: tails, `inexact`, no query replies | Kept |
-| `handover.json` missing, stale (> 3 min, another boot), bad MAC or `min_reader` too high | Fail closed: restore from `workspace.json` + `tokens.json` (whose MAC must also verify, §5.3). Parked confirmations and held texts are dropped. | Kept |
+| `handover.json` missing, written for another holder run (its instance id: also another boot), bad MAC or `min_reader` too high | Fail closed: restore from `workspace.json` + `tokens.json` (whose MAC must also verify, §5.3). Parked confirmations and held texts are dropped. | Kept |
 | Holder upgrade preflight or `execve` fails | Fallback drain | Kept |
 | The new holder image crashes, fails the keeper's check, or doesn't connect within 10 s | The keeper adopts the orphans (§7.3 step 6) | Kept, `degraded` (exit codes kept) |
 | The new holder image crashes after the keeper has exited, or a holder crashes | `holder_lost`: pi and Claude resume from disk, shells restart fresh | Lost |

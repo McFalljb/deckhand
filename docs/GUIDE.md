@@ -1404,7 +1404,12 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
   Deckhand menu) quits and stops them too. Screens come back exactly after a quit; after a crash
   they are rebuilt from what the programs printed since (the last 1 MiB). If the holder itself
-  stops, its tabs say "the session holder stopped".
+  stops, its tabs say "the session holder stopped". Sessions the holder keeps that no tab comes
+  back for (you started with `--fresh`, or the saved workspace couldn't be read) are never
+  stopped behind your back: they keep running unseen, a message says how many, and **Quit
+  Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
+  example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
+  then stop when Deckhand quits.
 
 ## Updates
 

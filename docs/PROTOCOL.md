@@ -116,7 +116,8 @@ The first message on a connection is `hello`:
 - **Tokens that outlive Deckhand** (`keep_sessions`, Experimental). A pi or Claude process kept
   running by the session holder while Deckhand is closed keeps its token. With the setting on,
   the tokens of tabs whose process runs in the holder (sha256 hashes only, never a token), each
-  Claude tab's process (`claude_pids`) and a read-only tab's ack state are written to
+  Claude tab's process (`claude_pids`), a read-only tab's ack state and what each terminal was
+  started as (shell, pi, claude: a terminal is adopted only by a tab of that kind) are written to
   `<data>/tokens.json` on every mint and revoke, MAC'd with the holder's key (HMAC-SHA256;
   [background-core.md](plans/background-core.md) §5.3). On the next launch they belong to the tab
   that adopts that holder terminal (a new `tab_id`), with the same rules: an env token still

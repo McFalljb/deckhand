@@ -164,10 +164,11 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		e := editor_new(tab.id, p)
 		if c.line > 0 do ed_goto(e, c.line, 1)
 	}
-	// a pi or Claude tab's: right after its own tab, in its pane (else at the end of the focused pane)
+	// a pi or Claude tab's: right after its own tab, in its pane (open_pane; else at the end of the
+	// focused pane)
 	after: u64
 	if caller.kind == .Panel do for t in s.tabs do if t.id == caller.tab_id do after = t.id
-	pane_add_tab(s, tab, after = after)
+	pane_add_tab(s, tab, pane = open_pane(s, caller), after = after)
 	if agent {
 		// forget the tabs that closed since (ids are never reused), then remember this one
 		for id in show_agent_tabs do if _, t, _ := find_tab(id); t == nil do delete_key(&show_agent_tabs, id)

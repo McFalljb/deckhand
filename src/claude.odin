@@ -922,7 +922,7 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		delete(tab.cwd)
 		return fail("could not start Claude Code"), false
 	}
-	pane_add_tab(s, tab)
+	pane_add_tab(s, tab, pane = open_pane(s, caller))
 	if focus {
 		session_show_tab(s, tab.id)
 		focus_session(s.id, caller)

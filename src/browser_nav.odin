@@ -216,9 +216,9 @@ browser_nav_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 			if ferr := file_check(caller, url); ferr != "" do return fail(ferr), false
 		}
 		// an agent (a pi tab, a control caller) never changes what the user sees:
-		// its tab opens behind the session's active one
+		// its tab opens behind, in the pane of its own tab (open_pane)
 		agent := caller.kind == .Panel || caller.kind == .Control
-		id, oerr := browser_tab_open(s.id, url, background = agent)
+		id, oerr := browser_tab_open(s.id, url, background = agent, pane = open_pane(s, caller))
 		if id == 0 do return fail(oerr), false
 		if blank && !harness_run_holds_sheet() {
 			// the user's New browser tab: the keyboard goes to its URL field

@@ -313,6 +313,18 @@ pane_focus :: proc(s: ^Open_Session, pane_id: u64) {
 	mirror_sync(s)
 }
 
+// The pane a tab opened for `caller` in s goes into (pane_add_tab's `pane`): an agent's (a pi or
+// Claude tab's bridge or CLI, or a control caller tied to a tab) goes to the pane holding the
+// agent's own tab, where that tab is now (moved, or its pane closed and its tabs joined another);
+// the user's and scripts' opens, and an agent whose tab is not in s (Atlas opening in another
+// session), get 0: the focused pane. Where it lands only: whether it is shown is the caller's.
+open_pane :: proc(s: ^Open_Session, caller: Caller) -> u64 {
+	if caller.kind != .Panel && caller.kind != .Control do return 0
+	if caller.tab_id == 0 do return 0
+	if p := pane_of_tab(s, caller.tab_id); p != nil do return p.id
+	return 0
+}
+
 // Adds a new tab to s and returns it. It goes into pane `pane` (0: the focused one) at the end of
 // s.tabs, or, with `after`, right after that tab in its pane. It is not shown: the caller brings
 // it to the front with session_show_tab (a background open does not).

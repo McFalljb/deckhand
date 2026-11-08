@@ -421,8 +421,10 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
     Deckhand from before panes opens the same workspace with every tab back in one pane.)
   - **Agents and panes.** A session's pi or Claude tab can't split panes or move tabs; it sees
-    which tabs sit side by side, and the tabs it opens still go behind what you see (a file it
-    shows: next to its own tab, in its pane; a page or an app: in the pane with the keyboard).
+    which tabs sit side by side, and the tabs it opens (a file it shows, a page, an app, a
+    page its click opened) go behind what you see, in the pane that holds its own tab (a file
+    right next to it), wherever you have moved that tab. Tabs you open go in the pane with the
+    keyboard.
     Atlas can split, move and focus panes when you ask it to.
 - **If pi exits** (it crashed, failed to start, or you quit it), its tab keeps its last output
   under a bar that says how it ended ("pi exited (code 1)", or the signal that stopped it, such

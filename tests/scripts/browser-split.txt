@@ -1,7 +1,8 @@
 # A page live in a pane without the keyboard (docs/plans/split-panes.md P4; tests/scripts/browser.sh):
 # beside the pi tab's pane it keeps painting and loading, is not hidden from CEF, gets no keys,
 # and its CEF view is its own pane's size (a divider drag resizes it). A click in it gives its pane
-# the keyboard and reaches the page; an agent's screenshot says it is on screen.
+# the keyboard and reaches the page; an agent's screenshot says it is on screen; the pi's
+# browser_open lands in the pi tab's pane while the page's pane has the keyboard.
 wait 1500
 web_open tests/web/browser.html
 web_waitpaint 10000
@@ -50,4 +51,28 @@ assert_result data.tabs.0.on_screen true
 pi_command {"type":"browser_screenshot","tab_id":$ptab1}
 assert_finished ok true
 assert_finished data.on_screen true
+# the pi opens a page while the page's pane has the keyboard: it lands behind, in the pi tab's
+# pane (open_pane), not the focused one; neither pane's shown tab nor the focus changes
+key right cmd ctrl
+assert_state open_sessions.0.focused_pane $pane1
+pi_command {"type":"browser_open","url":"pidesk-test://web/agent.html"}
+assert_state open_sessions.0.tabs.2.kind browser
+assert_state open_sessions.0.tabs.2.pane $pane0
+assert_state open_sessions.0.panes.0.active_tab $pitab
+assert_state open_sessions.0.panes.1.active_tab $ptab1
+assert_state open_sessions.0.focused_pane $pane1
+# a popup the pi's click opens in the page's pane (a target=_blank link): it lands behind, in the
+# pi tab's pane too (Act_Op.who_tab -> browser_popup_pane), not in its opener's focused pane
+pi_command {"type":"browser_navigate","tab_id":$ptab1,"url":"pidesk-test://web/nav-a.html"}
+assert_result ok true
+pi_command {"type":"browser_wait","tab_id":$ptab1,"for":"load","timeout_ms":10000}
+assert_finished ok true
+pi_command_bg {"type":"browser_click","tab_id":$ptab1,"selector":"#blank"}
+await_bg 5000
+assert_finished ok true
+waitstate 5000 open_sessions.0.tabs.# 4
+assert_state open_sessions.0.tabs.3.kind browser
+assert_state open_sessions.0.tabs.3.pane $pane0
+assert_state open_sessions.0.panes.0.active_tab $pitab
+assert_state open_sessions.0.focused_pane $pane1
 quit

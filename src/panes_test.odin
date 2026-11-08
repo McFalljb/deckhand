@@ -513,6 +513,92 @@ panes_background_open_leaves_panes_alone :: proc(t: ^testing.T) {
 	run_command(Close_Tab{tab_id = r2.created_id}, {kind = .Internal})
 }
 
+// An agent's opens (show_file, browser_open, new_app_tab, a popup its click opened) land behind,
+// in the pane holding the agent's tab where it is now (moved, or its pane closed), not in the
+// focused one; the user's land in the focused pane. A caller whose tab is not in the session gets
+// the focused pane. An app tab an agent restarts stays where it is.
+@(test)
+panes_agent_opens_land_in_its_pane :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	x := pt_two()
+	defer pt_two_done(x)
+	frames_ok = -1 // no frame server in unit tests
+	dir := fmt.aprintf("%s/pt-agent-%d", os.get_env("TMPDIR", context.temp_allocator), os.get_pid())
+	os.make_directory_all(fmt.tprintf("%s/.pi-desk", dir))
+	defer os.remove_all(dir)
+	_ = os.write_entire_file(fmt.tprintf("%s/notes.txt", dir), transmute([]u8)string("one\n"))
+	_ = os.write_entire_file(fmt.tprintf("%s/.pi-desk/apps.json", dir), transmute([]u8)string(`{"apps":[{"name":"fake","argv":["/nonexistent/pi-desk-test-app"]}]}`))
+	append(&state.projects, Project{id = new_id(), cwd = fs_real(dir)})
+	x.s.cwd = fs_real(dir)
+	x.s.project_id = state.projects[0].id
+	opened: [dynamic]u64
+	defer {
+		for id in opened do run_command(Close_Tab{tab_id = id}, {kind = .Internal})
+		delete(opened)
+	}
+	// where an open landed; it changed no pane's shown tab and not the focus
+	lands :: proc(t: ^testing.T, x: Two, opened: ^[dynamic]u64, r: Result, want_pane: u64, what: string, loc := #caller_location) {
+		testing.expectf(t, r.ok && r.created_id != 0, "%s: %s", what, r.error, loc = loc)
+		if r.created_id == 0 do return
+		append(opened, r.created_id)
+		p := pane_of_tab(x.s, r.created_id)
+		testing.expectf(t, p != nil && p.id == want_pane, "%s: in pane %d, got %v", what, want_pane, p != nil ? p.id : 0, loc = loc)
+		for pn in x.s.panes do testing.expectf(t, pn.active != r.created_id, "%s: behind, not shown", what, loc = loc)
+		testing.expect_value(t, session_check(x.s), "", loc = loc)
+	}
+	pi := Caller{kind = .Panel, tab_id = x.pi} // in pane A; B is focused
+	lands(t, x, &opened, run_command(Show_File{path = "notes.txt"}, pi), x.a, "show_file")
+	lands(t, x, &opened, run_command(Browser_Open{url = "https://a.example"}, pi), x.a, "browser_open")
+	lands(t, x, &opened, run_command(New_App_Tab{name = "fake"}, pi), x.a, "new_app_tab")
+	app_in_a := opened[len(opened) - 1]
+	testing.expect_value(t, session_pane(x.s, x.a).active, x.shell)
+	testing.expect_value(t, session_pane(x.s, x.b).active, x.browser)
+	testing.expect_value(t, x.s.focused_pane, x.b)
+	testing.expect_value(t, x.s.active_tab, x.browser)
+	// a popup an agent's click opened: the clicking agent's pane, though its opener is in B
+	op := new(Act_Op)
+	op.tab_id, op.who, op.who_tab = x.browser, .Panel, x.pi
+	append(&act_ops, op)
+	testing.expect_value(t, browser_popup_pane(x.s, x.browser), x.a)
+	browser_act_reset()
+	testing.expect_value(t, browser_popup_pane(x.s, x.browser), u64(0)) // no agent: the focused pane
+	// a Claude tab in B, the user focused on A: its opens go to B
+	cl := new_id()
+	append(&x.s.tabs, Tab{id = cl, kind = Claude_Tab{}, title = "claude", status = .Running, pane = x.b})
+	claude := Caller{kind = .Panel, tab_id = cl, claude = true}
+	testing.expect(t, run_command(Focus_Pane{pane = x.a}, PT_UI).ok, "focus A")
+	lands(t, x, &opened, run_command(Browser_Open{url = "https://b.example"}, claude), x.b, "claude browser_open")
+	testing.expect_value(t, x.s.focused_pane, x.a)
+	// the Claude tab moved to A, the user on B: its opens follow it
+	testing.expect(t, run_command(Move_Tab{tab_id = cl, pane = x.a, index = -1}, PT_UI).ok, "move")
+	testing.expect(t, run_command(Focus_Pane{pane = x.b}, PT_UI).ok, "focus B")
+	lands(t, x, &opened, run_command(Browser_Open{url = "https://c.example"}, claude), x.a, "after a move")
+	lands(t, x, &opened, run_command(Show_File{path = "notes.txt"}, claude), x.a, "show_file after a move")
+	// restarting its app (in A) leaves it there, wherever the agent is
+	testing.expect(t, run_command(Move_Tab{tab_id = cl, pane = x.b, index = -1}, PT_UI).ok, "move back")
+	// (its program is not there: the restart is reached and fails to start, the tab stays)
+	rr := run_command(App_Restart{tab_id = app_in_a}, claude)
+	testing.expectf(t, rr.error == "could not start the app", "the restart was reached: %v", rr)
+	testing.expect_value(t, pane_of_tab(x.s, app_in_a).id, x.a)
+	// A closes (its tabs join B): the pi tab's opens go where it is now
+	testing.expect(t, run_command(Close_Pane{pane = x.a}, PT_UI).ok, "close A")
+	testing.expect_value(t, pane_of_tab(x.s, x.pi).id, x.b)
+	lands(t, x, &opened, run_command(Browser_Open{url = "https://d.example"}, pi), x.b, "after its pane closed")
+	// split again, the user on the new pane: the user's open comes to the front there
+	r := run_command(Split_Pane{pane = x.b, direction = .Right, tab_id = x.editor}, PT_UI)
+	testing.expectf(t, r.ok, "split: %s", r.error)
+	np := r.created_id
+	u := run_command(Browser_Open{url = "https://e.example"}, PT_UI)
+	testing.expectf(t, u.ok, "user's open: %s", u.error)
+	append(&opened, u.created_id)
+	testing.expect_value(t, pane_of_tab(x.s, u.created_id).id, np)
+	testing.expect_value(t, x.s.active_tab, u.created_id)
+	// a control caller whose tab is not in this session (Atlas, Home's): the focused pane, behind
+	lands(t, x, &opened, run_command(Browser_Open{session = x.s.id, url = "https://f.example"}, {kind = .Control, tab_id = 999_999}), np, "control")
+	testing.expect_value(t, x.s.active_tab, u.created_id)
+	testing.expect_value(t, open_pane(x.s, {kind = .UI, tab_id = x.pi}), u64(0)) // the user's: the focused pane
+}
+
 // A drag ends when its tab leaves the screen, not when another pane gets the focus.
 @(test)
 panes_drags_follow_the_screen :: proc(t: ^testing.T) {

@@ -417,6 +417,7 @@ Act_Op :: struct {
 	tab_id:      u64,
 	kind:        Act_Kind,
 	who:         Caller_Kind,
+	who_tab:     u64, // the caller's own tab (a pi or Claude tab; Atlas's), 0: none
 	who_text:    string, // owned: the upload bar's "<agent>"
 	stage:       Act_Stage,
 	active:      bool, // its turn came (its deadline counts from its acceptance)
@@ -669,6 +670,14 @@ browser_act_popup :: proc(opener, tab_id: u64) {
 	if op := act_head(opener); op != nil do op.popup = tab_id
 }
 
+// The pane of s a popup of tab `opener` goes into: while an agent's action runs there (its click
+// opened it), the acting agent's own pane (open_pane); else 0, the focused pane.
+browser_popup_pane :: proc(s: ^Open_Session, opener: u64) -> u64 {
+	op := act_head(opener)
+	if op == nil do return 0
+	return open_pane(s, {kind = op.who, tab_id = op.who_tab})
+}
+
 // Every action gone, unanswered (unit tests).
 browser_act_reset :: proc() {
 	for op in act_ops do act_free(op)
@@ -748,7 +757,7 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 		return {}, true
 	}
 	op := new(Act_Op)
-	op.request_id, op.tab_id, op.who = request_id, tab_id, caller.kind
+	op.request_id, op.tab_id, op.who, op.who_tab = request_id, tab_id, caller.kind, caller.tab_id
 	op.deadline = time.tick_add(time.tick_now(), ACT_TIMEOUT) // from acceptance: a queued action waits on its own clock
 	doing: Agent_Doing
 	bad: Result

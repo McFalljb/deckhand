@@ -133,18 +133,18 @@ tab_browser :: proc() -> ^Browser {
 	return nil
 }
 
-// Opens a browser tab in open session `session` and makes it that session's
-// active tab unless `background` (the session on screen stays). 0 and why: no
-// such session, or Home (only its pi tab). Callers: browser_open (a command,
-// browser_nav.odin), popups, test mode's web_open; they bump State.
-browser_tab_open :: proc(session: u64, url: string, background := false) -> (id: u64, err: string) {
+// Opens a browser tab in open session `session`, in its pane `pane` (0: the focused one;
+// open_pane: an agent's), and makes it that session's active tab unless `background` (the
+// session on screen stays). 0 and why: no such session, or Home (only its pi tab). Callers:
+// browser_open (a command, browser_nav.odin), popups, test mode's web_open; they bump State.
+browser_tab_open :: proc(session: u64, url: string, background := false, pane: u64 = 0) -> (id: u64, err: string) {
 	cs := find_session(session)
 	if cs == nil do return 0, "no such session"
 	if cs.home do return 0, "Home has only its pi tab"
 	title := url == "about:blank" ? "New tab" : "Browser"
 	// State never holds a user name or password (browser_url_public); the page gets the URL as given
 	tab := Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(browser_url_public(url))}, title = strings.clone(title), status = .Running}
-	pane_add_tab(cs, tab)
+	pane_add_tab(cs, tab, pane = pane)
 	if !background do session_show_tab(cs, tab.id)
 	browser_attach(tab.id, url)
 	return tab.id, ""
@@ -477,9 +477,10 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 		fmt.printfln("[browser] popup refused: no browser slot left (%s)", u)
 		return 0
 	}
-	// an agent's click opens it behind: an agent never changes what the user sees (browser_act.odin)
+	// an agent's click opens it behind, in the agent's pane: an agent never changes what the user
+	// sees (browser_act.odin)
 	agent := browser_act_busy(ob.tab_id)
-	id, err := browser_tab_open(s.id, u, background = background != 0 || agent)
+	id, err := browser_tab_open(s.id, u, background = background != 0 || agent, pane = browser_popup_pane(s, ob.tab_id))
 	if id == 0 {
 		fmt.printfln("[browser] popup refused: %s", err)
 		return 0

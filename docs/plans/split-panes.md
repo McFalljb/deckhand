@@ -3,10 +3,14 @@
 Status (2026-11-07): all phases built. P1–P3 merged (`main` 8d3cf47); P4 (live browser and app
 tabs, branch `panes-p4`), P5 (dragging tabs, `panes-p5`) and P6 (agent-facing text and docs,
 `panes-p6`) on branches in review. Left for later: a maximize-pane toggle, one file in two panes,
-agents splitting or opening beside themselves (Q5). Deviation from §4: an agent's `browser_open`
-and `new_app_tab` land in the focused pane (behind its shown tab), not the agent tab's pane;
-`show_file` lands in the agent tab's pane. Investigated at `main` 7904ea7 (searches used `rg`:
-fff MCP tools were not available to the worker).
+agents splitting or opening beside themselves (Q5). The v0.1.6 deviation from §4 (an agent's
+`browser_open` and `new_app_tab` landed in the focused pane) is fixed: every open made for an
+agent picks its pane with `open_pane(s, caller)` (`src/panes.odin`): the pane holding the agent's
+tab where it is now, else (the user, scripts, a caller whose tab is not in the session) the focused
+pane. Callers: `show_file`, `browser_open`, `new_app_tab`, `claude_open`, and popups an agent's
+click opened (`browser_popup_pane`, from the acting agent's tab: `Act_Op.who_tab`). Tests:
+`panes_agent_opens_land_in_its_pane`, scene `browser-split.txt`. Investigated at `main` 7904ea7
+(searches used `rg`: fff MCP tools were not available to the worker).
 
 Revision 2 (after review): the implicit `pane_ctx` is gone. `active_tab()`, `key_tab()`,
 `key_term()`, every tick and every action mean strictly **the focused pane's tab**. An explicit
@@ -393,7 +397,7 @@ what is saved, so `persist_on_event` marks the workspace dirty with no extra cod
 Unchanged but pane-aware: `focus_tab` (also focuses its pane), `close_tab` (handover within the
 pane), `new_shell_tab` (`pane?` optional arg; default focused pane), `open_file`/`show_file`/
 `browser_open`/`app_open`/`new_claude_tab` (tab lands in the focused pane, or the agent tab's
-pane for an agent; `pane?` optional where the caller may change the view).
+pane for an agent, via `open_pane`; `pane?` optional where the caller may change the view).
 
 Backward compatibility: every existing command, argument and snapshot path keeps its meaning
 for a single-pane session, which is every session until a user splits one. `active_tab` =

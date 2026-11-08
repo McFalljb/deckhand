@@ -707,8 +707,11 @@ snapshot without panes shows one pane with id 0. Who changes panes: anyone but a
 tab and an app (`"not allowed for this caller"`), so the user, scripts and Atlas; Home is
 refused. Agents see them: Atlas's `desk_state` summary prints a split session's tree (`panes: 7 |
 (8 / 9)`, `|` side by side, `/` stacked) and each tab's pane, and a Claude tab's `deckhand state`
-says the same above its JSON. An agent's tabs still open behind the user's view: `show_file`
-right after the agent's tab, in its pane; `browser_open` and `new_app_tab` in the focused pane.
+says the same above its JSON. An agent's tabs open behind the user's view, in the pane holding
+the agent's own tab (where that tab is now): `show_file` right after it, `browser_open`,
+`new_app_tab` and a popup the agent's click opened at the end of that pane. A caller whose tab is
+not in the session (Atlas naming another session, a control script) and the user's own opens
+get the focused pane. `app_restart` keeps an app tab where it is.
 
 `notifications` counts the bell's entries (`count`, `unread`) and the OS notifications they
 raised (`os_notified`); the entries are in `notifications_list`. A pi tab's snapshot has zeros.

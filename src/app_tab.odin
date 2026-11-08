@@ -426,7 +426,7 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		owned := make([]string, len(argv))
 		for a, i in argv do owned[i] = strings.clone(a)
 		tab := Tab{id = new_id(), kind = App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
-		pane_add_tab(s, tab)
+		pane_add_tab(s, tab, pane = open_pane(s, caller)) // an agent's: in its own tab's pane
 		if !by_agent {
 			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
 			// the user's, a script's and Home's come to the front

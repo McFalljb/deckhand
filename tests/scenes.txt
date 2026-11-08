@@ -25,7 +25,7 @@
 # large (tests/scenes.py CORE_MAX_LINES). "@unit" lists source files covered by the unit tests only
 # (tests/scenes.py --check-map wants every src/ file in one of these or in some scene's areas).
 
-@all  | | | | src/term.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/sign.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
+@all  | | | | src/term.odin src/term_view.odin src/term_palette.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/sign.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
 @core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
 @unit | | | | src/snapshot.odin src/holder/* src/holderwire/* src/corewire/* src/trust/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
 
@@ -79,7 +79,7 @@ panes-restore       | required |                       |    6 | src/panes*.odin 
 pi-chat-readonly    | full     | smoke                 |    8 | src/agent.odin integrations/pi/* tests/scripts/pi-chat-readonly*
 pi-login-lookup     | full     |                       |   22 | src/harness.odin src/login_env.odin tests/scripts/pi-login-lookup*
 polish              | full     | test-data             |   50 | src/palette.odin src/textfield.odin src/ui_toolbar.odin tests/scripts/polish.* tests/scripts/fake-bridge.sh
-polish-beep         | full     | test-data             |    10 | src/textfield.odin src/term.odin src/native/platform_macos.m tests/scripts/beep.txt tests/scripts/polish.sh | tests/scripts/polish.sh tests/scripts/beep.txt
+polish-beep         | full     | test-data             |    10 | src/textfield.odin src/term.odin src/term_view.odin src/native/platform_macos.m tests/scripts/beep.txt tests/scripts/polish.sh | tests/scripts/polish.sh tests/scripts/beep.txt
 projects            | required |                       |   20 | src/project_tidy.odin src/sidebar.odin src/ui_sidebar.odin tests/scripts/projects*
 reload              | full     |                       |   60 | src/reload.odin src/ui_reload.odin src/editor_watch.odin tests/scripts/reload.* tests/scripts/fake-bridge-reload.py
 release-checks      | full     |                       |   11 | scripts/release.sh scripts/check-release-build.sh scripts/check-env-reads.py src/test_hooks.odin tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh

@@ -460,7 +460,8 @@ snapshot_stored_corpus :: proc(t: ^testing.T) {
 @(test)
 snapshot_adopt :: proc(t: ^testing.T) {
 	app_context = context
-	font.cell_w, font.cell_h = 10, 20
+	term_cell = {10, 20} // the window's cells (fonts_apply): a new terminal takes them
+	defer term_cell = {}
 	src := snap_gt(30, 6)
 	small := uint(1024 * 1024)
 	gh.terminal_set(src, .Scrollback_Max_Bytes, &small)

@@ -212,6 +212,13 @@ Set_Tidy_Projects :: struct {
 Set_Keep_Sessions :: struct {
 	on: bool,
 }
+// keep_sessions' default (keep_sessions_default_on), except in test mode, where a scene turns it
+// on when it tests it (every other scene would leave a session holder running after it quits).
+// Saved only once the user chose (Settings.keep_sessions_chosen): turning the default back off
+// turns it off for everyone who never chose.
+keep_sessions_default_on := false
+keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest.active}
+
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
 // onto the clipboard (docs/PROTOCOL.md §2). The user's only: the one way a release build mints a
 // control token (test_hooks.odin: no --print-token there). The token is never logged or returned.
@@ -1318,8 +1325,9 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		toast_show("Control token copied: paste it into a terminal, then use deckhand --ctl (it works until you quit Deckhand)")
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
-		if state.settings.keep_sessions == c.on do return {ok = true}, false
-		state.settings.keep_sessions = c.on
+		// the user's choice (only the user may run it; the restore runs it for a saved choice)
+		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
+		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .UI || c.caller == .Internal do return fail("ui and internal callers have fixed policies"), false

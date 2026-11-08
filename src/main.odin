@@ -128,6 +128,7 @@ init :: proc "c" () {
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// PI_DESK_DATA_DIR, so scripts never read or write the user's
+	state.settings.keep_sessions = keep_sessions_default() // until the saved workspace says otherwise
 	if !autotest.active || hook_env(.Data_Dir) != "" {
 		persist_init(data_dir(context.temp_allocator))
 		claude_disk_launching = true // no transcript read on the main thread while it comes back

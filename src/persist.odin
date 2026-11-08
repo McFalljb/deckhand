@@ -566,7 +566,7 @@ workspace_json :: proc() -> string {
 	if st.agent_model != "" do ks(&w, "agent_model", st.agent_model)
 	if st.notify_off do kb(&w, "notify", false)
 	if st.tidy_off do kb(&w, "tidy_projects", false)
-	if st.keep_sessions do kb(&w, "keep_sessions", true)
+	if st.keep_sessions_chosen do kb(&w, "keep_sessions", st.keep_sessions) // only the user's choice: else the default applies (keep_sessions_default)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
 	if st.bell_off != {} || st.bell_os_off {
 		k(&w, "bell")
@@ -678,6 +678,9 @@ workspace_restore :: proc(text: string) -> string {
 	if hs, hok := root["holder"].(json.String); hok && len(hs) <= 64 do held_holder = strings.clone(string(hs)) // the held ids' holder (holder_adopt_all)
 
 	run :: proc(c: Command) -> Result {return run_command(c, {kind = .Internal})}
+	// keep_sessions: the saved choice below, else the default (files from when it was off by
+	// default have it only when the user turned it on)
+	state.settings.keep_sessions, state.settings.keep_sessions_chosen = keep_sessions_default(), false
 
 	// settings first: the look applies before anything is drawn
 	if st, is := root["settings"].(json.Object); is {

@@ -333,7 +333,11 @@ jobs_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 		return {ok = true, data = strings.to_string(b)}, true
 	case Job_Save:
 		path, err := job_note_save(c.path, c.text, c.based_on)
-		if caller.kind == .UI do job_sheet_saved(path, err) // the sheet closes, or says why
+		// the sheet closes (the Jobs tab shows, its row open), or says why
+		if caller.kind == .UI && job_sheet_saved(path, err) {
+			state.layout.left_open = true
+			state.layout.left_tab = .Jobs
+		}
 		if err != "" do return fail(err), false
 		jobs_scan(true)
 		b := strings.builder_make(context.temp_allocator)

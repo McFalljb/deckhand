@@ -303,8 +303,7 @@ harness_run_keep_sheet :: proc() {
 	if harness_run.status != .Running do return
 	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
 	if state.focus_widget == "setup" do return
-	state.focus_widget = strings.clone("setup") // the old one is not freed: some writers set literals (Set_Focus never frees either)
-	window_state_changed()
+	run_command(Focus_Move{widget = "setup"})
 }
 
 // Whether an install holds the setup sheet (nothing moves the keyboard off it).

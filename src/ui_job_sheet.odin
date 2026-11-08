@@ -248,7 +248,7 @@ job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	if !c.open {
 		if !job_sheet_open() do return {ok = true}, false
 		u.open = false
-		if state.focus_widget == "job_sheet" do state.focus_widget = ""
+		run_command(Focus_Release{widget = "job_sheet"})
 		return {ok = true}, true
 	}
 	if harness_run_holds_sheet() do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
@@ -278,7 +278,7 @@ job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	set_s(&u.start, sheet_now_text())
 	u.discard, u.stale, u.reload_armed = false, false, false
 	u.open = true
-	state.focus_widget = "job_sheet"
+	run_command(Focus_Move{widget = "job_sheet"})
 	app.redraw = true
 	return {ok = true}, true
 }
@@ -329,26 +329,25 @@ sheet_reload :: proc() {
 	u.stale, u.reload_armed, u.discard = false, false, false
 }
 
-// Job_Save's answer for the sheet (jobs.odin): closed, the job's row open;
-// or why not (the note changed on disk: Reload shows; the fields stay).
-job_sheet_saved :: proc(path, err: string) {
-	if !job_sheet_open() do return
+// Job_Save's answer for the sheet (jobs.odin): closed (true: Job_Save shows the Jobs tab), the
+// job's row open; or why not (the note changed on disk: Reload shows; the fields stay).
+job_sheet_saved :: proc(path, err: string) -> bool {
+	if !job_sheet_open() do return false
 	if err == JOB_NOTE_STALE {
 		job_sheet.stale = true
 		set_s(&job_sheet.err, "")
-		return
+		return false
 	}
 	if err != "" {
 		set_s(&job_sheet.err, err)
-		return
+		return false
 	}
 	job_sheet.open = false
-	if state.focus_widget == "job_sheet" do state.focus_widget = ""
-	state.layout.left_open = true
-	state.layout.left_tab = .Jobs
+	run_command(Focus_Release{widget = "job_sheet"})
 	if data, rerr := os.read_entire_file(path, context.temp_allocator); rerr == nil {
 		if vals, _, ok := note_front_values(string(data)); ok do jobs_ui_set(vals["id"], false)
 	}
+	return true
 }
 
 // Create / Save.

@@ -105,6 +105,9 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Send_Text:           return Send_Text{tab_id = c.tab_id, text = s(c.text, allocator)}
 	case Terminal_Link:       return Terminal_Link{tab_id = c.tab_id, url = s(c.url, allocator), external = c.external}
 	case Set_Focus:           return Set_Focus{widget = s(c.widget, allocator)}
+	case Focus_Move:          return Focus_Move{widget = s(c.widget, allocator)}
+	case Focus_Release:       return Focus_Release{widget = s(c.widget, allocator)}
+	case Set_Last_Harness:    return cmd
 	case Set_Panel:           return Set_Panel{panel = s(c.panel, allocator), open = c.open}
 	case Cancel_Confirmation: return Cancel_Confirmation{token = s(c.token, allocator)}
 	case Quit:                return Quit{confirm = s(c.confirm, allocator), stop_sessions = c.stop_sessions}
@@ -261,6 +264,8 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	case Send_Text:           delete(c.text, allocator)
 	case Terminal_Link:       delete(c.url, allocator)
 	case Set_Focus:           delete(c.widget, allocator)
+	case Focus_Move:          delete(c.widget, allocator)
+	case Focus_Release:       delete(c.widget, allocator)
 	case Set_Panel:           delete(c.panel, allocator)
 	case Cancel_Confirmation: delete(c.token, allocator)
 	case Quit:                delete(c.confirm, allocator)

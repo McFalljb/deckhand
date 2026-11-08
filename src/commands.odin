@@ -103,6 +103,20 @@ Send_Text :: struct {
 Set_Focus :: struct {
 	widget: string, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
 }
+// Deckhand itself moves the keyboard (a sheet it opened, a new tab's URL field, an install's
+// setup sheet), without set_focus's caller rules: the window's former direct writes.
+Focus_Move :: struct {
+	widget: string,
+}
+// A widget that closed lets go of the keyboard (back to the terminal); nothing when the keyboard
+// is elsewhere.
+Focus_Release :: struct {
+	widget: string,
+}
+// The harness the New session picker lists first (harness.odin).
+Set_Last_Harness :: struct {
+	harness: Harness,
+}
 Set_Layout :: struct {
 	left_width:    Maybe(f32), // unset fields keep their value
 	right_width:   Maybe(f32),
@@ -425,6 +439,9 @@ Command :: union {
 	Terminal_Link, // a link in a terminal tab (term_links.odin)
 	Send_Text,
 	Set_Focus,
+	Focus_Move,
+	Focus_Release,
+	Set_Last_Harness,
 	Set_Layout,
 	Set_Panel,
 	Cancel_Confirmation,
@@ -1036,6 +1053,18 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			state.layout.left_open = true
 			if state.layout.left_tab == .Sessions do state.layout.left_tab = .Files // the Settings tab is a tree too
 		}
+		return {ok = true}, true
+	case Focus_Move:
+		if c.widget == state.focus_widget do return {ok = true}, false
+		state.focus_widget = strings.clone(c.widget) // the old one is not freed: some writers set literals (as Set_Focus)
+		return {ok = true}, true
+	case Focus_Release:
+		if c.widget == "" || state.focus_widget != c.widget do return {ok = true}, false
+		state.focus_widget = "" // not freed: it may be a literal
+		return {ok = true}, true
+	case Set_Last_Harness:
+		if state.settings.last_harness == c.harness do return {ok = true}, false
+		state.settings.last_harness = c.harness
 		return {ok = true}, true
 	case Set_Layout:
 		l := &state.layout

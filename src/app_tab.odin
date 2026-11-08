@@ -1758,8 +1758,9 @@ app_entry :: proc(cwd, name: string) -> (App_Entry, bool) {
 app_not_declared :: proc(cwd, name: string) -> string {
 	names := make([dynamic]string, context.temp_allocator)
 	for e in app_entries(cwd) do append(&names, fmt.tprintf("%q", e.name))
-	if len(names) == 0 do return fmt.tprintf("no app %q: the session's folder declares none (.deckhand/apps.json)", name)
-	return fmt.tprintf("no app %q in the session's .deckhand/apps.json (declared: %s)", name, strings.join(names[:], ", ", context.temp_allocator))
+	file := strings.has_suffix(app_json_path(cwd), "/.pi-desk/apps.json") ? ".pi-desk/apps.json" : ".deckhand/apps.json" // the one read
+	if len(names) == 0 do return fmt.tprintf("no app %q: the session's folder declares none (%s)", name, file)
+	return fmt.tprintf("no app %q in the session's %s (declared: %s)", name, file, strings.join(names[:], ", ", context.temp_allocator))
 }
 
 // The session new_app_tab and app_declared act in: a pi or Claude tab's own, never another;

@@ -268,9 +268,10 @@ child_env :: proc(extra: []string = nil) -> []string {
 		// Deckhand's own names (tokens, the CLI, a read-only Claude tab's DECKHAND_CLAUDE_READONLY, a
 		// Claude tab's account), new and old: an explicit list, so the user's DECKHAND_SIGN_IDENTITY
 		// and the like pass (env_names.odin)
-		if env_desk_set(env_key(e)) do continue outer
+		if env_tab_dropped(env_key(e)) do continue outer
 		// a data dir of test mode's never reaches a tab (release builds have no such variable)
 		when TEST_HOOKS do if strings.has_prefix(e, HOOK_ENV[.Data_Dir]) && strings.has_prefix(e[len(HOOK_ENV[.Data_Dir]):], "=") do continue outer
+		when TEST_HOOKS do if strings.has_prefix(e, "PI_DESK_DATA_DIR=") do continue outer // its old name (test_hooks.odin hook_lookup)
 		if own_config && strings.has_prefix(e, "CLAUDE_CONFIG_DIR=") do continue
 		append(&out, e)
 	}

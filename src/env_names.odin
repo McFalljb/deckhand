@@ -22,8 +22,12 @@ DESK_SET_ENV := [?]string {
 	"JOB", "RUN", "RUN_DIR", "SCHEDULED_AT", // job runs
 }
 
-// The PI_DESK_ twins set beside the new names (not CONTROL_TOKEN: only pi's Atlas gets one).
-DESK_LEGACY_SET := [?]string{"SOCKET", "TOKEN", "CLAUDE_TOKEN", "CLAUDE_TAB", "CLAUDE_READONLY", "CLAUDE_ACCOUNT", "CLI", "SHOTS_DIR", "APP", "JOB", "RUN", "RUN_DIR", "SCHEDULED_AT"}
+// The PI_DESK_ twins set beside the new names: the ones something outside Deckhand's own code
+// may read (the CLI and bin/deckhand of a tab started before 0.1.7, forge, a job's own scripts,
+// a control token's user). Not CONTROL_TOKEN (only pi's Atlas gets one), nor CLAUDE_TAB,
+// CLAUDE_READONLY and CLAUDE_ACCOUNT: nothing reads those, and an old account marker would reach
+// claude and its Bash (CLAUDE_ACCOUNT_SH unsets only the new one).
+DESK_LEGACY_SET := [?]string{"SOCKET", "TOKEN", "CLAUDE_TOKEN", "CLI", "SHOTS_DIR", "APP", "JOB", "RUN", "RUN_DIR", "SCHEDULED_AT"}
 
 // The user's documented workarounds, read under both names (DECKHAND_ first).
 DESK_WORKAROUND_ENV := [?]string{"GUI_LAUNCH", "CEF_SHARED_TEXTURE"}
@@ -63,12 +67,21 @@ env_desk_set :: proc(k: string) -> bool {
 	return false
 }
 
-// k is Deckhand's own: what env_desk_set says, any old PI_DESK_ name, or a test hook (in builds
-// that have them). Never taken from the login shell (login_env.odin) nor passed to an app tab.
+// What a tab's environment drops of what it inherits (term.odin child_env): env_desk_set's names,
+// but CEF_SHARED_TEXTURE passes (the user's workaround, for a Deckhand started from that tab).
+env_tab_dropped :: proc(k: string) -> bool {
+	return env_desk_set(k) && k != "DECKHAND_CEF_SHARED_TEXTURE" && k != "PI_DESK_CEF_SHARED_TEXTURE"
+}
+
+// k is Deckhand's own: what env_desk_set says, any old PI_DESK_ name, or a test hook or another
+// development knob (in builds that have them). Never taken from the login shell (login_env.odin)
+// nor passed to an app tab.
 env_desk_owned :: proc(k: string) -> bool {
 	if strings.has_prefix(k, LEGACY_ENV_PREFIX) || env_desk_set(k) do return true
 	when TEST_HOOKS {
 		for h in HOOK_ENV do if h == k do return true
+		// read outside hook_env, compiled out of release builds (scripts/check-env-reads.py HOOK_ONLY)
+		for d in ([]string{"DECKHAND_CEF_SPARE", "DECKHAND_CEF_NETLOG", "DECKHAND_HOLDER_HOOKS"}) do if d == k do return true
 	}
 	return false
 }

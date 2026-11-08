@@ -4,6 +4,8 @@ package main
 // never call sokol or OS UI APIs; main.odin fills these in at startup (tests
 // leave them nil or set fakes). A headless core would provide its own.
 
+import "base:runtime"
+import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
@@ -72,10 +74,41 @@ data_dir_names :: proc(home: string, allocator := context.temp_allocator) -> (ne
 	return
 }
 
-// new when it is a folder or old is not one; else old. A link counts as what it points to.
+// What data_dir_pick last said about its choice ("" = nothing to say; tests).
+data_dir_note: string
+
+// new when it is a folder or old is not one; else old. A link counts as what it points to. Both
+// there (a dev copy, a downgrade, or 0.1.8 moved it and the link came back as a folder): old
+// while a session holder answers under it (its held sessions must never be orphaned), else new;
+// said once on stderr either way.
 data_dir_pick :: proc(new, old: string) -> string {
-	if os.is_dir(new) || !os.is_dir(old) do return new
-	return old
+	if !os.is_dir(old) do return new
+	if !os.is_dir(new) do return old
+	pick, note := new, fmt.tprintf("Deckhand: both %s and %s exist: using %s", new, old, new)
+	if data_dir_holder_alive(old) {
+		pick, note = old, fmt.tprintf("Deckhand: both %s and %s exist: using %s, where a session holder still runs", new, old, old)
+	}
+	if note != data_dir_note {
+		delete(data_dir_note, runtime.heap_allocator())
+		data_dir_note = strings.clone(note, runtime.heap_allocator())
+		fmt.eprintln(note)
+	}
+	return pick
+}
+
+// Whether a holder (or a running Deckhand's core) answers on a socket in <dir>/run.
+data_dir_holder_alive :: proc(dir: string) -> bool {
+	run := fmt.tprintf("%s/run", dir)
+	files, err := os.read_all_directory_by_path(run, context.temp_allocator)
+	if err != nil do return false
+	for f in files {
+		if !strings.has_suffix(f.name, ".sock") || !(strings.has_prefix(f.name, "holder-") || f.name == "core.sock") do continue
+		if fd, ok := sock_connect(f.fullpath); ok {
+			sock_close(fd)
+			return true
+		}
+	}
+	return false
 }
 
 // The home the data dir lives under. A release build: the account's (the user database), never

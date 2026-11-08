@@ -23,7 +23,10 @@ package main
 // user's workarounds, docs/DEVELOPING.md, docs/BROWSER.md). None steers who Deckhand trusts or
 // what it runs.
 
+import "base:runtime"
+import "core:fmt"
 import "core:os"
+import "core:strings"
 
 TEST_HOOKS :: #config(DECKHAND_TEST_HOOKS, true)
 
@@ -94,19 +97,34 @@ when TEST_HOOKS {
 	}
 }
 
+// Which hooks were read under their old PI_DESK_ name this run (one warning each), and the last
+// warning's text (tests).
+hook_warned: [Hook]bool
+hook_last_warning: string
+
 // A hook's value ("" when unset, and always in a release build).
 hook_env :: proc(h: Hook, allocator := context.temp_allocator) -> string {
-	when TEST_HOOKS {
-		return os.get_env(HOOK_ENV[h], allocator) // env-read-ok: hook_env itself
-	} else {
-		return ""
-	}
+	v, _ := hook_lookup(h, allocator)
+	return v
 }
 
 // A hook's value and whether it is set at all (an empty value counts: DECKHAND_PATH_DIRS="").
+// The rename (0.1.7): when DECKHAND_X is unset, its old name PI_DESK_X counts, with a one-line
+// warning (once per hook) naming the new one, so a dev launcher or a forge script that still
+// sets PI_DESK_DATA_DIR never opens the user's real data dir. Not refused: forge sets both while
+// it moves over. Release builds have neither name (the hooks are compiled out).
 hook_lookup :: proc(h: Hook, allocator := context.temp_allocator) -> (string, bool) {
 	when TEST_HOOKS {
-		return os.lookup_env(HOOK_ENV[h], allocator) // env-read-ok: hook_lookup itself
+		name := HOOK_ENV[h]
+		if v, ok := os.lookup_env(name, allocator); ok do return v, true // env-read-ok: hook_lookup itself
+		old := strings.concatenate({LEGACY_ENV_PREFIX, name[len("DECKHAND_"):]}, context.temp_allocator)
+		v, ok := os.lookup_env(old, allocator) // env-read-ok: a hook's old name, built from HOOK_ENV
+		if ok && !hook_warned[h] {
+			hook_warned[h] = true
+			hook_last_warning = fmt.aprintf("Deckhand: %s is the old name of %s; set %s instead (the old name stops working in 0.2.0)", old, name, name, allocator = runtime.heap_allocator())
+			fmt.eprintln(hook_last_warning)
+		}
+		return v, ok
 	} else {
 		return "", false
 	}

@@ -44,7 +44,9 @@ cs_reset :: proc() -> runtime.Allocator {
 
 @(private = "file")
 cs_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/deckhand-cs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	// not "deckhand-": its e-c-n-d plus an s in TMPDIR's random part made the "secnd" filter
+	// below match every row by its path (claude_session_rows, a flake after the rename)
+	d := fmt.aprintf("%s/dhx-cs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))

@@ -855,3 +855,45 @@ hello_deadline_and_early_headers :: proc(t: ^testing.T) {
 		testing.expectf(t, time.tick_since(t0) < 200 * time.Millisecond, "kind %d: dropped only after %v", kind, time.tick_since(t0))
 	}
 }
+
+// INPUT for a program that does not read is queued up to input_cap: past it the core's
+// connection is not read (the paste waits), and after input_stall (under the app's 5 s write
+// timeout) the queue is dropped so the connection never stalls long. The core stays attached.
+@(test)
+input_queue_is_capped :: proc(t: ^testing.T) {
+	cfg := test_cfg()
+	cfg.input_stall = 100 * time.Millisecond
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	// raw: a canonical-mode tty drops input past its line limit, so the queue would stay empty
+	spawn_ok(t, h, f, 1, "stty raw -echo; exec /bin/sleep 60")
+	chunk := make([]u8, 1024 * 1024, context.temp_allocator)
+	for &b in chunk do b = 'x'
+	frame := make([dynamic]u8, context.temp_allocator)
+	holderwire.encode_input(&frame, 1, chunk)
+	TOTAL :: 64 * 1024 * 1024
+	sent, at, most := 0, 0, 0
+	start := time.tick_now()
+	for sent < TOTAL && time.tick_since(start) < 5 * time.Second {
+		left := len(frame) - at
+		n := send(f.fd, &frame[at], c.size_t(left), MSG_NOSIGNAL)
+		if n > 0 {
+			at += int(n)
+			if at == len(frame) {
+				at = 0
+				sent += len(chunk)
+			}
+		}
+		holder_step(h, 0)
+		if term := live_term(h, 1); term != nil do most = max(most, len(term.input))
+		fake_read(f)
+	}
+	testing.expectf(t, sent == TOTAL, "only %d bytes went in %v", sent, time.tick_since(start))
+	testing.expectf(t, most <= QUEUE_CAP_INPUT + len(frame) + READ_CHUNK, "INPUT queued up to %d bytes", most)
+	fake_send(f, .Ping, 0, holderwire.Empty{})
+	_, pong := wait_for(h, f, .Pong)
+	testing.expect(t, pong && h.core != nil, "the core was dropped")
+}

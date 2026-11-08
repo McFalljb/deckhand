@@ -32,6 +32,8 @@ import "../trust"
 HOLDER_REV :: 1
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
+QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
+INPUT_STALL :: 2 * time.Second // the app's writes time out after 5 s (holder_client.odin)
 IDLE_EXIT :: 10 * time.Second
 MAX_COLS :: holderwire.MAX_COLS // the grid limits (PR A); SPAWN/RESIZE outside 1..max are refused
 MAX_ROWS :: holderwire.MAX_ROWS
@@ -53,6 +55,8 @@ Config :: struct {
 	queue_cap:     int,
 	quiet:         bool, // no log lines (tests)
 	spawn_timeout: time.Duration, // a SPAWN whose child has not exec'd by then fails
+	input_cap:     int, // INPUT queued for one terminal past this: the core's connection is not read
+	input_stall:   time.Duration, // ... for at most this long; then that queue is dropped
 	hello_timeout: time.Duration, // a connection that has not said HELLO by then is dropped
 	test_spawn_gate: c.int, // tests: > 0, a child reads one byte from it before its exec
 }
@@ -68,6 +72,8 @@ default_config :: proc() -> Config {
 		queue_cap = QUEUE_CAP,
 		spawn_timeout = SPAWN_TIMEOUT,
 		hello_timeout = HELLO_TIMEOUT,
+		input_cap = QUEUE_CAP_INPUT,
+		input_stall = INPUT_STALL,
 	}
 }
 
@@ -130,6 +136,8 @@ Holder :: struct {
 	exit_code:         int,
 	buf:               []u8,
 	serials:           u64,
+	input_paused:      bool, // a terminal has input_cap of INPUT queued: the core is not read
+	input_paused_at:   time.Tick,
 }
 
 Start_Error :: enum {
@@ -342,9 +350,10 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	}
 	if h.listen_fd >= 0 && !h.shutting_down do add(&fds, &who, &idx, h.listen_fd, POLLIN, .Listen, 0)
 	if h.wake_fd >= 0 do add(&fds, &who, &idx, h.wake_fd, POLLIN, .Wake, 0)
+	input_pause(h)
 	for cn, i in h.conns {
 		ev: c.short
-		if !cn.closing || cn.linger do ev |= POLLIN
+		if (!cn.closing || cn.linger) && !(cn == h.core && h.input_paused) do ev |= POLLIN
 		if queued(cn) > 0 do ev |= POLLOUT
 		add(&fds, &who, &idx, cn.fd, ev, .Conn, i)
 	}
@@ -390,6 +399,29 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	sweep_conns(h)
 }
 
+// INPUT a program does not take is queued up to input_cap; past it the core's connection is not
+// read (its writes wait, as a paste into a direct PTY would), and after input_stall that queue is
+// dropped (logged), before the app's own write timeout would give up on the holder.
+@(private)
+input_pause :: proc(h: ^Holder) {
+	over := false
+	for t in h.terms do if len(t.input) >= h.cfg.input_cap do over = true
+	if !over {
+		h.input_paused = false
+		return
+	}
+	if !h.input_paused {
+		h.input_paused, h.input_paused_at = true, time.tick_now()
+		return
+	}
+	if time.tick_since(h.input_paused_at) < h.cfg.input_stall do return
+	for t in h.terms do if len(t.input) >= h.cfg.input_cap {
+		hlog(h, "terminal %d: its program took no INPUT for %v: dropping %d queued bytes", t.id, h.cfg.input_stall, len(t.input))
+		clear(&t.input)
+	}
+	h.input_paused = false
+}
+
 // Masters are read unless the attached core has queue_cap bytes it has not taken (§5.6). With no
 // core they are always read, into the tails only, so programs never stall.
 @(private)
@@ -419,6 +451,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 		else if !term.final do t = min(t, ms_until(term.reaped_at, h.cfg.exit_grace))
 	}
 	if h.idle do t = min(t, ms_until(h.idle_since, h.cfg.idle_exit))
+	if h.input_paused do t = min(t, ms_until(h.input_paused_at, h.cfg.input_stall))
 	return t
 }
 

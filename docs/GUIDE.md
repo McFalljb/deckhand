@@ -1480,7 +1480,7 @@ it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)).
   remove the old Deckhand entry and add the new one.
 
 Release builds have no test or development switches: no test mode, no `PI_DESK_*` overrides of
-where data and sockets live, no `--print-token`. To drive Deckhand from a terminal, take a token
+where data and sockets live, and no token printed at start. To drive Deckhand from a terminal, take a token
 with **Copy a control token** (the gear): it puts `export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` on the
 clipboard for `deckhand --ctl` (it works until you quit Deckhand).
 

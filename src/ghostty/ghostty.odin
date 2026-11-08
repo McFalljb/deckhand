@@ -40,7 +40,24 @@ Key_Encoder :: distinct rawptr
 Key_Event :: distinct rawptr
 Mouse_Encoder :: distinct rawptr
 Mouse_Event :: distinct rawptr
+Formatter :: distinct rawptr
+Snapshot_Decoder :: distinct rawptr
 Allocator :: struct {} // only ever passed as nil (default allocator)
+
+// ---- io.h ----
+
+// Called synchronously; data is borrowed for the call. Return false to fail the operation.
+Writer_Fn :: #type proc "c" (userdata: rawptr, data: [^]u8, len: c.size_t) -> bool
+Writer :: struct {
+	write:    Writer_Fn,
+	userdata: rawptr,
+}
+// Fill buf (up to cap) and set out_len; a successful zero-byte read is end of file.
+Reader_Fn :: #type proc "c" (userdata: rawptr, buf: [^]u8, cap: c.size_t, out_len: ^c.size_t) -> bool
+Reader :: struct {
+	read:     Reader_Fn,
+	userdata: rawptr,
+}
 
 Formatter_Format :: enum c.int {
 	Plain = 0,
@@ -140,10 +157,20 @@ Selection_Format_Options :: struct {
 Cell :: u64
 
 Cell_Data :: enum c.int {
-	Invalid       = 0,
-	Codepoint     = 1,
-	Wide          = 3,
-	Has_Hyperlink = 7, // bool: an OSC 8 hyperlink (its URI: grid_ref_hyperlink_uri)
+	Invalid          = 0,
+	Codepoint        = 1,
+	Wide             = 3,
+	Has_Text         = 4, // bool
+	Style_Id         = 6, // u16
+	Has_Hyperlink    = 7, // bool: an OSC 8 hyperlink (its URI: grid_ref_hyperlink_uri)
+	Protected        = 8, // bool: DECSCA
+	Semantic_Content = 9, // Cell_Semantic_Content (OSC 133)
+}
+
+Cell_Semantic_Content :: enum c.int {
+	Output = 0,
+	Input  = 1,
+	Prompt = 2,
 }
 
 // A row of the grid (ghostty_grid_ref_row), opaque: read with row_get.
@@ -153,6 +180,7 @@ Grid_Row_Data :: enum c.int {
 	Wrap              = 1, // bool: the row soft-wraps into the next
 	Wrap_Continuation = 2, // bool: the row continues the one above
 	Hyperlink         = 5, // bool: some cell has a hyperlink (may be a false positive)
+	Semantic_Prompt   = 6, // c.int (GhosttyRowSemanticPrompt): OSC 133 marks
 }
 
 Cell_Wide :: enum c.int {
@@ -175,6 +203,10 @@ Terminal_Option :: enum c.int {
 	Color_Palette        = 14, // ^[256]Color_Rgb, nil resets to the built-in palette
 	Selection            = 21,
 	Scrollback_Max_Bytes = 27,
+	Scrollback_Max_Lines = 28,
+	// ^c.size_t: the unfinished escape or UTF-8 suffix kept for snapshots; 0 disables.
+	// Must be set before the input it covers (snapshot.odin, term.odin)
+	Continuation_Max_Bytes = 31,
 	Mode                 = 34, // Mode_Config*
 	Semantic_Prompt      = 42, // Semantic_Prompt_Fn: OSC 133 steps (a new prompt clears program status)
 	Program_Status       = 46, // Program_Status_Fn: OSC 7501 reports; while set, `OSC 7501 ; ?` is answered through Write_Pty
@@ -183,7 +215,22 @@ Terminal_Option :: enum c.int {
 Terminal_Data :: enum c.int {
 	Cols            = 1,
 	Rows            = 2,
+	Cursor_X        = 3, // u16, active area
+	Cursor_Y        = 4, // u16
+	Cursor_Pending_Wrap = 5, // bool
 	Active_Screen   = 6,
+	Cursor_Visible  = 7, // bool
+	Cursor_Style    = 10, // Style: the pen for newly printed characters
+	Pwd             = 13, // String, borrowed until the next mutating call
+	Total_Rows      = 14, // c.size_t: scrollback plus the active area
+	Scrollback_Rows = 15, // c.size_t
+	Color_Foreground = 18, // Color_Rgb; No_Value when unset
+	Color_Background = 19,
+	Color_Cursor     = 20,
+	Color_Palette    = 21, // [256]Color_Rgb
+	Scrollback_Max_Bytes   = 34, // c.size_t
+	Continuation_Max_Bytes = 36, // c.size_t; 0 = tracking off
+	Vt_Ground              = 38, // bool: the parser is between sequences
 	Kitty_Keyboard_Flags = 8, // u8
 	Mouse_Tracking  = 11,
 	Title           = 12,
@@ -301,6 +348,55 @@ Semantic_Prompt_Fn :: #type proc "c" (t: Terminal, userdata: rawptr, event: ^Sem
 Color_Scheme :: enum c.int {
 	Light = 0,
 	Dark  = 1,
+}
+
+// ---- formatter.h ----
+
+Formatter_Screen_Extra :: struct {
+	size:           c.size_t,
+	cursor:         bool,
+	style:          bool,
+	hyperlink:      bool,
+	protection:     bool,
+	kitty_keyboard: bool,
+	charsets:       bool,
+}
+
+Formatter_Terminal_Extra :: struct {
+	size:             c.size_t,
+	palette:          bool,
+	modes:            bool,
+	scrolling_region: bool,
+	tabstops:         bool,
+	pwd:              bool,
+	keyboard:         bool,
+	screen:           Formatter_Screen_Extra,
+}
+
+Formatter_Terminal_Options :: struct {
+	size:      c.size_t,
+	emit:      Formatter_Format,
+	unwrap:    bool,
+	trim:      bool,
+	extra:     Formatter_Terminal_Extra,
+	selection: ^Selection, // nil: the whole active screen and its scrollback
+}
+
+// ---- snapshot.h (GHOSTSNP) ----
+
+Snapshot_Decoder_Option :: enum c.int {
+	Max_Continuation_Bytes     = 0, // ^c.size_t
+	Retain_Continuation        = 1, // ^bool: keep tracking on the decoded terminal
+	Compress_History           = 2, // ^bool
+	Kitty_Image_Storage_Limit  = 3, // ^u64
+}
+
+Snapshot_Decoder_Data :: enum c.int {
+	Invalid                = 0,
+	Max_Continuation_Bytes = 1,
+	Source_Offset          = 2, // c.size_t: bytes consumed
+	History_Rows_Primary   = 3, // u64
+	History_Rows_Alternate = 4,
 }
 
 // ---- render.h ----
@@ -506,6 +602,24 @@ foreign lib {
 	tracked_grid_ref_free :: proc(ref: Tracked_Grid_Ref) ---
 	tracked_grid_ref_point :: proc(ref: Tracked_Grid_Ref, tag: Point_Tag, out: ^Point_Coordinate) -> Result ---
 	terminal_selection_format_alloc :: proc(terminal: Terminal, allocator: ^Allocator, options: Selection_Format_Options, out_ptr: ^[^]u8, out_len: ^c.size_t) -> Result ---
+	// the exact unfinished-sequence suffix (tracking must be on: Continuation_Max_Bytes)
+	terminal_continuation_alloc :: proc(terminal: Terminal, allocator: ^Allocator, out_ptr: ^[^]u8, out_len: ^c.size_t) -> Result ---
+
+	formatter_terminal_new :: proc(allocator: ^Allocator, formatter: ^Formatter, terminal: Terminal, options: Formatter_Terminal_Options) -> Result ---
+	formatter_format_alloc :: proc(formatter: Formatter, allocator: ^Allocator, out_ptr: ^[^]u8, out_len: ^c.size_t) -> Result ---
+	formatter_free :: proc(formatter: Formatter) ---
+
+	// GHOSTSNP: Invalid_Value when the parser is mid-sequence and the suffix isn't available
+	snapshot_encode :: proc(terminal: Terminal, writer: Writer) -> Result ---
+	snapshot_encode_alloc :: proc(terminal: Terminal, allocator: ^Allocator, out_ptr: ^[^]u8, out_len: ^c.size_t) -> Result ---
+	snapshot_decoder_new :: proc(allocator: ^Allocator, decoder: ^Snapshot_Decoder, reader: Reader) -> Result ---
+	snapshot_decoder_new_buf :: proc(allocator: ^Allocator, decoder: ^Snapshot_Decoder, ptr: [^]u8, len: c.size_t) -> Result ---
+	snapshot_decoder_set :: proc(decoder: Snapshot_Decoder, option: Snapshot_Decoder_Option, value: rawptr) -> Result ---
+	snapshot_decoder_ready :: proc(decoder: Snapshot_Decoder, terminal: ^Terminal) -> Result ---
+	snapshot_decoder_next :: proc(decoder: Snapshot_Decoder) -> Result --- // No_Value at FINISH
+	snapshot_decoder_decode :: proc(decoder: Snapshot_Decoder, terminal: ^Terminal) -> Result ---
+	snapshot_decoder_get :: proc(decoder: Snapshot_Decoder, data: Snapshot_Decoder_Data, out: rawptr) -> Result ---
+	snapshot_decoder_free :: proc(decoder: Snapshot_Decoder) ---
 
 	render_state_new :: proc(allocator: ^Allocator, state: ^Render_State) -> Result ---
 	render_state_free :: proc(state: Render_State) ---
@@ -529,6 +643,7 @@ foreign lib {
 	grid_ref_row :: proc(ref: ^Grid_Ref, out_row: ^Grid_Row) -> Result ---
 	grid_ref_graphemes :: proc(ref: ^Grid_Ref, buf: [^]u32, buf_len: c.size_t, out_len: ^c.size_t) -> Result ---
 	grid_ref_hyperlink_uri :: proc(ref: ^Grid_Ref, buf: [^]u8, buf_len: c.size_t, out_len: ^c.size_t) -> Result ---
+	grid_ref_style :: proc(ref: ^Grid_Ref, out: ^Style) -> Result ---
 
 	key_encoder_new :: proc(allocator: ^Allocator, encoder: ^Key_Encoder) -> Result ---
 	key_encoder_free :: proc(encoder: Key_Encoder) ---

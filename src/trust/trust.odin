@@ -35,6 +35,10 @@ Decision :: enum {
 	No_Peer, // the token could not be read
 	Other_User, // a different effective user
 	Changed, // not the process (or image) that was checked at accept
+	Not_Exec, // the holder's pid, but still the old image: nothing was exec'd (§7.3)
+	No_Code, // no code for that process (it exited or exec'd again), or ours is unknown
+	Bad_Signature, // its code's signature does not validate
+	Wrong_Identity, // signed, but not with our identifier (a swapped binary)
 }
 
 // At accept, before reading anything: may this peer talk to us at all?
@@ -62,6 +66,48 @@ peer_still :: proc(at_accept, now: Peer) -> Decision {
 ready_peer_allowed :: proc(mode: Mode, own_uid: u32, launched_pid: i32, at_accept: Peer) -> Decision {
 	if d := peer_allowed(mode, own_uid, at_accept); d != .Allow do return d
 	if launched_pid <= 0 || at_accept.pid != launched_pid do return .Changed
+	return .Allow
+}
+
+// The holder upgrade's keeper (§7.3 step 4): the peer on its socketpair must be the holder's own
+// pid running a NEW image (the exec happened: pidversion changed). Then image_allowed decides on
+// what that image is. old_pidversion: the image that forked the keeper.
+successor_image_allowed :: proc(mode: Mode, own_uid: u32, holder_pid, old_pidversion: i32, peer: Peer) -> Decision {
+	if d := peer_allowed(mode, own_uid, peer); d != .Allow do return d
+	if holder_pid <= 0 || peer.pid != holder_pid do return .Changed
+	if peer.pidversion == old_pidversion do return .Not_Exec
+	return .Allow
+}
+
+// The upgrade's dry run (§7.3 step 2): the peer must be the child the holder forked for it,
+// whatever that child exec'd (image_allowed checks what). Only then does it get dup'd masters.
+dry_run_peer_allowed :: proc(mode: Mode, own_uid: u32, child_pid: i32, peer: Peer) -> Decision {
+	if d := peer_allowed(mode, own_uid, peer); d != .Allow do return d
+	if child_pid <= 0 || peer.pid != child_pid do return .Changed
+	return .Allow
+}
+
+// A process's (or a file's) code, as the Security framework saw it: from a live audit token
+// (what the kernel actually ran), or a file's static code (only an early check: the file can be
+// swapped before it runs, S2).
+Code_Identity :: struct {
+	ok:         bool, // there was code to look at
+	valid:      bool, // its signature validates
+	identifier: string, // its signing identifier ("dev.deckhand.core")
+}
+
+// May this code have the holder's terminals and key? Ad hoc (§5.4, §7.3 4.6): the identifier
+// only, which must be our own and validly signed: a guard against accidents (a stray or wrong
+// binary), not against a same-user attacker, who can sign anything with any identifier. The
+// Developer ID's designated requirement joins here at D0.
+image_allowed :: proc(mode: Mode, own, got: Code_Identity) -> Decision {
+	if !own.ok || own.identifier == "" do return .No_Code
+	if !got.ok do return .No_Code
+	if !got.valid do return .Bad_Signature
+	switch mode {
+	case .Adhoc:
+		if got.identifier != own.identifier do return .Wrong_Identity
+	}
 	return .Allow
 }
 
@@ -152,14 +198,28 @@ when ODIN_OS == .Darwin {
 
 	// The peer of a connected Unix socket, now.
 	peer_read :: proc(fd: posix.FD) -> Peer {
+		p, _ := peer_read_token(fd)
+		return p
+	}
+
+	// The same, with the whole token (for code_identity_of_token: one read, one process).
+	peer_read_token :: proc(fd: posix.FD) -> (Peer, Audit_Token) {
 		tok: Audit_Token
 		n := u32(size_of(tok))
-		if trust_getsockopt(c.int(fd), SOL_LOCAL, LOCAL_PEERTOKEN, &tok, &n) != 0 || n != size_of(tok) do return {}
+		if trust_getsockopt(c.int(fd), SOL_LOCAL, LOCAL_PEERTOKEN, &tok, &n) != 0 || n != size_of(tok) do return {}, {}
+		return peer_of_token(tok), tok
+	}
+
+	peer_of_token :: proc(tok: Audit_Token) -> Peer {
 		return Peer{ok = true, pid = i32(tok.val[5]), pidversion = i32(tok.val[7]), euid = tok.val[1]}
 	}
 } else {
 	// Linux has no live token: SO_PEERCRED is the connecting process, fixed at connect (later).
 	peer_read :: proc(fd: posix.FD) -> Peer {return {}}
+	Audit_Token :: struct {
+		val: [8]u32,
+	}
+	peer_read_token :: proc(fd: posix.FD) -> (Peer, Audit_Token) {return {}, {}}
 }
 
 own_uid :: proc() -> u32 {return u32(posix.geteuid())}

@@ -37,6 +37,8 @@ jobs:
     name: scenes (${{ matrix.shard }}/4)
     env:
       SCENE_JOBS: "2"
+      # a scene is killed after this many times its typical (dev Mac) time, at least 120 s
+      SCENE_TIMEOUT_X: "5"
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive, persist-credentials: false }

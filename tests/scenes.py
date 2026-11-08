@@ -6,16 +6,23 @@ Which scenes (tests/scenes.txt lists them, with their areas, tags and typical ti
   --all             every required and full scene (not the manual tools, never a paid one)
   --required        the required ones (what CI runs on every pull request)
   --changed [BASE]  the scenes whose areas hold a file changed since BASE (default: main's merge
-                    base), committed or not, plus the smoke scenes; everything if an @all file
-                    changed
+                    base), committed or not, plus the smoke scenes. An @core file (main.odin,
+                    commands.odin...) adds the required scenes and the scenes whose area names
+                    its changed lines mention (browser_..., claude_...); a large @core change
+                    (over CORE_MAX_LINES lines) or an @all file (the build, the script engine,
+                    this runner) runs everything
   --area PATH       the scenes whose areas cover PATH (a file, or a folder prefix such as src/native)
   --shard I/N       of those, shard I of N (balanced by the typical times)
   --ci              leave out the scenes tagged noci
 
-It builds once (./build.sh and ./build.sh fake-app; --no-build to skip: each scene still refuses
-a stale build/deckhand), runs -j scenes at a time (scenes that share a lock tag one at a time,
+It builds once (./build.sh and ./build.sh fake-app; skipped when both are newer than every file
+they are built from; --build to build anyway, --no-build to skip: each scene still refuses a stale
+build/deckhand), runs -j scenes at a time (scenes that share a lock tag one at a time,
 --cef-jobs Chromium scenes at a time), retries a failed scene once and reports it as FLAKY if
-the retry passes, then prints a table: result, time, log. Logs: build/scenes/<scene>.log (the
+the retry passes, then prints a table: result, time, log. Each scene stops at its first failed
+check or wait (PI_DESK_SCRIPT_FAIL_FAST=1; --no-fail-fast to run every line) and is killed after
+its timeout (3x its typical time, at least 120 s; --timeout to set one for all); a failed or
+killed scene says which script line it was on (build/scenes/<scene>.step). Logs: build/scenes/<scene>.log (the
 first, failed attempt of a retried scene: <scene>.1.log). Exit status 1 if a scene failed both
 times; flaky scenes do not fail the run (--strict: they do).
 
@@ -27,6 +34,7 @@ import argparse
 import fnmatch
 import json
 import os
+import re
 import signal
 import subprocess
 import sys
@@ -47,6 +55,11 @@ IDLE_JOBS = 2  # idle scenes at a time, beside the -j others
 # how long after its start it may still be growing (counted at that size meanwhile)
 MEM_NEED = {"cef": 1.0 * 2**30, "idle": 0.6 * 2**30, "other": 0.2 * 2**30}
 MEM_YOUNG = 20.0
+# a scene is killed after max(TIMEOUT_MIN, TIMEOUT_X * its typical time) (--timeout: one for all)
+# (SCENE_TIMEOUT_X: CI's slower runners use more)
+TIMEOUT_X, TIMEOUT_MIN = float(os.environ.get("SCENE_TIMEOUT_X", "3")), 120
+# an @core change of more lines than this runs everything (a refactor, not an edit)
+CORE_MAX_LINES = 300
 
 
 class Scene:
@@ -103,6 +116,43 @@ def changed_files(base):
     return base, sorted(files)
 
 
+def core_changes(base, files):
+    """The changed lines (added or removed, lower-case) of these files since base, and their count."""
+    out, n = [], 0
+    for f in files:
+        try:
+            diff = git("diff", "-U0", base, "--", f)
+        except subprocess.CalledProcessError:
+            diff = ""
+        if not diff.strip() and os.path.exists(os.path.join(ROOT, f)):  # untracked: all of it
+            diff = "\n".join("+" + ln for ln in open(os.path.join(ROOT, f), errors="replace"))
+        for ln in diff.splitlines():
+            if ln[:1] in "+-" and not ln.startswith(("+++", "---")):
+                out.append(ln[1:].lower())
+                n += 1
+    return "\n".join(out), n
+
+
+def area_stems(s):
+    """What a scene's src/ areas are called in code: src/browser*.odin -> browser, src/app_tab.odin
+    -> app_tab; generic ones (ui_*, short names) left out."""
+    stems = []
+    for g in s.areas:
+        if not g.startswith("src/") or g.startswith("src/native/"):
+            continue
+        b = os.path.basename(g).split(".")[0].rstrip("*_")
+        if b.startswith("ui_"):
+            b = b[3:]
+        if len(b) >= 4 and "*" not in b and b not in stems:
+            stems.append(b)
+    return stems
+
+
+def mentions(text, stem):
+    """stem starts an identifier or a word of text (claude in new_claude_session, Claude_Wait)."""
+    return re.search(r"(?<![a-z0-9])" + re.escape(stem), text) is not None
+
+
 def select(a, scenes, special):
     by_name = {s.name: s for s in scenes}
     for s in scenes:
@@ -122,6 +172,23 @@ def select(a, scenes, special):
             base, files = changed_files(a.changed or None)
             label = f"changed since {base[:12]}"
         everything = [f for f in files if any(fnmatch.fnmatchcase(f, g) for g in special.get("@all", []))]
+        core = [f for f in files if f not in everything and any(fnmatch.fnmatchcase(f, g) for g in special.get("@core", []))]
+        core_why = {}  # scene name -> why an @core change selects it
+        if core and not everything:
+            if a.area:
+                everything = [core[0]]
+            else:
+                text, n = core_changes(base, core)
+                if n > CORE_MAX_LINES:
+                    everything = [f"{core[0]} ({n} lines changed in core files)"]
+                else:
+                    for s in scenes:
+                        if s.tier == "required":
+                            core_why[s.name] = f"{core[0]} (required)"
+                        else:
+                            stem = next((m for m in area_stems(s) if mentions(text, m)), None)
+                            if stem:
+                                core_why[s.name] = f"{core[0]} mentions {stem}"
         out = []
         for s in scenes:
             if s.tier not in ("required", "full"):
@@ -131,13 +198,15 @@ def select(a, scenes, special):
                 s.why = f"{everything[0]} (every scene)"
             elif hits:
                 s.why = hits[0] + (f" +{len(hits) - 1}" if len(hits) > 1 else "")
+            elif s.name in core_why:
+                s.why = core_why[s.name]
             elif "smoke" in s.tags and not a.area:
                 s.why = "smoke"
             if s.why:
                 out.append(s)
         unmapped = [f for f in files if f.startswith(("src/", "tests/scripts/", "integrations/", "tools/"))
                     and not any(s.covers(f) or any(g.startswith(f.rstrip("/") + "/") for g in s.areas) for s in scenes)
-                    and not any(fnmatch.fnmatchcase(f, g) for g in special.get("@all", []) + special.get("@unit", []))]
+                    and not any(fnmatch.fnmatchcase(f, g) for g in special.get("@all", []) + special.get("@core", []) + special.get("@unit", []))]
         print(f"scenes: {label}: {len(files)} files", file=sys.stderr)
         if unmapped:
             print("scenes: no scene covers: " + " ".join(unmapped) + " (add it to tests/scenes.txt)", file=sys.stderr)
@@ -169,13 +238,13 @@ def check_map(scenes, special):
     tracked = git("ls-files").split()
     src = [f for f in tracked if f.startswith(("src/", "integrations/", "tools/", "tests/scripts/"))
            and not f.endswith((".md",))]
-    globs = special.get("@all", []) + special.get("@unit", [])
+    globs = special.get("@all", []) + special.get("@core", []) + special.get("@unit", [])
     bad = 0
     for f in src:
         if not (any(s.covers(f) for s in scenes) or any(fnmatch.fnmatchcase(f, g) for g in globs)):
             if f.startswith("tests/scripts/") and not f.endswith((".sh", ".txt", ".py")):
                 continue
-            print(f"no scene, @all or @unit covers {f}")
+            print(f"no scene, @all, @core or @unit covers {f}")
             bad += 1
     for s in scenes:
         for g in s.areas:
@@ -212,16 +281,60 @@ def kill_tree(pid):
             pass
 
 
+# What ./build.sh and ./build.sh fake-app build from (tests/scripts/fresh-build.sh checks the app's
+# part too): when every file here is older than the output, the build is skipped
+APP_INPUTS = ["src", "tools/pi-desk-cli", "integrations/claude-code", "integrations/pi/extensions",
+              "integrations/pi/lib", "integrations/pi/skills", "integrations/pi/extensions.json",
+              "integrations/pi/package.json", "build.sh", "scripts/bundle-app.sh", "scripts/fetch-cef.sh",
+              "scripts/check-minos.sh", "vendor/cef/VERSION", "vendor/libghostty-vt", "vendor/clay/clay.h",
+              "vendor/tree-sitter"]
+FAKE_APP_INPUTS = ["tests/fake-app", "build.sh"]
+
+
+def stale_input(out, inputs):
+    """The first input newer than out ("" when out is fresh), or why out needs building."""
+    try:
+        built = os.stat(os.path.join(ROOT, out)).st_mtime
+    except OSError:
+        return f"no {out}"
+    for top in inputs:
+        path = os.path.join(ROOT, top)
+        if os.path.isfile(path):
+            if os.stat(path).st_mtime > built:
+                return top
+            continue
+        for d, _, fs in os.walk(path):
+            for f in fs:
+                if f.endswith("_test.odin"):
+                    continue
+                p = os.path.join(d, f)
+                try:
+                    if os.stat(p).st_mtime > built:
+                        return os.path.relpath(p, ROOT)
+                except OSError:
+                    pass
+    return ""
+
+
 def mem_need(s):
     if "cef" in s.tags:
         return MEM_NEED["idle" if "idle" in s.tags else "cef"]
     return MEM_NEED["other"]
 
 
+def last_step(name):
+    """The script line the scene was on (PI_DESK_SCRIPT_STEP: src/autotest.odin), or ""."""
+    try:
+        return open(os.path.join(LOGS, name + ".step"), errors="replace").read().strip()
+    except OSError:
+        return ""
+
+
 class Runner:
-    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0):
+    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None):
         self.pending = list(scenes)
         self.jobs, self.cef_jobs, self.retries, self.timeout = jobs, cef_jobs, retries, timeout
+        self.fail_fast, self.last = fail_fast, last or {}
         self.mem_budget = mem_budget  # bytes; 0: no budget
         self.rss, self.started_at = 0, {}
         self.running = {}  # name -> Scene
@@ -254,23 +367,40 @@ class Runner:
                 return False
         return True
 
+    def timeout_of(self, s):
+        if self.timeout:
+            return self.timeout
+        return max(TIMEOUT_MIN, TIMEOUT_X * max(s.secs, self.last.get(s.name, 0)))
+
     def attempt(self, s, log):
         t0 = time.monotonic()
+        timeout = self.timeout_of(s)
+        step = os.path.join(LOGS, s.name + ".step")
+        try:
+            os.remove(step)
+        except FileNotFoundError:
+            pass
+        env = dict(os.environ, PI_DESK_SCRIPT_STEP=step, PI_DESK_SCRIPT_FAIL_FAST="1" if self.fail_fast else "0")
         with open(log, "w") as fh:
-            fh.write(f"# {s.name}: {s.command}   (started {time.strftime('%H:%M:%S')}, load {os.getloadavg()[0]:.1f})\n")
+            fh.write(f"# {s.name}: {s.command}   (started {time.strftime('%H:%M:%S')}, load {os.getloadavg()[0]:.1f}, "
+                     f"timeout {timeout:.0f} s)\n")
             fh.flush()
             # in the runner's process group: whatever stops or limits the runner (a CI timeout,
             # a memory guard) reaches the scenes too
             p = subprocess.Popen(["/bin/sh", "-c", "exec " + s.command], cwd=ROOT, stdout=fh,
-                                 stderr=subprocess.STDOUT)
+                                 stderr=subprocess.STDOUT, env=env)
             try:
-                rc = p.wait(self.timeout)
+                rc = p.wait(timeout)
             except subprocess.TimeoutExpired:
                 kill_tree(p.pid)
                 p.wait()
                 rc = 124
-                fh.write(f"\n# scenes.py: killed after {self.timeout} s\n")
+                fh.write(f"\n# scenes.py: killed after {timeout:.0f} s ("
+                         f"{'--timeout' if self.timeout else f'{TIMEOUT_X:g}x its typical time, at least {TIMEOUT_MIN} s'})\n"
+                         f"# last script step: {last_step(s.name) or '(none: before the app ran a script line)'}\n")
             secs = time.monotonic() - t0
+            if rc != 0 and rc != 124 and last_step(s.name):
+                fh.write(f"\n# last script step: {last_step(s.name)}\n")
             fh.write(f"\n# {s.name}: exit {rc} after {secs:.1f} s (load {os.getloadavg()[0]:.1f})\n")
         return rc, secs
 
@@ -279,18 +409,25 @@ class Runner:
         rc, secs = self.attempt(s, log)
         times = [secs]
         result = "pass" if rc == 0 else "FAIL"
+        killed = rc == 124
+        step = last_step(s.name) if rc != 0 else ""
         if rc != 0 and self.retries:
             os.replace(log, os.path.join(LOGS, s.name + ".1.log"))
             rc, secs2 = self.attempt(s, log)
             times.append(secs2)
             result = "FLAKY" if rc == 0 else "FAIL"
+            killed = rc == 124
+            step = last_step(s.name) if rc != 0 else step
         with self.cv:
-            self.results[s.name] = {"result": result, "times": times, "log": os.path.relpath(log, ROOT)}
+            self.results[s.name] = {"result": result, "times": times, "log": os.path.relpath(log, ROOT),
+                                    "killed": killed and result == "FAIL", "step": step}
             del self.running[s.name]
             done = len(self.results)
             total = done + len(self.pending) + len(self.running)
-            print(f"[{done}/{total}] {result:5} {s.name} {sum(times):.0f}s" + (" (2 tries)" if len(times) > 1 else ""),
-                  flush=True)
+            extra = (" (2 tries)" if len(times) > 1 else "") + (" KILLED (timeout)" if killed and result == "FAIL" else "")
+            if result == "FAIL" and step:
+                extra += f"  at {step}"
+            print(f"[{done}/{total}] {result:5} {s.name} {sum(times):.0f}s{extra}", flush=True)
             self.cv.notify_all()
 
     def sample_memory(self):
@@ -346,8 +483,12 @@ def main():
                     help="start no scene that could take the run's total RSS past this (default 3.5; "
                     "SCENE_MEM_GB; 0: no budget)")
     ap.add_argument("--retries", type=int, default=1, choices=(0, 1))
-    ap.add_argument("--timeout", type=int, default=900, help="seconds per attempt (default 900)")
+    ap.add_argument("--timeout", type=int, default=0, help=f"seconds per attempt, for every scene (default: "
+                    f"{TIMEOUT_X}x the scene's typical or last time, at least {TIMEOUT_MIN} s)")
+    ap.add_argument("--no-fail-fast", action="store_true", help="run every script line after a failure "
+                    "(PI_DESK_SCRIPT_FAIL_FAST=0): to see all of a script's failures at once")
     ap.add_argument("--no-build", action="store_true")
+    ap.add_argument("--build", action="store_true", help="build even when build/deckhand and build/fake-app look fresh")
     ap.add_argument("--strict", action="store_true", help="a flaky scene fails the run")
     ap.add_argument("--soft-tier", choices=TIERS, help="a failed scene of this tier is a warning, "
                     "not a failure (the nightly run's not-yet-required scenes)")
@@ -379,10 +520,16 @@ def main():
     a.cef_jobs = a.cef_jobs or (3 if cpus >= 10 else 1)
     if not a.no_build:
         b0 = time.monotonic()
-        for cmd in (["./build.sh"], ["./build.sh", "fake-app"]):
-            if subprocess.run(cmd, stdout=subprocess.DEVNULL if not GHA else None).returncode != 0:
-                sys.exit(f"scenes: {' '.join(cmd)} failed")
-        print(f"scenes: built in {time.monotonic() - b0:.0f} s")
+        stale = [(cmd, why) for cmd, why in (("./build.sh", stale_input("build/deckhand", APP_INPUTS)),
+                                             ("./build.sh fake-app", stale_input("build/fake-app", FAKE_APP_INPUTS)))
+                 if why or a.build]
+        for cmd, why in stale:
+            if subprocess.run(cmd.split(), stdout=subprocess.DEVNULL if not GHA else None).returncode != 0:
+                sys.exit(f"scenes: {cmd} failed")
+        if stale:
+            print(f"scenes: built in {time.monotonic() - b0:.0f} s ({'; '.join(c + ': ' + (w or '--build') for c, w in stale)})")
+        else:
+            print("scenes: build/deckhand and build/fake-app are newer than their sources: not rebuilt (--build to)")
     os.makedirs(LOGS, exist_ok=True)
     for s in chosen:
         for f in (s.name + ".log", s.name + ".1.log"):
@@ -394,7 +541,7 @@ def main():
     print(f"scenes: {len(chosen)} scenes, {jobs} at a time (Chromium: {a.cef_jobs}; memory budget "
           f"{a.mem_gb:g} GB), load {load0:.1f}", flush=True)
     t0 = time.monotonic()
-    r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30))
+    r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30), not a.no_fail_fast, last)
     r.run()
     wall = time.monotonic() - t0
 
@@ -411,6 +558,9 @@ def main():
         res = r.results[name]
         t = " + ".join(f"{x:.0f}" for x in res["times"])
         rows.append(f"{name:20} {res['result']:6} {t:>6}  {res['log']}")
+        if res["result"] == "FAIL":
+            rows.append(f"{'':20} {'killed after its timeout' if res['killed'] else 'failed'}; last script step: "
+                        f"{res['step'] or '(none recorded)'}")
     tier_of = {s.name: s.tier for s in chosen}
     failed = [n for n in r.order if r.results[n]["result"] == "FAIL"]
     soft = [n for n in failed if tier_of[n] == a.soft_tier]

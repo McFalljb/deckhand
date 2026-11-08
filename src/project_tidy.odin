@@ -77,7 +77,7 @@ temp_roots_override: []string
 temp_roots :: proc() -> []string {
 	if temp_roots_override != nil do return temp_roots_override
 	// Scenes (a script running) whose fake HOME sits in /tmp, for a short
-	// path, name the temp folders instead: PI_DESK_TEMP_ROOTS, ':'-separated
+	// path, name the temp folders instead: DECKHAND_TEMP_ROOTS, ':'-separated
 	// (empty pieces dropped: "" would make every path temp).
 	if autotest.active {
 		named := make([dynamic]string, context.temp_allocator)

@@ -1,6 +1,6 @@
 package main
 
-// Claude Code sessions started outside pi-desk, as rows (docs/CLAUDE.md §4c). For the selected
+// Claude Code sessions started outside Deckhand, as rows (docs/CLAUDE.md §4c). For the selected
 // project (and Chats), each account's <config>/projects/<folder>/<session id>.jsonl, where
 // <folder> is Claude Code's name for the project's folder (claude_project_slug: computed from
 // the project's path and its real path, never turned back into a path). When that name is not
@@ -11,7 +11,7 @@ package main
 //   - Rows: newest first with pi's (the file's modification time; its birth time is "created"),
 //     at most MAX_SESSIONS per list; never a sidechain transcript (the first entry says
 //     isSidechain) nor a subagent's (agent-*.jsonl, or the session's own subagents/ folder, which
-//     is never listed); never one pi-desk already has (its history: that row, with this file's
+//     is never listed); never one Deckhand already has (its history: that row, with this file's
 //     created date) or a pi session's id. Titles: the user's /rename (custom-title, last wins),
 //     else the first real prompt (not meta, a command, a command's output, a system reminder or a
 //     sidechain; its first line, at most 80 characters), else Claude's own title (ai-title), else
@@ -19,7 +19,7 @@ package main
 //     list does; within the listing's byte budget on the main thread (TITLE_INLINE_BUDGET), the
 //     rest on a worker, then the rows are made again. Never saved, never given to agents beyond
 //     the row (id, title, times, account label): no path.
-//   - pi-desk's own history entries whose transcript is gone (Claude Code deletes transcripts
+//   - Deckhand's own history entries whose transcript is gone (Claude Code deletes transcripts
 //     after cleanupPeriodDays, 30 by default; `claude` purge or a hand rm) show greyed: decided
 //     by stat (the file it reported, else its account's folder for the project).
 //   - A click resumes the conversation in a Claude-only session under its account, by the
@@ -43,7 +43,7 @@ import "core:time"
 CLAUDE_DISK_CHUNK :: 64 * 1024 // the head and the tail of a transcript read for its title (Claude Code's own)
 
 // A Claude transcript of the listed project's: a row of its own (listed), or what the scan knows
-// of one pi-desk's history has (its created date, or that its transcript is gone).
+// of one Deckhand's history has (its created date, or that its transcript is gone).
 Claude_Disk :: struct {
 	id:       string,
 	path:     string, // the transcript (never in the snapshot)
@@ -51,7 +51,7 @@ Claude_Disk :: struct {
 	title:    string,
 	modified: time.Time,
 	created:  time.Time,
-	listed:   bool, // a row of its own: pi-desk's history does not have it
+	listed:   bool, // a row of its own: Deckhand's history does not have it
 	gone:     bool, // a history entry whose transcript is gone (no file)
 }
 
@@ -98,7 +98,7 @@ found_cache: struct {
 	changed: bool,
 }
 
-// A transcript line pi-desk hands to the JSON parser: at most one chunk long and nested at most
+// A transcript line Deckhand hands to the JSON parser: at most one chunk long and nested at most
 // JSON_MAX_DEPTH (the parser recurses: a line 20,000 deep would overflow the stack, and the
 // launch's scan would crash every start).
 @(private = "file")
@@ -461,7 +461,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	for c in cands {
 		rec, _ := claude_record(c.id)
 		if rec != nil {
-			// pi-desk's own: its row is the history's; only what the file tells
+			// Deckhand's own: its row is the history's; only what the file tells
 			append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created})
 			continue
 		}

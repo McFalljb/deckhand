@@ -1,6 +1,6 @@
 #!/bin/sh
 # Fetch the pinned CEF distribution (vendor/cef/VERSION) into
-# ~/Library/Caches/pi-desk/cef/<version>/ and print that directory.
+# ~/Library/Caches/deckhand/cef/<version>/ and print that directory.
 # Verifies SHA-256 before unpacking; a mismatch deletes the archive and stops
 # (exit 1). Idempotent: an unpacked tree with a .ok stamp is reused without
 # network access, but only while the archive it came from (kept in downloads/)
@@ -22,7 +22,7 @@ SHA256=$(val "CEF_SHA256_$ARCH")
 if [ -z "$VERSION" ] || [ -z "$FILE" ] || [ -z "$SHA256" ]; then
   echo "fetch-cef: $PIN has no pin for $ARCH" >&2; exit 1
 fi
-CACHE="${PI_DESK_CEF_CACHE:-$HOME/Library/Caches/pi-desk/cef}"
+CACHE="${DECKHAND_CEF_CACHE:-$HOME/Library/Caches/deckhand/cef}"
 DEST="$CACHE/$VERSION/$ARCH"
 ARCHIVE="$CACHE/downloads/$FILE"
 # the unpacked tree, while the archive beside it still checks out (a tampered or

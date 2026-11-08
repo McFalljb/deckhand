@@ -4,7 +4,7 @@
 # (pixels read back from the shown IOSurface: the square's colour and its
 # position changing), keys and clicks reach the app (its log), a resize sends
 # a new ring of the right size and the old one is freed, a stall keeps the
-# last frame and pi-desk responsive, a crash leaves the dimmed frame and the
+# last frame and Deckhand responsive, a crash leaves the dimmed frame and the
 # Restart button, Restart draws again, exit 75 restarts by itself, and typing
 # into Atlas's drawer sends the app nothing. Measures frame latency, CPU and memory.
 # A fake HOME with one project and session, a fake pi, a temp data dir.
@@ -12,7 +12,7 @@
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
 # backing scale 2 on any Mac (test mode's default is 1): logical px vs ring px stays tested
-export PI_DESK_SCALE=2
+export DECKHAND_SCALE=2
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
@@ -23,15 +23,15 @@ FAKE_HOME="$W/home"
 PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 # the palette's "New app tab…" lists the project's apps
-mkdir -p "$PROJ/.pi-desk"
-printf '{"apps":[{"name":"fake","argv":["%s/build/fake-app"]}]}\n' "$ROOT" > "$PROJ/.pi-desk/apps.json"
+mkdir -p "$PROJ/.deckhand"
+printf '{"apps":[{"name":"fake","argv":["%s/build/fake-app"]}]}\n' "$ROOT" > "$PROJ/.deckhand/apps.json"
 printf '{"type":"session","version":3,"id":"aaaa-1","cwd":"%s"}\n' "$PROJ" \
   > "$FAKE_HOME/.pi/agent/sessions/--proj--/2026-10-30T10-00-00-000Z_aaaa-1.jsonl"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/app-tab.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_RUNTIME_DIR="$W/run" APP_TAB_ONCE="$W" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 &
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/app-tab.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_RUNTIME_DIR="$W/run" APP_TAB_ONCE="$W" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 &
 PID=$!
-# pi-desk's memory while the scene runs (RSS, KB): before the first app tab
+# Deckhand's memory while the scene runs (RSS, KB): before the first app tab
 # (the script waits 1.5 s first) and the peak
 peak=0; before=0; n=0
 while kill -0 $PID 2>/dev/null; do
@@ -42,7 +42,7 @@ while kill -0 $PID 2>/dev/null; do
 done
 wait $PID || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|\[app\]|CPU " "$W/run.log" || true
-echo "pi-desk RSS: $((before / 1024)) MB before the first app tab, peak $((peak / 1024)) MB"
+echo "Deckhand RSS: $((before / 1024)) MB before the first app tab, peak $((peak / 1024)) MB"
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi
 if [ $fail = 1 ]; then echo "app-tab scene failed (log: $W/run.log)"; exit 1; fi

@@ -66,7 +66,7 @@ CREDENTIAL_REFUSED :: "credentials file: managed by pi (/login), not opened"
 @(private = "file")
 AGENT_CONFIG_FILES :: [?]string{"settings.json", "models.json", "keybindings.json", "mcp.json", "modes.json", "AGENTS.override.md", "AGENTS.md", "AGENTS.MD", "CLAUDE.md", "CLAUDE.MD", "SYSTEM.md", "APPEND_SYSTEM.md"}
 
-// A file pi-desk never lists, reads or opens: pi's sign-ins (auth.json,
+// A file Deckhand never lists, reads or opens: pi's sign-ins (auth.json,
 // models-store.json, cursor-sdk*.json, intercom/), any other private (no
 // group/other access, e.g. 0600) file in the agent dir (any depth; not
 // pi's own config files at its top), .env files anywhere (.env.example and
@@ -165,28 +165,28 @@ Settings_File_Row :: struct {
 
 // The Settings tab's Claude accounts group (claude_accounts.odin): an account's row is
 // CLAUDE_ACCOUNT_ROW + its folder (Rename…, Remove); the last row adds one (a folder picker).
-CLAUDE_ACCOUNT_ROW :: "pi-desk:claude-account:"
-CLAUDE_ACCOUNT_ADD_ROW :: "pi-desk:claude-account-add"
-CLAUDE_ACCOUNT_SCAN_ROW :: "pi-desk:claude-account-scan"
-CLAUDE_ACCOUNT_MORE_ROW :: "pi-desk:claude-account-more"
+CLAUDE_ACCOUNT_ROW :: "deckhand:claude-account:"
+CLAUDE_ACCOUNT_ADD_ROW :: "deckhand:claude-account-add"
+CLAUDE_ACCOUNT_SCAN_ROW :: "deckhand:claude-account-scan"
+CLAUDE_ACCOUNT_MORE_ROW :: "deckhand:claude-account-more"
 
 
 // The Settings tab's Atlas group: its model is a row that is no file; its
 // button opens pi's model selector in Atlas's terminal.
-ATLAS_MODEL_ROW :: "pi-desk:atlas-model"
+ATLAS_MODEL_ROW :: "deckhand:atlas-model"
 
 // The Claude Code group's default flags for new tabs (Set_Claude_Default_Flags): the setting's
 // row (what is on), the flag's toggle row and its warning line.
-CLAUDE_FLAGS_HEAD_ROW :: "pi-desk:claude-default-flags-head"
-CLAUDE_FLAGS_ROW :: "pi-desk:claude-default-flags"
-CLAUDE_FLAGS_WARN_ROW :: "pi-desk:claude-default-flags-warning"
+CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
+CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
+CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 
 // The pi extensions group (pi_integration.odin): one row per optional extension of Deckhand's pi
 // integration, PI_EXT_ROW + its name, with a Turn on / Turn off button (Set_Pi_Extension).
-PI_EXT_ROW :: "pi-desk:pi-extension:"
+PI_EXT_ROW :: "deckhand:pi-extension:"
 
 // A row that is a setting, not a file.
-settings_setting_row :: proc(path: string) -> bool {return strings.has_prefix(path, "pi-desk:")}
+settings_setting_row :: proc(path: string) -> bool {return strings.has_prefix(path, "deckhand:")}
 
 // The folders of pi's agent folder the tree shows (and that open).
 SETTINGS_FOLDERS :: [?]string{"prompts", "skills", "extensions"}

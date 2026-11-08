@@ -5,7 +5,7 @@ wait 1000
 waitfor fake bridge 30000
 command {"type":"new_shell_tab","session":$session}
 wait 800
-command {"type":"send_text","tab_id":$tab,"text":"sh \"$PI_DESK_TEXT_SAMPLE\"; ls ~/code; for i in 0 1 2 3 4 5 6 7; do printf '\\e[4%sm    \\e[0m' $i; done; echo; for i in 0 1 2 3 4 5 6 7; do printf '\\e[10%sm    \\e[0m' $i; done; echo; for i in 16 46 51 196 201 226 231 232 240 244 250 255; do printf '\\e[38;5;%sm%s \\e[0m' $i $i; done; echo"}
+command {"type":"send_text","tab_id":$tab,"text":"sh \"$DECKHAND_TEXT_SAMPLE\"; ls ~/code; for i in 0 1 2 3 4 5 6 7; do printf '\\e[4%sm    \\e[0m' $i; done; echo; for i in 0 1 2 3 4 5 6 7; do printf '\\e[10%sm    \\e[0m' $i; done; echo; for i in 16 46 51 196 201 226 231 232 240 244 250 255; do printf '\\e[38;5;%sm%s \\e[0m' $i $i; done; echo"}
 key enter
 wait 800
 command {"type":"focus_tab","tab_id":$pitab}

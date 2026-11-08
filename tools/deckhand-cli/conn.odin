@@ -1,10 +1,10 @@
-package pi_desk_cli
+package deckhand_cli
 
-// pi-desk's control socket, client side (pi-desk docs/PROTOCOL.md §1–2): NDJSON over the Unix
-// socket in PI_DESK_SOCKET. One hello with the Claude tab's token (PI_DESK_CLAUDE_TOKEN,
+// Deckhand's control socket, client side (Deckhand docs/PROTOCOL.md §1–2): NDJSON over the Unix
+// socket in DECKHAND_SOCKET. One hello with the Claude tab's token (DECKHAND_CLAUDE_TOKEN,
 // multi-use; never printed or logged), then commands one at a time; a `pending` reply is closed
 // by a `finished` event with its request_id. Closing the connection (exit, a timeout) makes
-// pi-desk cancel what this connection still runs.
+// Deckhand cancel what this connection still runs.
 
 import "core:c"
 import "core:encoding/json"
@@ -134,7 +134,7 @@ sock_call :: proc(t: ^Transport, cmd: string, timeout_ms: int) -> (result: json.
 	for {
 		line, got, timed_out := next_line(t, start, timeout_ms)
 		if !got {
-			transport_close(t) // pi-desk cancels what it still runs for us
+			transport_close(t) // Deckhand cancels what it still runs for us
 			if timed_out do return nil, fmt.aprintf("no answer from Deckhand within %d s", timeout_ms / 1000)
 			return nil, "Deckhand closed the connection"
 		}

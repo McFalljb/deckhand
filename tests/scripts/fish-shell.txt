@@ -1,5 +1,5 @@
 # tests/scripts/fish-shell.sh: $SHELL is fish (a stand-in that refuses sh syntax). The pi chat
-# `pi-desk DIR` opens, a Claude session and a shell tab all start.
+# `deckhand DIR` opens, a Claude session and a shell tab all start.
 wait 800
 waitfor FAKE PI STARTED 15000
 shot fish/pi

@@ -2,7 +2,7 @@ package main
 
 // The session holder's binary (src/holder, `deckhand-core`; docs/plans/background-core.md §3,
 // §7.1): where the app finds it, its install to a versioned dir under the data dir, and the
-// direct spawn (test mode, PI_DESK_HOLDER_DIRECT, and the fallback of the launchd launch in
+// direct spawn (test mode, DECKHAND_HOLDER_DIRECT, and the fallback of the launchd launch in
 // launchd_darwin.odin).
 //
 //   holder_bin_find() -> path                      the bundled binary ("" = none)
@@ -41,7 +41,7 @@ holder_bin_find :: proc(allocator := context.allocator) -> string {
 	dir := filepath.dir(exe)
 	cands := []string{
 		fmt.tprintf("%s/../Helpers/%s", dir, HOLDER_BIN),
-		fmt.tprintf("%s/%s", dir, HOLDER_BIN), // build/deckhand (PI_DESK_NO_CEF)
+		fmt.tprintf("%s/%s", dir, HOLDER_BIN), // build/deckhand (DECKHAND_NO_CEF)
 	}
 	for p in cands {
 		clean, _ := filepath.clean(p, context.temp_allocator)
@@ -154,7 +154,7 @@ holder_sha256 :: proc(data: []u8) -> string {
 // --data data` with env (nil = this process's), stdin /dev/null, stdout and stderr appended to <run>/holder.log, signals at
 // their defaults and none blocked, no other descriptor. A thread reaps it when it exits (it is
 // only ever our child while we live; after we exit launchd adopts it). Test mode and
-// PI_DESK_HOLDER_DIRECT=1 use this; the launchd launch falls back to it.
+// DECKHAND_HOLDER_DIRECT=1 use this; the launchd launch falls back to it.
 holder_launch_direct :: proc(bin, run, data: string, env: []string = nil) -> (pid: i32, ok: bool, why: string) {
 	argv := []cstring{
 		strings.clone_to_cstring(bin, context.temp_allocator),

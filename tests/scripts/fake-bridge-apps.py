@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""A fake pi for tests/scripts/app-open.sh: a pi-like screen and the pi integration's bridge over pi-desk's
+"""A fake pi for tests/scripts/app-open.sh: a pi-like screen and the pi integration's bridge over Deckhand's
 socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN: caller panel), opening and managing app
 tabs as the pi integration's app_open, app_restart and app_close tools do. A line typed into the tab says what
 to try; each result is logged to $APPS_LOG and the screen then says "done <word>":
@@ -63,7 +63,7 @@ def call(cmd):
 
 
 def finished(r):
-    """A long-running command's finished event (pi-desk sends it to the requester)."""
+    """A long-running command's finished event (Deckhand sends it to the requester)."""
     global buf
     want = r.get("request_id")
     while True:

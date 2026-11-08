@@ -34,7 +34,7 @@ r_reset :: proc(names: ..string) -> []u64 {
 	reload_watch_reset()
 	platform = {}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	clear(&r_sends)
 	reload_send = proc(tab_id, request_id: u64, cmd: Command) -> bool {
 		append(&r_sends, R_Send{tab_id, request_id, cmd})
@@ -77,7 +77,7 @@ r_done :: proc() {
 	for _, t in terms do reader_stop_and_close(t)
 	reload_watch_reset()
 	reload_send = socket_bridge_send
-	os.unset_env("PI_DESK_PI_PACKAGE")
+	os.unset_env("DECKHAND_PI_PACKAGE")
 }
 
 @(private = "file")
@@ -236,7 +236,7 @@ reload_callers :: proc(t: ^testing.T) {
 	ctl := Caller{kind = .Control, tab_id = ids[1]} // bound to beta's tab: not its own
 	r := run_command(Pi_Reload_All{}, ctl)
 	testing.expect_value(t, r.error, "needs_confirmation")
-	testing.expect(t, r.confirm_by_user && r.confirm_token == "", "the user confirms, in pi-desk")
+	testing.expect(t, r.confirm_by_user && r.confirm_token == "", "the user confirms, in Deckhand")
 	testing.expect_value(t, r.confirm_summary, "A script asks: reload 1 pi tab?") // a control token not bound to Atlas's tab
 	run_command(Set_Confirm_Policy{caller = .Script, class = .Session_Restart, mode = .Auto}, R_UI)
 	r = run_command(Pi_Reload_All{}, {kind = .Script})
@@ -264,7 +264,7 @@ reload_version_change :: proc(t: ^testing.T) {
 	os.make_directory_all(dir)
 	pkg := fmt.tprintf("%s/package.json", dir)
 	_ = os.write_entire_file(pkg, transmute([]u8)string(`{"name":"pi","version":"1.0.0"}`))
-	os.set_env("PI_DESK_PI_PACKAGE", pkg)
+	os.set_env("DECKHAND_PI_PACKAGE", pkg)
 	os.set_env("PI_CODING_AGENT_DIR", fmt.tprintf("%s/agent", dir))
 	defer os.unset_env("PI_CODING_AGENT_DIR")
 	testing.expect_value(t, pkg_version(pkg), "1.0.0")
@@ -457,10 +457,10 @@ reload_reprobe :: proc(t: ^testing.T) {
 	b := fmt.tprintf("%s/b.json", dir)
 	_ = os.write_entire_file(a, transmute([]u8)string(`{"version":"1.0.0"}`))
 	_ = os.write_entire_file(b, transmute([]u8)string(`{"version":"2.0.0"}`))
-	os.set_env("PI_DESK_PI_PACKAGE", a)
+	os.set_env("DECKHAND_PI_PACKAGE", a)
 	reload_tick()
 	testing.expect_value(t, state.reload.pi_version, "1.0.0")
-	os.set_env("PI_DESK_PI_PACKAGE", b) // pi now found elsewhere
+	os.set_env("DECKHAND_PI_PACKAGE", b) // pi now found elsewhere
 	reload_pending_add("/x/settings.json", "")
 	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	reload_tick() // takes the new place, reads its version
@@ -567,8 +567,8 @@ cr_env :: proc(tag: string) -> (base, cfg, proj: string) {
 	os.set_env("HOME", fmt.tprintf("%s/home", base))
 	os.set_env("CLAUDE_CONFIG_DIR", cfg)
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	os.unset_env("PI_DESK_CLAUDE_BIN")
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.unset_env("DECKHAND_CLAUDE_BIN")
 	claude_reload_watch_reset()
 	dead_tab_reset()
 	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
@@ -582,8 +582,8 @@ cr_done :: proc() {
 	dead_tab_reset()
 	claude_installed_probe = nil
 	os.unset_env("CLAUDE_CONFIG_DIR")
-	os.unset_env("PI_DESK_CLAUDE_BIN")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.unset_env("DECKHAND_CLAUDE_BIN")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 }
 
 @(private = "file")
@@ -642,7 +642,7 @@ claude_reload_classify :: proc(t: ^testing.T) {
 	defer cr_done()
 	base, cfg, proj := cr_env("class")
 	home := fmt.tprintf("%s/home", base)
-	plugin := os.get_env("PI_DESK_CLAUDE_PLUGIN", context.temp_allocator)
+	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
 	C :: Claude_File_Class
 	Case :: struct {
 		p:    string,
@@ -701,13 +701,13 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	claude_reload_build({proj})
 	src := claude_reload_sources_for_test()
 	has :: proc(m: map[string]string, k, scope: string) -> bool {v, ok := m[k]; return ok && v == scope}
-	plugin := os.get_env("PI_DESK_CLAUDE_PLUGIN", context.temp_allocator)
+	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
 	testing.expect(t, has(src, fmt.tprintf("%s/CLAUDE.md", cfg), ""), "the global CLAUDE.md")
 	testing.expect(t, has(src, fmt.tprintf("%s/rules/", cfg), ""), "the global rules")
 	testing.expect(t, has(src, fmt.tprintf("%s/output-styles/", cfg), ""), "output styles (missing: watched for being made)")
 	testing.expect(t, has(src, fmt.tprintf("%s/commands/", cfg), ""), "commands")
 	testing.expect(t, has(src, fmt.tprintf("%s/agents/", cfg), ""), "a missing agents folder (Claude Code only watches folders there at start)")
-	testing.expect(t, has(src, fmt.tprintf("%s/hooks/hooks.json", plugin), ""), "pi-desk's plugin")
+	testing.expect(t, has(src, fmt.tprintf("%s/hooks/hooks.json", plugin), ""), "Deckhand's plugin")
 	testing.expect(t, has(src, fmt.tprintf("%s/code/CLAUDE.md", base), fmt.tprintf("%s/code", base)), "CLAUDE.md above the cwd")
 	testing.expect(t, has(src, fmt.tprintf("%s/CLAUDE.md", proj), proj), "the cwd's (missing) CLAUDE.md")
 	testing.expect(t, has(src, fmt.tprintf("%s/CLAUDE.local.md", proj), proj), "CLAUDE.local.md")
@@ -721,7 +721,7 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	// the poll notices a change in a watched folder's files (an edited command), not in live ones
 	claude_reload_build({})
 	sess := cr_session(proj)
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
 	testing.expect(t, id != 0)
 	claude_reload_tick()
@@ -749,7 +749,7 @@ claude_reload_restart_flow :: proc(t: ^testing.T) {
 	defer cr_done()
 	base, cfg, proj := cr_env("flow")
 	args := fmt.tprintf("%s/args", base)
-	os.set_env("PI_DESK_CLAUDE_CMD", cr_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
 	idle := run_command(New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
 	busy := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
@@ -874,10 +874,10 @@ claude_version_drift :: proc(t: ^testing.T) {
 	testing.expect(t, strings.has_prefix(ident, "build:"), ident) // unknown layout: its file's identity
 	label, _ = claude_version_of(fmt.tprintf("%s/missing", base))
 	testing.expect_value(t, label, "")
-	// tests replace claude (PI_DESK_CLAUDE_CMD): no version unless PI_DESK_CLAUDE_BIN names one
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	// tests replace claude (DECKHAND_CLAUDE_CMD): no version unless DECKHAND_CLAUDE_BIN names one
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	testing.expect_value(t, claude_binary_path(), "")
-	os.set_env("PI_DESK_CLAUDE_BIN", link)
+	os.set_env("DECKHAND_CLAUDE_BIN", link)
 	testing.expect_value(t, claude_binary_path(), link)
 	// a running tab records the version on disk
 	sess := cr_session(proj)
@@ -916,7 +916,7 @@ claude_version_drift :: proc(t: ^testing.T) {
 	testing.expect(t, !os.exists(ran), "claude itself never ran")
 }
 
-// Saving a Claude file in pi-desk's editor shows the bar at once when Claude needs a restart for
+// Saving a Claude file in Deckhand's editor shows the bar at once when Claude needs a restart for
 // it; a file it applies live (settings.json) shows nothing.
 @(test)
 claude_reload_after_save :: proc(t: ^testing.T) {
@@ -937,8 +937,8 @@ claude_reload_after_save :: proc(t: ^testing.T) {
 	testing.expect(t, !can)
 }
 
-// An agent's Restart, confirmed by the user in pi-desk: still the agent's restart (never its own
-// session's Claude tabs, never the user's saved flags); every caller but pi-desk's own is asked,
+// An agent's Restart, confirmed by the user in Deckhand: still the agent's restart (never its own
+// session's Claude tabs, never the user's saved flags); every caller but Deckhand's own is asked,
 // whatever its confirm policy; only the user hides the bar.
 @(test)
 claude_reload_agent_confirm :: proc(t: ^testing.T) {
@@ -947,7 +947,7 @@ claude_reload_agent_confirm :: proc(t: ^testing.T) {
 	defer cr_done()
 	base, cfg, proj := cr_env("agent")
 	args := fmt.tprintf("%s/args", base)
-	os.set_env("PI_DESK_CLAUDE_CMD", cr_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	mine_s := cr_session(proj)
 	agent := Caller{kind = .Control, tab_id = find_session(mine_s).tabs[0].id}
 	mine := run_command(New_Claude_Tab{session = mine_s}, R_UI).created_id
@@ -997,7 +997,7 @@ claude_reload_scope_nested :: proc(t: ^testing.T) {
 	r_reset()
 	defer cr_done()
 	_, _, proj := cr_env("nested")
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	sess := cr_session(proj)
 	id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
 	claude_reload_tick()
@@ -1020,7 +1020,7 @@ claude_restart_all :: proc(t: ^testing.T) {
 	defer cr_done()
 	base, _, proj := cr_env("all")
 	args := fmt.tprintf("%s/args", base)
-	os.set_env("PI_DESK_CLAUDE_CMD", cr_args_cmd(args))
+	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
 	idle := run_command(New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
 	busy := run_command(New_Claude_Tab{session = sess}, R_UI).created_id

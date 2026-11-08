@@ -34,7 +34,7 @@ static id<MTLBuffer> solid(id<MTLDevice> d, int w, int h, uint32_t rgb) {
 }
 
 // One frame into texture (w x h px): background bg, then the boxes (px,
-// clipped). Commits; the caller then presents (pd_frames_present).
+// clipped). Commits; the caller then presents (dh_frames_present).
 void fake_render(void* queue, void* texture, int w, int h, uint32_t bg, const fake_box* boxes, int n, int slow_ms) {
     id<MTLCommandQueue> q = (__bridge id<MTLCommandQueue>)queue;
     id<MTLTexture> t = (__bridge id<MTLTexture>)texture;

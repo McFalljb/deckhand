@@ -3,7 +3,7 @@ package tests
 // Checks the hand-written libghostty-vt bindings:
 //  1. struct sizes/offsets and key enum values against the C compiler
 //     (build/abi_sizes.txt, produced by `./build.sh test` from tests/abi_sizes.c);
-//  2. an end-to-end pass through the calls pi-desk makes.
+//  2. an end-to-end pass through the calls Deckhand makes.
 
 import "base:runtime"
 import "core:c"

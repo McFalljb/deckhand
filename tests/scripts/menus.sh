@@ -26,7 +26,7 @@ mkdir -p "$STORE" "$W/data" "$A" "$B/.git" "$NOTES/jobs" "$FAKE_HOME/bin"
 
 # session DIR CWD HOURS-AGO ID TITLE (mtime HOURS-AGO; the file name's time
 # fixed: the order a folder listing returns is then the same every run, and
-# b1's subagents folder comes before its file, as pi-desk lists the folder)
+# b1's subagents folder comes before its file, as Deckhand lists the folder)
 session() {
   d="$STORE/$1"; mkdir -p "$d"
   ts="2026-10-$((23 - $3))T10-00-00-000Z"
@@ -67,8 +67,8 @@ chmod 755 "$FAKE_HOME/bin/pi"
 printf -- '---\ntype: job\nproject: atlas\ndate: 2026-11-01\nstatus: active\nsummary: m1\ntags: [job]\nupdated_by: claude\nid: m1\nenabled: false\nschedule: "manual"\nnotify: always\nfolder: ~/code/alpha\naccess: read\n---\n# Job m1\n\n## Prompt\nOK\n' > "$NOTES/jobs/menu-job.md"
 
 # Atlas's pi gets --append-system-prompt: the fake Atlas; anything else is a fake pi
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/menus.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD="case \" \$* \" in *' --append-system-prompt '*) exec python3 -I '$ROOT/tests/scripts/fake-atlas.py' \"\$@\";; *) while [ \"\${1:-}\" = -e ]; do shift 2; done; echo \"ARGS: \$*\"; exec sleep 600;; esac" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/menus.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD="case \" \$* \" in *' --append-system-prompt '*) exec python3 -I '$ROOT/tests/scripts/fake-atlas.py' \"\$@\";; *) while [ \"\${1:-}\" = -e ]; do shift 2; done; echo \"ARGS: \$*\"; exec sleep 600;; esac" \
   build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|TIMEOUT|done:|no element|unknown command|toast:" "$W/run.log" || true
 fail=0

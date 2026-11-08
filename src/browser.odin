@@ -7,10 +7,10 @@ package main
 // browser_cef.odin.
 //
 // Frames: each tab has a frame ring like an app tab's (frames.odin), over a
-// local channel: CEF paints into a slot pi-desk does not sample, the frame
+// local channel: CEF paints into a slot Deckhand does not sample, the frame
 // loop takes the newest one before drawing (browser_frames_tick), and a slot
 // a frame stopped showing goes back only after that frame's GPU work is done
-// (pd_frames_committed). Unlike an app's, the ring follows the size CEF
+// (dh_frames_committed). Unlike an app's, the ring follows the size CEF
 // paints at, with headroom: its surfaces are rounded up to RING_GRID px and
 // each frame says how much of its slot it fills (drawn alone). A paint too
 // big for the ring asks for a larger one (on_cef_ring): made at once, or,
@@ -23,7 +23,7 @@ package main
 // the toolbar, State per tab (url, title, loading, can_back, can_forward),
 // popups (on_cef_popup) and saving the tabs. What CEF reports goes into State
 // through the inbox (browser_report). Test mode also opens a tab with
-// `web_open`, a run with PI_DESK_DEBUG_BROWSER=URL at launch.
+// `web_open`, a run with DECKHAND_DEBUG_BROWSER=URL at launch.
 //
 // A browser tab belongs to one session for its whole life (state.odin):
 // browser_tab_open takes the session explicitly: a user's action passes the
@@ -108,7 +108,7 @@ browser_sampler: sg.Sampler
 browser_images: int // sokol images wrapping ring slots, alive (tests: every one is destroyed)
 browser_frames: bool // a local channel was opened: commit posts releases
 RING_GRID :: 256 // a browser ring's surfaces are rounded up to this (px): a drag mostly fits
-cef_start_ms: f64 // how long pd_cef_start took (lazy start, once)
+cef_start_ms: f64 // how long dh_cef_start took (lazy start, once)
 cef_state: enum {
 	Off,
 	Running,
@@ -159,7 +159,7 @@ browser_attach :: proc(tab_id: u64, url: string) -> ^Browser {
 	b.url = strings.clone(url)
 	b.opened_at = time.tick_now()
 	b.shown_at = b.opened_at
-	if !CEF_BUILT_IN do b.message = "Browser not built in (a build without CEF)" // no PI_DESK_ name: scripts/check-release-build.sh
+	if !CEF_BUILT_IN do b.message = "Browser not built in (a build without CEF)" // no DECKHAND_ name: scripts/check-release-build.sh
 	browsers[tab_id] = b
 	app.redraw = true
 	return b
@@ -171,7 +171,7 @@ browser_go :: proc(tab_id: u64, url: string) {
 	if b == nil do return
 	delete(b.url)
 	b.url = strings.clone(url)
-	if b.cef != 0 do pd_cef_navigate(b.cef, strings.clone_to_cstring(url, context.temp_allocator))
+	if b.cef != 0 do dh_cef_navigate(b.cef, strings.clone_to_cstring(url, context.temp_allocator))
 	else if b.closed_by_page do browser_reopen(b, url)
 }
 
@@ -214,7 +214,7 @@ cef_start :: proc() -> bool {
 	for d in ([]string{browser_dir, profile}) do posix.chmod(strings.clone_to_cstring(d, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	rlz_off(profile)
 	log_file, _ := filepath.join({root, "browser", "cef.log"}, context.temp_allocator)
-	shared: c.int = os.get_env("PI_DESK_CEF_SHARED_TEXTURE", context.temp_allocator) == "0" ? 0 : 1
+	shared: c.int = os.get_env("DECKHAND_CEF_SHARED_TEXTURE", context.temp_allocator) == "0" ? 0 : 1
 	cbs := Cef_Callbacks {
 		painted = on_cef_painted,
 		ring = on_cef_ring,
@@ -230,21 +230,21 @@ cef_start :: proc() -> bool {
 	// Google services is open, see the report)
 	no_network: c.int = autotest.active || hook_env(.Cef_Offline) == "1" ? 1 : 0
 	t0 := time.tick_now()
-	ok := pd_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
+	ok := dh_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
 	cef_start_ms = time.duration_milliseconds(time.tick_since(t0))
 	if ok do cef_state = .Running
 	if ok && autotest.active {
-		// pidesk-test://web/NAME: the fixtures in tests/web (no network)
+		// deckhand-test://web/NAME: the fixtures in tests/web (no network)
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		web, _ := filepath.join({cwd, "tests", "web"}, context.temp_allocator)
-		if pd_cef_test_scheme(strings.clone_to_cstring(web, context.temp_allocator)) != 1 do fmt.println("[browser] test mode: pidesk-test:// not registered")
+		if dh_cef_test_scheme(strings.clone_to_cstring(web, context.temp_allocator)) != 1 do fmt.println("[browser] test mode: deckhand-test:// not registered")
 	}
 	return ok
 }
 
 // Chromium's RLZ (Google's brand and promotion tracker) pings
 // clients1.google.com from its store under Library/Application Support/Google/RLZ
-// (pi-desk's own: cef_macos.m gives Chromium its own Library). It has no
+// (Deckhand's own: cef_macos.m gives Chromium its own Library). It has no
 // switch: its start is delayed by the profile preference rlz_ping_delay (90 s),
 // read once at startup. Set to ten years before CEF starts, it never pings
 // (real use also maps clients1.google.com to nothing). docs/BROWSER.md §2.3.
@@ -268,7 +268,7 @@ rlz_off :: proc(profile: string) {
 	root["rlz_ping_delay"] = json.Integer(RLZ_OFF_DELAY)
 	out, merr := json.marshal(json.Value(root), {}, context.temp_allocator)
 	if merr != nil do return
-	tmp := fmt.tprintf("%s.pi-desk-%d", path, os.get_pid())
+	tmp := fmt.tprintf("%s.deckhand-%d", path, os.get_pid())
 	f, err := os.open(tmp, {.Write, .Create, .Trunc}, {.Read_User, .Write_User})
 	if err != nil do return
 	_, werr := os.write(f, out)
@@ -325,11 +325,11 @@ browser_paint_size :: proc(b: ^Browser, w, h: int) {
 browser_ring_make :: proc(b: ^Browser, w, h: int) -> bool {
 	browser_free_rings(b) // room for it: rings nothing shows any more
 	rw, rh := ring_grid_up(w), ring_grid_up(h)
-	gen := pd_frames_ring_new(b.tab_id, c.int(rw), c.int(rh), app.dpi)
+	gen := dh_frames_ring_new(b.tab_id, c.int(rw), c.int(rh), app.dpi)
 	if gen == 0 do return false
 	g := Ring_Gen{gen = gen, w = rw, h = rh, scale = app.dpi}
 	for s in 0 ..< FRAME_SLOTS {
-		tex := pd_frames_slot_texture(b.tab_id, gen, c.int(s))
+		tex := dh_frames_slot_texture(b.tab_id, gen, c.int(s))
 		g.image[s] = sg.make_image({width = c.int(rw), height = c.int(rh), pixel_format = .BGRA8, mtl_texture = tex}).id
 		g.view[s] = sg.make_view({texture = {image = {g.image[s]}}}).id
 		browser_images += 1
@@ -340,7 +340,7 @@ browser_ring_make :: proc(b: ^Browser, w, h: int) -> bool {
 	b.last_ring = time.tick_now()
 	b.rings_made += 1
 	b.ring_bytes += u64(rw) * u64(rh) * 4 * FRAME_SLOTS
-	b.surf_peak = max(b.surf_peak, int(pd_frames_surface_count(b.tab_id)))
+	b.surf_peak = max(b.surf_peak, int(dh_frames_surface_count(b.tab_id)))
 	return true
 }
 
@@ -363,7 +363,7 @@ browser_ring_sizing :: proc(b: ^Browser, now: time.Tick) {
 	if b.cef == 0 || b.ring.cur_gen == 0 do return
 	cur := ring_gen(&b.ring, b.ring.cur_gen)
 	if cur == nil || !browser_ring_due(cur.w, cur.h, b.paint_w, b.paint_h, b.paint_since, b.last_ring, now) do return
-	if browser_ring_make(b, b.paint_w, b.paint_h) do pd_cef_invalidate(b.cef)
+	if browser_ring_make(b, b.paint_w, b.paint_h) do dh_cef_invalidate(b.cef)
 }
 
 @(private = "file")
@@ -385,7 +385,7 @@ browser_free_rings :: proc(b: ^Browser) {
 		for g, i in b.ring.gens {
 			if g.gen != gen do continue
 			for s in 0 ..< FRAME_SLOTS do browser_slot_destroy(&b.ring.gens[i], s)
-			pd_frames_ring_free(b.tab_id, gen, -1)
+			dh_frames_ring_free(b.tab_id, gen, -1)
 			ordered_remove(&b.ring.gens, i)
 			break
 		}
@@ -403,25 +403,25 @@ browser_frames_tick :: proc() -> bool {
 	for id, b in browsers {
 		if !b.chan do continue
 		p: Frames_Poll
-		pd_frames_poll(id, &p)
+		dh_frames_poll(id, &p)
 		if p.has_frame != 0 {
 			if tab_on_screen(id) || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
 				og, os_, retire := ring_take(&b.ring, p.gen, p.slot, p.seq, p.tick)
-				if retire do pd_frames_retire(id, og, u32(os_))
+				if retire do dh_frames_retire(id, og, u32(os_))
 				if b.ring.shown_gen == p.gen && b.ring.shown_slot == int(p.slot) do b.content_w, b.content_h = int(p.content_w), int(p.content_h)
 				redraw = true
-			} else if ring_may_release_now(&b.ring, p.gen, p.slot) do pd_frames_release_now(id, p.gen, p.slot) // never drawn
+			} else if ring_may_release_now(&b.ring, p.gen, p.slot) do dh_frames_release_now(id, p.gen, p.slot) // never drawn
 		}
 		browser_ring_sizing(b, now)
 		browser_free_rings(b)
-		b.surf_peak = max(b.surf_peak, int(pd_frames_surface_count(id)))
+		b.surf_peak = max(b.surf_peak, int(dh_frames_surface_count(id)))
 	}
 	return redraw
 }
 
 // After sg.commit (main.odin): the retired slots go back once this frame's GPU work is done.
 browser_frames_committed :: proc() {
-	if browser_frames do pd_frames_committed(sg.mtl_command_queue())
+	if browser_frames do dh_frames_committed(sg.mtl_command_queue())
 }
 
 @(private = "file")
@@ -493,7 +493,7 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 		browser_report({tab_id = id})
 		return 0
 	}
-	b.cef = slot // the shim reserved it; the browser arrives in on_after_created (pd_cef_ready)
+	b.cef = slot // the shim reserved it; the browser arrives in on_after_created (dh_cef_ready)
 	b.opens += 1
 	browser_report({tab_id = id}) // a new tab: State changed
 	return id
@@ -503,13 +503,13 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 @(private = "file")
 browser_chan :: proc(b: ^Browser) -> bool {
 	if b.chan do return true
-	b.chan = pd_frames_local_open(b.tab_id, sg.mtl_device()) == 1
+	b.chan = dh_frames_local_open(b.tab_id, sg.mtl_device()) == 1
 	browser_frames ||= b.chan
 	if autotest.active {
 		// count writes into any texture an uncompleted GPU frame samples;
-		// PI_DESK_TEST_GPU_LAG_MS: a slow GPU (the completed handler's work waits)
+		// DECKHAND_TEST_GPU_LAG_MS: a slow GPU (the completed handler's work waits)
 		lag, _ := strconv.parse_int(hook_env(.Gpu_Lag_Ms))
-		pd_frames_test_track(1, c.int(lag))
+		dh_frames_test_track(1, c.int(lag))
 	}
 	return b.chan
 }
@@ -524,7 +524,7 @@ on_cef_loading :: proc "c" (id: c.int, loading: c.int) {
 on_cef_closed :: proc "c" (id: c.int) {
 	context = app_context
 	b := by_cef(id)
-	if b == nil do return // pi-desk closed it (browser_drop) or quit
+	if b == nil do return // Deckhand closed it (browser_drop) or quit
 	// the page closed itself (window.close()): say so; Reload opens it again
 	b.cef = 0
 	b.closed_by_page = true
@@ -537,13 +537,13 @@ on_cef_closed :: proc "c" (id: c.int) {
 // their releases (the page lost the keyboard, or the tab went away).
 @(private = "file")
 release_input :: proc(b: ^Browser) {
-	for code in b.held do pd_cef_key(b.cef, CEF_KEY_UP, c.int(code), 0, b.held_ch[code], b.held_ch[code])
+	for code in b.held do dh_cef_key(b.cef, CEF_KEY_UP, c.int(code), 0, b.held_ch[code], b.held_ch[code])
 	b.held = {}
 	for button in c.int(0) ..= 2 {
 		flag: c.int = button == 0 ? CEF_FLAG_LEFT_BUTTON : button == 1 ? 1 << 5 : 1 << 6
 		if b.buttons & flag == 0 do continue
 		b.buttons &~= flag
-		pd_cef_mouse_click(b.cef, b.last_x, b.last_y, b.buttons, button, 1, 1)
+		dh_cef_mouse_click(b.cef, b.last_x, b.last_y, b.buttons, button, 1, 1)
 	}
 }
 
@@ -563,18 +563,18 @@ browser_tick :: proc() {
 	for _, b in browsers {
 		hidden := !tab_on_screen(b.tab_id)
 		// a popup's browser is not there until CEF made it (on_after_created)
-		if b.cef == 0 || pd_cef_ready(b.cef) == 0 do continue
+		if b.cef == 0 || dh_cef_ready(b.cef) == 0 do continue
 		focused := browser_wants_keys(b)
 		if focused != b.focused {
 			if !focused do release_input(b) // before it hides: held keys and buttons are let go
 			b.focused = focused
-			pd_cef_focus(b.cef, focused ? 1 : 0)
+			dh_cef_focus(b.cef, focused ? 1 : 0)
 		}
 		// a tab an agent's screenshot waits for paints (unseen: it is not drawn)
 		paint_hidden := hidden && !browser_agent_wakes(b.tab_id)
 		if paint_hidden != b.hidden {
 			b.hidden = paint_hidden
-			pd_cef_set_hidden(b.cef, paint_hidden ? 1 : 0)
+			dh_cef_set_hidden(b.cef, paint_hidden ? 1 : 0)
 		}
 		if r := tab_rect(b.tab_id); !hidden && r.z > 0 {
 			vw, vh := c.int(r.z / app.dpi), c.int(r.w / app.dpi)
@@ -582,7 +582,7 @@ browser_tick :: proc() {
 				b.view_w, b.view_h, b.view_scale = vw, vh, app.dpi
 				b.resized_at = now
 			}
-			pd_cef_resize(b.cef, vw, vh, app.dpi)
+			dh_cef_resize(b.cef, vw, vh, app.dpi)
 		}
 	}
 }
@@ -609,7 +609,7 @@ browser_pages :: proc() {
 		wants := !live && !b.lazy && (b.message == "" || b.waiting)
 		if !live && !wants do continue
 		append(&list, b)
-		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = tab_on_screen(b.tab_id), pinned = live && pd_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
+		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = tab_on_screen(b.tab_id), pinned = live && dh_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
 	}
 	if len(pages) == 0 do return
 	want_any := false
@@ -619,7 +619,7 @@ browser_pages :: proc() {
 		return
 	}
 	// a slot whose page is closing counts as free: it is, in a moment (no second page goes for it)
-	plan := browser_page_plan(pages[:], int(pd_cef_free_slots(1)))
+	plan := browser_page_plan(pages[:], int(dh_cef_free_slots(1)))
 	for i in plan.unload do browser_unload(list[i])
 	for i in plan.wait {
 		b := list[i]
@@ -634,10 +634,10 @@ browser_pages :: proc() {
 		}
 		r := tab_rect(b.tab_id) // its pane's size (panes.odin)
 		w, h := c.int(r.z / app.dpi), c.int(r.w / app.dpi)
-		b.cef = pd_cef_open(strings.clone_to_cstring(b.url, context.temp_allocator), w, h, app.dpi, b.tab_id)
+		b.cef = dh_cef_open(strings.clone_to_cstring(b.url, context.temp_allocator), w, h, app.dpi, b.tab_id)
 		if b.cef == 0 {
 			// no slot yet (one is still closing): wait; else it failed
-			if pd_cef_free_slots(0) == 0 do b.waiting, b.message = true, BROWSER_WAIT_MESSAGE
+			if dh_cef_free_slots(0) == 0 do b.waiting, b.message = true, BROWSER_WAIT_MESSAGE
 			else do b.waiting, b.message = false, "The browser could not open this page"
 			continue
 		}
@@ -652,11 +652,11 @@ browser_pages :: proc() {
 browser_unload :: proc(b: ^Browser) {
 	if b.cef == 0 do return
 	release_input(b)
-	// cef cleared first: CEF may say "closed" inside pd_cef_close, and
-	// on_cef_closed must then find nothing (pi-desk closed it, not the page)
+	// cef cleared first: CEF may say "closed" inside dh_cef_close, and
+	// on_cef_closed must then find nothing (Deckhand closed it, not the page)
 	id := b.cef
 	b.cef = 0
-	pd_cef_close(id)
+	dh_cef_close(id)
 	browser_free_page(b)
 	b.lazy = true
 	b.focused, b.hidden = false, false
@@ -673,7 +673,7 @@ browser_free_page :: proc(b: ^Browser) {
 	for &g in b.ring.gens do for s in 0 ..< FRAME_SLOTS do browser_slot_destroy(&g, s)
 	delete(b.ring.gens)
 	b.ring = {}
-	if b.chan do pd_frames_chan_close(b.tab_id)
+	if b.chan do dh_frames_chan_close(b.tab_id)
 	b.chan = false
 }
 
@@ -688,8 +688,8 @@ browser_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	// the frame fills the slot's top-left content_w x content_h (headroom beyond)
 	dw, dh := min(f32(b.content_w), w), min(f32(b.content_h), h)
 	u, v := dw / f32(g.w), dh / f32(g.h)
-	b.drawn_tex = pd_frames_slot_texture(b.tab_id, g.gen, c.int(b.ring.shown_slot))
-	if autotest.active do pd_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
+	b.drawn_tex = dh_frames_slot_texture(b.tab_id, g.gen, c.int(b.ring.shown_slot))
+	if autotest.active do dh_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
 	sgl.end()
 	sgl.texture({g.view[b.ring.shown_slot]}, browser_sampler)
 	sgl.begin_quads()
@@ -710,7 +710,7 @@ browser_drop :: proc(tab_id: u64) {
 	if b == nil do return
 	if id := b.cef; id != 0 {
 		b.cef = 0 // as browser_unload: on_cef_closed finds nothing
-		pd_cef_close(id)
+		dh_cef_close(id)
 	}
 	browser_free_page(b)
 	delete(b.url)
@@ -721,11 +721,11 @@ browser_drop :: proc(tab_id: u64) {
 
 // Quit: every browser closes, then CEF shuts down (before sokol's).
 browser_shutdown :: proc() {
-	if cef_state == .Running do pd_cef_shutdown()
+	if cef_state == .Running do dh_cef_shutdown()
 	cef_state = .Failed
 }
 
-// ---- input (event(): after pi-desk's own shortcuts and open widgets) ----
+// ---- input (event(): after Deckhand's own shortcuts and open widgets) ----
 
 @(private = "file")
 cef_mods :: proc(m: u32, buttons: c.int) -> c.int {
@@ -788,27 +788,27 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		b.buttons |= flag
 		browser_act_user_input(b.tab_id) // an agent acting here pauses (browser_act.odin)
 		browser_page_input(b.tab_id) // the user's own click (browser_polish.odin: downloads)
-		pd_cef_mouse_click(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), button, 0, c.int(max(app.clicks, 1)))
+		dh_cef_mouse_click(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), button, 0, c.int(max(app.clicks, 1)))
 		return true
 	case .MOUSE_UP:
 		if b.buttons & flag == 0 do return false
 		b.buttons &~= flag
-		pd_cef_mouse_click(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), button, 1, c.int(max(app.clicks, 1)))
+		dh_cef_mouse_click(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), button, 1, c.int(max(app.clicks, 1)))
 		return true
 	case .MOUSE_MOVE:
 		if !in_page(r, e.mouse_x, e.mouse_y) && b.buttons == 0 do return false
-		pd_cef_mouse_move(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), 0)
+		dh_cef_mouse_move(b.cef, vx, vy, cef_mods(e.modifiers, b.buttons), 0)
 		return in_page(r, e.mouse_x, e.mouse_y)
 	case .MOUSE_LEAVE:
-		pd_cef_mouse_move(b.cef, b.last_x, b.last_y, cef_mods(e.modifiers, b.buttons), 1)
-		return false // pi-desk's hover goes too
+		dh_cef_mouse_move(b.cef, b.last_x, b.last_y, cef_mods(e.modifiers, b.buttons), 1)
+		return false // Deckhand's hover goes too
 	case .MOUSE_SCROLL:
 		if !in_page(r, e.mouse_x, e.mouse_y) do return false
 		// sokol's deltas are lines-ish; Chromium wants pixels
-		pd_cef_wheel(b.cef, vx, vy, cef_mods(e.modifiers, 0), c.int(e.scroll_x * 40), c.int(e.scroll_y * 40))
+		dh_cef_wheel(b.cef, vx, vy, cef_mods(e.modifiers, 0), c.int(e.scroll_x * 40), c.int(e.scroll_y * 40))
 		return true
 	case .KEY_DOWN:
-		if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false // pi-desk's shortcuts (SPIKE: no ⌘C/V to the page yet)
+		if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false // Deckhand's shortcuts (SPIKE: no ⌘C/V to the page yet)
 		code, ch, known := mac_key(e.key_code, e.modifiers)
 		if !known do return true // no macOS key code for it: never sent as another key
 		browser_act_user_input(b.tab_id) // an agent acting here pauses (browser_act.odin)
@@ -819,19 +819,19 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		}
 		// SPIKE: Chromium shows the page no keydown for a modifier alone sent
 		// this way (nor as KEYDOWN); step 1.2 passes AppKit's flagsChanged through
-		pd_cef_key(b.cef, CEF_KEY_RAWKEYDOWN, code, cef_mods(e.modifiers, 0) | modifier_flag(code), ch, ch)
+		dh_cef_key(b.cef, CEF_KEY_RAWKEYDOWN, code, cef_mods(e.modifiers, 0) | modifier_flag(code), ch, ch)
 		return true
 	case .CHAR:
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false
 		if e.char_code < 0x20 && e.char_code != 13 && e.char_code != 9 do return true // control keys went as key downs
-		pd_cef_key(b.cef, CEF_KEY_CHAR, 0, cef_mods(e.modifiers, 0), u16(e.char_code), u16(e.char_code))
+		dh_cef_key(b.cef, CEF_KEY_CHAR, 0, cef_mods(e.modifiers, 0), u16(e.char_code), u16(e.char_code))
 		return true
 	case .KEY_UP:
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false
 		code, ch, known := mac_key(e.key_code, e.modifiers)
 		if !known do return true
 		b.held -= {int(code)}
-		pd_cef_key(b.cef, CEF_KEY_UP, code, cef_mods(e.modifiers, 0), ch, ch)
+		dh_cef_key(b.cef, CEF_KEY_UP, code, cef_mods(e.modifiers, 0), ch, ch)
 		return true
 	}
 	return false
@@ -915,25 +915,25 @@ mac_key :: proc(k: sapp.Keycode, mods: u32) -> (code: c.int, ch: u16, known: boo
 //   web_title TEXT [MS]        until the page title contains TEXT (default 5 s)
 //   web_pixel X Y RRGGBB [MS]  until the page pixel at logical X,Y (page coordinates)
 //                              is RRGGBB (±8 per channel)
-//   web_click X Y              a left click at page X,Y, through pi-desk's event path
+//   web_click X Y              a left click at page X,Y, through Deckhand's event path
 //   web_scroll DY X Y          the wheel at page X,Y (DY lines, as `scroll`)
 //   web_js CODE                run JavaScript in the page (no result)
 //   web_stats                  log the paint path, first paint and CEF start times
 //   web_assert opens N         browsers created for the tab on screen so far
 //   web_assert message TEXT    the text shown instead of the page ("-" = none)
-//   web_assert focused yes|no  whether the page has pi-desk's keyboard
+//   web_assert focused yes|no  whether the page has Deckhand's keyboard
 //   web_assert overwrites N    paints written into the texture the last drawn frame sampled
 //   web_assert inflight_writes N   slots handed to CEF while a GPU frame not completed yet
-//                              samples them (all tabs; PI_DESK_TEST_GPU_LAG_MS slows the GPU)
+//                              samples them (all tabs; DECKHAND_TEST_GPU_LAG_MS slows the GPU)
 //   web_assert surfaces N      ring surfaces alive for the tab on screen (3: one ring)
-//   web_assert shown held      the slot on screen is pi-desk's, not the producer's
+//   web_assert shown held      the slot on screen is Deckhand's, not the producer's
 //   web_assert freed           no browser tabs: no ring surfaces, local channels (open or
 //                              draining) or images left
 //   web_assert rings_max N     rings created for the tab since web_mark are at most N
 //   web_assert surfaces_peak_max N   ring surfaces alive at once since web_mark, at most N
 //   web_assert pumps_max N     CEF message-loop pumps since web_mark are at most N
 //   web_mark                   remember the pump count (no browser needed)
-//   web_mouse down|up|leave X Y   one mouse event at page X,Y through pi-desk's event path
+//   web_mouse down|up|leave X Y   one mouse event at page X,Y through Deckhand's event path
 //   web_keydown LETTER         a key press without its release (KEY_DOWN + CHAR)
 //   web_comment X Y W H TEXT   the comment picker's stub (comments.odin): a comment on the page
 //                              area X,Y W×H (page px) of the tab on screen, cropped from its frame
@@ -972,7 +972,7 @@ pixel_at :: proc(b: ^Browser, x, y: c.int) -> (u32, bool) {
 	px, py := int(f32(x) * app.dpi), int(f32(y) * app.dpi)
 	if px >= b.content_w || py >= b.content_h do return 0, false // headroom, not the page
 	rgb: u32
-	if pd_frames_pixel(b.tab_id, b.ring.shown_gen, c.int(b.ring.shown_slot), c.int(f32(x) * app.dpi), c.int(f32(y) * app.dpi), &rgb) == 0 do return 0, false
+	if dh_frames_pixel(b.tab_id, b.ring.shown_gen, c.int(b.ring.shown_slot), c.int(f32(x) * app.dpi), c.int(f32(y) * app.dpi), &rgb) == 0 do return 0, false
 	return rgb, true
 }
 
@@ -1099,14 +1099,14 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		return "", true
 	case "web_js":
 		if b == nil || b.cef == 0 do return "web_js: no browser", false
-		pd_cef_exec_js(b.cef, strings.clone_to_cstring(rest, context.temp_allocator))
+		dh_cef_exec_js(b.cef, strings.clone_to_cstring(rest, context.temp_allocator))
 		return "", true
 	case "web_mark":
 		gpu, cpu, pumps, dropped: u64
 		first_ms: f64
-		pd_cef_stats(0, &gpu, &cpu, &first_ms, &pumps, &dropped)
+		dh_cef_stats(0, &gpu, &cpu, &first_ms, &pumps, &dropped)
 		browser_pump_mark = pumps
-		for _, x in browsers do x.rings_mark, x.surf_peak, x.bytes_mark = x.rings_made, int(pd_frames_surface_count(x.tab_id)), x.ring_bytes
+		for _, x in browsers do x.rings_mark, x.surf_peak, x.bytes_mark = x.rings_made, int(dh_frames_surface_count(x.tab_id)), x.ring_bytes
 		fmt.printfln("[browser] mark: %d pumps so far", pumps)
 		return "", true
 	case "web_mouse":
@@ -1152,7 +1152,7 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		if len(args) == 2 && args[0] == "pumps_max" {
 			gpu, cpu, pumps, dropped: u64
 			first_ms: f64
-			pd_cef_stats(0, &gpu, &cpu, &first_ms, &pumps, &dropped)
+			dh_cef_stats(0, &gpu, &cpu, &first_ms, &pumps, &dropped)
 			want, _ := strconv.parse_f64(args[1])
 			n := pumps - browser_pump_mark
 			if f64(n) > want do return fmt.tprintf("ASSERT FAILED web_assert pumps_max: %d pumps since the mark, want at most %s", n, args[1]), false
@@ -1160,7 +1160,7 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 			return "", true
 		}
 		if len(args) == 1 && args[0] == "freed" {
-			n, chans := int(pd_frames_surface_total_local()), int(pd_frames_local_chans())
+			n, chans := int(dh_frames_surface_total_local()), int(dh_frames_local_chans())
 			if n != 0 || chans != 0 || browser_images != 0 || len(browsers) != 0 do return fmt.tprintf("ASSERT FAILED web_assert freed: %d surfaces, %d channels, %d images, %d browsers", n, chans, browser_images, len(browsers)), false
 			fmt.println("[browser] assert ok: no browser surfaces, channels, images or tabs left")
 			return "", true
@@ -1176,8 +1176,8 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		case "hidden": got = b.hidden ? "yes" : "no" // CEF told the page is hidden (no pane shows it)
 		case "view": got = fmt.tprintf("%dx%d", b.view_w, b.view_h) // its CEF view, logical px: its pane's
 		case "overwrites": got = fmt.tprint(b.overwrites)
-		case "inflight_writes": got = fmt.tprint(pd_frames_inflight_writes())
-		case "surfaces": got = fmt.tprint(pd_frames_surface_count(b.tab_id))
+		case "inflight_writes": got = fmt.tprint(dh_frames_inflight_writes())
+		case "surfaces": got = fmt.tprint(dh_frames_surface_count(b.tab_id))
 		case "rings_max", "surfaces_peak_max":
 			// at most N since web_mark
 			n := args[0] == "rings_max" ? b.rings_made - b.rings_mark : b.surf_peak
@@ -1186,9 +1186,9 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 			fmt.printfln("[browser] assert ok: %s %d (at most %d)", args[0], n, lim)
 			return "", true
 		case "shown":
-			// the slot on screen is pi-desk's (the producer cannot have it)
-			st := b.ring.shown_gen != 0 ? pd_frames_local_slot_state(b.tab_id, b.ring.shown_gen, c.int(b.ring.shown_slot)) : -1
-			got = st == FRAMES_SLOT_PIDESK ? "held" : fmt.tprintf("state %d", st)
+			// the slot on screen is Deckhand's (the producer cannot have it)
+			st := b.ring.shown_gen != 0 ? dh_frames_local_slot_state(b.tab_id, b.ring.shown_gen, c.int(b.ring.shown_slot)) : -1
+			got = st == FRAMES_SLOT_DECKHAND ? "held" : fmt.tprintf("state %d", st)
 		case: return fmt.tprintf("web_assert: unknown %s", args[0]), false
 		}
 		if got != want do return fmt.tprintf("ASSERT FAILED web_assert %s: got %q, want %q", args[0], got, want), false
@@ -1198,18 +1198,18 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		if b == nil do return "web_stats: no browser tab on screen", false
 		gpu, cpu, pumps, dropped: u64
 		first_ms: f64
-		pd_cef_stats(b.cef, &gpu, &cpu, &first_ms, &pumps, &dropped)
+		dh_cef_stats(b.cef, &gpu, &cpu, &first_ms, &pumps, &dropped)
 		g := ring_gen(&b.ring, b.ring.shown_gen)
 		gw, gh := g != nil ? g.w : 0, g != nil ? g.h : 0
-		bytes := pd_frames_surface_bytes(b.tab_id)
+		bytes := dh_frames_surface_bytes(b.tab_id)
 		fmt.printfln("[browser] stats: paint path %s (gpu frames %d, cpu frames %d, dropped %d, slots reused unshown %d); cef start %.0f ms; first paint %.0f ms after open (browser created -> paint %.0f ms); pumps %d; dpi %.1f; frame %dx%d px in ring gen %d %dx%d px, %d surfaces %.1f MB; rings made %d (%d since mark, %.0f MB allocated since mark), peak %d surfaces",
-			gpu > 0 ? "OnAcceleratedPaint" : "OnPaint", gpu, cpu, dropped, pd_frames_local_reclaimed(b.tab_id), cef_start_ms, time.duration_milliseconds(b.first_paint), first_ms, pumps, app.dpi, b.content_w, b.content_h, b.ring.shown_gen, gw, gh, pd_frames_surface_count(b.tab_id), f64(bytes) / (1024 * 1024), b.rings_made, b.rings_made - b.rings_mark, f64(b.ring_bytes - b.bytes_mark) / (1024 * 1024), b.surf_peak)
+			gpu > 0 ? "OnAcceleratedPaint" : "OnPaint", gpu, cpu, dropped, dh_frames_local_reclaimed(b.tab_id), cef_start_ms, time.duration_milliseconds(b.first_paint), first_ms, pumps, app.dpi, b.content_w, b.content_h, b.ring.shown_gen, gw, gh, dh_frames_surface_count(b.tab_id), f64(bytes) / (1024 * 1024), b.rings_made, b.rings_made - b.rings_mark, f64(b.ring_bytes - b.bytes_mark) / (1024 * 1024), b.surf_peak)
 		return "", true
 	}
 	return fmt.tprintf("unknown command %s", cmd), false
 }
 
-// A run with PI_DESK_DEBUG_BROWSER=URL opens a browser tab once a session
+// A run with DECKHAND_DEBUG_BROWSER=URL opens a browser tab once a session
 // is on screen (SPIKE: the only way outside test mode).
 browser_debug_tick :: proc() {
 	@(static) done: bool

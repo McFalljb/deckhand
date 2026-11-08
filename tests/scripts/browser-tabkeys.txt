@@ -1,8 +1,8 @@
-# ⌘T and ⌘W with the page focused (tests/scripts/browser.sh; docs/BROWSER.md §1.2): pi-desk takes
+# ⌘T and ⌘W with the page focused (tests/scripts/browser.sh; docs/BROWSER.md §1.2): Deckhand takes
 # its shortcuts first, by the menu bar (AppKit's key equivalents) and by the view; the page never
 # sees them. ⌘T: a new shell tab; ⌘W: closes the browser tab.
 wait 1500
-command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_open","url":"deckhand-test://web/nav-a.html"}
 web_title Nav A 10000
 web_waitpaint 10000
 web_click 400 400
@@ -32,7 +32,7 @@ key w cmd
 waitstate 3000 open_sessions.0.tabs.# 3
 assert_state open_sessions.0.tabs.1.kind shell
 # ⌘W through the menu bar, on another browser tab with its page focused
-command {"type":"browser_open","url":"pidesk-test://web/nav-b.html"}
+command {"type":"browser_open","url":"deckhand-test://web/nav-b.html"}
 web_title Nav B 10000
 web_waitpaint 10000
 web_click 400 400

@@ -44,12 +44,12 @@ setup :: proc() -> string {
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-editor-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-editor-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	dir := fs_real(made, context.allocator)
 	// these tests write files and run git in dir: never anywhere else
 	cwd, _ := os.get_working_directory(context.temp_allocator)
-	ensure(strings.has_prefix(dir, "/") && strings.contains(dir, "/pi-desk-editor-test-") && os.is_directory(dir) && dir != fs_real(cwd), "editor tests: no temp folder")
+	ensure(strings.has_prefix(dir, "/") && strings.contains(dir, "/deckhand-editor-test-") && os.is_directory(dir) && dir != fs_real(cwd), "editor tests: no temp folder")
 	append(&state.projects, Project{id = new_id(), cwd = dir, label = "proj"})
 	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = dir}
 	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
@@ -256,7 +256,7 @@ editor_save_is_atomic :: proc(t: ^testing.T) {
 	testing.expect_value(t, lfi.type, os.File_Type.Symlink) // the link stays a link
 	// no temporary files left next to it
 	infos, _ := os.read_all_directory_by_path(dir, context.temp_allocator)
-	for fi in infos do testing.expectf(t, !strings.contains(fi.name, ".pi-desk-"), "left %s", fi.name)
+	for fi in infos do testing.expectf(t, !strings.contains(fi.name, ".deckhand-"), "left %s", fi.name)
 	testing.expect(t, !e.disk_changed)
 	// our own save is not a change on disk
 	editor_check_disk(e)
@@ -425,7 +425,7 @@ fs_commands_inside_projects :: proc(t: ^testing.T) {
 	testing.expect_value(t, run_command(Create_File{path = "sub/new.txt"}, {kind = .Script}).error, "already exists")
 	testing.expect(t, run_command(Create_Dir{path = "d1/d2"}, {kind = .Script}).ok)
 	// outside every project, the project root itself, .git: refused
-	testing.expect_value(t, run_command(Create_File{path = "/tmp/pi-desk-outside.txt"}, {kind = .Script}).error, "only inside a project folder")
+	testing.expect_value(t, run_command(Create_File{path = "/tmp/deckhand-outside.txt"}, {kind = .Script}).error, "only inside a project folder")
 	testing.expect_value(t, run_command(Delete_Path{path = dir}, {kind = .UI}).error, "not on a project folder itself")
 	testing.expect_value(t, run_command(Create_File{path = ".git/x"}, {kind = .Script}).error, "not inside .git")
 	testing.expect_value(t, run_command(Create_File{path = "../escape.txt"}, {kind = .Script}).error, "only inside a project folder")
@@ -527,7 +527,7 @@ any_git_loading :: proc() -> bool {
 second_session :: proc() -> (dir: string, s: ^Open_Session) {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-editor-test-b-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-editor-test-b-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	dir = fs_real(made, context.allocator)
 	append(&state.projects, Project{id = new_id(), cwd = dir, label = "projb"})
@@ -761,7 +761,7 @@ review_watch_only_projects_and_files :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	setup()
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
-	outside := fmt.tprintf("%s/pi-desk-outside-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	outside := fmt.tprintf("%s/deckhand-outside-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(outside)
 	defer os.remove_all(outside)
 	open(t, write(outside, "loose.txt", "x"))

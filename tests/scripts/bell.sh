@@ -23,8 +23,8 @@ for s in "aaaa-1|Import recipes from a CSV export" "bbbb-2|Which unit should the
   printf '{"type":"session","version":3,"id":"%s","cwd":"%s"}\n{"type":"message","message":{"role":"user","content":"%s"}}\n' \
     "$id" "$PROJ" "$title" > "$DIR/2026-10-2${i}T0${i}-00-00-000Z_$id.jsonl"
 done
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-bell.py' \"\$@\"" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-bell.py' \"\$@\"" \
   build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU|notify:" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then

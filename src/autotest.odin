@@ -1,7 +1,7 @@
 package main
 
 // Scripted input for testing without touching other apps: when
-// PI_DESK_SCRIPT=<file> is set, each line is played in order from the frame
+// DECKHAND_SCRIPT=<file> is set, each line is played in order from the frame
 // loop, and synthetic sokol events go through the normal event() handler.
 // OS-level input (Cocoa -> sokol) is therefore NOT covered by these runs.
 //
@@ -60,7 +60,7 @@ package main
 //   rclickid NAME [INDEX]      right click there (context menus); for the Files and Settings
 //                              rows (frow, fcreate...) INDEX may be @PATH: the drawn row whose
 //                              path ends with PATH (e.g. @.pi/settings.json; a setting row's
-//                              path is its id, e.g. @pi-desk:claude-default-flags), so a row
+//                              path is its id, e.g. @deckhand:claude-default-flags), so a row
 //                              added above it does not move the click
 //   assert_files TEXT          the Files tree's rows (indented names, "/" after open folders)
 //                              contain TEXT ("\n" = a line break); assert_not_files: do not
@@ -103,7 +103,7 @@ package main
 //   revealed_clear             forget it
 //   assert_toast TEXT|-        the toast showing now (toast.odin) contains TEXT; - = none
 //   toast_clear                the toast goes away now
-//   assert_clipboard TEXT|-    what pi-desk last put on the clipboard contains TEXT; - = nothing
+//   assert_clipboard TEXT|-    what Deckhand last put on the clipboard contains TEXT; - = nothing
 //   clipboard_clear            forget it (the system clipboard is left as it is)
 //   assert_md TEXT             the shown Markdown preview's text (labels and markers too)
 //                              contains TEXT; assert_not_md: does not
@@ -145,7 +145,7 @@ package main
 //   assert_state PATH VALUE    state JSON at PATH (a.b.0.c; "#" = length) equals VALUE
 //   waitstate MS PATH VALUE    until the state JSON has VALUE at PATH (fails after MS)
 //   jobs_clock SECONDS         the jobs' scheduler clock moves on (jobs.odin), then a due check
-//   window_active on|off       as if pi-desk were in front (no OS notifications) or behind
+//   window_active on|off       as if Deckhand were in front (no OS notifications) or behind
 //   jobs_ui ID|- [limits]      open a Jobs row (and the limits) on the Jobs tab
 //   replace_in_file PATH OLD|NEW   edit a file as another program would
 //   assert_file PATH TEXT      the file contains TEXT; assert_not_file: does not
@@ -156,11 +156,11 @@ package main
 //   screen_hashes              log every terminal's screen_hash (tab id, holder terminal, hash)
 //   quit                       quit without confirmation; exit status 1 if an assert failed
 //
-// PI_DESK_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
+// DECKHAND_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
 // the first failed check, wait (waitfor, waitstate, waitresult, a command's TIMEOUT...) or missing
 // element ends the script there: it logs "ASSERT FAILED (stopped at line N ...)" (no "done:") and
 // quits (exit status 1), so a scene
-// fails in seconds instead of running every later wait to its timeout. PI_DESK_SCRIPT_STEP=FILE:
+// fails in seconds instead of running every later wait to its timeout. DECKHAND_SCRIPT_STEP=FILE:
 // each line's number and text are written to FILE as it starts, so a run that hangs or is killed
 // says where it was (tests/scenes.py prints it).
 //
@@ -168,7 +168,7 @@ package main
 // confirmation token), $project (selected project), $session (current open
 // session), $tab (its active tab), $pitab (its pi tab), $pisession (its pi
 // session id), $hometab (Home's pi tab), $chats (the Chats entry's project
-// id), $homedir ($HOME), $notesdir (the main folder, home_dir), $datadir (the data dir), $cwd (pi-desk's working directory), $pane0…$pane7 (the
+// id), $homedir ($HOME), $notesdir (the main folder, home_dir), $datadir (the data dir), $cwd (Deckhand's working directory), $pane0…$pane7 (the
 // current session's panes by slot), $ptab0…$ptab7 (the tab each shows). assert_screen, waitfor and dump read
 // the terminal with the keyboard (Home's while its pane shows).
 
@@ -220,7 +220,7 @@ Autotest :: struct {
 	bg_request:   u64, // pi_command_bg: a long command left running (await_bg waits for it)
 	bg_done:      bool,
 	bg_deadline:  time.Tick,
-	clipboard:    string, // what pi-desk last put on the clipboard (platform.set_clipboard)
+	clipboard:    string, // what Deckhand last put on the clipboard (platform.set_clipboard)
 	pasteboard:   string, // what a paste inserts: the script's own, never the system's (autotest_platform)
 	revealed:     string, // the last path platform.reveal was asked to show
 	eventually_on:    bool, // `eventually`: a failing check right after it is tried again next frame
@@ -231,14 +231,14 @@ Autotest :: struct {
 	input_line:   string, // that input's line (owned)
 	shot_drawn:   u64, // app.frames_drawn when a shot raised the window
 	shot_at:      time.Tick,
-	audit:        bool, // PI_DESK_WAIT_AUDIT=1: log which checks after a `wait` already held before it
+	audit:        bool, // DECKHAND_WAIT_AUDIT=1: log which checks after a `wait` already held before it
 	audit_wait:   int, // the `wait` line whose checks are running (C), -1 = none
 	audit_k:      int,
 	command_idx:  int, // the last `command` line (waitresult runs it again)
 	wr_idx:       int, // the waitresult line being waited on, -1 = none
 	wr_until:     time.Tick,
-	fail_fast:    bool, // PI_DESK_SCRIPT_FAIL_FAST=1: the first failure ends the script
-	step_file:    string, // PI_DESK_SCRIPT_STEP: the line running now goes there
+	fail_fast:    bool, // DECKHAND_SCRIPT_FAIL_FAST=1: the first failure ends the script
+	step_file:    string, // DECKHAND_SCRIPT_STEP: the line running now goes there
 	path:         string,
 }
 
@@ -659,7 +659,7 @@ autotest_step :: proc() {
 			return
 		case "jobs_clock": // jobs_clock SECONDS: the jobs' clock moves on, then a due check
 			jobs_clock_advance(i64(num(rest)))
-		case "window_active": // window_active on|off: as if pi-desk were in front or behind
+		case "window_active": // window_active on|off: as if Deckhand were in front or behind
 			app.window_active = strings.trim_space(rest) == "on"
 		case "jobs_ui": // jobs_ui OPEN_ID [limits]: open a row (and the limits) on the Jobs tab
 			jobs_ui_set(len(args) > 0 && args[0] != "-" ? args[0] : "", len(args) > 1 && args[1] == "limits")
@@ -1304,7 +1304,7 @@ script_fail :: proc(args: ..any) {
 	at.active = false
 }
 
-// The line starting now (PI_DESK_SCRIPT_STEP), so a hung or killed run says where it was.
+// The line starting now (DECKHAND_SCRIPT_STEP), so a hung or killed run says where it was.
 @(private = "file")
 script_write_step :: proc(idx: int, line: string) {
 	text := fmt.tprintf("%s:%d: %s\n", autotest.path, idx + 1, line)
@@ -1599,7 +1599,7 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		ok = rest == "-" ? toast.text == "" : toast.text != "" && strings.contains(toast.text, rest)
 		msg = ok ? fmt.tprint("assert ok: toast", fmt.tprintf("%q", toast.text)) : fmt.tprintf("ASSERT FAILED toast: %q, want %q", toast.text, rest)
 	case "assert_clipboard":
-		// what pi-desk last put on the clipboard contains TEXT ("\n" = a line break); "-" = nothing since clipboard_clear
+		// what Deckhand last put on the clipboard contains TEXT ("\n" = a line break); "-" = nothing since clipboard_clear
 		want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
 		ok = rest == "-" ? autotest.clipboard == "" : autotest.clipboard != "" && strings.contains(autotest.clipboard, want)
 		msg = ok ? fmt.tprint("assert ok: clipboard", fmt.tprintf("%q", autotest.clipboard)) : fmt.tprintf("ASSERT FAILED clipboard: %q, want %q", autotest.clipboard, want)
@@ -1783,7 +1783,7 @@ script_is_input :: proc(cmd: string) -> bool {
 	return false
 }
 
-// PI_DESK_WAIT_AUDIT=1 (tests/wait_audit.py): for every `wait` followed by checks, whether each
+// DECKHAND_WAIT_AUDIT=1 (tests/wait_audit.py): for every `wait` followed by checks, whether each
 // check already held before the line ahead of the wait ran (A) and when the wait began (B); the
 // check's own run is C. A check that held at A did not need the wait to become true: it may be a
 // check that something stays as it was, so its wait is kept. Logged, never counted or failed.

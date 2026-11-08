@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""A fake `claude` for pi-desk's Claude-tab scenes (never the real one; no network, no ~/.claude).
+"""A fake `claude` for Deckhand's Claude-tab scenes (never the real one; no network, no ~/.claude).
 
-pi-desk starts it in a Claude tab's PTY as `fake-claude.py --plugin-dir DIR [--resume ID] [args…]`.
-It behaves like Claude Code where pi-desk can see it: it runs the plugin's hooks (DIR/hooks/
-hooks.json) with realistic JSON on stdin, and the plugin's `pi-desk` command, and shows a prompt.
+Deckhand starts it in a Claude tab's PTY as `fake-claude.py --plugin-dir DIR [--resume ID] [args…]`.
+It behaves like Claude Code where Deckhand can see it: it runs the plugin's hooks (DIR/hooks/
+hooks.json) with realistic JSON on stdin, and the plugin's `deckhand` command, and shows a prompt.
 
 - Prints `FAKE CLAUDE ARGS: …` and `session <id>` (the --resume id, else a new uuid4); exits 3
   without --plugin-dir.
@@ -17,7 +17,7 @@ hooks.json) with realistic JSON on stdin, and the plugin's `pi-desk` command, an
   runs Notification hooks (permission_prompt) and waits for one line before Stop; `!quit` exits.
 - In `!cli` arguments `{browser}` and `{app}` become the first browser and app tab of the session
   (`{lastapp}`: the last app tab)
-  (from `pi-desk tabs` and `pi-desk state`).
+  (from `deckhand tabs` and `deckhand state`).
 - Hook groups with a "matcher" (PreToolUse, PostToolUse) run only for a tool name it lists
   (`A|B`, exact names, as Claude Code reads a plain matcher). Hooks marked "async" run in order,
   like the rest (the fake waits for them), and their stdout is logged (it must stay empty).
@@ -25,18 +25,18 @@ hooks.json) with realistic JSON on stdin, and the plugin's `pi-desk` command, an
 - `!todo`: PostToolUse on TodoWrite with a list of three (done, in progress, pending).
   `!tasks`: TaskCreated (two), PostToolUse on TaskUpdate (in progress), TaskCompleted.
   `!agent`: PreToolUse on the Agent tool (Explore, its description) and SubagentStart (agent-1).
-  `!agent-done`: SubagentStop for agent-1 (with a last message that must never reach pi-desk).
-  `!exit N`: claude exits with code N (pi-desk's dead tab bar).
+  `!agent-done`: SubagentStop for agent-1 (with a last message that must never reach Deckhand).
+  `!exit N`: claude exits with code N (Deckhand's dead tab bar).
   `!model NAME`: PostModelSwitch to NAME. `!ask`: the turn's Stop has a last message ending
   with a question. `!fail`: the turn ends with StopFailure (rate_limit) instead of Stop.
   `!ask-wake` / `!fail-wake`: as `!ask` / `!fail`, then FAKE_CLAUDE_WAKE_MS (default 1500) later a
   turn with no UserPromptSubmit (a background wake, /loop) whose Stop ends with a statement.
   `!idle-prompt`: after the turn, Notification idle_prompt (as Claude Code sends a while later).
 - SessionStart has `model` (FAKE_CLAUDE_MODEL, default claude-opus-5; "-" = none). Its hooks'
-  stdout is logged as {"session_start_out": …} (pi-desk's sessionTitle).
+  stdout is logged as {"session_start_out": …} (Deckhand's sessionTitle).
 - FAKE_CLAUDE_PROJECTS: a FAKE Claude config dir's projects/ folder (never the real one): the
   transcript path is <it>/-fake/<session>.jsonl and the file is created there (empty).
-- `--settings JSON` (pi-desk's read-only profile): its hooks run too, after the plugin's (matcher
+- `--settings JSON` (Deckhand's read-only profile): its hooks run too, after the plugin's (matcher
   "*" = every tool; SessionStart: the read-only ack). FAKE_CLAUDE_IGNORE_SETTINGS=1: they do not
   (an older Claude Code that ignores them). `!bash CMD`: PreToolUse for the Bash tool with that command; `!tool NAME`:
   PreToolUse for that tool; each hook's exit and stdout are logged with the tool's input
@@ -128,7 +128,7 @@ class Fake:
         with open(os.path.join(self.dir, "hooks", "hooks.json")) as f:
             self.hooks = json.load(f).get("hooks", {})
         # the --settings hooks join the plugin's (Claude Code merges hooks from every source)
-        # FAKE_CLAUDE_IGNORE_SETTINGS=1: a Claude Code that ignores them (pi-desk must notice: no ack)
+        # FAKE_CLAUDE_IGNORE_SETTINGS=1: a Claude Code that ignores them (Deckhand must notice: no ack)
         settings = {} if os.environ.get("FAKE_CLAUDE_IGNORE_SETTINGS") == "1" else (SETTINGS or {})
         for event, groups in (settings.get("hooks") or {}).items():
             self.hooks.setdefault(event, []).extend(groups)
@@ -196,7 +196,7 @@ class Fake:
         e = self.env()
         def cli(words):
             # bin/pi-desk: the old name, an alias of bin/deckhand (pi-kit and older sessions use it)
-            p = subprocess.run([os.path.join(self.dir, "bin", "pi-desk")] + words, capture_output=True, text=True, env=e, timeout=60)
+            p = subprocess.run([os.path.join(self.dir, "bin", "deckhand")] + words, capture_output=True, text=True, env=e, timeout=60)
             try:
                 return json.loads(p.stdout)
             except ValueError:
@@ -232,7 +232,7 @@ class Fake:
                 if os.getppid() == 1:
                     break
                 time.sleep(0.02)
-            p = subprocess.run([os.path.join(self.dir, "bin", "pi-desk")] + args, capture_output=True, text=True, env=self.env(), timeout=60)
+            p = subprocess.run([os.path.join(self.dir, "bin", "deckhand")] + args, capture_output=True, text=True, env=self.env(), timeout=60)
             os.write(w, json.dumps({"orphan": args, "ppid": os.getppid(), "exit": p.returncode, "out": p.stdout}).encode())
             os._exit(0)
         os.close(w)
@@ -399,9 +399,9 @@ def main():
     fake = Fake(plugin_dir, session_id, "resume" if resume else "startup")
     fake.log({"start": sys.argv[1:], "session": session_id})
     tok_file = os.environ.get("FAKE_CLAUDE_TOKEN_FILE", "")
-    if tok_file:  # the scene checks pi-desk's own logs never hold it
+    if tok_file:  # the scene checks Deckhand's own logs never hold it
         with open(tok_file, "a") as f:
-            f.write(os.environ.get("PI_DESK_CLAUDE_TOKEN", "") + "\n")
+            f.write(os.environ.get("DECKHAND_CLAUDE_TOKEN", "") + "\n")
     start = {"source": fake.source}
     model = os.environ.get("FAKE_CLAUDE_MODEL", "claude-opus-5")
     if model != "-":

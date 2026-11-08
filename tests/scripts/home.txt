@@ -1,5 +1,5 @@
 # The agent's drawer (Home) and close_session in test mode. Run with tests/scripts/run.sh
-# (fake HOME and pi store, PI_DESK_CMD echoing pi's arguments).
+# (fake HOME and pi store, DECKHAND_CMD echoing pi's arguments).
 # Screenshots: build/shots/home/.
 wait 1000
 waitfor ARGS: 15000

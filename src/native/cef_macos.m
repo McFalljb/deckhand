@@ -1,22 +1,22 @@
-// CEF inside pi-desk (docs/BROWSER.md §1): a thin shim over CEF's C API
+// CEF inside Deckhand (docs/BROWSER.md §1): a thin shim over CEF's C API
 // (include/capi), compiled against the pinned distribution's headers so every
 // struct layout is checked by the compiler, not hand-copied. Odin calls the
-// flat pd_cef_* functions below (src/browser_cef.odin); nothing of CEF's
+// flat dh_cef_* functions below (src/browser_cef.odin); nothing of CEF's
 // types crosses into Odin.
 //
 //  - The framework is loaded lazily with dlopen on the first browser tab
-//    (pd_cef_start), so pi-desk's own launch never maps 240 MB of Chromium.
+//    (dh_cef_start), so Deckhand's own launch never maps 240 MB of Chromium.
 //  - Message loop: external pump (settings.external_message_pump). CEF's
 //    on_schedule_message_pump_work arms one main-queue GCD timer that runs
 //    cef_do_message_loop_work; after each pump the timer is re-armed at most
 //    33 ms out while a browser is visible or loading, 1 s otherwise. Never
 //    re-entrant. The frame loop also runs a pump that is overdue
-//    (pd_cef_pump_due): while every frame is drawn, each blocks in
+//    (dh_cef_pump_due): while every frame is drawn, each blocks in
 //    nextDrawable and the main queue can wait seconds for its turn.
 //  - Rendering: windowless (OSR) into the tab's frame ring, the one app tabs
 //    use (src/native/frames_macos.m, local channel; docs/BROWSER.md §1.1):
-//    each paint takes a slot pi-desk does not sample (pd_frames_local_acquire),
-//    fills it, and hands it over (pd_frames_local_frame); the frame loop shows
+//    each paint takes a slot Deckhand does not sample (dh_frames_local_acquire),
+//    fills it, and hands it over (dh_frames_local_frame); the frame loop shows
 //    it and gives the slot back only after the GPU frame that last drew it
 //    completed. So a paint never writes the texture on screen. With shared
 //    textures on, on_accelerated_paint's IOSurface is wrapped as an
@@ -25,7 +25,7 @@
 //    returns). Otherwise on_paint's BGRA buffer is copied into the slot's
 //    IOSurface whole (a slot may hold an older frame: dirty rects are not
 //    enough). A paint goes to the slot's top-left; a paint larger than the
-//    ring asks pi-desk for a bigger one (callbacks.ring): made at once, or
+//    ring asks Deckhand for a bigger one (callbacks.ring): made at once, or
 //    (during a drag) a little later by the frame loop, which then
 //    invalidates the view. A paint with no free slot is dropped and the
 //    view invalidated a frame later, so the last paint is never lost.
@@ -34,21 +34,21 @@
 //    and the protocol are added at run time and sendEvent: sets the flag.
 //
 //  - Navigation (step 2): the main frame's address, the back/forward state
-//    and loading go to pi-desk (callbacks.address, callbacks.nav);
-//    pd_cef_navigate / pd_cef_history drive it. Popups (target=_blank,
-//    window.open, ⌘-click) become new windowless browsers in pi-desk tabs of
+//    and loading go to Deckhand (callbacks.address, callbacks.nav);
+//    dh_cef_navigate / dh_cef_history drive it. Popups (target=_blank,
+//    window.open, ⌘-click) become new windowless browsers in deckhand tabs of
 //    the opener's session (callbacks.popup decides and makes the tab; a
 //    slot is reserved before CEF creates the browser and taken in
 //    on_after_created), so window.opener keeps working.
-//  - Test mode: pidesk-test://web/NAME serves tests/web/NAME (a scheme
-//    handler; no network), pd_cef_test_scheme.
+//  - Test mode: deckhand-test://web/NAME serves tests/web/NAME (a scheme
+//    handler; no network), dh_cef_test_scheme.
 //
 // SPIKE (step 1): fixed slots, no context menus, no IME, no
 // DevTools window (the protocol, in process: the last section); the key
-// translation (pd_cef_key) gets the macOS key code from the Odin side's
+// translation (dh_cef_key) gets the macOS key code from the Odin side's
 // table rather than the NSEvent.
 //
-// Built by build.sh into build/pd_cef.a unless PI_DESK_NO_CEF=1.
+// Built by build.sh into build/dh_cef.a unless DECKHAND_NO_CEF=1.
 
 #import <Cocoa/Cocoa.h>
 #import <Metal/Metal.h>
@@ -85,24 +85,24 @@
 #include "include/internal/cef_string.h"
 
 // the frame ring's in-process producer (src/native/frames_macos.m)
-int pd_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* slot, void** texture, IOSurfaceRef* surface);
-void pd_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot);
-int pd_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq, int w, int h);
+int dh_frames_local_acquire(uint64_t tab_id, int w, int h, uint32_t* gen, int* slot, void** texture, IOSurfaceRef* surface);
+void dh_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot);
+int dh_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq, int w, int h);
 
 typedef struct {
     void (*painted)(int id, int width, int height, int accelerated, void* written); // a new frame is in written (an id<MTLTexture>, a ring slot)
-    int (*ring)(uint64_t tab_id, int width, int height); // no ring fits a w x h px paint: make one now (1 = made; 0: later, with pd_cef_invalidate)
+    int (*ring)(uint64_t tab_id, int width, int height); // no ring fits a w x h px paint: make one now (1 = made; 0: later, with dh_cef_invalidate)
     void (*title)(int id, const char* utf8);
     void (*loading)(int id, int loading);
     void (*closed)(int id);
     void (*log)(const char* utf8);
     // step 2 (navigation): the main frame's URL; loading and history; a popup
     // the page asks for (slot: the browser id it will have; 0 = refused, else
-    // the pi-desk tab made for it)
+    // the Deckhand tab made for it)
     void (*address)(int id, const char* utf8);
     void (*nav)(int id, int loading, int can_back, int can_forward);
     uint64_t (*popup)(int opener, int slot, const char* url, int user_gesture, int background);
-} pd_cef_callbacks;
+} dh_cef_callbacks;
 
 // ---- the framework's entry points (dlsym'd; prototypes from the headers) ----
 
@@ -124,7 +124,7 @@ CEF_FNS(DECL)
 static void* framework;
 static int started; // 1 running, -1 failed to start (never retried)
 static int shutting_down;
-static pd_cef_callbacks cb;
+static dh_cef_callbacks cb;
 static id<MTLDevice> device;
 static id<MTLCommandQueue> queue;
 static int shared_textures;
@@ -154,7 +154,7 @@ typedef struct {
     int pending; // a popup's slot, reserved until on_after_created brings its browser (2: its tab closed meanwhile)
     int opener_cef, popup_id; // a reservation's opener (CEF browser id) and on_before_popup's popup_id
     unsigned long long res_seq; // reservation order
-    uint64_t tab_id; // its frame ring's channel (pi-desk's tab id; 0 once closed)
+    uint64_t tab_id; // its frame ring's channel (Deckhand's tab id; 0 once closed)
     uint64_t seq; // frames handed over
     uint64_t dropped; // paints with no slot to go into
     int retry; // an invalidate is due (a paint was dropped)
@@ -221,7 +221,7 @@ static int any_active(void) {
 }
 static uint64_t pumps;
 
-static double due_at; // when the armed pump is due (0: none): pd_cef_pump_due
+static double due_at; // when the armed pump is due (0: none): dh_cef_pump_due
 static void arm(int64_t delay_ms) {
     if (delay_ms < 0) delay_ms = 0;
     due_at = now_s() + delay_ms / 1000.0;
@@ -310,12 +310,12 @@ static void disable_features(cef_command_line_t* cl, const char* features) {
     add_switch_value(cl, "disable-features", merged);
 }
 
-static int offline; // pd_cef_start: no network at all (test mode)
+static int offline; // dh_cef_start: no network at all (test mode)
 
 // Chromium features that phone home, off (network policy, BROWSER.md).
 // Unknown names are ignored by Chromium: tests/scripts/browser-netpolicy.sh
 // checks what is still tried.
-#define PD_CEF_DISABLED_FEATURES                                                          \
+#define DH_CEF_DISABLED_FEATURES                                                          \
     "NetworkTimeServiceQuerying,"                    /* clients2.google.com/time */      \
     "OptimizationHints,OptimizationHintsFetching,OptimizationGuideModelDownloading,"     \
     "OptimizationTargetPrediction,OptimizationGuideOnDeviceModel,"                       \
@@ -355,16 +355,16 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
     // Web notifications stay (the user allows the prompt); web push is off
     // (PushMessaging below), since it needs GCM.
     // no warm spare renderer kept for the next navigation (~70-85 MB RSS);
-    // PI_DESK_CEF_SPARE=1 keeps Chromium's default (the spike measured both)
-#ifndef PD_RELEASE // test and development knobs: not in a release build (src/test_hooks.odin)
-    const char* spare = getenv("PI_DESK_CEF_SPARE");
+    // DECKHAND_CEF_SPARE=1 keeps Chromium's default (the spike measured both)
+#ifndef DH_RELEASE // test and development knobs: not in a release build (src/test_hooks.odin)
+    const char* spare = getenv("DECKHAND_CEF_SPARE");
     if (!spare || strcmp(spare, "1") != 0)
 #endif
         disable_features(cl, "SpareRendererForSitePerProcess");
-    disable_features(cl, PD_CEF_DISABLED_FEATURES);
-#ifndef PD_RELEASE
+    disable_features(cl, DH_CEF_DISABLED_FEATURES);
+#ifndef DH_RELEASE
     // tests/scripts/browser-netpolicy.sh: Chromium's own log of what it tries to reach
-    const char* netlog = getenv("PI_DESK_CEF_NETLOG");
+    const char* netlog = getenv("DECKHAND_CEF_NETLOG");
     if (netlog && netlog[0]) add_switch_value(cl, "log-net-log", netlog);
 #endif
     if (offline) {
@@ -378,7 +378,7 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
         add_switch(cl, "disable-quic");
     } else {
         // RLZ's ping host (also held off by rlz_ping_delay, browser.odin):
-        // belt and braces: RLZ's store is pi-desk's own (framework_search_path),
+        // belt and braces: RLZ's store is Deckhand's own (framework_search_path),
         // and a ping could carry whatever it holds
         add_switch_value(cl, "host-resolver-rules", "MAP clients1.google.com ~NOTFOUND");
     }
@@ -407,7 +407,7 @@ static int CEF_CALLBACK get_screen_info(cef_render_handler_t* self, cef_browser_
     return 1;
 }
 
-// A paint went nowhere (every slot pi-desk's, or its copy failed): ask for it again a frame
+// A paint went nowhere (every slot Deckhand's, or its copy failed): ask for it again a frame
 // later, once (Chromium paints only what changed: a dropped last paint would
 // leave the old frame on screen).
 static void dropped(int i) {
@@ -430,11 +430,11 @@ static int acquire(int i, int w, int h, uint32_t* gen, int* slot, id<MTLTexture>
     Slot* s = &slots[i];
     if (!s->tab_id) return 0; // closing
     void* t = NULL;
-    int r = pd_frames_local_acquire(s->tab_id, w, h, gen, slot, &t, surf);
-    if (r == 0 && cb.ring && cb.ring(s->tab_id, w, h)) r = pd_frames_local_acquire(s->tab_id, w, h, gen, slot, &t, surf);
+    int r = dh_frames_local_acquire(s->tab_id, w, h, gen, slot, &t, surf);
+    if (r == 0 && cb.ring && cb.ring(s->tab_id, w, h)) r = dh_frames_local_acquire(s->tab_id, w, h, gen, slot, &t, surf);
     if (r != 1) {
-        if (r == -1) dropped(i); // every slot pi-desk's: free again within a frame or two
-        else if (r == 0) s->dropped++; // no ring fits yet: pi-desk makes one and invalidates (pd_cef_invalidate)
+        if (r == -1) dropped(i); // every slot Deckhand's: free again within a frame or two
+        else if (r == 0) s->dropped++; // no ring fits yet: Deckhand makes one and invalidates (dh_cef_invalidate)
         return 0;
     }
     *tex = (__bridge id<MTLTexture>)t;
@@ -445,7 +445,7 @@ static int acquire(int i, int w, int h, uint32_t* gen, int* slot, id<MTLTexture>
 // paint is asked for again (its slot may have held the newest frame, now
 // dropped), up to 3 times in a row: a failure that stays would spin.
 static void copy_failed(int i, uint32_t gen, int k) {
-    pd_frames_local_unacquire(slots[i].tab_id, gen, k);
+    dh_frames_local_unacquire(slots[i].tab_id, gen, k);
     if (slots[i].fails++ < 3) dropped(i);
     else slots[i].dropped++;
 }
@@ -480,7 +480,7 @@ static void CEF_CALLBACK on_paint(cef_render_handler_t* self, cef_browser_t* b, 
     size_t bpr = IOSurfaceGetBytesPerRow(surf);
     for (int y = 0; y < h; y++) memcpy(base + (size_t)y * bpr, (const uint8_t*)buffer + (size_t)y * w * 4, (size_t)w * 4);
     IOSurfaceUnlock(surf, 0, NULL);
-    pd_frames_local_frame(slots[i].tab_id, gen, k, ++slots[i].seq, w, h);
+    dh_frames_local_frame(slots[i].tab_id, gen, k, ++slots[i].seq, w, h);
     painted(i, w, h, 0, t);
 }
 
@@ -527,7 +527,7 @@ static void CEF_CALLBACK on_accelerated_paint(cef_render_handler_t* self, cef_br
         copy_failed(i, gen, k);
         return;
     }
-    pd_frames_local_frame(slots[i].tab_id, gen, k, ++slots[i].seq, w, h);
+    dh_frames_local_frame(slots[i].tab_id, gen, k, ++slots[i].seq, w, h);
     painted(i, w, h, 1, dst);
 }
 
@@ -555,7 +555,7 @@ static void CEF_CALLBACK on_before_close(cef_life_span_handler_t* self, cef_brow
     if (!i) return;
     devtools_forget(i);
     RELEASE(slots[i].browser);
-    slots[i] = (Slot){0}; // free again (closing cleared): pd_cef_open may reuse it
+    slots[i] = (Slot){0}; // free again (closing cleared): dh_cef_open may reuse it
     if (cb.closed) cb.closed(i);
 }
 
@@ -600,7 +600,7 @@ static void CEF_CALLBACK on_address(cef_display_handler_t* self, cef_browser_t* 
 
 // ---- popups: target=_blank, window.open, ⌘-click (docs/BROWSER.md §2.5) ----
 //
-// pi-desk decides (callbacks.popup: refused without a user gesture) and makes
+// Deckhand decides (callbacks.popup: refused without a user gesture) and makes
 // a tab for it in the opener's session; the new browser is windowless like
 // every other and gets a reserved slot, taken in on_after_created. CEF
 // creates it with the opener's client, so window.opener is kept.
@@ -622,7 +622,7 @@ static int CEF_CALLBACK on_before_popup(cef_life_span_handler_t* self, cef_brows
     if (!opener || !cb.popup || shutting_down) return 1;
     int i = free_slot();
     char* url = utf8_of(target_url);
-    // no slot left: pi-desk still hears of it (refused), the page gets nothing
+    // no slot left: Deckhand still hears of it (refused), the page gets nothing
     uint64_t tab = cb.popup(opener, i, url, user_gesture, disposition == CEF_WOD_NEW_BACKGROUND_TAB);
     free(url);
     if (!i || !tab) return 1;
@@ -647,10 +647,10 @@ static int CEF_CALLBACK on_before_popup(cef_life_span_handler_t* self, cef_brows
 }
 
 // The reservations, for the matcher (cef_popup_slots.h).
-static void reservations(pd_popup_res r[MAX_BROWSERS + 1]) {
-    memset(r, 0, sizeof(pd_popup_res) * (MAX_BROWSERS + 1));
+static void reservations(dh_popup_res r[MAX_BROWSERS + 1]) {
+    memset(r, 0, sizeof(dh_popup_res) * (MAX_BROWSERS + 1));
     for (int i = 1; i <= MAX_BROWSERS; i++)
-        if (slots[i].pending) r[i] = (pd_popup_res){slots[i].pending, slots[i].opener_cef, slots[i].popup_id, slots[i].res_seq};
+        if (slots[i].pending) r[i] = (dh_popup_res){slots[i].pending, slots[i].opener_cef, slots[i].popup_id, slots[i].res_seq};
 }
 
 static void close_now(cef_browser_t* b) {
@@ -671,7 +671,7 @@ static void CEF_CALLBACK on_after_created(cef_life_span_handler_t* self, cef_bro
             return;
         }
     if (creating || !b->is_popup(b)) {
-        RELEASE(b); // pd_cef_open's: it keeps the one create_browser_sync returns
+        RELEASE(b); // dh_cef_open's: it keeps the one create_browser_sync returns
         return;
     }
     int opener = 0;
@@ -680,18 +680,18 @@ static void CEF_CALLBACK on_after_created(cef_life_span_handler_t* self, cef_bro
         opener = oh->get_opener_identifier(oh);
         RELEASE(oh);
     }
-    pd_popup_res r[MAX_BROWSERS + 1];
+    dh_popup_res r[MAX_BROWSERS + 1];
     reservations(r);
-    int k = shutting_down ? 0 : pd_popup_take(r, MAX_BROWSERS, opener);
+    int k = shutting_down ? 0 : dh_popup_take(r, MAX_BROWSERS, opener);
     if (!k) {
-        // nothing reserved it (pi-desk is shutting down, or an abort released
+        // nothing reserved it (Deckhand is shutting down, or an abort released
         // its reservation: cef_popup_slots.h): close it again
         close_now(b);
         RELEASE(b);
         return;
     }
     Slot* s = &slots[k];
-    int cancelled = s->pending == 2; // its tab closed meanwhile (pd_cef_close)
+    int cancelled = s->pending == 2; // its tab closed meanwhile (dh_cef_close)
     s->pending = 0;
     s->browser = b; // our reference (released in on_before_close)
     s->cef_id = id;
@@ -715,16 +715,16 @@ static void CEF_CALLBACK on_after_created(cef_life_span_handler_t* self, cef_bro
 static void CEF_CALLBACK on_popup_aborted(cef_life_span_handler_t* self, cef_browser_t* b, int popup_id) {
     int opener = b->get_identifier(b);
     RELEASE(b);
-    pd_popup_res r[MAX_BROWSERS + 1];
+    dh_popup_res r[MAX_BROWSERS + 1];
     reservations(r);
-    int k = pd_popup_find(r, MAX_BROWSERS, opener, popup_id);
+    int k = dh_popup_find(r, MAX_BROWSERS, opener, popup_id);
     if (!k) return;
     int cancelled = slots[k].pending == 2;
     slots[k] = (Slot){0};
-    if (!cancelled && cb.closed) cb.closed(k); // pi-desk's tab says the page closed
+    if (!cancelled && cb.closed) cb.closed(k); // Deckhand's tab says the page closed
 }
 
-// ---- pidesk-test://web/NAME: tests/web/NAME in test mode (no network) ----
+// ---- deckhand-test://web/NAME: tests/web/NAME in test mode (no network) ----
 
 static char test_root[PATH_MAX]; // "" = no handler (real use)
 
@@ -758,7 +758,7 @@ static int CEF_CALLBACK tr_open(cef_resource_handler_t* self, cef_request_t* req
     if (callback) RELEASE(callback);
     char* url = u ? utf8_of(u) : strdup("");
     if (u) p_cef_string_userfree_utf16_free(u);
-    const char* prefix = "pidesk-test://web/";
+    const char* prefix = "deckhand-test://web/";
     char path[PATH_MAX];
     if (strncmp(url, prefix, strlen(prefix)) == 0) {
         char name[PATH_MAX];
@@ -842,9 +842,9 @@ static cef_scheme_handler_factory_t test_factory;
 
 // Every process registers the scheme (the helper too, cef_helper.c): standard,
 // so relative links resolve; secure, so fixtures may ask what needs a secure
-// context (notifications, location: browser-polish.txt). Only test mode serves it (pd_cef_test_scheme).
+// context (notifications, location: browser-polish.txt). Only test mode serves it (dh_cef_test_scheme).
 static void CEF_CALLBACK on_register_schemes(cef_app_t* self, cef_scheme_registrar_t* reg) {
-    cef_string_t n = str16("pidesk-test");
+    cef_string_t n = str16("deckhand-test");
     reg->add_custom_scheme(reg, &n, CEF_SCHEME_OPTION_STANDARD | CEF_SCHEME_OPTION_SECURE | CEF_SCHEME_OPTION_CORS_ENABLED);
     p_cef_string_utf16_clear(&n); // the registrar is scoped (not ref-counted): never released
 }
@@ -889,10 +889,10 @@ static void nsapp_conform(void) {
 //
 // Chromium finds the user's Library with NSSearchPathForDirectoriesInDomains
 // (base::apple::GetUserLibraryPath) and keeps things there that Google Chrome
-// shares, RLZ's ~/Library/Application Support/Google/RLZ above all. pi-desk's
+// shares, RLZ's ~/Library/Application Support/Google/RLZ above all. Deckhand's
 // Chromium must never touch them (another browser's files are not ours): the framework's
 // calls (its GOT entry, nothing else in the process) get a Library inside
-// pi-desk's data dir instead. pi-desk's own lookups are unchanged.
+// Deckhand's data dir instead. Deckhand's own lookups are unchanged.
 static char lib_home[PATH_MAX]; // <data dir>/browser/home
 
 static NSArray<NSString*>* framework_search_path(NSSearchPathDirectory dir, NSSearchPathDomainMask mask, BOOL expand) {
@@ -909,7 +909,7 @@ static NSArray<NSString*>* framework_search_path(NSSearchPathDirectory dir, NSSe
 }
 
 // Rewrites the framework's GOT entry for NSSearchPathForDirectoriesInDomains.
-// fw: the path pd_cef_start passed to dlopen; only that image is changed.
+// fw: the path dh_cef_start passed to dlopen; only that image is changed.
 // Returns the number of entries changed (0: refuse to start CEF).
 static int redirect_framework_library(const char* fw, const char* home) {
     if (strlen(home) >= sizeof(lib_home)) return 0;
@@ -957,7 +957,7 @@ static int redirect_framework_library(const char* fw, const char* home) {
 
 // Starts CEF once (later calls return the first result). root_cache: the
 // profile directory; log_file: CEF's log ("" = none). 1 = running.
-int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file, int shared, int no_network, const pd_cef_callbacks* callbacks) {
+int dh_cef_start(void* mtl_device, const char* root_cache, const char* log_file, int shared, int no_network, const dh_cef_callbacks* callbacks) {
     if (started) return started == 1;
     started = -1;
     if (callbacks) cb = *callbacks;
@@ -1065,7 +1065,7 @@ int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file,
         s.log_severity = LOGSEVERITY_WARNING;
     } else
         s.log_severity = LOGSEVERITY_DISABLE;
-    // NSApp's args are pi-desk's own: CEF must not parse them as switches
+    // NSApp's args are Deckhand's own: CEF must not parse them as switches
     s.command_line_args_disabled = 1;
     s.background_color = 0xFFFFFFFF;
     char* argv0 = (char*)NSProcessInfo.processInfo.arguments.firstObject.UTF8String;
@@ -1088,16 +1088,16 @@ int pd_cef_start(void* mtl_device, const char* root_cache, const char* log_file,
 // nextDrawable] until a drawable comes back, and the main queue, where the timer fires, gets no
 // turn for seconds: Chromium then does nothing (a page behind the view never loads, a woken tab
 // never paints). Measured: pumps due in 33 ms ran 1-5 s late.
-void pd_cef_pump_due(void) {
+void dh_cef_pump_due(void) {
     if (due_at > 0 && now_s() >= due_at + 0.005) pump();
 }
 
-int pd_cef_running(void) { return started == 1 && !shutting_down; }
+int dh_cef_running(void) { return started == 1 && !shutting_down; }
 
 // A windowless browser for url, w x h logical px at scale. Returns its id
 // (1..8) or 0.
-int pd_cef_open(const char* url, int w, int h, float scale, uint64_t tab_id) {
-    if (!pd_cef_running()) return 0;
+int dh_cef_open(const char* url, int w, int h, float scale, uint64_t tab_id) {
+    if (!dh_cef_running()) return 0;
     int i = free_slot();
     if (!i) return 0;
     Slot* s = &slots[i];
@@ -1132,7 +1132,7 @@ int pd_cef_open(const char* url, int w, int h, float scale, uint64_t tab_id) {
     return i;
 }
 
-void pd_cef_resize(int i, int w, int h, float scale) {
+void dh_cef_resize(int i, int w, int h, float scale) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     int scale_changed = scale != slots[i].scale;
@@ -1146,7 +1146,7 @@ void pd_cef_resize(int i, int w, int h, float scale) {
     RELEASE(hst);
 }
 
-void pd_cef_set_hidden(int i, int hidden) {
+void dh_cef_set_hidden(int i, int hidden) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     if (slots[i].hidden != hidden) {
@@ -1160,7 +1160,7 @@ void pd_cef_set_hidden(int i, int hidden) {
 }
 
 // Paint the whole view again (a ring that fits it is ready).
-void pd_cef_invalidate(int i) {
+void dh_cef_invalidate(int i) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     hst->invalidate(hst, PET_VIEW);
@@ -1168,7 +1168,7 @@ void pd_cef_invalidate(int i) {
     arm(0);
 }
 
-void pd_cef_focus(int i, int focused) {
+void dh_cef_focus(int i, int focused) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     hst->set_focus(hst, focused);
@@ -1176,7 +1176,7 @@ void pd_cef_focus(int i, int focused) {
 }
 
 // Mouse in view coordinates (logical px). button: 0 left, 1 middle, 2 right.
-void pd_cef_mouse_move(int i, int x, int y, int mods, int leave) {
+void dh_cef_mouse_move(int i, int x, int y, int mods, int leave) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     cef_mouse_event_t e = {.x = x, .y = y, .modifiers = (uint32_t)mods};
@@ -1186,7 +1186,7 @@ void pd_cef_mouse_move(int i, int x, int y, int mods, int leave) {
     arm(0);
 }
 
-void pd_cef_mouse_click(int i, int x, int y, int mods, int button, int up, int count) {
+void dh_cef_mouse_click(int i, int x, int y, int mods, int button, int up, int count) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     cef_mouse_event_t e = {.x = x, .y = y, .modifiers = (uint32_t)mods};
@@ -1196,7 +1196,7 @@ void pd_cef_mouse_click(int i, int x, int y, int mods, int button, int up, int c
     arm(0);
 }
 
-void pd_cef_wheel(int i, int x, int y, int mods, int dx, int dy) {
+void dh_cef_wheel(int i, int x, int y, int mods, int dx, int dy) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     cef_mouse_event_t e = {.x = x, .y = y, .modifiers = (uint32_t)mods};
@@ -1208,7 +1208,7 @@ void pd_cef_wheel(int i, int x, int y, int mods, int dx, int dy) {
 
 // type: 0 RAWKEYDOWN, 2 KEYUP, 3 CHAR (cef_key_event_type_t). native: the
 // macOS virtual key code; ch / unmod: UTF-16 characters (0 = none).
-void pd_cef_key(int i, int type, int native, int mods, unsigned short ch, unsigned short unmod) {
+void dh_cef_key(int i, int type, int native, int mods, unsigned short ch, unsigned short unmod) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     cef_key_event_t e;
@@ -1226,7 +1226,7 @@ void pd_cef_key(int i, int type, int native, int mods, unsigned short ch, unsign
 }
 
 // The main frame loads url (the URL field, browser_navigate).
-void pd_cef_navigate(int i, const char* url) {
+void dh_cef_navigate(int i, const char* url) {
     if (i < 1 || i > MAX_BROWSERS || !slots[i].browser || slots[i].closing) return;
     cef_frame_t* f = slots[i].browser->get_main_frame(slots[i].browser);
     if (!f) return;
@@ -1239,7 +1239,7 @@ void pd_cef_navigate(int i, const char* url) {
 }
 
 // what: 0 back, 1 forward, 2 reload, 3 stop.
-void pd_cef_history(int i, int what) {
+void dh_cef_history(int i, int what) {
     if (i < 1 || i > MAX_BROWSERS || !slots[i].browser || slots[i].closing) return;
     cef_browser_t* b = slots[i].browser;
     switch (what) {
@@ -1252,24 +1252,24 @@ void pd_cef_history(int i, int what) {
     arm(0);
 }
 
-// Test mode: pidesk-test://web/NAME serves root/NAME (tests/web). 1 = registered.
-int pd_cef_test_scheme(const char* root) {
+// Test mode: deckhand-test://web/NAME serves root/NAME (tests/web). 1 = registered.
+int dh_cef_test_scheme(const char* root) {
     if (started != 1 || !root || strlen(root) >= sizeof test_root) return 0;
     snprintf(test_root, sizeof test_root, "%s", root);
     INIT_BASE(test_factory);
     test_factory.create = test_factory_create;
-    cef_string_t n = str16("pidesk-test"), d = str16("");
+    cef_string_t n = str16("deckhand-test"), d = str16("");
     int ok = p_cef_register_scheme_handler_factory(&n, &d, &test_factory);
     p_cef_string_utf16_clear(&n);
     p_cef_string_utf16_clear(&d);
     return ok;
 }
 
-void pd_cef_exec_js(int i, const char* js) {
+void dh_cef_exec_js(int i, const char* js) {
     if (i < 1 || i > MAX_BROWSERS || !slots[i].browser || slots[i].closing) return;
     cef_frame_t* f = slots[i].browser->get_main_frame(slots[i].browser);
     if (!f) return;
-    cef_string_t code = str16(js), url = str16("pidesk://test");
+    cef_string_t code = str16(js), url = str16("deckhand://test");
     f->execute_java_script(f, &code, &url, 0);
     p_cef_string_utf16_clear(&code);
     p_cef_string_utf16_clear(&url);
@@ -1279,7 +1279,7 @@ void pd_cef_exec_js(int i, const char* js) {
 
 // Counters for the spike's report: paints by path, first paint after create
 // (ms), pumps, paints dropped (no ring slot free).
-void pd_cef_stats(int i, uint64_t* gpu, uint64_t* cpu, double* first_paint_ms, uint64_t* pump_count, uint64_t* dropped_n) {
+void dh_cef_stats(int i, uint64_t* gpu, uint64_t* cpu, double* first_paint_ms, uint64_t* pump_count, uint64_t* dropped_n) {
     *pump_count = pumps;
     if (i < 1 || i > MAX_BROWSERS) return;
     *gpu = slots[i].paints_gpu;
@@ -1288,18 +1288,18 @@ void pd_cef_stats(int i, uint64_t* gpu, uint64_t* cpu, double* first_paint_ms, u
     *first_paint_ms = slots[i].first_paint_at > 0 ? (slots[i].first_paint_at - slots[i].created_at) * 1000 : -1;
 }
 
-// Slots no browser holds or waits for (pi-desk's page planner, browser.odin);
+// Slots no browser holds or waits for (Deckhand's page planner, browser.odin);
 // closing: also those whose browser is closing (free in a moment).
-int pd_cef_free_slots(int closing) {
+int dh_cef_free_slots(int closing) {
     int n = 0;
     for (int i = 1; i <= MAX_BROWSERS; i++) n += !slots[i].pending && (slots[i].browser ? closing && slots[i].closing : 1);
     return n;
 }
 
 // 1: the browser exists (a popup's arrives a little after its tab: on_after_created).
-int pd_cef_ready(int i) { return i >= 1 && i <= MAX_BROWSERS && slots[i].browser && !slots[i].closing; }
+int dh_cef_ready(int i) { return i >= 1 && i <= MAX_BROWSERS && slots[i].browser && !slots[i].closing; }
 
-void pd_cef_close(int i) {
+void dh_cef_close(int i) {
     if (i >= 1 && i <= MAX_BROWSERS && slots[i].pending) {
         slots[i].pending = 2; // closed as soon as it arrives
         slots[i].tab_id = 0;
@@ -1317,7 +1317,7 @@ void pd_cef_close(int i) {
 
 // On quit: close every browser, pump until each is gone (at most 2 s), then
 // cef_shutdown on the main thread.
-void pd_cef_shutdown(void) {
+void dh_cef_shutdown(void) {
     if (started != 1 || shutting_down) return;
     double t0 = now_s();
     for (int i = 1; i <= MAX_BROWSERS; i++) {
@@ -1348,13 +1348,13 @@ void pd_cef_shutdown(void) {
 
 // ---- DevTools protocol, in process (docs/BROWSER.md §3.3: annotation) ----
 //
-// pi-desk talks CDP to a browser through send_dev_tools_message and one
+// Deckhand talks CDP to a browser through send_dev_tools_message and one
 // observer per browser (registered on its first message): no remote
-// debugging port. Results and events go to pi-desk's callback on the main
+// debugging port. Results and events go to Deckhand's callback on the main
 // thread (the UI thread: the pump runs there), as JSON. src/browser_annotate.odin.
 
-typedef void (*pd_cef_devtools_fn)(int id, int msg_id, int ok, const char* method, const char* json, size_t len);
-static pd_cef_devtools_fn devtools_cb;
+typedef void (*dh_cef_devtools_fn)(int id, int msg_id, int ok, const char* method, const char* json, size_t len);
+static dh_cef_devtools_fn devtools_cb;
 static cef_dev_tools_message_observer_t devtools_obs;
 static cef_registration_t* devtools_reg[MAX_BROWSERS + 1];
 static int devtools_reg_cef[MAX_BROWSERS + 1]; // the CEF browser its registration observes
@@ -1390,11 +1390,11 @@ static void devtools_forget(int i) {
     devtools_reg_cef[i] = 0;
 }
 
-void pd_cef_devtools_callback(pd_cef_devtools_fn fn) { devtools_cb = fn; }
+void dh_cef_devtools_callback(dh_cef_devtools_fn fn) { devtools_cb = fn; }
 
 // Sends one CDP message ({"id":N,"method":…,"params":…}, UTF-8 JSON) to
 // browser i. 1 = submitted (a result comes back through the callback).
-int pd_cef_devtools_send(int i, const char* json, size_t len) {
+int dh_cef_devtools_send(int i, const char* json, size_t len) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return 0;
     if (!devtools_obs.base.size) {

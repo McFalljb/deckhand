@@ -1,6 +1,6 @@
 package main
 
-// Test mode's backing scale (PI_DESK_SCALE, docs/DEVELOPING.md "Test mode"): unset is 1 on every
+// Test mode's backing scale (DECKHAND_SCALE, docs/DEVELOPING.md "Test mode"): unset is 1 on every
 // Mac, so a scene's pixel positions do not depend on the display; 1 to 4 otherwise.
 
 import "core:testing"

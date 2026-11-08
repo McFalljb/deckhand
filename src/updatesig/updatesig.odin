@@ -1,16 +1,16 @@
 package updatesig
 
-// pi-desk's release signatures (docs/DEVELOPING.md, "Update signing"): shared by the
+// Deckhand's release signatures (docs/DEVELOPING.md, "Update signing"): shared by the
 // app's updater (src/update*.odin) and the release tool (tools/update-sign).
 //
-// A release ships pi-desk-<v>-macos-arm64.zip and pi-desk-<v>-macos-arm64.zip.sig. The
+// A release ships deckhand-<v>-macos-arm64.zip and deckhand-<v>-macos-arm64.zip.sig. The
 // .sig (SIG_FILE_HEAD, then "cdhash HEX", then "signature BASE64") carries a 64-byte
 // Ed25519 signature over the MANIFEST below, which names the version, the file name, its
 // size, its SHA-256 and the app's CDHash (the main executable's code directory hash, as
 // `codesign -dvvv` prints it: it covers Info.plist and the resource seal, so every file
 // of the bundle). Signing the manifest instead of the raw zip binds the version (an old
 // signed zip cannot be offered as a newer release) and the unpacked bundle (its CDHash is
-// checked again right before it replaces pi-desk); the verifier never holds the ~340 MB
+// checked again right before it replaces Deckhand); the verifier never holds the ~340 MB
 // zip in memory; the zip's bytes are still covered through SHA-256.
 //
 // Keys: the private key is the 32-byte Ed25519 seed, base64 (44 characters), in a 0600
@@ -26,7 +26,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
-// the formats' names, kept from pi-desk (the rename to Deckhand changed no format)
+// the formats' names, kept from Deckhand (the rename to Deckhand changed no format)
 MANIFEST_HEAD :: "pi-desk update v2"
 SIG_FILE_HEAD :: "pi-desk-update-sig v2"
 SIG_SIZE :: ed25519.SIGNATURE_SIZE // 64

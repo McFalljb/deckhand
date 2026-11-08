@@ -1,5 +1,5 @@
 # A fake pi-integration bridge that publishes the largest panel set a bridge may send
-# (16 panels x 200 rows x 512-byte rows, far past pi-desk's caps) and stays
+# (16 panels x 200 rows x 512-byte rows, far past Deckhand's caps) and stays
 # connected with pi working, so the status dot pulses. For tests/scripts/panels-cpu.txt.
 import json, os, socket, sys, time
 s = socket.socket(socket.AF_UNIX)

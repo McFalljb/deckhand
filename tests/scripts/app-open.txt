@@ -1,6 +1,6 @@
 # A session's own pi opens its project's declared app (tests/scripts/app-open.sh): the fake bridge
 # (fake-bridge-apps.py) in the session's pi tab, the fake app (build/fake-app) declared in each
-# project's .pi-desk/apps.json. Another project's session has an app tab the user opened.
+# project's .deckhand/apps.json. Another project's session has an app tab the user opened.
 wait 1000
 # the other session first, with the user's app tab, in front
 command {"type":"add_project","cwd":"$homedir/other"}
@@ -16,7 +16,7 @@ command {"type":"new_chat","project_id":$last}
 assert_result ok true
 assert_state open_sessions.# 2
 waitfor fake apps bridge 10000
-# 1. open: its own declared app, at once (pi-desk asks nothing), behind the view; refused
+# 1. open: its own declared app, at once (Deckhand asks nothing), behind the view; refused
 # elsewhere, by argv, by an unknown name
 type open
 key enter

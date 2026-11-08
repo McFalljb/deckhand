@@ -1,5 +1,5 @@
 // Hand-written Odin bindings for the subset of libghostty-vt (Ghostty v1.4.0,
-// include/ghostty/vt/*.h) that pi-desk uses. The C ABI is not stable yet:
+// include/ghostty/vt/*.h) that Deckhand uses. The C ABI is not stable yet:
 // when bumping the Ghostty tag, re-check every struct here against the
 // headers. `./build.sh test` compares struct sizes with the C compiler's.
 package ghostty

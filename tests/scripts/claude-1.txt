@@ -1,5 +1,5 @@
 # Claude Code tabs, run 1 (tests/scripts/claude.sh; docs/CLAUDE.md): a fake claude
-# (fake-claude.py) that runs the bundled plugin's hooks and its `pi-desk` CLI as Claude Code would.
+# (fake-claude.py) that runs the bundled plugin's hooks and its `deckhand` CLI as Claude Code would.
 # A browser page and the fake app beside it; the "+" menu's New Claude tab; its session id from the
 # SessionStart hook; the CLI against both tabs; the token refused outside the tab's processes; an
 # agent's text held while the user types; comments with the next message; closed, its row in the
@@ -73,7 +73,7 @@ type !cli app open fake
 key enter
 waitfor CLI app open fake -> exit 0 15000
 waitstate 15000 open_sessions.0.tabs.3.turn idle
-# at once: pi-desk asks nothing (Claude's own permission mode is the gate)
+# at once: Deckhand asks nothing (Claude's own permission mode is the gate)
 assert_state pending_confirmations.# 0
 assert_state open_sessions.0.tabs.# 5
 assert_state open_sessions.0.tabs.4.kind app
@@ -203,7 +203,7 @@ clickid cm_send
 waitfor PROMPT: Here are my comments. 15000
 waitstate 5000 open_sessions.0.comments.# 0
 waitstate 15000 open_sessions.0.tabs.3.turn idle
-# 6. closed: a row of the project's list (pi-desk's own history, marked Claude); a click resumes
+# 6. closed: a row of the project's list (Deckhand's own history, marked Claude); a click resumes
 # it in a Claude-only session (no pi tab) with --resume
 ui_command {"type":"close_tab","tab_id":$tab}
 assert_result ok true

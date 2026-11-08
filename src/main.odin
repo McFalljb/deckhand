@@ -1,6 +1,6 @@
 package main
 
-// pi-desk spike: a native window (sokol_app + sokol_gfx/gl) with a Clay
+// Deckhand spike: a native window (sokol_app + sokol_gfx/gl) with a Clay
 // sidebar of pi projects and sessions, and a terminal pane running pi's
 // fullscreen TUI on our own PTY + libghostty-vt.
 //
@@ -26,7 +26,7 @@ OUTPUT_FRAME :: 15 * time.Millisecond
 
 App :: struct {
 	dpi:            f32,
-	pending_start:  bool, // `pi-desk DIR`: open a new chat once the pane has a size
+	pending_start:  bool, // `deckhand DIR`: open a new chat once the pane has a size
 	launch_project: u64, // its project (launch_project)
 	pane:           [4]f32, // the focused pane's content rect x, y, w, h (framebuffer px)
 	centre:         [4]f32, // the panes' area: every pane and divider of the session on screen (framebuffer px)
@@ -101,7 +101,7 @@ init :: proc "c" () {
 		os.exit(1)
 	}
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
-	// anything is written there; test mode looks for pi-desk only in a runtime dir of its own
+	// anything is written there; test mode looks for Deckhand only in a runtime dir of its own
 	check_old := !autotest.active || hook_env(.Runtime_Dir) != ""
 	if why := instance_guard(home_root, check_old); why != "" {
 		if autotest.active {
@@ -131,12 +131,12 @@ init :: proc "c" () {
 	if socket_start() && token_kind != "" {
 		when TEST_HOOKS {
 			kind := token_kind == "control" ? Caller_Kind.Control : Caller_Kind.Script
-			fmt.printf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), socket_mint_token({kind = kind}, context.temp_allocator))
+			fmt.printf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", socket_path(), socket_mint_token({kind = kind}, context.temp_allocator))
 			os.flush(os.stdout)
 		}
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
-	// PI_DESK_DATA_DIR, so scripts never read or write the user's
+	// DECKHAND_DATA_DIR, so scripts never read or write the user's
 	state.settings.keep_sessions = keep_sessions_default() // until the saved workspace says otherwise
 	if !autotest.active || hook_env(.Data_Dir) != "" {
 		persist_init(data_dir(context.temp_allocator))
@@ -156,7 +156,7 @@ init :: proc "c" () {
 	// (not while setup is due: Done writes it where the user puts chats)
 	if (!autotest.active || hook_env(.Data_Dir) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
 	if setup_due() && (!autotest.active || hook_env(.First_Run) == "1") do run_command(Setup_Sheet{open = true})
-	// `pi-desk DIR` adds/selects DIR and starts a new chat there.
+	// `deckhand DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
 		r := run_command(Add_Project{dir})
 		// only in DIR's own project: a failed add starts nothing (never the one selected before)
@@ -164,7 +164,7 @@ init :: proc "c" () {
 		if app.launch_project != 0 do app.pending_start = true
 		else do fmt.eprintfln("Deckhand: %s: %s", dir, r.error)
 	}
-	update_init() // pi-desk's own updates: saved choices, leftovers, the check timer (update.odin)
+	update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
 	app.redraw = true
 }
@@ -202,13 +202,13 @@ window_hooks_app :: proc() -> Window_Hooks {
 		toast = proc(text: string, err: bool) {toast_show(text, err)},
 		frames_info = proc(tab_id: u64) -> (service: string, key: [32]u8, device: u64, ok: bool) {
 			when ODIN_OS == .Darwin {
-				if pd_frames_chan_key(tab_id, &key[0]) == 1 do return string(pd_frames_service()), key, pd_frames_device_id(), true
+				if dh_frames_chan_key(tab_id, &key[0]) == 1 do return string(dh_frames_service()), key, dh_frames_device_id(), true
 			}
 			return
 		},
 		frames_read = proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
 			when ODIN_OS == .Darwin {
-				return pd_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
+				return dh_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
 			}
 			return false
 		},
@@ -272,7 +272,7 @@ frame :: proc "c" () {
 	app.frames_called += 1
 	core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
-	browser_debug_tick() // PI_DESK_DEBUG_BROWSER (browser.odin, spike)
+	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
 	t := active_term()
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
 	at := agent_term() // Atlas's terminal in the drawer (also while it slides out)
@@ -291,7 +291,7 @@ frame :: proc "c" () {
 	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
 	if holder_restart_tick() do app.redraw = true // Restart session holder's outcome (holder_restart.odin)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
-	pd_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
+	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
 	if browser_frames_tick() do app.redraw = true // browser tabs: a frame CEF painted (browser.odin)
 	if browser_polish_pending_tick() do app.redraw = true // blocked popups held back a second (browser_polish.odin)
 	if browser_agent_tick() do app.redraw = true // agents' reads, waits, screenshots, recordings (browser_agent.odin)
@@ -409,7 +409,7 @@ over_right_column :: proc(x: f32) -> bool {
 	return r > 0 && x >= sapp.widthf() - r * app.dpi
 }
 
-// OS events. In script mode (PI_DESK_SCRIPT) real keyboard/mouse input is
+// OS events. In script mode (DECKHAND_SCRIPT) real keyboard/mouse input is
 // dropped so keystrokes meant for another app can never reach the child.
 event_os :: proc "c" (e: ^sapp.Event) {
 	context = app_context
@@ -639,7 +639,7 @@ event :: proc(e: ^sapp.Event) {
 			}
 			return // Cmd+V arrives as CLIPBOARD_PASTED
 		}
-		// a Claude tab's prompt holds text now: pi-desk holds what it would send (claude.odin);
+		// a Claude tab's prompt holds text now: Deckhand holds what it would send (claude.odin);
 		// Enter submits it (its hook says so) and Esc does not add text
 		if kt != nil && e.key_code != .ENTER && e.key_code != .KP_ENTER && e.key_code != .ESCAPE do claude_note_typed(ktab)
 		if kt != nil do term_key_down(kt, e)
@@ -1195,12 +1195,12 @@ app_args_parse :: proc(args: []string) -> (a: App_Args, ok: bool) {
 	return a, true
 }
 
-// The project `pi-desk DIR` starts in: the one Add_Project made or selected for DIR; 0 = none.
+// The project `deckhand DIR` starts in: the one Add_Project made or selected for DIR; 0 = none.
 launch_project :: proc(r: Result) -> u64 {
 	return r.ok ? r.created_id : 0
 }
 
-// What `pi-desk DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
+// What `deckhand DIR` starts in project pid once the pane has a size: a pi chat (a Claude session when
 // Claude Code is the only harness installed), or with --claude a
 // Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
 // how to install it).
@@ -1211,7 +1211,7 @@ launch_start :: proc(claude: bool, pid: u64) -> Command {
 	return New_Chat{pid}
 }
 
-// Test mode's backing scale from PI_DESK_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty
+// Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty
 // is 1, so a scene's pixels are the same on every Mac; else a number from 1 to 4.
 test_scale_parse :: proc(env: string) -> (scale: f64, ok: bool) {
 	s := strings.trim_space(env)
@@ -1234,13 +1234,13 @@ main :: proc() {
 	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
 	login_env_startup()
 	when TEST_HOOKS {
-		// test mode is quiet unless PI_DESK_QUIET=0: the window never shows or takes focus
+		// test mode is quiet unless DECKHAND_QUIET=0: the window never shows or takes focus
 		if hook_env(.Script) != "" && hook_env(.Quiet) != "0" do platform_quiet()
-		// test mode: the same backing scale on every Mac (PI_DESK_SCALE, default 1), quiet or not
+		// test mode: the same backing scale on every Mac (DECKHAND_SCALE, default 1), quiet or not
 		if hook_env(.Script) != "" {
 			scale, sok := test_scale_parse(hook_env(.Scale))
 			if !sok {
-				fmt.eprintln("Deckhand: PI_DESK_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
+				fmt.eprintln("Deckhand: DECKHAND_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
 				os.exit(2)
 			}
 			platform_test_scale(scale)

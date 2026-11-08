@@ -88,13 +88,13 @@ msgs = [{"id": "s", "v": 1, "type": "pi.session", "pi_session_id": sid, "session
         {"id": "t", "v": 1, "type": "pi.status", "agent": "idle", "waiting": False, "blockers": []}]
 if sid == "r1":
     msgs += [todos, shells]
-pidesk = os.environ.get("PI_DESK_BIN")
-if pidesk and os.environ.get("DECKHAND_SOCKET"):
+deckhand = os.environ.get("DECKHAND_BIN")
+if deckhand and os.environ.get("DECKHAND_SOCKET"):
     null = os.open(os.devnull, os.O_WRONLY)
     os.dup2(null, 1)
     os.dup2(null, 2)
-    # --ctl reads PI_DESK_SOCKET/PI_DESK_TOKEN; a pi tab gets DECKHAND_SOCKET/DECKHAND_TOKEN
-    os.environ["PI_DESK_SOCKET"] = os.environ["DECKHAND_SOCKET"]
-    os.environ["PI_DESK_TOKEN"] = os.environ.get("DECKHAND_TOKEN", "")
-    os.execv(pidesk, [pidesk, "--ctl", "--wait", "600000"] + [json.dumps(m) for m in msgs])
+    # --ctl reads DECKHAND_SOCKET/DECKHAND_TOKEN; a pi tab gets DECKHAND_SOCKET/DECKHAND_TOKEN
+    os.environ["DECKHAND_SOCKET"] = os.environ["DECKHAND_SOCKET"]
+    os.environ["DECKHAND_TOKEN"] = os.environ.get("DECKHAND_TOKEN", "")
+    os.execv(deckhand, [deckhand, "--ctl", "--wait", "600000"] + [json.dumps(m) for m in msgs])
 os.execvp("sleep", ["sleep", "600"])

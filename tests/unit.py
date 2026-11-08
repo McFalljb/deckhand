@@ -31,7 +31,7 @@ import tempfile
 import time
 
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-BIN = "build/pi-desk-core-tests"
+BIN = "build/deckhand-core-tests"
 LOGS = "build/unit"
 TIMES = "build/unit-times.json"
 # Tests with time budgets (perf_expect: reported, gating only at 10x): run last, alone, so their
@@ -48,7 +48,7 @@ TIMING = [
 # Slow tests that get a process of their own (their file's other tests run in another)
 ALONE = ["layout_no_overlap_1", "layout_no_overlap_2", "layout_no_overlap_3", "layout_no_overlap_4"]
 BUILD = ["odin", "build", "src", "-build-mode:test", "-out:" + BIN,
-         "-define:ODIN_TEST_THREADS=1", "-define:PI_DESK_UPDATE_TEST=true"]
+         "-define:ODIN_TEST_THREADS=1", "-define:DECKHAND_UPDATE_TEST=true"]
 
 
 def find_tests():

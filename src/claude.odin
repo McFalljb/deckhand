@@ -1,12 +1,12 @@
 package main
 
 // Claude Code tabs (docs/CLAUDE.md): `claude` in a terminal tab of an open session, started
-// with pi-desk's own plugin (`--plugin-dir`, integrations/claude-code/, copied into the app
+// with Deckhand's own plugin (`--plugin-dir`, integrations/claude-code/, copied into the app
 // bundle) and nothing installed in the user's Claude Code config.
 //
-//   - The plugin's hooks and its `pi-desk` command (bin/pi-desk -> the bundled pi-desk-cli, so
-//     plugin and app versions always match) talk to pi-desk over the control socket with a
-//     per-tab token in PI_DESK_CLAUDE_TOKEN. The token is caller `panel` with `claude` set: it
+//   - The plugin's hooks and its `deckhand` command (bin/pi-desk -> the bundled deckhand-cli, so
+//     plugin and app versions always match) talk to Deckhand over the control socket with a
+//     per-tab token in DECKHAND_CLAUDE_TOKEN. The token is caller `panel` with `claude` set: it
 //     may do exactly what a pi tab's bridge may (its own session's browser and app tabs,
 //     queries) minus the pi bridge's reports (pi.status, panel.set, pi.attached), plus the
 //     claude.* reports below for its own tab. It is multi-use (the CLI is a new process per
@@ -17,7 +17,7 @@ package main
 //     `claude_history` (saved), so a relaunch restores the tab with `--resume <id>` and the
 //     project's "…" menu offers "Resume Claude: <title>".
 //   - claude.turn (UserPromptSubmit, Stop, Notification hooks): submitted, idle or waiting. Text
-//     pi-desk sends into the tab (claude_prompt: Atlas, scripts) is held until the turn is idle
+//     Deckhand sends into the tab (claude_prompt: Atlas, scripts) is held until the turn is idle
 //     and the user has typed nothing since their last submitted prompt (claude_tick). The
 //     Claude's own OSC 7501 status (agent_status.odin) must agree: either one working or
 //     waiting holds the text (claude_ready).
@@ -36,7 +36,7 @@ import "core:time"
 Claude_Turn :: enum u8 {
 	Unknown, // no hook reported yet (starting, or the plugin's hooks do not run)
 	Idle, // SessionStart, Stop: waiting for the user's next prompt
-	Working, // a prompt was submitted (UserPromptSubmit), or pi-desk just sent one
+	Working, // a prompt was submitted (UserPromptSubmit), or Deckhand just sent one
 	Waiting, // a permission or question dialog (Notification hook)
 }
 CLAUDE_TURN_NAMES := [Claude_Turn]string {
@@ -56,8 +56,8 @@ Claude_Held :: struct {
 Claude_Tab :: struct {
 	session_id: string, // Claude Code's session id (claude.session); "" until its SessionStart hook ran
 	args:       []string, // the user's extra flags; kept, and passed again on resume and restore
-	readonly:   bool, // started with pi-desk's read-only profile (§1a): kept, saved, never dropped
-	guard_stopped: bool, // pi-desk stopped it: its profile never confirmed it loaded (claude_readonly_tick; not saved)
+	readonly:   bool, // started with Deckhand's read-only profile (§1a): kept, saved, never dropped
+	guard_stopped: bool, // Deckhand stopped it: its profile never confirmed it loaded (claude_readonly_tick; not saved)
 	turn:       Claude_Turn,
 	held:       [dynamic]Claude_Held, // claude_prompt texts waiting for an idle, empty prompt; at most CLAUDE_HELD_MAX
 	model:      string, // Claude's model (SessionStart's model, PostModelSwitch; claude_rows.odin); "" = not reported
@@ -66,7 +66,7 @@ Claude_Tab :: struct {
 	resume_path: string, // a transcript found on disk: --resume takes its absolute path (claude_disk.odin); "" = by id
 }
 
-// A Claude Code session pi-desk ran, for Resume (the project's "…" menu) and restore.
+// A Claude Code session Deckhand ran, for Resume (the project's "…" menu) and restore.
 Claude_Record :: struct {
 	id:      string, // Claude's session id
 	cwd:     string, // where it ran
@@ -106,7 +106,7 @@ New_Claude_Session :: struct {
 	args:       []string,
 	account:    string, // a configured account's label or folder ("" = the project's last used, else the last used)
 }
-// A pi-desk title for a Claude session of the history (the user's; "" = none).
+// A Deckhand title for a Claude session of the history (the user's; "" = none).
 Claude_Rename :: struct {
 	claude_session_id: string,
 	title:             string,
@@ -157,7 +157,7 @@ Claude_Restore_History :: struct {
 	records:      []Claude_Record,
 	readonly_ids: []string, // conversations that ran read-only (claude_readonly_ids; outside the history's cap)
 }
-// The read-only profile loaded: its SessionStart hook (pi-desk's --settings) with this start's
+// The read-only profile loaded: its SessionStart hook (Deckhand's --settings) with this start's
 // nonce (§1a). A Claude tab's own, once per start, before its first prompt.
 Claude_Readonly_Ack :: struct {
 	tab_id: u64,
@@ -261,8 +261,8 @@ claude_command_text :: proc(text: string) -> string {
 
 // Pastes text as the user's next message now, under the held-prompt rules (claude_ready: idle per
 // hooks and OSC 7501, bracketed paste, nothing typed); Enter follows (claude_tick). "" = sent,
-// else why not. pi-desk's own fixed text only (comments' Send now), never page or agent text.
-// slash: pi-desk's own fixed slash command (CLAUDE_MODEL_COMMAND: Restart with model…), the one
+// else why not. Deckhand's own fixed text only (comments' Send now), never page or agent text.
+// slash: Deckhand's own fixed slash command (CLAUDE_MODEL_COMMAND: Restart with model…), the one
 // case a leading / may go in; never text from anyone else.
 claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
@@ -305,7 +305,7 @@ claude_tick :: proc() {
 
 // ---- the plugin and the CLI ----
 
-// The plugin folder pi-desk passes with --plugin-dir: PI_DESK_CLAUDE_PLUGIN (development), else
+// The plugin folder Deckhand passes with --plugin-dir: DECKHAND_CLAUDE_PLUGIN (development), else
 // the bundle's Contents/Resources/claude-code, else claude-code next to the binary (a bare
 // build). "" = not found. Temp-allocated.
 claude_plugin_dir :: proc() -> string {
@@ -323,12 +323,12 @@ claude_plugin_dir :: proc() -> string {
 // Tests: the CLI's path instead of the one next to the binary ("-" = none).
 claude_cli_override: string
 
-// The pi-desk-cli binary next to pi-desk's own ("" = missing). Temp-allocated.
+// The deckhand-cli binary next to Deckhand's own ("" = missing). Temp-allocated.
 claude_cli_path :: proc() -> string {
 	if claude_cli_override != "" do return claude_cli_override == "-" ? "" : claude_cli_override
 	exe := executable_path()
 	if exe == "" do return ""
-	p, _ := filepath.join({filepath.dir(exe), "pi-desk-cli"}, context.temp_allocator)
+	p, _ := filepath.join({filepath.dir(exe), "deckhand-cli"}, context.temp_allocator)
 	return os.exists(p) ? p : ""
 }
 
@@ -338,7 +338,7 @@ claude_cli_path :: proc() -> string {
 // line saying where it was found. Neither: what to do, exit 127.
 CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/bin" "$HOME/.claude/local"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/claude" ] && [ -x "$d/claude" ]; then printf '%s\n' "Deckhand: Claude Code is installed at $d/claude but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v claude >/dev/null 2>&1 || { printf '%s\n' "Claude Code (claude) was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.local/bin or ~/.claude/local." "Install Claude Code, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh, ~/.bash_profile for bash), then open a Claude tab again."; exit 127; }; exec claude "$@"`
 
-// What a Claude tab runs: PI_DESK_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
+// What a Claude tab runs: DECKHAND_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
 // in test mode never the real claude: TEST_NO_CLAUDE_CMD (commands.odin).
 claude_tab_cmd :: proc() -> string {
 	if c := hook_env(.Claude_Cmd); c != "" do return c
@@ -353,11 +353,11 @@ claude_tab_cmd :: proc() -> string {
 
 // Starts claude in the tab's terminal: `$SHELL -l -c` (the user's PATH), --plugin-dir, --resume
 // with the tab's session id when it has one, then its extra flags. The environment adds the
-// socket, the tab's Claude token, the CLI's path and where screenshots go. PI_DESK_CLAUDE_CMD
+// socket, the tab's Claude token, the CLI's path and where screenshots go. DECKHAND_CLAUDE_CMD
 // replaces claude (tests: a fake claude); it sees the same arguments as "$@". False if it could
 // not start (the terminal says why). s: the tab's session (the tab may not be in it yet).
 // Read-only (claude_tab_readonly; every start, whoever starts it): the user's flags only from
-// the allowlist, pi-desk's profile last, PI_DESK_CLAUDE_READONLY=1; never without the guard.
+// the allowlist, Deckhand's profile last, DECKHAND_CLAUDE_READONLY=1; never without the guard.
 // defaults: a start the user makes (a new tab, session or chat, the user's resume, restore and
 // restart): the user's default flags as the setting is now (claude_with_defaults), never saved;
 // a read-only start leaves them out and says so.
@@ -382,7 +382,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		nonce = string(b)
 	}
 	if ro && cli == "" {
-		term_note(t, "Deckhand's command (pi-desk-cli) is missing from this build, and a read-only Claude tab never starts without its guard: rebuild Deckhand.")
+		term_note(t, "Deckhand's command (deckhand-cli) is missing from this build, and a read-only Claude tab never starts without its guard: rebuild Deckhand.")
 		return false
 	}
 	// its account (claude_accounts.odin): only a configured one starts
@@ -417,7 +417,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	env := make([dynamic]string, context.temp_allocator)
 	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli))) // + PI_KIT_NOTES_DIR, as pi tabs get it (folders.odin)
 	append(&env, ..claude_account_env(ct.account)) // its account: CLAUDE_CONFIG_DIR (none for the default)
-	if ro do append(&env, "PI_DESK_CLAUDE_READONLY=1")
+	if ro do append(&env, "DECKHAND_CLAUDE_READONLY=1")
 	claude_shots_tidy()
 	if !term_start(t, argv[:], cwd, env[:], {kind = .Claude}) {
 		socket_forget_tab(tab_id)
@@ -460,7 +460,7 @@ claude_shots_tidy :: proc() {
 
 // The tools a read-only tab never gets (bare names: Claude Code takes them out of Claude's
 // context, and no mode, allow rule or later flag can give them back). Bash stays, behind plan
-// mode, the scoped deny rules below and the guard (`pi-desk hook readonly`).
+// mode, the scoped deny rules below and the guard (`deckhand hook readonly`).
 CLAUDE_READONLY_DENY := [?]string {
 	"Edit", "Write", "NotebookEdit", "MultiEdit", "PowerShell", "Monitor", "Agent", "Task", "Workflow",
 	"CronCreate", "CronDelete", "ScheduleWakeup", "RemoteTrigger", "EnterWorktree", "ExitWorktree",
@@ -472,7 +472,7 @@ CLAUDE_READONLY_BASH_DENY := [?]string {
 	"rm", "mv", "cp", "chmod", "chown", "touch", "mkdir", "tee", "sed -i", "git commit", "git push",
 	"git merge", "git rebase", "git reset", "git checkout", "git switch", "git stash", "git apply",
 	"git am", "git cherry-pick", "git revert", "git tag", "git worktree add", "git worktree remove",
-	// pi-desk's own additions (the guard's m_pidesk)
+	// Deckhand's own additions (the guard's m_deckhand)
 	// (not git config: `Bash(git config *)` would block --get; the guard blocks its writes)
 	"git clean", "git restore", "git pull", "git add", "git init", "git update-ref",
 	"rmdir", "unlink", "ln", "truncate", "wget", "perl -i", "perl -pi",
@@ -577,7 +577,7 @@ claude_adopt_ro_stop :: proc(tab_id: u64) {
 	claude_readonly_stop(tab, ct, CLAUDE_GUARD_UNTRUSTED, "A read-only Claude was stopped: Deckhand could not confirm its guard after reopening (restart the tab)")
 }
 
-// Whether pi-desk stopped this tab for an unconfirmed profile (tests, the label).
+// Whether Deckhand stopped this tab for an unconfirmed profile (tests, the label).
 claude_readonly_stopped :: proc(tab_id: u64) -> bool {
 	_, _, ct := claude_tab_of(tab_id)
 	return ct != nil && ct.guard_stopped
@@ -638,7 +638,7 @@ claude_readonly_hook_command :: proc(cli: string) -> string {
 	return strings.concatenate({claude_sh_quote(cli), " hook readonly || exit 2"}, context.temp_allocator)
 }
 
-// The settings pi-desk passes with --settings (above the user's and the project's; not kept by
+// The settings Deckhand passes with --settings (above the user's and the project's; not kept by
 // --resume, so passed at every start): plan mode, the deny rules, no bypass or auto mode, hooks
 // on (a project's disableAllHooks cannot turn the guard off), no shell in skills, and the guard
 // for every tool call, blocking when it fails or times out.
@@ -664,8 +664,8 @@ claude_readonly_settings :: proc(cli, nonce: string) -> string {
 	return strings.to_string(b)
 }
 
-// pi-desk's read-only profile, last in argv (temp): plan mode, the user's settings files only (a
-// project's settings, hooks and .mcp.json in the chats folder are not loaded), pi-desk's settings,
+// Deckhand's read-only profile, last in argv (temp): plan mode, the user's settings files only (a
+// project's settings, hooks and .mcp.json in the chats folder are not loaded), Deckhand's settings,
 // and the denied tools.
 claude_readonly_profile :: proc(cli, nonce: string) -> []string {
 	out := make([dynamic]string, context.temp_allocator)
@@ -674,7 +674,7 @@ claude_readonly_profile :: proc(cli, nonce: string) -> []string {
 	return out[:]
 }
 
-// What a read-only tab's token may not send (pi-desk's own check, whatever the guard let
+// What a read-only tab's token may not send (Deckhand's own check, whatever the guard let
 // through): acting on a page or an app. Reading, screenshots and navigation stay, as for pi.
 claude_readonly_refuses :: proc(caller: Caller, cmd: Command) -> string {
 	if caller.kind != .Panel || !caller.claude do return ""
@@ -760,7 +760,7 @@ claude_id_ok :: proc(id: string) -> bool {
 	return true
 }
 
-// Why these extra flags cannot go ("" = they can): flags pi-desk sets itself, and the ones that
+// Why these extra flags cannot go ("" = they can): flags Deckhand sets itself, and the ones that
 // pick another session, are refused; no NUL or line breaks; at most CLAUDE_ARGS_MAX.
 claude_args_check :: proc(args: []string) -> string {
 	if len(args) > CLAUDE_ARGS_MAX do return fmt.tprintf("at most %d extra flags", CLAUDE_ARGS_MAX)
@@ -1340,7 +1340,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			append(&state.claude_readonly_ids, strings.clone(r.id))
 		}
 		for r in c.records {
-			// as a report would be: an id that can go into argv, no flags pi-desk sets, an absolute
+			// as a report would be: an id that can go into argv, no flags Deckhand sets, an absolute
 			// project, a one-line title of at most CLAUDE_TITLE_MAX
 			if !claude_id_ok(r.id) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
 			if claude_args_check(r.args) != "" || !strings.has_prefix(r.project, "/") do continue

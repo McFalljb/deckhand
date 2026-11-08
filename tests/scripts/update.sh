@@ -19,7 +19,7 @@
 #   5. update-5.txt: the "new app" (this test binary as 0.1.3) takes the secret from the helper,
 #      is welcomed as the named successor and adopts all three: screen hashes equal to the
 #      handover's and to a reference terminal fed every byte, the same pids, counters going on.
-# The app runs as its own test build (-define:PI_DESK_UPDATE_TEST=true, without the browser):
+# The app runs as its own test build (-define:DECKHAND_UPDATE_TEST=true, without the browser):
 # a release build has neither the test key nor the fixture variables compiled in.
 # Usage: tests/scripts/update.sh   (needs ./build.sh's libraries; builds build/update-sign)
 set -eu
@@ -30,7 +30,7 @@ rm -rf "$W" build/shots/update
 mkdir -p "$W" build/shots/update
 odin build tools/update-sign -out:build/update-sign
 BIN="$W/deckhand-update-test"
-odin build src -out:"$BIN" -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0 &
+odin build src -out:"$BIN" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 &
 # the session holder and the relaunch helper (holder_bin_find: next to the app's binary)
 odin build src/holder -out:"$W/deckhand-core" -minimum-os-version:14.0 &
 wait
@@ -100,10 +100,10 @@ mkapp "$W/install" 0.1.0
 mkrelease 0.1.1
 
 run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the project]
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    PI_DESK_UPDATE_URL="file://$W/rel/latest.json" PI_DESK_UPDATE_DOWNLOAD="file://$W/rel/download/" \
-    PI_DESK_UPDATE_VERSION="$2" PI_DESK_UPDATE_APP="$W/install/Deckhand.app" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+    DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
+    DECKHAND_UPDATE_VERSION="$2" DECKHAND_UPDATE_APP="$W/install/Deckhand.app" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
 }
 fail=0
 check_log() { # LOG
@@ -160,7 +160,7 @@ v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/D
 # 4b: another copy (another executable, its own data dir) in the minute the holder waits
 mkdir -p "$W/other" "$W/data-other"
 cp "$BIN" "$W/other/deckhand-update-test"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/update-4b.txt PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data-other" PI_DESK_RUNTIME_DIR="$RUN" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/update-4b.txt DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data-other" DECKHAND_RUNTIME_DIR="$RUN" \
   "$W/other/deckhand-update-test" > "$W/run4b.log" 2>&1 || true
 check_log "$W/run4b.log"
 grep -q "refused: secret" "$W/run4b.log" || { echo "run 4b: another Deckhand was not refused by the waiting holder"; fail=1; }

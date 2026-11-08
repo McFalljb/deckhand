@@ -24,14 +24,14 @@ is restored marked `missing` ("gone"): never started, never recreated empty.
 
 ## File
 
-`<data dir>/workspace.json` (macOS: `~/Library/Application Support/pi-desk/workspace.json`; Linux:
-`$XDG_DATA_HOME/pi-desk`, default `~/.local/share/pi-desk`; `PI_DESK_DATA_DIR` overrides). The
-data dir keeps Deckhand's former name, pi-desk, so existing workspaces carry over. Mode
+`<data dir>/workspace.json` (macOS: `~/Library/Application Support/Deckhand/workspace.json`; Linux:
+`$XDG_DATA_HOME/deckhand`, default `~/.local/share/deckhand`; `DECKHAND_DATA_DIR` overrides). The
+data dir keeps Deckhand's former name, Deckhand, so existing workspaces carry over. Mode
 `0600`, written whole and atomically (temp file in the same dir, fsync, rename) one second after
 the first change to saved data (pi status, panel, focus and tab-exit updates do not count), only
 when the content changed, and once more at quit (before the
 tabs' processes are stopped). Test mode saves and restores only with an explicit
-`PI_DESK_DATA_DIR`.
+`DECKHAND_DATA_DIR`.
 
 ```json
 {"v":1,

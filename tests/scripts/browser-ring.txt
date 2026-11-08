@@ -1,5 +1,5 @@
 # The tab's frame ring (tests/scripts/browser.sh; docs/BROWSER.md §1.1): CEF
-# paints into ring slots pi-desk does not sample; a resize makes a new ring
+# paints into ring slots Deckhand does not sample; a resize makes a new ring
 # and frees the old; a hidden tab keeps its frame and paints again when shown;
 # closing frees every surface and image. browser.sh runs it twice: shared
 # textures (OnAcceleratedPaint) and the CPU path (OnPaint).

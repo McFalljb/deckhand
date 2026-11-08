@@ -26,7 +26,7 @@ ws_reset :: proc() -> runtime.Allocator {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 
@@ -34,7 +34,7 @@ ws_reset :: proc() -> runtime.Allocator {
 // is reported resolved).
 @(private = "file")
 tmp_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-ws-%s-%d", os.get_env("TMPDIR", context.temp_allocator), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-ws-%s-%d", os.get_env("TMPDIR", context.temp_allocator), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -418,7 +418,7 @@ workspace_lazy_start :: proc(t: ^testing.T) {
 	run_command(Focus_Tab{tab_id = sa.tabs[1].id})
 	testing.expect_value(t, len(terms), 4)
 	if tt := term_of(sa.tabs[1].id); tt != nil do testing.expect_value(t, pty_child_cwd(&tt.pty), a)
-	// `pi-desk DIR` wins over the restored focus
+	// `deckhand DIR` wins over the restored focus
 	ws_reset()
 	rescan_now()
 	workspace_restore(text)

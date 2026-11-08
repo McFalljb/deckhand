@@ -36,7 +36,7 @@ Tab_Kind :: union {
 	Markdown_Tab, // a .md file drawn as a document (markdown_view.odin); its source is a read-only editor in `editors`
 	Browser_Tab, // a web page (browser.odin; CEF, docs/BROWSER.md)
 	App_Tab, // a program rendering into the tab (app_tab.odin; docs/ENGINE-BRIDGE.md)
-	Claude_Tab, // Claude Code in a terminal, with pi-desk's plugin (claude.odin; docs/CLAUDE.md)
+	Claude_Tab, // Claude Code in a terminal, with Deckhand's plugin (claude.odin; docs/CLAUDE.md)
 }
 
 Tab_Status :: enum {
@@ -45,7 +45,7 @@ Tab_Status :: enum {
 	Not_Started, // restored from the saved workspace; starts when its session is focused
 }
 
-// How a tab's process ended (its waitpid status), once pi-desk reaped it.
+// How a tab's process ended (its waitpid status), once Deckhand reaped it.
 // Unknown when it could not be reaped (it kept running after closing its
 // terminal, and was hung up on).
 Exit_Info :: struct {
@@ -90,7 +90,7 @@ Tab :: struct {
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,
-// no layout. pi-desk picks fonts and colours from the tone.
+// no layout. Deckhand picks fonts and colours from the tone.
 Panel_Tone :: enum {
 	Normal,
 	Accent,
@@ -131,7 +131,7 @@ Session_Agent :: enum u8 {
 Open_Session :: struct {
 	id:            u64,
 	agent:         Session_Agent,
-	pi_session_id: string, // pi's session id (a UUID; pi-desk picks it for new chats); agent .Claude: its main tab's Claude session id ("" until reported)
+	pi_session_id: string, // pi's session id (a UUID; Deckhand picks it for new chats); agent .Claude: its main tab's Claude session id ("" until reported)
 	session_dir:   string, // "" = pi's default store
 	session_file:  string, // as the bridge last reported it (pi.session); "" = unknown
 	project_id:    u64,
@@ -222,7 +222,7 @@ Command_Class :: enum {
 
 // How a caller's destructive commands of one class are confirmed.
 Confirm_Mode :: enum {
-	Ask, // the user confirms in pi-desk's UI; the caller's own token is refused
+	Ask, // the user confirms in Deckhand's UI; the caller's own token is refused
 	Trusted, // the caller may confirm its own tokens
 	Auto, // no confirmation
 }
@@ -338,7 +338,7 @@ State :: struct {
 	layout:                Layout,
 	pending_confirmations: [dynamic]Pending_Confirmation,
 	settings:              Settings,
-	home:                  u64, // the Home session (open session id; 0 = not made yet): pi-desk's own agent
+	home:                  u64, // the Home session (open session id; 0 = not made yet): Deckhand's own agent
 	home_open:             bool, // the agent's chat drawer shows
 	agent:                 Agent_Info, // the agent's unread count (agent.odin), from its bridge status
 	home_model:            string, // agent_model when Atlas last started (agent.odin: --model again only when it changed)
@@ -353,7 +353,7 @@ State :: struct {
 	jobs_notified:         int, // OS notifications sent for jobs (tests)
 	home_dir_prev:         string, // the main folder before the user changed it (offered in Finder; not saved)
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
-	claude_history:        [dynamic]Claude_Record, // Claude Code sessions pi-desk ran, most recent first (claude.odin; saved)
+	claude_history:        [dynamic]Claude_Record, // Claude Code sessions Deckhand ran, most recent first (claude.odin; saved)
 	claude_readonly_ids:   [dynamic]string, // Claude sessions that ran read-only, outside the history's cap (claude.odin §1a; saved)
 	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's

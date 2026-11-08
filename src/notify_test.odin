@@ -430,7 +430,7 @@ bell_quit_is_quiet :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(n_os), 0)
 }
 
-// What pi-desk could not do for the user (notify_failed: Send to Atlas's
+// What Deckhand could not do for the user (notify_failed: Send to Atlas's
 // text left on the clipboard) is said even with the Errors group off: it
 // answers the user's own action, and is the only word of where the text went.
 @(test)

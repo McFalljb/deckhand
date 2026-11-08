@@ -1,6 +1,6 @@
 package update_sign
 
-// pi-desk's release signing tool (docs/DEVELOPING.md, "Update signing"). Build:
+// Deckhand's release signing tool (docs/DEVELOPING.md, "Update signing"). Build:
 //   odin build tools/update-sign -out:build/update-sign
 //
 //   update-sign keygen FILE              a new key pair: the private key (base64 seed) into

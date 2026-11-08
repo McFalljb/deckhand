@@ -1,12 +1,12 @@
 package fake_app
 
-// A stand-in for an engine in a pi-desk app tab (docs/ENGINE-BRIDGE.md §7,
-// step 1 part): the NDJSON hello on PI_DESK_SOCKET, the Mach frame channel
+// A stand-in for an engine in a Deckhand app tab (docs/ENGINE-BRIDGE.md §7,
+// step 1 part): the NDJSON hello on DECKHAND_SOCKET, the Mach frame channel
 // (src/native/frames_macos.m's connect half), a 60 Hz loop that draws a
 // moving square with Metal into the ring and sends FRAME from the empty
 // command buffer's completed handler. Answers tab.ping, tab.visible and
 // tab.quit; logs every input message it gets to stdout ("input: …"), which
-// pi-desk keeps in the tab's log.
+// Deckhand keeps in the tab's log.
 //
 // Its own methods (engine bridge step 2: app_call passes any method through;
 // tab.describe lists them): game.get {path: "square"|"tick"}, game.set
@@ -40,7 +40,7 @@ import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
-foreign import native {"../../build/pd_frames.a", "../../build/fake_render.a", "system:Metal.framework", "system:IOSurface.framework", "system:Foundation.framework", "system:bsm"}
+foreign import native {"../../build/dh_frames.a", "../../build/fake_render.a", "system:Metal.framework", "system:IOSurface.framework", "system:Foundation.framework", "system:bsm"}
 
 Conn :: distinct rawptr
 Box :: struct {
@@ -50,14 +50,14 @@ Box :: struct {
 
 @(default_calling_convention = "c")
 foreign native {
-	pd_frames_connect :: proc(service: cstring, key: [^]u8, tab_id: u64, device: rawptr, err: [^]u8, errcap: c.int) -> Conn ---
-	pd_frames_acquire :: proc(cn: Conn, gen: ^u32, slot: ^c.int, w, h: ^c.int, scale: ^f32, texture: ^rawptr) -> c.int ---
-	pd_frames_unacquire :: proc(cn: Conn, slot: c.int) ---
-	pd_frames_present :: proc(cn: Conn, gen: u32, slot: c.int, seq, tick: u64, queue: rawptr) ---
-	pd_frames_conn_suspend :: proc(cn: Conn, on: c.int) ---
-	pd_frames_conn_dead :: proc(cn: Conn) -> c.int ---
-	pd_frames_conn_stats :: proc(cn: Conn, sent, dropped, rings: ^u64, gen: ^u32, w, h: ^c.int) ---
-	pd_frames_device_for :: proc(registry_id: u64) -> rawptr ---
+	dh_frames_connect :: proc(service: cstring, key: [^]u8, tab_id: u64, device: rawptr, err: [^]u8, errcap: c.int) -> Conn ---
+	dh_frames_acquire :: proc(cn: Conn, gen: ^u32, slot: ^c.int, w, h: ^c.int, scale: ^f32, texture: ^rawptr) -> c.int ---
+	dh_frames_unacquire :: proc(cn: Conn, slot: c.int) ---
+	dh_frames_present :: proc(cn: Conn, gen: u32, slot: c.int, seq, tick: u64, queue: rawptr) ---
+	dh_frames_conn_suspend :: proc(cn: Conn, on: c.int) ---
+	dh_frames_conn_dead :: proc(cn: Conn) -> c.int ---
+	dh_frames_conn_stats :: proc(cn: Conn, sent, dropped, rings: ^u64, gen: ^u32, w, h: ^c.int) ---
+	dh_frames_device_for :: proc(registry_id: u64) -> rawptr ---
 	fake_queue :: proc(device: rawptr) -> rawptr ---
 	fake_render :: proc(queue, texture: rawptr, w, h: c.int, bg: u32, boxes: [^]Box, n: c.int, slow_ms: c.int) ---
 }
@@ -222,10 +222,10 @@ main :: proc() {
 			os.exit(2)
 		}
 	}
-	path := os.get_env("PI_DESK_SOCKET", context.temp_allocator)
-	token := os.get_env("PI_DESK_TOKEN", context.temp_allocator)
+	path := os.get_env("DECKHAND_SOCKET", context.temp_allocator)
+	token := os.get_env("DECKHAND_TOKEN", context.temp_allocator)
 	if path == "" || token == "" {
-		say("fake-app: needs PI_DESK_SOCKET and PI_DESK_TOKEN (run it from a pi-desk app tab)")
+		say("fake-app: needs DECKHAND_SOCKET and DECKHAND_TOKEN (run it from a Deckhand app tab)")
 		os.exit(2)
 	}
 	say(fmt.tprintf("fake-app %d: pgid %d sid %d", posix.getpid(), posix.getpgrp(), posix.getsid(0)))
@@ -245,7 +245,7 @@ main :: proc() {
 		os.exit(1)
 	}
 	v, _ := json.parse_string(line, .JSON, true)
-	// pi-desk sends nothing before the hello reply (docs/PROTOCOL.md §2)
+	// Deckhand sends nothing before the hello reply (docs/PROTOCOL.md §2)
 	first, _ := v.(json.Object)
 	first_id, _ := first["id"].(json.String)
 	first_type, _ := first["type"].(json.String)
@@ -280,10 +280,10 @@ main :: proc() {
 		os.exit(1)
 	}
 	if flags.bad_key do key[0] ~= 0xFF
-	device := pd_frames_device_for(device_id)
+	device := dh_frames_device_for(device_id)
 	queue := fake_queue(device)
 	errbuf: [256]u8
-	cn := pd_frames_connect(strings.clone_to_cstring(service), raw_data(key), tab_id, device, &errbuf[0], len(errbuf))
+	cn := dh_frames_connect(strings.clone_to_cstring(service), raw_data(key), tab_id, device, &errbuf[0], len(errbuf))
 	if cn == nil {
 		say("fake-app: frames:", string(cstring(&errbuf[0])))
 		os.exit(1)
@@ -297,8 +297,8 @@ main :: proc() {
 	for {
 		free_all(context.temp_allocator)
 		if sync.atomic_load(&quitting) do os.exit(0)
-		if pd_frames_conn_dead(cn) != 0 {
-			say("pi-desk is gone: exiting")
+		if dh_frames_conn_dead(cn) != 0 {
+			say("Deckhand is gone: exiting")
 			os.exit(0)
 		}
 		tick += 1
@@ -309,7 +309,7 @@ main :: proc() {
 			slot, w, h: c.int
 			scale: f32
 			tex: rawptr
-			if pd_frames_acquire(cn, &gen, &slot, &w, &h, &scale, &tex) != 0 {
+			if dh_frames_acquire(cn, &gen, &slot, &w, &h, &scale, &tex) != 0 {
 				lw := int(f32(w) / scale)
 				sx, sy := 20 + int(tick * 2) % max(lw - 60, 1), 40
 				if sync.atomic_load(&sq_fixed) do sx, sy = sync.atomic_load(&sq_x), sync.atomic_load(&sq_y)
@@ -332,7 +332,7 @@ main :: proc() {
 				}
 				fake_render(queue, tex, w, h, 0x202830, &boxes[0], len(boxes), c.int(flags.slow_ms))
 				seq += 1
-				pd_frames_present(cn, gen, slot, seq, tick, queue)
+				dh_frames_present(cn, gen, slot, seq, tick, queue)
 				frames += 1
 			}
 		}
@@ -343,7 +343,7 @@ main :: proc() {
 		if hang_due && frames >= u64(flags.hang_after) {
 			say("hanging after", frames, "frames")
 			sync.atomic_store(&hung, true)
-			pd_frames_conn_suspend(cn, 1)
+			dh_frames_conn_suspend(cn, 1)
 			for {time.sleep(time.Second)}
 		}
 		if time.tick_since(last_log) > time.Second {
@@ -351,7 +351,7 @@ main :: proc() {
 			sent, dropped, rings: u64
 			gen: u32
 			w, h: c.int
-			pd_frames_conn_stats(cn, &sent, &dropped, &rings, &gen, &w, &h)
+			dh_frames_conn_stats(cn, &sent, &dropped, &rings, &gen, &w, &h)
 			say(fmt.tprintf("stats: tick %d, frames sent %d, dropped %d, rings %d, gen %d, %dx%d", tick, sent, dropped, rings, gen, w, h))
 			send_line(fmt.tprintf(`{{"v":1,"type":"event","event":"tab.log","level":"info","text":"tick %d, %d frames","tick":%d}}`, tick, sent, tick))
 		}

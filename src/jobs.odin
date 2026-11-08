@@ -20,14 +20,14 @@ package main
 //
 // Delivery (§7, as changed by the user on 2026-11-01): nothing goes into
 // Atlas's context. A finished run is unread on the Jobs tab, raises a macOS
-// notification by the job's `notify` while pi-desk is in the background,
+// notification by the job's `notify` while Deckhand is in the background,
 // and emits the `job.finished` event (the top bar's notification centre
 // consumes it). Atlas reads job state on demand: job_list, job_runs.
 //
 // No approvals (ATLAS.md §10.3): a job note runs as it says,
 // whoever wrote it. The controls are the note's `enabled`, the per-job pause,
 // Pause all and the limits and safety stops below. Approval fields left in
-// an old state.json are ignored and dropped at its next write. pi-desk never
+// an old state.json are ignored and dropped at its next write. Deckhand never
 // touches the Keychain for jobs.
 
 import "base:runtime"
@@ -501,7 +501,7 @@ local_stamp :: proc(t: i64) -> string {
 	return fmt.tprintf("%04d-%02d-%02d %02d:%02d", c.year, c.month, c.day, c.hour, c.minute)
 }
 
-// RFC 3339 local time with its offset (PI_DESK_SCHEDULED_AT).
+// RFC 3339 local time with its offset (DECKHAND_SCHEDULED_AT).
 iso_local :: proc(t: i64) -> string {
 	tt := posix.time_t(t)
 	tm: posix.tm
@@ -726,7 +726,7 @@ job_save :: proc(j: ^Job) {
 	write_atomic(fmt.tprintf("%s/state.json", dir), strings.to_string(b))
 }
 
-// ---- the note: pi-desk's lines ----
+// ---- the note: Deckhand's lines ----
 
 // Rewrites the note's Recent runs from j.recent (re-read first; a temp
 // file renamed over it; once more if it changed in between).
@@ -742,7 +742,7 @@ job_note_write_recent :: proc(j: ^Job) {
 		// a temp file next to it, renamed over it only if the note did not
 		// change since it was read (else read it again: never lose a save)
 		slash := strings.last_index_byte(j.path, '/')
-		tmp := fmt.tprintf("%s/.%s.pi-desk-%d", j.path[:max(slash, 0)], j.path[slash + 1:], posix.getpid())
+		tmp := fmt.tprintf("%s/.%s.deckhand-%d", j.path[:max(slash, 0)], j.path[slash + 1:], posix.getpid())
 		if werr := write_atomic(tmp, out); werr != "" {
 			sched_log("%s: could not write Recent runs: %s", j.def.id, werr)
 			return
@@ -999,7 +999,7 @@ period_limit_reached :: proc(now: i64) -> bool {
 
 // pi: the setting pi_path, else `pi` on the jobs' PATH, else pi's managed
 // install (login_env.odin; jobs_path is usually the login shell's, saved).
-// Test mode: only pi_path (a scene's fake) or PI_DESK_REAL_PI=1; never the real pi by search.
+// Test mode: only pi_path (a scene's fake) or DECKHAND_REAL_PI=1; never the real pi by search.
 job_pi_path :: proc() -> string {
 	if p := state.settings.pi_path; p != "" do return p
 	if test_mode() && hook_env(.Real_Pi) != "1" {
@@ -1114,7 +1114,7 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	append(&env, fmt.tprintf("PATH=%s", jobs_env_path()))
 	if n := notes_env_job(); n != "" do append(&env, n) // the user's own, else the main folder (folders.odin)
 	if j.def.access == .Read do append(&env, "PI_KIT_READONLY=1")
-	append(&env, fmt.tprintf("PI_DESK_JOB=%s", j.def.id), fmt.tprintf("PI_DESK_RUN=%s", name), fmt.tprintf("PI_DESK_RUN_DIR=%s", dir), fmt.tprintf("PI_DESK_SCHEDULED_AT=%s", iso_local(scheduled)))
+	append(&env, fmt.tprintf("DECKHAND_JOB=%s", j.def.id), fmt.tprintf("DECKHAND_RUN=%s", name), fmt.tprintf("DECKHAND_RUN_DIR=%s", dir), fmt.tprintf("DECKHAND_SCHEDULED_AT=%s", iso_local(scheduled)))
 	if pi == "" || !run_spawn(r, argv[:], env[:], j.def.folder, fmt.tprintf("%s/stderr.log", dir)) {
 		r.spawn_error = strings.clone(pi == "" ? JOBS_NEED_PI : "could not start pi")
 		r.exit_code = -1
@@ -1311,7 +1311,7 @@ jobs_running_changed :: proc() {
 // Delivery (§7), all in one place: the Jobs tab's unread marker, the
 // job.finished event, the bell (notify_job_finished: job id, title, status,
 // one-line summary, run folder; the bell sends the OS notification for runs
-// that need the user or failed, paced) and pi-desk's own OS notification
+// that need the user or failed, paced) and Deckhand's own OS notification
 // for what the bell does not notify (a finished run with `notify: always`,
 // the auto-pause nudge, anything while the bell's Jobs group is off). Never
 // a notice to Atlas. Nothing but the event and the record at quit.
@@ -1381,7 +1381,7 @@ job_mark_read :: proc(j: ^Job, run: string) -> int {
 	return n
 }
 
-// A macOS notification while pi-desk is in the background: attention
+// A macOS notification while Deckhand is in the background: attention
 // (needs you, failures, safety stops) always, others at most one per 5 s.
 @(private = "file")
 jobs_notify :: proc(title, body: string, urgent: bool) {
@@ -1506,7 +1506,7 @@ job_note_save :: proc(path, text_: string, based_on := "") -> (string, string) {
 	if job_note_hash(string(now)) != based_on do return "", JOB_NOTE_STALE
 	// temp file + rename, with the note's own mode (write_atomic makes 0600)
 	slash := strings.last_index_byte(path, '/')
-	tmp := fmt.tprintf("%s/.%s.pi-desk-%d", path[:max(slash, 0)], path[slash + 1:], posix.getpid())
+	tmp := fmt.tprintf("%s/.%s.deckhand-%d", path[:max(slash, 0)], path[slash + 1:], posix.getpid())
 	if err := write_atomic(tmp, text); err != "" do return "", fmt.tprintf("could not write %s: %s", fs_display(path), err)
 	if fi, serr := os.stat(path, context.temp_allocator); serr == nil do os.chmod(tmp, fi.mode & os.Permissions_All)
 	if os.rename(tmp, path) != nil {
@@ -1729,7 +1729,7 @@ job_event_json :: proc(e: Job_Event) -> string {
 	return strings.to_string(b)
 }
 
-// Stops every run (quit): they would outlive pi-desk's records otherwise.
+// Stops every run (quit): they would outlive Deckhand's records otherwise.
 // The watchdog for every run now (tests).
 jobs_watch_all :: proc() {
 	now := jobs_now()
@@ -1754,7 +1754,7 @@ jobs_folders :: proc() -> []string {
 	return out[:]
 }
 
-// At startup (the first tick): the approval key file older pi-desk made
+// At startup (the first tick): the approval key file older Deckhand made
 // where the Keychain was not used (tests, test mode) goes; approvals were
 // removed. The Keychain is never touched (its old item stays until the user
 // deletes it in Keychain Access).

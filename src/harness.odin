@@ -1,11 +1,11 @@
 package main
 
-// The coding agents ("harnesses") pi-desk can start in a session: pi and Claude Code (sidebar.odin:
+// The coding agents ("harnesses") Deckhand can start in a session: pi and Claude Code (sidebar.odin:
 // Harness). Either may be missing: a Claude-only user has no pi, a pi user may have no Claude Code.
 //
 //   - Whether each is installed is looked for, never run: claude_installed (claude.odin) and
 //     pi_installed here, by stat on the PATH new tabs get (child_base_env) and in each one's own
-//     install folders. PI_DESK_CMD stands in for pi (tests, benchmarks): pi counts as installed.
+//     install folders. DECKHAND_CMD stands in for pi (tests, benchmarks): pi counts as installed.
 //   - The user's one "New session" (⌘N in Chats, ⇧⌘N, "+ New session", Chats' "+ New chat", a
 //     project's "+" and menu, a checkout's "New session here", the palette and the menu bar) goes
 //     through new_session_ui: no harness installed, a toast with how to install one; one, it
@@ -60,7 +60,7 @@ pi_detect :: proc(path, home, agent_dir: string) -> bool {
 }
 
 // The PATH pi_installed and claude_installed look in: the one new tabs get. Test mode looks in the
-// install folders only (under the scene's fake HOME), never PATH, unless PI_DESK_REAL_PI=1: a
+// install folders only (under the scene's fake HOME), never PATH, unless DECKHAND_REAL_PI=1: a
 // scene finds the same harnesses on every Mac, never the developer's own pi or claude.
 detect_path :: proc() -> string {
 	if test_mode() && hook_env(.Real_Pi) != "1" do return ""
@@ -95,7 +95,7 @@ pi_lookup_timeout := 10 * time.Second
 
 pi_lookup_state :: proc() -> Pi_Lookup {return Pi_Lookup(sync.atomic_load(&pi_lookup.state))}
 
-// Asks the login shell on a worker (once per recheck). Test mode: only with PI_DESK_REAL_PI=1, as
+// Asks the login shell on a worker (once per recheck). Test mode: only with DECKHAND_REAL_PI=1, as
 // detect_path (never the developer's own pi).
 @(private = "file")
 pi_lookup_start :: proc() {

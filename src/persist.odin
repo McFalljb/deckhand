@@ -319,7 +319,7 @@ workspace_json :: proc() -> string {
 		open_obj(&w)
 		if s.agent == .Claude {
 			// a Claude-only session (claude.odin): its main tab's Claude session; pi_session_id ""
-			// so that an older pi-desk leaves it out
+			// so that an older Deckhand leaves it out
 			ks(&w, "agent", "claude")
 			ks(&w, "claude_session_id", s.pi_session_id)
 			ks(&w, "pi_session_id", "")
@@ -350,7 +350,7 @@ workspace_json :: proc() -> string {
 				// Claude Code (claude.odin): its session (resumed on restore), folder and the user's flags
 				if ct.session_id != "" do ks(&w, "claude_session_id", ct.session_id)
 				ks(&w, "cwd", tab.cwd != "" ? tab.cwd : s.cwd)
-				if ct.readonly do kb(&w, "readonly", true) // pi-desk's read-only profile: kept at every start
+				if ct.readonly do kb(&w, "readonly", true) // Deckhand's read-only profile: kept at every start
 				if ct.account != "" do ks(&w, "account", ct.account) // its Claude Code account's folder (claude_accounts.odin)
 				if len(ct.args) > 0 {
 					k(&w, "args")
@@ -371,7 +371,7 @@ workspace_json :: proc() -> string {
 	}
 	strings.write_byte(&w.b, ']')
 	if current >= 0 do ki(&w, "current_session", current)
-	// Home: only its pi session id (its dir and cwd are pi-desk's own)
+	// Home: only its pi session id (its dir and cwd are Deckhand's own)
 	if hs := home_session(); hs != nil {
 		strings.write_string(&w.b, ",\n")
 		w.first = true
@@ -452,7 +452,7 @@ workspace_json :: proc() -> string {
 		write_strings(&w.b, state.claude_readonly_ids[:])
 	}
 
-	// Claude Code sessions pi-desk ran (claude.odin): Resume in a project's menu
+	// Claude Code sessions Deckhand ran (claude.odin): Resume in a project's menu
 	if len(state.claude_history) > 0 {
 		strings.write_string(&w.b, ",\n")
 		w.first = true
@@ -912,7 +912,7 @@ workspace_restore :: proc(text: string) -> string {
 		}
 	}
 
-	// Claude Code sessions pi-desk ran, and the conversations that ran read-only (one command:
+	// Claude Code sessions Deckhand ran, and the conversations that ran read-only (one command:
 	// the saved id list goes first, then the history's read-only records while there is room)
 	recs := make([dynamic]Claude_Record, context.temp_allocator)
 	ro_ids := make([dynamic]string, context.temp_allocator)
@@ -1078,7 +1078,7 @@ num_of :: proc(obj: json.Object, key: string) -> (f32, bool) {
 }
 
 // After the first layout (the pane has a size): focus the restored current
-// tab, which starts its session. Skipped when `pi-desk DIR` opens a new chat.
+// tab, which starts its session. Skipped when `deckhand DIR` opens a new chat.
 persist_after_layout :: proc(skip: bool) {
 	if persist.launch != {} && !persist.laid_out {
 		persist.laid_out = true

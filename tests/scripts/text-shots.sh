@@ -4,7 +4,7 @@
 # Usage: tests/scripts/text-shots.sh SCRIPT [BINARY]   (shots land in build/shots/)
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
-export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
+export DECKHAND_SCALE=${DECKHAND_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 BIN=${2:-build/deckhand}
@@ -21,6 +21,6 @@ for title in "Fix the login bug 🐛 before release" "日本語のドキュメ�
   printf '{"type":"session","version":3,"id":"tttt-%s","cwd":"%s"}\n' "$i" "$PROJ" > "$f"
   printf '{"type":"message","message":{"role":"user","content":"%s"}}\n' "$title" >> "$f"
 done
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" \
-  PI_DESK_CMD="sh '$ROOT/tests/scripts/text-sample.sh'; exec sleep 600" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" \
+  DECKHAND_CMD="sh '$ROOT/tests/scripts/text-sample.sh'; exec sleep 600" \
   "$BIN" "$PROJ"

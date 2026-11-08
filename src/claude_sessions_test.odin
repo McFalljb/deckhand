@@ -1,7 +1,7 @@
 package main
 
 // Claude-only sessions and Claude rows in the left column (claude.odin, sidebar.odin; docs/CLAUDE.md
-// §1, §4), and pi-desk without Claude Code installed. Same rules as core_test.odin: shared global
+// §1, §4), and Deckhand without Claude Code installed. Same rules as core_test.odin: shared global
 // State, one thread, harmless processes (`sleep` or a shell line standing in for claude).
 
 import "base:runtime"
@@ -34,17 +34,17 @@ cs_reset :: proc() -> runtime.Allocator {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes // the tests' stand-in for claude is installed (detection: claude_detection)
 	return runtime.heap_allocator()
 }
 
 @(private = "file")
 cs_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-cs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-cs-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -140,7 +140,7 @@ claude_session_new :: proc(t: ^testing.T) {
 	testing.expect(t, r3.ok || r3.error == "needs_confirmation", r3.error)
 }
 
-// A project's Claude sessions are rows in its session list, from pi-desk's own history: titles,
+// A project's Claude sessions are rows in its session list, from Deckhand's own history: titles,
 // a Claude flag, never another project's; an open one is not listed twice.
 @(test)
 claude_session_rows :: proc(t: ^testing.T) {
@@ -166,7 +166,7 @@ claude_session_rows :: proc(t: ^testing.T) {
 	run_command(Set_Filter{text = "secnd"}, CS_UI)
 	testing.expect_value(t, cs_row_ids(), "second claude(c)")
 	run_command(Set_Filter{text = ""}, CS_UI)
-	// rename: a pi-desk title of the user's
+	// rename: a Deckhand title of the user's
 	testing.expect(t, run_command(Claude_Rename{claude_session_id = "c2c2c2c2-0000-4000-8000-000000000001", title = "  parser work\n"}, CS_UI).ok)
 	testing.expect(t, strings.contains(cs_row_ids(), "parser work(c)"), cs_row_ids())
 	rec, _ := claude_record("c2c2c2c2-0000-4000-8000-000000000001")
@@ -244,11 +244,11 @@ claude_session_resume_from_row :: proc(t: ^testing.T) {
 	run_command(Claude_Turn_Report{tab_id = main, state = "idle"}, CS_SCRIPT)
 	run_command(Close_Session{session = r.created_id}, CS_UI)
 	argf := fmt.tprintf("%s/argv", dir)
-	plugin := os.get_env("PI_DESK_CLAUDE_PLUGIN", context.temp_allocator)
+	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
 	bare := fmt.tprintf("--plugin-dir\n%s\n--resume\n%s\n", plugin, sid)
 	for caller in ([]Caller{CS_CONTROL, CS_SCRIPT, CS_UI}) {
 		os.remove(argf)
-		os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
+		os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
 		rr := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = sid}, caller)
 		testing.expect(t, rr.ok, rr.error)
 		s := find_session(rr.created_id)
@@ -300,7 +300,7 @@ claude_session_restore :: proc(t: ^testing.T) {
 	testing.expect_value(t, strings.count(text, `"agent":"claude"`), 1)
 	context.allocator = cs_reset()
 	argf := fmt.tprintf("%s/argv", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
 	rescan_now()
 	testing.expect_value(t, workspace_restore(text), "")
 	testing.expect_value(t, len(state.open_sessions), 1)
@@ -456,7 +456,7 @@ claude_not_installed :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(find_session(pisess).tabs), 1)
 	testing.expect(t, strings.contains(toast.text, "claude.ai/install.sh"), toast.text)
 	testing.expect(t, strings.contains(toast.text, "npm or a managed install: code.claude.com/docs/en/setup"), toast.text) // other setups: the setup page
-	// the rows still list (pi-desk's own records)
+	// the rows still list (Deckhand's own records)
 	testing.expect(t, strings.contains(cs_row_ids(), "made before(c)"), cs_row_ids())
 	// the menus offer no Claude rows (one-harness users see nothing extra; harness.odin)
 	menu_open(Menu_Project(pid), {})
@@ -503,7 +503,7 @@ claude_restore_not_installed :: proc(t: ^testing.T) {
 	claude_installed_probe = proc() -> bool {return false}
 	defer claude_installed_probe = nil
 	marker := fmt.tprintf("%s/ran", cs_dir("rs-missing-ran"))
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`touch %s; exec sleep 30`, marker))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`touch %s; exec sleep 30`, marker))
 	rescan_now()
 	testing.expect_value(t, workspace_restore(text), "")
 	s := &state.open_sessions[0]

@@ -1,7 +1,7 @@
-package pi_desk_cli
+package deckhand_cli
 
 // A screenshot's PNG, checked rather than trusted (as pi-kit's desk/app.ts shotFile): after
-// resolving symlinks it must be directly in realpath(PI_DESK_SHOTS_DIR), named `<tab>-<n>.png`, a
+// resolving symlinks it must be directly in realpath(DECKHAND_SHOTS_DIR), named `<tab>-<n>.png`, a
 // regular file (opened without following a link) of at most SHOT_MAX bytes starting with the PNG
 // signature. Only then is its path printed for Claude to Read.
 
@@ -33,7 +33,7 @@ shot_name_ok :: proc(tab: i64, base: string) -> bool {
 // The checked real path, or why not.
 shot_check :: proc(tab: i64, file, shots_dir: string) -> (path: string, why: string) {
 	no := "not a Deckhand screenshot of this tab"
-	if shots_dir == "" do return "", "PI_DESK_SHOTS_DIR is not set"
+	if shots_dir == "" do return "", "DECKHAND_SHOTS_DIR is not set"
 	if !strings.has_prefix(file, "/") do return "", no
 	real, ok := real_path(file)
 	if !ok do return "", "the file could not be read"

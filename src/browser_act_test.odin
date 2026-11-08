@@ -181,7 +181,7 @@ browser_act_keys_parse :: proc(t: ^testing.T) {
 
 @(test)
 browser_act_pages_refused :: proc(t: ^testing.T) {
-	for u in ([]string{"https://a.example/x", "http://localhost:3000/", "pidesk-test://web/act.html", "about:blank"}) do testing.expectf(t, act_page_allowed(u), "%s refused", u)
+	for u in ([]string{"https://a.example/x", "http://localhost:3000/", "deckhand-test://web/act.html", "about:blank"}) do testing.expectf(t, act_page_allowed(u), "%s refused", u)
 	for u in ([]string{"file:///etc/hosts", "FILE:///x", "chrome://settings", "devtools://devtools/x", "view-source:https://a.example", "chrome-extension://abc/x", "data:text/html,x", "javascript:alert(1)", "about:settings", ""}) do testing.expectf(t, !act_page_allowed(u), "%s allowed", u)
 	// a tab on a file: page refuses actions at once
 	context.allocator = runtime.heap_allocator()
@@ -438,7 +438,7 @@ ends_free :: proc(m: ^map[u64]string) {
 	free(m)
 }
 
-// An action's time counts from when pi-desk accepted it (queued ones too), not from its turn.
+// An action's time counts from when Deckhand accepted it (queued ones too), not from its turn.
 @(test)
 browser_act_deadline_from_accept :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -523,7 +523,7 @@ browser_act_upload_paths :: proc(t: ^testing.T) {
 	}
 	for d in ([]string{data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator)}) {
 		code, _ := act_files_check([]string{fmt.tprintf("%s/x.txt", d)})
-		testing.expectf(t, code == "path_not_allowed", "pi-desk's own %s: %s", d, code)
+		testing.expectf(t, code == "path_not_allowed", "Deckhand's own %s: %s", d, code)
 	}
 	f := tmp_file("real.txt")
 	link := fmt.tprintf("%s/link.txt", filepath.dir(f))

@@ -1,6 +1,6 @@
 package main
 
-// A Claude tab's status for any setup (docs/CLAUDE.md §5a): what pi-desk can tell when Claude Code
+// A Claude tab's status for any setup (docs/CLAUDE.md §5a): what Deckhand can tell when Claude Code
 // gives it less than the newest version does.
 //
 //   - Dots from the hooks. Claude Code reports its own status (OSC 7501) from v2.1.295; an older or
@@ -15,7 +15,7 @@ package main
 //     it and a claude_wait_idle result lists it (pi's blockers likewise feed only its reload
 //     confirmation).
 //   - "Hooks not running". Every feed of the plugin is a hook. When `disableAllHooks` is set, a
-//     managed `allowManagedHooksOnly` blocks pi-desk's plugin, or the plugin does not load, a
+//     managed `allowManagedHooksOnly` blocks Deckhand's plugin, or the plugin does not load, a
 //     Claude tab reports nothing: no session id (a new one is not saved and cannot resume), no
 //     comments, no held texts, empty panels. When no hook has reported a turn in this run of the
 //     tab (a restored tab's saved session id does not count) CLAUDE_HOOKS_GRACE after Claude's
@@ -203,7 +203,7 @@ old_version :: proc(tab: ^Tab) -> string {
 }
 
 // The bar over a Claude tab ("" = none): its hooks never reported, else its Claude Code is older
-// than pi-desk's minimum.
+// than Deckhand's minimum.
 claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if tab == nil do return ""
 	if _, is := tab.kind.(Claude_Tab); !is || tab.status != .Running do return ""

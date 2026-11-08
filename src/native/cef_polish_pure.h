@@ -8,7 +8,7 @@
 // The address a download is recorded as coming from (its quarantine record): http and https
 // only, without a user:password@ part, the query or the fragment. 0: none (another scheme, too
 // long).
-static int pd_url_for_record(const char* in, char* out, size_t cap) {
+static int dh_url_for_record(const char* in, char* out, size_t cap) {
     if (!in || !out || cap == 0) return 0;
     size_t skip;
     if (!strncasecmp(in, "http://", 7)) skip = 7;
@@ -34,7 +34,7 @@ static int pd_url_for_record(const char* in, char* out, size_t cap) {
 
 // At most one line a second: 1 when a line may be said at now (seconds; *skipped back to 0);
 // otherwise the line is counted in *skipped (said with the next one).
-static int pd_rate_ok(double* last, int* skipped, double now) {
+static int dh_rate_ok(double* last, int* skipped, double now) {
     if (*last != 0 && now - *last < 1.0) {
         (*skipped)++;
         return 0;

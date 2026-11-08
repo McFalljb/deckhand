@@ -1,12 +1,12 @@
-// pi-desk's annotation overlay (docs/BROWSER.md §3.2-3.5), embedded in pi-desk
-// (src/browser_annotate.odin, #load) and run in the "pi-desk" isolated world of
+// Deckhand's annotation overlay (docs/BROWSER.md §3.2-3.5), embedded in Deckhand
+// (src/browser_annotate.odin, #load) and run in the "deckhand" isolated world of
 // each page's top frame: Page.addScriptToEvaluateOnNewDocument for new
 // documents, Page.createIsolatedWorld + Runtime.evaluate for the one already
 // there. The page's scripts share the DOM but not this world's globals, and
 // the binding (__pdAnnot, Runtime.addBinding with executionContextName) exists
 // here only: a page cannot call it.
 //
-// The page finds, pi-desk draws: nothing is added to the DOM. pi-desk calls
+// The page finds, Deckhand draws: nothing is added to the DOM. Deckhand calls
 // __pd.* (Runtime.evaluate in this world, numbers and JSON only); answers and
 // changes go back through the binding as one JSON string each:
 //   hello  {url, title, sx, sy, vw, vh}           a document is ready (or came back from the cache)
@@ -202,7 +202,7 @@
       }
       post(Object.assign({ t: "area", seq, r: [R(x), R(y), R(w), R(h)], els }, page()));
     },
-    // the markers to follow in this document (pi-desk's list replaces the last one), and comment mode
+    // the markers to follow in this document (Deckhand's list replaces the last one), and comment mode
     track(list, on) {
       markers = Array.isArray(list) ? list : [];
       commenting = !!on;

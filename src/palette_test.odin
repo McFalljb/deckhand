@@ -25,7 +25,7 @@ reset :: proc() -> runtime.Allocator {
 	tf_set(&palette.field, "")
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 

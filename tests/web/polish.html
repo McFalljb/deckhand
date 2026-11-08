@@ -1,6 +1,6 @@
 <!doctype html>
 <!-- Tab polish fixture (tests/scripts/browser-polish*.txt; docs/BROWSER.md step 3), served as
-     pidesk-test://web/polish.html. Fixed positions (CSS px from the page's top-left):
+     deckhand-test://web/polish.html. Fixed positions (CSS px from the page's top-left):
        #alert    20,20  160x40   alert(), then the title says "after alert"
        #confirm  20,70  160x40   confirm(): the title says "confirm=true|false"
        #prompt   20,120 160x40   prompt() with "Ada": the title says "prompt=<answer>"
@@ -39,7 +39,7 @@
 <button id="cam" onclick="navigator.mediaDevices.getUserMedia({video: true}).then(() => document.title = 'cam=ok', e => document.title = 'cam=' + e.name)">camera</button>
 <script>
   window.opened = 'none';
-  // a blob (downloads of pidesk-test:// addresses never start: the download path does not see
+  // a blob (downloads of deckhand-test:// addresses never start: the download path does not see
   // the test scheme's handler)
   document.getElementById('dl').href = URL.createObjectURL(new Blob(['pi-desk download fixture\n'], {type: 'text/plain'}));
   window.tryOpen = () => { const w = window.open('nav-b.html?from=script'); window.opened = w ? 'window' : 'null'; };

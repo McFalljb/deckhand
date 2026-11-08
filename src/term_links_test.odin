@@ -179,7 +179,7 @@ term_link_command :: proc(t: ^testing.T) {
 		testing.expect_value(t, opened[0], "mailto:a@example.invalid")
 		testing.expect_value(t, opened[1], "https://example.com/ext")
 	}
-	// http(s): pi-desk's browser in the terminal's session, in front, when the build has
+	// http(s): Deckhand's browser in the terminal's session, in front, when the build has
 	// one; without CEF (this test build) the default browser
 	n := len(state.open_sessions[0].tabs)
 	r = run_command(Terminal_Link{tab_id = tab, url = "https://example.com/b"}, ui)

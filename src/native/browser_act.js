@@ -1,8 +1,8 @@
 // What an agent's actions need from the page (docs/BROWSER.md §4, step 8): browser_act.odin
-// (#load). Evaluated as one expression in the "pi-desk" isolated world of the page's top frame
+// (#load). Evaluated as one expression in the "deckhand" isolated world of the page's top frame
 // (the overlay's world, as browser_read.js): the page's scripts share the DOM but not this
 // world's globals or prototypes, so they cannot patch what it calls. The input itself (clicks,
-// keys) is CDP's Input domain, sent by pi-desk; this only finds targets, checks fields and reports.
+// keys) is CDP's Input domain, sent by Deckhand; this only finds targets, checks fields and reports.
 // Called as (THIS)(req); returns a JSON string (op "file_el": the element itself):
 //   init    {}     the password tracker (also at every new document's start: browser_annotate.odin)
 //   target  {sel?, x?, y?, center?, scroll, focus, need}   the element (a ref, a simple selector, or the
@@ -16,7 +16,7 @@
 //           root is closed, an unknown element: cannot be checked), "frame" (focus is inside an
 //           embedded document: cannot be checked), "sensitive"; plain: a "none" that is the page
 //           itself or focusable by nature (a button, a link). select: a "text" target's content
-//           is selected (clear: the text pi-desk inserts next replaces it)
+//           is selected (clear: the text Deckhand inserts next replaces it)
 //   revealed {}    how many password fields show their text now (type flipped by a "show
 //           password" button, or a password autocomplete field with text): screenshots wait
 //   select  {sel, label?, value?}  choose an option of a <select> (input and change events)

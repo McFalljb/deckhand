@@ -1569,8 +1569,8 @@ md_follow :: proc(v: ^Md_View, s: ^Open_Session, doc_path: string, c: Markdown_F
 	if scheme, has := url_scheme(url); has {
 		switch scheme {
 		case "http", "https", "mailto":
-			// it leaves pi-desk (the user's browser or mail, signed in): only the
-			// user's click, or a call the user confirms in pi-desk
+			// it leaves Deckhand (the user's browser or mail, signed in): only the
+			// user's click, or a call the user confirms in Deckhand
 			changed := false
 			if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
 				what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(url, context.temp_allocator))

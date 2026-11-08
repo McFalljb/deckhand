@@ -34,17 +34,17 @@ rv_reset :: proc() -> runtime.Allocator {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	return runtime.heap_allocator()
 }
 
 @(private = "file")
 rv_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-rv-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-rv-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -143,7 +143,7 @@ rv_dead_dup :: proc(t: ^testing.T) {
 	main := find_session(r.created_id).tabs[0].id
 	run_command(Claude_Session_Report{tab_id = main, session_id = sidc}, RV_SCRIPT)
 	argf := fmt.tprintf("%s/argv", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
 	run_command(Tab_Exited{tab_id = main, exit = {known = true, code = 0}}, {kind = .Internal})
 	o := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = sidc}, RV_UI)
 	testing.expect_value(t, o.created_id, r.created_id)
@@ -220,7 +220,7 @@ rv_agents_do_not_start_restored :: proc(t: ^testing.T) {
 	text := strings.clone(workspace_json())
 	context.allocator = rv_reset()
 	argf := fmt.tprintf("%s/argv", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argf, argf, argf))
 	rescan_now()
 	testing.expect_value(t, workspace_restore(text), "")
 	a, b := &state.open_sessions[0], &state.open_sessions[1]
@@ -238,7 +238,7 @@ rv_agents_do_not_start_restored :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(rv_wait_file(argf), "--dangerously-skip-permissions"))
 }
 
-// The history from the saved file is checked like a report: no flags pi-desk sets, one-line
+// The history from the saved file is checked like a report: no flags Deckhand sets, one-line
 // titles of at most 80 characters, ids that can go into argv.
 @(test)
 rv_history_checked_on_load :: proc(t: ^testing.T) {

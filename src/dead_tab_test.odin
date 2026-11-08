@@ -37,7 +37,7 @@ d_reset :: proc() -> runtime.Allocator {
 	dead_tab_reset()
 	platform = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 
@@ -46,13 +46,13 @@ d_done :: proc() {
 	inbox_drain()
 	for _, t in terms do reader_stop_and_close(t)
 	claude_installed_probe = nil
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 }
 
 // One project with one listed session (dddd-1) in a temp HOME's pi store.
 @(private = "file")
 d_home :: proc() -> (project: u64) {
-	home := fmt.aprintf("%s/pi-desk-dead-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	home := fmt.aprintf("%s/deckhand-dead-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	dir, _ := filepath.join({home, ".pi", "agent", "sessions", "--tmp--"}, context.temp_allocator)
 	os.make_directory_all(dir)
 	header := `{"type":"session","version":3,"id":"dddd-1","cwd":"/tmp"}` + "\n"
@@ -98,7 +98,7 @@ dead_tab_exit_status :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	pid := d_home()
-	os.set_env("PI_DESK_CMD", "exit 3")
+	os.set_env("DECKHAND_CMD", "exit 3")
 	r := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_SCRIPT)
 	testing.expect(t, r.ok, r.error)
 	tab := find_session(r.created_id).tabs[0].id
@@ -112,7 +112,7 @@ dead_tab_exit_status :: proc(t: ^testing.T) {
 	testing.expect_value(t, dead_tab_tip(tb), "pi exited (code 3)")
 
 	// killed by a signal (a hangup, as when a parent dies): said as one
-	os.set_env("PI_DESK_CMD", `kill -HUP $$`)
+	os.set_env("DECKHAND_CMD", `kill -HUP $$`)
 	r2 := run_command(Pi_Restart{tab_id = tab}, D_SCRIPT)
 	testing.expect(t, r2.ok, r2.error)
 	testing.expect(t, d_wait_exit(tab), "exited again")
@@ -145,16 +145,16 @@ dead_tab_open_restarts :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	pid := d_home()
-	args := fmt.tprintf("%s/pi-desk-dead-args-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	args := fmt.tprintf("%s/deckhand-dead-args-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	defer os.remove(args)
-	os.set_env("PI_DESK_CMD", "exit 1")
+	os.set_env("DECKHAND_CMD", "exit 1")
 	r := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_SCRIPT)
 	sess := r.created_id
 	tab := find_session(sess).tabs[0].id
 	testing.expect(t, d_wait_exit(tab))
 
 	// the listed session's row (and the palette, the bell, open_session)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
 	r2 := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_UI)
 	testing.expect(t, r2.ok, r2.error)
 	testing.expect_value(t, r2.created_id, sess)
@@ -173,13 +173,13 @@ dead_tab_open_restarts :: proc(t: ^testing.T) {
 	testing.expect_value(t, term_of(tab).pty.pid, pid1)
 
 	// the Open group's row (a focus that opens): restarts; a plain focus does not
-	os.set_env("PI_DESK_CMD", "exit 1")
+	os.set_env("DECKHAND_CMD", "exit 1")
 	run_command(Pi_Restart{tab_id = tab}, D_SCRIPT) // refused: still running
 	testing.expect_value(t, term_of(tab).pty.pid, pid1)
 	drop_term(tab) // the old pi goes
 	d_term(tab, "exit 1")
 	testing.expect(t, d_wait_exit(tab))
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	run_command(Focus_Session{session = sess}, D_UI)
 	_, tb, _ := find_tab(tab)
 	testing.expect_value(t, tb.status, Tab_Status.Exited)
@@ -210,12 +210,12 @@ pi_restart_command :: proc(t: ^testing.T) {
 	testing.expect(t, command_spec("pi_restart") != nil, "in the command table")
 
 	// Restart with model…: pi's selector key goes in once the new pi reports
-	out := fmt.tprintf("%s/pi-desk-dead-keys-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	out := fmt.tprintf("%s/deckhand-dead-keys-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	defer os.remove(out)
 	drop_term(tab)
 	d_term(tab, "exit 1")
 	testing.expect(t, d_wait_exit(tab))
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	r2 := run_command(Pi_Restart{tab_id = tab, pick_model = true}, D_UI)
 	testing.expect(t, r2.ok, r2.error)
 	testing.expect(t, restart_picking(tab), "the selector waits for the new pi")
@@ -229,13 +229,13 @@ pi_restart_command :: proc(t: ^testing.T) {
 	testing.expect(t, !restart_picking(tab))
 
 	// a pi that never reports: given up after the wait, said in a toast
-	os.set_env("PI_DESK_CMD", "exit 1")
+	os.set_env("DECKHAND_CMD", "exit 1")
 	drop_term(tab)
 	d_term(tab, "exit 1")
 	_, tb, _ := find_tab(tab)
 	tb.agent = .Unknown
 	testing.expect(t, d_wait_exit(tab))
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	run_command(Pi_Restart{tab_id = tab, pick_model = true}, D_UI)
 	dead_tab_tick(time.tick_add(time.tick_now(), PICKER_WAIT + time.Second))
 	testing.expect(t, !restart_picking(tab))
@@ -250,13 +250,13 @@ dead_tab_bell_restarts :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	pid := d_home()
-	os.set_env("PI_DESK_CMD", "exit 1")
+	os.set_env("DECKHAND_CMD", "exit 1")
 	sess := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_SCRIPT).created_id
 	tab := find_session(sess).tabs[0].id
 	state.current_session = 0 // not on screen: the exit makes an entry
 	testing.expect(t, d_wait_exit(tab))
 	testing.expect_value(t, len(state.notices.items), 1)
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	bell_activate(state.notices.items[0].id)
 	inbox_drain()
 	_, tb, _ := find_tab(tab)
@@ -271,7 +271,7 @@ dead_tab_failed_restart_keeps_it :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	pid := d_home()
-	os.set_env("PI_DESK_CMD", "exit 4")
+	os.set_env("DECKHAND_CMD", "exit 4")
 	sess := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_SCRIPT).created_id
 	tab := find_session(sess).tabs[0].id
 	testing.expect(t, d_wait_exit(tab))
@@ -386,15 +386,15 @@ dead_tab_pickers_per_tab :: proc(t: ^testing.T) {
 	outs: [2]string
 	tabs: [2]u64
 	for i in 0 ..< 2 {
-		outs[i] = fmt.tprintf("%s/pi-desk-dead-pick-%d-%d", os.get_env("TMPDIR", context.temp_allocator), i, time.now()._nsec)
-		os.set_env("PI_DESK_CMD", "exit 1")
+		outs[i] = fmt.tprintf("%s/deckhand-dead-pick-%d-%d", os.get_env("TMPDIR", context.temp_allocator), i, time.now()._nsec)
+		os.set_env("DECKHAND_CMD", "exit 1")
 		sess := run_command(New_Chat{project_id = state.selected_project}, D_SCRIPT).created_id
 		tabs[i] = find_session(sess).tabs[0].id
 		testing.expect(t, d_wait_exit(tabs[i]))
 	}
 	defer for o in outs do os.remove(o)
 	for i in 0 ..< 2 {
-		os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", outs[i]))
+		os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", outs[i]))
 		testing.expect(t, run_command(Pi_Restart{tab_id = tabs[i], pick_model = true}, D_UI).ok)
 	}
 	testing.expect(t, restart_picking(tabs[0]) && restart_picking(tabs[1]))
@@ -421,13 +421,13 @@ dead_tab_restart_clears_program_status :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
 	pid := d_home()
-	os.set_env("PI_DESK_CMD", "exit 1")
+	os.set_env("DECKHAND_CMD", "exit 1")
 	r := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_SCRIPT)
 	tab := find_session(r.created_id).tabs[0].id
 	testing.expect(t, d_wait_exit(tab))
 	_, tb, _ := find_tab(tab)
 	prog_summary_set(&tb.prog, {state = .Error, app = "pi", msg = "boom", records = 1})
-	os.set_env("PI_DESK_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CMD", "exec sleep 30")
 	r2 := run_command(Open_Session_Cmd{project_id = pid, pi_session_id = "dddd-1"}, D_UI)
 	testing.expect(t, r2.ok, r2.error)
 	_, tb, _ = find_tab(tab)
@@ -439,7 +439,7 @@ dead_tab_restart_clears_program_status :: proc(t: ^testing.T) {
 // ---- a dead Claude tab: Restart with model… ----
 
 // "Restart with model…" on a Claude tab that failed: Claude Code starts again on its conversation
-// (--resume), then pi-desk pastes its own fixed `/model` (Claude Code's model picker) under the
+// (--resume), then Deckhand pastes its own fixed `/model` (Claude Code's model picker) under the
 // held-prompt rules: only once the turn is idle per the hooks, with bracketed paste on and nothing
 // typed; never when claude was not found. Without a ready Claude before the deadline the user is
 // told how to open the picker.
@@ -447,19 +447,19 @@ dead_tab_restart_clears_program_status :: proc(t: ^testing.T) {
 claude_restart_with_model :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
-	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
-	dir := fmt.aprintf("%s/pi-desk-dead-model-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	dir := fmt.aprintf("%s/deckhand-dead-model-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-dm"), cwd = dir}
 	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	sess := s.id
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 1")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
 	id := run_command(New_Claude_Tab{session = sess}, D_UI).created_id
 	run_command(Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556670", source = "startup"}, D_SCRIPT)
 	exited := false
@@ -480,7 +480,7 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 	tab.exit = nf
 	// restart, then the picker once Claude is ready
 	got := fmt.tprintf("%s/claude-stdin", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("exec cat > '%s'", got))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > '%s'", got))
 	r := run_command(Claude_Restart{tab_id = id, pick_model = true}, D_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, restart_picking(id), "waits for Claude to be ready")
@@ -513,7 +513,7 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 	// the deadline: never ready, the user is told how
 	drop_term(id)
 	tab.status, tab.exit = .Exited, Exit_Info{known = true, code = 1}
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	testing.expect(t, run_command(Claude_Restart{tab_id = id, pick_model = true}, D_UI).ok)
 	testing.expect(t, restart_picking(id))
 	dead_tab_tick(time.tick_add(time.tick_now(), 60 * time.Second))
@@ -529,19 +529,19 @@ claude_restart_with_model :: proc(t: ^testing.T) {
 claude_restart_pick_model_user :: proc(t: ^testing.T) {
 	context.allocator = d_reset()
 	defer d_done()
-	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
-	dir := fmt.aprintf("%s/pi-desk-dead-pick-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+	dir := fmt.aprintf("%s/deckhand-dead-pick-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	os.set_env("HOME", dir)
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-dp"), cwd = dir}
 	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
-	os.set_env("PI_DESK_CLAUDE_CMD", "exit 1")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exit 1")
 	id := run_command(New_Claude_Tab{session = s.id}, D_UI).created_id
 	run_command(Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556690", source = "startup"}, D_SCRIPT)
 	exited := false
@@ -554,7 +554,7 @@ claude_restart_pick_model_user :: proc(t: ^testing.T) {
 		time.sleep(10 * time.Millisecond)
 	}
 	testing.expect(t, exited, "the fake exited")
-	os.set_env("PI_DESK_CLAUDE_CMD", "exec sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	r := run_command(Claude_Restart{tab_id = id, pick_model = true}, Caller{kind = .Control})
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, !restart_picking(id), "no model picker for an agent's restart")

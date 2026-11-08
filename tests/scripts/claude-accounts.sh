@@ -2,7 +2,7 @@
 # Claude Code accounts and Claude sessions found on disk in quiet test mode (docs/CLAUDE.md §1b,
 # §4b): never a real claude, never the user's ~/.claude*. A fake HOME with two fake accounts
 # (~/.claude and ~/.claude-work: fake account files, read by stat only) whose projects/ hold fake
-# transcripts of the project (one each, run outside pi-desk, plus a subagent file that is never a
+# transcripts of the project (one each, run outside Deckhand, plus a subagent file that is never a
 # row); a pi session beside them. Rows show the harness icons and account names (light and dark),
 # + New session opens the picker with a row per account, a found row resumes under its account by the
 # transcript's path (CLAUDE_CONFIG_DIR as the fake claude saw it).
@@ -35,9 +35,9 @@ touch -t 202611021000 "$FAKE_HOME/.claude-work/projects/$SLUG/22222222-0000-4000
 claude_stub "$FAKE_HOME"
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdca.XXXXXX") # a short runtime dir: the socket path must fit sun_path
 CLAUDE_CMD="printf '%s\n' \"\${CLAUDE_CONFIG_DIR:-unset}\" >> '$W/ccd.txt'; exec python3 -I '$ROOT/tests/scripts/fake-claude.py' \"\$@\""
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/claude-accounts.txt \
-  PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" PI_DESK_CMD='exec sleep 600' \
-  PI_DESK_CLAUDE_CMD="$CLAUDE_CMD" FAKE_CLAUDE_LOG="$W/claude.log" FAKE_CLAUDE_TURN_MS=200 \
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/claude-accounts.txt \
+  DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" DECKHAND_CMD='exec sleep 600' \
+  DECKHAND_CLAUDE_CMD="$CLAUDE_CMD" FAKE_CLAUDE_LOG="$W/claude.log" FAKE_CLAUDE_TURN_MS=200 \
   "$ROOT/build/deckhand" "$PROJ" > "$W/run.log" 2>&1 || true
 rm -rf "$RUN"
 fail=0

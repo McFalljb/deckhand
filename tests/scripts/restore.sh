@@ -23,8 +23,8 @@ store "$W/alpha" aaaa-1 01
 store "$W/beta" bbbb-2 02
 run() { # script data-dir [args]
   s=$1 d=$2; shift 2
-  HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT="$s" PI_DESK_DATA_DIR="$d" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@"
+  HOME="$W/home" SHELL=/bin/sh DECKHAND_SCRIPT="$s" DECKHAND_DATA_DIR="$d" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$@"
 }
 
 echo "== run 1: open, quit (confirm flow)"
@@ -37,7 +37,7 @@ cat "$W/data/workspace.json"
 
 echo "== run 2: relaunch, restore"
 run tests/scripts/restore-2.txt "$W/data" > "$W/run2.log" 2>&1 || { cat "$W/run2.log"; exit 1; }
-grep -E "ASSERT|done:|pi-desk:|found|TIMEOUT" "$W/run2.log"
+grep -E "ASSERT|done:|Deckhand:|found|TIMEOUT" "$W/run2.log"
 ! grep -q TIMEOUT "$W/run2.log" || { echo "a waitfor timed out"; exit 1; }
 grep -c '"command":{"type":"restore_session"' "$W/data/commands.log" | sed 's/^/restore_session events in the log: /'
 grep -q "ARGS: --session $W/home/.pi/agent/sessions/.*_aaaa-1.jsonl" "$W/run2.log" || grep -q "found ARGS: --session" "$W/run2.log" || { echo "pi not resumed"; exit 1; }
@@ -58,13 +58,13 @@ mkdir -p "$W/big"
 } > "$W/data/workspace.json"
 for n in 1 2 3; do
   run tests/scripts/restore-big.txt "$W/data" > "$W/run3-$n.log" 2>&1 || { cat "$W/run3-$n.log"; exit 1; }
-  grep -E "ASSERT|Deckhand:|pi-desk:" "$W/run3-$n.log"
+  grep -E "ASSERT|Deckhand:|deckhand:" "$W/run3-$n.log"
   cp "$W/data/workspace.json" "$W/big-$n.json"
 done
 echo "== baseline: same HOME, --fresh"
 for n in 1 2 3; do
   run tests/scripts/restore-fresh.txt "$W/data-fresh" --fresh > "$W/fresh-$n.log" 2>&1 || { cat "$W/fresh-$n.log"; exit 1; }
-  grep -E "ASSERT|Deckhand:|pi-desk:" "$W/fresh-$n.log" || true
+  grep -E "ASSERT|Deckhand:|deckhand:" "$W/fresh-$n.log" || true
 done
 echo "== run 4: Atlas's session from another folder: forked once into the main folder"
 A="$W/atlas"
@@ -76,8 +76,8 @@ cp "$OLD" "$A/old.copy"
 printf '{"v":1,"projects":[],"open_sessions":[],"home":{"pi_session_id":"atlas-1"},"layout":{"left_width":300,"right_width":320,"right_open":true,"panels":[],"collapsed":[]},"settings":{"home_dir":"%s","setup_seen":true}}\n' "$MAIN" > "$A/data/workspace.json"
 atlas_run() { # log
   rm -f "$A/args"
-  HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/restore-atlas.txt PI_DESK_DATA_DIR="$A/data" \
-    PI_DESK_CMD='case " $* " in *" --append-system-prompt "*) ;; *) exec sleep 600;; esac; while [ "${1:-}" = -e ]; do shift 2; done; printf "%s\n" "$@" > "'"$A"'/args.tmp"; pwd -P >> "'"$A"'/args.tmp"; mv "'"$A"'/args.tmp" "'"$A"'/args"; exec sleep 600' \
+  HOME="$W/home" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/restore-atlas.txt DECKHAND_DATA_DIR="$A/data" \
+    DECKHAND_CMD='case " $* " in *" --append-system-prompt "*) ;; *) exec sleep 600;; esac; while [ "${1:-}" = -e ]; do shift 2; done; printf "%s\n" "$@" > "'"$A"'/args.tmp"; pwd -P >> "'"$A"'/args.tmp"; mv "'"$A"'/args.tmp" "'"$A"'/args"; exec sleep 600' \
     build/deckhand > "$1" 2>&1 || { cat "$1"; exit 1; }
   grep -E "ASSERT|done:" "$1"
   ! grep -q TIMEOUT "$1" || { echo "a waitfor timed out"; exit 1; }

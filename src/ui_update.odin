@@ -1,6 +1,6 @@
 package main
 
-// The update bar over the centre (update.odin has the model): "pi-desk 0.1.1 is
+// The update bar over the centre (update.odin has the model): "Deckhand 0.1.1 is
 // available" with Release notes, Skip this version, Later and Update; then
 // "Downloading…", "ready: Restart to update", or why it was not installed. Every step is
 // a visible button; nothing installs without a click.

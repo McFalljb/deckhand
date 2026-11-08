@@ -1,7 +1,7 @@
 package main
 
 // A dry run of the Projects tree (project_tidy.odin) against a real store,
-// opt-in: PI_DESK_TREE_DRYRUN=<file> names a TSV of store folders made by
+// opt-in: DECKHAND_TREE_DRYRUN=<file> names a TSV of store folders made by
 // scripts/tree-dryrun.py (store dir, header cwd, newest and oldest mtime in
 // ns: only the cwd of each folder's newest session header, nothing else from
 // the sessions). Prints the rows with every parent and group row open, and
@@ -9,7 +9,7 @@ package main
 // sessions are the ones in its own store dir: none move). Without the
 // variable it does nothing. Usage:
 //   python3 -I scripts/tree-dryrun.py > /tmp/store.tsv
-//   PI_DESK_TREE_DRYRUN=/tmp/store.tsv odin test src -define:ODIN_TEST_THREADS=1 \
+//   DECKHAND_TREE_DRYRUN=/tmp/store.tsv odin test src -define:ODIN_TEST_THREADS=1 \
 //     -define:ODIN_TEST_NAMES=main.tree_dryrun
 
 import "core:fmt"
@@ -21,7 +21,7 @@ import "core:time"
 
 @(test)
 tree_dryrun :: proc(t: ^testing.T) {
-	file := os.get_env("PI_DESK_TREE_DRYRUN", context.temp_allocator)
+	file := os.get_env("DECKHAND_TREE_DRYRUN", context.temp_allocator)
 	if file == "" do return
 	context.allocator = context.temp_allocator // (a one-off: the state is dropped after)
 	data, err := os.read_entire_file(file, context.allocator)

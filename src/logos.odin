@@ -1,6 +1,6 @@
 package main
 
-// Harness logos: the real marks of the agents pi-desk runs (sidebar.odin: HARNESSES), not
+// Harness logos: the real marks of the agents Deckhand runs (sidebar.odin: HARNESSES), not
 // glyphs drawn for them. Sources, colours and usage terms: assets/harness/README.md.
 //
 // Both marks are pixel art: a grid of cells, each one colour or empty. A logo is rasterised
@@ -47,8 +47,8 @@ LOGO_PI := []string{
 
 // Whether Claude Code's mascot is shown. Anthropic's trademark guidelines ask for approval
 // before its marks are used (assets/harness/README.md); build with
-// -define:PI_DESK_CLAUDE_LOGO=false and Claude rows show the plain glyph instead.
-LOGO_CLAUDE_ON :: #config(PI_DESK_CLAUDE_LOGO, true)
+// -define:DECKHAND_CLAUDE_LOGO=false and Claude rows show the plain glyph instead.
+LOGO_CLAUDE_ON :: #config(DECKHAND_CLAUDE_LOGO, true)
 
 // Claude Code: Clawd, the mascot on its welcome screen, as Claude Code 2.1.318 draws it. In the
 // terminal it is three rows of quadrant block characters, each quadrant a cell one wide and

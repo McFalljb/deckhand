@@ -233,7 +233,7 @@ jobs_run_now_rules :: proc(t: ^testing.T) {
 }
 
 // 4: unknown frontmatter keys are errors (a job never runs with a key
-// pi-desk does not understand), approval keys too (never job settings).
+// Deckhand does not understand), approval keys too (never job settings).
 @(test)
 jobs_unknown_keys_error :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -409,7 +409,7 @@ os_notes: [dynamic]string
 
 // The bell (notify.odin) gets every delivered run: job id, title, status,
 // one-line summary, run folder; one OS notification per run, not two (the
-// bell's paced one for attention; pi-desk's own only for what the bell does
+// bell's paced one for attention; Deckhand's own only for what the bell does
 // not notify).
 @(test)
 jobs_deliver_to_bell :: proc(t: ^testing.T) {
@@ -543,7 +543,7 @@ jobs_pid_cleared_after_reap :: proc(t: ^testing.T) {
 }
 
 // No approval key: startup makes none and removes the old file (test mode
-// and non-macOS kept it there); no Keychain code is left in pi-desk (the
+// and non-macOS kept it there); no Keychain code is left in Deckhand (the
 // browser's mock keychain switch, cef_macos.m, is Chromium's and unrelated).
 @(test)
 jobs_no_approval_key :: proc(t: ^testing.T) {

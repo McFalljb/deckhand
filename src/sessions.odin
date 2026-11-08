@@ -55,10 +55,10 @@ Session :: struct {
 	title:    string, // name, first prompt or goal (titles.odin); "" = none
 	untitled: string, // "Untitled session · <when_>" for a file without a title
 	modified: time.Time, // the file's modification time: last activity
-	claude:   bool, // a Claude Code session (pi-desk's history, or found on disk: claude_disk.odin), not a pi file
+	claude:   bool, // a Claude Code session (Deckhand's history, or found on disk: claude_disk.odin), not a pi file
 	account:  string, // Claude: its account's config folder ("" = the default)
-	found:    bool, // Claude: a transcript found on disk, not in pi-desk's history
-	gone:     bool, // Claude: pi-desk's history entry whose transcript is gone (greyed)
+	found:    bool, // Claude: a transcript found on disk, not in Deckhand's history
+	gone:     bool, // Claude: Deckhand's history entry whose transcript is gone (greyed)
 }
 
 @(private = "file")
@@ -115,7 +115,7 @@ scan_projects :: proc(scan: ^Scan_Result) {
 
 // Main thread: makes `scan` the project list. Projects keep their id and
 // name across scans (matched by cwd); projects added by hand that have no
-// sessions yet stay at the top. The Chats entry (when pi-desk has a data
+// sessions yet stay at the top. The Chats entry (when Deckhand has a data
 // dir) is last. Takes ownership of `scan`.
 apply_scan :: proc(scan: ^Scan_Result) {
 	heap := context.allocator

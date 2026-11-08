@@ -675,7 +675,7 @@ rclickid jobrow 0
 clickmenu Open note
 eventually
 assert_state open_sessions.5.tabs.4.title menu-job.md
-# a run while pi-desk is behind: unread, so the menu offers Mark read
+# a run while Deckhand is behind: unread, so the menu offers Mark read
 window_active off
 rclickid jobrow 0
 clickmenu Run now

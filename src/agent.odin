@@ -4,7 +4,7 @@ package main
 // Home session's pi (home.odin) in its normal terminal UI, shown in the
 // drawer (drawer.odin, ⌘J). It starts like any pi tab, with a bridge token
 // (the pi integration's bridge reports its status, pi.status) and Home's control
-// token (its desk tools drive pi-desk through the socket; pi_integration.odin).
+// token (its desk tools drive Deckhand through the socket; pi_integration.odin).
 //
 // What is Atlas's own:
 //   - its prompt: <data dir>/atlas/ATLAS.md, made with a short starter on
@@ -14,7 +14,7 @@ package main
 //     startup, the old one kept as ATLAS.md.bak-<date> (agent_prompt_migrate)
 //   - the user guide: docs/GUIDE.md, built into the binary and written to
 //     <data dir>/atlas/GUIDE.md at startup when it differs
-//     (agent_guide_install), so Atlas reads the guide of the pi-desk that
+//     (agent_guide_install), so Atlas reads the guide of the Deckhand that
 //     runs it, wherever the binary lives; its path reaches Atlas as one more
 //     --append-system-prompt line, also when the user edited ATLAS.md
 //   - its model: the user's setting agent_model ("provider/id", optionally
@@ -24,7 +24,7 @@ package main
 //     (the drawer's Model button opens pi's own model selector).
 //   - unread and the "needs you" tint: from its bridge status. A run that
 //     ends while the drawer is shut counts as unread; a run that ends or a
-//     dialog that waits raises an OS notification while pi-desk is in the
+//     dialog that waits raises an OS notification while Deckhand is in the
 //     background (setting notify).
 
 import "core:encoding/json"
@@ -44,7 +44,7 @@ ATLAS_PROMPT_FILE :: "ATLAS.md"
 // Ctrl+L: pi's "app.model.select" (its model selector), pi's docs/keybindings.md
 PI_MODEL_SELECT_KEY :: "\x0c"
 
-// What pi-desk writes as ATLAS.md (agent_prompt_ensure; agent_prompt_migrate
+// What Deckhand writes as ATLAS.md (agent_prompt_ensure; agent_prompt_migrate
 // over an unedited older starter). Keep it short: the guide has the detail.
 ATLAS_PROMPT_STARTER :: `# Atlas
 
@@ -374,7 +374,7 @@ agent_guide_path :: proc() -> string {
 }
 
 // At startup: writes the guide built into this binary to the data dir when
-// the copy there differs (pi-desk's file: the user's edits are not kept).
+// the copy there differs (Deckhand's file: the user's edits are not kept).
 agent_guide_install :: proc() {
 	path := agent_guide_path()
 	if path == "" do return
@@ -459,7 +459,7 @@ agent_needs_user :: proc() -> bool {
 
 // ---- the model ----
 
-// The model Atlas runs as far as pi-desk can tell: the last model_change of
+// The model Atlas runs as far as Deckhand can tell: the last model_change of
 // its session file (pi writes one on each pick and for a new session), else
 // the setting, else "" (pi's default). At most one look a second; the file
 // is read again only when it grew.

@@ -11,7 +11,7 @@ command {"type":"open_session","project_id":$project,"pi_session_id":"r1"}
 waitfor parseCsv 15000
 command {"type":"markdown_open","path":"README.md"}
 wait 300
-command {"type":"browser_open","url":"pidesk-test://web/demo.html"}
+command {"type":"browser_open","url":"deckhand-test://web/demo.html"}
 web_title Recipe Box 15000
 web_waitpaint 15000
 command {"type":"new_shell_tab","session":$session}

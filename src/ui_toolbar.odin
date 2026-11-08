@@ -10,7 +10,7 @@ package main
 //   - the settings popover (focus widget "settings"; a click on the gear):
 //     appearance, look, reduce motion, Chats, rescan, keyboard shortcuts,
 //     Edit settings files… (the left column's Settings tab, ⌘,: settings_files.odin)
-//     and Set up pi-desk… (the first-run sheet, ui_setup.odin); every row runs an action
+//     and Set up Deckhand… (the first-run sheet, ui_setup.odin); every row runs an action
 //   - the keyboard shortcuts sheet (focus widget "shortcuts"; ⌘/), listed
 //     from the action table
 //   - the one tooltip system: after the pointer rests TIP_DELAY on a control,
@@ -227,7 +227,7 @@ Pop_Item :: enum {
 	Tidy_Projects, // the tidy project list (project_tidy.odin); last, so earlier rows keep their ids
 	Reload_Pi, // reload every pi tab (reload.odin); drawn after Rescan, last so earlier rows keep their ids
 	Setup, // "Set up Deckhand…": the first-run sheet (ui_setup.odin), its button once a main folder is set; last so earlier rows keep their ids
-	Update_Checks, // check for pi-desk updates about once a day (update.odin); last so earlier rows keep their ids
+	Update_Checks, // check for Deckhand updates about once a day (update.odin); last so earlier rows keep their ids
 	Refresh_Env, // ask the login shell for its environment again (login_env.odin); drawn after Reload pi; last so earlier rows keep their ids
 	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
 	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids

@@ -4,7 +4,7 @@ package main
 // path and model in the history, the row's session info, Reveal and Copy path, the model's
 // switches, the question and error dots, the rename pushed to Claude Code, the exit's bell entry,
 // Send and close in a Claude-only session, Ask Claude to review, PI_KIT_NOTES_DIR and
-// `pi-desk --claude DIR`. Same rules as core_test.odin: shared global State, one thread, harmless
+// `deckhand --claude DIR`. Same rules as core_test.odin: shared global State, one thread, harmless
 // processes standing in for claude.
 
 import "base:runtime"
@@ -47,13 +47,13 @@ r_reset :: proc() -> runtime.Allocator {
 	r_clip, r_revealed = "", ""
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {r_clip = strings.clone(s, runtime.heap_allocator())}, reveal = proc(p: string) {r_revealed = strings.clone(p, runtime.heap_allocator())}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	// never the user's real Claude folder: a fake one (tests that need files make their own)
-	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/pi-desk-cr-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
+	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cr-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
 	return runtime.heap_allocator()
 }
 
@@ -61,13 +61,13 @@ r_reset :: proc() -> runtime.Allocator {
 r_done :: proc() {
 	inbox_drain()
 	for _, t in terms do reader_stop_and_close(t)
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	os.unset_env("CLAUDE_CONFIG_DIR")
 }
 
 @(private = "file")
 r_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-cr-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-cr-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -177,7 +177,7 @@ claude_rows_transcript_and_model :: proc(t: ^testing.T) {
 	if testing.expect(t, rec != nil) do testing.expect_value(t, rec.transcript, "")
 }
 
-// A Claude row's session info (from pi-desk's own record: never Claude's files), Copy session
+// A Claude row's session info (from Deckhand's own record: never Claude's files), Copy session
 // info, Reveal in Finder and Copy path (its transcript, checked again at each use).
 @(test)
 claude_rows_info_reveal_copy :: proc(t: ^testing.T) {
@@ -366,7 +366,7 @@ claude_rows_exit_bell :: proc(t: ^testing.T) {
 	pid := run_command(Add_Project{cwd = dir}, R_UI).created_id
 	sess := run_command(New_Chat{project_id = pid}, R_UI).created_id
 	for code in ([]int{0, 127, 3}) {
-		os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("exit %d", code))
+		os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exit %d", code))
 		id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
 		state.current_session = 0 // not on screen
 		before := len(state.notices.items)
@@ -393,7 +393,7 @@ claude_rows_send_and_close :: proc(t: ^testing.T) {
 	dir := r_dir("sendclose")
 	got := fmt.tprintf("%s/claude-stdin", dir)
 	pid := run_command(Add_Project{cwd = dir}, R_UI).created_id
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("exec cat > %s", got))
 	sess, main := r_claude_session(t, pid)
 	run_command(Claude_Session_Report{tab_id = main, session_id = "a6a6a6a6-0000-4000-8000-000000000001", source = "startup"}, R_SCRIPT)
 	s := find_session(sess)
@@ -460,7 +460,7 @@ claude_rows_notes_env :: proc(t: ^testing.T) {
 	state.settings.home_dir = "/m-notes"
 	defer state.settings.home_dir = ""
 	os.unset_env("PI_KIT_NOTES_DIR")
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf("env > %s.tmp; mv %s.tmp %s; exec sleep 30", envf, envf, envf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf("env > %s.tmp; mv %s.tmp %s; exec sleep 30", envf, envf, envf))
 	r_claude_session(t, pid)
 	text := ""
 	for _ in 0 ..< 200 {
@@ -473,7 +473,7 @@ claude_rows_notes_env :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, "PI_KIT_NOTES_DIR=/m-notes\n"), "the notes folder")
 }
 
-// `pi-desk --claude DIR`: a Claude session there on start; a bare DIR stays a pi chat.
+// `deckhand --claude DIR`: a Claude session there on start; a bare DIR stays a pi chat.
 @(test)
 claude_rows_launch_args :: proc(t: ^testing.T) {
 	a, ok := app_args_parse({"--claude", "/x"})
@@ -541,7 +541,7 @@ claude_rows_transcript_kept :: proc(t: ^testing.T) {
 	}
 }
 
-// Review round 1, item 3: `pi-desk [--claude] DIR` starts in DIR's project only: never in the
+// Review round 1, item 3: `deckhand [--claude] DIR` starts in DIR's project only: never in the
 // project that happened to be selected.
 @(test)
 claude_rows_launch_needs_its_project :: proc(t: ^testing.T) {

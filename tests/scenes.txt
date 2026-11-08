@@ -7,7 +7,7 @@
 #            manual    run only when named: screenshot and benchmark tools, nothing to assert
 #            paid      starts a REAL pi on paid models: the runner never runs it
 #   tags     smoke      also runs for every --changed run, whatever changed
-#            test-data  writes build/test-data (no PI_DESK_DATA_DIR): one at a time
+#            test-data  writes build/test-data (no DECKHAND_DATA_DIR): one at a time
 #            test-trash test mode's trash, build/test-trash: one at a time
 #            cef        starts Chromium: at most --cef-jobs at a time (memory)
 #            alone      runs with nothing else beside it (CPU or timing numbers)
@@ -31,7 +31,7 @@
 
 # scene             | tier     | tags                  | secs | areas | command
 agent-status        | full     |                       |   34 | src/agent_status*.odin src/ui_sidebar.odin tests/scripts/agent-status.* tests/scripts/fake-7501.py
-agent-show          | full     |                       |   12 | src/show_file.odin src/markdown_view.odin src/editor_commands.odin src/editor_file.odin tools/pi-desk-cli/* integrations/claude-code/* integrations/pi/extensions/browser/* integrations/pi/lib/show.ts tests/scripts/agent-show.* tests/scripts/fake-bridge-show.py tests/scripts/fake-claude.py
+agent-show          | full     |                       |   12 | src/show_file.odin src/markdown_view.odin src/editor_commands.odin src/editor_file.odin tools/deckhand-cli/* integrations/claude-code/* integrations/pi/extensions/browser/* integrations/pi/lib/show.ts tests/scripts/agent-show.* tests/scripts/fake-bridge-show.py tests/scripts/fake-claude.py
 agent               | full     | test-data             |   18 | src/agent.odin src/home.odin src/drawer.odin integrations/pi/* docs/GUIDE.md tests/scripts/agent.* tests/scripts/fake-atlas.py
 app-calls           | full     |                       |   25 | src/app_tab.odin src/app_wire.odin src/frames.odin src/native/frames_macos.m tests/fake-app/* tests/scripts/app-calls.sh
 app-open            | full     |                       |    4 | src/app_tab.odin src/app_wire.odin tests/fake-app/* tests/scripts/app-open.* tests/scripts/fake-bridge-apps.py
@@ -48,10 +48,10 @@ browser-netpolicy   | full     | cef,idle,noci         |   25 | src/browser_cef.
 browser-rlz         | full     | cef,idle              |  105 | src/browser_cef.odin src/native/cef_macos.m src/native/cef_helper.c scripts/fetch-cef.sh tests/scripts/browser-rlz.*
 buttons             | full     |                       |   38 | src/ui_toolbar.odin src/actions.odin src/ui_sidebar.odin src/palette.odin src/toast.odin tests/scripts/buttons.*
 changes             | full     | test-trash            |   49 | src/changes*.odin src/ui_changes.odin src/editor_git.odin src/fs_model.odin tests/scripts/changes.*
-claude              | full     | cef                   |   35 | src/claude*.odin src/ui_claude*.odin src/comments.odin src/app_tab.odin src/app_wire.odin tools/pi-desk-cli/* integrations/claude-code/* tests/fake-app/* tests/scripts/claude.sh tests/scripts/claude-[12].txt tests/scripts/claude-check.py tests/scripts/fake-claude.py
+claude              | full     | cef                   |   35 | src/claude*.odin src/ui_claude*.odin src/comments.odin src/app_tab.odin src/app_wire.odin tools/deckhand-cli/* integrations/claude-code/* tests/fake-app/* tests/scripts/claude.sh tests/scripts/claude-[12].txt tests/scripts/claude-check.py tests/scripts/fake-claude.py
 claude-accounts     | full     |                       |   15 | src/claude_accounts.odin src/claude_disk.odin src/claude_rows.odin src/ui_sidebar.odin tests/scripts/claude-accounts.* tests/scripts/fake-claude.py
-claude-feeds        | full     |                       |   38 | src/claude_status.odin src/claude_panels.odin src/claude.odin src/ui_claude.odin tools/pi-desk-cli/* integrations/claude-code/* tests/scripts/claude-feeds.* tests/scripts/fake-claude.py
-claude-readonly     | full     |                       |   36 | src/claude.odin src/claude_disk.odin tools/pi-desk-cli/* integrations/claude-code/* tests/readonly-vectors.json tests/scripts/claude-readonly* tests/scripts/fake-claude.py
+claude-feeds        | full     |                       |   38 | src/claude_status.odin src/claude_panels.odin src/claude.odin src/ui_claude.odin tools/deckhand-cli/* integrations/claude-code/* tests/scripts/claude-feeds.* tests/scripts/fake-claude.py
+claude-readonly     | full     |                       |   36 | src/claude.odin src/claude_disk.odin tools/deckhand-cli/* integrations/claude-code/* tests/readonly-vectors.json tests/scripts/claude-readonly* tests/scripts/fake-claude.py
 claude-runtime      | full     |                       |   37 | src/claude_reload.odin src/ui_claude_reload.odin src/claude.odin src/dead_tab.odin src/ui_dead_tab.odin src/settings_files.odin tests/scripts/claude-runtime.* tests/scripts/fake-claude.py
 claude-sessions     | full     |                       |   40 | src/claude.odin src/claude_rows.odin src/claude_disk.odin src/sidebar.odin src/ui_sidebar.odin src/session_info.odin tests/scripts/claude-sessions* tests/scripts/fake-claude.py
 claude-wait         | full     |                       |    8 | src/claude_wait.odin src/claude_status.odin src/agent.odin tests/scripts/claude-wait.* tests/scripts/fake-claude.py
@@ -97,8 +97,8 @@ worktrees           | full     |                       |   37 | src/worktrees.od
 font                | manual   | test-data             |   20 | tests/scripts/font.* | tests/scripts/font.sh shots
 looks               | manual   | test-data             |   60 | tests/scripts/looks.* tests/scripts/text-sample.sh
 readme-shot         | manual   | cef                   |   30 | tests/scripts/readme-shot.* tests/scripts/demo-pi.py tests/web/demo.html
-run-frame-pause     | manual   | test-data,alone       |   45 | tests/scripts/frame-pause.txt | env PI_DESK_QUIET=0 tests/scripts/run.sh tests/scripts/frame-pause.txt
-panels-cpu          | manual   | test-data,alone       |   30 | tests/scripts/panels-cpu.txt tests/scripts/fake-bridge-max.py | env PI_DESK_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
+run-frame-pause     | manual   | test-data,alone       |   45 | tests/scripts/frame-pause.txt | env DECKHAND_QUIET=0 tests/scripts/run.sh tests/scripts/frame-pause.txt
+panels-cpu          | manual   | test-data,alone       |   30 | tests/scripts/panels-cpu.txt tests/scripts/fake-bridge-max.py | env DECKHAND_FAKE_MAX=1 tests/scripts/panels.sh tests/scripts/panels-cpu.txt
 shots               | manual   |                       |   20 | tests/scripts/shots.*
 text-shots          | manual   | test-data             |   15 | tests/scripts/text-shots.sh tests/scripts/text.txt tests/scripts/text-sample.sh | tests/scripts/text-shots.sh tests/scripts/text.txt
 text-flood          | manual   | test-data,alone       |   15 | tests/scripts/text-flood.txt | tests/scripts/text-shots.sh tests/scripts/text-flood.txt

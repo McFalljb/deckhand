@@ -5,7 +5,7 @@
 # their own session, right after their own tab, behind the user's view; a file outside every
 # project is shown; another session, a binary file are refused (code and hint). Never a real pi
 # or claude. Quiet test mode, a fake HOME, a temp data dir. Needs ./build.sh (build/claude-code,
-# build/pi-desk-cli). Writes build/agent-show/ (run.log, show.log, claude.log).
+# build/deckhand-cli). Writes build/agent-show/ (run.log, show.log, claude.log).
 # Usage: tests/scripts/agent-show.sh
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
@@ -13,7 +13,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
 . tests/scripts/claude-stub.sh
-[ -x build/pi-desk-cli ] && [ -f build/claude-code/.claude-plugin/plugin.json ] || { echo "build/pi-desk-cli or build/claude-code missing: ./build.sh"; exit 1; }
+[ -x build/deckhand-cli ] && [ -f build/claude-code/.claude-plugin/plugin.json ] || { echo "build/deckhand-cli or build/claude-code missing: ./build.sh"; exit 1; }
 W="$ROOT/build/agent-show"
 rm -rf "$W"
 FAKE_HOME="$W/home"
@@ -29,10 +29,10 @@ OUTSIDE="$FAKE_HOME/outside/sre-interview-questions.md"
 printf '# SRE interview questions\n\n## Incidents\n' > "$OUTSIDE"
 claude_stub "$FAKE_HOME"
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/pds.XXXXXX") # a short runtime dir: the socket path must fit sun_path
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/agent-show.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_RUNTIME_DIR="$RUN" SHOW_LOG="$W/show.log" OUTSIDE_FILE="$OUTSIDE" \
-  PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-bridge-show.py' \"\$@\"" \
-  PI_DESK_CLAUDE_CMD="exec python3 -I '$ROOT/tests/scripts/fake-claude.py' \"\$@\"" \
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/agent-show.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_RUNTIME_DIR="$RUN" SHOW_LOG="$W/show.log" OUTSIDE_FILE="$OUTSIDE" \
+  DECKHAND_CMD="exec python3 -I '$ROOT/tests/scripts/fake-bridge-show.py' \"\$@\"" \
+  DECKHAND_CLAUDE_CMD="exec python3 -I '$ROOT/tests/scripts/fake-claude.py' \"\$@\"" \
   FAKE_CLAUDE_LOG="$W/claude.log" FAKE_CLAUDE_TURN_MS=100 \
   build/deckhand > "$W/run.log" 2>&1 || true
 rm -rf "$RUN"

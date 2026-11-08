@@ -23,9 +23,9 @@ package main
 // Agents can read the state (get_state "update") but cannot check, download or install:
 // every update command is the user's (command_table.odin).
 //
-// Test mode: no checks unless PI_DESK_UPDATE_URL points at a fixture (file://), and then
-// PI_DESK_UPDATE_DOWNLOAD (the download prefix), PI_DESK_UPDATE_VERSION (the running
-// version) and PI_DESK_UPDATE_APP (a fake installed bundle, never in /Applications) stand
+// Test mode: no checks unless DECKHAND_UPDATE_URL points at a fixture (file://), and then
+// DECKHAND_UPDATE_DOWNLOAD (the download prefix), DECKHAND_UPDATE_VERSION (the running
+// version) and DECKHAND_UPDATE_APP (a fake installed bundle, never in /Applications) stand
 // in; the test key is accepted and the relaunch is only logged.
 
 import "base:runtime"
@@ -63,7 +63,7 @@ UPDATE_PHASE_NAMES := [Update_Phase]string {
 }
 
 Update_State :: struct {
-	// the running pi-desk (Update_Env, from the timer thread at start)
+	// the running Deckhand (Update_Env, from the timer thread at start)
 	known:      bool, // Update_Env arrived
 	current:    string, // its version ("" = unknown: a development build; no checks)
 	bundle:     string, // the bundle to replace ("" = cannot: why_not)
@@ -124,7 +124,7 @@ update_init :: proc() {
 	update_load()
 	if autotest.active {
 		// a release build never reads the fixture variables: no checks in its test mode
-		when !PI_DESK_UPDATE_TEST do return
+		when !DECKHAND_UPDATE_TEST do return
 		u := hook_env(.Update_Url)
 		if u == "" do return
 		upd.test = true
@@ -158,7 +158,7 @@ update_init :: proc() {
 	})
 }
 
-// The running version and the bundle pi-desk may replace (any thread; temp allocator).
+// The running version and the bundle Deckhand may replace (any thread; temp allocator).
 update_env_find :: proc(test: bool, test_version, test_app: string) -> (version, bundle, why: string) {
 	if test {
 		if test_app == "" || under_applications(test_app) do return test_version, "", "test mode installs only into a fake folder, never under /Applications"
@@ -362,7 +362,7 @@ update_effects_text :: proc(keeps, stops, jobs, away, browsers: bool) -> string 
 }
 
 // Why Update cannot go ahead here ("" = it can).
-// release = false: only this copy of pi-desk (where it runs, its key), not the release.
+// release = false: only this copy of Deckhand (where it runs, its key), not the release.
 update_cannot_install :: proc(release := true) -> string {
 	if upd.bundle == "" do return upd.why_not != "" ? upd.why_not : "Deckhand cannot find its own app bundle"
 	if sig.is_placeholder(update_key()) do return "this build has no update key: update from the release page"
@@ -371,7 +371,7 @@ update_cannot_install :: proc(release := true) -> string {
 }
 
 update_key :: proc() -> string {
-	when PI_DESK_UPDATE_TEST {
+	when DECKHAND_UPDATE_TEST {
 		if upd.test do return UPDATE_TEST_PUBLIC_KEY
 	}
 	return UPDATE_PUBLIC_KEY
@@ -643,7 +643,7 @@ codesign_cdhash :: proc(app: string) -> string {
 	return ""
 }
 
-// The prepared bundle, right before it replaces pi-desk: a real folder owned by this user,
+// The prepared bundle, right before it replaces Deckhand: a real folder owned by this user,
 // and bundle_check (codesign, bundle id, version, the signed CDHash). "" = fine.
 install_check :: proc(staged, version, cdhash: string) -> string {
 	st: posix.stat_t
@@ -652,7 +652,7 @@ install_check :: proc(staged, version, cdhash: string) -> string {
 	return bundle_check(staged, version, cdhash)
 }
 
-// The bundle is pi-desk at this version, its code signature holds, and its CDHash is the
+// The bundle is Deckhand at this version, its code signature holds, and its CDHash is the
 // one the release's signature names (so no file changed since it was signed).
 bundle_check :: proc(app, version, cdhash: string) -> string {
 	if !sig.cdhash_valid(cdhash) do return "the update has no signed CDHash"
@@ -676,7 +676,7 @@ bundle_check :: proc(app, version, cdhash: string) -> string {
 update_relaunched: string
 
 // Main thread: the running bundle out, the new one in, the relaunch helper, quit. On a
-// failure everything goes back as it was; "" = done (pi-desk is quitting).
+// failure everything goes back as it was; "" = done (Deckhand is quitting).
 @(private = "file")
 update_swap :: proc() -> string {
 	bundle, staged := upd.bundle, upd.staged

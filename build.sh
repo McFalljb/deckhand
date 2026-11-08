@@ -12,10 +12,10 @@
 # With CEF (default on macOS arm64): build/Deckhand.app (the framework and the five
 # helper apps, signed with DECKHAND_SIGN_IDENTITY: scripts/sign.sh) and build/deckhand, a wrapper that execs the app's
 # binary, so `build/deckhand ARGS` works as before (build/pi-desk is the same wrapper,
-# for older scripts). PI_DESK_NO_CEF=1: the bare binary at build/deckhand (and a
+# for older scripts). DECKHAND_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
 # DECKHAND_RELEASE=1 (scripts/release.sh): the release or debug build without the test hooks
-# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no PI_DESK_* overrides,
+# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no DECKHAND_* overrides,
 # no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
@@ -95,29 +95,29 @@ if [ ! -f build/clay-odin/clay.odin ] || [ $CLAY_BIND/clay.odin -nt build/clay-o
 fi
 
 # text backend (macOS: CoreText + CoreGraphics), rebuilt when its source changes
-if [ ! -f build/pd_text.a ] || [ src/native/text_coretext.c -nt build/pd_text.a ]; then
-  clang -c -O2 -Wall src/native/text_coretext.c -o build/pd_text.o
-  ar rcs build/pd_text.a build/pd_text.o
+if [ ! -f build/dh_text.a ] || [ src/native/text_coretext.c -nt build/dh_text.a ]; then
+  clang -c -O2 -Wall src/native/text_coretext.c -o build/dh_text.o
+  ar rcs build/dh_text.a build/dh_text.o
 fi
 
 # window pieces sokol lacks (macOS: title bar, input methods, window drag, the menu bar)
-if [ ! -f build/pd_platform.a ] || [ src/native/platform_macos.m -nt build/pd_platform.a ] || [ src/native/menubar_macos.m -nt build/pd_platform.a ]; then
-  clang -c -O2 -Wall -fobjc-arc src/native/platform_macos.m -o build/pd_platform.o
-  clang -c -O2 -Wall -fobjc-arc src/native/menubar_macos.m -o build/pd_menubar.o
-  rm -f build/pd_platform.a
-  ar rcs build/pd_platform.a build/pd_platform.o build/pd_menubar.o
+if [ ! -f build/dh_platform.a ] || [ src/native/platform_macos.m -nt build/dh_platform.a ] || [ src/native/menubar_macos.m -nt build/dh_platform.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/platform_macos.m -o build/dh_platform.o
+  clang -c -O2 -Wall -fobjc-arc src/native/menubar_macos.m -o build/dh_menubar.o
+  rm -f build/dh_platform.a
+  ar rcs build/dh_platform.a build/dh_platform.o build/dh_menubar.o
 fi
 
 # editor and file-system model: FSEvents watcher, Trash, Finder (macOS)
-if [ ! -f build/pd_editor.a ] || [ src/native/editor_macos.m -nt build/pd_editor.a ]; then
-  clang -c -O2 -Wall -fobjc-arc src/native/editor_macos.m -o build/pd_editor.o
-  ar rcs build/pd_editor.a build/pd_editor.o
+if [ ! -f build/dh_editor.a ] || [ src/native/editor_macos.m -nt build/dh_editor.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/editor_macos.m -o build/dh_editor.o
+  ar rcs build/dh_editor.a build/dh_editor.o
 fi
 
 # app tabs' frame channel (Mach + IOSurface + Metal; docs/ENGINE-BRIDGE.md §2)
-if [ ! -f build/pd_frames.a ] || [ src/native/frames_macos.m -nt build/pd_frames.a ]; then
-  clang -c -O2 -Wall -fobjc-arc src/native/frames_macos.m -o build/pd_frames.o
-  ar rcs build/pd_frames.a build/pd_frames.o
+if [ ! -f build/dh_frames.a ] || [ src/native/frames_macos.m -nt build/dh_frames.a ]; then
+  clang -c -O2 -Wall -fobjc-arc src/native/frames_macos.m -o build/dh_frames.o
+  ar rcs build/dh_frames.a build/dh_frames.o
 fi
 
 # tree-sitter and the editor's grammars (vendor/tree-sitter, src/editor_syntax.odin):
@@ -149,7 +149,7 @@ fi
 # against CEF's C API headers only: no C++ wrapper, no CMake.
 CEF_API_VERSION=15600 # the C API version the shim and helper are written against
 WITH_CEF=0
-if [ "${PI_DESK_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
+if [ "${DECKHAND_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
   case "$(uname -m)" in
     arm64) WITH_CEF=1 ;;
     *) echo "Deckhand: CEF is wired up for arm64 only so far; building without it" ;;
@@ -164,23 +164,23 @@ fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
-  # a release shim has no PI_DESK_CEF_SPARE or PI_DESK_CEF_NETLOG (src/test_hooks.odin);
-  # build/pd_cef.mode says which one build/pd_cef.a is
+  # a release shim has no DECKHAND_CEF_SPARE or DECKHAND_CEF_NETLOG (src/test_hooks.odin);
+  # build/dh_cef.mode says which one build/dh_cef.a is
   CEF_MODE=dev CEF_SHIM_FLAGS=$CEF_CFLAGS
-  if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DPD_RELEASE=1"; fi
-  if [ ! -f build/pd_cef.a ] || [ "$(cat build/pd_cef.mode 2>/dev/null)" != $CEF_MODE ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
-    clang -c $CEF_SHIM_FLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
-    rm -f build/pd_cef.a
-    ar rcs build/pd_cef.a build/pd_cef.o
-    echo $CEF_MODE > build/pd_cef.mode
+  if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DDH_RELEASE=1"; fi
+  if [ ! -f build/dh_cef.a ] || [ "$(cat build/dh_cef.mode 2>/dev/null)" != $CEF_MODE ] || [ src/native/cef_macos.m -nt build/dh_cef.a ] || [ src/native/cef_polish.inc -nt build/dh_cef.a ] || [ src/native/cef_polish_pure.h -nt build/dh_cef.a ] || [ vendor/cef/VERSION -nt build/dh_cef.a ]; then
+    clang -c $CEF_SHIM_FLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/dh_cef.o
+    rm -f build/dh_cef.a
+    ar rcs build/dh_cef.a build/dh_cef.o
+    echo $CEF_MODE > build/dh_cef.mode
   fi
   if [ ! -f build/cef_helper ] || [ src/native/cef_helper.c -nt build/cef_helper ] || [ vendor/cef/VERSION -nt build/cef_helper ]; then
     clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper
   fi
   OUT=build/Deckhand.app/Contents/MacOS/Deckhand
-  DEFINES="$DEFINES -define:PI_DESK_CEF=true"
+  DEFINES="$DEFINES -define:DECKHAND_CEF=true"
   mkdir -p build/Deckhand.app/Contents/MacOS
-  # build/deckhand (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
+  # build/deckhand (the wrapper, or a bare binary from a DECKHAND_NO_CEF build) stays until
   # bundle-app.sh rewrites it: a failed compile leaves the last working command in place
 fi
 # the fake app for app-tab scenes (tests/fake-app/): test builds only
@@ -207,10 +207,10 @@ check_link_minos() { # odin build args (package and defines)
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
 # Claude Code tabs (src/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
-# (and its alias bin/pi-desk) runs (tools/pi-desk-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
+# (and its alias bin/pi-desk) runs (tools/deckhand-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {
-  odin build tools/pi-desk-cli -out:build/pi-desk-cli -o:speed -minimum-os-version:$MACOS_MIN
+  odin build tools/deckhand-cli -out:build/deckhand-cli -o:speed -minimum-os-version:$MACOS_MIN
   rm -rf build/claude-code
   cp -R integrations/claude-code build/claude-code
   build_pi
@@ -273,7 +273,7 @@ case "$MODE" in
     if command -v node >/dev/null; then (cd integrations/pi && node --test test/unit.test.ts test/deckhand.test.ts test/kit.test.ts test/optional.test.ts test/conflicts.test.ts test/mode.test.ts) >build/pi-integration-tests.log 2>&1 || { tail -40 build/pi-integration-tests.log; echo "integrations/pi tests failed (build/pi-integration-tests.log)"; exit 1; }; grep -E '^# (pass|fail)|^ℹ (pass|fail)' build/pi-integration-tests.log; else echo "integrations/pi tests: skipped (no node)"; fi
     # the page reader's walk (text, outline): frames, boxless containers, shadow slots (fake DOM)
     if command -v node >/dev/null; then node tests/browser_read_js_test.mjs; else echo "browser_read_js_test: skipped (no node)"; fi
-    odin test tests -out:build/pi-desk-tests
+    odin test tests -out:build/deckhand-tests
     # the holder wire codec (src/holderwire): golden vectors, the released schema, a fuzz pass
     odin test src/holderwire -out:build/holderwire-tests
     # the window/core framed wire (src/corewire): golden vectors, a fuzz pass, the in-memory transport
@@ -292,8 +292,8 @@ case "$MODE" in
     python3 -B tests/scenes_test.py -q
     # every environment read names a known variable (test knobs go through hook_env)
     python3 -I scripts/check-env-reads.py
-    # the pi-desk CLI for Claude tabs (its tests share a fake environment: one thread)
-    odin test tools/pi-desk-cli -out:build/pi-desk-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
+    # the Deckhand CLI for Claude tabs (its tests share a fake environment: one thread)
+    odin test tools/deckhand-cli -out:build/deckhand-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude
     build_fake_app ;;
   fake-app) build_fake_app ;;
@@ -306,7 +306,7 @@ if [ $WITH_CEF = 1 ]; then
   # what the app ships: the CEF framework (prebuilt) and the helpers
   scripts/check-minos.sh $MACOS_MIN build/Deckhand.app
 elif [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then
-  # a bare binary (PI_DESK_NO_CEF): build/pi-desk runs it too, for older scripts
+  # a bare binary (DECKHAND_NO_CEF): build/pi-desk runs it too, for older scripts
   rm -f build/pi-desk && ln -s deckhand build/pi-desk
 fi
 

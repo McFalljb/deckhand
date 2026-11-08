@@ -1,8 +1,8 @@
-package pi_desk_cli
+package deckhand_cli
 
-// The command line → one pi-desk command. Checked the way pi-kit's desk-browser and desk app
+// The command line → one Deckhand command. Checked the way pi-kit's desk-browser and desk app
 // tools check their parameters, so a bad call gets a clear message without a round trip;
-// pi-desk enforces every rule again (who may act on which tab, sensitive fields, uploads…).
+// Deckhand enforces every rule again (who may act on which tab, sensitive fields, uploads…).
 
 import "core:encoding/json"
 import "core:fmt"
@@ -35,7 +35,7 @@ Kind :: enum {
 
 Req :: struct {
 	name:       string, // as the user typed it: "read", "app call"
-	type:       string, // pi-desk's command type
+	type:       string, // Deckhand's command type
 	kind:       Kind,
 	cmd:        string, // the command object (JSON, one line)
 	tab:        i64,
@@ -55,8 +55,8 @@ Req :: struct {
 	n_events:   int,
 }
 
-ACT_TIMEOUT_MS :: 40_000 // pi-desk gives an action 30 s
-UPLOAD_TIMEOUT_MS :: 130_000 // pi-desk waits 120 s for the user's Allow
+ACT_TIMEOUT_MS :: 40_000 // Deckhand gives an action 30 s
+UPLOAD_TIMEOUT_MS :: 130_000 // Deckhand waits 120 s for the user's Allow
 DEFAULT_TIMEOUT_MS :: 30_000
 MAX_WAIT_S :: 120.0
 
@@ -138,7 +138,7 @@ parse_rect :: proc(s: string, what: string) -> (string, string) {
 }
 
 // A JSON argument made one line: a raw CR or LF in valid JSON can only be whitespace outside a
-// string, so it becomes a space (pi-desk's protocol is one message per line).
+// string, so it becomes a space (Deckhand's protocol is one message per line).
 one_line_json :: proc(s: string) -> string {
 	b := strings.builder_make()
 	for i in 0 ..< len(s) {
@@ -545,7 +545,7 @@ parse_cli :: proc(args: []string, read_stdin: proc() -> string = nil) -> (req: R
 	case "app open":
 		f, e = parse_flags(rest, {"title"}, nil)
 		req.type, req.kind = "new_app_tab", .App_Open
-		if e == "" && (len(f.pos) < 1 || strings.trim_space(f.pos[0]) == "") do e = "NAME is required: an app your project declares in .pi-desk/apps.json (`deckhand app list-declared`)"
+		if e == "" && (len(f.pos) < 1 || strings.trim_space(f.pos[0]) == "") do e = "NAME is required: an app your project declares in .deckhand/apps.json (`deckhand app list-declared`)"
 		if e == "" do e = no_more(&f, 1)
 		if e == "" {
 			jw_str(&w, "name", f.pos[0])

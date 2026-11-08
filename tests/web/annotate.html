@@ -13,12 +13,12 @@
                                    editable text (picked at its left edge: the card itself)
        #umbox  20,640 300x40    a container holding a div made editable by CSS alone
                                 (-webkit-user-modify; picked at its left edge)
-       #__pd   an element named like pi-desk's overlay (named access must not stop it)
+       #__pd   an element named like Deckhand's overlay (named access must not stop it)
        the page is 3000 px tall.
      A form's values never reach pi (only "[value hidden]" and the field's name).
      The page also checks for the DevTools Runtime domain (an Error whose stack getter only a
      console serializer reads): window.probe's cdp=true means it is on.
-     The page tries to reach pi-desk's binding and overlay (they live in another world): what it
+     The page tries to reach Deckhand's binding and overlay (they live in another world): what it
      saw is in window.probe ("b=<typeof binding> p=<typeof overlay> forged=<calls that went>"). -->
 <html><head><meta charset="utf-8"><title>Annotate fixture</title>
 <style>
@@ -64,7 +64,7 @@
   const bait = new Error('bait');
   Object.defineProperty(bait, 'stack', { get() { cdp = true; return ''; } });
   const look = () => {
-    // the binding and the overlay are in pi-desk's isolated world: never here
+    // the binding and the overlay are in Deckhand's isolated world: never here
     for (const name of ['__pdAnnot', '__pd']) {
       if (typeof window[name] === 'function' || (typeof window[name] === 'object' && !(window[name] instanceof HTMLElement))) {
         try { window[name]('{"t":"pick","seq":1,"r":[0,0,10,10]}'); forged++; } catch (e) {}

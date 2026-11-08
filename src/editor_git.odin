@@ -94,7 +94,7 @@ run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input :=
 run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, code: int, ran: bool) {
 	tmpdir := os.get_env("TMPDIR", context.temp_allocator)
 	if tmpdir == "" do tmpdir = "/tmp"
-	path := fmt.tprintf("%s/pi-desk-run-%d-%d.out", strings.trim_right(tmpdir, "/"), os.get_pid(), sync.atomic_add(&run_seq, 1))
+	path := fmt.tprintf("%s/deckhand-run-%d-%d.out", strings.trim_right(tmpdir, "/"), os.get_pid(), sync.atomic_add(&run_seq, 1))
 	f, ferr := os.open(path, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
 	if ferr != nil do return "", 0, false
 	defer {

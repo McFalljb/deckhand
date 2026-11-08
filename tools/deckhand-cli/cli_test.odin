@@ -1,4 +1,4 @@
-package pi_desk_cli
+package deckhand_cli
 
 import "core:encoding/json"
 import "core:fmt"
@@ -7,7 +7,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 
-// ---- a fake pi-desk ----
+// ---- a fake Deckhand ----
 
 Fake :: struct {
 	sent:    [dynamic]string, // command objects, in order
@@ -33,8 +33,8 @@ test_ctx :: proc(f: ^Fake, stdin := "", env: map[string]string = nil) -> Ctx {
 	cur_env = env
 	if cur_env == nil {
 		cur_env = make(map[string]string)
-		cur_env["PI_DESK_SOCKET"] = "/nonexistent.sock"
-		cur_env["PI_DESK_CLAUDE_TOKEN"] = "t"
+		cur_env["DECKHAND_SOCKET"] = "/nonexistent.sock"
+		cur_env["DECKHAND_CLAUDE_TOKEN"] = "t"
 	}
 	cur_stdin = stdin
 	t := new(Transport)
@@ -281,7 +281,7 @@ app_output :: proc(t: ^testing.T) {
 }
 
 // app open, close, restart and list-declared: the tab id and what to do next; the project's
-// apps.json entries fenced; pi-desk's refusal (another session, not declared) passed on.
+// apps.json entries fenced; Deckhand's refusal (another session, not declared) passed on.
 @(test)
 app_open_output :: proc(t: ^testing.T) {
 	f: Fake
@@ -296,7 +296,7 @@ app_open_output :: proc(t: ^testing.T) {
 	run(&c, {"app", "open", "fake"})
 	o = out_obj(&c)
 	testing.expect(t, is_false(o, "started") && strings.contains(get_text(o, "message"), "could not start"), get_text(o, "message"))
-	f.replies["new_app_tab"] = `{"ok":false,"error":"no app \"x\" in the session's .pi-desk/apps.json (declared: \"fake\")"}`
+	f.replies["new_app_tab"] = `{"ok":false,"error":"no app \"x\" in the session's .deckhand/apps.json (declared: \"fake\")"}`
 	c = test_ctx(&f)
 	testing.expect_value(t, run(&c, {"app", "open", "x"}), 1)
 	o = out_obj(&c)
@@ -368,7 +368,7 @@ show_output :: proc(t: ^testing.T) {
 
 @(test)
 screenshot_path_checked :: proc(t: ^testing.T) {
-	dir := fmt.aprintf("%s/build/pi-desk-cli-test-shots", os.get_working_directory(context.allocator) or_else ".")
+	dir := fmt.aprintf("%s/build/deckhand-cli-test-shots", os.get_working_directory(context.allocator) or_else ".")
 	os.make_directory_all(dir)
 	png := []u8{0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0, 0}
 	good := fmt.aprintf("%s/7-3.png", dir)
@@ -390,9 +390,9 @@ screenshot_path_checked :: proc(t: ^testing.T) {
 	f: Fake
 	f.replies["browser_screenshot"] = fmt.aprintf(`{{"ok":true,"data":{{"path":%s,"w":800,"h":600,"bytes":10,"scale":2,"on_screen":false}}}}`, quoted(good))
 	env := make(map[string]string)
-	env["PI_DESK_SOCKET"] = "/x"
-	env["PI_DESK_CLAUDE_TOKEN"] = "t"
-	env["PI_DESK_SHOTS_DIR"] = dir
+	env["DECKHAND_SOCKET"] = "/x"
+	env["DECKHAND_CLAUDE_TOKEN"] = "t"
+	env["DECKHAND_SHOTS_DIR"] = dir
 	c := test_ctx(&f, env = env)
 	testing.expect_value(t, run(&c, {"screenshot", "7"}), 0)
 	o := out_obj(&c)
@@ -496,7 +496,7 @@ hook_session_start_sources :: proc(t: ^testing.T) {
 @(test)
 hook_prompt_submit_comments :: proc(t: ^testing.T) {
 	f: Fake
-	f.replies["claude.comments"] = `{"ok":true,"data":{"count":2,"attachment_id":41,"text":"Deckhand comments (2). note\n` + "```" + `pi-desk-comments\n1. x\n` + "```" + `","images":[{"no":1,"path":"/d/c1.png"},{"no":3,"path":"/d/c2.png"}]}}`
+	f.replies["claude.comments"] = `{"ok":true,"data":{"count":2,"attachment_id":41,"text":"Deckhand comments (2). note\n` + "```" + `deckhand-comments\n1. x\n` + "```" + `","images":[{"no":1,"path":"/d/c1.png"},{"no":3,"path":"/d/c2.png"}]}}`
 	c := test_ctx(&f, stdin = strings.concatenate({`{"session_id":"s","hook_event_name":"UserPromptSubmit","prompt":"Fix the header `, strings.repeat("é", 60), `\nsecond line"}`}))
 	testing.expect_value(t, run(&c, {"hook", "prompt-submit"}), 0)
 	testing.expect_value(t, len(f.sent), 3)
@@ -558,7 +558,7 @@ hook_notification_and_outside :: proc(t: ^testing.T) {
 	c = test_ctx(&f2, stdin = `{}`)
 	run(&c, {"hook", "stop"})
 	testing.expect_value(t, f2.sent[0], `{"type":"claude.turn","state":"idle"}`)
-	// outside pi-desk: nothing sent, nothing said, exit 0
+	// outside Deckhand: nothing sent, nothing said, exit 0
 	f3: Fake
 	empty := make(map[string]string)
 	empty["HOME"] = "/x"
@@ -687,7 +687,7 @@ hook_subagents :: proc(t: ^testing.T) {
 	c := test_ctx(&f, stdin = `{"agent_id":"a1","agent_type":"x"}`)
 	testing.expect_value(t, run(&c, {"hook", "subagent-start"}), 0)
 	silent(t, &c)
-	// outside pi-desk: nothing at all
+	// outside Deckhand: nothing at all
 	f2: Fake
 	empty := make(map[string]string)
 	empty["HOME"] = "/x"
@@ -775,7 +775,7 @@ hook_stop_background :: proc(t: ^testing.T) {
 }
 
 // PostToolUse on Bash: a background launch (run_in_background, or one moved to the background:
-// its backgroundTaskId) shows in pi-desk's Background panel at once; other Bash calls send nothing.
+// its backgroundTaskId) shows in Deckhand's Background panel at once; other Bash calls send nothing.
 @(test)
 hook_bash_background :: proc(t: ^testing.T) {
 	f: Fake
@@ -860,16 +860,16 @@ readonly_vectors :: proc(t: ^testing.T) {
 		testing.expectf(t, !mutating(cmd), "should run: %q", cmd)
 	}
 	// pi-desk only for now (not in pi-kit's MUTATING yet): the port's extra checks
-	deny_pd := get_arr(o, "deny_pidesk")
-	allow_pd := get_arr(o, "allow_pidesk")
+	deny_pd := get_arr(o, "deny_deckhand")
+	allow_pd := get_arr(o, "allow_deckhand")
 	testing.expect(t, len(deny_pd) > 20 && len(allow_pd) > 5)
 	for v in deny_pd {
 		cmd := string(v.(json.String))
-		testing.expectf(t, mutating(cmd), "should be blocked (pi-desk): %q", cmd)
+		testing.expectf(t, mutating(cmd), "should be blocked (Deckhand): %q", cmd)
 	}
 	for v in allow_pd {
 		cmd := string(v.(json.String))
-		testing.expectf(t, !mutating(cmd), "should run (pi-desk): %q", cmd)
+		testing.expectf(t, !mutating(cmd), "should run (Deckhand): %q", cmd)
 	}
 }
 
@@ -877,11 +877,11 @@ readonly_vectors :: proc(t: ^testing.T) {
 ro_hook :: proc(stdin: string, env: map[string]string = nil) -> (code: int, out: string, err: string) {
 	f: Fake
 	e := env
-	if e == nil do e = make(map[string]string) // none of pi-desk's: the guard needs nothing from it
+	if e == nil do e = make(map[string]string) // none of Deckhand's: the guard needs nothing from it
 	c := test_ctx(&f, stdin = stdin, env = e)
 	code = run(&c, {"hook", "readonly"})
 	testing_sent_none := len(f.sent) == 0
-	assert(testing_sent_none) // never calls pi-desk
+	assert(testing_sent_none) // never calls Deckhand
 	return code, strings.to_string(c.out), strings.to_string(c.err)
 }
 
@@ -951,7 +951,7 @@ hook_readonly_denies_hostile_json :: proc(t: ^testing.T) {
 	}
 }
 
-// The read-only ack (SessionStart, from pi-desk's --settings): the start's nonce to pi-desk with
+// The read-only ack (SessionStart, from Deckhand's --settings): the start's nonce to pi-desk with
 // the tab's token; it prints nothing (SessionStart output would go into Claude's context) and
 // never fails Claude (exit 0); without pi-desk it does nothing.
 @(test)
@@ -1010,7 +1010,7 @@ skill_allows :: proc(cmd: string) -> bool {
 	return false
 }
 
-// Opening, restarting and closing app tabs go through Claude Code's own permission mode (pi-desk
+// Opening, restarting and closing app tabs go through Claude Code's own permission mode (Deckhand
 // asks nothing: docs/ENGINE-BRIDGE.md, trust model), so the skill never pre-approves them; the
 // other verbs stay pre-approved.
 @(test)

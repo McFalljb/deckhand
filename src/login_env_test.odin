@@ -214,7 +214,7 @@ login_env_gui_nix_path_merges :: proc(t: ^testing.T) {
 @(test)
 login_env_shell_wins :: proc(t: ^testing.T) {
 	inh := []string{"SSH_AUTH_SOCK=/launchd/agent", "LE_SAME=v", "LE_ONLY_INHERITED=i", "PWD=/inh", "PATH=/usr/bin:/bin"}
-	sh := []string{"SSH_AUTH_SOCK=/1p/agent.sock", "LE_SAME=v", "PWD=/shell", "SHLVL=3", "PI_DESK_SCRIPT=x", "PATH=/opt/homebrew/bin:/usr/bin"}
+	sh := []string{"SSH_AUTH_SOCK=/1p/agent.sock", "LE_SAME=v", "PWD=/shell", "SHLVL=3", "DECKHAND_SCRIPT=x", "PATH=/opt/homebrew/bin:/usr/bin"}
 	env, res := login_env_compose(inh, sh, true, {})
 	testing.expect_value(t, res, Login_Env_Result.Shell)
 	got := strings.join(env, "|", context.temp_allocator)
@@ -230,7 +230,7 @@ login_env_gui_detection :: proc(t: ^testing.T) {
 	testing.expect(t, !login_env_gui_launch(4242, "/opt/homebrew/bin:/usr/bin", ""))
 	testing.expect(t, login_env_gui_launch(4242, NIX_PATH_GUI, "1"))
 	testing.expect(t, !login_env_gui_launch(1, "/usr/bin", "0"), "turned off")
-	// review round 1: test mode (PI_DESK_SCRIPT) never asks the real shell unless told to
+	// review round 1: test mode (DECKHAND_SCRIPT) never asks the real shell unless told to
 	testing.expect(t, !login_env_gui_launch(1, "/usr/bin:/bin", "", test_mode = true))
 	testing.expect(t, !login_env_gui_launch(1, "/usr/bin:/bin", "0", test_mode = true))
 	testing.expect(t, login_env_gui_launch(4242, NIX_PATH_GUI, "1", test_mode = true))
@@ -255,7 +255,7 @@ login_env_compose_rules :: proc(t: ^testing.T) {
 }
 
 // A real (fake) shell through the whole fix: its session variables and
-// PI_DESK_* switches never come in.
+// DECKHAND_* switches never come in.
 @(test)
 login_env_fix_skip_list :: proc(t: ^testing.T) {
 	old_path := strings.clone(os.get_env("PATH", context.temp_allocator), context.temp_allocator)
@@ -267,13 +267,13 @@ login_env_fix_skip_list :: proc(t: ^testing.T) {
 	d := le_dir("skip")
 	defer os.remove_all(d)
 	sh := le_fake_shell(d, "", fmt.tprintf(
-		"#!/bin/sh\nprintf '%%s' '%s'; printf 'PATH=/le/skip/bin\\0SHLVL=9\\0PWD=/le\\0OLDPWD=/le\\0_=/x\\0PI_DESK_SCRIPT=evil.txt\\0LE_SKIP_OK=1\\0'; printf '%%s' '%s'\n",
+		"#!/bin/sh\nprintf '%%s' '%s'; printf 'PATH=/le/skip/bin\\0SHLVL=9\\0PWD=/le\\0OLDPWD=/le\\0_=/x\\0DECKHAND_SCRIPT=evil.txt\\0LE_SKIP_OK=1\\0'; printf '%%s' '%s'\n",
 		LOGIN_ENV_MARK, LOGIN_ENV_MARK,
 	))
 	os.set_env("PATH", NIX_PATH_GUI)
 	testing.expect_value(t, login_env_fix(true, sh, {}, LE_ANSWER_TIMEOUT), Login_Env_Result.Shell)
 	testing.expect_value(t, os.get_env("LE_SKIP_OK", context.temp_allocator), "1")
-	for k in ([]string{"SHLVL", "PI_DESK_SCRIPT"}) {
+	for k in ([]string{"SHLVL", "DECKHAND_SCRIPT"}) {
 		_, found := os.lookup_env(k, context.temp_allocator)
 		testing.expectf(t, !found, "%s not imported", k)
 	}
@@ -380,7 +380,7 @@ login_env_managed_pi_discovery :: proc(t: ^testing.T) {
 	le_fake_bin(fmt.tprintf("%s/path", d), "pi", "ONPATH")
 	out, _ = le_capture({"/usr/bin/env", "-i", fmt.tprintf("HOME=%s", home), fmt.tprintf("PATH=%s/path:/usr/bin:/bin", d), "/bin/sh", "-c", PI_TAB_CMD, "pi", "x"})
 	testing.expect_value(t, out, "FAKE ONPATH x\n")
-	// pi-desk's own lookup (jobs, the reload probe) finds the same
+	// Deckhand's own lookup (jobs, the reload probe) finds the same
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
 	defer os.set_env("HOME", old_home)
 	old_cad, had_cad := os.lookup_env("PI_CODING_AGENT_DIR", context.temp_allocator)
@@ -471,13 +471,13 @@ login_env_refresh_action :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(env, "LE_LAUNCH_SEEN=yes"), "asked with the launch environment: %s", env)
 	testing.expect(t, strings.contains(env, "PATH=/le/refresh/bin:/usr/bin:/bin"), env)
 	testing.expect(t, strings.contains(env, "HOME=/le/home"), env)
-	testing.expect(t, strings.contains(env, "TERM_PROGRAM=pi-desk"), env)
+	testing.expect(t, strings.contains(env, "TERM_PROGRAM=Deckhand"), env)
 	_, found := os.lookup_env("LE_REFRESH_N", context.temp_allocator)
 	testing.expect(t, !found, "this process's environment is not changed")
 }
 
 // The shell runs in a session of its own: no controlling terminal to stop
-// it (a pi-desk started from a terminal with a bare PATH: `zsh -i` would
+// it (a Deckhand started from a terminal with a bare PATH: `zsh -i` would
 // open /dev/tty from a background group and stop on SIGTTIN).
 @(test)
 login_env_probe_new_session :: proc(t: ^testing.T) {
@@ -547,12 +547,12 @@ login_env_probe_timeout_kills :: proc(t: ^testing.T) {
 	testing.expectf(t, time.tick_since(start) < LE_STOPPED_WITHIN, "killed at the timeout (%v)", time.tick_since(start))
 }
 
-// pi-desk's own switches never come from the user's shell (PI_DESK_SCRIPT
+// Deckhand's own switches never come from the user's shell (DECKHAND_SCRIPT
 // would turn on test mode).
 @(test)
-login_env_parse_skips_pi_desk :: proc(t: ^testing.T) {
+login_env_parse_skips_deckhand :: proc(t: ^testing.T) {
 	M :: LOGIN_ENV_MARK
-	vars, ok := login_env_parse(M + "PATH=/a\x00PI_DESK_SCRIPT=x.txt\x00PI_DESK_CMD=cat\x00PI_KIT_NOTES_DIR=/n\x00" + M)
+	vars, ok := login_env_parse(M + "PATH=/a\x00DECKHAND_SCRIPT=x.txt\x00DECKHAND_CMD=cat\x00PI_KIT_NOTES_DIR=/n\x00" + M)
 	testing.expect(t, ok)
 	testing.expect_value(t, strings.join(vars, "|", context.temp_allocator), "PATH=/a|PI_KIT_NOTES_DIR=/n")
 }
@@ -618,10 +618,10 @@ kill_pid :: proc(pid: string) {
 	if n > 0 do posix.kill(posix.pid_t(n), .SIGKILL)
 }
 
-// ---- Claude Code's session markers (pi-desk started from inside a Claude Code session) ----
+// ---- Claude Code's session markers (Deckhand started from inside a Claude Code session) ----
 
 // What a running claude sets in its children (code.claude.com/docs/en/env-vars), as seen
-// when pi-desk was `open`ed from a shell inside a Claude Code session.
+// when Deckhand was `open`ed from a shell inside a Claude Code session.
 @(private = "file")
 LE_MARKERS :: [?]string{
 	"CLAUDECODE=1",
@@ -652,11 +652,11 @@ login_env_claude_marker_names :: proc(t: ^testing.T) {
 		k, _, _ := strings.partition(e, "=")
 		testing.expectf(t, claude_session_marker(k), "%s is a session marker", k)
 	}
-	for k in ([]string{"CLAUDE_CONFIG_DIR", "CLAUDE_EFFORT", "ANTHROPIC_API_KEY", "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS", "CLAUDE_CODE_USE_BEDROCK", "PI_DESK_CLAUDE_TOKEN", "CLAUDE"}) {
+	for k in ([]string{"CLAUDE_CONFIG_DIR", "CLAUDE_EFFORT", "ANTHROPIC_API_KEY", "CLAUDE_CODE_SESSIONEND_HOOKS_TIMEOUT_MS", "CLAUDE_CODE_USE_BEDROCK", "DECKHAND_CLAUDE_TOKEN", "CLAUDE"}) {
 		testing.expectf(t, !claude_session_marker(k), "%s is not a session marker", k)
 	}
 	testing.expect(t, claude_config_var("CLAUDE_CONFIG_DIR") && claude_config_var("CLAUDE_EFFORT") && claude_config_var("CLAUDE_CODE_AUTO_COMPACT_WINDOW"))
-	testing.expect(t, !claude_config_var("CLAUDECODE") && !claude_config_var("PI_DESK_CLAUDE_CMD") && !claude_config_var("HOME"))
+	testing.expect(t, !claude_config_var("CLAUDECODE") && !claude_config_var("DECKHAND_CLAUDE_CMD") && !claude_config_var("HOME"))
 	// pi and Atlas read ANTHROPIC_* too: never taken for the parent session's
 	testing.expect(t, !claude_config_var("ANTHROPIC_DEFAULT_HAIKU_MODEL") && !claude_config_var("ANTHROPIC_API_KEY"))
 	// from a Claude session: a marker only claude itself sets (CLAUDECODE alone: an IDE's terminal)
@@ -792,12 +792,12 @@ login_env_child_env_no_markers :: proc(t: ^testing.T) {
 	base[len(LE_MARKERS)] = "PATH=/usr/bin"
 	base[len(LE_MARKERS) + 1] = "CLAUDE_CONFIG_DIR=/le/c"
 	login_env.children = base
-	env := child_env({"PI_DESK_CLAUDE_TAB=1"})
+	env := child_env({"DECKHAND_CLAUDE_TAB=1"})
 	for e in env {
 		k, _, _ := strings.partition(e, "=")
 		testing.expectf(t, !claude_session_marker(k), "%s reached a child", k)
 	}
-	testing.expect(t, le_env_has(env, "PATH") && le_env_has(env, "CLAUDE_CONFIG_DIR") && le_env_has(env, "PI_DESK_CLAUDE_TAB"))
+	testing.expect(t, le_env_has(env, "PATH") && le_env_has(env, "CLAUDE_CONFIG_DIR") && le_env_has(env, "DECKHAND_CLAUDE_TAB"))
 }
 
 // This process's environment back to `saved` (a test changed it).

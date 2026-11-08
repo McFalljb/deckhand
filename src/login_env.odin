@@ -1,6 +1,6 @@
 package main
 
-// pi-desk started from the Dock, Finder, Spotlight or `open` gets launchd's
+// Deckhand started from the Dock, Finder, Spotlight or `open` gets launchd's
 // environment, not the one a terminal gives: PATH is /usr/bin:/bin:/usr/sbin:/sbin
 // or whatever launchd was configured with (a Nix profile's folders, say), and
 // everything the user's interactive shell setup adds is missing (Homebrew's
@@ -15,7 +15,7 @@ package main
 //   - the shell's values win, as in a terminal (the shell inherited the same
 //     environment, so a value differs only where an rc file set it on purpose:
 //     a 1Password SSH_AUTH_SOCK over launchd's); variables the shell did not
-//     print are kept; the session's own (PWD, SHLVL, _) and PI_DESK_* never come;
+//     print are kept; the session's own (PWD, SHLVL, _) and DECKHAND_* never come;
 //   - PATH is the shell's, in the shell's order (a terminal's order: rc files
 //     put Homebrew and Nix first on purpose), then the inherited folders the
 //     shell's PATH lacks, at the end; no folder twice.
@@ -26,7 +26,7 @@ package main
 // Claude Code's session markers (claude_session_marker: CLAUDECODE,
 // CLAUDE_CODE_CHILD_SESSION, CLAUDE_CODE_SESSION_ID, CLAUDE_PID…) are what a
 // running claude sets in ITS children (code.claude.com/docs/en/env-vars).
-// pi-desk started from a shell inside a Claude Code session (`open`, or a
+// Deckhand started from a shell inside a Claude Code session (`open`, or a
 // terminal there) would pass them to every tab: a Claude tab would start as
 // that session's child (no transcript saved, "inherited
 // CLAUDE_CODE_CHILD_SESSION marker"). So they leave this process's
@@ -38,11 +38,11 @@ package main
 // shell is asked (as for a GUI launch) with them left out, and only what it
 // sets itself comes back. No answer from the shell (it failed or timed out):
 // they stay, as inherited (only the markers go). ANTHROPIC_* always stay (pi
-// and Atlas read them too). PI_DESK_GUI_LAUNCH=0 turns all this off (the
+// and Atlas read them too). DECKHAND_GUI_LAUNCH=0 turns all this off (the
 // markers still go).
 //
 // "Refresh shell environment" (Refresh_Shell_Env) asks again later, on a
-// worker, with the environment pi-desk was started with, and merges the same
+// worker, with the environment Deckhand was started with, and merges the same
 // way into an environment kept here for NEW tabs (child_base_env); the
 // process's own is not changed after startup (setenv is not thread-safe),
 // and running tabs keep theirs.
@@ -58,7 +58,7 @@ import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
-LOGIN_ENV_MARK :: "__pi_desk_env_7f3a9c__"
+LOGIN_ENV_MARK :: "__deckhand_env_7f3a9c__"
 LOGIN_ENV_TIMEOUT :: 4 * time.Second
 
 @(private = "file")
@@ -86,7 +86,7 @@ path_is_bare :: proc(path: string) -> bool {
 // hooks, MCP servers, IDE terminals; code.claude.com/docs/en/env-vars:
 // "Set automatically", "Set by Claude Code, not by you"), and the ones seen
 // in such an environment that only make sense there (the parent's binary,
-// its entrypoint, whether it is attended): never a child's of pi-desk.
+// its entrypoint, whether it is attended): never a child's of deckhand.
 @(private = "file")
 CLAUDE_SESSION_MARKERS :: [?]string{
 	"CLAUDECODE", // "Set to 1 in subprocesses Claude Code spawns"; IDE terminals too
@@ -105,7 +105,7 @@ CLAUDE_SESSION_MARKER_PREFIXES :: [?]string{
 	"CLAUDE_CODE_MESSAGING_", // _SOCKET, _TOKEN: "Each session exports its own … never one inherited"
 }
 // Only claude itself sets these (not an IDE's terminal, which sets CLAUDECODE):
-// pi-desk was started from inside a Claude Code session.
+// Deckhand was started from inside a Claude Code session.
 @(private = "file")
 CLAUDE_SESSION_PROOF :: [?]string{"CLAUDE_CODE_CHILD_SESSION", "CLAUDE_CODE_SESSION_ID", "CLAUDE_PID"}
 
@@ -146,8 +146,8 @@ login_env_strip_claude :: proc(env: []string, config: bool) -> []string {
 }
 
 // The "K=V" entries between the markers of the shell's output (rc-file noise
-// before and after ignored), without its session variables or pi-desk's own
-// PI_DESK_* switches. ok: a PATH among
+// before and after ignored), without its session variables or Deckhand's own
+// DECKHAND_* switches. ok: a PATH among
 // them. Temp-allocated.
 login_env_parse :: proc(out: string) -> (vars: []string, ok: bool) {
 	i := strings.index(out, LOGIN_ENV_MARK)
@@ -158,7 +158,7 @@ login_env_parse :: proc(out: string) -> (vars: []string, ok: bool) {
 	list := make([dynamic]string, context.temp_allocator)
 	for e in strings.split(rest[:j], "\x00", context.temp_allocator) {
 		k, eq, _ := strings.partition(e, "=")
-		if k == "" || eq == "" || login_env_skipped(k) do continue // PI_DESK_SCRIPT would be test mode
+		if k == "" || eq == "" || login_env_skipped(k) do continue // DECKHAND_SCRIPT would be test mode
 		if k == "PATH" do ok = true
 		append(&list, e)
 	}
@@ -308,7 +308,7 @@ login_env_with_dirs :: proc(path: string, dirs: []string) -> string {
 	return strings.join(parts[:], ":", context.temp_allocator)
 }
 
-// Where pi and its runtimes usually are. PI_DESK_PATH_DIRS replaces the list
+// Where pi and its runtimes usually are. DECKHAND_PATH_DIRS replaces the list
 // (tests: never the machine's real /opt/homebrew/bin).
 login_env_dirs :: proc(home: string) -> []string {
 	if v, found := hook_lookup(.Path_Dirs); found {
@@ -365,11 +365,11 @@ login_env_merge_path :: proc(shell_path, inherited_path: string) -> string {
 	return strings.join(parts[:], ":", context.temp_allocator)
 }
 
-// The shell's session variables and pi-desk's own switches: never taken from it.
+// The shell's session variables and Deckhand's own switches: never taken from it.
 @(private = "file")
 login_env_skipped :: proc(k: string) -> bool {
 	skip := LOGIN_ENV_SKIP
-	return slice.contains(skip[:], k) || strings.has_prefix(k, "PI_DESK_") || strings.has_prefix(k, "DECKHAND_")
+	return slice.contains(skip[:], k) || strings.has_prefix(k, "DECKHAND_") || strings.has_prefix(k, "DECKHAND_")
 }
 
 // The environment a GUI launch gives its children: the inherited one merged
@@ -408,12 +408,12 @@ login_env_compose :: proc(inherited, shell: []string, shell_ok: bool, dirs: []st
 	return out[:], result
 }
 
-// A GUI launch (see the top): PI_DESK_GUI_LAUNCH=1 or 0 says (tests, or to
+// A GUI launch (see the top): DECKHAND_GUI_LAUNCH=1 or 0 says (tests, or to
 // turn the import off); else the parent is launchd (LaunchServices: Dock,
-// Finder, Spotlight, `open`), or PATH is launchd's bare one, or pi-desk was
+// Finder, Spotlight, `open`), or PATH is launchd's bare one, or Deckhand was
 // started from inside a Claude Code session (from_claude: its environment is
-// that session's, not a terminal's). Test mode (PI_DESK_SCRIPT) never is
-// without PI_DESK_GUI_LAUNCH=1: scenes never ask the real shell.
+// that session's, not a terminal's). Test mode (DECKHAND_SCRIPT) never is
+// without DECKHAND_GUI_LAUNCH=1: scenes never ask the real shell.
 login_env_gui_launch :: proc(ppid: int, path, override: string, test_mode := false, from_claude := false) -> bool {
 	switch override {
 	case "1": return true
@@ -466,7 +466,7 @@ login_env_fix :: proc(gui: bool, shell: string, dirs: []string, timeout: time.Du
 login_env: struct {
 	gui:      bool,
 	from_claude: bool, // started from inside a Claude Code session (login_env_from_claude)
-	launch:   []string, // the environment pi-desk was started with (heap; a GUI launch only)
+	launch:   []string, // the environment Deckhand was started with (heap; a GUI launch only)
 	children: []string, // after a refresh: what new tabs get (heap); nil = this process's
 	running:  bool,
 }
@@ -476,7 +476,7 @@ login_env_startup :: proc() {
 	path := os.get_env("PATH", context.temp_allocator)
 	test_mode := hook_env(.Script) != ""
 	env, _ := os.environ(context.temp_allocator)
-	gui := login_env_gui_launch(int(posix.getppid()), path, os.get_env("PI_DESK_GUI_LAUNCH", context.temp_allocator), test_mode, login_env_from_claude(env))
+	gui := login_env_gui_launch(int(posix.getppid()), path, os.get_env("DECKHAND_GUI_LAUNCH", context.temp_allocator), test_mode, login_env_from_claude(env))
 	login_env.gui = gui
 	login_env.from_claude = login_env_from_claude(env)
 	if gui do login_env.launch = env_clone(login_env_strip_claude(env, false)) // a refresh asks with it (markers out)

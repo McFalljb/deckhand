@@ -49,7 +49,7 @@ while i < len(args):
         sys.stderr.write(f"Unknown option: {a}\n"); sys.exit(2)
     messages.append(a); i += 1
 prompt = " ".join(messages).strip()
-job = os.environ.get("PI_DESK_JOB", "x")
+job = os.environ.get("DECKHAND_JOB", "x")
 with open(os.path.join(os.environ.get("HOME", "/tmp"), f"pi-env-{job}.txt"), "w") as f:
     f.write("ARGS: " + " ".join(sys.argv[1:]) + "\n")
     for k in sorted(os.environ): f.write(f"{k}={os.environ[k]}\n")
@@ -57,7 +57,7 @@ with open(os.path.join(os.environ.get("HOME", "/tmp"), f"pi-env-{job}.txt"), "w"
 out({"type": "session", "version": 3, "id": "fake", "cwd": os.getcwd()})
 out({"type": "agent_start"})
 word = prompt.split()[0].lstrip("-@") if prompt.split() else ""
-sched = os.environ.get("PI_DESK_SCHEDULED_AT", "")
+sched = os.environ.get("DECKHAND_SCHEDULED_AT", "")
 
 def ok(extra=""):
     out({"type": "tool_execution_start", "toolCallId": "t1", "toolName": "bash", "args": {"command": "ls"}})

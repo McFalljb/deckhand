@@ -125,27 +125,27 @@ inst_exe :: proc(pid: int) -> string {
 }
 
 @(test)
-instance_old_pidesk :: proc(t: ^testing.T) {
+instance_legacy :: proc(t: ^testing.T) {
 	d := inst_dir("sock")
 	defer os.remove_all(d)
 	mk :: proc(d, name: string) {_ = os.write_entire_file(fmt.tprintf("%s/%s", d, name), transmute([]byte)string(""))}
 	// ours, a dead one, a Deckhand (its lock decides), junk names
 	for n in ([]string{"pi-desk-7.sock", "pi-desk-99.sock", "pi-desk-102.sock", "pi-desk-x.sock", "pi-desk-101.sockx", "other-101.sock"}) do mk(d, n)
-	testing.expect_value(t, instance_old_pidesk_find(d, 7, inst_alive, inst_exe), 0)
+	testing.expect_value(t, instance_legacy_find(d, 7, inst_alive, inst_exe), 0)
 	mk(d, "pi-desk-101.sock")
-	testing.expect_value(t, instance_old_pidesk_find(d, 7, inst_alive, inst_exe), 101)
-	testing.expect_value(t, instance_old_pidesk_find(d, 101, inst_alive, inst_exe), 0) // that is us
-	testing.expect_value(t, instance_old_pidesk_find(fmt.tprintf("%s/none", d), 7, inst_alive, inst_exe), 0)
+	testing.expect_value(t, instance_legacy_find(d, 7, inst_alive, inst_exe), 101)
+	testing.expect_value(t, instance_legacy_find(d, 101, inst_alive, inst_exe), 0) // that is us
+	testing.expect_value(t, instance_legacy_find(fmt.tprintf("%s/none", d), 7, inst_alive, inst_exe), 0)
 	// a pi-desk built from source (build/pi-desk.app beside build.sh) does not count
-	testing.expect(t, instance_pidesk_exe("/Applications/pi-desk.app/Contents/MacOS/pi-desk"))
-	testing.expect(t, instance_pidesk_exe("/Users/me/Apps/pi-desk.app/Contents/MacOS/pi-desk"))
-	testing.expect(t, !instance_pidesk_exe("/Applications/Deckhand.app/Contents/MacOS/Deckhand"))
-	testing.expect(t, !instance_pidesk_exe("/usr/bin/pi-desk-cli"))
+	testing.expect(t, instance_legacy_exe("/Applications/pi-desk.app/Contents/MacOS/pi-desk"))
+	testing.expect(t, instance_legacy_exe("/Users/me/Apps/pi-desk.app/Contents/MacOS/pi-desk"))
+	testing.expect(t, !instance_legacy_exe("/Applications/Deckhand.app/Contents/MacOS/Deckhand"))
+	testing.expect(t, !instance_legacy_exe("/usr/bin/pi-desk-cli"))
 	repo := inst_dir("repo")
 	defer os.remove_all(repo)
 	os.make_directory_all(fmt.tprintf("%s/build", repo))
 	_ = os.write_entire_file(fmt.tprintf("%s/build.sh", repo), transmute([]byte)string("#!/bin/sh\n"))
-	testing.expect(t, !instance_pidesk_exe(fmt.tprintf("%s/build/pi-desk.app/Contents/MacOS/pi-desk", repo)))
+	testing.expect(t, !instance_legacy_exe(fmt.tprintf("%s/build/pi-desk.app/Contents/MacOS/pi-desk", repo)))
 	testing.expect(t, strings.contains(instance_message(0), "Deckhand is already running"))
 	testing.expect(t, strings.contains(instance_message(101), "pi-desk"))
 }
@@ -161,11 +161,11 @@ instance_guard_whole :: proc(t: ^testing.T) {
 	run := fmt.tprintf("%s/run", d)
 	macos := fmt.tprintf("%s/old/pi-desk.app/Contents/MacOS", d)
 	for x in ([]string{data, run, macos}) do os.make_directory_all(x)
-	saved := strings.clone(os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator), context.temp_allocator)
-	os.set_env("PI_DESK_RUNTIME_DIR", run)
+	saved := strings.clone(os.get_env("DECKHAND_RUNTIME_DIR", context.temp_allocator), context.temp_allocator)
+	os.set_env("DECKHAND_RUNTIME_DIR", run)
 	defer {
-		if saved == "" do os.unset_env("PI_DESK_RUNTIME_DIR")
-		else do os.set_env("PI_DESK_RUNTIME_DIR", saved)
+		if saved == "" do os.unset_env("DECKHAND_RUNTIME_DIR")
+		else do os.set_env("DECKHAND_RUNTIME_DIR", saved)
 	}
 
 	// a stand-in pi-desk 0.1.x that only sleeps (a copy of /bin/sleep is killed: Apple's

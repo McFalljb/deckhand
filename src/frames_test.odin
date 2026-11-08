@@ -26,7 +26,7 @@ MACH_HEADER :: 24 // mach_msg_header_t
 frames_messages_are_fixed_little_endian :: proc(t: ^testing.T) {
 	buf: [256]u8
 	// FRAME: gen u32, slot u32, seq u64, tick u64 after the header
-	n := int(pd_frames_encode(4, 7, 2, 0x1122334455667788, 99, &buf[0]))
+	n := int(dh_frames_encode(4, 7, 2, 0x1122334455667788, 99, &buf[0]))
 	testing.expect_value(t, n, MACH_HEADER + 24)
 	testing.expect_value(t, rd32(buf[:], 20), 4) // msgh_id
 	testing.expect_value(t, rd32(buf[:], 4), u32(n)) // msgh_size
@@ -35,59 +35,59 @@ frames_messages_are_fixed_little_endian :: proc(t: ^testing.T) {
 	testing.expect_value(t, rd64(buf[:], MACH_HEADER + 8), 0x1122334455667788)
 	testing.expect_value(t, rd64(buf[:], MACH_HEADER + 16), 99)
 	// RELEASE: gen, slot
-	n = int(pd_frames_encode(5, 3, 1, 0, 0, &buf[0]))
+	n = int(dh_frames_encode(5, 3, 1, 0, 0, &buf[0]))
 	testing.expect_value(t, n, MACH_HEADER + 8)
 	testing.expect_value(t, rd32(buf[:], 20), 5)
 	testing.expect_value(t, rd32(buf[:], MACH_HEADER), 3)
 	testing.expect_value(t, rd32(buf[:], MACH_HEADER + 4), 1)
 	// RING_DONE: gen
-	n = int(pd_frames_encode(3, 12, 0, 0, 0, &buf[0]))
+	n = int(dh_frames_encode(3, 12, 0, 0, 0, &buf[0]))
 	testing.expect_value(t, n, MACH_HEADER + 4)
 	testing.expect_value(t, rd32(buf[:], MACH_HEADER), 12)
 	// HELLO: key[32], tab_id u64
-	n = int(pd_frames_encode(1, 0, 0, 42, 0, &buf[0]))
+	n = int(dh_frames_encode(1, 0, 0, 42, 0, &buf[0]))
 	testing.expect_value(t, n, MACH_HEADER + 32 + 8)
 	testing.expect_value(t, rd64(buf[:], MACH_HEADER + 32), 42)
 	// RING: header, body, 3 port descriptors (12 bytes each), gen count w h scale format
-	testing.expect_value(t, int(pd_frames_encode(2, 0, 0, 0, 0, &buf[0])), MACH_HEADER + 4 + 3 * 12 + 6 * 4)
-	testing.expect_value(t, int(pd_frames_encode(9, 0, 0, 0, 0, &buf[0])), 0) // no such message
+	testing.expect_value(t, int(dh_frames_encode(2, 0, 0, 0, 0, &buf[0])), MACH_HEADER + 4 + 3 * 12 + 6 * 4)
+	testing.expect_value(t, int(dh_frames_encode(9, 0, 0, 0, 0, &buf[0])), 0) // no such message
 }
 
 @(test)
 frames_key_and_sender_checks :: proc(t: ^testing.T) {
 	a, b: [32]u8
 	for i in 0 ..< 32 do a[i], b[i] = u8(i * 7), u8(i * 7)
-	testing.expect_value(t, pd_frames_key_equal(&a[0], &b[0]), 1)
+	testing.expect_value(t, dh_frames_key_equal(&a[0], &b[0]), 1)
 	b[31] ~= 1
-	testing.expect_value(t, pd_frames_key_equal(&a[0], &b[0]), 0) // the last byte counts
+	testing.expect_value(t, dh_frames_key_equal(&a[0], &b[0]), 0) // the last byte counts
 	b[31] ~= 1
 	b[0] ~= 0x80
-	testing.expect_value(t, pd_frames_key_equal(&a[0], &b[0]), 0)
-	// the tab's process group 500 and session 500 (pi-desk starts it with setsid)
-	testing.expect_value(t, pd_frames_sender_in(500, 500, 500, 500), 1) // the child itself
-	testing.expect_value(t, pd_frames_sender_in(612, 500, 500, 500), 1) // a grandchild in its own group, same session (sh -c "make run")
-	testing.expect_value(t, pd_frames_sender_in(500, 77, 500, 500), 1) // left the session but not the group
-	testing.expect_value(t, pd_frames_sender_in(612, 77, 500, 500), 0) // setsid: neither
-	testing.expect_value(t, pd_frames_sender_in(-1, -1, 500, 500), 0) // a pid that is gone
-	testing.expect_value(t, pd_frames_sender_in(0, 0, 0, 0), 0) // an unset channel never matches
+	testing.expect_value(t, dh_frames_key_equal(&a[0], &b[0]), 0)
+	// the tab's process group 500 and session 500 (Deckhand starts it with setsid)
+	testing.expect_value(t, dh_frames_sender_in(500, 500, 500, 500), 1) // the child itself
+	testing.expect_value(t, dh_frames_sender_in(612, 500, 500, 500), 1) // a grandchild in its own group, same session (sh -c "make run")
+	testing.expect_value(t, dh_frames_sender_in(500, 77, 500, 500), 1) // left the session but not the group
+	testing.expect_value(t, dh_frames_sender_in(612, 77, 500, 500), 0) // setsid: neither
+	testing.expect_value(t, dh_frames_sender_in(-1, -1, 500, 500), 0) // a pid that is gone
+	testing.expect_value(t, dh_frames_sender_in(0, 0, 0, 0), 0) // an unset channel never matches
 }
 
 @(test)
 frames_only_current_frames_count :: proc(t: ^testing.T) {
 	rel: u32 = 99
 	// stale gen, no ring yet, bad slot: dropped
-	testing.expect_value(t, pd_frames_on_frame(5, 0, 0, 4, 0, &rel), 0)
-	testing.expect_value(t, pd_frames_on_frame(0, 0, 0, 0, 0, &rel), 0)
-	testing.expect_value(t, pd_frames_on_frame(5, 0, 0, 5, 3, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 4, 0, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(0, 0, 0, 0, 0, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 5, 3, &rel), 0)
 	// the first: taken
-	testing.expect_value(t, pd_frames_on_frame(5, 0, 0, 5, 1, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 5, 1, &rel), 1)
 	testing.expect_value(t, rel, 99)
 	// a newer one while slot 1 waits unshown: slot 1 goes back at once
-	testing.expect_value(t, pd_frames_on_frame(5, 1, 1, 5, 2, &rel), 2)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 1, 5, 2, &rel), 2)
 	testing.expect_value(t, rel, 1)
 	// the same slot again (never happens with a correct app): nothing to release twice
 	rel = 99
-	testing.expect_value(t, pd_frames_on_frame(5, 1, 2, 5, 2, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 2, &rel), 1)
 	testing.expect_value(t, rel, 99)
 }
 
@@ -182,7 +182,7 @@ app_commands_parse_and_permissions :: proc(t: ^testing.T) {
 	testing.expect(t, ac.method == "tab.ping" && ac.timeout_ms == 500, "app_call's method")
 	_, err = parse_command(`{"type":"app_call","tab_id":4}`, context.temp_allocator)
 	testing.expect(t, err != "", "method is needed")
-	// an app's program sends no commands, not even queries; the internal ones are pi-desk's
+	// an app's program sends no commands, not even queries; the internal ones are Deckhand's
 	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, Get_State{}), "app: no queries")
 	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, New_App_Tab{}), "app: no commands")
 	testing.expect(t, caller_may({kind = .Control}, App_Call{}), "control may call apps")
@@ -299,46 +299,46 @@ _ :: sapp
 @(test)
 frames_local_ring_never_hands_out_a_held_slot :: proc(t: ^testing.T) {
 	TAB :: u64(0x7E57_0000_0001)
-	dev := pd_frames_device_for(0)
-	testing.expect_value(t, pd_frames_local_open(TAB, dev), 1)
-	defer pd_frames_chan_close(TAB)
+	dev := dh_frames_device_for(0)
+	testing.expect_value(t, dh_frames_local_open(TAB, dev), 1)
+	defer dh_frames_chan_close(TAB)
 	gen: u32
 	slot: c.int
 	tex, surf: rawptr
-	acq :: proc(w: c.int, gen: ^u32, slot: ^c.int, tex, surf: ^rawptr) -> c.int {return pd_frames_local_acquire(TAB, w, 8, gen, slot, tex, surf)}
+	acq :: proc(w: c.int, gen: ^u32, slot: ^c.int, tex, surf: ^rawptr) -> c.int {return dh_frames_local_acquire(TAB, w, 8, gen, slot, tex, surf)}
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 0) // no ring yet: make one
-	g := pd_frames_ring_new(TAB, 8, 8, 1)
+	g := dh_frames_ring_new(TAB, 8, 8, 1)
 	testing.expect(t, g != 0, "a ring")
 	testing.expect_value(t, acq(9, &gen, &slot, &tex, &surf), 0) // larger: make one
 	// frame 1 -> shown (polled and taken, as browser_frames_tick does)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	testing.expect(t, gen == g && tex != nil && surf != nil, "slot of the current ring")
 	shown := slot
-	testing.expect_value(t, pd_frames_local_frame(TAB, gen, slot, 1, 8, 8), 1)
+	testing.expect_value(t, dh_frames_local_frame(TAB, gen, slot, 1, 8, 8), 1)
 	p: Frames_Poll
-	pd_frames_poll(TAB, &p)
+	dh_frames_poll(TAB, &p)
 	testing.expect(t, p.has_frame == 1 && c.int(p.slot) == shown, "the frame is polled")
-	testing.expect_value(t, pd_frames_local_slot_state(TAB, g, shown), FRAMES_SLOT_PIDESK)
+	testing.expect_value(t, dh_frames_local_slot_state(TAB, g, shown), FRAMES_SLOT_DECKHAND)
 	// frames 2 and 3, never polled: neither gets the shown slot; 3 replaces 2 (freed at once)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	s2 := slot
 	testing.expect(t, s2 != shown, "not the shown slot")
-	pd_frames_local_frame(TAB, gen, s2, 2, 8, 8)
+	dh_frames_local_frame(TAB, gen, s2, 2, 8, 8)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	s3 := slot
 	testing.expect(t, s3 != shown && s3 != s2, "the free slot first")
-	pd_frames_local_frame(TAB, gen, s3, 3, 8, 8)
-	testing.expect_value(t, pd_frames_local_slot_state(TAB, g, s2), FRAMES_SLOT_FREE)
+	dh_frames_local_frame(TAB, gen, s3, 3, 8, 8)
+	testing.expect_value(t, dh_frames_local_slot_state(TAB, g, s2), FRAMES_SLOT_FREE)
 	// s2 is being written; the only other is s3, unshown: it is written again (its frame dropped)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	testing.expect_value(t, slot, s2)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	testing.expect_value(t, slot, s3)
-	testing.expect_value(t, pd_frames_local_reclaimed(TAB), 1)
+	testing.expect_value(t, dh_frames_local_reclaimed(TAB), 1)
 	// s2 and s3 written; s3 handed over and polled (now shown), the old shown one retired:
-	pd_frames_local_unacquire(TAB, g, s2)
-	pd_frames_local_frame(TAB, g, s3, 4, 8, 8)
-	pd_frames_poll(TAB, &p)
+	dh_frames_local_unacquire(TAB, g, s2)
+	dh_frames_local_frame(TAB, g, s3, 4, 8, 8)
+	dh_frames_poll(TAB, &p)
 	testing.expect(t, p.has_frame == 1 && c.int(p.slot) == s3, "frame 4 polled")
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	testing.expect_value(t, slot, s2)
@@ -346,39 +346,39 @@ frames_local_ring_never_hands_out_a_held_slot :: proc(t: ^testing.T) {
 	// (old `shown`), and s2 being written. Nothing to give: drop.
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), -1)
 	// RELEASE of the retired slot (after the GPU frame): it is free again
-	pd_frames_release_now(TAB, g, u32(shown))
-	pd_frames_peers() // the Mach queue's work is done (a barrier)
-	testing.expect_value(t, pd_frames_local_slot_state(TAB, g, shown), FRAMES_SLOT_FREE)
+	dh_frames_release_now(TAB, g, u32(shown))
+	dh_frames_peers() // the Mach queue's work is done (a barrier)
+	testing.expect_value(t, dh_frames_local_slot_state(TAB, g, shown), FRAMES_SLOT_FREE)
 	testing.expect_value(t, acq(8, &gen, &slot, &tex, &surf), 1)
 	testing.expect_value(t, slot, shown)
 	// a frame for an old ring is dropped and its slot freed
-	g2 := pd_frames_ring_new(TAB, 8, 8, 1)
+	g2 := dh_frames_ring_new(TAB, 8, 8, 1)
 	// a smaller paint fits the ring (headroom): its size comes with the frame
 	{
 		g3: u32
 		s3_: c.int
 		t3, f3: rawptr
-		testing.expect_value(t, pd_frames_local_acquire(TAB, 5, 3, &g3, &s3_, &t3, &f3), 1)
-		testing.expect_value(t, pd_frames_local_frame(TAB, g3, s3_, 9, 5, 3), 1)
-		pd_frames_poll(TAB, &p)
+		testing.expect_value(t, dh_frames_local_acquire(TAB, 5, 3, &g3, &s3_, &t3, &f3), 1)
+		testing.expect_value(t, dh_frames_local_frame(TAB, g3, s3_, 9, 5, 3), 1)
+		dh_frames_poll(TAB, &p)
 		testing.expect(t, p.has_frame == 1 && p.content_w == 5 && p.content_h == 3, "content size polled")
-		testing.expect_value(t, pd_frames_local_acquire(TAB, 9, 3, &g3, &s3_, &t3, &f3), 0) // wider: a new ring
+		testing.expect_value(t, dh_frames_local_acquire(TAB, 9, 3, &g3, &s3_, &t3, &f3), 0) // wider: a new ring
 	}
-	testing.expect_value(t, pd_frames_local_frame(TAB, g, slot, 5, 8, 8), 0)
-	testing.expect_value(t, pd_frames_surface_count(TAB), 6)
-	testing.expect(t, pd_frames_surface_bytes(TAB) > 0, "bytes counted")
+	testing.expect_value(t, dh_frames_local_frame(TAB, g, slot, 5, 8, 8), 0)
+	testing.expect_value(t, dh_frames_surface_count(TAB), 6)
+	testing.expect(t, dh_frames_surface_bytes(TAB) > 0, "bytes counted")
 	// an app's checks never count browser surfaces; closing frees them
-	pd_frames_ring_free(TAB, g, -1)
-	testing.expect_value(t, pd_frames_surface_count(TAB), 3)
+	dh_frames_ring_free(TAB, g, -1)
+	testing.expect_value(t, dh_frames_surface_count(TAB), 3)
 	_ = g2
-	testing.expect(t, pd_frames_local_chans() >= 1, "the channel counts while open")
-	pd_frames_chan_close(TAB)
-	testing.expect_value(t, pd_frames_surface_count(TAB), 0)
-	testing.expect_value(t, pd_frames_surface_total_local(), 0)
-	testing.expect_value(t, pd_frames_local_open(TAB + 1, dev) == 1 && pd_frames_surface_total() == 0, true)
-	pd_frames_chan_close(TAB + 1)
-	pd_frames_peers() // the Mach queue finished draining the closed channels
-	testing.expect_value(t, pd_frames_local_chans(), 0)
+	testing.expect(t, dh_frames_local_chans() >= 1, "the channel counts while open")
+	dh_frames_chan_close(TAB)
+	testing.expect_value(t, dh_frames_surface_count(TAB), 0)
+	testing.expect_value(t, dh_frames_surface_total_local(), 0)
+	testing.expect_value(t, dh_frames_local_open(TAB + 1, dev) == 1 && dh_frames_surface_total() == 0, true)
+	dh_frames_chan_close(TAB + 1)
+	dh_frames_peers() // the Mach queue finished draining the closed channels
+	testing.expect_value(t, dh_frames_local_chans(), 0)
 }
 
 // When a browser's ring is remade (browser.odin): only when a paint outgrows

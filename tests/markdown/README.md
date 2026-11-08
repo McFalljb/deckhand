@@ -37,7 +37,7 @@ while i < len(lines):
     elif re.match(r'^#{1,6} ', l): sec = re.sub(r'^#+ ', '', l).strip()
     i += 1
 PY
-PI_DESK_MD_SPEC=/tmp/examples.txt odin test src -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=main.markdown_spec_report
+DECKHAND_MD_SPEC=/tmp/examples.txt odin test src -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_NAMES=main.markdown_spec_report
 ```
 
 Last run (2026-11-01): CommonMark 0.31.2: 648/652 (the four above); GFM spec extension

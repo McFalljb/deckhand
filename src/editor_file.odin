@@ -270,7 +270,7 @@ editor_save :: proc(e: ^Editor) -> string {
 		if posix.access(strings.clone_to_cstring(target, context.temp_allocator), {.W_OK}) != .OK do return fmt.tprintf("%s is read-only (no write permission): not saved", filepath.base(target))
 	}
 	dir, base := filepath.split(target)
-	tmp := fmt.tprintf("%s/.%s.pi-desk-%d.tmp", dir, base, time.now()._nsec)
+	tmp := fmt.tprintf("%s/.%s.deckhand-%d.tmp", dir, base, time.now()._nsec)
 	f, err := os.open(tmp, {.Write, .Create, .Excl}, mode)
 	if err != nil do return fmt.tprintf("cannot write %s: %v", dir, err)
 	ok := true

@@ -18,6 +18,6 @@ while [ $i -lt 3000 ]; do
   printf '{"type":"session","version":3,"id":"s%d","cwd":"%s"}\n' $i "$PROJ" > "$D/2026-10-01T00-00-00-000Z_s$i.jsonl"
   i=$((i + 1))
 done
-HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/persist-cpu.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-status.py'" \
-  build/deckhand "$PROJ" 2>&1 | grep -E "CPU|pi-desk:|done:"
+HOME="$W/home" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/persist-cpu.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-status.py'" \
+  build/deckhand "$PROJ" 2>&1 | grep -E "CPU|Deckhand:|done:"

@@ -127,7 +127,7 @@ browser_menu_link_stays_in_session :: proc(t: ^testing.T) {
 		testing.expect(t, s != nil && s.id == b, "opened in beta")
 	}
 	testing.expect(t, found, "Open link in new tab offered")
-	// a link pi-desk does not open: no "Open link in new tab", Copy link still
+	// a link Deckhand does not open: no "Open link in new tab", Copy link still
 	clear(&items)
 	browser_menu_items(Menu_Browser{tab_id = tb, link = "javascript:alert(1)", flags = CM_LINK}, &items)
 	labels := make([dynamic]string, context.temp_allocator)
@@ -207,7 +207,7 @@ browser_polish_commands_user_only :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok && r.error == "not a browser tab", r.error)
 	// Open in default browser: web addresses only
 	testing.expect(t, browser_external_ok("https://x.example") && browser_external_ok("HTTP://x"))
-	testing.expect(t, !browser_external_ok("file:///etc/passwd") && !browser_external_ok("pidesk-test://web/a.html") && !browser_external_ok("about:blank"))
+	testing.expect(t, !browser_external_ok("file:///etc/passwd") && !browser_external_ok("deckhand-test://web/a.html") && !browser_external_ok("about:blank"))
 }
 
 @(test)
@@ -313,10 +313,10 @@ browser_bar_text_clipped_from_the_left :: proc(t: ^testing.T) {
 @(test)
 browser_dialog_bar_names_origin :: proc(t: ^testing.T) {
 	testing.expect_value(t, url_origin("https://User@Example.com:8443/a?b#c"), "https://example.com:8443")
-	testing.expect_value(t, url_origin("pidesk-test://web/polish.html"), "pidesk-test://web")
+	testing.expect_value(t, url_origin("deckhand-test://web/polish.html"), "deckhand-test://web")
 	testing.expect_value(t, url_origin("file:///tmp/a.html"), "file://")
 	testing.expect_value(t, url_origin("about:blank"), "about:blank")
-	testing.expect_value(t, dialog_bar_text(.Alert, "Hi\nthere", "pidesk-test://web/", "pidesk-test://web/polish.html"), "pidesk-test://web says: Hi there")
+	testing.expect_value(t, dialog_bar_text(.Alert, "Hi\nthere", "deckhand-test://web/", "deckhand-test://web/polish.html"), "deckhand-test://web says: Hi there")
 	testing.expect_value(t, dialog_bar_text(.Confirm, "Sure?", "https://ads.example/", "https://news.example/x"), "https://ads.example (embedded frame) says: Sure?")
 	testing.expect_value(t, dialog_bar_text(.Leave, "", "", "https://news.example/x"), "Leave this page? Changes you made may not be saved.")
 }
@@ -491,7 +491,7 @@ browser_download_ask_keeps_url :: proc(t: ^testing.T) {
 }
 
 // An agent's browser_* commands never count as the user's gesture for a download: only input
-// pi-desk forwards from the user's own events does (browser_page_input).
+// Deckhand forwards from the user's own events does (browser_page_input).
 @(test)
 browser_agent_commands_are_not_a_gesture :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()

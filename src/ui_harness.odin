@@ -364,7 +364,7 @@ harness_step_event :: proc(e: ^sapp.Event) -> bool {
 
 // ---- the Settings tab's Coding agents group ----
 
-HARNESS_SETTINGS_ROW :: "pi-desk:harness:"
+HARNESS_SETTINGS_ROW :: "deckhand:harness:"
 
 // The group's rows (settings_file_rows): per harness, its row; once installed, its integration and
 // recommended items. Install… and Update… open the sheet's checklist.

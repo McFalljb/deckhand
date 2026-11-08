@@ -48,10 +48,10 @@ wt_setup :: proc() -> (f: Wt_Fixture, ok: bool) {
 	files_refresh()
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-wt-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-wt-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	f.root = fs_real(made, context.allocator)
-	ensure(strings.contains(f.root, "/pi-desk-wt-test-") && os.is_directory(f.root), "worktree tests: no temp folder")
+	ensure(strings.contains(f.root, "/deckhand-wt-test-") && os.is_directory(f.root), "worktree tests: no temp folder")
 	// a fake HOME: git reads no user config here
 	f.old_home = strings.clone(os.get_env("HOME", context.temp_allocator))
 	os.make_directory_all(fmt.tprintf("%s/home", f.root))
@@ -487,8 +487,8 @@ wt_session_in_a_worktree :: proc(t: ^testing.T) {
 	defer wt_teardown(f)
 	if !ok do return
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 5")
-	defer os.unset_env("PI_DESK_CMD")
+	os.set_env("DECKHAND_CMD", "sleep 5")
+	defer os.unset_env("DECKHAND_CMD")
 	wt_scan_now(f.main)
 	p := state.projects[0]
 	testing.expect_value(t, run_command(Worktree_Session{project_id = p.id, path = fmt.tprintf("%s/home", f.root)}, {kind = .Script}).error, "not a checkout of the project's repository")
@@ -515,10 +515,10 @@ wt_claude_session_in_a_worktree :: proc(t: ^testing.T) {
 	defer wt_teardown(f)
 	if !ok do return
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 5")
-	defer os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 5")
+	defer os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	wt_scan_now(f.main)
 	p := state.projects[0]

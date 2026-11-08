@@ -1,6 +1,6 @@
 # The coding agents checklist (tests/scripts/harness-setup.sh, run 3): pi 1.3.0 (npm) and Claude Code
 # 2.1.100 (native) are too old: Update aimed at the copy found (its path), run after a click; pi's
-# integration is not loaded. No PI_DESK_INSTALL_CMD: test mode refuses the run (exit 127).
+# integration is not loaded. No DECKHAND_INSTALL_CMD: test mode refuses the run (exit 127).
 wait 1500
 assert_state focus.step agents
 assert_state focus.agents.0.state too_old

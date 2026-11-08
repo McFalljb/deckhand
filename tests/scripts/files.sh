@@ -23,7 +23,7 @@ T=$(mktemp -d /tmp/pd.XXXX) || exit 1
 FAKE_HOME=$(cd "$T" && pwd -P) || exit 1
 # only ever the temp folder made here
 trap 'case "$FAKE_HOME" in /private/tmp/pd.?*|/tmp/pd.?*) rm -rf "$FAKE_HOME" ;; esac' EXIT
-export PI_DESK_TEMP_ROOTS=/nonexistent-temp-root
+export DECKHAND_TEMP_ROOTS=/nonexistent-temp-root
 PROJ="$FAKE_HOME/proj"
 mkdir -p "$PROJ/src" "$PROJ/node_modules/pkg" "$PROJ/huge" "$W/data" "$FAKE_HOME/.pi/agent/sessions/--proj--"
 printf '{"type":"session","version":3,"id":"ffff-1","cwd":"%s"}\n' "$PROJ" \
@@ -41,8 +41,8 @@ printf 'int main(void) {\n    return 1;\n}\n' > "$PROJ/main.c" # modified
 printf 'new\n' > "$PROJ/new.txt"                                # untracked
 printf 'log\n' > "$PROJ/debug.log"                              # ignored
 run() { # script log
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
+  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU|FILES" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "files scene failed (log: $2)"; exit 1

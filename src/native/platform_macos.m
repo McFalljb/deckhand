@@ -16,7 +16,7 @@
 //    KVO: no polling) and the window's own appearance (title bar, folder
 //    picker) when the user picked light or dark.
 //
-// Built by build.sh into build/pd_platform.a.
+// Built by build.sh into build/dh_platform.a.
 
 #import <Cocoa/Cocoa.h>
 #import <UserNotifications/UserNotifications.h>
@@ -27,9 +27,9 @@ typedef struct {
     void (*marked)(const char* utf8, int len, int caret);   // composition, "" = none; caret = byte offset
     void (*caret_rect)(float* x, float* y, float* w, float* h); // framebuffer px, top-left origin
     int (*option_composes)(void);                           // 1: Option may start a dead key
-} pd_ime_callbacks;
+} dh_ime_callbacks;
 
-static pd_ime_callbacks cb;
+static dh_ime_callbacks cb;
 static NSWindow* win;
 static NSView* view;
 static NSString* marked_text; // current composition ("" = none)
@@ -88,7 +88,7 @@ static NSRange ti_selectedRange(id self, SEL _cmd) { return NSMakeRange(0, 0); }
 static NSArray* ti_validAttributes(id self, SEL _cmd) { return @[]; }
 static NSAttributedString* ti_attributedSubstring(id self, SEL _cmd, NSRange r, NSRangePointer actual) { return nil; }
 static NSUInteger ti_characterIndexForPoint(id self, SEL _cmd, NSPoint p) { return NSNotFound; }
-// The key is a command (Enter, Tab, arrows): it goes on to sokol (pd_keyDown). No beep.
+// The key is a command (Enter, Tab, arrows): it goes on to sokol (dh_keyDown). No beep.
 // The view's own input context. NSView makes one only for views that conform
 // to NSTextInputClient when it is first asked, which happened before the
 // protocol was added at run time: without this, inputContext stays nil,
@@ -123,7 +123,7 @@ static NSRect ti_firstRect(id self, SEL _cmd, NSRange r, NSRangePointer actual) 
 // keyDown: through the input system first. Cmd and Ctrl chords, and Option
 // when it acts as Alt (terminal), go straight to sokol unless a composition is
 // open.
-static void pd_keyDown(id self, SEL _cmd, NSEvent* ev) {
+static void dh_keyDown(id self, SEL _cmd, NSEvent* ev) {
     NSEventModifierFlags m = ev.modifierFlags;
     BOOL composing = marked_text.length > 0;
     BOOL chord = (m & (NSEventModifierFlagCommand | NSEventModifierFlagControl)) != 0;
@@ -208,13 +208,13 @@ static void place_traffic_lights(void) {
 
 // AppKit lays the title bar out again on its own (activation, resizes):
 // called after every drawn frame, cheap when nothing moved.
-void pd_mac_place_lights(void) { place_traffic_lights(); }
+void dh_mac_place_lights(void) { place_traffic_lights(); }
 
 // ---- API ----
 
 // Blends the title bar into the content: our top bar is bar_h logical px tall;
 // the traffic lights sit centred in it, the first at light_x.
-void pd_mac_init(void* window, const pd_ime_callbacks* callbacks, float bar_h, float light_x, float min_w, float min_h) {
+void dh_mac_init(void* window, const dh_ime_callbacks* callbacks, float bar_h, float light_x, float min_w, float min_h) {
     // held keys repeat instead of opening the accent popover (a terminal
     // needs repeats); registered, so a user's own setting still wins
     [[NSUserDefaults standardUserDefaults] registerDefaults:@{@"ApplePressAndHoldEnabled" : @NO}];
@@ -253,11 +253,11 @@ void pd_mac_init(void* window, const pd_ime_callbacks* callbacks, float bar_h, f
     class_addMethod(cls, @selector(insertText:), (IMP)ti_insertTextLegacy, "v@:@");
     if (win.isKeyWindow) [view.inputContext activate];
     Method kd = class_getInstanceMethod(cls, @selector(keyDown:));
-    orig_key_down = method_setImplementation(kd, (IMP)pd_keyDown);
+    orig_key_down = method_setImplementation(kd, (IMP)dh_keyDown);
 }
 
 // Drops an open composition (focus moved elsewhere).
-void pd_mac_ime_cancel(void) {
+void dh_mac_ime_cancel(void) {
     if (marked_text.length == 0) return;
     [view.inputContext discardMarkedText];
     marked_text = @"";
@@ -265,32 +265,32 @@ void pd_mac_ime_cancel(void) {
 }
 
 // The caret moved: the candidate window follows.
-void pd_mac_ime_caret_moved(void) {
+void dh_mac_ime_caret_moved(void) {
     if (marked_text.length > 0) [view.inputContext invalidateCharacterCoordinates];
 }
 
 // Called while handling a mouse down in an empty part of the top bar.
-void pd_mac_window_drag(void) {
+void dh_mac_window_drag(void) {
     NSEvent* e = NSApp.currentEvent;
     if (e && e.type == NSEventTypeLeftMouseDown) [win performWindowDragWithEvent:e];
 }
 
 // A double-click in an empty part of the top bar, as the title bar does it
 // (System Settings › Desktop & Dock › "Double-click a window's title bar to").
-void pd_mac_titlebar_double_click(void) {
+void dh_mac_titlebar_double_click(void) {
     NSString* a = [[NSUserDefaults standardUserDefaults] stringForKey:@"AppleActionOnDoubleClick"];
     if ([a isEqualToString:@"Minimize"]) [win performMiniaturize:nil];
     else if (![a isEqualToString:@"None"]) [win performZoom:nil];
 }
 
-double pd_mac_double_click_interval(void) { return NSEvent.doubleClickInterval; }
+double dh_mac_double_click_interval(void) { return NSEvent.doubleClickInterval; }
 
-void pd_mac_set_title(const char* title) {
+void dh_mac_set_title(const char* title) {
     win.title = [NSString stringWithUTF8String:title] ?: @"";
 }
 
 // Folder picker (modal). Copies the path into buf; returns its length, 0 if cancelled.
-int pd_mac_pick_folder(char* buf, int cap) {
+int dh_mac_pick_folder(char* buf, int cap) {
     NSOpenPanel* p = [NSOpenPanel openPanel];
     p.canChooseDirectories = YES;
     p.canChooseFiles = NO;
@@ -310,7 +310,7 @@ int pd_mac_pick_folder(char* buf, int cap) {
 
 // NSApp's appearance is never set (only the window's), so its effective
 // appearance is the OS's.
-int pd_mac_system_light(void) {
+int dh_mac_system_light(void) {
     NSAppearanceName n = [NSApp.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
     return ![n isEqualToString:NSAppearanceNameDarkAqua];
 }
@@ -320,7 +320,7 @@ int pd_mac_system_light(void) {
 @end
 @implementation PdAppearanceObserver
 - (void)observeValueForKeyPath:(NSString*)path ofObject:(id)obj change:(NSDictionary*)change context:(void*)ctx {
-    if (self.changed) self.changed(pd_mac_system_light());
+    if (self.changed) self.changed(dh_mac_system_light());
 }
 @end
 
@@ -328,7 +328,7 @@ static PdAppearanceObserver* appearance_observer;
 
 // Calls changed(light) on the main thread whenever the OS switches between
 // light and dark (System Settings, or Auto at sunset).
-void pd_mac_watch_appearance(void (*changed)(int light)) {
+void dh_mac_watch_appearance(void (*changed)(int light)) {
     if (appearance_observer) return;
     appearance_observer = [PdAppearanceObserver new];
     appearance_observer.changed = changed;
@@ -336,19 +336,19 @@ void pd_mac_watch_appearance(void (*changed)(int light)) {
 }
 
 // The window's appearance: 0 follows the OS, 1 light (Aqua), 2 dark (Dark Aqua).
-void pd_mac_set_appearance(int mode) {
+void dh_mac_set_appearance(int mode) {
     win.appearance = mode == 1 ? [NSAppearance appearanceNamed:NSAppearanceNameAqua]
                    : mode == 2 ? [NSAppearance appearanceNamed:NSAppearanceNameDarkAqua] : nil;
 }
 
 // Test mode: the window's effective appearance (1 light, 0 dark).
-int pd_mac_test_window_light(void) {
+int dh_mac_test_window_light(void) {
     NSAppearanceName n = [win.effectiveAppearance bestMatchFromAppearancesWithNames:@[ NSAppearanceNameAqua, NSAppearanceNameDarkAqua ]];
     return ![n isEqualToString:NSAppearanceNameDarkAqua];
 }
 
 // Shows a file or folder in Finder (selected in its parent's window).
-void pd_mac_reveal(const char* path) {
+void dh_mac_reveal(const char* path) {
     NSString* s = [NSString stringWithUTF8String:path];
     if (!s) return;
     [[NSWorkspace sharedWorkspace] activateFileViewerSelectingURLs:@[[NSURL fileURLWithPath:s]]];
@@ -356,7 +356,7 @@ void pd_mac_reveal(const char* path) {
 
 // Opens a web or mail link (Markdown and terminal links) with the user's
 // default app. 1: handed to the app; 0: not a URL NSURL reads, or refused.
-int pd_mac_open_url(const char* url) {
+int dh_mac_open_url(const char* url) {
     NSString* s = [NSString stringWithUTF8String:url];
     if (!s) return 0;
     NSURL* u = [NSURL URLWithString:s];
@@ -364,11 +364,11 @@ int pd_mac_open_url(const char* url) {
     return [[NSWorkspace sharedWorkspace] openURL:u] ? 1 : 0;
 }
 
-// ---- test mode (PI_DESK_SCRIPT): in-process only, never posted to the system ----
+// ---- test mode (DECKHAND_SCRIPT): in-process only, never posted to the system ----
 
 // What gets a click at (x, y) framebuffer px: 1 = our view, 0 = something
 // else (the title bar), -1 = nothing.
-int pd_mac_test_hit(float x, float y) {
+int dh_mac_test_hit(float x, float y) {
     CGFloat s = win.backingScaleFactor;
     NSView* frame = view.superview; // the window's frame view: its hitTest takes window coordinates
     NSPoint p = NSMakePoint(x / s, view.isFlipped ? y / s : view.bounds.size.height - y / s);
@@ -377,7 +377,7 @@ int pd_mac_test_hit(float x, float y) {
 }
 
 // Traffic light centre (logical px from the content's top-left).
-void pd_mac_test_light(float* x, float* y) {
+void dh_mac_test_light(float* x, float* y) {
     NSButton* close = [win standardWindowButton:NSWindowCloseButton];
     NSRect r = [close convertRect:close.bounds toView:nil];
     *x = (float)NSMidX(r);
@@ -389,8 +389,8 @@ void pd_mac_test_light(float* x, float* y) {
 // 2 = a key press (keyCode, characters, Option if alt) through keyDown:.
 // 3 = a key press (flags: 1 Option, 2 repeat) whose input method calls are
 // `ops` (tab-separated: mark=TEXT, insert=TEXT, cmd=SELECTOR, unmark) instead
-// of the system's: tests pi-desk's keyDown: handling without a real IME.
-void pd_mac_test_ime(int kind, const char* text, int key_code, int alt, const char* ops) {
+// of the system's: tests Deckhand's keyDown: handling without a real IME.
+void dh_mac_test_ime(int kind, const char* text, int key_code, int alt, const char* ops) {
     NSString* s = [NSString stringWithUTF8String:text] ?: @"";
     if (kind == 3) {
         test_ops = [[NSString stringWithUTF8String:ops] componentsSeparatedByString:@"\t"];
@@ -429,7 +429,7 @@ void pd_mac_test_ime(int kind, const char* text, int key_code, int alt, const ch
 static int beeps;
 static void count_beep_sel(id self, SEL _cmd, SEL s) { beeps++; }
 static void count_beep_obj(id self, SEL _cmd, id o) { beeps++; }
-int pd_mac_test_beeps(void) {
+int dh_mac_test_beeps(void) {
     static BOOL installed;
     if (!installed) {
         installed = YES;
@@ -451,7 +451,7 @@ int pd_mac_test_beeps(void) {
 // first call installs the counter.
 static int panels;
 static void count_panel(id self, SEL _cmd, id sender) { panels++; }
-int pd_mac_test_panels(void) {
+int dh_mac_test_panels(void) {
     static BOOL installed;
     if (!installed) {
         installed = YES;
@@ -465,12 +465,12 @@ int pd_mac_test_panels(void) {
 }
 
 // Test mode: whether sokol's view has an input context (input methods need one).
-int pd_mac_test_has_input_context(void) { return view.inputContext != nil; }
+int dh_mac_test_has_input_context(void) { return view.inputContext != nil; }
 
 // An OS notification from the agent. A bundled app (an identifier) uses the
 // user notification center, asking for permission once; a bare binary (the
 // dev build) cannot, so the Dock icon bounces once instead.
-void pd_mac_notify(const char* title, const char* body) {
+void dh_mac_notify(const char* title, const char* body) {
     NSString* t = [NSString stringWithUTF8String:title] ?: @"";
     NSString* b = [NSString stringWithUTF8String:body] ?: @"";
     if (NSBundle.mainBundle.bundleIdentifier == nil) {
@@ -491,7 +491,7 @@ void pd_mac_notify(const char* title, const char* body) {
     [center addNotificationRequest:req withCompletionHandler:nil];
 }
 
-// ---- quiet test mode (PI_DESK_SCRIPT, unless PI_DESK_QUIET=0) ----
+// ---- quiet test mode (DECKHAND_SCRIPT, unless DECKHAND_QUIET=0) ----
 //
 // Scene runs must not disturb the person using the Mac. Called before sokol
 // starts: the app never activates (accessory: no Dock icon, never frontmost,
@@ -528,16 +528,16 @@ static void replace(Class cls, SEL sel, IMP imp, IMP* orig) {
 }
 
 // The left mouse button is down right now (a drag whose mouseUp: we missed).
-int pd_mac_left_button_down(void) { return ([NSEvent pressedMouseButtons] & 1) != 0; }
+int dh_mac_left_button_down(void) { return ([NSEvent pressedMouseButtons] & 1) != 0; }
 
 // ---- the clipboard's change count (browser_act.odin: a page changing it during an agent's
 // input is told to the user; nothing of its contents is read) ----
 
-long pd_mac_pasteboard_count(void) { return (long)[[NSPasteboard generalPasteboard] changeCount]; }
+long dh_mac_pasteboard_count(void) { return (long)[[NSPasteboard generalPasteboard] changeCount]; }
 
 // A secret onto the clipboard (Copy a control token): the text plus nspasteboard.org's concealed
 // and transient markers, so clipboard managers neither show nor keep it. The change count after.
-long pd_mac_pasteboard_set_secret(const char* text) {
+long dh_mac_pasteboard_set_secret(const char* text) {
     NSPasteboard* pb = [NSPasteboard generalPasteboard];
     [pb clearContents];
     [pb setString:@(text) forType:NSPasteboardTypeString];
@@ -547,19 +547,19 @@ long pd_mac_pasteboard_set_secret(const char* text) {
 }
 
 // Clears the clipboard if nothing changed it since count (it still holds the secret).
-void pd_mac_pasteboard_clear_if(long count) {
+void dh_mac_pasteboard_clear_if(long count) {
     NSPasteboard* pb = [NSPasteboard generalPasteboard];
     if ((long)[pb changeCount] == count) [pb clearContents];
 }
 
 // Quit: every window out of sight before the session holder's handover and the final save (they
 // can take seconds; a frozen window under a beachball looks hung). The app keeps running.
-void pd_mac_hide_windows(void) {
+void dh_mac_hide_windows(void) {
     for (NSWindow* w in [NSApp windows]) [w orderOut:nil];
 }
 
-// A modal alert with one Quit button (instance.odin: another Deckhand or pi-desk runs).
-void pd_mac_alert(const char* title, const char* text) {
+// A modal alert with one Quit button (instance.odin: another Deckhand or Deckhand runs).
+void dh_mac_alert(const char* title, const char* text) {
     [NSApp activateIgnoringOtherApps:YES];
     NSAlert* a = [[NSAlert alloc] init];
     a.alertStyle = NSAlertStyleWarning;
@@ -569,7 +569,7 @@ void pd_mac_alert(const char* title, const char* text) {
     [a runModal];
 }
 
-void pd_mac_quiet(void) {
+void dh_mac_quiet(void) {
     Class app = [NSApplication class];
     replace(app, @selector(setActivationPolicy:), (IMP)quiet_set_policy, &orig_set_policy);
     replace(app, @selector(activateIgnoringOtherApps:), (IMP)quiet_activate_flag, NULL);
@@ -579,19 +579,19 @@ void pd_mac_quiet(void) {
     [NSApplication sharedApplication].activationPolicy = NSApplicationActivationPolicyAccessory;
 }
 
-// ---- test mode's backing scale (PI_DESK_SCALE; docs/DEVELOPING.md) ----
+// ---- test mode's backing scale (DECKHAND_SCALE; docs/DEVELOPING.md) ----
 //
-// pi-desk renders at the same backing scale on every Mac: `scale`, whatever the display's (a
+// Deckhand renders at the same backing scale on every Mac: `scale`, whatever the display's (a
 // Retina display is 2, most others and CI runners 1). Every screen and window reports it, so
-// sokol's dpi_scale, the drawable's size, app tabs' rings, app_screenshot PNGs and pi-desk's own
-// conversions (pd_mac_test_hit, the IME's rectangle) all agree. Not the window server: the
+// sokol's dpi_scale, the drawable's size, app tabs' rings, app_screenshot PNGs and Deckhand's own
+// conversions (dh_mac_test_hit, the IME's rectangle) all agree. Not the window server: the
 // `shot` command's screencapture records the window at the real display's scale. Before sokol
 // starts.
 
 static CGFloat test_scale = 1;
 static CGFloat test_backing_scale(id self, SEL _cmd) { return test_scale; }
 
-void pd_mac_test_scale(double scale) {
+void dh_mac_test_scale(double scale) {
     test_scale = scale;
     replace([NSScreen class], @selector(backingScaleFactor), (IMP)test_backing_scale, NULL);
     replace([NSWindow class], @selector(backingScaleFactor), (IMP)test_backing_scale, NULL);
@@ -601,7 +601,7 @@ void pd_mac_test_scale(double scale) {
 
 // No App Nap while a job runs (its timers stay on time).
 static id job_activity;
-void pd_mac_activity(int on) {
+void dh_mac_activity(int on) {
     if (on && !job_activity) {
         job_activity = [[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Deckhand job running"];
     } else if (!on && job_activity) {

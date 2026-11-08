@@ -3,7 +3,7 @@
 # integration it loads with -e (the bridge and the desk tools). Only
 # Atlas is a real pi (real HOME for its login and packages, its session in
 # build/test-data/home); project tabs are fake pis in a fake HOME, so what
-# Atlas sees is the fake project. The model comes from pi-desk's setting
+# Atlas sees is the fake project. The model comes from Deckhand's setting
 # agent_model (--model), its prompt from build/test-data/atlas/ATLAS.md
 # (--append-system-prompt). Two short prompts: its name, then the projects
 # (desk_state).
@@ -24,8 +24,8 @@ printf '{"type":"session","version":3,"id":"demo-1","cwd":"%s"}\n{"type":"messag
 PI=$(command -v pi)
 REAL_HOME=$HOME
 # Atlas's pi gets --append-system-prompt (only Atlas does): real pi; anything else is fake
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/home-e2e.txt PI_DESK_LOG_COMMANDS=1 PI_DESK_REAL_PI=1 \
-  PI_DESK_CMD="case \" \$* \" in *' --append-system-prompt '*) HOME='$REAL_HOME' exec '$PI' \"\$@\";; *) while [ \"\${1:-}\" = -e ]; do shift 2; done; echo \"ARGS: \$*\"; exec sleep 600;; esac" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/home-e2e.txt DECKHAND_LOG_COMMANDS=1 DECKHAND_REAL_PI=1 \
+  DECKHAND_CMD="case \" \$* \" in *' --append-system-prompt '*) HOME='$REAL_HOME' exec '$PI' \"\$@\";; *) while [ \"\${1:-}\" = -e ]; do shift 2; done; echo \"ARGS: \$*\"; exec sleep 600;; esac" \
   build/deckhand "$PROJ" > build/home-e2e.log 2>&1 || { tail -40 build/home-e2e.log; exit 1; }
 grep -E "ASSERT|done:|TIMEOUT" build/home-e2e.log
 echo "== control commands (the event log; tokens and text redacted)"

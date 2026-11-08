@@ -1,7 +1,7 @@
 #!/bin/sh
 # Hot reload with a fake bridge (tests/scripts/fake-bridge-reload.py): a fake
 # pi store with two sessions, a fake ~/.pi/agent, a fake pi package
-# (PI_DESK_PI_PACKAGE) at 1.4.0 (the integration's minimum: an older pi gets no DECKHAND_* and its bridge cannot connect), a temp data dir (never the user's). A shell
+# (DECKHAND_PI_PACKAGE) at 1.4.0 (the integration's minimum: an older pi gets no DECKHAND_* and its bridge cannot connect), a temp data dir (never the user's). A shell
 # tab edits pi's settings.json → the bar → Reload: pi.reload to the idle tab,
 # the working one queued and reloaded once idle; an extension edit (FSEvents)
 # while a tab has a background shell → the confirmation names it; a pi
@@ -35,9 +35,9 @@ printf 'printf %s > %s\n' "'{\"defaultModel\": \"deepseek-v4.1-flash\", \"theme\
 printf 'printf %s > %s\n' "'{\"defaultModel\": \"kimi-k3\", \"theme\": \"dark\", \"lastChangelogVersion\": \"1.1.0\"}'" "$AD/settings.json" > "$FAKE_HOME/pi-writes.sh"
 printf 'echo "// edited" >> %s\n' "$AD/extensions/demo/index.ts" > "$FAKE_HOME/edit-ext.sh"
 printf 'echo %s > %s\n' "'{\"name\":\"@earendil-works/pi-coding-agent\",\"version\":\"1.5.0\"}'" "$W/pi-pkg/package.json" > "$FAKE_HOME/bump.sh"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_PI_PACKAGE="$W/pi-pkg/package.json" RELOAD_LOG="$W/bridge.log" \
-  PI_DESK_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-reload.py' \"\$@\"" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_PI_PACKAGE="$W/pi-pkg/package.json" RELOAD_LOG="$W/bridge.log" \
+  DECKHAND_CMD="exec python3 '$ROOT/tests/scripts/fake-bridge-reload.py' \"\$@\"" \
   build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 fail=0

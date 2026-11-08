@@ -1,9 +1,9 @@
-// pi-desk's CEF helper (docs/BROWSER.md §1.5): one binary cloned into the
+// Deckhand's CEF helper (docs/BROWSER.md §1.5): one binary cloned into the
 // five "Deckhand Helper (…).app" bundles. Chromium starts it for renderer,
 // GPU, network, plugin and alert processes. It starts the sandbox, loads the
 // framework at run time (sandboxed helpers must not link it), checks the API
 // hash and hands over to cef_execute_process, with an app that registers
-// pi-desk's pidesk-test scheme (as the browser process does, cef_macos.m:
+// Deckhand's deckhand-test scheme (as the browser process does, cef_macos.m:
 // every process must agree that it is a standard scheme).
 //
 // Built by build.sh: clang, the pinned distribution's headers only (no C++
@@ -38,7 +38,7 @@ static int CEF_CALLBACK ref_one(cef_base_ref_counted_t* self) { return 1; }
 
 static void CEF_CALLBACK on_register_schemes(cef_app_t* self, cef_scheme_registrar_t* reg) {
     cef_string_t n = {0};
-    to16("pidesk-test", 11, &n);
+    to16("deckhand-test", 13, &n);
     reg->add_custom_scheme(reg, &n, CEF_SCHEME_OPTION_STANDARD | CEF_SCHEME_OPTION_SECURE | CEF_SCHEME_OPTION_CORS_ENABLED);
     clear16(&n);
 }

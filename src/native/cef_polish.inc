@@ -1,28 +1,28 @@
 // Browser tabs, step 3 ("tab polish", docs/BROWSER.md §6): the rest of what CEF expects from
 // its host, #included at the end of cef_macos.m (it uses that file's slots and helpers).
-// pi-desk decides and draws; this only translates (src/browser_polish.odin):
+// Deckhand decides and draws; this only translates (src/browser_polish.odin):
 //
 //  - cursor and tooltip (display handler): the page's cursor type and title text;
 //  - the context menu: Chromium's own is emptied (on_before_context_menu clears the model, so
-//    none shows); what was under the pointer goes to pi-desk, which draws its own menu;
-//    pd_cef_edit runs Copy, Paste… in the focused frame;
-//  - JS dialogs (alert, confirm, prompt, beforeunload): the callback is kept until pi-desk's
-//    bar answers (pd_cef_dialog_answer), one per browser; more while one is open are suppressed;
+//    none shows); what was under the pointer goes to Deckhand, which draws its own menu;
+//    dh_cef_edit runs Copy, Paste… in the focused frame;
+//  - JS dialogs (alert, confirm, prompt, beforeunload): the callback is kept until Deckhand's
+//    bar answers (dh_cef_dialog_answer), one per browser; more while one is open are suppressed;
 //  - find in page (host find / stop_finding; on_find_result);
 //  - zoom (get/set_zoom_level: Chromium keeps it per host);
-//  - downloads: pi-desk decides and names the file (callbacks.download_path: go now with a
+//  - downloads: Deckhand decides and names the file (callbacks.download_path: go now with a
 //    safe, new name in the downloads folder; refuse; or ask first: the callback is held until
-//    pi-desk's bar answers, pd_cef_download_answer) and hears progress; pd_cef_download_cancel;
-//    a finished file is quarantined (and pi-desk hears whether that worked);
+//    Deckhand's bar answers, dh_cef_download_answer) and hears progress; dh_cef_download_cancel;
+//    a finished file is quarantined (and Deckhand hears whether that worked);
 //  - permission prompts (notifications, location; camera and microphone through the media
-//    request): one per browser, kept until pi-desk's bar answers; other kinds get CEF's
+//    request): one per browser, kept until Deckhand's bar answers; other kinds get CEF's
 //    default (Alloy: not granted); a main-frame navigation denies a camera or microphone
 //    request still waiting (on_before_browse);
 //  - a renderer that died (request handler) and DevTools in a window of its own
 //    (show_dev_tools, in process: no remote debugging port);
 //  - popups without a user gesture: Chromium's own blocker would refuse window.open before
-//    on_before_popup is asked, so pi-desk could never offer them; --disable-popup-blocking
-//    leaves that to on_before_popup, which refuses them as before (blocked_popup) and pi-desk
+//    on_before_popup is asked, so Deckhand could never offer them; --disable-popup-blocking
+//    leaves that to on_before_popup, which refuses them as before (blocked_popup) and Deckhand
 //    shows its bar with Open;
 //  - native file choosers (dialog handler): cancelled while an agent's action runs on the tab
 //    (callbacks.file_dialog; the agent hears use_browser_upload), the default panel otherwise.
@@ -47,7 +47,7 @@ typedef struct {
     void (*dialog)(int id, int kind, const char* message, const char* default_text, const char* origin);
     void (*find)(int id, int request, int count, int active, int final_update);
     // the file a download goes to (out, at most cap bytes with its NUL): 1 = go there now;
-    // 0 = refused; 2 = ask first (pd_cef_download_answer answers later)
+    // 0 = refused; 2 = ask first (dh_cef_download_answer answers later)
     int (*download_path)(int id, uint32_t dl, const char* suggested, const char* url, char* out, int cap);
     // state: 1 going, 2 done, 3 cancelled, 4 failed; quarantined: a done file was marked as downloaded
     void (*download)(int id, uint32_t dl, int state, int64_t received, int64_t total, const char* path, int quarantined);
@@ -57,9 +57,9 @@ typedef struct {
     void (*navigated)(int id);           // a main-frame navigation starts
     // a native file chooser is opening: 1 = cancel it (an agent's action runs on the tab)
     int (*file_dialog)(int id);
-} pd_cef_polish_callbacks;
+} dh_cef_polish_callbacks;
 
-static pd_cef_polish_callbacks pcb;
+static dh_cef_polish_callbacks pcb;
 static cef_jsdialog_handler_t pol_jsdialog;
 static cef_find_handler_t pol_find;
 static cef_download_handler_t pol_download;
@@ -73,7 +73,7 @@ static cef_permission_prompt_callback_t* pol_prompt[MAX_BROWSERS + 1];
 static uint64_t pol_prompt_id[MAX_BROWSERS + 1];
 static cef_media_access_callback_t* pol_media[MAX_BROWSERS + 1];
 static uint32_t pol_media_perms[MAX_BROWSERS + 1];
-static cef_before_download_callback_t* pol_ask[MAX_BROWSERS + 1]; // a download waiting for pi-desk's bar
+static cef_before_download_callback_t* pol_ask[MAX_BROWSERS + 1]; // a download waiting for Deckhand's bar
 static uint32_t pol_ask_id[MAX_BROWSERS + 1];
 // refusals said at most once a second per browser (a page can ask in a loop): dialogs, permissions
 static double pol_said_at[MAX_BROWSERS + 1][2];
@@ -82,7 +82,7 @@ static int pol_said_skipped[MAX_BROWSERS + 1][2];
 static void pol_say_limited(int i, int what, NSString* line) {
     if (i < 0 || i > MAX_BROWSERS) i = 0;
     int skipped = pol_said_skipped[i][what];
-    if (!pd_rate_ok(&pol_said_at[i][what], &pol_said_skipped[i][what], CFAbsoluteTimeGetCurrent())) return;
+    if (!dh_rate_ok(&pol_said_at[i][what], &pol_said_skipped[i][what], CFAbsoluteTimeGetCurrent())) return;
     say(skipped ? [NSString stringWithFormat:@"%@ (and %d more in the last second)", line, skipped] : line);
 }
 
@@ -92,7 +92,7 @@ static struct {
     cef_download_item_callback_t* cb; // cancel (held while it runs)
 } pol_dl[POL_DOWNLOADS];
 
-void pd_cef_polish_callbacks_set(const pd_cef_polish_callbacks* c) { pcb = *c; }
+void dh_cef_polish_callbacks_set(const dh_cef_polish_callbacks* c) { pcb = *c; }
 
 static int pol_slot(cef_browser_t* b) {
     if (!b) return 0;
@@ -107,7 +107,7 @@ static int CEF_CALLBACK pol_on_cursor(cef_display_handler_t* self, cef_browser_t
                                       const cef_cursor_info_t* info) {
     int i = pol_slot(b);
     if (i && pcb.cursor) pcb.cursor(i, type);
-    return 1; // pi-desk sets the pointer
+    return 1; // Deckhand sets the pointer
 }
 
 static int CEF_CALLBACK pol_on_tooltip(cef_display_handler_t* self, cef_browser_t* b, cef_string_t* text) {
@@ -119,7 +119,7 @@ static int CEF_CALLBACK pol_on_tooltip(cef_display_handler_t* self, cef_browser_
     return 1;
 }
 
-// ---- the context menu: Chromium's is emptied, pi-desk draws its own ----
+// ---- the context menu: Chromium's is emptied, Deckhand draws its own ----
 
 static void CEF_CALLBACK pol_on_menu(cef_context_menu_handler_t* self, cef_browser_t* b, cef_frame_t* f, cef_context_menu_params_t* params,
                                      cef_menu_model_t* model) {
@@ -140,7 +140,7 @@ static void CEF_CALLBACK pol_on_menu(cef_context_menu_handler_t* self, cef_brows
 }
 
 // 0 undo, 1 redo, 2 cut, 3 copy, 4 paste, 5 select all: in the focused frame.
-void pd_cef_edit(int i, int op) {
+void dh_cef_edit(int i, int op) {
     if (i < 1 || i > MAX_BROWSERS || !slots[i].browser || slots[i].closing) return;
     cef_frame_t* f = slots[i].browser->get_focused_frame(slots[i].browser);
     if (!f) f = slots[i].browser->get_main_frame(slots[i].browser);
@@ -158,7 +158,7 @@ void pd_cef_edit(int i, int op) {
     arm(0);
 }
 
-// ---- JS dialogs: a bar in the tab, answered by pd_cef_dialog_answer ----
+// ---- JS dialogs: a bar in the tab, answered by dh_cef_dialog_answer ----
 
 static void pol_dialog_drop(int i) {
     cef_jsdialog_callback_t* cb_ = pol_dialog[i];
@@ -209,7 +209,7 @@ static void CEF_CALLBACK pol_on_dialog_reset(cef_jsdialog_handler_t* self, cef_b
 static void CEF_CALLBACK pol_on_dialog_closed(cef_jsdialog_handler_t* self, cef_browser_t* b) { pol_dialog_gone(b); }
 
 // The bar's OK (ok=1, text: a prompt's answer) or Cancel. 0: no dialog open.
-int pd_cef_dialog_answer(int i, int ok, const char* text) {
+int dh_cef_dialog_answer(int i, int ok, const char* text) {
     if (i < 1 || i > MAX_BROWSERS || !pol_dialog[i]) return 0;
     cef_jsdialog_callback_t* cb_ = pol_dialog[i];
     pol_dialog[i] = NULL; // before cont: on_dialog_closed may come from inside it
@@ -231,7 +231,7 @@ static void CEF_CALLBACK pol_on_find(cef_find_handler_t* self, cef_browser_t* b,
 }
 
 // text: what to find; forward 0: backwards; next 1: the next match of the same text.
-void pd_cef_find(int i, const char* text, int forward, int next) {
+void dh_cef_find(int i, const char* text, int forward, int next) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     cef_string_t t = str16(text);
@@ -242,7 +242,7 @@ void pd_cef_find(int i, const char* text, int forward, int next) {
     arm(0);
 }
 
-void pd_cef_find_stop(int i) {
+void dh_cef_find_stop(int i) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     hst->stop_finding(hst, 1);
@@ -252,7 +252,7 @@ void pd_cef_find_stop(int i) {
 
 // ---- zoom (Chromium's zoom level: factor = 1.2^level; per host) ----
 
-double pd_cef_zoom_get(int i) {
+double dh_cef_zoom_get(int i) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return 0;
     double z = hst->get_zoom_level(hst);
@@ -260,7 +260,7 @@ double pd_cef_zoom_get(int i) {
     return z;
 }
 
-void pd_cef_zoom_set(int i, double level) {
+void dh_cef_zoom_set(int i, double level) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     hst->set_zoom_level(hst, level);
@@ -269,12 +269,12 @@ void pd_cef_zoom_set(int i, double level) {
     arm(0);
 }
 
-// ---- downloads: pi-desk picks the file; progress comes back ----
+// ---- downloads: Deckhand picks the file; progress comes back ----
 
 static int CEF_CALLBACK pol_can_download(cef_download_handler_t* self, cef_browser_t* b, const cef_string_t* url, const cef_string_t* method) {
     if (b) RELEASE(b);
     // Chromium asks here for downloads a page starts by script too (no user gesture known
-    // here): pi-desk decides in on_before_download (download_policy: the user's own click in
+    // here): Deckhand decides in on_before_download (download_policy: the user's own click in
     // the tab just now, or a bar that asks)
     return 1;
 }
@@ -293,7 +293,7 @@ static int CEF_CALLBACK pol_before_download(cef_download_handler_t* self, cef_br
     int how = callback && pcb.download_path ? pcb.download_path(i, id, name, url, path, (int)sizeof path) : 0;
     free(url), free(name);
     if (how == 2 && i && !pol_ask[i]) {
-        // pi-desk's bar asks first: held (released unanswered = cancelled)
+        // Deckhand's bar asks first: held (released unanswered = cancelled)
         pol_ask[i] = callback;
         pol_ask_id[i] = id;
         touch();
@@ -311,9 +311,9 @@ static int CEF_CALLBACK pol_before_download(cef_download_handler_t* self, cef_br
     return 1;
 }
 
-// The bar's answer to a download that asked first: path (a new file pi-desk reserved) = go there;
+// The bar's answer to a download that asked first: path (a new file Deckhand reserved) = go there;
 // NULL = cancelled. 0: no such download waiting.
-int pd_cef_download_answer(int i, uint32_t dl, const char* path) {
+int dh_cef_download_answer(int i, uint32_t dl, const char* path) {
     if (i < 1 || i > MAX_BROWSERS || !pol_ask[i] || pol_ask_id[i] != dl) return 0;
     cef_before_download_callback_t* cb_ = pol_ask[i];
     pol_ask[i] = NULL;
@@ -332,7 +332,7 @@ int pd_cef_download_answer(int i, uint32_t dl, const char* path) {
 // A finished download is marked as one (com.apple.quarantine, as Safari and Chrome do): Gatekeeper
 // checks it when it is opened (the bar's Open), so a downloaded app never runs unchecked.
 // Chromium's content layer sets only its "where from" here. The address recorded has no
-// user:password@, query or fragment (pd_url_for_record). 1: marked.
+// user:password@, query or fragment (dh_url_for_record). 1: marked.
 static int pol_quarantine(const char* path, const char* url) {
     @autoreleasepool {
         NSURL* file = [NSURL fileURLWithPath:@(path)];
@@ -341,7 +341,7 @@ static int pol_quarantine(const char* path, const char* url) {
             (__bridge NSString*)kLSQuarantineAgentNameKey : @"Deckhand",
         } mutableCopy];
         char rec[2048];
-        NSURL* from = url && pd_url_for_record(url, rec, sizeof rec) ? [NSURL URLWithString:@(rec)] : nil;
+        NSURL* from = url && dh_url_for_record(url, rec, sizeof rec) ? [NSURL URLWithString:@(rec)] : nil;
         if (from) q[(__bridge NSString*)kLSQuarantineDataURLKey] = from;
         NSError* err = nil;
         if (![file setResourceValue:q forKey:NSURLQuarantinePropertiesKey error:&err]) {
@@ -393,7 +393,7 @@ static void CEF_CALLBACK pol_download_updated(cef_download_handler_t* self, cef_
     free(path);
 }
 
-void pd_cef_download_cancel(uint32_t id) {
+void dh_cef_download_cancel(uint32_t id) {
     for (int j = 0; j < POL_DOWNLOADS; j++)
         if (pol_dl[j].cb && pol_dl[j].id == id) {
             pol_dl[j].cb->cancel(pol_dl[j].cb);
@@ -411,7 +411,7 @@ static int pol_perm_busy(int i) { return pol_prompt[i] || pol_media[i]; }
 static int CEF_CALLBACK pol_on_prompt(cef_permission_handler_t* self, cef_browser_t* b, uint64_t prompt_id, const cef_string_t* origin,
                                       uint32_t perms, cef_permission_prompt_callback_t* callback) {
     int i = pol_slot(b);
-    // Chromium's own "multiple automatic downloads" question: granted here, as pi-desk asks
+    // Chromium's own "multiple automatic downloads" question: granted here, as Deckhand asks
     // per download itself (download_take: one per user gesture, otherwise its bar)
     if (perms == CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS && callback) {
         callback->cont(callback, CEF_PERMISSION_RESULT_ACCEPT);
@@ -466,7 +466,7 @@ static int CEF_CALLBACK pol_on_media(cef_permission_handler_t* self, cef_browser
 }
 
 // The bar's Allow (1) or Block (0). 0: nothing asked.
-int pd_cef_permission_answer(int i, int allow) {
+int dh_cef_permission_answer(int i, int allow) {
     if (i < 1 || i > MAX_BROWSERS) return 0;
     if (pol_prompt[i]) {
         cef_permission_prompt_callback_t* cb_ = pol_prompt[i];
@@ -489,7 +489,7 @@ int pd_cef_permission_answer(int i, int allow) {
 }
 
 // A main-frame navigation: a camera or microphone request still waiting is denied and its bar
-// goes (the page that asked is leaving); pi-desk drops a download still asking
+// goes (the page that asked is leaving); Deckhand drops a download still asking
 // (callbacks.navigated). Navigations are never cancelled here.
 static int CEF_CALLBACK pol_on_before_browse(cef_request_handler_t* self, cef_browser_t* b, cef_frame_t* f, cef_request_t* req, int user_gesture,
                                              int is_redirect) {
@@ -497,12 +497,12 @@ static int CEF_CALLBACK pol_on_before_browse(cef_request_handler_t* self, cef_br
     if (f) RELEASE(f);
     if (req) RELEASE(req);
     int i = pol_slot(b);
-    if (i && main_frame && pol_media[i]) pd_cef_permission_answer(i, 0);
+    if (i && main_frame && pol_media[i]) dh_cef_permission_answer(i, 0);
     if (i && main_frame && pcb.navigated) pcb.navigated(i);
     return 0;
 }
 
-// ---- native file choosers: cancelled under an agent's action (pi-desk decides) ----
+// ---- native file choosers: cancelled under an agent's action (Deckhand decides) ----
 
 static cef_dialog_handler_t pol_dialog_handler;
 static int CEF_CALLBACK pol_on_file_dialog(cef_dialog_handler_t* self, cef_browser_t* b, cef_file_dialog_mode_t mode, const cef_string_t* title,
@@ -531,14 +531,14 @@ static void CEF_CALLBACK pol_on_terminated(cef_request_handler_t* self, cef_brow
     // its dialog and prompt went with it
     pol_dialog_drop(i);
     if (pcb.dialog) pcb.dialog(i, -1, "", "", "");
-    if (pol_perm_busy(i)) pd_cef_permission_answer(i, 0);
+    if (pol_perm_busy(i)) dh_cef_permission_answer(i, 0);
     if (pcb.crashed) pcb.crashed(i, status);
 }
 
 // ---- DevTools: Chromium's own, in a window of its own (in process) ----
 
 // x, y: inspect the element there (view px); -1: just open.
-int pd_cef_devtools_show(int i, int x, int y) {
+int dh_cef_devtools_show(int i, int x, int y) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return 0;
     cef_window_info_t wi;
@@ -556,7 +556,7 @@ int pd_cef_devtools_show(int i, int x, int y) {
     return 1;
 }
 
-int pd_cef_devtools_open(int i) {
+int dh_cef_devtools_open(int i) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return 0;
     int open = hst->has_dev_tools(hst);
@@ -564,7 +564,7 @@ int pd_cef_devtools_open(int i) {
     return open;
 }
 
-void pd_cef_devtools_close(int i) {
+void dh_cef_devtools_close(int i) {
     cef_browser_host_t* hst = host_of(i);
     if (!hst) return;
     hst->close_dev_tools(hst);
@@ -573,9 +573,9 @@ void pd_cef_devtools_close(int i) {
 }
 
 // Test mode only (browser_polish.odin's page_crash): the renderer dies as a crash would.
-void pd_cef_test_crash(int i) { pd_cef_navigate(i, "chrome://crash"); }
+void dh_cef_test_crash(int i) { dh_cef_navigate(i, "chrome://crash"); }
 
-// ---- wiring (pd_cef_start, before cef_initialize) ----
+// ---- wiring (dh_cef_start, before cef_initialize) ----
 
 static cef_jsdialog_handler_t* CEF_CALLBACK pol_get_jsdialog(cef_client_t* self) { return &pol_jsdialog; }
 static cef_find_handler_t* CEF_CALLBACK pol_get_find(cef_client_t* self) { return &pol_find; }

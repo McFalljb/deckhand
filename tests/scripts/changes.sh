@@ -39,8 +39,8 @@ mkdir -p "$PROJ/.git/hooks"
 printf '#!/bin/sh\ntouch "%s/pre-commit-ran"\n' "$W" > "$PROJ/.git/hooks/pre-commit"
 chmod +x "$PROJ/.git/hooks/pre-commit"
 run() { # script log
-  HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
+  HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "changes scene failed (log: $2)"; exit 1

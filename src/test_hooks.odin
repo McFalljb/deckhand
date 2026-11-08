@@ -4,22 +4,22 @@ package main
 // "A genuine binary under attacker config"): a signed Deckhand passes every identity check whatever
 // its environment, so a release build must not be steerable by it. scripts/release.sh builds with
 // -define:DECKHAND_TEST_HOOKS=false (DECKHAND_RELEASE=1 ./build.sh) and then checks the binaries
-// for every name below, and for any PI_DESK_ name not in its ALLOWED list (scripts/check-release-build.sh):
+// for every name below, and for any DECKHAND_ name not in its ALLOWED list (scripts/check-release-build.sh):
 // none may be left; scripts/check-env-reads.py (run by it and by ./build.sh test) refuses any other
-// environment read of a name not on its list, or not a literal. The CEF shim's knobs (PI_DESK_CEF_SPARE, PI_DESK_CEF_NETLOG) are compiled out
-// with -DPD_RELEASE=1 (build.sh).
+// environment read of a name not on its list, or not a literal. The CEF shim's knobs (DECKHAND_CEF_SPARE, DECKHAND_CEF_NETLOG) are compiled out
+// with -DDH_RELEASE=1 (build.sh).
 //
 // With the hooks off:
-//   - every hook_env() is "" (test mode never starts: no PI_DESK_SCRIPT), and the names
+//   - every hook_env() is "" (test mode never starts: no DECKHAND_SCRIPT), and the names
 //     themselves are not in the binary (HOOK_ENV is compiled only with the hooks on);
-//   - the data and runtime dirs are the fixed ones (no PI_DESK_DATA_DIR, PI_DESK_RUNTIME_DIR), under
+//   - the data and runtime dirs are the fixed ones (no DECKHAND_DATA_DIR, DECKHAND_RUNTIME_DIR), under
 //     the account's home from the user database, not $HOME (platform.odin data_home);
 //   - `--print-token` is not accepted (Settings › Copy a control token mints one, the user's).
 // Test and development builds (./build.sh, ./build.sh test, every scene) keep them.
 //
-// Not hooks, so kept (each in check-release-build.sh's ALLOWED, with why): PI_DESK_SOCKET and
-// PI_DESK_TOKEN (what Deckhand gives its tabs, read by `deckhand --ctl`) and the other names it
-// sets in its tabs' and jobs' environments, PI_DESK_GUI_LAUNCH and PI_DESK_CEF_SHARED_TEXTURE (the
+// Not hooks, so kept (each in check-release-build.sh's ALLOWED, with why): DECKHAND_SOCKET and
+// DECKHAND_TOKEN (what Deckhand gives its tabs, read by `deckhand --ctl`) and the other names it
+// sets in its tabs' and jobs' environments, DECKHAND_GUI_LAUNCH and DECKHAND_CEF_SHARED_TEXTURE (the
 // user's workarounds, docs/DEVELOPING.md, docs/BROWSER.md). None steers who Deckhand trusts or
 // what it runs.
 
@@ -53,44 +53,44 @@ Hook :: enum u8 {
 	Cef_Offline,
 	Log_Commands,
 	Path_Dirs,
-	Update_Url, // the updater's fixtures (update.odin; with -define:PI_DESK_UPDATE_TEST=true only)
+	Update_Url, // the updater's fixtures (update.odin; with -define:DECKHAND_UPDATE_TEST=true only)
 	Update_Download,
 	Update_Version,
 	Update_App,
 }
 
 when TEST_HOOKS {
-	// scripts/check-release-build.sh reads the names from here: one `= "PI_DESK_…"` per line
+	// scripts/check-release-build.sh reads the names from here: one `= "DECKHAND_…"` per line
 	HOOK_ENV := [Hook]string {
-		.Script           = "PI_DESK_SCRIPT",
-		.Script_Fail_Fast = "PI_DESK_SCRIPT_FAIL_FAST",
-		.Script_Step      = "PI_DESK_SCRIPT_STEP",
-		.Wait_Audit       = "PI_DESK_WAIT_AUDIT",
-		.Quiet            = "PI_DESK_QUIET",
-		.Scale            = "PI_DESK_SCALE",
-		.First_Run        = "PI_DESK_FIRST_RUN",
-		.Data_Dir         = "PI_DESK_DATA_DIR",
-		.Runtime_Dir      = "PI_DESK_RUNTIME_DIR",
-		.Cmd              = "PI_DESK_CMD",
-		.Real_Pi          = "PI_DESK_REAL_PI",
-		.Claude_Cmd       = "PI_DESK_CLAUDE_CMD",
-		.Claude_Bin       = "PI_DESK_CLAUDE_BIN",
-		.Claude_Plugin    = "PI_DESK_CLAUDE_PLUGIN",
-		.Pi_Integration   = "PI_DESK_PI_INTEGRATION",
-		.Pi_Package       = "PI_DESK_PI_PACKAGE",
-		.Install_Cmd      = "PI_DESK_INSTALL_CMD",
-		.Gpu_Lag_Ms       = "PI_DESK_TEST_GPU_LAG_MS",
-		.Holder_Direct    = "PI_DESK_HOLDER_DIRECT",
-		.Holder_Rev       = "PI_DESK_HOLDER_REV",
-		.Temp_Roots       = "PI_DESK_TEMP_ROOTS",
-		.Debug_Browser    = "PI_DESK_DEBUG_BROWSER",
-		.Cef_Offline      = "PI_DESK_CEF_OFFLINE",
-		.Log_Commands     = "PI_DESK_LOG_COMMANDS",
-		.Path_Dirs        = "PI_DESK_PATH_DIRS",
-		.Update_Url       = "PI_DESK_UPDATE_URL",
-		.Update_Download  = "PI_DESK_UPDATE_DOWNLOAD",
-		.Update_Version   = "PI_DESK_UPDATE_VERSION",
-		.Update_App       = "PI_DESK_UPDATE_APP",
+		.Script           = "DECKHAND_SCRIPT",
+		.Script_Fail_Fast = "DECKHAND_SCRIPT_FAIL_FAST",
+		.Script_Step      = "DECKHAND_SCRIPT_STEP",
+		.Wait_Audit       = "DECKHAND_WAIT_AUDIT",
+		.Quiet            = "DECKHAND_QUIET",
+		.Scale            = "DECKHAND_SCALE",
+		.First_Run        = "DECKHAND_FIRST_RUN",
+		.Data_Dir         = "DECKHAND_DATA_DIR",
+		.Runtime_Dir      = "DECKHAND_RUNTIME_DIR",
+		.Cmd              = "DECKHAND_CMD",
+		.Real_Pi          = "DECKHAND_REAL_PI",
+		.Claude_Cmd       = "DECKHAND_CLAUDE_CMD",
+		.Claude_Bin       = "DECKHAND_CLAUDE_BIN",
+		.Claude_Plugin    = "DECKHAND_CLAUDE_PLUGIN",
+		.Pi_Integration   = "DECKHAND_PI_INTEGRATION",
+		.Pi_Package       = "DECKHAND_PI_PACKAGE",
+		.Install_Cmd      = "DECKHAND_INSTALL_CMD",
+		.Gpu_Lag_Ms       = "DECKHAND_TEST_GPU_LAG_MS",
+		.Holder_Direct    = "DECKHAND_HOLDER_DIRECT",
+		.Holder_Rev       = "DECKHAND_HOLDER_REV",
+		.Temp_Roots       = "DECKHAND_TEMP_ROOTS",
+		.Debug_Browser    = "DECKHAND_DEBUG_BROWSER",
+		.Cef_Offline      = "DECKHAND_CEF_OFFLINE",
+		.Log_Commands     = "DECKHAND_LOG_COMMANDS",
+		.Path_Dirs        = "DECKHAND_PATH_DIRS",
+		.Update_Url       = "DECKHAND_UPDATE_URL",
+		.Update_Download  = "DECKHAND_UPDATE_DOWNLOAD",
+		.Update_Version   = "DECKHAND_UPDATE_VERSION",
+		.Update_App       = "DECKHAND_UPDATE_APP",
 	}
 }
 
@@ -103,7 +103,7 @@ hook_env :: proc(h: Hook, allocator := context.temp_allocator) -> string {
 	}
 }
 
-// A hook's value and whether it is set at all (an empty value counts: PI_DESK_PATH_DIRS="").
+// A hook's value and whether it is set at all (an empty value counts: DECKHAND_PATH_DIRS="").
 hook_lookup :: proc(h: Hook, allocator := context.temp_allocator) -> (string, bool) {
 	when TEST_HOOKS {
 		return os.lookup_env(HOOK_ENV[h], allocator) // env-read-ok: hook_lookup itself

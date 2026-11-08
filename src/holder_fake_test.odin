@@ -4,7 +4,7 @@ package main
 // socket in a temp runtime dir, served by a thread that answers HELLO as told (WELCOME with
 // the given terminals and TAILs, REFUSED, or nothing), then records every frame the app sends
 // and answers SPAWN, PING and GOODBYE. It runs in this process, so the peer checks pass (same
-// pid at both ends). Never the real holder, never launchd (PI_DESK_HOLDER_DIRECT=1 in case a
+// pid at both ends). Never the real holder, never launchd (DECKHAND_HOLDER_DIRECT=1 in case a
 // start falls through to a launch).
 
 import "base:runtime"
@@ -65,8 +65,8 @@ fake_holder_start :: proc(t: ^testing.T, f: ^Fake_Holder, keep := true) {
 	if f.instance == "" do f.instance = "fake-instance-1"
 	if f.previous == "" do f.previous = "handover"
 	f.dir = fmt.aprintf("%s/dkf-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	os.set_env("PI_DESK_RUNTIME_DIR", f.dir)
-	os.set_env("PI_DESK_HOLDER_DIRECT", "1") // never launchd, whatever a start falls through to
+	os.set_env("DECKHAND_RUNTIME_DIR", f.dir)
+	os.set_env("DECKHAND_HOLDER_DIRECT", "1") // never launchd, whatever a start falls through to
 	testing.expect_value(t, runtime_dir_prepare(f.dir, RUNTIME_HOLDER_NEED), "")
 	f.saved_root = home_root
 	home_root = fmt.aprintf("%s/data", f.dir)
@@ -99,7 +99,7 @@ fake_holder_stop :: proc(f: ^Fake_Holder) {
 	}
 	socket_tokens_disable(false)
 	home_root = f.saved_root
-	os.unset_env("PI_DESK_HOLDER_DIRECT")
+	os.unset_env("DECKHAND_HOLDER_DIRECT")
 	state.settings.keep_sessions = false
 	delete(f.got)
 }

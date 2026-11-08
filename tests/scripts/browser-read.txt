@@ -5,7 +5,7 @@
 # child and a shadow root's slot are read through. Fixture: tests/web/read-frames.html.
 wait 1500
 assert_state open_sessions.# 1
-pi_command {"type":"browser_open","url":"pidesk-test://web/read-frames.html"}
+pi_command {"type":"browser_open","url":"deckhand-test://web/read-frames.html"}
 pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":15000}
 assert_finished ok true
 # text
@@ -76,7 +76,7 @@ assert_finished ok true
 pi_command {"type":"browser_wait","tab_id":$last,"for":"selector","value":"#cvdc","timeout_ms":600}
 assert_finished data.code timeout
 # a big hidden menu before the article: the article is read whole
-pi_command {"type":"browser_open","url":"pidesk-test://web/read-big.html"}
+pi_command {"type":"browser_open","url":"deckhand-test://web/read-big.html"}
 pi_command {"type":"browser_wait","tab_id":$last,"for":"load","timeout_ms":15000}
 assert_finished ok true
 pi_command {"type":"browser_read","tab_id":$last}

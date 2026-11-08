@@ -59,8 +59,8 @@ S="$W/script.txt"
   done
   echo "quit"
 } > "$S"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$S" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_RUNTIME_DIR="$W/run" PI_DESK_CMD='exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$S" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_RUNTIME_DIR="$W/run" DECKHAND_CMD='exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command" "$W/run.log" | head -20 || true
 if grep -qE "ASSERT FAILED|TIMEOUT|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "app-calls scene failed (log: $W/run.log)"; exit 1

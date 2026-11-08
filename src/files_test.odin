@@ -29,10 +29,10 @@ fsetup :: proc() -> string {
 	files_state_gen += 1
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-files-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-files-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	dir := fs_real(made, context.allocator)
-	ensure(strings.contains(dir, "/pi-desk-files-test-") && os.is_directory(dir), "files tests: no temp folder")
+	ensure(strings.contains(dir, "/deckhand-files-test-") && os.is_directory(dir), "files tests: no temp folder")
 	append(&state.projects, Project{id = new_id(), cwd = dir, label = "proj"})
 	s := Open_Session{id = new_id(), pi_session_id = strings.clone("f-1"), project_id = state.projects[0].id, cwd = dir}
 	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})

@@ -2,7 +2,7 @@
 # A stand-in for fish as a login shell ($SHELL), for tests/scripts/fish-shell.sh: `fish -l -c CMD`
 # rejects POSIX sh syntax that fish does not have, as fish does ("fish: Unsupported use of '='",
 # "fish: Expected a command, but found …", exit 127), and runs what fish would also run (here with
-# /bin/sh: the commands pi-desk sends that fish accepts mean the same in both). Without -c it is an
+# /bin/sh: the commands Deckhand sends that fish accepts mean the same in both). Without -c it is an
 # interactive shell (/bin/sh). Never installs or needs the real fish.
 cmd=""
 while [ $# -gt 0 ]; do

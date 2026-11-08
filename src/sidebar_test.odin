@@ -29,7 +29,7 @@ sb_reset :: proc(data_dir := "") -> runtime.Allocator {
 	home_root = data_dir
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {sb_clip = strings.clone(s)}, reveal = proc(s: string) {sb_revealed = strings.clone(s)}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 
@@ -82,7 +82,7 @@ by_cwd :: proc(cwd: string) -> ^Project {
 @(private = "file")
 fake_pi :: proc(tag: string) -> string {
 	out := fmt.aprintf("%s/pd-sb-args-%s-%d", os.get_env("TMPDIR", context.temp_allocator), tag, time.now()._nsec)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`echo "$* RO=$PI_KIT_READONLY CWD=$(pwd)" > '%s'; exec sleep 30`, out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`echo "$* RO=$PI_KIT_READONLY CWD=$(pwd)" > '%s'; exec sleep 30`, out))
 	return out
 }
 

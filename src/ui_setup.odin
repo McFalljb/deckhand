@@ -8,7 +8,7 @@ package main
 //      third-party items, Install and Update on a click in a terminal on the sheet.
 //   1. The main folder: use the notes folder found (PI_KIT_NOTES_DIR, else
 //      a folder named in pi's global AGENTS.md that has sessions/ or a
-//      README.md), create ~/pi-desk, or choose another folder.
+//      README.md), create ~/Deckhand, or choose another folder.
 //   2. Chats: inside the main folder (chats/) or a separate folder.
 //   3. Claude Code accounts, only when two or more are found (claude_accounts.odin: config
 //      folders, by stat): tick the ones to use, edit their labels, add folders anywhere (a
@@ -18,7 +18,7 @@ package main
 //   4. The layout as a small tree, then Done.
 //
 // It opens by itself once when no main folder is set (setup_due; test mode
-// only with PI_DESK_FIRST_RUN=1), and from "Set up pi-desk…" (the palette,
+// only with DECKHAND_FIRST_RUN=1), and from "Set up Deckhand…" (the palette,
 // the Jobs tab, Atlas's drawer, the Settings tab's Folders group). Skip for
 // now and Done both close it for good (Setup_Sheet{open = false}); Done
 // sends Set_Folder (chats), then Set_Home_Dir{setup = true}, which closes it
@@ -34,7 +34,7 @@ import clay "../build/clay-odin"
 
 Setup_Main :: enum u8 {
 	Detected, // the notes folder found
-	Create, // ~/pi-desk
+	Create, // ~/Deckhand
 	Other, // picked
 }
 
@@ -134,7 +134,7 @@ set_str :: proc(dst: ^string, v: string) {
 	dst^ = strings.clone(v)
 }
 
-// The sheet starts over: step 1, the detected folder (or ~/pi-desk), chats
+// The sheet starts over: step 1, the detected folder (or ~/Deckhand), chats
 // pre-selected from what is there.
 setup_begin :: proc() {
 	u := &setup_ui

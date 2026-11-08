@@ -2,7 +2,7 @@ package main
 
 // The updater's decisions, without I/O where it can be helped (update.odin runs them;
 // src/update_test.odin tests them): versions, the release JSON, when to check, where
-// pi-desk may replace itself, and whether an unpacked bundle is safe to look at.
+// Deckhand may replace itself, and whether an unpacked bundle is safe to look at.
 
 import "core:encoding/json"
 import jg "jsonguard"
@@ -19,7 +19,7 @@ UPDATE_REPO :: "McFalljb/deckhand"
 UPDATE_API_URL :: "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest"
 UPDATE_DOWNLOAD_URL :: "https://github.com/" + UPDATE_REPO + "/releases/download/" // + tag/name
 UPDATE_RELEASES_URL :: "https://github.com/" + UPDATE_REPO + "/releases"
-// pi-desk's bundle id, kept by Deckhand (macOS keeps permissions and notification settings by it)
+// Deckhand's bundle id, kept by Deckhand (macOS keeps permissions and notification settings by it)
 UPDATE_BUNDLE_ID :: "dev.pi-desk.app"
 // The bundle a release zip holds, exactly; updates install under the running bundle's own name.
 // (scripts/release.sh reads it from here.)
@@ -158,7 +158,7 @@ release_parse :: proc(body: string, allocator := context.allocator) -> (r: Relea
 	return r, ""
 }
 
-// Whether to offer `latest` to a pi-desk at `current`: newer, and not the version the
+// Whether to offer `latest` to a Deckhand at `current`: newer, and not the version the
 // user skipped.
 update_offer :: proc(latest, current: string, skipped: string) -> bool {
 	l, lok := semver_parse(latest)
@@ -198,9 +198,9 @@ update_due :: proc(now, last_ok, last_try: i64, enabled: bool) -> bool {
 	return now - last_ok >= UPDATE_INTERVAL
 }
 
-// ---- where pi-desk may replace itself ----
+// ---- where Deckhand may replace itself ----
 
-// The running bundle (from the executable's real path) and, when pi-desk cannot replace
+// The running bundle (from the executable's real path) and, when Deckhand cannot replace
 // it, why. `writable` is posix access(W_OK) (tests pass their own).
 install_decision :: proc(exe: string, writable: proc(path: string) -> bool) -> (bundle: string, why: string) {
 	if strings.contains(exe, "/AppTranslocation/") {

@@ -1,4 +1,4 @@
-# The first-run sheet (tests/scripts/setup.sh): no main folder, PI_DESK_FIRST_RUN=1.
+# The first-run sheet (tests/scripts/setup.sh): no main folder, DECKHAND_FIRST_RUN=1.
 # A fake vault named in the fake ~/.pi/agent/AGENTS.md is found; separate chats
 # (~/Chats); Done makes the folders; the Jobs tab works; a new chat gets
 # PI_KIT_NOTES_DIR; the sheet reopens from the gear and the menu bar and closes with Esc.
@@ -73,7 +73,7 @@ command {"type":"set_home_dir","path":"$homedir"}
 assert_result error not allowed for this caller
 command {"type":"set_folder","kind":"jobs","path":"$homedir"}
 assert_result error not allowed for this caller
-# the gear's "Set up pi-desk…" (its button once a main folder is set) reopens it
+# the gear's "Set up Deckhand…" (its button once a main folder is set) reopens it
 # at its first step, the coding agents (the main folder pre-filled); Esc closes, nothing changes
 clickid settings
 wait 200
@@ -87,7 +87,7 @@ wait 200
 assert_state focus.kind terminal
 assert_state settings.home_dir $homedir/notes/agents-demo
 assert_state settings.folders.chats.path $homedir/Chats
-# the menu bar's pi-desk → Set up pi-desk… does the same
+# the menu bar's Deckhand → Set up Deckhand… does the same
 menu setup
 eventually
 assert_state focus.id setup

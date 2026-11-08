@@ -1,5 +1,5 @@
 """A fake pi for tests/scripts/agent-show.sh: a pi-like screen and the pi integration's bridge over
-pi-desk's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN: caller panel), showing the user files
+Deckhand's socket (DECKHAND_SOCKET, the single-use DECKHAND_TOKEN: caller panel), showing the user files
 as the pi integration's desk_show tool does (show_file). Typing "show" and Enter runs, logging each
 result to $SHOW_LOG, then the screen says "done show":
   show_file README.md (anchor setup), notes.txt (line 3), $OUTSIDE_FILE (absolute, outside every
@@ -56,7 +56,7 @@ def call(cmd):
 
 
 def finished(r):
-    """A long-running command's finished event (pi-desk sends it to the requester)."""
+    """A long-running command's finished event (Deckhand sends it to the requester)."""
     global buf
     want = r.get("request_id")
     while True:

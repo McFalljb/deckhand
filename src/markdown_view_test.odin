@@ -32,7 +32,7 @@ md_setup :: proc(t: ^testing.T, name, text: string) -> (dir: string, tab_id: u64
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	made := fmt.tprintf("%s/pi-desk-md-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
+	made := fmt.tprintf("%s/deckhand-md-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
 	dir = fs_real(made, context.allocator)
 	append(&state.projects, Project{id = new_id(), cwd = dir, label = "proj"})

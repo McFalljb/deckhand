@@ -94,8 +94,8 @@ pi_integration_args_follow_the_manifest :: proc(t: ^testing.T) {
 pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := fmt.aprintf("%s/pd-pi-env-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	os.set_env("PI_DESK_RUNTIME_DIR", dir)
-	defer os.unset_env("PI_DESK_RUNTIME_DIR")
+	os.set_env("DECKHAND_RUNTIME_DIR", dir)
+	defer os.unset_env("DECKHAND_RUNTIME_DIR")
 	rdir, ok := sock_runtime_dir(context.temp_allocator)
 	testing.expect(t, ok)
 	testing.expect(t, socket_start(rdir))
@@ -106,7 +106,7 @@ pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 		for e in env {
 			k, _, _ := strings.partition(e, "=")
 			bridge := k == "PI_DESK_SOCKET" || k == "PI_DESK_TOKEN" || k == "PI_DESK_CONTROL_TOKEN" || k == "PI_DESK_SHOTS_DIR"
-			if bridge || strings.has_prefix(k, "DECKHAND_") do append(&out, k) // the bridge's (the test run's own PI_DESK_CMD and the rest are inherited)
+			if bridge || strings.has_prefix(k, "DECKHAND_") do append(&out, k) // the bridge's (the test run's own DECKHAND_CMD and the rest are inherited)
 		}
 		return strings.join(out[:], " ", context.temp_allocator)
 	}
@@ -134,18 +134,18 @@ pi_tab_env_is_deckhands_own :: proc(t: ^testing.T) {
 	testing.expect_value(t, names(child_env(agent_env(4343))), "")
 }
 
-// PI_DESK_PI_INTEGRATION (another integration folder) counts only in test mode: a release
+// DECKHAND_PI_INTEGRATION (another integration folder) counts only in test mode: a release
 // build never loads extensions from a folder an environment variable names.
 @(test)
 pi_integration_env_only_in_test_mode :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := pin_dir(t)
 	defer os.remove_all(dir)
-	os.set_env("PI_DESK_PI_INTEGRATION", dir)
-	defer os.unset_env("PI_DESK_PI_INTEGRATION")
+	os.set_env("DECKHAND_PI_INTEGRATION", dir)
+	defer os.unset_env("DECKHAND_PI_INTEGRATION")
 	testing.expect_value(t, pi_integration_from_env(test = false), "")
 	testing.expect_value(t, pi_integration_from_env(test = true), dir)
-	os.set_env("PI_DESK_PI_INTEGRATION", "relative/pi")
+	os.set_env("DECKHAND_PI_INTEGRATION", "relative/pi")
 	testing.expect_value(t, pi_integration_from_env(test = true), "")
 }
 
@@ -250,8 +250,8 @@ pi_starts_with_the_integration :: proc(t: ^testing.T) {
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	argfile := fmt.tprintf("%s/args", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argfile, argfile, argfile))
-	defer os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argfile, argfile, argfile))
+	defer os.set_env("DECKHAND_CMD", "sleep 30")
 	read_args :: proc(t: ^testing.T, path: string) -> string {
 		for _ in 0 ..< 200 {
 			if data, err := os.read_entire_file(path, context.temp_allocator); err == nil && len(data) > 0 {

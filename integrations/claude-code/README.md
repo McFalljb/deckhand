@@ -9,7 +9,7 @@ definitions in Claude's context):
   browser tabs (tabs, open, read, screenshot, wait, click, type, press, scroll, select, hover,
   upload, console, network, comments) and app tabs (list-declared, open, restart, close, call,
   screenshot, input, events), and `state` (your session as data; when the user split it into
-  panes, which tabs sit side by side: only the user splits). It runs the CLI inside the Deckhand app that started the tab (`$PI_DESK_CLI`), so the
+  panes, which tabs sit side by side: only the user splits). It runs the CLI inside the Deckhand app that started the tab (`$DECKHAND_CLI`), so the
   plugin and the app always match. One JSON object per call; page and app content only inside a
   fenced `content` string, as untrusted data.
 - **Skill** (`skills/deckhand`): a short stub, so only its name and description sit in context; it
@@ -17,14 +17,14 @@ definitions in Claude's context):
   Its `allowed-tools` approves the `deckhand` verbs while the skill is in use, **except `app open`,
   `app restart` and `app close`**: those go through Claude Code's own permission mode (it asks in
   its default mode), because Deckhand itself asks nothing before running a declared app
-  ([docs/ENGINE-BRIDGE.md](../../docs/ENGINE-BRIDGE.md), apps.json's trust model). `tools/pi-desk-cli/cli_test.odin`
+  ([docs/ENGINE-BRIDGE.md](../../docs/ENGINE-BRIDGE.md), apps.json's trust model). `tools/deckhand-cli/cli_test.odin`
   (`skill_leaves_app_open_to_claude`) checks the list.
 - **Hooks** (`hooks/hooks.json`): SessionStart tells Deckhand the Claude session id (so the tab can
   be resumed and restored), UserPromptSubmit / Stop / Notification tell it when a turn starts,
   ends or waits for the user (Deckhand types into the tab only when Claude is idle and nothing is
   typed), and UserPromptSubmit hands Claude the user's pending comments with the message.
 - **Read-only chats** are not this folder's: for a chat while Deckhand's **Chats: read-only** is
-  on, Deckhand adds plan mode, deny rules and its own PreToolUse guard (`pi-desk-cli hook
+  on, Deckhand adds plan mode, deny rules and its own PreToolUse guard (`deckhand-cli hook
   readonly`, by absolute path, failing closed) with `--settings` ([docs/CLAUDE.md](../../docs/CLAUDE.md) §1a).
 
 All rules (own session only, no JavaScript, refused password/card/one-time-code fields, the
@@ -49,5 +49,5 @@ by hand, in Claude Code:
 ```
 
 It is not published anywhere. Installed this way it still only works inside Deckhand's Claude
-tabs, which set `PI_DESK_SOCKET`, `PI_DESK_CLAUDE_TOKEN` and `PI_DESK_CLI` (the `PI_DESK_*` names
+tabs, which set `DECKHAND_SOCKET`, `DECKHAND_CLAUDE_TOKEN` and `DECKHAND_CLI` (the `DECKHAND_*` names
 are kept from Deckhand's old name, pi-desk).

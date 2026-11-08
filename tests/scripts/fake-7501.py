@@ -15,7 +15,7 @@ the keyboard and sends reports:
   bad       malformed reports: an unknown state, bad base64, a bad kind,
             a 64 KiB message, control and bidi characters, a bad id
   long      blocked with a 2000-byte message (kept: 256 bytes)
-  flood     300 records (pi-desk keeps 256)
+  flood     300 records (Deckhand keeps 256)
   prompt    OSC 133 A, as a shell's new prompt would
   exit      exit (the shell takes the foreground back)
 """
@@ -104,7 +104,7 @@ def main():
             report("state=done:id=spoof:msg=" + b64("ok‮gnp.exe​\x07\x1b[31mred"))
             report("state=done:id=" + "x" * 600)
         elif w == "long":
-            report("state=blocked:" + app + ":msg=" + b64("B" * 2000))  # valid: pi-desk keeps 256 bytes
+            report("state=blocked:" + app + ":msg=" + b64("B" * 2000))  # valid: Deckhand keeps 256 bytes
         elif w == "flood":
             for i in range(300):
                 report("state=done:id=flood/%d" % i)

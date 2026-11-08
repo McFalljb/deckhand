@@ -4,7 +4,7 @@
 #
 # A published release binary cannot be pointed at a local release (its update fixtures and test
 # hooks are compiled out, by design: src/test_hooks.odin), so "the current release's updater" is
-# its source at its tag, built as the update scene builds it (-define:PI_DESK_UPDATE_TEST=true):
+# its source at its tag, built as the update scene builds it (-define:DECKHAND_UPDATE_TEST=true):
 #   1. the latest published release's tag (gh, read only; or --prev TAG), checked out in a
 #      temporary worktree, its updater built;
 #   2. a release JSON and download folder (file://) offering VERSION with the new zip itself, its
@@ -55,7 +55,7 @@ git worktree add --detach "$PREVDIR" "$PREV" >/dev/null 2>&1
 (
   cd "$PREVDIR"
   ./build.sh fake-app > "$W/prev-build.log" 2>&1 &&
-    odin build src -out:"$W/prev-updater" -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0 >> "$W/prev-build.log" 2>&1 &&
+    odin build src -out:"$W/prev-updater" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 >> "$W/prev-build.log" 2>&1 &&
     odin build tools/update-sign -out:"$W/update-sign" >> "$W/prev-build.log" 2>&1
 ) || { tail -20 "$W/prev-build.log"; echo "update-from-release: $PREV did not build (log: $W/prev-build.log)" >&2; exit 1; }
 mkdir -p "$W/keys"
@@ -106,9 +106,9 @@ waitstate 10000 update.phase installed
 quit
 SCRIPT
 mkdir -p "$W/home" "$W/data"
-HOME="$W/home" SHELL=/bin/sh PI_DESK_SCRIPT="$W/script.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-  PI_DESK_UPDATE_URL="file://$W/rel/latest.json" PI_DESK_UPDATE_DOWNLOAD="file://$W/rel/download/" \
-  PI_DESK_UPDATE_VERSION="$PREV_V" PI_DESK_UPDATE_APP="$I" \
+HOME="$W/home" SHELL=/bin/sh DECKHAND_SCRIPT="$W/script.txt" DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+  DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
+  DECKHAND_UPDATE_VERSION="$PREV_V" DECKHAND_UPDATE_APP="$I" \
   "$W/prev-updater" > "$W/run.log" 2>&1 || true
 
 fail=0

@@ -7,8 +7,8 @@ package main
 // so an older Deckhand is refused while this app or a holder lives, and this app is refused
 // while an older one runs. The files are opened close-on-exec, so pi, shells, jobs and the
 // update relaunch's sh never inherit them and never keep a later start out. pi-desk 0.1.x takes
-// no lock: a live pi-desk is found by its control socket in its old runtime dir
-// ($TMPDIR/pi-desk-<uid>/pi-desk-<pid>.sock, a process whose executable is pi-desk's). Either
+// no lock: a live Deckhand is found by its control socket in its old runtime dir
+// ($TMPDIR/pi-desk-<uid>/pi-desk-<pid>.sock, a process whose executable is Deckhand's). Either
 // way Deckhand says so and quits (main.odin, instance_guard).
 
 import "core:c"
@@ -63,7 +63,7 @@ instance_lock_release :: proc(fd: posix.FD) {
 }
 
 // A live pi-desk 0.1.x's pid from its socket in the runtime dir, or 0. own: this process.
-instance_old_pidesk_find :: proc(runtime_dir: string, own: int, alive: proc(pid: int) -> bool, exe: proc(pid: int) -> string) -> int {
+instance_legacy_find :: proc(runtime_dir: string, own: int, alive: proc(pid: int) -> bool, exe: proc(pid: int) -> string) -> int {
 	entries, err := os.read_all_directory_by_path(runtime_dir, context.temp_allocator)
 	if err != nil do return 0
 	for e in entries {
@@ -72,14 +72,14 @@ instance_old_pidesk_find :: proc(runtime_dir: string, own: int, alive: proc(pid:
 		digits := n[len("pi-desk-"):len(n) - len(".sock")]
 		pid, pok := strconv.parse_int(digits, 10)
 		if !pok || pid <= 0 || pid == own || !alive(pid) do continue
-		if instance_pidesk_exe(exe(pid)) do return pid
+		if instance_legacy_exe(exe(pid)) do return pid
 	}
 	return 0
 }
 
-// pi-desk's executable (pi-desk.app's), not one built from source (build/pi-desk.app beside
+// Deckhand's executable (pi-desk.app's), not one built from source (build/pi-desk.app beside
 // build.sh: its scenes run with their own data dirs).
-instance_pidesk_exe :: proc(path: string) -> bool {
+instance_legacy_exe :: proc(path: string) -> bool {
 	if filepath.base(path) != "pi-desk" do return false
 	macos := filepath.dir(path)
 	contents := filepath.dir(macos)
@@ -90,7 +90,7 @@ instance_pidesk_exe :: proc(path: string) -> bool {
 	return true
 }
 
-// What the alert says (old: the pi-desk found, or 0; refused: which lock was held).
+// What the alert says (old: the Deckhand found, or 0; refused: which lock was held).
 instance_message :: proc(old: int, refused := Instance_Refusal.Running) -> string {
 	if refused == .Older do return "An older Deckhand is running with the same data. Quit it first."
 	if old != 0 do return "pi-desk is running with the same data. Quit pi-desk first (and delete pi-desk.app: Deckhand replaces it), then open Deckhand again."
@@ -123,7 +123,7 @@ instance_guard :: proc(dir: string, check_old: bool) -> string {
 	if dir == "" do return ""
 	if check_old {
 		if rd := sock_legacy_runtime_dir(context.temp_allocator); rd != "" {
-			if old := instance_old_pidesk_find(rd, int(posix.getpid()), instance_alive, instance_exe); old != 0 do return instance_message(old)
+			if old := instance_legacy_find(rd, int(posix.getpid()), instance_alive, instance_exe); old != 0 do return instance_message(old)
 		}
 	}
 	core_fd, inst_fd, refused := instance_locks_take(dir)

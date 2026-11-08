@@ -74,7 +74,7 @@ a_status :: proc(a: Agent_State, waiting := false) {
 a_start :: proc(t: ^testing.T, dir: string) -> string {
 	args := fmt.tprintf("%s/args", dir)
 	os.remove(args)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, args, args, args))
 	if ht := home_tab(); ht != nil && ht.status == .Running do run_command(Tab_Exited{tab_id = ht.id})
 	r := run_command(Set_Home{open = true}, A_UI)
 	testing.expect(t, r.ok, r.error)
@@ -286,7 +286,7 @@ agent_model_picker_key :: proc(t: ^testing.T) {
 	dir := a_reset()
 	defer a_done()
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	r := run_command(Agent_Model_Picker{}, A_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, state.home_open && state.focus_widget == "agent_input", "drawer shown with the keyboard")
@@ -316,7 +316,7 @@ agent_model_picker_pending :: proc(t: ^testing.T) {
 	dir := a_reset()
 	defer a_done()
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	sent :: proc(path: string) -> string {
 		time.sleep(100 * time.Millisecond)
 		data, _ := os.read_entire_file(path, context.temp_allocator)
@@ -379,7 +379,7 @@ agent_keyboard_is_users :: proc(t: ^testing.T) {
 	testing.expect(t, run_command(Set_Focus{widget = "agent_input"}, A_UI).ok)
 }
 
-// The model pi-desk shows: the last model_change of Atlas's session file.
+// The model Deckhand shows: the last model_change of Atlas's session file.
 @(test)
 agent_model_from_session :: proc(t: ^testing.T) {
 	text := `{"type":"session","version":3,"id":"a"}
@@ -457,7 +457,7 @@ agent_send_while_starting_says_why :: proc(t: ^testing.T) {
 	clip = ""
 	platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	sent :: proc(path: string) -> string {
 		time.sleep(100 * time.Millisecond)
 		data, _ := os.read_entire_file(path, context.temp_allocator)
@@ -511,7 +511,7 @@ agent_send_pending_dropped :: proc(t: ^testing.T) {
 	clip = ""
 	platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	said :: proc() -> int {
 		n := 0
 		for x in state.notices.items do if strings.contains(x.place, "Send to") do n += 1
@@ -555,7 +555,7 @@ agent_send_waits_for_paste_mode :: proc(t: ^testing.T) {
 	clip = ""
 	platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`stty raw -echo; sleep 0.3; printf '\033[?2004h'; exec cat > '%s'`, out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; sleep 0.3; printf '\033[?2004h'; exec cat > '%s'`, out))
 	testing.expect(t, agent_send("four\n", A_UI).ok, "waits for pi")
 	a_status(.Idle) // before the paste mode is on
 	testing.expect_value(t, len(state.notices.items), 0)
@@ -587,7 +587,7 @@ agent_send_again_while_waiting_for_paste_mode :: proc(t: ^testing.T) {
 	clip = ""
 	platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`stty raw -echo; sleep 0.5; printf '\033[?2004h'; exec cat > '%s'`, out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; sleep 0.5; printf '\033[?2004h'; exec cat > '%s'`, out))
 	testing.expect(t, agent_send("one\n", A_UI).ok, "waits for pi")
 	a_status(.Idle) // before the paste mode is on
 	r := agent_send("two\n", A_UI)
@@ -617,7 +617,7 @@ agent_send_paste_wait_deadline_holds :: proc(t: ^testing.T) {
 	defer a_done()
 	platform.set_clipboard = proc(s: string) {}
 	out := fmt.tprintf("%s/stdin", dir)
-	os.set_env("PI_DESK_CMD", fmt.tprintf(`stty raw -echo; exec cat > '%s'`, out)) // never turns paste mode on
+	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; exec cat > '%s'`, out)) // never turns paste mode on
 	testing.expect(t, agent_send("one\n", A_UI).ok, "waits for pi")
 	t0 := time.tick_now()
 	a_status(.Idle)

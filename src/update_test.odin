@@ -1,6 +1,6 @@
 package main
 
-// pi-desk's updater (update.odin, update_core.odin, src/updatesig): versions, the
+// Deckhand's updater (update.odin, update_core.odin, src/updatesig): versions, the
 // release JSON, signatures, when to check, where it may install, the unpacked bundle's
 // safety, the saved choices and who may send the commands (`./build.sh test`). No
 // network: the scene tests/scripts/update.sh plays the downloads from local files.
@@ -17,9 +17,9 @@ import sig "updatesig"
 @(private = "file")
 U_UI :: Caller{kind = .UI}
 
-// `odin build` type-checks this file too: a release build (no PI_DESK_UPDATE_TEST) has no test
+// `odin build` type-checks this file too: a release build (no DECKHAND_UPDATE_TEST) has no test
 // key, so these tests see an empty one there (they only run with the define: ./build.sh test).
-when !PI_DESK_UPDATE_TEST {
+when !DECKHAND_UPDATE_TEST {
 	@(private = "file")
 	UPDATE_TEST_PUBLIC_KEY :: ""
 }
@@ -130,7 +130,7 @@ update_release_parse :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
 	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"deckhand-0.1.1-macos-x64.zip","size":5}]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
-	// a pi-desk-named zip (0.1.x's) is not a Deckhand release's
+	// a deckhand-named zip (0.1.x's) is not a Deckhand release's
 	_, err = release_parse(release_json("v0.1.1", assets = `[{"name":"pi-desk-0.1.1-macos-arm64.zip","size":5},{"name":"pi-desk-0.1.1-macos-arm64.zip.sig","size":5}]`), context.temp_allocator)
 	testing.expect_value(t, err, "the release has no macOS arm64 zip")
 	_, err = release_parse(release_json("v0.1.1", zip_size = (1 << 30) + 1), context.temp_allocator)
@@ -238,7 +238,7 @@ update_install_decision :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(why, "cannot write to /Applications"), why)
 	_, why = install_decision("/Applications/Deckhand.app/Contents/MacOS/Deckhand", u_writable_parent_only)
 	testing.expect(t, strings.contains(why, "cannot write to /Applications/Deckhand.app"), why)
-	_, why = install_decision("/Volumes/pi-desk/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
+	_, why = install_decision("/Volumes/deckhand/Deckhand.app/Contents/MacOS/Deckhand", u_writable_none)
 	testing.expect(t, strings.contains(why, "disk image"), why)
 	// a development build: build/Deckhand.app beside build.sh
 	repo := u_tmp("repo")
@@ -268,7 +268,7 @@ update_links_and_names :: proc(t: ^testing.T) {
 	testing.expect_value(t, zip_names_check("/etc/x\n"), "the zip has an absolute path")
 	testing.expect_value(t, zip_names_check("Deckhand.app/\nother.app/x\n"), "the zip holds more than Deckhand.app")
 	testing.expect_value(t, zip_names_check("Deckhand.application/x\n"), "the zip holds more than Deckhand.app")
-	// pi-desk's bundle name (0.1.x releases): not what a Deckhand release holds
+	// Deckhand's bundle name (0.1.x releases): not what a Deckhand release holds
 	testing.expect_value(t, zip_names_check("pi-desk.app/\npi-desk.app/Contents/\n"), "the zip holds more than Deckhand.app")
 	testing.expect_value(t, zip_names_check(""), "the zip is empty")
 }
@@ -492,7 +492,7 @@ update_sig_file_format :: proc(t: ^testing.T) {
 	text := sig.sig_file_make(cd, "QUJD", context.temp_allocator)
 	c, b, ok := sig.sig_file_parse(text)
 	testing.expect(t, ok && c == cd && b == "QUJD", text)
-	for bad in ([]string{"", "QUJD\n", "pi-desk-update-sig v2\ncdhash xyz\nsignature QUJD\n", "pi-desk-update-sig v1\ncdhash " + CD + "\nsignature QUJD\n", "pi-desk-update-sig v2\nsignature QUJD\ncdhash " + CD + "\n", "pi-desk-update-sig v2\ncdhash " + CD + "\nsignature QUJD\nextra\n"}) {
+	for bad in ([]string{"", "QUJD\n", "pi-desk-update-sig v2\ncdhash xyz\nsignature QUJD\n", "deckhand-update-sig v1\ncdhash " + CD + "\nsignature QUJD\n", "pi-desk-update-sig v2\nsignature QUJD\ncdhash " + CD + "\n", "pi-desk-update-sig v2\ncdhash " + CD + "\nsignature QUJD\nextra\n"}) {
 		_, _, bok := sig.sig_file_parse(bad)
 		testing.expectf(t, !bok, "%q refused", bad)
 	}
@@ -533,7 +533,7 @@ update_under_applications :: proc(t: ^testing.T) {
 	defer {os.remove_all(root); delete(root, runtime.heap_allocator())}
 	os.symlink("/Applications", upath(root, "apps"))
 	testing.expect(t, under_applications(upath(root, "apps", "Deckhand.app")), "through a link")
-	when PI_DESK_UPDATE_TEST {
+	when DECKHAND_UPDATE_TEST {
 		upd.test = true
 		testing.expect_value(t, update_key(), UPDATE_TEST_PUBLIC_KEY)
 		upd.test = false

@@ -31,8 +31,8 @@ session alpha 3 a1 "Write the release notes"
 session alpha 9 a2 "Bump the parser"
 session bravo 30 b1 "Fix the flaky test"
 
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "buttons scene failed (log: $W/run.log)"

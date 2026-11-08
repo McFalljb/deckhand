@@ -40,8 +40,8 @@ clipboard_text :: proc() -> string {
 	return platform.get_clipboard != nil ? platform.get_clipboard() : ""
 }
 
-// Where pi-desk keeps its own files (command log; later the saved
-// workspace). PI_DESK_DATA_DIR overrides.
+// Where Deckhand keeps its own files (command log; later the saved
+// workspace). DECKHAND_DATA_DIR overrides.
 data_dir :: proc(allocator := context.allocator) -> string {
 	if d := hook_env(.Data_Dir, allocator); d != "" do return d
 	return data_dir_under(data_home(TEST_HOOKS, context.temp_allocator), allocator)
@@ -52,11 +52,11 @@ data_dir :: proc(allocator := context.allocator) -> string {
 data_dir_under :: proc(home: string, allocator := context.allocator) -> string {
 	if !strings.has_prefix(home, "/") do return ""
 	when ODIN_OS == .Darwin {
-		p, _ := filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
+		p, _ := filepath.join({home, "Library", "Application Support", "deckhand"}, allocator)
 	} else {
 		base := os.get_env("XDG_DATA_HOME", context.temp_allocator)
 		if !strings.has_prefix(base, "/") do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
-		p, _ := filepath.join({base, "pi-desk"}, allocator)
+		p, _ := filepath.join({base, "deckhand"}, allocator)
 	}
 	return p
 }

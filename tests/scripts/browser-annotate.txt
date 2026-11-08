@@ -1,6 +1,6 @@
 # Comment mode (tests/scripts/browser.sh; docs/BROWSER.md §3, steps 4 and 6): Annotate, hover,
 # a click picks an element (the page gets no click), an area drag, markers and their badges
-# following scroll, a page JS cannot reach pi-desk's binding, navigation away and back.
+# following scroll, a page JS cannot reach Deckhand's binding, navigation away and back.
 # Page coordinates are CSS px from the page's top-left (tests/web/annotate.html).
 wait 1500
 assert_state open_sessions.# 1
@@ -10,7 +10,7 @@ web_title Annotate fixture 5000
 waitstate 5000 open_sessions.0.tabs.1.annot_ready true
 assert_state open_sessions.0.tabs.1.mode browse
 assert_state open_sessions.0.tabs.1.markers.# 0
-# browse mode with no markers: a scroll sends pi-desk nothing
+# browse mode with no markers: a scroll sends Deckhand nothing
 web_js window.scrollTo(0, 50)
 wait 300
 annot_assert layouts 0

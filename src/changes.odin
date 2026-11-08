@@ -1260,10 +1260,10 @@ changes_commit_start :: proc(v: ^Changes_View, request_id: u64, msg: string) {
 	thread.run_with_poly_data(job, proc(job: ^Job) {
 		h := runtime.heap_allocator()
 		// as a terminal runs it: the user's login shell (its PATH finds gpg, pre-commit, husky
-		// when pi-desk started from Finder), their hooks, its own process group
+		// when Deckhand started from Finder), their hooks, its own process group
 		shell := os.get_env("SHELL", context.temp_allocator)
 		if shell == "" do shell = "/bin/zsh"
-		argv := shell_script_argv(shell, `cd "$1" && exec git commit -F -`, "pi-desk-commit") // fish and co.: /bin/sh
+		argv := shell_script_argv(shell, `cd "$1" && exec git commit -F -`, "deckhand-commit") // fish and co.: /bin/sh
 		append(&argv, job.root)
 		out, st := run_group(argv[:], changes_commit_timeout, input = strings.concatenate({job.msg, "\n"}, context.temp_allocator), cap = 1 << 20, merge_stderr = true)
 		err := ""

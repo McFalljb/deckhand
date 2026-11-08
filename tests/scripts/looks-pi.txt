@@ -1,6 +1,6 @@
-# Real pi follows pi-desk's light/dark (run with LOOKS_PI=real tests/scripts/looks.sh):
+# Real pi follows Deckhand's light/dark (run with LOOKS_PI=real tests/scripts/looks.sh):
 # pi runs with --use-theme system, turns on mode 2031 and re-queries the
-# terminal's colours when pi-desk reports a switch. One short prompt to pi.
+# terminal's colours when Deckhand reports a switch. One short prompt to pi.
 wait 1000
 waitfor deepseek 30000
 wait 1000

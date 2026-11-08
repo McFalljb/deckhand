@@ -81,7 +81,7 @@ annot_what_quotes_page_text :: proc(t: ^testing.T) {
 	testing.expect_value(t, comment_lines, 1)
 	testing.expect(t, strings.contains(out, "\n   Comment: make it blue\n"), out)
 	// the fence is longer than any run of backticks inside
-	testing.expect(t, strings.contains(out, "````pi-desk-comments"), out)
+	testing.expect(t, strings.contains(out, "````deckhand-comments"), out)
 	// a tag that is not a tag name is not trusted
 	p.tag = "img src=x onerror"
 	testing.expect(t, strings.has_prefix(annot_pick_what(&p), `element "Save`), annot_pick_what(&p))

@@ -33,17 +33,17 @@ r2_reset :: proc() -> runtime.Allocator {
 	persist = {}
 	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
-	os.set_env("PI_DESK_CLAUDE_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
+	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	return runtime.heap_allocator()
 }
 
 @(private = "file")
 r2_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-r2-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-r2-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -74,7 +74,7 @@ r2_restored :: proc(t: ^testing.T, tag: string) -> (a, b: ^Open_Session, dir, lo
 	text := strings.clone(workspace_json())
 	context.allocator = r2_reset()
 	log = fmt.tprintf("%s/argv.log", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" >> %s; exec sleep 30`, log))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" >> %s; exec sleep 30`, log))
 	rescan_now()
 	testing.expect_value(t, workspace_restore(text), "")
 	testing.expect_value(t, len(state.open_sessions), 2)
@@ -165,8 +165,8 @@ r2_chat_claude_restored :: proc(t: ^testing.T) {
 	os.set_env("HOME", r2_dir("chat-home"))
 	dir := r2_dir("chat-mark")
 	log := fmt.tprintf("%s/argv", dir)
-	claude_cli_override = fmt.tprintf("%s/pi-desk-cli", dir)
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$*" >> %s; exec sleep 30`, log))
+	claude_cli_override = fmt.tprintf("%s/deckhand-cli", dir)
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$*" >> %s; exec sleep 30`, log))
 	rescan_now()
 	c := chats_project()
 	if c == nil {testing.fail(t);return}

@@ -21,7 +21,7 @@ ca_fake_home_init :: proc "contextless" () {
 	when ODIN_TEST {
 		test_tmpdir_ensure() // in the process's own temp folder (tmpdir_test.odin)
 		context = runtime.default_context()
-		d := fmt.aprintf("%s/pi-desk-test-home-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
+		d := fmt.aprintf("%s/deckhand-test-home-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec)
 		os.make_directory_all(d)
 		buf: [posix.PATH_MAX]u8
 		if r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:])); r != nil do d = strings.clone(string(r))
@@ -40,7 +40,7 @@ CA_CONTROL :: Caller{kind = .Control}
 
 @(private = "file")
 ca_dir :: proc(tag: string) -> string {
-	d := fmt.aprintf("%s/pi-desk-ca-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
+	d := fmt.aprintf("%s/deckhand-ca-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(d)
 	buf: [posix.PATH_MAX]u8
 	r := posix.realpath(strings.clone_to_cstring(d, context.temp_allocator), raw_data(buf[:]))
@@ -87,9 +87,9 @@ ca_reset :: proc(env: ^Ca_Env) -> runtime.Allocator {
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	os.unset_env("XDG_CONFIG_HOME")
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
-	os.set_env("PI_DESK_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	claude_found = .Yes
 	env.home = ca_dir("home")
 	env.root = ca_dir("data")
@@ -98,7 +98,7 @@ ca_reset :: proc(env: ^Ca_Env) -> runtime.Allocator {
 	env.argf = fmt.aprintf("%s/argv", d)
 	os.set_env("HOME", env.home)
 	home_root = env.root
-	os.set_env("PI_DESK_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; env > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, env.argf, env.argf, env.argf, env.envf, env.envf, env.envf))
+	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; env > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, env.argf, env.argf, env.argf, env.envf, env.envf, env.envf))
 	claude_accounts_refresh()
 	rescan_now()
 	return runtime.heap_allocator()
@@ -122,7 +122,7 @@ ca_write :: proc(path, text: string) {
 	_ = os.write_entire_file(path, transmute([]u8)text)
 }
 
-// A config folder: settings.json, and the account file when marked (stat is all pi-desk does).
+// A config folder: settings.json, and the account file when marked (stat is all Deckhand does).
 @(private = "file")
 ca_config :: proc(dir: string, marked := true) {
 	os.make_directory_all(dir)
@@ -157,7 +157,7 @@ ca_labels :: proc() -> string {
 	return strings.to_string(b)
 }
 
-// A transcript line of Claude Code's (the fields pi-desk looks at; the rest as Claude writes it).
+// A transcript line of Claude Code's (the fields Deckhand looks at; the rest as Claude writes it).
 @(private = "file")
 ca_user :: proc(cwd, text: string, meta := false, sidechain := false) -> string {
 	return fmt.tprintf(`{{"parentUuid":null,"isSidechain":%v,"userType":"external","cwd":%q,"sessionId":"x","version":"2.1.317","type":"user",%s"message":{{"role":"user","content":%q}},"uuid":"u1","timestamp":"2026-11-01T10:00:00.000Z"}}`, sidechain, cwd, meta ? `"isMeta":true,` : "", text)
@@ -243,7 +243,7 @@ claude_accounts_detected :: proc(t: ^testing.T) {
 	testing.expect_value(t, ca_labels(), "Claude*,Day job")
 }
 
-// CLAUDE_CONFIG_DIR in pi-desk's login environment (an odd path: spaces, unicode) is the default
+// CLAUDE_CONFIG_DIR in Deckhand's login environment (an odd path: spaces, unicode) is the default
 // account: plain `claude` uses it. ~/.claude, when there, is another one, started with
 // CLAUDE_CONFIG_DIR unset.
 @(test)
@@ -261,7 +261,7 @@ claude_accounts_env_default :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(claude_account_env(odd)), 0)
 	home := fmt.tprintf("%s/.claude", env.home)
 	e := strings.join(claude_account_env(home), "\n", context.temp_allocator)
-	testing.expect(t, strings.contains(e, "PI_DESK_CLAUDE_ACCOUNT="), "~/.claude: unset after the profile")
+	testing.expect(t, strings.contains(e, "DECKHAND_CLAUDE_ACCOUNT="), "~/.claude: unset after the profile")
 	testing.expect(t, !strings.contains(e, "CLAUDE_CONFIG_DIR="), e)
 	// a relative CLAUDE_CONFIG_DIR is not Claude's folder: ~/.claude is the default
 	os.set_env("CLAUDE_CONFIG_DIR", "relative/dir")
@@ -315,7 +315,7 @@ claude_accounts_start_env :: proc(t: ^testing.T) {
 	testing.expect(t, r.ok, r.error)
 	e := ca_wait_file(env.envf)
 	testing.expect(t, strings.contains(e, fmt.tprintf("CLAUDE_CONFIG_DIR=%s\n", work)), e)
-	testing.expect(t, !strings.contains(e, "PI_DESK_CLAUDE_ACCOUNT"), "the marker is gone before claude runs")
+	testing.expect(t, !strings.contains(e, "DECKHAND_CLAUDE_ACCOUNT"), "the marker is gone before claude runs")
 	s := find_session(r.created_id)
 	ct := s.tabs[0].kind.(Claude_Tab)
 	testing.expect_value(t, ct.account, work)
@@ -398,7 +398,7 @@ ca_touch :: proc(path: string, secs_ago: int) {
 
 // The selected project's Claude Code conversations from every account's projects/ folder: titles
 // from the first real prompt (or the user's /rename, Claude's title or summary), newest first
-// with pi's, never a sidechain or subagent file, never one pi-desk already lists.
+// with pi's, never a sidechain or subagent file, never one Deckhand already lists.
 @(test)
 claude_disk_rows_listed :: proc(t: ^testing.T) {
 	env: Ca_Env
@@ -439,7 +439,7 @@ claude_disk_rows_listed :: proc(t: ^testing.T) {
 	snap := state_json()
 	testing.expect(t, strings.contains(snap, `"found":true`))
 	testing.expect(t, !strings.contains(snap, ".jsonl"), "no transcript path for agents")
-	// one pi-desk already has (its own history) is not listed twice
+	// one Deckhand already has (its own history) is not listed twice
 	r := run_command(New_Claude_Session{project_id = pid, account = "Claude"}, CA_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, run_command(Claude_Session_Report{tab_id = find_session(r.created_id).tabs[0].id, session_id = b, source = "resume"}, CA_SCRIPT).ok)
@@ -489,9 +489,9 @@ claude_disk_chats_readonly :: proc(t: ^testing.T) {
 	env: Ca_Env
 	context.allocator = ca_reset(&env)
 	defer ca_done()
-	// a read-only tab never starts without pi-desk-cli (its guard): a stand-in, not whatever a
+	// a read-only tab never starts without deckhand-cli (its guard): a stand-in, not whatever a
 	// release build left next to the test binary
-	cli := fmt.tprintf("%s/pi-desk-cli", ca_dir("cli"))
+	cli := fmt.tprintf("%s/deckhand-cli", ca_dir("cli"))
 	_ = os.write_entire_file(cli, transmute([]u8)string("#!/bin/sh\nexit 0\n"))
 	claude_cli_override = cli
 	defer claude_cli_override = ""

@@ -3,7 +3,7 @@
 # pi's own tool allowlist (PI_READONLY_ARGS: --tools read,grep,find,ls --exclude-tools 'mcp__*'
 # --no-mcp, last in argv)
 # and PI_KIT_READONLY=1. Every start also gets Deckhand's pi integration (-e per extension, first)
-# and DECKHAND_* bridge variables, never pi-kit's PI_DESK_* ones. Never a real pi: the fake (PI_DESK_CMD) logs its argv and environment,
+# and DECKHAND_* bridge variables, never pi-kit's PI_DESK_* ones. Never a real pi: the fake (DECKHAND_CMD) logs its argv and environment,
 # then waits for "exit" typed into its tab.
 #   1. pi-chat-readonly-1.txt: read-only on; the user's new chat, a script's (an agent's) new
 #      chat, its restart after pi exited, a resumed chat (open_session); quit
@@ -43,8 +43,8 @@ fail=0
 for n in 1 2; do
   RUN=$(mktemp -d "${TMPDIR:-/tmp}/pdcr.XXXXXX") # a short runtime dir: the socket path must fit sun_path
   env -u PI_KIT_READONLY HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh \
-    PI_DESK_SCRIPT=tests/scripts/pi-chat-readonly-$n.txt PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    PI_DESK_CMD="$CMD" build/deckhand > "$W/run$n.log" 2>&1 || true
+    DECKHAND_SCRIPT=tests/scripts/pi-chat-readonly-$n.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+    DECKHAND_CMD="$CMD" build/deckhand > "$W/run$n.log" 2>&1 || true
   rm -rf "$RUN"
   grep -E "ASSERT FAILED|done:|TIMEOUT|unknown command|no element" "$W/run$n.log" | sed "s/^/run $n: /" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|unknown command|no element" "$W/run$n.log" || ! grep -q 'quit' "$W/run$n.log"; then

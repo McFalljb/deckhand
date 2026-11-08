@@ -51,7 +51,7 @@ FOLDER_DOES := [Folder_Kind]string {
 }
 
 // User-only: the main folder ("" = not set). create: make it first (the
-// setup sheet's "Create ~/pi-desk").
+// setup sheet's "Create ~/Deckhand").
 Set_Home_Dir :: struct {
 	path:   string,
 	create: bool,
@@ -89,7 +89,7 @@ folder_reachable :: proc(k: Folder_Kind) -> bool {
 	return state.settings.home_dir != "" && os.is_dir(state.settings.home_dir)
 }
 
-// pi-kit's notes root (PI_KIT_NOTES_DIR as pi-desk passes it): the sessions
+// pi-kit's notes root (PI_KIT_NOTES_DIR as Deckhand passes it): the sessions
 // folder's parent, so pi-kit's sessions/ is ours ("" = none).
 notes_root :: proc() -> string {
 	s := folder_of(.Sessions)
@@ -97,14 +97,14 @@ notes_root :: proc() -> string {
 	return filepath.dir(s)
 }
 
-// The user's own PI_KIT_NOTES_DIR: pi-desk's environment, else the login shell's.
+// The user's own PI_KIT_NOTES_DIR: Deckhand's environment, else the login shell's.
 notes_env_user :: proc() -> string {
 	if v := os.get_env("PI_KIT_NOTES_DIR", context.temp_allocator); v != "" do return v
 	return folders_login_notes
 }
 
 // The entry a pi tab gets ("" = none: the user's own wins, it reaches the
-// tab through pi-desk's environment or the login shell).
+// tab through Deckhand's environment or the login shell).
 notes_env_pi :: proc() -> string {
 	if notes_env_user() != "" do return ""
 	if r := notes_root(); r != "" do return fmt.tprintf("PI_KIT_NOTES_DIR=%s", r)
@@ -132,10 +132,10 @@ pi_extra_env :: proc(env: []string) -> []string {
 setup_due :: proc() -> bool {return state.settings.home_dir == "" && !state.settings.setup_seen}
 
 // The Settings tab's row for a folder (not a file).
-folder_row_path :: proc(k: Folder_Kind) -> string {return fmt.tprintf("pi-desk:folder:%s", FOLDER_NAMES[k])}
-FOLDER_MAIN_ROW :: "pi-desk:folder:main"
-FOLDER_PREV_ROW :: "pi-desk:folder:previous"
-FOLDER_ENV_ROW :: "pi-desk:folder:env"
+folder_row_path :: proc(k: Folder_Kind) -> string {return fmt.tprintf("deckhand:folder:%s", FOLDER_NAMES[k])}
+FOLDER_MAIN_ROW :: "deckhand:folder:main"
+FOLDER_PREV_ROW :: "deckhand:folder:previous"
+FOLDER_ENV_ROW :: "deckhand:folder:env"
 
 // The folder kind of a Settings row path, or false.
 folder_row_kind :: proc(path: string) -> (Folder_Kind, bool) {
@@ -335,7 +335,7 @@ path_under :: proc(q, p: string) -> bool {
 // global AGENTS.md (only that file: never pi's CLAUDE.md or an override),
 // else Claude Code's global CLAUDE.md (its config folder's: CLAUDE_CONFIG_DIR
 // or ~/.claude; that folder, which has a sessions/ of its own, is never the
-// answer). Read in pi-desk only; the sheet shows only the path found.
+// answer). Read in Deckhand only; the sheet shows only the path found.
 setup_detect :: proc() -> (string, string) {
 	if p, why := detect_notes_folder(notes_env_user(), fmt.tprintf("%s/AGENTS.md", pi_agent_dir())); p != "" do return p, why
 	if cd := claude_config_dir(); cd != "" do return detect_notes_folder("", fmt.tprintf("%s/CLAUDE.md", cd))

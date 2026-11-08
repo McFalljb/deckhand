@@ -42,9 +42,9 @@ for n in 1 2 3; do
   else
     claude_stub "$FAKE_HOME"
   fi
-  PATH="$path" HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/claude-sessions-$n.txt \
-    PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" PI_DESK_CMD='exec sleep 600' \
-    PI_DESK_CLAUDE_CMD="$CLAUDE_CMD" FAKE_CLAUDE_LOG="$W/claude.log" \
+  PATH="$path" HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/claude-sessions-$n.txt \
+    DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" DECKHAND_CMD='exec sleep 600' \
+    DECKHAND_CLAUDE_CMD="$CLAUDE_CMD" FAKE_CLAUDE_LOG="$W/claude.log" \
     FAKE_CLAUDE_SESSION=5e551011-1111-4222-8333-444455556666 FAKE_CLAUDE_TURN_MS=200 \
     FAKE_CLAUDE_PROJECTS="$FAKE_HOME/.claude/projects" \
     "$ROOT/build/deckhand" > "$W/run$n.log" 2>&1 || true

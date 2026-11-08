@@ -22,7 +22,7 @@ APP=build/Deckhand.app
 C=$APP/Contents
 FW_NAME="Chromium Embedded Framework.framework"
 VERSION=$(sed -n 's/^CEF_VERSION=//p' vendor/cef/VERSION)
-# the bundle id stays pi-desk's (docs/DEVELOPING.md): macOS keeps notification settings by it.
+# the bundle id stays Deckhand's (docs/DEVELOPING.md): macOS keeps notification settings by it.
 # Privacy permissions (camera, microphone, location, folders) also depend on the code signature:
 # kept across rebuilds and updates when signed with the same certificate (scripts/sign.sh), asked
 # for again after each one when signed ad hoc.
@@ -114,9 +114,9 @@ done
 
 # Claude Code tabs (src/claude.odin): the CLI next to the binary (signed before the app: nested
 # code is signed inside out) and the plugin in Resources (sealed with the app's resources)
-if [ -f build/pi-desk-cli ] && [ -d build/claude-code ]; then
-  cp build/pi-desk-cli "$C/MacOS/pi-desk-cli"
-  sign_code "$C/MacOS/pi-desk-cli"
+if [ -f build/deckhand-cli ] && [ -d build/claude-code ]; then
+  cp build/deckhand-cli "$C/MacOS/deckhand-cli"
+  sign_code "$C/MacOS/deckhand-cli"
   rm -rf "$C/Resources/claude-code"
   cp -R build/claude-code "$C/Resources/claude-code"
 fi

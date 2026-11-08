@@ -14,19 +14,19 @@ package main
 //   MCP servers   the cwd's .mcp.json
 //   new folders   <config>/{agents,skills}/ and the cwd's .claude/{agents,skills}/ when they
 //                 appear (Claude Code watches only folders that existed at its start)
-//   the plugin    pi-desk's own plugin (--plugin-dir): its manifest, hooks, skill, bin
+//   the plugin    Deckhand's own plugin (--plugin-dir): its manifest, hooks, skill, bin
 //
 // There is no /reload for those: the bar offers Restart (claude_restart_changed), the same
 // conversation again with --resume <its session id> in the same tab, as the dead tab's
 // Restart does (dead_tab.odin). A tab restarts only when idle: its turn idle per the hooks and
 // per OSC 7501, nothing typed or held, no subagent running; busy ones wait; a tab that never
 // reported its session id (no --resume possible) is left alone. Restarting stops what Claude
-// runs in the background (background shells, monitors), which pi-desk sees only as of Claude's
+// runs in the background (background shells, monitors), which Deckhand sees only as of Claude's
 // last turn (claude_panels.odin): the user always confirms, and the confirmation names them. Only the user's own restart replays the tab's saved flags (CLAUDE.md §3).
 //
 // Claude Code's version: `claude` is found as the tab's command finds it (the children's
-// PATH, ~/.local/bin, ~/.claude/local; PI_DESK_CLAUDE_BIN in tests; none while
-// PI_DESK_CLAUDE_CMD replaces claude) and its version read from where it links to, by stat and
+// PATH, ~/.local/bin, ~/.claude/local; DECKHAND_CLAUDE_BIN in tests; none while
+// DECKHAND_CLAUDE_CMD replaces claude) and its version read from where it links to, by stat and
 // readlink only: never run (native install: .../versions/<v>; Homebrew: Caskroom/claude-code/<v>;
 // npm: the package's package.json). An unknown layout: the file's identity (inode, time,
 // size). Each Claude tab records it when first seen running (Tab.reload.version); another one
@@ -125,7 +125,7 @@ CLAUDE_CONFIG_FOLDERS :: [?]string{"agents", "skills", "commands", "output-style
 @(private = "file")
 under :: proc(p, dir: string) -> bool {return dir != "" && len(p) > len(dir) && strings.has_prefix(p, dir) && p[len(dir)] == '/'}
 
-// A Claude Code file pi-desk never lists, reads, watches or opens: its credentials
+// A Claude Code file Deckhand never lists, reads, watches or opens: its credentials
 // (.credentials.json), its account and MCP state (.claude.json and its backups, wherever they
 // are), and everything in a Claude config folder but the user's config (CONFIG_FILES and
 // CLAUDE_CONFIG_FOLDERS): transcripts (projects/), history, sessions, file history, caches,
@@ -160,7 +160,7 @@ claude_credential :: proc(p: string) -> bool {
 	return false
 }
 
-// The config folders pi-desk guards, whichever CLAUDE_CONFIG_DIR names now: ~/.claude and
+// The config folders Deckhand guards, whichever CLAUDE_CONFIG_DIR names now: ~/.claude and
 // CLAUDE_CONFIG_DIR (claude_config_dir; a relative one is not Claude's and is ignored).
 // Temp-allocated.
 claude_config_dirs :: proc() -> []string {
@@ -217,7 +217,7 @@ claude_credential_files :: proc() -> []string {
 }
 
 // Whether a running Claude session picks up a change of path by itself, needs a restart, or
-// pi-desk ignores it (see the top of the file).
+// Deckhand ignores it (see the top of the file).
 claude_file_class :: proc(path: string) -> Claude_File_Class {
 	if path == "" || !filepath.is_abs(path) do return .Ignored
 	p, _ := filepath.clean(path, context.temp_allocator)
@@ -247,7 +247,7 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 
 // ---- claude's version, by looking only ----
 
-// Tests: the binary to look at instead of searching (PI_DESK_CLAUDE_BIN).
+// Tests: the binary to look at instead of searching (DECKHAND_CLAUDE_BIN).
 // The `claude` a Claude tab would start ("" = none found, or tests replace claude): the
 // children's PATH, then ~/.local/bin and ~/.claude/local, as CLAUDE_TAB_CMD looks. Stat only.
 claude_binary_path :: proc() -> string {
@@ -503,7 +503,7 @@ claude_reload_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		if len(later) > 0 do what = fmt.tprintf("%s %d busy tab%s wait%s until idle.", what, len(later), len(later) == 1 ? "" : "s", len(later) == 1 ? "s" : "")
 		// what runs there now, as Claude's last turn reported it (claude_panels.odin)
 		for x in ([][dynamic]^Tab{now, later}) do for t in x do if bg := claude_background_names(t.id); bg != "" do what = fmt.tprintf("%s Running in %s: %s.", what, cut_utf8(one_line(t.title, context.temp_allocator), 40), bg)
-		// always asked, by the user: pi-desk sees Claude's background work only as of its last turn
+		// always asked, by the user: Deckhand sees Claude's background work only as of its last turn
 		gr, go_on, ch := confirm_gate(cmd, .Session_Restart, caller, c.confirm, what, force_ask = caller.kind != .Internal)
 		if !go_on do return gr, ch
 		flags := asker.kind == .UI // the saved flags are the user's to replay, on the user's restart (CLAUDE.md §3)
@@ -904,7 +904,7 @@ claude_reload_poll :: proc() {
 	}
 }
 
-// The plugin's files a running Claude read at start (pi-desk's own, --plugin-dir).
+// The plugin's files a running Claude read at start (Deckhand's own, --plugin-dir).
 @(private = "file")
 PLUGIN_FILES :: [?]string{".claude-plugin/plugin.json", "hooks/hooks.json", "skills/deckhand/SKILL.md", "bin/deckhand", "bin/pi-desk"}
 @(private = "file")

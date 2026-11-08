@@ -415,17 +415,17 @@ test("desk bridge: pi.attach becomes an attachment with pi's image content", () 
 });
 
 test("desk bridge: the attachment goes with the next message typed in pi, after its text and images", () => {
-	const a = { id: 3, text: "<pi-desk-comments>", images: [{ type: "image" as const, data: PNG, mimeType: "image/png" }] };
+	const a = { id: 3, text: "<deckhand-comments>", images: [{ type: "image" as const, data: PNG, mimeType: "image/png" }] };
 	const own = { type: "image" as const, data: "AAAA", mimeType: "image/jpeg" };
-	assert.deepEqual(attachInput({ text: "fix these", images: [own], source: "interactive" }, a), { text: "fix these\n\n<pi-desk-comments>", images: [own, a.images[0]] });
-	assert.deepEqual(attachInput({ text: "  ", source: "interactive" }, a), { text: "<pi-desk-comments>", images: a.images });
+	assert.deepEqual(attachInput({ text: "fix these", images: [own], source: "interactive" }, a), { text: "fix these\n\n<deckhand-comments>", images: [own, a.images[0]] });
+	assert.deepEqual(attachInput({ text: "  ", source: "interactive" }, a), { text: "<deckhand-comments>", images: a.images });
 	assert.equal(attachInput({ text: "x", source: "interactive" }, undefined), undefined, "nothing pending");
 	assert.equal(attachInput({ text: "x", source: "extension" }, a), undefined, "pi.prompt and other extensions' messages: not the user's next message");
 	assert.equal(attachInput({ text: "x", source: "rpc" }, a), undefined);
 });
 
 test("desk bridge: a slash command keeps its text; the attachment waits for the next message", () => {
-	const a = { id: 3, text: "<pi-desk-comments>", images: [] };
+	const a = { id: 3, text: "<deckhand-comments>", images: [] };
 	assert.equal(attachInput({ text: "/review the diff", source: "interactive" }, a), undefined, "a prompt template");
 	assert.equal(attachInput({ text: "/skill:foo go", source: "interactive" }, a), undefined, "a skill");
 	assert.ok(attachInput({ text: " /x", source: "interactive" }, a), "pi's own check: only a leading /");
@@ -433,16 +433,16 @@ test("desk bridge: a slash command keeps its text; the attachment waits for the 
 	t.set(a);
 	assert.equal(t.input({ text: "/review", source: "interactive" }), undefined);
 	assert.equal(t.held?.id, 3, "still pending");
-	assert.deepEqual(t.input({ text: "now this", source: "interactive" }), { text: "now this\n\n<pi-desk-comments>", images: [] });
+	assert.deepEqual(t.input({ text: "now this", source: "interactive" }), { text: "now this\n\n<deckhand-comments>", images: [] });
 });
 
 const userMsg = (content: unknown) => ({ role: "user", content });
 test("desk bridge: an idle prompt's pi.attached once its message starts", () => {
 	const t = new Attacher();
-	const a = { id: 5, text: "<pi-desk-comments>A5</pi-desk-comments>", images: [] };
+	const a = { id: 5, text: "<deckhand-comments>A5</deckhand-comments>", images: [] };
 	t.set(a);
 	const out = t.input({ text: "look", source: "interactive" });
-	assert.deepEqual(out, { text: "look\n\n<pi-desk-comments>A5</pi-desk-comments>", images: [] }, "no ack yet");
+	assert.deepEqual(out, { text: "look\n\n<deckhand-comments>A5</deckhand-comments>", images: [] }, "no ack yet");
 	assert.equal(t.held?.id, 5, "not acked at input: the message may never start");
 	assert.deepEqual(t.started({ role: "assistant", content: [{ type: "text", text: out!.text }] }), [], "not a user message");
 	assert.deepEqual(t.started(userMsg("something else")), [], "another message");
@@ -1482,7 +1482,7 @@ async function deskBrowserHarness(answer: (cmd: any) => any, env: Record<string,
 		},
 	};
 	const saved = { s: process.env.DECKHAND_SOCKET, t: process.env.DECKHAND_TOKEN, c: process.env.DECKHAND_CONTROL_TOKEN, r: process.env.PI_KIT_READONLY };
-	process.env.DECKHAND_SOCKET = "/nonexistent/pi-desk.sock";
+	process.env.DECKHAND_SOCKET = "/nonexistent/deckhand.sock";
 	process.env.DECKHAND_TOKEN = "bridge";
 	delete process.env.DECKHAND_CONTROL_TOKEN;
 	delete process.env.PI_KIT_READONLY;
@@ -1501,7 +1501,7 @@ async function deskBrowserHarness(answer: (cmd: any) => any, env: Record<string,
 test("desk-browser: a pi tab opens its project's declared app by name, in its own session, behind the user's view", async () => {
 	const state = { open_sessions: [{ id: 3, tabs: [{ id: 2, kind: "pi", title: "pi" }, { id: 13, kind: "app", title: "fake", status: "running", app_status: "running" }] }] };
 	const h = await deskBrowserHarness((cmd) => {
-		if (cmd.type === "new_app_tab") return cmd.name === "fake" ? { ok: true, created_id: 21 } : { ok: false, error: 'no app "nope" in the session\'s .pi-desk/apps.json (declared: "fake")' };
+		if (cmd.type === "new_app_tab") return cmd.name === "fake" ? { ok: true, created_id: 21 } : { ok: false, error: 'no app "nope" in the session\'s .deckhand/apps.json (declared: "fake")' };
 		if (cmd.type === "app_declared") return { ok: true, data: { session: 3, apps: [{ name: "fake", argv: ["build/fake-app"] }] } };
 		if (cmd.type === "get_state") return { ok: true, data: state };
 		if (cmd.type === "app_restart" || cmd.type === "app_close") return cmd.tab_id === 13 ? { ok: true } : { ok: false, error: "a pi or Claude tab reaches only its own session's app tabs" };

@@ -68,7 +68,7 @@ on refs. After an action that navigates, `wait TAB load` before reading.
 ## App tabs
 
 ```sh
-deckhand app list-declared                      # the apps your project declares (.pi-desk/apps.json)
+deckhand app list-declared                      # the apps your project declares (.deckhand/apps.json)
 deckhand app open sandbox                       # → tab id: opens a declared app by name, behind the user's view
 deckhand app restart 9                          # also: app close 9 [--comments send|drop]
 deckhand state                                  # your session: its tabs (kind app = app tabs), as data
@@ -80,7 +80,7 @@ deckhand app events 9 log [--since N]           # the app's recent events of a t
 ```
 
 You open only what the project declares, by name, in your own session (no argv; ask the user to
-add an entry to `.pi-desk/apps.json` if an app is missing). It opens behind the user's view; at
+add an entry to `.deckhand/apps.json` if an app is missing). It opens behind the user's view; at
 most 8 you opened run per session. Methods are the app's own: never
 guess them, use what `tab.describe` lists. Input events:
 `key` (down/up, sokol key names: a, space, enter, left), `char` (text), `mouse`

@@ -1,14 +1,14 @@
 #!/usr/bin/env python3
-"""A fake pi that dies, for tests/scripts/dead-tab.sh (pi-desk's dead-tab bar).
+"""A fake pi that dies, for tests/scripts/dead-tab.sh (Deckhand's dead-tab bar).
 
-It plays pi's terminal UI just enough and the pi integration's bridge over pi-desk's
+It plays pi's terminal UI just enough and the pi integration's bridge over Deckhand's
 socket (DECKHAND_SOCKET, DECKHAND_TOKEN): hello, pi.session, pi.status idle. It
 prints its arguments (--session, --model). Keys (the terminal is raw):
   Ctrl+L        "[model selector]" (pi's app.model.select)
   a line "limit"  a provider's rate-limit error, then exits with code 1
   a line "quit"   exits with code 0 (/quit)
   a line "hup"    kills itself with SIGHUP (as a mass hangup would)
-Never calls a model: nothing here talks to anything but pi-desk's socket.
+Never calls a model: nothing here talks to anything but Deckhand's socket.
 """
 import json, os, signal, socket, sys, termios, tty
 

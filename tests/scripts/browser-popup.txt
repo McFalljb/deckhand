@@ -2,7 +2,7 @@
 # click open a new browser tab in the opener's session, with window.opener kept; window.open
 # without a user gesture is refused (blocked_popup in State; step 3 adds its bar).
 wait 1500
-command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_open","url":"deckhand-test://web/nav-a.html"}
 web_title Nav A 10000
 web_waitpaint 10000
 assert_state open_sessions.0.tabs.# 2
@@ -11,7 +11,7 @@ web_click 60 100
 waitstate 5000 open_sessions.0.tabs.# 3
 assert_state open_sessions.0.tabs.2.kind browser
 web_title Nav B 10000
-waitstate 5000 open_sessions.0.tabs.2.url pidesk-test://web/nav-b.html?from=blank
+waitstate 5000 open_sessions.0.tabs.2.url deckhand-test://web/nav-b.html?from=blank
 waitstate 5000 open_sessions.0.tabs.2.title Nav B
 assert_state open_sessions.0.active_tab $tab
 shot browser-popup/blank
@@ -20,11 +20,11 @@ command {"type":"focus_tab","tab_id":$last}
 web_title Nav A 5000
 web_click 60 160
 waitstate 5000 open_sessions.0.tabs.# 4
-waitstate 5000 open_sessions.0.tabs.3.url pidesk-test://web/nav-b.html?from=open
+waitstate 5000 open_sessions.0.tabs.3.url deckhand-test://web/nav-b.html?from=open
 web_title Nav B opener 10000
 waitstate 5000 open_sessions.0.tabs.3.title Nav B opener
 # window.open with no user gesture: refused (Chromium's own blocker; one that reaches
-# OnBeforePopup without a gesture is refused by pi-desk and shows as blocked_popup)
+# OnBeforePopup without a gesture is refused by Deckhand and shows as blocked_popup)
 command {"type":"focus_tab","tab_id":$last}
 web_title Nav A 5000
 web_js window.open('nav-b.html?from=script')
@@ -33,13 +33,13 @@ assert_state open_sessions.0.tabs.# 4
 # another session on screen: a popup goes to its opener's session, never the first one
 command {"type":"new_chat","project_id":$project}
 waitstate 5000 open_sessions.# 2
-command {"type":"browser_open","url":"pidesk-test://web/nav-a.html"}
+command {"type":"browser_open","url":"deckhand-test://web/nav-a.html"}
 web_title Nav A 10000
 web_waitpaint 10000
 assert_state open_sessions.1.tabs.# 2
 web_click 60 100
 waitstate 5000 open_sessions.1.tabs.# 3
-waitstate 5000 open_sessions.1.tabs.2.url pidesk-test://web/nav-b.html?from=blank
+waitstate 5000 open_sessions.1.tabs.2.url deckhand-test://web/nav-b.html?from=blank
 assert_state open_sessions.0.tabs.# 4
 # closing a popup's tab while it loads is fine; every tab closes cleanly
 command {"type":"close_tab","tab_id":$tab}

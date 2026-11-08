@@ -23,7 +23,7 @@ editor_perf_50k :: proc(t: ^testing.T) {
 	syntax_budget = 3 * time.Second
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
-	path := fmt.tprintf("%s/pi-desk-perf-%d.c", strings.trim_right(tmp, "/"), time.now()._nsec)
+	path := fmt.tprintf("%s/deckhand-perf-%d.c", strings.trim_right(tmp, "/"), time.now()._nsec)
 	b := strings.builder_make(context.temp_allocator)
 	for i in 0 ..< 50_000 do fmt.sbprintf(&b, "int f%d(int x) {{ return x; }} // %d\n", i, i)
 	_ = os.write_entire_file(path, transmute([]u8)strings.to_string(b))

@@ -88,12 +88,12 @@ markdown_gfm_spec :: proc(t: ^testing.T) {
 	testing.expectf(t, pass == total, "%d of %d GFM examples pass", pass, total)
 }
 
-// The whole spec (not vendored): PI_DESK_MD_SPEC=path/to/examples.txt
+// The whole spec (not vendored): DECKHAND_MD_SPEC=path/to/examples.txt
 // (tests/markdown/README.md says how to make it) prints a pass count per
 // section and the failing examples' numbers. Never fails.
 @(test)
 markdown_spec_report :: proc(t: ^testing.T) {
-	path := os.get_env("PI_DESK_MD_SPEC", context.temp_allocator)
+	path := os.get_env("DECKHAND_MD_SPEC", context.temp_allocator)
 	if path == "" do return
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil {

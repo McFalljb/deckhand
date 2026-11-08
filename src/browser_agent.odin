@@ -11,16 +11,16 @@ package main
 // read any site without asking (user decision, BROWSER.md §8 decision 4); file: stays the user's
 // (browser_open, browser_navigate).
 //
-// How: in process, through the tab's DevTools session (pd_cef_devtools_send; results come back
+// How: in process, through the tab's DevTools session (dh_cef_devtools_send; results come back
 // through browser_annotate.odin's observer callback, which hands ours over first: ids from
 // AGENT_MSG_BASE up). Reads run src/native/browser_read.js in the overlay's isolated world
-// ("pi-desk", the context of its latest hello): the page's scripts cannot see or change it, and
+// ("deckhand", the context of its latest hello): the page's scripts cannot see or change it, and
 // form values are never read ("[value hidden]", as comment mode). Long commands (read, wait,
 // screenshot) are ops ticked every frame (browser_agent_tick), finished with a Finished_Event;
 // a read's data is private (only its requester gets the page's text; the log sees its size).
 //
 // Console and network: the Runtime, Log and Network domains are a bot check's tell (and route
-// every console message through pi-desk), so they are off by default. The first browser_console
+// every console message through Deckhand), so they are off by default. The first browser_console
 // (Runtime + Log) or browser_network (Network) on a tab turns that recording on, for
 // AGENT_CAPTURE_FOR after the last such call; it ends sooner when the top document goes to
 // another origin or the user presses Stop (a page that reopens meanwhile records again). While
@@ -798,7 +798,7 @@ cdp_send :: proc(t: ^Agent_Tab, cef: c.int, method, params: string) -> c.int {
 	if next_msg < AGENT_MSG_BASE do next_msg = AGENT_MSG_BASE + 1 // wrapped
 	id := next_msg
 	msg := fmt.tprintf(`{{"id":%d,"method":"%s","params":%s}}`, id, method, params)
-	if pd_cef_devtools_send(cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
+	if dh_cef_devtools_send(cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
 	if autotest.active && t != nil {
 		if _, has := t.sent[method]; !has do t.sent[strings.clone(method)] = 0
 		t.sent[method] += 1
@@ -1251,7 +1251,7 @@ shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (do
 			op.woke = true
 			op.shot_seq = b.ring.shown_seq
 			t.wake = true
-			pd_cef_invalidate(b.cef)
+			dh_cef_invalidate(b.cef)
 			app.redraw = true
 		}
 		ready = ready && b.ring.shown_seq > op.shot_seq
@@ -1263,7 +1263,7 @@ shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (do
 		if !op.woke && !late {
 			op.woke = true
 			op.shot_seq = b.ring.shown_seq
-			pd_cef_invalidate(b.cef)
+			dh_cef_invalidate(b.cef)
 			app.redraw = true
 		}
 		if !late do ready = ready && b.ring.shown_seq > op.shot_seq

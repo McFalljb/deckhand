@@ -33,14 +33,14 @@ reset :: proc() -> runtime.Allocator {
 	quits = 0
 	platform = {quit = proc() {quits += 1}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
-	os.set_env("PI_DESK_CMD", "sleep 30")
+	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
 }
 
 // A fake pi store under a temp HOME: one project per cwd, given session ids.
 @(private = "file")
 fake_home :: proc(cwds: []string, ids: []string) -> string {
-	home := fmt.aprintf("%s/pi-desk-test-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	home := fmt.aprintf("%s/deckhand-test-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	for cwd, i in cwds {
 		dir, _ := filepath.join({home, ".pi", "agent", "sessions", fmt.tprintf("--p%d--", i)}, context.temp_allocator)
 		os.make_directory_all(dir)
@@ -314,7 +314,7 @@ panel_commands :: proc(t: ^testing.T) {
 	run_command(Set_Panel_Collapsed{panel = "todos", collapsed = false}, script)
 	testing.expect_value(t, json_path(state_json(), "layout.collapsed.#"), "0")
 
-	// the last bridge connection gone (pi-desk sets unknown): panels cleared
+	// the last bridge connection gone (Deckhand sets unknown): panels cleared
 	run_command(set(tab2, "todos", {text = "x"}), Caller{kind = .Panel, tab_id = tab2})
 	run_command(Pi_Status_Update{tab_id = tab1, agent = .Unknown})
 	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "0")
@@ -377,7 +377,7 @@ new_chat_and_reopen_dedupe :: proc(t: ^testing.T) {
 	r := run_command(New_Chat{project_id = pid}, script)
 	testing.expect(t, r.ok, r.error)
 	s := find_session(r.created_id)
-	testing.expect(t, s != nil && len(s.pi_session_id) == 36, "pi-desk picked a UUID")
+	testing.expect(t, s != nil && len(s.pi_session_id) == 36, "Deckhand picked a UUID")
 	testing.expect_value(t, s.tabs[0].status, Tab_Status.Running)
 
 	// opening a listed session twice focuses the first one
@@ -512,7 +512,7 @@ close_rules :: proc(t: ^testing.T) {
 @(test)
 command_log_rotates :: proc(t: ^testing.T) {
 	context.allocator = reset()
-	dir := fmt.tprintf("%s/pi-desk-log-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	dir := fmt.tprintf("%s/deckhand-log-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	event_log_open(dir)
 	defer event_log_close()
 	log_cap = 1000
@@ -668,9 +668,9 @@ appearance_resolution :: proc(t: ^testing.T) {
 appearance_reports_to_apps :: proc(t: ^testing.T) {
 	context.allocator = reset()
 	app_context = context // libghostty-vt's replies (on_write_pty) run in it
-	out := fmt.tprintf("%s/pi-desk-2031-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
+	out := fmt.tprintf("%s/deckhand-2031-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	defer os.remove(out)
-	os.set_env("PI_DESK_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
+	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	run_command(Add_Project{cwd = "/tmp"}, script)
 	sess := run_command(New_Chat{project_id = state.selected_project}, script).created_id
 	term := term_of(find_session(sess).tabs[0].id)

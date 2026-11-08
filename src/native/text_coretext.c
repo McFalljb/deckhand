@@ -1,4 +1,4 @@
-// CoreText + CoreGraphics text backend for pi-desk (macOS). Called from
+// CoreText + CoreGraphics text backend for Deckhand (macOS). Called from
 // src/text_coretext.odin; the platform-neutral atlas, caches and drawing are
 // in src/font.odin.
 //
@@ -23,7 +23,7 @@ typedef struct {
 	float underline_pos;            // px below the baseline (positive = down)
 	float underline_thickness;
 	int color;                      // colour glyphs (emoji)
-} pd_metrics;
+} dh_metrics;
 
 typedef struct {
 	int32_t face;
@@ -31,7 +31,7 @@ typedef struct {
 	float x, y;    // pen position of this glyph from the run origin (y down)
 	float advance;
 	int32_t cluster; // byte offset into the UTF-8 input
-} pd_glyph;
+} dh_glyph;
 
 typedef struct {
 	CTFontRef font;
@@ -69,7 +69,7 @@ static int family_is(CTFontRef f, CFStringRef want) {
 // semibold (alone). Missing bold is synthesised (stroke); missing italic is
 // synthesised with a skew. Returns the face index, or -1 if the family is not
 // installed or (semibold) has no semibold weight.
-int pd_face_open(const char *family, int len, double px, int traits) {
+int dh_face_open(const char *family, int len, double px, int traits) {
 	CTFontRef base = NULL;
 	if (len == 0) {
 		base = CTFontCreateUIFontForLanguage(kCTFontUIFontSystem, px, NULL);
@@ -166,7 +166,7 @@ int pd_face_open(const char *family, int len, double px, int traits) {
 	return id;
 }
 
-void pd_face_metrics(int face, pd_metrics *m) {
+void dh_face_metrics(int face, dh_metrics *m) {
 	CTFontRef f = faces[face].font;
 	m->ascent = CTFontGetAscent(f);
 	m->descent = CTFontGetDescent(f);
@@ -183,13 +183,13 @@ void pd_face_metrics(int face, pd_metrics *m) {
 	m->advance = adv.width;
 }
 
-int pd_face_is_color(int face) { return faces[face].color; }
+int dh_face_is_color(int face) { return faces[face].color; }
 
 // Shapes UTF-8 text with `face` (CoreText applies the system fallback
 // cascade, kerning, and emoji sequences). ligatures: 0 off, 1 standard.
 // Writes up to cap glyphs; returns the glyph count (may exceed cap: then
 // only cap were written) and the total advance in *width.
-int pd_shape(int face, const char *text, int len, int ligatures, pd_glyph *out, int cap, float *width) {
+int dh_shape(int face, const char *text, int len, int ligatures, dh_glyph *out, int cap, float *width) {
 	*width = 0;
 	if (len <= 0) return 0;
 	CFStringRef s = CFStringCreateWithBytes(NULL, (const UInt8 *)text, len, kCFStringEncodingUTF8, false);
@@ -263,7 +263,7 @@ static float stroke_width(CTFontRef f) { return (float)fmax(0.5, CTFontGetSize(f
 // Pixel box of a glyph drawn at `scale` with its origin shifted right by
 // subx (0..1): x0 from the pen position, y0 from the baseline (down is
 // positive, so y0 is usually negative). Padded by one pixel for AA.
-void pd_glyph_box(int face, uint32_t glyph, float scale, float subx, int *x0, int *y0, int *w, int *h) {
+void dh_glyph_box(int face, uint32_t glyph, float scale, float subx, int *x0, int *y0, int *w, int *h) {
 	CTFontRef f = faces[face].font;
 	CGGlyph g = (CGGlyph)glyph;
 	CGRect r = CTFontGetBoundingRectsForGlyphs(f, kCTFontOrientationHorizontal, &g, NULL, 1);
@@ -283,11 +283,11 @@ void pd_glyph_box(int face, uint32_t glyph, float scale, float subx, int *x0, in
 }
 
 // Rasterises a glyph into dst (RGBA8, w x h, stride bytes per row, rows
-// top-down), using the box from pd_glyph_box. Monochrome glyphs come out as
+// top-down), using the box from dh_glyph_box. Monochrome glyphs come out as
 // white with coverage in alpha; colour glyphs as straight (not
 // premultiplied) RGBA. thicken: CoreText font smoothing (heavier strokes,
 // like Terminal.app). Returns 1 for a colour glyph.
-int pd_glyph_render(int face, uint32_t glyph, float scale, float subx, int x0, int y0, int w, int h, uint8_t *dst, int stride, int thicken) {
+int dh_glyph_render(int face, uint32_t glyph, float scale, float subx, int x0, int y0, int w, int h, uint8_t *dst, int stride, int thicken) {
 	if (w <= 0 || h <= 0) return 0;
 	face_t *fc = &faces[face];
 	int color = fc->color;

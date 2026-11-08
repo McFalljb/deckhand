@@ -32,8 +32,8 @@ jobs_owner_rules :: proc(t: ^testing.T) {
 	os.set_env("HOME", HOME_T)
 	defer os.set_env("HOME", old_home)
 	ps := OWNER_FIXTURE[:]
-	atlas := "/Users/tester/pi-desk/atlas"
-	chats := "/Users/tester/pi-desk/chats"
+	atlas := "/Users/tester/deckhand/atlas"
+	chats := "/Users/tester/deckhand/chats"
 	r :: proc(fp, folder: string, ps: []Owner_Project, atlas, chats: string) -> Job_Owner {return job_owner_resolve(fp, folder, ps, atlas, chats)}
 	// folder inference: the deepest listed project, whole components
 	o := r("", "/Users/tester/code/api/web/src", ps, atlas, chats)
@@ -49,8 +49,8 @@ jobs_owner_rules :: proc(t: ^testing.T) {
 	testing.expect_value(t, r("", "/tmp/x", ps, atlas, chats).kind, Job_Owner_Kind.Other)
 	// Atlas's and the chats folder
 	testing.expect_value(t, r("", atlas, ps, atlas, chats).kind, Job_Owner_Kind.Atlas)
-	testing.expect_value(t, r("", "/Users/tester/pi-desk/chats/sub", ps, atlas, chats).kind, Job_Owner_Kind.Chats)
-	testing.expect_value(t, r("", "/Users/tester/pi-desk/atlasx", ps, atlas, chats).kind, Job_Owner_Kind.Other)
+	testing.expect_value(t, r("", "/Users/tester/deckhand/chats/sub", ps, atlas, chats).kind, Job_Owner_Kind.Chats)
+	testing.expect_value(t, r("", "/Users/tester/deckhand/atlasx", ps, atlas, chats).kind, Job_Owner_Kind.Other)
 	testing.expect_value(t, r("", atlas, ps, "", chats).kind, Job_Owner_Kind.Other) // no main folder
 	// for_project wins over the folder
 	testing.expect_value(t, r("atlas", "/Users/tester/code/api", ps, atlas, chats).kind, Job_Owner_Kind.Atlas)
@@ -205,7 +205,7 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 		testing.expect_value(t, fi.mode & os.Permissions_All, os.Permissions{.Read_User, .Write_User, .Read_Group, .Read_Other})
 	} else do testing.fail_now(t, "stat")
 	if ents, derr := os.read_all_directory_by_path(folder_of(.Jobs), context.temp_allocator); derr == nil {
-		for e in ents do testing.expect(t, !strings.contains(e.name, ".pi-desk-") && !strings.contains(e.name, ".tmp-"), e.name) // no temp file left
+		for e in ents do testing.expect(t, !strings.contains(e.name, ".deckhand-") && !strings.contains(e.name, ".tmp-"), e.name) // no temp file left
 	}
 	data, _ = os.read_entire_file(path, context.temp_allocator)
 	s := string(data)

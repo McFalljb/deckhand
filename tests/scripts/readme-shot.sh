@@ -9,7 +9,7 @@
 # Usage: tests/scripts/readme-shot.sh
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
-export PI_DESK_SCALE=${PI_DESK_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
+export DECKHAND_SCALE=${DECKHAND_SCALE:-2} # rendered at 2x as on a Retina Mac; `shot` (screencapture) still records at the real display's scale
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
@@ -65,9 +65,9 @@ MD
 (cd "$P/recipe-box" && git init -q && git add . \
   && git -c user.name=demo -c user.email=demo@example.invalid -c commit.gpgsign=false commit -qm init)
 
-HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/zsh PI_DESK_SCRIPT=tests/scripts/readme-shot.txt \
-  PI_DESK_DATA_DIR="$W/data" PI_DESK_BIN="$ROOT/build/deckhand" \
-  PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/demo-pi.py' \"\$@\"" \
+HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/zsh DECKHAND_SCRIPT=tests/scripts/readme-shot.txt \
+  DECKHAND_DATA_DIR="$W/data" DECKHAND_BIN="$ROOT/build/deckhand" \
+  DECKHAND_CMD="exec python3 -I '$ROOT/tests/scripts/demo-pi.py' \"\$@\"" \
   build/deckhand "$P/recipe-box" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then

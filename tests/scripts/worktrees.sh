@@ -57,8 +57,8 @@ fi
 exec sleep 600
 PI
 run() { # script log
-  HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
-    PI_DESK_CMD="exec sh '$W/fake-pi.sh' \"\$@\"" build/deckhand > "$2" 2>&1 || true
+  HOME="$FAKE_HOME" GIT_CONFIG_NOSYSTEM=1 SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_DATA_DIR="$W/data" \
+    DECKHAND_CMD="exec sh '$W/fake-pi.sh' \"\$@\"" build/deckhand > "$2" 2>&1 || true
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|CPU" "$2" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element" "$2" || ! grep -q "done:" "$2"; then
     echo "worktrees scene failed (log: $2)"; exit 1

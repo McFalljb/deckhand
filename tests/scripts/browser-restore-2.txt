@@ -6,11 +6,11 @@ assert_state open_sessions.# 2
 assert_state open_sessions.0.pi_session_id rrrr-1
 assert_state open_sessions.0.tabs.# 2
 assert_state open_sessions.0.tabs.1.kind browser
-assert_state open_sessions.0.tabs.1.url pidesk-test://web/nav-b.html
+assert_state open_sessions.0.tabs.1.url deckhand-test://web/nav-b.html
 assert_state open_sessions.0.tabs.1.title Nav B
 assert_state open_sessions.1.pi_session_id rrrr-2
 assert_state open_sessions.1.tabs.# 2
-assert_state open_sessions.1.tabs.1.url pidesk-test://web/nav-a.html
+assert_state open_sessions.1.tabs.1.url deckhand-test://web/nav-a.html
 # the second session was on screen at quit: its page loads; the first waits
 waitstate 10000 open_sessions.1.tabs.1.status running
 web_title Nav A 10000

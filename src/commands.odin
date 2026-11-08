@@ -364,7 +364,7 @@ Restore_Tab :: struct {
 	active: bool, // the session's active tab (none: the pi tab)
 	claude_id: string, // Claude tabs: the Claude session to resume ("" = a new one)
 	args:  []string, // Claude tabs: the user's extra flags
-	readonly: bool, // Claude tabs: started with pi-desk's read-only profile (kept: claude.odin)
+	readonly: bool, // Claude tabs: started with Deckhand's read-only profile (kept: claude.odin)
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
@@ -390,7 +390,7 @@ Restore_Session :: struct {
 	session_dir:   string, // "" = pi's default store
 	cwd:           string, // where pi runs: a checkout of the project's repository ("" = the project's folder)
 	tabs:          []Restore_Tab, // the tabs after the pi tab (agent claude: all of them, the main Claude tab first)
-	home:          bool, // the Home session (no project, no other tabs; session dir and cwd are pi-desk's)
+	home:          bool, // the Home session (no project, no other tabs; session dir and cwd are Deckhand's)
 	agent:         Session_Agent, // claude: a Claude-only session; pi_session_id is its Claude session id
 	layout:        Restore_Layout, // its panes ({}: one pane)
 	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
@@ -1381,7 +1381,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// multi-use (each `deckhand --ctl` says hello with it anew), so the clipboard is the risk:
 		// marked concealed and transient, and cleared after CONTROL_TOKEN_CLIP_TTL if still there
 		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
-		exports := fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok)
+		exports := fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", socket_path(), tok)
 		if platform.set_clipboard_secret != nil {
 			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
 		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
@@ -1477,7 +1477,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Pi_Status_Update:
 		ps, tab := pi_tab(c.tab_id)
 		if tab == nil do return fail("no such pi tab"), false
-		// unknown: only pi-desk itself, when the tab's last bridge connection is gone
+		// unknown: only Deckhand itself, when the tab's last bridge connection is gone
 		if c.agent == .Unknown && caller.kind != .Internal do return fail("agent must be idle, working or error"), false
 		// a turn ended: a new chat's file exists now, list it
 		if c.agent == .Idle && tab.agent != .Idle do refresh_listing(ps)
@@ -2092,7 +2092,7 @@ refresh_listing :: proc(s: ^Open_Session) {
 
 // caller: who brings it up. An agent's (control) never starts restored Claude tabs: they would
 // run with the user's saved flags (docs/CLAUDE.md §3, §4); they stay not started until the user
-// (or pi-desk itself, or a test script) shows the session.
+// (or Deckhand itself, or a test script) shows the session.
 focus_session :: proc(id: u64, caller: Caller) {
 	// a session made current is laid out again; until then its panes' rects come from its tree
 	// inside the window's last centre (tab_rect, panes.odin)
@@ -2229,12 +2229,12 @@ find_session_file :: proc(p: Project, pi_session_id: string, session_dir := "") 
 	return strings.clone(session_file_among(files, pi_session_id), context.temp_allocator)
 }
 
-// path = "" starts a new chat with `pi --session-id <id>`, so pi-desk knows
+// path = "" starts a new chat with `pi --session-id <id>`, so Deckhand knows
 // which file it will be; otherwise resumes the file.
 open_new_session :: proc(p: Project, pi_session_id: string, path: string, cwd := "", session_dir := "") -> (Result, bool) {
 	if chat_readonly(p.id) && pi_readonly_too_old() do return fail(PI_READONLY_CHAT_TOO_OLD), false
 	tab := Tab{id = new_id(), kind = Pi_Tab{readonly = chat_readonly(p.id)}, title = "pi"}
-	// the bridge in this pi finds pi-desk with these (token = this tab, panel)
+	// the bridge in this pi finds Deckhand with these (token = this tab, panel)
 	env := chat_env(p.id, socket_pi_env({kind = .Panel, tab_id = tab.id}))
 	// session_dir "": pi's own store, also for chats (`cd ~/Chats && pi --resume`)
 	at := cwd != "" ? cwd : p.cwd // cwd: a worktree of the project
@@ -2376,7 +2376,7 @@ login_shell :: proc() -> string {
 
 // Login shells that do not take POSIX sh syntax (`fish -l -c 'for d in …; do'` fails), by name
 // (a version suffix allowed: fish-3.7). Any other shell (zsh, bash, sh, dash, ksh…, and one
-// pi-desk does not know) runs pi-desk's sh scripts itself, as it always has.
+// Deckhand does not know) runs Deckhand's sh scripts itself, as it always has.
 NON_POSIX_SHELLS :: [?]string{"fish", "nu", "nushell", "xonsh", "elvish", "tcsh", "csh", "pwsh", "pwsh-preview", "powershell", "ysh", "ion", "murex", "rc", "es"}
 
 shell_is_posix :: proc(shell: string) -> bool {
@@ -2385,10 +2385,10 @@ shell_is_posix :: proc(shell: string) -> bool {
 	return true
 }
 
-// argv that runs pi-desk's own sh script (PI_TAB_CMD, CLAUDE_TAB_CMD, a stand-in) with $0 = name;
+// argv that runs Deckhand's own sh script (PI_TAB_CMD, CLAUDE_TAB_CMD, a stand-in) with $0 = name;
 // the caller appends the script's arguments ("$@"). A POSIX login shell runs it itself (`-l -c`:
 // the login profile's PATH, as in a terminal); any other (fish, nushell, xonsh) would refuse sh
-// syntax, so /bin/sh runs it, in the environment pi-desk took from the login shell at startup or
+// syntax, so /bin/sh runs it, in the environment Deckhand took from the login shell at startup or
 // at Refresh shell environment (login_env.odin), or the terminal's it was started from. Temp.
 shell_script_argv :: proc(shell, script, name: string) -> [dynamic]string {
 	argv := make([dynamic]string, context.temp_allocator)
@@ -2404,24 +2404,24 @@ shell_script_argv :: proc(shell, script, name: string) -> [dynamic]string {
 // found and that PATH lacks it. Neither: what to do, exit 127 (dead_tab.odin).
 PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/"*) _pa=$HOME/${_pa#"~/"};; esac; command -v pi >/dev/null 2>&1 || for d in "${_pa:+$_pa/bin}" "$HOME/.pi/agent/bin"; do case "$d" in /*) ;; *) continue;; esac; if [ -f "$d/pi" ] && [ -x "$d/pi" ]; then printf '%s\n' "Deckhand: pi is installed at $d/pi but is not on your login shell's PATH; starting it from there. Add $d to PATH in your shell's login profile (~/.zprofile for zsh) so other tools find it too."; PATH="$d:$PATH"; export PATH; break; fi; done; command -v pi >/dev/null 2>&1 || { printf '%s\n' "pi was not found: it is not on your login shell's PATH:" "  $PATH" "nor in ~/.pi/agent/bin (pi's managed install)." "Install pi, or add its folder to PATH in your shell's login profile (~/.zprofile for zsh, ~/.bash_profile for bash), then open this tab again."; exit 127; }; exec pi "$@"`
 
-// Test mode (PI_DESK_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
-// pi or claude (docs/DEVELOPING.md "Test mode"). pi-desk's own log says so too (test_mode_refused).
+// Test mode (DECKHAND_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
+// pi or claude (docs/DEVELOPING.md "Test mode"). Deckhand's own log says so too (test_mode_refused).
 // (Test builds only: a release build has no test mode, test_hooks.odin.)
 when TEST_HOOKS {
-	TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CMD; refusing to run the real pi (PI_DESK_REAL_PI=1 allows it)"; exit 127`
-	TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CLAUDE_CMD; refusing to run the real claude"; exit 127`
+	TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no DECKHAND_CMD; refusing to run the real pi (DECKHAND_REAL_PI=1 allows it)"; exit 127`
+	TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no DECKHAND_CLAUDE_CMD; refusing to run the real claude"; exit 127`
 }
 
-// pi-desk runs a test script (autotest.odin): scenes, never the user's own session.
+// Deckhand runs a test script (autotest.odin): scenes, never the user's own session.
 test_mode :: proc() -> bool {return hook_env(.Script) != ""}
 
-// Said on pi-desk's stderr (the scene's log) whenever test mode refuses a real binary.
+// Said on Deckhand's stderr (the scene's log) whenever test mode refuses a real binary.
 test_mode_refused :: proc(what: string) {
 	fmt.eprintf("Deckhand: test mode: refusing to run the real %s (no stand-in command set)\n", what)
 }
 
-// What a pi tab runs: PI_DESK_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
-// real pi only with PI_DESK_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
+// What a pi tab runs: DECKHAND_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
+// real pi only with DECKHAND_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
 pi_tab_cmd :: proc() -> string {
 	if c := hook_env(.Cmd); c != "" do return c
 	when TEST_HOOKS {
@@ -2437,7 +2437,7 @@ pi_tab_cmd :: proc() -> string {
 start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: string, env: []string, extra: []string = nil, fork := "") -> bool {
 	argv: [dynamic]string
 	// A login shell finds pi on the user's PATH (from Finder or the Dock, PATH
-	// is the interactive shell's: login_env.odin). PI_DESK_CMD replaces pi (benchmarks: e.g.
+	// is the interactive shell's: login_env.odin). DECKHAND_CMD replaces pi (benchmarks: e.g.
 	// "cat big.log"); it sees the pi arguments as "$@". Test mode fails closed (pi_tab_cmd).
 	argv = shell_script_argv(login_shell(), pi_tab_cmd(), "pi") // fish and co.: /bin/sh
 	append(&argv, ..pi_integration_args()) // first: Deckhand's pi integration, `-e` per extension (pi_integration.odin)

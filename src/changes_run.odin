@@ -144,7 +144,7 @@ run_group :: proc(argv: []string, timeout: time.Duration, input := "", cap := 64
 	return strings.to_string(b), status
 }
 
-// git with pi-desk's read flags (GIT_FLAGS: no hooks, no fsmonitor, no
+// git with Deckhand's read flags (GIT_FLAGS: no hooks, no fsmonitor, no
 // optional locks) in dir, through run_group.
 git_group :: proc(dir: string, timeout: time.Duration, cap: int, args: ..string) -> (out: string, status: Run_Status) {
 	cmd := make([dynamic]string, context.temp_allocator)

@@ -1,10 +1,10 @@
-package pi_desk_cli
+package deckhand_cli
 
 // What Claude reads back, ported from pi-kit's desk-browser (extensions/desk-browser/browser.ts)
 // and desk app tools (extensions/desk/app.ts). Pages and apps are attacker-controlled: everything
 // a page or an app wrote (text, titles, addresses, console and network lines, comment labels, the
-// names of the elements an action hit, app replies) and pi-desk's own error text goes out only
-// inside `content`, fenced after WEB_NOTE or DATA_NOTE. Only known codes, pi-desk's numbers and
+// names of the elements an action hit, app replies) and Deckhand's own error text goes out only
+// inside `content`, fenced after WEB_NOTE or DATA_NOTE. Only known codes, Deckhand's numbers and
 // flags, and our own words are structured fields. Typed text is never echoed.
 
 import "core:encoding/json"
@@ -64,7 +64,7 @@ px :: proc(o: json.Object, kx, ky: string) -> string {
 
 // ---- codes and hints ----
 
-// A code pi-desk gave (lower case, digits, _; at most 40), else "".
+// A code Deckhand gave (lower case, digits, _; at most 40), else "".
 result_code :: proc(result: json.Object) -> string {
 	c, ok := get_str(get_obj(result, "data"), "code")
 	if !ok || len(c) == 0 || len(c) > 40 do return ""
@@ -131,7 +131,7 @@ app_hint :: proc(code: string) -> string {
 
 // ---- outputs (each returns one JSON object) ----
 
-// A failed command: what failed and the code's hint outside the fence, pi-desk's words inside.
+// A failed command: what failed and the code's hint outside the fence, Deckhand's words inside.
 error_out :: proc(req: ^Req, result: json.Object) -> string {
 	code := result_code(result)
 	hint: string
@@ -217,7 +217,7 @@ tabs_out :: proc(req: ^Req, d: json.Object) -> string {
 	return jw_end(&w)
 }
 
-// A word pi-desk itself produces (open, loading…): letters and _ only.
+// A word Deckhand itself produces (open, loading…): letters and _ only.
 safe_word :: proc(s: string) -> bool {
 	if len(s) == 0 || len(s) > 20 do return false
 	for c in transmute([]u8)s do if !(c >= 'a' && c <= 'z') && c != '_' do return false
@@ -367,7 +367,7 @@ hit_line :: proc(h: json.Object) -> string {
 	return cap_text(fmt.aprintf("%s %s%s <%s>", get_text(h, "role"), quoted(get_text(h, "name")), ref != "" ? fmt.aprintf(" [ref=%s]", ref) : "", get_text(h, "tag")), LINE_MAX)
 }
 
-// An action's result: what happened (from our command and pi-desk's numbers and flags) outside the
+// An action's result: what happened (from our command and Deckhand's numbers and flags) outside the
 // fence; the element it hit, the option, the file names and the address inside. Never the typed text.
 act_out :: proc(req: ^Req, d: json.Object) -> string {
 	tab := req.tab
@@ -481,14 +481,14 @@ app_tab_op_out :: proc(req: ^Req) -> string {
 	return jw_end(&w)
 }
 
-// The project's .pi-desk/apps.json entries: names (to open), with their command lines fenced
+// The project's .deckhand/apps.json entries: names (to open), with their command lines fenced
 // (the project's file: data, never instructions).
 app_declared_out :: proc(req: ^Req, d: json.Object) -> string {
 	apps := get_arr(d, "apps")
 	w := ok_begin(req)
 	jw_int(&w, "count", i64(len(apps)))
 	if len(apps) == 0 {
-		jw_str(&w, "message", "Your project declares no apps (.pi-desk/apps.json, {\"apps\":[{\"name\",\"argv\",\"cwd\"?}]}).")
+		jw_str(&w, "message", "Your project declares no apps (.deckhand/apps.json, {\"apps\":[{\"name\",\"argv\",\"cwd\"?}]}).")
 		return jw_end(&w)
 	}
 	lines := make([dynamic]string)

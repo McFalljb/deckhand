@@ -520,7 +520,7 @@ palette_row :: proc(it: Palette_Item, i: int, width: f32) {
 @(private = "file")
 centre :: proc(cs: ^Open_Session) {
 	if clay.UI(clay.ID("centre"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-		update_bar() // a pi-desk update: available, downloading, ready (ui_update.odin)
+		update_bar() // a Deckhand update: available, downloading, ready (ui_update.odin)
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)

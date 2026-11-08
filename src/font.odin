@@ -32,7 +32,7 @@ import clay "../build/clay-odin"
 
 Face_Id :: distinct i32
 
-// Matches pd_metrics in src/native/text_coretext.c. Pixels.
+// Matches dh_metrics in src/native/text_coretext.c. Pixels.
 Face_Metrics :: struct {
 	ascent, descent, leading: f32, // descent positive
 	advance:                  f32, // of 'M'
@@ -42,7 +42,7 @@ Face_Metrics :: struct {
 	color:                    i32,
 }
 
-// Matches pd_glyph.
+// Matches dh_glyph.
 Shaped_Glyph :: struct {
 	face:    Face_Id,
 	glyph:   u32,
@@ -133,8 +133,8 @@ Run_Glyph :: struct {
 	sprite:  bool,
 }
 
-ATLAS_MIN :: #config(PI_DESK_ATLAS_MIN, 1024) // -define:PI_DESK_ATLAS_MIN=128 etc. exercise grow/evict
-ATLAS_MAX :: #config(PI_DESK_ATLAS_MAX, 4096)
+ATLAS_MIN :: #config(DECKHAND_ATLAS_MIN, 1024) // -define:DECKHAND_ATLAS_MIN=128 etc. exercise grow/evict
+ATLAS_MAX :: #config(DECKHAND_ATLAS_MAX, 4096)
 RUN_GLYPHS_MAX :: 1 << 18 // run cache starts over past this
 MAX_RUN_GLYPHS :: 16 // glyphs kept per terminal cell
 

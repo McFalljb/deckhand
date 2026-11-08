@@ -9,9 +9,9 @@
 # finishes, the next tick is skipped; 5 identical tool calls → looping;
 # silence → stalled; 3 failures → paused + a nudge; a missing folder →
 # folder_missing, paused, history kept; "Needs user approval" → needs_you
-# with the stored action; PI_DESK_SCHEDULED_AT set (and no pi-desk socket or
+# with the stored action; DECKHAND_SCHEDULED_AT set (and no Deckhand socket or
 # tokens); no approvals: a prompt edited in the file runs as edited, a job
-# from control (an agent's job_create) runs on its schedule, and pi-desk has
+# from control (an agent's job_create) runs on its schedule, and Deckhand has
 # no Keychain code (no Security framework, no SecItem symbols);
 # ATLAS.md copied into the notes folder; redaction; the Jobs tab's buttons;
 # idle CPU. Screenshots: build/shots/jobs/ (dark and light).
@@ -57,8 +57,8 @@ note secret sec1 manual SECRET
 note silent sil1 manual SILENT
 note spend spend1 "* * * * *" SPEND "access: full"
 
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/jobs.txt PI_DESK_DATA_DIR="$W/data" \
-  PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/jobs.txt DECKHAND_DATA_DIR="$W/data" \
+  DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand "$PROJ" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|TIMEOUT|done:|no element|CPU|unknown command" "$W/run.log" || true
 fail=0
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then fail=1; fi
@@ -71,11 +71,11 @@ chk "ok1 events.jsonl" 'grep -q agent_settled "$D"/ok1/runs/*/events.jsonl'
 chk "ok1 summary" 'grep -q "All good, scheduled" "$D"/ok1/runs/*/summary.md'
 chk "ok1 run line" 'grep -q "✅ ok" "$NOTES/jobs/ok.md"'
 chk "ok1 preamble" 'grep -q "running unattended" "$D"/ok1/runs/*/preamble.md'
-# the environment: an allowlist; no pi-desk socket or tokens; the scheduled time; read-only
-chk "PI_DESK_SCHEDULED_AT" 'grep -q "^PI_DESK_SCHEDULED_AT=20" "$FAKE_HOME/pi-env-ok1.txt"'
+# the environment: an allowlist; no Deckhand socket or tokens; the scheduled time; read-only
+chk "DECKHAND_SCHEDULED_AT" 'grep -q "^DECKHAND_SCHEDULED_AT=20" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "PI_KIT_READONLY" 'grep -q "^PI_KIT_READONLY=1" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "PI_KIT_NOTES_DIR" 'grep -q "^PI_KIT_NOTES_DIR=$NOTES" "$FAKE_HOME/pi-env-ok1.txt"'
-chk "no socket/tokens" '! grep -qE "^(PI_DESK|DECKHAND)_(SOCKET|TOKEN|CONTROL_TOKEN)=" "$FAKE_HOME"/pi-env-*.txt'
+chk "no socket/tokens" '! grep -qE "^(DECKHAND|DECKHAND)_(SOCKET|TOKEN|CONTROL_TOKEN)=" "$FAKE_HOME"/pi-env-*.txt'
 chk "full access: not read-only" '! grep -q "^PI_KIT_READONLY" "$FAKE_HOME/pi-env-spend1.txt"'
 chk "argv" 'grep -q "ARGS: --mode json --session-dir $D/ok1/sessions --session-id" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "read: pi's read tools only, no MCP" 'grep -q -- "--tools read,grep,find,ls --exclude-tools mcp__\* --no-mcp" "$FAKE_HOME/pi-env-ok1.txt"'

@@ -1,7 +1,7 @@
 GFM spec examples for the extensions (tables, task list items, strikethrough,
 autolinks), copied verbatim from https://github.com/github/cmark-gfm/blob/master/test/spec.txt
 (GitHub Flavored Markdown Spec 0.29-gfm, CC-BY-SA 4.0). Examples 9001+ are
-pi-desk's own, written to the same output format. See README.md.
+Deckhand's own, written to the same output format. See README.md.
 
 ```````````````````````````````` example 198 Tables (extension) [table]
 | foo | bar |
@@ -310,7 +310,7 @@ a.b-c_d@a.b_
 <p>a.b-c_d@a.b_</p>
 ````````````````````````````````
 
-```````````````````````````````` example 9001 pi-desk: a table in a list item
+```````````````````````````````` example 9001 Deckhand: a table in a list item
 - | a | b |
   | - | - |
   | 1 | 2 |
@@ -335,7 +335,7 @@ a.b-c_d@a.b_
 </ul>
 ````````````````````````````````
 
-```````````````````````````````` example 9002 pi-desk: an escaped pipe in code, alignment, a short row
+```````````````````````````````` example 9002 Deckhand: an escaped pipe in code, alignment, a short row
 | a | b |
 |:--|--:|
 | `x\|y` |
@@ -356,7 +356,7 @@ a.b-c_d@a.b_
 </table>
 ````````````````````````````````
 
-```````````````````````````````` example 9003 pi-desk: task items in a loose list
+```````````````````````````````` example 9003 Deckhand: task items in a loose list
 - [x] done
 
 - [ ] open
@@ -371,7 +371,7 @@ a.b-c_d@a.b_
 </ul>
 ````````````````````````````````
 
-```````````````````````````````` example 9004 pi-desk: not task items
+```````````````````````````````` example 9004 Deckhand: not task items
 - [ ]x
 
 * [a] b
@@ -384,13 +384,13 @@ a.b-c_d@a.b_
 </ul>
 ````````````````````````````````
 
-```````````````````````````````` example 9005 pi-desk: strikethrough runs must match
+```````````````````````````````` example 9005 Deckhand: strikethrough runs must match
 ~~a~~ ~b~ ~~~c~~~ ~~d~
 .
 <p><del>a</del> <del>b</del> ~~~c~~~ ~~d~</p>
 ````````````````````````````````
 
-```````````````````````````````` example 9006 pi-desk: a paragraph before the header row, a blank line ends the table
+```````````````````````````````` example 9006 Deckhand: a paragraph before the header row, a blank line ends the table
 intro
 | a |
 | - |
@@ -414,13 +414,13 @@ after
 <p>after</p>
 ````````````````````````````````
 
-```````````````````````````````` example 9007 pi-desk: bare links and e-mail with trailing punctuation
+```````````````````````````````` example 9007 Deckhand: bare links and e-mail with trailing punctuation
 See www.example.com/a_b, or mail me@example.org.
 .
 <p>See <a href="http://www.example.com/a_b">www.example.com/a_b</a>, or mail <a href="mailto:me@example.org">me@example.org</a>.</p>
 ````````````````````````````````
 
-```````````````````````````````` example 9008 pi-desk: a header-only table
+```````````````````````````````` example 9008 Deckhand: a header-only table
 | a | b |
 | --- | --- |
 .

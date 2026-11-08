@@ -17,6 +17,6 @@ rm -rf "$FAKE_HOME" build/test-data
 mkdir -p "$PROJ" "$STORE" build/shots/dead-tab
 printf '{"type":"session","version":3,"id":"demo-1","cwd":"%s"}\n{"type":"message","message":{"role":"user","content":"Fix the demo build"}}\n' "$PROJ" \
   > "$STORE/2026-10-30T10-00-00-000Z_demo-1.jsonl"
-HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$SCRIPT" \
-  PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-dead.py' \"\$@\"" \
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$SCRIPT" \
+  DECKHAND_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-dead.py' \"\$@\"" \
   build/deckhand

@@ -43,7 +43,7 @@ LAUNCHD_JOB_DIR :: "job-" // <run>/job-<6 hex>: short, the ready socket's path m
 
 // Starts a session holder for run (the runtime dir) and data (the data dir), running bin (from
 // holder_install), with env ("KEY=VALUE"; nil = this process's). Test mode and
-// PI_DESK_HOLDER_DIRECT=1 spawn it directly and never touch launchd. pid: the holder's.
+// DECKHAND_HOLDER_DIRECT=1 spawn it directly and never touch launchd. pid: the holder's.
 holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: bool, why: string) {
 	if len(run) + RUNTIME_HOLDER_NEED > SUN_PATH_MAX {
 		return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket (sun_path is %d bytes)", run, SUN_PATH_MAX + 1)

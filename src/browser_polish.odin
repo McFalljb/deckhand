@@ -43,7 +43,6 @@ import "core:strings"
 import "core:sys/posix"
 import "core:time"
 import "core:unicode/utf8"
-import "base:runtime"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
 
@@ -126,11 +125,6 @@ Browser_Zoom_Step :: enum u8 {
 	In,
 	Out,
 }
-BROWSER_ZOOM_STEP_NAMES := [Browser_Zoom_Step]string {
-	.Reset = "reset",
-	.In    = "in",
-	.Out   = "out",
-}
 Browser_Edit_Op :: enum u8 {
 	Undo,
 	Redo,
@@ -139,14 +133,6 @@ Browser_Edit_Op :: enum u8 {
 	Paste,
 	Select_All,
 }
-BROWSER_EDIT_OP_NAMES := [Browser_Edit_Op]string {
-	.Undo       = "undo",
-	.Redo       = "redo",
-	.Cut        = "cut",
-	.Copy       = "copy",
-	.Paste      = "paste",
-	.Select_All = "select_all",
-}
 Browser_Download_Op :: enum u8 {
 	Open,
 	Reveal,
@@ -154,14 +140,6 @@ Browser_Download_Op :: enum u8 {
 	Dismiss,
 	Allow, // a download the page started without the user's click: go ahead (download_ask)
 	Block, // … or not
-}
-BROWSER_DOWNLOAD_OP_NAMES := [Browser_Download_Op]string {
-	.Open    = "open",
-	.Reveal  = "reveal",
-	.Cancel  = "cancel",
-	.Dismiss = "dismiss",
-	.Allow   = "allow",
-	.Block   = "block",
 }
 
 Browser_Zoom :: struct {
@@ -939,95 +917,6 @@ download_find :: proc(id: u32) -> ^Page_Download {
 	for &d in page_downloads do if d.id == id do return &d
 	return nil
 }
-
-browser_polish_command_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Browser_Zoom:       return "browser_zoom"
-	case Browser_Find:       return "browser_find"
-	case Browser_Find_Close: return "browser_find_close"
-	case Browser_Dialog:     return "browser_dialog"
-	case Browser_Permission: return "browser_permission"
-	case Browser_Popup:      return "browser_popup"
-	case Browser_Edit:       return "browser_edit"
-	case Browser_Devtools:   return "browser_devtools"
-	case Browser_External:   return "browser_external"
-	case Browser_Download:   return "browser_download"
-	}
-	return ""
-}
-
-browser_polish_command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
-	#partial switch c in cmd {
-	case Browser_Find:
-		x := c
-		x.text = strings.clone(c.text, allocator)
-		return x
-	case Browser_Dialog:
-		x := c
-		x.text = strings.clone(c.text, allocator)
-		return x
-	}
-	return cmd
-}
-
-browser_polish_command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Browser_Find:   delete(c.text, allocator)
-	case Browser_Dialog: delete(c.text, allocator)
-	}
-}
-
-// The command's fields for events and logs (redact: a prompt's answer becomes its length).
-browser_polish_command_write :: proc(w: ^Jw, cmd: Command, redact := false) {
-	#partial switch c in cmd {
-	case Browser_Zoom:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_str(w, "step", BROWSER_ZOOM_STEP_NAMES[c.step])
-	case Browser_Find:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_str(w, "text", c.text)
-		if c.back do pw_bool(w, "back", true)
-	case Browser_Find_Close: pw_u64(w, "tab_id", c.tab_id)
-	case Browser_Dialog:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_bool(w, "ok", c.ok)
-		if c.text != "" do pw_str(w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
-	case Browser_Permission:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_bool(w, "allow", c.allow)
-	case Browser_Popup:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_bool(w, "open", c.open)
-	case Browser_Edit:
-		pw_u64(w, "tab_id", c.tab_id)
-		pw_str(w, "op", BROWSER_EDIT_OP_NAMES[c.op])
-	case Browser_Devtools:
-		pw_u64(w, "tab_id", c.tab_id)
-		if c.x >= 0 && c.y >= 0 {
-			pw_u64(w, "x", u64(c.x))
-			pw_u64(w, "y", u64(c.y))
-		}
-		if c.close do pw_bool(w, "close", true)
-	case Browser_External: pw_u64(w, "tab_id", c.tab_id)
-	case Browser_Download:
-		pw_u64(w, "download_id", c.download_id)
-		pw_str(w, "op", BROWSER_DOWNLOAD_OP_NAMES[c.op])
-	}
-}
-
-@(private = "file")
-pw_key :: proc(w: ^Jw, k: string) {
-	if !w.first do strings.write_byte(w.b, ',')
-	w.first = false
-	json_quote(w.b, k)
-	strings.write_byte(w.b, ':')
-}
-@(private = "file")
-pw_str :: proc(w: ^Jw, k, v: string) {pw_key(w, k); json_quote(w.b, v)}
-@(private = "file")
-pw_u64 :: proc(w: ^Jw, k: string, v: u64) {pw_key(w, k); strings.write_u64(w.b, v)}
-@(private = "file")
-pw_bool :: proc(w: ^Jw, k: string, v: bool) {pw_key(w, k); strings.write_string(w.b, v ? "true" : "false")}
 
 // ---- State (json_write.odin, inside a browser tab's object) ----
 

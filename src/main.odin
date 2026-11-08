@@ -212,6 +212,30 @@ window_hooks_app :: proc() -> Window_Hooks {
 			}
 			return false
 		},
+		browser_json = proc(b: ^strings.Builder, tab_id: u64) {
+			annot_tab_json(b, tab_id) // comment mode, markers (browser_annotate.odin)
+			browser_polish_tab_json(b, tab_id) // zoom, bars, downloads (browser_polish.odin)
+			browser_agent_tab_json(b, tab_id) // the agent strip (browser_agent.odin)
+			browser_act_tab_json(b, tab_id) // an upload's ask (browser_act.odin)
+		},
+		browser_page = proc(tab_id: u64) -> string {
+			b := browser_of(tab_id)
+			if b == nil do return ""
+			return b.cef != 0 ? "open" : b.waiting ? "waiting" : b.lazy ? "unloaded" : b.message != "" ? "closed" : "opening"
+		},
+		app_view = proc(tab_id: u64) -> (v: App_View, ok: bool) {
+			a := app_of(tab_id)
+			if a == nil do return
+			v = {frames = a.ring.shown, inspect = a.inspect}
+			if g := ring_gen(&a.ring, a.ring.cur_gen); g != nil do v.has_ring, v.ring_gen, v.ring_w, v.ring_h = true, g.gen, g.w, g.h
+			return v, true
+		},
+		md_view = proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool) {
+			v := md_view_of(tab_id)
+			if v == nil || !v.laid do return
+			line, links, headings, matches = md_state_numbers(v, tab_id, source) // markdown_view.odin
+			return line, links, headings, matches, true
+		},
 		tab_host_apply = tab_host_apply_app, // tabhost.odin
 		test_step = autotest_step,
 	}

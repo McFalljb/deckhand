@@ -17,7 +17,6 @@ package main
 
 import "core:c"
 import "core:time"
-import sg "../vendor/sokol-odin/sokol/gfx"
 
 when ODIN_OS == .Darwin {
 	foreign import pdframes {"../build/pd_frames.a", "system:Metal.framework", "system:IOSurface.framework", "system:Foundation.framework", "system:bsm"}
@@ -102,8 +101,10 @@ Ring_Gen :: struct {
 	gen:   u32,
 	w, h:  int, // px
 	scale: f32,
-	image: [FRAME_SLOTS]sg.Image,
-	view:  [FRAME_SLOTS]sg.View,
+	// the window's sokol image and view sampling each slot (app_tab.odin, browser.odin), by id
+	// (sg.Image{id}, sg.View{id}; 0 = none): the record holds no sokol types
+	image: [FRAME_SLOTS]u32,
+	view:  [FRAME_SLOTS]u32,
 	freed: bool, // surfaces gone (all but the shown slot of a dead app's ring)
 }
 

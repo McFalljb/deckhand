@@ -19,8 +19,6 @@ package main
 // What CEF reports (browser.odin's callbacks) comes back as Browser_Update
 // (internal, through the inbox), so State and events follow the page.
 
-import "base:runtime"
-import "core:c"
 import "core:fmt"
 import "core:slice"
 import "core:strings"
@@ -311,57 +309,7 @@ browser_restore :: proc(tab: ^Tab) {
 	b.lazy = true // its page opens when the tab is first shown
 }
 
-// ---- the command plumbing (commands.odin, inbox.odin, json_*.odin) ----
-
-browser_command_type :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Browser_Open:     return "browser_open"
-	case Browser_Navigate: return "browser_navigate"
-	case Browser_Back:     return "browser_back"
-	case Browser_Forward:  return "browser_forward"
-	case Browser_Reload:   return "browser_reload"
-	case Browser_Stop:     return "browser_stop"
-	case Browser_Update:   return "browser_update"
-	}
-	return ""
-}
-
-browser_command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
-	s :: proc(x: string, a: runtime.Allocator) -> string {return strings.clone(x, a)}
-	#partial switch c in cmd {
-	case Browser_Open:     return Browser_Open{session = c.session, url = s(c.url, allocator)}
-	case Browser_Navigate: return Browser_Navigate{tab_id = c.tab_id, url = s(c.url, allocator)}
-	case Browser_Update:
-		x := c
-		x.url, x.title, x.blocked = s(c.url, allocator), s(c.title, allocator), s(c.blocked, allocator)
-		return x
-	}
-	return cmd
-}
-
-browser_command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
-	#partial switch c in cmd {
-	case Browser_Open:     delete(c.url, allocator)
-	case Browser_Navigate: delete(c.url, allocator)
-	case Browser_Update:
-		delete(c.url, allocator)
-		delete(c.title, allocator)
-		delete(c.blocked, allocator)
-	}
-}
-
-// The tab a browser command targets (socket.odin's event filter).
-browser_command_tab :: proc(cmd: Command) -> u64 {
-	#partial switch c in cmd {
-	case Browser_Navigate: return c.tab_id
-	case Browser_Back:     return c.tab_id
-	case Browser_Forward:  return c.tab_id
-	case Browser_Reload:   return c.tab_id
-	case Browser_Stop:     return c.tab_id
-	case Browser_Update:   return c.tab_id
-	}
-	return 0
-}
+// The command plumbing (type names, copies, events' fields, browser_url_redacted): browser_wire.odin.
 
 // What CEF reported, into State (from browser.odin's callbacks; the inbox
 // runs it after the pump, never inside CEF's own call).
@@ -650,30 +598,6 @@ browser_page_plan :: proc(pages: []Page_Info, free_slots: int, allocator := cont
 		} else do append(&p.wait, i)
 	}
 	return
-}
-
-// The URL without a user name or password (scheme://NAME:PASSWORD@host/… ->
-// scheme://host/…): what State, events and the workspace hold. The query and
-// fragment stay (they may hold tokens: PERSISTENCE.md). Temp-allocated.
-browser_url_public :: proc(url: string) -> string {
-	i := strings.index(url, "://")
-	if i < 0 do return url
-	start := i + 3
-	end := len(url)
-	if k := strings.index_any(url[start:], "/?#"); k >= 0 do end = start + k
-	at := strings.last_index_byte(url[start:end], '@')
-	if at < 0 do return url
-	return strings.concatenate({url[:start], url[start + at + 1:]}, context.temp_allocator)
-}
-
-// For events and logs: a command's address as typed, without user:pass@ also
-// when it has no scheme yet ("NAME:PASSWORD@example.com"). Temp-allocated.
-browser_url_redacted :: proc(url: string) -> string {
-	if strings.contains(url, "://") do return browser_url_public(url)
-	end := len(url)
-	if k := strings.index_any(url, "/?#"); k >= 0 do end = k
-	at := strings.last_index_byte(url[:end], '@')
-	return at < 0 ? url : url[at + 1:]
 }
 
 // Every frame (browser_tick) and before a key: the URL field belongs to the tab

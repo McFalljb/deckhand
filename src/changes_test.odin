@@ -557,7 +557,8 @@ while :; do touch "$GIT_INDEX_FILE.lock" "$(git rev-parse --git-dir)/index.lock"
 `, f.root, f.root))
 	_, _ = run_bounded("", {"chmod", "+x", hook}, GIT_TIMEOUT)
 	old_timeout, old_grace := changes_commit_timeout, changes_kill_grace
-	changes_commit_timeout, changes_kill_grace = 1500 * time.Millisecond, 300 * time.Millisecond
+	// 4 s: git must reach the hook before the timeout, which takes over 1.5 s on a busy CI runner
+	changes_commit_timeout, changes_kill_grace = 4 * time.Second, 300 * time.Millisecond
 	defer changes_commit_timeout, changes_kill_grace = old_timeout, old_grace
 	start := time.tick_now()
 	r := run_command(Changes_Commit{tab_id = f.tab, message = "slow"}, {kind = .UI})

@@ -37,6 +37,7 @@ MAX_COLS :: holderwire.MAX_COLS // the grid limits (PR A); SPAWN/RESIZE outside 
 MAX_ROWS :: holderwire.MAX_ROWS
 READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
+SPAWN_TIMEOUT :: 10 * time.Second // the app gives up (and RELEASEs) sooner; this is the backstop
 LINGER :: 5 * time.Second // after GOODBYE_ACK: how long the core may take to close
 
 Config :: struct {
@@ -50,6 +51,8 @@ Config :: struct {
 	tail_cap:      int,
 	queue_cap:     int,
 	quiet:         bool, // no log lines (tests)
+	spawn_timeout: time.Duration, // a SPAWN whose child has not exec'd by then fails
+	test_spawn_gate: c.int, // tests: > 0, a child reads one byte from it before its exec
 }
 
 default_config :: proc() -> Config {
@@ -61,6 +64,7 @@ default_config :: proc() -> Config {
 		shutdown_wait = time.Second,
 		tail_cap = TAIL_CAP,
 		queue_cap = QUEUE_CAP,
+		spawn_timeout = SPAWN_TIMEOUT,
 	}
 }
 
@@ -79,6 +83,12 @@ Term :: struct {
 	reaped_at:                  time.Tick,
 	final:                      bool, // the exit is reported (EXITED, or `exit` in WELCOME)
 	released:                   bool, // forgotten once reaped
+	// forked but not exec'd yet (spawn_pty): exec_fd says when. Not listed in WELCOME nor acked,
+	// its master not read, until SPAWNED (sent only to the core that asked, `requester`).
+	pending:                    bool,
+	exec_fd:                    c.int,
+	spawned_at:                 time.Tick,
+	requester:                  u64, // the asking connection's serial
 }
 
 Conn :: struct {
@@ -93,6 +103,7 @@ Conn :: struct {
 	linger:        bool, // closing after GOODBYE_ACK: once sent, wait for the core's EOF (or LINGER)
 	closing_since: time.Tick,
 	dead:          bool,
+	serial:        u64, // this connection's number (a freed Conn's address may come back)
 }
 
 Holder :: struct {
@@ -114,6 +125,7 @@ Holder :: struct {
 	done:              bool, // the loop should end; exit_code says how
 	exit_code:         int,
 	buf:               []u8,
+	serials:           u64,
 }
 
 Start_Error :: enum {
@@ -269,6 +281,7 @@ conn_free :: proc(cn: ^Conn) {
 
 @(private)
 term_free :: proc(t: ^Term) {
+	if t.pending && t.exec_fd >= 0 do close(t.exec_fd)
 	ring_destroy(&t.tail)
 	delete(t.input)
 	free(t)
@@ -294,6 +307,8 @@ holder_attach :: proc(h: ^Holder, fd: c.int) -> bool {
 	set_nosigpipe(fd)
 	cn := new(Conn)
 	cn.fd, cn.peer, cn.last_rx = fd, peer, time.tick_now()
+	h.serials += 1
+	cn.serial = h.serials
 	append(&h.conns, cn)
 	return true
 }
@@ -306,6 +321,7 @@ Poll_Who :: enum {
 	Wake,
 	Conn,
 	Term,
+	Spawn, // a pending terminal's exec_fd
 }
 
 // One iteration: wait up to timeout_ms (less when a timer is due) for sockets, masters or a
@@ -330,7 +346,8 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	}
 	reading := reading_allowed(h)
 	for t, i in h.terms {
-		if t.master < 0 || t.eof do continue
+		if t.pending && t.exec_fd >= 0 do add(&fds, &who, &idx, t.exec_fd, POLLIN, .Spawn, i)
+		if t.master < 0 || t.eof || t.pending do continue
 		ev: c.short
 		if reading do ev |= POLLIN
 		if len(t.input) > 0 do ev |= POLLOUT
@@ -358,6 +375,8 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 				t := h.terms[idx[k]]
 				if pfd.revents & POLLOUT != 0 do term_flush(t)
 				if pfd.revents & (POLLIN | POLLHUP | POLLERR | POLLNVAL) != 0 do term_read(h, t)
+			case .Spawn:
+				spawn_resolve(h, h.terms[idx[k]], false)
 			}
 		}
 	}
@@ -390,6 +409,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 		else do t = min(t, ms_until(cn.last_rx, h.cfg.pong_timeout))
 	}
 	for term in h.terms {
+		if term.pending do t = min(t, ms_until(term.spawned_at, h.cfg.spawn_timeout))
 		if !term.reaped do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
 		else if !term.final do t = min(t, ms_until(term.reaped_at, h.cfg.exit_grace))
 	}
@@ -579,10 +599,7 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		t := live_term(h, id)
 		if t == nil do return
 		t.released = true
-		if t.master >= 0 do close(t.master)
-		t.master = -1
-		clear(&t.input)
-		if !t.reaped do kill(t.pid, SIGHUP)
+		term_forget(t)
 	case .Foreground:
 		t := live_term(h, id)
 		pg: i64
@@ -626,7 +643,7 @@ find_term :: proc(h: ^Holder, id: u32) -> ^Term {
 welcome :: proc(h: ^Holder, cn: ^Conn, wire: i64) {
 	terms := make([dynamic]holderwire.Welcome_Terminal, context.temp_allocator)
 	for t in h.terms {
-		if t.released do continue
+		if t.released || t.pending do continue
 		wt := holderwire.Welcome_Terminal {
 			id = i64(t.id), pid = i64(t.pid), pgid = i64(t.pgid),
 			cols = i64(t.cols), rows = i64(t.rows), xpixel = i64(t.xpixel), ypixel = i64(t.ypixel),
@@ -641,7 +658,7 @@ welcome :: proc(h: ^Holder, cn: ^Conn, wire: i64) {
 		terminals = terms[:],
 	})
 	for t in h.terms {
-		if t.released do continue
+		if t.released || t.pending do continue
 		tail := ring_bytes(&t.tail)
 		holderwire.encode_output(&cn.out, .Tail, t.id, t.offset - u64(len(tail)), tail)
 	}
@@ -675,24 +692,66 @@ handle_spawn :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		return
 	}
 	ws := Winsize{ws_col = u16(m.cols), ws_row = u16(m.rows), ws_xpixel = clamp_px(m.xpixel), ws_ypixel = clamp_px(m.ypixel)}
-	pid, master, why := spawn_pty(m.argv, m.env, m.cwd, ws)
+	pid, master, exec_fd, why := spawn_pty(m.argv, m.env, m.cwd, ws, h.cfg.test_spawn_gate)
 	if why != "" {
 		fail(h, cn, id, why)
 		return
 	}
 	t := new(Term)
-	t.id, t.master, t.pid = id, master, pid
-	t.pgid = getpgid(pid)
-	if t.pgid <= 0 do t.pgid = pid // forkpty made it a session leader
+	t.id, t.master, t.pid, t.pgid = id, master, pid, pid // forkpty makes it a session leader
 	t.cols, t.rows, t.xpixel, t.ypixel = ws.ws_col, ws.ws_row, ws.ws_xpixel, ws.ws_ypixel
+	t.pending, t.exec_fd, t.spawned_at, t.requester = true, exec_fd, time.tick_now(), cn.serial
 	append(&h.terms, t)
-	send_msg(cn, .Spawned, id, holderwire.Spawned{pid = i64(pid), pgid = i64(t.pgid)})
+	spawn_resolve(h, t, false) // a fast exec (or failure) is answered in this step
+}
+
+// A pending terminal's exec happened, failed, or (timed_out) never came in spawn_timeout:
+// SPAWNED or SPAWN_FAILED to the core that asked, if it is still the attached one and the
+// terminal was not RELEASEd meanwhile. A child nobody waits for any more is hung up.
+@(private)
+spawn_resolve :: proc(h: ^Holder, t: ^Term, timed_out: bool) {
+	if !t.pending do return
+	r := Spawn_Result.Exec_Failed
+	child_errno: c.int
+	if !timed_out do r, child_errno = spawn_result(t.exec_fd)
+	if r == .Waiting do return
+	t.pending = false
+	close(t.exec_fd)
+	t.exec_fd = -1
+	asker := h.core != nil && h.core.serial == t.requester ? h.core : nil
+	if r == .Exec_Failed {
+		why := timed_out ? fmt.tprintf("timed out: the child did not exec within %v", h.cfg.spawn_timeout) : fmt.tprintf("exec: errno %d", child_errno)
+		if timed_out && !t.reaped do kill(t.pid, SIGKILL)
+		term_forget(t)
+		hlog(h, "terminal %d: SPAWN failed: %s", t.id, why)
+		if asker != nil && !t.released do send_msg(asker, .Spawn_Failed, t.id, holderwire.Spawn_Failed{error = why})
+		t.released = true // the reaper forgets it
+		return
+	}
+	if t.released do return // RELEASEd while it waited (hung up then)
+	if asker == nil {
+		hlog(h, "terminal %d: exec'd after the core that asked for it left: hanging up", t.id)
+		term_forget(t)
+		t.released = true
+		return
+	}
+	send_msg(asker, .Spawned, t.id, holderwire.Spawned{pid = i64(t.pid), pgid = i64(t.pgid)})
+}
+
+// Close the master and hang up the child (unless it was reaped): RELEASE, and spawns nobody
+// waits for. The caller marks it released.
+@(private)
+term_forget :: proc(t: ^Term) {
+	if t.master >= 0 do close(t.master)
+	t.master = -1
+	clear(&t.input)
+	if !t.reaped do kill(t.pid, SIGHUP)
 }
 
 @(private)
 goodbye_handover :: proc(h: ^Holder, cn: ^Conn) {
 	acks := make([dynamic]holderwire.Ack_Terminal, context.temp_allocator)
-	for t in h.terms do if !t.released do append(&acks, holderwire.Ack_Terminal{id = i64(t.id), offset = t.offset})
+	for t in h.terms do if !t.released && !t.pending do append(&acks, holderwire.Ack_Terminal{id = i64(t.id), offset = t.offset})
 	// successor secrets come with PR D (§7.2); until then any core with the DR may follow
 	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = ""})
 	conn_close_after(cn)
@@ -756,6 +815,7 @@ timers :: proc(h: ^Holder) {
 	}
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {
 		t := h.terms[i]
+		if t.pending && time.tick_since(t.spawned_at) >= h.cfg.spawn_timeout do spawn_resolve(h, t, true)
 		if !t.reaped {
 			st: c.int
 			if waitpid(t.pid, &st, WNOHANG) == t.pid {
@@ -771,7 +831,7 @@ timers :: proc(h: ^Holder) {
 			ordered_remove(&h.terms, i)
 			continue
 		}
-		if !t.reaped || t.final do continue
+		if !t.reaped || t.final || t.pending do continue
 		// The master stays open past the grace (a grandchild holds the slave): EXITED anyway, after
 		// what the PTY holds now; not while the core's queue is full (that output comes first).
 		grace := !t.eof && t.master >= 0 && time.tick_since(t.reaped_at) >= h.cfg.exit_grace

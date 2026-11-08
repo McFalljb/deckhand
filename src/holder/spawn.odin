@@ -31,7 +31,12 @@ reset_signals :: proc "contextless" () {
 
 // argv[0] must be an absolute path (no PATH search); env entries are "K=V". The child gets the
 // PTY's slave as 0, 1, 2 and is its session leader (forkpty: pgid == pid).
-spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize) -> (pid: c.int, master: c.int, err: string) {
+//
+// Returns once the child is forked, not once it exec'd: its chdir or execve can block (a hung
+// network cwd, a slow first-exec check) and the holder's loop must not. exec_fd (nonblocking,
+// close-on-exec) tells how it went: EOF once the exec worked, or the child's errno (spawn_result).
+// gate (tests, > 0): the child reads a byte from it before chdir, as if blocked there.
+spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize, gate: c.int = 0) -> (pid: c.int, master: c.int, exec_fd: c.int, err: string) {
 	// Everything the child needs is prepared before fork: after fork only async-signal-safe
 	// calls (sigaction, sigprocmask, chdir, execve, write, _exit).
 	c_argv := make([]cstring, len(argv) + 1, context.temp_allocator)
@@ -47,7 +52,7 @@ spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize) -> (pid: c.int,
 	sync.mutex_lock(&fork_lock)
 	if pipe(&exec_pipe) != 0 {
 		sync.mutex_unlock(&fork_lock)
-		return 0, -1, fmt.tprintf("pipe: errno %d", errno())
+		return 0, -1, -1, fmt.tprintf("pipe: errno %d", errno())
 	}
 	set_cloexec(exec_pipe[0])
 	set_cloexec(exec_pipe[1])
@@ -60,11 +65,15 @@ spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize) -> (pid: c.int,
 		e := errno()
 		close(exec_pipe[0])
 		close(exec_pipe[1])
-		return 0, -1, fmt.tprintf("forkpty: errno %d", e)
+		return 0, -1, -1, fmt.tprintf("forkpty: errno %d", e)
 	}
 	if pid == 0 {
 		close(exec_pipe[0])
 		reset_signals()
+		if gate > 0 {
+			b: u8
+			read(gate, &b, 1)
+		}
 		if cwd != "" do chdir(c_cwd)
 		execve(c_argv[0], raw_data(c_argv), raw_data(c_env))
 		e := errno()
@@ -72,17 +81,24 @@ spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize) -> (pid: c.int,
 		_exit(127)
 	}
 	close(exec_pipe[1])
-	child_errno: c.int
-	exec_failed := read(exec_pipe[0], &child_errno, size_of(child_errno)) == size_of(child_errno)
-	close(exec_pipe[0])
-	if exec_failed {
-		close(master)
-		st: c.int
-		waitpid(pid, &st, 0)
-		return 0, -1, fmt.tprintf("exec %s: errno %d", argv[0], child_errno)
-	}
+	set_nonblock(exec_pipe[0])
 	set_nonblock(master)
-	return pid, master, ""
+	return pid, master, exec_pipe[0], ""
+}
+
+Spawn_Result :: enum {
+	Waiting, // nothing yet: the child has not exec'd (or failed) so far
+	Exec_Ok,
+	Exec_Failed, // child_errno says why
+}
+
+// What spawn_pty's exec_fd says now (it is nonblocking).
+spawn_result :: proc(exec_fd: c.int) -> (r: Spawn_Result, child_errno: c.int) {
+	n := read(exec_fd, &child_errno, size_of(child_errno))
+	if n == 0 do return .Exec_Ok, 0
+	if n < 0 && (errno() == EAGAIN || errno() == EINTR) do return .Waiting, 0
+	if n == size_of(child_errno) do return .Exec_Failed, child_errno
+	return .Exec_Failed, n < 0 ? errno() : 0 // a short write: the child died writing it
 }
 
 // A waitpid status as an exit code or a signal (WIFEXITED / WIFSIGNALED).

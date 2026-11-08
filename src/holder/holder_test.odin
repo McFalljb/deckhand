@@ -775,3 +775,47 @@ start_checks :: proc(t: ^testing.T) {
 	holder_free(h)
 	close(fd)
 }
+
+// A SPAWN whose child blocks before exec (a hung network cwd, a slow first-exec check) does not
+// freeze the loop: PING still gets PONG, and SPAWNED comes once the exec happens; INPUT sent
+// before it reaches the program. One that never gets to exec fails after spawn_timeout.
+@(test)
+spawn_blocked_before_exec :: proc(t: ^testing.T) {
+	gate: [2]c.int
+	sync.mutex_lock(&fork_lock)
+	testing.expect(t, pipe(&gate) == 0)
+	for fd in gate do set_cloexec(fd) // the gated child reads it before its exec
+	sync.mutex_unlock(&fork_lock)
+	defer close(gate[0])
+	defer close(gate[1])
+	cfg := test_cfg()
+	cfg.spawn_timeout = 400 * time.Millisecond
+	cfg.test_spawn_gate = gate[0]
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	sh_spawn(f, 1, `read x; printf 'got:%s\n' "$x"; exit 0`)
+	fake_input(f, 1, "early\n")
+	start := time.tick_now()
+	fake_send(f, .Ping, 0, holderwire.Empty{})
+	_, pong := wait_for(h, f, .Pong, 0, timeout = time.Second)
+	testing.expect(t, pong, "no PONG while a SPAWN waits for its exec")
+	testing.expect(t, time.tick_since(start) < 500 * time.Millisecond)
+	for g in f.frames do testing.expect(t, g.kind != .Spawned, "SPAWNED before the exec")
+	// let it exec
+	b: u8 = 1
+	write(gate[1], &b, 1)
+	_, spawned := wait_for(h, f, .Spawned, 1)
+	testing.expect(t, spawned, "no SPAWNED after the exec")
+	testing.expect(t, wait_output(t, h, f, 1, "got:early"), "INPUT before SPAWNED was lost")
+	// never released: SPAWN_FAILED after spawn_timeout, the child is killed and reaped
+	sh_spawn(f, 2, "exit 0")
+	g, failed := wait_for(h, f, .Spawn_Failed, 2, timeout = 2 * time.Second)
+	m: holderwire.Spawn_Failed
+	testing.expect(t, failed && decode_got(g, .Spawn_Failed, &m), "no SPAWN_FAILED for a spawn that never execs")
+	testing.expectf(t, strings.contains(m.error, "timed out"), "error: %q", m.error)
+	pump(h, 100 * time.Millisecond, f)
+	testing.expect(t, live_term(h, 2) == nil)
+}

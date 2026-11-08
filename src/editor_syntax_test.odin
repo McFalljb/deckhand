@@ -101,17 +101,18 @@ syntax_large_parse :: proc(t: ^testing.T) {
 	b: Text_Buffer
 	tb_init(&b, sb.buf[:])
 	defer tb_destroy(&b)
-	t0 := time.tick_now()
+	// CPU time (this thread's: the parse runs on it): a busy machine slows it less than wall time
+	t0 := thread_cpu_now()
 	sx: Syntax
 	syntax_open(&sx, language_by_name("c"), &b)
 	defer syntax_close(&sx)
-	first := time.tick_since(t0)
+	first := thread_cpu_since(t0)
 	at := tb_line_start(&b, 25_000)
 	tb_insert(&b, at, "x")
 	syntax_edit(&sx, at, at, at + 1, {25_000, 0}, {25_000, 0}, {25_000, 1})
-	t1 := time.tick_now()
+	t1 := thread_cpu_now()
 	syntax_reparse(&sx, &b)
-	again := time.tick_since(t1)
+	again := thread_cpu_since(t1)
 	fmt.printf("syntax: 50k-line C file parsed in %v, reparsed after one edit in %v\n", first, again)
-	testing.expectf(t, again < 50 * time.Millisecond, "incremental reparse took %v", again)
+	perf_expect(t, "syntax_large_parse: incremental reparse of a 50k-line C file", again, 50 * time.Millisecond)
 }

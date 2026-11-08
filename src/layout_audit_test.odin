@@ -784,11 +784,14 @@ markdown_layout_pathological :: proc(t: ^testing.T) {
 		lay_free(&v.lay)
 		free(v)
 		free_all(context.temp_allocator)
-		return testing.expectf(t, d < limit, "%s (%d KB) took %v (limit %v)", name, len(text) / 1000, d, limit)
+		perf_expect(t, fmt.tprintf("markdown layout: %s (%d KB)", name, len(text) / 1000), d, limit)
+		return d <= limit
 	}
 	small_ok := true
 	for c in cases(1_600) do small_ok &= run(t, c[0], c[1], 50 * time.Millisecond)
-	if !small_ok do return // not linear: the 200 KB cases would take minutes and tens of GB
+	// over the budget (a busy machine, or not linear): the 200 KB cases could take minutes and tens
+	// of GB, so they are left out (reported above; perf_expect fails it past 10x)
+	if !small_ok do return
 	for c in cases(20_000) do run(t, c[0], c[1], time.Second)
 }
 
@@ -803,7 +806,7 @@ markdown_html_pathological :: proc(t: ^testing.T) {
 	md_layout(v, 700)
 	d := thread_cpu_since(t0)
 	fmt.printfln("markdown layout: an unclosed '<' in HTML, 1 MB, in %.1f ms", f64(d) / f64(time.Millisecond))
-	testing.expectf(t, d < time.Second, "took %v", d)
+	perf_expect(t, "markdown_html_pathological: an unclosed '<' in HTML, 1 MB", d, time.Second)
 	md_free(v.doc)
 	lay_free(&v.lay)
 	free(v)

@@ -59,7 +59,7 @@ editor_perf_50k :: proc(t: ^testing.T) {
 	testing.expect(t, !e.sx.stale && len(toks) > 0)
 	log.infof("PERF reparse after a typing pause: %.1f ms", pause_ms)
 	log.infof("PERF (CPU time) open 50k-line C file: %.1f ms; typing: %.2f ms per key on average, %.2f ms worst (%d keys)", open_ms, total / N, worst, N)
-	testing.expect(t, open_ms < 2000)
-	testing.expect(t, total / N < 50)
+	perf_expect(t, "editor_perf_50k: open a 50k-line C file", time.Duration(open_ms * f64(time.Millisecond)), 2 * time.Second)
+	perf_expect(t, "editor_perf_50k: typing, per key on average", time.Duration(total / N * f64(time.Millisecond)), 50 * time.Millisecond)
 	editor_free(e) // frees e too
 }

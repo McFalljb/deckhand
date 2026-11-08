@@ -400,8 +400,8 @@ reload_burst :: proc(t: ^testing.T) {
 	t1 := thread_cpu_now()
 	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	took_flush := thread_cpu_since(t1)
-	testing.expectf(t, took_events < 20 * time.Millisecond, "20k events took %v (release builds: about half)", took_events)
-	testing.expectf(t, took_flush < 5 * time.Millisecond, "the report took %v", took_flush)
+	perf_expect(t, "reload_burst: 20k FSEvents paths (release builds: about half)", took_events, 20 * time.Millisecond)
+	perf_expect(t, "reload_burst: the report", took_flush, 5 * time.Millisecond)
 	log.infof("20k FSEvents paths: %v; the report: %v", took_events, took_flush)
 	testing.expect_value(t, len(state.reload.changed), RELOAD_CHANGED_MAX)
 	testing.expect_value(t, state.reload.changed_more, 20_000 - RELOAD_CHANGED_MAX)
@@ -607,8 +607,10 @@ cr_args_cmd :: proc(args: string) -> string {
 }
 
 @(private = "file")
+// Up to 20 s (a fake claude's start under load: 3 s was once too short), no slower when it passes.
 cr_has :: proc(path, want: string) -> bool {
-	for _ in 0 ..< 300 {
+	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
 		data, _ := os.read_entire_file(path, context.temp_allocator)
 		if strings.contains(string(data), want) do return true
 		time.sleep(10 * time.Millisecond)
@@ -619,7 +621,9 @@ cr_has :: proc(path, want: string) -> bool {
 // Waits until a restarted tab runs again (the old process gone: dead_tab_tick starts it).
 @(private = "file")
 cr_running_again :: proc(id: u64) -> bool {
-	for _ in 0 ..< 500 {
+	// up to 20 s (500 rounds of 10 ms, ~5 s, timed out on CI under load), no slower when it passes
+	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
 		pump_all()
 		pty_reap()
 		dead_tab_tick()

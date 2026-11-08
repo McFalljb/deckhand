@@ -452,12 +452,16 @@ login_env_refresh_action :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok && strings.contains(r.error, "started from a terminal"), r.error)
 
 	login_env = {gui = true, launch = {"HOME=/le/home", "PATH=/usr/bin:/bin", "LE_LAUNCH_ONLY=yes"}}
+	// a fake shell's start under load took longer than the 4 s a real one gets (no slower when it passes)
+	old_timeout := login_env_refresh_timeout
+	login_env_refresh_timeout = 20 * time.Second
+	defer login_env_refresh_timeout = old_timeout
 	r = run_command(Refresh_Shell_Env{}, {kind = .UI})
 	testing.expect(t, r.ok && r.pending)
 	r2 := run_command(Refresh_Shell_Env{}, {kind = .UI})
 	testing.expect(t, !r2.ok, "one at a time")
 	deadline := time.tick_now()
-	for login_env.running && time.tick_since(deadline) < 5 * time.Second {
+	for login_env.running && time.tick_since(deadline) < 25 * time.Second {
 		inbox_drain()
 		time.sleep(10 * time.Millisecond)
 	}

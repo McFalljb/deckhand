@@ -285,6 +285,8 @@ pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY l
 ghostty/       Odin bindings for the libghostty-vt calls used
 snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
 holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
+jsonguard/     the check in front of every json.parse/unmarshal of input Deckhand does not control
+               (depth, invalid UTF-8, raw control bytes; core:encoding/json crashes on those)
 autotest.odin  PI_DESK_SCRIPT test mode
 *_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```

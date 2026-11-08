@@ -11,6 +11,7 @@ package main
 // pending confirmations, panel contents, pi status or typed text.
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -665,7 +666,7 @@ move_aside :: proc(tag: string) {
 workspace_restore :: proc(text: string) -> string {
 	if len(text) > WORKSPACE_MAX do return "file too big"
 	if !json_depth_ok(text) do return "JSON nested too deeply"
-	v, jerr := json.parse_string(text, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return "invalid JSON"
 	root, ok := v.(json.Object)
 	if !ok do return "not a JSON object"

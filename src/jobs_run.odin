@@ -30,6 +30,7 @@ import "core:c"
 import "core:crypto/sha2"
 import "core:encoding/hex"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:hash"
 import "core:os"
@@ -308,7 +309,7 @@ run_event :: proc(r: ^Job_Run, line: string) {
 	sync.lock(&r.mu)
 	r.last_event = time.tick_now()
 	sync.unlock(&r.mu)
-	v, err := json.parse_string(line, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(line, .JSON, true, context.temp_allocator, max_depth = jg.MAX_DEPTH_TRANSCRIPT)
 	if err != nil do return
 	o, ok := v.(json.Object)
 	if !ok do return

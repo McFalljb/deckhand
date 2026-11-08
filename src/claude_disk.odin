@@ -30,6 +30,7 @@ package main
 
 import "base:runtime"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
@@ -142,7 +143,7 @@ found_read :: proc(path: string, size: i64) -> (title, cwd: string, sidechain: b
 			if len(line) < 2 || line[0] != '{' do continue
 			wanted := strings.contains(line, `"custom-title"`) || strings.contains(line, `"ai-title"`) || strings.contains(line, `"summary"`) || strings.contains(line, `"isSidechain"`) || strings.contains(line, `"cwd"`)
 			if !wanted || !line_parsable(line) do continue
-			v, perr := json.parse(transmute([]u8)line, .JSON, false, context.temp_allocator) // strict: JSON5's quotes would hide brackets from line_parsable
+			v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator) // strict: JSON5's quotes would hide brackets from line_parsable
 			if perr != nil do continue
 			o, ok := v.(json.Object)
 			if !ok do continue
@@ -631,7 +632,7 @@ found_cwd :: proc(path: string, size, mtime: i64) -> (cwd: string, sidechain: bo
 			if len(line) < 2 || line[0] != '{' do continue
 			if !strings.contains(line, `"cwd"`) && !strings.contains(line, `"isSidechain"`) do continue
 			if !line_parsable(line) do continue
-			v, perr := json.parse(transmute([]u8)line, .JSON, false, context.temp_allocator) // strict: JSON5's quotes would hide brackets from line_parsable
+			v, perr := jg.parse(transmute([]u8)line, .JSON, false, context.temp_allocator) // strict: JSON5's quotes would hide brackets from line_parsable
 			if perr != nil do continue
 			o, ok := v.(json.Object)
 			if !ok do continue

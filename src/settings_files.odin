@@ -37,6 +37,7 @@ package main
 // the running pi tabs (pi reads its settings at start or on /reload).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -413,7 +414,7 @@ settings_packages :: proc() -> []string {
 	if k, st := path_stat(path); k != .File || st.size > 4 << 20 do return out[:]
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return out[:]
-	v, jerr := json.parse(data, .JSON5, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON5, true, context.temp_allocator)
 	if jerr != nil do return out[:]
 	root, _ := v.(json.Object)
 	list, _ := root["packages"].(json.Array)

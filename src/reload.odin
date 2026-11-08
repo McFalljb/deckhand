@@ -46,6 +46,7 @@ package main
 
 import "base:runtime"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -884,7 +885,7 @@ PI_OWN_SETTINGS :: [?]string{"defaultProvider", "defaultModel", "defaultThinking
 settings_digest :: proc(path: string) -> string {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return ""
-	v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if jerr != nil do return ""
 	if obj, ok := v.(json.Object); ok do for k in PI_OWN_SETTINGS do delete_key(&obj, k)
 	out, merr := json.marshal(v, {sort_maps_by_key = true}, context.temp_allocator)
@@ -896,7 +897,7 @@ settings_digest :: proc(path: string) -> string {
 pkg_version :: proc(path: string) -> string {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return ""
-	v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if jerr != nil do return ""
 	obj, ok := v.(json.Object)
 	if !ok do return ""
@@ -986,7 +987,7 @@ pi_package_of :: proc(bin: string) -> string {
 pkg_name :: proc(path: string) -> string {
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return ""
-	v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if jerr != nil do return ""
 	obj, ok := v.(json.Object)
 	if !ok do return ""
@@ -1172,7 +1173,7 @@ add_settings_paths :: proc(settings, base, scope: string) {
 	if path_kind(settings) != .File do return
 	data, err := os.read_entire_file(settings, context.temp_allocator)
 	if err != nil do return
-	v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if jerr != nil do return
 	obj, ok := v.(json.Object)
 	if !ok do return
@@ -1219,7 +1220,7 @@ add_local :: proc(spec, base, scope: string, pkg: bool) {
 		// the manifest's paths: the folder each starts in
 		data, err := os.read_entire_file(pj, context.temp_allocator)
 		if err != nil do return
-		v, jerr := json.parse(data, .JSON, true, context.temp_allocator)
+		v, jerr := jg.parse(data, .JSON, true, context.temp_allocator)
 		if jerr != nil do return
 		root, ok := v.(json.Object)
 		if !ok do return

@@ -18,6 +18,7 @@ package main
 // Rows and their sources are listed in docs/HARNESSES.md §6.
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -384,7 +385,7 @@ pi_settings_sources :: proc(path: string) -> []string {
 	if k, st := path_stat(path); k != .File || st.size > 4 << 20 do return out[:]
 	data, err := os.read_entire_file(path, context.temp_allocator)
 	if err != nil do return out[:]
-	v, jerr := json.parse(data, .JSON5, true, context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON5, true, context.temp_allocator)
 	if jerr != nil do return out[:]
 	root, _ := v.(json.Object)
 	list, _ := root["packages"].(json.Array)

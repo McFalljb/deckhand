@@ -33,6 +33,7 @@ package main
 import "base:runtime"
 import "core:hash"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:math/rand"
 import "core:mem/virtual"
@@ -655,7 +656,7 @@ job_load :: proc(j: ^Job) {
 	if !job_id_valid(j.def.id) || home_root == "" do return
 	dir := job_data_dir(j.def.id)
 	if data, err := os.read_entire_file(fmt.tprintf("%s/state.json", dir), context.temp_allocator); err == nil {
-		v, perr := json.parse(data, .JSON, true, context.temp_allocator)
+		v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
 		o, _ := v.(json.Object)
 		if perr == nil {
 			i :: proc(o: json.Object, k: string) -> i64 {
@@ -684,7 +685,7 @@ job_load :: proc(j: ^Job) {
 		if r.type != .Directory do continue
 		data, err := os.read_entire_file(fmt.tprintf("%s/meta.json", r.fullpath), context.temp_allocator)
 		if err != nil do continue
-		v, _ := json.parse(data, .JSON, true, context.temp_allocator)
+		v, _ := jg.parse(data, .JSON, true, context.temp_allocator)
 		o, _ := v.(json.Object)
 		if rd, ok := o["read"].(json.Boolean); ok && !rd do append(&j.unread, strings.clone(r.name))
 	}
@@ -955,7 +956,7 @@ ledger_ready :: proc() -> bool {
 		for r in runs {
 			data, err := os.read_entire_file(fmt.tprintf("%s/meta.json", r.fullpath), context.temp_allocator)
 			if err != nil do continue
-			v, _ := json.parse(data, .JSON, true, context.temp_allocator)
+			v, _ := jg.parse(data, .JSON, true, context.temp_allocator)
 			o, _ := v.(json.Object)
 			at := i64(o["ended"].(json.Integer) or_else 0)
 			cost := f64(o["cost"].(json.Float) or_else 0)

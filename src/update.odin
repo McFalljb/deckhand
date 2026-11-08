@@ -30,6 +30,7 @@ package main
 
 import "base:runtime"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -816,7 +817,7 @@ update_load :: proc() {
 	if p == "" do return
 	data, err := os.read_entire_file(p, context.temp_allocator)
 	if err != nil do return
-	v, jerr := json.parse(data, parse_integers = true, allocator = context.temp_allocator)
+	v, jerr := jg.parse(data, parse_integers = true, allocator = context.temp_allocator)
 	o, ok := v.(json.Object)
 	if jerr != nil || !ok do return
 	if b, bok := o["checks"].(json.Boolean); bok do upd.checks_off = !bool(b)

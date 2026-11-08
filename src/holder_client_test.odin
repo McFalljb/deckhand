@@ -914,3 +914,21 @@ holder_upgrading_told_once :: proc(t: ^testing.T) {
 	testing.expect_value(t, toast.text, "")
 	hc.upgrading = false
 }
+
+// An older holder that can't be upgraded in place (rev 1): holder_upgrade_tick says so once per
+// run, as plain information, and starts no upgrade.
+@(test)
+holder_upgrade_unavailable_told_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	hc.on, hc.adopt_done, hc.holder_rev = true, true, 1
+	toast_clear()
+	holder_upgrade_tick()
+	testing.expect(t, strings.contains(toast.text, "can't be updated in place"), toast.text)
+	testing.expect(t, !toast.err, "shown as an error")
+	testing.expect(t, !hc.upgrading, "an upgrade started for a rev-1 holder")
+	toast_clear()
+	holder_upgrade_tick()
+	testing.expect_value(t, toast.text, "")
+}

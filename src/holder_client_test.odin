@@ -428,6 +428,25 @@ holder_midrun_lists_kept :: proc(t: ^testing.T) {
 	sync.unlock(&hc.mu)
 }
 
+// Its OUTPUT may come while the app is still attaching: the reader thread runs by then, so the
+// terminals are marked kept before it starts (no unlocked write beside its hc.mu reads; a
+// -sanitize:thread build reported one), and that OUTPUT is not kept either.
+@(test)
+holder_midrun_kept_before_reader :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, output = transmute([]u8)string("more output")}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	hc.adopt_done = true
+	testing.expect(t, holder_wanted(), "attached")
+	wait_until(100, proc() -> bool {return false}) // the OUTPUT has come
+	sync.lock(&hc.mu)
+	h := hc.held[3]
+	testing.expect(t, h != nil && h.kept && len(h.buf) == 0 && h.tail_len == 0, "kept, its output not kept")
+	if h != nil do testing.expect_value(t, h.next, u64(1 + len("more output"))) // its offset still followed
+	sync.unlock(&hc.mu)
+}
+
 @(test)
 held_release_unclaimed_rule :: proc(t: ^testing.T) {
 	cases := []struct {

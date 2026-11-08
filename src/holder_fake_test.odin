@@ -39,6 +39,7 @@ Fake_Holder :: struct {
 	previous:  string,
 	terms:     []hw.Welcome_Terminal,
 	tails:     [][]u8, // one per terminal (its offset - len = the TAIL's start)
+	output:    []u8, // sent as OUTPUT of the first terminal right after the TAILs (while the app attaches)
 	key:       [32]u8,
 	dir:       string, // the runtime dir (also home_root/..)
 	path:      string,
@@ -182,6 +183,11 @@ fake_serve :: proc(f: ^Fake_Holder) {
 						tail := i < len(f.tails) ? f.tails[i] : nil
 						out := make([dynamic]u8, context.temp_allocator)
 						hw.encode_output(&out, .Tail, u32(wt.id), wt.offset - u64(len(tail)), tail)
+						sock_write_all(f.cfd, out[:])
+					}
+					if len(f.output) > 0 && len(f.terms) > 0 {
+						out := make([dynamic]u8, context.temp_allocator)
+						hw.encode_output(&out, .Output, u32(f.terms[0].id), f.terms[0].offset, f.output)
 						sock_write_all(f.cfd, out[:])
 					}
 				}

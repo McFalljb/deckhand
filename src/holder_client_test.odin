@@ -571,7 +571,7 @@ holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 		lfd := posix.FD(uintptr(p))
 		time.sleep(20 * time.Millisecond)
 		posix.fcntl(lfd, .SETFL, posix.O_Flags{.NONBLOCK})
-		for _ in 0 ..< 30 {
+		for _ in 0 ..< 100 { // past the rescan too: every connect of holder_client_start is taken and closed
 			for {
 				fd := posix.accept(lfd, nil, nil)
 				if fd < 0 do break

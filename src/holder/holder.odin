@@ -41,8 +41,8 @@ READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
 SPAWN_TIMEOUT :: 10 * time.Second // the app gives up (and RELEASEs) sooner; this is the backstop
 HELLO_TIMEOUT :: 5 * time.Second // from accept: a connection that has not said HELLO is dropped
-LINGER :: 5 * time.Second
-ACCEPT_BACKOFF :: 100 * time.Millisecond // out of fds: the listener is left out of poll this long // after GOODBYE_ACK: how long the core may take to close
+LINGER :: 5 * time.Second // after GOODBYE_ACK: how long the core may take to close
+ACCEPT_BACKOFF :: 100 * time.Millisecond // out of fds: the listener is left out of poll this long
 
 Config :: struct {
 	run_dir:       string, // "": no listening socket (tests hand fds to holder_attach)
@@ -142,6 +142,7 @@ Holder :: struct {
 	input_paused_at:   time.Tick,
 	logged:            int, // log lines so far (tests)
 	listen_paused:     bool, // accept failed for want of fds (EMFILE, ENFILE): back off
+	accept_logged:     bool, // that was logged; again only after an accept worked
 	listen_paused_at:  time.Tick,
 }
 
@@ -256,6 +257,19 @@ holder_listen :: proc(h: ^Holder) -> bool {
 	return true
 }
 
+// The socket goes as soon as the holder is on its way out (a shutdown that reaps, an idle exit):
+// a core that connects then is refused at once rather than left waiting in an unpolled backlog.
+@(private)
+stop_listening :: proc(h: ^Holder) {
+	if h.listen_fd >= 0 do close(h.listen_fd)
+	h.listen_fd = -1
+	if h.sock_path != "" {
+		unlink(strings.clone_to_cstring(h.sock_path, context.temp_allocator))
+		delete(h.sock_path)
+		h.sock_path = ""
+	}
+}
+
 @(private)
 sync_lock :: proc() {sync.mutex_lock(&fork_lock)}
 @(private)
@@ -278,11 +292,7 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 		term_free(t)
 	}
 	delete(h.terms)
-	if h.listen_fd >= 0 do close(h.listen_fd)
-	if h.sock_path != "" {
-		unlink(strings.clone_to_cstring(h.sock_path, context.temp_allocator))
-		delete(h.sock_path)
-	}
+	stop_listening(h)
 	if h.lock_fd >= 0 do close(h.lock_fd)
 	delete(h.instance)
 	delete(h.buf)
@@ -476,11 +486,13 @@ accept_all :: proc(h: ^Holder) {
 			// the listener stays readable while the connection waits: polling it again at once
 			// would spin
 			if e := errno(); e == EMFILE || e == ENFILE {
-				if !h.listen_paused do hlog(h, "accept: out of file descriptors (errno %d): backing off", e)
+				if !h.accept_logged do hlog(h, "accept: out of file descriptors (errno %d): backing off", e)
+				h.accept_logged = true
 				h.listen_paused, h.listen_paused_at = true, time.tick_now()
 			}
 			return
 		}
+		h.accept_logged = false
 		holder_attach(h, fd)
 	}
 }
@@ -836,6 +848,7 @@ shutdown :: proc(h: ^Holder) {
 	for cn in h.conns do cn.dead = true
 	h.core = nil
 	h.shutting_down = true
+	stop_listening(h)
 	h.shutdown_deadline = time.tick_add(time.tick_now(), h.cfg.shutdown_wait)
 }
 
@@ -927,6 +940,7 @@ timers :: proc(h: ^Holder) {
 		if !h.idle do h.idle, h.idle_since = true, time.tick_now()
 		else if time.tick_since(h.idle_since) >= h.cfg.idle_exit {
 			hlog(h, "no core and no running terminal for %v: exiting", h.cfg.idle_exit)
+			stop_listening(h)
 			h.done, h.exit_code = true, 0
 		}
 	} else {
@@ -963,9 +977,10 @@ hold_main :: proc(args: []string) -> int {
 	}
 	if run_dir == "" || data_dir == "" do return usage()
 
+	cloexec_inherited() // a launcher's leaked fds never reach the sessions
 	reset_signals()
-	raise_fd_limit()
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
+	raise_fd_limit() // after it: the re-exec'd holder would take the raised limit for the original
 
 	if ready != "" {
 		// the launcher's environment, applied by ready_handshake (detach.odin)
@@ -1014,6 +1029,7 @@ hold_main :: proc(args: []string) -> int {
 raise_fd_limit :: proc() {
 	rl: Rlimit
 	if getrlimit(RLIMIT_NOFILE, &rl) != 0 do return
+	child_nofile, child_nofile_set = rl, true // the sessions get the limit we were started with (spawn_pty)
 	want := min(rl.max, OPEN_MAX)
 	if rl.cur >= want do return
 	rl.cur = want

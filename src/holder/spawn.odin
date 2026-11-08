@@ -29,8 +29,24 @@ reset_signals :: proc "contextless" () {
 	sigprocmask(SIG_SETMASK, &empty, nil)
 }
 
-// TODO
-cloexec_inherited :: proc() {}
+// Every fd above 2 this process has made close-on-exec: one a launcher leaked to us (a shell, a
+// CI runner, a direct start that did not use POSIX_SPAWN_CLOEXEC_DEFAULT) never reaches a
+// session. At start, before any fd of the holder's own is open (theirs are close-on-exec).
+cloexec_inherited :: proc() {
+	F_GETFD :: 1
+	rl: Rlimit
+	top := c.int(OPEN_MAX)
+	if getrlimit(RLIMIT_NOFILE, &rl) == 0 do top = c.int(min(max(rl.cur, rl.max), OPEN_MAX)) // above the soft limit too
+	for fd in c.int(3) ..< top {
+		flags := fcntl(fd, F_GETFD)
+		if flags >= 0 && flags & FD_CLOEXEC == 0 do fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
+	}
+}
+
+// RLIMIT_NOFILE as the holder was started with (raise_fd_limit raises its own): set again in
+// every child before execve.
+child_nofile: Rlimit
+child_nofile_set: bool
 
 // argv[0] must be an absolute path (no PATH search); env entries are "K=V". The child gets the
 // PTY's slave as 0, 1, 2 and is its session leader (forkpty: pgid == pid).
@@ -73,6 +89,7 @@ spawn_pty :: proc(argv, env: []string, cwd: string, ws: Winsize, gate: c.int = 0
 	if pid == 0 {
 		close(exec_pipe[0])
 		reset_signals()
+		if child_nofile_set do setrlimit(RLIMIT_NOFILE, &child_nofile)
 		if gate > 0 {
 			b: u8
 			read(gate, &b, 1)

@@ -36,6 +36,8 @@ import "trust"
 HOLDER_WAIT :: 5 * time.Second // the socket after a launch, WELCOME + TAILs, SPAWNED, GOODBYE_ACK
 HOLDER_MAX_TERMS :: 4096
 HOLDER_FG_EVERY :: 250 * time.Millisecond // FOREGROUND at most this often per terminal
+HOLDER_RECHECK :: 50 * time.Millisecond // a refused connect is tried again after this (a full backlog)
+HOLDER_RESCAN :: 300 * time.Millisecond // the sockets are looked at again after a silent holder
 
 // One holder terminal as the app knows it. hc.mu guards every field after the reader started.
 Held :: struct {
@@ -148,17 +150,43 @@ holder_client_start :: proc() -> bool {
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
 	answered := false
-	for path in socks {
-		switch holder_connect(path) {
-		case .Welcomed:
-			hc.tried = true
-			return true
-		case .Answered:
-			answered = true
-		case .Stale:
-			fmt.eprintln("Deckhand: session holder: removing a dead holder's socket", path)
-			sock_unlink(path)
+	// a holder that took the connection and closed it (or never answered) without a byte may have
+	// been shutting down: looked for again once, a moment later (gone by then: none runs)
+	// (a socket that is still there then is not tried again: a hung holder would cost 5 s more)
+	silent := make([dynamic]string, context.temp_allocator)
+	for pass in 0 ..< 2 {
+		quiet := false
+		next: for path in socks {
+			for q in silent do if q == path {
+				answered = true
+				continue next
+			}
+			r := holder_connect(path)
+			if r == .Stale {
+				// macOS also refuses when the listen backlog is full: a busy live holder. Once more
+				// before its socket is taken for a dead one's
+				time.sleep(HOLDER_RECHECK)
+				r = holder_connect(path)
+			}
+			switch r {
+			case .Welcomed:
+				hc.tried = true
+				return true
+			case .Answered:
+				answered = true
+			case .Quiet:
+				if pass == 0 {
+					quiet = true
+					append(&silent, path)
+				} else do answered = true
+			case .Stale:
+				fmt.eprintln("Deckhand: session holder: removing a dead holder's socket", path)
+				sock_unlink(path)
+			}
 		}
+		if !quiet do break
+		time.sleep(HOLDER_RESCAN)
+		socks = holder_socks(run)
 	}
 	switch trust.holder_start(answered, state.settings.keep_sessions) {
 	case .Without:
@@ -226,7 +254,11 @@ Connect_Result :: enum {
 	Welcomed, // attached
 	Answered, // something listens there but gave no usable WELCOME: a holder runs (trust.holder_start)
 	Stale, // nobody listens (a holder killed with -9: the holder unlinks only its own socket at exit)
+	Quiet, // took the connection but closed it, or never answered, without a byte (shutting down?)
 }
+
+@(private = "file")
+handshake_got: int // bytes the handshake read so far (Quiet: none)
 
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
@@ -242,6 +274,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer
+	handshake_got = 0
 	fail :: proc(why: string) -> Connect_Result {
 		fmt.eprintln("Deckhand: session holder:", why)
 		sock_close(hc.fd)
@@ -250,7 +283,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 		clear(&hc.held)
 		hw.stream_destroy(&hc.rx)
 		hc.rx = {}
-		return .Answered
+		return handshake_got == 0 ? .Quiet : .Answered
 	}
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE})
@@ -340,6 +373,7 @@ handshake_frame :: proc(deadline: time.Tick) -> (f: hw.Frame, ok: bool) {
 		if left <= 0 || !sock_wait_readable(hc.fd, max(int(time.duration_milliseconds(left)), 1)) do return {}, false
 		n := sock_read(hc.fd, buf[:])
 		if n <= 0 do return {}, false
+		handshake_got += n
 		if trust.peer_still(hc.peer, trust.peer_read(hc.fd)) != .Allow do return {}, false
 		hw.stream_feed(&hc.rx, buf[:n])
 	}

@@ -10,8 +10,6 @@ import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
-import "core:slice"
-import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -665,7 +663,8 @@ shutdown_stops_listening :: proc(t: ^testing.T) {
 	f := fake_connect(t, h)
 	defer fake_free(f)
 	hello(t, h, f)
-	spawn_ok(t, h, f, 1, `trap "" HUP; exec /bin/sleep 5`) // outlives the hangup: the shutdown waits
+	spawn_ok(t, h, f, 1, `trap "" HUP; echo ready; exec /bin/sleep 5`) // outlives the hangup: the shutdown waits
+	testing.expect(t, wait_output(t, h, f, 1, "ready"))
 	fake_send(f, .Goodbye, 0, holderwire.Goodbye{mode = "shutdown"})
 	start := time.tick_now()
 	for !h.shutting_down && time.tick_since(start) < time.Second do holder_step(h, 10)
@@ -996,62 +995,28 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(h.conns), 1)
 }
 
-// The fds this process inherited open without close-on-exec, before any test ran: a CI runner
-// hands its shells some (GitHub's macOS one: 131, 140, ...). They are no leak of the holder's (it
-// is started with only 0-2: holder_launch_direct's POSIX_SPAWN_CLOEXEC_DEFAULT, launchd), so
-// child_holds_only_stdio allows them and nothing else.
-inherited_fds: [256]c.int
-inherited_n: int
-
-@(init)
-inherited_fds_init :: proc "contextless" () {
-	F_GETFD :: 1
-	for fd in c.int(3) ..< 4096 {
-		flags := fcntl(fd, F_GETFD)
-		if flags < 0 || flags & FD_CLOEXEC != 0 do continue
-		if inherited_n < len(inherited_fds) do inherited_fds[inherited_n] = fd
-		inherited_n += 1
-	}
-}
-
-fd_inherited :: proc(fd: int) -> bool {
-	for i in 0 ..< min(inherited_n, len(inherited_fds)) do if int(inherited_fds[i]) == fd do return true
-	return false
-}
-
-// A SPAWNed program holds only 0, 1 and 2 (and what the test process itself inherited, above):
-// no master of another terminal, no socket, no lock.
+// A SPAWNed program holds only 0, 1 and 2: no master of another terminal, no socket, no lock.
+// The fds this process inherited (a CI runner hands its shells some: GitHub's macOS one 131,
+// 140, ...) are made close-on-exec first, as hold_main does at start (cloexec_inherited); every
+// fd a holder opens after that is checked.
 @(test)
 child_holds_only_stdio :: proc(t: ^testing.T) {
-	if !testing.expectf(t, inherited_n <= len(inherited_fds), "%d inherited fds: more than listed", inherited_n) do return
+	sync.mutex_lock(&fork_lock)
+	cloexec_inherited()
+	sync.mutex_unlock(&fork_lock)
 	h := new_test_holder(t)
 	defer holder_free(h, true)
 	f := fake_connect(t, h)
 	defer fake_free(f)
 	hello(t, h, f)
 	spawn_ok(t, h, f, 1, "exec /bin/sleep 5") // another terminal's master is open meanwhile
-	// ls lists what it inherited plus the two it opens to read the directory (the two lowest
-	// free ones, if none leaked: 3 and 4 from a clean shell; as from a clean shell)
+	// ls lists what it inherited plus the two it opens to read the directory (3 and 4, the lowest
+	// free ones, if none leaked; as from a clean shell)
 	spawn_ok(t, h, f, 2, `exec /bin/ls /dev/fd`)
 	_, ok := exited_of(t, h, f, 2)
 	testing.expect(t, ok)
-	// an inherited one the child has (a sibling test may have made them close-on-exec since:
-	// cloexec_inherited) is allowed, and ls's two then come after it
-	fields := strings.fields(output_of(t, f, 2), context.temp_allocator)
-	present := make(map[int]bool, context.temp_allocator)
-	for s in fields do if n, is_num := strconv.parse_int(s); is_num && n > 2 && fd_inherited(n) do present[n] = true
-	got := make([dynamic]string, context.temp_allocator)
-	for s in fields {
-		n, _ := strconv.parse_int(s)
-		if present[n] do continue
-		append(&got, s)
-	}
-	want := make([dynamic]string, context.temp_allocator)
-	append(&want, "0", "1", "2")
-	for fd := 3; len(want) < 5; fd += 1 do if !present[fd] do append(&want, fmt.tprintf("%d", fd))
-	slice.sort(got[:])
-	slice.sort(want[:])
-	testing.expectf(t, slice_eq(got[:], want[:]), "the child holds more than 0-2: %v (inherited by the tests: %v)", got[:], inherited_fds[:min(inherited_n, len(inherited_fds))])
+	out := strings.fields(output_of(t, f, 2), context.temp_allocator)
+	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "the child holds more than 0-2: %v", out)
 }
 
 slice_eq :: proc(a, b: []string) -> bool {

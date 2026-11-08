@@ -115,7 +115,7 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 		close(kp[0]); close(kp[1])
 		return "cannot read our own audit token"
 	}
-	argv := [5]cstring{cpath, "hold", "--resume", strings.clone_to_cstring(fmt.tprintf("%d", kp[1]), context.temp_allocator), nil}
+	argv := resume_argv(h, cpath, "--resume", kp[1])
 	keeper := posix.fork()
 	if keeper < 0 {
 		close(kp[0]); close(kp[1])
@@ -155,6 +155,14 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	return fmt.tprintf("execve: errno %d", e)
 }
 
+// `path hold --run DIR --data DIR --resume FD`: the dirs are the state's (and checked against
+// it), there so that ps and pgrep still tell which holder serves which run dir.
+@(private)
+resume_argv :: proc(h: ^Holder, path: cstring, flag: cstring, fd: c.int) -> [9]cstring {
+	tmp := context.temp_allocator
+	return {path, "hold", "--run", strings.clone_to_cstring(h.cfg.run_dir, tmp), "--data", strings.clone_to_cstring(h.cfg.data_dir, tmp), flag, strings.clone_to_cstring(fmt.tprintf("%d", fd), tmp), nil}
+}
+
 // Sends everything queued for cn, waiting up to the deadline (the loop is paused meanwhile).
 @(private)
 conn_flush_by :: proc(h: ^Holder, cn: ^Conn, deadline: time.Tick) -> bool {
@@ -180,7 +188,7 @@ dry_run :: proc(h: ^Holder, path: string, blob: []u8, fds: []c.int, own: trust.C
 	sync_unlock()
 	set_nosigpipe(dp[0])
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
-	argv := [5]cstring{cpath, "hold", "--dry-run-resume", strings.clone_to_cstring(fmt.tprintf("%d", dp[1]), context.temp_allocator), nil}
+	argv := resume_argv(h, cpath, "--dry-run-resume", dp[1])
 	env := _NSGetEnviron()^
 	sync_lock()
 	child := posix.fork()
@@ -246,7 +254,7 @@ dry_run_talk :: proc(fd: c.int, child: i32, blob: []u8, fds: []c.int, own: trust
 // `hold --resume FD` and `hold --dry-run-resume FD` (hold_main, after reset_signals): take the
 // state over FD. A dry run reports and exits; a resume returns the holder to serve (nil, with a
 // log line, if the handoff failed: the caller exits 1 and the keeper keeps the terminals).
-holder_resume :: proc(fd_arg: string, dry: bool) -> ^Holder {
+holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^Holder {
 	fdn, nok := strconv.parse_int(fd_arg, 10)
 	if !nok || fdn < 3 || fdn > 1 << 20 {
 		log_line(fmt.tprintf("resume: bad fd %q", fd_arg))
@@ -270,6 +278,10 @@ holder_resume :: proc(fd_arg: string, dry: bool) -> ^Holder {
 		return nil
 	}
 	delete(fds)
+	if h.cfg.run_dir != run_dir || h.cfg.data_dir != data_dir {
+		log_line(fmt.tprintf("resume: the state is for %s and %s, not the dirs we were given: exiting", h.cfg.run_dir, h.cfg.data_dir))
+		os.exit(1) // the fds go with us; the keeper keeps its copies
+	}
 	if dry {
 		if _, on := hook("dry-run-fail", true); on do _exit(1)
 		res: [16]u8
@@ -291,6 +303,5 @@ holder_resume :: proc(fd_arg: string, dry: bool) -> ^Holder {
 	}
 	close(fd)
 	hlog(h, "upgraded in place: holder_rev %d, %d terminals, instance %s", HOLDER_REV, len(h.terms), h.instance)
-	_ = os.args
 	return h
 }

@@ -989,7 +989,8 @@ on_sigchld :: proc "c" (sig: c.int) {
 }
 
 // `deckhand-core hold --run DIR --data DIR [--ready PATH]`, or after an UPGRADE's exec
-// `hold --resume FD` (the new image) and `hold --dry-run-resume FD` (its dry run; upgrade.odin).
+// `hold --resume FD --run DIR --data DIR` (the new image) and `hold --dry-run-resume FD --run DIR
+// --data DIR` (its dry run; upgrade.odin).
 // Exit codes: 0 done (idle or GOODBYE{shutdown}), 1 a start failure, 2 usage, 3 instance.lock
 // held exclusively.
 hold_main :: proc(args: []string) -> int {
@@ -1013,9 +1014,9 @@ hold_main :: proc(args: []string) -> int {
 	reset_signals()
 
 	if resume != "" || dry != "" {
-		if run_dir != "" || data_dir != "" || ready != "" || (resume != "" && dry != "") do return usage()
+		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") do return usage()
 		raise_fd_limit() // before it takes every master; a resource limit survives exec, but not the raise
-		h := holder_resume(dry != "" ? dry : resume, dry != "")
+		h := holder_resume(dry != "" ? dry : resume, dry != "", run_dir, data_dir)
 		if h == nil do return 1
 		install_sigchld(h)
 		return holder_serve(h)

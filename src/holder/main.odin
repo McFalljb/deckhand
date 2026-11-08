@@ -5,6 +5,7 @@
 // the programs print.
 //
 //   deckhand-core hold --run DIR --data DIR [--ready PATH]   serve (holder.odin)
+//   deckhand-core hold --resume FD --run DIR --data DIR      after an UPGRADE's exec (upgrade.odin)
 //   deckhand-core __detach                    launchd job entry: fork, setsid, exec hold (detach.odin)
 package holder
 

@@ -65,7 +65,7 @@ files-nested        | full     |                       |   20 | src/files.odin s
 fish-shell          | full     |                       |    6 | src/login_env.odin src/harness.odin tests/scripts/fish-shell.* tests/scripts/fake-fish.sh tests/scripts/fake-claude.py
 harness-setup       | full     |                       |   40 | src/harness_install.odin src/harness_manifest.odin src/ui_harness.odin src/ui_setup.odin tests/scripts/harness-setup* tests/scripts/fake-install.sh
 jobs                | required | test-trash            |   79 | src/jobs*.odin src/ui_jobs.odin src/ui_job_sheet.odin src/notify.odin src/agent.odin tests/scripts/jobs.* tests/scripts/fake-pi-json.py
-keep-sessions       | full     |                       |    5 | src/holder_client.odin src/holder_adopt.odin src/holder/* src/holderwire/* src/trust/* src/launchd_darwin.odin src/holder_install.odin src/macfile.odin src/snapshot.odin src/instance.odin tests/scripts/keep-sessions*
+keep-sessions       | full     |                       |    8 | src/holder_client.odin src/holder_adopt.odin src/holder/* src/holderwire/* src/trust/* src/launchd_darwin.odin src/holder_install.odin src/macfile.odin src/snapshot.odin src/instance.odin tests/scripts/keep-sessions*
 login-path          | full     |                       |   27 | src/login_env.odin src/harness.odin tests/scripts/login-path*
 markdown            | required |                       |   30 | src/markdown*.odin src/menubar.odin docs/GUIDE.md tests/markdown/* tests/scripts/markdown.*
 menu                | required | smoke                 |   10 | src/menubar.odin src/native/menubar_macos.m src/actions.odin tests/scripts/menu.*

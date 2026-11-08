@@ -204,6 +204,10 @@ window_hooks_app :: proc() -> Window_Hooks {
 			}
 			return
 		},
+		display = proc() -> (fps: int, scale: f32, ok: bool) {
+			fps, scale = platform_display()
+			return fps, scale, true
+		},
 		frames_read = proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
 			when ODIN_OS == .Darwin {
 				return dh_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
@@ -1270,6 +1274,7 @@ main :: proc() {
 			platform_test_scale(scale)
 		}
 	}
+	platform_display_hook() // sokol's display link: the window's screen's rate (platform_macos.m)
 	sapp.run({
 		init_cb = init,
 		frame_cb = frame,

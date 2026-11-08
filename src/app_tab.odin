@@ -156,7 +156,7 @@ APP_SHOT_TIMEOUT :: 30 * time.Second
 APP_SHOTS_IN_FLIGHT :: 4 // screenshots being encoded at once (each holds a frame copy)
 APP_SHOT_TYPE :: "#screenshot" // a pending screenshot's type: never a method name (app_call_check)
 // Deckhand's own requests and the envelope's message types: never from app_call
-APP_RESERVED := [?]string{"tab.quit", "tab.visible", "hello", "result", "event", "input"}
+APP_RESERVED := [?]string{"tab.quit", "tab.visible", "tab.display", "hello", "result", "event", "input"}
 
 // Runtime per app tab (outside State), keyed by tab id.
 App_Proc :: struct {
@@ -172,6 +172,8 @@ App_Proc :: struct {
 	ping_at:     time.Tick,
 	ping_answered: bool,
 	sent_visible: int, // -1 = not sent yet, else 0/1
+	sent_fps:    int, // the display rate and scale last sent in tab.display (0 = not yet)
+	sent_scale:  f32,
 	restarts:    [dynamic]time.Tick, // automatic restarts (exit 75)
 	quit_at:     time.Tick, // closing: tab.quit sent at
 	term_sent:   bool,
@@ -678,6 +680,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	delete(a.ping_wire)
 	a.ping_wire = ""
 	a.sent_visible = -1
+	a.sent_fps, a.sent_scale = 0, 0
 	a.focused = false
 	clear(&a.held)
 	a.buttons = {}
@@ -1005,6 +1008,14 @@ app_frames_tick :: proc() -> bool {
 				if visible do a.ring.last_frame = now // silence while hidden is no stall
 			}
 		}
+		// the display: its rate and scale, soon after the hello (which has them too) and whenever
+		// the window's screen changes (another screen, ProMotion/VRR, a scale change)
+		if fps, scale := platform_display(); (a.sent_fps != fps || a.sent_scale != scale) && socket_app_connected(id) {
+			if w := app_own_request(id, "tab.display", app_display_json(fps, scale), APP_CALL_TIMEOUT); w != "" {
+				delete(w)
+				a.sent_fps, a.sent_scale = fps, scale
+			}
+		}
 		// stalls: no frame for 2 s while visible -> tab.ping (1 s)
 		status := at.app_status
 		want := status
@@ -1098,6 +1109,21 @@ app_frames_committed :: proc() {
 	if frames_ok == 1 do dh_frames_committed(sg.mtl_command_queue())
 }
 
+// Where a frame of gw x gh px draws in a pane at x, y, w, h (framebuffer px, may be
+// fractional: split panes): at whole pixels, at most the frame's size, so each screen pixel's
+// centre lands on one texel's centre (1:1, nothing filtered or shifted by half a pixel). Pure.
+App_Quad :: struct {
+	x, y, w, h: f32, // px
+	u, v:       f32, // the frame's part shown (texture coordinates)
+}
+
+app_frame_quad :: proc(x, y, w, h: f32, gw, gh: int) -> App_Quad {
+	x0, y0 := math.round(x), math.round(y)
+	dw := clamp(math.round(x + w) - x0, 0, f32(gw))
+	dh := clamp(math.round(y + h) - y0, 0, f32(gh))
+	return {x0, y0, dw, dh, gw > 0 ? dw / f32(gw) : 0, gh > 0 ? dh / f32(gh) : 0}
+}
+
 // The shown slot at the pane's top-left, 1:1 in px (clipped while a
 // resize is on its way); dimmed once the app exited.
 app_draw :: proc(tab_id: u64, x, y, w, h: f32) {
@@ -1106,16 +1132,15 @@ app_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	g := ring_gen(&a.ring, a.ring.shown_gen)
 	if g == nil || g.image[a.ring.shown_slot] == 0 do return
 	if app_sampler.id == 0 do app_sampler = sg.make_sampler({min_filter = .NEAREST, mag_filter = .NEAREST})
-	dw, dh := min(f32(g.w), w), min(f32(g.h), h)
-	u, v := dw / f32(g.w), dh / f32(g.h)
+	q := app_frame_quad(x, y, w, h, g.w, g.h)
 	k: u8 = a.pid == 0 ? 110 : 255 // the last frame of an app that exited: dimmed
 	sgl.end()
 	sgl.texture({g.view[a.ring.shown_slot]}, app_sampler)
 	sgl.begin_quads()
-	sgl.v2f_t2f_c4b(x, y, 0, 0, k, k, k, 255)
-	sgl.v2f_t2f_c4b(x + dw, y, u, 0, k, k, k, 255)
-	sgl.v2f_t2f_c4b(x + dw, y + dh, u, v, k, k, k, 255)
-	sgl.v2f_t2f_c4b(x, y + dh, 0, v, k, k, k, 255)
+	sgl.v2f_t2f_c4b(q.x, q.y, 0, 0, k, k, k, 255)
+	sgl.v2f_t2f_c4b(q.x + q.w, q.y, q.u, 0, k, k, k, 255)
+	sgl.v2f_t2f_c4b(q.x + q.w, q.y + q.h, q.u, q.v, k, k, k, 255)
+	sgl.v2f_t2f_c4b(q.x, q.y + q.h, 0, q.v, k, k, k, 255)
 	sgl.end()
 	sgl.texture(font.view, font.sampler)
 	sgl.begin_quads()
@@ -1807,6 +1832,10 @@ app_palette_results :: proc(query: string) -> []Palette_Item {
 //   app_leave                   the pointer leaves the window
 //   assert_app_hover LABEL|-    while inspecting, the box under the pointer has LABEL (- = none)
 //   assert_shot_pixel X Y RRGGBB  the last finished app_screenshot's PNG at px X,Y is RRGGBB (±8)
+//   app_display_fps N           report N fps as the window's screen's rate (as if it moved to such
+//                               a screen; 0 = the real one): apps get tab.display, the display link
+//                               asks for N
+//   assert_display_link N       sokol's display link asks for N frames per second
 
 app_last_finished: string // autotest's last finished result (assert_shot_pixel)
 
@@ -2053,6 +2082,14 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		e := sapp.Event{type = args[0] == "down" ? .MOUSE_DOWN : .MOUSE_UP, mouse_button = .LEFT, mouse_x = r.x + f32(num_arg(args, 1, 0)) * app.dpi, mouse_y = r.y + f32(num_arg(args, 2, 0)) * app.dpi}
 		app.clicks = 1
 		event(&e)
+		return "", true
+	case "app_display_fps":
+		if len(args) < 1 do return "app_display_fps N", false
+		platform_test_display_fps(int(num_arg(args, 0, 0)))
+		return "", true
+	case "assert_display_link":
+		if len(args) < 1 do return "assert_display_link N", false
+		if got := platform_display_link_fps(); got != f32(num_arg(args, 0, 0)) do return fmt.tprintf("ASSERT FAILED display link asks for %v fps, want %s", got, args[0]), false
 		return "", true
 	case "app_leave":
 		e := sapp.Event{type = .MOUSE_LEAVE}

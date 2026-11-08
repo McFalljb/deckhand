@@ -106,8 +106,11 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
 {"id":"1","v":1,"type":"hello","token":"<DECKHAND_TOKEN>","app":"my-engine","pid":4321}
 {"id":"1","v":1,"type":"result","result":{"ok":true,"data":{"v":1,"app":"deckhand","caller":"app","tab_id":9,
  "capabilities":["app","frames","input"],"reconnect_token":"<64 hex>",
- "frames":{"service":"dev.deckhand.frames.812","key":"<64 hex>","device":4294969123}}}}
+ "frames":{"service":"dev.deckhand.frames.812","key":"<64 hex>","device":4294969123},
+ "display":{"fps":240,"scale":1}}}}
 ```
+
+`display` is the screen the tab's window is on (§2.1, "Display rate"). Old engines ignore it.
 
 `device` is Deckhand's `MTLDevice.registryID`. The engine must render on that same GPU (pick it
 from `MTLCopyAllDevices`), so the surfaces never cross GPUs on a dual-GPU Mac.
@@ -149,7 +152,8 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
   - **Size:** `round(pane_w × scale) × round(pane_h × scale)` (the tab's own pane).
   - **Contents:** values already display-encoded, the same as sokol's BGRA8 window swapchain.
 - With 3 slots, one is on screen, one waits for Deckhand's GPU to finish sampling it, and one is
-  free for the engine. Neither side waits on the other at 60 Hz.
+  free for the engine. Neither side waits on the other at the display's rate (up to 240 Hz
+  measured; see "Display rate" below).
 - **Ownership:** Deckhand creates and frees the surfaces.
   - The engine wraps each surface once, with `newTextureWithDescriptor:iosurface:plane:0`
     (usage RenderTarget|ShaderRead) and then `sg_make_image{mtl_textures}`. Depth and MSAA
@@ -163,6 +167,24 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
     then frees the old ring. If the engine dies first, Deckhand frees it then.
   - The RING message *is* the resize for texture tabs. TAB-PROTOCOL's `resize` message is dropped
     for them.
+- **Display rate.** Deckhand tells the engine the screen it is shown on, so it can pace to it
+  (it has no window, so no display link of its own):
+  - the hello reply's `display {fps, scale}`, and the request `tab.display {fps, scale}` (NDJSON,
+    with an id like `tab.visible`; reply `{"ok":true}`, any reply or none is fine). Deckhand
+    sends `tab.display` soon after the hello (the same values; treat it as idempotent) and again
+    whenever they change: the window moves to another screen, a screen's mode or refresh rate
+    changes (ProMotion, VRR, System Settings), the screens are added or removed, or the backing
+    scale changes.
+  - `fps` (integer): the window's screen's `NSScreen.maximumFramesPerSecond` (60, 120, 144,
+    240…); the screen holding most of the window when it spans two. `scale` (number): that
+    window's backing scale. The RING's `scale` (§2.2) is still the one to render at; `scale`
+    here says a new ring is coming.
+  - The engine paces to `fps`, or to its own lower cap (a simulation can tick at a fixed rate and
+    interpolate its drawing). Deckhand's own frame loop runs at the window's screen's rate too
+    (its display link follows the window, not the main screen), and an app frame redraws the
+    window at once: nothing caps app frames at 60 Hz (the 15 ms cap is terminal output's only).
+  - Frames are drawn 1:1: the ring is the pane's size in pixels, drawn at whole pixels with a
+    nearest sampler, so the engine renders at native resolution and nothing is filtered.
 - **Visibility:** `tab.visible {visible}` (NDJSON). Visible = shown in any pane of the session on
   screen (several app tabs can be visible at once when the session is split; only the pane with
   the keyboard gets input). A hidden tab gets no frames. The engine keeps
@@ -556,7 +578,9 @@ Loaded in every pi; inert when no app is reachable.
 
 **Behaviour.**
 - **Startup:** hello with `DECKHAND_TOKEN`, then the Mach `HELLO`, then wait for `RING`.
-- **Loop at 60 Hz** (a `mach_wait_until` timer). When not paused: `tick += round(scale)` (scale
+- **Loop at 60 Hz** (a `mach_wait_until` timer), or `--fps N`, or `--fps display` (the rate
+  Deckhand reports: hello `display.fps`, then `tab.display`). Its stats line (once a second, in
+  the tab's log) counts the frames drawn and the loop turns that found no free slot. When not paused: `tick += round(scale)` (scale
   < 1 ticks every 1/scale frames). Then render if a slot is held.
 - **Render, with no shaders:**
   - a render pass with a Clear load action: background `#202830`;
@@ -675,7 +699,9 @@ Step 1 carries the most risk: it is native IPC and process-lifetime code.
      slot back if the send fails. Send `HELLO` and `RING_DONE` with no timeout. Drain `RING`
      and `RELEASE` promptly on a dedicated queue: Deckhand gives up after 250 ms and treats the
      engine as hung.
-5. **Pace itself to 60 Hz** (no display link). Render nothing while `tab.visible` is false.
+5. **Pace itself to the display rate Deckhand reports** (the hello's `display.fps`, then each
+   `tab.display`), or to the engine's own lower cap; it has no display link. Render nothing
+   while `tab.visible` is false.
 6. **Death handling:** a dead-name notification or socket EOF means `--on-desk-exit=window|exit`.
    Never touch the old surfaces again. Exit code 75 means "restart me".
 7. **`input` messages → `Game_Input`** (sokol keycode names, logical px × scale, `focus`, `char`),
@@ -692,7 +718,7 @@ Step 1 carries the most risk: it is native IPC and process-lifetime code.
    - `tab.time` (pause, step N replying after N ticks, scale);
    - `tab.record`/`tab.replay` (Play snapshot + per-tick input);
    - `tab.subscribe` (log, script_error, profiler ≤ 4/s, reload);
-   - `tab.visible`, `tab.ping`, `tab.quit`.
+   - `tab.visible`, `tab.display`, `tab.ping`, `tab.quit`.
 9. **Errors** in the §4 shape with `code`. A stale generation is always `gone`.
 10. **Events:** `tab.reload` for dylib, Lua and state-size restarts; `tab.time` when the pause
     state or mode changes.

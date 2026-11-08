@@ -54,7 +54,7 @@ app_call_checks_only_the_envelope :: proc(t: ^testing.T) {
 	bad(t, `game"get`, "", "bad_args")
 	bad(t, "ünïcode", "", "bad_args")
 	bad(t, ".get", "", "bad_args") // starts with a letter
-	for m in ([]string{"tab.quit", "tab.visible", "hello", "result", "event", "input"}) do bad(t, m, "", "reserved")
+	for m in ([]string{"tab.quit", "tab.visible", "tab.display", "hello", "result", "event", "input"}) do bad(t, m, "", "reserved")
 	for k in ([]string{"id", "v", "type"}) do bad(t, "game.get", strings.concatenate({`{"`, k, `":1}`}, context.temp_allocator), "bad_args")
 	big := strings.concatenate({`{"s":"`, strings.repeat("x", APP_PARAMS_MAX, context.temp_allocator), `"}`}, context.temp_allocator)
 	bad(t, "game.set", big, "bad_args")
@@ -284,4 +284,44 @@ app_keys_cannot_hold_nul :: proc(t: ^testing.T) {
 	testing.expect(t, app_input_event_check(`{"event":"key","type\u0000":"tab.quit"}`) != "", "an input event key with NUL")
 	testing.expect_value(t, app_input_event_check(`{"event":"key","key":"w"}`), "")
 	testing.expect(t, app_input_event_check(`{"event":"key","source":"user"}`) != "", "the envelope's keys, as before")
+}
+
+// The display an app paces from (ENGINE-BRIDGE §2.1): the hello's `display` and tab.display's
+// fields, valid JSON numbers whatever the scale.
+@(test)
+app_display_json_fields :: proc(t: ^testing.T) {
+	testing.expect_value(t, app_display_json(240, 1), `{"fps":240,"scale":1}`)
+	testing.expect_value(t, app_display_json(120, 2), `{"fps":120,"scale":2}`)
+	testing.expect_value(t, app_display_json(60, 1.5), `{"fps":60,"scale":1.5}`)
+	v, err := json.parse_string(app_display_json(144, 2), .JSON, true, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, v.(json.Object)["fps"].(json.Integer), 144)
+}
+
+// A frame draws 1:1: at whole pixels, never wider than the frame, so no texel is stretched,
+// shifted by half a pixel or filtered, also in a split pane whose edges are fractional.
+@(test)
+app_frame_quad_is_whole_pixels :: proc(t: ^testing.T) {
+	// the pane at whole pixels, the frame its size: as is
+	q := app_frame_quad(100, 50, 640, 480, 640, 480)
+	testing.expect_value(t, q, App_Quad{100, 50, 640, 480, 1, 1})
+	// a split pane at 600.5 (panes_tab_rect): the ring is round(499.5) = 500 px wide
+	q = app_frame_quad(600.5, 78, 499.5, 572, 500, 572)
+	testing.expect_value(t, q.x, 601)
+	testing.expect_value(t, q.w, 499) // round(1100) - 601: the pane's right edge stays
+	testing.expect_value(t, q.u, f32(499) / 500) // texel i at pixel 601 + i, exactly
+	// a pane larger than the frame (a resize on its way): the frame's size, never stretched
+	q = app_frame_quad(10, 10, 800, 600, 640, 480)
+	testing.expect_value(t, q, App_Quad{10, 10, 640, 480, 1, 1})
+	// smaller (a drag shrinks the pane): clipped, still 1:1
+	q = app_frame_quad(10.25, 10.75, 320.5, 240, 640, 480)
+	testing.expect_value(t, q.x, 10)
+	testing.expect_value(t, q.y, 11)
+	testing.expect_value(t, q.w, 321)
+	testing.expect_value(t, q.u * 640, 321)
+	testing.expect_value(t, q.h, 240)
+	// no frame size: nothing
+	q = app_frame_quad(0, 0, 100, 100, 0, 0)
+	testing.expect_value(t, q.w, 0)
+	testing.expect_value(t, q.u, 0)
 }

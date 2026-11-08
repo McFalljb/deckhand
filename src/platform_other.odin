@@ -12,6 +12,10 @@ window_send_back :: proc() {}
 window_set_content_size :: proc(w, h: f32) {}
 window_minimize :: proc() {}
 platform_test_scale :: proc(scale: f64) {}
+platform_display_hook :: proc() {}
+platform_display :: proc() -> (fps: int, scale: f32) {return 60, 1}
+platform_display_link_fps :: proc() -> f32 {return 0}
+platform_test_display_fps :: proc(fps: int) {}
 window_restore :: proc() {}
 app_deactivate :: proc() {}
 window_capture :: proc(path: string) {}

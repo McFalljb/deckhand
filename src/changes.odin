@@ -223,7 +223,7 @@ changes_repo :: proc(root: string) -> ^Changes_Repo {
 	r.root = strings.clone(root)
 	r.common = strings.clone(w.common)
 	append(&changes_repos, r)
-	watch_folder(root) // its files' changes come through fs_model_changed
+	window_watch_folder(root) // its files' changes come through fs_model_changed
 	return r
 }
 

@@ -252,6 +252,8 @@ window_hooks_app :: proc() -> Window_Hooks {
 		commit_message_clear = proc() {tf_set(&changes_message_field, "")}, // ui_changes.odin
 		unsaved_files = tab_views_unsaved,
 		tab_dirty = tab_view_dirty,
+		watch_folder = watch_folder, // editor_watch.odin
+		watch_sync = watch_sync,
 		// terminals' views (term_view.odin)
 		term_view_new = term_view_init,
 		term_view_free = term_view_free,

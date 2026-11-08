@@ -58,6 +58,10 @@ Window_Hooks :: struct {
 	commit_message_clear: proc(), // a commit made from a Changes tab: its message field empties
 	unsaved_files:  proc(under: string) -> int, // buffers with unsaved changes ("" = all; else in that folder)
 	tab_dirty:      proc(tab_id: u64) -> bool, // the tab's buffer has unsaved changes
+	// The file watcher (editor_watch.odin: FSEvents through the window's shim; its events reach
+	// the editors and the file-system model in editor_tick). No window: nothing is watched.
+	watch_folder:   proc(folder: string), // watch this project folder too
+	watch_sync:     proc(), // the set of folders to watch changed (open files, reload's folders)
 
 	// ---- terminals: the core's Term, the window's Term_View (term_view.odin) ----
 	term_view_new:  proc(t: ^Term), // a terminal was made: its view's render state and encoders
@@ -168,6 +172,8 @@ window_commit_message_clear :: proc() {if window.commit_message_clear != nil do 
 // No window: no buffers, so nothing unsaved.
 window_unsaved_files :: proc(under := "") -> int {return window.unsaved_files != nil ? window.unsaved_files(under) : 0}
 window_tab_dirty :: proc(tab_id: u64) -> bool {return window.tab_dirty != nil && window.tab_dirty(tab_id)}
+window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
+window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}
 
 window_term_view_new :: proc(t: ^Term) {if window.term_view_new != nil do window.term_view_new(t)}
 window_term_view_free :: proc(t: ^Term) {if window.term_view_free != nil do window.term_view_free(t)}

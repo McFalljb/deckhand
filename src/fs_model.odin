@@ -403,7 +403,7 @@ fs_read_dir :: proc(dir: string, with_ignored := false, parent_ignored := false,
 		if for_user do return nil, fs_list_error_text(lerr) // the Files tab's row: what to do about it
 		return nil, fmt.tprintf("cannot list %s: %s", dir, strings.to_lower(string(posix.strerror(lerr)), context.temp_allocator))
 	}
-	watch_folder(fs_root_of(dir))
+	window_watch_folder(fs_root_of(dir))
 	out := make([dynamic]Fs_Entry, 0, len(names_read), context.temp_allocator)
 	names := make([dynamic]string, 0, len(names_read), context.temp_allocator)
 	for e in names_read {
@@ -546,7 +546,7 @@ fs_project_files :: proc(root: string) -> []string {
 		if fl.stale do list_refresh(root, fl) // kept meanwhile
 		return fl.list
 	}
-	watch_folder(root)
+	window_watch_folder(root)
 	fs_stats.list_runs_sync += 1
 	list := project_list(root)
 	fs_model.files[strings.clone(root)] = File_List{list = list, last = time.tick_now()}
@@ -932,5 +932,5 @@ editors_renamed :: proc(from, to: string) {
 		tab.title = title_for(np, view)
 		window_view_moved(tab.id, np) // its buffer follows (tab_views.odin)
 	}
-	watch_sync()
+	window_watch_sync()
 }

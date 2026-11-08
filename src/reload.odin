@@ -779,7 +779,7 @@ reload_tick :: proc() {
 			reload_build({})
 			delete(rw.key)
 			rw.key = ""
-			watch_sync()
+			window_watch_sync()
 		}
 		reload_flush()
 		return
@@ -829,7 +829,7 @@ reload_poll :: proc() {
 		delete(rw.key)
 		rw.key = strings.clone(key)
 		reload_build(cwds)
-		watch_sync()
+		window_watch_sync()
 	}
 	for &s in rw.srcs {
 		k, st := path_stat(s.path)

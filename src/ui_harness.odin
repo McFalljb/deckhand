@@ -13,6 +13,7 @@ package main
 //     sheet at that step (one place runs installs).
 
 import "core:fmt"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
@@ -404,4 +405,85 @@ harness_settings_tip :: proc(path: string, on_button: bool) -> string {
 	r := HARNESS_MANIFEST[it.row]
 	if on_button do return fmt.tprintf("Open the coding agents checklist: `%s`", it.command)
 	return fmt.tprintf("%s: %s. %s", r.name, harness_item_text(it^), r.why)
+}
+
+// ---- the New session picker and the install run's keys (moved from harness.odin and
+// harness_install.odin: the window's) ----
+
+// The picker's rows: a note saying what it starts, then the choices (temp).
+new_session_menu_items :: proc(t: Menu_New_Session, items: ^[dynamic]Menu_Item) {
+	p := find_project(t.project_id)
+	if p == nil do return
+	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", project_display(p^))
+	append(items, Menu_Item{label = what, note = true})
+	append(items, ..new_session_choices(p, t.cwd))
+}
+
+// Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top
+// bar, centred (framebuffer px).
+new_session_anchor :: proc() -> [2]f32 {
+	return {max((f32(sapp.width()) - px(MENU_W)) / 2, 0), px(TAB_STRIP_H + SP_4)}
+}
+
+// The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
+// at: where the picker opens (nil = new_session_anchor).
+new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
+	p := find_project(pid)
+	if p == nil do return
+	// looked up again (stat only): a harness installed since is offered
+	pi_installed_now()
+	claude_installed_now()
+	items := new_session_choices(p, cwd)
+	switch len(items) {
+	case 0:
+		toast_show(NO_HARNESS, err = true)
+	case 1:
+		harness_used(items[0].cmd)
+		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")
+	case:
+		menu_open(Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())
+		rows := menu_items()
+		for it, i in rows do if !it.note && !it.sep {
+			menu.selected = i // the first choice: the last used
+			break
+		}
+	}
+}
+
+// A number key in the picker: its Nth choice (1-9). False: not the picker, or no such row.
+new_session_number :: proc(key: sapp.Keycode, mods: u32) -> bool {
+	if _, ok := menu.target.(Menu_New_Session); !ok do return false
+	if mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT) != 0 do return false // ⌘1…: not a pick
+	n := int(key) - int(sapp.Keycode._1)
+	if key >= .KP_1 && key <= .KP_9 do n = int(key) - int(sapp.Keycode.KP_1)
+	if n < 0 || n > 8 do return false
+	k := 0
+	for it, i in menu_items() {
+		if it.note || it.sep do continue
+		if k == n {
+			menu_run(i)
+			return true
+		}
+		k += 1
+	}
+	return false
+}
+
+// Whether a key reaches the run's terminal: only while it runs and shows on the sheet (visible),
+// never ⌘ keys (⌘Q quits), and not Enter during HARNESS_ENTER_GRACE after the click.
+harness_run_takes_key :: proc(e: ^sapp.Event, visible: bool, now: time.Tick) -> bool {
+	if harness_run.status != .Running || !visible do return false
+	if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false
+	enter := (e.type == .KEY_DOWN || e.type == .KEY_UP) && (e.key_code == .ENTER || e.key_code == .KP_ENTER) || e.type == .CHAR && (e.char_code == '\r' || e.char_code == '\n')
+	if enter && time.tick_diff(harness_run.started, now) < HARNESS_ENTER_GRACE do return false
+	return true
+}
+
+// While an install runs on the setup sheet the keyboard stays there (its terminal, ⌃C): whatever
+// moved it (a menu, a command) is undone on the next frame, on the run's step.
+harness_run_keep_sheet :: proc() {
+	if harness_run.status != .Running do return
+	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
+	if state.focus_widget == "setup" do return
+	run_command(Focus_Take{widget = "setup"})
 }

@@ -278,7 +278,7 @@ job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	set_s(&u.start, sheet_now_text())
 	u.discard, u.stale, u.reload_armed = false, false, false
 	u.open = true
-	run_command(Focus_Move{widget = "job_sheet"})
+	run_command(Focus_Take{widget = "job_sheet"})
 	app.redraw = true
 	return {ok = true}, true
 }

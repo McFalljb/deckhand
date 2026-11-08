@@ -20,7 +20,6 @@ import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
-import sapp "../vendor/sokol-odin/sokol/app"
 
 Harness_Run_Status :: enum u8 {
 	None,
@@ -209,16 +208,6 @@ harness_run_start :: proc(id: string) -> string {
 	return ""
 }
 
-// Whether a key reaches the run's terminal: only while it runs and shows on the sheet (visible),
-// never ⌘ keys (⌘Q quits), and not Enter during HARNESS_ENTER_GRACE after the click.
-harness_run_takes_key :: proc(e: ^sapp.Event, visible: bool, now: time.Tick) -> bool {
-	if harness_run.status != .Running || !visible do return false
-	if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false
-	enter := (e.type == .KEY_DOWN || e.type == .KEY_UP) && (e.key_code == .ENTER || e.key_code == .KP_ENTER) || e.type == .CHAR && (e.char_code == '\r' || e.char_code == '\n')
-	if enter && time.tick_diff(harness_run.started, now) < HARNESS_ENTER_GRACE do return false
-	return true
-}
-
 // pump_all: the run's process exited.
 harness_run_exited :: proc(exit: Exit_Info) {
 	if harness_run.status != .Running do return
@@ -295,15 +284,6 @@ no_sudo_names :: proc(dir: string) -> []string {
 		if strings.has_prefix(name, NO_SUDO_PREFIX) do append(&out, strings.clone(name, context.temp_allocator))
 	}
 	return out[:]
-}
-
-// While an install runs on the setup sheet the keyboard stays there (its terminal, ⌃C): whatever
-// moved it (a menu, a command) is undone on the next frame, on the run's step.
-harness_run_keep_sheet :: proc() {
-	if harness_run.status != .Running do return
-	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
-	if state.focus_widget == "setup" do return
-	run_command(Focus_Move{widget = "setup"})
 }
 
 // Whether an install holds the setup sheet (nothing moves the keyboard off it).

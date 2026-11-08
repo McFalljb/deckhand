@@ -165,7 +165,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Terminal_Link:       return "terminal_link"
 	case Send_Text:           return "send_text"
 	case Set_Focus:           return "set_focus"
-	case Focus_Move:          return "focus_move"
+	case Focus_Take:          return "focus_take"
 	case Focus_Release:       return "focus_release"
 	case Set_Last_Harness:    return "set_last_harness"
 	case Set_Layout:          return "set_layout"
@@ -492,7 +492,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
 	case Set_Focus:
 		kv_str(&w, "widget", c.widget)
-	case Focus_Move:
+	case Focus_Take:
 		kv_str(&w, "widget", c.widget)
 	case Focus_Release:
 		kv_str(&w, "widget", c.widget)

@@ -46,7 +46,6 @@ import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 import "core:time"
-import clay "../build/clay-odin"
 
 // pi's agent directory: PI_CODING_AGENT_DIR, else ~/.pi/agent. As pi reads it (getAgentDir,
 // expandTildePath): "~" is the home folder, "~/x" under it; a relative one (pi would take it from

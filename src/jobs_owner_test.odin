@@ -157,7 +157,7 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	r := run_command(Job_Save{text = text}, ui)
 	testing.expect(t, r.ok, r.error)
 	path := strings.clone(r.data[len(`{"path":"`):len(r.data) - 2], context.temp_allocator)
-	// the sheet's keyboard and the Jobs tab are commands (focus_move, focus_release, Job_Save's own
+	// the sheet's keyboard and the Jobs tab are commands (focus_take, focus_release, Job_Save's own
 	// layout), not the window's writes: open takes the keyboard, Cancel gives it back, Save
 	// gives it back and shows the Jobs tab
 	{

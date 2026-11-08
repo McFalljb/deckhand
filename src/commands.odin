@@ -105,7 +105,7 @@ Set_Focus :: struct {
 }
 // Deckhand itself moves the keyboard (a sheet it opened, a new tab's URL field, an install's
 // setup sheet), without set_focus's caller rules: the window's former direct writes.
-Focus_Move :: struct {
+Focus_Take :: struct {
 	widget: string,
 }
 // A widget that closed lets go of the keyboard (back to the terminal); nothing when the keyboard
@@ -439,7 +439,7 @@ Command :: union {
 	Terminal_Link, // a link in a terminal tab (term_links.odin)
 	Send_Text,
 	Set_Focus,
-	Focus_Move,
+	Focus_Take,
 	Focus_Release,
 	Set_Last_Harness,
 	Set_Layout,
@@ -1054,7 +1054,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if state.layout.left_tab == .Sessions do state.layout.left_tab = .Files // the Settings tab is a tree too
 		}
 		return {ok = true}, true
-	case Focus_Move:
+	case Focus_Take:
 		if c.widget == state.focus_widget do return {ok = true}, false
 		state.focus_widget = strings.clone(c.widget) // the old one is not freed: some writers set literals (as Set_Focus)
 		return {ok = true}, true

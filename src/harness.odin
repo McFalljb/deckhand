@@ -25,7 +25,6 @@ import "core:sync"
 import "core:sys/posix"
 import "core:thread"
 import "core:time"
-import sapp "../vendor/sokol-odin/sokol/app"
 
 // Saved names (workspace.json settings.last_harness).
 HARNESS_KEYS := [Harness]string {
@@ -227,66 +226,8 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	return out[:]
 }
 
-// The picker's rows: a note saying what it starts, then the choices (temp).
-new_session_menu_items :: proc(t: Menu_New_Session, items: ^[dynamic]Menu_Item) {
-	p := find_project(t.project_id)
-	if p == nil do return
-	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", project_display(p^))
-	append(items, Menu_Item{label = what, note = true})
-	append(items, ..new_session_choices(p, t.cwd))
-}
-
 // A picker row (or the only harness) was chosen: it goes first next time.
 harness_used :: proc(cmd: Command) {
 	if h, ok := harness_of(cmd); ok do run_command(Set_Last_Harness{harness = h})
 }
 
-// Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top
-// bar, centred (framebuffer px).
-new_session_anchor :: proc() -> [2]f32 {
-	return {max((f32(sapp.width()) - px(MENU_W)) / 2, 0), px(TAB_STRIP_H + SP_4)}
-}
-
-// The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
-// at: where the picker opens (nil = new_session_anchor).
-new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
-	p := find_project(pid)
-	if p == nil do return
-	// looked up again (stat only): a harness installed since is offered
-	pi_installed_now()
-	claude_installed_now()
-	items := new_session_choices(p, cwd)
-	switch len(items) {
-	case 0:
-		window_toast(NO_HARNESS, err = true)
-	case 1:
-		harness_used(items[0].cmd)
-		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")
-	case:
-		menu_open(Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())
-		rows := menu_items()
-		for it, i in rows do if !it.note && !it.sep {
-			menu.selected = i // the first choice: the last used
-			break
-		}
-	}
-}
-
-// A number key in the picker: its Nth choice (1-9). False: not the picker, or no such row.
-new_session_number :: proc(key: sapp.Keycode, mods: u32) -> bool {
-	if _, ok := menu.target.(Menu_New_Session); !ok do return false
-	if mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT) != 0 do return false // ⌘1…: not a pick
-	n := int(key) - int(sapp.Keycode._1)
-	if key >= .KP_1 && key <= .KP_9 do n = int(key) - int(sapp.Keycode.KP_1)
-	if n < 0 || n > 8 do return false
-	k := 0
-	for it, i in menu_items() {
-		if it.note || it.sep do continue
-		if k == n {
-			menu_run(i)
-			return true
-		}
-		k += 1
-	}
-	return false
-}

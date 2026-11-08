@@ -26,7 +26,7 @@
 # (tests/scenes.py --check-map wants every src/ file in one of these or in some scene's areas).
 
 @all  | | | | src/term.odin src/term_view.odin src/term_palette.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/sign.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
-@core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
+@core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/window_hooks.odin src/core_loop.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
 @unit | | | | src/snapshot.odin src/holder/* src/holderwire/* src/corewire/* src/trust/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
 
 # scene             | tier     | tags                  | secs | areas | command
@@ -52,11 +52,11 @@ claude              | full     | cef                   |   35 | src/claude*.odin
 claude-accounts     | full     |                       |   15 | src/claude_accounts.odin src/claude_disk.odin src/claude_rows.odin src/ui_sidebar.odin tests/scripts/claude-accounts.* tests/scripts/fake-claude.py
 claude-feeds        | full     |                       |   38 | src/claude_status.odin src/claude_panels.odin src/claude.odin src/ui_claude.odin tools/pi-desk-cli/* integrations/claude-code/* tests/scripts/claude-feeds.* tests/scripts/fake-claude.py
 claude-readonly     | full     |                       |   36 | src/claude.odin src/claude_disk.odin tools/pi-desk-cli/* integrations/claude-code/* tests/readonly-vectors.json tests/scripts/claude-readonly* tests/scripts/fake-claude.py
-claude-runtime      | full     |                       |   37 | src/claude_reload.odin src/ui_claude_reload.odin src/claude.odin src/dead_tab.odin src/settings_files.odin tests/scripts/claude-runtime.* tests/scripts/fake-claude.py
+claude-runtime      | full     |                       |   37 | src/claude_reload.odin src/ui_claude_reload.odin src/claude.odin src/dead_tab.odin src/ui_dead_tab.odin src/settings_files.odin tests/scripts/claude-runtime.* tests/scripts/fake-claude.py
 claude-sessions     | full     |                       |   40 | src/claude.odin src/claude_rows.odin src/claude_disk.odin src/sidebar.odin src/ui_sidebar.odin src/session_info.odin tests/scripts/claude-sessions* tests/scripts/fake-claude.py
 claude-wait         | full     |                       |    8 | src/claude_wait.odin src/claude_status.odin src/agent.odin tests/scripts/claude-wait.* tests/scripts/fake-claude.py
 comments            | full     | cef                   |   19 | src/comments.odin src/ui_comments.odin src/browser_annotate.odin src/native/browser_overlay.js src/app_tab.odin tests/fake-app/* tests/web/browser.html tests/scripts/comments.* tests/scripts/fake-bridge-attach.py
-dead-tab            | full     | test-data             |   13 | src/dead_tab.odin tests/scripts/dead-tab.* tests/scripts/fake-pi-dead.py
+dead-tab            | full     | test-data             |   13 | src/dead_tab.odin src/ui_dead_tab.odin tests/scripts/dead-tab.* tests/scripts/fake-pi-dead.py
 editor              | full     |                       |   21 | src/editor*.odin src/native/editor_macos.m src/textfield.odin vendor/tree-sitter/* tests/scripts/editor*
 fail-fast-test      | required |                       |    6 | src/autotest.odin tests/scripts/panes.sh tests/scripts/fresh-build.sh tests/scripts/fail-fast-*
 fetch-cef-test      | required |                       |    5 | scripts/fetch-cef.sh tests/scripts/fetch-cef-test.sh

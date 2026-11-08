@@ -226,7 +226,7 @@ browser_nav_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: 
 			browser_url_tab = id
 			delete(browser_url_error)
 			browser_url_error = ""
-			run_command(Focus_Move{widget = "browser_url"})
+			run_command(Focus_Take{widget = "browser_url"})
 		}
 		return {ok = true, created_id = id}, true
 	case Browser_Navigate:

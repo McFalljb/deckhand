@@ -356,7 +356,9 @@ palette.odin   command palette (⌘K): items, fuzzy search and ranking, recents;
 sidebar.odin   left column model: which projects, chats and sessions show and in what order (pins, sort, filter, hidden, the Open group)
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
-tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md)
+tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs browser, app, Markdown and editor commands
+window_hooks.odin what the core asks of the window (redraw, toast, frames, tab host commands, the test step): core files call these, main.odin fills them
+core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame()
 update*.odin   Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
 agent_status.odin  status of every terminal tab: OSC 7501 records, bridge > OSC 7501 precedence, unseen ("done, not seen yet"), roll-ups, the attention sort's tiers, set_unread, the tooltip line
 notify.odin    the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands

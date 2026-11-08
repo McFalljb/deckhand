@@ -113,6 +113,17 @@ The first message on a connection is `hello`:
   `DECKHAND_CONTROL_TOKEN` (the desk tools; swapped for a reconnect token on the first hello,
   like the panel token), with `DECKHAND_SOCKET`. The control hello's `tab_id` is Home's tab
   (`0` for unbound control tokens such as `--print-token control`). Shell tabs never get any of these variables.
+- **Tokens that outlive Deckhand** (`keep_sessions`, Experimental). A pi or Claude process kept
+  running by the session holder while Deckhand is closed keeps its token. With the setting on,
+  the tokens of tabs whose process runs in the holder (sha256 hashes only, never a token), each
+  Claude tab's process (`claude_pids`) and a read-only tab's ack state are written to
+  `<data>/tokens.json` on every mint and revoke, MAC'd with the holder's key (HMAC-SHA256;
+  [background-core.md](plans/background-core.md) §5.3). On the next launch they belong to the tab
+  that adopts that holder terminal (a new `tab_id`), with the same rules: an env token still
+  works once, a reconnect token keeps working, a Claude token still only from the tab's own
+  processes. A file that does not verify (edited, another holder's key, cut, out of shape) loads
+  nothing: every old token is `unknown token`, and an adopted read-only Claude tab is stopped
+  ([CLAUDE.md](CLAUDE.md) §1a).
 - **What a pi tab sees.** A `panel` caller's `get_state` is filtered to its own session: the
   open session holding its tab and that session's project; `sessions` (the selected project's
   list) and `pending_confirmations` are empty, `current_session` is its session only if that is
@@ -202,6 +213,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `agent_model_picker` | | **user only**: shows the drawer, gives the agent's terminal the keyboard and opens pi's own model selector there (its key, Ctrl+L; once pi reports its status if it is still starting) |
 | `set_agent_name` | `name` | **user only**: the agent's name (`""` = Atlas; cleaned, at most 32 bytes). It labels the drawer, the top bar and notifications, so the agent cannot set it |
 | `set_notify` | `on` | **user only**: OS notifications from the agent while Deckhand is in the background |
+| `set_keep_sessions` | `on` | **user only**, Experimental (default off; `state.settings.keep_sessions`): keep sessions running when Deckhand quits. Their processes stay in the session holder and the next launch adopts them; their tokens survive in a MAC'd `tokens.json` (§2) |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
 | `notifications_list` | `limit`? | query (any caller but pi tabs; listed in `list_commands`): the bell's entries, newest first, at most `limit` (default 20, at most 200); see [The bell](#the-bell-notifications) |
 | `notifications_mark_read` | `id`? \| `session`? \| `all`? | **user only**: marks one entry, an open session's, or all read |
@@ -641,7 +653,7 @@ without asking. Exited tabs never ask.
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
-              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true,
+              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": false,
               "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
               "home_dir": "/Users/me/pi-desk", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/pi-desk/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},

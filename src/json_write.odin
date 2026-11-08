@@ -195,6 +195,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Agent_Model_Picker:  return "agent_model_picker"
 	case Set_Notify:          return "set_notify"
 	case Set_Tidy_Projects:   return "set_tidy_projects"
+	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Confirm_Policy:  return "set_confirm_policy"
 	case Set_Close_Confirm:   return "set_close_confirm"
 	case Set_Theme:           return "set_theme"
@@ -433,6 +434,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Notify:
 		kv_bool(&w, "on", c.on)
 	case Set_Tidy_Projects:
+		kv_bool(&w, "on", c.on)
+	case Set_Keep_Sessions:
 		kv_bool(&w, "on", c.on)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
@@ -1487,6 +1490,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_str(&st, "agent_name", s.settings.agent_name)
 		kv_bool(&st, "notify", !s.settings.notify_off)
 		kv_bool(&st, "tidy_projects", !s.settings.tidy_off)
+		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)

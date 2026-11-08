@@ -597,6 +597,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "agent_model_picker":  cmd = Agent_Model_Picker{}
 	case "set_notify":          cmd = Set_Notify{on = get_bool(&r, "on")}
 	case "set_tidy_projects":   cmd = Set_Tidy_Projects{on = get_bool(&r, "on")}
+	case "set_keep_sessions":   cmd = Set_Keep_Sessions{on = get_bool(&r, "on")}
 	case "update_check":        cmd = Update_Check{}
 	case "update_skip":         cmd = Update_Skip{}
 	case "update_later":        cmd = Update_Later{}
@@ -992,6 +993,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		s.settings.agent_model = get_str(&sr, "agent_model", optional = true)
 		s.settings.notify_off = !(opt_bool(&sr, "notify").? or_else true)
 		s.settings.tidy_off = !(opt_bool(&sr, "tidy_projects").? or_else true)
+		s.settings.keep_sessions = opt_bool(&sr, "keep_sessions").? or_else false
 		if bo, bok := st["bell"].(json.Object); bok {
 			br := Rd{obj = bo, a = allocator}
 			for g in Bell_Group do if !(opt_bool(&br, BELL_GROUP_NAMES[g]).? or_else true) do s.settings.bell_off += {g}

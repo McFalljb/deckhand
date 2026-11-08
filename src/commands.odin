@@ -206,6 +206,11 @@ Set_Notify :: struct {
 Set_Tidy_Projects :: struct {
 	on: bool,
 }
+// Keep sessions running in the session holder when Deckhand quits (docs/plans/background-core.md;
+// off by default until it is done). User-only.
+Set_Keep_Sessions :: struct {
+	on: bool,
+}
 
 // User-only (caller ui or internal): settings that bound what agents may do.
 Set_Confirm_Policy :: struct {
@@ -421,6 +426,7 @@ Command :: union {
 	Agent_Model_Picker,
 	Set_Notify,
 	Set_Tidy_Projects,
+	Set_Keep_Sessions,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
 	Set_Theme,
@@ -1289,6 +1295,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.tidy_off == !c.on do return {ok = true}, false
 		state.settings.tidy_off = !c.on
 		return {ok = true}, true // projects_tidy runs after (run_command)
+	case Set_Keep_Sessions:
+		if state.settings.keep_sessions == c.on do return {ok = true}, false
+		state.settings.keep_sessions = c.on
+		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .UI || c.caller == .Internal do return fail("ui and internal callers have fixed policies"), false
 		state.settings.confirm[c.caller][c.class] = c.mode

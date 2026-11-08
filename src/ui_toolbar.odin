@@ -230,6 +230,7 @@ Pop_Item :: enum {
 	Update_Checks, // check for pi-desk updates about once a day (update.odin); last so earlier rows keep their ids
 	Refresh_Env, // ask the login shell for its environment again (login_env.odin); drawn after Reload pi; last so earlier rows keep their ids
 	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
+	Keep_Sessions, // Experimental: keep sessions running when Deckhand quits; last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -241,6 +242,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
 	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
 	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Shortcuts, .Settings_Files, .Setup, .Tidy_Projects, .Update_Checks,
+	.Keep_Sessions,
 }
 
 POP_ACTIONS := [Pop_Item]string {
@@ -274,6 +276,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Update_Checks     = "update_checks",
 	.Refresh_Env       = "refresh_shell_env",
 	.Restart_Claude    = "restart_all_claude",
+	.Keep_Sessions     = "keep_sessions",
 }
 
 settings_open :: proc() -> bool {return state.focus_widget == "settings"}
@@ -346,7 +349,9 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 	}) {
-		clay.TextDynamic(action_label(a), txt(mix(th.text_secondary, th.text, em)))
+		label := action_label(a)
+		if it == .Keep_Sessions do label = "Keep sessions when quitting" // the full label is too wide for the gear at Large text
+		clay.TextDynamic(label, txt(mix(th.text_secondary, th.text, em)))
 		spacer()
 		if on, ok := toggle.?; ok {
 			switch_control(on)
@@ -527,6 +532,11 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Setup, nil)
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
 		pop_row(.Update_Checks, !upd.checks_off)
+		pop_sep()
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
+			pop_label("Experimental")
+		}
+		pop_row(.Keep_Sessions, state.settings.keep_sessions)
 	}
 }
 

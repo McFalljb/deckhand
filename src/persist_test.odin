@@ -474,3 +474,29 @@ workspace_browser_tabs :: proc(t: ^testing.T) {
 	for &s in state.open_sessions do for tab in s.tabs do drop_term(tab.id)
 }
 
+
+// keep_sessions (Experimental, default off): the user's only, saved only when on, restored.
+@(test)
+keep_sessions_setting :: proc(t: ^testing.T) {
+	context.allocator = ws_reset()
+	persist_init(tmp_dir("ks"))
+	testing.expect(t, !state.settings.keep_sessions, "off by default")
+	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`), "default not saved")
+	for k in ([]Caller_Kind{.Control, .Script, .Panel, .App}) {
+		r := run_command(Set_Keep_Sessions{on = true}, {kind = k, tab_id = 1})
+		testing.expectf(t, !r.ok && r.error == "not allowed for this caller", "%v: %s", k, r.error)
+	}
+	testing.expect(t, !run_command(Set_Keep_Sessions{on = true}, {kind = .Panel, tab_id = 1, claude = true}).ok, "a Claude tab")
+	testing.expect(t, !state.settings.keep_sessions)
+	testing.expect(t, run_command(Set_Keep_Sessions{on = true}, {kind = .UI}).ok)
+	text := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, strings.contains(text, `"keep_sessions":true`), text)
+	testing.expect(t, strings.contains(state_json(), `"keep_sessions":true`), "in the snapshot")
+	run_command(Set_Keep_Sessions{on = false}, {kind = .UI})
+	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`))
+	testing.expect_value(t, workspace_restore(text), "")
+	testing.expect(t, state.settings.keep_sessions, "restored on")
+	c, ok := parse_command(`{"type":"set_keep_sessions","on":false}`, context.temp_allocator)
+	_, is := c.(Set_Keep_Sessions)
+	testing.expect(t, ok == "" && is, ok)
+}

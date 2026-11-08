@@ -436,6 +436,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		rt.ro_need = true
 		copy(rt.ro_nonce[:], nonce)
 		claude_rt[tab_id] = rt
+		socket_tokens_ro(tab_id, true, false, nonce) // tokens.json: unconfirmed (an adopted copy is stopped)
 	}
 	return true
 }
@@ -553,6 +554,27 @@ claude_readonly_tick :: proc(now := time.Tick{}) {
 	}
 }
 
+// Whether a read-only Claude kept by the session holder (holder terminal `term`) may keep running
+// in its adopted tab: its ack state came from a tokens.json that verified (or from this run) and
+// says its profile acked. Anything else (no file, a bad MAC, no entry, not acked yet) is false:
+// the integrator then stops it (claude_adopt_ro_stop), failing closed (§1a). Call it for every
+// adopted Claude tab that is read-only (Claude_Tab.readonly) or whose saved state says so
+// (socket_tokens_ro_of: need).
+claude_adopt_ro_ok :: proc(term: u32) -> bool {
+	ro, found := socket_tokens_ro_of(term)
+	return found && ro.need && ro.acked
+}
+
+CLAUDE_GUARD_UNTRUSTED :: "read-only guard not confirmed after Deckhand reopened: stopped. Restart this tab."
+
+// An adopted read-only Claude whose ack state is not trusted (claude_adopt_ro_ok false): stopped
+// as an unconfirmed start is (its process group killed, its token revoked, the tab says why).
+claude_adopt_ro_stop :: proc(tab_id: u64) {
+	_, tab, ct := claude_tab_of(tab_id)
+	if ct == nil || ct.guard_stopped do return
+	claude_readonly_stop(tab, ct, CLAUDE_GUARD_UNTRUSTED, "A read-only Claude was stopped: Deckhand could not confirm its guard after reopening (restart the tab)")
+}
+
 // Whether pi-desk stopped this tab for an unconfirmed profile (tests, the label).
 claude_readonly_stopped :: proc(tab_id: u64) -> bool {
 	_, _, ct := claude_tab_of(tab_id)
@@ -560,15 +582,15 @@ claude_readonly_stopped :: proc(tab_id: u64) -> bool {
 }
 
 @(private = "file")
-claude_readonly_stop :: proc(tab: ^Tab, ct: ^Claude_Tab) {
+claude_readonly_stop :: proc(tab: ^Tab, ct: ^Claude_Tab, note := CLAUDE_GUARD_STOPPED, toast := "A read-only Claude was stopped: its guard was not confirmed (a startup dialog left open, or an old Claude Code)") {
 	ct.guard_stopped = true
 	held_clear(ct)
 	socket_forget_tab(tab.id) // nothing more from its token
 	if t := term_of(tab.id); t != nil {
-		term_note(t, CLAUDE_GUARD_STOPPED)
+		term_note(t, note)
 		if t.pty.pid > 0 do posix.killpg(posix.pid_t(t.pty.pid), .SIGKILL) // claude and what it runs
 	}
-	toast_show("A read-only Claude was stopped: its guard was not confirmed (a startup dialog left open, or an old Claude Code)", err = true)
+	toast_show(toast, err = true)
 	app.redraw = true
 }
 
@@ -1304,6 +1326,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if len(c.nonce) != len(rt.ro_nonce) || c.nonce != string(rt.ro_nonce[:]) do return fail("not this start's ack"), false
 		rt.ro_acked = true
 		claude_rt[tab.id] = rt
+		socket_tokens_ro(tab.id, true, true, c.nonce) // tokens.json: confirmed (survives a relaunch)
 		return {ok = true}, true
 	case Claude_Restore_History:
 		// the saved list first (least recently used first), then the history's read-only records

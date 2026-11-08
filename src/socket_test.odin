@@ -5,6 +5,7 @@ package main
 // are harmless (/bin/sh, `sleep`); the socket lives in a temp dir.
 
 import "base:runtime"
+import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -1180,4 +1181,231 @@ script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
 	app_fail_pending(tab, "the test ended", "tab_gone")
 	inbox_drain()
 	testing.expect_value(t, autotest.wait_request, 0)
+}
+
+// ---- tokens.json (keep_sessions): tokens of processes kept by the holder survive a relaunch ----
+
+@(private = "file")
+sk_key :: proc(b: u8) -> (k: [32]u8) {
+	for i in 0 ..< 32 do k[i] = b ~ u8(i * 7)
+	return
+}
+
+// Quit and reopen as far as the control socket goes: every token in memory is gone.
+@(private = "file")
+sk_relaunch :: proc(t: ^testing.T) {
+	rdir, _ := sock_runtime_dir(context.temp_allocator)
+	socket_stop(proc() {inbox_drain()})
+	testing.expect(t, socket_start(rdir), "socket_start again")
+}
+
+@(private = "file")
+sk_file :: proc(path: string) -> string {
+	data, err := os.read_entire_file(path, context.temp_allocator)
+	return err == nil ? string(data) : ""
+}
+
+@(private = "file")
+sk_hex :: proc(tok: string) -> string {
+	h := token_hash(tok)
+	return string(hex.encode(h[:], context.temp_allocator))
+}
+
+// keep_sessions off: binding and minting never write a file.
+@(test)
+socket_tokens_off_writes_nothing :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	path := fmt.tprintf("%s/tokens.json", dir)
+	tok := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	socket_tokens_bind(101, 7)
+	c, r := tc_hello(tok)
+	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	tc_close(c)
+	testing.expect(t, !os.exists(path), "no tokens.json while keep_sessions is off")
+}
+
+// A pi tab in the holder: its reconnect token works after a relaunch, for the adopted tab's new id.
+// The file holds hashes only; a used env token stays used; the tab's end revokes everything.
+@(test)
+socket_tokens_pi_reconnect_across_relaunch :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	path := fmt.tprintf("%s/tokens.json", dir)
+	key := sk_key(3)
+	loaded, why := socket_tokens_enable(path, key[:])
+	testing.expect(t, !loaded && why == "missing", why)
+	env := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	ctl := socket_mint_token({kind = .Control, tab_id = 101}, context.temp_allocator, single_use = true) // Home's
+	other := socket_mint_token({kind = .Panel, tab_id = 102}, context.temp_allocator, single_use = true) // not in the holder
+	script := socket_mint_token({kind = .Script}, context.temp_allocator)
+	socket_tokens_bind(101, 7)
+	b, r := tc_hello(env)
+	re := json_path(r, "result.data.reconnect_token")
+	testing.expect_value(t, len(re), 64)
+	tc_close(b)
+	raw := sk_file(path)
+	testing.expect(t, strings.has_prefix(raw, "deckhand-mac 1 tokens "), raw)
+	for tok in ([]string{env, ctl, re, other, script}) do testing.expect(t, !strings.contains(raw, tok), "a token on disk")
+	testing.expect(t, strings.contains(raw, sk_hex(re)) && strings.contains(raw, sk_hex(ctl)), raw)
+	testing.expect(t, !strings.contains(raw, sk_hex(env)), "a used env token is not listed")
+	testing.expect(t, !strings.contains(raw, sk_hex(other)) && !strings.contains(raw, sk_hex(script)), "only tabs in the holder")
+	testing.expect(t, strings.contains(raw, `"term":7`), raw)
+
+	sk_relaunch(t)
+	x, rx := tc_hello(re)
+	testing.expect_value(t, json_path(rx, "result.error"), "unknown token")
+	tc_close(x)
+	loaded, why = socket_tokens_enable(path, key[:])
+	testing.expect(t, loaded, why)
+	x, rx = tc_hello(re)
+	testing.expect_value(t, json_path(rx, "result.error"), "unknown token") // not before its terminal is adopted
+	tc_close(x)
+	testing.expect(t, socket_tokens_adopt(7, 202), "adopted with saved state")
+	testing.expect(t, !socket_tokens_adopt(8, 203), "nothing saved for term 8")
+	c1, r1 := tc_hello(re)
+	testing.expect_value(t, json_path(r1, "result.ok"), "true")
+	testing.expect_value(t, json_path(r1, "result.data.caller"), "panel")
+	testing.expect_value(t, json_path(r1, "result.data.tab_id"), "202")
+	testing.expect_value(t, json_path(r1, "result.data.reconnect_token"), "<missing>")
+	c2, r2 := tc_hello(re) // still multi-use
+	testing.expect_value(t, json_path(r2, "result.ok"), "true")
+	u, ru := tc_hello(env)
+	testing.expect_value(t, json_path(ru, "result.error"), "unknown token")
+	tc_close(u)
+	// Home's control token: still single-use, swapped on its first hello
+	h1, rh := tc_hello(ctl)
+	testing.expect_value(t, json_path(rh, "result.data.caller"), "control")
+	testing.expect_value(t, json_path(rh, "result.data.tab_id"), "202")
+	testing.expect_value(t, len(json_path(rh, "result.data.reconnect_token")), 64)
+	h2, rh2 := tc_hello(ctl)
+	testing.expect_value(t, json_path(rh2, "result.error"), "unknown token")
+	for c in ([]^Tc{c1, c2, h1, h2}) do tc_close(c)
+	// a second relaunch still knows it (the adopted entries were written under the same term)
+	sk_relaunch(t)
+	loaded, why = socket_tokens_enable(path, key[:])
+	testing.expect(t, loaded, why)
+	socket_tokens_adopt(7, 303)
+	c3, r3 := tc_hello(re)
+	testing.expect_value(t, json_path(r3, "result.data.tab_id"), "303")
+	tc_close(c3)
+	// the tab ends: revoked, and gone from the file
+	socket_forget_tab(303)
+	c4, r4 := tc_hello(re)
+	testing.expect_value(t, json_path(r4, "result.error"), "unknown token")
+	tc_close(c4)
+	testing.expect(t, !strings.contains(sk_file(path), `"term":7`), sk_file(path))
+	socket_tokens_disable(true)
+	testing.expect(t, !os.exists(path), "disable(remove) deletes the file")
+}
+
+// A file that does not verify (edited, another holder's key, the wrong kind, out of shape) loads
+// nothing: the old tokens are unknown, the read-only state untrusted, and the file is rewritten.
+@(test)
+socket_tokens_fail_closed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	path := fmt.tprintf("%s/tokens.json", dir)
+	key, other := sk_key(3), sk_key(4)
+	setup :: proc(t: ^testing.T, path: string, key: []u8) -> string {
+		socket_tokens_enable(path, key)
+		re := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator)
+		socket_tokens_bind(101, 7)
+		socket_tokens_ro(101, true, true, "nonce-1")
+		return re
+	}
+	expect_refused :: proc(t: ^testing.T, path: string, key: []u8, tok: string, want: string, loc := #caller_location) {
+		// a relaunch, for tab 101's token (cheaper than restarting the socket: keeps this < 1 s)
+		socket_tokens_disable(false)
+		socket_forget_tab(101)
+		loaded, why := socket_tokens_enable(path, key)
+		testing.expectf(t, !loaded && strings.contains(why, want), "loaded %v: %s", loaded, why, loc = loc)
+		testing.expect(t, !socket_tokens_adopt(7, 202), "nothing to adopt", loc = loc)
+		testing.expect(t, !claude_adopt_ro_ok(7), "read-only state untrusted", loc = loc)
+		c, r := tc_hello(tok)
+		testing.expect_value(t, json_path(r, "result.error"), "unknown token", loc = loc)
+		tc_close(c)
+		socket_forget_tab(202)
+		if want != "too large" {
+			_, rok, _ := macfile_read(path, TOKENS_KIND, key, context.temp_allocator)
+			testing.expect(t, rok, "rewritten with the new key", loc = loc)
+		}
+	}
+	// one byte of the body changed
+	tok := setup(t, path, key[:])
+	raw := sk_file(path)
+	i := strings.index(raw, `"acked":true`)
+	_ = os.write_entire_file(path, transmute([]u8)strings.concatenate({raw[:i], `"acked":fals`, raw[i + len(`"acked":true`) - 0:]}, context.temp_allocator))
+	expect_refused(t, path, key[:], tok, "bad MAC")
+	// another holder (it restarted: a new key)
+	tok = setup(t, path, key[:])
+	expect_refused(t, path, other[:], tok, "bad MAC")
+	// a handover file put in its place
+	tok = setup(t, path, key[:])
+	body, _, _ := macfile_read(path, TOKENS_KIND, key[:], context.temp_allocator)
+	macfile_write(path, "handover", body, key[:])
+	expect_refused(t, path, key[:], tok, "not tokens")
+	// MAC'd but out of shape: too deep, a zero term, pid 1, an unknown caller, unknown version
+	for bad in ([]string {
+		strings.concatenate({`{"v":1,"terms":`, strings.repeat("[", JSON_MAX_DEPTH + 2, context.temp_allocator), strings.repeat("]", JSON_MAX_DEPTH + 2, context.temp_allocator), "}"}, context.temp_allocator),
+		`{"v":1,"terms":[{"term":0,"tokens":[]}]}`,
+		`{"v":1,"terms":[{"term":4294967296,"tokens":[]}]}`,
+		`{"v":1,"terms":[{"term":7,"claude_root":1,"tokens":[]}]}`,
+		fmt.tprintf(`{{"v":1,"terms":[{{"term":7,"tokens":[{{"sha256":"%s","caller":"ui","claude":false,"single_use":false}}]}}]}}`, sk_hex(tok)),
+		`{"v":2,"terms":[]}`,
+	}) {
+		tok = setup(t, path, key[:])
+		macfile_write(path, TOKENS_KIND, bad, key[:])
+		expect_refused(t, path, key[:], tok, "")
+	}
+	// too large
+	tok = setup(t, path, key[:])
+	was := macfile_max
+	macfile_max = 16
+	expect_refused(t, path, key[:], tok, "too large")
+	macfile_max = was
+}
+
+// A Claude token kept across a relaunch keeps its rule: hellos only from the tab's own processes
+// (its saved root pid, now the adopted tab's). Its read-only ack state comes along.
+@(test)
+socket_tokens_claude_keeps_ancestry :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := sk_start(t)
+	defer sk_stop()
+	path := fmt.tprintf("%s/tokens.json", dir)
+	key := sk_key(5)
+	socket_tokens_enable(path, key[:])
+	tok := socket_mint_token({kind = .Panel, tab_id = 301, claude = true}, context.temp_allocator)
+	socket_claude_pid(301, i32(os.get_pid()))
+	socket_tokens_bind(301, 9)
+	socket_tokens_ro(301, true, true, "n1")
+	unacked := socket_mint_token({kind = .Panel, tab_id = 302, claude = true}, context.temp_allocator)
+	socket_claude_pid(302, 99_999_999) // nothing of ours
+	socket_tokens_bind(302, 10)
+	socket_tokens_ro(302, true, false, "n2")
+	sk_relaunch(t)
+	loaded, why := socket_tokens_enable(path, key[:])
+	testing.expect(t, loaded, why)
+	testing.expect(t, claude_adopt_ro_ok(9), "acked: trusted")
+	testing.expect(t, !claude_adopt_ro_ok(10), "not acked: stopped")
+	testing.expect(t, !claude_adopt_ro_ok(11), "no state: stopped")
+	socket_tokens_adopt(9, 401)
+	socket_tokens_adopt(10, 402)
+	testing.expect(t, claude_adopt_ro_ok(9), "still trusted once adopted")
+	c, r := tc_hello(tok)
+	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	testing.expect_value(t, json_path(r, "result.data.caller"), "claude")
+	testing.expect_value(t, json_path(r, "result.data.tab_id"), "401")
+	c2, r2 := tc_hello(tok) // multi-use, as before
+	testing.expect_value(t, json_path(r2, "result.ok"), "true")
+	x, rx := tc_hello(unacked)
+	testing.expect_value(t, json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
+	for k in ([]^Tc{c, c2, x}) do tc_close(k)
+	raw := sk_file(path)
+	testing.expect(t, strings.contains(raw, fmt.tprintf(`"claude_root":%d`, os.get_pid())) && strings.contains(raw, `"acked":true`), raw)
+	testing.expect(t, !strings.contains(raw, "n1") || strings.contains(raw, sk_hex("n1")), "the nonce is hashed")
 }

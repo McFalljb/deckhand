@@ -878,3 +878,41 @@ ch_default_flags :: proc(t: ^testing.T) {
 		testing.expectf(t, ch_has(got, SKIP) == want_on, "a restore with the setting %v: %v", want_on, got)
 	}
 }
+
+// 2b. A read-only Claude kept by the session holder across a relaunch keeps running only with a
+// trusted ack (tokens.json, socket.odin): acked → ok; not acked or nothing saved → stopped, and
+// the tab says so.
+@(test)
+ch_readonly_adopt_fails_closed :: proc(t: ^testing.T) {
+	env: Ch_Env
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	defer ch_done(old_home, old_root)
+	context.allocator = ch_reset(&env)
+	c := chats_project()
+	if c == nil {testing.fail(t);return}
+	run_command(Set_Chats_Readonly{on = true}, CH_UI)
+	start :: proc(env: Ch_Env, c: ^Project) -> (tab: u64, nonce: string) {
+		ch_clear(env)
+		r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+		argv := ch_argv(env)
+		return find_session(r.created_id).tabs[0].id, strings.clone(ch_nonce(argv))
+	}
+	a, na := start(env, c)
+	socket_tokens_bind(a, 21)
+	testing.expect(t, !claude_adopt_ro_ok(21), "not acked yet")
+	testing.expect(t, run_command(Claude_Readonly_Ack{tab_id = a, nonce = na}, Caller{kind = .Panel, tab_id = a, claude = true}).ok)
+	testing.expect(t, claude_adopt_ro_ok(21), "acked")
+	b, _ := start(env, c)
+	socket_tokens_bind(b, 22)
+	testing.expect(t, !claude_adopt_ro_ok(22), "not acked")
+	testing.expect(t, !claude_adopt_ro_ok(23), "nothing saved (no file, or a bad MAC)")
+	claude_adopt_ro_stop(b)
+	testing.expect(t, claude_readonly_stopped(b), "stopped")
+	sb, tb, _ := find_tab(b)
+	_, _, ex := tab_label(sb, tb^)
+	testing.expectf(t, strings.contains(ex, "not confirmed"), "label: %s", ex)
+	testing.expect(t, !claude_adopt_ro_ok(22), "its state went with its token")
+	testing.expect(t, !claude_readonly_stopped(a))
+	socket_forget_tab(a)
+	testing.expect(t, !claude_adopt_ro_ok(21), "the tab's end drops it")
+}

@@ -22,7 +22,11 @@ covers the build, the source layout and the architecture.
 ```sh
 ./build.sh test               # unit, binding and pi integration tests
 ./build.sh scenes --changed   # test-mode scenes for what you changed
+./build.sh scenes NAME        # one scene again, after a fix
 ```
+
+Run `./build.sh scenes --all` only when you change the build or the test runner, and before a
+release: `--changed` and CI cover everything else ([docs/TESTING.md](docs/TESTING.md#what-to-run)).
 
 Scenes run the real app in test mode: a fake `HOME`, a fake pi, a temporary data folder and no
 network. They never start a real `pi` or `claude`. [docs/TESTING.md](docs/TESTING.md) explains

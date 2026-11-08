@@ -131,8 +131,13 @@ run_spawn :: proc(r: ^Job_Run, argv, env: []string, cwd, stderr_path: string) ->
 		if null >= 0 do posix.close(null)
 		return false
 	}
+	// neither end reaches another child (a shell opened during the run); dup2 into pi's stdout clears it there
+	posix.fcntl(fds[0], .SETFD, i32(posix.FD_CLOEXEC))
+	posix.fcntl(fds[1], .SETFD, i32(posix.FD_CLOEXEC))
 	lock := posix.FD(r.lock_fd)
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
 	pid := posix.fork()
+	if pid != 0 do sync.rw_mutex_shared_unlock(&fork_lock)
 	if pid < 0 {
 		posix.close(fds[0])
 		posix.close(fds[1])

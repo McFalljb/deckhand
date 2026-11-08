@@ -8,6 +8,7 @@ package main
 // thread; output in the temp allocator.
 
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:time"
 
@@ -80,7 +81,9 @@ run_group :: proc(argv: []string, timeout: time.Duration, input := "", cap := 64
 	posix_spawn_file_actions_adddup2(&fa, i32(pipe_out[1]), 1)
 	posix_spawn_file_actions_adddup2(&fa, i32(merge_stderr ? pipe_out[1] : null_fd), 2)
 	pid: posix.pid_t
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
 	err := posix.posix_spawnp(&pid, cargv[0], &fa, &attr, raw_data(cargv), posix.environ)
+	sync.rw_mutex_shared_unlock(&fork_lock)
 	posix.close(pipe_out[1])
 	if input != "" do posix.close(pipe_in[0])
 	if err != .NONE {

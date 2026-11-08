@@ -34,6 +34,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import "core:thread"
 import "core:time"
@@ -510,7 +511,7 @@ remove_tree :: proc(path: string) {
 			st: posix.stat_t
 			if posix.fstatat(fd, n, &st, {.SYMLINK_NOFOLLOW}) != .OK do continue
 			if posix.S_ISDIR(st.st_mode) && depth < 256 {
-				sub := posix.openat(fd, n, {.DIRECTORY, .NOFOLLOW})
+				sub := posix.openat(fd, n, {.DIRECTORY, .NOFOLLOW, .CLOEXEC})
 				if sub >= 0 do remove_below(sub, depth + 1)
 				posix.unlinkat(fd, n, {.REMOVEDIR})
 			} else {
@@ -759,6 +760,8 @@ relaunch_spawn :: proc(bundle: string) -> bool {
 	posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", i32(posix.O_WRONLY), 0)
 	env := []cstring{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", nil}
 	pid: posix.pid_t
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
+	defer sync.rw_mutex_shared_unlock(&fork_lock)
 	return posix.posix_spawn(&pid, "/bin/sh", &fa, &attr, raw_data(argv), raw_data(env)) == .NONE
 }
 

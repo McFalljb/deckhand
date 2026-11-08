@@ -206,6 +206,7 @@ login_env_run :: proc(argv: []string, timeout: time.Duration, env: []string = ni
 	if posix.pipe(&pipe_out) != .OK do return
 	defer posix.close(pipe_out[0])
 	posix.fcntl(pipe_out[0], .SETFD, i32(posix.FD_CLOEXEC))
+	posix.fcntl(pipe_out[1], .SETFD, i32(posix.FD_CLOEXEC)) // the dup2 into stdout clears it in the child
 	null_fd := posix.open("/dev/null", {.RDWR, .CLOEXEC})
 	defer if null_fd >= 0 do posix.close(null_fd)
 	attr, fa: [512]u8 // opaque (a pointer on macOS, a struct elsewhere)
@@ -218,7 +219,9 @@ login_env_run :: proc(argv: []string, timeout: time.Duration, env: []string = ni
 	posix_spawn_file_actions_adddup2(&fa, i32(pipe_out[1]), 1)
 	posix_spawn_file_actions_adddup2(&fa, i32(null_fd), 2)
 	pid: posix.pid_t
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
 	err := posix.posix_spawnp(&pid, cargv[0], &fa, &attr, raw_data(cargv), envp)
+	sync.rw_mutex_shared_unlock(&fork_lock)
 	posix.close(pipe_out[1])
 	if err != .NONE do return
 	sync.lock(&login_probe.lock)

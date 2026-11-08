@@ -112,7 +112,9 @@ run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, inp
 		if _, werr := os.write_string(stdin, input); werr != nil do return "", 0, false
 		if _, serr := os.seek(stdin, 0, .Start); serr != nil do return "", 0, false
 	}
+	sync.rw_mutex_shared_lock(&fork_lock) // a plain fork (fork_lock, pty.odin)
 	p, perr := os.process_start({command = cmd, working_dir = dir, stdout = f, stdin = stdin})
+	sync.rw_mutex_shared_unlock(&fork_lock)
 	if perr != nil do return "", 0, false
 	st, werr := os.process_wait(p, timeout)
 	if werr != nil || !st.exited {

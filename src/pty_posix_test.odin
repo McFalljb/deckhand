@@ -11,6 +11,8 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:testing"
+import "core:sys/posix"
+import "core:thread"
 import "core:time"
 
 @(private = "file")
@@ -102,4 +104,27 @@ pty_close_hangs_up_while_another_lives :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, hung_up, "the closed tab's terminal hung up while the second shell lives")
 	if !hung_up do kill(pid, SIGKILL)
+}
+
+// A terminal opened during a job run holds neither end of the job's stdout
+// pipe (else pi's output would not end when pi does, and the run would hang).
+@(test)
+pty_child_holds_no_job_pipe :: proc(t: ^testing.T) {
+	dir, _ := os.make_directory_temp("", "ptyjob-*", context.temp_allocator)
+	defer os.remove_all(dir)
+	r := Job_Run{dir = dir, lock_fd = -1}
+	ok := run_spawn(&r, {"/bin/sleep", "30"}, PT_ENV, "/", filepath.join({dir, "stderr.log"}, context.temp_allocator) or_else "")
+	testing.expect(t, ok, "run_spawn")
+	if !ok do return
+	defer {
+		posix.kill(-r.pid, .SIGKILL)
+		thread.join(r.th)
+		thread.destroy(r.th)
+	}
+	// the write end is pi's alone by now; the read end stays ours for the run
+	script := fmt.tprintf("if [ -e /dev/fd/%d ]; then echo held:%d; else echo free:%d; fi; echo done.", r.out_fd, r.out_fd, r.out_fd)
+	sh := pt_spawn(t, script)
+	defer pt_end(&sh)
+	out := pt_read_until(&sh, "done.", 5 * time.Second)
+	testing.expectf(t, strings.contains(out, fmt.tprintf("free:%d", r.out_fd)), "the job's pipe (fd %d) leaked into the shell: %q", r.out_fd, out)
 }

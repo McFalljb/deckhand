@@ -122,7 +122,7 @@ Update_Prepared :: struct {
 // and the timer (not in test mode without a fixture URL).
 update_init :: proc() {
 	update_load()
-	if autotest.active {
+	if autotest_active {
 		// a release build never reads the fixture variables: no checks in its test mode
 		when !DECKHAND_UPDATE_TEST do return
 		u := hook_env(.Update_Url)
@@ -151,7 +151,7 @@ update_init :: proc() {
 		inbox_submit(Update_Env{version = version, bundle = bundle, why_not = why}, {kind = .Internal})
 		free_all(context.temp_allocator)
 		time.sleep(t.delay)
-		for !app.quitting {
+		for !app_quitting {
 			inbox_submit(Update_Tick{}, {kind = .Internal})
 			time.sleep(t.test ? time.Hour : UPDATE_TICK_EVERY)
 		}
@@ -319,13 +319,13 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 	case Update_Install:
 		if upd.phase != .Ready || upd.staged == "" do return fail("no update is ready to install"), false
 		if upd.bundle == "" do return fail(upd.why_not), false
-		if job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then restart to update"), true
+		if window_job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then restart to update"), true
 		// keep_sessions: what the session holder keeps carries on through the update (§7.4), so
 		// only what would stop is asked about
 		keeps := holder_keeps_sessions()
-		if quit_would_stop(keeps) || jobs_any_running() || (keeps && editors_unsaved() > 0) {
+		if quit_would_stop(keeps) || jobs_any_running() || (keeps && window_unsaved_files() > 0) {
 			what := fmt.tprintf("restart Deckhand to update to %s? %s", upd.release.version, update_restart_effects(keeps))
-			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+			if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what, force_ask = true)
 			if !go_on do return gr, ch
 		}

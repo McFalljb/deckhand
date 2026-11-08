@@ -25,7 +25,7 @@ toast_show :: proc(text: string, err := false) {
 	delete(toast.text)
 	toast = {text = strings.clone(one_line(text, context.temp_allocator)), err = err, until = time.tick_add(time.tick_now(), err ? TOAST_TIME_ERR : TOAST_TIME)}
 	app.redraw = true
-	if autotest.active do fmt.println("[autotest] toast:", err ? "error:" : "", toast.text)
+	if autotest_active do fmt.println("[autotest] toast:", err ? "error:" : "", toast.text)
 }
 
 toast_clear :: proc() {

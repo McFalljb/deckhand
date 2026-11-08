@@ -214,7 +214,7 @@ harness_run_exited :: proc(exit: Exit_Info) {
 	harness_run.exit = exit
 	harness_run.status = exit.known && exit.code == 0 && exit.signal == 0 ? .Done : .Failed
 	pi_version_probe_again() // pi may have a new version (reload.odin)
-	setup_clear_error() // "an install is running" no longer holds
+	window_setup_sheet(.Clear_Error) // "an install is running" no longer holds
 	harness_checklist_refresh(full = true)
 }
 

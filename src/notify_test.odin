@@ -422,8 +422,8 @@ bell_quit_is_quiet :: proc(t: ^testing.T) {
 	a, b := n_reset()
 	defer n_done()
 	n_active = false
-	app.quitting = true
-	defer app.quitting = false
+	app_quitting = true
+	defer app_quitting = false
 	run_command(Tab_Exited{tab_id = n_tab(a)})
 	run_command(Tab_Exited{tab_id = n_tab(b)})
 	testing.expect_value(t, len(state.notices.items), 0)

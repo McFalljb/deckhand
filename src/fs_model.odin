@@ -21,6 +21,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:thread"
 import "core:time"
+import "core:unicode/utf8"
 
 Fs_Kind :: enum u8 {
 	File,
@@ -97,7 +98,7 @@ fs_trash_fn: proc(path: string) -> bool = fs_trash_or_fake
 
 @(private = "file")
 fs_trash_or_fake :: proc(path: string) -> bool {
-	if !autotest.active do return fs_trash(path)
+	if !autotest_active do return platform.trash != nil && platform.trash(path)
 	dir := "build/test-trash"
 	os.make_directory_all(dir)
 	to, _ := filepath.join({dir, fmt.tprintf("%d-%s", fs_model.gen, filepath.base(path))}, context.temp_allocator)
@@ -713,7 +714,7 @@ fs_delete :: proc(path: string, caller: Caller) -> (err: string) {
 	if path_kind(p) == .Missing && !os.exists(p) do return "no such file or folder" // os.exists: a dangling link
 	if !fs_trash_fn(p) do return "could not move it to the Trash"
 	fs_model_changed(p)
-	for _, ed in editors do if within(fs_real(ed.path), p) do editor_check_disk(ed)
+	window_files_deleted(p) // open buffers of them say so
 	return ""
 }
 
@@ -723,13 +724,13 @@ fs_reveal_path :: proc(path: string, caller: Caller) -> string {
 	if e != "" && caller.kind != .Panel && wt_known_checkout(fs_abs(path, caller)) do p, e = fs_real(fs_abs(path, caller)), "" // a worktree of a project
 	if e != "" do return e
 	if !os.exists(p) do return "no such file or folder"
-	if autotest.active || platform.quit == nil || ODIN_TEST {
+	if autotest_active || platform.quit == nil || ODIN_TEST {
 		// never opens Finder from tests: remembered instead
 		delete(fs_model.revealed)
 		fs_model.revealed = strings.clone(p)
 		return ""
 	}
-	fs_reveal(p)
+	if platform.reveal != nil do platform.reveal(p)
 	return ""
 }
 
@@ -818,4 +819,118 @@ fs_list_error_text :: proc(e: posix.Errno) -> string {
 		return "Can't open: it is not there any more"
 	}
 	return fmt.tprintf("Can't open: %s", strings.to_lower(string(posix.strerror(e)), context.temp_allocator))
+}
+
+Disk_Stamp :: struct {
+	size:  i64,
+	mtime: i64, // ns
+	inode: u64,
+	dev:   u64,
+	mode:  u32, // permission bits
+}
+
+Path_Kind :: enum {
+	Missing,
+	File, // regular
+	Dir,
+	Other, // FIFO, device, socket
+}
+
+// stat(2) (symlinks followed) without opening anything: core:os's stat
+// opens the path, which blocks on a FIFO.
+path_stat :: proc(path: string) -> (kind: Path_Kind, st: Disk_Stamp) {
+	sb: posix.stat_t
+	if posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &sb) != .OK do return .Missing, {}
+	switch {
+	case posix.S_ISREG(sb.st_mode): kind = .File
+	case posix.S_ISDIR(sb.st_mode): kind = .Dir
+	case: kind = .Other
+	}
+	return kind, stamp_of_stat(&sb)
+}
+
+path_kind :: proc(path: string) -> Path_Kind {k, _ := path_stat(path); return k}
+
+// A stat result as a Disk_Stamp (editor_file.odin too).
+stamp_of_stat :: proc(sb: ^posix.stat_t) -> Disk_Stamp {
+	return {size = i64(sb.st_size), mtime = i64(sb.st_mtim.tv_sec) * 1e9 + i64(sb.st_mtim.tv_nsec), inode = u64(sb.st_ino), dev = u64(sb.st_dev), mode = u32(transmute(posix._mode_t)sb.st_mode) & 0o7777}
+}
+
+// Binary: a NUL byte in the first 8 KB, or mostly bytes that are neither
+// UTF-8 nor text controls.
+looks_binary :: proc(data: []u8) -> bool {
+	head := data[:min(len(data), 8192)]
+	bad := 0
+	i := 0
+	for i < len(head) {
+		c := head[i]
+		if c == 0 do return true
+		if c < 0x20 && c != '\n' && c != '\r' && c != '\t' && c != 0x1b && c != 0x0c && c != 0x08 do bad += 1
+		if c < 0x80 {
+			i += 1
+			continue
+		}
+		r, n := utf8.decode_rune(head[i:])
+		if r == utf8.RUNE_ERROR && n <= 1 {
+			// a sequence cut by the 8 KB window is fine
+			if len(head) - i < 4 && len(head) < len(data) do break
+			bad += 1
+			n = 1
+		}
+		i += n
+	}
+	return bad * 10 > len(head) // more than 10%
+}
+
+// One read for disk_read (tests swap in a failing one).
+disk_read_chunk: proc(f: ^os.File, p: []u8) -> (int, os.Error) = proc(f: ^os.File, p: []u8) -> (int, os.Error) {return os.read(f, p)}
+
+// Whether path is a regular file, or not there at all (restored tabs).
+regular_or_missing :: proc(path: string) -> bool {
+	k := path_kind(path)
+	return k == .Missing || k == .File
+}
+
+// A path as the user reads it: ~ for the home folder.
+fs_display :: proc(p: string) -> string {
+	home := os.get_env("HOME", context.temp_allocator)
+	if home != "" && strings.has_prefix(p, home) do return strings.concatenate({"~", p[len(home):]}, context.temp_allocator)
+	return p
+}
+
+// The tab title for a file view.
+title_for :: proc(path: string, view: Editor_View) -> string {
+	base := filepath.base(path)
+	switch view {
+	case .File:      return strings.clone(base)
+	case .Diff_Head: return fmt.aprintf("%s ↔ HEAD", base)
+	case .Diff_Disk: return fmt.aprintf("%s ↔ disk", base)
+	case .Changes:   return strings.clone("Changes")
+	}
+	return strings.clone(base)
+}
+
+// A file or folder moved: open tabs follow it (path and title).
+editors_renamed :: proc(from, to: string) {
+	for &s in state.open_sessions do for &tab in s.tabs {
+		path: ^string
+		view := Editor_View.File
+		#partial switch &k in tab.kind {
+		case Editor_Tab:
+			path, view = &k.path, k.view
+		case Markdown_Tab:
+			path = &k.path
+		case:
+			continue
+		}
+		rp := fs_real(path^)
+		if rp != from && !strings.has_prefix(rp, strings.concatenate({from, "/"}, context.temp_allocator)) do continue
+		np := strings.concatenate({to, rp[len(from):]})
+		delete(path^)
+		path^ = np
+		delete(tab.title)
+		tab.title = title_for(np, view)
+		window_view_moved(tab.id, np) // its buffer follows (tab_views.odin)
+	}
+	watch_sync()
 }

@@ -87,32 +87,12 @@ File_List_Done :: struct {
 	root, out: string,
 }
 
-EDITOR_VIEW_NAMES := [Editor_View]string {
-	.File      = "file",
-	.Diff_Disk = "disk",
-	.Diff_Head = "head",
-	.Changes   = "changes",
-}
-
 @(private = "file")
 editor_tab :: proc(id: u64) -> (^Open_Session, ^Tab, ^Editor) {
 	s, tab, _ := find_tab(id)
 	if tab == nil do return nil, nil, nil
 	if _, is := tab.kind.(Editor_Tab); !is do return nil, nil, nil
 	return s, tab, editor_of(id)
-}
-
-// The tab title for a file view.
-@(private = "file")
-title_for :: proc(path: string, view: Editor_View) -> string {
-	base := filepath.base(path)
-	switch view {
-	case .File:      return strings.clone(base)
-	case .Diff_Head: return fmt.aprintf("%s ↔ HEAD", base)
-	case .Diff_Disk: return fmt.aprintf("%s ↔ disk", base)
-	case .Changes:   return strings.clone("Changes")
-	}
-	return strings.clone(base)
 }
 
 editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
@@ -372,13 +352,6 @@ editor_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool)
 	return fail("unknown command"), false
 }
 
-// A path as the user reads it: ~ for the home folder.
-fs_display :: proc(p: string) -> string {
-	home := os.get_env("HOME", context.temp_allocator)
-	if home != "" && strings.has_prefix(p, home) do return strings.concatenate({"~", p[len(home):]}, context.temp_allocator)
-	return p
-}
-
 @(private = "file")
 quoted :: proc(s: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
@@ -414,36 +387,6 @@ editor_set_text :: proc(e: ^Editor, text: string) {
 	e.cursor, e.anchor = 0, 0
 	e.gen += 1
 	app.redraw = true
-}
-
-// A file or folder moved: open tabs follow it (path and title).
-editors_renamed :: proc(from, to: string) {
-	for &s in state.open_sessions do for &tab in s.tabs {
-		path: ^string
-		view := Editor_View.File
-		#partial switch &k in tab.kind {
-		case Editor_Tab:
-			path, view = &k.path, k.view
-		case Markdown_Tab:
-			path = &k.path
-		case:
-			continue
-		}
-		rp := fs_real(path^)
-		if rp != from && !strings.has_prefix(rp, strings.concatenate({from, "/"}, context.temp_allocator)) do continue
-		np := strings.concatenate({to, rp[len(from):]})
-		delete(path^)
-		path^ = np
-		delete(tab.title)
-		tab.title = title_for(np, view)
-		if e := editor_of(tab.id); e != nil {
-			delete(e.path)
-			e.path = strings.clone(np)
-			e.disk, _ = disk_stamp(np)
-			e.missing = false
-		}
-	}
-	watch_sync()
 }
 
 // editor_state's data (temp allocator).

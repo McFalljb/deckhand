@@ -347,3 +347,60 @@ term_target_rect :: proc(tab_id: u64) -> [4]f32 {
 	}
 	return f
 }
+
+pane_editor :: proc(p: ^Pane) -> ^Editor {
+	if t := pane_shown(p); t != nil do return editor_of(t.id)
+	return nil
+}
+
+pane_browser :: proc(p: ^Pane) -> ^Browser {
+	if t := pane_shown(p); t != nil do return browsers[t.id]
+	return nil
+}
+
+pane_app :: proc(p: ^Pane) -> ^App_Proc {
+	if t := pane_shown(p); t != nil do return app_of(t.id)
+	return nil
+}
+
+// Pane p's content rect (framebuffer px): its laid-out rect, else the one the window last laid
+// out (app.pane).
+pane_rect :: proc(p: ^Pane) -> [4]f32 {
+	if p != nil && p.rect.z > 0 do return p.rect
+	return app.pane
+}
+
+// The pane of the current session whose content holds the point (framebuffer px), or nil. With
+// no pane laid out yet: the focused pane.
+pane_at :: proc(x, y: f32) -> ^Pane {
+	s := cur()
+	if s == nil do return nil
+	laid := false
+	for &p in s.panes {
+		r := p.frame.z > 0 ? p.frame : p.rect
+		if r.z <= 0 do continue
+		laid = true
+		if x >= r.x && y >= r.y && x < r.x + r.z && y < r.y + r.w do return &p
+	}
+	return laid ? nil : session_focused_pane(s)
+}
+
+// Where tab `tab_id` is drawn (framebuffer px): in the current session its pane's laid-out
+// rect; else (another session, or not laid out yet) its pane's place in the session's tree
+// inside the rect the window last laid out (app.pane), what it will get when shown.
+tab_rect :: proc(tab_id: u64) -> [4]f32 {
+	s, tab, _ := find_tab(tab_id)
+	if tab == nil do return app.pane
+	p := session_pane(s, tab.pane)
+	if p == nil do return app.pane
+	if s.id == state.current_session && p.rect.z > 0 do return p.rect
+	centre := app.centre.z > 0 ? app.centre : app.pane
+	if centre.z <= 0 do return app.pane
+	if len(s.panes) <= 1 do return app.pane // one pane: its content is the centre's (under the session's bars)
+	// the pane's place in the tree, less its strip (its tab's bars are not counted)
+	for r in pane_rects(s, centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id {
+		strip := min(px(TAB_STRIP_H), r.rect.w)
+		return {r.rect.x, r.rect.y + strip, r.rect.z, r.rect.w - strip}
+	}
+	return app.pane
+}

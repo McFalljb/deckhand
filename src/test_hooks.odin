@@ -30,6 +30,10 @@ import "core:strings"
 
 TEST_HOOKS :: #config(DECKHAND_TEST_HOOKS, true)
 
+// Test mode runs a script (autotest.odin, DECKHAND_SCRIPT): the core logs more, never touches the
+// user's Trash or Finder, and starts the holder directly.
+autotest_active: bool
+
 Hook :: enum u8 {
 	Script, // test mode: the script to run (autotest.odin)
 	Script_Fail_Fast,

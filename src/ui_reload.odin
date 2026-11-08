@@ -85,15 +85,6 @@ restart_bar_shows :: proc() -> bool {
 	return n.idle + n.busy + n.no_bridge + n.queued + n.reloading > 0
 }
 
-// Whether a reload (restart) of this tab is under way.
-reload_step_is :: proc(t: ^Tab, restart: bool) -> bool {
-	#partial switch t.reload.step {
-	case .Reload_Kicked, .Reload_Sent: return !restart
-	case .Restart_Kicked, .Restart_Asking, .Restart_Exiting: return restart
-	}
-	return false
-}
-
 @(private = "file")
 tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
 

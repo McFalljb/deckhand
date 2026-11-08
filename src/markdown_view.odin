@@ -56,12 +56,6 @@ Markdown_Follow :: struct {
 	confirm: string, // a web or mail link from a caller other than the user: the user confirms
 }
 
-// Whether a path is a Markdown file (by its extension).
-md_is_markdown_path :: proc(path: string) -> bool {
-	ext := strings.to_lower(filepath.ext(path), context.temp_allocator)
-	return ext == ".md" || ext == ".markdown" || ext == ".mdx"
-}
-
 // ---- fenced code renderers ----
 
 // A fenced block's language with a renderer of its own (diagrams). render

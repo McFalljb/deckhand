@@ -44,12 +44,6 @@ Text_Size :: enum {
 	Medium,
 	Large,
 }
-TEXT_SIZE_NAMES := [Text_Size]string {
-	.Default = "default",
-	.Small   = "small",
-	.Medium  = "medium",
-	.Large   = "large",
-}
 // Smallest to largest, as the gear shows them.
 TEXT_SIZE_ORDER :: [4]Text_Size{.Small, .Medium, .Default, .Large}
 // UI body and secondary (small) text per size, logical px.
@@ -203,12 +197,6 @@ Theme_Id :: enum {
 	Graphite,
 	Warm,
 	Ghostty,
-}
-
-THEME_NAMES := [Theme_Id]string {
-	.Graphite = "graphite",
-	.Warm     = "warm",
-	.Ghostty  = "ghostty",
 }
 
 Theme :: struct {
@@ -423,12 +411,6 @@ Appearance :: enum {
 	System,
 	Light,
 	Dark,
-}
-
-APPEARANCE_NAMES := [Appearance]string {
-	.System = "system",
-	.Light  = "light",
-	.Dark   = "dark",
 }
 
 // The active look in the active appearance.

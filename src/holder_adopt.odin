@@ -247,7 +247,7 @@ holder_handover :: proc() -> bool {
 		}
 		sum := token_hash(string(blob))
 		append(&list, Handover_Term{term = i64(id), offset = off, sha256 = string(hex.encode(sum[:], context.temp_allocator)), format = used.format, inexact = used.inexact || gap || t.inexact})
-		if autotest.active {
+		if autotest_active {
 			hsh, _ := screen_hash(t.gt)
 			fmt.printfln("[autotest] handover %d offset %d hash %x", id, off, hsh)
 		}
@@ -447,7 +447,7 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 			hsh, _ := screen_hash(gt) // before term_adopt_gt (its resize clears mode 2026)
 			term_adopt_gt(t, gt)
 			exact = ex && !snap.inexact && !meta.inexact
-			if autotest.active do fmt.printfln("[autotest] adopted %d hash %x %s", id, hsh, exact ? "exact" : "inexact")
+			if autotest_active do fmt.printfln("[autotest] adopted %d hash %x %s", id, hsh, exact ? "exact" : "inexact")
 			term_feed_replayed(t, tail[skip:])
 			adopted = true
 		} else if gt != nil {
@@ -458,13 +458,13 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 		// no usable snapshot (crash restart): a fresh terminal at the holder's size, its whole tail
 		t.cols, t.rows = max(cols, 2), max(rows, 2)
 		gh.terminal_resize(t.gt, t.cols, t.rows, u32(t.cell.x), u32(t.cell.y))
-		if autotest.active {
+		if autotest_active {
 			hsh, _ := screen_hash(t.gt)
 			fmt.printfln("[autotest] adopted %d hash %x inexact", id, hsh)
 		}
 		term_feed_replayed(t, tail)
 	}
-	if autotest.active && adopted && tail_start == 0 do adopt_ref_check(t, id, tail, cols, rows)
+	if autotest_active && adopted && tail_start == 0 do adopt_ref_check(t, id, tail, cols, rows)
 	t.inexact = !exact
 	t.pty = Pty{fd = -1, held = id, pid = pid}
 	t.running = true

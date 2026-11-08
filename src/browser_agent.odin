@@ -799,7 +799,7 @@ cdp_send :: proc(t: ^Agent_Tab, cef: c.int, method, params: string) -> c.int {
 	id := next_msg
 	msg := fmt.tprintf(`{{"id":%d,"method":"%s","params":%s}}`, id, method, params)
 	if dh_cef_devtools_send(cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
-	if autotest.active && t != nil {
+	if autotest_active && t != nil {
 		if _, has := t.sent[method]; !has do t.sent[strings.clone(method)] = 0
 		t.sent[method] += 1
 	}

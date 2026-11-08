@@ -386,6 +386,7 @@ ui_sidebar.odin left column layout and input: filter field, quick filters, secti
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
 tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs browser, app, Markdown and editor commands
 window_hooks.odin what the core asks of the window (redraw, toast, frames, a tab's view facts for State's JSON, tab host commands, the test step): core files call these, main.odin fills them
+tab_views.odin the window's side of the tab view hooks: a tab record's view (editor buffer, Markdown view, Changes diff, browser page) made and dropped as the core reports the record; unsaved buffers for the core's questions
 *_wire.odin    the browser, app and Markdown commands' wire layer (type names, inbox copies and frees, events' fields, the socket's tab filter); app_wire.odin also an app's results, events and tab.boxes as its socket sends them
 core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame()
 update*.odin   Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key

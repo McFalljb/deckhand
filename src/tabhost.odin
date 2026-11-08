@@ -53,13 +53,15 @@ tab_view :: proc(kind: Tab_Kind) -> ^Tab_View {
 }
 
 // The window's side of tab host routing (window_hooks.odin): the browser, app, Markdown and
-// editor commands, as commands.odin's apply sent them before.
+// editor commands, and a terminal's links, as commands.odin's apply sent them before.
 tab_host_apply_app :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool) {
 	#partial switch _ in cmd {
 	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
 		return editor_apply(cmd, caller)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
 		return markdown_apply(cmd, caller)
+	case Terminal_Link:
+		return term_link_apply(cmd.(Terminal_Link), caller) // a browser tab, else the default browser (term_links.odin)
 	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
 		return app_apply(cmd, caller, request_id)
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:

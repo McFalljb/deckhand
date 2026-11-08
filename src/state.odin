@@ -495,3 +495,30 @@ tab_clear_panels :: proc(t: ^Tab) {
 	for &p in t.panels do panel_free(&p)
 	clear(&t.panels)
 }
+
+// The names settings.json, commands and get_state use for the window's look and editor tabs' views.
+THEME_NAMES := [Theme_Id]string {
+	.Graphite = "graphite",
+	.Warm     = "warm",
+	.Ghostty  = "ghostty",
+}
+
+APPEARANCE_NAMES := [Appearance]string {
+	.System = "system",
+	.Light  = "light",
+	.Dark   = "dark",
+}
+
+TEXT_SIZE_NAMES := [Text_Size]string {
+	.Default = "default",
+	.Small   = "small",
+	.Medium  = "medium",
+	.Large   = "large",
+}
+
+EDITOR_VIEW_NAMES := [Editor_View]string {
+	.File      = "file",
+	.Diff_Disk = "disk",
+	.Diff_Head = "head",
+	.Changes   = "changes",
+}

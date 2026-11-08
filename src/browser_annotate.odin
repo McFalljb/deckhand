@@ -318,7 +318,7 @@ cdp :: proc(a: ^Annot, b: ^Browser, method: string, params: string, call := Anno
 	msg := strings.to_string(s)
 	if dh_cef_devtools_send(b.cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
 	if call != .None do a.pending[id] = call
-	if autotest.active {
+	if autotest_active {
 		if _, has := a.sent[method]; !has do a.sent[strings.clone(method)] = 0
 		a.sent[method] += 1
 	}

@@ -534,15 +534,15 @@ tidy_temp_roots_env :: proc(t: ^testing.T) {
 	old_script := strings.clone(os.get_env("DECKHAND_SCRIPT", context.temp_allocator), context.temp_allocator)
 	defer os.set_env("DECKHAND_SCRIPT", old_script)
 	defer os.unset_env("DECKHAND_TEMP_ROOTS")
-	was := autotest.active
-	defer autotest.active = was
+	was := autotest_active
+	defer autotest_active = was
 	os.set_env("DECKHAND_TEMP_ROOTS", "/pd-a::/pd-b:")
 	// not running a script: the env var (even with DECKHAND_SCRIPT set) is ignored
-	autotest.active = false
+	autotest_active = false
 	os.set_env("DECKHAND_SCRIPT", "x.txt")
 	testing.expect(t, slice.contains(temp_roots(), "/tmp"), "the system's roots")
 	// running a script: just the named ones, no empty piece
-	autotest.active = true
+	autotest_active = true
 	roots := temp_roots()
 	testing.expectf(t, len(roots) == 2 && roots[0] == "/pd-a" && roots[1] == "/pd-b", "roots %v", roots)
 	testing.expect(t, !is_temp_path("/Users/x/proj", roots), "an empty piece is no root")

@@ -162,12 +162,6 @@ pi_installed_now :: proc() -> bool {
 
 // ---- the one "New session" ----
 
-// The picker's project is gone (a rescan dropped it): the menu closes.
-new_session_target_gone :: proc() -> bool {
-	t, ok := menu.target.(Menu_New_Session)
-	return ok && find_project(t.project_id) == nil
-}
-
 // Atlas is offered: it runs on pi (open or running already: as it is).
 atlas_offered :: proc() -> bool {return state.home_open || agent_running() || pi_installed()}
 

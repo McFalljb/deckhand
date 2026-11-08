@@ -595,7 +595,6 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
 		{"src/app_wire.odin", "app_event_in", "json.parse_value", "parser", ""},
 		{"src/app_wire.odin", "app_boxes_parse", "jg.parse_string", "", ""},
-		{"src/autotest.odin", "json_path", "jg.parse_string", "", ""},
 		{"src/browser.odin", "rlz_off", "jg.parse", "", ""},
 		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
 		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
@@ -613,6 +612,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
 		{"src/claude_status.odin", "hints_load", "jg.parse", "", ""},
 		{"src/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
+		{"src/ctl.odin", "json_path", "jg.parse_string", "", ""},
 		{"src/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
 		{"src/jobs.odin", "job_load", "jg.parse", "", ""},
 		{"src/jobs.odin", "job_load", "jg.parse", "", ""},

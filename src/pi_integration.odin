@@ -212,9 +212,9 @@ pi_extras_outdated :: proc(t: ^Tab) -> bool {
 	@(static) cache: struct {
 		frame, gen, value: u64,
 	}
-	if app.frames_called == 0 do return t.reload.extras != pi_integration_extras()
-	if cache.frame != app.frames_called || cache.gen != settings_gen {
-		cache = {frame = app.frames_called, gen = settings_gen, value = pi_integration_extras()}
+	if app_frames_called == 0 do return t.reload.extras != pi_integration_extras()
+	if cache.frame != app_frames_called || cache.gen != settings_gen {
+		cache = {frame = app_frames_called, gen = settings_gen, value = pi_integration_extras()}
 	}
 	return t.reload.extras != cache.value
 }

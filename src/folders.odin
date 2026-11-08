@@ -227,7 +227,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 	if c, ok := cmd.(Set_Home_Dir); ok && c.setup {
 		r, changed = home_dir_apply(c, caller)
 		if !r.ok {
-			setup_failed(r.error)
+			window_setup_sheet(.Failed, r.error)
 			return
 		}
 		cr, cch := folders_apply(Setup_Sheet{open = false}, caller)
@@ -259,7 +259,7 @@ folders_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool
 	case Setup_Sheet:
 		if !c.open && harness_run_holds_sheet() do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
 		if c.open {
-			setup_begin()
+			window_setup_sheet(.Begin)
 			if state.focus_widget != "setup" {
 				delete(state.focus_widget)
 				state.focus_widget = strings.clone("setup")

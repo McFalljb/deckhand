@@ -650,16 +650,6 @@ app_fail_pending :: proc(tab_id: u64, why, code: string, shots := true) {
 
 // ---- process ----
 
-when ODIN_OS == .Darwin {
-	foreign import applib "system:System"
-	@(default_calling_convention = "c")
-	foreign applib {
-		posix_spawn_file_actions_addchdir_np :: proc(fa: rawptr, path: cstring) -> posix.Errno ---
-		posix_spawn_file_actions_addopen :: proc(fa: rawptr, fd: i32, path: cstring, oflag: i32, mode: u16) -> posix.Errno ---
-	}
-	POSIX_SPAWN_SETSID :: 0x0400
-}
-
 // The app's environment: Deckhand's minus its own names (env_desk_owned: what it sets, the old
 // PI_DESK_* and the test hooks) and PI_KIT_*, plus its socket, a fresh single-use `app` token for
 // this tab and DECKHAND_APP=1, each with its PI_DESK_ twin (env_names.odin; forge reads those).

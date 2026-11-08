@@ -437,7 +437,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		window_toast(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
-	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
+	if autotest_active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
 }
 
@@ -1063,7 +1063,7 @@ holder_reattach :: proc() -> bool {
 			upgrade_finish_locked(res)
 			sync.unlock(&hc.mu)
 			upgrade_release()
-			if autotest.active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
+			if autotest_active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
 			return true
 		}
 		if !strings.has_prefix(why, "retry") {

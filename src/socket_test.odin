@@ -1145,17 +1145,17 @@ script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
 	tab, c := sk_app_tab(t)
 	defer tc_close(c)
 	// only what this test changes
-	was_active, was_started, was_next, was_failures, was_lines := autotest.active, autotest.started, autotest.next, autotest.failures, autotest.lines
+	was_active, was_started, was_next, was_failures, was_lines := autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines
 	was_wait, was_until, was_deadline := autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline
 	was_timeout := script_finish_timeout
 	defer {
-		autotest.active, autotest.started, autotest.next, autotest.failures, autotest.lines = was_active, was_started, was_next, was_failures, was_lines
+		autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines = was_active, was_started, was_next, was_failures, was_lines
 		autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline = was_wait, was_until, was_deadline
 		script_finish_timeout = was_timeout
 	}
 	script_finish_timeout = 200 * time.Millisecond
 	run :: proc(lines: []string, ms: time.Duration) {
-		autotest.active, autotest.started, autotest.next, autotest.failures = true, true, 0, 0
+		autotest_active, autotest.started, autotest.next, autotest.failures = true, true, 0, 0
 		autotest.wait_request, autotest.wait_until = 0, {}
 		autotest.lines = lines
 		autotest_step()

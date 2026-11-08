@@ -79,7 +79,7 @@ temp_roots :: proc() -> []string {
 	// Scenes (a script running) whose fake HOME sits in /tmp, for a short
 	// path, name the temp folders instead: DECKHAND_TEMP_ROOTS, ':'-separated
 	// (empty pieces dropped: "" would make every path temp).
-	if autotest.active {
+	if autotest_active {
 		named := make([dynamic]string, context.temp_allocator)
 		for r in strings.split(hook_env(.Temp_Roots), ":", context.temp_allocator) do if r != "" do append(&named, r)
 		if len(named) > 0 do return named[:]

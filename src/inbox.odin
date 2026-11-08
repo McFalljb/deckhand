@@ -8,6 +8,7 @@ package main
 // a Finished_Event carrying the same request id.
 
 import "base:runtime"
+import "core:fmt"
 import "core:strings"
 import "core:sync"
 
@@ -448,5 +449,22 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		}
 		delete(c.layout.nodes, allocator)
 		delete(c.tabs, allocator)
+	}
+}
+
+// What a menu row's command did, where nothing else on screen shows it: a
+// failure always (else a click seems to do nothing), a copy when it worked.
+// Not a command that finishes later or asks first (the confirmation bar).
+menu_result :: proc(label: string, cmd: Command, r: Result) {
+	if r.pending || r.error == "needs_confirmation" do return
+	if r.error == CLAUDE_MISSING do return // the command said how to install it already (claude.odin)
+	if !r.ok {
+		why := r.error != "" ? r.error : "it did not work"
+		window_toast(fmt.tprintf("%s: %s", strings.trim_suffix(label, "…"), why), err = true)
+		return
+	}
+	#partial switch c in cmd {
+	case Session_Info: if c.to == "clipboard" do window_toast("Session info copied")
+	case Copy_Path:    window_toast("Path copied")
 	}
 }

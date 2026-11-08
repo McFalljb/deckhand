@@ -132,7 +132,7 @@ term_attach_gt :: proc(t: ^Term) {
 // theme, as term_start sets them. Modes and grapheme clustering come from the
 // snapshot.
 term_adopt_gt :: proc(t: ^Term, gt: gh.Terminal) {
-	term_cancel_drag(t) // its tracked ends belong to the old terminal
+	window_term_drag_cancel(t) // its tracked ends belong to the old terminal
 	if t.gt != nil do gh.terminal_free(t.gt)
 	t.gt = gt
 	gh.terminal_get(gt, .Cols, &t.cols)
@@ -161,7 +161,7 @@ term_init :: proc(t: ^Term, cols, rows: u16) -> bool {
 	t.cols, t.rows = cols, rows
 	t.cell = term_cell
 	if !term_new_gt(t) do return false
-	term_view_init(t)
+	window_term_view_new(t) // its view's render state and encoders (term_view.odin)
 	t.pty.fd = -1
 	return true
 }
@@ -199,7 +199,7 @@ term_feed_replayed :: proc(t: ^Term, bytes: []u8) {
 }
 
 term_free :: proc(t: ^Term) {
-	term_view_free(t)
+	window_term_view_free(t)
 	reader_stop_and_close(t)
 	delete(t.reader.inbox)
 	gh.terminal_free(t.gt)
@@ -210,7 +210,7 @@ term_free :: proc(t: ^Term) {
 // False if the process could not be started.
 term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = nil, start: Held_Start = {}) -> bool {
 	reader_stop_and_close(t)
-	term_cancel_drag(t) // its tracked ends belong to the old terminal
+	window_term_drag_cancel(t) // its tracked ends belong to the old terminal
 	// a new terminal per process: clean modes, scrollback and kitty flags
 	gh.terminal_free(t.gt)
 	term_new_gt(t)

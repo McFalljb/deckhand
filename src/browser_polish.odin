@@ -615,7 +615,7 @@ download_reserve :: proc(dir, name: string, allocator := context.temp_allocator)
 
 // Where downloads go: ~/Downloads; test mode: the data dir's downloads/ (a temp dir).
 downloads_dir :: proc() -> string {
-	if autotest.active || ODIN_TEST {
+	if autotest_active || ODIN_TEST {
 		root := home_root != "" ? home_root : "build/test-data"
 		d, _ := filepath.join({root, "downloads"}, context.temp_allocator)
 		return d

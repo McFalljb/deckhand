@@ -245,7 +245,7 @@ control_token_clip_tick :: proc() {
 	if platform.clear_clipboard_if != nil do platform.clear_clipboard_if(control_token_clip.count)
 	control_token_clip = {}
 }
-keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest.active}
+keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest_active}
 
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
 // onto the clipboard (docs/PROTOCOL.md §2). The user's only: the one way a release build mints a
@@ -844,7 +844,7 @@ close_needs_confirm :: proc(tab: Tab) -> bool {
 			t := term_of(tab.id)
 			return t != nil && pty_foreground_busy(&t.pty)
 		case Editor_Tab:
-			return editor_dirty(editor_of(tab.id)) // unsaved changes
+			return window_tab_dirty(tab.id) // unsaved changes
 		case Changes_Tab, Browser_Tab:
 			return false // nothing of its own to lose
 		case Markdown_Tab:
@@ -1051,13 +1051,13 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// the overlays that take the user's keys (Space/Enter run settings) open for the user only
 		if (c.widget == "palette" || c.widget == "settings" || c.widget == "shortcuts" || c.widget == "notifications" || c.widget == "setup" || c.widget == "job_sheet") && caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens the palette, settings, shortcuts, notifications and setup"), false
 		// the job sheet is modal: it closes by its own Save / Cancel (job_sheet)
-		if job_sheet_open() && c.widget != "job_sheet" do return fail("the job sheet is open (save or cancel it first)"), false
-		if c.widget == "job_sheet" && !job_sheet_open() do return fail("the job sheet opens with job_sheet"), false
+		if window_job_sheet_open() && c.widget != "job_sheet" do return fail("the job sheet is open (save or cancel it first)"), false
+		if c.widget == "job_sheet" && !window_job_sheet_open() do return fail("the job sheet opens with job_sheet"), false
 		// an install or update runs on the setup sheet: only the user moves away from it (harness_install.odin)
 		// an install or update runs on the setup sheet: modal until it ends, for every caller (its terminal and ⌃C stay reachable)
 		if harness_run_holds_sheet() && c.widget != "setup" do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
 		if c.widget == state.focus_widget do return {ok = true}, false
-		if c.widget == "setup" do setup_begin() // the first-run sheet starts at step 1 (ui_setup.odin)
+		if c.widget == "setup" do window_setup_sheet(.Begin) // the first-run sheet starts at step 1 (ui_setup.odin)
 		state.focus_widget = strings.clone(c.widget)
 		if c.widget == "sidebar_filter" || c.widget == "rename_project" || c.widget == "rename_session" do state.layout.left_open = true // its field must show
 		if c.widget == "sidebar_filter" || c.widget == "rename_project" || c.widget == "rename_session" do state.layout.left_tab = .Sessions
@@ -1149,20 +1149,20 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		}
 		return {ok = true}, true
 	case Quit:
-		if job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then quit"), true
+		if window_job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then quit"), true
 		// keep_sessions: what the session holder keeps running is not stopped, so not asked about
 		keeps := !c.stop_sessions && holder_keeps_sessions()
-		if quit_would_stop(keeps) || (keeps && editors_unsaved() > 0) {
+		if quit_would_stop(keeps) || (keeps && window_unsaved_files() > 0) {
 			what := "quit Deckhand? Running sessions will be stopped."
-			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
+			if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
 			if keeps || c.stop_sessions {
 				what = keeps ? "quit Deckhand? Sessions the session holder keeps run on; others will be stopped." : "quit Deckhand and stop all sessions? Every session, including those kept running, will be stopped."
-				if n := editors_unsaved(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+				if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
 			}
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what)
 			if !go_on do return gr, ch
 		}
-		app.stop_sessions = c.stop_sessions
+		app_stop_sessions = c.stop_sessions
 		if platform.quit != nil do platform.quit()
 		return {ok = true}, false
 	case Get_State:
@@ -1295,7 +1295,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Session_Info:
 		return session_info_apply(c, caller)
 	case Job_Sheet:
-		return job_sheet_apply(c, caller)
+		return window_job_sheet(c, caller) // the sheet is the window's (ui_job_sheet.odin)
 	case Copy_Path:
 		path, err := sidebar_path(c.project_id, c.pi_session_id)
 		if err != "" do return fail(err), false
@@ -1615,7 +1615,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes:
 		return panes_apply(cmd, caller) // panes_commands.odin
 	case Terminal_Link:
-		return term_link_apply(c, caller)
+		return window_tab_host_apply(cmd, caller, request_id) // a browser tab or the default browser (term_links.odin)
 	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
 		return window_tab_host_apply(cmd, caller, request_id) // app tabs
 	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
@@ -2122,18 +2122,18 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3); in a chat read-only while chats are (claude_start)
 		if et, is_ed := tab.kind.(Editor_Tab); is_ed {
 			// no process: the file opens again (a gone file says so in its tab)
-			if editor_of(tab.id) == nil do editor_new(tab.id, et.path)
+			window_view_open(tab.id, et)
 			tab.status = .Running
 			continue
 		}
 		if mt, is_md := tab.kind.(Markdown_Tab); is_md {
-			if md_view_of(tab.id) == nil do md_view_new(tab.id, mt.path)
+			window_view_open(tab.id, mt)
 			tab.status = .Running
 			continue
 		}
-		if _, is_web := tab.kind.(Browser_Tab); is_web {
+		if bt, is_web := tab.kind.(Browser_Tab); is_web {
 			// its page loads now (browser_tick), at the URL it was saved with
-			browser_restore(&tab)
+			window_view_open(tab.id, bt)
 			tab.status = .Running
 			continue
 		}
@@ -2350,19 +2350,16 @@ shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0) -> (u64, s
 new_term :: proc(tab_id: u64) -> ^Term {
 	t := new(Term)
 	term_init(t, 80, 24)
-	// size it to its pane before the child starts, so it sees the right grid (panes.odin; a tab
-	// not added yet: the focused pane's)
-	if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
+	// size it to its pane before the child starts, so it sees the right grid (the window's
+	// tab_rect; a tab not added yet: the focused pane's)
+	window_term_fit(t, tab_id)
 	terms[tab_id] = t
 	return t
 }
 
 drop_term :: proc(tab_id: u64) {
-	editor_drop(tab_id) // an editor tab's buffer (editor_commands.odin)
+	window_view_drop(tab_id) // its buffer, Markdown view, page or app (tab_views.odin)
 	changes_drop(tab_id) // a Changes tab's view (changes.odin)
-	md_drop(tab_id) // a Markdown tab's view (markdown_view.odin)
-	browser_drop(tab_id) // a browser tab's page (browser.odin)
-	app_drop(tab_id) // an app tab's process and frames (app_tab.odin)
 	if t := term_of(tab_id); t != nil {
 		term_free(t)
 		free(t)
@@ -2478,4 +2475,69 @@ scan_worker :: proc(request_id: u64) {
 	scan := new(Scan_Result)
 	scan_projects(scan)
 	inbox_submit(Rescan_Done{request_id = request_id, scan = scan}, {kind = .Internal})
+}
+
+// What the URL field's text becomes: a URL with a scheme Deckhand opens
+// (http, https, file, about, deckhand-test: test fixtures) as is; a bare host
+// ("example.com", "example.com/path", "host:8080") gets https://, a local one
+// (localhost, 127.x, [::1]) http://. Anything else (words, spaces) is not a
+// web address: search is not built in yet (BROWSER.md §2.2). Pure.
+browser_url_normalize :: proc(text: string, allocator := context.temp_allocator) -> (url: string, err: string) {
+	t := strings.trim_space(text)
+	if t == "" do return "", "type a web address"
+	if strings.contains_any(t, " \t\n\r") do return "", "not a web address (search is not built in yet)"
+	lower := strings.to_lower(t, context.temp_allocator)
+	if lower == BROWSER_BLANK do return strings.clone(BROWSER_BLANK, allocator), ""
+	if i := strings.index(lower, "://"); i > 0 {
+		scheme := lower[:i]
+		switch scheme {
+		case "http", "https", "file", "deckhand-test":
+			if len(t) == i + 3 do return "", "the address has nothing after ://"
+			return strings.clone(t, allocator), ""
+		}
+		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", scheme)
+	}
+	if strings.has_prefix(lower, "about:") || strings.has_prefix(lower, "javascript:") || strings.has_prefix(lower, "data:") || strings.has_prefix(lower, "mailto:") || strings.has_prefix(lower, "chrome:") {
+		return "", fmt.tprintf("Deckhand does not open %s: addresses (http, https and file only)", lower[:strings.index_byte(lower, ':')])
+	}
+	// a bare host, maybe with a port and a path
+	end := len(t)
+	if k := strings.index_any(t, "/?#"); k >= 0 do end = k
+	hostport := lower[:end]
+	// user@host: never typed as a bare host here (127.0.0.1@evil.com is evil.com)
+	if strings.contains_rune(hostport, '@') do return "", "not a web address (a user name before @ is not opened from here)"
+	host := hostport
+	if strings.has_prefix(host, "[") {
+		// [::1]:8080
+		k := strings.index_byte(host, ']')
+		if k < 0 do return "", "not a web address"
+		rest := host[k + 1:]
+		host = host[:k + 1]
+		if rest != "" && !port_ok(rest) do return "", "not a web address"
+	} else if k := strings.index_byte(host, ':'); k >= 0 {
+		if !port_ok(host[k:]) do return "", "not a web address (search is not built in yet)"
+		host = host[:k]
+	}
+	if host == "" do return "", "not a web address"
+	local := host == "localhost" || strings.has_suffix(host, ".localhost") || host == "[::1]" || strings.has_prefix(host, "127.")
+	if !local {
+		// letters, digits, - and . with a dot inside and a top-level part of letters (or an IPv4 address)
+		if !strings.contains_rune(host, '.') || strings.has_prefix(host, ".") || strings.has_suffix(host, ".") do return "", "not a web address (search is not built in yet)"
+		for r in host do if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-' || r == '.' || r > 0x7f) do return "", "not a web address (search is not built in yet)"
+		tld := host[strings.last_index_byte(host, '.') + 1:]
+		ipv4 := true
+		for r in host do if !(r >= '0' && r <= '9' || r == '.') do ipv4 = false
+		if !ipv4 {
+			for r in tld do if r >= '0' && r <= '9' do return "", "not a web address (search is not built in yet)"
+			if len(tld) < 2 do return "", "not a web address (search is not built in yet)"
+		}
+	}
+	return strings.concatenate({local ? "http://" : "https://", t}, allocator), ""
+
+	port_ok :: proc(s: string) -> bool {
+		// ":" then 1-5 digits
+		if len(s) < 2 || len(s) > 6 || s[0] != ':' do return false
+		for r in s[1:] do if r < '0' || r > '9' do return false
+		return true
+	}
 }

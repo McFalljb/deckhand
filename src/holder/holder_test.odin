@@ -941,3 +941,27 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	for len(h.conns) == 0 && time.tick_since(start) < time.Second do holder_step(h, 20)
 	testing.expect_value(t, len(h.conns), 1)
 }
+
+// A SPAWNed program holds only 0, 1 and 2: no master of another terminal, no socket, no lock.
+@(test)
+child_holds_only_stdio :: proc(t: ^testing.T) {
+	h := new_test_holder(t)
+	defer holder_free(h, true)
+	f := fake_connect(t, h)
+	defer fake_free(f)
+	hello(t, h, f)
+	spawn_ok(t, h, f, 1, "exec /bin/sleep 5") // another terminal's master is open meanwhile
+	// ls lists what it inherited plus the two it opens to read the directory (3 and 4, the lowest
+	// free ones, if none leaked; as from a clean shell)
+	spawn_ok(t, h, f, 2, `exec /bin/ls /dev/fd`)
+	_, ok := exited_of(t, h, f, 2)
+	testing.expect(t, ok)
+	out := strings.fields(output_of(t, f, 2), context.temp_allocator)
+	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "the child holds more than 0-2: %v", out)
+}
+
+slice_eq :: proc(a, b: []string) -> bool {
+	if len(a) != len(b) do return false
+	for x, i in a do if x != b[i] do return false
+	return true
+}

@@ -7,13 +7,18 @@ import "core:c"
 import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
+import "core:sync"
 import "core:testing"
 import "core:time"
 
 @(private = "file")
 pair :: proc(t: ^testing.T) -> (holder, launcher: posix.FD) {
 	fds: [2]posix.FD
+	// close-on-exec before a sibling test's spawn can fork (child_holds_only_stdio)
+	sync.mutex_lock(&fork_lock)
 	testing.expect(t, posix.socketpair(.UNIX, .STREAM, nil, &fds) == .OK, "socketpair")
+	for fd in fds do set_cloexec(c.int(fd))
+	sync.mutex_unlock(&fork_lock)
 	ready_nosigpipe(fds[0]) // as ready_connect's socket: a gone launcher is EPIPE, not SIGPIPE
 	return fds[0], fds[1]
 }

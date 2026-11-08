@@ -410,6 +410,7 @@ browser_frames_tick :: proc() -> bool {
 			if tab_on_screen(id) || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
 				og, os_, retire := ring_take(&b.ring, p.gen, p.slot, p.seq, p.tick)
 				if retire do dh_frames_retire(id, og, u32(os_))
+				b.ring.last_frame = now // live frames on screen: the display link stays fast (frames.odin)
 				if b.ring.shown_gen == p.gen && b.ring.shown_slot == int(p.slot) do b.content_w, b.content_h = int(p.content_w), int(p.content_h)
 				redraw = true
 			} else if ring_may_release_now(&b.ring, p.gen, p.slot) do dh_frames_release_now(id, p.gen, p.slot) // never drawn
@@ -419,6 +420,13 @@ browser_frames_tick :: proc() -> bool {
 		b.surf_peak = max(b.surf_peak, int(dh_frames_surface_count(id)))
 	}
 	return redraw
+}
+
+// A browser tab on screen painted within DISPLAY_FAST_HOLD (the display link's rate: frames.odin).
+browser_frames_live :: proc() -> bool {
+	now := time.tick_now()
+	for id, b in browsers do if display_tab_live(tab_on_screen(id), false, ring_framed_recently(&b.ring, now)) do return true
+	return false
 }
 
 // After sg.commit (main.odin): the retired slots go back once this frame's GPU work is done.

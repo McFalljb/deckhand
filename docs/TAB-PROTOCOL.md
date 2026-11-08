@@ -63,7 +63,7 @@ The program exposes commands, state and events over the envelope in [PROTOCOL.md
 The program speaks first (`hello`); Deckhand's hello reply is the first line it gets, and nothing
 (requests, `input`) is sent before that reply.
 Which requests a program answers is its own business: Deckhand passes any method through
-(`app_call {method, params}`, PROTOCOL.md) and keeps only `tab.quit` and `tab.visible` for itself.
+(`app_call {method, params}`, PROTOCOL.md) and keeps only `tab.quit`, `tab.visible` and `tab.display` for itself.
 Agents ask the program with `tab.describe` first. Suggested common requests:
 
 | type | reply |

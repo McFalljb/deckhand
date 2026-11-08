@@ -1229,7 +1229,7 @@ autotest_step :: proc() {
 		case "annot_move", "annot_drag", "annot_key", "annot_assert":
 			if msg, ok := annot_script(cmd, args, rest); !ok do script_fail(msg)
 			else do at.asserts += cmd == "annot_assert" ? 1 : 0
-		case "app_open", "app_waitframe", "app_waitstatus", "app_waitlog", "assert_app_log", "assert_not_app_log", "assert_app_pixel", "app_square", "assert_app_moved", "app_mark", "app_waitring", "assert_app_surfaces", "assert_apps_freed", "app_click", "app_stats", "assert_app_dimmed", "app_keydown", "app_drag", "app_hover", "assert_app_hover", "assert_shot_pixel", "app_mouse", "app_leave":
+		case "app_open", "app_waitframe", "app_waitstatus", "app_waitlog", "assert_app_log", "assert_not_app_log", "assert_app_pixel", "app_square", "assert_app_moved", "app_mark", "app_waitring", "assert_app_surfaces", "assert_apps_freed", "app_click", "app_stats", "assert_app_dimmed", "app_keydown", "app_drag", "app_hover", "assert_app_hover", "assert_shot_pixel", "app_mouse", "app_leave", "app_display_fps", "assert_display_link":
 			xr := expand_vars(rest) // $datadir, $tab, …
 			app_last_finished = at.last_finished // assert_shot_pixel reads its data.path
 			if msg, ok := app_script(cmd, strings.fields(xr, context.temp_allocator), xr); !ok do script_fail(msg)

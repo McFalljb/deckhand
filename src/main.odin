@@ -204,6 +204,10 @@ window_hooks_app :: proc() -> Window_Hooks {
 			}
 			return
 		},
+		display = proc() -> (fps: int, scale: f32, ok: bool) {
+			fps, scale = platform_display()
+			return fps, scale, true
+		},
 		frames_read = proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
 			when ODIN_OS == .Darwin {
 				return dh_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
@@ -320,6 +324,9 @@ frame :: proc "c" () {
 	if browser_agent_tick() do app.redraw = true // agents' reads, waits, screenshots, recordings (browser_agent.odin)
 	if browser_act_tick() do app.redraw = true // agents' clicks, typing, uploads (browser_act.odin)
 	app_focus_tick()
+	// the display link: the screen's maximum while an app or page on screen is live, else at most
+	// 120 (frames.odin)
+	platform_display_link_cap(display_link_cap(app_frames_live() || browser_frames_live()))
 	if !app.redraw do return // nothing changed: keep the last frame on screen
 	app.last_draw = time.tick_now()
 	// moved to a display with another scale, set_theme picked another look,
@@ -1270,6 +1277,7 @@ main :: proc() {
 			platform_test_scale(scale)
 		}
 	}
+	platform_display_hook() // sokol's display link: the window's screen's rate (platform_macos.m)
 	sapp.run({
 		init_cb = init,
 		frame_cb = frame,

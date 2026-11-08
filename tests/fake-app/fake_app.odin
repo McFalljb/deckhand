@@ -2,14 +2,14 @@ package fake_app
 
 // A stand-in for an engine in a Deckhand app tab (docs/ENGINE-BRIDGE.md §7,
 // step 1 part): the NDJSON hello on DECKHAND_SOCKET, the Mach frame channel
-// (src/native/frames_macos.m's connect half), a 60 Hz loop that draws a
+// (src/native/frames_macos.m's connect half), a loop (60 Hz, or --fps) that draws a
 // moving square with Metal into the ring and sends FRAME from the empty
-// command buffer's completed handler. Answers tab.ping, tab.visible and
-// tab.quit; logs every input message it gets to stdout ("input: …"), which
-// Deckhand keeps in the tab's log.
+// command buffer's completed handler. Answers tab.ping, tab.visible,
+// tab.display and tab.quit; logs every input message it gets to stdout
+// ("input: …"), which Deckhand keeps in the tab's log.
 //
 // Its own methods (engine bridge step 2: app_call passes any method through;
-// tab.describe lists them): game.get {path: "square"|"tick"}, game.set
+// tab.describe lists them): game.get {path: "square"|"tick"|"display"}, game.set
 // {path: "square", value: {x, y}|null} (null: it moves again). It sends
 // tab.boxes ({id, label, rect} in logical px) whenever they change.
 //
@@ -26,6 +26,9 @@ package fake_app
 //   --bad-key         send a wrong key in HELLO
 //   --no-frames       never connect the Mach channel
 //   --slow-ms N       delay each commit by N ms
+//   --fps N|display   frames per second: N, or the display rate Deckhand reports (the hello's
+//                     `display.fps`, then tab.display); default 60. The stats line counts the
+//                     loop turns that found no free slot ("no slot") and the frames drawn
 
 import "base:runtime"
 import "core:c"
@@ -66,6 +69,7 @@ Flags :: struct {
 	crash_after, hang_after, freeze_after, exit_code, slow_ms: int,
 	once:                                        string,
 	bad_key, no_frames:                          bool,
+	fps:                                         int, // -1 = 60, 0 = the display's (--fps display)
 }
 
 flags: Flags
@@ -78,6 +82,9 @@ hung: bool // --hang-after reached (atomic)
 sq_fixed: bool // game.set square: it stays at sq_x, sq_y
 sq_x, sq_y: int
 cur_tick: u64
+// the display Deckhand reports (hello `display`, tab.display) (atomic)
+display_fps: int = 60
+display_scale_x100: int = 100
 
 ok_reply :: proc(id, data: string) {
 	send_line(fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":%s}}}}`, id, data))
@@ -154,6 +161,18 @@ reader :: proc() {
 			sync.atomic_store(&visible, bool(vis))
 			say("visible:", vis)
 			send_line(fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{}}}}}}`, id))
+		case "tab.display":
+			num :: proc(v: json.Value) -> f64 {
+				#partial switch n in v {
+				case json.Integer: return f64(n)
+				case json.Float:   return f64(n)
+				}
+				return 0
+			}
+			if f := int(num(obj["fps"])); f > 0 do sync.atomic_store(&display_fps, f)
+			sync.atomic_store(&display_scale_x100, int(num(obj["scale"]) * 100 + 0.5))
+			say(fmt.tprintf("display: fps %d, scale %.2f", sync.atomic_load(&display_fps), f64(sync.atomic_load(&display_scale_x100)) / 100))
+			send_line(fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{}}}}}}`, id))
 		case "tab.quit":
 			send_line(fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{}}}}}}`, id))
 			say("quit requested")
@@ -165,6 +184,7 @@ reader :: proc() {
 			switch path {
 			case "square": ok_reply(id, fmt.tprintf(`{{"value":%s}}`, square_json()))
 			case "tick":   ok_reply(id, fmt.tprintf(`{{"value":%d}}`, sync.atomic_load(&cur_tick)))
+			case "display": ok_reply(id, fmt.tprintf(`{{"value":{{"fps":%d,"scale":%.2f,"pace":%d}}}}`, sync.atomic_load(&display_fps), f64(sync.atomic_load(&display_scale_x100)) / 100, pace_fps()))
 			case:
 				send_line(fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":false,"error":"no such path","code":"no_path","path":%q,"at":"game"}}}}`, id, path))
 			}
@@ -196,6 +216,13 @@ reader :: proc() {
 	}
 }
 
+// The loop's rate: --fps N, the display's (--fps display), else 60.
+pace_fps :: proc() -> int {
+	if flags.fps > 0 do return flags.fps
+	if flags.fps == 0 do return max(sync.atomic_load(&display_fps), 1)
+	return 60
+}
+
 int_arg :: proc(args: []string, i: ^int) -> int {
 	i^ += 1
 	if i^ >= len(args) do return 0
@@ -205,6 +232,7 @@ int_arg :: proc(args: []string, i: ^int) -> int {
 
 main :: proc() {
 	args := os.args
+	flags.fps = -1 // 60
 	for i := 1; i < len(args); i += 1 {
 		switch args[i] {
 		case "--crash-after": flags.crash_after = int_arg(args, &i)
@@ -212,6 +240,17 @@ main :: proc() {
 		case "--freeze-after": flags.freeze_after = int_arg(args, &i)
 		case "--exit":        flags.exit_code = int_arg(args, &i)
 		case "--slow-ms":     flags.slow_ms = int_arg(args, &i)
+		case "--fps":
+			i += 1
+			if i < len(args) && args[i] == "display" do flags.fps = 0
+			else {
+				n, nok := strconv.parse_int(i < len(args) ? args[i] : "")
+				if !nok || n < 1 || n > 1000 {
+					say("--fps N (1-1000) or --fps display")
+					os.exit(2)
+				}
+				flags.fps = n
+			}
 		case "--bad-key":     flags.bad_key = true
 		case "--no-frames":   flags.no_frames = true
 		case "--once":
@@ -264,7 +303,16 @@ main :: proc() {
 	service, _ := fr["service"].(json.String)
 	key_hex, _ := fr["key"].(json.String)
 	device_id := u64(fr["device"].(json.Integer) or_else 0)
-	say(fmt.tprintf("hello ok: tab %d, service %s, device %d", tab_id, service, device_id)) // never the key
+	if dp, has := data["display"].(json.Object); has {
+		#partial switch f in dp["fps"] {
+		case json.Integer: if f > 0 do sync.atomic_store(&display_fps, int(f))
+		}
+		#partial switch x in dp["scale"] {
+		case json.Integer: sync.atomic_store(&display_scale_x100, int(x) * 100)
+		case json.Float:   sync.atomic_store(&display_scale_x100, int(x * 100 + 0.5))
+		}
+	}
+	say(fmt.tprintf("hello ok: tab %d, service %s, device %d, display fps %d scale %.2f", tab_id, service, device_id, sync.atomic_load(&display_fps), f64(sync.atomic_load(&display_scale_x100)) / 100)) // never the key
 	if flags.exit_code != 0 && fault_now() {
 		say("exiting with", flags.exit_code)
 		os.exit(flags.exit_code)
@@ -289,6 +337,8 @@ main :: proc() {
 		os.exit(1)
 	}
 	tick, seq, frames: u64
+	no_slot, tries: u64 // visible loop turns that found no free slot, of all visible turns
+	last_frames, last_no_slot, last_tries: u64
 	last_boxes := ""
 	next := time.tick_now()
 	last_log := time.tick_now()
@@ -309,7 +359,9 @@ main :: proc() {
 			slot, w, h: c.int
 			scale: f32
 			tex: rawptr
-			if dh_frames_acquire(cn, &gen, &slot, &w, &h, &scale, &tex) != 0 {
+			tries += 1
+			if dh_frames_acquire(cn, &gen, &slot, &w, &h, &scale, &tex) == 0 do no_slot += 1
+			else {
 				lw := int(f32(w) / scale)
 				sx, sy := 20 + int(tick * 2) % max(lw - 60, 1), 40
 				if sync.atomic_load(&sq_fixed) do sx, sy = sync.atomic_load(&sq_x), sync.atomic_load(&sq_y)
@@ -352,10 +404,11 @@ main :: proc() {
 			gen: u32
 			w, h: c.int
 			dh_frames_conn_stats(cn, &sent, &dropped, &rings, &gen, &w, &h)
-			say(fmt.tprintf("stats: tick %d, frames sent %d, dropped %d, rings %d, gen %d, %dx%d", tick, sent, dropped, rings, gen, w, h))
+			say(fmt.tprintf("stats: tick %d, frames sent %d, dropped %d, rings %d, gen %d, %dx%d; pace %d fps, last second: %d frames, no slot %d of %d", tick, sent, dropped, rings, gen, w, h, pace_fps(), frames - last_frames, no_slot - last_no_slot, tries - last_tries))
+			last_frames, last_no_slot, last_tries = frames, no_slot, tries
 			send_line(fmt.tprintf(`{{"v":1,"type":"event","event":"tab.log","level":"info","text":"tick %d, %d frames","tick":%d}}`, tick, sent, tick))
 		}
-		next = time.tick_add(next, time.Second / 60)
+		next = time.tick_add(next, time.Second / time.Duration(pace_fps()))
 		if d := time.tick_diff(time.tick_now(), next); d > 0 do time.sleep(d)
 		else do next = time.tick_now()
 	}

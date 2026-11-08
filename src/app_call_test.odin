@@ -8,6 +8,7 @@ package main
 
 import "base:runtime"
 import "core:encoding/json"
+import "core:math"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -54,7 +55,7 @@ app_call_checks_only_the_envelope :: proc(t: ^testing.T) {
 	bad(t, `game"get`, "", "bad_args")
 	bad(t, "ünïcode", "", "bad_args")
 	bad(t, ".get", "", "bad_args") // starts with a letter
-	for m in ([]string{"tab.quit", "tab.visible", "hello", "result", "event", "input"}) do bad(t, m, "", "reserved")
+	for m in ([]string{"tab.quit", "tab.visible", "tab.display", "hello", "result", "event", "input"}) do bad(t, m, "", "reserved")
 	for k in ([]string{"id", "v", "type"}) do bad(t, "game.get", strings.concatenate({`{"`, k, `":1}`}, context.temp_allocator), "bad_args")
 	big := strings.concatenate({`{"s":"`, strings.repeat("x", APP_PARAMS_MAX, context.temp_allocator), `"}`}, context.temp_allocator)
 	bad(t, "game.set", big, "bad_args")
@@ -284,4 +285,75 @@ app_keys_cannot_hold_nul :: proc(t: ^testing.T) {
 	testing.expect(t, app_input_event_check(`{"event":"key","type\u0000":"tab.quit"}`) != "", "an input event key with NUL")
 	testing.expect_value(t, app_input_event_check(`{"event":"key","key":"w"}`), "")
 	testing.expect(t, app_input_event_check(`{"event":"key","source":"user"}`) != "", "the envelope's keys, as before")
+}
+
+// The display an app paces from (ENGINE-BRIDGE §2.1): the hello's `display` and tab.display's
+// fields, valid JSON numbers whatever the scale.
+@(test)
+app_display_json_fields :: proc(t: ^testing.T) {
+	testing.expect_value(t, app_display_json(240, 1), `{"fps":240,"scale":1}`)
+	testing.expect_value(t, app_display_json(120, 2), `{"fps":120,"scale":2}`)
+	testing.expect_value(t, app_display_json(60, 1.5), `{"fps":60,"scale":1.5}`)
+	v, err := json.parse_string(app_display_json(144, 2), .JSON, true, context.temp_allocator)
+	testing.expect_value(t, err, nil)
+	testing.expect_value(t, v.(json.Object)["fps"].(json.Integer), 144)
+}
+
+// A frame draws 1:1: at whole pixels, never wider than the frame, so no texel is stretched,
+// shifted by half a pixel or filtered, also in a split pane whose edges are fractional. The
+// ring is sized from the same snapped span (app_snap), so a settled ring is drawn whole: no
+// column of it cropped, no column of the pane left undrawn.
+@(test)
+app_frame_quad_is_whole_pixels :: proc(t: ^testing.T) {
+	// the pane at whole pixels, the frame its size: as is
+	q := app_frame_quad(100, 50, 640, 480, 640, 480)
+	testing.expect_value(t, q, App_Quad{100, 50, 640, 480, 1, 1})
+	// fractional split-pane edges (panes_tab_rect): the ring the pane gets is drawn exactly
+	for r in ([][4]f32{{600.5, 78, 499.5, 572}, {600.4, 78.6, 499.4, 571.3}, {0.5, 0.5, 10.5, 10.5}, {10.25, 10.75, 320.5, 240}}) {
+		sn := app_snap(r)
+		testing.expect_value(t, sn.x, math.round(r.x))
+		testing.expect_value(t, sn.y, math.round(r.y))
+		rw, rh := int(sn.z), int(sn.w) // the ring's size (app_frames_tick)
+		q = app_frame_quad(r.x, r.y, r.z, r.w, rw, rh)
+		testing.expectf(t, q.w == f32(rw) && q.h == f32(rh) && q.u == 1 && q.v == 1, "%v: ring %dx%d, drawn %v", r, rw, rh, q)
+		testing.expect_value(t, q.x, sn.x)
+		testing.expect_value(t, q.y, sn.y)
+		// the pane's right and bottom edges, snapped, are where the frame ends
+		testing.expect_value(t, q.x + q.w, math.round(r.x + r.z))
+		testing.expect_value(t, q.y + q.h, math.round(r.y + r.w))
+	}
+	testing.expect_value(t, app_snap({600.5, 78, 499.5, 572}).z, 499)
+	testing.expect_value(t, app_snap({600.4, 78, 499.4, 572}).z, 500)
+	// a pane larger than the frame (a resize on its way): the frame's size, never stretched
+	q = app_frame_quad(10, 10, 800, 600, 640, 480)
+	testing.expect_value(t, q, App_Quad{10, 10, 640, 480, 1, 1})
+	// smaller (a drag shrinks the pane): clipped, still 1:1
+	q = app_frame_quad(10.25, 10.75, 320.5, 240, 640, 480)
+	testing.expect_value(t, q.w, 321)
+	testing.expect_value(t, q.u * 640, 321)
+	// no frame size: nothing
+	q = app_frame_quad(0, 0, 100, 100, 0, 0)
+	testing.expect_value(t, q.w, 0)
+	testing.expect_value(t, q.u, 0)
+}
+
+// The display link's rate (power): the screen's maximum only while a visible app or browser
+// tab is live (an app connected, or a frame in the last DISPLAY_FAST_HOLD); otherwise at most
+// DISPLAY_IDLE_FPS, as on a 120 Hz MacBook before. What apps are told stays the real maximum.
+@(test)
+display_link_follows_live_frames :: proc(t: ^testing.T) {
+	testing.expect_value(t, display_link_cap(true), 0) // no cap: the screen's maximum
+	testing.expect_value(t, display_link_cap(false), DISPLAY_IDLE_FPS)
+	testing.expect_value(t, DISPLAY_IDLE_FPS, 120)
+	now := time.tick_now()
+	r: Frame_Ring
+	testing.expect(t, !ring_framed_recently(&r, now), "never framed")
+	r.last_frame = now
+	testing.expect(t, ring_framed_recently(&r, time.tick_add(now, DISPLAY_FAST_HOLD)), "framed within the hold")
+	testing.expect(t, !ring_framed_recently(&r, time.tick_add(now, DISPLAY_FAST_HOLD + time.Millisecond)), "quiet past the hold")
+	// a visible tab counts; a hidden one never does
+	testing.expect(t, display_tab_live(visible = true, connected = true, framed = false), "a connected app on screen")
+	testing.expect(t, display_tab_live(visible = true, connected = false, framed = true), "a page painting on screen")
+	testing.expect(t, !display_tab_live(visible = true, connected = false, framed = false), "idle on screen")
+	testing.expect(t, !display_tab_live(visible = false, connected = true, framed = true), "hidden")
 }

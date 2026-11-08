@@ -19,6 +19,28 @@ assert_app_moved
 assert_state open_sessions.0.tabs.1.kind app
 assert_state open_sessions.0.tabs.1.app_status running
 assert_state open_sessions.0.tabs.1.ring_gen 1
+# ---- the display (ENGINE-BRIDGE §2.1): its rate and scale in the hello, tab.display soon after
+# and when the window's screen changes; sokol's display link follows the window's screen
+# (capped at 120 while no live app or page shows)
+app_waitlog display: fps 3000
+assert_app_log scale 2.00
+app_display_fps 240
+app_waitlog display: fps 240, scale 2.00 3000
+# the screen's maximum while a live app shows; hidden, at most 120 once a second passed (power);
+# the app is still told 240
+assert_display_link 240
+command {"type":"focus_tab","tab_id":$pitab}
+wait 1300
+assert_display_link 120
+command {"type":"focus_tab","tab_id":$last}
+app_waitframe 2
+assert_display_link 240
+app_display_fps 50
+app_waitlog display: fps 50, scale 2.00 3000
+assert_display_link 50
+command {"type":"app_call","tab_id":$last,"method":"tab.display","params":{"fps":1}}
+assert_result ok false
+app_display_fps 0
 cpu_begin
 wait 3000
 cpu_end app tab on screen, 60 fps

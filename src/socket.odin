@@ -890,8 +890,19 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, service, string(hex.encode(key[:], context.temp_allocator)), device)
 		}
 	}
+	// and the display it shows on: the rate to pace at and the backing scale (§2.1; tab.display
+	// follows when they change)
+	if caller.kind == .App && window.display != nil {
+		if fps, scale, ok := window.display(); ok do fmt.sbprintf(&b, `,"display":%s`, app_display_json(fps, scale))
+	}
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
+}
+
+// An app tab's display, as the hello reply's `display` and tab.display's fields carry it
+// (docs/ENGINE-BRIDGE.md §2.1): the screen's maximum frames per second and its backing scale.
+app_display_json :: proc(fps: int, scale: f32) -> string {
+	return fmt.tprintf(`{{"fps":%d,"scale":%v}}`, fps, scale)
 }
 
 // The connection that sent request `request_id` (its Conn id), 0 if none (the user, a script, Deckhand).

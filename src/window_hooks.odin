@@ -19,6 +19,9 @@ Window_Hooks :: struct {
 	// an app tab's frame channel, for its hello (socket.odin): the service name, the channel's
 	// key and the GPU's id; ok false = no channel
 	frames_info:    proc(tab_id: u64) -> (service: string, key: [32]u8, device: u64, ok: bool),
+	// the screen the window is on, for an app tab's hello (socket.odin; any thread): its maximum
+	// frames per second and backing scale; ok false = unknown
+	display:        proc() -> (fps: int, scale: f32, ok: bool),
 	// BGRA pixels of a region of an app tab's frame slot (comments.odin's crops); false = none
 	frames_read:    proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool,
 	// what the window knows of a tab, for its object in State's JSON (json_write.odin); a

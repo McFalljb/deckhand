@@ -136,7 +136,28 @@ foreign pdplatform {
 	dh_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
 	dh_mac_pasteboard_clear_if :: proc(count: c.long) ---
 	dh_mac_activity :: proc(on: c.int) ---
+	dh_mac_display_hook :: proc() ---
+	dh_mac_display_fps :: proc() -> c.int ---
+	dh_mac_display_scale :: proc() -> f32 ---
+	dh_mac_display_link_fps :: proc() -> f32 ---
+	dh_mac_test_display_fps :: proc(fps: c.int) ---
+	dh_mac_display_link_cap :: proc(cap: c.int) ---
 }
+
+// The display link's rate: at most cap frames per second (0 = the screen's maximum). Cheap when
+// unchanged (each frame; main.odin).
+platform_display_link_cap :: proc(cap: int) {dh_mac_display_link_cap(c.int(cap))}
+
+// Before sokol starts: its display link follows the window's screen's rate, not the main
+// screen's (src/native/platform_macos.m).
+platform_display_hook :: proc() {dh_mac_display_hook()}
+// The window's screen: its maximum frames per second and backing scale (any thread; app tabs
+// pace from them: docs/ENGINE-BRIDGE.md §2.1).
+platform_display :: proc() -> (fps: int, scale: f32) {return int(dh_mac_display_fps()), dh_mac_display_scale()}
+// The rate sokol's display link asks for now (tests; 0 = none).
+platform_display_link_fps :: proc() -> f32 {return dh_mac_display_link_fps()}
+// Test mode: report this rate as the screen's (0 = the real one).
+platform_test_display_fps :: proc(fps: int) {dh_mac_test_display_fps(c.int(fps))}
 
 // While a job runs: no App Nap (timers on time; the system may still sleep).
 platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}

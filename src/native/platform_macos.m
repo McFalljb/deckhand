@@ -15,12 +15,18 @@
 //  - Appearance: the OS light/dark (NSApp.effectiveAppearance, observed with
 //    KVO: no polling) and the window's own appearance (title bar, folder
 //    picker) when the user picked light or dark.
+//  - The display's rate: sokol's display link runs at the MAIN screen's maximum
+//    frame rate, fixed at launch; it is retargeted to the window's own screen
+//    (and again when the window moves or the screens change), and that rate and
+//    scale are kept for app tabs (docs/ENGINE-BRIDGE.md §2.1, "Display rate").
 //
 // Built by build.sh into build/dh_platform.a.
 
 #import <Cocoa/Cocoa.h>
 #import <UserNotifications/UserNotifications.h>
+#import <QuartzCore/QuartzCore.h>
 #import <objc/runtime.h>
+#import <stdatomic.h>
 
 typedef struct {
     void (*insert)(const char* utf8, int len);              // committed text
@@ -31,6 +37,7 @@ typedef struct {
 
 static dh_ime_callbacks cb;
 static NSWindow* win;
+static void display_watch(void); // the display's rate (below)
 static NSView* view;
 static NSString* marked_text; // current composition ("" = none)
 static NSString* pending_insert; // insertText during interpretKeyEvents
@@ -254,6 +261,91 @@ void dh_mac_init(void* window, const dh_ime_callbacks* callbacks, float bar_h, f
     if (win.isKeyWindow) [view.inputContext activate];
     Method kd = class_getInstanceMethod(cls, @selector(keyDown:));
     orig_key_down = method_setImplementation(kd, (IMP)dh_keyDown);
+    display_watch();
+}
+
+// ---- the display's rate (app tabs pace from it; sokol's frame loop follows it) ----
+//
+// sokol creates its CADisplayLink with -[NSView displayLinkWithTarget:selector:] (the link
+// follows the view's screen) but fixes its preferredFrameRateRange at launch to
+// NSScreen.mainScreen.maximumFramesPerSecond: a window on a 240 Hz screen while the main screen
+// is 60 Hz would draw at 60. dh_mac_display_hook (before sokol starts) catches that link; each
+// screen change sets its range to the window's screen's maximum. Vendor files stay untouched.
+
+static CADisplayLink* display_link; // sokol's, caught as it is made
+static atomic_int display_fps = 60; // the window's screen's maximumFramesPerSecond (any thread)
+static _Atomic float display_scale = 1; // its backing scale (any thread)
+static int test_fps; // test mode's override (0 = the screen's)
+static int link_cap = 120; // the display link asks for at most this (0 = the screen's maximum): the frame loop's choice
+static IMP orig_display_link;
+static void display_update(void);
+
+static id hook_display_link(id self, SEL _cmd, id target, SEL sel) {
+    id link = ((id (*)(id, SEL, id, SEL))orig_display_link)(self, _cmd, target, sel);
+    display_link = link;
+    // a link made again later (sokol remakes it): the window's screen and cap, once sokol has set
+    // its own range right after this returns
+    if (win) dispatch_async(dispatch_get_main_queue(), ^{ display_update(); });
+    return link;
+}
+
+// Before sokol starts: sokol's view class gets a displayLinkWithTarget:selector: that keeps the
+// link it makes (NSView's own does the work).
+void dh_mac_display_hook(void) {
+    Class cls = NSClassFromString(@"_sapp_macos_view");
+    Method m = class_getInstanceMethod([NSView class], @selector(displayLinkWithTarget:selector:));
+    if (!cls || !m) return;
+    orig_display_link = method_getImplementation(m);
+    class_addMethod(cls, @selector(displayLinkWithTarget:selector:), (IMP)hook_display_link, method_getTypeEncoding(m));
+}
+
+// The window's screen (else the main screen): its maximum rate and scale; the display link
+// follows it. Main thread.
+static void display_update(void) {
+    NSScreen* scr = win.screen ? win.screen : NSScreen.mainScreen;
+    NSInteger fps = scr ? scr.maximumFramesPerSecond : 60;
+    if (fps <= 0) fps = 60;
+    if (test_fps > 0) fps = test_fps;
+    atomic_store(&display_fps, (int)fps);
+    atomic_store(&display_scale, (float)(win ? win.backingScaleFactor : (scr ? scr.backingScaleFactor : 1)));
+    if (display_link) {
+        // as sokol sets it (swap interval 1), for this screen; capped while nothing live shows
+        float f = (float)(link_cap > 0 && link_cap < fps ? link_cap : fps);
+        CAFrameRateRange r = CAFrameRateRangeMake(f, f, f);
+        CAFrameRateRange cur = display_link.preferredFrameRateRange;
+        if (cur.minimum != r.minimum || cur.maximum != r.maximum || cur.preferred != r.preferred) display_link.preferredFrameRateRange = r;
+    }
+}
+
+static void display_watch(void) {
+    NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
+    // moved to another screen, its backing scale changed, or a screen's mode (ProMotion, VRR,
+    // a display's refresh rate in System Settings) or the screen set changed
+    for (NSString* n in @[ NSWindowDidChangeScreenNotification, NSWindowDidChangeBackingPropertiesNotification ]) {
+        [nc addObserverForName:n object:win queue:nil usingBlock:^(NSNotification* note) { display_update(); }];
+    }
+    [nc addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:nil usingBlock:^(NSNotification* note) { display_update(); }];
+    display_update();
+}
+
+// The display link asks for at most cap frames per second (0 = the screen's maximum). Main
+// thread, each frame: nothing happens unless it changed.
+void dh_mac_display_link_cap(int cap) {
+    if (cap < 0) cap = 0;
+    if (cap == link_cap) return;
+    link_cap = cap;
+    display_update();
+}
+
+// The window's screen's maximum frames per second, and its backing scale (any thread).
+int dh_mac_display_fps(void) { return atomic_load(&display_fps); }
+float dh_mac_display_scale(void) { return atomic_load(&display_scale); }
+// What sokol's display link asks for now (tests; 0 = no link).
+float dh_mac_display_link_fps(void) { return display_link ? display_link.preferredFrameRateRange.preferred : 0; }
+// Test mode: report this rate, as if the window moved to such a screen (0 = the screen's).
+void dh_mac_test_display_fps(int fps) {
+    test_fps = fps > 0 ? fps : 0;
+    display_update();
 }
 
 // Drops an open composition (focus moved elsewhere).

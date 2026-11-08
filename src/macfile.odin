@@ -20,6 +20,7 @@ import "core:encoding/hex"
 import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
+import "core:unicode/utf8"
 
 MACFILE_MAGIC :: "deckhand-mac"
 MACFILE_VERSION :: 1
@@ -128,9 +129,11 @@ macfile_read :: proc(path, kind: string, key: []u8, allocator := context.allocat
 
 // Whether a JSON text read from outside is small enough in shape to parse: arrays and objects
 // nest at most JSON_MAX_DEPTH deep (json_depth_ok) and it has at most `max_items` values and
-// keys (commas and colons outside strings). Run before json.parse, after the MAC verified.
+// keys (commas and colons outside strings), and it is valid UTF-8 (core:encoding/json's string
+// unquoting writes past its buffer on invalid UTF-8: a bounds trap). Run before json.parse, after
+// the MAC verified.
 json_shape_ok :: proc(text: string, max_items: int) -> bool {
-	if !json_depth_ok(text) do return false
+	if !utf8.valid_string(text) || !json_depth_ok(text) do return false
 	n := 0
 	in_str, esc := false, false
 	for i in 0 ..< len(text) {

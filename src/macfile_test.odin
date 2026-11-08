@@ -148,4 +148,5 @@ json_shape_limits :: proc(t: ^testing.T) {
 	testing.expect(t, json_shape_ok(`{"s":",,,,,,,,,,,,,,,,,,,"}`, 2), "commas in strings do not count")
 	deep := strings.concatenate({strings.repeat("[", JSON_MAX_DEPTH + 1, context.temp_allocator), strings.repeat("]", JSON_MAX_DEPTH + 1, context.temp_allocator)}, context.temp_allocator)
 	testing.expect(t, !json_shape_ok(deep, 1 << 20))
+	testing.expect(t, !json_shape_ok("{\"a\":\"\xff\xfe\"}", 10), "invalid UTF-8 (json.parse would trap on it)")
 }

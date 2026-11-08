@@ -1356,6 +1356,7 @@ socket_tokens_fail_closed :: proc(t: ^testing.T) {
 		`{"v":1,"terms":[{"term":7,"claude_root":1,"tokens":[]}]}`,
 		fmt.tprintf(`{{"v":1,"terms":[{{"term":7,"tokens":[{{"sha256":"%s","caller":"ui","claude":false,"single_use":false}}]}}]}}`, sk_hex(tok)),
 		`{"v":2,"terms":[]}`,
+		"{\"v\":1,\"terms\":[],\"x\":\"\xff\xfe\"}", // invalid UTF-8: json.parse would trap
 	}) {
 		tok = setup(t, path, key[:])
 		macfile_write(path, TOKENS_KIND, bad, key[:])

@@ -3,6 +3,7 @@ package holder
 // The holder's half of the ready handshake (detach.odin) over a socketpair, the launcher's
 // bytes written ahead. The launchd path itself is src/launchd_test.odin's.
 
+import "core:c"
 import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
@@ -20,9 +21,9 @@ pair :: proc(t: ^testing.T) -> (holder, launcher: posix.FD) {
 @(private = "file")
 read_all_now :: proc(fd: posix.FD) -> string {
 	buf: [256]u8
-	pfd := posix.pollfd{fd = fd, events = {.IN}}
-	if posix.poll(&pfd, 1, 1000) <= 0 do return ""
-	n := posix.read(fd, &buf[0], len(buf))
+	pfd := Pollfd{fd = c.int(fd), events = POLLIN}
+	if poll(&pfd, 1, 1000) <= 0 do return ""
+	n := read(c.int(fd), &buf[0], len(buf))
 	return n > 0 ? strings.clone(string(buf[:n]), context.temp_allocator) : ""
 }
 
@@ -32,7 +33,7 @@ ready_exchange_env :: proc(t: ^testing.T) {
 	defer posix.close(h)
 	defer posix.close(l)
 	sent := "A=1\x00PATH=/usr/bin:/bin\x00EMPTY=\x00WITH=eq=uals\x00\x00"
-	posix.write(l, raw_data(sent), len(sent))
+	write(c.int(l), raw_data(sent), len(sent))
 	env, ok := ready_exchange(h, time.Second)
 	defer {
 		for e in env do delete(e)
@@ -53,7 +54,7 @@ ready_exchange_empty_env :: proc(t: ^testing.T) {
 	h, l := pair(t)
 	defer posix.close(h)
 	defer posix.close(l)
-	posix.write(l, raw_data(string("\x00")), 1)
+	write(c.int(l), raw_data(string("\x00")), 1)
 	env, ok := ready_exchange(h, time.Second)
 	defer delete(env)
 	testing.expect(t, ok)
@@ -66,7 +67,7 @@ ready_exchange_fails_closed :: proc(t: ^testing.T) {
 	{
 		h, l := pair(t)
 		part := "A=1\x00B="
-		posix.write(l, raw_data(part), len(part))
+		write(c.int(l), raw_data(part), len(part))
 		posix.close(l)
 		_, ok := ready_exchange(h, time.Second)
 		testing.expect(t, !ok, "closed mid-environment")

@@ -932,3 +932,24 @@ holder_upgrade_unavailable_told_once :: proc(t: ^testing.T) {
 	holder_upgrade_tick()
 	testing.expect_value(t, toast.text, "")
 }
+
+// hc.rx lives as long as the connection and the reader thread appends to it: its buffer is the
+// heap's whatever allocator holder_client_start's caller has (the app switches context.allocator
+// to temp in places; a temp buffer would be freed under the reader by the next free_all).
+@(test)
+holder_rx_on_the_heap :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	// the heap underneath (what the caller's allocations are freed with later), but not the heap's
+	// procedure, so a buffer that adopted the caller's allocator shows
+	forward :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, loc := #caller_location) -> ([]byte, runtime.Allocator_Error) {
+		return runtime.heap_allocator_proc(data, mode, size, alignment, old_memory, old_size, loc)
+	}
+	context.allocator = runtime.Allocator{forward, nil}
+	ok := holder_client_start()
+	context.allocator = runtime.heap_allocator()
+	testing.expect(t, ok, "not attached")
+	testing.expect(t, hc.rx.buf.allocator.procedure == runtime.heap_allocator_proc, "hc.rx took the caller's allocator")
+}

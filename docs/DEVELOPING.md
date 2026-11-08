@@ -384,6 +384,8 @@ pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY l
 ghostty/       Odin bindings for the libghostty-vt calls used
 snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
 holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
+corewire/      the window/core framed wire (§5.1 of docs/plans/background-core.md) and the in-memory
+               transport (its own package; golden vectors in tests/framed-wire/v1/)
 jsonguard/     the check in front of every json.parse/unmarshal of input Deckhand does not control
                (depth, invalid UTF-8, raw control bytes, JSON5 hex prefixes and comment runs;
                core:encoding/json crashes on those). Strict JSON unless a caller asks for JSON5.

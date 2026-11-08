@@ -230,7 +230,7 @@ Pop_Item :: enum {
 	Update_Checks, // check for pi-desk updates about once a day (update.odin); last so earlier rows keep their ids
 	Refresh_Env, // ask the login shell for its environment again (login_env.odin); drawn after Reload pi; last so earlier rows keep their ids
 	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
-	Keep_Sessions, // Experimental: keep sessions running when Deckhand quits; last so earlier rows keep their ids
+	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
 }
 
@@ -535,10 +535,6 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Setup, nil)
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
 		pop_row(.Update_Checks, !upd.checks_off)
-		pop_sep()
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
-			pop_label("Experimental")
-		}
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
 	}
 }

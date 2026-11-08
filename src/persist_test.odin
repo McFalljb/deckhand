@@ -475,13 +475,16 @@ workspace_browser_tabs :: proc(t: ^testing.T) {
 }
 
 
-// keep_sessions (Experimental, default off): the user's only, saved only when on, restored.
+// keep_sessions (on by default; test mode off unless a scene turns it on): the user's only,
+// saved once the user chose it (keep_sessions_default_not_saved), restored; a workspace.json
+// without it (never chosen, or written while it was Experimental and off by default) gets the
+// default.
 @(test)
 keep_sessions_setting :: proc(t: ^testing.T) {
 	context.allocator = ws_reset()
 	persist_init(tmp_dir("ks"))
-	testing.expect(t, !state.settings.keep_sessions, "off by default")
-	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`), "default not saved")
+	testing.expect(t, keep_sessions_default(), "on by default")
+	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`), "not chosen: not saved")
 	for k in ([]Caller_Kind{.Control, .Script, .Panel, .App}) {
 		r := run_command(Set_Keep_Sessions{on = true}, {kind = k, tab_id = 1})
 		testing.expectf(t, !r.ok && r.error == "not allowed for this caller", "%v: %s", k, r.error)
@@ -494,11 +497,16 @@ keep_sessions_setting :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(state_json(), `"keep_sessions":true`), "in the snapshot")
 	run_command(Set_Keep_Sessions{on = false}, {kind = .UI})
 	off := strings.clone(workspace_json(), context.temp_allocator)
-	testing.expect(t, strings.contains(off, `"keep_sessions":false`), off) // the user's choice: kept whatever the default
+	testing.expect(t, strings.contains(off, `"keep_sessions":false`), off)
 	testing.expect_value(t, workspace_restore(text), "")
 	testing.expect(t, state.settings.keep_sessions, "restored on")
 	testing.expect_value(t, workspace_restore(off), "")
-	testing.expect(t, !state.settings.keep_sessions, "restored off")
+	testing.expect(t, !state.settings.keep_sessions, "restored off: the user's off stays off")
+	old, _ := strings.replace(off, `"keep_sessions":false,`, "", 1, context.temp_allocator)
+	old, _ = strings.replace(old, `,"keep_sessions":false`, "", 1, context.temp_allocator)
+	testing.expect(t, !strings.contains(old, "keep_sessions"), old)
+	testing.expect_value(t, workspace_restore(old), "")
+	testing.expect(t, state.settings.keep_sessions, "absent: the default (on)")
 	c, ok := parse_command(`{"type":"set_keep_sessions","on":false}`, context.temp_allocator)
 	_, is := c.(Set_Keep_Sessions)
 	testing.expect(t, ok == "" && is, ok)

@@ -272,7 +272,7 @@ Settings :: struct {
 	jobs_paused:   bool, // the kill switch: no new runs
 	job_limits:    Job_Limits,
 	tidy_off:      bool, // the project list as found: no temp or missing folders hidden, no subfolders folded (project_tidy.odin)
-	keep_sessions: bool, // Experimental: sessions keep running in the session holder when Deckhand quits (off by default)
+	keep_sessions: bool, // sessions keep running in the session holder when Deckhand quits or updates (on by default: keep_sessions_default)
 	keep_sessions_chosen: bool, // the user set keep_sessions (saved only then: keep_sessions_default)
 	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
 	// added, removed folders) and the account a new Claude session last started with

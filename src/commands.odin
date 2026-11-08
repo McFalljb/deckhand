@@ -207,8 +207,8 @@ Set_Notify :: struct {
 Set_Tidy_Projects :: struct {
 	on: bool,
 }
-// Keep sessions running in the session holder when Deckhand quits (docs/plans/background-core.md;
-// off by default until it is done). User-only.
+// Keep sessions running in the session holder when Deckhand quits and while it updates
+// (docs/plans/background-core.md). On by default (keep_sessions_default). User-only.
 Set_Keep_Sessions :: struct {
 	on: bool,
 }
@@ -216,7 +216,7 @@ Set_Keep_Sessions :: struct {
 // on when it tests it (every other scene would leave a session holder running after it quits).
 // Saved only once the user chose (Settings.keep_sessions_chosen): turning the default back off
 // turns it off for everyone who never chose.
-keep_sessions_default_on := false
+keep_sessions_default_on := true // on by default: this line alone turns it off again (revert its commit)
 
 // Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
 CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second

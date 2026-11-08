@@ -1399,9 +1399,9 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
-- **Experimental › Keep sessions when quitting** (the palette's **Keep sessions running when
-  Deckhand quits**): off by default and not finished yet. With it on, a session holder keeps your
-  tabs' programs running while Deckhand is closed, and reopening Deckhand picks them up again. Only
+- **Keep sessions when quitting** (the palette's **Keep sessions running when Deckhand quits**):
+  on by default. A session holder keeps your tabs' programs running while Deckhand is closed or
+  [updating](#updates), and reopening Deckhand picks them up again. Only
   you can change it (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
   still guarded after reopening, it stops that tab (Restart starts it again). With it on, ⌘Q
   asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
@@ -1899,7 +1899,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Rescan sessions |  | read pi's session store again (Claude rows are Deckhand's own history) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
-| Keep sessions running when Deckhand quits |  | Experimental, off by default: on or off (the gear's Experimental section) |
+| Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |
 | Check for Updates… |  | check for a newer Deckhand now ([Updates](#updates)) |

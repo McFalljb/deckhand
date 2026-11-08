@@ -97,7 +97,7 @@ when TEST_HOOKS {
 // A hook's value ("" when unset, and always in a release build).
 hook_env :: proc(h: Hook, allocator := context.temp_allocator) -> string {
 	when TEST_HOOKS {
-		return os.get_env(HOOK_ENV[h], allocator)
+		return os.get_env(HOOK_ENV[h], allocator) // env-read-ok: hook_env itself
 	} else {
 		return ""
 	}
@@ -106,7 +106,7 @@ hook_env :: proc(h: Hook, allocator := context.temp_allocator) -> string {
 // A hook's value and whether it is set at all (an empty value counts: PI_DESK_PATH_DIRS="").
 hook_lookup :: proc(h: Hook, allocator := context.temp_allocator) -> (string, bool) {
 	when TEST_HOOKS {
-		return os.lookup_env(HOOK_ENV[h], allocator)
+		return os.lookup_env(HOOK_ENV[h], allocator) // env-read-ok: hook_lookup itself
 	} else {
 		return "", false
 	}

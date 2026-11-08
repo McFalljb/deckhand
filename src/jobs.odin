@@ -1105,7 +1105,7 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	argv := job_argv(pi, fmt.tprintf("%s/sessions", jd), new_uuid(), j.def.model, job_atlas_prompt(), preamble, j.def.prompt, j.def.access)
 	env := make([dynamic]string, context.temp_allocator)
 	for k in ([]string{"HOME", "USER", "LANG", "TMPDIR", "PI_CODING_AGENT_DIR"}) {
-		if v := os.get_env(k, context.temp_allocator); v != "" do append(&env, fmt.tprintf("%s=%s", k, v))
+		if v := os.get_env(k, context.temp_allocator); v != "" do append(&env, fmt.tprintf("%s=%s", k, v)) // env-read-ok: k from the literal list above
 	}
 	append(&env, fmt.tprintf("PATH=%s", jobs_env_path()))
 	if n := notes_env_job(); n != "" do append(&env, n) // the user's own, else the main folder (folders.odin)

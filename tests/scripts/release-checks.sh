@@ -141,7 +141,7 @@ scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary 
 L="$H/lint"
 lint() { # WHAT WANT(pass|fail) LINE
   rm -rf "$L"; mkdir -p "$L/src" "$L/scripts"
-  printf 'package main\nf :: proc() {\n\t%s\n}\n' "$3" > "$L/src/x.odin"
+  printf 'package main\nf :: proc() {\n\t%b\n}\n' "$3" > "$L/src/x.odin" # %b: a \\n in LINE is a new line
   if python3 -I scripts/check-env-reads.py --root "$L" >"$H/out.txt" 2>&1; then got=pass; else got=fail; fi
   [ "$got" = "$2" ] && ok "env lint: $1 ($2)" || bad "env lint: $1: $got, want $2: $(cat "$H/out.txt")"
 }
@@ -149,6 +149,14 @@ lint "a built name" fail 'v := os.get_env(fmt.tprintf("PI_DESK_%s", x))'
 lint "an unknown literal" fail 'v := os.get_env("PI_DESK_NEW_KNOB")'
 lint "a C getenv of a knob" fail 'const char* v = getenv("PI_DESK_NEW_KNOB");'
 lint "a known literal" pass 'v := os.get_env("HOME")'
+lint "env_lookup of a built name" fail 'v, _ := env_lookup(child_base_env(), fmt.tprintf("PI_DESK_%s", x))'
+lint "env_lookup of an unknown literal" fail 'v, _ := env_lookup(child_base_env(), "PI_DESK_NEW_KNOB")'
+lint "env_lookup of a known literal" pass 'v, _ := env_lookup(child_base_env(), "PATH")'
+lint "the name on the next line" fail 'v := os.get_env(\n\t\t"PI_DESK_NEW_KNOB")'
+lint "a // inside a string before the call" fail 'u := "http://x"; v := os.get_env(fmt.tprintf("PI_DESK_%s", x))'
+lint "a non-literal without the marker" fail 'v := os.get_env(name)'
+lint "a non-literal with the marker" pass 'v := os.get_env(name) // env-read-ok: test'
+lint "the marker in a string is no marker" fail 'v := os.get_env(name); s := "// env-read-ok: no"'
 python3 -I scripts/check-env-reads.py >"$H/out.txt" 2>&1 && ok "env lint: the tree passes" || bad "env lint: $(cat "$H/out.txt")"
 grep -q -- '-DPD_RELEASE=1' build.sh && grep -q '#ifndef PD_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost PD_RELEASE"
 grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"

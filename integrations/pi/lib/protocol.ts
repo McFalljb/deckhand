@@ -30,8 +30,8 @@ export function adoptEnv(): void {
 	const g = slots();
 	for (const name of Object.keys(process.env)) {
 		if (!name.startsWith("DECKHAND_")) continue;
-		const v = process.env[name];
-		delete process.env[name];
+		const v = process.env[name]; // env-read-ok: adoptEnv: DECKHAND_* only
+		delete process.env[name]; // env-read-ok: adoptEnv: DECKHAND_* only
 		if (name.endsWith("_TOKEN")) g[envKey(name)] ??= v || undefined;
 		else g[envKey(name)] = v || undefined; // empty counts as unset
 	}
@@ -53,7 +53,7 @@ export function forgetDeckhandEnv(names: readonly string[] = ["DECKHAND_SOCKET",
  * (adoptEnv); `take` is kept for the callers' sake.
  */
 export function envToken(env: string, _take = false): string | undefined {
-	return deckhandEnv(env);
+	return deckhandEnv(env); // env-read-ok: envToken: its callers are checked
 }
 /** Keep a hello result's reconnect token for every later hello with `env`'s token. */
 export function keepToken(env: string, token: unknown): void {

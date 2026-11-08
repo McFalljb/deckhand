@@ -139,7 +139,7 @@ disclaim_responsibility :: proc() {
 	own := getpid()
 	buf: [16]u8
 	pid_str := strconv.write_int(buf[:], i64(own), 10)
-	if os.get_env(RESPONSIBLE_ENV, context.temp_allocator) == pid_str {
+	if os.get_env(RESPONSIBLE_ENV, context.temp_allocator) == pid_str { // env-read-ok: a constant: the TCC re-exec marker
 		log_line("TCC: responsible for itself (disclaimed)")
 		return
 	}

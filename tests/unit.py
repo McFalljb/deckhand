@@ -15,7 +15,7 @@ it is 10x over (an accidentally quadratic change); over the budget it is a warni
 Fails if a test fails, or if the number of tests that ran is not the number of @(test) procs
 found in src/*.odin (a test that silently stopped running is a failure too).
 
-Usage: tests/unit.py [-j N] [--no-build] [--only NAME,...] [--perf-strict]
+Usage: tests/unit.py [-j N] [--no-build] [--only NAME,...] [--timing-only] [--perf-strict]
 Logs: build/unit/<chunk>.log. Never runs a real pi or claude (the tests use stand-ins).
 """
 import argparse
@@ -92,6 +92,7 @@ def main():
                     help="parallel processes (default: half the CPUs, at most 6; UNIT_JOBS)")
     ap.add_argument("--no-build", action="store_true", help="use the existing " + BIN)
     ap.add_argument("--only", help="comma-separated test names (still one process per file)")
+    ap.add_argument("--timing-only", action="store_true", help="only the timing group (TIMING): the perf layer")
     ap.add_argument("--perf-strict", action="store_true",
                     help="a time budget over its limit fails the run (DECKHAND_PERF_STRICT=1; a quiet machine only)")
     a = ap.parse_args()
@@ -105,6 +106,8 @@ def main():
     for n in TIMING + ALONE:
         if n not in names:
             sys.exit(f"unit.py: {n} is listed in TIMING or ALONE but is not a test in src/ (renamed? update the list)")
+    if a.timing_only:
+        a.only = ",".join(TIMING)
     if a.only:
         want = set(a.only.split(","))
         unknown = want - names

@@ -141,6 +141,10 @@ trap 'cleanup; exit 130' INT TERM
 if [ $PACKAGE = 1 ]; then
 # --- build and test ------------------------------------------------------------------
 ./build.sh test
+# the time budgets at their own limits (the perf layer: docs/TESTING.md "Timing tests"): a summary
+# to read, never a reason to stop (./build.sh test above gates on 10x and 3x)
+python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
+  { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
 ./build.sh # release build with CEF; bundle-app.sh lays out and ad-hoc signs build/Deckhand.app
 BUILT=build/$APP_NAME
 EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)

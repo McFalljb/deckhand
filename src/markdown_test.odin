@@ -150,7 +150,7 @@ markdown_parse_1mb :: proc(t: ^testing.T) {
 	fmt.printfln("markdown: 1 MB parsed in %.1f ms of CPU time (best of 5)", f64(best) / f64(time.Millisecond))
 	// hosted CI runners are shared and slower: a looser limit there (CI is set by GitHub Actions)
 	limit := os.get_env("CI", context.temp_allocator) != "" ? 150 * time.Millisecond : 50 * time.Millisecond
-	perf_expect(t, "markdown_parse_1mb (best of 5)", best, limit)
+	perf_expect(t, "markdown_parse_1mb (best of 5)", best, limit, PERF_GATE_USER) // opening a large .md
 }
 
 @(test)

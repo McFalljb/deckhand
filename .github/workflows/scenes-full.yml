@@ -27,6 +27,20 @@ env:
   HOMEBREW_NO_AUTO_UPDATE: "1"
 
 jobs:
+  # The time budgets at their own limits (tests/unit.py --perf-strict): a report, never failing the
+  # run (merges gate on ./build.sh test, where a budget fails only past 10x or 3x)
+  perf:
+    runs-on: macos-15
+    timeout-minutes: 15
+    continue-on-error: true
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, persist-credentials: false }
+      - uses: ./.github/actions/setup
+        with: { cef: "false" }
+      - name: Time budgets, strict (a report)
+        run: python3 tests/unit.py --timing-only --perf-strict || echo "::warning::time budgets over their limits (see the log)"
+
   scenes:
     runs-on: macos-15
     timeout-minutes: 45

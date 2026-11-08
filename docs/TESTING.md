@@ -289,16 +289,20 @@ CPU against 20, and `syntax_large_parse`'s 50 ms wall-clock reparse failed `rele
 Every budget goes through `perf_expect` (`src/cpu_clock_test.odin`): it prints
 `PERF label: took X (budget Y)`; over the budget it prints `PERF OVER BUDGET …`, which
 `tests/unit.py` lists at the end as a warning (a GitHub warning in CI), and the test fails only
-past **10×** the budget. `tests/unit.py --perf-strict` (`DECKHAND_PERF_STRICT=1`) fails at the
-budget itself: for a quiet machine, when a budget is what you are working on.
+past **10×** the budget, or **3×** (`PERF_GATE_USER`) for what a user waits on directly: a key
+typed and a 50k-line file opened (`editor_perf_50k`), a 1 MB Markdown file parsed.
+`tests/unit.py --perf-strict` (`DECKHAND_PERF_STRICT=1`) fails at the budget itself: for a quiet
+machine, when a budget is what you are working on. The nightly workflow (`scenes-full.yml`, job
+`perf`) and `release.sh` run `tests/unit.py --timing-only --perf-strict` as a report: a warning,
+never a failure.
 
 | Test | Measures | Budget | Why this way |
 |---|---|---|---|
-| `markdown_parse_1mb` | CPU time, best of 5 | 50 ms (150 on CI) | reported; a quadratic parse is far past 10× |
-| `markdown_layout_pathological` | CPU time | 50 ms per 16 KB case, 1 s per 200 KB | over budget at 16 KB skips the 200 KB cases (they would take minutes if not linear) |
+| `markdown_parse_1mb` | CPU time, best of 5 | 50 ms (150 on CI) | gate 3×: a user opens such files |
+| `markdown_layout_pathological` | CPU time | 50 ms per 16 KB case, 1 s per 200 KB | past the gate at 16 KB: fails and skips the 200 KB cases (minutes if not linear); over budget only: one 200 KB case still runs |
 | `markdown_html_pathological`, `markdown_pathological` | CPU time | 1 s; 2 s per case | was wall time (`markdown_pathological`) |
 | `reload_burst` | CPU time | 20 ms (20k events), 5 ms (the report) | flaked at 33.9 ms under load |
-| `editor_perf_50k` | CPU time | 2 s open, 50 ms a key | |
+| `editor_perf_50k` | CPU time | 2 s open, 50 ms a key | gate 3×: what a user waits on |
 | `syntax_large_parse` | CPU time (was wall) | 50 ms reparse | failed `release.sh` at 50–54 ms wall; ~6 ms of CPU |
 | `buffer_large_file` | CPU time (was wall) | 200 ms index, 500 ms edits | |
 

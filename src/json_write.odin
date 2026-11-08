@@ -196,6 +196,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Notify:          return "set_notify"
 	case Set_Tidy_Projects:   return "set_tidy_projects"
 	case Set_Keep_Sessions:   return "set_keep_sessions"
+	case Copy_Control_Token:  return "copy_control_token"
 	case Set_Confirm_Policy:  return "set_confirm_policy"
 	case Set_Close_Confirm:   return "set_close_confirm"
 	case Set_Theme:           return "set_theme"
@@ -437,6 +438,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Keep_Sessions:
 		kv_bool(&w, "on", c.on)
+	case Copy_Control_Token: // nothing: the token is never written
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
 	case Update_Install:

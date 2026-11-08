@@ -1,0 +1,28 @@
+# Deckhand's own updates with sessions kept (tests/scripts/update.sh): now 0.1.1 with
+# keep_sessions on, a pi tab and two shells printing counters; Update to 0.1.3, then Restart to
+# update asks nothing (the session holder keeps all three) and hands them over with a successor
+# secret; the relaunch helper waits for the new app (run 5) to take it.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+command {"type":"add_project","cwd":"$cwd/build/update/home/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"uuuu-1"}
+assert_result ok true
+waitfor ARGS: 10000
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"u1 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"u2 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"focus_tab","tab_id":$last}
+waitfor u2 c5 10000
+menu check_updates
+waitstate 10000 update.available true
+assert_state update.latest 0.1.3
+clickid update_go
+waitstate 30000 update.phase ready
+assert_drawn Sessions carry on
+state_json update-before
+# every tab is kept: Restart to update asks nothing, and the handover names a successor
+ui_command {"type":"update_install"}
+assert_result ok true
+wait 3000

@@ -1065,3 +1065,69 @@ inherited_fds_made_cloexec :: proc(t: ^testing.T) {
 	for fd in fds do testing.expectf(t, fcntl(fd, F_GETFD) & FD_CLOEXEC != 0, "fd %d is not close-on-exec", fd)
 	for fd in c.int(0) ..< 3 do testing.expectf(t, fcntl(fd, F_GETFD) & FD_CLOEXEC == 0, "stdio fd %d was made close-on-exec", fd)
 }
+
+// GOODBYE{handover, successor}: the ack carries a fresh 256-bit secret; until it is used or
+// SUCCESSOR_TTL passes, only a HELLO with it is welcomed (REFUSED{secret} otherwise), and only
+// once. A plain handover names no successor: no secret, any core may follow.
+@(test)
+successor_secret_reserves_the_holder :: proc(t: ^testing.T) {
+	cfg := test_cfg()
+	cfg.successor_ttl = 400 * time.Millisecond
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	handover :: proc(t: ^testing.T, h: ^Holder, f: ^Fake, successor: bool) -> string {
+		fake_send(f, .Goodbye, 0, holderwire.Goodbye{mode = "handover", successor = successor})
+		g, ok := wait_for(h, f, .Goodbye_Ack)
+		ack: holderwire.Goodbye_Ack
+		testing.expect(t, ok && decode_got(g, .Goodbye_Ack, &ack))
+		fake_hangup(f)
+		testing.expect(t, wait_eof(h, f))
+		return strings.clone(ack.successor_secret, context.temp_allocator)
+	}
+	refused :: proc(t: ^testing.T, h: ^Holder, secret: string) {
+		f := fake_connect(t, h)
+		defer fake_free(f)
+		fake_send(f, .Hello, 0, holderwire.Hello{wire = holderwire.WIRE, successor_secret = secret})
+		g, ok := wait_for(h, f, .Refused)
+		r: holderwire.Refused
+		testing.expect(t, ok && decode_got(g, .Refused, &r), "not refused")
+		testing.expect_value(t, r.code, "secret")
+		testing.expect(t, !strings.contains(r.error, secret) || secret == "", "the secret in a REFUSED")
+		// it lingers until the core closes (the core must still read its peer on the REFUSED)
+		pump(h, 30 * time.Millisecond, f)
+		testing.expect(t, !f.eof, "closed right after REFUSED")
+		fake_hangup(f)
+		testing.expect(t, wait_eof(h, f))
+	}
+	a := fake_connect(t, h)
+	defer fake_free(a)
+	hello(t, h, a)
+	secret := handover(t, h, a, true)
+	testing.expect_value(t, len(secret), 64)
+	refused(t, h, "") // a core that was not named
+	refused(t, h, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff")
+	refused(t, h, secret[:32])
+	b := fake_connect(t, h)
+	defer fake_free(b)
+	fake_send(b, .Hello, 0, holderwire.Hello{wire = holderwire.WIRE, successor_secret = secret})
+	_, ok := wait_for(h, b, .Welcome)
+	testing.expect(t, ok, "the successor was not welcomed")
+	// used: the next handover's secret is a new one, and the old one opens nothing
+	secret2 := handover(t, h, b, true)
+	testing.expect(t, len(secret2) == 64 && secret2 != secret)
+	refused(t, h, secret)
+	// expired: anyone may connect again (a crash-style restart: the successor never came)
+	pump(h, cfg.successor_ttl + 50 * time.Millisecond)
+	c2 := fake_connect(t, h)
+	defer fake_free(c2)
+	hello(t, h, c2)
+	// a plain handover (a quit): no secret, any core follows
+	testing.expect_value(t, handover(t, h, c2, false), "")
+	d := fake_connect(t, h)
+	defer fake_free(d)
+	w := hello(t, h, d)
+	testing.expect_value(t, w.previous, "handover")
+	for fk in ([]^Fake{a, b}) do for fr in fk.frames {
+		testing.expectf(t, !strings.contains(string(fr.payload), secret2) || fr.kind == .Goodbye_Ack, "the secret in a %v frame", fr.kind)
+	}
+}

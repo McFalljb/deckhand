@@ -308,13 +308,15 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 child_env :: proc(extra: []string = nil) -> []string {
 	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
-	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_DESK_SOCKET=", "PI_DESK_TOKEN=", "PI_DESK_CONTROL_TOKEN=", "DECKHAND_SOCKET=", "DECKHAND_TOKEN=", "DECKHAND_CONTROL_TOKEN=", "DECKHAND_SHOTS_DIR=", "PI_DESK_DATA_DIR=", "PI_DESK_SHOTS_DIR=", "PI_DESK_CLAUDE_TOKEN=", "PI_DESK_CLI=", "PI_DESK_CLAUDE_TAB=", "PI_DESK_GUI_LAUNCH=", "PI_KIT_READONLY=", "PI_DESK_CLAUDE_READONLY=", "PI_DESK_CLAUDE_ACCOUNT="} // a chat sets its own PI_KIT_READONLY, a read-only Claude tab its PI_DESK_CLAUDE_READONLY, a Claude tab its account
+	drop := [?]string{"TERM=", "TERM_PROGRAM", "COLORTERM=", "KITTY_", "GHOSTTY_", "ITERM_", "WEZTERM_", "TMUX", "STY=", "VTE_", "LC_TERMINAL", "PI_DESK_SOCKET=", "PI_DESK_TOKEN=", "PI_DESK_CONTROL_TOKEN=", "DECKHAND_SOCKET=", "DECKHAND_TOKEN=", "DECKHAND_CONTROL_TOKEN=", "DECKHAND_SHOTS_DIR=", "PI_DESK_SHOTS_DIR=", "PI_DESK_CLAUDE_TOKEN=", "PI_DESK_CLI=", "PI_DESK_CLAUDE_TAB=", "PI_DESK_GUI_LAUNCH=", "PI_KIT_READONLY=", "PI_DESK_CLAUDE_READONLY=", "PI_DESK_CLAUDE_ACCOUNT="} // a chat sets its own PI_KIT_READONLY, a read-only Claude tab its PI_DESK_CLAUDE_READONLY, a Claude tab its account
 	// a Claude tab's account (claude_accounts.odin): its CLAUDE_CONFIG_DIR replaces the inherited
 	// one; "!CLAUDE_CONFIG_DIR" drops it
 	own_config := false
 	for x in extra do if strings.has_prefix(x, "CLAUDE_CONFIG_DIR=") || x == "!CLAUDE_CONFIG_DIR" do own_config = true
 	outer: for e in env {
 		for d in drop do if strings.has_prefix(e, d) do continue outer
+		// a data dir of test mode's never reaches a tab (release builds have no such variable)
+		when TEST_HOOKS do if strings.has_prefix(e, HOOK_ENV[.Data_Dir]) && strings.has_prefix(e[len(HOOK_ENV[.Data_Dir]):], "=") do continue outer
 		if own_config && strings.has_prefix(e, "CLAUDE_CONFIG_DIR=") do continue
 		append(&out, e)
 	}

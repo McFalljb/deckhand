@@ -34,6 +34,7 @@ Fake_Got :: struct {
 
 Fake_Holder :: struct {
 	mode:      Fake_Mode,
+	refuse_code: string, // .Refuse's code ("wire" when empty)
 	no_read:   bool, // after the WELCOME, never read again (the app's sends block)
 	no_listen: bool, // only the dirs: no socket, no thread
 	instance:  string,
@@ -187,7 +188,13 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				hello = true
 				switch f.mode {
 				case .Refuse:
-					fake_send(f, .Refused, 0, hw.Refused{code = "wire", error = "fake: no common wire"})
+					fake_send(f, .Refused, 0, hw.Refused{code = f.refuse_code != "" ? f.refuse_code : "wire", error = "fake: refused"})
+					// open until the app closes, as the holder lingers: the app checks its peer
+					// before it acts on the REFUSED (a closed peer can't be read)
+					for _ in 0 ..< 100 {
+						if sync.atomic_load(&f.stop) do break
+						if sock_wait_readable(f.cfd, 10) && sock_read(f.cfd, buf) <= 0 do break
+					}
 					return
 				case .Silent, .Hangup:
 				case .Welcome:

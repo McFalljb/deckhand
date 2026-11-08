@@ -40,7 +40,7 @@
 import { randomUUID } from "node:crypto";
 import { Type } from "typebox";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
-import { COMMAND_EVENT, CONTROL_EVENT, CONTROL_READY, type CommandOutcome, adoptEnv, deckhandEnv, envToken, inDesk } from "../../lib/protocol.ts";
+import { COMMAND_EVENT, CONTROL_EVENT, CONTROL_READY, type CommandOutcome, adoptEnv, envToken, inDesk } from "../../lib/protocol.ts";
 import { SHOW_DESCRIPTION, showCommand, showText } from "../../lib/show.ts";
 import { appCallCommand, appEventsText, appInputEvents, appReplyText, appTabsText, declaredText, shotFile, shotText } from "../../lib/app.ts";
 import {
@@ -242,7 +242,7 @@ export default function (pi: ExtensionAPI) {
 	// ---- actions (step 8) ----
 	/** An action: the command (checked), its result as actText, a failure with the typed text hidden. */
 	async function act(command: R, signal: AbortSignal | undefined) {
-		const ms = command.type === "browser_upload" ? UPLOAD_TIMEOUT_MS : Number(deckhandEnv("DECKHAND_ACT_TIMEOUT_MS")) || ACT_TIMEOUT_MS; // the env: tests only
+		const ms = command.type === "browser_upload" ? UPLOAD_TIMEOUT_MS : ACT_TIMEOUT_MS; // no env override: a shipped knob nothing used
 		const r = await call(command, ms, signal);
 		return text(r.ok ? actText(command, r.data ?? {}) : errorText(command.type, r, command.type === "browser_type" && command.text.length >= 3 ? command.text : undefined));
 	}

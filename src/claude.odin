@@ -309,7 +309,7 @@ claude_tick :: proc() {
 // the bundle's Contents/Resources/claude-code, else claude-code next to the binary (a bare
 // build). "" = not found. Temp-allocated.
 claude_plugin_dir :: proc() -> string {
-	if p := os.get_env("PI_DESK_CLAUDE_PLUGIN", context.temp_allocator); p != "" && filepath.is_abs(p) && os.is_dir(p) do return p
+	if p := hook_env(.Claude_Plugin); p != "" && filepath.is_abs(p) && os.is_dir(p) do return p
 	exe := executable_path()
 	if exe == "" do return ""
 	dir := filepath.dir(exe)
@@ -341,10 +341,12 @@ CLAUDE_TAB_CMD :: `command -v claude >/dev/null 2>&1 || for d in "$HOME/.local/b
 // What a Claude tab runs: PI_DESK_CLAUDE_CMD (tests: a fake claude), else claude (CLAUDE_TAB_CMD);
 // in test mode never the real claude: TEST_NO_CLAUDE_CMD (commands.odin).
 claude_tab_cmd :: proc() -> string {
-	if c := os.get_env("PI_DESK_CLAUDE_CMD", context.temp_allocator); c != "" do return c
-	if test_mode() {
-		test_mode_refused("claude")
-		return TEST_NO_CLAUDE_CMD
+	if c := hook_env(.Claude_Cmd); c != "" do return c
+	when TEST_HOOKS {
+		if test_mode() {
+			test_mode_refused("claude")
+			return TEST_NO_CLAUDE_CMD
+		}
 	}
 	return CLAUDE_TAB_CMD
 }

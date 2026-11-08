@@ -1,0 +1,9 @@
+# Deckhand's own updates with sessions kept, the new app (tests/scripts/update.sh): 0.1.3, started
+# as the relaunch helper would; it takes the successor secret and adopts the three terminals
+# (update.sh compares hashes and pids).
+wait 300
+assert_state update.current 0.1.3
+wait 1500
+state_json update-after
+screen_hashes
+quit

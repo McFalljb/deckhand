@@ -181,6 +181,44 @@ holder_answered_no_second_launch :: proc(t: ^testing.T) {
 	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
 }
 
+// A holder that waits for the Deckhand an update relaunches (REFUSED{secret}) runs every kept
+// session: like any holder that answers without a WELCOME, the restored tabs it keeps must wait
+// for it (hc.unreachable: held_away, their held ids saved again), never start a second copy.
+@(test)
+holder_refused_secret_unreachable :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	toast_clear()
+	testing.expect(t, !holder_client_start(), "attached to something")
+	testing.expect(t, hc.refused_secret)
+	testing.expect(t, hc.unreachable, "not taken for a holder that keeps sessions")
+	testing.expect(t, strings.contains(toast.text, "update"), toast.text)
+	testing.expect(t, !strings.contains(toast.text, "another copy"), toast.text) // it may be the successor itself
+	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+}
+
+// The reservation lapses after SUCCESSOR_TTL (the successor never came, or this was it without
+// its secret): the attach is tried again then, once, and the tabs that waited are adopted.
+@(test)
+holder_refused_secret_retried :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	testing.expect(t, !holder_client_start())
+	holder_successor_retry_tick()
+	testing.expect(t, !hc.on, "retried before the reservation lapsed")
+	testing.expect(t, hc.successor_retry != {}, "no retry planned")
+	f.mode = .Welcome // the reservation lapsed: the holder welcomes anyone
+	hc.successor_retry = time.tick_now()
+	holder_successor_retry_tick()
+	testing.expect(t, hc.on, "not attached on the retry")
+	testing.expect(t, !hc.unreachable)
+	testing.expect(t, hc.adopt_done, "the retry's adopt did not run")
+}
+
 // A dead holder's socket (nobody listening: kill -9) is removed, and with keep_sessions off it
 // does not use up the one start of this run: turning the setting on later still starts one.
 @(test)
@@ -815,4 +853,82 @@ holder_reattach_frames_behind_tails :: proc(t: ^testing.T) {
 	testing.expectf(t, done, "the frames behind the TAILs waited for more bytes: %q, eof %v", h != nil ? string(h.buf[:]) : "", h != nil && h.eof)
 	if h != nil do testing.expect_value(t, h.exit, Exit_Info{known = true, code = 7})
 	sync.unlock(&hc.mu)
+}
+
+// The automatic upgrade (holder_upgrade_tick): once per run, only after the launch's adopt, only
+// for an older holder, never beside a running one (the palette's Restart).
+@(test)
+holder_upgrade_due_rule :: proc(t: ^testing.T) {
+	cases := []struct {
+		tried, adopt_done, wanted, running, want: bool,
+	} {
+		{false, true, true, false, true},
+		{true, true, true, false, false}, // once: a failed upgrade is not tried again this run
+		{false, false, true, false, false}, // the adopt first (its tabs claim their terminals)
+		{false, true, false, false, false}, // same rev, newer, or no holder
+		{false, true, true, true, false}, // Restart session holder runs
+	}
+	for c, i in cases do testing.expectf(t, holder_upgrade_due(c.tried, c.adopt_done, c.wanted, c.running) == c.want, "case %d", i)
+}
+
+// GOODBYE_ACK's successor secret is kept in hc's fixed buffer only: the frame's bytes (in the
+// reader's stream) and the decoded copy are wiped once it is taken.
+@(test)
+goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	secret := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Goodbye_Ack, 0, hw.Goodbye_Ack{terminals = {{id = 3, offset = 9}}, successor_secret = secret})
+	rx: hw.Stream
+	defer hw.stream_destroy(&rx)
+	hw.stream_feed(&rx, out[:])
+	f, err := hw.stream_next(&rx)
+	testing.expect_value(t, err, hw.Frame_Error.None)
+	testing.expect(t, goodbye_ack_take(f))
+	testing.expect_value(t, string(hc.successor[:hc.successor_len]), secret)
+	testing.expect_value(t, hc.ack[3], u64(9))
+	for b, i in f.payload do if b != 0 {
+		testing.expectf(t, false, "payload byte %d not wiped", i)
+		break
+	}
+}
+
+// A tab opened while the holder upgrades runs on its own PTY (it stops at quit): the user is told
+// once per upgrade, not at every tab.
+@(test)
+holder_upgrading_told_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	saved := state.settings.keep_sessions
+	defer state.settings.keep_sessions = saved
+	state.settings.keep_sessions = true
+	hc.on, hc.tried, hc.upgrading = true, true, true
+	toast_clear()
+	testing.expect(t, !holder_wanted(), "spawned in the holder mid-upgrade")
+	testing.expect(t, strings.contains(toast.text, "upgrad"), toast.text)
+	toast_clear()
+	testing.expect(t, !holder_wanted())
+	testing.expect_value(t, toast.text, "")
+	hc.upgrading = false
+}
+
+// An older holder that can't be upgraded in place (rev 1): holder_upgrade_tick says so once per
+// run, as plain information, and starts no upgrade.
+@(test)
+holder_upgrade_unavailable_told_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	holder_client_forget()
+	defer holder_client_forget()
+	hc.on, hc.adopt_done, hc.holder_rev = true, true, 1
+	toast_clear()
+	holder_upgrade_tick()
+	testing.expect(t, strings.contains(toast.text, "can't be updated in place"), toast.text)
+	testing.expect(t, !toast.err, "shown as an error")
+	testing.expect(t, !hc.upgrading, "an upgrade started for a rev-1 holder")
+	toast_clear()
+	holder_upgrade_tick()
+	testing.expect_value(t, toast.text, "")
 }

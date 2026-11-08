@@ -292,3 +292,13 @@ launchd_bootout_after_failed_bootstrap :: proc(t: ^testing.T) {
 	want := fmt.tprintf("bootout gui/%d/%s", posix.getuid(), label)
 	testing.expectf(t, strings.contains(string(b), want), "no %q in the calls: %q", want, string(b))
 }
+
+// holder_install's temp file: unique per call (the update's helper install and an upgrade's can
+// run at once on two threads of one process: a pid-only name made one remove the other's).
+@(test)
+holder_install_tmp_unique :: proc(t: ^testing.T) {
+	a := holder_install_tmp("/d")
+	b := holder_install_tmp("/d")
+	testing.expect(t, a != b, a)
+	testing.expect(t, strings.has_prefix(a, "/d/.deckhand-core.") && strings.has_suffix(a, ".tmp"), a)
+}

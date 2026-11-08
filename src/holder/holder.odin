@@ -33,7 +33,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 2
+HOLDER_REV :: 3
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -56,6 +56,7 @@ Config :: struct {
 	exit_grace:    time.Duration, // EXITED this long after the reap even if the master stays open
 	reap_interval: time.Duration, // how often to try waitpid while a child runs (SIGCHLD wakes us sooner)
 	shutdown_wait: time.Duration, // GOODBYE{shutdown}: how long to reap before exiting
+	successor_ttl: time.Duration, // GOODBYE{handover, successor}: how long its secret is valid
 	tail_cap:      int,
 	queue_cap:     int,
 	quiet:         bool, // no log lines (tests)
@@ -74,6 +75,7 @@ default_config :: proc() -> Config {
 		exit_grace = 500 * time.Millisecond,
 		reap_interval = time.Second,
 		shutdown_wait = time.Second,
+		successor_ttl = holderwire.SUCCESSOR_TTL,
 		tail_cap = TAIL_CAP,
 		queue_cap = QUEUE_CAP,
 		spawn_timeout = SPAWN_TIMEOUT,
@@ -140,6 +142,8 @@ Holder :: struct {
 	conns:             [dynamic]^Conn,
 	core:              ^Conn, // the attached (WELCOMEd) core, or nil
 	previous:          string, // none | handover | crash, for the next WELCOME
+	successor:         string, // the named successor's secret (hex; "" = none): only its HELLO is welcomed
+	successor_until:   time.Tick, // ...until then (or until it is used)
 	idle:              bool,
 	idle_since:        time.Tick,
 	shutting_down:     bool,
@@ -296,6 +300,7 @@ sync_unlock :: proc() {sync.mutex_unlock(&fork_lock)}
 // running, so no test leaves processes behind. The holder binary leaves them (they were hung up).
 holder_free :: proc(h: ^Holder, kill_children := false) {
 	if h == nil do return
+	successor_clear(h)
 	for cn in h.conns do conn_free(cn)
 	delete(h.conns)
 	for t in h.terms {
@@ -643,10 +648,24 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 			conn_drop(h, cn, fmt.tprintf("bad HELLO: %v", e))
 			return
 		}
+		defer if hello.successor_secret != "" {
+			trust.wipe(transmute([]u8)hello.successor_secret) // the decoded copy and the frame's bytes
+			trust.wipe(f.payload)
+		}
 		wire, wire_ok := holderwire.negotiate(hello.wire)
-		switch trust.hello_answer(h.core != nil, wire_ok) {
+		successor_expire(h)
+		switch trust.hello_answer(h.core != nil, wire_ok, h.successor != "", trust.successor_secret_ok(h.successor, hello.successor_secret)) {
 		case .Welcome:
 			welcome(h, cn, wire)
+		case .Welcome_Successor:
+			successor_clear(h) // one HELLO
+			hlog(h, "the named successor said HELLO")
+			welcome(h, cn, wire)
+		case .Refuse_Secret:
+			hlog(h, "refused HELLO: a successor is named and this core is not it")
+			send_msg(cn, .Refused, 0, holderwire.Refused{code = holderwire.REFUSE_CODE_NAMES[.Secret], error = "the session holder is waiting for the Deckhand that is updating (at most a minute)"})
+			conn_close_after(cn)
+			cn.linger = true // as after GOODBYE_ACK: a closed peer can't be checked, so the core couldn't read why
 		case .Refuse_Wire:
 			hlog(h, "refused HELLO: wire %d", hello.wire)
 			send_msg(cn, .Refused, 0, holderwire.Refused{code = holderwire.REFUSE_CODE_NAMES[.Wire], error = fmt.tprintf("this holder speaks wire %d..%d", holderwire.WIRE_MIN, holderwire.WIRE)})
@@ -711,7 +730,7 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 		m: holderwire.Goodbye
 		if holderwire.decode(f, .Goodbye, &m, context.temp_allocator) != .None do return
 		switch m.mode {
-		case "handover": goodbye_handover(h, cn)
+		case "handover": goodbye_handover(h, cn, m.successor)
 		case "shutdown": shutdown(h)
 		case: hlog(h, "GOODBYE mode %q unknown", m.mode)
 		}
@@ -852,16 +871,43 @@ term_forget :: proc(t: ^Term) {
 }
 
 @(private)
-goodbye_handover :: proc(h: ^Holder, cn: ^Conn) {
+goodbye_handover :: proc(h: ^Holder, cn: ^Conn, successor: bool) {
 	acks := make([dynamic]holderwire.Ack_Terminal, context.temp_allocator)
 	for t in h.terms do if !t.released && !t.pending do append(&acks, holderwire.Ack_Terminal{id = i64(t.id), offset = t.offset})
-	// successor secrets come with PR D (§7.2); until then any core with the DR may follow
-	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = ""})
+	// a named successor (the updater's relaunch): a fresh secret, the only HELLO welcomed until it
+	// is used or successor_ttl passes; a plain handover (a quit): none, any core may follow
+	successor_clear(h)
+	if successor {
+		raw: [32]u8
+		crypto.rand_bytes(raw[:])
+		h.successor = string(hex.encode(raw[:]))
+		trust.wipe(raw[:])
+		h.successor_until = time.tick_add(time.tick_now(), h.cfg.successor_ttl)
+	}
+	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor})
 	conn_close_after(cn)
 	cn.linger = true
 	h.core = nil
 	h.previous = "handover"
 	hlog(h, "handover: the core said goodbye (%d terminals)", len(acks))
+}
+
+@(private)
+successor_clear :: proc(h: ^Holder) {
+	if h.successor == "" do return
+	trust.wipe(transmute([]u8)h.successor)
+	delete(h.successor)
+	h.successor = ""
+}
+
+// The successor secret expires: a successor that never came is a crash-style restart for whoever
+// connects next (its handover.json still verifies: the next launch uses it).
+@(private)
+successor_expire :: proc(h: ^Holder) {
+	if h.successor != "" && time.tick_diff(time.tick_now(), h.successor_until) <= 0 {
+		hlog(h, "the named successor did not come within %v: any core may connect", h.cfg.successor_ttl)
+		successor_clear(h)
+	}
 }
 
 // GOODBYE{shutdown}: hang up every terminal, reap for up to shutdown_wait, then exit 0.

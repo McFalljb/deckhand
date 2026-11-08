@@ -1,5 +1,7 @@
 # Deckhand's own updates (tests/scripts/update.sh): a fake install of 0.1.0, release 0.1.1
-# from local files. Offer, Skip, Check for Updates, Later, Update, Restart to update.
+# from local files. Offer, Skip, Check for Updates, Later, Update, Restart to update. keep_sessions
+# off: the restart stops what runs (update-4.txt has it on).
+ui_command {"type":"set_keep_sessions","on":false}
 wait 1500
 waitstate 10000 update.available true
 assert_state update.current 0.1.0

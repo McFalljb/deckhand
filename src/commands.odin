@@ -207,11 +207,36 @@ Set_Notify :: struct {
 Set_Tidy_Projects :: struct {
 	on: bool,
 }
-// Keep sessions running in the session holder when Deckhand quits (docs/plans/background-core.md;
-// off by default until it is done). User-only.
+// Keep sessions running in the session holder when Deckhand quits and while it updates
+// (docs/plans/background-core.md). On by default (keep_sessions_default). User-only.
 Set_Keep_Sessions :: struct {
 	on: bool,
 }
+// keep_sessions' default (keep_sessions_default_on), except in test mode, where a scene turns it
+// on when it tests it (every other scene would leave a session holder running after it quits).
+// Saved only once the user chose (Settings.keep_sessions_chosen): turning the default back off
+// turns it off for everyone who never chose.
+keep_sessions_default_on := true // on by default: this line alone turns it off again (revert its commit)
+
+// Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
+CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second
+control_token_clip: struct {
+	count:    int,
+	deadline: time.Tick, // zero: nothing to clear
+}
+
+// Main thread, every frame (control_token_clip).
+control_token_clip_tick :: proc() {
+	if control_token_clip.deadline == {} || time.tick_diff(control_token_clip.deadline, time.tick_now()) < 0 do return
+	if platform.clear_clipboard_if != nil do platform.clear_clipboard_if(control_token_clip.count)
+	control_token_clip = {}
+}
+keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest.active}
+
+// Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
+// onto the clipboard (docs/PROTOCOL.md §2). The user's only: the one way a release build mints a
+// control token (test_hooks.odin: no --print-token there). The token is never logged or returned.
+Copy_Control_Token :: struct {}
 
 // User-only (caller ui or internal): settings that bound what agents may do.
 Set_Confirm_Policy :: struct {
@@ -431,6 +456,7 @@ Command :: union {
 	Set_Notify,
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
+	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
 	Set_Theme,
@@ -1306,9 +1332,21 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.tidy_off == !c.on do return {ok = true}, false
 		state.settings.tidy_off = !c.on
 		return {ok = true}, true // projects_tidy runs after (run_command)
+	case Copy_Control_Token:
+		if !socket_running() do return fail("Deckhand's control socket is not running"), false
+		// multi-use (each `deckhand --ctl` says hello with it anew), so the clipboard is the risk:
+		// marked concealed and transient, and cleared after CONTROL_TOKEN_CLIP_TTL if still there
+		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
+		exports := fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok)
+		if platform.set_clipboard_secret != nil {
+			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
+		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
+		toast_show("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
+		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
-		if state.settings.keep_sessions == c.on do return {ok = true}, false
-		state.settings.keep_sessions = c.on
+		// the user's choice (only the user may run it; the restore runs it for a saved choice)
+		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
+		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .UI || c.caller == .Internal do return fail("ui and internal callers have fixed policies"), false
@@ -2327,11 +2365,14 @@ PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/
 
 // Test mode (PI_DESK_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
 // pi or claude (docs/DEVELOPING.md "Test mode"). pi-desk's own log says so too (test_mode_refused).
-TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CMD; refusing to run the real pi (PI_DESK_REAL_PI=1 allows it)"; exit 127`
-TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CLAUDE_CMD; refusing to run the real claude"; exit 127`
+// (Test builds only: a release build has no test mode, test_hooks.odin.)
+when TEST_HOOKS {
+	TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CMD; refusing to run the real pi (PI_DESK_REAL_PI=1 allows it)"; exit 127`
+	TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CLAUDE_CMD; refusing to run the real claude"; exit 127`
+}
 
 // pi-desk runs a test script (autotest.odin): scenes, never the user's own session.
-test_mode :: proc() -> bool {return os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != ""}
+test_mode :: proc() -> bool {return hook_env(.Script) != ""}
 
 // Said on pi-desk's stderr (the scene's log) whenever test mode refuses a real binary.
 test_mode_refused :: proc(what: string) {
@@ -2341,10 +2382,12 @@ test_mode_refused :: proc(what: string) {
 // What a pi tab runs: PI_DESK_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
 // real pi only with PI_DESK_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
 pi_tab_cmd :: proc() -> string {
-	if c := os.get_env("PI_DESK_CMD", context.temp_allocator); c != "" do return c
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
-		test_mode_refused("pi")
-		return TEST_NO_PI_CMD
+	if c := hook_env(.Cmd); c != "" do return c
+	when TEST_HOOKS {
+		if test_mode() && hook_env(.Real_Pi) != "1" {
+			test_mode_refused("pi")
+			return TEST_NO_PI_CMD
+		}
 	}
 	return PI_TAB_CMD
 }

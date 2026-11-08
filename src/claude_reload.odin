@@ -251,8 +251,8 @@ claude_file_class :: proc(path: string) -> Claude_File_Class {
 // The `claude` a Claude tab would start ("" = none found, or tests replace claude): the
 // children's PATH, then ~/.local/bin and ~/.claude/local, as CLAUDE_TAB_CMD looks. Stat only.
 claude_binary_path :: proc() -> string {
-	if b := os.get_env("PI_DESK_CLAUDE_BIN", context.temp_allocator); filepath.is_abs(b) do return b
-	if os.get_env("PI_DESK_CLAUDE_CMD", context.temp_allocator) != "" do return ""
+	if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
+	if hook_env(.Claude_Cmd) != "" do return ""
 	dirs := make([dynamic]string, context.temp_allocator)
 	if path, ok := env_lookup(child_base_env(), "PATH"); ok do for d in strings.split(path, ":", context.temp_allocator) do append(&dirs, d)
 	if h := os.get_env("HOME", context.temp_allocator); strings.has_prefix(h, "/") {
@@ -884,7 +884,7 @@ claude_reload_poll :: proc() {
 		}
 	}
 	// claude's version on disk: found again now and then (PATH may change), looked at each poll
-	if cw.last_find == {} || time.tick_since(cw.last_find) > CLAUDE_FIND_EVERY || os.get_env("PI_DESK_CLAUDE_BIN", context.temp_allocator) != "" {
+	if cw.last_find == {} || time.tick_since(cw.last_find) > CLAUDE_FIND_EVERY || hook_env(.Claude_Bin) != "" {
 		cw.last_find = now
 		b := claude_binary_path()
 		if b != cw.bin {

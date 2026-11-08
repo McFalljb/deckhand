@@ -11,7 +11,10 @@ and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not ye
 ## 1. Transport and envelope
 
 - A Unix socket `core.sock` (mode `0600`) in the runtime dir, `<data dir>/run` (`0700`; macOS
-  `~/Library/Application Support/pi-desk/run`); `PI_DESK_RUNTIME_DIR` overrides. The name is
+  `~/Library/Application Support/pi-desk/run`); `PI_DESK_RUNTIME_DIR` overrides (development and
+  test builds only). The same dir holds the session holder's `holder-<8 hex>.sock` and, for the
+  minute an update hands sessions over, the relaunch helper's `successor.sock` (GUIDE.md
+  "Updates"; docs/plans/background-core.md §7.2). The name is
   stable (until M1 it was `pi-desk-<pid>.sock` in `$TMPDIR/pi-desk-<uid>`), so a tab that outlives
   Deckhand keeps its `DECKHAND_SOCKET`. Deckhand refuses a directory it does not own, that is not
   a real directory, or whose socket paths would not fit in `sun_path` (104 bytes). Named pipe on
@@ -100,7 +103,10 @@ The first message on a connection is `hello`:
   connects); a same-user process can also read pi's memory, so this guards against leaks
   through `ps`, logs and children, not against the same user. For local scripts and testing, `deckhand --print-token script
   DIR` (or `control`) mints one at startup and prints it once to stdout as
-  `export PI_DESK_SOCKET='…' PI_DESK_TOKEN='…'`. Tokens are never in State, events, replies or the log.
+  `export PI_DESK_SOCKET='…' PI_DESK_TOKEN='…'` (development and test builds only: a release build
+  has no `--print-token`, DEVELOPING.md "Releases"). In any build, `copy_control_token` (the
+  gear's **Copy a control token**, the user's only) mints a control token and puts that same line
+  on the clipboard. Tokens are never in State, events, replies or the log.
 - **A Claude tab's token** (`PI_DESK_CLAUDE_TOKEN`, with `PI_DESK_SOCKET`, `PI_DESK_CLI`,
   `PI_DESK_SHOTS_DIR`, `PI_DESK_CLAUDE_TAB`) is **multi-use** (the plugin's CLI is a new process
   per call), minted fresh at each start of the tab, revoked when its process exits or the tab
@@ -114,7 +120,7 @@ The first message on a connection is `hello`:
   `DECKHAND_CONTROL_TOKEN` (the desk tools; swapped for a reconnect token on the first hello,
   like the panel token), with `DECKHAND_SOCKET`. The control hello's `tab_id` is Home's tab
   (`0` for unbound control tokens such as `--print-token control`). Shell tabs never get any of these variables.
-- **Tokens that outlive Deckhand** (`keep_sessions`, Experimental). A pi or Claude process kept
+- **Tokens that outlive Deckhand** (`keep_sessions`, on by default). A pi or Claude process kept
   running by the session holder while Deckhand is closed keeps its token. With the setting on,
   the tokens of tabs whose process runs in the holder (sha256 hashes only, never a token), each
   Claude tab's process (`claude_pids`), a read-only tab's ack state and what each terminal was
@@ -215,7 +221,8 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `agent_model_picker` | | **user only**: shows the drawer, gives the agent's terminal the keyboard and opens pi's own model selector there (its key, Ctrl+L; once pi reports its status if it is still starting) |
 | `set_agent_name` | `name` | **user only**: the agent's name (`""` = Atlas; cleaned, at most 32 bytes). It labels the drawer, the top bar and notifications, so the agent cannot set it |
 | `set_notify` | `on` | **user only**: OS notifications from the agent while Deckhand is in the background |
-| `set_keep_sessions` | `on` | **user only**, Experimental (default off; `state.settings.keep_sessions`): keep sessions running when Deckhand quits. Their processes stay in the session holder and the next launch adopts them; their tokens survive in a MAC'd `tokens.json` (§2) |
+| `copy_control_token` | — | **user only**: a new control token (unbound, `tab_id` 0) for `deckhand --ctl`, as `export PI_DESK_SOCKET='…' PI_DESK_TOKEN='…'`, onto the clipboard; the result and the log never hold it. The one way a release build mints a control token (§2) |
+| `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): keep sessions running when Deckhand quits or updates. Their processes stay in the session holder and the next launch adopts them; their tokens survive in a MAC'd `tokens.json` (§2) |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
 | `notifications_list` | `limit`? | query (any caller but pi tabs; listed in `list_commands`): the bell's entries, newest first, at most `limit` (default 20, at most 200); see [The bell](#the-bell-notifications) |
 | `notifications_mark_read` | `id`? \| `session`? \| `all`? | **user only**: marks one entry, an open session's, or all read |

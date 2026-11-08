@@ -31,6 +31,7 @@ package main
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -106,6 +107,11 @@ Holder_Client :: struct {
 	stop:      bool,
 	acked:     bool,
 	ack:       map[u32]u64, // GOODBYE_ACK: id -> offset
+	successor: [64]u8, // GOODBYE_ACK's successor secret (hex), until it goes to the relaunch helper
+	successor_len: int,
+	refused_secret: bool, // a HELLO was refused for want of the successor secret: an update is relaunching another Deckhand
+	successor_retry: time.Tick, // after REFUSED{secret}: when the reservation has lapsed and the attach is tried again (zero: none)
+	successor_retries: int,
 	dying:     [dynamic]i32, // pids of released terminals, until they are gone (pty_dying)
 	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
 	tokens_why:    string, // why not
@@ -114,6 +120,7 @@ Holder_Client :: struct {
 	path:      string, // the socket connected to (an upgrade reconnects to it)
 	holder_rev: i64, // WELCOME.holder_rev
 	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
+	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
 	up_done:   bool, // the outcome is in up_result (mu)
 	up_result: Holder_Upgrade_Result,
@@ -197,6 +204,9 @@ holder_client_start :: proc() -> bool {
 	if why != "" do return false
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
+	// relaunched by an update (holder_successor.odin): the secret the holder waits for
+	secret := successor_secret_take(run)
+	defer for &b in transmute([]u8)secret do b = 0
 	answered := false
 	// a holder that took the connection and closed it (or never answered) without a byte may have
 	// been shutting down: looked for again once, a moment later (gone by then: none runs)
@@ -209,13 +219,13 @@ holder_client_start :: proc() -> bool {
 				answered = true
 				continue next
 			}
-			r := holder_connect(path)
+			r := holder_connect(path, secret)
 			// macOS also refuses when the listen backlog is full: a busy live holder. Tried again,
 			// with backoff, before its socket is taken for a dead one's (only a refusal: .Stale)
 			for wait in HOLDER_RECHECKS {
 				if r != .Stale do break
 				time.sleep(wait)
-				r = holder_connect(path)
+				r = holder_connect(path, secret)
 			}
 			switch r {
 			case .Welcomed:
@@ -236,6 +246,18 @@ holder_client_start :: proc() -> bool {
 		if !quiet do break
 		time.sleep(HOLDER_RESCAN)
 		socks = holder_socks(run)
+	}
+	if hc.refused_secret {
+		// the holder waits (at most SUCCESSOR_TTL) for the Deckhand an update relaunches with its
+		// secret, and this HELLO had none that fits (another copy, or the successor whose secret
+		// never came): never a second holder beside it, and the tabs it keeps wait for it
+		// (held_away, as for any holder that answers without a WELCOME: holder_adopt_all). The
+		// attach is tried again once the reservation has lapsed (holder_successor_retry_tick).
+		hc.tried, hc.unreachable = true, true
+		if hc.successor_retries < SUCCESSOR_RETRIES do hc.successor_retry = time.tick_add(time.tick_now(), hw.SUCCESSOR_TTL + 2 * time.Second)
+		fmt.eprintln("Deckhand: session holder: it is reserved for the Deckhand an update relaunches; trying again once that lapses")
+		toast_show("The session holder is reserved for the Deckhand an update is starting. Its sessions come back here in about a minute if that Deckhand doesn't take them; tabs opened now stop when Deckhand quits.", err = true)
+		return false
 	}
 	switch trust.holder_start(answered, state.settings.keep_sessions) {
 	case .Without:
@@ -268,7 +290,7 @@ holder_client_start :: proc() -> bool {
 	for time.tick_since(deadline) < HOLDER_WAIT {
 		outer: for path in holder_socks(run) {
 			for b in before do if b == path do continue outer
-			if holder_connect(path) == .Welcomed do return true
+			if holder_connect(path, "") == .Welcomed do return true
 		}
 		time.sleep(20 * time.Millisecond)
 	}
@@ -312,7 +334,7 @@ handshake_got: int // bytes the handshake read so far (Quiet: none)
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
 @(private = "file")
-holder_connect :: proc(path: string) -> Connect_Result {
+holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	fd, ok, refused := sock_connect_why(path)
 	if !ok do return refused ? .Stale : .Answered // not refused (EACCES, a race): not known dead
 	peer := trust.peer_read(fd)
@@ -335,8 +357,10 @@ holder_connect :: proc(path: string) -> Connect_Result {
 		return handshake_got == 0 ? .Quiet : .Answered
 	}
 	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE})
-	if !sock_write_all(fd, out[:]) do return fail("cannot send HELLO")
+	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE, successor_secret = secret})
+	sent := sock_write_all(fd, out[:])
+	if secret != "" do trust.wipe(out[:]) // the HELLO held the successor secret
+	if !sent do return fail("cannot send HELLO")
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
 
 	f, fok := handshake_frame(deadline)
@@ -344,6 +368,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	if f.kind == u8(hw.Kind.Refused) {
 		r: hw.Refused
 		hw.decode(f, .Refused, &r, context.temp_allocator)
+		if r.code == hw.REFUSE_CODE_NAMES[.Secret] do hc.refused_secret = true
 		return fail(fmt.tprintf("refused: %s %s", r.code, r.error))
 	}
 	w: hw.Welcome
@@ -410,7 +435,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 		toast_show(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
-	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
+	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
 }
 
@@ -500,6 +525,24 @@ holder_frames :: proc() -> bool {
 	}
 }
 
+// GOODBYE_ACK's offsets into hc.ack and its successor secret into hc.successor (the one copy, until
+// it goes to the relaunch helper); the frame's bytes and the decoded copy are wiped. False: bad.
+goodbye_ack_take :: proc(f: hw.Frame) -> bool {
+	m: hw.Goodbye_Ack
+	e := hw.decode(f, .Goodbye_Ack, &m, context.temp_allocator)
+	defer {
+		trust.wipe(transmute([]u8)m.successor_secret)
+		trust.wipe(f.payload)
+	}
+	if e != .None do return false
+	for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
+	if len(m.successor_secret) == len(hc.successor) {
+		copy(hc.successor[:], m.successor_secret)
+		hc.successor_len = len(hc.successor)
+	}
+	return true
+}
+
 // One frame from the holder (reader thread).
 @(private = "file")
 holder_frame :: proc(f: hw.Frame) {
@@ -546,10 +589,11 @@ holder_frame :: proc(f: hw.Frame) {
 		if h == nil || hw.decode(f, .Foreground_Is, &m, context.temp_allocator) != .None do return
 		h.fg = i32(clamp(m.pgid, 0, i64(max(i32))))
 	case .Goodbye_Ack:
-		m: hw.Goodbye_Ack
-		e := hw.decode(f, .Goodbye_Ack, &m, context.temp_allocator)
-		if !hc.handed || hc.acked || e != .None do return
-		for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
+		if !hc.handed || hc.acked {
+			trust.wipe(f.payload)
+			return
+		}
+		if !goodbye_ack_take(f) do return
 		hc.acked = true
 		sync.cond_broadcast(&hc.cond)
 	case .Upgrade_Failed:
@@ -620,6 +664,15 @@ holder_write :: proc(frame: []u8) -> bool {
 // connected or launched on first use).
 holder_wanted :: proc() -> bool {
 	if !state.settings.keep_sessions || hc.lost || hc.handed do return false
+	// mid-upgrade a SPAWN would wait for the new image (seconds; holder_spawn gives up after
+	// HOLDER_WAIT): a tab opened then runs directly and stops at quit
+	if holder_upgrading() {
+		if !hc.upgrade_told {
+			hc.upgrade_told = true // once per upgrade (holder_upgrade clears it)
+			toast_show("The session holder is upgrading: tabs opened in the next few seconds stop when Deckhand quits")
+		}
+		return false
+	}
 	return holder_client_start()
 }
 
@@ -799,9 +852,9 @@ holder_shutdown :: proc() {
 // the terminals: the reader must not stall at its backlog cap before it sees the exec) or, for
 // none, dropping what came. Still upgrading then: no GOODBYE, the app leaves crash-style
 // (holder_leave: the holder keeps every terminal for the next launch, restored from its tails).
-holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawptr = nil) -> bool {
+holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawptr = nil, successor := false) -> bool {
 	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode})
+	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode, successor = successor})
 	deadline := time.tick_add(time.tick_now(), holder_quit_upgrade_wait)
 	sync.lock(&hc.wmu)
 	for hc.upgrading && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
@@ -856,23 +909,39 @@ HOLDER_UPGRADE_WAIT :: 13 * time.Second + HOLDER_REATTACH_WAIT + 2 * time.Second
 // At quit, an upgrade in flight is waited for this long, then the app leaves crash-style.
 holder_quit_upgrade_wait := 10 * time.Second
 
-// Whether the attached holder should and can be upgraded to the one this app bundles (PR D's
-// updater then calls holder_upgrade with the installed bundled binary).
+// Whether the attached holder should and can be upgraded to the one this app bundles:
+// holder_upgrade_tick (holder_restart.odin) then upgrades it once, after the launch's adopt.
 holder_upgrade_wanted :: proc() -> bool {
+	bundled := holder_rev_bundled()
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	return hc.on && !hc.lost && !hc.handed && holder_upgradable(hc.holder_rev, HOLDER_REV, hc.upgrade_error_seen != "")
+	return hc.on && !hc.lost && !hc.handed && holder_upgradable(hc.holder_rev, bundled, hc.upgrade_error_seen != "")
 }
 
 // Why the attached holder, older than the bundled one, cannot be upgraded in place ("" when it
 // can, or is not older): plain words to say once, never an error.
 holder_upgrade_unavailable :: proc() -> string {
+	bundled := holder_rev_bundled()
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	if !hc.on || hc.lost || hc.handed || hc.holder_rev < 1 || hc.holder_rev >= HOLDER_REV do return ""
+	if !hc.on || hc.lost || hc.handed || hc.holder_rev < 1 || hc.holder_rev >= bundled do return ""
 	if hc.upgrade_error_seen != "" do return "Your kept sessions are running in a backup session holder after an update didn't take; it's replaced once those sessions end."
 	if hc.holder_rev < HOLDER_UPGRADE_MIN_REV do return "Your kept sessions are running in an older session holder that can't be updated in place; it's replaced once those sessions end."
 	return ""
+}
+
+// HOLDER_REV, or in a test build PI_DESK_HOLDER_REV (a scene makes the running holder look old).
+@(private = "file")
+holder_rev_bundled :: proc() -> i64 {
+	if v := hook_env(.Holder_Rev); v != "" {
+		if n, ok := strconv.parse_i64(v); ok do return n
+	}
+	return HOLDER_REV
+}
+
+// An upgrade is in flight (UPGRADE sent, no outcome yet).
+holder_upgrading :: proc() -> bool {
+	return sync.atomic_load(&hc.upgrading) // cleared once what waited has gone out (upgrade_release)
 }
 
 // UPGRADE{path}: the holder re-execs into the binary at path (an absolute path to an installed,
@@ -892,7 +961,7 @@ holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
 		sync.unlock(&hc.wmu)
 		return {error = strings.clone(busy ? "an upgrade is already running" : "no session holder is attached")}
 	}
-	hc.upgrading, hc.up_done = true, false
+	hc.upgrading, hc.up_done, hc.upgrade_told = true, false, false
 	sync.unlock(&hc.mu)
 	sent := sock_write_all(hc.fd, out[:])
 	sync.unlock(&hc.wmu)
@@ -1121,6 +1190,24 @@ holder_client_forget :: proc() {
 	delete(hc.upgrade_error_seen)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
+}
+
+SUCCESSOR_RETRIES :: 2 // tries after a REFUSED{secret}: a new reservation each time is another update
+
+// Main thread, every frame: after REFUSED{secret}, once the holder's reservation has lapsed, the
+// launch's attach and adopt again: the tabs that waited for it (held_away) get their terminals.
+holder_successor_retry_tick :: proc() {
+	if hc.successor_retry == {} || hc.on || hc.lost || hc.handed do return
+	if time.tick_diff(hc.successor_retry, time.tick_now()) < 0 do return
+	hc.successor_retry = {}
+	hc.successor_retries += 1
+	hc.tried, hc.unreachable, hc.refused_secret, hc.adopt_done = false, false, false, false
+	for &s in state.open_sessions do for &t in s.tabs do if t.held_away != 0 {
+		if t.status == .Not_Started do t.held = t.held_away
+		t.held_away = 0
+	}
+	fmt.eprintln("Deckhand: session holder: the successor's reservation lapsed: attaching again")
+	holder_adopt_all()
 }
 
 // Some tab waits for an unreachable holder that kept its process at launch (Tab.held_away).

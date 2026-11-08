@@ -114,7 +114,7 @@ pi_integration_dir :: proc() -> string {
 // boundary as PI_DESK_CMD (the command a pi tab runs): whoever sets Deckhand's environment.
 pi_integration_from_env :: proc(test: bool) -> string {
 	if !test do return ""
-	p := os.get_env("PI_DESK_PI_INTEGRATION", context.temp_allocator)
+	p := hook_env(.Pi_Integration)
 	if p == "" || !filepath.is_abs(p) || path_kind(fmt.tprintf("%s/extensions.json", p)) != .File do return ""
 	return p
 }

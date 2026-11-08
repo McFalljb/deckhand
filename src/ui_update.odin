@@ -43,7 +43,8 @@ update_bar_parts :: proc() -> (msg: string, parts: [dynamic]Update_Part) {
 		append(&parts, Update_Part.Notes)
 	case .Ready:
 		msg = fmt.tprintf("Deckhand %s is ready", v)
-		if any_running() || jobs_any_running() do msg = fmt.tprintf("%s — restarting stops running sessions, shells and jobs", msg)
+		keeps := holder_keeps_sessions()
+		if quit_would_stop(keeps) || jobs_any_running() || keeps do msg = fmt.tprintf("%s — %s", msg, update_restart_effects(keeps))
 		append(&parts, Update_Part.Later, Update_Part.Install)
 	case .Failed:
 		msg = fmt.tprintf("Deckhand %s not installed: %s", v, upd.message)
@@ -108,7 +109,7 @@ update_tip :: proc(h: Hit_Update) -> (label, keys: string) {
 	case .Skip:    return "Do not offer this version again (Check for Updates… offers it again)", ""
 	case .Later:   return "Hide this until the next check finds a release", ""
 	case .Update:  return "Download it and check its signature; nothing is replaced until you restart", ""
-	case .Install: return "Replace Deckhand with the checked update and restart it (asks first while anything runs)", ""
+	case .Install: return "Replace Deckhand with the checked update and restart it (sessions kept running carry on; asks first if anything would stop)", ""
 	}
 	return "", ""
 }

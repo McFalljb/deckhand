@@ -13,6 +13,9 @@
 # binary, so `build/deckhand ARGS` works as before (build/pi-desk is the same wrapper,
 # for older scripts). PI_DESK_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
+# DECKHAND_RELEASE=1 (scripts/release.sh): the release or debug build without the test hooks
+# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no PI_DESK_* overrides,
+# no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
 set -eu
@@ -150,19 +153,28 @@ if [ "${PI_DESK_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-a
 fi
 OUT=build/deckhand
 DEFINES=""
+if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then
+  [ "$MODE" = test ] || [ "$MODE" = fake-app ] && { echo "build.sh: DECKHAND_RELEASE=1 is for release builds, not $MODE"; exit 1; }
+  DEFINES="-define:DECKHAND_TEST_HOOKS=false"
+fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
-  if [ ! -f build/pd_cef.a ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
-    clang -c $CEF_CFLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
+  # a release shim has no PI_DESK_CEF_SPARE or PI_DESK_CEF_NETLOG (src/test_hooks.odin);
+  # build/pd_cef.mode says which one build/pd_cef.a is
+  CEF_MODE=dev CEF_SHIM_FLAGS=$CEF_CFLAGS
+  if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DPD_RELEASE=1"; fi
+  if [ ! -f build/pd_cef.a ] || [ "$(cat build/pd_cef.mode 2>/dev/null)" != $CEF_MODE ] || [ src/native/cef_macos.m -nt build/pd_cef.a ] || [ src/native/cef_polish.inc -nt build/pd_cef.a ] || [ src/native/cef_polish_pure.h -nt build/pd_cef.a ] || [ vendor/cef/VERSION -nt build/pd_cef.a ]; then
+    clang -c $CEF_SHIM_FLAGS -I"$CEF" -fobjc-arc src/native/cef_macos.m -o build/pd_cef.o
     rm -f build/pd_cef.a
     ar rcs build/pd_cef.a build/pd_cef.o
+    echo $CEF_MODE > build/pd_cef.mode
   fi
   if [ ! -f build/cef_helper ] || [ src/native/cef_helper.c -nt build/cef_helper ] || [ vendor/cef/VERSION -nt build/cef_helper ]; then
     clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper
   fi
   OUT=build/Deckhand.app/Contents/MacOS/Deckhand
-  DEFINES="-define:PI_DESK_CEF=true"
+  DEFINES="$DEFINES -define:PI_DESK_CEF=true"
   mkdir -p build/Deckhand.app/Contents/MacOS
   # build/deckhand (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
   # bundle-app.sh rewrites it: a failed compile leaves the last working command in place
@@ -270,6 +282,8 @@ case "$MODE" in
     python3 tests/unit.py
     # the scenes runner's --changed selection (no app, no git)
     python3 -B tests/scenes_test.py -q
+    # every environment read names a known variable (test knobs go through hook_env)
+    python3 -I scripts/check-env-reads.py
     # the pi-desk CLI for Claude tabs (its tests share a fake environment: one thread)
     odin test tools/pi-desk-cli -out:build/pi-desk-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude

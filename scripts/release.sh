@@ -7,6 +7,7 @@
 #
 # Usage: scripts/release.sh --version X.Y.Z [--no-upload | --upload-only] [--key FILE]
 #                           [--repo OWNER/NAME [--allow-other-repo]] [--rotating-from OLDPUB]
+#                           [--prev vX.Y.Z | --skip-prev-updater]
 #   --version      the version; HEAD must be exactly the tag vX.Y.Z (git describe
 #                  --exact-match), already pushed to the release repository
 #   --no-upload    a dry run: everything into dist/, no GitHub calls at all
@@ -19,6 +20,10 @@
 #   --allow-other-repo
 #                  release to a repository that is not UPDATE_REPO (a fork, a test): installed
 #                  copies never look there
+#   --prev TAG     the current release whose updater must install the new zip
+#                  (tests/scripts/update-from-release.sh; default: the latest published one, by gh)
+#   --skip-prev-updater
+#                  leave that test out (only when there is no earlier release to test with)
 #   --rotating-from OLDPUB
 #                  the key-rotation bridge release only: this checkout's UPDATE_PUBLIC_KEY is the
 #                  NEW key, and the release is signed with the OLD key (--key OLDFILE, whose
@@ -27,7 +32,8 @@
 # Refuses, before building anything, unless: X.Y.Z (no pre-releases: the updater never offers
 # them); the worktree is clean (no changes, no untracked files); HEAD is exactly the tag vX.Y.Z;
 # src/update_key.odin has a real key; the key file's public half is that key. After the build:
-# the app's main executable holds UPDATE_PUBLIC_KEY and not the test key.
+# the app's main executable holds UPDATE_PUBLIC_KEY and not the test key, and no binary holds a test
+# hook (scripts/check-release-build.sh: env overrides, test mode, --print-token).
 #
 # Code signing, from the environment (never printed): MACOS_CERT_P12 (base64 of a .p12 with a
 #   "Developer ID Application" identity) and MACOS_CERT_PASSWORD: Developer ID signature,
@@ -41,7 +47,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0
+VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0 SKIP_PREV=0 PREV_TAG=""
 KEY=${PI_DESK_UPDATE_KEY_FILE:-$HOME/.config/pi-desk/update.key}
 # the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
 APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
@@ -56,6 +62,8 @@ while [ $# -gt 0 ]; do
     --repo) REPO=${2:?--repo needs OWNER/NAME}; shift 2 ;;
     --rotating-from) ROTATING_FROM=${2:?--rotating-from needs the old public key}; shift 2 ;;
     --allow-other-repo) ALLOW_OTHER_REPO=1; shift ;;
+    --prev) PREV_TAG=${2:?--prev needs a tag}; shift 2 ;;
+    --skip-prev-updater) SKIP_PREV=1; shift ;;
     -h|--help) sed -n '2,/^set -eu/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "release: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -145,7 +153,9 @@ if [ $PACKAGE = 1 ]; then
 # to read, never a reason to stop (./build.sh test above gates on 10x and 3x)
 python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
   { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
-./build.sh # release build with CEF; bundle-app.sh lays out and ad-hoc signs build/Deckhand.app
+# release build with CEF and without the test hooks (src/test_hooks.odin); bundle-app.sh lays out
+# and ad-hoc signs build/Deckhand.app
+DECKHAND_RELEASE=1 ./build.sh
 BUILT=build/$APP_NAME
 EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)
 EXE=$BUILT/Contents/MacOS/$EXE_NAME
@@ -159,6 +169,9 @@ if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
   echo "release: $BUILT has the update TEST key in it (a test build?)" >&2
   exit 1
 fi
+# no test hook in anything Deckhand runs: the env overrides, test mode, --print-token
+scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/pi-desk-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
+  { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
 [ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
   { echo "release: $BUILT has no CEF framework (a PI_DESK_NO_CEF build?)" >&2; exit 1; }
 
@@ -301,6 +314,13 @@ CHECK_CDHASH=$(codesign -d -vvv "$TMP/check/$APP_NAME" 2>&1 | sed -n 's/^CDHash=
   { echo "release: the zipped app's CDHash ($CHECK_CDHASH) is not the built one's ($CDHASH)" >&2; exit 1; }
 build/update-sign sign "$KEY" "$VERSION" "$DIST/$NAME.zip" "$CDHASH" "$DIST/$NAME.zip.sig"
 build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$NAME.zip" "$DIST/$NAME.zip.sig"
+
+# the new zip, installed by the current release's updater (its source at its tag: a release
+# binary has no fixtures to point it here; about 1-2 min). --skip-prev-updater: the first release.
+if [ $SKIP_PREV = 0 ]; then
+  tests/scripts/update-from-release.sh "$DIST/$NAME.zip" "$VERSION" ${PREV_TAG:+--prev "$PREV_TAG"} ||
+    { echo "release: the current release's updater did not install $DIST/$NAME.zip" >&2; exit 1; }
+fi
 
 echo "release: $DIST/$NAME.zip ($(du -h "$DIST/$NAME.zip" | cut -f1)), signature: $SIGNED, notarized: $NOTARIZED, update CDHash: $CDHASH"
 cat "$DIST/$NAME.zip.sha256"

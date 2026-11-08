@@ -50,6 +50,13 @@ hello_answer_table :: proc(t: ^testing.T) {
 	testing.expect(t, hello_answer(attached = true, wire_ok = true) == .Refuse_Attached)
 	testing.expect(t, hello_answer(attached = false, wire_ok = false) == .Refuse_Wire)
 	testing.expect(t, hello_answer(attached = true, wire_ok = false) == .Refuse_Wire)
+	// a successor is named (§7.2): only the HELLO with its secret, until it is used or expires
+	testing.expect(t, hello_answer(attached = false, wire_ok = true, reserved = true, secret_ok = false) == .Refuse_Secret)
+	testing.expect(t, hello_answer(attached = false, wire_ok = true, reserved = true, secret_ok = true) == .Welcome_Successor)
+	testing.expect(t, hello_answer(attached = true, wire_ok = true, reserved = true, secret_ok = true) == .Refuse_Attached)
+	testing.expect(t, hello_answer(attached = false, wire_ok = false, reserved = true, secret_ok = true) == .Refuse_Wire)
+	// no reservation: a secret, right or wrong, changes nothing
+	testing.expect(t, hello_answer(attached = false, wire_ok = true, reserved = false, secret_ok = true) == .Welcome)
 }
 
 @(test)
@@ -198,4 +205,15 @@ self_identity_reads :: proc(t: ^testing.T) {
 	testing.expect(t, sh.ok && sh.identifier == "com.apple.sh", "/bin/sh")
 	testing.expect(t, image_allowed(.Adhoc, own, sh) == .Wrong_Identity)
 	testing.expect(t, !code_identity_of_file("/nonexistent/deckhand-core").ok)
+}
+
+@(test)
+successor_secret_compare :: proc(t: ^testing.T) {
+	a := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
+	testing.expect(t, successor_secret_ok(a, a))
+	testing.expect(t, !successor_secret_ok(a, "00112233445566778899aabbccddeeff00112233445566778899aabbccddeefe"))
+	testing.expect(t, !successor_secret_ok(a, a[:62]))
+	testing.expect(t, !successor_secret_ok(a, ""))
+	testing.expect(t, !successor_secret_ok("", ""), "no secret is never a match")
+	testing.expect(t, !successor_secret_ok(a[:10], a[:10]), "only 256-bit secrets")
 }

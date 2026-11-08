@@ -710,3 +710,26 @@ update_backup_after_downgrade :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, !os.exists(backup), "removed at the second start, whatever version runs")
 }
+
+// What Restart to update says it does: only what is true (app tabs are among the programs that
+// stop; sessions waiting for an unreachable holder keep running there, never "stopped").
+@(test)
+update_effects_wording :: proc(t: ^testing.T) {
+	cases := []struct {
+		keeps, stops, jobs, away, browsers: bool,
+		want:                               string,
+	} {
+		{false, true, false, false, false, "Running sessions, shells and app tabs will be stopped."},
+		{false, true, true, false, true, "Running sessions, shells and app tabs will be stopped; running jobs will be stopped; browser pages will reload."},
+		{false, false, false, true, false, "Sessions waiting for the session holder keep running in it."},
+		{false, true, false, true, false, "Running sessions, shells and app tabs will be stopped; sessions waiting for the session holder keep running in it."},
+		{true, false, false, false, false, "Sessions carry on."},
+		{true, false, false, false, true, "Sessions carry on; browser pages will reload."},
+		{true, true, true, false, false, "Sessions kept running carry on; other tabs' programs will be stopped; running jobs will be stopped."},
+	}
+	for c, i in cases {
+		got := update_effects_text(c.keeps, c.stops, c.jobs, c.away, c.browsers)
+		testing.expectf(t, got == c.want, "case %d: %q", i, got)
+		testing.expectf(t, !strings.contains(got, "restart"), "case %d: %q", i, got)
+	}
+}

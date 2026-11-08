@@ -43,7 +43,7 @@ sock_runtime_dir :: proc(allocator := context.allocator) -> (dir: string, ok: bo
 }
 
 sock_runtime_dir_why :: proc(allocator := context.allocator) -> (dir, why: string) {
-	if d := os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator); d != "" {
+	if d := hook_env(.Runtime_Dir); d != "" {
 		dir = strings.clone(d, allocator)
 	} else {
 		if home_root == "" do return "", "no data dir to keep the runtime dir in"
@@ -57,7 +57,7 @@ sock_runtime_dir_why :: proc(allocator := context.allocator) -> (dir, why: strin
 // goes in it. "" = fine, else why not (temp allocator).
 runtime_dir_prepare :: proc(dir: string, need: int) -> string {
 	if len(dir) + need > SUN_PATH_MAX {
-		return fmt.tprintf("the runtime dir %s is too long: a socket in it would pass %d bytes (sun_path); use a shorter data dir or PI_DESK_RUNTIME_DIR", dir, SUN_PATH_MAX)
+		return fmt.tprintf("the runtime dir %s is too long: a socket in it would pass %d bytes (sun_path); use a shorter data dir", dir, SUN_PATH_MAX)
 	}
 	cdir := strings.clone_to_cstring(dir, context.temp_allocator)
 	posix.mkdir(cdir, posix.S_IRWXU) // EEXIST is fine: checked below
@@ -78,7 +78,7 @@ runtime_dir_prepare :: proc(dir: string, need: int) -> string {
 sock_legacy_runtime_dir :: proc(allocator := context.allocator) -> string {
 	uid := posix.getuid()
 	dir: string
-	if d := os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator); d != "" {
+	if d := hook_env(.Runtime_Dir); d != "" {
 		dir = strings.clone(d, allocator)
 	} else {
 		when ODIN_OS == .Darwin {

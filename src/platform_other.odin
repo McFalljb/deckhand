@@ -5,6 +5,7 @@ package main
 
 platform_wake :: proc() {}
 platform_alert :: proc(title, text: string) {}
+platform_hide_windows :: proc() {}
 cpu_seconds :: proc() -> f64 {return 0}
 window_raise_without_focus :: proc() {}
 window_send_back :: proc() {}
@@ -32,6 +33,8 @@ test_ime :: proc(kind: int, text: string, key_code := 0, alt := false, repeat :=
 platform_frame_drawn :: proc() {}
 platform_left_button :: proc() -> bool {return true}
 platform_clipboard_count :: proc() -> int {return 0}
+platform_clipboard_set_secret :: proc(text: string) -> int {return 0}
+platform_clipboard_clear_if :: proc(count: int) {}
 platform_run_later :: proc(p: proc()) {p()}
 test_beeps :: proc() -> int {return 0}
 test_panels :: proc() -> int {return 0}

@@ -110,6 +110,8 @@ Server :: struct {
 @(private = "file")
 srv: Server
 
+socket_running :: proc() -> bool {return srv.running}
+
 // Starts listening on <dir>/core.sock (dir default: sock_runtime_dir). The name is stable, so
 // tabs that outlive this process keep their DECKHAND_SOCKET (docs/plans/background-core.md
 // §5.1); a stale one is replaced (main.odin holds core.lock first). Main thread.

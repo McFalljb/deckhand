@@ -121,13 +121,38 @@ Releases are built and signed on the release signer's Mac, in one command:
 builds no releases. The script refuses, before it builds anything, unless the worktree is clean
 (no changes, no untracked files), HEAD is exactly the tag `vX.Y.Z`, `UPDATE_PUBLIC_KEY` is a
 real key and the key file's public half is that key. Then it runs `./build.sh test` and
-`./build.sh` (with CEF), checks that the app holds `UPDATE_PUBLIC_KEY` and not the test key,
-writes the version into every `Info.plist`, code-signs (ad hoc, or Developer ID and notarized
-when `MACOS_CERT_P12` and the rest are set), zips, unpacks the zip again to check its signature
-and CDHash against the built app, writes the `.sha256` and the updater's `.sig` from that
-bundle, and drafts the GitHub Release with `gh` (`--verify-tag`: the tag must already be pushed;
-a re-run replaces a draft's files but never a published release's). Last, it downloads the
-draft's `.sig` again and verifies it against the local zip. You check the draft and publish it.
+`DECKHAND_RELEASE=1 ./build.sh` (with CEF, **without the test hooks**: below), checks that the
+app holds `UPDATE_PUBLIC_KEY` and not the test key and that none of its executables holds a test
+hook (`scripts/check-release-build.sh`), writes the version into every `Info.plist`, code-signs
+(ad hoc, or Developer ID and notarized when `MACOS_CERT_P12` and the rest are set), zips, unpacks
+the zip again to check its signature and CDHash against the built app, and writes the `.sha256`
+and the updater's `.sig` from that bundle. Then **the current release's updater installs the new
+zip** (`tests/scripts/update-from-release.sh`, about 1-2 min, below). Last, it drafts the GitHub
+Release with `gh` (`--verify-tag`: the tag must already be pushed; a re-run replaces a draft's
+files but never a published release's), downloads the draft's `.sig` again and verifies it
+against the local zip. You check the draft and publish it.
+
+**No test hooks in a release** (docs/plans/background-core.md §5.3: a genuine binary must not be
+steerable by its environment). Every test and development knob goes through `hook_env()` in
+`src/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`PI_DESK_SCRIPT` and the
+rest), `PI_DESK_DATA_DIR`, `PI_DESK_RUNTIME_DIR`, the pi and Claude stand-ins, the updater's
+fixtures. `-define:DECKHAND_TEST_HOOKS=false` (what `DECKHAND_RELEASE=1 ./build.sh` passes)
+compiles the table out, so a release build uses the fixed data and runtime dirs, never enters
+test mode, and has no `--print-token` (Settings › Copy a control token mints a control token
+instead). `scripts/check-release-build.sh BINARY...` fails if any of those names, `--print-token`
+or the update test key is in a binary; `tests/scripts/release-checks.sh` builds `src` without
+hooks and runs it. A new knob goes into `HOOK_ENV`, never a bare `os.get_env("PI_DESK_…")`.
+After a release build, run `./build.sh` again before the scenes: they need the hooks.
+
+**The current release's updater** (`tests/scripts/update-from-release.sh ZIP VERSION [--prev
+TAG]`, release only). A published release binary cannot be pointed at a local zip (it has no
+fixtures, by design), so the test builds the updater from the current release's tag (the latest
+published one, by `gh`; `--prev` names it) in a temporary worktree, as the update scene builds it
+(`-define:PI_DESK_UPDATE_TEST=true`), offers it the new zip from `file://` fixtures with a `.sig`
+made with that tag's throwaway test key (the real `.sig` is verified by `update-sign verify`,
+the same code), and lets it download, check and swap the new bundle into a fake install. The
+installed bundle must be the new version, verify, and carry no test hooks. `release.sh
+--skip-prev-updater` leaves it out (only for a first release); `--prev TAG` passes a tag on.
 
 Each release:
 
@@ -161,8 +186,12 @@ The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
 holder only upgrades to a newer `holder_rev`, so **bump `HOLDER_REV`** in `src/holder/holder.odin`
 and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
-(tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. In a development build the
-palette's *Restart session holder* upgrades the running holder to the one you just built. The
+(tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. The app upgrades an attached
+holder older than the one it bundles by itself, once per run, after the launch's adopt
+(`holder_upgrade_tick`, `src/holder_restart.odin`): after an update that is the new app, attached
+as the named successor. In a development build the palette's *Restart session holder* upgrades
+the running holder to the one you just built. `PI_DESK_HOLDER_REV=N` (test builds) makes the app
+take its bundled holder for rev N (the keep-sessions scene's automatic upgrade). The
 re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
 `-define:DECKHAND_TEST_HOOKS=true`; never in a release).
 
@@ -349,7 +378,9 @@ the same socket with the integration's `desk` tools (PROTOCOL.md §8).
 
 For local scripts, `build/deckhand --print-token script DIR` prints one
 `export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` line, after which `build/deckhand --ctl '{"type":"get_state"}'`
-talks to the running app. See PROTOCOL.md §9.
+talks to the running app. See PROTOCOL.md §9. Development and test builds only: a release build
+has no `--print-token` (Releases, "No test hooks"); there the gear's **Copy a control token**
+puts the same line on the clipboard.
 
 ### Sessions
 

@@ -145,7 +145,7 @@ harness_run_argv :: proc(r: Harness_Row, action: Harness_Action, plan: Harness_R
 	if test {
 		argv = make([dynamic]string, context.temp_allocator)
 		if stand_in == "" {
-			append(&argv, "/bin/sh", "-c", "printf '%s\\n' 'Deckhand test mode: no PI_DESK_INSTALL_CMD; refusing to run the real install'; exit 127")
+			append(&argv, "/bin/sh", "-c", "printf '%s\\n' 'Deckhand test mode: no install stand-in; refusing to run the real install'; exit 127")
 			return argv, true
 		}
 		b := strings.builder_make(context.temp_allocator)
@@ -193,7 +193,7 @@ harness_run_start :: proc(id: string) -> string {
 		if !test_mode() do return "unit tests never run a real install" // a guard on the tests themselves
 	}
 	test := test_mode()
-	stand_in := os.get_env("PI_DESK_INSTALL_CMD", context.temp_allocator)
+	stand_in := hook_env(.Install_Cmd)
 	argv, refused := harness_run_argv(r, it.action, plan, test, stand_in)
 	if refused do test_mode_refused("install command")
 	id_ := new_id()

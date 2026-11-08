@@ -535,6 +535,29 @@ int pd_mac_left_button_down(void) { return ([NSEvent pressedMouseButtons] & 1) !
 
 long pd_mac_pasteboard_count(void) { return (long)[[NSPasteboard generalPasteboard] changeCount]; }
 
+// A secret onto the clipboard (Copy a control token): the text plus nspasteboard.org's concealed
+// and transient markers, so clipboard managers neither show nor keep it. The change count after.
+long pd_mac_pasteboard_set_secret(const char* text) {
+    NSPasteboard* pb = [NSPasteboard generalPasteboard];
+    [pb clearContents];
+    [pb setString:@(text) forType:NSPasteboardTypeString];
+    [pb setData:[NSData data] forType:@"org.nspasteboard.ConcealedType"];
+    [pb setData:[NSData data] forType:@"org.nspasteboard.TransientType"];
+    return (long)[pb changeCount];
+}
+
+// Clears the clipboard if nothing changed it since count (it still holds the secret).
+void pd_mac_pasteboard_clear_if(long count) {
+    NSPasteboard* pb = [NSPasteboard generalPasteboard];
+    if ((long)[pb changeCount] == count) [pb clearContents];
+}
+
+// Quit: every window out of sight before the session holder's handover and the final save (they
+// can take seconds; a frozen window under a beachball looks hung). The app keeps running.
+void pd_mac_hide_windows(void) {
+    for (NSWindow* w in [NSApp windows]) [w orderOut:nil];
+}
+
 // A modal alert with one Quit button (instance.odin: another Deckhand or pi-desk runs).
 void pd_mac_alert(const char* title, const char* text) {
     [NSApp activateIgnoringOtherApps:YES];

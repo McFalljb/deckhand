@@ -93,7 +93,7 @@ log_write :: proc(line: string) {
 emit_event :: proc(ev: Event) {
 	line := event_json(ev)
 	log_write(line)
-	if os.get_env("PI_DESK_LOG_COMMANDS", context.temp_allocator) != "" do fmt.println("[event]", line)
+	if hook_env(.Log_Commands) != "" do fmt.println("[event]", line)
 	autotest_on_event(ev)
 	persist_on_event(ev)
 	socket_publish(ev)

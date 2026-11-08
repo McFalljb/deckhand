@@ -129,7 +129,7 @@ claude_config_var :: proc(k: string) -> bool {
 // The environment is a Claude Code session's child's (CLAUDE_SESSION_PROOF).
 login_env_from_claude :: proc(env: []string) -> bool {
 	proof := CLAUDE_SESSION_PROOF
-	for k in proof do if _, found := env_lookup(env, k); found do return true
+	for k in proof do if _, found := env_lookup(env, k); found do return true // env-read-ok: k from the literal proof list
 	return false
 }
 
@@ -311,7 +311,7 @@ login_env_with_dirs :: proc(path: string, dirs: []string) -> string {
 // Where pi and its runtimes usually are. PI_DESK_PATH_DIRS replaces the list
 // (tests: never the machine's real /opt/homebrew/bin).
 login_env_dirs :: proc(home: string) -> []string {
-	if v, found := os.lookup_env("PI_DESK_PATH_DIRS", context.temp_allocator); found {
+	if v, found := hook_lookup(.Path_Dirs); found {
 		return strings.split(v, ":", context.temp_allocator)
 	}
 	dirs := make([dynamic]string, context.temp_allocator)
@@ -384,7 +384,7 @@ login_env_compose :: proc(inherited, shell: []string, shell_ok: bool, dirs: []st
 		k, _, _ := strings.partition(e, "=")
 		if k == "PATH" || claude_session_marker(k) do continue
 		if shell_ok && !login_env_skipped(k) {
-			if v, have := env_lookup(shell, k); have {
+			if v, have := env_lookup(shell, k); have { // env-read-ok: merging the login shell env by key
 				append(&out, fmt.tprintf("%s=%s", k, v)) // the shell's wins, as in a terminal
 				continue
 			}
@@ -395,8 +395,8 @@ login_env_compose :: proc(inherited, shell: []string, shell_ok: bool, dirs: []st
 		for e in shell {
 			k, eq, _ := strings.partition(e, "=")
 			if eq == "" || k == "PATH" || login_env_skipped(k) || claude_session_marker(k) do continue
-			if _, have := env_lookup(inherited, k); have do continue // replaced above
-			if _, dup := env_lookup(out[:], k); dup do continue
+			if _, have := env_lookup(inherited, k); have do continue // replaced above (env-read-ok: merging by key)
+			if _, dup := env_lookup(out[:], k); dup do continue // env-read-ok: merging by key
 			append(&out, e)
 		}
 		sp, _ := env_lookup(shell, "PATH")
@@ -451,11 +451,11 @@ login_env_fix :: proc(gui: bool, shell: string, dirs: []string, timeout: time.Du
 	if gui do env, result, _ = login_env_shell_merge(env, login_env_from_claude(inherited), shell, timeout, probe, dirs)
 	for e in inherited {
 		k, _, _ := strings.partition(e, "=")
-		if _, keep := env_lookup(env, k); !keep do os.unset_env(k)
+		if _, keep := env_lookup(env, k); !keep do os.unset_env(k) // env-read-ok: merging by key
 	}
 	for e in env {
 		k, _, v := strings.partition(e, "=")
-		if cur, have := env_lookup(inherited, k); have && cur == v do continue
+		if cur, have := env_lookup(inherited, k); have && cur == v do continue // env-read-ok: merging by key
 		os.set_env(k, v)
 	}
 	return result
@@ -474,7 +474,7 @@ login_env: struct {
 // main's call: the user's shell, the usual folders.
 login_env_startup :: proc() {
 	path := os.get_env("PATH", context.temp_allocator)
-	test_mode := os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != ""
+	test_mode := hook_env(.Script) != ""
 	env, _ := os.environ(context.temp_allocator)
 	gui := login_env_gui_launch(int(posix.getppid()), path, os.get_env("PI_DESK_GUI_LAUNCH", context.temp_allocator), test_mode, login_env_from_claude(env))
 	login_env.gui = gui

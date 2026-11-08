@@ -30,7 +30,7 @@ import "core:time"
 
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh)
 HOLDER_BIN :: "deckhand-core"
-HOLDER_REV :: 2 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 3 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 
 // The bundled binary: <exe dir>/../Helpers/deckhand-core (Deckhand.app), else build/deckhand-core
@@ -68,9 +68,9 @@ holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: strin
 	if err := os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User}); err != nil && !os.is_dir(dir) {
 		return "", false, fmt.tprintf("cannot make %s: %v", dir, err)
 	}
-	tmp := fmt.tprintf("%s/.%s.%d.tmp", dir, HOLDER_BIN, posix.getpid())
+	tmp := holder_install_tmp(dir)
 	ctmp := strings.clone_to_cstring(tmp, context.temp_allocator)
-	posix.unlink(ctmp) // ours from an earlier try (the pid in the name)
+	posix.unlink(ctmp) // ours from an earlier try (the pid and number in the name)
 	fd := posix.open(ctmp, {.WRONLY, .CREAT, .EXCL, .NOFOLLOW, .CLOEXEC}, {.IRUSR, .IWUSR, .IXUSR})
 	if fd < 0 do return "", false, fmt.tprintf("cannot write %s: %s", tmp, posix.strerror(posix.errno()))
 	rest := src
@@ -224,4 +224,12 @@ when ODIN_OS != .Darwin {
 		if len(run) + RUNTIME_HOLDER_NEED > SUN_PATH_MAX do return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket", run)
 		return holder_launch_direct(bin, run, data, env)
 	}
+}
+
+// A temp name of this call's own in dir: the pid and a per-process number (two threads may
+// install at once: the updater's relaunch helper and an upgrade).
+holder_install_tmp :: proc(dir: string) -> string {
+	@(static) seq: u64
+	n := sync.atomic_add(&seq, 1)
+	return fmt.tprintf("%s/.%s.%d.%d.tmp", dir, HOLDER_BIN, posix.getpid(), n)
 }

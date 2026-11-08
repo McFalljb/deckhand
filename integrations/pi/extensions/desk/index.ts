@@ -257,7 +257,7 @@ export default function (pi: ExtensionAPI) {
 		let buf = "";
 		const helloTimer = setTimeout(() => s.destroy(), HELLO_TIMEOUT_MS);
 		s.setEncoding("utf8");
-		s.on("connect", () => s.write(line({ id: helloId, type: "hello", token: envToken(ENV) })));
+		s.on("connect", () => s.write(line({ id: helloId, type: "hello", token: envToken(ENV) }))); // env-read-ok: ENV is DECKHAND_CONTROL_TOKEN
 		s.on("data", (chunk: string) => {
 			buf += chunk;
 			let nl: number;
@@ -588,7 +588,7 @@ export default function (pi: ExtensionAPI) {
 	}
 
 	pi.on("session_start", (_e, c) => {
-		if (c.mode !== "tui" || !deskSocket() || !envToken(ENV, true)) return;
+		if (c.mode !== "tui" || !deskSocket() || !envToken(ENV, true)) return; // env-read-ok: ENV is DECKHAND_CONTROL_TOKEN
 		ctx = c;
 		registerTools();
 		connect();

@@ -11,6 +11,14 @@
 #      0.1.2's signature does not match its zip: refused with a clear message, nothing
 #      installed.
 #   3. update-3.txt: the new version's second start removes the old bundle.
+#   4. update-4.txt: keep_sessions on, a pi tab and two counting shells in the session holder;
+#      Update to 0.1.3 and Restart to update: nothing asked, the quit hands the terminals over
+#      with a successor secret (GOODBYE{handover, successor}), and the relaunch helper
+#      (deckhand-core relaunch, --no-open in test mode) waits on successor.sock.
+#   4b. update-4b.txt: another copy of Deckhand meanwhile: refused (REFUSED{secret}), no second holder.
+#   5. update-5.txt: the "new app" (this test binary as 0.1.3) takes the secret from the helper,
+#      is welcomed as the named successor and adopts all three: screen hashes equal to the
+#      handover's and to a reference terminal fed every byte, the same pids, counters going on.
 # The app runs as its own test build (-define:PI_DESK_UPDATE_TEST=true, without the browser):
 # a release build has neither the test key nor the fixture variables compiled in.
 # Usage: tests/scripts/update.sh   (needs ./build.sh's libraries; builds build/update-sign)
@@ -22,7 +30,21 @@ rm -rf "$W" build/shots/update
 mkdir -p "$W" build/shots/update
 odin build tools/update-sign -out:build/update-sign
 BIN="$W/deckhand-update-test"
-odin build src -out:"$BIN" -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0
+odin build src -out:"$BIN" -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0 &
+# the session holder and the relaunch helper (holder_bin_find: next to the app's binary)
+odin build src/holder -out:"$W/deckhand-core" -minimum-os-version:14.0 &
+wait
+[ -x "$BIN" ] && [ -x "$W/deckhand-core" ] || { echo "update scene: the build failed"; exit 1; }
+codesign -f -s - -i dev.deckhand.core "$W/deckhand-core" 2>/dev/null
+RUN=$(mktemp -d "${TMPDIR:-/tmp}/dkup.XXXXXX") # the holder's socket path must fit in sun_path
+holders() { pgrep -f "deckhand-core hold --run $RUN" || true; }
+helpers() { pgrep -f "deckhand-core relaunch --pid .* --run $RUN" || true; }
+cleanup() {
+  cp "$RUN/holder.log" "$W/holder.log" 2>/dev/null || true
+  for p in $(holders) $(helpers); do kill -9 "$p" 2>/dev/null || true; done
+  rm -rf "$RUN"
+}
+trap cleanup EXIT
 KEY="$W/test.key"
 cp tests/update/test-key.txt "$KEY"
 chmod 600 "$KEY"
@@ -74,11 +96,11 @@ mkrelease() {
 mkapp "$W/install" 0.1.0
 mkrelease 0.1.1
 
-run() { # SCRIPT
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_DATA_DIR="$W/data" \
+run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the project]
+  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="$1" PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
     PI_DESK_UPDATE_URL="file://$W/rel/latest.json" PI_DESK_UPDATE_DOWNLOAD="file://$W/rel/download/" \
     PI_DESK_UPDATE_VERSION="$2" PI_DESK_UPDATE_APP="$W/install/Deckhand.app" \
-    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" "$PROJ" > "$3" 2>&1 || true
+    PI_DESK_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
 }
 fail=0
 check_log() { # LOG
@@ -113,8 +135,65 @@ ls -a "$W/install" | grep -q '^\.deckhand-update-' && { echo "a refused update l
 run tests/scripts/update-3.txt 0.1.1 "$W/run3.log"
 check_log "$W/run3.log"
 [ -e "$W/install/Deckhand.app.old-0.1.0" ] && { echo "the old bundle was not removed at the new version's second start"; fail=1; }
+
+# 4 and 5: an update that keeps the sessions
+GOOD=1 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
+run tests/scripts/update-4.txt 0.1.1 "$W/run4.log" ""
+check_log4() { # like check_log, but the run ends by the update's quit (no "done:")
+  grep -E "ASSERT FAILED|TIMEOUT|no element|unknown command|session holder|update relaunch" "$1" || true
+  if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$1"; then fail=1; fi
+}
+check_log4 "$W/run4.log"
+grep -q "update relaunch: .*(with the successor helper)" "$W/run4.log" || { echo "run 4: no relaunch helper"; fail=1; }
+v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/Deckhand.app/Contents/Info.plist")
+[ "$v" = 0.1.3 ] || { echo "run 4: the fake install was not swapped to 0.1.3 (it is $v)"; fail=1; }
+[ -n "$(holders)" ] || { echo "run 4: no session holder after the update's quit"; fail=1; }
+[ -n "$(helpers)" ] || { echo "run 4: no relaunch helper waiting"; fail=1; }
+[ -S "$RUN/successor.sock" ] || { echo "run 4: no successor.sock"; fail=1; }
+[ -f "$W/data/handover.json" ] || { echo "run 4: no handover.json"; fail=1; }
+# 4b: another copy (another executable, its own data dir) in the minute the holder waits
+mkdir -p "$W/other" "$W/data-other"
+cp "$BIN" "$W/other/deckhand-update-test"
+HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT=tests/scripts/update-4b.txt PI_DESK_SCRIPT_FAIL_FAST=1 PI_DESK_DATA_DIR="$W/data-other" PI_DESK_RUNTIME_DIR="$RUN" \
+  "$W/other/deckhand-update-test" > "$W/run4b.log" 2>&1 || true
+check_log "$W/run4b.log"
+grep -q "refused: secret" "$W/run4b.log" || { echo "run 4b: another Deckhand was not refused by the waiting holder"; fail=1; }
+[ "$(holders | wc -l | tr -d ' ')" = 1 ] || { echo "run 4b: not exactly one session holder: $(holders)"; fail=1; }
+[ -n "$(helpers)" ] || { echo "run 4b: the relaunch helper gave up"; fail=1; }
+run tests/scripts/update-5.txt 0.1.3 "$W/run5.log" ""
+check_log "$W/run5.log"
+grep -q "holder attached: previous handover, 3 terminals, as the named successor" "$W/run5.log" || { echo "run 5: not attached as the named successor"; grep "holder attached" "$W/run5.log"; fail=1; }
+python3 - "$W/run4.log" "$W/run5.log" "$ROOT/build/update-before.json" "$ROOT/build/update-after.json" <<'PY' || fail=1
+import json, re, sys
+log4, log5 = open(sys.argv[1]).read(), open(sys.argv[2]).read()
+handed = {m[0]: m[1] for m in re.findall(r"\[autotest\] handover (\d+) offset \d+ hash (\w+)", log4)}
+adopted = {m[0]: (m[1], m[2]) for m in re.findall(r"\[autotest\] adopted (\d+) hash (\w+) (exact|inexact)", log5)}
+refs = dict(re.findall(r"\[autotest\] adopted_ref (\d+) (\w+)", log5))
+fail = []
+if len(handed) != 3: fail.append(f"{len(handed)} terminals handed over, want 3 (the pi tab and 2 shells)")
+for term, h in handed.items():
+    if adopted.get(term) != (h, "exact"): fail.append(f"terminal {term}: handover hash {h}, adopted {adopted.get(term)}")
+    if refs.get(term) != "equal": fail.append(f"terminal {term}: against the reference: {refs.get(term)}")
+def tabs(p): # the session the scene opened: the one whose tabs are held
+    for s in json.load(open(p))["open_sessions"]:
+        if any(t.get("held") for t in s["tabs"]): return {t["title"]: t for t in s["tabs"]}
+    return {}
+before, after = tabs(sys.argv[3]), tabs(sys.argv[4])
+if len(before) != 3: fail.append(f"{len(before)} held tabs before the update, want 3")
+for title, t in before.items():
+    a = after.get(title, {})
+    if not t.get("pid") or a.get("pid") != t.get("pid") or a.get("status") != "running" or a.get("inexact"): fail.append(f"{title}: {t.get('pid')} -> {a}")
+if fail: sys.exit("run 5: " + "\n".join(fail))
+print(f"run 5: {len(handed)} terminals adopted exactly through the update, same pids")
+PY
+for _ in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(helpers)" ] && break; sleep 0.2; done
+[ -z "$(helpers)" ] || { echo "the relaunch helper still runs after the new app took the secret"; fail=1; }
+[ -e "$RUN/successor.sock" ] && { echo "successor.sock left behind"; fail=1; }
+# the secret (64 hex digits) is in no log
+cat "$W/run4.log" "$W/run4b.log" "$W/run5.log" "$RUN/holder.log" 2>/dev/null | grep -qE '[0-9a-f]{64}' && { echo "a 64-hex value (a secret?) in a log"; fail=1; }
+
 # no network: every URL curl got was a local file
 grep -q "https://api.github.com" "$W/data/commands.log" 2>/dev/null && { echo "a real URL was used"; fail=1; }
 
-if [ $fail = 1 ]; then echo "update scene failed (logs: $W/run1.log $W/run2.log $W/run3.log)"; exit 1; fi
+if [ $fail = 1 ]; then echo "update scene failed (logs: $W/run1.log ... $W/run5.log, $W/holder.log)"; exit 1; fi
 echo "update scene ok"

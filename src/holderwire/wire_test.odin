@@ -188,6 +188,10 @@ unknown_fields_and_kinds :: proc(t: ^testing.T) {
 	testing.expect_value(t, decode(frame(1, `{"wire": 1.5}`), .Hello, &h, context.temp_allocator), Msg_Error.Wrong_Type)
 	testing.expect_value(t, decode(frame(1, `{"wire": 1, "successor_secret": 5}`), .Hello, &h, context.temp_allocator), Msg_Error.Wrong_Type)
 	testing.expect_value(t, decode(frame(1, `[1]`), .Hello, &h, context.temp_allocator), Msg_Error.Bad_Json)
+	g: Goodbye
+	testing.expect_value(t, decode(frame(u8(Kind.Goodbye), `{"mode": "handover", "successor": 1}`), .Goodbye, &g, context.temp_allocator), Msg_Error.Wrong_Type)
+	testing.expect_value(t, decode(frame(u8(Kind.Goodbye), `{"mode": "handover", "successor": true}`), .Goodbye, &g, context.temp_allocator), Msg_Error.None)
+	testing.expect(t, g.successor)
 	testing.expect_value(t, decode(frame(1, `{"wire": 1`), .Hello, &h, context.temp_allocator), Msg_Error.Bad_Json)
 	testing.expect_value(t, decode(frame(2, `{}`), .Hello, &h, context.temp_allocator), Msg_Error.Wrong_Kind)
 	// nested: a WELCOME terminal without an offset
@@ -481,6 +485,7 @@ every_message_unmarshals :: proc(t: ^testing.T) {
 	check(t, .Release, Empty{})
 	check(t, .Exited, Exited{code = 2, signal = 0, offset = 77})
 	check(t, .Goodbye, Goodbye{mode = "shutdown"})
+	check(t, .Goodbye, Goodbye{mode = "handover", successor = true})
 	check(t, .Goodbye_Ack, Goodbye_Ack{terminals = {{id = 1, offset = 5}, {id = 2, offset = 6}}, successor_secret = "s"})
 	check(t, .Foreground, Empty{})
 	check(t, .Foreground_Is, Foreground_Is{pgid = 9})

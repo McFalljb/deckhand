@@ -475,13 +475,16 @@ workspace_browser_tabs :: proc(t: ^testing.T) {
 }
 
 
-// keep_sessions (Experimental, default off): the user's only, saved only when on, restored.
+// keep_sessions (on by default; test mode off unless a scene turns it on): the user's only,
+// saved once the user chose it (keep_sessions_default_not_saved), restored; a workspace.json
+// without it (never chosen, or written while it was Experimental and off by default) gets the
+// default.
 @(test)
 keep_sessions_setting :: proc(t: ^testing.T) {
 	context.allocator = ws_reset()
 	persist_init(tmp_dir("ks"))
-	testing.expect(t, !state.settings.keep_sessions, "off by default")
-	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`), "default not saved")
+	testing.expect(t, keep_sessions_default(), "on by default")
+	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`), "not chosen: not saved")
 	for k in ([]Caller_Kind{.Control, .Script, .Panel, .App}) {
 		r := run_command(Set_Keep_Sessions{on = true}, {kind = k, tab_id = 1})
 		testing.expectf(t, !r.ok && r.error == "not allowed for this caller", "%v: %s", k, r.error)
@@ -493,10 +496,42 @@ keep_sessions_setting :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(text, `"keep_sessions":true`), text)
 	testing.expect(t, strings.contains(state_json(), `"keep_sessions":true`), "in the snapshot")
 	run_command(Set_Keep_Sessions{on = false}, {kind = .UI})
-	testing.expect(t, !strings.contains(workspace_json(), `"keep_sessions"`))
+	off := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, strings.contains(off, `"keep_sessions":false`), off)
 	testing.expect_value(t, workspace_restore(text), "")
 	testing.expect(t, state.settings.keep_sessions, "restored on")
+	testing.expect_value(t, workspace_restore(off), "")
+	testing.expect(t, !state.settings.keep_sessions, "restored off: the user's off stays off")
+	old, _ := strings.replace(off, `"keep_sessions":false,`, "", 1, context.temp_allocator)
+	old, _ = strings.replace(old, `,"keep_sessions":false`, "", 1, context.temp_allocator)
+	testing.expect(t, !strings.contains(old, "keep_sessions"), old)
+	testing.expect_value(t, workspace_restore(old), "")
+	testing.expect(t, state.settings.keep_sessions, "absent: the default (on)")
 	c, ok := parse_command(`{"type":"set_keep_sessions","on":false}`, context.temp_allocator)
 	_, is := c.(Set_Keep_Sessions)
 	testing.expect(t, ok == "" && is, ok)
+}
+
+// keep_sessions is saved only once the user chose it: a run with the default on that never
+// changed it leaves no key, so a build whose default is off again (the default-on commit
+// reverted) reads it as off. A choice is kept across a default change either way.
+@(test)
+keep_sessions_default_not_saved :: proc(t: ^testing.T) {
+	context.allocator = ws_reset()
+	persist_init(tmp_dir("ksd"))
+	saved_default := keep_sessions_default_on
+	defer keep_sessions_default_on = saved_default
+	keep_sessions_default_on = true
+	testing.expect_value(t, workspace_restore(`{"v":1,"settings":{}}`), "")
+	testing.expect(t, state.settings.keep_sessions == keep_sessions_default(), "absent: the default")
+	untouched := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, !strings.contains(untouched, `"keep_sessions"`), untouched)
+	run_command(Set_Keep_Sessions{on = true}, {kind = .UI}) // the user turns it on (already on): a choice
+	chose_on := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, strings.contains(chose_on, `"keep_sessions":true`), chose_on)
+	keep_sessions_default_on = false // the default-off build
+	testing.expect_value(t, workspace_restore(untouched), "")
+	testing.expect(t, !state.settings.keep_sessions, "never chosen: off under the default-off build")
+	testing.expect_value(t, workspace_restore(chose_on), "")
+	testing.expect(t, state.settings.keep_sessions, "chosen on: stays on")
 }

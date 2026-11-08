@@ -9,7 +9,8 @@
 #    kept pi's bridge reconnects with its reconnect token (tokens.json). The palette's Restart
 #    session holder upgrades the holder in place (§7.3); the same processes (pids) run on and the
 #    counters kept counting. Then the app is killed (-9).
-# 3. relaunches after that crash: adopted from the tails (inexact), same pids; then "Quit
+# 3. relaunches after that crash, its bundled holder taken for a newer one: adopted from the tails
+#    (inexact), same pids, and the holder upgraded in place at attach, once; then "Quit
 #    Deckhand and Stop All Sessions": the holder must be gone after it.
 # 4. relaunches: fresh shells in a new holder, which is killed (-9): every tab says holder_lost.
 # A fake HOME, a fake pi, a temp data dir and a short runtime dir under $TMPDIR (never the user's).
@@ -37,9 +38,10 @@ SESS="$FAKE_HOME/.pi/agent/sessions/--$(printf '%s' "${PROJ#/}" | tr / -)--"
 mkdir -p "$PROJ" "$W/data" "$SESS"
 printf '{"type":"session","version":3,"id":"kkkk-1","cwd":"%s"}\n' "$PROJ" > "$SESS/2026-11-01T10-00-00-000Z_kkkk-1.jsonl"
 
-start() { # n: the app in the background (APP: its pid)
-  HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="tests/scripts/keep-sessions-$1.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
-    KEEP_BRIDGE_LOG="$W/bridge.log" PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-keep.py' \"\$@\"" build/deckhand > "$W/run$1.log" 2>&1 &
+start() { # n [VAR=value...]: the app in the background (APP: its pid)
+  n=$1; shift
+  env "$@" HOME="$FAKE_HOME" SHELL=/bin/sh PI_DESK_SCRIPT="tests/scripts/keep-sessions-$n.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
+    KEEP_BRIDGE_LOG="$W/bridge.log" PI_DESK_CMD="exec python3 -I '$ROOT/tests/scripts/fake-pi-keep.py' \"\$@\"" build/deckhand > "$W/run$n.log" 2>&1 &
   APP=$!
 }
 wait_log() { # n TEXT: until run n's log has TEXT (20 s)
@@ -60,6 +62,10 @@ start 1; finish 1
 [ -n "$(holders)" ] || { echo "no session holder running after run 1"; exit 1; }
 grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$W/data/workspace.json"; exit 1; }
 [ -f "$W/data/handover.json" ] || { echo "no handover.json"; exit 1; }
+# the window goes away before the handover's waits (no beachball over a frozen window at quit)
+h=$(grep -n "windows hidden" "$W/run1.log" | head -1 | cut -d: -f1)
+f=$(grep -n "\[autotest\] handover " "$W/run1.log" | head -1 | cut -d: -f1)
+[ -n "$h" ] && [ -n "$f" ] && [ "$h" -lt "$f" ] || { echo "run 1: the window was not hidden before the handover (hidden at line ${h:-none}, handover at ${f:-none})"; exit 1; }
 
 # 2: adopted exactly, the kept pi's bridge reconnects with its token; the holder restarted in
 #    place (Restart session holder); then the app is killed
@@ -102,7 +108,11 @@ grep -q "holder upgraded: ok true, adopted false, holder_rev" "$W/run2.log" || {
 [ ! -f "$W/data/handover.json" ] || { echo "handover.json left after it was read"; exit 1; }
 
 # 3: a crash restart: from the tails, inexact, the same processes; then Stop All Sessions
-start 3; finish 3
+# PI_DESK_HOLDER_REV: the app takes its bundled holder for a newer one, so it upgrades the running
+# holder by itself once the adopt is done (holder_upgrade_tick), as after an update
+start 3 PI_DESK_HOLDER_REV=99; finish 3
+grep -q "holder upgraded: ok true, adopted false, holder_rev" "$W/run3.log" || { echo "run 3: the older holder was not upgraded at attach"; exit 1; }
+[ "$(grep -c "holder upgraded:" "$W/run3.log")" = 1 ] || { echo "run 3: more than one automatic upgrade"; exit 1; }
 python3 - "$W/run3.log" "$ROOT/build/keep-sessions-before.json" "$ROOT/build/keep-sessions-crash.json" <<'PY'
 import json, re, sys
 log = open(sys.argv[1]).read()

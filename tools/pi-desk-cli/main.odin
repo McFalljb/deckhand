@@ -35,7 +35,7 @@ main :: proc() {
 		write_out  = proc(c: ^Ctx, s: string) {fd_write(1, s)},
 		write_err  = proc(c: ^Ctx, s: string) {fd_write(2, s)},
 		read_stdin = stdin_all,
-		getenv     = proc(k: string) -> string {return os.get_env(k, context.allocator)},
+		getenv     = proc(k: string) -> string {return os.get_env(k, context.allocator)}, // env-read-ok: the CLI getenv wrapper: its callers are checked
 		clock      = proc() -> u64 {return u64(time.tick_now()._nsec)},
 	}
 	code := run(&c, os.args[1:])

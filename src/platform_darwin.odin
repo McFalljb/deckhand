@@ -129,9 +129,12 @@ foreign pdplatform {
 	pd_mac_notify :: proc(title, body: cstring) ---
 	pd_mac_quiet :: proc() ---
 	pd_mac_alert :: proc(title, text: cstring) ---
+	pd_mac_hide_windows :: proc() ---
 	pd_mac_test_scale :: proc(scale: f64) ---
 	pd_mac_left_button_down :: proc() -> c.int ---
 	pd_mac_pasteboard_count :: proc() -> c.long ---
+	pd_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
+	pd_mac_pasteboard_clear_if :: proc(count: c.long) ---
 	pd_mac_activity :: proc(on: c.int) ---
 }
 
@@ -142,6 +145,7 @@ platform_activity :: proc(on: bool) {pd_mac_activity(on ? 1 : 0)}
 // (src/native/platform_macos.m).
 platform_quiet :: proc() {pd_mac_quiet()}
 // A modal alert with one Quit button (before the window is of use: instance.odin)
+platform_hide_windows :: proc() {pd_mac_hide_windows()}
 platform_alert :: proc(title, text: string) {pd_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator))}
 
 // Test mode, before sokol starts: every screen and window reports this backing scale
@@ -196,6 +200,8 @@ platform_frame_drawn :: proc() {pd_mac_place_lights()}
 // The left mouse button as the OS sees it now (not from our events).
 platform_left_button :: proc() -> bool {return pd_mac_left_button_down() != 0}
 platform_clipboard_count :: proc() -> int {return int(pd_mac_pasteboard_count())}
+platform_clipboard_set_secret :: proc(text: string) -> int {return int(pd_mac_pasteboard_set_secret(strings.clone_to_cstring(text, context.temp_allocator)))}
+platform_clipboard_clear_if :: proc(count: int) {pd_mac_pasteboard_clear_if(c.long(count))}
 platform_ime_caret_moved :: proc() {pd_mac_ime_caret_moved()}
 window_drag :: proc() {pd_mac_window_drag()}
 window_titlebar_double_click :: proc() {pd_mac_titlebar_double_click()}

@@ -16,6 +16,7 @@
 package trust
 
 import "core:c"
+import "core:mem"
 import "core:sys/posix"
 
 Mode :: enum {
@@ -114,18 +115,32 @@ image_allowed :: proc(mode: Mode, own, got: Code_Identity) -> Decision {
 // The holder's answer to a HELLO that passed peer_allowed (§5.3 "Core → holder", §5.7).
 // attached: another core is attached and has not missed pongs for PONG_TIMEOUT.
 // wire_ok: holderwire.negotiate found a common version.
-// Floors and successor secrets are not enforced yet (no versions to compare under ad hoc, and
-// PR D's updater is the first successor); an unknown or wrong secret is ignored, not trusted.
+// reserved: the last core named a successor (GOODBYE{handover, successor}, §7.2) and its secret
+// is neither used nor expired; secret_ok: this HELLO carries that secret (successor_secret_ok).
+// While reserved, only the successor is welcomed; without a reservation a secret, right or
+// wrong, changes nothing. Floors are not enforced yet (no versions to compare under ad hoc).
 Hello_Answer :: enum {
 	Welcome,
+	Welcome_Successor, // welcomed, and the secret is used up
 	Refuse_Wire,
 	Refuse_Attached,
+	Refuse_Secret,
 }
 
-hello_answer :: proc(attached, wire_ok: bool) -> Hello_Answer {
+hello_answer :: proc(attached, wire_ok: bool, reserved := false, secret_ok := false) -> Hello_Answer {
 	if !wire_ok do return .Refuse_Wire
 	if attached do return .Refuse_Attached
+	if reserved do return secret_ok ? .Welcome_Successor : .Refuse_Secret
 	return .Welcome
+}
+
+// A HELLO's successor secret against the holder's: both 64 hex digits (256 bits), compared in
+// constant time. An empty secret never matches.
+successor_secret_ok :: proc(want, got: string) -> bool {
+	if len(want) != 64 || len(got) != 64 do return false
+	diff: u8
+	for i in 0 ..< 64 do diff |= want[i] ~ got[i]
+	return diff == 0
 }
 
 // The app's side of the holder socket (§5.3 "Core → holder"): the holder that WELCOMEd must be
@@ -223,3 +238,8 @@ when ODIN_OS == .Darwin {
 }
 
 own_uid :: proc() -> u32 {return u32(posix.geteuid())}
+
+// Zeroes b in a way the compiler keeps (a secret's bytes once used: the successor secret).
+wipe :: proc(b: []u8) {
+	if len(b) > 0 do mem.zero_explicit(raw_data(b), len(b))
+}

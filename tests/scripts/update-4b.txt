@@ -1,0 +1,7 @@
+# Deckhand's own updates with sessions kept (tests/scripts/update.sh): another copy of Deckhand
+# starting while the holder waits for the named successor. The relaunch helper gives it no
+# secret (not the new app's executable), the holder refuses it, and it starts no holder of its own.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+wait 1000
+quit

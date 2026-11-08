@@ -356,12 +356,17 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
     // (PushMessaging below), since it needs GCM.
     // no warm spare renderer kept for the next navigation (~70-85 MB RSS);
     // PI_DESK_CEF_SPARE=1 keeps Chromium's default (the spike measured both)
+#ifndef PD_RELEASE // test and development knobs: not in a release build (src/test_hooks.odin)
     const char* spare = getenv("PI_DESK_CEF_SPARE");
-    if (!spare || strcmp(spare, "1") != 0) disable_features(cl, "SpareRendererForSitePerProcess");
+    if (!spare || strcmp(spare, "1") != 0)
+#endif
+        disable_features(cl, "SpareRendererForSitePerProcess");
     disable_features(cl, PD_CEF_DISABLED_FEATURES);
+#ifndef PD_RELEASE
     // tests/scripts/browser-netpolicy.sh: Chromium's own log of what it tries to reach
     const char* netlog = getenv("PI_DESK_CEF_NETLOG");
     if (netlog && netlog[0]) add_switch_value(cl, "log-net-log", netlog);
+#endif
     if (offline) {
         // Test mode: Chromium's own background services (Safe Browsing, GCM,
         // component and model downloads) reach Google even with the switches

@@ -117,7 +117,7 @@ SPECS := []Kind_Spec {
 		{name = "signal", type = .Int, required = true},
 		{name = "offset", type = .Int, required = true},
 	}},
-	{"GOODBYE", .Goodbye, false, .Json, {{name = "mode", type = .String, required = true}}},
+	{"GOODBYE", .Goodbye, false, .Json, {{name = "mode", type = .String, required = true}, {name = "successor", type = .Bool}}},
 	{"GOODBYE_ACK", .Goodbye_Ack, false, .Json, {
 		{name = "terminals", type = .Objects, required = true, items = ACK_TERMINAL},
 		{name = "successor_secret", type = .String, required = true},

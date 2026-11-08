@@ -998,7 +998,7 @@ period_limit_reached :: proc(now: i64) -> bool {
 // Test mode: only pi_path (a scene's fake) or PI_DESK_REAL_PI=1; never the real pi by search.
 job_pi_path :: proc() -> string {
 	if p := state.settings.pi_path; p != "" do return p
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
+	if test_mode() && hook_env(.Real_Pi) != "1" {
 		test_mode_refused("pi (jobs: no pi_path)")
 		return ""
 	}
@@ -1105,7 +1105,7 @@ job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	argv := job_argv(pi, fmt.tprintf("%s/sessions", jd), new_uuid(), j.def.model, job_atlas_prompt(), preamble, j.def.prompt, j.def.access)
 	env := make([dynamic]string, context.temp_allocator)
 	for k in ([]string{"HOME", "USER", "LANG", "TMPDIR", "PI_CODING_AGENT_DIR"}) {
-		if v := os.get_env(k, context.temp_allocator); v != "" do append(&env, fmt.tprintf("%s=%s", k, v))
+		if v := os.get_env(k, context.temp_allocator); v != "" do append(&env, fmt.tprintf("%s=%s", k, v)) // env-read-ok: k from the literal list above
 	}
 	append(&env, fmt.tprintf("PATH=%s", jobs_env_path()))
 	if n := notes_env_job(); n != "" do append(&env, n) // the user's own, else the main folder (folders.odin)

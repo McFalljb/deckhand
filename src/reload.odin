@@ -910,7 +910,7 @@ pkg_version :: proc(path: string) -> string {
 // at once (tests). The result is taken by reload_tick.
 @(private = "file")
 probe_again :: proc() {
-	if p := os.get_env("PI_DESK_PI_PACKAGE", context.temp_allocator); p != "" {
+	if p := hook_env(.Pi_Package); p != "" {
 		sync.lock(&probe.lock)
 		delete(probe.result, runtime.heap_allocator())
 		probe.result = strings.clone(p, runtime.heap_allocator())
@@ -918,7 +918,7 @@ probe_again :: proc() {
 		sync.atomic_store(&probe.done, true)
 		return
 	}
-	if os.get_env("PI_DESK_CMD", context.temp_allocator) != "" do return // pi is replaced (tests): no version
+	if hook_env(.Cmd) != "" do return // pi is replaced (tests): no version
 	if sync.atomic_load(&probe.running) do return
 	if rw.last_probe != {} && time.tick_since(rw.last_probe) < 10 * time.Second do return
 	rw.last_probe = time.tick_now()

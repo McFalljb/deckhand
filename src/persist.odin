@@ -537,6 +537,7 @@ workspace_json :: proc() -> string {
 	if st.agent_model != "" do ks(&w, "agent_model", st.agent_model)
 	if st.notify_off do kb(&w, "notify", false)
 	if st.tidy_off do kb(&w, "tidy_projects", false)
+	if st.keep_sessions do kb(&w, "keep_sessions", true)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
 	if st.bell_off != {} || st.bell_os_off {
 		k(&w, "bell")
@@ -677,6 +678,7 @@ workspace_restore :: proc(text: string) -> string {
 		if am, aok := st["agent_model"].(json.String); aok do run(Set_Agent_Model{model = am})
 		if no, nok := st["notify"].(json.Boolean); nok do run(Set_Notify{on = bool(no)})
 		if tp, tok := st["tidy_projects"].(json.Boolean); tok do run(Set_Tidy_Projects{on = bool(tp)})
+		if ks, kok := st["keep_sessions"].(json.Boolean); kok do run(Set_Keep_Sessions{on = bool(ks)})
 		claude_accounts_restore(st) // claude_accounts.odin
 		if lh, lok := enum_of(st, "last_harness", HARNESS_KEYS); lok do state.settings.last_harness = lh // harness.odin
 		if bo, bok := st["bell"].(json.Object); bok {

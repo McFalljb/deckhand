@@ -44,6 +44,13 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
 "settings":{"confirm":{"control":{"tab_close":"trusted"}},"confirm_close":{"shell":"always"},"theme":"ghostty","reduce_motion":true,"appearance":"light","text_size":"large"}}
 ```
 
+`<data dir>/tokens.json` (only with `keep_sessions` on, Experimental): the control socket's
+tokens of the tabs whose process runs in the session holder, so those processes can reconnect
+after Deckhand reopens (PROTOCOL.md §2). Keyed by holder terminal, sha256 hashes only, never a
+token. Mode `0600`, rewritten atomically on every mint and revoke, MAC'd with the holder's
+in-memory key (`src/macfile.odin`: a `deckhand-mac 1 tokens <hmac>` line, then the JSON): a file
+that does not verify is ignored whole.
+
 - `projects`: projects added by hand, renamed, selected, or holding a saved session. Projects
   derived from pi's store are found again by scanning; saved entries add names and bring back
   hand-added projects (on top, in saved order). A project whose folder is gone shows as missing.
@@ -151,7 +158,8 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   `restore_session` starts it there again while that folder is still a checkout of the project's
   repository (else in the project's folder).
 - `settings.agent_name`, `settings.agent_model` (when set), `settings.notify: false` and
-  `settings.tidy_projects: false` (when off). The tidy list's state (temp, missing, nesting) is
+  `settings.tidy_projects: false` (when off), `settings.keep_sessions: true` (when on; the
+  session holder's `tokens.json` is its own file, above). The tidy list's state (temp, missing, nesting) is
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
   ones do); restored as saved (`added` absent: a found row that nests), never selected one by

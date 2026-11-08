@@ -318,39 +318,68 @@ def kill_tree(pid):
             pass
 
 
-# What ./build.sh and ./build.sh fake-app build from (tests/scripts/fresh-build.sh checks the app's
-# part too): when every file here is older than the output, the build is skipped
+# What ./build.sh and ./build.sh fake-app build from (build.sh, bundle-app.sh, the #load-ed files;
+# tests/scripts/fresh-build.sh checks most of it too): the build is skipped when every file here is
+# older than the output and the list of files is the one the last build saw (a deleted or renamed
+# file changes it: build/<output>.inputs)
 APP_INPUTS = ["src", "tools/pi-desk-cli", "integrations/claude-code", "integrations/pi/extensions",
               "integrations/pi/lib", "integrations/pi/skills", "integrations/pi/extensions.json",
-              "integrations/pi/package.json", "build.sh", "scripts/bundle-app.sh", "scripts/fetch-cef.sh",
-              "scripts/check-minos.sh", "vendor/cef/VERSION", "vendor/libghostty-vt", "vendor/clay/clay.h",
-              "vendor/tree-sitter"]
+              "integrations/pi/package.json", "integrations/pi/README.md", "build.sh", "scripts/bundle-app.sh",
+              "scripts/fetch-cef.sh", "scripts/check-minos.sh", "scripts/entitlements", "assets", "vendor",
+              "docs/GUIDE.md", "docs/PROTOCOL.md", "tests/markdown"]
 FAKE_APP_INPUTS = ["tests/fake-app", "build.sh"]
+# built into vendor/sokol-odin by build.sh itself: not inputs
+GENERATED = ("_metal_release.a",)
+
+
+def input_files(inputs):
+    """Every file under inputs (relative paths, sorted; *_test.odin left out: not in the binary)."""
+    out = []
+    for top in inputs:
+        path = os.path.join(ROOT, top)
+        if os.path.isfile(path):
+            out.append(top)
+            continue
+        for d, dirs, fs in os.walk(path):
+            dirs[:] = [x for x in dirs if x != ".git"]
+            out += [os.path.relpath(os.path.join(d, f), ROOT) for f in fs
+                    if not f.endswith("_test.odin") and not f.endswith(GENERATED) and f != ".DS_Store"]
+    return sorted(out)
+
+
+def list_file(out):
+    return os.path.join(ROOT, "build", os.path.basename(out) + ".inputs")
 
 
 def stale_input(out, inputs):
-    """The first input newer than out ("" when out is fresh), or why out needs building."""
+    """Why out needs building: the first input newer than it, a changed file list, or no out; ""
+    when out is fresh."""
     try:
         built = os.stat(os.path.join(ROOT, out)).st_mtime
     except OSError:
         return f"no {out}"
-    for top in inputs:
-        path = os.path.join(ROOT, top)
-        if os.path.isfile(path):
-            if os.stat(path).st_mtime > built:
-                return top
-            continue
-        for d, _, fs in os.walk(path):
-            for f in fs:
-                if f.endswith("_test.odin"):
-                    continue
-                p = os.path.join(d, f)
-                try:
-                    if os.stat(p).st_mtime > built:
-                        return os.path.relpath(p, ROOT)
-                except OSError:
-                    pass
+    files = input_files(inputs)
+    try:
+        last = open(list_file(out)).read().split("\n")
+    except OSError:
+        last = None
+    if last != files:
+        return "its list of source files changed" if last is not None else "no record of its sources"
+    for f in files:
+        try:
+            if os.stat(os.path.join(ROOT, f)).st_mtime > built:
+                return f
+        except OSError:
+            return f
     return ""
+
+
+def record_inputs(out, inputs):
+    try:
+        with open(list_file(out), "w") as fh:
+            fh.write("\n".join(input_files(inputs)))
+    except OSError:
+        pass
 
 
 def mem_need(s):
@@ -557,12 +586,15 @@ def main():
     a.cef_jobs = a.cef_jobs or (3 if cpus >= 10 else 1)
     if not a.no_build:
         b0 = time.monotonic()
-        stale = [(cmd, why) for cmd, why in (("./build.sh", stale_input("build/deckhand", APP_INPUTS)),
-                                             ("./build.sh fake-app", stale_input("build/fake-app", FAKE_APP_INPUTS)))
-                 if why or a.build]
-        for cmd, why in stale:
+        builds = (("./build.sh", "build/deckhand", APP_INPUTS), ("./build.sh fake-app", "build/fake-app", FAKE_APP_INPUTS))
+        stale = [(cmd, out, ins, why) for cmd, out, ins in builds for why in [stale_input(out, ins)] if why or a.build]
+        for cmd, out, ins, why in stale:
+            files_before = input_files(ins)
             if subprocess.run(cmd.split(), stdout=subprocess.DEVNULL if not GHA else None).returncode != 0:
                 sys.exit(f"scenes: {cmd} failed")
+            if input_files(ins) == files_before:  # nothing came or went during the build
+                record_inputs(out, ins)
+        stale = [(cmd, why) for cmd, _, _, why in stale]
         if stale:
             print(f"scenes: built in {time.monotonic() - b0:.0f} s ({'; '.join(c + ': ' + (w or '--build') for c, w in stale)})")
         else:

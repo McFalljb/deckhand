@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Tests for tests/scenes.py's --changed selection (./build.sh test runs it; no git, no app)."""
+"""Tests for tests/scenes.py: the --changed selection and the build freshness check (./build.sh test
+runs it; no git, no app). Run with python3 -B (no __pycache__ in tests/)."""
 import os
 import sys
 import unittest
@@ -50,6 +51,57 @@ class CoreSelection(unittest.TestCase):
     def test_terminal_socket_and_persistence_select_everything(self):
         for f in ("src/term.odin", "src/pty_posix.odin", "src/socket.odin", "src/persist.odin"):
             self.assertTrue(any(scenes.fnmatch.fnmatchcase(f, g) for g in self.special["@all"]), f)
+
+
+class Freshness(unittest.TestCase):
+    """The build is skipped only when nothing it is built from changed, was added or was deleted."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="scenes-test-")
+        self.root, scenes.ROOT = scenes.ROOT, self.tmp
+        os.makedirs(os.path.join(self.tmp, "src"))
+        os.makedirs(os.path.join(self.tmp, "build"))
+        for f in ("src/a.odin", "src/b.odin"):
+            self.write(f, "x", -100)
+        self.write("build/out", "built", -50)
+        scenes.record_inputs("build/out", ["src"])
+
+    def tearDown(self):
+        import shutil
+        scenes.ROOT = self.root
+        shutil.rmtree(self.tmp)
+
+    def write(self, rel, text, age):
+        import time
+        p = os.path.join(self.tmp, rel)
+        with open(p, "w") as fh:
+            fh.write(text)
+        t = time.time() + age
+        os.utime(p, (t, t))
+
+    def test_fresh(self):
+        self.assertEqual(scenes.stale_input("build/out", ["src"]), "")
+
+    def test_a_newer_file(self):
+        self.write("src/b.odin", "y", 0)
+        self.assertEqual(scenes.stale_input("build/out", ["src"]), "src/b.odin")
+
+    def test_a_deleted_file(self):
+        os.remove(os.path.join(self.tmp, "src/b.odin"))
+        self.assertNotEqual(scenes.stale_input("build/out", ["src"]), "")
+
+    def test_an_old_file_added(self):  # e.g. a checkout that restores a file with its old date
+        self.write("src/c.odin", "z", -100)
+        self.assertNotEqual(scenes.stale_input("build/out", ["src"]), "")
+
+    def test_a_new_test_file_does_not_count(self):
+        self.write("src/c_test.odin", "t", 0)
+        self.assertEqual(scenes.stale_input("build/out", ["src"]), "")
+
+    def test_vendor_and_assets_are_inputs(self):
+        for top in ("vendor", "assets", "scripts/entitlements", "docs/GUIDE.md"):
+            self.assertIn(top, scenes.APP_INPUTS)
 
 
 if __name__ == "__main__":

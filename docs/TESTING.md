@@ -47,8 +47,9 @@ scenes. What a narrower `--changed` leaves out is caught after the merge, by the
 (`scenes-full.yml`), or by `--all` before a release; run `--all` yourself when a change is broad
 and its scenes are not obvious.
 
-`./build.sh scenes` builds (`./build.sh`, `./build.sh fake-app`, each only when its output is older
-than a file it is built from; `--build` builds anyway) and then runs `tests/scenes.py` with the
+`./build.sh scenes` builds (`./build.sh`, `./build.sh fake-app`, each only when a file it is built
+from is newer than its output or was added or deleted since its last build: `build/<output>.inputs`;
+`--build` builds anyway) and then runs `tests/scenes.py` with the
 same arguments. Other selections: scene names
 (`./build.sh scenes menus jobs`), `--area src/native` (the scenes covering a file or folder),
 `--required` (what CI gates pull requests on), `--list` (what would run and why, without

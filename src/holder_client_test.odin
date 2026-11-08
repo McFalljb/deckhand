@@ -156,3 +156,38 @@ held_ids_persist :: proc(t: ^testing.T) {
 	x.pty.held = 0 // never a RELEASE from a test
 	x.running = false
 }
+
+// A holder socket that answers but gives no WELCOME (refused, another wire after an update, too
+// slow, a bad TAIL) means a holder runs there with its sessions: no second holder is launched
+// (restored tabs would start duplicates of what it runs); the app runs without one, and says so.
+@(test)
+holder_answered_no_second_launch :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	toast_clear()
+	testing.expect(t, !holder_client_start(), "attached to something")
+	files, _ := os.read_all_directory_by_path(f.dir, context.temp_allocator)
+	for x in files do testing.expectf(t, !holder_sock_name_ok(x.name) || x.name == "holder-0000fa01.sock", "a second holder: %s", x.name)
+	testing.expect(t, os.exists(f.path), "the answering holder's socket is kept")
+	testing.expect(t, strings.contains(toast.text, "session holder"), toast.text)
+	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+}
+
+// A dead holder's socket (nobody listening: kill -9) is removed, and with keep_sessions off it
+// does not use up the one start of this run: turning the setting on later still starts one.
+@(test)
+holder_stale_socket_removed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{no_listen = true}
+	fake_holder_start(t, &f, keep = false)
+	defer fake_holder_stop(&f)
+	stale := fmt.tprintf("%s/holder-0000dead.sock", f.dir)
+	fd, ok := sock_listen(stale)
+	testing.expect(t, ok)
+	sock_close(fd) // the file stays; a connect is refused
+	testing.expect(t, !holder_client_start())
+	testing.expect(t, !os.exists(stale), "the dead holder's socket is removed")
+	testing.expect(t, !hc.tried, "the start is not used up")
+}

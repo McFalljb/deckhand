@@ -128,9 +128,30 @@ holder_client_start :: proc() -> bool {
 	if why != "" do return false
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
+	answered := false
+	for path in socks {
+		switch holder_connect(path) {
+		case .Welcomed:
+			hc.tried = true
+			return true
+		case .Answered:
+			answered = true
+		case .Stale:
+			fmt.eprintln("Deckhand: session holder: removing a dead holder's socket", path)
+			sock_unlink(path)
+		}
+	}
+	switch trust.holder_start(answered, state.settings.keep_sessions) {
+	case .Without:
+		return false // only dead holders' sockets (removed): tried again once the setting is on
+	case .Warn_Running:
+		hc.tried = true
+		fmt.eprintln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
+		toast_show("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
+		return false
+	case .Launch:
+	}
 	hc.tried = true
-	for path in socks do if holder_connect(path) do return true
-	if !state.settings.keep_sessions do return false
 	bin := holder_bin_find(context.temp_allocator)
 	if bin == "" {
 		fmt.eprintln("Deckhand: session holder: deckhand-core not found; sessions stop at quit")
@@ -151,7 +172,7 @@ holder_client_start :: proc() -> bool {
 	for time.tick_since(deadline) < HOLDER_WAIT {
 		outer: for path in holder_socks(run) {
 			for b in before do if b == path do continue outer
-			if holder_connect(path) do return true
+			if holder_connect(path) == .Welcomed do return true
 		}
 		time.sleep(20 * time.Millisecond)
 	}
@@ -181,21 +202,27 @@ set_timeouts :: proc(fd: Sock_Fd) {
 	posix.setsockopt(fd, posix.SOL_SOCKET, .SNDTIMEO, &tv, size_of(tv))
 }
 
-// Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. False (and
-// nothing kept) on any failure: refused, stale socket, a bad or lying WELCOME.
+Connect_Result :: enum {
+	Welcomed, // attached
+	Answered, // something listens there but gave no usable WELCOME: a holder runs (trust.holder_start)
+	Stale, // nobody listens (a holder killed with -9: the holder unlinks only its own socket at exit)
+}
+
+// Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
+// Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
 @(private = "file")
-holder_connect :: proc(path: string) -> bool {
-	fd, ok := sock_connect(path)
-	if !ok do return false // stale (the holder unlinks only its own socket at exit)
+holder_connect :: proc(path: string) -> Connect_Result {
+	fd, ok, refused := sock_connect_why(path)
+	if !ok do return refused ? .Stale : .Answered // not refused (EACCES, a race): not known dead
 	peer := trust.peer_read(fd)
 	if d := trust.peer_allowed(.Adhoc, trust.own_uid(), peer); d != .Allow {
 		fmt.eprintln("Deckhand: session holder: refused its peer:", d)
 		sock_close(fd)
-		return false
+		return .Answered
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer
-	fail :: proc(why: string) -> bool {
+	fail :: proc(why: string) -> Connect_Result {
 		fmt.eprintln("Deckhand: session holder:", why)
 		sock_close(hc.fd)
 		hc.fd = -1
@@ -203,7 +230,7 @@ holder_connect :: proc(path: string) -> bool {
 		clear(&hc.held)
 		hw.stream_destroy(&hc.rx)
 		hc.rx = {}
-		return false
+		return .Answered
 	}
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE})
@@ -262,7 +289,7 @@ holder_connect :: proc(path: string) -> bool {
 	hc.on, hc.lost, hc.handed, hc.stop = true, false, false, false
 	hc.reader = thread.create_and_start(holder_reader)
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
-	return true
+	return .Welcomed
 }
 
 // The next whole frame during the handshake (main thread, before the reader runs).
@@ -602,6 +629,19 @@ holder_client_stop :: proc() {
 	if hc.fd >= 0 do sock_close(hc.fd)
 	hc.fd = -1
 	hc.on = false
+}
+
+// Forgets the connection and everything held (unit tests, between fake holders).
+holder_client_forget :: proc() {
+	holder_client_stop()
+	for _, h in hc.held do held_free(h)
+	delete(hc.held)
+	delete(hc.ack)
+	delete(hc.dying)
+	delete(hc.instance)
+	delete(hc.previous)
+	hw.stream_destroy(&hc.rx)
+	hc = Holder_Client{fd = -1}
 }
 
 // ---- boot time (handover.json's `boot`) ----

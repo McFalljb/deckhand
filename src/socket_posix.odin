@@ -149,15 +149,24 @@ sock_accept :: proc(fd: Sock_Fd, timeout_ms: int) -> (Sock_Fd, bool) {
 }
 
 sock_connect :: proc(path: string) -> (Sock_Fd, bool) {
-	addr, ok := sock_addr(path)
-	if !ok do return -1, false
-	fd := sock_new()
-	if fd < 0 do return -1, false
+	fd, ok, _ := sock_connect_why(path)
+	return fd, ok
+}
+
+// sock_connect, and whether it failed because nobody listens there (ECONNREFUSED: a stale
+// socket; ENOENT: gone already).
+sock_connect_why :: proc(path: string) -> (fd: Sock_Fd, ok, refused: bool) {
+	addr, aok := sock_addr(path)
+	if !aok do return -1, false, false
+	fd = sock_new()
+	if fd < 0 do return -1, false, false
 	if posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) != .OK {
+		e := posix.errno()
+		refused = e == .ECONNREFUSED || e == .ENOENT
 		posix.close(fd)
-		return -1, false
+		return -1, false, refused
 	}
-	return fd, true
+	return fd, true, false
 }
 
 sock_wait_readable :: proc(fd: Sock_Fd, timeout_ms: int) -> bool {

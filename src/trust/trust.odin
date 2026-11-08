@@ -91,6 +91,25 @@ welcome_peer_ok :: proc(at_connect: Peer, welcome_pid: i64) -> Decision {
 	return .Allow
 }
 
+// The app at launch, after trying every holder socket in the runtime dir (§6, §7.2): whether
+// to launch a holder. answered: some socket took the connection (whatever came after: REFUSED,
+// another wire after an update, no WELCOME in time, a bad TAIL), so a holder runs there and
+// keeps its sessions. A second holder would leave them invisible while restored tabs start
+// duplicates of them (pi --session on the same files), and both would number terminals from 1:
+// so never, and the app runs without a holder and says so. Sockets nobody listens on (a holder
+// killed with -9) are stale: they do not count.
+Holder_Start :: enum {
+	Launch, // none runs: launch one
+	Without, // none runs and keep_sessions is off: nothing to do
+	Warn_Running, // one runs but did not WELCOME: no holder this run, warn
+}
+
+holder_start :: proc(answered, keep_sessions: bool) -> Holder_Start {
+	if answered do return .Warn_Running
+	if !keep_sessions do return .Without
+	return .Launch
+}
+
 // Whether a handover.json whose MAC verified describes the holder this launch attached to (§7.2,
 // §7.7). Anything else is a crash restart (tails, inexact): a file from another holder run (its
 // instance), another boot, a newer writer (min_reader), or a holder that says the last core did

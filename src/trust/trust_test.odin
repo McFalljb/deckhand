@@ -104,3 +104,20 @@ peer_read_socketpair :: proc(t: ^testing.T) {
 	testing.expect(t, peer_allowed(.Adhoc, own_uid(), p) == .Allow)
 	testing.expect(t, peer_still(p, peer_read(fds[0])) == .Allow)
 }
+
+@(test)
+holder_start_table :: proc(t: ^testing.T) {
+	cases := []struct {
+		answered, keep: bool,
+		want:           Holder_Start,
+	} {
+		{false, true, .Launch},
+		{false, false, .Without},
+		{true, true, .Warn_Running}, // a holder runs: never a second one
+		{true, false, .Warn_Running}, // its sessions are from an earlier run: still say so
+	}
+	for c, i in cases {
+		got := holder_start(c.answered, c.keep)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
+	}
+}

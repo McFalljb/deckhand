@@ -5,7 +5,8 @@ package main
 // its environment, so a release build must not be steerable by it. scripts/release.sh builds with
 // -define:DECKHAND_TEST_HOOKS=false (DECKHAND_RELEASE=1 ./build.sh) and then checks the binaries
 // for every name below, and for any PI_DESK_ name not in its ALLOWED list (scripts/check-release-build.sh):
-// none may be left. The CEF shim's knobs (PI_DESK_CEF_SPARE, PI_DESK_CEF_NETLOG) are compiled out
+// none may be left; scripts/check-env-reads.py (run by it and by ./build.sh test) refuses any other
+// environment read of a name not on its list, or not a literal. The CEF shim's knobs (PI_DESK_CEF_SPARE, PI_DESK_CEF_NETLOG) are compiled out
 // with -DPD_RELEASE=1 (build.sh).
 //
 // With the hooks off:

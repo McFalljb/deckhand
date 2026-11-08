@@ -14,6 +14,12 @@ NAMES=$(sed -n 's/^[[:space:]]*\.[A-Za-z_]*[[:space:]]*= "\(PI_DESK_[A-Z_]*\)",*
 n=$(printf '%s\n' "$NAMES" | grep -c PI_DESK_ || true)
 [ "$n" -ge 20 ] || { echo "check-release-build: found only $n hook names in src/test_hooks.odin (HOOK_ENV moved?)" >&2; exit 1; }
 TEST_PUB=$(sed -n 's/^.*UPDATE_TEST_PUBLIC_KEY :: "\(.*\)"$/\1/p' "$ROOT/src/update_key.odin")
+# the source side: every environment read names a known variable, a literal (no "PI_DESK_%s"
+# built at run time could pass the allowlist below unseen); test knobs go through hook_env
+python3 -I "$ROOT/scripts/check-env-reads.py" >/dev/null || { echo "check-release-build: scripts/check-env-reads.py failed (above)" >&2; exit 1; }
+# the holder's own test hooks (src/holder/keeper.odin, DECKHAND_TEST_HOOKS): never in a release holder
+NAMES="$NAMES
+DECKHAND_HOLDER_HOOKS"
 
 # The only PI_DESK_ names a release binary may hold. None is read to steer what Deckhand trusts,
 # where its data lives or what it runs; each is one of:

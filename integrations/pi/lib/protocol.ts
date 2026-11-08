@@ -42,7 +42,7 @@ export function deckhandEnv(name: string): string | undefined {
 	return slots()[envKey(name)] || undefined;
 }
 /** Tests: forget every DECKHAND_* value kept in memory. */
-export function forgetDeckhandEnv(names: readonly string[] = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR", "DECKHAND_ACT_TIMEOUT_MS"]): void {
+export function forgetDeckhandEnv(names: readonly string[] = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR"]): void {
 	for (const n of names) slots()[envKey(n)] = undefined;
 }
 

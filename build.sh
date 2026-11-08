@@ -282,6 +282,8 @@ case "$MODE" in
     python3 tests/unit.py
     # the scenes runner's --changed selection (no app, no git)
     python3 -B tests/scenes_test.py -q
+    # every environment read names a known variable (test knobs go through hook_env)
+    python3 -I scripts/check-env-reads.py
     # the pi-desk CLI for Claude tabs (its tests share a fake environment: one thread)
     odin test tools/pi-desk-cli -out:build/pi-desk-cli-tests -define:ODIN_TEST_THREADS=1 -define:ODIN_TEST_TRACK_MEMORY=false
     build_claude

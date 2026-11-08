@@ -10,6 +10,7 @@
 #   test hooks (src/test_hooks.odin): src built with -define:DECKHAND_TEST_HOOKS=false holds no
 #   hook name, --print-token or test key (scripts/check-release-build.sh passes it), binaries
 #   planted with a single hook string, or any PI_DESK_ name the check does not allow, fail it;
+#   the source lint (scripts/check-env-reads.py) refuses an env read of a built or unknown name;
 #   release.sh builds with DECKHAND_RELEASE=1 and runs the check; build.sh refuses it for tests
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
 set -eu
@@ -133,6 +134,22 @@ done
 cp /usr/bin/true "$H/planted"
 printf '\001PI_DESK_SOCKET\001PI_DESK_GUI_LAUNCH\001PI_DESK_*\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowed PI_DESK_ names pass" || bad "an allowed name refused: $(cat "$H/out.txt")"
+cp /usr/bin/true "$H/planted"
+printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"
+# the source lint (scripts/check-env-reads.py): a name built at run time, or an unknown one, fails
+L="$H/lint"
+lint() { # WHAT WANT(pass|fail) LINE
+  rm -rf "$L"; mkdir -p "$L/src" "$L/scripts"
+  printf 'package main\nf :: proc() {\n\t%s\n}\n' "$3" > "$L/src/x.odin"
+  if python3 -I scripts/check-env-reads.py --root "$L" >"$H/out.txt" 2>&1; then got=pass; else got=fail; fi
+  [ "$got" = "$2" ] && ok "env lint: $1 ($2)" || bad "env lint: $1: $got, want $2: $(cat "$H/out.txt")"
+}
+lint "a built name" fail 'v := os.get_env(fmt.tprintf("PI_DESK_%s", x))'
+lint "an unknown literal" fail 'v := os.get_env("PI_DESK_NEW_KNOB")'
+lint "a C getenv of a knob" fail 'const char* v = getenv("PI_DESK_NEW_KNOB");'
+lint "a known literal" pass 'v := os.get_env("HOME")'
+python3 -I scripts/check-env-reads.py >"$H/out.txt" 2>&1 && ok "env lint: the tree passes" || bad "env lint: $(cat "$H/out.txt")"
 grep -q -- '-DPD_RELEASE=1' build.sh && grep -q '#ifndef PD_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost PD_RELEASE"
 grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"
 grep -q 'scripts/check-release-build.sh "$EXE"' scripts/release.sh && ok "release.sh checks its binaries" || bad "release.sh does not run check-release-build.sh"

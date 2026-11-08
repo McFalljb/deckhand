@@ -37,6 +37,7 @@ import "trust"
 holder_label_prefix := "dev.deckhand.hold."
 // How long the launcher waits for the detached child's pid, and then for its ack.
 holder_ready_timeout := 10 * time.Second
+LAUNCHCTL :: "/bin/launchctl" // tests pass a stand-in to launchd_launch
 LAUNCHD_STALE_AGE :: 60 * time.Second // a job or temp dir this old is a dead launcher's
 LAUNCHD_JOB_DIR :: "job-" // <run>/job-<6 hex>: short, the ready socket's path must fit in sun_path
 
@@ -56,8 +57,8 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 
 // The launchd path alone (tests call it with their prefix). label: the job's, booted out on
 // return whatever happened.
-launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string) -> (pid: i32, label: string, ok: bool, why: string) {
-	launchd_sweep(run, prefix)
+launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL) -> (pid: i32, label: string, ok: bool, why: string) {
+	launchd_sweep(run, prefix, launchctl)
 	uid := posix.getuid()
 	label = fmt.tprintf("%s%d.%d", prefix, posix.getpid(), time.now()._nsec)
 	domain := fmt.tprintf("gui/%d", uid)
@@ -83,11 +84,12 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string) ->
 	if !lok do return 0, label, false, fmt.tprintf("cannot listen on %s", ready)
 	defer sock_close(lfd)
 	if w := launchd_write_plist(plist, launchd_plist(label, bin, run, data, jdir)); w != "" do return 0, label, false, w
-	out, st := run_group({"/bin/launchctl", "bootstrap", domain, plist}, 10 * time.Second, merge_stderr = true)
+	// a bootstrap that failed or timed out may still have loaded the job: booted out on every path
+	booted := false
+	defer if !booted do launchd_bootout(domain, label, launchctl)
+	out, st := run_group({launchctl, "bootstrap", domain, plist}, 10 * time.Second, merge_stderr = true)
 	os.remove(plist)
 	if st != .Ok do return 0, label, false, fmt.tprintf("launchctl bootstrap: %v %s", st, strings.trim_space(out))
-	booted := false
-	defer if !booted do launchd_bootout(domain, label)
 
 	exe := launchd_realpath(bin)
 	deadline := time.tick_now()._nsec + i64(holder_ready_timeout)
@@ -96,7 +98,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string) ->
 		if left <= 0 do return 0, label, false, "the detached holder never connected to the ready socket"
 		cfd, aok := sock_accept(lfd, left)
 		if !aok do continue
-		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline)
+		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline, launchctl)
 		sock_close(cfd)
 		if p > 0 do return p, label, true, ""
 		fmt.eprintln("Deckhand: session holder: ready:", w)
@@ -107,7 +109,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string) ->
 // One connection on the ready socket: "" and the pid once the child acked, else why not. The job
 // is booted out (booted set) once the peer passed, before the environment goes.
 @(private = "file")
-launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64) -> (pid: i32, why: string) {
+launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64, launchctl: string) -> (pid: i32, why: string) {
 	at_accept := trust.peer_read(cfd) // before any byte is read
 	line, lok := launchd_read_until(cfd, '\n', 32, deadline)
 	if !lok do return 0, "no pid from the peer"
@@ -115,7 +117,7 @@ launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, la
 	if d := trust.ready_peer_allowed(.Adhoc, trust.own_uid(), claimed, at_accept); d != .Allow do return 0, fmt.tprintf("refused a peer (%v)", d)
 	if pp := pid_parent(claimed); pp != 1 do return 0, fmt.tprintf("refused pid %d: its parent is %d, not launchd", claimed, pp)
 	if got := launchd_realpath(holder_pid_exe(claimed)); exe == "" || got != exe do return 0, fmt.tprintf("refused pid %d: it runs %q, not %q", claimed, got, exe)
-	launchd_bootout(domain, label)
+	launchd_bootout(domain, label, launchctl)
 	booted^ = true
 	if d := trust.peer_still(at_accept, trust.peer_read(cfd)); d != .Allow do return 0, fmt.tprintf("the peer changed before the environment (%v)", d)
 	sent := env
@@ -179,8 +181,8 @@ holder_pid_exe :: proc(pid: i32) -> string {
 	return strings.clone(string(buf[:n]), context.temp_allocator)
 }
 
-launchd_bootout :: proc(domain, label: string) {
-	out, st := run_group({"/bin/launchctl", "bootout", fmt.tprintf("%s/%s", domain, label)}, 10 * time.Second, merge_stderr = true)
+launchd_bootout :: proc(domain, label: string, launchctl := LAUNCHCTL) {
+	out, st := run_group({launchctl, "bootout", fmt.tprintf("%s/%s", domain, label)}, 10 * time.Second, merge_stderr = true)
 	// gone already (it never loaded, or a sweep raced us) is fine; anything else is worth a line
 	if st != .Ok && !strings.contains(out, "No such process") && !strings.contains(out, "Could not find service") {
 		fmt.eprintln("Deckhand: session holder: launchctl bootout", label, ":", strings.trim_space(out))
@@ -242,9 +244,9 @@ launchd_write_plist :: proc(path, body: string) -> string {
 // herdr's remove_stale: boot out our labels (prefix) that are not running and whose ns stamp is
 // older than LAUNCHD_STALE_AGE (a launcher died between bootstrap and bootout), and remove temp
 // dirs in run that old (their launcher is gone: one waits 10 s at most).
-launchd_sweep :: proc(run, prefix: string) {
+launchd_sweep :: proc(run, prefix: string, launchctl := LAUNCHCTL) {
 	now := time.now()._nsec
-	out, st := run_group({"/bin/launchctl", "list"}, 10 * time.Second)
+	out, st := run_group({launchctl, "list"}, 10 * time.Second)
 	if st == .Ok {
 		domain := fmt.tprintf("gui/%d", posix.getuid())
 		for line in strings.split_lines(out, context.temp_allocator) {
@@ -254,7 +256,7 @@ launchd_sweep :: proc(run, prefix: string) {
 			_, _, ns_s := strings.partition(f[2][len(prefix):], ".")
 			ns, nok := strconv.parse_i64(ns_s, 10)
 			if !nok || now - ns < i64(LAUNCHD_STALE_AGE) do continue
-			launchd_bootout(domain, f[2])
+			launchd_bootout(domain, f[2], launchctl)
 		}
 	}
 	entries, err := os.read_all_directory_by_path(run, context.temp_allocator)

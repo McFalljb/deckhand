@@ -249,3 +249,23 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	entries, _ := os.read_all_directory_by_path(run, context.temp_allocator)
 	for e in entries do testing.expectf(t, !strings.has_prefix(e.name, LAUNCHD_JOB_DIR) || e.name == "job-busy02", "left: %s", e.name)
 }
+
+// A bootstrap that fails (or times out) may still have loaded the job: it is booted out on
+// every path after the attempt. A stand-in launchctl records the calls; launchd is not touched.
+@(test)
+launchd_bootout_after_failed_bootstrap :: proc(t: ^testing.T) {
+	d := lt_dir("lfail")
+	defer os.remove_all(d)
+	run := fmt.tprintf("%s/run", d)
+	testing.expect_value(t, runtime_dir_prepare(run, RUNTIME_HOLDER_NEED), "")
+	calls := fmt.tprintf("%s/calls", d)
+	fake := fmt.tprintf("%s/launchctl", d)
+	script := fmt.tprintf("#!/bin/sh\necho \"$*\" >> '%s'\nif [ \"$1\" = bootstrap ]; then echo 'Bootstrap failed: 5: Input/output error' >&2; exit 5; fi\nexit 0\n", calls)
+	_ = os.write_entire_file(fake, transmute([]byte)script)
+	posix.chmod(strings.clone_to_cstring(fake, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	_, label, ok, why := launchd_launch("/nonexistent/deckhand-core", run, fmt.tprintf("%s/data", d), {"PATH=/usr/bin:/bin"}, TEST_LABEL_PREFIX, launchctl = fake)
+	testing.expectf(t, !ok && strings.contains(why, "bootstrap"), "a failed bootstrap: %v %s", ok, why)
+	b, _ := os.read_entire_file(calls, context.temp_allocator)
+	want := fmt.tprintf("bootout gui/%d/%s", posix.getuid(), label)
+	testing.expectf(t, strings.contains(string(b), want), "no %q in the calls: %q", want, string(b))
+}

@@ -1290,10 +1290,8 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "dirty", editor_dirty(editor_of(t.id)))
 			}
 			if ct, is_ch := t.kind.(Changes_Tab); is_ch do kv_str(&to, "root", ct.root)
-			if _, is_br := t.kind.(Browser_Tab); is_br do annot_tab_json(b, t.id) // comment mode, markers (browser_annotate.odin)
-			if _, is_br := t.kind.(Browser_Tab); is_br do browser_polish_tab_json(b, t.id) // zoom, bars, downloads (browser_polish.odin)
-			if _, is_br := t.kind.(Browser_Tab); is_br do browser_agent_tab_json(b, t.id) // the agent strip (browser_agent.odin)
-			if _, is_br := t.kind.(Browser_Tab); is_br do browser_act_tab_json(b, t.id) // an upload's ask (browser_act.odin)
+			// the window's: comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask
+			if _, is_br := t.kind.(Browser_Tab); is_br do window_browser_json(b, t.id)
 			if bt, is_web := t.kind.(Browser_Tab); is_web {
 				// browser_nav.odin: what the page reported
 				kv_str(&to, "url", bt.url)
@@ -1302,19 +1300,19 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "can_forward", bt.can_forward)
 				if bt.blocked_popup != "" do kv_str(&to, "blocked_popup", bt.blocked_popup)
 				// its page: open | waiting (no slot free) | unloaded (opens when shown) | closed (see the tab)
-				if b := browser_of(t.id); b != nil do kv_str(&to, "page", b.cef != 0 ? "open" : b.waiting ? "waiting" : b.lazy ? "unloaded" : b.message != "" ? "closed" : "opening")
+				if page := window_browser_page(t.id); page != "" do kv_str(&to, "page", page)
 			}
 			if at, is_app := t.kind.(App_Tab); is_app {
 				kv_str(&to, "app_status", APP_STATUS_NAMES[at.app_status])
 				if at.exit_code >= 0 do kv_u64(&to, "exit_code", u64(at.exit_code))
-				if a := app_of(t.id); a != nil {
-					kv_u64(&to, "frames", a.ring.shown)
+				if a, has := window_app_view(t.id); has { // its process (the window's)
+					kv_u64(&to, "frames", a.frames)
 					kv_bool(&to, "inspect", a.inspect)
 					kv_u64(&to, "boxes", u64(app_box_count(t.id)))
-					if g := ring_gen(&a.ring, a.ring.cur_gen); g != nil {
-						kv_u64(&to, "ring_gen", u64(g.gen))
-						kv_u64(&to, "ring_w", u64(g.w))
-						kv_u64(&to, "ring_h", u64(g.h))
+					if a.has_ring {
+						kv_u64(&to, "ring_gen", u64(a.ring_gen))
+						kv_u64(&to, "ring_w", u64(a.ring_w))
+						kv_u64(&to, "ring_h", u64(a.ring_h))
 					}
 				}
 			}
@@ -1322,8 +1320,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			if mt, is_md := t.kind.(Markdown_Tab); is_md {
 				kv_str(&to, "path", mt.path)
 				kv_bool(&to, "source", mt.source)
-				if v := md_view_of(t.id); v != nil && v.laid {
-					line, links, headings, matches := md_state_numbers(v, t.id, mt.source)
+				if line, links, headings, matches, laid := window_md_view(t.id, mt.source); laid { // its preview (the window's)
 					kv_u64(&to, "line", u64(line))
 					kv_u64(&to, "links", u64(links))
 					kv_u64(&to, "headings", u64(headings))

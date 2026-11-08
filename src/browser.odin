@@ -122,7 +122,7 @@ browser_host := Tab_View {
 		b := browsers[tab_id]
 		if b == nil do return 0
 		g := ring_gen(&b.ring, b.ring.shown_gen)
-		return g != nil ? g.image[b.ring.shown_slot].id : 0
+		return g != nil ? g.image[b.ring.shown_slot] : 0
 	},
 }
 
@@ -330,8 +330,8 @@ browser_ring_make :: proc(b: ^Browser, w, h: int) -> bool {
 	g := Ring_Gen{gen = gen, w = rw, h = rh, scale = app.dpi}
 	for s in 0 ..< FRAME_SLOTS {
 		tex := pd_frames_slot_texture(b.tab_id, gen, c.int(s))
-		g.image[s] = sg.make_image({width = c.int(rw), height = c.int(rh), pixel_format = .BGRA8, mtl_texture = tex})
-		g.view[s] = sg.make_view({texture = {image = g.image[s]}})
+		g.image[s] = sg.make_image({width = c.int(rw), height = c.int(rh), pixel_format = .BGRA8, mtl_texture = tex}).id
+		g.view[s] = sg.make_view({texture = {image = {g.image[s]}}}).id
 		browser_images += 1
 	}
 	append(&b.ring.gens, g)
@@ -368,10 +368,10 @@ browser_ring_sizing :: proc(b: ^Browser, now: time.Tick) {
 
 @(private = "file")
 browser_slot_destroy :: proc(g: ^Ring_Gen, s: int) {
-	if g.image[s].id == 0 do return
-	sg.destroy_view(g.view[s])
-	sg.destroy_image(g.image[s])
-	g.image[s], g.view[s] = {}, {}
+	if g.image[s] == 0 do return
+	sg.destroy_view({g.view[s]})
+	sg.destroy_image({g.image[s]})
+	g.image[s], g.view[s] = 0, 0
 	browser_images -= 1
 }
 
@@ -683,7 +683,7 @@ browser_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	b := browsers[tab_id]
 	if b == nil || b.cef == 0 || b.ring.shown_gen == 0 do return
 	g := ring_gen(&b.ring, b.ring.shown_gen)
-	if g == nil || g.image[b.ring.shown_slot].id == 0 || b.content_w <= 0 do return
+	if g == nil || g.image[b.ring.shown_slot] == 0 || b.content_w <= 0 do return
 	if browser_sampler.id == 0 do browser_sampler = sg.make_sampler({min_filter = .LINEAR, mag_filter = .LINEAR})
 	// the frame fills the slot's top-left content_w x content_h (headroom beyond)
 	dw, dh := min(f32(b.content_w), w), min(f32(b.content_h), h)
@@ -691,7 +691,7 @@ browser_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	b.drawn_tex = pd_frames_slot_texture(b.tab_id, g.gen, c.int(b.ring.shown_slot))
 	if autotest.active do pd_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
 	sgl.end()
-	sgl.texture(g.view[b.ring.shown_slot], browser_sampler)
+	sgl.texture({g.view[b.ring.shown_slot]}, browser_sampler)
 	sgl.begin_quads()
 	sgl.v2f_t2f_c4b(x, y, 0, 0, 255, 255, 255, 255)
 	sgl.v2f_t2f_c4b(x + dw, y, u, 0, 255, 255, 255, 255)

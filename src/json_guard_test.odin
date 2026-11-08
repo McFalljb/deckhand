@@ -590,11 +590,11 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 	WANT := [?]Parse_Site {
 		{"src/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
 		{"src/app_tab.odin", "app_input_event_check", "jg.parse_string", "", ""},
-		{"src/app_tab.odin", "json_string_of", "jg.parse_string", "", ""},
-		{"src/app_tab.odin", "app_event_in", "json.make_parser", "json_valid", ""},
-		{"src/app_tab.odin", "app_event_in", "json.parse_value", "parser", ""},
-		{"src/app_tab.odin", "app_boxes_parse", "jg.parse_string", "", ""},
 		{"src/app_tab.odin", "app_entries", "jg.parse", "", ""},
+		{"src/app_wire.odin", "json_string_of", "jg.parse_string", "", ""},
+		{"src/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
+		{"src/app_wire.odin", "app_event_in", "json.parse_value", "parser", ""},
+		{"src/app_wire.odin", "app_boxes_parse", "jg.parse_string", "", ""},
 		{"src/autotest.odin", "json_path", "jg.parse_string", "", ""},
 		{"src/browser.odin", "rlz_off", "jg.parse", "", ""},
 		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},

@@ -1,10 +1,20 @@
 # Run 2 of keep-sessions.sh: the session comes back with its 7 terminals adopted from the holder
-# (keep-sessions.sh compares hashes, pids and the counter). The scene kills the app (-9) once
+# (keep-sessions.sh compares hashes, pids and the counter), then restarts the holder in place from
+# the palette. The scene kills the app (-9) once
 # screen_hashes has logged.
 wait 300
 waitstate 5000 open_sessions.0.tabs.6.status running
 assert_state open_sessions.0.tabs.6.held 7
 assert_state open_sessions.0.tabs.0.status running
+# the palette's Restart session holder (a development build): the holder upgrades in place to the
+# same build; the sessions must not notice (keep-sessions.sh: same pids, running, exact, counting)
+key k cmd
+type restart session holder
+assert_palette 0 action:restart_session_holder
+key enter
+eventually 20000
+assert_toast Session holder restarted
+toast_clear
 wait 1500
 state_json keep-sessions-after
 dump keep-sessions-after

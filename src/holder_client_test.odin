@@ -640,3 +640,35 @@ holder_hangup_rescanned :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(toast.text, "isn't answering"), toast.text)
 	testing.expect(t, !hc.tried, "the start is used up: a holder is never launched this run")
 }
+
+// An upgrade only goes up (§7.3); a holder that never said its rev is not upgraded.
+@(test)
+holder_rev_order :: proc(t: ^testing.T) {
+	testing.expect(t, holder_rev_older(1, 2))
+	testing.expect(t, !holder_rev_older(2, 2))
+	testing.expect(t, !holder_rev_older(3, 2)) // never down
+	testing.expect(t, !holder_rev_older(0, 2))
+	testing.expect(t, !holder_rev_older(-1, 2))
+}
+
+// Exit codes from the wire: -1 is unknown (an orphan that ended before its keeper watched it).
+@(test)
+holder_exit_of_wire :: proc(t: ^testing.T) {
+	testing.expect_value(t, exit_of_wire(3, 0), Exit_Info{known = true, code = 3})
+	testing.expect_value(t, exit_of_wire(0, 15), Exit_Info{known = true, signal = 15})
+	testing.expect_value(t, exit_of_wire(-1, 0), Exit_Info{})
+	testing.expect_value(t, exit_of_wire(999, 0), Exit_Info{known = true, code = 255})
+}
+
+// Restart session holder is offered only for a holder built from source (build/ beside build.sh).
+@(test)
+holder_restart_dev_only :: proc(t: ^testing.T) {
+	d := fmt.tprintf("%s/hc-devbuild-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), os.get_pid())
+	defer os.remove_all(d)
+	os.make_directory_all(fmt.tprintf("%s/repo/build", d))
+	_ = os.write_entire_file(fmt.tprintf("%s/repo/build.sh", d), transmute([]byte)string("#!/bin/sh\n"))
+	testing.expect(t, holder_bin_dev_build(fmt.tprintf("%s/repo/build/Deckhand.app/Contents/Helpers/deckhand-core", d)))
+	testing.expect(t, holder_bin_dev_build(fmt.tprintf("%s/repo/build/deckhand-core", d)))
+	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/deckhand-core", d)))
+	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/other/build/deckhand-core", d))) // no build.sh beside it
+}

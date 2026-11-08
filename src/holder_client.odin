@@ -9,6 +9,9 @@ package main
 //   holder_spawn(...) -> (Pty, ok)  SPAWN, wait for SPAWNED (≤ 5 s)
 //   holder_pull(id, reader)         OUTPUT received for a terminal into its Term's inbox
 //   holder_handover() / holder_shutdown()   at quit (GOODBYE)
+//   holder_upgrade(path) -> Holder_Upgrade_Result   the holder re-execs into another binary in place
+//                                   (§7.3): sessions, pids and terminal ids stay; blocks ≤ 25 s
+//   holder_upgrade_wanted() -> bool  the attached holder's holder_rev is older than the bundled one
 //
 // Trust: the peer is read at connect (trust.peer_allowed) and again before every read is
 // acted on (trust.peer_still); the WELCOME must come from that pid (trust.welcome_peer_ok).
@@ -60,6 +63,21 @@ Held :: struct {
 	welcomed:    bool, // listed in this connection's WELCOME (the adopt candidates)
 	claimed:     bool, // a restored tab adopted it
 	kept:        bool, // listed, no tab took it, not safe to hang up: runs on unseen, its output dropped
+	degraded:    bool, // not the holder's child: a keeper serves it after a failed upgrade (§7.3 step 6)
+}
+
+// What holder_upgrade did. Neither ok nor adopted: the holder refused or could not start the
+// new binary and carries on as it was, the same connection, sessions and wire (the fallback
+// drain, §7.3 step 7: in M1 the old holder also keeps taking new tabs; a second holder for them
+// waits for a holder whose wire is too old for this app, which none is yet).
+Holder_Upgrade_Result :: struct {
+	ok:         bool, // the holder runs the new binary: same pid, same instance, every session kept
+	adopted:    bool, // the new image did not take over (it crashed, failed verification or never
+	                  // connected): the upgrade's keeper serves the sessions, degraded
+	lost:       bool, // the holder is gone (its sessions end as "the session holder stopped")
+	error:      string, // why not ok (UPGRADE_FAILED's error, or the keeper's); heap
+	holder_rev: i64, // what answered after it
+	pid:        i32,
 }
 
 Holder_Client :: struct {
@@ -89,6 +107,13 @@ Holder_Client :: struct {
 	tokens_why:    string, // why not
 	adopt_done:    bool, // the launch's adopt ran: terminals a later WELCOME lists are kept unseen
 	unreachable:   bool, // a holder answered but did not attach (Warn_Running): it may run kept sessions
+	path:      string, // the socket connected to (an upgrade reconnects to it)
+	holder_rev: i64, // WELCOME.holder_rev
+	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
+	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
+	up_done:   bool, // the outcome is in up_result (mu)
+	up_result: Holder_Upgrade_Result,
+	upgrade_error_seen: string, // the last WELCOME's upgrade_error (a keeper serves)
 }
 
 hc := Holder_Client{fd = -1}
@@ -134,6 +159,17 @@ held_release_unclaimed :: proc(ended, clean, same_holder, listed: bool) -> bool 
 
 holder_kept_text :: proc(n: int) -> string {
 	return fmt.tprintf("%d kept session%s restored: %s running in the session holder. Quit Deckhand and Stop All Sessions ends %s.", n, n == 1 ? " wasn't" : "s weren't", n == 1 ? "it keeps" : "they keep", n == 1 ? "it" : "them")
+}
+
+// Whether a holder of holder_rev `running` should be upgraded to the bundled one (§7.3: only when
+// it is older; a newer holder is never downgraded).
+holder_rev_older :: proc(running, bundled: i64) -> bool {return running >= 1 && running < bundled}
+
+// An exit as the holder reports it; code -1: it ended unseen (an orphan adopted after a failed
+// upgrade, gone before its keeper watched it), unknown.
+exit_of_wire :: proc(code, signal: i64) -> Exit_Info {
+	if code < 0 && signal == 0 do return {}
+	return {known = true, code = int(clamp(code, 0, 255)), signal = int(clamp(signal, 0, 127))}
 }
 
 // ---- connecting ----
@@ -321,9 +357,10 @@ holder_connect :: proc(path: string) -> Connect_Result {
 			h.cols, h.rows = u16(wt.cols), u16(wt.rows) // range-checked by holderwire.decode (bad)
 		}
 		if ex, has := wt.exit.?; has {
-			h.exit = {known = true, code = int(clamp(ex.code, 0, 255)), signal = int(clamp(ex.signal, 0, 127))}
+			h.exit = exit_of_wire(ex.code, ex.signal)
 			h.eof = true
 		}
+		h.degraded = wt.degraded.? or_else false
 		hc.held[id] = h
 		max_id = max(max_id, id)
 	}
@@ -339,6 +376,9 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	}
 	hc.instance = strings.clone(w.instance)
 	hc.previous = strings.clone(w.previous)
+	hc.path = strings.clone(path)
+	hc.holder_rev = w.holder_rev
+	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
 	hc.pid = peer.pid
 	copy(hc.key[:], key)
 	hc.next_id = max_id + 1
@@ -414,16 +454,19 @@ holder_reader :: proc() {
 		}
 		if !sock_wait_readable(hc.fd, 100) do continue
 		n := sock_read(hc.fd, buf)
-		if n <= 0 {
-			holder_lose(n == 0 ? "the holder closed the connection" : "read failed")
-			return
-		}
-		if d := trust.peer_still(hc.peer, trust.peer_read(hc.fd)); d != .Allow {
-			holder_lose(fmt.tprintf("its peer changed since connect: %v", d))
+		why := ""
+		if n <= 0 do why = n == 0 ? "the holder closed the connection" : "read failed"
+		else if d := trust.peer_still(hc.peer, trust.peer_read(hc.fd)); d != .Allow do why = fmt.tprintf("its peer changed since connect: %v", d)
+		if why != "" {
+			// mid-upgrade, the old image's connection closes at its exec: the new image (or the
+			// keeper) serves the same socket
+			if sync.atomic_load(&hc.upgrading) && holder_reattach() do continue
+			holder_lose(why)
 			return
 		}
 		hw.stream_feed(&hc.rx, buf[:n])
 		if !holder_frames() do return
+		if sync.atomic_load(&hc.upgrading) do upgrade_release() // after UPGRADE_FAILED: what waited goes out
 		free_all(context.temp_allocator)
 	}
 }
@@ -466,7 +509,7 @@ holder_frame :: proc(f: hw.Frame) {
 	case .Exited:
 		m: hw.Exited
 		if h == nil || hw.decode(f, .Exited, &m, context.temp_allocator) != .None do return
-		h.exit = {known = true, code = int(clamp(m.code, 0, 255)), signal = int(clamp(m.signal, 0, 127))}
+		h.exit = exit_of_wire(m.code, m.signal)
 		h.eof = true
 	case .Spawned:
 		m: hw.Spawned
@@ -494,6 +537,12 @@ holder_frame :: proc(f: hw.Frame) {
 		for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
 		hc.acked = true
 		sync.cond_broadcast(&hc.cond)
+	case .Upgrade_Failed:
+		m: hw.Upgrade_Failed
+		if !hc.upgrading || hc.up_done do return
+		why := "the holder refused the upgrade"
+		if hw.decode(f, .Upgrade_Failed, &m, context.temp_allocator) == .None do why = m.error
+		upgrade_finish_locked({error = strings.clone(why), holder_rev = hc.holder_rev, pid = hc.pid})
 	case .Pong, .Unknown:
 	case:
 		fmt.eprintln("Deckhand: session holder: ignoring a frame of kind", f.kind)
@@ -513,6 +562,7 @@ holder_lose :: proc(why: string) {
 		h.exit = {}
 	}
 	for _, h in hc.held do if h.spawn == .Waiting do h.spawn = .Failed
+	if hc.upgrading && !hc.up_done do upgrade_finish_locked({lost = true, error = strings.clone(why)})
 	sock_shutdown(hc.fd) // writers fail at once; the fd is closed by holder_client_stop
 	sync.cond_broadcast(&hc.cond)
 }
@@ -530,7 +580,15 @@ holder_send :: proc(kind: hw.Kind, id: u32, msg: $T) -> bool {
 holder_write :: proc(frame: []u8) -> bool {
 	sync.lock(&hc.wmu)
 	defer sync.unlock(&hc.wmu)
-	if hc.fd < 0 || sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) do return false
+	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) do return false
+	if hc.upgrading {
+		// whole frames wait for the new image (INPUT is never split across the exec); a PING or
+		// FOREGROUND is only worth sending now
+		if len(frame) > 0 && (frame[0] == u8(hw.Kind.Ping) || frame[0] == u8(hw.Kind.Foreground)) do return true
+		append(&hc.pending, ..frame)
+		return true
+	}
+	if hc.fd < 0 do return false
 	if sock_write_all(hc.fd, frame) do return true
 	// a 5 s block (SO_SNDTIMEO) or an error, maybe part-way through the frame: nothing more can
 	// follow it on the wire. Shut the socket: the reader sees the end and loses the holder.
@@ -719,6 +777,7 @@ holder_shutdown :: proc() {
 
 // The last frame this connection sends: after it nothing goes out (no RELEASE at close_all).
 holder_goodbye :: proc(mode: string) -> bool {
+	upgrade_wait(HOLDER_UPGRADE_WAIT) // never into the middle of an upgrade
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode})
 	sync.lock(&hc.wmu)
@@ -743,6 +802,237 @@ holder_leave :: proc() {
 	hc.handed, hc.handover = true, true
 	sync.unlock(&hc.mu)
 	if hc.fd >= 0 do sock_shutdown(hc.fd)
+}
+
+// ---- upgrade (§7.3) ----
+
+HOLDER_UPGRADE_WAIT :: 25 * time.Second // the holder's dry run (5 s) and keeper (10 s), with room
+HOLDER_REATTACH_WAIT :: 15 * time.Second
+
+// Whether the attached holder is older than the one this app bundles (PR D's updater then calls
+// holder_upgrade with the installed bundled binary).
+holder_upgrade_wanted :: proc() -> bool {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	return hc.on && !hc.lost && !hc.handed && holder_rev_older(hc.holder_rev, HOLDER_REV)
+}
+
+// UPGRADE{path}: the holder re-execs into the binary at path (an absolute path to an installed,
+// verified deckhand-core: holder_install's result), keeping every session, its pid and its
+// terminal id, and its instance id (held tabs saved with it still adopt). Blocks until the
+// outcome (≤ HOLDER_UPGRADE_WAIT; any thread but the holder reader). Meanwhile frames for the
+// holder (input, resizes, spawns, releases) wait and go to the new image whole, in order.
+// result.error is heap (the caller deletes it).
+holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Upgrade, 0, hw.Upgrade{path = path})
+	sync.lock(&hc.wmu)
+	sync.lock(&hc.mu)
+	if !hc.on || hc.lost || hc.handed || hc.fd < 0 || hc.upgrading {
+		busy := hc.upgrading
+		sync.unlock(&hc.mu)
+		sync.unlock(&hc.wmu)
+		return {error = strings.clone(busy ? "an upgrade is already running" : "no session holder is attached")}
+	}
+	hc.upgrading, hc.up_done = true, false
+	sync.unlock(&hc.mu)
+	sent := sock_write_all(hc.fd, out[:])
+	sync.unlock(&hc.wmu)
+	if !sent {
+		sync.lock(&hc.mu)
+		if !hc.up_done do upgrade_finish_locked({error = strings.clone("cannot send UPGRADE")})
+		sync.unlock(&hc.mu)
+		upgrade_release()
+	}
+	upgrade_wait(HOLDER_UPGRADE_WAIT)
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	if !hc.up_done do return {error = strings.clone("the holder did not finish the upgrade in time")} // the reader still settles it
+	r := hc.up_result
+	hc.up_result = {}
+	return r
+}
+
+// Waits (≤ d) for an upgrade in flight to end.
+@(private = "file")
+upgrade_wait :: proc(d: time.Duration) {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	deadline := time.tick_add(time.tick_now(), d)
+	for hc.upgrading && !hc.up_done {
+		left := time.tick_diff(time.tick_now(), deadline)
+		if left <= 0 do return
+		sync.cond_wait_with_timeout(&hc.cond, &hc.mu, left)
+	}
+}
+
+// The outcome (hc.mu held); upgrade_release then sends what waited.
+@(private = "file")
+upgrade_finish_locked :: proc(r: Holder_Upgrade_Result) {
+	delete(hc.up_result.error)
+	hc.up_result, hc.up_done = r, true
+	sync.cond_broadcast(&hc.cond)
+}
+
+// Once there is an outcome: the frames held back go out (unless the holder is lost) and frames
+// flow again. Takes wmu, then mu (holder_upgrade's order).
+@(private = "file")
+upgrade_release :: proc() {
+	sync.lock(&hc.wmu)
+	defer sync.unlock(&hc.wmu)
+	sync.lock(&hc.mu)
+	done := hc.up_done
+	sync.unlock(&hc.mu)
+	if !hc.upgrading || !done do return
+	hc.upgrading = false
+	if len(hc.pending) > 0 && hc.fd >= 0 && !sync.atomic_load(&hc.lost) && !sock_write_all(hc.fd, hc.pending[:]) {
+		sock_shutdown(hc.fd) // part of it may be out (holder_write): the reader loses the holder
+	}
+	clear(&hc.pending)
+}
+
+// The reader thread, mid-upgrade, saw the old connection end: connect to the same socket again
+// (the new image, or the keeper, listens on it), HELLO, check the WELCOME is the same holder run
+// (instance and key), then continue every terminal's stream from its TAIL. False: lost.
+@(private = "file")
+holder_reattach :: proc() -> bool {
+	sync.lock(&hc.wmu)
+	if hc.fd >= 0 do sock_close(hc.fd)
+	hc.fd = -1
+	sync.unlock(&hc.wmu)
+	old_pid := hc.pid
+	deadline := time.tick_add(time.tick_now(), HOLDER_REATTACH_WAIT)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
+		fd, ok := sock_connect(hc.path)
+		if !ok {
+			time.sleep(20 * time.Millisecond)
+			continue
+		}
+		why, done := holder_reattach_on(fd, deadline)
+		if done {
+			sync.lock(&hc.mu)
+			res := Holder_Upgrade_Result{holder_rev = hc.holder_rev, pid = hc.pid}
+			switch {
+			case hc.upgrade_error_seen != "":
+				res.adopted = true
+				res.error = strings.clone(hc.upgrade_error_seen)
+			case hc.pid != old_pid:
+				res.error = strings.clone("another process answered for the holder")
+			case:
+				res.ok = true
+			}
+			upgrade_finish_locked(res)
+			sync.unlock(&hc.mu)
+			upgrade_release()
+			if autotest.active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
+			return true
+		}
+		if !strings.has_prefix(why, "retry") {
+			fmt.eprintln("Deckhand: session holder: after the upgrade:", why)
+			return false
+		}
+		time.sleep(20 * time.Millisecond)
+	}
+	return false
+}
+
+// One reattach attempt on a connected fd. done: attached (hc.fd is fd). Otherwise fd is closed;
+// why starts with "retry" when another attempt may work.
+@(private = "file")
+holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, done: bool) {
+	peer := trust.peer_read(fd)
+	if d := trust.peer_allowed(.Adhoc, trust.own_uid(), peer); d != .Allow {
+		sock_close(fd)
+		return fmt.tprintf("refused its peer: %v", d), false
+	}
+	set_timeouts(fd)
+	hw.stream_destroy(&hc.rx)
+	hc.rx = {}
+	sync.lock(&hc.wmu)
+	hc.fd, hc.peer = fd, peer
+	sync.unlock(&hc.wmu)
+	fail :: proc(why: string) -> (string, bool) {
+		sync.lock(&hc.wmu)
+		sock_close(hc.fd)
+		hc.fd = -1
+		sync.unlock(&hc.wmu)
+		return why, false
+	}
+	out := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE})
+	if !sock_write_all(fd, out[:]) do return fail("retry: cannot send HELLO")
+	f, fok := handshake_frame(deadline)
+	if !fok do return fail("retry: no WELCOME")
+	if f.kind == u8(hw.Kind.Refused) do return fail("refused")
+	w: hw.Welcome
+	if e := hw.decode(f, .Welcome, &w, context.temp_allocator); e != .None do return fail(fmt.tprintf("bad WELCOME: %v", e))
+	if d := trust.welcome_peer_ok(peer, w.pid); d != .Allow do return fail("WELCOME pid is not the socket's peer")
+	if w.wire < hw.WIRE_MIN || w.wire > hw.WIRE do return fail("WELCOME wire")
+	// the same holder run: an upgrade keeps its instance and its key
+	key, kok := hex.decode(transmute([]u8)w.hmac_key, context.temp_allocator)
+	if w.instance != hc.instance || !kok || len(key) != MACFILE_KEY_LEN || string(key) != string(hc.key[:]) do return fail("a different holder answered (instance or key)")
+	if len(w.terminals) > HOLDER_MAX_TERMS do return fail("WELCOME lists too many terminals")
+	listed := make(map[u32]bool, len(w.terminals), context.temp_allocator)
+	for wt in w.terminals {
+		if wt.id <= 0 || wt.id > i64(max(u32)) || u32(wt.id) in listed do return fail("WELCOME terminal ids")
+		listed[u32(wt.id)] = true
+	}
+	tails := make([dynamic]hw.Frame, context.temp_allocator)
+	for wt in w.terminals {
+		tf, tok := handshake_frame(deadline)
+		if !tok || tf.kind != u8(hw.Kind.Tail) || tf.terminal != u32(wt.id) do return fail("missing TAIL")
+		tf.payload = slice_clone_tmp(tf.payload) // the stream's buffer moves on
+		append(&tails, tf)
+	}
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	for wt, i in w.terminals {
+		h := hc.held[u32(wt.id)]
+		if h == nil do continue // released while it upgraded: its RELEASE waits in pending
+		start, bytes, e := hw.decode_output(tails[i])
+		if e != .None || start + u64(len(bytes)) != wt.offset do continue
+		if !h.eof {
+			skip, gap := held_output_place(h.next, start, len(bytes))
+			if gap {
+				h.gap = true // bytes between the two never came: shown as inexact
+				h.next = start
+			}
+			append(&h.buf, ..bytes[skip:])
+			h.next += u64(len(bytes) - skip)
+			if ex, has := wt.exit.?; has {
+				h.exit = exit_of_wire(ex.code, ex.signal)
+				h.eof = true
+			}
+		}
+		h.degraded = wt.degraded.? or_else false
+	}
+	// a terminal we had that the holder no longer lists is gone
+	for id, h in hc.held do if !listed[id] && !h.eof && (h.welcomed || h.spawn == .Spawned) {
+		h.eof, h.lost = true, true
+		h.exit = {}
+	}
+	delete(hc.previous)
+	hc.previous = strings.clone(w.previous)
+	delete(hc.upgrade_error_seen)
+	hc.upgrade_error_seen = strings.clone(w.upgrade_error)
+	hc.holder_rev = w.holder_rev
+	hc.pid = peer.pid
+	return "", true
+}
+
+@(private = "file")
+slice_clone_tmp :: proc(b: []u8) -> []u8 {
+	out := make([]u8, len(b), context.temp_allocator)
+	copy(out, b)
+	return out
+}
+
+// Whether a held terminal is degraded (served by an upgrade's keeper, not its child).
+holder_term_degraded :: proc(id: u32) -> bool {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	h := hc.held[id]
+	return h != nil && h.degraded
 }
 
 // Ends the reader thread and closes the connection (cleanup).

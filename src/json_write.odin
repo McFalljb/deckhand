@@ -1269,6 +1269,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				}
 				if x.inexact do kv_bool(&to, "inexact", true) // adopted, not rebuilt byte-exactly
 				if x.holder_lost do kv_bool(&to, "holder_lost", true) // the session holder stopped
+				if x.pty.held != 0 && holder_term_degraded(x.pty.held) do kv_bool(&to, "holder_degraded", true) // an upgrade's keeper serves it (§7.3)
 			}
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {

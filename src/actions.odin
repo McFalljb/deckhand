@@ -349,6 +349,11 @@ ACTIONS := [?]Action {
 	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (Command, bool) {
 		return Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
 	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}},
+	// development builds only (holder_restart.odin): the session holder re-execs into this build's
+	// holder binary in place; sessions keep running
+	{id = "restart_session_holder", label = "Restart session holder", make = proc() -> (Command, bool) {
+		return nil, holder_restart_available()
+	}, ui = holder_restart_start, detail = proc() -> string {return "development build: upgrade in place, sessions keep running"}},
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (Command, bool) {
 		return Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},

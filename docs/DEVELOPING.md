@@ -157,6 +157,15 @@ it. Only signed code goes in `Helpers` (a data file there fails signing). With K
 the app installs it to `<data dir>/core/<rev>-<sha12>/` (quarantine stripped after the signature
 check) and starts it from there, so an app update never pulls the binary from under live sessions.
 
+The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §7.3;
+`src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
+holder only upgrades to a newer `holder_rev`, so **bump `HOLDER_REV`** in `src/holder/holder.odin`
+and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
+(tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. In a development build the
+palette's *Restart session holder* upgrades the running holder to the one you just built. The
+re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
+`-define:DECKHAND_TEST_HOOKS=true`; never in a release).
+
 ### Update signing
 
 Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust

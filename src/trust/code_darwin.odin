@@ -13,6 +13,7 @@ package trust
 
 import "core:c"
 import "core:strings"
+import CF "core:sys/darwin/CoreFoundation"
 
 foreign import mach "system:System"
 @(default_calling_convention = "c")
@@ -57,17 +58,15 @@ self_peer :: proc() -> Peer {
 }
 
 @(private = "file")
-CFRef :: rawptr
+CFRef :: CF.TypeRef // Odin's own CoreFoundation package's, so its declarations and ours agree
 
 foreign import cf "system:CoreFoundation.framework"
 @(default_calling_convention = "c")
 foreign cf {
 	CFDictionaryGetValue :: proc(d: CFRef, key: CFRef) -> CFRef ---
 	CFURLCreateFromFileSystemRepresentation :: proc(alloc: CFRef, path: [^]u8, n: c.long, is_dir: b8) -> CFRef ---
-	CFStringGetCString :: proc(s: CFRef, buf: [^]u8, size: c.long, encoding: u32) -> b8 ---
 	CFGetTypeID :: proc(x: CFRef) -> c.ulong ---
 	CFStringGetTypeID :: proc() -> c.ulong ---
-	CFRelease :: proc(x: CFRef) ---
 }
 
 foreign import sec "system:Security.framework"
@@ -91,11 +90,11 @@ kCFStringEncodingUTF8 :: 0x08000100
 identifier_of :: proc(code: CFRef) -> string {
 	info: CFRef
 	if SecCodeCopySigningInformation(code, kSecCSSigningInformation, &info) != 0 || info == nil do return ""
-	defer CFRelease(info)
+	defer CF.CFRelease(info)
 	v := CFDictionaryGetValue(info, kSecCodeInfoIdentifier)
 	if v == nil || CFGetTypeID(v) != CFStringGetTypeID() do return ""
 	buf: [256]u8
-	if !CFStringGetCString(v, &buf[0], len(buf), kCFStringEncodingUTF8) do return ""
+	if !CF.StringGetCString(CF.String(v), &buf[0], CF.Index(len(buf)), CF.StringEncoding(kCFStringEncodingUTF8)) do return ""
 	return strings.clone(string(cstring(&buf[0])), context.temp_allocator)
 }
 
@@ -116,10 +115,10 @@ code_identity_self :: proc() -> Code_Identity {
 code_identity_of_file :: proc(path: string) -> Code_Identity {
 	url := CFURLCreateFromFileSystemRepresentation(nil, raw_data(path), c.long(len(path)), false)
 	if url == nil do return {}
-	defer CFRelease(url)
+	defer CF.CFRelease(url)
 	code: CFRef
 	if SecStaticCodeCreateWithPath(url, 0, &code) != 0 || code == nil do return {}
-	defer CFRelease(code)
+	defer CF.CFRelease(code)
 	id := identifier_of(code)
 	if id == "" do return {}
 	return Code_Identity{ok = true, valid = SecStaticCodeCheckValidity(code, kSecCSStrictValidate, nil) == 0, identifier = id}

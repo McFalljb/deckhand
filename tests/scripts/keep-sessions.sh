@@ -6,8 +6,9 @@
 #    keeps them running.
 # 2. relaunches: every terminal is adopted from its snapshot, its screen hash equal to the one at
 #    the handover and, against a reference terminal fed every byte, equal with the probes; the
-#    same processes (pids) run on and the counters kept counting; the kept pi's bridge reconnects
-#    with its reconnect token (tokens.json). Then the app is killed (-9).
+#    kept pi's bridge reconnects with its reconnect token (tokens.json). The palette's Restart
+#    session holder upgrades the holder in place (§7.3); the same processes (pids) run on and the
+#    counters kept counting. Then the app is killed (-9).
 # 3. relaunches after that crash: adopted from the tails (inexact), same pids; then "Quit
 #    Deckhand and Stop All Sessions": the holder must be gone after it.
 # 4. relaunches: fresh shells in a new holder, which is killed (-9): every tab says holder_lost.
@@ -60,7 +61,8 @@ start 1; finish 1
 grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$W/data/workspace.json"; exit 1; }
 [ -f "$W/data/handover.json" ] || { echo "no handover.json"; exit 1; }
 
-# 2: adopted exactly, the kept pi's bridge reconnects with its token; then the app is killed
+# 2: adopted exactly, the kept pi's bridge reconnects with its token; the holder restarted in
+#    place (Restart session holder); then the app is killed
 start 2
 wait_log 2 "screen_hash"
 for _ in $(seq 50); do [ "$(grep -c 'hello ok' "$W/bridge.log")" -ge 2 ] && break; sleep 0.2; done
@@ -95,6 +97,7 @@ if not last(sys.argv[6]) > last(sys.argv[5]) > 0: fail.append(f"the counter did 
 if fail: sys.exit("\n".join(fail))
 print(f"{len(handed)} terminals adopted exactly, same pids, counter {last(sys.argv[5])} -> {last(sys.argv[6])}")
 PY
+grep -q "holder upgraded: ok true, adopted false, holder_rev" "$W/run2.log" || { echo "run 2: Restart session holder did not upgrade it in place"; exit 1; }
 [ -n "$(holders)" ] || { echo "the session holder did not outlive the app's kill -9"; exit 1; }
 [ ! -f "$W/data/handover.json" ] || { echo "handover.json left after it was read"; exit 1; }
 

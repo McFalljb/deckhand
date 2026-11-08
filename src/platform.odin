@@ -6,6 +6,8 @@ package main
 
 import "core:os"
 import "core:path/filepath"
+import "core:strings"
+import "core:sys/posix"
 
 Platform :: struct {
 	set_clipboard:  proc(text: string),
@@ -37,7 +39,7 @@ clipboard_text :: proc() -> string {
 // workspace). PI_DESK_DATA_DIR overrides.
 data_dir :: proc(allocator := context.allocator) -> string {
 	if d := hook_env(.Data_Dir, allocator); d != "" do return d
-	home := os.get_env("HOME", context.temp_allocator)
+	home := data_home(TEST_HOOKS, context.temp_allocator)
 	when ODIN_OS == .Darwin {
 		p, _ := filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
 	} else {
@@ -46,4 +48,22 @@ data_dir :: proc(allocator := context.allocator) -> string {
 		p, _ := filepath.join({base, "pi-desk"}, allocator)
 	}
 	return p
+}
+
+// The home the data dir lives under. A release build: the account's (the user database), never
+// $HOME, so an environment can't move the data dir, the runtime socket, tokens.json or the holder
+// (background-core.md §5.3, "A genuine binary under attacker config"). Test and development
+// builds: $HOME (scenes run with a fake one).
+data_home :: proc(hooks: bool, allocator := context.temp_allocator) -> string {
+	if hooks do return os.get_env("HOME", allocator)
+	return account_home(allocator)
+}
+
+// The home directory of the real uid's account (getpwuid_r), or "" when there is none.
+account_home :: proc(allocator := context.temp_allocator) -> string {
+	pw: posix.passwd
+	res: ^posix.passwd
+	buf: [4096]u8
+	if posix.getpwuid_r(posix.getuid(), &pw, raw_data(buf[:]), len(buf), &res) != .NONE || res == nil || pw.pw_dir == nil do return ""
+	return strings.clone(string(pw.pw_dir), allocator)
 }

@@ -11,7 +11,8 @@ package main
 // With the hooks off:
 //   - every hook_env() is "" (test mode never starts: no PI_DESK_SCRIPT), and the names
 //     themselves are not in the binary (HOOK_ENV is compiled only with the hooks on);
-//   - the data and runtime dirs are the fixed ones (no PI_DESK_DATA_DIR, PI_DESK_RUNTIME_DIR);
+//   - the data and runtime dirs are the fixed ones (no PI_DESK_DATA_DIR, PI_DESK_RUNTIME_DIR), under
+//     the account's home from the user database, not $HOME (platform.odin data_home);
 //   - `--print-token` is not accepted (Settings › Copy a control token mints one, the user's).
 // Test and development builds (./build.sh, ./build.sh test, every scene) keep them.
 //

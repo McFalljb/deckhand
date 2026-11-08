@@ -819,3 +819,39 @@ spawn_blocked_before_exec :: proc(t: ^testing.T) {
 	pump(h, 100 * time.Millisecond, f)
 	testing.expect(t, live_term(h, 2) == nil)
 }
+
+// Before HELLO: a connection that trickles bytes is dropped hello_timeout after accept (not kept
+// alive by them), and a header of any other kind, or a HELLO past MAX_CONTROL, is refused as
+// soon as its 9 bytes are in (nothing of a big payload is buffered).
+@(test)
+hello_deadline_and_early_headers :: proc(t: ^testing.T) {
+	cfg := test_cfg()
+	cfg.hello_timeout = 300 * time.Millisecond
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	a := fake_connect(t, h)
+	defer fake_free(a)
+	hdr := make([dynamic]u8, context.temp_allocator)
+	holderwire.put_header(&hdr, u8(holderwire.Kind.Hello), 0, 100)
+	start := time.tick_now()
+	for i := 0; !a.eof && time.tick_since(start) < 2 * time.Second; i += 1 {
+		if i < len(hdr) do fake_write(a, hdr[i:i + 1])
+		else if i < len(hdr) + 100 do fake_write(a, transmute([]u8)string(" "))
+		pump(h, 30 * time.Millisecond, a)
+	}
+	testing.expect(t, a.eof, "a trickling connection was kept open")
+	testing.expectf(t, time.tick_since(start) < 700 * time.Millisecond, "dropped after %v", time.tick_since(start))
+
+	for kind in ([]u8{u8(holderwire.Kind.Input), u8(holderwire.Kind.Hello)}) {
+		b := fake_connect(t, h)
+		defer fake_free(b)
+		raw := make([dynamic]u8, context.temp_allocator)
+		size := kind == u8(holderwire.Kind.Hello) ? u32(holderwire.MAX_CONTROL + 1) : u32(holderwire.MAX_PAYLOAD)
+		holderwire.put_header(&raw, kind, 1, int(size))
+		append(&raw, ..make([]u8, 1000, context.temp_allocator))
+		fake_write(b, raw[:])
+		t0 := time.tick_now()
+		testing.expectf(t, wait_eof(h, b, time.Second), "kind %d: not dropped", kind)
+		testing.expectf(t, time.tick_since(t0) < 200 * time.Millisecond, "kind %d: dropped only after %v", kind, time.tick_since(t0))
+	}
+}

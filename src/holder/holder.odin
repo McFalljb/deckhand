@@ -38,6 +38,7 @@ MAX_ROWS :: holderwire.MAX_ROWS
 READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
 SPAWN_TIMEOUT :: 10 * time.Second // the app gives up (and RELEASEs) sooner; this is the backstop
+HELLO_TIMEOUT :: 5 * time.Second // from accept: a connection that has not said HELLO is dropped
 LINGER :: 5 * time.Second // after GOODBYE_ACK: how long the core may take to close
 
 Config :: struct {
@@ -52,6 +53,7 @@ Config :: struct {
 	queue_cap:     int,
 	quiet:         bool, // no log lines (tests)
 	spawn_timeout: time.Duration, // a SPAWN whose child has not exec'd by then fails
+	hello_timeout: time.Duration, // a connection that has not said HELLO by then is dropped
 	test_spawn_gate: c.int, // tests: > 0, a child reads one byte from it before its exec
 }
 
@@ -65,6 +67,7 @@ default_config :: proc() -> Config {
 		tail_cap = TAIL_CAP,
 		queue_cap = QUEUE_CAP,
 		spawn_timeout = SPAWN_TIMEOUT,
+		hello_timeout = HELLO_TIMEOUT,
 	}
 }
 
@@ -98,6 +101,7 @@ Conn :: struct {
 	out:           [dynamic]u8,
 	out_head:      int,
 	last_rx:       time.Tick,
+	accepted_at:   time.Tick,
 	welcomed:      bool,
 	closing:       bool, // send what is queued, then close (REFUSED, GOODBYE_ACK)
 	linger:        bool, // closing after GOODBYE_ACK: once sent, wait for the core's EOF (or LINGER)
@@ -306,7 +310,7 @@ holder_attach :: proc(h: ^Holder, fd: c.int) -> bool {
 	set_nonblock(fd)
 	set_nosigpipe(fd)
 	cn := new(Conn)
-	cn.fd, cn.peer, cn.last_rx = fd, peer, time.tick_now()
+	cn.fd, cn.peer, cn.last_rx, cn.accepted_at = fd, peer, time.tick_now(), time.tick_now()
 	h.serials += 1
 	cn.serial = h.serials
 	append(&h.conns, cn)
@@ -407,6 +411,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	for cn in h.conns {
 		if cn.closing do t = min(t, ms_until(cn.closing_since, cn.linger ? LINGER : h.cfg.pong_timeout))
 		else do t = min(t, ms_until(cn.last_rx, h.cfg.pong_timeout))
+		if !cn.welcomed && !cn.closing do t = min(t, ms_until(cn.accepted_at, h.cfg.hello_timeout))
 	}
 	for term in h.terms {
 		if term.pending do t = min(t, ms_until(term.spawned_at, h.cfg.spawn_timeout))
@@ -449,6 +454,13 @@ conn_read :: proc(h: ^Holder, cn: ^Conn) {
 	}
 	cn.last_rx = time.tick_now()
 	holderwire.stream_feed(&cn.rx, h.buf[:n])
+	// before HELLO only a HELLO, judged by its header (nothing of a big payload is buffered)
+	if hd, whole := holderwire.parse_header(cn.rx.buf[cn.rx.head:]); whole && !cn.welcomed {
+		if hd.kind != u8(holderwire.Kind.Hello) || hd.len > holderwire.MAX_CONTROL {
+			conn_drop(h, cn, fmt.tprintf("frame kind %d (%d bytes) before HELLO", hd.kind, hd.len))
+			return
+		}
+	}
 	for !cn.dead && !cn.closing {
 		f, ferr := holderwire.stream_next(&cn.rx)
 		if ferr == .Need_More do break
@@ -811,6 +823,8 @@ timers :: proc(h: ^Holder) {
 			if time.tick_since(cn.closing_since) >= (cn.linger ? LINGER : h.cfg.pong_timeout) do cn.dead = true
 		} else if time.tick_since(cn.last_rx) >= h.cfg.pong_timeout {
 			conn_drop(h, cn, "no frame within the pong timeout")
+		} else if !cn.welcomed && time.tick_since(cn.accepted_at) >= h.cfg.hello_timeout {
+			conn_drop(h, cn, "no HELLO in time")
 		}
 	}
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {

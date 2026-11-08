@@ -2,7 +2,14 @@ package main
 
 // Terminal snapshots (snapshot.odin, design §5.5 and §7.2).
 
+import "base:runtime"
 import "core:c"
+import "core:fmt"
+import "core:math/rand"
+import "core:os"
+import "core:slice"
+import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import gh "ghostty"
 
@@ -30,4 +37,463 @@ term_tracks_continuation :: proc(t: ^testing.T) {
 	term_start(term, {"/bin/sh", "-c", "exit 0"}, "/tmp")
 	check(t, term.gt, "term_start")
 	term_free(term)
+}
+
+// ---- the corpus (a subset of S1's; the full run is tools/vt-snapshot-spike on spike/vt-snapshot) ----
+
+@(private = "file")
+Snap_Resize :: struct {
+	cols, rows: u16,
+}
+@(private = "file")
+Snap_Event :: union {
+	string,
+	Snap_Resize,
+}
+@(private = "file")
+Snap_Case :: struct {
+	name:       string,
+	cols, rows: u16,
+	events:     []Snap_Event,
+}
+
+ESC :: "\x1b"
+
+// Built once, outside the tests' allocators (the tests reset the temp one).
+@(private = "file")
+snap_corpus_cache: []Snap_Case
+
+@(private = "file")
+snap_corpus :: proc() -> []Snap_Case {
+	if snap_corpus_cache == nil do snap_corpus_cache = snap_corpus_build()
+	return snap_corpus_cache
+}
+
+@(private = "file")
+snap_corpus_build :: proc() -> []Snap_Case {
+	a := runtime.heap_allocator()
+	out := make([dynamic]Snap_Case, a)
+	ls, _ := os.read_entire_file("tests/vt-corpus/ls.bin", a)
+	append(&out, Snap_Case{"ls-real", 120, 40, slice.clone([]Snap_Event{string(ls), "$ "}, a)})
+
+	vim := strings.builder_make(a)
+	strings.write_string(&vim, ESC + "]0;vim main.odin\x07" + ESC + "[?1049h" + ESC + "[?1h" + ESC + "=" + ESC + "[?2004h" + ESC + "[?1002h" + ESC + "[?1006h" + ESC + "[?25l")
+	strings.write_string(&vim, ESC + "[H" + ESC + "[2J" + ESC + "[1;18r")
+	for y in 1 ..= 18 do fmt.sbprintf(&vim, ESC + "[%d;1H" + ESC + "[38;5;244m%3d " + ESC + "[0m" + ESC + "[38;2;200;120;%dmproc" + ESC + "[0m " + ESC + "[1;3mname_%d" + ESC + "[0m", y, y, y * 8, y)
+	strings.write_string(&vim, ESC + "[19;1H" + ESC + "[7m main.odin [+]" + ESC + "[K" + ESC + "[0m" + ESC + "[20;1H-- INSERT --")
+	strings.write_string(&vim, ESC + "[18;1H\n\n" + ESC + "[38;5;196mscrolled" + ESC + "[0m" + ESC + "[1;1H" + ESC + "M" + "top" + ESC + "[2S" + ESC + "[1T")
+	strings.write_string(&vim, ESC + "[?6h" + ESC + "[5;10Horigin" + ESC + "[?6l" + ESC + "[4 q" + ESC + "[?25h" + ESC + "[10;20H" + ESC + "7")
+	append(&out, Snap_Case{"vim-alt", 80, 20, slice.clone([]Snap_Event{"$ history\r\n$ vim main.odin\r\n", strings.to_string(vim), ESC + "[12;5Htyping" + ESC + "[4hINS" + ESC + "[4l"}, a)})
+
+	htop := strings.builder_make(a)
+	state := rand.create(7)
+	gen := rand.default_random_generator(&state)
+	strings.write_string(&htop, ESC + "[?1049h" + ESC + "[?1000h")
+	sgr := [?]string{"[1;4m", "[2;9m", "[4:3m" + ESC + "[58;2;255;0;0m", "[53;5m", "[7;8m", "[0m", "[22;24;27;28m"}
+	for _ in 0 ..< 3 {
+		for y in 1 ..= 24 {
+			fmt.sbprintf(&htop, ESC + "[%d;1H", y)
+			for x := 0; x < 70; {
+				switch rand.int_max(4, gen) {
+				case 0: fmt.sbprintf(&htop, ESC + "[38;5;%dm", rand.int_max(256, gen))
+				case 1: fmt.sbprintf(&htop, ESC + "[48;2;%d;%d;%dm", rand.int_max(256, gen), rand.int_max(256, gen), rand.int_max(256, gen))
+				case: strings.write_string(&htop, ESC); strings.write_string(&htop, sgr[rand.int_max(len(sgr), gen)])
+				}
+				n := 1 + rand.int_max(10, gen)
+				for _ in 0 ..< n do strings.write_byte(&htop, u8('a' + rand.int_max(26, gen)))
+				x += n
+			}
+			strings.write_string(&htop, ESC + "[K")
+		}
+	}
+	append(&out, Snap_Case{"htop-sgr", 80, 24, slice.clone([]Snap_Event{strings.to_string(htop)}, a)})
+
+	uni := strings.builder_make(a)
+	for i in 0 ..< 20 do fmt.sbprintf(&uni, "日本語 中文 한국어 👨‍👩‍👧 🇯🇵 👍🏽 ❤️ e\u0301 " + ESC + "[3%dm%d" + ESC + "[0m\r\n", i % 8, i)
+	strings.write_string(&uni, ESC + "[5;40H漢字" + ESC + "[8;39H😀😀")
+	append(&out, Snap_Case{"unicode", 40, 12, slice.clone([]Snap_Event{strings.to_string(uni)}, a)})
+
+	links := strings.builder_make(a)
+	for i in 0 ..< 20 do fmt.sbprintf(&links, "see " + ESC + "]8;id=l%d;https://example.com/%d" + ESC + "\\link" + ESC + "]8;;" + ESC + "\\ " + ESC + "]8;;file:///tmp/f%d\x07" + ESC + "[4mfile" + ESC + "[24m" + ESC + "]8;;\x07\r\n", i, i, i)
+	strings.write_string(&links, ESC + "]8;;https://open.example/" + ESC + "\\open")
+	append(&out, Snap_Case{"osc8", 60, 12, slice.clone([]Snap_Event{strings.to_string(links)}, a)})
+
+	append(&out, Snap_Case{"partial-esc", 60, 10, slice.clone([]Snap_Event{"hello " + ESC + "[1mbold" + ESC + "[0m\r\n", ESC + "[38;2;10", ";20;30mtrue" + ESC + "[0m ", "\xe6\x97", "\xa5 " + ESC + "]2;partial ti", "tle" + ESC + "\\" + ESC + "P", "+q544e" + ESC + "\\dcs\r\n" + ESC, "[31mred" + ESC + "[0m"}, a)})
+
+	long := strings.builder_make(a)
+	for i in 0 ..< 80 do fmt.sbprintf(&long, ESC + "[3%dmline %d " + ESC + "[0m%s\r\n", i % 8, i, strings.repeat("wrapping text ", 1 + i % 6, a))
+	append(&out, Snap_Case{"resize", 60, 16, slice.clone([]Snap_Event{strings.to_string(long), Snap_Resize{90, 20}, strings.concatenate({"grown ", strings.repeat("x", 120, a), "\r\n"}, a), Snap_Resize{40, 12}, "shrunk " + ESC + "[1;1Htop", ESC + "[?1049h alt " + ESC + "[5;5Hin alt", Snap_Resize{50, 14}, "more"}, a)})
+
+	misc := strings.builder_make(a)
+	strings.write_string(&misc, "shell\r\n" + ESC + "]7;file://host/tmp/proj" + ESC + "\\" + ESC + "]4;1;rgb:12/34/56" + ESC + "\\" + ESC + "]10;rgb:ee/dd/cc" + ESC + "\\" + ESC + "]11;rgb:11/22/33" + ESC + "\\" + ESC + "]12;rgb:ff/00/ff" + ESC + "\\")
+	strings.write_string(&misc, ESC + "[3g" + ESC + "[1;5H" + ESC + "H" + ESC + "[1;13H" + ESC + "H" + ESC + "[H\tA\tB\r\n" + ESC + "(0lqqk" + ESC + "(B\r\n" + ESC + ")0\x0elqk\x0f SO/SI\r\n")
+	strings.write_string(&misc, ESC + "[1\"qprotected" + ESC + "[0\"q not\r\n" + ESC + "[?69h" + ESC + "[5;60s" + ESC + "[5;20r" + ESC + "[?7l" + ESC + "[6;55Hno autowrap past the margin" + ESC + "[?7h")
+	strings.write_string(&misc, ESC + "[?45h" + ESC + "[?1004h" + ESC + "[?2031h" + ESC + "[>1u" + ESC + "[>4;2m" + ESC + "[20h" + ESC + "[?5h" + ESC + "[?12h")
+	strings.write_string(&misc, ESC + "]133;A" + ESC + "\\$ " + ESC + "]133;B" + ESC + "\\ls" + ESC + "]133;C" + ESC + "\\")
+	strings.write_string(&misc, ESC + "[1;3;38;5;208m" + ESC + "[10;8H" + ESC + "7" + ESC + "[15;30H" + ESC + "[0;48;5;22m" + ESC + "[24;80HX")
+	append(&out, Snap_Case{"misc-state", 80, 24, slice.clone([]Snap_Event{strings.to_string(misc)}, a)})
+	return out[:]
+}
+
+// A terminal as Deckhand makes one (term_new_gt), without a Term.
+@(private = "file")
+snap_gt :: proc(cols, rows: u16) -> gh.Terminal {
+	gt: gh.Terminal
+	gh.terminal_new(nil, &gt, cols, rows)
+	sb := uint(TERM_SCROLLBACK_MAX)
+	gh.terminal_set(gt, .Scrollback_Max_Bytes, &sb)
+	limit := TERM_CONTINUATION_MAX
+	gh.terminal_set(gt, .Continuation_Max_Bytes, &limit)
+	mc := gh.Mode_Config{mode = gh.mode_dec(2027), value = true}
+	gh.terminal_set(gt, .Mode, &mc)
+	return gt
+}
+
+@(private = "file")
+snap_write :: proc(gt: gh.Terminal, s: string) {if len(s) > 0 do gh.terminal_vt_write(gt, raw_data(s), len(s))}
+
+// Feeds s in random chunks, heavy on small ones so escapes split.
+@(private = "file")
+snap_feed :: proc(gt: gh.Terminal, s: string, gen: rand.Generator) {
+	for i := 0; i < len(s); {
+		n: int
+		switch rand.int_max(3, gen) {
+		case 0: n = 1 + rand.int_max(3, gen)
+		case 1: n = 1 + rand.int_max(64, gen)
+		case: n = 1 + rand.int_max(4096, gen)
+		}
+		n = min(n, len(s) - i)
+		snap_write(gt, s[i:i + n])
+		i += n
+	}
+}
+
+@(private = "file")
+snap_apply :: proc(gt: gh.Terminal, ev: Snap_Event, gen: rand.Generator) {
+	switch e in ev {
+	case string: snap_feed(gt, e, gen)
+	case Snap_Resize: gh.terminal_resize(gt, e.cols, e.rows, 8, 16)
+	}
+}
+
+@(private = "file")
+snap_dump :: proc(gt: gh.Terminal) -> string {
+	sb := strings.builder_make(context.temp_allocator)
+	screen_dump(gt, &sb)
+	return strings.to_string(sb)
+}
+
+// Equal dumps, or the first differing line.
+@(private = "file")
+snap_same :: proc(t: ^testing.T, a, b: gh.Terminal, what: string) -> bool {
+	da, db := snap_dump(a), snap_dump(b)
+	if da == db do return true
+	la, lb := strings.split_lines(da, context.temp_allocator), strings.split_lines(db, context.temp_allocator)
+	for i in 0 ..< max(len(la), len(lb)) {
+		x := i < len(la) ? la[i] : "<none>"
+		y := i < len(lb) ? lb[i] : "<none>"
+		if x != y {
+			testing.expectf(t, false, "%s: line %d differs\n  A: %.200s\n  B: %.200s", what, i, x, y)
+			break
+		}
+	}
+	return false
+}
+
+// Probes the same bytes into both: hidden state (pen and charset, tab stops,
+// saved cursor, scroll region, pending wrap, the other screen) shows up.
+SNAP_PROBES := [?]string{"Pqx\tT\tT" + ESC + "8R" + ESC + "[999;1HA\n\n\nB" + ESC + "MC" + ESC + "[1;1HD" + ESC + "[5SE" + ESC + "[2TF", ESC + "[?1049l" + ESC + "[?47lQ" + ESC + "8S" + ESC + "[999;999HZ"}
+
+// Snapshot at a random byte of a random event, rebuild, feed both the rest
+// (resizes at the same offset), compare before and after the probes.
+@(private = "file")
+snap_roundtrip :: proc(t: ^testing.T, cs: Snap_Case, seed: u64, formats: []string) -> (exact: bool, meta: Snapshot_Meta) {
+	state := rand.create(seed)
+	gen := rand.default_random_generator(&state)
+	a := snap_gt(cs.cols, cs.rows)
+	defer gh.terminal_free(a)
+	b: gh.Terminal
+	defer if b != nil do gh.terminal_free(b)
+	at := rand.int_max(len(cs.events) + 1, gen)
+	take :: proc(t: ^testing.T, a: gh.Terminal, formats: []string, cs: Snap_Case, meta: ^Snapshot_Meta) -> gh.Terminal {
+		blob, used, err := snapshot_encode(a, {offset = 42}, formats, true, context.temp_allocator)
+		if !testing.expectf(t, err == .None, "%s: encode %v", cs.name, err) do return nil
+		gt, m, derr := snapshot_decode(blob)
+		testing.expectf(t, derr == .None, "%s: decode %v", cs.name, derr)
+		testing.expect_value(t, m.format, used.format)
+		testing.expect_value(t, m.offset, 42)
+		meta^ = m
+		return gt
+	}
+	for ev, i in cs.events {
+		if i == at {
+			if s, ok := ev.(string); ok {
+				cut := rand.int_max(len(s) + 1, gen)
+				snap_feed(a, s[:cut], gen)
+				b = take(t, a, formats, cs, &meta)
+				if b == nil do return false, meta
+				s2 := rand.create(seed ~ 0x5eed)
+				g2 := rand.default_random_generator(&s2)
+				s3 := s2
+				g3 := rand.default_random_generator(&s3)
+				snap_feed(a, s[cut:], g2)
+				snap_feed(b, s[cut:], g3)
+				continue
+			}
+			b = take(t, a, formats, cs, &meta)
+			if b == nil do return false, meta
+		}
+		if b == nil {
+			snap_apply(a, ev, gen)
+		} else {
+			s2 := rand.create(seed + u64(i))
+			g2 := rand.default_random_generator(&s2)
+			s3 := s2
+			g3 := rand.default_random_generator(&s3)
+			snap_apply(a, ev, g2)
+			snap_apply(b, ev, g3)
+		}
+	}
+	if b == nil do b = take(t, a, formats, cs, &meta)
+	if b == nil do return false, meta
+	exact = snap_dump(a) == snap_dump(b)
+	for p in SNAP_PROBES {
+		snap_write(a, p)
+		snap_write(b, p)
+		exact = exact && snap_dump(a) == snap_dump(b)
+	}
+	return exact, meta
+}
+
+@(test)
+snapshot_corpus_roundtrip :: proc(t: ^testing.T) {
+	for cs in snap_corpus() {
+		for s in 0 ..< 10 {
+			seed := t.seed + u64(s) * 104729
+			exact, meta := snap_roundtrip(t, cs, seed, SNAPSHOT_FORMATS[:])
+			testing.expectf(t, exact, "%s: GHOSTSNP round trip not exact (seed %d)", cs.name, seed)
+			testing.expect_value(t, meta.format, SNAPSHOT_GHOSTSNP)
+			testing.expect(t, !meta.inexact)
+			free_all(context.temp_allocator)
+		}
+	}
+}
+
+// Same bytes, different chunking: the same screen hash.
+@(test)
+snapshot_determinism :: proc(t: ^testing.T) {
+	for cs in snap_corpus() {
+		hashes: [3]u64
+		for s in 0 ..< 3 {
+			state := rand.create(t.seed + u64(s))
+			gen := rand.default_random_generator(&state)
+			gt := snap_gt(cs.cols, cs.rows)
+			for ev in cs.events do snap_apply(gt, ev, gen)
+			both: bool
+			hashes[s], both = screen_hash(gt)
+			testing.expect(t, both)
+			gh.terminal_free(gt)
+		}
+		testing.expectf(t, hashes[0] == hashes[1] && hashes[1] == hashes[2], "%s: hashes %v", cs.name, hashes)
+		free_all(context.temp_allocator)
+	}
+}
+
+// The VT fallback, for a peer without GHOSTSNP: inexact, exact where S1 found
+// it so, and missing the screen behind the alt screen.
+@(test)
+snapshot_vt_fallback :: proc(t: ^testing.T) {
+	vt_only := []string{SNAPSHOT_VT}
+	corpus := snap_corpus()
+	for cs in corpus {
+		if cs.name != "ls-real" && cs.name != "unicode" && cs.name != "vim-alt" do continue
+		a := snap_gt(cs.cols, cs.rows)
+		for ev in cs.events do if s, ok := ev.(string); ok do snap_write(a, s)
+		blob, meta, err := snapshot_encode(a, {}, vt_only, false, context.temp_allocator)
+		testing.expect_value(t, err, Snapshot_Error.None)
+		testing.expect_value(t, meta.format, SNAPSHOT_VT)
+		testing.expect(t, meta.inexact)
+		b, _, derr := snapshot_decode(blob)
+		testing.expect_value(t, derr, Snapshot_Error.None)
+		ha, _ := screen_hash(a)
+		hb, _ := screen_hash(b)
+		if cs.name == "vim-alt" {
+			testing.expectf(t, ha != hb, "vim-alt: the VT fallback now keeps the primary screen; update §5.5")
+			// what is there matches: the alt screen itself
+			testing.expect(t, strings.contains(snap_dump(b), "-- INSERT --"))
+		} else {
+			snap_same(t, a, b, fmt.tprintf("%s via vt", cs.name))
+		}
+		gh.terminal_free(a)
+		gh.terminal_free(b)
+		free_all(context.temp_allocator)
+	}
+	_, _, err := snapshot_encode(nil, {}, []string{"ghostsnp/9"}, true)
+	testing.expect_value(t, err, Snapshot_Error.No_Common_Format)
+	testing.expect_value(t, snapshot_pick_format({"vt", "ghostsnp/1"}), SNAPSHOT_GHOSTSNP)
+	testing.expect_value(t, snapshot_pick_format({"ghostsnp/2"}), "")
+}
+
+// An unfinished sequence over the continuation limit: GHOSTSNP can't encode
+// until it ends; a handover may take the VT fallback meanwhile.
+@(test)
+snapshot_over_limit :: proc(t: ^testing.T) {
+	gt := snap_gt(40, 10)
+	defer gh.terminal_free(gt)
+	small: c.size_t = 64 * 1024
+	gh.terminal_set(gt, .Continuation_Max_Bytes, &small)
+	snap_write(gt, "before\r\n" + ESC + "]52;c;")
+	snap_write(gt, strings.repeat("QUFB", 25 * 1024, context.temp_allocator)) // 100 KiB
+	_, _, err := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	testing.expect_value(t, err, Snapshot_Error.Unfinished)
+	_, _, err = snapshot_encode(gt, {}, []string{SNAPSHOT_GHOSTSNP}, true, context.temp_allocator)
+	testing.expect_value(t, err, Snapshot_Error.Unfinished) // no VT to fall back to
+	blob, meta, err2 := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], true, context.temp_allocator)
+	testing.expect_value(t, err2, Snapshot_Error.None)
+	testing.expect_value(t, meta.format, SNAPSHOT_VT)
+	testing.expect(t, meta.inexact)
+	_, both := screen_hash(gt)
+	testing.expect(t, !both)
+	b, _, _ := snapshot_decode(blob)
+	testing.expect(t, strings.contains(snap_dump(b), "before"))
+	gh.terminal_free(b)
+	// the sequence ends: exact again
+	snap_write(gt, "\x07after")
+	blob, meta, err = snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	testing.expect_value(t, err, Snapshot_Error.None)
+	testing.expect_value(t, meta.format, SNAPSHOT_GHOSTSNP)
+	b, _, _ = snapshot_decode(blob)
+	snap_same(t, gt, b, "after the OSC ended")
+	gh.terminal_free(b)
+	free_all(context.temp_allocator)
+}
+
+@(test)
+snapshot_continuation_trim :: proc(t: ^testing.T) {
+	gt := snap_gt(40, 10)
+	defer gh.terminal_free(gt)
+	snap_write(gt, ESC + "]52;c;")
+	snap_write(gt, strings.repeat("QUFB", 512 * 1024, context.temp_allocator)) // 2 MiB
+	testing.expect(t, !term_continuation_trim(gt)) // mid-sequence: left alone
+	snap_write(gt, "\x07" + ESC + "[1")
+	testing.expect(t, !term_continuation_trim(gt))
+	snap_write(gt, "mX")
+	testing.expect(t, term_continuation_trim(gt))
+	limit: c.size_t
+	gh.terminal_get(gt, .Continuation_Max_Bytes, &limit)
+	testing.expect_value(t, limit, TERM_CONTINUATION_MAX)
+	snap_write(gt, ESC + "[3") // and tracking still works
+	_, _, err := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	testing.expect_value(t, err, Snapshot_Error.None)
+	free_all(context.temp_allocator)
+}
+
+@(test)
+snapshot_bad_input :: proc(t: ^testing.T) {
+	gt := snap_gt(20, 4)
+	defer gh.terminal_free(gt)
+	snap_write(gt, "hi")
+	blob, _, _ := snapshot_encode(gt, {offset = 7}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	cases := [?][]u8{blob[:2], blob[:len(blob) / 2], blob[:len(blob) - 1], slice.concatenate([][]u8{blob, {1, 2, 3}}, context.temp_allocator)}
+	for b, i in cases {
+		_, _, err := snapshot_decode(b)
+		testing.expectf(t, err == .Bad_Snapshot, "case %d: %v", i, err)
+	}
+	pack :: proc(meta: string, body: string) -> []u8 {
+		out := make([dynamic]u8, context.temp_allocator)
+		n := [4]u8{u8(len(meta)), 0, 0, 0}
+		append(&out, ..n[:])
+		append(&out, meta)
+		append(&out, body)
+		return out[:]
+	}
+	_, _, err := snapshot_decode(pack(`{"format":"ghostsnp/7","cols":20,"rows":4}`, "x"))
+	testing.expect_value(t, err, Snapshot_Error.Unknown_Format)
+	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":0,"rows":4}`, "x"))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	_, _, err = snapshot_decode(pack(`[1]`, ""))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	// a newer side's extra meta fields are ignored
+	g2, m, e2 := snapshot_decode(pack(`{"format":"vt","cols":20,"rows":4,"future":{"x":1}}`, "ok"))
+	testing.expect_value(t, e2, Snapshot_Error.None)
+	testing.expect_value(t, m.cols, 20)
+	if g2 != nil do gh.terminal_free(g2)
+	free_all(context.temp_allocator)
+}
+
+// Snapshots written by the libghostty-vt this branch shipped with
+// (tests/vt-corpus/ghostsnp-1/) still decode to the same screen as a live
+// terminal fed the same bytes. This is the libghostty bump check (DEVELOPING.md):
+// a failure after a bump means old snapshots no longer restore exactly.
+// VT_CORPUS_WRITE=1 writes missing files (only when adding a case).
+@(test)
+snapshot_stored_corpus :: proc(t: ^testing.T) {
+	write := os.get_env("VT_CORPUS_WRITE", context.temp_allocator) == "1"
+	stored := 0
+	for cs in snap_corpus() {
+		if cs.name == "ls-real" || cs.name == "htop-sgr" || cs.name == "resize" do continue // size; covered live
+		a := snap_gt(cs.cols, cs.rows)
+		for ev in cs.events {
+			switch e in ev {
+			case string: snap_write(a, e)
+			case Snap_Resize: gh.terminal_resize(a, e.cols, e.rows, 8, 16)
+			}
+		}
+		path := fmt.tprintf("tests/vt-corpus/ghostsnp-1/%s.snap", cs.name)
+		if write {
+			if _, err := os.stat(path, context.temp_allocator); err != nil {
+				os.make_directory_all("tests/vt-corpus/ghostsnp-1")
+				blob, _, _ := snapshot_encode(a, {offset = 1}, {SNAPSHOT_GHOSTSNP}, false, context.temp_allocator)
+				_ = os.write_entire_file(path, blob)
+			}
+		}
+		data, err := os.read_entire_file(path, context.temp_allocator)
+		if testing.expectf(t, err == nil, "%s missing", path) {
+			b, meta, derr := snapshot_decode(data)
+			if testing.expectf(t, derr == .None, "%s: %v", path, derr) {
+				testing.expect_value(t, meta.format, SNAPSHOT_GHOSTSNP)
+				snap_same(t, a, b, path)
+				gh.terminal_free(b)
+				stored += 1
+			}
+		}
+		gh.terminal_free(a)
+		free_all(context.temp_allocator)
+	}
+	testing.expect_value(t, stored, 5)
+}
+
+// A decoded terminal joins a Term: callbacks (query replies), the limit and the
+// size come back.
+@(test)
+snapshot_adopt :: proc(t: ^testing.T) {
+	app_context = context
+	src := snap_gt(30, 6)
+	snap_write(src, "restored " + ESC + "[1;31mred")
+	blob, _, _ := snapshot_encode(src, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	gh.terminal_free(src)
+	gt, _, err := snapshot_decode(blob)
+	testing.expect_value(t, err, Snapshot_Error.None)
+	term := new(Term)
+	defer free(term)
+	testing.expect(t, term_init(term, 80, 24))
+	fds: [2]posix.FD
+	posix.pipe(&fds)
+	term.pty.fd = i32(fds[1])
+	term.running = true
+	term_adopt_gt(term, gt)
+	testing.expect_value(t, term.cols, 30)
+	testing.expect_value(t, term.rows, 6)
+	limit: c.size_t
+	gh.terminal_get(term.gt, .Continuation_Max_Bytes, &limit)
+	testing.expect_value(t, limit, TERM_CONTINUATION_MAX)
+	snap_write(term.gt, ESC + "[6n") // cursor position report: answered through Write_Pty
+	posix.fcntl(fds[0], .SETFL, posix.O_NONBLOCK)
+	buf: [64]u8
+	n := posix.read(fds[0], &buf[0], len(buf))
+	testing.expect_value(t, n > 0 ? string(buf[:n]) : "", ESC + "[1;13R")
+	term.running = false
+	term_free(term)
+	posix.close(fds[0])
+	free_all(context.temp_allocator)
 }

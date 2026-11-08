@@ -126,6 +126,7 @@ on_color_scheme :: proc "c" (gt: gh.Terminal, userdata: rawptr, out: ^gh.Color_S
 // the library keeps the buffer's high-water capacity, so term_pump trims it
 // (term_continuation_trim).
 TERM_CONTINUATION_MAX :: c.size_t(9 * 1024 * 1024)
+TERM_SCROLLBACK_MAX :: 20 * 1024 * 1024
 // trim the continuation buffer at most once per this much output
 CONT_TRIM_EVERY :: 1024 * 1024
 
@@ -133,7 +134,7 @@ CONT_TRIM_EVERY :: 1024 * 1024
 // 2027), then term_attach_gt.
 term_new_gt :: proc(t: ^Term) -> bool {
 	if gh.terminal_new(nil, &t.gt, t.cols, t.rows) != .Success do return false
-	max_bytes: uint = 20 * 1024 * 1024
+	max_bytes := uint(TERM_SCROLLBACK_MAX)
 	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
 	grapheme_clusters(t)
 	term_attach_gt(t)

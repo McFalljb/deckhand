@@ -100,6 +100,20 @@ libghostty-vt's C ABI is not stable yet, and `src/ghostty/ghostty.odin` is hand-
 v1.4.0. `./build.sh test` checks struct sizes, offsets and key-enum values against the C headers,
 so rerun it after bumping the tag.
 
+**Bumping libghostty-vt**, also check terminal snapshots (`src/snapshot.odin`; design
+[§5.5](plans/background-core.md#55-terminal-streams-option-a)):
+
+1. `./build.sh test` must pass `snapshot_stored_corpus`. It decodes the GHOSTSNP snapshots that the
+   previous library wrote (`tests/vt-corpus/ghostsnp-1/`) and compares each with a live terminal
+   fed the same bytes. A failure means snapshots from the old version no longer restore exactly.
+2. If the snapshot format version changed (bytes 8–9 of the body after `GHOSTSNP`), add
+   `ghostsnp/N` to `SNAPSHOT_FORMATS` ahead of the old one. Keep the old one while a released core
+   may still send it; the VT fallback covers anything older.
+3. Rerun S1's full corpus (`tools/vt-snapshot-spike` on the `spike/vt-snapshot` branch) and check
+   that `TERM_CONTINUATION_MAX` still covers the parser's longest kept sequence (`osc.zig`
+   `MAX_ALLOCATING_BUF`).
+4. Then add the new version's snapshots under a new directory, keeping the old ones.
+
 ## Releases
 
 Releases are built and signed on the release signer's Mac, in one command:
@@ -261,6 +275,8 @@ titles.odin    session titles by pi's rule: files streamed once, cached by offse
 term.odin      one terminal: PTY + reader thread + libghostty-vt, drawing, input encoding
 pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
 ghostty/       Odin bindings for the libghostty-vt calls used
+snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
+holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
 autotest.odin  PI_DESK_SCRIPT test mode
 *_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```

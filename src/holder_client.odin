@@ -28,6 +28,7 @@ package main
 // Writes take hc.wmu and are whole frames; a write that fails or blocks 5 s (SO_SNDTIMEO) shuts
 // the socket (half a frame may be out), which loses the holder.
 
+import "base:runtime"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
@@ -345,6 +346,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer
+	rx_reset()
 	handshake_got = 0
 	fail :: proc(why: string) -> Connect_Result {
 		fmt.eprintln("Deckhand: session holder:", why)
@@ -437,6 +439,16 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	hc.reader = thread.create_and_start(holder_reader)
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
+}
+
+// An empty hc.rx whose buffer is the heap's. A [dynamic] adopts context.allocator at its first
+// append, and the handshake's is on the caller's thread with the caller's allocator (the app
+// switches it to temp in places): the reader thread would then append into memory the next
+// free_all takes back.
+@(private = "file")
+rx_reset :: proc() {
+	hw.stream_destroy(&hc.rx)
+	hc.rx = {buf = make([dynamic]u8, runtime.heap_allocator())}
 }
 
 // The next whole frame during the handshake (main thread, before the reader runs).
@@ -1073,8 +1085,7 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 		return fmt.tprintf("refused its peer: %v", d), false
 	}
 	set_timeouts(fd)
-	hw.stream_destroy(&hc.rx)
-	hc.rx = {}
+	rx_reset()
 	sync.lock(&hc.wmu)
 	hc.fd, hc.peer = fd, peer
 	sync.unlock(&hc.wmu)

@@ -523,7 +523,10 @@ snapshot_hostile_meta :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
 	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":65535,"rows":65535}`, "hello\x1b[2J"))
 	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
-	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":1001,"rows":4}`, ""))
+	_, _, err = snapshot_decode(pack(`{"format":"vt","cols":2001,"rows":4}`, ""))
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	nl := strings.concatenate({"{\"format\":[\"\n,", strings.repeat("[", 60_000, context.temp_allocator)}, context.temp_allocator)
+	_, _, err = snapshot_decode(pack(nl, ""))
 	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
 	// GHOSTSNP whose grid disagrees with its meta
 	gt := snap_gt(30, 6)
@@ -556,4 +559,73 @@ snapshot_ghostsnp_version :: proc(t: ^testing.T) {
 	testing.expect_value(t, meta.format, SNAPSHOT_GHOSTSNP)
 	testing.expect_value(t, u16(body[8]) | u16(body[9]) << 8, 1)
 	free_all(context.temp_allocator)
+}
+
+// The GHOSTSNP pre-check reads the grid from the TERMINAL record (body[20:24])
+// before the codec allocates it: a valid-CRC body larger than its meta is refused.
+@(test)
+snapshot_ghostsnp_precheck :: proc(t: ^testing.T) {
+	gt := snap_gt(30, 6)
+	defer gh.terminal_free(gt)
+	blob, _, _ := snapshot_encode(gt, {}, SNAPSHOT_FORMATS[:], false, context.temp_allocator)
+	meta, body, _ := snapshot_unpack(blob)
+	cols, _ := endian.get_u16(body[20:22], .Little)
+	rows, _ := endian.get_u16(body[22:24], .Little)
+	tag, _ := endian.get_u16(body[10:12], .Little)
+	testing.expect_value(t, tag, 1)
+	testing.expect_value(t, cols, 30)
+	testing.expect_value(t, rows, 6)
+	cols_ok, _ := snapshot_ghostsnp_grid(body)
+	testing.expect(t, cols_ok)
+	// a body claiming 2000x1000 (CRC fixed up) under a 30x6 meta
+	evil := slice.clone(body, context.temp_allocator)
+	endian.put_u16(evil[20:22], .Little, 2000)
+	endian.put_u16(evil[22:24], .Little, 1000)
+	plen, _ := endian.get_u32(evil[12:16], .Little)
+	crc := crc32c(evil[10:16], 0)
+	crc = crc32c(evil[20:20 + plen], crc)
+	endian.put_u32(evil[16:20], .Little, crc)
+	mj, _ := json.marshal(meta, {}, context.temp_allocator)
+	out := make([dynamic]u8, context.temp_allocator)
+	n: [4]u8
+	endian.put_u32(n[:], .Little, u32(len(mj)))
+	append(&out, ..n[:])
+	append(&out, ..mj)
+	append(&out, ..evil)
+	_, _, err := snapshot_decode(out[:])
+	testing.expect_value(t, err, Snapshot_Error.Bad_Snapshot)
+	ok, _ := snapshot_ghostsnp_grid(evil)
+	testing.expect(t, ok) // well formed: refused for disagreeing with the meta
+	short_ok, _ := snapshot_ghostsnp_grid(body[:23])
+	testing.expect(t, !short_ok)
+	free_all(context.temp_allocator)
+}
+
+// CRC32C (Castagnoli), as GHOSTSNP records use.
+@(private = "file")
+crc32c :: proc(b: []u8, prev: u32) -> u32 {
+	crc := ~prev
+	for x in b {
+		crc ~= u32(x)
+		for _ in 0 ..< 8 do crc = (crc >> 1) ~ (0x82F63B78 & (0 - (crc & 1)))
+	}
+	return ~crc
+}
+
+// The grid never exceeds what a snapshot may carry (round 2: a small font on
+// an ultrawide display).
+@(test)
+term_rect_clamped :: proc(t: ^testing.T) {
+	app_context = context
+	font.cell_w, font.cell_h = 1, 1
+	term := new(Term)
+	defer free(term)
+	testing.expect(t, term_init(term, 80, 24))
+	term_set_rect(term, 0, 0, 10_000, 5_000)
+	testing.expect_value(t, int(term.cols), MAX_TERM_COLS)
+	testing.expect_value(t, int(term.rows), MAX_TERM_ROWS)
+	gt_cols: u16
+	gh.terminal_get(term.gt, .Cols, &gt_cols)
+	testing.expect_value(t, int(gt_cols), MAX_TERM_COLS)
+	term_free(term)
 }

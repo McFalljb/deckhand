@@ -279,8 +279,9 @@ decoder_fuzz :: proc(t: ^testing.T) {
 	deep100k := strings.concatenate({`{"wire":1,"x":`, strings.repeat("[", 100_000, context.temp_allocator)}, h)
 	objects := strings.repeat(`{"a":`, 50_000, h)
 	many_keys := strings.concatenate({`{"wire":1,`, strings.repeat(`"k":0,`, 20_000, context.temp_allocator), `"z":0}`}, h)
-	defer {delete(deep300); delete(deep100k); delete(objects); delete(many_keys)}
-	shapes := []string{`{"wire": {}}`, `{"terminals": [1, 2]}`, `{"terminals": [{"exit": 5}]}`, `{"argv": [1]}`, `null`, `"x"`, `{"wire": 1e400}`, `{"wire": -9223372036854775809}`, deep300, deep100k, objects, many_keys, `{"s":"\\\"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[","wire":1}`}
+	newline := strings.concatenate({"{\"wire\":[\"\n,", strings.repeat("[", 65_000, context.temp_allocator)}, h)
+	defer {delete(deep300); delete(deep100k); delete(objects); delete(many_keys); delete(newline)}
+	shapes := []string{`{"wire": {}}`, `{"terminals": [1, 2]}`, `{"terminals": [{"exit": 5}]}`, `{"argv": [1]}`, `null`, `"x"`, `{"wire": 1e400}`, `{"wire": -9223372036854775809}`, deep300, deep100k, objects, many_keys, newline, `{"s":"\\\"[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[[","wire":1}`}
 	free_all(context.temp_allocator)
 	for iter in 0 ..< 40_000 {
 		clear(&buf)
@@ -370,6 +371,7 @@ schema_diff_rules :: proc(t: ^testing.T) {
 		for p in probs do if strings.contains(p, what) do found = true
 		testing.expectf(t, found, "%q -> %q: expected a %q problem, got %v", from, to, what, probs)
 	}
+	expect_problem(t, base, "control len <= 1048576", "control len <= 2097152", "header changed")
 	expect_problem(t, base, `"name": "PING", "kind": 30`, `"name": "PING", "kind": 33`, "renumbered")
 	expect_problem(t, base, `{"name": "path", "type": "string", "required": true}`, `{"name": "path", "type": "int", "required": true}`, "type changed")
 	expect_problem(t, base, `{"name": "error", "type": "string", "required": true}]}`, `{"name": "error", "type": "string", "required": true}, {"name": "new", "type": "int", "required": true}]}`, "must be optional")
@@ -396,6 +398,15 @@ hostile_json :: proc(t: ^testing.T) {
 	for i in 0 ..< 60_000 do fmt.sbprintf(&keys, `,"k%d":0`, i)
 	strings.write_byte(&keys, '}')
 	testing.expect_value(t, decode(Frame{u8(Kind.Hello), 0, keys.buf[:]}, .Hello, &h, context.temp_allocator), Msg_Error.Bad_Json)
+	// a raw newline ends a string for Odin's tokenizer, which the parser then ignores (round 2)
+	nl := strings.concatenate({"{\"wire\":[\"\n,", strings.repeat("[", 65_000, context.temp_allocator)}, context.temp_allocator)
+	testing.expect_value(t, decode(Frame{u8(Kind.Hello), 0, transmute([]u8)nl}, .Hello, &h, context.temp_allocator), Msg_Error.Bad_Json)
+	testing.expect(t, !json_shape_ok(transmute([]u8)string(`{"a":"x	y"}`)))
+	testing.expect(t, !json_shape_ok(transmute([]u8)string(`]]{"a":1}`)))
+	testing.expect(t, json_shape_ok(transmute([]u8)string(`{"a":"x\ny \" [[["}`)))
+	// invalid UTF-8 in a string overruns core:encoding/json's unquote buffer (found by the fuzz pass)
+	bad_utf8 := strings.concatenate({`{"wire":1,"s":"`, strings.repeat("\xff", 12, context.temp_allocator), `"}`}, context.temp_allocator)
+	testing.expect_value(t, decode(Frame{u8(Kind.Hello), 0, transmute([]u8)bad_utf8}, .Hello, &h, context.temp_allocator), Msg_Error.Bad_Json)
 	// a control frame over the control cap is refused at the frame layer
 	b := make([]u8, HEADER_SIZE, context.temp_allocator)
 	b[0] = u8(Kind.Hello)
@@ -419,8 +430,26 @@ size_ranges :: proc(t: ^testing.T) {
 	testing.expect_value(t, decode(frame(.Resize, `{"cols":80,"rows":24,"xpixel":640,"ypixel":384}`), .Resize, &r, context.temp_allocator), Msg_Error.None)
 	s: Spawn
 	testing.expect_value(t, decode(frame(.Spawn, `{"argv":["sh"],"env":[],"cwd":"/","cols":80,"rows":100000,"xpixel":0,"ypixel":0}`), .Spawn, &s, context.temp_allocator), Msg_Error.Out_Of_Range)
+	testing.expect_value(t, decode(frame(.Resize, `{"cols":2000,"rows":1000,"xpixel":0,"ypixel":0}`), .Resize, &r, context.temp_allocator), Msg_Error.None)
+	testing.expect_value(t, decode(frame(.Resize, `{"cols":2001,"rows":10,"xpixel":0,"ypixel":0}`), .Resize, &r, context.temp_allocator), Msg_Error.Out_Of_Range)
+	// WELCOME is the bootstrap: one bad terminal is flagged, the rest decode
 	w: Welcome
-	testing.expect_value(t, decode(frame(.Welcome, `{"wire":1,"instance":"i","pid":1,"holder_rev":1,"previous":"none","hmac_key":"k","terminals":[{"id":1,"pid":2,"pgid":2,"cols":5000,"rows":24,"xpixel":0,"ypixel":0,"offset":0,"exit":null}]}`), .Welcome, &w, context.temp_allocator), Msg_Error.Out_Of_Range)
+	testing.expect_value(t, decode(frame(.Welcome, `{"wire":1,"instance":"i","pid":1,"holder_rev":1,"previous":"none","hmac_key":"k","terminals":[{"id":1,"pid":2,"pgid":2,"cols":5000,"rows":24,"xpixel":0,"ypixel":0,"offset":0,"exit":null},{"id":2,"pid":3,"pgid":3,"cols":80,"rows":24,"xpixel":0,"ypixel":0,"offset":9,"exit":null}]}`), .Welcome, &w, context.temp_allocator), Msg_Error.None)
+	if testing.expect_value(t, len(w.terminals), 2) {
+		testing.expect(t, w.terminals[0].bad)
+		testing.expect(t, !w.terminals[1].bad)
+		testing.expect_value(t, w.terminals[1].offset, 9)
+	}
+	// the key limit is per object: a WELCOME with 1000 terminals decodes
+	ws := make([dynamic]Welcome_Terminal, context.temp_allocator)
+	for i in 0 ..< 1000 do append(&ws, Welcome_Terminal{id = i64(i), pid = 1, pgid = 1, cols = 80, rows = 24})
+	b := make([dynamic]u8, context.temp_allocator)
+	testing.expect(t, encode(&b, .Welcome, 0, Welcome{wire = 1, instance = "i", pid = 1, holder_rev = 1, previous = "none", hmac_key = "k", terminals = ws[:]}))
+	f, _, _ := next_frame(b[:])
+	w2: Welcome
+	testing.expect_value(t, decode(f, .Welcome, &w2, context.temp_allocator), Msg_Error.None)
+	testing.expect_value(t, len(w2.terminals), 1000)
+	testing.expect(t, !strings.contains(string(b[:]), "bad")) // the flag never goes on the wire
 	free_all(context.temp_allocator)
 }
 

@@ -33,6 +33,26 @@ SNAPSHOT_FORMATS := [?]string{SNAPSHOT_GHOSTSNP, SNAPSHOT_VT}
 // holderwire.json_shape_ok for why the parser needs guarding).
 SNAPSHOT_META_MAX :: 64 * 1024
 
+// The largest grid a snapshot (and the holder wire) carries; term_set_rect
+// never makes a bigger one, so our own snapshots always decode.
+MAX_TERM_COLS :: hw.MAX_COLS
+MAX_TERM_ROWS :: hw.MAX_ROWS
+
+// The grid a GHOSTSNP body declares, read before the codec allocates it: the
+// TERMINAL record comes first, after the 10-byte envelope and a 10-byte
+// record header (tag u16 = 1, len u32, CRC32C u32), and starts with columns
+// u16 and rows u16 (ghostty src/terminal/snapshot/terminal.zig). This bounds
+// the screen only: history pages declare their own sizes, so the real control
+// against a hostile snapshot is the MAC check (PR B) before snapshot_decode.
+snapshot_ghostsnp_grid :: proc(body: []u8) -> (ok: bool, grid: [2]u16) {
+	if len(body) < 24 || string(body[:8]) != "GHOSTSNP" do return false, {}
+	tag, _ := endian.get_u16(body[10:12], .Little)
+	if tag != 1 do return false, {}
+	grid[0], _ = endian.get_u16(body[20:22], .Little)
+	grid[1], _ = endian.get_u16(body[22:24], .Little)
+	return true, grid
+}
+
 // Beside the terminal: what Deckhand keeps about the stream. Grow-only JSON;
 // unknown fields are ignored. (OSC 7501 status joins in M1 PR B, with the
 // holder that needs it.) After decoding, `format` is always one of the
@@ -190,6 +210,8 @@ snapshot_decode :: proc(blob: []u8) -> (gt: gh.Terminal, meta: Snapshot_Meta, er
 	if err != .None do return
 	switch meta.format {
 	case SNAPSHOT_GHOSTSNP:
+		ok, grid := snapshot_ghostsnp_grid(body)
+		if !ok || i64(grid[0]) != meta.cols || i64(grid[1]) != meta.rows do return nil, meta, .Bad_Snapshot
 		d: gh.Snapshot_Decoder
 		if gh.snapshot_decoder_new_buf(nil, &d, raw_data(body), c.size_t(len(body))) != .Success do return nil, meta, .Bad_Snapshot
 		defer gh.snapshot_decoder_free(d)

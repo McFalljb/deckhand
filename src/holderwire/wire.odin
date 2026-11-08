@@ -17,6 +17,7 @@ package holderwire
 import "core:encoding/endian"
 import "core:encoding/json"
 import "core:time"
+import "core:unicode/utf8"
 
 HEADER_SIZE :: 9
 MAX_PAYLOAD :: 16 * 1024 * 1024 // INPUT, OUTPUT, TAIL and unknown kinds
@@ -26,12 +27,12 @@ MAX_CONTROL :: 1024 * 1024 // a JSON control payload of a known kind
 // object key, so a hostile payload (100 KB of "[", or MBs of keys) overflows
 // the stack. json_shape_ok refuses those before anything parses them.
 JSON_MAX_DEPTH :: 32
-JSON_MAX_KEYS :: 4096
+JSON_MAX_KEYS :: 4096 // per object: the stack cost is unmarshal's alloca per key of one object
 
 // Terminal sizes the wire accepts (Deckhand's largest grid has room to spare);
 // checked on decode, before anyone converts them to u16.
-MAX_COLS :: 1000
-MAX_ROWS :: 500
+MAX_COLS :: 2000
+MAX_ROWS :: 1000
 MAX_PIXELS :: 65535 // winsize's ws_xpixel/ws_ypixel are unsigned short
 
 WIRE :: 1 // the newest wire this code speaks
@@ -137,6 +138,7 @@ Welcome_Terminal :: struct {
 	ypixel: i64,
 	offset: u64, // output bytes produced so far
 	exit:   Maybe(Exit_Status), // null while running
+	bad:    bool `json:"-"`, // set by decode: a size out of range (never on the wire)
 }
 
 Welcome :: struct {
@@ -341,7 +343,8 @@ decode :: proc(f: Frame, kind: Kind, msg: ^$T, allocator := context.allocator) -
 	when T == Resize || T == Spawn {
 		if !size_ok(msg.cols, msg.rows, msg.xpixel, msg.ypixel) do return .Out_Of_Range
 	} else when T == Welcome {
-		for w in msg.terminals do if !size_ok(w.cols, w.rows, w.xpixel, w.ypixel) do return .Out_Of_Range
+		// the bootstrap message: flag a bad terminal, keep the rest
+		for &w in msg.terminals do w.bad = !size_ok(w.cols, w.rows, w.xpixel, w.ypixel)
 	}
 	return .None
 }
@@ -350,14 +353,23 @@ size_ok :: proc(cols, rows, xpixel, ypixel: i64) -> bool {
 	return cols >= 1 && cols <= MAX_COLS && rows >= 1 && rows <= MAX_ROWS && xpixel >= 0 && xpixel <= MAX_PIXELS && ypixel >= 0 && ypixel <= MAX_PIXELS
 }
 
-// A cheap scan of JSON text: false if it nests deeper than max_depth or holds
-// more than max_keys object keys (counted as ':' outside strings). Says nothing
+// A cheap scan of JSON text: false if it nests deeper than max_depth, if
+// one object holds more than max_keys keys (counted as ':' outside strings,
+// per innermost container), if brackets close more than they open, or if a
+// string holds a raw control byte. JSON forbids those bytes, and they matter:
+// Odin's tokenizer ends a string at a raw newline and its parser carries on,
+// which would desynchronise this scan from the parser. Also false for invalid
+// UTF-8 (JSON forbids it too): the parser's unquote writes 3 bytes per bad
+// byte into a buffer sized for the input, and overruns it. Says nothing else
 // about validity; json.parse decides that after.
 json_shape_ok :: proc(b: []u8, max_depth := JSON_MAX_DEPTH, max_keys := JSON_MAX_KEYS) -> bool {
-	depth, keys := 0, 0
+	if !utf8.valid_string(string(b)) do return false
+	keys: [JSON_MAX_DEPTH + 1]int
+	depth := 0
 	in_str, esc := false, false
 	for c in b {
 		if in_str {
+			if c < 0x20 do return false
 			if esc do esc = false
 			else if c == '\\' do esc = true
 			else if c == '"' do in_str = false
@@ -367,11 +379,14 @@ json_shape_ok :: proc(b: []u8, max_depth := JSON_MAX_DEPTH, max_keys := JSON_MAX
 		case '"': in_str = true
 		case '{', '[':
 			depth += 1
-			if depth > max_depth do return false
-		case '}', ']': depth -= 1
+			if depth > max_depth || depth >= len(keys) do return false
+			keys[depth] = 0
+		case '}', ']':
+			depth -= 1
+			if depth < 0 do return false
 		case ':':
-			keys += 1
-			if keys > max_keys do return false
+			keys[depth] += 1
+			if keys[depth] > max_keys do return false
 		}
 	}
 	return true

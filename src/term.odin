@@ -377,8 +377,9 @@ term_pump :: proc(t: ^Term) {
 // Fits the grid into the pane rect; resizes terminal and PTY on change.
 term_set_rect :: proc(t: ^Term, x, y, w, h: f32) {
 	t.x, t.y, t.w, t.h = x, y, w, h
-	cols := u16(max(2, int((w - 2 * term_pad()) / font.cell_w)))
-	rows := u16(max(2, int((h - 2 * term_pad()) / font.cell_h)))
+	// capped at what a snapshot carries (snapshot.odin), so ours always decode
+	cols := u16(clamp(int((w - 2 * term_pad()) / font.cell_w), 2, MAX_TERM_COLS))
+	rows := u16(clamp(int((h - 2 * term_pad()) / font.cell_h), 2, MAX_TERM_ROWS))
 	if cols == t.cols && rows == t.rows do return
 	// a column divider is being dragged: the grid (and the child's PTY)
 	// follows at most every RESIZE_THROTTLE; the release resizes it exactly

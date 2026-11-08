@@ -132,7 +132,7 @@ spec_of :: proc(kind: u8) -> (Kind_Spec, bool) {
 // The schema as JSON, in the layout of schema/released-holder.json.
 schema_json :: proc(allocator := context.allocator) -> string {
 	sb := strings.builder_make(allocator)
-	fmt.sbprintf(&sb, "{{\n  \"wire\": %d,\n  \"header\": \"kind u8, terminal u32 LE, len u32 LE; len <= %d\",\n  \"kinds\": [\n", WIRE, MAX_PAYLOAD)
+	fmt.sbprintf(&sb, "{{\n  \"wire\": %d,\n  \"header\": \"kind u8, terminal u32 LE, len u32 LE; len <= %d; control len <= %d\",\n  \"kinds\": [\n", WIRE, MAX_PAYLOAD, MAX_CONTROL)
 	for s, i in SPECS {
 		fmt.sbprintf(&sb, "    {{\"name\": %q, \"kind\": %d, \"frozen\": %v, \"payload\": %q, \"fields\": ", s.name, u8(s.kind), s.frozen, PAYLOAD_NAMES[s.payload])
 		write_fields(&sb, s.fields)

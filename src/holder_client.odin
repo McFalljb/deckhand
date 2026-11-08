@@ -106,6 +106,9 @@ Holder_Client :: struct {
 	stop:      bool,
 	acked:     bool,
 	ack:       map[u32]u64, // GOODBYE_ACK: id -> offset
+	successor: [64]u8, // GOODBYE_ACK's successor secret (hex), until it goes to the relaunch helper
+	successor_len: int,
+	refused_secret: bool, // a HELLO was refused for want of the successor secret: an update is relaunching another Deckhand
 	dying:     [dynamic]i32, // pids of released terminals, until they are gone (pty_dying)
 	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
 	tokens_why:    string, // why not
@@ -197,6 +200,9 @@ holder_client_start :: proc() -> bool {
 	if why != "" do return false
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
+	// relaunched by an update (holder_successor.odin): the secret the holder waits for
+	secret := successor_secret_take(run)
+	defer for &b in transmute([]u8)secret do b = 0
 	answered := false
 	// a holder that took the connection and closed it (or never answered) without a byte may have
 	// been shutting down: looked for again once, a moment later (gone by then: none runs)
@@ -209,13 +215,13 @@ holder_client_start :: proc() -> bool {
 				answered = true
 				continue next
 			}
-			r := holder_connect(path)
+			r := holder_connect(path, secret)
 			// macOS also refuses when the listen backlog is full: a busy live holder. Tried again,
 			// with backoff, before its socket is taken for a dead one's (only a refusal: .Stale)
 			for wait in HOLDER_RECHECKS {
 				if r != .Stale do break
 				time.sleep(wait)
-				r = holder_connect(path)
+				r = holder_connect(path, secret)
 			}
 			switch r {
 			case .Welcomed:
@@ -236,6 +242,14 @@ holder_client_start :: proc() -> bool {
 		if !quiet do break
 		time.sleep(HOLDER_RESCAN)
 		socks = holder_socks(run)
+	}
+	if hc.refused_secret {
+		// the holder waits (at most a minute) for the Deckhand an update is relaunching, and this
+		// is not it: never a second holder beside it
+		hc.tried = true
+		fmt.eprintln("Deckhand: session holder: it is waiting for the Deckhand an update is starting; running without it")
+		toast_show("Deckhand is updating and another copy is taking over the running sessions: quit this one and open Deckhand again in a minute", err = true)
+		return false
 	}
 	switch trust.holder_start(answered, state.settings.keep_sessions) {
 	case .Without:
@@ -268,7 +282,7 @@ holder_client_start :: proc() -> bool {
 	for time.tick_since(deadline) < HOLDER_WAIT {
 		outer: for path in holder_socks(run) {
 			for b in before do if b == path do continue outer
-			if holder_connect(path) == .Welcomed do return true
+			if holder_connect(path, "") == .Welcomed do return true
 		}
 		time.sleep(20 * time.Millisecond)
 	}
@@ -312,7 +326,7 @@ handshake_got: int // bytes the handshake read so far (Quiet: none)
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
 @(private = "file")
-holder_connect :: proc(path: string) -> Connect_Result {
+holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	fd, ok, refused := sock_connect_why(path)
 	if !ok do return refused ? .Stale : .Answered // not refused (EACCES, a race): not known dead
 	peer := trust.peer_read(fd)
@@ -335,7 +349,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 		return handshake_got == 0 ? .Quiet : .Answered
 	}
 	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE})
+	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE, successor_secret = secret})
 	if !sock_write_all(fd, out[:]) do return fail("cannot send HELLO")
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
 
@@ -344,6 +358,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 	if f.kind == u8(hw.Kind.Refused) {
 		r: hw.Refused
 		hw.decode(f, .Refused, &r, context.temp_allocator)
+		if r.code == hw.REFUSE_CODE_NAMES[.Secret] do hc.refused_secret = true
 		return fail(fmt.tprintf("refused: %s %s", r.code, r.error))
 	}
 	w: hw.Welcome
@@ -410,7 +425,7 @@ holder_connect :: proc(path: string) -> Connect_Result {
 		toast_show(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
-	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals", hc.previous, len(w.terminals))
+	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
 }
 
@@ -550,6 +565,10 @@ holder_frame :: proc(f: hw.Frame) {
 		e := hw.decode(f, .Goodbye_Ack, &m, context.temp_allocator)
 		if !hc.handed || hc.acked || e != .None do return
 		for a in m.terminals do if a.id > 0 && a.id <= i64(max(u32)) do hc.ack[u32(a.id)] = a.offset
+		if len(m.successor_secret) == len(hc.successor) {
+			copy(hc.successor[:], m.successor_secret)
+			hc.successor_len = len(hc.successor)
+		}
 		hc.acked = true
 		sync.cond_broadcast(&hc.cond)
 	case .Upgrade_Failed:
@@ -799,9 +818,9 @@ holder_shutdown :: proc() {
 // the terminals: the reader must not stall at its backlog cap before it sees the exec) or, for
 // none, dropping what came. Still upgrading then: no GOODBYE, the app leaves crash-style
 // (holder_leave: the holder keeps every terminal for the next launch, restored from its tails).
-holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawptr = nil) -> bool {
+holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawptr = nil, successor := false) -> bool {
 	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode})
+	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode, successor = successor})
 	deadline := time.tick_add(time.tick_now(), holder_quit_upgrade_wait)
 	sync.lock(&hc.wmu)
 	for hc.upgrading && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {

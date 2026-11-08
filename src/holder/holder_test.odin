@@ -1093,6 +1093,10 @@ successor_secret_reserves_the_holder :: proc(t: ^testing.T) {
 		testing.expect(t, ok && decode_got(g, .Refused, &r), "not refused")
 		testing.expect_value(t, r.code, "secret")
 		testing.expect(t, !strings.contains(r.error, secret) || secret == "", "the secret in a REFUSED")
+		// it lingers until the core closes (the core must still read its peer on the REFUSED)
+		pump(h, 30 * time.Millisecond, f)
+		testing.expect(t, !f.eof, "closed right after REFUSED")
+		fake_hangup(f)
 		testing.expect(t, wait_eof(h, f))
 	}
 	a := fake_connect(t, h)

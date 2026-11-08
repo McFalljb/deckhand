@@ -7,12 +7,14 @@
 //   deckhand-core hold --run DIR --data DIR [--ready PATH]   serve (holder.odin)
 //   deckhand-core hold --resume FD --run DIR --data DIR      after an UPGRADE's exec (upgrade.odin)
 //   deckhand-core __detach                    launchd job entry: fork, setsid, exec hold (detach.odin)
+//   deckhand-core relaunch --pid P --app BUNDLE --exe EXE --run DIR [--no-open]
+//                                             the updater's relaunch helper (relaunch.odin)
 package holder
 
 import "core:fmt"
 import "core:os"
 
-USAGE :: "usage: deckhand-core hold --run DIR --data DIR [--ready PATH] | __detach"
+USAGE :: "usage: deckhand-core hold --run DIR --data DIR [--ready PATH] | __detach | relaunch ..."
 
 main :: proc() {
 	if len(os.args) < 2 {
@@ -24,6 +26,8 @@ main :: proc() {
 		os.exit(hold_main(os.args[2:]))
 	case "__detach":
 		os.exit(detach_main(os.args[2:]))
+	case "relaunch":
+		os.exit(relaunch_main(os.args[2:]))
 	}
 	fmt.eprintln(USAGE)
 	os.exit(2)

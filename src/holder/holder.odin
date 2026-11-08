@@ -661,6 +661,7 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 			hlog(h, "refused HELLO: a successor is named and this core is not it")
 			send_msg(cn, .Refused, 0, holderwire.Refused{code = holderwire.REFUSE_CODE_NAMES[.Secret], error = "the session holder is waiting for the Deckhand that is updating (at most a minute)"})
 			conn_close_after(cn)
+			cn.linger = true // as after GOODBYE_ACK: a closed peer can't be checked, so the core couldn't read why
 		case .Refuse_Wire:
 			hlog(h, "refused HELLO: wire %d", hello.wire)
 			send_msg(cn, .Refused, 0, holderwire.Refused{code = holderwire.REFUSE_CODE_NAMES[.Wire], error = fmt.tprintf("this holder speaks wire %d..%d", holderwire.WIRE_MIN, holderwire.WIRE)})

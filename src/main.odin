@@ -720,6 +720,7 @@ event :: proc(e: ^sapp.Event) {
 		// otherwise they are released as direct ones are hung up
 		if app.stop_sessions do holder_shutdown()
 		else do holder_handover()
+		relaunch_helper_send("") // an update's helper without a secret (none was handed over): it only relaunches
 		persist_quit() // while the shells still run (their cwd is saved; held ids with a handover)
 		close_all()
 	}

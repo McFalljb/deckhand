@@ -320,9 +320,12 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		if upd.phase != .Ready || upd.staged == "" do return fail("no update is ready to install"), false
 		if upd.bundle == "" do return fail(upd.why_not), false
 		if job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then restart to update"), true
-		if any_running() || jobs_any_running() {
-			what := fmt.tprintf("restart Deckhand to update to %s? Running sessions, shells and jobs will be stopped.", upd.release.version)
-			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("restart Deckhand to update to %s? Running sessions, shells and jobs will be stopped, and %d file%s with unsaved changes will be lost.", upd.release.version, n, n == 1 ? "" : "s")
+		// keep_sessions: what the session holder keeps carries on through the update (§7.4), so
+		// only what would stop is asked about
+		keeps := holder_keeps_sessions()
+		if quit_would_stop(keeps) || jobs_any_running() || (keeps && editors_unsaved() > 0) {
+			what := fmt.tprintf("restart Deckhand to update to %s? %s", upd.release.version, update_restart_effects(keeps))
+			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what, force_ask = true)
 			if !go_on do return gr, ch
 		}
@@ -334,6 +337,20 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		return {ok = true}, true
 	}
 	return fail("unknown command"), false
+}
+
+// What restarting to update does to what runs (the confirmation and the bar, ui_update.odin).
+// keeps: the session holder keeps sessions through it (keep_sessions).
+update_restart_effects :: proc(keeps: bool) -> string {
+	if !keeps do return "Running sessions, shells and jobs will be stopped."
+	stops := quit_would_stop(true)
+	jobs := jobs_any_running()
+	switch {
+	case stops && jobs: return "Sessions kept running carry on; other tabs' programs and running jobs will be stopped, browser pages will reload."
+	case stops:         return "Sessions kept running carry on; other tabs' programs will be stopped, browser pages will reload."
+	case jobs:          return "Sessions carry on; running jobs will be stopped, browser pages will reload and app tabs will restart."
+	}
+	return "Sessions carry on; browser pages will reload and app tabs will restart."
 }
 
 // Why Update cannot go ahead here ("" = it can).
@@ -664,6 +681,17 @@ update_swap :: proc() -> string {
 		upd.phase = .Failed
 		return why
 	}
+	// keep_sessions: the relaunch helper that takes the successor secret to the new app
+	// (holder_successor.odin) is the holder binary, found and checked before anything moves
+	helper := ""
+	if holder_keeps_sessions() {
+		if bin := holder_bin_find(context.temp_allocator); bin != "" {
+			if exe, iok, iwhy := holder_install(bin, home_root); iok {
+				helper = strings.clone(exe, context.temp_allocator)
+				delete(exe)
+			} else do fmt.eprintln("Deckhand: update: no relaunch helper (", iwhy, "): sessions are kept, the new app finds them after a minute")
+		}
+	}
 	backup := fmt.tprintf("%s.old-%s", bundle, upd.current)
 	remove_tree(backup) // an earlier attempt's
 	update_set(&upd.backup, backup)
@@ -693,14 +721,27 @@ update_swap :: proc() -> string {
 	}
 	if old_at == backup do update_set(&upd.staged, "")
 	update_save()
+	// the helper waits for the secret our quit's handover gets (GOODBYE{handover, successor}); test
+	// mode's starts nothing (the scene starts the new app: the same test binary)
+	helped := false
+	if helper != "" {
+		new_exe := upd.test ? executable_path() : update_bundle_exe(bundle)
+		run, rwhy := sock_runtime_dir_why(context.temp_allocator)
+		if rwhy == "" && new_exe != "" {
+			ok, why := relaunch_helper_start(helper, bundle, new_exe, run, no_open = upd.test)
+			if !ok do fmt.eprintln("Deckhand: update:", why, "- relaunching without a successor")
+			helped = ok
+		}
+	}
 	if upd.test {
 		delete(update_relaunched)
 		update_relaunched = strings.clone(bundle)
-		fmt.println("[autotest] update relaunch:", bundle)
+		fmt.println("[autotest] update relaunch:", bundle, helped ? "(with the successor helper)" : "")
 		upd.phase = .Installed
+		if helped && platform.quit != nil do platform.quit() // the handover at quit, as for real
 		return ""
 	}
-	if !relaunch_spawn(bundle) {
+	if !helped && !relaunch_spawn(bundle) {
 		// back as it was: the old bundle in place, the new one at its staged name
 		if !swap_paths(old_at, bundle) {
 			os.rename(bundle, fmt.tprintf("%s.failed", staged))
@@ -734,6 +775,14 @@ swap_paths :: proc(a, b: string) -> bool {
 	} else {
 		return false
 	}
+}
+
+// The swapped-in bundle's main executable (its Info.plist's), or "".
+@(private = "file")
+update_bundle_exe :: proc(bundle: string) -> string {
+	exe := plist_value(upath(bundle, "Contents", "Info.plist"), "CFBundleExecutable")
+	if exe == "" || strings.contains_any(exe, "/\x00") do return ""
+	return upath(bundle, "Contents", "MacOS", exe)
 }
 
 // A detached /bin/sh that waits for this process to exit, then opens the bundle. The pid

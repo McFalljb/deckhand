@@ -202,7 +202,10 @@ holder_handover :: proc() -> bool {
 	handover_clear()
 	hc.handover = true
 	feed :: proc(d: rawptr) {for t in (^[dynamic]^Term)(d)^ do handover_feed(t)}
-	if !holder_goodbye("handover", feed, &held) do return true // lost or left: whatever the holder kept, the next launch finds
+	// an update names its successor (holder_successor.odin): the ack's secret goes to the relaunch
+	// helper, and the holder then waits for that app alone (at most a minute)
+	successor := relaunch_helper_waiting()
+	if !holder_goodbye("handover", feed, &held, successor) do return true // lost or left: whatever the holder kept, the next launch finds (the helper gets no secret)
 	// the holder sends every OUTPUT before the ack and nothing after it
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
 	for {
@@ -216,6 +219,14 @@ holder_handover :: proc() -> bool {
 	if !hc.acked {
 		fmt.eprintln("Deckhand: session holder: no GOODBYE_ACK; the next launch restores from the tails")
 		return true
+	}
+	if successor {
+		sync.lock(&hc.mu)
+		secret := string(hc.successor[:hc.successor_len])
+		relaunch_helper_send(secret) // at once: a later failure here still leaves the holder to it
+		for &b in hc.successor do b = 0
+		hc.successor_len = 0
+		sync.unlock(&hc.mu)
 	}
 	file := Handover_File{v = 1, min_reader = 1, holder = hc.instance, written = time.now()._nsec / 1e9}
 	list := make([dynamic]Handover_Term, context.temp_allocator)

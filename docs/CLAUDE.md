@@ -496,9 +496,12 @@ is valid; it learns nothing it can use from outside the tab.
   start Claude Code's own config and update checks). Each Claude tab records it when first seen
   running; another one on disk shows the update bar. Tests: `PI_DESK_CLAUDE_BIN`; none while
   `PI_DESK_CLAUDE_CMD` replaces claude.
-- **A Deckhand update** replaces the app and relaunches it, so every Claude tab starts again on the
-  new plugin anyway; the plugin's files are watched for development builds
-  (`PI_DESK_CLAUDE_PLUGIN`, `build/claude-code`).
+- **A Deckhand update** replaces the app and relaunches it. With Keep sessions on (the default),
+  Claude tabs run on through it in the session holder (GUIDE.md "Updates"), still on the plugin,
+  hooks and `deckhand` CLI they started with: the plugin bar then offers the Restart that moves
+  each to the new plugin (as for kept sessions above), and nothing restarts by itself. With it off,
+  every Claude tab starts again on the new plugin anyway. The plugin's files are watched for
+  development builds (`PI_DESK_CLAUDE_PLUGIN`, `build/claude-code`).
 - **Never touched** (`claude_credential`, also via `settings_credential` for the Settings tab, the
   editor, Files and the reload watchers): `.credentials.json`, `.claude.json` and its backups
   anywhere, and everything in a Claude config folder except `settings.json`, `settings.local.json`,

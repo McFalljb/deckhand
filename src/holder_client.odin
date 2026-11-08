@@ -637,6 +637,18 @@ holder_goodbye :: proc(mode: string) -> bool {
 	return false
 }
 
+// Quit without a GOODBYE, the sessions kept (holder_handover could not write the handover):
+// nothing more goes to the holder (no RELEASE at close_all), and the socket is shut, so the
+// holder sees a crash and keeps every terminal for the next launch.
+holder_leave :: proc() {
+	sync.lock(&hc.wmu)
+	defer sync.unlock(&hc.wmu)
+	sync.lock(&hc.mu)
+	hc.handed, hc.handover = true, true
+	sync.unlock(&hc.mu)
+	if hc.fd >= 0 do sock_shutdown(hc.fd)
+}
+
 // Ends the reader thread and closes the connection (cleanup).
 holder_client_stop :: proc() {
 	if hc.reader != nil {

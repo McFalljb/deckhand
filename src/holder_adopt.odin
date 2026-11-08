@@ -170,25 +170,27 @@ handover_clear :: proc() {
 
 // ---- quit ----
 
-// At quit with keep_sessions on: true once the holder has the sessions (GOODBYE{handover}
-// went out); the tabs are then left running (close_all sends no RELEASE). False: nothing was
-// handed over (no holder, setting off, the data dir unwritable: §7.7 "abort before GOODBYE"),
-// so quit as without a holder. A failure after the GOODBYE (a snapshot or handover.json that
-// cannot be written) still keeps the sessions: the next launch restores them from the tails,
-// inexact.
+// At quit with keep_sessions on: true once the holder keeps the sessions; the tabs are then
+// left running (close_all sends no RELEASE). False: nothing is kept (no holder, the setting
+// off, no held tab), so quit as without a holder. When the data dir can't be written (§7.7
+// "disk full: abort before GOODBYE", sessions kept) no GOODBYE goes out and nothing else
+// either: the holder sees a crash and the next launch restores from its tails, inexact. A
+// failure after the GOODBYE (a snapshot or handover.json that cannot be written) ends the same.
 holder_handover :: proc() -> bool {
 	if !hc.on || hc.lost || hc.handed || !state.settings.keep_sessions do return false
 	held := make([dynamic]^Term, context.temp_allocator)
 	for _, t in terms do if t.running && t.pty.held != 0 do append(&held, t)
 	if len(held) == 0 do return false
 	if why := handover_dir_ready(); why != "" {
-		fmt.eprintln("Deckhand: session holder: no handover (the handover folder:", why, "): sessions stop")
-		return false
+		fmt.eprintln("Deckhand: session holder: no handover (the handover folder:", why, "): the sessions run on, restored from the holder's tails next launch")
+		holder_leave()
+		return true
 	}
 	probe := data_path(HANDOVER_DIR + "/probe")
 	if !file_write_private(probe, transmute([]u8)string("ok")) {
-		fmt.eprintln("Deckhand: session holder: no handover (cannot write the data dir): sessions stop")
-		return false
+		fmt.eprintln("Deckhand: session holder: no handover (cannot write the data dir): the sessions run on, restored from the holder's tails next launch")
+		holder_leave()
+		return true
 	}
 	os.remove(probe)
 	handover_clear()

@@ -227,3 +227,32 @@ holder_partial_send_loses :: proc(t: ^testing.T) {
 	holder_input(1, big) // fills the socket buffer, then times out
 	testing.expect(t, wait_until(2000, proc() -> bool {return sync.atomic_load(&hc.lost)}), "the holder is lost after a partial send")
 }
+
+// §7.7 "disk full while writing the handover: abort before GOODBYE; sessions kept": when the
+// handover folder can't be written, no GOODBYE goes out and neither does a RELEASE at close:
+// the held tabs run on (the next launch restores them crash-style, from the tails).
+@(test)
+holder_handover_unwritable_keeps :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, previous = "none"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	testing.expect(t, holder_wanted(), "attached")
+	h := new(Held)
+	h.id, h.spawn, h.pid = 5, .Spawned, i32(os.get_pid())
+	hc.held[5] = h
+	x := new_term(9101)
+	x.running, x.pty = true, Pty{fd = -1, held = 5}
+	defer {
+		x.pty.held, x.running = 0, false
+		drop_term(9101)
+	}
+	// the handover folder is a file: it cannot be made
+	_ = os.write_entire_file(fmt.tprintf("%s/handover", home_root), transmute([]u8)string("x"))
+	holder_handover()
+	testing.expect(t, holder_keeps_sessions(), "the held tabs are saved as held")
+	pty_close(&x.pty) // close_all
+	time.sleep(150 * time.Millisecond)
+	testing.expect_value(t, fake_holder_count(&f, .Goodbye), 0)
+	testing.expect_value(t, fake_holder_count(&f, .Release), 0)
+}

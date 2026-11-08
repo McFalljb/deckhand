@@ -10,6 +10,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import gh "ghostty"
@@ -439,4 +440,78 @@ held_release_unclaimed_rule :: proc(t: ^testing.T) {
 		{false, true, true, false, false}, // a crash before the save that would have listed it
 	}
 	for c, i in cases do testing.expectf(t, held_release_unclaimed(c.ended, c.clean, c.same, c.listed) == c.want, "case %d", i)
+}
+
+// A holder that answers but does not attach (here: refused, as after an update to another wire)
+// still runs the sessions it kept: a restored pi or Claude tab with a held id stays not started
+// (no `pi --session` beside the holder's copy on the same file), says so, and keeps its held id
+// in workspace.json, so the launch that reaches the holder again adopts it.
+@(test)
+holder_unattached_held_tabs_wait :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"dddd-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"shell","title":"a","cwd":"%s","held":4}},{{"kind":"shell","title":"b","cwd":"%s"}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, proj, proj)
+	adopt_run(t, &f, text, nil)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	if !testing.expect_value(t, len(s.tabs), 3) do return
+	s.missing = false // its session file is not made here
+	focus_session(s.id, {kind = .UI}) // shown: its restored tabs start
+	testing.expect_value(t, s.tabs[0].status, Tab_Status.Not_Started)
+	testing.expect(t, term_of(s.tabs[0].id) == nil, "a pi started beside the holder's")
+	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started)
+	testing.expect_value(t, s.tabs[2].status, Tab_Status.Running) // never held: starts as always
+	saved := workspace_json()
+	testing.expect(t, strings.contains(saved, `"held":3`) && strings.contains(saved, `"held":4`), saved)
+	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
+	testing.expect_value(t, fake_holder_count(&f, .Spawn), 0)
+	_, _, extra := tab_label(s, s.tabs[0])
+	testing.expect(t, strings.contains(extra, "session holder"), extra)
+	if x := term_of(s.tabs[2].id); x != nil do pty_kill_group(&x.pty, i32(posix.Signal.SIGKILL))
+}
+
+// Mid-run, the holder lost (a send timed out) but still running: it keeps the sessions, so a held
+// pi tab is not "dead": no Restart, no restart on opening its session, an explicit restart is
+// refused, and workspace.json keeps its held id and the holder's instance for the next launch.
+@(test)
+holder_lost_alive_no_restart :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	was := holder_send_timeout
+	holder_send_timeout = 200 * time.Millisecond
+	defer holder_send_timeout = was
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"eeee-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj)
+	adopt_run(t, &f, text, binds)
+	s := &state.open_sessions[len(state.open_sessions) - 1]
+	s.missing = false // its session file is not made here
+	tab := &s.tabs[0]
+	if !testing.expect_value(t, tab.status, Tab_Status.Running) do return
+	big := make([]u8, 4 << 20)
+	defer delete(big)
+	holder_input(3, big) // fills the socket buffer, then times out: lost
+	testing.expect(t, wait_until(2000, proc() -> bool {return sync.atomic_load(&hc.lost)}), "lost")
+	for _ in 0 ..< 50 {
+		pump_all()
+		if tab.status == .Exited do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect_value(t, tab.status, Tab_Status.Exited)
+	testing.expect(t, !tab_is_dead(tab), "offered a Restart while the holder runs it")
+	restart_if_dead(s, user = true)
+	testing.expect_value(t, tab.status, Tab_Status.Exited)
+	r := run_command(Pi_Restart{tab_id = tab.id}, {kind = .UI})
+	testing.expect(t, !r.ok, "restarted while the holder runs it")
+	testing.expect_value(t, tab.status, Tab_Status.Exited)
+	saved := workspace_json()
+	testing.expect(t, strings.contains(saved, `"held":3`), saved)
+	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
 }

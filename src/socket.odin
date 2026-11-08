@@ -941,9 +941,16 @@ socket_request_conn :: proc(request_id: u64) -> u64 {
 TOKENS_KIND :: "tokens"
 tokens_write_probe: proc() // tests: called right before tokens.json is written
 
-// Whether srv.mu is free right now (tests: tokens.json is never written while holding it).
-socket_mu_free :: proc() -> bool {
-	if !sync.mutex_try_lock(&srv.mu) do return false
+// Tests (tokens_write_probe): whether the calling thread does not hold srv.mu. srv.mu has no
+// owner, so this takes it: another thread (the accept loop, a connection) may hold it for a
+// moment, so a failed try is tried again, and only a lock that stays taken for `within` (one the
+// caller holds, which nothing can release while it waits here) counts as held.
+socket_mu_free :: proc(within := 5 * time.Second) -> bool {
+	start := time.tick_now()
+	for !sync.mutex_try_lock(&srv.mu) {
+		if time.tick_since(start) >= within do return false
+		time.sleep(time.Millisecond)
+	}
 	sync.unlock(&srv.mu)
 	return true
 }

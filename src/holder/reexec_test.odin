@@ -84,9 +84,10 @@ rig_free :: proc(t: ^testing.T, r: ^Rig) {
 		b, _ := os.read_entire_file(fmt.tprintf("%s/holder.log", r.dir), context.temp_allocator)
 		fmt.eprintf("---- %s/holder.log ----\n%s----\n", r.dir, string(b))
 	}
-	for p in r.pids do kill(-p, SIGKILL)
-	for p in r.pids do kill(p, SIGKILL)
-	for p in r.extra do kill(p, SIGKILL)
+	// only real pids: a failed spawn's 0 would be kill(0), the test runner's own process group
+	for p in r.pids do if p > 1 do kill(-p, SIGKILL)
+	for p in r.pids do if p > 1 do kill(p, SIGKILL)
+	for p in r.extra do if p > 1 do kill(p, SIGKILL)
 	if r.pid > 0 {
 		kill(r.pid, SIGKILL)
 		st: c.int
@@ -252,6 +253,17 @@ rig_pump :: proc(r: ^Rig, d: time.Duration) {
 	for time.tick_since(start) < d && !r.f.eof do rig_read(r, 5)
 }
 
+// Reads until terminal id's counter passes n (up to timeout): still counting. Not a fixed pump
+// and a count: a loaded runner can take longer than any short window to fork /bin/sleep.
+rig_counts_past :: proc(t: ^testing.T, r: ^Rig, id: u32, n: int, timeout := 5 * time.Second) -> bool {
+	start := time.tick_now()
+	for counters_ok(t, rig_text(r, id), id) <= n {
+		if r.f.eof || time.tick_since(start) > timeout do return false
+		rig_read(r, 10)
+	}
+	return true
+}
+
 rig_spawn :: proc(t: ^testing.T, r: ^Rig, id: u32, script: string) -> c.int {
 	rig_send(r, .Spawn, id, holderwire.Spawn {
 		argv = {"/bin/sh", "-c", script}, env = {"PATH=/usr/bin:/bin", "LANG=C"}, cwd = "/",
@@ -261,7 +273,7 @@ rig_spawn :: proc(t: ^testing.T, r: ^Rig, id: u32, script: string) -> c.int {
 	testing.expectf(t, ok, "terminal %d: no SPAWNED", id)
 	s: holderwire.Spawned
 	decode_got(g, .Spawned, &s)
-	append(&r.pids, c.int(s.pid))
+	if s.pid > 1 do append(&r.pids, c.int(s.pid))
 	return c.int(s.pid)
 }
 
@@ -361,10 +373,7 @@ reexec_under_load :: proc(t: ^testing.T) {
 		rig_pump(r, 150 * time.Millisecond)
 	}
 	testing.expect_value(t, r.gaps, 0)
-	for id in u32(1) ..= 5 {
-		n := counters_ok(t, rig_text(r, id), id)
-		testing.expectf(t, n > 20, "terminal %d counted only %d", id, n)
-	}
+	for id in u32(1) ..= 5 do testing.expectf(t, rig_counts_past(t, r, id, 20), "terminal %d counted only %d", id, counters_ok(t, rig_text(r, id), id))
 	// every input byte, once, in order
 	start := time.tick_now()
 	got: []u8
@@ -416,8 +425,7 @@ reexec_refusals :: proc(t: ^testing.T) {
 		testing.expectf(t, pok, "%s (%s): no PONG", cs.path, cs.hook)
 	}
 	n := counters_ok(t, rig_text(r, 1), 1)
-	rig_pump(r, 100 * time.Millisecond)
-	testing.expect(t, counters_ok(t, rig_text(r, 1), 1) > n)
+	testing.expect(t, rig_counts_past(t, r, 1, n), "terminal 1 stopped counting")
 	testing.expect_value(t, r.gaps, 0)
 }
 
@@ -488,11 +496,7 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	}
 	// output goes on, without a gap, input works, exits are known (NOTE_EXITSTATUS)
 	// counting on (a loaded runner forks /bin/sleep slowly: wait for the lines, not a fixed time)
-	counted := time.tick_now()
-	for id in u32(1) ..= 3 {
-		for counters_ok(t, rig_text(r, id), id) <= 10 && time.tick_since(counted) < 5 * time.Second && !r.f.eof do rig_read(r, 10)
-		testing.expectf(t, counters_ok(t, rig_text(r, id), id) > 10, "terminal %d stopped counting under the keeper", id)
-	}
+	for id in u32(1) ..= 3 do testing.expectf(t, rig_counts_past(t, r, id, 10), "terminal %d stopped counting under the keeper", id)
 	testing.expect_value(t, r.gaps, 0)
 	rig_input(r, 4, transmute([]u8)string("x\n"))
 	g, eok := rig_wait(r, .Exited, 4)
@@ -518,8 +522,7 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	_, pok := rig_wait(r, .Pong)
 	testing.expect(t, pok, "no PONG from the keeper after the refused UPGRADE")
 	n := counters_ok(t, rig_text(r, 1), 1)
-	rig_pump(r, 100 * time.Millisecond)
-	testing.expect(t, counters_ok(t, rig_text(r, 1), 1) > n, "terminal 1 stopped counting")
+	testing.expect(t, rig_counts_past(t, r, 1, n), "terminal 1 stopped counting")
 }
 
 @(test)
@@ -558,7 +561,9 @@ reexec_keeper_reaped :: proc(t: ^testing.T) {
 holder_zombies :: proc(holder: c.int) -> string {
 	out := fmt.tprintf("%s.ps", os.get_env("TMPDIR", context.temp_allocator))
 	cmd := fmt.ctprintf("/bin/ps -A -o ppid=,pid=,stat= > %s", out)
+	sync_lock() // a fork of our own: no fake core's fd (fake_connect) leaks into ps mid-cloexec
 	posix.system(cmd)
+	sync_unlock()
 	b, _ := os.read_entire_file(out, context.temp_allocator)
 	os.remove(out)
 	z := make([dynamic]string, context.temp_allocator)

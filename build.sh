@@ -231,6 +231,8 @@ case "$MODE" in
     # the page reader's walk (text, outline): frames, boxless containers, shadow slots (fake DOM)
     if command -v node >/dev/null; then node tests/browser_read_js_test.mjs; else echo "browser_read_js_test: skipped (no node)"; fi
     odin test tests -out:build/pi-desk-tests
+    # the holder wire codec (src/holderwire): golden vectors, the released schema, a fuzz pass
+    odin test src/holderwire -out:build/holderwire-tests
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py

@@ -69,6 +69,48 @@ abi_matches_c :: proc(t: ^testing.T) {
 		{"Program_Status_State.Clear value", int(gh.Program_Status_State.Clear)},
 		{"Program_Status_Kind.Auth value", int(gh.Program_Status_Kind.Auth)},
 		{"Semantic_Prompt_Kind.Prompt_Start value", int(gh.Semantic_Prompt_Kind.Prompt_Start)},
+		{"Writer size", int(size_of(gh.Writer))},
+		{"Reader size", int(size_of(gh.Reader))},
+		{"Formatter_Screen_Extra size", int(size_of(gh.Formatter_Screen_Extra))},
+		{"Formatter_Screen_Extra.charsets offset", int(offset_of(gh.Formatter_Screen_Extra, charsets))},
+		{"Formatter_Terminal_Extra size", int(size_of(gh.Formatter_Terminal_Extra))},
+		{"Formatter_Terminal_Extra.keyboard offset", int(offset_of(gh.Formatter_Terminal_Extra, keyboard))},
+		{"Formatter_Terminal_Extra.screen offset", int(offset_of(gh.Formatter_Terminal_Extra, screen))},
+		{"Formatter_Terminal_Options size", int(size_of(gh.Formatter_Terminal_Options))},
+		{"Formatter_Terminal_Options.extra offset", int(offset_of(gh.Formatter_Terminal_Options, extra))},
+		{"Formatter_Terminal_Options.selection offset", int(offset_of(gh.Formatter_Terminal_Options, selection))},
+		{"Formatter_Format.VT value", int(gh.Formatter_Format.VT)},
+		{"Terminal_Option.Continuation_Max_Bytes value", int(gh.Terminal_Option.Continuation_Max_Bytes)},
+		{"Terminal_Option.Scrollback_Max_Lines value", int(gh.Terminal_Option.Scrollback_Max_Lines)},
+		{"Terminal_Data.Cursor_X value", int(gh.Terminal_Data.Cursor_X)},
+		{"Terminal_Data.Cursor_Pending_Wrap value", int(gh.Terminal_Data.Cursor_Pending_Wrap)},
+		{"Terminal_Data.Cursor_Visible value", int(gh.Terminal_Data.Cursor_Visible)},
+		{"Terminal_Data.Cursor_Style value", int(gh.Terminal_Data.Cursor_Style)},
+		{"Terminal_Data.Pwd value", int(gh.Terminal_Data.Pwd)},
+		{"Terminal_Data.Total_Rows value", int(gh.Terminal_Data.Total_Rows)},
+		{"Terminal_Data.Scrollback_Rows value", int(gh.Terminal_Data.Scrollback_Rows)},
+		{"Terminal_Data.Width_Px value", int(gh.Terminal_Data.Width_Px)},
+		{"Terminal_Data.Height_Px value", int(gh.Terminal_Data.Height_Px)},
+		{"Terminal_Data.Cursor_Y value", int(gh.Terminal_Data.Cursor_Y)},
+		{"Terminal_Data.Color_Background value", int(gh.Terminal_Data.Color_Background)},
+		{"Terminal_Data.Color_Cursor value", int(gh.Terminal_Data.Color_Cursor)},
+		{"Cell_Data.Has_Text value", int(gh.Cell_Data.Has_Text)},
+		{"Cell_Data.Style_Id value", int(gh.Cell_Data.Style_Id)},
+		{"Cell_Semantic_Content.Prompt value", int(gh.Cell_Semantic_Content.Prompt)},
+		{"Snapshot_Decoder_Option.Max_Continuation_Bytes value", int(gh.Snapshot_Decoder_Option.Max_Continuation_Bytes)},
+		{"Snapshot_Decoder_Option.Kitty_Image_Storage_Limit value", int(gh.Snapshot_Decoder_Option.Kitty_Image_Storage_Limit)},
+		{"Snapshot_Decoder_Data.History_Rows_Alternate value", int(gh.Snapshot_Decoder_Data.History_Rows_Alternate)},
+		{"Terminal_Data.Color_Foreground value", int(gh.Terminal_Data.Color_Foreground)},
+		{"Terminal_Data.Color_Palette value", int(gh.Terminal_Data.Color_Palette)},
+		{"Terminal_Data.Scrollback_Max_Bytes value", int(gh.Terminal_Data.Scrollback_Max_Bytes)},
+		{"Terminal_Data.Continuation_Max_Bytes value", int(gh.Terminal_Data.Continuation_Max_Bytes)},
+		{"Terminal_Data.Vt_Ground value", int(gh.Terminal_Data.Vt_Ground)},
+		{"Cell_Data.Protected value", int(gh.Cell_Data.Protected)},
+		{"Cell_Data.Semantic_Content value", int(gh.Cell_Data.Semantic_Content)},
+		{"Grid_Row_Data.Semantic_Prompt value", int(gh.Grid_Row_Data.Semantic_Prompt)},
+		{"Snapshot_Decoder_Option.Retain_Continuation value", int(gh.Snapshot_Decoder_Option.Retain_Continuation)},
+		{"Snapshot_Decoder_Option.Compress_History value", int(gh.Snapshot_Decoder_Option.Compress_History)},
+		{"Snapshot_Decoder_Data.Source_Offset value", int(gh.Snapshot_Decoder_Data.Source_Offset)},
 	}
 	seen := 0
 	text := string(data)
@@ -326,4 +368,77 @@ program_status_osc7501 :: proc(t: ^testing.T) {
 	// OSC 133 A: a new prompt
 	w(term, "\x1b]133;A\x07")
 	testing.expect_value(t, probe.prompts, 1)
+}
+
+// GHOSTSNP, the continuation and the terminal formatter: the calls snapshot.odin makes.
+@(test)
+snapshot_calls :: proc(t: ^testing.T) {
+	term: gh.Terminal
+	testing.expect_value(t, gh.terminal_new(nil, &term, 30, 5), gh.Result.Success)
+	defer gh.terminal_free(term)
+	limit: c.size_t = 4096
+	testing.expect_value(t, gh.terminal_set(term, .Continuation_Max_Bytes, &limit), gh.Result.Success)
+	s := "\x1b]2;title\x07ab\x1b[1;31mcd\x1b[38;2;1"
+	gh.terminal_vt_write(term, raw_data(s), len(s))
+	ground := true
+	gh.terminal_get(term, .Vt_Ground, &ground)
+	testing.expect(t, !ground)
+
+	cp: [^]u8
+	cn: c.size_t
+	testing.expect_value(t, gh.terminal_continuation_alloc(term, nil, &cp, &cn), gh.Result.Success)
+	testing.expect_value(t, string(cp[:cn]), "\x1b[38;2;1")
+	gh.free(nil, cp, cn)
+
+	p: [^]u8
+	n: c.size_t
+	testing.expect_value(t, gh.snapshot_encode_alloc(term, nil, &p, &n), gh.Result.Success)
+	defer gh.free(nil, p, n)
+	testing.expect_value(t, string(p[:8]), "GHOSTSNP")
+	d: gh.Snapshot_Decoder
+	testing.expect_value(t, gh.snapshot_decoder_new_buf(nil, &d, p, n), gh.Result.Success)
+	retain := true
+	testing.expect_value(t, gh.snapshot_decoder_set(d, .Retain_Continuation, &retain), gh.Result.Success)
+	b: gh.Terminal
+	testing.expect_value(t, gh.snapshot_decoder_decode(d, &b), gh.Result.Success)
+	used: c.size_t
+	testing.expect_value(t, gh.snapshot_decoder_get(d, .Source_Offset, &used), gh.Result.Success)
+	testing.expect_value(t, used, n)
+	gh.snapshot_decoder_free(d)
+	defer gh.terminal_free(b)
+	// the rest of the SGR lands the same in both
+	rest := ";2;3mX"
+	gh.terminal_vt_write(term, raw_data(rest), len(rest))
+	gh.terminal_vt_write(b, raw_data(rest), len(rest))
+	for tm in ([?]gh.Terminal{term, b}) {
+		x: u16
+		gh.terminal_get(tm, .Cursor_X, &x)
+		testing.expect_value(t, x, 5)
+		title: gh.String
+		gh.terminal_get(tm, .Title, &title)
+		testing.expect_value(t, string(title.ptr[:title.len]), "title")
+		pen := gh.Style{size = size_of(gh.Style)}
+		gh.terminal_get(tm, .Cursor_Style, &pen)
+		testing.expect_value(t, pen.fg_color.tag, gh.Style_Color_Tag.Rgb)
+		testing.expect_value(t, pen.fg_color.value.rgb, gh.Color_Rgb{1, 2, 3})
+		ref := gh.Grid_Ref{size = size_of(gh.Grid_Ref)}
+		pt := gh.Point{tag = .Active}
+		pt.value.coordinate = {x = 2, y = 0}
+		testing.expect_value(t, gh.terminal_grid_ref(tm, pt, &ref), gh.Result.Success)
+		st := gh.Style{size = size_of(gh.Style)}
+		testing.expect_value(t, gh.grid_ref_style(&ref, &st), gh.Result.Success)
+		testing.expect(t, st.bold)
+	}
+
+	opts := gh.Formatter_Terminal_Options{size = size_of(gh.Formatter_Terminal_Options), emit = .VT}
+	opts.extra = {size = size_of(gh.Formatter_Terminal_Extra), modes = true}
+	opts.extra.screen = {size = size_of(gh.Formatter_Screen_Extra), cursor = true, style = true}
+	f: gh.Formatter
+	testing.expect_value(t, gh.formatter_terminal_new(nil, &f, term, opts), gh.Result.Success)
+	defer gh.formatter_free(f)
+	fp: [^]u8
+	fl: c.size_t
+	testing.expect_value(t, gh.formatter_format_alloc(f, nil, &fp, &fl), gh.Result.Success)
+	testing.expect(t, strings.contains(string(fp[:fl]), "cd"))
+	gh.free(nil, fp, fl)
 }

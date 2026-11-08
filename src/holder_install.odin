@@ -10,7 +10,9 @@ package main
 //   holder_launch_direct(bin, run, data, env) -> (pid, ok, why)
 //
 // Installed at <data>/core/<HOLDER_REV>-<sha12>/deckhand-core: a running holder keeps its
-// binary even when the app is updated or rebuilt (the sha keeps dev rebuilds apart). The copy is
+// binary even when the app is updated or rebuilt (the sha keeps dev rebuilds apart; a signed
+// binary changed in place is killed at its next page-in, so not even a dev build runs from
+// build/: only test mode does). The copy is
 // checked (codesign --verify --strict, identifier dev.deckhand.core) and only then loses
 // com.apple.quarantine: a quarantined binary is SIGKILLed at exec, by launchd too (S2).
 
@@ -48,22 +50,12 @@ holder_bin_find :: proc(allocator := context.allocator) -> string {
 	return ""
 }
 
-// A binary built from source: under a build/ dir whose parent has build.sh. It runs from there
-// (no install, no quarantine to strip, a rebuild takes effect at the next holder).
-holder_dev_build :: proc(bin: string) -> bool {
-	d := filepath.dir(bin)
-	for d != "/" && d != "." && d != "" {
-		if filepath.base(d) == "build" && os.is_file(fmt.tprintf("%s/../build.sh", d)) do return true
-		d = filepath.dir(d)
-	}
-	return false
-}
-
-// What to run for the holder: bin itself in test mode or for a development build, else a copy
-// in <data>/core/<rev>-<sha12>/ (reused when it is already there and identical). path in the
-// heap allocator. why: why not (bin unreadable, the copy fails codesign, a write failed).
+// What to run for the holder: bin itself in test mode (autotest: scenes, whose holders end with
+// them), else a copy in <data>/core/<rev>-<sha12>/ (reused when it is already there and
+// identical), development builds included. path in the heap allocator. why: why not (bin
+// unreadable, the copy fails codesign, a write failed).
 holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
-	if autotest.active || holder_dev_build(bin) do return strings.clone(bin), true, ""
+	if autotest.active do return strings.clone(bin), true, ""
 	src, rerr := os.read_entire_file(bin, context.temp_allocator)
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)

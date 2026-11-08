@@ -211,9 +211,13 @@ build_pi() {
 
 # the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed ad
 # hoc with its own identifier (bundle-app.sh copies it into the app). Links only libSystem.
+# Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
+# keeps its file (a signed binary changed in place is killed at its next page-in).
 build_core() {
-  odin build src/holder -out:build/deckhand-core -o:speed -minimum-os-version:$MACOS_MIN
-  codesign -f -s - -i dev.deckhand.core build/deckhand-core 2>/dev/null
+  rm -f build/.deckhand-core.new
+  odin build src/holder -out:build/.deckhand-core.new -o:speed -minimum-os-version:$MACOS_MIN
+  codesign -f -s - -i dev.deckhand.core build/.deckhand-core.new 2>/dev/null
+  mv -f build/.deckhand-core.new build/deckhand-core
 }
 
 case "$MODE" in

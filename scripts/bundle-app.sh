@@ -113,11 +113,15 @@ if [ -f build/pi-desk-cli ] && [ -d build/claude-code ]; then
 fi
 # the session holder (src/holder, docs/plans/background-core.md §7.1): a signed Mach-O in
 # Contents/Helpers (data files there would break the app's seal), identifier dev.deckhand.core,
-# which holder_install checks on its copy (src/holder_install.odin); signed before the app
+# which holder_install checks on its copy (src/holder_install.odin); signed before the app.
+# Never written in place: a holder may run this very file (a scene's, in test mode), and a
+# signed binary changed under it is killed at its next page-in. Signed beside, then renamed in.
 if [ -f build/deckhand-core ]; then
   mkdir -p "$C/Helpers"
-  cp build/deckhand-core "$C/Helpers/deckhand-core"
-  codesign --force --sign - --identifier dev.deckhand.core "$C/Helpers/deckhand-core"
+  rm -f build/.deckhand-core.bundled
+  cp build/deckhand-core build/.deckhand-core.bundled
+  codesign --force --sign - --identifier dev.deckhand.core build/.deckhand-core.bundled
+  mv -f build/.deckhand-core.bundled "$C/Helpers/deckhand-core"
 fi
 # pi tabs (src/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
 if [ -d build/pi ]; then

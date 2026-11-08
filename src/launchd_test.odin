@@ -74,16 +74,17 @@ holder_install_copies :: proc(t: ^testing.T) {
 	p3, ok3, _ := holder_install(other, data)
 	defer delete(p3)
 	testing.expect(t, ok3 && p3 != path, "a different binary, a different dir")
-	// a development build runs in place
+	// a development build is installed too: the next rebuild must not change a running holder's
+	// file (only test mode runs the binary in place)
 	repo := fmt.tprintf("%s/repo", d)
-	os.make_directory_all(fmt.tprintf("%s/build", repo))
+	helpers := fmt.tprintf("%s/build/Deckhand.app/Contents/Helpers", repo)
+	os.make_directory_all(helpers)
 	_ = os.write_entire_file(fmt.tprintf("%s/build.sh", repo), transmute([]byte)string("#!/bin/sh\n"))
-	dev := fmt.tprintf("%s/build/Deckhand.app/Contents/Helpers/deckhand-core", repo)
-	testing.expect(t, holder_dev_build(dev))
-	p4, ok4, _ := holder_install(dev, data)
+	dev := fmt.tprintf("%s/deckhand-core", helpers)
+	if !lt_cc(t, "int main(void) { return 2; }\n", dev, HOLDER_ID) do return
+	p4, ok4, why4 := holder_install(dev, data)
 	defer delete(p4)
-	testing.expect(t, ok4 && p4 == dev, "used directly")
-	testing.expect(t, !holder_dev_build(bin))
+	testing.expectf(t, ok4 && p4 != dev && strings.has_prefix(p4, fmt.tprintf("%s/core/", data)), "a dev build is installed: %q %s", p4, why4)
 }
 
 @(test)

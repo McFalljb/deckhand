@@ -25,7 +25,7 @@ ctl_main :: proc(args: []string) -> int {
 	path := os.get_env("PI_DESK_SOCKET", context.allocator)
 	token := os.get_env("PI_DESK_TOKEN", context.allocator)
 	if path == "" || token == "" {
-		fmt.eprintln("deckhand --ctl: PI_DESK_SOCKET and PI_DESK_TOKEN must be set (see deckhand --print-token)")
+		fmt.eprintln("deckhand --ctl: PI_DESK_SOCKET and PI_DESK_TOKEN must be set (Settings › Copy a control token gives both)")
 		return 2
 	}
 	rest := args

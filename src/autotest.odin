@@ -249,7 +249,7 @@ autotest_allows_input :: proc() -> bool {return !autotest.active || autotest.inj
 autotest: Autotest
 
 autotest_init :: proc() {
-	path := os.get_env("PI_DESK_SCRIPT", context.temp_allocator)
+	path := hook_env(.Script)
 	if path == "" do return
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil {
@@ -259,9 +259,9 @@ autotest_init :: proc() {
 	autotest.lines = strings.split_lines(string(data))
 	autotest.active = true
 	autotest.retry_line, autotest.audit_wait, autotest.wr_idx, autotest.command_idx = -1, -1, -1, -1
-	autotest.audit = os.get_env("PI_DESK_WAIT_AUDIT", context.temp_allocator) == "1"
-	autotest.fail_fast = os.get_env("PI_DESK_SCRIPT_FAIL_FAST", context.temp_allocator) == "1"
-	autotest.step_file = os.get_env("PI_DESK_SCRIPT_STEP", context.allocator)
+	autotest.audit = hook_env(.Wait_Audit) == "1"
+	autotest.fail_fast = hook_env(.Script_Fail_Fast) == "1"
+	autotest.step_file = hook_env(.Script_Step, context.allocator)
 	autotest.path = strings.clone(path)
 	if autotest.audit do log("AUDIT script", path)
 	autotest_platform()
@@ -1292,7 +1292,7 @@ script_fail :: proc(args: ..any) {
 	// fail fast: stop here, as `quit` does (exit status 1: main.odin); no "done:" line, which the
 	// scene scripts read as a script that ran to its end
 	line := at.next > 0 && at.next <= len(at.lines) ? strings.trim_space(at.lines[at.next - 1]) : ""
-	log(fmt.tprintf("ASSERT FAILED (stopped at line %d of %s; PI_DESK_SCRIPT_FAIL_FAST): %s (%d asserts, %d failed)",
+	log(fmt.tprintf("ASSERT FAILED (stopped at line %d of %s; fail fast): %s (%d asserts, %d failed)",
 		at.next, at.path, line, at.asserts, at.failures))
 	if at.step_file != "" do script_write_step(at.next - 1, fmt.tprintf("%s   (failed; stopped)", line))
 	at.next = len(at.lines)

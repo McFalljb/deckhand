@@ -228,7 +228,7 @@ cef_start :: proc() -> bool {
 	}
 	// test mode never touches the network (SPIKE: the real policy for Chromium's
 	// Google services is open, see the report)
-	no_network: c.int = autotest.active || os.get_env("PI_DESK_CEF_OFFLINE", context.temp_allocator) == "1" ? 1 : 0
+	no_network: c.int = autotest.active || hook_env(.Cef_Offline) == "1" ? 1 : 0
 	t0 := time.tick_now()
 	ok := pd_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
 	cef_start_ms = time.duration_milliseconds(time.tick_since(t0))
@@ -508,7 +508,7 @@ browser_chan :: proc(b: ^Browser) -> bool {
 	if autotest.active {
 		// count writes into any texture an uncompleted GPU frame samples;
 		// PI_DESK_TEST_GPU_LAG_MS: a slow GPU (the completed handler's work waits)
-		lag, _ := strconv.parse_int(os.get_env("PI_DESK_TEST_GPU_LAG_MS", context.temp_allocator))
+		lag, _ := strconv.parse_int(hook_env(.Gpu_Lag_Ms))
 		pd_frames_test_track(1, c.int(lag))
 	}
 	return b.chan
@@ -1214,7 +1214,7 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 browser_debug_tick :: proc() {
 	@(static) done: bool
 	if done do return
-	url := os.get_env("PI_DESK_DEBUG_BROWSER", context.temp_allocator)
+	url := hook_env(.Debug_Browser)
 	if url == "" {
 		done = true
 		return

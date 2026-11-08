@@ -308,7 +308,7 @@ harness_update_bare :: proc(r: Harness_Row, layout: Install_Layout, real: string
 harness_binary :: proc(h: Harness) -> string {
 	name := h == .Pi ? "pi" : "claude"
 	if h == .Claude {
-		if b := os.get_env("PI_DESK_CLAUDE_BIN", context.temp_allocator); filepath.is_abs(b) do return b
+		if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
 	}
 	for d in strings.split(detect_path(), ":", context.temp_allocator) do if exe_in(d, name) do return fmt.tprintf("%s/%s", strings.trim_right(d, "/"), name)
 	switch h {

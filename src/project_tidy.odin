@@ -81,7 +81,7 @@ temp_roots :: proc() -> []string {
 	// (empty pieces dropped: "" would make every path temp).
 	if autotest.active {
 		named := make([dynamic]string, context.temp_allocator)
-		for r in strings.split(os.get_env("PI_DESK_TEMP_ROOTS", context.temp_allocator), ":", context.temp_allocator) do if r != "" do append(&named, r)
+		for r in strings.split(hook_env(.Temp_Roots), ":", context.temp_allocator) do if r != "" do append(&named, r)
 		if len(named) > 0 do return named[:]
 	}
 	out := make([dynamic]string, context.temp_allocator)

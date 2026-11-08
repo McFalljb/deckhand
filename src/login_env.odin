@@ -311,7 +311,7 @@ login_env_with_dirs :: proc(path: string, dirs: []string) -> string {
 // Where pi and its runtimes usually are. PI_DESK_PATH_DIRS replaces the list
 // (tests: never the machine's real /opt/homebrew/bin).
 login_env_dirs :: proc(home: string) -> []string {
-	if v, found := os.lookup_env("PI_DESK_PATH_DIRS", context.temp_allocator); found {
+	if v, found := hook_lookup(.Path_Dirs); found {
 		return strings.split(v, ":", context.temp_allocator)
 	}
 	dirs := make([dynamic]string, context.temp_allocator)
@@ -474,7 +474,7 @@ login_env: struct {
 // main's call: the user's shell, the usual folders.
 login_env_startup :: proc() {
 	path := os.get_env("PATH", context.temp_allocator)
-	test_mode := os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != ""
+	test_mode := hook_env(.Script) != ""
 	env, _ := os.environ(context.temp_allocator)
 	gui := login_env_gui_launch(int(posix.getppid()), path, os.get_env("PI_DESK_GUI_LAUNCH", context.temp_allocator), test_mode, login_env_from_claude(env))
 	login_env.gui = gui

@@ -7,6 +7,10 @@
 #   release.sh: a dirty tree, HEAD not exactly vX.Y.Z, another version's tag, the placeholder
 #   key, a key file readable by others, a key that is not UPDATE_PUBLIC_KEY, a rotation bridge
 #   whose key is not the old one: refused
+#   test hooks (src/test_hooks.odin): src built with -define:DECKHAND_TEST_HOOKS=false holds no
+#   hook name, --print-token or test key (scripts/check-release-build.sh passes it), binaries
+#   planted with a single hook string fail it;
+#   release.sh builds with DECKHAND_RELEASE=1 and runs the check; build.sh refuses it for tests
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -109,6 +113,20 @@ sed -i '' '/^ZIP_PREFIX ::/d' "$R/src/updatesig/updatesig.odin"
 git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qam nozip
 git -C "$R" tag v0.7.0
 refused "no ZIP_PREFIX in src/updatesig/updatesig.odin" "ZIP_PREFIX" --version 0.7.0 --no-upload
+
+# ---- test hooks out of release builds (src/test_hooks.odin) ----------------------------------
+H="$W/hooks"
+mkdir -p "$H"
+odin build src -out:"$H/nohooks" -define:DECKHAND_TEST_HOOKS=false -minimum-os-version:14.0 >"$H/build.log" 2>&1 || { cat "$H/build.log"; bad "src did not build without hooks"; }
+scripts/check-release-build.sh "$H/nohooks" >"$H/out.txt" 2>&1 && ok "a build without hooks passes the check" || bad "a build without hooks: $(cat "$H/out.txt")"
+for s in PI_DESK_SCRIPT PI_DESK_DATA_DIR PI_DESK_RUNTIME_DIR PI_DESK_UPDATE_URL --print-token; do
+  cp /usr/bin/true "$H/planted"
+  printf 'x%sx' "$s" >> "$H/planted"
+  scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding $s passed" || ok "a binary holding $s refused"
+done
+grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"
+grep -q 'scripts/check-release-build.sh "$EXE"' scripts/release.sh && ok "release.sh checks its binaries" || bad "release.sh does not run check-release-build.sh"
+DECKHAND_RELEASE=1 ./build.sh test >"$H/out.txt" 2>&1 && bad "build.sh test ran without hooks" || ok "build.sh refuses DECKHAND_RELEASE=1 for tests"
 
 if [ $fail = 1 ]; then echo "release checks failed (last output: $W/out.txt)"; exit 1; fi
 echo "release checks ok"

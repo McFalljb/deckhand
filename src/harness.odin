@@ -64,7 +64,7 @@ pi_detect :: proc(path, home, agent_dir: string) -> bool {
 // install folders only (under the scene's fake HOME), never PATH, unless PI_DESK_REAL_PI=1: a
 // scene finds the same harnesses on every Mac, never the developer's own pi or claude.
 detect_path :: proc() -> string {
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" do return ""
+	if test_mode() && hook_env(.Real_Pi) != "1" do return ""
 	path, _ := env_lookup(child_base_env(), "PATH")
 	return path
 }
@@ -100,7 +100,7 @@ pi_lookup_state :: proc() -> Pi_Lookup {return Pi_Lookup(sync.atomic_load(&pi_lo
 // detect_path (never the developer's own pi).
 @(private = "file")
 pi_lookup_start :: proc() {
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
+	if test_mode() && hook_env(.Real_Pi) != "1" {
 		sync.atomic_store(&pi_lookup.state, .Missing)
 		return
 	}
@@ -131,7 +131,7 @@ pi_lookup_start :: proc() {
 // stats again (the user's New session).
 pi_installed :: proc() -> bool {
 	if pi_installed_probe != nil do return pi_installed_probe()
-	if os.get_env("PI_DESK_CMD", context.temp_allocator) != "" do return true
+	if hook_env(.Cmd) != "" do return true
 	if pi_found == .Unknown && pi_detect(detect_path(), os.get_env("HOME", context.temp_allocator), pi_agent_dir()) do pi_found = .Yes
 	if pi_found != .Unknown do return pi_found == .Yes
 	switch pi_lookup_state() {

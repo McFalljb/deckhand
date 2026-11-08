@@ -125,11 +125,11 @@ update_init :: proc() {
 	if autotest.active {
 		// a release build never reads the fixture variables: no checks in its test mode
 		when !PI_DESK_UPDATE_TEST do return
-		u := os.get_env("PI_DESK_UPDATE_URL", context.temp_allocator)
+		u := hook_env(.Update_Url)
 		if u == "" do return
 		upd.test = true
 		upd.url = strings.clone(u)
-		upd.download = strings.clone(os.get_env("PI_DESK_UPDATE_DOWNLOAD", context.temp_allocator))
+		upd.download = strings.clone(hook_env(.Update_Download))
 	} else {
 		upd.url = strings.clone(UPDATE_API_URL)
 		upd.download = strings.clone(UPDATE_DOWNLOAD_URL)
@@ -142,8 +142,8 @@ update_init :: proc() {
 	h := runtime.heap_allocator()
 	t := new_clone(Timer{test = upd.test, delay = UPDATE_START_DELAY}, h)
 	if upd.test {
-		t.version = strings.clone(os.get_env("PI_DESK_UPDATE_VERSION", context.temp_allocator), h)
-		t.app = strings.clone(os.get_env("PI_DESK_UPDATE_APP", context.temp_allocator), h)
+		t.version = strings.clone(hook_env(.Update_Version), h)
+		t.app = strings.clone(hook_env(.Update_App), h)
 		t.delay = 300 * time.Millisecond
 	}
 	thread.run_with_poly_data(t, proc(t: ^Timer) {
@@ -161,7 +161,7 @@ update_init :: proc() {
 // The running version and the bundle pi-desk may replace (any thread; temp allocator).
 update_env_find :: proc(test: bool, test_version, test_app: string) -> (version, bundle, why: string) {
 	if test {
-		if test_app == "" || under_applications(test_app) do return test_version, "", "test mode installs only into a fake folder (PI_DESK_UPDATE_APP), never under /Applications"
+		if test_app == "" || under_applications(test_app) do return test_version, "", "test mode installs only into a fake folder, never under /Applications"
 		b, w := install_decision(upath(test_app, "Contents", "MacOS", "Deckhand"), path_writable)
 		return test_version, b, w
 	}

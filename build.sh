@@ -13,6 +13,9 @@
 # binary, so `build/deckhand ARGS` works as before (build/pi-desk is the same wrapper,
 # for older scripts). PI_DESK_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
+# DECKHAND_RELEASE=1 (scripts/release.sh): the release or debug build without the test hooks
+# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no PI_DESK_* overrides,
+# no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
 set -eu
@@ -150,6 +153,10 @@ if [ "${PI_DESK_NO_CEF:-0}" != 1 ] && [ "$MODE" != test ] && [ "$MODE" != fake-a
 fi
 OUT=build/deckhand
 DEFINES=""
+if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then
+  [ "$MODE" = test ] || [ "$MODE" = fake-app ] && { echo "build.sh: DECKHAND_RELEASE=1 is for release builds, not $MODE"; exit 1; }
+  DEFINES="-define:DECKHAND_TEST_HOOKS=false"
+fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
@@ -162,7 +169,7 @@ if [ $WITH_CEF = 1 ]; then
     clang $CEF_CFLAGS -I"$CEF" src/native/cef_helper.c -o build/cef_helper
   fi
   OUT=build/Deckhand.app/Contents/MacOS/Deckhand
-  DEFINES="-define:PI_DESK_CEF=true"
+  DEFINES="$DEFINES -define:PI_DESK_CEF=true"
   mkdir -p build/Deckhand.app/Contents/MacOS
   # build/deckhand (the wrapper, or a bare binary from a PI_DESK_NO_CEF build) stays until
   # bundle-app.sh rewrites it: a failed compile leaves the last working command in place

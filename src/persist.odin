@@ -108,7 +108,7 @@ persist_quit :: proc() {
 	if persist.done do return
 	persist_save()
 	persist.done = true
-	if persist.path != "" && os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" do fmt.eprintf("Deckhand: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
+	if persist.path != "" && hook_env(.Script) != "" do fmt.eprintf("Deckhand: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
 }
 
 // Writes `text` to `path` through a temp file in the same dir and a rename,

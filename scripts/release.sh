@@ -27,7 +27,8 @@
 # Refuses, before building anything, unless: X.Y.Z (no pre-releases: the updater never offers
 # them); the worktree is clean (no changes, no untracked files); HEAD is exactly the tag vX.Y.Z;
 # src/update_key.odin has a real key; the key file's public half is that key. After the build:
-# the app's main executable holds UPDATE_PUBLIC_KEY and not the test key.
+# the app's main executable holds UPDATE_PUBLIC_KEY and not the test key, and no binary holds a test
+# hook (scripts/check-release-build.sh: env overrides, test mode, --print-token).
 #
 # Code signing, from the environment (never printed): MACOS_CERT_P12 (base64 of a .p12 with a
 #   "Developer ID Application" identity) and MACOS_CERT_PASSWORD: Developer ID signature,
@@ -145,7 +146,9 @@ if [ $PACKAGE = 1 ]; then
 # to read, never a reason to stop (./build.sh test above gates on 10x and 3x)
 python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
   { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
-./build.sh # release build with CEF; bundle-app.sh lays out and ad-hoc signs build/Deckhand.app
+# release build with CEF and without the test hooks (src/test_hooks.odin); bundle-app.sh lays out
+# and ad-hoc signs build/Deckhand.app
+DECKHAND_RELEASE=1 ./build.sh
 BUILT=build/$APP_NAME
 EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)
 EXE=$BUILT/Contents/MacOS/$EXE_NAME
@@ -159,6 +162,9 @@ if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
   echo "release: $BUILT has the update TEST key in it (a test build?)" >&2
   exit 1
 fi
+# no test hook in anything Deckhand runs: the env overrides, test mode, --print-token
+scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/pi-desk-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
+  { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
 [ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||
   { echo "release: $BUILT has no CEF framework (a PI_DESK_NO_CEF build?)" >&2; exit 1; }
 

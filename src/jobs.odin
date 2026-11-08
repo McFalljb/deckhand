@@ -998,7 +998,7 @@ period_limit_reached :: proc(now: i64) -> bool {
 // Test mode: only pi_path (a scene's fake) or PI_DESK_REAL_PI=1; never the real pi by search.
 job_pi_path :: proc() -> string {
 	if p := state.settings.pi_path; p != "" do return p
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
+	if test_mode() && hook_env(.Real_Pi) != "1" {
 		test_mode_refused("pi (jobs: no pi_path)")
 		return ""
 	}

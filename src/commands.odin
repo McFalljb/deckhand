@@ -212,6 +212,10 @@ Set_Tidy_Projects :: struct {
 Set_Keep_Sessions :: struct {
 	on: bool,
 }
+// Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
+// onto the clipboard (docs/PROTOCOL.md §2). The user's only: the one way a release build mints a
+// control token (test_hooks.odin: no --print-token there). The token is never logged or returned.
+Copy_Control_Token :: struct {}
 
 // User-only (caller ui or internal): settings that bound what agents may do.
 Set_Confirm_Policy :: struct {
@@ -431,6 +435,7 @@ Command :: union {
 	Set_Notify,
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
+	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
 	Set_Theme,
@@ -1306,6 +1311,12 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.tidy_off == !c.on do return {ok = true}, false
 		state.settings.tidy_off = !c.on
 		return {ok = true}, true // projects_tidy runs after (run_command)
+	case Copy_Control_Token:
+		if !socket_running() do return fail("Deckhand's control socket is not running"), false
+		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
+		if platform.set_clipboard != nil do platform.set_clipboard(fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok))
+		toast_show("Control token copied: paste it into a terminal, then use deckhand --ctl (it works until you quit Deckhand)")
+		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
 		if state.settings.keep_sessions == c.on do return {ok = true}, false
 		state.settings.keep_sessions = c.on
@@ -2327,11 +2338,14 @@ PI_TAB_CMD :: `_pa=${PI_CODING_AGENT_DIR:-}; case "$_pa" in "~") _pa=$HOME;; "~/
 
 // Test mode (PI_DESK_SCRIPT) fails closed: without a stand-in a tab runs this instead of the real
 // pi or claude (docs/DEVELOPING.md "Test mode"). pi-desk's own log says so too (test_mode_refused).
-TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CMD; refusing to run the real pi (PI_DESK_REAL_PI=1 allows it)"; exit 127`
-TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CLAUDE_CMD; refusing to run the real claude"; exit 127`
+// (Test builds only: a release build has no test mode, test_hooks.odin.)
+when TEST_HOOKS {
+	TEST_NO_PI_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CMD; refusing to run the real pi (PI_DESK_REAL_PI=1 allows it)"; exit 127`
+	TEST_NO_CLAUDE_CMD :: `printf '%s\n' "Deckhand test mode: no PI_DESK_CLAUDE_CMD; refusing to run the real claude"; exit 127`
+}
 
 // pi-desk runs a test script (autotest.odin): scenes, never the user's own session.
-test_mode :: proc() -> bool {return os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != ""}
+test_mode :: proc() -> bool {return hook_env(.Script) != ""}
 
 // Said on pi-desk's stderr (the scene's log) whenever test mode refuses a real binary.
 test_mode_refused :: proc(what: string) {
@@ -2341,10 +2355,12 @@ test_mode_refused :: proc(what: string) {
 // What a pi tab runs: PI_DESK_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the
 // real pi only with PI_DESK_REAL_PI=1 (real-pi scenes), else TEST_NO_PI_CMD.
 pi_tab_cmd :: proc() -> string {
-	if c := os.get_env("PI_DESK_CMD", context.temp_allocator); c != "" do return c
-	if test_mode() && os.get_env("PI_DESK_REAL_PI", context.temp_allocator) != "1" {
-		test_mode_refused("pi")
-		return TEST_NO_PI_CMD
+	if c := hook_env(.Cmd); c != "" do return c
+	when TEST_HOOKS {
+		if test_mode() && hook_env(.Real_Pi) != "1" {
+			test_mode_refused("pi")
+			return TEST_NO_PI_CMD
+		}
 	}
 	return PI_TAB_CMD
 }

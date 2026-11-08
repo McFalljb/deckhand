@@ -87,13 +87,13 @@ init :: proc "c" () {
 	autotest_init()
 	if autotest.active do platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
 	// test mode keeps its log out of the user's data dir
-	if autotest.active && os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) == "" {
+	if autotest.active && hook_env(.Data_Dir) == "" {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
 	} else do home_root = data_dir()
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
 	// anything is written there; test mode looks for pi-desk only in a runtime dir of its own
-	check_old := !autotest.active || os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator) != ""
+	check_old := !autotest.active || hook_env(.Runtime_Dir) != ""
 	if why := instance_guard(home_root, check_old); why != "" {
 		if autotest.active {
 			fmt.println("[autotest] instance refused:", why)
@@ -111,20 +111,24 @@ init :: proc "c" () {
 		agent_guide_install()
 	}
 	// the session-title cache (titles.odin): same rule as the workspace
-	if !autotest.active || os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) != "" do titles_load(data_dir(context.temp_allocator))
+	if !autotest.active || hook_env(.Data_Dir) != "" do titles_load(data_dir(context.temp_allocator))
 	claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
 	rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
+	// (development and test builds only: a release build mints a control token only from
+	// Settings › Copy a control token, test_hooks.odin)
 	dir, token_kind := app_args.dir, app_args.token_kind
 	if socket_start() && token_kind != "" {
-		kind := token_kind == "control" ? Caller_Kind.Control : Caller_Kind.Script
-		fmt.printf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), socket_mint_token({kind = kind}, context.temp_allocator))
-		os.flush(os.stdout)
+		when TEST_HOOKS {
+			kind := token_kind == "control" ? Caller_Kind.Control : Caller_Kind.Script
+			fmt.printf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), socket_mint_token({kind = kind}, context.temp_allocator))
+			os.flush(os.stdout)
+		}
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// PI_DESK_DATA_DIR, so scripts never read or write the user's
-	if !autotest.active || os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) != "" {
+	if !autotest.active || hook_env(.Data_Dir) != "" {
 		persist_init(data_dir(context.temp_allocator))
 		claude_disk_launching = true // no transcript read on the main thread while it comes back
 		persist_load(app_args.fresh)
@@ -140,8 +144,8 @@ init :: proc "c" () {
 	// the chats folder's instructions (folders.odin), then the first-run sheet
 	// once while no main folder is set (test mode: only when a scene asks)
 	// (not while setup is due: Done writes it where the user puts chats)
-	if (!autotest.active || os.get_env("PI_DESK_DATA_DIR", context.temp_allocator) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
-	if setup_due() && (!autotest.active || os.get_env("PI_DESK_FIRST_RUN", context.temp_allocator) == "1") do run_command(Setup_Sheet{open = true})
+	if (!autotest.active || hook_env(.Data_Dir) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
+	if setup_due() && (!autotest.active || hook_env(.First_Run) == "1") do run_command(Setup_Sheet{open = true})
 	// `pi-desk DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
 		r := run_command(Add_Project{dir})
@@ -1101,13 +1105,19 @@ App_Args :: struct {
 }
 app_args: App_Args
 
-APP_USAGE :: "usage: deckhand [--fresh] [--print-token script|control] [--claude] [DIR]   |   deckhand --ctl [--wait MS] JSON..."
+when TEST_HOOKS {
+	APP_USAGE :: "usage: deckhand [--fresh] [--print-token script|control] [--claude] [DIR]   |   deckhand --ctl [--wait MS] JSON..."
+	PRINT_TOKEN_FLAG :: "--print-token"
+} else {
+	APP_USAGE :: "usage: deckhand [--fresh] [--claude] [DIR]   |   deckhand --ctl [--wait MS] JSON..."
+	PRINT_TOKEN_FLAG :: "" // never matches: a release build has no --print-token (test_hooks.odin)
+}
 
 // The command line (after the program's name; --ctl is handled before). --claude needs DIR.
 app_args_parse :: proc(args: []string) -> (a: App_Args, ok: bool) {
 	for i := 0; i < len(args); i += 1 {
 		x := args[i]
-		if x == "--print-token" && i + 1 < len(args) && (args[i + 1] == "script" || args[i + 1] == "control") {
+		if PRINT_TOKEN_FLAG != "" && x == PRINT_TOKEN_FLAG && i + 1 < len(args) && (args[i + 1] == "script" || args[i + 1] == "control") {
 			a.token_kind = args[i + 1]
 			i += 1
 		} else if x == "--fresh" {
@@ -1160,16 +1170,18 @@ main :: proc() {
 	app_context = context
 	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
 	login_env_startup()
-	// test mode is quiet unless PI_DESK_QUIET=0: the window never shows or takes focus
-	if os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" && os.get_env("PI_DESK_QUIET", context.temp_allocator) != "0" do platform_quiet()
-	// test mode: the same backing scale on every Mac (PI_DESK_SCALE, default 1), quiet or not
-	if os.get_env("PI_DESK_SCRIPT", context.temp_allocator) != "" {
-		scale, sok := test_scale_parse(os.get_env("PI_DESK_SCALE", context.temp_allocator))
-		if !sok {
-			fmt.eprintln("Deckhand: PI_DESK_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
-			os.exit(2)
+	when TEST_HOOKS {
+		// test mode is quiet unless PI_DESK_QUIET=0: the window never shows or takes focus
+		if hook_env(.Script) != "" && hook_env(.Quiet) != "0" do platform_quiet()
+		// test mode: the same backing scale on every Mac (PI_DESK_SCALE, default 1), quiet or not
+		if hook_env(.Script) != "" {
+			scale, sok := test_scale_parse(hook_env(.Scale))
+			if !sok {
+				fmt.eprintln("Deckhand: PI_DESK_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
+				os.exit(2)
+			}
+			platform_test_scale(scale)
 		}
-		platform_test_scale(scale)
 	}
 	sapp.run({
 		init_cb = init,

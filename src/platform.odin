@@ -36,7 +36,7 @@ clipboard_text :: proc() -> string {
 // Where pi-desk keeps its own files (command log; later the saved
 // workspace). PI_DESK_DATA_DIR overrides.
 data_dir :: proc(allocator := context.allocator) -> string {
-	if d := os.get_env("PI_DESK_DATA_DIR", allocator); d != "" do return d
+	if d := hook_env(.Data_Dir, allocator); d != "" do return d
 	home := os.get_env("HOME", context.temp_allocator)
 	when ODIN_OS == .Darwin {
 		p, _ := filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)

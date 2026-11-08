@@ -1479,7 +1479,7 @@ and setup carry over and nothing you rely on breaks. They are not leftovers to r
 
 - the bundle id, `dev.pi-desk.app`;
 - the data dir, `~/Library/Application Support/pi-desk` (see [Where it lives](#where-it-lives));
-- the `PI_DESK_*` environment variables (`PI_DESK_DATA_DIR` and the ones Deckhand sets in its tabs);
+- the `PI_DESK_*` environment variables Deckhand sets in its tabs;
 - the `pi-desk` command in Claude tabs, an alias of `deckhand`;
 - the project file `.pi-desk/apps.json` and the default main folder `~/pi-desk`.
 
@@ -1491,7 +1491,8 @@ download or install one: only you can.
 ### Where it lives
 
 Deckhand's data dir is `~/Library/Application Support/pi-desk` on macOS (Linux:
-`~/.local/share/pi-desk`; the `PI_DESK_DATA_DIR` environment variable moves it). The name is kept
+`~/.local/share/pi-desk`; a release build always uses this one; a development build can move it,
+docs/DEVELOPING.md). The name is kept
 from Deckhand's old name ([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
 to you (`0700`), and its files are `0600`:
 

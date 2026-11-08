@@ -212,11 +212,15 @@ it). Logs: `build/scenes/<scene>.log`, summary: `build/scenes/summary.txt`, last
 `build/scene-times.json` (used to start the longest first).
 
 **Failing fast.** A scene stops at its first failed check, wait (`waitfor`, `waitstate`,
-`waitresult`, a command's TIMEOUT) or missing element: the app logs `STOPPED at line N of
-SCRIPT` and quits with exit status 1 (`PI_DESK_SCRIPT_FAIL_FAST=1`, which
+`waitresult`, a command's TIMEOUT) or missing element: the app logs `ASSERT FAILED (stopped at line N
+of SCRIPT…)`, no `done:` line, and quits with exit status 1 (`PI_DESK_SCRIPT_FAIL_FAST=1`, which
 `tests/scripts/fresh-build.sh` and the runner set; `--no-fail-fast` or
 `PI_DESK_SCRIPT_FAIL_FAST=0` runs every line, to see all of a new script's failures at once).
-A `waitfor` that times out is a failure (it used to be only logged). The runner kills a scene
+A `waitfor` that times out is a failure (it used to be only logged). Every failed line is
+logged with `ASSERT FAILED` (or `TIMEOUT` for a wait), the markers the scene scripts read: most
+run the app with `|| true` and grep its log, so a failure worded otherwise (`dragtab: no such tab
+or place`) used to pass its scene. `fail-fast-test` checks that a bogus `dragtab` fails
+`panes.sh`, with and without fail-fast. The runner kills a scene
 after 3× its typical or last time, at least 120 s (`--timeout` sets one for all; it was 900 s
 for every scene, and `jobs` once waited all of it out, failing one 15 s wait after another).
 Each script line is written to `build/scenes/<scene>.step` as it starts

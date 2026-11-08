@@ -157,7 +157,8 @@ package main
 //
 // PI_DESK_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
 // the first failed check, wait (waitfor, waitstate, waitresult, a command's TIMEOUT...) or missing
-// element ends the script there: it logs "STOPPED at line N" and quits (exit status 1), so a scene
+// element ends the script there: it logs "ASSERT FAILED (stopped at line N ...)" (no "done:") and
+// quits (exit status 1), so a scene
 // fails in seconds instead of running every later wait to its timeout. PI_DESK_SCRIPT_STEP=FILE:
 // each line's number and text are written to FILE as it starts, so a run that hangs or is killed
 // says where it was (tests/scenes.py prints it).
@@ -1270,16 +1271,22 @@ script_command :: proc(c: Command, caller: Caller) -> (id: u64, r: Result, finis
 	return id, reply.result, finished
 }
 
+// A failed script line: counted (exit status 1 at quit), and logged with a marker the scene scripts
+// look for ("ASSERT FAILED", or "TIMEOUT" for a wait): many run the app with `|| true` and read
+// its log, so a failure without one ("dragtab: no such tab or place") would pass the scene.
 @(private = "file")
 script_fail :: proc(args: ..any) {
 	autotest.failures += 1
-	log(..args)
+	msg := fmt.tprint(..args)
+	if strings.has_prefix(msg, "ASSERT FAILED") || strings.has_prefix(msg, "TIMEOUT") do log(msg)
+	else do log("ASSERT FAILED", msg)
 	at := &autotest
 	if !at.fail_fast || !at.active do return
-	// fail fast: stop here, as `quit` does (exit status 1: main.odin)
+	// fail fast: stop here, as `quit` does (exit status 1: main.odin); no "done:" line, which the
+	// scene scripts read as a script that ran to its end
 	line := at.next > 0 && at.next <= len(at.lines) ? strings.trim_space(at.lines[at.next - 1]) : ""
-	log(fmt.tprintf("STOPPED at line %d of %s (PI_DESK_SCRIPT_FAIL_FAST): %s", at.next, at.path, line))
-	log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
+	log(fmt.tprintf("ASSERT FAILED (stopped at line %d of %s; PI_DESK_SCRIPT_FAIL_FAST): %s (%d asserts, %d failed)",
+		at.next, at.path, line, at.asserts, at.failures))
 	if at.step_file != "" do script_write_step(at.next - 1, fmt.tprintf("%s   (failed; stopped)", line))
 	at.next = len(at.lines)
 	at.waiting_for = ""

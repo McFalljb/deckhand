@@ -58,6 +58,7 @@ claude-wait         | full     |                       |    8 | src/claude_wait.
 comments            | full     | cef                   |   19 | src/comments.odin src/ui_comments.odin src/browser_annotate.odin src/native/browser_overlay.js src/app_tab.odin tests/fake-app/* tests/web/browser.html tests/scripts/comments.* tests/scripts/fake-bridge-attach.py
 dead-tab            | full     | test-data             |   13 | src/dead_tab.odin tests/scripts/dead-tab.* tests/scripts/fake-pi-dead.py
 editor              | full     |                       |   21 | src/editor*.odin src/native/editor_macos.m src/textfield.odin vendor/tree-sitter/* tests/scripts/editor*
+fail-fast-test      | required |                       |    6 | src/autotest.odin tests/scripts/panes.sh tests/scripts/fresh-build.sh tests/scripts/fail-fast-*
 fetch-cef-test      | required |                       |    5 | scripts/fetch-cef.sh tests/scripts/fetch-cef-test.sh
 files               | full     | test-trash            |   37 | src/files.odin src/fs_model.odin src/ui_files.odin src/editor_watch.odin src/native/editor_macos.m tests/scripts/files*
 files-nested        | full     |                       |   20 | src/files.odin src/fs_model.odin src/ui_files.odin src/project_tidy.odin tests/scripts/files-nested.*

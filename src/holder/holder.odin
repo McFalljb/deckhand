@@ -41,7 +41,8 @@ READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
 SPAWN_TIMEOUT :: 10 * time.Second // the app gives up (and RELEASEs) sooner; this is the backstop
 HELLO_TIMEOUT :: 5 * time.Second // from accept: a connection that has not said HELLO is dropped
-LINGER :: 5 * time.Second // after GOODBYE_ACK: how long the core may take to close
+LINGER :: 5 * time.Second
+ACCEPT_BACKOFF :: 100 * time.Millisecond // out of fds: the listener is left out of poll this long // after GOODBYE_ACK: how long the core may take to close
 
 Config :: struct {
 	run_dir:       string, // "": no listening socket (tests hand fds to holder_attach)
@@ -58,6 +59,7 @@ Config :: struct {
 	input_cap:     int, // INPUT queued for one terminal past this: the core's connection is not read
 	input_stall:   time.Duration, // ... for at most this long; then that queue is dropped
 	hello_timeout: time.Duration, // a connection that has not said HELLO by then is dropped
+	test_accept_errno: c.int, // tests: != 0, accept() fails with it
 	test_spawn_gate: c.int, // tests: > 0, a child reads one byte from it before its exec
 }
 
@@ -138,6 +140,8 @@ Holder :: struct {
 	serials:           u64,
 	input_paused:      bool, // a terminal has input_cap of INPUT queued: the core is not read
 	input_paused_at:   time.Tick,
+	listen_paused:     bool, // accept failed for want of fds (EMFILE, ENFILE): back off
+	listen_paused_at:  time.Tick,
 }
 
 Start_Error :: enum {
@@ -348,7 +352,8 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 		append(who, w)
 		append(idx, i)
 	}
-	if h.listen_fd >= 0 && !h.shutting_down do add(&fds, &who, &idx, h.listen_fd, POLLIN, .Listen, 0)
+	if h.listen_paused && time.tick_since(h.listen_paused_at) >= ACCEPT_BACKOFF do h.listen_paused = false
+	if h.listen_fd >= 0 && !h.shutting_down && !h.listen_paused do add(&fds, &who, &idx, h.listen_fd, POLLIN, .Listen, 0)
 	if h.wake_fd >= 0 do add(&fds, &who, &idx, h.wake_fd, POLLIN, .Wake, 0)
 	input_pause(h)
 	for cn, i in h.conns {
@@ -452,17 +457,28 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	}
 	if h.idle do t = min(t, ms_until(h.idle_since, h.cfg.idle_exit))
 	if h.input_paused do t = min(t, ms_until(h.input_paused_at, h.cfg.input_stall))
+	if h.listen_paused do t = min(t, ms_until(h.listen_paused_at, ACCEPT_BACKOFF))
 	return t
 }
 
 @(private)
 accept_all :: proc(h: ^Holder) {
 	for {
+		fd: c.int = -1
 		sync_lock()
-		fd := accept(h.listen_fd, nil, nil)
+		if h.cfg.test_accept_errno != 0 do __error()^ = h.cfg.test_accept_errno
+		else do fd = accept(h.listen_fd, nil, nil)
 		if fd >= 0 do set_cloexec(fd)
 		sync_unlock()
-		if fd < 0 do return
+		if fd < 0 {
+			// the listener stays readable while the connection waits: polling it again at once
+			// would spin
+			if e := errno(); e == EMFILE || e == ENFILE {
+				if !h.listen_paused do hlog(h, "accept: out of file descriptors (errno %d): backing off", e)
+				h.listen_paused, h.listen_paused_at = true, time.tick_now()
+			}
+			return
+		}
 		holder_attach(h, fd)
 	}
 }
@@ -946,6 +962,7 @@ hold_main :: proc(args: []string) -> int {
 	if run_dir == "" || data_dir == "" do return usage()
 
 	reset_signals()
+	raise_fd_limit()
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
 
 	if ready != "" {
@@ -982,6 +999,19 @@ hold_main :: proc(args: []string) -> int {
 	code := h.exit_code
 	holder_free(h)
 	return code
+}
+
+// Each session takes a master (and its pending spawn an exec pipe); launchd's soft limit of 256
+// would run out long before the hard one: raise the soft limit to the hard one (capped at
+// OPEN_MAX, what setrlimit takes on macOS).
+@(private)
+raise_fd_limit :: proc() {
+	rl: Rlimit
+	if getrlimit(RLIMIT_NOFILE, &rl) != 0 do return
+	want := min(rl.max, OPEN_MAX)
+	if rl.cur >= want do return
+	rl.cur = want
+	if setrlimit(RLIMIT_NOFILE, &rl) != 0 do log_line(fmt.tprintf("setrlimit(NOFILE, %d): errno %d", want, errno()))
 }
 
 @(private)

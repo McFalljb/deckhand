@@ -12,6 +12,8 @@ TIOCSWINSZ :: 0x80087467
 TIOCGWINSZ :: 0x40087468
 EAGAIN :: 35
 EINTR :: 4
+EMFILE :: 24
+ENFILE :: 23
 O_NONBLOCK :: 0x0004
 O_RDWR :: 0x0002
 O_CREAT :: 0x0200
@@ -51,6 +53,13 @@ POLLNVAL :: 0x0020
 
 POSIX_SPAWN_SETEXEC :: 0x0040
 RTLD_DEFAULT :: rawptr(~uintptr(1)) // (void *)-2
+
+RLIMIT_NOFILE :: 8
+OPEN_MAX :: 10240
+
+Rlimit :: struct {
+	cur, max: u64,
+}
 
 Pollfd :: struct {
 	fd:      c.int,
@@ -119,6 +128,8 @@ foreign libc {
 	posix_spawnattr_destroy :: proc(attr: ^rawptr) -> c.int ---
 	_NSGetEnviron :: proc() -> ^[^]cstring ---
 	__error :: proc() -> ^c.int ---
+	getrlimit :: proc(resource: c.int, rlp: ^Rlimit) -> c.int ---
+	setrlimit :: proc(resource: c.int, rlp: ^Rlimit) -> c.int ---
 }
 
 foreign import libproc "system:proc"

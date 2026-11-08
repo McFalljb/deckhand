@@ -12,6 +12,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "../holderwire"
@@ -896,4 +897,47 @@ input_queue_is_capped :: proc(t: ^testing.T) {
 	fake_send(f, .Ping, 0, holderwire.Empty{})
 	_, pong := wait_for(h, f, .Pong)
 	testing.expect(t, pong && h.core != nil, "the core was dropped")
+}
+
+// accept() failing with EMFILE leaves the listener readable: it is left out of poll for a
+// moment (no 100% CPU spin), and the waiting connection is accepted once fds are free again.
+@(test)
+accept_emfile_backs_off :: proc(t: ^testing.T) {
+	r: [4]u8
+	crypto.rand_bytes(r[:])
+	tmp := strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")
+	if tmp == "" do tmp = "/tmp"
+	run := fmt.tprintf("%s/dh-emfile-%s", tmp, string(hex.encode(r[:], context.temp_allocator)))
+	crun := strings.clone_to_cstring(run, context.temp_allocator)
+	testing.expect_value(t, mkdir(crun, 0o700), 0)
+	defer rmdir(crun)
+	cfg := test_cfg()
+	cfg.run_dir = run
+	cfg.test_accept_errno = EMFILE
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	if h == nil do return
+
+	addr: posix.sockaddr_un
+	addr.sun_family = .UNIX
+	for i in 0 ..< len(h.sock_path) do addr.sun_path[i] = c.char(h.sock_path[i])
+	addr.sun_len = u8(size_of(addr))
+	sync.mutex_lock(&fork_lock)
+	fd := posix.FD(socket(AF_UNIX, SOCK_STREAM, 0))
+	set_cloexec(c.int(fd))
+	sync.mutex_unlock(&fork_lock)
+	defer posix.close(fd)
+	testing.expect(t, posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
+
+	steps := 0
+	start := time.tick_now()
+	for time.tick_since(start) < 300 * time.Millisecond {
+		holder_step(h, 50)
+		steps += 1
+	}
+	testing.expectf(t, steps < 30, "%d loop iterations in 300 ms with accept failing", steps)
+	h.cfg.test_accept_errno = 0
+	start = time.tick_now()
+	for len(h.conns) == 0 && time.tick_since(start) < time.Second do holder_step(h, 20)
+	testing.expect_value(t, len(h.conns), 1)
 }

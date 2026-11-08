@@ -973,6 +973,10 @@ hold_main :: proc(args: []string) -> int {
 		}
 	}
 
+	// out of the launcher's cwd (the app's, when started directly; __detach did it already), so
+	// the holder never keeps a directory or a volume busy. Relative paths would break: kept then.
+	if strings.has_prefix(run_dir, "/") && strings.has_prefix(data_dir, "/") do chdir("/")
+
 	cfg := default_config()
 	cfg.run_dir, cfg.data_dir = run_dir, data_dir
 	h, err := holder_new(cfg)

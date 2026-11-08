@@ -184,12 +184,11 @@ launchd_plist_keys :: proc(t: ^testing.T) {
 // One real launch through launchd (S2's path): the detached holder runs with parent launchd
 // after its job was booted out, the temp dir is gone, and a stale job and temp dir of a dead
 // launcher are swept. Skipped without a GUI session (CI, ssh).
+//
+// First the real holder started directly (test mode's way): it leaves its cwd (the app's) for "/",
+// so it never keeps a directory or a volume busy.
 @(test)
 launchd_launch_real :: proc(t: ^testing.T) {
-	if !lt_launchd_ok() {
-		fmt.println("launchd_launch_real: skipped (no gui/<uid> launchd domain: not a GUI session)")
-		return
-	}
 	d := lt_dir("ld")
 	defer os.remove_all(d)
 	run := fmt.tprintf("%s/run", d)
@@ -197,6 +196,34 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	testing.expect_value(t, runtime_dir_prepare(run, RUNTIME_HOLDER_NEED), "")
 	os.make_directory_all(data)
 	domain := fmt.tprintf("gui/%d", posix.getuid())
+
+	// the holder: src/holder built here (a second; the launchd job must exec a real binary)
+	bin := fmt.tprintf("%s/deckhand-core", d)
+	o, bst := run_group({"odin", "build", "src/holder", fmt.tprintf("-out:%s", bin), "-minimum-os-version:14.0"}, 120 * time.Second, merge_stderr = true)
+	if !testing.expectf(t, bst == .Ok, "odin build src/holder: %s", o) do return
+
+	{
+		drun := fmt.tprintf("%s/drun", d)
+		testing.expect_value(t, runtime_dir_prepare(drun, RUNTIME_HOLDER_NEED), "")
+		dpid, dok, dwhy := holder_launch_direct(bin, drun, data, {"PATH=/usr/bin:/bin"})
+		if !testing.expectf(t, dok, "direct: %s", dwhy) do return
+		defer posix.kill(posix.pid_t(dpid), .SIGKILL)
+		listening := false
+		for _ in 0 ..< 300 {
+			entries, _ := os.read_all_directory_by_path(drun, context.temp_allocator)
+			for e in entries do if strings.has_prefix(e.name, "holder-") && strings.has_suffix(e.name, ".sock") do listening = true
+			if listening do break
+			time.sleep(10 * time.Millisecond)
+		}
+		testing.expect(t, listening, "the direct holder never listened")
+		lo, lst := run_group({"/usr/sbin/lsof", "-a", "-p", fmt.tprintf("%d", dpid), "-d", "cwd", "-Fn"}, 10 * time.Second)
+		testing.expectf(t, lst == .Ok && strings.contains(lo, "\nn/\n"), "the direct holder's cwd is not /: %q", lo)
+	}
+
+	if !lt_launchd_ok() {
+		fmt.println("launchd_launch_real: launchd part skipped (no gui/<uid> launchd domain: not a GUI session)")
+		return
+	}
 
 	// a dead launcher's leftovers: a loaded job that ran and ended (/usr/bin/true) with an old
 	// stamp, a fresh one of the same kind, and an old temp dir
@@ -221,11 +248,6 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	tv := [2]posix.timeval{{tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}, {tv_sec = posix.time_t(time.now()._nsec / 1e9 - 3600)}}
 	posix.utimes(strings.clone_to_cstring(old_dir, context.temp_allocator), &tv)
 	time.sleep(100 * time.Millisecond) // /usr/bin/true has run and ended
-
-	// the holder: src/holder built here (a second; the launchd job must exec a real binary)
-	bin := fmt.tprintf("%s/deckhand-core", d)
-	o, bst := run_group({"odin", "build", "src/holder", fmt.tprintf("-out:%s", bin), "-minimum-os-version:14.0"}, 120 * time.Second, merge_stderr = true)
-	if !testing.expectf(t, bst == .Ok, "odin build src/holder: %s", o) do return
 
 	t0 := time.tick_now()
 	pid, label, ok, why := launchd_launch(bin, run, data, {"LT_MARK=yes", "PATH=/usr/bin:/bin"}, TEST_LABEL_PREFIX)

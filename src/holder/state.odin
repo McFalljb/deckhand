@@ -186,6 +186,7 @@ state_decode :: proc(blob: []u8, fds: []c.int, cfg: Config) -> (h: ^Holder, why:
 		t.cols, t.rows, t.xpixel, t.ypixel = r_u16(&r), r_u16(&r), r_u16(&r), r_u16(&r)
 		t.offset = r_u64(&r)
 		flags := r_u8(&r)
+		if flags & ~u8(31) != 0 do return fail(terms[:], "a terminal flag this holder does not know")
 		t.eof, t.reaped, t.final, t.released, t.orphan = flags & 1 != 0, flags & 2 != 0, flags & 4 != 0, flags & 8 != 0, flags & 16 != 0
 		t.exit.code, t.exit.signal = r_i64(&r), r_i64(&r)
 		master, mok := take_fd(&r, fds, used, .Master)

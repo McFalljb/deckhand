@@ -47,6 +47,8 @@ import "../holderwire"
 import "../trust"
 
 DRY_RUN_WAIT :: 5 * time.Second
+// UPGRADE_FAILED's error from an upgrade's keeper (the app tells it apart: holder_upgradable)
+KEEPER_NO_UPGRADE :: "this holder is an upgrade's keeper: it does not upgrade; it ends when its sessions do"
 UPGRADE_BUSY :: "busy: a spawn is in flight; retry" // UPGRADE_FAILED's error when it may work in a moment
 CORE_FLUSH_WAIT :: 3 * time.Second
 
@@ -55,8 +57,9 @@ Dry_Result :: struct {
 	rev, wire_min, wire: i64,
 }
 
-dry_run_ok :: proc(r: Dry_Result, core_wire: i64) -> bool {
-	return r.rev >= 1 && r.wire_min >= 1 && r.wire_min <= r.wire && core_wire >= r.wire_min && core_wire <= r.wire
+// own_rev: this holder's; the new one may be the same (a rebuild) or newer, never older.
+dry_run_ok :: proc(r: Dry_Result, core_wire: i64, own_rev: i64 = HOLDER_REV) -> bool {
+	return r.rev >= 1 && r.rev >= own_rev && r.wire_min >= 1 && r.wire_min <= r.wire && core_wire >= r.wire_min && core_wire <= r.wire
 }
 
 // UPGRADE from the attached core. Returns only if the upgrade did not happen (UPGRADE_FAILED is
@@ -67,7 +70,7 @@ handle_upgrade :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 	if e := holderwire.decode(f, .Upgrade, &m, context.temp_allocator); e != .None {
 		why = fmt.tprintf("bad UPGRADE: %v", e)
 	} else if !h.can_upgrade {
-		why = "this holder cannot upgrade (it is not the holder binary)"
+		why = h.upgrade_error != "" ? KEEPER_NO_UPGRADE : "this holder cannot upgrade (it is not the holder binary)"
 	} else {
 		why = upgrade_run(h, cn, m.path)
 	}
@@ -258,6 +261,7 @@ dry_run_talk :: proc(fd: c.int, child: i32, blob: []u8, fds: []c.int, own: trust
 	v2, _ := endian.get_u32(res[8:12], .Little)
 	v3, _ := endian.get_u32(res[12:16], .Little)
 	r = {i64(v1), i64(v2), i64(v3)}
+	if r.rev < HOLDER_REV do return fmt.tprintf("its holder_rev %d is older than this holder's %d: a holder is never downgraded", r.rev, HOLDER_REV)
 	if !dry_run_ok(r, core_wire) do return fmt.tprintf("holder_rev %d, wire %d..%d does not serve this core (wire %d)", r.rev, r.wire_min, r.wire, core_wire)
 	return ""
 }
@@ -306,9 +310,12 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 		_exit(0) // nothing else: the dry run never serves, reads or writes a master
 	}
 	if _, on := hook("crash-resume", true); on do _exit(1)
+	if _, on := hook("hang-resume", true); on do for {time.sleep(time.Hour)}
 	h.previous = "upgrade"
 	h.can_upgrade = true
 	orphans_watch(h)
+	// the keeper is our child (the old image forked it): reaped once it exits after DONE (timers)
+	if kp := trust.peer_read(posix.FD(fd)); kp.ok && kp.pid > 0 && kp.pid != i32(getpid()) do h.keeper_pid = c.int(kp.pid)
 	done := transmute([]u8)string("DONE")
 	if !send_all_by(fd, done, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 		// the keeper is gone (it can no longer adopt): we have the terminals, so we serve

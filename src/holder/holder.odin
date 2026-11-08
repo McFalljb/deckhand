@@ -135,6 +135,7 @@ Holder :: struct {
 	kq:                c.int, // kqueue watching orphans' exits (NOTE_EXITSTATUS), or -1
 	upgrade_error:     string, // the keeper adopted the terminals: why the new image did not get them (WELCOME)
 	can_upgrade:       bool, // the holder binary (never an in-process test holder): UPGRADE may exec
+	keeper_pid:        c.int, // after an upgrade: the keeper (our child) until it is reaped, else 0
 	terms:             [dynamic]^Term,
 	conns:             [dynamic]^Conn,
 	core:              ^Conn, // the attached (WELCOMEd) core, or nil
@@ -917,6 +918,10 @@ timers :: proc(h: ^Holder) {
 		} else if !cn.welcomed && time.tick_since(cn.accepted_at) >= h.cfg.hello_timeout {
 			conn_drop(h, cn, "no HELLO in time")
 		}
+	}
+	if h.keeper_pid > 0 {
+		st: c.int
+		if r := waitpid(h.keeper_pid, &st, WNOHANG); r == h.keeper_pid || (r < 0 && errno() == ECHILD) do h.keeper_pid = 0
 	}
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {
 		t := h.terms[i]

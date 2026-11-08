@@ -35,6 +35,7 @@ import "core:c"
 import "core:encoding/endian"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
@@ -45,6 +46,7 @@ HANDOFF_MAGIC :: "DHK1"
 HANDOFF_FDS_PER_MSG :: 64
 KEEPER_WAIT :: 10 * time.Second // the new image's hello (§7.3 step 6)
 HANDOFF_WAIT :: 10 * time.Second // each later step of a handoff
+KEEPER_DONE_WAIT :: 10 * time.Second // the new image's DONE after it took the state (it hangs: killed)
 HANDOFF_MAX_FDS :: 2 + STATE_MAX_TERMS
 HANDOFF_MAX_BLOB :: 1 << 34
 
@@ -204,17 +206,40 @@ keeper_run :: proc(h: ^Holder, k: c.int, holder_pid, old_pv: i32, blob: []u8, fd
 		} else if !handoff_give(k, blob, fds, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 			why = "the new holder image stopped while taking over"
 		} else {
-			// it has everything: it serves once it says DONE; its end closing first means it died
+			// it has everything: it serves once it says DONE; its end closing first means it died.
+			// One that hangs holds the listener and never serves: after the wait it is killed (if
+			// it is still that image) and the keeper's copies of the masters keep the sessions.
+			wait := KEEPER_DONE_WAIT
+			if ms, on := hook("done-wait", true); on {
+				if v, vok := strconv.parse_int(ms); vok do wait = time.Duration(v) * time.Millisecond
+			}
 			done: [4]u8
-			if recv_all_by(k, done[:], time.tick_add(time.tick_now(), 365 * 24 * time.Hour)) && string(done[:]) == "DONE" {
+			got := recv_all_by(k, done[:], time.tick_add(time.tick_now(), wait))
+			if got && string(done[:]) == "DONE" {
 				hlog(h, "keeper: the new image took over; exiting")
 				_exit(0)
 			}
 			why = "the new holder image stopped before it took over"
+			if !got && keeper_kill_successor(h, k, holder_pid, peer) {
+				why = "the new holder image did not take over in time (it was stopped)"
+			}
 		}
 	}
 	close(k)
 	keeper_adopt(h, why)
+}
+
+// The new image took the state and did not say DONE in time: SIGKILL it, only if the socket's
+// peer is still that image (the pid and pidversion that passed the checks). True if killed.
+@(private)
+keeper_kill_successor :: proc(h: ^Holder, k: c.int, holder_pid: i32, verified: trust.Peer) -> bool {
+	now := trust.peer_read(posix.FD(k))
+	if !now.ok || now.pid != holder_pid || now.pid != verified.pid || now.pidversion != verified.pidversion {
+		hlog(h, "keeper: the new image did not say DONE and is no longer the one checked: not killed")
+		return false
+	}
+	hlog(h, "keeper: the new image (pid %d) did not say DONE in time: killing it", holder_pid)
+	return kill(c.int(holder_pid), SIGKILL) == 0
 }
 
 // The keeper becomes the holder (§7.3 step 6): the same terminals, instance and key; the sessions
@@ -224,7 +249,10 @@ keeper_adopt :: proc(h: ^Holder, why: string) -> ! {
 	h.previous = "upgrade"
 	h.upgrade_error = strings.clone(why)
 	for t in h.terms do if !t.reaped do t.orphan = true
-	h.can_upgrade = true
+	// never upgraded again: it is a fork that never exec'd, and upgrade_run's file check runs
+	// Security.framework, unsafe after fork; with the only copies of the masters, a crash there
+	// would hang up every session. It ends once its sessions do (handle_upgrade says so).
+	h.can_upgrade = false
 	orphans_watch(h)
 	install_sigchld(h)
 	os.exit(holder_serve(h))
@@ -290,6 +318,8 @@ orphans_read :: proc(h: ^Holder) {
 //   exec-fail       execve fails (consumed)
 //   dry-run-fail    the dry run's image exits 1 after taking the state (consumed)
 //   crash-resume    the new image exits 1 after taking the state, before DONE (consumed)
+//   hang-resume     the new image hangs after taking the state, before DONE (consumed)
+//   done-wait       holds milliseconds: the keeper's wait for DONE (consumed; KEEPER_DONE_WAIT)
 
 TEST_HOOKS :: #config(DECKHAND_TEST_HOOKS, false)
 

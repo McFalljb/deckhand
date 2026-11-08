@@ -1,0 +1,122 @@
+package trust
+
+import "core:sys/posix"
+import "core:testing"
+
+@(test)
+peer_allowed_table :: proc(t: ^testing.T) {
+	me :: u32(501)
+	cases := []struct {
+		peer: Peer,
+		want: Decision,
+	} {
+		{Peer{ok = true, pid = 10, pidversion = 1, euid = me}, .Allow},
+		{Peer{ok = true, pid = 10, pidversion = 1, euid = 0}, .Other_User}, // root is another user too
+		{Peer{ok = true, pid = 10, pidversion = 1, euid = 502}, .Other_User},
+		{Peer{}, .No_Peer}, // the connecting process already exited
+	}
+	for c, i in cases do testing.expectf(t, peer_allowed(.Adhoc, me, c.peer) == c.want, "case %d: %v", i, peer_allowed(.Adhoc, me, c.peer))
+}
+
+@(test)
+peer_still_table :: proc(t: ^testing.T) {
+	a := Peer{ok = true, pid = 10, pidversion = 7, euid = 501}
+	cases := []struct {
+		now:  Peer,
+		want: Decision,
+	} {
+		{a, .Allow},
+		{Peer{ok = true, pid = 10, pidversion = 8, euid = 501}, .Changed}, // exec'd after connecting
+		{Peer{ok = true, pid = 11, pidversion = 7, euid = 501}, .Changed}, // the fd went to a child
+		{Peer{ok = true, pid = 10, pidversion = 7, euid = 0}, .Changed},
+		{Peer{}, .No_Peer}, // the last writer exited (EINVAL)
+	}
+	for c, i in cases do testing.expectf(t, peer_still(a, c.now) == c.want, "case %d", i)
+}
+
+@(test)
+ready_peer_table :: proc(t: ^testing.T) {
+	p := Peer{ok = true, pid = 42, pidversion = 3, euid = 501}
+	testing.expect(t, ready_peer_allowed(.Adhoc, 501, 42, p) == .Allow)
+	testing.expect(t, ready_peer_allowed(.Adhoc, 501, 43, p) == .Changed) // not the launched child
+	testing.expect(t, ready_peer_allowed(.Adhoc, 501, 0, p) == .Changed) // unknown child: never
+	testing.expect(t, ready_peer_allowed(.Adhoc, 502, 42, p) == .Other_User)
+	testing.expect(t, ready_peer_allowed(.Adhoc, 501, 42, Peer{}) == .No_Peer)
+}
+
+@(test)
+hello_answer_table :: proc(t: ^testing.T) {
+	testing.expect(t, hello_answer(attached = false, wire_ok = true) == .Welcome)
+	testing.expect(t, hello_answer(attached = true, wire_ok = true) == .Refuse_Attached)
+	testing.expect(t, hello_answer(attached = false, wire_ok = false) == .Refuse_Wire)
+	testing.expect(t, hello_answer(attached = true, wire_ok = false) == .Refuse_Wire)
+}
+
+@(test)
+welcome_peer_table :: proc(t: ^testing.T) {
+	p := Peer{ok = true, pid = 42, pidversion = 3, euid = 501}
+	testing.expect(t, welcome_peer_ok(p, 42) == .Allow)
+	testing.expect(t, welcome_peer_ok(p, 43) == .Changed) // relayed or posing
+	testing.expect(t, welcome_peer_ok(p, 0) == .Changed)
+	testing.expect(t, welcome_peer_ok(p, -42) == .Changed)
+	testing.expect(t, welcome_peer_ok(p, 42 + (1 << 32)) == .Changed) // no truncation to i32
+	testing.expect(t, welcome_peer_ok(Peer{}, 42) == .No_Peer)
+}
+
+@(test)
+handover_fresh_table :: proc(t: ^testing.T) {
+	// no boot time: the holder's instance id is per holder run, so it implies the boot
+	// (kern.boottime moves with wall-clock steps)
+	cases := []struct {
+		min_reader, ours: i64,
+		holder, instance: string,
+		previous:         string,
+		want:             Handover_Decision,
+	} {
+		{1, 1, "ab", "ab", "handover", .Use},
+		{2, 1, "ab", "ab", "handover", .Too_New},
+		{0, 1, "ab", "ab", "handover", .Too_New}, // a missing min_reader is not "any"
+		{1, 2, "ab", "ab", "handover", .Use},
+		{1, 1, "ab", "cd", "handover", .Other_Holder},
+		{1, 1, "", "", "handover", .Other_Holder}, // an empty id never matches
+		{1, 1, "ab", "ab", "crash", .No_Goodbye},
+		{1, 1, "ab", "ab", "none", .No_Goodbye},
+		{1, 1, "ab", "ab", "upgrade", .No_Goodbye},
+	}
+	for c, i in cases {
+		got := handover_fresh(c.min_reader, c.ours, c.holder, c.instance, c.previous)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
+	}
+}
+
+// The real getsockopt on a socketpair: this process on both ends, its own uid, stable.
+@(test)
+peer_read_socketpair :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer {posix.close(fds[0]); posix.close(fds[1])}
+	p := peer_read(fds[0])
+	testing.expect(t, p.ok)
+	testing.expect_value(t, p.pid, i32(posix.getpid()))
+	testing.expect_value(t, p.euid, own_uid())
+	testing.expect(t, peer_allowed(.Adhoc, own_uid(), p) == .Allow)
+	testing.expect(t, peer_still(p, peer_read(fds[0])) == .Allow)
+}
+
+@(test)
+holder_start_table :: proc(t: ^testing.T) {
+	cases := []struct {
+		answered, keep: bool,
+		want:           Holder_Start,
+	} {
+		{false, true, .Launch},
+		{false, false, .Without},
+		{true, true, .Warn_Running}, // a holder runs: never a second one
+		{true, false, .Warn_Running}, // its sessions are from an earlier run: still say so
+	}
+	for c, i in cases {
+		got := holder_start(c.answered, c.keep)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
+	}
+}

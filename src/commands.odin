@@ -121,7 +121,8 @@ Cancel_Confirmation :: struct {
 Rescan :: struct {} // long-running: returns pending, finishes with an event
 Refresh_Shell_Env :: struct {} // long-running: asks the login shell again (login_env.odin); new tabs get it
 Quit :: struct {
-	confirm: string,
+	confirm:       string,
+	stop_sessions: bool, // "Quit Deckhand and Stop All Sessions…": the session holder hangs up everything too
 }
 Get_State :: struct {} // query: Result.data is the state JSON
 List_Commands :: struct {} // query: the commands this caller may send (command_table.odin)
@@ -204,6 +205,11 @@ Set_Notify :: struct {
 // The tidy project list (project_tidy.odin): temp folders and missing ones
 // hidden, subfolders folded into their project. On by default.
 Set_Tidy_Projects :: struct {
+	on: bool,
+}
+// Keep sessions running in the session holder when Deckhand quits (docs/plans/background-core.md;
+// off by default until it is done). User-only.
+Set_Keep_Sessions :: struct {
 	on: bool,
 }
 
@@ -323,6 +329,7 @@ Restore_Tab :: struct {
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
+	held:  u32, // its process runs in the session holder's terminal `held` (adopted at launch)
 }
 // A restored session's saved panes (persist.odin panes_parse; restored by restore_panes in
 // panes_restore.odin). nodes[0] is the tree's root; no nodes: one pane holding every tab.
@@ -349,6 +356,8 @@ Restore_Session :: struct {
 	layout:        Restore_Layout, // its panes ({}: one pane)
 	pi_pane:       Maybe(int), // with a layout: the pi tab's saved pane (nil, unset = not known: the focused pane); a Claude-only session's main tab is tabs[0]
 	pi_active:     bool, // with a layout: the pi tab was its pane's shown tab
+	pi_held:       u32, // the pi tab's (Home's) session holder terminal (Restore_Tab.held)
+	pi_readonly:   bool, // that pi was started read-only (an adopted one keeps it)
 }
 Bridge_Done :: struct { 	// a bridge answered (or dropped) a Pi_Prompt/Pi_Reload/Pi_Wait_Idle
 	request_id: u64,
@@ -421,6 +430,7 @@ Command :: union {
 	Agent_Model_Picker,
 	Set_Notify,
 	Set_Tidy_Projects,
+	Set_Keep_Sessions,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
 	Set_Theme,
@@ -1070,12 +1080,19 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true
 	case Quit:
 		if job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then quit"), true
-		if any_running() {
+		// keep_sessions: what the session holder keeps running is not stopped, so not asked about
+		keeps := !c.stop_sessions && holder_keeps_sessions()
+		if quit_would_stop(keeps) || (keeps && editors_unsaved() > 0) {
 			what := "quit Deckhand? Running sessions will be stopped."
 			if n := editors_unsaved(); n > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
+			if keeps || c.stop_sessions {
+				what = keeps ? "quit Deckhand? Sessions the session holder keeps run on; others will be stopped." : "quit Deckhand and stop all sessions? Every session, including those kept running, will be stopped."
+				if n := editors_unsaved(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+			}
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what)
 			if !go_on do return gr, ch
 		}
+		app.stop_sessions = c.stop_sessions
 		if platform.quit != nil do platform.quit()
 		return {ok = true}, false
 	case Get_State:
@@ -1289,6 +1306,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.tidy_off == !c.on do return {ok = true}, false
 		state.settings.tidy_off = !c.on
 		return {ok = true}, true // projects_tidy runs after (run_command)
+	case Set_Keep_Sessions:
+		if state.settings.keep_sessions == c.on do return {ok = true}, false
+		state.settings.keep_sessions = c.on
+		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .UI || c.caller == .Internal do return fail("ui and internal callers have fixed policies"), false
 		state.settings.confirm[c.caller][c.class] = c.mode
@@ -1351,6 +1372,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		s, tab := pi_tab(c.tab_id)
 		if tab == nil do return fail("no such pi tab"), false
 		if tab.status == .Running do return fail("pi is running in this tab (pi_reload restarts a running one)"), false
+		if tab_held_away(tab) != 0 do return fail("this session still runs in the session holder, which isn't answering: quit and reopen Deckhand to get it back"), false
 		if tab.status == .Not_Started do return fail("pi has not started in this tab yet: it starts when its session is shown"), false
 		if reload_step_is(tab, true) || restart_waiting(tab.id) do return fail("this tab is restarting"), false
 		if s.missing do return fail("its session file or folder no longer exists"), false
@@ -1571,7 +1593,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if c.pi_session_id == "" do return fail("pi_session_id is empty"), false
 			if home_root == "" do return fail("Home is not available (no data dir)"), false
 			s := Open_Session{id = new_id(), pi_session_id = strings.clone(c.pi_session_id), session_dir = home_dir(), cwd = home_cwd(), home = true, restored = true}
-			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started})
+			append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Not_Started, held = c.pi_held})
 			s.active_tab = s.tabs[0].id
 			session_panes_init(&s)
 			append(&state.open_sessions, s)
@@ -1598,7 +1620,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			missing       = path == "" || !os.exists(cwd),
 			restored      = true,
 		}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Not_Started})
+		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{readonly = c.pi_readonly}, title = "pi", status = .Not_Started, held = c.pi_held})
 		s.id = new_id()
 		restore_tabs(&s, c.tabs, c.layout, c.pi_pane, c.pi_active)
 		if s.active_tab == 0 do session_show_tab(&s, s.tabs[0].id)
@@ -1618,6 +1640,7 @@ restore_tabs :: proc(s: ^Open_Session, tabs: []Restore_Tab, layout: Restore_Layo
 	for rt in tabs {
 		added := restore_tab(s, rt)
 		if added == 0 do continue
+		if rt.held != 0 do for &t in s.tabs do if t.id == added do t.held = rt.held // terminal tabs only (holder_adopt_all)
 		append(&places, Restore_Place{tab = added, pane = rt.pane.? or_else -1, active = rt.pane_active})
 		if rt.active do session_show_tab(s, added)
 	}
@@ -1835,7 +1858,8 @@ same_target :: proc(a, b: Command) -> bool {
 		y, ok := b.(Close_Session)
 		return ok && x.session == y.session
 	case Quit:
-		_, ok := b.(Quit)
+		y, ok := b.(Quit)
+		ok = ok && x.stop_sessions == y.stop_sessions
 		return ok
 	case Set_Claude_Default_Flags:
 		y, ok := b.(Set_Claude_Default_Flags)
@@ -2014,6 +2038,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 	if s.missing do return
 	for &tab in s.tabs {
 		if tab.status != .Not_Started do continue
+		if tab_held_away(&tab) != 0 do continue // it runs on in the session holder (holder_client.odin)
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3); in a chat read-only while chats are (claude_start)
 		if et, is_ed := tab.kind.(Editor_Tab); is_ed {
 			// no process: the file opens again (a gone file says so in its tab)
@@ -2065,7 +2090,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			if !ok do socket_forget_tab(tab.id)
 		case Shell_Tab:
 			cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : s.cwd
-			ok = term_start(t, {login_shell(), "-l"}, cwd) // a fresh terminal: the note goes after
+			ok = term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) // a fresh terminal: the note goes after
 			if ok do term_note(t, "Restored tab: a new shell (the previous one's history is not kept).")
 		case Claude_Tab:
 			if !claude_installed_now() { // installed since it was restored: looked up again
@@ -2228,7 +2253,7 @@ shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0) -> (u64, s
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
 	t := new_term(id)
-	if !term_start(t, {login_shell(), "-l"}, cwd) {
+	if !term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) {
 		drop_term(id)
 		pane_tab_gone(s, id)
 		for x, i in s.tabs do if x.id == id {
@@ -2338,7 +2363,8 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	if path != "" do append(&argv, "--session", path)
 	else do append(&argv, "--session-id", pi_session_id)
 	append(&argv, ..extra) // last: a chat's read-only flags (chat_args)
-	return term_start(t, argv[:], cwd, pi_extra_env(env)) // + PI_KIT_NOTES_DIR (folders.odin)
+	pk, _ := tab.kind.(Pi_Tab)
+	return term_start(t, argv[:], cwd, pi_extra_env(env), {kind = .Pi, pi_ro = pk.readonly, extras = tab.reload.extras}) // + PI_KIT_NOTES_DIR (folders.odin)
 }
 
 // Runtime upkeep, not state changes: read every terminal (background tabs

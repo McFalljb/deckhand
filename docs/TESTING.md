@@ -147,6 +147,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `sidebar` | the left column: add project, pin, sort, filter, hide, dividers, restore | 35 | |
 | `agent-status` | OSC 7501 agent status for any terminal tab: handshake, dots, malformed input, unread/seen | 33 | |
 | `app-tab` | app tabs: frames over IOSurface, input, resize, stall, crash, restart | 28 | |
+| `keep-sessions` | `keep_sessions`: 6 shells and a pi kept by the session holder through a quit; relaunch adopts every terminal exactly (screen hash at handover, a reference terminal with probes), same pids, counters went on; after a kill -9 of the app, adopted from the tails (inexact, same pids); Quit and Stop All Sessions ends the holder; a kill -9 of the holder ends every tab with `holder_lost` | 8 | |
 | `login-path` | the GUI-launch environment: bare PATH, failing shell, no pi, Nix-like PATH, Claude markers | 26 | |
 | `app-calls` | app_call under load at app start: every call finishes, hello reply first, default scale | 24 | its scale check repeats `test_scale_test.odin` |
 | `update` | self-update from local fixtures: bar, skip, download, signature check, swap, old bundle kept/removed | 24 | |
@@ -205,8 +206,9 @@ side by side. What they share, and how the runner keeps them apart:
   scripts into six groups of ~35 s, each in its own folder (`build/browser-<g>/`).
 - **`idle`**: `browser-rlz` (100 s) and `browser-netpolicy` (20 s) sit idle on purpose. They
   take no `-j` slot (at most two at a time), but still a Chromium slot.
-- **The control socket**: per process (`pi-desk-<pid>.sock`) in the runtime dir; scenes that
-  look at the runtime dir set their own `PI_DESK_RUNTIME_DIR`. No ports are opened.
+- **The control socket**: `core.sock` in the runtime dir, `<data dir>/run` (test mode without a
+  data dir: `build/test-data/run`, which the `test-data` lock keeps to one scene at a time); scenes
+  that look at the runtime dir set their own `PI_DESK_RUNTIME_DIR`. No ports are opened.
 - **Screenshots**: `build/shots/<scene>/`, one folder per scene.
 - **The clipboard**: under a script the app's copies and pastes use a pasteboard of its own
   (`autotest.pasteboard`), never the system's: one scene's copy cannot replace another's, nor the

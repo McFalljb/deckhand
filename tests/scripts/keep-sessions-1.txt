@@ -1,0 +1,32 @@
+# Run 1 of keep-sessions.sh: keep_sessions on, a session with 6 shells printing counters (awk:
+# no "$" for the script's variables), then quit mid-output. Every tab runs in the session
+# holder, so the quit asks nothing and hands them over (snapshots, handover.json).
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+assert_result ok true
+command {"type":"add_project","cwd":"$cwd/build/keep-sessions/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"kkkk-1"}
+assert_result ok true
+waitfor ARGS: 10000
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t1 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t2 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t3 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t4 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t5 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"new_shell_tab","session":$session}
+command {"type":"send_text","tab_id":$last,"text":"awk 'BEGIN{for(i=1;;i++){print \"t6 c\" i; fflush(); system(\"sleep 0.1\")}}'\n"}
+command {"type":"focus_tab","tab_id":$last}
+waitfor t6 c5 10000
+assert_state open_sessions.0.tabs.# 7
+assert_state open_sessions.0.tabs.6.held 7
+state_json keep-sessions-before
+dump keep-sessions-before
+ui_command {"type":"quit"}
+assert_result ok true
+wait 3000

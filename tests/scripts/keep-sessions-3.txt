@@ -1,0 +1,12 @@
+# Run 3 of keep-sessions.sh: after the app was killed, the terminals come back from the holder's
+# tails (inexact), the same processes; then "Quit Deckhand and Stop All Sessions" (it asks: the
+# holder's sessions stop too).
+wait 300
+waitstate 5000 open_sessions.0.tabs.6.status running
+assert_state open_sessions.0.tabs.6.inexact true
+wait 500
+state_json keep-sessions-crash
+ui_command {"type":"quit","stop_sessions":true}
+assert_result error needs_confirmation
+ui_command {"type":"quit","stop_sessions":true,"confirm":"$token"}
+wait 3000

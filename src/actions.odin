@@ -346,6 +346,9 @@ ACTIONS := [?]Action {
 	{id = "refresh_shell_env", label = "Refresh shell environment", make = proc() -> (Command, bool) {return Refresh_Shell_Env{}, true}, detail = proc() -> string {
 		return login_env.gui ? "new tabs only" : "uses the terminal's"
 	}},
+	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (Command, bool) {
+		return Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
+	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}},
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (Command, bool) {
 		return Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
@@ -440,6 +443,7 @@ ACTIONS := [?]Action {
 	{id = "sort_sessions", label = "Sort sessions (next order)", make = proc() -> (Command, bool) {return next_sort(.Sessions), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Sessions]]}},
 	{id = "sort_chats", label = "Sort chats (next order)", make = proc() -> (Command, bool) {return next_sort(.Chats), true}, detail = proc() -> string {return SORT_SHORT[state.sidebar.sort[.Chats]]}},
 	{id = "quit", label = "Quit Deckhand", keys = "⌘Q", make = proc() -> (Command, bool) {return Quit{}, true}},
+	{id = "quit_stop_sessions", label = "Quit Deckhand and Stop All Sessions…", make = proc() -> (Command, bool) {return Quit{stop_sessions = true}, true}},
 	// the terminals' and the editor's text size (the menu bar's View menu)
 	{id = "text_bigger", label = "Bigger text", keys = "⌘+", make = proc() -> (Command, bool) {
 		pt := int(term_text_pt())

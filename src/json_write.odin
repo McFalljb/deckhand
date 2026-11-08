@@ -195,6 +195,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Agent_Model_Picker:  return "agent_model_picker"
 	case Set_Notify:          return "set_notify"
 	case Set_Tidy_Projects:   return "set_tidy_projects"
+	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Confirm_Policy:  return "set_confirm_policy"
 	case Set_Close_Confirm:   return "set_close_confirm"
 	case Set_Theme:           return "set_theme"
@@ -434,6 +435,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Tidy_Projects:
 		kv_bool(&w, "on", c.on)
+	case Set_Keep_Sessions:
+		kv_bool(&w, "on", c.on)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
 	case Update_Install:
@@ -498,6 +501,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_str(&w, "token", redact ? "<redacted>" : c.token)
 	case Quit:
 		token(&w, c.confirm, redact)
+		if c.stop_sessions do kv_bool(&w, "stop_sessions", true)
 	case Set_Confirm_Policy:
 		kv_str(&w, "caller", CALLER_NAMES[c.caller])
 		kv_str(&w, "class", CLASS_NAMES[c.class])
@@ -1257,6 +1261,15 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_bool(&to, "on_screen", os.id == s.current_session && session_tab_shown(&sos, t.id))
 			}
 			if t.status == .Exited do if how := exit_text(t.exit); how != "" do kv_str(&to, "exit", how)
+			if x := term_of(t.id); x != nil {
+				// keep_sessions (holder_client.odin): its process runs in the session holder's terminal `held`
+				if x.pty.held != 0 {
+					kv_u64(&to, "held", u64(x.pty.held))
+					if x.pty.pid > 0 do kv_u64(&to, "pid", u64(x.pty.pid))
+				}
+				if x.inexact do kv_bool(&to, "inexact", true) // adopted, not rebuilt byte-exactly
+				if x.holder_lost do kv_bool(&to, "holder_lost", true) // the session holder stopped
+			}
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {
 				kv_str(&to, "path", et.path)
@@ -1487,6 +1500,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_str(&st, "agent_name", s.settings.agent_name)
 		kv_bool(&st, "notify", !s.settings.notify_off)
 		kv_bool(&st, "tidy_projects", !s.settings.tidy_off)
+		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)

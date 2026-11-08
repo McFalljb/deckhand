@@ -598,6 +598,9 @@ pane_layout :: proc(cs: ^Open_Session, p: ^Pane) {
 					} else if b := pane_browser(p); b != nil && b.message != "" {
 						clay.TextDynamic(b.message, txt(th.text_secondary))
 						if b.closed_by_page do browser_reload_button() // browser.odin
+					} else if away := pane_shown(p); empty && away != nil && tab_held_away(away) != 0 {
+						clay.Text("Still running in the session holder", txt(th.text_secondary))
+						clay.Text(HELD_AWAY_TEXT, txt(th.text_muted))
 					} else if empty {
 						clay.Text("No session open", txt(th.text_secondary))
 						clay.Text("Pick one on the left, or start a new chat", txt(th.text_muted))
@@ -833,6 +836,7 @@ tab_label :: proc(cs: ^Open_Session, tab: Tab) -> (ic: Icon, label, extra: strin
 	if tab.status == .Exited do extra = "exited"
 	if is_claude && ct.guard_stopped do extra = "read-only guard not confirmed: stopped"
 	if tab.status == .Not_Started do extra = cs != nil && cs.missing ? "gone" : "not started"
+	if tc := tab; tab_held_away(&tc) != 0 do extra = "in the session holder" // not reachable: never started here
 	return
 }
 

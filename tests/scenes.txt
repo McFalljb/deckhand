@@ -27,7 +27,7 @@
 
 @all  | | | | src/term.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
 @core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
-@unit | | | | src/snapshot.odin src/holderwire/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
+@unit | | | | src/snapshot.odin src/holder/* src/holderwire/* src/trust/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
 
 # scene             | tier     | tags                  | secs | areas | command
 agent-status        | full     |                       |   34 | src/agent_status*.odin src/ui_sidebar.odin tests/scripts/agent-status.* tests/scripts/fake-7501.py
@@ -65,6 +65,7 @@ files-nested        | full     |                       |   20 | src/files.odin s
 fish-shell          | full     |                       |    6 | src/login_env.odin src/harness.odin tests/scripts/fish-shell.* tests/scripts/fake-fish.sh tests/scripts/fake-claude.py
 harness-setup       | full     |                       |   40 | src/harness_install.odin src/harness_manifest.odin src/ui_harness.odin src/ui_setup.odin tests/scripts/harness-setup* tests/scripts/fake-install.sh
 jobs                | required | test-trash            |   79 | src/jobs*.odin src/ui_jobs.odin src/ui_job_sheet.odin src/notify.odin src/agent.odin tests/scripts/jobs.* tests/scripts/fake-pi-json.py
+keep-sessions       | full     |                       |    8 | src/holder_client.odin src/holder_adopt.odin src/holder/* src/holderwire/* src/trust/* src/launchd_darwin.odin src/holder_install.odin src/macfile.odin src/snapshot.odin src/instance.odin tests/scripts/keep-sessions*
 login-path          | full     |                       |   27 | src/login_env.odin src/harness.odin tests/scripts/login-path*
 markdown            | required |                       |   30 | src/markdown*.odin src/menubar.odin docs/GUIDE.md tests/markdown/* tests/scripts/markdown.*
 menu                | required | smoke                 |   10 | src/menubar.odin src/native/menubar_macos.m src/actions.odin tests/scripts/menu.*

@@ -38,6 +38,7 @@ Persist :: struct {
 	checks:        int, // save checks (workspace_json runs) and writes, for the log
 	writes:        int,
 	dir_lists:     int, // session dir listings by the save check (tests)
+	restored_clean: bool, // persist_load restored the saved file (not missing, --fresh, or moved aside)
 }
 
 persist: Persist
@@ -163,6 +164,25 @@ session_on_disk :: proc(s: Open_Session) -> bool {
 	return path != ""
 }
 
+// The session holder terminal a tab's process runs in, while the holder keeps it at quit
+// (holder_keeps_sessions), or still runs in though unreachable (tab_held_away); 0 = none. Saved
+// as "held", so the next launch adopts it.
+tab_held :: proc(tab_id: u64) -> u32 {
+	if _, tab, _ := find_tab(tab_id); tab != nil do if away := tab_held_away(tab); away != 0 do return away
+	t := term_of(tab_id)
+	if t == nil || !t.running || t.pty.held == 0 || !holder_keeps_sessions() do return 0
+	return t.pty.held
+}
+
+// A saved "held" (1..max u32), else 0. workspace.json is not MAC'd: a same-user edit can only
+// map one of the user's held terminals to another of their tabs (tokens are bound by terminal
+// in the MAC'd tokens.json, so it hands no token to another program).
+held_of :: proc(o: json.Object) -> u32 {
+	n, ok := o["held"].(json.Integer)
+	if !ok || n <= 0 || i64(n) > i64(max(u32)) do return 0
+	return u32(n)
+}
+
 // A shell tab's cwd: the live shell's, else where it started.
 @(private = "file")
 shell_cwd :: proc(s: Open_Session, tab: Tab) -> string {
@@ -251,6 +271,9 @@ workspace_json :: proc() -> string {
 	w := W{b = strings.builder_make(context.temp_allocator)}
 	open_obj(&w)
 	ki(&w, "v", WORKSPACE_VERSION)
+	// the holder its held ids are in: this run's, or (not attached) the one they were saved with
+	if holder_keeps_sessions() && hc.instance != "" do ks(&w, "holder", hc.instance)
+	else if held_away_any() && held_holder != "" do ks(&w, "holder", held_holder)
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	for &s in state.open_sessions {
@@ -312,6 +335,10 @@ workspace_json :: proc() -> string {
 			if tab.id == s.active_tab do active = j
 			open_obj(&w)
 			ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
+			if held := tab_held(tab.id); held != 0 {
+				ki(&w, "held", int(held)) // its process runs on in the session holder
+				if pt, is_pi := tab.kind.(Pi_Tab); is_pi && pt.readonly do kb(&w, "readonly", true) // as it was started (adopted: kept)
+			}
 			if _, is_shell := tab.kind.(Shell_Tab); is_shell {
 				ks(&w, "title", tab.title)
 				ks(&w, "cwd", shell_cwd(s^, tab))
@@ -350,6 +377,7 @@ workspace_json :: proc() -> string {
 		k(&w, "home")
 		open_obj(&w)
 		ks(&w, "pi_session_id", hs.pi_session_id)
+		if len(hs.tabs) > 0 { if held := tab_held(hs.tabs[0].id); held != 0 do ki(&w, "held", int(held)) }
 		if state.home_model != "" do ks(&w, "model_applied", state.home_model) // the --model of its last start
 		if state.home_fork_from != "" do ks(&w, "fork_from", state.home_fork_from) // a fork pi has not written yet (home.odin)
 		close_obj(&w)
@@ -537,6 +565,7 @@ workspace_json :: proc() -> string {
 	if st.agent_model != "" do ks(&w, "agent_model", st.agent_model)
 	if st.notify_off do kb(&w, "notify", false)
 	if st.tidy_off do kb(&w, "tidy_projects", false)
+	if st.keep_sessions do kb(&w, "keep_sessions", true)
 	if st.last_harness != .Pi do ks(&w, "last_harness", HARNESS_KEYS[st.last_harness]) // the picker's first row (harness.odin)
 	if st.bell_off != {} || st.bell_os_off {
 		k(&w, "bell")
@@ -618,6 +647,7 @@ persist_load :: proc(fresh := false) {
 		return
 	}
 	persist.last_written = strings.clone(string(data))
+	persist.restored_clean = true
 	fmt.eprintf("Deckhand: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
 }
 
@@ -642,6 +672,9 @@ workspace_restore :: proc(text: string) -> string {
 	ver, has_v := root["v"].(json.Integer)
 	if !has_v do return "no version"
 	if ver != WORKSPACE_VERSION do return fmt.tprintf("unknown version %d (Deckhand reads %d)", ver, WORKSPACE_VERSION)
+	delete(held_holder)
+	held_holder = ""
+	if hs, hok := root["holder"].(json.String); hok && len(hs) <= 64 do held_holder = strings.clone(string(hs)) // the held ids' holder (holder_adopt_all)
 
 	run :: proc(c: Command) -> Result {return run_command(c, {kind = .Internal})}
 
@@ -677,6 +710,7 @@ workspace_restore :: proc(text: string) -> string {
 		if am, aok := st["agent_model"].(json.String); aok do run(Set_Agent_Model{model = am})
 		if no, nok := st["notify"].(json.Boolean); nok do run(Set_Notify{on = bool(no)})
 		if tp, tok := st["tidy_projects"].(json.Boolean); tok do run(Set_Tidy_Projects{on = bool(tp)})
+		if ks, kok := st["keep_sessions"].(json.Boolean); kok do run(Set_Keep_Sessions{on = bool(ks)})
 		claude_accounts_restore(st) // claude_accounts.odin
 		if lh, lok := enum_of(st, "last_harness", HARNESS_KEYS); lok do state.settings.last_harness = lh // harness.odin
 		if bo, bok := st["bell"].(json.Object); bok {
@@ -769,10 +803,17 @@ workspace_restore :: proc(text: string) -> string {
 		layout, tab_pane, pane_active := panes_parse(so["panes"], len(saved_tabs))
 		pi_pane: Maybe(int)
 		pi_active := false
+		pi_held: u32
+		pi_readonly := false
 		for tv, j in saved_tabs {
 			to, _ := tv.(json.Object)
 			kind, _ := to["kind"].(json.String)
-			if j == 0 && kind == "pi" do pi_pane, pi_active = known(tab_pane[0]), pane_active[0]
+			held := held_of(to)
+			if j == 0 && kind == "pi" {
+				pi_pane, pi_active, pi_held = known(tab_pane[0]), pane_active[0], held
+				pro, _ := to["readonly"].(json.Boolean)
+				pi_readonly = bool(pro)
+			}
 			if kind == "editor" {
 				// a file tab: reopens when its session starts (unsaved edits are not kept)
 				if path, _ := to["path"].(json.String); strings.has_prefix(path, "/") do append(&tabs, Restore_Tab{kind = .Editor, cwd = path, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
@@ -797,16 +838,16 @@ workspace_restore :: proc(text: string) -> string {
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				ro, _ := to["readonly"].(json.Boolean)
 				acct, _ := to["account"].(json.String)
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
 			title, _ := to["title"].(json.String)
 			cwd, _ := to["cwd"].(json.String)
-			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
+			append(&tabs, Restore_Tab{kind = .Shell, title = one_line(title, context.temp_allocator), cwd = cwd, active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 		}
 		scwd, _ := so["cwd"].(json.String) // a worktree of the project (Restore_Session checks it)
-		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active})
+		r := claude ? run(Restore_Session{project_id = p.id, pi_session_id = id, tabs = tabs[:], agent = .Claude, layout = layout}) : run(Restore_Session{project_id = p.id, pi_session_id = id, session_dir = dir, cwd = scwd != pcwd ? string(scwd) : "", tabs = tabs[:], layout = layout, pi_pane = pi_pane, pi_active = pi_active, pi_held = pi_held, pi_readonly = pi_readonly})
 		if r.ok && has_current && i64(i) == i64(current) {
 			if s := find_session(r.created_id); s != nil do persist.focus_tab = s.active_tab
 		}
@@ -814,7 +855,7 @@ workspace_restore :: proc(text: string) -> string {
 
 	// Home, not started until its pane opens
 	if h, is := root["home"].(json.Object); is {
-		if id, iok := h["pi_session_id"].(json.String); iok && id != "" do run(Restore_Session{pi_session_id = id, home = true})
+		if id, iok := h["pi_session_id"].(json.String); iok && id != "" do run(Restore_Session{pi_session_id = id, home = true, pi_held = held_of(h)})
 		if m, mok := h["model_applied"].(json.String); mok {
 			delete(state.home_model)
 			state.home_model = strings.clone(string(m))

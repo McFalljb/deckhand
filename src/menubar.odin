@@ -61,6 +61,7 @@ MENUBAR := [?]Bar_Item {
 		{id = "show_all", title = "Show all", native = .Show_All},
 		SEP,
 		{action = "quit"},
+		{action = "quit_stop_sessions"},
 	}},
 	{title = "File", sub = []Bar_Item {
 		{action = "new_chat"},

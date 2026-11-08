@@ -4,6 +4,7 @@
 #   ./build.sh debug    debug build
 #   ./build.sh run      release build, then run
 #   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
+#                       the holder's, wire's and trust rules' tests (src/holder, src/holderwire, src/trust),
 #                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
 #   ./build.sh scenes [ARGS]   build, then the test-mode scenes (tests/scenes.py ARGS; e.g.
 #                       --changed, --all, NAME...): docs/TESTING.md
@@ -208,6 +209,17 @@ build_pi() {
   cp integrations/pi/extensions.json integrations/pi/package.json integrations/pi/README.md build/pi/
 }
 
+# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed ad
+# hoc with its own identifier (bundle-app.sh copies it into the app). Links only libSystem.
+# Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
+# keeps its file (a signed binary changed in place is killed at its next page-in).
+build_core() {
+  rm -f build/.deckhand-core.new
+  odin build src/holder -out:build/.deckhand-core.new -o:speed -minimum-os-version:$MACOS_MIN
+  codesign -f -s - -i dev.deckhand.core build/.deckhand-core.new 2>/dev/null
+  mv -f build/.deckhand-core.new build/deckhand-core
+}
+
 case "$MODE" in
   test)     check_link_minos src; check_link_minos tests/fake-app ;;
   fake-app) check_link_minos tests/fake-app ;;
@@ -215,8 +227,9 @@ case "$MODE" in
 esac
 
 case "$MODE" in
-  debug)   odin build src -out:$OUT -debug -define:SOKOL_DEBUG=false -minimum-os-version:$MACOS_MIN $DEFINES; build_claude ;;
+  debug)   odin build src -out:$OUT -debug -define:SOKOL_DEBUG=false -minimum-os-version:$MACOS_MIN $DEFINES; build_claude; build_core ;;
   test)
+    build_core
     clang -Ivendor/libghostty-vt/include tests/abi_sizes.c -o build/abi_sizes
     build/abi_sizes > build/abi_sizes.txt
     # the CEF shim's popup slot matcher (pure C, no CEF needed)
@@ -233,6 +246,11 @@ case "$MODE" in
     odin test tests -out:build/pi-desk-tests
     # the holder wire codec (src/holderwire): golden vectors, the released schema, a fuzz pass
     odin test src/holderwire -out:build/holderwire-tests
+    # who may talk to the holder, its launcher and the app (src/trust): pure table tests
+    odin test src/trust -out:build/trust-tests
+    # the session holder (src/holder): an in-process holder and a fake core over a socketpair,
+    # /bin/sh children; its half of the launcher's ready handshake
+    odin test src/holder -out:build/holder-tests
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py
@@ -243,7 +261,7 @@ case "$MODE" in
     build_claude
     build_fake_app ;;
   fake-app) build_fake_app ;;
-  release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES; build_claude ;;
+  release|run) odin build src -out:$OUT -o:speed -minimum-os-version:$MACOS_MIN $DEFINES; build_claude; build_core ;;
   *) echo "usage: ./build.sh [release|debug|run|test|fake-app|scenes ARGS]"; exit 1 ;;
 esac
 

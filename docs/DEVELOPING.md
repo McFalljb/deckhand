@@ -149,6 +149,14 @@ open (the README says how to get past that). The app is about 340 MB, mostly
 Chromium for the browser tab. The bundle carries the third-party licences in
 `Contents/Resources/licenses/`.
 
+The bundle also carries the session holder, `Contents/Helpers/deckhand-core` (`src/holder/`,
+built by `./build.sh` in every mode as `build/deckhand-core`; docs/plans/background-core.md §3).
+`scripts/bundle-app.sh` signs it with the identifier `dev.deckhand.core` before the app, and
+`scripts/release.sh` signs it with the app's identity; `codesign --verify --deep --strict` covers
+it. Only signed code goes in `Helpers` (a data file there fails signing). With Keep sessions on,
+the app installs it to `<data dir>/core/<rev>-<sha12>/` (quarantine stripped after the signature
+check) and starts it from there, so an app update never pulls the binary from under live sessions.
+
 ### Update signing
 
 Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust

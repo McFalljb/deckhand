@@ -188,6 +188,14 @@ send it; the nonce is new at each start (an old one is refused) and the token is
 What can still send it: same-user code below the tab before the first prompt (the user's own
 SessionStart hooks, a login profile): the user's trust, as §3. Restart tries again.
 
+**Across a relaunch** (`keep_sessions`, Experimental: the session holder keeps the tab's process
+while Deckhand is closed). The ack state (needed, acked, a hash of the nonce) is saved per holder
+terminal in the MAC'd `tokens.json` (PROTOCOL.md §2). When Deckhand reopens and adopts a
+read-only tab, it keeps running only if that file verified and says it acked
+(`claude_adopt_ro_ok`); otherwise (no file, a bad MAC, no entry, not acked yet) it is stopped as
+above (`claude_adopt_ro_stop`; the terminal says "read-only guard not confirmed after Deckhand
+reopened: stopped. Restart this tab.").
+
 **Deckhand's own check.** A read-only tab's token may not send `browser_click`, `browser_type`,
 `browser_press`, `browser_select`, `browser_upload`, `browser_hover` (it can fire page scripts),
 `app_input`, `app_call`
@@ -451,6 +459,10 @@ is valid; it learns nothing it can use from outside the tab.
 `src/claude_reload.odin` (the bars: `src/ui_claude_reload.odin`), parity with pi's hot reload
 (PROTOCOL.md "Hot reload"):
 
+- **Kept sessions (Keep sessions on, GUIDE.md).** A Claude tab the session holder kept running
+  while Deckhand was closed keeps the plugin, hooks and CLI it started with. After an update of
+  Deckhand, the updated plugin reaches such a tab only when it restarts: the plugin bar offers
+  that Restart as for any other change to Deckhand's plugin.
 - **What is watched.** Only what a running Claude Code reads at start (its docs, "When edits take
   effect"; skills, subagents and memory pages): `CLAUDE.md`/`CLAUDE.local.md`/`.claude/CLAUDE.md`
   in the tab's folder and above it and the config folder's `CLAUDE.md`; `rules/`, `output-styles/`,

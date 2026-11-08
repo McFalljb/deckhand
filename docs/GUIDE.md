@@ -1398,6 +1398,20 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
+- **Experimental › Keep sessions when quitting** (the palette's **Keep sessions running when
+  Deckhand quits**): off by default and not finished yet. With it on, a session holder keeps your
+  tabs' programs running while Deckhand is closed, and reopening Deckhand picks them up again. Only
+  you can turn it on (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
+  still guarded after reopening, it stops that tab (Restart starts it again). With it on, ⌘Q
+  asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
+  Deckhand menu) quits and stops them too. Screens come back exactly after a quit; after a crash
+  they are rebuilt from what the programs printed since (the last 1 MiB). If the holder itself
+  stops, its tabs say "the session holder stopped". Sessions the holder keeps that no tab comes
+  back for (you started with `--fresh`, or the saved workspace couldn't be read) are never
+  stopped behind your back: they keep running unseen, a message says how many, and **Quit
+  Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
+  example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
+  then stop when Deckhand quits.
 
 ## Updates
 
@@ -1463,8 +1477,7 @@ and setup carry over and nothing you rely on breaks. They are not leftovers to r
 - the data dir, `~/Library/Application Support/pi-desk` (see [Where it lives](#where-it-lives));
 - the `PI_DESK_*` environment variables (`PI_DESK_DATA_DIR` and the ones Deckhand sets in its tabs);
 - the `pi-desk` command in Claude tabs, an alias of `deckhand`;
-- the project file `.pi-desk/apps.json`, the default main folder `~/pi-desk`, and the control
-  socket's folder (`$TMPDIR/pi-desk-<uid>`).
+- the project file `.pi-desk/apps.json` and the default main folder `~/pi-desk`.
 
 Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
 download or install one: only you can.
@@ -1499,7 +1512,7 @@ Elsewhere:
 - **Your folders**: notes, jobs, memory, Atlas's prompt and chats live in the main folder (see
   below). These are yours: Deckhand's data dir above is machine-only state.
 - **Chats** run in the chats folder; their sessions are in pi's store like any other.
-- The control socket lives in a private temporary folder (`$TMPDIR/pi-desk-<uid>`).
+- The control socket lives in a private folder in the data dir (`run/core.sock`).
 
 ### Your folders
 
@@ -1651,6 +1664,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Hide Deckhand | ⌘H | |
 | Hide others | ⌥⌘H | Show all brings them back |
 | Quit Deckhand | ⌘Q | asks while sessions run |
+| Quit Deckhand and Stop All Sessions… |  | with Keep sessions on: the kept sessions stop too (asks) |
 
 **File**
 
@@ -1842,6 +1856,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Rescan sessions |  | read pi's session store again (Claude rows are Deckhand's own history) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
+| Keep sessions running when Deckhand quits |  | Experimental, off by default: on or off (the gear's Experimental section) |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |
 | Check for Updates… |  | check for a newer Deckhand now ([Updates](#updates)) |
 | Check for updates automatically |  | on or off: the daily check ([Updates](#updates)) |
@@ -1860,6 +1875,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Pin session, Unpin session, Hide session |  | the session on screen |
 | Sort projects (next order), Sort sessions (next order), Sort chats (next order) |  | Recent → Name → Created |
 | Quit Deckhand | ⌘Q | |
+| Quit Deckhand and Stop All Sessions… |  | the session holder's sessions too |
 | Open file… | ⌘P | |
 | Save | ⌘S | |
 | Find in file | ⌘F | |

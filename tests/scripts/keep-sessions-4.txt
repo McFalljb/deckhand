@@ -1,0 +1,12 @@
+# Run 4 of keep-sessions.sh: no holder kept anything (Stop All Sessions): the session starts
+# fresh shells, in a new holder (keep_sessions is still on). The scene kills that holder (-9)
+# once screen_hashes has logged: every tab ends, saying the session holder stopped.
+wait 300
+waitstate 8000 open_sessions.0.tabs.6.status running
+waitstate 3000 open_sessions.0.tabs.6.held 7
+waitfor Restored tab 5000
+screen_hashes
+waitstate 8000 open_sessions.0.tabs.6.holder_lost true
+waitstate 3000 open_sessions.0.tabs.0.holder_lost true
+assert_state open_sessions.0.tabs.6.status exited
+quit

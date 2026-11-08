@@ -44,6 +44,33 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
 "settings":{"confirm":{"control":{"tab_close":"trusted"}},"confirm_close":{"shell":"always"},"theme":"ghostty","reduce_motion":true,"appearance":"light","text_size":"large"}}
 ```
 
+`<data dir>/tokens.json` (only with `keep_sessions` on, Experimental): the control socket's
+tokens of the tabs whose process runs in the session holder, so those processes can reconnect
+after Deckhand reopens (PROTOCOL.md §2). Keyed by holder terminal, sha256 hashes only, never a
+token. Per terminal it also says what was started there (`kind`: shell, pi or claude; for pi
+`pi_ro` and its optional extensions `extras`): a restored tab of another kind never adopts that
+terminal, and an adopted pi tab is never less read-only than it started. Written whenever a
+holder is attached (at launch or later), rewritten atomically on every mint and revoke (outside
+the socket's lock), MAC'd with the holder's in-memory key (`src/macfile.odin`: a `deckhand-mac
+1 tokens <hmac>` line, then the JSON): a file that does not verify is ignored whole. A new
+holder (no terminals) removes the old file; entries for terminals the holder no longer lists
+are dropped at launch.
+
+With `keep_sessions` on, a terminal tab (pi, shell, Claude, Home's pi) whose process runs in the
+session holder saves `"held": <terminal id>` (a pi tab started read-only also `"readonly":
+true`), the file then also has a top-level `"holder": <its instance id>` (held ids are adopted
+only from that same holder), and at a quit that hands the sessions over (`src/holder_adopt.odin`) Deckhand writes
+`<data dir>/handover/<id>.snap` (`0600`: each terminal's snapshot at the offset the holder
+acked, `src/snapshot.odin`) and `<data dir>/handover.json`, MAC'd as `handover`:
+`{"v":1,"min_reader":1,"holder":<WELCOME instance>,"written":<unix>,
+"terminals":[{"term","offset","sha256","format","inexact"}]}`. Both are read once at the next
+launch and removed. They are used only when the MAC verifies, `min_reader` ≤ 1, `holder` is the
+attached holder's instance (random per holder run, so also this boot) and the holder says the
+last core said goodbye (`trust.handover_fresh`); each snapshot only when its sha256 matches.
+Otherwise the terminals are rebuilt from the holder's tails (`inexact`). If the handover can't be
+written at quit (disk full, an unwritable data dir), nothing is sent to the holder: the sessions
+run on and the next launch rebuilds them from the tails.
+
 - `projects`: projects added by hand, renamed, selected, or holding a saved session. Projects
   derived from pi's store are found again by scanning; saved entries add names and bring back
   hand-added projects (on top, in saved order). A project whose folder is gone shows as missing.
@@ -151,7 +178,8 @@ tabs' processes are stopped). Test mode saves and restores only with an explicit
   `restore_session` starts it there again while that folder is still a checkout of the project's
   repository (else in the project's folder).
 - `settings.agent_name`, `settings.agent_model` (when set), `settings.notify: false` and
-  `settings.tidy_projects: false` (when off). The tidy list's state (temp, missing, nesting) is
+  `settings.tidy_projects: false` (when off), `settings.keep_sessions: true` (when on; the
+  session holder's `tokens.json` is its own file, above). The tidy list's state (temp, missing, nesting) is
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
   ones do); restored as saved (`added` absent: a found row that nests), never selected one by
@@ -208,7 +236,16 @@ cwd (without `--resume` when no id was reported), with a new token; a Claude-onl
 main tab the same. With Claude Code no longer installed they do not start: the tab says why and
 shows as exited (docs/CLAUDE.md §1). `deckhand DIR` opening a new chat skips the restored focus.
 The terminals' text size (`settings.terminal_text_size`, saved only when not the look's) is
-replayed with the other settings, as `set_terminal_text_size`.
+replayed with the other settings, as `set_terminal_text_size`. Then, before the first layout,
+tabs with a `held` id the session holder still lists are adopted at once (not lazily): their
+terminal comes back from the handover snapshot plus the holder's tail (exact), or from the tail
+alone (`inexact` in State), and their status is `running`; replies to queries in the replayed
+bytes are dropped. A held terminal no tab claims is released (hung up) only when nothing can be
+lost: it already ended, or the saved file restored cleanly, was saved with this holder and
+listed it. Otherwise (`--fresh`, a file moved aside, a crash before the first save, another
+holder's ids) it keeps running in the holder, not shown, and a toast says how many ("N kept
+sessions weren't restored"); **Quit Deckhand and Stop All Sessions** ends them. A `held` id the
+holder no longer lists restores as above.
 
 - Corrupt file, unknown `v`, not a regular file, or over 4 MB (checked before reading) → moved aside to `workspace.json.bad-<unix time>`, start
   empty. Nothing is changed before the file is validated.

@@ -36,6 +36,7 @@ App :: struct {
 	pointer:        [2]f32,
 	ready:          bool, // init done: the inbox may be drained
 	quitting:       bool, // quit confirmed (or nothing to confirm): let the window close
+	stop_sessions:  bool, // that quit stops the session holder's sessions too (Quit.stop_sessions)
 	frames_called:  u64, // frame callbacks, drawn or not (frame-pause measurements)
 	wakes:          u64, // platform wakes that ran
 	font_theme:     Theme_Id, // the look the fonts were opened for
@@ -129,6 +130,9 @@ init :: proc "c" () {
 		persist_load(app_args.fresh)
 		claude_disk_launching = false
 	}
+	// the session holder: tabs whose processes it kept since the last run get them back now
+	// (holder_adopt.odin); with keep_sessions on it is connected (or launched) here
+	holder_adopt_all()
 	harness_no_sudo_sweep(at_quit = false) // no-sudo folders of runs whose Deckhand is gone (harness_install.odin)
 	// Claude's projects (claude_disk.odin), on the Rescan worker, with the saved accounts (added
 	// ones in, removed ones out)
@@ -707,7 +711,11 @@ event :: proc(e: ^sapp.Event) {
 			ui_do(Quit{})
 			return
 		}
-		persist_quit() // while the shells still run (their cwd is saved)
+		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
+		// otherwise they are released as direct ones are hung up
+		if app.stop_sessions do holder_shutdown()
+		else do holder_handover()
+		persist_quit() // while the shells still run (their cwd is saved; held ids with a handover)
 		close_all()
 	}
 }
@@ -794,7 +802,7 @@ confirm_pending :: proc(token: string) {
 		#partial switch c in p.command {
 		case Close_Tab: cmd = Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}
 		case Close_Session: cmd = Close_Session{session = c.session, confirm = token, ask = c.ask, comments = c.comments}
-		case Quit:      cmd = Quit{confirm = token}
+		case Quit:      cmd = Quit{confirm = token, stop_sessions = c.stop_sessions}
 		case Update_Install: cmd = Update_Install{confirm = token}
 		case Pi_Reload: cmd = Pi_Reload{tab_id = c.tab_id, confirm = token}
 		case Pi_Reload_All: cmd = Pi_Reload_All{only_changed = c.only_changed, confirm = token}
@@ -1074,6 +1082,7 @@ cleanup :: proc "c" () {
 	socket_stop()
 	jobs_shutdown()
 	close_all()
+	holder_client_stop() // the session holder's connection (holder_client.odin)
 	browser_shutdown() // CEF before sokol (browser.odin)
 	app_shutdown() // app tabs' processes (app_tab.odin)
 	comments_shutdown() // this run's crops (comments.odin)

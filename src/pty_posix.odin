@@ -141,6 +141,10 @@ pty_read :: proc(p: ^Pty, buf: []u8) -> int {
 }
 
 pty_write :: proc(p: ^Pty, data: []u8) {
+	if p.held != 0 {
+		holder_input(p.held, data)
+		return
+	}
 	if p.fd < 0 do return
 	append(&p.pending, ..data)
 	pty_flush(p)
@@ -148,6 +152,7 @@ pty_write :: proc(p: ^Pty, data: []u8) {
 
 // Writes as much of the pending output as the pty accepts right now.
 pty_flush :: proc(p: ^Pty) {
+	if p.fd < 0 do return // a held pty: the holder queues what its PTY does not take
 	for len(p.pending) > 0 {
 		n := write(p.fd, raw_data(p.pending), len(p.pending))
 		if n <= 0 do return // EAGAIN: retry next frame
@@ -156,12 +161,22 @@ pty_flush :: proc(p: ^Pty) {
 }
 
 pty_resize :: proc(p: ^Pty, cols, rows: u16, w_px, h_px: u32) {
+	if p.held != 0 {
+		holder_resize(p.held, cols, rows, w_px, h_px)
+		return
+	}
 	if p.fd < 0 do return
 	ws := Winsize{ws_row = rows, ws_col = cols, ws_xpixel = u16(min(w_px, 65535)), ws_ypixel = u16(min(h_px, 65535))}
 	ioctl(p.fd, TIOCSWINSZ, &ws)
 }
 
 pty_close :: proc(p: ^Pty) {
+	if p.held != 0 {
+		holder_release(p.held) // hangs it up in the holder (not after a handover)
+		delete(p.pending)
+		p^ = Pty{fd = -1}
+		return
+	}
 	if p.fd >= 0 do close(p.fd)
 	if p.pid > 0 {
 		kill(p.pid, SIGHUP)
@@ -171,11 +186,18 @@ pty_close :: proc(p: ^Pty) {
 	p^ = Pty{fd = -1}
 }
 
+// Signals the child's process group (a read-only Claude stopped: claude.odin).
+pty_kill_group :: proc(p: ^Pty, sig: i32) {
+	if p.pid <= 0 do return
+	if p.held != 0 do holder_signal_group(p.held, sig)
+	else do kill(-p.pid, c.int(sig))
+}
+
 // Whether a child we hung up on is not reaped yet (hot reload waits for it
 // before starting pi again on the same session).
 pty_dying :: proc(pid: i32) -> bool {
 	for d in dying do if d == pid do return true
-	return false
+	return holder_dying(pid)
 }
 
 pty_reap :: proc() {
@@ -189,7 +211,12 @@ pty_reap :: proc() {
 // child is a session leader, so its group id is its pid): a shell is running
 // a command. False if unknown.
 pty_foreground_busy :: proc(p: ^Pty) -> bool {
-	if p.fd < 0 || p.pid <= 0 do return false
+	if p.pid <= 0 do return false
+	if p.held != 0 {
+		pg := holder_foreground(p.held)
+		return pg > 0 && pg != p.pid
+	}
+	if p.fd < 0 do return false
 	pg := tcgetpgrp(p.fd)
 	return pg > 0 && pg != p.pid
 }
@@ -197,6 +224,7 @@ pty_foreground_busy :: proc(p: ^Pty) -> bool {
 // The terminal's foreground process group, or 0 if unknown (agent_status.odin:
 // a program that reported working leaves the foreground when it exits).
 pty_foreground_pgrp :: proc(p: ^Pty) -> i32 {
+	if p.held != 0 do return p.pid > 0 ? holder_foreground(p.held) : 0
 	if p.fd < 0 || p.pid <= 0 do return 0
 	return i32(max(tcgetpgrp(p.fd), 0))
 }
@@ -205,6 +233,12 @@ pty_foreground_pgrp :: proc(p: ^Pty) -> i32 {
 // is forgotten then, so closing the pty hangs up nobody.
 pty_try_reap :: proc(p: ^Pty) -> (e: Exit_Info, reaped: bool) {
 	if p.pid <= 0 do return {}, false
+	if p.held != 0 {
+		// the holder reaps; EXITED says how (unknown when the holder was lost)
+		e, reaped = holder_exit(p.held)
+		if reaped do p.pid = 0
+		return
+	}
 	status: c.int
 	r := waitpid(p.pid, &status, WNOHANG)
 	if r != p.pid do return {}, false
@@ -224,6 +258,10 @@ exit_info_from_wait :: proc(status: c.int) -> Exit_Info {
 // True once the child process has exited (reaps it).
 pty_child_exited :: proc(p: ^Pty) -> bool {
 	if p.pid <= 0 do return true
+	if p.held != 0 {
+		_, ended := holder_exit(p.held)
+		return ended
+	}
 	status: c.int
 	return waitpid(p.pid, &status, WNOHANG) == p.pid
 }

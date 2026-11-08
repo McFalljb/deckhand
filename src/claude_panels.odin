@@ -739,6 +739,7 @@ claude_extra_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Re
 	case Claude_Restart:
 		s, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
+		if tab_held_away(tab) != 0 do return fail("this Claude still runs in the session holder, which isn't answering: quit and reopen Deckhand to get it back"), false
 		switch tab.status {
 		case .Running:     return fail("Claude is running in this tab"), false
 		case .Not_Started: return fail("Claude has not started in this tab yet: it starts when its session is shown"), false

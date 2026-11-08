@@ -22,6 +22,7 @@ import "core:encoding/hex"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 import "core:thread"
@@ -85,6 +86,21 @@ Server :: struct {
 	bridge_calls: map[string]Bridge_Call, // our request id on a bridge -> the command waiting for it
 	tab_session:  map[u64]u64, // tab -> open session, kept from State (ids are never reused)
 	claude_pids:  map[u64]i32, // a Claude tab -> its process (the login shell that execs claude): its token's hellos must come from below it
+	// tokens.json (keep_sessions; socket_tokens_enable): tabs whose process lives in the holder
+	tok_on:       bool,
+	tok_path:     string,
+	tok_key:      [MACFILE_KEY_LEN]u8,
+	tok_body:     string, // the newest tokens.json body (tokens_save), written by tokens_flush
+	tok_gen:      u64, // bumped by each tokens_save
+	tok_written:  u64, // the gen tokens_flush last wrote
+	tok_wmu:      sync.Mutex, // one tokens.json writer at a time (never held with mu while writing)
+	tab_term:     map[u64]u32, // a tab -> the holder terminal its process runs in
+	tab_ro:       map[u64]Ro_Saved, // a read-only Claude tab's ack state (claude.odin)
+	tab_start:    map[u64]Held_Start, // what a held tab's process was started as
+	hashed:       map[[32]u8]Hashed_Token, // tokens from tokens.json: known by their hash until a hello shows them
+	held_root:    map[u32]i32, // loaded, not adopted yet: a term's claude_pids root
+	held_ro:      map[u32]Ro_Saved, // loaded, not adopted yet: a term's read-only ack state
+	held_start:   map[u32]Held_Start, // loaded, not adopted yet: what a term was started as
 	next_ref:     u64,
 	next_conn:    u64,
 	next_bridge:  u64,
@@ -93,19 +109,21 @@ Server :: struct {
 @(private = "file")
 srv: Server
 
-// Starts listening in `dir` (default: sock_runtime_dir). Main thread.
+// Starts listening on <dir>/core.sock (dir default: sock_runtime_dir). The name is stable, so
+// tabs that outlive this process keep their DECKHAND_SOCKET (docs/plans/background-core.md
+// §5.1); a stale one is replaced (main.odin holds core.lock first). Main thread.
 socket_start :: proc(dir := "") -> bool {
 	if srv.running do return true
 	d := dir
 	if d == "" {
-		ok: bool
-		d, ok = sock_runtime_dir(context.temp_allocator)
-		if !ok {
-			fmt.eprintln("Deckhand: control socket: unsafe or missing runtime dir", d)
+		why: string
+		d, why = sock_runtime_dir_why(context.temp_allocator)
+		if why != "" {
+			fmt.eprintln("Deckhand: control socket:", why)
 			return false
 		}
 	}
-	path := fmt.aprintf("%s/pi-desk-%d.sock", d, os.get_pid())
+	path := fmt.aprintf("%s/%s", d, CORE_SOCK)
 	fd, ok := sock_listen(path)
 	if !ok {
 		fmt.eprintln("Deckhand: control socket: cannot listen on", path)
@@ -151,6 +169,8 @@ socket_stop :: proc(pump: proc() = nil) {
 	for k in srv.bridge_calls do delete(k)
 	clear(&srv.bridge_calls)
 	clear(&srv.origins)
+	clear(&srv.claude_pids)
+	tokens_reset() // tokens.json stays as it was last written: the holder's processes keep their tokens
 	sync.unlock(&srv.mu)
 	if pump != nil {
 		deadline := time.tick_now()
@@ -176,7 +196,9 @@ socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single
 	sync.lock(&srv.mu)
 	srv.next_ref += 1
 	srv.tokens[strings.clone(tok)] = {caller = caller, ref = srv.next_ref, single_use = single_use}
+	tokens_save()
 	sync.unlock(&srv.mu)
+	tokens_flush()
 	return tok
 }
 
@@ -236,7 +258,9 @@ socket_claude_env :: proc(tab_id: u64, cli: string) -> []string {
 socket_claude_pid :: proc(tab_id: u64, pid: i32) {
 	sync.lock(&srv.mu)
 	srv.claude_pids[tab_id] = pid
+	tokens_save()
 	sync.unlock(&srv.mu)
+	tokens_flush()
 }
 
 // Whether a hello with a Claude tab's token comes from that tab's own processes: the connecting
@@ -260,6 +284,7 @@ socket_claude_peer_ok :: proc(c: ^Conn, tab_id: u64) -> bool {
 // hang up its connections.
 socket_forget_tab :: proc(tab_id: u64) {
 	if tab_id == 0 do return
+	defer tokens_flush() // after the unlock below (defers run last first)
 	sync.lock(&srv.mu)
 	defer sync.unlock(&srv.mu)
 	gone := make([dynamic]string, context.temp_allocator)
@@ -279,6 +304,7 @@ socket_forget_tab :: proc(tab_id: u64) {
 		sync.unlock(&c.mu)
 	}
 	delete_key(&srv.claude_pids, tab_id)
+	tokens_forget_tab(tab_id)
 }
 
 // ---- events (main thread) ----
@@ -730,7 +756,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		ref: u64
 		if err == "" {
 			sync.lock(&srv.mu)
-			e, known := srv.tokens[m.token]
+			e, known := token_find(m.token) // this run's, or one from tokens.json
 			// a Claude tab's token works only from that tab's own processes
 			if known && e.caller.claude && !socket_claude_peer_ok(c, e.caller.tab_id) {
 				sync.unlock(&srv.mu)
@@ -746,9 +772,11 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 					delete(k)
 					reconnect = random_token(context.temp_allocator)
 					srv.tokens[strings.clone(reconnect)] = {caller = e.caller, ref = e.ref}
+					tokens_save()
 				}
 			}
 			sync.unlock(&srv.mu)
+			tokens_flush()
 			if !known do err = "unknown token"
 		}
 		if err != "" {
@@ -871,4 +899,488 @@ socket_request_conn :: proc(request_id: u64) -> u64 {
 	defer sync.unlock(&srv.mu)
 	if o, ok := srv.origins[request_id]; ok do return u64(o.conn)
 	return 0
+}
+
+// ---- tokens.json: tokens that outlive Deckhand (keep_sessions) ----
+//
+// A process kept running by the session holder while Deckhand is closed keeps the token it was
+// given. So with keep_sessions on, the tokens, claude_pids and read-only ack state of every tab
+// whose process runs in the holder are written to <data>/tokens.json on every change, MAC'd with
+// the holder's key (macfile.odin; docs/plans/background-core.md §5.3 B3). Hashes only, never a
+// token. Tab ids are new each launch, so entries are keyed by the holder terminal (`term`).
+//
+// The integrator's calls (main thread):
+// - socket_tokens_enable(path, key): the holder WELCOMEd and keep_sessions is on. Loads the old
+//   file (a bad or missing MAC loads nothing: every old token is unknown) and writes from now on.
+// - socket_tokens_bind(tab_id, term, start): the tab's process was SPAWNED in holder terminal
+//   `term` (after its env was built: tokens minted before the bind are the tab's too), started
+//   as `start` (the tab kind, pi's read-only flag and optional extensions): an adopt checks the
+//   restored tab against it (socket_tokens_start_of).
+// - socket_tokens_adopt(term, tab_id, start): a running terminal from the old run is the new
+//   tab `tab_id`: its loaded tokens, claude root pid and read-only state are that tab's, and
+//   `start` what it is now. False: the file had nothing for it (show "Reconnect needed: restart
+//   this tab").
+// - socket_tokens_release(term): a loaded terminal that will not be adopted.
+// - socket_tokens_prune(terms): at adopt, drop what was loaded for terminals the holder no
+//   longer lists (an id can come back for a new terminal).
+// - socket_tokens_disable(remove): keep_sessions went off or the holder is gone.
+// socket_forget_tab (the tab closed, exited or restarts) drops the tab's entries and binding.
+// With keep_sessions off nothing here runs and no file is written.
+//
+// Body (JSON, after the macfile header):
+//   {"v":1,"terms":[{"term":7,"kind":"pi","pi_ro":false,"extras":5,"claude_root":4242,
+//     "ro":{"need":true,"acked":true,"nonce":"<sha256 hex>"},
+//     "tokens":[{"sha256":"<hex>","caller":"panel","claude":false,"single_use":false}]}]}
+// `kind` (shell, pi, claude) always; `pi_ro` and `extras` for pi; `claude_root` and `ro` only
+// when set. A pi env token that was used is not listed (it was swapped
+// for a reconnect token, which is): an unlisted token is unknown, as a used one must be.
+
+TOKENS_KIND :: "tokens"
+tokens_write_probe: proc() // tests: called right before tokens.json is written
+
+// Whether srv.mu is free right now (tests: tokens.json is never written while holding it).
+socket_mu_free :: proc() -> bool {
+	if !sync.mutex_try_lock(&srv.mu) do return false
+	sync.unlock(&srv.mu)
+	return true
+}
+TOKENS_VERSION :: 1
+TOKENS_MAX_TERMS :: 4096
+TOKENS_MAX_PER_TERM :: 64
+
+// What a held terminal's process was started as (tokens.json, MAC'd).
+Held_Kind :: enum u8 {
+	Unknown, // not a tab's (never bound)
+	Shell,
+	Pi,
+	Claude,
+}
+
+HELD_KIND_NAMES := [Held_Kind]string {
+	.Unknown = "",
+	.Shell   = "shell",
+	.Pi      = "pi",
+	.Claude  = "claude",
+}
+
+Held_Start :: struct {
+	kind:   Held_Kind,
+	pi_ro:  bool, // pi: started read-only (a read-only chat)
+	extras: u64, // pi: the optional extensions it loaded (Tab.reload.extras)
+}
+
+Ro_Saved :: struct {
+	need, acked: bool,
+	nonce:       [32]u8, // sha256 of the start's nonce
+}
+
+@(private = "file")
+Hashed_Token :: struct {
+	using entry: Token_Entry, // caller.tab_id 0 until its term is adopted (no hello until then)
+	term:        u32,
+}
+
+// srv.mu held.
+@(private = "file")
+tokens_reset :: proc() {
+	srv.tok_on = false
+	delete(srv.tok_body)
+	srv.tok_body = ""
+	srv.tok_written = srv.tok_gen
+	delete(srv.tok_path)
+	srv.tok_path = ""
+	srv.tok_key = {}
+	clear(&srv.tab_term)
+	clear(&srv.tab_ro)
+	clear(&srv.tab_start)
+	clear(&srv.hashed)
+	clear(&srv.held_root)
+	clear(&srv.held_ro)
+	clear(&srv.held_start)
+}
+
+socket_tokens_enable :: proc(path: string, key: []u8) -> (loaded: bool, why: string) {
+	if len(key) != MACFILE_KEY_LEN do return false, "no key"
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	clear(&srv.hashed)
+	clear(&srv.held_root)
+	clear(&srv.held_ro)
+	clear(&srv.held_start)
+	delete(srv.tok_path)
+	srv.tok_path = strings.clone(path)
+	copy(srv.tok_key[:], key)
+	loaded, why = tokens_load(path, key)
+	if !loaded {
+		// fail closed: whatever was there is unknown now (never logged: only why)
+		clear(&srv.hashed)
+		clear(&srv.held_root)
+		clear(&srv.held_ro)
+		clear(&srv.held_start)
+		if why != "missing" do fmt.eprintln("Deckhand: tokens.json not trusted, old tokens are unknown:", why)
+	}
+	srv.tok_on = true
+	tokens_save()
+	return
+}
+
+socket_tokens_disable :: proc(remove: bool) {
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	if remove && srv.tok_path != "" do os.remove(srv.tok_path)
+	tokens_reset() // this run's tokens and claude_pids stay
+}
+
+socket_tokens_bind :: proc(tab_id: u64, term: u32, start: Held_Start) {
+	if tab_id == 0 || term == 0 do return
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	srv.tab_term[tab_id] = term
+	srv.tab_start[tab_id] = start
+	tokens_save()
+}
+
+// What holder terminal `term` was started as (loaded and verified, or this run's).
+socket_tokens_start_of :: proc(term: u32) -> (start: Held_Start, found: bool) {
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	if st, ok := srv.held_start[term]; ok do return st, true
+	for tab, t in srv.tab_term do if t == term {
+		st, ok := srv.tab_start[tab]
+		return st, ok
+	}
+	return {}, false
+}
+
+// Drops what was loaded for terminals not in `keep` (the holder's WELCOME), not adopted yet.
+socket_tokens_prune :: proc(keep: []u32) {
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	kept :: proc(keep: []u32, term: u32) -> bool {
+		for k in keep do if k == term do return true
+		return false
+	}
+	gone := make([dynamic][32]u8, context.temp_allocator)
+	for k, h in srv.hashed do if h.caller.tab_id == 0 && !kept(keep, h.term) do append(&gone, k)
+	for k in gone do delete_key(&srv.hashed, k)
+	terms := make([dynamic]u32, context.temp_allocator)
+	for term in srv.held_root do if !kept(keep, term) do append(&terms, term)
+	for term in srv.held_ro do if !kept(keep, term) do append(&terms, term)
+	for term in srv.held_start do if !kept(keep, term) do append(&terms, term)
+	for term in terms {
+		delete_key(&srv.held_root, term)
+		delete_key(&srv.held_ro, term)
+		delete_key(&srv.held_start, term)
+	}
+	tokens_save()
+}
+
+socket_tokens_adopt :: proc(term: u32, tab_id: u64, start: Held_Start = {}) -> (trusted: bool) {
+	if tab_id == 0 || term == 0 do return false
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	for _, &h in srv.hashed do if h.term == term && h.caller.tab_id == 0 {
+		h.caller.tab_id = tab_id
+		trusted = true
+	}
+	if root, ok := srv.held_root[term]; ok {
+		srv.claude_pids[tab_id] = root
+		delete_key(&srv.held_root, term)
+		trusted = true
+	}
+	if ro, ok := srv.held_ro[term]; ok {
+		srv.tab_ro[tab_id] = ro
+		delete_key(&srv.held_ro, term)
+		trusted = true
+	}
+	if st, ok := srv.held_start[term]; ok {
+		srv.tab_start[tab_id] = st
+		delete_key(&srv.held_start, term)
+	}
+	if start.kind != .Unknown do srv.tab_start[tab_id] = start // what the adopted tab is now (never looser: holder_adopt_all)
+	srv.tab_term[tab_id] = term
+	tokens_save()
+	return
+}
+
+socket_tokens_release :: proc(term: u32) {
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	gone := make([dynamic][32]u8, context.temp_allocator)
+	for k, h in srv.hashed do if h.term == term && h.caller.tab_id == 0 do append(&gone, k)
+	for k in gone do delete_key(&srv.hashed, k)
+	delete_key(&srv.held_root, term)
+	delete_key(&srv.held_ro, term)
+	delete_key(&srv.held_start, term)
+	tokens_save()
+}
+
+// A read-only Claude tab's ack state changed (claude.odin): saved with its term.
+socket_tokens_ro :: proc(tab_id: u64, need, acked: bool, nonce: string) {
+	defer tokens_flush() // after the unlock
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	srv.tab_ro[tab_id] = {need = need, acked = acked, nonce = token_hash(nonce)}
+	tokens_save()
+}
+
+// The read-only ack state saved for holder terminal `term` (loaded and verified, or this run's).
+socket_tokens_ro_of :: proc(term: u32) -> (ro: Ro_Saved, found: bool) {
+	sync.lock(&srv.mu)
+	defer sync.unlock(&srv.mu)
+	if r, ok := srv.held_ro[term]; ok do return r, true
+	for tab, t in srv.tab_term do if t == term {
+		r, ok := srv.tab_ro[tab]
+		return r, ok
+	}
+	return {}, false
+}
+
+// A token from this run, or one loaded from tokens.json whose terminal was adopted (then it is
+// this run's from now on: kept by the token itself). srv.mu held.
+@(private = "file")
+token_find :: proc(tok: string) -> (Token_Entry, bool) {
+	if e, ok := srv.tokens[tok]; ok do return e, true
+	if len(srv.hashed) == 0 do return {}, false
+	h := token_hash(tok)
+	he, ok := srv.hashed[h]
+	if !ok || he.caller.tab_id == 0 do return {}, false
+	delete_key(&srv.hashed, h)
+	srv.tokens[strings.clone(tok)] = he.entry
+	return he.entry, true
+}
+
+// srv.mu held.
+@(private = "file")
+tokens_forget_tab :: proc(tab_id: u64) {
+	gone := make([dynamic][32]u8, context.temp_allocator)
+	for k, h in srv.hashed do if h.caller.tab_id == tab_id do append(&gone, k)
+	for k in gone do delete_key(&srv.hashed, k)
+	delete_key(&srv.tab_ro, tab_id)
+	delete_key(&srv.tab_start, tab_id)
+	delete_key(&srv.tab_term, tab_id)
+	tokens_save()
+}
+
+@(private = "file")
+TOKEN_CALLERS := [Caller_Kind]string {
+	.Internal = "",
+	.UI       = "",
+	.Script   = "",
+	.Control  = "control",
+	.Panel    = "panel",
+	.App      = "app",
+}
+
+// Builds tokens.json's body when enabled (srv.mu held); the caller writes it with tokens_flush
+// once srv.mu is released.
+@(private = "file")
+tokens_save :: proc() {
+	if !srv.tok_on do return
+	Out :: struct {
+		root:   i32,
+		ro:     Ro_Saved,
+		has_ro: bool,
+		start:  Held_Start,
+		toks:   [dynamic]string,
+	}
+	terms := make(map[u32]Out, context.temp_allocator)
+	tok_json :: proc(hash: [32]u8, e: Token_Entry) -> string {
+		h := hash
+		return fmt.tprintf(`{{"sha256":"%s","caller":"%s","claude":%v,"single_use":%v}}`, string(hex.encode(h[:], context.temp_allocator)), TOKEN_CALLERS[e.caller.kind], e.caller.claude, e.single_use)
+	}
+	get :: proc(m: ^map[u32]Out, term: u32) -> ^Out {
+		if term not_in m do m[term] = {toks = make([dynamic]string, context.temp_allocator)}
+		return &m[term]
+	}
+	for tab, term in srv.tab_term {
+		o := get(&terms, term)
+		if root, ok := srv.claude_pids[tab]; ok do o.root = root
+		if ro, ok := srv.tab_ro[tab]; ok do o.ro, o.has_ro = ro, true
+		if st, ok := srv.tab_start[tab]; ok do o.start = st
+	}
+	for tok, e in srv.tokens {
+		term, bound := srv.tab_term[e.caller.tab_id]
+		if !bound || e.caller.tab_id == 0 || TOKEN_CALLERS[e.caller.kind] == "" do continue
+		o := get(&terms, term)
+		append(&o.toks, tok_json(token_hash(tok), e))
+	}
+	for h, he in srv.hashed {
+		term := he.term
+		if he.caller.tab_id != 0 {
+			t, bound := srv.tab_term[he.caller.tab_id]
+			if !bound do continue
+			term = t
+		}
+		o := get(&terms, term)
+		append(&o.toks, tok_json(h, he.entry))
+	}
+	for term, root in srv.held_root do get(&terms, term).root = root
+	for term, ro in srv.held_ro {
+		o := get(&terms, term)
+		o.ro, o.has_ro = ro, true
+	}
+	for term, st in srv.held_start do get(&terms, term).start = st
+	ids := make([dynamic]u32, 0, len(terms), context.temp_allocator)
+	for k in terms do append(&ids, k)
+	slice.sort(ids[:])
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"terms":[`, TOKENS_VERSION)
+	first := true
+	for id in ids {
+		o := terms[id]
+		if o.start.kind == .Unknown do continue // nothing says what it is: not kept (fails closed)
+		if !first do strings.write_byte(&b, ',')
+		first = false
+		fmt.sbprintf(&b, `{{"term":%d,"kind":"%s"`, id, HELD_KIND_NAMES[o.start.kind])
+		if o.start.kind == .Pi do fmt.sbprintf(&b, `,"pi_ro":%v,"extras":%d`, o.start.pi_ro, transmute(i64)o.start.extras)
+		if o.root > 1 do fmt.sbprintf(&b, `,"claude_root":%d`, o.root)
+		nonce := o.ro.nonce
+		if o.has_ro do fmt.sbprintf(&b, `,"ro":{{"need":%v,"acked":%v,"nonce":"%s"}}`, o.ro.need, o.ro.acked, string(hex.encode(nonce[:], context.temp_allocator)))
+		slice.sort(o.toks[:]) // stable output: the map's order is not
+		strings.write_string(&b, `,"tokens":[`)
+		for tj, k in o.toks {
+			if k > 0 do strings.write_byte(&b, ',')
+			strings.write_string(&b, tj)
+		}
+		strings.write_string(&b, "]}")
+	}
+	strings.write_string(&b, "]}")
+	delete(srv.tok_body)
+	srv.tok_body = strings.clone(strings.to_string(b))
+	srv.tok_gen += 1
+}
+
+// Writes the body tokens_save left, after srv.mu is released (every caller of tokens_save:
+// a slow or hung disk then holds up only that caller, never the threads that need srv.mu).
+// Writers queue on tok_wmu and the newest body wins: an older one is never written after it.
+@(private = "file")
+tokens_flush :: proc() {
+	sync.lock(&srv.tok_wmu)
+	defer sync.unlock(&srv.tok_wmu)
+	sync.lock(&srv.mu)
+	if srv.tok_written == srv.tok_gen || srv.tok_body == "" || srv.tok_path == "" {
+		sync.unlock(&srv.mu)
+		return
+	}
+	gen := srv.tok_gen
+	path := strings.clone(srv.tok_path, context.temp_allocator)
+	body := strings.clone(srv.tok_body, context.temp_allocator)
+	key := srv.tok_key
+	sync.unlock(&srv.mu)
+	if tokens_write_probe != nil do tokens_write_probe()
+	if ok, why := macfile_write(path, TOKENS_KIND, body, key[:]); !ok {
+		fmt.eprintln("Deckhand: cannot save tokens.json:", why)
+	}
+	sync.lock(&srv.mu)
+	srv.tok_written = gen
+	sync.unlock(&srv.mu)
+}
+
+// Reads tokens.json into srv.hashed, held_root and held_ro (srv.mu held). All or nothing: any
+// entry out of shape rejects the whole file.
+@(private = "file")
+tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
+	body, rok, rwhy := macfile_read(path, TOKENS_KIND, key, context.temp_allocator)
+	if !rok do return false, rwhy
+	if !json_shape_ok(body, 200_000) do return false, "too large or too deep"
+	v, jerr := json.parse_string(body, .JSON, true, context.temp_allocator)
+	if jerr != nil do return false, "invalid JSON"
+	root, is := v.(json.Object)
+	if !is do return false, "not an object"
+	if ver, vok := root["v"].(json.Integer); !vok || ver != TOKENS_VERSION do return false, "unknown version"
+	list, lok := root["terms"].(json.Array)
+	if !lok || len(list) > TOKENS_MAX_TERMS do return false, "bad terms"
+	hashes := make(map[[32]u8]Hashed_Token, context.temp_allocator)
+	roots := make(map[u32]i32, context.temp_allocator)
+	ros := make(map[u32]Ro_Saved, context.temp_allocator)
+	starts := make(map[u32]Held_Start, context.temp_allocator)
+	seen := make(map[u32]bool, context.temp_allocator)
+	hash32 :: proc(v: json.Value) -> (h: [32]u8, ok: bool) {
+		s, sok := v.(json.String)
+		if !sok || len(s) != 64 do return {}, false
+		b, hok := hex.decode(transmute([]u8)s, context.temp_allocator)
+		if !hok || len(b) != 32 do return {}, false
+		copy(h[:], b)
+		return h, true
+	}
+	for item in list {
+		o, ook := item.(json.Object)
+		if !ook do return false, "bad term"
+		tn, tok := o["term"].(json.Integer)
+		if !tok || tn <= 0 || tn > i64(max(u32)) do return false, "bad term id"
+		term := u32(tn)
+		if seen[term] do return false, "a term twice"
+		seen[term] = true
+		st: Held_Start
+		kn, kok := o["kind"].(json.String)
+		if !kok do return false, "bad kind"
+		switch kn {
+		case "shell":  st.kind = .Shell
+		case "pi":     st.kind = .Pi
+		case "claude": st.kind = .Claude
+		case:          return false, "bad kind"
+		}
+		if r, has := o["pi_ro"]; has {
+			b, bok := r.(json.Boolean)
+			if !bok || st.kind != .Pi do return false, "bad pi_ro"
+			st.pi_ro = bool(b)
+		}
+		if r, has := o["extras"]; has {
+			n, nok := r.(json.Integer)
+			if !nok || st.kind != .Pi do return false, "bad extras"
+			st.extras = transmute(u64)i64(n)
+		}
+		starts[term] = st
+		if r, has := o["claude_root"]; has {
+			n, nok := r.(json.Integer)
+			if !nok || n <= 1 || n > i64(max(i32)) do return false, "bad claude_root"
+			roots[term] = i32(n)
+		}
+		if r, has := o["ro"]; has {
+			ro, rook := r.(json.Object)
+			if !rook do return false, "bad ro"
+			need, nok := ro["need"].(json.Boolean)
+			acked, aok := ro["acked"].(json.Boolean)
+			nonce, hok := hash32(ro["nonce"])
+			if !nok || !aok || !hok do return false, "bad ro"
+			ros[term] = {need = bool(need), acked = bool(acked), nonce = nonce}
+		}
+		toks, took := o["tokens"].(json.Array)
+		if !took || len(toks) > TOKENS_MAX_PER_TERM do return false, "bad tokens"
+		for tv in toks {
+			to, tok2 := tv.(json.Object)
+			if !tok2 do return false, "bad token"
+			h, hok := hash32(to["sha256"])
+			cs, cok := to["caller"].(json.String)
+			claude, clok := to["claude"].(json.Boolean)
+			single, sok := to["single_use"].(json.Boolean)
+			if !hok || !cok || !clok || !sok do return false, "bad token"
+			kind: Caller_Kind
+			switch cs {
+			case "panel":   kind = .Panel
+			case "app":     kind = .App
+			case "control": kind = .Control
+			case:           return false, "bad token caller"
+			}
+			if claude && kind != .Panel do return false, "bad token caller"
+			if h in hashes do return false, "a token twice"
+			hashes[h] = {entry = {caller = {kind = kind, claude = bool(claude)}, single_use = bool(single)}, term = term}
+		}
+	}
+	for h, he in hashes {
+		e := he
+		srv.next_ref += 1
+		e.ref = srv.next_ref
+		srv.hashed[h] = e
+	}
+	for k, r in roots do srv.held_root[k] = r
+	for k, r in ros do srv.held_ro[k] = r
+	for k, r in starts do srv.held_start[k] = r
+	return true, ""
 }

@@ -625,7 +625,7 @@ download_try_name :: proc(name: string, n: int, allocator := context.temp_alloca
 download_reserve :: proc(dir, name: string, allocator := context.temp_allocator) -> string {
 	for n in 0 ..< 1000 {
 		path, _ := filepath.join({dir, download_try_name(name, n)}, allocator)
-		fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.WRONLY, .CREAT, .EXCL, .NOFOLLOW}, {.IRUSR, .IWUSR, .IRGRP, .IROTH})
+		fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.WRONLY, .CREAT, .EXCL, .NOFOLLOW, .CLOEXEC}, {.IRUSR, .IWUSR, .IRGRP, .IROTH})
 		if fd >= 0 {
 			posix.close(fd)
 			return path

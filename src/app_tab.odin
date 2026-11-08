@@ -866,7 +866,9 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	posix_spawn_file_actions_addchdir_np(&fa, strings.clone_to_cstring(cwd, context.temp_allocator))
 	pid: posix.pid_t
 	// argv[0] on PATH; the child's environment is env
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
 	err := posix.posix_spawnp(&pid, c_argv[0], &fa, &attr, raw_data(c_argv), raw_data(c_env))
+	sync.rw_mutex_shared_unlock(&fork_lock)
 	posix.close(fds[1])
 	if err != .NONE {
 		posix.close(fds[0])

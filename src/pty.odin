@@ -1,5 +1,7 @@
 package main
 
+import "core:sync"
+
 // Pseudo-terminal interface. Each platform implements these procs in its own
 // file: pty_posix.odin (macOS, Linux via forkpty). A Windows ConPTY version
 // would implement the same procs in pty_windows.odin.
@@ -14,6 +16,13 @@ package main
 //   pty_foreground_busy(&p) -> bool       a program other than the child itself is in
 //                                         the foreground (e.g. a shell running a command)
 //   pty_foreground_pgrp(&p) -> i32        the foreground process group (0 = unknown)
+
+// The fork lock. pty_spawn holds it exclusively from making its pipe until
+// the pipe and the new master are close-on-exec; every other place that
+// forks or spawns (from any thread) holds it shared around the fork, so no
+// child is born holding a descriptor in that window. (POSIX_SPAWN_CLOEXEC_DEFAULT
+// is macOS only, and Odin's os.process_start is a plain fork.)
+fork_lock: sync.RW_Mutex
 
 Pty :: struct {
 	fd:      i32, // master side (posix)

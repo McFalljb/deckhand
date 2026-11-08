@@ -3,6 +3,7 @@ package main
 
 import "core:c"
 import "core:strings"
+import "core:sync"
 
 when ODIN_OS == .Darwin {
 	foreign import libc "system:System"
@@ -78,13 +79,25 @@ pty_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16) -
 	c_cwd := strings.clone_to_cstring(cwd, context.temp_allocator)
 
 	// A close-on-exec pipe tells us whether execve worked: a successful exec
-	// closes it (read gets EOF), a failed one writes a byte first.
+	// closes it (read gets EOF), a failed one writes a byte first. Both ends
+	// close-on-exec, so no other child holds them.
 	exec_pipe: [2]c.int
-	if pipe(&exec_pipe) != 0 do return {}, false
-	fcntl(exec_pipe[1], F_SETFD, c.int(FD_CLOEXEC))
 	ws := Winsize{ws_row = rows, ws_col = cols}
 	master: c.int
+	// No other fork until these fds are close-on-exec (fork_lock, pty.odin).
+	sync.rw_mutex_lock(&fork_lock)
+	if pipe(&exec_pipe) != 0 {
+		sync.rw_mutex_unlock(&fork_lock)
+		return {}, false
+	}
+	fcntl(exec_pipe[0], F_SETFD, c.int(FD_CLOEXEC))
+	fcntl(exec_pipe[1], F_SETFD, c.int(FD_CLOEXEC))
 	pid := forkpty(&master, nil, nil, &ws)
+	// The master is close-on-exec: a later child (another terminal's shell, a
+	// job, git) must not hold it, or closing this tab would not hang up its
+	// terminal. Its own child has only the slave, as 0, 1 and 2 (forkpty).
+	if pid > 0 do fcntl(master, F_SETFD, c.int(FD_CLOEXEC))
+	if pid != 0 do sync.rw_mutex_unlock(&fork_lock)
 	if pid < 0 {
 		close(exec_pipe[0])
 		close(exec_pipe[1])

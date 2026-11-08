@@ -257,7 +257,7 @@ term_free :: proc(t: ^Term) {
 
 // Starts argv on a fresh terminal (old child hung up, screen reset).
 // False if the process could not be started.
-term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = nil) -> bool {
+term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = nil, start: Held_Start = {}) -> bool {
 	reader_stop_and_close(t)
 	term_cancel_drag(t) // its tracked ends belong to the old terminal
 	// a new terminal per process: clean modes, scrollback and kitty flags
@@ -277,7 +277,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	// a tab's (it may not be in its session yet: a new session's pi tab), not the setup sheet's install run
 	if tab_id != 0 && tab_id != harness_run.term_id && holder_wanted() {
 		p, ok = holder_spawn(argv, cwd, child_env(extra_env), t.cols, t.rows, px_w, px_h)
-		if ok do socket_tokens_bind(tab_id, p.held) // its tokens (minted for its env) are kept with it
+		if ok do socket_tokens_bind(tab_id, p.held, start) // its tokens (minted for its env) and what it is are kept with it
 		else do fmt.eprintln("Deckhand: session holder: SPAWN failed; this tab runs on its own PTY (it stops at quit)")
 	}
 	if !ok {

@@ -2088,7 +2088,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			if !ok do socket_forget_tab(tab.id)
 		case Shell_Tab:
 			cwd := tab.cwd != "" && os.is_dir(tab.cwd) ? tab.cwd : s.cwd
-			ok = term_start(t, {login_shell(), "-l"}, cwd) // a fresh terminal: the note goes after
+			ok = term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) // a fresh terminal: the note goes after
 			if ok do term_note(t, "Restored tab: a new shell (the previous one's history is not kept).")
 		case Claude_Tab:
 			if !claude_installed_now() { // installed since it was restored: looked up again
@@ -2251,7 +2251,7 @@ shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0) -> (u64, s
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
 	t := new_term(id)
-	if !term_start(t, {login_shell(), "-l"}, cwd) {
+	if !term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) {
 		drop_term(id)
 		pane_tab_gone(s, id)
 		for x, i in s.tabs do if x.id == id {
@@ -2361,7 +2361,8 @@ start_pi :: proc(t: ^Term, tab: ^Tab, pi_session_id, path, session_dir, cwd: str
 	if path != "" do append(&argv, "--session", path)
 	else do append(&argv, "--session-id", pi_session_id)
 	append(&argv, ..extra) // last: a chat's read-only flags (chat_args)
-	return term_start(t, argv[:], cwd, pi_extra_env(env)) // + PI_KIT_NOTES_DIR (folders.odin)
+	pk, _ := tab.kind.(Pi_Tab)
+	return term_start(t, argv[:], cwd, pi_extra_env(env), {kind = .Pi, pi_ro = pk.readonly, extras = tab.reload.extras}) // + PI_KIT_NOTES_DIR (folders.odin)
 }
 
 // Runtime upkeep, not state changes: read every terminal (background tabs

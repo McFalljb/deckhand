@@ -38,6 +38,7 @@ Persist :: struct {
 	checks:        int, // save checks (workspace_json runs) and writes, for the log
 	writes:        int,
 	dir_lists:     int, // session dir listings by the save check (tests)
+	restored_clean: bool, // persist_load restored the saved file (not missing, --fresh, or moved aside)
 }
 
 persist: Persist
@@ -641,6 +642,7 @@ persist_load :: proc(fresh := false) {
 		return
 	}
 	persist.last_written = strings.clone(string(data))
+	persist.restored_clean = true
 	fmt.eprintf("Deckhand: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
 }
 

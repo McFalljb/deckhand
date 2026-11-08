@@ -315,21 +315,47 @@ holder_adopt_all :: proc() {
 		id := tab.held
 		tab.held = 0
 		if id == 0 || tab.status != .Not_Started do continue
+		kind: Held_Kind
 		switch _ in tab.kind {
-		case Shell_Tab, Pi_Tab, Claude_Tab:
+		case Shell_Tab:  kind = .Shell
+		case Pi_Tab:     kind = .Pi
+		case Claude_Tab: kind = .Claude
 		case Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab:
 			continue
 		}
-		if !adopt_tab(&s, &tab, id, snaps) do continue
-		_, is_shell := tab.kind.(Shell_Tab)
-		if !socket_tokens_adopt(id, tab.id) && !is_shell do untrusted += 1
-		if ct, is_cl := &tab.kind.(Claude_Tab); is_cl {
+		// what the terminal was started as (the MAC'd tokens.json): never into another kind of
+		// tab (workspace.json is not MAC'd: an edit could put a Claude's id on a shell tab)
+		saved, known := socket_tokens_start_of(id)
+		if hc.tokens_loaded && (!known || saved.kind != kind) {
+			fmt.eprintln("Deckhand: session holder: terminal", id, "was not started as this", HELD_KIND_NAMES[kind], "tab (tokens.json): not adopted")
+			continue
+		}
+		if !adopt_tab(&s, &tab, id, snaps, saved, known) do continue
+		start := Held_Start{kind = kind}
+		if pk, is_pi := tab.kind.(Pi_Tab); is_pi do start.pi_ro, start.extras = pk.readonly, tab.reload.extras
+		if !socket_tokens_adopt(id, tab.id, start) && kind != .Shell do untrusted += 1
+		ct, is_cl := &tab.kind.(Claude_Tab)
+		if is_cl {
 			if t := term_of(tab.id); t != nil do socket_claude_pid(tab.id, t.pty.pid) // its hellos come from below it
-			// a read-only Claude without trusted ack state is stopped (docs/CLAUDE.md §1a)
-			ro, found := socket_tokens_ro_of(id)
-			if (ct.readonly || (found && ro.need)) && !claude_adopt_ro_ok(id) do claude_adopt_ro_stop(tab.id)
+		}
+		// a read-only Claude without trusted ack state is stopped (docs/CLAUDE.md §1a); so is
+		// anything whose saved state says it needs the read-only guard, whatever its tab
+		ro, found := socket_tokens_ro_of(id)
+		if ((found && ro.need) || (is_cl && ct.readonly)) && !claude_adopt_ro_ok(id) {
+			if is_cl do claude_adopt_ro_stop(tab.id)
+			else if t := term_of(tab.id); t != nil {
+				socket_forget_tab(tab.id)
+				term_note(t, CLAUDE_GUARD_UNTRUSTED)
+				pty_kill_group(&t.pty, i32(posix.Signal.SIGKILL))
+			}
 		}
 	}
+	// entries for terminals the holder no longer lists: an id can come back for a new one
+	listed := make([dynamic]u32, context.temp_allocator)
+	sync.lock(&hc.mu)
+	for id, h in hc.held do if h.welcomed do append(&listed, id)
+	sync.unlock(&hc.mu)
+	socket_tokens_prune(listed[:])
 	if untrusted > 0 do toast_show(fmt.tprintf("%d session%s kept running but can't reach Deckhand: restart %s to reconnect", untrusted, untrusted == 1 ? "" : "s", untrusted == 1 ? "it" : "them"), err = true)
 	// terminals no restored tab claimed
 	gone := make([dynamic]u32, context.temp_allocator)
@@ -343,10 +369,10 @@ holder_adopt_all :: proc() {
 	}
 }
 
-// Adopts holder terminal id into tab (its Term made now). False: not adoptable (gone, already
-// claimed, listed with a bad size).
+// Adopts holder terminal id into tab (its Term made now); saved: what tokens.json says it was
+// started as, when known. False: not adoptable (gone, already claimed, listed with a bad size).
 @(private = "file")
-adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_Snap) -> bool {
+adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_Snap, saved: Held_Start, known: bool) -> bool {
 	sync.lock(&hc.mu)
 	h := hc.held[id]
 	if h == nil || !h.welcomed || h.claimed || h.lost {
@@ -399,9 +425,19 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	t.reader.eof = false
 	t.changed = true
 	tab.status = .Running
-	if _, is_pi := tab.kind.(Pi_Tab); is_pi && !s.home {
-		// as a restart would start it, and never looser than it was started (workspace.json)
-		tab.kind = Pi_Tab{readonly = chat_readonly(s.project_id) || tab.kind.(Pi_Tab).readonly}
+	if pk, is_pi := tab.kind.(Pi_Tab); is_pi {
+		if s.home {
+			// Atlas: the model it runs with is the one applied at its last start (its first
+			// status must not take another for it: Pi_Status_Update)
+			delete(agent_model_starting)
+			agent_model_starting = strings.clone(state.home_model)
+		} else {
+			// as a restart would start it, and never looser than it was started (tokens.json,
+			// MAC'd; workspace.json's flag can only add to it)
+			tab.kind = Pi_Tab{readonly = chat_readonly(s.project_id) || pk.readonly || (known && saved.pi_ro)}
+		}
+		// the optional extensions it runs with (unknown: as now, so no restart is offered for it)
+		tab.reload.extras = known ? saved.extras : pi_integration_extras()
 	}
 	return true
 }

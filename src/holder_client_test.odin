@@ -13,6 +13,7 @@ import "core:sync"
 import "core:testing"
 import "core:time"
 import gh "ghostty"
+import hw "holderwire"
 
 @(test)
 holder_sock_names :: proc(t: ^testing.T) {
@@ -204,7 +205,7 @@ holder_midrun_writes_tokens :: proc(t: ^testing.T) {
 	fake_holder_start(t, &f)
 	defer fake_holder_stop(&f)
 	testing.expect(t, holder_wanted(), "attached")
-	socket_tokens_bind(101, 1)
+	socket_tokens_bind(101, 1, {kind = .Shell})
 	path := fmt.tprintf("%s/tokens.json", home_root)
 	_, ok, why := macfile_read(path, TOKENS_KIND, f.key[:], context.temp_allocator)
 	testing.expect(t, ok, why)
@@ -255,4 +256,85 @@ holder_handover_unwritable_keeps :: proc(t: ^testing.T) {
 	time.sleep(150 * time.Millisecond)
 	testing.expect_value(t, fake_holder_count(&f, .Goodbye), 0)
 	testing.expect_value(t, fake_holder_count(&f, .Release), 0)
+}
+
+// ---- adopt at launch, against a fake holder ----
+
+@(private = "file")
+fake_term :: proc(id: i64, tail: string) -> hw.Welcome_Terminal {
+	return {id = id, pid = i64(os.get_pid()), pgid = i64(os.get_pid()), cols = 80, rows = 24, offset = u64(len(tail))}
+}
+
+// A clean State, the fake's tokens.json written as an earlier run would have (binds: term ->
+// what it was started as), then workspace `text` restored and holder_adopt_all run.
+@(private = "file")
+adopt_run :: proc(t: ^testing.T, f: ^Fake_Holder, text: string, binds: map[u32]Held_Start, clean := true) {
+	for _, x in terms {
+		x.pty.held, x.running = 0, false // never a RELEASE or kill from here
+		term_free(x)
+		free(x)
+	}
+	clear(&terms)
+	inbox_drain()
+	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}, settings = {keep_sessions = true}}
+	persist = {}
+	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	os.set_env("SHELL", "/bin/sh")
+	os.set_env("PI_DESK_CMD", "sleep 30")
+	path := fmt.tprintf("%s/tokens.json", home_root)
+	socket_tokens_enable(path, f.key[:])
+	tab := u64(900)
+	for term, st in binds {
+		tab += 1
+		socket_tokens_bind(tab, term, st)
+	}
+	socket_tokens_disable(false)
+	testing.expect_value(t, workspace_restore(text), "")
+	persist.restored_clean = clean
+	holder_adopt_all()
+}
+
+@(private = "file")
+adopt_proj :: proc() -> string {
+	tmp := os.get_env("TMPDIR", context.temp_allocator)
+	proj := fmt.aprintf("%s/pi-desk-adopt-%d", strings.trim_right(tmp, "/"), os.get_pid())
+	os.make_directory_all(proj)
+	return proj
+}
+
+// What a terminal was started as comes from the MAC'd tokens.json: a pi tab is read-only if it
+// was started so (whatever workspace.json says), keeps the extensions it started with (no false
+// restart offer), Atlas keeps its applied model; a terminal mapped to another kind of tab (a
+// Claude into a shell tab) is not adopted; entries for terminals the holder no longer lists go.
+@(test)
+holder_adopt_checks_start :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "claude\r\n"), fake_term(5, "atlas\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("claude\r\n"), transmute([]u8)string("atlas\r\n")}}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi, pi_ro = true, extras = 9}
+	binds[4] = {kind = .Claude}
+	binds[5] = {kind = .Pi}
+	binds[6] = {kind = .Shell} // gone from the holder
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"shell","title":"a","cwd":"%s","held":4}}],"active_tab":0}}],"home":{{"pi_session_id":"hhhh-home","held":5,"model_applied":"m-applied"}}}}`, f.instance, proj, proj, proj, proj)
+	delete(agent_model_starting)
+	agent_model_starting = strings.clone("m-other")
+	adopt_run(t, &f, text, binds)
+	s: ^Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 2, "restored")
+	if s == nil || len(s.tabs) != 2 do return
+	testing.expect_value(t, s.tabs[0].status, Tab_Status.Running)
+	testing.expect(t, s.tabs[0].kind.(Pi_Tab).readonly, "read-only as started (tokens.json)")
+	testing.expect_value(t, s.tabs[0].reload.extras, u64(9))
+	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started) // a Claude is not a shell tab
+	testing.expect(t, term_of(s.tabs[1].id) == nil, "not adopted")
+	hs := home_session()
+	testing.expect(t, hs != nil && hs.tabs[0].status == .Running, "Atlas adopted")
+	testing.expect_value(t, agent_model_starting, "m-applied")
+	_, f6 := socket_tokens_start_of(6)
+	testing.expect(t, !f6, "term 6 is no longer listed: pruned")
 }

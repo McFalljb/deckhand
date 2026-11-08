@@ -1515,14 +1515,21 @@ Applications. Your projects, sessions, settings, Atlas, jobs and Claude accounts
 While pi-desk runs, Deckhand does not start: it says so and quits. From Deckhand on, releases come
 as `deckhand-<version>-macos-arm64.zip`.
 
-**Names kept from pi-desk, on purpose.** Some internal names still say pi-desk, so that your data
-and setup carry over and nothing you rely on breaks. They are not leftovers to rename:
+**Old names that still work.** From 0.1.7 everything is named Deckhand, and the old names keep
+working, so your data and setup carry over and nothing you rely on breaks:
 
-- the bundle id, `dev.pi-desk.app`;
-- the data dir, `~/Library/Application Support/pi-desk` (see [Where it lives](#where-it-lives));
-- the `PI_DESK_*` environment variables Deckhand sets in its tabs;
+- the data dir: Deckhand uses `~/Library/Application Support/pi-desk` while that is where your data
+  is (0.1.8 moves it to `…/Deckhand`; see [Where it lives](#where-it-lives));
+- the environment variables Deckhand sets in Claude tabs, app tabs and job runs are set under both
+  names, `DECKHAND_*` and the old `PI_DESK_*`, until 0.2.0; `DECKHAND_GUI_LAUNCH` and
+  `DECKHAND_CEF_SHARED_TEXTURE` are read under their old names too;
 - the `pi-desk` command in Claude tabs, an alias of `deckhand`;
-- the project file `.pi-desk/apps.json` and the default main folder `~/pi-desk`.
+- the project file: `.deckhand/apps.json`, or `.pi-desk/apps.json` if that is the one you have
+  (Deckhand never moves it: `git mv` it when you like);
+- your main folder, wherever it is (`~/pi-desk` stays `~/pi-desk`).
+
+The bundle id is still `dev.pi-desk.app` in 0.1.7; 0.1.8 changes it to `dev.deckhand.app`, and macOS
+then asks once more for folder access and notifications.
 
 Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
 download or install one: only you can.
@@ -1533,8 +1540,9 @@ download or install one: only you can.
 
 Deckhand's data dir is `~/Library/Application Support/Deckhand` on macOS (Linux:
 `~/.local/share/deckhand`; a release build always uses this one; a development build can move it,
-docs/DEVELOPING.md). The name is kept
-from Deckhand's old name ([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
+docs/DEVELOPING.md). An install from before the rename keeps using `~/Library/Application
+Support/pi-desk` (Linux: `~/.local/share/pi-desk`) until 0.1.8 moves it
+([From pi-desk to Deckhand](#from-pi-desk-to-deckhand)). It is private
 to you (`0700`), and its files are `0600`:
 
 | File | What |

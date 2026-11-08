@@ -49,5 +49,5 @@ by hand, in Claude Code:
 ```
 
 It is not published anywhere. Installed this way it still only works inside Deckhand's Claude
-tabs, which set `DECKHAND_SOCKET`, `DECKHAND_CLAUDE_TOKEN` and `DECKHAND_CLI` (the `DECKHAND_*` names
-are kept from Deckhand's old name, pi-desk).
+tabs, which set `DECKHAND_SOCKET`, `DECKHAND_CLAUDE_TOKEN` and `DECKHAND_CLI` (and, until 0.2.0,
+the same under their old names, `PI_DESK_*`, for tabs started before Deckhand 0.1.7).

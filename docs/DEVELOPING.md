@@ -50,11 +50,39 @@ small wrapper that runs the bundle's binary directly, so arguments, the environm
 through (`build/pi-desk` is the same wrapper under its old name, so older scripts keep working).
 `DECKHAND_NO_CEF=1 ./build.sh` builds without the browser tab and without the download.
 
-Deckhand used to be called pi-desk, and some internal names keep the old name on purpose, so
-existing installs, scripts and signed updates keep working: the bundle id `dev.pi-desk.app`, the
-data dir `~/Library/Application Support/Deckhand`, the CEF cache, the `DECKHAND_*` environment
-variables, `TERM_PROGRAM=Deckhand`, `tools/deckhand-cli/`, `.deckhand/apps.json` and the update
-manifest's header lines.
+### The rename
+
+Deckhand used to be called pi-desk. The rename takes two releases, because Deckhand 0.1.6 and older
+update only to a bundle with the old bundle id and a signature in the old format:
+
+- **0.1.7 (the bridge).** Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
+  `tools/deckhand-cli/`, `.deckhand/apps.json`, `~/Library/Caches/deckhand/cef`,
+  `~/.config/deckhand/update.key`, `TERM_PROGRAM=Deckhand`), and the old ones still work
+  (`src/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
+  runs are set under both names (`DECKHAND_SOCKET` and `PI_DESK_SOCKET`, …; never in pi tabs, where
+  pi-kit's desk extensions would switch on), and every reader takes the new name first, then the
+  old; the scrubs drop an explicit list of Deckhand's names (both families), never every
+  `DECKHAND_` variable, so your own `DECKHAND_SIGN_IDENTITY` reaches a shell tab. The bundle ships
+  `Contents/MacOS/deckhand-cli` and a link `pi-desk-cli -> deckhand-cli` (Claude tabs started
+  before 0.1.7, and held ones, run it by that absolute path; a read-only tab's guard fails closed
+  without it), and the plugin keeps `bin/pi-desk`. The data dir is
+  `~/Library/Application Support/Deckhand` when it is there, else `…/pi-desk`, where every older
+  install keeps its data (nothing is moved yet); `.deckhand/apps.json` is read first, else
+  `.pi-desk/apps.json`. `fetch-cef.sh` moves the CEF cache once (with a link back) and
+  `release.sh` falls back to the key's old place with a warning. The bundle id stays
+  `dev.pi-desk.app` and releases are still signed in the v2 format (`pi-desk update v2`), but the
+  updater also accepts `dev.deckhand.app` and the v3 format (`deckhand update v3`), so 0.1.7 can
+  take 0.1.8. `scripts/rename-pi-desk.py` did the mechanical part (re-runnable:
+  `scripts/rename-pi-desk-rebase.sh`).
+- **0.1.8 (the flip).** The bundle id becomes `dev.deckhand.app`, releases are signed v3, and the
+  data dir moves to `…/Deckhand` (with a link from the old place). Deckhand 0.1.6 and older cannot
+  take it: they update to 0.1.7 first, or are reinstalled by hand.
+- **0.2.0, or three releases after 0.1.7, whichever is later:** the old names stop being set and
+  shipped (`PI_DESK_*` in tabs, `pi-desk-cli`, `bin/pi-desk`, `build/pi-desk`). Reading them stays.
+
+Names that keep the old product's name for good: the instance guard's look for a running
+`pi-desk.app` (and its `$TMPDIR/pi-desk-<uid>` sockets), the old Atlas prompt starters it
+recognises, the titles cache's format line and the user's own `~/pi-desk` main folder.
 
 On its first run `build.sh` also compiles the sokol C libraries (into the sokol-odin submodule
 tree), Clay, the CoreText text backend and stb_truetype (into `build/`). Clay is compiled from the

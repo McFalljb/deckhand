@@ -52,7 +52,7 @@ and protocol between releases.
 Deckhand used to be called pi-desk. pi-desk 0.1.x cannot update itself to Deckhand, so install
 Deckhand fresh: quit pi-desk (the two can't run at the same time), delete `pi-desk.app`, then
 install Deckhand as above. Your projects, sessions, settings, Atlas, jobs and Claude accounts
-carry over, because Deckhand uses the same data folder. Some internal names keep the old name on purpose; see
+carry over, because Deckhand reads the same data folder. The old names keep working; see
 [From pi-desk to Deckhand](docs/GUIDE.md#from-pi-desk-to-deckhand).
 
 ## First run

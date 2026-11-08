@@ -20,9 +20,10 @@ suggested vocabulary, not a list Deckhand checks.
 
 1. **App tab.** Deckhand starts the engine's windowless *desk host* as a child of a session, with
    `DECKHAND_SOCKET` and a single-use `DECKHAND_TOKEN` (new caller kind `app`). Control stays NDJSON
-   on Deckhand's socket; the engine is a client, like a pi tab's bridge. (pi tabs moved to
-   `DECKHAND_SOCKET`/`DECKHAND_TOKEN` with Deckhand's bundled pi integration; an app keeps
-   `DECKHAND_SOCKET`/`DECKHAND_TOKEN`, a stable interface.)
+   on Deckhand's socket; the engine is a client, like a pi tab's bridge. (`DECKHAND_SOCKET`/
+   `DECKHAND_TOKEN` are a stable interface. Until 0.2.0 an app also gets them under their names
+   from before the rename, `PI_DESK_SOCKET`/`PI_DESK_TOKEN`, which older engines read: read the
+   `DECKHAND_` names first.)
 2. **Frames over a Mach channel, not XPC.** Deckhand checks in a per-process bootstrap name
    (`bootstrap_check_in`, as Chromium's MachPortRendezvous does) and hands the
    engine its name and a 32-byte key in the hello reply. Surfaces travel as
@@ -89,8 +90,10 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
   and Home's come to the front.
 - `posix_spawn` with no PTY, in its own process group. stdout and stderr go to a 2000-line ring
   and to `<data dir>/apps/<tab_id>.log`, which the tab's **Log** button opens.
-- Env: the parent's env minus the `DECKHAND_*` and `PI_KIT_*` variables, plus `DECKHAND_SOCKET`,
-  `DECKHAND_TOKEN` (fresh, single-use, caller `app`, bound to this tab) and `DECKHAND_APP=1`.
+- Env: the parent's env minus Deckhand's own variables (the ones it sets in tabs, any old
+  `PI_DESK_*`, the test hooks: `src/env_names.odin`) and `PI_KIT_*`, plus `DECKHAND_SOCKET`,
+  `DECKHAND_TOKEN` (fresh, single-use, caller `app`, bound to this tab) and `DECKHAND_APP=1`, each
+  also under its old name (`PI_DESK_SOCKET`, `PI_DESK_TOKEN`, `PI_DESK_APP`) until 0.2.0.
 - **Owner:** the session that holds the tab. Its pi tab may drive this tab. That is the same
   exception to the self-reference rule as browser tabs (BROWSER §4.1). Atlas reaches it through
   `control`.

@@ -412,8 +412,8 @@ dev Mac, load noted per run):
 | A hung or failing scene | up to 900 s, then nothing said where | stops at its first failure; killed after 3× its time (min 120 s), with the script line it was on |
 | `./build.sh test` | 67 s (cold build; load 6 → 10) | 54 s (load 5–6); time budgets never fail it below 10× |
 
-Past commits on main, as `--changed` would select for each: of 21, 9 selected every scene
-before; 4 still do (`build.sh`, `bundle-app.sh`, or 685 lines of core files), the other 5 select
+Past commits on main, as `--changed` would select for each: of 21, 10 selected every scene
+before; 4 still do (`build.sh`, `bundle-app.sh`, or 685 lines of core files), the other 6 select
 15–44.
 
 ### What was tried and left out

@@ -9,6 +9,7 @@ import "core:math"
 import "core:strconv"
 import "core:strings"
 import "core:unicode/utf8"
+import jg "../../src/jsonguard"
 
 // A JSON string literal: quotes, backslashes and control characters escaped; invalid
 // UTF-8 becomes U+FFFD, so the output is always valid JSON on one line.
@@ -190,8 +191,10 @@ is_false :: proc(o: json.Object, k: string) -> bool {
 	return has && !v
 }
 
+// Through jg (src/jsonguard, core only): Claude Code's hook input carries what an agent wrote,
+// and core:encoding/json crashes on deep nesting and invalid UTF-8.
 parse_obj :: proc(s: string) -> (json.Object, bool) {
-	v, err := json.parse_string(s, .JSON, true)
+	v, err := jg.parse_string(s, .JSON, true)
 	if err != nil do return nil, false
 	o, ok := v.(json.Object)
 	return o, ok

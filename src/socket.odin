@@ -27,6 +27,7 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import jg "jsonguard"
 
 socket_line_max := 1 << 20 // a longer request line is an error and closes the connection
 SOCKET_HELLO_MAX :: 4096 // the same, before hello
@@ -946,6 +947,7 @@ socket_mu_free :: proc() -> bool {
 }
 TOKENS_VERSION :: 1
 TOKENS_MAX_TERMS :: 4096
+TOKENS_MAX_DEPTH :: 8 // tokens.json nests 5 deep
 TOKENS_MAX_PER_TERM :: 64
 
 // What a held terminal's process was started as (tokens.json, MAC'd).
@@ -1289,7 +1291,8 @@ tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
 	body, rok, rwhy := macfile_read(path, TOKENS_KIND, key, context.temp_allocator)
 	if !rok do return false, rwhy
 	if !json_shape_ok(body, 200_000) do return false, "too large or too deep"
-	v, jerr := json.parse_string(body, .JSON, true, context.temp_allocator)
+	// jg after the MAC and the item count: tokens_save writes 5 levels (root, terms, a term, its tokens, a token)
+	v, jerr := jg.parse_string(body, .JSON, true, context.temp_allocator, max_depth = TOKENS_MAX_DEPTH)
 	if jerr != nil do return false, "invalid JSON"
 	root, is := v.(json.Object)
 	if !is do return false, "not an object"

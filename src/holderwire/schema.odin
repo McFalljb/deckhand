@@ -5,6 +5,7 @@ package holderwire
 // never renumber, retype, remove, or add a required field to a kind that shipped.
 
 import "core:encoding/json"
+import jg "../jsonguard"
 import "core:fmt"
 import "core:strings"
 
@@ -162,8 +163,8 @@ write_fields :: proc(sb: ^strings.Builder, fields: []Field_Spec) {
 // (a shipped schema/released-holder.json). Empty: compatible.
 schema_problems :: proc(released, current: string, allocator := context.allocator) -> [dynamic]string {
 	out := make([dynamic]string, allocator)
-	rv, e1 := json.parse_string(released, .JSON, true, context.temp_allocator)
-	cv, e2 := json.parse_string(current, .JSON, true, context.temp_allocator)
+	rv, e1 := jg.parse_string(released, .JSON, true, context.temp_allocator)
+	cv, e2 := jg.parse_string(current, .JSON, true, context.temp_allocator)
 	if e1 != nil || e2 != nil {
 		append(&out, fmt.aprintf("unreadable schema (released %v, current %v)", e1, e2, allocator = allocator))
 		return out

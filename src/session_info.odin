@@ -27,6 +27,7 @@ package main
 // (pi_prompt to Atlas's tab, through its bridge).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -75,7 +76,7 @@ session_facts_read :: proc(path: string) -> (f: Session_Facts, err: string) {
 	head := string(buf[:max(n, 0)])
 	if nl := strings.index_byte(head, '\n'); nl >= 0 do head = head[:nl]
 	else if i64(n) < info.size do return f, "the session header is too long"
-	v, perr := json.parse_string(strings.trim_right(head, "\r"), .JSON, true)
+	v, perr := jg.parse_string(strings.trim_right(head, "\r"), .JSON, true)
 	obj, is_obj := v.(json.Object)
 	if perr != nil || !is_obj do return f, "the session file has no header"
 	str :: proc(o: json.Object, k: string) -> string {

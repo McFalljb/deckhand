@@ -31,6 +31,7 @@ package main
 //     status bar), and so does the setup sheet. Unknown: loaded.
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -146,7 +147,7 @@ manifest_load :: proc(dir: string) {
 				},
 			}
 			raw: Raw
-			if json.unmarshal(data, &raw, allocator = context.temp_allocator) == nil {
+			if jg.unmarshal(data, &raw, .JSON, context.temp_allocator) == nil {
 				for e in raw.extensions do append(&manifest, Pi_Extension{name = strings.clone(e.name), required = e.required, default_on = e.default_on, does = strings.clone(e.does)})
 			} else do fmt.eprintln("Deckhand: the pi integration's extensions.json is not valid JSON")
 		}

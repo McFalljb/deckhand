@@ -5,6 +5,7 @@ package main
 // pi-desk may replace itself, and whether an unpacked bundle is safe to look at.
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -112,7 +113,7 @@ release_free :: proc(r: ^Release) {
 // builds them from the tag and the expected names).
 release_parse :: proc(body: string, allocator := context.allocator) -> (r: Release, err: string) {
 	if len(body) > UPDATE_JSON_MAX do return {}, "the release answer is too big"
-	v, jerr := json.parse_string(body, .JSON, parse_integers = true, allocator = context.temp_allocator)
+	v, jerr := jg.parse_string(body, .JSON, parse_integers = true, allocator = context.temp_allocator)
 	if jerr != nil do return {}, "the release answer is not JSON"
 	o, is_obj := v.(json.Object)
 	if !is_obj do return {}, "the release answer is not an object"

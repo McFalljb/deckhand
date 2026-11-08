@@ -32,6 +32,7 @@ package main
 // and the version bar for that version (saved in <data>/claude-hints.json).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -79,7 +80,7 @@ hints_load :: proc() {
 	if p == "" do return
 	data, err := os.read_entire_file(p, context.temp_allocator)
 	if err != nil do return
-	v, jerr := json.parse(data, allocator = context.temp_allocator)
+	v, jerr := jg.parse(data, .JSON, allocator = context.temp_allocator) // hints_save writes it
 	o, ok := v.(json.Object)
 	if jerr != nil || !ok do return
 	if s, sok := o["version_dismissed"].(json.String); sok && len(s) <= 40 {

@@ -38,6 +38,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
@@ -828,7 +829,7 @@ browser_agent_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, method: cst
 	t := agent_tab_of(b.tab_id)
 	if t == nil do return false
 	if m == "Page.frameNavigated" {
-		v, err := json.parse(data[:n], .JSON, true, context.temp_allocator)
+		v, err := jg.parse(data[:n], .JSON, true, context.temp_allocator)
 		if err != nil do return false
 		frame, _ := v.(json.Object)["frame"].(json.Object)
 		if _, sub := frame["parentId"]; sub do return false
@@ -850,7 +851,7 @@ browser_agent_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, method: cst
 	// on and still wanted (after a cutoff the domains stay on until the next tick turns them off)
 	con, net := t.on_console && t.want_console, t.on_net && t.want_net
 	if t.cap_cef != cef || !(con || net) do return false
-	v, err := json.parse(data[:n], .JSON, true, context.temp_allocator)
+	v, err := jg.parse(data[:n], .JSON, true, context.temp_allocator)
 	if err != nil do return false
 	o, _ := v.(json.Object)
 	switch m {
@@ -1138,7 +1139,7 @@ op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, privat
 			}
 			return true, {error = fmt.tprintf("the page did not answer: %s", err), data = `{"code":"page_error"}`}, false
 		}
-		v, perr := json.parse_string(value, .JSON, true, context.temp_allocator)
+		v, perr := jg.parse_string(value, .JSON, true, context.temp_allocator)
 		o, is := v.(json.Object)
 		if perr != nil || !is do return true, {error = "the page's answer was not readable", data = `{"code":"page_error"}`}, false
 		if e, has := o["error"].(json.String); has do return true, {error = e, data = `{"code":"bad_args"}`}, false
@@ -1219,7 +1220,7 @@ op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, privat
 
 	// Runtime.evaluate's string result, or why not
 	eval_value :: proc(reply: string, ok: bool) -> (string, string) {
-		v, err := json.parse_string(reply, .JSON, true, context.temp_allocator)
+		v, err := jg.parse_string(reply, .JSON, true, context.temp_allocator)
 		if err != nil do return "", "unreadable reply"
 		o, _ := v.(json.Object)
 		if !ok {

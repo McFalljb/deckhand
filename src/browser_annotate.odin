@@ -36,6 +36,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -426,7 +427,7 @@ on_cef_devtools :: proc "c" (id: c.int, msg_id: c.int, ok: c.int, method: cstrin
 		if !had do return
 		delete_key(&a.pending, msg_id)
 		if ok == 0 do return
-		v, err := json.parse(data[:n], .JSON, true, context.temp_allocator)
+		v, err := jg.parse(data[:n], .JSON, true, context.temp_allocator)
 		if err != nil do return
 		o, _ := v.(json.Object)
 		#partial switch call {
@@ -450,7 +451,7 @@ on_cef_devtools :: proc "c" (id: c.int, msg_id: c.int, ok: c.int, method: cstrin
 		return
 	}
 	if string(method) != "Runtime.bindingCalled" && string(method) != "Page.frameNavigated" do return
-	v, err := json.parse(data[:n], .JSON, true, context.temp_allocator)
+	v, err := jg.parse(data[:n], .JSON, true, context.temp_allocator)
 	if err != nil do return
 	o, is_o := v.(json.Object)
 	if !is_o do return
@@ -471,7 +472,7 @@ on_cef_devtools :: proc "c" (id: c.int, msg_id: c.int, ok: c.int, method: cstrin
 	if str(o, "name") != ANNOT_BINDING do return
 	ctx, ok := int_of(o["executionContextId"])
 	if !ok do return
-	m, perr := json.parse_string(str(o, "payload"), .JSON, true, context.temp_allocator)
+	m, perr := jg.parse_string(str(o, "payload"), .JSON, true, context.temp_allocator)
 	if perr != nil do return
 	mo, is := m.(json.Object)
 	if !is do return

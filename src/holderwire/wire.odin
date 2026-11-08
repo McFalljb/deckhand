@@ -17,17 +17,18 @@ package holderwire
 import "core:encoding/endian"
 import "core:encoding/json"
 import "core:time"
-import "core:unicode/utf8"
+import jg "../jsonguard"
 
 HEADER_SIZE :: 9
 MAX_PAYLOAD :: 16 * 1024 * 1024 // INPUT, OUTPUT, TAIL and unknown kinds
 MAX_CONTROL :: 1024 * 1024 // a JSON control payload of a known kind
 
-// core:encoding/json parses recursively with no depth limit and allocas per
-// object key, so a hostile payload (100 KB of "[", or MBs of keys) overflows
-// the stack. json_shape_ok refuses those before anything parses them.
+// core:encoding/json parses recursively with no depth limit and unmarshal's
+// stack grows per object key, so a hostile payload (100 KB of "[", or MBs of
+// keys) overflows the stack. json_shape_ok refuses those before anything
+// parses them.
 JSON_MAX_DEPTH :: 32
-JSON_MAX_KEYS :: 4096 // per object: the stack cost is unmarshal's alloca per key of one object
+JSON_MAX_KEYS :: 4096 // per object: unmarshal's stack grows per key of one object
 
 // Terminal sizes the wire accepts (Deckhand's largest grid has room to spare);
 // checked on decode, before anyone converts them to u16.
@@ -353,43 +354,11 @@ size_ok :: proc(cols, rows, xpixel, ypixel: i64) -> bool {
 	return cols >= 1 && cols <= MAX_COLS && rows >= 1 && rows <= MAX_ROWS && xpixel >= 0 && xpixel <= MAX_PIXELS && ypixel >= 0 && ypixel <= MAX_PIXELS
 }
 
-// A cheap scan of JSON text: false if it nests deeper than max_depth, if
-// one object holds more than max_keys keys (counted as ':' outside strings,
-// per innermost container), if brackets close more than they open, or if a
-// string holds a raw control byte. JSON forbids those bytes, and they matter:
-// Odin's tokenizer ends a string at a raw newline and its parser carries on,
-// which would desynchronise this scan from the parser. Also false for invalid
-// UTF-8 (JSON forbids it too): the parser's unquote writes 3 bytes per bad
-// byte into a buffer sized for the input, and overruns it. Says nothing else
-// about validity; json.parse decides that after.
+// A cheap scan of JSON text before json.parse (src/jsonguard: why, and
+// what it refuses): nesting, keys per object, excess closers, raw control
+// bytes in strings, invalid UTF-8.
 json_shape_ok :: proc(b: []u8, max_depth := JSON_MAX_DEPTH, max_keys := JSON_MAX_KEYS) -> bool {
-	if !utf8.valid_string(string(b)) do return false
-	keys: [JSON_MAX_DEPTH + 1]int
-	depth := 0
-	in_str, esc := false, false
-	for c in b {
-		if in_str {
-			if c < 0x20 do return false
-			if esc do esc = false
-			else if c == '\\' do esc = true
-			else if c == '"' do in_str = false
-			continue
-		}
-		switch c {
-		case '"': in_str = true
-		case '{', '[':
-			depth += 1
-			if depth > max_depth || depth >= len(keys) do return false
-			keys[depth] = 0
-		case '}', ']':
-			depth -= 1
-			if depth < 0 do return false
-		case ':':
-			keys[depth] += 1
-			if keys[depth] > max_keys do return false
-		}
-	}
-	return true
+	return jg.shape_ok(b, max_depth, max_keys, .JSON)
 }
 
 // OUTPUT/TAIL: the start offset and the bytes (borrowed).

@@ -69,6 +69,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -1102,7 +1103,7 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 	if late do return true, code_err("timeout", ctx == 0 ? "the page is not ready (no document yet)" : "the action did not finish in time")
 	obj: json.Object
 	if have && op.stage != .File_El || have && op.stage == .File_El && strings.has_prefix(value, "{") {
-		jv, perr := json.parse_string(value, .JSON, true, context.temp_allocator)
+		jv, perr := jg.parse_string(value, .JSON, true, context.temp_allocator)
 		o, is := jv.(json.Object)
 		if perr != nil || !is do return true, code_err("page_error", "the page's answer was not readable")
 		if e, has := o["error"].(json.String); has {
@@ -1344,7 +1345,7 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 	// Runtime.evaluate's result: the string value (by value), or the object's id (object: true;
 	// a string value then is browser_act.js's error)
 	eval_reply :: proc(reply: string, ok: bool, object: bool) -> (string, string) {
-		v, err := json.parse_string(reply, .JSON, true, context.temp_allocator)
+		v, err := jg.parse_string(reply, .JSON, true, context.temp_allocator)
 		if err != nil do return "", "unreadable reply"
 		o, _ := v.(json.Object)
 		if !ok {
@@ -1468,7 +1469,7 @@ act_result :: proc(op: ^Act_Op, b: ^Browser, bt: Browser_Tab, t: ^Agent_Tab, p: 
 	fmt.sbprintf(&w, `{{"action":"%s"`, ACT_KIND_NAMES[op.kind])
 	if op.kind == .Select {
 		// browser_act.js's answer: {hit, chosen}
-		v, err := json.parse_string(op.scroll0, .JSON, true, context.temp_allocator)
+		v, err := jg.parse_string(op.scroll0, .JSON, true, context.temp_allocator)
 		o, _ := v.(json.Object)
 		if err == nil {
 			h, _ := json.marshal(o["hit"], allocator = context.temp_allocator)
@@ -1491,8 +1492,8 @@ act_result :: proc(op: ^Act_Op, b: ^Browser, bt: Browser_Tab, t: ^Agent_Tab, p: 
 		}
 		strings.write_byte(&w, ']')
 	case .Scroll:
-		v0, e0 := json.parse_string(op.scroll0, .JSON, true, context.temp_allocator)
-		v1, e1 := json.parse_string(after, .JSON, true, context.temp_allocator)
+		v0, e0 := jg.parse_string(op.scroll0, .JSON, true, context.temp_allocator)
+		v1, e1 := jg.parse_string(after, .JSON, true, context.temp_allocator)
 		o0, _ := v0.(json.Object)
 		o1, _ := v1.(json.Object)
 		if e0 == nil && e1 == nil && after != "" {

@@ -28,6 +28,7 @@ package main
 //     background (setting notify).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -521,7 +522,7 @@ last_model_change :: proc(text: string) -> string {
 // A top-level string field of a one-line JSON object (temp), or "".
 @(private = "file")
 json_field :: proc(line, key: string) -> string {
-	v, err := json.parse_string(line, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(line, .JSON, true, context.temp_allocator, max_depth = jg.MAX_DEPTH_TRANSCRIPT)
 	if err != nil do return ""
 	o, _ := v.(json.Object)
 	s, _ := o[key].(json.String)

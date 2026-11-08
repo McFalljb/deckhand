@@ -5,6 +5,7 @@ package main
 // dashes in paths are ambiguous). Titles: titles.odin (pi's rule, cached).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:mem/virtual"
 import "core:os"
 import "core:path/filepath"
@@ -353,7 +354,7 @@ header_cwd :: proc(path: string) -> string {
 	buf := read_chunk(path, SCAN_CHUNK)
 	nl := strings.index_byte(string(buf), '\n')
 	if nl < 0 do return ""
-	v, err := json.parse(buf[:nl], allocator = context.temp_allocator)
+	v, err := jg.parse(buf[:nl], .JSON, allocator = context.temp_allocator) // pi writes it (JSON.stringify)
 	if err != nil do return ""
 	obj, ok := v.(json.Object)
 	if !ok do return ""

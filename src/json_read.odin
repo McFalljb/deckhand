@@ -6,6 +6,7 @@ package main
 
 import "base:runtime"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:strings"
 import "core:unicode/utf8"
@@ -250,6 +251,7 @@ Json_Member :: struct {
 	key, raw: string,
 }
 json_members_raw :: proc(s: string, allocator := context.temp_allocator) -> (out: []Json_Member, ok: bool) {
+	if !jg.shape_ok(s, spec = .JSON) do return nil, false
 	context.allocator = context.temp_allocator // the parser's values: thrown away
 	p := json.make_parser(s, .JSON, false, context.temp_allocator)
 	if p.curr_token.kind != .Open_Brace do return nil, false
@@ -367,7 +369,7 @@ get_enum :: proc(r: ^Rd, k: string, names: [$E]string) -> E {
 	return {}
 }
 
-JSON_MAX_DEPTH :: 64
+JSON_MAX_DEPTH :: jg.MAX_DEPTH // 64
 
 // Whether s is exactly one RFC 8259 JSON value (whitespace around it only),
 // valid UTF-8, nested at most JSON_MAX_DEPTH. core:encoding/json's .JSON mode
@@ -484,34 +486,17 @@ jv_value :: proc(s: string, i: ^int, depth: int) -> bool {
 }
 
 // False if arrays/objects nest deeper than JSON_MAX_DEPTH (brackets inside
-// strings do not count). core:encoding/json recurses per level, so a line of
-// "[[[[..." would otherwise overflow the stack: check before parsing.
+// strings do not count): so callers can say "nested too deeply". The rest of
+// what the parser must not see (invalid UTF-8, raw control bytes in strings)
+// jg.parse refuses after it (src/jsonguard).
 json_depth_ok :: proc(text: string) -> bool {
-	depth := 0
-	in_str, esc := false, false
-	for i in 0 ..< len(text) {
-		b := text[i]
-		if in_str {
-			if esc do esc = false
-			else if b == '\\' do esc = true
-			else if b == '"' do in_str = false
-			continue
-		}
-		switch b {
-		case '"':      in_str = true
-		case '[', '{':
-			depth += 1
-			if depth > JSON_MAX_DEPTH do return false
-		case ']', '}': depth -= 1
-		}
-	}
-	return true
+	return jg.check(text, JSON_MAX_DEPTH, spec = .JSON) != .Too_Deep
 }
 
 // One command from its JSON text: {"type": "close_tab", "tab_id": 3, ...}.
 parse_command :: proc(text: string, allocator := context.allocator) -> (Command, string) {
 	if !json_depth_ok(text) do return nil, "JSON nested too deeply"
-	v, err := json.parse_string(text, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if err != nil do return nil, "invalid JSON"
 	cmd, cerr := command_from_value(v, allocator)
 	if cerr == "" do cerr = app_call_raw_params(&cmd, text, allocator)
@@ -764,7 +749,7 @@ Request_Msg :: struct {
 
 parse_request :: proc(line: string, allocator := context.allocator) -> (m: Request_Msg, err: string) {
 	if !json_depth_ok(line) do return {}, "JSON nested too deeply"
-	v, jerr := json.parse_string(line, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse_string(line, .JSON, true, context.temp_allocator)
 	if jerr != nil do return {}, "invalid JSON"
 	obj, ok := v.(json.Object)
 	if !ok do return {}, "a request must be a JSON object"
@@ -813,7 +798,7 @@ parse_request :: proc(line: string, allocator := context.allocator) -> (m: Reque
 // The state snapshot back into a State (for clients, tests and, later,
 // restoring a saved workspace). Runtime-only parts are not in the snapshot.
 state_from_json :: proc(text: string, allocator := context.allocator) -> (s: State, err: string) {
-	v, jerr := json.parse_string(text, .JSON, true, context.temp_allocator)
+	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return {}, "invalid JSON"
 	obj, ok := v.(json.Object)
 	if !ok do return {}, "state must be an object"

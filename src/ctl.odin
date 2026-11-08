@@ -14,6 +14,7 @@ package main
 // "ok": false. Get a token with `pi-desk --print-token script DIR`.
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -49,7 +50,7 @@ ctl_main :: proc(args: []string) -> int {
 	}
 	status := 0
 	for arg, i in rest {
-		v, err := json.parse_string(arg, .JSON, true, context.temp_allocator)
+		v, err := jg.parse_string(arg, .JSON, true, context.temp_allocator)
 		obj, is_obj := v.(json.Object)
 		if err != nil || !is_obj {
 			fmt.eprintln("deckhand --ctl: not a JSON object:", arg)

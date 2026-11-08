@@ -37,6 +37,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -256,7 +257,7 @@ rlz_off :: proc(profile: string) {
 	os.make_directory_all(dir)
 	root: json.Object
 	if data, err := os.read_entire_file(path, context.temp_allocator); err == nil {
-		v, perr := json.parse(data, .JSON, true, context.temp_allocator)
+		v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
 		if obj, ok := v.(json.Object); perr == nil && ok do root = obj
 		else {
 			fmt.println("[browser] the profile's Preferences do not parse: RLZ delay not set")

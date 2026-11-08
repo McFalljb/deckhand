@@ -18,7 +18,8 @@ and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not ye
   Windows (later; OS code is behind `src/socket_posix.odin`).
   Newline-delimited JSON (NDJSON): one UTF-8 JSON object per line, no line breaks inside.
 - Lines up to 1 MiB (4 KiB before `hello`); a longer one gets an error result and the
-  connection closes. JSON nested deeper than 64 arrays/objects gets `"JSON nested too deeply"`.
+  connection closes. JSON nested deeper than 64 arrays/objects gets `"JSON nested too deeply"`;
+  invalid UTF-8, or a raw control character inside a string, gets `"invalid JSON"`.
 - `hello` must arrive within 5 s (`"no hello in time"`, then close). At most 64 connections at
   once; more get `"too many connections"` and are closed. A malformed
   line after `hello` gets an error result (`"id": ""` if none could be read) and the connection

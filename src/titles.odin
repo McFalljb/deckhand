@@ -24,6 +24,7 @@ package main
 import "base:runtime"
 import "core:bytes"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:hash"
 import "core:os"
@@ -327,7 +328,7 @@ title_line :: proc(line: []u8, sc: ^Title_Scan) {
 	arena: runtime.Arena
 	defer runtime.arena_destroy(&arena)
 	a := runtime.arena_allocator(&arena)
-	v, err := json.parse(line, allocator = a)
+	v, err := jg.parse(line, .JSON, allocator = a, max_depth = jg.MAX_DEPTH_TRANSCRIPT, fix_utf8 = true) // a title is worth reading lossily
 	if err != nil do return // not JSON (cut off, garbage): skipped, as pi does
 	obj, _ := v.(json.Object)
 	typ, _ := obj["type"].(json.String)

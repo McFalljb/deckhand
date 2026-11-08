@@ -173,6 +173,7 @@ package main
 // the terminal with the keyboard (Home's while its pane shows).
 
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -1475,7 +1476,7 @@ script_pane_divider :: proc(args: []string) -> bool {
 // The value at a dotted path in a JSON document, as text: strings bare,
 // numbers and bools as written, "#" = length of the array/object before it.
 json_path :: proc(text, path: string) -> string {
-	v, err := json.parse_string(text, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if err != nil do return "<invalid json>"
 	p := path
 	for part in strings.split_iterator(&p, ".") {

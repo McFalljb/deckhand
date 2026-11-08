@@ -28,6 +28,7 @@ import "core:c"
 import "core:crypto"
 import "core:encoding/hex"
 import "core:encoding/json"
+import jg "jsonguard"
 import "core:fmt"
 import "core:math"
 import "core:os"
@@ -610,7 +611,7 @@ app_call_check :: proc(method, params: string) -> (error, code: string) {
 
 // Why one of app_input's events cannot go to the app ("" if it can).
 app_input_event_check :: proc(ev: string) -> string {
-	v, err := json.parse_string(ev, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(ev, .JSON, true, context.temp_allocator)
 	obj, is := v.(json.Object)
 	if err != nil || !is do return "each event must be a JSON object"
 	if _, has := obj["event"].(json.String); !has do return "each event needs \"event\""
@@ -690,7 +691,7 @@ app_result_of :: proc(line: string) -> (r: App_Result, valid: bool) {
 // A JSON string literal's value (temp), or ok=false.
 @(private = "file")
 json_string_of :: proc(raw: string) -> (string, bool) {
-	v, err := json.parse_string(raw, .JSON, true, context.temp_allocator)
+	v, err := jg.parse_string(raw, .JSON, true, context.temp_allocator)
 	s, is := v.(json.String)
 	return s, err == nil && is
 }
@@ -1583,8 +1584,9 @@ boxes_dirty: bool // atomic: new boxes arrived (redraw an inspected tab)
 // capped (none: the id). ok=false if `boxes` is not a list. Heap-owned:
 // app_boxes_free.
 app_boxes_parse :: proc(line: string) -> (out: []App_Box, ok: bool) {
-	v, err := json.parse_string(line, .JSON, true, context.temp_allocator)
-	list, is := v.(json.Object)["boxes"].(json.Array)
+	v, err := jg.parse_string(line, .JSON, true, context.temp_allocator)
+	obj, _ := v.(json.Object) // not an object (or refused: nil): no boxes, no panic
+	list, is := obj["boxes"].(json.Array)
 	if err != nil || !is do return nil, false
 	ha := runtime.heap_allocator()
 	res := make([dynamic]App_Box, 0, min(len(list), APP_BOXES_MAX), ha)
@@ -2004,7 +2006,7 @@ app_entries :: proc(cwd: string) -> []App_Entry {
 	path, _ := filepath.join({cwd, ".pi-desk", "apps.json"}, context.temp_allocator)
 	data, ok := app_json_read(path)
 	if !ok do return nil
-	v, perr := json.parse(data, .JSON, true, context.temp_allocator)
+	v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
 	if perr != nil do return nil
 	root, _ := v.(json.Object) // another shape lists nothing (an agent may have written the file)
 	list, _ := root["apps"].(json.Array)

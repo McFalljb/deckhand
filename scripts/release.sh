@@ -39,7 +39,12 @@
 #   "Developer ID Application" identity) and MACOS_CERT_PASSWORD: Developer ID signature,
 #   hardened runtime, the entitlements in scripts/entitlements/. Plus APPLE_ID, APPLE_TEAM_ID
 #   and APPLE_APP_PASSWORD (an app-specific password): notarized and stapled. Without them:
-#   signed ad hoc (as build.sh already does), not notarized; the notes say how to open it.
+#   signed with DECKHAND_SIGN_IDENTITY from the login keychain (scripts/sign.sh; default the
+#   self-signed "Deckhand Self-Signed"), as build.sh already does, not notarized; the notes say how
+#   to open it. Refused when that identity is not in the keychain (never a silent ad-hoc
+#   release: macOS would forget the users' privacy grants at the update). DECKHAND_SIGN_IDENTITY=-
+#   asks for an ad-hoc release on purpose. A "Developer ID Application: ..." identity there is
+#   signed like MACOS_CERT_P12's (hardened runtime, timestamp).
 #
 # Writes dist/deckhand-<version>-macos-arm64.zip (holding Deckhand.app), its .sha256, its .sig and
 # release-notes.md.
@@ -147,6 +152,14 @@ trap cleanup EXIT
 trap 'cleanup; exit 130' INT TERM
 
 if [ $PACKAGE = 1 ]; then
+# --- the signing identity: in the keychain, or ad hoc only when asked (scripts/sign.sh) --------
+if [ -z "${MACOS_CERT_P12:-}" ] || [ -z "${MACOS_CERT_PASSWORD:-}" ]; then
+  . scripts/sign.sh
+  DECKHAND_SIGN_REQUIRED=1
+  export DECKHAND_SIGN_REQUIRED # build.sh's bundle-app.sh signs with it too
+  sign_resolve || exit 1
+  [ "$SIGN_AS" != - ] || echo "release: DECKHAND_SIGN_IDENTITY=-: an AD-HOC release, on purpose (users are asked for their privacy grants again)" >&2
+fi
 # --- build and test ------------------------------------------------------------------
 ./build.sh test
 # the time budgets at their own limits (the perf layer: docs/TESTING.md "Timing tests"): a summary
@@ -154,7 +167,7 @@ if [ $PACKAGE = 1 ]; then
 python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
   { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
 # release build with CEF and without the test hooks (src/test_hooks.odin); bundle-app.sh lays out
-# and ad-hoc signs build/Deckhand.app
+# and signs build/Deckhand.app (scripts/sign.sh)
 DECKHAND_RELEASE=1 ./build.sh
 BUILT=build/$APP_NAME
 EXE_NAME=$(/usr/libexec/PlistBuddy -c "Print :CFBundleExecutable" "$BUILT/Contents/Info.plist" 2>/dev/null || true)
@@ -197,8 +210,9 @@ done
 SIGNED=adhoc
 NOTARIZED=0
 
-if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ]; then
+if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ] || case "${SIGN_AS:-}" in "Developer ID Application:"*) true ;; *) false ;; esac; then
   echo "release: signing with a Developer ID (hardened runtime)"
+  if [ -z "${MACOS_CERT_P12:-}" ] || [ -z "${MACOS_CERT_PASSWORD:-}" ]; then IDENTITY=$SIGN_AS; else
   # a throwaway keychain, so neither CI nor a local run touches the login keychain's identities
   KC="$TMP/signing.keychain-db"
   KC_PASS=$(openssl rand -hex 24)
@@ -214,7 +228,8 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ]; then
   security list-keychains -d user -s "$KC" $OLD_KEYCHAINS
   IDENTITY=$(security find-identity -v -p codesigning "$KC" | sed -n 's/.*"\(Developer ID Application:[^"]*\)".*/\1/p' | head -1)
   [ -n "$IDENTITY" ] || { echo "release: MACOS_CERT_P12 has no 'Developer ID Application' identity" >&2; exit 1; }
-  sign() { codesign --force --timestamp --options runtime --keychain "$KC" --sign "$IDENTITY" "$@"; }
+  fi
+  sign() { codesign --force --timestamp --options runtime ${KC:+--keychain "$KC"} --sign "$IDENTITY" "$@"; }
   # inside out: the framework's libraries, the framework, the helpers, the app (no --deep)
   for lib in "$FW/Libraries/"*.dylib; do sign "$lib"; done
   sign "$FW"
@@ -230,12 +245,13 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ]; then
   sign --entitlements scripts/entitlements/app.plist "$APP"
   SIGNED=developer-id
 else
-  echo "release: no MACOS_CERT_P12: signing ad hoc"
-  # bundle-app.sh signed the framework, the helpers and the app ad hoc; the version edits
+  echo "release: signing with \"$SIGN_AS\" (no Developer ID: not notarized; - is ad hoc)"
+  # bundle-app.sh signed the framework, the helpers and the app with it; the version edits
   # above changed the helpers' and the app's Info.plist, so those two levels are signed again
   # (inside out, no --deep; the framework is untouched and keeps its signature)
-  for h in "$APP"/Contents/Frameworks/*Helper*.app; do codesign --force --sign - "$h"; done
-  codesign --force --sign - "$APP"
+  for h in "$APP"/Contents/Frameworks/*Helper*.app; do sign_code "$h"; done
+  sign_code "$APP"
+  if [ "$SIGN_AS" != - ]; then SIGNED=self-signed; fi
 fi
 codesign --verify --deep --strict --verbose=2 "$APP"
 
@@ -286,7 +302,7 @@ ditto -c -k --keepParent "$APP" "$DIST/$NAME.zip"
   if [ $NOTARIZED = 1 ]; then
     echo "The app is signed with a Developer ID and notarized by Apple."
   else
-    echo "**This app is not signed with an Apple Developer ID or notarized** (it is signed ad hoc),"
+    echo "**This app is not signed with an Apple Developer ID or notarized** (it is $(if [ $SIGNED = adhoc ]; then echo signed ad hoc; else echo self-signed; fi)),"
     echo "so macOS refuses to open it the first time. After unzipping and moving \`$APP_NAME\` to"
     echo "Applications, either right-click it and choose **Open** (macOS 14), or open it once and then"
     echo "click **Open Anyway** in System Settings › Privacy & Security (macOS 15 and later), or clear"
@@ -295,6 +311,12 @@ ditto -c -k --keepParent "$APP" "$DIST/$NAME.zip"
     echo '```sh'
     echo "xattr -dr com.apple.quarantine /Applications/$APP_NAME"
     echo '```'
+    if [ $SIGNED = self-signed ]; then
+      echo
+      echo "Releases are self-signed with the same certificate, so macOS keeps the permissions you give"
+      echo "Deckhand (the Desktop, Documents and Downloads folders, the camera...) from one update to the"
+      echo "next. Coming from a release signed ad hoc, it asks for them once more."
+    fi
   fi
   echo
   echo "Deckhand runs your own [pi](https://www.npmjs.com/package/@earendil-works/pi-coding-agent);"

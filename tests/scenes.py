@@ -324,7 +324,7 @@ def kill_tree(pid):
 # file changes it: build/<output>.inputs)
 APP_INPUTS = ["src", "tools/pi-desk-cli", "integrations/claude-code", "integrations/pi/extensions",
               "integrations/pi/lib", "integrations/pi/skills", "integrations/pi/extensions.json",
-              "integrations/pi/package.json", "integrations/pi/README.md", "build.sh", "scripts/bundle-app.sh",
+              "integrations/pi/package.json", "integrations/pi/README.md", "build.sh", "scripts/bundle-app.sh", "scripts/sign.sh",
               "scripts/fetch-cef.sh", "scripts/check-minos.sh", "scripts/entitlements", "assets", "vendor",
               "docs/GUIDE.md", "docs/PROTOCOL.md", "tests/markdown"]
 FAKE_APP_INPUTS = ["tests/fake-app", "build.sh"]

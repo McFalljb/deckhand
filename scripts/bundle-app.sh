@@ -6,13 +6,16 @@
 #   Contents/Frameworks/Deckhand Helper[ (GPU|Renderer|Plugin|Alerts)].app   one C binary
 #   Contents/Helpers/deckhand-core                 the session holder (build/deckhand-core)
 #     (CEF finds them by the main executable's name: "<CFBundleExecutable> Helper (...).app")
-# Signed ad hoc, inside out: helpers, framework, app. No --deep, no hardened
-# runtime. The framework is copied and signed only when the pin changed;
-# later builds re-sign the helpers (tiny) and the app.
+# Signed with DECKHAND_SIGN_IDENTITY (scripts/sign.sh: the self-signed identity, else ad hoc
+# with a warning), inside out: framework, helpers, CLI, holder, app. No --deep, no hardened
+# runtime. The framework is copied only when the pin changed, and signed again only then or
+# when the identity changed; later builds re-sign the helpers (tiny) and the app.
 # Usage: scripts/bundle-app.sh CEF_DIR MACOS_MIN   (called by build.sh)
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
+. scripts/sign.sh
+sign_resolve
 CEF=$1
 MIN=$2
 APP=build/Deckhand.app
@@ -20,8 +23,9 @@ C=$APP/Contents
 FW_NAME="Chromium Embedded Framework.framework"
 VERSION=$(sed -n 's/^CEF_VERSION=//p' vendor/cef/VERSION)
 # the bundle id stays pi-desk's (docs/DEVELOPING.md): macOS keeps notification settings by it.
-# Privacy permissions (camera, microphone, location) also depend on the code signature, so an
-# ad-hoc-signed build asks for them again after each update or rebuild.
+# Privacy permissions (camera, microphone, location, folders) also depend on the code signature:
+# kept across rebuilds and updates when signed with the same certificate (scripts/sign.sh), asked
+# for again after each one when signed ad hoc.
 ID=dev.pi-desk.app
 NAME=Deckhand
 
@@ -57,7 +61,7 @@ plist() { # PATH EXECUTABLE ID NAME [LSUIElement]
       echo '  <key>NSLocationUsageDescription</key><string>A web page in a browser tab asked for your location.</string>'
       echo '  <key>NSLocationWhenInUseUsageDescription</key><string>A web page in a browser tab asked for your location.</string>'
       # the Files tab and the editor list and open folders macOS protects: it asks the user with
-      # these words (docs/GUIDE.md "The Files tab"); an ad-hoc build may ask again after each update
+      # these words (docs/GUIDE.md "The Files tab"); an ad-hoc build asks again after each update
       echo '  <key>NSDesktopFolderUsageDescription</key><string>Deckhand shows and edits files in your Desktop folder for your projects.</string>'
       echo '  <key>NSDocumentsFolderUsageDescription</key><string>Deckhand shows and edits files in your Documents folder for your projects.</string>'
       echo '  <key>NSDownloadsFolderUsageDescription</key><string>Deckhand shows and edits files in your Downloads folder for your projects.</string>'
@@ -85,9 +89,14 @@ if [ "$(cat build/.cef-bundled-version 2>/dev/null)" != "$VERSION" ] || [ ! -d "
   echo "bundling CEF $VERSION"
   rm -rf "$C/Frameworks/$FW_NAME"
   cp -cR "$CEF/Release/$FW_NAME" "$C/Frameworks/$FW_NAME"
-  codesign --force --sign - "$C/Frameworks/$FW_NAME/Libraries/"*.dylib
-  codesign --force --sign - "$C/Frameworks/$FW_NAME"
+  rm -f build/.cef-signed-as
   echo "$VERSION" > build/.cef-bundled-version
+fi
+# signed again when the identity changed (build/.cef-signed-as: which one signed it)
+if [ "$(cat build/.cef-signed-as 2>/dev/null)" != "$SIGN_AS" ]; then
+  sign_code "$C/Frameworks/$FW_NAME/Libraries/"*.dylib
+  sign_code "$C/Frameworks/$FW_NAME"
+  printf '%s\n' "$SIGN_AS" > build/.cef-signed-as
 fi
 
 # helpers: one binary, five bundles (Chromium picks them by name)
@@ -100,14 +109,14 @@ for kind in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
     cp build/cef_helper "$h/Contents/MacOS/$name"
   fi
   plist "$h/Contents/Info.plist" "$name" "$ID.helper${suffix:+.$suffix}" "$name" ui_element
-  codesign --force --sign - "$h" 2>/dev/null
+  sign_code "$h"
 done
 
 # Claude Code tabs (src/claude.odin): the CLI next to the binary (signed before the app: nested
 # code is signed inside out) and the plugin in Resources (sealed with the app's resources)
 if [ -f build/pi-desk-cli ] && [ -d build/claude-code ]; then
   cp build/pi-desk-cli "$C/MacOS/pi-desk-cli"
-  codesign --force --sign - "$C/MacOS/pi-desk-cli"
+  sign_code "$C/MacOS/pi-desk-cli"
   rm -rf "$C/Resources/claude-code"
   cp -R build/claude-code "$C/Resources/claude-code"
 fi
@@ -120,7 +129,7 @@ if [ -f build/deckhand-core ]; then
   mkdir -p "$C/Helpers"
   rm -f build/.deckhand-core.bundled
   cp build/deckhand-core build/.deckhand-core.bundled
-  codesign --force --sign - --identifier dev.deckhand.core build/.deckhand-core.bundled
+  sign_code --identifier dev.deckhand.core build/.deckhand-core.bundled
   mv -f build/.deckhand-core.bundled "$C/Helpers/deckhand-core"
 fi
 # pi tabs (src/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
@@ -129,7 +138,7 @@ if [ -d build/pi ]; then
   cp -R build/pi "$C/Resources/pi"
 fi
 
-codesign --force --sign - "$APP"
+sign_code "$APP"
 
 # build/deckhand: the command scripts and the relaunch use, environment intact; build/pi-desk is
 # the same (older scripts and pi-kit's development setups run that name)

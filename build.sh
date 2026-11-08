@@ -9,7 +9,7 @@
 #   ./build.sh scenes [ARGS]   build, then the test-mode scenes (tests/scenes.py ARGS; e.g.
 #                       --changed, --all, NAME...): docs/TESTING.md
 # With CEF (default on macOS arm64): build/Deckhand.app (the framework and the five
-# helper apps, signed ad hoc) and build/deckhand, a wrapper that execs the app's
+# helper apps, signed with DECKHAND_SIGN_IDENTITY: scripts/sign.sh) and build/deckhand, a wrapper that execs the app's
 # binary, so `build/deckhand ARGS` works as before (build/pi-desk is the same wrapper,
 # for older scripts). PI_DESK_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
@@ -21,6 +21,9 @@
 set -eu
 ROOT=$(cd "$(dirname "$0")" && pwd)
 cd "$ROOT"
+# code signing (DECKHAND_SIGN_IDENTITY, default the self-signed "Deckhand Self-Signed"; ad hoc with a
+# warning when it is not in the keychain): scripts/sign.sh, docs/DEVELOPING.md "Code signing"
+. scripts/sign.sh
 MODE=${1:-release}
 # the scenes: tests/scenes.py builds (./build.sh, ./build.sh fake-app) and runs them
 if [ "$MODE" = scenes ]; then shift; exec python3 tests/scenes.py "$@"; fi
@@ -221,19 +224,21 @@ build_pi() {
   cp integrations/pi/extensions.json integrations/pi/package.json integrations/pi/README.md build/pi/
 }
 
-# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed ad
-# hoc with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
+# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed
+# (scripts/sign.sh) with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
 # Security and CoreFoundation (an upgrade checks the new image's code: src/trust/code_darwin.odin).
 # Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
 # keeps its file (a signed binary changed in place is killed at its next page-in).
 build_core() {
   rm -f build/.deckhand-core.new
   odin build src/holder -out:build/.deckhand-core.new -o:speed -minimum-os-version:$MACOS_MIN
-  codesign -f -s - -i dev.deckhand.core build/.deckhand-core.new 2>/dev/null
+  sign_resolve
+  sign_code -i dev.deckhand.core build/.deckhand-core.new
   mv -f build/.deckhand-core.new build/deckhand-core
 }
 # test builds only: the holder with its test hooks (src/holder/keeper.odin) for the re-exec tests,
-# and the same binary signed with another identifier (the swapped binary they must refuse)
+# and the same binary signed with another identifier (the swapped binary they must refuse); ad hoc,
+# so CI and every Mac test the same thing (the checks look at the identifier, not the signer)
 build_core_hooks() {
   rm -f build/.deckhand-core-hooks.new build/.deckhand-core-swapped.new
   odin build src/holder -out:build/.deckhand-core-hooks.new -define:DECKHAND_TEST_HOOKS=true -minimum-os-version:$MACOS_MIN

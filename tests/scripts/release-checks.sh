@@ -47,7 +47,7 @@ chmod 700 "$K/shared"
 # ---- release.sh's refusals, before any build -----------------------------------------------
 R="$W/repo"
 mkdir -p "$R/scripts" "$R/src/updatesig" "$R/tools/update-sign" "$R/build" "$W/bin"
-cp scripts/release.sh "$R/scripts/"
+cp scripts/release.sh scripts/sign.sh "$R/scripts/"
 cp src/updatesig/updatesig.odin "$R/src/updatesig/"
 cp src/update_core.odin "$R/src/" # UPDATE_REPO, the repository release.sh uploads to
 cp tools/update-sign/main.odin "$R/tools/update-sign/"
@@ -104,6 +104,10 @@ refused "--repo another repository" "is not the repository the app updates from"
 if rel --version 0.5.0 --upload-only --repo someone/fork --allow-other-repo; then bad "--allow-other-repo: went ahead with no dist/"
 elif grep -q "is not the repository" "$W/out.txt"; then bad "--allow-other-repo: still refused for the repository"
 else ok "--allow-other-repo lets another repository through"; fi
+# the signing identity (scripts/sign.sh): one the keychain holds, or ad hoc only when asked (-)
+(export DECKHAND_SIGN_IDENTITY="Deckhand No Such Identity $$"; refused "a signing identity not in the keychain" "no code-signing identity" --version 0.5.0 --no-upload)
+(export DECKHAND_SIGN_IDENTITY=-; rel --version 0.5.0 --no-upload || true)
+grep -q "an AD-HOC release, on purpose" "$W/out.txt" && ok "DECKHAND_SIGN_IDENTITY=- goes on to an ad-hoc release" || bad "DECKHAND_SIGN_IDENTITY=-: $(tail -1 "$W/out.txt")"
 # the release's names come from the app's source: none there, no release
 sed -i '' '/^UPDATE_APP ::/d' "$R/src/update_core.odin"
 git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qam noapp

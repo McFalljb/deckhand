@@ -76,6 +76,9 @@ mkrelease() {
   v=$1 d="$W/rel/download/v$1" z="deckhand-$1-macos-arm64.zip"
   mkdir -p "$d" "$W/src-$v"
   mkapp "$W/src-$v" "$v"
+  # UPDATE_RELEASE_SIGN=IDENTITY: the releases signed with that certificate (the install stays ad
+  # hoc): an ad-hoc install (0.1.6 and before) updating to a self-signed one (scripts/sign.sh)
+  [ -z "${UPDATE_RELEASE_SIGN:-}" ] || codesign --force --sign "$UPDATE_RELEASE_SIGN" "$W/src-$v/Deckhand.app" 2>/dev/null
   (cd "$W/src-$v" && ditto -c -k --keepParent Deckhand.app "$d/$z")
   cd_=$(codesign -d -vvv "$W/src-$v/Deckhand.app" 2>&1 | sed -n 's/^CDHash=//p')
   build/update-sign sign "$KEY" "$v" "$d/$z" "$cd_" "$d/$z.sig" >/dev/null
@@ -114,6 +117,9 @@ v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/D
 [ "$v" = 0.1.1 ] || { echo "the fake install was not swapped to 0.1.1 (it is $v)"; fail=1; }
 [ -d "$W/install/Deckhand.app.old-0.1.0" ] || { echo "no backup of the old bundle"; fail=1; }
 codesign --verify --deep --strict "$W/install/Deckhand.app" || { echo "the installed bundle does not verify"; fail=1; }
+if [ -n "${UPDATE_RELEASE_SIGN:-}" ]; then
+  codesign -dr - "$W/install/Deckhand.app" 2>&1 | grep -q 'certificate leaf = H' || { echo "the installed bundle is not the certificate-signed release"; fail=1; }
+fi
 grep -q "update relaunch: $W/install/Deckhand.app" "$W/run1.log" || { echo "the relaunch was not logged"; fail=1; }
 # the relaunched app can start: nothing the old one started (its pi, the relaunch's sh) holds its
 # instance lock (src/instance.odin, close-on-exec); run 2 below starts on the same data dir

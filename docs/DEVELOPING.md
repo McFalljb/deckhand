@@ -69,6 +69,65 @@ archive member, from `otool -l`); after bundling it checks every Mach-O file in 
 including the CEF framework and the helpers. Anything newer than `MACOS_MIN` fails the build.
 Deckhand has not yet been run on a real macOS 14 machine.
 
+### Code signing
+
+Every build is code-signed with one identity: `SIGN_IDENTITY_DEFAULT` in `scripts/sign.sh`, which
+`build.sh`, `scripts/bundle-app.sh` and `scripts/release.sh` share. It is a self-signed
+certificate, **"Deckhand Self-Signed"**, in your login keychain. `DECKHAND_SIGN_IDENTITY=…`
+overrides it for one build (the setting lives in the script, not the environment: a shell started
+by Deckhand drops `DECKHAND_*` variables from the login environment, `src/login_env.odin`). Make
+the identity once per Mac:
+
+```sh
+scripts/make-signing-identity.sh   # RSA key + 10-year codeSigning certificate, imported for codesign
+```
+
+The private key stays in the keychain (it is made in a private temp folder, imported, and the folder
+removed). The certificate is not trusted, and need not be: `codesign` signs with it all the same,
+and nothing asks for an admin password.
+
+Why: macOS keeps privacy grants (the Desktop, Documents and Downloads folders, the camera, the
+microphone) per *designated requirement*. Signed ad hoc, that requirement is the build's CDHash
+(`designated => cdhash H"…"`), so every rebuild and every update is a stranger and asks again.
+Signed with the certificate it is the identifier plus the certificate's hash, the same for every
+build:
+
+```sh
+codesign -dr - build/Deckhand.app
+# designated => identifier "dev.pi-desk.app" and certificate leaf = H"<the certificate's SHA-1>"
+```
+
+Signed inside out, no `--deep`, no hardened runtime: the CEF framework's libraries and the
+framework (again only when the pin or the identity changed: `build/.cef-signed-as`), the five
+helpers, `pi-desk-cli`, `deckhand-core` (identifier `dev.deckhand.core`, which `holder_install`
+checks), then the app. A designated requirement of `identifier … and certificate leaf = …` is the
+default codesign makes for a self-signed certificate; none is written by hand, so a Developer ID
+gets its own default (the Apple anchor and its team) with no other change.
+
+- **Not in the keychain** (a CI runner, another Mac): `build.sh` signs ad hoc with a loud warning.
+  `DECKHAND_SIGN_IDENTITY=-` signs ad hoc on purpose, without it.
+- **A release** never falls back to ad hoc: `scripts/release.sh` stops before the build if the
+  identity is not in the keychain. `DECKHAND_SIGN_IDENTITY=- scripts/release.sh …` makes an
+  ad-hoc release on purpose (a bridge release, say); its notes then say "signed ad hoc".
+- **Another Mac** has its own certificate, so builds from there ask for the grants once more. To sign
+  everywhere with the same one, export it from Keychain Access (as a `.p12`) and import it on the
+  other Mac; never commit it.
+- **A locked login keychain** (over ssh): `security unlock-keychain` first, or sign ad hoc.
+- **Switching to an Apple Developer ID later** is the one line: `SIGN_IDENTITY_DEFAULT="Developer
+  ID Application: NAME (TEAMID)"` in `scripts/sign.sh`, with that identity in the login keychain
+  (or `DECKHAND_SIGN_IDENTITY=` the same, to try it first). `scripts/release.sh` then signs like
+  its `MACOS_CERT_P12` path (hardened runtime, timestamp, `scripts/entitlements/`) and notarizes
+  when `APPLE_ID` and the rest are set.
+  The designated requirement changes once (to the team's), so macOS asks for the grants one more
+  time at that update; the updater does not care who signed (below).
+
+The trust checks do not depend on the signer. The session holder's copy is checked for a valid
+strict signature with the identifier `dev.deckhand.core` (`holder_verify`), and peers by user
+(`src/trust`); the updater checks a new bundle's signature (`codesign --verify --deep --strict`),
+bundle id, version and the CDHash its Ed25519 `.sig` names. So an ad-hoc install (0.1.6 and
+before) updates to a self-signed release like to any other (and back); `UPDATE_RELEASE_SIGN="Deckhand
+Self-Signed" tests/scripts/update.sh` runs the update scene that way.
+
 ## Rebuilding libghostty-vt
 
 ```sh
@@ -169,9 +228,10 @@ come from the source too: the app from `UPDATE_APP` (`src/update_core.odin`), th
 
 A release, titled "Deckhand X.Y.Z", carries `deckhand-<version>-macos-arm64.zip` (holding exactly
 `Deckhand.app`), its `.sha256` and its `.sig` (below). Unless a release says it is notarized,
-the app is signed ad hoc rather than with an Apple Developer ID, so Gatekeeper refuses the first
-open (the README says how to get past that). The app is about 340 MB, mostly
-Chromium for the browser tab. The bundle carries the third-party licences in
+the app is self-signed ([Code signing](#code-signing); 0.1.6 and before were signed ad hoc)
+rather than signed with an Apple Developer ID, so Gatekeeper refuses the first open (the README
+says how to get past that); its notes say so, and that the permissions users grant last across
+self-signed updates. The app is about 340 MB, mostly Chromium for the browser tab. The bundle carries the third-party licences in
 `Contents/Resources/licenses/`.
 
 The bundle also carries the session holder, `Contents/Helpers/deckhand-core` (`src/holder/`,

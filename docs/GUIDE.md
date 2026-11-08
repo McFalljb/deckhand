@@ -869,8 +869,11 @@ screen, else of the selected project. Press ⌘⇧E again to go back to Sessions
 - **A folder that cannot be opened** shows a red line under it saying why, with **Retry**. "macOS
   needs permission" means macOS privacy protects it (Desktop, Documents, Downloads, iCloud Drive,
   removable and network volumes): allow Deckhand in **System Settings › Privacy & Security ›
-  Files and Folders** (or **Full Disk Access**), then click **Retry**. A build signed ad hoc (one
-  you built yourself) is a new app to macOS after each update or rebuild, so it may ask again.
+  Files and Folders** (or **Full Disk Access**), then click **Retry**. A self-signed release
+  (signed with one certificate, release after release) keeps what you allow across updates; coming
+  from a release signed ad hoc, macOS asks once more. A build signed ad hoc (one built without the
+  signing certificate, docs/DEVELOPING.md "Code signing") is a new app to macOS after each update or
+  rebuild, so it may ask again.
 
 ### Worktrees
 

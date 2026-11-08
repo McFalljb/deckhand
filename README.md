@@ -33,7 +33,7 @@ and protocol between releases.
    `shasum -a 256 -c deckhand-<version>-macos-arm64.zip.sha256` next to its `.sha256` file.
 2. Unzip it and move `Deckhand.app` to `/Applications`. The app is about 340 MB, mostly Chromium
    for the browser tabs.
-3. Open it the first time. Deckhand is signed ad hoc and not notarized by Apple, so Gatekeeper
+3. Open it the first time. Deckhand is not signed with an Apple Developer ID or notarized, so Gatekeeper
    blocks the first open:
    - **macOS 15 and later**: open the app, close the warning, then go to **System Settings ›
      Privacy & Security** and click **Open Anyway** next to Deckhand.

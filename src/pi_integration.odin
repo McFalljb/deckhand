@@ -299,7 +299,7 @@ pi_status_message :: proc(tab: ^Tab) -> string {
 
 pi_status_dismiss :: proc(tab: ^Tab) {
 	if tab == nil do return
-	app.redraw = true
+	window_state_changed()
 	delete(pi_dismissed)
 	pi_dismissed = strings.clone(tab.reload.version)
 }

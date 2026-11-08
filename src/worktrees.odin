@@ -531,7 +531,7 @@ wt_track :: proc(track: string) -> (ahead, behind: int, gone: bool) {
 // A worker's scan arrived (main thread). Choices of the Files tree that
 // point at a checkout no longer there are dropped (true: state changed).
 worktrees_done :: proc(c: Worktrees_Done) -> bool {
-	app.redraw = true
+	window_state_changed()
 	r: ^Wt_Repo
 	for x in wt_repos do if x.common == c.common do r = x
 	if r == nil do return false
@@ -832,7 +832,7 @@ wt_cleanup_pre :: proc(p: string) -> (main, err: string) {
 wt_cleanup_start :: proc(p, main: string, request_id: u64, remove: bool) {
 	wt_set_error(p, "")
 	wt_busy[strings.clone(p)] = remove ? .Removing : .Checking
-	app.redraw = true
+	window_state_changed()
 	Job :: struct {
 		path, main: string,
 		request_id: u64,
@@ -871,7 +871,7 @@ wt_cleanup_done :: proc(c: Worktree_Cleanup_Done) -> (r: Result, changed: bool) 
 		k, _ := delete_key(&wt_busy, c.path)
 		delete(k)
 	}
-	app.redraw = true
+	window_state_changed()
 	if c.removed {
 		fs_model_changed(c.path)
 		wt_stale(c.main)

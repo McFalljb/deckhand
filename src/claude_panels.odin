@@ -609,7 +609,7 @@ claude_panels_tick :: proc(now := time.Tick{}) {
 		if !running || time.tick_diff(w.drawn, now) < CLAUDE_PANELS_EVERY do continue
 		if _, tab, _ := find_tab(id); tab != nil {
 			render(tab, now)
-			app.redraw = true
+			window_state_changed()
 		}
 	}
 }

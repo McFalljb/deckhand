@@ -1000,7 +1000,7 @@ settings_create :: proc(path: string) {
 	}
 	res := run_command(Open_File{path = row.path}, {kind = .UI})
 	if !res.ok do sf_error = strings.clone(fmt.tprintf("%s: %s", fs_display(row.path), res.error))
-	app.redraw = true
+	window_state_changed()
 }
 
 @(private = "file")
@@ -1018,7 +1018,7 @@ settings_poll :: proc() {
 	sf_poll_at = time.tick_now()
 	if sf_look(record_only = false) {
 		settings_gen += 1
-		app.redraw = true
+		window_state_changed()
 	}
 }
 

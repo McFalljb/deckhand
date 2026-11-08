@@ -31,7 +31,7 @@ Editor_Bar :: enum u8 {
 	Goto,
 }
 
-editor_host := Tab_Host {
+editor_host := Tab_View {
 	display = .Drawn,
 	draw = proc(tab_id: u64, x, y, w, h: f32) {if e := editor_of(tab_id); e != nil do editor_draw(e, x, y, w, h)},
 }

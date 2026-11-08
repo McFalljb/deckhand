@@ -258,7 +258,7 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 	items := new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:
-		toast_show(NO_HARNESS, err = true)
+		window_toast(NO_HARNESS, err = true)
 	case 1:
 		harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")

@@ -260,7 +260,7 @@ agent_send_failed :: proc(text, why: string) -> Result {
 	if platform.set_clipboard != nil do platform.set_clipboard(text)
 	notify_failed(fmt.tprintf("Send to %s", agent_name()), fmt.tprintf("%s: copied to the clipboard", why))
 	// also on screen now: it may have waited for pi, after the menu's own outcome
-	toast_show(fmt.tprintf("Send to %s: %s: copied to the clipboard", agent_name(), why), err = true)
+	window_toast(fmt.tprintf("Send to %s: %s: copied to the clipboard", agent_name(), why), err = true)
 	return fail(fmt.tprintf("%s: copied to the clipboard", why))
 }
 

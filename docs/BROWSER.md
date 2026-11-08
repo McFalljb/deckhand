@@ -226,7 +226,7 @@ build/Deckhand.app/Contents/
   `loading`, `can_back`, `can_forward`, `blocked_popup`; (step 3) `zoom`, `crashed`,
   `devtools`, `dialog`, `permission`, `find`, `downloads` (PROTOCOL.md "Browser tabs").
 - Runtime (outside State, keyed by tab id): the CEF browser, its textures, the DevTools session.
-- `tab_host(Browser_Tab)`: `display = .Texture`; `texture` returns the tab's image; `input`
+- `tab_view(Browser_Tab)`: `display = .Texture`; `texture` returns the tab's image; `input`
   forwards (§1.2); `capture` uses `Page.captureScreenshot`; `control` answers TAB-PROTOCOL's
   `tab.*` through CDP.
 

@@ -205,7 +205,7 @@ harness_run_start :: proc(id: string) -> string {
 		return "could not start the terminal"
 	}
 	harness_run = {term_id = id_, item = strings.clone(id), action = it.action, command = strings.clone(it.command), status = .Running, started = time.tick_now(), no_sudo = strings.clone(plan.no_sudo)}
-	app.redraw = true
+	window_state_changed()
 	return ""
 }
 
@@ -237,7 +237,7 @@ harness_run_dismiss :: proc() {
 	delete(harness_run.item)
 	delete(harness_run.command)
 	harness_run = {}
-	app.redraw = true
+	window_state_changed()
 }
 
 harness_run_term :: proc() -> ^Term {
@@ -304,7 +304,7 @@ harness_run_keep_sheet :: proc() {
 	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
 	if state.focus_widget == "setup" do return
 	state.focus_widget = strings.clone("setup") // the old one is not freed: some writers set literals (Set_Focus never frees either)
-	app.redraw = true
+	window_state_changed()
 }
 
 // Whether an install holds the setup sheet (nothing moves the keyboard off it).

@@ -126,7 +126,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 		silent := claude_hooks_silent(&tab, now)
 		if silent != r.silent {
 			r.silent = silent
-			app.redraw = true
+			window_state_changed()
 		}
 	}
 	gone := make([dynamic]u64, context.temp_allocator)
@@ -226,7 +226,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 // (saved: it stays hidden after a relaunch until another old version shows).
 claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 	if tab == nil do return
-	app.redraw = true
+	window_state_changed()
 	if claude_hooks_silent(tab, now) {
 		rt_of(tab.id).dismissed = true
 		return

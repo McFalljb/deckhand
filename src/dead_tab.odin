@@ -140,7 +140,7 @@ pi_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, pick_model: bool) -> Result 
 		drop_term(tab.id)
 		if old != nil do terms[tab.id] = old
 		tab.status, tab.exit = .Exited, exit
-		toast_show(fmt.tprintf("Restart %s: could not start pi", session_where(s)), err = true)
+		window_toast(fmt.tprintf("Restart %s: could not start pi", session_where(s)), err = true)
 		return fail("could not start pi")
 	}
 	if old != nil {
@@ -239,7 +239,7 @@ dead_tab_tick :: proc(now := time.Tick{}) {
 		}
 		if time.tick_diff(n, p.deadline) > 0 do continue
 		ordered_remove(&restart_pickers, i)
-		toast_show(p.claude ? "Claude is not ready for a message: type /model in its prompt to pick a model" : "pi has not said it is ready: press Ctrl+L in its terminal to pick a model", err = true)
+		window_toast(p.claude ? "Claude is not ready for a message: type /model in its prompt to pick a model" : "pi has not said it is ready: press Ctrl+L in its terminal to pick a model", err = true)
 	}
 }
 
@@ -368,7 +368,7 @@ dead_tab_click :: proc(p: ^Pane, h: Hit_Dead_Tab) {
 	if _, is := tab.kind.(Claude_Tab); is do ui_do(Claude_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
 	else do ui_do(Pi_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
 	if state.focus_widget != "" do ui_do(Set_Focus{""}) // the keyboard goes to the new pi
-	app.redraw = true
+	window_state_changed()
 }
 
 // A dead pi or Claude tab's tooltip (its tab, its Open row): how it ended. "" = none.
@@ -398,7 +398,7 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		return {ok = true, created_id = tab.id}
 	}
 	if exit_not_found(tab.exit) && !claude_installed_now() {
-		toast_show(CLAUDE_MISSING_HINT, err = true)
+		window_toast(CLAUDE_MISSING_HINT, err = true)
 		return fail(CLAUDE_MISSING_HINT)
 	}
 	forget_confirmations_for(tab.id)
@@ -415,7 +415,7 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		drop_term(tab.id)
 		if old != nil do terms[tab.id] = old
 		tab.status, tab.exit = .Exited, exit
-		toast_show(fmt.tprintf("Restart %s: could not start Claude Code", session_where(s)), err = true)
+		window_toast(fmt.tprintf("Restart %s: could not start Claude Code", session_where(s)), err = true)
 		return fail("could not start Claude Code")
 	}
 	if old != nil {

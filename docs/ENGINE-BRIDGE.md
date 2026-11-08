@@ -62,7 +62,7 @@ suggested vocabulary, not a list Deckhand checks.
 ## 1. Process model and launch
 
 **Tab kind.** A new `App_Tab {argv, cwd, title, status, exit_code}` in a session, like a shell
-tab. `Tab_Display.Texture` and `tab_host(App_Tab)` → `app_host` (`src/app_tab.odin`).
+tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.odin`).
 
 **Starting one.**
 - Command `new_app_tab {session, name? | argv?, cwd?, title?}` → tab id. `name` names an entry in

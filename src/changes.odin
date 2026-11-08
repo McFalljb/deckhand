@@ -253,7 +253,7 @@ changes_tick :: proc() {
 		if r.loading {
 			if !r.slow && time.tick_since(r.started) >= CHANGES_SLOW {
 				r.slow = true
-				app.redraw = true
+				window_state_changed()
 			}
 			continue
 		}
@@ -302,7 +302,7 @@ changes_refresh :: proc(r: ^Changes_Repo) {
 	r.stale, r.now = true, true
 	r.gen += 1
 	r.asked = time.tick_now()
-	app.redraw = true
+	window_state_changed()
 }
 
 @(private = "file")
@@ -486,7 +486,7 @@ changes_scan_done :: proc(c: Changes_Scan_Done) {
 	r: ^Changes_Repo
 	for x in changes_repos do if x.root == c.root do r = x
 	if r == nil do return
-	app.redraw = true
+	window_state_changed()
 	r.loading, r.slow = false, false
 	r.loaded = true
 	if c.gen != r.gen do r.stale = true // a change since it started: read again after the debounce
@@ -676,7 +676,7 @@ changes_message :: proc(v: ^Changes_View, msg: string, path := "") {
 	e.refused = strings.clone(msg)
 	delete(e.path)
 	e.path = strings.clone(path != "" ? path : v.root)
-	app.redraw = true
+	window_state_changed()
 }
 
 // The rows of the list, in order (temp allocator): scope and status
@@ -743,7 +743,7 @@ changes_select :: proc(v: ^Changes_View, path: string, scope: Change_Scope, stat
 		}
 	}
 	changes_diff_start(v)
-	app.redraw = true
+	window_state_changed()
 }
 
 // Next or previous file in the list (j/k, arrows, the ◀ ▶ buttons).
@@ -1208,7 +1208,7 @@ changes_op_start :: proc(v: ^Changes_View, request_id: u64, what: string, args: 
 	delete(v.notice)
 	v.notice, v.notice_err = "", false
 	v.busy = op_busy(what)
-	app.redraw = true
+	window_state_changed()
 	Job :: struct {
 		tab_id, request_id: u64,
 		root, what, trash:  string,
@@ -1250,7 +1250,7 @@ changes_commit_start :: proc(v: ^Changes_View, request_id: u64, msg: string) {
 	delete(v.notice)
 	v.notice, v.notice_err = "", false
 	v.busy = op_busy("commit")
-	app.redraw = true
+	window_state_changed()
 	Job :: struct {
 		tab_id, request_id: u64,
 		root, msg:          string,
@@ -1326,7 +1326,7 @@ changes_op_done :: proc(c: Changes_Op_Done) -> (r: Result, changed: bool) {
 		}
 		if c.what == "commit" && err == "" do tf_set(&changes_message_field, "")
 	}
-	app.redraw = true
+	window_state_changed()
 	res := Result{ok = err == ""}
 	if err != "" do res.error = c.what == "commit" ? "git commit failed (the Changes tab shows git's output)" : err
 	emit_event(Finished_Event{request_id = c.request_id, result = res})

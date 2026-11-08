@@ -300,7 +300,7 @@ status_load :: proc(s: ^Git_Status) {
 
 // A worker's git status arrived (main thread).
 git_status_done :: proc(c: Git_Status_Done) {
-	app.redraw = true // the Files tree shows the codes
+	window_state_changed() // the Files tree shows the codes
 	s: ^Git_Status
 	for &x in fs_model.status do if x.root == c.root do s = &x
 	if s == nil do return
@@ -587,7 +587,7 @@ file_list_done :: proc(c: File_List_Done) {
 	out := make([dynamic]string)
 	for p in strings.split(c.out, "\x00", context.temp_allocator) do if p != "" do append(&out, strings.clone(p))
 	fl.list = out[:]
-	app.redraw = true
+	window_state_changed()
 }
 
 // The project's files, sorted (context allocator): git's view, else a walk.

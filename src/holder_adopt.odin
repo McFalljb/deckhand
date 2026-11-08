@@ -412,7 +412,7 @@ holder_adopt_all :: proc() {
 		fmt.eprintln("Deckhand: session holder:", kept, "terminal(s) no restored tab claims: kept running")
 		note = strings.concatenate({holder_kept_text(kept), note == "" ? "" : " ", note}, context.temp_allocator)
 	}
-	if note != "" do toast_show(note, err = true)
+	if note != "" do window_toast(note, err = true)
 }
 
 // Adopts holder terminal id into tab (its Term made now); saved: what tokens.json says it was

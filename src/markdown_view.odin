@@ -1049,7 +1049,7 @@ md_layout :: proc(v: ^Md_View, width: f32) {
 
 // ---- drawing ----
 
-markdown_host := Tab_Host {
+markdown_host := Tab_View {
 	display = .Drawn,
 	draw = proc(tab_id: u64, x, y, w, h: f32) {
 		e := editor_of(tab_id)

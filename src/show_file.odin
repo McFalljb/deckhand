@@ -144,7 +144,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 			ed_goto(e, c.line, 1)
 		}
 		if !agent do front(s, tab.id, caller)
-		app.redraw = true
+		window_state_changed()
 		return {ok = true, created_id = tab.id, data = data(kind, open_path, s.id, true)}, true
 	}
 	// at most SHOW_FILE_MAX_TABS tabs agents opened in a session
@@ -175,7 +175,7 @@ show_file_apply :: proc(c: Show_File, caller: Caller) -> (r: Result, changed: bo
 		show_agent_tabs[tab.id] = caller.tab_id
 	}
 	if !agent do front(s, tab.id, caller)
-	app.redraw = true
+	window_state_changed()
 	return {ok = true, created_id = tab.id, data = data(kind, p, s.id, false)}, true
 }
 

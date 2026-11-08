@@ -312,7 +312,7 @@ claude_disk_tick :: proc() {
 	sync.unlock(&found_cache.mu)
 	if !changed do return
 	claude_disk_rescan()
-	app.redraw = true
+	window_state_changed()
 }
 
 // Tests: waits for the worker, then makes the rows again.

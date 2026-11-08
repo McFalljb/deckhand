@@ -234,7 +234,7 @@ titles_tick :: proc() {
 			s.title_size = -1
 			s.checked = {}
 		}
-		app.redraw = true
+		window_state_changed()
 	}
 	if save do titles_save()
 	claude_disk_tick() // Claude transcripts read on its worker (claude_disk.odin)

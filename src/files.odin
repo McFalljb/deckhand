@@ -433,7 +433,7 @@ files_select_in :: proc(v: ^Files_View, path: string) {
 		v.cursor = strings.clone(path)
 	}
 	v.reveal = true
-	app.redraw = true
+	window_state_changed()
 }
 
 // The rows of the tree at root, rebuilt if anything they show changed.
@@ -643,5 +643,5 @@ files_retry :: proc(dir: string) {
 		d.stale = true
 		files_cache_gen += 1
 	}
-	app.redraw = true
+	window_state_changed()
 }

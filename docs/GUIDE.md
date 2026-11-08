@@ -1393,7 +1393,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Rescan sessions**, and, while such a tab runs, **Reload all pi tabs** and **Restart all Claude
   tabs** (see [Hot reload](#hot-reload)), **Refresh shell
   environment** (see [Where Deckhand's environment comes from](#troubleshooting): new tabs only),
-  **Keyboard shortcuts** (⌘/) and **Edit settings files…** (⌘,).
+  **Keyboard shortcuts** (⌘/), **Edit settings files…** (⌘,) and **Copy a control token** (for
+  `deckhand --ctl`: see [Updates](#updates), "Release builds").
 - **Set up Deckhand…**: the [first run](#the-first-run) sheet again (coding agents, main folder, chats).
 - **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
@@ -1433,8 +1434,12 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
 - **Later**: hides the bar until the next check finds a release.
 - **Update**: downloads the release and checks it. Nothing is replaced yet, and you can keep
   working. Then the bar says "Deckhand 0.1.1 is ready" with **Restart to update**.
-- **Restart to update**: replaces Deckhand and restarts it. While sessions, shells or jobs run,
-  Deckhand asks first: restarting stops them (sessions resume from their files afterwards).
+- **Restart to update**: replaces Deckhand and restarts it. With **Keep sessions** on, the
+  sessions the session holder keeps (pi, Claude, shells) **carry on through the update**: a pi
+  turn keeps running, and the new Deckhand shows each screen as it was. Browser pages reload, app
+  tabs restart, and running jobs stop; Deckhand asks first only when something would stop (an app
+  tab, a job, unsaved files). With it off, restarting stops every session, shell and job, and
+  Deckhand asks first while any runs (sessions resume from their files afterwards).
 
 **What is checked before anything is replaced.** The download goes into a private folder in the
 data dir. Deckhand refuses it unless its size matches the release, its SHA-256 matches the
@@ -1449,6 +1454,35 @@ update** replaces Deckhand, it checks the prepared copy once more (yours, same c
 version); a copy changed since is refused. The old app is kept as `Deckhand.app.old-<version>`
 next to the new one until Deckhand starts a second time after the update (whatever version you
 run then), which removes it.
+
+**How the sessions reach the new Deckhand.** The old Deckhand hands every kept terminal over to
+the session holder (as at a quit), and the holder gives it a one-time secret that only the new
+Deckhand may use, for one minute. A small relaunch helper takes that secret (never through the
+command line, the environment, a file or a log), waits for the old Deckhand to quit, opens the new
+one and gives the secret only to it. Until then the holder lets no other Deckhand take the
+sessions; one that starts meanwhile (another copy) says so and runs without them. If the new
+Deckhand does not come within the minute, the next Deckhand you open gets them, as after a crash.
+Kept Claude tabs keep the plugin they started with until you restart them: the plugin bar offers
+it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)).
+
+**Releases are signed ad hoc for now**, without an Apple Developer ID. Two consequences:
+
+- **Other programs running as you can control the kept sessions.** The session holder, the
+  relaunch helper and Deckhand check that the other side is you (the same macOS user), not that
+  it is Deckhand: the secrets and the signed state files guard against accidents (a stale socket,
+  another copy), not against a program of yours that sets out to type into your terminals. That
+  is close to today's position (such a program can already edit Deckhand's and Claude's settings),
+  and it ends with the Developer ID.
+- **Privacy permissions, Full Disk Access above all, may not follow an update.** macOS knows an
+  ad-hoc app by its exact code, so after each update Deckhand is a new app to it: folders under
+  Desktop, Documents or Downloads may ask again, and a **Full Disk Access** grant silently stops
+  applying. After an update, check **System Settings › Privacy & Security › Full Disk Access**,
+  remove the old Deckhand entry and add the new one.
+
+Release builds have no test or development switches: no test mode, no `PI_DESK_*` overrides of
+where data and sockets live, no `--print-token`. To drive Deckhand from a terminal, take a token
+with **Copy a control token** (the gear): it puts `export PI_DESK_SOCKET=… PI_DESK_TOKEN=…` on the
+clipboard for `deckhand --ctl` (it works until you quit Deckhand).
 
 **When Deckhand cannot replace itself**, the bar says why and offers only **Release notes**:
 when it runs from a folder you cannot write to, from a disk image, or from macOS's temporary

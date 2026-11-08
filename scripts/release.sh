@@ -7,6 +7,7 @@
 #
 # Usage: scripts/release.sh --version X.Y.Z [--no-upload | --upload-only] [--key FILE]
 #                           [--repo OWNER/NAME [--allow-other-repo]] [--rotating-from OLDPUB]
+#                           [--prev vX.Y.Z | --skip-prev-updater]
 #   --version      the version; HEAD must be exactly the tag vX.Y.Z (git describe
 #                  --exact-match), already pushed to the release repository
 #   --no-upload    a dry run: everything into dist/, no GitHub calls at all
@@ -19,6 +20,10 @@
 #   --allow-other-repo
 #                  release to a repository that is not UPDATE_REPO (a fork, a test): installed
 #                  copies never look there
+#   --prev TAG     the current release whose updater must install the new zip
+#                  (tests/scripts/update-from-release.sh; default: the latest published one, by gh)
+#   --skip-prev-updater
+#                  leave that test out (only when there is no earlier release to test with)
 #   --rotating-from OLDPUB
 #                  the key-rotation bridge release only: this checkout's UPDATE_PUBLIC_KEY is the
 #                  NEW key, and the release is signed with the OLD key (--key OLDFILE, whose
@@ -42,7 +47,7 @@ set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
 
-VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0
+VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0 SKIP_PREV=0 PREV_TAG=""
 KEY=${PI_DESK_UPDATE_KEY_FILE:-$HOME/.config/pi-desk/update.key}
 # the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
 APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
@@ -57,6 +62,8 @@ while [ $# -gt 0 ]; do
     --repo) REPO=${2:?--repo needs OWNER/NAME}; shift 2 ;;
     --rotating-from) ROTATING_FROM=${2:?--rotating-from needs the old public key}; shift 2 ;;
     --allow-other-repo) ALLOW_OTHER_REPO=1; shift ;;
+    --prev) PREV_TAG=${2:?--prev needs a tag}; shift 2 ;;
+    --skip-prev-updater) SKIP_PREV=1; shift ;;
     -h|--help) sed -n '2,/^set -eu/p' "$0" | sed '$d'; exit 0 ;;
     *) echo "release: unknown argument $1" >&2; exit 2 ;;
   esac
@@ -307,6 +314,13 @@ CHECK_CDHASH=$(codesign -d -vvv "$TMP/check/$APP_NAME" 2>&1 | sed -n 's/^CDHash=
   { echo "release: the zipped app's CDHash ($CHECK_CDHASH) is not the built one's ($CDHASH)" >&2; exit 1; }
 build/update-sign sign "$KEY" "$VERSION" "$DIST/$NAME.zip" "$CDHASH" "$DIST/$NAME.zip.sig"
 build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$NAME.zip" "$DIST/$NAME.zip.sig"
+
+# the new zip, installed by the current release's updater (its source at its tag: a release
+# binary has no fixtures to point it here; about 1-2 min). --skip-prev-updater: the first release.
+if [ $SKIP_PREV = 0 ]; then
+  tests/scripts/update-from-release.sh "$DIST/$NAME.zip" "$VERSION" ${PREV_TAG:+--prev "$PREV_TAG"} ||
+    { echo "release: the current release's updater did not install $DIST/$NAME.zip" >&2; exit 1; }
+fi
 
 echo "release: $DIST/$NAME.zip ($(du -h "$DIST/$NAME.zip" | cut -f1)), signature: $SIGNED, notarized: $NOTARIZED, update CDHash: $CDHASH"
 cat "$DIST/$NAME.zip.sha256"

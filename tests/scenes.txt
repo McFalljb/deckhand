@@ -82,7 +82,7 @@ polish              | full     | test-data             |   50 | src/palette.odin
 polish-beep         | full     | test-data             |    10 | src/textfield.odin src/term.odin src/native/platform_macos.m tests/scripts/beep.txt tests/scripts/polish.sh | tests/scripts/polish.sh tests/scripts/beep.txt
 projects            | required |                       |   20 | src/project_tidy.odin src/sidebar.odin src/ui_sidebar.odin tests/scripts/projects*
 reload              | full     |                       |   60 | src/reload.odin src/ui_reload.odin src/editor_watch.odin tests/scripts/reload.* tests/scripts/fake-bridge-reload.py
-release-checks      | full     |                       |   11 | scripts/release.sh scripts/check-release-build.sh src/test_hooks.odin tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh
+release-checks      | full     |                       |   11 | scripts/release.sh scripts/check-release-build.sh src/test_hooks.odin tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh tests/scripts/update-from-release.sh
 restore             | required | smoke                 |   20 | src/titles.odin src/home.odin tests/scripts/restore*
 run-home            | full     | test-data             |   15 | src/home.odin src/drawer.odin src/agent.odin tests/scripts/run.sh tests/scripts/home.txt | tests/scripts/run.sh tests/scripts/home.txt
 settings            | required |                       |   21 | src/settings_files.odin src/files.odin src/ui_files.odin tests/scripts/settings.*

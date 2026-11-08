@@ -78,9 +78,11 @@ pty_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16) -
 	c_cwd := strings.clone_to_cstring(cwd, context.temp_allocator)
 
 	// A close-on-exec pipe tells us whether execve worked: a successful exec
-	// closes it (read gets EOF), a failed one writes a byte first.
+	// closes it (read gets EOF), a failed one writes a byte first. Both ends
+	// close-on-exec, so no other child holds them.
 	exec_pipe: [2]c.int
 	if pipe(&exec_pipe) != 0 do return {}, false
+	fcntl(exec_pipe[0], F_SETFD, c.int(FD_CLOEXEC))
 	fcntl(exec_pipe[1], F_SETFD, c.int(FD_CLOEXEC))
 	ws := Winsize{ws_row = rows, ws_col = cols}
 	master: c.int
@@ -98,6 +100,10 @@ pty_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16) -
 		write(exec_pipe[1], &failed, 1)
 		_exit(127)
 	}
+	// The master is close-on-exec: a later child (another terminal's shell, a
+	// job, git) must not hold it, or closing this tab would not hang up its
+	// terminal. Its own child has only the slave, as 0, 1 and 2 (forkpty).
+	fcntl(master, F_SETFD, c.int(FD_CLOEXEC))
 	close(exec_pipe[1])
 	status: u8
 	exec_failed := read(exec_pipe[0], &status, 1) == 1

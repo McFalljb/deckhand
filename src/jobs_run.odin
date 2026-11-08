@@ -147,6 +147,7 @@ run_spawn :: proc(r: ^Job_Run, argv, env: []string, cwd, stderr_path: string) ->
 		posix.dup2(fds[1], 1)
 		posix.dup2(errf, 2)
 		for fd in posix.FD(3) ..< 256 do if fd != lock do posix.close(fd)
+		posix.fcntl(lock, .SETFD, i32(0)) // pi keeps the run lock (close-on-exec for every other child)
 		if posix.chdir(c_cwd) != .OK do posix._exit(126)
 		posix.execve(c_argv[0], raw_data(c_argv), raw_data(c_env))
 		posix._exit(127)
@@ -405,7 +406,9 @@ result_text :: proc(v: json.Value) -> string {
 
 // Takes the job's run lock (non-blocking); -1 when another run holds it.
 run_lock :: proc(path: string) -> c.int {
-	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.RDWR, .CREAT}, {.IRUSR, .IWUSR})
+	// close-on-exec: a shell started during the run must not keep the lock
+	// past it (run_spawn hands it to pi on purpose)
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.RDWR, .CREAT, .CLOEXEC}, {.IRUSR, .IWUSR})
 	if fd < 0 do return -1
 	if flock(c.int(fd), LOCK_EX | LOCK_NB) != 0 {
 		posix.close(fd)

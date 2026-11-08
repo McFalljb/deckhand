@@ -485,7 +485,7 @@ remove_tree :: proc(path: string) {
 		posix.unlink(cp)
 		return
 	}
-	fd := posix.open(cp, {.DIRECTORY, .NOFOLLOW})
+	fd := posix.open(cp, {.DIRECTORY, .NOFOLLOW, .CLOEXEC})
 	if fd < 0 do return
 	remove_below(fd, 0)
 	posix.rmdir(cp)

@@ -10,10 +10,12 @@ and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not ye
 
 ## 1. Transport and envelope
 
-- A Unix socket `pi-desk-<pid>.sock` (mode `0600`) in a per-user `0700` directory: macOS
-  `$TMPDIR/pi-desk-<uid>`, Linux `$XDG_RUNTIME_DIR/pi-desk` (else `/tmp/pi-desk-<uid>`);
-  `PI_DESK_RUNTIME_DIR` overrides. Deckhand refuses a directory it does not own or that is not a
-  real directory. Named pipe on Windows (later; OS code is behind `src/socket_posix.odin`).
+- A Unix socket `core.sock` (mode `0600`) in the runtime dir, `<data dir>/run` (`0700`; macOS
+  `~/Library/Application Support/pi-desk/run`); `PI_DESK_RUNTIME_DIR` overrides. The name is
+  stable (until M1 it was `pi-desk-<pid>.sock` in `$TMPDIR/pi-desk-<uid>`), so a tab that outlives
+  Deckhand keeps its `DECKHAND_SOCKET`. Deckhand refuses a directory it does not own, that is not
+  a real directory, or whose socket paths would not fit in `sun_path` (104 bytes). Named pipe on
+  Windows (later; OS code is behind `src/socket_posix.odin`).
   Newline-delimited JSON (NDJSON): one UTF-8 JSON object per line, no line breaks inside.
 - Lines up to 1 MiB (4 KiB before `hello`); a longer one gets an error result and the
   connection closes. JSON nested deeper than 64 arrays/objects gets `"JSON nested too deeply"`.

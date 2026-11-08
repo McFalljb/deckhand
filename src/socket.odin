@@ -93,19 +93,21 @@ Server :: struct {
 @(private = "file")
 srv: Server
 
-// Starts listening in `dir` (default: sock_runtime_dir). Main thread.
+// Starts listening on <dir>/core.sock (dir default: sock_runtime_dir). The name is stable, so
+// tabs that outlive this process keep their DECKHAND_SOCKET (docs/plans/background-core.md
+// §5.1); a stale one is replaced (main.odin holds core.lock first). Main thread.
 socket_start :: proc(dir := "") -> bool {
 	if srv.running do return true
 	d := dir
 	if d == "" {
-		ok: bool
-		d, ok = sock_runtime_dir(context.temp_allocator)
-		if !ok {
-			fmt.eprintln("Deckhand: control socket: unsafe or missing runtime dir", d)
+		why: string
+		d, why = sock_runtime_dir_why(context.temp_allocator)
+		if why != "" {
+			fmt.eprintln("Deckhand: control socket:", why)
 			return false
 		}
 	}
-	path := fmt.aprintf("%s/pi-desk-%d.sock", d, os.get_pid())
+	path := fmt.aprintf("%s/%s", d, CORE_SOCK)
 	fd, ok := sock_listen(path)
 	if !ok {
 		fmt.eprintln("Deckhand: control socket: cannot listen on", path)

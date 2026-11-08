@@ -244,7 +244,8 @@ case "$MODE" in
     odin test src/holderwire -out:build/holderwire-tests
     # who may talk to the holder, its launcher and the app (src/trust): pure table tests
     odin test src/trust -out:build/trust-tests
-    # the session holder (src/holder): in-process holder, a fake core over a socketpair, /bin/sh children
+    # the session holder (src/holder): an in-process holder and a fake core over a socketpair,
+    # /bin/sh children; its half of the launcher's ready handshake
     odin test src/holder -out:build/holder-tests
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)

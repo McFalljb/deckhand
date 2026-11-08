@@ -1,11 +1,15 @@
 package main
 
-// One Deckhand per data dir. At start, before anything is written there, Deckhand takes
-// <data dir>/instance.lock (flock, exclusive, non-blocking; held until the process ends). The
-// file is opened close-on-exec, so pi, shells, jobs and the update relaunch's sh never inherit
-// it and never keep a later start out. pi-desk 0.1.x takes no lock: a live pi-desk is found by
-// its control socket (<runtime dir>/pi-desk-<pid>.sock, a process whose executable is
-// pi-desk's). Either way Deckhand says so and quits (main.odin, instance_guard).
+// One Deckhand per data dir (docs/plans/background-core.md §7.6). At start, before anything is
+// written there, Deckhand takes two flocks in <data dir> (non-blocking, held until the process
+// ends): core.lock exclusive (one app per data dir) and instance.lock shared. Session holders
+// (src/holder) take instance.lock shared too, and a Deckhand from before M1 wants it exclusive,
+// so an older Deckhand is refused while this app or a holder lives, and this app is refused
+// while an older one runs. The files are opened close-on-exec, so pi, shells, jobs and the
+// update relaunch's sh never inherit them and never keep a later start out. pi-desk 0.1.x takes
+// no lock: a live pi-desk is found by its control socket in its old runtime dir
+// ($TMPDIR/pi-desk-<uid>/pi-desk-<pid>.sock, a process whose executable is pi-desk's). Either
+// way Deckhand says so and quits (main.odin, instance_guard).
 
 import "core:c"
 import "core:fmt"
@@ -15,22 +19,43 @@ import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 
+CORE_LOCK_FILE :: "core.lock"
 INSTANCE_LOCK_FILE :: "instance.lock"
+LOCK_SH :: 1
 
 // flock, LOCK_EX and LOCK_NB: jobs_run.odin's (the jobs' run locks)
 
-// The lock in dir (made 0700 if missing): its fd, or ok = false (another holds it, or the file
-// cannot be opened).
-instance_lock_take :: proc(dir: string) -> (fd: posix.FD, ok: bool) {
+// The lock file name in dir (dir made 0700 if missing), taken with op (LOCK_EX or LOCK_SH;
+// never blocks): its fd, or ok = false (a conflicting lock is held, or the file cannot be opened).
+instance_lock_take :: proc(dir, name: string, op: c.int) -> (fd: posix.FD, ok: bool) {
 	os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User})
-	p := strings.clone_to_cstring(fmt.tprintf("%s/%s", dir, INSTANCE_LOCK_FILE), context.temp_allocator)
+	p := strings.clone_to_cstring(fmt.tprintf("%s/%s", dir, name), context.temp_allocator)
 	fd = posix.open(p, {.RDWR, .CREAT, .CLOEXEC, .NOFOLLOW}, {.IRUSR, .IWUSR})
 	if fd < 0 do return -1, false
-	if flock(c.int(fd), LOCK_EX | LOCK_NB) != 0 {
+	if flock(c.int(fd), op | LOCK_NB) != 0 {
 		posix.close(fd)
 		return -1, false
 	}
 	return fd, true
+}
+
+Instance_Refusal :: enum u8 {
+	None,
+	Running, // core.lock is held: another Deckhand (M1 or later) runs with this data
+	Older, // instance.lock is held exclusive: a Deckhand from before M1
+}
+
+// The app's two locks in dir: core.lock EX, then instance.lock SH. Both or neither.
+instance_locks_take :: proc(dir: string) -> (core_fd, inst_fd: posix.FD, refused: Instance_Refusal) {
+	core_ok, inst_ok: bool
+	core_fd, core_ok = instance_lock_take(dir, CORE_LOCK_FILE, LOCK_EX)
+	if !core_ok do return -1, -1, .Running
+	inst_fd, inst_ok = instance_lock_take(dir, INSTANCE_LOCK_FILE, LOCK_SH)
+	if !inst_ok {
+		posix.close(core_fd)
+		return -1, -1, .Older
+	}
+	return core_fd, inst_fd, .None
 }
 
 instance_lock_release :: proc(fd: posix.FD) {
@@ -65,8 +90,9 @@ instance_pidesk_exe :: proc(path: string) -> bool {
 	return true
 }
 
-// What the alert says (old: the pi-desk found, or 0).
-instance_message :: proc(old: int) -> string {
+// What the alert says (old: the pi-desk found, or 0; refused: which lock was held).
+instance_message :: proc(old: int, refused := Instance_Refusal.Running) -> string {
+	if refused == .Older do return "An older Deckhand is running with the same data. Quit it first."
 	if old != 0 do return "pi-desk is running with the same data. Quit pi-desk first (and delete pi-desk.app: Deckhand replaces it), then open Deckhand again."
 	return "Deckhand is already running (or pi-desk is using the same data). Quit it first."
 }
@@ -88,19 +114,20 @@ when ODIN_OS == .Darwin {
 	instance_exe :: proc(pid: int) -> string {return ""}
 }
 
-instance_fd: posix.FD = -1
+instance_fd: posix.FD = -1 // instance.lock (SH)
+instance_core_fd: posix.FD = -1 // core.lock (EX)
 
 // At start (main.odin init), before anything is written to dir: "" = go on (the lock is held
 // until the process ends), else why not. check_old: look for a running pi-desk 0.1.x too.
 instance_guard :: proc(dir: string, check_old: bool) -> string {
 	if dir == "" do return ""
 	if check_old {
-		if rd, ok := sock_runtime_dir(context.temp_allocator); ok {
+		if rd := sock_legacy_runtime_dir(context.temp_allocator); rd != "" {
 			if old := instance_old_pidesk_find(rd, int(posix.getpid()), instance_alive, instance_exe); old != 0 do return instance_message(old)
 		}
 	}
-	fd, ok := instance_lock_take(dir)
-	if !ok do return instance_message(0)
-	instance_fd = fd
+	core_fd, inst_fd, refused := instance_locks_take(dir)
+	if refused != .None do return instance_message(0, refused)
+	instance_core_fd, instance_fd = core_fd, inst_fd
 	return ""
 }

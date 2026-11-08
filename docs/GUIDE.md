@@ -1461,8 +1461,7 @@ and setup carry over and nothing you rely on breaks. They are not leftovers to r
 - the data dir, `~/Library/Application Support/pi-desk` (see [Where it lives](#where-it-lives));
 - the `PI_DESK_*` environment variables (`PI_DESK_DATA_DIR` and the ones Deckhand sets in its tabs);
 - the `pi-desk` command in Claude tabs, an alias of `deckhand`;
-- the project file `.pi-desk/apps.json`, the default main folder `~/pi-desk`, and the control
-  socket's folder (`$TMPDIR/pi-desk-<uid>`).
+- the project file `.pi-desk/apps.json` and the default main folder `~/pi-desk`.
 
 Agents (Atlas, pi tabs) can see whether an update is available (`get_state`), but cannot check,
 download or install one: only you can.
@@ -1497,7 +1496,7 @@ Elsewhere:
 - **Your folders**: notes, jobs, memory, Atlas's prompt and chats live in the main folder (see
   below). These are yours: Deckhand's data dir above is machine-only state.
 - **Chats** run in the chats folder; their sessions are in pi's store like any other.
-- The control socket lives in a private temporary folder (`$TMPDIR/pi-desk-<uid>`).
+- The control socket lives in a private folder in the data dir (`run/core.sock`).
 
 ### Your folders
 

@@ -22,14 +22,66 @@ inst_dir :: proc(name: string) -> string {
 instance_lock_excludes :: proc(t: ^testing.T) {
 	d := inst_dir("excl")
 	defer os.remove_all(d)
-	fd, ok := instance_lock_take(d)
-	testing.expect(t, ok, "the first one takes it")
-	_, ok2 := instance_lock_take(d)
-	testing.expect(t, !ok2, "a second one does not")
-	instance_lock_release(fd)
-	fd3, ok3 := instance_lock_take(d)
-	testing.expect(t, ok3, "free again once released")
-	instance_lock_release(fd3)
+	c1, i1, r1 := instance_locks_take(d)
+	testing.expect_value(t, r1, Instance_Refusal.None)
+	_, _, r2 := instance_locks_take(d)
+	testing.expect_value(t, r2, Instance_Refusal.Running) // core.lock: one app per data dir
+	instance_lock_release(c1)
+	instance_lock_release(i1)
+	c3, i3, r3 := instance_locks_take(d)
+	testing.expect_value(t, r3, Instance_Refusal.None) // free again once released
+	instance_lock_release(c3)
+	instance_lock_release(i3)
+}
+
+// The downgrade rule (§7.6): instance.lock is SH for this app and for holders; a Deckhand from
+// before M1 takes it EX. So an EX taker fails while an SH holder lives (another fd, or a child
+// that inherited one: a holder outliving the app), SH works beside SH, and while an older app
+// holds EX this app is refused with its own message.
+@(test)
+instance_lock_shared_rule :: proc(t: ^testing.T) {
+	d := inst_dir("shared")
+	defer os.remove_all(d)
+	sh1, ok1 := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_SH)
+	testing.expect(t, ok1, "SH")
+	sh2, ok2 := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_SH)
+	testing.expect(t, ok2, "SH beside SH")
+	_, ex_ok := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_EX)
+	testing.expect(t, !ex_ok, "an older app's EX fails while SH is held")
+	instance_lock_release(sh2)
+	// a child holds it: this fd without close-on-exec, then ours closed (the open file
+	// description, and its lock, lives on in the child)
+	posix.fcntl(sh1, .SETFD, 0)
+	argv := []cstring{"/bin/sleep", "5", nil}
+	pid: posix.pid_t
+	spawned := posix.posix_spawn(&pid, "/bin/sleep", nil, nil, raw_data(argv), nil) == .NONE
+	testing.expect(t, spawned, "a child runs")
+	instance_lock_release(sh1)
+	_, ex2 := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_EX)
+	testing.expect(t, !ex2, "EX fails while a child holds SH")
+	c, i, r := instance_locks_take(d)
+	testing.expect_value(t, r, Instance_Refusal.None) // the app starts beside a holder
+	instance_lock_release(c)
+	instance_lock_release(i)
+	if spawned {
+		posix.kill(pid, .SIGKILL)
+		st: i32
+		posix.waitpid(pid, &st, {})
+	}
+	// an older app holds EX: this app is refused, and says why
+	ex, ex3 := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_EX)
+	testing.expect(t, ex3, "EX once nothing holds SH")
+	c4, i4, r4 := instance_locks_take(d)
+	testing.expect_value(t, r4, Instance_Refusal.Older)
+	testing.expect_value(t, c4, posix.FD(-1))
+	testing.expect_value(t, i4, posix.FD(-1))
+	testing.expect_value(t, instance_message(0, r4), "An older Deckhand is running with the same data. Quit it first.")
+	// and core.lock was let go with it: the next try, once the older app quit, succeeds
+	instance_lock_release(ex)
+	c5, i5, r5 := instance_locks_take(d)
+	testing.expect_value(t, r5, Instance_Refusal.None)
+	instance_lock_release(c5)
+	instance_lock_release(i5)
 }
 
 // A child started with plain posix_spawn (every open fd without close-on-exec passes) must not
@@ -38,8 +90,8 @@ instance_lock_excludes :: proc(t: ^testing.T) {
 instance_lock_not_inherited :: proc(t: ^testing.T) {
 	d := inst_dir("inherit")
 	defer os.remove_all(d)
-	fd, ok := instance_lock_take(d)
-	testing.expect(t, ok, "taken")
+	cfd, fd, r := instance_locks_take(d)
+	testing.expect_value(t, r, Instance_Refusal.None)
 	argv := []cstring{"/bin/sleep", "5", nil}
 	pid: posix.pid_t
 	spawned := posix.posix_spawn(&pid, "/bin/sleep", nil, nil, raw_data(argv), nil) == .NONE
@@ -49,11 +101,15 @@ instance_lock_not_inherited :: proc(t: ^testing.T) {
 		st: i32
 		posix.waitpid(pid, &st, {})
 	}
+	instance_lock_release(cfd)
 	instance_lock_release(fd)
 	time.sleep(50 * time.Millisecond)
-	fd2, ok2 := instance_lock_take(d)
+	ex, ok2 := instance_lock_take(d, INSTANCE_LOCK_FILE, LOCK_EX) // as an older app would
 	testing.expect(t, ok2, "the child does not hold the lock (O_CLOEXEC)")
-	if ok2 do instance_lock_release(fd2)
+	if ok2 do instance_lock_release(ex)
+	cex, ok3 := instance_lock_take(d, CORE_LOCK_FILE, LOCK_EX)
+	testing.expect(t, ok3, "nor core.lock")
+	if ok3 do instance_lock_release(cex)
 }
 
 @(private = "file")
@@ -143,7 +199,8 @@ instance_guard_whole :: proc(t: ^testing.T) {
 	testing.expect_value(t, instance_guard(data, true), "") // its leftover socket alone does not count
 	defer {
 		instance_lock_release(instance_fd)
-		instance_fd = -1
+		instance_lock_release(instance_core_fd)
+		instance_fd, instance_core_fd = -1, -1
 	}
 	fd := instance_fd
 	testing.expect(t, fd >= 0, "the lock is held")

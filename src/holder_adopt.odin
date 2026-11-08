@@ -26,6 +26,7 @@ import "core:sync"
 import "core:sys/posix"
 import "core:time"
 import gh "ghostty"
+import jg "jsonguard"
 import "trust"
 
 HANDOVER_KIND :: "handover"
@@ -57,9 +58,11 @@ Handover_File :: struct {
 // The body of a verified handover.json, checked: a JSON object of sane shape, at most
 // HOLDER_MAX_TERMS entries, each with a terminal id in 1..max u32 (unique) and a 64-hex sha256.
 // Any bad entry refuses the whole file. Pure (holder_adopt_test.odin); temp allocator.
+HANDOVER_MAX_DEPTH :: 8 // the file nests 3 deep (root, terminals, an entry)
 handover_parse :: proc(body: string) -> (f: Handover_File, ok: bool, why: string) {
 	if !json_shape_ok(body, 8 * HOLDER_MAX_TERMS + 64) do return {}, false, "shape"
-	v, perr := json.parse_string(body, .JSON, true, context.temp_allocator)
+	// jg after the MAC (handover_load) and the item count: 3 levels deep when written
+	v, perr := jg.parse_string(body, .JSON, true, context.temp_allocator, max_depth = HANDOVER_MAX_DEPTH)
 	if perr != nil do return {}, false, "not JSON"
 	root, is := v.(json.Object)
 	if !is do return {}, false, "not an object"
@@ -82,7 +85,7 @@ handover_parse :: proc(body: string) -> (f: Handover_File, ok: bool, why: string
 			if !ti || !oi || !hs || o["offset"].(json.Integer) < 0 do return {}, false, "wrong types"
 		}
 	}
-	if json.unmarshal_string(body, &f, .JSON, context.temp_allocator) != nil do return {}, false, "wrong types"
+	if jg.unmarshal_string(body, &f, .JSON, context.temp_allocator, max_depth = HANDOVER_MAX_DEPTH) != nil do return {}, false, "wrong types"
 	if len(f.terminals) > HOLDER_MAX_TERMS do return {}, false, "too many terminals"
 	seen := make(map[i64]bool, len(f.terminals), context.temp_allocator)
 	for t in f.terminals {

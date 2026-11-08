@@ -212,6 +212,8 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ]; then
     esac
   done
   sign "$APP/Contents/MacOS/pi-desk-cli" # Claude tabs' CLI (src/claude.odin)
+  # the session holder (src/holder): holder_install checks this identifier on its copy
+  if [ -f "$APP/Contents/Helpers/deckhand-core" ]; then sign --identifier dev.deckhand.core "$APP/Contents/Helpers/deckhand-core"; fi
   sign --entitlements scripts/entitlements/app.plist "$APP"
   SIGNED=developer-id
 else

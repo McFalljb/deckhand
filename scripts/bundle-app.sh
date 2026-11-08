@@ -4,6 +4,7 @@
 #   Contents/MacOS/Deckhand                        the Odin binary (already there)
 #   Contents/Frameworks/Chromium Embedded Framework.framework   APFS clone of the pinned one
 #   Contents/Frameworks/Deckhand Helper[ (GPU|Renderer|Plugin|Alerts)].app   one C binary
+#   Contents/Helpers/deckhand-core                 the session holder (build/deckhand-core)
 #     (CEF finds them by the main executable's name: "<CFBundleExecutable> Helper (...).app")
 # Signed ad hoc, inside out: helpers, framework, app. No --deep, no hardened
 # runtime. The framework is copied and signed only when the pin changed;
@@ -109,6 +110,14 @@ if [ -f build/pi-desk-cli ] && [ -d build/claude-code ]; then
   codesign --force --sign - "$C/MacOS/pi-desk-cli"
   rm -rf "$C/Resources/claude-code"
   cp -R build/claude-code "$C/Resources/claude-code"
+fi
+# the session holder (src/holder, docs/plans/background-core.md §7.1): a signed Mach-O in
+# Contents/Helpers (data files there would break the app's seal), identifier dev.deckhand.core,
+# which holder_install checks on its copy (src/holder_install.odin); signed before the app
+if [ -f build/deckhand-core ]; then
+  mkdir -p "$C/Helpers"
+  cp build/deckhand-core "$C/Helpers/deckhand-core"
+  codesign --force --sign - --identifier dev.deckhand.core "$C/Helpers/deckhand-core"
 fi
 # pi tabs (src/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
 if [ -d build/pi ]; then

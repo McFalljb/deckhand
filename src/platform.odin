@@ -44,12 +44,18 @@ clipboard_text :: proc() -> string {
 // workspace). PI_DESK_DATA_DIR overrides.
 data_dir :: proc(allocator := context.allocator) -> string {
 	if d := hook_env(.Data_Dir, allocator); d != "" do return d
-	home := data_home(TEST_HOOKS, context.temp_allocator)
+	return data_dir_under(data_home(TEST_HOOKS, context.temp_allocator), allocator)
+}
+
+// The data dir under home; "" when home is not an absolute path (never one relative to the cwd:
+// the launch then refuses to start, main.odin).
+data_dir_under :: proc(home: string, allocator := context.allocator) -> string {
+	if !strings.has_prefix(home, "/") do return ""
 	when ODIN_OS == .Darwin {
 		p, _ := filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
 	} else {
 		base := os.get_env("XDG_DATA_HOME", context.temp_allocator)
-		if base == "" do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
+		if !strings.has_prefix(base, "/") do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
 		p, _ := filepath.join({base, "pi-desk"}, allocator)
 	}
 	return p
@@ -66,9 +72,23 @@ data_home :: proc(hooks: bool, allocator := context.temp_allocator) -> string {
 
 // The home directory of the real uid's account (getpwuid_r), or "" when there is none.
 account_home :: proc(allocator := context.temp_allocator) -> string {
-	pw: posix.passwd
-	res: ^posix.passwd
-	buf: [4096]u8
-	if posix.getpwuid_r(posix.getuid(), &pw, raw_data(buf[:]), len(buf), &res) != .NONE || res == nil || pw.pw_dir == nil do return ""
-	return strings.clone(string(pw.pw_dir), allocator)
+	return account_home_with(proc(buf: []u8) -> (dir: string, err: posix.Errno) {
+		pw: posix.passwd
+		res: ^posix.passwd
+		err = posix.getpwuid_r(posix.getuid(), &pw, raw_data(buf), len(buf), &res)
+		if err != .NONE || res == nil || pw.pw_dir == nil do return "", err
+		return string(pw.pw_dir), .NONE
+	}, allocator)
+}
+
+// lookup with a buffer grown on ERANGE (up to 1 MiB); its dir, cloned, or "".
+account_home_with :: proc(lookup: proc(buf: []u8) -> (string, posix.Errno), allocator := context.temp_allocator) -> string {
+	for size := 4096; size <= 1 << 20; size *= 2 {
+		buf := make([]u8, size, context.temp_allocator)
+		dir, err := lookup(buf)
+		if err == .ERANGE do continue
+		if err != .NONE do return ""
+		return strings.clone(dir, allocator)
+	}
+	return ""
 }

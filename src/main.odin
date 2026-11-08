@@ -91,6 +91,14 @@ init :: proc "c" () {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
 	} else do home_root = data_dir()
+	if home_root == "" {
+		// no home for this account in the user database (a release build never takes $HOME):
+		// never a data dir relative to wherever Deckhand was started
+		why := "Deckhand can't find your home folder (your account has no entry in the user database), so it has nowhere to keep its files"
+		fmt.eprintln("Deckhand:", why)
+		platform_alert("Deckhand can't start", why)
+		os.exit(1)
+	}
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
 	// anything is written there; test mode looks for pi-desk only in a runtime dir of its own
 	check_old := !autotest.active || hook_env(.Runtime_Dir) != ""

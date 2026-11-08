@@ -1,0 +1,28 @@
+{
+  "wire": 1,
+  "header": "kind u8, terminal u32 LE, len u32 LE; len <= 16777216",
+  "kinds": [
+    {"name": "HELLO", "kind": 1, "frozen": true, "payload": "json", "fields": [{"name": "wire", "type": "int", "required": true}, {"name": "successor_secret", "type": "string", "required": false}]},
+    {"name": "WELCOME", "kind": 2, "frozen": true, "payload": "json", "fields": [{"name": "wire", "type": "int", "required": true}, {"name": "instance", "type": "string", "required": true}, {"name": "pid", "type": "int", "required": true}, {"name": "holder_rev", "type": "int", "required": true}, {"name": "previous", "type": "string", "required": true}, {"name": "hmac_key", "type": "string", "required": true}, {"name": "terminals", "type": "objects", "required": true, "items": [{"name": "id", "type": "int", "required": true}, {"name": "pid", "type": "int", "required": true}, {"name": "pgid", "type": "int", "required": true}, {"name": "cols", "type": "int", "required": true}, {"name": "rows", "type": "int", "required": true}, {"name": "xpixel", "type": "int", "required": true}, {"name": "ypixel", "type": "int", "required": true}, {"name": "offset", "type": "int", "required": true}, {"name": "exit", "type": "object", "required": false, "nullable": true}]}]},
+    {"name": "REFUSED", "kind": 3, "frozen": true, "payload": "json", "fields": [{"name": "code", "type": "string", "required": true}, {"name": "error", "type": "string", "required": true}]},
+    {"name": "UPGRADE", "kind": 4, "frozen": true, "payload": "json", "fields": [{"name": "path", "type": "string", "required": true}]},
+    {"name": "UPGRADE_FAILED", "kind": 5, "frozen": true, "payload": "json", "fields": [{"name": "error", "type": "string", "required": true}]},
+    {"name": "SPAWN", "kind": 16, "frozen": false, "payload": "json", "fields": [{"name": "argv", "type": "strings", "required": true}, {"name": "env", "type": "strings", "required": true}, {"name": "cwd", "type": "string", "required": true}, {"name": "cols", "type": "int", "required": true}, {"name": "rows", "type": "int", "required": true}, {"name": "xpixel", "type": "int", "required": true}, {"name": "ypixel", "type": "int", "required": true}]},
+    {"name": "SPAWNED", "kind": 17, "frozen": false, "payload": "json", "fields": [{"name": "pid", "type": "int", "required": true}, {"name": "pgid", "type": "int", "required": true}]},
+    {"name": "SPAWN_FAILED", "kind": 18, "frozen": false, "payload": "json", "fields": [{"name": "error", "type": "string", "required": true}]},
+    {"name": "INPUT", "kind": 19, "frozen": false, "payload": "raw", "fields": []},
+    {"name": "OUTPUT", "kind": 20, "frozen": false, "payload": "offset+raw", "fields": []},
+    {"name": "TAIL", "kind": 21, "frozen": false, "payload": "offset+raw", "fields": []},
+    {"name": "RESIZE", "kind": 22, "frozen": false, "payload": "json", "fields": [{"name": "cols", "type": "int", "required": true}, {"name": "rows", "type": "int", "required": true}, {"name": "xpixel", "type": "int", "required": true}, {"name": "ypixel", "type": "int", "required": true}]},
+    {"name": "SIGNAL", "kind": 23, "frozen": false, "payload": "json", "fields": [{"name": "signal", "type": "int", "required": true}, {"name": "target", "type": "string", "required": true}]},
+    {"name": "RELEASE", "kind": 24, "frozen": false, "payload": "json", "fields": []},
+    {"name": "EXITED", "kind": 25, "frozen": false, "payload": "json", "fields": [{"name": "code", "type": "int", "required": true}, {"name": "signal", "type": "int", "required": true}, {"name": "offset", "type": "int", "required": true}]},
+    {"name": "GOODBYE", "kind": 26, "frozen": false, "payload": "json", "fields": [{"name": "mode", "type": "string", "required": true}]},
+    {"name": "GOODBYE_ACK", "kind": 27, "frozen": false, "payload": "json", "fields": [{"name": "terminals", "type": "objects", "required": true, "items": [{"name": "id", "type": "int", "required": true}, {"name": "offset", "type": "int", "required": true}]}, {"name": "successor_secret", "type": "string", "required": true}]},
+    {"name": "FOREGROUND", "kind": 28, "frozen": false, "payload": "json", "fields": []},
+    {"name": "FOREGROUND_IS", "kind": 29, "frozen": false, "payload": "json", "fields": [{"name": "pgid", "type": "int", "required": true}]},
+    {"name": "PING", "kind": 30, "frozen": false, "payload": "json", "fields": []},
+    {"name": "PONG", "kind": 31, "frozen": false, "payload": "json", "fields": []},
+    {"name": "UNKNOWN", "kind": 32, "frozen": false, "payload": "json", "fields": [{"name": "kind", "type": "int", "required": true}]}
+  ]
+}

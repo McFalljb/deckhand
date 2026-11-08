@@ -51,6 +51,18 @@ token. Mode `0600`, rewritten atomically on every mint and revoke, MAC'd with th
 in-memory key (`src/macfile.odin`: a `deckhand-mac 1 tokens <hmac>` line, then the JSON): a file
 that does not verify is ignored whole.
 
+With `keep_sessions` on, a terminal tab (pi, shell, Claude, Home's pi) whose process runs in the
+session holder saves `"held": <terminal id>` (a pi tab started read-only also `"readonly":
+true`), and at a quit that hands the sessions over (`src/holder_adopt.odin`) Deckhand writes
+`<data dir>/handover/<id>.snap` (`0600`: each terminal's snapshot at the offset the holder
+acked, `src/snapshot.odin`) and `<data dir>/handover.json`, MAC'd as `handover`:
+`{"v":1,"min_reader":1,"holder":<WELCOME instance>,"boot":<kern.boottime>,"written":<unix>,
+"terminals":[{"term","offset","sha256","format","inexact"}]}`. Both are read once at the next
+launch and removed. They are used only when the MAC verifies, `min_reader` ≤ 1, `holder` is the
+attached holder's instance, `boot` is this boot and the holder says the last core said goodbye
+(`trust.handover_fresh`); each snapshot only when its sha256 matches. Otherwise the terminals are
+rebuilt from the holder's tails (`inexact`).
+
 - `projects`: projects added by hand, renamed, selected, or holding a saved session. Projects
   derived from pi's store are found again by scanning; saved entries add names and bring back
   hand-added projects (on top, in saved order). A project whose folder is gone shows as missing.
@@ -216,7 +228,12 @@ cwd (without `--resume` when no id was reported), with a new token; a Claude-onl
 main tab the same. With Claude Code no longer installed they do not start: the tab says why and
 shows as exited (docs/CLAUDE.md §1). `deckhand DIR` opening a new chat skips the restored focus.
 The terminals' text size (`settings.terminal_text_size`, saved only when not the look's) is
-replayed with the other settings, as `set_terminal_text_size`.
+replayed with the other settings, as `set_terminal_text_size`. Then, before the first layout,
+tabs with a `held` id the session holder still lists are adopted at once (not lazily): their
+terminal comes back from the handover snapshot plus the holder's tail (exact), or from the tail
+alone (`inexact` in State), and their status is `running`; replies to queries in the replayed
+bytes are dropped. Held terminals no tab claims are released (hung up). A `held` id the holder
+no longer lists restores as above.
 
 - Corrupt file, unknown `v`, not a regular file, or over 4 MB (checked before reading) → moved aside to `workspace.json.bad-<unix time>`, start
   empty. Nothing is changed before the file is validated.

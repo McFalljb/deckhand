@@ -1400,7 +1400,11 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   Deckhand quits**): off by default and not finished yet. With it on, a session holder keeps your
   tabs' programs running while Deckhand is closed, and reopening Deckhand picks them up again. Only
   you can turn it on (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
-  still guarded after reopening, it stops that tab (Restart starts it again).
+  still guarded after reopening, it stops that tab (Restart starts it again). With it on, ⌘Q
+  asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
+  Deckhand menu) quits and stops them too. Screens come back exactly after a quit; after a crash
+  they are rebuilt from what the programs printed since (the last 1 MiB). If the holder itself
+  stops, its tabs say "the session holder stopped".
 
 ## Updates
 
@@ -1653,6 +1657,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Hide Deckhand | ⌘H | |
 | Hide others | ⌥⌘H | Show all brings them back |
 | Quit Deckhand | ⌘Q | asks while sessions run |
+| Quit Deckhand and Stop All Sessions… |  | with Keep sessions on: the kept sessions stop too (asks) |
 
 **File**
 
@@ -1863,6 +1868,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Pin session, Unpin session, Hide session |  | the session on screen |
 | Sort projects (next order), Sort sessions (next order), Sort chats (next order) |  | Recent → Name → Created |
 | Quit Deckhand | ⌘Q | |
+| Quit Deckhand and Stop All Sessions… |  | the session holder's sessions too |
 | Open file… | ⌘P | |
 | Save | ⌘S | |
 | Find in file | ⌘F | |

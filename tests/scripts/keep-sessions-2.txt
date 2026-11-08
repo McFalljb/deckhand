@@ -1,0 +1,15 @@
+# Run 2 of keep-sessions.sh: the session comes back with its 7 terminals adopted from the holder
+# (keep-sessions.sh compares hashes, pids and the counter), then "Quit Deckhand and Stop All
+# Sessions" (it asks: the holder's sessions stop too).
+wait 300
+waitstate 5000 open_sessions.0.tabs.6.status running
+assert_state open_sessions.0.tabs.6.held 7
+assert_state open_sessions.0.tabs.0.status running
+wait 1500
+state_json keep-sessions-after
+dump keep-sessions-after
+screen_hashes
+ui_command {"type":"quit","stop_sessions":true}
+assert_result error needs_confirmation
+ui_command {"type":"quit","stop_sessions":true,"confirm":"$token"}
+wait 3000

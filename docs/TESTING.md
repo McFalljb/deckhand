@@ -147,6 +147,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `sidebar` | the left column: add project, pin, sort, filter, hide, dividers, restore | 35 | |
 | `agent-status` | OSC 7501 agent status for any terminal tab: handshake, dots, malformed input, unread/seen | 33 | |
 | `app-tab` | app tabs: frames over IOSurface, input, resize, stall, crash, restart | 28 | |
+| `keep-sessions` | `keep_sessions`: 6 shells and a pi kept by the session holder through a quit; relaunch adopts every terminal exactly (screen hash at handover, a reference terminal with probes), same pids, counters went on; Quit and Stop All Sessions ends the holder | 5 | |
 | `login-path` | the GUI-launch environment: bare PATH, failing shell, no pi, Nix-like PATH, Claude markers | 26 | |
 | `app-calls` | app_call under load at app start: every call finishes, hello reply first, default scale | 24 | its scale check repeats `test_scale_test.odin` |
 | `update` | self-update from local fixtures: bar, skip, download, signature check, swap, old bundle kept/removed | 24 | |

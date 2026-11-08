@@ -10,6 +10,7 @@ import "core:crypto"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:os"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -285,10 +286,19 @@ exited_while_grandchild_holds_pty :: proc(t: ^testing.T) {
 	defer fake_free(f)
 	hello(t, h, f)
 	start := time.tick_now()
-	spawn_ok(t, h, f, 1, `/bin/sleep 3 & printf bye; exit 2`)
+	// The grandchild ignores the revoke's SIGHUP (else it is gone with the terminal, and nothing
+	// is left to wait for) and outlives the bound by seconds, so a busy machine cannot blur the two.
+	tmp := strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")
+	pidf := fmt.tprintf("%s/grandchild-%d.pid", tmp, posix.getpid())
+	defer os.remove(pidf)
+	defer {
+		b, _ := os.read_entire_file(pidf, context.temp_allocator)
+		if pid, pok := strconv.parse_int(strings.trim_space(string(b))); pok && pid > 1 do kill(c.int(pid), SIGKILL)
+	}
+	spawn_ok(t, h, f, 1, fmt.tprintf(`(trap '' HUP; exec /bin/sleep 30) & echo $! > %s; printf bye; exit 2`, pidf))
 	e, ok := exited_of(t, h, f, 1)
-	testing.expect(t, ok)
-	testing.expect(t, time.tick_since(start) < 2 * time.Second, "EXITED waited for the grandchild")
+	testing.expect(t, ok, "no EXITED while the grandchild runs")
+	testing.expectf(t, time.tick_since(start) < 10 * time.Second, "EXITED waited for the grandchild (%v)", time.tick_since(start))
 	testing.expect_value(t, e.code, 2)
 	out := output_of(t, f, 1)
 	testing.expect_value(t, out, "bye")
@@ -526,14 +536,16 @@ handover_then_second_core :: proc(t: ^testing.T) {
 @(test)
 refused_and_ping_timeout :: proc(t: ^testing.T) {
 	cfg := test_cfg()
-	cfg.pong_timeout = 150 * time.Millisecond
+	// pings every 40 ms keep a for twice the timeout; b and c2 then take milliseconds of it. The
+	// timeout is long enough that a loaded runner's stall between two steps cannot pass it.
+	cfg.pong_timeout = time.Second
 	h := new_test_holder(t, cfg)
 	defer holder_free(h, true)
 	a := fake_connect(t, h)
 	defer fake_free(a)
 	hello(t, h, a)
 	start := time.tick_now()
-	for time.tick_since(start) < 300 * time.Millisecond {
+	for time.tick_since(start) < 2 * cfg.pong_timeout {
 		fake_send(a, .Ping, 0, holderwire.Empty{})
 		_, ok := wait_for(h, a, .Pong)
 		testing.expect(t, ok)
@@ -559,7 +571,7 @@ refused_and_ping_timeout :: proc(t: ^testing.T) {
 	testing.expect(t, wait_eof(h, c2))
 
 	// a falls silent
-	testing.expect(t, wait_eof(h, a, time.Second), "a silent core was not dropped")
+	testing.expect(t, wait_eof(h, a, 10 * time.Second), "a silent core was not dropped")
 	testing.expect(t, h.core == nil)
 	d := fake_connect(t, h)
 	defer fake_free(d)
@@ -630,8 +642,14 @@ goodbye_shutdown :: proc(t: ^testing.T) {
 	testing.expect_value(t, h.exit_code, 0)
 	testing.expect(t, h.terms[0].reaped)
 	testing.expect(t, kill(c.int(s.pid), 0) != 0)
-	fake_read(f)
-	testing.expect(t, f.eof)
+	// closed by now; read until the EOF shows (a process another test forks at that moment can
+	// hold a copy of the fd for a while: not one read, on a busy machine)
+	start = time.tick_now()
+	for !f.eof && time.tick_since(start) < 5 * time.Second {
+		fake_read(f)
+		if !f.eof do time.sleep(time.Millisecond)
+	}
+	testing.expect(t, f.eof, "the core's connection is still open after shutdown")
 }
 
 // A run dir of the test's own (0700), for a holder that listens. Removed by the caller (rmdir).
@@ -841,7 +859,9 @@ spawn_blocked_before_exec :: proc(t: ^testing.T) {
 	defer close(gate[0])
 	defer close(gate[1])
 	cfg := test_cfg()
-	cfg.spawn_timeout = 400 * time.Millisecond
+	// far past the PONG bound below while the first spawn waits (a loop that blocked until the
+	// spawn timed out would miss it by seconds, however busy the machine); 400 ms for the second
+	cfg.spawn_timeout = 10 * time.Second
 	cfg.test_spawn_gate = gate[0]
 	h := new_test_holder(t, cfg)
 	defer holder_free(h, true)
@@ -852,9 +872,9 @@ spawn_blocked_before_exec :: proc(t: ^testing.T) {
 	fake_input(f, 1, "early\n")
 	start := time.tick_now()
 	fake_send(f, .Ping, 0, holderwire.Empty{})
-	_, pong := wait_for(h, f, .Pong, 0, timeout = time.Second)
+	_, pong := wait_for(h, f, .Pong, 0, timeout = 5 * time.Second)
 	testing.expect(t, pong, "no PONG while a SPAWN waits for its exec")
-	testing.expect(t, time.tick_since(start) < 500 * time.Millisecond)
+	testing.expectf(t, time.tick_since(start) < 5 * time.Second, "PONG after %v", time.tick_since(start))
 	for g in f.frames do testing.expect(t, g.kind != .Spawned, "SPAWNED before the exec")
 	// let it exec
 	b: u8 = 1
@@ -863,8 +883,9 @@ spawn_blocked_before_exec :: proc(t: ^testing.T) {
 	testing.expect(t, spawned, "no SPAWNED after the exec")
 	testing.expect(t, wait_output(t, h, f, 1, "got:early"), "INPUT before SPAWNED was lost")
 	// never released: SPAWN_FAILED after spawn_timeout, the child is killed and reaped
+	h.cfg.spawn_timeout = 400 * time.Millisecond
 	sh_spawn(f, 2, "exit 0")
-	g, failed := wait_for(h, f, .Spawn_Failed, 2, timeout = 2 * time.Second)
+	g, failed := wait_for(h, f, .Spawn_Failed, 2, timeout = 10 * time.Second)
 	m: holderwire.Spawn_Failed
 	testing.expect(t, failed && decode_got(g, .Spawn_Failed, &m), "no SPAWN_FAILED for a spawn that never execs")
 	testing.expectf(t, strings.contains(m.error, "timed out"), "error: %q", m.error)
@@ -885,15 +906,25 @@ hello_deadline_and_early_headers :: proc(t: ^testing.T) {
 	defer fake_free(a)
 	hdr := make([dynamic]u8, context.temp_allocator)
 	holderwire.put_header(&hdr, u8(holderwire.Kind.Hello), 0, 100)
+	// One byte per 30 ms pump: the trickle lasts at least 109 * 30 ms (3.27 s), however busy the
+	// machine, against a 300 ms deadline. Dropped while it still trickles is the deadline from
+	// accept; a deadline that each byte pushed back would drop it only after the trickle stopped.
+	// (No wall-clock bound: a loaded runner stretches every pump, not the order of the two.)
+	TRICKLE :: 9 + 100
 	start := time.tick_now()
-	for i := 0; !a.eof && time.tick_since(start) < 2 * time.Second; i += 1 {
-		if i < len(hdr) do fake_write(a, hdr[i:i + 1])
-		else if i < len(hdr) + 100 do fake_write(a, transmute([]u8)string(" "))
+	sent := 0
+	for !a.eof && sent < TRICKLE && time.tick_since(start) < 30 * time.Second {
+		if sent < len(hdr) do fake_write(a, hdr[sent:sent + 1])
+		else do fake_write(a, transmute([]u8)string(" "))
+		sent += 1
 		pump(h, 30 * time.Millisecond, a)
 	}
-	testing.expect(t, a.eof, "a trickling connection was kept open")
-	testing.expectf(t, time.tick_since(start) < 700 * time.Millisecond, "dropped after %v", time.tick_since(start))
+	testing.expectf(t, a.eof, "a trickling connection was kept open (%d bytes over %v)", sent, time.tick_since(start))
+	testing.expectf(t, sent < TRICKLE, "dropped only once the trickle stopped (%v): each byte pushed the deadline back", time.tick_since(start))
 
+	// Refused on the header alone, not at the deadline: with it an hour away, a drop at all is the
+	// refusal (no time bound to miss on a busy machine).
+	h.cfg.hello_timeout = time.Hour
 	for kind in ([]u8{u8(holderwire.Kind.Input), u8(holderwire.Kind.Hello)}) {
 		b := fake_connect(t, h)
 		defer fake_free(b)
@@ -902,9 +933,7 @@ hello_deadline_and_early_headers :: proc(t: ^testing.T) {
 		holderwire.put_header(&raw, kind, 1, int(size))
 		append(&raw, ..make([]u8, 1000, context.temp_allocator))
 		fake_write(b, raw[:])
-		t0 := time.tick_now()
-		testing.expectf(t, wait_eof(h, b, time.Second), "kind %d: not dropped", kind)
-		testing.expectf(t, time.tick_since(t0) < 200 * time.Millisecond, "kind %d: dropped only after %v", kind, time.tick_since(t0))
+		testing.expectf(t, wait_eof(h, b, 10 * time.Second), "kind %d: not dropped", kind)
 	}
 }
 

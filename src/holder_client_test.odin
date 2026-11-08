@@ -641,14 +641,132 @@ holder_hangup_rescanned :: proc(t: ^testing.T) {
 	testing.expect(t, !hc.tried, "the start is used up: a holder is never launched this run")
 }
 
-// An upgrade only goes up (§7.3); a holder that never said its rev is not upgraded.
+// An upgrade only goes up (§7.3); a holder that never said its rev is not upgraded, nor one that
+// cannot upgrade at all: rev 1 (before UPGRADE existed) or an upgrade's keeper (it never exec'd).
 @(test)
 holder_rev_order :: proc(t: ^testing.T) {
-	testing.expect(t, holder_rev_older(1, 2))
-	testing.expect(t, !holder_rev_older(2, 2))
-	testing.expect(t, !holder_rev_older(3, 2)) // never down
-	testing.expect(t, !holder_rev_older(0, 2))
-	testing.expect(t, !holder_rev_older(-1, 2))
+	cases := []struct {
+		running, bundled: i64,
+		keeper, want:     bool,
+	} {
+		{2, 3, false, true},
+		{2, 2, false, false},
+		{3, 2, false, false}, // never down
+		{1, 2, false, false}, // rev 1 answers "does not upgrade yet": not asked
+		{0, 2, false, false},
+		{-1, 2, false, false},
+		{2, 3, true, false}, // a keeper serves: it ends with its sessions
+	}
+	for c, i in cases do testing.expectf(t, holder_upgradable(c.running, c.bundled, c.keeper) == c.want, "case %d", i)
+}
+
+// What the palette's Restart says: an adoption says degraded, a slow outcome never claims "as
+// before" (it may still succeed, or the keeper may have the sessions).
+@(test)
+holder_restart_texts :: proc(t: ^testing.T) {
+	m, e := holder_restart_text({ok = true, holder_rev = 2})
+	testing.expect(t, !e && strings.contains(m, "every session kept"), m)
+	m, e = holder_restart_text({adopted = true, error = "x"})
+	testing.expect(t, e && strings.contains(m, "degraded"), m)
+	m, e = holder_restart_text({timed_out = true, error = "slow"})
+	testing.expect(t, e && !strings.contains(m, "as before") && strings.contains(m, "still"), m)
+	m, e = holder_restart_text({error = "refused"})
+	testing.expect(t, e && strings.contains(m, "as before"), m)
+	m, e = holder_restart_text({lost = true, error = "gone"})
+	testing.expect(t, e && strings.contains(m, "lost"), m)
+}
+
+// A SPAWN while an upgrade runs fails at once (the tab starts directly), never queued behind it:
+// queued, it blocked the main thread for the whole spawn wait, and the holder later ran it too.
+@(test)
+holder_spawn_during_upgrade_fails_fast :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	if !testing.expect(t, holder_wanted(), "attached") do return
+	sync.lock(&hc.wmu)
+	hc.upgrading = true
+	sync.unlock(&hc.wmu)
+	start := time.tick_now()
+	_, ok := holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
+	took := time.tick_since(start)
+	sync.lock(&hc.wmu)
+	queued := len(hc.pending)
+	hc.upgrading = false
+	clear(&hc.pending)
+	sync.unlock(&hc.wmu)
+	testing.expect(t, !ok, "spawned while upgrading")
+	testing.expectf(t, took < time.Second, "the spawn waited %v", took)
+	testing.expect_value(t, queued, 0)
+}
+
+// Quit while an upgrade has not finished: no GOODBYE into it (it would go to the old image's
+// closed socket and the handover be lost): after a bounded wait, which keeps pulling output,
+// the app leaves crash-style (the holder keeps every terminal, restored from the tails).
+@(test)
+holder_goodbye_during_upgrade_leaves :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	if !testing.expect(t, holder_wanted(), "attached") do return
+	was := holder_quit_upgrade_wait
+	holder_quit_upgrade_wait = 300 * time.Millisecond
+	defer holder_quit_upgrade_wait = was
+	sync.lock(&hc.wmu)
+	hc.upgrading = true
+	sync.unlock(&hc.wmu)
+	@(static) pumped: int
+	pumped = 0
+	start := time.tick_now()
+	sent := holder_goodbye("handover", proc(_: rawptr) {pumped += 1})
+	took := time.tick_since(start)
+	testing.expect(t, !sent, "a GOODBYE went out mid-upgrade")
+	testing.expectf(t, took < 2 * time.Second, "quit waited %v", took)
+	testing.expect(t, hc.handed && hc.handover, "not left crash-style (holder_leave)")
+	testing.expect(t, pumped > 0, "output was not pulled while it waited")
+	wait_until(200, proc() -> bool {return false})
+	testing.expect_value(t, fake_holder_count(&f, .Goodbye), 0)
+	sync.lock(&hc.wmu)
+	hc.upgrading = false
+	sync.unlock(&hc.wmu)
+}
+
+// The upgrade's outcome is in, but the frames held back during it are not sent yet: a GOODBYE
+// waits for them (a queued RELEASE must reach the holder first, or it keeps a closed tab's
+// process as a kept session).
+@(test)
+holder_goodbye_after_pending :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	if !testing.expect(t, holder_wanted(), "attached") do return
+	rel := make([dynamic]u8, context.temp_allocator)
+	hw.encode(&rel, .Release, 9, hw.Empty{})
+	sync.lock(&hc.wmu)
+	hc.upgrading = true
+	append(&hc.pending, ..rel[:])
+	sync.unlock(&hc.wmu)
+	sync.lock(&hc.mu)
+	hc.up_done = true // the reattach set the outcome; upgrade_release has not run yet
+	sync.unlock(&hc.mu)
+	th := thread.create_and_start(proc() {
+		time.sleep(150 * time.Millisecond)
+		upgrade_release()
+	})
+	defer thread.destroy(th)
+	testing.expect(t, holder_goodbye("shutdown"), "no GOODBYE")
+	thread.join(th)
+	wait_until(500, proc() -> bool {return false})
+	got := fake_holder_got(&f)
+	ri, gi := -1, -1
+	for g, i in got {
+		if g.kind == .Release && g.terminal == 9 && ri < 0 do ri = i
+		if g.kind == .Goodbye && gi < 0 do gi = i
+	}
+	testing.expectf(t, ri >= 0 && gi > ri, "RELEASE at %d, GOODBYE at %d: the GOODBYE overtook it", ri, gi)
 }
 
 // Exit codes from the wire: -1 is unknown (an orphan that ended before its keeper watched it).

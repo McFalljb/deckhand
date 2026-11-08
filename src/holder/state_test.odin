@@ -74,6 +74,11 @@ state_refuses_bad_blobs :: proc(t: ^testing.T) {
 	copy(bad, blob[:])
 	bad[4] = 99 // a newer state version
 	try(t, bad, fds[:], "too new")
+	// a terminal flag this holder does not know (a newer image's): refused, not dropped
+	at := 8 + (4 + len(h.instance)) + 32 + (4 + len(h.cfg.run_dir)) + (4 + len(h.cfg.data_dir)) + (4 + len(h.sock_path)) + 12 + 28
+	copy(bad, blob[:])
+	bad[at] |= 0x80
+	try(t, bad, fds[:], "an unknown terminal flag")
 	// a pipe where a PTY master belongs
 	p: [2]c.int
 	pipe(&p)

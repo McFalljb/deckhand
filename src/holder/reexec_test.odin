@@ -18,6 +18,10 @@ package holder
 //                             (degraded) and reports their exit codes
 //   reexec_new_image_killed   the new image dies after taking the state, before DONE: the keeper
 //                             keeps the terminals, exit codes included
+//   reexec_new_image_hangs    the new image hangs after taking the state: the keeper stops
+//                             waiting for DONE, kills it (that image only) and keeps the terminals
+//                             (each adopt case then sends the keeper an UPGRADE: refused)
+//   reexec_keeper_reaped      after an upgrade the keeper is reaped by the new image (no zombie)
 //   reexec_keeps_fd_limit     a session spawned after an upgrade (or a failed one) gets the soft
 //                             RLIMIT_NOFILE the holder was first started with, not the raised one
 //   reexec_session_fds        a session spawned after an upgrade holds only its stdio: not the
@@ -417,9 +421,17 @@ reexec_refusals :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.gaps, 0)
 }
 
+Adopt_How :: enum {
+	Swap, // the binary is swapped before execve: the swapped image fails verification
+	Crash, // the new image exits after taking the state
+	Hang, // the new image hangs after taking the state: the keeper stops waiting and kills it
+}
+
 // The keeper keeps the terminals (hook: how the new image fails): the next WELCOME comes from the
 // keeper's pid, every terminal degraded, output without a gap, exit codes and signals reported.
-adopt_case :: proc(t: ^testing.T, swap: bool) {
+// The keeper then refuses an UPGRADE of its own (it never exec'd: no Security.framework there).
+adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
+	swap := how == .Swap
 	r, ok := rig_new(t)
 	defer rig_free(t, r)
 	if !ok || !rig_start(t, r) do return
@@ -438,8 +450,11 @@ adopt_case :: proc(t: ^testing.T, swap: bool) {
 			posix.chmod(strings.clone_to_cstring(pair[1], context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 		}
 		rig_hook(r, "swap", evil)
-	} else {
+	} else if how == .Crash {
 		rig_hook(r, "crash-resume")
+	} else {
+		rig_hook(r, "hang-resume")
+		rig_hook(r, "done-wait", "300") // ms: the keeper's wait for DONE, 10 s otherwise
 	}
 	failed, closed := rig_upgrade(r, path)
 	testing.expectf(t, closed, "upgrade: %q", failed)
@@ -450,7 +465,8 @@ adopt_case :: proc(t: ^testing.T, swap: bool) {
 	testing.expectf(t, w2.pid != i64(r.pid), "the WELCOME is from the holder's pid %d, not a keeper", w2.pid)
 	testing.expect_value(t, w2.previous, "upgrade")
 	testing.expect_value(t, w2.instance, w.instance)
-	testing.expectf(t, strings.contains(w2.upgrade_error, swap ? "failed verification" : "stopped"), "upgrade_error %q", w2.upgrade_error)
+	want := [Adopt_How]string{.Swap = "failed verification", .Crash = "stopped", .Hang = "in time"}
+	testing.expectf(t, strings.contains(w2.upgrade_error, want[how]), "upgrade_error %q", w2.upgrade_error)
 	testing.expect_value(t, len(w2.terminals), 5)
 	for wt in w2.terminals do testing.expectf(t, wt.degraded.? or_else false, "terminal %d is not degraded", wt.id)
 	// the image that ran (the holder's pid) ends with no terminals: it was refused or it crashed
@@ -464,8 +480,12 @@ adopt_case :: proc(t: ^testing.T, swap: bool) {
 		rig_read(r, 10)
 	}
 	r.pid = -1
-	code, _, _ := exit_from_wait(st)
-	testing.expect_value(t, code, 1)
+	code, sig, _ := exit_from_wait(st)
+	if how == .Hang {
+		testing.expect_value(t, sig, 9) // the keeper killed the image that hung
+	} else {
+		testing.expect_value(t, code, 1)
+	}
 	// output goes on, without a gap, input works, exits are known (NOTE_EXITSTATUS)
 	// counting on (a loaded runner forks /bin/sleep slowly: wait for the lines, not a fixed time)
 	counted := time.tick_now()
@@ -490,13 +510,77 @@ adopt_case :: proc(t: ^testing.T, swap: bool) {
 	testing.expect_value(t, proc_ppid(pid), c.int(w2.pid))
 	g, eok = rig_wait(r, .Exited, 9)
 	testing.expect(t, eok && decode_got(g, .Exited, &e) && e.code == 5)
+	// an UPGRADE of the keeper is refused, plainly; it serves on (the same connection)
+	failed2, closed2 := rig_upgrade(r, r.bin)
+	testing.expectf(t, !closed2 && strings.contains(failed2, "keeper"), "the keeper upgraded: closed %v, %q", closed2, failed2)
+	if closed2 do return
+	rig_send(r, .Ping, 0, holderwire.Empty{})
+	_, pok := rig_wait(r, .Pong)
+	testing.expect(t, pok, "no PONG from the keeper after the refused UPGRADE")
+	n := counters_ok(t, rig_text(r, 1), 1)
+	rig_pump(r, 100 * time.Millisecond)
+	testing.expect(t, counters_ok(t, rig_text(r, 1), 1) > n, "terminal 1 stopped counting")
 }
 
 @(test)
-reexec_swapped_binary :: proc(t: ^testing.T) {adopt_case(t, swap = true)}
+reexec_swapped_binary :: proc(t: ^testing.T) {adopt_case(t, .Swap)}
 
 @(test)
-reexec_new_image_killed :: proc(t: ^testing.T) {adopt_case(t, swap = false)}
+reexec_new_image_killed :: proc(t: ^testing.T) {adopt_case(t, .Crash)}
+
+@(test)
+reexec_new_image_hangs :: proc(t: ^testing.T) {adopt_case(t, .Hang)}
+
+// After an upgrade the keeper (the new image's child: the old one forked it) exits once the new
+// image took over; the new image reaps it, so no zombie stays behind.
+@(test)
+reexec_keeper_reaped :: proc(t: ^testing.T) {
+	r, ok := rig_new(t)
+	defer rig_free(t, r)
+	if !ok || !rig_start(t, r) do return
+	rig_attach(t, r)
+	rig_spawn(t, r, 1, COUNTER)
+	failed, closed := rig_upgrade(r, r.bin)
+	testing.expectf(t, closed, "%q", failed)
+	if !closed do return
+	if _, aok := rig_attach(t, r); !aok do return
+	zombies := ""
+	start := time.tick_now()
+	for time.tick_since(start) < 3 * time.Second {
+		zombies = holder_zombies(r.pid)
+		if zombies == "" do break
+		rig_read(r, 50)
+	}
+	testing.expectf(t, zombies == "", "zombie children of the holder: %q", zombies)
+}
+
+// The holder's children that are zombies ("pid stat" lines), from ps.
+holder_zombies :: proc(holder: c.int) -> string {
+	out := fmt.tprintf("%s.ps", os.get_env("TMPDIR", context.temp_allocator))
+	cmd := fmt.ctprintf("/bin/ps -A -o ppid=,pid=,stat= > %s", out)
+	posix.system(cmd)
+	b, _ := os.read_entire_file(out, context.temp_allocator)
+	os.remove(out)
+	z := make([dynamic]string, context.temp_allocator)
+	for l in strings.split_lines(string(b), context.temp_allocator) {
+		f := strings.fields(l, context.temp_allocator)
+		if len(f) == 3 && f[0] == fmt.tprintf("%d", holder) && strings.has_prefix(f[2], "Z") do append(&z, fmt.tprintf("%s %s", f[1], f[2]))
+	}
+	return strings.join(z[:], ", ", context.temp_allocator)
+}
+
+// The dry run's answer: the wire range must hold the core's, and the new holder may not be older
+// than this one (an upgrade never goes down; the same rev is a rebuild).
+@(test)
+dry_run_answer :: proc(t: ^testing.T) {
+	w := i64(holderwire.WIRE)
+	testing.expect(t, dry_run_ok({HOLDER_REV, 1, w}, w))
+	testing.expect(t, dry_run_ok({HOLDER_REV + 1, 1, w}, w))
+	testing.expect(t, !dry_run_ok({HOLDER_REV - 1, 1, w}, w), "a downgrade")
+	testing.expect(t, !dry_run_ok({0, 1, w}, w))
+	testing.expect(t, !dry_run_ok({HOLDER_REV, w + 1, w + 2}, w), "the core's wire is too old for it")
+	testing.expect(t, !dry_run_ok({HOLDER_REV, 1, w - 1}, w), "the core's wire is too new for it")
+}
 
 // One session's output: `script` run to its exit.
 rig_run :: proc(t: ^testing.T, r: ^Rig, id: u32, script: string) -> string {

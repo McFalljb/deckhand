@@ -155,6 +155,13 @@ package main
 //   state_json NAME            app state as JSON to build/NAME.json
 //   quit                       quit without confirmation; exit status 1 if an assert failed
 //
+// PI_DESK_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
+// the first failed check, wait (waitfor, waitstate, waitresult, a command's TIMEOUT...) or missing
+// element ends the script there: it logs "STOPPED at line N" and quits (exit status 1), so a scene
+// fails in seconds instead of running every later wait to its timeout. PI_DESK_SCRIPT_STEP=FILE:
+// each line's number and text are written to FILE as it starts, so a run that hangs or is killed
+// says where it was (tests/scenes.py prints it).
+//
 // Variables in command/assert lines: $last (last created_id), $token (last
 // confirmation token), $project (selected project), $session (current open
 // session), $tab (its active tab), $pitab (its pi tab), $pisession (its pi
@@ -227,6 +234,9 @@ Autotest :: struct {
 	command_idx:  int, // the last `command` line (waitresult runs it again)
 	wr_idx:       int, // the waitresult line being waited on, -1 = none
 	wr_until:     time.Tick,
+	fail_fast:    bool, // PI_DESK_SCRIPT_FAIL_FAST=1: the first failure ends the script
+	step_file:    string, // PI_DESK_SCRIPT_STEP: the line running now goes there
+	path:         string,
 }
 
 // Real keyboard/mouse input is dropped in test mode; script-driven native
@@ -247,6 +257,9 @@ autotest_init :: proc() {
 	autotest.active = true
 	autotest.retry_line, autotest.audit_wait, autotest.wr_idx, autotest.command_idx = -1, -1, -1, -1
 	autotest.audit = os.get_env("PI_DESK_WAIT_AUDIT", context.temp_allocator) == "1"
+	autotest.fail_fast = os.get_env("PI_DESK_SCRIPT_FAIL_FAST", context.temp_allocator) == "1"
+	autotest.step_file = os.get_env("PI_DESK_SCRIPT_STEP", context.allocator)
+	autotest.path = strings.clone(path)
 	if autotest.audit do log("AUDIT script", path)
 	autotest_platform()
 }
@@ -530,8 +543,10 @@ autotest_step :: proc() {
 			log("found", at.waiting_for)
 			at.waiting_for = ""
 		} else if time.tick_diff(at.deadline, now) > 0 {
-			log("TIMEOUT waiting for", at.waiting_for)
+			msg := strings.concatenate({"TIMEOUT waiting for ", at.waiting_for}, context.temp_allocator)
 			at.waiting_for = ""
+			script_fail(msg)
+			if !at.active do return
 		} else {
 			return
 		}
@@ -548,6 +563,7 @@ autotest_step :: proc() {
 		if idx != at.retry_line {
 			log(line)
 			at.elem_until = {}
+			if at.step_file != "" do script_write_step(idx, line)
 		}
 		at.retry_line = -1
 		if script_is_check(cmd) {
@@ -1258,6 +1274,26 @@ script_command :: proc(c: Command, caller: Caller) -> (id: u64, r: Result, finis
 script_fail :: proc(args: ..any) {
 	autotest.failures += 1
 	log(..args)
+	at := &autotest
+	if !at.fail_fast || !at.active do return
+	// fail fast: stop here, as `quit` does (exit status 1: main.odin)
+	line := at.next > 0 && at.next <= len(at.lines) ? strings.trim_space(at.lines[at.next - 1]) : ""
+	log(fmt.tprintf("STOPPED at line %d of %s (PI_DESK_SCRIPT_FAIL_FAST): %s", at.next, at.path, line))
+	log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
+	if at.step_file != "" do script_write_step(at.next - 1, fmt.tprintf("%s   (failed; stopped)", line))
+	at.next = len(at.lines)
+	at.waiting_for = ""
+	at.eventually_on = false
+	app.quitting = true // the script ends the run: no confirmation
+	sapp.request_quit()
+	at.active = false
+}
+
+// The line starting now (PI_DESK_SCRIPT_STEP), so a hung or killed run says where it was.
+@(private = "file")
+script_write_step :: proc(idx: int, line: string) {
+	text := fmt.tprintf("%s:%d: %s\n", autotest.path, idx + 1, line)
+	_ = os.write_entire_file(autotest.step_file, transmute([]u8)text)
 }
 
 // Called for every event (events.odin).

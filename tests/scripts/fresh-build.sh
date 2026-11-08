@@ -8,3 +8,6 @@ _stale=$(find src tools/pi-desk-cli integrations/claude-code integrations/pi/ext
   integrations/pi/skills integrations/pi/extensions.json \
   -type f ! -name '*_test.odin' -newer build/deckhand 2>/dev/null | head -1)
 [ -z "$_stale" ] || { echo "build/deckhand is older than $_stale: ./build.sh first"; exit 1; }
+# a scene stops at its first failed check or wait (src/autotest.odin; PI_DESK_SCRIPT_FAIL_FAST=0
+# to run every line anyway, e.g. to see all the failures of a script being written)
+export PI_DESK_SCRIPT_FAIL_FAST="${PI_DESK_SCRIPT_FAIL_FAST:-1}"

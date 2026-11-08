@@ -8,6 +8,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:strings"
 import "core:sync"
 import "core:thread"
 
@@ -37,6 +38,21 @@ holder_bin_dev_build :: proc(bin: string) -> bool {
 	return false
 }
 
+// What Restart says about an outcome (heap). err: shown as an error.
+holder_restart_text :: proc(r: Holder_Upgrade_Result) -> (msg: string, err: bool) {
+	switch {
+	case r.ok:
+		return fmt.aprintf("Session holder restarted (holder_rev %d): every session kept", r.holder_rev), false
+	case r.adopted:
+		return fmt.aprintf("Session holder: the new binary did not take over (%s). Sessions run on, degraded", r.error), true
+	case r.lost:
+		return fmt.aprintf("Session holder lost: %s", r.error), true
+	case r.timed_out:
+		return strings.clone("Session holder: the restart is still going after a long wait; sessions keep running. Check again in a moment"), true
+	}
+	return fmt.aprintf("Session holder not restarted: %s. Sessions run on as before", r.error), true
+}
+
 holder_restart_start :: proc() {
 	sync.lock(&restart.mu)
 	if restart.running {
@@ -55,16 +71,7 @@ holder_restart_start :: proc() {
 			msg = fmt.aprintf("Session holder not restarted: %s", bin == "" ? "deckhand-core not found" : why)
 		} else {
 			r := holder_upgrade(path)
-			switch {
-			case r.ok:
-				msg, err = fmt.aprintf("Session holder restarted (holder_rev %d): every session kept", r.holder_rev), false
-			case r.adopted:
-				msg = fmt.aprintf("Session holder: the new binary did not take over (%s). Sessions run on, degraded", r.error)
-			case r.lost:
-				msg = fmt.aprintf("Session holder lost: %s", r.error)
-			case:
-				msg = fmt.aprintf("Session holder not restarted: %s. Sessions run on as before", r.error)
-			}
+			msg, err = holder_restart_text(r)
 			delete(r.error)
 			delete(path)
 		}

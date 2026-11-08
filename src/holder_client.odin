@@ -10,8 +10,11 @@ package main
 //   holder_pull(id, reader)         OUTPUT received for a terminal into its Term's inbox
 //   holder_handover() / holder_shutdown()   at quit (GOODBYE)
 //   holder_upgrade(path) -> Holder_Upgrade_Result   the holder re-execs into another binary in place
-//                                   (§7.3): sessions, pids and terminal ids stay; blocks ≤ 25 s
-//   holder_upgrade_wanted() -> bool  the attached holder's holder_rev is older than the bundled one
+//                                   (§7.3): sessions, pids and terminal ids stay; blocks ≤ 50 s
+//   holder_upgrade_wanted() -> bool  the attached holder is older than the bundled one and can
+//                                   upgrade (not rev 1, not an upgrade's keeper)
+//   holder_upgrade_unavailable() -> string  why an older holder can't upgrade ("" if it can or
+//                                   is not older): plain, to say once
 //
 // Trust: the peer is read at connect (trust.peer_allowed) and again before every read is
 // acted on (trust.peer_still); the WELCOME must come from that pid (trust.welcome_peer_ok).
@@ -75,6 +78,7 @@ Holder_Upgrade_Result :: struct {
 	adopted:    bool, // the new image did not take over (it crashed, failed verification or never
 	                  // connected): the upgrade's keeper serves the sessions, degraded
 	lost:       bool, // the holder is gone (its sessions end as "the session holder stopped")
+	timed_out:  bool, // no outcome within HOLDER_UPGRADE_WAIT: it may still succeed or be adopted
 	error:      string, // why not ok (UPGRADE_FAILED's error, or the keeper's); heap
 	holder_rev: i64, // what answered after it
 	pid:        i32,
@@ -161,9 +165,15 @@ holder_kept_text :: proc(n: int) -> string {
 	return fmt.tprintf("%d kept session%s restored: %s running in the session holder. Quit Deckhand and Stop All Sessions ends %s.", n, n == 1 ? " wasn't" : "s weren't", n == 1 ? "it keeps" : "they keep", n == 1 ? "it" : "them")
 }
 
+// The first holder_rev that takes UPGRADE (rev 1 answers "this holder does not upgrade yet").
+HOLDER_UPGRADE_MIN_REV :: 2
+
 // Whether a holder of holder_rev `running` should be upgraded to the bundled one (§7.3: only when
-// it is older; a newer holder is never downgraded).
-holder_rev_older :: proc(running, bundled: i64) -> bool {return running >= 1 && running < bundled}
+// it is older; a newer holder is never downgraded) and can be: not rev 1, not an upgrade's keeper
+// (a fork that never exec'd: it refuses, and ends once its sessions do).
+holder_upgradable :: proc(running, bundled: i64, keeper: bool) -> bool {
+	return running >= HOLDER_UPGRADE_MIN_REV && running < bundled && !keeper
+}
 
 // An exit as the holder reports it; code -1: it ended unseen (an orphan adopted after a failed
 // upgrade, gone before its keeper watched it), unknown.
@@ -588,7 +598,10 @@ holder_write :: proc(frame: []u8) -> bool {
 	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) do return false
 	if hc.upgrading {
 		// whole frames wait for the new image (INPUT is never split across the exec); a PING or
-		// FOREGROUND is only worth sending now
+		// FOREGROUND is only worth sending now. A SPAWN fails at once: queued, holder_spawn would
+		// block the main thread for its whole wait, and the holder run it after the tab started
+		// directly instead.
+		if len(frame) > 0 && frame[0] == u8(hw.Kind.Spawn) do return false
 		if len(frame) > 0 && (frame[0] == u8(hw.Kind.Ping) || frame[0] == u8(hw.Kind.Foreground)) do return true
 		append(&hc.pending, ..frame)
 		return true
@@ -781,11 +794,33 @@ holder_shutdown :: proc() {
 }
 
 // The last frame this connection sends: after it nothing goes out (no RELEASE at close_all).
-holder_goodbye :: proc(mode: string) -> bool {
-	upgrade_wait(HOLDER_UPGRADE_WAIT) // never into the middle of an upgrade
+// Never into an upgrade: it waits until the upgrade is over and the frames held back during it
+// went out (a queued RELEASE first), at most holder_quit_upgrade_wait, calling pump (output into
+// the terminals: the reader must not stall at its backlog cap before it sees the exec) or, for
+// none, dropping what came. Still upgrading then: no GOODBYE, the app leaves crash-style
+// (holder_leave: the holder keeps every terminal for the next launch, restored from its tails).
+holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawptr = nil) -> bool {
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode})
+	deadline := time.tick_add(time.tick_now(), holder_quit_upgrade_wait)
 	sync.lock(&hc.wmu)
+	for hc.upgrading && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
+		sync.unlock(&hc.wmu)
+		if time.tick_diff(time.tick_now(), deadline) <= 0 {
+			fmt.eprintln("Deckhand: session holder: still upgrading at quit: leaving it the sessions (no GOODBYE)")
+			holder_leave()
+			return false
+		}
+		if pump != nil {
+			pump(data)
+		} else {
+			sync.lock(&hc.mu)
+			for _, h in hc.held do clear(&h.buf)
+			sync.unlock(&hc.mu)
+		}
+		time.sleep(10 * time.Millisecond)
+		sync.lock(&hc.wmu)
+	}
 	defer sync.unlock(&hc.wmu)
 	if sync.atomic_load(&hc.handed) do return false
 	sync.lock(&hc.mu)
@@ -811,15 +846,33 @@ holder_leave :: proc() {
 
 // ---- upgrade (§7.3) ----
 
-HOLDER_UPGRADE_WAIT :: 25 * time.Second // the holder's dry run (5 s) and keeper (10 s), with room
-HOLDER_REATTACH_WAIT :: 15 * time.Second
+// The holder's worst case (src/holder upgrade.odin, keeper.odin): before the exec, the core's
+// flush (3 s) and the dry run (5 s to report, 5 s to exit); after it, until anything answers on
+// the socket, the keeper's waits for the new image's hello (10 s), its taking the state (10 s)
+// and its DONE (10 s, then it is killed and the keeper adopts). The reattach covers the latter,
+// the whole wait both.
+HOLDER_REATTACH_WAIT :: 35 * time.Second
+HOLDER_UPGRADE_WAIT :: 13 * time.Second + HOLDER_REATTACH_WAIT + 2 * time.Second
+// At quit, an upgrade in flight is waited for this long, then the app leaves crash-style.
+holder_quit_upgrade_wait := 10 * time.Second
 
-// Whether the attached holder is older than the one this app bundles (PR D's updater then calls
-// holder_upgrade with the installed bundled binary).
+// Whether the attached holder should and can be upgraded to the one this app bundles (PR D's
+// updater then calls holder_upgrade with the installed bundled binary).
 holder_upgrade_wanted :: proc() -> bool {
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	return hc.on && !hc.lost && !hc.handed && holder_rev_older(hc.holder_rev, HOLDER_REV)
+	return hc.on && !hc.lost && !hc.handed && holder_upgradable(hc.holder_rev, HOLDER_REV, hc.upgrade_error_seen != "")
+}
+
+// Why the attached holder, older than the bundled one, cannot be upgraded in place ("" when it
+// can, or is not older): plain words to say once, never an error.
+holder_upgrade_unavailable :: proc() -> string {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	if !hc.on || hc.lost || hc.handed || hc.holder_rev < 1 || hc.holder_rev >= HOLDER_REV do return ""
+	if hc.upgrade_error_seen != "" do return "Your kept sessions are running in a backup session holder after an update didn't take; it's replaced once those sessions end."
+	if hc.holder_rev < HOLDER_UPGRADE_MIN_REV do return "Your kept sessions are running in an older session holder that can't be updated in place; it's replaced once those sessions end."
+	return ""
 }
 
 // UPGRADE{path}: the holder re-execs into the binary at path (an absolute path to an installed,
@@ -852,7 +905,7 @@ holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
 	upgrade_wait(HOLDER_UPGRADE_WAIT)
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	if !hc.up_done do return {error = strings.clone("the holder did not finish the upgrade in time")} // the reader still settles it
+	if !hc.up_done do return {timed_out = true, error = strings.clone("the holder did not finish the upgrade in time")} // the reader still settles it
 	r := hc.up_result
 	hc.up_result = {}
 	return r
@@ -881,7 +934,7 @@ upgrade_finish_locked :: proc(r: Holder_Upgrade_Result) {
 
 // Once there is an outcome: the frames held back go out (unless the holder is lost) and frames
 // flow again. Takes wmu, then mu (holder_upgrade's order).
-@(private = "file")
+@(private)
 upgrade_release :: proc() {
 	sync.lock(&hc.wmu)
 	defer sync.unlock(&hc.wmu)
@@ -1063,6 +1116,9 @@ holder_client_forget :: proc() {
 	delete(hc.instance)
 	delete(hc.previous)
 	delete(hc.tokens_why)
+	delete(hc.path)
+	delete(hc.pending)
+	delete(hc.upgrade_error_seen)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
 }

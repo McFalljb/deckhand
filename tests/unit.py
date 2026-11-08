@@ -7,10 +7,15 @@ dir). One test binary is built, then every src/*.odin file's tests run as one ch
 -j workers, the slowest first (build/unit-times.json, from the last run). The timing tests
 (TIMING below) run after the rest, one at a time, so the other chunks' load does not skew them.
 
+The perf layer: a time budget (perf_expect, src/cpu_clock_test.odin) never fails this run unless
+it is 10x over (an accidentally quadratic change); over the budget it is a warning in the summary
+("perf: over budget"), so a busy machine cannot fail a gate. --perf-strict
+(DECKHAND_PERF_STRICT=1, for a quiet machine) fails at the budget itself.
+
 Fails if a test fails, or if the number of tests that ran is not the number of @(test) procs
 found in src/*.odin (a test that silently stopped running is a failure too).
 
-Usage: tests/unit.py [-j N] [--no-build] [--only NAME,...]
+Usage: tests/unit.py [-j N] [--no-build] [--only NAME,...] [--timing-only] [--perf-strict]
 Logs: build/unit/<chunk>.log. Never runs a real pi or claude (the tests use stand-ins).
 """
 import argparse
@@ -29,13 +34,16 @@ ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 BIN = "build/pi-desk-core-tests"
 LOGS = "build/unit"
 TIMES = "build/unit-times.json"
-# Tests that assert wall-clock or CPU-time budgets: run last, alone (see docs/TESTING.md)
+# Tests with time budgets (perf_expect: reported, gating only at 10x): run last, alone, so their
+# numbers mean something (see docs/TESTING.md, "Timing tests")
 TIMING = [
     "markdown_parse_1mb",
     "markdown_layout_pathological",
     "markdown_html_pathological",
     "reload_burst",
     "editor_perf_50k",
+    "syntax_large_parse",
+    "buffer_large_file",
 ]
 # Slow tests that get a process of their own (their file's other tests run in another)
 ALONE = ["layout_no_overlap_1", "layout_no_overlap_2", "layout_no_overlap_3", "layout_no_overlap_4"]
@@ -84,7 +92,12 @@ def main():
                     help="parallel processes (default: half the CPUs, at most 6; UNIT_JOBS)")
     ap.add_argument("--no-build", action="store_true", help="use the existing " + BIN)
     ap.add_argument("--only", help="comma-separated test names (still one process per file)")
+    ap.add_argument("--timing-only", action="store_true", help="only the timing group (TIMING): the perf layer")
+    ap.add_argument("--perf-strict", action="store_true",
+                    help="a time budget over its limit fails the run (DECKHAND_PERF_STRICT=1; a quiet machine only)")
     a = ap.parse_args()
+    if a.perf_strict:
+        os.environ["DECKHAND_PERF_STRICT"] = "1"
     os.chdir(ROOT)
     jobs = a.j or max(2, min(6, (os.cpu_count() or 4) // 2))
 
@@ -93,6 +106,8 @@ def main():
     for n in TIMING + ALONE:
         if n not in names:
             sys.exit(f"unit.py: {n} is listed in TIMING or ALONE but is not a test in src/ (renamed? update the list)")
+    if a.timing_only:
+        a.only = ",".join(TIMING)
     if a.only:
         want = set(a.only.split(","))
         unknown = want - names
@@ -154,6 +169,16 @@ def main():
         print("\n".join((bad or lines)[-40:]))
         names_ = chunks.get(name, timing)
         print(f"rerun: {BIN} -tests:{','.join(names_)}   (or tests/unit.py --only NAME)")
+    over = []
+    for _, _, _, _, log in results:
+        over += [ln.strip() for ln in open(log, errors="replace") if ln.startswith("PERF OVER BUDGET")]
+    if over:
+        print(f"unit: perf: {len(over)} over budget (a warning, not a failure: busy machine? "
+              f"load {os.getloadavg()[0]:.1f}; rerun with --only NAME --perf-strict on a quiet one):")
+        for ln in over:
+            print("  " + ln)
+            if os.environ.get("GITHUB_ACTIONS") == "true":
+                print("::warning::" + ln)
     slow = sorted(results, key=lambda r: -r[3])[:5]
     print("unit: slowest chunks: " + ", ".join(f"{r[0]} {r[3]:.1f}s" for r in slow))
     print(f"unit: {ran}/{len(tests)} tests ran in {len(results)} processes, {jobs} at a time: "

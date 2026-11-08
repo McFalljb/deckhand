@@ -118,19 +118,19 @@ buffer_large_file :: proc(t: ^testing.T) {
 	sb := strings.builder_make()
 	for i in 0 ..< 200_000 do fmt.sbprintf(&sb, "line %d: some text that is long enough to look like code;\n", i)
 	data := sb.buf[:]
-	t0 := time.tick_now()
+	t0 := thread_cpu_now() // CPU time: a busy machine slows it less than wall time
 	b: Text_Buffer
 	tb_init(&b, data[:]) // takes ownership
 	defer tb_destroy(&b)
-	load := time.tick_since(t0)
+	load := thread_cpu_since(t0)
 	testing.expect_value(t, tb_line_count(&b), 200_001)
-	t1 := time.tick_now()
+	t1 := thread_cpu_now()
 	for i in 0 ..< 1000 do tb_insert(&b, tb_line_start(&b, (i * 197) % 200_000), "x")
-	edits := time.tick_since(t1)
+	edits := thread_cpu_since(t1)
 	scratch: [dynamic]u8
 	defer delete(scratch)
 	testing.expect_value(t, tb_line(&b, 100_000 - 0, &scratch)[:6], "line 1")
-	testing.expectf(t, load < 200 * time.Millisecond, "load took %v", load)
-	testing.expectf(t, edits < 500 * time.Millisecond, "1000 edits took %v", edits)
+	perf_expect(t, "buffer_large_file: index 200k lines", load, 200 * time.Millisecond)
+	perf_expect(t, "buffer_large_file: 1000 scattered inserts", edits, 500 * time.Millisecond)
 	fmt.printf("buffer: %d MB, 200k lines indexed in %v, 1000 scattered inserts in %v\n", tb_len(&b) / (1 << 20), load, edits)
 }

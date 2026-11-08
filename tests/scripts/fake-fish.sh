@@ -13,7 +13,8 @@ while [ $# -gt 0 ]; do
   esac
 done
 [ -n "$FAKE_FISH_LOG" ] && printf '%s\n' "fish -c: ${cmd:-(interactive)}" >> "$FAKE_FISH_LOG"
-if [ -z "$cmd" ]; then exec /bin/sh "$@"; fi
+# interactive: say so on the tab's screen (fish-shell.txt waits for it), then a shell
+if [ -z "$cmd" ]; then echo "FAKE FISH INTERACTIVE"; exec /bin/sh "$@"; fi
 # what fish refuses: $(…) is fish 3.4+ but ${…}, `for … ; do`, `case … in`, `[ … ] && {`, VAR=x,
 # "$@" and "$*" (fish has $argv) are not fish
 for bad in '${' '; do ' 'case ' '"$@"' '$*' '; then ' 'export PATH' '=$' ; do

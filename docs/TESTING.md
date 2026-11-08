@@ -19,16 +19,38 @@ test mode works and what each scene's fixtures look like: [DEVELOPING.md](DEVELO
 
 ## What to run
 
+No test run should take more than 3 minutes. Run the smallest set that covers the change, and
+`--all` only where the table says so: not after every fix.
+
 | When | Command | Time (dev Mac) |
 |---|---|---|
-| Every change | `./build.sh test` (all unit layers) | ~1 min |
-| Every change that touches the app | `./build.sh scenes --changed` (the scenes whose areas hold a changed file, plus the smoke set) | 1–10 min, by what changed |
-| Before merging something broad, or an `@all` file | `./build.sh scenes --all` | ~3 min + the build (~25 min one scene at a time) |
-| Release | `./build.sh test`, `./build.sh scenes --all`, the release steps in [DEVELOPING.md](DEVELOPING.md#releases) | |
+| Every change (each fix while you work) | `./build.sh test` (all unit layers), and `./build.sh scenes --changed` if it touches the app or a scene | test ~40–60 s; scenes: the matched scenes + the smoke set, ~0.5–2 min |
+| A scene failed | rerun that scene by name (`./build.sh scenes NAME`), not the set: the log says the script line it stopped at | its own time |
+| Before opening or merging a pull request | the same as every change; CI (`ci.yml`) runs the unit tests and the required scenes, never the full tier | CI ~3–4 min |
+| A change to an `@all` file (the build, `vendor/`, the runner, `fresh-build.sh`) or a large refactor | `./build.sh scenes --all` (`--changed` selects all of it anyway) | ~3 min + the build when stale |
+| Release | `./build.sh test`, `./build.sh scenes --all`, the release steps in [DEVELOPING.md](DEVELOPING.md#releases) | ~4–5 min |
+| Nightly (`scenes-full.yml`) | every required and full scene in CI; perf warnings in the unit job's log | |
 | By hand, never in CI | the paid scenes (real pi, billed): `bridge-e2e.sh`, `home-e2e.sh`, `text-pi.sh`, `LOOKS_PI=real looks.sh` | |
 
-`./build.sh scenes` builds once (`./build.sh`, `./build.sh fake-app`) and then runs
-`tests/scenes.py` with the same arguments. Other selections: scene names
+What `--changed` selects (`--list` prints it, with the reason per scene): the scenes whose areas
+hold a changed file, plus the smoke set. A change to an `@core` file (`main.odin`,
+`commands.odin`, `state.odin`, `autotest.odin`… in `tests/scenes.txt`) adds the required scenes
+and every scene whose area name (singular or plural) its changed lines, or the `case` and proc
+they are in, mention: an edit anywhere in `commands.odin`'s `case Worktree_Remove:` runs
+`worktrees`, one in a `Browser_*` case the browser scenes. A core change over 300 lines runs
+everything. An `@all` file runs everything: the build, `vendor/`, the runner, and the terminal,
+pty, socket and persistence files, which nearly every scene drives. `tests/scenes_test.py`
+(in `./build.sh test`) checks the selection.
+
+Nothing runs the full-tier scenes before a merge: CI gates on the unit tests and the required
+scenes. What a narrower `--changed` leaves out is caught after the merge, by the nightly run
+(`scenes-full.yml`), or by `--all` before a release; run `--all` yourself when a change is broad
+and its scenes are not obvious.
+
+`./build.sh scenes` builds (`./build.sh`, `./build.sh fake-app`, each only when a file it is built
+from is newer than its output or was added or deleted since its last build: `build/<output>.inputs`;
+`--build` builds anyway) and then runs `tests/scenes.py` with the
+same arguments. Other selections: scene names
 (`./build.sh scenes menus jobs`), `--area src/native` (the scenes covering a file or folder),
 `--required` (what CI gates pull requests on), `--list` (what would run and why, without
 running). `--no-build` skips the build; each scene still refuses a stale `build/deckhand`
@@ -53,7 +75,7 @@ tool, or a scene tagged `noci`.
 | `src/*_test.odin` (`tests/unit.py`, ~800 tests in ~70 processes) | the command layer: every command, caller rules, confirmations, persistence, the socket, Claude and pi launch arguments and environment, jobs, the editor, the layout audit (no overlapping text at 4 widths × every look × light/dark), the docs listing every action and command | ~30–40 s on 6 processes incl. the build (~2 min 15 s on one) | every change |
 | `tools/pi-desk-cli` tests | the `deckhand` CLI the Claude Code plugin runs: argument parsing, the read-only guard (`tests/readonly-vectors.json`) | <1 s | every change |
 | `odin build` of the fake app (`tests/fake-app`) | builds the app-tab stand-in the scenes need | ~5 s | every change |
-| Scenes (`tests/scenes.py`, below) | the real app end to end, in quiet test mode, with fakes | see below | by area; `--all` before broad merges |
+| Scenes (`tests/scenes.py`, below) | the real app end to end, in quiet test mode, with fakes | see below | by area (`--changed`); `--all` for `@all` changes and releases |
 
 `src/*_test.odin` share the global `State`, so each process runs one thread. `tests/unit.py`
 gets its speed from processes: one per source file (the four `layout_no_overlap_N` parts get
@@ -197,6 +219,25 @@ the first log kept as `build/scenes/<scene>.1.log`; it does not fail the run (`-
 it). Logs: `build/scenes/<scene>.log`, summary: `build/scenes/summary.txt`, last times:
 `build/scene-times.json` (used to start the longest first).
 
+**Failing fast.** A scene stops at its first failed check, wait (`waitfor`, `waitstate`,
+`waitresult`, a command's TIMEOUT) or missing element: the app logs `ASSERT FAILED (stopped at line N
+of SCRIPT…)`, no `done:` line, and quits with exit status 1 (`PI_DESK_SCRIPT_FAIL_FAST=1`, which
+`tests/scripts/fresh-build.sh` and the runner set; `--no-fail-fast` or
+`PI_DESK_SCRIPT_FAIL_FAST=0` runs every line, to see all of a new script's failures at once).
+A `waitfor` that times out is a failure (it used to be only logged). Every failed line is
+logged with `ASSERT FAILED` (or `TIMEOUT` for a wait), the markers the scene scripts read: most
+run the app with `|| true` and grep its log, so a failure worded otherwise (`dragtab: no such tab
+or place`) used to pass its scene. `fail-fast-test` checks that a bogus `dragtab` fails
+`panes.sh`, with and without fail-fast. The runner kills a scene
+after 3× its typical or last time, at least 120 s (`--timeout` sets one for all; it was 900 s
+for every scene, and `jobs` once waited all of it out, failing one 15 s wait after another).
+A scene killed for its timeout is not retried. `--max-minutes` (`SCENE_MAX_MINUTES`; CI: 14 of
+the job's 25 min, nightly 32 of 45) is the whole run's budget: past it no scene starts (they are
+**NOT RUN**, a failure) and running ones are killed, so the summary table always prints.
+Each script line is written to `build/scenes/<scene>.step` as it starts
+(`PI_DESK_SCRIPT_STEP`), so a failed or killed scene's summary row says where it was:
+`killed after its timeout; last script step: tests/scripts/menus.txt:188: wait 300`.
+
 Concurrency: `-j 8` on a Mac with 10+ CPUs, 4 with 8+, 2 otherwise (`SCENE_JOBS`, `SCENE_CEF_JOBS`
 to change; CI sets 2 and, with fewer than 10 CPUs, gets one Chromium at a time). A memory budget
 (`--mem-gb`, `SCENE_MEM_GB`, default 3.5 GB of total RSS, as a memory guard counts it) holds a
@@ -249,12 +290,41 @@ before the window and one inside it.
 
 ## Timing tests
 
-Five unit tests assert time budgets: `markdown_parse_1mb` (50 ms; 150 ms on CI),
-`markdown_layout_pathological`, `markdown_html_pathological`, `reload_burst` and
-`editor_perf_50k`. They catch an accidentally quadratic change, not a few percent. They
-measure the calling thread's CPU time (`thread_cpu_now`, `src/cpu_clock_test.odin`), so a busy
-machine no longer fails them, and `tests/unit.py` runs them last, alone. The limits are the
-same as before.
+Time budgets are a **perf layer** that reports and does not gate. They are there to catch an
+accidentally quadratic change (tens to thousands of times slower), not a few percent, and
+under load from other builds (load 14–40) single runs were 2–3× slower, CPU time too (a thread
+on an efficiency core, caches shared with the other processes): `reload_burst` took 33.9 ms of
+CPU against 20, and `syntax_large_parse`'s 50 ms wall-clock reparse failed `release.sh` at
+50–54 ms.
+
+Every budget goes through `perf_expect` (`src/cpu_clock_test.odin`): it prints
+`PERF label: took X (budget Y)`; over the budget it prints `PERF OVER BUDGET …`, which
+`tests/unit.py` lists at the end as a warning (a GitHub warning in CI), and the test fails only
+past **10×** the budget, or **3×** (`PERF_GATE_USER`) for what a user waits on directly: a key
+typed and a 50k-line file opened (`editor_perf_50k`), a 1 MB Markdown file parsed.
+`tests/unit.py --perf-strict` (`DECKHAND_PERF_STRICT=1`) fails at the budget itself: for a quiet
+machine, when a budget is what you are working on. The nightly workflow (`scenes-full.yml`, job
+`perf`) and `release.sh` run `tests/unit.py --timing-only --perf-strict` as a report: a warning,
+never a failure.
+
+| Test | Measures | Budget | Why this way |
+|---|---|---|---|
+| `markdown_parse_1mb` | CPU time, best of 5 | 50 ms (150 on CI) | gate 3×: a user opens such files |
+| `markdown_layout_pathological` | CPU time | 50 ms per 16 KB case, 1 s per 200 KB | past the gate at 16 KB: fails and skips the 200 KB cases (minutes if not linear); over budget only: one 200 KB case still runs |
+| `markdown_html_pathological`, `markdown_pathological` | CPU time | 1 s; 2 s per case | was wall time (`markdown_pathological`) |
+| `reload_burst` | CPU time | 20 ms (20k events), 5 ms (the report) | flaked at 33.9 ms under load |
+| `editor_perf_50k` | CPU time | 2 s open, 50 ms a key | gate 3×: what a user waits on |
+| `syntax_large_parse` | CPU time (was wall) | 50 ms reparse | failed `release.sh` at 50–54 ms wall; ~6 ms of CPU |
+| `buffer_large_file` | CPU time (was wall) | 200 ms index, 500 ms edits | |
+
+Not a relative baseline (timing a small input in the same process and comparing): the small
+runs are a few ms, too noisy to compare, and the 10× gate already catches what these tests are
+for. `tests/unit.py` still runs the timing group last, alone, so its numbers mean something.
+
+Bounds that are not budgets stay gating but generous, and waits on fake processes are
+deadlines, no slower when they pass: `claude_restart_all`'s waits for the fake claude (20 s;
+~3 and ~5 s of loop rounds timed out on CI) and `login_env_refresh_action`'s refresh (20 s in
+the test, `login_env_refresh_timeout`; the app keeps 4 s).
 
 ## Flakes
 
@@ -276,6 +346,11 @@ same as before.
 | `browser-rlz` | every sentinel file's access time moved at quit; seen once at load 11, not reproduced in 6 runs since | the runner reports it as **FLAKY** if it comes back |
 | `browser-read` (`browser-e`) at `-j 9` | a load wait right after `browser_open` passed on the new tab's blank first document (also "complete"), and the read got nothing | `browser_open` marks the navigation as `browser_navigate` does (`browser_agent_open_marks_navigation`) |
 | `bell` (count 2, not 3) | the bell coalesces a session's entries within `NOTICE_COALESCE` (10 s); with the waits gone, aaaa-1's second run could end within 10 s of its first entry and replace it (load 22) | an explicit `wait 10000` before that run |
+| `agent` (load 27–33) | waited for the fake Atlas's first line (`control token`), then read the three it prints after it | waits for the last line |
+| `fish-shell` (load 30) | quit 1.5 s after opening the shell tab, before the (fake) fish had started | the fake fish says so on screen; the script waits for it |
+| `restore` (load 21) | quit before the shell had run `cd /`, so the saved cwd was the project's | waits for the command's output |
+| `reload_burst`, `syntax_large_parse`, `buffer_large_file`, `markdown_parse_1mb` | time budgets under load, CPU time too | the perf layer (above): report, gate at 10× |
+| `claude_restart_all`, `login_env_refresh_action` | fake processes slower than a 3–5 s wait under load | 20 s deadlines |
 | `browser-agent` (`browser-f`), while converting waits | a script's first `wait` became `eventually`; the app had not settled and a read returned an empty title | a script's first wait is never converted |
 
 ## Candidates to delete or rework
@@ -344,6 +419,21 @@ a large `$TMPDIR` (the no-sudo sweep, fixed on main in bfb3472: launch and quit 
 Without the memory budget, `-j 8`/`-j 9` with three Chromium scenes took 2.5–3.0 min and peaked at
 3.6–3.7 GB, once past 4 GB. The critical path is now `browser-rlz` (105 s, idle by design) and the
 Chromium lanes. `./build.sh test`: 51 s (794 unit tests, 141 node tests).
+
+Fail-fast, per-scene timeouts, the perf layer and a narrower `--changed` (2026-11-07, same
+dev Mac, load noted per run):
+
+| What | Before | After |
+|---|---|---|
+| `./build.sh scenes --all`, build included | 233 s (57 s build + 2.9 min; load 8 → 26; one FLAKY `restore`) | 219 s (55 s build + 2.7 min; load 7–8; no flakes); after the review fixes, 59 scenes: 210 s (45 s + 2.8 min; load 4–6; no flakes) |
+| `--all` again, nothing changed since the last build | the same 233 s (always rebuilt) | 170 s (no rebuild + 2.8 min; load 7 → 5) |
+| A change to `commands.odin` + `login_env.odin` (this branch's first commit) | every scene: `--all`, ~233 s | 19 scenes (required, smoke, `login-path`, `fish-shell`, `pi-login-lookup`, `editor`, `markdown`): 106 s with the rebuild (45 s + 1.0 min; load 5) |
+| A hung or failing scene | up to 900 s, then nothing said where | stops at its first failure; killed after 3× its time (min 120 s), with the script line it was on |
+| `./build.sh test` | 67 s (cold build; load 6 → 10) | 54–55 s (load 4–6); a time budget fails it only past 10× (3× for typing, opening a file) |
+
+Past commits on main, as `--changed` would select for each: of 21, 10 selected every scene
+before; 6 still do (`build.sh`, `bundle-app.sh`, the terminal, pty, socket or persistence files,
+or over 300 lines of core files), the other 4 select 21–41.
 
 ### What was tried and left out
 

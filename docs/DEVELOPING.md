@@ -387,8 +387,9 @@ still readable on white.
 
 Which tests exist, what each protects, how long it takes and when it must run:
 [TESTING.md](TESTING.md). In short: `./build.sh test` for every change, `./build.sh scenes
---changed` for the scenes covering what you changed (plus a smoke set), `./build.sh scenes --all`
-before a broad merge. `tests/scenes.py` (what `./build.sh scenes` runs) builds once, runs scenes
+--changed` for the scenes covering what you changed (plus a smoke set), a failed scene again by
+name, and `./build.sh scenes --all` only for an `@all` change (the build, the runner) and before a
+release: not after every fix. No test run should take more than 3 minutes. `tests/scenes.py` (what `./build.sh scenes` runs) builds once, runs scenes
 side by side, retries a failure once and reports flaky ones; `tests/scenes.txt` lists every scene
 with its tier and the files it covers.
 

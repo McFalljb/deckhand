@@ -773,7 +773,7 @@ markdown_layout_pathological :: proc(t: ^testing.T) {
 			{"link text", strings.concatenate({"[", rep("q", k * 10), "](x.md)"}, context.temp_allocator)},
 		}
 	}
-	run :: proc(t: ^testing.T, name, text: string, limit: time.Duration) -> bool {
+	run :: proc(t: ^testing.T, name, text: string, limit: time.Duration) -> (gate_ok, budget_ok: bool) {
 		v := new(Md_View)
 		v.doc = md_parse(text)
 		t0 := thread_cpu_now() // CPU time: a busy machine does not fail it
@@ -784,11 +784,25 @@ markdown_layout_pathological :: proc(t: ^testing.T) {
 		lay_free(&v.lay)
 		free(v)
 		free_all(context.temp_allocator)
-		return testing.expectf(t, d < limit, "%s (%d KB) took %v (limit %v)", name, len(text) / 1000, d, limit)
+		gate_ok = perf_expect(t, fmt.tprintf("markdown layout: %s (%d KB)", name, len(text) / 1000), d, limit)
+		return gate_ok, d <= limit
 	}
-	small_ok := true
-	for c in cases(1_600) do small_ok &= run(t, c[0], c[1], 50 * time.Millisecond)
-	if !small_ok do return // not linear: the 200 KB cases would take minutes and tens of GB
+	small_gate, small_budget := true, true
+	for c in cases(1_600) {
+		g, b := run(t, c[0], c[1], 50 * time.Millisecond)
+		small_gate &= g
+		small_budget &= b
+	}
+	if !small_gate do return // failed: not linear, and the 200 KB cases would take minutes and tens of GB
+	big := cases(20_000)
+	n := len(big)
+	if !small_budget {
+		// over the budget but within the gate (a busy machine, most likely): one 200 KB case still
+		// runs, so the large size is never silently left out
+		fmt.printfln("PERF OVER BUDGET markdown layout: a 16 KB case was over budget: only one 200 KB case runs")
+		n = 1
+	}
+	for c in big[:n] do run(t, c[0], c[1], time.Second)
 	for c in cases(20_000) do run(t, c[0], c[1], time.Second)
 }
 
@@ -803,7 +817,7 @@ markdown_html_pathological :: proc(t: ^testing.T) {
 	md_layout(v, 700)
 	d := thread_cpu_since(t0)
 	fmt.printfln("markdown layout: an unclosed '<' in HTML, 1 MB, in %.1f ms", f64(d) / f64(time.Millisecond))
-	testing.expectf(t, d < time.Second, "took %v", d)
+	perf_expect(t, "markdown_html_pathological: an unclosed '<' in HTML, 1 MB", d, time.Second)
 	md_free(v.doc)
 	lay_free(&v.lay)
 	free(v)

@@ -1039,7 +1039,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			toast_show(msg, err = true)
 			return fail(msg), false
 		}
-		if !login_env_refresh_start(request_id) do return fail("a refresh is already running"), false
+		if !login_env_refresh_start(request_id, timeout = login_env_refresh_timeout) do return fail("a refresh is already running"), false
 		toast_show("Reading your shell environment…")
 		return {ok = true, pending = true}, false
 	case Refresh_Shell_Env_Done:

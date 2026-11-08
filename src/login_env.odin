@@ -520,6 +520,10 @@ Login_Env_Job :: struct {
 	timeout:    time.Duration,
 }
 
+// The "Refresh shell environment" command's answer timeout (tests raise it: a fake shell's start
+// under load can take longer than a real shell's on a quiet machine)
+login_env_refresh_timeout := LOGIN_ENV_TIMEOUT
+
 // Starts a refresh on a worker (false: one is running already). A terminal
 // launch has nothing to refresh: the caller says so.
 login_env_refresh_start :: proc(request_id: u64, probe: Login_Env_Probe = login_env_ask, timeout := LOGIN_ENV_TIMEOUT) -> bool {

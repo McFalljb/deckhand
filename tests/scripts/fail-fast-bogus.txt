@@ -1,0 +1,6 @@
+# tests/scripts/fail-fast-test.sh: a script line that fails without an "ASSERT FAILED" check (a tab
+# that does not exist); the scene running it must fail, with or without fail-fast
+wait 300
+dragtab 9 centre 7
+assert_state open_sessions.# 1
+quit

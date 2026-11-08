@@ -425,11 +425,11 @@ dev Mac, load noted per run):
 
 | What | Before | After |
 |---|---|---|
-| `./build.sh scenes --all`, build included | 233 s (57 s build + 2.9 min; load 8 → 26; one FLAKY `restore`) | 219 s (55 s build + 2.7 min; load 7–8; no flakes) |
+| `./build.sh scenes --all`, build included | 233 s (57 s build + 2.9 min; load 8 → 26; one FLAKY `restore`) | 219 s (55 s build + 2.7 min; load 7–8; no flakes); after the review fixes, 59 scenes: 210 s (45 s + 2.8 min; load 4–6; no flakes) |
 | `--all` again, nothing changed since the last build | the same 233 s (always rebuilt) | 170 s (no rebuild + 2.8 min; load 7 → 5) |
 | A change to `commands.odin` + `login_env.odin` (this branch's first commit) | every scene: `--all`, ~233 s | 19 scenes (required, smoke, `login-path`, `fish-shell`, `pi-login-lookup`, `editor`, `markdown`): 106 s with the rebuild (45 s + 1.0 min; load 5) |
 | A hung or failing scene | up to 900 s, then nothing said where | stops at its first failure; killed after 3× its time (min 120 s), with the script line it was on |
-| `./build.sh test` | 67 s (cold build; load 6 → 10) | 54 s (load 5–6); time budgets never fail it below 10× |
+| `./build.sh test` | 67 s (cold build; load 6 → 10) | 54–55 s (load 4–6); a time budget fails it only past 10× (3× for typing, opening a file) |
 
 Past commits on main, as `--changed` would select for each: of 21, 10 selected every scene
 before; 6 still do (`build.sh`, `bundle-app.sh`, the terminal, pty, socket or persistence files,

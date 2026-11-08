@@ -1370,7 +1370,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if platform.set_clipboard_secret != nil {
 			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
 		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
-		toast_show("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
+		window_toast("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)

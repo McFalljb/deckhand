@@ -205,8 +205,9 @@ side by side. What they share, and how the runner keeps them apart:
   scripts into six groups of ~35 s, each in its own folder (`build/browser-<g>/`).
 - **`idle`**: `browser-rlz` (100 s) and `browser-netpolicy` (20 s) sit idle on purpose. They
   take no `-j` slot (at most two at a time), but still a Chromium slot.
-- **The control socket**: per process (`pi-desk-<pid>.sock`) in the runtime dir; scenes that
-  look at the runtime dir set their own `PI_DESK_RUNTIME_DIR`. No ports are opened.
+- **The control socket**: `core.sock` in the runtime dir, `<data dir>/run` (test mode without a
+  data dir: `build/test-data/run`, which the `test-data` lock keeps to one scene at a time); scenes
+  that look at the runtime dir set their own `PI_DESK_RUNTIME_DIR`. No ports are opened.
 - **Screenshots**: `build/shots/<scene>/`, one folder per scene.
 - **The clipboard**: under a script the app's copies and pastes use a pasteboard of its own
   (`autotest.pasteboard`), never the system's: one scene's copy cannot replace another's, nor the

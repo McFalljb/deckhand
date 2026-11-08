@@ -5,7 +5,7 @@ package main
 // directory. socket.odin only uses these procs; Windows (named pipes) would
 // implement the same set in socket_windows.odin.
 //
-//   sock_runtime_dir() -> (dir, ok)        the private directory for the socket
+//   sock_runtime_dir() -> (dir, ok)        the private directory for the sockets (<data>/run)
 //   sock_listen(path) -> (fd, ok)          bind + listen (socket file 0600)
 //   sock_accept(fd, ms) -> (fd, ok)        waits up to ms for a connection
 //   sock_connect(path) -> (fd, ok)
@@ -23,12 +23,61 @@ import "core:sys/posix"
 
 Sock_Fd :: posix.FD
 
-// PI_DESK_RUNTIME_DIR overrides (tests). macOS: $TMPDIR/pi-desk-<uid> ($TMPDIR
-// is already per user). Linux: $XDG_RUNTIME_DIR/pi-desk, else
-// /tmp/pi-desk-<uid>. The directory must be ours, a real directory (no
-// symlink) and 0700; group/other bits are removed if set.
+// sun_path is 104 bytes, its NUL included
+SUN_PATH_MAX :: 103
+CORE_SOCK :: "core.sock" // the control socket's name in the runtime dir (stable, docs/PROTOCOL.md §1)
+// what the runtime dir must have room for after its path: "/core.sock", and
+// "/holder-<rand8>.sock" (a session holder's, src/holder), which the holder's launch checks
+RUNTIME_CORE_NEED :: len("/" + CORE_SOCK)
+RUNTIME_HOLDER_NEED :: len("/holder-xxxxxxxx.sock")
+
+// The runtime dir (docs/plans/background-core.md §5.1): <data root>/run, the data root being
+// home_root (data_dir(), or test mode's build/test-data); not $TMPDIR, which macOS cleans under
+// long-lived processes. PI_DESK_RUNTIME_DIR overrides (tests). It must be ours, a real
+// directory (no symlink) and 0700 (group/other bits are removed if set), and core.sock's path
+// in it must fit in sun_path. why: what is wrong ("" = fine).
 sock_runtime_dir :: proc(allocator := context.allocator) -> (dir: string, ok: bool) {
+	why: string
+	dir, why = sock_runtime_dir_why(allocator)
+	return dir, why == ""
+}
+
+sock_runtime_dir_why :: proc(allocator := context.allocator) -> (dir, why: string) {
+	if d := os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator); d != "" {
+		dir = strings.clone(d, allocator)
+	} else {
+		if home_root == "" do return "", "no data dir to keep the runtime dir in"
+		os.make_directory_all(home_root, {.Read_User, .Write_User, .Execute_User})
+		dir = fmt.aprintf("%s/run", strings.trim_right(home_root, "/"), allocator = allocator)
+	}
+	return dir, runtime_dir_prepare(dir, RUNTIME_CORE_NEED)
+}
+
+// Makes dir (its parent must exist) and checks it as above; need: the longest "/name" that
+// goes in it. "" = fine, else why not (temp allocator).
+runtime_dir_prepare :: proc(dir: string, need: int) -> string {
+	if len(dir) + need > SUN_PATH_MAX {
+		return fmt.tprintf("the runtime dir %s is too long: a socket in it would pass %d bytes (sun_path); use a shorter data dir or PI_DESK_RUNTIME_DIR", dir, SUN_PATH_MAX)
+	}
+	cdir := strings.clone_to_cstring(dir, context.temp_allocator)
+	posix.mkdir(cdir, posix.S_IRWXU) // EEXIST is fine: checked below
+	st: posix.stat_t
+	if posix.lstat(cdir, &st) != .OK do return fmt.tprintf("the runtime dir %s cannot be made", dir)
+	if !posix.S_ISDIR(st.st_mode) do return fmt.tprintf("the runtime dir %s is not a directory (a symlink is refused)", dir)
+	if st.st_uid != posix.getuid() do return fmt.tprintf("the runtime dir %s belongs to another user", dir)
+	if st.st_mode & (posix.S_IRWXG | posix.S_IRWXO) != {} {
+		if posix.chmod(cdir, posix.S_IRWXU) != .OK do return fmt.tprintf("the runtime dir %s cannot be made private (0700)", dir)
+	}
+	return ""
+}
+
+// The runtime dir of pi-desk 0.1.x and of Deckhand before M1, where instance_guard looks for a
+// running pi-desk: PI_DESK_RUNTIME_DIR, else macOS $TMPDIR/pi-desk-<uid> ($TMPDIR is already
+// per user), Linux $XDG_RUNTIME_DIR/pi-desk, else /tmp/pi-desk-<uid>. Never made; "" unless it
+// is a real directory of ours.
+sock_legacy_runtime_dir :: proc(allocator := context.allocator) -> string {
 	uid := posix.getuid()
+	dir: string
 	if d := os.get_env("PI_DESK_RUNTIME_DIR", context.temp_allocator); d != "" {
 		dir = strings.clone(d, allocator)
 	} else {
@@ -44,15 +93,9 @@ sock_runtime_dir :: proc(allocator := context.allocator) -> (dir: string, ok: bo
 			}
 		}
 	}
-	cdir := strings.clone_to_cstring(dir, context.temp_allocator)
-	posix.mkdir(cdir, posix.S_IRWXU) // EEXIST is fine: checked below
 	st: posix.stat_t
-	if posix.lstat(cdir, &st) != .OK do return dir, false
-	if !posix.S_ISDIR(st.st_mode) || st.st_uid != uid do return dir, false
-	if st.st_mode & (posix.S_IRWXG | posix.S_IRWXO) != {} {
-		if posix.chmod(cdir, posix.S_IRWXU) != .OK do return dir, false
-	}
-	return dir, true
+	if posix.lstat(strings.clone_to_cstring(dir, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) || st.st_uid != uid do return ""
+	return dir
 }
 
 @(private = "file")
@@ -81,7 +124,7 @@ sock_listen :: proc(path: string) -> (Sock_Fd, bool) {
 	addr, ok := sock_addr(path)
 	if !ok do return -1, false
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
-	posix.unlink(cpath) // a stale socket of ours (the name has our pid)
+	posix.unlink(cpath) // a stale socket of ours (core.sock: the core lock makes it ours)
 	fd := sock_new()
 	if fd < 0 do return -1, false
 	if posix.bind(fd, (^posix.sockaddr)(&addr), size_of(addr)) != .OK || posix.listen(fd, 64) != .OK {

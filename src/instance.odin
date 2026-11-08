@@ -95,7 +95,7 @@ instance_fd: posix.FD = -1
 instance_guard :: proc(dir: string, check_old: bool) -> string {
 	if dir == "" do return ""
 	if check_old {
-		if rd, ok := sock_runtime_dir(context.temp_allocator); ok {
+		if rd := sock_legacy_runtime_dir(context.temp_allocator); rd != "" {
 			if old := instance_old_pidesk_find(rd, int(posix.getpid()), instance_alive, instance_exe); old != 0 do return instance_message(old)
 		}
 	}

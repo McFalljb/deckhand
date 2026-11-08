@@ -82,6 +82,35 @@ hello_answer :: proc(attached, wire_ok: bool) -> Hello_Answer {
 	return .Welcome
 }
 
+// The app's side of the holder socket (§5.3 "Core → holder"): the holder that WELCOMEd must be
+// the process the socket's peer token named at connect. A WELCOME claiming another pid comes from
+// something relaying for (or posing as) a holder: refused.
+welcome_peer_ok :: proc(at_connect: Peer, welcome_pid: i64) -> Decision {
+	if !at_connect.ok do return .No_Peer
+	if welcome_pid <= 0 || welcome_pid != i64(at_connect.pid) do return .Changed
+	return .Allow
+}
+
+// Whether a handover.json whose MAC verified describes the holder this launch attached to (§7.2,
+// §7.7). Anything else is a crash restart (tails, inexact): a file from another holder run (its
+// instance), another boot, a newer writer (min_reader), or a holder that says the last core did
+// not say goodbye (previous) never gives its snapshots to this launch.
+Handover_Decision :: enum {
+	Use,
+	Too_New, // min_reader above what this reader understands
+	Other_Holder, // written for another holder run
+	Other_Boot, // written before a reboot
+	No_Goodbye, // the holder's WELCOME.previous is not "handover"
+}
+
+handover_fresh :: proc(min_reader, our_reader: i64, file_holder, welcome_instance: string, file_boot, this_boot: i64, previous: string) -> Handover_Decision {
+	if min_reader < 1 || min_reader > our_reader do return .Too_New
+	if file_holder == "" || file_holder != welcome_instance do return .Other_Holder
+	if file_boot <= 0 || file_boot != this_boot do return .Other_Boot
+	if previous != "handover" do return .No_Goodbye
+	return .Use
+}
+
 // The HMAC key (state-file authentication, §5.3 B3) goes only in a WELCOME, so only to a core
 // that passed peer_allowed and hello_answer on this connection.
 

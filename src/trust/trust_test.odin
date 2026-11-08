@@ -52,6 +52,44 @@ hello_answer_table :: proc(t: ^testing.T) {
 	testing.expect(t, hello_answer(attached = true, wire_ok = false) == .Refuse_Wire)
 }
 
+@(test)
+welcome_peer_table :: proc(t: ^testing.T) {
+	p := Peer{ok = true, pid = 42, pidversion = 3, euid = 501}
+	testing.expect(t, welcome_peer_ok(p, 42) == .Allow)
+	testing.expect(t, welcome_peer_ok(p, 43) == .Changed) // relayed or posing
+	testing.expect(t, welcome_peer_ok(p, 0) == .Changed)
+	testing.expect(t, welcome_peer_ok(p, -42) == .Changed)
+	testing.expect(t, welcome_peer_ok(p, 42 + (1 << 32)) == .Changed) // no truncation to i32
+	testing.expect(t, welcome_peer_ok(Peer{}, 42) == .No_Peer)
+}
+
+@(test)
+handover_fresh_table :: proc(t: ^testing.T) {
+	cases := []struct {
+		min_reader, ours: i64,
+		holder, instance: string,
+		boot, this_boot:  i64,
+		previous:         string,
+		want:             Handover_Decision,
+	} {
+		{1, 1, "ab", "ab", 100, 100, "handover", .Use},
+		{2, 1, "ab", "ab", 100, 100, "handover", .Too_New},
+		{0, 1, "ab", "ab", 100, 100, "handover", .Too_New}, // a missing min_reader is not "any"
+		{1, 2, "ab", "ab", 100, 100, "handover", .Use},
+		{1, 1, "ab", "cd", 100, 100, "handover", .Other_Holder},
+		{1, 1, "", "", 100, 100, "handover", .Other_Holder}, // an empty id never matches
+		{1, 1, "ab", "ab", 99, 100, "handover", .Other_Boot},
+		{1, 1, "ab", "ab", 0, 0, "handover", .Other_Boot}, // unknown boot time: not this boot
+		{1, 1, "ab", "ab", 100, 100, "crash", .No_Goodbye},
+		{1, 1, "ab", "ab", 100, 100, "none", .No_Goodbye},
+		{1, 1, "ab", "ab", 100, 100, "upgrade", .No_Goodbye},
+	}
+	for c, i in cases {
+		got := handover_fresh(c.min_reader, c.ours, c.holder, c.instance, c.boot, c.this_boot, c.previous)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
+	}
+}
+
 // The real getsockopt on a socketpair: this process on both ends, its own uid, stable.
 @(test)
 peer_read_socketpair :: proc(t: ^testing.T) {

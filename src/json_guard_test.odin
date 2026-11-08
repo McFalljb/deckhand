@@ -566,6 +566,10 @@ json_guard_scan_sees_through_disguises :: proc(t: ^testing.T) {
 	for name in ([]string{"is_valid", "parse_value", "validate_value", "unquote_string", "make_tokenizer", "get_token", "unmarshal_any"}) {
 		testing.expectf(t, limit_of(fmt.tprintf("f :: proc(s: string) {{\n\tx := json.%s(s)\n}}\n", name)) == "UNGUARDED", "json.%s", name)
 	}
+	// json_shape_ok is holderwire's (a jg.shape_ok); a json_shape_ok of another package is not it
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\tif !json_shape_ok(s) do return\n\tv, _ := json.parse(s, .JSON)\n}\n"), "UNGUARDED")
+	testing.expect_value(t, len(scan_source("src/holderwire/x.odin", "f :: proc(s: string) {\n\tif !json_shape_ok(s) do return\n\tv, _ := json.parse(s, .JSON)\n}\n")), 1)
+	testing.expect_value(t, scan_source("src/holderwire/x.odin", "f :: proc(s: string) {\n\tif !json_shape_ok(s) do return\n\tv, _ := json.parse(s, .JSON)\n}\n")[0].limit, "json_shape_ok")
 	testing.expect_value(t, limit_of("f :: proc(p: ^json.Parser) {\n\tv, _ := json.parse_value(p)\n}\n"), "UNGUARDED")
 	testing.expect_value(t, limit_of("f :: proc() {\n\tb, _ := json.marshal(x)\n\to: json.Object\n}\n"), "0 sites")
 	testing.expect_value(t, limit_of("f :: proc() {\n\ts := \"json.parse(x)\"\n}\n"), "0 sites")

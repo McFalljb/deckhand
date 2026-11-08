@@ -60,6 +60,9 @@ jobs:
       SCENE_JOBS: "2"
       # a scene is killed after this many times its typical (dev Mac) time, at least 120 s
       SCENE_TIMEOUT_X: "5"
+      # the scenes' own budget, inside the job's 25 min (setup and the build come first): past it no
+      # scene starts and running ones are killed, so the summary and the logs always come out
+      SCENE_MAX_MINUTES: "14"
     steps:
       - uses: actions/checkout@v4
         with: { submodules: recursive, persist-credentials: false }

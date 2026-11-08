@@ -104,5 +104,44 @@ class Freshness(unittest.TestCase):
             self.assertIn(top, scenes.APP_INPUTS)
 
 
+class RunnerLimits(unittest.TestCase):
+    """A scene killed for its timeout is not tried again, and a run's time budget leaves the rest
+    unstarted (the summary always prints before CI's job timeout)."""
+
+    def setUp(self):
+        import tempfile
+        self.tmp = tempfile.mkdtemp(prefix="scenes-test-")
+        self.logs, scenes.LOGS = scenes.LOGS, self.tmp
+
+    def tearDown(self):
+        import shutil
+        scenes.LOGS = self.logs
+        shutil.rmtree(self.tmp)
+
+    def scene(self, name, command):
+        return scenes.Scene(name, "full", set(), 1, [], command)
+
+    def test_a_killed_scene_is_not_retried(self):
+        import io, contextlib
+        r = scenes.Runner([self.scene("hang", "sleep 30")], 1, 1, 1, 1)
+        with contextlib.redirect_stdout(io.StringIO()):
+            r.run()
+        res = r.results["hang"]
+        self.assertEqual(res["result"], "FAIL")
+        self.assertTrue(res["killed"])
+        self.assertEqual(len(res["times"]), 1, "no second try after a timeout kill")
+
+    def test_the_budget_leaves_the_rest_unstarted(self):
+        import io, contextlib, time
+        r = scenes.Runner([self.scene("a", "sleep 3"), self.scene("b", "true")], 1, 1, 0, 0,
+                          budget=1.0)
+        t0 = time.monotonic()
+        with contextlib.redirect_stdout(io.StringIO()):
+            r.run()
+        self.assertLess(time.monotonic() - t0, 2.5, "the running scene is stopped at the budget")
+        self.assertEqual(r.results["a"]["result"], "FAIL")
+        self.assertEqual(r.results["b"]["result"], "NOT RUN")
+
+
 if __name__ == "__main__":
     unittest.main()

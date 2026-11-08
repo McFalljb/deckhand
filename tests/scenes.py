@@ -397,8 +397,9 @@ def last_step(name):
 
 
 class Runner:
-    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None):
+    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None, budget=0.0):
         self.pending = list(scenes)
+        self.budget, self.t0 = budget, time.monotonic()  # seconds for the whole run (0: none)
         self.jobs, self.cef_jobs, self.retries, self.timeout = jobs, cef_jobs, retries, timeout
         self.fail_fast, self.last = fail_fast, last or {}
         self.mem_budget = mem_budget  # bytes; 0: no budget
@@ -434,9 +435,10 @@ class Runner:
         return True
 
     def timeout_of(self, s):
-        if self.timeout:
-            return self.timeout
-        return max(TIMEOUT_MIN, TIMEOUT_X * max(s.secs, self.last.get(s.name, 0)))
+        t = self.timeout or max(TIMEOUT_MIN, TIMEOUT_X * max(s.secs, self.last.get(s.name, 0)))
+        if self.budget:  # never past the run's budget
+            t = max(0.1, min(t, self.budget - (time.monotonic() - self.t0)))
+        return t
 
     def attempt(self, s, log):
         t0 = time.monotonic()
@@ -477,7 +479,8 @@ class Runner:
         result = "pass" if rc == 0 else "FAIL"
         killed = rc == 124
         step = last_step(s.name) if rc != 0 else ""
-        if rc != 0 and self.retries:
+        # a scene killed for its timeout is not tried again: it would most likely hang as long
+        if rc != 0 and rc != 124 and self.retries and not self.over_budget():
             os.replace(log, os.path.join(LOGS, s.name + ".1.log"))
             rc, secs2 = self.attempt(s, log)
             times.append(secs2)
@@ -506,8 +509,12 @@ class Runner:
             self.peak_rss = max(self.peak_rss, self.rss)
             time.sleep(0.5)
 
+    def over_budget(self):
+        return bool(self.budget) and time.monotonic() - self.t0 >= self.budget
+
     def run(self):
         self.finished, self.peak_rss = False, 0
+        self.t0 = time.monotonic()
         threading.Thread(target=self.sample_memory, daemon=True).start()
         try:
             self._run()
@@ -517,6 +524,14 @@ class Runner:
     def _run(self):
         with self.cv:
             while self.pending or self.running:
+                if self.pending and self.over_budget():
+                    for s in self.pending:  # left unstarted: the summary prints before CI's job timeout
+                        self.results[s.name] = {"result": "NOT RUN", "times": [], "log": "-", "killed": False,
+                                                "step": f"the run's {self.budget:.0f} s budget was used up"}
+                        self.order.append(s.name)
+                        print(f"NOT RUN {s.name} (the run's {self.budget:.0f} s budget was used up)", flush=True)
+                    self.pending = []
+                    continue
                 started = False
                 for s in list(self.pending):
                     if self.can_start(s):
@@ -527,7 +542,8 @@ class Runner:
                         threading.Thread(target=self.run_one, args=(s,), daemon=True).start()
                         started = True
                 if not started:
-                    self.cv.wait(0.5 if self.mem_budget else None)  # memory goes down without a notify
+                    # memory goes down without a notify; the budget runs out without one
+                    self.cv.wait(0.5 if self.mem_budget or self.budget else None)
 
 
 def main():
@@ -551,6 +567,9 @@ def main():
     ap.add_argument("--retries", type=int, default=1, choices=(0, 1))
     ap.add_argument("--timeout", type=int, default=0, help=f"seconds per attempt, for every scene (default: "
                     f"{TIMEOUT_X}x the scene's typical or last time, at least {TIMEOUT_MIN} s)")
+    ap.add_argument("--max-minutes", type=float, default=float(os.environ.get("SCENE_MAX_MINUTES", "0")),
+                    help="the whole run's budget: past it no scene starts and running ones are killed, so "
+                    "the summary prints before a CI job's timeout (SCENE_MAX_MINUTES; default 0: none)")
     ap.add_argument("--no-fail-fast", action="store_true", help="run every script line after a failure "
                     "(PI_DESK_SCRIPT_FAIL_FAST=0): to see all of a script's failures at once")
     ap.add_argument("--no-build", action="store_true")
@@ -610,7 +629,8 @@ def main():
     print(f"scenes: {len(chosen)} scenes, {jobs} at a time (Chromium: {a.cef_jobs}; memory budget "
           f"{a.mem_gb:g} GB), load {load0:.1f}", flush=True)
     t0 = time.monotonic()
-    r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30), not a.no_fail_fast, last)
+    r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30), not a.no_fail_fast, last,
+               a.max_minutes * 60)
     r.run()
     wall = time.monotonic() - t0
 
@@ -627,11 +647,13 @@ def main():
         res = r.results[name]
         t = " + ".join(f"{x:.0f}" for x in res["times"])
         rows.append(f"{name:20} {res['result']:6} {t:>6}  {res['log']}")
-        if res["result"] == "FAIL":
+        if res["result"] == "NOT RUN":
+            rows.append(f"{'':20} {res['step']}")
+        elif res["result"] == "FAIL":
             rows.append(f"{'':20} {'killed after its timeout' if res['killed'] else 'failed'}; last script step: "
                         f"{res['step'] or '(none recorded)'}")
     tier_of = {s.name: s.tier for s in chosen}
-    failed = [n for n in r.order if r.results[n]["result"] == "FAIL"]
+    failed = [n for n in r.order if r.results[n]["result"] in ("FAIL", "NOT RUN")]
     soft = [n for n in failed if tier_of[n] == a.soft_tier]
     hard = [n for n in failed if n not in soft]
     flaky = [n for n in r.order if r.results[n]["result"] == "FLAKY"]
@@ -649,6 +671,8 @@ def main():
     with open(os.path.join(LOGS, "summary.txt"), "w") as fh:
         fh.write(text + "\n")
     for n in failed:
+        if r.results[n]["result"] == "NOT RUN":
+            continue
         log = os.path.join(ROOT, r.results[n]["log"])
         tail = open(log, errors="replace").read().splitlines()[-30:]
         if GHA:

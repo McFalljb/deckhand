@@ -231,6 +231,9 @@ or place`) used to pass its scene. `fail-fast-test` checks that a bogus `dragtab
 `panes.sh`, with and without fail-fast. The runner kills a scene
 after 3× its typical or last time, at least 120 s (`--timeout` sets one for all; it was 900 s
 for every scene, and `jobs` once waited all of it out, failing one 15 s wait after another).
+A scene killed for its timeout is not retried. `--max-minutes` (`SCENE_MAX_MINUTES`; CI: 14 of
+the job's 25 min, nightly 32 of 45) is the whole run's budget: past it no scene starts (they are
+**NOT RUN**, a failure) and running ones are killed, so the summary table always prints.
 Each script line is written to `build/scenes/<scene>.step` as it starts
 (`PI_DESK_SCRIPT_STEP`), so a failed or killed scene's summary row says where it was:
 `killed after its timeout; last script step: tests/scripts/menus.txt:188: wait 300`.

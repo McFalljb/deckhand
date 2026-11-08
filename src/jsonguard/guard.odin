@@ -11,8 +11,16 @@
 // - ends a string at a raw newline (String_Not_Terminated) and its parser
 //   carries on, so a naive bracket count drifts out of step with it;
 // - unmarshal into a struct grows the stack per key of one object (100,000
-//   keys overflow a 512 KiB thread).
+//   keys overflow a 512 KiB thread);
+// - JSON5 only: after "0x" its tokenizer swallows the next rune unseen,
+//   whatever it is (a quote, a closer, a comment's '/'), and the parser
+//   ignores the Invalid_Number, so a scan that saw that rune drifts out of
+//   step ([0x" then 60,000 "[" overflows the stack); and it recurses once
+//   per comment in a row (get_token -> get_token: 10,000 "/**/" overflow).
 // check refuses all of those, in one pass, before anything parses.
+//
+// The default spec is strict JSON (.JSON): what programs write. JSON5 only
+// where a person edits the file (pi's settings.json) and the caller asks.
 //
 // Stack measured (dev-2026-09, arm64, a 512 KiB thread: the smallest any
 // Deckhand thread gets; Odin threads take RLIMIT_STACK, normally 8 MiB):
@@ -36,6 +44,9 @@ DEPTH_CAP :: 256
 // Plain parse has no per-key stack cost: unlimited by default.
 MAX_KEYS_UNMARSHAL :: 4096
 NO_KEY_LIMIT :: max(int)
+// JSON5 comments in a row, only whitespace between (the tokenizer recurses
+// once per comment; a person's file has a few).
+MAX_COMMENT_RUN :: 64
 
 Refusal :: enum u8 {
 	None,
@@ -44,13 +55,16 @@ Refusal :: enum u8 {
 	Too_Deep,
 	Too_Many_Keys, // in one object
 	Unbalanced, // more closers than openers
+	Hex_Prefix, // JSON5: "0x" starting a token, then a rune that is not [0-9A-Za-z] (the tokenizer swallows it unseen)
+	Comment_Run, // JSON5: more than MAX_COMMENT_RUN comments in a row
 }
 
 // Why b must not reach the parser (.None: it may). Says nothing else about
 // validity; json.parse decides that after. spec matters for JSON5 (and
 // SJSON/MJSON): single-quoted strings and comments, scanned exactly as the
-// tokenizer scans them, so the count cannot be fooled by a bracket in either.
-check :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.DEFAULT_SPECIFICATION) -> Refusal {
+// tokenizer scans them, so the count cannot be fooled by a bracket in either,
+// and the two ways its tokenizer goes wrong (hex prefixes, comment runs).
+check :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.Specification.JSON) -> Refusal {
 	if !utf8.valid_string(s) do return .Not_Utf8
 	limit := min(max_depth, DEPTH_CAP)
 	keys: [DEPTH_CAP + 1]int
@@ -58,6 +72,7 @@ check :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec 
 	quote: u8 = 0 // the open string's quote, 0 outside strings
 	esc := false
 	json5 := spec != .JSON
+	comments := 0 // JSON5 comments in a row
 	for i := 0; i < len(s); i += 1 {
 		c := s[i]
 		if quote != 0 {
@@ -67,12 +82,34 @@ check :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec 
 			else if c == quote do quote = 0
 			continue
 		}
+		// a run of comments goes on over whitespace (and over any non-ASCII
+		// byte: U+2028, U+2029 and U+FEFF are JSON5 whitespace; counting
+		// on over others only refuses more); anything else is a token
+		comment := false
+		switch c {
+		case ' ', '\t', '\v', '\f', '\r', '\n', 0x80 ..= 0xff: continue
+		}
 		switch c {
 		case '"': quote = c
 		case '\'': if json5 do quote = c
+		case '0':
+			// The tokenizer: a token that starts with "0x" or "0X" (JSON5) reads
+			// the rune after the 'x' without looking at it, then hex digits. A
+			// '0' after [0-9A-Za-z_.+-] never starts a token (the identifier or
+			// number before it goes on through it), so only there may the
+			// guard skip the check. A rune that is not [0-9A-Za-z] there would
+			// be read unseen: refused (a valid JSON5 hex number never has one).
+			if !json5 || i + 2 >= len(s) || (s[i + 1] != 'x' && s[i + 1] != 'X') do break
+			if i > 0 && token_byte(s[i - 1]) do break
+			if !alnum(s[i + 2]) do return .Hex_Prefix
 		case '/':
 			// comments (not JSON's): as the tokenizer skips them
 			if !json5 || i + 1 >= len(s) do break
+			if s[i + 1] == '/' || s[i + 1] == '*' {
+				comment = true
+				comments += 1
+				if comments > MAX_COMMENT_RUN do return .Comment_Run
+			}
 			if s[i + 1] == '/' {
 				i += 2
 				for i < len(s) && s[i] != '\n' do i += 1
@@ -103,14 +140,21 @@ check :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec 
 			keys[depth] += 1
 			if keys[depth] > max_keys do return .Too_Many_Keys
 		}
+		if !comment do comments = 0
 	}
 	return .None
 }
 
-shape_ok_string :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.DEFAULT_SPECIFICATION) -> bool {
+@(private = "file")
+alnum :: proc(c: u8) -> bool {return '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'}
+// A byte an identifier or number goes on through ("-0", ".0", "e0", "a0", "_0").
+@(private = "file")
+token_byte :: proc(c: u8) -> bool {return alnum(c) || c == '_' || c == '.' || c == '+' || c == '-'}
+
+shape_ok_string :: proc(s: string, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.Specification.JSON) -> bool {
 	return check(s, max_depth, max_keys, spec) == .None
 }
-shape_ok_bytes :: proc(b: []u8, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.DEFAULT_SPECIFICATION) -> bool {
+shape_ok_bytes :: proc(b: []u8, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, spec := json.Specification.JSON) -> bool {
 	return check(string(b), max_depth, max_keys, spec) == .None
 }
 shape_ok :: proc {
@@ -125,7 +169,8 @@ refusal_error :: proc(r: Refusal) -> json.Error {
 	case .None: return .None
 	case .Not_Utf8: return .Invalid_Rune
 	case .Control_In_String: return .String_Not_Terminated
-	case .Too_Deep, .Too_Many_Keys, .Unbalanced: return .Unexpected_Token
+	case .Too_Deep, .Too_Many_Keys, .Unbalanced, .Comment_Run: return .Unexpected_Token
+	case .Hex_Prefix: return .Invalid_Number
 	}
 	return .Unexpected_Token
 }
@@ -134,13 +179,13 @@ refusal_error :: proc(r: Refusal) -> json.Error {
 // limits. A refused input returns (nil, a non-None error), like bad JSON.
 // fix_utf8: replace invalid UTF-8 with U+FFFD (a copy, in allocator) instead
 // of refusing it, for text that is worth reading lossily (a session title).
-parse_string :: proc(data: string, spec := json.DEFAULT_SPECIFICATION, parse_integers := false, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, fix_utf8 := false, loc := #caller_location) -> (json.Value, json.Error) {
+parse_string :: proc(data: string, spec := json.Specification.JSON, parse_integers := false, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, fix_utf8 := false, loc := #caller_location) -> (json.Value, json.Error) {
 	data := data
 	if fix_utf8 && !utf8.valid_string(data) do data = replace_invalid_utf8(data, allocator)
 	if r := check(data, max_depth, max_keys, spec); r != .None do return nil, refusal_error(r)
 	return json.parse_string(data, spec, parse_integers, allocator, loc)
 }
-parse_bytes :: proc(data: []u8, spec := json.DEFAULT_SPECIFICATION, parse_integers := false, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, fix_utf8 := false, loc := #caller_location) -> (json.Value, json.Error) {
+parse_bytes :: proc(data: []u8, spec := json.Specification.JSON, parse_integers := false, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := NO_KEY_LIMIT, fix_utf8 := false, loc := #caller_location) -> (json.Value, json.Error) {
 	return parse_string(string(data), spec, parse_integers, allocator, max_depth, max_keys, fix_utf8, loc)
 }
 
@@ -165,10 +210,10 @@ parse :: proc {
 }
 
 // json.unmarshal with the guard in front (keys limited by default: see MAX_KEYS_UNMARSHAL).
-unmarshal :: proc(data: []u8, ptr: ^$T, spec := json.DEFAULT_SPECIFICATION, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := MAX_KEYS_UNMARSHAL) -> json.Unmarshal_Error {
+unmarshal :: proc(data: []u8, ptr: ^$T, spec := json.Specification.JSON, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := MAX_KEYS_UNMARSHAL) -> json.Unmarshal_Error {
 	if r := check(string(data), max_depth, max_keys, spec); r != .None do return refusal_error(r)
 	return json.unmarshal(data, ptr, spec, allocator)
 }
-unmarshal_string :: proc(data: string, ptr: ^$T, spec := json.DEFAULT_SPECIFICATION, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := MAX_KEYS_UNMARSHAL) -> json.Unmarshal_Error {
+unmarshal_string :: proc(data: string, ptr: ^$T, spec := json.Specification.JSON, allocator := context.allocator, max_depth := MAX_DEPTH, max_keys := MAX_KEYS_UNMARSHAL) -> json.Unmarshal_Error {
 	return unmarshal(transmute([]u8)data, ptr, spec, allocator, max_depth, max_keys)
 }

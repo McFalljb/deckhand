@@ -289,11 +289,10 @@ json_guard_check_refuses_what_the_parser_mishandles :: proc(t: ^testing.T) {
 	for bad in ([]string{`[0x"]`, `[0x']`, "[0x]", "[0X}", "[0x/**/]", "[0x ]", "[0x,1]", "[0x\u00e9]"}) do testing.expectf(t, jg.check(bad, 4, spec = .JSON5) != .None, "%q passes", bad)
 	testing.expect_value(t, jg.check(`["0x]"]`, 4, spec = .JSON), R.None) // strict JSON has no hex
 	// JSON5 comments in a row (only whitespace between): the tokenizer recurses per comment
-	COMMENT_RUN :: 64 // jg.MAX_COMMENT_RUN
 	run :: proc(n: int, sep: string) -> string {return strings.concatenate({"[", strings.repeat(sep, n, context.temp_allocator), "1]"}, context.temp_allocator)}
-	testing.expect_value(t, jg.check(run(COMMENT_RUN, "/**/ "), spec = .JSON5), R.None)
-	testing.expect(t, jg.check(run(COMMENT_RUN + 1, "/**/ "), spec = .JSON5) != .None, "a run of block comments")
-	testing.expect(t, jg.check(run(COMMENT_RUN + 1, "// x\n\t"), spec = .JSON5) != .None, "a run of line comments")
+	testing.expect_value(t, jg.check(run(jg.MAX_COMMENT_RUN, "/**/ "), spec = .JSON5), R.None)
+	testing.expect(t, jg.check(run(jg.MAX_COMMENT_RUN + 1, "/**/ "), spec = .JSON5) != .None, "a run of block comments")
+	testing.expect(t, jg.check(run(jg.MAX_COMMENT_RUN + 1, "// x\n\t"), spec = .JSON5) != .None, "a run of line comments")
 	testing.expect_value(t, jg.check(run(1000, "/**/ 1,"), spec = .JSON5), R.None) // a token between: no recursion
 	// the default is strict JSON: JSON5 only when a caller asks
 	testing.expect_value(t, jg.check("{a: 1 /* [[[[[ */}", 4), R.Too_Deep)

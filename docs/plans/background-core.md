@@ -5,8 +5,20 @@ window closes) and [#5](https://github.com/McFalljb/deckhand/issues/5) (every ma
 sidebar). Design only: no app code has changed. Investigated at `main` 6ee5586. Modelled on
 Herdr 2 (herdr-core cd12ddd, herdr-app 7fe7ac3, Apache-2.0).
 
-Status (2026-11-07): revision 3, after review rounds 1 and 2. The user's decisions are in §2.
-Gating first tasks: the VT snapshot spike (S1) and the signing/runtime spike (S2), §10.
+Status (2026-11-07): revision 4. Both spikes are done and folded in here. Q0 is merged (#18).
+M1 is broken into PRs in §10.1. The user's decisions are in §2.
+
+- **S1 (VT snapshot): GO,** via libghostty-vt's binary snapshot (GHOSTSNP v1). It was exact in
+  360/360 runs. Branch `spike/vt-snapshot` 6bf748e, `tools/vt-snapshot-spike/`.
+- **S2 (platform), on macOS 26.6.2 only:**
+  - Audit tokens are *live*.
+  - launchd detach works.
+  - Holder re-exec works, but `execve("/dev/fd/N")` doesn't.
+  - Ad-hoc builds can't load ad-hoc CEF under library validation.
+  - Quarantine SIGKILLs a launchd-started binary.
+
+Revision 4: §5.3 (live audit tokens), §5.5 and §7.2 (GHOSTSNP), §6 (launchd facts), §7.3 (the
+keeper-gated handover replaces `/dev/fd/N`), §9, §10.1, §11, §12.
 
 Revision 3:
 - Identity is a **Developer ID designated requirement** checked by audit token, with library
@@ -61,7 +73,7 @@ Contents: 1 Goal · 2 Decisions · 3 Process model · 4 What moves where · 5 Pr
 |---|---|---|
 | Processes | Window, core and PTY holder (herdr), not exec-in-place of the core | §3, §9 |
 | Holder upgrades | The holder **re-execs itself** (its pid survives, so it stays the children's parent). Drain is only the fallback. | §7.3, §9 |
-| Terminal output | Option (a): bytes plus the window's own ghostty-vt, with VT snapshot resync | §5.5 |
+| Terminal output | Option (a): bytes plus the window's own ghostty-vt, resynced by a **GHOSTSNP** snapshot (S1). The VT formatter is only an `inexact` fallback. | §5.5 |
 | Identity | A designated requirement (identifier + Team ID, Developer ID, hardened runtime), checked by audit token, **in both directions** | §5.3 |
 | Sequencing | **M1 may ship ad-hoc** with a same-user residual. **The M4 window/core split (`ui` over a socket) waits for the Developer ID.** | §5.4, §10 |
 | First step | M1: the holder in front of today's single-process app | §10 |
@@ -156,15 +168,36 @@ From the map's §2. C = core, W = window, H = holder.
 
 ### 5.2 Handshake
 
-The hello reply gains `generation` (today's `v`), `version`, `features`, `methods`, `machine` and
-`holder_wire`. Today no socket token maps to `ui` (socket.odin:850; `.UI` is in-process only).
+The hello reply gains `generation` (today's `v`), `version`, `features`, `methods`, `machine`,
+`holder_wire` and `snapshot` (the formats this side can decode, best first:
+`["ghostsnp/1", "vt"]`). Today no socket token maps to `ui` (socket.odin:850; `.UI` is in-process only).
 M4 adds the first one, which makes §5.3 the critical boundary.
 
 ### 5.3 Auth (Developer ID model)
 
-**Identity = a designated requirement (DR)**, checked against the peer's **audit token**
-(`LOCAL_PEERTOKEN`, which includes pidversion, so a process that execs after connecting fails):
-1. Get the peer's code with `SecCodeCopyGuestWithAttributes(kSecGuestAttributeAudit)`.
+**Identity = a designated requirement (DR)**, checked against the peer's **audit token**.
+
+**The token is live (S2, Q1).** `LOCAL_PEERTOKEN` and `LOCAL_PEERPID` report the process that
+*last did I/O* on the peer socket, re-resolved on every call, not the process that connected:
+- after an exec, they report the new image (same pid, new pidversion);
+- after an fd handed to a forked child, they report that child;
+- after the peer exits, they fail with `EINVAL`.
+
+So the rule is:
+- **Read the token at accept, before reading any byte**, and run the DR check (steps 1–4) on it.
+- **On every read**, call `getsockopt` again. Drop the connection if `pid` or `pidversion`
+  differs, or on `EINVAL`.
+- Deckhand's own binaries open their own connections with `SOCK_CLOEXEC` and never share the fd.
+- **Residual:** bytes written by another process X that land in the same `read()` as a later
+  write by the genuine G are attributed to G. This needs X to share G's fd, which hardened
+  runtime (no task-port injection) and CLOEXEC rule out.
+- **Today's Claude token check has the same weakness** (`socket_claude_peer_ok`,
+  socket.odin:247-258). It reads `LOCAL_PEERPID` once, at hello, and gets the last writer. The
+  check is same-user anyway, so this is a residual; PROTOCOL.md gets a line.
+
+The DR check:
+1. Get the peer's code with `SecCodeCopyGuestWithAttributes(kSecGuestAttributeAudit)` on the
+   saved token. A token whose process exec'd since gives `errSecCSNoSuchCode` (-67065).
 2. Check it with `SecCodeCheckValidity(kSecCSStrictValidate)` against the requirement:
 
 ```
@@ -173,6 +206,9 @@ anchor apple generic and certificate leaf[subject.OU] = "<TEAM_ID>"
 ```
 
 3. Read the code flags, and require `CS_RUNTIME` (hardened runtime) and no `get-task-allow`.
+   **From D0 only**: S2 showed an ad-hoc binary under hardened runtime and library validation
+   refuses ad-hoc libraries ("different Team IDs"), so ad-hoc builds can't turn the runtime on with
+   CEF.
 4. Read the **version from the signed `Info.plist`** (`kSecCodeInfoPList`), which serves as the
    `seq` for floors (P5).
 
@@ -242,7 +278,10 @@ token and handover files 0600.
 
 ### 5.4 Until the Developer ID
 
-Ad-hoc builds have no team identity, so **every check above degrades to "same user"**. The DR
+Ad-hoc builds have no team identity, so **every check above degrades to "same user"**. S2
+showed the token yields a CDHash even for ad-hoc code, so the core and holder *could* pin each
+other's CDHash. Per decision 5 that isn't planned: a pin doesn't stop a same-user process running
+the genuine binary, and the Developer ID replaces it. The DR
 checks are skipped, with a single banner in Settings: "This copy isn't signed with Deckhand's
 Developer ID: other programs running as you can control its sessions". The holder still keeps
 its HMAC key and its successor secret. Those raise the bar against accidents, not against a
@@ -263,22 +302,60 @@ holder and type into any terminal.
 
 ```
 window: term.attach {tab_id, history_lines}       → {channel, offset}
-core:   [ch][SNAPSHOT] meta JSON + VT bytes at that offset
+core:   [ch][SNAPSHOT] meta JSON + GHOSTSNP bytes at that offset (screen first, then history)
 core:   [ch][DATA] bytes from offset, coalesced ≤ 8 ms or 64 KiB
 core:   [ch][RESIZE] {offset, cols, rows, xpixel, ypixel}   (applied at that byte offset)
 window: [ch][DATA] encoded input · [ch][CREDIT] n · [ch][FOCUS] · term.detach
 ```
 
 - The core is the only resize authority, and the only one that answers terminal queries.
-- Snapshot = VT bytes plus meta (cursor, modes, title, colours, OSC 7501 status, exit state).
-  It's version-independent. **S1 gates it.**
+- **Snapshot = meta JSON + GHOSTSNP** (libghostty-vt v1.4.0 `snapshot.h`). S1 measured it
+  **exact in 360/360 runs**, including snapshots taken mid-escape and mid-UTF-8. It carries
+  everything:
+  - both screens and their scrollback, cursor, pen and saved cursor;
+  - modes, margins, tab stops, charsets, palette, title and pwd;
+  - kitty keyboard flags, hyperlinks, DECSCA protection, OSC 133 marks;
+  - the unfinished parser input.
+
+  Meta holds what Deckhand keeps beside the terminal: the `format` used, `offset`, cols/rows/
+  pixels, OSC 7501 status and exit state.
+- **Fallback: the VT formatter** (`ghostty_formatter_terminal_new`), marked **`inexact`**, used
+  only when the two sides share no `ghostsnp/N`. S1 found it loses:
+  - the primary screen while the alt screen is up (everything behind vim, htop or Claude Code);
+  - the DECSC saved cursor;
+  - per-cell DECSCA;
+  - OSC 133 marks.
+- **Versions:** GHOSTSNP v1 makes no compatibility promise, and a decoder rejects other
+  versions. Both sides list `snapshot` formats in hello (§5.2). **Every libghostty bump** runs an
+  old-encode/new-decode round trip before shipping; this goes on DEVELOPING.md's checklist for
+  rebuilding libghostty-vt.
+- **Size:** 10k lines of styled scrollback at 200×60 is 9.6 MB, 1.7 MB with zstd, against the
+  50 KB screen alone. Encoding takes 2.5–4.9 ms and decoding 6–11 ms, so speed is no issue.
+  Snapshots are therefore:
+  - **compressed**: the codec's `OPT_COMPRESS_HISTORY` locally; zstd on streams and over remote
+    links;
+  - **exempt from credit**, sent on their own queue, which a newer snapshot replaces;
+  - **streamed screen-first**: the window renders at the codec's `READY` marker (about 50 KB),
+    and history pages follow newest→oldest.
+
+  The codec has no "N history lines" option, so `history_lines` is enforced by the decoder
+  stopping early.
+- **Every terminal sets `OPT_CONTINUATION_MAX_BYTES` at creation**, in the core and in the
+  window. Encoding fails with `Invalid_Value` if the parser is mid-sequence without it, and also
+  while an unfinished sequence is over the limit (a 2 MiB OSC 52 against a 1 MiB limit). **Such a
+  terminal can't be snapshotted until the sequence ends.** Retry after the next ground state, and
+  set the limit to the largest sequence Deckhand accepts.
+- **Decoded terminals keep no callbacks** (write_pty, title, bell, OSC 7501/133, colour scheme)
+  and no continuation tracking unless `DECODER_OPT_RETAIN_CONTINUATION` is set. The window and a
+  new core re-register them through one helper shared with `term_start`, and re-apply the theme if
+  theirs differs.
 - Hidden tabs aren't streamed; detach 2 s after a tab is hidden.
 
 ### 5.6 Flow control
 
 | Where | Rule |
 |---|---|
-| Core → window | Credit, starting at 256 KiB. More than 4 MiB behind: a fresh `SNAPSHOT`. Channel 0 never blocks. |
+| Core → window | Credit for `DATA`, starting at 256 KiB. More than 4 MiB behind: a fresh `SNAPSHOT`. Snapshots are exempt from credit and sent compressed, screen first (§5.5). Channel 0 never blocks. |
 | State | Deltas at ≤ 60/s. Overflow sends a full state. |
 | Holder → core, core attached | Queue 8 MiB, then stop reading the PTY (as herdr does). |
 | Holder, no core for more than 3 s | Read into the 1 MiB tail only, so programs never stall. Offsets keep counting. |
@@ -324,7 +401,9 @@ The holder disclaims TCC responsibility at start (herdr's `macos_responsibility.
 **Starting a process outside the app** follows herdr's launchd model (macos_launchd.rs:176-262):
 1. The launcher makes a 0700 temp dir with `job.plist` (0600) and a `ready` socket. The label is
    unique per launch: `dev.deckhand.<core|hold>.<pid>.<ns>`.
-2. It runs `launchctl bootstrap gui/<uid>` and removes the plist.
+2. It runs `launchctl bootstrap gui/<uid>` and removes the plist. The plist sets
+   `RunAtLoad=true`, `KeepAlive=false`, `AbandonProcessGroup=true` and
+   **`ProcessType=Interactive`**.
 3. The job runs `deckhand-core __detach <ready>`. It forks; the parent exits; the child calls
    `setsid`, execs, and waits until its ppid is 1.
 4. The child connects to `ready`. The launcher **checks the peer (pid + DR, P8)**, boots the job
@@ -332,6 +411,19 @@ The holder disclaims TCC responsibility at start (herdr's `macos_responsibility.
    acks and serves.
 
 A failed bootstrap falls back to a direct spawn, with a logged warning.
+
+S2 facts (macOS 26.6.2):
+
+| Fact | Consequence |
+|---|---|
+| Bootstrap takes 7–25 ms and the handshake 33–70 ms; the environment arrives intact (74 vars) | Fine for on-demand start |
+| `ProcessType` sticks through fork, exec and bootout: Background = pri 4, Standard = 20, Interactive = 31 | Set `Interactive` explicitly |
+| **Bootout kills the job's own process.** Only a forked, setsid child survives. | The fork in step 3 is required |
+| A launcher killed between bootstrap and bootout **leaks the job** (loaded, not running), and the waiting child dies of SIGPIPE | A stale-job sweep at every launch (herdr's `remove_stale`). Launcher and child ignore SIGPIPE and log a failed handshake. |
+| A fixed label fails while loaded (`Bootstrap failed: 5: Input/output error`) | Unique labels |
+| `launchctl submit` makes a **KeepAlive** job that respawns | Never use it |
+| A quarantined binary is **SIGKILLed at exec**, from launchd too (`OS_REASON_EXEC`) | Strip quarantine after verifying (§7.1) |
+| `responsibility_spawnattrs_setdisclaim` works | The holder and core are TCC-responsible for themselves |
 
 | Event | What happens |
 |---|---|
@@ -345,8 +437,16 @@ A failed bootstrap falls back to a direct spawn, with a logged warning.
 | Logout or reboot | Everything stops; today's restore follows. |
 
 Rejected:
-- **The window spawning the core:** the core stays in the app's coalition, which macOS may kill
-  on quit (herdr 0.1.17).
+- **The window spawning the core** (fork + setsid). Herdr's reason, "macOS kills the app's
+  coalition on quit" (0.1.17), **did not reproduce on 26.6.2**: a plain fork + setsid child
+  survived an AppleScript quit, SIGTERM and SIGKILL of the app. Force Quit (⌥⌘⎋), logout and
+  macOS 14/15 are still untested. The launchd path is kept because a direct child:
+  - **stays in the app's coalition** (jetsam and energy accounting, and any RunningBoard
+    coalition termination);
+  - **is TCC-attributed to Deckhand.app** while the app lives;
+  - only S2's launchd child had its own coalition and its own responsibility from the start.
+
+  The disclaim fixes TCC attribution on its own; the coalition is the remaining reason.
 - **An SMAppService login agent:** it needs a Login Items prompt; deferred to M5.
 
 ---
@@ -371,8 +471,10 @@ Deckhand.app/                                  Developer ID, notarized (from M4;
   format (`cdhash none` on Linux). That is Ed25519, never checksum-only.
 - **Install:**
   - Copy the nested Core.app from the verified bundle to
-    `~/Library/Application Support/pi-desk/core/<v>/`, strip `com.apple.quarantine`, and check
-    the DR.
+    `~/Library/Application Support/pi-desk/core/<v>/`, strip `com.apple.quarantine` **after verifying** (S2: a
+    quarantined binary is SIGKILLed at exec, launchd included), and check the DR. Data files go in
+    `Contents/Resources` only: S2 showed a data file in `Helpers`, `MacOS` or `Frameworks` fails
+    signing and `--verify --deep --strict`; a signed Mach-O in `Helpers` is fine.
   - `current` and `previous` are symlinks switched by rename.
   - A version is collected when it is neither of those, nothing runs from it, and no tab was
     started from it. The integrations live there, so live tabs keep their paths across an app
@@ -388,13 +490,20 @@ Deckhand.app/                                  Developer ID, notarized (from M4;
    keeps reading into the tail from there.
 3. Old core:
    1. feeds bytes up to each acked offset into its emulator;
-   2. snapshots each terminal **at exactly that offset**;
+   2. snapshots each terminal **at exactly that offset**, in GHOSTSNP if the successor lists the
+      same `ghostsnp/N` (from `deckhand-core check`), else in VT (`inexact`):
+      - a terminal whose unfinished sequence is over the continuation limit can't be encoded
+        (§5.5). It is written as VT, marked `inexact`, and the holder's tail carries on from the
+        offset;
+      - snapshots go to `handover/<id>.snap` (0600, codec history compression), named in
+        `handover.json`;
    3. writes `handover.json` (0600, HMAC'd) with `min_reader`, runtime ids, the tab ↔ terminal
       map, pending confirmations, held Claude texts and waits, and the snapshot offsets;
    4. flushes `workspace.json` and points `current` at the successor;
    5. launches the successor, passing the secret over the peer-checked `ready` socket (§6);
    6. releases its locks.
-4. New core: `HELLO{successor_secret}` (and the DR). Then `WELCOME` and `TAIL{start}` per terminal:
+4. New core: `HELLO{successor_secret}` (and the DR). It decodes each snapshot, then
+   re-registers the callbacks and the theme (§5.5). Then `WELCOME` and `TAIL{start}` per terminal:
    - `start == snapshot offset`: exact;
    - `start < snapshot offset`: skip the overlap;
    - `start > snapshot offset`: **`inexact`**.
@@ -402,13 +511,29 @@ Deckhand.app/                                  Developer ID, notarized (from M4;
    during the gap times out, which TUIs handle; a stale `^[[?1;2c` never lands in vim.
 6. Requests in flight (a pending browser action, `claude_wait_idle`) are lost. Their callers see
    a reconnect. This is documented in PROTOCOL.md.
+7. **How tests check exactness: a screen hash, not snapshot bytes.** That is a hash of the
+   cell-by-cell dump of both screens, cursor and modes, which S1's comparator already produces.
+   Re-encoding a decoded terminal gives different bytes with an identical dump (S1: 40/180
+   alt-screen runs, from internal style and page order).
 
 ### 7.3 Holder upgrade (re-exec)
 
 Only when `WELCOME.holder_rev` is older than the new core's. `holder_rev` is bumped by hand, and
 CI fails if holder source changed without a bump.
 
-1. The core sends `UPGRADE{path}`. The holder checks the file's DR (static code).
+S2 confirmed the mechanism on 26.6.2:
+- after `execve`, the pid is unchanged, the masters are open and the children are still children
+  (`waitpid` works);
+- there is no SIGHUP and no output gap;
+- the new image is up about 2 ms after the call.
+
+It also showed that `execve("/dev/fd/N")` **fails on macOS** (`EACCES`: the fdesc node has no x
+bit), and that a path swapped between the check and `execve` runs. A check on the *file* can
+therefore never be trusted, so the terminals now pass through a **keeper-gated handover**,
+checked against what actually ran.
+
+1. The core sends `UPGRADE{path}`. The holder checks the file's DR (static code). This only
+   catches mistakes early; the real check is the keeper's, in step 4.
 2. **Preflight (P3):**
    - The holder serialises its state to a 0600 unlinked file:
      - terminals: id, pid, pgid, master fd, sizes, offsets, unreported exits;
@@ -418,32 +543,53 @@ CI fails if holder source changed without a bump.
    - It runs `path hold --dry-run-resume <fd>` as a **child**, with **dup'd** masters. The child
      resumes everything except reading and writing: it parses the state, fstats the fds, and
      builds its tables. Then it prints `holder_rev` and `wire` and exits 0.
-3. **Re-exec:**
-   - The writer threads pause **between whole `INPUT` frames** (P2).
-   - The pumps pause; output waits in the kernel PTY buffer.
-   - The holder forks a **keeper** that holds dup'd masters for 30 s: the R4 safety net, below.
-   - It clears `FD_CLOEXEC` on the fds it passes, then calls `execve(path, hold --resume-fd N)`.
-     S2 tries `execve("/dev/fd/N")` on the fd it verified, to close R3.
-   - The pid is unchanged, so the holder stays every child's parent.
-   - If `execve` fails, the old image restores CLOEXEC, resumes and sends `UPGRADE_FAILED`.
-4. **The new image:**
-   1. **resets every signal disposition and the signal mask (P1)**, because exec keeps ignored
-      signals and the mask;
+3. **Keeper and re-exec:**
+   - The writer threads pause **between whole `INPUT` frames** (P2), and the pumps pause; output
+     waits in the kernel PTY buffer.
+   - The holder forks a **keeper**. The keeper holds the masters, the state fd, the listener and
+     the HMAC key. It is the only process that has them.
+   - The holder closes its own copies of all of these. It then calls
+     `execve(path, hold --resume <keeper-socket>)` while holding **none of them**. Only the pid,
+     and with it the children's parenthood, carries over.
+   - If `execve` fails, the keeper hands everything back to the old image (same pid, same
+     pidversion), which resumes and sends `UPGRADE_FAILED`.
+4. **The keeper gates the handover:**
+   1. The new image connects to the keeper.
+   2. The keeper reads the peer's **live audit token** and requires the holder's pid with a **new
+      pidversion**.
+   3. It checks the DR on that token. The token reflects what the kernel actually ran: a swapped
+      file fails here.
+   4. Only then does it send the masters, state fd, listener and key over `SCM_RIGHTS`. S2 showed
+      this costs one socket round trip in the gap.
+   5. A swapped image gets the pid, and so parenthood, but **never the terminals or the key**.
+      The keeper adopts them itself (step 6), and the core reports "the session holder failed
+      verification".
+   6. Under ad hoc (§5.4) the keeper's check is identifier-only, so it guards against accidents,
+      not attackers.
+5. **The new image** (after it receives the fds):
+   1. **resets every signal disposition and the signal mask (P1)**. S2: an inherited `SIG_IGN`
+      and blocked mask **leak into every child spawned later** (a shell whose SIGPIPE is ignored
+      at entry can't trap it), and exec clears `SA_NOCLDWAIT`;
    2. sets CLOEXEC again;
    3. reaps exits from the gap (`waitpid(-1, WNOHANG)`);
    4. replays the pending input;
    5. resumes the pumps;
-   6. binds a fresh socket (so its listener credentials are post-exec);
+   6. binds a fresh socket;
    7. tells the keeper to exit.
 
    The core reconnects, re-checks the holder's DR (P9), and sees `previous: upgrade`.
-5. **Keeper, if the new image dies within 30 s:** the masters stay open, so there is no SIGHUP.
-   The keeper re-execs the *old* holder binary in **adopt-orphans mode**. It serves the same
-   terminals, but the children are now launchd's, so it watches them with
-   `kqueue EVFILT_PROC NOTE_EXIT`, and exit codes are unknown. The core marks those tabs
-   `degraded`. They work until closed.
-6. **Fallback drain:** after `UPGRADE_FAILED` or a failed preflight, the old holder keeps its
-   terminals, the core speaks its older wire, and new terminals go to a new holder.
+6. **Keeper fallback, if the new image dies, fails the check, or doesn't connect within 10 s:** the masters are still
+   open in the keeper, so there is no SIGHUP (S2: sessions got ppid 1 with no gap). The keeper
+   re-execs the *old* holder binary in **adopt-orphans mode**:
+   - It serves the same terminals.
+   - The children are now launchd's, so it watches them with `kqueue EVFILT_PROC
+     NOTE_EXIT|NOTE_EXITSTATUS`. **That returns the wait status for non-children** (S2 saw
+     SIGTERM; M1 checks `exit(n)` too).
+   - The core marks those tabs **`degraded`**: they're not the holder's children (no `waitpid`,
+     no parent-based job control), but they keep output, input and exit codes, and work until
+     closed.
+7. **Fallback drain:** after a failed preflight, the old holder keeps its terminals, the core
+   speaks its older wire, and new terminals go to a new holder.
 
 ### 7.4 App update, step by step
 
@@ -503,8 +649,8 @@ crashing.**
 | Old core crashes before `GOODBYE` | A crash restart: tails, `inexact`, no query replies | Kept |
 | `handover.json` missing, stale (> 3 min, another boot), bad MAC or `min_reader` too high | Fail closed: restore from `workspace.json` + `tokens.json` (whose MAC must also verify, §5.3). Parked confirmations and held texts are dropped. | Kept |
 | Holder upgrade preflight or `execve` fails | Fallback drain | Kept |
-| The new holder image crashes within 30 s | The keeper adopts the orphans (§7.3 step 5) | Kept, `degraded` |
-| The new holder image crashes after 30 s, or a holder crashes | `holder_lost`: pi and Claude resume from disk, shells restart fresh | Lost |
+| The new holder image crashes, fails the keeper's check, or doesn't connect within 10 s | The keeper adopts the orphans (§7.3 step 6) | Kept, `degraded` (exit codes kept) |
+| The new holder image crashes after the keeper has exited, or a holder crashes | `holder_lost`: pi and Claude resume from disk, shells restart fresh | Lost |
 | Disk full while writing the handover | Abort before `GOODBYE` | Kept |
 
 ---
@@ -579,12 +725,12 @@ automatic) lets the user pick the moment, because the remote sessions pause brie
 | Old sessions get holder fixes | at once | only when those tabs close (weeks for a pi session) |
 | Frozen wire | the bootstrap subset; the rest grows | **the whole wire, forever**. Round 1 found it too narrow before it shipped. |
 | Holders alive | one | one per build still holding tabs |
-| A bad holder build | the preflight dry run, then the keeper adopts orphans within 30 s | hurts only new terminals |
+| A bad or swapped holder build | preflight dry run; the keeper gates the fds on the live audit token and adopts orphans if the new image fails | hurts only new terminals |
 | Code | state, fd and signal handling, preflight, keeper (~600 lines, in the holder) | none extra, but the core must speak every old wire |
 
 Re-exec wins: a frozen full wire costs something on every future change, and with the dry run plus
-the keeper, a bad holder build no longer means lost sessions in the first 30 s. Drain remains the
-fallback. Also rejected: fd passing (exit codes lost), one holder per terminal (100+ processes),
+the keeper, a bad or swapped holder build that fails to start never gets the terminals. Drain remains the
+fallback. Also rejected: fd passing to a new process (children reparent to launchd; `NOTE_EXITSTATUS` keeps their exit codes, S2, but there's no `waitpid` or parent job control, and a core crash still needs a holder), one holder per terminal (100+ processes),
 and tmux (ROADMAP 2026-10-30).
 
 ---
@@ -595,10 +741,10 @@ Every step ships on its own.
 
 | # | Step | Ships | Size |
 |---|---|---|---|
-| Q0 | **PTY master fds CLOEXEC.** pty_posix.odin:111 sets only `O_NONBLOCK`, so later children inherit earlier masters. Add a test that a new shell holds no other master. | Closing a tab reliably hangs it up | ½ day |
-| S1 | **VT snapshot spike** (gating): whole-screen VT from libghostty-vt v1.4.0's selection formatter, plus modes. A corpus round-trip compared cell by cell. Fallback: synthesised CUP+SGR+text (~200 lines). | Go/no-go for option (a) and exact handover | 1 week |
-| S2 | **Platform spike:** audit-token DR checks; herdr-style launchd detach on macOS 14 and 15 (survives app quit); holder re-exec with live PTYs, the keeper and `execve("/dev/fd/N")`; the TCC disclaim | Facts for §5.3, §6, §7.3 | 1 week |
-| M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. One security review round, plus a second if a Developer ID is in place by then. **Doc changes:** PROTOCOL.md §1, CLAUDE.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 5–7 weeks |
+| Q0 | ✅ **PTY master fds CLOEXEC** (merged, #18) | Closing a tab reliably hangs it up | done |
+| S1 | ✅ **VT snapshot spike: GO** via GHOSTSNP (exact in 360/360; the formatter is the fallback). Branch `spike/vt-snapshot` 6bf748e. | §5.5, §7.2 | done |
+| S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit, logout (manual, before M1 ships). | §5.3, §6, §7.3 | done (14/15 owed) |
+| M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
 | D0 | **Developer ID** (the user's timing): certificate; `release.sh`'s existing Developer ID and notarization path as the default; CEF signed under the team; library validation on; DR checks switched on | M4 may start | ~1 week |
 | M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop | Compiler-checked split; hidden windows stop stalling parsing | 2–3 weeks |
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing | The real protocol under every test | 4–6 weeks |
@@ -607,7 +753,27 @@ Every step ships on its own.
 | M6 | **Remote:** connect, install, update, caps (§8.3, the CEF request handler), sidebar, offline states, file fetch, harness setup, plus a **headless Linux core and release target** | **#5 done** | 7–11 weeks + 2–3 for Linux |
 | M7 | Several windows | More windows | 2–4 weeks |
 
-Total: about 29–44 weeks. M1 alone delivers most of #4's value.
+Remaining: about 31–46 weeks, now that Q0, S1 and S2 are done. M1 grew by 2 weeks, for the snapshot bindings and the keeper gate.
+
+### 10.1 M1 in four PRs
+
+The split-panes lesson: fewer, larger PRs, and one combined review where that's safe. Each PR
+merges on its own, keeps `main` releasable, and runs its tests in under 3 minutes.
+
+- **The holder path stays off by default** behind the setting `keep_sessions` until PR D turns
+  it on. It appears under Settings › Experimental: *Keep sessions running when Deckhand quits*.
+  Like every setting, it is user-only.
+- **Ad hoc throughout** (§5.4). DR checks run as same-user until D0.
+
+| PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
+|---|---|---|---|---|---|
+| **A. Snapshot and holder wire libraries** (no behaviour change) | GHOSTSNP, continuation, terminal formatter and data-enum bindings, ported from `tools/vt-snapshot-spike/ffi.odin` (6bf748e). Every terminal sets `OPT_CONTINUATION_MAX_BYTES` at creation. One callback-and-theme registration helper, used by `term_start` and by decoded terminals. `snapshot_encode`/`decode` (meta JSON + GHOSTSNP, VT fallback, screen hash). The holder wire codec as its own package, with golden vectors and `released-holder.json`. | `src/ghostty/ghostty.odin`, `tests/abi_sizes.c`, `tests/ghostty_test.odin`, `src/term.odin`, new `src/snapshot.odin` (+ `_test`), new `src/holderwire/` (+ tests), `tests/holder-wire/v1/*.bin`, `tests/vt-corpus/`, `schema/released-holder.json`, DEVELOPING.md (libghostty bump checklist) | ABI sizes; snapshot round trip and determinism by screen hash; continuation-limit failure and retry; wire golden vectors, fuzz pass and grow-only diff. All in `./build.sh test` (+~10 s). | One round | Nothing visible. Terminals behave as before (a regression check on the continuation limit: big OSC 52 pastes, kitty images). |
+| **B. Holder, launch and adopt** (behind `keep_sessions`) | `deckhand-core hold`: spawn, pump, reap, tails, offsets, `FOREGROUND`, ping, refusal while a core is attached, the HMAC key, the TCC disclaim. The launchd detach (`ProcessType=Interactive`, stale sweep, SIGPIPE, peer-checked `ready`). Install to `core/<v>/`, stripping quarantine after verifying. **Unconditional:** the stable `core.sock` and the runtime dir move to Application Support (PROTOCOL.md §1). With the setting on, PTYs go through the holder. On quit: `GOODBYE{handover}`, snapshots and MAC'd `handover.json`. On launch: adopt, or crash-restore from the tails. Also MAC'd `tokens.json` written on every mint and revoke, the read-only ack failing closed, the `instance.lock` SH rule, and the pre-M1 refusal message. | new `src/holder/`, new `src/launchd_darwin.odin`, `src/pty.odin`/`pty_posix.odin` (a holder-backed `Pty`), `src/socket.odin`/`socket_posix.odin`, `src/instance.odin`, `src/persist.odin`, `src/claude.odin` (`claude_pids`, ack state), `src/main.odin`, `build.sh`, `scripts/bundle-app.sh` (`Contents/Helpers/deckhand-core`), new `tests/scripts/keep-sessions.sh`, PROTOCOL.md, PERSISTENCE.md | Holder unit tests over a socketpair (~3 s); MAC tamper tests (<1 s); downgrade lock (<1 s). Scene `keep-sessions.sh` (~40 s): 6 fake terminals, quit, relaunch, screen hash equal; kill -9 the app, then `inexact`; kill -9 the holder, then `holder_lost`; pi reconnect and Claude ancestry. Test mode spawns the holder directly and never bootstraps launchd. S2's programs re-run on macOS 14/15 by hand. | **Two security rounds** | Turn the setting on, start a pi turn and a `top` in a shell, then ⌘Q. Reopen: both are still running, with their screens. |
+| **C. Holder re-exec and keeper** | `UPGRADE`, the dry-run preflight on dup'd masters, the keeper-gated fd handover (live audit token), signal and mask reset, adopt-orphans with `NOTE_EXITSTATUS`, fallback drain, `holder_rev` and its CI check. | `src/holder/upgrade.odin`, `src/holder/keeper.odin`, `src/holder/state.odin` (+ tests), `scripts/check-holder-rev.sh`, `ci.yml` | Re-exec under load (~15 s, a unit test running real processes): 5 upgrades, no gaps, no split input, swapped binary refused, killed image adopted with exit codes | **Combined with D:** one two-round security review of C+D | Dev builds only: the palette's *Restart session holder* runs an upgrade to the same build; sessions don't notice. |
+| **D. Updates keep sessions; release hardening** (turns `keep_sessions` on) | The updater does a §7.2 handover before relaunch, with the successor secret passed through the relaunch helper's `ready` socket. The update prompt is reworded. Release builds compile out the test hooks, the env overrides and `--print-token` (with Settings › Copy a control token added). `release.sh` checks for hook strings. The new zip is installed by **the current release's updater**. The default flips to on. Docs: CLAUDE.md §4a, GUIDE.md (ad-hoc residual, Full Disk Access after updates), DEVELOPING.md "Releases". | `src/update.odin`, `src/update_core.odin`, `src/main.odin`, `build.sh`, `scripts/release.sh`, `tests/scripts/update.sh`, `tests/scripts/release-checks.sh`, docs | `update.sh` extended (~60 s): update from `file://` fixtures with 3 live fake sessions, then screen hashes equal and pids unchanged. `release-checks.sh` (<10 s). The previous-release updater test is release-only (~1 min). | (with C) | Update Deckhand with a pi turn running: the turn carries on through the update. |
+
+Sizes: A 1.5 weeks, B 3–3.5, C 1.5–2, D 1–1.5, so **7–9 weeks** for M1, reviews included. Order:
+A → B → C+D, with C and D on stacked branches and merged together after their combined review. M1 alone delivers most of #4's value.
 
 ---
 
@@ -615,10 +781,10 @@ Total: about 29–44 weeks. M1 alone delivers most of #4's value.
 
 | # | Risk | Mitigation |
 |---|---|---|
-| R1 | Snapshot fidelity, two-emulator determinism | S1; resize sequenced by offset; randomised determinism tests |
+| R1 | Snapshot fidelity, two-emulator determinism, **GHOSTSNP v1 has no compatibility promise** | S1 measured it exact. Resize is sequenced by offset. Formats are listed in hello, with a VT `inexact` fallback, and a round-trip test runs on every libghostty bump (§5.5). |
 | R2 | `ui` and holder ownership over sockets | §5.3. M4 only after the Developer ID (§5.4). Security review rounds. |
-| R3 | TOCTOU between checking the `UPGRADE` file and `execve`: a same-user swap gets the holder | S2 tries `execve("/dev/fd/N")` on the checked fd. The core re-checks the holder's DR after re-exec and refuses it on a mismatch. |
-| R4 | A new holder image crashing | Dry-run resume on dup'd masters; the 30 s keeper; rare `holder_rev` bumps; upgrade-under-load tests |
+| R3 | TOCTOU between checking the `UPGRADE` file and `execve`. S2: `execve("/dev/fd/N")` fails on macOS, and a path swap runs. | **The keeper-gated handover** (§7.3 step 4): the masters and key go only to an image whose live audit token passes the DR, so a swapped image gets the pid but no terminals. The core re-checks the holder's DR (P9). |
+| R4 | A new holder image crashing | Dry-run resume on dup'd masters; the keeper adopts orphans with exit codes (`NOTE_EXITSTATUS`, S2); rare `holder_rev` bumps; upgrade-under-load tests |
 | R5 | Ad-hoc M1: same-user code can drive the holder | Stated (§5.4); the Developer ID before M4 |
 | R6 | Ad-hoc TCC re-prompts and silent Full Disk Access loss | Ends with the Developer ID. Documented until then. |
 | R7 | M1's closed-app gap | Hooks must fail safe; the read-only guard never needs the socket (checked in M1); M4 closes the gap |
@@ -626,6 +792,8 @@ Total: about 29–44 weeks. M1 alone delivers most of #4's value.
 | R9 | Moving ticks off `frame()` changes scene timing | M2 keeps `core_tick()` from `frame()` until M4 |
 | R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own work item; the handler checks the resolved address on every request |
 | R11 | Scope | Every step ships on its own |
+| R12 | S2 ran only on macOS 26.6.2 (the minimum is 14) | Run S2's programs on 14 and 15, plus Force Quit and logout, before M1's PR B ships (§10.1) |
+| R13 | An unfinished over-limit sequence (a large OSC 52) blocks snapshots | A limit sized to the largest accepted sequence, retry after ground, VT `inexact` at a handover |
 
 ---
 
@@ -635,12 +803,13 @@ Total: about 29–44 weeks. M1 alone delivers most of #4's value.
 |---|---|---|---|
 | Holder wire | Golden vectors for the frozen subset (fail if one changes), a fuzz pass over the decoder, the `released-holder.json` diff | < 1 s | unit |
 | Holder behaviour | An in-process holder and a fake core over a socketpair, with `/bin/sh` children: spawn, input, pixel resize, signals, exit-after-output, offsets, tail cap, backlog, `REFUSED` cases (attached, floor, secret), ping timeout, the HMAC key only after a check | ~3 s | unit |
-| Holder re-exec | A real holder with 6 children printing counters, upgraded 5 times under load and mid-input. Checks: pid and parent unchanged, offsets continuous, no lost or split input; signal dispositions and mask reset; a failed dry run leads to drain; `execve` failure; the new image killed at once → keeper adopts (`degraded`) | ~15 s | unit |
+| Holder re-exec | A real holder with 6 children printing counters, upgraded 5 times under load and mid-input. Checks: pid and parent unchanged, offsets continuous, no lost or split input; signal dispositions and mask reset (a child's `sigreport`); a failed dry run leads to drain; `execve` failure; the new image killed at once, or a swapped binary (wrong identifier) → the keeper refuses the fds and adopts (`degraded`, `exit(3)` reported as 3) | ~15 s | unit |
 | Grow-only API | Generated schema against `released-v1.json` | < 1 s | unit |
 | Skew, floors, auth decisions | Pure table tests: `skew_check`, `peer_allowed` (DR, floor, successor secret, dev or ad-hoc mode), window floor | < 1 s | unit |
 | MAC'd files | A tampered or truncated `tokens.json`/`handover.json` fails closed; a read-only tab is stopped | < 1 s | unit |
 | Release build | `release.sh` checks: no hook strings, no env-override strings, entitlements as listed, library validation on (D0+); the current release's updater installs the new zip | ~1 min | release only |
-| Snapshot and determinism | The S1 corpus, plus random chunking and resizes | ~5 s | unit |
+| Snapshot and determinism | S1's harness (`tools/vt-snapshot-spike`) as a unit test: 9 cases × random snapshot points, mid-escape and mid-UTF-8, resizes at the same offset, **compared by screen hash**; the formatter fallback's known gaps asserted as `inexact`; an encode failing over the continuation limit, then succeeding after ground. ~11 s in the spike; the unit run uses 10 points per case. | ~3 s | unit |
+| libghostty bump | Old-encode/new-decode round trip of the corpus (snapshots from the previous version kept in `tests/vt-corpus/`) | ~2 s | unit, on bump |
 | Handover | Scene: a test-mode core, 6 fake terminals, 5 handovers under load. Checks: screens `exact`, no replayed query replies, tokens reconnect (pi reconnect, Claude ancestry). Variants: kill -9 the core (`inexact`); kill -9 the holder; a new core crashing twice (rollback, `SUPERVISE`) | ~40 s | scene |
 | Downgrade lock | A pre-M1-style `instance.lock` EX taker fails while a holder lives | < 1 s | unit |
 | Window attach | Close the window, output continues, reopen, compare | ~30 s | scene |

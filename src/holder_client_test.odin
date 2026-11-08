@@ -672,3 +672,29 @@ holder_restart_dev_only :: proc(t: ^testing.T) {
 	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/deckhand-core", d)))
 	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/other/build/deckhand-core", d))) // no build.sh beside it
 }
+
+// After an upgrade the new image's WELCOME, TAILs and the frames behind them (OUTPUT, then
+// EXITED) can arrive in one read, and a quiet session sends nothing more: the reattach handles
+// them at once, not when the next bytes come (as holder_reader does after a first attach).
+@(test)
+holder_reattach_frames_behind_tails :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, upgrade_output = transmute([]u8)string("after the upgrade")}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	if !testing.expect(t, holder_wanted(), "attached") do return
+	r := holder_upgrade("/fake/deckhand-core")
+	defer delete(r.error)
+	testing.expectf(t, r.ok, "upgrade: %q", r.error)
+	done := wait_until(1000, proc() -> bool {
+		sync.lock(&hc.mu)
+		defer sync.unlock(&hc.mu)
+		h := hc.held[3]
+		return h != nil && h.eof && strings.contains(string(h.buf[:]), "after the upgrade")
+	})
+	sync.lock(&hc.mu)
+	h := hc.held[3]
+	testing.expectf(t, done, "the frames behind the TAILs waited for more bytes: %q, eof %v", h != nil ? string(h.buf[:]) : "", h != nil && h.eof)
+	if h != nil do testing.expect_value(t, h.exit, Exit_Info{known = true, code = 7})
+	sync.unlock(&hc.mu)
+}

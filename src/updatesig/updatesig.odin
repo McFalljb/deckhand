@@ -26,18 +26,36 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
-// the formats' names, kept from Deckhand (the rename to Deckhand changed no format)
+// The formats. v2 still carries the old name (every release up to 0.1.7 is signed with it, and
+// Deckhand 0.1.6 and older read only v2). v3 is the same format under Deckhand's name, which
+// releases from 0.1.8 on are signed with (0.1.8 also changes the bundle id, which 0.1.6 refuses
+// anyway). 0.1.7 reads both, so it can take 0.1.8; a .sig's head says which manifest it signs,
+// so a v2 signature never verifies a v3 manifest or the other way round.
+Format :: enum u8 {
+	V2,
+	V3,
+}
 MANIFEST_HEAD :: "pi-desk update v2"
 SIG_FILE_HEAD :: "pi-desk-update-sig v2"
+MANIFEST_HEAD_V3 :: "deckhand update v3"
+SIG_FILE_HEAD_V3 :: "deckhand-update-sig v3"
+MANIFEST_HEADS := [Format]string {
+	.V2 = MANIFEST_HEAD,
+	.V3 = MANIFEST_HEAD_V3,
+}
+SIG_FILE_HEADS := [Format]string {
+	.V2 = SIG_FILE_HEAD,
+	.V3 = SIG_FILE_HEAD_V3,
+}
 SIG_SIZE :: ed25519.SIGNATURE_SIZE // 64
 SEED_SIZE :: ed25519.PRIVATE_KEY_SIZE // 32
 PUB_SIZE :: ed25519.PUBLIC_KEY_SIZE // 32
 // src/update_key.odin's value until a real key is put in; release.sh refuses to ship it
 PLACEHOLDER_PREFIX :: "PLACEHOLDER"
 
-// The signed message: one field per line, "\n"-terminated, nothing else.
-manifest :: proc(version, file_name: string, size: i64, sha256_hex, cdhash: string, allocator := context.allocator) -> string {
-	return fmt.aprintf("%s\nversion %s\nfile %s\nsize %d\nsha256 %s\ncdhash %s\n", MANIFEST_HEAD, version, file_name, size, strings.to_lower(sha256_hex, context.temp_allocator), strings.to_lower(cdhash, context.temp_allocator), allocator = allocator)
+// The signed message: one field per line, "\n"-terminated, nothing else; its head is format's.
+manifest :: proc(version, file_name: string, size: i64, sha256_hex, cdhash: string, allocator := context.allocator, format := Format.V2) -> string {
+	return fmt.aprintf("%s\nversion %s\nfile %s\nsize %d\nsha256 %s\ncdhash %s\n", MANIFEST_HEADS[format], version, file_name, size, strings.to_lower(sha256_hex, context.temp_allocator), strings.to_lower(cdhash, context.temp_allocator), allocator = allocator)
 }
 
 // A CDHash as codesign prints it: 40 (SHA-256 truncated) or 64 hex digits.
@@ -53,22 +71,27 @@ cdhash_valid :: proc(s: string) -> bool {
 	return true
 }
 
-// The .sig file's text.
-sig_file_make :: proc(cdhash, sig_b64: string, allocator := context.allocator) -> string {
-	return fmt.aprintf("%s\ncdhash %s\nsignature %s\n", SIG_FILE_HEAD, strings.to_lower(cdhash, context.temp_allocator), sig_b64, allocator = allocator)
+// The .sig file's text, in format.
+sig_file_make :: proc(cdhash, sig_b64: string, allocator := context.allocator, format := Format.V2) -> string {
+	return fmt.aprintf("%s\ncdhash %s\nsignature %s\n", SIG_FILE_HEADS[format], strings.to_lower(cdhash, context.temp_allocator), sig_b64, allocator = allocator)
 }
 
-// A .sig file: its CDHash (lower case) and signature (temp allocator), or ok = false. Exactly
-// the three lines, in order.
-sig_file_parse :: proc(text: string) -> (cdhash, sig_b64: string, ok: bool) {
+// A .sig file: its CDHash (lower case), signature (temp allocator) and format (v2 or v3: the
+// manifest it signs is that format's), or ok = false. Exactly the three lines, in order.
+sig_file_parse :: proc(text: string) -> (cdhash, sig_b64: string, format: Format, ok: bool) {
 	if len(text) > 4096 do return
 	lines := strings.split_lines(strings.trim_right(text, "\n"), context.temp_allocator)
-	if len(lines) != 3 || lines[0] != SIG_FILE_HEAD do return
+	if len(lines) != 3 do return
+	switch lines[0] {
+	case SIG_FILE_HEAD:    format = .V2
+	case SIG_FILE_HEAD_V3: format = .V3
+	case:                  return
+	}
 	if !strings.has_prefix(lines[1], "cdhash ") || !strings.has_prefix(lines[2], "signature ") do return
 	cdhash = strings.to_lower(lines[1][len("cdhash "):], context.temp_allocator)
 	sig_b64 = lines[2][len("signature "):]
-	if !cdhash_valid(cdhash) || len(sig_b64) == 0 do return "", "", false
-	return cdhash, sig_b64, true
+	if !cdhash_valid(cdhash) || len(sig_b64) == 0 do return "", "", .V2, false
+	return cdhash, sig_b64, format, true
 }
 
 // A release's zip: ZIP_PREFIX + X.Y.Z + ZIP_SUFFIX (scripts/release.sh reads both from here)

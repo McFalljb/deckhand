@@ -7,9 +7,10 @@ package update_sign
 //                                        FILE (created 0600, never overwritten); prints only
 //                                        the public key, for src/update_key.odin
 //   update-sign pubkey KEYFILE           the public key of the private key
-//   update-sign sign KEYFILE VERSION ZIP CDHASH SIG
+//   update-sign sign [--v3] KEYFILE VERSION ZIP CDHASH SIG
 //                                        writes SIG: the signature of ZIP's manifest
-//                                        (version, file name, size, SHA-256, the app's CDHash)
+//                                        (version, file name, size, SHA-256, the app's CDHash);
+//                                        --v3: the format releases from 0.1.8 on use (src/updatesig)
 //   update-sign verify PUBKEY VERSION ZIP SIG   exit 0 if SIG is good for ZIP under PUBKEY
 //   update-sign manifest VERSION ZIP CDHASH     prints the signed manifest
 //
@@ -24,7 +25,7 @@ import "core:sys/posix"
 import sig "../../src/updatesig"
 
 usage :: proc() -> int {
-	fmt.eprintln("usage: update-sign keygen FILE | pubkey KEYFILE | sign KEYFILE VERSION ZIP CDHASH SIG | verify PUBKEY VERSION ZIP SIG | manifest VERSION ZIP CDHASH")
+	fmt.eprintln("usage: update-sign keygen FILE | pubkey KEYFILE | sign [--v3] KEYFILE VERSION ZIP CDHASH SIG | verify PUBKEY VERSION ZIP SIG | manifest VERSION ZIP CDHASH")
 	return 2
 }
 
@@ -50,6 +51,7 @@ run :: proc(args: []string) -> int {
 		fmt.println(pub)
 		return 0
 	case "sign":
+		if len(args) == 7 && args[1] == "--v3" do return sign(args[2], args[3], args[4], args[5], args[6], .V3)
 		if len(args) != 6 do return usage()
 		return sign(args[1], args[2], args[3], args[4], args[5])
 	case "verify":
@@ -59,12 +61,12 @@ run :: proc(args: []string) -> int {
 			fmt.eprintln("update-sign: cannot read", args[4])
 			return 1
 		}
-		cd, b64, pok := sig.sig_file_parse(string(data))
+		cd, b64, format, pok := sig.sig_file_parse(string(data))
 		if !pok {
 			fmt.eprintln("update-sign: not a Deckhand .sig file")
 			return 1
 		}
-		m, ok := manifest_of(args[2], args[3], cd)
+		m, ok := manifest_of(args[2], args[3], cd, format)
 		if !ok do return 1
 		if !sig.verify(args[1], transmute([]byte)m, b64) {
 			fmt.eprintln("update-sign: BAD signature")
@@ -92,7 +94,7 @@ valid_version :: proc(v: string) -> bool {
 	return true
 }
 
-manifest_of :: proc(version, zip, cdhash: string) -> (string, bool) {
+manifest_of :: proc(version, zip, cdhash: string, format := sig.Format.V2) -> (string, bool) {
 	if !sig.cdhash_valid(cdhash) {
 		fmt.eprintln("update-sign: CDHASH must be the app's CDHash (40 or 64 hex digits, codesign -dvvv)")
 		return "", false
@@ -111,7 +113,7 @@ manifest_of :: proc(version, zip, cdhash: string) -> (string, bool) {
 		fmt.eprintln("update-sign: cannot read", zip)
 		return "", false
 	}
-	return sig.manifest(version, name, size, sum, cdhash, context.temp_allocator), true
+	return sig.manifest(version, name, size, sum, cdhash, context.temp_allocator, format), true
 }
 
 // The base64 seed from a key file that only its owner can read. Opened with O_NOFOLLOW (a
@@ -162,17 +164,17 @@ private_key :: proc(path: string) -> (string, bool) {
 	return key, key != ""
 }
 
-sign :: proc(key_file, version, zip, cdhash, out: string) -> int {
+sign :: proc(key_file, version, zip, cdhash, out: string, format := sig.Format.V2) -> int {
 	seed, ok := private_key(key_file)
 	if !ok do return 1
-	m, mok := manifest_of(version, zip, cdhash)
+	m, mok := manifest_of(version, zip, cdhash, format)
 	if !mok do return 1
 	s, sok := sig.sign(seed, transmute([]byte)m)
 	if !sok {
 		fmt.eprintln("update-sign: the private key is not a base64 Ed25519 seed (32 bytes)")
 		return 1
 	}
-	if err := os.write_entire_file(out, transmute([]byte)sig.sig_file_make(cdhash, s, context.temp_allocator)); err != nil {
+	if err := os.write_entire_file(out, transmute([]byte)sig.sig_file_make(cdhash, s, context.temp_allocator, format)); err != nil {
 		fmt.eprintln("update-sign: cannot write", out)
 		return 1
 	}

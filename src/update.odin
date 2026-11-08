@@ -589,9 +589,10 @@ update_prepare :: proc(p: Prep) -> (staged, cdhash: string, err: string) {
 	}
 	sig_text, serr := os.read_entire_file(sig_path, context.temp_allocator)
 	if serr != nil do return "", "", "cannot read the signature"
-	signed_cd, sig_b64, sok := sig.sig_file_parse(string(sig_text))
+	signed_cd, sig_b64, format, sok := sig.sig_file_parse(string(sig_text))
 	if !sok do return "", "", "its signature file is not one Deckhand reads"
-	manifest := sig.manifest(p.version, name, size, sum, signed_cd, context.temp_allocator)
+	manifest := sig.manifest(p.version, name, size, sum, signed_cd, context.temp_allocator, format) // v2 or v3: the .sig's
+
 	if !sig.verify(p.key, transmute([]byte)manifest, sig_b64) do return "", "", "its signature is not valid"
 
 	// signed: unpack (names checked first, links checked after), then the bundle itself
@@ -657,7 +658,7 @@ install_check :: proc(staged, version, cdhash: string) -> string {
 bundle_check :: proc(app, version, cdhash: string) -> string {
 	if !sig.cdhash_valid(cdhash) do return "the update has no signed CDHash"
 	plist := upath(app, "Contents", "Info.plist")
-	if id := plist_value(plist, "CFBundleIdentifier"); id != UPDATE_BUNDLE_ID do return fmt.tprintf("the update is not Deckhand (bundle id %q)", id)
+	if id := plist_value(plist, "CFBundleIdentifier"); !update_bundle_id_ok(id) do return fmt.tprintf("the update is not Deckhand (bundle id %q)", id)
 	if v := plist_value(plist, "CFBundleShortVersionString"); v != version do return fmt.tprintf("the update's version is %q, not %s", v, version)
 	exe := plist_value(plist, "CFBundleExecutable")
 	if exe == "" || strings.contains_any(exe, "/\x00") do return "the update names no executable"

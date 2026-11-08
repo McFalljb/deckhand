@@ -75,13 +75,13 @@ PLIST
 mkrelease() {
   v=$1 d="$W/rel/download/v$1" z="deckhand-$1-macos-arm64.zip"
   mkdir -p "$d" "$W/src-$v"
-  mkapp "$W/src-$v" "$v"
+  mkapp "$W/src-$v" "$v" "${ID:-dev.pi-desk.app}"
   # UPDATE_RELEASE_SIGN=IDENTITY: the releases signed with that certificate (the install stays ad
   # hoc): an ad-hoc install (0.1.6 and before) updating to a self-signed one (scripts/sign.sh)
   [ -z "${UPDATE_RELEASE_SIGN:-}" ] || codesign --force --sign "$UPDATE_RELEASE_SIGN" "$W/src-$v/Deckhand.app" 2>/dev/null
   (cd "$W/src-$v" && ditto -c -k --keepParent Deckhand.app "$d/$z")
   cd_=$(codesign -d -vvv "$W/src-$v/Deckhand.app" 2>&1 | sed -n 's/^CDHash=//p')
-  build/update-sign sign "$KEY" "$v" "$d/$z" "$cd_" "$d/$z.sig" >/dev/null
+  build/update-sign sign ${SIGFMT:+--$SIGFMT} "$KEY" "$v" "$d/$z" "$cd_" "$d/$z.sig" >/dev/null
   if [ "${GOOD:-1}" != 1 ]; then
     # signed, then the zip changes (its checksum follows): only the signature is wrong
     mkdir -p "$W/src-$v/Deckhand.app/Contents/Resources"
@@ -143,7 +143,9 @@ check_log "$W/run3.log"
 [ -e "$W/install/Deckhand.app.old-0.1.0" ] && { echo "the old bundle was not removed at the new version's second start"; fail=1; }
 
 # 4 and 5: an update that keeps the sessions
-GOOD=1 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
+# 0.1.3 as 0.1.8 will ship (the rename's second step): the new bundle id, a v3 signature; this
+# build (the 0.1.7 bridge) takes it
+GOOD=1 ID=dev.deckhand.app SIGFMT=v3 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
 run tests/scripts/update-4.txt 0.1.1 "$W/run4.log" ""
 check_log4() { # like check_log, but the run ends by the update's quit (no "done:")
   grep -E "ASSERT FAILED|TIMEOUT|no element|unknown command|session holder|update relaunch" "$1" || true
@@ -153,6 +155,8 @@ check_log4 "$W/run4.log"
 grep -q "update relaunch: .*(with the successor helper)" "$W/run4.log" || { echo "run 4: no relaunch helper"; fail=1; }
 v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$W/install/Deckhand.app/Contents/Info.plist")
 [ "$v" = 0.1.3 ] || { echo "run 4: the fake install was not swapped to 0.1.3 (it is $v)"; fail=1; }
+id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$W/install/Deckhand.app/Contents/Info.plist")
+[ "$id" = dev.deckhand.app ] || { echo "run 4: the v3-signed dev.deckhand.app update was not installed (bundle id $id)"; fail=1; }
 [ -n "$(holders)" ] || { echo "run 4: no session holder after the update's quit"; fail=1; }
 [ -n "$(helpers)" ] || { echo "run 4: no relaunch helper waiting"; fail=1; }
 [ -S "$RUN/successor.sock" ] || { echo "run 4: no successor.sock"; fail=1; }

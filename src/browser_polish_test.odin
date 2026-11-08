@@ -515,3 +515,24 @@ browser_agent_commands_are_not_a_gesture :: proc(t: ^testing.T) {
 	p := page_extra(ta)
 	testing.expect_value(t, download_take(p, bp_at(0), 0), Download_Decision.Ask)
 }
+
+// Closing the find bar gives the keyboard back through focus_release (no direct State write):
+// only when the find field has it, for this tab.
+@(test)
+browser_find_close_releases_focus :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _ := bp_reset()
+	defer for id, _ in browsers do browser_drop(id)
+	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	ta := r.created_id
+	page_find_tab = ta
+	defer page_find_tab = 0
+	state.focus_widget = "browser_find"
+	testing.expect(t, run_command(Browser_Find_Close{ta}, {kind = .UI}).ok)
+	testing.expect_value(t, state.focus_widget, "")
+	// another widget keeps it
+	state.focus_widget = "sidebar_filter"
+	testing.expect(t, run_command(Browser_Find_Close{ta}, {kind = .UI}).ok)
+	testing.expect_value(t, state.focus_widget, "sidebar_filter")
+	state.focus_widget = ""
+}

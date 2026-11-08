@@ -726,7 +726,7 @@ reload_note_save :: proc(path, scope: string) {
 	reload_pending_add(path, scope)
 	rw.due = time.tick_now()
 	rw.from_save = true
-	app.redraw = true
+	window_state_changed()
 }
 
 // Forgets the watcher's state (tests).
@@ -803,7 +803,7 @@ reload_tick :: proc() {
 		rw.last_poll = time.tick_now()
 		reload_poll()
 	}
-	if reload_flush() do app.redraw = true
+	if reload_flush() do window_state_changed()
 }
 
 // The running pi tabs' folders, sorted ("@atlas" when Atlas runs).

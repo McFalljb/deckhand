@@ -770,7 +770,7 @@ claude_reload_note_save :: proc(path: string) {
 	pending_add(p, scope)
 	cw.due = time.tick_now()
 	cw.from_save = true
-	app.redraw = true
+	window_state_changed()
 }
 
 // Every frame (editor_tick): records each Claude tab's version when it starts, restarts the
@@ -806,7 +806,7 @@ claude_reload_tick :: proc() {
 		cw.last_poll = time.tick_now()
 		claude_reload_poll()
 	}
-	if claude_reload_flush() do app.redraw = true
+	if claude_reload_flush() do window_state_changed()
 }
 
 // Tests: a poll now, and its report as if the debounce passed.

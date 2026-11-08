@@ -238,13 +238,13 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		upd.manual = false
 		if c.err != "" {
 			update_set(&upd.message, c.err)
-			if manual do toast_show(fmt.tprintf("Could not check for updates: %s", c.err), err = true)
+			if manual do window_toast(fmt.tprintf("Could not check for updates: %s", c.err), err = true)
 			return {ok = true}, true
 		}
 		r, why := release_parse(c.body)
 		if why != "" {
 			update_set(&upd.message, why)
-			if manual do toast_show(fmt.tprintf("No update: %s", why), err = true)
+			if manual do window_toast(fmt.tprintf("No update: %s", why), err = true)
 			return {ok = true}, true
 		}
 		upd.last_ok = update_now()
@@ -252,7 +252,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		update_set(&upd.message, "")
 		if (upd.phase == .Downloading || upd.phase == .Ready || upd.phase == .Installed) && r.version != upd.release.version {
 			// the update under way stays; a newer one is offered once this one runs
-			if manual do toast_show(fmt.tprintf("Deckhand %s is ready to install first (then %s)", upd.release.version, r.version))
+			if manual do window_toast(fmt.tprintf("Deckhand %s is ready to install first (then %s)", upd.release.version, r.version))
 			release_free(&r)
 			return {ok = true}, true
 		}
@@ -271,7 +271,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 					update_set(&upd.skipped, "")
 					update_save()
 					upd.offered = true
-				} else do toast_show(fmt.tprintf("Deckhand %s is up to date", upd.current))
+				} else do window_toast(fmt.tprintf("Deckhand %s is up to date", upd.current))
 			}
 		}
 		return {ok = true}, true

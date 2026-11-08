@@ -306,7 +306,7 @@ events: map[u64]map[string][dynamic]App_Event_Row
 @(private = "file")
 events_seq: u64
 
-app_host := Tab_Host {
+app_host := Tab_View {
 	display = .Texture,
 	draw = proc(tab_id: u64, x, y, w, h: f32) {app_draw(tab_id, x, y, w, h)},
 	texture = proc(tab_id: u64) -> u32 {

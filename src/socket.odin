@@ -885,10 +885,9 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	fmt.sbprintf(&b, `{{"v":%d,"app":"pi-desk","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
 	if reconnect != "" do fmt.sbprintf(&b, `,"reconnect_token":"%s"`, reconnect)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
-	when ODIN_OS == .Darwin do if caller.kind == .App {
-		key: [32]u8
-		if pd_frames_chan_key(caller.tab_id, &key[0]) == 1 {
-			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, string(pd_frames_service()), string(hex.encode(key[:], context.temp_allocator)), pd_frames_device_id())
+	if caller.kind == .App && window.frames_info != nil {
+		if service, key, device, ok := window.frames_info(caller.tab_id); ok {
+			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, service, string(hex.encode(key[:], context.temp_allocator)), device)
 		}
 	}
 	strings.write_byte(&b, '}')

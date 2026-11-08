@@ -63,7 +63,7 @@ holder_restart_text :: proc(r: Holder_Upgrade_Result, auto := false) -> (msg: st
 }
 
 holder_restart_start :: proc() {
-	if !holder_upgrade_run(false) do toast_show("The session holder is already restarting")
+	if !holder_upgrade_run(false) do window_toast("The session holder is already restarting")
 }
 
 // Whether the automatic upgrade is due now (pure: holder_client_test.odin): once per run, after
@@ -78,7 +78,7 @@ holder_upgrade_tick :: proc() {
 	if !restart.unavailable_told {
 		// an older holder that can't be upgraded in place (rev 1, or a keeper): said once, plain info
 		restart.unavailable_told = true
-		if why := holder_upgrade_unavailable(); why != "" do toast_show(why)
+		if why := holder_upgrade_unavailable(); why != "" do window_toast(why)
 	}
 	if restart.auto do return
 	sync.lock(&restart.mu)
@@ -132,7 +132,7 @@ holder_restart_tick :: proc() -> bool {
 	if !sync.try_lock(&restart.mu) do return false
 	defer sync.unlock(&restart.mu)
 	if restart.msg == "" do return false
-	toast_show(restart.msg, err = restart.err)
+	window_toast(restart.msg, err = restart.err)
 	delete(restart.msg)
 	restart.msg = ""
 	return true

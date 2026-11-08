@@ -157,6 +157,27 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	r := run_command(Job_Save{text = text}, ui)
 	testing.expect(t, r.ok, r.error)
 	path := strings.clone(r.data[len(`{"path":"`):len(r.data) - 2], context.temp_allocator)
+	// the sheet's keyboard and the Jobs tab are commands (focus_take, focus_release, Job_Save's own
+	// layout), not the window's writes: open takes the keyboard, Cancel gives it back, Save
+	// gives it back and shows the Jobs tab
+	{
+		testing.expect(t, run_command(Job_Sheet{open = true}, ui).ok)
+		testing.expect_value(t, state.focus_widget, "job_sheet")
+		testing.expect(t, run_command(Job_Sheet{open = false}, ui).ok)
+		testing.expect_value(t, state.focus_widget, "")
+		testing.expect(t, run_command(Job_Sheet{open = true}, ui).ok)
+		state.layout.left_open, state.layout.left_tab = false, .Sessions
+		id2, date2 := job_new_id_date()
+		f2 := f
+		f2.name = "Sheet job 2"
+		text2, _ := job_form_new_note(f2, id2, date2)
+		r2 := run_command(Job_Save{text = text2}, ui)
+		testing.expect(t, r2.ok, r2.error)
+		testing.expect(t, !job_sheet_open())
+		testing.expect_value(t, state.focus_widget, "")
+		testing.expect(t, state.layout.left_open)
+		testing.expect_value(t, state.layout.left_tab, Left_Tab.Jobs)
+	}
 	data, _ := os.read_entire_file(path, context.temp_allocator)
 	testing.expect(t, strings.contains(string(data), "enabled: true"), "written enabled")
 	testing.expect_value(t, run_command(Job_Save{text = text}, ui).error, fmt.tprintf("id: %s is another job's (give this one its own)", id))

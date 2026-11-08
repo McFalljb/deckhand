@@ -319,7 +319,7 @@ term_link_rescan :: proc(t: ^testing.T) {
 	defer font.cell_w, font.cell_h = saved_w, saved_h
 	font.cell_w, font.cell_h = 10, 20
 	g := vt("a https://example.com/x b\r\n")
-	tm := Term{gt = g, cols = 30, rows = 5, w = 300, h = 100}
+	tm := Term{gt = g, cols = 30, rows = 5, view = {w = 300, h = 100}}
 	defer {
 		term_link_clear(&tm)
 		gh.terminal_free(g)

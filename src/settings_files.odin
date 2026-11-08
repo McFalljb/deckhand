@@ -46,7 +46,6 @@ import "core:mem/virtual"
 import "core:slice"
 import "core:strings"
 import "core:time"
-import clay "../build/clay-odin"
 
 // pi's agent directory: PI_CODING_AGENT_DIR, else ~/.pi/agent. As pi reads it (getAgentDir,
 // expandTildePath): "~" is the home folder, "~/x" under it; a relative one (pi would take it from
@@ -1000,7 +999,7 @@ settings_create :: proc(path: string) {
 	}
 	res := run_command(Open_File{path = row.path}, {kind = .UI})
 	if !res.ok do sf_error = strings.clone(fmt.tprintf("%s: %s", fs_display(row.path), res.error))
-	app.redraw = true
+	window_state_changed()
 }
 
 @(private = "file")
@@ -1018,7 +1017,7 @@ settings_poll :: proc() {
 	sf_poll_at = time.tick_now()
 	if sf_look(record_only = false) {
 		settings_gen += 1
-		app.redraw = true
+		window_state_changed()
 	}
 }
 

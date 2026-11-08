@@ -171,7 +171,7 @@ tab_drop_previews :: proc(t: ^testing.T) {
 tab_drag_on_the_window :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	defer tab_drag = {}
 	s := pt_one(2) // pi, shell 1, shell 2
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -301,9 +301,10 @@ panes_cmd_split_lone_tab :: proc(t: ^testing.T) {
 	run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s1}, PT_UI)
 	run_command(Split_Pane{pane = pane_of_tab(s, s1).id, direction = .Right, tab_id = s2}, PT_UI)
 	pane_set_ratio(s, s.nodes[s.root].id, 0.7)
-	old_c, old_d := app.centre, app.dpi
-	defer app.centre, app.dpi = old_c, old_d
+	old_c, old_d, old_pc := app.centre, app.dpi, pane_centre
+	defer app.centre, app.dpi, pane_centre = old_c, old_d, old_pc
 	app.centre, app.dpi = {0, 0, 740, 600}, 1
+	pane_centre_set(740, 600, 1)
 	r = run_command(Split_Pane{pane = pane_of_tab(s, pi).id, direction = .Right, tab_id = s2}, PT_UI)
 	testing.expectf(t, r.ok, "room without s2's pane: %s", r.error)
 	testing.expect_value(t, len(s.panes), 3)
@@ -345,7 +346,7 @@ tab_drop_not_under_the_drawer :: proc(t: ^testing.T) {
 tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	defer tab_drag = {}
 	s := pt_one(2)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -370,7 +371,7 @@ tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
 tab_drag_owns_the_pointer_in_event :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	defer tab_drag = {}
 	x := pt_two()
 	defer pt_two_done(x)

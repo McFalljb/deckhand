@@ -627,7 +627,7 @@ harness_checklist_refresh :: proc(full := false, bump := true) {
 		append(&harness_items, x)
 	}
 	if bump do settings_gen += 1 // the Settings tab's Coding agents rows
-	app.redraw = true
+	window_state_changed()
 }
 
 // The checklist is looked at again when it next shows (the shell environment was refreshed).

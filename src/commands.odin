@@ -103,6 +103,20 @@ Send_Text :: struct {
 Set_Focus :: struct {
 	widget: string, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
 }
+// Deckhand itself moves the keyboard (a sheet it opened, a new tab's URL field, an install's
+// setup sheet), without set_focus's caller rules: the window's former direct writes.
+Focus_Take :: struct {
+	widget: string,
+}
+// A widget that closed lets go of the keyboard (back to the terminal); nothing when the keyboard
+// is elsewhere.
+Focus_Release :: struct {
+	widget: string,
+}
+// The harness the New session picker lists first (harness.odin).
+Set_Last_Harness :: struct {
+	harness: Harness,
+}
 Set_Layout :: struct {
 	left_width:    Maybe(f32), // unset fields keep their value
 	right_width:   Maybe(f32),
@@ -425,6 +439,9 @@ Command :: union {
 	Terminal_Link, // a link in a terminal tab (term_links.odin)
 	Send_Text,
 	Set_Focus,
+	Focus_Take,
+	Focus_Release,
+	Set_Last_Harness,
 	Set_Layout,
 	Set_Panel,
 	Cancel_Confirmation,
@@ -719,7 +736,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	}
 	if changed {
 		state.version += 1
-		app.redraw = true
+		window_state_changed()
 	}
 	_, q1 := cmd.(Get_State)
 	_, q2 := cmd.(List_Commands)
@@ -742,6 +759,18 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	_, q5 := cmd.(List_Dir)
 	if !q1 && !q2 && !q3 && !q4 && !q5 do emit_event(Command_Event{request_id = request_id, caller = caller, version = state.version, changed = changed, command = cmd, result = r})
 	return r
+}
+
+// The focus_widget string focus_take made (heap). Other writers set literals or clones nobody
+// frees, so only this one is freed when the keyboard moves on (as browser_nav did).
+@(private = "file")
+focus_taken: string
+
+// Frees the current focus_widget when focus_take made it; anything else is left alone.
+@(private = "file")
+focus_taken_free :: proc() {
+	if focus_taken != "" && raw_data(state.focus_widget) == raw_data(focus_taken) do delete(state.focus_widget)
+	focus_taken = ""
 }
 
 // Capabilities, from the command table (command_table.odin): panel callers
@@ -1037,6 +1066,21 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if state.layout.left_tab == .Sessions do state.layout.left_tab = .Files // the Settings tab is a tree too
 		}
 		return {ok = true}, true
+	case Focus_Take:
+		if c.widget == state.focus_widget do return {ok = true}, false
+		focus_taken_free()
+		state.focus_widget = strings.clone(c.widget)
+		focus_taken = state.focus_widget
+		return {ok = true}, true
+	case Focus_Release:
+		if c.widget == "" || state.focus_widget != c.widget do return {ok = true}, false
+		focus_taken_free()
+		state.focus_widget = ""
+		return {ok = true}, true
+	case Set_Last_Harness:
+		if state.settings.last_harness == c.harness do return {ok = true}, false
+		state.settings.last_harness = c.harness
+		return {ok = true}, true
 	case Set_Layout:
 		l := &state.layout
 		if w, ok := c.left_width.?; ok do l.left_width = clamp(w, LEFT_MIN, LEFT_MAX)
@@ -1072,11 +1116,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Refresh_Shell_Env:
 		if !login_env.gui {
 			msg := "Deckhand was started from a terminal: its tabs use that terminal's environment (start it again there to pick up profile changes)"
-			toast_show(msg, err = true)
+			window_toast(msg, err = true)
 			return fail(msg), false
 		}
 		if !login_env_refresh_start(request_id, timeout = login_env_refresh_timeout) do return fail("a refresh is already running"), false
-		toast_show("Reading your shell environment…")
+		window_toast("Reading your shell environment…")
 		return {ok = true, pending = true}, false
 	case Refresh_Shell_Env_Done:
 		login_env_refresh_done(c.ok, c.env)
@@ -1086,10 +1130,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		harness_checklist_forget() // the coding agents checklist looks again when it next shows (harness_manifest.odin)
 		err := ""
 		if c.ok {
-			toast_show("Shell environment refreshed: new tabs use it; open tabs keep theirs")
+			window_toast("Shell environment refreshed: new tabs use it; open tabs keep theirs")
 		} else {
 			err = "your login shell gave no environment in time (4 s): new tabs keep the current one"
-			toast_show(fmt.tprintf("Refresh shell environment: %s", err), err = true)
+			window_toast(fmt.tprintf("Refresh shell environment: %s", err), err = true)
 		}
 		emit_event(Finished_Event{request_id = c.request_id, result = {ok = c.ok, error = err}})
 		return {ok = true}, false
@@ -1139,7 +1183,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		}
 		// Atlas runs on pi (harness.odin): without it nothing starts and the user is told how to install it
 		if !agent_running() && !(caller.kind == .UI ? pi_installed_now() : pi_installed()) {
-			if caller.kind == .UI do toast_show(ATLAS_NEEDS_PI, err = true)
+			if caller.kind == .UI do window_toast(ATLAS_NEEDS_PI, err = true)
 			return fail(ATLAS_NEEDS_PI), false
 		}
 		if state.home == 0 {
@@ -1341,7 +1385,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if platform.set_clipboard_secret != nil {
 			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
 		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
-		toast_show("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
+		window_toast("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)
@@ -1556,7 +1600,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		emit_event(Finished_Event{request_id = c.request_id, result = {ok = c.ok, error = c.error}})
 		return {ok = true}, sent
 	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
-		return editor_apply(cmd, caller)
+		return window_tab_host_apply(cmd, caller, request_id) // editor (tabhost.odin)
 	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter:
 		return files_apply(cmd, caller)
 	case List_Worktrees, Files_Set_Root, Worktree_Cleanup, Worktree_Cleanup_Done, Worktrees_Done:
@@ -1564,7 +1608,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_apply(cmd, caller, request_id)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
-		return markdown_apply(cmd, caller)
+		return window_tab_host_apply(cmd, caller, request_id) // Markdown
 	case Show_File:
 		return show_file_apply(c, caller)
 	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes:
@@ -1572,7 +1616,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Terminal_Link:
 		return term_link_apply(c, caller)
 	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
-		return app_apply(cmd, caller, request_id)
+		return window_tab_host_apply(cmd, caller, request_id) // app tabs
 	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
 		return claude_apply(cmd, caller, request_id) // claude.odin
 	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
@@ -1599,16 +1643,13 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Comment_Add, Comment_Edit, Comment_Delete, Comments_Clear, Comments_Send_Now, Comments_Ask_Cancel, Pi_Attached:
 		return comments_apply(cmd, caller, request_id)
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
-		if r, refused := browser_agent_nav_refused(cmd, caller); refused do return r, false // Take over (browser_agent.odin)
-		r, ch := browser_nav_apply(cmd, caller)
-		browser_agent_nav_ran(cmd, caller, r) // the agent strip; a load wait's navigation (browser_agent.odin)
-		return r, ch
+		return window_tab_host_apply(cmd, caller, request_id) // browser tabs
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
-		return browser_polish_apply(cmd, caller)
+		return window_tab_host_apply(cmd, caller, request_id)
 	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
-		return browser_agent_apply(cmd, caller, request_id)
+		return window_tab_host_apply(cmd, caller, request_id)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
-		return browser_act_apply(cmd, caller, request_id)
+		return window_tab_host_apply(cmd, caller, request_id)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		return notify_apply(cmd, caller)
 	case Program_Status, Set_Unread:

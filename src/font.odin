@@ -230,6 +230,7 @@ fonts_apply :: proc(cfg: Font_Config, dpi: f32) -> bool {
 	m := mono.metrics
 	font.cell_w = max(1, math.round(m.advance))
 	font.cell_h = mono.line_h
+	term_cell = {font.cell_w, font.cell_h} // new terminals start with it (term.odin)
 	font.baseline = mono.baseline
 	font.line_thick = max(1, math.round(m.underline_thickness))
 	font.underline_y = min(font.cell_h - font.line_thick, font.baseline + max(1, math.round(m.underline_pos)))

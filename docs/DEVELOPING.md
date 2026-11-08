@@ -356,7 +356,9 @@ palette.odin   command palette (⌘K): items, fuzzy search and ranking, recents;
 sidebar.odin   left column model: which projects, chats and sessions show and in what order (pins, sort, filter, hidden, the Open group)
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
-tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md)
+tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs browser, app, Markdown and editor commands
+window_hooks.odin what the core asks of the window (redraw, toast, frames, tab host commands, the test step): core files call these, main.odin fills them
+core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame()
 update*.odin   Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
 agent_status.odin  status of every terminal tab: OSC 7501 records, bridge > OSC 7501 precedence, unseen ("done, not seen yet"), roll-ups, the attention sort's tiers, set_unread, the tooltip line
 notify.odin    the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands
@@ -374,12 +376,14 @@ changes.odin   the Changes tab's model: a checkout's uncommitted files and branc
 ui_files.odin  the Files and Settings tabs: Sessions | Files | Settings | Jobs switch, header buttons, filter, virtualised tree, row menu, drag to a terminal
 native/editor_macos.m  macOS: FSEvents watcher, Trash, Finder reveal
 ui.odin        Clay layout (sidebar, top bar = title bar, confirmation bar, terminal pane, right panel, palette overlay) + drawing, hover/fade motion
-theme.odin     design tokens (spacing, type, radii, sizes, motion) and the three looks (graphite, warm, ghostty), dark and light; appearance (system/light/dark)
+theme.odin     design tokens (spacing, type, radii, sizes, motion) and the three looks (graphite, warm, ghostty), dark and light; appearance (system/light/dark); the terminal's own colours are in term_palette.odin
 font.odin      text: font sets (UI, UI small, mono), shaped-run + glyph caches, growing atlas, sokol_gl quads
 text_*.odin    text backends: CoreText (macOS, src/native/text_coretext.c), stb_truetype (others); box-drawing sprites
 sessions.odin  projects + sessions from ~/.pi/agent/sessions (header cwd); the Chats entry (<data dir>/chats)
 titles.odin    session titles by pi's rule: files streamed once, cached by offset (a worker for big ones), saved as <data dir>/session-titles.tsv
-term.odin      one terminal: PTY + reader thread + libghostty-vt, drawing, input encoding
+term.odin      one terminal, the core's side: PTY + reader thread + libghostty-vt, its size (term_resize: cols, rows, cell px)
+term_view.odin the window's side of a terminal: drawing, selection, input encoding; sizes the grid from the pane and font
+term_palette.odin the terminal's default colours per look and appearance (answers colour queries)
 pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
 ghostty/       Odin bindings for the libghostty-vt calls used
 snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
@@ -476,7 +480,7 @@ and the identity variables of whatever terminal launched Deckhand are removed.
 Printable keys travel as text from the CHAR event, which is correct for any keyboard layout.
 Ctrl and Alt combinations and special keys are encoded from KEY_DOWN. Option acts as Alt (for pi's
 Alt+Enter), so Option+letter sends ESC+letter rather than a special character. The macOS
-line-editing keys are Ghostty's defaults (`mac_key_text` in `term.odin`): ⌘⌫ sends Ctrl-U, ⌘←
+line-editing keys are Ghostty's defaults (`mac_key_text` in `term_view.odin`): ⌘⌫ sends Ctrl-U, ⌘←
 Ctrl-A, ⌘→ Ctrl-E, ⌥← ESC b and ⌥→ ESC f. ⌥⌦ (ESC d) is Deckhand's own addition, and ⌥⌫ is ESC DEL
 from the encoder. ⌘K stays the palette, so Ghostty's clear-screen binding is not used.
 

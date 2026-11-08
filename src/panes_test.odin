@@ -1035,7 +1035,7 @@ panes_split_layout :: proc(t: ^testing.T) {
 	ui_pane_rects(s)
 	r = run_command(Split_Pane{pane = b, direction = .Right}, PT_UI)
 	testing.expect_value(t, r.error, "not enough room")
-	app.centre = {}
+	centre_reset()
 }
 
 
@@ -1106,7 +1106,7 @@ panes_actions :: proc(t: ^testing.T) {
 panes_divider_drag :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	s := pt_one(1)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
 	r := run_command(Split_Pane{direction = .Right, tab_id = s.tabs[1].id}, PT_UI)
@@ -1165,7 +1165,7 @@ panes_press_focuses_its_pane :: proc(t: ^testing.T) {
 panes_changes_not_refreshed_every_layout :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	s := pt_one(1)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
 	root := "/tmp/pt-changes"
@@ -1202,7 +1202,7 @@ panes_changes_not_refreshed_every_layout :: proc(t: ^testing.T) {
 panes_field_in_second_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -1280,7 +1280,7 @@ panes_markdown_preview_of_the_pane :: proc(t: ^testing.T) {
 panes_room_and_ratio_keep_minimums :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	s := pt_one(3)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
 	ids := [4]u64{s.tabs[0].id, s.tabs[1].id, s.tabs[2].id, s.tabs[3].id}
@@ -1406,7 +1406,7 @@ panes_bars_guard_per_tab :: proc(t: ^testing.T) {
 panes_bars_never_widen_a_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -1435,7 +1435,7 @@ pane_width_of :: proc(s: ^Open_Session, pane: u64) -> f32 {
 panes_bars_hit_only_inside_their_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	defer delete_key(&page_extras, x.browser)
@@ -1478,7 +1478,7 @@ panes_bars_hit_only_inside_their_pane :: proc(t: ^testing.T) {
 panes_agent_strip_buttons_fit_a_narrow_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -1539,7 +1539,7 @@ clear_inbox_for_test :: proc() {
 panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -1566,7 +1566,7 @@ panes_pointer_leaves_its_pane :: proc(t: ^testing.T) {
 panes_field_press_only_inside_its_pane :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	defer delete_key(&page_extras, x.browser)
@@ -1596,7 +1596,7 @@ panes_field_press_only_inside_its_pane :: proc(t: ^testing.T) {
 panes_pointer_leaves_for_a_column :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	if !testing.expect(t, pt_ui(), "fonts") do return
-	defer app.centre = {}
+	defer centre_reset()
 	x := pt_two()
 	defer pt_two_done(x)
 	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
@@ -1626,4 +1626,85 @@ panes_pointer_leaves_for_a_column :: proc(t: ^testing.T) {
 	event(&e)
 	testing.expectf(t, pointer_pane == x.b, "the press's pane while held: %v", pointer_pane)
 	inbox_drain()
+}
+
+// The window's centre back to "not laid out" (app.centre and what it sent the core).
+centre_reset :: proc() {
+	app.centre = {}
+	pane_centre = {}
+}
+
+// split_pane's room check from the centre size the window sent (no Clay, no layout): at scale 1
+// two panes across need 2 * 240 + 1 px, at scale 2 twice that; down, 2 * 140 + 1.
+@(test)
+pane_room_from_the_sent_centre :: proc(t: ^testing.T) {
+	defer centre_reset()
+	s := pt_one(3)
+	p := s.panes[0].id
+	pane_centre_set(480, 1000, 1)
+	testing.expect(t, !pane_has_room(s, p, .Right))
+	testing.expect(t, pane_has_room(s, p, .Down))
+	pane_centre_set(481, 280, 1)
+	testing.expect(t, pane_has_room(s, p, .Right))
+	testing.expect(t, !pane_has_room(s, p, .Down))
+	pane_centre_set(900, 600, 2) // 450 logical px: no room across
+	testing.expect(t, !pane_has_room(s, p, .Right))
+	r := run_command(Split_Pane{pane = p, direction = .Right}, PT_UI)
+	testing.expect_value(t, r.error, "not enough room")
+	pane_centre_set(1000, 600, 1)
+	r = run_command(Split_Pane{pane = p, direction = .Right, tab_id = s.tabs[1].id}, PT_UI)
+	testing.expectf(t, r.ok, "split: %s", r.error)
+	// two across in 1000: each ~500; a third beside either needs 3 * 240 + 2 = 722 across: yes,
+	// but the 500 px pane itself has room for two halves (481) too
+	testing.expect(t, pane_has_room(s, s.panes[0].id, .Right))
+	pane_centre_set(700, 600, 1) // 3 * 240 + 2 = 722 > 700
+	testing.expect(t, !pane_has_room(s, s.panes[0].id, .Right))
+	// not laid out: every split has room
+	pane_centre = {}
+	testing.expect(t, pane_has_room(s, s.panes[0].id, .Right))
+}
+
+// set_split's ratio is kept off the panes' minimums at the split's size from the sent centre
+// (no Clay): in 1001 px across (1000 + the divider), a pane is at least 240 px, so 0.1 becomes 0.24.
+@(test)
+pane_ratio_from_the_sent_centre :: proc(t: ^testing.T) {
+	defer centre_reset()
+	s := pt_one(2)
+	r := run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s.tabs[1].id}, PT_UI)
+	testing.expectf(t, r.ok, "split: %s", r.error)
+	split := s.nodes[s.root].id
+	// not laid out: the ratio as given
+	r = run_command(Set_Split{split = split, ratio = 0.1})
+	testing.expect(t, r.ok)
+	testing.expect(t, abs(s.nodes[s.root].ratio - 0.1) < 1e-4)
+	pane_centre_set(1001, 600, 1)
+	r = run_command(Set_Split{split = split, ratio = 0.1})
+	testing.expect(t, r.ok)
+	testing.expectf(t, abs(s.nodes[s.root].ratio - 0.24) < 1e-4, "kept: %v", s.nodes[s.root].ratio)
+	r = run_command(Set_Split{split = split, ratio = 0.95})
+	testing.expectf(t, abs(s.nodes[s.root].ratio - 0.76) < 1e-4, "kept: %v", s.nodes[s.root].ratio)
+	r = run_command(Set_Split{split = split, ratio = 0.5})
+	testing.expect(t, abs(s.nodes[s.root].ratio - 0.5) < 1e-4)
+	// scale 2: 901 framebuffer px is 450 logical: no room for both, the ratio alone decides
+	pane_centre_set(901, 600, 2)
+	r = run_command(Set_Split{split = split, ratio = 0.1})
+	testing.expect(t, abs(s.nodes[s.root].ratio - 0.1) < 1e-4)
+	// a nested split's size is its place in the tree: the right half of 1001 at 0.5 is 500 px
+	pane_centre_set(1001, 600, 1)
+	run_command(Set_Split{split = split, ratio = 0.5})
+	right := s.nodes[s.nodes[s.root].b].pane // child b of the root
+	np := pane_split(s, right, .Down)
+	testing.expect(t, np != 0)
+	left := s.nodes[s.nodes[s.root].a].pane
+	mv: u64 // the shell beside the pi tab in the left pane
+	for tab in s.tabs[1:] do if tab.pane == left do mv = tab.id
+	testing.expect(t, pane_move_tab(s, mv, np))
+	inner: u64
+	for n in s.nodes do if !n.leaf && n.dir == .Down do inner = n.id
+	rect, ok := pane_split_rect(s, inner, {0, 0, 1001, 600}, 1, 240, 140)
+	testing.expect(t, ok)
+	testing.expectf(t, abs(rect.z - 500) < 0.5 && abs(rect.w - 600) < 0.5, "inner split: %v", rect)
+	r = run_command(Set_Split{split = inner, ratio = 0.05}) // 599 px down: at least 140 / 599
+	testing.expect(t, r.ok)
+	for n in s.nodes do if n.id == inner do testing.expectf(t, abs(n.ratio - 140.0 / 599) < 1e-3, "inner kept: %v", n.ratio)
 }

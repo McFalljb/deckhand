@@ -92,13 +92,13 @@ in logical px) for Deckhand's Inspect overlay.
 
 ## 5. In code
 
-`src/tabhost.odin` has the in-process interface as types: `Tab_Display` and `Tab_Host` (draw,
-texture, input, capture, control), and `tab_host(kind)` picks the host for each tab kind. The
-frame draws each pane's shown tab (one per pane when the session is split) through `tab_host(kind).draw`. Terminal, editor, Changes and Markdown
+`src/tabhost.odin` has the in-process interface as types: `Tab_Display` and `Tab_View` (draw,
+texture, input, capture, control), and `tab_view(kind)` picks the host for each tab kind. The
+frame draws each pane's shown tab (one per pane when the session is split) through `tab_view(kind).draw`. Terminal, editor, Changes and Markdown
 tabs are `.Drawn`; browser tabs (`src/browser.odin`) and app tabs (`src/app_tab.odin`, frames
 over IOSurface) are `.Texture` and draw their texture themselves. Input is routed per tab kind in
 `main.odin`, and an app's control requests go through `app_call` on the socket (PROTOCOL.md), not
-through `Tab_Host.control`. Clay `.Image` render commands are not used (`ui_draw`).
+through `Tab_View.control`. Clay `.Image` render commands are not used (`ui_draw`).
 
 ## Open questions
 

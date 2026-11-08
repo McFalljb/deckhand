@@ -239,7 +239,7 @@ holder_handover :: proc() -> bool {
 		gap := h == nil || h.gap || h.next != off
 		sync.unlock(&hc.mu)
 		if !acked do continue
-		meta := Snapshot_Meta{offset = off, xpixel = i64(min(f32(t.cols) * font.cell_w, 65535)), ypixel = i64(min(f32(t.rows) * font.cell_h, 65535))}
+		meta := Snapshot_Meta{offset = off, xpixel = i64(min(f32(t.cols) * t.cell.x, 65535)), ypixel = i64(min(f32(t.rows) * t.cell.y, 65535))}
 		blob, used, err := snapshot_encode(t.gt, meta, SNAPSHOT_FORMATS[:], fallback_ok = true, allocator = context.temp_allocator)
 		if err != .None || !file_write_private(snap_path(id), blob) {
 			fmt.eprintln("Deckhand: session holder: no snapshot of terminal", id, err)
@@ -412,7 +412,7 @@ holder_adopt_all :: proc() {
 		fmt.eprintln("Deckhand: session holder:", kept, "terminal(s) no restored tab claims: kept running")
 		note = strings.concatenate({holder_kept_text(kept), note == "" ? "" : " ", note}, context.temp_allocator)
 	}
-	if note != "" do toast_show(note, err = true)
+	if note != "" do window_toast(note, err = true)
 }
 
 // Adopts holder terminal id into tab (its Term made now); saved: what tokens.json says it was
@@ -457,7 +457,7 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 	if !adopted {
 		// no usable snapshot (crash restart): a fresh terminal at the holder's size, its whole tail
 		t.cols, t.rows = max(cols, 2), max(rows, 2)
-		gh.terminal_resize(t.gt, t.cols, t.rows, u32(font.cell_w), u32(font.cell_h))
+		gh.terminal_resize(t.gt, t.cols, t.rows, u32(t.cell.x), u32(t.cell.y))
 		if autotest.active {
 			hsh, _ := screen_hash(t.gt)
 			fmt.printfln("[autotest] adopted %d hash %x inexact", id, hsh)
@@ -497,7 +497,7 @@ adopt_ref_check :: proc(t: ^Term, id: u32, all: []u8, cols, rows: u16) {
 	ref.cols, ref.rows = cols, rows
 	if !term_new_gt(&ref) do return
 	defer gh.terminal_free(ref.gt)
-	gh.terminal_resize(ref.gt, cols, rows, u32(font.cell_w), u32(font.cell_h))
+	gh.terminal_resize(ref.gt, cols, rows, u32(t.cell.x), u32(t.cell.y))
 	ref.mute_replies = true
 	gh.terminal_vt_write(ref.gt, raw_data(all), len(all))
 	a, aok := gt_clone(ref.gt)

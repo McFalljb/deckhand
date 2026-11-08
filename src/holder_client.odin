@@ -257,7 +257,7 @@ holder_client_start :: proc() -> bool {
 		hc.tried, hc.unreachable = true, true
 		if hc.successor_retries < SUCCESSOR_RETRIES do hc.successor_retry = time.tick_add(time.tick_now(), hw.SUCCESSOR_TTL + 2 * time.Second)
 		fmt.eprintln("Deckhand: session holder: it is reserved for the Deckhand an update relaunches; trying again once that lapses")
-		toast_show("The session holder is reserved for the Deckhand an update is starting. Its sessions come back here in about a minute if that Deckhand doesn't take them; tabs opened now stop when Deckhand quits.", err = true)
+		window_toast("The session holder is reserved for the Deckhand an update is starting. Its sessions come back here in about a minute if that Deckhand doesn't take them; tabs opened now stop when Deckhand quits.", err = true)
 		return false
 	}
 	switch trust.holder_start(answered, state.settings.keep_sessions) {
@@ -266,7 +266,7 @@ holder_client_start :: proc() -> bool {
 	case .Warn_Running:
 		hc.tried, hc.unreachable = true, true
 		fmt.eprintln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
-		toast_show("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
+		window_toast("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
 		return false
 	case .Launch:
 	}
@@ -434,7 +434,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 			h.kept, h.tail_len = true, 0
 			clear(&h.buf)
 		}
-		toast_show(holder_kept_text(len(w.terminals)), err = true)
+		window_toast(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
 	if autotest.active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
@@ -681,7 +681,7 @@ holder_wanted :: proc() -> bool {
 	if holder_upgrading() {
 		if !hc.upgrade_told {
 			hc.upgrade_told = true // once per upgrade (holder_upgrade clears it)
-			toast_show("The session holder is upgrading: tabs opened in the next few seconds stop when Deckhand quits")
+			window_toast("The session holder is upgrading: tabs opened in the next few seconds stop when Deckhand quits")
 		}
 		return false
 	}

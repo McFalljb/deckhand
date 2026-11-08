@@ -573,7 +573,7 @@ theme_and_motion :: proc(t: ^testing.T) {
 		gh.terminal_get(term.gt, .Color_Background_Default, &c)
 		return c
 	}
-	g := THEMES[.Graphite].term_bg
+	g := TERM_COLORS[.Graphite].bg
 	testing.expect_value(t, bg_of(term), gh.Color_Rgb{g.r, g.g, g.b}) // new terminals start in the look
 	v := state.version
 	r := run_command(Set_Theme{name = .Ghostty}, script)
@@ -616,31 +616,31 @@ appearance_resolution :: proc(t: ^testing.T) {
 	// system follows the OS: dark until the platform says light
 	testing.expect(t, !theme_is_light())
 	testing.expect(t, theme() == &THEMES[.Graphite])
-	testing.expect_value(t, bg_of(term), THEMES[.Graphite].term_bg)
+	testing.expect_value(t, bg_of(term), TERM_COLORS[.Graphite].bg)
 	v := state.version
 	run_command(System_Appearance{light = true})
 	testing.expect_value(t, state.version, v + 1)
 	testing.expect(t, theme_is_light())
 	testing.expect(t, theme() == &THEMES_LIGHT[.Graphite])
-	testing.expect_value(t, bg_of(term), THEMES_LIGHT[.Graphite].term_bg) // terminals follow live
+	testing.expect_value(t, bg_of(term), TERM_COLORS_LIGHT[.Graphite].bg) // terminals follow live
 	run_command(System_Appearance{light = true}) // unchanged
 	testing.expect_value(t, state.version, v + 1)
 	// dark wins over a light OS; the OS still records its changes
 	r := run_command(Set_Appearance{mode = .Dark}, script)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, !theme_is_light())
-	testing.expect_value(t, bg_of(term), THEMES[.Graphite].term_bg)
+	testing.expect_value(t, bg_of(term), TERM_COLORS[.Graphite].bg)
 	run_command(System_Appearance{light = false})
 	run_command(Set_Appearance{mode = .Light}, script)
 	testing.expect(t, theme_is_light())
-	testing.expect_value(t, bg_of(term), THEMES_LIGHT[.Graphite].term_bg)
+	testing.expect_value(t, bg_of(term), TERM_COLORS_LIGHT[.Graphite].bg)
 	// the look is independent: ghostty light
 	run_command(Set_Theme{name = .Ghostty}, script)
 	testing.expect(t, theme() == &THEMES_LIGHT[.Ghostty])
 	testing.expect_value(t, bg_of(term), Rgba{0xff, 0xff, 0xff, 255})
 	run_command(Set_Appearance{mode = .System}, script) // OS is dark now
 	testing.expect(t, theme() == &THEMES[.Ghostty])
-	testing.expect_value(t, bg_of(term), THEMES[.Ghostty].term_bg)
+	testing.expect_value(t, bg_of(term), TERM_COLORS[.Ghostty].bg)
 	// the window's own appearance followed each setting
 	testing.expect_value(t, len(window_modes), 3)
 	if len(window_modes) == 3 do testing.expect(t, window_modes[0] == .Dark && window_modes[1] == .Light && window_modes[2] == .System)
@@ -650,7 +650,7 @@ appearance_resolution :: proc(t: ^testing.T) {
 	pal: [256]gh.Color_Rgb
 	run_command(Set_Appearance{mode = .Light}, script)
 	gh.terminal_get(term.gt, .Color_Palette_Default, &pal)
-	fg, bg := THEMES_LIGHT[.Ghostty].term_fg, THEMES_LIGHT[.Ghostty].term_bg
+	fg, bg := TERM_COLORS_LIGHT[.Ghostty].fg, TERM_COLORS_LIGHT[.Ghostty].bg
 	testing.expect_value(t, pal[16], gh.Color_Rgb{fg.r, fg.g, fg.b}) // cube from the foreground...
 	testing.expect_value(t, pal[231], gh.Color_Rgb{bg.r, bg.g, bg.b}) // ...to the background
 	for i in 232 ..< 255 do testing.expectf(t, lab_of({pal[i].r, pal[i].g, pal[i].b, 255}).l < lab_of({pal[i + 1].r, pal[i + 1].g, pal[i + 1].b, 255}).l, "grey ramp runs dark to light at %d", i)
@@ -694,7 +694,7 @@ appearance_reports_to_apps :: proc(t: ^testing.T) {
 	// the re-query gets the new colours
 	q := "\x1b]11;?\x1b\\"
 	gh.terminal_vt_write(term.gt, raw_data(q), len(q))
-	bg := THEMES[.Graphite].term_bg
+	bg := TERM_COLORS[.Graphite].bg
 	want := fmt.tprintf("\x1b]11;rgb:%02x%02x/%02x%02x/%02x%02x", bg.r, bg.r, bg.g, bg.g, bg.b, bg.b)
 	testing.expectf(t, got(out, want), "OSC 11 answer %q", want)
 	run_command(Set_Theme{name = .Warm}, script) // a new look: same scheme, new colours, reported too

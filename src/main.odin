@@ -8,6 +8,7 @@ package main
 // output, input, resize). Idle frames do no GPU work.
 
 import "base:runtime"
+import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -193,6 +194,35 @@ platform_app :: proc() -> Platform {
 	}
 }
 
+// The window's side of the core's hooks (window_hooks.odin), filled in before main runs so the
+// unit tests have them too.
+window_hooks_app :: proc() -> Window_Hooks {
+	return {
+		state_changed = proc() {app.redraw = true},
+		toast = proc(text: string, err: bool) {toast_show(text, err)},
+		frames_info = proc(tab_id: u64) -> (service: string, key: [32]u8, device: u64, ok: bool) {
+			when ODIN_OS == .Darwin {
+				if pd_frames_chan_key(tab_id, &key[0]) == 1 do return string(pd_frames_service()), key, pd_frames_device_id(), true
+			}
+			return
+		},
+		frames_read = proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
+			when ODIN_OS == .Darwin {
+				return pd_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
+			}
+			return false
+		},
+		tab_host_apply = tab_host_apply_app, // tabhost.odin
+		test_step = autotest_step,
+	}
+}
+
+@(init)
+window_hooks_init :: proc "contextless" () {
+	context = runtime.default_context()
+	window = window_hooks_app()
+}
+
 // The OS switched between light and dark (platform layer, main thread; the
 // test mode's `system_appearance` too).
 on_system_appearance :: proc(light: bool) {
@@ -216,18 +246,8 @@ frame :: proc "c" () {
 	defer free_all(context.temp_allocator)
 
 	app.frames_called += 1
-	inbox_drain()
-	autotest_step()
-	pump_all()
-	pty_reap()
-	persist_tick()
-	titles_tick() // titles the worker read (titles.odin)
+	core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
-	jobs_tick() // Atlas's jobs: notes, the clock, running runs (jobs.odin)
-	agent_pending_tick() // Send to Atlas text that waited too long for pi (session_info.odin)
-	claude_tick() // Claude tabs: held texts that can go now, their Enter (claude.odin)
-	claude_wait_tick() // claude_wait_idle: waits whose Claude tab is idle, gone or past its deadline (claude_wait.odin)
-	dead_tab_tick() // Restart with model…: pi's selector once the new pi is up (dead_tab.odin)
 	browser_debug_tick() // PI_DESK_DEBUG_BROWSER (browser.odin, spike)
 	t := active_term()
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
@@ -775,7 +795,7 @@ pane_draw :: proc(p: ^Pane, t: ^Term, typing: bool) {
 	if tab == nil || (term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
 	if r.z <= 0 || r.w <= 0 do return
-	tab_host(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
+	tab_view(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
 	if pt := term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
 }
 

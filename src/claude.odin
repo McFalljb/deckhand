@@ -196,7 +196,7 @@ claude_note_typed :: proc(tab: ^Tab) {
 	if !rt.typed {
 		rt.typed = true
 		claude_rt[tab.id] = rt
-		app.redraw = true // the held strip says why it waits
+		window_state_changed() // the held strip says why it waits
 	}
 }
 
@@ -294,7 +294,7 @@ claude_tick :: proc() {
 				rt.enter_due = {}
 				claude_rt[tab.id] = rt
 				if t := term_of(tab.id); t != nil && t.running do pty_write(&t.pty, transmute([]u8)string("\r"))
-				app.redraw = true
+				window_state_changed()
 				continue
 			}
 			if len(ct.held) == 0 do continue
@@ -404,7 +404,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	if defaults {
 		with := claude_with_defaults(args)
 		if !ro do args = with
-		else if len(with) > len(args) do toast_show(fmt.tprintf("Read-only chat: %s (your default Claude Code flags) left out", strings.join(with[len(args):], " ", context.temp_allocator)))
+		else if len(with) > len(args) do window_toast(fmt.tprintf("Read-only chat: %s (your default Claude Code flags) left out", strings.join(with[len(args):], " ", context.temp_allocator)))
 	}
 	if ro do args, _ = claude_readonly_args(args) // only the allowlist (saved from before it was read-only)
 	append(&argv, ..args)
@@ -592,8 +592,8 @@ claude_readonly_stop :: proc(tab: ^Tab, ct: ^Claude_Tab, note := CLAUDE_GUARD_ST
 		term_note(t, note)
 		pty_kill_group(&t.pty, i32(posix.Signal.SIGKILL)) // claude and what it runs (in the holder: SIGNAL{pgroup})
 	}
-	toast_show(toast, err = true)
-	app.redraw = true
+	window_toast(toast, err = true)
+	window_state_changed()
 }
 
 // The user's flags a read-only tab keeps (temp), and the first one it does not ("" = none).
@@ -740,7 +740,7 @@ claude_installed_probe: proc() -> bool
 // same refusal.
 claude_missing :: proc(caller: Caller) -> (r: Result, missing: bool) {
 	if caller.kind == .UI ? claude_installed_now() : claude_installed() do return {}, false
-	if caller.kind == .UI do toast_show(CLAUDE_MISSING, err = true)
+	if caller.kind == .UI do window_toast(CLAUDE_MISSING, err = true)
 	return fail(CLAUDE_MISSING), true
 }
 
@@ -1219,7 +1219,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		ts, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
 		was := ct.turn
-		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do app.redraw = true // dots without OSC 7501 (claude_status.odin)
+		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do window_state_changed() // dots without OSC 7501 (claude_status.odin)
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
 		switch c.state {
 		case "submitted":

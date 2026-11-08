@@ -493,3 +493,25 @@ every_message_unmarshals :: proc(t: ^testing.T) {
 	testing.expect_value(t, decode(Frame{u8(Kind.Welcome), 0, transmute([]u8)string(bad)}, .Welcome, &w, a), Msg_Error.Wrong_Type)
 	free_all(a)
 }
+
+// The upgrade's optional WELCOME fields (§7.3 step 6): a keeper's degraded terminals and why it
+// serves them; absent, they leave the frozen encoding as it was (golden_vectors).
+@(test)
+welcome_upgrade_fields :: proc(t: ^testing.T) {
+	out := make([dynamic]u8, context.temp_allocator)
+	encode(&out, .Welcome, 0, Welcome {
+		wire = 1, instance = "ab", pid = 7, holder_rev = 2, previous = "upgrade", hmac_key = "00",
+		terminals = {{id = 1, pid = 9, pgid = 9, cols = 80, rows = 24, offset = 3, degraded = true}, {id = 2, pid = 10, pgid = 10, cols = 80, rows = 24}},
+		upgrade_error = "the new holder image failed verification",
+	})
+	f, _, _ := next_frame(out[:])
+	w: Welcome
+	testing.expect_value(t, decode(f, .Welcome, &w, context.temp_allocator), Msg_Error.None)
+	testing.expect_value(t, w.upgrade_error, "the new holder image failed verification")
+	testing.expect(t, w.terminals[0].degraded.? or_else false)
+	testing.expect(t, w.terminals[1].degraded == nil)
+	testing.expect(t, !strings.contains(string(f.payload), `"degraded":false`))
+	// a wrong type is refused like any other field's
+	bad := `{"wire":1,"instance":"ab","pid":7,"holder_rev":2,"previous":"none","hmac_key":"00","terminals":[{"id":1,"pid":9,"pgid":9,"cols":80,"rows":24,"xpixel":0,"ypixel":0,"offset":0,"degraded":1}]}`
+	testing.expect_value(t, decode(Frame{u8(Kind.Welcome), 0, transmute([]u8)string(bad)}, .Welcome, &w, context.temp_allocator), Msg_Error.Wrong_Type)
+}

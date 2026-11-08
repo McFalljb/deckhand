@@ -4,7 +4,8 @@
 #   ./build.sh debug    debug build
 #   ./build.sh run      release build, then run
 #   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
-#                       the holder's, wire's and trust rules' tests (src/holder, src/holderwire, src/trust),
+#                       the holder's, wires' and trust rules' tests (src/holder, src/holderwire, src/corewire,
+#                       src/trust),
 #                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
 #   ./build.sh scenes [ARGS]   build, then the test-mode scenes (tests/scenes.py ARGS; e.g.
 #                       --changed, --all, NAME...): docs/TESTING.md
@@ -270,6 +271,8 @@ case "$MODE" in
     odin test tests -out:build/pi-desk-tests
     # the holder wire codec (src/holderwire): golden vectors, the released schema, a fuzz pass
     odin test src/holderwire -out:build/holderwire-tests
+    # the window/core framed wire (src/corewire): golden vectors, a fuzz pass, the in-memory transport
+    odin test src/corewire -out:build/corewire-tests
     # who may talk to the holder, its launcher and the app (src/trust): pure table tests
     odin test src/trust -out:build/trust-tests
     # the session holder (src/holder): an in-process holder and a fake core over a socketpair,

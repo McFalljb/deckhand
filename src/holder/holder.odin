@@ -825,15 +825,10 @@ hold_main :: proc(args: []string) -> int {
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
 
 	if ready != "" {
-		env, ok := ready_handshake(ready)
-		if !ok {
+		// the launcher's environment, applied by ready_handshake (detach.odin)
+		if _, ok := ready_handshake(ready); !ok {
 			log_line("the launcher's ready handshake failed")
 			return 1
-		}
-		for kv in env {
-			eq := strings.index_byte(kv, '=')
-			if eq <= 0 do continue
-			setenv(strings.clone_to_cstring(kv[:eq], context.temp_allocator), strings.clone_to_cstring(kv[eq + 1:], context.temp_allocator), 1)
 		}
 	}
 

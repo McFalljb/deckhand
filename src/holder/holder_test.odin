@@ -343,7 +343,9 @@ resize_with_pixels :: proc(t: ^testing.T) {
 	ws: Winsize
 	ioctl(h.terms[0].master, TIOCGWINSZ, &ws)
 	testing.expect_value(t, ws, Winsize{ws_row = 24, ws_col = 80, ws_xpixel = 640, ws_ypixel = 384})
+	// pixels past u16 are out of range (holderwire.decode): ignored, the size stays
 	fake_send(f, .Resize, 1, holderwire.Resize{cols = 100, rows = 30, xpixel = 900, ypixel = 70000})
+	fake_send(f, .Resize, 1, holderwire.Resize{cols = 100, rows = 30, xpixel = 900, ypixel = 65535})
 	fake_input(f, 1, "\n")
 	testing.expect(t, wait_output(t, h, f, 1, "30 100"))
 	ioctl(h.terms[0].master, TIOCGWINSZ, &ws)

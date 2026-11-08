@@ -31,8 +31,8 @@ HOLDER_REV :: 1
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 IDLE_EXIT :: 10 * time.Second
-MAX_COLS :: 2000 // the grid limits (PR A); SPAWN/RESIZE outside 1..max are refused
-MAX_ROWS :: 1000
+MAX_COLS :: holderwire.MAX_COLS // the grid limits (PR A); SPAWN/RESIZE outside 1..max are refused
+MAX_ROWS :: holderwire.MAX_ROWS
 READ_CHUNK :: 64 * 1024
 MAX_PENDING :: 8 // connections that have not said HELLO yet
 

@@ -163,6 +163,27 @@ ring_wants_new :: proc(r: ^Frame_Ring, w, h: int, scale: f32, now: time.Tick) ->
 	return time.tick_diff(r.want_since, now) >= RING_SETTLE
 }
 
+// ---- the display link's rate (power; main.odin, src/native/platform_macos.m) ----
+//
+// Deckhand's frame loop runs at the window's screen's maximum only while a tab on screen shows
+// live frames: an app tab connected, or an app or browser tab that framed in the last
+// DISPLAY_FAST_HOLD. Otherwise at most DISPLAY_IDLE_FPS (a 120 Hz MacBook's rate, as before):
+// terminals and the chrome gain nothing from 240 wake-ups a second. Apps are always told the
+// screen's real maximum (tab.display).
+DISPLAY_FAST_HOLD :: time.Second
+DISPLAY_IDLE_FPS :: 120
+
+// The cap on the display link for this frame: 0 = none (the screen's maximum). Pure.
+display_link_cap :: proc(live: bool) -> int {return live ? 0 : DISPLAY_IDLE_FPS}
+
+// A tab keeps the display link fast: on screen, and an app connected or frames arriving. Pure.
+display_tab_live :: proc(visible, connected, framed: bool) -> bool {return visible && (connected || framed)}
+
+// A frame was taken within DISPLAY_FAST_HOLD of now. Pure but for the clock passed in.
+ring_framed_recently :: proc(r: ^Frame_Ring, now: time.Tick) -> bool {
+	return r.last_frame != {} && time.tick_diff(r.last_frame, now) <= DISPLAY_FAST_HOLD
+}
+
 ring_gen :: proc(r: ^Frame_Ring, gen: u32) -> ^Ring_Gen {
 	for &g in r.gens do if g.gen == gen do return &g
 	return nil

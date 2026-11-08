@@ -276,11 +276,16 @@ static CADisplayLink* display_link; // sokol's, caught as it is made
 static atomic_int display_fps = 60; // the window's screen's maximumFramesPerSecond (any thread)
 static _Atomic float display_scale = 1; // its backing scale (any thread)
 static int test_fps; // test mode's override (0 = the screen's)
+static int link_cap = 120; // the display link asks for at most this (0 = the screen's maximum): the frame loop's choice
 static IMP orig_display_link;
+static void display_update(void);
 
 static id hook_display_link(id self, SEL _cmd, id target, SEL sel) {
     id link = ((id (*)(id, SEL, id, SEL))orig_display_link)(self, _cmd, target, sel);
     display_link = link;
+    // a link made again later (sokol remakes it): the window's screen and cap, once sokol has set
+    // its own range right after this returns
+    if (win) dispatch_async(dispatch_get_main_queue(), ^{ display_update(); });
     return link;
 }
 
@@ -304,7 +309,8 @@ static void display_update(void) {
     atomic_store(&display_fps, (int)fps);
     atomic_store(&display_scale, (float)(win ? win.backingScaleFactor : (scr ? scr.backingScaleFactor : 1)));
     if (display_link) {
-        float f = (float)fps; // as sokol sets it (swap interval 1), for this screen
+        // as sokol sets it (swap interval 1), for this screen; capped while nothing live shows
+        float f = (float)(link_cap > 0 && link_cap < fps ? link_cap : fps);
         CAFrameRateRange r = CAFrameRateRangeMake(f, f, f);
         CAFrameRateRange cur = display_link.preferredFrameRateRange;
         if (cur.minimum != r.minimum || cur.maximum != r.maximum || cur.preferred != r.preferred) display_link.preferredFrameRateRange = r;
@@ -319,6 +325,15 @@ static void display_watch(void) {
         [nc addObserverForName:n object:win queue:nil usingBlock:^(NSNotification* note) { display_update(); }];
     }
     [nc addObserverForName:NSApplicationDidChangeScreenParametersNotification object:nil queue:nil usingBlock:^(NSNotification* note) { display_update(); }];
+    display_update();
+}
+
+// The display link asks for at most cap frames per second (0 = the screen's maximum). Main
+// thread, each frame: nothing happens unless it changed.
+void dh_mac_display_link_cap(int cap) {
+    if (cap < 0) cap = 0;
+    if (cap == link_cap) return;
+    link_cap = cap;
     display_update();
 }
 

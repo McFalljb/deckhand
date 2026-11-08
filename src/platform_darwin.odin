@@ -141,7 +141,12 @@ foreign pdplatform {
 	dh_mac_display_scale :: proc() -> f32 ---
 	dh_mac_display_link_fps :: proc() -> f32 ---
 	dh_mac_test_display_fps :: proc(fps: c.int) ---
+	dh_mac_display_link_cap :: proc(cap: c.int) ---
 }
+
+// The display link's rate: at most cap frames per second (0 = the screen's maximum). Cheap when
+// unchanged (each frame; main.odin).
+platform_display_link_cap :: proc(cap: int) {dh_mac_display_link_cap(c.int(cap))}
 
 // Before sokol starts: its display link follows the window's screen's rate, not the main
 // screen's (src/native/platform_macos.m).

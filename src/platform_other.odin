@@ -16,6 +16,7 @@ platform_display_hook :: proc() {}
 platform_display :: proc() -> (fps: int, scale: f32) {return 60, 1}
 platform_display_link_fps :: proc() -> f32 {return 0}
 platform_test_display_fps :: proc(fps: int) {}
+platform_display_link_cap :: proc(cap: int) {}
 window_restore :: proc() {}
 app_deactivate :: proc() {}
 window_capture :: proc(path: string) {}

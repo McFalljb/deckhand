@@ -324,6 +324,9 @@ frame :: proc "c" () {
 	if browser_agent_tick() do app.redraw = true // agents' reads, waits, screenshots, recordings (browser_agent.odin)
 	if browser_act_tick() do app.redraw = true // agents' clicks, typing, uploads (browser_act.odin)
 	app_focus_tick()
+	// the display link: the screen's maximum while an app or page on screen is live, else at most
+	// 120 (frames.odin)
+	platform_display_link_cap(display_link_cap(app_frames_live() || browser_frames_live()))
 	if !app.redraw do return // nothing changed: keep the last frame on screen
 	app.last_draw = time.tick_now()
 	// moved to a display with another scale, set_theme picked another look,

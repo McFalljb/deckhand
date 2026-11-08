@@ -149,7 +149,9 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
 - **3 IOSurfaces** per app tab, created by Deckhand.
   - `kIOSurfacePixelFormat 'BGRA'`, 4 bytes per element, bytes per row aligned with
     `IOSurfaceAlignProperty`, not global.
-  - **Size:** `round(pane_w × scale) × round(pane_h × scale)` (the tab's own pane).
+  - **Size:** the tab's own pane in framebuffer px (`pane × scale`), its edges rounded to whole
+    pixels: `round(x + w) − round(x)` by `round(y + h) − round(y)` (split panes' edges can be
+    fractional).
   - **Contents:** values already display-encoded, the same as sokol's BGRA8 window swapchain.
 - With 3 slots, one is on screen, one waits for Deckhand's GPU to finish sampling it, and one is
   free for the engine. Neither side waits on the other at the display's rate (up to 240 Hz
@@ -180,11 +182,16 @@ never has to reply in order (unlike PROTOCOL §1 for clients).
     window's backing scale. The RING's `scale` (§2.2) is still the one to render at; `scale`
     here says a new ring is coming.
   - The engine paces to `fps`, or to its own lower cap (a simulation can tick at a fixed rate and
-    interpolate its drawing). Deckhand's own frame loop runs at the window's screen's rate too
-    (its display link follows the window, not the main screen), and an app frame redraws the
-    window at once: nothing caps app frames at 60 Hz (the 15 ms cap is terminal output's only).
-  - Frames are drawn 1:1: the ring is the pane's size in pixels, drawn at whole pixels with a
-    nearest sampler, so the engine renders at native resolution and nothing is filtered.
+    interpolate its drawing). Deckhand's own frame loop runs at the window's screen's maximum
+    too (its display link follows the window, not the main screen) while a tab on screen is
+    live: an app connected, or an app or browser tab that framed in the last second. Otherwise it
+    runs at most at 120 Hz (power). An app frame redraws the window at once: nothing caps app
+    frames at 60 Hz (the 15 ms cap is terminal output's only). `fps` is always the screen's
+    real maximum, whatever the loop runs at.
+  - Frames are drawn 1:1: the ring is the pane's span at whole pixels (its edges rounded:
+    `round(x + w) - round(x)`, likewise for height), drawn at that rounded origin with a
+    nearest sampler, and input is measured from the same origin. The engine renders at native
+    resolution and nothing is filtered or cropped.
 - **Visibility:** `tab.visible {visible}` (NDJSON). Visible = shown in any pane of the session on
   screen (several app tabs can be visible at once when the session is split; only the pane with
   the keyboard gets input). A hidden tab gets no frames. The engine keeps

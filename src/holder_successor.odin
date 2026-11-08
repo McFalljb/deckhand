@@ -27,6 +27,10 @@ import "trust"
 
 SUCCESSOR_SOCK :: "successor.sock" // src/holder/relaunch.odin's
 RELAUNCH_READY_WAIT :: 5 * time.Second
+// How long the new app waits for the helper's secret: it answers once it is serving (after it
+// started `open`, which it no longer waits for), so this only covers a slow machine. Only after
+// an update (successor.sock is there); the launch waits meanwhile.
+SUCCESSOR_TAKE_WAIT :: 15 * time.Second
 
 // The old app's helper: its pid and the write end of its stdin (-1 = none started).
 relaunch_helper := struct {
@@ -148,7 +152,7 @@ successor_secret_take :: proc(run: string) -> string {
 	if !sock_write_all(fd, transmute([]u8)fmt.tprintf("%d\n", posix.getpid())) do return ""
 	buf: [80]u8
 	n := 0
-	deadline := time.tick_add(time.tick_now(), RELAUNCH_READY_WAIT)
+	deadline := time.tick_add(time.tick_now(), SUCCESSOR_TAKE_WAIT)
 	for n < len(buf) && (n == 0 || buf[n - 1] != '\n') {
 		left := time.tick_diff(time.tick_now(), deadline)
 		if left <= 0 || !sock_wait_readable(fd, max(int(time.duration_milliseconds(left)), 1)) do return ""

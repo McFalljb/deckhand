@@ -194,8 +194,29 @@ holder_refused_secret_unreachable :: proc(t: ^testing.T) {
 	testing.expect(t, !holder_client_start(), "attached to something")
 	testing.expect(t, hc.refused_secret)
 	testing.expect(t, hc.unreachable, "not taken for a holder that keeps sessions")
-	testing.expect(t, strings.contains(toast.text, "updating"), toast.text)
+	testing.expect(t, strings.contains(toast.text, "update"), toast.text)
+	testing.expect(t, !strings.contains(toast.text, "another copy"), toast.text) // it may be the successor itself
 	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+}
+
+// The reservation lapses after SUCCESSOR_TTL (the successor never came, or this was it without
+// its secret): the attach is tried again then, once, and the tabs that waited are adopted.
+@(test)
+holder_refused_secret_retried :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	fake_holder_start(t, &f)
+	defer fake_holder_stop(&f)
+	testing.expect(t, !holder_client_start())
+	holder_successor_retry_tick()
+	testing.expect(t, !hc.on, "retried before the reservation lapsed")
+	testing.expect(t, hc.successor_retry != {}, "no retry planned")
+	f.mode = .Welcome // the reservation lapsed: the holder welcomes anyone
+	hc.successor_retry = time.tick_now()
+	holder_successor_retry_tick()
+	testing.expect(t, hc.on, "not attached on the retry")
+	testing.expect(t, !hc.unreachable)
+	testing.expect(t, hc.adopt_done, "the retry's adopt did not run")
 }
 
 // A dead holder's socket (nobody listening: kill -9) is removed, and with keep_sessions off it

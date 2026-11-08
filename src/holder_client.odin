@@ -110,6 +110,8 @@ Holder_Client :: struct {
 	successor: [64]u8, // GOODBYE_ACK's successor secret (hex), until it goes to the relaunch helper
 	successor_len: int,
 	refused_secret: bool, // a HELLO was refused for want of the successor secret: an update is relaunching another Deckhand
+	successor_retry: time.Tick, // after REFUSED{secret}: when the reservation has lapsed and the attach is tried again (zero: none)
+	successor_retries: int,
 	dying:     [dynamic]i32, // pids of released terminals, until they are gone (pty_dying)
 	tokens_loaded: bool, // tokens.json verified at attach (socket_tokens_enable)
 	tokens_why:    string, // why not
@@ -245,12 +247,15 @@ holder_client_start :: proc() -> bool {
 		socks = holder_socks(run)
 	}
 	if hc.refused_secret {
-		// the holder waits (at most a minute) for the Deckhand an update is relaunching, and this
-		// is not it: never a second holder beside it, and the tabs it keeps wait for it
-		// (held_away, as for any holder that answers without a WELCOME: holder_adopt_all)
+		// the holder waits (at most SUCCESSOR_TTL) for the Deckhand an update relaunches with its
+		// secret, and this HELLO had none that fits (another copy, or the successor whose secret
+		// never came): never a second holder beside it, and the tabs it keeps wait for it
+		// (held_away, as for any holder that answers without a WELCOME: holder_adopt_all). The
+		// attach is tried again once the reservation has lapsed (holder_successor_retry_tick).
 		hc.tried, hc.unreachable = true, true
-		fmt.eprintln("Deckhand: session holder: it is waiting for the Deckhand an update is starting; running without it")
-		toast_show("Deckhand is updating and another copy is taking over the running sessions: quit this one and open Deckhand again in a minute", err = true)
+		if hc.successor_retries < SUCCESSOR_RETRIES do hc.successor_retry = time.tick_add(time.tick_now(), hw.SUCCESSOR_TTL + 2 * time.Second)
+		fmt.eprintln("Deckhand: session holder: it is reserved for the Deckhand an update relaunches; trying again once that lapses")
+		toast_show("The session holder is reserved for the Deckhand an update is starting. Its sessions come back here in about a minute if that Deckhand doesn't take them; tabs opened now stop when Deckhand quits.", err = true)
 		return false
 	}
 	switch trust.holder_start(answered, state.settings.keep_sessions) {
@@ -1161,6 +1166,24 @@ holder_client_forget :: proc() {
 	delete(hc.upgrade_error_seen)
 	hw.stream_destroy(&hc.rx)
 	hc = Holder_Client{fd = -1}
+}
+
+SUCCESSOR_RETRIES :: 2 // tries after a REFUSED{secret}: a new reservation each time is another update
+
+// Main thread, every frame: after REFUSED{secret}, once the holder's reservation has lapsed, the
+// launch's attach and adopt again: the tabs that waited for it (held_away) get their terminals.
+holder_successor_retry_tick :: proc() {
+	if hc.successor_retry == {} || hc.on || hc.lost || hc.handed do return
+	if time.tick_diff(hc.successor_retry, time.tick_now()) < 0 do return
+	hc.successor_retry = {}
+	hc.successor_retries += 1
+	hc.tried, hc.unreachable, hc.refused_secret, hc.adopt_done = false, false, false, false
+	for &s in state.open_sessions do for &t in s.tabs do if t.held_away != 0 {
+		if t.status == .Not_Started do t.held = t.held_away
+		t.held_away = 0
+	}
+	fmt.eprintln("Deckhand: session holder: the successor's reservation lapsed: attaching again")
+	holder_adopt_all()
 }
 
 // Some tab waits for an unreachable holder that kept its process at launch (Tab.held_away).

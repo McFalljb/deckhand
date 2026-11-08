@@ -232,6 +232,7 @@ frame :: proc "c" () {
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
+	holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
 	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
 	if holder_restart_tick() do app.redraw = true // Restart session holder's outcome (holder_restart.odin)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)

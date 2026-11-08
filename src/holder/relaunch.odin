@@ -94,8 +94,16 @@ relaunch_main :: proc(args: []string) -> int {
 	close(0)
 	// the old app quits right after it sent the secret: wait for it, as the old /bin/sh helper did
 	for kill(a.pid, 0) == 0 do time.sleep(100 * time.Millisecond)
+	// open is not waited for before serving: it may return only once the new app has finished
+	// launching, and the new app asks successor.sock for its secret before that
+	opened: c.int = -1
 	if !a.no_open {
-		if !relaunch_open(a.app) do relaunch_say("cannot run open %s", a.app)
+		opened = relaunch_open(a.app)
+		if opened < 0 do relaunch_say("cannot run open %s", a.app)
+	}
+	defer if opened > 0 {
+		st: c.int
+		waitpid(opened, &st, 0)
 	}
 	if !lok || secret == "" do return 0
 	relaunch_serve(lfd, secret, a.exe, time.tick_add(time.tick_now(), holderwire.SUCCESSOR_TTL))
@@ -257,7 +265,8 @@ real_path :: proc(p: string) -> string {
 
 // `/usr/bin/open BUNDLE`, detached, with a plain environment and /dev/null for its stdio.
 @(private = "file")
-relaunch_open :: proc(app: string) -> bool {
+// Starts `open BUNDLE`; its pid (the caller reaps it), or -1.
+relaunch_open :: proc(app: string) -> c.int {
 	// our stdin is closed already; stdout and stderr go to /dev/null for open
 	null := open("/dev/null", O_RDWR)
 	if null >= 0 {
@@ -268,8 +277,6 @@ relaunch_open :: proc(app: string) -> bool {
 	argv := []cstring{"/usr/bin/open", strings.clone_to_cstring(app, context.temp_allocator), nil}
 	env := []cstring{"PATH=/usr/bin:/bin:/usr/sbin:/sbin", nil}
 	pid: c.int
-	if posix_spawn(&pid, "/usr/bin/open", nil, nil, raw_data(argv), raw_data(env)) != 0 do return false
-	st: c.int
-	waitpid(pid, &st, 0)
-	return true
+	if posix_spawn(&pid, "/usr/bin/open", nil, nil, raw_data(argv), raw_data(env)) != 0 do return -1
+	return pid
 }

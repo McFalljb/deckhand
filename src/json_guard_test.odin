@@ -355,107 +355,300 @@ json_guard_limits_fit_a_small_thread_stack :: proc(t: ^testing.T) {
 	testing.expectf(t, ok, "parsing at the limits on a 512 KiB thread: %s", why)
 }
 
-// Every json.parse / json.unmarshal / json.make_parser in Deckhand's own code
-// goes through jg (src/jsonguard), or sits right after a check that refuses
-// the same inputs (json_valid: strict RFC 8259, UTF-8, 64 deep; jg.check /
-// json_shape_ok). A new call that skips the guard fails here. Each site is
-// listed with its limit, so one that moves or changes limit is noticed too.
-@(test)
-json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
-	SRC := #load_directory(".")
-	HOLDERWIRE := #load_directory("holderwire")
-	// file, proc, call, limit ("" = the default, jg.MAX_DEPTH)
-	Want :: struct {file, proc_name, call, limit: string}
-	WANT := [?]Want {
-		{"agent.odin", "json_field", "jg.parse_string", "transcript"}, // pi session lines
-		{"app_tab.odin", "app_input_event_check", "jg.parse_string", ""},
-		{"app_tab.odin", "json_string_of", "jg.parse_string", ""},
-		{"app_tab.odin", "app_event_in", "json.make_parser", "json_valid"},
-		{"app_tab.odin", "app_boxes_parse", "jg.parse_string", ""},
-		{"app_tab.odin", "app_entries", "jg.parse", ""},
-		{"autotest.odin", "json_path", "jg.parse_string", ""},
-		{"browser.odin", "rlz_off", "jg.parse", ""},
-		{"browser_act.odin", "act_step", "jg.parse_string", ""},
-		{"browser_act.odin", "eval_reply", "jg.parse_string", ""},
-		{"browser_act.odin", "act_result", "jg.parse_string", ""},
-		{"browser_act.odin", "act_result", "jg.parse_string", ""},
-		{"browser_act.odin", "act_result", "jg.parse_string", ""},
-		{"browser_agent.odin", "browser_agent_devtools", "jg.parse", ""},
-		{"browser_agent.odin", "browser_agent_devtools", "jg.parse", ""},
-		{"browser_agent.odin", "op_step", "jg.parse_string", ""},
-		{"browser_agent.odin", "eval_value", "jg.parse_string", ""},
-		{"browser_annotate.odin", "on_cef_devtools", "jg.parse", ""},
-		{"browser_annotate.odin", "on_cef_devtools", "jg.parse", ""},
-		{"browser_annotate.odin", "on_cef_devtools", "jg.parse_string", ""}, // a page's binding payload
-		{"claude_disk.odin", "look", "jg.parse", ""}, // Claude transcripts (seen 16 deep)
-		{"claude_disk.odin", "found_cwd", "jg.parse", ""},
-		{"claude_status.odin", "hints_load", "jg.parse", ""},
-		{"ctl.odin", "ctl_main", "jg.parse_string", ""},
-		{"harness_manifest.odin", "pi_settings_sources", "jg.parse", ""},
-		{"jobs.odin", "job_load", "jg.parse", ""},
-		{"jobs.odin", "s", "jg.parse", ""},
-		{"jobs.odin", "ledger_ready", "jg.parse", ""},
-		{"jobs_run.odin", "run_event", "jg.parse_string", "transcript"}, // pi's JSON events
-		{"json_read.odin", "json_members_raw", "json.make_parser", "jg.shape_ok"},
-		{"json_read.odin", "parse_command", "jg.parse_string", ""},
-		{"json_read.odin", "parse_request", "jg.parse_string", ""},
-		{"json_read.odin", "state_from_json", "jg.parse_string", ""},
-		{"persist.odin", "workspace_restore", "jg.parse_string", ""},
-		{"pi_integration.odin", "manifest_load", "jg.unmarshal", ""},
-		{"reload.odin", "settings_digest", "jg.parse", ""},
-		{"reload.odin", "pkg_version", "jg.parse", ""},
-		{"reload.odin", "pkg_name", "jg.parse", ""},
-		{"reload.odin", "add_settings_paths", "jg.parse", ""},
-		{"reload.odin", "add_local", "jg.parse", ""},
-		{"session_info.odin", "session_facts_read", "jg.parse_string", ""},
-		{"sessions.odin", "header_cwd", "jg.parse", ""},
-		{"settings_files.odin", "settings_packages", "jg.parse", ""},
-		{"snapshot.odin", "snapshot_unpack", "json.parse", "json_shape_ok"},
-		{"snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok"},
-		{"socket.odin", "app_conn_line", "json.parse_string", "json_valid"},
-		{"titles.odin", "title_line", "jg.parse", "transcript"},
-		{"update.odin", "update_load", "jg.parse", ""},
-		{"update_core.odin", "release_parse", "jg.parse_string", ""}, // the network
-		{"holderwire/schema.odin", "schema_problems", "jg.parse_string", ""},
-		{"holderwire/schema.odin", "schema_problems", "jg.parse_string", ""},
-		{"holderwire/wire.odin", "decode", "json.parse", "json_shape_ok"},
-		{"holderwire/wire.odin", "decode", "json.unmarshal", "json_shape_ok"},
+// Every use of core:encoding/json's parser in Deckhand's own code (src/ and
+// tools/, every package; not tests, not src/jsonguard) goes through jg, or
+// sits right after a check that refuses the same inputs. A parser proc is any
+// lowercase json.name but marshal and the value helpers: called or not (a
+// proc value is a way around jg too). Comments and string contents do not
+// count, for the calls or for the guards. A guard is `!check(ARG` with the
+// call's own first argument, then a return, earlier in the same proc and at
+// most 12 lines before (check: json_valid: strict RFC 8259, UTF-8, 64 deep;
+// jg.shape_ok / json_shape_ok). A call on a parser (&p) counts as guarded
+// when its proc made that parser from guarded text. core:encoding/json
+// imported under another name is refused outright. Each site is listed with
+// its limit and spec, so one that moves or changes either is noticed too.
+@(private = "file")
+Parse_Site :: struct {file, proc_name, call, limit, spec: string}
+
+@(private = "file")
+JSON_SAFE := [?]string{"marshal", "marshal_to_builder", "marshal_to_writer", "destroy_value", "clone_value"}
+@(private = "file")
+JG_PARSERS := [?]string{"parse", "parse_string", "parse_bytes", "unmarshal", "unmarshal_string"}
+@(private = "file")
+JSON_GUARDS := [?]string{"json_valid", "jg.shape_ok", "json_shape_ok", "hw.json_shape_ok"}
+
+// src with comments and the insides of string and rune literals blanked
+// (newlines kept, so lines still line up).
+@(private = "file")
+code_only :: proc(src: string) -> string {
+	b := make([]u8, len(src), context.temp_allocator)
+	copy(b, src)
+	blank :: proc(b: []u8, from, to: int) {for k in max(from, 0) ..< min(to, len(b)) do if b[k] != '\n' do b[k] = ' '}
+	for i := 0; i < len(b); {
+		c := b[i]
+		next: u8 = i + 1 < len(b) ? b[i + 1] : 0
+		switch {
+		case c == '/' && next == '/':
+			j := i
+			for j < len(b) && b[j] != '\n' do j += 1
+			blank(b, i, j)
+			i = j
+		case c == '/' && next == '*': // Odin's block comments nest
+			depth, j := 0, i
+			for j < len(b) {
+				if j + 1 < len(b) && b[j] == '/' && b[j + 1] == '*' {depth += 1; j += 2}
+				else if j + 1 < len(b) && b[j] == '*' && b[j + 1] == '/' {depth -= 1; j += 2; if depth == 0 do break}
+				else do j += 1
+			}
+			blank(b, i, j)
+			i = j
+		case c == '"' || c == '\'':
+			j := i + 1
+			for j < len(b) && b[j] != c && b[j] != '\n' do j += b[j] == '\\' ? 2 : 1
+			blank(b, i + 1, j)
+			i = j + 1
+		case c == '`':
+			j := i + 1
+			for j < len(b) && b[j] != '`' do j += 1
+			blank(b, i + 1, j)
+			i = j + 1
+		case:
+			i += 1
+		}
 	}
-	got := make([dynamic]Want, context.temp_allocator)
-	scan :: proc(got: ^[dynamic]Want, prefix: string, files: []runtime.Load_Directory_File) {
-		CALLS :: [?]string{"json.parse_string(", "json.parse_bytes(", "json.parse(", "json.unmarshal_string(", "json.unmarshal_any(", "json.unmarshal(", "json.make_parser(", "jg.parse_string(", "jg.parse(", "jg.unmarshal(", "jg.unmarshal_string("}
-		for f in files {
-			if !strings.has_suffix(f.name, ".odin") || strings.has_suffix(f.name, "_test.odin") do continue
-			lines := strings.split_lines(string(f.data), context.temp_allocator)
-			proc_name := ""
-			for line, i in lines {
-				code := line
-				if c := strings.index(code, "//"); c >= 0 do code = code[:c]
-				if colon := strings.index(code, " :: proc"); colon >= 0 do proc_name = strings.trim_space(code[:colon])
-				for call in CALLS {
-					at := strings.index(code, call)
-					if at < 0 || (at > 0 && (code[at - 1] == '_' || code[at - 1] == '.' || 'a' <= code[at - 1] && code[at - 1] <= 'z')) do continue
-					limit := ""
-					if strings.has_prefix(call, "jg.") {
-						if strings.contains(code, "MAX_DEPTH_TRANSCRIPT") do limit = "transcript"
-						else if strings.contains(code, "max_depth") do limit = "custom"
+	return string(b)
+}
+
+@(private = "file")
+ident_byte :: proc(c: u8) -> bool {return c == '_' || '0' <= c && c <= '9' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z'}
+
+// The first argument of the call whose '(' is at s[open] (to the first comma
+// or ')' at its own level), trimmed.
+@(private = "file")
+first_arg :: proc(s: string, open: int) -> string {
+	depth := 0
+	for k in open + 1 ..< len(s) {
+		switch s[k] {
+		case '(', '[', '{': depth += 1
+		case ')', ']', '}':
+			if depth == 0 do return strings.trim_space(s[open + 1:k])
+			depth -= 1
+		case ',': if depth == 0 do return strings.trim_space(s[open + 1:k])
+		}
+	}
+	return strings.trim_space(s[open + 1:])
+}
+
+// The parse sites of one file; limit "UNGUARDED" (no guard), "ALIASED"
+// (core:encoding/json imported under another name).
+@(private = "file")
+scan_source :: proc(file, text: string) -> []Parse_Site {
+	got := make([dynamic]Parse_Site, context.temp_allocator)
+	raw := strings.split_lines(text, context.temp_allocator)
+	lines := strings.split_lines(code_only(text), context.temp_allocator)
+	proc_name := "" // the top-level proc (the label)
+	proc_start := 0 // the line of the innermost proc header (where guards stop)
+	parser_guard := "" // the guard of a parser this proc made ("" = none)
+	for code, i in lines {
+		if colon := strings.index(code, " :: proc"); colon >= 0 {
+			proc_start = i
+			parser_guard = ""
+			if len(code) > 0 && code[0] != ' ' && code[0] != '\t' do proc_name = strings.trim_space(code[:colon])
+		}
+		trimmed := strings.trim_space(code)
+		if strings.has_prefix(trimmed, "import ") && strings.contains(raw[i], `"core:encoding/json"`) {
+			name := strings.trim_space(strings.trim_prefix(strings.trim_space(raw[i][:strings.index(raw[i], `"`)]), "import"))
+			if name != "" && name != "json" do append(&got, Parse_Site{file, proc_name, strings.concatenate({"import ", name}, context.temp_allocator), "ALIASED", ""})
+			continue
+		}
+		for pkg in ([]string{"json.", "jg."}) {
+			for at := 0; at < len(code); {
+				k := strings.index(code[at:], pkg)
+				if k < 0 do break
+				k += at
+				at = k + len(pkg)
+				if k > 0 && (ident_byte(code[k - 1]) || code[k - 1] == '.') do continue
+				e := at
+				for e < len(code) && ident_byte(code[e]) do e += 1
+				name := code[at:e]
+				if name == "" || !('a' <= name[0] && name[0] <= 'z') do continue
+				listed := false
+				if pkg == "jg." {
+					for n in JG_PARSERS do if n == name do listed = true
+				} else {
+					listed = true
+					for n in JSON_SAFE do if n == name do listed = false
+				}
+				if !listed do continue
+				call := strings.concatenate({pkg, name}, context.temp_allocator)
+				rest := code[e:]
+				open := e + (len(rest) - len(strings.trim_left_space(rest)))
+				is_call := open < len(code) && code[open] == '('
+				spec := ""
+				if strings.contains(code, ".JSON5") || strings.contains(code, ".MJSON") || strings.contains(code, ".SJSON") do spec = "JSON5"
+				limit := ""
+				if pkg == "jg." {
+					if strings.contains(code, "MAX_DEPTH_TRANSCRIPT") do limit = "transcript"
+					else if strings.contains(code, "max_depth") do limit = "custom"
+				} else if !is_call {
+					limit = "UNGUARDED" // a proc value: a call through it is not seen
+				} else {
+					arg := first_arg(code, open)
+					if strings.has_prefix(arg, "&") {
+						limit = parser_guard != "" ? "parser" : "UNGUARDED"
 					} else {
-						// a raw call: what guards it, in the 12 lines before
+						if !strings.contains(code, ".JSON") do spec = "JSON5 (default)"
 						limit = "UNGUARDED"
-						for j := i; j >= max(0, i - 12); j -= 1 {
-							for g in ([]string{"json_valid", "jg.shape_ok", "json_shape_ok"}) do if strings.contains(lines[j], strings.concatenate({g, "("}, context.temp_allocator)) {limit = g; break}
-							if limit != "UNGUARDED" do break
+						guard: for j := i; j >= max(proc_start, i - 12); j -= 1 {
+							for g in JSON_GUARDS {
+								needle := strings.concatenate({"!", g, "(", arg}, context.temp_allocator)
+								c := strings.index(lines[j], needle)
+								if c < 0 do continue
+								after := lines[j][c + len(needle):]
+								if !strings.has_prefix(after, ")") && !strings.has_prefix(after, ",") do continue
+								returns := strings.contains(lines[j][c:], "return")
+								if !returns && strings.has_suffix(strings.trim_space(lines[j]), "{") {
+									for m in j + 1 ..< min(j + 4, i) do if strings.contains(lines[m], "return") do returns = true
+								}
+								if !returns do continue
+								limit = strings.trim_prefix(g, "hw.")
+								break guard
+							}
+						}
+						if name == "make_parser" || name == "make_parser_from_string" || name == "make_parser_from_bytes" {
+							parser_guard = limit != "UNGUARDED" ? limit : ""
 						}
 					}
-					append(got, Want{strings.concatenate({prefix, f.name}, context.temp_allocator), proc_name, call[:len(call) - 1], limit})
-					break
 				}
+				append(&got, Parse_Site{file, proc_name, call, limit, spec})
+				break // one site per line
 			}
 		}
 	}
-	scan(&got, "", SRC)
-	scan(&got, "holderwire/", HOLDERWIRE)
-	for g in got do testing.expectf(t, g.limit != "UNGUARDED", "%s %s: %s with no guard before it: use jg (src/jsonguard)", g.file, g.proc_name, g.call)
+	return got[:]
+}
+
+// Every .odin file under dir (not tests), as paths relative to the repo.
+@(private = "file")
+odin_sources :: proc(dir, rel: string, out: ^[dynamic][2]string) {
+	entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
+	if err != nil do return
+	for e in entries {
+		if strings.has_prefix(e.name, ".") || e.name == "node_modules" do continue
+		r := strings.concatenate({rel, "/", e.name}, context.temp_allocator)
+		if e.type == .Directory {
+			if r != "src/jsonguard" do odin_sources(e.fullpath, r, out)
+			continue
+		}
+		if !strings.has_suffix(e.name, ".odin") || strings.has_suffix(e.name, "_test.odin") do continue
+		data, rerr := os.read_entire_file(e.fullpath, context.temp_allocator)
+		if rerr == nil do append(out, [2]string{r, string(data)})
+	}
+}
+
+// The scan catches the ways around it.
+@(test)
+json_guard_scan_sees_through_disguises :: proc(t: ^testing.T) {
+	limit_of :: proc(src: string) -> string {
+		got := scan_source("x.odin", src)
+		if len(got) != 1 do return fmt.tprintf("%d sites", len(got))
+		return got[0].limit
+	}
+	testing.expect_value(t, limit_of("import j \"core:encoding/json\"\n"), "ALIASED")
+	testing.expect_value(t, limit_of("f :: proc() {\n\tp := json.parse_string\n}\n"), "UNGUARDED") // a proc value
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\tu := \"http://x\"; v, _ := json.parse(s)\n}\n"), "UNGUARDED") // after a // in a string
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\t// if !json_valid(s) do return\n\tv, _ := json.parse(s)\n}\n"), "UNGUARDED") // a guard in a comment
+	testing.expect_value(t, limit_of("f :: proc(s, o: string) {\n\tif !json_valid(o) do return\n\tv, _ := json.parse(s)\n}\n"), "UNGUARDED") // another variable
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\tok := json_valid(s)\n\tv, _ := json.parse(s)\n}\n"), "UNGUARDED") // checked, not acted on
+	testing.expect_value(t, limit_of("g :: proc(s: string) {\n\tif !json_valid(s) do return\n}\nf :: proc(s: string) {\n\tv, _ := json.parse(s)\n}\n"), "UNGUARDED") // another proc's guard
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\tif !json_valid(s) do return\n\tv, _ := json.parse(s, .JSON)\n}\n"), "json_valid")
+	testing.expect_value(t, limit_of("f :: proc(s: string) {\n\tif !json_valid(s) {\n\t\tlog()\n\t\treturn\n\t}\n\tv, _ := json.parse(s, .JSON)\n}\n"), "json_valid")
+	for name in ([]string{"is_valid", "parse_value", "validate_value", "unquote_string", "make_tokenizer", "get_token", "unmarshal_any"}) {
+		testing.expectf(t, limit_of(fmt.tprintf("f :: proc(s: string) {{\n\tx := json.%s(s)\n}}\n", name)) == "UNGUARDED", "json.%s", name)
+	}
+	testing.expect_value(t, limit_of("f :: proc(p: ^json.Parser) {\n\tv, _ := json.parse_value(p)\n}\n"), "UNGUARDED")
+	testing.expect_value(t, limit_of("f :: proc() {\n\tb, _ := json.marshal(x)\n\to: json.Object\n}\n"), "0 sites")
+	testing.expect_value(t, limit_of("f :: proc() {\n\ts := \"json.parse(x)\"\n}\n"), "0 sites")
+}
+
+@(test)
+json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
+	root := strings.trim_suffix(strings.trim_right(#directory, "/"), "/src")
+	files := make([dynamic][2]string, context.temp_allocator)
+	odin_sources(strings.concatenate({root, "/src"}, context.temp_allocator), "src", &files)
+	odin_sources(strings.concatenate({root, "/tools"}, context.temp_allocator), "tools", &files)
+	testing.expectf(t, len(files) > 100, "found %d .odin files under src/ and tools/", len(files))
+	// file, top-level proc, call, limit ("" = jg's default, jg.MAX_DEPTH), spec ("" = strict JSON)
+	WANT := [?]Parse_Site {
+		{"src/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
+		{"src/app_tab.odin", "app_input_event_check", "jg.parse_string", "", ""},
+		{"src/app_tab.odin", "json_string_of", "jg.parse_string", "", ""},
+		{"src/app_tab.odin", "app_event_in", "json.make_parser", "json_valid", ""},
+		{"src/app_tab.odin", "app_event_in", "json.parse_value", "parser", ""},
+		{"src/app_tab.odin", "app_boxes_parse", "jg.parse_string", "", ""},
+		{"src/app_tab.odin", "app_entries", "jg.parse", "", ""},
+		{"src/autotest.odin", "json_path", "jg.parse_string", "", ""},
+		{"src/browser.odin", "rlz_off", "jg.parse", "", ""},
+		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
+		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
+		{"src/browser_act.odin", "act_result", "jg.parse_string", "", ""},
+		{"src/browser_act.odin", "act_result", "jg.parse_string", "", ""},
+		{"src/browser_act.odin", "act_result", "jg.parse_string", "", ""},
+		{"src/browser_agent.odin", "browser_agent_devtools", "jg.parse", "", ""},
+		{"src/browser_agent.odin", "browser_agent_devtools", "jg.parse", "", ""},
+		{"src/browser_agent.odin", "op_step", "jg.parse_string", "", ""},
+		{"src/browser_agent.odin", "op_step", "jg.parse_string", "", ""},
+		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
+		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
+		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse_string", "", ""}, // a page's binding payload
+		{"src/claude_disk.odin", "found_read", "jg.parse", "", ""}, // Claude transcripts (seen 16 deep)
+		{"src/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
+		{"src/claude_status.odin", "hints_load", "jg.parse", "", ""},
+		{"src/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
+		{"src/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
+		{"src/jobs.odin", "job_load", "jg.parse", "", ""},
+		{"src/jobs.odin", "job_load", "jg.parse", "", ""},
+		{"src/jobs.odin", "ledger_ready", "jg.parse", "", ""},
+		{"src/jobs_run.odin", "run_event", "jg.parse_string", "transcript", ""}, // pi's JSON events
+		{"src/json_read.odin", "json_members_raw", "json.make_parser", "jg.shape_ok", ""},
+		{"src/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
+		{"src/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
+		{"src/json_read.odin", "json_members_raw", "json.parse_object_key", "parser", ""},
+		{"src/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
+		{"src/json_read.odin", "json_members_raw", "json.parse_value", "parser", ""},
+		{"src/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
+		{"src/json_read.odin", "parse_command", "jg.parse_string", "", ""},
+		{"src/json_read.odin", "parse_request", "jg.parse_string", "", ""},
+		{"src/json_read.odin", "state_from_json", "jg.parse_string", "", ""},
+		{"src/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
+		{"src/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
+		{"src/reload.odin", "settings_digest", "jg.parse", "", ""},
+		{"src/reload.odin", "pkg_version", "jg.parse", "", ""},
+		{"src/reload.odin", "pkg_name", "jg.parse", "", ""},
+		{"src/reload.odin", "add_settings_paths", "jg.parse", "", ""},
+		{"src/reload.odin", "add_local", "jg.parse", "", ""},
+		{"src/session_info.odin", "session_facts_read", "jg.parse_string", "", ""},
+		{"src/sessions.odin", "header_cwd", "jg.parse", "", ""},
+		{"src/settings_files.odin", "settings_packages", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
+		{"src/snapshot.odin", "snapshot_unpack", "json.parse", "json_shape_ok", ""},
+		{"src/snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok", ""},
+		{"src/socket.odin", "app_conn_line", "json.parse_string", "json_valid", ""},
+		{"src/titles.odin", "title_line", "jg.parse", "transcript", ""},
+		{"src/update.odin", "update_load", "jg.parse", "", ""},
+		{"src/update_core.odin", "release_parse", "jg.parse_string", "", ""}, // the network
+		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
+		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
+		{"src/holderwire/wire.odin", "decode", "json.parse", "json_shape_ok", ""},
+		{"src/holderwire/wire.odin", "decode", "json.unmarshal", "json_shape_ok", ""},
+		{"tools/pi-desk-cli/json_util.odin", "parse_obj", "jg.parse_string", "", ""}, // Claude Code's hook input (the read-only guard), Deckhand's replies
+		{"tools/pi-desk-cli/args.odin", "parse_cli", "jg.parse_string", "", ""}, // app input's EVENTS_JSON
+	}
+	got := make([dynamic]Parse_Site, context.temp_allocator)
+	for f in files do append(&got, ..scan_source(f[0], f[1]))
+	for g in got {
+		if g.limit == "ALIASED" do testing.expectf(t, false, "%s: %s: import core:encoding/json as json (or use jg), so the scan can see its calls", g.file, g.call)
+		else do testing.expectf(t, g.limit != "UNGUARDED", "%s %s: %s with no guard before it: use jg (src/jsonguard)", g.file, g.proc_name, g.call)
+	}
 	used := make([]bool, len(got), context.temp_allocator)
 	for w in WANT {
 		found := false

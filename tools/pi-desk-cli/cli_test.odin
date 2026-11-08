@@ -4,6 +4,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 
 // ---- a fake pi-desk ----
@@ -921,6 +922,33 @@ hook_readonly_tools :: proc(t: ^testing.T) {
 	for n in ([]string{"Read", "Grep", "Glob", "WebFetch", "WebSearch", "TodoWrite", "AskUserQuestion", "EnterPlanMode", "Skill"}) do ro_allowed(t, tool(n))
 	// what it cannot read is denied
 	for s in ([]string{"", "not json", "[]", `{"tool_name":"Bash"}`, `{"tool_name":"Bash","tool_input":{"command":7}}`, `{"tool_input":{}}`}) do ro_denied(t, s)
+}
+
+// Hostile tool input (an agent writes it): core:encoding/json overflows the stack on deep
+// nesting and overruns on invalid UTF-8. A crashed hook does not block in Claude Code, so the
+// guard must deny it instead. Each input runs in a forked child: a crash fails the test.
+@(private = "file")
+ro_hostile: string
+
+@(test)
+hook_readonly_denies_hostile_json :: proc(t: ^testing.T) {
+	deep := strings.repeat("[", 100_000)
+	bad := strings.repeat("\xff\xfe", 512)
+	for s in ([]string{
+		strings.concatenate({`{"tool_name":"Bash","tool_input":`, deep}),
+		strings.concatenate({`{"tool_name":"Read","tool_input":{"file_path":"`, bad, `"}}`}),
+	}) {
+		ro_hostile = s
+		pid := posix.fork()
+		if pid == 0 {
+			for sig in ([]posix.Signal{.SIGSEGV, .SIGBUS, .SIGILL, .SIGTRAP, .SIGABRT}) do posix.signal(sig, auto_cast posix.SIG_DFL)
+			code, _, _ := ro_hook(ro_hostile)
+			posix._exit(code == 2 ? 0 : 3)
+		}
+		status: i32
+		posix.waitpid(pid, &status, {})
+		testing.expectf(t, posix.WIFEXITED(status) && posix.WEXITSTATUS(status) == 0, "hostile input of %d bytes: %s", len(s), posix.WIFSIGNALED(status) ? fmt.tprintf("killed by signal %d", posix.WTERMSIG(status)) : "not denied")
+	}
 }
 
 // The read-only ack (SessionStart, from pi-desk's --settings): the start's nonce to pi-desk with

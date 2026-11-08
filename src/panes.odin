@@ -1,7 +1,6 @@
 package main
 
 import "core:fmt"
-import clay "../build/clay-odin"
 
 // Panes: an open session's tabs side by side (docs/plans/split-panes.md).
 //
@@ -223,20 +222,6 @@ tab_rect :: proc(tab_id: u64) -> [4]f32 {
 		return {r.rect.x, r.rect.y + strip, r.rect.z, r.rect.w - strip}
 	}
 	return app.pane
-}
-
-// A Clay id for an element of pane p: slot 0 gives exactly clay.ID(name), so a session with one
-// pane keeps every id scripts and tests click; another slot hashes its own label ("name#slot"),
-// so no slot's id can meet another's whatever the index.
-pid :: proc(p: ^Pane, name: string) -> clay.ElementId {
-	return pidi(p, name, 0)
-}
-
-// pid for an element that already takes an index (rows, buttons): slot 0 is clay.ID(name, i).
-pidi :: proc(p: ^Pane, name: string, i: int) -> clay.ElementId {
-	slot := p != nil ? p.slot : 0
-	if slot == 0 do return clay.ID(name, u32(i))
-	return clay.ID(fmt.tprintf("%s#%d", name, slot), u32(i)) // temp: an id lives for its frame
 }
 
 // ---- writing ----
@@ -564,24 +549,41 @@ pane_rects :: proc(s: ^Open_Session, rect: [4]f32, divider, min_w, min_h: f32) -
 			append(out, Pane_Rect{node.pane, r})
 			return
 		}
-		across := node.dir == .Right
-		total := (across ? r.z : r.w) - div
-		ma := node_min(s, node.a, across, div, across ? mw : mh)
-		mb := node_min(s, node.b, across, div, across ? mw : mh)
-		la := total * node.ratio
-		if total >= ma + mb do la = clamp(la, ma, total - mb)
-		la = max(la, 0)
-		lb := max(total - la, 0)
-		if across {
-			walk(s, node.a, {r.x, r.y, la, r.w}, div, mw, mh, out)
-			walk(s, node.b, {r.x + la + div, r.y, lb, r.w}, div, mw, mh, out)
-		} else {
-			walk(s, node.a, {r.x, r.y, r.z, la}, div, mw, mh, out)
-			walk(s, node.b, {r.x, r.y + la + div, r.z, lb}, div, mw, mh, out)
-		}
+		ra, rb := split_sides(s, node, r, div, mw, mh)
+		walk(s, node.a, ra, div, mw, mh, out)
+		walk(s, node.b, rb, div, mw, mh, out)
 	}
 	walk(s, s.root, rect, divider, min_w, min_h, &out)
 	return out[:]
+}
+
+// Split node's two children's rects inside r, as pane_rects lays them out.
+@(private = "file")
+split_sides :: proc(s: ^Open_Session, node: Layout_Node, r: [4]f32, div, mw, mh: f32) -> (a, b: [4]f32) {
+	across := node.dir == .Right
+	total := (across ? r.z : r.w) - div
+	ma := node_min(s, node.a, across, div, across ? mw : mh)
+	mb := node_min(s, node.b, across, div, across ? mw : mh)
+	la := total * node.ratio
+	if total >= ma + mb do la = clamp(la, ma, total - mb)
+	la = max(la, 0)
+	lb := max(total - la, 0)
+	if across do return {r.x, r.y, la, r.w}, {r.x + la + div, r.y, lb, r.w}
+	return {r.x, r.y, r.z, la}, {r.x, r.y + la + div, r.z, lb}
+}
+
+// Split `split`'s rect inside `rect`, as pane_rects lays the tree out. False: no such split.
+pane_split_rect :: proc(s: ^Open_Session, split: u64, rect: [4]f32, divider, min_w, min_h: f32) -> ([4]f32, bool) {
+	if s == nil || len(s.nodes) == 0 do return {}, false
+	walk :: proc(s: ^Open_Session, n: int, r: [4]f32, split: u64, div, mw, mh: f32) -> ([4]f32, bool) {
+		node := s.nodes[n]
+		if node.leaf do return {}, false
+		if node.id == split do return r, true
+		ra, rb := split_sides(s, node, r, div, mw, mh)
+		if x, ok := walk(s, node.a, ra, split, div, mw, mh); ok do return x, true
+		return walk(s, node.b, rb, split, div, mw, mh)
+	}
+	return walk(s, s.root, rect, split, divider, min_w, min_h)
 }
 
 // The least size of node n's subtree along one axis (across: widths), m per pane.
@@ -702,63 +704,6 @@ session_check :: proc(s: ^Open_Session) -> string {
 	return ""
 }
 
-// ---- the pane the per-tab bars' Clay ids are for ----
-//
-// The per-tab bars (a browser's toolbar, an editor's find bar, a Changes tab's list…) are laid
-// out once per pane, so their Clay ids carry the pane's slot (pid): cid(name) is pid(the pane
-// being laid out, hit-tested or handled, name). pane_layout sets it while it lays a pane out,
-// the per-pane handlers and hit tests while they look at one; elsewhere (key handling, the
-// fields' cursors, ticks) it is the focused pane, whose tab has the keyboard. Only ids: which
-// tab a bar acts on still comes from its pane explicitly (pane_shown and friends).
-
-@(private = "file")
-ids_pane_at: ^Pane
-
-// Clay ids from now on are pane p's; returns the one before, for ids_pane_end.
-ids_pane_begin :: proc(p: ^Pane) -> ^Pane {
-	old := ids_pane_at
-	ids_pane_at = p
-	return old
-}
-ids_pane_end :: proc(old: ^Pane) {ids_pane_at = old}
-
-// The pane the per-tab bars' ids are for now.
-ids_pane :: proc() -> ^Pane {return ids_pane_at != nil ? ids_pane_at : focused_pane()}
-
-cid :: proc(name: string, i: u32 = 0) -> clay.ElementId {return pidi(ids_pane(), name, int(i))}
-
-// A pane's element (cid/pid) under x, y as the pane shows it: inside its box and its pane's frame.
-// A bar is clipped to its pane; what is cut off there is never hit (a box can reach into the
-// next pane or a column while its pane gets the event: event_pane's focused pane off any pane).
-pane_inside :: proc(p: ^Pane, id: clay.ElementId, x, y: f32) -> bool {
-	if !inside(id, x, y) do return false
-	if p == nil || p.frame.z <= 0 do return true // not laid out yet
-	f := p.frame
-	return x >= f.x && x < f.x + f.z && y >= f.y && y < f.y + f.w
-}
-
-// pane_inside for the ids of the pane the event is for (cid).
-cinside :: proc(name: string, x, y: f32, i: u32 = 0) -> bool {return pane_inside(ids_pane(), cid(name, i), x, y)}
-
-// A bar's width across its pane: grows to the pane, never past it (with clip = {horizontal =
-// true} on the bar: its content's width is never its minimum, so one wide bar does not stretch
-// the others or the pane).
-bar_w :: proc() -> clay.SizingAxis {return clay.SizingGrow({max = pane_width()})}
-
-// The width (framebuffer px) the per-tab bars of the pane being laid out have: the centre's with
-// one pane, else that pane's (its last layout, else its place in the tree).
-pane_width :: proc() -> f32 {
-	s := cur()
-	if s == nil || len(s.panes) <= 1 do return centre_width()
-	p := ids_pane()
-	if p == nil do return centre_width()
-	// its place in the tree in the centre (as laid out: not its content's last width, which a bar
-	// wider than the pane would feed back into)
-	if app.centre.z > 0 do for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
-	if p.rect.z > 0 do return p.rect.z
-	return centre_width()
-}
-
 // The least sizes along split node n's direction of its two children (min_w or min_h per pane,
 // dividers between them).
 pane_split_mins :: proc(s: ^Open_Session, n: int, divider, min_w, min_h: f32) -> (a, b: f32) {
@@ -770,9 +715,10 @@ pane_split_mins :: proc(s: ^Open_Session, n: int, divider, min_w, min_h: f32) ->
 
 // The share split node n gives child a in `total` px (its size less the divider): its ratio, kept
 // so neither side is under its minimum when there is room for both, as pane_rects does.
-pane_split_share :: proc(s: ^Open_Session, n: int, ratio, total: f32) -> f32 {
+pane_split_share :: proc(s: ^Open_Session, n: int, ratio, total, scale: f32) -> f32 {
 	if total <= 0 do return ratio
-	ma, mb := pane_split_mins(s, n, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H))
+	div, mw, mh := pane_mins(scale)
+	ma, mb := pane_split_mins(s, n, div, mw, mh)
 	la := total * ratio
 	if total >= ma + mb do la = clamp(la, ma, total - mb)
 	return la / total
@@ -808,26 +754,3 @@ pane_room_need :: proc(s: ^Open_Session, grow: u64, across: bool, divider, min_w
 	return walk(s, s.root, grow, across, divider, across ? min_w : min_h)
 }
 
-// The rect a terminal tab is sized to (framebuffer px). Shown in its pane of the current session:
-// where it draws (its "terminal" element: only its own bars, a Claude tab's or a dead pi tab's,
-// take room). Hidden: its pane's content without any tab's bars (the pane less its strip), what it
-// gets when shown without bars of its own; so a tab with bars (a Changes header, a browser's
-// toolbar) coming and going never resizes the pane's other terminals. Else tab_rect.
-term_target_rect :: proc(tab_id: u64) -> [4]f32 {
-	s, tab, _ := find_tab(tab_id)
-	if s == nil || tab == nil || s.id != state.current_session do return tab_rect(tab_id)
-	p := pane_of_tab(s, tab_id)
-	if p == nil || p.frame.z <= 0 do return tab_rect(tab_id)
-	if p.active == tab_id {
-		if d := clay.GetElementData(pid(p, "terminal")); d.found && d.boundingBox.width > 0 {
-			b := d.boundingBox
-			return {b.x, b.y, b.width, b.height}
-		}
-	}
-	f := p.frame
-	if len(s.panes) > 1 {
-		strip := min(px(TAB_STRIP_H), f.w)
-		f = {f.x, f.y + strip, f.z, f.w - strip}
-	}
-	return f
-}

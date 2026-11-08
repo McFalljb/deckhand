@@ -546,7 +546,7 @@ pane_tree_layout :: proc(cs: ^Open_Session, n: int) {
 	ratio := pane_drag_ratio(node.id, node.ratio) // a divider being dragged: where it is now
 	// kept off the panes' minimum sizes at the split's last laid-out size (pane_rects does the same)
 	if d := clay.GetElementData(clay.ID("pane_split", u32(node.id))); d.found {
-		kept := pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W))
+		kept := pane_split_share(cs, n, ratio, (across ? d.boundingBox.width : d.boundingBox.height) - px(BORDER_W), app.dpi)
 		if abs(kept - ratio) > 0.0005 do app.redraw = true // laid out at last frame's size: once more at this one's
 		ratio = kept
 	}
@@ -1282,6 +1282,7 @@ ui_pane_rects :: proc(cs: ^Open_Session) {
 		return {b.x, b.y, b.width, b.height}
 	}
 	app.centre = box(clay.ID("panes"))
+	pane_centre_set(app.centre.z, app.centre.w, app.dpi) // the room and ratio checks' (panes_commands.odin)
 	if cs == nil do return
 	for &p in cs.panes {
 		p.rect = box(pid(&p, "pane_body"))

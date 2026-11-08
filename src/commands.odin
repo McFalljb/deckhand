@@ -217,6 +217,20 @@ Set_Keep_Sessions :: struct {
 // Saved only once the user chose (Settings.keep_sessions_chosen): turning the default back off
 // turns it off for everyone who never chose.
 keep_sessions_default_on := false
+
+// Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
+CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second
+control_token_clip: struct {
+	count:    int,
+	deadline: time.Tick, // zero: nothing to clear
+}
+
+// Main thread, every frame (control_token_clip).
+control_token_clip_tick :: proc() {
+	if control_token_clip.deadline == {} || time.tick_diff(control_token_clip.deadline, time.tick_now()) < 0 do return
+	if platform.clear_clipboard_if != nil do platform.clear_clipboard_if(control_token_clip.count)
+	control_token_clip = {}
+}
 keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest.active}
 
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
@@ -1320,9 +1334,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true // projects_tidy runs after (run_command)
 	case Copy_Control_Token:
 		if !socket_running() do return fail("Deckhand's control socket is not running"), false
+		// multi-use (each `deckhand --ctl` says hello with it anew), so the clipboard is the risk:
+		// marked concealed and transient, and cleared after CONTROL_TOKEN_CLIP_TTL if still there
 		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
-		if platform.set_clipboard != nil do platform.set_clipboard(fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok))
-		toast_show("Control token copied: paste it into a terminal, then use deckhand --ctl (it works until you quit Deckhand)")
+		exports := fmt.tprintf("export PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok)
+		if platform.set_clipboard_secret != nil {
+			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
+		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
+		toast_show("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)

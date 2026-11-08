@@ -1530,4 +1530,23 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	c, hr := tc_hello(tok)
 	testing.expect_value(t, json_path(hr, "result.data.caller"), "control")
 	tc_close(c)
+	// with the app's pasteboard: marked concealed and transient (clipboard managers skip it), and
+	// cleared after CONTROL_TOKEN_CLIP_TTL if it still holds the token (its change count)
+	@(static) secret: string
+	@(static) cleared: [dynamic]int
+	secret = ""
+	clear(&cleared)
+	platform.set_clipboard_secret = proc(s: string) -> int {secret = strings.clone(s, runtime.heap_allocator()); return 41}
+	platform.clear_clipboard_if = proc(count: int) {append(&cleared, count)}
+	defer platform.set_clipboard_secret, platform.clear_clipboard_if = nil, nil
+	clip = ""
+	testing.expect(t, run_command(Copy_Control_Token{}, sk_ui).ok)
+	testing.expect(t, strings.contains(secret, "PI_DESK_TOKEN='"), secret)
+	testing.expect_value(t, clip, "") // not through the plain copy
+	control_token_clip_tick()
+	testing.expect_value(t, len(cleared), 0) // not before the deadline
+	control_token_clip.deadline = time.tick_now()
+	control_token_clip_tick()
+	control_token_clip_tick()
+	testing.expect(t, len(cleared) == 1 && cleared[0] == 41, fmt.tprint(cleared[:]))
 }

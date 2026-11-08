@@ -292,6 +292,7 @@ autotest_platform :: proc() {
 		autotest_paste_set(text)
 	}
 	platform.get_clipboard = proc() -> string {return autotest.pasteboard}
+	platform.set_clipboard_secret, platform.clear_clipboard_if = nil, nil // the script's own pasteboard (set_clipboard)
 	platform.open_url = proc(url: string) -> bool {
 		log("open url", url)
 		delete(autotest.opened_url)

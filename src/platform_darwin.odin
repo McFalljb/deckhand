@@ -132,6 +132,8 @@ foreign pdplatform {
 	pd_mac_test_scale :: proc(scale: f64) ---
 	pd_mac_left_button_down :: proc() -> c.int ---
 	pd_mac_pasteboard_count :: proc() -> c.long ---
+	pd_mac_pasteboard_set_secret :: proc(text: cstring) -> c.long ---
+	pd_mac_pasteboard_clear_if :: proc(count: c.long) ---
 	pd_mac_activity :: proc(on: c.int) ---
 }
 
@@ -196,6 +198,8 @@ platform_frame_drawn :: proc() {pd_mac_place_lights()}
 // The left mouse button as the OS sees it now (not from our events).
 platform_left_button :: proc() -> bool {return pd_mac_left_button_down() != 0}
 platform_clipboard_count :: proc() -> int {return int(pd_mac_pasteboard_count())}
+platform_clipboard_set_secret :: proc(text: string) -> int {return int(pd_mac_pasteboard_set_secret(strings.clone_to_cstring(text, context.temp_allocator)))}
+platform_clipboard_clear_if :: proc(count: int) {pd_mac_pasteboard_clear_if(c.long(count))}
 platform_ime_caret_moved :: proc() {pd_mac_ime_caret_moved()}
 window_drag :: proc() {pd_mac_window_drag()}
 window_titlebar_double_click :: proc() {pd_mac_titlebar_double_click()}

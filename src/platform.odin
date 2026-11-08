@@ -25,6 +25,11 @@ Platform :: struct {
 	// the system clipboard's change count (browser_act.odin: a page changing it during an agent's
 	// input is told to the user); nothing of its contents is read
 	clipboard_count: proc() -> int,
+	// a secret (Copy a control token): onto the clipboard marked concealed and transient
+	// (nspasteboard.org: clipboard managers neither show nor keep it); returns the change count
+	// after it, for clear_clipboard_if. nil: set_clipboard (tests, test mode's own pasteboard)
+	set_clipboard_secret: proc(text: string) -> int,
+	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
 }
 
 platform: Platform

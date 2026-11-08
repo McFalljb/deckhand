@@ -233,6 +233,8 @@ case "$MODE" in
     odin test tests -out:build/pi-desk-tests
     # the holder wire codec (src/holderwire): golden vectors, the released schema, a fuzz pass
     odin test src/holderwire -out:build/holderwire-tests
+    # who may talk to the holder, its launcher and the app (src/trust): pure table tests
+    odin test src/trust -out:build/trust-tests
     # command layer (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py

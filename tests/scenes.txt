@@ -27,7 +27,7 @@
 
 @all  | | | | src/term.odin src/pty*.odin src/socket*.odin src/persist.odin vendor/* build.sh scripts/bundle-app.sh scripts/check-minos.sh tests/scripts/fresh-build.sh tests/scripts/claude-stub.sh tests/scenes.py
 @core | | | | src/main.odin src/autotest.odin src/state.odin src/commands.odin src/command_table.odin src/json_read.odin src/json_write.odin src/inbox.odin src/events.odin src/ui.odin src/theme.odin src/font.odin src/text_*.odin src/icons.odin src/platform*.odin src/native/platform_macos.m src/native/text_coretext.c src/term_text.odin src/tabhost.odin src/ctl.odin src/sessions.odin src/harness.odin src/login_env.odin src/pi_integration.odin src/ghostty/*
-@unit | | | | src/snapshot.odin src/holderwire/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
+@unit | | | | src/snapshot.odin src/holderwire/* src/trust/* src/logos.odin src/titles.odin src/session_info.odin src/project_tidy.odin src/instance.odin src/text_size*.odin src/*_test.odin
 
 # scene             | tier     | tags                  | secs | areas | command
 agent-status        | full     |                       |   34 | src/agent_status*.odin src/ui_sidebar.odin tests/scripts/agent-status.* tests/scripts/fake-7501.py

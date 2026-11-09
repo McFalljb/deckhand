@@ -11,12 +11,14 @@
 #      0.1.2's signature does not match its zip: refused with a clear message, nothing
 #      installed.
 #   3. update-3.txt: the new version's second start removes the old bundle.
-#   4. update-4.txt: keep_sessions on, a pi tab and two counting shells in the session holder;
+#   4. update-4.txt (in process unless the run forces a separate core: the first update after the
+#      flip): keep_sessions on, a pi tab and two counting shells in the session holder;
 #      Update to 0.1.3 and Restart to update: nothing asked, the quit hands the terminals over
 #      with a successor secret (GOODBYE{handover, successor}), and the relaunch helper
 #      (deckhand-core relaunch, --no-open in test mode) waits on successor.sock.
 #   4b. update-4b.txt: another copy of Deckhand meanwhile: refused (REFUSED{secret}), no second holder.
-#   5. update-5.txt: the "new app" (this test binary as 0.1.3) takes the secret from the helper,
+#   5. update-5.txt: the "new app" (this test binary as 0.1.3; with a separate core, its window)
+#      takes the secret from the helper (its core says the HELLO with it),
 #      is welcomed as the named successor and adopts all three: screen hashes equal to the
 #      handover's and to a reference terminal fed every byte, the same pids, counters going on.
 # The app runs as its own test build (-define:DECKHAND_UPDATE_TEST=true, without the browser):
@@ -38,7 +40,7 @@ wait
 codesign -f -s - -i dev.deckhand.core "$W/deckhand-core" 2>/dev/null
 # with a separate core (DECKHAND_SEPARATE_CORE=1): the core with the same test define, beside the
 # holder (core_serve_bin_find); the core runs the updates, the window shows them
-if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ]; then
+if [ "${DECKHAND_SEPARATE_CORE:-1}" = 1 ]; then
   odin build src/coremain -out:"$W/deckhand-core-serve" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 || { echo "update scene: the core's build failed"; exit 1; }
   codesign -f -s - -i dev.deckhand.core "$W/deckhand-core-serve" 2>/dev/null
   codesign -f -s - -i dev.pi-desk.app "$BIN" 2>/dev/null # the window's identifier: the core checks it (trust.WINDOW_IDS)
@@ -106,13 +108,13 @@ mkrelease() {
 mkapp "$W/install" 0.1.0
 mkrelease 0.1.1
 
-run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the project]
-  HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
+run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the project] ($RUN_ENV: K=V words)
+  env ${RUN_ENV:-} HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="$1" DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
     DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
     DECKHAND_UPDATE_VERSION="$2" DECKHAND_UPDATE_APP="$W/install/Deckhand.app" \
     DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
   # a separate core prints what it did (the relaunch, the handover) in its own log: read with the run's
-  if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v '^export DECKHAND_SOCKET=' "$RUN/core.log" >> "$3" || true; : > "$RUN/core.log"; fi # (not its control token)
+  if [ "${DECKHAND_SEPARATE_CORE:-1}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v '^export DECKHAND_SOCKET=' "$RUN/core.log" >> "$3" || true; : > "$RUN/core.log"; fi # (not its control token)
 }
 fail=0
 check_log() { # LOG
@@ -155,7 +157,12 @@ check_log "$W/run3.log"
 # 0.1.3 as 0.1.8 will ship (the rename's second step): the new bundle id, a v3 signature; this
 # build (the 0.1.7 bridge) takes it
 GOOD=1 ID=dev.deckhand.app SIGFMT=v3 mkrelease 0.1.3 # (GOOD=0 above outlives its call in sh)
+# run 4's app is in process unless the run asks for a separate core (scenes.py --separate-core):
+# by default the first update after the flip, from an in-process build to a separate core's
+# window, which takes the successor secret for its core (client_core_launch)
+RUN_ENV="DECKHAND_SEPARATE_CORE=${DECKHAND_SEPARATE_CORE:-0}"
 run tests/scripts/update-4.txt 0.1.1 "$W/run4.log" ""
+RUN_ENV=
 check_log4() { # like check_log, but the run ends by the update's quit (no "done:")
   grep -E "ASSERT FAILED|TIMEOUT|no element|unknown command|session holder|update relaunch" "$1" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$1"; then fail=1; fi
@@ -173,10 +180,10 @@ id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$W/install/Deckhand
 # 4b: another copy (another executable, its own data dir) in the minute the holder waits
 mkdir -p "$W/other" "$W/data-other"
 cp "$BIN" "$W/other/deckhand-update-test"
-[ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && cp "$W/deckhand-core-serve" "$W/deckhand-core" "$W/other/" # its own core, beside it
+[ "${DECKHAND_SEPARATE_CORE:-1}" = 1 ] && cp "$W/deckhand-core-serve" "$W/deckhand-core" "$W/other/" # its own core, beside it
 HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/update-4b.txt DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data-other" DECKHAND_RUNTIME_DIR="$RUN" \
   "$W/other/deckhand-update-test" > "$W/run4b.log" 2>&1 || true
-if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v "^export DECKHAND_SOCKET=" "$RUN/core.log" >> "$W/run4b.log" || true; : > "$RUN/core.log"; fi
+if [ "${DECKHAND_SEPARATE_CORE:-1}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v "^export DECKHAND_SOCKET=" "$RUN/core.log" >> "$W/run4b.log" || true; : > "$RUN/core.log"; fi
 check_log "$W/run4b.log"
 grep -q "refused: secret" "$W/run4b.log" || { echo "run 4b: another Deckhand was not refused by the waiting holder"; fail=1; }
 [ "$(holders | wc -l | tr -d ' ')" = 1 ] || { echo "run 4b: not exactly one session holder: $(holders)"; fail=1; }

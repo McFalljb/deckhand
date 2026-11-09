@@ -440,9 +440,11 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   first, and says so when its processes are still running. pi's session file stays: you can
   open it again from the list.
 
-Sessions you switch away from keep running in the background. When you quit (⌘Q) with sessions
-running, Deckhand asks first; on the next start it restores your open sessions, tabs and layout,
-and starts each session again when you first look at it.
+Sessions you switch away from keep running in the background. ⌘Q closes the window and your
+sessions keep running in Deckhand Core (see [Sessions in a background
+core](#the-gear-quick-settings)); **Quit Deckhand and Stop All Sessions…** stops them, and asks first
+while they run. On the next start Deckhand restores your open sessions, tabs and layout, and
+starts each session again when you first look at it.
 
 **A tab belongs to one session.** A tab you open goes into the session on screen; one an agent
 opens goes into that agent's own session, never "whichever session you happen to be looking at".
@@ -1429,6 +1431,30 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   keeps running and nothing is redrawn. If the new holder fails to start or to verify, the old
   one's keeper keeps the sessions (marked degraded: they work, and their exit codes still show).
 
+- **Sessions in a background core** (the palette's **Run sessions in a background core (at the
+  next launch)**): on by default, and read when Deckhand opens. Your tabs run in Deckhand Core, a
+  process of its own, and the window talks to it over a socket only Deckhand's own window may
+  use. ⌘Q (or Quit in the Dock, or closing the window) closes the window and Deckhand Core keeps
+  your sessions running; the first time, a note says so. Opening Deckhand again shows them as
+  they are, a turn that went on meanwhile included; while the window is closed, notifications
+  come from Deckhand Core. **Quit Deckhand and Stop All Sessions…** stops Deckhand Core too. With
+  no window, no tab's program running, no job run and no scheduled job for 10 minutes, Deckhand
+  Core saves and exits by itself (opening Deckhand starts it again). If Deckhand Core stops
+  unexpectedly, the window (or, with no window, the session holder) starts it again and carries
+  on. If no Deckhand Core comes up when you open Deckhand, it offers **Use Previous Core**, or
+  **Run Sessions in Deckhand Itself** (this setting off, from then on).
+  Logging out stops both; the next launch restores your sessions as usual. When Deckhand opens
+  and finds Deckhand Core from an older version (after an update), it hands your sessions over
+  to its own Deckhand Core at once: they keep running, and job runs get up to two minutes to
+  finish first (any still running then stop, as "stopped (update)"). If the running Deckhand Core
+  is newer than this Deckhand, it asks: update Deckhand, or **Use This App's Core**. The
+  palette's **Use previous core** hands the sessions to the Deckhand Core from before the last
+  update. Either way that choice holds (relaunches and new windows use the previous core) until
+  a different version of Deckhand is installed. Turned off, Deckhand runs everything in its own
+  process as before: ⌘Q then asks while sessions run (Keep sessions still keeps them through the
+  session holder). Turning it off takes effect once Deckhand Core has stopped (**Quit Deckhand and
+  Stop All Sessions…**); until then Deckhand opens as its window. Only you can change it.
+
 ## Updates
 
 Deckhand checks for a newer release of itself a minute after it starts and then about once a day
@@ -1439,27 +1465,6 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
 
 **When a newer version exists**, a bar over the centre says "Deckhand 0.1.1 is available":
 
-- **Experimental › Sessions in a background core** (the palette's **Run sessions in a background
-  core (experimental; at the next launch)**): off by default, and read when Deckhand opens. With
-  it on, your tabs run in Deckhand Core, a process of its own, and the window talks to it over a
-  socket only Deckhand's own window may use. ⌘Q (or Quit in the Dock, or closing the window)
-  closes the window and Deckhand Core keeps your sessions running; the first time, a note says
-  so. Opening Deckhand again shows them as they are, a turn that went on meanwhile included;
-  while the window is closed, notifications come from Deckhand Core. **Quit Deckhand and Stop All
-  Sessions…** stops Deckhand Core too. With no window, no tab's program running, no job run and
-  no scheduled job for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand
-  starts it again). If Deckhand Core stops unexpectedly, the window (or, with no window, the
-  session holder) starts it again and carries on. If no Deckhand Core comes up when you open
-  Deckhand, it offers **Use Previous Core**.
-  Logging out stops both; the next launch restores your sessions as usual. When Deckhand opens
-  and finds Deckhand Core from an older version (after an update), it hands your sessions over
-  to its own Deckhand Core at once: they keep running, and job runs get up to two minutes to
-  finish first (any still running then stop, as "stopped (update)"). If the running Deckhand Core
-  is newer than this Deckhand, it asks: update Deckhand, or **Use This App's Core**. The
-  palette's **Use previous core** hands the sessions to the Deckhand Core from before the last
-  update. Either way that choice holds (relaunches and new windows use the previous core) until
-  a different version of Deckhand is installed. Still the window's alone for now: app tabs, the setup
-  sheet's installs, the Changes tab and the update dialog. Only you can change it.
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers
   it again.
@@ -1750,8 +1755,8 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Set up Deckhand… |  | the first-run sheet: coding agents, main folder, chats (see [the first run](#the-first-run)) |
 | Hide Deckhand | ⌘H | |
 | Hide others | ⌥⌘H | Show all brings them back |
-| Quit Deckhand | ⌘Q | asks while sessions run |
-| Quit Deckhand and Stop All Sessions… |  | with Keep sessions on: the kept sessions stop too (asks) |
+| Quit Deckhand | ⌘Q | closes the window; sessions keep running in Deckhand Core (with the background core off: asks while sessions run) |
+| Quit Deckhand and Stop All Sessions… |  | stops Deckhand Core and every session, kept ones too (asks) |
 
 **File**
 
@@ -1944,7 +1949,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
-| Run sessions in a background core (experimental; at the next launch) |  | off by default: on or off (the gear's Experimental row) |
+| Run sessions in a background core (at the next launch) |  | on by default: on or off (the gear's row) |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |

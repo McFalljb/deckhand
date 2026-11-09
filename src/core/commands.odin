@@ -232,14 +232,15 @@ Set_Keep_Sessions :: struct {
 // turns it off for everyone who never chose.
 keep_sessions_default_on := true // on by default: this line alone turns it off again (revert its commit)
 
-// Settings › Experimental › Run sessions in a background core (docs/plans/background-core.md
-// §10.3 M4-C): the window and the core as two processes (`deckhand-core serve` over core.sock).
-// Read by the window at launch (main.odin separate_core_wanted), so a change takes effect at the
-// next launch. User-only. Off by default until M4-E flips this line.
+// Settings › Run sessions in a background core (docs/plans/background-core.md §10.3): the window
+// and the core as two processes (`deckhand-core serve` over core.sock). Read by the window at
+// launch (main.odin separate_core_wanted), so a change takes effect at the next launch. User-only.
+// On by default; saved only when it differs from the default (an opt-out), so this line alone
+// turns it off again for everyone who never chose.
 Set_Separate_Core :: struct {
 	on: bool,
 }
-separate_core_default_on := false
+separate_core_default_on := true
 
 // The answer to state.holder_ask (a session holder from another build runs, holder_client.odin):
 // stop true stops it (SIGTERM, then SIGKILL), removes its socket and starts a new holder; its
@@ -299,6 +300,13 @@ control_token_clip_tick :: proc() {
 	control_token_clip = {}
 }
 keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest_active}
+
+// The settings with a default that can change between builds, until the saved workspace says
+// otherwise (main.odin and serve.odin at start, persist.odin's load).
+settings_defaults :: proc() {
+	state.settings.keep_sessions, state.settings.keep_sessions_chosen = keep_sessions_default(), false
+	state.settings.separate_core = separate_core_default_on
+}
 
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
 // onto the clipboard (docs/PROTOCOL.md §2). The user's only: the one way a release build mints a

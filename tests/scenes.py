@@ -15,9 +15,11 @@ Which scenes (tests/scenes.txt lists them, with their areas, tags and typical ti
   --shard I/N       of those, shard I of N (balanced by the typical times)
   --ci              leave out the scenes tagged noci
   --separate-core   run them with the core as another process (DECKHAND_SEPARATE_CORE=1, the
-                    background core: docs/plans/background-core.md M4), leaving out the scenes
-                    tagged inproc; the cores and holders a scene leaves running are killed after
-                    it (core_sweep)
+                    background core: docs/plans/background-core.md M4; the app's default too),
+                    leaving out the scenes tagged inproc
+  --in-process      run them with the core in the window's process (DECKHAND_SEPARATE_CORE=0:
+                    the old path, still a setting). Unless --in-process, the cores and holders a
+                    scene leaves running are killed after it (core_sweep)
 
 It builds once (./build.sh and ./build.sh fake-app; skipped when both are newer than every file
 they are built from; --build to build anyway, --no-build to skip: each scene still refuses a stale
@@ -440,9 +442,10 @@ def last_step(name):
 
 class Runner:
     def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None, budget=0.0,
-                 separate=False):
+                 core_env=""):
         self.pending = list(scenes)
-        self.separate = separate  # DECKHAND_SEPARATE_CORE=1 per attempt (core_sweep after it)
+        self.core_env = core_env  # DECKHAND_SEPARATE_CORE per attempt ("": the app's default, separate)
+        self.separate = core_env != "0"  # core_sweep after each attempt
         self.budget, self.t0 = budget, time.monotonic()  # seconds for the whole run (0: none)
         self.jobs, self.cef_jobs, self.retries, self.timeout = jobs, cef_jobs, retries, timeout
         self.fail_fast, self.last = fail_fast, last or {}
@@ -494,8 +497,9 @@ class Runner:
         except FileNotFoundError:
             pass
         env = dict(os.environ, DECKHAND_SCRIPT_STEP=step, DECKHAND_SCRIPT_FAIL_FAST="1" if self.fail_fast else "0")
+        if self.core_env:
+            env.update(DECKHAND_SEPARATE_CORE=self.core_env)
         if self.separate:
-            env.update(DECKHAND_SEPARATE_CORE="1")
             core_sweep(s)  # an earlier attempt's
         with open(log, "w") as fh:
             fh.write(f"# {s.name}: {s.command}   (started {time.strftime('%H:%M:%S')}, load {os.getloadavg()[0]:.1f}, "
@@ -606,6 +610,7 @@ def main():
     ap.add_argument("--shard", metavar="I/N")
     ap.add_argument("--ci", action="store_true", help="leave out noci scenes")
     ap.add_argument("--separate-core", action="store_true", help="the core as another process (DECKHAND_SEPARATE_CORE=1)")
+    ap.add_argument("--in-process", action="store_true", help="the core in the window's process (DECKHAND_SEPARATE_CORE=0)")
     ap.add_argument("-j", type=int, default=int(os.environ.get("SCENE_JOBS", "0")) or None,
                     help="scenes at a time, idle ones not counted (default: 8 with 10+ CPUs, 4 with 8+, "
                     "else 2; SCENE_JOBS)")
@@ -631,6 +636,8 @@ def main():
     ap.add_argument("--list", action="store_true")
     ap.add_argument("--check-map", action="store_true")
     a = ap.parse_args()
+    if a.separate_core and a.in_process:
+        ap.error("--separate-core or --in-process, not both")
     os.chdir(ROOT)
     scenes, special = load()
     if a.check_map:
@@ -681,15 +688,15 @@ def main():
           f"{a.mem_gb:g} GB), load {load0:.1f}", flush=True)
     t0 = time.monotonic()
     r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30), not a.no_fail_fast, last,
-               a.max_minutes * 60, a.separate_core)
+               a.max_minutes * 60, "1" if a.separate_core else "0" if a.in_process else "")
     r.run()
     wall = time.monotonic() - t0
-    if a.separate_core and core_sweep():
+    if not a.in_process and core_sweep():
         print("scenes: killed background cores or holders still running after the run")
 
     times = dict(last)
     for name, res in r.results.items():
-        if res["result"] == "pass" and not a.separate_core:
+        if res["result"] == "pass" and not a.separate_core and not a.in_process:  # the default's
             times[name] = round(res["times"][0], 1)
     try:
         json.dump(times, open(TIMES, "w"), indent=0, sort_keys=True)

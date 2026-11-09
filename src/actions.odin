@@ -348,7 +348,7 @@ ACTIONS := [?]Action {
 		return core.login_env.gui ? "new tabs only" : "uses the terminal's"
 	}},
 	{id = "copy_control_token", label = "Copy a control token", make = proc() -> (core.Command, bool) {return core.Copy_Control_Token{}, true}, detail = proc() -> string {return "for deckhand --ctl"}},
-	{id = "separate_core", label = "Run sessions in a background core (experimental; at the next launch)", make = proc() -> (core.Command, bool) {
+	{id = "separate_core", label = "Run sessions in a background core (at the next launch)", make = proc() -> (core.Command, bool) {
 		return core.Set_Separate_Core{on = !state.settings.separate_core}, true
 	}, detail = proc() -> string {return state.settings.separate_core ? "on" : "off"}},
 	// a separate core only (core_handover.odin): the sessions go back to the core before the last update

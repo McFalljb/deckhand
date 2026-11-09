@@ -53,7 +53,11 @@ from is newer than its output or was added or deleted since its last build: `bui
 same arguments. Other selections: scene names
 (`./build.sh scenes menus jobs`), `--area src/native` (the scenes covering a file or folder),
 `--required` (what CI gates pull requests on), `--list` (what would run and why, without
-running). `--no-build` skips the build; each scene still refuses a stale `build/deckhand`
+running). Scenes run with the app's default, a separate core (`deckhand-core serve`);
+`--in-process` runs them with the core in the window's process (`DECKHAND_SEPARATE_CORE=0`, the
+setting's opt-out), and `--separate-core` forces a separate core and leaves out the scenes tagged
+`inproc` (those that test the window process's own core: hidden-window, which runs in process by
+default). `--no-build` skips the build; each scene still refuses a stale `build/deckhand`
 (`tests/scripts/fresh-build.sh`: any source, CLI or bundled-integration file newer than the
 binary; `*_test.odin` files are not in the binary and do not count).
 

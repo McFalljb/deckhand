@@ -106,6 +106,7 @@ serve_main :: proc(args: []string) -> int {
 	core.core_separate = true
 	core.app_context = context
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
+	core.login_env_adopt() // a refresh of the login shell's environment (login_env.odin)
 	if !serve_platform() do return 1
 	core.home_root = strings.clone(data)
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
@@ -140,7 +141,7 @@ serve_main :: proc(args: []string) -> int {
 			os.flush(os.stdout)
 		}
 	}
-	core.state.settings.keep_sessions = core.keep_sessions_default()
+	core.settings_defaults()
 	if files {
 		core.persist_init(core.data_dir(context.temp_allocator))
 		core.claude_disk_launching = true

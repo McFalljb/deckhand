@@ -303,6 +303,13 @@ core_label_prefix := "dev.deckhand.core."
 core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> (pid: i32, ok: bool, why: string) {
 	ours, _ := os.environ(context.temp_allocator)
 	env := core_launch_env(ours, from_tab)
+	// a window that asked the login shell at its launch: its core's refresh asks it too (login_env_adopt)
+	if login_env.gui && !from_tab {
+		with := make([]string, len(env) + 1, context.temp_allocator)
+		copy(with, env)
+		with[len(env)] = "DECKHAND_GUI_LAUNCH=1"
+		env = with
+	}
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve", secret)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve", secret = secret)
 	if lok do return lpid, true, ""

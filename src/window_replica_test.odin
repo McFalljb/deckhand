@@ -18,7 +18,6 @@ window_reads_only_its_replica :: proc(t: ^testing.T) {
 		file, needle: string,
 		n:            int,
 	} {
-		{"main.odin", "core.state.", 1}, // init: the core's own setting, before the window attaches
 		{"state_view.odin", "&core.state", 1}, // `state` before the attach (the window's unit tests)
 		{"term_view_stream.odin", "core.term_of(", 1}, // test mode's screen-hash check against the core's terminal
 		{"client.odin", "core.window.", 2}, // the unit tests' host link sets the test_facts hook

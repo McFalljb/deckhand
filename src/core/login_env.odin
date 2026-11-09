@@ -486,6 +486,17 @@ login_env_startup :: proc() {
 	free_all(context.temp_allocator)
 }
 
+// A separate core (serve): its environment is its window's, merged with the login shell's at that
+// window's launch, so it asks the shell only for a refresh: when that window was a GUI launch (it
+// says so with DECKHAND_GUI_LAUNCH=1: core_launch), or when its own launch passes the same test
+// (launchd starts it, as it starts a Dock launch). Its tabs never get that name (env_tab_dropped).
+login_env_adopt :: proc() {
+	env, _ := os.environ(context.temp_allocator)
+	login_env.from_claude = login_env_from_claude(env)
+	login_env.gui = login_env_gui_launch(int(posix.getppid()), os.get_env("PATH", context.temp_allocator), login_env_gui_switch(), hook_env(.Script) != "", login_env.from_claude)
+	if login_env.gui do login_env.launch = env_clone(login_env_strip_claude(env, false)) // a refresh asks with it
+}
+
 // The environment new child processes start from: the refreshed one, else
 // this process's. Temp-allocated (the strings: shared, do not free).
 // Never Claude Code's session markers (they left this process's environment

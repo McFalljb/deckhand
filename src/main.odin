@@ -88,19 +88,27 @@ init :: proc "c" () {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		mode_data = strings.concatenate({cwd, "/build/test-data"}, context.temp_allocator)
 	}
-	if separate_core_wanted(mode_data) {
-		init_separate() // the core is another process (client_core.odin)
-		return
+	// the core as another process (client_core.odin): the setting, or (turned off) a core of this
+	// data dir that still runs: its sessions and core.lock are there, so this launch is its window.
+	// fallback: no core came up and the user chose to run the sessions in Deckhand itself
+	fallback := false
+	if wanted := separate_core_wanted(mode_data); wanted || separate_core_running(mode_data) {
+		if init_separate(wanted ? "" : "Sessions are still running in the background. Quit and Stop All Sessions to switch.") do return
+		fallback = true // init_separate set the window up already
 	}
 	client_connect() // the window's link: the core's requests reach it while the workspace comes back (client.odin)
-	app.window_active = true
-	platform_window_init()
-	platform_terminate_hook(on_terminate) // the Dock's Quit and logout (quit_route)
-	menubar_install() // the macOS menu bar (menubar.odin)
+	if !fallback {
+		app.window_active = true
+		platform_window_init()
+		platform_terminate_hook(on_terminate) // the Dock's Quit and logout (quit_route)
+		menubar_install() // the macOS menu bar (menubar.odin)
+	}
 	// the OS appearance before anything is drawn, then its changes
 	client_call(core.System_Appearance{light = platform_system_light()}, .Internal) // before the attach: straight in
-	platform_watch_appearance()
-	autotest_init()
+	if !fallback {
+		platform_watch_appearance()
+		autotest_init()
+	}
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
 	// test mode keeps its log out of the user's data dir
 	if core.autotest_active && core.hook_env(.Data_Dir) == "" {
@@ -152,7 +160,7 @@ init :: proc "c" () {
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// DECKHAND_DATA_DIR, so scripts never read or write the user's
-	core.state.settings.keep_sessions = core.keep_sessions_default() // until the saved workspace says otherwise (the core's, before the window attaches)
+	core.settings_defaults() // until the saved workspace says otherwise (the core's, before the window attaches)
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" {
 		core.persist_init(core.data_dir(context.temp_allocator))
 		core.claude_disk_launching = true // no transcript read on the main thread while it comes back
@@ -181,6 +189,10 @@ init :: proc "c" () {
 	}
 	core.update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
 	client_attach() // the window as its core's client: `state` is the replica from here on (client.odin)
+	if fallback { // saved, so the next launch runs in process too
+		client_call(core.Set_Separate_Core{on = false})
+		toast_show("Sessions run in Deckhand itself: turn Settings › Sessions in a background core on to try it again")
+	}
 	app.ready = true
 	app.redraw = true
 	core.core_loop_start() // core_tick also while no frames run (core_loop.odin)
@@ -189,7 +201,9 @@ init :: proc "c" () {
 // init with a separate core (client_core.odin): the window's own setup, then the core's link.
 // Nothing of the core runs here: no instance lock, socket, workspace, holder, jobs or core loop
 // (the core process has them). The first-run sheet is the in-process window's only for now.
-init_separate :: proc() {
+// note: a toast once attached. False: no core came up and the user chose to run the sessions in
+// Deckhand itself (init goes on in process; the window is set up).
+init_separate :: proc(note := "") -> bool {
 	app.window_active = true
 	platform_window_init()
 	platform_terminate_hook(on_terminate)
@@ -214,10 +228,15 @@ init_separate :: proc() {
 			fmt.println("[autotest] core refused:", why)
 			os.exit(3)
 		}
-		platform_alert("Deckhand can't start", why)
+		if platform_ask("Deckhand can't start its background core", fmt.tprintf("%s. You can run your sessions in Deckhand itself instead (Settings › Sessions in a background core turns it on again).", why), "Run Sessions in Deckhand Itself", "Quit") {
+			script_drain = core.inbox_drain
+			client_core_abandon()
+			return false
+		}
 		os.exit(1)
 	}
 	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
+	if note != "" do toast_show(note)
 	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
 	if app_args.dir != "" {
 		r, _ := client_call_wait(core.Add_Project{app_args.dir}, 5 * time.Second)
@@ -240,6 +259,7 @@ init_separate :: proc() {
 		client_drain()
 		autotest_step()
 	})
+	return true
 }
 
 // The app's platform layer: every entry set (a nil one would make its

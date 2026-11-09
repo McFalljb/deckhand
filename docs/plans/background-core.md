@@ -981,7 +981,7 @@ streams (`src/core/term_stream.odin`) and `Term_View`'s own terminal.
   do (§12).
 - **The window's identifier list** is `dev.pi-desk.app` until the rename's flip, which adds
   `dev.deckhand.app` (the release checklist below).
-- **Behind a default until the last PR:** `separate_core_default_on := false` in
+- **Behind a default until the last PR** (now flipped: "The flip as built" below)**:** `separate_core_default_on := false` in
   `src/core/commands.odin`, like M1's `keep_sessions_default_on`, with Settings › Experimental:
   *Run sessions in a background core* (user-only, read at launch). Off: the window runs the core
   in process over the in-memory link, as M3 does. On: two processes. M4-E flips it once M4-D has
@@ -1129,6 +1129,18 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
 - **Not done:** the successor retry off the main thread; the window and holder floor actions;
   update.sh's M1 extension; the launcher stays `deckhand-core-serve launch` (not src/launchd).
 
+**The flip as built** (where it differs from M4-E's last commit):
+- **`separate_core_default_on := true`, and the setting stays as an opt-out.** Settings ›
+  *Sessions in a background core* (no longer under Experimental) keeps the in-process path for a
+  user who turns it off; `settings.separate_core` is saved only when it differs from the default,
+  so reverting that one line turns it off again for everyone who never chose. The in-process
+  attach is not test-only yet: that would drop the opt-out, and it is the fallback while the
+  manual checks below are open.
+- **Scenes:** with the flip every scene runs with a separate core unless it says otherwise;
+  `tests/scenes.py --in-process` (`DECKHAND_SEPARATE_CORE=0`) runs the old path. Scenes tagged
+  `inproc` (hidden-window: the window process's own core loop) run in process by default and are
+  left out of `--separate-core` runs.
+
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR
   check plus `window.token`, and under the self-signed identity a same-user process can pass the
@@ -1145,8 +1157,9 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   what a busy shown tab looks like (it catches up by snapshot).
 
 **Release readiness** (decision 7: the first release of the split):
-- [ ] M3-G, M3-H, M3-F2 and M4-A to E merged; `separate_core_default_on` is true.
-- [ ] `./build.sh test` and scenes `--all` green with the default on; the nightly full run green.
+- [x] M3-G, M3-H, M3-F2 and M4-A to E merged; `separate_core_default_on` is true (the flip's PR).
+- [ ] `./build.sh test` and scenes `--all` green with the default on (done locally for the flip's
+  PR, and `--all --in-process` too); the nightly full run green.
 - [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout, the minimised
   window, and macOS 14 and 15 (S2's programs and D's manual list).
 - [ ] **`keep_sessions_default_on := true`** (`src/core/commands.odin`) is a release blocker

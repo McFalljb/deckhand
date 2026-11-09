@@ -142,6 +142,20 @@ scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the allowe
 cp /usr/bin/true "$H/planted"
 printf '\001PI_DESK_SOCKET\001PI_DESK_CLAUDE_TOKEN\001PI_DESK_CLI\001PI_DESK_GUI_LAUNCH\001PI_DESK_\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "the old names the rename still sets pass" || bad "an allowed old name refused: $(cat "$H/out.txt")"
+# an optimised build keeps some compared strings as aligned 16-byte pieces (__literal16): a piece
+# that starts an allowed name passes, run on into its neighbours or not; any other piece fails
+plant16() { # BYTES...: /usr/bin/true padded to a 16-byte boundary, then the bytes
+  cp /usr/bin/true "$H/planted"
+  n=$(( (16 - $(wc -c < "$H/planted") % 16) % 16 ))
+  [ "$n" = 0 ] || head -c "$n" /dev/zero >> "$H/planted"
+  printf "$@" >> "$H/planted"
+}
+plant16 'DECKHAND_SUCCESS/deckhand-core-sPI_DESK_CEF_SHARDECKHAND_CEF_SHACLAUDE_CONFIG_DI\001'
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "16-byte pieces of allowed names pass" || bad "a 16-byte piece of an allowed name refused: $(cat "$H/out.txt")"
+plant16 'DECKHAND_SCRIPT_\001'
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a 16-byte piece of a hook name passed" || ok "a 16-byte piece of a hook name refused"
+plant16 '\001DECKHAND_SUCCESS\001'
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an unaligned piece passed" || ok "an unaligned piece refused"
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"

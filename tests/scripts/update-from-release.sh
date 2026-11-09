@@ -16,6 +16,7 @@
 #      version, codesign, CDHash) and swaps in the new bundle;
 #   4. the installed bundle is VERSION, verifies (codesign --deep --strict), has CEF and the
 #      session holder, and carries no test hooks (scripts/check-release-build.sh).
+# Each test hook is set under its old PI_DESK_ name too: 0.1.6 and older read only those.
 # Nothing is uploaded, tagged or published; the worktree is removed at the end.
 # Usage: tests/scripts/update-from-release.sh ZIP VERSION [--prev vX.Y.Z]
 set -eu
@@ -55,7 +56,7 @@ git worktree add --detach "$PREVDIR" "$PREV" >/dev/null 2>&1
 (
   cd "$PREVDIR"
   ./build.sh fake-app > "$W/prev-build.log" 2>&1 &&
-    odin build src -out:"$W/prev-updater" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 >> "$W/prev-build.log" 2>&1 &&
+    odin build src -out:"$W/prev-updater" -define:DECKHAND_UPDATE_TEST=true -define:PI_DESK_UPDATE_TEST=true -minimum-os-version:14.0 >> "$W/prev-build.log" 2>&1 &&
     odin build tools/update-sign -out:"$W/update-sign" >> "$W/prev-build.log" 2>&1
 ) || { tail -20 "$W/prev-build.log"; echo "update-from-release: $PREV did not build (log: $W/prev-build.log)" >&2; exit 1; }
 mkdir -p "$W/keys"
@@ -109,6 +110,9 @@ mkdir -p "$W/home" "$W/data"
 HOME="$W/home" SHELL=/bin/sh DECKHAND_SCRIPT="$W/script.txt" DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
   DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
   DECKHAND_UPDATE_VERSION="$PREV_V" DECKHAND_UPDATE_APP="$I" \
+  PI_DESK_SCRIPT="$W/script.txt" PI_DESK_DATA_DIR="$W/data" PI_DESK_RUNTIME_DIR="$RUN" \
+  PI_DESK_UPDATE_URL="file://$W/rel/latest.json" PI_DESK_UPDATE_DOWNLOAD="file://$W/rel/download/" \
+  PI_DESK_UPDATE_VERSION="$PREV_V" PI_DESK_UPDATE_APP="$I" \
   "$W/prev-updater" > "$W/run.log" 2>&1 || true
 
 fail=0

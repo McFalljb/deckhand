@@ -392,7 +392,6 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 	v.offset = meta.offset
 	v.snapshots += 1
 	core.gt_setup(v.gt, core.term_colors()) // the one helper the core's terminals use too (term.odin)
-	theme_applied = core.term_colors()
 	gh.terminal_get(v.gt, .Cols, &v.cols)
 	gh.terminal_get(v.gt, .Rows, &v.rows)
 	// the core sized it otherwise meanwhile (a holder adopt): the next layout asks again

@@ -26,7 +26,6 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:mem"
-import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -54,7 +53,7 @@ client: Client
 client_attach :: proc() {
 	if client.attached do return
 	heap := runtime.heap_allocator()
-	when core.TEST_HOOKS {client.log = os.get_env("DECKHAND_PROTO_LOG", context.temp_allocator) == "1"}
+	client.log = core.hook_env(.Proto_Log) == "1" // dev and test builds only (test_hooks.odin)
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
 	deferred_init(&client.deferred)

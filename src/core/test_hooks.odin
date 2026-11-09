@@ -64,6 +64,7 @@ Hook :: enum u8 {
 	Update_Download,
 	Update_Version,
 	Update_App,
+	Proto_Log, // the window's link prints its frames (client.odin)
 }
 
 when TEST_HOOKS {
@@ -98,6 +99,7 @@ when TEST_HOOKS {
 		.Update_Download  = "DECKHAND_UPDATE_DOWNLOAD",
 		.Update_Version   = "DECKHAND_UPDATE_VERSION",
 		.Update_App       = "DECKHAND_UPDATE_APP",
+		.Proto_Log        = "DECKHAND_PROTO_LOG",
 	}
 }
 

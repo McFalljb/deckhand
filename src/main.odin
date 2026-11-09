@@ -246,7 +246,6 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 			line, links, headings, matches = md_state_numbers(v, tab_id, source) // markdown_view.odin
 			return line, links, headings, matches, true
 		},
-		tab_host_apply = tab_host_apply_app, // tabhost.odin
 		test_step = autotest_step,
 		test_event = autotest_on_event,
 		// tab views (tab_views.odin)

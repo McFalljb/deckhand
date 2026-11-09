@@ -1,5 +1,13 @@
 package core
 
+import "core:encoding/json"
+import "core:fmt"
+import "core:os"
+import "core:path/filepath"
+import "core:strings"
+import "core:sys/posix"
+import jg "../jsonguard"
+
 // From src/app_tab.odin (scripts/core-move.py): the core uses these, the window keeps
 // the rest of that file.
 
@@ -115,3 +123,111 @@ APP_METHOD_MAX :: 64 // app_call's method: [A-Za-z][A-Za-z0-9_.:/-]*
 APP_BOXES_MAX :: 256 // tab.boxes kept per tab
 
 APP_BOX_LABEL_MAX :: 200 // bytes of a box's label (id: APP_METHOD_MAX)
+
+// ---- what the core reads for app tabs (moved from src/app_tab.odin, M3-G) ----
+
+// An agent's app tab title: one line of at most this many characters.
+APP_TITLE_MAX :: 80
+// apps.json is read only up to this size.
+APP_JSON_MAX :: 256 * 1024
+// Whether the caller is a pi tab started read-only (chat_env: a chat under Chats: read-only);
+// what it was started with, not today's setting.
+pi_chat_readonly :: proc(caller: Caller) -> bool {
+	if caller.kind != .Panel || caller.claude do return false
+	_, tab, _ := find_tab(caller.tab_id)
+	if tab == nil do return false
+	pt, is := tab.kind.(Pi_Tab)
+	return is && pt.readonly
+}
+
+// Apps listed in the session's .deckhand/apps.json ({"apps":[{"name","argv","cwd"?}]}).
+App_Entry :: struct {
+	name: string,
+	argv: []string,
+	cwd:  string,
+}
+
+// The project file: <cwd>/.deckhand/apps.json, else its name before the rename (0.1.7),
+// <cwd>/.pi-desk/apps.json, read for good (it is committed in the user's repos; never moved).
+// Both there: .deckhand/ only. Temp-allocated.
+app_json_path :: proc(cwd: string) -> string {
+	path, _ := filepath.join({cwd, ".deckhand", "apps.json"}, context.temp_allocator)
+	if os.exists(path) do return path
+	old, _ := filepath.join({cwd, ".pi-desk", "apps.json"}, context.temp_allocator)
+	return os.exists(old) ? old : path
+}
+
+app_entries :: proc(cwd: string) -> []App_Entry {
+	data, ok := app_json_read(app_json_path(cwd))
+	if !ok do return nil
+	v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
+	if perr != nil do return nil
+	root, _ := v.(json.Object) // another shape lists nothing (an agent may have written the file)
+	list, _ := root["apps"].(json.Array)
+	out := make([dynamic]App_Entry, context.temp_allocator)
+	for x in list {
+		o, _ := x.(json.Object)
+		name, _ := o["name"].(json.String)
+		av, _ := o["argv"].(json.Array)
+		cw, _ := o["cwd"].(json.String)
+		if name == "" || strings.rune_count(name) > APP_TITLE_MAX || len(av) == 0 do continue
+		argv := make([]string, len(av), context.temp_allocator)
+		for s, i in av do argv[i] = s.(json.String) or_else ""
+		append(&out, App_Entry{name = name, argv = argv, cwd = cw})
+	}
+	return out[:]
+}
+
+// apps.json's bytes (temp): a regular file, not a symbolic link, at most APP_JSON_MAX bytes.
+// Opened without following a link and without blocking (a FIFO), then checked on the open file
+// (an agent may have written it); never more than APP_JSON_MAX+1 bytes read.
+@(private = "file")
+app_json_read :: proc(path: string) -> ([]u8, bool) {
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.CLOEXEC, .NOFOLLOW, .NONBLOCK})
+	if fd < 0 do return nil, false
+	defer posix.close(fd)
+	st: posix.stat_t
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) || st.st_size > APP_JSON_MAX do return nil, false
+	buf := make([]u8, APP_JSON_MAX + 1, context.temp_allocator)
+	n := 0
+	for n < len(buf) {
+		want: int = len(buf) - n
+		got := posix.read(fd, raw_data(buf[n:]), uint(want))
+		if got < 0 && posix.errno() == .EINTR do continue
+		if got <= 0 do break
+		n += int(got)
+	}
+	if n > APP_JSON_MAX do return nil, false // grew since fstat
+	return buf[:n], true
+}
+
+// The entry of the session's apps.json named `name`.
+app_entry :: proc(cwd, name: string) -> (App_Entry, bool) {
+	for e in app_entries(cwd) do if e.name == name do return e, true
+	return {}, false
+}
+
+// Why `name` cannot open: the names the session declares.
+app_not_declared :: proc(cwd, name: string) -> string {
+	names := make([dynamic]string, context.temp_allocator)
+	for e in app_entries(cwd) do append(&names, fmt.tprintf("%q", e.name))
+	file := strings.has_suffix(app_json_path(cwd), "/.pi-desk/apps.json") ? ".pi-desk/apps.json" : ".deckhand/apps.json" // the one read
+	if len(names) == 0 do return fmt.tprintf("no app %q: the session's folder declares none (%s)", name, file)
+	return fmt.tprintf("no app %q in the session's %s (declared: %s)", name, file, strings.join(names[:], ", ", context.temp_allocator))
+}
+
+// The session new_app_tab and app_declared act in: a pi or Claude tab's own, never another;
+// else the one named, or the caller's (Home's and an unbound caller's: the one on screen).
+app_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+	if caller.kind == .Panel {
+		own := caller_session(caller)
+		if own == nil do return nil, "the calling tab has no session"
+		if session != 0 && session != own.id do return nil, "a pi or Claude tab opens and lists apps in its own session only"
+		return own, ""
+	}
+	s := session != 0 ? find_session(session) : caller_session(caller)
+	if s != nil && s.home && session == 0 do s = cur()
+	if s == nil do return nil, "no open session to open the app in"
+	return s, ""
+}
+

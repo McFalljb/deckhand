@@ -63,10 +63,10 @@ term_url_detection :: proc(t: ^testing.T) {
 @(test)
 term_url_allowed_cases :: proc(t: ^testing.T) {
 	for u in ([]string{"https://example.com", "http://localhost:8080/x", "mailto:a@example.invalid", "HTTPS://Example.com/"}) {
-		testing.expectf(t, term_url_allowed(u), "%s should open", u)
+		testing.expectf(t, core.term_url_allowed(u), "%s should open", u)
 	}
 	for u in ([]string{"file:///etc/passwd", "javascript:alert(1)", "data:text/html,hi", "vscode://x", "ssh://host", "https://", "http:///x", "mailto:", "https://exa mple.com", "https://example.com/\x07", "", "about:blank", "  https://example.com"}) {
-		testing.expectf(t, !term_url_allowed(u), "%q should be refused", u)
+		testing.expectf(t, !core.term_url_allowed(u), "%q should be refused", u)
 	}
 }
 
@@ -238,19 +238,19 @@ term_link_menu :: proc(t: ^testing.T) {
 term_url_refuses_misleading :: proc(t: ^testing.T) {
 	// #2: a backslash anywhere, user info before the host
 	for u in ([]string{"https://a.com\\@evil.com/", "https://a.com/x\\y", "https://user@evil.com/", "https://a.com:pw@evil.com", "http://good.example@evil.example/x"}) {
-		testing.expectf(t, !term_url_allowed(u), "%q should be refused", u)
+		testing.expectf(t, !core.term_url_allowed(u), "%q should be refused", u)
 	}
 	// an @ in the path or query is fine
 	for u in ([]string{"https://example.com/@user", "https://example.com/?to=a@b.c", "mailto:a@example.invalid"}) {
-		testing.expectf(t, term_url_allowed(u), "%q should open", u)
+		testing.expectf(t, core.term_url_allowed(u), "%q should open", u)
 	}
 	// #4: the scheme compares as ASCII (İ lowercases to i)
-	testing.expect(t, !term_url_allowed("maİlto:a@example.invalid"), "maİlto refused")
-	testing.expect(t, !term_url_allowed("httpſ://example.com"), "httpſ refused")
+	testing.expect(t, !core.term_url_allowed("maİlto:a@example.invalid"), "maİlto refused")
+	testing.expect(t, !core.term_url_allowed("httpſ://example.com"), "httpſ refused")
 	testing.expect_value(t, url_in("x maİlto:a@example.invalid", 4), "")
 	// #5: anything one_line would change, and invalid UTF-8
 	for u in ([]string{"https://example.com/‮evil", "https://exa​mple.com/", "https://example.com/⁦x", "https://example.com/\xff", "https://example.com/­"}) {
-		testing.expectf(t, !term_url_allowed(u), "%q should be refused", u)
+		testing.expectf(t, !core.term_url_allowed(u), "%q should be refused", u)
 	}
 }
 

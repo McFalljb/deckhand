@@ -22,10 +22,12 @@ package core
 //       (menu_result shows its outcome).
 //   {"type":"window.command","id":"8","now":true,"command":{"focus_take":{"widget":"…"}}}
 //       one of WINDOW_COMMANDS, encoded by its fields (state_wire.odin's encoding), run as internal
+//   finished, tab_host.event: the tab host's (tabhost_route.odin)
 // Core -> window:
 //   state.full / state.delta (state_wire.odin)
 //   {"type":"result","id":"7","request_id":N,"result":{...}}   the socket's reply (reply_json)
 //   {"type":"toast","text":"…","err":false}
+//   tab_host.call: a browser, app, Markdown or editor command for the window's part (tabhost_route.odin)
 //
 // Order (design Q9): a command's state.delta is sent before its result, so the window, which waits
 // for its own result, has the new state when it reads it. In process the wait is nil: the window
@@ -42,11 +44,8 @@ import jg "../jsonguard"
 
 // The internal commands the window may send (window.command), run with the internal caller.
 // Nothing else is decoded from window.command; a socket never sees this list.
+// (A tab's page, app and workers report as tab_host.event instead: TAB_HOST_COMMANDS, tabhost_route.odin.)
 WINDOW_COMMANDS := [?]typeid {
-	App_Update, // an app tab's process started or exited (app_tab.odin's frame loop)
-	App_Call_Done, // an app screenshot worker's answer (app_tab.odin; its file: app_shot_ours). Runs in
-	// the window today (tabhost.odin); if app hosting moves into the core, recheck it here
-	Browser_Update, // what CEF reported: URL, title, loading (browser_nav.odin)
 	Comment_Add, // a comment the user made on a page or an app (ui_comments.odin, browser_annotate.odin)
 	Focus_Take, // a window widget took the keyboard (sheets, browser fields)
 	Focus_Release, // ...and let it go
@@ -62,6 +61,7 @@ Window_Msg_Kind :: enum u8 {
 	State, // state.full or state.delta: replica_apply takes the text
 	Result,
 	Toast,
+	Tab_Host_Call, // tab_host_call_parse takes the text (tabhost_route.odin)
 }
 
 Window_Msg :: struct {
@@ -171,6 +171,7 @@ core_detach_window :: proc() {
 	cw.mem_destroy(&link.t)
 	free(link, heap)
 	link = nil
+	tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
 }
 
 // A top-level inbox drain starts (inbox_drain): the window's hook, if it set one.
@@ -511,6 +512,8 @@ window_msg_parse :: proc(text: string) -> (m: Window_Msg, err: string) {
 				if iok do for im in inner do if im.key == "data" do m.result.data = im.raw
 			}
 		}
+	case "tab_host.call":
+		m.kind = .Tab_Host_Call
 	case "toast":
 		m.kind = .Toast
 		m.text = string(obj["text"].(json.String) or_else "")
@@ -525,6 +528,13 @@ window_msg_parse :: proc(text: string) -> (m: Window_Msg, err: string) {
 window_command_ok :: proc(id: typeid) -> bool {
 	for w in WINDOW_COMMANDS do if w == id do return true
 	return false
+}
+
+// Sends the window a message (tabhost_route.odin's calls). False: no window attached.
+window_link_send :: proc(text: string) -> bool {
+	if link == nil do return false
+	link_send(text)
+	return true
 }
 
 @(private = "file")
@@ -634,6 +644,17 @@ link_message :: proc(text: string) {
 			return
 		}
 		link_run(cmd, {kind = .Internal}, id, now, "")
+	case "tab_host.event":
+		// a page's, an app's or a window worker's report: the tab_host caller, never ui
+		cmd, err := command_variant_read(obj["command"], TAB_HOST_COMMANDS[:])
+		if err != "" {
+			fmt.eprintln("Deckhand: a tab_host.event refused:", err)
+			link_reply_now(id, fail(fmt.tprintf("tab_host.event: %s", err)), 0)
+			return
+		}
+		link_run(cmd, {kind = .Tab_Host}, id, now, "")
+	case "finished":
+		tab_host_finished_msg(obj, text) // a call's answer, or a pending request's end (tabhost_route.odin)
 	case:
 		fmt.eprintln("Deckhand: an unknown window message:", type)
 	}

@@ -267,6 +267,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "claude_deliver", args = "tab_id, force?", does = "a Claude tab's held text goes now", who = .Internal},
 	{type = "claude_restore_history", args = "records", does = "the saved Claude sessions back into the state", who = .Internal},
 	{type = "browser_update", args = "tab_id, url?, title?, loading?, can_back?, can_forward?, blocked_popup?", does = "a browser tab's page reported its address, title, loading or history, or a refused popup", who = .Internal},
+	{type = "browser_popup_open", args = "opener, url, background?, pane?", does = "a page opened a popup with a user gesture: a new browser tab in the opener's session (the window's report; created_id = the tab)", who = .Internal},
 	// browser tabs' polish (browser_polish.odin; docs/BROWSER.md step 3): the user's only for now
 	{type = "browser_zoom", args = "tab_id, step", does = `zoom a browser tab's page: step "in", "out" or "reset" (Chrome's steps, 25%-500%; Chromium keeps it per site); state: zoom`, who = .User},
 	{type = "browser_find", args = "tab_id, text, back?", does = "find text in a browser tab's page (the same text again: the next match; back: the previous); its find bar shows; state: find {text, matches, active}", who = .User},
@@ -288,6 +289,7 @@ command_spec :: proc(type: string) -> ^Command_Spec {
 // Whether a caller of this kind may send commands with this `who` at all
 // (bridge reports also need the caller's own tab: caller_may).
 who_allows :: proc(kind: Caller_Kind, who: Command_Who) -> bool {
+	if kind == .Tab_Host do return false // TAB_HOST_COMMANDS only (caller_may)
 	switch who {
 	case .Anyone:   return kind != .Panel && kind != .App
 	case .Query:    return kind != .App // an app tab's program sends no commands

@@ -208,55 +208,6 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 		e.follow = true
 		app.redraw = true
 		return {ok = true}, false
-	case core.List_Dir:
-		data, err := core.fs_list_json(c.path, caller, c.ignored)
-		if err != "" do return core.fail(err), false
-		return {ok = true, data = strings.clone(data)}, false
-	// File commands: the path is resolved (for this caller) before any
-	// confirmation, and the confirmation parks and shows that absolute path,
-	// so confirming later acts on the same file whatever is on screen.
-	case core.Create_File, core.Create_Dir:
-		path, confirm := "", ""
-		dir := false
-		#partial switch x in cmd {
-		case core.Create_File: path, confirm = x.path, x.confirm
-		case core.Create_Dir:  path, confirm, dir = x.path, x.confirm, true
-		}
-		p, _, err := core.fs_check_write(path, caller)
-		if err != "" do return core.fail(err), false
-		ch := false
-		if caller.kind == .Control && core.fs_outside_own(p, caller) {
-			parked: core.Command = dir ? core.Command(core.Create_Dir{path = p}) : core.Command(core.Create_File{path = p})
-			gr, go_on, gch := core.confirm_gate(parked, .Fs_Write, caller, confirm, fmt.tprintf("create %s %s?", dir ? "the folder" : "the file", p))
-			if !go_on do return gr, gch
-			ch = gch
-		}
-		created: string
-		if dir do created, err = core.fs_create_dir(p, caller)
-		else do created, err = core.fs_create_file(p, caller)
-		if err != "" do return core.fail(err), ch
-		return {ok = true, data = fmt.aprintf(`{{"path":%s}}`, quoted(created))}, ch
-	case core.Rename_Path:
-		a, _, e1 := core.fs_check_write(c.from, caller)
-		if e1 != "" do return core.fail(e1), false
-		b, _, e2 := core.fs_check_write(c.to, caller)
-		if e2 != "" do return core.fail(e2), false
-		ch := false
-		if caller.kind == .Control && (core.fs_outside_own(a, caller) || core.fs_outside_own(b, caller)) {
-			gr, go_on, gch := core.confirm_gate(core.Rename_Path{from = a, to = b}, .Fs_Write, caller, c.confirm, fmt.tprintf("rename %s to %s?", a, b))
-			if !go_on do return gr, gch
-			ch = gch
-		}
-		if err := core.fs_rename(a, b, caller); err != "" do return core.fail(err), ch
-		return {ok = true}, true // open tabs may have new titles
-	case core.Delete_Path:
-		p, _, err := core.fs_check_write(c.path, caller)
-		if err != "" do return core.fail(err), false
-		if !os.exists(p) do return core.fail("no such file or folder"), false
-		gr, go_on, ch := core.confirm_gate(core.Delete_Path{path = p}, .Delete, caller, c.confirm, fmt.tprintf("move %s to the Trash?", p))
-		if !go_on do return gr, ch
-		if derr := core.fs_delete(p, caller); derr != "" do return core.fail(derr), ch
-		return {ok = true}, ch
 	case core.Git_Head_Done:
 		// only the newest load's result counts; one for a path the tab no
 		// longer has (renamed) ends the load and asks again
@@ -264,15 +215,6 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 			if e.path == c.path do git_head_set(e, c.in_repo, c.tracked, c.head)
 			else do e.git.loading, e.git.head_stale = false, true
 		}
-		return {ok = true}, false
-	case core.Git_Status_Done:
-		core.git_status_done(c)
-		return {ok = true}, false
-	case core.File_List_Done:
-		core.file_list_done(c)
-		return {ok = true}, false
-	case core.Reveal_In_Finder:
-		if err := core.fs_reveal_path(c.path, caller); err != "" do return core.fail(err), false
 		return {ok = true}, false
 	}
 	return core.fail("unknown command"), false

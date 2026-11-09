@@ -211,8 +211,8 @@ socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single
 	return tok
 }
 
-// Callers a token may stand for: never ui (only the window's attach is the user) nor internal.
-token_caller_ok :: proc(c: Caller) -> bool {return c.kind != .UI && c.kind != .Internal}
+// Callers a token may stand for: never ui (only the window's attach is the user), internal or tab_host.
+token_caller_ok :: proc(c: Caller) -> bool {return c.kind != .UI && c.kind != .Internal && c.kind != .Tab_Host}
 
 @(private = "file")
 random_token :: proc(allocator := context.allocator) -> string {
@@ -403,7 +403,7 @@ command_tab :: proc(cmd: Command) -> u64 {
 	case Panel_Set:         return c.tab_id
 	case Panel_Remove:      return c.tab_id
 	case Pi_Attached:       return c.tab_id
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		return browser_command_tab(cmd)
 	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
 		return browser_agent_command_tab(cmd)
@@ -889,6 +889,7 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	case .Panel:                             caps = caller.claude ? `["claude_tab","state","events"]` : `["pi_tab","panels","state","events"]`
 	case .Control, .Script, .UI, .Internal:  caps = `["commands","state","events"]`
 	case .App:                               caps = `["app","frames","input"]`
+	case .Tab_Host:                          caps = `[]` // never a socket's (token_caller_ok)
 	}
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"app":"deckhand","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
@@ -1205,6 +1206,7 @@ TOKEN_CALLERS := [Caller_Kind]string {
 	.Control  = "control",
 	.Panel    = "panel",
 	.App      = "app",
+	.Tab_Host = "", // never a token: only the window's link reports for its tabs
 }
 
 // Builds tokens.json's body when enabled (srv.mu held); the caller writes it with tokens_flush

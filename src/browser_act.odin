@@ -509,7 +509,6 @@ act_request_cancel :: proc(c: core.Request_Cancel) -> core.Result {
 		return {ok = true}
 	}
 	if agent_request_end(c.request_id, why, "cancelled") do return {ok = true}
-	if core.claude_wait_cancel(c.request_id, why) do return {ok = true} // claude_wait.odin
 	return core.fail("no running request with that id")
 }
 
@@ -544,7 +543,7 @@ own :: proc(dst: ^string, v: string) {
 // A finished action's answer (tests also keep it: act_test_finished).
 act_finish :: proc(request_id: u64, r: core.Result, private := false) {
 	if act_test_finished != nil do act_test_finished[request_id] = strings.clone(core.result_json(r))
-	core.emit_event(core.Finished_Event{request_id = request_id, result = r, private = private})
+	tab_host_finished(request_id, r, private)
 }
 
 @(private = "file")
@@ -668,13 +667,13 @@ browser_act_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u6
 	case core.Request_Cancel:
 		return act_request_cancel(c), true
 	case core.Browser_Agent_Take_Over:
-		_, _, _, err := browser_target(caller, c.tab_id)
+		_, _, _, err := core.browser_target(caller, c.tab_id)
 		if err != "" do return core.fail(err), false
 		agent_take_over(c.tab_id, c.on)
 		return {ok = true}, true
 	}
 	tab_id := core.browser_act_command_tab(cmd)
-	_, _, bt, err := browser_target(caller, tab_id)
+	_, _, bt, err := core.browser_target(caller, tab_id)
 	if err != "" do return core.fail(err), false
 	if r, refused := browser_agent_refused(caller, tab_id); refused do return r, false
 	if act_upload_asking(tab_id) != nil do return code_err("busy", "the upload bar on this tab is asking the user: wait for their answer (the upload's own result), then act"), false

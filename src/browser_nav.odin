@@ -29,177 +29,69 @@ import clay "../build/clay-odin"
 
 // ---- URL normalising (the URL field and browser_open/browser_navigate) ----
 
-// ---- which session browser_open opens in ----
-
-// The session a caller's browser_open goes to (session: what it named, 0 =
-// none), or why not. Home is refused by browser_tab_open.
-browser_open_session :: proc(caller: core.Caller, session: u64) -> (^core.Open_Session, string) {
-	switch caller.kind {
-	case .Panel:
-		// a pi tab: its own session, never another
-		own := core.caller_session(caller)
-		if own == nil do return nil, "the calling pi tab has no session"
-		if session != 0 && session != own.id do return nil, "a pi tab opens browser tabs in its own session only"
-		return own, ""
-	case .UI, .Script:
-		// the user: the session on screen (scripts act as the user)
-		s := session != 0 ? core.find_session(session) : core.cur()
-		if s == nil do return nil, session != 0 ? "no such session" : "no session on screen"
-		return s, ""
-	case .Control:
-		// Atlas (bound to Home's tab) or a control script: the session it names;
-		// Atlas without one means its own, Home, which has none
-		if session != 0 {
-			s := core.find_session(session)
-			if s == nil do return nil, "no such session"
-			return s, ""
-		}
-		if caller.tab_id != 0 {
-			s := core.caller_session(caller)
-			if s == nil do return nil, "no such session"
-			return s, ""
-		}
-		return nil, "session is needed (which session the browser tab belongs to)"
-	case .Internal:
-		s := core.find_session(session)
-		if s == nil do return nil, "no such session"
-		return s, ""
-	case .App:
-	}
-	return nil, "not allowed for this caller"
-}
-
-// A browser tab a caller may drive: a pi tab only its own session's (browser_agent.odin too).
-browser_target :: proc(caller: core.Caller, tab_id: u64) -> (s: ^core.Open_Session, tab: ^core.Tab, bt: ^core.Browser_Tab, err: string) {
-	s, tab, _ = core.find_tab(tab_id)
-	if tab == nil do return nil, nil, nil, "no such tab"
-	is: bool
-	bt, is = &tab.kind.(core.Browser_Tab)
-	if !is do return nil, nil, nil, "not a browser tab"
-	if caller.kind == .Panel {
-		own := core.caller_session(caller)
-		if own == nil || own != s do return nil, nil, nil, "a pi tab drives only its own session's browser tabs"
-	}
-	return s, tab, bt, ""
-}
-
-// The tab's title from the page's (none: its address without the scheme).
-@(private = "file")
-browser_tab_title :: proc(title, url: string) -> string {
-	if title != "" do return title
-	if url == "" || url == core.BROWSER_BLANK do return "New tab"
-	if i := strings.index(url, "://"); i >= 0 do return url[i + 3:]
-	return url
-}
-
-@(private = "file")
-set_str :: proc(dst: ^string, v: string) {
-	if dst^ == v do return
-	old := dst^
-	dst^ = strings.clone(v)
-	delete(old)
-}
+// Which session browser_open opens in, which browser tabs a caller may drive, file: addresses and
+// the tab's title: the core's (tabhost_route.odin), which checks them before the window's part.
 
 // ---- commands ----
 
-browser_nav_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
+// The window's part of the navigation commands: CEF goes there (the core checked the caller, the
+// tab and the URL, and changes the tab's record from the answer: tabhost_route.odin). tab_id: the
+// tab browser_open makes.
+browser_nav_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
 	case core.Browser_Open:
-		s, err := browser_open_session(caller, c.session)
-		if s == nil do return core.fail(err), false
-		url: string
+		if tab_id == 0 do return core.fail("no tab for the page"), false
 		blank := c.url == ""
-		if blank {
-			if caller.kind != .UI do return core.fail("url is needed"), false
-			url = core.BROWSER_BLANK
-		} else {
+		url := core.BROWSER_BLANK
+		if !blank {
+			err: string
 			url, err = core.browser_url_normalize(c.url)
 			if err != "" do return core.fail(err), false
-			if ferr := file_check(caller, url); ferr != "" do return core.fail(ferr), false
 		}
-		// an agent (a pi tab, a control caller) never changes what the user sees:
-		// its tab opens behind, in the pane of its own tab (open_pane)
-		agent := caller.kind == .Panel || caller.kind == .Control
-		id, oerr := browser_tab_open(s.id, url, background = agent, pane = core.open_pane(s, caller))
-		if id == 0 do return core.fail(oerr), false
+		browser_attach(tab_id, url)
 		if blank && !core.harness_run_holds_sheet() {
 			// the user's New browser tab: the keyboard goes to its URL field
 			tf_set(&browser_url_field, "")
-			browser_url_tab = id
+			browser_url_tab = tab_id
 			delete(browser_url_error)
 			browser_url_error = ""
 			client_call(core.Focus_Take{widget = "browser_url"}, .Internal)
 		}
-		return {ok = true, created_id = id}, true
+		return {ok = true, created_id = tab_id}, true
 	case core.Browser_Navigate:
-		_, _, bt, err := browser_target(caller, c.tab_id)
-		if bt == nil do return core.fail(err), false
 		url, uerr := core.browser_url_normalize(c.url)
 		if uerr != "" do return core.fail(uerr), false
-		if ferr := file_check(caller, url); ferr != "" do return core.fail(ferr), false
-		set_str(&bt.url, core.browser_url_public(url))
-		set_str(&bt.blocked_popup, "")
 		browser_go(c.tab_id, url)
 		return {ok = true}, true
 	case core.Browser_Back:
-		return browser_step(caller, c.tab_id, true), false // the page reports where it went (Browser_Update)
+		return browser_step(c.tab_id, true), false // the page reports where it went (Browser_Update)
 	case core.Browser_Forward:
-		return browser_step(caller, c.tab_id, false), false
+		return browser_step(c.tab_id, false), false
 	case core.Browser_Reload:
-		_, _, bt, err := browser_target(caller, c.tab_id)
-		if bt == nil do return core.fail(err), false
 		b := browser_of(c.tab_id)
 		if b == nil do return core.fail("the page is not loaded"), false
 		if b.cef == 0 {
-			// the page closed itself (or could not open): open it again
-			if !browser_reopen(b, bt.url) do return core.fail("the page is not loaded"), false
+			// the page closed itself (or could not open): open it again, at its address
+			url := ""
+			if _, tab, _ := core.find_tab(c.tab_id); tab != nil do if bt, is := tab.kind.(core.Browser_Tab); is do url = bt.url
+			if !browser_reopen(b, url) do return core.fail("the page is not loaded"), false
 			return {ok = true}, true
 		}
 		dh_cef_history(b.cef, CEF_RELOAD)
 		return {ok = true}, false
 	case core.Browser_Stop:
-		_, _, bt, err := browser_target(caller, c.tab_id)
-		if bt == nil do return core.fail(err), false
 		b := browser_of(c.tab_id)
 		if b == nil || b.cef == 0 do return core.fail("the page is not loaded"), false
 		dh_cef_history(b.cef, CEF_STOP)
 		return {ok = true}, false
-	case core.Browser_Update:
-		_, tab, _ := core.find_tab(c.tab_id)
-		if tab == nil do return core.fail("no such tab"), false
-		bt, is := &tab.kind.(core.Browser_Tab)
-		if !is do return core.fail("not a browser tab"), false
-		if .Url in c.what {
-			set_str(&bt.url, core.browser_url_public(c.url))
-			if b := browser_of(c.tab_id); b != nil do set_str(&b.url, c.url) // a reopened page loads this
-		}
-		if .Nav in c.what do bt.loading, bt.can_back, bt.can_forward = c.loading, c.can_back, c.can_forward
-		if .Blocked in c.what do set_str(&bt.blocked_popup, c.blocked)
-		if .Title in c.what || .Url in c.what {
-			b := browser_of(c.tab_id)
-			set_str(&tab.title, browser_tab_title(b != nil ? b.title : "", bt.url))
-		}
-		return {ok = true}, true
 	}
 	return core.fail("unknown command"), false
 }
 
-// file: addresses (local files) are the user's own: no agent or script opens them.
 @(private = "file")
-file_check :: proc(caller: core.Caller, url: string) -> string {
-	if caller.kind == .UI || caller.kind == .Internal do return ""
-	if strings.has_prefix(strings.to_lower(url, context.temp_allocator), "file:") do return "file: addresses are opened by the user only"
-	return ""
-}
-
-@(private = "file")
-browser_step :: proc(caller: core.Caller, tab_id: u64, back: bool) -> core.Result {
-	_, _, bt, err := browser_target(caller, tab_id)
-	if bt == nil do return core.fail(err)
+browser_step :: proc(tab_id: u64, back: bool) -> core.Result {
 	b := browser_of(tab_id)
 	if b == nil || b.cef == 0 do return core.fail("the page is not loaded")
-	if back && !bt.can_back do return core.fail("nothing to go back to")
-	if !back && !bt.can_forward do return core.fail("nothing to go forward to")
 	dh_cef_history(b.cef, back ? CEF_BACK : CEF_FORWARD)
 	return {ok = true}
 }
@@ -214,10 +106,26 @@ browser_restore :: proc(tab_id: u64, url: string) {
 
 // The command plumbing (type names, copies, events' fields, browser_url_redacted): browser_wire.odin.
 
-// What CEF reported, into State (from browser.odin's callbacks; the inbox
-// runs it after the pump, never inside CEF's own call).
+// What CEF reported, into the tab's record (from browser.odin's callbacks): a tab_host.event the
+// core runs with the tab_host caller, after the pump, never inside CEF's own call. The page's
+// title goes with every address change (the core makes the tab's title from both).
 browser_report :: proc(u: core.Browser_Update) {
-	client_internal(u)
+	v := u
+	if .Url in v.what || .Title in v.what {
+		if b := browser_of(v.tab_id); b != nil {
+			if .Url in v.what do set_str(&b.url, v.url) // a reopened page loads this
+			if .Title not_in v.what do v.title = b.title
+		}
+	}
+	tab_host_report(v) // tabhost_link.odin
+}
+
+@(private = "file")
+set_str :: proc(dst: ^string, v: string) {
+	if dst^ == v do return
+	old := dst^
+	dst^ = strings.clone(v)
+	delete(old)
 }
 
 // ---- the toolbar (ui.odin's centre, above the page) ----

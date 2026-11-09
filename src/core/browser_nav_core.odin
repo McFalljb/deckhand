@@ -40,4 +40,14 @@ Browser_Update :: struct {
 	blocked:     string, // the refused popup's URL
 }
 
+// A page's popup (target=_blank, window.open, ⌘-click) with a user gesture, as the window reports
+// it (the tab_host caller; browser.odin's on_cef_popup): a new tab in the opener's session, never
+// another. created_id: the tab, whose page CEF opens in the slot it reserved.
+Browser_Popup_Open :: struct {
+	opener:     u64, // the page's tab
+	url:        string, // as the page asked (State gets it without user:pass@)
+	background: bool, // behind the view (⌘-click, or an agent acting on the opener)
+	pane:       u64, // the pane it goes into (an agent's: its own tab's); 0 = the focused one
+}
+
 BROWSER_BLANK :: "about:blank"

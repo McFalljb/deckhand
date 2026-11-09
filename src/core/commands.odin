@@ -619,6 +619,7 @@ Command :: union {
 	Browser_Reload,
 	Browser_Stop,
 	Browser_Update,
+	Browser_Popup_Open,
 	// browser tabs' polish (browser_polish.odin)
 	Browser_Zoom,
 	Browser_Find,
@@ -701,6 +702,7 @@ Caller_Kind :: enum {
 	Control,
 	Panel,
 	App, // an app tab's program (app_tab.odin): answers tab.* requests, sends no commands
+	Tab_Host, // what a tab's page or app reports through the window (tabhost_route.odin): TAB_HOST_COMMANDS only, never ui
 }
 Caller :: struct {
 	kind:   Caller_Kind,
@@ -779,6 +781,7 @@ focus_taken_free :: proc() {
 // scripts). Settings that bound agents are user-only. The control caller
 // drives pi tabs through pi_prompt/pi_reload/pi_wait_idle, never reports.
 caller_may :: proc(caller: Caller, cmd: Command) -> bool {
+	if caller.kind == .Tab_Host do return tab_host_may(cmd) // a page's or an app's reports only (tabhost_route.odin)
 	spec := command_spec(command_type(cmd))
 	if spec == nil || !who_allows(caller.kind, spec.who) do return false
 	// a Claude tab (panel + claude): its own claude.* reports, never a pi bridge's; and only
@@ -823,7 +826,7 @@ confirm_mode :: proc(caller: Caller, class: Command_Class) -> Confirm_Mode {
 	case .UI:       return .Ask
 	case .Script, .Control, .Panel:
 		return state.settings.confirm[caller.kind][class]
-	case .App:
+	case .App, .Tab_Host:
 		return .Ask
 	}
 	return .Ask
@@ -1397,7 +1400,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Confirm_Policy:
-		if c.caller == .UI || c.caller == .Internal do return fail("ui and internal callers have fixed policies"), false
+		if c.caller == .UI || c.caller == .Internal || c.caller == .Tab_Host do return fail("ui, internal and tab_host callers have fixed policies"), false
 		state.settings.confirm[c.caller][c.class] = c.mode
 		return {ok = true}, true
 	case Set_Close_Confirm:
@@ -1604,7 +1607,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		emit_event(Finished_Event{request_id = c.request_id, result = {ok = c.ok, error = c.error}})
 		return {ok = true}, sent
 	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
-		return window_tab_host_apply(cmd, caller, request_id) // editor (tabhost.odin)
+		return tab_host_apply(cmd, caller, request_id) // editor: the window hosts it (tabhost_route.odin)
 	case Set_Left_Tab, Files_Expand, Files_Collapse_All, Files_Reveal, Set_Files_Filter:
 		return files_apply(cmd, caller)
 	case List_Worktrees, Files_Set_Root, Worktree_Cleanup, Worktree_Cleanup_Done, Worktrees_Done:
@@ -1612,15 +1615,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Changes_Open, Changes_List, Changes_Stage, Changes_Unstage, Changes_Discard, Changes_Commit, Changes_Scan_Done, Changes_Diff_Done, Changes_Op_Done:
 		return changes_apply(cmd, caller, request_id)
 	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
-		return window_tab_host_apply(cmd, caller, request_id) // Markdown
+		return tab_host_apply(cmd, caller, request_id) // Markdown
 	case Show_File:
 		return show_file_apply(c, caller)
 	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes:
 		return panes_apply(cmd, caller) // panes_commands.odin
 	case Terminal_Link:
-		return window_tab_host_apply(cmd, caller, request_id) // a browser tab or the default browser (term_links.odin)
+		return tab_host_apply(cmd, caller, request_id) // a browser tab or the default browser (term_links.odin)
 	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
-		return window_tab_host_apply(cmd, caller, request_id) // app tabs
+		return tab_host_apply(cmd, caller, request_id) // app tabs
 	case New_Claude_Tab, New_Claude_Session, Claude_Rename, Claude_Resume, Claude_Session_Report, Claude_Turn_Report, Claude_Comments, Claude_Attached, Claude_Prompt, Claude_Held_Op, Claude_Deliver, Claude_Restore_History, Claude_Readonly_Ack:
 		return claude_apply(cmd, caller, request_id) // claude.odin
 	case Add_Claude_Account, Rename_Claude_Account, Remove_Claude_Account, Set_Claude_Account_Default:
@@ -1646,14 +1649,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return claude_wait_tick_apply()
 	case Comment_Add, Comment_Edit, Comment_Delete, Comments_Clear, Comments_Send_Now, Comments_Ask_Cancel, Pi_Attached:
 		return comments_apply(cmd, caller, request_id)
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
-		return window_tab_host_apply(cmd, caller, request_id) // browser tabs
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
+		return tab_host_apply(cmd, caller, request_id) // browser tabs
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
-		return window_tab_host_apply(cmd, caller, request_id)
+		return tab_host_apply(cmd, caller, request_id)
 	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
-		return window_tab_host_apply(cmd, caller, request_id)
+		return tab_host_apply(cmd, caller, request_id)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
-		return window_tab_host_apply(cmd, caller, request_id)
+		return tab_host_apply(cmd, caller, request_id)
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		return notify_apply(cmd, caller)
 	case Program_Status, Set_Unread:
@@ -1879,6 +1882,7 @@ asked_by :: proc(caller: Caller, what: string) -> string {
 	case .UI, .Internal:
 	case .Script:  who = "A script asks"
 	case .App:     who = "An app asks"
+	case .Tab_Host: who = "A page asks"
 	case .Control: who = home_bound(caller) ? fmt.tprintf("%s asks", agent_name()) : "A script asks"
 	case .Panel:
 		s, _, _ := find_tab(caller.tab_id)

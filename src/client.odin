@@ -47,6 +47,8 @@ Client :: struct {
 	released:  time.Tick, // the last deferred_release
 	busy:      int, // inside frame() or event() (main.odin): the window may hold pointers into the replica
 	facts_sent: map[u64]string, // each browser tab's facts as last sent (client_pull)
+	host:      bool, // the link carries the tab host only (the window's unit tests: client_attach_host)
+	detached:  bool, // test mode's detach_window: the window plays gone until attach_window
 }
 
 client: Client
@@ -68,6 +70,53 @@ client_attach :: proc() {
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)
 	state = &client.replica
 }
+
+// The window's unit tests: the link for the tab host only (tabhost_link.odin), so the core reaches
+// the window's tabs by message as in the app; `state` stays the core's and commands go straight in.
+client_attach_host :: proc() {
+	if client.attached || client.host do return
+	heap := runtime.heap_allocator()
+	client.main = sync.current_thread_id()
+	client.results = make(map[string]core.Result, heap)
+	client.facts_sent = make(map[u64]string, heap)
+	client.end = core.core_attach_window(client_on_frames, client_pull)
+	client.host = true
+}
+
+// The window's unit tests: the tab host's link off (what the core does with no window), or on again.
+client_host_set :: proc(on: bool) {
+	if on == client.host || client.attached do return
+	if on do client.end = core.core_attach_window(client_on_frames, client_pull)
+	else do core.core_detach_window()
+	client.host = on
+}
+
+// Test mode's detach_window: the window plays gone (M4's no-window cases, now). The core ends what
+// the window owed and answers no_window for its tabs; the replica stays as it was. Main thread.
+client_detach :: proc() {
+	if !client.attached do return
+	core.core_detach_window()
+	client.attached, client.detached = false, true
+	heap := runtime.heap_allocator()
+	for _, v in client.facts_sent do delete(v, heap)
+	clear(&client.facts_sent)
+}
+
+// Test mode's attach_window: the window comes back; the replica gets the whole state again.
+client_reattach :: proc() {
+	if !client.detached do return
+	client.detached = false
+	client.end = core.core_attach_window(client_on_frames, client_pull)
+	client.attached = true
+	client_raw(core.window_msg_subscribe())
+	core.window_link_pump()
+}
+
+// The link is up (tabhost_link.odin sends on it).
+client_link_up :: proc() -> bool {return client.attached || client.host}
+client_send_raw :: proc(text: string) {client_raw(text)}
+client_next_id :: proc() -> string {return client_id()}
+client_take_result :: proc(id: string) -> core.Result {return client_take(id)}
 
 // A ui command; its outcome comes back as state (ui_do). menu: a menu row's label, whose
 // failure is shown (core.menu_result).
@@ -277,6 +326,11 @@ client_on_frames :: proc() {
 			} else do client.results[strings.clone(m.id, heap)] = r
 		case .Toast:
 			toast_show(m.text, m.err)
+		case .Tab_Host_Call:
+			// the window's part may call the core, which answers on this link: read by the inner loop
+			client.receiving = false
+			tab_host_on_call(text) // tabhost_link.odin
+			client.receiving = true
 		case .Unknown:
 		}
 	}

@@ -30,39 +30,7 @@ LINK_TIP_MAX :: 160 // runes of a URL shown in the tip
 
 // ---- which URLs open ----
 
-// Whether url may open from terminal output: http(s) with a host, or mailto
-// with an address. Refused: spaces, control, invisible and direction
-// characters (anything one_line would change), invalid UTF-8, a backslash
-// anywhere (NSURL and Chromium read https://a.com\@b.com differently) and
-// user info before the host (https://good@evil: the host shown must be the
-// host opened). The scheme compares as ASCII (İ lowercases to i).
-term_url_allowed :: proc(url: string) -> bool {
-	if url == "" || !utf8.valid_string(url) do return false
-	for i in 0 ..< len(url) do if url[i] <= 0x20 || url[i] == 0x7f || url[i] == '\\' do return false
-	if core.one_line(url, context.temp_allocator) != url do return false
-	for p in ([]string{"https://", "http://"}) {
-		if !ascii_prefix(url, p) do continue
-		rest := url[len(p):]
-		if rest == "" || rest[0] == '/' || rest[0] == '?' || rest[0] == '#' do return false
-		auth := rest
-		if k := strings.index_any(rest, "/?#"); k >= 0 do auth = rest[:k]
-		return strings.index_byte(auth, '@') < 0
-	}
-	if ascii_prefix(url, "mailto:") do return len(url) > len("mailto:")
-	return false
-}
-
-// s starts with the lowercase ASCII prefix p, in any ASCII case.
-@(private = "file")
-ascii_prefix :: proc(s, p: string) -> bool {
-	if len(s) < len(p) do return false
-	for i in 0 ..< len(p) {
-		c := s[i]
-		if c >= 'A' && c <= 'Z' do c += 'a' - 'A'
-		if c != p[i] do return false
-	}
-	return true
-}
+// term_url_allowed and ascii_prefix: src/core/term_links_core.odin (the core checks terminal_link).
 
 // The URL as shown in the tip and the menu: one line, at most max runes
 // (max >= 2). What follows scheme://host (a mail address: up to its ?) is
@@ -78,7 +46,7 @@ link_label :: proc(url: string, max: int) -> string {
 		end := len(s)
 		if j := strings.index_any(s[k + 3:], "/?#"); j >= 0 do end = k + 3 + j
 		head, scheme = s[:end], s[:k + 3]
-	} else if ascii_prefix(s, "mailto:") {
+	} else if core.ascii_prefix(s, "mailto:") {
 		end := len(s)
 		if j := strings.index_byte(s, '?'); j >= 0 do end = j
 		head, scheme = s[:end], s[:len("mailto:")]
@@ -210,7 +178,7 @@ Link_Cell :: struct {
 link_in_cells :: proc(cells: []Link_Cell, at: int) -> (lo, hi: int, url: string, osc8: bool, ok: bool) {
 	if at < 0 || at >= len(cells) do return
 	if u := cells[at].uri; u != "" {
-		if !term_url_allowed(u) do return
+		if !core.term_url_allowed(u) do return
 		lo, hi = at, at
 		for lo > 0 && cells[lo - 1].uri == u do lo -= 1
 		for hi + 1 < len(cells) && cells[hi + 1].uri == u do hi += 1
@@ -223,7 +191,7 @@ link_in_cells :: proc(cells: []Link_Cell, at: int) -> (lo, hi: int, url: string,
 	b := strings.builder_make(context.temp_allocator)
 	for r in rs[lo:hi + 1] do if r > 0 do strings.write_rune(&b, r)
 	url = strings.to_string(b)
-	ok = term_url_allowed(url)
+	ok = core.term_url_allowed(url)
 	return
 }
 
@@ -489,7 +457,7 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]core.Menu_Item)
 	shown := strings.clone(link_label(m.url, 80), context.temp_allocator)
 	append(items, core.Menu_Item{label = shown, note = true})
 	append(items, core.Menu_Item{sep = true})
-	mail := ascii_prefix(m.url, "mailto:")
+	mail := core.ascii_prefix(m.url, "mailto:")
 	append(items, core.Menu_Item{label = "Open link", keys = "⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url}})
 	if !mail do append(items, core.Menu_Item{label = "Open in default browser", keys = "⇧⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url, external = true}})
 	append(items, core.Menu_Item{label = "Copy link", copy = m.url})
@@ -501,22 +469,11 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]core.Menu_Item)
 @(private = "file")
 browser_usable :: proc() -> bool {return CEF_BUILT_IN && cef_state != .Failed}
 
-term_link_apply :: proc(c: core.Terminal_Link, caller: core.Caller) -> (core.Result, bool) {
-	s, tab, _ := core.find_tab(c.tab_id)
-	if tab == nil do return core.fail("no such tab"), false
-	#partial switch _ in tab.kind {
-	case core.Pi_Tab, core.Shell_Tab, core.Claude_Tab:
-	case:
-		return core.fail("not a terminal tab"), false
-	}
-	if !term_url_allowed(c.url) do return core.fail("only http, https and mailto links open from a terminal"), false
-	if !ascii_prefix(c.url, "mailto:") {
-		if !c.external && browser_usable() && !s.home {
-			id, _ := browser_tab_open(s.id, c.url)
-			if id != 0 do return {ok = true, created_id = id}, true
-		}
-	}
-	if core.platform.open_url == nil do return core.fail("cannot open links here"), false
-	if !core.platform.open_url(c.url) do return core.fail("the link could not be opened"), false
-	return {ok = true}, false
+// The window's part of terminal_link (the core checked the tab and the URL: tabhost_route.odin): an
+// http(s) link opens in a browser tab of the terminal's session when Deckhand's browser works,
+// under tab_id (the core adds its record). Refused: the core opens it in the default browser.
+term_link_apply :: proc(c: core.Terminal_Link, caller: core.Caller, tab_id: u64) -> (core.Result, bool) {
+	if tab_id == 0 || !browser_usable() do return {error = "no browser here", data = `{"code":"no_browser"}`}, false
+	browser_attach(tab_id, c.url)
+	return {ok = true, created_id = tab_id}, true
 }

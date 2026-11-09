@@ -246,7 +246,7 @@ palette_run :: proc(it: Palette_Item) {
 		cs := core.cur()
 		if cs == nil do return
 		// path: a command line; argv (detail's entry): an apps.json app
-		for e in app_entries(cs.cwd) do if e.name == it.title && it.path == "" {
+		for e in core.app_entries(cs.cwd) do if e.name == it.title && it.path == "" {
 			ui_do(core.New_App_Tab{session = cs.id, argv = e.argv, cwd = e.cwd, title = e.name})
 			return
 		}

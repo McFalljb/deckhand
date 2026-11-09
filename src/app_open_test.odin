@@ -438,6 +438,6 @@ app_declared_long_names_skipped :: proc(t: ^testing.T) {
 	a, _, _, dir := ao_reset(t)
 	defer ao_done(dir)
 	ao_write_apps(a, fmt.tprintf(`{{"apps":[{{"name":%q,"argv":[%q]}},{{"name":%q,"argv":[%q]}}]}}`, strings.repeat("z", 81, context.temp_allocator), AO_MISSING, strings.repeat("y", 80, context.temp_allocator), AO_MISSING))
-	es := app_entries(core.find_session(a).cwd)
+	es := core.app_entries(core.find_session(a).cwd)
 	testing.expectf(t, len(es) == 1 && strings.rune_count(es[0].name) == 80, "%v", es)
 }

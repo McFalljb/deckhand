@@ -58,6 +58,7 @@ core_tick_body :: proc() {
 	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
 	holder_restart_tick() // Restart session holder's outcome, as a toast (holder_restart.odin; the toast redraws)
 	output_activity_tick(time.tick_now())
+	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 }
 
 // One core tick (frame() calls it first). A call from inside a tick (a modal loop a command

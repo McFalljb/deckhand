@@ -74,6 +74,7 @@ CALLER_NAMES := [Caller_Kind]string {
 	.Control  = "control",
 	.Panel    = "panel",
 	.App      = "app",
+	.Tab_Host = "tab_host",
 }
 CLASS_NAMES := [Command_Class]string {
 	.Tab_Close       = "tab_close",
@@ -320,7 +321,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Claude_Model_Report: return "claude.model"
 	case Claude_Wait_Idle:    return "claude_wait_idle"
 	case Claude_Wait_Tick:    return "claude_wait_tick"
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		return browser_command_type(cmd)
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
 		return browser_polish_command_type(cmd)
@@ -912,7 +913,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "attachment_id", c.attachment_id)
 	case Rescan, Refresh_Shell_Env, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel:
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		browser_command_write(&w, cmd, redact) // below
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
 		browser_polish_command_write(&w, cmd, redact) // browser_polish.odin
@@ -1642,7 +1643,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		key(&st, "confirm")
 		cf := obj_begin(b)
 		for k in Caller_Kind {
-			if k == .UI || k == .Internal do continue
+			if k == .UI || k == .Internal || k == .Tab_Host do continue // fixed policies
 			key(&cf, CALLER_NAMES[k])
 			ko := obj_begin(b)
 			for cl in Command_Class do kv_str(&ko, CLASS_NAMES[cl], MODE_NAMES[s.settings.confirm[k][cl]])
@@ -1771,6 +1772,11 @@ browser_command_write :: proc(w: ^Jw, cmd: Command, redact := false) {
 			kv_bool(w, "can_forward", c.can_forward)
 		}
 		if .Blocked in c.what do kv_str(w, "blocked_popup", c.blocked)
+	case Browser_Popup_Open:
+		kv_u64(w, "opener", c.opener)
+		kv_str(w, "url", url(c.url, redact))
+		if c.background do kv_bool(w, "background", true)
+		if c.pane != 0 do kv_u64(w, "pane", c.pane)
 	}
 }
 

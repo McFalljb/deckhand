@@ -26,7 +26,7 @@ package main
 // `web_open`, a run with DECKHAND_DEBUG_BROWSER=URL at launch.
 //
 // A browser tab belongs to one session for its whole life (state.odin):
-// browser_tab_open takes the session explicitly: a user's action passes the
+// browser_open takes the session explicitly (the core: tabhost_route.odin): a user's action passes the
 // session on screen, a command or an agent its own session (the caller's),
 // never "whatever is focused" at the time it runs. Popups, target=_blank and
 // window.open (OnBeforePopup, on_cef_popup) open a new tab in the opener's
@@ -127,23 +127,6 @@ tab_browser :: proc() -> ^Browser {
 	return nil
 }
 
-// Opens a browser tab in open session `session`, in its pane `pane` (0: the focused one;
-// open_pane: an agent's), and makes it that session's active tab unless `background` (the
-// session on screen stays). 0 and why: no such session, or Home (only its pi tab). Callers:
-// browser_open (a command, browser_nav.odin), popups, test mode's web_open; they bump State.
-browser_tab_open :: proc(session: u64, url: string, background := false, pane: u64 = 0) -> (id: u64, err: string) {
-	cs := core.find_session(session)
-	if cs == nil do return 0, "no such session"
-	if cs.home do return 0, "Home has only its pi tab"
-	title := url == "about:blank" ? "New tab" : "Browser"
-	// State never holds a user name or password (browser_url_public); the page gets the URL as given
-	tab := core.Tab{id = core.new_id(), kind = core.Browser_Tab{url = strings.clone(core.browser_url_public(url))}, title = strings.clone(title), status = .Running}
-	core.pane_add_tab(cs, tab, pane = pane)
-	if !background do core.session_show_tab(cs, tab.id)
-	browser_attach(tab.id, url)
-	core.window_state_changed() // a window-side write to State (popups, web_open): the replica must hear it
-	return tab.id, ""
-}
 
 // A browser tab's runtime (a new tab, a restored one once its session is
 // focused); CEF opens the page in browser_tick.
@@ -461,11 +444,11 @@ on_cef_nav :: proc "c" (id: c.int, loading, can_back, can_forward: c.int) {
 // slot `slot`; refused without a user gesture (blocked_popup, for the bar of
 // step 3) or with no slot left. Returns the new tab's id, 0 = refused.
 //
-// The tab is made here, not through the inbox like the other reports: the shim
-// needs its id now, to reserve the slot CEF's browser lands in. It is safe: CEF
-// calls this on the main thread from the pump (a GCD main-queue timer, never
-// inside a frame, an event or a command), as run_command would run; the
-// browser_report that follows bumps State's version and sends the event.
+// The tab's record is the core's: the page's popup goes to it as a tab_host.event
+// (Browser_Popup_Open, the tab_host caller: a page never acts as the user) and its id comes
+// back at once, because the shim needs it now to reserve the slot CEF's browser lands in. CEF
+// calls this on the main thread from the pump (a GCD main-queue timer, never inside a frame, an
+// event or a command), as run_command would run.
 @(private = "file")
 on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, background: c.int) -> u64 {
 	context = core.app_context
@@ -485,21 +468,20 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 	// an agent's click opens it behind, in the agent's pane: an agent never changes what the user
 	// sees (browser_act.odin)
 	agent := browser_act_busy(ob.tab_id)
-	id, err := browser_tab_open(s.id, u, background = background != 0 || agent, pane = browser_popup_pane(s, ob.tab_id))
-	if id == 0 {
-		fmt.printfln("[browser] popup refused: %s", err)
+	r := tab_host_report_now(core.Browser_Popup_Open{opener = ob.tab_id, url = u, background = background != 0 || agent, pane = browser_popup_pane(s, ob.tab_id)})
+	id := r.created_id
+	if !r.ok || id == 0 {
+		fmt.printfln("[browser] popup refused: %s", r.error != "" ? r.error : "no tab")
 		return 0
 	}
+	b := browser_attach(id, u)
 	if agent do browser_act_popup(ob.tab_id, id)
-	b := browsers[id]
 	if !browser_chan(b) {
 		b.message = "The browser has no frame channel left (too many tabs)"
-		browser_report({tab_id = id})
 		return 0
 	}
 	b.cef = slot // the shim reserved it; the browser arrives in on_after_created (dh_cef_ready)
 	b.opens += 1
-	browser_report({tab_id = id}) // a new tab: State changed
 	return id
 }
 
@@ -1039,9 +1021,9 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 		// the test's own session: the one on screen (a user's action)
 		cs := core.cur()
 		if cs == nil do return "web_open: no session", false
-		id, err := browser_tab_open(cs.id, url)
-		if id == 0 do return fmt.tprintf("web_open: %s", err), false
-		autotest.last_created = id // $last
+		r := client_call(core.Browser_Open{session = cs.id, url = url}) // the user's (tabhost_route.odin)
+		if !r.ok do return fmt.tprintf("web_open: %s", r.error), false
+		autotest.last_created = r.created_id // $last
 		return "", true
 	case "web_waitpaint":
 		wait_set("paint", arg_ms(args, 0, 10000))
@@ -1226,7 +1208,7 @@ browser_debug_tick :: proc() {
 	cs := core.cur()
 	if cs == nil do return
 	done = true
-	browser_tab_open(cs.id, url) // the session on screen: as if the user opened it there
+	client_call(core.Browser_Open{session = cs.id, url = url}) // the session on screen: as if the user opened it there
 }
 
 

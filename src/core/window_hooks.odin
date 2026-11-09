@@ -3,7 +3,8 @@ package core
 // What the core asks of the window (design §10.2, M2-A): a proc table beside `platform`
 // (platform.odin), filled in by main.odin (window_hooks_app). Core files never set app.redraw
 // or show a toast themselves; they call these. M3 turns each entry into a message, so the
-// table's shape is the message list. Nil entries do nothing (a headless core), and a query
+// table's shape is the message list (M3-G: browser, app, Markdown and editor commands went first,
+// as tab_host.call, tabhost_route.odin). Nil entries do nothing (a headless core), and a query
 // answers as if there were no window: no buffers, nothing unsaved, no sheet open.
 //
 // The core owns state and records; the window owns views and buffers (design §4). So the core
@@ -38,8 +39,6 @@ Window_Hooks :: struct {
 	// a Markdown tab's preview: the source line at its top, its links and headings, find
 	// matches (-1: no find bar on the preview); ok false = not laid out yet
 	md_view:        proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool),
-	// browser, app, Markdown and editor commands: the tab's host runs them (commands.odin)
-	tab_host_apply: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool),
 	test_step:      proc(), // test mode's script step, after the inbox (autotest.odin, core_loop.odin)
 	test_event:     proc(ev: Event), // test mode: every event, as it is emitted (autotest.odin)
 
@@ -123,13 +122,6 @@ window_state_changed :: proc() {
 window_toast :: proc(text: string, err := false) {
 	if window_link_toast(text, err) do return // an attached window gets it as a message (window_link.odin)
 	if window.toast != nil do window.toast(text, err)
-}
-
-// A browser, app, Markdown or editor command: its tab's host runs it (the window's, today in
-// process; M3-G routes it). No window: refused.
-window_tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool) {
-	if window.tab_host_apply == nil do return fail("no window"), false
-	return window.tab_host_apply(cmd, caller, request_id)
 }
 
 // A browser tab's page facts the window has, into its object in State (none without a window):

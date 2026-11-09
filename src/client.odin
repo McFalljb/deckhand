@@ -106,7 +106,7 @@ client_detach :: proc() {
 	if !client.attached do return
 	core.core_detach_window()
 	client.attached, client.detached = false, true
-	// TODO(M3-H): term_views_drop_all() here: the window's terminal views go with it (M3-H adds it)
+	term_views_drop_all() // the window.s terminal copies go with it: their channels are gone (term_view_stream.odin)
 	heap := runtime.heap_allocator()
 	for _, v in client.facts_sent do delete(v, heap)
 	clear(&client.facts_sent)

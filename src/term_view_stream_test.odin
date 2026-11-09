@@ -41,6 +41,7 @@ ts_on_frames :: proc() {
 ts_begin :: proc(cols: u16 = 80, rows: u16 = 24) -> ^core.Term {
 	core.app_context = context
 	font.cell_w, font.cell_h = 8, 16
+	tl_host_off() // the unit tests' tab host link (tabhost_link_test.odin): one window per core
 	ok: bool
 	client.end, ok = core.core_attach_window(ts_on_frames)
 	assert(ok, "attach")
@@ -58,6 +59,7 @@ ts_end :: proc(tm: ^core.Term) {
 	core.core_detach_window()
 	client.attached = false
 	client.end = {}
+	tl_host_on()
 	term_view_credit_off = false
 	delete_key(&core.terms, TS_TAB)
 	core.term_free(tm)
@@ -373,4 +375,53 @@ stream_scrollback_limit :: proc(t: ^testing.T) {
 	gh.terminal_get(tm.gt, .Scrollback_Rows, &h1)
 	gh.terminal_get(v.gt, .Scrollback_Rows, &h2)
 	testing.expectf(t, abs(int(h1) - int(h2)) <= 1000, "scrollback depths %d and %d", h1, h2)
+}
+
+// Test mode's detach_window, then attach_window (M3-G): the copies go with the link, and come
+// back live from fresh snapshots, never frozen on the old channels.
+@(test)
+stream_detach_window_then_attach :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	tl_host_off()
+	defer tl_host_on()
+	saved_state, saved_client := state, client
+	core.state = core.State{}
+	client = {}
+	client_attach()
+	if !testing.expect(t, client.attached) do return
+	core.app_context = context
+	font.cell_w, font.cell_h = 8, 16
+	tm := new(core.Term, runtime.heap_allocator())
+	core.term_init(tm, 60, 10)
+	tm.cell = {8, 16}
+	core.terms[TS_TAB] = tm
+	defer {
+		term_views_drop_all()
+		delete_key(&core.terms, TS_TAB)
+		core.term_free(tm)
+		free(tm, runtime.heap_allocator())
+		if client.attached do core.core_detach_window()
+		core.replica_free(&client.replica, deferred_allocator(&client.deferred))
+		deferred_release(&client.deferred)
+		deferred_release(&client.deferred)
+		for r in client.deferred.retired do delete(r)
+		delete(client.results)
+		delete(client.facts_sent)
+		client, state = saved_client, saved_state
+		core.state = core.State{}
+	}
+	ts_write(tm, "before the detach\r\n")
+	v := term_view_of(TS_TAB)
+	testing.expect(t, v != nil && ts_same(t, tm, "attached"))
+	client_detach()
+	testing.expect(t, term_view_peek(TS_TAB) == nil, "the copies went with the link")
+	testing.expect(t, term_view_of(TS_TAB) == nil, "no copy while detached")
+	ts_write(tm, "while detached\r\n")
+	client_reattach()
+	testing.expect(t, client.attached, "attached again")
+	v = term_view_of(TS_TAB)
+	testing.expect(t, v != nil && ts_same(t, tm, "reattached"))
+	ts_write(tm, "live after the attach\r\n") // streamed on the new channel, not frozen
+	testing.expect(t, ts_same(t, tm, "live"))
+	testing.expect(t, strings.contains(term_screen_text(term_view_peek(TS_TAB)), "live after the attach"))
 }

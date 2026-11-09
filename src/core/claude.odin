@@ -190,7 +190,7 @@ claude_tab_of :: proc(tab_id: u64) -> (s: ^Open_Session, tab: ^Tab, ct: ^Claude_
 
 // The user typed into a Claude tab (main.odin, keys and text that reach its terminal).
 claude_note_typed :: proc(tab: ^Tab) {
-	if tab == nil do return
+	if tab == nil || tab.machine != 0 do return // another machine's: its own core hears its typing
 	if _, is := tab.kind.(Claude_Tab); !is do return
 	if replica_process { // the core's runtime is in the other process: it hears it (Claude_Typed)
 		if !tab.live.claude_typed && claude_typed_send != nil do claude_typed_send(tab.id)

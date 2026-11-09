@@ -35,7 +35,9 @@ package core
 // this core's State (machine_mirror.odin). A replica that refuses a message asks for state.full
 // again. Down, the merged entries stay as last seen (the sidebar greys them); up again, a fresh
 // state.full replaces them. Selecting one of its projects here sends it select_project, so its
-// sessions come. Nothing else is read from it yet.
+// sessions come. The user's commands on its ids, and its terminals, go through machine_route.odin
+// (M6-C): their results, term.attached, term.scroll and its terminal channels' frames are read
+// here and handed there; nothing else is taken.
 //
 // Reconnects back off: 1 s, doubling to 60 s, back to 1 s after a minute up. A link the other
 // machine's own window took back (hub.taken) waits for the user's Take back (machine_connect).
@@ -446,6 +448,56 @@ mach: struct {
 	dropped: int, // window.request and confirmation.parked dropped from hub links (tests, logs)
 }
 
+when TEST_HOOKS {
+	// Tests (machine_route_test.odin): machine links with no process; what is sent on them, kept.
+	Machine_Test_Frame :: struct {
+		no:      u64,
+		channel: u32,
+		kind:    cw.Kind,
+		payload: []u8, // heap
+	}
+	machine_test_links: struct {
+		on:     bool,
+		up:     map[u64]bool,
+		texts:  [dynamic]string, // heap
+		frames: [dynamic]Machine_Test_Frame,
+	}
+}
+
+// Machine no's link is online (machine_route.odin).
+machine_link_up :: proc(no: u64) -> bool {
+	when TEST_HOOKS do if machine_test_links.on do return machine_test_links.up[no]
+	l, _ := mlink_find(no)
+	return l != nil && l.phase == .Up && l.sock != nil
+}
+
+// A JSON message on machine no's link (false: not online, or it refused it).
+machine_link_send_text :: proc(no: u64, text: string) -> bool {
+	when TEST_HOOKS do if machine_test_links.on {
+		if !machine_test_links.up[no] do return false
+		append(&machine_test_links.texts, strings.clone(text, runtime.heap_allocator()))
+		return true
+	}
+	l, _ := mlink_find(no)
+	return l != nil && mlink_send(l, text)
+}
+
+// A frame on one of machine no's terminal channels.
+machine_link_send_frame :: proc(no: u64, channel: u32, kind: cw.Kind, payload: []u8) -> bool {
+	when TEST_HOOKS do if machine_test_links.on {
+		if !machine_test_links.up[no] do return false
+		p := make([]u8, len(payload), runtime.heap_allocator())
+		copy(p, payload)
+		append(&machine_test_links.frames, Machine_Test_Frame{no = no, channel = channel, kind = kind, payload = p})
+		return true
+	}
+	l, _ := mlink_find(no)
+	if l == nil || l.sock == nil || l.phase != .Up || channel == cw.JSON_CHANNEL do return false
+	if cw.sock_send(l.sock, channel, kind, payload) != .None do return false
+	cw.sock_flush(l.sock)
+	return true
+}
+
 // Dropped from hub links so far (tests).
 machines_dropped :: proc() -> int {return mach.dropped}
 
@@ -549,6 +601,7 @@ mlink_close :: proc(l: ^Mach_Link, wait := false) {
 mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	s, why := machine_status_of(o)
 	mlink_close(l)
+	machine_route_down(l.no) // what waited for it ends; its terminals attach again when it is up
 	l.phase = .Idle
 	l.next_at = time.tick_add(time.tick_now(), machine_backoff_down(&l.backoff, time.tick_now()))
 	mlink_set(l, s, why)
@@ -646,6 +699,7 @@ machines_tick :: proc() {
 			if l.phase != .Idle || l.fd >= 0 do mlink_close(l)
 			mlink_reap(l)
 			mlink_unmerge(l)
+			machine_route_down(l.no, gone = true) // what waited for it, its terminals (machine_route.odin)
 			l.phase, l.next_at, l.backoff = .Idle, {}, {}
 			mlink_set(l, .Offline, "Machines over SSH is off")
 			continue
@@ -695,6 +749,7 @@ machines_tick :: proc() {
 			if l.phase == .Up && mirror_stream_due(&l.stream, now) do mlink_send(l, window_msg_subscribe()) // a refused full: asked again
 		}
 	}
+	machine_route_tick(now)
 }
 
 // The hello reply line came: online (frames from here on) or a status.
@@ -730,7 +785,8 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	mlink_set(l, .Online, why, version)
 	l.stream = {want_full = true} // deltas wait for its first state.full
 	mlink_send(l, window_msg_subscribe()) // its state (M6-B): state.full, then deltas
-	if id_machine(state.selected_project) == l.no do mlink_send(l, window_msg_command(Select_Project{project_id = id_local(state.selected_project)}, "", now = true))
+	if id_machine(state.selected_project) == l.no do mlink_send(l, hub_command_json(Select_Project{project_id = id_local(state.selected_project)}, "", .UI))
+	machine_route_up(l.no) // the window's terminals of it attach again, each from a fresh snapshot (machine_route.odin)
 }
 
 // Sends one JSON message on an online link (false: not sent; the link's pump finds out why).
@@ -787,7 +843,7 @@ machine_select_project :: proc(p: Project) {
 	l, _ := mlink_find(p.machine)
 	if l == nil do return
 	mirror_sessions_show(l.no, &l.mirror)
-	mlink_send(l, window_msg_command(Select_Project{project_id = id_local(p.id)}, "", now = true))
+	mlink_send(l, hub_command_json(Select_Project{project_id = id_local(p.id)}, "", .UI))
 }
 
 // Frames from an online link. Caps from the first byte: what a window would act on is dropped
@@ -807,17 +863,26 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			return
 		}
 		if err != .None do return
-		if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do continue
+		if f.channel != cw.JSON_CHANNEL {
+			machine_term_frame(l.no, f) // one of its terminals, relayed to the window (machine_route.odin)
+			continue
+		}
+		if f.kind != u8(cw.Kind.Data) do continue
 		kind := hub_msg_type(string(f.payload)) // parsed once here; a state message once more, into the replica
 		switch kind {
 		case STATE_FULL, STATE_DELTA:
 			mlink_state(l, string(f.payload), kind == STATE_FULL)
+		case "result", "finished": // the user's commands it ran (machine_route.odin)
+			machine_route_reply(l.no, string(f.payload))
+		case "term.attached", "term.scroll":
+			machine_term_json(l.no, kind, string(f.payload))
 		case "window.request", "confirmation.parked":
 			mach.dropped += 1
 			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, kind)
 		case "hub.taken":
 			by := json_path(string(f.payload), "by")
 			mlink_close(l)
+			machine_route_down(l.no)
 			l.phase = .Stopped
 			l.backoff = {}
 			mlink_set(l, .Taken, by != "" && by != "<invalid json>" ? fmt.tprintf("viewed from %s", hub_from_name(by)) : "in use by that machine's own window")
@@ -942,6 +1007,7 @@ machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 		return fail(w)
 	}
 	mlink_unmerge(l)
+	machine_route_down(l.no, gone = true)
 	mlink_free(l)
 	machines_publish()
 	return {ok = true}

@@ -34,7 +34,12 @@ pane_drag: Pane_Drag
 // the point, else the focused one (keys; a point outside every pane).
 event_pane :: proc(e: ^sapp.Event) -> ^core.Pane {
 	s := core.cur()
-	if s == nil do return core.focused_pane()
+	if s == nil {
+		// another machine's session: its one pane, whose terminal is a relayed copy (the handlers
+		// that act here resolve their tab through pane_shown, which has none for it)
+		if v := core.cur_view(); v != nil do return core.session_focused_pane(v)
+		return core.focused_pane()
+	}
 	#partial switch e.type {
 	case .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL, .MOUSE_ENTER, .MOUSE_LEAVE:
 		if pointer_capture.pane != 0 {

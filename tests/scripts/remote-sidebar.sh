@@ -2,9 +2,9 @@
 # Remote machines in the sidebar (docs/plans/background-core.md §10.4 M6-B): as remote-link.sh, a
 # second core on this Mac (its own HOME, data and runtime dirs; DECKHAND_HUB_WITHOUT_SSHD=1, its
 # saved settings let other machines in) is reached through `--via`, no ssh. That core opens a
-# session with two shells; the window lists it under the machine's name, and showing it runs nothing
-# here ("Connecting…"). The link then drops (its connect is killed, the other core runs on): the
-# machine is offline, its session still listed (greyed). The next connect brings it back online,
+# session with two shells; the window lists it under the machine's name, and showing it runs
+# nothing here (its shell's terminal is relayed from that core, M6-C). The link then drops (its
+# connect is killed, the other core runs on): the machine is offline, its session still listed (greyed). The next connect brings it back online,
 # from a fresh state.full.
 # Usage: tests/scripts/remote-sidebar.sh
 set -eu
@@ -52,8 +52,7 @@ assert_rows machines m2:online:3
 assert_drawn M2
 assert_rows open -
 clickid open 0
-eventually
-assert_drawn Connecting…
+waitfor $ 20000
 eventually 20000
 assert_rows machines m2:offline:3
 assert_drawn offline
@@ -85,7 +84,7 @@ SID=$(ctl2 "{\"type\":\"new_chat\",\"project_id\":$PID}" | id_of)
 [ -n "$SID" ] || { echo "new_chat on the other core failed"; exit 1; }
 ctl2 "{\"type\":\"new_shell_tab\",\"session\":$SID}" | grep -q '"ok":true' || { echo "new_shell_tab failed"; exit 1; }
 ctl2 "{\"type\":\"new_shell_tab\",\"session\":$SID}" | grep -q '"ok":true' || { echo "new_shell_tab failed"; exit 1; }
-until_log "$W/run.log" "assert ok: drawn \"Connecting" 30
+until_log "$W/run.log" "found \\$" 30
 # the link drops (the other core runs on): offline, then the next connect brings it back
 pkill -f "$ROOT/build/deckhand-core-serve connect" || true
 wait "$APP" || true

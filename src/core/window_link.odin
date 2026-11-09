@@ -956,6 +956,14 @@ link_message :: proc(text: string) -> (command: bool) {
 	type, _ := obj["type"].(json.String)
 	id := string(obj["id"].(json.String) or_else "")
 	now := bool(obj["now"].(json.Boolean) or_else false)
+	if link.hub do switch type {
+	case "window.facts", "window.tab_facts", "window.command", "script.core", "tab_host.event", "finished", "window.reply":
+		// a window's own (its facts, the internal caller, test mode, the tab_host caller, a call's
+		// answer, a request's reply): never another machine's core's
+		fmt.eprintln("Deckhand: a hub sent", type, "(refused)")
+		link_reply_now(id, fail(fmt.tprintf("%s is a window's, not a hub's", type)), 0)
+		return
+	}
 	switch type {
 	case "state.subscribe":
 		link.subscribed = true
@@ -976,12 +984,23 @@ link_message :: proc(text: string) -> (command: bool) {
 		if members, mok := json_members_raw(strings.trim_space(text)); mok {
 			for m in members do if m.key == "command" do raw = m.raw
 		}
+		caller := link_command_caller(obj)
+		if link.hub {
+			// another machine's core: it says whose command this is (on_behalf), never more than ui
+			ok: bool
+			if caller, ok = hub_on_behalf(obj); !ok {
+				link_reply_now(id, fail("a hub's command needs on_behalf: ui or control"), 0)
+				return
+			}
+		}
+		// the UI-only fields (Close_Session.ask...) are the user's only
 		cmd, err := parse_command_ui(raw, context.temp_allocator)
+		if caller.kind != .UI do cmd, err = parse_command(raw, context.temp_allocator)
 		if err != "" {
 			link_reply_now(id, fail(err), 0)
 			return
 		}
-		link_run(cmd, link_command_caller(obj), id, now, menu)
+		link_run(cmd, caller, id, now, menu)
 	case "window.reply":
 		link_reply_in(obj)
 	case "window.facts":
@@ -1092,6 +1111,20 @@ window_msg_script_core :: proc(line, id: string) -> string {
 
 // The callers test mode's script may run a line as (window_msg_command's "as").
 SCRIPT_AS_NAMES := #partial [Caller_Kind]string{.Script = "script", .Control = "control", .Panel = "panel"}
+
+// A hub's command's caller (§8.3): its on_behalf {"kind"}, which the hub checked with caller_may
+// first; this core applies that kind's rules again. Only ui or control: never above ui, never
+// internal; not script (it may send a Claude tab's claude.* reports, who = .Claude) nor a panel's
+// (bound to a tab of the hub's). False: none, or another kind (refused).
+hub_on_behalf :: proc(obj: json.Object) -> (Caller, bool) {
+	ob, ok := obj["on_behalf"].(json.Object)
+	if !ok do return {}, false
+	switch string(ob["kind"].(json.String) or_else "") {
+	case "ui":      return {kind = .UI}, true
+	case "control": return {kind = .Control}, true
+	}
+	return {}, false
+}
 
 // A window command's caller: ui; in test mode a script line's own (its "as"), as in process.
 @(private = "file")

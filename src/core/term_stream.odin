@@ -64,6 +64,8 @@ Term_Stream :: struct {
 	credited:  u64, // DATA bytes the window took (CREDIT)
 	need_snap: bool, // send a snapshot at the next flush (attach, a new terminal, too far behind)
 	history:   int, // history_lines asked at attach (0: all)
+	snap_max:  int, // its snapshots' bytes at most (0: a frame)
+	vt:        bool, // its snapshots are the VT replay, never GHOSTSNP (asked by another machine's core: machine_route.odin)
 	// stats (tests, the scenes' log)
 	snapshots: int,
 	snap_retries: int, // a snapshot that could not be made yet (an unfinished sequence over the limit)
@@ -138,9 +140,16 @@ term_streams_flush :: proc(retry_now := false) {
 	}
 }
 
-// The window went (core_detach_window): its streams end.
+// The window went (core_detach_window): its streams end, and its relays of other machines'.
 term_streams_window_gone :: proc() {
 	for len(streams) > 0 do stream_free(len(streams) - 1)
+	machine_relays_window_gone()
+}
+
+// A channel for the window's next stream (another machine's relayed ones too: machine_route.odin).
+term_stream_channel_new :: proc() -> u32 {
+	next_channel += 1
+	return next_channel - 1
 }
 
 // ---- from the window ----
@@ -150,7 +159,11 @@ term_stream_message :: proc(type: string, obj: json.Object, id: string) {
 	switch type {
 	case "term.attach":
 		tab_id := json_u64(obj["tab_id"])
-		history := int(json_u64(obj["history_lines"]))
+		history := int(min(json_u64(obj["history_lines"]), 1 << 30))
+		if id_machine(tab_id) != 0 { 	// another machine's: relayed (machine_route.odin)
+			machine_term_attach(id, tab_id, history)
+			return
+		}
 		t := term_of(tab_id)
 		b := strings.builder_make(context.temp_allocator)
 		fmt.sbprintf(&b, `{{"v":%d,"type":"term.attached","id":`, PROTOCOL_VERSION)
@@ -163,8 +176,9 @@ term_stream_message :: proc(type: string, obj: json.Object, id: string) {
 		}
 		heap := runtime.heap_allocator()
 		s := new(Term_Stream, heap)
-		s.channel, s.tab_id, s.t, s.history = next_channel, tab_id, t, history
-		next_channel += 1
+		s.channel, s.tab_id, s.t, s.history = term_stream_channel_new(), tab_id, t, history
+		s.vt = string(obj["snapshot"].(json.String) or_else "") == SNAPSHOT_VT
+		s.snap_max = int(min(json_u64(obj["snapshot_max"]), u64(cw.MAX_PAYLOAD))) // a hub's: its window parses it in one go
 		s.pending = make([dynamic]u8, heap)
 		s.resizes = make([dynamic]Stream_Resize, heap)
 		s.need_snap = true
@@ -174,14 +188,20 @@ term_stream_message :: proc(type: string, obj: json.Object, id: string) {
 		stream_flush(s) // the snapshot, at that offset
 	case "term.detach":
 		ch := u32(json_u64(obj["channel"]))
+		if machine_term_detach(ch) do return // a relay's
 		for s, i in streams do if s.channel == ch {
 			stream_free(i)
 			break
 		}
 	case "term.resize":
-		t := term_of(json_u64(obj["tab_id"]))
+		tab_id := json_u64(obj["tab_id"])
+		t := term_of(tab_id)
 		cols, rows := json_u64(obj["cols"]), json_u64(obj["rows"])
 		cw_, ch_ := json_f32(obj["cell_w"]), json_f32(obj["cell_h"])
+		if id_machine(tab_id) != 0 && cols >= 2 && rows >= 2 && cols <= u64(MAX_TERM_COLS) && rows <= u64(MAX_TERM_ROWS) && cw_ > 0 && ch_ > 0 && cw_ <= 1000 && ch_ <= 1000 {
+			machine_term_resize(tab_id, cols, rows, cw_, ch_) // another machine's: its core resizes it
+			return
+		}
 		if t == nil || cols < 2 || rows < 2 || cols > u64(MAX_TERM_COLS) || rows > u64(MAX_TERM_ROWS) || cw_ <= 0 || ch_ <= 0 || cw_ > 1000 || ch_ > 1000 do return
 		term_resize(t, u16(cols), u16(rows), cw_, ch_)
 	}
@@ -190,7 +210,10 @@ term_stream_message :: proc(type: string, obj: json.Object, id: string) {
 // A frame on a terminal channel from the window (window_link_pump). Main thread.
 term_stream_frame :: proc(f: cw.Frame) {
 	s := stream_of(f.channel)
-	if s == nil do return // detached, or its terminal went: dropped
+	if s == nil {
+		machine_term_from_window(f) // another machine's (relayed); else detached, or its terminal went: dropped
+		return
+	}
 	t := s.t
 	switch cw.Kind(f.kind) {
 	case .Data: // the user's input, encoded by the window
@@ -312,7 +335,9 @@ stream_snapshot :: proc(s: ^Term_Stream) -> bool {
 		meta.exit_code, meta.exit_signal = i64(t.exit.code), i64(t.exit.signal)
 	}
 	meta.inexact = t.inexact
-	blob, err := snapshot_encode_fit(t.gt, meta, stream_snap_limit > 0 ? stream_snap_limit : cw.MAX_PAYLOAD)
+	limit := stream_snap_limit > 0 ? stream_snap_limit : cw.MAX_PAYLOAD
+	if s.snap_max > 0 do limit = min(limit, s.snap_max)
+	blob, err := snapshot_encode_fit(t.gt, meta, limit, vt = s.vt)
 	if err != .None {
 		s.snap_retries += 1
 		return false
@@ -330,9 +355,11 @@ stream_snapshot :: proc(s: ^Term_Stream) -> bool {
 // A GHOSTSNP snapshot of gt (only GHOSTSNP: a window always decodes it; the VT fallback is for
 // a handover between versions) of at most limit bytes: over it, a copy with less scrollback is
 // encoded instead, halving the limit each time, oldest lines first; then without Kitty images
-// (GHOSTSNP carries their pixels), then the screen alone (temp allocator).
-snapshot_encode_fit :: proc(gt: gh.Terminal, meta: Snapshot_Meta, limit: int) -> (blob: []u8, err: Snapshot_Error) {
-	formats := [?]string{SNAPSHOT_GHOSTSNP}
+// (GHOSTSNP carries their pixels), then the screen alone (temp allocator). vt: the VT replay
+// instead (inexact), for another machine's hub, whose window must never decode a GHOSTSNP it sent
+// (machine_route.odin).
+snapshot_encode_fit :: proc(gt: gh.Terminal, meta: Snapshot_Meta, limit: int, vt := false) -> (blob: []u8, err: Snapshot_Error) {
+	formats := [?]string{vt ? SNAPSHOT_VT : SNAPSHOT_GHOSTSNP}
 	blob, _, err = snapshot_encode(gt, meta, formats[:], allocator = context.temp_allocator)
 	if err != .None || len(blob) <= limit do return
 	clone, ok := gt_clone(gt)

@@ -484,6 +484,19 @@ active_tab :: proc() -> ^Tab {
 	return session_focused_tab(cur())
 }
 
+// The focused tab of the session on screen, whichever machine's (cur_view): for the window's
+// terminal copies, whose input goes to their stream (another machine's, relayed: machine_route.odin),
+// and for the user's commands that name it (another machine's run there).
+active_tab_view :: proc() -> ^Tab {
+	return session_focused_tab(cur_view())
+}
+
+// key_tab, whichever machine's (as active_tab_view).
+key_tab_view :: proc() -> ^Tab {
+	if state.focus_widget == "agent_input" && state.home_open do return home_tab()
+	return active_tab_view()
+}
+
 term_of :: proc(tab_id: u64) -> ^Term {
 	return terms[tab_id] or_else nil
 }

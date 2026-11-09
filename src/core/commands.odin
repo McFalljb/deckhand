@@ -811,8 +811,8 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		r = fail("not allowed for this caller")
 	} else if why := claude_readonly_refuses(caller, cmd); why != "" {
 		r = fail(why) // a read-only Claude tab acting on a page or an app (claude.odin)
-	} else if why := machine_command_refuses(cmd); why != "" {
-		r = fail(why) // another machine's session, tab or project (machine_mirror.odin)
+	} else if mr, routed := machine_route(cmd, caller, request_id); routed {
+		r = mr // another machine's session, tab or project: run there, or refused (machine_route.odin)
 	} else {
 		r, changed = apply(cmd, caller, request_id)
 	}
@@ -1121,8 +1121,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true
 	case Copy_Selection:
 		_, tab, _ := find_tab(c.tab_id)
-		t := tab != nil ? term_of(tab.id) : nil
-		if t == nil do return fail("no such terminal tab"), false
+		// another machine's terminal: the window's copy too (relayed, machine_route.odin)
+		if tab == nil || (term_of(tab.id) == nil && !(tab.machine != 0 && tab.has_term)) do return fail("no such terminal tab"), false
 		// the selection is the window's copy's (term_view.odin): it copies it (no window: none)
 		if !window_copy_selection(tab.id) do return fail("nothing selected"), false
 		return {ok = true}, false // side effect only

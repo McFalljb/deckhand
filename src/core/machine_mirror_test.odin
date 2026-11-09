@@ -177,16 +177,6 @@ mirror_never_saved :: proc(t: ^testing.T) {
 	replica_free(&r, runtime.heap_allocator())
 }
 
-@(test)
-mirror_commands_refused :: proc(t: ^testing.T) {
-	sid, _ := id_pack(3, 9)
-	tid, _ := id_pack(3, 10)
-	testing.expect(t, machine_command_refuses(Close_Tab{tab_id = tid}) != "", "a command on another machine's tab waits for M6-C")
-	testing.expect(t, machine_command_refuses(New_Shell_Tab{session = sid}) != "", "and on its session")
-	testing.expect_value(t, machine_command_refuses(Focus_Session{session = sid}), "") // the view is this Mac's
-	testing.expect_value(t, machine_command_refuses(Close_Tab{tab_id = 10}), "")
-}
-
 // Review round 1: another machine's session on screen is not "the session on screen" for anything
 // that acts (cur): a split, a shown file or quick-open, the Files tab's base. Nothing local is added
 // to it, and no local folder it names is read.

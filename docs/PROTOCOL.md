@@ -1112,7 +1112,7 @@ Window → core:
 | `command` | `id`, `command`, `menu?`, `now?` | a command run as `ui`, in its wire form (every field, unlike events' and the log's; the UI-only fields `close_session.ask`, `focus_session.reopen` and `set_home_dir.setup` are read only here). `id` `""`: no result. `now`: run at once, else queued in the inbox. `menu`: a menu row's label (a failure is shown as a toast) |
 | `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: a comment, a widget taking or releasing the keyboard, a git HEAD read, the OS appearance, a session seen); anything else is refused |
 | `tab_host.event` | `id`, `command: {"<type>": {fields}}`, `now?` | what a page, an app or a window worker reported (`TAB_HOST_COMMANDS`: `browser_update`, `browser_popup_open`, `app_update`, `app_call_done`), run as the **`tab_host` caller**: answers and tab records only. It cannot confirm, change a setting or a confirmation policy, show a file, or reach another session's tabs (a popup opens in its opener's session); it has no token. Anything else is refused |
-| `finished` | `id`, `changed`, `result` | the window's answer to a `tab_host.call` (`changed`: the window's own state moved) |
+| `finished` | `id`, `changed`, `private`, `wait_ms`, `result` | the window's answer to a `tab_host.call` (`changed`: the window's own state moved; `private`: its data is a page's content, the requester's only; `wait_ms`, with a `pending` result: how long the window itself may take to end it, as an upload's bar waiting for the user). Taken only for a call the core is running or waiting on |
 | `finished` | `request_id`, `private`, `result` | the end of a request the window answered `pending` (an agent's read, action, wait or screenshot, an app call); the core sends `result` to the requester. Taken only for a request the core is waiting on |
 | `window.browser_facts` | `tab_id`, `facts` (or `null`) | what only the window knows of a browser tab (comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask), typed; get_state writes it. The core asks for it fresh before it writes a browser tab |
 
@@ -1130,8 +1130,10 @@ Core → window:
 its page, app, buffer and view are the window's. With no window attached every routed command
 answers `{"ok":false,"error":"no window: …","data":{"code":"no_window"}}` and nothing is made. A
 call the window does not answer within 10 s answers `timeout`; a request it answered `pending`
-gets its own timeout plus 10 s (60 s with none), then `timeout`. A window that detaches ends
-every wait with `no_window`.
+gets its own timeout or the answer's `wait_ms` (at most 15 min), whichever is longer, plus 10 s
+(60 s with neither), then `timeout`. A request ends once: a `finished` for it that comes before
+its call's answer ends it, and the answer only updates the records. A call the link refuses
+answers `no_window` at once. A window that detaches ends every wait with `no_window`.
 
 **Order.** A command's `state.delta` is sent before its `result` (the window waits for its own
 results and reads State at once). The delta before a result compares every section, so it holds

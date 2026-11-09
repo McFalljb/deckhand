@@ -15,7 +15,10 @@ package core
 //   {"v":1,"type":"tab_host.call","id":"h7","request_id":N,"tab_id":T,"caller":{…},"command":{"<type>":{…}}}
 //       tab_id: the tab the call makes (the core picks its id; the record follows the answer), or 0
 // Window -> core:
-//   {"v":1,"type":"finished","id":"h7","changed":true,"result":{…}}     answers a call
+//   {"v":1,"type":"finished","id":"h7","changed":true,"private":false,"wait_ms":0,"result":{…}}
+//       answers a call; private: its data is a web page's content (the requester's only);
+//       wait_ms, with a pending result: how long the window itself may take to end it (an
+//       upload's bar waits for the user), so the core's backstop comes after that
 //   {"v":1,"type":"finished","request_id":N,"private":false,"result":{…}} ends a request the
 //       window answered pending (an agent's read, action, wait, screenshot, app call)
 //   {"v":1,"type":"tab_host.event","id":"e1","now":true,"command":{"<type>":{…}}}
@@ -79,21 +82,33 @@ Host_Wait :: struct {
 	cmd:        Command, // heap copy: what a late answer completes (tab_host_after)
 	caller:     Caller,
 	tab_id:     u64,
+	ended:      bool, // the window ended the request already (its finished came before the call's answer)
+}
+
+@(private = "file")
+Host_Calling :: struct {
+	id:         string, // the call's (temp)
+	request_id: u64,
+	ended:      bool, // the window ended the request while its call ran: no wait after a pending answer
 }
 
 @(private = "file")
 Host_Answer :: struct {
 	result:  Result, // heap
 	changed: bool,
+	wait:    time.Duration, // the window's own wait for a pending result (wait_ms)
 }
 
 @(private = "file")
 host: struct {
 	next:    u64,
-	answers: map[string]Host_Answer, // answers to calls in flight, until taken (heap keys)
+	answers: map[string]Host_Answer, // answers to the calls being run now (host.calling), until taken (heap keys)
 	waits:   [dynamic]^Host_Wait,
-	calling: [dynamic]u64, // request ids of the calls being run now (nested: a link inside a Markdown tab)
+	calling: [dynamic]Host_Calling, // the calls being run now (nested: a link inside a Markdown tab)
 }
+
+// The most a window's own wait_ms may ask for (a backstop, not a promise).
+TAB_HOST_WAIT_MAX :: 15 * time.Minute
 
 // Sends cmd to the window that hosts its tab and takes the answer. answered false: none yet (M4);
 // the agent gets pending and tab_host_finished completes it.
@@ -102,33 +117,43 @@ tab_host_call :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64
 	heap := runtime.heap_allocator()
 	if host.answers == nil do host.answers = make(map[string]Host_Answer, heap)
 	if host.waits == nil do host.waits = make([dynamic]^Host_Wait, heap)
-	if host.calling == nil do host.calling = make([dynamic]u64, heap)
+	if host.calling == nil do host.calling = make([dynamic]Host_Calling, heap)
 	host.next += 1
 	id := fmt.tprintf("h%d", host.next)
-	append(&host.calling, request_id)
+	append(&host.calling, Host_Calling{id = id, request_id = request_id})
 	sent := window_link_send(tab_host_msg_call(id, cmd, caller, request_id, tab_id))
 	if sent do window_link_pump() // in process the window answered while it was sent
-	pop(&host.calling)
-	if !sent do return no_window(), false, true
-	if a, ok := host.answers[id]; ok {
-		key, _ := delete_key(&host.answers, id)
-		delete(key, heap)
-		r = result_clone(a.result, context.temp_allocator)
-		result_free(a.result)
-		// answered pending: its finished comes later (nobody to tell without a request id)
-		if r.pending && request_id != 0 do host_wait(cmd, caller, request_id, tab_id, "", tab_host_deadline(cmd))
-		return r, a.changed, true
+	me := pop(&host.calling)
+	if !sent {
+		if id in host.answers do host_answer_drop(id) // cannot be: nothing was sent
+		return no_window(), false, true
 	}
-	host_wait(cmd, caller, request_id, tab_id, id, TAB_HOST_CALL_WAIT)
+	if a, ok := host.answers[id]; ok {
+		r = result_clone(a.result, context.temp_allocator)
+		changed = a.changed
+		host_answer_drop(id)
+		// answered pending: its finished comes later (nobody to tell without a request id), unless
+		// the window ended it already while the call ran
+		if r.pending && request_id != 0 && !me.ended do host_wait(cmd, caller, request_id, tab_id, "", tab_host_deadline(cmd, a.wait))
+		return r, changed, true
+	}
+	host_wait(cmd, caller, request_id, tab_id, id, TAB_HOST_CALL_WAIT, ended = me.ended)
 	return {ok = true, pending = true}, false, false
 }
 
 @(private = "file")
-host_wait :: proc(cmd: Command, caller: Caller, request_id, tab_id: u64, id: string, wait: time.Duration) {
+host_wait :: proc(cmd: Command, caller: Caller, request_id, tab_id: u64, id: string, wait: time.Duration, ended := false) {
 	heap := runtime.heap_allocator()
 	w := new(Host_Wait, heap)
-	w^ = {id = strings.clone(id, heap), request_id = request_id, deadline = time.tick_add(time.tick_now(), wait), cmd = command_clone(cmd, heap), caller = caller, tab_id = tab_id}
+	w^ = {id = strings.clone(id, heap), request_id = request_id, deadline = time.tick_add(time.tick_now(), wait), cmd = command_clone(cmd, heap), caller = caller, tab_id = tab_id, ended = ended}
 	append(&host.waits, w)
+}
+
+@(private = "file")
+host_answer_drop :: proc(id: string) {
+	key, a := delete_key(&host.answers, id)
+	result_free(a.result)
+	delete(key, runtime.heap_allocator())
 }
 
 @(private = "file")
@@ -140,14 +165,25 @@ host_wait_free :: proc(w: ^Host_Wait) {
 }
 
 // How long a request the window answered pending may take before the core gives up on it: its
-// own timeout (the window ends it first), and TAB_HOST_GRACE more.
-tab_host_deadline :: proc(cmd: Command) -> time.Duration {
+// own timeout (the window ends it first), or what the window said it may take (window_wait: an
+// upload's bar waits for the user), and TAB_HOST_GRACE more.
+tab_host_deadline :: proc(cmd: Command, window_wait: time.Duration = 0) -> time.Duration {
 	d := TAB_HOST_PENDING_DEFAULT
 	#partial switch c in cmd {
 	case App_Call:          if c.timeout_ms > 0 do d = time.Duration(c.timeout_ms) * time.Millisecond
 	case Browser_Page_Wait: if c.timeout_ms > 0 do d = max(d, time.Duration(c.timeout_ms) * time.Millisecond)
 	}
+	d = max(d, min(window_wait, TAB_HOST_WAIT_MAX))
 	return d + TAB_HOST_GRACE
+}
+
+// Whether a command's result data is a web page's content (only its requester gets it): the
+// window marks its answers with it, and the core marks them too.
+tab_host_data_private :: proc(cmd: Command) -> bool {
+	#partial switch _ in cmd {
+	case Browser_Read, Browser_Console, Browser_Network: return true
+	}
+	return false
 }
 
 // What the window sent: a call's answer (id), or the end of a request it answered pending
@@ -159,9 +195,12 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 		fmt.eprintln("Deckhand: a finished from the window refused:", rerr)
 		return
 	}
+	private := bool(obj["private"].(json.Boolean) or_else false)
 	id := string(obj["id"].(json.String) or_else "")
 	if id != "" {
 		changed := bool(obj["changed"].(json.Boolean) or_else false)
+		wait: time.Duration
+		if n, is := obj["wait_ms"].(json.Integer); is && n > 0 do wait = time.Duration(min(n, i64(TAB_HOST_WAIT_MAX / time.Millisecond))) * time.Millisecond
 		for w, i in host.waits do if w.id == id {
 			// a late answer (M4): it completes the agent's request now
 			ordered_remove(&host.waits, i)
@@ -171,17 +210,26 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 				state.version += 1
 				window_state_changed()
 			}
+			if w.ended do return // the window's finished ended the request already
 			if r.pending {
-				host_wait(w.cmd, w.caller, w.request_id, w.tab_id, "", tab_host_deadline(w.cmd))
+				host_wait(w.cmd, w.caller, w.request_id, w.tab_id, "", tab_host_deadline(w.cmd, wait))
 				return
 			}
-			if w.request_id != 0 do emit_event(Finished_Event{request_id = w.request_id, result = r})
+			if w.request_id != 0 do emit_event(Finished_Event{request_id = w.request_id, result = r, private = private || tab_host_data_private(w.cmd)})
+			return
+		}
+		// only the calls being run now wait for an answer here: any other (a call that timed out,
+		// one the core never sent) is dropped, so the map never grows
+		running := false
+		for c in host.calling do if c.id == id do running = true
+		if !running {
+			when TEST_HOOKS do fmt.eprintln("[tab_host] an answer to a call nobody waits for:", id)
 			return
 		}
 		if old, had := host.answers[id]; had {
 			result_free(old.result)
-			host.answers[id] = {result_clone(r, heap), changed}
-		} else do host.answers[strings.clone(id, heap)] = {result_clone(r, heap), changed}
+			host.answers[id] = {result_clone(r, heap), changed, wait}
+		} else do host.answers[strings.clone(id, heap)] = {result_clone(r, heap), changed, wait}
 		return
 	}
 	n, nok := obj["request_id"].(json.Integer)
@@ -190,16 +238,25 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 		return
 	}
 	rid := u64(n)
-	private := bool(obj["private"].(json.Boolean) or_else false)
 	for w, i in host.waits do if w.id == "" && w.request_id == rid {
+		private ||= tab_host_data_private(w.cmd)
 		ordered_remove(&host.waits, i)
 		host_wait_free(w)
 		emit_event(Finished_Event{request_id = rid, result = r, private = private})
 		return
 	}
-	// one the window ends while its call still runs (it answers pending right after)
-	for c in host.calling do if c == rid {
+	// one the window ends while its call still runs (it answers pending right after): no wait
+	// after that answer, so no second finished
+	for i := len(host.calling) - 1; i >= 0; i -= 1 do if c := &host.calling[i]; c.request_id == rid && !c.ended {
+		c.ended = true
 		emit_event(Finished_Event{request_id = rid, result = r, private = private})
+		return
+	}
+	// one the window ended before the core read its call's answer (M4: the finished came first):
+	// it ends the request now; the answer still updates the records when it comes
+	for w in host.waits do if w.id != "" && w.request_id == rid && !w.ended {
+		w.ended = true
+		emit_event(Finished_Event{request_id = rid, result = r, private = private || tab_host_data_private(w.cmd)})
 		return
 	}
 	when TEST_HOOKS do fmt.eprintln("[tab_host] a finished for a request nobody waits for:", rid)
@@ -213,7 +270,7 @@ tab_host_tick :: proc() {
 		w := host.waits[i]
 		if time.tick_diff(w.deadline, now) <= 0 do continue
 		ordered_remove(&host.waits, i)
-		if w.request_id != 0 do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the window did not answer in time", data = `{"code":"timeout"}`}})
+		if w.request_id != 0 && !w.ended do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the window did not answer in time", data = `{"code":"timeout"}`}})
 		host_wait_free(w)
 	}
 }
@@ -222,7 +279,7 @@ tab_host_tick :: proc() {
 tab_host_detached :: proc() {
 	heap := runtime.heap_allocator()
 	for w in host.waits {
-		if w.request_id != 0 do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the window went away before it answered", data = `{"code":"no_window"}`}})
+		if w.request_id != 0 && !w.ended do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the window went away before it answered", data = `{"code":"no_window"}`}})
 		host_wait_free(w)
 	}
 	clear(&host.waits)
@@ -252,6 +309,16 @@ tab_host_waiting :: proc() -> int {return len(host.waits)}
 tab_host_expire_for_test :: proc() {
 	for w in host.waits do w.deadline = time.tick_add(time.tick_now(), -time.Second)
 }
+
+// As if d had passed (tests).
+@(private)
+tab_host_age_for_test :: proc(d: time.Duration) {
+	for w in host.waits do w.deadline = time.tick_add(w.deadline, -d)
+}
+
+// Answers kept for calls (tests).
+@(private)
+tab_host_answers_for_test :: proc() -> int {return len(host.answers)}
 
 @(private)
 tab_host_result_read_for_test :: proc(obj: json.Object, text: string) -> (Result, string) {return tab_host_result_read(obj, text)}
@@ -304,12 +371,13 @@ tab_host_call_parse :: proc(text: string) -> (c: Tab_Host_Call, err: string) {
 	return
 }
 
-// The window's answer to a call.
-tab_host_msg_finished :: proc(id: string, r: Result, changed: bool) -> string {
+// The window's answer to a call. private: its data is a web page's content; wait: with a pending
+// result, how long the window itself may take to end it (0: the command's own timeout).
+tab_host_msg_finished :: proc(id: string, r: Result, changed: bool, private := false, wait: time.Duration = 0) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"type":"finished","id":`, PROTOCOL_VERSION)
 	json_quote(&b, id)
-	fmt.sbprintf(&b, `,"changed":%v,"result":`, changed)
+	fmt.sbprintf(&b, `,"changed":%v,"private":%v,"wait_ms":%d,"result":`, changed, private, i64(max(wait, 0) / time.Millisecond))
 	write_result(&b, r)
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
@@ -869,6 +937,8 @@ browser_popup_open :: proc(c: Browser_Popup_Open) -> (Result, bool) {
 	if tab == nil do return fail("no such tab"), false
 	if _, is := tab.kind.(Browser_Tab); !is do return fail("not a browser tab"), false
 	if s.home do return fail("Home has only its pi tab"), false
+	// a file: address opens from a file: page only (the window checks it too)
+	if bt, _ := tab.kind.(Browser_Tab); !browser_file_link_ok(bt.url, c.url) do return fail("file: addresses open from a file: page only"), false
 	pane := c.pane
 	if session_pane(s, pane) == nil do pane = 0
 	id := new_id()
@@ -1084,6 +1154,12 @@ markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller
 	case "external":
 		url := c.url
 		scheme := strings.to_lower(url[:max(strings.index_byte(url, ':'), 0)], context.temp_allocator)
+		// whatever the window says, only a web or mail link leaves Deckhand (never file:, a
+		// script or an app's own scheme)
+		switch scheme {
+		case "http", "https", "mailto":
+		case: return fail("only http, https and mailto links open outside Deckhand"), false
+		}
 		changed := false
 		if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
 			what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(url, context.temp_allocator))

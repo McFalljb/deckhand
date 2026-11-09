@@ -23,6 +23,9 @@ Fake_Host :: struct {
 	silent:   bool, // answers nothing (M4: the answer comes later, or never)
 	refuse:   bool, // answers ok false
 	pending:  bool, // answers pending (an agent's read)
+	wait:     time.Duration, // with pending: the window's own wait (wait_ms)
+	data:     string, // the answer's data
+	end_first: bool, // ends the request (its finished) before it answers the call pending
 	last_id:  string, // the last call's id (heap)
 	last_rid: u64,
 	last_tab: u64,
@@ -46,8 +49,9 @@ fh_on_frames :: proc() {
 		delete(fh.last_id, heap)
 		fh.last_id, fh.last_rid, fh.last_tab = strings.clone(c.id, heap), c.request_id, c.tab_id
 		if fh.silent do continue
-		r := Result{ok = !fh.refuse, error = fh.refuse ? "the window says no" : "", created_id = c.tab_id, pending = fh.pending && !fh.refuse}
-		fh_send(tab_host_msg_finished(c.id, r, !fh.refuse))
+		if fh.end_first do fh_send(tab_host_msg_done(c.request_id, {ok = true, data = `{"early":true}`}))
+		r := Result{ok = !fh.refuse, error = fh.refuse ? "the window says no" : "", created_id = c.tab_id, pending = fh.pending && !fh.refuse, data = fh.data}
+		fh_send(tab_host_msg_finished(c.id, r, !fh.refuse, wait = fh.wait))
 	}
 }
 
@@ -411,4 +415,121 @@ tab_host_call_message_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, rerr, "")
 	testing.expect(t, r.ok && r.created_id == 5 && r.data == `{"a":[1,2]}`)
 	_ = time.Second
+}
+
+// Round 1 of the G+H review: a window's own wait (an upload's bar) is the core's backstop too; a
+// request the window ended during its own call, or before the core read the call's answer, ends
+// once; a late answer keeps private; answers to calls nobody runs are dropped; a link that
+// refuses the call answers no_window at once.
+@(test)
+tab_host_waits_and_ends_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, _, _, ta, _, _, _, _, _ := fh_begin()
+	defer fh_done()
+	// an upload's bar may wait 120 s for the user: 90 s on, the core still waits
+	fh.pending, fh.wait = true, 180 * time.Second
+	r := run_command(Browser_Click{tab_id = ta, target = {selector = "#b"}}, {kind = .Script}, 601)
+	testing.expect(t, r.ok && r.pending)
+	tab_host_age_for_test(90 * time.Second)
+	tab_host_tick()
+	testing.expect_value(t, len(fh.events), 0)
+	fh_send(tab_host_msg_done(601, {ok = true}))
+	window_link_pump()
+	if testing.expect_value(t, len(fh.events), 1) do testing.expect(t, fh.events[0].result.ok, "the window's own end")
+	// without a wait of its own: the command's (70 s) — 90 s on, timeout
+	fh.wait = 0
+	r = run_command(Browser_Click{tab_id = ta, target = {selector = "#b"}}, {kind = .Script}, 602)
+	tab_host_age_for_test(90 * time.Second)
+	tab_host_tick()
+	if testing.expect_value(t, len(fh.events), 2) do testing.expect_value(t, json_path(fh.events[1].result.data, "code"), "timeout")
+	// ended while its call ran, then answered pending: one finished, never a timeout after it
+	fh.end_first = true
+	r = run_command(Browser_Read{tab_id = ta}, {kind = .Script}, 603)
+	testing.expect(t, r.pending)
+	testing.expect_value(t, tab_host_waiting(), 0)
+	tab_host_expire_for_test()
+	tab_host_tick()
+	if testing.expect_value(t, len(fh.events), 3) do testing.expect_value(t, json_path(fh.events[2].result.data, "early"), "true")
+	fh.end_first = false
+	// M4: the finished comes before the core read the call's answer; then the answer, pending
+	fh.silent = true
+	r = run_command(Browser_Read{tab_id = ta}, {kind = .Script}, 604)
+	id := strings.clone(fh.last_id, context.temp_allocator)
+	fh_send(tab_host_msg_done(604, {ok = true, data = `{"text":"hi"}`}))
+	window_link_pump()
+	if testing.expect_value(t, len(fh.events), 4) {
+		testing.expect_value(t, fh.events[3].request_id, 604)
+		testing.expect(t, fh.events[3].private, "a read's text is private")
+	}
+	fh_send(tab_host_msg_finished(id, {ok = true, pending = true}, false))
+	window_link_pump()
+	tab_host_expire_for_test()
+	tab_host_tick()
+	testing.expect_value(t, len(fh.events), 4)
+	testing.expect_value(t, tab_host_waiting(), 0)
+	// a late answer with a page's content: private (the window says so; the core knows it too)
+	r = run_command(Browser_Console{tab_id = ta}, {kind = .Script}, 605)
+	fh_send(tab_host_msg_finished(fh.last_id, {ok = true, data = `{"lines":["secret"]}`}, false, private = true))
+	r = run_command(Browser_Network{tab_id = ta}, {kind = .Script}, 606)
+	fh_send(tab_host_msg_finished(fh.last_id, {ok = true, data = `{"requests":["secret"]}`}, false))
+	window_link_pump()
+	if testing.expect_value(t, len(fh.events), 6) {
+		testing.expect(t, fh.events[4].request_id == 605 && fh.events[4].private, "console: private")
+		testing.expect(t, fh.events[5].request_id == 606 && fh.events[5].private, "network: private")
+	}
+	// answers to calls nobody runs (timed out, never sent) are not kept
+	fh_send(tab_host_msg_finished("h99999", {ok = true, data = `{"x":1}`}, false))
+	fh_send(tab_host_msg_finished(id, {ok = true}, false))
+	window_link_pump()
+	testing.expect_value(t, tab_host_answers_for_test(), 0)
+	// the link refuses the call (closed): no_window at once, nothing waits
+	fh.silent = false
+	cw.mem_close(fh.end)
+	r = run_command(Browser_Reload{tab_id = ta}, {kind = .Script}, 607)
+	testing.expect(t, !r.pending, "not pending")
+	testing.expect_value(t, json_path(r.data, "code"), "no_window")
+	testing.expect_value(t, tab_host_waiting(), 0)
+}
+
+// Defence in depth: whatever the window answers, a Markdown link leaves Deckhand only as http,
+// https or mailto, and a page's popup opens a file: address only from a file: page.
+@(test)
+tab_host_links_checked_in_core :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _, _, _, _, _, md, _, tb := fh_begin()
+	defer fh_done()
+	@(static) opened: [dynamic]string
+	opened = make([dynamic]string, context.temp_allocator)
+	platform.open_url = proc(url: string) -> bool {
+		append(&opened, strings.clone(url, context.temp_allocator))
+		return true
+	}
+	defer platform.open_url = nil
+	fh.data = `{"follow":"external"}`
+	for u in ([]string{"file:///etc/passwd", "javascript:alert(1)", "x-app://do", "/etc/hosts"}) {
+		r := run_command(Markdown_Follow{tab_id = md, url = u}, {kind = .UI})
+		testing.expectf(t, !r.ok, "%s: refused", u)
+	}
+	testing.expect_value(t, len(opened), 0)
+	r := run_command(Markdown_Follow{tab_id = md, url = "https://ok.example/"}, {kind = .UI})
+	testing.expect(t, r.ok)
+	r = run_command(Markdown_Follow{tab_id = md, url = "mailto:a@example.invalid"}, {kind = .UI})
+	testing.expect(t, r.ok)
+	testing.expect_value(t, len(opened), 2)
+	fh.data = ""
+	page := Caller{kind = .Tab_Host}
+	r = run_command(Browser_Popup_Open{opener = tb, url = "file:///etc/passwd"}, page)
+	testing.expect(t, !r.ok, "a web page's popup to a file: address")
+	r = run_command(Browser_Popup_Open{opener = tb, url = "https://pop.example/"}, page)
+	testing.expect(t, r.ok)
+	// a file: page may (the user opened it)
+	s := &state.open_sessions[0]
+	_ = a
+	for &tab in s.tabs do if bt, is := &tab.kind.(Browser_Tab); is {
+		delete(bt.url)
+		bt.url = strings.clone("file:///tmp/a.html")
+		r = run_command(Browser_Popup_Open{opener = tab.id, url = "file:///tmp/b.html"}, page)
+		testing.expect(t, r.ok, "from a file: page")
+		break
+	}
 }

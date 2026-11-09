@@ -18,6 +18,7 @@ package main
 
 import "core:fmt"
 import "core:sync"
+import "core:time"
 import "core"
 
 // A call from the core (client.odin's client_on_frames, on the main thread).
@@ -32,7 +33,17 @@ tab_host_on_call :: proc(text: string) {
 		return
 	}
 	r, changed := tab_host_apply_app(c.cmd, c.caller, c.request_id, c.tab_id)
-	tab_host_raw(core.tab_host_msg_finished(c.id, r, changed))
+	private := r.data != "" && core.tab_host_data_private(c.cmd)
+	tab_host_raw(core.tab_host_msg_finished(c.id, r, changed, private, r.pending ? tab_host_own_wait(c.cmd) : 0))
+}
+
+// How long the window itself may take to end a request it answered pending, past the command's
+// own timeout (core.tab_host_deadline): 0 for most. An upload waits for the user at its bar.
+tab_host_own_wait :: proc(cmd: core.Command) -> time.Duration {
+	#partial switch _ in cmd {
+	case core.Browser_Upload: return ACT_TIMEOUT + ACT_UPLOAD_WAIT + ACT_TIMEOUT // to the bar, the bar, the files after Allow
+	}
+	return 0
 }
 
 // A request the window answered pending ends (its result goes to the requester). Main thread.

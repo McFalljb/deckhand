@@ -530,11 +530,10 @@ window_command_ok :: proc(id: typeid) -> bool {
 	return false
 }
 
-// Sends the window a message (tabhost_route.odin's calls). False: no window attached.
+// Sends the window a message (tabhost_route.odin's calls). False: no window attached, or the
+// link refused it (closed, over its limit): the caller answers no_window at once.
 window_link_send :: proc(text: string) -> bool {
-	if link == nil do return false
-	link_send(text)
-	return true
+	return link_send(text)
 }
 
 @(private = "file")

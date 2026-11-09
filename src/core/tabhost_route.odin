@@ -631,8 +631,10 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			session_show_tab(s, tab.id)
 			if et := &tab.kind.(Editor_Tab); !c.preview do et.preview = false // opened for good (double-click, Enter)
 			focus_session(s.id, caller)
-			if c.line > 0 do routed(Goto_Line{tab_id = tab.id, line = c.line, col = c.col}, caller, request_id)
-			return {ok = true, created_id = tab.id}, true
+			// by id: routed's wait may run the window's commands, which can move or free records
+			id := tab.id
+			if c.line > 0 do routed(Goto_Line{tab_id = id, line = c.line, col = c.col}, caller, request_id)
+			return {ok = true, created_id = id}, true
 		}
 		return routed(Open_File{path = p, line = c.line, col = c.col, session = s.id, preview = c.preview}, caller, request_id, new_id())
 	case Markdown_Open:
@@ -642,8 +644,9 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			if !tab_host_up() do return no_window(), false
 			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
-			if c.anchor != "" do routed(Markdown_Scroll{tab_id = tab.id, anchor = c.anchor}, caller, request_id)
-			return {ok = true, created_id = tab.id}, true
+			id := tab.id // (by id across routed, as above)
+			if c.anchor != "" do routed(Markdown_Scroll{tab_id = id, anchor = c.anchor}, caller, request_id)
+			return {ok = true, created_id = id}, true
 		}
 		return routed(Markdown_Open{path = p, session = s.id, anchor = c.anchor}, caller, request_id, new_id())
 	case Diff_File:
@@ -683,10 +686,12 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 	case Markdown_Follow:
 		s, _, mt := markdown_tab_of(c.tab_id)
 		if mt == nil do return fail("no such Markdown tab"), false
+		sid := s.id // by id: routed's wait may run the window's commands, which can move or free records
 		// the window says what the link is (one of the document's, as laid out); the core acts on it
 		r, ch := routed(cmd, caller, request_id)
 		if !r.ok || r.data == "" do return r, ch
-		r2, ch2 := markdown_follow_act(c, s, caller, request_id, r.data)
+		if find_session(sid) == nil do return fail("the session went"), ch
+		r2, ch2 := markdown_follow_act(c, sid, caller, request_id, r.data)
 		return r2, ch || ch2
 	case Git_Head_Done:
 		if !tab_host_up() do return {ok = true}, false // the editor went with the window
@@ -1160,7 +1165,7 @@ session_file_tab :: proc(s: ^Open_Session, p: string, editor: bool) -> ^Tab {
 // {"follow":"open","path":…,"anchor":…}): the core opens it. A web or mail link leaves Deckhand
 // (the user's browser or mail, signed in): only the user's click, or a call the user confirms.
 @(private = "file")
-markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller, request_id: u64, data: string) -> (Result, bool) {
+markdown_follow_act :: proc(c: Markdown_Follow, sid: u64, caller: Caller, request_id: u64, data: string) -> (Result, bool) {
 	switch json_path(data, "follow") {
 	case "external":
 		url := c.url
@@ -1183,8 +1188,8 @@ markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller
 	case "open":
 		p := json_path(data, "path")
 		if p == "" do return fail("empty link"), false
-		if path_kind(p) != .Dir && md_is_markdown_path(p) do return tab_host_apply(Markdown_Open{path = p, session = s.id, anchor = json_path(data, "anchor")}, caller, request_id)
-		return run_command(Open_File{path = p, session = s.id}, caller), true
+		if path_kind(p) != .Dir && md_is_markdown_path(p) do return tab_host_apply(Markdown_Open{path = p, session = sid, anchor = json_path(data, "anchor")}, caller, request_id)
+		return run_command(Open_File{path = p, session = sid}, caller), true
 	}
 	return {ok = true}, false
 }

@@ -502,6 +502,9 @@ app_sock_connected :: proc(tab_id: u64) -> bool {
 	return tab != nil && tab.live.app_connected
 }
 
+// After a spawn with a separate core: how long the connection is not judged (app_frames_tick).
+APP_SEP_SOCK_GRACE :: 2 * time.Second
+
 @(private = "file")
 app_sock_forget :: proc(tab_id: u64) {
 	if !client_separate() {
@@ -794,8 +797,10 @@ app_frames_tick :: proc() -> bool {
 			}
 		}
 		if a.pid == 0 do continue
-		// the socket: an app that hangs up is gone (its exit comes next)
-		if app_sock_connected(id) do a.sock_seen = true
+		// the socket: an app that hangs up is gone (its exit comes next). A separate core's word on it
+		// (Tab_Live) lags a core tick and may still be the old process's: not read in the grace
+		if client_separate() && time.tick_since(a.started_at) < APP_SEP_SOCK_GRACE {
+		} else if app_sock_connected(id) do a.sock_seen = true
 		else if a.sock_seen && !a.closing {
 			a.sock_seen = false
 			app_log_line(a, "[Deckhand] the app closed its connection: stopping it")

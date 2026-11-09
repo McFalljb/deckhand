@@ -468,14 +468,21 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 	// an agent's click opens it behind, in the agent's pane: an agent never changes what the user
 	// sees (browser_act.odin)
 	agent := browser_act_busy(ob.tab_id)
-	r := tab_host_report_now(core.Browser_Popup_Open{opener = ob.tab_id, url = u, background = background != 0 || agent, pane = browser_popup_pane(s, ob.tab_id)})
+	// the wait for the core's answer reads its messages (a closed tab's view_drop): ob and s may
+	// be gone after it, so only the opener's id is used from here on
+	opener_id := ob.tab_id
+	r := tab_host_report_now(core.Browser_Popup_Open{opener = opener_id, url = u, background = background != 0 || agent, pane = browser_popup_pane(s, opener_id)})
 	id := r.created_id
 	if !r.ok || id == 0 {
-		fmt.printfln("[browser] popup refused: %s", r.error != "" ? r.error : "no tab")
+		// a core that answered too late still makes the tab, and its view (view_open): the page
+		// loads there when shown, without the opener (CEF's popup is refused here)
+		fmt.printfln("[browser] popup refused: %s", r.error != "" ? r.error : r.pending ? "the core did not answer in time" : "no tab")
 		return 0
 	}
-	b := browser_attach(id, u)
-	if agent do browser_act_popup(ob.tab_id, id)
+	b := browser_of(id) // the view the core opened with the tab (view_open), lazy until now
+	if b == nil do b = browser_attach(id, u)
+	b.lazy = false
+	if agent do browser_act_popup(opener_id, id)
 	if !browser_chan(b) {
 		b.message = "The browser has no frame channel left (too many tabs)"
 		return 0

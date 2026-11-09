@@ -5,9 +5,10 @@ package core
 // with the user's next message: the user's text, what was picked, and a cropped image.
 //
 // One path for every source: a source makes a crop (comments_crop_path, then a PNG there) and
-// adds the comment with Comment_Add (internal; browser_comment_add and app_comment_add below are
-// the two sources so far). Comments belong to the session that holds the tab, never to the session
-// on screen, and stay with it when the tab closes (closing asks first: send or drop).
+// adds the comment with Comment_Add (internal; the window's browser_comment_add and app_comment_add
+// in ui_comments.odin are the two sources so far). Comments belong to the session that holds the
+// tab, never to the session on screen, and stay with it when the tab closes (closing asks first:
+// send or drop).
 //
 // Delivery, per session, to its pi tab's bridge (integrations/pi extensions/bridge, PROTOCOL.md §4):
 //   - whenever the pending set changes, and after every bridge handshake (pi.session), Deckhand
@@ -684,14 +685,10 @@ browser_comment_what :: proc(box: [4]int, what, title, url: string) -> string {
 	return fmt.tprintf("%s on %s (%s)", pick, q(title != "" ? title : "untitled page"), q(url))
 }
 
-// A comment on an app tab's Inspect box (ui_comments.odin: the comment bar's Add): box `box_id`
-// (label, rect as the app sent them), the user's text, and the crop taken at the click (its file
-// goes to the comment, or is removed if the comment is refused).
-app_comment_add :: proc(tab_id: u64, box_id, label: string, rect: App_Rect, text, crop: string) -> (id: u64, err: string) {
-	what := fmt.tprintf("box %q (%q) at %d,%d %d×%d", label != "" ? label : box_id, box_id, int(rect.x), int(rect.y), int(rect.w), int(rect.h))
-	r := run_command(Comment_Add{source = .App, tab_id = tab_id, what = what, text = text, crop = crop}, {kind = .Internal})
-	if !r.ok && crop != "" do os.remove(crop)
-	return r.created_id, r.error
+// What an app tab's Inspect box comment names (ui_comments.odin's app_comment_add): box `box_id`
+// (label, rect as the app sent them). Temp allocator.
+app_comment_what :: proc(box_id, label: string, rect: App_Rect) -> string {
+	return fmt.tprintf("box %q (%q) at %d,%d %d×%d", label != "" ? label : box_id, box_id, int(rect.x), int(rect.y), int(rect.w), int(rect.h))
 }
 
 // Deckhand quits: this run's crops go (comments are not kept across runs yet).

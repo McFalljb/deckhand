@@ -281,6 +281,9 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 			wire_free(&p.os, type_info_of(Open_Session), a)
 			continue
 		}
+		// a pane that stays keeps the window's own layout (rect, frame: not on the wire) until the
+		// window lays out again: an event handled before then (a click that focused its pane) finds it
+		for &np in p.os.panes do for op in os.panes do if op.id == np.id do np.rect, np.frame = op.rect, op.frame
 		for f in SESSION_PANE_FIELDS do field_swap(os, &p.os, type_info_of(Open_Session), f)
 		wire_free(&p.os, type_info_of(Open_Session), a)
 	}

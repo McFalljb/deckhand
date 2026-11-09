@@ -441,7 +441,7 @@ show in its State (`comments`, `comments_wait`) and are changed with `comment_ed
 sources so far: `browser_comment_add(tab_id, box, what, text)` (step 4's picker calls it; today
 only test mode's stub `web_comment X Y W H TEXT`, which crops the frame on screen from the
 browser's frame ring; the element, title and address are quoted, on one line) and
-`app_comment_add(tab_id, box_id, label, rect, text, crop)`: a click on an app tab's Inspect box
+`app_comment_add(tab_id, box_id, label, rect, text, crop)` (the window's, `src/ui_comments.odin`): a click on an app tab's Inspect box
 takes its crop at once (`app_box_crop`, through `app_screenshot`'s frame read, `dh_frames_read`,
 before the bar moves the content), then opens the new-comment bar ("Comment on box “coin”:",
 Add, Cancel; Cancel removes the crop). This run's crops are removed at quit.

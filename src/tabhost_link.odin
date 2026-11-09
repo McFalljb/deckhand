@@ -68,6 +68,7 @@ tab_host_report_now :: proc(cmd: core.Command) -> core.Result {
 	text, ok := core.tab_host_msg_event(cmd, id, now = true)
 	if !ok do return core.fail("not a tab host report")
 	if !tab_host_raw(text) do return core.no_window()
+	if client_separate() do return client_wait(id) // over core.sock: a bounded wait, as a command's
 	client_pump()
 	return client_take_result(id)
 }

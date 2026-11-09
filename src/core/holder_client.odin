@@ -129,6 +129,7 @@ Holder_Client :: struct {
 	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
 	refused_path: string, // its socket
 	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
+	rollback_told: bool, // SUPERVISE_STATUS said rolled_back: said once
 }
 
 hc := Holder_Client{fd = -1}
@@ -489,6 +490,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		window_toast(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
+	holder_supervise_me()
 	if autotest_active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
 }
@@ -668,6 +670,14 @@ holder_frame :: proc(f: hw.Frame) {
 		why := "the holder refused the upgrade"
 		if hw.decode(f, .Upgrade_Failed, &m, context.temp_allocator) == .None do why = m.error
 		upgrade_finish_locked({error = strings.clone(why), holder_rev = hc.holder_rev, pid = hc.pid})
+	case .Supervise_Status:
+		m: hw.Supervise_Status
+		if hw.decode(f, .Supervise_Status, &m, context.temp_allocator) == .None && m.rolled_back && !hc.rollback_told {
+			hc.rollback_told = true
+			fmt.eprintln("Deckhand: background core: the session holder's supervisor rolled the update back (the new core crashed twice)")
+			if autotest_active do fmt.println("[autotest] core: rolled back")
+			window_toast("Update rolled back: the updated background core stopped twice, so the previous one runs your sessions.", err = true)
+		}
 	case .Pong, .Unknown:
 	case:
 		fmt.eprintln("Deckhand: session holder: ignoring a frame of kind", f.kind)
@@ -1125,6 +1135,7 @@ holder_reattach :: proc() -> bool {
 			upgrade_finish_locked(res)
 			sync.unlock(&hc.mu)
 			upgrade_release()
+			holder_supervise_me() // a new image starts with no supervisor state
 			if autotest_active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
 			return true
 		}
@@ -1360,4 +1371,43 @@ holder_hung_tick :: proc() {
 	fmt.eprintln("Deckhand: session holder: still not answering after", hw.PONG_TIMEOUT, "-", n, "tab(s) that waited for it start fresh")
 	window_toast(fmt.tprintf("The session holder still isn't answering: %d session%s that waited for it start fresh here.", n, n == 1 ? "" : "s"), err = true)
 	window_state_changed()
+}
+
+// ---- the supervisor (src/holder supervisor.odin) ----
+
+// A separate core tells its holder where it runs from, so a crash gets it relaunched (SUPERVISE{core}).
+holder_supervise_me :: proc() {
+	if !core_separate do return
+	if exe := executable_path(); exe != "" do holder_send(.Supervise, 0, hw.Supervise{op = "core", path = exe})
+}
+
+// The window's question to the holder while its core never comes up (P6): op "status" or
+// "use_previous". Any holder socket of ours in run whose code is the holder's; ok false: none answered.
+holder_supervise_ask :: proc(run, op: string) -> (st: hw.Supervise_Status, ok: bool) {
+	for path in holder_socks(run) {
+		fd, cok := sock_connect(path)
+		if !cok do continue
+		defer sock_close(fd)
+		peer, tok := trust.peer_read_token(fd)
+		if trust.peer_allowed(.Adhoc, trust.own_uid(), peer) != .Allow || holder_peer_code_ok(tok) != "" do continue
+		out := make([dynamic]u8, context.temp_allocator)
+		hw.encode(&out, .Supervise, 0, hw.Supervise{op = op})
+		if !sock_write_all(fd, out[:]) do continue
+		rx: hw.Stream
+		defer hw.stream_destroy(&rx)
+		buf: [4096]u8
+		deadline := time.tick_add(time.tick_now(), 2 * time.Second)
+		for {
+			if f, err := hw.stream_next(&rx); err == .None {
+				if f.kind == u8(hw.Kind.Supervise_Status) && hw.decode(f, .Supervise_Status, &st, context.temp_allocator) == .None do return st, true
+				break
+			}
+			left := time.tick_diff(time.tick_now(), deadline)
+			if left <= 0 || !sock_wait_readable(fd, max(int(time.duration_milliseconds(left)), 1)) do break
+			n := sock_read(fd, buf[:])
+			if n <= 0 || trust.peer_still(peer, trust.peer_read(fd)) != .Allow do break
+			hw.stream_feed(&rx, buf[:n])
+		}
+	}
+	return {}, false
 }

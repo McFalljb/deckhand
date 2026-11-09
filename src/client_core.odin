@@ -443,3 +443,21 @@ ctl_core_ensure :: proc() {
 	}
 	fmt.eprintln("deckhand --ctl: Deckhand's background core did not start within 15 s")
 }
+
+// No core came up (a crash loop, P6): the session holder's supervisor is asked directly. When a
+// previous core is installed the user may pick Use Previous Core (the holder launches it). True:
+// asked for it; dial again.
+client_core_offer_previous :: proc() -> bool {
+	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
+	if rwhy != "" do return false
+	st, ok := core.holder_supervise_ask(run, "status")
+	if !ok || !st.previous || st.core do return false
+	text := fmt.tprintf("Deckhand's background core keeps stopping%s. Your sessions are still running. Use the background core from before the last update?", st.crashes > 0 ? fmt.tprintf(" (%d time%s in 5 minutes)", st.crashes, st.crashes == 1 ? "" : "s") : "")
+	if core.autotest_active {
+		fmt.println("[autotest] core: offer previous:", text)
+		return false
+	}
+	if !platform_ask("Deckhand's background core isn't starting", text, "Use Previous Core", "Quit") do return false
+	_, ok = core.holder_supervise_ask(run, "use_previous")
+	return ok
+}

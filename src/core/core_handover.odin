@@ -8,7 +8,8 @@ package core
 //        "self", this binary), checked: its signature (holder_verify) and `check` (generation,
 //        snapshot formats). Refused: nothing changes.
 //     2. job runs get JOBS_HANDOVER_WAIT to end (none starts meanwhile), then the core quits
-//        (platform.quit) as for a stop, with the handover named:
+//        by SIGTERM (as for a stop; never platform.quit, which tells windows to quit), with the
+//        handover named:
 //   serve_stop (src/coremain)
 //     3. the runs still going stop as "stopped (update)"; GOODBYE{handover, successor}: every held
 //        terminal fed to its acked offset and snapshotted there (holder_handover), handover.json,
@@ -25,6 +26,7 @@ package core
 import "core:fmt"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:time"
 
 JOBS_HANDOVER_WAIT :: 2 * time.Minute
@@ -85,7 +87,9 @@ core_handover_tick :: proc() {
 	if handover.to == "" || handover.quit do return
 	if jobs_running_count() > 0 && time.tick_diff(time.tick_now(), handover.until) > 0 do return
 	handover.quit = true
-	if platform.quit != nil do platform.quit()
+	// SIGTERM, never platform.quit: a core that quits on purpose tells its windows to quit too
+	// (M4-D); one that stops by signal lets them reconnect, here to the successor
+	posix.kill(posix.getpid(), .SIGTERM)
 }
 
 // The handover is due at quit (serve_stop): the successor gets the GOODBYE's secret.

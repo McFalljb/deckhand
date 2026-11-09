@@ -206,7 +206,9 @@ init_separate :: proc() {
 		platform_alert("Deckhand can't start", "Deckhand can't find your home folder, so it has nowhere to keep its files")
 		os.exit(1)
 	}
-	if why := client_core_connect(core.home_root); why != "" {
+	why := client_core_connect(core.home_root)
+	if why != "" && client_core_offer_previous() do why = client_core_connect(core.home_root)
+	if why != "" {
 		fmt.eprintln("Deckhand:", why)
 		if core.autotest_active {
 			fmt.println("[autotest] core refused:", why)

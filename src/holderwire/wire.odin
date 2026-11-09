@@ -70,6 +70,8 @@ Kind :: enum u8 {
 	Ping           = 30,
 	Pong           = 31,
 	Unknown        = 32,
+	Supervise      = 33, // the supervisor (§7.7): a separate core's path after WELCOME; a window's status or use_previous as its first frame
+	Supervise_Status = 34,
 }
 
 Header :: struct {
@@ -225,6 +227,23 @@ Ack_Terminal :: struct {
 Goodbye_Ack :: struct {
 	terminals:        []Ack_Terminal,
 	successor_secret: string,
+}
+
+// SUPERVISE (docs/plans/background-core.md §7.7). op "core": the attached core is a separate
+// core (deckhand-core-serve) at path, which the holder relaunches if it crashes. A window, as its
+// first frame instead of HELLO: op "status", or "use_previous" (launch the previous installed
+// core now); it gets SUPERVISE_STATUS and the connection closes.
+Supervise :: struct {
+	op:   string,
+	path: string `json:"path,omitempty"`,
+}
+
+Supervise_Status :: struct {
+	core:        bool, // a core is attached
+	crashes:     i64, // core crashes in the last 5 min
+	rolled_back: bool, // two crashes: the previous core runs (the update rolled back)
+	gave_up:     bool, // it stopped relaunching (too many failures in a row)
+	previous:    bool, // a previous core is installed (Use previous core can work)
 }
 
 Foreground_Is :: struct {

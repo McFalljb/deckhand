@@ -271,6 +271,7 @@ keeper_adopt :: proc(h: ^Holder, why: string) -> ! {
 	// Security.framework, unsafe after fork; with the only copies of the masters, a crash there
 	// would hang up every session. It ends once its sessions do (handle_upgrade says so).
 	h.can_upgrade = false
+	h.forked = true // nor the supervisor's code checks (Security.framework)
 	orphans_watch(h)
 	install_sigchld(h)
 	os.exit(holder_serve(h))

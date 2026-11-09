@@ -7,7 +7,7 @@
 # says GOODBYE{handover, successor}, snapshots, and launches its successor with the holder's secret;
 # the window dials the new core. Checks: a new core pid, the same holder and session pids, every held
 # terminal adopted exact from the handover's snapshot, the job run recorded ok (not stopped), and no
-# 64-hex secret in any log. A fake HOME, fake pi, temp data dir and a short runtime dir.
+# 64-hex secret in any log. Then the core is killed (-9): the holder's supervisor launches it again. A fake HOME, fake pi, temp data dir and a short runtime dir.
 # Usage: tests/scripts/handover.sh
 set -eu
 unset CLAUDE_CONFIG_DIR
@@ -91,6 +91,14 @@ for f in glob.glob(os.path.join(sys.argv[3], "*.log")):
 if fail: sys.exit("\n".join(fail))
 print(f"handed over: {len(adopt)} terminal(s) adopted exact, the job run ok")
 PY
+# the supervisor: a core killed with -9 is launched again by the holder (no window open)
+kill -9 "$NEW"
+AGAIN=
+for _ in $(seq 100); do AGAIN=$(cores); [ -n "$AGAIN" ] && [ "$AGAIN" != "$NEW" ] && grep -q "holder attached: previous crash" "$RUN/core.log" && break; sleep 0.1; done
+[ -n "$AGAIN" ] && [ "$AGAIN" != "$NEW" ] || { echo "the supervisor did not relaunch the core"; tail -20 "$RUN/holder.log"; exit 1; }
+grep -q "holder attached: previous crash" "$RUN/core.log" || { echo "the relaunched core did not attach"; tail -20 "$RUN/core.log"; exit 1; }
+[ "$(holders)" = "$HOLDER" ] || { echo "the holder changed after the crash"; exit 1; }
+NEW=$AGAIN
 kill -TERM "$NEW"
 for _ in $(seq 50); do [ -z "$(cores)" ] && break; sleep 0.1; done
 [ -z "$(cores)" ] || { echo "the new core did not stop on SIGTERM"; exit 1; }

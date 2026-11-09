@@ -65,7 +65,7 @@ included. Anything newer fails the build. Deckhand has not yet run on a real mac
 Deckhand was called pi-desk. Deckhand 0.1.6 and older update only to a bundle with the old bundle
 id and the old signature format, so the rename takes two releases:
 
-- **0.1.7, the bridge.** Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
+- **0.2.0, the bridge** (it also carries the core/window split). Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
   `tools/deckhand-cli/`, `.deckhand/apps.json`, `~/Library/Caches/deckhand/cef`,
   `~/.config/deckhand/update.key`, `TERM_PROGRAM=Deckhand`), and the old ones still work
   (`src/core/env_names.odin` lists them):
@@ -82,17 +82,17 @@ id and the old signature format, so the rename takes two releases:
     `.pi-desk/apps.json`.
   - The bundle id stays `dev.pi-desk.app` and releases are signed in the v2 format
     (`pi-desk update v2`), but the updater also accepts `dev.deckhand.app` and v3
-    (`deckhand update v3`, `UPDATE_BUNDLE_ID_NEXT` in `src/core/update_core.odin`), so 0.1.7 can
+    (`deckhand update v3`, `UPDATE_BUNDLE_ID_NEXT` in `src/core/update_core.odin`), so 0.2.0 can
     take the flip.
   - `scripts/rename-pi-desk.py` did the mechanical part (re-runnable with
     `scripts/rename-pi-desk-rebase.sh`).
-- **The flip (0.1.8 or later).** The bundle id becomes `dev.deckhand.app`, releases are signed v3,
+- **The flip (0.2.1).** The bundle id becomes `dev.deckhand.app`, releases are signed v3,
   and the data dir moves to `…/Deckhand` (with a link from the old place). The window's identifier
   list in `src/trust` gains `dev.deckhand.app`. The move must handle a running core and holder:
   the runtime dir, `core.sock` and `core/<v>/` live in the data dir, and kept tabs have
-  `DECKHAND_SOCKET` set. Deckhand 0.1.6 and older can't take the flip: they update to 0.1.7 first,
+  `DECKHAND_SOCKET` set. Deckhand 0.1.6 and older can't take the flip: they update to 0.2.0 first,
   or are reinstalled by hand.
-- **0.2.0, or three releases after 0.1.7, whichever is later:** the old names stop being set and
+- **Three releases after 0.2.0:** the old names stop being set and
   shipped (`PI_DESK_*` in tabs, `pi-desk-cli`, `bin/pi-desk`, `build/pi-desk`). Reading them stays.
 
 Some names keep the old product's name for good: the instance guard's look for a running

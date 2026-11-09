@@ -68,7 +68,7 @@ The first message on a connection is `hello`:
   pi's own terminal sidebar.
 - **Tokens are routing + capabilities.** Deckhand creates one random token per child it starts and
   passes it in the child's environment (a pi tab: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`; an app tab
-  and scripts: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`, and until 0.2.0 also their old names
+  and scripts: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`, and, for three releases after 0.2.0, also their old names
   `PI_DESK_SOCKET`, `PI_DESK_TOKEN`; a Claude tab: below, both names too). The token tells Deckhand
   which tab the connection belongs to (so a panel lands in the right session) and what it may do:
 

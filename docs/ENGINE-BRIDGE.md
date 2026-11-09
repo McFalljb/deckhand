@@ -68,7 +68,7 @@ not saved in the workspace.
   and `<data dir>/apps/<tab_id>.log` (the tab's **Log** button).
 - Env: the parent's minus Deckhand's own variables (`src/core/env_names.odin`) and `PI_KIT_*`,
   plus `DECKHAND_SOCKET`, `DECKHAND_TOKEN` (fresh, single-use, bound to this tab) and
-  `DECKHAND_APP=1`. Until 0.2.0 each is also set under its pre-rename name (`PI_DESK_SOCKET`,
+  `DECKHAND_APP=1`. For three releases after 0.2.0 each is also set under its pre-rename name (`PI_DESK_SOCKET`,
   `PI_DESK_TOKEN`, `PI_DESK_APP`); read the `DECKHAND_` names first.
 - **Owner:** the session that holds the tab. Its agent may drive this tab (the same exception to
   the self-reference rule as browser tabs, BROWSER §4.1). Atlas reaches any app tab.

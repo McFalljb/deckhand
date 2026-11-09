@@ -17,7 +17,7 @@ key escape
 web_js window.l0 = leaves
 web_mouse leave 300 300
 web_js document.title = 'leave +' + (leaves - l0)
-web_title leave +1
+web_title leave +1 5000
 # the last browser closes: no more pumping (a 1 s pulse would give 3+)
 command {"type":"close_tab","tab_id":$tab}
 wait 1000

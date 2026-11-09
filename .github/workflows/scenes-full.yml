@@ -1,7 +1,9 @@
 # Every test-mode scene, nightly and on demand: tiers required and full in tests/scenes.txt (CEF
 # and app-tab scenes on the runner's virtual GPU, large-folder and many-file timings). Failures
 # of the not-yet-required (full) scenes are warnings and never fail the run; a required one fails
-# it. What runs where and why: docs/TESTING.md.
+# it. Also the required scenes with the core in the window's process (--in-process), nightly and
+# on every push to main (pull requests run only the default, a separate core: ci.yml). What runs
+# where and why: docs/TESTING.md.
 #
 # NEVER here: bridge-e2e.sh, home-e2e.sh, text-pi.sh and LOOKS_PI=real looks.sh (real pi, paid
 # models; tier "paid", which tests/scenes.py refuses). Left out as well: the manual tier
@@ -10,6 +12,10 @@
 name: Scenes (full)
 
 on:
+  # the in-process scenes only (the other jobs skip a push); the same paths as ci.yml
+  push:
+    branches: [main]
+    paths: ["**", "!**.md", "!docs/**", "!LICENSE", "docs/GUIDE.md", "docs/PROTOCOL.md"]
   schedule:
     - cron: "17 7 * * *"
   workflow_dispatch:
@@ -18,7 +24,7 @@ permissions:
   contents: read
 
 concurrency:
-  group: scenes-full
+  group: scenes-full-${{ github.event_name }}
   cancel-in-progress: true
 
 env:
@@ -30,6 +36,7 @@ jobs:
   # The time budgets at their own limits (tests/unit.py --perf-strict): a report, never failing the
   # run (merges gate on ./build.sh test, where a budget fails only past 10x or 3x)
   perf:
+    if: github.event_name != 'push'
     runs-on: macos-15
     timeout-minutes: 15
     continue-on-error: true
@@ -42,6 +49,7 @@ jobs:
         run: python3 tests/unit.py --timing-only --perf-strict || echo "::warning::time budgets over their limits (see the log)"
 
   scenes:
+    if: github.event_name != 'push'
     runs-on: macos-15
     timeout-minutes: 45
     strategy:
@@ -71,6 +79,41 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: scene-output-${{ matrix.shard }}
+          path: |
+            build/scenes
+            build/shots
+            build/**/*.log
+          if-no-files-found: ignore
+
+  # The required scenes with the core in the window's process (DECKHAND_SEPARATE_CORE=0, still a
+  # setting): after the merge, so pull requests wait only for the default's run (ci.yml)
+  scenes-in-process:
+    runs-on: macos-15
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [1, 2]
+    name: scenes in-process (${{ matrix.shard }}/2)
+    env:
+      SCENE_JOBS: "2"
+      SCENE_TIMEOUT_X: "5"
+      SCENE_MAX_MINUTES: "14"
+    steps:
+      - uses: actions/checkout@v4
+        with: { submodules: recursive, persist-credentials: false }
+      - uses: ./.github/actions/setup
+      - name: Build (with CEF) and the fake app
+        run: ./build.sh && ./build.sh fake-app
+      - name: Which scenes
+        run: python3 tests/scenes.py --required --ci --in-process --shard ${{ matrix.shard }}/2 --list
+      - name: Scenes
+        run: python3 tests/scenes.py --required --ci --in-process --shard ${{ matrix.shard }}/2 --no-build
+      - name: Upload screenshots and logs on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: scene-output-in-process-${{ matrix.shard }}
           path: |
             build/scenes
             build/shots

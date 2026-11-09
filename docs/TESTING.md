@@ -22,14 +22,18 @@ test mode works and what each scene's fixtures look like: [DEVELOPING.md](DEVELO
 No test run should take more than 3 minutes. Run the smallest set that covers the change, and
 `--all` only where the table says so: not after every fix.
 
+Workers and contributors run the focused scenes locally (`./build.sh scenes --changed`, or the
+scenes by name); CI runs the full required pass on every pull request, and everything else after
+the merge. Don't run the whole suite locally to stand in for CI.
+
 | When | Command | Time (dev Mac) |
 |---|---|---|
 | Every change (each fix while you work) | `./build.sh test` (all unit layers), and `./build.sh scenes --changed` if it touches the app or a scene | test ~40–60 s; scenes: the matched scenes + the smoke set, ~0.5–2 min |
 | A scene failed | rerun that scene by name (`./build.sh scenes NAME`), not the set: the log says the script line it stopped at | its own time |
-| Before opening or merging a pull request | the same as every change; CI (`ci.yml`) runs the unit tests and the required scenes, never the full tier | CI ~3–4 min |
+| Before opening or merging a pull request | the same as every change; CI (`ci.yml`) runs the unit tests and the required scenes (separate core), never the full tier | CI ~5 min |
 | A change to an `@all` file (the build, `vendor/`, the runner, `fresh-build.sh`) or a large refactor | `./build.sh scenes --all` (`--changed` selects all of it anyway) | ~3 min + the build when stale |
 | Release | `./build.sh test`, `./build.sh scenes --all`, the release steps in [DEVELOPING.md](DEVELOPING.md#releases) | ~4–5 min |
-| Nightly (`scenes-full.yml`) | every required and full scene in CI; perf warnings in the unit job's log | |
+| Nightly (`scenes-full.yml`) | every required and full scene in CI; perf warnings in the unit job's log; the required scenes `--in-process` (also on every push to main) | |
 | By hand, never in CI | the paid scenes (real pi, billed): `bridge-e2e.sh`, `home-e2e.sh`, `text-pi.sh`, `LOOKS_PI=real looks.sh` | |
 
 What `--changed` selects (`--list` prints it, with the reason per scene): the scenes whose areas
@@ -38,8 +42,11 @@ hold a changed file, plus the smoke set. A change to an `@core` file (`main.odin
 and every scene whose area name (singular or plural) its changed lines, or the `case` and proc
 they are in, mention: an edit anywhere in `commands.odin`'s `case Worktree_Remove:` runs
 `worktrees`, one in a `Browser_*` case the browser scenes. A core change over 300 lines runs
-everything. An `@all` file runs everything: the build, `vendor/`, the runner, and the terminal,
-pty, socket and persistence files, which nearly every scene drives. `tests/scenes_test.py`
+everything. The terminal, pty, socket and persistence files are `@core` too (nearly every scene
+passes through them), and the scenes that test them most name them in their areas: an edit to
+`socket.odin` runs the required scenes, the multi-process ones (`two-process`, `window-attach`,
+`handover`, `keep-sessions`...) and any whose area its lines mention. An `@all` file runs
+everything: the build, `vendor/`, the runner. `tests/scenes_test.py`
 (in `./build.sh test`) checks the selection.
 
 Nothing runs the full-tier scenes before a merge: CI gates on the unit tests and the required
@@ -62,8 +69,10 @@ default). `--no-build` skips the build; each scene still refuses a stale `build/
 binary; `*_test.odin` files are not in the binary and do not count).
 
 CI: `ci.yml` (every pull request and push to main) runs `./build.sh test` and the required
-scenes in two shards; `scenes-full.yml` (nightly, on demand) runs required + full in four
-shards, where a full-tier failure is a warning. Neither ever runs a paid scene, a manual
+scenes, with the default separate core, in four shards; `scenes-full.yml` (nightly, on demand)
+runs required + full in four shards, where a full-tier failure is a warning, and the required
+scenes `--in-process` in two shards (nightly and on every push to main, so pull requests wait
+for one mode only). The setup action caches the Odin release download (checksummed every run). Neither ever runs a paid scene, a manual
 tool, or a scene tagged `noci`.
 
 ## Test layers
@@ -252,8 +261,8 @@ or place`) used to pass its scene. `fail-fast-test` checks that a bogus `dragtab
 `panes.sh`, with and without fail-fast. The runner kills a scene
 after 3× its typical or last time, at least 120 s (`--timeout` sets one for all; it was 900 s
 for every scene, and `jobs` once waited all of it out, failing one 15 s wait after another).
-A scene killed for its timeout is not retried. `--max-minutes` (`SCENE_MAX_MINUTES`; CI: 14 of
-the job's 25 min, nightly 32 of 45) is the whole run's budget: past it no scene starts (they are
+A scene killed for its timeout is not retried. `--max-minutes` (`SCENE_MAX_MINUTES`; CI: 10 of
+the job's 20 min, nightly 32 of 45) is the whole run's budget: past it no scene starts (they are
 **NOT RUN**, a failure) and running ones are killed, so the summary table always prints.
 Each script line is written to `build/scenes/<scene>.step` as it starts
 (`DECKHAND_SCRIPT_STEP`), so a failed or killed scene's summary row says where it was:

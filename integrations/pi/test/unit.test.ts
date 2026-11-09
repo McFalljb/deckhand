@@ -5,7 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import { test } from "node:test";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
-import { ATTACH_IMAGES_MAX, Attacher, attachInput, CommandCalls, backoff, blockers, busyReasons, deskToken, envToken, forgetDeckhandEnv, promptRefusal, inDesk, keepReconnectToken, keepToken, line, parse, parseAttach, promptContent, reply, runOutcome, status, wireImages } from "../lib/protocol.ts";
+import { ATTACH_IMAGES_MAX, Attacher, attachInput, CommandCalls, backoff, HelloFlow, helloKey256, helloProof, helloTokenId, tokenHello, blockers, busyReasons, deskToken, envToken, forgetDeckhandEnv, promptRefusal, inDesk, keepReconnectToken, keepToken, line, parse, parseAttach, promptContent, reply, runOutcome, status, wireImages } from "../lib/protocol.ts";
 import { COMMANDS, confirmedBy, parkedFor, parseCommands, runDescription, sameCommand } from "../lib/commands.ts";
 import { alreadyTrue, DATA_NOTE, tabLine, eventsText, EVENTS_END, EVENTS_START, exited, filterState, fires, noticeFor, type On, piTabOf, refusal, seenFrom, stateText, summarize, tabLabel, watchHits, watchText } from "../lib/state.ts";
 import { APP_IMAGE_MAX, appCallCommand, appEventsText, appInputEvents, appReplyText, shotFile, shotText } from "../lib/app.ts";
@@ -368,6 +368,75 @@ test("desk bridge: the token leaves process.env but stays readable, then the rec
 	} finally {
 		forgetDeckhandEnv();
 		for (const [k, v] of [["DECKHAND_SOCKET", saved.s], ["DECKHAND_TOKEN", saved.t]] as const) v === undefined ? delete process.env[k] : (process.env[k] = v);
+	}
+});
+
+// The challenge hello (Deckhand docs/PROTOCOL.md §2). The vector is src/core/hello_proof_test.odin's.
+test("hello: the proofs match Deckhand's vector", () => {
+	const key = helloKey256("ab".repeat(32));
+	const id = helloTokenId(key);
+	assert.equal(id, "e05f8d531fd4524dc252476e8c9c27457a014664e4d353b0e4f228fefab4fe66");
+	assert.equal(helloProof(key, "core", id, "01".repeat(32), "02".repeat(32), 4242), "38531696492ecb189bf763d4ee588fe3ffad3e29eba39aca058b3835db87bc63");
+	assert.equal(helloProof(key, "client", id, "01".repeat(32), "02".repeat(32), 4242), "a01941e02678fa7489ffb892cb562796a934231cc474c246cb64cf900c36f9e9");
+});
+
+test("hello: a plain token says challenge, and the reconnect token is kept with its kind; an older Deckhand's stays plain", () => {
+	try {
+		forgetDeckhandEnv();
+		const f = new HelloFlow("DECKHAND_TOKEN", "b1", "env-tok");
+		assert.deepEqual(parse(f.first.trim()), { v: 1, id: "b1", type: "hello", token: "env-tok", challenge: true });
+		assert.equal(f.onLine({ id: "other", type: "result", result: { ok: true } }), undefined);
+		const ok = f.onLine({ id: "b1", type: "result", result: { ok: true, data: { tab_id: 3, reconnect_token: "re-1", reconnect_hello: "challenge" } } });
+		assert.ok(ok && "ok" in ok && ok.ok.data.tab_id === 3);
+		assert.equal(deskToken(), "re-1");
+		assert.equal(tokenHello("DECKHAND_TOKEN"), "challenge");
+		// a challenge token's flow never sends it
+		assert.ok(!new HelloFlow("DECKHAND_TOKEN", "b5", "re-1").first.includes("re-1"));
+		// an older Deckhand: no reconnect_hello, so the next hello is plain again
+		forgetDeckhandEnv();
+		new HelloFlow("DECKHAND_TOKEN", "b2", "env-2").onLine({ id: "b2", type: "result", result: { ok: true, data: { reconnect_token: "re-2" } } });
+		assert.equal(tokenHello("DECKHAND_TOKEN"), "plain");
+		assert.match(new HelloFlow("DECKHAND_TOKEN", "b3", "re-2").first, /"token":"re-2"/);
+		const bad = new HelloFlow("DECKHAND_TOKEN", "b4", "x").onLine({ id: "b4", type: "result", result: { ok: false, error: "unknown token" } });
+		assert.deepEqual(bad, { fail: "unknown token" });
+	} finally {
+		forgetDeckhandEnv();
+	}
+});
+
+test("hello: a challenge-only token is never sent; a fake Deckhand without its key gets no proof", () => {
+	try {
+		forgetDeckhandEnv();
+		const token = "cd".repeat(32);
+		keepToken("DECKHAND_TOKEN", token, "challenge");
+		const nonce = "03".repeat(32);
+		const key = helloKey256(token);
+		const id = helloTokenId(key);
+		// the fake: any proof it makes up
+		const f = new HelloFlow("DECKHAND_TOKEN", "b1", token, 777, nonce);
+		assert.ok(!f.first.includes(token), "the token is not in the hello");
+		assert.deepEqual(parse(f.first.trim()), { v: 1, id: "b1", type: "hello", token_id: id, nonce });
+		const fake = f.onLine({ id: "b1", type: "result", result: { ok: true, data: { challenge: "04".repeat(32), proof: "05".repeat(32) } } });
+		assert.ok(fake && "fail" in fake, "refused");
+		assert.equal(f.onLine({ id: "b1p", type: "result", result: { ok: true } }), undefined, "and it waits for nothing more");
+		// a relay: the real Deckhand's proof, but for the relay's pid
+		const r = new HelloFlow("DECKHAND_TOKEN", "b2", token, 777, nonce);
+		const relayed = r.onLine({ id: "b2", type: "result", result: { ok: true, data: { challenge: "04".repeat(32), proof: helloProof(key, "core", id, nonce, "04".repeat(32), 778) } } });
+		assert.ok(relayed && "fail" in relayed, "a proof for another process is refused");
+		// the real one: its proof checks, then ours goes, then the hello result
+		const g = new HelloFlow("DECKHAND_TOKEN", "b3", token, 777, nonce);
+		const sn = "06".repeat(32);
+		const step = g.onLine({ id: "b3", type: "result", result: { ok: true, data: { challenge: sn, proof: helloProof(key, "core", id, nonce, sn, 777) } } });
+		assert.ok(step && "send" in step);
+		const sent = parse(step.send.trim())!;
+		assert.deepEqual(sent, { v: 1, id: "b3p", type: "hello.proof", proof: helloProof(key, "client", id, nonce, sn, 777) });
+		assert.ok(!step.send.includes(token));
+		const done = g.onLine({ id: "b3p", type: "result", result: { ok: true, data: { tab_id: 9 } } });
+		assert.ok(done && "ok" in done && done.ok.data.tab_id === 9);
+		assert.equal(deskToken(), token, "the token is kept");
+		assert.equal(tokenHello("DECKHAND_TOKEN"), "challenge");
+	} finally {
+		forgetDeckhandEnv();
 	}
 });
 

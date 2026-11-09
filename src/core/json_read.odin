@@ -780,7 +780,12 @@ Request_Msg :: struct {
 	id:      string,
 	type:    string, // hello | command | cancel | subscribe | unsubscribe | pi.session | pi.status | result | panel.*
 	v:       int,
-	token:   string, // hello only
+	token:   string, // hello: the token (the plain hello)
+	token_id: string, // hello: a challenge hello's token id (hello_proof.odin), instead of token
+	nonce:   string, // hello: a challenge hello's client nonce
+	proof:   string, // hello.proof: the client's proof
+	challenge: bool, // hello: the client speaks the challenge hello (its reconnect token is challenge-only)
+	framed:  bool, // hello, hello.proof: after the reply, the connection carries frames (§5a)
 	command: Command, // command, pi.session, pi.status
 	session: u64, // subscribe filter: an open session id (0 = all)
 	tab_id:  u64, // subscribe filter: a tab id (0 = all)
@@ -802,7 +807,15 @@ parse_request :: proc(line: string, allocator := context.allocator) -> (m: Reque
 	if m.v != PROTOCOL_VERSION do return m, fmt.tprintf("unsupported protocol version %d (Deckhand speaks %d)", m.v, PROTOCOL_VERSION)
 	switch m.type {
 	case "hello":
-		m.token = get_str(&r, "token")
+		if _, has := obj["token_id"]; has {
+			m.token_id = get_str(&r, "token_id")
+			m.nonce = get_str(&r, "nonce")
+		} else do m.token = get_str(&r, "token")
+		m.challenge = opt_bool(&r, "challenge").? or_else false
+		m.framed = opt_bool(&r, "framed").? or_else false
+	case "hello.proof":
+		m.proof = get_str(&r, "proof")
+		m.framed = opt_bool(&r, "framed").? or_else false
 	case "command":
 		cv, has := obj["command"]
 		if !has do return m, "missing field command"

@@ -13,7 +13,6 @@ import "core:os"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
-import jg "../jsonguard"
 
 RELEASED_V1 :: "schema/released-v1.json"
 
@@ -24,7 +23,7 @@ FRAME_HEADER :: "channel u32 LE, kind u8, len u32 LE; len <= 16777216"
 released_frame :: proc(t: ^testing.T) {
 	text, err := os.read_entire_file(RELEASED_V1, context.temp_allocator)
 	if !testing.expectf(t, err == nil, "%s: %v (run from the repo root)", RELEASED_V1, err) do return
-	v, jerr := jg.parse_bytes(text, .JSON, true, context.temp_allocator)
+	v, jerr := json.parse(text, .JSON, true, context.temp_allocator) // the repo's own file (corewire imports no other package)
 	if !testing.expectf(t, jerr == nil, "%s: %v", RELEASED_V1, jerr) do return
 	frame := (v.(json.Object) or_else nil)["frame"].(json.Object) or_else nil
 	if !testing.expect(t, frame != nil, "the released file has a frame part") do return

@@ -19,6 +19,8 @@ printf '{"type":"session","version":3,"id":"pppp-1","cwd":"%s"}\n' "$PROJ" \
 run() { # n
   HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT="tests/scripts/panes-restore-$1.txt" DECKHAND_DATA_DIR="$W/data" \
     DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' build/deckhand > "$W/run$1.log" 2>&1 || true
+  # a separate core (DECKHAND_SEPARATE_CORE=1) makes the final save in its own log: read with the run's
+  if [ -f "$W/data/run/core.log" ]; then cat "$W/data/run/core.log" >> "$W/run$1.log"; : > "$W/data/run/core.log"; fi
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run$1.log" | sed "s/^/run $1: /" || true
   # run 1 ends at its quit (no "done:"): its last line is the final save
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run$1.log" || ! grep -qE "done:|workspace save checks" "$W/run$1.log"; then

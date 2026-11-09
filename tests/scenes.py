@@ -15,8 +15,9 @@ Which scenes (tests/scenes.txt lists them, with their areas, tags and typical ti
   --shard I/N       of those, shard I of N (balanced by the typical times)
   --ci              leave out the scenes tagged noci
   --separate-core   run them with the core as another process (DECKHAND_SEPARATE_CORE=1, the
-                    background core: docs/plans/background-core.md M4); the cores and holders a
-                    scene leaves running are killed after it (core_sweep)
+                    background core: docs/plans/background-core.md M4), leaving out the scenes
+                    tagged inproc; the cores and holders a scene leaves running are killed after
+                    it (core_sweep)
 
 It builds once (./build.sh and ./build.sh fake-app; skipped when both are newer than every file
 they are built from; --build to build anyway, --no-build to skip: each scene still refuses a stale
@@ -49,7 +50,7 @@ DATA = os.path.join(ROOT, "tests", "scenes.txt")
 LOGS = os.path.join(ROOT, "build", "scenes")
 TIMES = os.path.join(ROOT, "build", "scene-times.json")
 LOCKS = ("test-data", "test-trash")
-TAGS = {"smoke", "cef", "alone", "noci", "idle"} | set(LOCKS)
+TAGS = {"smoke", "cef", "alone", "noci", "idle", "inproc"} | set(LOCKS)
 TIERS = ("required", "full", "manual", "paid")
 GHA = os.environ.get("GITHUB_ACTIONS") == "true"
 IDLE_JOBS = 2  # idle scenes at a time, beside the -j others
@@ -257,6 +258,11 @@ def select(a, scenes, special):
             s.why = s.tier
     if a.ci:
         out = [s for s in out if "noci" not in s.tags]
+    if a.separate_core:  # what they test is the core in the window's process
+        left = [s.name for s in out if "inproc" in s.tags]
+        if left:
+            print(f"scenes: --separate-core leaves out {' '.join(left)} (tagged inproc)", file=sys.stderr)
+        out = [s for s in out if "inproc" not in s.tags]
     paid = [s.name for s in out if s.tier == "paid"]
     if paid:
         sys.exit(f"scenes: {', '.join(paid)} start a real pi on paid models: never from this runner "

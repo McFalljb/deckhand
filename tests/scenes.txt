@@ -14,6 +14,7 @@
 #            idle       sleeps through most of its run (an idle period is what it tests): takes no
 #                       -j slot (with cef, still a Chromium slot: memory); at most two at a time
 #            noci       not in CI (results depend on the machine; see docs/TESTING.md)
+#            inproc     tests the core in the window's own process: --separate-core runs leave it out
 #   secs     a typical serial run on a dev Mac (M-series, lightly loaded): orders and shards runs
 #   areas    globs (fnmatch, "*" crosses "/") of the files whose change should run it
 #   command  when not tests/scripts/<scene>.sh
@@ -64,7 +65,7 @@ files               | full     | test-trash            |   37 | src/core/files.o
 files-nested        | full     |                       |   20 | src/core/files.odin src/core/fs_model.odin src/ui_files.odin src/core/project_tidy.odin tests/scripts/files-nested.* src/core/ui_files_core.odin
 fish-shell          | full     |                       |    6 | src/core/login_env.odin src/core/harness.odin tests/scripts/fish-shell.* tests/scripts/fake-fish.sh tests/scripts/fake-claude.py
 harness-setup       | full     |                       |   40 | src/core/harness_install.odin src/core/harness_manifest.odin src/ui_harness.odin src/ui_setup.odin tests/scripts/harness-setup* tests/scripts/fake-install.sh src/core/ui_setup_core.odin
-hidden-window       | full     |                       |    9 | src/core/core_loop.odin src/core/platform.odin src/platform_darwin.odin tests/scripts/hidden-window* tests/scripts/fake-pi-flood.py
+hidden-window       | full     | inproc                |    9 | src/core/core_loop.odin src/core/platform.odin src/platform_darwin.odin tests/scripts/hidden-window* tests/scripts/fake-pi-flood.py
 jobs                | required | test-trash            |   79 | src/jobs*.odin src/core/jobs*.odin src/ui_jobs.odin src/ui_job_sheet.odin src/core/notify.odin src/core/agent.odin tests/scripts/jobs.* tests/scripts/fake-pi-json.py src/core/ui_job_sheet_core.odin
 keep-sessions       | full     |                       |    8 | src/core/holder_client.odin src/core/holder_successor.odin src/core/holder_adopt.odin src/core/holder_restart.odin src/holder/* src/holderwire/* src/trust/* src/core/launchd_darwin.odin src/core/holder_install.odin src/core/macfile.odin src/core/snapshot.odin src/core/instance.odin tests/scripts/keep-sessions*
 login-path          | full     |                       |   27 | src/core/login_env.odin src/core/harness.odin tests/scripts/login-path*

@@ -120,7 +120,7 @@ update_click :: proc(h: Hit_Update) {
 	switch h.part {
 	case .Notes:
 		url := core.upd.release.notes_url != "" ? core.upd.release.notes_url : core.UPDATE_RELEASES_URL
-		if core.platform.open_url != nil do _ = core.platform.open_url(url)
+		if win_os.open_url != nil do _ = win_os.open_url(url)
 	case .Skip:    ui_do(core.Update_Skip{})
 	case .Later:   ui_do(core.Update_Later{})
 	case .Update:  ui_do(core.Update_Download{})

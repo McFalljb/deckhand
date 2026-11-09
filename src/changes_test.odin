@@ -53,7 +53,8 @@ ch_setup :: proc() -> (f: Ch_Fixture, ok: bool) {
 	clear(&core.terms)
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	made := fmt.tprintf("%s/deckhand-changes-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)

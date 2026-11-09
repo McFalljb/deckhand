@@ -293,7 +293,7 @@ harness_step_click :: proc(h: Hit_Setup) -> string {
 	case .Agent_Copy:
 		if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
 		if it := core.harness_item(core.HARNESS_MANIFEST[h.index].id); it != nil && it.command != "" {
-			if core.platform.set_clipboard != nil do core.platform.set_clipboard(it.command)
+			if win_os.set_clipboard != nil do win_os.set_clipboard(it.command)
 			toast_show(fmt.tprintf("Copied: %s", it.command))
 		}
 	case .Agent_Close:

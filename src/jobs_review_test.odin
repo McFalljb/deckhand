@@ -425,7 +425,8 @@ jobs_deliver_to_bell :: proc(t: ^testing.T) {
 		fx_done(fx)
 	}
 	core.platform.notify = proc(title, body: string) {append(&os_notes, strings.clone(title))}
-	core.platform.window_active = proc() -> bool {return false}
+	app.window_active = false // the window in the background: OS notifications go (its facts, client.odin)
+	defer app.window_active = true
 	core.run_command(core.Notifications_Clear{})
 	clear(&os_notes)
 	note(fx, "gone", "gone1", "manual", "OK", fmt.tprintf("folder: %s/nope", fx.dir))

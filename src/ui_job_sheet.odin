@@ -793,7 +793,7 @@ job_sheet_event :: proc(e: ^sapp.Event) -> bool {
 			case .Q:                return false
 			case .ENTER, .KP_ENTER: sheet_save()
 			case .A:                tf_select_all(f)
-			case .C:                if s := tf_selected_text(f); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
+			case .C:                if s := tf_selected_text(f); s != "" && win_os.set_clipboard != nil do win_os.set_clipboard(s)
 			case .LEFT:             tf_home(f, shift)
 			case .RIGHT:            tf_end(f, shift)
 			case .BACKSPACE:        tf_delete_to_start(f)
@@ -835,7 +835,7 @@ job_sheet_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, core.clipboard_text())
+		tf_insert(f, clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_MOVE:

@@ -83,7 +83,8 @@ ca_reset :: proc(env: ^Ca_Env) -> runtime.Allocator {
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	core.persist = {}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	core.login_env.children = nil
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	os.unset_env("XDG_CONFIG_HOME")

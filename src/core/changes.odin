@@ -666,7 +666,7 @@ changes_drop :: proc(tab_id: u64) {
 // refused editor as a message with the path under it).
 @(private = "file")
 changes_message :: proc(v: ^Changes_View, msg: string, path := "") {
-	if !window_changes_diff(v.tab_id, path != "" ? path : v.root, "", msg) do return
+	window_changes_diff(v.tab_id, path != "" ? path : v.root, "", msg)
 	window_state_changed()
 }
 

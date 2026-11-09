@@ -68,6 +68,7 @@ kv_f32 :: proc(w: ^Jw, k: string, v: f32) {
 // ---- enum names on the wire ----
 
 CALLER_NAMES := [Caller_Kind]string {
+	.None     = "none",
 	.Internal = "internal",
 	.UI       = "ui",
 	.Script   = "script",
@@ -1482,7 +1483,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			if mt, is_md := t.kind.(Markdown_Tab); is_md {
 				kv_str(&to, "path", mt.path)
 				kv_bool(&to, "source", mt.source)
-				if line, links, headings, matches, laid := window_md_view(t.id, mt.source); laid { // its preview (the window's)
+				if line, links, headings, matches, laid := window_md_view(t.id); laid { // its preview (the window's)
 					kv_u64(&to, "line", u64(line))
 					kv_u64(&to, "links", u64(links))
 					kv_u64(&to, "headings", u64(headings))
@@ -1643,7 +1644,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		key(&st, "confirm")
 		cf := obj_begin(b)
 		for k in Caller_Kind {
-			if k == .UI || k == .Internal || k == .Tab_Host do continue // fixed policies
+			if k == .None || k == .UI || k == .Internal || k == .Tab_Host do continue // fixed policies
 			key(&cf, CALLER_NAMES[k])
 			ko := obj_begin(b)
 			for cl in Command_Class do kv_str(&ko, CLASS_NAMES[cl], MODE_NAMES[s.settings.confirm[k][cl]])

@@ -1,7 +1,7 @@
 package main
 
-// The core's window hooks (window_hooks.odin): redraws and toasts reach the window only through
-// them, once per command that changed State, as app.redraw did.
+// The core's window hooks (window_hooks.odin): redraws reach the window only through them, once
+// per command that changed State, as app.redraw did (toasts are messages: window_link.odin).
 
 import "base:runtime"
 import "core:testing"
@@ -9,14 +9,11 @@ import "core"
 
 @(private = "file")
 wh_redraws: int
-@(private = "file")
-wh_toasts: [dynamic]string
 
 @(private = "file")
 wh_fake :: proc() -> core.Window_Hooks {
 	h := window_hooks_app()
 	h.state_changed = proc() {wh_redraws += 1}
-	h.toast = proc(text: string, err: bool) {append(&wh_toasts, text)}
 	return h
 }
 
@@ -27,7 +24,6 @@ wh_reset :: proc() {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	wh_redraws = 0
-	clear(&wh_toasts)
 }
 
 @(test)
@@ -54,22 +50,18 @@ window_hooks_redraw_once_per_changed_command :: proc(t: ^testing.T) {
 	testing.expect_value(t, wh_redraws, 2)
 }
 
+// No window: a toast and a redraw signal go nowhere, and nothing breaks.
 @(test)
-window_hooks_toast_goes_through_the_hook :: proc(t: ^testing.T) {
+window_hooks_no_window :: proc(t: ^testing.T) {
 	saved := core.window
 	defer core.window = saved
-	tl_host_off() // an attached window gets its toasts as messages (window_link.odin)
+	tl_host_off()
 	defer tl_host_on()
 	core.window = wh_fake()
+	core.window.state_changed = nil
 	wh_reset()
-	core.window_toast("hello")
-	testing.expect_value(t, len(wh_toasts), 1)
-	if len(wh_toasts) == 1 do testing.expect_value(t, wh_toasts[0], "hello")
-	// no window: nothing shown, nothing breaks
-	core.window = {}
 	core.window_toast("nobody")
 	core.window_state_changed()
-	testing.expect_value(t, len(wh_toasts), 1)
 	testing.expect_value(t, wh_redraws, 0)
 }
 

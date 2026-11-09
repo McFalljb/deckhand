@@ -27,7 +27,7 @@ act_reset :: proc() -> (a, b, pa, pb, ta, tb: u64) {
 	browser_act_reset()
 	for id, _ in browsers do browser_drop(id)
 	state^ = core.State{}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	for name in ([]string{"alpha", "beta"}) {
 		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
 		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
@@ -614,8 +614,8 @@ browser_act_clipboard :: proc(t: ^testing.T) {
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
 	clip_count = 1
-	core.platform.clipboard_count = proc() -> int {return clip_count}
-	defer core.platform.clipboard_count = nil
+	win_os.clipboard_count = proc() -> int {return clip_count}
+	defer win_os.clipboard_count = nil
 	pi := core.Caller{kind = .Panel, tab_id = pa}
 	f := tmp_file("a.txt")
 	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 561)

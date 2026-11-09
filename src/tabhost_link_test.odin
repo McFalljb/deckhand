@@ -16,6 +16,7 @@ tab_host_unit_attach :: proc "contextless" () {
 	when ODIN_TEST {
 		context = runtime.default_context()
 		client_attach_host()
+		app.window_active = true // what the window reports (client_facts): in front, as an app at rest
 	}
 }
 
@@ -30,7 +31,7 @@ tl_reset :: proc() -> (a, b, pa, pb, ta, tb: u64) {
 	core.inbox_drain()
 	for id, _ in browsers do browser_drop(id)
 	state^ = core.State{}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	for name in ([]string{"alpha", "beta"}) {
 		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
 		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})

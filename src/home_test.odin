@@ -36,7 +36,8 @@ h_reset :: proc(t: ^testing.T, socket := false) {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	core.persist = {}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	h_dir = fmt.aprintf("%s/pd-home-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)

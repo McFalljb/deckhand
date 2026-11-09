@@ -249,7 +249,8 @@ pi_starts_with_the_integration :: proc(t: ^testing.T) {
 	state^ = core.State {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	argfile := fmt.tprintf("%s/args", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf '%%s\n' "$@" > %s.tmp; mv %s.tmp %s; exec sleep 30`, argfile, argfile, argfile))

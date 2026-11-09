@@ -87,6 +87,10 @@ Tab :: struct {
 	// gave no WELCOME): never started here (that would be a second pi or Claude on one session),
 	// saved as "held" again so the launch that reaches the holder adopts it (holder_adopt_all)
 	held_away: u32,
+	// what the window shows of its terminal, from the core's (tab_term_facts_tick; not saved): the
+	// core has one (the window streams a copy), and it printed in the last TAB_OUTPUT_RECENT
+	has_term:      bool,
+	output_recent: bool,
 }
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,

@@ -51,7 +51,18 @@ ts_begin :: proc(cols: u16 = 80, rows: u16 = 24) -> ^core.Term {
 	core.term_init(tm, cols, rows)
 	tm.cell = {8, 16}
 	core.terms[TS_TAB] = tm
+	ts_tab_record()
 	return tm
+}
+
+// The tab's record, which says the core has its terminal (the window reads only that, never a Term).
+@(private = "file")
+ts_tab_record :: proc() {
+	s := core.Open_Session{id = core.new_id()}
+	append(&s.tabs, core.Tab{id = TS_TAB, kind = core.Shell_Tab{}, status = .Running})
+	append(&core.state.open_sessions, s)
+	core.tab_term_facts_tick(time.tick_now()) // has_term: the core has its terminal
+	core.window_link_flush() // into a subscribed window's replica
 }
 
 @(private = "file")
@@ -63,6 +74,7 @@ ts_end :: proc(tm: ^core.Term) {
 	tl_host_on()
 	term_view_credit_off = false
 	delete_key(&core.terms, TS_TAB)
+	clear(&core.state.open_sessions)
 	core.term_free(tm)
 	free(tm, runtime.heap_allocator())
 }
@@ -396,6 +408,7 @@ stream_detach_window_then_attach :: proc(t: ^testing.T) {
 	core.term_init(tm, 60, 10)
 	tm.cell = {8, 16}
 	core.terms[TS_TAB] = tm
+	ts_tab_record()
 	defer {
 		term_views_drop_all()
 		delete_key(&core.terms, TS_TAB)

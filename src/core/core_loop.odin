@@ -58,6 +58,7 @@ core_tick_body :: proc() {
 	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
 	holder_restart_tick() // Restart session holder's outcome, as a toast (holder_restart.odin; the toast redraws)
 	output_activity_tick(time.tick_now())
+	tab_term_facts_tick(time.tick_now())
 	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 	term_streams_flush() // what the terminals parsed this tick, to the window's copies (term_stream.odin)
 }
@@ -170,6 +171,23 @@ core_loop_start :: proc() {
 
 // Quitting: the timer does nothing more.
 core_loop_stop :: proc() {core_loop.stopped = true}
+
+// A terminal tab's record says what the window shows of its terminal (the window reads only its
+// replica, never a Term): that the core has one, and that it printed lately (the tab strip's
+// running placeholder, ui.odin). Changed only when one flips. Each tick, and before each delta.
+TAB_OUTPUT_RECENT :: 1500 * time.Millisecond
+
+tab_term_facts_tick :: proc(now: time.Tick) {
+	changed := false
+	for &s in state.open_sessions do for &tab in s.tabs {
+		t := terms[tab.id] or_else nil
+		recent := t != nil && t.running && t.last_output != {} && time.tick_diff(t.last_output, now) < TAB_OUTPUT_RECENT
+		if tab.has_term == (t != nil) && tab.output_recent == recent do continue
+		tab.has_term, tab.output_recent = t != nil, recent
+		changed = true
+	}
+	if changed do window_state_changed()
+}
 
 // Q11: while some terminal had output in the last OUTPUT_ACTIVE_FOR, App Nap stays off (parsing
 // keeps up with a hidden window's output; it costs energy, so only then).

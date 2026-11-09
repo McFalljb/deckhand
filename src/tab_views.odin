@@ -1,10 +1,11 @@
 package main
 
-// The window's side of the tab view hooks (window_hooks.odin, design §4: the core keeps the tab
-// records, the window their views). A tab record's view is made when the core says the record
-// appeared (view_open) and goes when it says the tab closed (view_drop): an editor tab's buffer,
-// a Markdown tab's view (and its editor), a Changes tab's read-only diff editor, a browser tab's
-// page. The core asks the window about its buffers (unsaved changes) through the queries here.
+// The window's side of the tab view requests (window_hooks.odin's window.request ops, design §4:
+// the core keeps the tab records, the window their views). A tab record's view is made when the
+// core says the record appeared (view_open) and goes when it says the tab closed (view_drop): an
+// editor tab's buffer, a Markdown tab's view (and its editor), a Changes tab's read-only diff
+// editor, a browser tab's page. What the core needs of the buffers (unsaved changes) the window
+// reports as facts (client.odin).
 
 import "core:strings"
 import "core"
@@ -31,9 +32,10 @@ tab_view_open :: proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: strin
 }
 
 // window.view_goto: a Markdown view scrolls to the heading (anchor), else to the source line; an
-// editor goes to the line (column 1). 0 and "": stays.
-tab_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
-	if _, tab, _ := core.find_tab(tab_id); tab != nil do view_goto(tab_id, tab.kind, line, anchor)
+// editor goes to the line (column 1). 0 and "": stays. kind: the tab record's (the core's: the
+// replica may not have it yet).
+tab_view_goto :: proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
+	view_goto(tab_id, kind, line, anchor)
 }
 
 @(private = "file")
@@ -100,14 +102,10 @@ tab_view_changes_rewind :: proc(tab_id: u64) {
 	e.cursor, e.anchor = 0, 0
 }
 
-// window.unsaved_files: buffers with unsaved changes, all ("") or those of files in a folder
-// (a worktree about to be removed: wt_within).
-tab_views_unsaved :: proc(under: string) -> int {
-	if under == "" do return editors_unsaved()
-	n := 0
-	for _, ed in editors do if ed.path != "" && core.wt_within(core.fs_real(ed.path), under) && editor_dirty(ed) do n += 1
-	return n
+// The buffers with unsaved changes, each as its file's real path ("" = none yet), for the core's
+// facts (window_unsaved_files; temp allocator).
+tab_views_unsaved_paths :: proc() -> []string {
+	out := make([dynamic]string, context.temp_allocator)
+	for _, ed in editors do if editor_dirty(ed) do append(&out, ed.path != "" ? core.fs_real(ed.path) : "")
+	return out[:]
 }
-
-// window.tab_dirty: the tab's buffer has unsaved changes.
-tab_view_dirty :: proc(tab_id: u64) -> bool {return editor_dirty(editor_of(tab_id))}

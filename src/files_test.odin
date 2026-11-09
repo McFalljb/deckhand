@@ -25,7 +25,8 @@ fsetup :: proc() -> string {
 	for id in ids do editor_drop(id)
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	core.files_refresh()
 	core.files_state_gen += 1
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -236,6 +237,7 @@ files_preview_tabs :: proc(t: ^testing.T) {
 	// editing keeps it (editor_tick turns an edited preview into a tab)
 	e := editor_of(rb.created_id)
 	ed_insert(e, "x")
+	client_test_facts() // the buffer's unsaved change, as the window reports it (client.odin)
 	core.files_keep_edited_preview()
 	core.inbox_drain()
 	testing.expect(t, !preview(s, 1))

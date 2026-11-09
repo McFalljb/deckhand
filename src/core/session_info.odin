@@ -197,7 +197,7 @@ session_info_apply :: proc(c: Session_Info, caller: Caller) -> (Result, bool) {
 	r := Result{ok = true, data = strings.to_string(b)}
 	switch c.to {
 	case "clipboard":
-		if platform.set_clipboard != nil do platform.set_clipboard(text)
+		window_clipboard_set(text)
 	case "agent":
 		if sr := agent_send(fmt.tprintf("%s\n", text), caller); !sr.ok {
 			sr.data = r.data
@@ -257,7 +257,7 @@ agent_send :: proc(text: string, caller: Caller) -> Result {
 // in the bell (the user may not be looking at the drawer: it waited for pi).
 @(private = "file")
 agent_send_failed :: proc(text, why: string) -> Result {
-	if platform.set_clipboard != nil do platform.set_clipboard(text)
+	window_clipboard_set(text)
 	notify_failed(fmt.tprintf("Send to %s", agent_name()), fmt.tprintf("%s: copied to the clipboard", why))
 	// also on screen now: it may have waited for pi, after the menu's own outcome
 	window_toast(fmt.tprintf("Send to %s: %s: copied to the clipboard", agent_name(), why), err = true)

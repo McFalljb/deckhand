@@ -141,7 +141,7 @@ tool_w :: proc(t: Changes_Tool) -> f32 {return text_w(tool_label(t)) + px(2 * SP
 tool_label :: proc(t: Changes_Tool) -> string {
 	if t == .Review {
 		if v := active_changes(); v != nil {
-			if s, _, _ := core.find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
 		}
 	}
 	if t == .Merge {
@@ -160,7 +160,7 @@ changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: 
 	case .Refresh:
 		return true, ""
 	case .Review:
-		s, _, _ := core.find_tab(v.tab_id)
+		s, _, _ := find_tab(v.tab_id)
 		if s != nil && s.agent == .Claude {
 			// a Claude-only session: its main Claude tab (claude_prompt holds the text until it is idle)
 			if len(s.tabs) == 0 || s.tabs[0].status != .Running do return false, "this session's Claude is not running"
@@ -583,7 +583,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		case .Refresh: tip = "Read the changes again"
 		case .Review:
 			tip = "Ask this session's pi to review these changes"
-			if s, _, _ := core.find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
+			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
 		case .Merge:   tip = fmt.tprintf("%s coming later", strings.trim_suffix(tool_label(.Merge), "…"))
 		case .Commit:  tip, keys = "Commit the staged files (your git hooks run)", "Enter"
 		case .Prev:    tip, keys = "Previous file", "K"
@@ -604,7 +604,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 // A tool's click (and the keys that do the same).
 changes_tool_run :: proc(v: ^core.Changes_View, t: Changes_Tool) {
 	if ok, _ := changes_tool_state(v, t); !ok do return
-	s, _, _ := core.find_tab(v.tab_id)
+	s, _, _ := find_tab(v.tab_id)
 	r, f := core.changes_selected(v)
 	switch t {
 	case .Refresh: core.changes_refresh(r)

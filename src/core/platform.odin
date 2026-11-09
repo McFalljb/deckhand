@@ -13,33 +13,20 @@ import "core:sys/posix"
 import "core:time"
 
 Platform :: struct {
-	set_clipboard:  proc(text: string),
-	get_clipboard:  proc() -> string, // what a paste inserts (clipboard_text)
 	quit:           proc(), // the user confirmed: close the app
 	wake:           proc(), // any thread: get the main thread to drain the inbox soon
-	pick_folder:    proc() -> string, // asks the user for a folder (modal); "" = cancelled
 	run_later:      proc(p: proc()), // main thread: runs p soon from the main run loop, outside any event or frame callback
-	set_appearance: proc(mode: Appearance), // the window's own appearance (title bar, folder picker): system = follow the OS
-	reveal:         proc(path: string), // shows path in the file manager
 	notify:         proc(title, body: string), // an OS notification (the agent, while the window is in the background)
-	window_active:  proc() -> bool, // the window has the keyboard
-	left_button:    proc() -> bool, // the left mouse button is down now (nil: assume it is)
-	open_url:       proc(url: string) -> bool, // opens a web or mail link with the user's default app (Markdown and terminal links); false: not opened
-	// the system clipboard's change count (browser_act.odin: a page changing it during an agent's
-	// input is told to the user); nothing of its contents is read
-	clipboard_count: proc() -> int,
-	// a secret (Copy a control token): onto the clipboard marked concealed and transient
-	// (nspasteboard.org: clipboard managers neither show nor keep it); returns the change count
-	// after it, for clear_clipboard_if. nil: set_clipboard (tests, test mode's own pasteboard)
-	set_clipboard_secret: proc(text: string) -> int,
-	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
-	trash:                proc(path: string) -> bool, // moves path to the Trash; nil or false: not moved
-	activity:             proc(on: bool), // holds off App Nap while on (activity_hold: jobs, recent output); nil: nothing
+	trash:          proc(path: string) -> bool, // moves path to the Trash; nil or false: not moved
+	activity:       proc(on: bool), // holds off App Nap while on (activity_hold: jobs, recent output); nil: nothing
 	// main thread: calls fire every `every` from the main run loop, outside sokol's callbacks, also
 	// while no frames run (hidden, minimised, App Nap); core_loop.odin decides what it does. nil:
 	// nothing (unit tests: frames, or the tests themselves, tick the core)
-	core_timer:           proc(every: time.Duration, fire: proc()),
+	core_timer:     proc(every: time.Duration, fire: proc()),
 }
+// What was the window's here (the clipboard, links, Reveal in Finder, the folder picker, the
+// appearance, whether it has the keyboard) is the window's own (src/win_os.odin): the core asks
+// with a window.request (window_hooks.odin).
 
 platform: Platform
 
@@ -59,12 +46,6 @@ activity_hold :: proc(r: Activity_Reason, on: bool) {
 	else do activity_reasons -= {r}
 	now := activity_reasons != {}
 	if now != was && platform.activity != nil do platform.activity(now)
-}
-
-// What a paste inserts: the system clipboard (a script's own pasteboard under autotest); "" with
-// no platform (unit tests).
-clipboard_text :: proc() -> string {
-	return platform.get_clipboard != nil ? platform.get_clipboard() : ""
 }
 
 // Where Deckhand keeps its own files (command log; later the saved

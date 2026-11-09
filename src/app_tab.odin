@@ -199,7 +199,7 @@ tab_app :: proc() -> ^App_Proc {
 
 @(private = "file")
 app_tab_of :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^core.App_Tab) {
-	s, tab, _ := core.find_tab(id)
+	s, tab, _ := find_tab(id)
 	if tab == nil do return nil, nil, nil
 	at, is := &tab.kind.(core.App_Tab)
 	if !is do return nil, nil, nil
@@ -1468,7 +1468,7 @@ app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
 		return true
 	}
 	if cinside("app_log", x, y) {
-		if s, _, _ := core.find_tab(a.tab_id); s != nil do ui_do(core.Open_File{path = a.log_path, session = s.id})
+		if s, _, _ := find_tab(a.tab_id); s != nil do ui_do(core.Open_File{path = a.log_path, session = s.id})
 		return true
 	}
 	if cinside("app_wait", x, y) {

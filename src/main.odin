@@ -76,6 +76,7 @@ init :: proc "c" () {
 	}
 	ui_init()
 	core.platform = platform_app()
+	win_os = win_os_app() // the window's own (win_os.odin)
 	app.window_active = true
 	platform_window_init()
 	menubar_install() // the macOS menu bar (menubar.odin)
@@ -172,27 +173,33 @@ init :: proc "c" () {
 // commands do nothing without a word).
 platform_app :: proc() -> core.Platform {
 	return {
-		set_clipboard = proc(text: string) {sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))},
-		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
 		quit = proc() {
 			core.app_quitting = true
 			app_request_quit()
 		},
 		wake = platform_wake,
-		pick_folder = platform_pick_folder,
 		run_later = platform_run_later,
+		notify = platform_notify,
+		trash = fs_trash, // editor_platform_*.odin
+		activity = platform_activity,
+		core_timer = platform_core_timer,
+	}
+}
+
+// The window's own OS layer (win_os.odin): what the core asks with a window.request, and what
+// window code uses itself.
+win_os_app :: proc() -> Win_OS {
+	return {
+		set_clipboard = proc(text: string) {sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))},
+		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
+		pick_folder = platform_pick_folder,
 		set_appearance = platform_set_appearance,
 		reveal = platform_reveal,
-		notify = platform_notify,
-		window_active = proc() -> bool {return app.window_active},
 		left_button = platform_left_button,
 		open_url = platform_open_url,
 		clipboard_count = platform_clipboard_count,
 		set_clipboard_secret = platform_clipboard_set_secret,
 		clear_clipboard_if = platform_clipboard_clear_if,
-		trash = fs_trash, // editor_platform_*.odin
-		activity = platform_activity,
-		core_timer = platform_core_timer,
 	}
 }
 
@@ -205,78 +212,15 @@ app_request_quit :: proc() {
 	sapp.request_quit()
 }
 
-// The window's side of the core's hooks (window_hooks.odin), filled in before main runs so the
-// unit tests have them too.
+// The window's side of the core's hooks (window_hooks.odin): the redraw signal and test mode's;
+// everything else is a message (window_requests.odin, client.odin's facts). Filled in before main
+// runs so the unit tests have them too.
 window_hooks_app :: proc() -> core.Window_Hooks {
 	return {
 		state_changed = proc() {app.redraw = true},
-		toast = proc(text: string, err: bool) {toast_show(text, err)},
-		frames_info = proc(tab_id: u64) -> (service: string, key: [32]u8, device: u64, ok: bool) {
-			when ODIN_OS == .Darwin {
-				if dh_frames_chan_key(tab_id, &key[0]) == 1 do return string(dh_frames_service()), key, dh_frames_device_id(), true
-			}
-			return
-		},
-		display = proc() -> (fps: int, scale: f32, ok: bool) {
-			fps, scale = platform_display()
-			return fps, scale, true
-		},
-		frames_read = proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
-			when ODIN_OS == .Darwin {
-				return dh_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
-			}
-			return false
-		},
-		browser_facts = browser_facts_of, // client.odin (an attached window sends them instead)
-		browser_page = proc(tab_id: u64) -> string {
-			b := browser_of(tab_id)
-			if b == nil do return ""
-			return b.cef != 0 ? "open" : b.waiting ? "waiting" : b.lazy ? "unloaded" : b.message != "" ? "closed" : "opening"
-		},
-		app_view = proc(tab_id: u64) -> (v: core.App_View, ok: bool) {
-			a := app_of(tab_id)
-			if a == nil do return
-			v = {frames = a.ring.shown, inspect = a.inspect}
-			if g := ring_gen(&a.ring, a.ring.cur_gen); g != nil do v.has_ring, v.ring_gen, v.ring_w, v.ring_h = true, g.gen, g.w, g.h
-			return v, true
-		},
-		md_view = proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool) {
-			v := md_view_of(tab_id)
-			if v == nil || !v.laid do return
-			line, links, headings, matches = md_state_numbers(v, tab_id, source) // markdown_view.odin
-			return line, links, headings, matches, true
-		},
 		test_step = autotest_step,
 		test_event = autotest_on_event,
-		// tab views (tab_views.odin)
-		view_open = tab_view_open,
-		view_goto = tab_view_goto,
-		view_drop = tab_view_drop,
-		view_moved = tab_view_moved,
-		files_deleted = tab_views_files_deleted,
-		changes_diff = tab_view_changes_diff,
-		changes_rewind = tab_view_changes_rewind,
-		commit_message_clear = proc() {tf_set(&changes_message_field, "")}, // ui_changes.odin
-		unsaved_files = tab_views_unsaved,
-		tab_dirty = tab_view_dirty,
-		watch_folder = watch_folder, // editor_watch.odin
-		watch_sync = watch_sync,
-		// terminals: the window's copies (term_view_stream.odin)
-		term_fit = proc(tab_id: u64) -> (cols, rows: u16, cell: [2]f32, ok: bool) {
-			r := tab_rect(tab_id)
-			if r.z <= 0 do return
-			cols, rows = term_grid_fit(r.z, r.w)
-			return cols, rows, {font.cell_w, font.cell_h}, true
-		},
-		term_selection = term_view_selection,
-		// sheets (ui_job_sheet.odin, ui_setup.odin)
-		job_sheet = job_sheet_apply,
-		job_sheet_open = job_sheet_open,
-		job_sheet_holds_quit = job_sheet_holds_quit,
-		job_sheet_saved = job_sheet_saved,
-		setup_sheet = setup_sheet_op,
-		setup_state = setup_state_now,
-		dpi = proc() -> f32 {return app.dpi},
+		test_facts = client.host ? client_test_facts : nil, // the unit tests' host link (client.odin)
 	}
 }
 
@@ -314,6 +258,7 @@ frame :: proc "c" () {
 	core.app_frames_called += 1
 	client.busy += 1 // the replica's retired blocks wait for client_after_tick (client.odin)
 	defer client.busy -= 1
+	client_facts() // what the last event changed of the window's facts, before the core reads them (client.odin)
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
 	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
@@ -323,7 +268,7 @@ frame :: proc "c" () {
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
 	at := agent_view() // Atlas's terminal in the drawer (also while it slides out)
 	drags_follow_focus()
-	left_down := core.platform.left_button == nil || core.platform.left_button()
+	left_down := win_os.left_button == nil || win_os.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
 	shown_changed := false // a terminal in another pane on screen (panes.odin)
@@ -370,7 +315,7 @@ frame :: proc "c" () {
 		ui_pane_rects(cs) // each pane's content rect (panes.odin)
 		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
-		if cs != nil do for tab in cs.tabs do if core.term_of(tab.id) != nil {
+		if cs != nil do for tab in cs.tabs do if tab.has_term {
 			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
 			if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
 		}
@@ -697,7 +642,7 @@ event :: proc(e: ^sapp.Event) {
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
 		core.claude_note_typed(ktab)
-		if ktab != nil do ui_do(core.Send_Text{ktab.id, core.clipboard_text()})
+		if ktab != nil do ui_do(core.Send_Text{ktab.id, clipboard_text()})
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))
@@ -744,7 +689,7 @@ event :: proc(e: ^sapp.Event) {
 			ui_do(core.Focus_Tab{u64(hit)})
 			tab_drag_arm(u64(hit), e.mouse_x, e.mouse_y) // moved a few px, it drags (panes_drag.odin)
 			// a double-click keeps a preview tab
-			if _, t, _ := core.find_tab(u64(hit)); t != nil && app.clicks == 2 {
+			if _, t, _ := find_tab(u64(hit)); t != nil && app.clicks == 2 {
 				if et, is := t.kind.(core.Editor_Tab); is && et.preview do ui_do(core.Keep_Tab{tab_id = t.id})
 			}
 		case Hit_Close_Tab: close_tab_click(u64(hit))
@@ -865,7 +810,7 @@ bar_click_ok :: proc(token: string) -> bool {
 // Pane p's tab at its draw rect; IME marked text when its terminal (t) has the keyboard.
 pane_draw :: proc(p: ^core.Pane, t: ^Term_View, typing: bool) {
 	tab := core.pane_shown(p)
-	if tab == nil || (core.term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
+	if tab == nil || (!tab.has_term && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
 	if r.z <= 0 || r.w <= 0 do return
 	v := tab_view(tab.kind) // nil: a kind this window does not know (a newer core's; nothing to draw)
@@ -976,10 +921,10 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		if cmd {
 			#partial switch e.key_code {
 			case .A: tf_select_all(f)
-			case .C: if s := tf_selected_text(f); s != "" do core.platform.set_clipboard(s)
+			case .C: if s := tf_selected_text(f); s != "" do clipboard_set(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {
-					core.platform.set_clipboard(s)
+					clipboard_set(s)
 					tf_backspace(f)
 				}
 			case .LEFT, .UP:     tf_home(f, shift)
@@ -1045,7 +990,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, core.clipboard_text())
+		tf_insert(f, clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_DOWN:

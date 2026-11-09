@@ -1,8 +1,9 @@
 package main
 
-// The tab view hooks (window_hooks.odin, tab_views.odin): the core keeps the tab records and tells
-// the window when one appears or goes; it asks the window about buffers and sheets, and with no
-// window the answers are the safe ones (nothing unsaved, nothing holds the quit).
+// The tab view requests (window_hooks.odin, tab_views.odin): the core keeps the tab records and
+// tells the window when one appears or goes (window.request); the window reports its buffers and
+// sheets (its facts), and with no window the answers are the safe ones (nothing unsaved, nothing
+// holds the quit).
 
 import "base:runtime"
 import "core:fmt"
@@ -12,23 +13,13 @@ import "core:testing"
 import "core"
 
 @(private = "file")
-wv_opened: [dynamic]u64
-@(private = "file")
-wv_open_line: int
-@(private = "file")
-wv_dropped: [dynamic]u64
-
-@(private = "file")
 wv_reset :: proc() -> (session: u64, dir: string) {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	core.platform = {}
-	clear(&wv_opened)
-	clear(&wv_dropped)
-	wv_open_line = 0
+	core.platform, win_os = {}, {}
 	dir = fmt.aprintf("build/test-data/window-views-%d", os.get_pid())
 	os.remove_all(dir)
 	os.make_directory_all(dir)
@@ -39,40 +30,6 @@ wv_reset :: proc() -> (session: u64, dir: string) {
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	return s.id, dir
-}
-
-// A fake window that only records the view hooks.
-@(private = "file")
-wv_fake :: proc() -> core.Window_Hooks {
-	h := window_hooks_app()
-	h.view_open = proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
-		append(&wv_opened, tab_id)
-		wv_open_line = line
-	}
-	h.view_drop = proc(tab_id: u64) {append(&wv_dropped, tab_id)}
-	h.tab_dirty = proc(tab_id: u64) -> bool {return false}
-	return h
-}
-
-// show_file makes a record and the window its view (at the line); closing the tab drops it.
-@(test)
-window_views_follow_tab_records :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	saved := core.window
-	defer core.window = saved
-	core.window = wv_fake()
-	_, dir := wv_reset()
-	defer os.remove_all(dir)
-	r := core.run_command(core.Show_File{path = "notes.txt", line = 2}, {kind = .UI})
-	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, len(wv_opened), 1)
-	if len(wv_opened) == 1 do testing.expect_value(t, wv_opened[0], r.created_id)
-	testing.expect_value(t, wv_open_line, 2)
-	testing.expect(t, editor_of(r.created_id) == nil) // the fake window made none
-	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
-	testing.expect(t, c.ok, c.error)
-	testing.expect_value(t, len(wv_dropped), 1)
-	if len(wv_dropped) == 1 do testing.expect_value(t, wv_dropped[0], r.created_id)
 }
 
 // The app's window: the same record gets a real editor at the line, and it goes with the tab.
@@ -122,14 +79,13 @@ window_views_no_window :: proc(t: ^testing.T) {
 	testing.expect(t, !core.window_job_sheet_open())
 	testing.expect(t, !core.window_job_sheet_holds_quit())
 	testing.expect(t, !core.window_job_sheet_saved("x", ""))
-	testing.expect(t, !core.window_changes_diff(r.created_id, "p", "text"))
 	testing.expect_value(t, core.window_dpi(), f32(0))
 	_, ok := core.window_setup_state()
 	testing.expect(t, !ok)
 	js := core.run_command(core.Job_Sheet{open = true}, {kind = .UI})
 	testing.expect_value(t, js.error, "no window")
 	tl := core.run_command(core.Terminal_Link{tab_id = core.find_session(session).tabs[0].id, url = "https://example.com"}, {kind = .UI})
-	testing.expect_value(t, tl.error, "cannot open links here") // no window and no default browser (core.platform)
+	testing.expect_value(t, core.json_path(tl.data, "code"), "no_window") // the user's ⌘-click needs the window
 	// closing works without a window too
 	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, c.ok, c.error)

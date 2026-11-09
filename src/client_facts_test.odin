@@ -1,48 +1,50 @@
 package main
 
-// M3-F review round 1, finding 11: a browser tab's facts the link refused are not taken as
-// sent (the next pull sends them again), and a closed tab's go on both sides.
+// M3-F review round 1, finding 11: a tab's facts the link refused are not taken as sent (the
+// next push sends them again), and a closed tab's go on both sides.
 
 import "base:runtime"
 import "core:fmt"
-import "core:strings"
 import "core:testing"
 import "core"
 import cw "corewire"
 
 @(test)
-client_pull_refused_not_sent :: proc(t: ^testing.T) {
+client_facts_refused_not_sent :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	saved_end, saved_sent := client.end, client.facts_sent
-	defer client.end, client.facts_sent = saved_end, saved_sent
+	saved_end := client.end
+	defer client.end = saved_end
+	e := new(Editor)
+	e.tab_id, e.view = 9, .Changes
+	editors[9] = e
+	defer {
+		delete_key(&editors, 9)
+		free(e)
+		client_facts_forget(9)
+	}
 	tr: cw.Mem_Transport
 	a, b := cw.mem_open(&tr)
 	defer cw.mem_destroy(&tr)
-	client.facts_sent = make(map[u64]string)
-	defer {
-		for _, v in client.facts_sent do delete(v)
-		delete(client.facts_sent)
-	}
 	client.end = a
 	cw.mem_close(b)
-	client_pull(9)
-	testing.expect(t, 9 not_in client.facts_sent, "refused: not taken as sent")
+	client_facts()
+	testing.expect(t, 9 not_in client.tab_facts_sent, "refused: not taken as sent")
 }
 
 @(test)
-browser_facts_go_with_the_tab :: proc(t: ^testing.T) {
+tab_facts_go_with_the_tab :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	saved_sent := client.facts_sent
-	defer client.facts_sent = saved_sent
-	client.facts_sent = make(map[u64]string)
-	defer delete(client.facts_sent)
-	client.facts_sent[31] = strings.clone("x")
-	core.browser_facts_set(31, core.Browser_Facts{zoom = 2})
+	e := new(Editor)
+	e.tab_id, e.view = 31, .Changes
+	editors[31] = e
+	client_test_facts() // over the unit tests' host link (tabhost_link_test.odin), on this thread
+	testing.expect(t, 31 in client.tab_facts_sent, "sent")
+	testing.expect(t, core.window_tab_facts(31) != nil, "the core keeps them")
+	delete_key(&editors, 31)
+	free(e)
 	core.drop_term(31)
-	_, kept := core.browser_facts_get(31)
-	testing.expect(t, !kept, "the core's copy went with the tab")
-	tab_view_drop(31) // the window's hook (drop_term calls it when the window set its hooks)
-	testing.expect(t, 31 not_in client.facts_sent, "and the client's")
+	testing.expect(t, core.window_tab_facts(31) == nil, "the core's copy went with the tab")
+	testing.expect(t, 31 not_in client.tab_facts_sent, "and the client's (tab_view_drop)")
 }
 
 // Finding 3: with no frames (the window hidden), the core's drains still apply deltas to the
@@ -64,7 +66,7 @@ client_deferred_bounded_while_hidden :: proc(t: ^testing.T) {
 		deferred_release(&client.deferred)
 		for r in client.deferred.retired do delete(r)
 		delete(client.results)
-		delete(client.facts_sent)
+		delete(client.tab_facts_sent)
 		client, state = saved_client, saved_state
 		core.state = core.State{}
 	}

@@ -173,7 +173,7 @@ claude_click :: proc(p: ^core.Pane, h: Hit_Claude) {
 		case:
 			cmd := status_update_command(t)
 			if cmd == "" do return
-			if core.platform.set_clipboard != nil do core.platform.set_clipboard(cmd)
+			if win_os.set_clipboard != nil do win_os.set_clipboard(cmd)
 			toast_show(fmt.tprintf("Copied: %s", cmd))
 		}
 		return

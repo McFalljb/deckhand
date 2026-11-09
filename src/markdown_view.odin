@@ -168,7 +168,7 @@ md_view_of :: proc(tab_id: u64) -> ^Md_View {return md_views[tab_id] or_else nil
 md_preview :: proc(tab_id: u64) -> ^Md_View {
 	v := md_view_of(tab_id)
 	if v == nil do return nil
-	_, tab, _ := core.find_tab(tab_id)
+	_, tab, _ := find_tab(tab_id)
 	if tab == nil do return nil
 	mt, is := tab.kind.(core.Markdown_Tab)
 	if !is || mt.source do return nil
@@ -1417,7 +1417,7 @@ md_preview_shown :: proc(p: ^core.Pane) -> bool {
 
 @(private = "file")
 md_tab :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^Md_View) {
-	s, tab, _ := core.find_tab(id)
+	s, tab, _ := find_tab(id)
 	if tab == nil do return nil, nil, nil
 	if _, is := tab.kind.(core.Markdown_Tab); !is do return nil, nil, nil
 	return s, tab, md_view_of(id)

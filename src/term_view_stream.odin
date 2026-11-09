@@ -109,7 +109,9 @@ term_view_of :: proc(tab_id: u64) -> ^Term_View {
 		v.shown = time.tick_now()
 		return v
 	}
-	if !client.attached || core.term_of(tab_id) == nil do return nil // M4: the replica's tab kinds
+	if !client.attached do return nil
+	// a terminal the core has: the replica's record says so (the setup sheet's install terminal is no tab)
+	if _, tab, _ := find_tab(tab_id); (tab == nil || !tab.has_term) && tab_id != core.harness_run.term_id do return nil
 	return term_view_attach(tab_id)
 }
 
@@ -174,10 +176,7 @@ term_fit_rect :: proc(tab_id: u64, x, y, w, h: f32) {
 	// follows at most every RESIZE_THROTTLE; the release resizes it exactly
 	if (divider.active || pane_dragging()) && had && time.tick_since(f.resized) < RESIZE_THROTTLE do return
 	term_fits[tab_id] = {cols = cols, rows = rows, cell = {font.cell_w, font.cell_h}, resized = time.tick_now(), rect = {x, y, w, h}}
-	if !client.attached {
-		if t := core.term_of(tab_id); t != nil do core.term_resize(t, cols, rows, font.cell_w, font.cell_h)
-		return
-	}
+	if !client_link_up() do return // no core to tell
 	client_frame(cw.JSON_CHANNEL, .Data, transmute([]u8)fmt.tprintf(`{{"v":%d,"type":"term.resize","tab_id":%d,"cols":%d,"rows":%d,"cell_w":%v,"cell_h":%v}}`, core.PROTOCOL_VERSION, tab_id, cols, rows, font.cell_w, font.cell_h))
 	core.window_link_pump()
 }

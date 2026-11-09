@@ -24,7 +24,7 @@ sf_reset :: proc(t: ^testing.T) -> (a, b, home: u64, dir, outside: string) {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	dir = fmt.aprintf("build/test-data/show-file-%d", os.get_pid())
 	os.remove_all(dir)
 	for name in ([]string{"alpha", "beta"}) {

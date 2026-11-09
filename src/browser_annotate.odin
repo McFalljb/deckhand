@@ -839,7 +839,7 @@ annot_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 		}
 	}
 	// markers, numbered as the session's list
-	if s, _, _ := core.find_tab(tab_id); s != nil {
+	if s, _, _ := find_tab(tab_id); s != nil {
 		lh := text_line_height(.UI)
 		pad := px(SP_1)
 		for cm, i in s.comments {
@@ -936,7 +936,7 @@ annot_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 	a := annots[tab_id]
 	if a == nil do return
 	f.annot, f.comment_mode, f.annot_ready, f.doc_url = true, a.on, a.ctx != 0, a.url
-	s, _, _ := core.find_tab(tab_id)
+	s, _, _ := find_tab(tab_id)
 	markers := make([dynamic]core.Browser_Marker_Fact, context.temp_allocator)
 	if s != nil do for cm, i in s.comments {
 		mk, has := annot_markers[cm.id]

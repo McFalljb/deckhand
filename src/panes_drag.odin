@@ -394,7 +394,7 @@ tab_drag_layout :: proc() {
 	}
 	s := core.cur()
 	if s == nil do return
-	_, tab, _ := core.find_tab(tab_drag.tab)
+	_, tab, _ := find_tab(tab_drag.tab)
 	if tab == nil do return
 	ic, label, _ := tab_label(s, tab^)
 	if clay.UI(clay.ID("tab_ghost"))({

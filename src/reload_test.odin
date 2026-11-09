@@ -33,7 +33,7 @@ r_reset :: proc(names: ..string) -> []u64 {
 	core.inbox_drain()
 	state^ = core.State{}
 	core.reload_watch_reset()
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	clear(&r_sends)

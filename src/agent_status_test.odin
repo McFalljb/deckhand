@@ -19,9 +19,6 @@ import "core"
 import gh "ghostty"
 
 @(private = "file")
-as_active: bool
-
-@(private = "file")
 as_rep :: proc(state: core.Prog_State, id := "", app := "", msg := "", kind := core.Prog_Kind.None, title := "") -> core.Prog_Report {
 	return {state = state, id = id, app = app, msg = msg, kind = kind, title = title, progress = -1}
 }
@@ -126,8 +123,9 @@ as_reset :: proc() -> (a, b, a_pi, a_sh: u64) {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
-	as_active = true
-	core.platform = {window_active = proc() -> bool {return as_active}, notify = proc(title, body: string) {}}
+	app.window_active = true
+	core.platform = {notify = proc(title, body: string) {}}
+	win_os = {}
 	p := core.Project{id = core.new_id(), group = .Projects, cwd = "/tmp/as-proj", label = "as-proj"}
 	append(&state.projects, p)
 	state.selected_project = p.id
@@ -146,7 +144,7 @@ as_reset :: proc() -> (a, b, a_pi, a_sh: u64) {
 }
 
 @(private = "file")
-as_done :: proc() {core.platform = {}}
+as_done :: proc() {core.platform, win_os = {}, {}}
 
 // What pump_all would send after the terminal's records changed.
 @(private = "file")
@@ -188,13 +186,13 @@ status_unseen_and_bell :: proc(t: ^testing.T) {
 	as_report(a_sh, as_rep(.Idle))
 	testing.expect(t, !sh.unseen)
 	// the window behind: unseen; coming to the front (status_wants_seen) reads it
-	as_active = false
+	app.window_active = false
 	as_report(a_sh, as_rep(.Working))
 	as_report(a_sh, as_rep(.Idle))
 	testing.expect(t, sh.unseen)
 	core.run_command(core.Focus_Session{session = a}, {kind = .UI}) // the window is still behind: not seen
 	testing.expect(t, sh.unseen)
-	as_active = true
+	app.window_active = true
 	testing.expect_value(t, len(core.status_wants_seen()), 1)
 	testing.expect_value(t, core.status_wants_seen()[0], a_sh)
 	core.run_command(core.Set_Unread{tab_id = a_sh, unread = false}, {kind = .Internal})
@@ -604,6 +602,7 @@ status_output_dot_after_done :: proc(t: ^testing.T) {
 	as_w(term, "\x1b]7501;state=done\x07")
 	core.status_pump(a_sh, term)
 	term.last_output = time.tick_now()
+	core.tab_term_facts_tick(time.tick_now()) // into the tab's record, which the window reads
 	_, sh, _ := core.find_tab(a_sh)
 	testing.expectf(t, core.tab_status_view(sh^).dot == .None, "view %v", core.tab_status_view(sh^))
 	testing.expect_value(t, tab_strip_status(sh^, true), core.Row_Status.Running)

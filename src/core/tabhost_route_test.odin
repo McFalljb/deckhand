@@ -30,6 +30,7 @@ Fake_Host :: struct {
 	last_rid: u64,
 	last_tab: u64,
 	events:   [dynamic]Finished_Event, // the finished events the core emitted (results heap)
+	opened:   [dynamic]string, // the links it was asked to open (window.request open_url; temp)
 }
 
 @(private = "file")
@@ -42,6 +43,14 @@ fh_on_frames :: proc() {
 		f, err := cw.mem_recv(fh.end, context.temp_allocator)
 		if err != .None do return
 		text := string(f.payload)
+		if json_path(text, "type") == "window.request" {
+			id, q, _ := window_request_parse(text)
+			if q.op != .Open_Url do continue
+			append(&fh.opened, strings.clone(q.text, context.temp_allocator))
+			rep := Window_Reply{ok = true}
+			if id != "" do fh_send(window_msg_reply(id, &rep))
+			continue
+		}
 		if json_path(text, "type") != "tab_host.call" do continue
 		c, perr := tab_host_call_parse(text)
 		if perr != "" do panic(perr)
@@ -66,7 +75,7 @@ fh_send :: proc(text: string) {
 fh_begin :: proc(attach := true) -> (a, b, pa, ta, app, ed, md, pb, tb: u64) {
 	state = State{}
 	heap := runtime.heap_allocator()
-	fh = {calls = make([dynamic]string, heap), events = make([dynamic]Finished_Event, heap)}
+	fh = {calls = make([dynamic]string, heap), events = make([dynamic]Finished_Event, heap), opened = make([dynamic]string, context.temp_allocator)}
 	window.test_event = proc(ev: Event) {
 		if f, is := ev.(Finished_Event); is {
 			x := f
@@ -181,24 +190,14 @@ tab_host_no_window :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _, pa, ta, app, ed, md, _, _ := fh_begin(attach = false)
 	defer fh_done()
-	opened := 0
-	platform.open_url = proc(url: string) -> bool {return true} // terminal_link's fallback
-	defer platform.open_url = nil
 	for c in fh_routed(a, ta, app, ed, md, pa) {
 		before := len(find_session(a).tabs)
 		v := state.version
 		r := run_command(c, {kind = .UI}, 77)
-		if _, link := c.(Terminal_Link); link {
-			// no window: the default browser opens it (the core's own fallback)
-			testing.expectf(t, r.ok && r.created_id == 0, "terminal_link: %v", r)
-			opened += 1
-			continue
-		}
 		testing.expectf(t, !r.ok && json_path(r.data, "code") == "no_window", "%s: %v", command_type(c), r)
 		testing.expectf(t, !r.pending, "%s: never pending without a window", command_type(c))
 		testing.expectf(t, len(find_session(a).tabs) == before && state.version == v, "%s: nothing changed", command_type(c))
 	}
-	testing.expect_value(t, opened, 1)
 	testing.expect_value(t, tab_host_waiting(), 0)
 	// what the core keeps itself still works without a window: records and the project's files
 	r := run_command(App_Update{tab_id = app, status = .Running}, {kind = .Internal})
@@ -498,24 +497,18 @@ tab_host_links_checked_in_core :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _, _, _, _, _, md, _, tb := fh_begin()
 	defer fh_done()
-	@(static) opened: [dynamic]string
-	opened = make([dynamic]string, context.temp_allocator)
-	platform.open_url = proc(url: string) -> bool {
-		append(&opened, strings.clone(url, context.temp_allocator))
-		return true
-	}
-	defer platform.open_url = nil
+	opened := &fh.opened // the window opens them (window.request open_url)
 	fh.data = `{"follow":"external"}`
 	for u in ([]string{"file:///etc/passwd", "javascript:alert(1)", "x-app://do", "/etc/hosts"}) {
 		r := run_command(Markdown_Follow{tab_id = md, url = u}, {kind = .UI})
 		testing.expectf(t, !r.ok, "%s: refused", u)
 	}
-	testing.expect_value(t, len(opened), 0)
+	testing.expect_value(t, len(opened^), 0)
 	r := run_command(Markdown_Follow{tab_id = md, url = "https://ok.example/"}, {kind = .UI})
 	testing.expect(t, r.ok)
 	r = run_command(Markdown_Follow{tab_id = md, url = "mailto:a@example.invalid"}, {kind = .UI})
 	testing.expect(t, r.ok)
-	testing.expect_value(t, len(opened), 2)
+	testing.expect_value(t, len(opened^), 2)
 	fh.data = ""
 	page := Caller{kind = .Tab_Host}
 	r = run_command(Browser_Popup_Open{opener = tb, url = "file:///etc/passwd"}, page)

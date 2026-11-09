@@ -19,17 +19,17 @@ autotest_clipboard_stays_in_the_app :: proc(t: ^testing.T) {
 		delete(autotest.pasteboard)
 		autotest.clipboard, autotest.pasteboard = "", ""
 	}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	autotest_platform()
-	testing.expect(t, core.platform.get_clipboard != nil)
-	core.platform.set_clipboard("copied in a scene")
-	testing.expect_value(t, core.clipboard_text(), "copied in a scene")
+	testing.expect(t, win_os.get_clipboard != nil)
+	win_os.set_clipboard("copied in a scene")
+	testing.expect_value(t, clipboard_text(), "copied in a scene")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene") // assert_clipboard
 	// `paste`: what the next paste reads, not what Deckhand copied
 	autotest_paste_set("typed by the script")
-	testing.expect_value(t, core.clipboard_text(), "typed by the script")
+	testing.expect_value(t, clipboard_text(), "typed by the script")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene")
 	// no platform (unit tests): nothing to paste
-	core.platform = {}
-	testing.expect_value(t, core.clipboard_text(), "")
+	core.platform, win_os = {}, {}
+	testing.expect_value(t, clipboard_text(), "")
 }

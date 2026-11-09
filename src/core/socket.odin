@@ -1096,7 +1096,7 @@ welcome_json :: proc(caller: Caller, reconnect: string, reconnect_challenge := f
 	case .Panel:                             caps = caller.claude ? `["claude_tab","state","events"]` : `["pi_tab","panels","state","events"]`
 	case .Control, .Script, .UI, .Internal:  caps = `["commands","state","events"]`
 	case .App:                               caps = `["app","frames","input"]`
-	case .Tab_Host:                          caps = `[]` // never a socket's (token_caller_ok)
+	case .Tab_Host, .None:                   caps = `[]` // never a socket's (token_caller_ok)
 	}
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"app":"deckhand","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
@@ -1104,16 +1104,16 @@ welcome_json :: proc(caller: Caller, reconnect: string, reconnect_challenge := f
 	if reconnect != "" && reconnect_challenge do strings.write_string(&b, `,"reconnect_hello":"challenge"`)
 	if framed do framed_fields(&b, caller)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
-	if caller.kind == .App && window.frames_info != nil {
-		if service, key, device, ok := window.frames_info(caller.tab_id); ok {
-			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, service, string(hex.encode(key[:], context.temp_allocator)), device)
+	// (what the window reported: window.facts, window.tab_facts)
+	wf := window_facts()
+	if caller.kind == .App && wf != nil && wf.frames_service != "" {
+		if tf := window_tab_facts(caller.tab_id); tf != nil && tf.frames_key != "" {
+			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, wf.frames_service, tf.frames_key, wf.frames_device)
 		}
 	}
 	// and the display it shows on: the rate to pace at and the backing scale (§2.1; tab.display
 	// follows when they change)
-	if caller.kind == .App && window.display != nil {
-		if fps, scale, ok := window.display(); ok do fmt.sbprintf(&b, `,"display":%s`, app_display_json(fps, scale))
-	}
+	if caller.kind == .App && wf != nil do fmt.sbprintf(&b, `,"display":%s`, app_display_json(wf.fps, wf.scale))
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
 }
@@ -1409,6 +1409,7 @@ tokens_forget_tab :: proc(tab_id: u64) {
 
 @(private = "file")
 TOKEN_CALLERS := [Caller_Kind]string {
+	.None     = "",
 	.Internal = "",
 	.UI       = "",
 	.Script   = "",

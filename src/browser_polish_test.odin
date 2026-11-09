@@ -20,7 +20,7 @@ bp_reset :: proc() -> (a, b: u64) {
 	core.inbox_drain()
 	for id, _ in browsers do browser_drop(id)
 	state^ = core.State{}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	for name in ([]string{"alpha", "beta"}) {
 		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
 		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
@@ -340,7 +340,7 @@ browser_download_open_refused :: proc(t: ^testing.T) {
 	clear(&page_downloads)
 	defer clear(&page_downloads)
 	opened := 0
-	core.platform.open_url = proc(url: string) -> bool {return true}
+	win_os.open_url = proc(url: string) -> bool {return true}
 	append(&page_downloads, Page_Download{id = 5, tab_id = 1, state = .Done, path = "/tmp/x/a.webloc", quarantined = true})
 	r := core.run_command(core.Browser_Download{download_id = 5, op = .Open}, {kind = .UI})
 	testing.expect(t, !r.ok, "a .webloc is not opened")

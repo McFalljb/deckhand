@@ -177,17 +177,16 @@ core_loop_output_activity :: proc(t: ^testing.T) {
 // a control token's clipboard clear (and the holder's retry, upgrade and restart outcome beside it).
 @(test)
 core_loop_tick_clears_token_clipboard :: proc(t: ^testing.T) {
-	@(static) cleared: int
-	cleared = -1
 	l, s, q := loop_setup()
 	defer loop_restore(l, s, q)
-	saved_platform, saved_clip := platform, control_token_clip
-	defer {platform, control_token_clip = saved_platform, saved_clip}
-	platform = {clear_clipboard_if = proc(count: int) {cleared = count}}
+	saved_clip := control_token_clip
+	defer control_token_clip = saved_clip
+	fw_attach() // the window clears it (window.request clipboard_clear_if)
+	defer core_detach_window()
 	control_token_clip.count = 7
 	control_token_clip.deadline = time.tick_add(time.tick_now(), -time.Second) // its minute is up
 	testing.expect(t, core_timer_fire(at(0)), "the timer did not tick")
-	testing.expect_value(t, cleared, 7)
+	testing.expect(t, fw.last.op == .Clipboard_Clear_If && fw.last.count == 7, "cleared")
 	testing.expect(t, control_token_clip.deadline == {})
 }
 

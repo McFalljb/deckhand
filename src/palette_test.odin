@@ -24,7 +24,8 @@ reset :: proc() -> runtime.Allocator {
 	for k in palette.recent do delete(k)
 	clear(&palette.recent)
 	tf_set(&palette.field, "")
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -142,7 +143,7 @@ palette_runs_commands :: proc(t: ^testing.T) {
 	// later from the main queue (platform.run_later), never inside the key or
 	// click handler that chose the action; cancelled = nothing
 	picks = 0
-	core.platform.pick_folder = proc() -> string {picks += 1; return ""}
+	win_os.pick_folder = proc() -> string {picks += 1; return ""}
 	n := len(state.projects)
 	palette_run(palette_search("add project")[0])
 	testing.expect_value(t, picks, 0) // not from inside the handler
@@ -150,7 +151,7 @@ palette_runs_commands :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	testing.expect_value(t, picks, 1)
 	testing.expect_value(t, len(state.projects), n)
-	core.platform.pick_folder = proc() -> string {picks += 1; return "/tmp/picked"}
+	win_os.pick_folder = proc() -> string {picks += 1; return "/tmp/picked"}
 	testing.expect_value(t, palette_search("add project")[0].key, "action:add_project")
 	palette_run(palette_search("add project")[0])
 	core.inbox_drain()
@@ -229,7 +230,7 @@ menu_action_outcomes :: proc(t: ^testing.T) {
 	action_run("new_shell_tab") // not from a menu: nothing said
 	testing.expect_value(t, toast.text, "")
 	// a folder picker row: its command's failure after the pick
-	core.platform.pick_folder = proc() -> string {return "relative/not-there"}
+	win_os.pick_folder = proc() -> string {return "relative/not-there"}
 	action_run("chats_dir", "Chats folder…")
 	palette_run_deferred()
 	core.inbox_drain()

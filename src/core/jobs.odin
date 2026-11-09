@@ -380,7 +380,7 @@ jobs_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 			return res, false
 		case "run_folder":
 			if j.last_run == "" do return fail("no run yet"), false
-			if platform.reveal != nil do platform.reveal(fmt.tprintf("%s/runs/%s", job_data_dir(j.def.id), j.last_run))
+			window_reveal(fmt.tprintf("%s/runs/%s", job_data_dir(j.def.id), j.last_run))
 			return {ok = true}, false
 		}
 		return fail("what: note, report or run_folder"), false
@@ -1387,7 +1387,7 @@ job_mark_read :: proc(j: ^Job, run: string) -> int {
 @(private = "file")
 jobs_notify :: proc(title, body: string, urgent: bool) {
 	if platform.notify == nil do return
-	if platform.window_active != nil && platform.window_active() do return
+	if window_attached() && window_is_active() do return
 	if !urgent && sched.last_notify != {} && time.tick_since(sched.last_notify) < NOTIFY_GAP do return
 	sched.last_notify = time.tick_now()
 	state.jobs_notified += 1

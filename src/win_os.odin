@@ -1,0 +1,38 @@
+package main
+
+// The window's own OS layer: what was the window's half of core.Platform (docs/plans/
+// background-core.md §10.3, M3-F2). Window code calls it directly; the core asks for it with a
+// window.request (window_requests.odin). main.odin fills it in (win_os_app); unit tests leave
+// entries nil or set fakes, and test mode replaces the ones a script must not reach
+// (autotest_platform).
+
+import "core"
+
+Win_OS :: struct {
+	set_clipboard:        proc(text: string),
+	get_clipboard:        proc() -> string, // what a paste inserts (clipboard_text)
+	pick_folder:          proc() -> string, // asks the user for a folder (modal); "" = cancelled
+	set_appearance:       proc(mode: core.Appearance), // the window's own appearance (title bar, folder picker): system = follow the OS
+	reveal:               proc(path: string), // shows path in the file manager
+	left_button:          proc() -> bool, // the left mouse button is down now (nil: assume it is)
+	open_url:             proc(url: string) -> bool, // a web or mail link in the user's default app; false: not opened
+	// the system clipboard's change count (browser_act.odin: a page changing it during an agent's
+	// input is told to the user); nothing of its contents is read
+	clipboard_count:      proc() -> int,
+	// a secret (Copy a control token): onto the clipboard marked concealed and transient
+	// (nspasteboard.org: clipboard managers neither show nor keep it); returns the change count
+	// after it, for clear_clipboard_if. nil: set_clipboard (tests, test mode's own pasteboard)
+	set_clipboard_secret: proc(text: string) -> int,
+	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
+}
+
+win_os: Win_OS
+
+
+// What a paste inserts: the system clipboard (a script's own pasteboard under autotest); "" with
+// none (unit tests).
+clipboard_text :: proc() -> string {
+	return win_os.get_clipboard != nil ? win_os.get_clipboard() : ""
+}
+
+clipboard_set :: proc(text: string) {if win_os.set_clipboard != nil do win_os.set_clipboard(text)}

@@ -305,7 +305,7 @@ notify_wants_seen :: proc(session: u64) -> bool {
 }
 
 notify_window_active :: proc() -> bool {
-	return platform.window_active == nil || platform.window_active()
+	return window_is_active()
 }
 
 // The user sees this session now (focus_session): its entries are read,

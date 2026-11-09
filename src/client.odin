@@ -24,6 +24,13 @@ package main
 // Terminals (M3-H): the window's copies of the terminals it shows are streamed on channels ≥ 1
 // and term.* messages (term_view_stream.odin); client_frame sends their input and requests.
 //
+// The core asks the window with window.request (window_requests.odin) and never reads the
+// window's memory: what only the window knows (its buffers' unsaved changes, a page's facts, an
+// app's frames, the first-run sheet, whether it has the keyboard) it sends as window.facts and
+// window.tab_facts whenever they changed (client_facts): before each command it sends, at each
+// frame's start and end, before each event, and after each call or request it answered. So the
+// core's copy is never older than what the window last did before the core reads it.
+//
 // Dev builds: DECKHAND_PROTO_LOG=1 prints every frame on the link to stderr (first 300 bytes;
 // a terminal channel's frames by kind and size).
 
@@ -50,7 +57,9 @@ Client :: struct {
 	swept:     time.Tick, // the last sweep (client_after_tick)
 	released:  time.Tick, // the last deferred_release
 	busy:      int, // inside frame() or event() (main.odin): the window may hold pointers into the replica
-	facts_sent: map[u64]string, // each browser tab's facts as last sent (client_pull)
+	facts_sent: string, // window.facts as last sent (client_facts; heap)
+	tab_facts_sent: map[u64]string, // each tab's window.tab_facts as last sent (heap)
+	facting:   bool, // client_facts runs (it pumps the core, which may run a command)
 	host:      bool, // the link carries the tab host only (the window's unit tests: client_attach_host)
 	detached:  bool, // test mode's detach_window: the window plays gone until attach_window
 }
@@ -65,14 +74,15 @@ client_attach :: proc() {
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
 	deferred_init(&client.deferred)
-	client.facts_sent = make(map[u64]string, heap)
-	end, ok := core.core_attach_window(client_on_frames, client_pull, client_on_drain)
+	client.tab_facts_sent = make(map[u64]string, heap)
+	end, ok := core.core_attach_window(client_on_frames, client_on_drain)
 	if !ok do return // one window per core (it said why)
 	client.end = end
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)
 	state = &client.replica
+	client_facts()
 }
 
 // The window's unit tests: the link for the tab host only (tabhost_link.odin), so the core reaches
@@ -82,22 +92,31 @@ client_attach_host :: proc() {
 	heap := runtime.heap_allocator()
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
-	client.facts_sent = make(map[u64]string, heap)
-	end, ok := core.core_attach_window(client_on_frames, client_pull)
+	client.tab_facts_sent = make(map[u64]string, heap)
+	end, ok := core.core_attach_window(client_on_frames)
 	if !ok do return
 	client.end = end
 	client.host = true
+	core.window.test_facts = client_test_facts // the tests run commands straight in: the facts go first
+}
+
+// The unit tests' facts before each command (core.window.test_facts): on the test's own thread.
+client_test_facts :: proc() {
+	client.main = sync.current_thread_id()
+	client_facts()
 }
 
 // The window's unit tests: the tab host's link off (what the core does with no window), or on again.
 client_host_set :: proc(on: bool) {
 	if on == client.host || client.attached do return
+	client_facts_forget_all() // a new link: its core has none of them
 	if on {
-		end, ok := core.core_attach_window(client_on_frames, client_pull)
+		end, ok := core.core_attach_window(client_on_frames)
 		if !ok do return
 		client.end = end
 	} else do core.core_detach_window()
 	client.host = on
+	core.window.test_facts = on ? client_test_facts : nil
 }
 
 // Test mode's detach_window: the window plays gone (M4's no-window cases, now). The core ends what
@@ -107,21 +126,20 @@ client_detach :: proc() {
 	core.core_detach_window()
 	client.attached, client.detached = false, true
 	term_views_drop_all() // the window.s terminal copies go with it: their channels are gone (term_view_stream.odin)
-	heap := runtime.heap_allocator()
-	for _, v in client.facts_sent do delete(v, heap)
-	clear(&client.facts_sent)
+	client_facts_forget_all()
 }
 
 // Test mode's attach_window: the window comes back; the replica gets the whole state again.
 client_reattach :: proc() {
 	if !client.detached do return
-	end, ok := core.core_attach_window(client_on_frames, client_pull, client_on_drain)
+	end, ok := core.core_attach_window(client_on_frames, client_on_drain)
 	if !ok do return
 	client.detached = false
 	client.end = end
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump()
+	client_facts()
 }
 
 // The link is up (tabhost_link.odin sends on it).
@@ -137,6 +155,7 @@ client_send :: proc(cmd: core.Command, menu := "") {
 		core.inbox_submit(cmd, {kind = .UI}, menu = menu)
 		return
 	}
+	client_facts()
 	client_raw(core.window_msg_command(cmd, "", menu = menu))
 	core.window_link_pump()
 }
@@ -151,9 +170,10 @@ client_run :: proc(cmd: core.Command) -> core.Result {
 		core.result_free(reply.result)
 		return out
 	}
+	client_facts()
 	id := client_id()
 	client_raw(core.window_msg_command(cmd, id))
-	core.window_link_pump()
+	for core.window_link_pump() {} // past the pump's cap too: this caller waits for its result
 	core.inbox_drain()
 	return client_take(id)
 }
@@ -163,6 +183,7 @@ client_run :: proc(cmd: core.Command) -> core.Result {
 client_call :: proc(cmd: core.Command, kind: core.Caller_Kind = .UI) -> core.Result {
 	assert(kind == .UI || kind == .Internal)
 	if !client.attached do return core.run_command(cmd, {kind = kind})
+	client_facts()
 	id := client_id()
 	if kind == .UI {
 		client_raw(core.window_msg_command(cmd, id, now = true))
@@ -174,7 +195,7 @@ client_call :: proc(cmd: core.Command, kind: core.Caller_Kind = .UI) -> core.Res
 		}
 		client_raw(text)
 	}
-	core.window_link_pump()
+	for core.window_link_pump() && !(id in client.results) {} // past the pump's cap too: it waits for its result
 	return client_take(id)
 }
 
@@ -190,8 +211,10 @@ client_internal :: proc(cmd: core.Command) {
 		fmt.eprintln("Deckhand: not a window command:", core.command_type(cmd))
 		return
 	}
+	on_main := sync.current_thread_id() == client.main
+	if on_main do client_facts()
 	client_raw(text)
-	if sync.current_thread_id() == client.main do core.window_link_pump()
+	if on_main do core.window_link_pump()
 	else if core.platform.wake != nil do core.platform.wake()
 }
 
@@ -210,6 +233,7 @@ client_after_tick :: proc() {
 	sweep := time.tick_diff(client.swept, now) >= time.Duration(every) * time.Millisecond
 	if sweep do client.swept = now
 	core.window_link_flush(sweep)
+	client_facts()
 }
 
 SWEEP_MS :: 100
@@ -230,7 +254,9 @@ client_on_drain :: proc() {
 
 // Before handling an event: the replica holds what timers and other threads' commands did.
 client_before_event :: proc() {
-	if client.attached do core.window_link_flush()
+	if !client.attached do return
+	core.window_link_flush()
+	client_facts()
 }
 
 // Test mode (autotest.odin, after each script step): "" while every write to State signalled the
@@ -251,23 +277,87 @@ browser_facts_of :: proc(tab_id: u64) -> (f: core.Browser_Facts) {
 	return
 }
 
-// The core asks for a browser tab's facts (get_state): sent when they changed since the last time.
-client_pull :: proc(tab_id: u64) {
-	f := browser_facts_of(tab_id)
-	text := core.window_msg_browser_facts(tab_id, &f)
-	if last, ok := client.facts_sent[tab_id]; ok && last == text do return
-	if !client_raw(text) do return // refused: not sent, the next pull tries again
+// What the window knows of one tab's view (temp allocator); ok false: it has no view of it.
+tab_facts_of :: proc(tab_id: u64) -> (f: core.Tab_Facts, ok: bool) {
+	if b := browser_of(tab_id); b != nil {
+		f.browser = browser_facts_of(tab_id)
+		f.page = b.cef != 0 ? "open" : b.waiting ? "waiting" : b.lazy ? "unloaded" : b.message != "" ? "closed" : "opening"
+		ok = true
+	}
+	if a := app_of(tab_id); a != nil {
+		v := core.App_View{frames = a.ring.shown, inspect = a.inspect}
+		if g := ring_gen(&a.ring, a.ring.cur_gen); g != nil do v.has_ring, v.ring_gen, v.ring_w, v.ring_h = true, g.gen, g.w, g.h
+		f.app, ok = v, true
+	}
+	if key, has := frames_chan_key(tab_id); has do f.frames_key, ok = key, true
+	if v := md_view_of(tab_id); v != nil {
+		ok = true
+		if v.laid {
+			source := false
+			if _, tab, _ := find_tab(tab_id); tab != nil do if mt, is := tab.kind.(core.Markdown_Tab); is do source = mt.source
+			m: core.Md_Facts
+			m.line, m.links, m.headings, m.matches = md_state_numbers(v, tab_id, source) // markdown_view.odin
+			f.md = m
+		}
+	}
+	if e := editor_of(tab_id); e != nil {
+		f.dirty, ok = editor_dirty(e), true
+	}
+	return
+}
+
+// Sends the core what only the window knows, where it changed since it was last sent (window.facts,
+// window.tab_facts), and has the core read it. Main thread; a no-op without a link.
+client_facts :: proc() {
+	if !client_link_up() || client.facting || sync.current_thread_id() != client.main do return
+	client.facting = true
+	defer client.facting = false
 	heap := runtime.heap_allocator()
-	if old, ok := client.facts_sent[tab_id]; ok do delete(old, heap)
-	client.facts_sent[tab_id] = strings.clone(text, heap)
+	sent := false
+	f := core.Window_Facts{active = app.window_active, dpi = app.dpi, job_sheet_open = job_sheet_open(), unsaved = tab_views_unsaved_paths()}
+	f.fps, f.scale = platform_display()
+	f.frames_service, f.frames_device = frames_service()
+	if s, ok := setup_state_now(); ok do f.setup = s // ui_setup.odin
+	if text := core.window_msg_facts(&f); text != client.facts_sent && client_raw(text) {
+		delete(client.facts_sent, heap)
+		client.facts_sent = strings.clone(text, heap)
+		sent = true
+	}
+	ids := make(map[u64]bool, context.temp_allocator)
+	for id in browsers do ids[id] = true
+	for id in apps do ids[id] = true
+	for id in md_views do ids[id] = true
+	for id in editors do ids[id] = true
+	for id in ids {
+		tf, ok := tab_facts_of(id)
+		text := core.window_msg_tab_facts(id, ok ? &tf : nil)
+		if last, had := client.tab_facts_sent[id]; had && last == text do continue
+		if !client_raw(text) do continue // refused: not sent, the next push tries again
+		if old, had := client.tab_facts_sent[id]; had {
+			delete(old, heap)
+			client.tab_facts_sent[id] = strings.clone(text, heap)
+		} else do client.tab_facts_sent[id] = strings.clone(text, heap)
+		sent = true
+	}
+	if sent do core.window_link_pump()
 }
 
 // The tab closed (tab_view_drop): what was sent of it goes (the core drops its copy itself).
 client_facts_forget :: proc(tab_id: u64) {
-	if old, ok := client.facts_sent[tab_id]; ok {
+	if old, ok := client.tab_facts_sent[tab_id]; ok {
 		delete(old, runtime.heap_allocator())
-		delete_key(&client.facts_sent, tab_id)
+		delete_key(&client.tab_facts_sent, tab_id)
 	}
+}
+
+// A new link (or none): the core has none of the window's facts; all are sent again.
+@(private = "file")
+client_facts_forget_all :: proc() {
+	heap := runtime.heap_allocator()
+	for _, v in client.tab_facts_sent do delete(v, heap)
+	clear(&client.tab_facts_sent)
+	delete(client.facts_sent, heap)
+	client.facts_sent = ""
 }
 
 // ---- the link ----
@@ -357,10 +447,21 @@ client_on_frames :: proc() {
 			client.receiving = false
 			client.busy += 1 // window code runs (it may hold replica pointers): no release mid-call
 			tab_host_on_call(text) // tabhost_link.odin
+			client_facts() // what the call changed of the window's facts, before the core reads them
 			client.busy -= 1
 			client.receiving = true
 		case .Term:
 			term_view_json(text) // term.attached, term.scroll (term_view_stream.odin)
+		case .Window_Request:
+			// what the core asks (window_requests.odin); its answer is read by the core's pump, and the
+			// window's part may send the core commands of its own: read by the inner loop
+			client.receiving = false
+			client.busy += 1
+			window_on_request(text)
+			client.busy -= 1
+			client.receiving = true
+		case .Confirmation_Parked:
+			app.redraw = true // the confirmation bar shows it from the replica, with the delta that follows
 		case .Unknown:
 		}
 	}

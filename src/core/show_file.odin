@@ -51,7 +51,7 @@ show_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
 		if session != 0 do s = find_session(session)
 		else if caller.tab_id != 0 do s = caller_session(caller)
 		if s == nil do return nil, session != 0 ? "no such session" : "session is needed (which session's tab shows the file)"
-	case .App, .Tab_Host:
+	case .App, .Tab_Host, .None:
 		return nil, "not allowed for this caller"
 	}
 	if s.home do return nil, "Home has only its pi tab: name a session (session) to show the file in"

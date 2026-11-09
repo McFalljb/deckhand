@@ -27,7 +27,8 @@ hs_start :: proc(t: ^testing.T) -> string {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	dir := fmt.aprintf("%s/pd-hello-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
 	os.set_env("DECKHAND_RUNTIME_DIR", dir)
 	rdir, ok := core.sock_runtime_dir(context.temp_allocator)

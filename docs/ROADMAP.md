@@ -174,7 +174,8 @@ Design: [plans/background-core.md](plans/background-core.md) (G13, G14).
 - ⬜ **M5** Jobs while closed: a login agent, so schedules run after Stop All and after a restart
   of the Mac.
 - ⬜ **M6** Remote machines: sessions on other hosts in the same sidebar, over SSH, with a headless
-  Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)).
+  Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)). Planned as six Mac→Mac PRs,
+  then four Linux PRs: [plans/background-core.md §10.4](plans/background-core.md#104-m6-in-prs).
 - ⬜ **M7** Several windows on one core.
 - ⬜ **D0** An Apple Developer ID: notarized builds and the hardened runtime. One line in
   `scripts/sign.sh` switches the identity; the trust checks follow by themselves.

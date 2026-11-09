@@ -7,7 +7,11 @@ Herdr 2 (herdr-core cd12ddd, herdr-app 7fe7ac3, Apache-2.0).
 
 Status (2026-11-08): revision 6. Both spikes are done and folded in here. M1, M2 and M3-E/F are
 merged (M3-F: #44); M3-G and M3-H are in review. M1 is broken into PRs in §10.1, M2 and M3 in
-§10.2, M4 in §10.3. The user's decisions are in §2.
+§10.2, M4 in §10.3, M6 in §10.4. The user's decisions are in §2.
+
+Revision 7 (2026-11-09): §10.4 (M6 in PRs, checked against `main` efeefb1, v0.2.0). The M6 row
+in §10; §8.2's `file.read` replaced by bytes in the reply (§10.4); R10; Q12 and Q13, decided by
+the user on 2026-11-09 (decision 8 in §2: the M6 release gate).
 
 Revision 6: §10.3 (M4 in PRs, checked against `main` 2a3bd0b and the M3-G and M3-H branches).
 **M4 no longer waits for D0:** the DR checks anchor on the self-signed identity (§5.4). Decisions
@@ -76,6 +80,7 @@ Contents: 1 Goal · 2 Decisions · 3 Process model · 4 What moves where · 5 Pr
 | 5 | Apple Developer ID | **Deckhand will get one, though not now.** The design assumes it. Ad-hoc builds get no special safeguards; §5.4 states what they trust. **2026-11-08: M4 doesn't wait for it,** and nothing is built that waits for it. The checks anchor on the self-signed identity "Deckhand Self-Signed" (§5.4). The swap later is the one line `SIGN_IDENTITY_DEFAULT` in `scripts/sign.sh`. |
 | 6 | What a core runs (2026-11-08) | **Every core is fully featured:** sessions, jobs, scheduler and Atlas. The window is a view of its own machine and every connected one. Remotes over SSH (M6). The local Atlas is the hub (§8.6). |
 | 7 | Releases (2026-11-08) | **No release until the split is complete** (M4 merged). Then the user makes the release and sets the new core and window up on their machine. The release checklist is in §10.3. |
+| 8 | Remote (2026-11-09) | **No release carries M6 until M6-A to F and L1–L4 are merged**, the Linux holder (L3) included. A remote Mac's own window and the hub: the newest connection wins, with **Take back**. Screenshots come back as bytes in the reply, with no `file.read` (§8.2, §10.4). |
 
 **In this design (open to review):**
 
@@ -717,7 +722,7 @@ subset.
 | pi, Claude, shells, jobs | On the remote host |
 | Browser tabs | In the local CEF, capped (§8.3) |
 | App tabs | Left out in v1 |
-| Screenshots, crops | `file.read` |
+| Screenshots, crops | Bytes in the `finished` reply, written by the remote core; no `file.read` (decided 2026-11-09, §10.4) |
 
 ### 8.3 Trust in both directions
 
@@ -816,7 +821,7 @@ Every step ships on its own.
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
 | M4 | **Separate core** (`Deckhand Core.app`), **signed with the self-signed identity; it does not wait for D0** (§5.4). It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Plus M3's carry-overs (M3-F2). `released-v1.json` is done (M3-E). **Six PRs in §10.3.** Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 6–7.5 weeks elapsed (8.5–10.5 of work) |
 | M5 | Login agent; jobs while closed | Scheduled jobs with Deckhand closed | 1–2 weeks |
-| M6 | **Remote:** connect, install, update, caps (§8.3, the CEF request handler), sidebar, offline states, file fetch, harness setup, plus a **headless Linux core and release target** | **#5 done** | 7–11 weeks + 2–3 for Linux |
+| M6 | **Remote:** the SSH link and hub door, every machine in the sidebar, remote terminals, remote browser tabs with the CEF caps, install and one-click update, the hub Atlas; then a **headless Linux core, systemd, its holder and release target**. **Six Mac→Mac PRs and four Linux PRs in §10.4;** no release carries M6 until all ten are merged. | **#5 done** | 9.5–12 weeks Mac→Mac + 5–6.5 for Linux (§10.4) |
 | M7 | Several windows | More windows | 2–4 weeks |
 
 Order: M1 → M2 → M3 → M4 → M5, M6, M7. D0 happens whenever the user gets the Developer ID; it
@@ -1183,6 +1188,183 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
 - [ ] **On the user's machine after the release:** one `deckhand-core serve` and one holder
   (`pgrep -fl deckhand-core`); sessions survive ⌘Q and an update; Stop All ends them.
 
+### 10.4 M6 in PRs
+
+Checked against `main` efeefb1 (v0.2.0: M1–M4 shipped, the separate core on by default). Planning
+only: no code has changed. The user's decisions are binding: every core is fully featured and the
+window is a view of every machine (decision 6, §8.6); SSH first, with the user's `ssh` and
+`~/.ssh/config`; the local Atlas is the hub and remote cores are capped at `panel` scope for their
+own sessions (§8.3); remote updates are a one-click offer (decision 4, §8.5); simplicity first.
+
+**What the code shows:**
+- **The window's replica is `core.state` itself** (`src/client_core.odin`): the core's helpers
+  (`core.cur()` and the rest) read it, and the UI reads it everywhere. There is one `State` per
+  window, not one per machine. So remote sessions reach the window **through the local core's
+  State**, as a mirror the local core keeps per machine, and the window keeps talking to one core.
+  This is §3's picture (only the local core dials), made concrete.
+- **Ids are a `u64` from one counter per core** (`State.next_id`, `src/core/state.odin`), with
+  3,377 `tab_id` uses across the core and the window. Session and project ids are `u64` too. The
+  agents that read them are TypeScript (the pi bridge, Atlas), whose numbers are exact only below
+  2^53.
+- **The framed door is the window's only, and its link is a singleton** (`src/core/window_sock.odin`,
+  `src/core/window_link.odin`: "one window at a time"). The door wants the window's identifier
+  (`trust.WINDOW_IDS`), `run/window.token` and a peer that doesn't descend from the holder.
+  A relay from another machine is a new kind of peer at that door.
+- **There is no `connect`.** Core.app has two binaries (M4-C as built: an Odin LLVM assertion keeps
+  `serve` apart from the holder's `hold`), so `connect` goes in `deckhand-core-serve`, which links
+  the core package and `src/corewire`. §8.1's `deckhand-core connect` means that binary until the
+  two merge.
+- **`src/corewire/transport_sock.odin` works on any stream fd.** A `socketpair` whose other end is
+  `ssh`'s stdin and stdout carries the framed wire unchanged: no new transport.
+- **The version table is ready:** `skew_check` and `CORE_MIN` (`src/corewire/skew.odin`), the hello
+  reply's `machine{os, arch}`, `version` and `generation` (`src/core/socket.odin`), M4-E's
+  `core_install`, `core_make_current` and `core_handover` (`src/core/holder_install.odin`,
+  `core_versions.odin`, `core_handover.odin`). §8.5's update is these, run on the remote.
+- **`machines` is a reserved State section** (`STATE_SECTIONS_RESERVED`, `src/core/state_wire.odin`).
+  `on_behalf` doesn't exist yet; `Caller{kind, tab_id, claude}` and `caller_may` are in
+  `src/core/commands.odin`.
+- **Release builds compile out `DECKHAND_DATA_DIR` and `DECKHAND_RUNTIME_DIR`** (§5.3, B2). The
+  "second core on one Mac" test therefore runs in development and test builds. A release build
+  reaches a second core only through another macOS user (`ssh otheruser@localhost`) or another Mac.
+- **The CEF client has a request handler with `on_before_browse` only** (`src/native/cef_polish.inc`).
+  P7 needs a resource request handler for every request, and **CEF gives no resolved address
+  before a request goes out**.
+- **zstd isn't built** (M4-C, "Not done"). Over SSH, `-o Compression=yes` compresses the whole link
+  instead, snapshots included, so M6 needs no zstd.
+- **The ControlPath must fit in 104 bytes, plus 17 more:** `ssh` binds a temporary
+  `<path>.<16 random>` first. With the runtime dir under `~/Library/Application Support/Deckhand/run/`
+  (about 57 bytes), `ssh-<host>.ctl` with a long host name passes the limit. The path is
+  `ssh-<n>.ctl`, where `n` is the machine's number.
+- **A core started over SSH on a Mac** has no `gui/<uid>` launchd domain unless that user is logged
+  in at the screen. `launchctl bootstrap` then fails, and §6's fallback (a direct, detached spawn)
+  runs: such a core has no banners of its own. That is fine, because the hub raises them (§8.6).
+- **Linux, measured with `odin check -target:linux_amd64`:** `src/corewire` and `src/holderwire`
+  check clean. `src/core` has about 13 errors in 8 files: the `stat` mode width, `st_flags`, a
+  `poll` redeclaration, and `core_launch` and `holder_pid_exe`, which exist only in darwin files.
+  `src/trust` fails only in its tests. The runtime gaps are `proc_pidinfo` (a tab's cwd, a peer's
+  parent), `proc_listchildpids`, `LOCAL_PEERPID`/`LOCAL_PEERTOKEN` (live audit tokens), xattrs,
+  the updater, and the Obj-C shim in `src/coremain` (notifications, App Nap). **The holder is the
+  real port:** all of `src/holder` (about 2,700 lines) is `#+build darwin`. Its loop and the keeper
+  use kqueue (`NOTE_EXITSTATUS`), spawn uses the TCC disclaim, and detach, relaunch and the
+  supervisor use launchd. `libghostty-vt` is already vendored for `x86_64-linux-gnu` and
+  `aarch64-linux-gnu`, and CI already has an `ubuntu-latest` job.
+
+**Decisions this section makes:**
+- **Ids: `{machine, id}`, packed into the existing `u64`.** Machine 0 is this Mac, so every local
+  id is unchanged. A remote id is `machine_no << 40 | remote_id`. Machine numbers come from the
+  registry (1–8191), never reused, and a remote id must stay below 2^40. That keeps every id below
+  2^53, so the TypeScript agents read it exactly. Nothing in the 3,377 `tab_id` uses changes type.
+  Every mirrored session and tab also carries `machine` (its name) in `get_state`. A command is
+  routed by the machine of the id it names. One naming no id runs locally, and the window always
+  names ids for a remote machine.
+- **The local core mirrors, the window doesn't change shape.** For each linked machine the local
+  core subscribes to the remote's state (`state.subscribe` over the link) and merges the result
+  into its own State: projects, open sessions, tabs and panes, with packed ids and `machine` set.
+  It also fills the `machines` section (no longer reserved): `{no, name, status, version, os,
+  arch, error}`. Mirrored entries are never written to `workspace.json`. `get_state`'s redaction
+  applies to them as to local ones.
+- **View state for remote machines stays local.** Which session is current, and focus, are the hub's
+  (§4's view state, in the local State). Commands that change a remote's tabs and panes go to that
+  remote, so the layout of a remote session is shared with that machine's own window, if it has one.
+- **The hub is a peer at the remote's framed door:** a framed hello with `"peer":"hub"`, the remote's
+  `run/window.token` (`connect` runs as that user and reads it), a peer of this user that doesn't
+  descend from the remote's holder, and the **core's** identifier (`dev.deckhand.core`, the same
+  Core.app) instead of the window's. On Linux the check is the same user only (§8.3). It attaches
+  through the window link's machinery with `hub` set. The remote treats it as its window (its tab
+  host for browser tabs), and the local core drops what a window would act on (below).
+- **Terminals are relayed, not parsed.** The local core forwards `term.attach`/`term.detach` and
+  passes `DATA`, `SNAPSHOT`, `RESIZE`, `CREDIT` and `FOCUS` between the window's channel and the
+  remote's channel. It keeps no ghostty-vt for remote terminals, because the remote core is their
+  only resize and query authority (§5.5). Credit passes through end to end.
+- **Each PR reconnects its own part.** The link (M6-A) retries with backoff: 1 s, doubling to 60 s,
+  reset after a minute up. Coming up again means a fresh `state.full` (M6-B) and terminals
+  attached again, each from a snapshot at its byte offset (M6-C). That is exact, and needs no new
+  resume message. Sending only the missing bytes is a later optimisation, if a link proves slow.
+- **No `file.read`.** A remote session's screenshots and crops are made in the local window. Their
+  bytes return in the `finished` reply to the remote core's `tab_host.call` (base64, capped at
+  8 MiB), and the remote core writes them to its own shots dir. That gives a remote core no read
+  path into the local disk. **This replaces §8.2's `file.read`** (decided by the user, 2026-11-09).
+- **Behind a default until the last Mac PR:** `remote_machines_default_on := false` in
+  `src/core/commands.odin`, with Settings › Experimental: *Machines over SSH* (user-only), as
+  `keep_sessions` and `separate_core` were. M6-F flips it.
+- **`ssh` is the user's,** run as `ssh -S <run>/ssh-<n>.ctl -o ControlMaster=auto
+  -o ControlPersist=600 -o BatchMode=yes -o Compression=yes <target> '<core path>' connect`.
+  `<target>` is what the user typed (a `~/.ssh/config` alias or `user@host`), and Deckhand never
+  edits `~/.ssh/config`. Under `BatchMode`, a password, host-key or 2FA prompt fails as
+  `needs_login`. The machine row's **Log in…** then opens a local shell tab running the same
+  `ssh -S … -M` in the foreground, so the prompt happens in a real terminal and the link reuses
+  that master.
+- **`--via CMD`** (development and test builds only, like the env overrides) runs `CMD` in place of
+  `ssh … connect`. It is how the scenes reach a second core with its own data and runtime dirs and
+  no `sshd` (§12's "Remote" row).
+
+**The Mac→Mac PRs** (each testable on one Mac; behind `remote_machines_default_on` until M6-F):
+
+| PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
+|---|---|---|---|---|---|
+| **M6-A. The link: registry, `connect` and the hub door** (starts now, against `main`) | **The registry:** `<data>/machines.json` (0600) holds `{no, name, target, os, arch, core_path, via?}`. `machine_add{name, target}` and `machine_remove{no}` are `ui`-only (`who = .User`), and `--via` is in test builds only. Adding runs `ssh … uname -sm` once to fill `os`, `arch` and the core's path: `~/Library/Application Support/Deckhand/core/current/…/deckhand-core-serve` on macOS, `~/.local/share/deckhand/core/current/deckhand-core-serve` on Linux. **`deckhand-core-serve connect`:** dials this machine's `core.sock`, launching a core as `--ctl` does when none answers. It sends the framed hello with `"peer":"hub"` and `run/window.token`, then copies bytes between stdio and the socket until either side ends. **The remote door:** `window_sock.odin` accepts that hello when the token matches, the peer is this user and not a holder descendant, and its code has the core's identifier (`trust.CORE_IDS`). The link it gets has `hub` set. **The local side:** `src/core/machines.odin` spawns `ssh` (or `--via`) on a `socketpair` and runs `transport_sock` over its end. It reads the hello reply through `skew_check` and keeps a status per machine: `connecting`, `online`, `offline`, `needs_login`, `needs_update`, `not_installed`. It reconnects with backoff, and fills the `machines` section. **Caps from the first byte:** the local core drops every `window.request` and `confirmation.parked` from a hub link and never acts on them. | new `src/core/machines.odin` (+ `_test`), `src/coremain/main.odin` (`connect`), `src/core/window_sock.odin`, `src/core/window_link.odin` (`hub`), `src/core/state_wire.odin` (`machines`), `src/core/command_table.odin`, `src/core/commands.odin`, new `tests/scripts/remote-link.sh`, PROTOCOL.md §5a (the hub hello), GUIDE.md (Settings › Machines) | Unit (< 1 s): the registry's round trip and 0600; the `ssh` argv (ControlPath ≤ 86 bytes, `BatchMode`, `--via` refused in release builds); the status table (hello reply × skew × exit code 255 with "Permission denied" → `needs_login`); backoff on a fake clock; the remote door refusing a window identifier, a holder descendant and a wrong token. Scene `remote-link.sh` (~30 s): a second `serve` with its own `DECKHAND_DATA_DIR` and `DECKHAND_RUNTIME_DIR`, reached through `--via 'build/deckhand-core-serve connect'`. `machine_add`, then `online` with its version; kill -9 the remote core, then `offline`, then `online` again after it relaunches; a `window.request clipboard_set` from the remote never reaches the window. | One security round (the hub door, the dropped requests) | Settings › Experimental › *Machines over SSH*, then Settings › Machines › Add: `localhost` (in a development build) or another Mac. The row shows its version and a green dot, and turns grey when that machine sleeps. |
+| **M6-B. Every machine in the sidebar** (after A) | The local core sends `state.subscribe` on each link and keeps the remote's `state.full`/`state.delta` as a per-machine mirror. It merges that into State with packed ids and `machine` set: projects, open sessions, tabs and panes (`sessions`, `tabs:<s>` and `panes:<s>` sections under packed ids). Its own deltas go to the window. Coming up again replaces the mirror from a fresh `state.full`. **The sidebar groups by machine:** this Mac first, then each machine under its name with a status dot. Offline is greyed, with its last-known sessions (kept in memory only). `needs_login` shows **Log in…**, `not_installed` shows **Install…** (M6-E), and `needs_update` shows **Update** (M6-E). Selecting a remote project asks that core for its sessions. Mirrored entries are never persisted, and `get_state` shows them with `machine`. Remote sessions open read-only in this PR: the tab bar shows, and a terminal shows "Connecting…" until M6-C. | `src/core/machines.odin`, new `src/core/machine_mirror.odin` (+ `_test`), `src/core/state.odin` (`machine` on Project, Open_Session, Tab), `src/core/state_wire.odin`, `src/core/state_read.odin`, `src/core/persist.odin` (skip mirrored), `src/core/sidebar.odin`, `src/ui_sidebar.odin`, `src/window_replica_test.odin`, GUIDE.md ("Projects, sessions and chats"), PROTOCOL.md (State snapshot: `machine`, `machines`) | Unit (< 1 s): id packing (0 unchanged, 2^40 refused, the 2^53 bound); merge and unmerge of a mirror (a remote delta changes only that machine's entries; dropping a machine removes them); persist never writes a mirrored entry; `get_state` redaction on mirrored confirmations. The replica's completeness test covers `machine` and `machines`. Scene `remote-sidebar.sh` (~30 s, `--via`): the remote opens a session with two shells, the local window lists them under the machine, the remote goes offline (greyed, still listed) and comes back. | One round | The other machine's projects and running sessions appear under its name in the sidebar, and grey out when it goes offline. |
+| **M6-C. Remote terminals** (after B) | **Commands:** a `ui` command naming a remote id is forwarded on that machine's link, with the id unpacked and `"on_behalf":{"kind":"ui"}`. Its result comes back under the window's request id, and its state change arrives through the mirror before the result (Q9's order). The remote core runs it as `caller_may(on_behalf)` and never above `ui`. A link that is down answers `{"ok":false,"code":"machine_offline"}`. **New tabs and sessions on a machine:** the **+** menu and the palette act on the current session's machine, and New session has a machine picker when more than one is online. **Terminal streams relayed:** `term.attach` on a remote tab attaches on the remote and maps the window's channel to the remote's. `DATA`, `SNAPSHOT`, `RESIZE`, `CREDIT` and `FOCUS` pass through unparsed, and `term.detach` and the 2 s hidden-tab detach go through too. A link coming up again re-attaches every shown terminal, each from a fresh snapshot at its offset. **OSC 52 from remote terminals is ignored:** the remote's clipboard request is a `window.request`, which A already drops. | `src/core/machines.odin`, new `src/core/machine_route.odin` (+ `_test`), `src/core/commands.odin` (`on_behalf` in `Caller`, `caller_may`), `src/core/window_link.odin`, `src/core/term_stream.odin` (the relay), `src/term_view_stream.odin` (unchanged unless the test says so), `src/ui_toolbar.odin`, `src/palette.odin`, PROTOCOL.md §2 (`on_behalf`) and §5a | Unit (< 1 s): routing by id (local, remote, offline → `machine_offline`); `on_behalf` only lowers (a hub `ui` request carrying `control` can't change a user-only setting, and `on_behalf:none` is refused); the channel map (attach, detach, the link dropping mid-stream, re-attach); credit passes through. Scene `remote-terms.sh` (~40 s, `--via`): open a shell on the machine, type `echo hi`, and the window's screen hash equals the remote core's; resize; kill -9 the remote core, and after the supervisor relaunches it, the screen comes back; a remote OSC 52 leaves the local clipboard unchanged. Scenes `--changed`. | **Two security rounds** (forwarded `ui`, `on_behalf`, the relay) | Open a shell or a pi tab on the other machine from the sidebar and work in it as in a local tab. Close the lid and reopen it: the tab reconnects, with its screen. |
+| **M6-D. Remote browser tabs** (after C; beside E) | A remote core's `tab_host.call` is routed to the window **only for that machine's tabs**, with ids packed. A call for another machine's tab, or a local one, is refused. **P7 in CEF:** a resource request handler (`get_resource_request_handler` → `on_before_resource_load`) on every request of a remote session's browser tab, redirects included. It refuses loopback, link-local, RFC 1918, CGNAT, ULA and `localhost`, `*.localhost` and `*.local` hosts. For any other name it resolves the host itself (`getaddrinfo`) and refuses it if any address is private. **Residual:** DNS rebinding between that lookup and Chromium's own; R10 is updated to say so. **Forwarded ports (§13 Q4):** a remote tab opening `http://localhost:P` asks *Forward port P from <machine>?*. Yes runs `ssh -S <ctl> -O forward -L P:localhost:P`, or the next free port if `P` is taken, and that port is then allowed. **Screenshots and crops:** bytes in the `finished` reply, capped at 8 MiB, written by the remote core to its own shots dir. App tabs stay local-only (§8.2): `new_app_tab` on a remote session answers `not_on_remote`. | `src/core/tabhost_route.odin`, `src/tabhost.odin`, `src/browser_cef.odin`, `src/native/cef_polish.inc` (the resource handler), new `src/netcap.odin` (+ `_test`: the address classifier), `src/core/machines.odin` (forwards), `src/core/app_tab_core.odin`, `src/core/comments.odin` (crops), docs/BROWSER.md, GUIDE.md | Unit (< 1 s): the classifier table (IPv4 and IPv6 literals, mapped addresses, decimal and octal forms, the names); a `tab_host.call` for another machine's tab is refused; a reply over 8 MiB is refused. Scene `remote-browser.sh` (~40 s, `--via`): a remote pi opens a browser tab; a `data:` page loads; a page on the test's loopback server is blocked, and so is a redirect to it; after the forward is accepted, the forwarded port loads; a screenshot lands in the remote's shots dir. | One round, with a security lens on the classifier | A pi on the other machine opens a page and shows it to you in a tab here. A page it opens on its own `localhost:3000` asks to forward the port first. |
+| **M6-E. Install, one-click update and setup** (after C; beside D) | **Install** (§8.4) when `machine_add` or **Install…** finds no core. If OS and arch match this Mac, it re-checks `core/current`'s DR and copies the Core.app with `tar -c … \| ssh … tar -x` into the remote's `core/<v>/` staging dir. Then it runs the remote's `deckhand-core-serve install` (M4-E: verify, quarantine (none over SSH), DR against its own signature, `current`/`previous` by rename). If OS or arch differ, it uses the release tarball and `.sig`, verified here and then copied; that is Linux's path, which M6-L4 supplies. **Update (§8.5):** a remote older than this Mac's core, or `needs_update`, shows **Update** on its row. A click installs as above, then sends `core_handover{to:"current"}` on the link (M4-E's §7.2, plus §7.3 if `holder_rev` changed), and the link comes up on the new core. No downgrades. A core outside Deckhand's folder gets the command shown and is left alone. **Harness setup on the remote:** the setup sheet, opened from a machine's row, runs on that core (`harness_install` forwarded as `ui`), showing the command it ran, as locally. | `src/core/machines.odin`, new `src/core/machine_install.odin` (+ `_test`), `src/core/holder_install.odin`, `src/core/core_versions.odin`, `src/coremain/main.odin`, `src/core/harness_install.odin`, `src/ui_setup.odin`, `src/ui_sidebar.odin`, GUIDE.md ("Updates", "Machines"), HARNESSES.md | Unit (< 1 s): the install plan (same OS and arch → copy; else tarball; a failed DR or `.sig` → refuse); the Update button's rule (older, below `CORE_MIN`, older generation, outside the folder → command only). Scene `remote-install.sh` (~60 s, `--via`): add a machine with an empty data dir, and it installs and comes up `online`; a fixture core with an older version shows Update; a click keeps the remote shell's pid and screen hash across the handover. | One round | Add the other Mac with nothing installed: Deckhand installs its core and the machine comes up. When this Mac updates, the other machine's row offers **Update**, and its sessions keep running through it. |
+| **M6-F. The hub: Atlas, jobs and the bell; the flip** (after C, D and E) | **Atlas reaches every machine.** The mirror is in `get_state`, so Atlas sees remote sessions and jobs. Its commands on remote ids are forwarded with `on_behalf:{kind:"control"}`, and the remote applies `control`'s rules again. Remote Atlases stay on their machine and never reach back (§8.6). **Jobs and the bell:** the mirror carries each machine's `jobs` and bell entries. The local core raises a notification for a remote job that needs the user, or a remote bell entry, once per entry and naming the machine, because remote cores can't use `window.request` (§8.6). The Jobs tab groups runs by machine. **Last commit:** `remote_machines_default_on := true`. Settings › Machines leaves Experimental, and the setting stays as an opt-out. | `src/core/machine_route.odin`, `src/core/machine_mirror.odin`, `src/core/agent.odin`, `src/core/notify.odin`, `src/core/jobs.odin`, `src/ui_jobs.odin`, `src/core/commands.odin`, `integrations/pi/…` (Atlas's prompt: machines), docs/ATLAS.md, GUIDE.md ("Atlas", "Jobs", "The bell"), ROADMAP.md | Unit (< 1 s): Atlas's `control` on a remote id runs as `control` there (a user-only setting is refused); a remote needs-you job notifies once, and again only for a new run. Scene `remote-atlas.sh` (~40 s, `--via`): the local Atlas lists the remote's sessions and sends a prompt to a remote pi tab; a remote job that needs the user rings the local bell. After the flip, scenes `--all --shard i/3` (3 × ~2.5 min). | One round | Ask Atlas "what's running on the NUC?" and it answers from that machine's sessions. A job on the other machine that needs you rings the bell here. |
+
+Sizes: A 1.5–2 weeks, B 2, C 2–2.5, D 1.5–2, E 1.5–2, F 1–1.5, so **9.5–12 weeks of work** for
+Mac→Mac, reviews included. **Order:** A → B → C, then D and E side by side, then F. Elapsed with
+D and E in parallel: about **8–10 weeks**.
+
+**The Linux PRs** (after M6-A; independent of B–F, so L1 may start beside them if a worker is free):
+
+| PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
+|---|---|---|---|---|---|
+| **M6-L1. The core on Linux, without the holder** | `odin build src/coremain -target:linux_amd64` builds and runs. The ~13 type errors are fixed behind `when ODIN_OS`. `/proc` replaces `proc_pidinfo` (`/proc/<pid>/cwd`, the ppid in `/proc/<pid>/stat`) and `proc_listchildpids` (`/proc/<pid>/task/*/children`). `SO_PEERCRED` replaces `LOCAL_PEERPID`, and `trust` on Linux is the same user, with `peer_still` true (§8.3: no code signing). `src/coremain` gets a Linux platform file in place of the Obj-C shim: no banners (the hub raises them) and no App Nap. The updater and quarantine are off on Linux. The data dir is `~/.local/share/deckhand` and the runtime dir `~/.local/state/deckhand/run/` (0700, §8.4). **Sessions run without the holder** (`keep_sessions` forced off on Linux): PTYs are the core's children, as before M1. A core restart or update therefore restarts the remote's sessions, and pi and Claude resume from disk. CI gains an `ubuntu-latest` job that builds the core and runs `src/corewire`, `src/holderwire` and the core's portable unit tests. | `src/core/pty_posix.odin`, `src/core/socket_posix.odin`, `src/core/show_file.odin`, `src/core/harness_install.odin`, `src/core/core_handover.odin`, new `src/core/launch_linux.odin`, new `src/core/proc_linux.odin`, `src/trust/trust.odin`, new `src/trust/peer_linux.odin`, `src/core/platform.odin`, new `src/coremain/platform_linux.odin`, `src/coremain/serve.odin`, `.github/workflows/ci.yml`, DEVELOPING.md ("Building the Linux core") | The Linux CI job (~3 min: build, then unit tests). Locally on a Mac: `odin check -target:linux_amd64` for each core package, in `./build.sh test` (~20 s). By hand on the NUC: `serve`, then `--ctl get_state`, a shell tab, `connect`. | One round | Build on the NUC (or take CI's binary), add the NUC from the Mac with `--via`, and open a shell there. |
+| **M6-L2. systemd and linger** (after L1) | `deckhand-core-serve install` on Linux writes `~/.config/systemd/user/deckhand-core.service` (`ExecStart=…/current/deckhand-core-serve serve`, `Restart=on-failure`, **`KillMode=process`**, so a restart never takes the sessions' processes with it), then runs `systemctl --user daemon-reload`. `connect` starts it with `systemctl --user start` when nothing answers, and the idle exit (§6) stays on. Install checks `loginctl show-user $USER -p Linger`. If linger is off, the machine row says *Jobs on this machine stop when you log out of it* and shows `loginctl enable-linger $USER`. It runs that command itself when polkit allows it (§8.4). | `src/core/launch_linux.odin`, `src/core/holder_install.odin` (install on Linux), `src/core/machine_install.odin`, `src/coremain/main.odin`, GUIDE.md ("Machines": Linux), DEVELOPING.md | Unit (< 1 s): the unit file's text; the linger parse. By hand on the NUC: log out, and a scheduled job still runs (linger); `systemctl --user restart deckhand-core` leaves a shell's process alive under `KillMode=process`. | None (config and docs, plus the tests) | Install on the NUC from the Mac: its core starts on demand and survives the SSH session ending, and its jobs run while the Mac sleeps. |
+| **M6-L3. The holder on Linux** (after L2) | `src/holder` builds for Linux. A `poll(2)` loop with a `SIGCHLD` self-pipe replaces kqueue. Spawn is `fork` + `setsid` + `TIOCSCTTY` + `exec` (no TCC disclaim). **Re-exec without the keeper:** Linux can `fexecve` the fd it verified, which macOS couldn't (S2), so there is no path-swap window to gate. A new image that fails falls back to drain (§7.3); orphan adoption with exit codes (`NOTE_EXITSTATUS`) is macOS-only. Detach and the supervisor use `systemd-run --user` for the core instead of launchd. The holder runs in its own transient unit (`deckhand-holder-<instance>`), so stopping the core's unit never reaches it. `keep_sessions` is back on for Linux, and §8.5's update keeps sessions there too. | `src/holder/holder.odin`, new `src/holder/sys_linux.odin`, `src/holder/spawn.odin`, `src/holder/upgrade.odin`, `src/holder/supervisor.odin`, `src/holder/relaunch.odin`, `src/holder/detach.odin`, `src/core/holder_client.odin`, `src/core/launch_linux.odin`, `scripts/check-holder-rev.sh` (bump) | The holder's unit tests on the Linux CI job (~1 min): spawn, offsets, tails, a re-exec under load (5 upgrades, no gaps). By hand on the NUC: `keep-sessions.sh`'s steps (restart the core, and a shell's pid is unchanged), and an Update from the Mac with a pi turn running. | **Two security rounds** (the holder, re-exec on a new OS) | Update the NUC from the Mac with a pi turn running there: the turn carries on. |
+| **M6-L4. The Linux release artifact** (after L1; L3 joins when it merges) | On a tag, CI's `ubuntu-latest` job builds `deckhand-core-<v>-linux-x86_64.tar.gz` (`deckhand-core-serve`, the holder once L3 is in, the CLI and the integrations) and uploads it as a workflow artifact. `scripts/release.sh` downloads it, checks its sha256 against CI's log, and signs a `.sig` with the local Ed25519 key in today's manifest format (`cdhash none`). The key never goes to CI. It attaches both to the draft release. M6-E's tarball path verifies the `.sig` on the Mac before copying it over. `aarch64` comes later (Q5). | `.github/workflows/ci.yml` (or a new `release-linux.yml`), `scripts/release.sh`, `scripts/check-release-build.sh` (the Linux binary: no hook strings), `src/core/machine_install.odin`, DEVELOPING.md "Releases" | `release-checks.sh` on the tarball (< 10 s); M6-E's install plan with a fixture tarball and `.sig` (a bad `.sig` is refused). Release only: install the draft's tarball on the NUC from the Mac. | None (release tooling) | Add the NUC with nothing on it: Deckhand downloads the matching core, checks its signature, installs it and comes up. |
+
+Sizes: L1 1.5–2 weeks, L2 0.5–1, L3 2–2.5, L4 1, so **5–6.5 weeks** for Linux, against §10's
+earlier 2–3. The holder (L3) is most of the gap: §10's figure assumed the core and holder were
+nearly portable, and the holder is not. **Build order:** L1 → L2 → L3, with L4 after L1 (it picks
+up the holder once L3 merges). Between L1 and L3 the Linux core on `main` runs without a holder,
+which is a step in the build, never a release.
+
+**The release gate (decided 2026-11-09):** no Deckhand release carries M6 until M6-A to F **and**
+L1–L4 are all merged, the holder port (L3) included. Linux ships working in full or not at all.
+
+**Total for M6: about 14.5–18.5 weeks of work** (Mac→Mac 9.5–12, Linux 5–6.5). §10 estimated
+9–14. With L1 built beside B–F, elapsed to the release gate is about 11–14 weeks.
+
+**Riskiest parts:**
+- **M6-C, forwarded `ui`.** A remote id carries the user's `ui` to another machine. `on_behalf`
+  must only lower it, and a hub request must never run as the remote's `internal`. Both review
+  rounds attack routing by id: a forged packed id, a local id forwarded, a remote id run locally.
+- **M6-A, the hub door.** It is a second way to `ui` on every core, so it gets the window door's
+  checks in the same order, with the core's identifier. On Linux it is the same user only,
+  as §8.3 states.
+- **M6-D, the address classifier.** P7's "resolved address" is our own lookup, not Chromium's, so
+  DNS rebinding is a stated residual (R10). The table test is the gate.
+- **M6-B, the mirror.** A remote delta must change only that machine's entries, and a mirrored entry
+  must never reach `workspace.json`. Otherwise a restart restores a remote session as a local one.
+- **M6-L3, the holder on a new OS,** and `KillMode`. Under systemd's default, stopping the core's unit
+  would kill every session.
+
+**The first PR, concretely (M6-A).** Branch off `main`. Begin with the unit tests for the registry
+and the `ssh` argv in `src/core/machines_test.odin`, then `connect` in `src/coremain/main.odin`,
+bytes only: stdio ↔ `core.sock`. Next the `hub` branch of `window_hello_check`
+(`src/core/window_sock.odin`) with `trust.CORE_IDS`, then the local spawn on a `socketpair` and
+`transport_sock`. `tests/scripts/remote-link.sh` follows `tests/scripts/two-process.sh`: a second
+`serve` with its own `DECKHAND_DATA_DIR` and `DECKHAND_RUNTIME_DIR`, and `machine_add` with
+`via` set to `build/deckhand-core-serve connect`, run under that pair. Done when the scene shows
+`online`, then `offline` after kill -9, then `online` again, and the dropped `window.request` is
+asserted.
+
+**Decided by the user (2026-11-09)** (Q12 and Q13 in §13):
+- **A remote Mac with its own window open.** The hub and that Mac's window would both want to be
+  its one window (one window per core until M7). **The newest connection wins,** as for two
+  windows today. The other side shows *Viewed from <machine>* with **Take back**. M6-A builds it.
+- **Linux scope.** The release waits until Linux works in full, holder included: the gate above.
+- **Screenshots.** The bytes come back in the reply, with no `file.read` (§8.2 changed).
+
 ---
 
 ## 11. Risks
@@ -1198,7 +1380,7 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
 | R7 | M1's closed-app gap | Hooks must fail safe; the read-only guard never needs the socket (checked in M1); M4 closes the gap |
 | R8 | Bundle-relative paths under live sessions | Everything lives in `core/<v>/`, collected only when unused |
 | R9 | Moving ticks off `frame()` changes scene timing | M2 keeps calling `core_tick()` from `frame()` until M4, and a timer runs it only when no frame has run for 50 ms (M2-C), never inside `frame()` or a modal loop |
-| R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own work item; the handler checks the resolved address on every request |
+| R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own PRs (§10.4). CEF gives no resolved address before a request, so the handler resolves the host itself on every request, redirects included: DNS rebinding between that lookup and Chromium's is a stated residual. Linux units use `KillMode=process`. |
 | R11 | Scope | Every step ships on its own |
 | R12 | S2 ran only on macOS 26.6.2 (the minimum is 14) | Run S2's programs on 14 and 15, plus Force Quit and logout, before M1's PR B ships (§10.1) |
 | R13 | An unfinished over-limit sequence (a large OSC 52) blocks snapshots | A limit sized to the largest accepted sequence, retry after ground, VT `inexact` at a handover |
@@ -1251,6 +1433,8 @@ Test builds keep the hooks and use per-test dirs; they skip DR checks as ad-hoc 
 | Q9 | Does the window wait for its own command replies? 104 window call sites use the result at once. | Yes: the core sends the state delta before the reply. In process (M3) the wait is nil; M4 measures it over `core.sock` and bounds it (250 ms, then the call shows as pending). |
 | Q10 | Which caller do a page's own events (popups, dialogs, downloads) use? | A new `tab_host` caller: answers and tab records only, never `ui` |
 | Q11 | Does a hidden window keep App Nap off while terminals produce output? Parsing then keeps up, but it costs energy. | Yes, while a terminal has had output in the last 2 s (M2-C) |
+| Q12 | A remote Mac with its own window open: the hub and that window both want to be its one window (§10.4) | **Decided (2026-11-09):** the newest connection wins; the other side shows *Viewed from <machine>* with **Take back** |
+| Q13 | Ship the Linux core before its holder? | **Decided (2026-11-09): no.** No release carries M6 until M6-A to F and L1–L4 are merged, the holder port (L3) included. L1 may still be built beside M6-B to F (§10.4). |
 
 ---
 

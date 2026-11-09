@@ -22,4 +22,11 @@ eventually 8000
 assert_state open_sessions.0.tabs.0.reload.version 1.5.0
 assert_state open_sessions.0.tabs.0.reload.note restarted on pi 1.5.0
 assert_state open_sessions.0.tabs.0.agent idle
+# an extension edited: only the window watches files (the core hears it: Fs_Changed); after the
+# restart's rebuild of the watched folders has reached the window (the live section)
+wait 1500
+command {"type":"send_text","tab_id":$last,"text":"sh ~/edit-ext.sh\n"}
+eventually 8000
+assert_state reload.changed.0 $homedir/.pi/agent/extensions/demo/index.ts
+assert_state open_sessions.0.tabs.0.reload.stale true
 quit

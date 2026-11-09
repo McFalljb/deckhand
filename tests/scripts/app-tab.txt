@@ -134,6 +134,7 @@ assert_result data.code bad_args
 assert_state open_sessions.0.tabs.1.inspect false
 assert_drawn Inspect
 clickid app_inspect
+eventually
 assert_state open_sessions.0.tabs.1.inspect true
 wait 300
 assert_state open_sessions.0.tabs.1.boxes 3
@@ -160,6 +161,7 @@ assert_state focus.id <missing>
 # a press Deckhand took while inspecting: its release never reaches the app, even after Inspect is off
 app_mouse down 61 63
 clickid app_inspect
+eventually
 assert_state open_sessions.0.tabs.1.inspect false
 app_mouse up 61 63
 wait 300

@@ -36,6 +36,13 @@ odin build src/holder -out:"$W/deckhand-core" -minimum-os-version:14.0 &
 wait
 [ -x "$BIN" ] && [ -x "$W/deckhand-core" ] || { echo "update scene: the build failed"; exit 1; }
 codesign -f -s - -i dev.deckhand.core "$W/deckhand-core" 2>/dev/null
+# with a separate core (DECKHAND_SEPARATE_CORE=1): the core with the same test define, beside the
+# holder (core_serve_bin_find); the core runs the updates, the window shows them
+if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ]; then
+  odin build src/coremain -out:"$W/deckhand-core-serve" -define:DECKHAND_UPDATE_TEST=true -minimum-os-version:14.0 || { echo "update scene: the core's build failed"; exit 1; }
+  codesign -f -s - -i dev.deckhand.core "$W/deckhand-core-serve" 2>/dev/null
+  codesign -f -s - -i dev.pi-desk.app "$BIN" 2>/dev/null # the window's identifier: the core checks it (trust.WINDOW_IDS)
+fi
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/dkup.XXXXXX") # the holder's socket path must fit in sun_path
 holders() { pgrep -f "deckhand-core hold --run $RUN" || true; }
 helpers() { pgrep -f "deckhand-core relaunch --pid .* --run $RUN" || true; }

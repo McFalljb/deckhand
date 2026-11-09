@@ -207,10 +207,12 @@ Autotest :: struct {
 	cpu_frames:   u64,
 	cpu_bytes:    int,
 	cpu_calls:    u64,
+	cpu_checks:   f64, // terms_check_cpu at cpu_begin
 	wait_request: u64, // pending command: wait for its finished event
 	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
 	replica_checked: time.Tick, // the last divergence check (autotest_check_replica)
 	terms_checked:   int, // terminal copies compared with the core's (autotest_check_terms)
+	terms_check_cpu: f64, // the CPU seconds those checks took (cpu_end leaves them out: a test-mode cost)
 	submitted:    u64, // the command script_command is running: its finished event may come in the same drain
 	submitted_done: bool, // it came (last_finished holds it)
 	last_result:  string, // JSON of the last command result
@@ -597,8 +599,9 @@ autotest_step :: proc() {
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
 		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
-		autotest_check_terms() // and each shown terminal's copy (M3-H)
 		cmd, _, rest := strings.partition(line, " ")
+		// and each shown terminal's copy (M3-H): once per step, not on every retry of it
+		if idx != at.retry_line do autotest_check_terms()
 		args := strings.fields(rest, context.temp_allocator)
 		if idx != at.retry_line {
 			log(line)
@@ -1109,9 +1112,10 @@ autotest_step :: proc() {
 			at.cpu_frames = app.frames_drawn
 			at.cpu_bytes = total_bytes_in()
 			at.cpu_calls = core.app_frames_called
+			at.cpu_checks = at.terms_check_cpu
 		case "cpu_end":
 			wall := time.duration_seconds(time.tick_diff(at.cpu_wall, now))
-			cpu := cpu_seconds() - at.cpu_start
+			cpu := cpu_seconds() - at.cpu_start - (at.terms_check_cpu - at.cpu_checks) // without the terminal copies' checks (test mode's)
 			calls := core.app_frames_called - at.cpu_calls
 			log(fmt.tprintf("CPU %s: %.1f%% over %.1fs, %d frames drawn, %d frame callbacks (%.1f/s), %d pty bytes", rest, 100 * cpu / wall, wall, app.frames_drawn - at.cpu_frames, calls, f64(calls) / wall, total_bytes_in() - at.cpu_bytes))
 		case "atlas":
@@ -1345,6 +1349,8 @@ autotest_check_replica :: proc() {
 // Each shown terminal's copy in the window must equal the core's terminal after every script step
 // (design §10.2, M3-H): the screen hash of both (term_view_stream.odin).
 autotest_check_terms :: proc() {
+	cpu := cpu_seconds()
+	defer autotest.terms_check_cpu += cpu_seconds() - cpu
 	d, n := term_views_check()
 	autotest.terms_checked += n
 	if d != "" do script_fail(fmt.tprintf("the window's terminal copy diverged from the core's: %s", d))

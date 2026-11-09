@@ -181,6 +181,10 @@ serve_loop :: proc() {
 			pfd[1] = {fd = fd, events = out ? {.IN, .OUT} : {.IN}}
 			n = 2
 		}
+		if at, ok := core.term_stream_retry_at(); ok { // a window's snapshot backs off: try it when due
+			ms := max(0, int(time.duration_milliseconds(time.tick_diff(time.tick_now(), at))) + 1)
+			timeout = timeout < 0 ? ms : min(timeout, ms)
+		}
 		if loop_again do timeout = 0
 		posix.poll(&pfd[0], posix.nfds_t(n), c.int(timeout))
 		drain: [64]u8

@@ -128,7 +128,7 @@ draft_add :: proc() {
 	text := strings.trim_space(tf_text(&comment_new_field))
 	if d.tab_id == 0 || text == "" do return
 	if d.pick != nil do annot_pick_add(d.tab_id, d.pick, text, d.crop) // the comment has the file now
-	else do core.app_comment_add(d.tab_id, d.box_id, d.label, d.rect, text, d.crop)
+	else do app_comment_add(d.tab_id, d.box_id, d.label, d.rect, text, d.crop)
 	comments_ui.draft.crop = ""
 	delete(d.crop)
 	comments_draft_end()
@@ -579,6 +579,15 @@ browser_comment_add :: proc(tab_id: u64, box: [4]int, what, text: string) -> (id
 	if !r.ok && crop != "" do os.remove(crop)
 	if crop != "" do delete(crop)
 	if r.pending do return 0, "the comment is still being added" // a separate core that did not answer in time
+	return r.created_id, r.error
+}
+
+// A comment on an app tab's Inspect box (the comment bar's Add): box `box_id` (label, rect as the
+// app sent them), the user's text, and the crop taken at the click (its file goes to the comment,
+// or is removed if the comment is refused). The core adds it (Comment_Add).
+app_comment_add :: proc(tab_id: u64, box_id, label: string, rect: core.App_Rect, text, crop: string) -> (id: u64, err: string) {
+	r := client_call(core.Comment_Add{source = .App, tab_id = tab_id, what = core.app_comment_what(box_id, label, rect), text = text, crop = crop}, .Internal)
+	if !r.ok && crop != "" do os.remove(crop)
 	return r.created_id, r.error
 }
 

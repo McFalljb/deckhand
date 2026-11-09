@@ -609,6 +609,10 @@ autotest_step :: proc() {
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
 		autotest_push_facts() // what the step before this one changed in the window (a key, a mode)
+		// a separate core: the step starts once the core ran what the steps before it sent (a key's
+		// or a click's command) and the window took its answers (the delta, a link opened, a file
+		// revealed), as in process, where a command runs before the next frame
+		if client_separate() && idx != at.retry_line do client_barrier()
 		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
 		cmd, _, rest := strings.partition(line, " ")
 		// and each shown terminal's copy (M3-H): once per step, not on every retry of it
@@ -640,10 +644,9 @@ autotest_step :: proc() {
 		if at.audit do script_audit(idx, cmd)
 		// an element-addressed line reads the last layout: one drawn after the last input (not
 		// the same click again right after it: two clickid lines are a double-click)
-		// a separate core: first what that input sent has run there and its delta came back
-		// (client_barrier), then a frame drawn after it, as in process where it ran at once
+		// a separate core: the step's barrier (above) brought that input's delta; then a frame
+		// drawn after it, as in process where it ran at once
 		if script_reads_layout(cmd) && client_separate() && !at.input_synced && line != at.input_line {
-			client_barrier()
 			at.input_synced, at.input_drawn = true, app.frames_drawn
 			app.redraw = true
 			at.retry_line, at.next = idx, idx

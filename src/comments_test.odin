@@ -625,14 +625,14 @@ comments_app_box_crop_at_click :: proc(t: ^testing.T) {
 	testing.expect(t, !os.exists(crop), "Cancel removes the crop")
 	// Add: the comment keeps the crop taken at the click
 	crop = c_crop(32)
-	id, err := core.app_comment_add(app_tab.id, box.id, box.label, box.rect, "collect it", crop)
+	id, err := app_comment_add(app_tab.id, box.id, box.label, box.rect, "collect it", crop)
 	testing.expect_value(t, err, "")
 	_, cm, _ := core.comment_find(id)
 	testing.expect(t, cm != nil && cm.crop == core.fs_real(crop)) // kept by its resolved path
 	testing.expect(t, os.exists(crop))
 	// refused (not an app tab): its crop goes
 	crop2 := c_crop(32)
-	_, err = core.app_comment_add(c_web(a), box.id, box.label, box.rect, "x", crop2)
+	_, err = app_comment_add(c_web(a), box.id, box.label, box.rect, "x", crop2)
 	testing.expect(t, err != "")
 	testing.expect(t, !os.exists(crop2))
 	comments_draft_end()

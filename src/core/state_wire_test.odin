@@ -440,11 +440,13 @@ state_wire_deltas :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(d, `"tabs:10"`) && !strings.contains(d, `"panels:`), d)
 	testing.expect_value(t, len(r.open_sessions[0].tabs[0].panels), 2)
 
-	// a divider: the session's panes section only
+	// a divider: the session's panes section only; a pane keeps the window's layout (window-only)
 	s.version += 1
 	s.open_sessions[0].nodes[0].ratio = 0.55
+	r.open_sessions[0].panes[0].rect = {1, 2, 3, 4}
 	d = apply(t, &r, &s, &sent)
 	testing.expect(t, strings.contains(d, `"panes:10"`) && !strings.contains(d, `"sessions"`), d)
+	testing.expect_value(t, r.open_sessions[0].panes[0].rect, [4]f32{1, 2, 3, 4})
 
 	// a session field: the sessions section; tabs and panes stay
 	s.version += 1

@@ -20,9 +20,6 @@ A_UI :: core.Caller{kind = .UI}
 @(private = "file")
 a_notes: [dynamic]string
 @(private = "file")
-a_active: bool
-
-@(private = "file")
 a_reset :: proc() -> string {
 	context.allocator = runtime.heap_allocator()
 	for _, x in core.terms {
@@ -36,9 +33,10 @@ a_reset :: proc() -> string {
 	}
 	core.persist = {}
 	clear(&a_notes)
-	a_active = true
+	app.window_active = true
 	core.agent_picker = {}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, notify = proc(title, body: string) {append(&a_notes, strings.clone(body))}, window_active = proc() -> bool {return a_active}}
+	core.platform = {quit = proc() {}, notify = proc(title, body: string) {append(&a_notes, strings.clone(body))}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	core.home_root = fmt.aprintf("%s/pd-atlas-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
 	os.make_directory_all(core.home_root)
@@ -259,7 +257,7 @@ agent_unread_from_bridge_status :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.json_path(core.state_json(), "agent.needs_user"), "true")
 	status(bridge, tab, .Idle)
 	// in the background: finished and needs-you notify (the gap holds back a second "finished")
-	a_active = false
+	app.window_active = false
 	status(bridge, tab, .Working)
 	status(bridge, tab, .Idle)
 	status(bridge, tab, .Working)
@@ -456,7 +454,7 @@ agent_send_while_starting_says_why :: proc(t: ^testing.T) {
 	defer a_done()
 	@(static) clip: string
 	clip = ""
-	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
+	win_os.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	sent :: proc(path: string) -> string {
@@ -510,7 +508,7 @@ agent_send_pending_dropped :: proc(t: ^testing.T) {
 	defer a_done()
 	@(static) clip: string
 	clip = ""
-	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
+	win_os.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf("stty raw -echo; exec cat > '%s'", out))
 	said :: proc() -> int {
@@ -554,7 +552,7 @@ agent_send_waits_for_paste_mode :: proc(t: ^testing.T) {
 	defer a_done()
 	@(static) clip: string
 	clip = ""
-	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
+	win_os.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; sleep 0.3; printf '\033[?2004h'; exec cat > '%s'`, out))
 	testing.expect(t, core.agent_send("four\n", A_UI).ok, "waits for pi")
@@ -586,7 +584,7 @@ agent_send_again_while_waiting_for_paste_mode :: proc(t: ^testing.T) {
 	defer a_done()
 	@(static) clip: string
 	clip = ""
-	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s)}
+	win_os.set_clipboard = proc(s: string) {clip = strings.clone(s)}
 	out := fmt.tprintf("%s/stdin", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; sleep 0.5; printf '\033[?2004h'; exec cat > '%s'`, out))
 	testing.expect(t, core.agent_send("one\n", A_UI).ok, "waits for pi")
@@ -616,7 +614,7 @@ agent_send_paste_wait_deadline_holds :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := a_reset()
 	defer a_done()
-	core.platform.set_clipboard = proc(s: string) {}
+	win_os.set_clipboard = proc(s: string) {}
 	out := fmt.tprintf("%s/stdin", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`stty raw -echo; exec cat > '%s'`, out)) // never turns paste mode on
 	testing.expect(t, core.agent_send("one\n", A_UI).ok, "waits for pi")

@@ -289,7 +289,7 @@ command_spec :: proc(type: string) -> ^Command_Spec {
 // Whether a caller of this kind may send commands with this `who` at all
 // (bridge reports also need the caller's own tab: caller_may).
 who_allows :: proc(kind: Caller_Kind, who: Command_Who) -> bool {
-	if kind == .Tab_Host do return false // TAB_HOST_COMMANDS only (caller_may)
+	if kind == .Tab_Host || kind == .None do return false // TAB_HOST_COMMANDS only (caller_may); None: nobody's
 	switch who {
 	case .Anyone:   return kind != .Panel && kind != .App
 	case .Query:    return kind != .App // an app tab's program sends no commands

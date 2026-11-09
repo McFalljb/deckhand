@@ -549,7 +549,7 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	#partial switch ev.type {
 	case .CLIPBOARD_PASTED:
 		if e.readonly do return true
-		ed_insert(e, core.clipboard_text(), .Other)
+		ed_insert(e, clipboard_text(), .Other)
 		return true
 	case .CHAR:
 		if cmd || ctrl do return true
@@ -571,11 +571,11 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	if cmd {
 		#partial switch ev.key_code {
 		case .A:      ed_select_all(e)
-		case .C:      if s := copy_text(e); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
+		case .C:      if s := copy_text(e); s != "" && win_os.set_clipboard != nil do win_os.set_clipboard(s)
 		case .X:
 			if e.readonly do return true
 			lo, hi := ed_copy_range(e)
-			if core.platform.set_clipboard != nil do core.platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
+			if win_os.set_clipboard != nil do win_os.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
 			ed_replace(e, lo, hi, "", .Other)
 		case .Z:      if shift do ed_redo(e); else do ed_undo(e)
 		case .S:      ui_do(core.Save_File{e.tab_id})
@@ -1082,13 +1082,13 @@ editor_run_action :: proc(tab_id: u64, a: core.Editor_Action) {
 	case .None:
 	case .Undo:           ed_undo(e)
 	case .Redo:           ed_redo(e)
-	case .Copy:           if s := copy_text(e); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
+	case .Copy:           if s := copy_text(e); s != "" && win_os.set_clipboard != nil do win_os.set_clipboard(s)
 	case .Cut:
 		if ro do break
 		lo, hi := ed_copy_range(e)
-		if core.platform.set_clipboard != nil do core.platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
+		if win_os.set_clipboard != nil do win_os.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
 		ed_replace(e, lo, hi, "", .Other)
-	case .Paste:          if !ro do ed_insert(e, core.clipboard_text(), .Other)
+	case .Paste:          if !ro do ed_insert(e, clipboard_text(), .Other)
 	case .Select_All:     ed_select_all(e)
 	case .Toggle_Comment: if !ro do ed_toggle_comment(e)
 	case .Indent:         if !ro do ed_indent_lines(e, false)

@@ -199,7 +199,8 @@ au_reset :: proc(data_dir: string) -> runtime.Allocator {
 	core.persist = {}
 	menu = {}
 	core.home_root = data_dir
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()

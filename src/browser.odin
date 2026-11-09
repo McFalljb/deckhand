@@ -454,7 +454,7 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 	context = core.app_context
 	ob := by_cef(opener)
 	if ob == nil do return 0
-	s, _, _ := core.find_tab(ob.tab_id)
+	s, _, _ := find_tab(ob.tab_id)
 	if s == nil do return 0
 	u := string(url)
 	if user_gesture == 0 {
@@ -589,7 +589,7 @@ browser_pages :: proc() {
 	list := make([dynamic]^Browser, context.temp_allocator)
 	pages := make([dynamic]Page_Info, context.temp_allocator)
 	for _, b in browsers {
-		s, _, _ := core.find_tab(b.tab_id)
+		s, _, _ := find_tab(b.tab_id)
 		if s == nil do continue
 		live := b.cef != 0
 		wants := !live && !b.lazy && (b.message == "" || b.waiting)

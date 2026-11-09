@@ -1140,7 +1140,9 @@ Window → core:
 | `tab_host.event` | `id`, `command: {"<type>": {fields}}`, `now?` | what a page, an app or a window worker reported (`TAB_HOST_COMMANDS`: `browser_update`, `browser_popup_open`, `app_update`, `app_call_done`), run as the **`tab_host` caller**: answers and tab records only. It cannot confirm, change a setting or a confirmation policy, show a file, or reach another session's tabs (a popup opens in its opener's session); it has no token. Anything else is refused |
 | `finished` | `id`, `changed`, `private`, `wait_ms`, `result` | the window's answer to a `tab_host.call` (`changed`: the window's own state moved; `private`: its data is a page's content, the requester's only; `wait_ms`, with a `pending` result: how long the window itself may take to end it, as an upload's bar waiting for the user). Taken only for a call the core is running or waiting on |
 | `finished` | `request_id`, `private`, `result` | the end of a request the window answered `pending` (an agent's read, action, wait or screenshot, an app call); the core sends `result` to the requester. Taken only for a request the core is waiting on |
-| `window.browser_facts` | `tab_id`, `facts` (or `null`) | what only the window knows of a browser tab (comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask), typed; get_state writes it. The core asks for it fresh before it writes a browser tab |
+| `window.reply` | `id`, `reply: {ok, count, cols, rows, cell, changed, result}` | the answer to a `window.request` that has an `id` (the fields its op uses). Taken only for a request the core is waiting on; a late one is dropped |
+| `window.facts` | `facts: {active, dpi, fps, scale, frames_service, frames_device, job_sheet_open, setup, unsaved}` | what only the window knows of itself, sent whenever it changed: it has the keyboard, the screen's rate and scale (an app tab's hello), the job sheet is open, the first-run sheet as `get_state` shows it, each buffer with unsaved changes (its file's path). Until the first one the core treats unsaved files as not known |
+| `window.tab_facts` | `tab_id`, `facts: {browser, page, app, frames_key, md, dirty}` (or `null`) | what only the window knows of one tab's view, sent whenever it changed: a browser page's facts (comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask) and its state, an app's frames and Inspect, its frame channel's key (only the app's hello carries it), a Markdown preview's numbers, an editor buffer's unsaved changes. Typed; `get_state` writes it. The core never asks: the window sends its facts before each command it sends, at the start and end of each frame, before each event, and after each call or request it answered |
 
 Core → window:
 
@@ -1150,6 +1152,8 @@ Core → window:
 | `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went) |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `toast` | `text`, `err` | a short line at the bottom of the window |
+| `window.request` | `id`, `request: {op, …}` | what the core asks the window to do; `id` `""`: no reply. `op`: `clipboard_set` (`text`), `clipboard_secret` (`text`; reply `ok`, `count`: marked concealed, the change count after), `clipboard_clear_if` (`count`), `open_url` (`text`; reply `ok`), `reveal` (`path`), `appearance` (`mode`), `copy_selection` (`tab_id`: the window's copy's selection onto the clipboard; reply `ok`: there was one), `term_fit` (`tab_id`; reply `ok`, `cols`, `rows`, `cell`: a new terminal's grid from its pane), `view_open` (`tab_id`, `kind`, `line`, `anchor`), `view_goto` (the same), `view_drop`, `view_moved` (`path`), `files_deleted` (`path`), `changes_diff` (`tab_id`, `path`, `text`, `message`), `changes_rewind`, `commit_message_clear`, `watch_folder` (`path`), `watch_sync`, `setup_sheet` (`setup`, `text`), `job_sheet` (`job_sheet`, `caller`; reply `result`, `changed`), `job_sheet_saved` (`path`, `message`; reply `ok`: the sheet closed), `job_sheet_holds_quit` (reply `ok`: it has changes, asks to discard them, and the quit stops). With no window, or no reply, each answers as if there were none, at once: the core never waits on the window (in process the reply comes while the request is sent) |
+| `confirmation.parked` | `summary`, `by_user` | a confirmation waits in the confirmation bar; its record follows in the next `state.delta` |
 | `tab_host.call` | `id`, `request_id`, `tab_id`, `caller: {kind, tab_id, claude}`, `command: {"<type>": {fields}}` | the window's part of a browser, app, Markdown or editor command (`src/core/tabhost_route.odin`): CEF, an app's process and frames, a buffer, a view. The core checks the caller, resolves the target and runs the confirmation gate first, and changes the tab's records from the window's answer (`finished`) |
 
 **Tab host routing (M3-G).** The tab's record (URL, title, path, app status, pane) is the core's;
@@ -1198,7 +1202,17 @@ the size. A tab hidden for 2 s detaches.
 | window | `[ch] CREDIT` | u32 LE: DATA bytes taken. The window starts with 256 KiB; more than 4 MiB waiting and the core sends a fresh `SNAPSHOT` instead |
 | window | `[ch] FOCUS` | one byte, 1 gained, 0 lost: reported to the program if it asked (mode 1004) |
 
-`copy_selection` copies the window's copy's selection (no window: `nothing selected`).
+`copy_selection` copies the window's copy's selection (no window: `nothing selected`). A terminal
+tab's record carries `has_term` (the core has its terminal: the window may attach) and
+`output_recent` (it printed in the last 1.5 s: the tab strip's running placeholder), so the window
+never reads a core terminal.
+
+**Limits.** The core decodes a window message within 8× its length (at least 64 KiB, at most
+16 MiB; state messages get 64×, up to 512 MiB), and runs at most 512 of the window's commands
+(`command`, `window.command`, `tab_host.event`) per pump: the rest wait in the link for the next
+tick. Frames the core took off the link while it streams a terminal wait in a capped backlog
+(`cw.Backlog`); past its cap the window is closed. A caller nobody set (`Caller_Kind.None`, the
+zero value) is refused by every rule.
 
 **Test mode** compares the window's replica with the core's State after every script step; a
 difference fails the scene. It also compares each shown terminal's copy with the core's terminal

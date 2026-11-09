@@ -331,7 +331,7 @@ pane_width :: proc() -> f32 {
 // gets when shown without bars of its own; so a tab with bars (a Changes header, a browser's
 // toolbar) coming and going never resizes the pane's other terminals. Else tab_rect.
 term_target_rect :: proc(tab_id: u64) -> [4]f32 {
-	s, tab, _ := core.find_tab(tab_id)
+	s, tab, _ := find_tab(tab_id)
 	if s == nil || tab == nil || s.id != state.current_session do return tab_rect(tab_id)
 	p := core.pane_of_tab(s, tab_id)
 	if p == nil || p.frame.z <= 0 do return tab_rect(tab_id)
@@ -390,7 +390,7 @@ pane_at :: proc(x, y: f32) -> ^core.Pane {
 // rect; else (another session, or not laid out yet) its pane's place in the session's tree
 // inside the rect the window last laid out (app.pane), what it will get when shown.
 tab_rect :: proc(tab_id: u64) -> [4]f32 {
-	s, tab, _ := core.find_tab(tab_id)
+	s, tab, _ := find_tab(tab_id)
 	if tab == nil do return app.pane
 	p := core.session_pane(s, tab.pane)
 	if p == nil do return app.pane

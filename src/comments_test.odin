@@ -48,7 +48,7 @@ c_reset :: proc(names: ..string) -> []u64 {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
-	core.platform = {}
+	core.platform, win_os = {}, {}
 	clear(&c_pushes)
 	clear(&c_prompts)
 	c_bridge_up = true

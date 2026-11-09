@@ -121,8 +121,10 @@ tab_host_call :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64
 	host.next += 1
 	id := fmt.tprintf("h%d", host.next)
 	append(&host.calling, Host_Calling{id = id, request_id = request_id})
+	window_link_flush() // what earlier commands changed reaches the replica first: the window's part reads it
 	sent := window_link_send(tab_host_msg_call(id, cmd, caller, request_id, tab_id))
-	if sent do window_link_pump() // in process the window answered while it was sent
+	// in process the window answered while it was sent: pump past the per-pump cap until its answer
+	if sent do for window_link_pump() && !(id in host.answers) {}
 	me := pop(&host.calling)
 	if !sent {
 		if id in host.answers do host_answer_drop(id) // cannot be: nothing was sent
@@ -360,7 +362,7 @@ tab_host_call_parse :: proc(text: string) -> (c: Tab_Host_Call, err: string) {
 	if !cok do return c, "no caller"
 	kind := string(co["kind"].(json.String) or_else "")
 	found := false
-	for k in Caller_Kind do if caller_kind_name(k) == kind {
+	for k in Caller_Kind do if k != .None && caller_kind_name(k) == kind {
 		c.caller.kind = k
 		found = true
 	}
@@ -608,8 +610,8 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !ascii_prefix(c.url, "mailto:") && !c.external && !s.home && tab_host_up() {
 			if r, ch := routed(cmd, caller, request_id, new_id()); r.ok do return r, ch
 		}
-		if platform.open_url == nil do return fail("cannot open links here"), false
-		if !platform.open_url(c.url) do return fail("the link could not be opened"), false
+		if !window_attached() do return no_window(), false // the user's ⌘-click: there is a window
+		if !window_open_url(c.url) do return fail("the link could not be opened"), false
 		return {ok = true}, false
 	case Open_File:
 		s, p, err := file_open_target(caller, c.session, c.path)
@@ -862,7 +864,7 @@ browser_open_session :: proc(caller: Caller, session: u64) -> (^Open_Session, st
 		s := find_session(session)
 		if s == nil do return nil, "no such session"
 		return s, ""
-	case .App, .Tab_Host:
+	case .App, .Tab_Host, .None:
 	}
 	return nil, "not allowed for this caller"
 }
@@ -1167,7 +1169,7 @@ markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller
 			if !go_on do return gr, ch
 			changed = ch
 		}
-		if platform.open_url != nil do _ = platform.open_url(url)
+		_ = window_open_url(url)
 		return {ok = true}, changed
 	case "open":
 		p := json_path(data, "path")

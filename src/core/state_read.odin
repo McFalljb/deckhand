@@ -13,7 +13,7 @@ package core
 // Forward-compatible, as a newer core may add things (grow-only, schema/released-v1.json):
 // unknown keys and sections are ignored; an unknown enum name, an enum number outside the
 // enum's values, or an unknown union variant reads as the zero value (so a names table indexed
-// by it never goes out of range: Tab_Status reads Running, Caller_Kind Internal, Command_Class
+// by it never goes out of range: Tab_Status reads Running, Caller_Kind None (refused by every caller rule), Command_Class
 // Tab_Close, a Tab_Kind nil); a command of an unknown type reads as a nil Command, a
 // confirmation the window cannot confirm. A type mismatch is an error.
 //
@@ -56,6 +56,16 @@ budget_take :: proc(n: int) -> bool {
 // the core's reads of the window's messages, window_link.odin).
 wire_read_budget :: proc(text: string) {
 	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, READ_BUDGET_MAX)
+}
+
+// What one of the window's messages may decode to (window_link.odin): commands and facts, far
+// less than a state message (the core reads it; the window is the one that could lie).
+READ_BUDGET_WINDOW_PER_BYTE :: 8
+READ_BUDGET_WINDOW_MIN :: 64 << 10
+READ_BUDGET_WINDOW_MAX :: 16 << 20
+
+wire_read_budget_window :: proc(text: string) {
+	read_budget = clamp(READ_BUDGET_WINDOW_PER_BYTE * len(text), READ_BUDGET_WINDOW_MIN, READ_BUDGET_WINDOW_MAX)
 }
 
 // Applies one state.full or state.delta message to r. "" = applied.

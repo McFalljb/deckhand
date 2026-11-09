@@ -3,10 +3,9 @@ package core
 // What only the window knows of a browser tab's page, for its object in get_state (design §10.2,
 // an M3 must-do): comment mode and markers, zoom, the page's bars and downloads, the agent strip,
 // an upload's ask. It was a hook that wrote raw JSON members into the core's output; now the
-// window sends it typed (window.browser_facts, window_link.odin) and the core writes it
-// (browser_facts_write), so nothing the window says becomes JSON the core did not shape.
+// window sends it typed (Tab_Facts.browser in window.tab_facts, window_link.odin) and the core
+// writes it (browser_facts_write), so nothing the window says becomes JSON the core did not shape.
 
-import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:strings"
@@ -185,35 +184,4 @@ browser_zoom_json :: proc(factor: f64) -> string {
 	s := fmt.tprintf("%.2f", f)
 	s = strings.trim_right(s, "0")
 	return strings.trim_right(s, ".")
-}
-
-// ---- what the attached window sent (window_link.odin keeps them; main thread) ----
-
-@(private = "file")
-facts_by_tab: map[u64]Browser_Facts
-
-// The window's facts for a tab (window.browser_facts): replaces what it said before. nil: the
-// tab has none any more.
-browser_facts_set :: proc(tab_id: u64, f: Maybe(Browser_Facts)) {
-	heap := runtime.heap_allocator()
-	if facts_by_tab.allocator.procedure == nil do facts_by_tab = make(map[u64]Browser_Facts, heap)
-	if old, had := facts_by_tab[tab_id]; had {
-		o := old
-		wire_free(&o, type_info_of(Browser_Facts), heap)
-		delete_key(&facts_by_tab, tab_id)
-	}
-	if x, ok := f.?; ok do facts_by_tab[tab_id] = x
-}
-
-browser_facts_get :: proc(tab_id: u64) -> (^Browser_Facts, bool) {
-	if tab_id not_in facts_by_tab do return nil, false
-	return &facts_by_tab[tab_id], true
-}
-
-browser_facts_clear :: proc() {
-	for id in facts_by_tab {
-		f := facts_by_tab[id]
-		wire_free(&f, type_info_of(Browser_Facts), runtime.heap_allocator())
-	}
-	clear(&facts_by_tab)
 }

@@ -452,7 +452,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 		else do t.want_net = true
 		t.capture_until = time.tick_add(time.tick_now(), AGENT_CAPTURE_FOR)
 		if started {
-			_, tab, _ := core.find_tab(tab_id)
+			_, tab, _ := find_tab(tab_id)
 			// a blank page has none yet: the first real page's is taken (devtools, Page.frameNavigated)
 			if bt, is := tab.kind.(core.Browser_Tab); is do set_owned(&t.capture_origin, agent_real_origin(bt.url))
 		}
@@ -667,9 +667,9 @@ agent_tabs_list :: proc(caller: core.Caller, session: u64) -> core.Result {
 agent_comments :: proc(caller: core.Caller, tab_id, session: u64) -> core.Result {
 	s: ^core.Open_Session
 	if tab_id != 0 {
-		ts, tab, _ := core.find_tab(tab_id)
+		ts, tab, _ := find_tab(tab_id)
 		if tab == nil do return core.fail("no such tab")
-		if caller.kind == .Panel && core.caller_session(caller) != ts do return core.fail("a pi tab sees only its own session's comments")
+		if own := core.caller_session(caller); caller.kind == .Panel && (own == nil || own.id != ts.id) do return core.fail("a pi tab sees only its own session's comments")
 		s = ts
 	} else if caller.kind == .Panel {
 		s = core.caller_session(caller)
@@ -995,7 +995,7 @@ browser_agent_tick :: proc() -> bool {
 	redraw := false
 	// closed tabs: their state goes
 	gone := make([dynamic]u64, context.temp_allocator)
-	for id in agent_tabs do if _, tab, _ := core.find_tab(id); tab == nil do append(&gone, id)
+	for id in agent_tabs do if _, tab, _ := find_tab(id); tab == nil do append(&gone, id)
 	for id in gone {
 		agent_tab_free(agent_tabs[id])
 		delete_key(&agent_tabs, id)
@@ -1067,7 +1067,7 @@ agent_busy :: proc(tab_id: u64) -> bool {
 // One op's step: done, with its result (private: a page's content).
 @(private = "file")
 op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: core.Result, private: bool) {
-	_, tab, _ := core.find_tab(op.tab_id)
+	_, tab, _ := find_tab(op.tab_id)
 	b := browser_of(op.tab_id)
 	if tab == nil || b == nil do return true, {error = "the tab closed", data = `{"code":"tab_gone"}`}, false
 	bt, _ := tab.kind.(core.Browser_Tab)

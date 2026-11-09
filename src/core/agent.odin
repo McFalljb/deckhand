@@ -444,7 +444,7 @@ agent_status_changed :: proc(was: Agent_State, was_waiting: bool, now: Agent_Sta
 @(private = "file")
 agent_notify :: proc(body: string, urgent: bool) {
 	if state.settings.notify_off || platform.notify == nil do return
-	if platform.window_active != nil && platform.window_active() do return
+	if window_attached() && window_is_active() do return
 	if !urgent && agent_rt.last_notify != {} && time.tick_since(agent_rt.last_notify) < NOTIFY_GAP do return
 	agent_rt.last_notify = time.tick_now()
 	state.agent.notified += 1

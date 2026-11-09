@@ -217,7 +217,7 @@ page_bars_sig :: proc(tab_id: u64) -> string {
 		if p.ask_id != 0 do fmt.sbprintf(&b, "ask %d;", p.ask_id)
 		if p.find_open do strings.write_string(&b, "find;")
 	}
-	if _, tab, _ := core.find_tab(tab_id); tab != nil {
+	if _, tab, _ := find_tab(tab_id); tab != nil {
 		if bt, is := tab.kind.(core.Browser_Tab); is && bt.blocked_popup != "" do fmt.sbprintf(&b, "popup %s;", bt.blocked_popup)
 	}
 	if d := page_bar_download(tab_id); d != nil do fmt.sbprintf(&b, "download %d %d;", d.id, d.state)
@@ -590,7 +590,7 @@ Menu_Browser :: struct {
 }
 
 browser_menu_items :: proc(t: Menu_Browser, items: ^[dynamic]core.Menu_Item) {
-	_, tab, _ := core.find_tab(t.tab_id)
+	_, tab, _ := find_tab(t.tab_id)
 	if tab == nil do return
 	bt, is := tab.kind.(core.Browser_Tab)
 	if !is do return
@@ -618,7 +618,7 @@ browser_menu_items :: proc(t: Menu_Browser, items: ^[dynamic]core.Menu_Item) {
 	append(items, core.Menu_Item{label = "Reload", cmd = core.Browser_Reload{t.tab_id}})
 	if t.link != "" {
 		sep(items)
-		if s, _, _ := core.find_tab(t.tab_id); s != nil {
+		if s, _, _ := find_tab(t.tab_id); s != nil {
 			if _, err := core.browser_url_normalize(t.link); err == "" && core.browser_file_link_ok(bt.url, t.link) do append(items, core.Menu_Item{label = "Open link in new tab", cmd = core.Browser_Open{session = s.id, url = t.link}})
 		}
 		append(items, core.Menu_Item{label = "Copy link", copy = t.link})
@@ -647,7 +647,7 @@ browser_external_ok :: proc(url: string) -> bool {
 browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	target :: proc(tab_id: u64) -> (s: ^core.Open_Session, bt: ^core.Browser_Tab, b: ^Browser, err: string) {
 		tab: ^core.Tab
-		s, tab, _ = core.find_tab(tab_id)
+		s, tab, _ = find_tab(tab_id)
 		if tab == nil do return nil, nil, nil, "no such tab"
 		is: bool
 		bt, is = &tab.kind.(core.Browser_Tab)
@@ -749,7 +749,7 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64
 		_, bt, _, err := target(c.tab_id)
 		if err != "" do return core.fail(err), false
 		if !browser_external_ok(bt.url) do return core.fail("only web addresses (http, https) open in the default browser"), false
-		if core.platform.open_url == nil || !core.platform.open_url(bt.url) do return core.fail("the page could not be opened in the default browser"), false
+		if win_os.open_url == nil || !win_os.open_url(bt.url) do return core.fail("the page could not be opened in the default browser"), false
 		return {ok = true}, false
 	case core.Browser_Download:
 		if c.download_id == 0 && c.op == .Reveal {
@@ -757,7 +757,7 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64
 			dir := downloads_dir()
 			os.make_directory_all(dir)
 			set_owned(&page_revealed, dir)
-			if core.platform.reveal != nil do core.platform.reveal(dir)
+			if win_os.reveal != nil do win_os.reveal(dir)
 			return {ok = true}, false
 		}
 		if c.op == .Allow || c.op == .Block {
@@ -800,11 +800,11 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64
 		switch c.op {
 		case .Open:
 			if err := download_open_check(d); err != "" do return core.fail(err), false
-			if core.platform.open_url == nil || !core.platform.open_url(file_url(d.path)) do return core.fail("the file could not be opened"), false
+			if win_os.open_url == nil || !win_os.open_url(file_url(d.path)) do return core.fail("the file could not be opened"), false
 		case .Reveal:
 			if !os.exists(d.path) do return core.fail("the file is gone"), false
 			set_owned(&page_revealed, d.path)
-			if core.platform.reveal != nil do core.platform.reveal(d.path)
+			if win_os.reveal != nil do win_os.reveal(d.path)
 		case .Cancel:
 			if d.state != .Going do return core.fail("the download is not running"), false
 			dh_cef_download_cancel(d.id)
@@ -1571,7 +1571,7 @@ browser_polish_toolbar_layout :: proc(b: ^Browser) {
 // page's tooltip.
 browser_polish_bars_layout :: proc(b: ^Browser) {
 	th := theme()
-	_, tab, _ := core.find_tab(b.tab_id)
+	_, tab, _ := find_tab(b.tab_id)
 	if tab == nil do return
 	bt, _ := tab.kind.(core.Browser_Tab)
 	p := page_extras[b.tab_id]

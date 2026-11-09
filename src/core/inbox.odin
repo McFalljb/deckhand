@@ -58,8 +58,9 @@ inbox_drain :: proc() {
 	defer inbox_depth -= 1
 	heap := runtime.heap_allocator()
 	ui_ran := false // the user's commands: their delta compares every section (window_link_flush)
+	capped := false // the window's frames stopped at the pump's cap: the rest wait for the next drain
 	for {
-		window_link_pump()
+		if !capped do capped = window_link_pump()
 		sync.lock(&inbox_mu)
 		batch := inbox_queue
 		inbox_queue = make([dynamic]Request, heap)

@@ -1012,6 +1012,31 @@ reviews included. **Order:** A and B start now, against `main`; F2 starts when G
 for F2, A and B. D and E run side by side after C, on separate branches, with one combined review,
 and E's last commit flips the default after D merges. Elapsed: about **6–7.5 weeks**.
 
+**M3-F2 as built** (where it differs from the row above):
+- **Facts are pushed, requests are few.** What the core read from the window (`tab_dirty`,
+  `unsaved_files`, `browser_facts`, `browser_page`, `app_view`, `md_view`, `frames_info`,
+  `display`, `setup_state`, `dpi`, `job_sheet_open`, `window_active`) became `window.facts` and
+  `window.tab_facts`, sent whenever they change (before each window command, each frame, each
+  event, each answered call). So nothing synchronous goes core → window for them, and the app
+  hello needs no `tab_host.call`. `window.request` is for actions; the few with a reply
+  (`clipboard_secret`, `open_url`, `copy_selection`, `term_fit`, `job_sheet`, `job_sheet_saved`,
+  `job_sheet_holds_quit`) get it while the request is sent in process. Over `core.sock` (M4-C)
+  they need the bounded wait, or a default: no reply answers as if there were no window.
+- **`pick_folder` is not a request:** only the window's own UI opens the picker, then sends the
+  command, so the core never waits on a modal. `term_selection` became `copy_selection` (the
+  selection never leaves the window). `frames_read` is the window's own call.
+- **Terminal facts in the record:** `Tab.has_term` and `Tab.output_recent` (set by the core's
+  tick, flipped only on a change), so the window's `term_of` and `tab_busy` read the replica.
+- **Not done:** per-section triggers (the untracked-write check stays best-effort); the
+  scripted session with every hook nil. The window's direct reads are gone (`find_tab`,
+  `term_of`, the terminal checks, the hook table; `src/window_replica_test.odin` keeps them out),
+  but it still calls core procedures that read the core's globals: `core.cur()` and the other
+  `State` helpers read the core's `State`, not the replica, and some read runtime the replica
+  does not carry (the harness run, Claude's per-tab runtime in `claude_ready` and
+  `comments_can_send`, the holder's away flag in `tab_held_away`, account and title caches, the
+  file and Settings models). In two processes those read the window process's own empty copies,
+  unless M4-C decodes the replica into that process's `core.state` and carries the rest.
+
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR
   check plus `window.token`, and under the self-signed identity a same-user process can pass the

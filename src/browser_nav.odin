@@ -73,7 +73,7 @@ browser_nav_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 
 		if b.cef == 0 {
 			// the page closed itself (or could not open): open it again, at its address
 			url := ""
-			if _, tab, _ := core.find_tab(c.tab_id); tab != nil do if bt, is := tab.kind.(core.Browser_Tab); is do url = bt.url
+			if _, tab, _ := find_tab(c.tab_id); tab != nil do if bt, is := tab.kind.(core.Browser_Tab); is do url = bt.url
 			if !browser_reopen(b, url) do return core.fail("the page is not loaded"), false
 			return {ok = true}, true
 		}
@@ -154,7 +154,7 @@ nav_button :: proc(id: clay.ElementId, label: string, enabled: bool) {
 browser_bar_layout :: proc(p: ^core.Pane) {
 	b := pane_browser(p)
 	if b == nil do return
-	_, tab, _ := core.find_tab(b.tab_id)
+	_, tab, _ := find_tab(b.tab_id)
 	if tab == nil do return
 	bt, _ := tab.kind.(core.Browser_Tab)
 	th := theme()
@@ -232,7 +232,7 @@ toolbar_parts_w :: proc(b: ^Browser, bt: core.Browser_Tab) -> f32 {
 browser_url_focus :: proc() {
 	b := tab_browser()
 	if b == nil || annot_on(b) do return // comment mode: no field on screen
-	_, tab, _ := core.find_tab(b.tab_id)
+	_, tab, _ := find_tab(b.tab_id)
 	if tab == nil do return
 	bt, _ := tab.kind.(core.Browser_Tab)
 	tf_set(&browser_url_field, bt.url == core.BROWSER_BLANK ? "" : bt.url)
@@ -290,7 +290,7 @@ Browser_Can :: enum {
 }
 @(private = "file")
 browser_can :: proc(tab_id: u64, what: Browser_Can) -> bool {
-	_, tab, _ := core.find_tab(tab_id)
+	_, tab, _ := find_tab(tab_id)
 	if tab == nil do return false
 	bt, is := tab.kind.(core.Browser_Tab)
 	if !is do return false

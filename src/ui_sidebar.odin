@@ -388,8 +388,8 @@ menu_run :: proc(i: int) {
 	} else if it.editor != .None {
 		if t, ok := target.(Menu_Editor); ok do editor_run_action(u64(t), it.editor)
 	} else if it.copy != "" {
-		if core.platform.set_clipboard != nil {
-			core.platform.set_clipboard(it.copy)
+		if win_os.set_clipboard != nil {
+			win_os.set_clipboard(it.copy)
 			toast_show(fmt.tprintf("Copied: %s", it.copy))
 		}
 	} else if it.files != .None {
@@ -1433,9 +1433,9 @@ filter_enter :: proc() {
 // "+" on the Projects header (and the palette's Add project…): the folder
 // picker (a modal loop: run outside this event handler), then add_project.
 add_project_dialog :: proc() {
-	if core.platform.run_later == nil || core.platform.pick_folder == nil do return
+	if core.platform.run_later == nil || win_os.pick_folder == nil do return
 	core.platform.run_later(proc() {
-		path := strings.clone(core.platform.pick_folder())
+		path := strings.clone(win_os.pick_folder())
 		defer delete(path)
 		if path != "" do ui_do(core.Add_Project{cwd = path})
 	})

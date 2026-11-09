@@ -535,7 +535,7 @@ workspace_json :: proc() -> string {
 	k(&w, "confirm")
 	open_obj(&w)
 	for ck in Caller_Kind {
-		if ck == .UI || ck == .Internal do continue
+		if ck == .None || ck == .UI || ck == .Internal do continue
 		set := false
 		for cl in Command_Class do if st.confirm[ck][cl] != .Ask do set = true
 		if !set do continue
@@ -686,7 +686,7 @@ workspace_restore :: proc(text: string) -> string {
 	if st, is := root["settings"].(json.Object); is {
 		if cf, cok := st["confirm"].(json.Object); cok {
 			for ck in Caller_Kind {
-				if ck == .UI || ck == .Internal do continue
+				if ck == .None || ck == .UI || ck == .Internal do continue
 				ko, kok := cf[CALLER_NAMES[ck]].(json.Object)
 				if !kok do continue
 				for cl in Command_Class {

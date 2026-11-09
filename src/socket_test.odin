@@ -38,7 +38,8 @@ sk_start :: proc(t: ^testing.T) -> string {
 	state^ = core.State {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	dir := fmt.aprintf("%s/pd-sock-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
@@ -1514,7 +1515,7 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	defer sk_stop()
 	@(static) clip: string
 	clip = ""
-	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s, runtime.heap_allocator())}
+	win_os.set_clipboard = proc(s: string) {clip = strings.clone(s, runtime.heap_allocator())}
 	for k in ([]core.Caller_Kind{.Control, .Script, .Panel}) {
 		r := core.run_command(core.Copy_Control_Token{}, {kind = k})
 		testing.expectf(t, !r.ok, "%v may not mint a control token", k)
@@ -1537,9 +1538,9 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	@(static) cleared: [dynamic]int
 	secret = ""
 	clear(&cleared)
-	core.platform.set_clipboard_secret = proc(s: string) -> int {secret = strings.clone(s, runtime.heap_allocator()); return 41}
-	core.platform.clear_clipboard_if = proc(count: int) {append(&cleared, count)}
-	defer core.platform.set_clipboard_secret, core.platform.clear_clipboard_if = nil, nil
+	win_os.set_clipboard_secret = proc(s: string) -> int {secret = strings.clone(s, runtime.heap_allocator()); return 41}
+	win_os.clear_clipboard_if = proc(count: int) {append(&cleared, count)}
+	defer win_os.set_clipboard_secret, win_os.clear_clipboard_if = nil, nil
 	clip = ""
 	testing.expect(t, core.run_command(core.Copy_Control_Token{}, sk_ui).ok)
 	testing.expect(t, strings.contains(secret, "DECKHAND_TOKEN='"), secret)

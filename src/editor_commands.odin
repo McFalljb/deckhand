@@ -15,7 +15,7 @@ import "core"
 
 @(private = "file")
 editor_tab :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^Editor) {
-	s, tab, _ := core.find_tab(id)
+	s, tab, _ := find_tab(id)
 	if tab == nil do return nil, nil, nil
 	if _, is := tab.kind.(core.Editor_Tab); !is do return nil, nil, nil
 	return s, tab, editor_of(id)

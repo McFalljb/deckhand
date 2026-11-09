@@ -747,7 +747,7 @@ fs_reveal_path :: proc(path: string, caller: Caller) -> string {
 		fs_model.revealed = strings.clone(p)
 		return ""
 	}
-	if platform.reveal != nil do platform.reveal(p)
+	window_reveal(p)
 	return ""
 }
 

@@ -242,7 +242,7 @@ control_token_clip: struct {
 // Main thread, every frame (control_token_clip).
 control_token_clip_tick :: proc() {
 	if control_token_clip.deadline == {} || time.tick_diff(control_token_clip.deadline, time.tick_now()) < 0 do return
-	if platform.clear_clipboard_if != nil do platform.clear_clipboard_if(control_token_clip.count)
+	window_clipboard_clear_if(control_token_clip.count)
 	control_token_clip = {}
 }
 keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !autotest_active}
@@ -696,6 +696,7 @@ Result :: struct {
 
 // Who sent a command. tab_id is the caller's own tab for pi-tab callers.
 Caller_Kind :: enum {
+	None, // the zero value: a Caller nobody set. Every caller rule refuses it (caller_may); the core's own is .Internal, spelled out
 	Internal,
 	UI,
 	Script,
@@ -718,6 +719,7 @@ after_command_check: proc(cmd: Command)
 
 // Runs one command on the main thread. request_id ties it to its events.
 run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id: u64 = 0) -> Result {
+	if window.test_facts != nil do window.test_facts() // unit tests only (window_hooks.odin)
 	r: Result
 	changed := false
 	if !caller_may(caller, cmd) {
@@ -740,6 +742,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		state.version += 1
 		window_state_changed()
 	}
+	if changed do tab_term_facts_tick(time.tick_now()) // a terminal it made or dropped: its tab's record says so (core_loop.odin)
 	_, q1 := cmd.(Get_State)
 	_, q2 := cmd.(List_Commands)
 	// the scheduler's own bookkeeping and the job queries: no event unless State moved
@@ -781,6 +784,7 @@ focus_taken_free :: proc() {
 // scripts). Settings that bound agents are user-only. The control caller
 // drives pi tabs through pi_prompt/pi_reload/pi_wait_idle, never reports.
 caller_may :: proc(caller: Caller, cmd: Command) -> bool {
+	if caller.kind == .None do return false // never set: nobody's
 	if caller.kind == .Tab_Host do return tab_host_may(cmd) // a page's or an app's reports only (tabhost_route.odin)
 	spec := command_spec(command_type(cmd))
 	if spec == nil || !who_allows(caller.kind, spec.who) do return false
@@ -826,7 +830,7 @@ confirm_mode :: proc(caller: Caller, class: Command_Class) -> Confirm_Mode {
 	case .UI:       return .Ask
 	case .Script, .Control, .Panel:
 		return state.settings.confirm[caller.kind][class]
-	case .App, .Tab_Host:
+	case .App, .Tab_Host, .None:
 		return .Ask
 	}
 	return .Ask
@@ -1026,9 +1030,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		_, tab, _ := find_tab(c.tab_id)
 		t := tab != nil ? term_of(tab.id) : nil
 		if t == nil do return fail("no such terminal tab"), false
-		text := window_term_selection(tab.id) // the selection is the window's copy's (term_view.odin)
-		if text == "" do return fail("nothing selected"), false
-		if platform.set_clipboard != nil do platform.set_clipboard(text)
+		// the selection is the window's copy's (term_view.odin): it copies it (no window: none)
+		if !window_copy_selection(tab.id) do return fail("nothing selected"), false
 		return {ok = true}, false // side effect only
 	case Send_Text:
 		s, tab, _ := find_tab(c.tab_id)
@@ -1296,7 +1299,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Reveal_Path:
 		path, err := sidebar_path(c.project_id, c.pi_session_id)
 		if err != "" do return fail(err), false
-		if platform.reveal != nil do platform.reveal(path)
+		window_reveal(path)
 		return {ok = true}, false // side effect only
 	case Session_Info:
 		return session_info_apply(c, caller)
@@ -1305,7 +1308,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Copy_Path:
 		path, err := sidebar_path(c.project_id, c.pi_session_id)
 		if err != "" do return fail(err), false
-		if platform.set_clipboard != nil do platform.set_clipboard(path)
+		window_clipboard_set(path)
 		return {ok = true}, false
 	case Restore_Sidebar:
 		sb := &state.sidebar
@@ -1389,9 +1392,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		tok := socket_mint_token({kind = .Control}, context.temp_allocator)
 		// with the old names too, for scripts that read them (env_names.odin)
 		exports := fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s' PI_DESK_SOCKET='%s' PI_DESK_TOKEN='%s'\n", socket_path(), tok, socket_path(), tok)
-		if platform.set_clipboard_secret != nil {
-			control_token_clip = {count = platform.set_clipboard_secret(exports), deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
-		} else if platform.set_clipboard != nil do platform.set_clipboard(exports)
+		// the window marks it (or, with no concealed pasteboard, puts it there plainly: nothing to clear)
+		if count, ok := window_clipboard_secret(exports); ok {
+			control_token_clip = {count = count, deadline = time.tick_add(time.tick_now(), CONTROL_TOKEN_CLIP_TTL)}
+		}
 		window_toast("Control token copied: paste it into a terminal within a minute (then it leaves the clipboard), then use deckhand --ctl (it works until you quit Deckhand)")
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
@@ -1400,7 +1404,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
 	case Set_Confirm_Policy:
-		if c.caller == .UI || c.caller == .Internal || c.caller == .Tab_Host do return fail("ui, internal and tab_host callers have fixed policies"), false
+		if c.caller == .None || c.caller == .UI || c.caller == .Internal || c.caller == .Tab_Host do return fail("ui, internal and tab_host callers have fixed policies"), false
 		state.settings.confirm[c.caller][c.class] = c.mode
 		return {ok = true}, true
 	case Set_Close_Confirm:
@@ -1421,7 +1425,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.appearance == c.mode do return {ok = true}, false
 		was := theme_is_light()
 		state.settings.appearance = c.mode
-		if platform.set_appearance != nil do platform.set_appearance(c.mode)
+		window_set_appearance(c.mode)
 		if theme_is_light() != was do for _, t in terms do term_apply_theme(t)
 		return {ok = true}, true
 	case System_Appearance:
@@ -1800,6 +1804,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		r = {error = "needs_confirmation", confirm_summary = p.summary}
 		if caller.kind == .UI || mode == .Trusted do r.confirm_token = p.token
 		else do r.confirm_by_user = true
+		window_confirmation_parked(p.summary, r.confirm_by_user) // the bar shows it (window_link.odin)
 		return r, false, true
 	}
 	for p, i in state.pending_confirmations {
@@ -1879,7 +1884,7 @@ cut_utf8 :: proc(s: string, max: int) -> string {
 asked_by :: proc(caller: Caller, what: string) -> string {
 	who: string
 	switch caller.kind {
-	case .UI, .Internal:
+	case .UI, .Internal, .None:
 	case .Script:  who = "A script asks"
 	case .App:     who = "An app asks"
 	case .Tab_Host: who = "A page asks"
@@ -2369,7 +2374,7 @@ new_term :: proc(tab_id: u64) -> ^Term {
 
 drop_term :: proc(tab_id: u64) {
 	window_view_drop(tab_id) // its buffer, Markdown view, page or app (tab_views.odin)
-	browser_facts_set(tab_id, nil) // what the window said of its page (window.browser_facts)
+	window_tab_facts_drop(tab_id) // what the window said of it (window.tab_facts)
 	changes_drop(tab_id) // a Changes tab's view (changes.odin)
 	if t := term_of(tab_id); t != nil {
 		term_free(t)

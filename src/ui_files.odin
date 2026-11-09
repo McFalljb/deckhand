@@ -1023,14 +1023,14 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 		name := filepath.base(path)
 		if dot := strings.last_index_byte(name, '.'); dot > 0 do files_name_field.cursor, files_name_field.anchor = dot, 0
 	case .Copy_Path:
-		if path == "" || core.platform.set_clipboard == nil do return false
-		core.platform.set_clipboard(path)
+		if path == "" || win_os.set_clipboard == nil do return false
+		win_os.set_clipboard(path)
 		return true
 	case .Copy_Relative:
 		rel := path
 		if strings.has_prefix(path, root) && len(path) > len(root) do rel = path[len(root) + 1:]
-		if rel == "" || core.platform.set_clipboard == nil do return false
-		core.platform.set_clipboard(rel)
+		if rel == "" || win_os.set_clipboard == nil do return false
+		win_os.set_clipboard(rel)
 		return true
 	}
 	return false

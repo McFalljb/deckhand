@@ -32,7 +32,7 @@ rv_reset :: proc() -> runtime.Allocator {
 	inbox_drain()
 	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
 	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	platform = {quit = proc() {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")

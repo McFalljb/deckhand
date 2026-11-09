@@ -28,7 +28,8 @@ sb_reset :: proc(data_dir := "") -> runtime.Allocator {
 	}
 	core.persist = {}
 	core.home_root = data_dir
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {sb_clip = strings.clone(s)}, reveal = proc(s: string) {sb_revealed = strings.clone(s)}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {sb_clip = strings.clone(s)}, reveal = proc(s: string) {sb_revealed = strings.clone(s)}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()

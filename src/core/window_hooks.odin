@@ -1,85 +1,36 @@
 package core
 
-// What the core asks of the window (design §10.2, M2-A): a proc table beside `platform`
-// (platform.odin), filled in by main.odin (window_hooks_app). Core files never set app.redraw
-// or show a toast themselves; they call these. M3 turns each entry into a message, so the
-// table's shape is the message list (M3-G: browser, app, Markdown and editor commands went first,
-// as tab_host.call, tabhost_route.odin). Nil entries do nothing (a headless core), and a query
-// answers as if there were no window: no buffers, nothing unsaved, no sheet open.
+// What the core asks of the window, and what it knows of it (design §10.2; M3-F2). Every entry is
+// a message on the window's link (window_link.odin), so nothing here calls into the window:
+//   - window.request{op} (core -> window): what the core asks the window to do (the clipboard,
+//     opening a link, Reveal in Finder, the appearance, a tab's view, the file watcher, the sheets).
+//     Most want no answer; the few that do (window_request with a reply) get a window.reply, which
+//     in process comes while the request is sent. No window, or no answer: the wrapper answers as
+//     if there were no window, at once (the core never waits on it).
+//   - window.facts and window.tab_facts (window -> core): what only the window knows (its buffers'
+//     unsaved changes, a page's zoom and bars, an app's frames, the first-run sheet, whether it has
+//     the keyboard). The window sends them whenever they changed (client.odin), so the core reads
+//     its own copy and never asks.
+// The table below keeps what is not a message: the redraw signal and test mode's hooks.
 //
 // The core owns state and records; the window owns views and buffers (design §4). So the core
 // never touches an editor, a Markdown view, a browser page, an app's frames or a terminal's
-// view: it reports that a tab record appeared or went (view_open, view_drop) and asks what it
-// needs to know (tab_dirty, unsaved_files, job_sheet_holds_quit).
+// view: it says that a tab record appeared or went (view_open, view_drop) and reads what the
+// window reported (tab_dirty, unsaved_files, job_sheet_holds_quit).
 
 import "core:fmt"
 import "core:strings"
 
 Window_Hooks :: struct {
-	state_changed:  proc(), // something the window shows changed: draw a frame (was app.redraw = true)
-	toast:          proc(text: string, err: bool), // a short line at the bottom of the window (toast.odin)
-	// an app tab's frame channel, for its hello (socket.odin): the service name, the channel's
-	// key and the GPU's id; ok false = no channel
-	frames_info:    proc(tab_id: u64) -> (service: string, key: [32]u8, device: u64, ok: bool),
-	// the screen the window is on, for an app tab's hello (socket.odin; any thread): its maximum
-	// frames per second and backing scale; ok false = unknown
-	display:        proc() -> (fps: int, scale: f32, ok: bool),
-	// BGRA pixels of a region of an app tab's frame slot (comments.odin's crops); false = none
-	frames_read:    proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool,
-	// what the window knows of a tab, for its object in State's JSON (json_write.odin); a
-	// headless core writes none of it:
-	// a browser tab's page as the window has it (comment mode and markers, zoom, bars and
-	// downloads, the agent strip, an upload's ask); an attached window sends it instead
-	// (window.browser_facts, browser_facts.odin)
-	browser_facts:  proc(tab_id: u64) -> Browser_Facts,
-	// a browser tab's page: open | waiting | unloaded | closed | opening; "" = no page
-	browser_page:   proc(tab_id: u64) -> string,
-	// an app tab's live frames and Inspect; ok false = no process
-	app_view:       proc(tab_id: u64) -> (v: App_View, ok: bool),
-	// a Markdown tab's preview: the source line at its top, its links and headings, find
-	// matches (-1: no find bar on the preview); ok false = not laid out yet
-	md_view:        proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool),
-	test_step:      proc(), // test mode's script step, after the inbox (autotest.odin, core_loop.odin)
-	test_event:     proc(ev: Event), // test mode: every event, as it is emitted (autotest.odin)
-
-	// ---- tab views: the core keeps the tab records, the window their views ----
-	// A tab record appeared (show_file, a restored tab shown, a Changes tab): the window makes its
-	// view if it has none (an editor's buffer, a Markdown view, a Changes tab's diff, a browser
-	// page that loads when shown), then goes to line or anchor as view_goto.
-	view_open:      proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string),
-	// The tab's view goes to a 1-based line (0 = stays) or a Markdown heading id ("" = none).
-	view_goto:      proc(tab_id: u64, line: int, anchor: string),
-	view_drop:      proc(tab_id: u64), // the tab closed: its view goes (drop_term)
-	view_moved:     proc(tab_id: u64, path: string), // its file moved to path (a rename): the buffer follows
-	files_deleted:  proc(under: string), // files under this path went to the Trash: buffers check the disk
-	// A Changes tab's diff area: the text, or why there is none (message != ""; the text stays);
-	// path is what it is of. False: no such view.
-	changes_diff:   proc(tab_id: u64, path, text, message: string) -> bool,
-	changes_rewind: proc(tab_id: u64), // another file selected: its diff shows from the top
-	commit_message_clear: proc(), // a commit made from a Changes tab: its message field empties
-	unsaved_files:  proc(under: string) -> int, // buffers with unsaved changes ("" = all; else in that folder)
-	tab_dirty:      proc(tab_id: u64) -> bool, // the tab's buffer has unsaved changes
-	// The file watcher (editor_watch.odin: FSEvents through the window's shim; its events reach
-	// the editors and the file-system model in editor_tick). No window: nothing is watched.
-	watch_folder:   proc(folder: string), // watch this project folder too
-	watch_sync:     proc(), // the set of folders to watch changed (open files, reload's folders)
-
-	// ---- terminals: the window keeps its own copy of the ones it shows (term_stream.odin) ----
-	// the grid a new terminal gets from its tab's pane (before its child starts); ok false: no pane yet
-	term_fit:       proc(tab_id: u64) -> (cols, rows: u16, cell: [2]f32, ok: bool),
-	// the user's selection in the window's copy of the tab's terminal ("": none). M4: a window.request
-	term_selection: proc(tab_id: u64) -> string,
-
-	// ---- sheets and the window's own state ----
-	job_sheet:      proc(c: Job_Sheet, caller: Caller) -> (Result, bool), // the job_sheet command (ui_job_sheet.odin)
-	job_sheet_open: proc() -> bool,
-	// the sheet has changes: true, and it asks (the next quit discards them)
-	job_sheet_holds_quit: proc() -> bool,
-	job_sheet_saved: proc(path, err: string) -> bool, // Job_Save's answer: true = the sheet closed
-	setup_sheet:    proc(op: Setup_Sheet_Op, why: string), // the first-run sheet (ui_setup.odin)
-	setup_state:    proc() -> (Setup_State, bool), // the sheet as get_state's focus shows it (temp allocated)
-	dpi:            proc() -> f32, // framebuffer px per logical px (0 = none)
+	state_changed: proc(), // something the window shows changed: draw a frame (was app.redraw = true)
+	test_step:     proc(), // test mode's script step, after the inbox (autotest.odin, core_loop.odin)
+	test_event:    proc(ev: Event), // test mode: every event, as it is emitted (autotest.odin)
+	// the window's unit tests over the tab host's link (client_attach_host): it sends its facts
+	// now, before each command (the app sends them whenever they change: client.odin)
+	test_facts:    proc(),
 }
+
+window: Window_Hooks
 
 // The first-run sheet as get_state shows it (json_write.odin's setup_json).
 Setup_State :: struct {
@@ -100,9 +51,7 @@ Setup_Sheet_Op :: enum u8 {
 	Failed, // Done's Set_Home_Dir failed: why
 }
 
-window: Window_Hooks
-
-// An app tab's window side, for State's JSON (Window_Hooks.app_view).
+// An app tab's window side, for State's JSON.
 App_View :: struct {
 	frames:   u64, // frames that became the shown one
 	inspect:  bool, // Inspect is on (its boxes drawn)
@@ -112,71 +61,199 @@ App_View :: struct {
 	ring_h:   int,
 }
 
+// ---- window.request: what the core asks the window to do ----
+
+Window_Op :: enum u8 {
+	None,
+	Clipboard_Set, // text onto the clipboard
+	Clipboard_Secret, // text onto it marked concealed and transient; reply: ok (marked) and the change count after it
+	Clipboard_Clear_If, // clear it if it still holds what count put there
+	Open_Url, // a web or mail link in the user's default app; reply: ok (opened)
+	Reveal, // path in Finder
+	Appearance, // the window's own appearance (mode)
+	Copy_Selection, // the window's copy of tab_id's terminal: its selection onto the clipboard; reply: ok (there was one)
+	Term_Fit, // the grid tab_id's pane fits; reply: ok, cols, rows, cell
+	View_Open, // tab_id's record appeared (kind): the window makes its view, then goes to line or anchor
+	View_Goto, // tab_id's view goes to line (0 = stays) or anchor ("" = none)
+	View_Drop, // tab_id closed: its view goes
+	View_Moved, // tab_id's file moved to path: the buffer follows
+	Files_Deleted, // files under path went to the Trash: buffers look at the disk
+	Changes_Diff, // a Changes tab's diff area: text, or why there is none (message); of path
+	Changes_Rewind, // another file selected: its diff from the top
+	Commit_Message_Clear, // a commit made: the message field empties
+	Watch_Folder, // watch this project folder (path) too
+	Watch_Sync, // the set of folders to watch changed
+	Setup_Sheet, // the first-run sheet: setup (and text: why)
+	Job_Sheet, // the job_sheet command (job_sheet, caller); reply: result, changed
+	Job_Sheet_Saved, // Job_Save's answer (path, message: its error); reply: ok (the sheet closed)
+	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
+}
+
+Window_Request :: struct {
+	op:        Window_Op,
+	tab_id:    u64,
+	text:      string,
+	path:      string,
+	message:   string,
+	count:     int,
+	line:      int,
+	anchor:    string,
+	kind:      Tab_Kind,
+	mode:      Appearance,
+	setup:     Setup_Sheet_Op,
+	job_sheet: Job_Sheet,
+	caller:    Caller,
+}
+
+Window_Reply :: struct {
+	ok:      bool,
+	count:   int,
+	cols:    u16,
+	rows:    u16,
+	cell:    [2]f32,
+	changed: bool,
+	result:  Result,
+}
+
+// ---- window.facts and window.tab_facts: what only the window knows ----
+
+Window_Facts :: struct {
+	active:               bool, // the window has the keyboard
+	dpi:                  f32, // framebuffer px per logical px (0 = not known)
+	fps:                  int, // the screen it is on: its maximum frames per second (0 = not known)
+	scale:                f32, // and its backing scale
+	frames_service:       string, // app tabs' frame channels: the service ("" = none) and the GPU's id
+	frames_device:        u64,
+	job_sheet_open:       bool,
+	setup:                Maybe(Setup_State), // the first-run sheet as get_state's focus shows it
+	unsaved:              []string, // each buffer with unsaved changes: its file's path ("" = none yet)
+}
+
+Md_Facts :: struct {
+	line, links, headings: int,
+	matches:               int, // -1: no find bar on the preview
+}
+
+Tab_Facts :: struct {
+	browser:    Maybe(Browser_Facts), // a browser tab's page facts (browser_facts.odin)
+	page:       string, // a browser tab's page: open | waiting | unloaded | closed | opening ("" = none)
+	app:        Maybe(App_View), // an app tab's live frames and Inspect (none: no process)
+	frames_key: string, // an app tab's frame channel key, hex ("" = none); only its hello carries it
+	md:         Maybe(Md_Facts), // a Markdown tab's preview, once laid out
+	dirty:      bool, // an editor tab's buffer has unsaved changes
+}
+
 // Something the window shows changed: it draws a frame soon.
 window_state_changed :: proc() {
 	window_link_dirty() // the window's replica gets it at the next flush (window_link.odin)
 	if window.state_changed != nil do window.state_changed()
 }
 
-// A short line at the bottom of the window (what a menu choice did, or why not).
+// A short line at the bottom of the window (what a menu choice did, or why not). No window: none.
 window_toast :: proc(text: string, err := false) {
-	if window_link_toast(text, err) do return // an attached window gets it as a message (window_link.odin)
-	if window.toast != nil do window.toast(text, err)
+	_ = window_link_toast(text, err)
 }
 
-// A browser tab's page facts the window has, into its object in State (none without a window):
-// what an attached window sent, asked for now (window_link_pull), else the hook's (unit tests).
+window_test_event :: proc(ev: Event) {if window.test_event != nil do window.test_event(ev)}
+
+// ---- requests: with no window, nothing happens and a query answers as if none ----
+
+@(private = "file")
+ask :: proc(r: Window_Request) {_, _ = window_link_request(r, false)}
+
+window_clipboard_set :: proc(text: string) {ask({op = .Clipboard_Set, text = text})}
+// A secret onto the clipboard; ok false: put there plainly (or no window), nothing to clear.
+window_clipboard_secret :: proc(text: string) -> (count: int, ok: bool) {
+	r, answered := window_link_request({op = .Clipboard_Secret, text = text}, true)
+	return r.count, answered && r.ok
+}
+window_clipboard_clear_if :: proc(count: int) {ask({op = .Clipboard_Clear_If, count = count})}
+// False: not opened (or no window).
+window_open_url :: proc(url: string) -> bool {
+	r, answered := window_link_request({op = .Open_Url, text = url}, true)
+	return answered && r.ok
+}
+window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
+window_set_appearance :: proc(mode: Appearance) {ask({op = .Appearance, mode = mode})}
+// The window's copy of the tab's terminal: its selection onto the clipboard. False: none (or no window).
+window_copy_selection :: proc(tab_id: u64) -> bool {
+	r, answered := window_link_request({op = .Copy_Selection, tab_id = tab_id}, true)
+	return answered && r.ok
+}
+
+window_view_open :: proc(tab_id: u64, kind: Tab_Kind, line := 0, anchor := "") {
+	ask({op = .View_Open, tab_id = tab_id, kind = kind, line = line, anchor = anchor})
+}
+window_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
+	_, t, _ := find_tab(tab_id)
+	if t == nil do return
+	ask({op = .View_Goto, tab_id = tab_id, kind = t.kind, line = line, anchor = anchor})
+}
+window_view_drop :: proc(tab_id: u64) {ask({op = .View_Drop, tab_id = tab_id})}
+window_view_moved :: proc(tab_id: u64, path: string) {ask({op = .View_Moved, tab_id = tab_id, path = path})}
+window_files_deleted :: proc(under: string) {ask({op = .Files_Deleted, path = under})}
+window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") {
+	ask({op = .Changes_Diff, tab_id = tab_id, path = path, text = text, message = message})
+}
+window_changes_rewind :: proc(tab_id: u64) {ask({op = .Changes_Rewind, tab_id = tab_id})}
+window_commit_message_clear :: proc() {ask({op = .Commit_Message_Clear})}
+window_watch_folder :: proc(folder: string) {ask({op = .Watch_Folder, path = folder})}
+window_watch_sync :: proc() {ask({op = .Watch_Sync})}
+window_setup_sheet :: proc(op: Setup_Sheet_Op, why := "") {ask({op = .Setup_Sheet, setup = op, text = why})}
+
+// The grid a new terminal gets from its tab's pane, before its child starts (no window, or no
+// pane yet: it keeps its own).
+window_term_fit :: proc(t: ^Term, tab_id: u64) {
+	r, answered := window_link_request({op = .Term_Fit, tab_id = tab_id}, true)
+	if answered && r.ok do term_resize(t, r.cols, r.rows, r.cell.x, r.cell.y)
+}
+
+// The job_sheet command: the sheet is the window's (ui_job_sheet.odin).
+window_job_sheet :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
+	r, answered := window_link_request({op = .Job_Sheet, job_sheet = c, caller = caller}, true)
+	if !answered do return fail("no window"), false
+	return r.result, r.changed
+}
+// Job_Save's answer for the sheet: true = it closed.
+window_job_sheet_saved :: proc(path, err: string) -> bool {
+	r, answered := window_link_request({op = .Job_Sheet_Saved, path = path, message = err}, true)
+	return answered && r.ok
+}
+
+// ---- facts: what the window last reported (none with no window) ----
+
+// A browser tab's page facts, into its object in State (none without a window).
 window_browser_json :: proc(b: ^strings.Builder, tab_id: u64) {
-	if window_link_pull(tab_id) {
-		if f, ok := browser_facts_get(tab_id); ok do browser_facts_write(b, f)
-		return
+	if f := window_tab_facts(tab_id); f != nil {
+		if bf, ok := &f.browser.?; ok do browser_facts_write(b, bf)
 	}
-	if window.browser_facts == nil do return
-	f := window.browser_facts(tab_id)
-	browser_facts_write(b, &f)
 }
 
 // A browser tab's page state ("" = no page, or no window).
 window_browser_page :: proc(tab_id: u64) -> string {
-	if window.browser_page == nil do return ""
-	return window.browser_page(tab_id)
+	if f := window_tab_facts(tab_id); f != nil do return f.page
+	return ""
 }
 
 // An app tab's frames and Inspect (ok false: no process, or no window).
 window_app_view :: proc(tab_id: u64) -> (App_View, bool) {
-	if window.app_view == nil do return {}, false
-	return window.app_view(tab_id)
+	if f := window_tab_facts(tab_id); f != nil do if a, ok := f.app.?; ok do return a, true
+	return {}, false
 }
 
 // A Markdown tab's preview numbers (ok false: not laid out, or no window).
-window_md_view :: proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool) {
-	if window.md_view == nil do return
-	return window.md_view(tab_id, source)
+window_md_view :: proc(tab_id: u64) -> (line, links, headings, matches: int, ok: bool) {
+	if f := window_tab_facts(tab_id); f != nil do if m, has := f.md.?; has do return m.line, m.links, m.headings, m.matches, true
+	return
 }
 
-// ---- the wrappers: with no window, nothing happens and the queries answer as if none ----
-
-window_test_event :: proc(ev: Event) {if window.test_event != nil do window.test_event(ev)}
-
-window_view_open :: proc(tab_id: u64, kind: Tab_Kind, line := 0, anchor := "") {
-	if window.view_open != nil do window.view_open(tab_id, kind, line, anchor)
-}
-window_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
-	if window.view_goto != nil do window.view_goto(tab_id, line, anchor)
-}
-window_view_drop :: proc(tab_id: u64) {if window.view_drop != nil do window.view_drop(tab_id)}
-window_view_moved :: proc(tab_id: u64, path: string) {if window.view_moved != nil do window.view_moved(tab_id, path)}
-window_files_deleted :: proc(under: string) {if window.files_deleted != nil do window.files_deleted(under)}
-window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") -> bool {
-	return window.changes_diff != nil && window.changes_diff(tab_id, path, text, message)
-}
-window_changes_rewind :: proc(tab_id: u64) {if window.changes_rewind != nil do window.changes_rewind(tab_id)}
-window_commit_message_clear :: proc() {if window.commit_message_clear != nil do window.commit_message_clear()}
 // Buffers with unsaved changes ("" = all; else in that folder). known false: no window to ask
 // (a detached or headless core, M4), so it cannot say: a caller asks or refuses, never takes 0.
 window_unsaved_files :: proc(under := "") -> (n: int, known: bool) {
-	if window.unsaved_files == nil do return 0, false
-	return window.unsaved_files(under), true
+	f := window_facts()
+	if f == nil do return 0, false
+	for p in f.unsaved do if under == "" || (p != "" && wt_within(fs_real(p), under)) do n += 1
+	return n, true
 }
 
 // What a quit or update prompt says about unsaved files ("" = none to mention).
@@ -185,33 +262,36 @@ unsaved_files_note :: proc(n: int, known: bool) -> string {
 	if n > 0 do return fmt.tprintf("%d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
 	return ""
 }
+
 // Whether an editor tab's buffer has unsaved changes; not known with no window to ask (callers
 // that could lose them ask instead).
 window_tab_dirty :: proc(tab_id: u64) -> (dirty, known: bool) {
-	if window.tab_dirty == nil do return false, false
-	return window.tab_dirty(tab_id), true
+	if window_facts() == nil do return false, false
+	if f := window_tab_facts(tab_id); f != nil do return f.dirty, true
+	return false, true
 }
-window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
-window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}
 
-window_term_fit :: proc(t: ^Term, tab_id: u64) {
-	if window.term_fit == nil do return
-	if cols, rows, cell, ok := window.term_fit(tab_id); ok do term_resize(t, cols, rows, cell.x, cell.y)
+window_job_sheet_open :: proc() -> bool {
+	f := window_facts()
+	return f != nil && f.job_sheet_open
 }
-// No window: no selection.
-window_term_selection :: proc(tab_id: u64) -> string {return window.term_selection != nil ? window.term_selection(tab_id) : ""}
-
-window_job_sheet :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
-	if window.job_sheet == nil do return fail("no window"), false
-	return window.job_sheet(c, caller)
+// The sheet has changes: it asks to discard them, and the quit stops. No window: nothing holds it.
+window_job_sheet_holds_quit :: proc() -> bool {
+	r, answered := window_link_request({op = .Job_Sheet_Holds_Quit}, true)
+	return answered && r.ok
 }
-window_job_sheet_open :: proc() -> bool {return window.job_sheet_open != nil && window.job_sheet_open()}
-// No window: no sheet, so nothing holds the quit.
-window_job_sheet_holds_quit :: proc() -> bool {return window.job_sheet_holds_quit != nil && window.job_sheet_holds_quit()}
-window_job_sheet_saved :: proc(path, err: string) -> bool {return window.job_sheet_saved != nil && window.job_sheet_saved(path, err)}
-window_setup_sheet :: proc(op: Setup_Sheet_Op, why := "") {if window.setup_sheet != nil do window.setup_sheet(op, why)}
+// The first-run sheet as get_state's focus shows it; ok false: none (or no window).
 window_setup_state :: proc() -> (Setup_State, bool) {
-	if window.setup_state == nil do return {}, false
-	return window.setup_state()
+	if f := window_facts(); f != nil do if s, ok := f.setup.?; ok do return s, true
+	return {}, false
 }
-window_dpi :: proc() -> f32 {return window.dpi != nil ? window.dpi() : 0}
+window_dpi :: proc() -> f32 {
+	f := window_facts()
+	return f != nil ? f.dpi : 0
+}
+// The window has the keyboard. No window attached: true, as nobody can say otherwise
+// (M4-D: notifications with the window closed).
+window_is_active :: proc() -> bool {
+	f := window_facts()
+	return f == nil || f.active
+}

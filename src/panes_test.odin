@@ -42,16 +42,14 @@ pt_on_heap :: proc(a: runtime.Allocator) -> bool {
 	return a.procedure == runtime.heap_allocator_proc
 }
 
-@(private = "file")
-pt_active: bool
-
 // One session in State with a pane: its pi tab and n shells (not started). Current.
 pt_one :: proc(n: int) -> ^core.Open_Session {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
-	pt_active = true
-	core.platform = {window_active = proc() -> bool {return pt_active}}
+	app.window_active = true
+	core.platform, win_os = {}, {}
+	win_os = {}
 	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("pi-pt"), cwd = "/tmp/pt"}
 	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Not_Started})
 	for i in 0 ..< n do append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Shell_Tab{}, title = fmt.aprintf("shell %d", i + 1), status = .Not_Started})
@@ -77,8 +75,9 @@ pt_two :: proc() -> Two {
 	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
-	pt_active = true
-	core.platform = {window_active = proc() -> bool {return pt_active}}
+	app.window_active = true
+	core.platform, win_os = {}, {}
+	win_os = {}
 	x: Two
 	x.a, x.b = core.new_id(), core.new_id()
 	split := core.new_id()
@@ -126,7 +125,7 @@ pt_two_done :: proc(x: Two) {
 	delete_key(&editors, x.editor)
 	delete_key(&browsers, x.browser)
 	delete_key(&apps, x.app_id)
-	core.platform = {}
+	core.platform, win_os = {}, {}
 }
 
 pt_strip_titles :: proc(s: ^core.Open_Session, pane: u64) -> string {
@@ -366,9 +365,11 @@ panes_bell_counts_every_pane :: proc(t: ^testing.T) {
 	testing.expect(t, core.status_on_screen(x.s, x.editor), "the focused tab: on screen")
 	testing.expect(t, !core.status_on_screen(x.s, x.browser), "a hidden tab is not")
 	testing.expect(t, core.notify_on_screen(x.s.id), "the session's pi tab is shown: its bell entries are seen")
-	pt_active = false
+	app.window_active = false
+	client_test_facts() // what the window reports (client.odin)
 	testing.expect(t, !core.status_on_screen(x.s, x.pi) && !core.notify_on_screen(x.s.id), "window behind: nothing seen")
-	pt_active = true
+	app.window_active = true
+	client_test_facts()
 	// seen: every pane's shown tab, not the hidden ones
 	for &tab in x.s.tabs do tab.unseen = true
 	ids := core.status_wants_seen()
@@ -463,7 +464,8 @@ panes_close_hands_over_within_the_pane :: proc(t: ^testing.T) {
 	x := pt_two()
 	// no runtime for the closes below (the stand-ins are not real ones to free)
 	pt_two_done(x)
-	core.platform = {window_active = proc() -> bool {return pt_active}}
+	core.platform, win_os = {}, {}
+	win_os = {}
 	// B shows its browser (the middle one): its next tab, the app, takes over; A keeps its shell
 	r := core.run_command(core.Close_Tab{tab_id = x.browser}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
@@ -505,7 +507,8 @@ panes_background_open_leaves_panes_alone :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	x := pt_two()
 	pt_two_done(x)
-	core.platform = {window_active = proc() -> bool {return pt_active}}
+	core.platform, win_os = {}, {}
+	win_os = {}
 	dir := fmt.aprintf("%s/pt-show-%d", os.get_env("TMPDIR", context.temp_allocator), os.get_pid())
 	os.make_directory_all(dir)
 	defer os.remove_all(dir)

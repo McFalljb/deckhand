@@ -634,6 +634,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/state_read.odin", "replica_apply", "jg.parse_string", "", ""}, // the window's state stream (state.full, state.delta)
 		{"src/core/window_link.odin", "window_msg_parse", "jg.parse_string", "", ""}, // the window reads the core's frames
 		{"src/core/window_link.odin", "link_message", "jg.parse_string", "", ""}, // the core reads the window's frames
+		{"src/core/window_link.odin", "window_request_parse", "jg.parse_string", "", ""}, // the window reads the core's window.request
 		{"src/core/window_link.odin", "window_command_decode_for_test", "jg.parse_string", "", ""}, // tests
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts

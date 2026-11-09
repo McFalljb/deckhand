@@ -296,7 +296,7 @@ bell_activate :: proc(id: u64) {
 		if n.id != id do continue
 		if n.session == 0 do return
 		if s := core.find_session(n.session); s != nil {
-			if _, t, _ := core.find_tab(n.tab_id); t != nil {
+			if _, t, _ := find_tab(n.tab_id); t != nil {
 				ui_do(core.Focus_Tab{tab_id = n.tab_id})
 				// its pi exited: it starts again, as opening the session does (dead_tab.odin)
 				if t == core.session_pi_tab(s) && core.tab_is_dead(t) do ui_do(core.Pi_Restart{tab_id = t.id})

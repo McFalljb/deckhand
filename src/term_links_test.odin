@@ -138,7 +138,8 @@ link_setup :: proc() -> (shell_tab, home_tab_id: u64) {
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	clear(&opened)
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
 	append(&state.projects, core.Project{id = core.new_id(), cwd = "/tmp", label = "proj"})
 	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = "/tmp"}
 	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
@@ -307,7 +308,7 @@ term_link_open_fails :: proc(t: ^testing.T) {
 	// #5: the default app refusing the URL is a failure, not ok
 	context.allocator = runtime.heap_allocator()
 	tab, _ := link_setup()
-	core.platform.open_url = proc(url: string) -> bool {return false}
+	win_os.open_url = proc(url: string) -> bool {return false}
 	r := core.run_command(core.Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, {kind = .UI})
 	testing.expect(t, !r.ok, "open_url refused: not ok")
 }

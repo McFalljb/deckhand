@@ -284,32 +284,32 @@ autotest_init :: proc() {
 // own clipboard. A page (Chromium) still uses the system pasteboard (browser-act).
 autotest_platform :: proc() {
 	// never a modal panel or a Finder window from a script
-	core.platform.pick_folder = proc() -> string {
+	win_os.pick_folder = proc() -> string {
 		p := autotest.fake_folder
 		autotest.fake_folder = ""
 		log("folder picker ->", p)
 		return p
 	}
-	core.platform.reveal = proc(path: string) {
+	win_os.reveal = proc(path: string) {
 		log("reveal", path)
 		delete(autotest.revealed)
 		autotest.revealed = strings.clone(path)
 	}
 	// kept for assert_clipboard, and what the next paste inserts
-	core.platform.set_clipboard = proc(text: string) {
+	win_os.set_clipboard = proc(text: string) {
 		delete(autotest.clipboard)
 		autotest.clipboard = strings.clone(text)
 		autotest_paste_set(text)
 	}
-	core.platform.get_clipboard = proc() -> string {return autotest.pasteboard}
-	core.platform.set_clipboard_secret, core.platform.clear_clipboard_if = nil, nil // the script's own pasteboard (set_clipboard)
-	core.platform.open_url = proc(url: string) -> bool {
+	win_os.get_clipboard = proc() -> string {return autotest.pasteboard}
+	win_os.set_clipboard_secret, win_os.clear_clipboard_if = nil, nil // the script's own pasteboard (set_clipboard)
+	win_os.open_url = proc(url: string) -> bool {
 		log("open url", url)
 		delete(autotest.opened_url)
 		autotest.opened_url = strings.clone(url)
 		return true
 	}
-	core.platform.left_button = proc() -> bool {return autotest.left_down}
+	win_os.left_button = proc() -> bool {return autotest.left_down}
 }
 
 autotest_paste_set :: proc(text: string) {
@@ -534,6 +534,7 @@ autotest_step :: proc() {
 		at.started = true
 		app_deactivate()
 	}
+	autotest_push_facts()
 	now := time.tick_now()
 	// the replica against the core's State, between steps too (what terminals and timers did)
 	if time.tick_diff(at.replica_checked, now) >= 200 * time.Millisecond do autotest_check_replica()
@@ -598,6 +599,7 @@ autotest_step :: proc() {
 		line := strings.trim_space(at.lines[at.next])
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
+		autotest_push_facts() // what the step before this one changed in the window (a key, a mode)
 		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
 		cmd, _, rest := strings.partition(line, " ")
 		// and each shown terminal's copy (M3-H): once per step, not on every retry of it
@@ -1091,7 +1093,7 @@ autotest_step :: proc() {
 			log(fmt.tprintf("traffic lights: close button centre %.1f,%.1f; top bar centre y %.1f", x, y, f32(TAB_STRIP_H) / 2))
 		case "copy":
 			key_event("c", sapp.MODIFIER_SUPER)
-			log("clipboard:", fmt.tprintf("%q", core.clipboard_text()))
+			log("clipboard:", fmt.tprintf("%q", clipboard_text()))
 		case "resize":
 			window_set_content_size(num(args[0]), num(args[1]))
 		case "shot":
@@ -1320,6 +1322,13 @@ script_finish_wait :: proc(c: core.Command) -> time.Duration {
 	}
 	if own <= 0 do return script_finish_timeout
 	return max(script_finish_timeout, own + 10 * time.Second)
+}
+
+// The window's facts (window_hooks.odin) reach the core before a step reads its State: a step's
+// key or click changed them in this same tick, after the frame's push.
+autotest_push_facts :: proc() {
+	client_facts()
+	script_drain()
 }
 
 // Runs one script command now, in order with anything queued before (main thread). finished:

@@ -17,8 +17,9 @@ N_UI :: Caller{kind = .UI}
 
 @(private = "file")
 n_os: [dynamic]string
+// Whether the window has the keyboard: what the fake window reports (window_request_test.odin).
 @(private = "file")
-n_active: bool
+n_set_active :: proc(on: bool) {fw_facts({active = on})}
 
 // Two open sessions (pi tabs running), the first current; returns their ids.
 @(private = "file")
@@ -27,9 +28,11 @@ n_reset :: proc() -> (a, b: u64) {
 	inbox_drain()
 	state = State{}
 	clear(&n_os)
-	n_active = true
 	notice_test_now = time.now()
-	platform = {notify = proc(title, body: string) {append(&n_os, fmt.aprintf("%s|%s", title, body))}, window_active = proc() -> bool {return n_active}}
+	platform = {notify = proc(title, body: string) {append(&n_os, fmt.aprintf("%s|%s", title, body))}}
+	core_detach_window()
+	fw_attach()
+	n_set_active(true)
 	for name, i in ([]string{"alpha", "beta"}) {
 		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
 		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle}) // its bridge reported
@@ -58,6 +61,7 @@ n_later :: proc(d: time.Duration) {notice_test_now._nsec += i64(d)}
 n_done :: proc() {
 	notice_test_now = {}
 	platform = {}
+	core_detach_window()
 }
 
 @(test)
@@ -91,13 +95,13 @@ bell_status_changes :: proc(t: ^testing.T) {
 	run_command(Pi_Status_Update{tab_id = n_tab(b), agent = .Unknown})
 	testing.expect_value(t, len(state.notices.items), len(kinds))
 	// the current session with the window in the background: it counts
-	n_active = false
+	n_set_active(false)
 	n_later(11 * time.Second)
 	n_status(a, .Working)
 	n_status(a, .Idle)
 	testing.expect_value(t, state.notices.items[len(state.notices.items) - 1].session, a)
 	// pi exited in a background session
-	n_active = true
+	n_set_active(true)
 	n_later(11 * time.Second)
 	run_command(Tab_Exited{tab_id = n_tab(b)})
 	testing.expect_value(t, state.notices.items[len(state.notices.items) - 1].kind, Notice_Kind.Exited)
@@ -109,7 +113,7 @@ bell_coalesces_flapping :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, b := n_reset()
 	defer n_done()
-	n_active = false
+	n_set_active(false)
 	// within 10 s: one entry, the latest wins; the same kind again raises no second OS notification
 	n_status(b, .Working)
 	n_status(b, .Error)
@@ -169,11 +173,11 @@ bell_focus_marks_read :: proc(t: ^testing.T) {
 	run_command(Notify_Post{job = {job_id = "j1", title = "Backup", status = .Needs_You}})
 	testing.expect_value(t, notices_unread(), 2)
 	// focusing it while the window is in the background: still unread
-	n_active = false
+	n_set_active(false)
 	run_command(Focus_Session{session = b}, N_UI)
 	testing.expect_value(t, notices_unread(), 2)
 	// the window comes to the front (main.odin: FOCUSED): read
-	n_active = true
+	n_set_active(true)
 	run_command(Notifications_Mark_Read{session = state.current_session})
 	testing.expect_value(t, notices_unread(), 1)
 	// focusing a session while the window is active reads it
@@ -204,7 +208,7 @@ bell_settings_and_os :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, b := n_reset()
 	defer n_done()
-	n_active = false
+	n_set_active(false)
 	// defaults: everything collected; waiting, errors, exits, jobs that need you or failed notify
 	n_status(b, .Working)
 	n_status(b, .Idle)
@@ -217,7 +221,7 @@ bell_settings_and_os :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(n_os), 3) // needs you, failed
 	testing.expect_value(t, state.notices.os_sent, 3)
 	// in front: no OS notification
-	n_active = true
+	n_set_active(true)
 	n_later(11 * time.Second)
 	n_status(b, .Error)
 	testing.expect_value(t, len(n_os), 3)
@@ -233,7 +237,7 @@ bell_settings_and_os :: proc(t: ^testing.T) {
 	testing.expect_value(t, json_path(state_json(), "settings.bell.finished"), "false")
 	testing.expect_value(t, json_path(state_json(), "settings.bell.waiting"), "true")
 	// OS off
-	n_active = false
+	n_set_active(false)
 	run_command(Set_Bell{os = false}, N_UI)
 	n_later(11 * time.Second)
 	n_status(b, .Error)
@@ -317,7 +321,7 @@ bell_os_not_spammed :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, b := n_reset()
 	defer n_done()
-	n_active = false
+	n_set_active(false)
 	n_status(b, .Idle, waiting = true)
 	n_later(2 * time.Second)
 	n_status(b, .Error) // another kind, same session, 2 s later: the bell only
@@ -407,10 +411,10 @@ bell_window_focus_only_when_unread :: proc(t: ^testing.T) {
 	a, _ := n_reset()
 	defer n_done()
 	testing.expect(t, !notify_wants_seen(a), "no entries: nothing to queue")
-	n_active = false
+	n_set_active(false)
 	n_status(a, .Working)
 	n_status(a, .Idle)
-	n_active = true
+	n_set_active(true)
 	testing.expect(t, notify_wants_seen(a), "an unread entry of the session on screen")
 	testing.expect(t, !notify_wants_seen(0), "no session")
 }
@@ -421,7 +425,7 @@ bell_quit_is_quiet :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, b := n_reset()
 	defer n_done()
-	n_active = false
+	n_set_active(false)
 	app_quitting = true
 	defer app_quitting = false
 	run_command(Tab_Exited{tab_id = n_tab(a)})
@@ -447,7 +451,7 @@ bell_failed_action_ignores_errors_off :: proc(t: ^testing.T) {
 	run_command(Tab_Exited{tab_id = n_tab(a)})
 	testing.expect_value(t, len(state.notices.items), 1)
 	// in the background: the bell entry, but no macOS banner while Errors is off
-	n_active = false
+	n_set_active(false)
 	n_later(11 * time.Second)
 	notify_failed("Send to Atlas", "pi started over: copied to the clipboard")
 	testing.expect_value(t, len(state.notices.items), 2)

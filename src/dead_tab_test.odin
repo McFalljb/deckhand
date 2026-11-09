@@ -36,7 +36,8 @@ d_reset :: proc() -> runtime.Allocator {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	core.dead_tab_reset()
-	core.platform = {set_clipboard = proc(s: string) {}}
+	core.platform, win_os = {}, {}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()

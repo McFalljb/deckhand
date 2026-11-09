@@ -16,6 +16,7 @@ package main
 // in Deckhand's own process, is the producer (browser.odin; docs/BROWSER.md §1.1).
 
 import "core:c"
+import "core:encoding/hex"
 import "core:time"
 
 when ODIN_OS == .Darwin {
@@ -193,4 +194,30 @@ ring_gen :: proc(r: ^Frame_Ring, gen: u32) -> ^Ring_Gen {
 // (an app that sends a slot again must not get the one Deckhand samples).
 ring_may_release_now :: proc(r: ^Frame_Ring, gen: u32, slot: u32) -> bool {
 	return !(r.shown_gen == gen && r.shown_slot == int(slot))
+}
+
+// What an app tab's hello says of its frame channel (the core writes it from the window's facts,
+// client.odin): the service and the GPU's id ("" = none), and the tab's channel key (hex; ok false:
+// no channel). The key is never logged.
+frames_service :: proc() -> (service: string, device: u64) {
+	when ODIN_OS == .Darwin {
+		return string(dh_frames_service()), dh_frames_device_id()
+	}
+	return "", 0
+}
+
+frames_chan_key :: proc(tab_id: u64) -> (key_hex: string, ok: bool) {
+	when ODIN_OS == .Darwin {
+		key: [32]u8
+		if dh_frames_chan_key(tab_id, &key[0]) == 1 do return string(hex.encode(key[:], context.temp_allocator)), true
+	}
+	return "", false
+}
+
+// BGRA pixels of a region of an app tab's frame slot (ui_comments.odin's crops); false: none.
+frames_read :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, dst: []u8) -> bool {
+	when ODIN_OS == .Darwin {
+		return dh_frames_read(tab_id, gen, c.int(slot), c.int(x), c.int(y), c.int(w), c.int(h), raw_data(dst)) != 0
+	}
+	return false
 }

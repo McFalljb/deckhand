@@ -129,7 +129,8 @@ held_ids_persist :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	core.persist = {}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -320,7 +321,8 @@ adopt_run :: proc(t: ^testing.T, f: ^core.Fake_Holder, text: string, binds: map[
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}, settings = {keep_sessions = true}}
 	core.persist = {}
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	path := fmt.tprintf("%s/tokens.json", core.home_root)

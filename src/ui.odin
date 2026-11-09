@@ -201,15 +201,11 @@ tab_strip_status :: proc(tab: core.Tab, active: bool) -> core.Row_Status {
 	view := core.tab_status_view(tab)
 	_, is_pi := tab.kind.(core.Pi_Tab)
 	if view.dot != .None || is_pi do return view.dot // a status (done or idle: no dot) leaves room for recent output
-	if tab.status == .Running && tab_busy(tab.id) do return .Running // recent output
+	if tab.status == .Running && tab.output_recent do return .Running // recent output (the core's terminal, in the replica's record)
 	if !active && browser_act_recent(tab.id) do return .Running // an agent acts in this tab behind (browser_act.odin)
 	return .None
 }
 
-tab_busy :: proc(tab_id: u64) -> bool {
-	t := core.term_of(tab_id)
-	return t != nil && t.running && t.last_output != {} && time.tick_since(t.last_output) < ACTIVITY_WINDOW
-}
 
 status_color :: proc(st: core.Row_Status) -> core.Rgba {
 	th := theme()
@@ -533,7 +529,8 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	old := ids_pane_begin(p)
 	defer ids_pane_end(old)
 	split := cs != nil && len(cs.panes) > 1
-	empty := core.pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
+	shown := core.pane_shown(p)
+	empty := (shown == nil || !shown.has_term) && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
 	if clay.UI(pid(p, "pane"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		if split do pane_strip_layout(cs, p)
 		// the tab's bars, clipped across: a bar wider than a narrow pane (its buttons, an agent's

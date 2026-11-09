@@ -278,8 +278,8 @@ palette_run_deferred :: proc() {
 	menu := palette.pick_menu
 	palette.pick_menu = ""
 	defer delete(menu)
-	if core.platform.pick_folder == nil do return
-	action_folder = strings.clone(core.platform.pick_folder()) // heap: frames ran during the modal loop
+	if win_os.pick_folder == nil do return
+	action_folder = strings.clone(win_os.pick_folder()) // heap: frames ran during the modal loop
 	defer {
 		delete(action_folder)
 		action_folder = ""

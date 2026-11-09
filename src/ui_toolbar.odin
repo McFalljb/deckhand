@@ -92,7 +92,7 @@ button_click :: proc(b: Button) {
 // closes its whole session, which always asks first (repeated ⌘W on shell
 // tabs must never close a session silently once the pi tab is current).
 close_tab_click :: proc(tab_id: u64) {
-	s, _, i := core.find_tab(tab_id)
+	s, _, i := find_tab(tab_id)
 	if s == nil do return
 	if i == 0 do ui_do(core.Close_Session{session = s.id, ask = true})
 	else do ui_do(core.Close_Tab{tab_id = tab_id})
@@ -765,7 +765,7 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 	case Hit_Home: // the agent's button (far right)
 		return act("toggle_agent")
 	case Hit_Close_Tab:
-		if _, _, i := core.find_tab(u64(x)); i == 0 do return act("close_session") // the pi tab closes its session
+		if _, _, i := find_tab(u64(x)); i == 0 do return act("close_session") // the pi tab closes its session
 		return act("close_tab")
 	case Hit_Pin_Project:
 		p := core.find_project(u64(x))
@@ -825,7 +825,7 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return dead_tab_tip_for(x)
 	case Hit_Tab:
 		// a dead pi tab: how it ended; else its status dot's source and age (agent_status.odin)
-		_, tab, _ := core.find_tab(u64(x))
+		_, tab, _ := find_tab(u64(x))
 		if tip := dead_tab_hover_tip(tab); tip != "" do return tip, ""
 		if tab != nil {
 			// a Claude tab: its model too (claude_rows.odin)

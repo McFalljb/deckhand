@@ -457,8 +457,8 @@ browser_act_background_tab :: proc(s: ^core.Open_Session) -> (tab_id: u64, ok: b
 	for id, at in act_linger do if time.tick_since(at) < ACT_LINGER do seen[id] = true
 	best: time.Tick
 	for id in seen {
-		os_, tab, _ := core.find_tab(id)
-		if os_ != s || tab == nil do continue
+		os_, tab, _ := find_tab(id)
+		if os_ == nil || os_.id != s.id || tab == nil do continue
 		if core.tab_on_screen(tab.id) do continue // the user sees it (any pane)
 		at := agent_tab_of(id)
 		last := at != nil ? at.last : time.Tick{}
@@ -628,7 +628,7 @@ act_test_to_bar :: proc(tab_id: u64) -> bool {
 	op.bar_at = time.tick_now()
 	op.deadline = time.tick_add(op.bar_at, ACT_UPLOAD_WAIT)
 	own(&op.hit, `{"role":"file input","name":"Attachment","tag":"input"}`)
-	if _, tab, _ := core.find_tab(tab_id); tab != nil {
+	if _, tab, _ := find_tab(tab_id); tab != nil {
 		if bt, is := tab.kind.(core.Browser_Tab); is do own(&op.origin, url_origin(bt.url))
 	}
 	return true
@@ -651,7 +651,7 @@ browser_act_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u6
 			return {ok = true}, true
 		}
 		// the page the bar named: still on that origin
-		if _, tab, _ := core.find_tab(c.tab_id); tab != nil {
+		if _, tab, _ := find_tab(c.tab_id); tab != nil {
 			bt, _ := tab.kind.(core.Browser_Tab)
 			if url_origin(bt.url) != op.origin {
 				act_end(op, code_err("page_changed", "the page moved to another site while the upload bar asked: nothing was sent"))
@@ -866,14 +866,14 @@ act_eval :: proc(op: ^Act_Op, b: ^Browser, ctx: i64, req: string, by_value := tr
 // The clipboard's change count when the action's input first goes (act_send; never the upload
 // bar's wait).
 act_clip_note_input :: proc(op: ^Act_Op) {
-	if op.clip_armed || core.platform.clipboard_count == nil do return
-	op.clip0 = core.platform.clipboard_count()
+	if op.clip_armed || win_os.clipboard_count == nil do return
+	op.clip0 = win_os.clipboard_count()
 	op.clip_armed = true
 }
 
 // The clipboard changed since the action's input went.
 act_clip_changed :: proc(op: ^Act_Op) -> bool {
-	return op.clip_armed && core.platform.clipboard_count != nil && core.platform.clipboard_count() != op.clip0
+	return op.clip_armed && win_os.clipboard_count != nil && win_os.clipboard_count() != op.clip0
 }
 
 // The input events of one step, sent at once (CDP runs them in order); their answers are counted.
@@ -971,7 +971,7 @@ act_refusal :: proc(kind: string, plain: bool, want: Act_Key_Kind) -> (code, msg
 // One step of an action: done, with its answer.
 @(private = "file")
 act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: core.Result) {
-	_, tab, _ := core.find_tab(op.tab_id)
+	_, tab, _ := find_tab(op.tab_id)
 	b := browser_of(op.tab_id)
 	if tab == nil || b == nil do return true, code_err("tab_gone", "the tab closed")
 	bt, _ := tab.kind.(core.Browser_Tab)

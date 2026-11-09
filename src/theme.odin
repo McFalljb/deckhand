@@ -167,9 +167,6 @@ TINT_PRIMARY_HOVER :: 0.15
 TINT_SEGMENT :: 0.16 // the chosen segment of a segmented control
 EXITED_ALPHA :: 0.5
 QUESTION_ALPHA :: 0.55 // pi asked something (softer than "waiting for you")
-// Shell tabs (no bridge) count as running while their terminal printed
-// something within this window. pi tabs use the bridge's pi.status.
-ACTIVITY_WINDOW :: 1500 * time.Millisecond
 SCROLL_STEP :: 10 // px per wheel unit in the chrome's lists
 
 // ---- colours ----

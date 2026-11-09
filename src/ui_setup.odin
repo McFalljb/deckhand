@@ -755,10 +755,10 @@ field_event :: proc(e: ^sapp.Event) -> bool {
 		if cmd {
 			#partial switch e.key_code {
 			case .A: tf_select_all(f)
-			case .C: if s := tf_selected_text(f); s != "" do core.platform.set_clipboard(s)
+			case .C: if s := tf_selected_text(f); s != "" do win_os.set_clipboard(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {
-					core.platform.set_clipboard(s)
+					win_os.set_clipboard(s)
 					tf_backspace(f)
 				}
 			case .LEFT:      tf_home(f, shift)
@@ -790,7 +790,7 @@ field_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, core.one_line(core.clipboard_text(), context.temp_allocator))
+		tf_insert(f, core.one_line(clipboard_text(), context.temp_allocator))
 		app.redraw = true
 		return true
 	case .KEY_UP:

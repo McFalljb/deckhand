@@ -227,7 +227,7 @@ reset_for_titles :: proc() -> runtime.Allocator {
 	}
 	home_root = ""
 	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	platform = {quit = proc() {}}
 	return runtime.heap_allocator()
 }
 

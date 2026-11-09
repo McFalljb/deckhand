@@ -178,7 +178,7 @@ ask_target :: proc() -> (s: ^core.Open_Session, tab: ^core.Tab, n: int) {
 	s = core.find_session(a.session)
 	if s == nil do return nil, nil, 0
 	if a.tab_id != 0 {
-		_, tab, _ = core.find_tab(a.tab_id)
+		_, tab, _ = find_tab(a.tab_id)
 		if tab == nil do return nil, nil, 0
 		n = core.comments_of_tab(s, a.tab_id)
 	} else do n = len(s.comments)
@@ -190,7 +190,7 @@ ask_target :: proc() -> (s: ^core.Open_Session, tab: ^core.Tab, n: int) {
 comments_bars :: proc() {
 	if s, tab, n := ask_target(); s != nil do ask_bar(s, tab, n)
 	if comments_ui.draft.tab_id != 0 {
-		if _, t, _ := core.find_tab(comments_ui.draft.tab_id); t == nil do comments_draft_end() // its tab closed
+		if _, t, _ := find_tab(comments_ui.draft.tab_id); t == nil do comments_draft_end() // its tab closed
 		else if draft_shown() do new_bar()
 	}
 	s := comments_strip_session()
@@ -539,7 +539,7 @@ ring_crop :: proc(tab_id: u64, ring: ^Frame_Ring, content_w, content_h: int, sca
 	w, h := x1 - x0, y1 - y0
 	if w <= 0 || h <= 0 do return ""
 	px := make([]u8, w * h * 4, context.temp_allocator)
-	if core.window.frames_read == nil || !core.window.frames_read(tab_id, ring.shown_gen, ring.shown_slot, x0, y0, w, h, px) do return ""
+	if !frames_read(tab_id, ring.shown_gen, ring.shown_slot, x0, y0, w, h, px) do return ""
 	// down to COMMENT_CROP_SIDE on the long side (nearest pixel); BGRA -> RGBA, opaque
 	k := min(1, f32(core.COMMENT_CROP_SIDE) / f32(max(w, h)))
 	dw, dh := max(int(f32(w) * k), 1), max(int(f32(h) * k), 1)

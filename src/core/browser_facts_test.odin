@@ -37,15 +37,14 @@ browser_facts_round_trip_and_form :: proc(t: ^testing.T) {
 	state = State{}
 	end, _ := core_attach_window(proc() {})
 	defer core_detach_window()
-	_ = cw.mem_send(end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_browser_facts(7, &f))
+	tf := Tab_Facts{browser = f, page = "open"}
+	_ = cw.mem_send(end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_tab_facts(7, &tf))
 	window_link_pump()
-	got, ok := browser_facts_get(7)
-	if !testing.expect(t, ok, "kept") do return
 	b3 := strings.builder_make(context.temp_allocator)
-	browser_facts_write(&b3, got)
+	window_browser_json(&b3, 7)
 	testing.expect_value(t, strings.to_string(b3), want)
-	_ = cw.mem_send(end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_browser_facts(7, nil))
+	testing.expect_value(t, window_browser_page(7), "open")
+	_ = cw.mem_send(end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_tab_facts(7, nil))
 	window_link_pump()
-	_, ok = browser_facts_get(7)
-	testing.expect(t, !ok, "gone")
+	testing.expect(t, window_tab_facts(7) == nil, "gone")
 }

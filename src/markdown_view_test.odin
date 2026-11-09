@@ -30,7 +30,8 @@ md_setup :: proc(t: ^testing.T, name, text: string) -> (dir: string, tab_id: u64
 	core.inbox_drain()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	clear(&opened)
-	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
+	core.platform = {quit = proc() {}}
+	win_os = {set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	made := fmt.tprintf("%s/deckhand-md-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)

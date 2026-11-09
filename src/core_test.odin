@@ -8,6 +8,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
+import "core:reflect"
 import "core:strings"
 import "core:sync"
 import "core:testing"
@@ -32,7 +33,8 @@ reset :: proc() -> runtime.Allocator {
 		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	quits = 0
-	core.platform = {quit = proc() {quits += 1}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {quits += 1}}
+	win_os = {set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -604,7 +606,7 @@ appearance_resolution :: proc(t: ^testing.T) {
 	defer delete(window_modes)
 	@(static) wm: ^[dynamic]core.Appearance
 	wm = &window_modes
-	core.platform.set_appearance = proc(m: core.Appearance) {append(wm, m)}
+	win_os.set_appearance = proc(m: core.Appearance) {append(wm, m)}
 	testing.expect_value(t, state.settings.appearance, core.Appearance.System)
 	core.run_command(core.Add_Project{cwd = "/tmp"}, script)
 	sess := core.run_command(core.New_Chat{project_id = state.selected_project}, script).created_id
@@ -810,21 +812,19 @@ text_field_editing :: proc(t: ^testing.T) {
 	delete(f.buf)
 }
 
-// The app fills in every platform entry: a nil one makes its commands
-// succeed without doing anything (Reveal in Finder on a session or project
-// row, a job's Open run folder).
+// The app fills in every platform entry, the core's and the window's own: a nil one makes its
+// commands succeed without doing anything (Reveal in Finder on a session or project row, a job's
+// Open run folder).
 @(test)
 platform_app_sets_every_entry :: proc(t: ^testing.T) {
 	p := platform_app()
-	testing.expect(t, p.set_clipboard != nil, "set_clipboard")
-	testing.expect(t, p.quit != nil, "quit")
-	testing.expect(t, p.wake != nil, "wake")
-	testing.expect(t, p.pick_folder != nil, "pick_folder")
-	testing.expect(t, p.run_later != nil, "run_later")
-	testing.expect(t, p.set_appearance != nil, "set_appearance")
-	testing.expect(t, p.reveal != nil, "reveal")
-	testing.expect(t, p.notify != nil, "notify")
-	testing.expect(t, p.window_active != nil, "window_active")
-	testing.expect(t, p.left_button != nil, "left_button")
-	testing.expect(t, p.open_url != nil, "open_url")
+	for f in reflect.struct_fields_zipped(core.Platform) {
+		v := reflect.struct_field_value_by_name(p, f.name)
+		testing.expectf(t, (^rawptr)(v.data)^ != nil, "core.Platform.%s", f.name)
+	}
+	w := win_os_app()
+	for f in reflect.struct_fields_zipped(Win_OS) {
+		v := reflect.struct_field_value_by_name(w, f.name)
+		testing.expectf(t, (^rawptr)(v.data)^ != nil, "Win_OS.%s", f.name)
+	}
 }

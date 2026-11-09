@@ -13,6 +13,7 @@ import "core:math/rand"
 import "core:strings"
 import "core:sys/posix"
 import "core:testing"
+import "core:time"
 import "core"
 import cw "corewire"
 import gh "ghostty"
@@ -455,6 +456,7 @@ stream_failures_recover :: proc(t: ^testing.T) {
 	junk := [?]u8{1, 2, 3, 4, 5, 6, 7, 8}
 	term_view_frame(cw.Frame{channel = v.channel, kind = u8(cw.Kind.Snapshot), payload = junk[:]})
 	testing.expect(t, v.stale, "a snapshot that does not decode: stale")
+	v.snap_failed = time.tick_add(v.snap_failed, -2 * SNAP_FAIL_GAP) // (stream_snapshot_failure_gap)
 	term_views_tick()
 	v = term_view_peek(TS_TAB)
 	testing.expect(t, v != nil && !v.stale && ts_same(t, tm, "attached again"))
@@ -490,4 +492,30 @@ stream_snapshot_screen_only :: proc(t: ^testing.T) {
 	if !testing.expect_value(t, derr, core.Snapshot_Error.None) || gt == nil do return
 	defer gh.terminal_free(gt)
 	testing.expect_value(t, gt_screen_text(gt), gt_screen_text(tm.gt))
+}
+
+// Round 2: a snapshot that never decodes does not re-attach every frame (each attach makes the
+// core encode one anew): the stale copy waits SNAP_FAIL_GAP, then attaches again.
+@(test)
+stream_snapshot_failure_gap :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	tm := ts_begin(40, 10)
+	defer ts_end(tm)
+	ts_write(tm, "hello\r\n")
+	v := term_view_of(TS_TAB)
+	testing.expect(t, ts_same(t, tm, "attached"))
+	junk := [?]u8{1, 2, 3, 4, 5, 6, 7, 8}
+	term_view_frame(cw.Frame{channel = v.channel, kind = u8(cw.Kind.Snapshot), payload = junk[:]})
+	testing.expect(t, v.stale)
+	ch := v.channel
+	for _ in 0 ..< 60 do term_views_tick() // a second of frames, as fast as they come
+	pv := term_view_peek(TS_TAB)
+	testing.expect(t, pv != nil && pv.channel == ch && pv.stale, "not attached again within the gap")
+	pv = term_view_of(TS_TAB)
+	testing.expect(t, pv != nil && pv.channel == ch, "drawing it does not attach again either")
+	testing.expect(t, len(core.term_streams()) == 1 && core.term_streams()[0].channel == ch, "the core's stream is the first")
+	v.snap_failed = time.tick_add(v.snap_failed, -2 * SNAP_FAIL_GAP)
+	term_views_tick()
+	nv := term_view_peek(TS_TAB)
+	testing.expect(t, nv != nil && !nv.stale && ts_same(t, tm, "attached again after the gap"))
 }

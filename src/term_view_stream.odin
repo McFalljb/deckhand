@@ -25,6 +25,7 @@ import gh "ghostty"
 import jg "jsonguard"
 
 HIDDEN_DETACH :: 2 * time.Second // a tab off screen this long gives up its copy
+SNAP_FAIL_GAP :: time.Second // a tab whose snapshot did not decode attaches again at most this often
 HISTORY_BUDGET :: 2 * time.Millisecond // history pages decoded per frame after a snapshot shows
 
 Term_View :: struct {
@@ -41,6 +42,7 @@ Term_View :: struct {
 	dec_blob:     []u8, // the snapshot the decoder reads (heap)
 	snapshots:    int, // snapshots taken (tests)
 	stale:        bool, // a RESIZE at another offset than ours: it attaches again (term_views_tick)
+	snap_failed:  time.Tick, // its snapshot did not decode then: attached again SNAP_FAIL_GAP later, not at once
 	// drawing and input
 	rs:           gh.Render_State,
 	it:           gh.Row_Iterator,
@@ -194,6 +196,9 @@ term_views_tick :: proc() {
 	for id, v in term_views {
 		on := core.tab_on_screen(id) || (home != nil && id == home.id && state.home_open) || (id == core.harness_run.term_id && setup_open())
 		if on do v.shown = now
+		// a snapshot that does not decode: attached again once a second, never every frame (the
+		// core encodes each one anew)
+		if v.stale && v.snap_failed != {} && time.tick_diff(v.snap_failed, now) < SNAP_FAIL_GAP do continue
 		if v.stale || time.tick_diff(v.shown, now) > HIDDEN_DETACH do append(&gone, v)
 	}
 	for v in gone {
@@ -359,7 +364,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 	meta, body, err := core.snapshot_unpack(blob)
 	if err != .None {
 		fmt.eprintln("Deckhand: a terminal snapshot the window cannot read:", err)
-		v.stale = true // what follows is relative to it: attach again (term_views_tick)
+		view_snap_failed(v) // what follows is relative to it: attach again (term_views_tick)
 		return
 	}
 	gt: gh.Terminal
@@ -371,7 +376,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 		ok, grid := core.snapshot_ghostsnp_grid(body)
 		if !ok || i64(grid[0]) != meta.cols || i64(grid[1]) != meta.rows {
 			fmt.eprintln("Deckhand: a terminal snapshot whose size does not match its header")
-			v.stale = true
+			view_snap_failed(v)
 			return
 		}
 		// the decoder reads the snapshot as it goes: kept until its history is in
@@ -379,7 +384,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 		copy(kept, body)
 		if gh.snapshot_decoder_new_buf(nil, &dec, raw_data(kept), c.size_t(len(kept))) != .Success {
 			delete(kept, heap)
-			v.stale = true
+			view_snap_failed(v)
 			return
 		}
 		limit := core.TERM_CONTINUATION_MAX
@@ -391,7 +396,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 			gh.snapshot_decoder_free(dec)
 			delete(kept, heap)
 			fmt.eprintln("Deckhand: a terminal snapshot that does not decode")
-			v.stale = true
+			view_snap_failed(v)
 			return
 		}
 	case:
@@ -399,7 +404,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 		gt, _, e = core.snapshot_decode(blob)
 		if e != .None {
 			fmt.eprintln("Deckhand: a terminal snapshot that does not decode:", e)
-			v.stale = true
+			view_snap_failed(v)
 			return
 		}
 	}
@@ -439,6 +444,13 @@ view_history_end :: proc(v: ^Term_View) {
 	v.dec = nil
 	if v.dec_blob != nil do delete(v.dec_blob, runtime.heap_allocator())
 	v.dec_blob = nil
+}
+
+// v's snapshot did not decode: stale (nothing more applies to it), attached again SNAP_FAIL_GAP on.
+@(private = "file")
+view_snap_failed :: proc(v: ^Term_View) {
+	v.stale = true
+	v.snap_failed = time.tick_now()
 }
 
 // v's copy becomes gt (a snapshot's): what belonged to the old one goes first.

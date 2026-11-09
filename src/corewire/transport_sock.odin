@@ -14,8 +14,7 @@ package corewire
 //   of them, so they would otherwise arrive after it and be applied twice.
 // - Other frames are refused (Full) once `cap` bytes are queued, as mem_send refuses them.
 // - Channel 0 and snapshots stop at the ceiling, cap + 2 largest frames: past it the transport
-//   closes (Overflow), as the in-memory one does. And a peer that has bytes queued for it but
-//   takes none for `stall` closes it too (Stalled): a reader that stops is capped, then cut off.
+//   closes (Overflow), as the in-memory one does: a reader that stops is capped, then cut off.
 //
 // Reading: sock_recv returns whole frames, refusing a header over MAX_PAYLOAD (Too_Large, then
 // closed). At most one frame plus a read's worth is buffered: a peer that sends faster than the
@@ -30,9 +29,7 @@ package corewire
 import "base:runtime"
 import "core:sync"
 import "core:sys/posix"
-import "core:time"
 
-SOCK_STALL :: 10 * time.Second // no write progress for this long with bytes queued: closed
 @(private)
 SOCK_READ_CHUNK :: 64 * 1024
 
@@ -49,7 +46,6 @@ Close_Reason :: enum {
 	Truncated, // EOF in the middle of a frame
 	Peer_Changed, // peer_check refused the process behind the bytes
 	Overflow, // exempt sends past the ceiling
-	Stalled, // queued bytes, and no write progress for `stall`
 	Io_Error, // read or write failed
 }
 
@@ -65,7 +61,6 @@ Sock_Transport :: struct {
 	fd:            posix.FD,
 	allocator:     runtime.Allocator,
 	cap:           int,
-	stall:         time.Duration,
 	peer_check:    Peer_Check,
 	peer_data:     rawptr,
 	// out
@@ -75,7 +70,6 @@ Sock_Transport :: struct {
 	cur:           Sock_Out, // part-written (cur_off of it), or bytes == nil
 	cur_off:       int,
 	queued:        int, // bytes not written yet, cur's remainder included
-	last_progress: time.Tick, // last write progress, or when the queue last became non-empty
 	// in
 	inq:           Stream,
 	eof:           bool,
@@ -91,12 +85,11 @@ sock_ceiling :: proc(t: ^Sock_Transport) -> int {return t.cap + 2 * (HEADER_SIZE
 // read from it by whoever handed it over (the hello's reader read past its line); they are
 // checked with peer_check now, like any read. peer_check nil: no check (tests, a socketpair of
 // our own).
-sock_open :: proc(t: ^Sock_Transport, fd: posix.FD, cap := OUT_CAP, stall := SOCK_STALL, peer_check: Peer_Check = nil, peer_data: rawptr = nil, initial: []u8 = nil, allocator := context.allocator) {
+sock_open :: proc(t: ^Sock_Transport, fd: posix.FD, cap := OUT_CAP, peer_check: Peer_Check = nil, peer_data: rawptr = nil, initial: []u8 = nil, allocator := context.allocator) {
 	t^ = {}
 	t.fd = fd
 	t.allocator = allocator
 	t.cap = cap
-	t.stall = stall
 	t.peer_check = peer_check
 	t.peer_data = peer_data
 	t.ctl = make([dynamic]Sock_Out, allocator)
@@ -105,7 +98,6 @@ sock_open :: proc(t: ^Sock_Transport, fd: posix.FD, cap := OUT_CAP, stall := SOC
 	stream_init(&t.inq, allocator)
 	flags := posix.fcntl(fd, .GETFL)
 	if flags >= 0 do posix.fcntl(fd, .SETFL, flags | posix.O_NONBLOCK)
-	t.last_progress = time.tick_now()
 	if len(initial) > 0 {
 		if t.peer_check != nil && !t.peer_check(t.fd, t.peer_data) {
 			sock_fail(t, .Peer_Changed)
@@ -158,7 +150,6 @@ sock_send :: proc(t: ^Sock_Transport, channel: u32, kind: Kind, payload: []u8) -
 	copy(b, h[:])
 	copy(b[HEADER_SIZE:], payload)
 	o := Sock_Out{channel, u8(kind), b}
-	if t.queued == 0 do t.last_progress = time.tick_now() // the stall clock starts with the first byte queued
 	switch {
 	case channel == JSON_CHANNEL:
 		append(&t.ctl, o)
@@ -190,8 +181,7 @@ sock_send :: proc(t: ^Sock_Transport, channel: u32, kind: Kind, payload: []u8) -
 }
 
 // Writes what the socket takes now. Returns the bytes still queued; err is the close reason if
-// the transport is (or just got) closed. Call it when the fd is writable (sock_wants_write), and
-// now and then while bytes are queued, so a stalled peer is cut off.
+// the transport is (or just got) closed. Call it when the fd is writable (sock_wants_write).
 sock_flush :: proc(t: ^Sock_Transport) -> (pending: int, err: Close_Reason) {
 	sync.guard(&t.mu)
 	if t.closed do return 0, t.reason
@@ -222,15 +212,10 @@ sock_flush :: proc(t: ^Sock_Transport) -> (pending: int, err: Close_Reason) {
 		if n == 0 do break
 		t.cur_off += int(n)
 		t.queued -= int(n)
-		t.last_progress = time.tick_now()
 		if t.cur_off == len(t.cur.bytes) {
 			delete(t.cur.bytes, t.allocator)
 			t.cur, t.cur_off = {}, 0
 		}
-	}
-	if t.queued > 0 && time.tick_since(t.last_progress) > t.stall {
-		sock_fail(t, .Stalled)
-		return 0, t.reason
 	}
 	return t.queued, .None
 }
@@ -239,12 +224,6 @@ sock_flush :: proc(t: ^Sock_Transport) -> (pending: int, err: Close_Reason) {
 sock_wants_write :: proc(t: ^Sock_Transport) -> bool {
 	sync.guard(&t.mu)
 	return !t.closed && t.queued > 0
-}
-
-// Bytes queued and not written yet.
-sock_queued :: proc(t: ^Sock_Transport) -> int {
-	sync.guard(&t.mu)
-	return t.queued
 }
 
 // Lock held. Reads what is there, while the decoder has room for it: at most one frame plus a

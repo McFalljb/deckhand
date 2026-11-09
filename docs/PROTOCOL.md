@@ -126,16 +126,14 @@ The first message on a connection is `hello`:
 
   With `key = SHA-256(token)` (what `tokens.json` keeps), `token_id = HMAC-SHA256(key,
   "deckhand-token-id-v1")` and `proof(role) = HMAC-SHA256(key, "deckhand-hello-v1\n" role "\n"
-  token_id "\n" nonce "\n" challenge "\n" pid)`, all lowercase hex. Deckhand's proof has role
-  `core`, the client's `client`; the client checks Deckhand's before it sends its own. `pid` is
-  the connecting process's (Deckhand reads it from the socket, `LOCAL_PEERPID`), so a program
-  that relays a hello is refused by both sides: each proof names a process the other does not
-  see. The core's nonce is new on every connection, so a recorded proof does not verify again
+  nonce "\n" challenge)`, all lowercase hex. Deckhand's proof has role `core`, the
+  client's `client`; the client checks Deckhand's before it sends its own. The core's nonce is new
+  on every connection, so a recorded proof does not verify again
   (`"the proof does not verify"`); a token revoked between the two lines is `"unknown token"`.
   Code: `src/core/hello_proof.odin`, `integrations/pi/lib/protocol.ts` (`HelloFlow`), one shared
-  test vector. **What it does not stop:** a same-user process that reads `tokens.json` (0600) has
-  every token's key, which is enough to prove it; that is the same-user residual of
-  [background-core.md](plans/background-core.md) §5.4.
+  test vector. **`tokens.json`'s hashes are the challenge keys:** a process of the same user that
+  reads the file (0600) can prove any token in it. That is the same-user residual
+  ([background-core.md](plans/background-core.md) §5.4), stated here plainly.
 - **A Claude tab's token** (`DECKHAND_CLAUDE_TOKEN`, with `DECKHAND_SOCKET`, `DECKHAND_CLI`,
   `DECKHAND_SHOTS_DIR`, `DECKHAND_CLAUDE_TAB`) is **multi-use** (the plugin's CLI is a new process
   per call), minted fresh at each start of the tab, revoked when its process exits or the tab

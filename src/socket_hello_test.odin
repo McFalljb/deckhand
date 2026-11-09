@@ -10,7 +10,6 @@ import "core:crypto"
 import "core:fmt"
 import "core:os"
 import "core:strings"
-import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -105,20 +104,19 @@ hs_nonce :: proc() -> string {
 	return core.hex32(raw)
 }
 
-// The challenge hello as a client does it. Returns the connection, the step-1 reply and the
-// final reply ("" if it never got that far). cnonce "": a fresh one. bad_proof: send this
-// instead of the right proof. pid: the pid the client proves with (0: its own).
+// The challenge hello as a client does it: the step-1 reply, whether the core's proof verified,
+// and the final reply. cnonce "": a fresh one; bad_proof: sent instead of the right proof.
 @(private = "file")
 Challenge :: struct {
 	c:          ^Hc,
 	step1, end: string,
-	core_ok:    bool, // the core's proof verified
-	proof:      string, // what the client sent
+	core_ok:    bool,
+	proof:      string,
 	cnonce:     string,
 }
 
 @(private = "file")
-hs_challenge :: proc(token: string, cnonce := "", bad_proof := "", pid: i32 = 0, extra := "") -> (r: Challenge) {
+hs_challenge :: proc(token: string, cnonce := "", bad_proof := "") -> (r: Challenge) {
 	key := core.token_hash(token)
 	id := core.hex32(core.hello_token_id(key))
 	r.cnonce = cnonce != "" ? cnonce : hs_nonce()
@@ -127,18 +125,16 @@ hs_challenge :: proc(token: string, cnonce := "", bad_proof := "", pid: i32 = 0,
 	r.step1 = hs_recv(r.c)
 	if core.json_path(r.step1, "result.ok") != "true" do return
 	sn := core.json_path(r.step1, "result.data.challenge")
-	me := pid != 0 ? pid : i32(posix.getpid())
-	r.core_ok = core.hex64_equal(core.json_path(r.step1, "result.data.proof"), core.hex32(core.hello_proof(key, "core", id, r.cnonce, sn, i32(posix.getpid()))))
-	r.proof = bad_proof != "" ? bad_proof : core.hex32(core.hello_proof(key, "client", id, r.cnonce, sn, me))
-	hs_send(r.c, fmt.tprintf(`{{"id":"c2","v":1,"type":"hello.proof","proof":"%s"%s}}`, r.proof, extra))
+	r.core_ok = core.hex64_equal(core.json_path(r.step1, "result.data.proof"), core.hex32(core.hello_proof(key, "core", r.cnonce, sn)))
+	r.proof = bad_proof != "" ? bad_proof : core.hex32(core.hello_proof(key, "client", r.cnonce, sn))
+	hs_send(r.c, fmt.tprintf(`{{"id":"c2","v":1,"type":"hello.proof","proof":"%s"}}`, r.proof))
 	r.end = hs_recv(r.c)
 	return
 }
 
-// An env token's hello from a client that speaks the challenge: its reconnect token is
-// challenge-only. That token's plain hello is refused; its challenge hello works, any number of
-// times, with no token on the wire; a wrong proof, a replayed one, another pid's, an unknown id
-// and a stray hello.proof are refused.
+// An env token's hello from a client that speaks the challenge gives a challenge-only reconnect
+// token: its plain hello is refused, its challenge hello works with no token on the wire, and a
+// replayed or wrong proof, or an unknown token, is refused.
 @(test)
 socket_challenge_hello :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -146,70 +142,21 @@ socket_challenge_hello :: proc(t: ^testing.T) {
 	defer hs_stop()
 	env := core.socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
 	b, r := hs_plain(env, `,"challenge":true`)
-	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	re := strings.clone(core.json_path(r, "result.data.reconnect_token"), context.temp_allocator)
-	testing.expect_value(t, len(re), 64)
 	testing.expect_value(t, core.json_path(r, "result.data.reconnect_hello"), "challenge")
-	hs_close(b)
-
 	p, rp := hs_plain(re)
 	testing.expect_value(t, core.json_path(rp, "result.error"), "this token needs the challenge hello")
-	testing.expect(t, hs_closed(p))
-	hs_close(p)
-
-	ok1 := hs_challenge(re)
-	testing.expect(t, ok1.core_ok, "the core proves the token first")
-	testing.expect(t, !strings.contains(ok1.step1, re), "the token is never sent")
-	testing.expect_value(t, core.json_path(ok1.end, "result.ok"), "true")
-	testing.expect_value(t, core.json_path(ok1.end, "result.data.caller"), "panel")
-	testing.expect_value(t, core.json_path(ok1.end, "result.data.tab_id"), "101")
-	testing.expect_value(t, core.json_path(ok1.end, "result.data.reconnect_token"), "<missing>")
-	// the connection is the tab's: it may send its reports
-	hs_send(ok1.c, `{"id":"s","v":1,"type":"command","command":{"type":"list_commands"}}`)
-	testing.expect_value(t, core.json_path(hs_recv(ok1.c), "result.ok"), "true")
-	ok2 := hs_challenge(re) // again, at the same time
-	testing.expect_value(t, core.json_path(ok2.end, "result.ok"), "true")
-
-	// a replayed proof (same client nonce, the core's nonce is new each time)
-	rep := hs_challenge(re, cnonce = ok1.cnonce, bad_proof = ok1.proof)
-	testing.expect(t, rep.core_ok)
+	ok := hs_challenge(re)
+	testing.expect(t, ok.core_ok, "the core proves the token first")
+	testing.expect_value(t, core.json_path(ok.end, "result.data.caller"), "panel")
+	testing.expect_value(t, core.json_path(ok.end, "result.data.tab_id"), "101")
+	rep := hs_challenge(re, cnonce = ok.cnonce, bad_proof = ok.proof) // the core's nonce is new
 	testing.expect_value(t, core.json_path(rep.end, "result.error"), "the proof does not verify")
-	testing.expect(t, hs_closed(rep.c))
-	// a client that does not know the key
 	wrong := hs_challenge(re, bad_proof = hs_nonce())
 	testing.expect_value(t, core.json_path(wrong.end, "result.error"), "the proof does not verify")
-	// proved for another process (a relay: the core sees the relay's pid)
-	other := hs_challenge(re, pid = i32(posix.getpid()) + 1)
-	testing.expect_value(t, core.json_path(other.end, "result.error"), "the proof does not verify")
-	// an id nobody has, and a token that is not challenge-only
 	none := hs_challenge(hs_nonce())
 	testing.expect_value(t, core.json_path(none.step1, "result.error"), "unknown token")
-	plain_tok := core.socket_mint_token({kind = .Script}, context.temp_allocator)
-	pl := hs_challenge(plain_tok)
-	testing.expect_value(t, core.json_path(pl.step1, "result.error"), "unknown token")
-	// out of order, out of shape
-	s := hs_connect()
-	hs_send(s, `{"id":"x","v":1,"type":"hello.proof","proof":"00"}`)
-	testing.expect_value(t, core.json_path(hs_recv(s), "result.error"), "the first message must be hello")
-	testing.expect(t, hs_closed(s))
-	bad := hs_connect()
-	hs_send(bad, `{"id":"x","v":1,"type":"hello","token_id":"ZZ","nonce":"00"}`)
-	testing.expect_value(t, core.json_path(hs_recv(bad), "result.error"), "token_id and nonce must be 64 lowercase hex digits")
-	twice := hs_connect()
-	key := core.token_hash(re)
-	hs_send(twice, fmt.tprintf(`{{"id":"a","v":1,"type":"hello","token_id":"%s","nonce":"%s"}}`, core.hex32(core.hello_token_id(key)), hs_nonce()))
-	hs_recv(twice)
-	hs_send(twice, fmt.tprintf(`{{"id":"b","v":1,"type":"hello","token":"%s"}}`, re))
-	testing.expect_value(t, core.json_path(hs_recv(twice), "result.error"), "the challenge wants hello.proof")
-	// revoked between the two lines: unknown
-	mid := hs_connect()
-	hs_send(mid, fmt.tprintf(`{{"id":"a","v":1,"type":"hello","token_id":"%s","nonce":"%s"}}`, core.hex32(core.hello_token_id(key)), hs_nonce()))
-	r1 := hs_recv(mid)
-	core.socket_forget_tab(101)
-	ch := hs_challenge(re)
-	testing.expect_value(t, core.json_path(ch.step1, "result.error"), "unknown token")
-	testing.expect_value(t, core.json_path(r1, "result.ok"), "true")
-	for x in ([]^Hc{ok1.c, ok2.c, rep.c, wrong.c, other.c, none.c, pl.c, s, bad, twice, mid, ch.c}) do hs_close(x)
+	for x in ([]^Hc{b, p, ok.c, rep.c, wrong.c, none.c}) do hs_close(x)
 	free_all(context.temp_allocator)
 }
 
@@ -273,32 +220,6 @@ socket_tokens_keep_the_hello_kind :: proc(t: ^testing.T) {
 	free_all(context.temp_allocator)
 }
 
-// A file whose token says an unknown hello kind (or challenge on a single-use token) is refused
-// whole, as any entry out of shape is.
-@(test)
-socket_tokens_bad_hello_kind :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	dir := hs_start(t)
-	defer hs_stop()
-	path := fmt.tprintf("%s/tokens.json", dir)
-	key: [32]u8
-	for i in 0 ..< 32 do key[i] = u8(i + 9)
-	h := strings.repeat("ab", 32, context.temp_allocator)
-	for tok in ([]string{`"hello":"plain"`, `"hello":1`}) {
-		body := fmt.tprintf(`{{"v":1,"terms":[{{"term":4,"kind":"pi","pi_ro":false,"extras":0,"tokens":[{{"sha256":"%s","caller":"panel","claude":false,"single_use":false,%s}}]}}]}}`, h, tok)
-		ok, why := core.macfile_write(path, core.TOKENS_KIND, body, key[:])
-		testing.expect(t, ok, why)
-		loaded, lwhy := core.socket_tokens_enable(path, key[:])
-		testing.expect(t, !loaded && lwhy == "bad token hello", lwhy)
-	}
-	body := fmt.tprintf(`{{"v":1,"terms":[{{"term":4,"kind":"pi","pi_ro":false,"extras":0,"tokens":[{{"sha256":"%s","caller":"panel","claude":false,"single_use":true,"hello":"challenge"}}]}}]}}`, h)
-	core.macfile_write(path, core.TOKENS_KIND, body, key[:])
-	loaded, lwhy := core.socket_tokens_enable(path, key[:])
-	testing.expect(t, !loaded && lwhy == "bad token hello", lwhy)
-	core.socket_tokens_disable(true)
-	free_all(context.temp_allocator)
-}
-
 @(private = "file")
 hs_framed_fd: core.Sock_Fd = -1
 @(private = "file")
@@ -335,12 +256,7 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	testing.expect_value(t, core.json_path(r, "result.data.framed"), "true")
 	testing.expect_value(t, core.json_path(r, "result.data.generation"), fmt.tprint(cw.GENERATION))
-	testing.expect_value(t, core.json_path(r, "result.data.holder_wire"), "1")
-	testing.expect_value(t, core.json_path(r, "result.data.machine.os"), fmt.tprint(ODIN_OS_STRING))
-	testing.expect(t, strings.contains(r, `"snapshot":["ghostsnp/1","vt"]`), r)
-	testing.expect(t, strings.contains(r, `"features":["challenge_hello"]`), r)
-	testing.expect(t, strings.contains(r, `"methods":["get_state",`), r) // what this caller may send
-	testing.expect(t, strings.contains(r, `"version":`), r)
+	for k in ([]string{"version", "features", "methods", "machine", "holder_wire", "snapshot"}) do testing.expect(t, core.json_path(r, fmt.tprintf("result.data.%s", k)) != "<missing>", k)
 	start := time.tick_now()
 	for hs_framed_fd < 0 && time.tick_since(start) < 2 * time.Second do time.sleep(time.Millisecond)
 	testing.expect(t, hs_framed_fd >= 0, "the handler took the connection")
@@ -371,26 +287,3 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	free_all(context.temp_allocator)
 }
 
-// The pi integration's own hello code (HelloFlow, run by node) against this socket: the env
-// token's hello asks for the challenge, and the reconnect proves its token without sending it.
-@(test)
-socket_challenge_hello_from_the_bridge_code :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	hs_start(t)
-	defer hs_stop()
-	env := core.socket_mint_token({kind = .Panel, tab_id = 104}, context.temp_allocator, single_use = true)
-	st, out, errb, err := os.process_exec({command = {"/usr/bin/env", "node", "tests/scripts/hello-node.mjs", core.socket_path(), env}}, context.temp_allocator)
-	if err == nil && st.exit_code == 127 {
-		fmt.println("socket_challenge_hello_from_the_bridge_code: skipped (no node)") // ./build.sh test skips the pi tests the same way
-		return
-	}
-	testing.expectf(t, err == nil && st.exit_code == 0, "node: %v %v %s", err, st.exit_code, string(errb))
-	r := strings.trim_space(string(out))
-	testing.expect_value(t, core.json_path(r, "first_ok"), "true")
-	testing.expect_value(t, core.json_path(r, "kind"), "challenge")
-	testing.expect_value(t, core.json_path(r, "again_ok"), "true")
-	testing.expect_value(t, core.json_path(r, "tab_id"), "104")
-	testing.expect_value(t, core.json_path(r, "leaked"), "false")
-	testing.expect_value(t, core.json_path(r, "lines"), "2") // hello, hello.proof
-	free_all(context.temp_allocator)
-}

@@ -7,14 +7,10 @@ package core
 //
 //   key       = SHA-256(token)                    what tokens.json keeps (token_hash)
 //   token_id  = HMAC-SHA256(key, "deckhand-token-id-v1")          names the token, reveals nothing
-//   proof(r)  = HMAC-SHA256(key, "deckhand-hello-v1\n" r "\n" token_id "\n" client_nonce "\n"
-//                                core_nonce "\n" pid)               r: "core" or "client"
+//   proof(r)  = HMAC-SHA256(key, "deckhand-hello-v1\n" r "\n" client_nonce "\n" core_nonce)
 //
-// Everything is lowercase hex (64 digits) and pid is decimal: the connecting process's pid as
-// the core reads it from the socket (LOCAL_PEERPID) and as the client knows itself
-// (process.pid). Binding the pid stops a relay: a program that forwards a bridge's hello to the
-// core is the core's peer, so the core's proof names its pid, which the bridge refuses, and the
-// bridge's proof names the bridge's pid, which the core refuses.
+// r is "core" or "client", so neither side's proof can be sent back as the other's. Everything
+// is lowercase hex (64 digits).
 //
 // The same computation is in integrations/pi/lib/protocol.ts (helloProof); hello_proof_test.odin
 // and integrations/pi/test/unit.test.ts check both against one vector.
@@ -36,9 +32,9 @@ hello_token_id :: proc(key: [32]u8) -> (id: [32]u8) {
 	return
 }
 
-hello_proof :: proc(key: [32]u8, role: string, token_id, client_nonce, core_nonce: string, pid: i32) -> (p: [32]u8) {
+hello_proof :: proc(key: [32]u8, role, client_nonce, core_nonce: string) -> (p: [32]u8) {
 	k := key
-	msg := fmt.tprintf("%s\n%s\n%s\n%s\n%s\n%d", HELLO_PROOF_TAG, role, token_id, client_nonce, core_nonce, pid)
+	msg := fmt.tprintf("%s\n%s\n%s\n%s", HELLO_PROOF_TAG, role, client_nonce, core_nonce)
 	hmac.sum(hash.Algorithm.SHA256, p[:], transmute([]u8)msg, k[:])
 	return
 }

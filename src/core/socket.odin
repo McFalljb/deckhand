@@ -80,7 +80,6 @@ Conn :: struct {
 	ch_id:       [64]u8,
 	ch_cnonce:   [64]u8,
 	ch_snonce:   [64]u8,
-	ch_pid:      i32,
 	handoff:     bool, // a framed hello was answered: the reader hands the fd to socket_framed_handler
 }
 
@@ -970,11 +969,6 @@ conn_challenge :: proc(c: ^Conn, m: Request_Msg) -> bool {
 		conn_push(c, reply_json(m.id, fail("token_id and nonce must be 64 lowercase hex digits")), force = true)
 		return false
 	}
-	pid := sock_peer_pid(c.fd)
-	if pid <= 0 {
-		conn_push(c, reply_json(m.id, fail("cannot tell which process connected")), force = true)
-		return false
-	}
 	idb, _ := hex.decode(transmute([]u8)m.token_id, context.temp_allocator)
 	id: [32]u8
 	copy(id[:], idb)
@@ -988,35 +982,31 @@ conn_challenge :: proc(c: ^Conn, m: Request_Msg) -> bool {
 	raw: [32]u8
 	crypto.rand_bytes(raw[:])
 	snonce := hex32(raw)
-	c.ch_open, c.ch_key, c.ch_pid = true, key, pid
+	c.ch_open, c.ch_key = true, key
 	copy(c.ch_id[:], m.token_id)
 	copy(c.ch_cnonce[:], m.nonce)
 	copy(c.ch_snonce[:], snonce)
-	p := hello_proof(key, "core", m.token_id, m.nonce, snonce, pid)
+	p := hello_proof(key, "core", m.nonce, snonce)
 	conn_push(c, reply_json(m.id, {ok = true, data = fmt.tprintf(`{{"challenge":"%s","proof":"%s"}}`, snonce, hex32(p))}), force = true)
 	return true
 }
 
 // The challenge hello's second line: {"type":"hello.proof","proof"}. Checked against the key from
-// the first line, the same process still on the socket, and the token still known (revoked in
+// the first line, and the token still known (revoked in
 // between: unknown). Then the hello reply, as for a plain hello (no reconnect token: a challenge
 // token is never single-use).
 @(private = "file")
 conn_proof :: proc(c: ^Conn, m: Request_Msg) -> bool {
 	defer {
-		mem_zero_key(&c.ch_key)
+		trust.wipe(c.ch_key[:])
 		c.ch_open = false
 	}
 	if !hex64_ok(m.proof) {
 		conn_push(c, reply_json(m.id, fail("proof must be 64 lowercase hex digits")), force = true)
 		return false
 	}
-	if pid := sock_peer_pid(c.fd); pid != c.ch_pid {
-		conn_push(c, reply_json(m.id, fail("the hello came from another process")), force = true)
-		return false
-	}
 	id_hex := string(c.ch_id[:])
-	want := hello_proof(c.ch_key, "client", id_hex, string(c.ch_cnonce[:]), string(c.ch_snonce[:]), c.ch_pid)
+	want := hello_proof(c.ch_key, "client", string(c.ch_cnonce[:]), string(c.ch_snonce[:]))
 	if !hex64_equal(hex32(want), m.proof) {
 		conn_push(c, reply_json(m.id, fail("the proof does not verify")), force = true)
 		return false
@@ -1034,9 +1024,6 @@ conn_proof :: proc(c: ^Conn, m: Request_Msg) -> bool {
 	}
 	return conn_welcome(c, m.id, e.ref, "", false, m.framed)
 }
-
-@(private = "file")
-mem_zero_key :: proc(k: ^[32]u8) {trust.wipe(k[:])}
 
 // After a framed hello's reply: the writer sends what is queued (the reply) and stops, the
 // connection leaves the line server, and socket_framed_handler owns the fd from here.

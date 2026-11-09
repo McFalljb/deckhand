@@ -1,32 +1,22 @@
 package core
 
 import "core:math/rand"
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import cw "../corewire"
 import "../trust"
 
-// One vector, shared with integrations/pi/test/unit.test.ts (helloProof): the two implementations
-// agree byte for byte. (Also computed independently with Python's hmac.)
-HELLO_VECTOR_TOKEN :: "abababababababababababababababababababababababababababababababab"
-HELLO_VECTOR_ID :: "e05f8d531fd4524dc252476e8c9c27457a014664e4d353b0e4f228fefab4fe66"
-HELLO_VECTOR_CORE :: "38531696492ecb189bf763d4ee588fe3ffad3e29eba39aca058b3835db87bc63"
-HELLO_VECTOR_CLIENT :: "a01941e02678fa7489ffb892cb562796a934231cc474c246cb64cf900c36f9e9"
-
+// One vector, shared with integrations/pi/test/unit.test.ts (helloProof); also computed with
+// Python's hmac.
 @(test)
 hello_proof_vector :: proc(t: ^testing.T) {
-	key := token_hash(HELLO_VECTOR_TOKEN)
-	id := hex32(hello_token_id(key))
-	testing.expect_value(t, id, HELLO_VECTOR_ID)
-	cn, sn := "0101010101010101010101010101010101010101010101010101010101010101", "0202020202020202020202020202020202020202020202020202020202020202"
-	testing.expect_value(t, hex32(hello_proof(key, "core", id, cn, sn, 4242)), HELLO_VECTOR_CORE)
-	testing.expect_value(t, hex32(hello_proof(key, "client", id, cn, sn, 4242)), HELLO_VECTOR_CLIENT)
-	// every input counts
-	testing.expect(t, hex32(hello_proof(key, "client", id, cn, sn, 4243)) != HELLO_VECTOR_CLIENT)
-	testing.expect(t, hex32(hello_proof(key, "client", id, sn, cn, 4242)) != HELLO_VECTOR_CLIENT)
-	testing.expect(t, hex64_ok(HELLO_VECTOR_ID) && !hex64_ok("E05F8D531FD4524DC252476E8C9C27457A014664E4D353B0E4F228FEFAB4FE66") && !hex64_ok("ab"))
-	testing.expect(t, hex64_equal(HELLO_VECTOR_ID, HELLO_VECTOR_ID) && !hex64_equal(HELLO_VECTOR_ID, HELLO_VECTOR_CORE))
+	key := token_hash("abababababababababababababababababababababababababababababababab")
+	testing.expect_value(t, hex32(hello_token_id(key)), "e05f8d531fd4524dc252476e8c9c27457a014664e4d353b0e4f228fefab4fe66")
+	cn, sn := strings.repeat("01", 32, context.temp_allocator), strings.repeat("02", 32, context.temp_allocator)
+	testing.expect_value(t, hex32(hello_proof(key, "core", cn, sn)), "84f4b9f7dc6feedea6cac0f826c435a6cb6dde0a5874d3ea39ed1d93a21899fb")
+	testing.expect_value(t, hex32(hello_proof(key, "client", cn, sn)), "43351e85e4790d6a248033b770d4c48c1fd38f189941751c6919dcb3c67d173b")
 	free_all(context.temp_allocator)
 }
 

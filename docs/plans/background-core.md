@@ -979,7 +979,9 @@ streams (`src/core/term_stream.odin`) and `Term_View`'s own terminal.
 - **Every core is fully featured** (decision 6, §8.6). `Deckhand Core.app` runs sessions, jobs,
   the scheduler and Atlas with or without a window. M4 adds nothing local-only that M6 must undo.
 - **Bridge hellos prove a token without sending it.** The HMAC key is the token's SHA-256, which
-  is all `tokens.json` keeps, so the file gains no secret.
+  is all `tokens.json` keeps, so the file holds no new kind of secret. But its hashes *are* the
+  challenge keys: a same-user process that reads the file can prove any token in it. That is the
+  same-user residual (§5.4).
 
 | PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
 |---|---|---|---|---|---|

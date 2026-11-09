@@ -112,8 +112,8 @@ export function parse(text: string): Record<string, any> | undefined {
 /** The challenge hello's proofs, as Deckhand computes them (src/core/hello_proof.odin; one shared vector in the tests). */
 export const helloKey256 = (token: string) => createHash("sha256").update(token, "utf8").digest();
 export const helloTokenId = (key: Buffer) => createHmac("sha256", key).update("deckhand-token-id-v1").digest("hex");
-export function helloProof(key: Buffer, role: "core" | "client", tokenId: string, clientNonce: string, coreNonce: string, pid: number): string {
-	return createHmac("sha256", key).update(`deckhand-hello-v1\n${role}\n${tokenId}\n${clientNonce}\n${coreNonce}\n${pid}`).digest("hex");
+export function helloProof(key: Buffer, role: "core" | "client", clientNonce: string, coreNonce: string): string {
+	return createHmac("sha256", key).update(`deckhand-hello-v1\n${role}\n${clientNonce}\n${coreNonce}`).digest("hex");
 }
 const HEX64 = /^[0-9a-f]{64}$/;
 const sameHex = (a: unknown, b: string) => typeof a === "string" && HEX64.test(a) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
@@ -127,23 +127,21 @@ export type HelloStep = { send: string } | { ok: Record<string, any> } | { fail:
  * this client proves its reconnect token from now on. With a challenge-only reconnect token: its id
  * and a fresh nonce; Deckhand answers with its nonce and its proof, which is checked here before
  * anything else is sent (a program listening where Deckhand should be, without the token's key,
- * gets only the id and the nonce); then this side's proof. Both proofs name this process's pid, so
- * a relay is refused by either side. The token itself is never sent after its first hello.
+ * gets only the id and the nonce); then this side's proof. The token itself is never sent after
+ * its first hello.
  * A successful result's reconnect token is kept (keepToken) by the flow itself, at once.
  */
 export class HelloFlow {
 	readonly first: string;
 	private env: string;
 	private id: string;
-	private pid: number;
 	private step = 0;
 	private key?: Buffer;
 	private tokenId = "";
 	private nonce = "";
-	constructor(env: string, id: string, token: string, pid = process.pid, nonce = randomBytes(32).toString("hex")) {
+	constructor(env: string, id: string, token: string, nonce = randomBytes(32).toString("hex")) {
 		this.env = env;
 		this.id = id;
-		this.pid = pid;
 		if (tokenHello(env) === "challenge") {
 			this.key = helloKey256(token);
 			this.tokenId = helloTokenId(this.key);
@@ -166,9 +164,9 @@ export class HelloFlow {
 		if (this.step === 1) return { ok: m.result };
 		const d = m.result.data ?? {};
 		if (typeof d.challenge !== "string" || !HEX64.test(d.challenge)) return { fail: "no challenge" };
-		if (!sameHex(d.proof, helloProof(this.key, "core", this.tokenId, this.nonce, d.challenge, this.pid))) return { fail: "Deckhand's proof does not verify: not the Deckhand that gave this token" };
+		if (!sameHex(d.proof, helloProof(this.key, "core", this.nonce, d.challenge))) return { fail: "Deckhand's proof does not verify: not the Deckhand that gave this token" };
 		this.step = 1;
-		return { send: line({ id: this.waiting, type: "hello.proof", proof: helloProof(this.key, "client", this.tokenId, this.nonce, d.challenge, this.pid) }) };
+		return { send: line({ id: this.waiting, type: "hello.proof", proof: helloProof(this.key, "client", this.nonce, d.challenge) }) };
 	}
 }
 

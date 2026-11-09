@@ -141,7 +141,7 @@ serve_main :: proc(args: []string) -> int {
 			os.flush(os.stdout)
 		}
 	}
-	core.state.settings.keep_sessions = core.keep_sessions_default()
+	core.settings_defaults()
 	if files {
 		core.persist_init(core.data_dir(context.temp_allocator))
 		core.claude_disk_launching = true

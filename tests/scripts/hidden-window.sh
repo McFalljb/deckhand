@@ -10,6 +10,9 @@
 # so does one while no frames run.
 # Usage: tests/scripts/hidden-window.sh
 set -eu
+# the core loop in the window's own process is what it tests: in process unless a run asks
+# otherwise (scenes.py --separate-core leaves it out: tagged inproc)
+export DECKHAND_SEPARATE_CORE="${DECKHAND_SEPARATE_CORE:-0}"
 unset CLAUDE_CONFIG_DIR
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"

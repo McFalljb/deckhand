@@ -1,7 +1,7 @@
 package main
 
-// The window with a separate core (docs/plans/background-core.md §10.3 M4-C; Settings ›
-// Experimental › Run sessions in a background core, or DECKHAND_SEPARATE_CORE=1): the core is
+// The window with a separate core (docs/plans/background-core.md §10.3 M4-C; the default, unless
+// Settings › Run sessions in a background core is off or DECKHAND_SEPARATE_CORE=0): the core is
 // `deckhand-core serve`, another process, and the window's link is core.sock.
 //
 // - Dial: core.sock in the runtime dir; none answers with a window token: the window launches one

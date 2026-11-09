@@ -152,7 +152,7 @@ init :: proc "c" () {
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// DECKHAND_DATA_DIR, so scripts never read or write the user's
-	core.state.settings.keep_sessions = core.keep_sessions_default() // until the saved workspace says otherwise (the core's, before the window attaches)
+	core.settings_defaults() // until the saved workspace says otherwise (the core's, before the window attaches)
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" {
 		core.persist_init(core.data_dir(context.temp_allocator))
 		core.claude_disk_launching = true // no transcript read on the main thread while it comes back

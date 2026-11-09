@@ -190,7 +190,9 @@ or reconnects after the core crashed, finds that session started.
   repository (else in the project's folder).
 - `settings.agent_name`, `settings.agent_model` (when set), `settings.notify: false` and
   `settings.tidy_projects: false` (when off), `settings.keep_sessions` (only once you changed it;
-  absent: the default, on; the session holder's `tokens.json` is its own file, above). The tidy list's state (temp, missing, nesting) is
+  absent: the default, on; the session holder's `tokens.json` is its own file, above),
+  `settings.separate_core` (only when it differs from the default, on: read by the window before
+  it starts, to run the core in its own process or not). The tidy list's state (temp, missing, nesting) is
   derived at each scan and not saved. A project added by hand is saved in `projects` with
   `"added": true`, so a subfolder you added stays a top-level row across restarts (as pinned
   ones do); restored as saved (`added` absent: a found row that nests), never selected one by

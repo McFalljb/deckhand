@@ -294,6 +294,10 @@ its main executable, whose signature seals the rest; checked there with `codesig
 --strict --deep` against the app's own designated requirement, then quarantine stripped) and
 starts the holder from the copy, so an app update never pulls the binary from under live
 sessions. A bare `build/deckhand-core` (a `DECKHAND_NO_CEF` build) is installed alone, as before.
+Core.app also carries the core itself, `Contents/MacOS/deckhand-core-serve` (`src/coremain`): by
+default the window launches it and is its client over `core.sock` (docs/plans/background-core.md
+§10.3; PROTOCOL.md §5a), so ⌘Q closes the window and the sessions run on. Settings › *Sessions in
+a background core* off runs the core in the window's process as before.
 
 The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §7.3;
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
@@ -599,7 +603,10 @@ Which tests exist, what each protects, how long it takes and when it must run:
 name, and `./build.sh scenes --all` only for an `@all` change (the build, the runner) and before a
 release: not after every fix. No test run should take more than 3 minutes. `tests/scenes.py` (what `./build.sh scenes` runs) builds once, runs scenes
 side by side, retries a failure once and reports flaky ones; `tests/scenes.txt` lists every scene
-with its tier and the files it covers.
+with its tier and the files it covers. Like the app, scenes run with a separate core
+(`deckhand-core-serve serve`) by default; `--in-process` runs them with the core in the window's
+process (the Settings opt-out's path), and a single run of `build/deckhand` takes
+`DECKHAND_SEPARATE_CORE=0` or `1` (test and development builds only) over the saved setting.
 
 Scenes run `build/deckhand` as it is; `./build.sh test` does not build it. Each scene sources
 `tests/scripts/fresh-build.sh` first and stops if any source file it is built from (`src/`

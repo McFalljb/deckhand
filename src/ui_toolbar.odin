@@ -233,7 +233,7 @@ Pop_Item :: enum {
 	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
 	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
-	Separate_Core, // Experimental: run sessions in a background core (§10.3 M4-C; read at launch); last so earlier rows keep their ids
+	Separate_Core, // run sessions in a background core (on by default; read at launch); last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -540,8 +540,6 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
 		pop_row(.Update_Checks, !core.update_view().checks_off)
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
-		pop_sep()
-		pop_label("Experimental")
 		pop_row(.Separate_Core, state.settings.separate_core)
 	}
 }

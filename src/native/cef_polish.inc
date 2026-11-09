@@ -596,14 +596,21 @@ void dh_cef_test_crash(int i) { dh_cef_navigate(i, "chrome://crash"); }
 // is looked up first). Its answer may take a lookup, so it runs on a thread of its own and the
 // request waits (RV_CONTINUE_ASYNC). A redirect is checked again: on_resource_redirect sends a
 // refused one nowhere, and the redirected request comes through on_before_resource_load too.
+// WebSockets never reach that handler (CEF has none for them), so the context's proxy sends every
+// connection that is not http or https, and every connection to this Mac's loopback, to a dead
+// proxy, but for loopback on a forwarded port (remote_proxy). A page of another machine opens a
+// WebSocket to a forwarded port only, then.
 
 #define REMOTE_CONTEXTS 32
 #define REMOTE_URL_MAX 8192
+#define REMOTE_FORWARDS 32
 typedef struct {
     cef_request_context_handler_t h; // first: CEF's pointer is ours
     cef_resource_request_handler_t r;
-    uint64_t machine;
-    cef_request_context_t* ctx; // our reference
+    uint64_t machine; // 0: a free entry
+    cef_request_context_t* ctx; // our reference (NULL: none made yet)
+    uint16_t fw[REMOTE_FORWARDS]; // this Mac's ports forwarded from that machine (dh_cef_remote_forwards)
+    int nfw;
 } Remote_Ctx;
 static Remote_Ctx remote_ctx[REMOTE_CONTEXTS];
 
@@ -638,7 +645,8 @@ typedef struct {
 static void* remote_check_run(void* arg) {
     Remote_Check* c = arg;
     int ok = remote_allowed(c->machine, c->url);
-    if (!ok) fprintf(stderr, "Deckhand cef: machine %llu: a request refused (this Mac's network)\n", (unsigned long long)c->machine);
+    // fd 1, unbuffered: any thread (say() is the main thread's)
+    if (!ok) dprintf(1, "[browser] machine %llu: a request refused (this Mac's network)\n", (unsigned long long)c->machine);
     if (ok) c->callback->cont(c->callback);
     else c->callback->cancel(c->callback);
     RELEASE(c->callback);
@@ -691,7 +699,7 @@ static void CEF_CALLBACK remote_redirect(cef_resource_request_handler_t* self, c
 #endif
     free(u);
     if (literal_refused) {
-        fprintf(stderr, "Deckhand cef: machine %llu: a redirect refused (this Mac's network)\n", (unsigned long long)machine);
+        dprintf(1, "[browser] machine %llu: a redirect refused (this Mac's network)\n", (unsigned long long)machine);
         p_cef_string_utf16_clear(new_url);
         cef_string_t blocked = str16("about:blank#blocked");
         *new_url = blocked; // CEF takes it
@@ -706,15 +714,69 @@ static cef_resource_request_handler_t* CEF_CALLBACK remote_get_rrh(cef_request_c
     return &((Remote_Ctx*)self)->r; // every request of its pages (static: no reference to count)
 }
 
-// Machine machine's request context (made the first time; kept until quit). NULL: none.
-static cef_request_context_t* remote_context(uint64_t machine) {
+// Machine machine's entry (claimed when claim). NULL: none.
+static Remote_Ctx* remote_entry(uint64_t machine, int claim) {
     int free_k = -1;
     for (int k = 0; k < REMOTE_CONTEXTS; k++) {
-        if (remote_ctx[k].ctx && remote_ctx[k].machine == machine) return remote_ctx[k].ctx;
-        if (!remote_ctx[k].ctx && free_k < 0) free_k = k;
+        if (remote_ctx[k].machine == machine) return &remote_ctx[k];
+        if (!remote_ctx[k].machine && free_k < 0) free_k = k;
     }
-    if (free_k < 0 || !cb.net) return NULL;
-    Remote_Ctx* e = &remote_ctx[free_k];
+    if (!claim || free_k < 0 || !machine) return NULL;
+    remote_ctx[free_k].machine = machine;
+    return &remote_ctx[free_k];
+}
+
+// The context's proxy: a dead one (nothing listens on port 9) for all but http and https, and for
+// this Mac's loopback but its forwarded ports. Bypass rules: a later one overrides an earlier one;
+// "<-loopback>" takes loopback off the implicit bypass. UI thread. 1: set.
+static int remote_proxy(Remote_Ctx* e) {
+    char bypass[64 + REMOTE_FORWARDS * 48];
+    int n = snprintf(bypass, sizeof bypass, "http://*;https://*;<-loopback>");
+    for (int k = 0; k < e->nfw; k++)
+        n += snprintf(bypass + n, sizeof bypass - n, ";127.0.0.1:%u;localhost:%u", e->fw[k], e->fw[k]);
+    cef_dictionary_value_t* d = p_cef_dictionary_value_create();
+    cef_value_t* v = p_cef_value_create();
+    if (!d || !v) {
+        if (d) RELEASE(d);
+        if (v) RELEASE(v);
+        return 0;
+    }
+    struct { const char *k, *v; } kv[] = {{"mode", "fixed_servers"}, {"server", "http://127.0.0.1:9"}, {"bypass_list", bypass}};
+    for (int i = 0; i < 3; i++) {
+        cef_string_t k = str16(kv[i].k), s = str16(kv[i].v);
+        d->set_string(d, &k, &s);
+        p_cef_string_utf16_clear(&k);
+        p_cef_string_utf16_clear(&s);
+    }
+    v->set_dictionary(v, d); // takes d
+    cef_string_t name = str16("proxy"), err = {0};
+    int ok = e->ctx->base.set_preference(&e->ctx->base, &name, v, &err); // takes v
+    p_cef_string_utf16_clear(&name);
+    if (!ok) {
+        char* why = err.str ? utf8_of(&err) : NULL;
+        say([NSString stringWithFormat:@"another machine's pages: the proxy could not be set (%s)", why ? why : "?"]);
+        free(why);
+    }
+    p_cef_string_utf16_clear(&err);
+    return ok;
+}
+
+// This Mac's ports forwarded from machine (src/browser_remote.odin, as they change): its
+// WebSockets may reach them. UI thread.
+void dh_cef_remote_forwards(uint64_t machine, const uint16_t* ports, int n) {
+    Remote_Ctx* e = remote_entry(machine, n > 0);
+    if (!e) return;
+    e->nfw = 0;
+    for (int k = 0; k < n && k < REMOTE_FORWARDS; k++) e->fw[e->nfw++] = ports[k];
+    if (e->ctx) remote_proxy(e);
+}
+
+// Machine machine's request context (made the first time; kept until quit). NULL: none.
+static cef_request_context_t* remote_context(uint64_t machine) {
+    Remote_Ctx* e = remote_entry(machine, 1);
+    if (!e) return NULL;
+    if (e->ctx) return e->ctx;
+    if (!cb.net) return NULL;
     INIT_BASE(e->h);
     e->h.get_resource_request_handler = remote_get_rrh;
     INIT_BASE(e->r);
@@ -727,6 +789,11 @@ static cef_request_context_t* remote_context(uint64_t machine) {
     e->ctx = p_cef_request_context_create_context(&rs, &e->h);
     if (!e->ctx) {
         say(@"another machine's request context could not be made");
+        return NULL;
+    }
+    if (!remote_proxy(e)) { // no page of it opens without its proxy
+        RELEASE(e->ctx);
+        e->ctx = NULL;
         return NULL;
     }
 #ifndef DH_RELEASE

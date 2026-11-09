@@ -1385,7 +1385,7 @@ asserted.
 | R7 | M1's closed-app gap | Hooks must fail safe; the read-only guard never needs the socket (checked in M1); M4 closes the gap |
 | R8 | Bundle-relative paths under live sessions | Everything lives in `core/<v>/`, collected only when unused |
 | R9 | Moving ticks off `frame()` changes scene timing | M2 keeps calling `core_tick()` from `frame()` until M4, and a timer runs it only when no frame has run for 50 ms (M2-C), never inside `frame()` or a modal loop |
-| R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own PRs (§10.4). CEF gives no resolved address before a request, so the handler resolves the host itself on every request, redirects included: DNS rebinding between that lookup and Chromium's is a stated residual. Linux units use `KillMode=process`. |
+| R10 | Remote: Linux build, linger, SSH quirks, CEF address checks (DNS rebinding) | Its own PRs (§10.4). CEF gives no resolved address before a request, so the handler resolves the host itself on every request, redirects included: DNS rebinding between that lookup and Chromium's is a stated residual. WebSockets skip that handler: each machine's context has a dead proxy for all but http and https, bypassed only for forwarded loopback ports, so its pages' WebSockets reach forwarded ports only (as built, M6-D). Linux units use `KillMode=process`. |
 | R11 | Scope | Every step ships on its own |
 | R12 | S2 ran only on macOS 26.6.2 (the minimum is 14) | Run S2's programs on 14 and 15, plus Force Quit and logout, before M1's PR B ships (§10.1) |
 | R13 | An unfinished over-limit sequence (a large OSC 52) blocks snapshots | A limit sized to the largest accepted sequence, retry after ground, VT `inexact` at a handover |

@@ -1599,7 +1599,9 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			json_quote(b, m.arch)
 			strings.write_string(b, `,"error":`)
 			json_quote(b, m.error)
-			strings.write_byte(b, '}')
+			strings.write_string(b, `,"ports":[`) // forwarded to this Mac (machine_forward)
+			for p, k in m.ports do fmt.sbprintf(b, `%s{{"remote":%d,"local":%d}}`, k > 0 ? "," : "", p.remote, p.local)
+			strings.write_string(b, "]}")
 		}
 		strings.write_byte(b, ']')
 	}

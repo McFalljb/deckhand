@@ -6,6 +6,8 @@ package main
 // if on_cef_net says so: http, https, ws or wss to a public address, or this Mac's loopback on a
 // port the user forwarded from that machine (Machine_Forward); a name is looked up first
 // (core.netcap_lookup: a rebinding between that lookup and Chromium's own is the stated residual).
+// WebSockets never reach that check, so the context's proxy sends them to a dead port unless they
+// go to a forwarded one (dh_cef_remote_forwards): another machine's page has no other WebSocket.
 // They open no popups, downloads, permissions or file choosers (the shim), and only http and https
 // addresses (browser_remote_url_ok; the core checked them first, src/core/machine_browser.odin).
 // Their screenshots go back as bytes (app_tab.odin's frame_shot, inline). Their tabs' records are
@@ -35,16 +37,26 @@ net_ports: struct {
 	n:    int,
 }
 
-// Every frame with pages (browser_tick): the forwarded ports for CEF's threads, and the pages of
-// another machine's tabs that went.
+// Every frame with pages (browser_tick): the forwarded ports for CEF's threads and, as they change,
+// for each machine's proxy (its WebSockets: dh_cef_remote_forwards); and the pages of another
+// machine's tabs that went.
 browser_remote_tick :: proc() {
 	sync.lock(&net_ports.mu)
+	before := net_ports.list
+	n_before := net_ports.n
 	net_ports.n = 0
 	for m in state.machines do for p in m.ports do if net_ports.n < len(net_ports.list) {
 		net_ports.list[net_ports.n] = {m.no, p.local}
 		net_ports.n += 1
 	}
+	now := net_ports.list
+	n_now := net_ports.n
 	sync.unlock(&net_ports.mu)
+	if n_now != n_before || before != now {
+		// each machine in either list: its whole list now
+		for e, i in before[:n_before] do if !net_has_machine(before[:i], e.machine) do net_send(e.machine, now[:n_now])
+		for e, i in now[:n_now] do if !net_has_machine(now[:i], e.machine) && !net_has_machine(before[:n_before], e.machine) do net_send(e.machine, now[:n_now])
+	}
 	gone := make([dynamic]u64, context.temp_allocator)
 	for id, b in browsers {
 		if core.id_machine(id) == 0 do continue
@@ -53,6 +65,24 @@ browser_remote_tick :: proc() {
 		} else if b.seen_tab || time.tick_since(b.opened_at) > REMOTE_PAGE_ORPHAN do append(&gone, id)
 	}
 	for id in gone do browser_drop(id)
+}
+
+@(private = "file")
+net_has_machine :: proc(list: []Net_Port, machine: u64) -> bool {
+	for e in list do if e.machine == machine do return true
+	return false
+}
+
+// Machine machine's forwarded ports (of list) to its proxy.
+@(private = "file")
+net_send :: proc(machine: u64, list: []Net_Port) {
+	ports: [len(net_ports.list)]u16
+	k := 0
+	for e in list do if e.machine == machine {
+		ports[k] = e.port
+		k += 1
+	}
+	dh_cef_remote_forwards(machine, &ports[0], c.int(k))
 }
 
 // Whether a page of tab_id may open url here: any for this Mac's tabs; another machine's, http and

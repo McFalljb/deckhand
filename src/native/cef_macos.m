@@ -81,6 +81,7 @@
 #include "include/capi/cef_callback_capi.h"
 #include "include/capi/cef_request_capi.h"
 #include "include/capi/cef_request_context_capi.h"
+#include "include/capi/cef_values_capi.h"
 #include "include/capi/cef_request_context_handler_capi.h"
 #include "include/capi/cef_resource_request_handler_capi.h"
 #include "include/capi/cef_resource_handler_capi.h"
@@ -127,7 +128,9 @@ typedef struct {
     X(cef_string_utf8_clear)               \
     X(cef_string_userfree_utf16_free)      \
     X(cef_register_scheme_handler_factory) \
-    X(cef_request_context_create_context)
+    X(cef_request_context_create_context)  \
+    X(cef_value_create)                    \
+    X(cef_dictionary_value_create)
 #define DECL(name) static __typeof__(name)* p_##name;
 CEF_FNS(DECL)
 
@@ -385,9 +388,14 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
         // component and model downloads) reach Google even with the switches
         // above. No name resolves, every connection goes to a dead proxy
         // (IP literals too), no QUIC: pages come from file:// only.
-        add_switch_value(cl, "host-resolver-rules", "MAP * ~NOTFOUND");
-        add_switch_value(cl, "proxy-server", "http://127.0.0.1:9");
-        if (offline != 2) add_switch_value(cl, "proxy-bypass-list", "<-loopback>"); // 2: the scene's own loopback servers
+        // 2: the scene's own loopback servers stay reachable (remote-browser.sh)
+        add_switch_value(cl, "host-resolver-rules", offline == 2 ? "MAP * ~NOTFOUND, EXCLUDE 127.0.0.1, EXCLUDE localhost" : "MAP * ~NOTFOUND");
+        // 2: no proxy switch (it would pin the proxy, and another machine's pages set their own:
+        // cef_polish.inc's remote_proxy); the name rules above keep Google's names unresolved
+        if (offline != 2) {
+            add_switch_value(cl, "proxy-server", "http://127.0.0.1:9");
+            add_switch_value(cl, "proxy-bypass-list", "<-loopback>");
+        }
         add_switch(cl, "disable-quic");
     } else {
         // RLZ's ping host (also held off by rlz_ping_delay, browser.odin):

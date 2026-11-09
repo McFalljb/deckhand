@@ -218,6 +218,8 @@ ignored silently, so recheck them against the framework's strings at each bump.
   host in the net-log other than Safe Browsing's.
 - Test mode is fully offline on top: every host maps to nothing, a dead proxy, no QUIC.
   `browser.sh` fails on any non-loopback socket of Deckhand or a helper.
+  `remote-browser.sh` keeps loopback reachable (`DECKHAND_CEF_LOOPBACK`: names still map to
+  nothing; no global proxy, so another machine's context can set its own).
 
 ### 2.4 Saved across relaunch
 
@@ -419,6 +421,16 @@ By decision 4 (§8), agents read and act on any site without asking. What holds 
   or change what the user sees.
 - Actions on one tab run one at a time, 30 s each. The requester's `cancel` or closed connection
   ends its actions. Typed text is never logged.
+- **Another machine's agents** (§10.4 M6-D of the background-core design; PROTOCOL.md §5a,
+  "Another machine's browser tabs") drive tabs here with less: only the agent commands above, ids
+  packed to that machine's tabs, http(s) pages only, and none of this Mac's network but ports the
+  user forwarded (`src/core/netcap.odin` classifies every address form). Each machine's pages get
+  a request context of their own (in memory, `cef_polish.inc`'s `remote_context`): every request is
+  checked off the IO thread before it goes (a name looked up first), redirects again; WebSockets,
+  which skip that handler, go to a dead proxy unless they target a forwarded port; no downloads,
+  permissions, file choosers, popups or script clipboard access. Screenshots go back as bytes.
+  Residuals: DNS rebinding between the lookup and Chromium's own, and a page's clipboard write on
+  a click.
 
 ## 5. Buttons (every action has one)
 

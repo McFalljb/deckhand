@@ -74,6 +74,7 @@ when DECKHAND_CEF && ODIN_OS == .Darwin {
 		dh_cef_navigate :: proc(id: c.int, url: cstring) ---
 		dh_cef_history :: proc(id: c.int, what: c.int) ---
 		dh_cef_test_scheme :: proc(root: cstring) -> c.int ---
+		dh_cef_remote_forwards :: proc(machine: u64, ports: [^]u16, n: c.int) ---
 		dh_cef_stats :: proc(id: c.int, gpu, cpu: ^u64, first_paint_ms: ^f64, pumps: ^u64, dropped: ^u64) ---
 		dh_cef_close :: proc(id: c.int) ---
 		dh_cef_shutdown :: proc() ---
@@ -100,6 +101,7 @@ when DECKHAND_CEF && ODIN_OS == .Darwin {
 	dh_cef_ready :: proc(id: c.int) -> c.int {return 0}
 	dh_cef_free_slots :: proc(closing: c.int) -> c.int {return 8}
 	dh_cef_navigate :: proc(id: c.int, url: cstring) {}
+	dh_cef_remote_forwards :: proc(machine: u64, ports: [^]u16, n: c.int) {}
 	dh_cef_history :: proc(id: c.int, what: c.int) {}
 	dh_cef_test_scheme :: proc(root: cstring) -> c.int {return 0}
 	dh_cef_stats :: proc(id: c.int, gpu, cpu: ^u64, first_paint_ms: ^f64, pumps: ^u64, dropped: ^u64) {}

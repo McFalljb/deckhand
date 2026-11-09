@@ -1311,7 +1311,9 @@ that `path`. What the window sees of a page (`browser_update`) goes to that core
 none of this Mac's cookies or logins), with no downloads, permissions, file choosers, popups or
 script clipboard access, and every request, redirects and workers' included, is checked before it
 goes: the same rule, with the forwarded ports allowed and a host name looked up first (any private
-or loopback address, or none, refuses it). **What is left:** a name that resolves differently for
+or loopback address, or none, refuses it). WebSockets never reach that check (CEF has no hook for
+them), so the context's proxy sends every one to a dead port unless it goes to a forwarded port:
+another machine's page opens a WebSocket only to its own forwarded ports. **What is left:** a name that resolves differently for
 Chromium a moment after that lookup (DNS rebinding); a page may still write the clipboard on a
 click, as any page can.
 

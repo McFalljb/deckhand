@@ -259,8 +259,14 @@ as that machine has them. Click an open session to show it, or one of a project'
 it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
 **⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
-*On <machine>: …*. Its other kinds of tab (editors, pages, apps) show only on that machine for
-now, and agents and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
+*On <machine>: …*. Its agents' browser tabs open here, in this window's browser, but capped: only
+http and https pages, none of this Mac's cookies or logins, no downloads, uploads, popups,
+permissions or clipboard reads, and never this Mac's own network (its loopback, your LAN, `.local`
+names). When one of its pages wants that machine's `localhost:PORT` (a dev server there), a bar
+asks **Forward port PORT from <machine> to this Mac?**; **Forward** tunnels that one port over the
+machine's ssh link while it stays up, and the page opens it. Its WebSockets reach forwarded ports
+only. Its screenshots go back to that machine, never to a file here. Its other kinds of tab
+(editors, Markdown, apps) show only on that machine for now, and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
 is ignored), open windows or notify here. If the link drops, its terminals reconnect with their
 screen when it comes back. While the machine is offline its rows are greyed and show what it had
 when last seen; they come back up to date when it does. Nothing of another machine is saved on this

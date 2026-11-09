@@ -290,6 +290,9 @@ case "$MODE" in
     # then its test (each forbidden import planted in a temporary tree)
     scripts/check-core-boundary.sh
     sh tests/check-core-boundary-test.sh
+    # the M2-B move's verifier refuses a dropped `state^`, a kept `&state` and a declaration
+    # moved out of its `when` block (a temporary repository; no odin)
+    sh tests/core-move-verify-test.sh
     # the core (src/core/*_test.odin, package core: no sokol, Clay or CEF) and the window
     # (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)

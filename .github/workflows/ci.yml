@@ -53,8 +53,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with: { persist-credentials: false }
-      - name: No window imports in src/core or src/holder
-        run: scripts/check-core-boundary.sh && sh tests/check-core-boundary-test.sh
+      - name: No window imports in src/core or src/holder; the M2-B verifier refuses what it must
+        run: scripts/check-core-boundary.sh && sh tests/check-core-boundary-test.sh && sh tests/core-move-verify-test.sh
 
   unit:
     runs-on: macos-15 # arm64

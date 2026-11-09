@@ -959,6 +959,9 @@ browser_popup_open :: proc(c: Browser_Popup_Open) -> (Result, bool) {
 	if session_pane(s, pane) == nil do pane = 0
 	id := new_id()
 	browser_record_add(s, id, c.url, background = c.background, pane = pane)
+	// its view, as every browser tab's: a window that gave up waiting for this answer still shows
+	// the page (lazy, at its address); one that waited takes it for CEF's popup
+	window_view_open(id, Browser_Tab{url = c.url})
 	return {ok = true, created_id = id}, true
 }
 

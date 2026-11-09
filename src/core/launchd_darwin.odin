@@ -59,7 +59,7 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 
 // The launchd path alone (tests call it with their prefix). label: the job's, booted out on
 // return whatever happened.
-launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL, mode := "hold") -> (pid: i32, label: string, ok: bool, why: string) {
+launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL, mode := "hold", secret := "") -> (pid: i32, label: string, ok: bool, why: string) {
 	launchd_sweep(run, prefix, launchctl)
 	uid := posix.getuid()
 	label = fmt.tprintf("%s%d.%d", prefix, posix.getpid(), time.now()._nsec)
@@ -100,7 +100,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 		if left <= 0 do return 0, label, false, "the detached holder never connected to the ready socket"
 		cfd, aok := sock_accept(lfd, left)
 		if !aok do continue
-		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline, launchctl)
+		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline, launchctl, secret)
 		sock_close(cfd)
 		if p > 0 do return p, label, true, ""
 		fmt.eprintln("Deckhand: session holder: ready:", w)
@@ -111,7 +111,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 // One connection on the ready socket: "" and the pid once the child acked, else why not. The job
 // is booted out (booted set) once the peer passed, before the environment goes.
 @(private = "file")
-launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64, launchctl: string) -> (pid: i32, why: string) {
+launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64, launchctl: string, secret := "") -> (pid: i32, why: string) {
 	at_accept, tok := trust.peer_read_token(cfd) // before any byte is read
 	line, lok := launchd_read_until(cfd, '\n', 32, deadline)
 	if !lok do return 0, "no pid from the peer"
@@ -128,12 +128,20 @@ launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, la
 	if sent == nil do sent, _ = os.environ(context.temp_allocator) // nil: ours
 	b := strings.builder_make(context.temp_allocator)
 	for e in sent {
-		if e == "" || strings.contains_rune(e, 0) do continue
+		if e == "" || strings.contains_rune(e, 0) || strings.has_prefix(e, READY_SECRET_KEY + "=") do continue
 		strings.write_string(&b, e)
 		strings.write_byte(&b, 0)
 	}
+	// a handover's successor: the holder's secret, as an entry the child takes out (src/holder detach.odin)
+	if secret != "" {
+		strings.write_string(&b, READY_SECRET_KEY + "=")
+		strings.write_string(&b, secret)
+		strings.write_byte(&b, 0)
+	}
 	strings.write_byte(&b, 0)
-	if !sock_write_all(cfd, b.buf[:]) do return 0, "the holder left before the environment"
+	sent_ok := sock_write_all(cfd, b.buf[:])
+	if secret != "" do trust.wipe(b.buf[:])
+	if !sent_ok do return 0, "the holder left before the environment"
 	ack, aok := launchd_read_until(cfd, '\n', 8, deadline)
 	// (no peer check after the ack: the holder may have closed its end, and then the token is
 	// unreadable; the ack only ends the launch, it decides nothing)
@@ -290,14 +298,16 @@ core_label_prefix := "dev.deckhand.core."
 // in a tab launches one too, and the core must not carry that tab's tokens, socket or ids.
 // from_tab (`deckhand --ctl`): Claude Code's settings (CLAUDE_CONFIG_DIR…) go too, as the login
 // environment's merge drops them (login_env.odin): an agent's shell is not the user's.
-core_launch :: proc(bin, run, data: string, from_tab := false) -> (pid: i32, ok: bool, why: string) {
+// secret: a handover's successor secret (core_handover.odin), over the ready socket or, spawned
+// directly, a pipe on its stdin (never argv, the environment or a file).
+core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> (pid: i32, ok: bool, why: string) {
 	ours, _ := os.environ(context.temp_allocator)
 	env := core_launch_env(ours, from_tab)
-	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve")
-	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve")
+	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve", secret)
+	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve", secret = secret)
 	if lok do return lpid, true, ""
 	fmt.eprintln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
-	return holder_launch_direct(bin, run, data, env, "serve")
+	return holder_launch_direct(bin, run, data, env, "serve", secret)
 }
 
 // env without the names Deckhand sets for its tabs, jobs and control callers, under either name
@@ -307,3 +317,5 @@ core_launch_env :: proc(env: []string, from_tab := false) -> []string {
 	for e in login_env_strip_claude(env, from_tab) do if !env_tab_dropped(env_key(e)) do append(&out, e)
 	return out[:]
 }
+
+READY_SECRET_KEY :: "DECKHAND_SUCCESSOR_SECRET" // src/holder detach.odin's

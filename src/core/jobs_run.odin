@@ -69,6 +69,7 @@ Run_Stop :: enum u8 {
 	Timeout,
 	User, // job_stop
 	Quit, // Deckhand quit
+	Update, // the background core handed over to another (core_handover.odin)
 }
 
 Blocked_Action :: struct {

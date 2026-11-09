@@ -1050,6 +1050,7 @@ job_preamble :: proc(j: ^Job, scheduled: i64) -> string {
 @(private = "file")
 job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	if home_root == "" do return "no data folder"
+	if core_handover_pending() do return "Deckhand's background core is being replaced: try again in a moment"
 	if !job_id_valid(j.def.id) do return "bad id"
 	jd := job_data_dir(j.def.id)
 	mkdir_private(fmt.tprintf("%s/runs", jd))
@@ -1185,6 +1186,7 @@ job_finish :: proc(r: ^Job_Run) {
 	case stop == .Timeout:                  status = "timeout"
 	case stop == .User:                     status = "failed"
 	case stop == .Quit:                     status = "stopped (quit)"
+	case stop == .Update:                   status = "stopped (update)"
 	case exit_code != 0 || err_text != "":  status = "failed"
 	case len(blocked) > 0 || len(rep.needs_you) > 0: status = "needs_you"
 	}
@@ -1777,9 +1779,16 @@ jobs_any_scheduled :: proc() -> bool {
 	return false
 }
 
+jobs_running_count :: proc() -> int {
+	n := 0
+	for j in sched.jobs do if j.run != nil do n += 1
+	return n
+}
+
 // Quit: every run's tree gets SIGTERM, a short grace, then SIGKILL; each
-// run is recorded "stopped (quit)" (no notifications).
-jobs_shutdown :: proc() {
+// run is recorded "stopped (quit)" (no notifications), or "stopped (update)"
+// for a core's handover (why = .Update).
+jobs_shutdown :: proc(why := Run_Stop.Quit) {
 	sync.atomic_store(&sched.stop_timer, true)
 	if sched.timer != nil {
 		thread.join(sched.timer)
@@ -1791,7 +1800,7 @@ jobs_shutdown :: proc() {
 	if len(runs) == 0 do return
 	sched.quitting = true
 	defer sched.quitting = false
-	for r in runs do run_stop(r, .Quit)
+	for r in runs do run_stop(r, why)
 	ended :: proc(runs: []^Job_Run, ms: int) -> bool {
 		for _ in 0 ..< ms / 20 {
 			all := true

@@ -240,7 +240,7 @@ holder_sha256 :: proc(data: []u8) -> string {
 // their defaults and none blocked, no other descriptor. A thread reaps it when it exits (it is
 // only ever our child while we live; after we exit launchd adopts it). Test mode and
 // DECKHAND_HOLDER_DIRECT=1 use this; the launchd launch falls back to it.
-holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold") -> (pid: i32, ok: bool, why: string) {
+holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold", secret := "") -> (pid: i32, ok: bool, why: string) {
 	argv := []cstring{
 		strings.clone_to_cstring(bin, context.temp_allocator),
 		strings.clone_to_cstring(mode, context.temp_allocator), // hold, or serve (a separate core)
@@ -248,8 +248,23 @@ holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode :
 		strings.clone_to_cstring(run, context.temp_allocator),
 		"--data",
 		strings.clone_to_cstring(data, context.temp_allocator),
+		secret != "" ? "--secret-stdin" : nil, // a handover's successor: the secret on a pipe (serve only)
 		nil,
 	}
+	// the secret's pipe: written now (65 bytes fit any pipe buffer), its read end the child's stdin
+	sp: [2]posix.FD = {-1, -1}
+	if secret != "" {
+		sync.rw_mutex_lock(&fork_lock)
+		pok := posix.pipe(&sp) == .OK
+		if pok do for fd in sp do posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
+		sync.rw_mutex_unlock(&fork_lock)
+		if !pok do return 0, false, "cannot make a pipe"
+		line := fmt.tprintf("%s\n", secret)
+		posix.write(sp[1], raw_data(line), len(line))
+		trust.wipe(transmute([]u8)line)
+		posix.close(sp[1])
+	}
+	defer if sp[0] >= 0 do posix.close(sp[0])
 	envp := posix.environ
 	if env != nil {
 		cenv := make([]cstring, len(env) + 1, context.temp_allocator)
@@ -268,7 +283,8 @@ holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode :
 	posix_spawnattr_setflags(&attr, i16(HOLDER_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | HOLDER_SPAWN_SETSIGDEF | HOLDER_SPAWN_SETSIGMASK))
 	posix_spawn_file_actions_init(&fa)
 	defer posix_spawn_file_actions_destroy(&fa)
-	holder_spawn_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
+	if sp[0] >= 0 do posix_spawn_file_actions_adddup2(&fa, i32(sp[0]), 0)
+	else do holder_spawn_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
 	holder_spawn_addopen(&fa, 1, log, transmute(i32)posix.O_Flags{.WRONLY, .CREAT, .APPEND}, 0o600)
 	posix_spawn_file_actions_adddup2(&fa, 1, 2)
 	p: posix.pid_t

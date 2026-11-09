@@ -40,3 +40,23 @@ core_versions_current_previous_collect :: proc(t: ^testing.T) {
 	os.symlink("../../etc", fmt.tprintf("%s/%s", vdir, CORE_PREVIOUS))
 	testing.expect_value(t, core_link_read(vdir, CORE_PREVIOUS), "")
 }
+
+// core_handover is a separate core's, to an installed core only (core_handover.odin).
+@(test)
+core_handover_refusals :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved_root, saved_sep := home_root, core_separate
+	defer home_root, core_separate = saved_root, saved_sep
+	home_root = fmt.tprintf("%s/dkch-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	core_separate = false
+	r := run_command(Core_Handover{to = "current"}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "only a background core"), r.error)
+	core_separate = true
+	r = run_command(Core_Handover{to = "current"}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "no current core"), r.error)
+	r = run_command(Core_Handover{to = "/bin/sh"}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "unknown target"), r.error)
+	r = run_command(Core_Handover{to = "current"}, {kind = .Control})
+	testing.expect(t, !r.ok, "a control caller handed the core over")
+	testing.expect(t, !core_handover_pending())
+}

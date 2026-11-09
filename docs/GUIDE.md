@@ -1415,7 +1415,11 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   stopped behind your back: they keep running unseen, a message says how many, and **Quit
   Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
   example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
-  then stop when Deckhand quits.
+  then stop when Deckhand quits. If it still hasn't answered after 30 seconds, the tabs that were
+  waiting for its sessions start fresh. If the holder that answers is from another build of
+  Deckhand (one signed differently), Deckhand sends it nothing and asks once: **Stop It and Start
+  a New One** (its sessions end) or **Keep It Running** (Deckhand runs without a holder, as
+  above).
   When a newer Deckhand (after an update, or one you put in place yourself) finds the holder
   from an older one, it upgrades that holder in place by itself, once: the same process, every
   session kept, nothing to see. Only if that fails does a message say so; the sessions keep
@@ -1446,7 +1450,13 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
   no scheduled job for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand
   starts it again). If
   Deckhand Core stops unexpectedly, the window starts it again and carries on. Logging out
-  stops both; the next launch restores your sessions as usual. Still the window's alone for now: app tabs, the setup
+  stops both; the next launch restores your sessions as usual. When Deckhand opens and finds
+  Deckhand Core from an older version (after an update), it hands your sessions over to its own
+  Deckhand Core at once: they keep running, and job runs get up to two minutes to finish first
+  (any still running then stop, as "stopped (update)"). If the running Deckhand Core is newer
+  than this Deckhand, it asks: update Deckhand, or **Use This App's Core**. The palette's **Use
+  previous core** hands the sessions to the Deckhand Core from before the last update (the
+  window closes: open Deckhand again). Still the window's alone for now: app tabs, the setup
   sheet's installs, the Changes tab and the update dialog. Only you can change it.
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers
@@ -1933,6 +1943,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
 | Run sessions in a background core (experimental; at the next launch) |  | off by default: on or off (the gear's Experimental row) |
+| Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |

@@ -86,6 +86,7 @@ projects            | required |                       |   20 | src/core/project
 reload              | full     |                       |   60 | src/core/reload.odin src/ui_reload.odin src/editor_watch.odin tests/scripts/reload.* tests/scripts/fake-bridge-reload.py
 release-checks      | full     |                       |   11 | scripts/release.sh scripts/check-release-build.sh scripts/check-env-reads.py src/core/test_hooks.odin tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh
 reload-separate     | full     |                       |   12 | src/core/reload.odin src/core/claude_reload.odin src/editor_watch.odin src/client_core.odin src/coremain/* src/core/pi_integration.odin tests/scripts/reload-separate* tests/scripts/fake-bridge-reload.py
+handover            | full     |                       |   20 | src/core/core_handover.odin src/core/core_versions.odin src/core/holder_successor.odin src/holder/detach.odin src/coremain/* src/client_core.odin tests/scripts/handover*
 two-process         | full     |                       |    5 | src/coremain/* src/client_core.odin src/core/window_sock.odin tests/scripts/two-process*
 window-attach       | full     |                       |   16 | src/coremain/* src/client_core.odin src/core/window_sock.odin src/window_requests.odin src/toast.odin src/core/holder_adopt.odin tests/scripts/window-attach*
 update-from-release | manual   | noci                  |   30 | tests/scripts/update-from-release.sh scripts/release.sh | tests/scripts/update-from-release.sh

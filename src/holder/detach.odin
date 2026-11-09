@@ -16,6 +16,8 @@ package holder
 //
 // The wire, both ways plain bytes: holder → "<pid>\n"; launcher → the environment as
 // NUL-terminated "KEY=VALUE" entries, then one more NUL (an empty entry ends it); holder → "ok\n".
+// A core launched as a handover's successor (deckhand-core-serve) also gets the holder's successor
+// secret as the entry READY_SECRET_KEY: taken out, never applied to the environment.
 // SIGPIPE: the socket has SO_NOSIGPIPE, so a launcher that died mid-handshake is an error here,
 // not a signal (S2: the waiting child died of SIGPIPE).
 
@@ -33,6 +35,7 @@ READY_TIMEOUT :: 10 * time.Second
 // The environment's cap (the launcher's is far smaller: a login environment).
 READY_ENV_MAX :: 1 << 20
 SUN_PATH_MAX :: 103 // sun_path is 104 bytes, its NUL included
+READY_SECRET_KEY :: "DECKHAND_SUCCESSOR_SECRET" // the ready entry with a successor secret (never in our environment)
 
 // `deckhand-core __detach hold-args...` (the launchd job): 0 in the job's process once the child
 // is forked; the child never returns (exec), or exits 127.
@@ -80,7 +83,7 @@ detach_main :: proc(args: []string) -> int {
 // already applied (the process environment is replaced by it); ok = false: no launcher, a peer
 // that is not ours, a timeout or a short read (logged to stderr). Called by hold_main for
 // `--ready PATH`; the holder should exit on failure (the launcher falls back to a direct spawn).
-ready_handshake :: proc(path: string) -> (env: []string, ok: bool) {
+ready_handshake :: proc(path: string, secret: ^[64]u8 = nil) -> (env: []string, ok: bool) {
 	// the job's process exits at once after the fork; until launchd adopts us the launcher's
 	// parent check would fail
 	deadline := time.tick_now()._nsec + i64(READY_TIMEOUT)
@@ -107,6 +110,11 @@ ready_handshake :: proc(path: string) -> (env: []string, ok: bool) {
 	os.clear_env()
 	for e in env {
 		k, _, v := strings.partition(e, "=")
+		if k == READY_SECRET_KEY {
+			if secret != nil && len(v) == len(secret) do copy(secret[:], v)
+			trust.wipe(transmute([]u8)e)
+			continue
+		}
 		// the holder's own setenv (sys_darwin.odin), not os.set_env: two foreign signatures for one
 		// libc symbol in a package panic the compiler's LLVM backend at -o:speed
 		if k != "" do setenv(strings.clone_to_cstring(k, context.temp_allocator), strings.clone_to_cstring(v, context.temp_allocator), 1)
@@ -126,8 +134,10 @@ ready_exchange :: proc(fd: posix.FD, timeout: time.Duration) -> (env: []string, 
 		return nil, false
 	}
 	buf := make([dynamic]u8, context.temp_allocator)
+	defer trust.wipe(buf[:]) // it may hold a successor secret (READY_SECRET_KEY)
 	deadline := time.tick_now()._nsec + i64(timeout)
 	chunk: [16 << 10]u8
+	defer trust.wipe(chunk[:])
 	for {
 		// done: "\0\0" at the end (an empty environment is a lone "\0")
 		n := len(buf)

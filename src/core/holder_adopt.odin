@@ -204,7 +204,7 @@ holder_handover :: proc() -> bool {
 	feed :: proc(d: rawptr) {for t in (^[dynamic]^Term)(d)^ do handover_feed(t)}
 	// an update names its successor (holder_successor.odin): the ack's secret goes to the relaunch
 	// helper, and the holder then waits for that app alone (at most a minute)
-	successor := relaunch_helper_waiting()
+	successor := relaunch_helper_waiting() || core_handover_due()
 	if !holder_goodbye("handover", feed, &held, successor) do return true // lost or left: whatever the holder kept, the next launch finds (the helper gets no secret)
 	// the holder sends every OUTPUT before the ack and nothing after it
 	deadline := time.tick_add(time.tick_now(), HOLDER_WAIT)
@@ -220,7 +220,7 @@ holder_handover :: proc() -> bool {
 		fmt.eprintln("Deckhand: session holder: no GOODBYE_ACK; the next launch restores from the tails")
 		return true
 	}
-	if successor {
+	if successor && relaunch_helper_waiting() { // a core's handover keeps it for its successor (core_handover_finish)
 		sync.lock(&hc.mu)
 		secret := string(hc.successor[:hc.successor_len])
 		relaunch_helper_send(secret) // at once: a later failure here still leaves the holder to it
@@ -240,7 +240,7 @@ holder_handover :: proc() -> bool {
 		sync.unlock(&hc.mu)
 		if !acked do continue
 		meta := Snapshot_Meta{offset = off, xpixel = i64(min(f32(t.cols) * t.cell.x, 65535)), ypixel = i64(min(f32(t.rows) * t.cell.y, 65535))}
-		blob, used, err := snapshot_encode(t.gt, meta, SNAPSHOT_FORMATS[:], fallback_ok = true, allocator = context.temp_allocator)
+		blob, used, err := snapshot_encode(t.gt, meta, core_handover_formats(), fallback_ok = true, allocator = context.temp_allocator)
 		if err != .None || !file_write_private(snap_path(id), blob) {
 			fmt.eprintln("Deckhand: session holder: no snapshot of terminal", id, err)
 			continue

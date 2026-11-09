@@ -224,8 +224,13 @@ holder_client_start :: proc() -> bool {
 	if why != "" do return false
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
-	// relaunched by an update (holder_successor.odin): the secret the holder waits for
-	secret := successor_secret_take(run)
+	// relaunched by an update (holder_successor.odin), or a handover's successor core
+	// (core_handover.odin): the secret the holder waits for
+	secret: string
+	if successor_given[0] != 0 {
+		secret = strings.clone(string(successor_given[:]), context.temp_allocator)
+		trust.wipe(successor_given[:])
+	} else do secret = successor_secret_take(run)
 	defer for &b in transmute([]u8)secret do b = 0
 	answered := false
 	// a holder that took the connection and closed it (or never answered) without a byte may have

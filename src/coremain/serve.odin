@@ -54,11 +54,16 @@ loop: struct {
 	idle_since:     time.Tick, // nothing to do since ({} = something; core_idle_due)
 }
 
-SERVE_USAGE :: "usage: deckhand-core-serve serve --run DIR --data DIR [--ready PATH]"
+SERVE_USAGE :: "usage: deckhand-core-serve serve --run DIR --data DIR [--ready PATH] [--secret-stdin]"
 
 serve_main :: proc(args: []string) -> int {
 	run, data, ready: string
+	secret_stdin := false
 	for i := 0; i < len(args); i += 1 {
+		if args[i] == "--secret-stdin" { // a handover's successor, spawned directly: the secret on stdin
+			secret_stdin = true
+			continue
+		}
 		if i + 1 >= len(args) {
 			fmt.eprintln(SERVE_USAGE)
 			return 2
@@ -82,10 +87,22 @@ serve_main :: proc(args: []string) -> int {
 	posix.signal(.SIGTERM, serve_on_signal)
 	posix.signal(.SIGINT, serve_on_signal)
 	// launched through launchd: the launcher's environment (it carries the window's settings)
+	// a handover's successor: the holder's secret, for its one HELLO (core.successor_given)
 	if ready != "" {
-		if _, ok := holder.ready_handshake(ready); !ok do return 1
+		if _, ok := holder.ready_handshake(ready, &core.successor_given); !ok do return 1
+	} else if secret_stdin {
+		buf: [65]u8
+		n := 0
+		for n < len(buf) {
+			r := posix.read(0, &buf[n], uint(len(buf) - n))
+			if r <= 0 do break
+			n += int(r)
+		}
+		if n == 65 && buf[64] == '\n' do copy(core.successor_given[:], buf[:64])
+		core.trust_wipe(buf[:])
 	}
 	core.persist.launch = time.tick_now()
+	core.core_separate = true
 	core.app_context = context
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
 	if !serve_platform() do return 1
@@ -138,7 +155,7 @@ serve_main :: proc(args: []string) -> int {
 	if files && !core.setup_due() do core.chats_instructions_ensure(core.date_stamp())
 	core.core_loop_start()
 	serve_loop()
-	serve_stop()
+	serve_stop(run)
 	return 0
 }
 
@@ -246,8 +263,9 @@ terms_bytes_in :: proc() -> int {
 
 // The end (Quit, or a signal): as the in-process window's quit and cleanup do.
 @(private = "file")
-serve_stop :: proc() {
+serve_stop :: proc(run: string) {
 	core.core_loop_stop()
+	if core.core_handover_due() do core.jobs_shutdown(.Update) // runs that did not end in time (core_handover.odin)
 	if core.app_stop_sessions do core.holder_shutdown()
 	else do core.holder_handover()
 	core.persist_quit()
@@ -259,6 +277,7 @@ serve_stop :: proc() {
 	core.close_all()
 	core.holder_client_stop()
 	core.comments_shutdown()
+	core.core_handover_finish(run) // a handover: the locks go, the successor starts with the holder's secret
 	dh_core_activity(0)
 	// the window's link (not one of srv.conns) goes last: a window that reconnects finds the core
 	// gone, not one still holding core.lock through its handover and save

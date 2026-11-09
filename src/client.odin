@@ -73,6 +73,7 @@ Client :: struct {
 	gave_up:   bool, // ...and no reconnect will be tried (client_core_give_up)
 	reconnects: int, // reconnects since reconnects_since (reconnect_allowed)
 	reconnects_since: time.Tick,
+	handing_over: bool, // a core handover at attach: its connection's end is expected (client_core.odin)
 }
 
 client: Client

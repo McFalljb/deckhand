@@ -56,6 +56,7 @@ core_tick_body :: proc() {
 	dead_tab_tick() // Restart with model…: pi's selector once the new pi is up (dead_tab.odin)
 	control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)
 	holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
+	core_handover_tick() // a handover waits for job runs, then quits (core_handover.odin)
 	holder_hung_tick() // a holder that never answered: its held_away tabs start fresh after PONG_TIMEOUT (holder_client.odin)
 	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
 	holder_restart_tick() // Restart session holder's outcome, as a toast (holder_restart.odin; the toast redraws)

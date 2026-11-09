@@ -642,7 +642,7 @@ confirm_bar :: proc(pc: core.Pending_Confirmation) {
 			clay.TextDynamic(text, cfg)
 		}
 		button(clay.ID("confirm_no"), "Cancel", false, ui_hover == Hit(Hit_Cancel(pc.token)))
-		button(clay.ID("confirm_yes"), "Confirm", true, ui_hover == Hit(Hit_Confirm(pc.token)))
+		if pc.command != nil do button(clay.ID("confirm_yes"), "Confirm", true, ui_hover == Hit(Hit_Confirm(pc.token))) // nil: a newer core's command (confirm_pending)
 	}
 }
 

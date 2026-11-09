@@ -910,6 +910,12 @@ set_hover :: proc(h: Hit, over_terminal: bool) {
 confirm_pending :: proc(token: string) {
 	for p in state.pending_confirmations {
 		if p.token != token do continue
+		// a command this window cannot decode (a newer core's: the replica holds nil) is never
+		// confirmed blind; Cancel still works
+		if p.command == nil {
+			toast_show("This needs a newer Deckhand to confirm: cancel it, or confirm it there", true)
+			return
+		}
 		cmd := p.command
 		#partial switch c in p.command {
 		case core.Close_Tab: cmd = core.Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}

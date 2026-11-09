@@ -249,8 +249,8 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	wtok := core.window_token_read(rdir)
 	testing.expect_value(t, len(wtok), 64)
 	ids := []string{trust.own_signature().identifier}
-	core.window_peer_ids = ids // the "window" is this test binary
-	defer core.window_peer_ids = trust.WINDOW_IDS
+	hs_window_ids(ids) // the "window" is this test binary
+	defer hs_window_ids(trust.WINDOW_IDS)
 	core.window_door_pids_for_test(0, 0)
 	hs_framed_fd = -1
 	clear(&hs_framed_left)
@@ -274,11 +274,11 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	hs_close(n)
 	core.window_door_pids_for_test(0, 0)
 	// the window's code must be the window's: another identifier is refused
-	core.window_peer_ids = []string{"dev.deckhand.not-the-window"}
+	hs_window_ids([]string{"dev.deckhand.not-the-window"})
 	n, rn = hs_plain(wtok, `,"framed":true`)
 	testing.expect(t, strings.has_prefix(core.json_path(rn, "result.error"), "the window's code is not Deckhand's"), rn)
 	hs_close(n)
-	core.window_peer_ids = ids
+	hs_window_ids(ids)
 	testing.expect(t, hs_framed_fd < 0, "nothing was handed over")
 	c := hs_connect()
 	frame := make([dynamic]u8, context.temp_allocator)
@@ -325,3 +325,10 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	free_all(context.temp_allocator)
 }
 
+
+// The identifiers the core takes as the window's (a variable only with test hooks: a release
+// build's is a constant, and this file still compiles there).
+@(private = "file")
+hs_window_ids :: proc(ids: []string) {
+	when core.TEST_HOOKS do core.window_peer_ids = ids
+}

@@ -396,8 +396,10 @@ palette.odin   command palette (⌘K): items, fuzzy search and ranking, recents;
 core/sidebar.odin left column model: which projects, chats and sessions show and in what order (pins, sort, filter, hidden, the Open group)
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
-tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs browser, app, Markdown and editor commands
-core/window_hooks.odin what the core asks of the window (redraw, toast, frames, a tab's view facts for State's JSON, tab host commands, the test step): core files call these, main.odin fills them
+tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs the window's part of browser, app, Markdown and editor commands
+tabhost_link.odin the window's side of tab host routing: answers the core's tab_host.call with finished, reports pages' and apps' events as tab_host.event
+core/tabhost_route.odin tab host routing (PROTOCOL.md §5a): the core keeps browser, app, Markdown and editor tabs' records, sends tab_host.call to the window, times calls out, answers no_window with no window
+core/window_hooks.odin what the core asks of the window (redraw, toast, frames, a tab's view facts for State's JSON, the test step): core files call these, main.odin fills them
 tab_views.odin the window's side of the tab view hooks: a tab record's view (editor buffer, Markdown view, Changes diff, browser page) made and dropped as the core reports the record; unsaved buffers for the core's questions
 core/*_wire.odin the browser, app and Markdown commands' wire layer (type names, inbox copies and frees, events' fields, the socket's tab filter); app_wire.odin also an app's results, events and tab.boxes as its socket sends them
 core/core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame(); while no frame has run for 50 ms (hidden, minimised, App Nap), a main-queue timer calls it instead, never inside frame() or a modal loop frame() started, counted from the last frame's end, slowing to 500 ms after 3 s with nothing going on; a quit no frame carries out is done by the timer; a terminal's output in the last 2 s holds off App Nap

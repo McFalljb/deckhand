@@ -190,11 +190,11 @@ fi
 # no test hook in anything Deckhand runs: the env overrides, test mode, --print-token; Deckhand
 # Core.app's binaries too (the holder, the CLI: scripts/bundle-app.sh)
 CORE_REL="Contents/Helpers/Deckhand Core.app"
-[ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" ] && [ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ] ||
-  { echo "release: $BUILT has no $CORE_REL with deckhand-core and deckhand" >&2; exit 1; }
+[ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" ] && [ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ] && [ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core-serve" ] ||
+  { echo "release: $BUILT has no $CORE_REL with deckhand-core, deckhand-core-serve and deckhand" >&2; exit 1; }
 [ ! -e "$BUILT/Contents/Helpers/deckhand-core" ] ||
   { echo "release: $BUILT still has the bare Contents/Helpers/deckhand-core (an old build/ tree? remove build/Deckhand.app and build again)" >&2; exit 1; }
-scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ||
+scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core-serve" "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ||
   { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
 # the CLI's old name, a link Claude tabs started before 0.1.7 still run (scripts/bundle-app.sh)
 [ "$(readlink "$BUILT/Contents/MacOS/pi-desk-cli" 2>/dev/null)" = deckhand-cli ] ||

@@ -14,7 +14,7 @@ package main
 // and Stop All Sessions, or an agent's quit) ends it, and tells the window to quit too
 // (window.request quit) rather than reconnect. SIGTERM ends it with no such word (logout, a
 // handover's predecessor): a window then reconnects. With no window, no tab's process and no job
-// run for 10 minutes it exits (core_idle_due). Notifications go through the window while one is
+// run and no job schedule for 10 minutes it exits (core_idle_due). Notifications go through the window while one is
 // attached, else they are Deckhand Core's own banners.
 
 import "base:runtime"

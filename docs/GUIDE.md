@@ -1442,8 +1442,9 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
   closes the window and Deckhand Core keeps your sessions running; the first time, a note says
   so. Opening Deckhand again shows them as they are, a turn that went on meanwhile included;
   while the window is closed, notifications come from Deckhand Core. **Quit Deckhand and Stop All
-  Sessions…** stops Deckhand Core too. With no window, no tab's program running and no job run
-  for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand starts it again). If
+  Sessions…** stops Deckhand Core too. With no window, no tab's program running, no job run and
+  no scheduled job for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand
+  starts it again). If
   Deckhand Core stops unexpectedly, the window starts it again and carries on. Logging out
   stops both; the next launch restores your sessions as usual. Still the window's alone for now: app tabs, the setup
   sheet's installs, the Changes tab and the update dialog. Only you can change it.

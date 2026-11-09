@@ -1075,10 +1075,13 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   that exits by SIGTERM (logout, a handover's predecessor) sends nothing, so windows reconnect.
   The core now focuses the restored current tab itself at start (`persist_after_layout`), which
   M4-C left to the in-process window's first layout.
-- **Idle exit** in serve's loop (`core_idle_due`, unit-tested on a fake clock). The holder's own
+- **Idle exit** in serve's loop (`core_idle_due`, unit-tested on a fake clock). An enabled,
+  scheduled job also keeps the core (unlike Q1's default), so schedules don't silently stop
+  before M5's login agent. The holder's own
   10 s idle exit (no core, no terminal) already existed.
 - **`--ctl`** launches a core when `DECKHAND_SOCKET` is this data dir's `core.sock`, separate mode
-  is on and nothing answers. `deckhand DIR` needed nothing new: its window launches the core.
+  is on and nothing answers. Every core launch drops what Deckhand sets for tabs (tokens, socket,
+  tab ids: `core_launch_env`), so one launched from a tab carries none of it. `deckhand DIR` needed nothing new: its window launches the core.
 - **The window floor** is `<data>/window-floor`, read at serve's start, written when it rises.
 - **Hidden and minimised:** a toast's seconds start once the window shows; `claude_accounts`'
   per-frame cache also turns over per core tick (frames stop while hidden, and a separate core

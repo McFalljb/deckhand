@@ -30,33 +30,34 @@ UPDATE_IDS := [Update_Part]string {
 }
 
 update_bar_shows :: proc() -> bool {
-	if core.upd.phase == .Downloading || core.upd.phase == .Installed do return true
-	return core.upd.offered && !core.upd.dismissed
+	u := core.update_view() // the core's (a separate core: the replica's live section)
+	if u.phase == .Downloading || u.phase == .Installed do return true
+	return u.offered && !u.dismissed
 }
 
 // The bar's text and its buttons, left to right.
 update_bar_parts :: proc() -> (msg: string, parts: [dynamic]Update_Part) {
 	parts = make([dynamic]Update_Part, context.temp_allocator)
-	v := core.upd.release.version
-	switch core.upd.phase {
+	u := core.update_view()
+	v := u.release.version
+	switch u.phase {
 	case .Downloading:
 		msg = fmt.tprintf("Downloading Deckhand %s and checking its signature…", v)
 		append(&parts, Update_Part.Notes)
 	case .Ready:
 		msg = fmt.tprintf("Deckhand %s is ready", v)
-		keeps := core.holder_keeps_sessions()
-		if core.quit_would_stop(keeps) || core.jobs_any_running() || keeps do msg = fmt.tprintf("%s — %s", msg, core.update_restart_effects(keeps))
+		if u.effects != "" do msg = fmt.tprintf("%s — %s", msg, u.effects)
 		append(&parts, Update_Part.Later, Update_Part.Install)
 	case .Failed:
-		msg = fmt.tprintf("Deckhand %s not installed: %s", v, core.upd.message)
+		msg = fmt.tprintf("Deckhand %s not installed: %s", v, u.message)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
-		if core.update_cannot_install() == "" do append(&parts, Update_Part.Update)
+		if u.cannot == "" do append(&parts, Update_Part.Update)
 	case .Installed:
 		msg = fmt.tprintf("Deckhand %s is installed: restarting…", v)
 	case .None, .Checking:
 		msg = fmt.tprintf("Deckhand %s is available", v)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
-		if why := core.update_cannot_install(); why != "" do msg = fmt.tprintf("%s — %s", msg, why)
+		if why := u.cannot; why != "" do msg = fmt.tprintf("%s — %s", msg, why)
 		else do append(&parts, Update_Part.Update)
 	}
 	return
@@ -67,7 +68,7 @@ update_part_label :: proc(p: Update_Part) -> string {
 	case .Notes:   return "Release notes"
 	case .Skip:    return "Skip this version"
 	case .Later:   return "Later"
-	case .Update:  return core.upd.phase == .Failed ? "Try again" : "Update"
+	case .Update:  return core.update_view().phase == .Failed ? "Try again" : "Update"
 	case .Install: return "Restart to update"
 	}
 	return ""
@@ -88,8 +89,9 @@ update_bar :: proc() {
 		backgroundColor = cc(th.bg_elevated),
 		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
-		dot(core.upd.phase == .Failed ? th.error : th.accent)
-		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(core.upd.phase == .Failed ? th.error : th.text))
+		failed := core.update_view().phase == .Failed
+		dot(failed ? th.error : th.accent)
+		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(failed ? th.error : th.text))
 		spacer()
 		for p in parts {
 			primary := p == .Update || p == .Install
@@ -119,7 +121,8 @@ update_tip :: proc(h: Hit_Update) -> (label, keys: string) {
 update_click :: proc(h: Hit_Update) {
 	switch h.part {
 	case .Notes:
-		url := core.upd.release.notes_url != "" ? core.upd.release.notes_url : core.UPDATE_RELEASES_URL
+		u := core.update_view()
+		url := u.release.notes_url != "" ? u.release.notes_url : core.UPDATE_RELEASES_URL
 		if win_os.open_url != nil do _ = win_os.open_url(url)
 	case .Skip:    ui_do(core.Update_Skip{})
 	case .Later:   ui_do(core.Update_Later{})

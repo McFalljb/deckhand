@@ -206,6 +206,9 @@ command_type :: proc(cmd: Command) -> string {
 	case Core_Handover:       return "core_handover"
 	case Claude_Typed:        return "claude_typed"
 	case Claude_Status_Dismiss: return "claude_status_dismiss"
+	case App_Socket:          return "app_socket"
+	case Harness_Install:     return "harness_install"
+	case Fs_Changed:          return "fs_changed"
 	case Copy_Control_Token:  return "copy_control_token"
 	case Set_Confirm_Policy:  return "set_confirm_policy"
 	case Set_Close_Confirm:   return "set_close_confirm"
@@ -458,6 +461,14 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_u64(&w, "tab_id", c.tab_id)
 	case Claude_Status_Dismiss:
 		kv_u64(&w, "tab_id", c.tab_id)
+	case App_Socket: // never the line (an app's data) nor a token
+		kv_u64(&w, "tab_id", c.tab_id)
+		kv_str(&w, "op", APP_SOCKET_OP_NAMES[c.op])
+	case Harness_Install:
+		kv_str(&w, "item", c.item)
+		kv_bool(&w, "dismiss", c.dismiss)
+	case Fs_Changed:
+		kv_u64(&w, "paths", u64(len(c.paths))) // how many, not which
 	case Copy_Control_Token: // nothing: the token is never written
 	case Notifications_List, Notifications_Mark_Read, Notifications_Clear, Notify_Post, Set_Bell:
 		notify_write(w.b, cmd) // after "type": the object is not empty
@@ -1459,6 +1470,15 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				if x.inexact do kv_bool(&to, "inexact", true) // adopted, not rebuilt byte-exactly
 				if x.holder_lost do kv_bool(&to, "holder_lost", true) // the session holder stopped
 				if x.pty.held != 0 && holder_term_degraded(x.pty.held) do kv_bool(&to, "holder_degraded", true) // an upgrade's keeper serves it (§7.3)
+			} else if replica_process { // a separate core's window: the same, from the tab's live facts
+				l := t.live
+				if l.held_term != 0 {
+					kv_u64(&to, "held", u64(l.held_term))
+					if l.pid > 0 do kv_u64(&to, "pid", u64(l.pid))
+				}
+				if l.inexact do kv_bool(&to, "inexact", true)
+				if l.holder_lost do kv_bool(&to, "holder_lost", true)
+				if l.holder_degraded do kv_bool(&to, "holder_degraded", true)
 			}
 			if t.cwd != "" do kv_str(&to, "cwd", t.cwd)
 			if et, is_ed := t.kind.(Editor_Tab); is_ed {

@@ -220,7 +220,7 @@ init_separate :: proc() {
 	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
 	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
 	if app_args.dir != "" {
-		r := client_call_wait(core.Add_Project{app_args.dir}, 5 * time.Second)
+		r, _ := client_call_wait(core.Add_Project{app_args.dir}, 5 * time.Second)
 		app.launch_project = launch_project(r)
 		if app.launch_project != 0 do app.pending_start = true
 		else do fmt.eprintfln("Deckhand: %s: %s", app_args.dir, r.error)
@@ -229,6 +229,8 @@ init_separate :: proc() {
 	// what the window's views read from the core package's caches of the disk (accounts, titles)
 	core.claude_accounts_refresh()
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
+	// the first-run sheet, as in process: while no main folder is set (test mode: when a scene asks)
+	if core.setup_due() && (!core.autotest_active || core.hook_env(.First_Run) == "1") do ui_do(core.Setup_Sheet{open = true})
 	app.ready = true
 	app.redraw = true
 	// frames stop while hidden: the core's messages are read by a timer then (and the script runs)
@@ -429,6 +431,7 @@ frame :: proc "c" () {
 		app.last_frame_at = time.tick_now()
 		client_core_tick() // the core's connection ended: dial again (client_core.odin)
 		client_drain()
+		client_live_mirror() // the core's install run and watched folders (client_core.odin)
 		autotest_step()
 	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)

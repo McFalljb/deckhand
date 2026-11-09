@@ -6,4 +6,4 @@ dump two-process-2
 type echo AGAIN-$((7*6))
 key enter
 waitfor AGAIN-42 10000
-quit
+quit_window

@@ -60,12 +60,16 @@ WINDOW_COMMANDS := [?]typeid {
 	Comment_Add, // a comment the user made on a page or an app (ui_comments.odin, browser_annotate.odin)
 	Focus_Take, // a window widget took the keyboard (sheets, browser fields)
 	Focus_Release, // ...and let it go
+	Set_Last_Harness, // a New session picker row was chosen (harness_used)
 	Git_Head_Done, // an editor's git HEAD read (editor_git.odin's worker)
 	System_Appearance, // the OS switched light or dark
 	Notifications_Mark_Read, // the window came to the front: the session on screen is seen
 	Set_Unread, // ...and its tabs' finished marks
 	Claude_Typed, // a separate core: the user typed in a Claude tab's prompt (claude_note_typed)
 	Claude_Status_Dismiss, // and closed a Claude tab's status banner (claude_status_dismiss)
+	App_Socket, // a separate core: an app tab's token, a line to its program, its connection forgotten
+	Harness_Install, // a separate core: the setup sheet's Install, Update or Close (harness_install.odin)
+	Fs_Changed, // a separate core: what the window's file watcher saw (fs_model.odin)
 }
 
 // What a frame from the core is (window_msg_parse).
@@ -78,12 +82,14 @@ Window_Msg_Kind :: enum u8 {
 	Term, // term.attached, term.scroll: the window's terminal streams take the text (term_view.odin)
 	Window_Request, // window_request_parse takes the text
 	Confirmation_Parked, // text (its summary), by_user (err)
+	Finished, // a pending command of its own ended: request_id, result (window_link_finished)
 }
 
 Window_Msg :: struct {
 	kind:   Window_Msg_Kind,
 	id:     string, // Result: the command's id
-	result: Result, // Result (temp allocator)
+	request_id: u64, // Result, Finished: the core's id for it
+	result: Result, // Result, Finished (temp allocator)
 	text:   string, // Toast; Confirmation_Parked: its summary
 	err:    bool, // Toast; Confirmation_Parked: only the user can confirm it
 }
@@ -119,6 +125,7 @@ Window_Link :: struct {
 	tab_facts:  map[u64]Tab_Facts,
 	next_ask:   u64,
 	asking:     [dynamic]Link_Ask, // requests waiting for their reply (nested: one inside another's answer)
+	following:  map[u64]bool, // over core.sock: its commands answered pending, whose finished it is sent (window_link_finished)
 }
 
 @(private = "file")
@@ -209,6 +216,7 @@ core_detach_window :: proc(keep_transport := false) {
 	cw.backlog_destroy(&link.backlog)
 	link_facts_free()
 	delete(link.asking)
+	delete(link.following)
 	state_sent_free(&link.sent)
 	if link.sock != nil {
 		cw.sock_flush(link.sock) // what is queued (a last toast) goes if the socket takes it now
@@ -254,6 +262,8 @@ window_link_flush :: proc(sweep := false) {
 	if link != nil && link.overflowed do link_close_overflowed()
 	if link == nil || !link.subscribed do return
 	tab_term_facts_tick(time.tick_now()) // a terminal made or gone this tick goes with this delta
+	core_live_tick() // over core.sock: what a command did to the runtime goes with its delta (core_live.odin)
+	tab_live_tick() // ...and to each tab's (core_loop.odin)
 	link_free_replies()
 	// an over-limit state.full is built again only once State changed (not on every frame's sweep)
 	if link.need_full && link.too_large && !link.dirty && state.version == link.too_large_version do return
@@ -559,11 +569,13 @@ window_link_resync :: proc() {
 // ---- the window's side of the encoding (client.odin calls these; the window has no codec) ----
 
 // A ui command as the window sends it. id "": no reply.
-window_msg_command :: proc(cmd: Command, id: string, now := false, menu := "") -> string {
+window_msg_command :: proc(cmd: Command, id: string, now := false, menu := "", as: Caller = {}) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"type":"command","id":`, PROTOCOL_VERSION)
 	json_quote(&b, id)
 	if now do strings.write_string(&b, `,"now":true`)
+	// test mode's script: its line's caller (script, control, panel); the core honours it only in test mode
+	if name := SCRIPT_AS_NAMES[as.kind]; name != "" do fmt.sbprintf(&b, `,"as":{{"kind":"%s","tab_id":%d}}`, name, as.tab_id)
 	if menu != "" {
 		strings.write_string(&b, `,"menu":`)
 		json_quote(&b, menu)
@@ -650,9 +662,10 @@ window_msg_parse :: proc(text: string) -> (m: Window_Msg, err: string) {
 		m.kind = .State
 	case "term.attached", "term.scroll":
 		m.kind = .Term
-	case "result":
-		m.kind = .Result
+	case "result", "finished":
+		m.kind = type == "result" ? .Result : .Finished
 		m.id, _ = obj["id"].(json.String)
+		if n, is := obj["request_id"].(json.Integer); is && n >= 0 do m.request_id = u64(n)
 		ro, rok := obj["result"].(json.Object)
 		if !rok do return m, "result: missing result"
 		m.result.ok = bool(ro["ok"].(json.Boolean) or_else false)
@@ -701,6 +714,7 @@ window_command_ok :: proc(id: typeid) -> bool {
 // it, or no reply came (M4 over core.sock: the core never waits for one; a late reply is dropped).
 // Main thread.
 window_link_request :: proc(r: Window_Request, want_reply: bool) -> (reply: Window_Reply, answered: bool) {
+	if replica_process && replica_request != nil do return replica_request(r), true // the window's own (window_hooks.odin)
 	if link == nil do return
 	id := ""
 	if want_reply {
@@ -743,12 +757,54 @@ link_reply_in :: proc(obj: json.Object) {
 
 // What the window last reported (nil: no window, or it has not said yet).
 window_facts :: proc() -> ^Window_Facts {
+	if replica_process && replica_facts_text != nil {
+		@(static) own: Window_Facts
+		@(static) own_text: string
+		@(static) own_ok: bool
+		return replica_facts_read(replica_facts_text(), &own_text, &own, &own_ok)
+	}
 	if link == nil || !link.has_facts do return nil
 	return &link.facts
 }
 
+// A window whose core is another process: what it last sent of its own facts (window.facts and
+// window.tab_facts messages; the window sets it), so its own snapshot (state_json: test mode's
+// asserts) says what the core's does.
+replica_facts_text: proc() -> string
+replica_tab_facts_text: proc(tab_id: u64) -> string
+
+// The facts a message (text) carries, decoded into out once per new text (heap). nil: none.
+@(private = "file")
+replica_facts_read :: proc(text: string, last: ^string, out: ^$T, ok: ^bool) -> ^T {
+	if text == "" do return nil
+	if text != last^ {
+		ok^ = false
+		heap := runtime.heap_allocator()
+		wire_free(out, type_info_of(T), heap)
+		out^ = {}
+		delete(last^, heap)
+		last^ = strings.clone(text, heap)
+		v, err := jg.parse_string(text, .JSON, true, context.temp_allocator) // as the core reads it (link_message)
+		obj, _ := v.(json.Object)
+		fv := obj["facts"]
+		if _, null := fv.(json.Null); err != nil || null || fv == nil do return nil
+		wire_read_budget_window(text)
+		if wire_read(fv, out, type_info_of(T), heap) != "" {
+			wire_free(out, type_info_of(T), heap)
+			out^ = {}
+		} else do ok^ = true
+	}
+	return ok^ ? out : nil
+}
+
 // ...of one tab (nil: nothing, or no window).
 window_tab_facts :: proc(tab_id: u64) -> ^Tab_Facts {
+	if replica_process && replica_tab_facts_text != nil {
+		@(static) own: Tab_Facts
+		@(static) own_text: string
+		@(static) own_ok: bool
+		return replica_facts_read(replica_tab_facts_text(tab_id), &own_text, &own, &own_ok)
+	}
 	if link == nil do return nil
 	return &link.tab_facts[tab_id] or_else nil
 }
@@ -839,6 +895,7 @@ link_free_replies :: proc(all := false) {
 link_deliver :: proc(r: ^Reply, request_id: u64) {
 	lr := (^Link_Reply)(r)
 	window_link_flush(sweep = true)
+	link_follow(r.result, request_id)
 	link_send(reply_json(lr.id, r.result, request_id))
 	lr.delivered = true
 }
@@ -846,7 +903,33 @@ link_deliver :: proc(r: ^Reply, request_id: u64) {
 @(private = "file")
 link_reply_now :: proc(id: string, r: Result, request_id: u64) {
 	window_link_flush(sweep = true)
-	if id != "" do link_send(reply_json(id, r, request_id))
+	if id == "" do return
+	link_follow(r, request_id)
+	link_send(reply_json(id, r, request_id))
+}
+
+// A separate window's command answered pending (a tab host's call, a rescan): its finished goes
+// to the window too (window_link_finished), as a socket's own pending request's does. In process
+// the window's script sees every event already (window_test_event).
+@(private = "file")
+link_follow :: proc(r: Result, request_id: u64) {
+	if link.sock == nil || !r.pending || request_id == 0 do return
+	if link.following == nil do link.following = make(map[u64]bool, runtime.heap_allocator())
+	link.following[request_id] = true
+}
+
+// Every event (emit_event): a finished the window follows, as
+// {"type":"finished","request_id":N,"result":{...}}. Main thread.
+window_link_finished :: proc(ev: Event) {
+	f, ok := ev.(Finished_Event)
+	if !ok || link == nil || link.sock == nil do return
+	if _, had := delete_key(&link.following, f.request_id); !had do return
+	window_link_flush(sweep = true) // what it changed first (Q9)
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"type":"finished","request_id":%d,"result":`, PROTOCOL_VERSION, f.request_id)
+	write_result(&b, f.result)
+	strings.write_byte(&b, '}')
+	link_send(strings.to_string(b))
 }
 
 // One message from the window. True: it was a command (run or queued), for the pump's cap.
@@ -883,7 +966,7 @@ link_message :: proc(text: string) -> (command: bool) {
 			link_reply_now(id, fail(err), 0)
 			return
 		}
-		link_run(cmd, {kind = .UI}, id, now, menu)
+		link_run(cmd, link_command_caller(obj), id, now, menu)
 	case "window.reply":
 		link_reply_in(obj)
 	case "window.facts":
@@ -898,6 +981,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		link.facts, link.has_facts = f, true
 		hello_set(&f)
 		if link.sock != nil do link_layout_apply(&link.facts) // in process the layout writes them itself
+		if link.sock != nil do update_window_exe_set(f.exe) // the bundle a separate core's updates replace (update.odin)
 	case "window.tab_facts":
 		n, nok := obj["tab_id"].(json.Integer)
 		if !nok || n <= 0 {
@@ -943,6 +1027,23 @@ link_message :: proc(text: string) -> (command: bool) {
 		fmt.eprintln("Deckhand: an unknown window message:", type)
 	}
 	return
+}
+
+// The callers test mode's script may run a line as (window_msg_command's "as").
+SCRIPT_AS_NAMES := #partial [Caller_Kind]string{.Script = "script", .Control = "control", .Panel = "panel"}
+
+// A window command's caller: ui; in test mode a script line's own (its "as"), as in process.
+@(private = "file")
+link_command_caller :: proc(obj: json.Object) -> Caller {
+	when TEST_HOOKS {
+		as, ok := obj["as"].(json.Object)
+		if ok && autotest_active {
+			name := string(as["kind"].(json.String) or_else "")
+			tab, _ := as["tab_id"].(json.Integer)
+			for n, k in SCRIPT_AS_NAMES do if n != "" && n == name do return {kind = k, tab_id = u64(max(tab, 0))}
+		}
+	}
+	return {kind = .UI}
 }
 
 @(private = "file")
@@ -1120,16 +1221,24 @@ window_link_io :: proc() {
 link_sock_wait :: proc(at: int) {
 	deadline := time.tick_add(time.tick_now(), WINDOW_REPLY_WAIT)
 	for link != nil && link.sock != nil && !link.asking[at].got {
-		window_link_io()
-		window_link_pump()
-		if link == nil || link.sock == nil || link.asking[at].got do return
-		left := time.tick_diff(time.tick_now(), deadline)
-		if left <= 0 {
-			window_link_slow_replies += 1
+		if !window_link_wait_once(deadline, &link.asking[at].got) {
+			if link != nil && link.sock != nil && !link.asking[at].got do window_link_slow_replies += 1
 			return
 		}
-		cw.sock_wait(link.sock, max(1, int(time.duration_milliseconds(left))))
 	}
+}
+
+// One round of a bounded wait over core.sock: reads and runs what the window sent, then waits for
+// more until deadline. False: the link went, done is set, or the deadline passed.
+window_link_wait_once :: proc(deadline: time.Tick, done: ^bool = nil) -> bool {
+	if link == nil || link.sock == nil do return false
+	window_link_io()
+	window_link_pump()
+	if link == nil || link.sock == nil || (done != nil && done^) do return false
+	left := time.tick_diff(time.tick_now(), deadline)
+	if left <= 0 do return false
+	cw.sock_wait(link.sock, max(1, int(time.duration_milliseconds(left))))
+	return true
 }
 
 // Requests whose reply did not come within WINDOW_REPLY_WAIT (tests, logs).

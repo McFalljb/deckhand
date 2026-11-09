@@ -997,10 +997,19 @@ settings_create :: proc(path: string) {
 		fs_model_changed(row.path)
 		settings_gen += 1
 	}
+	if replica_process { // a separate core's window: the core opens it (a failure shows as a toast)
+		if replica_ui_send != nil do replica_ui_send(Open_File{path = row.path}, "Open")
+		window_state_changed()
+		return
+	}
 	res := run_command(Open_File{path = row.path}, {kind = .UI})
 	if !res.ok do sf_error = strings.clone(fmt.tprintf("%s: %s", fs_display(row.path), res.error))
 	window_state_changed()
 }
+
+// A window whose core is another process: a command as the user's (ui), sent to the core; menu: a
+// label its failure is shown under. The window sets it (client_core.odin).
+replica_ui_send: proc(cmd: Command, menu: string)
 
 @(private = "file")
 sf_poll_at: time.Tick

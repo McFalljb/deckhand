@@ -538,7 +538,7 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Control_Token, nil)
 		pop_row(.Setup, nil)
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
-		pop_row(.Update_Checks, !core.upd.checks_off)
+		pop_row(.Update_Checks, !core.update_view().checks_off)
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
 		pop_sep()
 		pop_label("Experimental")

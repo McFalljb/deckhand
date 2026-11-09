@@ -7,6 +7,7 @@ package core
 // skipped and run once that ends (core_tick_guarded, core_frame_end).
 
 import "base:runtime"
+import "core:strings"
 import "core:time"
 
 // The context Odin code runs in from C callbacks (ghostty's, the platform's, CEF's); main sets it
@@ -63,6 +64,8 @@ core_tick_body :: proc() {
 	output_activity_tick(time.tick_now())
 	tab_term_facts_tick(time.tick_now())
 	tab_live_tick()
+	core_live_tick() // the update bar, the install run, worktree clean ups (core_live.odin)
+	app_boxes_tick() // an inspected app tab's boxes (app_tab_core.odin)
 	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 	term_streams_flush() // what the terminals parsed this tick, to the window's copies (term_stream.odin)
 }
@@ -246,13 +249,21 @@ tab_live_tick :: proc() {
 		l.away = tab_held_away(&tab)
 		l.dead = tab_is_dead(&tab)
 		l.restart_wait = restart_waiting(tab.id)
-		if t := terms[tab.id] or_else nil; t != nil do l.held = t.pty.held != 0
+		if t := terms[tab.id] or_else nil; t != nil {
+			l.held, l.held_term, l.inexact, l.holder_lost = t.pty.held != 0, t.pty.held, t.inexact, t.holder_lost
+			if t.pty.held != 0 do l.pid, l.holder_degraded = t.pty.pid, holder_term_degraded(t.pty.held)
+		}
 		if ct, is := &tab.kind.(Claude_Tab); is {
 			l.claude_wait = claude_wait_of(&tab, ct)
 			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)
 			l.claude_restart = claude_restart_class(&tab)
 		}
+		if _, is := tab.kind.(App_Tab); is do l.app_connected = socket_app_connected(tab.id)
+		if v := changes_view(tab.id); v != nil do l.changes_busy, l.changes_notice, l.changes_notice_err = v.busy, v.notice, v.notice_err
 		if l == tab.live do continue
+		delete(tab.live.changes_busy)
+		delete(tab.live.changes_notice)
+		l.changes_busy, l.changes_notice = strings.clone(l.changes_busy), strings.clone(l.changes_notice) // the view's change under it
 		tab.live = l
 		changed = true
 	}

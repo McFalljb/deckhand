@@ -15,7 +15,8 @@ package main
 // (window.request quit) rather than reconnect. SIGTERM ends it with no such word (logout, a
 // handover's predecessor): a window then reconnects. With no window, no tab's process and no job
 // run and no job schedule for 10 minutes it exits (core_idle_due). Notifications go through the window while one is
-// attached, else they are Deckhand Core's own banners.
+// attached, else they are Deckhand Core's own banners. Updates are checked, downloaded and
+// installed here; the bundle replaced is the window's (window.facts exe).
 
 import "base:runtime"
 import "core:c"
@@ -153,6 +154,8 @@ serve_main :: proc(args: []string) -> int {
 	core.harness_no_sudo_sweep(at_quit = false)
 	if core.claude_startup_rescan_due() do core.run_command(core.Rescan{}, {kind = .Internal})
 	if files && !core.setup_due() do core.chats_instructions_ensure(core.date_stamp())
+	core.update_from_window = true // the bundle it replaces is its window's (update.odin)
+	core.update_init()
 	core.core_loop_start()
 	serve_loop()
 	serve_stop(run)
@@ -233,6 +236,7 @@ serve_loop :: proc() {
 		} else do core.core_tick()
 		core.reload_tick() // hot reload: pi's (its RELOAD_POLL stamps: the window's watcher is not ours)
 		core.claude_reload_tick() // and Claude Code's
+		core.fs_model_tick() // its file models' scans: git status, worktrees, the Changes tabs (fs_model.odin)
 		core.window_link_io()
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {

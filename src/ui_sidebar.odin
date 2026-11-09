@@ -366,7 +366,7 @@ menu_run :: proc(i: int) {
 		new_session_ui(ns.project_id, cwd, at)
 		return
 	}
-	if _, ok := target.(core.Menu_New_Session); ok do core.harness_used(it.cmd) // first next time
+	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if it.rename {
 		if t, ok := target.(Menu_Session); ok {
 			// a Claude session's row: its field takes the row (claude_rename on Enter)

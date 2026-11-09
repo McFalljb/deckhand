@@ -45,12 +45,14 @@ start() { # n [VAR=value...]: the app in the background (APP: its pid)
   APP=$!
 }
 wait_log() { # n TEXT: until run n's log has TEXT (20 s)
-  for _ in $(seq 100); do grep -q "$2" "$W/run$1.log" && return 0; sleep 0.2; done
+  for _ in $(seq 100); do grep -qs "$2" "$W/run$1.log" "$RUN/core.log" && return 0; sleep 0.2; done # (a separate core's own log too)
   echo "run $1: no \"$2\" in 20 s (log: $W/run$1.log)"; exit 1
 }
 finish() { # n [killed]: the app ended; its log has no failure (and, unless killed, its final save)
   wait "$APP" || true
   APP=
+  # a separate core (DECKHAND_SEPARATE_CORE=1) saves and hands over in its own log: read with the run's
+  if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v "^export DECKHAND_SOCKET=" "$RUN/core.log" >> "$W/run$1.log" || true; : > "$RUN/core.log"; fi
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command|session holder" "$W/run$1.log" | sed "s/^/run $1: /" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run$1.log" || { [ "${2:-}" != killed ] && ! grep -qE "workspace save checks" "$W/run$1.log"; }; then
     echo "keep-sessions run $1 failed (log: $W/run$1.log)"; exit 1
@@ -71,7 +73,10 @@ grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$
 # the window goes away before the handover's waits (no beachball over a frozen window at quit)
 h=$(grep -n "windows hidden" "$W/run1.log" | head -1 | cut -d: -f1)
 f=$(grep -n "\[autotest\] handover " "$W/run1.log" | head -1 | cut -d: -f1)
-[ -n "$h" ] && [ -n "$f" ] && [ "$h" -lt "$f" ] || { echo "run 1: the window was not hidden before the handover (hidden at line ${h:-none}, handover at ${f:-none})"; exit 1; }
+# (a separate core: the core hands over in its own process; the window never waits on it)
+if [ "${DECKHAND_SEPARATE_CORE:-0}" != 1 ]; then
+  [ -n "$h" ] && [ -n "$f" ] && [ "$h" -lt "$f" ] || { echo "run 1: the window was not hidden before the handover (hidden at line ${h:-none}, handover at ${f:-none})"; exit 1; }
+fi
 
 # 2: adopted exactly, the kept pi's bridge reconnects with its token; the holder restarted in
 #    place (Restart session holder); then the app is killed
@@ -79,6 +84,8 @@ start 2
 wait_log 2 "screen_hash"
 for _ in $(seq 50); do [ "$(grep -c 'hello ok' "$W/bridge.log")" -ge 2 ] && break; sleep 0.2; done
 kill -9 "$APP"
+# a separate core is Deckhand's other half: it crashes with it
+[ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && pkill -9 -f "deckhand-core-serve serve --run $RUN" || true
 finish 2 killed
 [ "$(grep -c 'hello ok' "$W/bridge.log")" -ge 2 ] || { echo "the kept pi's bridge did not reconnect after the relaunch:"; cat "$W/bridge.log"; exit 1; }
 ! grep -q "can't reach Deckhand" "$W/run2.log" || { echo "run 2: a kept session can't reach Deckhand (its token was not kept)"; exit 1; }

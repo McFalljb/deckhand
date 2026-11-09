@@ -160,7 +160,10 @@ package main
 //   assert_finished PATH VALUE same, on the last long-running command's finished result
 //   state_json NAME            app state as JSON to build/NAME.json
 //   screen_hashes              log every terminal's screen_hash (tab id, holder terminal, hash)
-//   quit                       quit without confirmation; exit status 1 if an assert failed
+//   quit                       quit without confirmation; exit status 1 if an assert failed. A
+//                              separate core quits too (Quit, as in process: keep_sessions holds),
+//                              so the next run on the data dir starts a fresh one
+//   quit_window                the same, but a separate core runs on (as ⌘Q: two-process, handover)
 //
 // DECKHAND_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
 // the first failed check, wait (waitfor, waitstate, waitresult, a command's TIMEOUT...) or missing
@@ -211,6 +214,10 @@ Autotest :: struct {
 	cpu_calls:    u64,
 	cpu_checks:   f64, // terms_check_cpu at cpu_begin
 	wait_request: u64, // pending command: wait for its finished event
+	input_synced: bool, // a separate core: the last input's commands ran there before an element line read the layout
+	early_request: u64, // a separate core: a finished that came before its command's result was read (script_command)
+	early_finished: string, // ...its result's JSON (heap)
+	early_created: u64, // ...and the id it made
 	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
 	replica_checked: time.Tick, // the last divergence check (autotest_check_replica)
 	terms_checked:   int, // terminal copies compared with the core's (autotest_check_terms)
@@ -569,7 +576,7 @@ autotest_step :: proc() {
 		at.wait_request = 0
 	}
 	if at.wait_state[0] != "" {
-		got := core.json_path(core.state_json(), at.wait_state[0])
+		got := core.json_path(script_state_json(), at.wait_state[0])
 		if got == at.wait_state[1] {
 			log("state reached:", at.wait_state[0], "=", got)
 		} else if time.tick_diff(at.deadline, now) > 0 {
@@ -633,12 +640,22 @@ autotest_step :: proc() {
 		if at.audit do script_audit(idx, cmd)
 		// an element-addressed line reads the last layout: one drawn after the last input (not
 		// the same click again right after it: two clickid lines are a double-click)
+		// a separate core: first what that input sent has run there and its delta came back
+		// (client_barrier), then a frame drawn after it, as in process where it ran at once
+		if script_reads_layout(cmd) && client_separate() && !at.input_synced && line != at.input_line {
+			client_barrier()
+			at.input_synced, at.input_drawn = true, app.frames_drawn
+			app.redraw = true
+			at.retry_line, at.next = idx, idx
+			return
+		}
 		if script_reads_layout(cmd) && app.frames_drawn <= at.input_drawn && line != at.input_line {
 			app.redraw = true
 			at.retry_line, at.next = idx, idx
 			return
 		}
 		if script_is_input(cmd) {
+			at.input_synced = false
 			at.input_drawn = app.frames_drawn
 			delete(at.input_line)
 			at.input_line = strings.clone(line)
@@ -1266,7 +1283,7 @@ autotest_step :: proc() {
 		case "result_file": // result_file NAME: the last command's result to build/NAME.json
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)at.last_result)
 		case "state_json":
-			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)core.state_json())
+			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)script_state_json())
 		case "screen_hashes": // screen_hashes: per terminal tab "[autotest] screen_hash <tab id> <held> <hash>" (snapshot.odin)
 			if client_separate() { // the window's copies (the core's terminals are in its process)
 				for id, v in term_views do if v.gt != nil {
@@ -1278,11 +1295,12 @@ autotest_step :: proc() {
 				h, _ := core.screen_hash(x.gt)
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
 			}
-		case "quit":
+		case "quit", "quit_window":
 			// a separate core: the window process ran core work on its replica (core.run_command)
 			if core.replica_core_runs > 0 do script_fail("the window process ran", core.replica_core_runs, "core command(s) on its replica (see the log)")
 			log(fmt.tprintf("done: %d asserts, %d failed; %d terminal copies checked", at.asserts, at.failures, at.terms_checked))
 			core.app_quitting = true // the script ends the run: no confirmation
+			if cmd == "quit" && client_separate() do script_core_quit()
 			script_show_again()
 			app_request_quit()
 			core.autotest_active = false
@@ -1349,11 +1367,20 @@ autotest_push_facts :: proc() {
 // Runs one script command now, in order with anything queued before (main thread). finished:
 // a long-running command's finished event already came (its result is in last_finished).
 script_command :: proc(c: core.Command, caller: core.Caller) -> (id: u64, r: core.Result, finished: bool) {
-	// a separate core: the script's commands go over the window's link, as the user's (ui); a
-	// long-running one's finished event is not followed (client_core.odin)
+	// a separate core: the script's commands go over the window's link, as the line's caller (the
+	// core honours it in test mode); a long-running one's finished comes as the core's finished
+	// message (client_core.odin)
 	if client_separate() {
-		r = core.result_clone(client_call_wait(c, SCRIPT_CORE_WAIT), runtime.heap_allocator())
-		return 0, r, false
+		rr: core.Result
+		rr, id = client_call_wait(c, SCRIPT_CORE_WAIT, caller)
+		if id != 0 && id == autotest.early_request { // it finished while its result was read
+			log("finished", id, autotest.early_finished)
+			delete(autotest.last_finished)
+			autotest.last_finished, autotest.early_finished, autotest.early_request = autotest.early_finished, "", 0
+			if rr.created_id == 0 do rr.created_id = autotest.early_created // $last, as in process (a tab host's answer)
+			finished = true
+		}
+		return id, core.result_clone(rr, runtime.heap_allocator()), finished
 	}
 	reply: core.Reply
 	id = core.inbox_submit(c, caller, &reply)
@@ -1438,6 +1465,28 @@ script_write_step :: proc(idx: int, line: string) {
 	_ = os.write_entire_file(autotest.step_file, transmute([]u8)text)
 }
 
+// A script's quit with a separate core: the core quits as an in-process Deckhand would (Quit,
+// confirmed as the user would), so the next run on this data dir starts a fresh core.
+script_core_quit :: proc() {
+	r, _ := client_call_wait(core.Quit{}, SCRIPT_CORE_WAIT)
+	if !r.ok && r.confirm_token != "" do r, _ = client_call_wait(core.Quit{confirm = r.confirm_token}, SCRIPT_CORE_WAIT)
+	if !r.ok {
+		fmt.eprintln("[autotest] the core did not quit:", r.error)
+		return
+	}
+	// until it is gone (its instance lock with it), as an in-process quit is when the process ends
+	start := time.tick_now()
+	for !client.lost && time.tick_since(start) < SCRIPT_CORE_WAIT do client_io(20)
+}
+
+// The snapshot a script reads. A separate core: what the window sent before (a click's command,
+// its facts: focus.step, an app tab's inspect…) has reached the core and its delta came back
+// (client_barrier), as in process, where a click's command runs at once.
+script_state_json :: proc() -> string {
+	if client_separate() do client_barrier()
+	return core.state_json()
+}
+
 // Called for every event (events.odin).
 autotest_on_event :: proc(ev: core.Event) {
 	// finished inside script_command's own drain (a fast app's reply): before the script knows
@@ -1460,6 +1509,13 @@ autotest_on_event :: proc(ev: core.Event) {
 		delete(autotest.last_finished)
 		autotest.last_finished = strings.clone(core.result_json(f.result))
 		autotest.wait_request = 0
+		// a separate core: what a tab host's call made comes with its finished ($last, as in process)
+		if client_separate() && f.result.created_id != 0 do autotest.prev_created, autotest.last_created = autotest.last_created, f.result.created_id
+		return
+	}
+	if f, ok := ev.(core.Finished_Event); ok && client_separate() && f.request_id != autotest.bg_request {
+		delete(autotest.early_finished)
+		autotest.early_request, autotest.early_finished, autotest.early_created = f.request_id, strings.clone(core.result_json(f.result)), f.result.created_id
 	}
 }
 
@@ -1781,7 +1837,7 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: menu", args[0], got) : fmt.tprintf("ASSERT FAILED menu %s: got %s, want %s", args[0], it != nil ? got : "no such item", args[1])
 	case "assert_state", "assert_result", "assert_finished":
 		path, _, want := strings.partition(strings.trim_space(rest), " ")
-		src := cmd == "assert_state" ? core.state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
+		src := cmd == "assert_state" ? script_state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
 		got := core.json_path(src, path)
 		want = expand_vars(want)
 		ok = got == want

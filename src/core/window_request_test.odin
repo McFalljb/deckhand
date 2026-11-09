@@ -117,7 +117,9 @@ window_request_round_trips :: proc(t: ^testing.T) {
 	testing.expect(t, fw.last.text == "Deckhand" && fw.last.message == "done", "the banner's title and body")
 	window_quit("Deckhand's background core quit")
 	testing.expect_value(t, fw.last.text, "Deckhand's background core quit")
-	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit, .Notify, .Quit}
+	window_app_boxes(7, `{"boxes":[]}`)
+	testing.expect(t, fw.last.tab_id == 7 && fw.last.text == `{"boxes":[]}`, "the app's boxes")
+	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit, .Notify, .Quit, .App_Boxes}
 	testing.expectf(t, slice_eq(fw.ops[:], want), "%v", fw.ops)
 	// every op but None and View_Goto (it needs a tab record: show_file's tests) is covered
 	testing.expect_value(t, len(want), len(Window_Op) - 2)

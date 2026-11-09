@@ -41,6 +41,31 @@ Harness_Run :: struct {
 
 harness_run: Harness_Run
 
+// A separate core's window (WINDOW_COMMANDS): the user's Install or Update on the sheet's
+// checklist (item, and the command the window showed: the core's own checklist must say the
+// same, or nothing runs), or Close (dismiss). In process the window calls harness_run_start itself.
+Harness_Install :: struct {
+	item:    string,
+	command: string,
+	dismiss: bool,
+}
+
+harness_install_apply :: proc(c: Harness_Install) -> Result {
+	if c.dismiss {
+		harness_run_dismiss()
+		return {ok = true}
+	}
+	if harness_run.status != .Running do harness_checklist_refresh(bump = false) // what is there now
+	why := ""
+	if it := harness_item(c.item); it == nil || it.command != c.command do why = "The checklist changed: nothing was run. Look at it again (Settings → Coding agents, Refresh)"
+	else do why = harness_run_start(c.item)
+	if why != "" {
+		window_toast(why, err = true) // the window does not wait for the answer
+		return fail(why)
+	}
+	return {ok = true}
+}
+
 // Where a harness's own installer puts it (the guard looks there too, besides `command -v`).
 // $_pa is pi's agent folder as pi reads PI_CODING_AGENT_DIR ("~" and "~/…" expanded; script below).
 @(private = "file")

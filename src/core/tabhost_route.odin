@@ -105,6 +105,7 @@ host: struct {
 	answers: map[string]Host_Answer, // answers to the calls being run now (host.calling), until taken (heap keys)
 	waits:   [dynamic]^Host_Wait,
 	calling: [dynamic]Host_Calling, // the calls being run now (nested: a link inside a Markdown tab)
+	answered: bool, // an answer came (tab_host_call's wait over core.sock looks again)
 }
 
 // The most a window's own wait_ms may ask for (a backstop, not a promise).
@@ -123,8 +124,15 @@ tab_host_call :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64
 	append(&host.calling, Host_Calling{id = id, request_id = request_id})
 	window_link_flush() // what earlier commands changed reaches the replica first: the window's part reads it
 	sent := window_link_send(tab_host_msg_call(id, cmd, caller, request_id, tab_id))
-	// in process the window answered while it was sent: pump past the per-pump cap until its answer
-	if sent do for window_link_pump() && !(id in host.answers) {}
+	// in process the window answered while it was sent: pump past the per-pump cap until its answer;
+	// over core.sock a bounded wait (WINDOW_REPLY_WAIT, as a window.request's), then pending
+	if sent && window_link_is_sock() {
+		deadline := time.tick_add(time.tick_now(), WINDOW_REPLY_WAIT)
+		for !(id in host.answers) {
+			host.answered = false
+			if !window_link_wait_once(deadline, &host.answered) && !host.answered do break
+		}
+	} else if sent do for window_link_pump() && !(id in host.answers) {}
 	me := pop(&host.calling)
 	if !sent {
 		if id in host.answers do host_answer_drop(id) // cannot be: nothing was sent
@@ -232,6 +240,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 			result_free(old.result)
 			host.answers[id] = {result_clone(r, heap), changed, wait}
 		} else do host.answers[strings.clone(id, heap)] = {result_clone(r, heap), changed, wait}
+		host.answered = true
 		return
 	}
 	n, nok := obj["request_id"].(json.Integer)
@@ -622,8 +631,10 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			session_show_tab(s, tab.id)
 			if et := &tab.kind.(Editor_Tab); !c.preview do et.preview = false // opened for good (double-click, Enter)
 			focus_session(s.id, caller)
-			if c.line > 0 do routed(Goto_Line{tab_id = tab.id, line = c.line, col = c.col}, caller, request_id)
-			return {ok = true, created_id = tab.id}, true
+			// by id: routed's wait may run the window's commands, which can move or free records
+			id := tab.id
+			if c.line > 0 do routed(Goto_Line{tab_id = id, line = c.line, col = c.col}, caller, request_id)
+			return {ok = true, created_id = id}, true
 		}
 		return routed(Open_File{path = p, line = c.line, col = c.col, session = s.id, preview = c.preview}, caller, request_id, new_id())
 	case Markdown_Open:
@@ -633,8 +644,9 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 			if !tab_host_up() do return no_window(), false
 			session_show_tab(s, tab.id)
 			focus_session(s.id, caller)
-			if c.anchor != "" do routed(Markdown_Scroll{tab_id = tab.id, anchor = c.anchor}, caller, request_id)
-			return {ok = true, created_id = tab.id}, true
+			id := tab.id // (by id across routed, as above)
+			if c.anchor != "" do routed(Markdown_Scroll{tab_id = id, anchor = c.anchor}, caller, request_id)
+			return {ok = true, created_id = id}, true
 		}
 		return routed(Markdown_Open{path = p, session = s.id, anchor = c.anchor}, caller, request_id, new_id())
 	case Diff_File:
@@ -674,10 +686,12 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 	case Markdown_Follow:
 		s, _, mt := markdown_tab_of(c.tab_id)
 		if mt == nil do return fail("no such Markdown tab"), false
+		sid := s.id // by id: routed's wait may run the window's commands, which can move or free records
 		// the window says what the link is (one of the document's, as laid out); the core acts on it
 		r, ch := routed(cmd, caller, request_id)
 		if !r.ok || r.data == "" do return r, ch
-		r2, ch2 := markdown_follow_act(c, s, caller, request_id, r.data)
+		if find_session(sid) == nil do return fail("the session went"), ch
+		r2, ch2 := markdown_follow_act(c, sid, caller, request_id, r.data)
 		return r2, ch || ch2
 	case Git_Head_Done:
 		if !tab_host_up() do return {ok = true}, false // the editor went with the window
@@ -1151,7 +1165,7 @@ session_file_tab :: proc(s: ^Open_Session, p: string, editor: bool) -> ^Tab {
 // {"follow":"open","path":…,"anchor":…}): the core opens it. A web or mail link leaves Deckhand
 // (the user's browser or mail, signed in): only the user's click, or a call the user confirms.
 @(private = "file")
-markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller, request_id: u64, data: string) -> (Result, bool) {
+markdown_follow_act :: proc(c: Markdown_Follow, sid: u64, caller: Caller, request_id: u64, data: string) -> (Result, bool) {
 	switch json_path(data, "follow") {
 	case "external":
 		url := c.url
@@ -1174,8 +1188,8 @@ markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller
 	case "open":
 		p := json_path(data, "path")
 		if p == "" do return fail("empty link"), false
-		if path_kind(p) != .Dir && md_is_markdown_path(p) do return tab_host_apply(Markdown_Open{path = p, session = s.id, anchor = json_path(data, "anchor")}, caller, request_id)
-		return run_command(Open_File{path = p, session = s.id}, caller), true
+		if path_kind(p) != .Dir && md_is_markdown_path(p) do return tab_host_apply(Markdown_Open{path = p, session = sid, anchor = json_path(data, "anchor")}, caller, request_id)
+		return run_command(Open_File{path = p, session = sid}, caller), true
 	}
 	return {ok = true}, false
 }

@@ -14,7 +14,7 @@ eventually
 assert_tip Worktrees and branches of this repository
 shot worktrees/closed
 command {"type":"list_worktrees"}
-assert_result data.loading false
+waitresult 10000 data.loading false
 assert_result data.default_branch main
 assert_result data.worktrees.# 5
 assert_result data.worktrees.0.main true
@@ -74,9 +74,8 @@ assert_state pending_confirmations.# 1
 assert_state pending_confirmations.0.summary Remove worktree ~/proj-a-merged and delete merged branch merged-wt? It also deletes 2 ignored paths (dist/, node_modules/).
 shot worktrees/confirm
 clickid confirm_yes
-wait 2500
 command {"type":"list_worktrees"}
-assert_result data.worktrees.# 4
+waitresult 10000 data.worktrees.# 4
 assert_result data.worktrees.1.path $homedir/proj-b-dirty
 # ---- light and dark
 command {"type":"set_appearance","mode":"light"}

@@ -62,6 +62,7 @@ tab_view_drop :: proc(tab_id: u64) {
 	browser_drop(tab_id) // a browser tab's page (browser.odin)
 	client_facts_forget(tab_id) // its facts as last sent to the core (client.odin)
 	app_drop(tab_id) // an app tab's process and frames (app_tab.odin)
+	if client_separate() do core.changes_drop(tab_id) // a Changes tab's own view (changes.odin's changes_view)
 }
 
 // window.view_moved: the tab's file is now at path (fs_model.odin's editors_renamed).

@@ -9,6 +9,7 @@ package core
 
 import "base:runtime"
 import "core:fmt"
+import "core:slice"
 import "core:strings"
 import "core:sync"
 
@@ -123,6 +124,12 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	s :: proc(v: string, a: runtime.Allocator) -> string {return strings.clone(v, a)}
 	switch c in cmd {
 	case Add_Project:         return Add_Project{cwd = s(c.cwd, allocator)}
+	case App_Socket:          return App_Socket{tab_id = c.tab_id, op = c.op, line = s(c.line, allocator)}
+	case Harness_Install:     return Harness_Install{item = s(c.item, allocator), command = s(c.command, allocator), dismiss = c.dismiss}
+	case Fs_Changed:
+		paths := make([]string, len(c.paths), allocator)
+		for p, i in c.paths do paths[i] = s(p, allocator)
+		return Fs_Changed{paths = paths, flags = slice.clone(c.flags, allocator)}
 	case Rename_Project:      return Rename_Project{project_id = c.project_id, name = s(c.name, allocator)}
 	case Open_Session_Cmd:    return Open_Session_Cmd{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator)}
 	case Close_Tab:           return Close_Tab{tab_id = c.tab_id, confirm = s(c.confirm, allocator), comments = c.comments}
@@ -283,6 +290,14 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Add_Project:         delete(c.cwd, allocator)
+	case App_Socket:          delete(c.line, allocator)
+	case Harness_Install:
+		delete(c.item, allocator)
+		delete(c.command, allocator)
+	case Fs_Changed:
+		for p in c.paths do delete(p, allocator)
+		delete(c.paths, allocator)
+		delete(c.flags, allocator)
 	case Rename_Project:      delete(c.name, allocator)
 	case Open_Session_Cmd:    delete(c.pi_session_id, allocator)
 	case Close_Tab:           delete(c.confirm, allocator)

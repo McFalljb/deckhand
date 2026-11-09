@@ -18,4 +18,4 @@ ui_command {"type":"job_run_now","job":"slow1"}
 wait 1000
 screen_hashes
 dump handover-1
-quit
+quit_window

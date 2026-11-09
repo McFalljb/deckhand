@@ -1,8 +1,10 @@
 #!/bin/sh
 # Hot reload with a separate core (DECKHAND_SEPARATE_CORE=1; docs/plans/background-core.md
 # §10.3 M4-C): a fake pi (tests/scripts/fake-bridge-reload.py) at 1.4.0, pi updated to 1.5.0,
-# Restart: the core restarts the tab on its session. The window process runs no core work (the
-# replica check in run_command fails the run), and the fake bridge started twice, by the core.
+# Restart: the core restarts the tab on its session. Then an extension's file is edited: the
+# window's watcher hears it, the core (which has none) gets it (Fs_Changed) and the reload bar
+# comes. The window process runs no core work (the replica check in run_command fails the run),
+# and the fake bridge started twice, by the core.
 # A fake HOME, a temp data dir and a short runtime dir; the core is stopped at the end.
 # Usage: tests/scripts/reload-separate.sh
 set -eu
@@ -25,7 +27,9 @@ FAKE_HOME="$W/home"
 PROJ="$FAKE_HOME/code/recipe-box"
 AD="$FAKE_HOME/.pi/agent"
 DIR="$AD/sessions/--reload--"
-mkdir -p "$PROJ" "$DIR" "$W/data" "$W/pi-pkg"
+mkdir -p "$PROJ" "$DIR" "$W/data" "$W/pi-pkg" "$AD/extensions/demo"
+printf 'export default function () {}\n' > "$AD/extensions/demo/index.ts"
+printf 'echo "// edited" >> %s\n' "$AD/extensions/demo/index.ts" > "$FAKE_HOME/edit-ext.sh"
 printf '{"type":"session","version":3,"id":"aaaa-1","cwd":"%s"}\n{"type":"message","message":{"role":"user","content":"Import recipes"}}\n' \
   "$PROJ" > "$DIR/2026-10-21T01-00-00-000Z_aaaa-1.jsonl"
 printf '{"name":"@earendil-works/pi-coding-agent","version":"1.4.0"}\n' > "$W/pi-pkg/package.json"

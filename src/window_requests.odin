@@ -18,7 +18,14 @@ window_on_request :: proc(text: string) {
 		if id != "" do window_reply(id, {})
 		return
 	}
-	r: core.Window_Reply
+	r := window_request_run(q)
+	if id != "" do window_reply(id, r)
+}
+
+// What a request asks, done; its reply. A separate core's window also runs the requests its own
+// core package makes (core.replica_request: its caches' views, the Changes tab's diff, watched
+// folders), as in process.
+window_request_run :: proc(q: core.Window_Request) -> (r: core.Window_Reply) {
 	switch q.op {
 	case .None:
 	case .Clipboard_Set:
@@ -79,8 +86,10 @@ window_on_request :: proc(text: string) {
 		if core.platform.notify != nil do core.platform.notify(q.text, q.message) // a separate core's (its own platform)
 	case .Quit:
 		client_core_quit(q.text) // the core ends on purpose, or another window took over: no reconnect (client_core.odin)
+	case .App_Boxes:
+		core.app_event_in(q.tab_id, "tab.boxes", q.text) // a separate core's: drawn as the app sent them (app_tab.odin)
 	}
-	if id != "" do window_reply(id, r)
+	return
 }
 
 @(private = "file")

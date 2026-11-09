@@ -22,7 +22,7 @@ assert_state open_sessions.0.tabs.1.kind changes
 assert_state open_sessions.0.tabs.1.root $homedir/proj
 # ---- changes_list: paths and counts
 command {"type":"changes_list"}
-assert_result data.loading false
+waitresult 10000 data.loading false
 assert_result data.branch feature
 assert_result data.default_branch main
 assert_result data.ahead 1

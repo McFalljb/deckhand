@@ -5,6 +5,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core:sync"
 import "core:sys/posix"
 import jg "../jsonguard"
 
@@ -231,3 +232,76 @@ app_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
 	return s, ""
 }
 
+
+// ---- a window in another process (a separate core): its app tabs' connections ----
+
+// An app tab's program connects to the core's socket (caller `app`), while its process and frames
+// are the window's. The window's part, over window.command (separate core only; in process the
+// window calls socket.odin itself): mint the tab's single-use token (the old one and its
+// connection go first; data: the child's environment as a JSON array of "K=V"), send one line
+// to the program, or forget the tab's token and connection. Internal (WINDOW_COMMANDS), no event.
+App_Socket_Op :: enum u8 {
+	Mint,
+	Send,
+	Forget,
+}
+
+APP_SOCKET_OP_NAMES := [App_Socket_Op]string{.Mint = "mint", .Send = "send", .Forget = "forget"}
+
+App_Socket :: struct {
+	tab_id: u64,
+	op:     App_Socket_Op,
+	line:   string, // Send: one line for the program
+}
+
+app_socket_apply :: proc(c: App_Socket) -> Result {
+	_, tab, _ := find_tab(c.tab_id)
+	switch c.op {
+	case .Mint:
+		// (new_app_tab's tab has no record yet: it follows the window's answer)
+		if c.tab_id == 0 do return fail("no tab")
+		if tab != nil {
+			if _, is := tab.kind.(App_Tab); !is do return fail("not an app tab")
+		}
+		socket_forget_tab(c.tab_id)
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_byte(&b, '[')
+		for e, i in socket_child_env({kind = .App, tab_id = c.tab_id}) {
+			if i > 0 do strings.write_byte(&b, ',')
+			json_quote(&b, e)
+		}
+		strings.write_byte(&b, ']')
+		return {ok = true, data = strings.clone(strings.to_string(b))}
+	case .Send:
+		if !socket_app_send(c.tab_id, c.line) do return fail("the app is not connected")
+		return {ok = true}
+	case .Forget:
+		socket_forget_tab(c.tab_id)
+		return {ok = true}
+	}
+	return fail("unknown op")
+}
+
+// A window in another process draws an inspected app tab's boxes: they go to it when they change
+// (window.request app_boxes, the tab.boxes line's shape). Each core tick, while one is attached
+// over core.sock.
+app_boxes_tick :: proc() {
+	if !window_link_is_sock() || !sync.atomic_exchange(&boxes_dirty, false) do return
+	for s in state.open_sessions do for t in s.tabs {
+		if _, is := t.kind.(App_Tab); !is do continue
+		b := strings.builder_make(context.temp_allocator)
+		strings.write_string(&b, `{"boxes":[`)
+		sync.lock(&boxes_mu)
+		for x, i in boxes[t.id] or_else nil {
+			if i > 0 do strings.write_byte(&b, ',')
+			strings.write_string(&b, `{"id":`)
+			json_quote(&b, x.id)
+			strings.write_string(&b, `,"label":`)
+			json_quote(&b, x.label)
+			fmt.sbprintf(&b, `,"rect":{{"x":%v,"y":%v,"w":%v,"h":%v}}}}`, x.rect.x, x.rect.y, x.rect.w, x.rect.h)
+		}
+		sync.unlock(&boxes_mu)
+		strings.write_string(&b, "]}")
+		window_app_boxes(t.id, strings.to_string(b))
+	}
+}

@@ -77,10 +77,12 @@ for i, (name, st) in enumerate(zip(names, starts)):
         check("--tools" not in a and "--exclude-tools" not in a and "--no-mcp" not in a, f"{name}: full pi, no allowlist: {a}")
         check(st["env"] == "unset", f"{name}: no PI_KIT_READONLY")
 # Deckhand's pi integration on every start: -e per required extension, first, from the app's
-# Resources/pi; the bridge variables are DECKHAND_*, never pi-kit's PI_DESK_* (it stays inert)
+# Resources/pi (a separate core: Deckhand Core.app's own copy); the bridge variables are DECKHAND_*,
+# never pi-kit's PI_DESK_* (it stays inert)
 root = sys.argv[2]
 manifest = json.load(open(os.path.join(root, "integrations/pi/extensions.json")))
-bundled = os.path.realpath(os.path.join(root, "build/Deckhand.app/Contents/Resources/pi"))
+res = "build/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/Resources/integrations/pi" if os.environ.get("DECKHAND_SEPARATE_CORE") == "1" else "build/Deckhand.app/Contents/Resources/pi"
+bundled = os.path.realpath(os.path.join(root, res))
 want = [x for e in manifest["extensions"] if e["required"] for x in ("-e", os.path.join(bundled, "extensions", e["name"]))]
 for name, st in zip(names, starts):
     a = st["argv"]

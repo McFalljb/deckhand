@@ -75,7 +75,8 @@ printf '#!/bin/sh\nexit 1\n' > "$H3/.npm-global/bin/npm"
 chmod 755 "$H3/.npm-global/bin/npm"
 fake_claude "$H3" "$H3/.local/share/claude/versions/2.1.100"
 run old "$H3"
-chk "test mode refused the real update" 'grep -q "test mode: refusing to run the real install command" "$W/run-old.log"'
+# (a separate core says it in its own log: DECKHAND_SEPARATE_CORE=1)
+chk "test mode refused the real update" 'grep -qs "test mode: refusing to run the real install command" "$W/run-old.log" "$W/data-old/run/core.log"'
 chk "nothing ran" '[ ! -e "$H3/install-argv.txt" ]'
 
 # 4. nix and mise: shown only

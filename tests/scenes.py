@@ -14,6 +14,9 @@ Which scenes (tests/scenes.txt lists them, with their areas, tags and typical ti
   --area PATH       the scenes whose areas cover PATH (a file, or a folder prefix such as src/native)
   --shard I/N       of those, shard I of N (balanced by the typical times)
   --ci              leave out the scenes tagged noci
+  --separate-core   run them with the core as another process (DECKHAND_SEPARATE_CORE=1, the
+                    background core: docs/plans/background-core.md M4); the cores and holders a
+                    scene leaves running are killed after it (core_sweep)
 
 It builds once (./build.sh and ./build.sh fake-app; skipped when both are newer than every file
 they are built from; --build to build anyway, --no-build to skip: each scene still refuses a stale
@@ -303,6 +306,39 @@ def check_map(scenes, special):
     return bad == 0
 
 
+def core_procs():
+    """This checkout's background cores and session holders (deckhand-core-serve serve, deckhand-core
+    hold): {pid: (their --run dir, --data dir)}. Started with setsid, they leave the runner's
+    process group."""
+    out = subprocess.run(["ps", "-axww", "-o", "pid=,command="], capture_output=True, text=True).stdout
+    found = {}
+    for line in out.splitlines():
+        pid, _, cmd = line.strip().partition(" ")
+        m = re.search(r"deckhand-core(?:-serve)? (?:serve|hold) --run (.+?) --data (.+?)(?: --|$)", cmd)
+        if m and ROOT in cmd:
+            found[int(pid)] = (m.group(1), m.group(2))
+    return found
+
+
+def core_sweep(scene=None):
+    """Kills the cores and holders a scene left (its data under build/<name>, or build/test-data
+    for a scene that holds that lock, one at a time; or a runtime dir the scene removed), or, with
+    no scene, all of them; returns how many. A core runs on after its window quits (as with the
+    user's)."""
+    n = 0
+    dirs = [scene.name] + (["test-data"] if "test-data" in scene.tags else []) if scene else []
+    mine = [os.path.join(ROOT, "build", d) for d in dirs]
+    for pid, (run, data) in core_procs().items():
+        if scene and os.path.isdir(run) and not any(data == d or data.startswith(d + "/") for d in mine):
+            continue
+        try:
+            os.kill(pid, signal.SIGKILL)
+            n += 1
+        except ProcessLookupError:
+            pass
+    return n
+
+
 def kill_tree(pid):
     """SIGKILL pid and everything below it (children first are found, then all are killed)."""
     pids, todo = [], [pid]
@@ -397,8 +433,10 @@ def last_step(name):
 
 
 class Runner:
-    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None, budget=0.0):
+    def __init__(self, scenes, jobs, cef_jobs, retries, timeout, mem_budget=0, fail_fast=True, last=None, budget=0.0,
+                 separate=False):
         self.pending = list(scenes)
+        self.separate = separate  # DECKHAND_SEPARATE_CORE=1 per attempt (core_sweep after it)
         self.budget, self.t0 = budget, time.monotonic()  # seconds for the whole run (0: none)
         self.jobs, self.cef_jobs, self.retries, self.timeout = jobs, cef_jobs, retries, timeout
         self.fail_fast, self.last = fail_fast, last or {}
@@ -450,6 +488,9 @@ class Runner:
         except FileNotFoundError:
             pass
         env = dict(os.environ, DECKHAND_SCRIPT_STEP=step, DECKHAND_SCRIPT_FAIL_FAST="1" if self.fail_fast else "0")
+        if self.separate:
+            env.update(DECKHAND_SEPARATE_CORE="1")
+            core_sweep(s)  # an earlier attempt's
         with open(log, "w") as fh:
             fh.write(f"# {s.name}: {s.command}   (started {time.strftime('%H:%M:%S')}, load {os.getloadavg()[0]:.1f}, "
                      f"timeout {timeout:.0f} s)\n")
@@ -468,6 +509,8 @@ class Runner:
                          f"{'the run budget (--max-minutes)' if self.budget and timeout < own else '--timeout' if self.timeout else f'{TIMEOUT_X:g}x its typical time, at least {TIMEOUT_MIN} s'})\n"
                          f"# last script step: {last_step(s.name) or '(none: before the app ran a script line)'}\n")
             secs = time.monotonic() - t0
+            if self.separate and core_sweep(s):
+                fh.write("\n# scenes.py: killed the background cores and holders it left running\n")
             if rc != 0 and rc != 124 and last_step(s.name):
                 fh.write(f"\n# last script step: {last_step(s.name)}\n")
             fh.write(f"\n# {s.name}: exit {rc} after {secs:.1f} s (load {os.getloadavg()[0]:.1f})\n")
@@ -556,6 +599,7 @@ def main():
     ap.add_argument("--area", metavar="PATH", action="append", help="repeatable")
     ap.add_argument("--shard", metavar="I/N")
     ap.add_argument("--ci", action="store_true", help="leave out noci scenes")
+    ap.add_argument("--separate-core", action="store_true", help="the core as another process (DECKHAND_SEPARATE_CORE=1)")
     ap.add_argument("-j", type=int, default=int(os.environ.get("SCENE_JOBS", "0")) or None,
                     help="scenes at a time, idle ones not counted (default: 8 with 10+ CPUs, 4 with 8+, "
                     "else 2; SCENE_JOBS)")
@@ -631,13 +675,15 @@ def main():
           f"{a.mem_gb:g} GB), load {load0:.1f}", flush=True)
     t0 = time.monotonic()
     r = Runner(chosen, jobs, a.cef_jobs, a.retries, a.timeout, int(a.mem_gb * 2**30), not a.no_fail_fast, last,
-               a.max_minutes * 60)
+               a.max_minutes * 60, a.separate_core)
     r.run()
     wall = time.monotonic() - t0
+    if a.separate_core and core_sweep():
+        print("scenes: killed background cores or holders still running after the run")
 
     times = dict(last)
     for name, res in r.results.items():
-        if res["result"] == "pass":
+        if res["result"] == "pass" and not a.separate_core:
             times[name] = round(res["times"][0], 1)
     try:
         json.dump(times, open(TIMES, "w"), indent=0, sort_keys=True)

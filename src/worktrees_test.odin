@@ -288,6 +288,22 @@ wt_files_set_root :: proc(t: ^testing.T) {
 	git_ok(f.main, "worktree", "prune")
 	wt_scan_now(f.main)
 	for c in state.files.checkouts do testing.expect(t, c.path != f.merged, "dropped")
+	// a window process with a separate core: the choice is the core's State, so the scan asks the
+	// core to drop it (Files_Set_Root back to the project) and leaves the replica alone
+	testing.expect(t, core.run_command(core.Files_Set_Root{path = f.dirty}, {kind = .Script}).ok)
+	os.remove_all(f.dirty)
+	git_ok(f.main, "worktree", "prune")
+	@(static) asked: string
+	asked = ""
+	core.replica_process = true
+	core.files_root_reset_send = proc(base: string) {asked = strings.clone(base, context.temp_allocator)}
+	runs := core.replica_core_runs
+	wt_scan_now(f.main)
+	core.replica_process = false
+	core.files_root_reset_send = nil
+	testing.expect_value(t, asked, f.main)
+	testing.expect_value(t, core.json_path(core.state_json(), "files.checkouts.0.path"), f.dirty)
+	when core.TEST_HOOKS do testing.expect_value(t, core.replica_core_runs, runs) // no State changed there
 }
 
 // Clean up as the user: sync refusals come back at once; git's checks run

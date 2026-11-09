@@ -1054,7 +1054,11 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   launching a core (the window does); the core's own notifications (they go through the window:
   `window.request notify`); the window floor on disk; app tabs, the setup sheet's install run,
   the Changes tab, worktree cleanup progress and the update UI stay the in-process window's;
-  after the core's connection ends the window quits (no reconnect).
+  after the core's connection ends the window quits (no reconnect). **Hot reload sees only
+  stamps:** pi's config folders are watched by FSEvents in the window, and the core runs the
+  reload ticks, so a separate core sees an edit inside a watched folder (an extension's file) only
+  when the folder's own stamp or a watched file changes (RELOAD_POLL, 2 s); a known gap until the
+  core watches them itself (before the default flips).
 
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR

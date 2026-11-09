@@ -254,11 +254,12 @@ Claude_Status_Dismiss :: struct {
 // How a replica process tells its core (client.odin sets it; nil in a core).
 claude_typed_send: proc(tab_id: u64)
 claude_status_dismiss_send: proc(tab_id: u64)
+files_root_reset_send: proc(base: string) // the Files tree back to base's own folder (worktrees_done)
 
 // The commands a window process runs itself with a separate core (replica_process): its own
 // workers' results, for its own caches (the Files tree, the worktree switcher, the Changes tab).
 // Anything else run there acts on the replica, not the core: test builds count and log it
-// (run_command; autotest fails the scene).
+// (run_command; autotest fails the scene), as is one of these that changed State.
 window_local_command :: proc(cmd: Command) -> bool {
 	#partial switch _ in cmd {
 	case File_List_Done, Git_Status_Done, Worktrees_Done, Changes_Scan_Done, Changes_Diff_Done: return true
@@ -759,14 +760,15 @@ after_command_check: proc(cmd: Command)
 // Runs one command on the main thread. request_id ties it to its events.
 run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id: u64 = 0) -> Result {
 	if window.test_facts != nil do window.test_facts() // unit tests only (window_hooks.odin)
-	when TEST_HOOKS {
-		if replica_process && !window_local_command(cmd) {
+	r: Result
+	changed := false
+	defer when TEST_HOOKS {
+		// a window process runs only its own caches' commands, and they change no State
+		if replica_process && (!window_local_command(cmd) || changed) {
 			replica_core_runs += 1
 			fmt.eprintfln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
 		}
 	}
-	r: Result
-	changed := false
 	if !caller_may(caller, cmd) {
 		r = fail("not allowed for this caller")
 	} else if why := claude_readonly_refuses(caller, cmd); why != "" {
@@ -1454,6 +1456,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, false
 	case Claude_Status_Dismiss:
 		_, tab, _ := find_tab(c.tab_id)
+		if tab == nil do return {ok = true}, false
 		claude_status_dismiss(tab)
 		return {ok = true}, true
 	case Set_Separate_Core:

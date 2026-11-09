@@ -148,6 +148,7 @@ client_core_connect :: proc(data: string) -> string {
 	core.replica_process = true
 	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
 	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
+	core.files_root_reset_send = proc(base: string) {client_send(core.Files_Set_Root{base = base})}
 	client_send_raw(core.window_msg_subscribe())
 	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
 	if !got_full do return "Deckhand's background core sent no state"

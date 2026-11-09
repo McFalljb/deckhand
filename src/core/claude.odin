@@ -192,6 +192,10 @@ claude_tab_of :: proc(tab_id: u64) -> (s: ^Open_Session, tab: ^Tab, ct: ^Claude_
 claude_note_typed :: proc(tab: ^Tab) {
 	if tab == nil do return
 	if _, is := tab.kind.(Claude_Tab); !is do return
+	if replica_process { // the core's runtime is in the other process: it hears it (Claude_Typed)
+		if tab.live.claude_wait != .Typing && claude_typed_send != nil do claude_typed_send(tab.id)
+		return
+	}
 	rt := claude_rt[tab.id]
 	if !rt.typed {
 		rt.typed = true
@@ -208,26 +212,60 @@ claude_typed :: proc(tab_id: u64) -> bool {return claude_rt[tab_id].typed}
 // no Enter still due. Either signal alone can hold it back; OSC 7501 never stands in for hooks
 // that have not said idle (never into a dialog).
 claude_ready :: proc(tab: ^Tab, ct: ^Claude_Tab) -> (ok: bool, why: string) {
-	if tab.status != .Running do return false, "Claude is not running in this tab"
+	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
+	if tab.status != .Running do w = .Not_Running
+	return w == .None, CLAUDE_WAIT_WHY[w]
+}
+
+// Why nothing can go into a Claude tab's prompt now (claude_ready).
+Claude_Wait :: enum u8 {
+	None,
+	Not_Running,
+	Ro_Guard,
+	Sending,
+	Starting,
+	Working,
+	Waiting,
+	Typing,
+	No_Paste,
+}
+
+CLAUDE_WAIT_WHY := [Claude_Wait]string {
+	.None        = "",
+	.Not_Running = "Claude is not running in this tab",
+	.Ro_Guard    = "Claude is starting (its read-only guard has not confirmed yet)",
+	.Sending     = "sending",
+	.Starting    = "Claude is starting",
+	.Working     = "Claude is working",
+	.Waiting     = "Claude is waiting for you",
+	.Typing      = "you are typing a message",
+	.No_Paste    = "Claude's input does not take pasted text now",
+}
+
+// claude_ready's answer from the core's runtime.
+claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
+	if tab.status != .Running do return .Not_Running
 	rt := claude_rt[tab.id]
 	// a read-only start: nothing goes in before its profile acked (a prompt before it stops the tab)
-	if rt.ro_need && !rt.ro_acked do return false, "Claude is starting (its read-only guard has not confirmed yet)"
-	if rt.enter_due != {} do return false, "sending"
+	if rt.ro_need && !rt.ro_acked do return .Ro_Guard
+	if rt.enter_due != {} do return .Sending
 	switch ct.turn {
-	case .Unknown: return false, "Claude is starting"
-	case .Working: return false, "Claude is working"
-	case .Waiting: return false, "Claude is waiting for you"
+	case .Unknown: return .Starting
+	case .Working: return .Working
+	case .Waiting: return .Waiting
 	case .Idle:
 	}
 	if v := tab_status_view(tab^); v.source == .Osc7501 {
 		#partial switch v.state {
-		case .Blocked: return false, "Claude is waiting for you"
-		case .Working: return false, "Claude is working"
+		case .Blocked: return .Waiting
+		case .Working: return .Working
 		}
 	}
-	if rt.typed do return false, "you are typing a message"
-	if why := claude_paste_refused(tab); why != "" do return false, why
-	return true, ""
+	if rt.typed do return .Typing
+	t := term_of(tab.id)
+	if t == nil || !t.running do return .Not_Running
+	if !mode_on(t, 2004) do return .No_Paste
+	return .None
 }
 
 // Held text goes only as a bracketed paste (Claude's prompt turns it on): without it each line
@@ -314,7 +352,7 @@ claude_plugin_dir :: proc() -> string {
 	exe := executable_path()
 	if exe == "" do return ""
 	dir := filepath.dir(exe)
-	for c in ([]string{"../Resources/claude-code", "claude-code"}) {
+	for c in ([]string{"../Resources/claude-code", "../Resources/integrations/claude-code", "claude-code"}) { // Deckhand.app, Deckhand Core.app (a separate core), a bare build
 		p, _ := filepath.join({dir, c}, context.temp_allocator)
 		if os.exists(strings.concatenate({p, "/.claude-plugin/plugin.json"}, context.temp_allocator)) do return p
 	}

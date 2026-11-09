@@ -593,6 +593,10 @@ worktrees_done :: proc(c: Worktrees_Done) -> bool {
 		found := false
 		for co in r.checkouts do if co.path == ch.path && !co.missing do found = true
 		if found && os.is_dir(ch.path) do continue
+		if replica_process { // the choice is the core's State: the core drops it (Files_Set_Root back to the project)
+			if files_root_reset_send != nil do files_root_reset_send(ch.base)
+			continue
+		}
 		files_checkout_drop(i)
 		changed = true
 	}

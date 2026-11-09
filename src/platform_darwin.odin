@@ -60,7 +60,7 @@ on_wake :: proc "c" (ctx: rawptr) {
 	app.wakes += 1
 	if app.ready {
 		core.core_loop_wake() // work came in: the core loop's timer at its fast pace
-		core.inbox_drain()
+		client_drain() // the core's inbox (in process), or what the core sent (separate: client.odin)
 	}
 }
 
@@ -369,4 +369,31 @@ test_menu_dump :: proc() -> string {
 	buf := make([]u8, 1 << 16, context.temp_allocator)
 	n := dh_mac_menu_dump(&buf[0], c.int(len(buf)))
 	return string(buf[:n])
+}
+
+Timebase :: struct {
+	numer, denom: u32,
+}
+foreign import libproc_cpu "system:proc"
+@(default_calling_convention = "c")
+foreign libproc_cpu {
+	proc_pid_rusage :: proc(pid: c.int, flavor: c.int, buffer: rawptr) -> c.int ---
+	mach_timebase_info :: proc(info: ^Timebase) -> c.int ---
+}
+
+// Another process's CPU seconds (user + system), 0 if unknown: a separate core's, for test mode's
+// per-process benchmarks (autotest.odin's cpu_end).
+pid_cpu_seconds :: proc(pid: i32) -> f64 {
+	Rusage_Info_V0 :: struct {
+		uuid:                       [16]u8,
+		user_time, system_time:     u64, // mach absolute time units
+		pkg_idle_wkups, interrupt_wkups, pageins, wired_size, resident_size, phys_footprint, start, exit: u64,
+	}
+	if pid <= 0 do return 0
+	ri: Rusage_Info_V0
+	if proc_pid_rusage(c.int(pid), 0, &ri) != 0 do return 0
+	tb: Timebase
+	mach_timebase_info(&tb)
+	if tb.denom == 0 do return 0
+	return f64(ri.user_time + ri.system_time) * f64(tb.numer) / f64(tb.denom) / 1e9
 }

@@ -122,6 +122,13 @@ term_stream_term_gone :: proc(t: ^Term) {
 	}
 }
 
+// When a snapshot that backed off is due again (ok = one waits): a loop with no frames to run it
+// (deckhand-core serve) sleeps no longer than this. Main thread.
+term_stream_retry_at :: proc() -> (at: time.Tick, ok: bool) {
+	for s in streams do if s.need_snap && (!ok || time.tick_diff(s.snap_after, at) < 0) do at, ok = s.snap_after, true
+	return
+}
+
 // Every stream sends what waits (the end of core_tick; before a test's screen-hash check).
 // retry_now: a snapshot that backs off is tried at once (the test check).
 term_streams_flush :: proc(retry_now := false) {

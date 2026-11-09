@@ -273,7 +273,7 @@ menubar_run :: proc(it: ^Bar_Item) {
 		ev = {type = .KEY_UP, key_code = k.code, modifiers = k.mods}
 		event(&ev)
 	}
-	core.inbox_drain()
+	client_drain()
 	app.redraw = true
 }
 

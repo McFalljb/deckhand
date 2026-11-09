@@ -65,6 +65,11 @@ Client :: struct {
 	// client_attach_host)
 	host:      bool,
 	detached:  bool, // test mode's detach_window: the window plays gone until attach_window
+	// a separate core (client_core.odin): the link is core.sock, `state` is core.state itself
+	sock:      ^cw.Sock_Transport,
+	core_pid:  i32,
+	abandoned: map[string]bool, // results that came past CLIENT_WAIT: dropped when they come
+	lost:      bool, // the core's connection ended
 }
 
 client: Client
@@ -171,7 +176,7 @@ client_send :: proc(cmd: core.Command, menu := "") {
 	}
 	client_facts()
 	client_raw(core.window_msg_command(cmd, "", menu = menu))
-	core.window_link_pump()
+	client_pump()
 }
 
 // A ui command's result, after everything queued before it ran (ui_run). Temp-allocated strings.
@@ -187,6 +192,7 @@ client_run :: proc(cmd: core.Command) -> core.Result {
 	client_facts()
 	id := client_id()
 	client_raw(core.window_msg_command(cmd, id))
+	if client.sock != nil do return client_wait(id) // over core.sock: a bounded wait (client_core.odin)
 	for core.window_link_pump() {} // past the pump's cap too: this caller waits for its result
 	core.inbox_drain()
 	return client_take(id)
@@ -209,6 +215,7 @@ client_call :: proc(cmd: core.Command, kind: core.Caller_Kind = .UI) -> core.Res
 		}
 		client_raw(text)
 	}
+	if client.sock != nil do return client_wait(id) // over core.sock: a bounded wait (client_core.odin)
 	for core.window_link_pump() && !(id in client.results) {} // past the pump's cap too: it waits for its result
 	return client_take(id)
 }
@@ -228,8 +235,8 @@ client_internal :: proc(cmd: core.Command) {
 	on_main := sync.current_thread_id() == client.main
 	if on_main do client_facts()
 	client_raw(text)
-	if on_main do core.window_link_pump()
-	else if core.platform.wake != nil do core.platform.wake()
+	if on_main do client_pump()
+	else if client.sock == nil && core.platform.wake != nil do core.platform.wake() // (a socket: sent already)
 }
 
 // After the core's tick (frame): what the core changed since (terminals, timers, the test step)
@@ -246,7 +253,8 @@ client_after_tick :: proc() {
 	every := app.redraw ? SWEEP_MS : SWEEP_IDLE_MS
 	sweep := time.tick_diff(client.swept, now) >= time.Duration(every) * time.Millisecond
 	if sweep do client.swept = now
-	core.window_link_flush(sweep)
+	if client.sock != nil do client_io(0)
+	else do core.window_link_flush(sweep)
 	client_facts()
 }
 
@@ -271,7 +279,8 @@ client_on_drain :: proc() {
 // Before handling an event: the replica holds what timers and other threads' commands did.
 client_before_event :: proc() {
 	if !client.attached do return
-	core.window_link_flush()
+	if client.sock != nil do client_io(0)
+	else do core.window_link_flush()
 	client_facts()
 }
 
@@ -334,6 +343,7 @@ client_facts :: proc() {
 	f.fps, f.scale = platform_display()
 	f.frames_service, f.frames_device = frames_service()
 	if s, ok := setup_state_now(); ok do f.setup = s // ui_setup.odin
+	client_layout_facts(&f) // a separate core: the panes' rects (client_core.odin)
 	if text := core.window_msg_facts(&f); text != client.facts_sent && client_raw(text) {
 		delete(client.facts_sent, heap)
 		client.facts_sent = strings.clone(text, heap)
@@ -355,7 +365,7 @@ client_facts :: proc() {
 		} else do client.tab_facts_sent[id] = strings.clone(text, heap)
 		sent = true
 	}
-	if sent do core.window_link_pump()
+	if sent do client_pump()
 }
 
 // The tab closed (tab_view_drop): what was sent of it goes (the core drops its copy itself).
@@ -396,6 +406,14 @@ client_frame :: proc(channel: u32, kind: cw.Kind, payload: []u8) -> bool {
 		if channel == cw.JSON_CHANNEL do fmt.eprintfln("[proto] window -> core %s", string(payload[:min(len(payload), 300)]))
 		else do fmt.eprintfln("[proto] window -> core [%d] %v %d bytes", channel, kind, len(payload))
 	}
+	if client.sock != nil {
+		if e := cw.sock_send(client.sock, channel, kind, payload); e != .None {
+			if e != .Full do fmt.eprintln("Deckhand: the connection to the core refused a message:", e)
+			return false
+		}
+		cw.sock_flush(client.sock) // never blocks: the rest goes at the next client_io
+		return true
+	}
 	if e := cw.mem_send(client.end, channel, kind, payload); e != .None {
 		fmt.eprintln("Deckhand: the window's link refused a message:", e)
 		return false
@@ -420,6 +438,9 @@ result_temp :: proc(r: core.Result) -> core.Result {
 	return core.result_clone(r, context.temp_allocator)
 }
 
+// What the core sent, read now (client_core.odin's socket turns).
+client_frames_read :: proc() {client_on_frames()}
+
 // Everything the core sent: state into the replica, results kept for their caller, toasts shown.
 @(private = "file")
 client_on_frames :: proc() {
@@ -428,7 +449,11 @@ client_on_frames :: proc() {
 	defer client.receiving = false
 	heap := runtime.heap_allocator()
 	for {
-		f, err := cw.mem_recv(client.end, context.temp_allocator)
+		f: cw.Frame
+		err: cw.Recv_Error
+		if client.sock != nil do f, err = cw.sock_recv(client.sock, context.temp_allocator)
+		else do f, err = cw.mem_recv(client.end, context.temp_allocator)
+		if err == .Closed && client.sock != nil do client_core_lost()
 		if err != .None do return
 		if f.channel != cw.JSON_CHANNEL {
 			if client.log do fmt.eprintfln("[proto] core -> window [%d] %v %d bytes", f.channel, cw.Kind(f.kind), len(f.payload))
@@ -445,12 +470,18 @@ client_on_frames :: proc() {
 		}
 		switch m.kind {
 		case .State:
-			if e := core.replica_apply(&client.replica, text, deferred_allocator(&client.deferred)); e != "" {
+			if e := core.replica_apply(client.sock != nil ? &core.state : &client.replica, text, deferred_allocator(&client.deferred)); e != "" { // separate: core.state is the replica
 				fmt.eprintln("Deckhand: the window's state did not apply:", e, "(asking for all of it)")
-				core.window_link_resync()
-			}
+				if client.sock != nil do client_raw(core.window_msg_subscribe()) // the core sends state.full again
+				else do core.window_link_resync()
+			} else do client_got_state()
 			app.redraw = true
 		case .Result:
+			if m.id in client.abandoned { // its caller stopped waiting (CLIENT_WAIT): dropped
+				k, _ := delete_key(&client.abandoned, m.id)
+				delete(k, heap)
+				continue
+			}
 			r := core.result_clone(m.result, heap)
 			if old, had := client.results[m.id]; had {
 				core.result_free(old)

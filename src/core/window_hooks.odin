@@ -87,6 +87,7 @@ Window_Op :: enum u8 {
 	Job_Sheet, // the job_sheet command (job_sheet, caller); reply: result, changed
 	Job_Sheet_Saved, // Job_Save's answer (path, message: its error); reply: ok (the sheet closed)
 	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
+	Notify, // a separate core's OS notification (text: title, message: body), shown by the window's own
 }
 
 Window_Request :: struct {
@@ -127,6 +128,15 @@ Window_Facts :: struct {
 	job_sheet_open:       bool,
 	setup:                Maybe(Setup_State), // the first-run sheet as get_state's focus shows it
 	unsaved:              []string, // each buffer with unsaved changes: its file's path ("" = none yet)
+	// a window in another process (separate core): what its layout wrote into the core's State in
+	// process: the panes' area (w, h px, scale: the room checks) and the shown session's pane rects
+	centre:               [3]f32,
+	panes:                []Pane_Fact,
+}
+
+Pane_Fact :: struct {
+	session, pane: u64,
+	rect, frame:   [4]f32, // Pane.rect and Pane.frame (framebuffer px; not on the state wire)
 }
 
 Md_Facts :: struct {
@@ -174,6 +184,9 @@ window_open_url :: proc(url: string) -> bool {
 	return answered && r.ok
 }
 window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
+// A separate core's OS notification goes through the window (none attached: none; M4-D gives the
+// core its own banners).
+window_notify :: proc(title, body: string) {ask({op = .Notify, text = title, message = body})}
 window_set_appearance :: proc(mode: Appearance) {ask({op = .Appearance, mode = mode})}
 // The window's copy of the tab's terminal: its selection onto the clipboard. False: none (or no window).
 window_copy_selection :: proc(tab_id: u64) -> bool {

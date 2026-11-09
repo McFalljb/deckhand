@@ -1435,6 +1435,13 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
 
 **When a newer version exists**, a bar over the centre says "Deckhand 0.1.1 is available":
 
+- **Experimental › Sessions in a background core** (the palette's **Run sessions in a background
+  core (experimental; at the next launch)**): off by default, and read when Deckhand opens. With
+  it on, your tabs run in Deckhand Core, a process of its own, and the window talks to it over a
+  socket only Deckhand's own window may use. ⌘Q closes the window and Deckhand Core keeps your
+  sessions running; opening Deckhand again shows them as they are; **Quit Deckhand and Stop All
+  Sessions…** stops Deckhand Core too. Still the window's alone for now: app tabs, the setup
+  sheet's installs, the Changes tab and the update dialog. Only you can change it.
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers
   it again.
@@ -1919,6 +1926,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
+| Run sessions in a background core (experimental; at the next launch) |  | off by default: on or off (the gear's Experimental row) |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |

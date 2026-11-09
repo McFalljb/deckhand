@@ -233,6 +233,7 @@ Pop_Item :: enum {
 	Restart_Claude, // restart every running Claude tab (claude_reload.odin), only while one runs; drawn after Reload pi; last so earlier rows keep their ids
 	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
+	Separate_Core, // Experimental: run sessions in a background core (§10.3 M4-C; read at launch); last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -244,7 +245,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
 	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
 	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Shortcuts, .Settings_Files, .Control_Token, .Setup, .Tidy_Projects, .Update_Checks,
-	.Keep_Sessions,
+	.Keep_Sessions, .Separate_Core,
 }
 
 POP_ACTIONS := [Pop_Item]string {
@@ -280,6 +281,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Restart_Claude    = "restart_all_claude",
 	.Keep_Sessions     = "keep_sessions",
 	.Control_Token     = "copy_control_token",
+	.Separate_Core     = "separate_core",
 }
 
 settings_open :: proc() -> bool {return state.focus_widget == "settings"}
@@ -354,6 +356,7 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 	}) {
 		label := action_label(a)
 		if it == .Keep_Sessions do label = "Keep sessions when quitting" // the full label is too wide for the gear at Large text
+		if it == .Separate_Core do label = "Sessions in a background core" // the full label is too wide too
 		clay.TextDynamic(label, txt(mix(th.text_secondary, th.text, em)))
 		spacer()
 		if on, ok := toggle.?; ok {
@@ -537,6 +540,9 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
 		pop_row(.Update_Checks, !core.upd.checks_off)
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
+		pop_sep()
+		pop_label("Experimental")
+		pop_row(.Separate_Core, state.settings.separate_core)
 	}
 }
 

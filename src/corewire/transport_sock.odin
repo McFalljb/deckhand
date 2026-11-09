@@ -27,6 +27,7 @@ package corewire
 // held for long). The fd is the transport's from sock_open: sock_destroy closes it.
 
 import "base:runtime"
+import "core:c"
 import "core:sync"
 import "core:sys/posix"
 
@@ -79,6 +80,8 @@ Sock_Transport :: struct {
 }
 
 // The most one direction may hold queued (mem_ceiling's rule).
+SOCK_BUFFER :: 2 * 1024 * 1024 // the kernel buffers asked for each way (sock_open)
+
 sock_ceiling :: proc(t: ^Sock_Transport) -> int {return t.cap + 2 * (HEADER_SIZE + MAX_PAYLOAD)}
 
 // Takes over fd (a connected stream socket) and makes it non-blocking. initial: bytes already
@@ -98,6 +101,12 @@ sock_open :: proc(t: ^Sock_Transport, fd: posix.FD, cap := OUT_CAP, peer_check: 
 	stream_init(&t.inq, allocator)
 	flags := posix.fcntl(fd, .GETFL)
 	if flags >= 0 do posix.fcntl(fd, .SETFL, flags | posix.O_NONBLOCK)
+	// macOS gives a Unix stream socket 8 KiB each way (net.local.stream.*space): a terminal's
+	// stream would move 8 KiB per wakeup of the reader. Best effort: the kernel caps it.
+	for opt in ([]posix.Sock_Option{.SNDBUF, .RCVBUF}) {
+		size := c.int(SOCK_BUFFER)
+		posix.setsockopt(fd, posix.SOL_SOCKET, opt, &size, size_of(size))
+	}
 	if len(initial) > 0 {
 		if t.peer_check != nil && !t.peer_check(t.fd, t.peer_data) {
 			sock_fail(t, .Peer_Changed)

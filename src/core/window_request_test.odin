@@ -113,7 +113,9 @@ window_request_round_trips :: proc(t: ^testing.T) {
 	testing.expect(t, window_job_sheet_saved("/j/a.md", ""), "the sheet closed")
 	fw.holds_quit = true
 	testing.expect(t, window_job_sheet_holds_quit())
-	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit}
+	window_notify("Deckhand", "done")
+	testing.expect(t, fw.last.text == "Deckhand" && fw.last.message == "done", "the banner's title and body")
+	want := []Window_Op{.Clipboard_Set, .Clipboard_Secret, .Clipboard_Clear_If, .Open_Url, .Reveal, .Appearance, .Copy_Selection, .Term_Fit, .View_Open, .View_Drop, .View_Moved, .Files_Deleted, .Changes_Diff, .Changes_Rewind, .Commit_Message_Clear, .Watch_Folder, .Watch_Sync, .Setup_Sheet, .Job_Sheet, .Job_Sheet_Saved, .Job_Sheet_Holds_Quit, .Notify}
 	testing.expectf(t, slice_eq(fw.ops[:], want), "%v", fw.ops)
 	// every op but None and View_Goto (it needs a tab record: show_file's tests) is covered
 	testing.expect_value(t, len(want), len(Window_Op) - 2)

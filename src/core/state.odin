@@ -91,7 +91,28 @@ Tab :: struct {
 	// core has one (the window streams a copy), and it printed in the last TAB_OUTPUT_RECENT
 	has_term:      bool,
 	output_recent: bool,
+	// what only the core's runtime knows of it, for a window in another process (tab_live_tick;
+	// not saved; zero in process, where the window's core reads its runtime itself)
+	live:          Tab_Live,
 }
+
+// A tab's runtime facts as the core sees them (deckhand-core serve, §10.3 M4-C): the helpers the
+// window calls read these in a replica process (replica_process) instead of the core's runtime,
+// which that process does not have. Set by the core's tick, changed only when one flips.
+Tab_Live :: struct {
+	away:         u32, // tab_held_away: its process runs in a session holder this core is not attached to
+	dead:         bool, // tab_is_dead: Restart is offered
+	restart_wait: bool, // restart_waiting: a restart waits for the old process
+	held:         bool, // its process runs in the session holder (a quit keeps it: quit_would_stop)
+	claude_wait:  Claude_Wait, // a Claude tab: why a message can't go in now (claude_ready)
+	claude_quiet: bool, // claude_hooks_silent, and its banner not dismissed (claude_status_message)
+	claude_restart: Reload_Class, // claude_restart_class
+}
+
+// This process is a window whose core is another process (main.odin, a separate core): `state`
+// is the replica the core streams, and the few helpers that read the core's runtime (its
+// terminals, Claude's per-tab state, the holder) read each tab's Tab_Live instead.
+replica_process: bool
 
 // A panel's content from a pi tab's bridge (docs/PROTOCOL.md §5): rows only,
 // no layout. Deckhand picks fonts and colours from the tone.
@@ -278,6 +299,7 @@ Settings :: struct {
 	tidy_off:      bool, // the project list as found: no temp or missing folders hidden, no subfolders folded (project_tidy.odin)
 	keep_sessions: bool, // sessions keep running in the session holder when Deckhand quits or updates (on by default: keep_sessions_default)
 	keep_sessions_chosen: bool, // the user set keep_sessions (saved only then: keep_sessions_default)
+	separate_core: bool, // the window and the core run as two processes from the next launch (Set_Separate_Core; experimental)
 	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
 	// added, removed folders) and the account a new Claude session last started with
 	claude_accounts:     [dynamic]Claude_Account_Setting,
@@ -470,6 +492,7 @@ quit_would_stop :: proc(keeps: bool) -> bool {
 			continue
 		case Shell_Tab, Pi_Tab, Claude_Tab, App_Tab:
 		}
+		if replica_process && t.live.held do continue // the core's (Tab_Live)
 		if x := term_of(t.id); x != nil && x.pty.held != 0 do continue
 		return true
 	}

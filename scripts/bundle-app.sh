@@ -144,10 +144,13 @@ if [ -f build/deckhand-core ]; then
   plist "$N/Contents/Info.plist" deckhand-core dev.deckhand.core "Deckhand Core" ui_element
   cp build/deckhand-core "$N/Contents/MacOS/deckhand-core"
   [ -f build/deckhand-cli ] && cp build/deckhand-cli "$N/Contents/MacOS/deckhand"
+  # a separate core (src/coremain, §10.3 M4-C): `deckhand-core-serve serve`, the same identifier
+  [ -f build/deckhand-core-serve ] && cp build/deckhand-core-serve "$N/Contents/MacOS/deckhand-core-serve"
   [ -d build/pi ] && cp -R build/pi "$N/Contents/Resources/integrations/pi"
   [ -d build/claude-code ] && cp -R build/claude-code "$N/Contents/Resources/integrations/claude-code"
   # inside out: the CLI, then the bundle (which signs its main executable, deckhand-core)
   [ -f "$N/Contents/MacOS/deckhand" ] && sign_code --identifier dev.deckhand.cli "$N/Contents/MacOS/deckhand"
+  [ -f "$N/Contents/MacOS/deckhand-core-serve" ] && sign_code --identifier dev.deckhand.core "$N/Contents/MacOS/deckhand-core-serve"
   sign_code "$N"
   rm -rf "$CORE_APP.old"
   [ -d "$CORE_APP" ] && mv "$CORE_APP" "$CORE_APP.old"

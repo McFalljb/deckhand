@@ -22,6 +22,7 @@ window_reads_only_its_replica :: proc(t: ^testing.T) {
 		{"state_view.odin", "&core.state", 1}, // `state` before the attach (the window's unit tests)
 		{"term_view_stream.odin", "core.term_of(", 1}, // test mode's screen-hash check against the core's terminal
 		{"client.odin", "core.window.", 2}, // the unit tests' host link sets the test_facts hook
+		{"client.odin", "&core.state", 1}, // a separate core: its state.full decodes into core.state, the window's `state` (client_core.odin)
 	}
 	files, err := os.read_all_directory_by_path("src", context.temp_allocator)
 	if !testing.expect(t, err == nil, "src") do return

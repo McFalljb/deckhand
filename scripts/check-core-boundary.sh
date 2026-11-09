@@ -14,6 +14,8 @@
 #   - uses intrinsics.objc_* (under any import name) or an objc_* attribute (on one line or
 #     across several).
 #
+# src/coremain (deckhand-core-serve) may import only ../core and ../holder besides base:*/core:*.
+#
 #   scripts/check-core-boundary.sh [ROOT]   ROOT: the tree to check (default: this one; the test,
 #                                           tests/check-core-boundary-test.sh, passes a copy)
 set -eu
@@ -81,6 +83,14 @@ out=$(
   check_dir src/corewire ""
   check_dir src/updatesig ""
   check_dir src/holderwire "../jsonguard"
+  # deckhand-core-serve's headless main: the core and the holder only (its Obj-C shim is allowed)
+  for f in src/coremain/*.odin; do
+    [ -f "$f" ] || continue
+    grep -nE '^[[:space:]]*import[[:space:]]' "$f" | while IFS= read -r line; do
+      path=$(printf '%s\n' "$line" | sed -n 's/^[^"]*"\([^"]*\)".*/\1/p')
+      case "$path" in (base:*|core:*|../core|../holder) ;; (*) echo "$f:${line%%:*}: imports $path" ;; esac
+    done
+  done
 )
 if [ -n "$out" ]; then
   printf '%s\n' "$out" | while IFS= read -r l; do echo "check-core-boundary: $l"; done

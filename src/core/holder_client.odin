@@ -596,6 +596,7 @@ holder_frame :: proc(f: hw.Frame) {
 			h.gap = true // the bytes in between never came: what follows is still shown
 			h.next = start
 		}
+		if len(h.buf) == 0 && skip < len(bytes) do output_wake() // the main thread took it all: it may sleep (term.odin)
 		append(&h.buf, ..bytes[skip:])
 		h.next += u64(len(bytes) - skip)
 	case .Exited:
@@ -734,6 +735,7 @@ holder_alive :: proc() -> bool {
 tab_held_away :: proc(tab: ^Tab) -> u32 {
 	if tab == nil do return 0
 	if tab.held_away != 0 do return tab.held_away
+	if replica_process do return tab.live.away // the core's (Tab_Live)
 	if t := term_of(tab.id); t != nil do return t.holder_away
 	return 0
 }
@@ -793,6 +795,14 @@ holder_pull :: proc(id: u32, r: ^Reader) {
 		clear(&h.buf)
 	}
 	r.eof = h.eof && len(h.buf) == 0
+}
+
+// Whether the holder sent output the main thread has not taken yet (output_backlog). Main thread.
+holder_output_waiting :: proc() -> bool {
+	sync.lock(&hc.mu)
+	defer sync.unlock(&hc.mu)
+	for _, h in hc.held do if len(h.buf) > 0 && !h.kept do return true
+	return false
 }
 
 holder_input :: proc(id: u32, data: []u8) {

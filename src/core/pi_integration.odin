@@ -4,7 +4,7 @@ package core
 // in the app and loads into every pi tab with `pi -e <path>`, as it loads its Claude Code plugin
 // with --plugin-dir. Nothing is written to pi's settings.
 //
-//   - Where: DECKHAND_PI_INTEGRATION (test mode only: scenes), else the bundle's Contents/Resources/pi, else
+//   - Where: DECKHAND_PI_INTEGRATION (test mode only: scenes), else the bundle's Contents/Resources/pi (Deckhand Core.app's: Resources/integrations/pi), else
 //     pi next to the binary (a bare build). It must hold extensions.json.
 //   - What: extensions.json lists the extensions in load order, each required or optional. Every
 //     pi start (start_pi: new tabs, chats, Atlas, restores, restarts) gets one `-e
@@ -102,7 +102,7 @@ pi_integration_dir :: proc() -> string {
 	exe := executable_path()
 	if exe == "" do return ""
 	dir := filepath.dir(exe)
-	for c in ([]string{"../Resources/pi", "pi"}) {
+	for c in ([]string{"../Resources/pi", "../Resources/integrations/pi", "pi"}) { // Deckhand.app, Deckhand Core.app (a separate core), a bare build
 		p, _ := filepath.join({dir, c}, context.temp_allocator)
 		if ok(p) do return p
 	}

@@ -226,17 +226,29 @@ build_pi() {
   cp integrations/pi/extensions.json integrations/pi/package.json integrations/pi/README.md build/pi/
 }
 
-# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, signed
+# the session holder (src/holder, docs/plans/background-core.md §3): build/deckhand-core, and the
+# separate core (src/coremain, §10.3 M4-C): build/deckhand-core-serve; signed
 # (scripts/sign.sh) with its own identifier (bundle-app.sh copies it into the app). Links libSystem, and
 # Security and CoreFoundation (an upgrade checks the new image's code: src/trust/code_darwin.odin).
 # Built and signed beside it, then renamed in: a holder running build/deckhand-core (a scene's)
 # keeps its file (a signed binary changed in place is killed at its next page-in).
 build_core() {
-  rm -f build/.deckhand-core.new
+  rm -f build/.deckhand-core.new build/.deckhand-core-serve.new
   odin build src/holder -out:build/.deckhand-core.new -o:speed -minimum-os-version:$MACOS_MIN
+  # the separate core (src/coremain: `deckhand-core-serve serve`, the core package headless; its
+  # own executable: see src/coremain/main.odin), with its Obj-C shim (App Nap, the Trash), which
+  # is linked only here, never into src/core
+  if [ ! -f build/dh_coremain.a ] || [ src/coremain/core_macos.m -nt build/dh_coremain.a ]; then
+    clang -c -O2 -Wall -fobjc-arc -mmacosx-version-min=$MACOS_MIN src/coremain/core_macos.m -o build/dh_coremain.o
+    rm -f build/dh_coremain.a
+    ar rcs build/dh_coremain.a build/dh_coremain.o
+  fi
+  odin build src/coremain -out:build/.deckhand-core-serve.new -o:speed -minimum-os-version:$MACOS_MIN $DEFINES
   sign_resolve
   sign_code -i dev.deckhand.core build/.deckhand-core.new
+  sign_code -i dev.deckhand.core build/.deckhand-core-serve.new
   mv -f build/.deckhand-core.new build/deckhand-core
+  mv -f build/.deckhand-core-serve.new build/deckhand-core-serve
 }
 # test builds only: the holder with its test hooks (src/holder/keeper.odin) for the re-exec tests,
 # and the same binary signed with another identifier (the swapped binary they must refuse); ad hoc,

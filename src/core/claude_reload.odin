@@ -337,6 +337,7 @@ claude_reload_outdated :: proc(t: ^Tab) -> bool {
 // typed or held, no subagent running), Busy, Blocked (a subagent runs), No_Bridge (it never
 // reported its session id: --resume is not possible).
 claude_restart_class :: proc(t: ^Tab) -> Reload_Class {
+	if replica_process do return t.live.claude_restart // the core's (Tab_Live)
 	ct, is := &t.kind.(Claude_Tab)
 	if !is do return .No_Bridge
 	if ct.session_id == "" do return .No_Bridge

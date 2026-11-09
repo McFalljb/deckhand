@@ -138,6 +138,7 @@ claude_status_tick :: proc(now := time.Tick{}) {
 // hook always reports one), CLAUDE_HOOKS_GRACE after its prompt came up. Read-only tabs have
 // their own check.
 claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
+	if replica_process do return tab.live.claude_quiet // the core's (Tab_Live)
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is || tab.status != .Running || ct.readonly || ct.turn != .Unknown do return false
 	r, has := status_rt[tab.id]
@@ -209,7 +210,7 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if _, is := tab.kind.(Claude_Tab); !is || tab.status != .Running do return ""
 	old := old_version(tab)
 	if claude_hooks_silent(tab, now) {
-		if rt_of(tab.id).dismissed do return ""
+		if !replica_process && rt_of(tab.id).dismissed do return ""
 		why := "`disableAllHooks` in your Claude settings, or your organisation's managed `allowManagedHooksOnly`"
 		if old != "" do why = fmt.tprintf("Claude Code %s (older than %s), %s", old, CLAUDE_MIN_VERSION, why)
 		return fmt.tprintf("Deckhand's Claude Code hooks aren't running here (likely %s; or a startup dialog is still open: answer it first): a new session is not saved and can't resume; comments, held messages and panels don't work", why)
@@ -227,6 +228,10 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 	if tab == nil do return
 	window_state_changed()
+	if replica_process { // the core's runtime is in the other process: it dismisses it (Claude_Status_Dismiss)
+		if claude_status_dismiss_send != nil do claude_status_dismiss_send(tab.id)
+		return
+	}
 	if claude_hooks_silent(tab, now) {
 		rt_of(tab.id).dismissed = true
 		return
@@ -285,4 +290,10 @@ claude_status_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 		strings.write_string(b, `,"claude_version_old":`)
 		json_quote(b, v)
 	}
+}
+
+// The hooks banner was dismissed for this tab (tab_live_tick).
+claude_status_dismissed :: proc(tab_id: u64) -> bool {
+	r, has := status_rt[tab_id]
+	return has && r.dismissed
 }

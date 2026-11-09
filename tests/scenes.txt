@@ -85,6 +85,8 @@ polish-beep         | full     | test-data             |    10 | src/textfield.o
 projects            | required |                       |   20 | src/core/project_tidy.odin src/core/sidebar.odin src/ui_sidebar.odin tests/scripts/projects* src/core/ui_sidebar_core.odin
 reload              | full     |                       |   60 | src/core/reload.odin src/ui_reload.odin src/editor_watch.odin tests/scripts/reload.* tests/scripts/fake-bridge-reload.py
 release-checks      | full     |                       |   11 | scripts/release.sh scripts/check-release-build.sh scripts/check-env-reads.py src/core/test_hooks.odin tools/update-sign/* src/updatesig/* tests/update/* tests/scripts/release-checks.sh
+reload-separate     | full     |                       |   12 | src/core/reload.odin src/core/claude_reload.odin src/editor_watch.odin src/client_core.odin src/coremain/* src/core/pi_integration.odin tests/scripts/reload-separate* tests/scripts/fake-bridge-reload.py
+two-process         | full     |                       |    5 | src/coremain/* src/client_core.odin src/core/window_sock.odin tests/scripts/two-process*
 update-from-release | manual   | noci                  |   30 | tests/scripts/update-from-release.sh scripts/release.sh | tests/scripts/update-from-release.sh
 restore             | required | smoke                 |   20 | src/core/titles.odin src/core/home.odin tests/scripts/restore*
 run-home            | full     | test-data             |   15 | src/core/home.odin src/drawer.odin src/core/agent.odin tests/scripts/run.sh tests/scripts/home.txt | tests/scripts/run.sh tests/scripts/home.txt

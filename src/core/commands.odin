@@ -232,6 +232,43 @@ Set_Keep_Sessions :: struct {
 // turns it off for everyone who never chose.
 keep_sessions_default_on := true // on by default: this line alone turns it off again (revert its commit)
 
+// Settings › Experimental › Run sessions in a background core (docs/plans/background-core.md
+// §10.3 M4-C): the window and the core as two processes (`deckhand-core serve` over core.sock).
+// Read by the window at launch (main.odin separate_core_wanted), so a change takes effect at the
+// next launch. User-only. Off by default until M4-E flips this line.
+Set_Separate_Core :: struct {
+	on: bool,
+}
+separate_core_default_on := false
+
+// A window in another process: the user typed in a Claude tab's prompt (claude_note_typed), so
+// held texts wait (internal; window.command only).
+Claude_Typed :: struct {
+	tab_id: u64,
+}
+// A window in another process: the user closed a Claude tab's status banner (claude_status_dismiss;
+// internal; window.command only).
+Claude_Status_Dismiss :: struct {
+	tab_id: u64,
+}
+// How a replica process tells its core (client.odin sets it; nil in a core).
+claude_typed_send: proc(tab_id: u64)
+claude_status_dismiss_send: proc(tab_id: u64)
+files_root_reset_send: proc(base: string) // the Files tree back to base's own folder (worktrees_done)
+
+// The commands a window process runs itself with a separate core (replica_process): its own
+// workers' results, for its own caches (the Files tree, the worktree switcher, the Changes tab).
+// Anything else run there acts on the replica, not the core: test builds count and log it
+// (run_command; autotest fails the scene), as is one of these that changed State.
+window_local_command :: proc(cmd: Command) -> bool {
+	#partial switch _ in cmd {
+	case File_List_Done, Git_Status_Done, Worktrees_Done, Changes_Scan_Done, Changes_Diff_Done: return true
+	}
+	return false
+}
+
+replica_core_runs: int // test builds: the core commands a window process ran (window_local_command)
+
 // Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
 CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second
 control_token_clip: struct {
@@ -473,6 +510,9 @@ Command :: union {
 	Set_Notify,
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
+	Set_Separate_Core,
+	Claude_Typed,
+	Claude_Status_Dismiss,
 	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
@@ -722,6 +762,13 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	if window.test_facts != nil do window.test_facts() // unit tests only (window_hooks.odin)
 	r: Result
 	changed := false
+	defer when TEST_HOOKS {
+		// a window process runs only its own caches' commands, and they change no State
+		if replica_process && (!window_local_command(cmd) || changed) {
+			replica_core_runs += 1
+			fmt.eprintfln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
+		}
+	}
 	if !caller_may(caller, cmd) {
 		r = fail("not allowed for this caller")
 	} else if why := claude_readonly_refuses(caller, cmd); why != "" {
@@ -1402,6 +1449,20 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
+		return {ok = true}, true
+	case Claude_Typed:
+		_, tab, _ := find_tab(c.tab_id)
+		claude_note_typed(tab)
+		return {ok = true}, false
+	case Claude_Status_Dismiss:
+		_, tab, _ := find_tab(c.tab_id)
+		if tab == nil do return {ok = true}, false
+		claude_status_dismiss(tab)
+		return {ok = true}, true
+	case Set_Separate_Core:
+		if state.settings.separate_core == c.on do return {ok = true}, false
+		state.settings.separate_core = c.on
+		window_toast(c.on ? "Sessions run in a background core from the next launch: quit Deckhand and open it again" : "Sessions run in Deckhand itself from the next launch: Quit Deckhand and Stop All Sessions, then open it again")
 		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .None || c.caller == .UI || c.caller == .Internal || c.caller == .Tab_Host do return fail("ui, internal and tab_host callers have fixed policies"), false

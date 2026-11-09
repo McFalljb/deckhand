@@ -75,6 +75,8 @@ window_on_request :: proc(text: string) {
 		r.ok = job_sheet_saved(q.path, q.message)
 	case .Job_Sheet_Holds_Quit:
 		r.ok = job_sheet_holds_quit()
+	case .Notify:
+		if core.platform.notify != nil do core.platform.notify(q.text, q.message) // a separate core's (its own platform)
 	}
 	if id != "" do window_reply(id, r)
 }

@@ -578,6 +578,7 @@ browser_comment_add :: proc(tab_id: u64, box: [4]int, what, text: string) -> (id
 	r := client_call(core.Comment_Add{source = .Browser, tab_id = tab_id, what = core.browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, .Internal)
 	if !r.ok && crop != "" do os.remove(crop)
 	if crop != "" do delete(crop)
+	if r.pending do return 0, "the comment is still being added" // a separate core that did not answer in time
 	return r.created_id, r.error
 }
 

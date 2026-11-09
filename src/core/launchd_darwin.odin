@@ -59,7 +59,7 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 
 // The launchd path alone (tests call it with their prefix). label: the job's, booted out on
 // return whatever happened.
-launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL) -> (pid: i32, label: string, ok: bool, why: string) {
+launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, launchctl := LAUNCHCTL, mode := "hold") -> (pid: i32, label: string, ok: bool, why: string) {
 	launchd_sweep(run, prefix, launchctl)
 	uid := posix.getuid()
 	label = fmt.tprintf("%s%d.%d", prefix, posix.getpid(), time.now()._nsec)
@@ -85,7 +85,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 	lfd, lok := sock_listen(ready)
 	if !lok do return 0, label, false, fmt.tprintf("cannot listen on %s", ready)
 	defer sock_close(lfd)
-	if w := launchd_write_plist(plist, launchd_plist(label, bin, run, data, jdir)); w != "" do return 0, label, false, w
+	if w := launchd_write_plist(plist, launchd_plist(label, bin, run, data, jdir, mode)); w != "" do return 0, label, false, w
 	// a bootstrap that failed or timed out may still have loaded the job: booted out on every path
 	booted := false
 	defer if !booted do launchd_bootout(domain, label, launchctl)
@@ -195,7 +195,7 @@ launchd_bootout :: proc(domain, label: string, launchctl := LAUNCHCTL) {
 
 // The job (docs/plans/background-core.md §6). WorkingDirectory is the temp dir, so the ready
 // socket goes by its short relative name; the child makes it absolute and leaves for "/".
-launchd_plist :: proc(label, bin, run, data, jdir: string) -> string {
+launchd_plist :: proc(label, bin, run, data, jdir: string, mode := "hold") -> string {
 	x := launchd_xml
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprint(&b, `<?xml version="1.0" encoding="UTF-8"?>
@@ -204,11 +204,13 @@ launchd_plist :: proc(label, bin, run, data, jdir: string) -> string {
 `)
 	fmt.sbprintf(&b, "  <key>Label</key><string>%s</string>\n", x(label))
 	fmt.sbprint(&b, "  <key>ProgramArguments</key><array>")
-	for a in ([]string{bin, "__detach", "--run", run, "--data", data, "--ready", "ready"}) do fmt.sbprintf(&b, "<string>%s</string>", x(a))
+	// a separate core: `__detach serve` (src/coremain), else the holder's `__detach` (hold)
+	args := mode == "serve" ? []string{bin, "__detach", "serve", "--run", run, "--data", data, "--ready", "ready"} : []string{bin, "__detach", "--run", run, "--data", data, "--ready", "ready"}
+	for a in args do fmt.sbprintf(&b, "<string>%s</string>", x(a))
 	fmt.sbprint(&b, "</array>\n")
 	fmt.sbprintf(&b, "  <key>WorkingDirectory</key><string>%s</string>\n", x(jdir))
 	fmt.sbprint(&b, "  <key>StandardInPath</key><string>/dev/null</string>\n")
-	logp := x(fmt.tprintf("%s/%s", run, HOLDER_LOG))
+	logp := x(fmt.tprintf("%s/%s", run, mode == "serve" ? CORE_LOG : HOLDER_LOG))
 	fmt.sbprintf(&b, "  <key>StandardOutPath</key><string>%s</string>\n", logp)
 	fmt.sbprintf(&b, "  <key>StandardErrorPath</key><string>%s</string>\n", logp)
 	fmt.sbprint(&b, `  <key>ProcessType</key><string>Interactive</string>
@@ -276,4 +278,18 @@ launchd_sweep :: proc(run, prefix: string, launchctl := LAUNCHCTL) {
 		os.remove(fmt.tprintf("%s/job.plist", d))
 		os.remove(d)
 	}
+}
+
+// The labels a separate core's launches use (deckhand-core serve).
+core_label_prefix := "dev.deckhand.core."
+
+// Starts a separate core (`deckhand-core serve`, src/coremain) for run and data, as the holder is
+// started: through launchd (its own coalition), or directly in test mode and with
+// DECKHAND_HOLDER_DIRECT=1, or when the launchd launch fails. pid: the core's.
+core_launch :: proc(bin, run, data: string) -> (pid: i32, ok: bool, why: string) {
+	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, nil, "serve")
+	lpid, _, lok, lwhy := launchd_launch(bin, run, data, nil, core_label_prefix, mode = "serve")
+	if lok do return lpid, true, ""
+	fmt.eprintln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
+	return holder_launch_direct(bin, run, data, nil, "serve")
 }

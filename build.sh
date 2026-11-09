@@ -3,7 +3,8 @@
 #   ./build.sh          release build -> build/deckhand
 #   ./build.sh debug    debug build
 #   ./build.sh run      release build, then run
-#   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
+#   ./build.sh test     binding tests (tests/), command-layer tests (src/core/*_test.odin) and the
+#                       window's (src/*_test.odin), the core boundary (scripts/check-core-boundary.sh),
 #                       the holder's, wires' and trust rules' tests (src/holder, src/holderwire, src/corewire,
 #                       src/trust),
 #                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
@@ -285,7 +286,12 @@ case "$MODE" in
     # processes (build/deckhand-core-hooks: 5 re-execs under load, refusals, the keeper adopting)
     build_core_hooks
     odin test src/holder -out:build/holder-tests
-    # command layer (src/*_test.odin); tests share the global State: one thread per process,
+    # the core and the holder link no window code (docs/plans/background-core.md §10.2): the check,
+    # then its test (each forbidden import planted in a temporary tree)
+    scripts/check-core-boundary.sh
+    sh tests/check-core-boundary-test.sh
+    # the core (src/core/*_test.odin, package core: no sokol, Clay or CEF) and the window
+    # (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py
     # the scenes runner's --changed selection (no app, no git)

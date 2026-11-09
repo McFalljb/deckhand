@@ -45,6 +45,17 @@ jobs:
           BASE: ${{ github.event_name == 'pull_request' && format('origin/{0}', github.base_ref) || github.event.before || 'origin/main' }}
         run: scripts/check-holder-rev.sh "$BASE"
 
+  # The core and the holder link no window code (docs/plans/background-core.md §10.2): fails in
+  # seconds, before the macOS jobs finish. ./build.sh test runs it too.
+  core-boundary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - name: No window imports in src/core or src/holder
+        run: scripts/check-core-boundary.sh && sh tests/check-core-boundary-test.sh
+
   unit:
     runs-on: macos-15 # arm64
     timeout-minutes: 20

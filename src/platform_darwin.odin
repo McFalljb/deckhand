@@ -10,6 +10,7 @@ import "core:c"
 import "core:fmt"
 import "core:strings"
 import "core:sync"
+import "core:time"
 import NS "core:sys/darwin/Foundation"
 import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -21,6 +22,12 @@ foreign libsystem {
 	@(link_name = "_dispatch_main_q")
 	dispatch_main_q: u8 // the main queue object; dispatch_get_main_queue() is &_dispatch_main_q
 	dispatch_async_f :: proc(queue: rawptr, ctx: rawptr, work: proc "c" (ctx: rawptr)) ---
+	_dispatch_source_type_timer: u8 // DISPATCH_SOURCE_TYPE_TIMER is &_dispatch_source_type_timer
+	dispatch_source_create :: proc(type: rawptr, handle: uintptr, mask: c.ulong, queue: rawptr) -> rawptr ---
+	dispatch_source_set_timer :: proc(source: rawptr, start: u64, interval: u64, leeway: u64) ---
+	dispatch_source_set_event_handler_f :: proc(source: rawptr, handler: proc "c" (ctx: rawptr)) ---
+	dispatch_resume :: proc(object: rawptr) ---
+	dispatch_time :: proc(base: u64, delta: i64) -> u64 ---
 	system :: proc(cmd: cstring) -> c.int ---
 	getrusage :: proc(who: c.int, usage: ^Rusage) -> c.int ---
 }
@@ -64,6 +71,33 @@ platform_run_later :: proc(p: proc()) {
 	})
 }
 
+@(private = "file")
+core_timer_source: rawptr
+@(private = "file")
+core_timer_proc: proc()
+
+// The core loop's timer (core_loop.odin): fire every `every` from the main queue, which runs while
+// sokol's frames are slowed or stopped (hidden, minimised, App Nap) and in modal loops too (the
+// core's guard keeps it out of frame() and the loops frame() started). Some leeway lets macOS
+// coalesce its wakeups. Once: a second call changes only what it fires.
+platform_core_timer :: proc(every: time.Duration, fire: proc()) {
+	core_timer_proc = fire
+	if core_timer_source != nil do return
+	src := dispatch_source_create(&_dispatch_source_type_timer, 0, 0, &dispatch_main_q)
+	if src == nil do return
+	ns := u64(every)
+	dispatch_source_set_timer(src, dispatch_time(0, i64(ns)), ns, ns / 5)
+	dispatch_source_set_event_handler_f(src, proc "c" (ctx: rawptr) {
+		context = core.app_context
+		// a guard, not free_all: in a modal loop the temp memory of the frame or tick that started
+		// it is still in use (the fire is skipped then, but this handler still runs)
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+		if app.ready && core_timer_proc != nil do core_timer_proc()
+	})
+	dispatch_resume(src)
+	core_timer_source = src
+}
+
 cpu_seconds :: proc() -> f64 {
 	ru: Rusage
 	getrusage(0, &ru)
@@ -82,6 +116,8 @@ window_set_content_size :: proc(w, h: f32) {
 window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", rawptr(nil))}
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
+app_hide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "hide:", rawptr(nil))}
+app_unhide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "unhideWithoutActivation")}
 
 // Captures only this window into path (PNG).
 window_capture :: proc(path: string) {

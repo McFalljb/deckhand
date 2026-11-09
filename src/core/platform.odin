@@ -10,6 +10,7 @@ import "core:os"
 import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
+import "core:time"
 
 Platform :: struct {
 	set_clipboard:  proc(text: string),
@@ -33,10 +34,32 @@ Platform :: struct {
 	set_clipboard_secret: proc(text: string) -> int,
 	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
 	trash:                proc(path: string) -> bool, // moves path to the Trash; nil or false: not moved
-	activity:             proc(on: bool), // holds off App Nap while on (jobs running); nil: nothing
+	activity:             proc(on: bool), // holds off App Nap while on (activity_hold: jobs, recent output); nil: nothing
+	// main thread: calls fire every `every` from the main run loop, outside sokol's callbacks, also
+	// while no frames run (hidden, minimised, App Nap); core_loop.odin decides what it does. nil:
+	// nothing (unit tests: frames, or the tests themselves, tick the core)
+	core_timer:           proc(every: time.Duration, fire: proc()),
 }
 
 platform: Platform
+
+// Why App Nap is held off: running jobs (jobs.odin), a terminal's output in the last 2 s
+// (core_loop.odin, Q11).
+Activity_Reason :: enum {
+	Jobs,
+	Output,
+}
+activity_reasons: bit_set[Activity_Reason]
+
+// Main thread: reason r holds App Nap off (on) or not; platform.activity hears only when the
+// answer for all of them changes.
+activity_hold :: proc(r: Activity_Reason, on: bool) {
+	was := activity_reasons != {}
+	if on do activity_reasons += {r}
+	else do activity_reasons -= {r}
+	now := activity_reasons != {}
+	if now != was && platform.activity != nil do platform.activity(now)
+}
 
 // What a paste inserts: the system clipboard (a script's own pasteboard under autotest); "" with
 // no platform (unit tests).

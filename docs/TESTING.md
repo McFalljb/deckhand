@@ -147,6 +147,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `sidebar` | the left column: add project, pin, sort, filter, hide, dividers, restore | 35 | |
 | `agent-status` | OSC 7501 agent status for any terminal tab: handshake, dots, malformed input, unread/seen | 33 | |
 | `app-tab` | app tabs: frames over IOSurface, input, resize, stall, crash, restart | 28 | |
+| `hidden-window` | the core loop while frames stop (the app hidden, ⌘H): a fake pi's 20 MiB through the session holder, its question (bell, OS notification) and a shell's exit all in the state while hidden; frames stopped and the core loop's timer ticked; screen hashes equal once shown | 6 | unit: `core_loop_test.odin` (the guard, the 50 ms rule) |
 | `keep-sessions` | `keep_sessions`: 6 shells and a pi kept by the session holder through a quit; relaunch adopts every terminal exactly (screen hash at handover, a reference terminal with probes), same pids, counters went on; after a kill -9 of the app, adopted from the tails (inexact, same pids); Quit and Stop All Sessions ends the holder; a kill -9 of the holder ends every tab with `holder_lost`; the palette's Restart session holder upgrades it in place without the sessions noticing | 8 | |
 | `login-path` | the GUI-launch environment: bare PATH, failing shell, no pi, Nix-like PATH, Claude markers | 26 | |
 | `app-calls` | app_call under load at app start: every call finishes, hello reply first, default scale | 24 | its scale check repeats `test_scale_test.odin` |

@@ -164,6 +164,7 @@ init :: proc "c" () {
 	core.update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
 	app.redraw = true
+	core.core_loop_start() // core_tick also while no frames run (core_loop.odin)
 }
 
 // The app's platform layer: every entry set (a nil one would make its
@@ -190,6 +191,7 @@ platform_app :: proc() -> core.Platform {
 		clear_clipboard_if = platform_clipboard_clear_if,
 		trash = fs_trash, // editor_platform_*.odin
 		activity = platform_activity,
+		core_timer = platform_core_timer,
 	}
 }
 
@@ -299,6 +301,9 @@ frame :: proc "c" () {
 	context = core.app_context
 	defer free_all(context.temp_allocator)
 
+	if script_frames_off() do return // test mode: as if macOS stopped calling frame() (autotest.odin)
+	core.core_frame_begin(time.tick_now()) // the core loop's timer stays out of frames (core_loop.odin)
+	defer core.core_frame_end() // and runs a tick it skipped meanwhile
 	core.app_frames_called += 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
@@ -809,6 +814,7 @@ event :: proc(e: ^sapp.Event) {
 		}
 		// the window goes first: the handover can wait seconds (an upgrade in flight, the ack, the
 		// snapshots), and nothing is drawn meanwhile
+		core.core_loop_stop() // no tick from the timer during the handover's waits
 		platform_hide_windows()
 		if core.autotest_active do fmt.println("[autotest] quit: windows hidden")
 		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
@@ -1176,6 +1182,7 @@ utf8_string :: proc(r: rune) -> string {
 
 cleanup :: proc "c" () {
 	context = core.app_context
+	core.core_loop_stop()
 	core.login_env_kill_probe() // a refresh's shell still running (login_env.odin)
 	core.harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)
 	core.persist_quit()

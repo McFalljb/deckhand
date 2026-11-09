@@ -2,6 +2,7 @@
 package main
 
 import "core"
+import "core:time"
 
 // Stubs until Linux/Windows get their own versions (frames drain the inbox).
 
@@ -21,6 +22,8 @@ platform_test_display_fps :: proc(fps: int) {}
 platform_display_link_cap :: proc(cap: int) {}
 window_restore :: proc() {}
 app_deactivate :: proc() {}
+app_hide :: proc() {}
+app_unhide :: proc() {}
 window_capture :: proc(path: string) {}
 platform_window_init :: proc() {}
 platform_ime_cancel :: proc() {}
@@ -59,3 +62,5 @@ platform_notify :: proc(title, body: string) {}
 platform_quiet :: proc() {}
 
 platform_activity :: proc(on: bool) {}
+// no timer: frames tick the core
+platform_core_timer :: proc(every: time.Duration, fire: proc()) {}

@@ -122,6 +122,12 @@ package main
 //                              (UNFOCUSED/FOCUSED through event(); the app's own idea only)
 //   deactivate                 hand focus back to the previously active app
 //   minimize / restore         miniaturize / deminiaturize the window
+//   hide / unhide              hide the app (⌘H) / show it again (the run's end shows it again:
+//                              AppKit never closes a hidden window, so sokol could not quit)
+//   frames off|on              frame() returns at once, as if macOS stopped calling it (hidden,
+//                              App Nap; quiet test mode's hidden window still gets 60 a second):
+//                              the core loop's timer ticks the core and this script (core_loop.odin)
+//   core_loop                  log the core loop's timer ticks, skips and frames so far
 //   menu ID                    pick a menu bar item as a click does (menubar.odin; ID = its action,
 //                              or undo, copy, paste...); fails if it is disabled. AppKit's own
 //                              items (hide, minimize...) are refused
@@ -186,6 +192,9 @@ import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 Autotest :: struct {
+	frames_off:   bool, // `frames off`: frame() returns at once, as if the OS stopped calling it
+	frames_back:  time.Tick, // ...until then at most (script_frames_off)
+	hidden:       bool, // `hide` ran (no `unhide` since)
 	lines:        []string,
 	next:         int,
 	wait_until:   time.Tick,
@@ -1086,6 +1095,18 @@ autotest_step :: proc() {
 			window_minimize()
 		case "restore":
 			window_restore()
+		case "hide":
+			app_hide()
+			at.hidden = true
+		case "unhide":
+			app_unhide()
+			at.hidden = false
+		case "frames":
+			at.frames_off = len(args) > 0 && args[0] == "off"
+			at.frames_back = time.tick_add(time.tick_now(), FRAMES_OFF_MAX)
+		case "core_loop":
+			l := core.core_loop
+			log(fmt.tprintf("core_loop timer_ticks %d skipped %d frames_called %d frames_drawn %d", l.timer_ticks, l.skipped, core.app_frames_called, app.frames_drawn))
 		case "menu":
 			it := menubar_find(args[0])
 			if it == nil || it.native != .None {
@@ -1210,6 +1231,7 @@ autotest_step :: proc() {
 		case "quit":
 			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
 			core.app_quitting = true // the script ends the run: no confirmation
+			script_show_again()
 			sapp.request_quit()
 			core.autotest_active = false
 			return
@@ -1298,8 +1320,31 @@ script_fail :: proc(args: ..any) {
 	at.waiting_for = ""
 	at.eventually_on = false
 	core.app_quitting = true // the script ends the run: no confirmation
+	script_show_again()
 	sapp.request_quit()
 	core.autotest_active = false
+}
+
+FRAMES_OFF_MAX :: 90 * time.Second
+
+// frame(): whether `frames off` holds now. Only the core loop's timer runs the script meanwhile;
+// without it nothing would, so after FRAMES_OFF_MAX the script fails instead of hanging.
+script_frames_off :: proc() -> bool {
+	at := &autotest
+	if !at.frames_off do return false
+	if time.tick_diff(at.frames_back, time.tick_now()) < 0 do return true
+	at.frames_off = false
+	script_fail(fmt.tprintf("TIMEOUT: frames off for %v and the script did not move on (nothing ticked the core: core_loop.odin's timer)", FRAMES_OFF_MAX))
+	return false
+}
+
+// The run ends: frames again, and a hidden app shown again (sokol quits from a frame, by closing
+// the window, which AppKit never does while the app is hidden).
+script_show_again :: proc() {
+	at := &autotest
+	at.frames_off = false
+	if at.hidden do app_unhide()
+	at.hidden = false
 }
 
 // The line starting now (DECKHAND_SCRIPT_STEP), so a hung or killed run says where it was.

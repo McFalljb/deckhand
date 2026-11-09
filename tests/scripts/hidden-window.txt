@@ -1,0 +1,62 @@
+# The core loop runs while frames don't (tests/scripts/hidden-window.sh; design §10.2, M2-C): the
+# app is hidden (⌘H) while a fake pi (tests/scripts/fake-pi-flood.py, never a model) prints 20 MiB
+# and asks the user something, and a shell exits. Frames stop (`frames off` makes sure of it:
+# quiet test mode's hidden window still gets 60 a second; App Nap or a real hidden window gets
+# none); the core loop's timer ticks the core, and this script. Every tab runs in the session
+# holder (keep_sessions), whose 8 MiB backpressure must not stall: the core drains it with no
+# frames.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+assert_result ok true
+command {"type":"add_project","cwd":"$cwd/build/hidden-window/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"hhhh-1"}
+assert_result ok true
+waitfor fake flood pi 10000
+command {"type":"new_shell_tab","session":$session}
+assert_result ok true
+waitstate 5000 open_sessions.0.tabs.1.status running
+command {"type":"focus_tab","tab_id":$pitab}
+assert_result ok true
+eventually
+assert_state open_sessions.0.tabs.0.agent idle
+state_json hidden-window-before
+# behind, then hidden: no frames from here on (hidden-window.sh checks the log's core_loop lines)
+window back
+core_loop
+hide
+frames off
+wait 1000
+core_loop
+command {"type":"send_text","tab_id":$pitab,"text":"flood\n"}
+assert_result ok true
+command {"type":"send_text","tab_id":$last,"text":"exit 3\n"}
+assert_result ok true
+# while hidden: the exit's banner, the 20 MiB parsed, pi's question, its bell and OS notification
+waitstate 15000 open_sessions.0.tabs.1.status exited
+assert_state open_sessions.0.tabs.1.exit code 3
+waitstate 20000 open_sessions.0.tabs.0.waiting true
+waitfor FLOOD DONE 272384 lines 30000
+command {"type":"get_state"}
+assert_result data.open_sessions.0.tabs.0.waiting true
+assert_result data.open_sessions.0.tabs.1.status exited
+assert_result data.open_sessions.0.tabs.1.exit code 3
+assert_result data.notifications.os_notified 1
+eventually
+assert_state notifications.count 1
+assert_state notifications.unread 1
+command {"type":"notifications_list"}
+assert_result data.notifications.0.kind waiting
+core_loop
+screen_hashes
+# shown again: the screen is current at once (hidden-window.sh compares the hashes)
+unhide
+frames on
+wait 1500
+core_loop
+screen_hashes
+state_json hidden-window-after
+ui_command {"type":"quit","stop_sessions":true}
+assert_result error needs_confirmation
+ui_command {"type":"quit","stop_sessions":true,"confirm":"$token"}
+wait 3000

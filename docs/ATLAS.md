@@ -1,9 +1,13 @@
 # Atlas: jobs and memory (design)
 
-Status: draft 3, 2026-11-01. Step 1 (§9) is built: `src/jobs*.odin`, `src/ui_jobs.odin`; what
-it does differently from this design is listed under "Step 1 as built" in §9. Decisions taken
-after the first draft are in §10. How Atlas runs today:
-[PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent), `src/core/agent.odin`.
+Status: step 1 (§9) is built (`src/core/jobs*.odin`, `src/ui_jobs.odin`, `src/ui_job_sheet.odin`);
+"Step 1 as built" in §9 lists where it differs from this design. The rest is design. The user's
+view is in [GUIDE.md](GUIDE.md#jobs); how Atlas runs is in
+[PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent) and `src/core/agent.odin`.
+
+**Where it runs.** Atlas's pi tab, the scheduler and job runs all live in the core. Atlas is a pi
+tab whose process the session holder keeps; job runs are the core's own children. So jobs run and
+Atlas keeps working while the window is closed, for as long as the core runs (§5).
 
 **Where Atlas runs.** Interactive Atlas starts in Deckhand's main folder (§2), or in the data
 dir's `home/` while no main folder is set or it cannot be reached. It never starts in the user's
@@ -26,7 +30,8 @@ report.
 ## 1. Goals and non-goals
 
 **Goals**
-- User-created jobs that start pi on a schedule, even when Deckhand is closed (**Decided**).
+- User-created jobs that start pi on a schedule, even when Deckhand's window is closed
+  (**Decided**; built through the core, §5).
 - Jobs may act while the user is away; no jobs by default (**Decided**). Jobs need no approval:
   any job note runs on its schedule, agents may create and edit jobs (**Decided** 2026-11-01, §10.3).
 - One memory folder shared by pi, Claude Code, Atlas and jobs: Deckhand's main folder, which can
@@ -39,7 +44,7 @@ report.
 - A sandbox in v1. Guardrails are pattern rails, not a boundary; phase 2 is §4.7 (**Decided**).
 - Embeddings over memory; plain text search first (§6).
 - Atlas writing new skills on its own (pi's skills folder; new skills ask first).
-- Linux and Windows helpers (macOS first).
+- Linux and Windows (macOS first).
 
 What we took from other systems, with links: §11.
 
@@ -53,7 +58,7 @@ the tab's `claude.turn` and `program_status` events. Atlas itself still runs on 
 
 ## 2. Folder layout (notes root)
 
-The notes root is Deckhand's main folder (setting `home_dir`, formerly `notes_dir`; GUIDE.md
+The notes root is Deckhand's main folder (setting `home_dir`; GUIDE.md
 "Your folders"), chosen in the first-run sheet: it offers the user's `PI_KIT_NOTES_DIR` (Deckhand's
 environment, else read once per start from the login shell) or a notes folder named in pi's
 global AGENTS.md, or `~/Deckhand`. Each subfolder (`jobs/`, `atlas/`, `memory/`, `sessions/`,
@@ -163,7 +168,7 @@ gets a warning on its row (cost), not a refusal.
 and checks every 30 s and on wake. It never sleeps for an interval: monotonic clocks pause while
 the Mac sleeps, so "fire in 30 min" drifts by the sleep time.
 
-**Missed runs** (**Decided**). A run that is late (Mac asleep, Deckhand and helper closed,
+**Missed runs** (**Decided**). A run that is late (Mac asleep, Deckhand's core not running,
 previous run still going) starts only within a **grace window** of half the job's interval,
 clamped to 2 min–2 h (cron: the gap to the next fire time; `at`: 2 h). Past the window the tick is
 **skipped** and recorded with its reason: `skipped (asleep)`, `skipped (closed)`,
@@ -221,10 +226,7 @@ Nothing is ever deleted automatically.
   Disable, user-only through `job_set_enabled`), the per-job pause, Pause all (`jobs_pause`, the
   kill switch) and the limits and safety stops (§4.5). Only Pause all and the per-job pause are
   stops agents cannot undo (resuming is user-only); `enabled:` is in the note, so anything that
-  edits notes can turn a disabled job back on. Unknown frontmatter keys are still errors (an
-  `approved: true` too: approval was never a note key). An old `state.json`'s `approved_*` fields
-  are ignored and dropped at its next write. `job_approve` answers with an error saying it was
-  removed.
+  edits notes can turn a disabled job back on. Unknown frontmatter keys are errors (`approved: true` too).
 - **Job runs cannot create or edit jobs.** `jobs/` is a protected path (§4.1, step 4; until then
   the preamble says so) and runs get no Deckhand socket. A run may propose a job under its `Needs
   you` section.
@@ -232,9 +234,9 @@ Nothing is ever deleted automatically.
   file by hand removes the job; its data-dir runs age out.
 
 New commands (rows in `src/core/command_table.odin`): `job_list` (query), `job_run_now`, `job_stop`,
-`jobs_pause` (anyone), `job_create` (anyone), `job_mark_read`; user-only:
-`jobs_resume`, `job_set_enabled`, `job_approve_action`, `job_revoke_action`,
-`memory_pending_decide`.
+`jobs_pause` (anyone), `job_create` (anyone), `job_mark_read`; user-only: `jobs_resume`,
+`job_set_enabled`. Planned, not built: `job_approve_action`, `job_revoke_action` (step 4),
+`memory_pending_decide` (step 3).
 
 ### 3.7 Each run is a fresh one-shot pi
 
@@ -353,46 +355,35 @@ certificates through `trustd` can fail inside the profile; `open` and `osascript
 processes outside the sandbox and must stay blocked; Seatbelt cannot nest, so tools that sandbox
 themselves fail inside it, and we wrap bash, not pi. Apple's `container` or Lima VMs come later.
 
-## 5. The background helper
+## 5. Jobs while the window is closed
 
-**Decided:** jobs run when Deckhand is closed, via a small login item. **Proposal:**
-`deckhand --scheduler`, the same binary with no window, running the scheduler package (no sokol
-calls, ROADMAP §4). Step 1 runs that package inside the window; step 2 runs it under launchd.
-When the core/window split happens, the core owns the scheduler and the helper goes away.
-(Rejected: the full core split now, too big; one launchd plist per job, see §3.2 coalescing.)
-
-**Who schedules.** Whoever holds `<data dir>/jobs/scheduler.lock` (`flock`). The helper holds it
-while alive; the window takes it only when no helper does, and gives it up when the helper
-appears.
+**Built: the core.** The scheduler runs in the core (`deckhand-core-serve`, `src/coremain`), not
+in the window, so jobs run whether or not a window is open. The design's separate scheduler
+helper (`deckhand --scheduler`, `scheduler.lock`, `jobs.sock`) was never built: the core replaced
+it.
+- **Staying up.** The core does not exit while an enabled, scheduled job could run, while a run
+  goes, while a window is attached or while a tab's process lives (`core_idle_due`,
+  `src/core/core_loop.odin`). With none of those for 10 minutes it saves and exits.
+- **Quitting.** ⌘Q closes only the window. **Quit Deckhand and Stop All Sessions…** stops the
+  core: running runs get SIGTERM, then SIGKILL, and are recorded `stopped (quit)` (no
+  notifications).
+- **Updates.** A core handing over to a new one (`src/core/core_handover.odin`) starts no new run
+  and waits up to 2 minutes (`JOBS_HANDOVER_WAIT`) for running ones; any still going are stopped
+  as `stopped (update)`. A job due meanwhile stays due for the successor (its next due time moves
+  on only once its run starts or is skipped).
+- **Not yet: logout and reboot.** Nothing starts the core at login, so after a logout or reboot
+  jobs wait until Deckhand is opened (ROADMAP M5, a login agent through `SMAppService`, which needs
+  the user's approval in Login Items). Until then, ticks missed meanwhile are `skipped (closed)`
+  (§3.2).
 
 **Per-job run lock.** Before starting a run the scheduler takes `<data dir>/jobs/<id>/run.lock`
 (`flock`, non-blocking) and passes the open descriptor to pi, so the lock lives exactly as long
-as the run. If it is held, the tick is `skipped (previous run still going)`. This closes the
-handover gap: a run the window started is still locked when the helper takes over scheduling.
+as the run. If it is held, the tick is `skipped (previous run still going)`.
 
-**Sharing state.** The disk is the shared state (job notes, run folders, `state.json`); the
-window watches it. Actions (Run now, Stop, Pause) go to the helper on
-`<data dir>/jobs.sock`, PROTOCOL.md §1 envelope, token in a `0600` file.
-
-**launchd.** LaunchAgent with `RunAtLoad` and `KeepAlive = {SuccessfulExit: false}`: launchd
-restarts the helper only after a crash. When the setting is off or the app is gone, the helper
-exits 0 and stays down (a plain `KeepAlive: true` would restart it every 10 s). Jobs only run
-while the user is logged in (a GUI-domain agent).
-
-**Login item.** Signed app on macOS 13+: `SMAppService.agent(plistName:)`; if its status is
-`requiresApproval`, the Jobs tab says so and opens System Settings → Login Items. Dev build or
-fallback: a plist in `~/Library/LaunchAgents/` with `AssociatedBundleIdentifiers` set so it shows
-under Deckhand in Login Items, `launchctl bootstrap gui/<uid>` / `bootout`. Settings → "Run jobs
-when Deckhand is closed" (user-only `jobs_background`).
-
-**Power.** During a run the scheduler holds an IOKit `PreventUserIdleSystemSleep` assertion so
-the Mac does not idle-sleep mid-run (closing the lid still sleeps). Before starting, it checks
-that the wake is a full wake, not a dark wake / Power Nap, and otherwise waits for the next full
-wake (grace window applies); **Unverified** how reliably a helper can tell the two apart. launchd does not wake the
-Mac; the helper sees the clock jump on wake.
-
-**Delivery when closed.** The helper posts the macOS notification itself (from inside the bundle,
-so it has the bundle id; to verify in step 2). Runs stay unread until opened (§7).
+**Power** (design, not built). During a run, hold an IOKit `PreventUserIdleSystemSleep` assertion
+so the Mac does not idle-sleep mid-run, and start only on a full wake, not a dark wake or Power
+Nap (**Unverified** how reliably a process can tell). What is built: an `NSProcessInfo` activity
+while a run goes, so App Nap does not delay it.
 
 ## 6. Memory (pi-kit `memory` extension)
 
@@ -485,6 +476,9 @@ Delivery:
    them, a pi tab's bridge too, so a desk tool can fetch them when the user asks. No notice is
    sent to Atlas's terminal.
 
+macOS notifications come from the window while one is open, else from the core itself (as
+"Deckhand Core", `src/coremain/serve.odin`).
+
 Optional (setting, off unless set): after N delivered runs of a job in a row go unread, its row
 suggests pausing it.
 
@@ -512,106 +506,71 @@ Settings' Atlas group and "Atlas: edit prompt" open whichever copy is in use.
 
 ## 9. Build plan
 
-Each step is its own PR with the repo's tests green. Steps 1, 2, 3 and 6 carry the most risk
+Each step is its own PR with the repo's tests green. Steps 1, 3, 4 and 6 carry the most risk
 (unattended execution, permissions, memory integrity).
 
-**Step 1 — Scheduler in the window, job notes, Jobs tab, Run now.** Scheduler package, note
-parser, cron/every/at/manual, `hours`, wall-clock deadlines, grace window and skip reasons,
-`read`/`full` access, run lock, limits, safety stops, auto-pause, JSON-mode runs
-with preamble and env, run folders, report extraction, `## Recent runs` writer, `folder_missing`,
-`job.finished`, Jobs tab with unread markers, the job commands, the notes folder (now `home_dir`), migration (§8).
-Acceptance:
-- Unit: flat-YAML subset; cron next-due incl. DST; grace window clamps; the `enabled` and
-  `## Recent runs` writers; summary/Needs-you extraction and fallback; redaction.
-- Script tests with a fake `pi` (setting `pi_path`): Run now → run folder, `meta.json`, run line;
-  overlapping tick → `skipped (previous run still going)`; late tick past the window → one skipped
-  line; `at` job disables itself; per-run limit → `over_limit`; daily limit reached mid-run → the
-  run finishes, the next tick is skipped; 5 identical tool calls → `looping`; silence → `stalled`;
-  3 failures → paused + nudge; missing folder → `folder_missing`, paused, history kept; a
-  "Needs user approval" result → `needs_you` with the stored action; `DECKHAND_SCHEDULED_AT` set.
-- (Superseded 2026-11-01, no approvals:) a file edit to the prompt runs as edited; a job from
-  `job_create` from control runs on its schedule; `job_approve` is gone.
+**Step 1 — Scheduler, job notes, Jobs tab, Run now** (built). The note parser,
+cron/every/at/manual, `hours`, wall-clock deadlines, the grace window and skip reasons,
+`read`/`full` access, the run lock, limits, safety stops, auto-pause, JSON-mode runs with
+preamble and environment, run folders, report extraction, the `## Recent runs` writer,
+`folder_missing`, `job.finished`, the Jobs tab with unread markers, the job commands, the main
+folder and §8. Tests: `src/core/jobs_test.odin`, `src/jobs_*_test.odin`, and the scene
+`tests/scripts/jobs.sh` with a fake `pi` (setting `pi_path`).
 
-**Step 1 as built (deviations and details).**
-- Delivery follows the 2026-11-01 decision in §7: no Atlas notices; `job_list` / `job_runs` are
-  Query commands any caller may use.
-- Commands added beyond the list: `job_delete {job, confirm?}` (Delete moves the note to the
-  Trash; `delete_path` only works inside projects), `job_open {job, what: note|report|run_folder}`,
-  `job_stop {job?}`, `jobs_pause` / `jobs_resume` with an optional `job` (one job, or all: the
-  kill switch), `job_set_enabled`, `set_notes_dir` (now `set_home_dir`), `set_pi_path`, `set_job_limits`. Caller
-  rules: `jobs_resume`, `job_set_enabled` and the settings are the user's only; `job_create`
-  from anyone writes an enabled note; a job run has no Deckhand socket or token, so jobs cannot
-  create jobs through Deckhand. (`job_approve` was removed on 2026-11-01.)
-- Runs get `PI_CODING_AGENT_DIR` too when it is set (pi's config location), besides the §3.7
-  allowlist.
-- A run over its `timeout` ends `timeout`; over its cost or turns, `over_limit`.
-- Skips of the same reason in a row are one run line with a count (`⏭ skipped (asleep) ×3`).
-- `## Check` is parsed but not run yet (a warning on the row; step 5).
-- Limits in the Jobs tab step through presets on click (Limits button); the safety stops have
-  presets but no "off".
-- Test mode never reads the login shell's `PATH` / `PI_KIT_NOTES_DIR`, so a test never sees the
-  real notes folder; the main folder is set explicitly there (`set_home_dir`).
-
-- **The prompt** goes after `--`. pi still reads an `@…` argument there as a file to attach,
-  so a prompt starting with `@` gets a leading newline.
-- **`access: read`** also passes pi's `--tools read,grep,find,ls --no-mcp`: pi's `--tools`
-  allowlist covers extension tools too, and MCP tools stay unless `--no-mcp` is given.
+**Step 1 as built** (where it differs from or adds to the design):
+- **Commands** beyond §3.6's list: `job_delete {job, confirm?}` (the note to the Trash),
+  `job_open {job, what: note|report|run_folder}`, `job_stop {job?}`, `jobs_pause` /
+  `jobs_resume` with an optional `job` (one job, or all), `job_set_enabled`, `set_home_dir`,
+  `set_pi_path`, `set_job_limits`. `jobs_resume`, `job_set_enabled` and the settings are the
+  user's only. A job run has no Deckhand socket or token, so jobs cannot create jobs.
+- **Not yet:** `access: workspace` and `worktree: true` are refused on the job's row (step 4);
+  `## Check` is parsed but not run (a warning on the row; step 5). The heartbeat's
+  `HEARTBEAT_OK` → `quiet` is built.
+- **Environment:** runs also get `PI_CODING_AGENT_DIR` when it is set. pi is found on the jobs'
+  `PATH` in absolute entries only.
+- **The prompt** goes after `--`. pi still reads a leading `@…` there as a file to attach, so a
+  prompt starting with `@` gets a leading newline.
+- **`access: read`** also passes `--tools read,grep,find,ls --no-mcp`: pi's `--tools` allowlist
+  covers extension tools too, and MCP tools stay unless `--no-mcp` is given.
+- **Statuses:** over `timeout` → `timeout`; over cost or turns → `over_limit`. Skips of one reason
+  in a row are one run line with a count (`⏭ skipped (asleep) ×3`).
 - **Who may run what.** `job_run_now` from anyone but the user refuses a paused or disabled job.
-  The limits (spend per day/week/month, runs at once) hold for the user too.
-- **Stopping a run.** Stops and quit signal pi's whole process tree (children walked with
-  `proc_listchildpids`, then each one's own process group): SIGTERM, then SIGKILL 5 s later.
-  Quit waits 1.5 s, then sends SIGKILL and records each run `stopped (quit)` (no
-  notifications). A stopped run's remembered tree gets SIGKILL when the run ends, even when pi
-  exited on SIGTERM within the grace, so no child outlives its run; the run's pid is cleared
-  once pi is reaped.
-- **Ticks while hidden.** A timer thread posts a scheduler tick every second while a run goes
-  (else every 30 s), so due checks and the watchdog run while frames are slowed or paused
-  (minimised, hidden). While any run goes, Deckhand holds an `NSProcessInfo` activity so App Nap
-  does not delay it (idle system sleep stays allowed). In test mode frames go on at 60/s
-  minimised (`tests/scripts/frame-pause.txt`); `jobs.sh` stops a silent run while minimised.
+  The limits hold for the user too. Limits in the Jobs tab step through presets; the safety stops
+  have presets but no "off".
+- **Stopping a run** signals pi's whole process tree (children by `proc_listchildpids`, then each
+  one's process group): SIGTERM, then SIGKILL 5 s later. A stopped run's remembered tree gets
+  SIGKILL when the run ends, so no child outlives it. Quit and handover: §5.
+- **Ticks without frames.** A timer thread in the core posts a scheduler tick every second while a
+  run goes (else every 30 s), so due checks and the watchdog never depend on the window.
 - **Disk.** `sessions/` is pruned like `runs/`; `events.jsonl` moves to `events.jsonl.1` at 5 MB.
-- **The note is the user's.** `## Recent runs` keeps the note's CRLF. The writer renames its
-  temp file over the note only if the note did not change since it was read, and a user's edit
-  is always re-read by the next scan.
-- **Finding pi.** pi is found on the jobs' `PATH` in absolute entries only, so a relative entry
-  cannot make a run start a different `pi`.
+- **The note is the user's.** `## Recent runs` keeps the note's CRLF. The writer renames its temp
+  file over the note only if the note did not change since it was read.
+- **Test mode** never reads the login shell's `PATH` or `PI_KIT_NOTES_DIR`; the main folder is set
+  explicitly (`set_home_dir`).
 
-**Approvals removed (2026-11-01).** Step 1 first shipped HMAC approvals with a key in the login
-Keychain. Each rebuild is signed ad hoc, so macOS asked for Keychain access after every build.
-Why removed: the prompts cost more than the protection was worth. Removed: the key (Keychain and
-`<data dir>/jobs/approval.key`, which startup now deletes), the approval record and its review
-UI (Approve, Changed — review, the definition diff), and `job_approve`. Deckhand no longer links
-the Security framework. What this gives up: anything running as the user (an interactive agent,
-a full-access job run despite its preamble) can write a job note that then runs on its schedule.
-The old Keychain item ("pi-desk jobs approval key") is left alone (removing it would itself need
-Keychain access); the user may delete it.
-
-**Step 2 — Background helper.** `--scheduler`, scheduler lock, `jobs.sock`, SMAppService/plist
-install, KeepAlive, power assertion and full-wake check, wake retry, notifications from the
-helper. Acceptance: window quit → an `every 1m` job runs; window + helper → one run per tick (two
-processes); a run started by the window is not re-run after helper takeover; kill the helper → the
-window schedules within 30 s; toggle off → helper exits 0 and is not restarted.
+**Step 2 — Jobs while the window is closed.** Done by the core (§5); the helper design was
+dropped. Left: starting at login (ROADMAP M5) and the power assertion and full-wake check.
 
 **Step 3 — Memory extension (pi-kit).** The four tools, batch ops, caps, lock, provenance, source
-tags, scans, `.history`, `changes.log`, 25% guard, `FORGOTTEN.md`, job queueing, `pi-kit memory`
-CLI, prompt snapshot with usage header, miss log. Acceptance (pi-kit tests): paths outside the root
-refused; a batch over the cap refused as a whole; concurrent updates both land; a job's update
-queues and the files are unchanged; secret / invisible Unicode / instruction text refused;
-backup written before rewrite; a curation dropping >25% refused.
+tags, scans, `.history`, `changes.log`, the 25% guard, `FORGOTTEN.md`, job queueing, the
+`pi-kit memory` CLI, the prompt snapshot, the miss log. Acceptance (pi-kit tests): paths outside
+the root refused; a batch over the cap refused as a whole; concurrent updates both land; a job's
+update queues; secret, invisible-Unicode and instruction text refused; backup before rewrite; a
+curation dropping >25% refused.
 
 **Step 4 — `workspace` access, protected paths, worktree, exact-action approval.**
 `PI_KIT_WRITE_ROOTS`, protected paths at every level, `worktree: true`, `PI_KIT_ALLOW_FILE`,
-Approve once / Always / Revoke. Acceptance: writes outside roots and to each protected path
-refused at `full`; a worktree run leaves the checkout's dirty files untouched; Approve once runs
+Approve once / Always / Revoke. Acceptance: writes outside the roots and to each protected path
+refused at `full`; a worktree run leaves the checkout's dirty files alone; Approve once runs
 exactly the stored command (a changed hash is refused); a revoked action is blocked again.
 
-**Step 5 — Heartbeat and no-agent checks.** Templates, loose `HEARTBEAT_OK`, `## Check`.
-Acceptance: `HEARTBEAT_OK` at start or end → `quiet`, no delivery; same check output twice → fake
-pi never started; no prompt → diff delivered; non-zero exit → `check_failed`.
+**Step 5 — Heartbeat templates and no-agent checks.** `## Check`, the templates. Acceptance: the
+same check output twice → pi never started; no prompt → the diff is delivered; a non-zero exit →
+`check_failed`.
 
-**Step 6 — Delivery polish.** Failure alert dedupe and cooldown, unread-nudge setting, pending
-memory review UI, Rule of Two note, the sink list (the bell consumes `job.finished`; no Atlas
-notices, §7). Acceptance: the same error twice within 6 h alerts once.
+**Step 6 — Delivery polish.** Failure alert dedupe and cooldown, the wake retry, the unread-nudge
+setting, the pending-memory review UI, the Rule of Two note. Acceptance: the same error twice
+within 6 h alerts once.
 
 **Phase 2 — srt sandbox** (§4.7), after the steps above are in use.
 
@@ -626,7 +585,11 @@ notices, §7). Acceptance: the same error twice within 6 h alerts once.
 
 3. ✅ **No job approvals** (2026-11-01). Any job note runs on its schedule; agents may create and
    edit jobs freely. The controls are the per-job enable toggle, pause and Pause all, and the
-   limits and safety stops. No Keychain access for jobs (§9, "Approvals removed").
+   limits and safety stops. Step 1 first shipped HMAC approvals with a Keychain key; macOS asked
+   for Keychain access after every rebuild, which cost more than it protected, so they were
+   removed. What this gives up: anything running as the user (an interactive agent, a
+   full-access job run despite its preamble) can write a job note that then runs on its
+   schedule.
 
 ## 11. Prior art
 

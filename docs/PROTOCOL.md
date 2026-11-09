@@ -1,31 +1,34 @@
-# Deckhand protocol (v1, draft)
+# Deckhand protocol (v1)
 
-How programs talk to Deckhand: the Home agent and scripts (control), the bridge extension of
-Deckhand's pi integration in each pi tab (pi-tab control and panels; `integrations/pi`,
-[HARNESSES.md](HARNESSES.md)), and later tab programs ([TAB-PROTOCOL.md](TAB-PROTOCOL.md)).
-One envelope, one socket, three schemas. Status: the command and state schemas, the socket
-listener, handshake, tokens, subscriptions and the pi-tab status/control half of the bridge
-schema and row panels (§5) are implemented (`src/core/socket.odin`, tested in `src/core_test.odin`
-and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not yet.
+How programs talk to Deckhand's core: scripts and Atlas (control), the bridge in each pi tab
+(`integrations/pi`, [HARNESSES.md](HARNESSES.md)), Claude tabs' plugin, app tabs
+([TAB-PROTOCOL.md](TAB-PROTOCOL.md)) and Deckhand's own window (§5a). One envelope, one socket.
+Code: `src/core/socket.odin`, tests in `src/core_test.odin` and `src/socket_test.odin`. Not built
+yet: the fixed panel kinds and `panel.action` (§5).
+
+The core runs as its own process, `deckhand-core-serve` in `Deckhand Core.app`, unless the user
+turned Settings › Sessions in a background core off; then it runs inside the window's process.
+Either way it owns the socket. [How Deckhand runs](GUIDE.md#how-deckhand-runs) explains the
+window, the core and the session holder for users; the design is
+[background-core.md](plans/background-core.md).
 
 ## 1. Transport and envelope
 
-- A Unix socket `core.sock` (mode `0600`) in the runtime dir, `<data dir>/run` (`0700`; macOS
-  `~/Library/Application Support/Deckhand/run`); `DECKHAND_RUNTIME_DIR` overrides (development and
-  test builds only). The same dir holds the session holder's `holder-<8 hex>.sock` and, for the
-  minute an update hands sessions over, the relaunch helper's `successor.sock` (GUIDE.md
-  "Updates"; docs/plans/background-core.md §7.2). The name is
-  stable (until M1 it was `deckhand-<pid>.sock` in `$TMPDIR/pi-desk-<uid>`), so a tab that outlives
-  Deckhand keeps its `DECKHAND_SOCKET`. Deckhand refuses a directory it does not own, that is not
-  a real directory, or whose socket paths would not fit in `sun_path` (104 bytes). Named pipe on
-  Windows (later; OS code is behind `src/core/socket_posix.odin`).
-  Newline-delimited JSON (NDJSON): one UTF-8 JSON object per line, no line breaks inside.
-- Lines up to 1 MiB (4 KiB before `hello`); a longer one gets an error result and the
+- A Unix socket `core.sock` (mode `0600`) in the runtime dir, `<data dir>/run` (`0700`);
+  `DECKHAND_RUNTIME_DIR` overrides it (development and test builds only). The same dir holds the
+  session holder's `holder-<8 hex>.sock`, the window's `window.token` (§5a) and, while an update
+  hands the core over, `successor.sock`. The name is stable, so a tab that outlives a core
+  restart or an update keeps its `DECKHAND_SOCKET`. Deckhand refuses a directory it does not own,
+  that is not a real directory, or whose socket paths would not fit in `sun_path` (104 bytes).
+- When the core restarts or is handed over, every connection closes. Clients reconnect (a pi
+  bridge with its reconnect token, §2). Requests in flight are lost; their callers see the
+  connection end.
+- Newline-delimited JSON (NDJSON): one UTF-8 JSON object per line, no line breaks inside.
+  Lines up to 1 MiB (4 KiB before `hello`); a longer one gets an error result and the
   connection closes. JSON nested deeper than 64 arrays/objects gets `"JSON nested too deeply"`;
   invalid UTF-8, or a raw control character inside a string, gets `"invalid JSON"`.
 - `hello` must arrive within 5 s (`"no hello in time"`, then close). At most 64 connections at
-  once; more get `"too many connections"` and are closed. A malformed
-  line after `hello` gets an error result (`"id": ""` if none could be read) and the connection
+  once; more get `"too many connections"` and are closed. A malformed line after `hello` gets an error result (`"id": ""` if none could be read) and the connection
   stays open.
 - Every message has `v` (protocol version, currently `1`) and `type`. Requests carry a client-chosen
   string `id`; the reply echoes it. Events have no `id`.
@@ -62,10 +65,10 @@ The first message on a connection is `hello`:
   `capabilities` is `["commands", "state", "events"]`
   for control and script callers, `["pi_tab", "panels", "state", "events"]` for panel callers.
   `panels` means Deckhand draws the tab's panels (§5) in its right column; the bridge then hides
-  pi's own terminal sidebar. An older Deckhand without it keeps the terminal sidebar.
+  pi's own terminal sidebar.
 - **Tokens are routing + capabilities.** Deckhand creates one random token per child it starts and
   passes it in the child's environment (a pi tab: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`; an app tab
-  and scripts: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`, and until 0.2.0 also their old names
+  and scripts: `DECKHAND_SOCKET`, `DECKHAND_TOKEN`, and, for three releases after 0.2.0, also their old names
   `PI_DESK_SOCKET`, `PI_DESK_TOKEN`; a Claude tab: below, both names too). The token tells Deckhand
   which tab the connection belongs to (so a panel lands in the right session) and what it may do:
 
@@ -84,9 +87,8 @@ The first message on a connection is `hello`:
   (caller `panel`, that tab) in `DECKHAND_TOKEN`, with `DECKHAND_SOCKET`, and where app
   screenshots go in `DECKHAND_SHOTS_DIR` (`<data dir>/apps/shots`, absolute; the pi integration
   checks `app_screenshot` files are directly in it; Home gets it too, app tabs' programs do not).
-  pi tabs do not get `DECKHAND_SOCKET`, `DECKHAND_TOKEN` or `DECKHAND_CONTROL_TOKEN` (Deckhand
-  passed those before it bundled its pi integration): older pi-kit releases' desk extensions
-  switch on only with them, so they stay inert next to the bundled integration. App tabs keep
+  pi tabs and Atlas never get the old `PI_DESK_*` names: pi-kit's desk extensions switch on only
+  with those, so they stay inert next to the bundled integration. App tabs keep
   `DECKHAND_SOCKET` and `DECKHAND_TOKEN` ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)). Shell tabs get none of
   them (they are removed from their environment). `DECKHAND_DATA_DIR` is never passed on and is
   removed from shell and pi tabs: Deckhand reads it, so a test-mode Deckhand an agent starts would
@@ -108,7 +110,7 @@ The first message on a connection is `hello`:
   has no `--print-token`, DEVELOPING.md "Releases"). In any build, `copy_control_token` (the
   gear's **Copy a control token**, the user's only) mints a control token and puts that same line
   on the clipboard. Tokens are never in State, events, replies or the log.
-- **The challenge hello** (from M4-B). A reconnect token never crosses the socket again: the
+- **The challenge hello.** A reconnect token never crosses the socket again: the
   client proves it knows it, and Deckhand proves it first, so a program listening where Deckhand
   should be learns nothing it can use. A client that speaks it says so on its env token's hello
   (`"challenge": true`); the result then carries `"reconnect_hello": "challenge"` next to
@@ -147,13 +149,13 @@ The first message on a connection is `hello`:
   `DECKHAND_CONTROL_TOKEN` (the desk tools; swapped for a reconnect token on the first hello,
   like the panel token), with `DECKHAND_SOCKET`. The control hello's `tab_id` is Home's tab
   (`0` for unbound control tokens such as `--print-token control`). Shell tabs never get any of these variables.
-- **Tokens that outlive Deckhand** (`keep_sessions`, on by default). A pi or Claude process kept
-  running by the session holder while Deckhand is closed keeps its token. With the setting on,
+- **Tokens that outlive the core** (`keep_sessions`, on by default). A pi or Claude process kept
+  running by the session holder across a core restart or update keeps its token. With the setting on,
   the tokens of tabs whose process runs in the holder (sha256 hashes only, never a token), each
   Claude tab's process (`claude_pids`), a read-only tab's ack state and what each terminal was
   started as (shell, pi, claude: a terminal is adopted only by a tab of that kind) are written to
   `<data>/tokens.json` on every mint and revoke, MAC'd with the holder's key (HMAC-SHA256;
-  [background-core.md](plans/background-core.md) §5.3). On the next launch they belong to the tab
+  [background-core.md](plans/background-core.md) §5.3). When the next core starts they belong to the tab
   that adopts that holder terminal (a new `tab_id`), with the same rules: an env token still
   works once, a reconnect token keeps working, a Claude token still only from the tab's own
   processes. A file that does not verify (edited, another holder's key, cut, out of shape) loads
@@ -240,7 +242,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `cancel_confirmation` | `token` | drops a pending confirmation |
 | `rescan` | | **long-running**: returns `pending`, then a `finished` event |
 | `refresh_shell_env` | | the user's only. **long-running**: asks the login shell for its environment again (Deckhand started from the Dock or Finder) and merges it in (the shell's values win) for new tabs and jobs' default PATH; open tabs keep theirs; refused when Deckhand was started from a terminal. The `finished` event's error says when the shell gave nothing in time. Values are never logged |
-| `quit` | `confirm`? | **confirms** while any process runs |
+| `quit` | `confirm`?, `stop_sessions`? | ends the core and the window (unlike ⌘Q, which closes only the window). Sessions the holder keeps (`keep_sessions`) run on, unless `stop_sessions` (**Quit Deckhand and Stop All Sessions…**). **Confirms** while it would stop a running process or lose unsaved files |
 | `get_state` | | query: `data` is the state snapshot |
 | `list_commands` | | query: `data` is `{"commands": [{"type", "args"?, "does", "confirm_class"?, "long_running"?}]}`, the commands this caller may send (`args` like `"tab_id, confirm?"`, `?` = optional), from the one command table (`src/core/command_table.odin`) |
 | `set_home` | `open` | shows or hides the agent's drawer; the first open makes and starts the agent's pi (its terminal UI, §8), an open after it exited starts it again → Home's tab id. Opening clears the unread count and, for the user, gives its terminal the keyboard. Hiding is the user's (and scripts'); the agent's own callers and pi tabs may not send it (`"only the user shows or hides the agent's drawer"`) |
@@ -249,9 +251,9 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_agent_name` | `name` | **user only**: the agent's name (`""` = Atlas; cleaned, at most 32 bytes). It labels the drawer, the top bar and notifications, so the agent cannot set it |
 | `set_notify` | `on` | **user only**: OS notifications from the agent while Deckhand is in the background |
 | `copy_control_token` | — | **user only**: a new control token (unbound, `tab_id` 0) for `deckhand --ctl`, as `export DECKHAND_SOCKET='…' DECKHAND_TOKEN='…'`, onto the clipboard; the result and the log never hold it. The one way a release build mints a control token (§2) |
-| `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): keep sessions running when Deckhand quits or updates. Their processes stay in the session holder and the next launch adopts them; their tokens survive in a MAC'd `tokens.json` (§2) |
-| `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the window runs its core as another process, `deckhand-core-serve serve`, over `core.sock` (§5a); off, in its own process |
-| `holder_replace` | `stop` | **user only**: answers `state.holder_ask` (a session holder from another build answered, and its code is not this build's: nothing was sent to it, no second holder started). `stop: true` stops it (SIGTERM, then SIGKILL after 3 s; only a process that runs a `deckhand-core`), removes its socket and starts a new holder: its sessions end. `false`: run on without a holder, as before |
+| `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): run tabs' processes in the session holder, so they survive a core restart or crash, an update, and a quit without Stop All; the next core adopts them, and their tokens survive in a MAC'd `tokens.json` (§2) |
+| `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
+| `holder_replace` | `stop` | **user only**: answers `state.holder_ask` (a session holder from another build answered, and its code is not this build's: nothing was sent to it, no second holder started). `stop: true` stops it (SIGTERM, then SIGKILL after 3 s; only a process that runs a `deckhand-core`), removes its socket and starts a new holder: its sessions end. `false`: run on without a holder |
 | `core_handover` | `to` | **user only**, a separate core: hand every session over to another core process (§7.2 of the background-core design): `"current"`, the core `deckhand-core-serve install` made current (an update, or *Use this app's core*), or `"previous"` (*Use previous core*). The target is checked (`deckhand-core-serve check`: its signature and generation) first. Job runs get up to 2 min to end, then stop as `stopped (update)`. The window's connection then ends and it dials the new core |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
 | `notifications_list` | `limit`? | query (any caller but pi tabs; listed in `list_commands`): the bell's entries, newest first, at most `limit` (default 20, at most 200); see [The bell](#the-bell-notifications) |
@@ -363,7 +365,6 @@ their runs and state in `<data dir>/jobs/<id>/`. `job` is a job's id (its note's
 | `job_sheet` | `open`, `job`?, `for_project`? | **user only**; the job sheet (src/ui_job_sheet.odin): open it for a new job (`for_project` preselected) or to edit `job`, or close it (nothing written) |
 | `job_save` | `path`?, `text`, `based_on`? | **user only**; the job sheet's Create / Save: `text` is the whole note and must parse (job note rules). No `path`: a new note in the jobs folder, written `enabled: true`, with an id no other job has → `data.path`. `path`: that job's note is rewritten (temp file + rename); its `id` must stay, and `based_on` (required then) is the FNV-1a 64 hash, 16 hex digits, of the note's text the edit started from: refused when the file has changed since |
 | `job_set_enabled` | `job`, `on` | **user only**; writes `enabled:` in the note |
-| `job_approve` | | **removed** (2026-11-01): jobs need no approval. Sending it gets `{"ok": false, "error": "job_approve was removed: …"}` |
 | `job_mark_read` | `job`?, `run`? | marks runs read |
 | `job_delete` | `job`, `confirm`? | **confirms** (class `delete`), then moves the note to the Trash; the history stays in the data dir. Refused while it runs |
 | `job_open` | `job`, `what` (`note`\|`report`\|`run_folder`) | opens the note or the last run's report in an editor tab (the report marks the run read), or shows the run folder |
@@ -604,7 +605,7 @@ Destructive commands belong to a **class**; confirmation is decided per caller a
 | Class | Commands |
 |---|---|
 | `tab_close` | `close_tab` (when the close rule asks, below; an editor tab asks when it has unsaved changes), `close_session` (when any of its tabs would ask), `reload_file` over unsaved changes |
-| `app_quit` | `quit` while any process runs |
+| `app_quit` | `quit` and `update_install`, when they would stop a running process or lose unsaved files |
 | `session_restart` | `pi_reload`, `pi_reload_all`, `pi_restart_updated`, `claude_restart_changed` |
 | `settings_write` | later: edit pi's settings |
 | `delete` | `delete_path` (moves to the Trash); later: remove projects, sessions |
@@ -696,7 +697,7 @@ without asking. Exited tabs never ask.
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
-              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": false,
+              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true,
               "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
               "home_dir": "/Users/me/deckhand", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/deckhand/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},
@@ -759,8 +760,7 @@ pane's strip in order, `rect` its content's last laid-out rect in points `{"x","
 has `pane` (its pane's id) and `on_screen` (shown in its pane of the current session: any pane's,
 browser and app tabs too; only the focused pane's tab gets keys). Every session has one pane until it is split. The layout
 is saved with the workspace and restored ([PERSISTENCE.md](PERSISTENCE.md), `panes`), but pane
-and split ids are runtime ids, new at each launch. A session read back from an older
-snapshot without panes shows one pane with id 0. Who changes panes: anyone but a pi or Claude
+and split ids are runtime ids, new at each start of the core. Who changes panes: anyone but a pi or Claude
 tab and an app (`"not allowed for this caller"`), so the user, scripts and Atlas; Home is
 refused. Agents see them: Atlas's `desk_state` summary prints a split session's tree (`panes: 7 |
 (8 / 9)`, `|` side by side, `/` stacked) and each tab's pane, and a Claude tab's `deckhand state`
@@ -776,7 +776,7 @@ raised (`os_notified`); the entries are in `notifications_list`. A pi tab's snap
 #### Hot reload
 
 pi reads its settings, extensions, skills, prompts, themes and context files at start and on
-`/reload`, its own code only at start (ROADMAP G11; `src/core/reload.odin`, the bars in
+`/reload`, its own code only at start (`src/core/reload.odin`, the bars in
 `src/ui_reload.odin`). While a pi tab runs, Deckhand watches, each for the tabs that read it:
 
 - every pi tab: the agent dir's `settings.json`, `keybindings.json`, `models.json`, `mcp.json`,
@@ -800,11 +800,8 @@ the bar at once (`from_save`, also with nothing to reload). Each running pi tab'
 `tabs[].reload` is `{"stale", "queued": ""|"reload"|"restart", "step", "version", "note"}`:
 `stale` = a file it reads changed since it started or last reloaded; `step` = what is under way
 (`reload`, `reloading`, `restart`, `asking`, `exiting`; one queue entry gives one step); `version`
-= pi's version on disk when it started. pi's version: the `package.json` above pi's real entry
-point, or the one a wrapper or shim script names (pnpm, nix), skipping a package.json that is
-not pi's (`command -v pi` in a login shell, or `/bin/sh` for fish, nushell and xonsh, on a worker: at the first pi tab, again when the bar may
-show and before a restart, at most every 10 s; `DECKHAND_PI_PACKAGE` overrides it, test mode
-without it has none). `reload.pi_version` is the version on disk now; a tab whose `version` differs is
+= pi's version on disk when it started (found without running pi: `src/core/reload.odin`;
+`DECKHAND_PI_PACKAGE` overrides it). `reload.pi_version` is the version on disk now; a tab whose `version` differs is
 offered a restart (`pi_restart_updated`). Atlas is a pi tab like the others here (idle only).
 
 **Claude tabs** (`src/core/claude_reload.odin`, the bars in `src/ui_claude_reload.odin`; CLAUDE.md
@@ -820,13 +817,8 @@ every folder above it, the cwd's `.mcp.json`, `.claude/rules|output-styles|comma
 (internal `claude_reload_watch`). Nothing is read; credential and state files are never
 watched (`claude_credential`). A Claude tab's `tabs[].reload` has the same fields (`step` unused;
 `version` = the claude it started with). `reload.claude` = `{gen, changed, changed_more,
-from_save, dismissed, version, update_dismissed}`: `version` is claude's on disk, from where
-`claude` links to (stat and readlink only, never run: `…/versions/<v>`, Homebrew's
-`Caskroom/claude-code/<v>`, npm's (bun's, mise's npm backend's) `@anthropic-ai/claude-code/package.json`,
-nix's `/nix/store/<hash>-claude-code-<v>/`, mise's `installs/<tool>/<v>/`, a pnpm or nix wrapper
-script's target; another layout:
-`"a new build"` when its file changes; `DECKHAND_CLAUDE_BIN` in tests, none while
-`DECKHAND_CLAUDE_CMD` replaces claude).
+from_save, dismissed, version, update_dismissed}`: `version` is claude's on disk, read from
+where `claude` links to, never by running it (`DECKHAND_CLAUDE_BIN` in tests).
 
 #### Updates
 
@@ -840,8 +832,10 @@ built in), `last_check` (Unix seconds of the last good check). No paths.
 
 Every update command is the user's (`who = .User`): `update_check`, `update_skip`,
 `update_later`, `update_download` (download and verify; nothing is installed),
-`update_install` (`confirm?`; confirmation class `app_quit`, asked of the user whatever the
-policy while sessions, shells or jobs run) and `set_update_check` (`on`). Agents and pi tabs get
+`update_install` (`confirm?`; confirmation class `app_quit`, always asked of the user when the
+update would stop something: a process the holder does not keep, a job run, unsaved files;
+sessions the holder keeps carry on through the update, and the core is handed over to the new
+one) and `set_update_check` (`on`). Agents and pi tabs get
 "not allowed for this caller". The internal `update_env`, `update_tick`, `update_checked` and
 `update_prepared` appear in events and the log (the release body never: only its size) but
 cannot be sent.
@@ -946,8 +940,8 @@ A `panel` caller's subscription is always limited to its own session. Events:
   and a `pi.status`'s `blockers` (kind and id only: `shell sh1`, `timer wk2`, `subagent`, else
   `<redacted>`; the state snapshot keeps their text).
 - The same lines (redacted) go to the command log, `<data dir>/commands.log`
-  (`~/Library/Application Support/Deckhand` on macOS; `DECKHAND_DATA_DIR` overrides), rotated at
-  10 MB into `commands.log.1` and `.2` (three files at most).
+  ([PERSISTENCE.md](PERSISTENCE.md) "File" for the data dir), rotated at 10 MB into
+  `commands.log.1` and `.2` (three files at most).
 
 ## 4. pi-tab schema (the pi integration's bridge)
 
@@ -1121,23 +1115,25 @@ on screen; a click on the entry focuses that tab.
 `claude-code: waiting for permission · OSC 7501, 2m ago — Apply these edits?` (a row's names the
 tab when it is not the pi tab: a program cannot pass as another session). No dot, no tooltip.
 
-## 5a. The window's link (M4: over `core.sock`)
+## 5a. The window's link (over `core.sock`)
 
-The window is a client of its core (docs/plans/background-core.md §10.2, M3-F). Today it attaches
-in process through an in-memory transport carrying the framed wire's JSON channel
-(`src/corewire`, `src/core/window_link.odin`, `src/client.odin`); M4 carries the same messages over
-`core.sock` in framed mode. Every message is a JSON object with `"v":1`.
+The window is a client of its core. It keeps a replica of the core's State and a copy of each
+terminal it shows; the core keeps the records and runs every command. By default the link is
+`core.sock` in framed mode (below). With Settings › Sessions in a background core off, the same
+messages go over an in-memory transport inside one process (`core_attach_window()`). Code:
+`src/corewire`, `src/core/window_link.odin`, `src/core/window_sock.odin`, `src/client.odin`,
+`src/client_core.odin`. Every JSON message has `"v":1`.
 
-**The `ui` caller has one door.** Only `core_attach_window()` (called by the window at init) makes
-this connection, and only it runs commands as `ui`. No socket hello, token or `--ctl` path reaches
-it: no token is ever made for the `ui`, `internal` or `tab_host` caller, and `state.subscribe` is not a socket
-request (`unknown request type`).
+**The `ui` caller has one door.** Only the window's link runs commands as `ui`. No plain socket
+hello, token or `--ctl` path reaches it: no token is ever made for the `ui`, `internal` or
+`tab_host` caller, and `state.subscribe` is not a request on a plain connection (`unknown request
+type`).
 
 Window → core:
 
 | type | fields | what it does |
 |---|---|---|
-| `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes; over `core.sock` it then sends `view_open` for each started editor, Markdown and browser tab (a new window process has none of their views) |
+| `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes; over `core.sock` it then sends `view_open` for each started editor, Markdown and browser tab (a new or reconnected window has none of their views) |
 | `command` | `id`, `command`, `menu?`, `now?`, `as?` | a command run as `ui`, in its wire form (every field, unlike events' and the log's; the UI-only fields `close_session.ask`, `focus_session.reopen` and `set_home_dir.setup` are read only here). `id` `""`: no result. `now`: run at once, else queued in the inbox. `menu`: a menu row's label (a failure is shown as a toast). `as` (`{kind, tab_id}`, `kind` `script`, `control` or `panel`): a test-mode script line's own caller, honoured only by a core in test mode |
 | `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: a comment, a widget taking or releasing the keyboard, the New session picker's choice, a git HEAD read, the OS appearance, a session seen; with a separate core also `app_socket` (an app tab's token, a line to its program, its connection dropped), `harness_install` (the setup sheet's Install, Update or Close, with the command it showed), `fs_changed` (what the window's file watcher saw) and `holder_restart` (the palette's Restart session holder, development builds)); anything else is refused |
 | `tab_host.event` | `id`, `command: {"<type>": {fields}}`, `now?` | what a page, an app or a window worker reported (`TAB_HOST_COMMANDS`: `browser_update`, `browser_popup_open`, `app_update`, `app_call_done`), run as the **`tab_host` caller**: answers and tab records only. It cannot confirm, change a setting or a confirmation policy, show a file, or reach another session's tabs (a popup opens in its opener's session); it has no token. Anything else is refused |
@@ -1160,7 +1156,7 @@ Core → window:
 | `confirmation.parked` | `summary`, `by_user` | a confirmation waits in the confirmation bar; its record follows in the next `state.delta` |
 | `tab_host.call` | `id`, `request_id`, `tab_id`, `caller: {kind, tab_id, claude}`, `command: {"<type>": {fields}}` | the window's part of a browser, app, Markdown or editor command (`src/core/tabhost_route.odin`): CEF, an app's process and frames, a buffer, a view. The core checks the caller, resolves the target and runs the confirmation gate first, and changes the tab's records from the window's answer (`finished`) |
 
-**Tab host routing (M3-G).** The tab's record (URL, title, path, app status, pane) is the core's;
+**Tab host routing.** The tab's record (URL, title, path, app status, pane) is the core's;
 its page, app, buffer and view are the window's. With no window attached every routed command
 answers `{"ok":false,"error":"no window: …","data":{"code":"no_window"}}` and nothing is made. A
 call the window does not answer within 10 s answers `timeout`; a request it answered `pending`
@@ -1169,40 +1165,50 @@ gets its own timeout or the answer's `wait_ms` (at most 15 min), whichever is lo
 its call's answer ends it, and the answer only updates the records. A call the link refuses
 answers `no_window` at once. A window that detaches ends every wait with `no_window`.
 
-**Over `core.sock` (M4).** A hello (plain or challenge) with `"framed": true` asks for framed
-mode: the reply is the line connection's last line, and it carries, beside the usual fields,
-`framed: true`, `generation` (the wire's, `1`), `version` (the core's release version, `""` in a
-development build), `features` (`["challenge_hello"]`), `methods` (the commands this caller may
-send), `machine` (`{os, arch}`), `holder_wire` and `snapshot` (the formats it decodes, best
-first: `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
+**The framed hello.** A hello (plain or challenge) with `"framed": true` asks for framed mode.
+The reply is the connection's last line. Beside the usual fields it carries `framed: true`,
+`generation` (the wire's, `1`), `version` (the core's release version, `""` in a development
+build), `features` (`["challenge_hello"]`), `methods` (the commands this caller may send),
+`machine` (`{os, arch}`), `holder_wire` and `snapshot` (the formats it decodes, best first:
+`["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
 ([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
-first, a newer snapshot replacing a queued one, the 4 MiB cap and the ceiling after which a
-peer that does not read is cut off, and the peer re-checked before each read's bytes are acted
-on. The window checks the reply with `skew_check` and the core the window with the window floor
-(`src/corewire/skew.odin`, §7.5).
+first, a newer snapshot replacing a queued one, a 4 MiB queue cap and a ceiling past which a peer
+that does not read is cut off, and the peer re-checked before each read's bytes are acted on. The
+window checks the reply with `skew_check`, and the core checks the window against the window
+floor (`src/corewire/skew.odin`; design §7.5).
 
-Framed mode is the window's only, and only with a separate core (`deckhand-core-serve serve`,
-M4-C; the default, Settings › Sessions in a background core): the hello's `token` must be the one in
-`<runtime dir>/window.token` (0600, written fresh when the core starts, gone when it stops). The
-core then checks, in this order, before it replies: the peer read at accept is this user and still
+Framed mode is for the window only. The hello's `token` must be the one in
+`<runtime dir>/window.token` (0600, written fresh when the core starts, gone when it stops).
+Before it replies, the core checks, in this order: the peer read at accept is this user and still
 the process that sent the hello; its code has the window's designated requirement; its version is
-not below the window floor (the newest window that attached to this core, in memory); it does not
-descend from the core or its session holder. Any other framed hello (a control or env token, a
-challenge hello) gets `"framed mode is only for Deckhand's window (with the core's window
-token)"`. The caller is `ui`. The window checks the core first, before it sends a byte: this user,
-and Deckhand Core.app's designated requirement (`core_peer_check`). The newest window to attach
-replaces an older one. A `window.request` that wants an answer waits at most 250 ms, then the core
-goes on as if no window were attached; so does a `tab_host.call`, after which the request answers
-`pending` and the window's `finished` ends it; a window's command waits at most 250 ms for its result,
-then shows as pending (the late result is dropped). Ad hoc and self-signed builds stop accidents,
-not a determined process of the same user (§5.4).
+not below the window floor (the newest window version that attached, kept in
+`<data>/window-floor`); it does not descend from the core or its session holder. Any other framed
+hello gets `"framed mode is only for Deckhand's window (with the core's window token)"`. The
+caller is `ui`. The window checks the core first, before it sends a byte: this user, and Deckhand
+Core.app's designated requirement (`core_peer_check`). A newer window that attaches replaces the
+older one, which is told to quit (`window.request quit`).
+
+Waits are bounded so the core never hangs on the window: a `window.request` that wants an answer
+waits at most 250 ms, then the core goes on as if no window were attached. A `tab_host.call` does
+the same, then answers `pending`, and the window's `finished` ends it. A window's command waits at
+most 250 ms for its result, then shows as pending (a late result is dropped). The designated
+requirement is the "Deckhand Self-Signed" certificate's in release builds and only the identifier
+plus the same user in ad hoc builds; neither stops a determined process of the same user
+(design §5.4, [GUIDE.md](GUIDE.md#how-deckhand-runs)).
+
+**When the connection ends.** A core that ends on purpose (a Quit, Stop All, or a newer window
+taking over) first sends `window.request quit`, and the window quits. Any other end (a crash, a
+SIGTERM, an update's handover) is not the window's end: it dials `core.sock` again, launching a
+core if none answers (up to 15 s), then drops its terminal copies and facts and starts again from
+a fresh `state.full`. After 3 reconnects in a minute, or when no core comes, it says so and
+closes. At attach (never at a reconnect) a core that is not this app's own (older, below
+`CORE_MIN`, an older generation) is handed over to the app's bundled core first (`core_handover`).
 
 **Order.** A command's `state.delta` is sent before its `result` (the window waits for its own
 results and reads State at once). The delta before a result compares every section, so it holds
-changes that bumped no version (a parked or consumed confirmation). In process the wait is nil;
-over `core.sock` it is bounded (250 ms, then the call shows as pending).
+changes that bumped no version (a parked or consumed confirmation).
 
-**Terminal streams** (design §5.5, M3-H; `src/core/term_stream.odin`, `src/term_view_stream.odin`).
+**Terminal streams** (design §5.5; `src/core/term_stream.odin`, `src/term_view_stream.odin`).
 The window keeps its own copy of each terminal it shows, fed on a channel of its own (≥ 1) with
 exactly the bytes the core's terminal parses; the core alone answers the program's queries and sets
 the size. A tab hidden for 2 s detaches.
@@ -1234,12 +1240,12 @@ tick. Frames the core took off the link while it streams a terminal wait in a ca
 zero value) is refused by every rule.
 
 **Test mode** over `core.sock`: each script step first waits until the core ran what the window
-sent and its delta came back (a no-op command's result), as in process where it ran at once; a `waitstate` that is reached waits one more drawn frame (the layout of what
-it reached). A script line whose work is the core's (`jobs_clock`, `detach_window`,
+sent and its delta came back (a no-op command's result); a `waitstate` that is reached waits one
+more drawn frame (the layout of what it reached). A script line whose work is the core's (`jobs_clock`, `detach_window`,
 `attach_window`) goes as `{"type":"script.core","id","line"}`, which only a core in test mode takes:
 `detach_window` makes the core act as if no window were attached (`no_window`, no requests) while
-the link stays for the script's lines. Test mode also compares the window's replica with the core's State after every script step; a
-difference fails the scene. It also compares each shown terminal's copy with the core's terminal
+the link stays for the script's lines. Test mode also compares the window's replica with the
+core's State after every script step; a difference fails the scene. It also compares each shown terminal's copy with the core's terminal
 by screen hash (the newest 2000 rows: once the scrollback is full, the two may keep a different
 number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link
 (a terminal channel's by kind and size).
@@ -1261,70 +1267,56 @@ number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every fram
 
 | Piece | Where |
 |---|---|
-| command parser (test mode, scripts, socket) | `parse_command`, `parse_request` in `src/core/json_read.odin` |
+| parser (test mode, scripts, socket) | `parse_command`, `parse_request` in `src/core/json_read.odin` |
 | encoders (commands, results, events, replies, state) | `src/core/json_write.odin` |
-| inbox (any thread → main thread), reply slots, wake | `src/core/inbox.odin`, `platform_wake` in `src/platform_darwin.odin` |
-| callers, capabilities, confirmation policy (`confirm_mode`, `close_needs_confirm`) | `src/core/commands.odin`; settings in `src/core/state.odin` |
-| the bell: entries, coalescing, `notifications_*`, `notify_post` (jobs) | `src/core/notify.odin`; the button and popover `src/ui_bell.odin` |
-| status of every terminal tab: OSC 7501 records, precedence, unseen, roll-ups, `set_unread`, the tooltip line | `src/core/agent_status.odin`; the callbacks registered in `src/core/term.odin` |
-| hot reload: watched pi files, pi's version, `pi_reload_all`, `pi_restart_updated` | `src/core/reload.odin`; the bars `src/ui_reload.odin` |
-| Claude tabs' hot reload and Claude Code's version: `claude_restart_changed`, `claude_reload_later` | `src/core/claude_reload.odin`; the bars `src/ui_claude_reload.odin` |
-| the command table (who may send what, args, confirm class, long-running; `list_commands`) | `src/core/command_table.odin` |
-| the Home session (data dir, cwd, control token) | `src/core/home.odin` |
+| the command table (who may send what, args, confirm class, long-running) | `src/core/command_table.odin` |
+| callers, `caller_may`, confirmation policy | `src/core/commands.odin` |
+| inbox (any thread → the core's loop), reply slots | `src/core/inbox.odin` |
+| socket: listener, connections, tokens, subscriptions, bridge routing | `src/core/socket.odin`, `src/core/socket_posix.odin` |
+| challenge hello | `src/core/hello_proof.odin` |
 | events, command log, own-event filter | `src/core/events.odin` |
-| socket: listener, connections, tokens, subscriptions, bridge routing | `src/core/socket.odin`; OS side `src/core/socket_posix.odin` |
+| the window's link and the framed hello | `src/core/window_link.odin`, `src/core/window_sock.odin`, `src/corewire/`; the window's side `src/client.odin`, `src/client_core.odin` |
+| tab host routing (`tab_host.call`, `finished`, `tab_host.event`, `no_window`) | `src/core/tabhost_route.odin`; the window's side `src/tabhost_link.odin`, `src/tabhost.odin` |
 | CLI client | `deckhand --ctl` in `src/core/ctl.odin` |
-| editor and file commands, file-system model | `src/core/editor_commands_core.odin` (records, file commands), `src/editor_commands.odin` (buffers), `src/core/fs_model.odin` |
-| tab host routing: `tab_host.call`, `finished`, `tab_host.event`, `no_window`, timeouts | `src/core/tabhost_route.odin`; the window's side `src/tabhost_link.odin`, `src/tabhost.odin` |
-| jobs: notes, cron, scheduler, runs, Jobs tab | `src/core/jobs_note.odin`, `src/core/jobs_cron.odin`, `src/core/jobs.odin`, `src/core/jobs_run.odin`, `src/ui_jobs.odin` |
-| the Changes tab: model, git scan, diffs, actions; its UI and the "±" | `src/core/changes.odin`; `src/ui_changes.odin` |
-| browser tabs: CEF shim, frames, input (`src/native/cef_macos.m`, `src/browser.odin`); navigation commands, toolbar, URL normalising, saving (`src/browser_nav.odin`) | `src/browser.odin`, `src/browser_nav.odin` |
-| Claude tabs: commands, held prompts, history, start (`claude_start`); the held bar; the token's process check (`socket_claude_peer_ok`); the plugin and its CLI | `src/core/claude.odin`; `src/ui_claude.odin`; `src/core/socket.odin`, `src/core/socket_posix.odin`; `integrations/claude-code/`, `tools/deckhand-cli/` |
-| pending comments: model, delivery (`pi.attach`), sources (`browser_comment_add`, `app_comment_add`); the strip and the close prompt | `src/core/comments.odin`; `src/ui_comments.odin` |
+
+Where each feature lives (status dots, hot reload, jobs, the bell, browser, Claude tabs,
+comments): [DEVELOPING.md](DEVELOPING.md) "Source map".
 
 ## 8. The built-in agent
 
-Deckhand's own agent ("Atlas", setting `agent_name`) is the Home session's pi in its normal
-terminal UI, shown in a drawer (⌘J; `src/core/agent.odin`, `src/drawer.odin`). It is a pi tab like
-any other: the drawer is only where its terminal shows.
+Atlas (setting `agent_name`) is the Home session's pi in its normal terminal UI, shown in a
+drawer (⌘J; `src/core/agent.odin`, `src/drawer.odin`). It is a pi tab like any other; the drawer
+is only where its terminal shows. The user's side is in [GUIDE.md](GUIDE.md#atlas).
 
 - **Start.** `pi --session-dir <data dir>/home --session <file>` (or `--session-id` for a new
-  one) after the integration's `-e` paths, cwd = the main folder (`home_dir`), else
-  `<data dir>/home/`, never `~` (`home_cwd` in `src/core/home.odin`; a session that ran elsewhere is
-  forked into it), env `DECKHAND_SOCKET`,
-  `DECKHAND_TOKEN` (its bridge) and `DECKHAND_CONTROL_TOKEN` (the desk tools; §2). Then:
-  - `--append-system-prompt <pi agent dir>/APPEND_SYSTEM.md` first, when the user has one:
-    any `--append-system-prompt` turns off pi's own discovery of that file, so Deckhand passes
-    it as pi would have (pi's agent dir: `PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
-  - `--append-system-prompt <data dir>/atlas/ATLAS.md`, Atlas's prompt. Deckhand writes it with
-    a short starter (who Atlas is, its tools, the guide, its rules) when it is missing: the
-    user edits it (the Settings tab's Atlas group, the palette's "Atlas: edit prompt"); saving
-    it shows the hot-reload bar for Atlas only (Reload: `pi_reload_all`, the session stays).
-    At startup a file that is byte for byte an older starter (never edited) is replaced by the
-    current one, the old kept as `ATLAS.md.bak-<date>`; an edited file is never touched.
-  - `--append-system-prompt "Deckhand user guide: <data dir>/atlas/GUIDE.md"`: the user guide
-    (docs/GUIDE.md) is built into the binary and written there at startup when it differs.
+  one) after the integration's `-e` paths. The cwd is the main folder (`home_dir`), else
+  `<data dir>/home/`, never `~` (`home_cwd` in `src/core/home.odin`; a session that ran elsewhere
+  is forked into it). Env: `DECKHAND_SOCKET`, `DECKHAND_TOKEN` (its bridge) and
+  `DECKHAND_CONTROL_TOKEN` (the desk tools; §2). Then, in order:
+  - `--append-system-prompt <pi agent dir>/APPEND_SYSTEM.md` when the user has one: any
+    `--append-system-prompt` turns off pi's own discovery of that file (pi's agent dir:
+    `PI_CODING_AGENT_DIR`, else `~/.pi/agent`).
+  - `--append-system-prompt <data dir>/atlas/ATLAS.md`, Atlas's prompt. Deckhand writes a starter
+    when it is missing, and replaces a file that is byte for byte an older starter (keeping
+    `ATLAS.md.bak-<date>`); an edited file is never touched. Saving it shows the hot-reload bar
+    for Atlas only.
+  - `--append-system-prompt "Deckhand user guide: <data dir>/atlas/GUIDE.md"`: docs/GUIDE.md,
+    built into the binary and written there at start when it differs.
   - `--model <agent_model>` when the setting is set and this is a new session or the setting
-    differs from the model Atlas last ran with (`home.model_applied`, docs/PERSISTENCE.md:
-    recorded at pi's first status, so a model pi rejects at start is passed again next time). Otherwise
-    pi's session keeps its own model, so a pick in pi's model selector survives a restart.
-- **Model.** The drawer header shows the model: the last `model_change` in Atlas's session
-  file (pi writes one on each pick), else the setting, else "pi's default". Its Model button,
-  the gear's "Atlas model…", the palette's "Atlas: change model" and the Settings tab's
-  Change… send `agent_model_picker`: pi's own model selector (Ctrl+L) in Atlas's terminal.
-  Refused while a pi dialog is open (`"Atlas is waiting for you"`). While pi starts, the key
-  waits for that tab's first status (not sent if a dialog is open by then), at most 15 s from
-  pi's start; it is dropped when the tab exits, restarts or reloads, and with no status after
-  15 s (no bridge) the command fails instead of waiting.
-- **Keys.** While its terminal has the keyboard (`agent_input`), keys go to pi (Esc too);
-  ⌘J and ⌘W hide the drawer, ⌘K opens the palette. Only the user moves the keyboard there:
-  `set_focus agent_input` is refused for every other caller, and `set_home` from a script
-  shows the drawer without moving the keyboard.
-- **Unread and nudge.** From its bridge's `pi.status`: a run that ends (`working` → `idle` or
-  `error`) while the drawer is shut counts as unread (the top bar button shows the count); a
-  pi dialog (`waiting`) tints the button. While the window is in the background, an ended run
-  or a dialog raises an OS notification (at most one per 5 s, dialogs always; `set_notify`);
-  the dev build (no bundle id) bounces the Dock icon instead.
+    differs from `home.model_applied` ([PERSISTENCE.md](PERSISTENCE.md)). Otherwise pi's session
+    keeps its own model, so a pick in pi's model selector survives a restart.
+- **Model.** The drawer header shows the last `model_change` in Atlas's session file, else the
+  setting, else "pi's default". `agent_model_picker` opens pi's own selector (Ctrl+L) in Atlas's
+  terminal. It is refused while a pi dialog is open (`"Atlas is waiting for you"`); while pi
+  starts, the key waits for the tab's first status, at most 15 s, then the command fails.
+- **Keys.** While its terminal has the keyboard (`agent_input`), keys go to pi (Esc too); ⌘J and
+  ⌘W hide the drawer, ⌘K opens the palette. Only the user moves the keyboard there: `set_focus
+  agent_input` is refused for every other caller, and `set_home` from a script shows the drawer
+  without moving the keyboard.
+- **Unread and nudge.** A run that ends (`working` → `idle` or `error`) while the drawer is shut
+  counts as unread; a pi dialog (`waiting`) tints the top bar button. While the window is in the
+  background, an ended run or a dialog raises an OS notification (at most one per 5 s, dialogs
+  always; `set_notify`).
 
 ## 9. Trying it
 

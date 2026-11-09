@@ -133,6 +133,8 @@ update_window_exe_set :: proc(exe: string) {
 }
 
 update_init :: proc() {
+	// a Linux core is updated by the Mac that installed it (docs/plans/background-core.md §8.5)
+	when ODIN_OS != .Darwin do return
 	update_load()
 	if autotest_active {
 		// a release build never reads the fixture variables: no checks in its test mode
@@ -214,7 +216,8 @@ executable_path :: proc() -> string {
 		if r == nil do return ""
 		return strings.clone(string(r), context.temp_allocator)
 	} else {
-		return ""
+		p, err := os.read_link("/proc/self/exe", context.temp_allocator) // Linux
+		return err == nil ? p : ""
 	}
 }
 
@@ -241,6 +244,7 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		update_check_start(false)
 		return {ok = true}, true
 	case Update_Check:
+		when ODIN_OS != .Darwin do return fail("a Linux core is updated from the Mac that installed it"), false
 		if upd.url == "" do return fail("update checks are off in test mode"), false
 		if !upd.known do return fail("Deckhand is still starting: try again in a moment"), false
 		if upd.current == "" do return fail("this is a development build: it does not update itself"), false

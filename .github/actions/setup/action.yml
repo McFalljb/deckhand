@@ -14,19 +14,22 @@ runs:
       uses: actions/cache@v4
       with:
         path: ${{ runner.temp }}/odin-dl
-        key: odin-${{ runner.os }}-arm64-${{ env.ODIN_VERSION }}-${{ env.ODIN_SHA256 }}
+        key: odin-${{ runner.os }}-${{ runner.os == 'Linux' && 'amd64' || 'arm64' }}-${{ env.ODIN_VERSION }}-${{ runner.os == 'Linux' && env.ODIN_SHA256_LINUX || env.ODIN_SHA256 }}
 
     - name: Odin (pinned, checksummed)
       shell: bash
       run: |
         dl="$RUNNER_TEMP/odin-dl/odin.tar.gz"
+        # macOS arm64, or Linux amd64 (the linux job: the core on Linux)
+        asset=odin-macos-arm64 sha=$ODIN_SHA256
+        if [ "$RUNNER_OS" = Linux ]; then asset=odin-linux-amd64 sha=$ODIN_SHA256_LINUX; fi
         if [ ! -f "$dl" ]; then
           mkdir -p "$RUNNER_TEMP/odin-dl"
-          # asset name checked for dev-2026-09; check it again when bumping ODIN_VERSION
+          # asset names checked for dev-2026-09; check them again when bumping ODIN_VERSION
           curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 -o "$dl" \
-            "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
+            "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/${asset}-${ODIN_VERSION}.tar.gz"
         fi
-        echo "${ODIN_SHA256}  $dl" | shasum -a 256 -c
+        echo "${sha}  $dl" | shasum -a 256 -c
         mkdir -p "$RUNNER_TEMP/odin"
         tar -xzf "$dl" -C "$RUNNER_TEMP/odin" --strip-components 1
         echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"

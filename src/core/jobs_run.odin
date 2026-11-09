@@ -189,7 +189,8 @@ proc_tree :: proc(pid: posix.pid_t, out: ^[dynamic]posix.pid_t) {
 		data, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", pid, pid), context.temp_allocator)
 		if err != nil do return
 		for f in strings.fields(string(data), context.temp_allocator) {
-			k := posix.pid_t(strconv.atoi(f))
+			n, _ := strconv.parse_int(f, 10)
+			k := posix.pid_t(n)
 			if k <= 1 do continue
 			seen := false
 			for x in out^ do if x == k do seen = true

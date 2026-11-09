@@ -361,17 +361,7 @@ when ODIN_OS == .Darwin {
 	peer_of_token :: proc(tok: Audit_Token) -> Peer {
 		return Peer{ok = true, pid = i32(tok.val[5]), pidversion = i32(tok.val[7]), euid = tok.val[1]}
 	}
-} else {
-	// Linux has no live token: SO_PEERCRED is the connecting process, fixed at connect (later).
-	peer_read :: proc(fd: posix.FD) -> Peer {return {}}
-	Audit_Token :: struct {
-		val: [8]u32,
-	}
-	peer_read_token :: proc(fd: posix.FD) -> (Peer, Audit_Token) {return {}, {}}
-	// no code signatures to read: every DR check fails closed
-	own_signature :: proc() -> Own_Signature {return {}}
-	peer_dr_check :: proc(tok: Audit_Token, ids: []string) -> (Decision, Code_Check) {return .No_Code, {}}
-}
+} // Linux: peer_linux.odin
 
 own_uid :: proc() -> u32 {return u32(posix.geteuid())}
 

@@ -72,10 +72,10 @@ data_dir_names :: proc(home: string, allocator := context.temp_allocator) -> (ne
 		new, _ = filepath.join({home, "Library", "Application Support", "Deckhand"}, allocator)
 		old, _ = filepath.join({home, "Library", "Application Support", "pi-desk"}, allocator)
 	} else {
-		base := os.get_env("XDG_DATA_HOME", context.temp_allocator)
-		if !strings.has_prefix(base, "/") do base, _ = filepath.join({home, ".local", "share"}, context.temp_allocator)
-		new, _ = filepath.join({base, "deckhand"}, allocator)
-		old, _ = filepath.join({base, "pi-desk"}, allocator)
+		// Linux (§8.4): ~/.local/share/deckhand, never $XDG_DATA_HOME (an environment doesn't move
+		// the data dir: data_home). pi-desk never ran there, so the old name is never a folder.
+		new, _ = filepath.join({home, ".local", "share", "deckhand"}, allocator)
+		old, _ = filepath.join({home, ".local", "share", "pi-desk"}, allocator)
 	}
 	return
 }

@@ -28,7 +28,7 @@ machines_registry_round_trip :: proc(t: ^testing.T) {
 	testing.expect_value(t, machines_write(path, list, 4), "")
 	st: posix.stat_t
 	testing.expect(t, posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &st) == .OK)
-	testing.expectf(t, transmute(u16)st.st_mode & 0o777 == 0o600, "mode %o", transmute(u16)st.st_mode & 0o777)
+	testing.expectf(t, u32(transmute(posix._mode_t)st.st_mode) & 0o777 == 0o600, "mode %o", u32(transmute(posix._mode_t)st.st_mode) & 0o777)
 	got, next, ok := machines_read(path, context.temp_allocator)
 	testing.expect(t, ok)
 	testing.expect_value(t, next, u64(4))
@@ -40,7 +40,7 @@ machines_registry_round_trip :: proc(t: ^testing.T) {
 	// written again over the old one: still 0600
 	testing.expect_value(t, machines_write(path, list[:1], 4), "")
 	testing.expect(t, posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &st) == .OK)
-	testing.expect(t, transmute(u16)st.st_mode & 0o777 == 0o600, "0600 after a rewrite")
+	testing.expect(t, u32(transmute(posix._mode_t)st.st_mode) & 0o777 == 0o600, "0600 after a rewrite")
 	_ = os.write_entire_file(path, transmute([]u8)string("{not json"))
 	_, _, bad := machines_read(path, context.temp_allocator)
 	testing.expect(t, !bad, "a broken file is not read as empty")

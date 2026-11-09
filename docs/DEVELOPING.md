@@ -7,7 +7,7 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 ## Contents
 
 1. [Requirements](#requirements)
-2. [Building and running](#building-and-running) ([the rename](#the-rename), [code signing](#code-signing))
+2. [Building and running](#building-and-running) ([the rename](#the-rename), [code signing](#code-signing), [the Linux core](#building-the-linux-core))
 3. [Rebuilding libghostty-vt](#rebuilding-libghostty-vt)
 4. [Pinned versions](#pinned-versions)
 5. [Releases](#releases) ([update signing](#update-signing))
@@ -163,6 +163,35 @@ Developer ID, because library validation compares Team IDs and a self-signed cer
 The updater checks a new bundle's signature (`codesign --verify --deep --strict`), bundle id,
 version and the CDHash its Ed25519 `.sig` names, not who signed it. So an ad-hoc install updates to
 a self-signed release like to any other.
+
+### Building the Linux core
+
+The core (`src/coremain`, the `core` package) also builds for Linux, so a Linux machine can run
+sessions for a Mac's window ([design §10.4](plans/background-core.md#104-m6-in-prs), M6-L1). It
+is a step in the build, behind no switch: nothing ships it yet. On Linux (Odin `dev-2026-09`,
+clang):
+
+```sh
+mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
+python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state
+```
+
+- **What differs** (`when ODIN_OS` blocks and `*_linux.odin` files): `/proc` in place of libproc
+  (a tab's cwd, a process's parent and children; `src/core/proc_linux.odin`); `SO_PEERCRED` in place
+  of `LOCAL_PEERTOKEN`, and trust is the same user only, as there is no code signing
+  (`src/trust/peer_linux.odin`, [design §8.3](plans/background-core.md#83-trust-in-both-directions));
+  no Obj-C shim, so no banners of its own, no App Nap and no Trash
+  (`src/coremain/platform_linux.odin`); no updater and no quarantine; a core is started directly,
+  in its own session (`src/core/launch_linux.odin`).
+- **Dirs:** data in `~/.local/share/deckhand`, sockets in `~/.local/state/deckhand/run` (0700;
+  never `$XDG_RUNTIME_DIR`, which logout removes). A data dir given with `DECKHAND_DATA_DIR` keeps
+  its sockets in `<data>/run`.
+- **No session holder yet** (M6-L3): `keep_sessions` is off and can't be turned on, so tab
+  processes are the core's children and a core restart restarts them.
+- **Checks:** `./build.sh test` type-checks `src/coremain` and the core's packages with
+  `-target:linux_amd64` (about a second). CI's `linux` job builds the core, runs the wires', the trust
+  rules' and the core's unit tests on Linux, and `tests/linux-core-smoke.py`.
 
 ## Rebuilding libghostty-vt
 

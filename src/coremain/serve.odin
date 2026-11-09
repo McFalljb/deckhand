@@ -28,20 +28,8 @@ import "core:sys/posix"
 import "core:time"
 
 import "../core"
-import "../holder"
 
-foreign import shim {
-	"../../build/dh_coremain.a",
-	"system:UserNotifications.framework",
-}
-foreign import foundation "system:Foundation.framework"
-@(default_calling_convention = "c")
-foreign shim {
-	dh_core_activity :: proc(on: c.int) ---
-	dh_core_trash :: proc(path: cstring) -> c.int ---
-	dh_core_notify :: proc(title, body: cstring) -> c.int ---
-}
-_ :: foundation
+// the platform's few calls: platform_darwin.odin (the Obj-C shim), platform_linux.odin
 
 @(private = "file")
 loop: struct {
@@ -90,7 +78,7 @@ serve_main :: proc(args: []string) -> int {
 	// launched through launchd: the launcher's environment (it carries the window's settings)
 	// a handover's successor: the holder's secret, for its one HELLO (core.successor_given)
 	if ready != "" {
-		if _, ok := holder.ready_handshake(ready, &core.successor_given); !ok do return 1
+		if !serve_ready_handshake(ready) do return 1
 	} else if secret_stdin {
 		buf: [65]u8
 		n := 0

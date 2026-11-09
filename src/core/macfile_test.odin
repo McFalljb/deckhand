@@ -46,7 +46,7 @@ macfile_round_trip :: proc(t: ^testing.T) {
 	testing.expect(t, ok, why)
 	st: posix.stat_t
 	testing.expect(t, posix.stat(strings.clone_to_cstring(p, context.temp_allocator), &st) == .OK)
-	testing.expect_value(t, transmute(u16)st.st_mode & 0o777, 0o600)
+	testing.expect_value(t, st.st_mode & (posix.S_IRWXU | posix.S_IRWXG | posix.S_IRWXO), posix.mode_t{.IRUSR, .IWUSR})
 	testing.expect(t, strings.has_prefix(mf_raw(p), "deckhand-mac 1 tokens "), mf_raw(p))
 	body, rok, rwhy := macfile_read(p, "tokens", key[:], context.temp_allocator)
 	testing.expect(t, rok, rwhy)

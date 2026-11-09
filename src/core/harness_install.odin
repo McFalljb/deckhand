@@ -186,14 +186,14 @@ harness_run_argv :: proc(r: Harness_Row, action: Harness_Action, plan: Harness_R
 harness_no_sudo_dir :: proc(command: string) -> string {
 	tmp := no_sudo_tmp()
 	d := fmt.tprintf("%s/%s%d-%d", tmp, NO_SUDO_PREFIX, os.get_pid(), new_id())
-	if posix.mkdir(strings.clone_to_cstring(d, context.temp_allocator), transmute(posix.mode_t)u16(0o700)) != .OK do return ""
+	if posix.mkdir(strings.clone_to_cstring(d, context.temp_allocator), posix.S_IRWXU) != .OK do return ""
 	shim := fmt.tprintf("#!/bin/sh\nprintf '%%s\\n' \"Deckhand doesn't run sudo; run this yourself:\" %s >&2\nexit 1\n", sh_quote(fmt.tprintf("  %s", command)))
 	p := fmt.tprintf("%s/sudo", d)
 	if os.write_entire_file(p, transmute([]u8)shim) != nil {
 		os.remove_all(d)
 		return ""
 	}
-	if posix.chmod(strings.clone_to_cstring(p, context.temp_allocator), transmute(posix.mode_t)u16(0o755)) != .OK {
+	if posix.chmod(strings.clone_to_cstring(p, context.temp_allocator), posix.S_IRWXU | {.IRGRP, .IXGRP, .IROTH, .IXOTH}) != .OK {
 		os.remove_all(d)
 		return ""
 	}

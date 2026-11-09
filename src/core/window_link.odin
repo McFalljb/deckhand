@@ -1053,24 +1053,26 @@ link_message :: proc(text: string) -> (command: bool) {
 // calls it itself): `jobs_clock SECONDS`; detach_window and attach_window, which in process close
 // and open the link: here the core plays windowless (no_window, no requests) while the link
 // stays, for the script's own lines.
-@(private = "file")
-script_core_line :: proc(line: string) -> Result {
-	cmd, _, rest := strings.partition(strings.trim_space(line), " ")
-	switch cmd {
-	case "detach_window":
-		link.held_off = true
-		tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
-		return {ok = true}
-	case "attach_window":
-		link.held_off = false
-		return {ok = true}
-	case "jobs_clock":
-		n, ok := strconv.parse_i64(strings.trim_space(rest))
-		if !ok do return fail("jobs_clock: not a number")
-		jobs_clock_advance(n)
-		return {ok = true}
+when TEST_HOOKS {
+	@(private = "file")
+	script_core_line :: proc(line: string) -> Result {
+		cmd, _, rest := strings.partition(strings.trim_space(line), " ")
+		switch cmd {
+		case "detach_window":
+			link.held_off = true
+			tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
+			return {ok = true}
+		case "attach_window":
+			link.held_off = false
+			return {ok = true}
+		case "jobs_clock":
+			n, ok := strconv.parse_i64(strings.trim_space(rest))
+			if !ok do return fail("jobs_clock: not a number")
+			jobs_clock_advance(n)
+			return {ok = true}
+		}
+		return fail(fmt.tprintf("not a core script line: %s", cmd))
 	}
-	return fail(fmt.tprintf("not a core script line: %s", cmd))
 }
 
 // A script line for the core's process (test mode over core.sock: script_core_line).

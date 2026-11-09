@@ -73,6 +73,7 @@ holder_restart_offered :: proc() -> bool {
 }
 
 holder_restart_start :: proc() {
+	if !holder_restart_available() do return
 	if !holder_upgrade_run(false) do window_toast("The session holder is already restarting")
 }
 

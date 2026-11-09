@@ -742,6 +742,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		state.version += 1
 		window_state_changed()
 	}
+	if changed do tab_term_facts_tick(time.tick_now()) // a terminal it made or dropped: its tab's record says so (core_loop.odin)
 	_, q1 := cmd.(Get_State)
 	_, q2 := cmd.(List_Commands)
 	// the scheduler's own bookkeeping and the job queries: no event unless State moved

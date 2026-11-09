@@ -109,7 +109,7 @@ drawer_content :: proc(dw: f32) {
 	drawer_notes_warning(dw)
 	// the terminal (drawn after the layout, main.odin), or why there is none
 	if clay.UI(clay.ID("drawer_term"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-		if !core.agent_running() {
+		if !agent_running() {
 			ht := core.home_tab()
 			if ht != nil && ht.status == .Exited do empty_state(strings.concatenate({core.agent_name(), " stopped"}, context.temp_allocator), "Press ⌘J twice to start it again", dw)
 			else do empty_state(strings.concatenate({"Starting ", core.agent_name(), "…"}, context.temp_allocator), "Its pi starts in the background", dw)

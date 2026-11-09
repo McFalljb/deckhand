@@ -12,7 +12,7 @@ import "core:testing"
 @(test)
 window_reads_only_its_replica :: proc(t: ^testing.T) {
 	// what reaches the core's memory instead of the replica
-	needles := []string{"core.find_tab(", "core.term_of(", "core.terms", "core.state.", "&core.state", "core.window."}
+	needles := []string{"core.find_tab(", "core.term_of(", "core.terms", "core.state.", "&core.state", "core.window.", "core.key_term(", "core.pane_term(", "core.active_term(", "core.agent_running("}
 	// file, needle, how many: what may stay
 	allowed := []struct {
 		file, needle: string,

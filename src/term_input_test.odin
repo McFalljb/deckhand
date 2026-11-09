@@ -302,6 +302,7 @@ drag_ends_without_the_button :: proc(t: ^testing.T) {
 // it, so a later move past the top edge neither extends the selection nor scrolls.
 @(test)
 terminal_through_the_app :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator() // a focus event may queue a command (Set_Unread: the window is in front again)
 	a, b: Term_View
 	fda := test_term(&a)
 	_ = test_term(&b)

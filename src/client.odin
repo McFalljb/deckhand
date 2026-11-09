@@ -60,24 +60,38 @@ Client :: struct {
 	facts_sent: string, // window.facts as last sent (client_facts; heap)
 	tab_facts_sent: map[u64]string, // each tab's window.tab_facts as last sent (heap)
 	facting:   bool, // client_facts runs (it pumps the core, which may run a command)
-	host:      bool, // the link carries the tab host only (the window's unit tests: client_attach_host)
+	// the link carries all but state: the core's requests, the tab host, the window's facts (the
+	// app's init until client_attach subscribes: client_connect; the window's unit tests:
+	// client_attach_host)
+	host:      bool,
 	detached:  bool, // test mode's detach_window: the window plays gone until attach_window
 }
 
 client: Client
 
-// Attaches the window to its core and makes `state` the replica (end of init, main.odin).
-client_attach :: proc() {
-	if client.attached do return
+// The window's link, early in init (main.odin): what the core asks of the window while it restores
+// the workspace (a restored tab's view, the first-run sheet) reaches it. `state` stays the core's
+// until client_attach subscribes.
+client_connect :: proc() {
+	if client.attached || client.host do return
 	heap := runtime.heap_allocator()
 	client.log = core.hook_env(.Proto_Log) == "1" // dev and test builds only (test_hooks.odin)
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
-	deferred_init(&client.deferred)
 	client.tab_facts_sent = make(map[u64]string, heap)
 	end, ok := core.core_attach_window(client_on_frames, client_on_drain)
 	if !ok do return // one window per core (it said why)
 	client.end = end
+	client.host = true
+}
+
+// Attaches the window to its core and makes `state` the replica (end of init, main.odin).
+client_attach :: proc() {
+	if client.attached do return
+	if !client.host do client_connect()
+	if !client.host do return
+	client.host = false
+	deferred_init(&client.deferred)
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)

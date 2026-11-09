@@ -529,7 +529,8 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	old := ids_pane_begin(p)
 	defer ids_pane_end(old)
 	split := cs != nil && len(cs.panes) > 1
-	empty := core.pane_term(p) == nil && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
+	shown := core.pane_shown(p)
+	empty := (shown == nil || !shown.has_term) && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
 	if clay.UI(pid(p, "pane"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		if split do pane_strip_layout(cs, p)
 		// the tab's bars, clipped across: a bar wider than a narrow pane (its buttons, an agent's

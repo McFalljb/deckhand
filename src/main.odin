@@ -77,6 +77,7 @@ init :: proc "c" () {
 	ui_init()
 	core.platform = platform_app()
 	win_os = win_os_app() // the window's own (win_os.odin)
+	client_connect() // the window's link: the core's requests reach it while the workspace comes back (client.odin)
 	app.window_active = true
 	platform_window_init()
 	menubar_install() // the macOS menu bar (menubar.odin)
@@ -348,7 +349,7 @@ frame :: proc "c" () {
 		pane_draw(p, t, typing)
 	} // else the layout's empty state shows
 	ui_draw(cmds, drawer_at, overlay)
-	if at != nil && core.agent_running() {
+	if at != nil && agent_running() {
 		if _, _, tw, th, ok := drawer_term_rect(); ok && tw > 0 && th > 0 {
 			term_draw(at)
 			if state.focus_widget == "agent_input" do term_draw_marked(at, ime.marked, ime.caret)

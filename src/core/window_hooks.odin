@@ -126,7 +126,7 @@ Window_Facts :: struct {
 	frames_device:        u64,
 	job_sheet_open:       bool,
 	setup:                Maybe(Setup_State), // the first-run sheet as get_state's focus shows it
-	unsaved:              []string, // each buffer with unsaved changes: its file's real path ("" = none yet)
+	unsaved:              []string, // each buffer with unsaved changes: its file's path ("" = none yet)
 }
 
 Md_Facts :: struct {
@@ -252,7 +252,7 @@ window_md_view :: proc(tab_id: u64) -> (line, links, headings, matches: int, ok:
 window_unsaved_files :: proc(under := "") -> (n: int, known: bool) {
 	f := window_facts()
 	if f == nil do return 0, false
-	for p in f.unsaved do if under == "" || (p != "" && wt_within(p, under)) do n += 1
+	for p in f.unsaved do if under == "" || (p != "" && wt_within(fs_real(p), under)) do n += 1
 	return n, true
 }
 

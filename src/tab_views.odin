@@ -102,10 +102,10 @@ tab_view_changes_rewind :: proc(tab_id: u64) {
 	e.cursor, e.anchor = 0, 0
 }
 
-// The buffers with unsaved changes, each as its file's real path ("" = none yet), for the core's
-// facts (window_unsaved_files; temp allocator).
+// The buffers with unsaved changes, each as its file's path ("" = none yet), for the core's facts
+// (window_unsaved_files; temp allocator).
 tab_views_unsaved_paths :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
-	for _, ed in editors do if editor_dirty(ed) do append(&out, ed.path != "" ? core.fs_real(ed.path) : "")
+	for _, ed in editors do if editor_dirty(ed) do append(&out, ed.path)
 	return out[:]
 }

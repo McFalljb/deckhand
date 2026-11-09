@@ -186,7 +186,7 @@ Edit_Target :: enum {
 edit_target :: proc() -> Edit_Target {
 	if f, _, _ := focused_field(); f != nil do return .Field
 	if state.focus_widget == "" && tab_editor() != nil do return .Editor
-	if core.key_tab() != nil && core.key_term() != nil && (state.focus_widget == "" || state.focus_widget == "agent_input") do return .Terminal
+	if kt := core.key_tab(); kt != nil && kt.has_term && (state.focus_widget == "" || state.focus_widget == "agent_input") do return .Terminal
 	return .None
 }
 

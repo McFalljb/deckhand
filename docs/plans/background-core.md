@@ -333,8 +333,11 @@ is committed:
   with it. Without the hardened runtime, `DYLD_INSERT_LIBRARIES` also loads into the genuine
   binary. This is the ad-hoc residual above, stated in GUIDE.md the same way.
 - **The hardened runtime stays off until D0.** Library validation compares Team IDs, and a
-  self-signed certificate has none. S2 showed ad hoc can't load CEF that way; M4-A checks the
-  self-signed case once and records the result here.
+  self-signed certificate has none. S2 showed ad hoc can't load CEF that way. **Checked in M4-A
+  (macOS 26.6.2): no, as expected.** A small program signed with Deckhand Self-Signed and
+  `--options runtime` (with and without `app.plist`'s entitlements) can't `dlopen` the CEF framework
+  of a self-signed build: "mapping process and mapped file (non-platform) have different Team
+  IDs". The same program without the runtime loads it.
 
 ### 5.5 Terminal streams (option a)
 

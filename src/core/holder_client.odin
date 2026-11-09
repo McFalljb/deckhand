@@ -131,6 +131,22 @@ Holder_Client :: struct {
 hc := Holder_Client{fd = -1}
 holder_send_timeout := HOLDER_WAIT // a send blocked this long fails (SO_SNDTIMEO; tests lower it)
 holder_test_allowed: bool // unit tests: a test that wants a holder says so
+// The identifiers a holder's code may have (P9, holder_peer_code_ok). The unit tests' fake holder
+// runs in the test binary itself and sets the test binary's own; a constant in release builds.
+when TEST_HOOKS {
+	holder_peer_ids: []string = trust.CORE_IDS
+} else {
+	holder_peer_ids :: trust.CORE_IDS
+}
+
+// "" if the code of the process a holder socket's token names (read at connect, before any byte)
+// has the holder's designated requirement as our own signature gives it (trust.peer_dr_check:
+// dev.deckhand.core, and under the self-signed identity our certificate), else why not.
+holder_peer_code_ok :: proc(tok: trust.Audit_Token) -> string {
+	d, got := trust.peer_dr_check(tok, holder_peer_ids)
+	if d == .Allow do return ""
+	return fmt.tprintf("its code: %v (identifier %q, status %d)", d, got.identifier, got.status)
+}
 
 // ---- pure helpers (holder_client_test.odin) ----
 
@@ -338,9 +354,15 @@ handshake_got: int // bytes the handshake read so far (Quiet: none)
 holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	fd, ok, refused := sock_connect_why(path)
 	if !ok do return refused ? .Stale : .Answered // not refused (EACCES, a race): not known dead
-	peer := trust.peer_read(fd)
+	peer, tok := trust.peer_read_token(fd)
 	if d := trust.peer_allowed(.Adhoc, trust.own_uid(), peer); d != .Allow {
 		fmt.eprintln("Deckhand: session holder: refused its peer:", d)
+		sock_close(fd)
+		return .Answered
+	}
+	// its code, before HELLO: SPAWN carries the environment and its tokens (§5.3, P9)
+	if why := holder_peer_code_ok(tok); why != "" {
+		fmt.eprintln("Deckhand: session holder: refused its peer:", why)
 		sock_close(fd)
 		return .Answered
 	}
@@ -1078,10 +1100,16 @@ holder_reattach :: proc() -> bool {
 // why starts with "retry" when another attempt may work.
 @(private = "file")
 holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, done: bool) {
-	peer := trust.peer_read(fd)
+	peer, tok := trust.peer_read_token(fd)
 	if d := trust.peer_allowed(.Adhoc, trust.own_uid(), peer); d != .Allow {
 		sock_close(fd)
 		return fmt.tprintf("refused its peer: %v", d), false
+	}
+	// the new image (or the keeper) is checked again, as at a first attach (P9): the keeper only
+	// checked its identifier (trust.image_allowed)
+	if w := holder_peer_code_ok(tok); w != "" {
+		sock_close(fd)
+		return fmt.tprintf("refused its peer: %s", w), false
 	}
 	set_timeouts(fd)
 	rx_reset()

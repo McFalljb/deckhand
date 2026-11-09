@@ -187,8 +187,14 @@ if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
   echo "release: $BUILT has the update TEST key in it (a test build?)" >&2
   exit 1
 fi
-# no test hook in anything Deckhand runs: the env overrides, test mode, --print-token
-scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/Contents/Helpers/deckhand-core" ||
+# no test hook in anything Deckhand runs: the env overrides, test mode, --print-token; Deckhand
+# Core.app's binaries too (the holder, the CLI: scripts/bundle-app.sh)
+CORE_REL="Contents/Helpers/Deckhand Core.app"
+[ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" ] && [ -x "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ] ||
+  { echo "release: $BUILT has no $CORE_REL with deckhand-core and deckhand" >&2; exit 1; }
+[ ! -e "$BUILT/Contents/Helpers/deckhand-core" ] ||
+  { echo "release: $BUILT still has the bare Contents/Helpers/deckhand-core (an old build/ tree? remove build/Deckhand.app and build again)" >&2; exit 1; }
+scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ||
   { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
 # the CLI's old name, a link Claude tabs started before 0.1.7 still run (scripts/bundle-app.sh)
 [ "$(readlink "$BUILT/Contents/MacOS/pi-desk-cli" 2>/dev/null)" = deckhand-cli ] ||
@@ -199,13 +205,14 @@ scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUI
 STAGE="$DIST/stage"
 APP="$STAGE/$APP_NAME"
 FW="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+CORE="$APP/$CORE_REL"
 rm -rf "$STAGE" "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" "$NOTES"
 mkdir -p "$STAGE"
 ditto "$BUILT" "$APP"
 
 # --- version into every Info.plist ---------------------------------------------------
 PB=/usr/libexec/PlistBuddy
-for p in "$APP/Contents/Info.plist" "$APP"/Contents/Frameworks/*Helper*.app/Contents/Info.plist; do
+for p in "$APP/Contents/Info.plist" "$APP"/Contents/Frameworks/*Helper*.app/Contents/Info.plist "$CORE/Contents/Info.plist"; do
   $PB -c "Set :CFBundleShortVersionString $PLIST_VERSION" "$p"
   $PB -c "Set :CFBundleVersion $PLIST_VERSION" "$p"
 done
@@ -248,8 +255,10 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ] || case "${
     esac
   done
   sign "$APP/Contents/MacOS/deckhand-cli" # Claude tabs' CLI (src/core/claude.odin)
-  # the session holder (src/holder): holder_install checks this identifier on its copy
-  if [ -f "$APP/Contents/Helpers/deckhand-core" ]; then sign --identifier dev.deckhand.core "$APP/Contents/Helpers/deckhand-core"; fi
+  # Deckhand Core.app (the session holder, the CLI, the integrations; identifier dev.deckhand.core,
+  # its Info.plist's): its CLI, then the bundle, which signs its main executable
+  sign --identifier dev.deckhand.cli "$CORE/Contents/MacOS/deckhand"
+  sign "$CORE"
   sign --entitlements scripts/entitlements/app.plist "$APP"
   SIGNED=developer-id
 else
@@ -258,10 +267,17 @@ else
   # above changed the helpers' and the app's Info.plist, so those two levels are signed again
   # (inside out, no --deep; the framework is untouched and keeps its signature)
   for h in "$APP"/Contents/Frameworks/*Helper*.app; do sign_code "$h"; done
+  sign_code "$CORE" # its Info.plist changed too; its CLI is untouched
   sign_code "$APP"
   if [ "$SIGN_AS" != - ]; then SIGNED=self-signed; fi
 fi
 codesign --verify --deep --strict --verbose=2 "$APP"
+# the nested Core.app on its own: sealed, its identifier, its version (src/trust reads the
+# version from the signed Info.plist)
+codesign --verify --deep --strict -R '=identifier "dev.deckhand.core"' "$CORE" ||
+  { echo "release: $CORE does not verify as dev.deckhand.core" >&2; exit 1; }
+[ "$($PB -c "Print :CFBundleShortVersionString" "$CORE/Contents/Info.plist")" = "$PLIST_VERSION" ] ||
+  { echo "release: $CORE has not version $PLIST_VERSION" >&2; exit 1; }
 
 if [ $SIGNED = developer-id ] && [ -n "${APPLE_ID:-}" ] && [ -n "${APPLE_TEAM_ID:-}" ] && [ -n "${APPLE_APP_PASSWORD:-}" ]; then
   echo "release: notarizing (this waits for Apple)"

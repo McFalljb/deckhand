@@ -9,11 +9,16 @@ package core
 //   holder_install(bin, data) -> (path, ok, why)   what to run: an installed, verified copy
 //   holder_launch_direct(bin, run, data, env) -> (pid, ok, why)
 //
-// Installed at <data>/core/<HOLDER_REV>-<sha12>/deckhand-core: a running holder keeps its
-// binary even when the app is updated or rebuilt (the sha keeps dev rebuilds apart; a signed
-// binary changed in place is killed at its next page-in, so not even a dev build runs from
-// build/: only test mode does). The copy is
-// checked (codesign --verify --strict, identifier dev.deckhand.core) and only then loses
+// The bundled binary is Deckhand Core.app's main executable (scripts/bundle-app.sh, §7.1, §10.3
+// M4-A); the whole bundle (the holder, the CLI, the integrations) is installed at
+// <data>/core/<HOLDER_REV>-<sha12>/Deckhand Core.app, and the holder runs from there. A bare
+// binary (build/deckhand-core of a DECKHAND_NO_CEF build, a test's) is installed alone, as
+// <data>/core/<HOLDER_REV>-<sha12>/deckhand-core. Either way a running holder keeps its files
+// even when the app is updated or rebuilt (the sha of the main executable, whose signature seals
+// the rest of its bundle, keeps dev rebuilds apart; a signed binary changed in place is killed at
+// its next page-in, so not even a dev build runs from build/: only test mode does). The copy is
+// checked (codesign --verify --strict --deep, against the designated requirement our own
+// signature gives: trust.peer_requirement, identifier dev.deckhand.core) and only then loses
 // com.apple.quarantine: a quarantined binary is SIGKILLed at exec, by launchd too (S2).
 
 import "core:c"
@@ -28,19 +33,23 @@ import "core:sys/posix"
 import "core:thread"
 import "core:time"
 
-HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh)
+import "../trust"
+
+HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh; trust.CORE_IDS)
 HOLDER_BIN :: "deckhand-core"
-HOLDER_REV :: 3 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+CORE_APP :: "Deckhand Core.app" // in Deckhand.app/Contents/Helpers (scripts/bundle-app.sh)
+HOLDER_REV :: 4 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 
-// The bundled binary: <exe dir>/../Helpers/deckhand-core (Deckhand.app), else build/deckhand-core
-// beside build.sh (a bare development binary at build/deckhand). "" = none found.
+// The bundled binary: <exe dir>/../Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core
+// (Deckhand.app), else deckhand-core beside our binary (build/deckhand-core of a bare development
+// build at build/deckhand, a test's). "" = none found.
 holder_bin_find :: proc(allocator := context.allocator) -> string {
 	exe := holder_own_exe()
 	if exe == "" do return ""
 	dir := filepath.dir(exe)
 	cands := []string{
-		fmt.tprintf("%s/../Helpers/%s", dir, HOLDER_BIN),
+		fmt.tprintf("%s/../Helpers/%s/Contents/MacOS/%s", dir, CORE_APP, HOLDER_BIN),
 		fmt.tprintf("%s/%s", dir, HOLDER_BIN), // build/deckhand (DECKHAND_NO_CEF)
 	}
 	for p in cands {
@@ -60,6 +69,7 @@ holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: strin
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)
 	dir := fmt.tprintf("%s/core/%d-%s", strings.trim_right(data, "/"), HOLDER_REV, sum[:12])
+	if app := holder_bundle_of(bin); app != "" do return holder_install_bundle(app, dir, sum)
 	dest := fmt.tprintf("%s/%s", dir, HOLDER_BIN)
 	if have, err := os.read_entire_file(dest, context.temp_allocator); err == nil && holder_sha256(have) == sum {
 		holder_unquarantine(dest) // identical to one that was checked; a stray mark would kill it
@@ -100,10 +110,68 @@ holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: strin
 	return strings.clone(dest), true, ""
 }
 
-// "" if path is validly signed (strict) with the holder's identifier, else why not.
+// The bundle bin is the main executable of: ".../Deckhand Core.app" for
+// ".../Deckhand Core.app/Contents/MacOS/deckhand-core", else "" (a bare binary).
+holder_bundle_of :: proc(bin: string) -> string {
+	suffix := fmt.tprintf("/%s/Contents/MacOS/%s", CORE_APP, HOLDER_BIN)
+	if !strings.has_suffix(bin, suffix) do return ""
+	return bin[:len(bin) - len(suffix) + 1 + len(CORE_APP)]
+}
+
+// holder_install for a bundle: app copied whole (ditto) into a temp dir beside dir, checked
+// there (the copy is what runs), its quarantine removed, then the temp dir renamed to dir. dir
+// already there with the same main executable (sum): reused. The path returned is the copy's
+// main executable.
+@(private = "file")
+holder_install_bundle :: proc(app, dir, sum: string) -> (path: string, ok: bool, why: string) {
+	rel := fmt.tprintf("%s/Contents/MacOS/%s", CORE_APP, HOLDER_BIN)
+	dest := fmt.tprintf("%s/%s", dir, rel)
+	if have, err := os.read_entire_file(dest, context.temp_allocator); err == nil && holder_sha256(have) == sum {
+		holder_unquarantine_tree(fmt.tprintf("%s/%s", dir, CORE_APP)) // identical to one that was checked
+		return strings.clone(dest), true, ""
+	}
+	parent := filepath.dir(dir)
+	if err := os.make_directory_all(parent, {.Read_User, .Write_User, .Execute_User}); err != nil && !os.is_dir(parent) {
+		return "", false, fmt.tprintf("cannot make %s: %v", parent, err)
+	}
+	tmp := holder_install_tmp(parent)
+	remove_tree(tmp) // ours from an earlier try (the pid and number in the name)
+	if posix.mkdir(strings.clone_to_cstring(tmp, context.temp_allocator), posix.S_IRWXU) != .OK {
+		return "", false, fmt.tprintf("cannot make %s: %s", tmp, posix.strerror(posix.errno()))
+	}
+	copy := fmt.tprintf("%s/%s", tmp, CORE_APP)
+	if out, st := run_group({"/usr/bin/ditto", app, copy}, 60 * time.Second, merge_stderr = true); st != .Ok {
+		remove_tree(tmp)
+		return "", false, fmt.tprintf("cannot copy %s: %v %s", app, st, strings.trim_space(out))
+	}
+	// the copy is what runs: check it, not app (which could change under us)
+	got, gerr := os.read_entire_file(fmt.tprintf("%s/%s", tmp, rel), context.temp_allocator)
+	if gerr != nil || holder_sha256(got) != sum {
+		remove_tree(tmp)
+		return "", false, fmt.tprintf("%s changed while it was copied", app)
+	}
+	if w := holder_verify(copy); w != "" {
+		remove_tree(tmp)
+		return "", false, w
+	}
+	holder_unquarantine_tree(copy)
+	if posix.rename(strings.clone_to_cstring(tmp, context.temp_allocator), strings.clone_to_cstring(dir, context.temp_allocator)) != 0 {
+		e := posix.errno()
+		remove_tree(tmp)
+		// another install of the same build won the race: use it if it is that build
+		if have, err := os.read_entire_file(dest, context.temp_allocator); err == nil && holder_sha256(have) == sum do return strings.clone(dest), true, ""
+		return "", false, fmt.tprintf("cannot install %s: %s", dir, posix.strerror(e))
+	}
+	return strings.clone(dest), true, ""
+}
+
+// "" if path (a binary, or a bundle with everything in it) is validly signed (strict) as our own
+// signature says the holder must be (trust.peer_requirement: its identifier, and under the
+// self-signed identity our certificate; ad hoc: the identifier only), else why not.
 holder_verify :: proc(path: string) -> string {
-	req := fmt.tprintf("=identifier \"%s\"", HOLDER_ID)
-	out, st := run_group({"/usr/bin/codesign", "--verify", "--strict", "-R", req, path}, 20 * time.Second, merge_stderr = true)
+	text, rok := trust.peer_requirement(trust.own_signature(), trust.CORE_IDS)
+	if !rok do return fmt.tprintf("the session holder %s cannot be checked: this process's own signature is unreadable", path)
+	out, st := run_group({"/usr/bin/codesign", "--verify", "--strict", "--deep", "-R", fmt.tprintf("=%s", text), path}, 20 * time.Second, merge_stderr = true)
 	if st == .Ok do return ""
 	return fmt.tprintf("the session holder %s fails its signature check (%v): %s", path, st, strings.trim_space(out))
 }
@@ -122,6 +190,15 @@ when ODIN_OS == .Darwin {
 	holder_unquarantine :: proc(path: string) {
 		removexattr(strings.clone_to_cstring(path, context.temp_allocator), QUARANTINE_XATTR, XATTR_NOFOLLOW) // ENOATTR is fine
 	}
+	// Every file, folder and link at and below path (links not followed).
+	holder_unquarantine_tree :: proc(path: string) {
+		holder_unquarantine(path)
+		st: posix.stat_t
+		if posix.lstat(strings.clone_to_cstring(path, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return
+		entries, err := os.read_all_directory_by_path(path, context.temp_allocator)
+		if err != nil do return
+		for e in entries do holder_unquarantine_tree(fmt.tprintf("%s/%s", path, e.name))
+	}
 	holder_quarantined :: proc(path: string) -> bool {
 		return getxattr(strings.clone_to_cstring(path, context.temp_allocator), QUARANTINE_XATTR, nil, 0, 0, XATTR_NOFOLLOW) >= 0
 	}
@@ -133,6 +210,16 @@ when ODIN_OS == .Darwin {
 	}
 } else {
 	holder_unquarantine :: proc(path: string) {}
+	holder_unquarantine_tree :: proc(path: string) {}
+	// Every file, folder and link at and below path (links not followed).
+	holder_unquarantine_tree :: proc(path: string) {
+		holder_unquarantine(path)
+		st: posix.stat_t
+		if posix.lstat(strings.clone_to_cstring(path, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return
+		entries, err := os.read_all_directory_by_path(path, context.temp_allocator)
+		if err != nil do return
+		for e in entries do holder_unquarantine_tree(fmt.tprintf("%s/%s", path, e.name))
+	}
 	holder_quarantined :: proc(path: string) -> bool {return false}
 	holder_own_exe :: proc() -> string {
 		p, err := os.read_link("/proc/self/exe", context.temp_allocator)

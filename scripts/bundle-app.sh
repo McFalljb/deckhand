@@ -4,11 +4,14 @@
 #   Contents/MacOS/Deckhand                        the Odin binary (already there)
 #   Contents/Frameworks/Chromium Embedded Framework.framework   APFS clone of the pinned one
 #   Contents/Frameworks/Deckhand Helper[ (GPU|Renderer|Plugin|Alerts)].app   one C binary
-#   Contents/Helpers/deckhand-core                 the session holder (build/deckhand-core)
 #     (CEF finds them by the main executable's name: "<CFBundleExecutable> Helper (...).app")
+#   Contents/Helpers/Deckhand Core.app             dev.deckhand.core (docs/plans/background-core.md §7.1)
+#     Contents/MacOS/deckhand-core                 the session holder (build/deckhand-core)
+#     Contents/MacOS/deckhand                      the CLI (build/deckhand-cli)
+#     Contents/Resources/integrations/{pi,claude-code}
 # Signed with DECKHAND_SIGN_IDENTITY (scripts/sign.sh: the self-signed identity, else ad hoc
-# with a warning), inside out: framework, helpers, CLI, holder, app. No --deep, no hardened
-# runtime. The framework is copied only when the pin changed, and signed again only then or
+# with a warning), inside out: framework, helpers, CLI, Core.app (its CLI, then the bundle), app.
+# No --deep, no hardened runtime (until the Developer ID: §5.4). The framework is copied only when the pin changed, and signed again only then or
 # when the identity changed; later builds re-sign the helpers (tiny) and the app.
 # Usage: scripts/bundle-app.sh CEF_DIR MACOS_MIN   (called by build.sh)
 set -eu
@@ -124,18 +127,35 @@ if [ -f build/deckhand-cli ] && [ -d build/claude-code ]; then
   rm -rf "$C/Resources/claude-code"
   cp -R build/claude-code "$C/Resources/claude-code"
 fi
-# the session holder (src/holder, docs/plans/background-core.md §7.1): a signed Mach-O in
-# Contents/Helpers (data files there would break the app's seal), identifier dev.deckhand.core,
-# which holder_install checks on its copy (src/core/holder_install.odin); signed before the app.
-# Never written in place: a holder may run this very file (a scene's, in test mode), and a
-# signed binary changed under it is killed at its next page-in. Signed beside, then renamed in.
+# Deckhand Core.app (docs/plans/background-core.md §7.1, §10.3 M4-A): the session holder as its
+# main executable, the CLI and the integrations, identifier dev.deckhand.core, which holder_install
+# checks on its copy with the app's own designated requirement (src/core/holder_install.odin,
+# src/trust). A bundle in Contents/Helpers (a bare data file there would break the app's seal);
+# signed before the app. Never written in place: a holder may run this very bundle's binary (a
+# scene's, in test mode), and a signed binary changed under it is killed at its next page-in. Laid
+# out and signed beside (build/.core-app.new), then renamed in; the old one is removed after (its
+# running binary keeps its file until it exits).
+CORE_APP="$C/Helpers/Deckhand Core.app"
 if [ -f build/deckhand-core ]; then
   mkdir -p "$C/Helpers"
-  rm -f build/.deckhand-core.bundled
-  cp build/deckhand-core build/.deckhand-core.bundled
-  sign_code --identifier dev.deckhand.core build/.deckhand-core.bundled
-  mv -f build/.deckhand-core.bundled "$C/Helpers/deckhand-core"
+  N="build/.core-app.new/Deckhand Core.app"
+  rm -rf build/.core-app.new
+  mkdir -p "$N/Contents/MacOS" "$N/Contents/Resources/integrations"
+  plist "$N/Contents/Info.plist" deckhand-core dev.deckhand.core "Deckhand Core" ui_element
+  cp build/deckhand-core "$N/Contents/MacOS/deckhand-core"
+  [ -f build/deckhand-cli ] && cp build/deckhand-cli "$N/Contents/MacOS/deckhand"
+  [ -d build/pi ] && cp -R build/pi "$N/Contents/Resources/integrations/pi"
+  [ -d build/claude-code ] && cp -R build/claude-code "$N/Contents/Resources/integrations/claude-code"
+  # inside out: the CLI, then the bundle (which signs its main executable, deckhand-core)
+  [ -f "$N/Contents/MacOS/deckhand" ] && sign_code --identifier dev.deckhand.cli "$N/Contents/MacOS/deckhand"
+  sign_code "$N"
+  rm -rf "$CORE_APP.old"
+  [ -d "$CORE_APP" ] && mv "$CORE_APP" "$CORE_APP.old"
+  mv "$N" "$CORE_APP"
+  rm -rf "$CORE_APP.old" build/.core-app.new
 fi
+# the bare holder of builds before Deckhand Core.app (removing it is safe while one runs)
+rm -f "$C/Helpers/deckhand-core"
 # pi tabs (src/core/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
 if [ -d build/pi ]; then
   rm -rf "$C/Resources/pi"

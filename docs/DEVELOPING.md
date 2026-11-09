@@ -127,8 +127,8 @@ codesign -dr - build/Deckhand.app
 
 Signed inside out, no `--deep`, no hardened runtime: the CEF framework's libraries and the
 framework (again only when the pin or the identity changed: `build/.cef-signed-as`), the five
-helpers, `deckhand-cli`, `deckhand-core` (identifier `dev.deckhand.core`, which `holder_install`
-checks), then the app. A designated requirement of `identifier … and certificate leaf = …` is the
+helpers, `deckhand-cli`, `Deckhand Core.app` (its CLI, then the bundle: identifier
+`dev.deckhand.core`, which `holder_install` checks), then the app. A designated requirement of `identifier … and certificate leaf = …` is the
 default codesign makes for a self-signed certificate; none is written by hand, so a Developer ID
 gets its own default (the Apple anchor and its team) with no other change.
 
@@ -149,10 +149,25 @@ gets its own default (the Apple anchor and its team) with no other change.
   The designated requirement changes once (to the team's), so macOS asks for the grants one more
   time at that update; the updater does not care who signed (below).
 
-The trust checks do not depend on the signer. The session holder's copy is checked for a valid
-strict signature with the identifier `dev.deckhand.core` (`holder_verify`), and peers by user
-(`src/trust`); the updater checks a new bundle's signature (`codesign --verify --deep --strict`),
-bundle id, version and the CDHash its Ed25519 `.sig` names. So an ad-hoc install (0.1.6 and
+**The trust checks follow the signer** (`src/trust`; docs/plans/background-core.md §5.4). Each
+process reads its own signature once (`trust.own_signature`, `SecCodeCopySelf`) and picks a mode:
+ad hoc (`DECKHAND_SIGN_IDENTITY=-`, CI) checks a peer's identifier; self-signed checks the
+identifier and the certificate leaf hash (`identifier "dev.deckhand.core" and certificate leaf =
+H"…"`, built at run time, so no hash is committed); a Developer ID (from D0) checks the Apple anchor
+and Team ID, the hardened runtime and no `get-task-allow`. A peer's code is read by the audit token
+saved at accept (`trust.peer_dr_check`). The app checks the session holder's code this way at
+every attach and reattach, the launcher checks the detached holder before it sends the
+environment, and the new app checks the relaunch helper; the holder's copy is checked with the
+same requirement (`holder_verify`). Under the self-signed identity this guards against accidents
+(other users, stale sockets, stray binaries, code signed by anyone else), not against a program
+of yours: it can sign with the same key (codesign uses it without a prompt), and without the
+hardened runtime it can load a library into Deckhand. The hardened runtime stays off until the
+Developer ID: library validation compares Team IDs, and a self-signed certificate has none (checked
+on macOS 26.6.2: a self-signed program under the hardened runtime cannot `dlopen` the self-signed
+CEF framework, "different Team IDs"). `tests/scripts/sign-dr.sh` checks the real signatures.
+
+The updater checks a new bundle's signature (`codesign --verify --deep --strict`), bundle id,
+version and the CDHash its Ed25519 `.sig` names, not its signer. So an ad-hoc install (0.1.6 and
 before) updates to a self-signed release like to any other (and back); `UPDATE_RELEASE_SIGN="Deckhand
 Self-Signed" tests/scripts/update.sh` runs the update scene that way.
 
@@ -263,13 +278,22 @@ says how to get past that); its notes say so, and that the permissions users gra
 self-signed updates. The app is about 340 MB, mostly Chromium for the browser tab. The bundle carries the third-party licences in
 `Contents/Resources/licenses/`.
 
-The bundle also carries the session holder, `Contents/Helpers/deckhand-core` (`src/holder/`,
-built by `./build.sh` in every mode as `build/deckhand-core`; docs/plans/background-core.md §3).
-`scripts/bundle-app.sh` signs it with the identifier `dev.deckhand.core` before the app, and
-`scripts/release.sh` signs it with the app's identity; `codesign --verify --deep --strict` covers
-it. Only signed code goes in `Helpers` (a data file there fails signing). With Keep sessions on,
-the app installs it to `<data dir>/core/<rev>-<sha12>/` (quarantine stripped after the signature
-check) and starts it from there, so an app update never pulls the binary from under live sessions.
+The bundle also carries **`Contents/Helpers/Deckhand Core.app`** (identifier `dev.deckhand.core`,
+`LSUIElement`; docs/plans/background-core.md §7.1): the session holder as its main executable,
+`Contents/MacOS/deckhand-core` (`src/holder/`, built by `./build.sh` in every mode as
+`build/deckhand-core`), the CLI as `Contents/MacOS/deckhand` (`build/deckhand-cli`), and the
+integrations in `Contents/Resources/integrations/` (`pi`, `claude-code`). `scripts/bundle-app.sh`
+lays it out and signs it (the CLI, then the bundle) before the app, beside the old one and renamed
+in, so a holder running from it keeps its file; `scripts/release.sh` sets its version, signs it
+with the app's identity and verifies it on its own; `./build.sh` runs `codesign --verify --deep
+--strict` on the whole app. Only signed code and bundles go in `Helpers` (a data file there fails
+signing). `Deckhand.app` keeps `Contents/MacOS/deckhand-cli`, its `pi-desk-cli` link and
+`Resources/pi` and `Resources/claude-code`: tabs started earlier run them by path. With Keep
+sessions on, the app installs the whole Core.app to `<data dir>/core/<rev>-<sha12>/` (the sha of
+its main executable, whose signature seals the rest; checked there with `codesign --verify
+--strict --deep` against the app's own designated requirement, then quarantine stripped) and
+starts the holder from the copy, so an app update never pulls the binary from under live
+sessions. A bare `build/deckhand-core` (a `DECKHAND_NO_CEF` build) is installed alone, as before.
 
 The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §7.3;
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running

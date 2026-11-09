@@ -18,6 +18,10 @@ import "core:testing"
 import "core:thread"
 import "core:time"
 import hw "../holderwire"
+import "../trust"
+
+@(private = "file")
+fake_holder_ids: [1]string
 
 Fake_Mode :: enum {
 	Welcome,
@@ -61,6 +65,7 @@ Fake_Holder :: struct {
 // A runtime dir and data dir of the test's own, the fake listening in it. keep_sessions as given.
 fake_holder_start :: proc(t: ^testing.T, f: ^Fake_Holder, keep := true) {
 	context.allocator = runtime.heap_allocator()
+	fake_holder_ids[0] = trust.own_signature().identifier
 	for i in 0 ..< 32 do f.key[i] = u8(i * 13 + 1)
 	if f.instance == "" do f.instance = "fake-instance-1"
 	if f.previous == "" do f.previous = "handover"
@@ -75,6 +80,7 @@ fake_holder_start :: proc(t: ^testing.T, f: ^Fake_Holder, keep := true) {
 	f.cfd, f.lfd = -1, -1
 	holder_client_forget()
 	holder_test_allowed = true
+	when TEST_HOOKS do holder_peer_ids = fake_holder_ids[:] // the fake is this test binary: its own identifier (P9)
 	state.settings.keep_sessions = keep
 	if f.no_listen do return
 	ok: bool
@@ -87,6 +93,7 @@ fake_holder_stop :: proc(f: ^Fake_Holder) {
 	if hc.on do holder_shutdown() // whatever it attached to stops (a real holder, if a test went wrong)
 	holder_client_forget()
 	holder_test_allowed = false
+	when TEST_HOOKS do holder_peer_ids = trust.CORE_IDS
 	sync.atomic_store(&f.stop, true)
 	if f.cfd >= 0 do sock_shutdown(f.cfd)
 	if f.th != nil {

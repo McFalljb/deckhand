@@ -75,6 +75,9 @@ def find_tests_in(pkg, binary, prefix):
     out = []
     for f in sorted(glob.glob(os.path.join(ROOT, pkg, "*.odin"))):
         lines = open(f, encoding="utf-8").read().split("\n")
+        # a file for other OSes only (#+build linux: src/core/proc_linux_test.odin) is not built here
+        if lines[0].startswith("#+build") and ("darwin" if sys.platform == "darwin" else "linux") not in lines[0]:
+            continue
         for i, line in enumerate(lines):
             if re.match(r"\s*@\(test\)", line):
                 m = re.search(r"(\w+)\s*::\s*proc", line) or re.match(r"\s*(\w+)\s*::\s*proc", lines[i + 1])

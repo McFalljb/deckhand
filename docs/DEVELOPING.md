@@ -173,6 +173,7 @@ clang):
 
 ```sh
 mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+mkdir -p -m 700 ~/.local/state/deckhand/run   # serve expects its runtime dir (a launcher makes it)
 build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
 python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state
 ```

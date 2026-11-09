@@ -61,7 +61,9 @@ core_peer_check_refuses_a_fake_core :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.pid, i32(posix.getpid()))
 	when TEST_HOOKS do core_peer_ids = []string{"dev.deckhand.core"}
 	_, why = core_peer_check(fds[0])
-	testing.expect(t, strings.has_prefix(why, "the process on core.sock is not Deckhand's core"), why)
+	// Linux: no code signing, the same user is the whole check (background-core.md §8.3)
+	when ODIN_OS == .Linux do testing.expect_value(t, why, "")
+	else do testing.expect(t, strings.has_prefix(why, "the process on core.sock is not Deckhand's core"), why)
 }
 
 // window.token: 64 hex, 0600, this user's; anything else is no token.

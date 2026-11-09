@@ -25,6 +25,9 @@ hello_proof_vector :: proc(t: ^testing.T) {
 // fd, the transport drops the connection before acting on its bytes (§5.3, §10.3 M4-B).
 @(test)
 transport_drops_a_forked_writer :: proc(t: ^testing.T) {
+	// Linux: SO_PEERCRED is the process that connected, fixed then, so a forked writer can't be
+	// told apart (same user only, background-core.md §8.3)
+	when ODIN_OS != .Darwin do return
 	fds: [2]posix.FD
 	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
 	at_accept := trust.peer_read(fds[1])

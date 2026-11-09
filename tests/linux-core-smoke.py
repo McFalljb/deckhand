@@ -23,6 +23,7 @@ def main():
     d = tempfile.mkdtemp(prefix="dh-smoke-")
     data, run, home = f"{d}/data", f"{d}/run", f"{d}/home"
     os.makedirs(home)
+    os.makedirs(run, mode=0o700)  # the launcher makes it (sock_runtime_dir): serve expects it
     env = dict(os.environ, HOME=home, DECKHAND_SCRIPT="smoke", DECKHAND_DATA_DIR=data, DECKHAND_RUNTIME_DIR=run)
     p = subprocess.Popen([BIN, "serve", "--run", run, "--data", data], env=env, stdout=subprocess.PIPE, text=True)
     try:

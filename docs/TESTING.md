@@ -141,7 +141,7 @@ as coverage.
 
 | Scene | What it is for |
 |---|---|
-| `looks`, `font`, `shots`, `text-shots`, `readme-shot` | screenshots (`readme-shot` makes `docs/images/deckhand.png` from demo data: check it by eye) |
+| `looks`, `font`, `shots`, `text-shots`, `readme-shot` | screenshots (`readme-shot` makes the README's clip and `docs/images/deckhand.png` from demo data: check them by eye; it needs Screen Recording for the app that runs it) |
 | `persist-cpu`, `panels-cpu`, `text-flood`, `run-frame-pause`, `term-bench` | CPU, frame and terminal-stream numbers to read |
 | `update-from-release` | the current release's updater installs a new zip (`release.sh` runs it) |
 

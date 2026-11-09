@@ -1,11 +1,17 @@
 #!/bin/sh
-# The README's screenshot (docs/images/deckhand.png): demo data only. A fake
-# HOME with three made-up projects and a few chats, a demo pi that draws a
-# made-up conversation and publishes a todos panel (tests/scripts/demo-pi.py,
-# never a real pi), a Markdown tab, a browser tab on a local test page
-# (tests/web/demo.html) and a shell tab; dark graphite, 1400x860.
-# Needs a CEF build (./build.sh). Writes build/shots/readme/deckhand.png; copy
-# it to docs/images/ after checking it by eye.
+# The README's clip and screenshot (docs/images/deckhand-demo.gif, deckhand.png):
+# demo data only. A fake HOME with three made-up projects and a few chats, a demo
+# pi that draws a made-up conversation and publishes a todos panel
+# (tests/scripts/demo-pi.py, never a real pi), a Markdown tab dragged into a split
+# and a browser tab on a local test page (tests/web/demo.html); dark graphite,
+# 1400x860. The clip's frames are Deckhand's own `shot`s of its hidden test
+# window (readme-shot.txt: readme/frames/NN-MS shows for MS ms), joined by ffmpeg.
+# Needs a CEF build (./build.sh) and ffmpeg. Writes build/shots/readme/deckhand.png,
+# deckhand-demo.gif and deckhand-demo.mp4; copy them to docs/images/ after
+# checking them by eye.
+# Captures use `screencapture -l` of the test window, so the app that runs this
+# script (a terminal) needs Screen Recording permission; from inside a Deckhand
+# tab that means Deckhand itself, else every frame fails ("could not create image").
 # Usage: tests/scripts/readme-shot.sh
 set -eu
 unset CLAUDE_CONFIG_DIR # never the user's own Claude Code folder (a Claude Code session sets one)
@@ -65,12 +71,33 @@ MD
 (cd "$P/recipe-box" && git init -q && git add . \
   && git -c user.name=demo -c user.email=demo@example.invalid -c commit.gpgsign=false commit -qm init)
 
+# the core and the demo pis outlive the window (sessions keep running): stop this run's ones
+stop_left() { pkill -f "$ROOT/build/(Deckhand\.app|deckhand)|$ROOT/tests/scripts/demo-pi\.py" 2>/dev/null || true; }
+trap stop_left EXIT
 HOME="$FAKE_HOME" CFFIXED_USER_HOME="$FAKE_HOME" SHELL=/bin/zsh DECKHAND_SCRIPT=tests/scripts/readme-shot.txt \
   DECKHAND_DATA_DIR="$W/data" DECKHAND_BIN="$ROOT/build/deckhand" \
-  DECKHAND_CMD="exec python3 -I '$ROOT/tests/scripts/demo-pi.py' \"\$@\"" \
+  DECKHAND_CMD="DEMO_LIVE=1 exec python3 -I '$ROOT/tests/scripts/demo-pi.py' \"\$@\"" \
   build/deckhand "$P/recipe-box" > "$W/run.log" 2>&1 || true
 grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run.log" || true
 if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run.log" || ! grep -q "done:" "$W/run.log"; then
   echo "readme shot failed (log: $W/run.log)"; exit 1
 fi
+
+# the clip: each frame once, held for its MS (ffmpeg's concat list; -fps_mode vfr keeps the GIF small), 1280 px wide
+FFMPEG=$(command -v ffmpeg || echo /opt/homebrew/bin/ffmpeg)
+LIST="$W/frames.txt"
+: > "$LIST"
+last=
+for f in build/shots/readme/frames/*.png; do
+  ms=$(basename "$f" .png | sed 's/.*-//')
+  printf "file '%s'\nduration %s\n" "$ROOT/$f" "$(awk -v m="$ms" 'BEGIN{printf "%.3f", m/1000}')" >> "$LIST"
+  last=$f
+done
+printf "file '%s'\n" "$ROOT/$last" >> "$LIST" # the concat demuxer drops the last duration otherwise
+VF="scale=1280:-2:flags=lanczos"
+"$FFMPEG" -loglevel error -y -f concat -safe 0 -i "$LIST" -fps_mode vfr \
+  -vf "$VF,split[a][b];[a]palettegen=max_colors=128:stats_mode=diff[p];[b][p]paletteuse=dither=none:diff_mode=rectangle" \
+  build/shots/readme/deckhand-demo.gif
+"$FFMPEG" -loglevel error -y -f concat -safe 0 -i "$LIST" -vf "$VF,format=yuv420p" \
+  -c:v libx264 -crf 26 -preset slow -movflags +faststart -an build/shots/readme/deckhand-demo.mp4
 ls -l build/shots/readme

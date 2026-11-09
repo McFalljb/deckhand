@@ -58,6 +58,7 @@ tab_view_drop :: proc(tab_id: u64) {
 	editor_drop(tab_id) // an editor tab's buffer (editor_commands.odin)
 	md_drop(tab_id) // a Markdown tab's view (markdown_view.odin)
 	browser_drop(tab_id) // a browser tab's page (browser.odin)
+	client_facts_forget(tab_id) // its facts as last sent to the core (client.odin)
 	app_drop(tab_id) // an app tab's process and frames (app_tab.odin)
 }
 

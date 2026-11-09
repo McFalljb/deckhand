@@ -219,6 +219,7 @@ reload_version_outdated :: proc(t: ^Tab) -> bool {
 
 @(private = "file")
 set_note :: proc(t: ^Tab, note: string) {
+	if t.reload.note != note do window_state_changed() // also from ticks, outside commands
 	delete(t.reload.note)
 	t.reload.note = strings.clone(cut_utf8(one_line(note, context.temp_allocator), RELOAD_NOTE_MAX))
 }
@@ -226,6 +227,7 @@ set_note :: proc(t: ^Tab, note: string) {
 @(private = "file")
 set_version :: proc(t: ^Tab, v: string) {
 	if t.reload.version == v do return
+	window_state_changed() // also from ticks, outside commands
 	delete(t.reload.version)
 	t.reload.version = strings.clone(v)
 }
@@ -765,12 +767,14 @@ reload_tick :: proc() {
 			run_command(Reload_Kick{tab_id = t.id})
 		}
 		if t.status != .Running {
+			if t.reload.started do window_state_changed() // State changed outside a command: the window's replica follows
 			t.reload.started = false
 			continue
 		}
 		any = true
 		if !t.reload.started {
 			t.reload.started = true
+			window_state_changed()
 			set_version(t, state.reload.pi_version)
 		}
 	}

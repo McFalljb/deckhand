@@ -141,6 +141,7 @@ browser_tab_open :: proc(session: u64, url: string, background := false, pane: u
 	core.pane_add_tab(cs, tab, pane = pane)
 	if !background do core.session_show_tab(cs, tab.id)
 	browser_attach(tab.id, url)
+	core.window_state_changed() // a window-side write to State (popups, web_open): the replica must hear it
 	return tab.id, ""
 }
 

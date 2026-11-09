@@ -1448,7 +1448,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 				kv_str(&to, "path", et.path)
 				if et.view != .File do kv_str(&to, "view", EDITOR_VIEW_NAMES[et.view])
 				if et.preview do kv_bool(&to, "preview", true)
-				kv_bool(&to, "dirty", window_tab_dirty(t.id))
+				if dirty, known := window_tab_dirty(t.id); known do kv_bool(&to, "dirty", dirty) // no window: not said
 			}
 			if ct, is_ch := t.kind.(Changes_Tab); is_ch do kv_str(&to, "root", ct.root)
 			// the window's: comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask

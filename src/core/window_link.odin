@@ -44,7 +44,8 @@ import jg "../jsonguard"
 // Nothing else is decoded from window.command; a socket never sees this list.
 WINDOW_COMMANDS := [?]typeid {
 	App_Update, // an app tab's process started or exited (app_tab.odin's frame loop)
-	App_Call_Done, // an app screenshot worker's answer (app_tab.odin)
+	App_Call_Done, // an app screenshot worker's answer (app_tab.odin; its file: app_shot_ours). Runs in
+	// the window today (tabhost.odin); if app hosting moves into the core, recheck it here
 	Browser_Update, // what CEF reported: URL, title, loading (browser_nav.odin)
 	Comment_Add, // a comment the user made on a page or an app (ui_comments.odin, browser_annotate.odin)
 	Focus_Take, // a window widget took the keyboard (sheets, browser fields)
@@ -77,11 +78,15 @@ Window_Link :: struct {
 	win_end:    cw.Mem_End,
 	on_frames:  proc(), // in process: the window reads what the core just sent
 	on_pull:    proc(tab_id: u64), // in process: the window sends a browser tab's facts now (get_state)
+	on_drain:   proc(), // in process: a top-level inbox drain starts (the window frees what its replica retired)
 	subscribed: bool,
 	sent:       State_Sent, // what the window's replica holds
 	dirty:      bool, // window_state_changed since the last delta
 	replies:    [dynamic]^Link_Reply, // queued commands' replies, freed once delivered
 	pumping:    int,
+	need_full:  bool, // a state message was refused: the next flush sends state.full
+	too_large_said: bool,
+	untracked:  [dynamic]string, // test mode: writes no trigger announced (window_link_check; heap)
 }
 
 @(private = "file")
@@ -100,24 +105,63 @@ window_attached :: proc() -> bool {return link != nil}
 // Attaches the window: the only way to get the ui caller (main.odin's client, at init). Returns
 // the window's end of the transport. on_frames is called after the core sends it anything.
 // Main thread.
-core_attach_window :: proc(on_frames: proc(), on_pull: proc(tab_id: u64) = nil) -> cw.Mem_End {
-	assert(link == nil, "one window")
+core_attach_window :: proc(on_frames: proc(), on_pull: proc(tab_id: u64) = nil, on_drain: proc() = nil) -> (end: cw.Mem_End, ok: bool) {
+	if link != nil {
+		fmt.eprintln("Deckhand: a second window may not attach while one is attached")
+		return {}, false // one window at a time, in a release build too
+	}
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
 	link.core_end, link.win_end = cw.mem_open(&link.t, allocator = heap)
 	link.on_frames = on_frames
 	link.on_pull = on_pull
+	link.on_drain = on_drain
 	link.replies = make([dynamic]^Link_Reply, heap)
+	link.untracked = make([dynamic]string, heap)
 	link.sent.sections = make(map[string]string, heap)
-	return link.win_end
+	return link.win_end, true
 }
+
+// Replies of a window that went while the inbox still held them (core_detach_window): they live
+// until the inbox answered (delivered), then go at the next pump. Main thread.
+@(private = "file")
+link_orphans: [dynamic]^Link_Reply
+
+@(private = "file")
+link_orphan_deliver :: proc(r: ^Reply, request_id: u64) {(^Link_Reply)(r).delivered = true}
+
+@(private = "file")
+link_orphans_free :: proc() {
+	heap := runtime.heap_allocator()
+	keep := 0
+	for r in link_orphans {
+		if r.delivered {
+			result_free(r.result)
+			delete(r.id, heap)
+			free(r, heap)
+			continue
+		}
+		link_orphans[keep] = r
+		keep += 1
+	}
+	resize(&link_orphans, keep)
+}
+
+window_link_orphans_for_test :: proc() -> int {return len(link_orphans)}
 
 // The window went (tests; M3-G's detach). Main thread.
 core_detach_window :: proc() {
 	if link == nil do return
 	heap := runtime.heap_allocator()
-	link_free_replies(all = true)
+	link_free_replies() // the delivered ones; the inbox may still hold the others
+	if len(link.replies) > 0 && link_orphans == nil do link_orphans = make([dynamic]^Link_Reply, heap)
+	for r in link.replies {
+		r.deliver = link_orphan_deliver
+		append(&link_orphans, r)
+	}
 	delete(link.replies)
+	for u in link.untracked do delete(u, heap)
+	delete(link.untracked)
 	browser_facts_clear()
 	state_sent_free(&link.sent)
 	cw.mem_close(link.core_end)
@@ -125,6 +169,9 @@ core_detach_window :: proc() {
 	free(link, heap)
 	link = nil
 }
+
+// A top-level inbox drain starts (inbox_drain): the window's hook, if it set one.
+window_link_drain_starts :: proc() {if link != nil && link.on_drain != nil do link.on_drain()}
 
 // Something the window shows changed (window_state_changed): the next flush looks.
 window_link_dirty :: proc() {if link != nil do link.dirty = true}
@@ -143,39 +190,174 @@ window_link_toast :: proc(text: string, err: bool) -> bool {
 // The state delta, if anything changed since the window's replica was sent: a command bumped
 // State.version, or window_state_changed was called. Main thread; at every inbox_drain's end
 // and before each of the window's results. sweep: compare every section whatever the triggers
-// said (the window's frames, a few times a second: the core still changes some fields in its
-// ticks with neither, e.g. a tab's reload bookkeeping). Test mode logs what a sweep found that no
-// trigger announced ("[replica] untracked"), so those writes can be found.
+// said (before each of the window's results, after a drain that ran a ui command, and a few
+// times a second from the window's frames), so the replica never stays behind a write that
+// signalled nothing. Test mode records each such write (link.untracked), and
+// window_link_check fails the scene on one that UNTRACKED_OK does not list.
 window_link_flush :: proc(sweep := false) {
 	if link == nil || !link.subscribed do return
 	link_free_replies()
 	triggered := link.dirty || link.sent.version != state.version
-	if !triggered && !sweep do return
+	if !triggered && !sweep && !link.need_full do return
+	when TEST_HOOKS {
+		if !triggered do link_note_untracked()
+	}
 	link.dirty = false
+	if link.need_full {
+		link_send_state(state_full_json(&state, &link.sent))
+		return
+	}
 	text, ok := state_delta_json(&state, &link.sent)
 	if !ok do return
-	when TEST_HOOKS {
-		if !triggered do fmt.eprintln("[replica] untracked: a change with no version bump and no window_state_changed:", delta_section_names(text))
-	}
-	link_send(text)
+	link_send_state(text)
 }
 
-// The section names a state.delta carries (test mode's log).
+// Sends a state message. A refused one (too large, or the link failed) leaves the replica behind
+// what link.sent says it holds, so the next flush sends state.full instead. A state.full over the
+// frame limit is not retried until State changes: it is said once, and the window keeps the last
+// state it got (test mode: the check fails).
 @(private = "file")
-delta_section_names :: proc(text: string) -> string {
-	members, ok := json_members_raw(text)
-	if !ok do return "?"
-	names := make([dynamic]string, context.temp_allocator)
-	for m in members do if m.key == "sections" {
-		inner, iok := json_members_raw(m.raw)
-		if iok do for x in inner do append(&names, x.key)
+link_send_state :: proc(text: string) {
+	if len(text) > link_max_payload {
+		if !link.too_large_said {
+			fmt.eprintfln("Deckhand: the window's state message is %d bytes, over the link's %d: the window keeps the state it has until State shrinks", len(text), link_max_payload)
+			link.too_large_said = true
+		}
+		link.need_full = true
+		when TEST_HOOKS do append(&link.untracked, strings.clone("<state over the frame limit>", runtime.heap_allocator()))
+		return
 	}
-	return strings.join(names[:], " ", context.temp_allocator)
+	if !link_send(text) {
+		link.need_full = true
+		return
+	}
+	link.need_full, link.too_large_said = false, false
+}
+
+// The largest state message the link sends (tests lower it).
+link_max_payload := cw.MAX_PAYLOAD
+
+// ---- test mode: writes to State that no trigger announced ----
+
+// Writes the core makes outside commands with no version bump and no window_state_changed,
+// that the check lets through: each a path (section with "*" for ids, "[*]" for list positions)
+// and the site that makes it. This list is meant to shrink: give such a write a trigger instead.
+UNTRACKED_OK := [?]struct {
+	path, site: string,
+}{}
+
+// Each section that differs from what the window was sent, as the first differing path in it
+// ("tabs:*[*].reload.started"), recorded in link.untracked.
+@(private = "file")
+link_note_untracked :: proc() {
+	heap := runtime.heap_allocator()
+	secs := state_sections(&state)
+	now := make(map[string]bool, len(secs), context.temp_allocator)
+	for x in secs {
+		now[x[0]] = true
+		old, had := link.sent.sections[x[0]]
+		if had && old == x[1] do continue
+		path := had ? json_diff_path(old, x[1]) : " (new)"
+		if len(link.untracked) < 64 do append(&link.untracked, strings.concatenate({section_pattern(x[0]), path}, heap))
+	}
+	for k in link.sent.sections do if !now[k] && len(link.untracked) < 64 do append(&link.untracked, strings.concatenate({section_pattern(k), " (gone)"}, heap))
+}
+
+// "tabs:12" -> "tabs:*"
+@(private = "file")
+section_pattern :: proc(name: string) -> string {
+	if c := strings.index_byte(name, ':'); c >= 0 do return strings.concatenate({name[:c + 1], "*"}, context.temp_allocator)
+	return name
+}
+
+// The first path where two JSON texts differ: ".a.b", "[*].c", "" if equal (temp allocator).
+json_diff_path :: proc(a, b: string) -> string {
+	va, ea := jg.parse_string(a, .JSON, true, context.temp_allocator)
+	vb, eb := jg.parse_string(b, .JSON, true, context.temp_allocator)
+	if ea != nil || eb != nil do return " (unparsed)"
+	return json_value_diff(va, vb, "")
+}
+
+@(private = "file")
+json_value_diff :: proc(a, b: json.Value, path: string) -> string {
+	#partial switch x in a {
+	case json.Object:
+		y, ok := b.(json.Object)
+		if !ok do return path
+		for k, v in x {
+			w, has := y[k]
+			if !has do return strings.concatenate({path, ".", k}, context.temp_allocator)
+			if d := json_value_diff(v, w, strings.concatenate({path, ".", k}, context.temp_allocator)); d != "" do return d
+		}
+		for k in y do if k not_in x do return strings.concatenate({path, ".", k}, context.temp_allocator)
+		return ""
+	case json.Array:
+		y, ok := b.(json.Array)
+		if !ok do return path
+		if len(x) != len(y) do return strings.concatenate({path, "[#]"}, context.temp_allocator)
+		for i in 0 ..< len(x) do if d := json_value_diff(x[i], y[i], strings.concatenate({path, "[*]"}, context.temp_allocator)); d != "" do return d
+		return ""
+	case json.String:
+		y, ok := b.(json.String)
+		return ok && x == y ? "" : path
+	case json.Integer:
+		y, ok := b.(json.Integer)
+		return ok && x == y ? "" : path
+	case json.Float:
+		y, ok := b.(json.Float)
+		return ok && x == y ? "" : path
+	case json.Boolean:
+		y, ok := b.(json.Boolean)
+		return ok && x == y ? "" : path
+	case json.Null:
+		_, ok := b.(json.Null)
+		return ok ? "" : path
+	}
+	return path
+}
+
+// Test mode, after every script step (autotest.odin through client.odin): "" or why the scene
+// fails. First a flush that only the triggers drive: what still differs from what the window was
+// sent is a write that signalled nothing, as are those the sweeps since the last check recorded;
+// each fails unless UNTRACKED_OK lists it. Then a sweep, and the replica must equal State: a
+// difference left is a write by the window into its replica (one that bypassed commands), and
+// the window gets the whole state again.
+window_link_check :: proc(replica: ^State) -> string {
+	if link == nil || !link.subscribed do return ""
+	window_link_flush()
+	when TEST_HOOKS do link_note_untracked()
+	b := strings.builder_make(context.temp_allocator)
+	seen := make(map[string]bool, context.temp_allocator)
+	for u in link.untracked {
+		if seen[u] || untracked_ok(u) do continue
+		seen[u] = true
+		if len(seen) == 1 do strings.write_string(&b, "a write to State with no version bump and no window_state_changed (give it a trigger, or list it in UNTRACKED_OK): ")
+		else do strings.write_string(&b, ", ")
+		strings.write_string(&b, u)
+	}
+	for u in link.untracked do delete(u, runtime.heap_allocator())
+	clear(&link.untracked)
+	window_link_flush(sweep = true)
+	clear(&link.untracked) // what that sweep found is in the report already
+	if d := window_link_diverged(replica); d != "" {
+		if len(seen) > 0 do strings.write_string(&b, "; ")
+		strings.write_string(&b, "the window's replica differs from State (a write that bypassed commands): ")
+		strings.write_string(&b, d)
+		window_link_resync()
+	}
+	return strings.to_string(b)
+}
+
+@(private = "file")
+untracked_ok :: proc(u: string) -> bool {
+	for ok in UNTRACKED_OK do if u == ok.path do return true
+	return false
 }
 
 // Reads every frame the window sent and acts on it: a queued command goes into the inbox (it
 // runs at the next inbox_drain, in order), a "now" one runs here. Main thread.
 window_link_pump :: proc() {
+	if len(link_orphans) > 0 do link_orphans_free()
 	if link == nil do return
 	link.pumping += 1
 	defer link.pumping -= 1
@@ -225,7 +407,7 @@ window_link_diverged :: proc(replica: ^State) -> string {
 // Sends the window a fresh state.full (after a divergence, so one failure does not repeat).
 window_link_resync :: proc() {
 	if link == nil || !link.subscribed do return
-	link_send(state_full_json(&state, &link.sent))
+	link_send_state(state_full_json(&state, &link.sent))
 }
 
 // ---- the window's side of the encoding (client.odin calls these; the window has no codec) ----
@@ -336,14 +518,15 @@ window_command_ok :: proc(id: typeid) -> bool {
 }
 
 @(private = "file")
-link_send :: proc(text: string) {
-	if link == nil do return
-	if cw.mem_send(link.core_end, cw.JSON_CHANNEL, .Data, transmute([]u8)text) != .None {
-		// a window that does not read (in process it always does): it starts again from a full
-		fmt.eprintln("Deckhand: the window's link failed; it gets the whole state again")
-		return
+link_send :: proc(text: string) -> bool {
+	if link == nil do return false
+	if e := cw.mem_send(link.core_end, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
+		// a window that does not read (in process it always does): its state starts again from a full
+		fmt.eprintln("Deckhand: the window's link refused a message:", e)
+		return false
 	}
 	if link.on_frames != nil do link.on_frames()
+	return true
 }
 
 // Frees the replies the inbox has delivered (and signalled: it signals right after deliver).
@@ -400,7 +583,7 @@ link_message :: proc(text: string) {
 	case "state.subscribe":
 		link.subscribed = true
 		link.dirty = false
-		link_send(state_full_json(&state, &link.sent))
+		link_send_state(state_full_json(&state, &link.sent))
 	case "command":
 		menu := string(obj["menu"].(json.String) or_else "")
 		raw := ""
@@ -492,3 +675,7 @@ window_command_decode_for_test :: proc(text: string) -> (Command, string) {
 	obj, _ := v.(json.Object)
 	return window_command_decode(obj["command"])
 }
+
+// The link itself (tests).
+@(private)
+window_link_for_test :: proc() -> ^Window_Link {return link}

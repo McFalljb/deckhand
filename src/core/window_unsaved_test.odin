@@ -41,4 +41,29 @@ window_unsaved_unknown_asks :: proc(t: ^testing.T) {
 	r = run_command(Quit{}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, quits, 1)
+
+	// M3-F review round 1, finding 6: no sessions to stop and no holder: unknown still asks
+	window = {}
+	hc.on = false
+	state.settings.keep_sessions = false
+	r = run_command(Quit{}, {kind = .UI})
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expect_value(t, quits, 1)
+}
+
+// Finding 6: an editor tab's unsaved changes with no window to ask are not known: closing it
+// asks, and get_state does not say dirty:false.
+@(test)
+window_tab_dirty_unknown :: proc(t: ^testing.T) {
+	saved_window := window
+	defer window = saved_window
+	window = {}
+	tab := Tab{id = 77, kind = Editor_Tab{path = "/x/a.txt"}, status = .Running}
+	dirty, known := window_tab_dirty(tab.id)
+	testing.expect(t, !dirty && !known, "no window: not known")
+	testing.expect(t, close_needs_confirm(tab), "unknown: closing asks")
+	window.tab_dirty = proc(id: u64) -> bool {return false}
+	dirty, known = window_tab_dirty(tab.id)
+	testing.expect(t, !dirty && known, "a window that says clean")
+	testing.expect(t, !close_needs_confirm(tab), "clean: closing goes on")
 }

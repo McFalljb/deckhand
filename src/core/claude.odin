@@ -275,6 +275,7 @@ claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string 
 	if t == nil || !t.running do return "Claude is not running in this tab"
 	term_paste(t, text)
 	ct.turn = .Working // until its hooks say otherwise
+	window_state_changed() // callers may answer "not changed"
 	rt := claude_rt[tab.id]
 	rt.enter_due = time.tick_add(time.tick_now(), CLAUDE_ENTER_DELAY)
 	rt.typed = false
@@ -428,6 +429,7 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 	claude_wait_started(tab_id) // waits on its earlier run end (claude_wait.odin)
 	ct.turn = .Unknown
 	ct.ended = .None // a new process: how the last one's turn ended is gone
+	window_state_changed() // a restart from a reload tick says nothing
 	rt := claude_rt[tab_id]
 	rt = {}
 	claude_rt[tab_id] = rt
@@ -1057,6 +1059,7 @@ claude_tab_gone :: proc(tab: ^Tab) {
 	held_clear(ct)
 	ct.turn = .Unknown
 	ct.ended = .None
+	window_state_changed()
 	delete_key(&claude_rt, tab.id)
 	claude_work_reset(tab.id) // its panels went with the exit (Tab_Exited)
 	if r, _ := claude_record(ct.session_id); r != nil do r.used = time.now()._nsec / 1e9
@@ -1316,6 +1319,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		delete(h.text)
 		delete(h.who)
 		ct.turn = .Working // until its hooks say otherwise: one text at a time
+		window_state_changed() // the caller may answer "not changed"
 		rt := claude_rt[tab.id]
 		rt.enter_due = time.tick_add(time.tick_now(), CLAUDE_ENTER_DELAY)
 		rt.typed = false

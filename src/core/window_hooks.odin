@@ -193,7 +193,12 @@ unsaved_files_note :: proc(n: int, known: bool) -> string {
 	if n > 0 do return fmt.tprintf("%d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
 	return ""
 }
-window_tab_dirty :: proc(tab_id: u64) -> bool {return window.tab_dirty != nil && window.tab_dirty(tab_id)}
+// Whether an editor tab's buffer has unsaved changes; not known with no window to ask (callers
+// that could lose them ask instead).
+window_tab_dirty :: proc(tab_id: u64) -> (dirty, known: bool) {
+	if window.tab_dirty == nil do return false, false
+	return window.tab_dirty(tab_id), true
+}
 window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
 window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}
 

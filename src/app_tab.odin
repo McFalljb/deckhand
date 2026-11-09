@@ -428,7 +428,7 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r
 		// timed out already, or not ours: only the asked tab's reply counts, an
 		// app's only for an app call, a screenshot worker's only for its screenshot
 		if !has || p.tab_id != c.tab_id || c.from_worker != (p.type == APP_SHOT_TYPE) {
-			if c.from_worker && c.file != "" do posix.unlink(strings.clone_to_cstring(c.file, context.temp_allocator)) // nobody wants it now
+			if c.from_worker && app_shot_ours(c.file) do posix.unlink(strings.clone_to_cstring(c.file, context.temp_allocator)) // nobody wants it now
 			return {ok = true}, false
 		}
 		key, _ := delete_key(&pending, c.wire)
@@ -2047,4 +2047,16 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		return "", true
 	}
 	return fmt.tprintf("unknown command %s", cmd), false
+}
+
+// Whether file is a screenshot worker's: a file directly in core.app_shots_dir(), links followed.
+// App_Call_Done can come over window.command (window_link.odin): its file is removed only then.
+// If app hosting moves into the core, recheck App_Call_Done's place in WINDOW_COMMANDS.
+app_shot_ours :: proc(file: string) -> bool {
+	if file == "" do return false
+	real := core.fs_real(file)
+	dir := core.fs_real(core.app_shots_dir(context.temp_allocator))
+	if real == "" || dir == "" || !strings.has_prefix(real, dir) do return false
+	rest := real[len(dir):]
+	return len(rest) > 1 && rest[0] == '/' && !strings.contains(rest[1:], "/") && os.is_file(real)
 }

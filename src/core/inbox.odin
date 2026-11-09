@@ -53,6 +53,9 @@ inbox_submit :: proc(cmd: Command, caller: Caller, reply: ^Reply = nil, menu := 
 // Runs everything queued, in order. Main thread only. The window's frames are read first
 // (window_link.odin: its queued commands join the queue), and its state delta goes at the end.
 inbox_drain :: proc() {
+	if inbox_depth == 0 do window_link_drain_starts() // nothing of an outer drain is on the stack
+	inbox_depth += 1
+	defer inbox_depth -= 1
 	heap := runtime.heap_allocator()
 	ui_ran := false // the user's commands: their delta compares every section (window_link_flush)
 	for {
@@ -81,6 +84,9 @@ inbox_drain :: proc() {
 		delete(batch)
 	}
 }
+
+@(private = "file")
+inbox_depth: int // inbox_drain's nesting (main thread)
 
 // Runs cmd now, with a request id of its own, outside the queue (what a direct run_command did):
 // the window's calls that need their result at once (window_link.odin). Main thread.

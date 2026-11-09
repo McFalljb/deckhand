@@ -310,6 +310,8 @@ frame :: proc "c" () {
 	core.core_frame_begin(time.tick_now()) // the core loop's timer stays out of frames (core_loop.odin)
 	defer core.core_frame_end(time.tick_now()) // and runs a tick it skipped meanwhile
 	core.app_frames_called += 1
+	client.busy += 1 // the replica's retired blocks wait for client_after_tick (client.odin)
+	defer client.busy -= 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
@@ -464,6 +466,8 @@ event_os :: proc "c" (e: ^sapp.Event) {
 }
 
 event :: proc(e: ^sapp.Event) {
+	client.busy += 1 // as in frame(): no release mid-event (client_on_drain)
+	defer client.busy -= 1
 	client_before_event() // the replica holds what timers did since the last frame (client.odin)
 	defer core.inbox_drain()
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)

@@ -44,6 +44,8 @@ Client :: struct {
 	deferred:  Deferred_Free,
 	diverged:  int, // test mode: divergences found (autotest.odin)
 	swept:     time.Tick, // the last sweep (client_after_tick)
+	released:  time.Tick, // the last deferred_release
+	busy:      int, // inside frame() or event() (main.odin): the window may hold pointers into the replica
 	facts_sent: map[u64]string, // each browser tab's facts as last sent (client_pull)
 }
 
@@ -58,7 +60,9 @@ client_attach :: proc() {
 	client.results = make(map[string]core.Result, heap)
 	deferred_init(&client.deferred)
 	client.facts_sent = make(map[u64]string, heap)
-	client.end = core.core_attach_window(client_on_frames, client_pull)
+	end, ok := core.core_attach_window(client_on_frames, client_pull, client_on_drain)
+	if !ok do return // one window per core (it said why)
+	client.end = end
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)
@@ -138,6 +142,7 @@ client_after_tick :: proc() {
 	if !client.attached do return
 	deferred_release(&client.deferred)
 	now := time.tick_now()
+	client.released = now
 	every := app.redraw ? SWEEP_MS : SWEEP_IDLE_MS
 	sweep := time.tick_diff(client.swept, now) >= time.Duration(every) * time.Millisecond
 	if sweep do client.swept = now
@@ -145,24 +150,32 @@ client_after_tick :: proc() {
 }
 
 SWEEP_MS :: 100
+DEFERRED_MAX :: 1024 // retired blocks a drain outside a frame lets wait (client_on_drain)
 SWEEP_IDLE_MS :: 1000
+
+// A top-level drain starts (core.inbox_drain). Outside a frame or an event (the window hidden:
+// no frames, while timers and agents still drain) nothing of the window's reads the replica, so
+// what deltas retired is freed here too, every SWEEP_MS or past DEFERRED_MAX blocks: it does not
+// pile up until the window shows again.
+client_on_drain :: proc() {
+	if client.busy > 0 do return
+	now := time.tick_now()
+	if time.tick_diff(client.released, now) < SWEEP_MS * time.Millisecond && deferred_count(&client.deferred) <= DEFERRED_MAX do return
+	deferred_release(&client.deferred)
+	client.released = now
+}
 
 // Before handling an event: the replica holds what timers and other threads' commands did.
 client_before_event :: proc() {
 	if client.attached do core.window_link_flush()
 }
 
-// Test mode (autotest.odin, after each script step): "" while the replica equals the core's
-// State; else which sections differ (a UI write that bypassed commands, or a change the stream
-// missed), after which the window gets the whole state again.
+// Test mode (autotest.odin, after each script step): "" while every write to State signalled the
+// stream and the replica equals the core's State; else what did not (core.window_link_check).
 client_check :: proc() -> string {
 	if !client.attached do return ""
-	core.window_link_flush(sweep = true)
-	d := core.window_link_diverged(&client.replica)
-	if d != "" {
-		client.diverged += 1
-		core.window_link_resync()
-	}
+	d := core.window_link_check(&client.replica) // window_link.odin: missed deltas, then window writes
+	if d != "" do client.diverged += 1
 	return d
 }
 
@@ -176,15 +189,22 @@ browser_facts_of :: proc(tab_id: u64) -> (f: core.Browser_Facts) {
 }
 
 // The core asks for a browser tab's facts (get_state): sent when they changed since the last time.
-@(private = "file")
 client_pull :: proc(tab_id: u64) {
 	f := browser_facts_of(tab_id)
 	text := core.window_msg_browser_facts(tab_id, &f)
 	if last, ok := client.facts_sent[tab_id]; ok && last == text do return
+	if !client_raw(text) do return // refused: not sent, the next pull tries again
 	heap := runtime.heap_allocator()
 	if old, ok := client.facts_sent[tab_id]; ok do delete(old, heap)
 	client.facts_sent[tab_id] = strings.clone(text, heap)
-	client_raw(text)
+}
+
+// The tab closed (tab_view_drop): what was sent of it goes (the core drops its copy itself).
+client_facts_forget :: proc(tab_id: u64) {
+	if old, ok := client.facts_sent[tab_id]; ok {
+		delete(old, runtime.heap_allocator())
+		delete_key(&client.facts_sent, tab_id)
+	}
 }
 
 // ---- the link ----
@@ -196,11 +216,13 @@ client_id :: proc() -> string {
 }
 
 @(private = "file")
-client_raw :: proc(text: string) {
+client_raw :: proc(text: string) -> bool {
 	if client.log do fmt.eprintfln("[proto] window -> core %s", text[:min(len(text), 300)])
 	if e := cw.mem_send(client.end, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
 		fmt.eprintln("Deckhand: the window's link refused a message:", e)
+		return false
 	}
+	return true
 }
 
 // The command's result, which the core sent (before returning from the pump or drain).
@@ -266,18 +288,21 @@ Deferred_Free :: struct {
 	mu:      sync.Mutex,
 }
 
-@(private = "file")
 deferred_init :: proc(d: ^Deferred_Free) {
 	for &r in d.retired do r = make([dynamic]rawptr, runtime.heap_allocator())
 }
 
-@(private = "file")
 deferred_allocator :: proc(d: ^Deferred_Free) -> runtime.Allocator {
 	return {procedure = deferred_proc, data = d}
 }
 
+// Blocks retired and not yet freed (tests).
+deferred_count :: proc(d: ^Deferred_Free) -> int {
+	sync.guard(&d.mu)
+	return len(d.retired[0]) + len(d.retired[1])
+}
+
 // Frees the blocks retired before the previous release; the newer ones wait for the next.
-@(private = "file")
 deferred_release :: proc(d: ^Deferred_Free) {
 	sync.guard(&d.mu)
 	heap := runtime.heap_allocator()

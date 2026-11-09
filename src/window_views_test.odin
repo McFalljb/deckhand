@@ -87,7 +87,7 @@ window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
 	e := editor_of(r.created_id)
 	testing.expect(t, e != nil)
 	if e != nil do testing.expect_value(t, tb_line_of(&e.buf, e.cursor), 2) // 0-based
-	testing.expect(t, !core.window_tab_dirty(r.created_id))
+	if dirty, dknown := core.window_tab_dirty(r.created_id); true do testing.expect(t, !dirty && dknown)
 	n, known := core.window_unsaved_files()
 	testing.expect(t, n == 0 && known)
 	core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
@@ -109,7 +109,7 @@ window_views_no_window :: proc(t: ^testing.T) {
 	_, tab, _ := core.find_tab(r.created_id)
 	testing.expect(t, tab != nil)
 	testing.expect(t, editor_of(r.created_id) == nil)
-	testing.expect(t, !core.window_tab_dirty(r.created_id))
+	if dirty, dknown := core.window_tab_dirty(r.created_id); true do testing.expect(t, !dirty && dknown)
 	_, known := core.window_unsaved_files()
 	testing.expect(t, !known, "no window: not known")
 	_, known = core.window_unsaved_files(dir)

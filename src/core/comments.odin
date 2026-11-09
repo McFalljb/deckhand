@@ -529,6 +529,8 @@ comments_close_act :: proc(s: ^Open_Session, tab_id: u64, choice: Comments_Choic
 comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {
 	case Comment_Add:
+		// never read, copy or remove a file that is not one of our crops (it is not removed either)
+		if !comments_crop_ok(c.crop) do return fail("crop: not one of Deckhand's comment crops"), false
 		s, tab, _ := find_tab(c.tab_id)
 		refuse :: proc(crop, msg: string) -> (Result, bool) {
 			if crop != "" do os.remove(crop)
@@ -627,10 +629,32 @@ crop_n: int
 
 // Where a source writes its next crop: <data dir>/comments/c-<pid>-<n>.png (a temp folder without
 // a data dir). The first use in a run removes crops a Deckhand that is gone left behind.
+// The folder crops are written in (temp allocator).
+comments_crop_dir :: proc() -> string {
+	if home_root != "" {
+		dir, _ := filepath.join({home_root, "comments"}, context.temp_allocator)
+		return dir
+	}
+	return fmt.tprintf("%s/deckhand-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
+}
+
+// Whether crop is one of ours: a c-<pid>-<n>.png file directly in comments_crop_dir(), after
+// following links. Comment_Add's crop comes from the window (window.command), and the core
+// reads, copies and removes it: never a path elsewhere.
+comments_crop_ok :: proc(crop: string) -> bool {
+	if crop == "" do return true
+	real := fs_real(crop)
+	dir := fs_real(comments_crop_dir())
+	if real == "" || dir == "" || !strings.has_prefix(real, dir) do return false
+	name := real[len(dir):]
+	if !strings.has_prefix(name, "/") do return false
+	name = name[1:]
+	if strings.contains(name, "/") do return false // directly in it
+	return strings.has_prefix(name, "c-") && strings.has_suffix(name, ".png") && os.is_file(real)
+}
+
 comments_crop_path :: proc() -> string {
-	dir: string
-	if home_root != "" do dir, _ = filepath.join({home_root, "comments"}, context.temp_allocator)
-	else do dir = fmt.tprintf("%s/deckhand-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
+	dir := comments_crop_dir()
 	if crop_n == 0 {
 		os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User})
 		if infos, rerr := os.read_all_directory_by_path(dir, context.temp_allocator); rerr == nil {

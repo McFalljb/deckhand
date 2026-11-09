@@ -35,7 +35,7 @@ browser_facts_round_trip_and_form :: proc(t: ^testing.T) {
 
 	// over the link: what the core keeps writes the same
 	state = State{}
-	end := core_attach_window(proc() {})
+	end, _ := core_attach_window(proc() {})
 	defer core_detach_window()
 	_ = cw.mem_send(end, cw.JSON_CHANNEL, .Data, transmute([]u8)window_msg_browser_facts(7, &f))
 	window_link_pump()

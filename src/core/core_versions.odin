@@ -132,9 +132,15 @@ core_serve_of :: proc(data, which: string) -> string {
 	vdir := core_versions_dir(data)
 	key := core_link_read(vdir, which)
 	if key == "" do return ""
-	p := fmt.tprintf("%s/%s/%s/Contents/MacOS/%s", vdir, key, CORE_APP, CORE_SERVE_BIN)
-	when ODIN_OS == .Linux do p = fmt.tprintf("%s/%s/%s", vdir, key, CORE_SERVE_BIN) // no Core.app (launch_linux.odin)
+	p := fmt.tprintf("%s/%s/%s", vdir, key, core_serve_rel())
 	return os.is_file(p) ? p : ""
+}
+
+// The serve binary's path inside an install dir: in its Core.app on macOS, alone on Linux
+// (launch_linux.odin). Temp.
+core_serve_rel :: proc() -> string {
+	when ODIN_OS == .Linux do return CORE_SERVE_BIN
+	return fmt.tprintf("%s/Contents/MacOS/%s", CORE_APP, CORE_SERVE_BIN)
 }
 
 // What <vdir>/<name> points at: a key (one path element), else "".

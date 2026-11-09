@@ -15,8 +15,10 @@ package main
 //   never runs the core's loop, holder, socket server or jobs (main.odin's separate branch).
 // - A command's reply is waited for at most CLIENT_WAIT (design Q9: 250 ms); past it the call shows
 //   as pending, and the late result is dropped.
-// - The core's connection ending ends the window (Quit Deckhand and Stop All Sessions, or a
-//   crash); M4-D/E bring a reconnect.
+// - The core's connection ending (a crash, a SIGTERM, a handover's predecessor going) is not the
+//   window's end: it dials again, launching a core if none answers (≤ 15 s), and restores from a
+//   fresh state.full; its terminal copies attach again (client_core_reconnect). Only a core that
+//   said window.request quit first (a Quit, Stop All, another window took over) ends the window.
 
 import "core:fmt"
 import "core:os"
@@ -115,6 +117,66 @@ separate_core_wanted :: proc(data: string) -> bool {
 // Connects to the separate core (launching it if none runs), says the framed hello and subscribes:
 // from here `state` is the replica. "" = attached, else why not. Main thread, at init.
 client_core_connect :: proc(data: string) -> string {
+	if why := client_core_dial(data); why != "" do return why
+	heap := runtime.heap_allocator()
+	client.log = core.hook_env(.Proto_Log) == "1"
+	client.main = sync.current_thread_id()
+	client.results = make(map[string]core.Result, heap)
+	client.abandoned = make(map[string]bool, heap)
+	client.tab_facts_sent = make(map[u64]string, heap)
+	deferred_init(&client.deferred)
+	client.attached = true
+	core.replica_process = true
+	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
+	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
+	core.files_root_reset_send = proc(base: string) {client_send(core.Files_Set_Root{base = base})}
+	return client_core_subscribe()
+}
+
+// The connection to the core ended (client_core_lost), and the window is not quitting: the old
+// link goes, the window dials again (or launches a core), and the replica, its terminal copies
+// and the facts it sent start over from a fresh state.full. Blocks the main thread while it dials
+// (a core that just died is usually back within a second; 15 s at most). "" = attached again.
+// Main thread, outside the frame reader (the frame and the hidden window's timer call it).
+client_core_reconnect :: proc() -> string {
+	if !client.lost || core.app_quitting do return ""
+	heap := runtime.heap_allocator()
+	for k, r in client.results {
+		core.result_free(r)
+		delete(k, heap)
+	}
+	clear(&client.results)
+	for k in client.abandoned do delete(k, heap)
+	clear(&client.abandoned)
+	term_views_drop_all() // their channels were the old connection's (term_view_stream.odin)
+	client_facts_forget_all()
+	got_full = false
+	old := client.sock // the dead link stays client.sock until a new one is up (client_separate holds)
+	if why := client_core_dial(core.home_root); why != "" do return why
+	cw.sock_destroy(old)
+	free(old, heap)
+	client.lost = false
+	why := client_core_subscribe()
+	if why == "" && core.autotest_active do fmt.printfln("[autotest] core: reattached to pid %d", client.core_pid)
+	app.redraw = true
+	return why
+}
+
+// The link is up: subscribe, wait for state.full (≤ 15 s), send the window's facts.
+@(private = "file")
+client_core_subscribe :: proc() -> string {
+	client_send_raw(core.window_msg_subscribe())
+	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
+	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
+	if !got_full do return "Deckhand's background core sent no state"
+	client_facts()
+	return ""
+}
+
+// Dials core.sock until a core with a window token answers its hello, launching one (once) if
+// none does, for up to CORE_START_WAIT. "" = client.sock is the link.
+@(private = "file")
+client_core_dial :: proc(data: string) -> string {
 	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
 	if rwhy != "" do return rwhy
 	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
@@ -137,22 +199,6 @@ client_core_connect :: proc(data: string) -> string {
 		if time.tick_diff(time.tick_now(), deadline) <= 0 do return "Deckhand's background core did not start within 15 s"
 		time.sleep(20 * time.Millisecond)
 	}
-	heap := runtime.heap_allocator()
-	client.log = core.hook_env(.Proto_Log) == "1"
-	client.main = sync.current_thread_id()
-	client.results = make(map[string]core.Result, heap)
-	client.abandoned = make(map[string]bool, heap)
-	client.tab_facts_sent = make(map[u64]string, heap)
-	deferred_init(&client.deferred)
-	client.attached = true
-	core.replica_process = true
-	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
-	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
-	core.files_root_reset_send = proc(base: string) {client_send(core.Files_Set_Root{base = base})}
-	client_send_raw(core.window_msg_subscribe())
-	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
-	if !got_full do return "Deckhand's background core sent no state"
-	client_facts()
 	return ""
 }
 
@@ -208,14 +254,37 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> string {
 	return ""
 }
 
-// The core's connection ended: the window ends too (the core quit, or crashed).
+// The core's connection ended. A core that said quit first (client_core_quit) takes the window with
+// it; otherwise (a crash, a SIGTERM, a handover) the window reconnects at its next frame or timer
+// turn (client_core_reconnect).
 client_core_lost :: proc() {
 	if client.lost do return
 	client.lost = true
 	fmt.eprintln("Deckhand: the background core's connection ended:", cw.sock_reason(client.sock))
 	if core.autotest_active do fmt.println("[autotest] core: connection ended")
+	if core.app_quitting do app_request_quit()
+}
+
+// window.request quit: the core ends on purpose, or let this window go for another; the window
+// quits too and never reconnects.
+client_core_quit :: proc(why: string) {
+	fmt.eprintln("Deckhand: the background core asked the window to quit:", why)
+	if core.autotest_active do fmt.println("[autotest] core: quit:", why)
 	core.app_quitting = true
 	app_request_quit()
+}
+
+// The frame's and the hidden window's turn: a lost connection is dialled again; one that cannot be
+// (no core within 15 s) says why and ends the window.
+client_core_tick :: proc() {
+	if !client.lost || core.app_quitting do return
+	if why := client_core_reconnect(); why != "" {
+		fmt.eprintln("Deckhand: cannot reconnect to the background core:", why)
+		if core.autotest_active do fmt.println("[autotest] core refused:", why)
+		else do platform_alert("Deckhand lost its background core", why)
+		core.app_quitting = true
+		app_request_quit()
+	}
 }
 
 // The window's layout facts the core wrote into its State itself in process (separate only):
@@ -241,4 +310,36 @@ client_call_wait :: proc(cmd: core.Command, wait: time.Duration) -> core.Result 
 	for !(id in client.results) && !client.lost && time.tick_since(start) < wait do client_io(20)
 	if id in client.results do return client_take_result(id)
 	return core.fail("the background core did not answer in time")
+}
+
+// `deckhand --ctl` with a separate core (main.odin, before core.ctl_main): when DECKHAND_SOCKET is
+// this data dir's core.sock and nothing answers there, a core is launched as the window launches
+// one, and waited for (≤ 15 s). So a call from a kept session finds a core after its core went
+// (a crash, an idle exit); the tokens it holds come back with the held tabs (tokens.json). Any
+// other socket, and the in-process mode, are left alone: there the window is the core.
+ctl_core_ensure :: proc() {
+	path := os.get_env("DECKHAND_SOCKET", context.temp_allocator) // as ctl_main reads it
+	if path == "" do return
+	data := core.data_dir(context.temp_allocator)
+	if data == "" || !separate_core_wanted(data) do return
+	core.home_root = data
+	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
+	if rwhy != "" || path != fmt.tprintf("%s/%s", run, core.CORE_SOCK) do return
+	if fd, ok := core.sock_connect(path); ok {
+		core.sock_close(fd)
+		return
+	}
+	if why := client_core_launch(run, data); why != "" {
+		fmt.eprintln("deckhand --ctl: cannot start Deckhand's background core:", why)
+		return
+	}
+	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
+	for time.tick_diff(time.tick_now(), deadline) > 0 {
+		if fd, ok := core.sock_connect(path); ok && core.window_token_read(run) != "" {
+			core.sock_close(fd)
+			return
+		} else if ok do core.sock_close(fd)
+		time.sleep(50 * time.Millisecond)
+	}
+	fmt.eprintln("deckhand --ctl: Deckhand's background core did not start within 15 s")
 }

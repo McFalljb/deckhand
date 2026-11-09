@@ -203,11 +203,12 @@ accounts_cache: struct {
 	ok:   bool,
 }
 
-// The accounts now, the default first (temp). Never empty while HOME is set. Made once a frame
-// (the rows, menus and tags all ask): again when anything it reads changed.
+// The accounts now, the default first (temp). Never empty while HOME is set. Made once a frame or
+// core tick (the rows, menus and tags all ask): again when anything it reads changed.
 claude_accounts :: proc() -> []Claude_Account {
 	heap := runtime.heap_allocator()
-	key := Accounts_Key{frame = app_frames_called, gen = claude_accounts_gen, settings = raw_data(state.settings.claude_accounts), n = len(state.settings.claude_accounts), home = home_dir_now(), def = claude_config_dir(), chosen = state.settings.claude_account_default}
+	// frame: a frame or a core tick, so also while the window is hidden, and in a separate core
+	key := Accounts_Key{frame = app_frames_called + core_loop.ticks, gen = claude_accounts_gen, settings = raw_data(state.settings.claude_accounts), n = len(state.settings.claude_accounts), home = home_dir_now(), def = claude_config_dir(), chosen = state.settings.claude_account_default}
 	c := &accounts_cache
 	same := c.ok && c.key.frame == key.frame && c.key.gen == key.gen && c.key.settings == key.settings && c.key.n == key.n && c.key.home == key.home && c.key.def == key.def && c.key.chosen == key.chosen
 	if !same {

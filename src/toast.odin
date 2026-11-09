@@ -24,7 +24,7 @@ toast: Toast
 
 toast_show :: proc(text: string, err := false) {
 	delete(toast.text)
-	toast = {text = strings.clone(core.one_line(text, context.temp_allocator)), err = err, until = time.tick_add(time.tick_now(), err ? TOAST_TIME_ERR : TOAST_TIME)}
+	toast = {text = strings.clone(core.one_line(text, context.temp_allocator)), err = err} // its time starts once the window shows (toast_tick)
 	app.redraw = true
 	if core.autotest_active do fmt.println("[autotest] toast:", err ? "error:" : "", toast.text)
 }
@@ -35,9 +35,17 @@ toast_clear :: proc() {
 	toast = {}
 }
 
-// The frame's tick: true when a shown toast just went away (draw a frame).
+// The frame's tick: true when a shown toast just went away (draw a frame). A toast raised while the
+// window is hidden or minimised (a separate core's, or a timer's) waits: its few seconds start
+// when the window shows.
 toast_tick :: proc() -> bool {
-	if toast.text == "" || time.tick_diff(toast.until, time.tick_now()) < 0 do return false
+	if toast.text == "" do return false
+	if toast.until == {} {
+		if app_is_hidden() || window_minimised() do return false
+		toast.until = time.tick_add(time.tick_now(), toast.err ? TOAST_TIME_ERR : TOAST_TIME)
+		return false
+	}
+	if time.tick_diff(toast.until, time.tick_now()) < 0 do return false
 	toast_clear()
 	return true
 }

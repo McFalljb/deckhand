@@ -377,7 +377,6 @@ client_facts_forget :: proc(tab_id: u64) {
 }
 
 // A new link (or none): the core has none of the window's facts; all are sent again.
-@(private = "file")
 client_facts_forget_all :: proc() {
 	heap := runtime.heap_allocator()
 	for _, v in client.tab_facts_sent do delete(v, heap)

@@ -1073,6 +1073,7 @@ WINDOW_REPLY_WAIT := 250 * time.Millisecond
 core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer) -> bool {
 	if link != nil {
 		fmt.eprintln("Deckhand: a new window attached: the previous one is let go")
+		window_quit("another Deckhand window attached") // it quits, not reconnects (they would take turns)
 		core_detach_window()
 	}
 	heap := runtime.heap_allocator()

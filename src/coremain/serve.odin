@@ -10,10 +10,12 @@ package main
 // turn: what run_later queued, the windows that said hello, a core tick, the socket's writes. A
 // tick that left terminal output unparsed (READ_BUDGET) runs again at once.
 //
-// Until M4-D: ⌘Q closes the window and this core runs on; Quit Deckhand and Stop All Sessions
-// (Quit{stop_sessions}) ends it. Notifications go through the window (window.request notify);
-// with none attached there is none (M4-D gives the core its own banners). Updates, the first-run
-// sheet and app tabs are the in-process window's only for now.
+// Lifecycle (§6, M4-D): ⌘Q closes the window and this core runs on; a Quit command (Quit Deckhand
+// and Stop All Sessions, or an agent's quit) ends it, and tells the window to quit too
+// (window.request quit) rather than reconnect. SIGTERM ends it with no such word (logout, a
+// handover's predecessor): a window then reconnects. With no window, no tab's process and no job
+// run for 10 minutes it exits (core_idle_due). Notifications go through the window while one is
+// attached, else they are Deckhand Core's own banners.
 
 import "base:runtime"
 import "core:c"
@@ -27,12 +29,16 @@ import "core:time"
 import "../core"
 import "../holder"
 
-foreign import shim "../../build/dh_coremain.a"
+foreign import shim {
+	"../../build/dh_coremain.a",
+	"system:UserNotifications.framework",
+}
 foreign import foundation "system:Foundation.framework"
 @(default_calling_convention = "c")
 foreign shim {
 	dh_core_activity :: proc(on: c.int) ---
 	dh_core_trash :: proc(path: cstring) -> c.int ---
+	dh_core_notify :: proc(title, body: cstring) -> c.int ---
 }
 _ :: foundation
 
@@ -45,6 +51,7 @@ loop: struct {
 	fire:           proc(),
 	next_fire:      time.Tick,
 	quit:           bool,
+	idle_since:     time.Tick, // nothing to do since ({} = something; core_idle_due)
 }
 
 SERVE_USAGE :: "usage: deckhand-core-serve serve --run DIR --data DIR [--ready PATH]"
@@ -83,6 +90,7 @@ serve_main :: proc(args: []string) -> int {
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
 	if !serve_platform() do return 1
 	core.home_root = strings.clone(data)
+	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {
 		fmt.eprintln("deckhand-core serve:", why)
 		return 3
@@ -122,6 +130,9 @@ serve_main :: proc(args: []string) -> int {
 		core.claude_disk_launching = false
 	}
 	core.holder_adopt_all()
+	// the restored current tab is focused (its session starts), as the in-process window does after
+	// its first layout: a window that attaches, or reconnects after a crash, finds it current
+	core.persist_after_layout(skip = false)
 	core.harness_no_sudo_sweep(at_quit = false)
 	if core.claude_startup_rescan_due() do core.run_command(core.Rescan{}, {kind = .Internal})
 	if files && !core.setup_due() do core.chats_instructions_ensure(core.date_stamp())
@@ -147,6 +158,7 @@ serve_platform :: proc() -> bool {
 		quit = proc() {
 			core.app_quitting = true
 			loop.quit = true
+			core.window_quit("Deckhand's background core quit") // the window goes too, never reconnects
 		},
 		wake = proc() {
 			if sync.atomic_exchange(&loop.woken, true) do return // one byte per turn is enough
@@ -155,8 +167,9 @@ serve_platform :: proc() -> bool {
 		},
 		run_later = proc(p: proc()) {append(&loop.later, p)},
 		notify = proc(title, body: string) {
-			if core.autotest_active do fmt.println("[autotest] notify:", title, "-", body)
-			core.window_notify(title, body)
+			if core.autotest_active do fmt.println("[autotest] notify:", title, "-", body, core.window_attached() ? "" : "(Deckhand Core)")
+			if core.window_attached() do core.window_notify(title, body)
+			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
 		},
 		trash = proc(path: string) -> bool {return dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator)) == 1},
 		activity = proc(on: bool) {dh_core_activity(on ? 1 : 0)},
@@ -205,6 +218,10 @@ serve_loop :: proc() {
 		core.claude_reload_tick() // and Claude Code's
 		core.window_link_io()
 		loop_again = core.output_backlog() && terms_bytes_in() != before
+		if core.core_idle_due(&loop.idle_since, core.core_idle_facts(), time.tick_now()) {
+			fmt.eprintfln("deckhand-core serve: no window, no tab's process and no job run for %v: exiting", core.CORE_IDLE_EXIT)
+			loop.quit = true
+		}
 		free_all(context.temp_allocator)
 	}
 }

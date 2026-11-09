@@ -50,6 +50,8 @@ App :: struct {
 	key_taken:      bool, // the last KEY_DOWN was the chrome's: drop its CHAR/KEY_UP
 	window_active:  bool, // the window has the keyboard (sokol FOCUSED/UNFOCUSED)
 	last_frame_at:  time.Tick, // a separate core: the last frame's start (the timer reads the core only between frames)
+	closing:        bool, // a separate core: the window is closing, the core runs on (quit_route)
+	close_asked:    time.Tick, // a separate core: app_request_quit asked sokol to close the window ({} = not, or it did)
 	window_title:   string,
 }
 
@@ -93,6 +95,7 @@ init :: proc "c" () {
 	client_connect() // the window's link: the core's requests reach it while the workspace comes back (client.odin)
 	app.window_active = true
 	platform_window_init()
+	platform_terminate_hook(on_terminate) // the Dock's Quit and logout (quit_route)
 	menubar_install() // the macOS menu bar (menubar.odin)
 	// the OS appearance before anything is drawn, then its changes
 	client_call(core.System_Appearance{light = platform_system_light()}, .Internal) // before the attach: straight in
@@ -189,6 +192,7 @@ init :: proc "c" () {
 init_separate :: proc() {
 	app.window_active = true
 	platform_window_init()
+	platform_terminate_hook(on_terminate)
 	menubar_install()
 	platform_watch_appearance()
 	autotest_init()
@@ -228,6 +232,7 @@ init_separate :: proc() {
 	// frames stop while hidden: the core's messages are read by a timer then (and the script runs)
 	core.platform.core_timer(50 * time.Millisecond, proc() {
 		if time.tick_since(app.last_frame_at) < 50 * time.Millisecond do return
+		client_core_tick() // the core's connection ended: dial again (client_core.odin)
 		client_drain()
 		autotest_step()
 	})
@@ -273,7 +278,15 @@ win_os_app :: proc() -> Win_OS {
 // frames at all (minimised, App Nap), the core loop's timer closes it (core_quit_stalled).
 app_request_quit :: proc() {
 	if app_is_hidden() do app_unhide()
+	app.close_asked = time.tick_now()
 	sapp.request_quit()
+}
+
+// A separate core's close that waits for a frame that does not come (minimised, App Nap), as
+// core_quit_stalled is for the in-process quit: the window timer closes the window itself.
+separate_close_stalled :: proc(now: time.Tick) -> bool {
+	if !client_separate() || app.close_asked == {} do return false
+	return time.tick_diff(app.close_asked, now) >= core.QUIT_STALL_AFTER && time.tick_diff(app.last_frame_at, now) >= core.QUIT_STALL_AFTER
 }
 
 // The window's side of the core's hooks (window_hooks.odin): the redraw signal and test mode's;
@@ -307,13 +320,77 @@ ui_do :: proc(cmd: core.Command) {
 	client_send(cmd) // client.odin
 }
 
-// A separate core: Quit Deckhand (⌘Q) closes the window and the sessions run on in the core
-// (until M4-D); only Quit Deckhand and Stop All Sessions reaches the core. True: handled here.
+// A Quit from the window (⌘Q, the menus, the palette): with a separate core, Quit Deckhand closes
+// the window and the sessions run on in the core; Quit Deckhand and Stop All Sessions, and a
+// confirmation's answer, reach the core (quit_route). True: handled here.
 window_only_quit :: proc(cmd: core.Command) -> bool {
 	q, is := cmd.(core.Quit)
-	if !is || !client_separate() || q.stop_sessions do return false
+	if !is || q.confirm != "" do return false
+	if quit_route(q.stop_sessions ? .Stop_All : .Menu, client_separate(), app_closing()) != .Close_Window do return false
 	app_request_quit()
 	return true
+}
+
+// ---- the quit paths (docs/plans/background-core.md §6, §10.3 M4-D) ----
+
+Quit_From :: enum u8 {
+	Menu, // ⌘Q, the menu's or palette's Quit, the window's close button
+	Dock, // -[NSApp terminate:] with no reason: the Dock's Quit, a script's `quit app "Deckhand"`
+	Logout, // ...with one: log out, restart, shut down
+	Stop_All, // Quit Deckhand and Stop All Sessions…
+}
+
+Quit_Do :: enum u8 {
+	Terminate, // go now; cleanup does the rest
+	Ask_Core, // Quit{} to the core: it asks if anything would stop, then the window closes (in process: the holder's handover)
+	Close_Window, // a separate core: only the window closes; the core and its sessions run on
+	Stop_All, // Quit{stop_sessions} to the core: it persists, hangs up the holder's sessions and exits; the window follows
+}
+
+// What a quit does. quitting: one already went through (a confirmed Quit, the window closing):
+// macOS's terminate after the last window closed goes ahead. Logout: both sides save and exit
+// (the core on the SIGTERM launchd sends it, in process cleanup's save); today's restore follows.
+quit_route :: proc(from: Quit_From, separate, quitting: bool) -> Quit_Do {
+	if quitting do return .Terminate
+	switch from {
+	case .Logout: return .Terminate
+	case .Stop_All: return .Stop_All
+	case .Menu, .Dock: return separate ? .Close_Window : .Ask_Core
+	}
+	return .Terminate
+}
+
+app_closing :: proc() -> bool {return core.app_quitting || app.closing}
+
+// -[NSApp terminate:] (platform_terminate_hook): the Dock's Quit is ⌘Q; logout goes now. 1:
+// terminate now; 0: not yet (the quit goes its usual way and terminates once the window closed).
+on_terminate :: proc "c" (logout: c.int) -> c.int {
+	context = core.app_context
+	from := logout != 0 ? Quit_From.Logout : .Dock
+	if core.autotest_active do fmt.println("[autotest] terminate:", from)
+	switch quit_route(from, client_separate(), app_closing()) {
+	case .Terminate: return 1
+	case .Ask_Core: ui_do(core.Quit{})
+	case .Close_Window: app_request_quit()
+	case .Stop_All: ui_do(core.Quit{stop_sessions = true})
+	}
+	return 0
+}
+
+// The first time the window closes over a separate core: a word that the sessions run on, and how
+// to stop them (once per data dir: QUIT_NOTICE_FILE).
+QUIT_NOTICE_FILE :: "background-core-noticed"
+
+quit_notice_once :: proc() {
+	if core.home_root == "" do return
+	path := fmt.tprintf("%s/%s", core.home_root, QUIT_NOTICE_FILE)
+	if os.exists(path) do return
+	_ = os.write_entire_file(path, transmute([]u8)string("shown\n"))
+	if core.autotest_active {
+		fmt.println("[autotest] quit notice")
+		return
+	}
+	platform_alert("Your sessions keep running", "Deckhand's window closes, and its background core keeps your sessions and jobs running. Open Deckhand again to see them. To stop them too, choose Quit Deckhand and Stop All Sessions… in the Deckhand menu.")
 }
 
 // A menu row's command: as ui_do, then its outcome is shown where nothing
@@ -336,6 +413,7 @@ frame :: proc "c" () {
 	client_facts() // what the last event changed of the window's facts, before the core reads them (client.odin)
 	if client_separate() { // the core is another process: what it sent, then the script's step
 		app.last_frame_at = time.tick_now()
+		client_core_tick() // the core's connection ended: dial again (client_core.odin)
 		client_drain()
 		autotest_step()
 	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
@@ -843,13 +921,16 @@ event :: proc(e: ^sapp.Event) {
 		}
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
-		// a separate core: the window closes, the core and its sessions run on (until M4-D: ⌘Q)
+		// a separate core: the window closes, the core and its sessions run on (quit_route)
 		if client_separate() {
+			app.close_asked = {}
 			if !core.app_quitting && len(tab_views_unsaved_paths()) > 0 {
 				sapp.cancel_quit()
 				toast_show("Save or close the files with unsaved changes first: the window closes, the sessions run on", true)
 				return
 			}
+			if !app_closing() do quit_notice_once()
+			app.closing = true
 			platform_hide_windows()
 			if core.autotest_active do fmt.println("[autotest] quit: windows hidden")
 			return
@@ -1330,7 +1411,10 @@ test_scale_parse :: proc(env: string) -> (scale: f64, ok: bool) {
 
 main :: proc() {
 	core.persist.launch = time.tick_now()
-	if len(os.args) > 1 && os.args[1] == "--ctl" do os.exit(core.ctl_main(os.args[2:]))
+	if len(os.args) > 1 && os.args[1] == "--ctl" {
+		ctl_core_ensure() // a separate core that went: launched again (client_core.odin)
+		os.exit(core.ctl_main(os.args[2:]))
+	}
 	ok: bool
 	app_args, ok = app_args_parse(os.args[1:])
 	if !ok {

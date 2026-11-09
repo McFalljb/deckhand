@@ -2,6 +2,7 @@
 package main
 
 import "core"
+import "core:c"
 import "core:time"
 
 // Stubs until Linux/Windows get their own versions (frames drain the inbox).
@@ -9,6 +10,8 @@ import "core:time"
 platform_wake :: proc() {}
 platform_alert :: proc(title, text: string) {}
 platform_hide_windows :: proc() {}
+platform_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) {}
+window_minimised :: proc() -> bool {return false}
 cpu_seconds :: proc() -> f64 {return 0}
 window_raise_without_focus :: proc() {}
 window_send_back :: proc() {}

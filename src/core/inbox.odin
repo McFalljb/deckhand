@@ -189,6 +189,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		copy(layout.nodes, c.layout.nodes)
 		return Restore_Session{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator), session_dir = s(c.session_dir, allocator), cwd = s(c.cwd, allocator), tabs = tabs, home = c.home, agent = c.agent, layout = layout, pi_pane = c.pi_pane, pi_active = c.pi_active, pi_held = c.pi_held, pi_readonly = c.pi_readonly}
 	case Set_Agent_Name:      return Set_Agent_Name{name = s(c.name, allocator)}
+	case Core_Handover:       return Core_Handover{to = s(c.to, allocator)}
 	case Set_Agent_Model:     return Set_Agent_Model{model = s(c.model, allocator)}
 	case Open_File:           return Open_File{path = s(c.path, allocator), line = c.line, col = c.col, session = c.session, preview = c.preview}
 	case New_Shell_Tab:       return New_Shell_Tab{session = c.session, cwd = s(c.cwd, allocator)}
@@ -273,7 +274,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return browser_agent_clone(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		return browser_act_clone(cmd, allocator)
-	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
+	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Holder_Replace, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
 		return cmd
 	}
 	return cmd
@@ -339,6 +340,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.job.summary, allocator)
 		delete(c.job.run_dir, allocator)
 	case Set_Agent_Name:      delete(c.name, allocator)
+	case Core_Handover:       delete(c.to, allocator)
 	case Set_Agent_Model:     delete(c.model, allocator)
 	case Pi_Reload:           delete(c.confirm, allocator)
 	case Pi_Reload_All, Pi_Restart_Updated, Reload_Watch: reload_free(cmd, allocator)

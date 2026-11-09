@@ -39,10 +39,13 @@ DECKHAND_HOLDER_HOOKS"
 #   the holder's own re-exec marker, _DECKHAND_RESPONSIBLE (src/holder/spawn.odin: it sets it with
 #     its pid before re-execing itself to disclaim TCC responsibility, and reads it back; it
 #     steers nothing else); seen as DECKHAND_RESPONSIBLE now that DECKHAND_ names are scanned
+#   DECKHAND_SUCCESSOR_SECRET: the key of the ready handshake's entry that carries a handover's
+#     successor secret to a new core (src/holder/detach.odin); taken out, never an environment read
 ALLOWED_SUFFIXES="SOCKET TOKEN CONTROL_TOKEN CLAUDE_TOKEN CLAUDE_TAB CLAUDE_READONLY CLAUDE_ACCOUNT CLI SHOTS_DIR APP JOB RUN RUN_DIR SCHEDULED_AT GUI_LAUNCH CEF_SHARED_TEXTURE"
 ALLOWED="DECKHAND_
 PI_DESK_
-DECKHAND_RESPONSIBLE"
+DECKHAND_RESPONSIBLE
+DECKHAND_SUCCESSOR_SECRET"
 for x in $ALLOWED_SUFFIXES; do ALLOWED="$ALLOWED
 DECKHAND_$x
 PI_DESK_$x"; done

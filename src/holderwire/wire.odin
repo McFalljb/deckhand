@@ -14,6 +14,7 @@
 //   optional fields only. Unknown fields are ignored; an unknown kind gets UNKNOWN{kind}.
 package holderwire
 
+import "core:mem"
 import "core:encoding/endian"
 import "core:encoding/json"
 import "core:time"
@@ -69,6 +70,8 @@ Kind :: enum u8 {
 	Ping           = 30,
 	Pong           = 31,
 	Unknown        = 32,
+	Supervise      = 33, // the supervisor (§7.7): a separate core's path after WELCOME; a window's status or use_previous as its first frame
+	Supervise_Status = 34,
 }
 
 Header :: struct {
@@ -226,6 +229,22 @@ Goodbye_Ack :: struct {
 	successor_secret: string,
 }
 
+// SUPERVISE (docs/plans/background-core.md §7.7). op "core": the attached core is a separate
+// core (deckhand-core-serve) at path, which the holder relaunches if it crashes. A window, as its
+// first frame instead of HELLO: op "status", or "use_previous" (launch the previous installed
+// core now); it gets SUPERVISE_STATUS and the connection closes.
+Supervise :: struct {
+	op:   string,
+	path: string `json:"path,omitempty"`,
+}
+
+Supervise_Status :: struct {
+	core:     bool, // a core is attached
+	crashes:  i64, // failed cores and launches in a row (since the last healthy core)
+	gave_up:  bool, // it stopped relaunching (too many failures in a row)
+	previous: bool, // a previous core is installed (Use previous core can work)
+}
+
 Foreground_Is :: struct {
 	pgid: i64,
 }
@@ -301,14 +320,21 @@ is_known :: proc(kind: u8) -> bool {
 }
 
 // Appends a control frame. False if the payload would be too large.
-encode :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, msg: $T) -> bool {
+encode :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, msg: $T, secret := false) -> bool {
 	spec, _ := spec_of(u8(kind))
 	assert(spec.payload == .Json, "encode: not a JSON kind")
 	data, err := json.marshal(msg, {}, context.temp_allocator)
+	// secret: msg carries one (a successor secret): the JSON's own copy is zeroed once appended
+	defer if secret do wipe_bytes(data)
 	if err != nil || len(data) > MAX_CONTROL do return false
 	put_header(out, u8(kind), terminal, len(data))
 	append(out, ..data)
 	return true
+}
+
+// Zeroes b in a way the compiler keeps (trust.wipe's twin: holderwire imports nothing of ours).
+wipe_bytes :: proc(b: []u8) {
+	if len(b) > 0 do mem.zero_explicit(raw_data(b), len(b))
 }
 
 // INPUT: raw bytes.

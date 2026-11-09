@@ -1,0 +1,5 @@
+# tests/scripts/handover.sh, run 2: the window finds the core and hands it over (DECKHAND_CORE_HANDOVER=self)
+# to a new core process, then attaches to that one: the session's terminals adopted, still running.
+waitstate 20000 open_sessions.0.tabs.1.status running
+assert_state open_sessions.0.tabs.0.status running
+quit

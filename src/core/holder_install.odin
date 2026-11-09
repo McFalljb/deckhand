@@ -38,7 +38,7 @@ import "../trust"
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh; trust.CORE_IDS)
 HOLDER_BIN :: "deckhand-core"
 CORE_APP :: "Deckhand Core.app" // in Deckhand.app/Contents/Helpers (scripts/bundle-app.sh)
-HOLDER_REV :: 4 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 5 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 CORE_LOG :: "core.log" // in the runtime dir: a separate core's stderr (deckhand-core serve)
 
@@ -66,6 +66,8 @@ holder_bin_find :: proc(allocator := context.allocator) -> string {
 // unreadable, the copy fails codesign, a write failed).
 holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
 	if autotest_active do return strings.clone(bin), true, ""
+	// the holder of an installed core (core_versions.odin) is an installed, checked copy already
+	if strings.has_prefix(bin, fmt.tprintf("%s/", core_versions_dir(data))) do return strings.clone(bin), true, ""
 	src, rerr := os.read_entire_file(bin, context.temp_allocator)
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)
@@ -123,7 +125,6 @@ holder_bundle_of :: proc(bin: string) -> string {
 // there (the copy is what runs), its quarantine removed, then the temp dir renamed to dir. dir
 // already there with the same main executable (sum): reused. The path returned is the copy's
 // main executable.
-@(private = "file")
 holder_install_bundle :: proc(app, dir, sum: string) -> (path: string, ok: bool, why: string) {
 	rel := fmt.tprintf("%s/Contents/MacOS/%s", CORE_APP, HOLDER_BIN)
 	dest := fmt.tprintf("%s/%s", dir, rel)
@@ -219,7 +220,12 @@ when ODIN_OS == .Darwin {
 	}
 }
 
-@(private = "file")
+// The sha256 (hex) of a file's bytes, "" if unreadable. Temp.
+holder_sha256_file :: proc(path: string) -> string {
+	b, err := os.read_entire_file(path, context.temp_allocator)
+	return err == nil ? holder_sha256(b) : ""
+}
+
 holder_sha256 :: proc(data: []u8) -> string {
 	sum: [sha2.DIGEST_SIZE_256]u8
 	ctx: sha2.Context_256
@@ -234,7 +240,7 @@ holder_sha256 :: proc(data: []u8) -> string {
 // their defaults and none blocked, no other descriptor. A thread reaps it when it exits (it is
 // only ever our child while we live; after we exit launchd adopts it). Test mode and
 // DECKHAND_HOLDER_DIRECT=1 use this; the launchd launch falls back to it.
-holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold") -> (pid: i32, ok: bool, why: string) {
+holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold", secret := "") -> (pid: i32, ok: bool, why: string) {
 	argv := []cstring{
 		strings.clone_to_cstring(bin, context.temp_allocator),
 		strings.clone_to_cstring(mode, context.temp_allocator), // hold, or serve (a separate core)
@@ -242,8 +248,23 @@ holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode :
 		strings.clone_to_cstring(run, context.temp_allocator),
 		"--data",
 		strings.clone_to_cstring(data, context.temp_allocator),
+		secret != "" ? "--secret-stdin" : nil, // a handover's successor: the secret on a pipe (serve only)
 		nil,
 	}
+	// the secret's pipe: written now (65 bytes fit any pipe buffer), its read end the child's stdin
+	sp: [2]posix.FD = {-1, -1}
+	if secret != "" {
+		sync.rw_mutex_lock(&fork_lock)
+		pok := posix.pipe(&sp) == .OK
+		if pok do for fd in sp do posix.fcntl(fd, .SETFD, posix.FD_CLOEXEC)
+		sync.rw_mutex_unlock(&fork_lock)
+		if !pok do return 0, false, "cannot make a pipe"
+		line := fmt.tprintf("%s\n", secret)
+		posix.write(sp[1], raw_data(line), len(line))
+		trust.wipe(transmute([]u8)line)
+		posix.close(sp[1])
+	}
+	defer if sp[0] >= 0 do posix.close(sp[0])
 	envp := posix.environ
 	if env != nil {
 		cenv := make([]cstring, len(env) + 1, context.temp_allocator)
@@ -262,7 +283,8 @@ holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode :
 	posix_spawnattr_setflags(&attr, i16(HOLDER_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT | HOLDER_SPAWN_SETSIGDEF | HOLDER_SPAWN_SETSIGMASK))
 	posix_spawn_file_actions_init(&fa)
 	defer posix_spawn_file_actions_destroy(&fa)
-	holder_spawn_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
+	if sp[0] >= 0 do posix_spawn_file_actions_adddup2(&fa, i32(sp[0]), 0)
+	else do holder_spawn_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
 	holder_spawn_addopen(&fa, 1, log, transmute(i32)posix.O_Flags{.WRONLY, .CREAT, .APPEND}, 0o600)
 	posix_spawn_file_actions_adddup2(&fa, 1, 2)
 	p: posix.pid_t
@@ -325,29 +347,15 @@ core_serve_bin_find :: proc(allocator := context.allocator) -> string {
 	return os.is_file(p) ? strings.clone(p, allocator) : ""
 }
 
-// What to run for a separate core: bin itself in test mode, else the serve binary of an
-// installed, checked copy of Deckhand Core.app in <data>/core/<rev>-<sha12 of both binaries>/ (as
-// the holder's: a running core keeps its files when the app is updated or rebuilt). A bare
-// development build (no Core.app) runs bin where it is. M4-E's `deckhand-core install` replaces it.
+// What to run for a separate core: bin itself in test mode, or for a bare development build (no
+// Core.app); else the serve binary of bin's Core.app installed as current in <data>/core/
+// (core_versions.odin: a running core keeps its files when the app is updated or rebuilt).
 core_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
 	if autotest_active do return strings.clone(bin), true, ""
-	holder := fmt.tprintf("%s/%s", filepath.dir(bin), HOLDER_BIN)
-	app := holder_bundle_of(holder)
+	app := holder_bundle_of(fmt.tprintf("%s/%s", filepath.dir(bin), HOLDER_BIN))
 	if app == "" {
 		fmt.eprintln("Deckhand: background core: no Deckhand Core.app (a bare development build): running", bin, "in place")
 		return strings.clone(bin), true, ""
 	}
-	hs, herr := os.read_entire_file(holder, context.temp_allocator)
-	ss, serr := os.read_entire_file(bin, context.temp_allocator)
-	if herr != nil || serr != nil do return "", false, fmt.tprintf("cannot read %s", app)
-	hsum, ssum := holder_sha256(hs), holder_sha256(ss)
-	both := holder_sha256(transmute([]u8)strings.concatenate({hsum, ssum}, context.temp_allocator))
-	dir := fmt.tprintf("%s/core/%d-c%s", strings.trim_right(data, "/"), HOLDER_REV, both[:12])
-	p, iok, iwhy := holder_install_bundle(app, dir, hsum)
-	if !iok do return "", false, iwhy
-	serve := fmt.tprintf("%s/%s", filepath.dir(p), CORE_SERVE_BIN)
-	if got, err := os.read_entire_file(serve, context.temp_allocator); err != nil || holder_sha256(got) != ssum {
-		return "", false, fmt.tprintf("%s changed while it was copied", app)
-	}
-	return strings.clone(serve), true, ""
+	return core_install_app(app, data)
 }

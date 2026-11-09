@@ -18,6 +18,7 @@ import "core:time"
 import "core"
 import gh "ghostty"
 import hw "holderwire"
+import "trust"
 
 @(test)
 holder_sock_names :: proc(t: ^testing.T) {
@@ -180,6 +181,34 @@ holder_answered_no_second_launch :: proc(t: ^testing.T) {
 	for x in files do testing.expectf(t, !core.holder_sock_name_ok(x.name) || x.name == "holder-0000fa01.sock", "a second holder: %s", x.name)
 	testing.expect(t, os.exists(f.path), "the answering holder's socket is kept")
 	testing.expect(t, strings.contains(toast.text, "session holder"), toast.text)
+	testing.expect(t, !core.holder_wanted(), "new tabs run on their own PTYs")
+}
+
+// A holder whose code is not ours (an older build signed otherwise) gets nothing, not even a HELLO:
+// no second holder starts beside it, and the user is asked once whether to replace it. "No" runs
+// on without one; "yes" signals only a process that runs a holder binary (here the fake is this
+// test binary: refused).
+@(test)
+holder_other_build_asked :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	when core.TEST_HOOKS do core.holder_peer_ids = trust.CORE_IDS // the fake's own identifier is not the holder's
+	toast_clear()
+	testing.expect(t, !core.holder_client_start(), "attached to another build's holder")
+	testing.expect_value(t, core.state.holder_ask.pid, i32(posix.getpid()))
+	testing.expect_value(t, len(core.fake_holder_got(&f)), 0)
+	testing.expect(t, !sync.atomic_load(&f.helloed), "a HELLO went to another build's holder")
+	files, _ := os.read_all_directory_by_path(f.dir, context.temp_allocator)
+	for x in files do testing.expectf(t, !core.holder_sock_name_ok(x.name) || x.name == "holder-0000fa01.sock", "a second holder: %s", x.name)
+	r := core.run_command(core.Holder_Replace{stop = true}, {kind = .UI})
+	testing.expect(t, !r.ok && strings.contains(r.error, "gone"), r.error) // not a holder binary: never signalled
+	core.state.holder_ask = {pid = i32(posix.getpid())}
+	r = core.run_command(core.Holder_Replace{stop = false}, {kind = .UI})
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, core.state.holder_ask, core.Holder_Ask{})
+	testing.expect(t, strings.contains(toast.text, "without a session holder"), toast.text)
 	testing.expect(t, !core.holder_wanted(), "new tabs run on their own PTYs")
 }
 

@@ -127,6 +127,13 @@ SPECS := []Kind_Spec {
 	{"PING", .Ping, false, .Json, nil},
 	{"PONG", .Pong, false, .Json, nil},
 	{"UNKNOWN", .Unknown, false, .Json, {{name = "kind", type = .Int, required = true}}},
+	{"SUPERVISE", .Supervise, false, .Json, {{name = "op", type = .String, required = true}, {name = "path", type = .String}}},
+	{"SUPERVISE_STATUS", .Supervise_Status, false, .Json, {
+		{name = "core", type = .Bool, required = true},
+		{name = "crashes", type = .Int, required = true},
+		{name = "gave_up", type = .Bool, required = true},
+		{name = "previous", type = .Bool, required = true},
+	}},
 }
 
 spec_of :: proc(kind: u8) -> (Kind_Spec, bool) {

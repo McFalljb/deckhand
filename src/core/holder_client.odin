@@ -126,6 +126,9 @@ Holder_Client :: struct {
 	up_done:   bool, // the outcome is in up_result (mu)
 	up_result: Holder_Upgrade_Result,
 	upgrade_error_seen: string, // the last WELCOME's upgrade_error (a keeper serves)
+	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
+	refused_path: string, // its socket
+	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
 }
 
 hc := Holder_Client{fd = -1}
@@ -221,8 +224,13 @@ holder_client_start :: proc() -> bool {
 	if why != "" do return false
 	socks := holder_socks(run)
 	if len(socks) == 0 && !state.settings.keep_sessions do return false // nothing to adopt; tried again once the setting is on
-	// relaunched by an update (holder_successor.odin): the secret the holder waits for
-	secret := successor_secret_take(run)
+	// relaunched by an update (holder_successor.odin), or a handover's successor core
+	// (core_handover.odin): the secret the holder waits for
+	secret: string
+	if successor_given[0] != 0 {
+		secret = strings.clone(string(successor_given[:]), context.temp_allocator)
+		trust.wipe(successor_given[:])
+	} else do secret = successor_secret_take(run)
 	defer for &b in transmute([]u8)secret do b = 0
 	answered := false
 	// a holder that took the connection and closed it (or never answered) without a byte may have
@@ -250,6 +258,13 @@ holder_client_start :: proc() -> bool {
 				return true
 			case .Answered:
 				answered = true
+			case .Refused_Code:
+				answered = true
+				if hc.refused_pid == 0 {
+					hc.refused_pid = refused_code_pid
+					delete(hc.refused_path)
+					hc.refused_path = strings.clone(path)
+				}
 			case .Quiet:
 				if pass == 0 {
 					quiet = true
@@ -281,6 +296,16 @@ holder_client_start :: proc() -> bool {
 		return false // only dead holders' sockets (removed): tried again once the setting is on
 	case .Warn_Running:
 		hc.tried, hc.unreachable = true, true
+		if hc.refused_pid != 0 {
+			// another build's holder: never a silent second one, and nothing of ours goes to it. The
+			// user is asked once whether to stop it (Holder_Replace; the window shows state.holder_ask)
+			n := holder_children(hc.refused_pid)
+			fmt.eprintln("Deckhand: session holder: one from another build runs (pid", hc.refused_pid, ",", n, "sessions): asking whether to replace it")
+			state.holder_ask = {pid = hc.refused_pid, sessions = n}
+			window_state_changed()
+			return false
+		}
+		hc.hung_since = time.tick_now()
 		fmt.eprintln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
 		window_toast("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
 		return false
@@ -343,10 +368,13 @@ Connect_Result :: enum {
 	Answered, // something listens there but gave no usable WELCOME: a holder runs (trust.holder_start)
 	Stale, // nobody listens (a holder killed with -9: the holder unlinks only its own socket at exit)
 	Quiet, // took the connection but closed it, or never answered, without a byte (shutting down?)
+	Refused_Code, // a holder of this user whose code is not ours (another build): nothing was sent to it
 }
 
 @(private = "file")
 handshake_got: int // bytes the handshake read so far (Quiet: none)
+@(private = "file")
+refused_code_pid: i32 // holder_connect's Refused_Code: the peer's pid
 
 // Connect, check the peer, HELLO, WELCOME and its TAILs; then the reader thread. Anything but
 // Welcomed keeps nothing: refused, a stale socket, a bad or lying WELCOME.
@@ -360,11 +388,13 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		sock_close(fd)
 		return .Answered
 	}
-	// its code, before HELLO: SPAWN carries the environment and its tokens (§5.3, P9)
+	// its code, before HELLO: SPAWN carries the environment and its tokens (§5.3, P9), HELLO the
+	// successor secret. Another build's holder (an older one signed otherwise): the user decides
 	if why := holder_peer_code_ok(tok); why != "" {
 		fmt.eprintln("Deckhand: session holder: refused its peer:", why)
 		sock_close(fd)
-		return .Answered
+		refused_code_pid = peer.pid
+		return .Refused_Code
 	}
 	set_timeouts(fd)
 	hc.fd, hc.peer = fd, peer
@@ -381,7 +411,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		return handshake_got == 0 ? .Quiet : .Answered
 	}
 	out := make([dynamic]u8, context.temp_allocator)
-	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE, successor_secret = secret})
+	hw.encode(&out, .Hello, 0, hw.Hello{wire = hw.WIRE, successor_secret = secret}, secret = secret != "")
 	sent := sock_write_all(fd, out[:])
 	if secret != "" do trust.wipe(out[:]) // the HELLO held the successor secret
 	if !sent do return fail("cannot send HELLO")
@@ -459,6 +489,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 		window_toast(holder_kept_text(len(w.terminals)), err = true)
 	}
 	hc.reader = thread.create_and_start(holder_reader)
+	holder_supervise_me()
 	if autotest_active do fmt.printfln("[autotest] holder attached: previous %s, %d terminals%s", hc.previous, len(w.terminals), secret != "" ? ", as the named successor" : "")
 	return .Welcomed
 }
@@ -539,6 +570,7 @@ holder_reader :: proc() {
 			return
 		}
 		hw.stream_feed(&hc.rx, buf[:n])
+		if sync.atomic_load(&hc.handed) do trust.wipe(buf[:n]) // after GOODBYE: the ack may carry the successor secret
 		if !holder_frames() do return
 		if sync.atomic_load(&hc.upgrading) do upgrade_release() // after UPGRADE_FAILED: what waited goes out
 		free_all(context.temp_allocator)
@@ -637,7 +669,7 @@ holder_frame :: proc(f: hw.Frame) {
 		why := "the holder refused the upgrade"
 		if hw.decode(f, .Upgrade_Failed, &m, context.temp_allocator) == .None do why = m.error
 		upgrade_finish_locked({error = strings.clone(why), holder_rev = hc.holder_rev, pid = hc.pid})
-	case .Pong, .Unknown:
+	case .Supervise_Status, .Pong, .Unknown:
 	case:
 		fmt.eprintln("Deckhand: session holder: ignoring a frame of kind", f.kind)
 	}
@@ -1094,6 +1126,7 @@ holder_reattach :: proc() -> bool {
 			upgrade_finish_locked(res)
 			sync.unlock(&hc.mu)
 			upgrade_release()
+			holder_supervise_me() // a new image starts with no supervisor state
 			if autotest_active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
 			return true
 		}
@@ -1262,4 +1295,110 @@ holder_successor_retry_tick :: proc() {
 held_away_any :: proc() -> bool {
 	for s in state.open_sessions do for t in s.tabs do if t.held_away != 0 do return true
 	return false
+}
+
+// ---- a holder from another build (Refused_Code) and a holder that never answers ----
+
+// How many processes pid has as children (its sessions, for a holder): 0 when unknown.
+holder_children :: proc(pid: i32) -> int {
+	when ODIN_OS == .Darwin {
+		buf: [1024]posix.pid_t
+		n := proc_listchildpids(posix.pid_t(pid), &buf[0], i32(size_of(buf))) // jobs_run.odin's
+		return max(0, int(n))
+	} else {
+		return 0
+	}
+}
+
+HOLDER_STOP_WAIT :: 3 * time.Second // after SIGTERM, before SIGKILL
+
+// Holder_Replace: the user's answer to state.holder_ask. stop: SIGTERM the refused holder (still
+// that process: the same pid running a deckhand-core), SIGKILL after HOLDER_STOP_WAIT, remove its
+// socket, and attach a new holder (its sessions are gone: the tabs that waited for them start
+// fresh). Not stop: run on without one, as before. Main thread; asked once per run.
+holder_replace :: proc(stop: bool) -> Result {
+	pid := hc.refused_pid
+	if state.holder_ask.pid == 0 || pid == 0 do return fail("no session holder from another build is waiting for an answer")
+	state.holder_ask = {}
+	if !stop {
+		window_toast("Running without a session holder: tabs opened now stop when Deckhand quits. The other build's sessions keep running there.", err = true)
+		return {ok = true}
+	}
+	if exe := holder_pid_exe(pid); !strings.has_suffix(exe, "/" + HOLDER_BIN) {
+		return fail("that session holder is gone") // a reused pid is never signalled
+	}
+	fmt.eprintln("Deckhand: session holder: stopping the one from another build (pid", pid, ") as the user asked")
+	posix.kill(posix.pid_t(pid), .SIGTERM)
+	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
+	for posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
+	if posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK {
+		posix.kill(posix.pid_t(pid), .SIGKILL)
+		for _ in 0 ..< 50 {
+			if posix.kill(posix.pid_t(pid), posix.Signal(0)) != .OK do break
+			time.sleep(20 * time.Millisecond)
+		}
+	}
+	if hc.refused_path != "" do sock_unlink(hc.refused_path)
+	hc.refused_pid = 0
+	hc.tried, hc.unreachable = false, false
+	for &s in state.open_sessions do for &t in s.tabs do t.held_away = 0 // their processes went with it
+	if !holder_client_start() do return fail("the old session holder is stopped, but a new one did not start (new tabs stop when Deckhand quits)")
+	window_toast("A new session holder runs: tabs opened from now on keep running when Deckhand quits.")
+	return {ok = true}
+}
+
+// Main thread, every tick: a holder that answered but never WELCOMEd (Warn_Running) for
+// PONG_TIMEOUT is taken for hung for good: the tabs that waited for its sessions (held_away) start
+// fresh here (the old processes, if they still run, are stuck in it).
+holder_hung_tick :: proc() {
+	if hc.hung_since == {} || hc.on || time.tick_since(hc.hung_since) < hw.PONG_TIMEOUT do return
+	hc.hung_since = {}
+	n := 0
+	for &s in state.open_sessions do for &t in s.tabs do if t.held_away != 0 {
+		t.held_away = 0
+		n += 1
+	}
+	if n == 0 do return
+	fmt.eprintln("Deckhand: session holder: still not answering after", hw.PONG_TIMEOUT, "-", n, "tab(s) that waited for it start fresh")
+	window_toast(fmt.tprintf("The session holder still isn't answering: %d session%s that waited for it start fresh here.", n, n == 1 ? "" : "s"), err = true)
+	window_state_changed()
+}
+
+// ---- the supervisor (src/holder supervisor.odin) ----
+
+// A separate core tells its holder where it runs from, so a crash gets it relaunched (SUPERVISE{core}).
+holder_supervise_me :: proc() {
+	if !core_separate do return
+	if exe := executable_path(); exe != "" do holder_send(.Supervise, 0, hw.Supervise{op = "core", path = exe})
+}
+
+// The window's question to the holder while its core never comes up (P6): op "status" or
+// "use_previous". Any holder socket of ours in run whose code is the holder's; ok false: none answered.
+holder_supervise_ask :: proc(run, op: string) -> (st: hw.Supervise_Status, ok: bool) {
+	for path in holder_socks(run) {
+		fd, cok := sock_connect(path)
+		if !cok do continue
+		defer sock_close(fd)
+		peer, tok := trust.peer_read_token(fd)
+		if trust.peer_allowed(.Adhoc, trust.own_uid(), peer) != .Allow || holder_peer_code_ok(tok) != "" do continue
+		out := make([dynamic]u8, context.temp_allocator)
+		hw.encode(&out, .Supervise, 0, hw.Supervise{op = op})
+		if !sock_write_all(fd, out[:]) do continue
+		rx: hw.Stream
+		defer hw.stream_destroy(&rx)
+		buf: [4096]u8
+		deadline := time.tick_add(time.tick_now(), 2 * time.Second)
+		for {
+			if f, err := hw.stream_next(&rx); err == .None {
+				if f.kind == u8(hw.Kind.Supervise_Status) && hw.decode(f, .Supervise_Status, &st, context.temp_allocator) == .None do return st, true
+				break
+			}
+			left := time.tick_diff(time.tick_now(), deadline)
+			if left <= 0 || !sock_wait_readable(fd, max(int(time.duration_milliseconds(left)), 1)) do break
+			n := sock_read(fd, buf[:])
+			if n <= 0 || trust.peer_still(peer, trust.peer_read(fd)) != .Allow do break
+			hw.stream_feed(&rx, buf[:n])
+		}
+	}
+	return {}, false
 }

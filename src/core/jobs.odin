@@ -886,6 +886,8 @@ jobs_check :: proc(now: i64) {
 			continue
 		}
 		if now < j.next_due || j.queued do continue
+		// a core handing over (core_handover.odin): what is due stays due, for the successor
+		if core_handover_pending() do continue
 		due := j.next_due
 		late := now - due
 		reason := ""
@@ -896,28 +898,40 @@ jobs_check :: proc(now: i64) {
 		case period_limit_reached(now):             reason = "limit reached"
 		case j.run != nil:                          reason = "previous run still going"
 		}
-		// the next due time, after this tick
-		switch s.kind {
-		case .Cron:  j.next_due = cron_next(s.cron, now)
-		case .Every: j.next_due = now + s.every // again from the run's end when it runs
-		case .At, .Manual: j.next_due = 0
-		}
 		if reason != "" {
 			job_skip(j, due, reason)
+			job_dispatched(j, now)
 		} else if !slot_free() {
+			// waits with its due time kept: a restart or a handover's successor finds it still due
 			j.queued, j.queued_due = true, due
 			sched_log("%s: queued (concurrency limit)", j.def.id)
 			sched.dirty = true
-		} else if err := job_start(j, due); err != "" {
-			sched_log("%s: not started: %s", j.def.id, err)
+		} else {
+			if err := job_start(j, due); err != "" do sched_log("%s: not started: %s", j.def.id, err)
+			job_dispatched(j, now)
 		}
-		if s.kind == .At {
-			j.last_at = max(j.last_at, s.at)
-			job_note_enable(j, false) // an `at` job runs once, then disables itself
-		}
-		job_save(j)
 	}
 	jobs_dequeue()
+}
+
+// A due job was taken (started or skipped): its next due time, after now; an `at` job is used up.
+@(private = "file")
+job_dispatched :: proc(j: ^Job, now: i64) {
+	s := j.def.schedule
+	switch s.kind {
+	case .Cron:  j.next_due = cron_next(s.cron, now)
+	case .Every: j.next_due = now + s.every // again from the run's end when it runs
+	case .At, .Manual: j.next_due = 0
+	}
+	if s.kind == .At {
+		j.last_at = max(j.last_at, s.at)
+		job_note_enable(j, false) // an `at` job runs once, then disables itself
+	}
+	job_save(j)
+}
+
+when ODIN_TEST {
+	jobs_test_busy: int // tests: slots taken by runs that are not there
 }
 
 @(private = "file")
@@ -925,6 +939,7 @@ slot_free :: proc() -> bool {
 	limit := state.settings.job_limits.concurrency
 	if limit <= 0 do return true
 	n := 0
+	when ODIN_TEST {n = jobs_test_busy}
 	for j in sched.jobs do if j.run != nil do n += 1
 	return n < limit
 }
@@ -932,6 +947,7 @@ slot_free :: proc() -> bool {
 // Queued runs start in due order as slots free up.
 @(private = "file")
 jobs_dequeue :: proc() {
+	if core_handover_pending() do return // they stay due (next_due kept): the successor starts them
 	for slot_free() {
 		next: ^Job
 		for j in sched.jobs do if j.queued && j.run == nil && (next == nil || j.queued_due < next.queued_due) do next = j
@@ -939,9 +955,10 @@ jobs_dequeue :: proc() {
 		next.queued = false
 		if state.settings.jobs_paused || next.paused || job_runnable(next) != "" {
 			job_skip(next, next.queued_due, "paused")
-			continue
+		} else if err := job_start(next, next.queued_due); err != "" {
+			sched_log("%s: not started: %s", next.def.id, err)
 		}
-		if err := job_start(next, next.queued_due); err != "" do sched_log("%s: not started: %s", next.def.id, err)
+		job_dispatched(next, jobs_now())
 	}
 }
 
@@ -1050,6 +1067,7 @@ job_preamble :: proc(j: ^Job, scheduled: i64) -> string {
 @(private = "file")
 job_start :: proc(j: ^Job, scheduled: i64) -> string {
 	if home_root == "" do return "no data folder"
+	if core_handover_pending() do return "Deckhand's background core is being replaced: try again in a moment"
 	if !job_id_valid(j.def.id) do return "bad id"
 	jd := job_data_dir(j.def.id)
 	mkdir_private(fmt.tprintf("%s/runs", jd))
@@ -1185,6 +1203,7 @@ job_finish :: proc(r: ^Job_Run) {
 	case stop == .Timeout:                  status = "timeout"
 	case stop == .User:                     status = "failed"
 	case stop == .Quit:                     status = "stopped (quit)"
+	case stop == .Update:                   status = "stopped (update)"
 	case exit_code != 0 || err_text != "":  status = "failed"
 	case len(blocked) > 0 || len(rep.needs_you) > 0: status = "needs_you"
 	}
@@ -1777,9 +1796,16 @@ jobs_any_scheduled :: proc() -> bool {
 	return false
 }
 
+jobs_running_count :: proc() -> int {
+	n := 0
+	for j in sched.jobs do if j.run != nil do n += 1
+	return n
+}
+
 // Quit: every run's tree gets SIGTERM, a short grace, then SIGKILL; each
-// run is recorded "stopped (quit)" (no notifications).
-jobs_shutdown :: proc() {
+// run is recorded "stopped (quit)" (no notifications), or "stopped (update)"
+// for a core's handover (why = .Update).
+jobs_shutdown :: proc(why := Run_Stop.Quit) {
 	sync.atomic_store(&sched.stop_timer, true)
 	if sched.timer != nil {
 		thread.join(sched.timer)
@@ -1791,7 +1817,7 @@ jobs_shutdown :: proc() {
 	if len(runs) == 0 do return
 	sched.quitting = true
 	defer sched.quitting = false
-	for r in runs do run_stop(r, .Quit)
+	for r in runs do run_stop(r, why)
 	ended :: proc(runs: []^Job_Run, ms: int) -> bool {
 		for _ in 0 ..< ms / 20 {
 			all := true

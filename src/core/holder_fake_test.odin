@@ -51,6 +51,7 @@ Fake_Holder :: struct {
 	// first terminal and its EXITED (code 7). After that it sends nothing more, PONG included.
 	upgrade_output: []u8,
 	upgraded:  bool,
+	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
 	dir:       string, // the runtime dir (also home_root/..)
 	path:      string,
@@ -193,6 +194,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			if !hello {
 				if kind != .Hello do return
 				hello = true
+				sync.atomic_store(&f.helloed, true)
 				switch f.mode {
 				case .Refuse:
 					fake_send(f, .Refused, 0, hw.Refused{code = f.refuse_code != "" ? f.refuse_code : "wire", error = "fake: refused"})

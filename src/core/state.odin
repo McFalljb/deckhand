@@ -379,10 +379,18 @@ State :: struct {
 	jobs_notified:         int, // OS notifications sent for jobs (tests)
 	home_dir_prev:         string, // the main folder before the user changed it (offered in Finder; not saved)
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
+	holder_ask:            Holder_Ask, // a session holder from another build runs: the window asks once whether to replace it (holder_client.odin)
 	claude_history:        [dynamic]Claude_Record, // Claude Code sessions Deckhand ran, most recent first (claude.odin; saved)
 	claude_readonly_ids:   [dynamic]string, // Claude sessions that ran read-only, outside the history's cap (claude.odin §1a; saved)
 	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
+}
+
+// A session holder whose code is not ours answered (holder_client.odin Refused_Code): the window
+// asks "Stop it and start a new one?" once; Holder_Replace answers. pid 0 = nothing to ask.
+Holder_Ask :: struct {
+	pid:      i32,
+	sessions: int, // its child processes when it was found
 }
 
 LEFT_WIDTH_DEFAULT :: 300

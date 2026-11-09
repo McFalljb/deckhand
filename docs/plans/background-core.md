@@ -680,16 +680,16 @@ subset.
 
 ### 7.7 Failure modes and rollback
 
-**Rollback is decided by the supervisor (the holder) or the window, never by the core that is
-crashing.**
+**Going back to the previous core is the user's choice (Use previous core), never automatic**
+(M4-E as built, below).
 
 | Failure | What happens | Sessions |
 |---|---|---|
 | A new core fails `check` | No handover; "Couldn't finish updating the background core". | Kept |
-| A new core crashes twice within 5 min | The holder's supervisor relaunches the **last healthy** core (`previous`) and does not raise the floor. The window says "Update rolled back". | Kept, `inexact` |
+| A new core crashes | The holder's supervisor relaunches `current` with a backoff and gives up after 6 failures in a row; no automatic rollback. | Kept, `inexact` |
 | A crash loop, seen by the window (P6) | The window connects to the holder directly with `SUPERVISE{status}` / `SUPERVISE{use: previous}` (window DR checked) and shows **Use previous core**. It doesn't wait for a core that never comes up. | Kept |
 | Use previous core, normal case (Settings › About) | A named handover to `previous` through the running core | Kept |
-| `current` swapped by same-user code | Every launch checks the DR: refused, "the background core failed verification" (a denial of service). The supervisor uses the last healthy core. | Kept |
+| `current` swapped by same-user code | Every launch checks the DR: refused, "the background core failed verification" (a denial of service). The user can pick Use previous core. | Kept |
 | Old core crashes before `GOODBYE` | A crash restart: tails, `inexact`, no query replies | Kept |
 | `handover.json` missing, written for another holder run (its instance id: also another boot), bad MAC or `min_reader` too high | Fail closed: restore from `workspace.json` + `tokens.json` (whose MAC must also verify, §5.3). Parked confirmations and held texts are dropped. | Kept |
 | Holder upgrade preflight or `execve` fails | Fallback drain | Kept |
@@ -1091,6 +1091,27 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   draws none).
 - **Not done:** app tabs exiting as `window_closed` (the separate window's app tabs are the M4 gaps
   work); a minimised-window scene (TESTING.md's by-hand list instead), as for Dock Quit and logout.
+
+**M4-E as built** (where it differs from the row above):
+- **No automatic rollback.** The supervisor relaunches `current` after a crash (backoff 1 s to
+  30 s, giving up after 6 failures in a row; healthy after 60 s resets the count). An automatic
+  rollback was built first and dropped in review. It needed a flag that clears itself, a window
+  relaunch that must not undo it, a successor reservation that must not trip it, and a build
+  check that could lock a user out, all for a case the user can handle with one click.
+- **Use previous core is sticky:** the palette entry (a handover to `previous`) and the window's
+  offer when no core comes up both write `<data>/core/use-previous` with the current key. While
+  it names the current key, the window's launches, the supervisor's relaunches and the window's
+  attach (no hand-back to current) all use `previous`. Making another build current
+  (`core_make_current`) removes it; nothing clears it on a timer.
+- **Handover only at attach** (`client_core_connect`); M4-D's reconnect never hands over, and
+  after a handover the window dials without launching (the old core starts the successor with
+  the holder's secret). A successor that never says SUPERVISE within 20 s counts as a crash:
+  the holder drops the successor secret, then relaunches.
+- **Jobs:** a due job's next due time moves on (and an `at` job is used up) only once its run
+  starts or is skipped, so one queued behind the concurrency limit, or due while a handover is
+  pending, is still due for the successor.
+- **Not done:** the successor retry off the main thread; the window and holder floor actions;
+  update.sh's M1 extension; the launcher stays `deckhand-core-serve launch` (not src/launchd).
 
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR

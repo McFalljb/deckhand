@@ -351,6 +351,10 @@ ACTIONS := [?]Action {
 	{id = "separate_core", label = "Run sessions in a background core (experimental; at the next launch)", make = proc() -> (core.Command, bool) {
 		return core.Set_Separate_Core{on = !state.settings.separate_core}, true
 	}, detail = proc() -> string {return state.settings.separate_core ? "on" : "off"}},
+	// a separate core only (core_handover.odin): the sessions go back to the core before the last update
+	{id = "use_previous_core", label = "Use previous core", make = proc() -> (core.Command, bool) {
+		return core.Core_Handover{to = core.CORE_PREVIOUS}, client_separate()
+	}, detail = proc() -> string {return "background core"}},
 	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (core.Command, bool) {
 		return core.Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
 	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}},

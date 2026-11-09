@@ -206,7 +206,9 @@ init_separate :: proc() {
 		platform_alert("Deckhand can't start", "Deckhand can't find your home folder, so it has nowhere to keep its files")
 		os.exit(1)
 	}
-	if why := client_core_connect(core.home_root); why != "" {
+	why := client_core_connect(core.home_root)
+	if why != "" && client_core_offer_previous() do why = client_core_connect(core.home_root)
+	if why != "" {
 		fmt.eprintln("Deckhand:", why)
 		if core.autotest_active {
 			fmt.println("[autotest] core refused:", why)
@@ -446,6 +448,7 @@ frame :: proc "c" () {
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
+	holder_ask_tick() // a session holder from another build: asked once (below)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
 	if browser_frames_tick() do app.redraw = true // browser tabs: a frame CEF painted (browser.odin)
@@ -1466,4 +1469,24 @@ main :: proc() {
 		clipboard_size = 4 * 1024 * 1024,
 		logger = {func = slog.func},
 	})
+}
+
+// A session holder from another build runs (state.holder_ask, core holder_client.odin): asked
+// once, outside any frame's drawing. Test mode never shows the modal: it logs the question, and
+// the script answers with holder_replace.
+@(private = "file")
+holder_asked: i32
+
+@(private = "file")
+holder_ask_tick :: proc() {
+	ask := state.holder_ask
+	if ask.pid == 0 || ask.pid == holder_asked do return
+	holder_asked = ask.pid
+	text := fmt.tprintf("A session holder from another build is running (%d session%s). Stop it and start a new one?", ask.sessions, ask.sessions == 1 ? "" : "s")
+	if core.autotest_active {
+		fmt.println("[autotest] holder ask:", text)
+		return
+	}
+	stop := platform_ask("Another session holder is running", fmt.tprintf("%s\n\nStopping it ends its sessions. Otherwise Deckhand runs without one: tabs opened now stop when Deckhand quits.", text), "Stop It and Start a New One", "Keep It Running")
+	client_send(core.Holder_Replace{stop = stop})
 }

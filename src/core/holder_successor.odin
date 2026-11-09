@@ -132,6 +132,14 @@ relaunch_helper_send :: proc(secret: string) {
 	relaunch_helper.fd = -1
 }
 
+// ---- a core launched as a handover's successor (core_handover.odin) ----
+
+// The secret its launcher gave it (deckhand-core-serve serve: over the ready socket or on stdin),
+// for its first HELLO; zeroed once used. All zeros: none.
+successor_given: [64]u8
+
+trust_wipe :: proc(b: []u8) {trust.wipe(b)}
+
 // ---- the new app ----
 
 // The successor secret from a relaunch helper waiting in the runtime dir, or "" (none there, not

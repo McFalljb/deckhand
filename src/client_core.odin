@@ -19,6 +19,11 @@ package main
 //   window's end: it dials again, launching a core if none answers (≤ 15 s), and restores from a
 //   fresh state.full; its terminal copies attach again (client_core_reconnect). Only a core that
 //   said window.request quit first (a Quit, Stop All, another window took over) ends the window.
+// - Skew (§7.5, M4-E): at attach (client_core_connect, never a reconnect), a core that is not this
+//   app's (older, below CORE_MIN, an older generation) is handed over to the app's own core at
+//   once, before the window subscribes: the bundled Core.app is installed and made current,
+//   core_handover{current} goes, and once that connection ends the window dials the new core. A
+//   newer generation asks: Use this app's core (the same handover) or quit to update.
 
 import "core:fmt"
 import "core:os"
@@ -120,13 +125,26 @@ separate_core_wanted :: proc(data: string) -> bool {
 // Connects to the separate core (launching it if none runs), says the framed hello and subscribes:
 // from here `state` is the replica. "" = attached, else why not. Main thread, at init.
 client_core_connect :: proc(data: string) -> string {
-	if why := client_core_dial(data); why != "" do return why
 	heap := runtime.heap_allocator()
 	client.log = core.hook_env(.Proto_Log) == "1"
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
 	client.abandoned = make(map[string]bool, heap)
 	client.tab_facts_sent = make(map[u64]string, heap)
+	hello, why := client_core_dial(data)
+	if why != "" do return why
+	to: string
+	if to, why = client_core_handover_to(hello, data); why != "" do return why
+	if to != "" {
+		// the old core hands over; its connection ends; the new core is dialled (never launched
+		// here: the old core starts it, with the holder's secret)
+		if why = client_core_handover(to); why != "" {
+			if hello.skew != .Core_Older && hello.skew != .Ok do return why
+			// it works as it is: stay with it
+		} else if _, why = client_core_dial(data, launch = false); why != "" {
+			return why
+		}
+	}
 	deferred_init(&client.deferred)
 	client.attached = true
 	core.replica_process = true
@@ -155,7 +173,8 @@ client_core_reconnect :: proc() -> string {
 	client_facts_forget_all()
 	got_full = false
 	old := client.sock // the dead link stays client.sock until a new one is up (client_separate holds)
-	if why := client_core_dial(core.home_root); why != "" do return why
+	// never a handover here: the core that answers is the supervisor's or a successor's
+	if _, why := client_core_dial(core.home_root); why != "" do return why
 	cw.sock_destroy(old)
 	free(old, heap)
 	client.lost = false
@@ -177,34 +196,33 @@ client_core_subscribe :: proc() -> string {
 }
 
 // Dials core.sock until a core with a window token answers its hello, for up to CORE_START_WAIT,
-// launching one every CORE_RELAUNCH_EVERY while none does: a core that is still stopping (its
-// handover and save, under core.lock) makes the first launch exit at once. "" = client.sock is the
-// link.
+// launching one every CORE_RELAUNCH_EVERY while none does (unless !launch: a handover's successor
+// is the old core's to start): a core that is still stopping (its handover and save, under
+// core.lock) makes the first launch exit at once. why == "": client.sock is the link.
 @(private = "file")
-client_core_dial :: proc(data: string) -> string {
+client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, why: string) {
 	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
-	if rwhy != "" do return rwhy
+	if rwhy != "" do return {}, rwhy
 	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
 	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
 	last_launch: time.Tick
 	for {
 		if fd, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" {
-				why := client_core_hello(fd, run)
-				if why == "" do break
+				hello, why = client_core_hello(fd, run)
+				if why == "" do return
 				core.sock_close(fd)
-				return why
+				return
 			}
 			core.sock_close(fd) // not a core's (yet): no window token
 		}
-		if last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY {
+		if launch && (last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY) {
 			last_launch = time.tick_now()
-			if why := client_core_launch(run, data); why != "" do return why
+			if why = client_core_launch(run, data); why != "" do return
 		}
-		if time.tick_diff(time.tick_now(), deadline) <= 0 do return "Deckhand's background core did not start within 15 s"
+		if time.tick_diff(time.tick_now(), deadline) <= 0 do return {}, launch ? "Deckhand's background core did not start within 15 s" : "Deckhand's new background core did not start within 15 s"
 		time.sleep(20 * time.Millisecond)
 	}
-	return ""
 }
 
 // The state.full came (client_on_frames).
@@ -217,45 +235,105 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 	if bin == "" do return "Deckhand Core.app (its deckhand-core-serve) is missing from this copy of Deckhand"
 	exe, ok, why := core.core_install(bin, data)
 	if !ok do return why
+	if prev := core.core_use_previous_serve(data); prev != "" do exe = prev // the user's Use previous core
 	if core.autotest_active do fmt.println("[autotest] core: launching", exe)
 	_, lok, lwhy := core.core_launch(exe, run, data, from_tab)
 	if !lok do return lwhy
 	return ""
 }
 
+// What the core's hello reply said (client_core_handover_to decides on it).
+Core_Hello :: struct {
+	skew:  cw.Skew,
+	build: string, // the core's two binaries' hash (core.core_build_of)
+}
+
 // The window's half of the framed hello on fd (connected to core.sock). "" = the link is up.
 @(private = "file")
-client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> string {
-	peer, why := core.core_peer_check(fd) // before a byte is sent (B4)
-	if why != "" do return why
+client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> (hello: Core_Hello, why: string) {
+	peer: trust.Peer
+	peer, why = core.core_peer_check(fd) // before a byte is sent (B4)
+	if why != "" do return
 	token := core.window_token_read(run)
 	line := fmt.tprintf("{{\"id\":\"w\",\"v\":%d,\"type\":\"hello\",\"framed\":true,\"token\":\"%s\"}}\n", core.PROTOCOL_VERSION, token)
-	if !core.sock_write_all(fd, transmute([]u8)line) do return "the background core closed the connection"
+	if !core.sock_write_all(fd, transmute([]u8)line) do return {}, "the background core closed the connection"
 	buf := make([dynamic]u8, context.temp_allocator)
 	chunk: [4096]u8
 	nl := -1
 	deadline := time.tick_add(time.tick_now(), 5 * time.Second)
 	for nl < 0 {
 		left := int(time.duration_milliseconds(time.tick_diff(time.tick_now(), deadline)))
-		if left <= 0 || !core.sock_wait_readable(fd, left) do return "the background core did not answer the hello"
+		if left <= 0 || !core.sock_wait_readable(fd, left) do return {}, "the background core did not answer the hello"
 		n := core.sock_read(fd, chunk[:])
-		if n <= 0 do return "the background core closed the connection"
-		if trust.peer_still(peer, trust.peer_read(fd)) != .Allow do return "the process on core.sock changed"
+		if n <= 0 do return {}, "the background core closed the connection"
+		if trust.peer_still(peer, trust.peer_read(fd)) != .Allow do return {}, "the process on core.sock changed"
 		append(&buf, ..chunk[:n])
 		nl = strings.index_byte(string(buf[:]), '\n')
-		if len(buf) > 1 << 20 do return "the background core's hello reply is too long"
+		if len(buf) > 1 << 20 do return {}, "the background core's hello reply is too long"
 	}
 	reply := string(buf[:nl])
-	if core.json_path(reply, "result.ok") != "true" do return fmt.tprintf("the background core refused this window: %s", core.json_path(reply, "result.error"))
-	if core.json_path(reply, "result.data.framed") != "true" do return "the background core did not take a framed connection"
+	if core.json_path(reply, "result.ok") != "true" do return {}, fmt.tprintf("the background core refused this window: %s", core.json_path(reply, "result.error"))
+	if core.json_path(reply, "result.data.framed") != "true" do return {}, "the background core did not take a framed connection"
 	gen, _ := strconv.parse_i64(core.json_path(reply, "result.data.generation"))
-	if msg := core.core_skew_message(cw.skew_check(cw.GENERATION, gen, core.core_version(), core.json_path(reply, "result.data.version"))); msg != "" do return msg
+	hello.skew = cw.skew_check(cw.GENERATION, gen, core.core_version(), core.json_path(reply, "result.data.version"))
+	hello.build = strings.clone(core.json_path(reply, "result.data.build"), context.temp_allocator)
 	client_peer = peer
 	client.core_pid = peer.pid
 	client.sock = new(cw.Sock_Transport, runtime.heap_allocator())
 	cw.sock_open(client.sock, fd, peer_check = proc(fd: core.Sock_Fd, data: rawptr) -> bool {
 		return trust.peer_still((^trust.Peer)(data)^, trust.peer_read(fd)) == .Allow
 	}, peer_data = &client_peer, initial = buf[nl + 1:], allocator = runtime.heap_allocator())
+	return hello, ""
+}
+
+// Whether the core the window found is handed over to this app's own, and to what ("" = keep
+// it), or why the window can't start. Installs this app's Core.app first (current: core_install).
+client_core_handover_to :: proc(hello: Core_Hello, data: string) -> (to, why: string) {
+	when core.TEST_HOOKS {
+		if core.autotest_active && core.hook_env(.Core_Handover) == "self" do return "self", "" // installs nothing in test mode
+	}
+	bundled := core.core_serve_bin_find(context.temp_allocator)
+	switch hello.skew {
+	case .Ok:
+		return "", "" // a development build (no version) never hands over to another of its kind
+	case .Core_Older, .Core_Below_Min, .Core_Older_Generation:
+		// the user's Use previous core holds (core_use_previous_serve): keep the core it chose
+		if core.core_use_previous_serve(data) != "" {
+			fmt.eprintln("Deckhand: background core: keeping the previous core (Use previous core)")
+			return "", hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
+		}
+	case .Core_Newer_Generation:
+		msg := core.core_skew_message(hello.skew)
+		if core.autotest_active || !platform_ask("Update Deckhand", fmt.tprintf("%s. Update Deckhand, or hand your sessions to this older app's core (they keep running).", msg), "Use This App's Core", "Quit") do return "", msg
+	}
+	if bundled == "" do return "", core.core_skew_message(hello.skew)
+	if _, ok, iwhy := core.core_install(bundled, data); !ok {
+		fmt.eprintln("Deckhand: background core: cannot install this app's core:", iwhy)
+		return "", hello.skew == .Ok || hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
+	}
+	return "current", ""
+}
+
+CORE_HANDOVER_WAIT :: 3 * time.Minute // its job runs get 2 min, then the handover itself
+
+// core_handover{to} on the link that is up (not subscribed yet), then the wait for the old core
+// to go: its connection ends. "" = handed over (the link is gone), else why not (the link stays).
+client_core_handover :: proc(to: string) -> string {
+	fmt.eprintln("Deckhand: handing the background core over to this app's (", to, ")")
+	if core.autotest_active do fmt.println("[autotest] core: handing over to", to)
+	client.handing_over = true
+	defer client.handing_over = false
+	r := client_call_wait(core.Core_Handover{to = to}, 15 * time.Second)
+	if !r.ok && !client.lost { // gone already: it went ahead
+		fmt.eprintln("Deckhand: background core: the handover was refused:", r.error)
+		return fmt.tprintf("Deckhand's background core could not be updated: %s", r.error)
+	}
+	start := time.tick_now()
+	for !client.lost && time.tick_since(start) < CORE_HANDOVER_WAIT do client_io(100)
+	if !client.lost do return "Deckhand's background core did not finish its handover"
+	cw.sock_destroy(client.sock)
+	free(client.sock, runtime.heap_allocator())
+	client.sock, client.lost = nil, false
 	return ""
 }
 
@@ -265,6 +343,7 @@ client_core_hello :: proc(fd: core.Sock_Fd, run: string) -> string {
 client_core_lost :: proc() {
 	if client.lost do return
 	client.lost = true
+	if client.handing_over do return // client_core_handover dials the new core
 	fmt.eprintln("Deckhand: the background core's connection ended:", cw.sock_reason(client.sock))
 	if core.autotest_active do fmt.println("[autotest] core: connection ended")
 	if core.app_quitting do app_request_quit()
@@ -366,4 +445,27 @@ ctl_core_ensure :: proc() {
 		time.sleep(50 * time.Millisecond)
 	}
 	fmt.eprintln("deckhand --ctl: Deckhand's background core did not start within 15 s")
+}
+
+// No core came up (a crash loop, P6): the session holder's supervisor is asked directly. When a
+// previous core is installed the user may pick Use Previous Core (the holder launches it). True:
+// asked for it; dial again.
+client_core_offer_previous :: proc() -> bool {
+	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
+	if rwhy != "" do return false
+	st, ok := core.holder_supervise_ask(run, "status")
+	if !ok || !st.previous || st.core do return false
+	text := fmt.tprintf("Deckhand's background core keeps stopping%s. Your sessions are still running. Use the background core from before the last update?", st.crashes > 0 ? fmt.tprintf(" (%d time%s in a row)", st.crashes, st.crashes == 1 ? "" : "s") : "")
+	if core.autotest_active {
+		fmt.println("[autotest] core: offer previous:", text)
+		return false
+	}
+	if !platform_ask("Deckhand's background core isn't starting", text, "Use Previous Core", "Quit") do return false
+	// sticky until another build is installed: the holder and this window launch previous
+	if why := core.core_use_previous_set(core.home_root); why != "" {
+		fmt.eprintln("Deckhand: background core: Use previous core:", why)
+		return false
+	}
+	_, ok = core.holder_supervise_ask(run, "use_previous")
+	return ok
 }

@@ -33,7 +33,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 4
+HOLDER_REV :: 5
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -66,12 +66,17 @@ Config :: struct {
 	hello_timeout: time.Duration, // a connection that has not said HELLO by then is dropped
 	test_accept_errno: c.int, // tests: != 0, accept() fails with it
 	test_spawn_gate: c.int, // tests: > 0, a child reads one byte from it before its exec
+	window_ids:    []string, // who may send SUPERVISE as a window (trust.WINDOW_IDS; tests their own)
 }
+
+@(private = "file")
+window_ids_default := trust.WINDOW_IDS
 
 default_config :: proc() -> Config {
 	return Config {
 		pong_timeout = holderwire.PONG_TIMEOUT,
 		idle_exit = IDLE_EXIT,
+		window_ids = window_ids_default[:],
 		exit_grace = 500 * time.Millisecond,
 		reap_interval = time.Second,
 		shutdown_wait = time.Second,
@@ -124,6 +129,8 @@ Conn :: struct {
 	closing_since: time.Tick,
 	dead:          bool,
 	serial:        u64, // this connection's number (a freed Conn's address may come back)
+	secret_out:    bool, // out held a successor secret (GOODBYE_ACK): zeroed when freed
+	supervised:    bool, // this core said SUPERVISE{core}: a separate core the supervisor watches
 }
 
 Holder :: struct {
@@ -159,6 +166,9 @@ Holder :: struct {
 	accept_logged:     bool, // that was logged; again only after an accept worked
 	listen_paused_at:  time.Tick,
 	owns_dirs:         bool, // cfg.run_dir and data_dir are ours to free (state_decode)
+	sup:               Supervisor, // a separate core's crashes and relaunches (supervisor.odin)
+	sup_launchers:     [dynamic]c.int, // supervisor launches' `<serve> launch` until reaped
+	forked:            bool, // a keeper serving (a fork that never exec'd): no Security.framework, so no supervisor
 }
 
 Start_Error :: enum {
@@ -324,12 +334,15 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 	delete(h.upgrade_error)
 	delete(h.instance)
 	delete(h.buf)
+	delete(h.sup.path)
+	delete(h.sup_launchers)
 	free(h)
 }
 
 @(private)
 conn_free :: proc(cn: ^Conn) {
 	if cn.fd >= 0 do close(cn.fd)
+	if cn.secret_out do trust.wipe(raw_data(cn.out)[:cap(cn.out)])
 	holderwire.stream_destroy(&cn.rx)
 	delete(cn.out)
 	free(cn)
@@ -549,9 +562,10 @@ conn_read :: proc(h: ^Holder, cn: ^Conn) {
 	}
 	cn.last_rx = time.tick_now()
 	holderwire.stream_feed(&cn.rx, h.buf[:n])
+	if !cn.welcomed do trust.wipe(h.buf[:n]) // a HELLO may carry the successor secret (its frame is wiped once decoded)
 	// before HELLO only a HELLO, judged by its header (nothing of a big payload is buffered)
 	if hd, whole := holderwire.parse_header(cn.rx.buf[cn.rx.head:]); whole && !cn.welcomed {
-		if hd.kind != u8(holderwire.Kind.Hello) || hd.len > holderwire.MAX_CONTROL {
+		if (hd.kind != u8(holderwire.Kind.Hello) && hd.kind != u8(holderwire.Kind.Supervise)) || hd.len > holderwire.MAX_CONTROL {
 			conn_drop(h, cn, fmt.tprintf("frame kind %d (%d bytes) before HELLO", hd.kind, hd.len))
 			return
 		}
@@ -609,6 +623,7 @@ conn_drop :: proc(h: ^Holder, cn: ^Conn, why: string) {
 	if cn == h.core {
 		h.core = nil
 		h.previous = "crash"
+		if cn.supervised do sup_core_gone(&h.sup, true, time.tick_now())
 	}
 }
 
@@ -638,6 +653,10 @@ send_msg :: proc(cn: ^Conn, kind: holderwire.Kind, terminal: u32, msg: $T) {
 
 @(private)
 handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
+	if !cn.welcomed && f.kind == u8(holderwire.Kind.Supervise) {
+		supervise_window(h, cn, f) // a window asks (supervisor.odin)
+		return
+	}
 	if !cn.welcomed {
 		if f.kind != u8(holderwire.Kind.Hello) {
 			conn_drop(h, cn, fmt.tprintf("frame kind %d before HELLO", f.kind))
@@ -729,11 +748,27 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 	case .Goodbye:
 		m: holderwire.Goodbye
 		if holderwire.decode(f, .Goodbye, &m, context.temp_allocator) != .None do return
+		// a goodbye: nothing to relaunch, unless it names a successor (a core's handover): that one
+		// must say SUPERVISE in time, or it counts as a crash (supervisor.odin)
+		if cn.supervised {
+			if m.mode == "handover" && m.successor do sup_successor_named(&h.sup, time.tick_now())
+			else do sup_core_gone(&h.sup, false, time.tick_now())
+		}
 		switch m.mode {
 		case "handover": goodbye_handover(h, cn, m.successor)
 		case "shutdown": shutdown(h)
 		case: hlog(h, "GOODBYE mode %q unknown", m.mode)
 		}
+	case .Supervise:
+		m: holderwire.Supervise
+		if holderwire.decode(f, .Supervise, &m, context.temp_allocator) != .None || m.op != "core" do return
+		if !strings.has_prefix(m.path, "/") || !strings.has_suffix(m.path, "/" + SUP_SERVE_BIN) || len(m.path) > 1024 {
+			hlog(h, "SUPERVISE: not a deckhand-core-serve path: %q", m.path)
+			return
+		}
+		cn.supervised = true
+		sup_core_said(&h.sup, m.path, time.tick_now())
+		send_msg(cn, .Supervise_Status, 0, sup_status(h))
 	case .Upgrade:
 		handle_upgrade(h, cn, f) // returns only if it did not happen (upgrade.odin)
 	case:
@@ -884,7 +919,8 @@ goodbye_handover :: proc(h: ^Holder, cn: ^Conn, successor: bool) {
 		trust.wipe(raw[:])
 		h.successor_until = time.tick_add(time.tick_now(), h.cfg.successor_ttl)
 	}
-	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor})
+	holderwire.encode(&cn.out, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor}, secret = h.successor != "")
+	cn.secret_out = h.successor != ""
 	conn_close_after(cn)
 	cn.linger = true
 	h.core = nil
@@ -965,6 +1001,7 @@ timers :: proc(h: ^Holder) {
 			conn_drop(h, cn, "no HELLO in time")
 		}
 	}
+	sup_run(h) // a separate core that crashed is launched again (supervisor.odin)
 	if h.keeper_pid > 0 {
 		st: c.int
 		if r := waitpid(h.keeper_pid, &st, WNOHANG); r == h.keeper_pid || (r < 0 && errno() == ECHILD) do h.keeper_pid = 0

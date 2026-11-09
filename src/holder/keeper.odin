@@ -15,7 +15,14 @@ package holder
 //   giver → taker   "DHK1" nfds u32 len u64                 (16 bytes)
 //                   ceil(nfds / 64) messages of 1 byte, each with up to 64 fds (SCM_RIGHTS)
 //                   the state blob (len bytes, state.odin)
-//   taker → giver   "DONE" (it serves now)  |  "DRY " rev u32 wire_min u32 wire u32 (a dry run)
+//   taker → giver   "DONE" (it took everything)  |  "DRY " rev u32 wire_min u32 wire u32 (a dry run)
+//   giver → taker   "GO  " (a keeper whose header said "DHK2"): only now does the taker serve
+//
+// The GO closes a race (holder_rev 5): without it the taker served as soon as it sent DONE, so a
+// keeper whose DONE wait ran out at that moment adopted (or killed) while the new image served the
+// same masters. Now the taker waits for GO and exits without it; the keeper sends GO only for a
+// DONE that came in time. A keeper of holder_rev 4 or older sends "DHK1" and no GO: the taker
+// then serves on DONE, as before.
 //
 // The keeper: forked by the old image just before execve, it is the only process holding the
 // masters, the listener and instance.lock while the exec happens (the old image's copies are
@@ -43,6 +50,8 @@ import "../holderwire"
 import "../trust"
 
 HANDOFF_MAGIC :: "DHK1"
+HANDOFF_MAGIC_GO :: "DHK2" // the giver's header from a keeper that sends GO after DONE
+HANDOFF_GO :: "GO  "
 HANDOFF_FDS_PER_MSG :: 64
 KEEPER_WAIT :: 10 * time.Second // the new image's hello (§7.3 step 6)
 HANDOFF_WAIT :: 10 * time.Second // each later step of a handoff
@@ -102,9 +111,9 @@ handoff_await_hello :: proc(fd: c.int, deadline: time.Tick) -> (peer: trust.Peer
 }
 
 // The state and its fds to the taker (the fds are copied: the giver keeps its own).
-handoff_give :: proc(fd: c.int, blob: []u8, fds: []c.int, deadline: time.Tick) -> bool {
+handoff_give :: proc(fd: c.int, blob: []u8, fds: []c.int, deadline: time.Tick, magic := HANDOFF_MAGIC) -> bool {
 	hdr: [16]u8
-	copy(hdr[:4], HANDOFF_MAGIC)
+	copy(hdr[:4], magic)
 	endian.put_u32(hdr[4:8], .Little, u32(len(fds)))
 	endian.put_u64(hdr[8:16], .Little, u64(len(blob)))
 	if !send_all_by(fd, hdr[:], deadline) do return false
@@ -126,22 +135,28 @@ handoff_give :: proc(fd: c.int, blob: []u8, fds: []c.int, deadline: time.Tick) -
 // ---- the taker's side ----
 
 // Says hello and takes the state and fds (heap). ok false: the giver refused (closed) or broke
-// off; any fds already received are closed.
-handoff_take :: proc(fd: c.int, deadline: time.Tick) -> (blob: []u8, fds: [dynamic]c.int, ok: bool) {
+// off; any fds already received are closed. go: the giver sends GO after our DONE (a keeper of
+// holder_rev 5 or newer): serve only once it came.
+handoff_take :: proc(fd: c.int, deadline: time.Tick) -> (blob: []u8, fds: [dynamic]c.int, go: bool, ok: bool) {
 	hello: [8]u8
 	copy(hello[:4], HANDOFF_MAGIC)
 	endian.put_u32(hello[4:8], .Little, u32(getpid()))
-	if !send_all_by(fd, hello[:], deadline) do return nil, nil, false
+	if !send_all_by(fd, hello[:], deadline) do return nil, nil, false, false
 	hdr: [16]u8
-	if !recv_all_by(fd, hdr[:], deadline) || string(hdr[:4]) != HANDOFF_MAGIC do return nil, nil, false
+	if !recv_all_by(fd, hdr[:], deadline) do return nil, nil, false, false
+	switch string(hdr[:4]) {
+	case HANDOFF_MAGIC:
+	case HANDOFF_MAGIC_GO: go = true
+	case: return nil, nil, false, false
+	}
 	nfds, _ := endian.get_u32(hdr[4:8], .Little)
 	n, _ := endian.get_u64(hdr[8:16], .Little)
-	if nfds > HANDOFF_MAX_FDS || n > HANDOFF_MAX_BLOB do return nil, nil, false
+	if nfds > HANDOFF_MAX_FDS || n > HANDOFF_MAX_BLOB do return nil, nil, false, false
 	fds = make([dynamic]c.int)
-	fail :: proc(fds: ^[dynamic]c.int) -> ([]u8, [dynamic]c.int, bool) {
+	fail :: proc(fds: ^[dynamic]c.int) -> ([]u8, [dynamic]c.int, bool, bool) {
 		for f in fds do close(f)
 		delete(fds^)
-		return nil, nil, false
+		return nil, nil, false, false
 	}
 	for len(fds) < int(nfds) {
 		want := min(int(nfds) - len(fds), HANDOFF_FDS_PER_MSG)
@@ -172,7 +187,7 @@ handoff_take :: proc(fd: c.int, deadline: time.Tick) -> (blob: []u8, fds: [dynam
 		delete(blob)
 		return fail(&fds)
 	}
-	return blob, fds, true
+	return blob, fds, go, true
 }
 
 // ---- the keeper ----
@@ -203,12 +218,13 @@ keeper_run :: proc(h: ^Holder, k: c.int, holder_pid, old_pv: i32, blob: []u8, fd
 		}
 		if d != .Allow {
 			why = fmt.aprintf("the new holder image failed verification (%v; identifier %q)", d, code.identifier)
-		} else if !handoff_give(k, blob, fds, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
+		} else if !handoff_give(k, blob, fds, time.tick_add(time.tick_now(), HANDOFF_WAIT), HANDOFF_MAGIC_GO) {
 			why = "the new holder image stopped while taking over"
 		} else {
-			// it has everything: it serves once it says DONE; its end closing first means it died.
-			// One that hangs holds the listener and never serves: after the wait it is killed (if
-			// it is still that image) and the keeper's copies of the masters keep the sessions.
+			// it has everything: it serves once it said DONE and got our GO; its end closing first
+			// means it died. One that hangs holds the listener and never serves: after the wait it
+			// is killed (if it is still that image) and the keeper's copies of the masters keep the
+			// sessions. Without our GO it never serves, so a DONE that comes too late is harmless.
 			wait := KEEPER_DONE_WAIT
 			if ms, on := hook("done-wait", true); on {
 				if v, vok := strconv.parse_int(ms); vok do wait = time.Duration(v) * time.Millisecond
@@ -216,10 +232,12 @@ keeper_run :: proc(h: ^Holder, k: c.int, holder_pid, old_pv: i32, blob: []u8, fd
 			done: [4]u8
 			got := recv_all_by(k, done[:], time.tick_add(time.tick_now(), wait))
 			if got && string(done[:]) == "DONE" {
-				hlog(h, "keeper: the new image took over; exiting")
-				_exit(0)
-			}
-			why = "the new holder image stopped before it took over"
+				if _, on := hook("no-go", true); !on && send_all_by(k, transmute([]u8)string(HANDOFF_GO), time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
+					hlog(h, "keeper: the new image took over; exiting")
+					_exit(0)
+				}
+				why = "the new holder image went away before it could serve"
+			} else do why = "the new holder image stopped before it took over"
 			if !got && keeper_kill_successor(h, k, holder_pid, peer) {
 				why = "the new holder image did not take over in time (it was stopped)"
 			}
@@ -253,6 +271,7 @@ keeper_adopt :: proc(h: ^Holder, why: string) -> ! {
 	// Security.framework, unsafe after fork; with the only copies of the masters, a crash there
 	// would hang up every session. It ends once its sessions do (handle_upgrade says so).
 	h.can_upgrade = false
+	h.forked = true // nor the supervisor's code checks (Security.framework)
 	orphans_watch(h)
 	install_sigchld(h)
 	os.exit(holder_serve(h))
@@ -319,6 +338,7 @@ orphans_read :: proc(h: ^Holder) {
 //   dry-run-fail    the dry run's image exits 1 after taking the state (consumed)
 //   crash-resume    the new image exits 1 after taking the state, before DONE (consumed)
 //   hang-resume     the new image hangs after taking the state, before DONE (consumed)
+//   no-go           the keeper got DONE but sends no GO, as if its wait had just run out (consumed)
 //   done-wait       holds milliseconds: the keeper's wait for DONE (consumed; KEEPER_DONE_WAIT)
 
 TEST_HOOKS :: #config(DECKHAND_TEST_HOOKS, false)

@@ -661,6 +661,18 @@ void dh_mac_alert(const char* title, const char* text, const char* button) {
     [a runModal];
 }
 
+// A modal question with two buttons: 1 for yes (the first, the default), 0 for no.
+int dh_mac_ask(const char* title, const char* text, const char* yes, const char* no) {
+    [NSApp activateIgnoringOtherApps:YES];
+    NSAlert* a = [[NSAlert alloc] init];
+    a.alertStyle = NSAlertStyleWarning;
+    a.messageText = @(title);
+    a.informativeText = @(text);
+    [a addButtonWithTitle:@(yes)];
+    [a addButtonWithTitle:@(no)];
+    return [a runModal] == NSAlertFirstButtonReturn ? 1 : 0;
+}
+
 void dh_mac_quiet(void) {
     Class app = [NSApplication class];
     replace(app, @selector(setActivationPolicy:), (IMP)quiet_set_policy, &orig_set_policy);

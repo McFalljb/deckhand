@@ -28,13 +28,28 @@ and protocol between releases.
 
 ## Install
 
+In Terminal:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh
+```
+
+It downloads the latest release, checks its SHA-256 and code signature, and installs
+`Deckhand.app` in `/Applications` (`~/Applications` if you can't write there; it never uses
+`sudo`). It stops without changing anything while Deckhand runs: to update a running Deckhand,
+use **Check for Updates…** in the app, which keeps your sessions. Options go after `sh -s --`:
+`--version X.Y.Z` for a given release, `--dir PATH` for another folder. Then open it with
+`open -a Deckhand`. The app is about 340 MB, mostly Chromium for the browser tabs.
+[Read the script](scripts/install.sh) before you pipe it to `sh`.
+
+**Or download it by hand:**
+
 1. Download `deckhand-<version>-macos-arm64.zip` from
    [Releases](https://github.com/McFalljb/deckhand/releases). To check the download, run
    `shasum -a 256 -c deckhand-<version>-macos-arm64.zip.sha256` next to its `.sha256` file.
-2. Unzip it and move `Deckhand.app` to `/Applications`. The app is about 340 MB, mostly Chromium
-   for the browser tabs.
-3. Open it the first time. Deckhand is not signed with an Apple Developer ID or notarized, so Gatekeeper
-   blocks the first open:
+2. Unzip it and move `Deckhand.app` to `/Applications`.
+3. Open it the first time. Deckhand is not signed with an Apple Developer ID or notarized, so
+   Gatekeeper blocks the first open of a copy downloaded with a browser:
    - **macOS 15 and later**: open the app, close the warning, then go to **System Settings ›
      Privacy & Security** and click **Open Anyway** next to Deckhand.
    - **macOS 14**: right-click (or Control-click) the app in Finder and choose **Open**, then
@@ -51,7 +66,7 @@ and protocol between releases.
 
 Deckhand used to be called pi-desk. pi-desk 0.1.x cannot update itself to Deckhand, so install
 Deckhand fresh: quit pi-desk (the two can't run at the same time), delete `pi-desk.app`, then
-install Deckhand as above. Your projects, sessions, settings, Atlas, jobs and Claude accounts
+install Deckhand as above (the install script reminds you if `pi-desk.app` is still there). Your projects, sessions, settings, Atlas, jobs and Claude accounts
 carry over, because Deckhand reads the same data folder. The old names keep working; see
 [From pi-desk to Deckhand](docs/GUIDE.md#from-pi-desk-to-deckhand).
 

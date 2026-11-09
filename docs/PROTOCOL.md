@@ -1190,7 +1190,7 @@ answers `no_window` at once. A window that detaches ends every wait with `no_win
 The reply is the connection's last line. Beside the usual fields it carries `framed: true`,
 `generation` (the wire's, `1`), `version` (the core's release version, `""` in a development
 build), `features` (`["challenge_hello"]`), `methods` (the commands this caller may send),
-`machine` (`{os, arch}`), `holder_wire` and `snapshot` (the formats it decodes, best first:
+`machine` (`{os, arch}`; a Linux core adds `linger`, `false` when its jobs stop at logout, and leaves it out when logind gave no answer), `holder_wire` and `snapshot` (the formats it decodes, best first:
 `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
 ([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
 first, a newer snapshot replacing a queued one, a 4 MiB queue cap and a ceiling past which a peer

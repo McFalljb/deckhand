@@ -96,6 +96,7 @@ serve_main :: proc(args: []string) -> int {
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
 	core.login_env_adopt() // a refresh of the login shell's environment (login_env.odin)
 	if !serve_platform() do return 1
+	if !serve_platform_prepare(run) do return 1
 	core.home_root = strings.clone(data)
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {

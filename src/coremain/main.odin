@@ -11,6 +11,9 @@
 //   deckhand-core-serve connect [--from NAME]       another machine's hub link, over its ssh: the
 //                                                   hub hello on this machine's core.sock, then
 //                                                   stdio <-> the socket (connect.odin)
+//   deckhand-core-serve linger [--enable]           Linux: this user's systemd linger, on|off|unknown;
+//                                                   --enable (the user said yes) asks logind for it,
+//                                                   no password prompt, no sudo (platform_linux.odin)
 //
 // The plan has one binary (deckhand-core gaining `serve`). Linking the core package and the
 // holder's `hold` into one executable crashes Odin's LLVM backend at -o:speed (an assertion in
@@ -36,13 +39,23 @@ main :: proc() {
 	if len(os.args) == 4 && os.args[1] == "install" && os.args[2] == "--data" do os.exit(install_main(os.args[3]))
 	if len(os.args) == 6 && os.args[1] == "launch" && os.args[2] == "--run" && os.args[4] == "--data" do os.exit(launch_main(os.args[3], os.args[5]))
 	if len(os.args) >= 2 && os.args[1] == "connect" do os.exit(connect_main(os.args[2:]))
+	when ODIN_OS == .Linux do if len(os.args) >= 2 && os.args[1] == "linger" do os.exit(linger_main(os.args[2:]))
 	fmt.eprintln(SERVE_USAGE)
 	os.exit(2)
 }
 
-// `install --data DIR`: the Core.app this binary is in, installed and made current.
+// `install --data DIR`: the Core.app this binary is in, installed and made current. On Linux
+// (no Core.app): this binary, then the systemd user unit and the linger check
+// (core.core_install_linux); what the user should know goes to stderr.
 install_main :: proc(data: string) -> int {
 	exe := core.executable_path()
+	when ODIN_OS == .Linux {
+		lserve, note, lok := core.core_install_linux(exe, data)
+		if note != "" do fmt.eprintln("deckhand-core-serve install:", note)
+		if !lok do return 1
+		fmt.println(lserve)
+		return 0
+	}
 	app := core.holder_bundle_of(fmt.tprintf("%s/%s", filepath.dir(exe), core.HOLDER_BIN))
 	if app == "" {
 		fmt.eprintln("deckhand-core-serve install: not inside a Deckhand Core.app:", exe)

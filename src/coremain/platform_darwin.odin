@@ -29,3 +29,6 @@ serve_ready_handshake :: proc(ready: string) -> bool {
 	_, ok := holder.ready_handshake(ready, &core.successor_given)
 	return ok
 }
+
+// Linux makes its run dir and reads linger here (platform_linux.odin); launchd's launcher made it.
+serve_platform_prepare :: proc(run: string) -> bool {return true}

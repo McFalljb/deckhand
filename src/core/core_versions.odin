@@ -133,6 +133,7 @@ core_serve_of :: proc(data, which: string) -> string {
 	key := core_link_read(vdir, which)
 	if key == "" do return ""
 	p := fmt.tprintf("%s/%s/%s/Contents/MacOS/%s", vdir, key, CORE_APP, CORE_SERVE_BIN)
+	when ODIN_OS == .Linux do p = fmt.tprintf("%s/%s/%s", vdir, key, CORE_SERVE_BIN) // no Core.app (launch_linux.odin)
 	return os.is_file(p) ? p : ""
 }
 
@@ -159,7 +160,9 @@ core_link_set :: proc(vdir, name, key: string) -> bool {
 
 // Every process's command line (this user's and others': ps shows them all), one per line. Temp.
 core_in_use :: proc() -> string {
-	out, st := run_group({"/bin/ps", "-axww", "-o", "args="}, 10 * time.Second)
+	argv := []string{"/bin/ps", "-axww", "-o", "args="}
+	when ODIN_OS == .Linux do argv = {"ps", "-e", "-ww", "-o", "args="} // procps
+	out, st := run_group(argv, 10 * time.Second)
 	return st == .Ok ? out : "?" // unknown: nothing is collected
 }
 

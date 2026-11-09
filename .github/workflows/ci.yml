@@ -93,6 +93,8 @@ jobs:
         run: python3 tests/linux-core-smoke.py build/deckhand-core-serve
       - name: The core serves from the default dirs (~/.local/state/deckhand/run)
         run: python3 tests/linux-core-smoke.py --default-dirs build/deckhand-core-serve
+      - name: The systemd user unit (install, verify; then on demand from connect under the runner's own user manager)
+        run: tests/linux-systemd-check.sh --real build/deckhand-core-serve
 
   # The required scenes (tier "required" in tests/scenes.txt) with the app's default, a separate
   # core: four shards balanced by their typical times, two scenes at a time on each runner

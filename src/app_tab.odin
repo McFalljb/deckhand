@@ -473,6 +473,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	crypto.rand_bytes(key[:])
 	if frames_ok == 1 do dh_frames_chan_open(a.tab_id, &key[0], 0, 0)
 	crypto.zero_explicit(&key, size_of(key))
+	client_facts() // its key reaches the core before the program can say hello (client.odin)
 	fds: [2]posix.FD
 	if posix.pipe(&fds) != .OK do return false
 	posix.fcntl(fds[0], .SETFD, i32(posix.FD_CLOEXEC))

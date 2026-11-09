@@ -669,7 +669,7 @@ agent_comments :: proc(caller: core.Caller, tab_id, session: u64) -> core.Result
 	if tab_id != 0 {
 		ts, tab, _ := find_tab(tab_id)
 		if tab == nil do return core.fail("no such tab")
-		if caller.kind == .Panel && core.caller_session(caller) != ts do return core.fail("a pi tab sees only its own session's comments")
+		if own := core.caller_session(caller); caller.kind == .Panel && (own == nil || own.id != ts.id) do return core.fail("a pi tab sees only its own session's comments")
 		s = ts
 	} else if caller.kind == .Panel {
 		s = core.caller_session(caller)

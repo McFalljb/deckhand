@@ -47,6 +47,7 @@ import "core:encoding/json"
 import "core:fmt"
 import "core:reflect"
 import "core:strings"
+import "core:sync"
 import "core:time"
 import cw "../corewire"
 import jg "../jsonguard"
@@ -727,6 +728,7 @@ window_tab_facts :: proc(tab_id: u64) -> ^Tab_Facts {
 
 // The tab closed (drop_term): what the window said of it goes.
 window_tab_facts_drop :: proc(tab_id: u64) {
+	hello_key_set(tab_id, "")
 	if link == nil do return
 	if old, had := link.tab_facts[tab_id]; had {
 		o := old
@@ -737,6 +739,7 @@ window_tab_facts_drop :: proc(tab_id: u64) {
 
 @(private = "file")
 link_facts_free :: proc() {
+	hello_set(nil)
 	heap := runtime.heap_allocator()
 	wire_free(&link.facts, type_info_of(Window_Facts), heap)
 	for id in link.tab_facts {
@@ -858,6 +861,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		}
 		wire_free(&link.facts, type_info_of(Window_Facts), heap)
 		link.facts, link.has_facts = f, true
+		hello_set(&f)
 	case "window.tab_facts":
 		n, nok := obj["tab_id"].(json.Integer)
 		if !nok || n <= 0 {
@@ -875,6 +879,7 @@ link_message :: proc(text: string) -> (command: bool) {
 			return
 		}
 		link.tab_facts[u64(n)] = f
+		hello_key_set(u64(n), f.frames_key)
 	case "term.attach", "term.detach", "term.resize":
 		term_stream_message(type, obj, id) // term_stream.odin
 	case "window.command":
@@ -956,3 +961,53 @@ window_command_decode_for_test :: proc(text: string) -> (Command, string) {
 // The link itself (tests).
 @(private)
 window_link_for_test :: proc() -> ^Window_Link {return link}
+
+// ---- what an app tab's hello says of the window (socket.odin's welcome_json, on a connection's
+// reader thread): a copy of those facts under a lock, set on the main thread as they arrive ----
+
+@(private = "file")
+hello_mu: sync.Mutex
+@(private = "file")
+hello: struct {
+	known:   bool, // the window reported its facts (display: fps, scale)
+	service: string, // heap
+	device:  u64,
+	fps:     int,
+	scale:   f32,
+	keys:    map[u64]string, // each app tab's frame channel key, hex (heap)
+}
+
+@(private = "file")
+hello_set :: proc(f: ^Window_Facts) {
+	sync.guard(&hello_mu)
+	heap := runtime.heap_allocator()
+	delete(hello.service, heap)
+	if f == nil {
+		for _, k in hello.keys do delete(k, heap)
+		delete(hello.keys)
+		hello = {}
+		return
+	}
+	hello.known, hello.service, hello.device, hello.fps, hello.scale = true, strings.clone(f.frames_service, heap), f.frames_device, f.fps, f.scale
+}
+
+@(private = "file")
+hello_key_set :: proc(tab_id: u64, key: string) {
+	sync.guard(&hello_mu)
+	heap := runtime.heap_allocator()
+	if old, had := hello.keys[tab_id]; had {
+		delete(old, heap)
+		delete_key(&hello.keys, tab_id)
+	}
+	if key == "" do return
+	if hello.keys == nil do hello.keys = make(map[u64]string, heap)
+	hello.keys[tab_id] = strings.clone(key, heap)
+}
+
+// An app tab's frame channel (service, its key and the GPU's id; key "": none) and the window's
+// display (known false: no window has said). Any thread; strings in the temp allocator.
+window_app_hello :: proc(tab_id: u64) -> (service, key: string, device: u64, fps: int, scale: f32, known: bool) {
+	sync.guard(&hello_mu)
+	key = strings.clone(hello.keys[tab_id] or_else "", context.temp_allocator)
+	return strings.clone(hello.service, context.temp_allocator), key, hello.device, hello.fps, hello.scale, hello.known
+}

@@ -534,6 +534,7 @@ autotest_step :: proc() {
 		at.started = true
 		app_deactivate()
 	}
+	autotest_push_facts()
 	now := time.tick_now()
 	// the replica against the core's State, between steps too (what terminals and timers did)
 	if time.tick_diff(at.replica_checked, now) >= 200 * time.Millisecond do autotest_check_replica()
@@ -598,6 +599,7 @@ autotest_step :: proc() {
 		line := strings.trim_space(at.lines[at.next])
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
+		autotest_push_facts() // what the step before this one changed in the window (a key, a mode)
 		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
 		cmd, _, rest := strings.partition(line, " ")
 		// and each shown terminal's copy (M3-H): once per step, not on every retry of it
@@ -1320,6 +1322,13 @@ script_finish_wait :: proc(c: core.Command) -> time.Duration {
 	}
 	if own <= 0 do return script_finish_timeout
 	return max(script_finish_timeout, own + 10 * time.Second)
+}
+
+// The window's facts (window_hooks.odin) reach the core before a step reads its State: a step's
+// key or click changed them in this same tick, after the frame's push.
+autotest_push_facts :: proc() {
+	client_facts()
+	script_drain()
 }
 
 // Runs one script command now, in order with anything queued before (main thread). finished:

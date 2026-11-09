@@ -313,7 +313,9 @@ frame :: proc "c" () {
 	if x, y, tw, th, ok := ui_terminal_rect(); ok {
 		app.pane = {x, y, tw, th}
 		cs := core.cur()
-		ui_pane_rects(cs) // each pane's content rect (panes.odin)
+		ui_pane_rects(cs) // each pane's content rect (panes.odin): the core's (get_state, the room checks; M4: a fact)
+		// and the replica's, which the window's own reads take (term_target_rect, tab_rect)
+		if rs := find_session(state.current_session); rs != nil && rs != cs do ui_pane_rects(rs)
 		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
 		if cs != nil do for tab in cs.tabs do if tab.has_term {

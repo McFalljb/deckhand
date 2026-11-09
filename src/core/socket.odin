@@ -1104,16 +1104,14 @@ welcome_json :: proc(caller: Caller, reconnect: string, reconnect_challenge := f
 	if reconnect != "" && reconnect_challenge do strings.write_string(&b, `,"reconnect_hello":"challenge"`)
 	if framed do framed_fields(&b, caller)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
-	// (what the window reported: window.facts, window.tab_facts)
-	wf := window_facts()
-	if caller.kind == .App && wf != nil && wf.frames_service != "" {
-		if tf := window_tab_facts(caller.tab_id); tf != nil && tf.frames_key != "" {
-			fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, wf.frames_service, tf.frames_key, wf.frames_device)
-		}
+	// (what the window reported: window.facts, window.tab_facts; this runs on the reader thread)
+	if caller.kind == .App {
+		service, key, device, fps, scale, known := window_app_hello(caller.tab_id)
+		if service != "" && key != "" do fmt.sbprintf(&b, `,"frames":{{"service":"%s","key":"%s","device":%d}}`, service, key, device)
+		// and the display it shows on: the rate to pace at and the backing scale (§2.1; tab.display
+		// follows when they change)
+		if known do fmt.sbprintf(&b, `,"display":%s`, app_display_json(fps, scale))
 	}
-	// and the display it shows on: the rate to pace at and the backing scale (§2.1; tab.display
-	// follows when they change)
-	if caller.kind == .App && wf != nil do fmt.sbprintf(&b, `,"display":%s`, app_display_json(wf.fps, wf.scale))
 	strings.write_byte(&b, '}')
 	return strings.to_string(b)
 }

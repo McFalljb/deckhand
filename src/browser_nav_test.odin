@@ -208,6 +208,7 @@ browser_tabs_driven_and_reported :: proc(t: ^testing.T) {
 // reaches State or the workspace; file: addresses are the user's only.
 @(test)
 browser_url_userinfo_and_file :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	for b in ([]string{"127.0.0.1@evil.com", "localhost:3000@evil.com/x", BN_USER_PW + "example.com", "a@b.c"}) {
 		got, err := core.browser_url_normalize(b)
 		testing.expectf(t, err != "" && got == "", "%q should be refused, got %q", b, got)

@@ -11,6 +11,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:log"
+import "core:mem"
 import "core:os"
 import "core:reflect"
 import "core:strings"
@@ -20,14 +21,25 @@ import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
-// Every unit test's commands keep every session's panes whole.
+// Every unit test's commands keep every session's panes whole, and run on the heap: the test
+// runner's own allocator (context.allocator in a test proc) is wiped when the test ends, while what
+// a command makes outlives it (core.terms' table, a Term and its reader thread, State's arrays),
+// so a test that forgets `context.allocator = runtime.heap_allocator()` corrupts the tests after it.
+// A test's own tracking allocator is fine when the heap is under it.
 @(init)
 pt_check_every_command :: proc "contextless" () {
 	core.after_command_check = proc(cmd: core.Command) {
+		if !pt_on_heap(context.allocator) do log.errorf("%v ran on the test runner's allocator (freed when the test ends): set context.allocator = runtime.heap_allocator() first", reflect.union_variant_typeid(cmd))
 		for &s in state.open_sessions {
 			if why := core.session_check(&s); why != "" do log.errorf("panes broken after %v: session %d: %s", reflect.union_variant_typeid(cmd), s.id, why)
 		}
 	}
+}
+
+pt_on_heap :: proc(a: runtime.Allocator) -> bool {
+	a := a
+	for a.procedure == mem.tracking_allocator_proc do a = (^mem.Tracking_Allocator)(a.data).backing
+	return a.procedure == runtime.heap_allocator_proc
 }
 
 @(private = "file")
@@ -1639,6 +1651,7 @@ centre_reset :: proc() {
 // two panes across need 2 * 240 + 1 px, at scale 2 twice that; down, 2 * 140 + 1.
 @(test)
 pane_room_from_the_sent_centre :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	defer centre_reset()
 	s := pt_one(3)
 	p := s.panes[0].id
@@ -1669,6 +1682,7 @@ pane_room_from_the_sent_centre :: proc(t: ^testing.T) {
 // (no Clay): in 1001 px across (1000 + the divider), a pane is at least 240 px, so 0.1 becomes 0.24.
 @(test)
 pane_ratio_from_the_sent_centre :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	defer centre_reset()
 	s := pt_one(2)
 	r := core.run_command(core.Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s.tabs[1].id}, PT_UI)

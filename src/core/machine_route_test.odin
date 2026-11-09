@@ -246,6 +246,7 @@ route_term_relay :: proc(t: ^testing.T) {
 	sent := rt_last_text()
 	testing.expect(t, json_path(sent, "type") == "term.attach" && json_path(sent, "tab_id") == "10", "attached there, its id unpacked")
 	testing.expect_value(t, json_path(sent, "snapshot"), "vt") // never GHOSTSNP from another machine (review round 1)
+	testing.expect_value(t, json_path(sent, "snapshot_max"), "2097152") // and at most RELAY_SNAP_MAX (round 2)
 	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":7,"offset":0}}`, json_path(sent, "id")))
 	testing.expect_value(t, rel.remote, u32(7))
 	// from there: on the window's channel
@@ -287,6 +288,19 @@ route_term_relay :: proc(t: ^testing.T) {
 	vt := snapshot_pack({format = SNAPSHOT_VT, cols = 80, rows = 24, inexact = true}, transmute([]u8)string("hi"), context.temp_allocator)
 	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = vt})
 	testing.expect(t, len(rt_win) == before + 1 && rt_win[before].channel == ch && rt_win[before].kind == .Snapshot, "its fresh VT snapshot on the same window channel")
+	// review round 2: a snapshot past RELAY_SNAP_MAX is refused too, and a snapshot does not wipe
+	// the credit the window owes
+	rel.in_flight = 100
+	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = vt})
+	testing.expect_value(t, rel.in_flight, 100)
+	before = len(rt_win)
+	big_vt := snapshot_pack({format = SNAPSHOT_VT, cols = 80, rows = 24, inexact = true}, make([]u8, RELAY_SNAP_MAX, context.temp_allocator), context.temp_allocator)
+	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = big_vt})
+	testing.expect(t, rel.remote == 0 && len(rt_win) == before, "a snapshot past the limit ends the stream there")
+	before -= 1 // as counted before the round-1 checks below (the last VT snapshot reached it)
+	rel.retry_at = {}
+	machine_route_up(3)
+	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":9,"offset":0}}`, json_path(rt_last_text(), "id")))
 	// review round 1: a GHOSTSNP (or anything else) from another machine never reaches the window's
 	// decoder: the stream ends there, attached again later
 	for bad in ([][]u8{snapshot_pack({format = SNAPSHOT_GHOSTSNP, cols = 80, rows = 24}, transmute([]u8)string("GHOSTSNP...."), context.temp_allocator), transmute([]u8)string("snap")}) {
@@ -347,4 +361,25 @@ route_vt_snapshot_fit :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, Snapshot_Error.None)
 	meta, _, uerr := snapshot_unpack(blob)
 	testing.expect(t, uerr == .None && meta.format == SNAPSHOT_VT, "a VT snapshot")
+}
+
+// Review round 2: the other core's side honours term.attach's snapshot_max.
+@(test)
+route_snapshot_max_honoured :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	rt_begin()
+	defer rt_end_test()
+	tm := new(Term)
+	term_init(tm, 80, 24)
+	terms[77] = tm
+	defer {
+		delete_key(&terms, 77)
+		term_free(tm)
+		free(tm)
+	}
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"term.attach","id":"a","tab_id":77,"history_lines":0,"snapshot":"vt","snapshot_max":4096}`)
+	ok := false
+	for st in term_streams() do if st.tab_id == 77 do ok = st.vt && st.snap_max == 4096
+	testing.expect(t, ok, "its stream keeps the limit")
+	for f in rt_win do if f.kind == .Snapshot do testing.expect(t, len(f.payload) <= 4096, "the snapshot fits it")
 }

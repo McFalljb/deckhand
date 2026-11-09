@@ -989,7 +989,7 @@ link_message :: proc(text: string) -> (command: bool) {
 			// another machine's core: it says whose command this is (on_behalf), never more than ui
 			ok: bool
 			if caller, ok = hub_on_behalf(obj); !ok {
-				link_reply_now(id, fail("a hub's command needs on_behalf: ui, control or script"), 0)
+				link_reply_now(id, fail("a hub's command needs on_behalf: ui or control"), 0)
 				return
 			}
 		}

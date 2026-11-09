@@ -26,9 +26,10 @@ package core
 // window's channel, the window's DATA, CREDIT and FOCUS go there, and term.resize and term.detach
 // follow. Credit passes through end to end. A link that goes down keeps the window's channels;
 // up again, each is attached again and its fresh snapshot replaces the window's copy. Its bytes are
-// untrusted: its snapshots are asked for as the VT replay ("snapshot":"vt"), so the window's own
+// untrusted: its snapshots are asked for as the VT replay ("snapshot":"vt") of at most
+// RELAY_SNAP_MAX ("snapshot_max"; the window parses one in a go), so the window's own
 // parser takes them as it takes its DATA and a local program's; a GHOSTSNP (whose decoder has no
-// MAC against another machine) or any other snapshot, a RESIZE outside the grid limits, DATA past
+// MAC against another machine), any other snapshot or a larger one, a RESIZE outside the grid limits, DATA past
 // twice the credit, more than RELAY_SNAPS_PER_SEC snapshots, or a channel given twice ends that
 // stream there, attached again RELAY_RETRY later.
 // OSC 52 from its terminals is its core's window.request, which is dropped (machines.odin).
@@ -52,6 +53,7 @@ ROUTE_PROXIES_MAX :: 32 // their confirmations asked here
 RELAYS_MAX :: 256 // terminals relayed
 RELAY_IN_FLIGHT_MAX :: 2 * STREAM_CREDIT // DATA the window has not credited: past it, the stream is ended there
 RELAY_SNAPS_PER_SEC :: 4
+RELAY_SNAP_MAX :: 2 << 20 // a snapshot from another machine, at most (asked for as snapshot_max): parsed on the window's main thread
 RELAY_RETRY :: 2 * time.Second
 ROUTE_TEXT_MAX :: 300 // its errors and confirmation summaries (text_clean)
 
@@ -339,7 +341,7 @@ relay_attach :: proc(r: ^Term_Relay) {
 	if !machine_link_up(r.machine) do return
 	// its snapshots as the VT replay: the window's parser takes them as it takes their DATA, and the
 	// GHOSTSNP decoder never sees another machine's bytes
-	r.asking = machine_link_send_text(r.machine, fmt.tprintf(`{{"v":%d,"type":"term.attach","id":"r%d","tab_id":%d,"history_lines":%d,"snapshot":"vt"}}`, PROTOCOL_VERSION, r.channel, id_local(r.tab_id), r.history))
+	r.asking = machine_link_send_text(r.machine, fmt.tprintf(`{{"v":%d,"type":"term.attach","id":"r%d","tab_id":%d,"history_lines":%d,"snapshot":"vt","snapshot_max":%d}}`, PROTOCOL_VERSION, r.channel, id_local(r.tab_id), r.history, RELAY_SNAP_MAX))
 	if autotest_active do fmt.printfln("[autotest] machine %s: terminal %d attaching (channel %d)", machine_name(r.machine), id_local(r.tab_id), r.channel)
 }
 
@@ -406,6 +408,10 @@ machine_term_frame :: proc(no: u64, f: cw.Frame) {
 	case .Snapshot:
 		// only the VT replay we asked for: never a GHOSTSNP (libghostty's decoder, no MAC from
 		// another machine) or anything else
+		if len(f.payload) > RELAY_SNAP_MAX {
+			relay_restart(r, "a snapshot past its limit")
+			return
+		}
 		if meta, _, err := snapshot_unpack(f.payload); err != .None || meta.format != SNAPSHOT_VT {
 			relay_restart(r, "a snapshot that is not the VT replay")
 			return
@@ -417,7 +423,6 @@ machine_term_frame :: proc(no: u64, f: cw.Frame) {
 			relay_restart(r, "too many snapshots")
 			return
 		}
-		r.in_flight = 0 // what came before it is replaced
 		window_link_send_frame(r.channel, .Snapshot, f.payload)
 	case .Resize:
 		rz: struct {

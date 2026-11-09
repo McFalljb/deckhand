@@ -1272,13 +1272,13 @@ hub's `window.command`, `window.facts`, `window.tab_facts`, `script.core`, `tab_
 
 **Terminals on another machine** are relayed, not parsed: this core keeps no terminal for them.
 The window's `term.attach` on such a tab gets a channel of this core's at once; the hub attaches it
-on the link (`term.attach` with its own id and `"snapshot":"vt"`: that core sends its snapshots as
-the VT replay, inexact, never GHOSTSNP) and maps the two channels. `SNAPSHOT`, `DATA`,
+on the link (`term.attach` with its own id, `"snapshot":"vt"` and `"snapshot_max":2097152`: that core sends
+its snapshots as the VT replay, inexact, never GHOSTSNP, and trims their scrollback to fit) and maps the two channels. `SNAPSHOT`, `DATA`,
 `RESIZE`, `CLOSE` and `term.scroll` come back on the window's channel; the window's `DATA`,
 `CREDIT` and `FOCUS`, `term.resize` and `term.detach` go there. Credit passes through end to end.
 Down, the window's channels stay; up again, each is attached again and its fresh snapshot replaces
 the window's copy. That machine's bytes are untrusted: the window parses them, snapshots included, as it parses a
-local program's; a snapshot that is not the VT replay (a GHOSTSNP's decoder has no MAC against
+local program's; a snapshot over 2 MiB or not the VT replay (a GHOSTSNP's decoder has no MAC against
 another machine), a `RESIZE` outside the grid limits, `DATA` past twice the credit, more than 4
 snapshots a second, or a channel given twice ends that stream there, attached again 2 s later. An OSC 52 from it is its
 core's `window.request`, which is dropped (and Deckhand's terminals ignore OSC 52 anyway).
@@ -1310,7 +1310,7 @@ the size. A tab hidden for 2 s detaches.
 
 | from | message or frame | |
 |---|---|---|
-| window | `term.attach` `id`, `tab_id`, `history_lines` (0: all), `snapshot?` | the core answers `term.attached` `id`, `tab_id`, `channel`, `offset` (or `error`), then `SNAPSHOT` on that channel (`snapshot` `"vt"`: always the VT replay, as a hub asks) |
+| window | `term.attach` `id`, `tab_id`, `history_lines` (0: all), `snapshot?`, `snapshot_max?` | the core answers `term.attached` `id`, `tab_id`, `channel`, `offset` (or `error`), then `SNAPSHOT` on that channel (`snapshot` `"vt"`: always the VT replay; `snapshot_max`: at most that many bytes, scrollback trimmed first; as a hub asks) |
 | window | `term.detach` `channel` | the stream ends |
 | window | `term.resize` `tab_id`, `cols`, `rows`, `cell_w`, `cell_h` | what the tab's pane fits; the core resizes the terminal and the PTY (it alone decides) |
 | core | `term.scroll` `channel` | the core typed or pasted into it: the copy scrolls to the bottom |

@@ -64,6 +64,7 @@ Term_Stream :: struct {
 	credited:  u64, // DATA bytes the window took (CREDIT)
 	need_snap: bool, // send a snapshot at the next flush (attach, a new terminal, too far behind)
 	history:   int, // history_lines asked at attach (0: all)
+	snap_max:  int, // its snapshots' bytes at most (0: a frame)
 	vt:        bool, // its snapshots are the VT replay, never GHOSTSNP (asked by another machine's core: machine_route.odin)
 	// stats (tests, the scenes' log)
 	snapshots: int,
@@ -177,6 +178,7 @@ term_stream_message :: proc(type: string, obj: json.Object, id: string) {
 		s := new(Term_Stream, heap)
 		s.channel, s.tab_id, s.t, s.history = term_stream_channel_new(), tab_id, t, history
 		s.vt = string(obj["snapshot"].(json.String) or_else "") == SNAPSHOT_VT
+		s.snap_max = int(min(json_u64(obj["snapshot_max"]), u64(cw.MAX_PAYLOAD))) // a hub's: its window parses it in one go
 		s.pending = make([dynamic]u8, heap)
 		s.resizes = make([dynamic]Stream_Resize, heap)
 		s.need_snap = true
@@ -333,7 +335,9 @@ stream_snapshot :: proc(s: ^Term_Stream) -> bool {
 		meta.exit_code, meta.exit_signal = i64(t.exit.code), i64(t.exit.signal)
 	}
 	meta.inexact = t.inexact
-	blob, err := snapshot_encode_fit(t.gt, meta, stream_snap_limit > 0 ? stream_snap_limit : cw.MAX_PAYLOAD, vt = s.vt)
+	limit := stream_snap_limit > 0 ? stream_snap_limit : cw.MAX_PAYLOAD
+	if s.snap_max > 0 do limit = min(limit, s.snap_max)
+	blob, err := snapshot_encode_fit(t.gt, meta, limit, vt = s.vt)
 	if err != .None {
 		s.snap_retries += 1
 		return false

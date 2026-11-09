@@ -1,11 +1,11 @@
 # The coding agents checklist (tests/scripts/harness-setup.sh, run 1): pi 1.5.0 from its installer
-# with both recommended packages, Claude Code 2.1.300 from its native installer. Everything is
+# with all five recommended packages, Claude Code 2.1.300 from its native installer. Everything is
 # ticked and nothing offers an action; the Settings tab's Coding agents group lists the same.
 wait 1500
 assert_state focus.id setup
 assert_state focus.step agents
 assert_state focus.steps 4
-assert_state focus.agents.# 6
+assert_state focus.agents.# 9
 assert_state focus.agents.0.id pi
 assert_state focus.agents.0.state ok
 assert_state focus.agents.0.version 1.5.0
@@ -18,12 +18,19 @@ assert_state focus.agents.2.state ok
 assert_state focus.agents.2.version 0.84.0
 assert_state focus.agents.3.id rpiv-todo
 assert_state focus.agents.3.state ok
-assert_state focus.agents.4.id claude
+assert_state focus.agents.4.id pi-ask-user
 assert_state focus.agents.4.state ok
-assert_state focus.agents.4.version 2.1.300
-assert_state focus.agents.4.layout official installer
-assert_state focus.agents.5.id claude-plugin
-assert_state focus.agents.5.state built_in
+assert_state focus.agents.5.id pi-web-access
+assert_state focus.agents.5.state ok
+assert_state focus.agents.5.version 0.47.0
+assert_state focus.agents.6.id rpiv-btw
+assert_state focus.agents.6.state ok
+assert_state focus.agents.7.id claude
+assert_state focus.agents.7.state ok
+assert_state focus.agents.7.version 2.1.300
+assert_state focus.agents.7.layout official installer
+assert_state focus.agents.8.id claude-plugin
+assert_state focus.agents.8.state built_in
 shot harness-setup/installed-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200

@@ -11,21 +11,21 @@ assert_state focus.agents.0.command $homedir/.pi/agent/bin/pi update --self
 assert_state focus.agents.0.runnable true
 assert_state focus.agents.1.state not_loaded
 assert_state focus.agents.2.state needs_harness
-assert_state focus.agents.4.state too_old
-assert_state focus.agents.4.version 2.1.100
-assert_state focus.agents.4.layout official installer
-assert_state focus.agents.4.command $homedir/.local/bin/claude update
-assert_state focus.agents.4.runnable true
+assert_state focus.agents.7.state too_old
+assert_state focus.agents.7.version 2.1.100
+assert_state focus.agents.7.layout official installer
+assert_state focus.agents.7.command $homedir/.local/bin/claude update
+assert_state focus.agents.7.runnable true
 shot harness-setup/old-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200
 shot harness-setup/old-light
 ui_command {"type":"set_appearance","mode":"dark"}
 wait 100
-clickid agent_item_btn 4
+clickid agent_item_btn 7
 wait 300
 waitstate 15000 focus.run.status failed
 assert_state focus.run.code 127
-assert_state focus.agents.4.state too_old
+assert_state focus.agents.7.state too_old
 shot harness-setup/old-refused-dark
 quit

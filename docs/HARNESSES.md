@@ -195,15 +195,21 @@ or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect`
 |---|---|---|---|---|---|---|---|
 | `pi` | pi | harness | required | 1.4.0 (`PI_MIN_VERSION`) | `pi` on the tabs' PATH or in `$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`; version from its `package.json` | `curl --proto '=https' --proto-redir '=https' -fsSL https://pi.dev/install.sh \| sh` | pi README "Getting started", `docs/quickstart.md` |
 | `pi-integration` | pi | built in | required | (pi 1.4.0) | `integrations/pi` in the build | — | §3 |
-| `pi-subagents` | pi | third-party | recommended | 0.84.0 (GHSA-6v8j-6w28-2w8r) | `npm:pi-subagents…` in `~/.pi/agent/settings.json` `packages`; version from `~/.pi/agent/npm/node_modules/pi-subagents`, else the spec | `pi install npm:pi-subagents@0.84.0` | npmjs.com/package/pi-subagents; pin from pi-kit `test/ci/package.json`; `pi install`: pi `docs/cli.md` |
-| `rpiv-todo` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-todo…` in `packages` | `pi install npm:@juicesharp/rpiv-todo@2.15.0` | npmjs.com/package/@juicesharp/rpiv-todo; pin from pi-kit |
+| `pi-subagents` | pi | third-party | recommended | 0.84.0 (GHSA-6v8j-6w28-2w8r) | `npm:pi-subagents…` in `~/.pi/agent/settings.json` `packages`; version from `~/.pi/agent/npm/node_modules/pi-subagents`, else the spec | `pi install npm:pi-subagents@0.84.0` | npmjs.com/package/pi-subagents; pin: the first version with the GHSA-6v8j-6w28-2w8r fix (nicobailon/pi-subagents advisory); `pi install`: pi `docs/cli.md` |
+| `rpiv-todo` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-todo…` in `packages` | `pi install npm:@juicesharp/rpiv-todo@2.15.0` | npmjs.com/package/@juicesharp/rpiv-todo; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
+| `pi-ask-user` | pi | third-party | recommended | — | `npm:pi-ask-user…` in `packages` | `pi install npm:pi-ask-user@0.17.0` | npmjs.com/package/pi-ask-user; pin: a version in daily use; no advisories (edlsh/pi-ask-user) |
+| `pi-web-access` | pi | third-party | recommended | 0.24.1 (GHSA-8phw-6qw6-xhq6) | `npm:pi-web-access…` in `packages` | `pi install npm:pi-web-access@0.47.0` | npmjs.com/package/pi-web-access; pin: npm's latest on 2026-11-09; minimum: the GHSA-8phw-6qw6-xhq6 fix (nicobailon/pi-web-access advisory, ≤ 0.24.0) |
+| `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
 | `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
 
-Why these: the two pi packages feed the bundled `panels` extension's Subagents and Todos panels
-(§3); without them those panels stay empty. They are pinned at the versions pi-kit vetted. Claude
-Code needs nothing third-party: its plugin is sh and Deckhand's own CLI, so its Recommended list is
-empty and the sheet says "nothing else needed". pi-kit itself is optional (§8), not recommended.
+Why these: pi-subagents and rpiv-todo feed the bundled `panels` extension's Subagents and Todos
+panels (§3); without them those panels stay empty. pi-ask-user (an `ask_user` tool), pi-web-access
+(web search and fetching) and rpiv-btw (`/btw` side questions) are the tools we recommend with pi.
+Each install is pinned to an exact version; advisories were checked on GitHub (the global advisory
+database and each package's repository) when the pin was set. Claude Code needs nothing
+third-party: its plugin is sh and Deckhand's own CLI and loads with every Claude tab, so its
+Recommended list is empty and the sheet says "Nothing else to install".
 
 **States** (`Harness_Item_State`) and what each shows:
 
@@ -285,9 +291,8 @@ Afterwards the existing "restart N idle tabs" bars take over for tabs on the old
 
 ## 8. pi-kit
 
-pi-kit stays optional and works in any terminal: its own guardrails, shell and notes, the sidebar
-column, model-rules, versions, its other skills and its agents. In Deckhand they work next to the
-bundled integration (§4). pi-kit's desk-bridge, desk and desk-browser go inert in Deckhand (§4
+For people who already have pi-kit installed: its guardrails, shell, notes and sidebar work next
+to the bundled integration (§4). pi-kit's desk-bridge, desk and desk-browser go inert in Deckhand (§4
 item 1) and can be removed from pi-kit. Atlas memory ([ATLAS.md](ATLAS.md) §6) is planned as
 part of Deckhand.
 

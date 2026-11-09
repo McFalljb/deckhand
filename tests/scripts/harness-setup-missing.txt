@@ -11,19 +11,19 @@ assert_state focus.agents.0.runnable true
 assert_state focus.agents.1.state built_in
 assert_state focus.agents.2.state needs_harness
 assert_state focus.agents.2.action none
-assert_state focus.agents.4.state missing
-assert_state focus.agents.4.command curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh | bash
-assert_state focus.agents.4.runnable true
+assert_state focus.agents.7.state missing
+assert_state focus.agents.7.command curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh | bash
+assert_state focus.agents.7.runnable true
 shot harness-setup/missing-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200
 shot harness-setup/missing-light
 ui_command {"type":"set_appearance","mode":"dark"}
 wait 100
-hover agent_item_btn 4
+hover agent_item_btn 7
 eventually
 assert_tip Run `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh | bash` in a terminal here
-clickid agent_item_btn 4
+clickid agent_item_btn 7
 eventually
 assert_state focus.run.item claude
 assert_state focus.run.status running
@@ -48,9 +48,9 @@ assert_state focus.id setup
 assert_state focus.step agents
 assert_state focus.run.status running
 waitstate 15000 focus.run.status done
-assert_state focus.agents.4.state ok
-assert_state focus.agents.4.version 2.1.300
-assert_state focus.agents.4.action none
+assert_state focus.agents.7.state ok
+assert_state focus.agents.7.version 2.1.300
+assert_state focus.agents.7.action none
 shot harness-setup/claude-installed-dark
 ui_command {"type":"set_appearance","mode":"light"}
 wait 200
@@ -71,7 +71,7 @@ waitstate 15000 focus.run.status done
 assert_state focus.agents.2.state ok
 assert_state focus.agents.2.version 0.84.0
 assert_state focus.agents.3.state missing
-# Close: the output goes
+# Close: the output goes (the sheet scrolled to the run when it started: five pi packages above it)
 clickid setupbtn 13
 eventually
 assert_state focus.run <missing>

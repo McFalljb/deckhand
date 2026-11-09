@@ -100,9 +100,8 @@ have several. You can skip it and reopen it from **Deckhand â€º Set up Deckhandâ
 - **Claude Code.** Deckhand starts your own `claude` with its bundled plugin (`--plugin-dir`),
   with your own account and settings.
 
-Both get status dots, comments, and tools for the browser and app tabs you give them.
-[pi-kit](https://github.com/McFalljb/pi-kit) is an optional set of extras for pi; Deckhand does
-not need it. See [docs/HARNESSES.md](docs/HARNESSES.md).
+Both get status dots, comments, and tools for the browser and app tabs you give them. See
+[docs/HARNESSES.md](docs/HARNESSES.md).
 
 ## Sessions keep running
 
@@ -161,7 +160,7 @@ releases. To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 For users:
 
 - [GUIDE.md](docs/GUIDE.md): the user guide.
-- [HARNESSES.md](docs/HARNESSES.md): the pi and Claude Code integrations, harness setup, and pi-kit.
+- [HARNESSES.md](docs/HARNESSES.md): the pi and Claude Code integrations and harness setup.
 
 Design and reference:
 

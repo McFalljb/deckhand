@@ -93,10 +93,11 @@ Harness_Row :: struct {
 	source:      string, // where the install command comes from
 }
 
-// The rows, harness by harness, the harness first. Real items only: pi's two recommended packages
-// feed the bundled `panels` extension's Subagents and Todos panels (integrations/pi/extensions/
-// panels), vetted and pinned by pi-kit (packages.json, test/ci/package.json). Claude Code needs
-// nothing third-party: its plugin is sh and Deckhand's own CLI.
+// The rows, harness by harness, the harness first. Real items only: pi-subagents and rpiv-todo feed
+// the bundled `panels` extension's Subagents and Todos panels (integrations/pi/extensions/panels);
+// the other pi packages are the tools we recommend with it. Each is pinned (docs/HARNESSES.md §6:
+// the pin's source and its advisory check). Claude Code needs nothing third-party: Deckhand's own
+// plugin loads with every Claude tab.
 HARNESS_MANIFEST := [?]Harness_Row {
 	{
 		harness = .Pi, id = "pi", name = "pi", kind = .Harness, need = .Required, min_version = PI_MIN_VERSION, detect = .Binary,
@@ -114,13 +115,31 @@ HARNESS_MANIFEST := [?]Harness_Row {
 		harness = .Pi, id = "pi-subagents", name = "pi-subagents", kind = .Third_Party, need = .Recommended, min_version = "0.84.0", detect = .Pi_Package, detect_arg = "pi-subagents",
 		install = "{pi} install npm:pi-subagents@0.84.0", update_any = "{pi} install npm:pi-subagents@0.84.0",
 		why = "Background workers and reviewers; feeds the Subagents panel (0.84.0 fixes GHSA-6v8j-6w28-2w8r)",
-		source = "https://www.npmjs.com/package/pi-subagents (pin: pi-kit test/ci/package.json; `pi install`: pi docs/cli.md)",
+		source = "https://www.npmjs.com/package/pi-subagents (pin: the fix for GHSA-6v8j-6w28-2w8r; `pi install`: pi docs/cli.md)",
 	},
 	{
 		harness = .Pi, id = "rpiv-todo", name = "rpiv-todo", kind = .Third_Party, need = .Recommended, detect = .Pi_Package, detect_arg = "@juicesharp/rpiv-todo",
 		install = "{pi} install npm:@juicesharp/rpiv-todo@2.15.0",
 		why = "A todo tool and /todos; feeds the Todos panel",
-		source = "https://www.npmjs.com/package/@juicesharp/rpiv-todo (pin: pi-kit test/ci/package.json)",
+		source = "https://www.npmjs.com/package/@juicesharp/rpiv-todo",
+	},
+	{
+		harness = .Pi, id = "pi-ask-user", name = "pi-ask-user", kind = .Third_Party, need = .Recommended, detect = .Pi_Package, detect_arg = "pi-ask-user",
+		install = "{pi} install npm:pi-ask-user@0.17.0",
+		why = "An ask_user tool: the agent asks you a question, with choices, instead of guessing",
+		source = "https://www.npmjs.com/package/pi-ask-user",
+	},
+	{
+		harness = .Pi, id = "pi-web-access", name = "pi-web-access", kind = .Third_Party, need = .Recommended, min_version = "0.24.1", detect = .Pi_Package, detect_arg = "pi-web-access",
+		install = "{pi} install npm:pi-web-access@0.47.0", update_any = "{pi} install npm:pi-web-access@0.47.0",
+		why = "Web search and fetching pages, PDFs and GitHub repos for the agent (0.24.1 fixes GHSA-8phw-6qw6-xhq6)",
+		source = "https://www.npmjs.com/package/pi-web-access",
+	},
+	{
+		harness = .Pi, id = "rpiv-btw", name = "rpiv-btw", kind = .Third_Party, need = .Recommended, detect = .Pi_Package, detect_arg = "@juicesharp/rpiv-btw",
+		install = "{pi} install npm:@juicesharp/rpiv-btw@2.15.0",
+		why = "/btw: ask a side question without adding it to the conversation",
+		source = "https://www.npmjs.com/package/@juicesharp/rpiv-btw",
 	},
 	{
 		harness = .Claude, id = "claude", name = "Claude Code", kind = .Harness, need = .Required, min_version = CLAUDE_MIN_VERSION, detect = .Binary,

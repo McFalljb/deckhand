@@ -79,8 +79,12 @@ Deckhand finds more than one Claude Code account):
    - **Recommended**: third-party items, each with a one-line reason, ticked when installed. For pi:
      [pi-subagents](https://www.npmjs.com/package/pi-subagents) and
      [rpiv-todo](https://www.npmjs.com/package/@juicesharp/rpiv-todo), which feed the Subagents and
-     Todos panels, found in `~/.pi/agent/settings.json` (read, never written by Deckhand). Claude
-     Code needs nothing more ("nothing else needed").
+     Todos panels, [pi-ask-user](https://www.npmjs.com/package/pi-ask-user) (the agent asks you
+     instead of guessing), [pi-web-access](https://www.npmjs.com/package/pi-web-access) (web search
+     and fetching) and [rpiv-btw](https://www.npmjs.com/package/@juicesharp/rpiv-btw) (`/btw` side
+     questions), found in `~/.pi/agent/settings.json` (read, never written by Deckhand). Claude
+     Code needs nothing more: Deckhand's own plugin loads with every Claude tab ("Nothing else to
+     install").
 
    Every **Install** and **Update** shows its exact command first and runs only when you click it,
    in a terminal on the sheet (⌃C stops it). Something already installed is never installed
@@ -143,9 +147,7 @@ The Todos panel reads [rpiv-todo](https://www.npmjs.com/package/@juicesharp/rpiv
 Subagents panel [pi-subagents](https://www.npmjs.com/package/pi-subagents), when you have them
 installed in pi; another extension that publishes those panels itself takes them over.
 
-[pi-kit](https://github.com/McFalljb/pi-kit) is optional extras that also work outside Deckhand:
-guardrails, background shells, session notes, skills and agents for delegating and reviewing work,
-and its sidebar in a plain terminal. Installed, it works next to Deckhand's integration: its own
+If you already have pi-kit installed, it works next to Deckhand's integration: its own
 Deckhand parts (`desk-bridge`, `desk`, `desk-browser`) stay inactive in Deckhand's tabs, and its
 sidebar hands its sections to Deckhand's right column.
 

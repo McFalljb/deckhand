@@ -1,0 +1,22 @@
+# tests/scripts/term-bench.sh: CPU while a shell tab prints 95 MB shown, then hidden.
+wait 1000
+waitfor ARGS: 15000
+command {"type":"new_shell_tab","session":$session}
+wait 1500
+cpu_begin
+wait 3000
+cpu_end idle
+type cat ../bench-flood.txt ../bench-flood.txt ../bench-flood.txt; echo FLOOD-$((40+2))
+key enter
+cpu_begin
+waitfor FLOOD-42 120000
+cpu_end flood-shown
+wait 500
+type sleep 3; cat ../bench-flood.txt ../bench-flood.txt ../bench-flood.txt; echo HIDDEN-$((40+2))
+key enter
+command {"type":"focus_tab","tab_id":$pitab}
+wait 2500
+cpu_begin
+wait 10000
+cpu_end flood-hidden
+quit

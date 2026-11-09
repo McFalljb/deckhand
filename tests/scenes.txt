@@ -104,6 +104,7 @@ panels-cpu          | manual   | test-data,alone       |   30 | tests/scripts/pa
 shots               | manual   |                       |   20 | tests/scripts/shots.*
 text-shots          | manual   | test-data             |   15 | tests/scripts/text-shots.sh tests/scripts/text.txt tests/scripts/text-sample.sh | tests/scripts/text-shots.sh tests/scripts/text.txt
 text-flood          | manual   | test-data,alone       |   15 | tests/scripts/text-flood.txt | tests/scripts/text-shots.sh tests/scripts/text-flood.txt
+term-bench          | manual   | test-data,alone       |   25 | tests/scripts/term-bench.*
 
 # Real pi, billed: never run by the runner (docs/DEVELOPING.md, "Test mode and scenes")
 bridge-e2e          | paid     |                       |   60 | tests/scripts/bridge-e2e.*

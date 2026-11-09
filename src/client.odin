@@ -45,6 +45,7 @@ Client :: struct {
 	deferred:  Deferred_Free,
 	diverged:  int, // test mode: divergences found (autotest.odin)
 	swept:     time.Tick, // the last sweep (client_after_tick)
+	facts_sent: map[u64]string, // each browser tab's facts as last sent (client_pull)
 }
 
 client: Client
@@ -57,7 +58,8 @@ client_attach :: proc() {
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
 	deferred_init(&client.deferred)
-	client.end = core.core_attach_window(client_on_frames)
+	client.facts_sent = make(map[u64]string, heap)
+	client.end = core.core_attach_window(client_on_frames, client_pull)
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)
@@ -163,6 +165,27 @@ client_check :: proc() -> string {
 		core.window_link_resync()
 	}
 	return d
+}
+
+// What only the window knows of a browser tab's page, typed (core.Browser_Facts; temp allocator).
+browser_facts_of :: proc(tab_id: u64) -> (f: core.Browser_Facts) {
+	annot_tab_facts(&f, tab_id) // comment mode, markers (browser_annotate.odin)
+	browser_polish_tab_facts(&f, tab_id) // zoom, bars, downloads (browser_polish.odin)
+	browser_agent_tab_facts(&f, tab_id) // the agent strip (browser_agent.odin)
+	browser_act_tab_facts(&f, tab_id) // an upload's ask (browser_act.odin)
+	return
+}
+
+// The core asks for a browser tab's facts (get_state): sent when they changed since the last time.
+@(private = "file")
+client_pull :: proc(tab_id: u64) {
+	f := browser_facts_of(tab_id)
+	text := core.window_msg_browser_facts(tab_id, &f)
+	if last, ok := client.facts_sent[tab_id]; ok && last == text do return
+	heap := runtime.heap_allocator()
+	if old, ok := client.facts_sent[tab_id]; ok do delete(old, heap)
+	client.facts_sent[tab_id] = strings.clone(text, heap)
+	client_raw(text)
 }
 
 // ---- the link ----

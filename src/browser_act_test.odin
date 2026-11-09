@@ -244,7 +244,7 @@ browser_act_take_over :: proc(t: ^testing.T) {
 	testing.expect(t, r.ok && r.pending, r.error)
 	// the state and the strip say so
 	b := strings.builder_make(context.temp_allocator)
-	browser_agent_tab_json(&b, ta)
+	test_facts_json(&b, ta, agent = true)
 	testing.expect(t, strings.contains(strings.to_string(b), `"control":"user"`), strings.to_string(b))
 	// Hand back
 	r = core.run_command(core.Browser_Agent_Take_Over{tab_id = ta, on = false}, {kind = .UI})
@@ -322,7 +322,7 @@ browser_act_upload_gate :: proc(t: ^testing.T) {
 	ask := act_upload_asking(ta)
 	testing.expect(t, ask != nil && ask.stage == .Bar, "at the bar")
 	b := strings.builder_make(context.temp_allocator)
-	browser_act_tab_json(&b, ta)
+	test_facts_json(&b, ta, act = true)
 	testing.expectf(t, strings.contains(strings.to_string(b), `"upload_ask":{"files":["report.pdf"]`), "%s", strings.to_string(b))
 	testing.expect(t, !strings.contains(strings.to_string(b), f), "the full path is not in State")
 	for _ in 0 ..< 3 do browser_act_tick()
@@ -407,7 +407,7 @@ browser_act_log_and_strip :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(strings.to_string(b), "private") && strings.contains(strings.to_string(b), `"files":1`), strings.to_string(b))
 	core.run_command(typed, pi)
 	strings.builder_reset(&b)
-	browser_agent_tab_json(&b, ta)
+	test_facts_json(&b, ta, agent = true)
 	testing.expectf(t, strings.contains(strings.to_string(b), `"doing":"typing into"`), "%s", strings.to_string(b))
 	testing.expect(t, strings.contains(strings.to_string(b), `"acting":true`), strings.to_string(b))
 }
@@ -719,6 +719,6 @@ browser_act_claude_named :: proc(t: ^testing.T) {
 	ask := act_upload_asking(ta)
 	testing.expect(t, ask != nil && strings.has_prefix(ask.who_text, "Claude in "), ask != nil ? ask.who_text : "no bar")
 	b := strings.builder_make(context.temp_allocator)
-	browser_agent_tab_json(&b, ta)
+	test_facts_json(&b, ta, agent = true)
 	testing.expectf(t, strings.contains(strings.to_string(b), `"who":"Claude"`), "%s", strings.to_string(b))
 }

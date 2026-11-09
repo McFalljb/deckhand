@@ -932,28 +932,29 @@ annot_button_layout :: proc(b: ^Browser) {
 // answers, the document on screen, and the tab's markers in the session's order: the comment,
 // its number, kind, selector, document box (CSS px), where it is (annot_place, or not_found /
 // other_page) and its badge's place (logical px from the page's top-left).
-annot_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
+annot_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 	a := annots[tab_id]
 	if a == nil do return
-	fmt.sbprintf(b, `,"mode":"%s","annot_ready":%v,"doc_url":`, a.on ? "comment" : "browse", a.ctx != 0)
-	core.json_quote(b, a.url)
-	strings.write_string(b, `,"markers":[`)
+	f.annot, f.comment_mode, f.annot_ready, f.doc_url = true, a.on, a.ctx != 0, a.url
 	s, _, _ := core.find_tab(tab_id)
-	n := 0
+	markers := make([dynamic]core.Browser_Marker_Fact, context.temp_allocator)
 	if s != nil do for cm, i in s.comments {
 		mk, has := annot_markers[cm.id]
 		if !has || mk.tab_id != tab_id do continue
 		at_, badge := annot_place(mk.doc, a.scroll, a.view)
 		if !mk.found do at_ = mk.url == annot_url_key(a.url) && a.ctx != 0 ? .Not_Found : .Other_Page
-		if n > 0 do strings.write_byte(b, ',')
-		n += 1
-		fmt.sbprintf(b, `{{"comment_id":%d,"n":%d,"kind":"%s","selector":`, cm.id, i + 1, mk.kind == .Area ? "area" : "element")
-		core.json_quote(b, mk.selector)
-		strings.write_string(b, `,"url":`)
-		core.json_quote(b, mk.url)
-		fmt.sbprintf(b, `,"box":"%d,%d %dx%d","where":"%s","badge":"%d,%d"%s`, int(math.round(mk.doc.x)), int(math.round(mk.doc.y)), int(math.round(mk.doc[2])), int(math.round(mk.doc[3])), ANNOT_WHERE_NAMES[at_], int(math.round(badge.x * a.zoom)), int(math.round(badge.y * a.zoom)), "}")
+		append(&markers, core.Browser_Marker_Fact {
+			comment_id = cm.id,
+			n = i + 1,
+			area = mk.kind == .Area,
+			selector = mk.selector,
+			url = mk.url,
+			box = fmt.tprintf("%d,%d %dx%d", int(math.round(mk.doc.x)), int(math.round(mk.doc.y)), int(math.round(mk.doc[2])), int(math.round(mk.doc[3]))),
+			where_ = ANNOT_WHERE_NAMES[at_],
+			badge = fmt.tprintf("%d,%d", int(math.round(badge.x * a.zoom)), int(math.round(badge.y * a.zoom))),
+		})
 	}
-	strings.write_byte(b, ']')
+	f.markers = markers[:]
 }
 
 // ---- test mode (autotest.odin) ----

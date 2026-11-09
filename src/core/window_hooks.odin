@@ -28,8 +28,9 @@ Window_Hooks :: struct {
 	// what the window knows of a tab, for its object in State's JSON (json_write.odin); a
 	// headless core writes none of it:
 	// a browser tab's page as the window has it (comment mode and markers, zoom, bars and
-	// downloads, the agent strip, an upload's ask), written as `,"key":value` members
-	browser_json:   proc(b: ^strings.Builder, tab_id: u64),
+	// downloads, the agent strip, an upload's ask); an attached window sends it instead
+	// (window.browser_facts, browser_facts.odin)
+	browser_facts:  proc(tab_id: u64) -> Browser_Facts,
 	// a browser tab's page: open | waiting | unloaded | closed | opening; "" = no page
 	browser_page:   proc(tab_id: u64) -> string,
 	// an app tab's live frames and Inspect; ok false = no process
@@ -131,9 +132,16 @@ window_tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> 
 	return window.tab_host_apply(cmd, caller, request_id)
 }
 
-// A browser tab's page facts the window has, into its object in State (none without a window).
+// A browser tab's page facts the window has, into its object in State (none without a window):
+// what an attached window sent, asked for now (window_link_pull), else the hook's (unit tests).
 window_browser_json :: proc(b: ^strings.Builder, tab_id: u64) {
-	if window.browser_json != nil do window.browser_json(b, tab_id)
+	if window_link_pull(tab_id) {
+		if f, ok := browser_facts_get(tab_id); ok do browser_facts_write(b, f)
+		return
+	}
+	if window.browser_facts == nil do return
+	f := window.browser_facts(tab_id)
+	browser_facts_write(b, &f)
 }
 
 // A browser tab's page state ("" = no page, or no window).

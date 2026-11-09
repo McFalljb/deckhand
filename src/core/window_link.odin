@@ -76,6 +76,7 @@ Window_Link :: struct {
 	core_end:   cw.Mem_End,
 	win_end:    cw.Mem_End,
 	on_frames:  proc(), // in process: the window reads what the core just sent
+	on_pull:    proc(tab_id: u64), // in process: the window sends a browser tab's facts now (get_state)
 	subscribed: bool,
 	sent:       State_Sent, // what the window's replica holds
 	dirty:      bool, // window_state_changed since the last delta
@@ -99,12 +100,13 @@ window_attached :: proc() -> bool {return link != nil}
 // Attaches the window: the only way to get the ui caller (main.odin's client, at init). Returns
 // the window's end of the transport. on_frames is called after the core sends it anything.
 // Main thread.
-core_attach_window :: proc(on_frames: proc()) -> cw.Mem_End {
+core_attach_window :: proc(on_frames: proc(), on_pull: proc(tab_id: u64) = nil) -> cw.Mem_End {
 	assert(link == nil, "one window")
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
 	link.core_end, link.win_end = cw.mem_open(&link.t, allocator = heap)
 	link.on_frames = on_frames
+	link.on_pull = on_pull
 	link.replies = make([dynamic]^Link_Reply, heap)
 	link.sent.sections = make(map[string]string, heap)
 	return link.win_end
@@ -116,6 +118,7 @@ core_detach_window :: proc() {
 	heap := runtime.heap_allocator()
 	link_free_replies(all = true)
 	delete(link.replies)
+	browser_facts_clear()
 	state_sent_free(&link.sent)
 	cw.mem_close(link.core_end)
 	cw.mem_destroy(&link.t)
@@ -261,6 +264,25 @@ window_msg_internal :: proc(cmd: Command, id: string, now := false) -> (text: st
 	return strings.to_string(b), true
 }
 
+// A browser tab's facts as the window sends them (nil: it has none any more).
+window_msg_browser_facts :: proc(tab_id: u64, f: ^Browser_Facts) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"type":"window.browser_facts","tab_id":%d,"facts":`, PROTOCOL_VERSION, tab_id)
+	if f == nil do strings.write_string(&b, "null")
+	else do wire_write(&b, f, type_info_of(Browser_Facts))
+	strings.write_byte(&b, '}')
+	return strings.to_string(b)
+}
+
+// What only the window knows of a browser tab, fresh (get_state): the window sends it now.
+// False: no attached window.
+window_link_pull :: proc(tab_id: u64) -> bool {
+	if link == nil do return false
+	if link.on_pull != nil do link.on_pull(tab_id)
+	window_link_pump()
+	return true
+}
+
 window_msg_subscribe :: proc() -> string {
 	return fmt.tprintf(`{{"v":%d,"type":"state.subscribe"}}`, PROTOCOL_VERSION)
 }
@@ -391,6 +413,25 @@ link_message :: proc(text: string) {
 			return
 		}
 		link_run(cmd, {kind = .UI}, id, now, menu)
+	case "window.browser_facts":
+		n, nok := obj["tab_id"].(json.Integer)
+		if !nok || n <= 0 {
+			fmt.eprintln("Deckhand: window.browser_facts without a tab_id")
+			return
+		}
+		fv := obj["facts"]
+		if _, null := fv.(json.Null); null || fv == nil {
+			browser_facts_set(u64(n), nil)
+			return
+		}
+		heap := runtime.heap_allocator()
+		f: Browser_Facts
+		if e := wire_read(fv, &f, type_info_of(Browser_Facts), heap); e != "" {
+			wire_free(&f, type_info_of(Browser_Facts), heap)
+			fmt.eprintln("Deckhand: window.browser_facts refused:", e)
+			return
+		}
+		browser_facts_set(u64(n), f)
 	case "window.command":
 		cmd, err := window_command_decode(obj["command"])
 		if err != "" {

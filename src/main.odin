@@ -227,12 +227,7 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 			}
 			return false
 		},
-		browser_json = proc(b: ^strings.Builder, tab_id: u64) {
-			annot_tab_json(b, tab_id) // comment mode, markers (browser_annotate.odin)
-			browser_polish_tab_json(b, tab_id) // zoom, bars, downloads (browser_polish.odin)
-			browser_agent_tab_json(b, tab_id) // the agent strip (browser_agent.odin)
-			browser_act_tab_json(b, tab_id) // an upload's ask (browser_act.odin)
-		},
+		browser_facts = browser_facts_of, // client.odin (an attached window sends them instead)
 		browser_page = proc(tab_id: u64) -> string {
 			b := browser_of(tab_id)
 			if b == nil do return ""

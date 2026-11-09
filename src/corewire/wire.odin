@@ -1,7 +1,9 @@
 // The framed wire between a window and its core, and between two cores
 // (docs/plans/background-core.md §5.1): what core.sock carries after an NDJSON
 // hello with framed:true, and what `deckhand-core connect` carries over stdio.
-// Pure: no sockets, no app state, no JSON parsing (payloads are opaque here).
+// This file is pure: no sockets, no app state, no JSON parsing (payloads are opaque here).
+// The transports beside it carry these frames: transport_mem.odin in process, transport_sock.odin
+// over a Unix socket; skew.odin has the hello's version tables.
 //
 // A frame is [channel u32 LE][kind u8][len u32 LE][payload ≤ 16 MiB] (herdr's
 // layout). Channel 0 carries JSON messages as DATA; channels ≥ 1 are terminal

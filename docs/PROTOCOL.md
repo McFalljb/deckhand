@@ -108,6 +108,32 @@ The first message on a connection is `hello`:
   has no `--print-token`, DEVELOPING.md "Releases"). In any build, `copy_control_token` (the
   gear's **Copy a control token**, the user's only) mints a control token and puts that same line
   on the clipboard. Tokens are never in State, events, replies or the log.
+- **The challenge hello** (from M4-B). A reconnect token never crosses the socket again: the
+  client proves it knows it, and Deckhand proves it first, so a program listening where Deckhand
+  should be learns nothing it can use. A client that speaks it says so on its env token's hello
+  (`"challenge": true`); the result then carries `"reconnect_hello": "challenge"` next to
+  `reconnect_token`, and that token is **challenge-only**: a plain hello with it gets `"this token
+  needs the challenge hello"`. A client that does not say it (a kept pi session's older bridge)
+  keeps the plain hello for its reconnect token until its tab closes. Env tokens, script, control
+  and app tokens, and Claude tokens keep the plain hello.
+
+```json
+{"id": "1", "v": 1, "type": "hello", "token_id": "<64 hex>", "nonce": "<64 hex>"}
+{"id": "1", "v": 1, "type": "result", "result": {"ok": true, "data": {"challenge": "<64 hex>", "proof": "<64 hex>"}}}
+{"id": "2", "v": 1, "type": "hello.proof", "proof": "<64 hex>"}
+{"id": "2", "v": 1, "type": "result", "result": {"ok": true, "data": {"v": 1, "app": "deckhand", "caller": "panel", ...}}}
+```
+
+  With `key = SHA-256(token)` (what `tokens.json` keeps), `token_id = HMAC-SHA256(key,
+  "deckhand-token-id-v1")` and `proof(role) = HMAC-SHA256(key, "deckhand-hello-v1\n" role "\n"
+  nonce "\n" challenge)`, all lowercase hex. Deckhand's proof has role `core`, the
+  client's `client`; the client checks Deckhand's before it sends its own. The core's nonce is new
+  on every connection, so a recorded proof does not verify again
+  (`"the proof does not verify"`); a token revoked between the two lines is `"unknown token"`.
+  Code: `src/core/hello_proof.odin`, `integrations/pi/lib/protocol.ts` (`HelloFlow`), one shared
+  test vector. **`tokens.json`'s hashes are the challenge keys:** a process of the same user that
+  reads the file (0600) can prove any token in it. That is the same-user residual
+  ([background-core.md](plans/background-core.md) §5.4), stated here plainly.
 - **A Claude tab's token** (`DECKHAND_CLAUDE_TOKEN`, with `DECKHAND_SOCKET`, `DECKHAND_CLI`,
   `DECKHAND_SHOTS_DIR`, `DECKHAND_CLAUDE_TAB`) is **multi-use** (the plugin's CLI is a new process
   per call), minted fresh at each start of the tab, revoked when its process exits or the tab
@@ -1117,6 +1143,19 @@ Core → window:
 | `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went) |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `toast` | `text`, `err` | a short line at the bottom of the window |
+
+**Over `core.sock` (M4).** A hello (plain or challenge) with `"framed": true` asks for framed
+mode: the reply is the line connection's last line, and it carries, beside the usual fields,
+`framed: true`, `generation` (the wire's, `1`), `version` (the core's release version, `""` in a
+development build), `features` (`["challenge_hello"]`), `methods` (the commands this caller may
+send), `machine` (`{os, arch}`), `holder_wire` and `snapshot` (the formats it decodes, best
+first: `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries frames
+([background-core.md](plans/background-core.md) §5.1; `src/corewire/transport_sock.odin`): channel 0
+first, a newer snapshot replacing a queued one, the 4 MiB cap and the ceiling after which a
+peer that does not read is cut off, and the peer re-checked before each read's bytes are acted
+on. The window checks the reply with `skew_check` and the core the window with the window floor
+(`src/corewire/skew.odin`, §7.5). Until M4-C nothing takes framed connections: such a hello gets
+`"framed mode is not available in this build"`, before an env token is used up.
 
 **Order.** A command's `state.delta` is sent before its `result` (the window waits for its own
 results and reads State at once). The delta before a result compares every section, so it holds

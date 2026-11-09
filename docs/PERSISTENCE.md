@@ -49,7 +49,9 @@ tokens of the tabs whose process runs in the session holder, so those processes 
 after Deckhand reopens (PROTOCOL.md §2). Keyed by holder terminal, sha256 hashes only, never a
 token. Per terminal it also says what was started there (`kind`: shell, pi or claude; for pi
 `pi_ro` and its optional extensions `extras`): a restored tab of another kind never adopts that
-terminal, and an adopted pi tab is never less read-only than it started. Written whenever a
+terminal, and an adopted pi tab is never less read-only than it started. A reconnect token that
+is challenge-only says `"hello":"challenge"` (absent: plain, every file before M4-B): its hash is
+the challenge hello's key (PROTOCOL.md §2). Written whenever a
 holder is attached (at launch or later), rewritten atomically on every mint and revoke (outside
 the socket's lock), MAC'd with the holder's in-memory key (`src/core/macfile.odin`: a `deckhand-mac
 1 tokens <hmac>` line, then the JSON): a file that does not verify is ignored whole. A new

@@ -4,6 +4,7 @@
 // Symbol.for("deckhand.*") tokens and deckhand:* events, so an installed pi-kit's desk extensions
 // (gated on PI_DESK_SOCKET and PI_DESK_TOKEN / PI_DESK_CONTROL_TOKEN) stay inert next to it.
 
+import { createHash, createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 import { one, type Panel, type Run, runningLeaves, type ShellRow } from "./rows.ts";
 
 export const V = 1;
@@ -43,7 +44,10 @@ export function deckhandEnv(name: string): string | undefined {
 }
 /** Tests: forget every DECKHAND_* value kept in memory. */
 export function forgetDeckhandEnv(names: readonly string[] = ["DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CONTROL_TOKEN", "DECKHAND_SHOTS_DIR"]): void {
-	for (const n of names) slots()[envKey(n)] = undefined;
+	for (const n of names) {
+		slots()[envKey(n)] = undefined;
+		if (n.endsWith("_TOKEN")) slots()[helloKey(n)] = undefined;
+	}
 }
 
 /**
@@ -55,13 +59,26 @@ export function forgetDeckhandEnv(names: readonly string[] = ["DECKHAND_SOCKET",
 export function envToken(env: string, _take = false): string | undefined {
 	return deckhandEnv(env); // env-read-ok: envToken: its callers are checked
 }
-/** Keep a hello result's reconnect token for every later hello with `env`'s token. */
-export function keepToken(env: string, token: unknown): void {
-	if (typeof token === "string" && token) slots()[tokenKey(env)] = token;
+/** How the token kept for `env` is shown at hello (a symbol of its own, so a token kept by an older
+ *  bridge, which has none, stays "plain"). */
+const helloKey = (env: string) => Symbol.for(`deckhand.hello.${env}`);
+export type HelloKind = "plain" | "challenge";
+/**
+ * Keep a hello result's reconnect token for every later hello with `env`'s token. `hello`: the
+ * result's `reconnect_hello` ("challenge": the token is proved, never sent again).
+ */
+export function keepToken(env: string, token: unknown, hello?: unknown): void {
+	if (typeof token !== "string" || !token) return;
+	slots()[tokenKey(env)] = token;
+	slots()[helloKey(env)] = hello === "challenge" ? "challenge" : "plain";
+}
+/** How the token for `env` is shown at hello: "challenge" only for a reconnect token Deckhand said so of. */
+export function tokenHello(env: string): HelloKind {
+	return slots()[helloKey(env)] === "challenge" ? "challenge" : "plain";
 }
 /** The pi tab's token (DECKHAND_TOKEN, caller `panel`). */
 export const deskToken = (take = false) => envToken("DECKHAND_TOKEN", take);
-export const keepReconnectToken = (token: unknown) => keepToken("DECKHAND_TOKEN", token);
+export const keepReconnectToken = (token: unknown, hello?: unknown) => keepToken("DECKHAND_TOKEN", token, hello);
 /** Deckhand's socket (DECKHAND_SOCKET). */
 export const deskSocket = () => deckhandEnv("DECKHAND_SOCKET");
 
@@ -87,6 +104,69 @@ export function parse(text: string): Record<string, any> | undefined {
 		return m && typeof m === "object" && !Array.isArray(m) && (m.v === undefined || m.v === V) ? m : undefined;
 	} catch {
 		return undefined;
+	}
+}
+
+// ---- the hello (Deckhand docs/PROTOCOL.md §2: the plain hello and the challenge hello) ----
+
+/** The challenge hello's proofs, as Deckhand computes them (src/core/hello_proof.odin; one shared vector in the tests). */
+export const helloKey256 = (token: string) => createHash("sha256").update(token, "utf8").digest();
+export const helloTokenId = (key: Buffer) => createHmac("sha256", key).update("deckhand-token-id-v1").digest("hex");
+export function helloProof(key: Buffer, role: "core" | "client", clientNonce: string, coreNonce: string): string {
+	return createHmac("sha256", key).update(`deckhand-hello-v1\n${role}\n${clientNonce}\n${coreNonce}`).digest("hex");
+}
+const HEX64 = /^[0-9a-f]{64}$/;
+const sameHex = (a: unknown, b: string) => typeof a === "string" && HEX64.test(a) && timingSafeEqual(Buffer.from(a), Buffer.from(b));
+
+/** What the hello flow says after a line from Deckhand. */
+export type HelloStep = { send: string } | { ok: Record<string, any> } | { fail: string } | undefined;
+
+/**
+ * One connection's hello, for the bridge and the desk tools. With a plain token (an env token, or a
+ * reconnect token an older Deckhand gave): `{"type":"hello","token",…,"challenge":true}`, which says
+ * this client proves its reconnect token from now on. With a challenge-only reconnect token: its id
+ * and a fresh nonce; Deckhand answers with its nonce and its proof, which is checked here before
+ * anything else is sent (a program listening where Deckhand should be, without the token's key,
+ * gets only the id and the nonce); then this side's proof. The token itself is never sent after
+ * its first hello.
+ * A successful result's reconnect token is kept (keepToken) by the flow itself, at once.
+ */
+export class HelloFlow {
+	readonly first: string;
+	private env: string;
+	private id: string;
+	private step = 0;
+	private key?: Buffer;
+	private tokenId = "";
+	private nonce = "";
+	constructor(env: string, id: string, token: string, nonce = randomBytes(32).toString("hex")) {
+		this.env = env;
+		this.id = id;
+		if (tokenHello(env) === "challenge") {
+			this.key = helloKey256(token);
+			this.tokenId = helloTokenId(this.key);
+			this.nonce = nonce;
+			this.first = line({ id, type: "hello", token_id: this.tokenId, nonce });
+		} else this.first = line({ id, type: "hello", token, challenge: true });
+	}
+	/** The id of the line whose reply comes next. */
+	get waiting(): string {
+		return this.step === 0 ? this.id : `${this.id}p`;
+	}
+	/** A parsed line from Deckhand; undefined: not the reply this flow waits for. */
+	onLine(m: Record<string, any>): HelloStep {
+		if (m.id !== this.waiting) return undefined;
+		if (m.result?.ok !== true) return { fail: String(m.result?.error ?? "hello refused") };
+		if (!this.key) {
+			keepToken(this.env, m.result.data?.reconnect_token, m.result.data?.reconnect_hello);
+			return { ok: m.result };
+		}
+		if (this.step === 1) return { ok: m.result };
+		const d = m.result.data ?? {};
+		if (typeof d.challenge !== "string" || !HEX64.test(d.challenge)) return { fail: "no challenge" };
+		if (!sameHex(d.proof, helloProof(this.key, "core", this.nonce, d.challenge))) return { fail: "Deckhand's proof does not verify: not the Deckhand that gave this token" };
+		this.step = 1;
+		return { send: line({ id: this.waiting, type: "hello.proof", proof: helloProof(this.key, "client", this.nonce, d.challenge) }) };
 	}
 }
 

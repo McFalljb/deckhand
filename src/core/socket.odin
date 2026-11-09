@@ -27,7 +27,11 @@ import "core:strings"
 import "core:sync"
 import "core:thread"
 import "core:time"
+import "base:runtime"
+import cw "../corewire"
+import hw "../holderwire"
 import jg "../jsonguard"
+import "../trust"
 
 socket_line_max := 1 << 20 // a longer request line is an error and closes the connection
 SOCKET_HELLO_MAX :: 4096 // the same, before hello
@@ -40,6 +44,17 @@ Token_Entry :: struct {
 	caller:     Caller,
 	ref:        u64, // identity: a caller never receives events caused by its own token
 	single_use: bool, // a child's env token: its first hello swaps it for a reconnect token
+	hello:      Hello_Kind, // how a hello shows it (tokens.json keeps it)
+	hid:        [32]u8, // .Challenge: its token id (hello_token_id)
+}
+
+// How a hello shows a token. Plain: sent as `token` (every token but the reconnect tokens the
+// challenge hello's clients get, and those minted before M4-B, which kept pi sessions' bridges
+// still send that way). Challenge: proved, never sent (hello_proof.odin); a plain hello with it
+// is refused.
+Hello_Kind :: enum u8 {
+	Plain,
+	Challenge,
 }
 
 Conn :: struct {
@@ -59,7 +74,19 @@ Conn :: struct {
 	closing:     bool,
 	writer:      ^thread.Thread, // nil if it could not start
 	opened:      time.Tick, // for the hello deadline
+	// a challenge hello between its two lines (reader thread only)
+	ch_open:     bool,
+	ch_key:      [32]u8,
+	ch_id:       [64]u8,
+	ch_cnonce:   [64]u8,
+	ch_snonce:   [64]u8,
+	handoff:     bool, // a framed hello was answered: the reader hands the fd to socket_framed_handler
 }
+
+// Who takes a connection after its framed hello (docs/PROTOCOL.md §5a): the fd, the caller its
+// token stands for, and bytes the reader read past the hello line (valid during the call). Nil:
+// a framed hello is refused. Only tests set it until M4-C (the window's link over core.sock).
+socket_framed_handler: proc(fd: Sock_Fd, caller: Caller, leftover: []u8)
 
 @(private = "file")
 Origin :: struct {
@@ -690,6 +717,12 @@ conn_reader :: proc(c: ^Conn) {
 			line := strings.trim_right(string(buf[:i]), "\r")
 			conn_wait_room(c)
 			keep := conn_line(c, line)
+			if c.handoff {
+				conn_handoff(c, buf[i + 1:])
+				delete(buf)
+				free_all(context.temp_allocator)
+				return
+			}
 			remove_range(&buf, 0, i + 1)
 			scanned = 0
 			free_all(context.temp_allocator)
@@ -763,7 +796,12 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 	if strings.trim_space(line) == "" do return true
 	m, err := parse_request(line, context.temp_allocator)
 	if c.ref == 0 {
-		if err == "" && m.type != "hello" do err = "the first message must be hello"
+		if err == "" && m.type == "hello.proof" && !c.ch_open do err = "the first message must be hello"
+		if err == "" && m.type == "hello" && c.ch_open do err = "the challenge wants hello.proof"
+		if err == "" && m.type != "hello" && m.type != "hello.proof" do err = "the first message must be hello"
+		if err == "" && m.framed && socket_framed_handler == nil do err = "framed mode is not available in this build"
+		if err == "" && m.type == "hello" && m.token_id != "" do return conn_challenge(c, m)
+		if err == "" && m.type == "hello.proof" do return conn_proof(c, m)
 		reconnect: string
 		ref: u64
 		if err == "" {
@@ -775,6 +813,12 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 				conn_push(c, reply_json(m.id, fail("this token works only from its Claude tab's own processes")), force = true)
 				return false
 			}
+			// a challenge-only token is never accepted as sent: whoever sent it should not have it
+			if known && e.hello == .Challenge {
+				sync.unlock(&srv.mu)
+				conn_push(c, reply_json(m.id, fail("this token needs the challenge hello")), force = true)
+				return false
+			}
 			if known {
 				c.caller = e.caller // socket_forget_tab finds it from here on
 				ref = e.ref
@@ -783,7 +827,14 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 					k, _ := delete_key(&srv.tokens, m.token)
 					delete(k)
 					reconnect = random_token(context.temp_allocator)
-					srv.tokens[strings.clone(reconnect)] = {caller = e.caller, ref = e.ref}
+					ne := Token_Entry{caller = e.caller, ref = e.ref}
+					if m.challenge {
+						// the client proves it from now on (hello_proof.odin); an older bridge,
+						// which does not say challenge, keeps the plain hello
+						ne.hello = .Challenge
+						ne.hid = hello_token_id(token_hash(reconnect))
+					}
+					srv.tokens[strings.clone(reconnect)] = ne
 					tokens_save()
 				}
 			}
@@ -795,15 +846,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 			conn_push(c, reply_json(m.id, fail(err)), force = true)
 			return false
 		}
-		// The reply is queued in the same step that makes the connection count as its caller's
-		// (c.ref: socket_app_send, socket_bridge_send and events look for it), so nothing that
-		// Deckhand sends it can come before its hello reply (TAB-PROTOCOL.md §3).
-		welcome := reply_json(m.id, {ok = true, data = welcome_json(c.caller, reconnect)})
-		sync.lock(&srv.mu)
-		c.ref = ref
-		conn_push(c, welcome, force = true)
-		sync.unlock(&srv.mu)
-		return true
+		return conn_welcome(c, m.id, ref, reconnect, reconnect != "" && m.challenge, m.framed)
 	}
 	if c.caller.kind == .App {
 		app_conn_line(c, line)
@@ -882,8 +925,172 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 	return true
 }
 
+// The hello's reply, and from then on the connection counts as its caller's. The reply is queued
+// in the same step that makes it count (c.ref: socket_app_send, socket_bridge_send and events
+// look for it), so nothing that Deckhand sends it can come before its hello reply
+// (TAB-PROTOCOL.md §3). framed: the reply carries the framed fields and the reader hands the
+// connection over (conn_handoff); it never counts as a line connection.
 @(private = "file")
-welcome_json :: proc(caller: Caller, reconnect: string) -> string {
+conn_welcome :: proc(c: ^Conn, id: string, ref: u64, reconnect: string, reconnect_challenge, framed: bool) -> bool {
+	data := welcome_json(c.caller, reconnect, reconnect_challenge, framed)
+	welcome := reply_json(id, {ok = true, data = data})
+	if framed {
+		conn_push(c, welcome, force = true)
+		c.handoff = true
+		return true
+	}
+	sync.lock(&srv.mu)
+	c.ref = ref
+	conn_push(c, welcome, force = true)
+	sync.unlock(&srv.mu)
+	return true
+}
+
+// A challenge-only token, by its id (srv.mu held): this run's, or one from tokens.json whose
+// terminal was adopted. key: its SHA-256, the proofs' key.
+@(private = "file")
+token_find_challenge :: proc(id: [32]u8) -> (e: Token_Entry, key: [32]u8, ok: bool) {
+	for tok, x in srv.tokens do if x.hello == .Challenge && x.hid == id {
+		if !token_caller_ok(x.caller) do return {}, {}, false
+		return x, token_hash(tok), true
+	}
+	for k, h in srv.hashed do if h.hello == .Challenge && h.hid == id && h.caller.tab_id != 0 {
+		return h.entry, k, true
+	}
+	return {}, {}, false
+}
+
+// The challenge hello's first line: {"type":"hello","token_id","nonce"}. The core answers with its
+// nonce and its proof (it knows the token's key), and waits for hello.proof. An unknown id ends
+// the connection, as an unknown token does.
+@(private = "file")
+conn_challenge :: proc(c: ^Conn, m: Request_Msg) -> bool {
+	if !hex64_ok(m.token_id) || !hex64_ok(m.nonce) {
+		conn_push(c, reply_json(m.id, fail("token_id and nonce must be 64 lowercase hex digits")), force = true)
+		return false
+	}
+	idb, _ := hex.decode(transmute([]u8)m.token_id, context.temp_allocator)
+	id: [32]u8
+	copy(id[:], idb)
+	sync.lock(&srv.mu)
+	_, key, known := token_find_challenge(id)
+	sync.unlock(&srv.mu)
+	if !known {
+		conn_push(c, reply_json(m.id, fail("unknown token")), force = true)
+		return false
+	}
+	raw: [32]u8
+	crypto.rand_bytes(raw[:])
+	snonce := hex32(raw)
+	c.ch_open, c.ch_key = true, key
+	copy(c.ch_id[:], m.token_id)
+	copy(c.ch_cnonce[:], m.nonce)
+	copy(c.ch_snonce[:], snonce)
+	p := hello_proof(key, "core", m.nonce, snonce)
+	conn_push(c, reply_json(m.id, {ok = true, data = fmt.tprintf(`{{"challenge":"%s","proof":"%s"}}`, snonce, hex32(p))}), force = true)
+	return true
+}
+
+// The challenge hello's second line: {"type":"hello.proof","proof"}. Checked against the key from
+// the first line, and the token still known (revoked in
+// between: unknown). Then the hello reply, as for a plain hello (no reconnect token: a challenge
+// token is never single-use).
+@(private = "file")
+conn_proof :: proc(c: ^Conn, m: Request_Msg) -> bool {
+	defer {
+		trust.wipe(c.ch_key[:])
+		c.ch_open = false
+	}
+	if !hex64_ok(m.proof) {
+		conn_push(c, reply_json(m.id, fail("proof must be 64 lowercase hex digits")), force = true)
+		return false
+	}
+	id_hex := string(c.ch_id[:])
+	want := hello_proof(c.ch_key, "client", string(c.ch_cnonce[:]), string(c.ch_snonce[:]))
+	if !hex64_equal(hex32(want), m.proof) {
+		conn_push(c, reply_json(m.id, fail("the proof does not verify")), force = true)
+		return false
+	}
+	idb, _ := hex.decode(transmute([]u8)id_hex, context.temp_allocator)
+	id: [32]u8
+	copy(id[:], idb)
+	sync.lock(&srv.mu)
+	e, key, known := token_find_challenge(id)
+	if known && key == c.ch_key do c.caller = e.caller // socket_forget_tab finds it from here on
+	sync.unlock(&srv.mu)
+	if !known || key != c.ch_key {
+		conn_push(c, reply_json(m.id, fail("unknown token")), force = true)
+		return false
+	}
+	return conn_welcome(c, m.id, e.ref, "", false, m.framed)
+}
+
+// After a framed hello's reply: the writer sends what is queued (the reply) and stops, the
+// connection leaves the line server, and socket_framed_handler owns the fd from here.
+@(private = "file")
+conn_handoff :: proc(c: ^Conn, leftover: []u8) {
+	sync.lock(&c.mu)
+	c.closing = true // the writer drains its queue, then returns
+	sync.cond_broadcast(&c.cond)
+	sync.unlock(&c.mu)
+	if c.writer != nil {
+		thread.join(c.writer)
+		thread.destroy(c.writer)
+		c.writer = nil
+	}
+	sync.lock(&srv.mu)
+	for x, i in srv.conns do if x == c {ordered_remove(&srv.conns, i); break}
+	sync.unlock(&srv.mu)
+	h := socket_framed_handler
+	if h == nil do sock_close(c.fd) // cleared since the hello: nobody takes it
+	else do h(c.fd, c.caller, leftover)
+	for l in c.out do delete(l)
+	delete(c.out)
+	free(c)
+}
+
+// §5.2's hello reply fields for a framed connection, after the usual ones.
+@(private = "file")
+framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
+	fmt.sbprintf(b, `,"framed":true,"generation":%d,"version":`, cw.GENERATION)
+	json_quote(b, core_version())
+	strings.write_string(b, `,"features":[`)
+	for f, i in CORE_FEATURES {
+		if i > 0 do strings.write_byte(b, ',')
+		json_quote(b, f)
+	}
+	strings.write_string(b, `],"methods":[`)
+	n := 0
+	for spec in COMMAND_SPECS {
+		if spec.who == .Internal || !who_allows(caller.kind, spec.who) do continue
+		if n > 0 do strings.write_byte(b, ',')
+		json_quote(b, spec.type)
+		n += 1
+	}
+	fmt.sbprintf(b, `],"machine":{{"os":"%s","arch":"%s"}},"holder_wire":%d,"snapshot":["%s","vt"]`, ODIN_OS_STRING, ODIN_ARCH_STRING, hw.WIRE, SNAPSHOT_GHOSTSNP)
+}
+
+// What a core says it can do beyond its generation (the framed hello's `features`): optional
+// behaviour is gated on these (§7.5).
+CORE_FEATURES := [?]string{"challenge_hello"}
+
+// This core's release version ("X.Y.Z" from its bundle's Info.plist), or "" for a development
+// build. Read once.
+@(private = "file")
+core_version_once: sync.Once
+@(private = "file")
+core_version_value: string
+
+core_version :: proc() -> string {
+	sync.once_do(&core_version_once, proc() {
+		v, _, _ := update_env_find(false, "", "")
+		core_version_value = strings.clone(v, runtime.heap_allocator())
+	})
+	return core_version_value
+}
+
+@(private = "file")
+welcome_json :: proc(caller: Caller, reconnect: string, reconnect_challenge := false, framed := false) -> string {
 	caps: string
 	switch caller.kind {
 	case .Panel:                             caps = caller.claude ? `["claude_tab","state","events"]` : `["pi_tab","panels","state","events"]`
@@ -893,6 +1100,8 @@ welcome_json :: proc(caller: Caller, reconnect: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"v":%d,"app":"deckhand","caller":"%s","tab_id":%d,"capabilities":%s`, PROTOCOL_VERSION, caller.claude ? "claude" : CALLER_NAMES[caller.kind], caller.tab_id, caps)
 	if reconnect != "" do fmt.sbprintf(&b, `,"reconnect_token":"%s"`, reconnect)
+	if reconnect != "" && reconnect_challenge do strings.write_string(&b, `,"reconnect_hello":"challenge"`)
+	if framed do framed_fields(&b, caller)
 	// an app tab: where its frames go (docs/ENGINE-BRIDGE.md §1); the key is never logged
 	if caller.kind == .App && window.frames_info != nil {
 		if service, key, device, ok := window.frames_info(caller.tab_id); ok {
@@ -1222,7 +1431,8 @@ tokens_save :: proc() {
 	terms := make(map[u32]Out, context.temp_allocator)
 	tok_json :: proc(hash: [32]u8, e: Token_Entry) -> string {
 		h := hash
-		return fmt.tprintf(`{{"sha256":"%s","caller":"%s","claude":%v,"single_use":%v}}`, string(hex.encode(h[:], context.temp_allocator)), TOKEN_CALLERS[e.caller.kind], e.caller.claude, e.single_use)
+		hello := e.hello == .Challenge ? `,"hello":"challenge"` : "" // absent: plain (every file before M4-B)
+		return fmt.tprintf(`{{"sha256":"%s","caller":"%s","claude":%v,"single_use":%v%s}}`, string(hex.encode(h[:], context.temp_allocator)), TOKEN_CALLERS[e.caller.kind], e.caller.claude, e.single_use, hello)
 	}
 	get :: proc(m: ^map[u32]Out, term: u32) -> ^Out {
 		if term not_in m do m[term] = {toks = make([dynamic]string, context.temp_allocator)}
@@ -1401,7 +1611,15 @@ tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
 			}
 			if claude && kind != .Panel do return false, "bad token caller"
 			if h in hashes do return false, "a token twice"
-			hashes[h] = {entry = {caller = {kind = kind, claude = bool(claude)}, single_use = bool(single)}, term = term}
+			he := Hashed_Token{entry = {caller = {kind = kind, claude = bool(claude)}, single_use = bool(single)}, term = term}
+			if hv, has := to["hello"]; has {
+				// only a reconnect token is challenge-only: never single-use, never a Claude tab's
+				hs, hok := hv.(json.String)
+				if !hok || hs != "challenge" || bool(single) || bool(claude) do return false, "bad token hello"
+				he.hello = .Challenge
+				he.hid = hello_token_id(h)
+			}
+			hashes[h] = he
 		}
 	}
 	for h, he in hashes {

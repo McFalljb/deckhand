@@ -40,7 +40,7 @@
 import net from "node:net";
 import { Type } from "typebox";
 import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-agent";
-import { adoptEnv, backoff, browserRefusal, deskSocket, CONTROL_EVENT, CONTROL_READY, envToken, keepToken, line, parse, TAB_EVENT } from "../../lib/protocol.ts";
+import { adoptEnv, backoff, browserRefusal, deskSocket, CONTROL_EVENT, CONTROL_READY, envToken, HelloFlow, line, parse, TAB_EVENT } from "../../lib/protocol.ts";
 import { appCallCommand, appEventsText, appInputEvents, appReplyText, shotFile, shotText } from "../../lib/app.ts";
 import { type Cmd, COMMANDS, confirmedBy, parkedFor, parseCommands, runDescription } from "../../lib/commands.ts";
 import { agentTabOf, agentTarget, type AgentKind, alreadyTrue, eventsText, exited, filterState, findTab, fires, idleCommand, idleText, type Notice, noticeFor, type On, promptCommand, promptSent, refusal, type Seen, seenFrom, seenOf, stateText, tabLabel, tabLine, WATCH_ON, watchHits, watchText } from "../../lib/state.ts";
@@ -253,11 +253,11 @@ export default function (pi: ExtensionAPI) {
 		if (closed) return;
 		const s = net.createConnection(deskSocket()!);
 		sock = s;
-		const helloId = `h${++seq}`;
+		const hello = new HelloFlow(ENV, `h${++seq}`, envToken(ENV)!); // env-read-ok: ENV is DECKHAND_CONTROL_TOKEN
 		let buf = "";
 		const helloTimer = setTimeout(() => s.destroy(), HELLO_TIMEOUT_MS);
 		s.setEncoding("utf8");
-		s.on("connect", () => s.write(line({ id: helloId, type: "hello", token: envToken(ENV) }))); // env-read-ok: ENV is DECKHAND_CONTROL_TOKEN
+		s.on("connect", () => s.write(hello.first));
 		s.on("data", (chunk: string) => {
 			buf += chunk;
 			let nl: number;
@@ -265,16 +265,19 @@ export default function (pi: ExtensionAPI) {
 				const m = parse(buf.slice(0, nl));
 				buf = buf.slice(nl + 1);
 				if (!m) continue;
-				// Deckhand revoked the env token on this hello: keep the reconnect token even if this runtime closed meanwhile.
-				const helloOk = !ready && m.id === helloId && m.result?.ok === true;
-				if (helloOk) keepToken(ENV, m.result.data?.reconnect_token);
+				// Deckhand revoked the env token on this hello: the flow keeps the reconnect token even if this runtime closed meanwhile.
+				const step = ready ? undefined : hello.onLine(m);
 				if (sock !== s || closed) continue;
 				try {
 					if (!ready) {
-						if (m.id !== helloId) continue;
+						if (!step) continue;
+						if ("send" in step) {
+							s.write(step.send); // the challenge hello's proof: Deckhand proved the token first
+							continue;
+						}
 						clearTimeout(helloTimer);
-						if (!helloOk) return void s.destroy(); // wrong token or version: retried with backoff
-						controlTab = Number(m.result.data?.tab_id) || 0;
+						if ("fail" in step) return void s.destroy(); // wrong token or version, or not our Deckhand: retried with backoff
+						controlTab = Number(step.ok.data?.tab_id) || 0;
 						ready = true;
 						attempt = 0;
 						pi.events.emit(CONTROL_READY, true);

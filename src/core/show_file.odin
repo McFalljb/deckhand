@@ -176,7 +176,11 @@ SF_DATALESS :: u32(0x40000000)
 show_file_flags: proc(path: string) -> u32 = proc(path: string) -> u32 {
 	sb: posix.stat_t
 	if posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &sb) != .OK do return 0
-	return u32(sb.st_flags)
+	when ODIN_OS == .Darwin {
+		return u32(sb.st_flags)
+	} else {
+		return 0 // Linux: no st_flags, and no dataless files
+	}
 }
 
 @(private = "file")

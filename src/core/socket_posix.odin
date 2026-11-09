@@ -49,6 +49,14 @@ sock_runtime_dir_why :: proc(allocator := context.allocator) -> (dir, why: strin
 		if home_root == "" do return "", "no data dir to keep the runtime dir in"
 		os.make_directory_all(home_root, {.Read_User, .Write_User, .Execute_User})
 		dir = fmt.aprintf("%s/run", strings.trim_right(home_root, "/"), allocator = allocator)
+		when ODIN_OS == .Linux {
+			// §8.4: the default data dir's sockets go in ~/.local/state/deckhand/run (never
+			// $XDG_RUNTIME_DIR, which logout removes); any other data dir (tests) keeps <data>/run
+			if state := runtime_dir_linux(home_root); state != "" {
+				delete(dir, allocator)
+				dir = strings.clone(state, allocator)
+			}
+		}
 	}
 	return dir, runtime_dir_prepare(dir, RUNTIME_CORE_NEED)
 }
@@ -240,8 +248,4 @@ when ODIN_OS == .Darwin {
 		if i := strings.last_index_byte(full, '/'); i >= 0 do full = full[i + 1:]
 		return (^i32)(&buf[16])^, (^u32)(&buf[20])^, strings.clone(full, context.temp_allocator)
 	}
-} else {
-	sock_peer_pid :: proc(fd: Sock_Fd) -> i32 {return 0} // Linux: SO_PEERCRED (later)
-	pid_parent :: proc(pid: i32) -> i32 {return 0}
-	proc_look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {return 0, 0, ""} // Linux: /proc (M6-E); until then no hub gets in
-}
+} // Linux: proc_linux.odin (SO_PEERCRED, /proc)

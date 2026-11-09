@@ -486,6 +486,15 @@ login_env_startup :: proc() {
 	free_all(context.temp_allocator)
 }
 
+// A separate core's environment (core_launch: launchd_darwin.odin, launch_linux.odin): env without
+// the names Deckhand sets for its tabs, jobs and control callers, under either name
+// (env_tab_dropped: the same scrub a tab's own environment gets). Temp allocator.
+core_launch_env :: proc(env: []string, from_tab := false) -> []string {
+	out := make([dynamic]string, 0, len(env), context.temp_allocator)
+	for e in login_env_strip_claude(env, from_tab) do if !env_tab_dropped(env_key(e)) do append(&out, e)
+	return out[:]
+}
+
 // A separate core (serve): its environment is its window's, merged with the login shell's at that
 // window's launch, so it asks the shell only for a refresh: when that window was a GUI launch (it
 // says so with DECKHAND_GUI_LAUNCH=1: core_launch), or when its own launch passes the same test

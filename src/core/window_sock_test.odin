@@ -61,7 +61,9 @@ core_peer_check_refuses_a_fake_core :: proc(t: ^testing.T) {
 	testing.expect_value(t, p.pid, i32(posix.getpid()))
 	when TEST_HOOKS do core_peer_ids = []string{"dev.deckhand.core"}
 	_, why = core_peer_check(fds[0])
-	testing.expect(t, strings.has_prefix(why, "the process on core.sock is not Deckhand's core"), why)
+	// Linux: no code signing, the same user is the whole check (background-core.md §8.3)
+	when ODIN_OS == .Linux do testing.expect_value(t, why, "")
+	else do testing.expect(t, strings.has_prefix(why, "the process on core.sock is not Deckhand's core"), why)
 }
 
 // window.token: 64 hex, 0600, this user's; anything else is no token.
@@ -175,11 +177,14 @@ hub_door_refusals :: proc(t: ^testing.T) {
 		window_peer_ids, hub_peer_ids = []string{own}, []string{"dev.deckhand.core"}
 		defer {window_peer_ids, hub_peer_ids = trust.WINDOW_IDS, trust.CORE_IDS}
 	}
-	// a window's identifier: a window, not a hub
+	// a window's identifier: a window, not a hub (Linux has no window: refused there, PR #68 round 1)
 	why, _ := window_hello_check(fds[0], peer, tok, token)
-	testing.expect_value(t, why, "")
+	when ODIN_OS == .Linux do testing.expect_value(t, why, NO_WINDOW_HERE)
+	else do testing.expect_value(t, why, "")
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
-	testing.expect(t, strings.has_prefix(why, "the hub's code is not Deckhand's core"), why)
+	// Linux: no code signing, the same user is the whole check (background-core.md §8.3)
+	when ODIN_OS == .Linux do testing.expect_value(t, why, "")
+	else do testing.expect(t, strings.has_prefix(why, "the hub's code is not Deckhand's core"), why)
 	when TEST_HOOKS do window_peer_ids, hub_peer_ids = []string{"dev.pi-desk.app"}, []string{own}
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
 	testing.expect_value(t, why, "")
@@ -214,6 +219,11 @@ hub_hello_refusal_round1 :: proc(t: ^testing.T) {
 	// a window needs neither
 	win := Window_Hello{token_ok = true, same_user = true, still = true, code = .Allow, floor = .Allow}
 	testing.expect_value(t, window_hello_refusal(win), "")
+	// review round 1 (PR #68): an OS with no window (Linux) lets only a hub in, whatever else holds
+	win.no_window = true
+	testing.expect_value(t, window_hello_refusal(win), NO_WINDOW_HERE)
+	ok.no_window = true
+	testing.expect_value(t, window_hello_refusal(ok), "")
 }
 
 // sshd's ancestry: a root-owned sshd or sshd-session above the peer, within 64 steps.

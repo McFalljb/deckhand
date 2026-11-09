@@ -190,7 +190,7 @@ rv_restore_then_install :: proc(t: ^testing.T) {
 	// installed (the native installer's place)
 	os.make_directory_all(fmt.tprintf("%s/.local/bin", home))
 	_ = os.write_entire_file(fmt.tprintf("%s/.local/bin/claude", home), transmute([]u8)string("#!/bin/sh\nexit 1\n"))
-	posix.chmod(strings.clone_to_cstring(fmt.tprintf("%s/.local/bin/claude", home), context.temp_allocator), transmute(posix.mode_t)u16(0o755))
+	posix.chmod(strings.clone_to_cstring(fmt.tprintf("%s/.local/bin/claude", home), context.temp_allocator), posix.S_IRWXU | {.IRGRP, .IXGRP, .IROTH, .IXOTH})
 	o := run_command(Open_Session_Cmd{project_id = s.project_id, pi_session_id = sidc}, RV_UI)
 	testing.expect(t, o.ok, o.error)
 	testing.expect_value(t, rv_keyed(sidc), 1)

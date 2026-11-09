@@ -196,18 +196,25 @@ self_identity_reads :: proc(t: ^testing.T) {
 	b := [1]u8{1}
 	posix.write(fds[1], &b[0], 1)
 	p, tok := peer_read_token(fds[0])
-	testing.expect(t, p.ok && p.pid == me.pid && p.pidversion == me.pidversion)
-	// the test binary is linker-signed: some identifier, and the token's code is ours
-	own := code_identity_self()
-	testing.expect(t, own.ok && own.valid && own.identifier != "", "own code identity")
-	got := code_identity_of_token(tok)
-	testing.expectf(t, got.ok && got.identifier == own.identifier, "token code %v, own %v", got, own)
-	testing.expect(t, image_allowed(.Adhoc, own, got) == .Allow)
-	// a file: a system binary is Apple's, not ours; a missing file has no code
-	sh := code_identity_of_file("/bin/sh")
-	testing.expect(t, sh.ok && sh.identifier == "com.apple.sh", "/bin/sh")
-	testing.expect(t, image_allowed(.Adhoc, own, sh) == .Wrong_Identity)
-	testing.expect(t, !code_identity_of_file("/nonexistent/deckhand-core").ok)
+	testing.expect(t, p.ok && p.pid == me.pid && p.pidversion == me.pidversion && p.euid == me.euid)
+	when ODIN_OS == .Linux {
+		// no code signing on Linux (§8.3): the same user is the whole check
+		d, _ := peer_dr_check(tok, CORE_IDS)
+		testing.expect_value(t, d, Decision.Allow)
+		testing.expect_value(t, peer_still(p, peer_read(fds[0])), Decision.Allow)
+	} else {
+		// the test binary is linker-signed: some identifier, and the token's code is ours
+		own := code_identity_self()
+		testing.expect(t, own.ok && own.valid && own.identifier != "", "own code identity")
+		got := code_identity_of_token(tok)
+		testing.expectf(t, got.ok && got.identifier == own.identifier, "token code %v, own %v", got, own)
+		testing.expect(t, image_allowed(.Adhoc, own, got) == .Allow)
+		// a file: a system binary is Apple's, not ours; a missing file has no code
+		sh := code_identity_of_file("/bin/sh")
+		testing.expect(t, sh.ok && sh.identifier == "com.apple.sh", "/bin/sh")
+		testing.expect(t, image_allowed(.Adhoc, own, sh) == .Wrong_Identity)
+		testing.expect(t, !code_identity_of_file("/nonexistent/deckhand-core").ok)
+	}
 }
 
 @(test)

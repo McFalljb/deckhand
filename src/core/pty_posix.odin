@@ -4,6 +4,7 @@ package core
 import "core:c"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 
 when ODIN_OS == .Darwin {
 	foreign import libc "system:System"
@@ -24,13 +25,6 @@ SIGKILL :: 9
 SIGHUP :: 1
 WNOHANG :: 1
 
-Pollfd :: struct {
-	fd:      c.int,
-	events:  c.short,
-	revents: c.short,
-}
-POLLIN :: 0x1
-
 Winsize :: struct {
 	ws_row, ws_col, ws_xpixel, ws_ypixel: u16,
 }
@@ -48,7 +42,6 @@ foreign libc {
 	chdir :: proc(path: cstring) -> c.int ---
 	execve :: proc(path: cstring, argv: [^]cstring, envp: [^]cstring) -> c.int ---
 	_exit :: proc(status: c.int) -> ! ---
-	poll :: proc(fds: ^Pollfd, nfds: c.uint, timeout: c.int) -> c.int ---
 	pipe :: proc(fds: ^[2]c.int) -> c.int ---
 	tcgetpgrp :: proc(fd: c.int) -> c.int ---
 	__error :: proc() -> ^c.int --- // darwin errno location
@@ -128,8 +121,8 @@ pty_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16) -
 
 // Blocks up to timeout_ms; true when a read will not block (data or hangup).
 pty_wait_readable :: proc(p: ^Pty, timeout_ms: int) -> bool {
-	pfd := Pollfd{fd = p.fd, events = POLLIN}
-	return poll(&pfd, 1, c.int(timeout_ms)) > 0
+	pfd := posix.pollfd{fd = posix.FD(p.fd), events = {.IN}}
+	return posix.poll(&pfd, 1, c.int(timeout_ms)) > 0
 }
 
 pty_read :: proc(p: ^Pty, buf: []u8) -> int {

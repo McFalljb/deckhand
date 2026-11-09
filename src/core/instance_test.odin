@@ -155,6 +155,7 @@ instance_legacy :: proc(t: ^testing.T) {
 // socket alone does not count once it quits; a second take of the same data dir is refused.
 @(test)
 instance_guard_whole :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return // pi-desk 0.1.x ran only on macOS
 	d := inst_dir("guard")
 	defer os.remove_all(d)
 	data := fmt.tprintf("%s/data", d)

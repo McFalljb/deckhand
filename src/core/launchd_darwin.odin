@@ -317,12 +317,4 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 	return holder_launch_direct(bin, run, data, env, "serve", secret)
 }
 
-// env without the names Deckhand sets for its tabs, jobs and control callers, under either name
-// (env_tab_dropped: the same scrub a tab's own environment gets). Temp allocator.
-core_launch_env :: proc(env: []string, from_tab := false) -> []string {
-	out := make([dynamic]string, 0, len(env), context.temp_allocator)
-	for e in login_env_strip_claude(env, from_tab) do if !env_tab_dropped(env_key(e)) do append(&out, e)
-	return out[:]
-}
-
 READY_SECRET_KEY :: "DECKHAND_SUCCESSOR_SECRET" // src/holder detach.odin's

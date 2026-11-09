@@ -361,8 +361,8 @@ when ODIN_OS == .Darwin {
 	peer_of_token :: proc(tok: Audit_Token) -> Peer {
 		return Peer{ok = true, pid = i32(tok.val[5]), pidversion = i32(tok.val[7]), euid = tok.val[1]}
 	}
-} else {
-	// Linux has no live token: SO_PEERCRED is the connecting process, fixed at connect (later).
+} else when ODIN_OS != .Linux { // Linux: peer_linux.odin
+	// another OS (none is built yet): no peer reads, every check fails closed
 	peer_read :: proc(fd: posix.FD) -> Peer {return {}}
 	Audit_Token :: struct {
 		val: [8]u32,

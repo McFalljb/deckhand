@@ -215,6 +215,7 @@ exit_of_wire :: proc(code, signal: i64) -> Exit_Info {
 // keep_sessions on (a holder is launched when none answers), or off when a holder socket is
 // there (sessions from an earlier run are adopted even after the setting went off).
 holder_client_start :: proc() -> bool {
+	when ODIN_OS != .Darwin do return false // no session holder on Linux until M6-L3: tabs are the core's children
 	if hc.on do return true
 	if hc.tried || home_root == "" do return false
 	when ODIN_TEST {

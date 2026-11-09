@@ -29,6 +29,8 @@ env:
   ODIN_VERSION: dev-2026-09
   # sha256 of odin-macos-arm64-dev-2026-09.tar.gz (the release asset). Update with ODIN_VERSION.
   ODIN_SHA256: 3e6cbc1f247d8d14fe02c3151272d0a5b8d6d77acb7219f5b62914e4d95d97f7
+  # and of odin-linux-amd64-dev-2026-09.tar.gz (the linux job)
+  ODIN_SHA256_LINUX: 167c3e1d7056419dad2e04bb3bd98715b7ff286d4c125f3c5a5ee337c6254283
   HOMEBREW_NO_AUTO_UPDATE: "1"
 
 jobs:
@@ -66,6 +68,31 @@ jobs:
         with: { cef: "false" }
       - name: Unit and binding tests
         run: ./build.sh test
+
+  # The core on Linux, without the session holder (docs/plans/background-core.md §10.4 M6-L1):
+  # it builds, its wires', trust rules' and portable unit tests pass, and it serves
+  # (tests/linux-core-smoke.py). ./build.sh test type-checks the same packages on a Mac.
+  linux:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/setup
+        with: { cef: "false" }
+      - name: Build the core
+        run: mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+      - name: Wire and trust tests
+        run: |
+          odin test src/holderwire -out:build/holderwire-tests
+          odin test src/corewire -out:build/corewire-tests
+          odin test src/trust -out:build/trust-tests
+      - name: The core's unit tests
+        run: TMPDIR="$RUNNER_TEMP" odin test src/core -out:build/deckhand-core-unit-tests -define:ODIN_TEST_THREADS=1 -define:DECKHAND_UPDATE_TEST=true
+      - name: The core serves
+        run: python3 tests/linux-core-smoke.py build/deckhand-core-serve
+      - name: The core serves from the default dirs (~/.local/state/deckhand/run)
+        run: python3 tests/linux-core-smoke.py --default-dirs build/deckhand-core-serve
 
   # The required scenes (tier "required" in tests/scenes.txt) with the app's default, a separate
   # core: four shards balanced by their typical times, two scenes at a time on each runner

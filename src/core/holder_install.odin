@@ -211,15 +211,6 @@ when ODIN_OS == .Darwin {
 } else {
 	holder_unquarantine :: proc(path: string) {}
 	holder_unquarantine_tree :: proc(path: string) {}
-	// Every file, folder and link at and below path (links not followed).
-	holder_unquarantine_tree :: proc(path: string) {
-		holder_unquarantine(path)
-		st: posix.stat_t
-		if posix.lstat(strings.clone_to_cstring(path, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do return
-		entries, err := os.read_all_directory_by_path(path, context.temp_allocator)
-		if err != nil do return
-		for e in entries do holder_unquarantine_tree(fmt.tprintf("%s/%s", path, e.name))
-	}
 	holder_quarantined :: proc(path: string) -> bool {return false}
 	holder_own_exe :: proc() -> string {
 		p, err := os.read_link("/proc/self/exe", context.temp_allocator)

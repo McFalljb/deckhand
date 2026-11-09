@@ -207,6 +207,7 @@ Terminal_Option :: enum c.int {
 	// ^c.size_t: the unfinished escape or UTF-8 suffix kept for snapshots; 0 disables.
 	// Must be set before the input it covers (snapshot.odin, term.odin)
 	Continuation_Max_Bytes = 31,
+	Kitty_Image_Storage_Limit = 15, // ^u64: 0 disables Kitty graphics and deletes every image
 	Mode                 = 34, // Mode_Config*
 	Semantic_Prompt      = 42, // Semantic_Prompt_Fn: OSC 133 steps (a new prompt clears program status)
 	Program_Status       = 46, // Program_Status_Fn: OSC 7501 reports; while set, `OSC 7501 ; ?` is answered through Write_Pty

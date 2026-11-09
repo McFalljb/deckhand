@@ -1151,7 +1151,7 @@ the size. A tab hidden for 2 s detaches.
 | window | `term.detach` `channel` | the stream ends |
 | window | `term.resize` `tab_id`, `cols`, `rows`, `cell_w`, `cell_h` | what the tab's pane fits; the core resizes the terminal and the PTY (it alone decides) |
 | core | `term.scroll` `channel` | the core typed or pasted into it: the copy scrolls to the bottom |
-| core | `[ch] SNAPSHOT` | meta JSON + GHOSTSNP at the attach offset, screen first (the window draws at the codec's READY, history pages follow newest first); trimmed, oldest scrollback first, to fit one frame. Exempt from credit |
+| core | `[ch] SNAPSHOT` | meta JSON + GHOSTSNP at the attach offset, screen first (the window draws at the codec's READY, history pages follow newest first); trimmed, oldest scrollback first, to fit one frame (then without Kitty images, then the screen alone); one that cannot be made yet is tried again after a back-off (50 ms, doubling to 2 s). Exempt from credit. A RESIZE the link refuses is replaced by a snapshot |
 | core | `[ch] DATA` | the bytes from the offset on, at most 64 KiB a frame, sent at the end of every core tick |
 | core | `[ch] RESIZE` | `{"offset","cols","rows","xpixel","ypixel"}`: applied after exactly the bytes before `offset` |
 | core | `[ch] CLOSE` | the terminal went |

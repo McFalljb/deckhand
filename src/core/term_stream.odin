@@ -32,12 +32,18 @@ import "core:encoding/endian"
 import "core:encoding/json"
 import "core:fmt"
 import "core:strings"
+import "core:time"
 import cw "../corewire"
 import gh "../ghostty"
 
 STREAM_CREDIT :: 256 * 1024 // DATA a window may have unread (credit at attach, §5.6)
 STREAM_BEHIND_MAX :: 4 * 1024 * 1024 // more than this waiting for credit: a fresh snapshot
 STREAM_DATA_MAX :: 64 * 1024 // one DATA frame at most (the coalescing size)
+STREAM_SNAP_BACKOFF :: 50 * time.Millisecond // a snapshot that could not be made: tried again after this, doubling
+STREAM_SNAP_BACKOFF_MAX :: 2 * time.Second
+
+// The most a snapshot may be (tests make it smaller; 0: the frame limit).
+stream_snap_limit := 0
 
 @(private = "file")
 Stream_Resize :: struct {
@@ -61,6 +67,8 @@ Term_Stream :: struct {
 	// stats (tests, the scenes' log)
 	snapshots: int,
 	snap_retries: int, // a snapshot that could not be made yet (an unfinished sequence over the limit)
+	snap_after:   time.Tick, // not tried again before this (a failed one backs off)
+	snap_backoff: time.Duration,
 }
 
 @(private = "file")
@@ -115,8 +123,12 @@ term_stream_term_gone :: proc(t: ^Term) {
 }
 
 // Every stream sends what waits (the end of core_tick; before a test's screen-hash check).
-term_streams_flush :: proc() {
-	for s in streams do stream_flush(s)
+// retry_now: a snapshot that backs off is tried at once (the test check).
+term_streams_flush :: proc(retry_now := false) {
+	for s in streams {
+		if retry_now do s.snap_after = {}
+		stream_flush(s)
+	}
 }
 
 // The window went (core_detach_window): its streams end.
@@ -208,7 +220,10 @@ stream_drop_pending :: proc(s: ^Term_Stream, snap: bool) {
 	s.head = 0
 	clear(&s.resizes)
 	s.from = s.t.offset
-	if snap do s.need_snap = true
+	if snap {
+		s.need_snap = true
+		s.snap_after, s.snap_backoff = {}, 0 // a new terminal or a fresh start: no wait
+	}
 }
 
 // Too far behind (the window does not take its DATA): what waits goes; a snapshot replaces it.
@@ -234,14 +249,26 @@ stream_flush :: proc(s: ^Term_Stream) {
 	if flushing do return // a frame sent below made the window act (in process): the outer flush goes on
 	flushing = true
 	defer flushing = false
-	if s.need_snap && !stream_snapshot(s) do return
+	if s.need_snap {
+		if s.snap_after != {} && time.tick_diff(time.tick_now(), s.snap_after) > 0 do return // backing off
+		if !stream_snapshot(s) {
+			s.snap_backoff = s.snap_backoff == 0 ? STREAM_SNAP_BACKOFF : min(s.snap_backoff * 2, STREAM_SNAP_BACKOFF_MAX)
+			s.snap_after = time.tick_add(time.tick_now(), s.snap_backoff)
+			return
+		}
+		s.snap_after, s.snap_backoff = {}, 0
+	}
 	for {
 		next_resize := len(s.resizes) > 0 ? s.resizes[0].offset : max(u64)
 		if len(s.resizes) > 0 && next_resize <= s.from {
 			r := s.resizes[0]
 			ordered_remove(&s.resizes, 0)
 			body := fmt.tprintf(`{{"offset":%d,"cols":%d,"rows":%d,"xpixel":%d,"ypixel":%d}}`, r.offset, r.cols, r.rows, r.xpixel, r.ypixel)
-			window_link_send_frame(s.channel, .Resize, transmute([]u8)body)
+			if window_link_send_frame(s.channel, .Resize, transmute([]u8)body) != .None {
+				// the window would apply what follows at the old size: it gets a snapshot instead
+				stream_drop_pending(s, snap = true)
+				return
+			}
 			continue
 		}
 		avail := u64(pending_len(s))
@@ -278,7 +305,7 @@ stream_snapshot :: proc(s: ^Term_Stream) -> bool {
 		meta.exit_code, meta.exit_signal = i64(t.exit.code), i64(t.exit.signal)
 	}
 	meta.inexact = t.inexact
-	blob, err := snapshot_encode_fit(t.gt, meta, cw.MAX_PAYLOAD)
+	blob, err := snapshot_encode_fit(t.gt, meta, stream_snap_limit > 0 ? stream_snap_limit : cw.MAX_PAYLOAD)
 	if err != .None {
 		s.snap_retries += 1
 		return false
@@ -295,7 +322,8 @@ stream_snapshot :: proc(s: ^Term_Stream) -> bool {
 
 // A GHOSTSNP snapshot of gt (only GHOSTSNP: a window always decodes it; the VT fallback is for
 // a handover between versions) of at most limit bytes: over it, a copy with less scrollback is
-// encoded instead, halving the limit each time, oldest lines first (temp allocator).
+// encoded instead, halving the limit each time, oldest lines first; then without Kitty images
+// (GHOSTSNP carries their pixels), then the screen alone (temp allocator).
 snapshot_encode_fit :: proc(gt: gh.Terminal, meta: Snapshot_Meta, limit: int) -> (blob: []u8, err: Snapshot_Error) {
 	formats := [?]string{SNAPSHOT_GHOSTSNP}
 	blob, _, err = snapshot_encode(gt, meta, formats[:], allocator = context.temp_allocator)
@@ -310,6 +338,14 @@ snapshot_encode_fit :: proc(gt: gh.Terminal, meta: Snapshot_Meta, limit: int) ->
 		blob, _, err = snapshot_encode(clone, meta, formats[:], allocator = context.temp_allocator)
 		if err != .None || len(blob) <= limit do return
 	}
+	no_images: u64 = 0
+	gh.terminal_set(clone, .Kitty_Image_Storage_Limit, &no_images)
+	blob, _, err = snapshot_encode(clone, meta, formats[:], allocator = context.temp_allocator)
+	if err != .None || len(blob) <= limit do return
+	no_history: uint = 0
+	gh.terminal_set(clone, .Scrollback_Max_Bytes, &no_history)
+	blob, _, err = snapshot_encode(clone, meta, formats[:], allocator = context.temp_allocator)
+	if err != .None || len(blob) <= limit do return
 	return nil, .Encode_Failed
 }
 

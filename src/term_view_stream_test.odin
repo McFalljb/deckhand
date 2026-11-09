@@ -425,3 +425,69 @@ stream_detach_window_then_attach :: proc(t: ^testing.T) {
 	testing.expect(t, ts_same(t, tm, "live"))
 	testing.expect(t, strings.contains(term_screen_text(term_view_peek(TS_TAB)), "live after the attach"))
 }
+
+// Round 1 of the G+H review. A RESIZE the link refuses is never lost: a snapshot follows instead.
+// A snapshot that cannot be made backs off (not every tick) and, too large even with little
+// scrollback, falls back to fewer images, then the screen alone. A snapshot the window cannot
+// decode makes its copy stale (attached again), and the test check counts a copy with none.
+@(test)
+stream_failures_recover :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	tm := ts_begin(80, 24)
+	defer ts_end(tm)
+	defer core.stream_snap_limit = 0
+	ts_write(tm, "hello\r\n")
+	// nothing fits: the attach's snapshot fails, and is not tried on every flush after
+	core.stream_snap_limit = 10
+	v := term_view_of(TS_TAB)
+	testing.expect(t, v != nil && v.gt == nil, "attached, no copy yet")
+	s := core.term_streams()[0]
+	for _ in 0 ..< 20 do core.term_streams_flush()
+	testing.expectf(t, s.snap_retries <= 2, "backed off: %d tries", s.snap_retries)
+	out, compared := term_views_check()
+	testing.expect_value(t, compared, 1)
+	testing.expectf(t, strings.contains(out, "no snapshot"), "the check says so: %q", out)
+	core.stream_snap_limit = 0
+	out, _ = term_views_check() // tried at once
+	testing.expect_value(t, out, "")
+	testing.expect(t, ts_same(t, tm, "after the back-off"))
+	// a snapshot the window cannot read: stale, so term_views_tick attaches it again
+	junk := [?]u8{1, 2, 3, 4, 5, 6, 7, 8}
+	term_view_frame(cw.Frame{channel = v.channel, kind = u8(cw.Kind.Snapshot), payload = junk[:]})
+	testing.expect(t, v.stale, "a snapshot that does not decode: stale")
+	term_views_tick()
+	v = term_view_peek(TS_TAB)
+	testing.expect(t, v != nil && !v.stale && ts_same(t, tm, "attached again"))
+	// the link refuses a RESIZE: a snapshot is due instead
+	s = core.term_streams()[0]
+	cw.mem_close(client.end)
+	core.term_resize(tm, 60, 20, 8, 16)
+	core.term_streams_flush()
+	testing.expect(t, s.need_snap, "a snapshot replaces the lost RESIZE")
+}
+
+// Too large with even a little scrollback: the screen alone (never nothing).
+@(test)
+stream_snapshot_screen_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	tm := ts_begin(120, 30)
+	defer ts_end(tm)
+	b := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< 20_000 do fmt.sbprintf(&b, "\x1b[38;2;%d;%d;%dmrow %06d %s\x1b[0m\r\n", i % 256, (i * 7) % 256, (i * 13) % 256, i, strings.repeat("z", 100, context.temp_allocator))
+	ts_write(tm, strings.to_string(b))
+	clone, ok := core.gt_clone(tm.gt)
+	if !testing.expect(t, ok) do return
+	none: uint = 0
+	gh.terminal_set(clone, .Scrollback_Max_Bytes, &none)
+	screen, _, err := core.snapshot_encode(clone, {}, {core.SNAPSHOT_GHOSTSNP}, allocator = context.temp_allocator)
+	gh.terminal_free(clone)
+	testing.expect_value(t, err, core.Snapshot_Error.None)
+	limit := len(screen) + 256
+	cut, cerr := core.snapshot_encode_fit(tm.gt, {}, limit)
+	testing.expect_value(t, cerr, core.Snapshot_Error.None)
+	testing.expectf(t, len(cut) <= limit, "%d bytes over the limit %d", len(cut), limit)
+	gt, _, derr := core.snapshot_decode(cut)
+	if !testing.expect_value(t, derr, core.Snapshot_Error.None) || gt == nil do return
+	defer gh.terminal_free(gt)
+	testing.expect_value(t, gt_screen_text(gt), gt_screen_text(tm.gt))
+}

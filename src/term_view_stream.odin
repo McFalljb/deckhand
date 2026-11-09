@@ -225,12 +225,17 @@ term_views_theme :: proc() {
 // stream, the copy's history).
 term_views_check :: proc() -> (out: string, compared: int) {
 	if !client.attached do return
-	core.term_streams_flush()
+	core.term_streams_flush(retry_now = true)
 	term_views_theme()
 	for id, v in term_views {
 		t := core.term_of(id)
-		if t == nil || v.gt == nil do continue
+		if t == nil do continue
 		compared += 1
+		if v.gt == nil {
+			// attached, but no snapshot it could use: not equal, and said so
+			out = fmt.tprintf("%s%stab %d: the window's copy has no snapshot", out, out == "" ? "" : "; ", id)
+			continue
+		}
 		term_view_history_finish(v)
 		if v.offset != t.offset {
 			out = fmt.tprintf("%s%stab %d: the window's copy is at offset %d, the core's at %d", out, out == "" ? "" : "; ", id, v.offset, t.offset)
@@ -354,6 +359,7 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 	meta, body, err := core.snapshot_unpack(blob)
 	if err != .None {
 		fmt.eprintln("Deckhand: a terminal snapshot the window cannot read:", err)
+		v.stale = true // what follows is relative to it: attach again (term_views_tick)
 		return
 	}
 	gt: gh.Terminal
@@ -363,12 +369,17 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 	switch meta.format {
 	case core.SNAPSHOT_GHOSTSNP:
 		ok, grid := core.snapshot_ghostsnp_grid(body)
-		if !ok || i64(grid[0]) != meta.cols || i64(grid[1]) != meta.rows do return
+		if !ok || i64(grid[0]) != meta.cols || i64(grid[1]) != meta.rows {
+			fmt.eprintln("Deckhand: a terminal snapshot whose size does not match its header")
+			v.stale = true
+			return
+		}
 		// the decoder reads the snapshot as it goes: kept until its history is in
 		kept = make([]u8, len(body), heap)
 		copy(kept, body)
 		if gh.snapshot_decoder_new_buf(nil, &dec, raw_data(kept), c.size_t(len(kept))) != .Success {
 			delete(kept, heap)
+			v.stale = true
 			return
 		}
 		limit := core.TERM_CONTINUATION_MAX
@@ -380,12 +391,17 @@ view_snapshot :: proc(v: ^Term_View, blob: []u8) {
 			gh.snapshot_decoder_free(dec)
 			delete(kept, heap)
 			fmt.eprintln("Deckhand: a terminal snapshot that does not decode")
+			v.stale = true
 			return
 		}
 	case:
 		e: core.Snapshot_Error
 		gt, _, e = core.snapshot_decode(blob)
-		if e != .None do return
+		if e != .None {
+			fmt.eprintln("Deckhand: a terminal snapshot that does not decode:", e)
+			v.stale = true
+			return
+		}
 	}
 	view_replace_gt(v, gt)
 	v.dec, v.dec_blob = dec, kept

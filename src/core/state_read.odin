@@ -11,8 +11,15 @@ package core
 // state.full again.
 //
 // Forward-compatible, as a newer core may add things (grow-only, schema/released-v1.json):
-// unknown keys and sections are ignored, an unknown enum name or union variant reads as the
-// zero value. A type mismatch is an error.
+// unknown keys and sections are ignored; an unknown enum name, an enum number outside the
+// enum's values, or an unknown union variant reads as the zero value (so a names table indexed
+// by it never goes out of range: Tab_Status reads Running, Caller_Kind Internal, Command_Class
+// Tab_Close, a Tab_Kind nil); a command of an unknown type reads as a nil Command, a
+// confirmation the window cannot confirm. A type mismatch is an error.
+//
+// Bounded: a message is refused when what it decodes to passes 64x its length (at least
+// 1 MiB, at most 512 MiB), before that memory is taken; the layout tree's indices (root, a,
+// b, parent) must point into its nodes.
 //
 // Memory: everything a replica holds is allocated with the allocator given to
 // replica_apply; replica_free frees it. A section that is replaced is freed then, so a
@@ -27,8 +34,27 @@ import "core:strconv"
 import "core:strings"
 import jg "../jsonguard"
 
+// What a message may still decode to, in bytes (replica_apply sets it; wire_read spends it).
+@(thread_local, private = "file")
+read_budget: int
+
+READ_BUDGET_PER_BYTE :: 64
+READ_BUDGET_MIN :: 1 << 20
+READ_BUDGET_MAX :: 512 << 20
+@(private = "file")
+TOO_LARGE :: ": too large (the message decodes to more than its limit)"
+
+// Takes n bytes from the budget; false: refused.
+@(private = "file")
+budget_take :: proc(n: int) -> bool {
+	if n < 0 || n > read_budget do return false
+	read_budget -= n
+	return true
+}
+
 // Applies one state.full or state.delta message to r. "" = applied.
 replica_apply :: proc(r: ^State, text: string, allocator := context.allocator) -> string {
+	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, READ_BUDGET_MAX)
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return "invalid JSON"
 	msg, ok := v.(json.Object)
@@ -160,6 +186,12 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 		err = "state.full: no sessions section"
 		return err
 	}
+	for &p in panes do if !p.gone {
+		if e := layout_problem(&p.os); e != "" {
+			err = fmt.tprintf("panes:%d: %s", p.session, e)
+			return err
+		}
+	}
 
 	// 2. check every per-session and per-tab section names one the replica will have
 	sessions := has_fixed[SESSIONS_SECTION] ? fixed.open_sessions[:] : r.open_sessions[:]
@@ -175,18 +207,20 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 		err = fmt.tprintf("panes:%d: no such open session", p.session)
 		return err
 	}
+	// the tabs as they will be: a session's tabs: section in this message, else the replica's
+	// (a session that stays keeps them)
+	will_be := make(map[u64]bool, context.temp_allocator)
+	pending_of := make(map[u64]^Pending_Tabs, len(tabs), context.temp_allocator)
+	for &pt in tabs do if !pt.gone do pending_of[pt.session] = &pt
+	for os in sessions {
+		list: []Tab
+		if pt, has := pending_of[os.id]; has do list = pt.tabs[:]
+		else if !full do if old := replica_session(r, os.id); old != nil do list = old.tabs[:]
+		for t in list do will_be[t.id] = true
+	}
 	for p in panels {
 		if p.gone do continue
-		found := false
-		for os in sessions {
-			// the session's tabs as they will be: this message's tabs: section, else the
-			// replica's (a session that stays keeps them)
-			list: []Tab
-			if pt := pending_tabs_for(tabs[:], os.id); pt != nil do list = pt.tabs[:]
-			else if !full do if old := replica_session(r, os.id); old != nil do list = old.tabs[:]
-			for t in list do if t.id == p.tab do found = true
-		}
-		if !found {
+		if !will_be[p.tab] {
 			err = fmt.tprintf("panels:%d: no such tab", p.tab)
 			return err
 		}
@@ -194,6 +228,10 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 
 	// 3. commit (nothing below fails)
 	if full do replica_free(r, a)
+	// tabs that stay keep their panels (panels:<tab> carries them), in whichever session they
+	// are now: each old tab by id, before what is replaced is freed
+	old_tabs := make(map[u64]^Tab, context.temp_allocator)
+	for &os in r.open_sessions do for &t in os.tabs do old_tabs[t.id] = &t
 	for sec, i in STATE_SECTIONS {
 		if !has_fixed[i] do continue
 		if sec.name == "sessions" {
@@ -205,6 +243,9 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 		}
 		for f in sec.fields do field_swap(r, &fixed, ti, f)
 	}
+	for &p in tabs do if !p.gone do for &nt in p.tabs {
+		if old, has := old_tabs[nt.id]; has do nt.panels, old.panels = old.panels, {}
+	}
 	wire_free(&fixed, ti, a) // what was replaced
 	// (checked above: every session and tab named here is in the replica now)
 	for &p in tabs {
@@ -214,8 +255,6 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 			wire_free(&p.tabs, type_info_of(type_of(p.tabs)), a)
 			continue
 		}
-		// tabs that stay keep their panels (panels:<tab> carries them)
-		for &nt in p.tabs do for &old in os.tabs do if old.id == nt.id do nt.panels, old.panels = old.panels, {}
 		wire_free(&os.tabs, type_info_of(type_of(os.tabs)), a)
 		os.tabs, p.tabs = p.tabs, {}
 	}
@@ -229,9 +268,11 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 		for f in SESSION_PANE_FIELDS do field_swap(os, &p.os, type_info_of(Open_Session), f)
 		wire_free(&p.os, type_info_of(Open_Session), a)
 	}
+	tab_of := make(map[u64]^Tab, context.temp_allocator)
+	if len(panels) > 0 do for &os in r.open_sessions do for &t in os.tabs do tab_of[t.id] = &t
 	for &p in panels {
 		if p.gone do continue
-		t := replica_tab(r, p.tab)
+		t := tab_of[p.tab]
 		if t == nil {
 			wire_free(&p.panels, type_info_of(type_of(p.panels)), a)
 			continue
@@ -244,21 +285,26 @@ replica_commit :: proc(r: ^State, sections: json.Object, full: bool, version: u6
 }
 
 @(private = "file")
-pending_tabs_for :: proc(tabs: []Pending_Tabs, session: u64) -> ^Pending_Tabs {
-	for &p in tabs do if p.session == session && !p.gone do return &p
-	return nil
-}
-
-@(private = "file")
 replica_session :: proc(r: ^State, id: u64) -> ^Open_Session {
 	for &os in r.open_sessions do if os.id == id do return &os
 	return nil
 }
 
+// Why an open session's layout tree cannot be walked ("" = it can): root and every node's
+// a, b and parent point into nodes (parent -1: the root).
 @(private = "file")
-replica_tab :: proc(r: ^State, id: u64) -> ^Tab {
-	for &os in r.open_sessions do for &t in os.tabs do if t.id == id do return &t
-	return nil
+layout_problem :: proc(os: ^Open_Session) -> string {
+	n := len(os.nodes)
+	if n == 0 {
+		if os.root != 0 do return "root with no nodes"
+		return ""
+	}
+	if os.root < 0 || os.root >= n do return "root out of range"
+	for nd, i in os.nodes {
+		if nd.a < 0 || nd.a >= n || nd.b < 0 || nd.b >= n do return fmt.tprintf("nodes[%d]: a child out of range", i)
+		if nd.parent < -1 || nd.parent >= n do return fmt.tprintf("nodes[%d]: parent out of range", i)
+	}
+	return ""
 }
 
 // "tabs:5" -> (SECTION_TABS, 5, true).
@@ -313,9 +359,17 @@ wire_read :: proc(v: json.Value, data: rawptr, ti: ^runtime.Type_Info, a: runtim
 	}
 	if ti.id == typeid_of(Command) {
 		if _, null := v.(json.Null); null do return ""
-		cmd, err := command_from_value(v, a)
-		if err != "" do return strings.concatenate({": ", err}, context.temp_allocator)
-		(^Command)(data)^ = cmd
+		// parsed into temp memory, then copied whole into a (the parser's own frees on a
+		// failure do not cover every command; this way nothing of it stays behind)
+		cmd, err := command_from_value(v, context.temp_allocator)
+		if err != "" {
+			// a type this window does not know (a newer core's): a nil command
+			if o, is := v.(json.Object); is {
+				if type, has := o["type"].(json.String); has && type != "" && strings.has_prefix(err, "unknown command ") do return ""
+			}
+			return strings.concatenate({": ", err}, context.temp_allocator)
+		}
+		if !wire_clone(&cmd, data, ti, a) do return TOO_LARGE
 		return ""
 	}
 	#partial switch t in ti.variant {
@@ -348,6 +402,7 @@ wire_read :: proc(v: json.Value, data: rawptr, ti: ^runtime.Type_Info, a: runtim
 		s, ok := v.(json.String)
 		if !ok do return ": wants a string"
 		if t.is_cstring do return ""
+		if !budget_take(len(s)) do return TOO_LARGE
 		(^string)(data)^ = strings.clone(s, a)
 	case runtime.Type_Info_Enum:
 		#partial switch x in v {
@@ -358,7 +413,11 @@ wire_read :: proc(v: json.Value, data: rawptr, ti: ^runtime.Type_Info, a: runtim
 			}
 			// a value this window does not know: the zero value
 		case json.Integer:
-			wire_put_int(data, ti.size, x)
+			for val in t.values do if i64(val) == x {
+				wire_put_int(data, ti.size, x)
+				return ""
+			}
+			// outside the enum: the zero value
 		case:
 			return ": wants an enum name"
 		}
@@ -372,6 +431,7 @@ wire_read :: proc(v: json.Value, data: rawptr, ti: ^runtime.Type_Info, a: runtim
 		elem := t.(runtime.Type_Info_Slice).elem if is_slice(ti) else t.(runtime.Type_Info_Dynamic_Array).elem
 		size := elem.size
 		buf: rawptr
+		if !budget_take(len(arr) * size) do return TOO_LARGE
 		if len(arr) > 0 {
 			b, aerr := mem.alloc(len(arr) * size, elem.align, a)
 			if aerr != nil do return ": out of memory"
@@ -413,17 +473,17 @@ wire_read :: proc(v: json.Value, data: rawptr, ti: ^runtime.Type_Info, a: runtim
 		wire_put_int(data, ti.size, i64(bits))
 	case runtime.Type_Info_Union:
 		if _, null := v.(json.Null); null do return ""
+		// the tag first: a variant that fails halfway is freed with the union
 		if len(t.variants) == 1 && !t.no_nil { // Maybe(T)
-			if e := wire_read(v, data, t.variants[0], a); e != "" do return e
 			reflect.set_union_variant_typeid(any{data, ti.id}, t.variants[0].id)
-			return ""
+			return wire_read(v, data, t.variants[0], a)
 		}
 		obj, ok := v.(json.Object)
 		if !ok || len(obj) != 1 do return ": wants {\"variant\": value}"
 		for key, x in obj {
 			for vt in t.variants do if strings.equal_fold(wire_variant_name(vt), key) {
-				if e := wire_read(x, data, vt, a); e != "" do return strings.concatenate({".", key, e}, context.temp_allocator)
 				reflect.set_union_variant_typeid(any{data, ti.id}, vt.id)
+				if e := wire_read(x, data, vt, a); e != "" do return strings.concatenate({".", key, e}, context.temp_allocator)
 				return ""
 			}
 			// a variant this window does not know: nil (or, no_nil, the first variant's zero)
@@ -495,4 +555,52 @@ wire_free :: proc(data: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) {
 		return // scalars: nothing held
 	}
 	mem.zero(data, ti.size)
+}
+
+// Copies the value at src (type ti) into dst (zeroed), its strings and arrays allocated with a
+// (as wire_read's), within the read budget. False: over the budget (dst holds what was copied,
+// freed with it).
+wire_clone :: proc(src, dst: rawptr, ti: ^runtime.Type_Info, a: runtime.Allocator) -> bool {
+	#partial switch t in ti.variant {
+	case runtime.Type_Info_Named:
+		return wire_clone(src, dst, t.base, a)
+	case runtime.Type_Info_Struct:
+		for k in 0 ..< int(t.field_count) do if !wire_clone(rawptr(uintptr(src) + t.offsets[k]), rawptr(uintptr(dst) + t.offsets[k]), t.types[k], a) do return false
+	case runtime.Type_Info_String:
+		if t.is_cstring do return true
+		x := (^string)(src)^
+		if !budget_take(len(x)) do return false
+		(^string)(dst)^ = strings.clone(x, a)
+	case runtime.Type_Info_Array:
+		for i in 0 ..< t.count do if !wire_clone(rawptr(uintptr(src) + uintptr(i * t.elem_size)), rawptr(uintptr(dst) + uintptr(i * t.elem_size)), t.elem, a) do return false
+	case runtime.Type_Info_Enumerated_Array:
+		for i in 0 ..< t.count do if !wire_clone(rawptr(uintptr(src) + uintptr(i * t.elem_size)), rawptr(uintptr(dst) + uintptr(i * t.elem_size)), t.elem, a) do return false
+	case runtime.Type_Info_Slice, runtime.Type_Info_Dynamic_Array:
+		elem := t.(runtime.Type_Info_Slice).elem if is_slice(ti) else t.(runtime.Type_Info_Dynamic_Array).elem
+		n := is_slice(ti) ? (^runtime.Raw_Slice)(src).len : (^runtime.Raw_Dynamic_Array)(src).len
+		from := is_slice(ti) ? (^runtime.Raw_Slice)(src).data : (^runtime.Raw_Dynamic_Array)(src).data
+		if !budget_take(n * elem.size) do return false
+		buf: rawptr
+		if n > 0 {
+			b, aerr := mem.alloc(n * elem.size, elem.align, a)
+			if aerr != nil do return false
+			buf = b
+		}
+		if is_slice(ti) {
+			raw := (^runtime.Raw_Slice)(dst)
+			raw.data, raw.len = buf, n
+		} else {
+			raw := (^runtime.Raw_Dynamic_Array)(dst)
+			raw.data, raw.len, raw.cap, raw.allocator = buf, n, n, a
+		}
+		for i in 0 ..< n do if !wire_clone(rawptr(uintptr(from) + uintptr(i * elem.size)), rawptr(uintptr(buf) + uintptr(i * elem.size)), elem, a) do return false
+	case runtime.Type_Info_Union:
+		vid := reflect.union_variant_typeid(any{src, ti.id})
+		if vid == nil do return true
+		reflect.set_union_variant_typeid(any{dst, ti.id}, vid)
+		return wire_clone(src, dst, type_info_of(vid), a)
+	case:
+		mem.copy(dst, src, ti.size) // scalars
+	}
+	return true
 }

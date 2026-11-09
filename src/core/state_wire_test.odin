@@ -2,16 +2,20 @@ package core
 
 // The window's state stream (state_wire.odin, state_read.odin; design §5.8): replicas built
 // from state.full and state.delta equal the State they came from, and every field of State
-// is either carried or listed as core-only or window-only. Pure: no processes, no files, and
-// the global `state` is not touched.
+// is either carried or listed as core-only or window-only. Pure: no processes; files: only the
+// golden fixture (tests/state-wire/v1/full.json) and build/state-full-v1.json; the global
+// `state` is not touched.
 
 import "base:runtime"
 import "core:fmt"
+import "core:encoding/json"
 import "core:mem"
+import "core:os"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import jg "../jsonguard"
 
 // ---- helpers: fill any value, compare two ----
 
@@ -361,6 +365,10 @@ state_wire_completeness :: proc(t: ^testing.T) {
 		}
 		os.tabs = tabs
 		os.id = u64(i + 1)
+		// the layout tree's indices must point into nodes (the replica refuses others)
+		for &nd in os.nodes do nd.a, nd.b, nd.parent = 1, 1, 0
+		os.nodes[0].parent = -1
+		os.root = 1
 	}
 	text := state_full_json(&s)
 	r := replica_of(t, text)
@@ -457,6 +465,16 @@ state_wire_deltas :: proc(t: ^testing.T) {
 	d = apply(t, &r, &s, &sent)
 	testing.expect(t, strings.contains(d, `"tabs:50"`) && strings.contains(d, `"panes:50"`) && strings.contains(d, `"panels:51"`), d)
 
+	// a tab (with panels) moves to another session: its panels go with it
+	s.version += 1
+	moved := s.open_sessions[0].tabs[0]
+	ordered_remove(&s.open_sessions[0].tabs, 0)
+	append(&s.open_sessions[len(s.open_sessions) - 1].tabs, moved)
+	d = apply(t, &r, &s, &sent)
+	testing.expect(t, !strings.contains(d, `"panels:11"`), d)
+	last := r.open_sessions[len(r.open_sessions) - 1]
+	testing.expect_value(t, len(last.tabs[len(last.tabs) - 1].panels), 2)
+
 	// closing it: its sections go as null
 	s.version += 1
 	pop(&s.open_sessions)
@@ -495,7 +513,16 @@ state_wire_refusals :: proc(t: ^testing.T) {
 		`{"type":"state.delta","version":2,"sections":{"projects":{"projects":[{"id":"x"}]},"tabs:777":[]}}`,
 		`{"type":"state.delta","version":2,"sections":{"settings":{"settings":{"theme":7.5}}}}`,
 		`{"type":"state.delta","version":2,"sections":{"projects":{"projects":{}}}}`,
-		`{"type":"state.delta","version":2,"sections":{"confirmations":{"pending_confirmations":[{"command":{"type":"no_such"}}]}}}`,
+		`{"type":"state.delta","version":2,"sections":{"confirmations":{"pending_confirmations":[{"command":{"type":7}}]}}}`, // not a type name
+		`{"type":"state.delta","version":2,"sections":{"confirmations":{"pending_confirmations":[{"command":{"type":"close_tab","tab_id":"x"}}]}}}`, // a known one, mistyped
+		`{"type":"state.delta","version":2,"sections":{"confirmations":{"pending_confirmations":[{"command":"close_tab"}]}}}`,
+		// the layout tree's indices point into nodes
+		`{"type":"state.delta","version":2,"sections":{"panes:10":{"root":99999,"nodes":[],"focused_pane":0}}}`,
+		`{"type":"state.delta","version":2,"sections":{"panes:10":{"root":3,"nodes":[{"leaf":true,"parent":-1}]}}}`,
+		`{"type":"state.delta","version":2,"sections":{"panes:10":{"root":0,"nodes":[{"leaf":false,"a":1,"b":5,"parent":-1},{"leaf":true,"parent":0}]}}}`,
+		`{"type":"state.delta","version":2,"sections":{"panes:10":{"root":0,"nodes":[{"leaf":true,"parent":-2}]}}}`,
+		`{"type":"state.delta","version":2,"sections":{"panes:10":{"root":0,"nodes":[{"leaf":true,"parent":1}]}}}`,
+		`{"type":"state.full","version":2,"state":{"sessions":{"open_sessions":[{"id":10}]},"panes:10":{"root":-1}}}`,
 		`{"type":"other","version":2}`,
 		strings.repeat("[", 100_000, context.temp_allocator),
 		"{\"type\":\"state.delta\",\"version\":2,\"sections\":{\"view\":{\"focus_widget\":\"\xff\"}}}",
@@ -511,6 +538,20 @@ state_wire_refusals :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(r.open_sessions[0].tabs), 1)
 	testing.expect_value(t, r.open_sessions[0].tabs[0].status, Tab_Status.Running)
 	testing.expect(t, r.open_sessions[0].tabs[0].kind == nil)
+	// an enum number outside the enum's values reads as the zero value (never indexes a names table)
+	odd := `{"type":"state.delta","version":43,"sections":{"tabs:10":[{"id":11,"status":200,"agent":-3,"kind":{"claude_tab":{"turn":77,"ended":2}}}],"panels:11":[]}}`
+	testing.expect_value(t, replica_apply(&r, odd, context.temp_allocator), "")
+	testing.expect_value(t, r.open_sessions[0].tabs[0].status, Tab_Status(0))
+	testing.expect_value(t, r.open_sessions[0].tabs[0].agent, Agent_State(0))
+	testing.expect_value(t, r.open_sessions[0].tabs[0].kind.(Claude_Tab).turn, Claude_Turn(0))
+	testing.expect_value(t, r.open_sessions[0].tabs[0].kind.(Claude_Tab).ended, Claude_Ended.Error) // in range: kept
+	// a command this window does not know (a newer core's): a nil command, one it cannot confirm
+	fut := `{"type":"state.full","version":44,"state":{"sessions":{"open_sessions":[]},"confirmations":{"pending_confirmations":[{"token":"t","summary":"new","command":{"type":"future_command","x":1}},{"token":"u","command":{"type":"quit"}}]}}}`
+	testing.expect_value(t, replica_apply(&r, fut, context.temp_allocator), "")
+	testing.expect_value(t, len(r.pending_confirmations), 2)
+	testing.expect(t, r.pending_confirmations[0].command == nil && r.pending_confirmations[0].summary == "new")
+	_, is_quit := r.pending_confirmations[1].command.(Quit)
+	testing.expect(t, is_quit)
 }
 
 // A replica frees what it replaces and what it held: a full, deltas of every kind, refused
@@ -543,6 +584,8 @@ state_wire_replica_frees_what_it_holds :: proc(t: ^testing.T) {
 	ordered_remove(&s.pending_confirmations, 0)
 	step(t, &r, &s, &sent, a)
 	half := [?]string {
+		`{"type":"state.delta","version":9,"sections":{"tabs:10":[{"id":11,"kind":{"editor_tab":{"path":"leaked-string","view":1.5}}}]}}`, // a union half-decoded
+		`{"type":"state.delta","version":9,"sections":{"confirmations":{"pending_confirmations":[{"token":"t","command":{"type":"close_tab","confirm":"leak?","tab_id":"x"}}]}}}`,
 		`{"type":"state.delta","version":9,"sections":{"tabs:10":[{"id":1,"title":"x"},{"id":"bad"}]}}`,
 		`{"type":"state.delta","version":9,"sections":{"panels:11":[{"id":"p","rows":[{"text":"x"},{"text":3}]}]}}`,
 		`{"type":"state.delta","version":9,"sections":{"panes:10":{"panes":[{"id":1}],"nodes":"x"}}}`,
@@ -582,4 +625,86 @@ state_wire_every_parked_command_comes_back :: proc(t: ^testing.T) {
 		testing.expectf(t, len(r.pending_confirmations) == 1 && reflect.union_variant_typeid(r.pending_confirmations[0].command) == vt.id, "%s parked: came back as %v", spec.type, r.pending_confirmations[0].command)
 	}
 	testing.expectf(t, n >= 10, "%d commands with a confirm class", n)
+}
+
+// The encoding of a released stream (tests/state-wire/v1/full.json: sample_state()'s
+// state.full when it was frozen) still decodes, and nothing in it is lost: re-encoded, every
+// key and value of the fixture is there (the same bytes today; a field added later only adds).
+// A field renamed, retyped or dropped, or an enum value renamed, fails here.
+STATE_GOLDEN :: "tests/state-wire/v1/full.json"
+
+@(test)
+state_wire_golden_full :: proc(t: ^testing.T) {
+	root := strings.trim_suffix(strings.trim_right(#directory, "/"), "/src/core")
+	s := sample_state()
+	now := state_full_json(&s)
+	_ = os.make_directory_all(fmt.tprintf("%s/build", root))
+	_ = os.write_entire_file(fmt.tprintf("%s/build/state-full-v1.json", root), transmute([]u8)now) // a new fixture, at a protocol bump only
+	golden, err := os.read_entire_file(fmt.tprintf("%s/%s", root, STATE_GOLDEN), context.temp_allocator)
+	if !testing.expectf(t, err == nil, "%s: %v", STATE_GOLDEN, err) do return
+	text := strings.trim_space(string(golden))
+	r: State
+	if !testing.expect_value(t, replica_apply(&r, text, context.temp_allocator), "") do return
+	again := state_full_json(&r)
+	if again == text do return
+	gv, _ := jg.parse_string(text, .JSON, true, context.temp_allocator)
+	av, _ := jg.parse_string(again, .JSON, true, context.temp_allocator)
+	for p in json_not_within(gv, av, "") do testing.expectf(t, false, "%s: lost in decode -> encode: %s", STATE_GOLDEN, p)
+}
+
+// Where x (the fixture) has something y does not: a key, a different value, a list's length.
+@(private = "file")
+json_not_within :: proc(x, y: json.Value, path: string) -> [dynamic]string {
+	out := make([dynamic]string, context.temp_allocator)
+	#partial switch a in x {
+	case json.Object:
+		b, ok := y.(json.Object)
+		if !ok {append(&out, path); return out}
+		for k, v in a {
+			w, has := b[k]
+			if !has {append(&out, fmt.tprintf("%s.%s", path, k)); continue}
+			append(&out, ..json_not_within(v, w, fmt.tprintf("%s.%s", path, k))[:])
+		}
+	case json.Array:
+		b, ok := y.(json.Array)
+		if !ok || len(a) != len(b) {append(&out, path); return out}
+		for v, i in a do append(&out, ..json_not_within(v, b[i], fmt.tprintf("%s[%d]", path, i))[:])
+	case:
+		if fmt.tprint(x) != fmt.tprint(y) do append(&out, fmt.tprintf("%s: %v -> %v", path, x, y))
+	}
+	return out
+}
+
+// A message cannot make the replica allocate far more than it is: one whose decoded size
+// passes 64x its length (at least 1 MiB) is refused before the memory is taken, and the
+// panels check stays linear in the tabs.
+@(test)
+state_wire_decode_is_bounded :: proc(t: ^testing.T) {
+	s := sample_state()
+	r := replica_of(t, state_full_json(&s))
+	// 200,000 empty tabs: 400 KB of JSON, about 100 MB of Tabs
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"type":"state.delta","version":50,"sections":{"tabs:10":[`)
+	for i in 0 ..< 200_000 {
+		if i > 0 do strings.write_byte(&b, ',')
+		strings.write_byte(&b, '0')
+	}
+	strings.write_string(&b, "]}}")
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, context.allocator)
+	defer mem.tracking_allocator_destroy(&track)
+	err := replica_apply(&r, strings.to_string(b), mem.tracking_allocator(&track))
+	testing.expectf(t, strings.contains(err, "too large"), "refused as too large: %q", err)
+	testing.expectf(t, track.peak_memory_allocated < 8 << 20, "peak %d bytes before refusing", track.peak_memory_allocated)
+	// many tabs with panels, in one full: the checks are not quadratic
+	big: State
+	big.open_sessions = make([dynamic]Open_Session, context.temp_allocator)
+	os := Open_Session{id = 1}
+	os.tabs = make([dynamic]Tab, 20_000, context.temp_allocator)
+	for &tab, i in os.tabs do tab.id = u64(100 + i)
+	append(&big.open_sessions, os)
+	start := time.tick_now()
+	rb := replica_of(t, state_full_json(&big))
+	testing.expect_value(t, len(rb.open_sessions[0].tabs), 20_000)
+	testing.expectf(t, time.tick_since(start) < 2 * time.Second, "20,000 tabs took %v", time.tick_since(start))
 }

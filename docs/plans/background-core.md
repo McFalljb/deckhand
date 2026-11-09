@@ -1037,6 +1037,25 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   file and Settings models). In two processes those read the window process's own empty copies,
   unless M4-C decodes the replica into that process's `core.state` and carries the rest.
 
+**M4-C as built** (where it differs from the row above):
+- **Two binaries in Core.app.** Linking the core package and the holder's `hold` into one
+  executable trips an Odin LLVM assertion at `-o:speed` (`llvm_sz == llvm_dz`, i32 vs i16), so
+  the core is `MacOS/deckhand-core-serve` (`src/coremain`, the same identifier), beside the
+  unchanged holder. `core_install` keys its copy on both binaries' hashes. One binary again once
+  the compiler takes it.
+- **A poll(2) loop, not CFRunLoop:** a self-pipe for wake (a reader's first output after the main
+  thread took it all wakes it too), the window's socket, the core timer's period as the timeout.
+- **`core.state` is the replica in the window process;** the helpers that read core runtime read
+  `Tab.live` (the core's tick fills it) when `core.replica_process` is set.
+- **Kernel buffers:** macOS gives a Unix stream socket 8 KiB each way, so `sock_open` asks for
+  2 MiB (the 95 MB term-bench flood took 8–10 s to reach the window before, 0.9–1.2 s after; in
+  process 1.8 s).
+- **Not done:** zstd on snapshots and `history_lines`' early stop; `--ctl` and `deckhand DIR`
+  launching a core (the window does); the core's own notifications (they go through the window:
+  `window.request notify`); the window floor on disk; app tabs, the setup sheet's install run,
+  the Changes tab, worktree cleanup progress and the update UI stay the in-process window's;
+  after the core's connection ends the window quits (no reconnect).
+
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR
   check plus `window.token`, and under the self-signed identity a same-user process can pass the

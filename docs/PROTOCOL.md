@@ -1175,13 +1175,27 @@ first: `["ghostsnp/1", "vt"]`). From the next byte on, the connection carries fr
 first, a newer snapshot replacing a queued one, the 4 MiB cap and the ceiling after which a
 peer that does not read is cut off, and the peer re-checked before each read's bytes are acted
 on. The window checks the reply with `skew_check` and the core the window with the window floor
-(`src/corewire/skew.odin`, §7.5). Until M4-C nothing takes framed connections: such a hello gets
-`"framed mode is not available in this build"`, before an env token is used up.
+(`src/corewire/skew.odin`, §7.5).
+
+Framed mode is the window's only, and only with a separate core (`deckhand-core-serve serve`,
+M4-C; Settings › Experimental, off by default): the hello's `token` must be the one in
+`<runtime dir>/window.token` (0600, written fresh when the core starts, gone when it stops). The
+core then checks, in this order, before it replies: the peer read at accept is this user and still
+the process that sent the hello; its code has the window's designated requirement; its version is
+not below the window floor (the newest window that attached to this core, in memory); it does not
+descend from the core or its session holder. Any other framed hello (a control or env token, a
+challenge hello) gets `"framed mode is only for Deckhand's window (with the core's window
+token)"`. The caller is `ui`. The window checks the core first, before it sends a byte: this user,
+and Deckhand Core.app's designated requirement (`core_peer_check`). The newest window to attach
+replaces an older one. A `window.request` that wants an answer waits at most 250 ms, then the core
+goes on as if no window were attached; a window's command waits at most 250 ms for its result,
+then shows as pending (the late result is dropped). Ad hoc and self-signed builds stop accidents,
+not a determined process of the same user (§5.4).
 
 **Order.** A command's `state.delta` is sent before its `result` (the window waits for its own
 results and reads State at once). The delta before a result compares every section, so it holds
 changes that bumped no version (a parked or consumed confirmation). In process the wait is nil;
-M4 bounds it (250 ms, then the call shows as pending).
+over `core.sock` it is bounded (250 ms, then the call shows as pending).
 
 **Terminal streams** (design §5.5, M3-H; `src/core/term_stream.odin`, `src/term_view_stream.odin`).
 The window keeps its own copy of each terminal it shows, fed on a channel of its own (≥ 1) with

@@ -3,7 +3,7 @@
 # group; harness_manifest.odin, harness_install.odin, ui_harness.odin) in quiet test mode, against
 # fake HOMEs with fake install layouts (stat and package.json only: nothing is ever run but the
 # stand-in tests/scripts/fake-install.sh, checked by its argv). Never the user's ~/.pi or ~/.claude.
-#   1. installed: pi (its installer's layout, 1.5.0, both recommended packages) and Claude Code
+#   1. installed: pi (its installer's layout, 1.5.0, all five recommended packages) and Claude Code
 #      (native, 2.1.300): everything ticked, no action; the Settings group.
 #   2. missing: neither installed; both collapsed with Install and the official command; Claude
 #      Code's Install runs the stand-in (Esc is held while it runs), then pi's, then pi-subagents':
@@ -55,7 +55,7 @@ run() { # NAME HOME [VAR=VALUE...]
 # 1. installed
 H1="$W/home-installed"
 fake_pi "$H1" "$H1/.pi/agent/lib/node_modules/@earendil-works/pi-coding-agent" 1.5.0
-printf '{"packages":[{"source":"npm:pi-subagents@0.84.0"},"npm:@juicesharp/rpiv-todo@2.15.0"]}\n' > "$H1/.pi/agent/settings.json"
+printf '{"packages":[{"source":"npm:pi-subagents@0.84.0"},"npm:@juicesharp/rpiv-todo@2.15.0","npm:pi-ask-user@0.17.0","npm:pi-web-access@0.47.0","npm:@juicesharp/rpiv-btw@2.15.0"]}\n' > "$H1/.pi/agent/settings.json"
 fake_claude "$H1" "$H1/.local/share/claude/versions/2.1.300"
 cp "$H1/.pi/agent/settings.json" "$W/settings-before.json"
 run installed "$H1"

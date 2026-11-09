@@ -254,6 +254,9 @@ facts_both :: proc(root: string) -> core.Harness_Facts {
 	f.packages = make(map[string]core.Pi_Package_Found, allocator = context.temp_allocator)
 	f.packages["pi-subagents"] = {listed = true, spec = "0.84.0", installed = "0.84.0"}
 	f.packages["@juicesharp/rpiv-todo"] = {listed = true, spec = "2.15.0"}
+	f.packages["pi-ask-user"] = {listed = true, spec = "0.17.0", installed = "0.17.0"}
+	f.packages["pi-web-access"] = {listed = true, installed = "0.46.0"} // unpinned: the installed copy's version
+	f.packages["@juicesharp/rpiv-btw"] = {listed = true, spec = "2.15.0"}
 	return f
 }
 
@@ -268,6 +271,7 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	testing.expect_value(t, item_of(items, "claude").layout, core.Install_Layout.Managed)
 	testing.expect_value(t, item_of(items, "pi-integration").state, core.Harness_Item_State.Built_In)
 	testing.expect_value(t, item_of(items, "rpiv-todo").version, "2.15.0")
+	testing.expect_value(t, item_of(items, "pi-web-access").version, "0.46.0")
 
 	// missing: Install with the official command; pi's packages wait for pi
 	f := facts_both(root)
@@ -305,6 +309,16 @@ harness_checklist_states :: proc(t: ^testing.T) {
 	sa, todo := item_of(items, "pi-subagents"), item_of(items, "rpiv-todo")
 	testing.expect(t, sa.state == .Too_Old && sa.runnable && sa.command == fmt.tprintf("%s install npm:pi-subagents@0.84.0", f.bin[.Pi]) && sa.target == f.bin[.Pi], sa.command)
 	testing.expect(t, todo.state == .Missing && todo.runnable && todo.command == fmt.tprintf("%s install npm:@juicesharp/rpiv-todo@2.15.0", f.bin[.Pi]))
+	// the other recommended packages: each a pinned install; pi-web-access below its advisory fix, Update
+	f.packages["pi-ask-user"], f.packages["@juicesharp/rpiv-btw"] = {}, {}
+	f.packages["pi-web-access"] = {listed = true, installed = "0.24.0"}
+	items = core.harness_checklist(f)
+	for c in ([][2]string{{"pi-ask-user", "npm:pi-ask-user@0.17.0"}, {"rpiv-btw", "npm:@juicesharp/rpiv-btw@2.15.0"}}) {
+		it := item_of(items, c[0])
+		testing.expectf(t, it.state == .Missing && it.runnable && it.command == fmt.tprintf("%s install %s", f.bin[.Pi], c[1]), "%s: %v", c[0], it)
+	}
+	wa := item_of(items, "pi-web-access")
+	testing.expect(t, wa.state == .Too_Old && wa.action == .Update && wa.command == fmt.tprintf("%s install npm:pi-web-access@0.47.0", f.bin[.Pi]), wa.command)
 	// found from a git or local source: found, its version unchecked, nothing offered (no second copy)
 	f.packages["@juicesharp/rpiv-todo"] = {listed = true, other = true}
 	todo = item_of(core.harness_checklist(f), "rpiv-todo")

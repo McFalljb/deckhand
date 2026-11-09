@@ -5,7 +5,7 @@ package main
 //   - The setup sheet's first step, "Your coding agents": one card per harness. A harness that is
 //     not installed is one collapsed line (Not installed, why, the exact install command, Install),
 //     so a one-harness user sees no clutter for the other. An installed one lists Deckhand's own
-//     integration ("built in") and the recommended third-party items (or "nothing else needed").
+//     integration ("built in") and the recommended third-party items (or "Nothing else to install").
 //     Every Install or Update shows its exact command before the click; a layout Deckhand does not
 //     run (nix, mise, unknown, an npm folder that needs sudo) gets Copy instead. A run shows below
 //     the cards in a terminal: its output live, how it ended, Close.
@@ -26,6 +26,11 @@ HARNESS_TERM_ROWS :: 8
 
 @(private = "file")
 term_laid_out: bool // the sheet declared the run's terminal this frame
+
+// The run whose terminal the sheet last scrolled to (its term_id): a new run's output is scrolled
+// into view once, below a long checklist, and the user may scroll away after.
+@(private = "file")
+term_scrolled_to: u64
 
 // The run's terminal rectangle in the last layout (framebuffer px).
 harness_term_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
@@ -200,7 +205,7 @@ harness_card :: proc(h: core.Harness, w: f32) {
 			}
 			item_line(it, inner, false)
 		}
-		if rec == 0 do sub_head("Recommended: nothing else needed")
+		if rec == 0 do sub_head("Nothing else to install")
 	}
 }
 
@@ -263,6 +268,15 @@ harness_step_body :: proc(w: f32) {
 	// installed harnesses first: the one the user has is what matters
 	for pass in 0 ..< 2 do for h in core.Harness do if core.harness_item_installed(h) == (pass == 0) do harness_card(h, w)
 	run_block(w)
+	// a run that just started shows at once: the body scrolls to its end, once (Clay's sizes are the
+	// last layout's: done when that layout had the run's terminal and the body is at its end)
+	if id := core.harness_run.term_id; id != 0 && id != term_scrolled_to {
+		if d := clay.GetScrollContainerData(clay.ID("setup_body")); d.found {
+			end := -max(d.contentDimensions.height - d.scrollContainerDimensions.height, 0)
+			if d.scrollPosition.y == end && clay.GetElementData(clay.ID("setup_term")).found do term_scrolled_to = id
+			d.scrollPosition.y = end
+		}
+	}
 }
 
 // The step's hits (setup_hit).

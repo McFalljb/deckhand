@@ -5,9 +5,13 @@ window closes) and [#5](https://github.com/McFalljb/deckhand/issues/5) (every ma
 sidebar). Design only: no app code has changed. Investigated at `main` 6ee5586. Modelled on
 Herdr 2 (herdr-core cd12ddd, herdr-app 7fe7ac3, Apache-2.0).
 
-Status (2026-11-07): revision 5. Both spikes are done and folded in here. Q0 is merged (#18),
-and so is M1's PR A (#21). M1 is broken into PRs in §10.1, M2 and M3 in §10.2. The user's
-decisions are in §2.
+Status (2026-11-08): revision 6. Both spikes are done and folded in here. M1, M2 and M3-E/F are
+merged (M3-F: #44); M3-G and M3-H are in review. M1 is broken into PRs in §10.1, M2 and M3 in
+§10.2, M4 in §10.3. The user's decisions are in §2.
+
+Revision 6: §10.3 (M4 in PRs, checked against `main` 2a3bd0b and the M3-G and M3-H branches).
+**M4 no longer waits for D0:** the DR checks anchor on the self-signed identity (§5.4). Decisions
+6 and 7 in §2; the D0 and M4 rows and the order in §10; R2, R5, Q8.
 
 Revision 5: §10.2 (M2 and M3 in PRs, checked against `main` 5b2927d), new sizes for M2 and M3
 in §10, R9 and R14–R16 in §11, rows in §12, Q9–Q11 in §13.
@@ -69,7 +73,9 @@ Contents: 1 Goal · 2 Decisions · 3 Process model · 4 What moves where · 5 Pr
 | 2 | ⌘Q | Closes the window only, and sessions keep running. **Quit Deckhand and Stop All Sessions…** stops everything (class `app_quit`). |
 | 3 | App tabs | May die with the window in v1. |
 | 4 | Remote core updates | One-click offer when connecting to an older remote core (§8.5). |
-| 5 | Apple Developer ID | **Deckhand will get one, though not now.** The design assumes it. Ad-hoc builds get no special safeguards; §5.4 states what they trust. |
+| 5 | Apple Developer ID | **Deckhand will get one, though not now.** The design assumes it. Ad-hoc builds get no special safeguards; §5.4 states what they trust. **2026-11-08: M4 doesn't wait for it,** and nothing is built that waits for it. The checks anchor on the self-signed identity "Deckhand Self-Signed" (§5.4). The swap later is the one line `SIGN_IDENTITY_DEFAULT` in `scripts/sign.sh`. |
+| 6 | What a core runs (2026-11-08) | **Every core is fully featured:** sessions, jobs, scheduler and Atlas. The window is a view of its own machine and every connected one. Remotes over SSH (M6). The local Atlas is the hub (§8.6). |
+| 7 | Releases (2026-11-08) | **No release until the split is complete** (M4 merged). Then the user makes the release and sets the new core and window up on their machine. The release checklist is in §10.3. |
 
 **In this design (open to review):**
 
@@ -79,7 +85,7 @@ Contents: 1 Goal · 2 Decisions · 3 Process model · 4 What moves where · 5 Pr
 | Holder upgrades | The holder **re-execs itself** (its pid survives, so it stays the children's parent). Drain is only the fallback. | §7.3, §9 |
 | Terminal output | Option (a): bytes plus the window's own ghostty-vt, resynced by a **GHOSTSNP** snapshot (S1). The VT formatter is only an `inexact` fallback. | §5.5 |
 | Identity | A designated requirement (identifier + Team ID, Developer ID, hardened runtime), checked by audit token, **in both directions** | §5.3 |
-| Sequencing | **M1 may ship ad-hoc** with a same-user residual. **The M4 window/core split (`ui` over a socket) waits for the Developer ID.** | §5.4, §10 |
+| Sequencing | **M1 may ship ad-hoc** with a same-user residual. **The M4 window/core split (`ui` over a socket) uses the self-signed identity** (decision 5, 2026-11-08), with its residual stated. | §5.4, §10 |
 | First step | M1: the holder in front of today's single-process app | §10 |
 | Windows | One per core in v1; view state stays in the core | §4 |
 | Lifecycle | herdr's launchd detach (unique label, fork, setsid, bootout) | §6 |
@@ -289,9 +295,9 @@ token and handover files 0600.
 Ad-hoc builds have no team identity, so **every check above degrades to "same user"**. S2
 showed the token yields a CDHash even for ad-hoc code, so the core and holder *could* pin each
 other's CDHash. Per decision 5 that isn't planned: a pin doesn't stop a same-user process running
-the genuine binary, and the Developer ID replaces it. The DR
-checks are skipped, with a single banner in Settings: "This copy isn't signed with Deckhand's
-Developer ID: other programs running as you can control its sessions". The holder still keeps
+the genuine binary, and the Developer ID replaces it. In ad-hoc builds the DR checks are skipped
+(self-signed builds run them, below), with a single banner in Settings: "This copy isn't signed
+with Deckhand's Developer ID: other programs running as you can control its sessions". The holder still keeps
 its HMAC key and its successor secret. Those raise the bar against accidents, not against a
 determined same-user process.
 
@@ -302,9 +308,33 @@ holder and type into any terminal.
 
 **Rule:**
 - **M1 (holder, no socket `ui`) may ship ad-hoc** with that residual, stated in GUIDE.md.
-- **M4 (window/core split, `ui` over a socket) ships only with the Developer ID** in place:
-  `release.sh`'s Developer ID and notarization path, CEF signed under the team, and library
-  validation on.
+- **M4 (window/core split, `ui` over a socket) uses the self-signed identity** (decision 5,
+  2026-11-08). It does not wait for the Developer ID.
+
+**The self-signed identity (M4).** Builds are signed with "Deckhand Self-Signed"
+(`scripts/sign.sh`; `scripts/make-signing-identity.sh` makes it). Its designated requirement is
+the identifier plus the certificate leaf hash: `identifier "dev.deckhand.core" and certificate
+leaf = H"<sha1>"`. Each process builds the requirement from its own signature at start, so no hash
+is committed:
+
+| Own signature | Mode | A peer must have |
+|---|---|---|
+| ad hoc (`DECKHAND_SIGN_IDENTITY=-`, CI) | `Adhoc` | the same user and the expected identifier |
+| "Deckhand Self-Signed" | `Self_Signed` | the expected identifier and our certificate leaf hash |
+| a Developer ID (D0) | `Developer_Id` | the §5.3 requirement (anchor apple generic, our Team ID), `CS_RUNTIME` and no `get-task-allow` |
+
+- **D0 is then one line:** `SIGN_IDENTITY_DEFAULT` in `scripts/sign.sh`. `release.sh` already
+  signs a Developer ID with the hardened runtime and notarizes it, and the checks pick the mode
+  from the process's own signature.
+- **What self-signed stops:** other users, stale sockets, stray or wrong binaries, and code
+  signed by anyone else.
+- **What it doesn't stop: a same-user attacker.** `codesign` may use the key without a prompt
+  (it is imported with `-T /usr/bin/codesign`), so any process of the user can sign its own code
+  with it. Without the hardened runtime, `DYLD_INSERT_LIBRARIES` also loads into the genuine
+  binary. This is the ad-hoc residual above, stated in GUIDE.md the same way.
+- **The hardened runtime stays off until D0.** Library validation compares Team IDs, and a
+  self-signed certificate has none. S2 showed ad hoc can't load CEF that way; M4-A checks the
+  self-signed case once and records the result here.
 
 ### 5.5 Terminal streams (option a)
 
@@ -466,7 +496,7 @@ Rejected:
 ### 7.1 Artifacts
 
 ```
-Deckhand.app/                                  Developer ID, notarized (from M4; M1 may be ad hoc)
+Deckhand.app/                                  self-signed until D0, then Developer ID, notarized
   Contents/MacOS/Deckhand                      window, dev.deckhand.app
   Contents/Frameworks/…CEF…                    same Team ID, library validation on
   Contents/Helpers/Deckhand Core.app/          dev.deckhand.core: deckhand-core (serve | hold |
@@ -489,8 +519,9 @@ Deckhand.app/                                  Developer ID, notarized (from M4;
   - A version is collected when it is neither of those, nothing runs from it, and no tab was
     started from it. The integrations live there, so live tabs keep their paths across an app
     swap.
-- **TCC:** with the Developer ID, grants follow the DR and survive updates. Ad-hoc builds
-  re-prompt at every core version, and Full Disk Access silently stops applying (§5.4).
+- **TCC:** with the Developer ID or the self-signed identity, grants follow the DR and survive
+  updates. Ad-hoc builds re-prompt at every core version, and Full Disk Access silently stops
+  applying (§5.4).
 
 ### 7.2 Core handover (byte-exact)
 
@@ -777,13 +808,16 @@ Every step ships on its own.
 | S1 | ✅ **VT snapshot spike: GO** via GHOSTSNP (exact in 360/360; the formatter is the fallback). Branch `spike/vt-snapshot` 6bf748e. | §5.5, §7.2 | done |
 | S2 | ✅ **Platform spike** on macOS 26.6.2: live audit tokens, launchd detach, re-exec and keeper confirmed; `/dev/fd/N` exec fails; ad-hoc runtime can't load CEF; quarantine kills. **Still owed:** macOS 14/15, Force Quit, logout (manual, before M1 ships). | §5.3, §6, §7.3 | done (14/15 owed) |
 | M1 | **Holder in front of today's single-process app**, ad hoc allowed (§5.4). It covers: the holder (Odin, no ghostty or sokol); its wire and golden vectors; re-exec with dry run and keeper; the successor secret; the HMAC key; MAC'd `tokens.json`/`handover.json`; launchd detach; stable `core.sock` and the runtime dir move; offsets and exact handover on quit and update; the `instance.lock` SH rule; release hooks and env overrides compiled out; the updater test against the current release. **Broken into four PRs in §10.1.** **Doc changes:** PROTOCOL.md §1, CLAUDE.md §4a (an updated plugin reaches kept Claude tabs only after a restart, which the bar offers), PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md. | **Quitting, crashing or updating Deckhand no longer stops pi, Claude or shells**, and the screens come back. **While the app is closed:** no status or bell; the `deckhand` CLI and Claude hooks fail (a `/clear` id goes unrecorded, so restore may resume the old conversation); held prompts wait; Atlas jobs don't run; **job runs stop when the app exits** (as today); in-flight requests are lost. | 7–9 weeks |
-| D0 | **Developer ID** (the user's timing): certificate; `release.sh`'s existing Developer ID and notarization path as the default; CEF signed under the team; library validation on; DR checks switched on | M4 may start | ~1 week |
+| D0 | **Developer ID** (the user's timing): certificate; `SIGN_IDENTITY_DEFAULT` set to it (one line, `scripts/sign.sh`); `release.sh`'s existing Developer ID and notarization path; CEF signed under the team; hardened runtime and library validation on. The DR checks are already in place from M4 and switch mode by themselves (§5.4). **No longer gates M4** (decision 5, 2026-11-08). | Attacker-grade checks instead of anti-accident ones | ~1 week |
 | M2 | **Boundary** (map M0): `src/core` with no sokol or Clay; the leaks fixed; a core loop. **Three PRs in §10.2.** | Compiler-checked split; hidden windows stop stalling parsing | 2.5–3.5 weeks |
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
-| M4 | **Separate core** (`Deckhand Core.app`), **after D0**. It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`; `released-v1.json`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 5–7 weeks |
+| M4 | **Separate core** (`Deckhand Core.app`), **signed with the self-signed identity; it does not wait for D0** (§5.4). It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Plus M3's carry-overs (M3-F2). `released-v1.json` is done (M3-E). **Six PRs in §10.3.** Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 6–7.5 weeks elapsed (8.5–10.5 of work) |
 | M5 | Login agent; jobs while closed | Scheduled jobs with Deckhand closed | 1–2 weeks |
 | M6 | **Remote:** connect, install, update, caps (§8.3, the CEF request handler), sidebar, offline states, file fetch, harness setup, plus a **headless Linux core and release target** | **#5 done** | 7–11 weeks + 2–3 for Linux |
 | M7 | Several windows | More windows | 2–4 weeks |
+
+Order: M1 → M2 → M3 → M4 → M5, M6, M7. D0 happens whenever the user gets the Developer ID; it
+gates nothing (decision 5, 2026-11-08). No release until M4 is merged (decision 7).
 
 Remaining: about 33–48 weeks, now that Q0, S1 and S2 are done. M1 grew by 2 weeks, for the
 snapshot bindings and the keeper gate. M2 grew by half a week (types and handlers that live in
@@ -903,6 +937,105 @@ other work touches 200 files.
   the core (§5.6). The holder-backed `Pty`'s reader thread must drain whether frames run or not;
   M2-C's scene checks it with 20 MiB of output.
 
+### 10.3 M4 in PRs
+
+Checked against `main` 2a3bd0b (M3-F, #44) and the M3-G and M3-H branches in review
+(`deckhand-m3g` b9065ba, `deckhand-m3h` fd87627). M3-F2 and M4-C plan against `main` plus G and H:
+`tab_host.call`/`finished`, the `tab_host` caller, `src/core/tabhost_route.odin`, terminal
+streams (`src/core/term_stream.odin`) and `Term_View`'s own terminal.
+
+**What the code shows:**
+- `deckhand-core` is the holder's binary (`src/holder/main.odin`), a bare Mach-O in
+  `Contents/Helpers`, installed to `core/<HOLDER_REV>-<sha12>/` (`src/core/holder_install.odin`).
+  There is no `Deckhand Core.app` yet, and no `serve`.
+- `src/trust` has one mode, `Adhoc` (same user; identifier only for images). The keeper uses the
+  kernel's `csops_audittoken`, because Security.framework isn't safe after fork.
+- The window's bundle id is still `dev.pi-desk.app` (`scripts/bundle-app.sh`); the rename's
+  0.1.8 flip changes it.
+- The window still reaches into the core in process: `Window_Hooks` (`src/core/window_hooks.odin`:
+  `view_open`, `tab_dirty`, `frames_info`, `browser_facts`, `term_selection`, the sheets, the
+  watcher and more), the window side of `platform` (clipboard, `open_url`, `reveal`,
+  `pick_folder`, appearance, `window_active`), `core.find_tab` from 42 window files (M3-G), and
+  `core.term_of` in 52 places (M3-H).
+- `Caller_Kind`'s zero value is `Internal` (`src/core/commands.odin`).
+- `keep_sessions_default_on := true` is in `src/core/commands.odin`.
+
+**Decisions this section makes:**
+- **The checks anchor on the self-signed identity** (decision 5, §5.4). The modes are picked from
+  the process's own signature, so D0 is one line. Test builds skip the DR checks as ad-hoc builds
+  do (§12).
+- **The window's identifier list** is `dev.pi-desk.app` until the rename's flip, which adds
+  `dev.deckhand.app` (the release checklist below).
+- **Behind a default until the last PR:** `separate_core_default_on := false` in
+  `src/core/commands.odin`, like M1's `keep_sessions_default_on`, with Settings › Experimental:
+  *Run sessions in a background core* (user-only, read at launch). Off: the window runs the core
+  in process over the in-memory link, as M3 does. On: two processes. M4-E flips it once M4-D has
+  merged.
+- **Then the in-process attach is test-only.** It is compiled out of release builds with the
+  test hooks, so the `ui` door is the socket check alone.
+- **One binary:** `deckhand-core` gains `serve`, `check` and `install` beside `hold`,
+  `__detach` and `relaunch` (§7.1). Only `serve` links the core package; the holder package still
+  doesn't (the boundary script).
+- **Every core is fully featured** (decision 6, §8.6). `Deckhand Core.app` runs sessions, jobs,
+  the scheduler and Atlas with or without a window. M4 adds nothing local-only that M6 must undo.
+- **Bridge hellos prove a token without sending it.** The HMAC key is the token's SHA-256, which
+  is all `tokens.json` keeps, so the file gains no secret.
+
+| PR | Contents | Files (main ones) | Tests (time) | Review | What the user can try |
+|---|---|---|---|---|---|
+| **M3-F2. The last hooks become messages** (after G+H merge; behaviour unchanged) | `window.request{op}`/`window.reply` for clipboard (get, set, secret, clear-if, change count), `open_url`, `reveal`, `pick_folder`, appearance and `window_active`, replacing those `platform` entries. The core keeps wake, run_later, activity, notify, `core_timer`, trash and quit. `confirmation.parked`. **Every other `Window_Hooks` entry becomes a message:** `view_open`/`goto`/`drop`/`moved`; `tab_dirty` and `unsaved_files` (the window reports dirty buffers, so the core never waits on it); `frames_info`, `display` and `frames_read` (the app tab's hello asks through `tab_host.call`); `browser_facts` (the in-process pull goes); `term_selection` (a `window.request`); the sheets, the watcher and the Changes view. **The window reads only its replica and its own copies:** the 42 files using `core.find_tab` read the replica, `core.term_of` from the window becomes the `Term_View` copy, and `tab_busy` reads the core terminal's last-output time from the replica's tab. **Limits:** a much lower decode budget for window messages than for state, and a cap on window commands run per pump (the rest wait for the next). **Missed writes:** per-section triggers, so the untracked-write check is exact, not best-effort. **Callers:** `Caller_Kind` gains `.None` as its zero value, and every caller rule refuses it; `Internal` is spelled out where meant. At the end, `Window_Hooks` holds only `state_changed` and the test hooks. | `src/core/window_hooks.odin`, `src/core/platform.odin`, `src/core/window_link.odin`, `src/client.odin`, `src/main.odin`, `src/platform_darwin.odin`, `src/core/commands.odin`, `src/core/command_table.odin`, `src/core/state_wire.odin`, `src/core/state_read.odin`, `src/core/tabhost_route.odin`, `src/term_view*.odin`, the 42 window files using `core.find_tab`, PROTOCOL.md §5a | Unit (< 2 s): every `window.request` op round trip, and `no_window` with none attached (F's missing unit test); `confirmation.parked` reaches the window; a zero `Caller` is refused by every rule; an over-budget window message is refused; a burst of 10k window commands runs over several pumps; a write to each section without its trigger fails; the core runs a scripted session with every hook nil except `state_changed`. `./build.sh test` (~1 min). Scenes `--all --shard i/3` (3 × ~2.5 min), with the divergence and screen-hash checks. | One round, with a security lens on `.None` and `window.request` | Nothing should change. Copy and paste, ⌘-click a link, Reveal in Finder, pick a folder, switch the appearance: all as before. |
+| **M4-A. `Deckhand Core.app` and the self-signed DR** (starts now, against `main`) | **The bundle:** `Contents/Helpers/Deckhand Core.app` (`dev.deckhand.core`, `LSUIElement`, versioned `Info.plist`) with `MacOS/deckhand-core` (today's holder binary), `MacOS/deckhand` (the CLI) and `Resources/integrations/` (pi, claude-code). It is signed inside out with `SIGN_AS`. `release.sh` sets its version, signs it and verifies `--deep --strict`; `check-release-build.sh` covers its binaries. Deckhand.app keeps `MacOS/deckhand-cli` and the `pi-desk-cli` link, because tabs started earlier run them by path. `holder_install` copies the whole Core.app to `core/<rev>-<sha12>/` and runs the holder from it. **The DR:** `src/trust` gains `Self_Signed` and `Developer_Id` beside `Adhoc` (§5.4), picked from our own signature (`SecCodeCopySelf`). A peer is checked by its audit token (`SecCodeCopyGuestWithAttributes` + `SecCodeCheckValidity(kSecCSStrictValidate)`), and its version is read from `kSecCodeInfoPList`. `Developer_Id` is table-tested only until D0. The holder's checks use it: the `ready` peer (P8) and the holder → core check (P9). The keeper stays identifier-only (fork-safe `csops`), and the core re-checks the new image (P9). **One check, written down in §5.4:** do the hardened runtime and library validation load CEF under the self-signed identity? (Expected no, as with ad hoc.) | `scripts/bundle-app.sh`, `scripts/release.sh`, `scripts/check-release-build.sh`, `build.sh`, `src/trust/trust.odin`, `src/trust/code_darwin.odin` (+ tests), `src/core/holder_install.odin`, `src/core/launchd_darwin.odin`, `src/core/holder_client.odin`, `src/holder/detach.odin`, `scripts/check-holder-rev.sh` (bump if it asks), DEVELOPING.md "Code signing", GUIDE.md (the residual) | Trust tables for the three modes (< 1 s). Real signatures, new `tests/scripts/sign-dr.sh` (~15 s; skipped when the identity isn't in the keychain): a tiny program signed with Deckhand Self-Signed passes over a socketpair; the same program ad hoc, or under another identifier, is refused; a peer that exec'd since fails (-67065). `codesign --verify --deep --strict` of the bundle in `./build.sh` (~2 s). `keep-sessions.sh` (~40 s) with the holder from the Core.app copy. | One security round now; M4-C's two rounds cover its use on the window link | `./build.sh`, then `codesign -dr - "build/Deckhand.app/Contents/Helpers/Deckhand Core.app"`: the identifier and the leaf hash. Sessions survive ⌘Q as before. |
+| **M4-B. The socket link and challenge-response hellos** (starts now, against `main`) | **Transport:** `src/corewire/transport_sock.odin` carries the framed wire over a non-blocking Unix socket, with the in-memory transport's header, 16 MiB limit and kinds. Channel 0 never waits behind terminal data. Snapshots go on their own queue, exempt from credit, where a newer one replaces one still queued (M3-H's gap). A cap on bytes queued for a peer that stops reading, then close. The peer token is re-read before each read is acted on (`trust.peer_still`). **The framed hello** on `core.sock` (`framed:true`, then frames), with §5.2's reply fields: `generation`, `version`, `features`, `methods`, `machine`, `holder_wire`, `snapshot`. Only tests use it until M4-C. **Pure tables in `src/trust`:** `skew_check` (§7.5's rows), the window floor (P5) and `CORE_MIN`. **Bridge hellos:** the pi bridge and the desk tools' client prove their reconnect token by an HMAC over both sides' nonces. The core proves it too, first, so a fake core learns nothing. The token never crosses the socket again. Tokens minted from this PR are challenge-only; tabs started earlier keep the plain hello until they close (a kept pi session runs the old bridge). Env tokens (single use) and Claude tokens (ancestry-checked, no reconnect token) are unchanged. | new `src/corewire/transport_sock.odin` (+ tests), `src/corewire/wire.odin`, `src/trust/trust.odin` (+ tests), `src/core/socket.odin`, `src/core/socket_posix.odin`, `src/core/persist.odin` (`tokens.json`: a token's hello kind), `integrations/pi/extensions/bridge/index.ts`, `integrations/pi/extensions/desk/index.ts`, `integrations/pi/lib/protocol.ts` (+ tests), PROTOCOL.md §2 | Socket transport over a socketpair (< 1 s): the golden vectors as bytes; partial reads and writes at every split; 16 MiB + 1 refused; a stalled reader hits the cap and is closed; a newer snapshot replaces a queued one; channel 0 gets past a full `DATA` queue. A fuzz pass over the reader (< 1 s). A forked child writing on the fd is dropped (~1 s). Hellos (< 1 s): a fake core without `tokens.json` fails the proof and gets nothing; a replayed proof is refused; a plain hello with a challenge-only token is refused, and with an older token accepted. `skew_check` and floor tables (< 1 s). pi's own tests (`integrations/pi/test`, ~5 s). Scenes `--changed` (pi reconnect, ~2.5 min). | One security round (the hellos); the transport is looked at again in M4-C | Nothing visible. pi tabs reconnect after `/reload` and after ⌘Q as before. |
+| **M4-C. Two processes** (after F2, A and B; behind `separate_core_default_on`) | **`deckhand-core serve`:** the core package under a headless main (new `src/coremain/`). It has its own run loop (CFRunLoop: wake, run_later, `core_timer`) and notifications from `Deckhand Core.app`; App Nap is held while output flows (`activity`). It takes `core.lock` (EX) and `instance.lock` (SH), owns `core.sock`, adopts the holder (`holder_client` moves with the core unchanged), restores and serves. **Job runs are the core's children** (`jobs_run.odin` is core code already). Obj-C shims are allowed in `src/coremain`, never in `src/core`. **The window over `core.sock`:** `client.odin` dials with the framed hello and checks the core's DR before sending a byte (B4). The core checks the window's DR, the window floor, `run/window.token` (0600) and that the window doesn't descend from a holder. That is the `ui` door with the default on. **Launch:** with no core, the window, `deckhand DIR` and `--ctl` launch one through the launchd launcher and wait ≤ 15 s; test mode spawns it directly. **Skew:** the hello runs B's table and shows §7.5's messages; the handover actions come in E. **Latency (Q9):** the reply wait is measured over the socket and bounded at 250 ms, after which the call shows as pending. **App Nap:** a reader's first data after idle wakes the core loop at once, so output isn't held while it naps. **Stream gaps:** `history_lines` (the decoder stops early) and zstd on snapshots over the socket. **Benchmarks:** term-bench per process; a shown tab's `cat` must be within 10% of M2's wall time, or the window gets a per-frame parse budget (it falls behind, and the 4 MiB rule sends a snapshot). Until D, ⌘Q closes the window and the core runs on; Quit Deckhand and Stop All Sessions stops it. | new `src/coremain/` (main, platform, shim `.m`), `src/client.odin`, `src/main.odin`, `src/core/window_link.odin` (a socket-backed link beside the in-memory one), `src/core/socket.odin`, `src/core/core_loop.odin`, `src/core/instance.odin`, `src/core/ctl.odin`, `src/core/launchd_darwin.odin`, `src/core/term_stream.odin`, `src/term_view_stream.odin`, `src/autotest.odin` (the checks over the socket), `build.sh`, `scripts/bundle-app.sh`, `scripts/check-core-boundary.sh`, `tests/scenes.py` (a core process per scene), new `tests/scripts/two-process.sh`, `tests/scripts/term-bench.sh`, PROTOCOL.md §2 and §5a | Unit (< 1 s), with fake identities: no socket path without the window's DR and token yields `ui`; a window that descends from a holder is refused; a fake core is refused by the window before it sends a byte; the 250 ms bound against a slowed fake core. Scene `two-process.sh` (~40 s): window and core as processes, a pi turn and a shell running; kill -9 the window, relaunch, screen hashes equal; `--ctl get_state` with no window; no core, so one is launched within 15 s. All scenes with the default on, `--all --shard i/3` (3 × ~2.5 min); with it off, `--changed`. term-bench (manual, alone, ~3 min). | **Two security rounds** (the `ui` door over a socket, the mutual DR, A's code in use) | Settings › Experimental › *Run sessions in a background core*, relaunch. Kill the window in Activity Monitor during a pi turn: the turn goes on, and its banner comes from Deckhand Core. Reopen: the screen is as it is. `deckhand --ctl get_state` answers with no window. |
+| **M4-D. Lifecycle** (after C; beside E) | **⌘Q and closing the window:** the window exits and sessions run on, with a notice the first time. **Quit Deckhand and Stop All Sessions…** (`app_quit`): persist, `GOODBYE{shutdown}`, the core exits. **Dock Quit and logout** (`applicationShouldTerminate:`/`terminate:`), which skip the handover today: Dock Quit is ⌘Q; at logout both sides persist and exit, and today's restore follows. **Idle:** no window, no live tab process and no job run for 10 min, then save and exit (Q2); a holder with no terminals exits. **No window:** routed commands and `window.request` answer `no_window`; notifications are banners from Deckhand Core; app tabs exit as `window_closed` (decision 3). **Reopen** reattaches: `state.full`, terminal snapshots, browser pages reload. **Hidden and minimised:** caches keyed on `app_frames_called` refresh when shown; toasts wait while hidden instead of expiring; the minimised window gets a scene and a manual check. | `src/main.odin`, `src/platform_darwin.odin` and the app delegate (`src/native/`), `src/coremain/`, `src/core/core_loop.odin` (idle), `src/core/commands.odin` (`Quit`), `src/toast.odin`, `src/app_tab.odin`, `src/autotest.odin`, new `tests/scripts/window-attach.sh`, GUIDE.md, PERSISTENCE.md, TESTING.md (the manual list) | Unit (< 1 s): the idle rule on a fake clock (a window, a tab process or a job run each keeps the core); the quit paths as a table (⌘Q, Dock Quit, logout, stop-all). Scene `window-attach.sh` (~30 s, §12's "Window attach"): close the window, output continues, `--ctl` answers, reopen and compare; a toast raised while hidden shows after. Scenes `--changed` (~2.5 min). Manual: minimised window, Dock Quit, logout. | **Combined with E:** two security rounds over D+E | ⌘Q during a pi turn, wait, reopen: the turn finished while closed, and its banner came. Quit and Stop All: `pgrep -fl deckhand-core` shows nothing. |
+| **M4-E. Install, handover and the supervisor** (after C; beside D; flips the default after D merges) | **`deckhand-core install`:** Core.app goes to `core/<v>/`, verified, then quarantine stripped, then the DR checked. `current` and `previous` are switched by rename, with §7.1's collection rule. This replaces A's `core/<rev>-<sha12>/`. **`deckhand-core check`:** version, generation, `ghostsnp/N`, `holder_rev`, wire. **`core.handover{to}`:** §7.2 with a core process on each side. Job runs: the handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. **App update (§7.4, M4+):** the window relaunches, runs the bundled `install` and sends `core.handover`, then `UPGRADE` if `holder_rev` changed. **Skew actions:** a local core that is older, or below `CORE_MIN`, is handed over to the bundled one at once; *Use this app's core* (a named handover) for a newer one; *Use this version* at the floor. **The supervisor (§7.7):** the holder relaunches a crashed core through the launchd launcher, with backoff. The launcher moves to its own package, `src/launchd`, which the holder may import. Two crashes in 5 min: `previous`, and the floor isn't raised. 60 s attached and healthy: the floor rises. `SUPERVISE{status}`/`{use: previous}` from the window (DR checked), with *Use previous core*. **Old follow-ups:** the keeper's DONE/GO race; complete secret wipes; the successor retry off the main thread; a permanently hung holder (its `held_away` tabs freed after the ping timeout); the timing-sensitive tests (reexec's 5 s and the keeper's 10 s waits) driven by events or a fake clock. `holder_rev` bump. **Last commit:** `separate_core_default_on` → true, and the in-process attach becomes test-only. | `src/holder/` (supervisor, `keeper.odin`, `state.odin`, `upgrade.odin`), new `src/launchd/` (from `src/core/launchd_darwin.odin`), `src/core/holder_install.odin` (→ core install), `src/core/holder_successor.odin`, `src/core/holder_adopt.odin`, `src/core/holder_client.odin`, `src/core/update.odin`, `src/core/jobs_run.odin`, `src/coremain/`, `src/client.odin` (skew dialogs, `SUPERVISE`), `scripts/check-core-boundary.sh`, `scripts/check-holder-rev.sh`, new `tests/scripts/handover.sh`, `tests/scripts/update.sh`, PERSISTENCE.md, DEVELOPING.md "Releases", GUIDE.md | Unit: install (copy, verify, then strip quarantine; `current`/`previous` by rename; collection keeps what runs) (~2 s); the supervisor (crash counts, backoff, health timer, floor) on a fake clock (< 1 s); `SUPERVISE` refused without the window's DR (< 1 s); the job wait, ≤ 2 min, on a fake clock (< 1 s). Scene `handover.sh` (~40 s, §12's "Handover" row): 6 fake terminals, 5 handovers under load, screens `exact`, no replayed query replies, pi reconnect and Claude ancestry; kill -9 the core (`inexact`, relaunched by the supervisor); kill -9 the holder; a new core that crashes twice (rollback, `SUPERVISE`); a job run across a handover. `update.sh` extended (~60 s): update with 3 live sessions and a running job, pids unchanged, **including from an M1 build**: the new window's core adopts the M1 app's holder. Reexec and keeper tests with no fixed sleeps. After the flip: scenes `--all --shard i/3` (3 × ~2.5 min). | (with D) | Build twice and relaunch: the newer core takes over and the sessions keep running. Settings › About › *Use previous core*. Kill -9 `deckhand-core serve` twice within 5 min: "Update rolled back". |
+
+Sizes: M3-F2 1–1.5 weeks, A 1, B 1, C 2.5–3, D 1–1.5, E 2–2.5, so **8.5–10.5 weeks of work**,
+reviews included. **Order:** A and B start now, against `main`; F2 starts when G+H merge. C waits
+for F2, A and B. D and E run side by side after C, on separate branches, with one combined review,
+and E's last commit flips the default after D merges. Elapsed: about **6–7.5 weeks**.
+
+**Riskiest parts:**
+- **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR
+  check plus `window.token`, and under the self-signed identity a same-user process can pass the
+  DR (§5.4). Both review rounds attack the order of checks: the token read at accept, before any
+  byte; the core's DR checked by the window first; a holder descendant refused.
+- **M3-F2, everything the window still reads in process.** One missed hook or `core.find_tab` is
+  a crash or a silent stale read once the core is another process. The gate is the
+  scripted-session test with every hook nil, plus the per-section triggers.
+- **M4-E, a handover with core processes on both sides,** including from an M1 build's holder,
+  and job runs that must finish or stop within 2 min.
+- **M4-D, quit paths.** Dock Quit, logout and Force Quit reach the window by different AppKit
+  paths. Only the first two can be scripted; Force Quit and logout stay manual.
+- **M4-C, the double parse in two processes.** If the 10% isn't met, the parse budget changes
+  what a busy shown tab looks like (it catches up by snapshot).
+
+**Release readiness** (decision 7: the first release of the split):
+- [ ] M3-G, M3-H, M3-F2 and M4-A to E merged; `separate_core_default_on` is true.
+- [ ] `./build.sh test` and scenes `--all` green with the default on; the nightly full run green.
+- [ ] **Manual checks:** Force Quit (⌥⌘⎋) of the window and of the core, logout, the minimised
+  window, and macOS 14 and 15 (S2's programs and D's manual list).
+- [ ] **`keep_sessions_default_on := true`** (`src/core/commands.odin`) is a release blocker
+  until the user has done the Force Quit, logout and macOS 14/15 checks. If they fail, the line
+  is reverted.
+- [ ] **The rename's 0.1.7/0.1.8 sequence is planned** (DEVELOPING.md "The rename"). The latest
+  release is 0.1.6, so the 0.1.7 bridge comes first. Then the rename's PR B, the 0.1.8 flip:
+  `dev.deckhand.app`, the data dir move to `…/Deckhand`, v3 signatures. The plan must say which
+  release carries the split. It must also say how the data dir move treats a running core and
+  holder: the runtime dir, `core.sock` and `core/<v>/` live under it, and kept tabs have
+  `DECKHAND_SOCKET` set. The window identifier list gains `dev.deckhand.app` with the flip.
+- [ ] Signed with Deckhand Self-Signed; `release.sh` verifies the nested Core.app;
+  `check-release-build.sh` passes for every binary in it.
+- [ ] The previous release's updater installs the new zip (`update-from-release.sh`). 0.1.6 is
+  `6ee5586`, before M1, so that one update can't keep sessions; the release notes say so.
+- [ ] Q9's reply wait measured over `core.sock` and within 250 ms; term-bench within 10%, or the
+  parse budget in.
+- [ ] An idle core with no window uses no measurable CPU (Activity Monitor, 5 min).
+- [ ] Docs: GUIDE.md (⌘Q keeps sessions, Stop All, the self-signed residual), PROTOCOL.md §2 and
+  §5a (over `core.sock`, the challenge hello), PERSISTENCE.md, DEVELOPING.md "Releases".
+- [ ] **On the user's machine after the release:** one `deckhand-core serve` and one holder
+  (`pgrep -fl deckhand-core`); sessions survive ⌘Q and an update; Stop All ends them.
+
 ---
 
 ## 11. Risks
@@ -910,11 +1043,11 @@ other work touches 200 files.
 | # | Risk | Mitigation |
 |---|---|---|
 | R1 | Snapshot fidelity, two-emulator determinism, **GHOSTSNP v1 has no compatibility promise** | S1 measured it exact. Resize is sequenced by offset. Formats are listed in hello, with a VT `inexact` fallback, and a round-trip test runs on every libghostty bump (§5.5). |
-| R2 | `ui` and holder ownership over sockets | §5.3. M4 only after the Developer ID (§5.4). Security review rounds. |
+| R2 | `ui` and holder ownership over sockets | §5.3. Mutual DR checks from M4, on the self-signed identity until D0 (§5.4: anti-accident, not anti-attacker). Security review rounds. |
 | R3 | TOCTOU between checking the `UPGRADE` file and `execve`. S2: `execve("/dev/fd/N")` fails on macOS, and a path swap runs. | **The keeper-gated handover** (§7.3 step 4): the masters and key go only to an image whose live audit token passes the DR, so a swapped image gets the pid but no terminals. The core re-checks the holder's DR (P9). |
 | R4 | A new holder image crashing | Dry-run resume on dup'd masters; the keeper adopts orphans with exit codes (`NOTE_EXITSTATUS`, S2); rare `holder_rev` bumps; upgrade-under-load tests |
-| R5 | Ad-hoc M1: same-user code can drive the holder | Stated (§5.4); the Developer ID before M4 |
-| R6 | Ad-hoc TCC re-prompts and silent Full Disk Access loss | Ends with the Developer ID. Documented until then. |
+| R5 | Ad-hoc M1 and self-signed M4: same-user code can drive the holder and the core | Stated (§5.4, GUIDE.md); ends at D0, a one-line change |
+| R6 | Ad-hoc TCC re-prompts and silent Full Disk Access loss | Ended for self-signed builds: their DR is stable across builds (`scripts/sign.sh`). Ad-hoc builds still re-prompt, documented. |
 | R7 | M1's closed-app gap | Hooks must fail safe; the read-only guard never needs the socket (checked in M1); M4 closes the gap |
 | R8 | Bundle-relative paths under live sessions | Everything lives in `core/<v>/`, collected only when unused |
 | R9 | Moving ticks off `frame()` changes scene timing | M2 keeps calling `core_tick()` from `frame()` until M4, and a timer runs it only when no frame has run for 50 ms (M2-C), never inside `frame()` or a modal loop |
@@ -950,7 +1083,7 @@ other work touches 200 files.
 | No window (M3-G) | `detach_window`, then every routed command answers `no_window`; reattach restores pages | ~15 s | scene |
 | Window attach | Close the window, output continues, reopen, compare | ~30 s | scene |
 | Remote | A second core with its own dirs via `--via 'deckhand-core connect'` (no sshd): install, caps (`window.request` refused, OSC 52 ignored, a loopback URL blocked), reconnect | ~30 s | scene |
-| launchd, real signing | S2's manual checks; one nightly scene on a Developer ID build | — | nightly |
+| launchd, real signing | S2's manual checks; `sign-dr.sh` (M4-A) with the self-signed identity; one nightly scene on a self-signed build (a Developer ID one from D0) | — | nightly |
 
 Test builds keep the hooks and use per-test dirs; they skip DR checks as ad-hoc builds do (§5.4).
 
@@ -967,7 +1100,7 @@ Test builds keep the hooks and use per-test dirs; they skip DR checks as ad-hoc 
 | Q5 | First remote targets | macOS arm64, Linux x86_64 |
 | Q6 | Several windows (M7): which window do agents steer? | The most recently focused |
 | Q7 | Holder upgrades: automatic on a `holder_rev` change, or ask first? | Automatic, named in the release notes |
-| Q8 | When D0 happens (it gates M4) | Before M3 ends |
+| Q8 | When D0 happens | **Decided (2026-11-08):** the user's timing; it no longer gates M4 (§5.4) |
 | Q9 | Does the window wait for its own command replies? 104 window call sites use the result at once. | Yes: the core sends the state delta before the reply. In process (M3) the wait is nil; M4 measures it over `core.sock` and bounds it (250 ms, then the call shows as pending). |
 | Q10 | Which caller do a page's own events (popups, dialogs, downloads) use? | A new `tab_host` caller: answers and tab records only, never `ui` |
 | Q11 | Does a hidden window keep App Nap off while terminals produce output? Parsing then keeps up, but it costs energy. | Yes, while a terminal has had output in the last 2 s (M2-C) |

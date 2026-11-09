@@ -1,6 +1,7 @@
 package main
 
 import "core:math"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -40,7 +41,7 @@ Tab_Drop_Kind :: enum {
 Tab_Drop :: struct {
 	kind:    Tab_Drop_Kind,
 	pane:    u64,
-	dir:     Pane_Dir, // Edge
+	dir:     core.Pane_Dir, // Edge
 	gap:     int, // Strip: the mark's place among the strip's tabs as drawn (0 = before the first)
 	index:   int, // Strip: move_tab's index (the strip position without the dragged tab)
 	noop:    bool, // it is a place, but dropping there changes nothing (its own place, its only pane)
@@ -57,7 +58,7 @@ Drop_Pane :: struct {
 	zone:  [4]f32, // the body the edge and centre zones divide (the pane less its strip)
 	strip: [4]f32, // its tab strip ({}: none)
 	tabs:  []Drop_Tab, // its tabs in strip order
-	room:  [Pane_Dir]bool, // it can be split that way (min sizes)
+	room:  [core.Pane_Dir]bool, // it can be split that way (min sizes)
 }
 
 Tab_Drop_Input :: struct {
@@ -75,12 +76,12 @@ Tab_Drop_Input :: struct {
 
 // Which part of rect r the point is in: an edge's zone (the side it is nearest, relative to the
 // zones' sizes, in a corner) or the centre. ok false: outside r.
-drop_zone_at :: proc(r: [4]f32, x, y, edge_min, edge_max: f32) -> (dir: Pane_Dir, edge: bool, ok: bool) {
+drop_zone_at :: proc(r: [4]f32, x, y, edge_min, edge_max: f32) -> (dir: core.Pane_Dir, edge: bool, ok: bool) {
 	if r.z <= 0 || r.w <= 0 || x < r.x || y < r.y || x >= r.x + r.z || y >= r.y + r.w do return
 	ok = true
 	bw := min(clamp(r.z * TAB_DROP_EDGE, edge_min, edge_max), r.z / 3)
 	bh := min(clamp(r.w * TAB_DROP_EDGE, edge_min, edge_max), r.w / 3)
-	d := [Pane_Dir]f32 {
+	d := [core.Pane_Dir]f32 {
 		.Left  = (x - r.x) / bw,
 		.Right = (r.x + r.z - x) / bw,
 		.Up    = (y - r.y) / bh,
@@ -146,13 +147,13 @@ rect_has :: proc(r: [4]f32, x, y: f32) -> bool {
 }
 
 // The command a drop runs (false: none: nowhere, no change, or refused).
-tab_drop_command :: proc(d: Tab_Drop, tab: u64) -> (Command, bool) {
+tab_drop_command :: proc(d: Tab_Drop, tab: u64) -> (core.Command, bool) {
 	if d.noop || d.refused != "" do return nil, false
 	switch d.kind {
 	case .None:   return nil, false
-	case .Strip:  return Move_Tab{tab_id = tab, pane = d.pane, index = d.index}, true
-	case .Centre: return Move_Tab{tab_id = tab, pane = d.pane, index = -1}, true
-	case .Edge:   return Split_Pane{pane = d.pane, direction = d.dir, tab_id = tab}, true
+	case .Strip:  return core.Move_Tab{tab_id = tab, pane = d.pane, index = d.index}, true
+	case .Centre: return core.Move_Tab{tab_id = tab, pane = d.pane, index = -1}, true
+	case .Edge:   return core.Split_Pane{pane = d.pane, direction = d.dir, tab_id = tab}, true
 	}
 	return nil, false
 }
@@ -218,9 +219,9 @@ tab_drag: Tab_Drag
 
 // A press on a tab (the click has already focused it): a drag may follow.
 tab_drag_arm :: proc(tab_id: u64, x, y: f32) {
-	s := cur()
+	s := core.cur()
 	if s == nil || s.home do return
-	session_panes_init(s)
+	core.session_panes_init(s)
 	tab_drag = {tab = tab_id, session = s.id, from = {x, y}, at = {x, y}}
 }
 
@@ -231,8 +232,8 @@ tab_dragging :: proc() -> bool {return tab_drag.tab != 0 && tab_drag.active}
 // follows the pointer.
 tab_drag_move :: proc(x, y: f32) {
 	if tab_drag.tab == 0 do return
-	s := cur()
-	if s == nil || s.id != tab_drag.session || pane_of_tab(s, tab_drag.tab) == nil {
+	s := core.cur()
+	if s == nil || s.id != tab_drag.session || core.pane_of_tab(s, tab_drag.tab) == nil {
 		tab_drag_cancel() // the tab or its session went from the screen
 		return
 	}
@@ -317,7 +318,7 @@ tab_drag_event :: proc(e: ^sapp.Event) -> bool {
 
 // The rects a drop is worked out from, from the last layout: each pane's strip (with one pane,
 // the title bar's tabs), its tabs and its body (the pane less its strip).
-tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
+tab_drop_input :: proc(s: ^core.Open_Session, tab_id: u64) -> Tab_Drop_Input {
 	box :: proc(id: clay.ElementId) -> [4]f32 {
 		d := clay.GetElementData(id)
 		if !d.found do return {}
@@ -327,14 +328,14 @@ tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
 	input := Tab_Drop_Input {
 		tab      = tab_id,
 		main     = len(s.tabs) > 0 ? s.tabs[0].id : 0,
-		at_max   = len(s.panes) >= PANES_MAX,
+		at_max   = len(s.panes) >= core.PANES_MAX,
 		edge_min = px(TAB_DROP_EDGE_MIN),
 		edge_max = px(TAB_DROP_EDGE_MAX),
 		mark_w   = px(TAB_DROP_MARK_W),
 	}
-	if p := pane_of_tab(s, tab_id); p != nil {
+	if p := core.pane_of_tab(s, tab_id); p != nil {
 		input.from = p.id
-		input.from_count = pane_tab_count(s, p.id)
+		input.from_count = core.pane_tab_count(s, p.id)
 	}
 	split := len(s.panes) > 1
 	panes := make([]Drop_Pane, len(s.panes), context.temp_allocator)
@@ -360,7 +361,7 @@ tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
 		}
 		// a lone tab takes its own pane's room with it (split_pane checks the same)
 		leaving := input.from_count <= 1 ? input.from : 0
-		for d in Pane_Dir do dp.room[d] = pane_has_room_leaving(s, p.id, d, leaving)
+		for d in core.Pane_Dir do dp.room[d] = core.pane_has_room_leaving(s, p.id, d, leaving)
 		panes[k] = dp
 	}
 	input.panes = panes
@@ -373,7 +374,7 @@ tab_drop_input :: proc(s: ^Open_Session, tab_id: u64) -> Tab_Drop_Input {
 // The drop indicator and the tab's ghost under the pointer, above the panes' tabs ("tab_drop"
 // and "tab_ghost" are drawn after them: main.odin frame()).
 tab_drag_layout :: proc() {
-	if tab_drag.tab != 0 && (pane_of_tab(cur(), tab_drag.tab) == nil || menu.open || job_sheet_open()) do tab_drag_cancel() // its tab closed, or something took over
+	if tab_drag.tab != 0 && (core.pane_of_tab(core.cur(), tab_drag.tab) == nil || menu.open || job_sheet_open()) do tab_drag_cancel() // its tab closed, or something took over
 	if !tab_dragging() do return
 	th := theme()
 	d := tab_drag.drop
@@ -384,23 +385,23 @@ tab_drag_layout :: proc() {
 		if clay.UI(clay.ID("tab_drop"))({
 			layout = {sizing = {clay.SizingFixed(r.z), clay.SizingFixed(r.w)}, childAlignment = {x = .Center, y = .Center}},
 			backgroundColor = cc(bg),
-			border = d.kind == .Strip ? {} : {color = cc(col), width = clay.BorderOutside(pu(BORDER_W))},
+			border = d.kind == .Strip ? {} : {color = cc(col), width = clay.BorderOutside(pu(core.BORDER_W))},
 			cornerRadius = clay.CornerRadiusAll(d.kind == .Strip ? 0 : px(RADIUS_MD)),
 			floating = {attachTo = .Root, offset = {r.x, r.y}, zIndex = 7},
 		}) {
 			if refused do clay.TextDynamic(d.refused, txt(th.text))
 		}
 	}
-	s := cur()
+	s := core.cur()
 	if s == nil do return
-	_, tab, _ := find_tab(tab_drag.tab)
+	_, tab, _ := core.find_tab(tab_drag.tab)
 	if tab == nil do return
 	ic, label, _ := tab_label(s, tab^)
 	if clay.UI(clay.ID("tab_ghost"))({
 		layout = {sizing = {clay.SizingFit({max = px(TAB_MAX_W)}), clay.SizingFixed(px(TAB_H))}, padding = {pu(SP_3), pu(SP_3), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(th.accent), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.accent), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {tab_drag.at.x + px(SP_3), tab_drag.at.y + px(SP_2)}, zIndex = 7},
 	}) {
 		if ic != .None do icon(ic, th.text, KIND_ICON)

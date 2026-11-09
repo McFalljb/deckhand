@@ -12,6 +12,7 @@ package main
 import "core:fmt"
 import "core:sys/posix"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -31,7 +32,7 @@ bell_open :: proc() -> bool {return state.focus_widget == "notifications"}
 bell: struct {
 	selected: int, // index into rows, -1 = none
 	opened:   bool, // open in the last layout (the selection resets on open)
-	rows:     [NOTICES_MAX]u64, // entry ids in display order
+	rows:     [core.NOTICES_MAX]u64, // entry ids in display order
 	n:        int,
 }
 
@@ -40,7 +41,7 @@ bell: struct {
 // The unread count beside the bell, when there is one ("" = none).
 @(private = "file")
 bell_count :: proc() -> string {
-	n := notices_unread()
+	n := core.notices_unread()
 	if n == 0 do return ""
 	return n > 99 ? "99+" : fmt.tprint(n)
 }
@@ -101,7 +102,7 @@ local_day :: proc(t: time.Time) -> int {
 
 // "now", "5m", "3h", "2d" (temp).
 bell_ago :: proc(at: time.Time) -> string {
-	m := int(time.duration_minutes(time.diff(at, notice_now())))
+	m := int(time.duration_minutes(time.diff(at, core.notice_now())))
 	switch {
 	case m < 1:       return "now"
 	case m < 60:      return fmt.tprintf("%dm", m)
@@ -111,7 +112,7 @@ bell_ago :: proc(at: time.Time) -> string {
 }
 
 @(private = "file")
-kind_icon :: proc(k: Notice_Kind) -> (Icon, Rgba) {
+kind_icon :: proc(k: core.Notice_Kind) -> (core.Icon, core.Rgba) {
 	th := theme()
 	switch k {
 	case .Finished:      return .Check, th.done
@@ -127,8 +128,8 @@ kind_icon :: proc(k: Notice_Kind) -> (Icon, Rgba) {
 
 // An entry's two lines: what happened, then where (temp).
 @(private = "file")
-entry_lines :: proc(n: Notice) -> (what, where_: string) {
-	what = notice_label(n)
+entry_lines :: proc(n: core.Notice) -> (what, where_: string) {
+	what = core.notice_label(n)
 	if n.job_id != "" {
 		return fmt.tprintf("%s: %s", what, n.title), n.summary
 	}
@@ -173,10 +174,10 @@ bell_layout :: proc(w, h: f32) {
 	}
 	x = clamp(x, px(SP_2), max(w - box_w - px(SP_2), 0))
 	items := state.notices.items[:]
-	unread := notices_unread()
+	unread := core.notices_unread()
 	head_h := px(HEADER_H + SP_1)
 	// the list: its groups and rows, as tall as fits under the bar
-	today := local_day(notice_now())
+	today := local_day(core.notice_now())
 	content: f32 = 0
 	groups := 0
 	last := -1
@@ -188,7 +189,7 @@ bell_layout :: proc(w, h: f32) {
 		}
 	}
 	content = f32(groups) * px(BELL_GROUP_H) + f32(len(items)) * (px(BELL_ROW_H) + px(2))
-	room := h - y - px(SP_4) - head_h - px(2 * PAD_OVERLAY + BORDER_W + 4)
+	room := h - y - px(SP_4) - head_h - px(2 * PAD_OVERLAY + core.BORDER_W + 4)
 	list_h := clamp(content, 0, max(room, px(BELL_ROW_H)))
 	inner_w := box_w - px(2 * PAD_OVERLAY)
 	bell.n = 0
@@ -196,7 +197,7 @@ bell_layout :: proc(w, h: f32) {
 		layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(PAD_OVERLAY)), childGap = pu(2)},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 8},
 	}) {
 		overlay_shadow("bell_shadow", 8)
@@ -208,7 +209,7 @@ bell_layout :: proc(w, h: f32) {
 			if unread > 0 do head_button(.Mark_All, "bell_markall", "Mark all read")
 			if len(items) > 0 do head_button(.Clear, "bell_clear", "Clear")
 		}
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}}, backgroundColor = cc(th.border)}) {}
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 		if len(items) == 0 {
 			empty_state("No notifications", "Sessions you are not looking at report here", inner_w)
 			return
@@ -279,7 +280,7 @@ bell_tip :: proc(h: Hit_Bell) -> (label, keys: string) {
 	case .Row:
 		for n in state.notices.items do if n.id == h.id {
 			if n.job_id != "" do return "", ""
-			return find_session(n.session) != nil ? "Go to this session" : "Open this session again", ""
+			return core.find_session(n.session) != nil ? "Go to this session" : "Open this session again", ""
 		}
 	}
 	return "", ""
@@ -289,21 +290,21 @@ bell_tip :: proc(h: Hit_Bell) -> (label, keys: string) {
 // (a closed session opens again); the popover closes. Jobs have nothing to
 // open yet (their tab will).
 bell_activate :: proc(id: u64) {
-	ui_do(Notifications_Mark_Read{id = id})
-	ui_do(Set_Focus{""})
+	ui_do(core.Notifications_Mark_Read{id = id})
+	ui_do(core.Set_Focus{""})
 	for n in state.notices.items {
 		if n.id != id do continue
 		if n.session == 0 do return
-		if s := find_session(n.session); s != nil {
-			if _, t, _ := find_tab(n.tab_id); t != nil {
-				ui_do(Focus_Tab{tab_id = n.tab_id})
+		if s := core.find_session(n.session); s != nil {
+			if _, t, _ := core.find_tab(n.tab_id); t != nil {
+				ui_do(core.Focus_Tab{tab_id = n.tab_id})
 				// its pi exited: it starts again, as opening the session does (dead_tab.odin)
-				if t == session_pi_tab(s) && tab_is_dead(t) do ui_do(Pi_Restart{tab_id = t.id})
+				if t == core.session_pi_tab(s) && core.tab_is_dead(t) do ui_do(core.Pi_Restart{tab_id = t.id})
 				// a Claude tab that exited: Claude starts again (not while it is still not found)
-				if _, is := t.kind.(Claude_Tab); is && tab_is_dead(t) && (!exit_not_found(t.exit) || claude_installed_now()) do ui_do(Claude_Restart{tab_id = t.id})
-			} else do ui_do(Focus_Session{session = s.id, reopen = true})
-		} else if n.pi_session_id != "" && find_project(n.project_id) != nil {
-			ui_do(Open_Session_Cmd{project_id = n.project_id, pi_session_id = n.pi_session_id})
+				if _, is := t.kind.(core.Claude_Tab); is && core.tab_is_dead(t) && (!core.exit_not_found(t.exit) || core.claude_installed_now()) do ui_do(core.Claude_Restart{tab_id = t.id})
+			} else do ui_do(core.Focus_Session{session = s.id, reopen = true})
+		} else if n.pi_session_id != "" && core.find_project(n.project_id) != nil {
+			ui_do(core.Open_Session_Cmd{project_id = n.project_id, pi_session_id = n.pi_session_id})
 		}
 		return
 	}
@@ -313,8 +314,8 @@ bell_activate :: proc(id: u64) {
 bell_click :: proc(h: Hit_Bell) {
 	switch h.what {
 	case .Row:      bell_activate(h.id)
-	case .Mark_All: ui_do(Notifications_Mark_Read{all = true})
-	case .Clear:    ui_do(Notifications_Clear{})
+	case .Mark_All: ui_do(core.Notifications_Mark_Read{all = true})
+	case .Clear:    ui_do(core.Notifications_Clear{})
 	}
 }
 
@@ -325,11 +326,11 @@ bell_event :: proc(e: ^sapp.Event) -> bool {
 	case .KEY_DOWN:
 		app.redraw = true
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			ui_do(Set_Focus{""}) // a shortcut closes it and runs as usual
+			ui_do(core.Set_Focus{""}) // a shortcut closes it and runs as usual
 			return false
 		}
 		#partial switch e.key_code {
-		case .ESCAPE: ui_do(Set_Focus{""})
+		case .ESCAPE: ui_do(core.Set_Focus{""})
 		case .UP:     if bell.n > 0 do bell.selected = bell.selected <= 0 ? bell.n - 1 : bell.selected - 1
 		case .DOWN, .TAB:
 			if bell.n > 0 do bell.selected = (bell.selected + 1) %% bell.n
@@ -343,7 +344,7 @@ bell_event :: proc(e: ^sapp.Event) -> bool {
 	case .MOUSE_DOWN:
 		h := chrome_hit({e.mouse_x, e.mouse_y})
 		if b, ok := h.(Hit_Bell); ok do bell_click(b)
-		else do ui_do(Set_Focus{""}) // outside (or the bell again): closes
+		else do ui_do(core.Set_Focus{""}) // outside (or the bell again): closes
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:

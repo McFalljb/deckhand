@@ -16,7 +16,7 @@
 #                  ~/.config/deckhand/update.key); a 600 file of yours in a private folder,
 #                  read only by build/update-sign
 #   --repo         the GitHub repository (default: $DECKHAND_RELEASE_REPO, else UPDATE_REPO in
-#                  src/update_core.odin, the repository the app's updater reads)
+#                  src/core/update_core.odin, the repository the app's updater reads)
 #   --allow-other-repo
 #                  release to a repository that is not UPDATE_REPO (a fork, a test): installed
 #                  copies never look there
@@ -31,7 +31,7 @@
 #
 # Refuses, before building anything, unless: X.Y.Z (no pre-releases: the updater never offers
 # them); the worktree is clean (no changes, no untracked files); HEAD is exactly the tag vX.Y.Z;
-# src/update_key.odin has a real key; the key file's public half is that key. After the build:
+# src/core/update_key.odin has a real key; the key file's public half is that key. After the build:
 # the app's main executable holds UPDATE_PUBLIC_KEY and not the test key, and no binary holds a test
 # hook (scripts/check-release-build.sh: env overrides, test mode, --print-token).
 #
@@ -59,9 +59,9 @@ if [ -z "${DECKHAND_UPDATE_KEY_FILE:-}" ] && [ ! -e "$KEY" ] && [ -e "$HOME/.con
   KEY=$HOME/.config/pi-desk/update.key
   echo "release: warning: using the key at its old place, $KEY; move it to ~/.config/deckhand/ (mkdir -m 700 ~/.config/deckhand && mv \"$KEY\" ~/.config/deckhand/)" >&2
 fi
-# the repository: the one the app's updater reads (src/update_core.odin's UPDATE_REPO)
-APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
-[ -n "$APP_REPO" ] || { echo "release: no UPDATE_REPO in src/update_core.odin" >&2; exit 1; }
+# the repository: the one the app's updater reads (src/core/update_core.odin's UPDATE_REPO)
+APP_REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/core/update_core.odin)
+[ -n "$APP_REPO" ] || { echo "release: no UPDATE_REPO in src/core/update_core.odin" >&2; exit 1; }
 REPO=${DECKHAND_RELEASE_REPO:-$APP_REPO}
 while [ $# -gt 0 ]; do
   case "$1" in
@@ -79,7 +79,7 @@ while [ $# -gt 0 ]; do
   esac
 done
 if [ "$REPO" != "$APP_REPO" ] && [ $ALLOW_OTHER_REPO = 0 ]; then
-  echo "release: $REPO (from --repo or DECKHAND_RELEASE_REPO) is not the repository the app updates from ($APP_REPO, UPDATE_REPO in src/update_core.odin): installed copies would never see this release. Pass --allow-other-repo if that is what you want" >&2
+  echo "release: $REPO (from --repo or DECKHAND_RELEASE_REPO) is not the repository the app updates from ($APP_REPO, UPDATE_REPO in src/core/update_core.odin): installed copies would never see this release. Pass --allow-other-repo if that is what you want" >&2
   exit 1
 fi
 if [ $PACKAGE = 0 ] && [ $UPLOAD = 0 ]; then
@@ -106,9 +106,9 @@ AT=$(git describe --tags --exact-match --match "$TAG" HEAD 2>/dev/null || true)
 [ "$AT" = "$TAG" ] || { echo "release: HEAD is not exactly the tag $TAG (git tag $TAG at the commit to release, push it, check it out)" >&2; exit 1; }
 
 # --- the update key: real, and the one this checkout's app trusts ----------------------------
-APP_PUB=$(sed -n 's/^UPDATE_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/update_key.odin)
+APP_PUB=$(sed -n 's/^UPDATE_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/core/update_key.odin)
 case "$APP_PUB" in
-  ""|PLACEHOLDER*) echo "release: src/update_key.odin still has the placeholder update key: put the real public key in first (docs/DEVELOPING.md, \"Update signing\")" >&2; exit 1 ;;
+  ""|PLACEHOLDER*) echo "release: src/core/update_key.odin still has the placeholder update key: put the real public key in first (docs/DEVELOPING.md, \"Update signing\")" >&2; exit 1 ;;
 esac
 mkdir -p build
 [ -x build/update-sign ] && [ ! tools/update-sign/main.odin -nt build/update-sign ] && [ ! src/updatesig/updatesig.odin -nt build/update-sign ] ||
@@ -117,11 +117,11 @@ KEY_PUB=$(build/update-sign pubkey "$KEY") || { echo "release: the update key fi
 # SIGN_PUB: the public key the .sig must verify under (the one installed copies trust)
 if [ -z "$ROTATING_FROM" ]; then
   [ "$KEY_PUB" = "$APP_PUB" ] ||
-    { echo "release: the key file's public half is not src/update_key.odin's UPDATE_PUBLIC_KEY (wrong key, or a checkout from before a key rotation)" >&2; exit 1; }
+    { echo "release: the key file's public half is not src/core/update_key.odin's UPDATE_PUBLIC_KEY (wrong key, or a checkout from before a key rotation)" >&2; exit 1; }
   SIGN_PUB=$APP_PUB
 else
   [ "$ROTATING_FROM" != "$APP_PUB" ] ||
-    { echo "release: --rotating-from is the old key, and src/update_key.odin already has the new one: they are the same here" >&2; exit 1; }
+    { echo "release: --rotating-from is the old key, and src/core/update_key.odin already has the new one: they are the same here" >&2; exit 1; }
   [ "$KEY_PUB" = "$ROTATING_FROM" ] ||
     { echo "release: --rotating-from: the key file's public half is not OLDPUB (sign the bridge release with the old key)" >&2; exit 1; }
   echo "release: key rotation bridge release: signed with the old key, the app trusts the new one"
@@ -130,11 +130,11 @@ fi
 
 DIST=dist
 # the app, and the release files the updater looks for: read from its source, never typed here
-# (src/update_core.odin UPDATE_APP; src/updatesig/updatesig.odin ZIP_PREFIX and ZIP_SUFFIX)
-APP_NAME=$(sed -n 's/^UPDATE_APP :: "\(.*\)"$/\1/p' src/update_core.odin)
+# (src/core/update_core.odin UPDATE_APP; src/updatesig/updatesig.odin ZIP_PREFIX and ZIP_SUFFIX)
+APP_NAME=$(sed -n 's/^UPDATE_APP :: "\(.*\)"$/\1/p' src/core/update_core.odin)
 ZIP_PREFIX=$(sed -n 's/^ZIP_PREFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)
 ZIP_SUFFIX=$(sed -n 's/^ZIP_SUFFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)
-case "$APP_NAME" in */*|"") echo "release: no usable UPDATE_APP in src/update_core.odin" >&2; exit 1 ;; *.app) ;; *) echo "release: UPDATE_APP in src/update_core.odin is not an .app" >&2; exit 1 ;; esac
+case "$APP_NAME" in */*|"") echo "release: no usable UPDATE_APP in src/core/update_core.odin" >&2; exit 1 ;; *.app) ;; *) echo "release: UPDATE_APP in src/core/update_core.odin is not an .app" >&2; exit 1 ;; esac
 case "$ZIP_PREFIX" in */*|"") echo "release: no usable ZIP_PREFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; esac
 case "$ZIP_SUFFIX" in */*|"") echo "release: no usable ZIP_SUFFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; *.zip) ;; *) echo "release: ZIP_SUFFIX in src/updatesig/updatesig.odin does not end in .zip" >&2; exit 1 ;; esac
 NAME="$ZIP_PREFIX$VERSION${ZIP_SUFFIX%.zip}"
@@ -171,7 +171,7 @@ fi
 # to read, never a reason to stop (./build.sh test above gates on 10x and 3x)
 python3 tests/unit.py --no-build --timing-only --perf-strict >build/release-perf.log 2>&1 ||
   { grep -E "PERF OVER|^unit: perf" build/release-perf.log | sed 's/^/release: warning: /'; echo "release: warning: time budgets over their limits on this machine (build/release-perf.log); not stopping" >&2; }
-# release build with CEF and without the test hooks (src/test_hooks.odin); bundle-app.sh lays out
+# release build with CEF and without the test hooks (src/core/test_hooks.odin); bundle-app.sh lays out
 # and signs build/Deckhand.app (scripts/sign.sh)
 DECKHAND_RELEASE=1 ./build.sh
 BUILT=build/$APP_NAME
@@ -182,7 +182,7 @@ EXE=$BUILT/Contents/MacOS/$EXE_NAME
 # public test key: -define:DECKHAND_UPDATE_TEST)
 LC_ALL=C grep -aqF "$APP_PUB" "$EXE" ||
   { echo "release: $BUILT does not contain UPDATE_PUBLIC_KEY" >&2; exit 1; }
-TEST_PUB=$(sed -n 's/^.*UPDATE_TEST_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/update_key.odin)
+TEST_PUB=$(sed -n 's/^.*UPDATE_TEST_PUBLIC_KEY :: "\(.*\)"$/\1/p' src/core/update_key.odin)
 if [ -n "$TEST_PUB" ] && LC_ALL=C grep -aqF "$TEST_PUB" "$EXE"; then
   echo "release: $BUILT has the update TEST key in it (a test build?)" >&2
   exit 1
@@ -247,7 +247,7 @@ if [ -n "${MACOS_CERT_P12:-}" ] && [ -n "${MACOS_CERT_PASSWORD:-}" ] || case "${
       *) sign --entitlements scripts/entitlements/helper.plist "$h" ;;
     esac
   done
-  sign "$APP/Contents/MacOS/deckhand-cli" # Claude tabs' CLI (src/claude.odin)
+  sign "$APP/Contents/MacOS/deckhand-cli" # Claude tabs' CLI (src/core/claude.odin)
   # the session holder (src/holder): holder_install checks this identifier on its copy
   if [ -f "$APP/Contents/Helpers/deckhand-core" ]; then sign --identifier dev.deckhand.core "$APP/Contents/Helpers/deckhand-core"; fi
   sign --entitlements scripts/entitlements/app.plist "$APP"

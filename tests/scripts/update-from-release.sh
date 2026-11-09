@@ -3,7 +3,7 @@
 # installed by the CURRENT release's updater (docs/plans/background-core.md §7.1, §10.1 PR D).
 #
 # A published release binary cannot be pointed at a local release (its update fixtures and test
-# hooks are compiled out, by design: src/test_hooks.odin), so "the current release's updater" is
+# hooks are compiled out, by design: src/core/test_hooks.odin), so "the current release's updater" is
 # its source at its tag, built as the update scene builds it (-define:DECKHAND_UPDATE_TEST=true):
 #   1. the latest published release's tag (gh, read only; or --prev TAG), checked out in a
 #      temporary worktree, its updater built;
@@ -28,7 +28,7 @@ shift 2
 PREV=""
 if [ "${1:-}" = --prev ]; then PREV=${2:?--prev needs a tag}; fi
 [ -s "$ZIP" ] || { echo "update-from-release: no zip at $ZIP" >&2; exit 1; }
-REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/update_core.odin)
+REPO=$(sed -n 's/^UPDATE_REPO :: "\(.*\)"$/\1/p' src/core/update_core.odin)
 if [ -z "$PREV" ]; then
   command -v gh >/dev/null || { echo "update-from-release: gh is needed to find the current release (or pass --prev vX.Y.Z)" >&2; exit 1; }
   PREV=$(gh release view --repo "$REPO" --json tagName -q .tagName)

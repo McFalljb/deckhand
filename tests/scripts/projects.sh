@@ -1,5 +1,5 @@
 #!/bin/sh
-# The Projects tree (src/project_tidy.odin) in test mode: a fake HOME shaped
+# The Projects tree (src/core/project_tidy.odin) in test mode: a fake HOME shaped
 # like a real one, a fake pi that prints its arguments and folder, a temp
 # data dir. Repositories are top-level rows, sibling folders in
 # ~/workspace/projects/_scratch share a group row inside projects, other subfolders nest

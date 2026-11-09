@@ -22,7 +22,7 @@ Serve :: struct {
 	finished: bool,
 }
 
-// A client of successor.sock as the new app is (src/holder_successor.odin): our pid, then the
+// A client of successor.sock as the new app is (src/core/holder_successor.odin): our pid, then the
 // secret line ("" if closed or refused), then "ok".
 @(private = "file")
 client :: proc(path: string, claim: int) -> string {

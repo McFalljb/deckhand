@@ -91,7 +91,7 @@ tab. `Tab_Display.Texture` and `tab_view(App_Tab)` → `app_host` (`src/app_tab.
 - `posix_spawn` with no PTY, in its own process group. stdout and stderr go to a 2000-line ring
   and to `<data dir>/apps/<tab_id>.log`, which the tab's **Log** button opens.
 - Env: the parent's env minus Deckhand's own variables (the ones it sets in tabs, any old
-  `PI_DESK_*`, the test hooks: `src/env_names.odin`) and `PI_KIT_*`, plus `DECKHAND_SOCKET`,
+  `PI_DESK_*`, the test hooks: `src/core/env_names.odin`) and `PI_KIT_*`, plus `DECKHAND_SOCKET`,
   `DECKHAND_TOKEN` (fresh, single-use, caller `app`, bound to this tab) and `DECKHAND_APP=1`, each
   also under its old name (`PI_DESK_SOCKET`, `PI_DESK_TOKEN`, `PI_DESK_APP`) until 0.2.0.
 - **Owner:** the session that holds the tab. Its pi tab may drive this tab. That is the same
@@ -468,7 +468,7 @@ drawing clips to the pane as before. Details: BROWSER §1.1.
   A left click on a box while inspecting opens the new-comment bar for it; the comment (source
   `app`: the box's label, id and rect, the user's text, a crop of the shown frame taken at the
   click through `app_screenshot`'s frame read) goes to the tab's session's pi with the user's next message
-  (`src/comments.odin`, BROWSER.md §3.6–3.7). Not yet: matching `seq` to the shown `FRAME`.
+  (`src/core/comments.odin`, BROWSER.md §3.6–3.7). Not yet: matching `seq` to the shown `FRAME`.
 - **Profiler** events are sent at most 4 per second.
 
 **What Deckhand answers itself.**

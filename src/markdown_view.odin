@@ -25,36 +25,11 @@ import "core:path/filepath"
 import "core:slice"
 import "core:strings"
 import "core:unicode/utf8"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 import sgl "../vendor/sokol-odin/sokol/gl"
 
-Markdown_Tab :: struct {
-	path:   string, // absolute (owned)
-	source: bool, // the source (the editor) instead of the preview
-}
-
-// Commands (rows in command_table.odin).
-Markdown_Open :: struct {
-	path:    string, // absolute, or relative to the session's folder
-	session: u64, // 0 = the caller's, else the one on screen
-	anchor:  string, // a heading id to scroll to ("" = the top)
-}
-Markdown_Set_View :: struct {
-	tab_id: u64,
-	source: bool,
-}
-Markdown_Scroll :: struct {
-	tab_id: u64,
-	anchor: string, // a heading id, or
-	line:   int, // a source line (1-based)
-}
-// Follows a link of the document, as a click on it does.
-Markdown_Follow :: struct {
-	tab_id:  u64,
-	url:     string,
-	confirm: string, // a web or mail link from a caller other than the user: the user confirms
-}
 
 // ---- fenced code renderers ----
 
@@ -193,22 +168,22 @@ md_view_of :: proc(tab_id: u64) -> ^Md_View {return md_views[tab_id] or_else nil
 md_preview :: proc(tab_id: u64) -> ^Md_View {
 	v := md_view_of(tab_id)
 	if v == nil do return nil
-	_, tab, _ := find_tab(tab_id)
+	_, tab, _ := core.find_tab(tab_id)
 	if tab == nil do return nil
-	mt, is := tab.kind.(Markdown_Tab)
+	mt, is := tab.kind.(core.Markdown_Tab)
 	if !is || mt.source do return nil
 	if e := editor_of(tab_id); e == nil || e.refused != "" do return nil
 	return v
 }
 
 // The current tab's Markdown view and editor (nil: another kind of tab).
-md_active :: proc() -> (^Md_View, ^Editor, ^Tab) {return md_of_pane(focused_pane())}
+md_active :: proc() -> (^Md_View, ^Editor, ^core.Tab) {return md_of_pane(core.focused_pane())}
 
 // The Markdown tab pane p shows: its view, editor and tab (all nil for another kind).
-md_of_pane :: proc(p: ^Pane) -> (^Md_View, ^Editor, ^Tab) {
-	tab := pane_shown(p)
+md_of_pane :: proc(p: ^core.Pane) -> (^Md_View, ^Editor, ^core.Tab) {
+	tab := core.pane_shown(p)
 	if tab == nil do return nil, nil, nil
-	if _, is := tab.kind.(Markdown_Tab); !is do return nil, nil, nil
+	if _, is := tab.kind.(core.Markdown_Tab); !is do return nil, nil, nil
 	v := md_view_of(tab.id)
 	e := editor_of(tab.id)
 	if v == nil || e == nil do return nil, nil, nil
@@ -685,8 +660,8 @@ lay_block :: proc(L: ^Md_Layout, b: ^Md_Block, x, w, y: f32, ctx: Ctx) -> f32 {
 		end_block_text(L)
 		if b.level <= 2 {
 			y += px(SP_1)
-			fill(L, .Rule, x, y, w, max(1, px(BORDER_W)))
-			y += max(1, px(BORDER_W))
+			fill(L, .Rule, x, y, w, max(1, px(core.BORDER_W)))
+			y += max(1, px(core.BORDER_W))
 		}
 	case .Thematic_Break:
 		y += px(SP_2)
@@ -948,7 +923,7 @@ lay_table :: proc(L: ^Md_Layout, b: ^Md_Block, x, w, y: f32, ctx: Ctx) -> f32 {
 	n := len(b.aligns)
 	if n == 0 do return y
 	pad := px(MD_CELL_PAD)
-	line := max(1, px(BORDER_W))
+	line := max(1, px(core.BORDER_W))
 	nat := make([]f32, n, context.temp_allocator)
 	mins := make([]f32, n, context.temp_allocator)
 	for row in b.children {
@@ -1058,7 +1033,7 @@ markdown_host := Tab_View {
 }
 
 @(private = "file")
-ink_color :: proc(p: Md_Piece, hovered: bool) -> Rgba {
+ink_color :: proc(p: Md_Piece, hovered: bool) -> core.Rgba {
 	th := theme()
 	switch p.ink {
 	case .Text:      return th.text
@@ -1352,10 +1327,10 @@ over_pane :: proc(v: ^Md_View, mx, my: f32) -> bool {
 // The preview's input: wheel and keys scroll, links follow, ⌘F/⌘G find,
 // ⇧⌘V shows the source. True if consumed. In the source view only ⇧⌘V is
 // taken here (the editor has the rest).
-markdown_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+markdown_event :: proc(p: ^core.Pane, ev: ^sapp.Event) -> bool {
 	v, e, tab := md_of_pane(p)
 	if v == nil do return false
-	mt := tab.kind.(Markdown_Tab)
+	mt := tab.kind.(core.Markdown_Tab)
 	cmd := ev.modifiers & sapp.MODIFIER_SUPER != 0
 	shift := ev.modifiers & sapp.MODIFIER_SHIFT != 0
 	if ev.type == .KEY_DOWN && cmd && shift && ev.key_code == .V {
@@ -1375,8 +1350,8 @@ markdown_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
 		v.pressed = -1
 		if !over_pane(v, ev.mouse_x, ev.mouse_y) do return false
 		if ev.mouse_button != .LEFT do return true
-		if state.focus_widget != "" do ui_do(Set_Focus{""})
-		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
+		if state.focus_widget != "" do ui_do(core.Set_Focus{""})
+		if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false})
 		// a link follows when the button comes up on it; ⌃-click is a right click
 		v.pressed = ev.modifiers & sapp.MODIFIER_CTRL != 0 ? -1 : md_link_at(v, ev.mouse_x, ev.mouse_y)
 		return true
@@ -1384,7 +1359,7 @@ markdown_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
 		l := v.pressed
 		v.pressed = -1
 		if l < 0 || ev.mouse_button != .LEFT do return false
-		if ev.modifiers & sapp.MODIFIER_CTRL == 0 && md_link_at(v, ev.mouse_x, ev.mouse_y) == l do ui_do(Markdown_Follow{tab_id = tab.id, url = v.lay.links[l]})
+		if ev.modifiers & sapp.MODIFIER_CTRL == 0 && md_link_at(v, ev.mouse_x, ev.mouse_y) == l do ui_do(core.Markdown_Follow{tab_id = tab.id, url = v.lay.links[l]})
 		return true
 	case .KEY_DOWN:
 		if state.focus_widget != "" || menu.open do return false
@@ -1433,49 +1408,49 @@ markdown_hover :: proc(mx, my: f32) {
 }
 
 // Whether the shown tab is a Markdown preview (the editor stays out of its input).
-md_preview_shown :: proc(p: ^Pane) -> bool {
-	tab := pane_shown(p)
+md_preview_shown :: proc(p: ^core.Pane) -> bool {
+	tab := core.pane_shown(p)
 	return tab != nil && md_preview(tab.id) != nil
 }
 
 // ---- commands ----
 
 @(private = "file")
-md_tab :: proc(id: u64) -> (^Open_Session, ^Tab, ^Md_View) {
-	s, tab, _ := find_tab(id)
+md_tab :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^Md_View) {
+	s, tab, _ := core.find_tab(id)
 	if tab == nil do return nil, nil, nil
-	if _, is := tab.kind.(Markdown_Tab); !is do return nil, nil, nil
+	if _, is := tab.kind.(core.Markdown_Tab); !is do return nil, nil, nil
 	return s, tab, md_view_of(id)
 }
 
-markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
+markdown_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
-	case Markdown_Open:
-		s := c.session != 0 ? find_session(c.session) : caller_session(caller)
-		if s != nil && s.home && c.session == 0 do s = cur()
-		if s == nil do return fail("no open session to open the file in"), false
-		if s.home do return fail("Home has only its pi tab"), false
-		if c.path == "" do return fail("path is empty"), false
+	case core.Markdown_Open:
+		s := c.session != 0 ? core.find_session(c.session) : core.caller_session(caller)
+		if s != nil && s.home && c.session == 0 do s = core.cur()
+		if s == nil do return core.fail("no open session to open the file in"), false
+		if s.home do return core.fail("Home has only its pi tab"), false
+		if c.path == "" do return core.fail("path is empty"), false
 		p := c.path
 		if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
 		if !filepath.is_abs(p) {
-			base := c.session != 0 ? s.cwd : fs_base_for(caller)
+			base := c.session != 0 ? s.cwd : core.fs_base_for(caller)
 			if base == "" do base = s.cwd
 			p, _ = filepath.join({base, p}, context.temp_allocator)
 		}
 		p, _ = filepath.clean(p, context.temp_allocator)
-		if settings_credential(p) do return fail(CREDENTIAL_REFUSED), false
-		switch path_kind(p) {
-		case .Missing: return fail("no such file"), false
-		case .Dir:     return fail("that is a folder"), false
+		if core.settings_credential(p) do return core.fail(core.CREDENTIAL_REFUSED), false
+		switch core.path_kind(p) {
+		case .Missing: return core.fail("no such file"), false
+		case .Dir:     return core.fail("that is a folder"), false
 		case .File, .Other:
 		}
-		rp := fs_real(p)
+		rp := core.fs_real(p)
 		for &tab in s.tabs {
-			mt, is := tab.kind.(Markdown_Tab)
-			if !is || fs_real(mt.path) != rp do continue
-			session_show_tab(s, tab.id)
-			focus_session(s.id, caller)
+			mt, is := tab.kind.(core.Markdown_Tab)
+			if !is || core.fs_real(mt.path) != rp do continue
+			core.session_show_tab(s, tab.id)
+			core.focus_session(s.id, caller)
 			if v := md_view_of(tab.id); v != nil && c.anchor != "" {
 				delete(v.want)
 				v.want = strings.clone(c.anchor)
@@ -1483,17 +1458,17 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 			app.redraw = true
 			return {ok = true, created_id = tab.id}, true
 		}
-		tab := Tab{id = new_id(), kind = Markdown_Tab{path = strings.clone(p)}, title = strings.clone(filepath.base(p)), status = .Running}
+		tab := core.Tab{id = core.new_id(), kind = core.Markdown_Tab{path = strings.clone(p)}, title = strings.clone(filepath.base(p)), status = .Running}
 		v := md_view_new(tab.id, p)
 		if c.anchor != "" do v.want = strings.clone(c.anchor)
-		pane_add_tab(s, tab)
-		session_show_tab(s, tab.id)
-		focus_session(s.id, caller)
+		core.pane_add_tab(s, tab)
+		core.session_show_tab(s, tab.id)
+		core.focus_session(s.id, caller)
 		return {ok = true, created_id = tab.id}, true
-	case Markdown_Set_View:
+	case core.Markdown_Set_View:
 		_, tab, v := md_tab(c.tab_id)
-		if tab == nil || v == nil do return fail("no such Markdown tab"), false
-		mt := &tab.kind.(Markdown_Tab)
+		if tab == nil || v == nil do return core.fail("no such Markdown tab"), false
+		mt := &tab.kind.(core.Markdown_Tab)
 		if mt.source == c.source do return {ok = true}, false
 		e := editor_of(tab.id)
 		if e != nil {
@@ -1513,46 +1488,46 @@ markdown_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: boo
 		mt.source = c.source
 		app.redraw = true
 		return {ok = true}, true
-	case Markdown_Scroll:
+	case core.Markdown_Scroll:
 		_, tab, v := md_tab(c.tab_id)
-		if tab == nil || v == nil do return fail("no such Markdown tab"), false
+		if tab == nil || v == nil do return core.fail("no such Markdown tab"), false
 		if c.anchor != "" {
 			a := strings.trim_prefix(c.anchor, "#")
 			if v.laid {
-				if _, ok := v.lay.anchors[a]; !ok do return fail("no such heading"), false
+				if _, ok := v.lay.anchors[a]; !ok do return core.fail("no such heading"), false
 			}
 			delete(v.want)
 			v.want = strings.clone(a)
 		} else if c.line > 0 {
 			v.want_line = c.line
-		} else do return fail("anchor or line is needed"), false
+		} else do return core.fail("anchor or line is needed"), false
 		app.redraw = true
 		return {ok = true}, false
-	case Markdown_Follow:
+	case core.Markdown_Follow:
 		s, tab, v := md_tab(c.tab_id)
-		if tab == nil || v == nil do return fail("no such Markdown tab"), false
+		if tab == nil || v == nil do return core.fail("no such Markdown tab"), false
 		known := false
 		for l in v.lay.links do if l == c.url do known = true
 		if !known && v.doc != nil && strings.has_prefix(c.url, "#") do known = strings.trim_prefix(c.url, "#") in v.doc.anchors
-		if !known do return fail("not a link of this document"), false
-		mt := tab.kind.(Markdown_Tab)
+		if !known do return core.fail("not a link of this document"), false
+		mt := tab.kind.(core.Markdown_Tab)
 		return md_follow(v, s, mt.path, c, caller)
 	}
-	return fail("unknown command"), false
+	return core.fail("unknown command"), false
 }
 
 // A link: #anchor scrolls; http(s) and mailto open in the browser; a
 // relative or absolute path opens (.md in a Markdown tab, other files in
 // the editor). Other schemes are not followed.
 @(private = "file")
-md_follow :: proc(v: ^Md_View, s: ^Open_Session, doc_path: string, c: Markdown_Follow, caller: Caller) -> (Result, bool) {
+md_follow :: proc(v: ^Md_View, s: ^core.Open_Session, doc_path: string, c: core.Markdown_Follow, caller: core.Caller) -> (core.Result, bool) {
 	url := c.url
 	if strings.has_prefix(url, "#") {
 		a := percent_decode(url[1:])
 		if v.laid {
 			if _, ok := v.lay.anchors[a]; !ok {
 				set_notice(v, fmt.tprintf("No heading #%s", a))
-				return fail("no such heading"), false
+				return core.fail("no such heading"), false
 			}
 		}
 		delete(v.want)
@@ -1567,16 +1542,16 @@ md_follow :: proc(v: ^Md_View, s: ^Open_Session, doc_path: string, c: Markdown_F
 			// user's click, or a call the user confirms in Deckhand
 			changed := false
 			if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
-				what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(url, context.temp_allocator))
-				gr, go_on, ch := confirm_gate(Markdown_Follow{tab_id = c.tab_id, url = url}, .Open_Link, caller, c.confirm, what)
+				what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", core.one_line(url[len("mailto:"):], context.temp_allocator)) : core.one_line(url, context.temp_allocator))
+				gr, go_on, ch := core.confirm_gate(core.Markdown_Follow{tab_id = c.tab_id, url = url}, .Open_Link, caller, c.confirm, what)
 				if !go_on do return gr, ch
 				changed = ch
 			}
-			if platform.open_url != nil do _ = platform.open_url(url)
+			if core.platform.open_url != nil do _ = core.platform.open_url(url)
 			return {ok = true}, changed
 		}
 		set_notice(v, fmt.tprintf("Not opened: %s: links", scheme))
-		return fail("only http, https and mailto links open"), false
+		return core.fail("only http, https and mailto links open"), false
 	}
 	p := url
 	frag := ""
@@ -1586,22 +1561,22 @@ md_follow :: proc(v: ^Md_View, s: ^Open_Session, doc_path: string, c: Markdown_F
 	}
 	if i := strings.index_byte(p, '?'); i >= 0 do p = p[:i]
 	p = percent_decode(p)
-	if p == "" do return fail("empty link"), false
+	if p == "" do return core.fail("empty link"), false
 	if !filepath.is_abs(p) do p, _ = filepath.join({filepath.dir(doc_path), p}, context.temp_allocator)
 	p, _ = filepath.clean(p, context.temp_allocator)
-	kind := path_kind(p)
+	kind := core.path_kind(p)
 	if kind == .Missing {
 		set_notice(v, fmt.tprintf("No such file: %s", url))
-		return fail("no such file"), false
+		return core.fail("no such file"), false
 	}
-	if kind != .Dir && md_is_markdown_path(p) {
-		return markdown_apply(Markdown_Open{path = p, session = s.id, anchor = frag}, caller)
+	if kind != .Dir && core.md_is_markdown_path(p) {
+		return markdown_apply(core.Markdown_Open{path = p, session = s.id, anchor = frag}, caller)
 	}
 	if kind == .Dir {
 		fs_reveal(p)
 		return {ok = true}, false
 	}
-	return run_command(Open_File{path = p, session = s.id}, caller), true
+	return core.run_command(core.Open_File{path = p, session = s.id}, caller), true
 }
 
 @(private = "file")

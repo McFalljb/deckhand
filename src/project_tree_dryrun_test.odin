@@ -18,6 +18,7 @@ import "core:strconv"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(test)
 tree_dryrun :: proc(t: ^testing.T) {
@@ -27,12 +28,12 @@ tree_dryrun :: proc(t: ^testing.T) {
 	data, err := os.read_entire_file(file, context.allocator)
 	testing.expect(t, err == nil, "read the TSV")
 	if err != nil do return
-	state = State{}
-	temp_roots_override = nil // the system's temp folders
-	nesting_off_for_tests = false
+	state^ = core.State{}
+	core.temp_roots_override = nil // the system's temp folders
+	core.nesting_off_for_tests = false
 	defer {
-		temp_roots_override = NO_TEMP_ROOTS[:]
-		nesting_off_for_tests = true
+		core.temp_roots_override = NO_TEMP_ROOTS[:]
+		core.nesting_off_for_tests = true
 	}
 	dirs := make(map[u64]string, context.temp_allocator) // project id -> store dir
 	text := string(data)
@@ -42,37 +43,37 @@ tree_dryrun :: proc(t: ^testing.T) {
 		newest, _ := strconv.parse_i64(f[2])
 		oldest, _ := strconv.parse_i64(f[3])
 		cwd := f[1]
-		id := new_id()
+		id := core.new_id()
 		dirs[id] = f[0]
-		append(&state.projects, Project{id = id, dir = f[0], cwd = cwd, label = short_label(cwd), newest = time.Time{_nsec = newest}, created = time.Time{_nsec = oldest}, missing = !os.exists(cwd), repo = is_repo_root(cwd)})
+		append(&state.projects, core.Project{id = id, dir = f[0], cwd = cwd, label = core.short_label(cwd), newest = time.Time{_nsec = newest}, created = time.Time{_nsec = oldest}, missing = !os.exists(cwd), repo = core.is_repo_root(cwd)})
 	}
-	projects_tidy()
+	core.projects_tidy()
 	// every parent and group row open
 	for p in state.projects {
 		append(&state.sidebar.expanded, p.cwd)
 		if p.group_dir != "" do append(&state.sidebar.expanded, p.group_dir)
 	}
 
-	shown := sidebar_projects()
+	shown := core.sidebar_projects()
 	n_groups, n_nested := 0, 0
 	fmt.println("== Projects tree (visible rows, all open; no pins, renames or hidden items applied)")
 	for r in shown {
 		ind := strings.repeat("  ", r.depth, context.temp_allocator)
 		if r.project == nil {
 			n_groups += 1
-			fmt.printfln("%s[group] %s/ (%d)", ind, short_label(r.group), r.kids)
+			fmt.printfln("%s[group] %s/ (%d)", ind, core.short_label(r.group), r.kids)
 			continue
 		}
 		if r.depth > 0 do n_nested += 1
 		tags := ""
 		if r.project.repo do tags = " [repo]"
 		if r.kids > 0 do tags = fmt.tprintf("%s [%d folder%s]", tags, r.kids, r.kids == 1 ? "" : "s")
-		fmt.printfln("%s%s%s", ind, short_label(r.project.cwd), tags)
+		fmt.printfln("%s%s%s", ind, core.short_label(r.project.cwd), tags)
 	}
 
 	// with Show hidden: every project exactly once, at its own folder
 	state.sidebar.show_hidden = true
-	all := sidebar_projects()
+	all := core.sidebar_projects()
 	seen := make(map[u64]int, context.temp_allocator)
 	hidden := 0
 	for r in all {

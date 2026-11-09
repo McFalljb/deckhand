@@ -7,6 +7,7 @@ package main
 import "base:runtime"
 import "core:strings"
 import "core:testing"
+import "core"
 import gh "ghostty"
 
 @(private = "file")
@@ -134,20 +135,20 @@ term_link_soft_wrap :: proc(t: ^testing.T) {
 @(private = "file")
 link_setup :: proc() -> (shell_tab, home_tab_id: u64) {
 	context.allocator = runtime.heap_allocator()
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	clear(&opened)
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
-	append(&state.projects, Project{id = new_id(), cwd = "/tmp", label = "proj"})
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = "/tmp"}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
-	append(&s.tabs, Tab{id = new_id(), kind = Shell_Tab{}, title = "sh", status = .Exited})
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
+	append(&state.projects, core.Project{id = core.new_id(), cwd = "/tmp", label = "proj"})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = "/tmp"}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Shell_Tab{}, title = "sh", status = .Exited})
 	shell_tab = s.tabs[1].id
 	s.active_tab = shell_tab
 	append(&state.open_sessions, s)
 	state.current_session = s.id
-	h := Open_Session{id = new_id(), home = true}
-	append(&h.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Atlas", status = .Exited})
+	h := core.Open_Session{id = core.new_id(), home = true}
+	append(&h.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "Atlas", status = .Exited})
 	home_tab_id = h.tabs[0].id
 	append(&state.open_sessions, h)
 	return
@@ -157,22 +158,22 @@ link_setup :: proc() -> (shell_tab, home_tab_id: u64) {
 term_link_command :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	tab, home := link_setup()
-	ui := Caller{kind = .UI}
+	ui := core.Caller{kind = .UI}
 	// refused schemes never open, whoever asks
 	for u in ([]string{"file:///etc/passwd", "javascript:alert(1)", "data:text/html,x", "myapp://x"}) {
-		r := run_command(Terminal_Link{tab_id = tab, url = u}, ui)
+		r := core.run_command(core.Terminal_Link{tab_id = tab, url = u}, ui)
 		testing.expectf(t, !r.ok, "%s refused", u)
 	}
 	testing.expect_value(t, len(opened), 0)
 	// only the user (a click) opens links from a terminal
-	r := run_command(Terminal_Link{tab_id = tab, url = "https://example.com/x"}, {kind = .Control})
+	r := core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/x"}, {kind = .Control})
 	testing.expect(t, !r.ok, "not for agents")
-	r = run_command(Terminal_Link{tab_id = tab, url = "https://example.com/x"}, {kind = .Script})
+	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/x"}, {kind = .Script})
 	testing.expect(t, !r.ok, "not for scripts")
 	// mailto and ⇧⌘ (external) go to the default app
-	r = run_command(Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, ui)
+	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, ui)
 	testing.expect(t, r.ok, r.error)
-	r = run_command(Terminal_Link{tab_id = tab, url = "https://example.com/ext", external = true}, ui)
+	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/ext", external = true}, ui)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, len(opened), 2)
 	if len(opened) == 2 {
@@ -182,7 +183,7 @@ term_link_command :: proc(t: ^testing.T) {
 	// http(s): Deckhand's browser in the terminal's session, in front, when the build has
 	// one; without CEF (this test build) the default browser
 	n := len(state.open_sessions[0].tabs)
-	r = run_command(Terminal_Link{tab_id = tab, url = "https://example.com/b"}, ui)
+	r = core.run_command(core.Terminal_Link{tab_id = tab, url = "https://example.com/b"}, ui)
 	testing.expect(t, r.ok, r.error)
 	if CEF_BUILT_IN {
 		testing.expect_value(t, len(state.open_sessions[0].tabs), n + 1)
@@ -193,11 +194,11 @@ term_link_command :: proc(t: ^testing.T) {
 	}
 	// Home's terminal (Atlas) has no browser tabs: the default browser
 	before := len(opened)
-	r = run_command(Terminal_Link{tab_id = home, url = "https://example.com/h"}, ui)
+	r = core.run_command(core.Terminal_Link{tab_id = home, url = "https://example.com/h"}, ui)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, len(opened), before + 1)
 	// not a terminal tab
-	r = run_command(Terminal_Link{tab_id = 999999, url = "https://example.com/x"}, ui)
+	r = core.run_command(core.Terminal_Link{tab_id = 999999, url = "https://example.com/x"}, ui)
 	testing.expect(t, !r.ok)
 }
 
@@ -208,7 +209,7 @@ term_link_menu :: proc(t: ^testing.T) {
 	menu_open(Menu_Term_Link{tab_id = tab, url = "https://example.com/m"}, {10, 10})
 	defer menu_close()
 	labels := make([dynamic]string, context.temp_allocator)
-	open_cmd: Command
+	open_cmd: core.Command
 	copy := ""
 	for it in menu_items() {
 		append(&labels, it.label)
@@ -219,7 +220,7 @@ term_link_menu :: proc(t: ^testing.T) {
 	testing.expectf(t, slice_has(labels[:], "Open link"), "Open link: %v", labels)
 	testing.expectf(t, slice_has(labels[:], "Open in default browser"), "Open in default browser: %v", labels)
 	testing.expect_value(t, copy, "https://example.com/m")
-	c, is := open_cmd.(Terminal_Link)
+	c, is := open_cmd.(core.Terminal_Link)
 	testing.expect(t, is && c.url == "https://example.com/m" && c.tab_id == tab && !c.external)
 	// a mail link: no browser row
 	menu_open(Menu_Term_Link{tab_id = tab, url = "mailto:a@example.invalid"}, {10, 10})
@@ -280,9 +281,9 @@ term_link_wide :: proc(t: ^testing.T) {
 @(test)
 term_link_events :: proc(t: ^testing.T) {
 	// #6: an event never shows a user name or password; the command targets its tab
-	red := command_json(Terminal_Link{tab_id = 5, url = "https://alice:pw@example.com/x"}, redact = true)
+	red := core.command_json(core.Terminal_Link{tab_id = 5, url = "https://alice:pw@example.com/x"}, redact = true)
 	testing.expectf(t, !strings.contains(red, "pw") && !strings.contains(red, "alice"), "redacted: %s", red)
-	testing.expect_value(t, command_tab(Terminal_Link{tab_id = 5, url = "https://example.com"}), 5)
+	testing.expect_value(t, core.command_tab(core.Terminal_Link{tab_id = 5, url = "https://example.com"}), 5)
 }
 
 @(test)
@@ -306,8 +307,8 @@ term_link_open_fails :: proc(t: ^testing.T) {
 	// #5: the default app refusing the URL is a failure, not ok
 	context.allocator = runtime.heap_allocator()
 	tab, _ := link_setup()
-	platform.open_url = proc(url: string) -> bool {return false}
-	r := run_command(Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, {kind = .UI})
+	core.platform.open_url = proc(url: string) -> bool {return false}
+	r := core.run_command(core.Terminal_Link{tab_id = tab, url = "mailto:a@example.invalid"}, {kind = .UI})
 	testing.expect(t, !r.ok, "open_url refused: not ok")
 }
 
@@ -319,7 +320,7 @@ term_link_rescan :: proc(t: ^testing.T) {
 	defer font.cell_w, font.cell_h = saved_w, saved_h
 	font.cell_w, font.cell_h = 10, 20
 	g := vt("a https://example.com/x b\r\n")
-	tm := Term{gt = g, cols = 30, rows = 5, view = {w = 300, h = 100}}
+	tm := core.Term{gt = g, cols = 30, rows = 5, view = {w = 300, h = 100}}
 	defer {
 		term_link_clear(&tm)
 		gh.terminal_free(g)

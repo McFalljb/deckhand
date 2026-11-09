@@ -16,6 +16,7 @@ import "core:c"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 import stbi "vendor:stb/image"
@@ -74,18 +75,18 @@ comment_new_field: Text_Field
 Comment_Draft :: struct {
 	tab_id:        u64,
 	box_id, label: string, // owned
-	rect:          App_Rect,
+	rect:          core.App_Rect,
 	pick:          ^Annot_Pick, // owned: a browser tab's element or area (nil: an app box)
 	crop:          string, // owned: the crop file taken at the click ("" none); removed on Cancel
 }
 
 // A click on an Inspect box (app_tab.odin, with its crop taken then): the new-comment bar for it,
 // with the keyboard. The draft owns crop from here.
-comments_draft_box :: proc(tab_id: u64, box: App_Box, crop: string) {
+comments_draft_box :: proc(tab_id: u64, box: core.App_Box, crop: string) {
 	comments_draft_end()
 	comments_ui.draft = {tab_id = tab_id, box_id = strings.clone(box.id), label = strings.clone(box.label), rect = box.rect, crop = crop}
 	tf_set(&comment_new_field, "")
-	ui_do(Set_Focus{"comment_new"})
+	ui_do(core.Set_Focus{"comment_new"})
 	app.redraw = true
 }
 
@@ -95,18 +96,18 @@ comments_draft_pick :: proc(tab_id: u64, pick: ^Annot_Pick, crop: string) {
 	comments_draft_end()
 	comments_ui.draft = {tab_id = tab_id, pick = pick, crop = crop}
 	tf_set(&comment_new_field, "")
-	ui_do(Set_Focus{"comment_new"})
+	ui_do(core.Set_Focus{"comment_new"})
 	app.redraw = true
 }
 
 // A marker's badge was clicked: the list opens with its comment in the edit field.
 comments_edit_open :: proc(comment_id: u64) {
-	_, pc, _ := comment_find(comment_id)
+	_, pc, _ := core.comment_find(comment_id)
 	if pc == nil do return
 	comments_ui.open = true
 	comments_ui.edit_id = comment_id
 	tf_set(&comment_edit_field, pc.text)
-	ui_do(Set_Focus{"comment_edit"})
+	ui_do(core.Set_Focus{"comment_edit"})
 	app.redraw = true
 }
 
@@ -118,7 +119,7 @@ comments_draft_end :: proc() {
 	if d.crop != "" do os.remove(d.crop) // not added: nothing else has it
 	delete(d.crop)
 	d^ = {}
-	if state.focus_widget == "comment_new" do ui_do(Set_Focus{""})
+	if state.focus_widget == "comment_new" do ui_do(core.Set_Focus{""})
 }
 
 @(private = "file")
@@ -127,7 +128,7 @@ draft_add :: proc() {
 	text := strings.trim_space(tf_text(&comment_new_field))
 	if d.tab_id == 0 || text == "" do return
 	if d.pick != nil do annot_pick_add(d.tab_id, d.pick, text, d.crop) // the comment has the file now
-	else do app_comment_add(d.tab_id, d.box_id, d.label, d.rect, text, d.crop)
+	else do core.app_comment_add(d.tab_id, d.box_id, d.label, d.rect, text, d.crop)
 	comments_ui.draft.crop = ""
 	delete(d.crop)
 	comments_draft_end()
@@ -136,7 +137,7 @@ draft_add :: proc() {
 // The draft's tab is on screen.
 @(private = "file")
 draft_shown :: proc() -> bool {
-	t := active_tab()
+	t := core.active_tab()
 	return comments_ui.draft.tab_id != 0 && t != nil && t.id == comments_ui.draft.tab_id
 }
 
@@ -144,13 +145,13 @@ COMMENTS_LIST_ROWS :: 8 // rows shown; the rest counted
 
 // The session whose strip shows: the one on screen, while its pi tab or one of its browser or app
 // tabs is the active tab. Never another session's comments.
-comments_strip_session :: proc() -> ^Open_Session {
-	s := cur()
+comments_strip_session :: proc() -> ^core.Open_Session {
+	s := core.cur()
 	if s == nil || s.home || len(s.comments) == 0 do return nil
-	t := active_tab()
+	t := core.active_tab()
 	if t == nil do return nil
 	#partial switch _ in t.kind {
-	case Pi_Tab, Browser_Tab, App_Tab, Claude_Tab: return s
+	case core.Pi_Tab, core.Browser_Tab, core.App_Tab, core.Claude_Tab: return s
 	}
 	return nil
 }
@@ -159,27 +160,27 @@ comments_strip_session :: proc() -> ^Open_Session {
 plural :: proc(n: int) -> string {return n == 1 ? "comment" : "comments"}
 
 // The strip's message and whether Send now may go (and why not).
-comments_message :: proc(s: ^Open_Session) -> (msg: string, can_send: bool, why: string) {
+comments_message :: proc(s: ^core.Open_Session) -> (msg: string, can_send: bool, why: string) {
 	n := len(s.comments)
-	can_send, why = comments_can_send(s)
+	can_send, why = core.comments_can_send(s)
 	if s.attach.sending != 0 do return fmt.tprintf("Sending %d %s to %s…", n, plural(n), comments_to_word(s)), false, why
 	// Send now goes into the Claude tab on screen; the next message there takes them too
-	if comments_claude_target(s) != nil do return fmt.tprintf("%d %s will go with your next message", n, plural(n)), can_send, why
-	if ok, wait := comments_ready(s); !ok do return fmt.tprintf("%d %s wait: %s", n, plural(n), wait), can_send, why
+	if core.comments_claude_target(s) != nil do return fmt.tprintf("%d %s will go with your next message", n, plural(n)), can_send, why
+	if ok, wait := core.comments_ready(s); !ok do return fmt.tprintf("%d %s wait: %s", n, plural(n), wait), can_send, why
 	return fmt.tprintf("%d %s will go with your next message", n, plural(n)), can_send, why
 }
 
 // The close prompt's tab or session, if it still has something to ask about.
 @(private = "file")
-ask_target :: proc() -> (s: ^Open_Session, tab: ^Tab, n: int) {
+ask_target :: proc() -> (s: ^core.Open_Session, tab: ^core.Tab, n: int) {
 	a := state.comments_ask
 	if a.session == 0 do return nil, nil, 0
-	s = find_session(a.session)
+	s = core.find_session(a.session)
 	if s == nil do return nil, nil, 0
 	if a.tab_id != 0 {
-		_, tab, _ = find_tab(a.tab_id)
+		_, tab, _ = core.find_tab(a.tab_id)
 		if tab == nil do return nil, nil, 0
-		n = comments_of_tab(s, a.tab_id)
+		n = core.comments_of_tab(s, a.tab_id)
 	} else do n = len(s.comments)
 	if n == 0 do return nil, nil, 0
 	return
@@ -189,7 +190,7 @@ ask_target :: proc() -> (s: ^Open_Session, tab: ^Tab, n: int) {
 comments_bars :: proc() {
 	if s, tab, n := ask_target(); s != nil do ask_bar(s, tab, n)
 	if comments_ui.draft.tab_id != 0 {
-		if _, t, _ := find_tab(comments_ui.draft.tab_id); t == nil do comments_draft_end() // its tab closed
+		if _, t, _ := core.find_tab(comments_ui.draft.tab_id); t == nil do comments_draft_end() // its tab closed
 		else if draft_shown() do new_bar()
 	}
 	s := comments_strip_session()
@@ -207,7 +208,7 @@ bar_layout :: proc() -> clay.ElementDeclaration {
 	return {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}
 }
 
@@ -238,29 +239,29 @@ labels_w :: proc(labels: []string) -> f32 {
 }
 
 // Who a session's comments go to, in words: its Claude in a Claude-only session (no pi), else pi.
-comments_agent_word :: proc(s: ^Open_Session) -> string {
+comments_agent_word :: proc(s: ^core.Open_Session) -> string {
 	return s != nil && s.agent == .Claude ? "Claude" : "pi"
 }
 
 // Who the strip's comments go to now: the Claude tab on screen (comments_claude_target) or a
 // Claude-only session's Claude, else pi.
-comments_to_word :: proc(s: ^Open_Session) -> string {
-	if s != nil && comments_claude_target(s) != nil do return "Claude"
+comments_to_word :: proc(s: ^core.Open_Session) -> string {
+	if s != nil && core.comments_claude_target(s) != nil do return "Claude"
 	return comments_agent_word(s)
 }
 
 // The close prompt's line and its send button (a tab's close, or the session's: tab nil).
-comments_ask_text :: proc(s: ^Open_Session, tab: ^Tab, n: int) -> (msg, send: string) {
+comments_ask_text :: proc(s: ^core.Open_Session, tab: ^core.Tab, n: int) -> (msg, send: string) {
 	agent := comments_agent_word(s)
 	if tab != nil do return fmt.tprintf("Close %q? %d %s on it %s not sent to %s yet", tab.title, n, plural(n), n == 1 ? "is" : "are", agent), "Send and close"
 	return fmt.tprintf("Close this session? %d %s %s not sent to %s yet (closing stops %s)", n, plural(n), n == 1 ? "is" : "are", agent, agent), "Send now"
 }
 
 @(private = "file")
-ask_bar :: proc(s: ^Open_Session, tab: ^Tab, n: int) {
+ask_bar :: proc(s: ^core.Open_Session, tab: ^core.Tab, n: int) {
 	th := theme()
 	msg, send := comments_ask_text(s, tab, n)
-	can, _ := comments_can_send(s, for_tab = tab != nil) // a tab's: pi's path (comments_send_now with tab_id)
+	can, _ := core.comments_can_send(s, for_tab = tab != nil) // a tab's: pi's path (comments_send_now with tab_id)
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + labels_w({"Cancel", "Drop and close", send})
 	if clay.UI(clay.ID("cm_ask_bar"))(bar_layout()) {
 		dot(th.waiting)
@@ -302,11 +303,11 @@ new_bar :: proc() {
 }
 
 @(private = "file")
-strip :: proc(s: ^Open_Session) {
+strip :: proc(s: ^core.Open_Session) {
 	th := theme()
 	msg, can, _ := comments_message(s)
-	ready, _ := comments_ready(s)
-	if comments_claude_target(s) != nil do ready = true // Claude's next message takes them
+	ready, _ := core.comments_ready(s)
+	if core.comments_claude_target(s) != nil do ready = true // Claude's next message takes them
 	view := comments_ui.open ? "Hide" : "View"
 	used := px(2 * TERM_PAD + DOT + 2 * SP_2) + labels_w({view, "Clear", "Send now"})
 	if clay.UI(clay.ID("cm_strip"))(bar_layout()) {
@@ -322,12 +323,12 @@ strip :: proc(s: ^Open_Session) {
 }
 
 @(private = "file")
-list :: proc(s: ^Open_Session) {
+list :: proc(s: ^core.Open_Session) {
 	th := theme()
 	if clay.UI(clay.ID("cm_list"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD + DOT + SP_2), pu(TERM_PAD), pu(SP_1), pu(SP_2)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		room := centre_width() - px(2 * TERM_PAD + DOT + SP_2)
 		for c, i in s.comments {
@@ -342,7 +343,7 @@ list :: proc(s: ^Open_Session) {
 					strip_button(.Save, "Save", true, true, i)
 				} else {
 					line := fmt.tprintf("%d. %s — %s%s", i + 1, c.text, c.what, c.crop != "" ? " · image" : "")
-					clay.TextDynamic(clip(strings.trim_space(one_line(line, context.temp_allocator)), max(room - labels_w({"Edit", "Delete"}), px(80))), txt(th.text_secondary))
+					clay.TextDynamic(clip(strings.trim_space(core.one_line(line, context.temp_allocator)), max(room - labels_w({"Edit", "Delete"}), px(80))), txt(th.text_secondary))
 					spacer()
 					strip_button(.Edit, "Edit", false, true, i)
 					strip_button(.Delete, "Delete", false, true, i)
@@ -399,8 +400,8 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 	case .Clear:  return "Remove every comment (nothing is sent)", ""
 	case .Send:
 		if s := comments_strip_session(); s != nil {
-			if ok, why := comments_can_send(s); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
-			if comments_claude_target(s) != nil || s.agent == .Claude do return "Send the comments to Claude now, as a message of their own", ""
+			if ok, why := core.comments_can_send(s); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
+			if core.comments_claude_target(s) != nil || s.agent == .Claude do return "Send the comments to Claude now, as a message of their own", ""
 		}
 		return "Send the comments to pi now, as a message of their own", ""
 	case .Edit:   return "Change this comment's text", ""
@@ -411,7 +412,7 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 	case .Ask_Send:
 		agent := "pi"
 		if s, _, _ := ask_target(); s != nil {
-			if ok, why := comments_can_send(s, for_tab = state.comments_ask.tab_id != 0); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
+			if ok, why := core.comments_can_send(s, for_tab = state.comments_ask.tab_id != 0); !ok do return strings.concatenate({"Cannot send now: ", why}, context.temp_allocator), ""
 			agent = comments_agent_word(s)
 			// a Claude-only session's Send and close: Claude's hook takes all of its comments
 			if s.agent == .Claude && state.comments_ask.tab_id != 0 do return "Send the session's comments to Claude now (its next message takes them all), then close the tab", ""
@@ -429,12 +430,12 @@ comments_tip :: proc(h: Hit_Comments) -> (label, keys: string) {
 @(private = "file")
 edit_end :: proc() {
 	comments_ui.edit_id = 0
-	if state.focus_widget == "comment_edit" do ui_do(Set_Focus{""})
+	if state.focus_widget == "comment_edit" do ui_do(core.Set_Focus{""})
 }
 
 @(private = "file")
 edit_save :: proc() {
-	if comments_ui.edit_id != 0 do ui_do(Comment_Edit{comment_id = comments_ui.edit_id, text = tf_text(&comment_edit_field)})
+	if comments_ui.edit_id != 0 do ui_do(core.Comment_Edit{comment_id = comments_ui.edit_id, text = tf_text(&comment_edit_field)})
 	edit_end()
 }
 
@@ -446,19 +447,19 @@ comments_click :: proc(h: Hit_Comments) {
 	case .Ask_Send:
 		s, _, _ := ask_target()
 		if s == nil do return
-		if ok, _ := comments_can_send(s, for_tab = a.tab_id != 0); !ok do return // disabled
-		if a.tab_id != 0 do ui_do(Close_Tab{tab_id = a.tab_id, comments = .Send})
+		if ok, _ := core.comments_can_send(s, for_tab = a.tab_id != 0); !ok do return // disabled
+		if a.tab_id != 0 do ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Send})
 		else {
-			ui_do(Comments_Send_Now{session = a.session})
-			ui_do(Comments_Ask_Cancel{})
+			ui_do(core.Comments_Send_Now{session = a.session})
+			ui_do(core.Comments_Ask_Cancel{})
 		}
 		return
 	case .Ask_Drop:
-		if a.tab_id != 0 do ui_do(Close_Tab{tab_id = a.tab_id, comments = .Drop})
-		else if a.session != 0 do ui_do(Close_Session{session = a.session, comments = .Drop})
+		if a.tab_id != 0 do ui_do(core.Close_Tab{tab_id = a.tab_id, comments = .Drop})
+		else if a.session != 0 do ui_do(core.Close_Session{session = a.session, comments = .Drop})
 		return
 	case .Ask_Cancel:
-		ui_do(Comments_Ask_Cancel{})
+		ui_do(core.Comments_Ask_Cancel{})
 		return
 	case .New_Add:
 		draft_add()
@@ -467,7 +468,7 @@ comments_click :: proc(h: Hit_Comments) {
 		comments_draft_end()
 		return
 	case .New_Field:
-		if state.focus_widget != "comment_new" do ui_do(Set_Focus{"comment_new"})
+		if state.focus_widget != "comment_new" do ui_do(core.Set_Focus{"comment_new"})
 		return
 	case .View, .Send, .Clear, .Edit, .Delete, .Save, .Cancel, .Field:
 	}
@@ -478,22 +479,22 @@ comments_click :: proc(h: Hit_Comments) {
 		comments_ui.open = !comments_ui.open
 		if !comments_ui.open do edit_end()
 	case .Send:
-		if ok, _ := comments_can_send(s); ok do ui_do(Comments_Send_Now{session = s.id})
+		if ok, _ := core.comments_can_send(s); ok do ui_do(core.Comments_Send_Now{session = s.id})
 	case .Clear:
 		edit_end()
-		ui_do(Comments_Clear{session = s.id})
+		ui_do(core.Comments_Clear{session = s.id})
 	case .Edit:
 		if h.index >= len(s.comments) do return
 		comments_ui.edit_id = s.comments[h.index].id
 		tf_set(&comment_edit_field, s.comments[h.index].text)
-		ui_do(Set_Focus{"comment_edit"})
+		ui_do(core.Set_Focus{"comment_edit"})
 	case .Delete:
 		if h.index >= len(s.comments) do return
 		if comments_ui.edit_id == s.comments[h.index].id do edit_end()
-		ui_do(Comment_Delete{comment_id = s.comments[h.index].id})
+		ui_do(core.Comment_Delete{comment_id = s.comments[h.index].id})
 	case .Save:   edit_save()
 	case .Cancel: edit_end()
-	case .Field:  if state.focus_widget != "comment_edit" do ui_do(Set_Focus{"comment_edit"})
+	case .Field:  if state.focus_widget != "comment_edit" do ui_do(core.Set_Focus{"comment_edit"})
 	case .Ask_Send, .Ask_Drop, .Ask_Cancel, .New_Add, .New_Cancel, .New_Field:
 	}
 }
@@ -532,15 +533,15 @@ comments_field_key :: proc(e: ^sapp.Event) -> bool {
 ring_crop :: proc(tab_id: u64, ring: ^Frame_Ring, content_w, content_h: int, scale: f32, box: [4]int) -> string {
 	when ODIN_OS != .Darwin do return ""
 	if ring.shown_gen == 0 || content_w <= 0 || content_h <= 0 do return ""
-	m := COMMENT_CROP_MARGIN
+	m := core.COMMENT_CROP_MARGIN
 	x0, y0 := max(int(f32(box[0] - m) * scale), 0), max(int(f32(box[1] - m) * scale), 0)
 	x1, y1 := min(int(f32(box[0] + box[2] + m) * scale), content_w), min(int(f32(box[1] + box[3] + m) * scale), content_h)
 	w, h := x1 - x0, y1 - y0
 	if w <= 0 || h <= 0 do return ""
 	px := make([]u8, w * h * 4, context.temp_allocator)
-	if window.frames_read == nil || !window.frames_read(tab_id, ring.shown_gen, ring.shown_slot, x0, y0, w, h, px) do return ""
+	if core.window.frames_read == nil || !core.window.frames_read(tab_id, ring.shown_gen, ring.shown_slot, x0, y0, w, h, px) do return ""
 	// down to COMMENT_CROP_SIDE on the long side (nearest pixel); BGRA -> RGBA, opaque
-	k := min(1, f32(COMMENT_CROP_SIDE) / f32(max(w, h)))
+	k := min(1, f32(core.COMMENT_CROP_SIDE) / f32(max(w, h)))
 	dw, dh := max(int(f32(w) * k), 1), max(int(f32(h) * k), 1)
 	out := make([]u8, dw * dh * 4, context.temp_allocator)
 	for y in 0 ..< dh {
@@ -558,7 +559,7 @@ ring_crop :: proc(tab_id: u64, ring: ^Frame_Ring, content_w, content_h: int, sca
 		append(dst, ..([^]u8)(data)[:size])
 	}
 	if stbi.write_png_to_func(sink, &png, c.int(dw), c.int(dh), 4, raw_data(out), c.int(dw * 4)) == 0 do return ""
-	path := comments_crop_path()
+	path := core.comments_crop_path()
 	if os.write_entire_file(path, png[:], {.Read_User, .Write_User}) != nil {
 		delete(path)
 		return ""
@@ -574,7 +575,7 @@ browser_comment_add :: proc(tab_id: u64, box: [4]int, what, text: string) -> (id
 	b := browser_of(tab_id)
 	if b == nil do return 0, "no such browser tab"
 	crop := ring_crop(tab_id, &b.ring, b.content_w, b.content_h, app.dpi, box)
-	r := run_command(Comment_Add{source = .Browser, tab_id = tab_id, what = browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, {kind = .Internal})
+	r := core.run_command(core.Comment_Add{source = .Browser, tab_id = tab_id, what = core.browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, {kind = .Internal})
 	if !r.ok && crop != "" do os.remove(crop)
 	if crop != "" do delete(crop)
 	return r.created_id, r.error
@@ -591,7 +592,7 @@ browser_box_crop :: proc(tab_id: u64, box: [4]int) -> string {
 // An app tab's Inspect box, cropped at the click (app_tab.odin; before the comment bar opens and
 // moves the content) from the frame on screen through app_screenshot's frame read: a new crop
 // file, "" if there is no frame. rect: logical tab px, as the app sent it in tab.boxes.
-app_box_crop :: proc(tab_id: u64, rect: App_Rect) -> string {
+app_box_crop :: proc(tab_id: u64, rect: core.App_Rect) -> string {
 	a := app_of(tab_id)
 	if a == nil do return ""
 	g := ring_gen(&a.ring, a.ring.shown_gen)

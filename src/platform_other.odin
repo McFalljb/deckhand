@@ -1,6 +1,8 @@
 #+build !darwin
 package main
 
+import "core"
+
 // Stubs until Linux/Windows get their own versions (frames drain the inbox).
 
 platform_wake :: proc() {}
@@ -24,7 +26,7 @@ platform_window_init :: proc() {}
 platform_ime_cancel :: proc() {}
 platform_system_light :: proc() -> bool {return false}
 platform_watch_appearance :: proc() {}
-platform_set_appearance :: proc(mode: Appearance) {}
+platform_set_appearance :: proc(mode: core.Appearance) {}
 test_window_light :: proc() -> bool {return false}
 platform_ime_caret_moved :: proc() {}
 window_drag :: proc() {}

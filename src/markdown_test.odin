@@ -10,6 +10,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(private = "file")
 Spec_Example :: struct {
@@ -140,9 +141,9 @@ markdown_parse_1mb :: proc(t: ^testing.T) {
 	text := strings.to_string(sb)
 	best := time.Duration(1 << 62)
 	for _ in 0 ..< 5 {
-		t0 := thread_cpu_now()
+		t0 := core.thread_cpu_now()
 		doc := md_parse(text)
-		d := thread_cpu_since(t0)
+		d := core.thread_cpu_since(t0)
 		best = min(best, d)
 		testing.expect(t, len(doc.root.children) > 1000, "parsed")
 		md_free(doc)
@@ -150,7 +151,7 @@ markdown_parse_1mb :: proc(t: ^testing.T) {
 	fmt.printfln("markdown: 1 MB parsed in %.1f ms of CPU time (best of 5)", f64(best) / f64(time.Millisecond))
 	// hosted CI runners are shared and slower: a looser limit there (CI is set by GitHub Actions)
 	limit := os.get_env("CI", context.temp_allocator) != "" ? 150 * time.Millisecond : 50 * time.Millisecond
-	perf_expect(t, "markdown_parse_1mb (best of 5)", best, limit, PERF_GATE_USER) // opening a large .md
+	core.perf_expect(t, "markdown_parse_1mb (best of 5)", best, limit, core.PERF_GATE_USER) // opening a large .md
 }
 
 @(test)
@@ -250,12 +251,12 @@ markdown_pathological :: proc(t: ^testing.T) {
 		{"table columns", cat("|", rep("a|", 5_000), "\n|", rep("-|", 5_000), "\n", rep("|b", 5_000), "\n")},
 	}
 	for c in cases {
-		t0 := thread_cpu_now()
+		t0 := core.thread_cpu_now()
 		doc := md_parse(c.text)
 		_ = md_html(doc, context.temp_allocator)
 		md_free(doc)
-		d := thread_cpu_since(t0)
-		perf_expect(t, fmt.tprintf("markdown pathological: %s", c.name), d, 2 * time.Second)
+		d := core.thread_cpu_since(t0)
+		core.perf_expect(t, fmt.tprintf("markdown pathological: %s", c.name), d, 2 * time.Second)
 		free_all(context.temp_allocator)
 	}
 }

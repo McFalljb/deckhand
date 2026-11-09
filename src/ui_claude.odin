@@ -12,6 +12,7 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 
 Hit_Claude :: distinct int // 0 Send now, 1 Drop; the status bar: 2 its action, 3 Dismiss
@@ -26,17 +27,17 @@ STATUS_LINES :: 3
 // The Claude or pi tab pane p shows while it has a status bar, else nil; its text and whether it is
 // the hooks bar (else a version bar).
 @(private = "file")
-status_tab :: proc(p: ^Pane) -> (tab: ^Tab, msg: string, hooks: bool) {
-	t := pane_shown(p)
+status_tab :: proc(p: ^core.Pane) -> (tab: ^core.Tab, msg: string, hooks: bool) {
+	t := core.pane_shown(p)
 	if t == nil do return nil, "", false
-	if _, is := t.kind.(Pi_Tab); is {
-		m := pi_status_message(t)
+	if _, is := t.kind.(core.Pi_Tab); is {
+		m := core.pi_status_message(t)
 		return m != "" ? t : nil, m, false
 	}
-	if _, is := t.kind.(Claude_Tab); !is do return nil, "", false
-	m := claude_status_message(t)
+	if _, is := t.kind.(core.Claude_Tab); !is do return nil, "", false
+	m := core.claude_status_message(t)
 	if m == "" do return nil, "", false
-	return t, m, claude_hooks_silent(t)
+	return t, m, core.claude_hooks_silent(t)
 }
 
 @(private = "file")
@@ -44,25 +45,25 @@ status_go_label :: proc(hooks: bool) -> string {return hooks ? "Show settings" :
 
 // The version bar's update command for the tab's harness ("" = none to copy: nix, mise).
 @(private = "file")
-status_update_command :: proc(t: ^Tab) -> string {
-	if _, is := t.kind.(Pi_Tab); is do return PI_UPDATE_COMMAND
-	return claude_update_command_now()
+status_update_command :: proc(t: ^core.Tab) -> string {
+	if _, is := t.kind.(core.Pi_Tab); is do return core.PI_UPDATE_COMMAND
+	return core.claude_update_command_now()
 }
 
 // The Claude tab pane p shows while it holds texts, else nil.
 @(private = "file")
-held_tab :: proc(p: ^Pane) -> (^Tab, ^Claude_Tab) {
-	t := pane_shown(p)
+held_tab :: proc(p: ^core.Pane) -> (^core.Tab, ^core.Claude_Tab) {
+	t := core.pane_shown(p)
 	if t == nil do return nil, nil
-	ct, is := &t.kind.(Claude_Tab)
+	ct, is := &t.kind.(core.Claude_Tab)
 	if !is || len(ct.held) == 0 do return nil, nil
 	return t, ct
 }
 
-claude_held_message :: proc(tab: ^Tab, ct: ^Claude_Tab) -> string {
+claude_held_message :: proc(tab: ^core.Tab, ct: ^core.Claude_Tab) -> string {
 	n := len(ct.held)
 	who := ct.held[0].who
-	_, why := claude_ready(tab, ct)
+	_, why := core.claude_ready(tab, ct)
 	if why == "" do why = "sending"
 	return fmt.tprintf("%d %s from %s %s: %s · “%s”", n, n == 1 ? "message" : "messages", who, n == 1 ? "waits" : "wait", why, held_preview(ct.held[0].text))
 }
@@ -89,10 +90,10 @@ held_preview :: proc(text: string) -> string {
 	}
 	line := strings.trim_space(strings.to_string(b))
 	if len(line) <= HELD_PREVIEW_MAX do return line
-	return strings.concatenate({cut_utf8(line, HELD_PREVIEW_MAX), "…"}, context.temp_allocator)
+	return strings.concatenate({core.cut_utf8(line, HELD_PREVIEW_MAX), "…"}, context.temp_allocator)
 }
 
-claude_bars :: proc(p: ^Pane) {
+claude_bars :: proc(p: ^core.Pane) {
 	status_bar(p)
 	t, ct := held_tab(p)
 	if t == nil do return
@@ -103,7 +104,7 @@ claude_bars :: proc(p: ^Pane) {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		dot(th.waiting)
 		clay.TextDynamic(clip(msg, max(pane_width() - used, px(80))), txt(th.text))
@@ -115,7 +116,7 @@ claude_bars :: proc(p: ^Pane) {
 
 // A Claude tab's status: its hooks never reported, or its Claude Code is old (claude_status.odin).
 @(private = "file")
-status_bar :: proc(p: ^Pane) {
+status_bar :: proc(p: ^core.Pane) {
 	t, msg, hooks := status_tab(p)
 	if t == nil do return
 	th := theme()
@@ -126,7 +127,7 @@ status_bar :: proc(p: ^Pane) {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(max(px(BAR_H), f32(n) * text_line_height(.UI) + px(2 * SP_2)))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		dot(hooks ? th.error : th.waiting)
 		clay.TextDynamic(text, txt(th.text))
@@ -160,24 +161,24 @@ claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	return "Hide this bar (the hooks bar until Claude restarts here; the version hint for this version)", ""
 }
 
-claude_click :: proc(p: ^Pane, h: Hit_Claude) {
+claude_click :: proc(p: ^core.Pane, h: Hit_Claude) {
 	if h >= 2 {
 		t, _, hooks := status_tab(p)
 		if t == nil do return
-		_, pi := t.kind.(Pi_Tab)
+		_, pi := t.kind.(core.Pi_Tab)
 		switch {
-		case h == 3 && pi: pi_status_dismiss(t)
-		case h == 3: claude_status_dismiss(t)
-		case hooks:  ui_do(Set_Left_Tab{tab = .Settings})
+		case h == 3 && pi: core.pi_status_dismiss(t)
+		case h == 3: core.claude_status_dismiss(t)
+		case hooks:  ui_do(core.Set_Left_Tab{tab = .Settings})
 		case:
 			cmd := status_update_command(t)
 			if cmd == "" do return
-			if platform.set_clipboard != nil do platform.set_clipboard(cmd)
+			if core.platform.set_clipboard != nil do core.platform.set_clipboard(cmd)
 			toast_show(fmt.tprintf("Copied: %s", cmd))
 		}
 		return
 	}
 	t, _ := held_tab(p)
 	if t == nil do return
-	ui_do(Claude_Held_Op{tab_id = t.id, op = h == 0 ? "send" : "drop"})
+	ui_do(core.Claude_Held_Op{tab_id = t.id, op = h == 0 ? "send" : "drop"})
 }

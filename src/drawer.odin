@@ -16,6 +16,7 @@ package main
 
 import "core:strings"
 import "core:unicode/utf8"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -48,16 +49,16 @@ drawer_w :: proc() -> f32 {
 	avail := ui_win_w - left * app.dpi
 	w := state.layout.drawer_width
 	if divider.active && divider.which == 2 do w = divider.value
-	if w <= 0 do w = DRAWER_WIDTH_DEFAULT
+	if w <= 0 do w = core.DRAWER_WIDTH_DEFAULT
 	most := avail * DRAWER_MAX_FRACTION
-	if state.layout.drawer_pinned do most = max(min(most, avail - (right + CENTRE_MIN) * app.dpi), min(px(DRAWER_WIDTH_MIN), most))
+	if state.layout.drawer_pinned do most = max(min(most, avail - (right + CENTRE_MIN) * app.dpi), min(px(core.DRAWER_WIDTH_MIN), most))
 	return min(px(w), most)
 }
 
 // The left edge's line: the column dividers' look, highlighted while hovered
 // or dragged.
 @(private = "file")
-drawer_edge :: proc() -> Rgba {
+drawer_edge :: proc() -> core.Rgba {
 	th := theme()
 	if divider.active && divider.which == 2 do return th.accent
 	if d, ok := ui_hover.(Hit_Divider); ok && int(d) == 2 do return mix(th.border, th.accent, 0.6)
@@ -71,13 +72,13 @@ drawer_top :: proc() -> f32 {return px(TAB_STRIP_H) + confirm_bar_h()}
 drawer_floating :: proc(w, h: f32) {
 	th := theme()
 	v := fade(clay.ID("drawer"), 0, state.home_open ? 1 : 0, DUR_SLIDE)
-	if v <= 0.001 || home_tab() == nil do return
+	if v <= 0.001 || core.home_tab() == nil do return
 	top := drawer_top()
 	dw := drawer_w()
 	if clay.UI(clay.ID("drawer"))({
-		layout = {sizing = {clay.SizingFixed(dw), clay.SizingFixed(h - top)}, padding = {left = pu(BORDER_W)}, layoutDirection = .TopToBottom}, // children start after the edge's line (Atlas's terminal is drawn over them)
+		layout = {sizing = {clay.SizingFixed(dw), clay.SizingFixed(h - top)}, padding = {left = pu(core.BORDER_W)}, layoutDirection = .TopToBottom}, // children start after the edge's line (Atlas's terminal is drawn over them)
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(drawer_edge()), width = {left = pu(BORDER_W)}},
+		border = {color = cc(drawer_edge()), width = {left = pu(core.BORDER_W)}},
 		floating = {attachTo = .Root, attachment = {element = .RightTop, parent = .RightTop}, offset = {(1 - v) * dw, top}, zIndex = 5},
 	}) {
 		drawer_content(dw)
@@ -87,12 +88,12 @@ drawer_floating :: proc(w, h: f32) {
 // Pinned: a column of the body, beside the terminal and the panels.
 drawer_pinned_column :: proc() {
 	th := theme()
-	if !state.home_open || home_tab() == nil do return
+	if !state.home_open || core.home_tab() == nil do return
 	dw := drawer_w()
 	if clay.UI(clay.ID("drawer"))({
-		layout = {sizing = {clay.SizingFixed(dw), clay.SizingGrow()}, padding = {left = pu(BORDER_W)}, layoutDirection = .TopToBottom},
+		layout = {sizing = {clay.SizingFixed(dw), clay.SizingGrow()}, padding = {left = pu(core.BORDER_W)}, layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(drawer_edge()), width = {left = pu(BORDER_W)}},
+		border = {color = cc(drawer_edge()), width = {left = pu(core.BORDER_W)}},
 	}) {
 		drawer_content(dw)
 	}
@@ -108,10 +109,10 @@ drawer_content :: proc(dw: f32) {
 	drawer_notes_warning(dw)
 	// the terminal (drawn after the layout, main.odin), or why there is none
 	if clay.UI(clay.ID("drawer_term"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
-		if !agent_running() {
-			ht := home_tab()
-			if ht != nil && ht.status == .Exited do empty_state(strings.concatenate({agent_name(), " stopped"}, context.temp_allocator), "Press ⌘J twice to start it again", dw)
-			else do empty_state(strings.concatenate({"Starting ", agent_name(), "…"}, context.temp_allocator), "Its pi starts in the background", dw)
+		if !core.agent_running() {
+			ht := core.home_tab()
+			if ht != nil && ht.status == .Exited do empty_state(strings.concatenate({core.agent_name(), " stopped"}, context.temp_allocator), "Press ⌘J twice to start it again", dw)
+			else do empty_state(strings.concatenate({"Starting ", core.agent_name(), "…"}, context.temp_allocator), "Its pi starts in the background", dw)
 		}
 	}
 }
@@ -119,24 +120,24 @@ drawer_content :: proc(dw: f32) {
 @(private = "file")
 drawer_header :: proc(dw: f32) {
 	th := theme()
-	ht := home_tab()
+	ht := core.home_tab()
 	status, col := agent_status_text()
-	model := agent_model_short()
+	model := core.agent_model_short()
 	if model == "" do model = "pi's default"
 	// what the model's name may take: the header less everything else on it
 	gap := px(SP_2)
 	button_w := text_w("Model", FONT_UI_SMALL) + px(2 * SP_2)
-	used := px(DRAWER_PAD + SP_2) + px(AVATAR) + text_w(agent_name(), WEIGHT_BOLD) + 2 * px(TAB_H) + button_w + 6 * gap
+	used := px(DRAWER_PAD + SP_2) + px(AVATAR) + text_w(core.agent_name(), WEIGHT_BOLD) + 2 * px(TAB_H) + button_w + 6 * gap
 	if ht != nil && ht.agent == .Working do used += px(DOT) + gap
 	if status != "" do used += text_w(status, FONT_UI_SMALL) + gap
 	room := dw - used
 	if clay.UI(clay.ID("drawer_head"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H + SP_3))}, padding = {pu(DRAWER_PAD), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_panel),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		avatar(AVATAR)
-		clay.TextDynamic(agent_name(), txt(th.text, WEIGHT_BOLD))
+		clay.TextDynamic(core.agent_name(), txt(th.text, WEIGHT_BOLD))
 		if ht != nil && ht.agent == .Working do dot(with_alpha(th.running, 1))
 		if status != "" do clay.TextDynamic(status, txt(col, FONT_UI_SMALL))
 		spacer()
@@ -181,7 +182,7 @@ drawer_header :: proc(dw: f32) {
 // folder (no main folder, or not reachable): it uses the data folder's copy.
 @(private = "file")
 drawer_notes_warning :: proc(dw: f32) {
-	msg := agent_prompt_warning()
+	msg := core.agent_prompt_warning()
 	if msg == "" do return
 	th := theme()
 	label := "Set up Deckhand…"
@@ -189,7 +190,7 @@ drawer_notes_warning :: proc(dw: f32) {
 	if clay.UI(clay.ID("drawer_notes_line"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(DRAWER_PAD), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(with_alpha(th.waiting, 0.12)),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		clay.TextDynamic(clip(msg, dw - px(DRAWER_PAD + 2 * SP_2) - bw, FONT_UI_SMALL), txt(th.text_secondary, FONT_UI_SMALL))
 		spacer()
@@ -209,7 +210,7 @@ drawer_notes_warning :: proc(dw: f32) {
 // The agent's initial in an accent circle.
 avatar :: proc(size: f32) {
 	th := theme()
-	name := agent_name()
+	name := core.agent_name()
 	r, n := utf8.decode_rune(name)
 	initial := r >= 'a' && r <= 'z' ? utf8_string(r - 32) : name[:n]
 	if clay.UI()({
@@ -224,9 +225,9 @@ avatar :: proc(size: f32) {
 // "starting…", "working…", "needs you", "error", "stopped" and its colour,
 // from Atlas's tab (its bridge status).
 @(private = "file")
-agent_status_text :: proc() -> (string, Rgba) {
+agent_status_text :: proc() -> (string, core.Rgba) {
 	th := theme()
-	ht := home_tab()
+	ht := core.home_tab()
 	switch {
 	case ht == nil || ht.status == .Exited: return "stopped", th.text_muted
 	case ht.waiting:                        return "needs you", th.waiting
@@ -259,11 +260,11 @@ drawer_hit :: proc() -> Hit {
 
 drawer_click :: proc(h: Hit_Agent) {
 	switch h.what {
-	case .Pin:   ui_do(Set_Layout{drawer_pinned = !state.layout.drawer_pinned})
-	case .Close: ui_do(Set_Home{open = false})
+	case .Pin:   ui_do(core.Set_Layout{drawer_pinned = !state.layout.drawer_pinned})
+	case .Close: ui_do(core.Set_Home{open = false})
 	case .Model: action_run("agent_model")
 	case .Notes: action_run("setup") // the first-run sheet (ui_setup.odin)
-	case .Term:  if state.focus_widget != "agent_input" do ui_do(Set_Focus{"agent_input"})
+	case .Term:  if state.focus_widget != "agent_input" do ui_do(core.Set_Focus{"agent_input"})
 	}
 	app.redraw = true
 }
@@ -295,7 +296,7 @@ drawer_event :: proc(e: ^sapp.Event) -> bool {
 			return true
 		}
 	}
-	t := agent_term()
+	t := core.agent_term()
 	in_term := state.home_open && t != nil && inside(clay.ID("drawer_term"), e.mouse_x, e.mouse_y) && !over_overlay()
 	#partial switch e.type {
 	case .MOUSE_DOWN:
@@ -303,7 +304,7 @@ drawer_event :: proc(e: ^sapp.Event) -> bool {
 		app.pointer = {e.mouse_x, e.mouse_y}
 		if term_link_mouse_down(t, e) do return true // ⌘-click or right-click on a link (term_links.odin)
 		if e.mouse_button != .LEFT do return false
-		if state.focus_widget != "agent_input" do ui_do(Set_Focus{"agent_input"})
+		if state.focus_widget != "agent_input" do ui_do(core.Set_Focus{"agent_input"})
 		term_mouse_down(t, e, app.clicks)
 		drawer_ui.mouse = true
 		app.redraw = true

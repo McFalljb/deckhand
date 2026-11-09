@@ -2,7 +2,7 @@
 # Deckhand started from the Dock by someone whose pi is on a folder only the login shell adds
 # (nvm, fnm, mise or pnpm in ~/.zprofile), with an interactive shell that never answers (a slow
 # or stuck ~/.zshrc): the environment probe times out, no stat finds pi, and pi is still not
-# "not installed" (src/harness.odin asks `$SHELL -l -c 'command -v pi'`). New session then starts
+# "not installed" (src/core/harness.odin asks `$SHELL -l -c 'command -v pi'`). New session then starts
 # pi, from the login shell's PATH; with no pi there either, pi is not installed (the control).
 # The pi is a tiny shell script: never a real pi.
 # Screenshots: build/shots/pi-login-lookup/. Usage: tests/scripts/pi-login-lookup.sh

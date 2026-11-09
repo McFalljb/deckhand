@@ -15,14 +15,15 @@ import "core:sys/posix"
 import "core:testing"
 import "core:thread"
 import "core:time"
+import "core"
 import gh "ghostty"
 import hw "holderwire"
 
 @(test)
 holder_sock_names :: proc(t: ^testing.T) {
-	testing.expect(t, holder_sock_name_ok("holder-0123abcd.sock"))
+	testing.expect(t, core.holder_sock_name_ok("holder-0123abcd.sock"))
 	for bad in ([]string{"holder-0123ABCD.sock", "holder-0123abc.sock", "holder-0123abcde.sock", "holder-0123abcd.sock.x", "core.sock", "holder-../ab.sock", "xholder-0123abcd.sock", ""}) {
-		testing.expectf(t, !holder_sock_name_ok(bad), "%q accepted", bad)
+		testing.expectf(t, !core.holder_sock_name_ok(bad), "%q accepted", bad)
 	}
 }
 
@@ -43,7 +44,7 @@ held_output_offsets :: proc(t: ^testing.T) {
 		{max(u64), 0, 10, 10, false}, // no overflow
 	}
 	for c, i in cases {
-		skip, gap := held_output_place(c.next, c.start, c.n)
+		skip, gap := core.held_output_place(c.next, c.start, c.n)
 		testing.expectf(t, skip == c.skip && gap == c.gap, "case %d: skip %d gap %v", i, skip, gap)
 	}
 }
@@ -64,7 +65,7 @@ held_tail_offsets :: proc(t: ^testing.T) {
 		{0, 0, 0, 0, true, true},
 	}
 	for c, i in cases {
-		skip, exact, ok := held_tail_skip(c.snap, c.start, c.end)
+		skip, exact, ok := core.held_tail_skip(c.snap, c.start, c.end)
 		testing.expectf(t, skip == c.skip && exact == c.exact && ok == c.ok, "case %d: %d %v %v", i, skip, exact, ok)
 	}
 }
@@ -74,7 +75,7 @@ handover_parse_rules :: proc(t: ^testing.T) {
 	SHA :: "abababababababababababababababababababababababababababababababab"
 	sha := SHA
 	good := fmt.tprintf(`{{"v":1,"min_reader":1,"holder":"aa","written":9,"terminals":[{{"term":3,"offset":10,"sha256":"%s","format":"ghostsnp/1","inexact":false}}]}}`, sha)
-	f, ok, why := handover_parse(good)
+	f, ok, why := core.handover_parse(good)
 	testing.expect(t, ok, why)
 	testing.expect(t, len(f.terminals) == 1 && f.terminals[0].term == 3 && f.terminals[0].offset == 10)
 	testing.expect_value(t, f.holder, "aa")
@@ -93,7 +94,7 @@ handover_parse_rules :: proc(t: ^testing.T) {
 		"{\"v\":1,\"holder\":\"\xff\"}", // invalid UTF-8
 	}
 	for b, i in bad {
-		_, bok, _ := handover_parse(b)
+		_, bok, _ := core.handover_parse(b)
 		testing.expectf(t, !bok, "bad case %d accepted", i)
 	}
 }
@@ -102,11 +103,11 @@ handover_parse_rules :: proc(t: ^testing.T) {
 @(test)
 replayed_queries_dropped :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	term := new(Term)
+	term := new(core.Term)
 	defer free(term)
-	testing.expect(t, term_init(term, 40, 4))
-	defer term_free(term)
-	term_feed_replayed(term, transmute([]u8)string("hi\x1b[c\x1b[6n\x1b]11;?\x07"))
+	testing.expect(t, core.term_init(term, 40, 4))
+	defer core.term_free(term)
+	core.term_feed_replayed(term, transmute([]u8)string("hi\x1b[c\x1b[6n\x1b]11;?\x07"))
 	testing.expect_value(t, term.replies_dropped, 3)
 	testing.expect(t, !term.mute_replies)
 	before := term.replies_dropped
@@ -120,15 +121,15 @@ replayed_queries_dropped :: proc(t: ^testing.T) {
 @(test)
 held_ids_persist :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	for _, x in terms {
-		term_free(x)
+	for _, x in core.terms {
+		core.term_free(x)
 		free(x)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
-	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
+	core.persist = {}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -137,26 +138,26 @@ held_ids_persist :: proc(t: ^testing.T) {
 	defer os.remove(proj)
 
 	text := fmt.tprintf(`{{"v":1,"projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"hhhh-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":7,"readonly":true}},{{"kind":"shell","title":"a","cwd":"%s","held":8}},{{"kind":"shell","title":"b","cwd":"%s","held":4294967296}},{{"kind":"shell","title":"c","cwd":"%s","held":0}}],"active_tab":1}}]}}`, proj, proj, proj, proj, proj, proj)
-	testing.expect_value(t, workspace_restore(text), "")
+	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, len(state.open_sessions), 1)
 	if len(state.open_sessions) != 1 do return
 	s := &state.open_sessions[0]
 	testing.expect_value(t, len(s.tabs), 4)
 	if len(s.tabs) != 4 do return
 	testing.expect_value(t, s.tabs[0].held, u32(7))
-	testing.expect(t, s.tabs[0].kind.(Pi_Tab).readonly) // as it was started
+	testing.expect(t, s.tabs[0].kind.(core.Pi_Tab).readonly) // as it was started
 	testing.expect_value(t, s.tabs[1].held, u32(8))
 	testing.expect_value(t, s.tabs[2].held, u32(0)) // past u32: refused
 	testing.expect_value(t, s.tabs[3].held, u32(0))
 
 	// written only while the holder keeps sessions, and only for running held terminals
-	x := new_term(s.tabs[1].id)
+	x := core.new_term(s.tabs[1].id)
 	x.running = true
 	x.pty.held = 8
-	testing.expect(t, !strings.contains(workspace_json(), `"held"`))
-	hc.handover = true
-	saved := workspace_json()
-	hc.handover = false
+	testing.expect(t, !strings.contains(core.workspace_json(), `"held"`))
+	core.hc.handover = true
+	saved := core.workspace_json()
+	core.hc.handover = false
 	testing.expect(t, strings.contains(saved, `"held":8`), saved)
 	testing.expect(t, !strings.contains(saved, `"held":7`), saved) // the pi tab did not start here
 	x.pty.held = 0 // never a RELEASE from a test
@@ -169,16 +170,16 @@ held_ids_persist :: proc(t: ^testing.T) {
 @(test)
 holder_answered_no_second_launch :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Refuse}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Refuse}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	toast_clear()
-	testing.expect(t, !holder_client_start(), "attached to something")
+	testing.expect(t, !core.holder_client_start(), "attached to something")
 	files, _ := os.read_all_directory_by_path(f.dir, context.temp_allocator)
-	for x in files do testing.expectf(t, !holder_sock_name_ok(x.name) || x.name == "holder-0000fa01.sock", "a second holder: %s", x.name)
+	for x in files do testing.expectf(t, !core.holder_sock_name_ok(x.name) || x.name == "holder-0000fa01.sock", "a second holder: %s", x.name)
 	testing.expect(t, os.exists(f.path), "the answering holder's socket is kept")
 	testing.expect(t, strings.contains(toast.text, "session holder"), toast.text)
-	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+	testing.expect(t, !core.holder_wanted(), "new tabs run on their own PTYs")
 }
 
 // A holder that waits for the Deckhand an update relaunches (REFUSED{secret}) runs every kept
@@ -187,16 +188,16 @@ holder_answered_no_second_launch :: proc(t: ^testing.T) {
 @(test)
 holder_refused_secret_unreachable :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	toast_clear()
-	testing.expect(t, !holder_client_start(), "attached to something")
-	testing.expect(t, hc.refused_secret)
-	testing.expect(t, hc.unreachable, "not taken for a holder that keeps sessions")
+	testing.expect(t, !core.holder_client_start(), "attached to something")
+	testing.expect(t, core.hc.refused_secret)
+	testing.expect(t, core.hc.unreachable, "not taken for a holder that keeps sessions")
 	testing.expect(t, strings.contains(toast.text, "update"), toast.text)
 	testing.expect(t, !strings.contains(toast.text, "another copy"), toast.text) // it may be the successor itself
-	testing.expect(t, !holder_wanted(), "new tabs run on their own PTYs")
+	testing.expect(t, !core.holder_wanted(), "new tabs run on their own PTYs")
 }
 
 // The reservation lapses after SUCCESSOR_TTL (the successor never came, or this was it without
@@ -204,19 +205,19 @@ holder_refused_secret_unreachable :: proc(t: ^testing.T) {
 @(test)
 holder_refused_secret_retried :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Refuse, refuse_code = "secret"}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	testing.expect(t, !holder_client_start())
-	holder_successor_retry_tick()
-	testing.expect(t, !hc.on, "retried before the reservation lapsed")
-	testing.expect(t, hc.successor_retry != {}, "no retry planned")
+	f := core.Fake_Holder{mode = .Refuse, refuse_code = "secret"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	testing.expect(t, !core.holder_client_start())
+	core.holder_successor_retry_tick()
+	testing.expect(t, !core.hc.on, "retried before the reservation lapsed")
+	testing.expect(t, core.hc.successor_retry != {}, "no retry planned")
 	f.mode = .Welcome // the reservation lapsed: the holder welcomes anyone
-	hc.successor_retry = time.tick_now()
-	holder_successor_retry_tick()
-	testing.expect(t, hc.on, "not attached on the retry")
-	testing.expect(t, !hc.unreachable)
-	testing.expect(t, hc.adopt_done, "the retry's adopt did not run")
+	core.hc.successor_retry = time.tick_now()
+	core.holder_successor_retry_tick()
+	testing.expect(t, core.hc.on, "not attached on the retry")
+	testing.expect(t, !core.hc.unreachable)
+	testing.expect(t, core.hc.adopt_done, "the retry's adopt did not run")
 }
 
 // A dead holder's socket (nobody listening: kill -9) is removed, and with keep_sessions off it
@@ -224,16 +225,16 @@ holder_refused_secret_retried :: proc(t: ^testing.T) {
 @(test)
 holder_stale_socket_removed :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{no_listen = true}
-	fake_holder_start(t, &f, keep = false)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{no_listen = true}
+	core.fake_holder_start(t, &f, keep = false)
+	defer core.fake_holder_stop(&f)
 	stale := fmt.tprintf("%s/holder-0000dead.sock", f.dir)
-	fd, ok := sock_listen(stale)
+	fd, ok := core.sock_listen(stale)
 	testing.expect(t, ok)
-	sock_close(fd) // the file stays; a connect is refused
-	testing.expect(t, !holder_client_start())
+	core.sock_close(fd) // the file stays; a connect is refused
+	testing.expect(t, !core.holder_client_start())
 	testing.expect(t, !os.exists(stale), "the dead holder's socket is removed")
-	testing.expect(t, !hc.tried, "the start is not used up")
+	testing.expect(t, !core.hc.tried, "the start is not used up")
 }
 
 // A holder started mid-run (keep_sessions turned on, then the first new tab) writes tokens.json
@@ -242,13 +243,13 @@ holder_stale_socket_removed :: proc(t: ^testing.T) {
 @(test)
 holder_midrun_writes_tokens :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, previous = "none"}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	testing.expect(t, holder_wanted(), "attached")
-	socket_tokens_bind(101, 1, {kind = .Shell})
-	path := fmt.tprintf("%s/tokens.json", home_root)
-	_, ok, why := macfile_read(path, TOKENS_KIND, f.key[:], context.temp_allocator)
+	f := core.Fake_Holder{mode = .Welcome, previous = "none"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	testing.expect(t, core.holder_wanted(), "attached")
+	core.socket_tokens_bind(101, 1, {kind = .Shell})
+	path := fmt.tprintf("%s/tokens.json", core.home_root)
+	_, ok, why := core.macfile_read(path, core.TOKENS_KIND, f.key[:], context.temp_allocator)
 	testing.expect(t, ok, why)
 }
 
@@ -257,17 +258,17 @@ holder_midrun_writes_tokens :: proc(t: ^testing.T) {
 @(test)
 holder_partial_send_loses :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, previous = "none", no_read = true}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	was := holder_send_timeout
-	holder_send_timeout = 200 * time.Millisecond
-	defer holder_send_timeout = was
-	testing.expect(t, holder_wanted(), "attached")
+	f := core.Fake_Holder{mode = .Welcome, previous = "none", no_read = true}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
+	testing.expect(t, core.holder_wanted(), "attached")
 	big := make([]u8, 4 << 20)
 	defer delete(big)
-	holder_input(1, big) // fills the socket buffer, then times out
-	testing.expect(t, wait_until(2000, proc() -> bool {return sync.atomic_load(&hc.lost)}), "the holder is lost after a partial send")
+	core.holder_input(1, big) // fills the socket buffer, then times out
+	testing.expect(t, core.wait_until(2000, proc() -> bool {return sync.atomic_load(&core.hc.lost)}), "the holder is lost after a partial send")
 }
 
 // §7.7 "disk full while writing the handover: abort before GOODBYE; sessions kept": when the
@@ -276,27 +277,27 @@ holder_partial_send_loses :: proc(t: ^testing.T) {
 @(test)
 holder_handover_unwritable_keeps :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, previous = "none"}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	testing.expect(t, holder_wanted(), "attached")
-	h := new(Held)
+	f := core.Fake_Holder{mode = .Welcome, previous = "none"}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	testing.expect(t, core.holder_wanted(), "attached")
+	h := new(core.Held)
 	h.id, h.spawn, h.pid = 5, .Spawned, i32(os.get_pid())
-	hc.held[5] = h
-	x := new_term(9101)
-	x.running, x.pty = true, Pty{fd = -1, held = 5}
+	core.hc.held[5] = h
+	x := core.new_term(9101)
+	x.running, x.pty = true, core.Pty{fd = -1, held = 5}
 	defer {
 		x.pty.held, x.running = 0, false
-		drop_term(9101)
+		core.drop_term(9101)
 	}
 	// the handover folder is a file: it cannot be made
-	_ = os.write_entire_file(fmt.tprintf("%s/handover", home_root), transmute([]u8)string("x"))
-	holder_handover()
-	testing.expect(t, holder_keeps_sessions(), "the held tabs are saved as held")
-	pty_close(&x.pty) // close_all
+	_ = os.write_entire_file(fmt.tprintf("%s/handover", core.home_root), transmute([]u8)string("x"))
+	core.holder_handover()
+	testing.expect(t, core.holder_keeps_sessions(), "the held tabs are saved as held")
+	core.pty_close(&x.pty) // close_all
 	time.sleep(150 * time.Millisecond)
-	testing.expect_value(t, fake_holder_count(&f, .Goodbye), 0)
-	testing.expect_value(t, fake_holder_count(&f, .Release), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Goodbye), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Release), 0)
 }
 
 // ---- adopt at launch, against a fake holder ----
@@ -309,30 +310,30 @@ fake_term :: proc(id: i64, tail: string) -> hw.Welcome_Terminal {
 // A clean State, the fake's tokens.json written as an earlier run would have (binds: term ->
 // what it was started as), then workspace `text` restored and holder_adopt_all run.
 @(private = "file")
-adopt_run :: proc(t: ^testing.T, f: ^Fake_Holder, text: string, binds: map[u32]Held_Start, clean := true) {
-	for _, x in terms {
+adopt_run :: proc(t: ^testing.T, f: ^core.Fake_Holder, text: string, binds: map[u32]core.Held_Start, clean := true) {
+	for _, x in core.terms {
 		x.pty.held, x.running = 0, false // never a RELEASE or kill from here
-		term_free(x)
+		core.term_free(x)
 		free(x)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}, settings = {keep_sessions = true}}
-	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}, settings = {keep_sessions = true}}
+	core.persist = {}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
-	path := fmt.tprintf("%s/tokens.json", home_root)
-	socket_tokens_enable(path, f.key[:])
+	path := fmt.tprintf("%s/tokens.json", core.home_root)
+	core.socket_tokens_enable(path, f.key[:])
 	tab := u64(900)
 	for term, st in binds {
 		tab += 1
-		socket_tokens_bind(tab, term, st)
+		core.socket_tokens_bind(tab, term, st)
 	}
-	socket_tokens_disable(false)
-	testing.expect_value(t, workspace_restore(text), "")
-	persist.restored_clean = clean
-	holder_adopt_all()
+	core.socket_tokens_disable(false)
+	testing.expect_value(t, core.workspace_restore(text), "")
+	core.persist.restored_clean = clean
+	core.holder_adopt_all()
 }
 
 @(private = "file")
@@ -350,33 +351,33 @@ adopt_proj :: proc() -> string {
 @(test)
 holder_adopt_checks_start :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "claude\r\n"), fake_term(5, "atlas\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("claude\r\n"), transmute([]u8)string("atlas\r\n")}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "claude\r\n"), fake_term(5, "atlas\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("claude\r\n"), transmute([]u8)string("atlas\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	proj := adopt_proj()
 	defer os.remove(proj)
-	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
 	binds[3] = {kind = .Pi, pi_ro = true, extras = 9}
 	binds[4] = {kind = .Claude}
 	binds[5] = {kind = .Pi}
 	binds[6] = {kind = .Shell} // gone from the holder
 	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"shell","title":"a","cwd":"%s","held":4}}],"active_tab":0}}],"home":{{"pi_session_id":"hhhh-home","held":5,"model_applied":"m-applied"}}}}`, f.instance, proj, proj, proj, proj)
-	delete(agent_model_starting)
-	agent_model_starting = strings.clone("m-other")
+	delete(core.agent_model_starting)
+	core.agent_model_starting = strings.clone("m-other")
 	adopt_run(t, &f, text, binds)
-	s: ^Open_Session
+	s: ^core.Open_Session
 	for &x in state.open_sessions do if !x.home do s = &x
 	testing.expect(t, s != nil && len(s.tabs) == 2, "restored")
 	if s == nil || len(s.tabs) != 2 do return
-	testing.expect_value(t, s.tabs[0].status, Tab_Status.Running)
-	testing.expect(t, s.tabs[0].kind.(Pi_Tab).readonly, "read-only as started (tokens.json)")
+	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running)
+	testing.expect(t, s.tabs[0].kind.(core.Pi_Tab).readonly, "read-only as started (tokens.json)")
 	testing.expect_value(t, s.tabs[0].reload.extras, u64(9))
-	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started) // a Claude is not a shell tab
-	testing.expect(t, term_of(s.tabs[1].id) == nil, "not adopted")
-	hs := home_session()
+	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Not_Started) // a Claude is not a shell tab
+	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "not adopted")
+	hs := core.home_session()
 	testing.expect(t, hs != nil && hs.tabs[0].status == .Running, "Atlas adopted")
-	testing.expect_value(t, agent_model_starting, "m-applied")
-	_, f6 := socket_tokens_start_of(6)
+	testing.expect_value(t, core.agent_model_starting, "m-applied")
+	_, f6 := core.socket_tokens_start_of(6)
 	testing.expect(t, !f6, "term 6 is no longer listed: pruned")
 }
 
@@ -390,19 +391,19 @@ holder_unclaimed_kept :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	ended := fake_term(7, "")
 	ended.exit = hw.Exit_Status{code = 0}
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), ended}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), ended}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	toast_clear()
 	adopt_run(t, &f, `{"v":1,"projects":[],"open_sessions":[]}`, nil, clean = false) // as --fresh
-	wait_until(300, proc() -> bool {return false})
-	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 0)
-	testing.expect_value(t, fake_holder_count(&f, .Release, 7), 1) // it ended: nothing to lose
+	core.wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 3), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 7), 1) // it ended: nothing to lose
 	testing.expect(t, strings.contains(toast.text, "1 kept session wasn't restored"), toast.text)
-	sync.lock(&hc.mu)
-	h := hc.held[3]
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
 	testing.expect(t, h != nil && h.kept, "kept, not shown")
-	sync.unlock(&hc.mu)
+	sync.unlock(&core.hc.mu)
 }
 
 // A clean restore whose tab listed the terminal but could not take it (here: tokens.json says it
@@ -410,19 +411,19 @@ holder_unclaimed_kept :: proc(t: ^testing.T) {
 @(test)
 holder_unclaimed_released_when_known :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(8, "")}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(8, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	proj := adopt_proj()
 	defer os.remove(proj)
-	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
 	binds[3] = {kind = .Pi}
 	binds[8] = {kind = .Shell}
 	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"bbbb-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, proj)
 	adopt_run(t, &f, text, binds)
-	wait_until(300, proc() -> bool {return false})
-	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 1)
-	testing.expect_value(t, fake_holder_count(&f, .Release, 8), 0)
+	core.wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 3), 1)
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 8), 0)
 }
 
 // workspace.json's held ids are for the holder they were saved with (its instance id): another
@@ -430,42 +431,42 @@ holder_unclaimed_released_when_known :: proc(t: ^testing.T) {
 @(test)
 holder_adopt_needs_same_instance :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	proj := adopt_proj()
 	defer os.remove(proj)
-	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
 	binds[3] = {kind = .Shell}
 	text := fmt.tprintf(`{{"v":1,"holder":"another-holder","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"cccc-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"a","cwd":"%s","held":3}}],"active_tab":0}}]}}`, proj, proj, proj, proj)
 	adopt_run(t, &f, text, binds)
 	s := &state.open_sessions[len(state.open_sessions) - 1]
-	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started)
-	wait_until(300, proc() -> bool {return false})
-	testing.expect_value(t, fake_holder_count(&f, .Release, 3), 0) // not this workspace's: kept
+	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Not_Started)
+	core.wait_until(300, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Release, 3), 0) // not this workspace's: kept
 	// and the instance is saved with the held ids
-	x := new_term(9201)
-	x.running, x.pty = true, Pty{fd = -1, held = 3}
+	x := core.new_term(9201)
+	x.running, x.pty = true, core.Pty{fd = -1, held = 3}
 	defer {
 		x.pty.held, x.running = 0, false
-		drop_term(9201)
+		core.drop_term(9201)
 	}
-	testing.expect(t, strings.contains(workspace_json(), fmt.tprintf(`"holder":"%s"`, f.instance)), workspace_json())
+	testing.expect(t, strings.contains(core.workspace_json(), fmt.tprintf(`"holder":"%s"`, f.instance)), core.workspace_json())
 }
 
 // A holder attached mid-run (after the launch's adopt) that lists terminals keeps them, not shown.
 @(test)
 holder_midrun_lists_kept :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	hc.adopt_done = true
-	testing.expect(t, holder_wanted(), "attached")
-	sync.lock(&hc.mu)
-	h := hc.held[3]
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	core.hc.adopt_done = true
+	testing.expect(t, core.holder_wanted(), "attached")
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
 	testing.expect(t, h != nil && h.kept && len(h.buf) == 0, "kept, its output not kept")
-	sync.unlock(&hc.mu)
+	sync.unlock(&core.hc.mu)
 }
 
 // Its OUTPUT may come while the app is still attaching: the reader thread runs by then, so the
@@ -474,17 +475,17 @@ holder_midrun_lists_kept :: proc(t: ^testing.T) {
 @(test)
 holder_midrun_kept_before_reader :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, output = transmute([]u8)string("more output")}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	hc.adopt_done = true
-	testing.expect(t, holder_wanted(), "attached")
-	wait_until(100, proc() -> bool {return false}) // the OUTPUT has come
-	sync.lock(&hc.mu)
-	h := hc.held[3]
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, output = transmute([]u8)string("more output")}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	core.hc.adopt_done = true
+	testing.expect(t, core.holder_wanted(), "attached")
+	core.wait_until(100, proc() -> bool {return false}) // the OUTPUT has come
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
 	testing.expect(t, h != nil && h.kept && len(h.buf) == 0 && h.tail_len == 0, "kept, its output not kept")
 	if h != nil do testing.expect_value(t, h.next, u64(1 + len("more output"))) // its offset still followed
-	sync.unlock(&hc.mu)
+	sync.unlock(&core.hc.mu)
 }
 
 @(test)
@@ -498,7 +499,7 @@ held_release_unclaimed_rule :: proc(t: ^testing.T) {
 		{false, true, false, true, false}, // saved with another holder
 		{false, true, true, false, false}, // a crash before the save that would have listed it
 	}
-	for c, i in cases do testing.expectf(t, held_release_unclaimed(c.ended, c.clean, c.same, c.listed) == c.want, "case %d", i)
+	for c, i in cases do testing.expectf(t, core.held_release_unclaimed(c.ended, c.clean, c.same, c.listed) == c.want, "case %d", i)
 }
 
 // A holder that answers but does not attach (here: refused, as after an update to another wire)
@@ -508,9 +509,9 @@ held_release_unclaimed_rule :: proc(t: ^testing.T) {
 @(test)
 holder_unattached_held_tabs_wait :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Refuse}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Refuse}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	proj := adopt_proj()
 	defer os.remove(proj)
 	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"dddd-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"shell","title":"a","cwd":"%s","held":4}},{{"kind":"shell","title":"b","cwd":"%s"}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, proj, proj)
@@ -518,18 +519,18 @@ holder_unattached_held_tabs_wait :: proc(t: ^testing.T) {
 	s := &state.open_sessions[len(state.open_sessions) - 1]
 	if !testing.expect_value(t, len(s.tabs), 3) do return
 	s.missing = false // its session file is not made here
-	focus_session(s.id, {kind = .UI}) // shown: its restored tabs start
-	testing.expect_value(t, s.tabs[0].status, Tab_Status.Not_Started)
-	testing.expect(t, term_of(s.tabs[0].id) == nil, "a pi started beside the holder's")
-	testing.expect_value(t, s.tabs[1].status, Tab_Status.Not_Started)
-	testing.expect_value(t, s.tabs[2].status, Tab_Status.Running) // never held: starts as always
-	saved := workspace_json()
+	core.focus_session(s.id, {kind = .UI}) // shown: its restored tabs start
+	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Not_Started)
+	testing.expect(t, core.term_of(s.tabs[0].id) == nil, "a pi started beside the holder's")
+	testing.expect_value(t, s.tabs[1].status, core.Tab_Status.Not_Started)
+	testing.expect_value(t, s.tabs[2].status, core.Tab_Status.Running) // never held: starts as always
+	saved := core.workspace_json()
 	testing.expect(t, strings.contains(saved, `"held":3`) && strings.contains(saved, `"held":4`), saved)
 	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
-	testing.expect_value(t, fake_holder_count(&f, .Spawn), 0)
+	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0)
 	_, _, extra := tab_label(s, s.tabs[0])
 	testing.expect(t, strings.contains(extra, "session holder"), extra)
-	if x := term_of(s.tabs[2].id); x != nil do pty_kill_group(&x.pty, i32(posix.Signal.SIGKILL))
+	if x := core.term_of(s.tabs[2].id); x != nil do core.pty_kill_group(&x.pty, i32(posix.Signal.SIGKILL))
 }
 
 // Mid-run, the holder lost (a send timed out) but still running: it keeps the sessions, so a held
@@ -538,39 +539,39 @@ holder_unattached_held_tabs_wait :: proc(t: ^testing.T) {
 @(test)
 holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	was := holder_send_timeout
-	holder_send_timeout = 200 * time.Millisecond
-	defer holder_send_timeout = was
+	f := core.Fake_Holder{mode = .Welcome, no_read = true, terms = {fake_term(3, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	was := core.holder_send_timeout
+	core.holder_send_timeout = 200 * time.Millisecond
+	defer core.holder_send_timeout = was
 	proj := adopt_proj()
 	defer os.remove(proj)
-	binds := make(map[u32]Held_Start, context.temp_allocator)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
 	binds[3] = {kind = .Pi}
 	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"eeee-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj)
 	adopt_run(t, &f, text, binds)
 	s := &state.open_sessions[len(state.open_sessions) - 1]
 	s.missing = false // its session file is not made here
 	tab := &s.tabs[0]
-	if !testing.expect_value(t, tab.status, Tab_Status.Running) do return
+	if !testing.expect_value(t, tab.status, core.Tab_Status.Running) do return
 	big := make([]u8, 4 << 20)
 	defer delete(big)
-	holder_input(3, big) // fills the socket buffer, then times out: lost
-	testing.expect(t, wait_until(2000, proc() -> bool {return sync.atomic_load(&hc.lost)}), "lost")
+	core.holder_input(3, big) // fills the socket buffer, then times out: lost
+	testing.expect(t, core.wait_until(2000, proc() -> bool {return sync.atomic_load(&core.hc.lost)}), "lost")
 	for _ in 0 ..< 50 {
-		pump_all()
+		core.pump_all()
 		if tab.status == .Exited do break
 		time.sleep(10 * time.Millisecond)
 	}
-	testing.expect_value(t, tab.status, Tab_Status.Exited)
-	testing.expect(t, !tab_is_dead(tab), "offered a Restart while the holder runs it")
-	restart_if_dead(s, user = true)
-	testing.expect_value(t, tab.status, Tab_Status.Exited)
-	r := run_command(Pi_Restart{tab_id = tab.id}, {kind = .UI})
+	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
+	testing.expect(t, !core.tab_is_dead(tab), "offered a Restart while the holder runs it")
+	core.restart_if_dead(s, user = true)
+	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
+	r := core.run_command(core.Pi_Restart{tab_id = tab.id}, {kind = .UI})
 	testing.expect(t, !r.ok, "restarted while the holder runs it")
-	testing.expect_value(t, tab.status, Tab_Status.Exited)
-	saved := workspace_json()
+	testing.expect_value(t, tab.status, core.Tab_Status.Exited)
+	saved := core.workspace_json()
 	testing.expect(t, strings.contains(saved, `"held":3`), saved)
 	testing.expect(t, strings.contains(saved, fmt.tprintf(`"holder":"%s"`, f.instance)), saved)
 }
@@ -582,7 +583,7 @@ holder_lost_alive_no_restart :: proc(t: ^testing.T) {
 Backlog :: struct {
 	path:     string,
 	lfd:      posix.FD,
-	filled:   [dynamic]Sock_Fd,
+	filled:   [dynamic]core.Sock_Fd,
 }
 
 // A listening socket at <dir>/holder-0000b10c.sock with its backlog full: connects are refused.
@@ -595,23 +596,23 @@ backlog_full :: proc(t: ^testing.T, dir: string) -> (b: Backlog) {
 	for i in 0 ..< len(b.path) do addr.sun_path[i] = c.char(b.path[i])
 	testing.expect(t, posix.bind(b.lfd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
 	testing.expect(t, posix.listen(b.lfd, 1) == .OK)
-	b.filled = make([dynamic]Sock_Fd, context.temp_allocator)
+	b.filled = make([dynamic]core.Sock_Fd, context.temp_allocator)
 	for _ in 0 ..< 8 {
-		fd, ok, refused := sock_connect_why(b.path)
+		fd, ok, refused := core.sock_connect_why(b.path)
 		if !ok {
 			testing.expect(t, refused, "not refused")
 			break
 		}
 		append(&b.filled, fd)
 	}
-	_, ok0, _ := sock_connect_why(b.path)
+	_, ok0, _ := core.sock_connect_why(b.path)
 	testing.expect(t, !ok0, "the backlog is not full")
 	return
 }
 
 @(private = "file")
 backlog_done :: proc(b: ^Backlog) {
-	for fd in b.filled do sock_close(fd)
+	for fd in b.filled do core.sock_close(fd)
 	posix.close(b.lfd)
 	posix.unlink(strings.clone_to_cstring(b.path, context.temp_allocator))
 }
@@ -619,9 +620,9 @@ backlog_done :: proc(b: ^Backlog) {
 @(test)
 holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{no_listen = true}
-	fake_holder_start(t, &f, keep = false)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{no_listen = true}
+	core.fake_holder_start(t, &f, keep = false)
+	defer core.fake_holder_stop(&f)
 	b := backlog_full(t, f.dir)
 	defer backlog_done(&b)
 	// the holder is busy for longer than the first recheck, and starts accepting well inside the
@@ -639,7 +640,7 @@ holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 			time.sleep(10 * time.Millisecond)
 		}
 	})
-	testing.expect(t, !holder_client_start())
+	testing.expect(t, !core.holder_client_start())
 	thread.join(drain)
 	thread.destroy(drain)
 	testing.expect(t, os.exists(b.path), "a live holder's socket was removed")
@@ -650,13 +651,13 @@ holder_full_backlog_not_unlinked :: proc(t: ^testing.T) {
 @(test)
 holder_never_drained_unlinked :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{no_listen = true}
-	fake_holder_start(t, &f, keep = false)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{no_listen = true}
+	core.fake_holder_start(t, &f, keep = false)
+	defer core.fake_holder_stop(&f)
 	b := backlog_full(t, f.dir)
 	defer backlog_done(&b)
 	start := time.tick_now()
-	testing.expect(t, !holder_client_start())
+	testing.expect(t, !core.holder_client_start())
 	took := time.tick_since(start)
 	testing.expect(t, !os.exists(b.path), "a socket nobody accepts on is left")
 	testing.expectf(t, took >= 700 * time.Millisecond, "removed after %v: before the retries were used up", took)
@@ -669,14 +670,14 @@ holder_never_drained_unlinked :: proc(t: ^testing.T) {
 @(test)
 holder_hangup_rescanned :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Hangup}
-	fake_holder_start(t, &f, keep = false)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Hangup}
+	core.fake_holder_start(t, &f, keep = false)
+	defer core.fake_holder_stop(&f)
 	toast_clear()
-	testing.expect(t, !holder_client_start())
-	testing.expect(t, !hc.unreachable, "taken for a holder that runs and does not answer")
+	testing.expect(t, !core.holder_client_start())
+	testing.expect(t, !core.hc.unreachable, "taken for a holder that runs and does not answer")
 	testing.expect(t, !strings.contains(toast.text, "isn't answering"), toast.text)
-	testing.expect(t, !hc.tried, "the start is used up: a holder is never launched this run")
+	testing.expect(t, !core.hc.tried, "the start is used up: a holder is never launched this run")
 }
 
 // An upgrade only goes up (§7.3); a holder that never said its rev is not upgraded, nor one that
@@ -695,22 +696,22 @@ holder_rev_order :: proc(t: ^testing.T) {
 		{-1, 2, false, false},
 		{2, 3, true, false}, // a keeper serves: it ends with its sessions
 	}
-	for c, i in cases do testing.expectf(t, holder_upgradable(c.running, c.bundled, c.keeper) == c.want, "case %d", i)
+	for c, i in cases do testing.expectf(t, core.holder_upgradable(c.running, c.bundled, c.keeper) == c.want, "case %d", i)
 }
 
 // What the palette's Restart says: an adoption says degraded, a slow outcome never claims "as
 // before" (it may still succeed, or the keeper may have the sessions).
 @(test)
 holder_restart_texts :: proc(t: ^testing.T) {
-	m, e := holder_restart_text({ok = true, holder_rev = 2})
+	m, e := core.holder_restart_text({ok = true, holder_rev = 2})
 	testing.expect(t, !e && strings.contains(m, "every session kept"), m)
-	m, e = holder_restart_text({adopted = true, error = "x"})
+	m, e = core.holder_restart_text({adopted = true, error = "x"})
 	testing.expect(t, e && strings.contains(m, "degraded"), m)
-	m, e = holder_restart_text({timed_out = true, error = "slow"})
+	m, e = core.holder_restart_text({timed_out = true, error = "slow"})
 	testing.expect(t, e && !strings.contains(m, "as before") && strings.contains(m, "still"), m)
-	m, e = holder_restart_text({error = "refused"})
+	m, e = core.holder_restart_text({error = "refused"})
 	testing.expect(t, e && strings.contains(m, "as before"), m)
-	m, e = holder_restart_text({lost = true, error = "gone"})
+	m, e = core.holder_restart_text({lost = true, error = "gone"})
 	testing.expect(t, e && strings.contains(m, "lost"), m)
 }
 
@@ -719,21 +720,21 @@ holder_restart_texts :: proc(t: ^testing.T) {
 @(test)
 holder_spawn_during_upgrade_fails_fast :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	if !testing.expect(t, holder_wanted(), "attached") do return
-	sync.lock(&hc.wmu)
-	hc.upgrading = true
-	sync.unlock(&hc.wmu)
+	f := core.Fake_Holder{mode = .Welcome}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = true
+	sync.unlock(&core.hc.wmu)
 	start := time.tick_now()
-	_, ok := holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
+	_, ok := core.holder_spawn({"/bin/sh"}, "/", {"PATH=/usr/bin:/bin"}, 80, 24, 640, 384)
 	took := time.tick_since(start)
-	sync.lock(&hc.wmu)
-	queued := len(hc.pending)
-	hc.upgrading = false
-	clear(&hc.pending)
-	sync.unlock(&hc.wmu)
+	sync.lock(&core.hc.wmu)
+	queued := len(core.hc.pending)
+	core.hc.upgrading = false
+	clear(&core.hc.pending)
+	sync.unlock(&core.hc.wmu)
 	testing.expect(t, !ok, "spawned while upgrading")
 	testing.expectf(t, took < time.Second, "the spawn waited %v", took)
 	testing.expect_value(t, queued, 0)
@@ -745,30 +746,30 @@ holder_spawn_during_upgrade_fails_fast :: proc(t: ^testing.T) {
 @(test)
 holder_goodbye_during_upgrade_leaves :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	if !testing.expect(t, holder_wanted(), "attached") do return
-	was := holder_quit_upgrade_wait
-	holder_quit_upgrade_wait = 300 * time.Millisecond
-	defer holder_quit_upgrade_wait = was
-	sync.lock(&hc.wmu)
-	hc.upgrading = true
-	sync.unlock(&hc.wmu)
+	f := core.Fake_Holder{mode = .Welcome}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	was := core.holder_quit_upgrade_wait
+	core.holder_quit_upgrade_wait = 300 * time.Millisecond
+	defer core.holder_quit_upgrade_wait = was
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = true
+	sync.unlock(&core.hc.wmu)
 	@(static) pumped: int
 	pumped = 0
 	start := time.tick_now()
-	sent := holder_goodbye("handover", proc(_: rawptr) {pumped += 1})
+	sent := core.holder_goodbye("handover", proc(_: rawptr) {pumped += 1})
 	took := time.tick_since(start)
 	testing.expect(t, !sent, "a GOODBYE went out mid-upgrade")
 	testing.expectf(t, took < 2 * time.Second, "quit waited %v", took)
-	testing.expect(t, hc.handed && hc.handover, "not left crash-style (holder_leave)")
+	testing.expect(t, core.hc.handed && core.hc.handover, "not left crash-style (holder_leave)")
 	testing.expect(t, pumped > 0, "output was not pulled while it waited")
-	wait_until(200, proc() -> bool {return false})
-	testing.expect_value(t, fake_holder_count(&f, .Goodbye), 0)
-	sync.lock(&hc.wmu)
-	hc.upgrading = false
-	sync.unlock(&hc.wmu)
+	core.wait_until(200, proc() -> bool {return false})
+	testing.expect_value(t, core.fake_holder_count(&f, .Goodbye), 0)
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = false
+	sync.unlock(&core.hc.wmu)
 }
 
 // The upgrade's outcome is in, but the frames held back during it are not sent yet: a GOODBYE
@@ -777,28 +778,28 @@ holder_goodbye_during_upgrade_leaves :: proc(t: ^testing.T) {
 @(test)
 holder_goodbye_after_pending :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	if !testing.expect(t, holder_wanted(), "attached") do return
+	f := core.Fake_Holder{mode = .Welcome}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
 	rel := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&rel, .Release, 9, hw.Empty{})
-	sync.lock(&hc.wmu)
-	hc.upgrading = true
-	append(&hc.pending, ..rel[:])
-	sync.unlock(&hc.wmu)
-	sync.lock(&hc.mu)
-	hc.up_done = true // the reattach set the outcome; upgrade_release has not run yet
-	sync.unlock(&hc.mu)
+	sync.lock(&core.hc.wmu)
+	core.hc.upgrading = true
+	append(&core.hc.pending, ..rel[:])
+	sync.unlock(&core.hc.wmu)
+	sync.lock(&core.hc.mu)
+	core.hc.up_done = true // the reattach set the outcome; upgrade_release has not run yet
+	sync.unlock(&core.hc.mu)
 	th := thread.create_and_start(proc() {
 		time.sleep(150 * time.Millisecond)
-		upgrade_release()
+		core.upgrade_release()
 	})
 	defer thread.destroy(th)
-	testing.expect(t, holder_goodbye("shutdown"), "no GOODBYE")
+	testing.expect(t, core.holder_goodbye("shutdown"), "no GOODBYE")
 	thread.join(th)
-	wait_until(500, proc() -> bool {return false})
-	got := fake_holder_got(&f)
+	core.wait_until(500, proc() -> bool {return false})
+	got := core.fake_holder_got(&f)
 	ri, gi := -1, -1
 	for g, i in got {
 		if g.kind == .Release && g.terminal == 9 && ri < 0 do ri = i
@@ -810,10 +811,10 @@ holder_goodbye_after_pending :: proc(t: ^testing.T) {
 // Exit codes from the wire: -1 is unknown (an orphan that ended before its keeper watched it).
 @(test)
 holder_exit_of_wire :: proc(t: ^testing.T) {
-	testing.expect_value(t, exit_of_wire(3, 0), Exit_Info{known = true, code = 3})
-	testing.expect_value(t, exit_of_wire(0, 15), Exit_Info{known = true, signal = 15})
-	testing.expect_value(t, exit_of_wire(-1, 0), Exit_Info{})
-	testing.expect_value(t, exit_of_wire(999, 0), Exit_Info{known = true, code = 255})
+	testing.expect_value(t, core.exit_of_wire(3, 0), core.Exit_Info{known = true, code = 3})
+	testing.expect_value(t, core.exit_of_wire(0, 15), core.Exit_Info{known = true, signal = 15})
+	testing.expect_value(t, core.exit_of_wire(-1, 0), core.Exit_Info{})
+	testing.expect_value(t, core.exit_of_wire(999, 0), core.Exit_Info{known = true, code = 255})
 }
 
 // Restart session holder is offered only for a holder built from source (build/ beside build.sh).
@@ -823,10 +824,10 @@ holder_restart_dev_only :: proc(t: ^testing.T) {
 	defer os.remove_all(d)
 	os.make_directory_all(fmt.tprintf("%s/repo/build", d))
 	_ = os.write_entire_file(fmt.tprintf("%s/repo/build.sh", d), transmute([]byte)string("#!/bin/sh\n"))
-	testing.expect(t, holder_bin_dev_build(fmt.tprintf("%s/repo/build/Deckhand.app/Contents/Helpers/deckhand-core", d)))
-	testing.expect(t, holder_bin_dev_build(fmt.tprintf("%s/repo/build/deckhand-core", d)))
-	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/deckhand-core", d)))
-	testing.expect(t, !holder_bin_dev_build(fmt.tprintf("%s/other/build/deckhand-core", d))) // no build.sh beside it
+	testing.expect(t, core.holder_bin_dev_build(fmt.tprintf("%s/repo/build/Deckhand.app/Contents/Helpers/deckhand-core", d)))
+	testing.expect(t, core.holder_bin_dev_build(fmt.tprintf("%s/repo/build/deckhand-core", d)))
+	testing.expect(t, !core.holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/deckhand-core", d)))
+	testing.expect(t, !core.holder_bin_dev_build(fmt.tprintf("%s/other/build/deckhand-core", d))) // no build.sh beside it
 }
 
 // After an upgrade the new image's WELCOME, TAILs and the frames behind them (OUTPUT, then
@@ -835,24 +836,24 @@ holder_restart_dev_only :: proc(t: ^testing.T) {
 @(test)
 holder_reattach_frames_behind_tails :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, upgrade_output = transmute([]u8)string("after the upgrade")}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
-	if !testing.expect(t, holder_wanted(), "attached") do return
-	r := holder_upgrade("/fake/deckhand-core")
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "x")}, tails = {transmute([]u8)string("x")}, upgrade_output = transmute([]u8)string("after the upgrade")}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	r := core.holder_upgrade("/fake/deckhand-core")
 	defer delete(r.error)
 	testing.expectf(t, r.ok, "upgrade: %q", r.error)
-	done := wait_until(1000, proc() -> bool {
-		sync.lock(&hc.mu)
-		defer sync.unlock(&hc.mu)
-		h := hc.held[3]
+	done := core.wait_until(1000, proc() -> bool {
+		sync.lock(&core.hc.mu)
+		defer sync.unlock(&core.hc.mu)
+		h := core.hc.held[3]
 		return h != nil && h.eof && strings.contains(string(h.buf[:]), "after the upgrade")
 	})
-	sync.lock(&hc.mu)
-	h := hc.held[3]
+	sync.lock(&core.hc.mu)
+	h := core.hc.held[3]
 	testing.expectf(t, done, "the frames behind the TAILs waited for more bytes: %q, eof %v", h != nil ? string(h.buf[:]) : "", h != nil && h.eof)
-	if h != nil do testing.expect_value(t, h.exit, Exit_Info{known = true, code = 7})
-	sync.unlock(&hc.mu)
+	if h != nil do testing.expect_value(t, h.exit, core.Exit_Info{known = true, code = 7})
+	sync.unlock(&core.hc.mu)
 }
 
 // The automatic upgrade (holder_upgrade_tick): once per run, only after the launch's adopt, only
@@ -868,7 +869,7 @@ holder_upgrade_due_rule :: proc(t: ^testing.T) {
 		{false, true, false, false, false}, // same rev, newer, or no holder
 		{false, true, true, true, false}, // Restart session holder runs
 	}
-	for c, i in cases do testing.expectf(t, holder_upgrade_due(c.tried, c.adopt_done, c.wanted, c.running) == c.want, "case %d", i)
+	for c, i in cases do testing.expectf(t, core.holder_upgrade_due(c.tried, c.adopt_done, c.wanted, c.running) == c.want, "case %d", i)
 }
 
 // GOODBYE_ACK's successor secret is kept in hc's fixed buffer only: the frame's bytes (in the
@@ -876,8 +877,8 @@ holder_upgrade_due_rule :: proc(t: ^testing.T) {
 @(test)
 goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	holder_client_forget()
-	defer holder_client_forget()
+	core.holder_client_forget()
+	defer core.holder_client_forget()
 	secret := "00112233445566778899aabbccddeeff00112233445566778899aabbccddeeff"
 	out := make([dynamic]u8, context.temp_allocator)
 	hw.encode(&out, .Goodbye_Ack, 0, hw.Goodbye_Ack{terminals = {{id = 3, offset = 9}}, successor_secret = secret})
@@ -886,9 +887,9 @@ goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
 	hw.stream_feed(&rx, out[:])
 	f, err := hw.stream_next(&rx)
 	testing.expect_value(t, err, hw.Frame_Error.None)
-	testing.expect(t, goodbye_ack_take(f))
-	testing.expect_value(t, string(hc.successor[:hc.successor_len]), secret)
-	testing.expect_value(t, hc.ack[3], u64(9))
+	testing.expect(t, core.goodbye_ack_take(f))
+	testing.expect_value(t, string(core.hc.successor[:core.hc.successor_len]), secret)
+	testing.expect_value(t, core.hc.ack[3], u64(9))
 	for b, i in f.payload do if b != 0 {
 		testing.expectf(t, false, "payload byte %d not wiped", i)
 		break
@@ -900,19 +901,19 @@ goodbye_ack_secret_wiped :: proc(t: ^testing.T) {
 @(test)
 holder_upgrading_told_once :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	holder_client_forget()
-	defer holder_client_forget()
+	core.holder_client_forget()
+	defer core.holder_client_forget()
 	saved := state.settings.keep_sessions
 	defer state.settings.keep_sessions = saved
 	state.settings.keep_sessions = true
-	hc.on, hc.tried, hc.upgrading = true, true, true
+	core.hc.on, core.hc.tried, core.hc.upgrading = true, true, true
 	toast_clear()
-	testing.expect(t, !holder_wanted(), "spawned in the holder mid-upgrade")
+	testing.expect(t, !core.holder_wanted(), "spawned in the holder mid-upgrade")
 	testing.expect(t, strings.contains(toast.text, "upgrad"), toast.text)
 	toast_clear()
-	testing.expect(t, !holder_wanted())
+	testing.expect(t, !core.holder_wanted())
 	testing.expect_value(t, toast.text, "")
-	hc.upgrading = false
+	core.hc.upgrading = false
 }
 
 // An older holder that can't be upgraded in place (rev 1): holder_upgrade_tick says so once per
@@ -920,16 +921,16 @@ holder_upgrading_told_once :: proc(t: ^testing.T) {
 @(test)
 holder_upgrade_unavailable_told_once :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	holder_client_forget()
-	defer holder_client_forget()
-	hc.on, hc.adopt_done, hc.holder_rev = true, true, 1
+	core.holder_client_forget()
+	defer core.holder_client_forget()
+	core.hc.on, core.hc.adopt_done, core.hc.holder_rev = true, true, 1
 	toast_clear()
-	holder_upgrade_tick()
+	core.holder_upgrade_tick()
 	testing.expect(t, strings.contains(toast.text, "can't be updated in place"), toast.text)
 	testing.expect(t, !toast.err, "shown as an error")
-	testing.expect(t, !hc.upgrading, "an upgrade started for a rev-1 holder")
+	testing.expect(t, !core.hc.upgrading, "an upgrade started for a rev-1 holder")
 	toast_clear()
-	holder_upgrade_tick()
+	core.holder_upgrade_tick()
 	testing.expect_value(t, toast.text, "")
 }
 
@@ -939,17 +940,17 @@ holder_upgrade_unavailable_told_once :: proc(t: ^testing.T) {
 @(test)
 holder_rx_on_the_heap :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	f := Fake_Holder{mode = .Welcome}
-	fake_holder_start(t, &f)
-	defer fake_holder_stop(&f)
+	f := core.Fake_Holder{mode = .Welcome}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
 	// the heap underneath (what the caller's allocations are freed with later), but not the heap's
 	// procedure, so a buffer that adopted the caller's allocator shows
 	forward :: proc(data: rawptr, mode: runtime.Allocator_Mode, size, alignment: int, old_memory: rawptr, old_size: int, loc := #caller_location) -> ([]byte, runtime.Allocator_Error) {
 		return runtime.heap_allocator_proc(data, mode, size, alignment, old_memory, old_size, loc)
 	}
 	context.allocator = runtime.Allocator{forward, nil}
-	ok := holder_client_start()
+	ok := core.holder_client_start()
 	context.allocator = runtime.heap_allocator()
 	testing.expect(t, ok, "not attached")
-	testing.expect(t, hc.rx.buf.allocator.procedure == runtime.heap_allocator_proc, "hc.rx took the caller's allocator")
+	testing.expect(t, core.hc.rx.buf.allocator.procedure == runtime.heap_allocator_proc, "hc.rx took the caller's allocator")
 }

@@ -15,14 +15,15 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 import gh "ghostty"
 
 @(private = "file")
-CH_UI :: Caller{kind = .UI}
+CH_UI :: core.Caller{kind = .UI}
 @(private = "file")
-CH_SCRIPT :: Caller{kind = .Script}
+CH_SCRIPT :: core.Caller{kind = .Script}
 @(private = "file")
-CH_CONTROL :: Caller{kind = .Control}
+CH_CONTROL :: core.Caller{kind = .Control}
 
 @(private = "file")
 ch_dir :: proc(tag: string) -> string {
@@ -43,20 +44,20 @@ Ch_Env :: struct {
 @(private = "file")
 ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
-	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
+	core.persist = {}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	claude_found = .Yes
+	core.claude_found = .Yes
 	if !keep_dirs {
 		env.home = ch_dir("home")
 		env.root = ch_dir("data")
@@ -69,21 +70,21 @@ ch_reset :: proc(env: ^Ch_Env, keep_dirs := false) -> runtime.Allocator {
 		env.cli = fmt.aprintf("%s/deckhand-cli", cdir)
 		_ = os.write_entire_file(env.cli, transmute([]u8)string("#!/bin/sh\nexit 0\n"))
 	}
-	claude_cli_override = env.cli
+	core.claude_cli_override = env.cli
 	os.set_env("HOME", env.home)
-	home_root = env.root
+	core.home_root = env.root
 	// the environment first, the argv last: once ch_argv sees this start's argv, its env file is
 	// there too (a start's env written after the next start's ch_clear would be read as the next's)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s' "${{DECKHAND_CLAUDE_READONLY:-unset}}" > '%s.tmp'; mv '%s.tmp' '%s'; printf '%%s\n' "$@" > '%s.tmp'; mv '%s.tmp' '%s'; exec sleep 30`, env.envf, env.envf, env.envf, env.argf, env.argf, env.argf))
-	rescan_now()
+	core.rescan_now()
 	return runtime.heap_allocator()
 }
 
 @(private = "file")
 ch_done :: proc(old_home: string, old_root: string) {
 	os.set_env("HOME", old_home)
-	home_root = old_root
-	claude_cli_override = ""
+	core.home_root = old_root
+	core.claude_cli_override = ""
 }
 
 // claude's argv at its next start (call ch_clear before the start)
@@ -134,7 +135,7 @@ ch_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #caller_l
 	testing.expectf(t, ch_after(argv, "--setting-sources") == "user", "user settings only: %s", joined, loc = loc)
 	for tool in ([]string{"Edit", "Write", "NotebookEdit", "Agent", "Workflow", "CronCreate", "RemoteTrigger", "EnterWorktree", "mcp__*", "PowerShell", "Monitor"}) do testing.expectf(t, ch_has(argv, tool), "%s denied: %s", tool, joined, loc = loc)
 	testing.expectf(t, !ch_has(argv, "Bash"), "Bash stays, behind the guard: %s", joined, loc = loc)
-	prof := claude_readonly_profile(env.cli, ch_nonce(argv))
+	prof := core.claude_readonly_profile(env.cli, ch_nonce(argv))
 	n := len(prof)
 	testing.expectf(t, len(argv) >= n && strings.join(argv[len(argv) - n:], "\x1f", context.temp_allocator) == strings.join(prof, "\x1f", context.temp_allocator), "the profile is last: %s", joined, loc = loc)
 	// the settings: deny rules, no bypass or auto mode, hooks on, the guard with an absolute,
@@ -166,7 +167,7 @@ ch_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #caller_l
 		testing.expect_value(t, h["onFailure"].(json.String) or_else "", "block", loc = loc)
 		testing.expectf(t, (h["async"].(json.Boolean) or_else false) == false, "sync", loc = loc)
 		cmd := string(h["command"].(json.String) or_else "")
-		testing.expectf(t, strings.has_prefix(cmd, claude_sh_quote(env.cli)) && strings.has_suffix(cmd, " hook readonly || exit 2"), "guard command: %s", cmd, loc = loc)
+		testing.expectf(t, strings.has_prefix(cmd, core.claude_sh_quote(env.cli)) && strings.has_suffix(cmd, " hook readonly || exit 2"), "guard command: %s", cmd, loc = loc)
 	}
 	testing.expectf(t, ch_env_ro(env) == "1", "DECKHAND_CLAUDE_READONLY=1", loc = loc)
 }
@@ -182,7 +183,7 @@ ch_not_readonly :: proc(t: ^testing.T, env: Ch_Env, argv: []string, loc := #call
 // The user's flags a read-only tab keeps (an allowlist), the first it refuses.
 @(test)
 ch_readonly_args :: proc(t: ^testing.T) {
-	kept, bad := claude_readonly_args({"--model", "opus", "--effort=high", "--verbose", "--fallback-model", "sonnet"})
+	kept, bad := core.claude_readonly_args({"--model", "opus", "--effort=high", "--verbose", "--fallback-model", "sonnet"})
 	testing.expect_value(t, bad, "")
 	testing.expect_value(t, len(kept), 6)
 	refused := [][]string {
@@ -193,11 +194,11 @@ ch_readonly_args :: proc(t: ^testing.T) {
 		{"-m", "x"}, {"--ide"}, {"--strict-mcp-config"},
 	}
 	for args in refused {
-		_, b := claude_readonly_args(args)
+		_, b := core.claude_readonly_args(args)
 		testing.expectf(t, b != "", "%v refused", args)
 	}
 	// the refusal names the flag, never its value
-	_, b := claude_readonly_args({`--settings={"env":{"X":"secret"}}`})
+	_, b := core.claude_readonly_args({`--settings={"env":{"X":"secret"}}`})
 	testing.expect_value(t, b, "--settings")
 }
 
@@ -206,37 +207,37 @@ ch_readonly_args :: proc(t: ^testing.T) {
 @(test)
 ch_chats_off :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	testing.expect(t, c != nil)
 	if c == nil do return
 	testing.expect(t, !state.settings.chats_readonly)
 	ch_clear(env)
-	r := run_command(New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions"}}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions"}}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	argv := ch_argv(env)
 	ch_not_readonly(t, env, argv)
 	testing.expect(t, ch_has(argv, "--dangerously-skip-permissions"), "the user's flags")
-	s := find_session(r.created_id)
-	testing.expect(t, s != nil && s.agent == .Claude && open_session_is_chat(s))
+	s := core.find_session(r.created_id)
+	testing.expect(t, s != nil && s.agent == .Claude && core.open_session_is_chat(s))
 	if s == nil do return
-	run_command(Claude_Session_Report{tab_id = s.tabs[0].id, session_id = "c1c1c1c1-0000-4000-8000-0000000000aa"}, CH_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = s.tabs[0].id, state = "submitted", title = "chat about cats"}, CH_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = s.tabs[0].id, session_id = "c1c1c1c1-0000-4000-8000-0000000000aa"}, CH_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = s.tabs[0].id, state = "submitted", title = "chat about cats"}, CH_SCRIPT)
 	found := false
-	for row in sidebar_sessions(.Chats) do if row.session.claude && row.session.title == "chat about cats" do found = true
+	for row in core.sidebar_sessions(.Chats) do if row.session.claude && row.session.title == "chat about cats" do found = true
 	testing.expect(t, found, "its row in Chats")
 	_, label, extra := tab_label(s, s.tabs[0])
 	testing.expect(t, extra != "read-only", label)
 	// a Claude tab in a pi chat: the user's, and an agent's
-	chat := run_command(New_Chat{project_id = c.id}, CH_UI).created_id
+	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
 	ch_clear(env)
-	rt := run_command(New_Claude_Tab{session = chat}, CH_UI)
+	rt := core.run_command(core.New_Claude_Tab{session = chat}, CH_UI)
 	testing.expect(t, rt.ok, rt.error)
 	ch_not_readonly(t, env, ch_argv(env))
 	ch_clear(env)
-	ra := run_command(New_Claude_Tab{session = chat}, CH_CONTROL)
+	ra := core.run_command(core.New_Claude_Tab{session = chat}, CH_CONTROL)
 	testing.expect(t, ra.ok, ra.error)
 	ch_not_readonly(t, env, ch_argv(env))
 }
@@ -246,48 +247,48 @@ ch_chats_off :: proc(t: ^testing.T) {
 @(test)
 ch_chats_readonly_new :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	testing.expect(t, run_command(Set_Chats_Readonly{on = true}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI).ok)
 	ch_clear(env)
-	r := run_command(New_Claude_Session{project_id = c.id, args = {"--model", "opus"}}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id, args = {"--model", "opus"}}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	argv := ch_argv(env)
 	ch_readonly(t, env, argv)
 	testing.expect(t, ch_after(argv, "--model") == "opus", "a model goes along")
-	s := find_session(r.created_id)
+	s := core.find_session(r.created_id)
 	_, _, extra := tab_label(s, s.tabs[0])
 	testing.expect_value(t, extra, "read-only")
 	tb := strings.builder_make(context.temp_allocator)
-	claude_tab_json(&tb, s.tabs[0])
+	core.claude_tab_json(&tb, s.tabs[0])
 	testing.expect(t, strings.contains(strings.to_string(tb), `"readonly":true`), "the snapshot says so")
 	n := len(state.open_sessions)
 	for args in ([][]string{{"--dangerously-skip-permissions"}, {"--permission-mode", "acceptEdits"}, {"--settings", "{}"}, {"--allowedTools", "Bash"}}) {
-		rr := run_command(New_Claude_Session{project_id = c.id, args = args}, CH_UI)
+		rr := core.run_command(core.New_Claude_Session{project_id = c.id, args = args}, CH_UI)
 		testing.expectf(t, !rr.ok && strings.contains(rr.error, "read-only chat"), "%v refused: %s", args, rr.error)
 	}
 	testing.expect_value(t, len(state.open_sessions), n)
 	// in a pi chat: the user's tab and an agent's
-	chat := run_command(New_Chat{project_id = c.id}, CH_UI).created_id
-	testing.expect(t, !run_command(New_Claude_Tab{session = chat, args = {"--permission-mode", "default"}}, CH_UI).ok)
+	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{session = chat, args = {"--permission-mode", "default"}}, CH_UI).ok)
 	ch_clear(env)
-	testing.expect(t, run_command(New_Claude_Tab{session = chat}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Tab{session = chat}, CH_UI).ok)
 	ch_readonly(t, env, ch_argv(env))
 	ch_clear(env)
-	ra := run_command(New_Claude_Session{project_id = c.id}, CH_CONTROL)
+	ra := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_CONTROL)
 	testing.expect(t, ra.ok, ra.error)
 	ch_readonly(t, env, ch_argv(env))
 	ch_clear(env)
-	testing.expect(t, run_command(New_Claude_Tab{session = chat}, CH_CONTROL).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Tab{session = chat}, CH_CONTROL).ok)
 	ch_readonly(t, env, ch_argv(env))
 	// a project's Claude stays as it was
 	pdir := ch_dir("proj")
-	pid := run_command(Add_Project{cwd = pdir}, CH_UI).created_id
+	pid := core.run_command(core.Add_Project{cwd = pdir}, CH_UI).created_id
 	ch_clear(env)
-	testing.expect(t, run_command(New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.New_Claude_Session{project_id = pid, args = {"--dangerously-skip-permissions"}}, CH_UI).ok)
 	ch_not_readonly(t, env, ch_argv(env))
 }
 
@@ -295,15 +296,15 @@ ch_chats_readonly_new :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_needs_guard :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	claude_cli_override = "-" // "-": no CLI (tests)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	core.claude_cli_override = "-" // "-": no CLI (tests)
 	ch_clear(env)
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	testing.expect(t, !r.ok, "refused")
 	testing.expect(t, !os.exists(env.argf), "claude never started")
 }
@@ -314,75 +315,75 @@ ch_readonly_needs_guard :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_kept :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
 	sid := "c2c2c2c2-0000-4000-8000-000000000001"
 	// begun before read-only went on, with flags of the user's
-	r := run_command(New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions", "--model", "opus"}}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id, args = {"--dangerously-skip-permissions", "--model", "opus"}}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, len(ch_argv(env)) > 0, "started") // its argv written before the next start's
-	s := find_session(r.created_id)
+	s := core.find_session(r.created_id)
 	tab := s.tabs[0].id
-	run_command(Claude_Session_Report{tab_id = tab, session_id = sid}, CH_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = tab, state = "submitted", title = "later"}, CH_SCRIPT)
-	testing.expect(t, run_command(Set_Chats_Readonly{on = true}, CH_UI).ok)
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CH_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "later"}, CH_SCRIPT)
+	testing.expect(t, core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI).ok)
 	// an agent's restart after it exited (its process gone)
-	drop_term(tab)
-	run_command(Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
+	core.drop_term(tab)
+	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
 	ch_clear(env)
-	rr0 := run_command(Claude_Restart{tab_id = tab}, CH_CONTROL)
+	rr0 := core.run_command(core.Claude_Restart{tab_id = tab}, CH_CONTROL)
 	testing.expect(t, rr0.ok, rr0.error)
 	ch_readonly(t, env, ch_argv(env))
 	// the user's restart: the saved bypass is left out, the model goes along
-	drop_term(tab)
-	run_command(Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
+	core.drop_term(tab)
+	core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
 	ch_clear(env)
-	testing.expect(t, run_command(Focus_Session{session = s.id, reopen = true}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.Focus_Session{session = s.id, reopen = true}, CH_UI).ok)
 	argv := ch_argv(env)
 	ch_readonly(t, env, argv)
 	testing.expect(t, !ch_has(argv, "--dangerously-skip-permissions"), "the saved bypass is left out")
 	testing.expect(t, ch_has(argv, "--model") && ch_after(argv, "--resume") == sid)
 	// saved, then the setting goes off, then restored: still read-only (the tab's)
-	text := strings.clone(workspace_json())
+	text := strings.clone(core.workspace_json())
 	testing.expect(t, strings.contains(text, `"readonly": true`) || strings.contains(text, `"readonly":true`), "saved with the tab")
 	context.allocator = ch_reset(&env, keep_dirs = true)
-	testing.expect_value(t, workspace_restore(text), "")
-	run_command(Set_Chats_Readonly{on = false}, CH_UI)
+	testing.expect_value(t, core.workspace_restore(text), "")
+	core.run_command(core.Set_Chats_Readonly{on = false}, CH_UI)
 	testing.expect_value(t, len(state.open_sessions), 1)
 	if len(state.open_sessions) != 1 do return
 	rs := &state.open_sessions[0]
-	testing.expect(t, open_session_is_chat(rs), "restored into Chats")
+	testing.expect(t, core.open_session_is_chat(rs), "restored into Chats")
 	ch_clear(env)
 	state.current_session = 0
-	run_command(Focus_Session{session = rs.id}, CH_UI)
+	core.run_command(core.Focus_Session{session = rs.id}, CH_UI)
 	argv = ch_argv(env)
 	ch_readonly(t, env, argv)
 	testing.expect(t, !ch_has(argv, "--dangerously-skip-permissions"))
 	// closed, then resumed from its row by an agent (no flags of the user's, the profile kept)
 	rsid := rs.id
-	run_command(Close_Session{session = rsid, confirm = ""}, CH_UI)
-	for &p in state.pending_confirmations do run_command(Close_Session{session = rsid, confirm = p.token}, CH_UI)
+	core.run_command(core.Close_Session{session = rsid, confirm = ""}, CH_UI)
+	for &p in state.pending_confirmations do core.run_command(core.Close_Session{session = rsid, confirm = p.token}, CH_UI)
 	testing.expect_value(t, len(state.open_sessions), 0)
 	ch_clear(env)
-	ar := run_command(Claude_Resume{claude_session_id = sid}, CH_CONTROL)
+	ar := core.run_command(core.Claude_Resume{claude_session_id = sid}, CH_CONTROL)
 	testing.expect(t, ar.ok, ar.error)
 	argv = ch_argv(env)
 	ch_readonly(t, env, argv)
 	testing.expect(t, !ch_has(argv, "--model"), "an agent's resume: no flags of the user's")
-	testing.expect(t, len(state.open_sessions) == 1 && open_session_is_chat(&state.open_sessions[0]), "resumed into Chats")
+	testing.expect(t, len(state.open_sessions) == 1 && core.open_session_is_chat(&state.open_sessions[0]), "resumed into Chats")
 	// and as a Claude tab of another chat by an agent (resume): still read-only
 	if len(state.open_sessions) == 1 {
 		id := state.open_sessions[0].id
-		run_command(Close_Session{session = id, confirm = ""}, CH_UI)
-		for &p in state.pending_confirmations do run_command(Close_Session{session = id, confirm = p.token}, CH_UI)
+		core.run_command(core.Close_Session{session = id, confirm = ""}, CH_UI)
+		for &p in state.pending_confirmations do core.run_command(core.Close_Session{session = id, confirm = p.token}, CH_UI)
 	}
-	c = chats_project() // a new state since the restore
-	chat := run_command(New_Chat{project_id = c.id}, CH_UI).created_id
+	c = core.chats_project() // a new state since the restore
+	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
 	ch_clear(env)
-	nt := run_command(New_Claude_Tab{session = chat, resume = sid}, CH_CONTROL)
+	nt := core.run_command(core.New_Claude_Tab{session = chat, resume = sid}, CH_CONTROL)
 	testing.expect(t, nt.ok, nt.error)
 	ch_readonly(t, env, ch_argv(env))
 }
@@ -392,23 +393,23 @@ ch_readonly_kept :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_no_act :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	testing.expect(t, r.ok, r.error)
-	tab := find_session(r.created_id).tabs[0].id
-	me := Caller{kind = .Panel, tab_id = tab, claude = true}
-	acts := []Command{Browser_Click{tab_id = 1}, Browser_Type{tab_id = 1}, Browser_Press{tab_id = 1}, Browser_Select{tab_id = 1}, Browser_Upload{tab_id = 1}, App_Input{tab_id = 1}, App_Call{tab_id = 1}}
+	tab := core.find_session(r.created_id).tabs[0].id
+	me := core.Caller{kind = .Panel, tab_id = tab, claude = true}
+	acts := []core.Command{core.Browser_Click{tab_id = 1}, core.Browser_Type{tab_id = 1}, core.Browser_Press{tab_id = 1}, core.Browser_Select{tab_id = 1}, core.Browser_Upload{tab_id = 1}, core.App_Input{tab_id = 1}, core.App_Call{tab_id = 1}}
 	for cmd in acts {
-		rr := run_command(cmd, me)
-		testing.expectf(t, !rr.ok && strings.contains(rr.error, "read-only"), "%v: %s", command_type(cmd), rr.error)
+		rr := core.run_command(cmd, me)
+		testing.expectf(t, !rr.ok && strings.contains(rr.error, "read-only"), "%v: %s", core.command_type(cmd), rr.error)
 	}
 	// reading is the session checks' as before (no such tab here), not the read-only refusal
-	rr := run_command(Browser_Tabs{session = r.created_id}, me)
+	rr := core.run_command(core.Browser_Tabs{session = r.created_id}, me)
 	testing.expect(t, !strings.contains(rr.error, "read-only"), rr.error)
 }
 
@@ -417,31 +418,31 @@ ch_readonly_no_act :: proc(t: ^testing.T) {
 @(test)
 ch_chats_offered :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	claude_installed_probe = proc() -> bool {return true}
+	core.claude_installed_probe = proc() -> bool {return true}
 	testing.expect(t, action_ok("new_chat"), "New chat")
 	all_choices := ""
-	for it in new_session_choices(c, "") do all_choices = strings.concatenate({all_choices, it.label, "|"}, context.temp_allocator)
+	for it in core.new_session_choices(c, "") do all_choices = strings.concatenate({all_choices, it.label, "|"}, context.temp_allocator)
 	testing.expect(t, strings.contains(all_choices, "Claude Code"), all_choices)
-	claude_installed_probe = nil
-	chat := run_command(New_Chat{project_id = c.id}, CH_UI).created_id
+	core.claude_installed_probe = nil
+	chat := core.run_command(core.New_Chat{project_id = c.id}, CH_UI).created_id
 	testing.expect(t, action_ok("new_claude_tab"), "with a chat on screen")
-	menu_open(Menu_Session{project_id = c.id, pi_session_id = find_session(chat).pi_session_id}, {})
+	menu_open(Menu_Session{project_id = c.id, pi_session_id = core.find_session(chat).pi_session_id}, {})
 	labels := make([dynamic]string, context.temp_allocator)
 	for it in menu_items() do append(&labels, it.label)
 	menu_close()
 	all := strings.join(labels[:], "|", context.temp_allocator)
 	testing.expect(t, strings.contains(all, "New Claude tab"), all)
 	// not installed: not offered, and refused
-	claude_found = .No
-	claude_installed_probe = proc() -> bool {return false}
-	defer claude_installed_probe = nil
-	for it in new_session_choices(c, "") do testing.expect(t, !strings.contains(it.label, "Claude"), it.label)
-	testing.expect(t, !run_command(New_Claude_Session{project_id = c.id}, CH_UI).ok)
+	core.claude_found = .No
+	core.claude_installed_probe = proc() -> bool {return false}
+	defer core.claude_installed_probe = nil
+	for it in core.new_session_choices(c, "") do testing.expect(t, !strings.contains(it.label, "Claude"), it.label)
+	testing.expect(t, !core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI).ok)
 }
 
 @(private = "file")
@@ -465,16 +466,16 @@ ch_guard_fails_closed :: proc(t: ^testing.T) {
 		posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 	}
 	cli := fmt.tprintf("%s/deckhand-cli", dir)
-	sh :: proc(c: string) -> string {return fmt.tprintf("/bin/sh -c %s", claude_sh_quote(c))}
-	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 2) // missing
+	sh :: proc(c: string) -> string {return fmt.tprintf("/bin/sh -c %s", core.claude_sh_quote(c))}
+	testing.expect_value(t, run(sh(core.claude_readonly_hook_command(cli))), 2) // missing
 	script(cli, "exit 1")
-	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 2)
+	testing.expect_value(t, run(sh(core.claude_readonly_hook_command(cli))), 2)
 	script(cli, "kill -9 $$")
-	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 2)
+	testing.expect_value(t, run(sh(core.claude_readonly_hook_command(cli))), 2)
 	script(cli, "exit 2")
-	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 2)
+	testing.expect_value(t, run(sh(core.claude_readonly_hook_command(cli))), 2)
 	script(cli, `[ "$1 $2" = "hook readonly" ] || exit 1; exit 0`)
-	testing.expect_value(t, run(sh(claude_readonly_hook_command(cli))), 0)
+	testing.expect_value(t, run(sh(core.claude_readonly_hook_command(cli))), 0)
 }
 
 // ---- review round 1 ----
@@ -503,21 +504,21 @@ ch_nonce :: proc(argv: []string) -> string {
 @(test)
 ch_label_follows_process :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	ch_not_readonly(t, env, ch_argv(env))
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	s := find_session(r.created_id)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	s := core.find_session(r.created_id)
 	_, _, extra := tab_label(s, s.tabs[0])
 	testing.expect_value(t, extra, "read-only after restart")
 	// its token still acts (it is a full Claude): consistent with the label
-	me := Caller{kind = .Panel, tab_id = s.tabs[0].id, claude = true}
-	testing.expect(t, !strings.contains(run_command(Browser_Click{tab_id = 1}, me).error, "read-only"))
+	me := core.Caller{kind = .Panel, tab_id = s.tabs[0].id, claude = true}
+	testing.expect(t, !strings.contains(core.run_command(core.Browser_Click{tab_id = 1}, me).error, "read-only"))
 }
 
 // 2. The profile must prove it loaded: its SessionStart hook acks with the start's nonce. No ack
@@ -525,79 +526,79 @@ ch_label_follows_process :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_ack :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	start :: proc(env: Ch_Env, c: ^Project) -> (tab: u64, nonce: string) {
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	start :: proc(env: Ch_Env, c: ^core.Project) -> (tab: u64, nonce: string) {
 		ch_clear(env)
-		r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+		r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 		argv := ch_argv(env)
-		return find_session(r.created_id).tabs[0].id, strings.clone(ch_nonce(argv))
+		return core.find_session(r.created_id).tabs[0].id, strings.clone(ch_nonce(argv))
 	}
 	now := time.tick_now()
 	// a: the session reports, no ack: stopped after 10 s
 	a, na := start(env, c)
 	testing.expect(t, len(na) >= 32, "a nonce in the ack hook")
-	run_command(Claude_Session_Report{tab_id = a, session_id = "a0a0a0a0-0000-4000-8000-000000000001"}, CH_SCRIPT)
-	claude_readonly_tick(time.tick_add(now, 5 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(a), "not before its time")
-	claude_readonly_tick(time.tick_add(now, 11 * time.Second))
-	testing.expect(t, claude_readonly_stopped(a), "stopped without the ack")
-	sa, ta, _ := find_tab(a)
+	core.run_command(core.Claude_Session_Report{tab_id = a, session_id = "a0a0a0a0-0000-4000-8000-000000000001"}, CH_SCRIPT)
+	core.claude_readonly_tick(time.tick_add(now, 5 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(a), "not before its time")
+	core.claude_readonly_tick(time.tick_add(now, 11 * time.Second))
+	testing.expect(t, core.claude_readonly_stopped(a), "stopped without the ack")
+	sa, ta, _ := core.find_tab(a)
 	_, _, ex := tab_label(sa, ta^)
 	testing.expectf(t, strings.contains(ex, "not confirmed"), "label: %s", ex)
 	// b: acked (its own token, its nonce): runs on
 	b, nb := start(env, c)
-	me := Caller{kind = .Panel, tab_id = b, claude = true}
-	testing.expect(t, !run_command(Claude_Readonly_Ack{tab_id = b, nonce = "wrong"}, me).ok, "a wrong nonce")
-	testing.expect(t, !run_command(Claude_Readonly_Ack{tab_id = b, nonce = nb}, Caller{kind = .Panel, tab_id = a, claude = true}).ok, "another tab's token")
-	testing.expect(t, !run_command(Claude_Readonly_Ack{tab_id = b, nonce = nb}, CH_CONTROL).ok, "an agent")
-	rb := run_command(Claude_Readonly_Ack{tab_id = b, nonce = nb}, me)
+	me := core.Caller{kind = .Panel, tab_id = b, claude = true}
+	testing.expect(t, !core.run_command(core.Claude_Readonly_Ack{tab_id = b, nonce = "wrong"}, me).ok, "a wrong nonce")
+	testing.expect(t, !core.run_command(core.Claude_Readonly_Ack{tab_id = b, nonce = nb}, core.Caller{kind = .Panel, tab_id = a, claude = true}).ok, "another tab's token")
+	testing.expect(t, !core.run_command(core.Claude_Readonly_Ack{tab_id = b, nonce = nb}, CH_CONTROL).ok, "an agent")
+	rb := core.run_command(core.Claude_Readonly_Ack{tab_id = b, nonce = nb}, me)
 	testing.expect(t, rb.ok, rb.error)
-	testing.expect(t, !run_command(Claude_Readonly_Ack{tab_id = b, nonce = nb}, me).ok, "once")
-	run_command(Claude_Session_Report{tab_id = b, session_id = "a0a0a0a0-0000-4000-8000-000000000002"}, CH_SCRIPT)
-	claude_readonly_tick(time.tick_add(now, 200 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(b), "acked: runs on")
+	testing.expect(t, !core.run_command(core.Claude_Readonly_Ack{tab_id = b, nonce = nb}, me).ok, "once")
+	core.run_command(core.Claude_Session_Report{tab_id = b, session_id = "a0a0a0a0-0000-4000-8000-000000000002"}, CH_SCRIPT)
+	core.claude_readonly_tick(time.tick_add(now, 200 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(b), "acked: runs on")
 	// c: a prompt before the ack: stopped at once, and a late ack is refused
 	cc, nc := start(env, c)
-	run_command(Claude_Turn_Report{tab_id = cc, state = "submitted", title = "x"}, CH_SCRIPT)
-	testing.expect(t, claude_readonly_stopped(cc), "a prompt before the ack")
-	testing.expect(t, !run_command(Claude_Readonly_Ack{tab_id = cc, nonce = nc}, Caller{kind = .Panel, tab_id = cc, claude = true}).ok)
+	core.run_command(core.Claude_Turn_Report{tab_id = cc, state = "submitted", title = "x"}, CH_SCRIPT)
+	testing.expect(t, core.claude_readonly_stopped(cc), "a prompt before the ack")
+	testing.expect(t, !core.run_command(core.Claude_Readonly_Ack{tab_id = cc, nonce = nc}, core.Caller{kind = .Panel, tab_id = cc, claude = true}).ok)
 	// d: no hook ran at all: stopped 120 s after Claude's prompt came up (bracketed paste on), not
 	// while a startup dialog (folder trust, login) sits open before it
 	d, _ := start(env, c)
-	claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(d), "a startup dialog left open: not stopped")
-	td := term_of(d)
+	core.claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(d), "a startup dialog left open: not stopped")
+	td := core.term_of(d)
 	if td == nil {testing.fail(t);return}
 	on := "\x1b[?2004h"
 	gh.terminal_vt_write(td.gt, raw_data(on), len(on))
 	up := time.tick_add(time.tick_now(), 300 * time.Second)
-	claude_readonly_tick(up) // its prompt is up: the clock starts
-	claude_readonly_tick(time.tick_add(up, 60 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(d))
-	claude_readonly_tick(time.tick_add(up, 121 * time.Second))
-	testing.expect(t, claude_readonly_stopped(d), "no hook within 120 s of its prompt")
-	testing.expect(t, strings.contains(CLAUDE_GUARD_STOPPED, "startup dialog"), "the message names both causes")
+	core.claude_readonly_tick(up) // its prompt is up: the clock starts
+	core.claude_readonly_tick(time.tick_add(up, 60 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(d))
+	core.claude_readonly_tick(time.tick_add(up, 121 * time.Second))
+	testing.expect(t, core.claude_readonly_stopped(d), "no hook within 120 s of its prompt")
+	testing.expect(t, strings.contains(core.CLAUDE_GUARD_STOPPED, "startup dialog"), "the message names both causes")
 	// d2: Claude's own OSC 7501 reporting (not blocked, which may be a dialog) starts it too
 	d2, _ := start(env, c)
-	_, tab2, _ := find_tab(d2)
+	_, tab2, _ := core.find_tab(d2)
 	tab2.prog.state = .Blocked
-	claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(d2), "blocked: maybe a dialog")
+	core.claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(d2), "blocked: maybe a dialog")
 	tab2.prog.state = .Idle
 	up2 := time.tick_add(time.tick_now(), 300 * time.Second)
-	claude_readonly_tick(up2)
-	claude_readonly_tick(time.tick_add(up2, 121 * time.Second))
-	testing.expect(t, claude_readonly_stopped(d2), "OSC 7501 idle: the clock ran")
+	core.claude_readonly_tick(up2)
+	core.claude_readonly_tick(time.tick_add(up2, 121 * time.Second))
+	testing.expect(t, core.claude_readonly_stopped(d2), "OSC 7501 idle: the clock ran")
 	// a full tab needs no ack
-	run_command(Set_Chats_Readonly{on = false}, CH_UI)
+	core.run_command(core.Set_Chats_Readonly{on = false}, CH_UI)
 	e, _ := start(env, c)
-	claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
-	testing.expect(t, !claude_readonly_stopped(e))
+	core.claude_readonly_tick(time.tick_add(time.tick_now(), 200 * time.Second))
+	testing.expect(t, !core.claude_readonly_stopped(e))
 }
 
 // 5. A read-only conversation stays read-only after its history entry is gone (the 100 cap, or
@@ -605,46 +606,46 @@ ch_readonly_ack :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_ids_kept :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
 	sid := "b1b1b1b1-0000-4000-8000-000000000001"
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	ch_argv(env)
-	tab := find_session(r.created_id).tabs[0].id
-	run_command(Claude_Session_Report{tab_id = tab, session_id = sid}, CH_SCRIPT)
+	tab := core.find_session(r.created_id).tabs[0].id
+	core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = sid}, CH_SCRIPT)
 	// saved; then loaded with its history entry gone
-	text := strings.clone(workspace_json())
+	text := strings.clone(core.workspace_json())
 	if i := strings.index(text, `"claude_sessions"`); i >= 0 {
 		// drop the history from the saved text
 		j := strings.index(text[i:], "]")
 		text = strings.concatenate({text[:i], `"claude_sessions_x":[`, text[i + j:]})
 	}
 	context.allocator = ch_reset(&env, keep_dirs = true)
-	testing.expect_value(t, workspace_restore(text), "")
+	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect(t, rec_none(sid), "the history entry is gone")
 	for len(state.open_sessions) > 0 {
 		id := state.open_sessions[0].id
-		run_command(Close_Session{session = id, confirm = ""}, CH_UI)
-		for &p in state.pending_confirmations do run_command(Close_Session{session = id, confirm = p.token}, CH_UI)
+		core.run_command(core.Close_Session{session = id, confirm = ""}, CH_UI)
+		for &p in state.pending_confirmations do core.run_command(core.Close_Session{session = id, confirm = p.token}, CH_UI)
 		if len(state.open_sessions) > 0 && state.open_sessions[0].id == id do break
 	}
 	pdir := ch_dir("proj")
-	pid := run_command(Add_Project{cwd = pdir}, CH_UI).created_id
+	pid := core.run_command(core.Add_Project{cwd = pdir}, CH_UI).created_id
 	ch_clear(env)
-	nt := run_command(New_Claude_Tab{project_id = pid, resume = sid}, CH_UI)
+	nt := core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid}, CH_UI)
 	testing.expect(t, nt.ok, nt.error)
 	ch_readonly(t, env, ch_argv(env))
 	// and the user's flags are limited there too
-	testing.expect(t, !run_command(New_Claude_Tab{project_id = pid, resume = sid, args = {"--dangerously-skip-permissions"}}, CH_UI).ok)
+	testing.expect(t, !core.run_command(core.New_Claude_Tab{project_id = pid, resume = sid, args = {"--dangerously-skip-permissions"}}, CH_UI).ok)
 }
 
 @(private = "file")
 rec_none :: proc(id: string) -> bool {
-	r, _ := claude_record(id)
+	r, _ := core.claude_record(id)
 	return r == nil
 }
 
@@ -652,18 +653,18 @@ rec_none :: proc(id: string) -> bool {
 @(test)
 ch_readonly_polish :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	argv := ch_argv(env)
-	tail := argv[len(argv) - len(CLAUDE_READONLY_DENY):]
+	tail := argv[len(argv) - len(core.CLAUDE_READONLY_DENY):]
 	testing.expect(t, ch_has(tail, "Task") && ch_has(tail, "ExitPlanMode"), strings.join(tail, " ", context.temp_allocator))
-	me := Caller{kind = .Panel, tab_id = find_session(r.created_id).tabs[0].id, claude = true}
-	testing.expect(t, strings.contains(run_command(Browser_Hover{tab_id = 1}, me).error, "read-only"))
+	me := core.Caller{kind = .Panel, tab_id = core.find_session(r.created_id).tabs[0].id, claude = true}
+	testing.expect(t, strings.contains(core.run_command(core.Browser_Hover{tab_id = 1}, me).error, "read-only"))
 }
 
 // Nothing Deckhand types (an agent's held message, Restart with model's /model) goes into a
@@ -671,22 +672,22 @@ ch_readonly_polish :: proc(t: ^testing.T) {
 @(test)
 ch_ack_holds_messages :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 	nonce := strings.clone(ch_nonce(ch_argv(env)))
-	tid := find_session(r.created_id).tabs[0].id
-	run_command(Claude_Session_Report{tab_id = tid, session_id = "c4c4c4c4-0000-4000-8000-000000000001"}, CH_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = tid, state = "idle"}, CH_SCRIPT)
-	_, tab, ct := claude_tab_of(tid)
-	_, why := claude_ready(tab, ct)
+	tid := core.find_session(r.created_id).tabs[0].id
+	core.run_command(core.Claude_Session_Report{tab_id = tid, session_id = "c4c4c4c4-0000-4000-8000-000000000001"}, CH_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tid, state = "idle"}, CH_SCRIPT)
+	_, tab, ct := core.claude_tab_of(tid)
+	_, why := core.claude_ready(tab, ct)
 	testing.expectf(t, strings.contains(why, "read-only guard"), "waits for the ack: %s", why)
-	testing.expect(t, run_command(Claude_Readonly_Ack{tab_id = tid, nonce = nonce}, Caller{kind = .Panel, tab_id = tid, claude = true}).ok)
-	_, why = claude_ready(tab, ct)
+	testing.expect(t, core.run_command(core.Claude_Readonly_Ack{tab_id = tid, nonce = nonce}, core.Caller{kind = .Panel, tab_id = tid, claude = true}).ok)
+	_, why = core.claude_ready(tab, ct)
 	testing.expectf(t, !strings.contains(why, "read-only guard"), "after the ack: %s", why)
 }
 
@@ -696,32 +697,32 @@ ch_ack_holds_messages :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_ids_lru :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	testing.expect_value(t, CLAUDE_READONLY_IDS_MAX, 10_000)
+	testing.expect_value(t, core.CLAUDE_READONLY_IDS_MAX, 10_000)
 	id :: proc(n: int) -> string {return fmt.tprintf("%08x-0000-4000-8000-000000000000", n)}
-	for n in 0 ..< CLAUDE_READONLY_IDS_MAX do claude_readonly_mark(id(n))
-	claude_readonly_mark(id(0)) // used again: now the most recent
-	claude_readonly_mark(id(CLAUDE_READONLY_IDS_MAX)) // one more: the least recent (1) goes
-	testing.expect_value(t, len(state.claude_readonly_ids), CLAUDE_READONLY_IDS_MAX)
-	testing.expect(t, claude_readonly_known(id(0)), "re-marked: kept")
-	testing.expect(t, !claude_readonly_known(id(1)), "least recently used: gone")
+	for n in 0 ..< core.CLAUDE_READONLY_IDS_MAX do core.claude_readonly_mark(id(n))
+	core.claude_readonly_mark(id(0)) // used again: now the most recent
+	core.claude_readonly_mark(id(core.CLAUDE_READONLY_IDS_MAX)) // one more: the least recent (1) goes
+	testing.expect_value(t, len(state.claude_readonly_ids), core.CLAUDE_READONLY_IDS_MAX)
+	testing.expect(t, core.claude_readonly_known(id(0)), "re-marked: kept")
+	testing.expect(t, !core.claude_readonly_known(id(1)), "least recently used: gone")
 	testing.expect_value(t, state.claude_readonly_ids[len(state.claude_readonly_ids) - 2], id(0))
 	// restore: the saved list first (its order), then records not in it, up to the cap
 	clear(&state.claude_readonly_ids)
-	rec := proc(n: int) -> Claude_Record {return Claude_Record{id = id(n), project = "/p", readonly = true}}
-	run_command(Claude_Restore_History{readonly_ids = {id(5), id(6)}, records = {rec(7), rec(5)}}, {kind = .Internal})
+	rec := proc(n: int) -> core.Claude_Record {return core.Claude_Record{id = id(n), project = "/p", readonly = true}}
+	core.run_command(core.Claude_Restore_History{readonly_ids = {id(5), id(6)}, records = {rec(7), rec(5)}}, {kind = .Internal})
 	got := strings.join(state.claude_readonly_ids[:], ",", context.temp_allocator)
 	testing.expect_value(t, got, strings.join({id(5), id(6), id(7)}, ",", context.temp_allocator))
 	clear(&state.claude_readonly_ids)
 	clear(&state.claude_history)
-	saved := make([]string, CLAUDE_READONLY_IDS_MAX, context.temp_allocator)
+	saved := make([]string, core.CLAUDE_READONLY_IDS_MAX, context.temp_allocator)
 	for &s, n in saved do s = strings.clone(id(n), context.temp_allocator)
-	run_command(Claude_Restore_History{readonly_ids = saved, records = {rec(CLAUDE_READONLY_IDS_MAX + 1)}}, {kind = .Internal})
-	testing.expect_value(t, len(state.claude_readonly_ids), CLAUDE_READONLY_IDS_MAX)
-	testing.expect(t, claude_readonly_known(id(0)), "the saved list comes first")
-	testing.expect_value(t, state.claude_readonly_ids[len(state.claude_readonly_ids) - 1], id(CLAUDE_READONLY_IDS_MAX - 1))
+	core.run_command(core.Claude_Restore_History{readonly_ids = saved, records = {rec(core.CLAUDE_READONLY_IDS_MAX + 1)}}, {kind = .Internal})
+	testing.expect_value(t, len(state.claude_readonly_ids), core.CLAUDE_READONLY_IDS_MAX)
+	testing.expect(t, core.claude_readonly_known(id(0)), "the saved list comes first")
+	testing.expect_value(t, state.claude_readonly_ids[len(state.claude_readonly_ids) - 1], id(core.CLAUDE_READONLY_IDS_MAX - 1))
 }
 
 // The user's default flags (Settings: "Default Claude Code flags for new tabs"; off by default).
@@ -732,106 +733,106 @@ ch_readonly_ids_lru :: proc(t: ^testing.T) {
 @(test)
 ch_default_flags :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
 	SKIP :: "--dangerously-skip-permissions"
 	args_of :: proc(id: u64) -> string {
-		_, _, ct := claude_tab_of(id)
+		_, _, ct := core.claude_tab_of(id)
 		return ct != nil ? strings.join(ct.args, " ", context.temp_allocator) : "<none>"
 	}
 	// start: clear the argv file, run, wait for this start's argv (a late write never lands in
 	// the next check)
-	start :: proc(env: Ch_Env, cmd: Command, caller: Caller) -> (Result, []string) {
+	start :: proc(env: Ch_Env, cmd: core.Command, caller: core.Caller) -> (core.Result, []string) {
 		ch_clear(env)
-		r := run_command(cmd, caller)
+		r := core.run_command(cmd, caller)
 		if !r.ok do return r, nil
 		return r, ch_argv(env)
 	}
 	// a dead tab started again, by the user or an agent
-	restart :: proc(env: Ch_Env, tab: u64, caller: Caller) -> []string {
-		drop_term(tab)
-		run_command(Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
+	restart :: proc(env: Ch_Env, tab: u64, caller: core.Caller) -> []string {
+		core.drop_term(tab)
+		core.run_command(core.Tab_Exited{tab_id = tab, exit = {known = true, code = 1}}, {kind = .Internal})
 		ch_clear(env)
-		if r := run_command(Claude_Restart{tab_id = tab}, caller); !r.ok do return nil
+		if r := core.run_command(core.Claude_Restart{tab_id = tab}, caller); !r.ok do return nil
 		return ch_argv(env)
 	}
 	on :: proc(t: ^testing.T) {
-		r := run_command(Set_Claude_Default_Flags{skip_permissions = true}, CH_UI)
+		r := core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, CH_UI)
 		testing.expect_value(t, r.error, "needs_confirmation") // the user confirms, with the warning
 		testing.expect(t, strings.contains(r.confirm_summary, "without asking"), r.confirm_summary)
 		testing.expect(t, !state.settings.claude_skip_permissions, "not before the confirmation")
-		testing.expect(t, run_command(Set_Claude_Default_Flags{skip_permissions = true, confirm = r.confirm_token}, CH_UI).ok)
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true, confirm = r.confirm_token}, CH_UI).ok)
 		testing.expect(t, state.settings.claude_skip_permissions)
 	}
 	off :: proc(t: ^testing.T) {
-		testing.expect(t, run_command(Set_Claude_Default_Flags{skip_permissions = false}, CH_UI).ok, "off: no confirmation")
+		testing.expect(t, core.run_command(core.Set_Claude_Default_Flags{skip_permissions = false}, CH_UI).ok, "off: no confirmation")
 		testing.expect(t, !state.settings.claude_skip_permissions)
 	}
 	pdir := ch_dir("defaults")
-	pid := run_command(Add_Project{cwd = pdir}, CH_UI).created_id
-	sess := run_command(New_Chat{project_id = pid}, CH_UI).created_id
+	pid := core.run_command(core.Add_Project{cwd = pdir}, CH_UI).created_id
+	sess := core.run_command(core.New_Chat{project_id = pid}, CH_UI).created_id
 	// off (the default): nothing changes
 	testing.expect(t, !state.settings.claude_skip_permissions, "off by default")
-	r, argv := start(env, New_Claude_Tab{session = sess}, CH_UI)
+	r, argv := start(env, core.New_Claude_Tab{session = sess}, CH_UI)
 	testing.expect(t, r.ok && !ch_has(argv, SKIP))
 	// only the user turns it on (an agent's, a Claude tab's: refused)
-	testing.expect(t, !run_command(Set_Claude_Default_Flags{skip_permissions = true}, CH_CONTROL).ok, "an agent may not")
-	testing.expect(t, !run_command(Set_Claude_Default_Flags{skip_permissions = true}, Caller{kind = .Panel, tab_id = r.created_id, claude = true}).ok, "a Claude tab may not")
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, CH_CONTROL).ok, "an agent may not")
+	testing.expect(t, !core.run_command(core.Set_Claude_Default_Flags{skip_permissions = true}, core.Caller{kind = .Panel, tab_id = r.created_id, claude = true}).ok, "a Claude tab may not")
 	testing.expect(t, !state.settings.claude_skip_permissions)
 	on(t)
 	// the user's new tab: in argv, never in the tab's saved flags
-	r, argv = start(env, New_Claude_Tab{session = sess}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess}, CH_UI)
 	testing.expect(t, ch_has(argv, SKIP), "in claude's argv")
 	testing.expect_value(t, args_of(r.created_id), "")
 	// the user's own flags: kept (saved), the default after them; never twice; a permission mode wins
-	r, argv = start(env, New_Claude_Tab{session = sess, args = {"--model", "opus"}}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, CH_UI)
 	testing.expect_value(t, args_of(r.created_id), "--model opus")
 	testing.expect_value(t, ch_after(argv, "opus"), SKIP)
-	_, argv = start(env, New_Claude_Tab{session = sess, args = {SKIP}}, CH_UI)
+	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {SKIP}}, CH_UI)
 	n := 0
 	for a in argv do if a == SKIP do n += 1
 	testing.expect_value(t, n, 1)
-	_, argv = start(env, New_Claude_Tab{session = sess, args = {"--permission-mode", "plan"}}, CH_UI)
+	_, argv = start(env, core.New_Claude_Tab{session = sess, args = {"--permission-mode", "plan"}}, CH_UI)
 	testing.expect(t, !ch_has(argv, SKIP), "an explicit permission mode wins")
 	// at the flag cap: left out, silently (the tab starts)
-	full := make([]string, CLAUDE_ARGS_MAX, context.temp_allocator)
+	full := make([]string, core.CLAUDE_ARGS_MAX, context.temp_allocator)
 	for &a in full do a = "--verbose"
-	r, argv = start(env, New_Claude_Tab{session = sess, args = full}, CH_UI)
+	r, argv = start(env, core.New_Claude_Tab{session = sess, args = full}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, !ch_has(argv, SKIP), "not past the cap")
-	r, argv = start(env, New_Claude_Session{project_id = pid, args = full}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = pid, args = full}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	// the user's new Claude session
-	r, argv = start(env, New_Claude_Session{project_id = pid}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = pid}, CH_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, ch_has(argv, SKIP), "the session's claude has it")
 	// an agent's tab and session: never
-	ra, aargv := start(env, New_Claude_Tab{session = sess}, CH_CONTROL)
+	ra, aargv := start(env, core.New_Claude_Tab{session = sess}, CH_CONTROL)
 	aid := ra.created_id
 	testing.expect(t, aid != 0 && !ch_has(aargv, SKIP), "an agent's tab")
-	rs, sargv := start(env, New_Claude_Session{project_id = pid}, CH_CONTROL)
+	rs, sargv := start(env, core.New_Claude_Session{project_id = pid}, CH_CONTROL)
 	testing.expect(t, rs.ok && !ch_has(sargv, SKIP), "an agent's session")
 	// a conversation an agent started: an agent's resume never, the user's with the setting now
 	sid := "0d0d0d0d-1111-4222-8333-444455556666"
-	testing.expect(t, run_command(Claude_Session_Report{tab_id = aid, session_id = sid, source = "startup"}, CH_SCRIPT).ok)
-	run_command(Claude_Turn_Report{tab_id = aid, state = "idle"}, CH_SCRIPT)
-	testing.expect(t, run_command(Close_Tab{tab_id = aid}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.Claude_Session_Report{tab_id = aid, session_id = sid, source = "startup"}, CH_SCRIPT).ok)
+	core.run_command(core.Claude_Turn_Report{tab_id = aid, state = "idle"}, CH_SCRIPT)
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = aid}, CH_UI).ok)
 	close_it :: proc(tab: u64) {
-		if rs, _, _ := find_tab(tab); rs != nil {
+		if rs, _, _ := core.find_tab(tab); rs != nil {
 			rsid := rs.id
-			run_command(Close_Session{session = rsid, confirm = ""}, CH_UI)
-			for &p in state.pending_confirmations do run_command(Close_Session{session = rsid, confirm = p.token}, CH_UI)
+			core.run_command(core.Close_Session{session = rsid, confirm = ""}, CH_UI)
+			for &p in state.pending_confirmations do core.run_command(core.Close_Session{session = rsid, confirm = p.token}, CH_UI)
 		}
 	}
-	rc, cargv := start(env, Claude_Resume{claude_session_id = sid}, CH_CONTROL)
+	rc, cargv := start(env, core.Claude_Resume{claude_session_id = sid}, CH_CONTROL)
 	testing.expect(t, rc.ok && !ch_has(cargv, SKIP), "an agent's resume")
 	close_it(rc.created_id)
-	testing.expect_value(t, claude_open_tab(sid), 0)
-	ru, uargv := start(env, Claude_Resume{claude_session_id = sid}, CH_UI)
+	testing.expect_value(t, core.claude_open_tab(sid), 0)
+	ru, uargv := start(env, core.Claude_Resume{claude_session_id = sid}, CH_UI)
 	testing.expect(t, ru.ok && ch_has(uargv, SKIP), "the user's resume")
 	testing.expect_value(t, args_of(ru.created_id), "")
-	rec, _ := claude_record(sid)
+	rec, _ := core.claude_record(sid)
 	testing.expect(t, rec != nil && len(rec.args) == 0, "never in the record's flags")
 	// restarts: the user's with the setting as it is now, an agent's never
 	testing.expect(t, ch_has(restart(env, ru.created_id, CH_UI), SKIP), "the user's restart, on")
@@ -839,41 +840,41 @@ ch_default_flags :: proc(t: ^testing.T) {
 	// turned off: the user's restart and resume of the same tab and conversation lose it
 	off(t)
 	testing.expect(t, !ch_has(restart(env, ru.created_id, CH_UI), SKIP), "the user's restart, off")
-	run_command(Claude_Turn_Report{tab_id = ru.created_id, state = "idle"}, CH_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = ru.created_id, state = "idle"}, CH_SCRIPT)
 	close_it(ru.created_id)
-	ru2, u2argv := start(env, Claude_Resume{claude_session_id = sid}, CH_UI)
+	ru2, u2argv := start(env, core.Claude_Resume{claude_session_id = sid}, CH_UI)
 	testing.expect(t, ru2.ok && !ch_has(u2argv, SKIP), "the user's resume, off")
 	// a read-only chat: the default is left out, and the user is told
 	on(t)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	testing.expect(t, run_command(Set_Chats_Readonly{on = true}, CH_UI).ok)
+	testing.expect(t, core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI).ok)
 	toast_show("")
-	rr, rargv := start(env, New_Claude_Session{project_id = c.id}, CH_UI)
+	rr, rargv := start(env, core.New_Claude_Session{project_id = c.id}, CH_UI)
 	testing.expect(t, rr.ok, rr.error)
 	ch_readonly(t, env, rargv)
 	testing.expect(t, !ch_has(rargv, SKIP), "not in a read-only chat")
 	testing.expect(t, strings.contains(toast.text, SKIP) && strings.contains(toast.text, "Read-only chat"), toast.text)
-	testing.expect(t, strings.contains(state_json(), `"claude_skip_permissions":true`), "in the snapshot")
-	testing.expect(t, run_command(Set_Chats_Readonly{on = false}, CH_UI).ok)
+	testing.expect(t, strings.contains(core.state_json(), `"claude_skip_permissions":true`), "in the snapshot")
+	testing.expect(t, core.run_command(core.Set_Chats_Readonly{on = false}, CH_UI).ok)
 	// restore: a saved Claude chat shown by the user gets the setting as it is then
-	r, argv = start(env, New_Claude_Session{project_id = c.id}, CH_UI)
+	r, argv = start(env, core.New_Claude_Session{project_id = c.id}, CH_UI)
 	testing.expect(t, r.ok && ch_has(argv, SKIP), r.error)
 	rsid := "0e0e0e0e-1111-4222-8333-444455556666"
-	run_command(Claude_Session_Report{tab_id = find_session(r.created_id).tabs[0].id, session_id = rsid}, CH_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = find_session(r.created_id).tabs[0].id, state = "submitted", title = "restore me"}, CH_SCRIPT)
-	text := strings.clone(workspace_json())
+	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(r.created_id).tabs[0].id, session_id = rsid}, CH_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = core.find_session(r.created_id).tabs[0].id, state = "submitted", title = "restore me"}, CH_SCRIPT)
+	text := strings.clone(core.workspace_json())
 	testing.expect(t, !strings.contains(text, SKIP), "never saved")
 	for want_on in ([]bool{false, true}) {
 		context.allocator = ch_reset(&env, keep_dirs = true)
-		testing.expect_value(t, workspace_restore(text), "")
+		testing.expect_value(t, core.workspace_restore(text), "")
 		state.settings.claude_skip_permissions = want_on // as the user has it now (whatever was saved)
-		target: ^Open_Session
+		target: ^core.Open_Session
 		for &o in state.open_sessions do if o.pi_session_id == rsid do target = &o
 		if target == nil {testing.fail(t);return}
 		ch_clear(env)
 		state.current_session = 0
-		testing.expect(t, run_command(Focus_Session{session = target.id}, CH_UI).ok)
+		testing.expect(t, core.run_command(core.Focus_Session{session = target.id}, CH_UI).ok)
 		got := ch_argv(env)
 		testing.expectf(t, ch_has(got, SKIP) == want_on, "a restore with the setting %v: %v", want_on, got)
 	}
@@ -885,34 +886,34 @@ ch_default_flags :: proc(t: ^testing.T) {
 @(test)
 ch_readonly_adopt_fails_closed :: proc(t: ^testing.T) {
 	env: Ch_Env
-	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), home_root
+	old_home, old_root := strings.clone(os.get_env("HOME", context.temp_allocator)), core.home_root
 	defer ch_done(old_home, old_root)
 	context.allocator = ch_reset(&env)
-	c := chats_project()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
-	run_command(Set_Chats_Readonly{on = true}, CH_UI)
-	start :: proc(env: Ch_Env, c: ^Project) -> (tab: u64, nonce: string) {
+	core.run_command(core.Set_Chats_Readonly{on = true}, CH_UI)
+	start :: proc(env: Ch_Env, c: ^core.Project) -> (tab: u64, nonce: string) {
 		ch_clear(env)
-		r := run_command(New_Claude_Session{project_id = c.id}, CH_UI)
+		r := core.run_command(core.New_Claude_Session{project_id = c.id}, CH_UI)
 		argv := ch_argv(env)
-		return find_session(r.created_id).tabs[0].id, strings.clone(ch_nonce(argv))
+		return core.find_session(r.created_id).tabs[0].id, strings.clone(ch_nonce(argv))
 	}
 	a, na := start(env, c)
-	socket_tokens_bind(a, 21, {kind = .Claude})
-	testing.expect(t, !claude_adopt_ro_ok(21), "not acked yet")
-	testing.expect(t, run_command(Claude_Readonly_Ack{tab_id = a, nonce = na}, Caller{kind = .Panel, tab_id = a, claude = true}).ok)
-	testing.expect(t, claude_adopt_ro_ok(21), "acked")
+	core.socket_tokens_bind(a, 21, {kind = .Claude})
+	testing.expect(t, !core.claude_adopt_ro_ok(21), "not acked yet")
+	testing.expect(t, core.run_command(core.Claude_Readonly_Ack{tab_id = a, nonce = na}, core.Caller{kind = .Panel, tab_id = a, claude = true}).ok)
+	testing.expect(t, core.claude_adopt_ro_ok(21), "acked")
 	b, _ := start(env, c)
-	socket_tokens_bind(b, 22, {kind = .Claude})
-	testing.expect(t, !claude_adopt_ro_ok(22), "not acked")
-	testing.expect(t, !claude_adopt_ro_ok(23), "nothing saved (no file, or a bad MAC)")
-	claude_adopt_ro_stop(b)
-	testing.expect(t, claude_readonly_stopped(b), "stopped")
-	sb, tb, _ := find_tab(b)
+	core.socket_tokens_bind(b, 22, {kind = .Claude})
+	testing.expect(t, !core.claude_adopt_ro_ok(22), "not acked")
+	testing.expect(t, !core.claude_adopt_ro_ok(23), "nothing saved (no file, or a bad MAC)")
+	core.claude_adopt_ro_stop(b)
+	testing.expect(t, core.claude_readonly_stopped(b), "stopped")
+	sb, tb, _ := core.find_tab(b)
 	_, _, ex := tab_label(sb, tb^)
 	testing.expectf(t, strings.contains(ex, "not confirmed"), "label: %s", ex)
-	testing.expect(t, !claude_adopt_ro_ok(22), "its state went with its token")
-	testing.expect(t, !claude_readonly_stopped(a))
-	socket_forget_tab(a)
-	testing.expect(t, !claude_adopt_ro_ok(21), "the tab's end drops it")
+	testing.expect(t, !core.claude_adopt_ro_ok(22), "its state went with its token")
+	testing.expect(t, !core.claude_readonly_stopped(a))
+	core.socket_forget_tab(a)
+	testing.expect(t, !core.claude_adopt_ro_ok(21), "the tab's end drops it")
 }

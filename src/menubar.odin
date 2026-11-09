@@ -17,6 +17,7 @@ package main
 
 import "base:runtime"
 import "core:strings"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 // AppKit's own items (menubar_macos.m's DH_* numbers).
@@ -172,7 +173,7 @@ MENUBAR := [?]Bar_Item {
 	}},
 }
 
-left_tab_shown :: proc(t: Left_Tab) -> bool {return state.layout.left_open && state.layout.left_tab == t}
+left_tab_shown :: proc(t: core.Left_Tab) -> bool {return state.layout.left_open && state.layout.left_tab == t}
 
 // What the Edit menu's items act on: what has the keyboard.
 Edit_Target :: enum {
@@ -185,7 +186,7 @@ Edit_Target :: enum {
 edit_target :: proc() -> Edit_Target {
 	if f, _, _ := focused_field(); f != nil do return .Field
 	if state.focus_widget == "" && tab_editor() != nil do return .Editor
-	if key_tab() != nil && key_term() != nil && (state.focus_widget == "" || state.focus_widget == "agent_input") do return .Terminal
+	if core.key_tab() != nil && core.key_term() != nil && (state.focus_widget == "" || state.focus_widget == "agent_input") do return .Terminal
 	return .None
 }
 
@@ -270,7 +271,7 @@ menubar_run :: proc(it: ^Bar_Item) {
 		ev = {type = .KEY_UP, key_code = k.code, modifiers = k.mods}
 		event(&ev)
 	}
-	inbox_drain()
+	core.inbox_drain()
 	app.redraw = true
 }
 

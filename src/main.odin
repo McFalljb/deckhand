@@ -15,6 +15,7 @@ import "core:strconv"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 import sg "../vendor/sokol-odin/sokol/gfx"
@@ -37,8 +38,8 @@ App :: struct {
 	pointer:        [2]f32,
 	ready:          bool, // init done: the inbox may be drained
 	wakes:          u64, // platform wakes that ran
-	font_theme:     Theme_Id, // the look the fonts were opened for
-	font_size:      Text_Size, // and the text size
+	font_theme:     core.Theme_Id, // the look the fonts were opened for
+	font_size:      core.Text_Size, // and the text size
 	// clicks: count of the current multi-click (1, 2, 3, ...)
 	clicks:         int,
 	last_click:     time.Tick,
@@ -62,7 +63,7 @@ ime: Ime
 app: App
 
 init :: proc "c" () {
-	context = app_context
+	context = core.app_context
 	sg.setup({environment = sglue.environment(), logger = {func = slog.func}})
 	sgl.setup({max_vertices = 1 << 20, max_commands = 1 << 14, logger = {func = slog.func}})
 	app.dpi = sapp.dpi_scale()
@@ -74,21 +75,21 @@ init :: proc "c" () {
 		os.exit(1)
 	}
 	ui_init()
-	platform = platform_app()
+	core.platform = platform_app()
 	app.window_active = true
 	platform_window_init()
 	menubar_install() // the macOS menu bar (menubar.odin)
 	// the OS appearance before anything is drawn, then its changes
-	run_command(System_Appearance{light = platform_system_light()})
+	core.run_command(core.System_Appearance{light = platform_system_light()})
 	platform_watch_appearance()
 	autotest_init()
-	if autotest_active do platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
+	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
 	// test mode keeps its log out of the user's data dir
-	if autotest_active && hook_env(.Data_Dir) == "" {
+	if core.autotest_active && core.hook_env(.Data_Dir) == "" {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
-		home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
-	} else do home_root = data_dir()
-	if home_root == "" {
+		core.home_root = strings.concatenate({cwd, "/build/test-data"}) // absolute: Home's pi runs elsewhere
+	} else do core.home_root = core.data_dir()
+	if core.home_root == "" {
 		// no home for this account in the user database (a release build never takes $HOME):
 		// never a data dir relative to wherever Deckhand was started
 		why := "Deckhand can't find your home folder (your account has no entry in the user database), so it has nowhere to keep its files"
@@ -98,9 +99,9 @@ init :: proc "c" () {
 	}
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
 	// anything is written there; test mode looks for Deckhand only in a runtime dir of its own
-	check_old := !autotest_active || hook_env(.Runtime_Dir) != ""
-	if why := instance_guard(home_root, check_old); why != "" {
-		if autotest_active {
+	check_old := !core.autotest_active || core.hook_env(.Runtime_Dir) != ""
+	if why := core.instance_guard(core.home_root, check_old); why != "" {
+		if core.autotest_active {
 			fmt.println("[autotest] instance refused:", why)
 			os.exit(3)
 		}
@@ -108,71 +109,71 @@ init :: proc "c" () {
 		platform_alert("Deckhand can't start", why)
 		os.exit(1)
 	}
-	event_log_open(home_root)
+	core.event_log_open(core.home_root)
 	// Atlas's prompt (an unedited older starter) and its copy of the guide (agent.odin)
-	if home_root != "" {
+	if core.home_root != "" {
 		y, m, d := time.date(time.now())
-		agent_prompt_migrate(fmt.tprintf("%04d-%02d-%02d", y, int(m), d))
-		agent_guide_install()
+		core.agent_prompt_migrate(fmt.tprintf("%04d-%02d-%02d", y, int(m), d))
+		core.agent_guide_install()
 	}
 	// the session-title cache (titles.odin): same rule as the workspace
-	if !autotest_active || hook_env(.Data_Dir) != "" do titles_load(data_dir(context.temp_allocator))
-	claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
-	rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
+	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
+	core.claude_accounts_refresh() // Claude Code's config folders (claude_accounts.odin)
+	core.rescan_now(claude = false) // pi's projects now; Claude's after the saved accounts are back
 	// control socket (socket.odin); `--print-token script|control` mints a
 	// token for local scripts and prints it once, as shell exports
 	// (development and test builds only: a release build mints a control token only from
 	// Settings › Copy a control token, test_hooks.odin)
 	dir, token_kind := app_args.dir, app_args.token_kind
-	if socket_start() && token_kind != "" {
-		when TEST_HOOKS {
-			kind := token_kind == "control" ? Caller_Kind.Control : Caller_Kind.Script
-			fmt.printf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", socket_path(), socket_mint_token({kind = kind}, context.temp_allocator))
+	if core.socket_start() && token_kind != "" {
+		when core.TEST_HOOKS {
+			kind := token_kind == "control" ? core.Caller_Kind.Control : core.Caller_Kind.Script
+			fmt.printf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", core.socket_path(), core.socket_mint_token({kind = kind}, context.temp_allocator))
 			os.flush(os.stdout)
 		}
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// DECKHAND_DATA_DIR, so scripts never read or write the user's
-	state.settings.keep_sessions = keep_sessions_default() // until the saved workspace says otherwise
-	if !autotest_active || hook_env(.Data_Dir) != "" {
-		persist_init(data_dir(context.temp_allocator))
-		claude_disk_launching = true // no transcript read on the main thread while it comes back
-		persist_load(app_args.fresh)
-		claude_disk_launching = false
+	state.settings.keep_sessions = core.keep_sessions_default() // until the saved workspace says otherwise
+	if !core.autotest_active || core.hook_env(.Data_Dir) != "" {
+		core.persist_init(core.data_dir(context.temp_allocator))
+		core.claude_disk_launching = true // no transcript read on the main thread while it comes back
+		core.persist_load(app_args.fresh)
+		core.claude_disk_launching = false
 	}
 	// the session holder: tabs whose processes it kept since the last run get them back now
 	// (holder_adopt.odin); with keep_sessions on it is connected (or launched) here
-	holder_adopt_all()
-	harness_no_sudo_sweep(at_quit = false) // no-sudo folders of runs whose Deckhand is gone (harness_install.odin)
+	core.holder_adopt_all()
+	core.harness_no_sudo_sweep(at_quit = false) // no-sudo folders of runs whose Deckhand is gone (harness_install.odin)
 	// Claude's projects (claude_disk.odin), on the Rescan worker, with the saved accounts (added
 	// ones in, removed ones out)
-	if claude_startup_rescan_due() do run_command(Rescan{}, {kind = .Internal})
+	if core.claude_startup_rescan_due() do core.run_command(core.Rescan{}, {kind = .Internal})
 	// the chats folder's instructions (folders.odin), then the first-run sheet
 	// once while no main folder is set (test mode: only when a scene asks)
 	// (not while setup is due: Done writes it where the user puts chats)
-	if (!autotest_active || hook_env(.Data_Dir) != "") && !setup_due() do chats_instructions_ensure(date_stamp())
-	if setup_due() && (!autotest_active || hook_env(.First_Run) == "1") do run_command(Setup_Sheet{open = true})
+	if (!core.autotest_active || core.hook_env(.Data_Dir) != "") && !core.setup_due() do core.chats_instructions_ensure(core.date_stamp())
+	if core.setup_due() && (!core.autotest_active || core.hook_env(.First_Run) == "1") do core.run_command(core.Setup_Sheet{open = true})
 	// `deckhand DIR` adds/selects DIR and starts a new chat there.
 	if dir != "" {
-		r := run_command(Add_Project{dir})
+		r := core.run_command(core.Add_Project{dir})
 		// only in DIR's own project: a failed add starts nothing (never the one selected before)
 		app.launch_project = launch_project(r)
 		if app.launch_project != 0 do app.pending_start = true
 		else do fmt.eprintfln("Deckhand: %s: %s", dir, r.error)
 	}
-	update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
+	core.update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
 	app.redraw = true
 }
 
 // The app's platform layer: every entry set (a nil one would make its
 // commands do nothing without a word).
-platform_app :: proc() -> Platform {
+platform_app :: proc() -> core.Platform {
 	return {
 		set_clipboard = proc(text: string) {sapp.set_clipboard_string(strings.clone_to_cstring(text, context.temp_allocator))},
 		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
 		quit = proc() {
-			app_quitting = true
+			core.app_quitting = true
 			sapp.request_quit()
 		},
 		wake = platform_wake,
@@ -194,7 +195,7 @@ platform_app :: proc() -> Platform {
 
 // The window's side of the core's hooks (window_hooks.odin), filled in before main runs so the
 // unit tests have them too.
-window_hooks_app :: proc() -> Window_Hooks {
+window_hooks_app :: proc() -> core.Window_Hooks {
 	return {
 		state_changed = proc() {app.redraw = true},
 		toast = proc(text: string, err: bool) {toast_show(text, err)},
@@ -225,7 +226,7 @@ window_hooks_app :: proc() -> Window_Hooks {
 			if b == nil do return ""
 			return b.cef != 0 ? "open" : b.waiting ? "waiting" : b.lazy ? "unloaded" : b.message != "" ? "closed" : "opening"
 		},
-		app_view = proc(tab_id: u64) -> (v: App_View, ok: bool) {
+		app_view = proc(tab_id: u64) -> (v: core.App_View, ok: bool) {
 			a := app_of(tab_id)
 			if a == nil do return
 			v = {frames = a.ring.shown, inspect = a.inspect}
@@ -252,11 +253,13 @@ window_hooks_app :: proc() -> Window_Hooks {
 		commit_message_clear = proc() {tf_set(&changes_message_field, "")}, // ui_changes.odin
 		unsaved_files = tab_views_unsaved,
 		tab_dirty = tab_view_dirty,
+		watch_folder = watch_folder, // editor_watch.odin
+		watch_sync = watch_sync,
 		// terminals' views (term_view.odin)
 		term_view_new = term_view_init,
 		term_view_free = term_view_free,
 		term_drag_cancel = term_cancel_drag,
-		term_fit = proc(t: ^Term, tab_id: u64) {if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)},
+		term_fit = proc(t: ^core.Term, tab_id: u64) {if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)},
 		// sheets (ui_job_sheet.odin, ui_setup.odin)
 		job_sheet = job_sheet_apply,
 		job_sheet_open = job_sheet_open,
@@ -271,52 +274,52 @@ window_hooks_app :: proc() -> Window_Hooks {
 @(init)
 window_hooks_init :: proc "contextless" () {
 	context = runtime.default_context()
-	window = window_hooks_app()
+	core.window = window_hooks_app()
 }
 
 // The OS switched between light and dark (platform layer, main thread; the
 // test mode's `system_appearance` too).
 on_system_appearance :: proc(light: bool) {
-	inbox_submit(System_Appearance{light = light}, {kind = .Internal})
+	core.inbox_submit(core.System_Appearance{light = light}, {kind = .Internal})
 }
 
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
-ui_do :: proc(cmd: Command) {
-	inbox_submit(cmd, {kind = .UI})
+ui_do :: proc(cmd: core.Command) {
+	core.inbox_submit(cmd, {kind = .UI})
 }
 
 // A menu row's command: as ui_do, then its outcome is shown where nothing
 // else would show it (menu_result: a failure, a copy).
-ui_do_menu :: proc(cmd: Command, label: string) {
-	inbox_submit(cmd, {kind = .UI}, menu = label)
+ui_do_menu :: proc(cmd: core.Command, label: string) {
+	core.inbox_submit(cmd, {kind = .UI}, menu = label)
 }
 
 frame :: proc "c" () {
-	context = app_context
+	context = core.app_context
 	defer free_all(context.temp_allocator)
 
-	app_frames_called += 1
-	core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
+	core.app_frames_called += 1
+	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
-	t := active_term()
+	t := core.active_term()
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
-	at := agent_term() // Atlas's terminal in the drawer (also while it slides out)
+	at := core.agent_term() // Atlas's terminal in the drawer (also while it slides out)
 	drags_follow_focus()
-	left_down := platform.left_button == nil || platform.left_button()
+	left_down := core.platform.left_button == nil || core.platform.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
 	shown_changed := false // a terminal in another pane on screen (panes.odin)
-	for x in terms_on_screen() do if x != t && x.changed do shown_changed = true
+	for x in core.terms_on_screen() do if x != t && x.changed do shown_changed = true
 	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
-	control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)
-	holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
-	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
-	if holder_restart_tick() do app.redraw = true // Restart session holder's outcome (holder_restart.odin)
+	core.control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)
+	core.holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
+	core.holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
+	if core.holder_restart_tick() do app.redraw = true // Restart session holder's outcome (holder_restart.odin)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
 	if browser_frames_tick() do app.redraw = true // browser tabs: a frame CEF painted (browser.odin)
@@ -336,7 +339,7 @@ frame :: proc "c" () {
 		app.font_theme = state.settings.theme
 		app.font_size = state.settings.text_size
 		fonts_apply(theme_font_config(theme()), d)
-		for _, t in terms do t.cols = 0 // new cell size: resize at the next layout
+		for _, t in core.terms do t.cols = 0 // new cell size: resize at the next layout
 	}
 
 	w, h := sapp.widthf(), sapp.heightf()
@@ -351,25 +354,25 @@ frame :: proc "c" () {
 	harness_term_layout() // the setup sheet's install terminal (ui_harness.odin)
 	if x, y, tw, th, ok := ui_terminal_rect(); ok {
 		app.pane = {x, y, tw, th}
-		cs := cur()
+		cs := core.cur()
 		ui_pane_rects(cs) // each pane's content rect (panes.odin)
-		if cs != nil && len(cs.panes) == 0 do if p := session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
+		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
-		if cs != nil do for tab in cs.tabs do if t := term_of(tab.id); t != nil {
+		if cs != nil do for tab in cs.tabs do if t := core.term_of(tab.id); t != nil {
 			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
 			if r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
 		}
 	}
-	if app.pane.z > 0 do persist_after_layout(skip = app.pending_start)
+	if app.pane.z > 0 do core.persist_after_layout(skip = app.pending_start)
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
 	annot_tick() // their annotation overlays and markers (browser_annotate.odin)
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
 	if app.pending_start && app.pane.z > 0 {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
-		if _, is := cmd.(New_Claude_Session); is do run_command(cmd, {kind = .UI}) // the user's: in front, toast if Claude Code is missing
-		else if cmd != nil do run_command(cmd)
-		t = active_term()
+		if _, is := cmd.(core.New_Claude_Session); is do core.run_command(cmd, {kind = .UI}) // the user's: in front, toast if Claude Code is missing
+		else if cmd != nil do core.run_command(cmd)
+		t = core.active_term()
 	}
 
 	editors_frame_begin() // an editor takes hits only where this frame draws it (editor_view.odin)
@@ -382,13 +385,13 @@ frame :: proc "c" () {
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
 	// the tab each pane shows, in its pane (pages and apps too); marked text in the focused one's (panes.odin)
-	if cs := cur(); cs != nil && len(cs.panes) > 1 {
+	if cs := core.cur(); cs != nil && len(cs.panes) > 1 {
 		for &p in cs.panes do pane_draw(&p, t, typing)
-	} else if p := focused_pane(); p != nil {
+	} else if p := core.focused_pane(); p != nil {
 		pane_draw(p, t, typing)
 	} // else the layout's empty state shows
 	ui_draw(cmds, drawer_at, overlay)
-	if at != nil && agent_running() {
+	if at != nil && core.agent_running() {
 		if _, _, tw, th, ok := drawer_term_rect(); ok && tw > 0 && th > 0 {
 			term_draw(at)
 			if state.focus_widget == "agent_input" do term_draw_marked(at, ime.marked, ime.caret)
@@ -411,7 +414,7 @@ frame :: proc "c" () {
 	browser_frames_committed() // the same for browser tabs
 	app.redraw = font_frame_done() // the atlas grew or started over: draw again
 	if t != nil do t.changed = false
-	for x in terms_on_screen() do x.changed = false // every pane's terminal was drawn
+	for x in core.terms_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false
 	app.frames_drawn += 1
 	platform_frame_drawn()
@@ -424,10 +427,10 @@ frame :: proc "c" () {
 // drag.
 drags_follow_focus :: proc() {
 	id: u64
-	if tab := active_tab(); tab != nil do id = tab.id
+	if tab := core.active_tab(); tab != nil do id = tab.id
 	if id == app.drag_tab do return
 	app.drag_tab = id
-	for tab_id, x in terms do if !tab_on_screen(tab_id) do term_cancel_drag(x)
+	for tab_id, x in core.terms do if !core.tab_on_screen(tab_id) do term_cancel_drag(x)
 }
 
 over_sidebar :: proc(x: f32) -> bool {
@@ -442,9 +445,9 @@ over_right_column :: proc(x: f32) -> bool {
 // OS events. In script mode (DECKHAND_SCRIPT) real keyboard/mouse input is
 // dropped so keystrokes meant for another app can never reach the child.
 event_os :: proc "c" (e: ^sapp.Event) {
-	context = app_context
+	context = core.app_context
 	defer free_all(context.temp_allocator)
-	if autotest_active && !autotest.injecting {
+	if core.autotest_active && !autotest.injecting {
 		#partial switch e.type {
 		case .KEY_DOWN, .KEY_UP, .CHAR, .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL, .CLIPBOARD_PASTED, .MOUSE_ENTER, .MOUSE_LEAVE, .FILES_DROPPED:
 			return
@@ -454,7 +457,7 @@ event_os :: proc "c" (e: ^sapp.Event) {
 }
 
 event :: proc(e: ^sapp.Event) {
-	defer inbox_drain()
+	defer core.inbox_drain()
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
@@ -481,7 +484,7 @@ event :: proc(e: ^sapp.Event) {
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
 		if !palette_is_open() do palette_reset()
-		ui_do(Set_Focus{palette_is_open() ? "" : "palette"})
+		ui_do(core.Set_Focus{palette_is_open() ? "" : "palette"})
 		return
 	}
 	// ⌘P opens a file of the current project (the palette's file mode), and closes it
@@ -495,9 +498,9 @@ event :: proc(e: ^sapp.Event) {
 	if e.type == .KEY_DOWN && e.key_code == .J && only_cmd {
 		ime_cancel()
 		was_palette := palette_is_open()
-		if was_palette do ui_do(Set_Focus{""})
-		if state.home_open && state.focus_widget != "agent_input" && !was_palette && home_tab() != nil && home_tab().status == .Running do ui_do(Set_Focus{"agent_input"})
-		else do ui_do(Set_Home{open = !state.home_open})
+		if was_palette do ui_do(core.Set_Focus{""})
+		if state.home_open && state.focus_widget != "agent_input" && !was_palette && core.home_tab() != nil && core.home_tab().status == .Running do ui_do(core.Set_Focus{"agent_input"})
+		else do ui_do(core.Set_Home{open = !state.home_open})
 		return
 	}
 	// ⌘, the Settings tab of the left column with the keyboard (again: back
@@ -510,10 +513,10 @@ event :: proc(e: ^sapp.Event) {
 		if menu.open do menu_close()
 		if e.key_code == .COMMA {
 			if state.layout.left_open && state.layout.left_tab == .Settings && state.focus_widget == "files" {
-				ui_do(Set_Left_Tab{tab = .Sessions})
-				ui_do(Set_Focus{""})
+				ui_do(core.Set_Left_Tab{tab = .Sessions})
+				ui_do(core.Set_Focus{""})
 			} else do action_run("settings")
-		} else do ui_do(Set_Focus{state.focus_widget == "shortcuts" ? "" : "shortcuts"})
+		} else do ui_do(core.Set_Focus{state.focus_widget == "shortcuts" ? "" : "shortcuts"})
 		app.key_taken = true
 		return
 	}
@@ -546,8 +549,8 @@ event :: proc(e: ^sapp.Event) {
 		ime_cancel()
 		if menu.open do menu_close()
 		if files_shown() && state.focus_widget == "files" {
-			ui_do(Set_Left_Tab{tab = .Sessions})
-			ui_do(Set_Focus{""})
+			ui_do(core.Set_Left_Tab{tab = .Sessions})
+			ui_do(core.Set_Focus{""})
 		} else do action_run("show_files")
 		app.key_taken = true
 		return
@@ -615,7 +618,7 @@ event :: proc(e: ^sapp.Event) {
 	old_ids := ids_pane_begin(fp)
 	defer ids_pane_end(old_ids)
 	// the editor's find/replace/go-to fields take Enter, Esc and ⌘G first
-	if editor_bar_focused() && editor_bar_event(focused_pane(), e) do return // its field has the keyboard
+	if editor_bar_focused() && editor_bar_event(core.focused_pane(), e) do return // its field has the keyboard
 	if changes_field_key(e) do return // the commit message's Enter and Esc (ui_changes.odin)
 	if comments_field_key(e) do return // a comment's edit field: Enter and Esc (ui_comments.odin)
 	if browser_url_key(fp, e) do return // a browser tab's URL field: Enter and Esc (browser_nav.odin)
@@ -631,37 +634,37 @@ event :: proc(e: ^sapp.Event) {
 	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
-	t := active_term()
-	mt := pane_term(fp) // the pointer's: the pane under it (or holding its press)
-	tab := active_tab()
-	cs := cur()
-	kt := key_term()
-	ktab := key_tab()
+	t := core.active_term()
+	mt := core.pane_term(fp) // the pointer's: the pane under it (or holding its press)
+	tab := core.active_tab()
+	cs := core.cur()
+	kt := core.key_term()
+	ktab := core.key_tab()
 	#partial switch e.type {
 	case .KEY_DOWN:
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
 			#partial switch e.key_code {
-			case .C: if ktab != nil do ui_do(Copy_Selection{ktab.id})
-			case .Q: ui_do(Quit{})
+			case .C: if ktab != nil do ui_do(core.Copy_Selection{ktab.id})
+			case .Q: ui_do(core.Quit{})
 			// ⌘N: a chat (Chats; the harness picker, harness.odin); ⇧⌘N: a session in the selected project. ⌥⌘T: a Claude tab
 			case .N: if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("new_chat")
 			case .T:
 				if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
-				else if cs != nil do ui_do(New_Shell_Tab{session = cs.id})
+				else if cs != nil do ui_do(core.New_Shell_Tab{session = cs.id})
 			case .L: // a browser tab: its URL field (browser_nav.odin); else the menu bar's (Go to line)
 				if tab_browser() != nil do browser_url_focus()
 				else if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
 			case .W:
-				if state.focus_widget == "agent_input" do ui_do(Set_Home{open = false}) // the drawer, never the tab under it
+				if state.focus_widget == "agent_input" do ui_do(core.Set_Home{open = false}) // the drawer, never the tab under it
 				else if tab != nil do close_tab_click(tab.id) // like its ×
 			case .B:
-				if e.modifiers & sapp.MODIFIER_ALT != 0 do ui_do(Set_Layout{right_open = !state.layout.right_open})
-				else do ui_do(Set_Layout{left_open = !state.layout.left_open})
+				if e.modifiers & sapp.MODIFIER_ALT != 0 do ui_do(core.Set_Layout{right_open = !state.layout.right_open})
+				else do ui_do(core.Set_Layout{left_open = !state.layout.left_open})
 			case ._1 ..= ._9:
 				if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
 			case .BACKSPACE, .LEFT, .RIGHT: // ⌘⌫ ⌘← ⌘→ alone: line editing (term.odin, mac_key_text)
 				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" {
-					claude_note_typed(ktab)
+					core.claude_note_typed(ktab)
 					term_key_down(kt, e)
 				}
 			case: // shortcuts only the menu bar has (⌘+, ⇧⌘], ⌥⌘↓…; menubar.odin)
@@ -671,15 +674,15 @@ event :: proc(e: ^sapp.Event) {
 		}
 		// a Claude tab's prompt holds text now: Deckhand holds what it would send (claude.odin);
 		// Enter submits it (its hook says so) and Esc does not add text
-		if kt != nil && e.key_code != .ENTER && e.key_code != .KP_ENTER && e.key_code != .ESCAPE do claude_note_typed(ktab)
+		if kt != nil && e.key_code != .ENTER && e.key_code != .KP_ENTER && e.key_code != .ESCAPE do core.claude_note_typed(ktab)
 		if kt != nil do term_key_down(kt, e)
 	case .KEY_UP:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_key_up(kt, e)
 	case .CHAR:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
-		claude_note_typed(ktab)
-		if ktab != nil do ui_do(Send_Text{ktab.id, clipboard_text()})
+		core.claude_note_typed(ktab)
+		if ktab != nil do ui_do(core.Send_Text{ktab.id, core.clipboard_text()})
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))
@@ -694,8 +697,8 @@ event :: proc(e: ^sapp.Event) {
 		if mt != nil && in_pane(mt, e.mouse_x, e.mouse_y) && !in_drawer {
 			// a click in the current tab takes the keyboard back; a sliding
 			// (unpinned) drawer goes away
-			if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
-			else if state.focus_widget == "agent_input" do ui_do(Set_Focus{""})
+			if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false})
+			else if state.focus_widget == "agent_input" do ui_do(core.Set_Focus{""})
 			if term_link_mouse_down(mt, e) do return // ⌘-click or right-click on a link (term_links.odin)
 			term_mouse_down(mt, e, app.clicks)
 			return
@@ -720,22 +723,22 @@ event :: proc(e: ^sapp.Event) {
 		}
 		switch hit in hit {
 		case Hit_Project:   project_row_click(u64(hit)) // select and expand; again: fold
-		case Hit_Session:   ui_do(Open_Session_Cmd{state.selected_project, string(hit)})
+		case Hit_Session:   ui_do(core.Open_Session_Cmd{state.selected_project, string(hit)})
 		case Hit_New:       new_session_ui(state.selected_project, at = [2]f32{e.mouse_x, e.mouse_y}) // the harness picker (harness.odin)
 		case Hit_Tab:
-			ui_do(Focus_Tab{u64(hit)})
+			ui_do(core.Focus_Tab{u64(hit)})
 			tab_drag_arm(u64(hit), e.mouse_x, e.mouse_y) // moved a few px, it drags (panes_drag.odin)
 			// a double-click keeps a preview tab
-			if _, t, _ := find_tab(u64(hit)); t != nil && app.clicks == 2 {
-				if et, is := t.kind.(Editor_Tab); is && et.preview do ui_do(Keep_Tab{tab_id = t.id})
+			if _, t, _ := core.find_tab(u64(hit)); t != nil && app.clicks == 2 {
+				if et, is := t.kind.(core.Editor_Tab); is && et.preview do ui_do(core.Keep_Tab{tab_id = t.id})
 			}
 		case Hit_Close_Tab: close_tab_click(u64(hit))
 		case Hit_Confirm:   if bar_click_ok(string(hit)) do confirm_pending(string(hit))
-		case Hit_Cancel:    if bar_click_ok(string(hit)) do ui_do(Cancel_Confirmation{string(hit)})
-		case Hit_Panel_Head: ui_do(Set_Panel_Collapsed{panel = string(hit), collapsed = !panel_collapsed(string(hit))})
+		case Hit_Cancel:    if bar_click_ok(string(hit)) do ui_do(core.Cancel_Confirmation{string(hit)})
+		case Hit_Panel_Head: ui_do(core.Set_Panel_Collapsed{panel = string(hit), collapsed = !core.panel_collapsed(string(hit))})
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
-		case Hit_Home:      ui_do(Set_Home{open = !state.home_open})
-		case Hit_Close_Session: ui_do(Close_Session{session = u64(hit)})
+		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
+		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
 		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
@@ -787,34 +790,34 @@ event :: proc(e: ^sapp.Event) {
 	case .FOCUSED:
 		app.window_active = true
 		// the session on screen is seen now: its bell entries are read
-		if notify_wants_seen(state.current_session) do inbox_submit(Notifications_Mark_Read{session = state.current_session}, {kind = .Internal})
-		for id in status_wants_seen() do inbox_submit(Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
+		if core.notify_wants_seen(state.current_session) do core.inbox_submit(core.Notifications_Mark_Read{session = state.current_session}, {kind = .Internal})
+		for id in core.status_wants_seen() do core.inbox_submit(core.Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
 		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
-		for _, x in terms {
+		for _, x in core.terms {
 			term_cancel_drag(x) // its release may go to another app
 			term_link_clear(x) // and ⌘'s
 		}
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
 		// window close / Cmd+Q from the menu: ask first if anything runs
-		if !app_quitting {
+		if !core.app_quitting {
 			sapp.cancel_quit()
-			ui_do(Quit{})
+			ui_do(core.Quit{})
 			return
 		}
 		// the window goes first: the handover can wait seconds (an upgrade in flight, the ack, the
 		// snapshots), and nothing is drawn meanwhile
 		platform_hide_windows()
-		if autotest_active do fmt.println("[autotest] quit: windows hidden")
+		if core.autotest_active do fmt.println("[autotest] quit: windows hidden")
 		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
 		// otherwise they are released as direct ones are hung up
-		if app_stop_sessions do holder_shutdown()
-		else do holder_handover()
-		relaunch_helper_send("") // an update's helper without a secret (none was handed over): it only relaunches
-		persist_quit() // while the shells still run (their cwd is saved; held ids with a handover)
-		close_all()
+		if core.app_stop_sessions do core.holder_shutdown()
+		else do core.holder_handover()
+		core.relaunch_helper_send("") // an update's helper without a secret (none was handed over): it only relaunches
+		core.persist_quit() // while the shells still run (their cwd is saved; held ids with a handover)
+		core.close_all()
 	}
 }
 
@@ -844,13 +847,13 @@ bar_click_ok :: proc(token: string) -> bool {
 }
 
 // Pane p's tab at its draw rect; IME marked text when its terminal (t) has the keyboard.
-pane_draw :: proc(p: ^Pane, t: ^Term, typing: bool) {
-	tab := pane_shown(p)
-	if tab == nil || (term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
+pane_draw :: proc(p: ^core.Pane, t: ^core.Term, typing: bool) {
+	tab := core.pane_shown(p)
+	if tab == nil || (core.term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
 	if r.z <= 0 || r.w <= 0 do return
 	tab_view(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
-	if pt := term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
+	if pt := core.term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
 }
 
 // Hit under the pointer from the last layout (no click).
@@ -898,24 +901,24 @@ confirm_pending :: proc(token: string) {
 		if p.token != token do continue
 		cmd := p.command
 		#partial switch c in p.command {
-		case Close_Tab: cmd = Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}
-		case Close_Session: cmd = Close_Session{session = c.session, confirm = token, ask = c.ask, comments = c.comments}
-		case Quit:      cmd = Quit{confirm = token, stop_sessions = c.stop_sessions}
-		case Update_Install: cmd = Update_Install{confirm = token}
-		case Pi_Reload: cmd = Pi_Reload{tab_id = c.tab_id, confirm = token}
-		case Pi_Reload_All: cmd = Pi_Reload_All{only_changed = c.only_changed, confirm = token}
-		case Pi_Restart_Updated: cmd = Pi_Restart_Updated{confirm = token}
-		case Claude_Restart_Changed: cmd = Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
-		case Reload_File: cmd = Reload_File{tab_id = c.tab_id, confirm = token}
-		case Delete_Path: cmd = Delete_Path{path = c.path, confirm = token}
-		case Create_File: cmd = Create_File{path = c.path, confirm = token}
-		case Create_Dir:  cmd = Create_Dir{path = c.path, confirm = token}
-		case Rename_Path: cmd = Rename_Path{from = c.from, to = c.to, confirm = token}
-		case Worktree_Cleanup: cmd = Worktree_Cleanup{path = c.path, confirm = token}
-		case Job_Delete:  cmd = Job_Delete{job = c.job, confirm = token}
-		case Changes_Discard: cmd = Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
-		case Markdown_Follow: cmd = Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
-		case Set_Claude_Default_Flags: cmd = Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
+		case core.Close_Tab: cmd = core.Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}
+		case core.Close_Session: cmd = core.Close_Session{session = c.session, confirm = token, ask = c.ask, comments = c.comments}
+		case core.Quit:      cmd = core.Quit{confirm = token, stop_sessions = c.stop_sessions}
+		case core.Update_Install: cmd = core.Update_Install{confirm = token}
+		case core.Pi_Reload: cmd = core.Pi_Reload{tab_id = c.tab_id, confirm = token}
+		case core.Pi_Reload_All: cmd = core.Pi_Reload_All{only_changed = c.only_changed, confirm = token}
+		case core.Pi_Restart_Updated: cmd = core.Pi_Restart_Updated{confirm = token}
+		case core.Claude_Restart_Changed: cmd = core.Claude_Restart_Changed{update = c.update, all = c.all, confirm = token}
+		case core.Reload_File: cmd = core.Reload_File{tab_id = c.tab_id, confirm = token}
+		case core.Delete_Path: cmd = core.Delete_Path{path = c.path, confirm = token}
+		case core.Create_File: cmd = core.Create_File{path = c.path, confirm = token}
+		case core.Create_Dir:  cmd = core.Create_Dir{path = c.path, confirm = token}
+		case core.Rename_Path: cmd = core.Rename_Path{from = c.from, to = c.to, confirm = token}
+		case core.Worktree_Cleanup: cmd = core.Worktree_Cleanup{path = c.path, confirm = token}
+		case core.Job_Delete:  cmd = core.Job_Delete{job = c.job, confirm = token}
+		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
+		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
+		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
 		}
 		ui_do(cmd)
 		return
@@ -939,8 +942,8 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		// a changed query starts over at the best match
 		if in_palette && tf_text(f) != before do palette_edited()
 		// the filter is State: every edit is a set_filter (agents see it too)
-		if in_filter && state.focus_widget == "sidebar_filter" && tf_text(f) != before do ui_do(Set_Filter{text = tf_text(f)})
-		if in_files_filter && state.focus_widget == "files_filter" && tf_text(f) != before do ui_do(Set_Files_Filter{text = tf_text(f)})
+		if in_filter && state.focus_widget == "sidebar_filter" && tf_text(f) != before do ui_do(core.Set_Filter{text = tf_text(f)})
+		if in_files_filter && state.focus_widget == "files_filter" && tf_text(f) != before do ui_do(core.Set_Files_Filter{text = tf_text(f)})
 		platform_ime_caret_moved()
 	}
 	#partial switch e.type {
@@ -949,17 +952,17 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		if cmd {
 			#partial switch e.key_code {
 			case .A: tf_select_all(f)
-			case .C: if s := tf_selected_text(f); s != "" do platform.set_clipboard(s)
+			case .C: if s := tf_selected_text(f); s != "" do core.platform.set_clipboard(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {
-					platform.set_clipboard(s)
+					core.platform.set_clipboard(s)
 					tf_backspace(f)
 				}
 			case .LEFT, .UP:     tf_home(f, shift)
 			case .RIGHT, .DOWN:  tf_end(f, shift)
 			case .BACKSPACE:     tf_delete_to_start(f)
 			case ._1 ..= ._9:    if in_palette do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
-			case .Q:             ui_do(Quit{})
+			case .Q:             ui_do(core.Quit{})
 			}
 			return true
 		}
@@ -981,15 +984,15 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			} else if in_filter {
 				filter_enter()
 			} else if state.focus_widget == "rename_session" {
-				ui_do(Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
-				ui_do(Set_Focus{""})
+				ui_do(core.Claude_Rename{claude_session_id = rename_session, title = tf_text(f)}) // a Claude row (claude.odin)
+				ui_do(core.Set_Focus{""})
 			} else {
-				ui_do(Rename_Project{state.selected_project, tf_text(f)})
-				ui_do(Set_Focus{""})
+				ui_do(core.Rename_Project{state.selected_project, tf_text(f)})
+				ui_do(core.Set_Focus{""})
 			}
 		case .ESCAPE:
-			if in_filter do ui_do(Set_Filter{text = ""}) // Esc clears the filter
-			ui_do(Set_Focus{""})
+			if in_filter do ui_do(core.Set_Filter{text = ""}) // Esc clears the filter
+			ui_do(core.Set_Focus{""})
 		case .BACKSPACE: if alt do tf_delete_word_left(f); else do tf_backspace(f)
 		case .DELETE:    tf_delete(f)
 		case .LEFT:      if alt do tf_word_left(f, shift); else do tf_move(f, -1, shift)
@@ -1018,7 +1021,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, clipboard_text())
+		tf_insert(f, core.clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_DOWN:
@@ -1030,14 +1033,14 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 				return true
 			}
 			if !inside(clay.ID("palette_box"), e.mouse_x, e.mouse_y) {
-				ui_do(Set_Focus{""}) // a click outside closes it (and does nothing else)
+				ui_do(core.Set_Focus{""}) // a click outside closes it (and does nothing else)
 				return true
 			}
 			if !field_inside(box_id, e.mouse_x, e.mouse_y) do return true
 		} else if !field_inside(box_id, e.mouse_x, e.mouse_y) {
 			// a click outside the field ends editing (and is handled normally)
 			ime_cancel()
-			ui_do(Set_Focus{""})
+			ui_do(core.Set_Focus{""})
 			return false
 		}
 		if ime.marked != "" do return true // the input method owns the caret
@@ -1116,8 +1119,8 @@ ime_commit :: proc(text: string) {
 	if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
-	} else if t := key_term(); t != nil {
-		claude_note_typed(key_tab())
+	} else if t := core.key_term(); t != nil {
+		core.claude_note_typed(core.key_tab())
 		term_text_input(t, text)
 	} else if ed := active_editor(); ed != nil {
 		editor_ime_commit(ed, text)
@@ -1132,7 +1135,7 @@ ime_set_marked :: proc(text: string, caret: int) {
 	ime.marked = strings.clone(text)
 	ime.caret = caret
 	app.redraw = true
-	if t := key_term(); t != nil do t.changed = true
+	if t := core.key_term(); t != nil do t.changed = true
 }
 
 ime_cancel :: proc() {
@@ -1147,7 +1150,7 @@ ime_option_composes :: proc() -> bool {return state.focus_widget != "" || active
 // The candidate window's anchor: the field caret, else the terminal cursor.
 ime_anchor :: proc() -> [4]f32 {
 	if state.focus_widget == "" {
-		if t := key_term(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
+		if t := core.key_term(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
 	}
 	return ime.caret_rect // a field's caret, or the editor's (editor_draw)
 }
@@ -1156,9 +1159,9 @@ ime_anchor :: proc() -> [4]f32 {
 // and ⌘` show it): the current session's title.
 update_window_title :: proc() {
 	title := "Deckhand"
-	if cs := cur(); cs != nil {
-		_, place := session_place(cs)
-		title = fmt.tprintf("%s · %s — Deckhand", place, open_session_title(cs))
+	if cs := core.cur(); cs != nil {
+		_, place := core.session_place(cs)
+		title = fmt.tprintf("%s · %s — Deckhand", place, core.open_session_title(cs))
 	}
 	if title == app.window_title do return
 	delete(app.window_title)
@@ -1172,18 +1175,18 @@ utf8_string :: proc(r: rune) -> string {
 }
 
 cleanup :: proc "c" () {
-	context = app_context
-	login_env_kill_probe() // a refresh's shell still running (login_env.odin)
-	harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)
-	persist_quit()
-	titles_save()
-	socket_stop()
-	jobs_shutdown()
-	close_all()
-	holder_client_stop() // the session holder's connection (holder_client.odin)
+	context = core.app_context
+	core.login_env_kill_probe() // a refresh's shell still running (login_env.odin)
+	core.harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)
+	core.persist_quit()
+	core.titles_save()
+	core.socket_stop()
+	core.jobs_shutdown()
+	core.close_all()
+	core.holder_client_stop() // the session holder's connection (holder_client.odin)
 	browser_shutdown() // CEF before sokol (browser.odin)
 	app_shutdown() // app tabs' processes (app_tab.odin)
-	comments_shutdown() // this run's crops (comments.odin)
+	core.comments_shutdown() // this run's crops (comments.odin)
 	comments_draft_shutdown() // and the comment bar's (ui_comments.odin)
 	sgl.shutdown()
 	sg.shutdown()
@@ -1199,7 +1202,7 @@ App_Args :: struct {
 }
 app_args: App_Args
 
-when TEST_HOOKS {
+when core.TEST_HOOKS {
 	APP_USAGE :: "usage: deckhand [--fresh] [--print-token script|control] [--claude] [DIR]   |   deckhand --ctl [--wait MS] JSON..."
 	PRINT_TOKEN_FLAG :: "--print-token"
 } else {
@@ -1227,7 +1230,7 @@ app_args_parse :: proc(args: []string) -> (a: App_Args, ok: bool) {
 }
 
 // The project `deckhand DIR` starts in: the one Add_Project made or selected for DIR; 0 = none.
-launch_project :: proc(r: Result) -> u64 {
+launch_project :: proc(r: core.Result) -> u64 {
 	return r.ok ? r.created_id : 0
 }
 
@@ -1235,11 +1238,11 @@ launch_project :: proc(r: Result) -> u64 {
 // Claude Code is the only harness installed), or with --claude a
 // Claude session (the user's own launch: it comes to the front; without Claude Code a toast says
 // how to install it).
-launch_start :: proc(claude: bool, pid: u64) -> Command {
-	if pid == 0 || find_project(pid) == nil do return nil // never the project that happened to be selected
-	if claude do return New_Claude_Session{project_id = pid}
-	if !pi_installed() && claude_installed() do return New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
-	return New_Chat{pid}
+launch_start :: proc(claude: bool, pid: u64) -> core.Command {
+	if pid == 0 || core.find_project(pid) == nil do return nil // never the project that happened to be selected
+	if claude do return core.New_Claude_Session{project_id = pid}
+	if !core.pi_installed() && core.claude_installed() do return core.New_Claude_Session{project_id = pid} // Claude Code alone (harness.odin)
+	return core.New_Chat{pid}
 }
 
 // Test mode's backing scale from DECKHAND_SCALE (docs/DEVELOPING.md "Test mode"): unset or empty
@@ -1253,23 +1256,23 @@ test_scale_parse :: proc(env: string) -> (scale: f64, ok: bool) {
 }
 
 main :: proc() {
-	persist.launch = time.tick_now()
-	if len(os.args) > 1 && os.args[1] == "--ctl" do os.exit(ctl_main(os.args[2:]))
+	core.persist.launch = time.tick_now()
+	if len(os.args) > 1 && os.args[1] == "--ctl" do os.exit(core.ctl_main(os.args[2:]))
 	ok: bool
 	app_args, ok = app_args_parse(os.args[1:])
 	if !ok {
 		fmt.eprintln(APP_USAGE)
 		os.exit(2)
 	}
-	app_context = context
+	core.app_context = context
 	// from the Dock or Finder: the login shell's environment, before any thread (login_env.odin)
-	login_env_startup()
-	when TEST_HOOKS {
+	core.login_env_startup()
+	when core.TEST_HOOKS {
 		// test mode is quiet unless DECKHAND_QUIET=0: the window never shows or takes focus
-		if hook_env(.Script) != "" && hook_env(.Quiet) != "0" do platform_quiet()
+		if core.hook_env(.Script) != "" && core.hook_env(.Quiet) != "0" do platform_quiet()
 		// test mode: the same backing scale on every Mac (DECKHAND_SCALE, default 1), quiet or not
-		if hook_env(.Script) != "" {
-			scale, sok := test_scale_parse(hook_env(.Scale))
+		if core.hook_env(.Script) != "" {
+			scale, sok := test_scale_parse(core.hook_env(.Scale))
 			if !sok {
 				fmt.eprintln("Deckhand: DECKHAND_SCALE must be a number from 1 to 4 (test mode's backing scale; unset = 1)")
 				os.exit(2)

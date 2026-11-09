@@ -1,7 +1,7 @@
 #+build darwin
 package holder
 
-// Starting session processes on a PTY (as src/pty_posix.odin's pty_spawn does), the signal
+// Starting session processes on a PTY (as src/core/pty_posix.odin's pty_spawn does), the signal
 // state the holder and its children start with, and the TCC disclaim at start.
 
 import "core:c"

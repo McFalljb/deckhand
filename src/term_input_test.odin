@@ -8,16 +8,17 @@ import "core:fmt"
 import "core:strings"
 import "core:sys/posix"
 import "core:testing"
+import "core"
 import gh "ghostty"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 // A 40x5 terminal with 10x20 px cells at 0,0; what it sends to the "app" is
 // read from the returned fd.
 @(private = "file")
-test_term :: proc(term: ^Term) -> posix.FD {
-	app_context = context
+test_term :: proc(term: ^core.Term) -> posix.FD {
+	core.app_context = context
 	font.cell_w, font.cell_h = 10, 20
-	term_init(term, 40, 5)
+	core.term_init(term, 40, 5)
 	term.w, term.h = 400, 100
 	fds: [2]posix.FD
 	posix.pipe(&fds)
@@ -38,7 +39,7 @@ sent :: proc(fd: posix.FD) -> string {
 }
 
 @(private = "file")
-key :: proc(term: ^Term, k: sapp.Keycode, mods: u32) {
+key :: proc(term: ^core.Term, k: sapp.Keycode, mods: u32) {
 	e := sapp.Event{type = .KEY_DOWN, key_code = k, modifiers = mods}
 	term_key_down(term, &e)
 	e.type = .KEY_UP
@@ -46,7 +47,7 @@ key :: proc(term: ^Term, k: sapp.Keycode, mods: u32) {
 }
 
 @(private = "file")
-mouse :: proc(term: ^Term, type: sapp.Event_Type, col, row: f32, mods: u32 = 0, clicks := 1) {
+mouse :: proc(term: ^core.Term, type: sapp.Event_Type, col, row: f32, mods: u32 = 0, clicks := 1) {
 	e := sapp.Event{type = type, mouse_button = .LEFT, mouse_x = term_pad() + (col + 0.5) * font.cell_w, mouse_y = term_pad() + (row + 0.5) * font.cell_h, modifiers = mods}
 	#partial switch type {
 	case .MOUSE_DOWN: term_mouse_down(term, &e, clicks)
@@ -58,7 +59,7 @@ mouse :: proc(term: ^Term, type: sapp.Event_Type, col, row: f32, mods: u32 = 0, 
 // Selected cells as term_draw counts them (drawn_selected; the scene's assert_drawn_selection):
 // the render state's .Selected flag, read without drawing.
 @(private = "file")
-render_selected_cells :: proc(t: ^Term) -> int {
+render_selected_cells :: proc(t: ^core.Term) -> int {
 	gh.render_state_update(t.rs, t.gt)
 	gh.render_state_get(t.rs, .Row_Iterator, &t.it)
 	n := 0
@@ -89,9 +90,9 @@ mac_line_editing_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, mac_key_text(.BACKSPACE, ALT, false), "")
 	testing.expect_value(t, mac_key_text(.BACKSPACE, 0, false), "")
 
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	key(&term, .BACKSPACE, ALT)
 	testing.expect_value(t, sent(fd), "\x1b\x7f") // ⌥⌫: delete word back (zsh, readline, pi)
 	key(&term, .BACKSPACE, SUPER)
@@ -123,40 +124,40 @@ mac_line_editing_keys :: proc(t: ^testing.T) {
 // The selection follows the drag (drawn every move), not just the release.
 @(test)
 selection_updates_during_drag :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	line := "hello-world foo.bar"
 	gh.terminal_vt_write(term.gt, raw_data(line), len(line))
 
 	mouse(&term, .MOUSE_DOWN, 2, 0)
-	testing.expect_value(t, term_selection_text(&term), "")
+	testing.expect_value(t, core.term_selection_text(&term), "")
 	term.changed = false
 	mouse(&term, .MOUSE_MOVE, 8, 0)
-	testing.expect_value(t, term_selection_text(&term), "llo-wor") // before any release
+	testing.expect_value(t, core.term_selection_text(&term), "llo-wor") // before any release
 	testing.expect(t, term.changed, "a drag step must ask for a redraw")
 	testing.expect(t, render_selected_cells(&term) > 0, "the frame drawn now shows the selection")
 	mouse(&term, .MOUSE_MOVE, 12, 0)
-	testing.expect_value(t, term_selection_text(&term), "llo-world f")
+	testing.expect_value(t, core.term_selection_text(&term), "llo-world f")
 	mouse(&term, .MOUSE_UP, 12, 0)
-	testing.expect_value(t, term_selection_text(&term), "llo-world f")
+	testing.expect_value(t, core.term_selection_text(&term), "llo-world f")
 
 	// ⇧-click extends from where the selection started
 	mouse(&term, .MOUSE_DOWN, 16, 0, sapp.MODIFIER_SHIFT)
 	mouse(&term, .MOUSE_UP, 16, 0, sapp.MODIFIER_SHIFT)
-	testing.expect_value(t, term_selection_text(&term), "llo-world foo.b")
+	testing.expect_value(t, core.term_selection_text(&term), "llo-world foo.b")
 	// a click without a drag clears it
 	mouse(&term, .MOUSE_DOWN, 4, 0)
 	mouse(&term, .MOUSE_UP, 4, 0)
-	testing.expect_value(t, term_selection_text(&term), "")
+	testing.expect_value(t, core.term_selection_text(&term), "")
 	testing.expect_value(t, render_selected_cells(&term), 0)
 	// double-click a word, triple-click the line
 	mouse(&term, .MOUSE_DOWN, 14, 0, clicks = 2)
 	mouse(&term, .MOUSE_UP, 14, 0)
-	testing.expect_value(t, term_selection_text(&term), "foo.bar")
+	testing.expect_value(t, core.term_selection_text(&term), "foo.bar")
 	mouse(&term, .MOUSE_DOWN, 14, 0, clicks = 3)
 	mouse(&term, .MOUSE_UP, 14, 0)
-	testing.expect_value(t, term_selection_text(&term), line)
+	testing.expect_value(t, core.term_selection_text(&term), line)
 	testing.expect_value(t, sent(fd), "") // no mouse mode: nothing reported
 }
 
@@ -164,9 +165,9 @@ selection_updates_during_drag :: proc(t: ^testing.T) {
 // drag with its button: 32+0, not 35 ("no button"), which pi ignores.
 @(test)
 reported_drag_carries_its_button :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	modes := "hello\x1b[?1002h\x1b[?1006h"
 	gh.terminal_vt_write(term.gt, raw_data(modes), len(modes))
 
@@ -174,26 +175,26 @@ reported_drag_carries_its_button :: proc(t: ^testing.T) {
 	mouse(&term, .MOUSE_MOVE, 5, 0)
 	mouse(&term, .MOUSE_UP, 5, 0)
 	testing.expect_value(t, sent(fd), "\x1b[<0;3;1M\x1b[<32;6;1M\x1b[<0;6;1m")
-	testing.expect_value(t, term_selection_text(&term), "")
+	testing.expect_value(t, core.term_selection_text(&term), "")
 
 	// ⇧+drag selects instead, and is not reported
 	mouse(&term, .MOUSE_DOWN, 0, 0, sapp.MODIFIER_SHIFT)
 	mouse(&term, .MOUSE_MOVE, 3, 0, sapp.MODIFIER_SHIFT)
-	testing.expect_value(t, term_selection_text(&term), "hell")
+	testing.expect_value(t, core.term_selection_text(&term), "hell")
 	mouse(&term, .MOUSE_UP, 3, 0, sapp.MODIFIER_SHIFT)
 	testing.expect_value(t, sent(fd), "")
 	// a reported click clears that selection
 	mouse(&term, .MOUSE_DOWN, 1, 0)
 	mouse(&term, .MOUSE_UP, 1, 0)
-	testing.expect_value(t, term_selection_text(&term), "")
+	testing.expect_value(t, core.term_selection_text(&term), "")
 }
 
 // A drag above the grid scrolls back a row per step; the selection follows.
 @(test)
 selection_drag_autoscrolls :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	b := strings.builder_make(context.temp_allocator)
 	for i in 0 ..< 20 do strings.write_string(&b, i < 19 ? "line\r\n" : "last")
 	text := strings.to_string(b)
@@ -201,27 +202,27 @@ selection_drag_autoscrolls :: proc(t: ^testing.T) {
 
 	mouse(&term, .MOUSE_DOWN, 0, 2)
 	mouse(&term, .MOUSE_MOVE, 0, -3) // above the pane: row 0
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), 2)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), 2)
 	term_drag_tick(&term, true)
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), 3)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), 3)
 	term_drag_tick(&term, true) // within AUTOSCROLL_STEP: no second step yet
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), 3)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), 3)
 	mouse(&term, .MOUSE_UP, 0, -3)
 	term.drag_scrolled = {}
 	term_drag_tick(&term, true) // released: nothing moves
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), 3)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), 3)
 }
 
 // Output streams in during a drag and the scrollback limit drops the oldest
 // rows: the selection keeps its start on the text it was pressed on.
 @(test)
 selection_anchor_survives_scrollback_trim :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	max_bytes: uint = 1 // as little as libghostty keeps: older pages go
 	gh.terminal_set(term.gt, .Scrollback_Max_Bytes, &max_bytes)
-	lines :: proc(term: ^Term, from, to: int) {
+	lines :: proc(term: ^core.Term, from, to: int) {
 		b := strings.builder_make(context.temp_allocator)
 		for i in from ..< to do fmt.sbprintf(&b, "\r\nrow %06d", i)
 		s := strings.to_string(b)
@@ -230,10 +231,10 @@ selection_anchor_survives_scrollback_trim :: proc(t: ^testing.T) {
 	lines(&term, 0, 2000)
 	mouse(&term, .MOUSE_DOWN, 0, 2) // on "row 001997"
 	mouse(&term, .MOUSE_MOVE, 5, 2)
-	testing.expect_value(t, term_selection_text(&term), "row 00")
+	testing.expect_value(t, core.term_selection_text(&term), "row 00")
 	lines(&term, 2000, 3000) // trims the oldest rows (about 1600 kept), not this one
 	mouse(&term, .MOUSE_MOVE, 9, 4)
-	got := term_selection_text(&term)
+	got := core.term_selection_text(&term)
 	testing.expectf(t, strings.has_prefix(got, "row 001997"), "selection drifted: starts %q", got[:min(len(got), 40)])
 	mouse(&term, .MOUSE_UP, 9, 4)
 }
@@ -242,9 +243,9 @@ selection_anchor_survives_scrollback_trim :: proc(t: ^testing.T) {
 // selection; the moves and the release after it report no button or release.
 @(test)
 shift_right_press_reports_nothing :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	modes := "hello\x1b[?1002h\x1b[?1006h"
 	gh.terminal_vt_write(term.gt, raw_data(modes), len(modes))
 	e := sapp.Event{type = .MOUSE_DOWN, mouse_button = .RIGHT, mouse_x = term_pad() + 25, mouse_y = term_pad() + 10, modifiers = sapp.MODIFIER_SHIFT}
@@ -260,24 +261,24 @@ shift_right_press_reports_nothing :: proc(t: ^testing.T) {
 // and term_cancel_drag ends one outright.
 @(test)
 drag_ends_without_the_button :: proc(t: ^testing.T) {
-	term: Term
+	term: core.Term
 	fd := test_term(&term)
-	defer {term_free(&term); posix.close(fd)}
+	defer {core.term_free(&term); posix.close(fd)}
 	b := strings.builder_make(context.temp_allocator)
 	for _ in 0 ..< 20 do strings.write_string(&b, "line\r\n")
 	gh.terminal_vt_write(term.gt, raw_data(strings.to_string(b)), len(strings.to_string(b)))
 	mouse(&term, .MOUSE_DOWN, 0, 2)
 	mouse(&term, .MOUSE_MOVE, 0, -3)
-	n := strings.count(term_selection_text(&term), "\n")
+	n := strings.count(core.term_selection_text(&term), "\n")
 	term_drag_tick(&term, false) // the button is up: no scroll, the drag is over
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), n)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), n)
 	testing.expect(t, !term.selecting, "drag still on")
 	mouse(&term, .MOUSE_DOWN, 0, 2)
 	mouse(&term, .MOUSE_MOVE, 0, -3)
 	term_cancel_drag(&term)
 	testing.expect(t, !term.selecting && !term.mouse_down, "drag still on")
 	term_drag_tick(&term, true)
-	testing.expect_value(t, strings.count(term_selection_text(&term), "\n"), n)
+	testing.expect_value(t, strings.count(core.term_selection_text(&term), "\n"), n)
 }
 
 // Through the app's event handler (moved from the term scene): ⌘ chords without a mapping send
@@ -286,24 +287,24 @@ drag_ends_without_the_button :: proc(t: ^testing.T) {
 // it, so a later move past the top edge neither extends the selection nor scrolls.
 @(test)
 terminal_through_the_app :: proc(t: ^testing.T) {
-	a, b: Term
+	a, b: core.Term
 	fda := test_term(&a)
 	fdb := test_term(&b)
-	s := Open_Session{id = 9101}
-	append(&s.tabs, Tab{id = 9102, kind = Shell_Tab{}}, Tab{id = 9103, kind = Shell_Tab{}})
+	s := core.Open_Session{id = 9101}
+	append(&s.tabs, core.Tab{id = 9102, kind = core.Shell_Tab{}}, core.Tab{id = 9103, kind = core.Shell_Tab{}})
 	s.active_tab = 9102
 	saved_sessions, saved_current := state.open_sessions, state.current_session
 	state.open_sessions = {}
 	append(&state.open_sessions, s)
 	state.current_session = 9101
-	terms[9102], terms[9103] = &a, &b
+	core.terms[9102], core.terms[9103] = &a, &b
 	defer {
-		delete_key(&terms, 9102)
-		delete_key(&terms, 9103)
+		delete_key(&core.terms, 9102)
+		delete_key(&core.terms, 9103)
 		delete(state.open_sessions[0].tabs)
 		delete(state.open_sessions)
 		state.open_sessions, state.current_session = saved_sessions, saved_current
-		term_free(&a); term_free(&b)
+		core.term_free(&a); core.term_free(&b)
 		posix.close(fda); posix.close(fdb)
 	}
 	app_key :: proc(k: sapp.Keycode, mods: u32) {

@@ -16,28 +16,29 @@ import "core:sys/posix"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 // Two sessions (alpha on screen, beta), each with its pi tab and a browser tab.
 @(private = "file")
 act_reset :: proc() -> (a, b, pa, pb, ta, tb: u64) {
 	context.allocator = runtime.heap_allocator()
-	inbox_drain()
+	core.inbox_drain()
 	browser_agent_reset()
 	browser_act_reset()
 	for id, _ in browsers do browser_drop(id)
-	state = State{}
-	platform = {}
+	state^ = core.State{}
+	core.platform = {}
 	for name in ([]string{"alpha", "beta"}) {
-		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
+		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 		s.active_tab = s.tabs[0].id
 		append(&state.open_sessions, s)
 	}
 	a, b = state.open_sessions[0].id, state.open_sessions[1].id
 	state.current_session = a
 	pa, pb = state.open_sessions[0].tabs[0].id, state.open_sessions[1].tabs[0].id
-	ta = run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI}).created_id
-	tb = run_command(Browser_Open{session = b, url = "https://b.example"}, {kind = .UI}).created_id
+	ta = core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI}).created_id
+	tb = core.run_command(core.Browser_Open{session = b, url = "https://b.example"}, {kind = .UI}).created_id
 	return
 }
 
@@ -50,7 +51,7 @@ act_done :: proc() {
 }
 
 @(private = "file")
-code_of :: proc(r: Result) -> string {
+code_of :: proc(r: core.Result) -> string {
 	i := strings.index(r.data, `"code":"`)
 	if i < 0 do return ""
 	rest := r.data[i + 8:]
@@ -59,7 +60,7 @@ code_of :: proc(r: Result) -> string {
 
 @(private = "file")
 tmp_file :: proc(name: string) -> string {
-	dir := fmt.tprintf("build/test-data/act-%d-%d", os.get_pid(), new_id())
+	dir := fmt.tprintf("build/test-data/act-%d-%d", os.get_pid(), core.new_id())
 	os.make_directory_all(dir)
 	p := fmt.tprintf("%s/%s", dir, name)
 	_ = os.write_entire_file(p, transmute([]u8)string("x"))
@@ -73,24 +74,24 @@ browser_act_session_scope :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, tb := act_reset()
 	defer act_done()
-	pi_a := Caller{kind = .Panel, tab_id = pa}
+	pi_a := core.Caller{kind = .Panel, tab_id = pa}
 	OWN :: "a pi tab drives only its own session's browser tabs"
 	f := tmp_file("a.txt")
 	paths := []string{f}
 	for tab in ([]u64{tb, ta}) {
-		cmds := []Command {
-			Browser_Click{tab_id = tab, target = {selector = "#buy"}},
-			Browser_Type{tab_id = tab, selector = "#name", text = "hi"},
-			Browser_Press{tab_id = tab, keys = "Tab"},
-			Browser_Scroll{tab_id = tab, dy = 300},
-			Browser_Select{tab_id = tab, selector = "#size", label = "Large", has_label = true},
-			Browser_Hover{tab_id = tab, target = {x = 10, y = 10, has_xy = true}},
-			Browser_Upload{tab_id = tab, selector = "#file", paths = paths},
+		cmds := []core.Command {
+			core.Browser_Click{tab_id = tab, target = {selector = "#buy"}},
+			core.Browser_Type{tab_id = tab, selector = "#name", text = "hi"},
+			core.Browser_Press{tab_id = tab, keys = "Tab"},
+			core.Browser_Scroll{tab_id = tab, dy = 300},
+			core.Browser_Select{tab_id = tab, selector = "#size", label = "Large", has_label = true},
+			core.Browser_Hover{tab_id = tab, target = {x = 10, y = 10, has_xy = true}},
+			core.Browser_Upload{tab_id = tab, selector = "#file", paths = paths},
 		}
 		for c in cmds {
-			r := run_command(c, pi_a)
-			if tab == tb do testing.expectf(t, !r.ok && r.error == OWN, "%s on another session's tab: %v", command_type(c), r)
-			else do testing.expectf(t, r.ok && r.pending, "%s on its own tab: %v", command_type(c), r)
+			r := core.run_command(c, pi_a)
+			if tab == tb do testing.expectf(t, !r.ok && r.error == OWN, "%s on another session's tab: %v", core.command_type(c), r)
+			else do testing.expectf(t, r.ok && r.pending, "%s on its own tab: %v", core.command_type(c), r)
 		}
 	}
 	testing.expect_value(t, len(act_ops), 7)
@@ -103,43 +104,43 @@ browser_act_args :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
-	check :: proc(t: ^testing.T, c: Command, pi: Caller, code: string, loc := #caller_location) {
-		r := run_command(c, pi)
-		testing.expectf(t, !r.ok && code_of(r) == code, "%s: want %s, got %v", command_type(c), code, r, loc = loc)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	check :: proc(t: ^testing.T, c: core.Command, pi: core.Caller, code: string, loc := #caller_location) {
+		r := core.run_command(c, pi)
+		testing.expectf(t, !r.ok && code_of(r) == code, "%s: want %s, got %v", core.command_type(c), code, r, loc = loc)
 	}
 	// a target: a selector or x,y, not both, not neither (click, hover)
-	check(t, Browser_Click{tab_id = ta}, pi, "bad_args")
-	check(t, Browser_Click{tab_id = ta, target = {selector = "#a", x = 1, y = 1, has_xy = true}}, pi, "bad_args")
-	check(t, Browser_Hover{tab_id = ta}, pi, "bad_args")
-	check(t, Browser_Click{tab_id = ta, target = {x = -1, y = 5, has_xy = true}}, pi, "bad_args")
+	check(t, core.Browser_Click{tab_id = ta}, pi, "bad_args")
+	check(t, core.Browser_Click{tab_id = ta, target = {selector = "#a", x = 1, y = 1, has_xy = true}}, pi, "bad_args")
+	check(t, core.Browser_Hover{tab_id = ta}, pi, "bad_args")
+	check(t, core.Browser_Click{tab_id = ta, target = {x = -1, y = 5, has_xy = true}}, pi, "bad_args")
 	// selectors: step 7's grammar only (no attributes: no way to pick a field by its state)
-	check(t, Browser_Click{tab_id = ta, target = {selector = "input[type=password]"}}, pi, "selector_unsupported")
-	check(t, Browser_Type{tab_id = ta, selector = "#pw:focus", text = "x"}, pi, "selector_unsupported")
-	check(t, Browser_Select{tab_id = ta, selector = "select option:checked", label = "x", has_label = true}, pi, "selector_unsupported")
-	check(t, Browser_Upload{tab_id = ta, selector = "input[type=file]", paths = []string{"/etc/hosts"}}, pi, "selector_unsupported")
+	check(t, core.Browser_Click{tab_id = ta, target = {selector = "input[type=password]"}}, pi, "selector_unsupported")
+	check(t, core.Browser_Type{tab_id = ta, selector = "#pw:focus", text = "x"}, pi, "selector_unsupported")
+	check(t, core.Browser_Select{tab_id = ta, selector = "select option:checked", label = "x", has_label = true}, pi, "selector_unsupported")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "input[type=file]", paths = []string{"/etc/hosts"}}, pi, "selector_unsupported")
 	// type: text needed (or a submit); no huge texts
-	check(t, Browser_Type{tab_id = ta, selector = "#name"}, pi, "bad_args")
-	check(t, Browser_Type{tab_id = ta, text = strings.repeat("x", ACT_TEXT_MAX + 1, context.temp_allocator)}, pi, "bad_args")
+	check(t, core.Browser_Type{tab_id = ta, selector = "#name"}, pi, "bad_args")
+	check(t, core.Browser_Type{tab_id = ta, text = strings.repeat("x", ACT_TEXT_MAX + 1, context.temp_allocator)}, pi, "bad_args")
 	// select: a label or a value, one of them
-	check(t, Browser_Select{tab_id = ta, selector = "#size"}, pi, "bad_args")
-	check(t, Browser_Select{tab_id = ta, selector = "#size", label = "a", has_label = true, value = "b", has_value = true}, pi, "bad_args")
-	check(t, Browser_Select{tab_id = ta, label = "a", has_label = true}, pi, "bad_args")
+	check(t, core.Browser_Select{tab_id = ta, selector = "#size"}, pi, "bad_args")
+	check(t, core.Browser_Select{tab_id = ta, selector = "#size", label = "a", has_label = true, value = "b", has_value = true}, pi, "bad_args")
+	check(t, core.Browser_Select{tab_id = ta, label = "a", has_label = true}, pi, "bad_args")
 	// press: known keys only; the clipboard's chords are the user's
-	check(t, Browser_Press{tab_id = ta, keys = ""}, pi, "bad_keys")
-	check(t, Browser_Press{tab_id = ta, keys = "Hyper+X"}, pi, "bad_keys")
-	check(t, Browser_Press{tab_id = ta, keys = "Meta+V"}, pi, "bad_keys")
-	check(t, Browser_Press{tab_id = ta, keys = "Tab Meta+C"}, pi, "bad_keys")
+	check(t, core.Browser_Press{tab_id = ta, keys = ""}, pi, "bad_keys")
+	check(t, core.Browser_Press{tab_id = ta, keys = "Hyper+X"}, pi, "bad_keys")
+	check(t, core.Browser_Press{tab_id = ta, keys = "Meta+V"}, pi, "bad_keys")
+	check(t, core.Browser_Press{tab_id = ta, keys = "Tab Meta+C"}, pi, "bad_keys")
 	// scroll: something to do
-	check(t, Browser_Scroll{tab_id = ta}, pi, "bad_args")
+	check(t, core.Browser_Scroll{tab_id = ta}, pi, "bad_args")
 	// upload: absolute paths of regular files, at least one; a directory never
 	dir, _ := os.get_absolute_path("build", context.temp_allocator)
-	check(t, Browser_Upload{tab_id = ta, selector = "#file"}, pi, "bad_file")
-	check(t, Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"relative.txt"}}, pi, "bad_file")
-	check(t, Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/nonexistent/x.txt"}}, pi, "bad_file")
-	check(t, Browser_Upload{tab_id = ta, selector = "#file", paths = []string{dir}}, pi, "bad_file")
-	check(t, Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/dev/null"}}, pi, "bad_file")
-	check(t, Browser_Upload{tab_id = ta, paths = []string{tmp_file("x.txt")}}, pi, "bad_args")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "#file"}, pi, "bad_file")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"relative.txt"}}, pi, "bad_file")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/nonexistent/x.txt"}}, pi, "bad_file")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{dir}}, pi, "bad_file")
+	check(t, core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/dev/null"}}, pi, "bad_file")
+	check(t, core.Browser_Upload{tab_id = ta, paths = []string{tmp_file("x.txt")}}, pi, "bad_args")
 	testing.expect_value(t, len(act_ops), 0)
 }
 
@@ -187,8 +188,8 @@ browser_act_pages_refused :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _, pa, _, _, _ := act_reset()
 	defer act_done()
-	tf := run_command(Browser_Open{session = a, url = "file:///tmp/x.html"}, {kind = .UI}).created_id
-	r := run_command(Browser_Click{tab_id = tf, target = {x = 5, y = 5, has_xy = true}}, {kind = .Panel, tab_id = pa})
+	tf := core.run_command(core.Browser_Open{session = a, url = "file:///tmp/x.html"}, {kind = .UI}).created_id
+	r := core.run_command(core.Browser_Click{tab_id = tf, target = {x = 5, y = 5, has_xy = true}}, {kind = .Panel, tab_id = pa})
 	testing.expectf(t, !r.ok && code_of(r) == "page_not_allowed", "%v", r)
 }
 
@@ -200,55 +201,55 @@ browser_act_take_over :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
-	r := run_command(Browser_Agent_Take_Over{tab_id = ta, on = true}, pi)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	r := core.run_command(core.Browser_Agent_Take_Over{tab_id = ta, on = true}, pi)
 	testing.expect(t, !r.ok, "a pi tab took over")
-	r = run_command(Browser_Agent_Take_Over{tab_id = ta, on = true}, {kind = .Control})
+	r = core.run_command(core.Browser_Agent_Take_Over{tab_id = ta, on = true}, {kind = .Control})
 	testing.expect(t, !r.ok, "a control caller took over")
 	// a click and a read in flight, a second click queued
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 101)
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 102)
-	run_command(Browser_Read{tab_id = ta}, pi, 103)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 101)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 102)
+	core.run_command(core.Browser_Read{tab_id = ta}, pi, 103)
 	ends := make(map[u64]string)
 	defer delete(ends)
 	act_test_finished = &ends
 	defer act_test_finished = nil
-	r = run_command(Browser_Agent_Take_Over{tab_id = ta, on = true}, {kind = .UI})
+	r = core.run_command(core.Browser_Agent_Take_Over{tab_id = ta, on = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	for rid in ([]u64{101, 102, 103}) do testing.expectf(t, strings.contains(ends[rid], `"code":"user_has_control"`), "request %d: %q", rid, ends[rid])
 	testing.expect_value(t, len(act_ops), 0)
 	testing.expect_value(t, len(agent_ops), 0)
 	testing.expect(t, agent_tab_of(ta).user_control, "the user has control")
-	cmds := []Command {
-		Browser_Click{tab_id = ta, target = {selector = "#a"}},
-		Browser_Type{tab_id = ta, text = "x"},
-		Browser_Press{tab_id = ta, keys = "Tab"},
-		Browser_Scroll{tab_id = ta, dy = 10},
-		Browser_Read{tab_id = ta},
-		Browser_Screenshot{tab_id = ta},
-		Browser_Page_Wait{tab_id = ta, what = "load"},
-		Browser_Console{tab_id = ta},
-		Browser_Network{tab_id = ta},
-		Browser_Navigate{tab_id = ta, url = "https://a.example/next"},
-		Browser_Reload{tab_id = ta},
+	cmds := []core.Command {
+		core.Browser_Click{tab_id = ta, target = {selector = "#a"}},
+		core.Browser_Type{tab_id = ta, text = "x"},
+		core.Browser_Press{tab_id = ta, keys = "Tab"},
+		core.Browser_Scroll{tab_id = ta, dy = 10},
+		core.Browser_Read{tab_id = ta},
+		core.Browser_Screenshot{tab_id = ta},
+		core.Browser_Page_Wait{tab_id = ta, what = "load"},
+		core.Browser_Console{tab_id = ta},
+		core.Browser_Network{tab_id = ta},
+		core.Browser_Navigate{tab_id = ta, url = "https://a.example/next"},
+		core.Browser_Reload{tab_id = ta},
 	}
 	for c in cmds {
-		r = run_command(c, pi)
-		testing.expectf(t, !r.ok && code_of(r) == "user_has_control", "%s while the user has control: %v", command_type(c), r)
+		r = core.run_command(c, pi)
+		testing.expectf(t, !r.ok && code_of(r) == "user_has_control", "%s while the user has control: %v", core.command_type(c), r)
 	}
 	// the user's own commands still work, and a script's (not an agent)
-	r = run_command(Browser_Navigate{tab_id = ta, url = "https://a.example/mine"}, {kind = .UI})
+	r = core.run_command(core.Browser_Navigate{tab_id = ta, url = "https://a.example/mine"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	r = run_command(Browser_Read{tab_id = ta}, {kind = .Script})
+	r = core.run_command(core.Browser_Read{tab_id = ta}, {kind = .Script})
 	testing.expect(t, r.ok && r.pending, r.error)
 	// the state and the strip say so
 	b := strings.builder_make(context.temp_allocator)
 	browser_agent_tab_json(&b, ta)
 	testing.expect(t, strings.contains(strings.to_string(b), `"control":"user"`), strings.to_string(b))
 	// Hand back
-	r = run_command(Browser_Agent_Take_Over{tab_id = ta, on = false}, {kind = .UI})
+	r = core.run_command(core.Browser_Agent_Take_Over{tab_id = ta, on = false}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	r = run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
+	r = core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
 	testing.expect(t, r.ok && r.pending, r.error)
 }
 
@@ -259,21 +260,21 @@ browser_act_user_input_pauses :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, tb := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	browser_act_user_input(ta)
 	testing.expect(t, agent_tab_of(ta) == nil || !agent_tab_of(ta).user_control, "no action ran: no pause")
 	ends := make(map[u64]string)
 	defer delete(ends)
 	act_test_finished = &ends
 	defer act_test_finished = nil
-	run_command(Browser_Type{tab_id = ta, selector = "#name", text = "hello"}, pi, 201)
+	core.run_command(core.Browser_Type{tab_id = ta, selector = "#name", text = "hello"}, pi, 201)
 	browser_act_user_input(tb) // another tab: nothing
 	testing.expect_value(t, len(act_ops), 1)
 	browser_act_user_input(ta)
 	testing.expect_value(t, len(act_ops), 0)
 	testing.expect(t, strings.contains(ends[201], `"code":"user_has_control"`), ends[201])
 	testing.expect(t, agent_tab_of(ta).user_control, "paused until Hand back")
-	r := run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
+	r := core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
 	testing.expect_value(t, code_of(r), "user_has_control")
 }
 
@@ -283,22 +284,22 @@ browser_act_stop :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	ends := make(map[u64]string)
 	defer delete(ends)
 	act_test_finished = &ends
 	defer act_test_finished = nil
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{tmp_file("u.txt")}}, pi, 301)
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 302)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{tmp_file("u.txt")}}, pi, 301)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 302)
 	testing.expect(t, act_test_to_bar(ta), "the upload asks")
 	testing.expect(t, act_upload_asking(ta) != nil, "the bar shows")
-	run_command(Browser_Agent_Stop{tab_id = ta}, {kind = .UI})
+	core.run_command(core.Browser_Agent_Stop{tab_id = ta}, {kind = .UI})
 	testing.expect(t, strings.contains(ends[301], `"code":"stopped"`), ends[301])
 	testing.expect(t, strings.contains(ends[302], `"code":"stopped"`), ends[302])
 	testing.expect_value(t, len(act_ops), 0)
 	testing.expect(t, act_upload_asking(ta) == nil, "the bar went")
 	// Stop does not take control: the agent may act again
-	r := run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
+	r := core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi)
 	testing.expect(t, r.ok, r.error)
 }
 
@@ -309,14 +310,14 @@ browser_act_upload_gate :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	ends := make(map[u64]string)
 	defer delete(ends)
 	act_test_finished = &ends
 	defer act_test_finished = nil
 	f := tmp_file("report.pdf")
 	// Block
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 401)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 401)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	ask := act_upload_asking(ta)
 	testing.expect(t, ask != nil && ask.stage == .Bar, "at the bar")
@@ -326,17 +327,17 @@ browser_act_upload_gate :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(strings.to_string(b), f), "the full path is not in State")
 	for _ in 0 ..< 3 do browser_act_tick()
 	testing.expect(t, act_upload_asking(ta) != nil && act_upload_asking(ta).stage == .Bar, "still asking: nothing sent")
-	r := run_command(Browser_Upload_Answer{tab_id = ta, allow = true}, pi)
+	r := core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = true}, pi)
 	testing.expect(t, !r.ok, "the agent answered its own upload")
-	r = run_command(Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .Control})
+	r = core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .Control})
 	testing.expect(t, !r.ok, "a control caller answered")
-	r = run_command(Browser_Upload_Answer{tab_id = ta, allow = false}, {kind = .UI})
+	r = core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = false}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	browser_act_tick()
 	testing.expect(t, strings.contains(ends[401], `"code":"upload_blocked"`), ends[401])
 	testing.expect(t, act_upload_asking(ta) == nil, "no bar")
 	// the timeout: waiting_for_user
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 402)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 402)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	act_upload_asking(ta).deadline = time.tick_add(time.tick_now(), -time.Second)
 	browser_act_tick()
@@ -344,19 +345,19 @@ browser_act_upload_gate :: proc(t: ^testing.T) {
 	testing.expect(t, act_upload_asking(ta) == nil, "no bar")
 	// Allow, but the file became a directory meanwhile: bad_file, nothing sent
 	g := tmp_file("gone.txt")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{g}}, pi, 403)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{g}}, pi, 403)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	os.remove(g)
 	os.make_directory(g)
 	defer os.remove(g)
-	r = run_command(Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
+	r = core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	browser_act_tick()
 	testing.expect(t, strings.contains(ends[403], `"code":"bad_file"`), ends[403])
 	// Allow with the file there: on to sending (the page's file input; no page here)
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 404)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 404)
 	testing.expect(t, act_test_to_bar(ta), "asking")
-	r = run_command(Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
+	r = core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, len(act_ops) == 1 && act_ops[0].stage == .File_El, "allowed: the files go next")
 	// no bar, no answer: refused
@@ -370,19 +371,19 @@ browser_act_not_a_gesture :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	browser_page_input(ta) // the user clicked in the page just now
-	cmds := []Command {
-		Browser_Click{tab_id = ta, target = {selector = "#dl"}},
-		Browser_Press{tab_id = ta, keys = "Enter"},
-		Browser_Type{tab_id = ta, text = "x", submit = true},
-		Browser_Hover{tab_id = ta, target = {selector = "#dl"}},
-		Browser_Scroll{tab_id = ta, dy = 100},
-		Browser_Select{tab_id = ta, selector = "#size", label = "Large", has_label = true},
+	cmds := []core.Command {
+		core.Browser_Click{tab_id = ta, target = {selector = "#dl"}},
+		core.Browser_Press{tab_id = ta, keys = "Enter"},
+		core.Browser_Type{tab_id = ta, text = "x", submit = true},
+		core.Browser_Hover{tab_id = ta, target = {selector = "#dl"}},
+		core.Browser_Scroll{tab_id = ta, dy = 100},
+		core.Browser_Select{tab_id = ta, selector = "#size", label = "Large", has_label = true},
 	}
 	for c in cmds {
-		r := run_command(c, pi)
-		testing.expectf(t, r.ok, "%s: %v", command_type(c), r)
+		r := core.run_command(c, pi)
+		testing.expectf(t, r.ok, "%s: %v", core.command_type(c), r)
 	}
 	testing.expect(t, page_extra(ta).input_at == {}, "the user's gesture was left for an agent's input")
 	testing.expect_value(t, download_take(page_extra(ta), time.tick_now(), 0), Download_Decision.Ask)
@@ -395,16 +396,16 @@ browser_act_log_and_strip :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
-	typed := Browser_Type{tab_id = ta, selector = "#name", text = "s3cret words"}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	typed := core.Browser_Type{tab_id = ta, selector = "#name", text = "s3cret words"}
 	b := strings.builder_make(context.temp_allocator)
-	browser_act_write(&b, typed, true)
+	core.browser_act_write(&b, typed, true)
 	testing.expect(t, !strings.contains(strings.to_string(b), "s3cret") && strings.contains(strings.to_string(b), `"text_bytes":12`), strings.to_string(b))
-	up := Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/Users/someone/private/tax.pdf"}}
+	up := core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{"/Users/someone/private/tax.pdf"}}
 	strings.builder_reset(&b)
-	browser_act_write(&b, up, true)
+	core.browser_act_write(&b, up, true)
 	testing.expect(t, !strings.contains(strings.to_string(b), "private") && strings.contains(strings.to_string(b), `"files":1`), strings.to_string(b))
-	run_command(typed, pi)
+	core.run_command(typed, pi)
 	strings.builder_reset(&b)
 	browser_agent_tab_json(&b, ta)
 	testing.expectf(t, strings.contains(strings.to_string(b), `"doing":"typing into"`), "%s", strings.to_string(b))
@@ -446,10 +447,10 @@ browser_act_deadline_from_accept :: proc(t: ^testing.T) {
 	defer act_done()
 	ends := ends_new()
 	defer ends_free(ends)
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	now := time.tick_now()
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 501)
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 502)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 501)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 502)
 	testing.expect_value(t, len(act_ops), 2)
 	for op in act_ops {
 		left := time.tick_diff(now, op.deadline)
@@ -466,13 +467,13 @@ browser_act_busy_while_bar_asks :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	f := tmp_file("a.txt")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 511)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 511)
 	testing.expect(t, act_test_to_bar(ta), "asking")
-	for c in ([]Command{Browser_Click{tab_id = ta, target = {selector = "#buy"}}, Browser_Type{tab_id = ta, selector = "#name", text = "x"}, Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}}) {
-		r := run_command(c, pi)
-		testing.expectf(t, !r.ok && code_of(r) == "busy", "%s while the bar asks: %v", command_type(c), r)
+	for c in ([]core.Command{core.Browser_Click{tab_id = ta, target = {selector = "#buy"}}, core.Browser_Type{tab_id = ta, selector = "#name", text = "x"}, core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}}) {
+		r := core.run_command(c, pi)
+		testing.expectf(t, !r.ok && code_of(r) == "busy", "%s while the bar asks: %v", core.command_type(c), r)
 	}
 	testing.expect_value(t, len(act_ops), 1)
 }
@@ -486,26 +487,26 @@ browser_act_request_cancel :: proc(t: ^testing.T) {
 	defer act_done()
 	ends := ends_new()
 	defer ends_free(ends)
-	pi := Caller{kind = .Panel, tab_id = pa}
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 521)
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 522)
-	run_command(Browser_Read{tab_id = ta}, pi, 523)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#a"}}, pi, 521)
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#b"}}, pi, 522)
+	core.run_command(core.Browser_Read{tab_id = ta}, pi, 523)
 	act_page_pending(ta)
 	browser_act_tick()
-	r := run_command(Request_Cancel{request_id = 522}, {kind = .Internal})
+	r := core.run_command(core.Request_Cancel{request_id = 522}, {kind = .Internal})
 	testing.expect(t, r.ok, r.error)
 	testing.expectf(t, strings.contains(ends[522], `"code":"cancelled"`), "the queued one: %s", ends[522])
 	testing.expect_value(t, len(act_ops), 1)
-	r = run_command(Request_Cancel{request_id = 521}, {kind = .Internal})
+	r = core.run_command(core.Request_Cancel{request_id = 521}, {kind = .Internal})
 	testing.expectf(t, strings.contains(ends[521], `"code":"cancelled"`), "the running one: %s", ends[521])
-	r = run_command(Request_Cancel{request_id = 523}, {kind = .Internal})
+	r = core.run_command(core.Request_Cancel{request_id = 523}, {kind = .Internal})
 	testing.expectf(t, strings.contains(ends[523], `"code":"cancelled"`), "a read: %s", ends[523])
 	testing.expect_value(t, len(act_ops), 0)
 	testing.expect_value(t, len(agent_ops), 0)
-	r = run_command(Request_Cancel{request_id = 999}, {kind = .Internal})
+	r = core.run_command(core.Request_Cancel{request_id = 999}, {kind = .Internal})
 	testing.expect(t, !r.ok, "nothing running with that id")
 	// not a command anyone else sends
-	testing.expect(t, !caller_may(pi, Request_Cancel{request_id = 1}), "internal only")
+	testing.expect(t, !core.caller_may(pi, core.Request_Cancel{request_id = 1}), "internal only")
 }
 
 // Uploads: protected folders and symlinks are refused (path_not_allowed; never opened); the bar
@@ -521,7 +522,7 @@ browser_act_upload_paths :: proc(t: ^testing.T) {
 		code, _ := act_files_check([]string{p})
 		testing.expectf(t, code == "path_not_allowed", "%s: %s", sub, code)
 	}
-	for d in ([]string{data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator)}) {
+	for d in ([]string{core.data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator)}) {
 		code, _ := act_files_check([]string{fmt.tprintf("%s/x.txt", d)})
 		testing.expectf(t, code == "path_not_allowed", "Deckhand's own %s: %s", d, code)
 	}
@@ -550,11 +551,11 @@ browser_act_upload_paths :: proc(t: ^testing.T) {
 	os.remove(ldir)
 	posix.symlink(strings.clone_to_cstring(gdir, context.temp_allocator), strings.clone_to_cstring(ldir, context.temp_allocator))
 	via := fmt.tprintf("%s/deep.txt", ldir)
-	pi := Caller{kind = .Panel, tab_id = pa}
-	r := run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{link}}, pi)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	r := core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{link}}, pi)
 	testing.expectf(t, code_of(r) == "path_not_allowed", "%v", r)
 	odd := tmp_file("two\nlines.txt")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f, odd, via}}, pi, 531)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f, odd, via}}, pi, 531)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	_, names, ok := browser_act_upload_words(ta)
 	testing.expect(t, ok, "words")
@@ -572,12 +573,12 @@ browser_act_upload_origin :: proc(t: ^testing.T) {
 	defer act_done()
 	ends := ends_new()
 	defer ends_free(ends)
-	pi := Caller{kind = .Panel, tab_id = pa}
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	f := tmp_file("a.txt")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 541)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 541)
 	testing.expect(t, act_test_to_bar(ta), "asking")
-	run_command(Browser_Update{tab_id = ta, what = {.Url}, url = "https://evil.example/x"}, {kind = .Internal})
-	r := run_command(Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Url}, url = "https://evil.example/x"}, {kind = .Internal})
+	r := core.run_command(core.Browser_Upload_Answer{tab_id = ta, allow = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expectf(t, strings.contains(ends[541], `"code":"page_changed"`), "%s", ends[541])
 	testing.expect_value(t, len(act_ops), 0)
@@ -593,8 +594,8 @@ browser_act_file_chooser :: proc(t: ^testing.T) {
 	ends := ends_new()
 	defer ends_free(ends)
 	testing.expect(t, !browser_act_file_dialog(ta), "no agent action: the user's panel")
-	pi := Caller{kind = .Panel, tab_id = pa}
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#one"}}, pi, 551)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#one"}}, pi, 551)
 	act_page_pending(ta)
 	browser_act_tick()
 	testing.expect(t, browser_act_file_dialog(ta), "an agent's click: cancelled")
@@ -613,11 +614,11 @@ browser_act_clipboard :: proc(t: ^testing.T) {
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
 	clip_count = 1
-	platform.clipboard_count = proc() -> int {return clip_count}
-	defer platform.clipboard_count = nil
-	pi := Caller{kind = .Panel, tab_id = pa}
+	core.platform.clipboard_count = proc() -> int {return clip_count}
+	defer core.platform.clipboard_count = nil
+	pi := core.Caller{kind = .Panel, tab_id = pa}
 	f := tmp_file("a.txt")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 561)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, pi, 561)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	op := act_ops[0]
 	clip_count = 2 // the user copies while the bar asks
@@ -655,8 +656,8 @@ browser_act_file_chooser_after :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, _, pa, _, ta, _ := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pa}
-	run_command(Browser_Click{tab_id = ta, target = {selector = "#one"}}, pi, 581)
+	pi := core.Caller{kind = .Panel, tab_id = pa}
+	core.run_command(core.Browser_Click{tab_id = ta, target = {selector = "#one"}}, pi, 581)
 	browser_act_cancel(ta, "done", "stopped") // the action ended
 	testing.expect(t, browser_act_file_dialog(ta), "right after an agent's action: cancelled")
 	page_extra(ta).input_at = time.tick_now() // the user clicked in the page since
@@ -672,10 +673,10 @@ browser_act_activity_lingers :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, b, _, pb, _, tb := act_reset()
 	defer act_done()
-	pi := Caller{kind = .Panel, tab_id = pb}
+	pi := core.Caller{kind = .Panel, tab_id = pb}
 	s := &state.open_sessions[1]
 	testing.expect(t, s.id == b, "beta")
-	run_command(Browser_Click{tab_id = tb, target = {selector = "#a"}}, pi, 571)
+	core.run_command(core.Browser_Click{tab_id = tb, target = {selector = "#a"}}, pi, 571)
 	testing.expect(t, browser_act_session_background(s), "acting")
 	browser_act_cancel(tb, "stopped", "stopped")
 	testing.expect(t, browser_act_session_background(s), "lingers after the last action")
@@ -694,10 +695,10 @@ browser_act_sidebar_names_actor :: proc(t: ^testing.T) {
 	defer act_done()
 	s := &state.open_sessions[1]
 	testing.expect_value(t, browser_act_session_text(s), "")
-	run_command(Browser_Click{tab_id = tb, target = {selector = "#a"}}, Caller{kind = .Panel, tab_id = pb}, 572)
+	core.run_command(core.Browser_Click{tab_id = tb, target = {selector = "#a"}}, core.Caller{kind = .Panel, tab_id = pb}, 572)
 	testing.expect_value(t, browser_act_session_text(s), "pi is using a page")
 	browser_act_cancel(tb, "stopped", "stopped")
-	run_command(Browser_Click{tab_id = tb, target = {selector = "#a"}}, Caller{kind = .Panel, tab_id = pb, claude = true}, 573)
+	core.run_command(core.Browser_Click{tab_id = tb, target = {selector = "#a"}}, core.Caller{kind = .Panel, tab_id = pb, claude = true}, 573)
 	testing.expect_value(t, browser_act_session_text(s), "Claude is using a page")
 	browser_act_cancel(tb, "stopped", "stopped")
 	_ = b
@@ -711,9 +712,9 @@ browser_act_claude_named :: proc(t: ^testing.T) {
 	defer act_done()
 	ends := ends_new()
 	defer ends_free(ends)
-	claude := Caller{kind = .Panel, tab_id = pa, claude = true}
+	claude := core.Caller{kind = .Panel, tab_id = pa, claude = true}
 	f := tmp_file("report.pdf")
-	run_command(Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, claude, 402)
+	core.run_command(core.Browser_Upload{tab_id = ta, selector = "#file", paths = []string{f}}, claude, 402)
 	testing.expect(t, act_test_to_bar(ta), "asking")
 	ask := act_upload_asking(ta)
 	testing.expect(t, ask != nil && strings.has_prefix(ask.who_text, "Claude in "), ask != nil ? ask.who_text : "no bar")

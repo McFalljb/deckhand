@@ -16,34 +16,35 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(private = "file")
-R_UI :: Caller{kind = .UI}
+R_UI :: core.Caller{kind = .UI}
 
 // Sessions (pi tabs running, their bridges reported idle) in /tmp/<name>.
 @(private = "file")
 r_reset :: proc(names: ..string) -> []u64 {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{}
-	reload_watch_reset()
-	platform = {}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{}
+	core.reload_watch_reset()
+	core.platform = {}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	clear(&r_sends)
-	reload_send = proc(tab_id, request_id: u64, cmd: Command) -> bool {
+	core.reload_send = proc(tab_id, request_id: u64, cmd: core.Command) -> bool {
 		append(&r_sends, R_Send{tab_id, request_id, cmd})
 		return true
 	}
 	ids := make([]u64, len(names))
 	for name, i in names {
-		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
+		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 		s.active_tab = s.tabs[0].id
 		append(&state.open_sessions, s)
 		ids[i] = s.tabs[0].id
@@ -56,44 +57,44 @@ r_reset :: proc(names: ..string) -> []u64 {
 @(private = "file")
 R_Send :: struct {
 	tab_id, request_id: u64,
-	cmd:                Command,
+	cmd:                core.Command,
 }
 @(private = "file")
 r_sends: [dynamic]R_Send
 
 // A running terminal for a pi tab (a harmless process).
 @(private = "file")
-r_term :: proc(id: u64) -> ^Term {
-	t := new(Term)
-	term_init(t, 80, 24)
-	term_start(t, {"/bin/sh", "-c", "exec sleep 30"}, "/tmp")
-	terms[id] = t
+r_term :: proc(id: u64) -> ^core.Term {
+	t := new(core.Term)
+	core.term_init(t, 80, 24)
+	core.term_start(t, {"/bin/sh", "-c", "exec sleep 30"}, "/tmp")
+	core.terms[id] = t
 	return t
 }
 
 @(private = "file")
 r_done :: proc() {
-	inbox_drain()
-	for _, t in terms do reader_stop_and_close(t)
-	reload_watch_reset()
-	reload_send = socket_bridge_send
+	core.inbox_drain()
+	for _, t in core.terms do core.reader_stop_and_close(t)
+	core.reload_watch_reset()
+	core.reload_send = core.socket_bridge_send
 	os.unset_env("DECKHAND_PI_PACKAGE")
 }
 
 @(private = "file")
-r_tab :: proc(id: u64) -> ^Tab {
-	_, t, _ := find_tab(id)
+r_tab :: proc(id: u64) -> ^core.Tab {
+	_, t, _ := core.find_tab(id)
 	return t
 }
 
 @(private = "file")
-r_status :: proc(id: u64, agent: Agent_State, waiting := false, blockers: []string = nil) {
-	run_command(Pi_Status_Update{tab_id = id, agent = agent, waiting = waiting, blockers = blockers}, {kind = .Panel, tab_id = id})
+r_status :: proc(id: u64, agent: core.Agent_State, waiting := false, blockers: []string = nil) {
+	core.run_command(core.Pi_Status_Update{tab_id = id, agent = agent, waiting = waiting, blockers = blockers}, {kind = .Panel, tab_id = id})
 }
 
 @(private = "file")
 r_changed :: proc(path: string, scope := "") {
-	run_command(Reload_Watch{paths = {path}, scopes = {scope}})
+	core.run_command(core.Reload_Watch{paths = {path}, scopes = {scope}})
 }
 
 // Changes are reported once none came for RELOAD_DEBOUNCE.
@@ -104,19 +105,19 @@ reload_debounce :: proc(t: ^testing.T) {
 	defer r_done()
 	t0 := time.tick_now()
 	ms :: proc(t0: time.Tick, n: int) -> time.Tick {return time.tick_add(t0, time.Duration(n) * time.Millisecond)}
-	reload_pending_add("/x/settings.json", "", t0)
-	testing.expect(t, !reload_flush(ms(t0, 500)), "too soon")
-	reload_pending_add("/x/extensions/a.ts", "", ms(t0, 800)) // another change: the wait starts again
-	reload_pending_add("/x/settings.json", "", ms(t0, 850)) // the same file once
-	testing.expect(t, !reload_flush(ms(t0, 1500)), "1 s after the first change, but not after the last")
+	core.reload_pending_add("/x/settings.json", "", t0)
+	testing.expect(t, !core.reload_flush(ms(t0, 500)), "too soon")
+	core.reload_pending_add("/x/extensions/a.ts", "", ms(t0, 800)) // another change: the wait starts again
+	core.reload_pending_add("/x/settings.json", "", ms(t0, 850)) // the same file once
+	testing.expect(t, !core.reload_flush(ms(t0, 1500)), "1 s after the first change, but not after the last")
 	testing.expect_value(t, state.reload.gen, u64(0))
-	testing.expect(t, reload_flush(ms(t0, 1900)), "quiet for a second")
+	testing.expect(t, core.reload_flush(ms(t0, 1900)), "quiet for a second")
 	testing.expect_value(t, len(state.reload.changed), 2)
 	testing.expect(t, r_tab(ids[0]).reload.stale)
-	testing.expect(t, !reload_flush(ms(t0, 5000)), "reported once")
+	testing.expect(t, !core.reload_flush(ms(t0, 5000)), "reported once")
 	// an editor save: at once
-	reload_note_save("/x/keybindings.json", "")
-	testing.expect(t, reload_flush(), "a save is not debounced")
+	core.reload_note_save("/x/keybindings.json", "")
+	testing.expect(t, core.reload_flush(), "a save is not debounced")
 	testing.expect(t, state.reload.from_save)
 }
 
@@ -128,15 +129,15 @@ reload_scopes :: proc(t: ^testing.T) {
 	ids := r_reset("alpha", "beta")
 	defer r_done()
 	state.open_sessions[1].cwd = "/tmp/alpha/sub"
-	home := Open_Session{id = new_id(), home = true, cwd = "/Users/x"}
-	append(&home.tabs, Tab{id = new_id(), kind = Pi_Tab{}, status = .Running, agent = .Idle})
+	home := core.Open_Session{id = core.new_id(), home = true, cwd = "/Users/x"}
+	append(&home.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, status = .Running, agent = .Idle})
 	append(&state.open_sessions, home)
 	atlas := home.tabs[0].id
 	r_changed("/tmp/alpha/sub/AGENTS.md", "/tmp/alpha/sub")
 	testing.expect(t, !r_tab(ids[0]).reload.stale && r_tab(ids[1]).reload.stale && !r_tab(atlas).reload.stale, "only the tab below it")
 	r_changed("/tmp/AGENTS.md", "/tmp")
 	testing.expect(t, r_tab(ids[0]).reload.stale && !r_tab(atlas).reload.stale, "both tabs below /tmp")
-	r_changed("/data/atlas/ATLAS.md", RELOAD_SCOPE_ATLAS)
+	r_changed("/data/atlas/ATLAS.md", core.RELOAD_SCOPE_ATLAS)
 	testing.expect(t, r_tab(atlas).reload.stale, "Atlas's prompt: Atlas")
 	r_tab(atlas).reload.stale = false
 	r_tab(ids[0]).reload.stale = false
@@ -170,11 +171,11 @@ reload_idle_and_queued :: proc(t: ^testing.T) {
 	testing.expect(t, reload_bar_shows())
 
 	// the user's click: background work → one confirmation that names it
-	r := run_command(Pi_Reload_All{only_changed = true}, R_UI)
+	r := core.run_command(core.Pi_Reload_All{only_changed = true}, R_UI)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expect(t, strings.has_prefix(r.confirm_summary, "Reload 3 pi tabs? Background work that a reload would stop: /tmp/shells (shell sh1: npm test; +1). Those tabs wait until it ends."), r.confirm_summary)
 	testing.expect(t, r_tab(idle).reload.queued == .None && r_tab(idle).reload.step == .None, "nothing happens before the answer")
-	r = run_command(Pi_Reload_All{only_changed = true, confirm = r.confirm_token}, R_UI)
+	r = core.run_command(core.Pi_Reload_All{only_changed = true, confirm = r.confirm_token}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.data, fmt.tprintf(`{{"reloading":[%d],"queued":[%d,%d],"no_bridge":[%d]}}`, idle, busy, shells, nob))
 	testing.expect_value(t, len(state.pending_confirmations), 0)
@@ -186,20 +187,20 @@ reload_idle_and_queued :: proc(t: ^testing.T) {
 	testing.expect(t, !can)
 
 	// the idle tab's bridge gets pi.reload and answers
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 1)
 	testing.expect(t, r_sends[0].tab_id == idle && r_tab(idle).reload.step == .Reload_Sent)
-	run_command(Bridge_Done{request_id = r_sends[0].request_id, ok = true})
+	core.run_command(core.Bridge_Done{request_id = r_sends[0].request_id, ok = true})
 	testing.expect(t, !r_tab(idle).reload.stale && r_tab(idle).reload.step == .None)
 	testing.expect_value(t, r_tab(idle).reload.note, "reloaded")
 
 	// the busy one goes idle: its reload goes
 	r_status(busy, .Idle)
 	testing.expect_value(t, r_tab(busy).reload.note, "reloading")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 2)
 	// it got busy again before the bridge ran it: again when idle
-	run_command(Bridge_Done{request_id = r_sends[1].request_id, ok = false, error = "not idle: agent working"})
+	core.run_command(core.Bridge_Done{request_id = r_sends[1].request_id, ok = false, error = "not idle: agent working"})
 	testing.expect(t, r_tab(busy).reload.queued == .Reload && r_tab(busy).reload.stale)
 	r_status(busy, .Working)
 	testing.expect(t, r_tab(busy).reload.queued == .Reload, "still waiting")
@@ -207,20 +208,20 @@ reload_idle_and_queued :: proc(t: ^testing.T) {
 	r_status(shells, .Idle, blockers = {"shell sh1: npm test"})
 	testing.expect(t, r_tab(shells).reload.queued == .Reload, "still blocked")
 	r_status(shells, .Idle)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 3)
-	run_command(Bridge_Done{request_id = r_sends[2].request_id, ok = true})
+	core.run_command(core.Bridge_Done{request_id = r_sends[2].request_id, ok = true})
 	testing.expect(t, !r_tab(shells).reload.stale)
 
 	// Later: the bar hides, the waiting reload is dropped; the next change shows it again
-	run_command(Pi_Reload_Later{}, R_UI)
+	core.run_command(core.Pi_Reload_Later{}, R_UI)
 	testing.expect(t, r_tab(busy).reload.queued == .None && !reload_bar_shows())
 	r_changed("/home/.pi/agent/extensions/x.ts")
 	testing.expect(t, reload_bar_shows())
 
 	// no background work: the click is the decision
 	r_status(busy, .Idle)
-	r = run_command(Pi_Reload_All{only_changed = true}, R_UI)
+	r = core.run_command(core.Pi_Reload_All{only_changed = true}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, r_tab(busy).reload.step == .Reload_Kicked && r_tab(idle).reload.step == .Reload_Kicked, "both go")
 }
@@ -232,23 +233,23 @@ reload_callers :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	ids := r_reset("alpha", "beta")
 	defer r_done()
-	run_command(Set_Confirm_Policy{caller = .Control, class = .Session_Restart, mode = .Auto}, R_UI)
-	ctl := Caller{kind = .Control, tab_id = ids[1]} // bound to beta's tab: not its own
-	r := run_command(Pi_Reload_All{}, ctl)
+	core.run_command(core.Set_Confirm_Policy{caller = .Control, class = .Session_Restart, mode = .Auto}, R_UI)
+	ctl := core.Caller{kind = .Control, tab_id = ids[1]} // bound to beta's tab: not its own
+	r := core.run_command(core.Pi_Reload_All{}, ctl)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expect(t, r.confirm_by_user && r.confirm_token == "", "the user confirms, in Deckhand")
 	testing.expect_value(t, r.confirm_summary, "A script asks: reload 1 pi tab?") // a control token not bound to Atlas's tab
-	run_command(Set_Confirm_Policy{caller = .Script, class = .Session_Restart, mode = .Auto}, R_UI)
-	r = run_command(Pi_Reload_All{}, {kind = .Script})
+	core.run_command(core.Set_Confirm_Policy{caller = .Script, class = .Session_Restart, mode = .Auto}, R_UI)
+	r = core.run_command(core.Pi_Reload_All{}, {kind = .Script})
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, r_tab(ids[0]).reload.step == .Reload_Kicked && r_tab(ids[1]).reload.step == .Reload_Kicked)
-	testing.expect_value(t, run_command(Pi_Reload_All{}, {kind = .Panel, tab_id = ids[0]}).error, "not allowed for this caller")
-	testing.expect_value(t, run_command(Pi_Restart_Updated{}, {kind = .Control}).error, "not allowed for this caller")
-	testing.expect_value(t, run_command(Pi_Reload_Later{}, {kind = .Control}).error, "not allowed for this caller")
-	testing.expect_value(t, run_command(Reload_Watch{}, {kind = .Script}).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Pi_Reload_All{}, {kind = .Panel, tab_id = ids[0]}).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Pi_Restart_Updated{}, {kind = .Control}).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Pi_Reload_Later{}, {kind = .Control}).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Reload_Watch{}, {kind = .Script}).error, "not allowed for this caller")
 	// one pi tab's reload names its background work too
 	r_status(ids[0], .Idle, blockers = {"shell sh1: npm test"})
-	r = run_command(Pi_Reload{tab_id = ids[0]}, R_UI)
+	r = core.run_command(core.Pi_Reload{tab_id = ids[0]}, R_UI)
 	testing.expect(t, strings.has_suffix(r.confirm_summary, "Background work stops: shell sh1: npm test."), r.confirm_summary)
 }
 
@@ -267,30 +268,30 @@ reload_version_change :: proc(t: ^testing.T) {
 	os.set_env("DECKHAND_PI_PACKAGE", pkg)
 	os.set_env("PI_CODING_AGENT_DIR", fmt.tprintf("%s/agent", dir))
 	defer os.unset_env("PI_CODING_AGENT_DIR")
-	testing.expect_value(t, pkg_version(pkg), "1.0.0")
+	testing.expect_value(t, core.pkg_version(pkg), "1.0.0")
 	// the first tick: tabs seen, the package read, its version reported at once
-	reload_tick()
+	core.reload_tick()
 	testing.expect_value(t, state.reload.pi_version, "1.0.0")
 	testing.expect_value(t, r_tab(ids[0]).reload.version, "1.0.0") // seen before the version was known
 	testing.expect(t, !restart_bar_shows(), "nothing to restart")
 	// pi is updated
 	_ = os.write_entire_file(pkg, transmute([]u8)string(`{"name":"pi","version":"1.10.0"}`))
-	reload_poll()
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_poll()
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	testing.expect_value(t, state.reload.pi_version, "1.10.0")
-	testing.expect(t, reload_outdated(r_tab(ids[0])) && reload_outdated(r_tab(ids[1])))
+	testing.expect(t, core.reload_outdated(r_tab(ids[0])) && core.reload_outdated(r_tab(ids[1])))
 	testing.expect(t, restart_bar_shows())
 	r_status(ids[1], .Working)
 	msg, can := reload_message(true)
 	testing.expect_value(t, msg, "pi updated to 1.10.0 — Restart 1 idle tab · 1 busy when idle")
 	testing.expect(t, can)
 	// a tab started now runs the new one
-	s := Open_Session{id = new_id(), cwd = "/tmp/gamma"}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, status = .Running, agent = .Idle})
+	s := core.Open_Session{id = core.new_id(), cwd = "/tmp/gamma"}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, status = .Running, agent = .Idle})
 	append(&state.open_sessions, s)
-	reload_tick()
+	core.reload_tick()
 	testing.expect_value(t, r_tab(s.tabs[0].id).reload.version, "1.10.0")
-	testing.expect(t, !reload_outdated(r_tab(s.tabs[0].id)))
+	testing.expect(t, !core.reload_outdated(r_tab(s.tabs[0].id)))
 
 	// Restart: the idle one is asked through its bridge first (pi.wait_idle,
 	// which pi-kit's bridge answers only when pi is truly idle), the busy one queued
@@ -299,38 +300,38 @@ reload_version_change :: proc(t: ^testing.T) {
 	state.open_sessions[0].session_file = strings.clone(sf)
 	old := r_term(ids[0])
 	old_pid := old.pty.pid
-	r := run_command(Pi_Restart_Updated{}, R_UI)
+	r := core.run_command(core.Pi_Restart_Updated{}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.data, fmt.tprintf(`{{"restarting":[%d],"queued":[%d],"no_bridge":[]}}`, ids[0], ids[1]))
-	inbox_drain()
+	core.inbox_drain()
 	a := r_tab(ids[0])
 	testing.expect_value(t, len(r_sends), 1)
 	if len(r_sends) == 1 {
-		w, is := r_sends[0].cmd.(Pi_Wait_Idle)
+		w, is := r_sends[0].cmd.(core.Pi_Wait_Idle)
 		testing.expect(t, is && w.tab_id == ids[0] && w.timeout_ms > 0, "asks the bridge whether pi is idle")
 	}
-	testing.expect(t, term_of(a.id) == old && a.status == .Running, "nothing killed before the bridge's answer")
+	testing.expect(t, core.term_of(a.id) == old && a.status == .Running, "nothing killed before the bridge's answer")
 	// pi got busy meanwhile: the bridge times out; nothing is killed, it waits for idle
-	run_command(Bridge_Done{request_id = r_sends[0].request_id, ok = false, error = "timeout"})
-	testing.expect(t, term_of(a.id) == old && a.status == .Running, "not killed")
+	core.run_command(core.Bridge_Done{request_id = r_sends[0].request_id, ok = false, error = "timeout"})
+	testing.expect(t, core.term_of(a.id) == old && a.status == .Running, "not killed")
 	testing.expect(t, a.reload.queued == .Restart, "again when idle")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 1) // no second ask by itself
 	// idle: asked again; the bridge says idle: the old pi is stopped, the new
 	// one starts only once the old process has exited
 	r_status(ids[0], .Idle)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 2)
-	run_command(Bridge_Done{request_id = r_sends[1].request_id, ok = true})
-	testing.expect(t, term_of(a.id) == nil, "the old pi is stopped")
+	core.run_command(core.Bridge_Done{request_id = r_sends[1].request_id, ok = true})
+	testing.expect(t, core.term_of(a.id) == nil, "the old pi is stopped")
 	testing.expect(t, a.status != .Running, "not started while the old process may still run")
 	for _ in 0 ..< 300 {
-		pty_reap()
-		reload_tick()
+		core.pty_reap()
+		core.reload_tick()
 		if a.status == .Running do break
 		time.sleep(10 * time.Millisecond)
 	}
-	testing.expectf(t, a.status == .Running && term_of(a.id) != nil && term_of(a.id).pty.pid != old_pid, "started again (%v, %v, %q)", a.status, a.reload.step, a.reload.note)
+	testing.expectf(t, a.status == .Running && core.term_of(a.id) != nil && core.term_of(a.id).pty.pid != old_pid, "started again (%v, %v, %q)", a.status, a.reload.step, a.reload.note)
 	testing.expect(t, posix.kill(posix.pid_t(old_pid), .NONE) != .OK, "after the old process exited")
 	testing.expect(t, a.agent == .Unknown, "its new bridge has not reported yet")
 	testing.expect_value(t, a.reload.version, "1.10.0")
@@ -338,12 +339,12 @@ reload_version_change :: proc(t: ^testing.T) {
 	testing.expect(t, r_tab(ids[1]).reload.queued == .Restart)
 	// the busy one has no session file to restart from: it says so when it gets idle
 	r_status(ids[1], .Idle)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, r_tab(ids[1]).reload.note, "not restarted: pi has not reported its session file")
 	testing.expect(t, r_tab(ids[1]).reload.queued == .None)
 	testing.expect_value(t, len(r_sends), 2) // never asked
 	// Later hides the bar until the next version
-	run_command(Pi_Reload_Later{restart = true}, R_UI)
+	core.run_command(core.Pi_Reload_Later{restart = true}, R_UI)
 	testing.expect(t, !restart_bar_shows())
 }
 
@@ -355,24 +356,24 @@ reload_double_kick :: proc(t: ^testing.T) {
 	ids := r_reset("alpha")
 	defer r_done()
 	r_changed("/home/.pi/agent/settings.json")
-	testing.expect(t, run_command(Pi_Reload_All{only_changed = true}, R_UI).ok)
+	testing.expect(t, core.run_command(core.Pi_Reload_All{only_changed = true}, R_UI).ok)
 	// a status report arrives before the inbox runs the kick
 	r_status(ids[0], .Idle)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 1)
 	if len(r_sends) == 1 {
-		_, is := r_sends[0].cmd.(Pi_Reload)
+		_, is := r_sends[0].cmd.(core.Pi_Reload)
 		testing.expect(t, is, "pi.reload")
 	}
 	// a stray kick, another status: nothing more while the reload runs
-	run_command(Reload_Kick{tab_id = ids[0]})
+	core.run_command(core.Reload_Kick{tab_id = ids[0]})
 	r_status(ids[0], .Idle)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 1)
-	run_command(Bridge_Done{request_id = r_sends[0].request_id, ok = true})
+	core.run_command(core.Bridge_Done{request_id = r_sends[0].request_id, ok = true})
 	testing.expect(t, !r_tab(ids[0]).reload.stale)
-	run_command(Reload_Kick{tab_id = ids[0]})
-	inbox_drain()
+	core.run_command(core.Reload_Kick{tab_id = ids[0]})
+	core.inbox_drain()
 	testing.expect_value(t, len(r_sends), 1) // nothing queued: nothing sent
 }
 
@@ -384,33 +385,33 @@ reload_burst :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	r_reset("alpha", "beta")
 	defer r_done()
-	base := fs_real(fmt.tprintf("%s/pd-reload-burst-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
+	base := core.fs_real(fmt.tprintf("%s/pd-reload-burst-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
 	ad := fmt.tprintf("%s/agent", base)
 	os.make_directory_all(fmt.tprintf("%s/extensions", ad))
 	os.set_env("PI_CODING_AGENT_DIR", ad)
 	defer os.unset_env("PI_CODING_AGENT_DIR")
-	reload_build({"/tmp/alpha"})
+	core.reload_build({"/tmp/alpha"})
 	paths := make([dynamic]string, context.temp_allocator)
 	for i in 0 ..< 20_000 do append(&paths, fmt.tprintf("%s/extensions/pkg/src/f%d.ts", ad, i))
 	for i in 0 ..< 1000 do append(&paths, fmt.tprintf("%s/extensions/pkg/node_modules/x/f%d.js", ad, i))
 	// CPU time (this thread's): a busy machine does not fail it
-	t0 := thread_cpu_now()
-	for p in paths do reload_fs_event(p)
-	took_events := thread_cpu_since(t0)
-	t1 := thread_cpu_now()
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
-	took_flush := thread_cpu_since(t1)
-	perf_expect(t, "reload_burst: 20k FSEvents paths (release builds: about half)", took_events, 20 * time.Millisecond)
-	perf_expect(t, "reload_burst: the report", took_flush, 5 * time.Millisecond)
+	t0 := core.thread_cpu_now()
+	for p in paths do core.reload_fs_event(p)
+	took_events := core.thread_cpu_since(t0)
+	t1 := core.thread_cpu_now()
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	took_flush := core.thread_cpu_since(t1)
+	core.perf_expect(t, "reload_burst: 20k FSEvents paths (release builds: about half)", took_events, 20 * time.Millisecond)
+	core.perf_expect(t, "reload_burst: the report", took_flush, 5 * time.Millisecond)
 	log.infof("20k FSEvents paths: %v; the report: %v", took_events, took_flush)
-	testing.expect_value(t, len(state.reload.changed), RELOAD_CHANGED_MAX)
-	testing.expect_value(t, state.reload.changed_more, 20_000 - RELOAD_CHANGED_MAX)
+	testing.expect_value(t, len(state.reload.changed), core.RELOAD_CHANGED_MAX)
+	testing.expect_value(t, state.reload.changed_more, 20_000 - core.RELOAD_CHANGED_MAX)
 	for p in state.reload.changed do testing.expectf(t, !strings.contains(p, "node_modules"), "listed: %s", p)
 	testing.expect(t, state.open_sessions[0].tabs[0].reload.stale && state.open_sessions[1].tabs[0].reload.stale)
 	testing.expect_value(t, state.reload.gen, u64(1))
 	// only node_modules: nothing to report
-	for i in 0 ..< 100 do reload_fs_event(fmt.tprintf("%s/extensions/pkg/node_modules/y/%d.js", ad, i))
-	testing.expect(t, !reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	for i in 0 ..< 100 do core.reload_fs_event(fmt.tprintf("%s/extensions/pkg/node_modules/y/%d.js", ad, i))
+	testing.expect(t, !core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 }
 
 // pi itself writes some keys of settings.json in ordinary use (the model
@@ -421,7 +422,7 @@ reload_pi_own_settings_keys :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	r_reset("alpha")
 	defer r_done()
-	base := fs_real(fmt.tprintf("%s/pd-reload-keys-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
+	base := core.fs_real(fmt.tprintf("%s/pd-reload-keys-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
 	ad := fmt.tprintf("%s/agent", base)
 	os.make_directory_all(ad)
 	os.set_env("PI_CODING_AGENT_DIR", ad)
@@ -430,15 +431,15 @@ reload_pi_own_settings_keys :: proc(t: ^testing.T) {
 	w :: proc(p, text: string) {_ = os.write_entire_file(p, transmute([]u8)text)}
 	w(sp, `{"theme": "dark", "defaultModel": "a", "lastChangelogVersion": "1.0.0"}`)
 	state.open_sessions[0].cwd = base
-	reload_poll()
+	core.reload_poll()
 	far := time.tick_add(time.tick_now(), 2 * time.Second)
-	testing.expect(t, !reload_flush(far))
+	testing.expect(t, !core.reload_flush(far))
 	w(sp, `{"lastChangelogVersion": "1.4.0", "theme": "dark", "defaultProvider": "x", "defaultModel": "b", "defaultThinkingLevel": "high", "modelThinkingLevels": {"x/b": "low"}, "deviceId": "d"}`)
-	reload_poll()
-	testing.expect(t, !reload_flush(far), "only keys pi writes itself")
+	core.reload_poll()
+	testing.expect(t, !core.reload_flush(far), "only keys pi writes itself")
 	w(sp, `{"lastChangelogVersion": "1.4.0", "theme": "light", "defaultModel": "b"}`)
-	reload_poll()
-	testing.expect(t, reload_flush(far), "the theme changed")
+	core.reload_poll()
+	testing.expect(t, core.reload_flush(far), "the theme changed")
 	testing.expect_value(t, state.reload.changed[0], sp)
 }
 
@@ -458,13 +459,13 @@ reload_reprobe :: proc(t: ^testing.T) {
 	_ = os.write_entire_file(a, transmute([]u8)string(`{"version":"1.0.0"}`))
 	_ = os.write_entire_file(b, transmute([]u8)string(`{"version":"2.0.0"}`))
 	os.set_env("DECKHAND_PI_PACKAGE", a)
-	reload_tick()
+	core.reload_tick()
 	testing.expect_value(t, state.reload.pi_version, "1.0.0")
 	os.set_env("DECKHAND_PI_PACKAGE", b) // pi now found elsewhere
-	reload_pending_add("/x/settings.json", "")
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
-	reload_tick() // takes the new place, reads its version
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_pending_add("/x/settings.json", "")
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_tick() // takes the new place, reads its version
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	testing.expect_value(t, state.reload.pi_version, "2.0.0")
 }
 
@@ -477,7 +478,7 @@ reload_sources :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	r_reset("x")
 	defer r_done()
-	base := fs_real(fmt.tprintf("%s/pd-reload-src-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
+	base := core.fs_real(fmt.tprintf("%s/pd-reload-src-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec), context.allocator)
 	ad := fmt.tprintf("%s/home/.pi/agent", base)
 	kit := fmt.tprintf("%s/kit", base)
 	proj := fmt.tprintf("%s/code/proj", base)
@@ -492,8 +493,8 @@ reload_sources :: proc(t: ^testing.T) {
 	os.symlink(fmt.tprintf("%s/elsewhere/s1", base), fmt.tprintf("%s/skills/s1", ad))
 	os.set_env("PI_CODING_AGENT_DIR", ad)
 	defer os.unset_env("PI_CODING_AGENT_DIR")
-	reload_build({proj})
-	src := reload_sources_for_test()
+	core.reload_build({proj})
+	src := core.reload_sources_for_test()
 	has :: proc(m: map[string]string, k, scope: string) -> bool {v, ok := m[k]; return ok && v == scope}
 	testing.expect(t, has(src, fmt.tprintf("%s/settings.json", ad), ""), "agent settings")
 	testing.expect(t, has(src, fmt.tprintf("%s/AGENTS.md", ad), ""), "agent context file")
@@ -510,31 +511,31 @@ reload_sources :: proc(t: ^testing.T) {
 		testing.expectf(t, !strings.contains(k, "auth.json") && !strings.contains(k, "/sessions") && !strings.has_prefix(k, "npm:"), "never watched: %s", k)
 	}
 	// FSEvents paths: inside a watched folder, credential files left out
-	reload_fs_event(fmt.tprintf("%s/extensions/a/index.ts", kit))
+	core.reload_fs_event(fmt.tprintf("%s/extensions/a/index.ts", kit))
 	w(fmt.tprintf("%s/extensions/secret.json", ad), "{}")
 	os.change_mode(fmt.tprintf("%s/extensions/secret.json", ad), os.perm_number(0o600))
-	reload_fs_event(fmt.tprintf("%s/extensions/secret.json", ad))
-	reload_fs_event(fmt.tprintf("%s/unrelated.txt", base))
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_fs_event(fmt.tprintf("%s/extensions/secret.json", ad))
+	core.reload_fs_event(fmt.tprintf("%s/unrelated.txt", base))
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	testing.expect_value(t, len(state.reload.changed), 1)
 	// the stat poll (built for the running tabs' folders): a context file
 	// edited above the cwd reaches the tab
 	state.open_sessions[0].cwd = proj
-	reload_poll() // builds for proj; stamps as they are
-	testing.expect(t, !reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)), "nothing changed yet")
+	core.reload_poll() // builds for proj; stamps as they are
+	testing.expect(t, !core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)), "nothing changed yet")
 	w(fmt.tprintf("%s/code/AGENTS.md", base), "# code, longer\n")
-	reload_poll()
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_poll()
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
 	testing.expect(t, slice.contains(state.reload.changed[:], fmt.tprintf("%s/code/AGENTS.md", base)), "listed (with the earlier change: the tab is still stale)")
 	testing.expect(t, state.open_sessions[0].tabs[0].reload.stale)
 	// a new extension folder in the project: noticed, then watched
 	os.make_directory_all(fmt.tprintf("%s/.pi/extensions", proj))
-	reload_poll()
-	testing.expect(t, reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
-	reload_poll()
-	testing.expect(t, has(reload_sources_for_test(), fmt.tprintf("%s/.pi/extensions/", proj), proj))
+	core.reload_poll()
+	testing.expect(t, core.reload_flush(time.tick_add(time.tick_now(), 2 * time.Second)))
+	core.reload_poll()
+	testing.expect(t, has(core.reload_sources_for_test(), fmt.tprintf("%s/.pi/extensions/", proj), proj))
 	found := false
-	for d in reload_watch_dirs() do if d == fmt.tprintf("%s/.pi/extensions", proj) do found = true
+	for d in core.reload_watch_dirs() do if d == fmt.tprintf("%s/.pi/extensions", proj) do found = true
 	testing.expect(t, found, "handed to FSEvents")
 }
 
@@ -550,9 +551,9 @@ cr_no_user_claude :: proc "contextless" () {
 }
 
 @(private = "file")
-CR_SCRIPT :: Caller{kind = .Script}
+CR_SCRIPT :: core.Caller{kind = .Script}
 @(private = "file")
-CR_CONTROL :: Caller{kind = .Control}
+CR_CONTROL :: core.Caller{kind = .Control}
 
 // A temp HOME with a fake Claude config folder (CLAUDE_CONFIG_DIR) and a project; never the
 // user's ~/.claude. Returns the temp folder, the config folder and the project.
@@ -560,7 +561,7 @@ CR_CONTROL :: Caller{kind = .Control}
 cr_env :: proc(tag: string) -> (base, cfg, proj: string) {
 	raw := fmt.tprintf("%s/pd-creload-%s-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), tag, time.now()._nsec)
 	os.make_directory_all(raw)
-	base = fs_real(raw, context.allocator)
+	base = core.fs_real(raw, context.allocator)
 	cfg = fmt.aprintf("%s/home/cfg", base)
 	proj = fmt.aprintf("%s/code/proj", base)
 	for d in ([]string{cfg, proj, fmt.tprintf("%s/rules", cfg), fmt.tprintf("%s/skills/s1", cfg), fmt.tprintf("%s/projects/-p", cfg), fmt.tprintf("%s/.claude/commands", proj)}) do os.make_directory_all(d)
@@ -569,18 +570,18 @@ cr_env :: proc(tag: string) -> (base, cfg, proj: string) {
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	os.unset_env("DECKHAND_CLAUDE_BIN")
-	claude_reload_watch_reset()
-	dead_tab_reset()
-	claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	core.claude_installed_probe = stand_in_installed // the stand-in claude counts as installed
 	return
 }
 
 @(private = "file")
 cr_done :: proc() {
 	r_done()
-	claude_reload_watch_reset()
-	dead_tab_reset()
-	claude_installed_probe = nil
+	core.claude_reload_watch_reset()
+	core.dead_tab_reset()
+	core.claude_installed_probe = nil
 	os.unset_env("CLAUDE_CONFIG_DIR")
 	os.unset_env("DECKHAND_CLAUDE_BIN")
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
@@ -592,8 +593,8 @@ cr_w :: proc(p, text: string) {_ = os.write_entire_file(p, transmute([]u8)text)}
 // An open session at cwd (its pi tab "running", no process) for Claude tabs.
 @(private = "file")
 cr_session :: proc(cwd: string) -> u64 {
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-cr"), cwd = strings.clone(cwd)}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("pi-cr"), cwd = strings.clone(cwd)}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
@@ -624,10 +625,10 @@ cr_running_again :: proc(id: u64) -> bool {
 	// up to 20 s (500 rounds of 10 ms, ~5 s, timed out on CI under load), no slower when it passes
 	deadline := time.tick_add(time.tick_now(), 20 * time.Second)
 	for time.tick_diff(time.tick_now(), deadline) > 0 {
-		pump_all()
-		pty_reap()
-		dead_tab_tick()
-		if _, tab, _ := find_tab(id); tab != nil && tab.status == .Running && !restart_waiting(id) do return true
+		core.pump_all()
+		core.pty_reap()
+		core.dead_tab_tick()
+		if _, tab, _ := core.find_tab(id); tab != nil && tab.status == .Running && !core.restart_waiting(id) do return true
 		time.sleep(10 * time.Millisecond)
 	}
 	return false
@@ -643,7 +644,7 @@ claude_reload_classify :: proc(t: ^testing.T) {
 	base, cfg, proj := cr_env("class")
 	home := fmt.tprintf("%s/home", base)
 	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
-	C :: Claude_File_Class
+	C :: core.Claude_File_Class
 	Case :: struct {
 		p:    string,
 		want: C,
@@ -682,7 +683,7 @@ claude_reload_classify :: proc(t: ^testing.T) {
 		{fmt.tprintf("%s/src/main.go", proj), .Ignored},
 		{fmt.tprintf("%s/.env", proj), .Ignored},
 	}
-	for c in cases do testing.expectf(t, claude_file_class(c.p) == c.want, "%s: %v, want %v", c.p, claude_file_class(c.p), c.want)
+	for c in cases do testing.expectf(t, core.claude_file_class(c.p) == c.want, "%s: %v, want %v", c.p, core.claude_file_class(c.p), c.want)
 }
 
 // What is watched for a running Claude tab: only what needs a restart, and never a credential,
@@ -698,8 +699,8 @@ claude_reload_sources :: proc(t: ^testing.T) {
 	cr_w(fmt.tprintf("%s/.claude.json", home), "{}")
 	cr_w(fmt.tprintf("%s/code/CLAUDE.md", base), "# code\n")
 	cr_w(fmt.tprintf("%s/.mcp.json", proj), "{}")
-	claude_reload_build({proj})
-	src := claude_reload_sources_for_test()
+	core.claude_reload_build({proj})
+	src := core.claude_reload_sources_for_test()
 	has :: proc(m: map[string]string, k, scope: string) -> bool {v, ok := m[k]; return ok && v == scope}
 	plugin := os.get_env("DECKHAND_CLAUDE_PLUGIN", context.temp_allocator)
 	testing.expect(t, has(src, fmt.tprintf("%s/CLAUDE.md", cfg), ""), "the global CLAUDE.md")
@@ -719,20 +720,20 @@ claude_reload_sources :: proc(t: ^testing.T) {
 		}
 	}
 	// the poll notices a change in a watched folder's files (an edited command), not in live ones
-	claude_reload_build({})
+	core.claude_reload_build({})
 	sess := cr_session(proj)
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
-	id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
+	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
 	testing.expect(t, id != 0)
-	claude_reload_tick()
-	claude_reload_poll_now()
+	core.claude_reload_tick()
+	core.claude_reload_poll_now()
 	testing.expect_value(t, len(state.reload.claude.changed), 0)
 	cr_w(fmt.tprintf("%s/settings.json", cfg), `{"model":"x"}`) // live: no bar
 	cr_w(fmt.tprintf("%s/.claude/commands/c.md", proj), "do it\n")
-	claude_reload_poll_now()
+	core.claude_reload_poll_now()
 	testing.expect_value(t, len(state.reload.claude.changed), 1)
 	testing.expect(t, slice.contains(state.reload.claude.changed[:], fmt.tprintf("%s/.claude/commands", proj)), "the commands folder")
-	_, tab, _ := find_tab(id)
+	_, tab, _ := core.find_tab(id)
 	testing.expect(t, tab.reload.stale, "the tab is stale")
 	// the bar's text, and no pi bar for it
 	testing.expect(t, claude_bar_shows(false))
@@ -751,78 +752,78 @@ claude_reload_restart_flow :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
-	idle := run_command(New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
-	busy := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	none := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	run_command(Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556661", source = "startup"}, CR_SCRIPT)
-	run_command(Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556662", source = "startup"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
-	claude_reload_tick()
+	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
+	busy := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	none := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556661", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556662", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
+	core.claude_reload_tick()
 	testing.expect(t, !claude_bar_shows(false), "nothing changed")
-	testing.expect(t, run_command(Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}}).ok)
-	_, it, _ := find_tab(idle)
+	testing.expect(t, core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}}).ok)
+	_, it, _ := core.find_tab(idle)
 	testing.expect(t, it.reload.stale)
 	msg, can := claude_reload_message(false)
 	testing.expect_value(t, msg, "Claude Code settings changed — Restart 1 idle Claude tab · 1 busy when idle")
 	testing.expect(t, can)
 	// a scoped change reaches only the tabs at or below it
-	run_command(Claude_Reload_Later{})
+	core.run_command(core.Claude_Reload_Later{})
 	testing.expect(t, !claude_bar_shows(false), "Later hides it")
-	for &x in find_session(sess).tabs do x.reload.stale = false
-	run_command(Claude_Reload_Watch{paths = {"/elsewhere/CLAUDE.md"}, scopes = {"/elsewhere"}})
+	for &x in core.find_session(sess).tabs do x.reload.stale = false
+	core.run_command(core.Claude_Reload_Watch{paths = {"/elsewhere/CLAUDE.md"}, scopes = {"/elsewhere"}})
 	testing.expect(t, !it.reload.stale, "another folder's file")
 	testing.expect(t, !claude_bar_shows(false))
-	run_command(Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", proj)}, scopes = {proj}})
+	core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", proj)}, scopes = {proj}})
 	testing.expect(t, it.reload.stale)
 	testing.expect(t, claude_bar_shows(false), "a new change shows it again")
 	// the user's Restart: confirmed first (background work stops)
-	r := run_command(Claude_Restart_Changed{}, R_UI)
+	r := core.run_command(core.Claude_Restart_Changed{}, R_UI)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expectf(t, strings.contains(r.confirm_summary, "background"), "says what stops: %s", r.confirm_summary)
 	os.remove(args)
-	r = run_command(Claude_Restart_Changed{confirm = r.confirm_token}, R_UI)
+	r = core.run_command(core.Claude_Restart_Changed{confirm = r.confirm_token}, R_UI)
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, json_path(r.data, "restarting.#"), "1")
-	testing.expect_value(t, json_path(r.data, "restarting.0"), fmt.tprint(idle))
-	testing.expect_value(t, json_path(r.data, "queued.#"), "1")
-	testing.expect_value(t, json_path(r.data, "queued.0"), fmt.tprint(busy))
-	testing.expect_value(t, json_path(r.data, "no_session.#"), "1")
-	testing.expect_value(t, json_path(r.data, "no_session.0"), fmt.tprint(none))
+	testing.expect_value(t, core.json_path(r.data, "restarting.#"), "1")
+	testing.expect_value(t, core.json_path(r.data, "restarting.0"), fmt.tprint(idle))
+	testing.expect_value(t, core.json_path(r.data, "queued.#"), "1")
+	testing.expect_value(t, core.json_path(r.data, "queued.0"), fmt.tprint(busy))
+	testing.expect_value(t, core.json_path(r.data, "no_session.#"), "1")
+	testing.expect_value(t, core.json_path(r.data, "no_session.0"), fmt.tprint(none))
 	testing.expect(t, cr_running_again(idle), "the idle tab runs again")
 	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556661\n--model\nopus"), "resumed with the user's flags")
-	_, it, _ = find_tab(idle)
+	_, it, _ = core.find_tab(idle)
 	testing.expect(t, !it.reload.stale, "fresh")
 	// the busy one waits; typing holds it too; it goes once idle and untouched
-	_, bt, _ := find_tab(busy)
-	testing.expect_value(t, bt.reload.queued, Reload_Op.Restart)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
-	claude_note_typed(bt)
-	claude_reload_tick()
-	testing.expect_value(t, bt.status, Tab_Status.Running) // not while the user types
-	run_command(Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
+	_, bt, _ := core.find_tab(busy)
+	testing.expect_value(t, bt.reload.queued, core.Reload_Op.Restart)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
+	core.claude_note_typed(bt)
+	core.claude_reload_tick()
+	testing.expect_value(t, bt.status, core.Tab_Status.Running) // not while the user types
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
 	os.remove(args)
-	claude_reload_tick()
+	core.claude_reload_tick()
 	testing.expect(t, cr_running_again(busy))
 	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556662"))
-	_, bt, _ = find_tab(busy)
-	testing.expect_value(t, bt.reload.queued, Reload_Op.None)
+	_, bt, _ = core.find_tab(busy)
+	testing.expect_value(t, bt.reload.queued, core.Reload_Op.None)
 	// the one without a conversation id runs on, untouched
-	_, nt, _ := find_tab(none)
-	testing.expect_value(t, nt.status, Tab_Status.Running)
+	_, nt, _ := core.find_tab(none)
+	testing.expect_value(t, nt.status, core.Tab_Status.Running)
 	// Atlas (control) may ask; the user confirms; the snapshot shows the bar's model
-	run_command(Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
-	rc := run_command(Claude_Restart_Changed{}, CR_CONTROL)
+	core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
+	rc := core.run_command(core.Claude_Restart_Changed{}, CR_CONTROL)
 	testing.expect_value(t, rc.error, "needs_confirmation")
 	testing.expect(t, rc.confirm_by_user)
-	testing.expect(t, command_spec("claude_restart_changed") != nil)
-	testing.expect(t, command_spec("claude_reload_later") != nil)
-	testing.expect(t, !caller_may(Caller{kind = .Panel, tab_id = idle, claude = true}, Claude_Restart_Changed{}), "a Claude tab never restarts tabs")
-	c, err := parse_command(`{"type":"claude_restart_changed","update":true}`, context.temp_allocator)
+	testing.expect(t, core.command_spec("claude_restart_changed") != nil)
+	testing.expect(t, core.command_spec("claude_reload_later") != nil)
+	testing.expect(t, !core.caller_may(core.Caller{kind = .Panel, tab_id = idle, claude = true}, core.Claude_Restart_Changed{}), "a Claude tab never restarts tabs")
+	c, err := core.parse_command(`{"type":"claude_restart_changed","update":true}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, c.(Claude_Restart_Changed).update, true)
-	snap := json_path(run_command(Get_State{}, R_UI).data, "reload.claude.changed.0")
+	testing.expect_value(t, c.(core.Claude_Restart_Changed).update, true)
+	snap := core.json_path(core.run_command(core.Get_State{}, R_UI).data, "reload.claude.changed.0")
 	testing.expect(t, strings.contains(snap, "CLAUDE.md"), snap)
 }
 
@@ -847,70 +848,70 @@ claude_version_drift :: proc(t: ^testing.T) {
 	link := fmt.tprintf("%s/claude", bin)
 	os.symlink(fmt.tprintf("%s/2.1.300", vers), link)
 	// how a version is read from an install's layout
-	label, ident := claude_version_of(link)
+	label, ident := core.claude_version_of(link)
 	testing.expect_value(t, label, "2.1.300")
 	testing.expect_value(t, ident, "2.1.300")
 	cask := fmt.tprintf("%s/Caskroom/claude-code/2.1.299", base)
 	os.make_directory_all(cask)
 	cr_w(fmt.tprintf("%s/claude", cask), fake)
-	label, _ = claude_version_of(fmt.tprintf("%s/claude", cask))
+	label, _ = core.claude_version_of(fmt.tprintf("%s/claude", cask))
 	testing.expect_value(t, label, "2.1.299")
 	latest := fmt.tprintf("%s/Caskroom/claude-code@latest/2.1.301", base) // the latest channel's cask
 	os.make_directory_all(latest)
 	cr_w(fmt.tprintf("%s/claude", latest), fake)
-	label, _ = claude_version_of(fmt.tprintf("%s/claude", latest))
+	label, _ = core.claude_version_of(fmt.tprintf("%s/claude", latest))
 	testing.expect_value(t, label, "2.1.301")
 	npm := fmt.tprintf("%s/lib/node_modules/@anthropic-ai/claude-code", base)
 	os.make_directory_all(npm)
 	cr_w(fmt.tprintf("%s/cli.js", npm), fake)
 	cr_w(fmt.tprintf("%s/package.json", npm), `{"name":"@anthropic-ai/claude-code","version":"2.1.250"}`)
 	os.symlink(fmt.tprintf("%s/cli.js", npm), fmt.tprintf("%s/npm-claude", base))
-	label, _ = claude_version_of(fmt.tprintf("%s/npm-claude", base))
+	label, _ = core.claude_version_of(fmt.tprintf("%s/npm-claude", base))
 	testing.expect_value(t, label, "2.1.250")
 	other := fmt.tprintf("%s/other-claude", base)
 	cr_w(other, fake)
-	label, ident = claude_version_of(other)
+	label, ident = core.claude_version_of(other)
 	testing.expect_value(t, label, "")
 	testing.expect(t, strings.has_prefix(ident, "build:"), ident) // unknown layout: its file's identity
-	label, _ = claude_version_of(fmt.tprintf("%s/missing", base))
+	label, _ = core.claude_version_of(fmt.tprintf("%s/missing", base))
 	testing.expect_value(t, label, "")
 	// tests replace claude (DECKHAND_CLAUDE_CMD): no version unless DECKHAND_CLAUDE_BIN names one
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
-	testing.expect_value(t, claude_binary_path(), "")
+	testing.expect_value(t, core.claude_binary_path(), "")
 	os.set_env("DECKHAND_CLAUDE_BIN", link)
-	testing.expect_value(t, claude_binary_path(), link)
+	testing.expect_value(t, core.claude_binary_path(), link)
 	// a running tab records the version on disk
 	sess := cr_session(proj)
-	id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	run_command(Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556663", source = "startup"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = id, state = "idle"}, CR_SCRIPT)
-	claude_reload_tick()
-	claude_reload_poll_now()
-	claude_reload_tick()
+	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = id, session_id = "0c1a0de0-aaaa-4222-8333-444455556663", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = id, state = "idle"}, CR_SCRIPT)
+	core.claude_reload_tick()
+	core.claude_reload_poll_now()
+	core.claude_reload_tick()
 	testing.expect_value(t, state.reload.claude.version, "2.1.300")
-	_, tab, _ := find_tab(id)
+	_, tab, _ := core.find_tab(id)
 	testing.expect_value(t, tab.reload.version, "2.1.300")
-	testing.expect(t, !claude_reload_outdated(tab))
+	testing.expect(t, !core.claude_reload_outdated(tab))
 	testing.expect(t, !claude_bar_shows(true))
 	// an update relinks claude
 	os.remove(link)
 	os.symlink(fmt.tprintf("%s/2.1.301", vers), link)
-	claude_reload_poll_now()
+	core.claude_reload_poll_now()
 	testing.expect_value(t, state.reload.claude.version, "2.1.301")
-	testing.expect(t, claude_reload_outdated(tab))
+	testing.expect(t, core.claude_reload_outdated(tab))
 	msg, can := claude_reload_message(true)
 	testing.expect_value(t, msg, "Claude Code updated to 2.1.301 — Restart 1 idle Claude tab")
 	testing.expect(t, can)
 	// Later: hidden until the next version
-	run_command(Claude_Reload_Later{update = true})
+	core.run_command(core.Claude_Reload_Later{update = true})
 	testing.expect(t, !claude_bar_shows(true))
 	state.reload.claude.update_dismissed = false
-	r := run_command(Claude_Restart_Changed{update = true}, R_UI)
-	r = run_command(Claude_Restart_Changed{update = true, confirm = r.confirm_token}, R_UI)
+	r := core.run_command(core.Claude_Restart_Changed{update = true}, R_UI)
+	r = core.run_command(core.Claude_Restart_Changed{update = true, confirm = r.confirm_token}, R_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, cr_running_again(id))
-	claude_reload_tick()
-	_, tab, _ = find_tab(id)
+	core.claude_reload_tick()
+	_, tab, _ = core.find_tab(id)
 	testing.expect_value(t, tab.reload.version, "2.1.301")
 	testing.expect(t, !claude_bar_shows(true))
 	testing.expect(t, !os.exists(ran), "claude itself never ran")
@@ -924,12 +925,12 @@ claude_reload_after_save :: proc(t: ^testing.T) {
 	r_reset()
 	defer cr_done()
 	_, cfg, _ := cr_env("save")
-	settings_after_save(0, fmt.tprintf("%s/settings.json", cfg))
-	claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
+	core.settings_after_save(0, fmt.tprintf("%s/settings.json", cfg))
+	core.claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
 	testing.expect_value(t, len(state.reload.claude.changed), 0)
 	testing.expect(t, !claude_bar_shows(false))
-	settings_after_save(0, fmt.tprintf("%s/CLAUDE.md", cfg))
-	claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
+	core.settings_after_save(0, fmt.tprintf("%s/CLAUDE.md", cfg))
+	core.claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
 	testing.expect(t, state.reload.claude.from_save)
 	testing.expect(t, claude_bar_shows(false))
 	msg, can := claude_reload_message(false)
@@ -949,45 +950,45 @@ claude_reload_agent_confirm :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	mine_s := cr_session(proj)
-	agent := Caller{kind = .Control, tab_id = find_session(mine_s).tabs[0].id}
-	mine := run_command(New_Claude_Tab{session = mine_s}, R_UI).created_id
+	agent := core.Caller{kind = .Control, tab_id = core.find_session(mine_s).tabs[0].id}
+	mine := core.run_command(core.New_Claude_Tab{session = mine_s}, R_UI).created_id
 	other_s := cr_session(proj)
-	other := run_command(New_Claude_Tab{session = other_s, args = {"--model", "opus"}}, R_UI).created_id
+	other := core.run_command(core.New_Claude_Tab{session = other_s, args = {"--model", "opus"}}, R_UI).created_id
 	for x in ([][2]u64{{mine, 1}, {other, 2}}) {
-		run_command(Claude_Session_Report{tab_id = x[0], session_id = fmt.tprintf("0c1a0de0-aaaa-4222-8333-44445555668%d", x[1]), source = "startup"}, CR_SCRIPT)
-		run_command(Claude_Turn_Report{tab_id = x[0], state = "idle"}, CR_SCRIPT)
+		core.run_command(core.Claude_Session_Report{tab_id = x[0], session_id = fmt.tprintf("0c1a0de0-aaaa-4222-8333-44445555668%d", x[1]), source = "startup"}, CR_SCRIPT)
+		core.run_command(core.Claude_Turn_Report{tab_id = x[0], state = "idle"}, CR_SCRIPT)
 	}
-	claude_reload_tick()
-	run_command(Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
-	r := run_command(Claude_Restart_Changed{}, agent)
+	core.claude_reload_tick()
+	core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
+	r := core.run_command(core.Claude_Restart_Changed{}, agent)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expect(t, r.confirm_by_user)
 	testing.expect_value(t, len(state.pending_confirmations), 1)
 	os.remove(args)
 	if len(state.pending_confirmations) == 1 {
 		confirm_pending(state.pending_confirmations[0].token)
-		inbox_drain()
+		core.inbox_drain()
 	}
 	testing.expect(t, cr_running_again(other), "the other session's tab restarted")
 	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556682"))
 	data, _ := os.read_entire_file(args, context.temp_allocator)
 	testing.expectf(t, !strings.contains(string(data), "--model"), "an agent's restart replays no saved flags: %q", string(data))
-	_, mt, _ := find_tab(mine)
-	testing.expect(t, !restart_waiting(mine) && mt.status == .Running && mt.reload.stale, "the agent's own session is left alone")
+	_, mt, _ := core.find_tab(mine)
+	testing.expect(t, !core.restart_waiting(mine) && mt.status == .Running && mt.reload.stale, "the agent's own session is left alone")
 	// a script trusted (or auto) for session restarts: the user still confirms (pi panels may not ask)
-	for kind in ([]Caller_Kind{.Script}) {
-		for mode in ([]Confirm_Mode{.Trusted, .Auto}) {
+	for kind in ([]core.Caller_Kind{.Script}) {
+		for mode in ([]core.Confirm_Mode{.Trusted, .Auto}) {
 			state.settings.confirm[kind][.Session_Restart] = mode
-			run_command(Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
-			c := Caller{kind = kind}
-			rr := run_command(Claude_Restart_Changed{}, c)
+			core.run_command(core.Claude_Reload_Watch{paths = {fmt.tprintf("%s/CLAUDE.md", cfg)}, scopes = {""}})
+			c := core.Caller{kind = kind}
+			rr := core.run_command(core.Claude_Restart_Changed{}, c)
 			testing.expectf(t, rr.error == "needs_confirmation" && rr.confirm_by_user && rr.confirm_token == "", "%v %v: %v", kind, mode, rr)
 			clear(&state.pending_confirmations)
 		}
 	}
 	// Later is the user's (as pi's)
-	testing.expect_value(t, command_spec("claude_reload_later").who, Command_Who.User)
-	testing.expect(t, !caller_may(CR_CONTROL, Claude_Reload_Later{}), "an agent never hides the bar")
+	testing.expect_value(t, core.command_spec("claude_reload_later").who, core.Command_Who.User)
+	testing.expect(t, !core.caller_may(CR_CONTROL, core.Claude_Reload_Later{}), "an agent never hides the bar")
 }
 
 // A file saved deep in a project's .claude (rules/sub/x.md) reaches that project's tabs.
@@ -999,14 +1000,14 @@ claude_reload_scope_nested :: proc(t: ^testing.T) {
 	_, _, proj := cr_env("nested")
 	os.set_env("DECKHAND_CLAUDE_CMD", "exec sleep 30")
 	sess := cr_session(proj)
-	id := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	claude_reload_tick()
+	id := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	core.claude_reload_tick()
 	os.make_directory_all(fmt.tprintf("%s/.claude/rules/sub", proj))
 	p := fmt.tprintf("%s/.claude/rules/sub/x.md", proj)
 	cr_w(p, "# rule\n")
-	settings_after_save(0, p)
-	claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
-	_, tab, _ := find_tab(id)
+	core.settings_after_save(0, p)
+	core.claude_reload_flush(time.tick_add(time.tick_now(), 2 * time.Second))
+	_, tab, _ := core.find_tab(id)
 	testing.expect(t, tab.reload.stale, "the project's tab needs a restart")
 }
 
@@ -1022,56 +1023,56 @@ claude_restart_all :: proc(t: ^testing.T) {
 	args := fmt.tprintf("%s/args", base)
 	os.set_env("DECKHAND_CLAUDE_CMD", cr_args_cmd(args))
 	sess := cr_session(proj)
-	idle := run_command(New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
-	busy := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	none := run_command(New_Claude_Tab{session = sess}, R_UI).created_id
-	run_command(Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556691", source = "startup"}, CR_SCRIPT)
-	run_command(Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556692", source = "startup"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
-	claude_reload_tick()
+	idle := core.run_command(core.New_Claude_Tab{session = sess, args = {"--model", "opus"}}, R_UI).created_id
+	busy := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	none := core.run_command(core.New_Claude_Tab{session = sess}, R_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556691", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556692", source = "startup"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "submitted"}, CR_SCRIPT)
+	core.claude_reload_tick()
 	// nothing changed: the bar's Restart has nothing to do, restart-all still does
-	testing.expect(t, !run_command(Claude_Restart_Changed{}, R_UI).ok, "nothing changed")
+	testing.expect(t, !core.run_command(core.Claude_Restart_Changed{}, R_UI).ok, "nothing changed")
 	testing.expect(t, action_ok("restart_all_claude"), "the palette offers it while a Claude tab runs")
 	testing.expect_value(t, POP_ACTIONS[.Restart_Claude], "restart_all_claude") // its button: the gear's popover
 	testing.expect(t, !action_ok("restart_changed_claude"), "nothing changed: not offered")
-	r := run_command(Claude_Restart_Changed{all = true}, R_UI)
+	r := core.run_command(core.Claude_Restart_Changed{all = true}, R_UI)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expectf(t, strings.contains(r.confirm_summary, "Restart 2 Claude tabs?"), "%s", r.confirm_summary)
 	os.remove(args)
-	r = run_command(Claude_Restart_Changed{all = true, confirm = r.confirm_token}, R_UI)
+	r = core.run_command(core.Claude_Restart_Changed{all = true, confirm = r.confirm_token}, R_UI)
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, json_path(r.data, "restarting.0"), fmt.tprint(idle))
-	testing.expect_value(t, json_path(r.data, "queued.0"), fmt.tprint(busy))
-	testing.expect_value(t, json_path(r.data, "no_session.0"), fmt.tprint(none))
+	testing.expect_value(t, core.json_path(r.data, "restarting.0"), fmt.tprint(idle))
+	testing.expect_value(t, core.json_path(r.data, "queued.0"), fmt.tprint(busy))
+	testing.expect_value(t, core.json_path(r.data, "no_session.0"), fmt.tprint(none))
 	testing.expect(t, cr_running_again(idle), "the idle tab runs again")
 	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556691\n--model\nopus"), "the user's restart replays the saved flags")
 	// the busy one goes once idle, though nothing changed
-	_, bt, _ := find_tab(busy)
-	testing.expect_value(t, bt.reload.queued, Reload_Op.Restart)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
+	_, bt, _ := core.find_tab(busy)
+	testing.expect_value(t, bt.reload.queued, core.Reload_Op.Restart)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
 	os.remove(args)
-	claude_reload_tick()
+	core.claude_reload_tick()
 	testing.expect(t, cr_running_again(busy), "the queued tab restarted once idle")
 	testing.expect(t, cr_has(args, "--resume\n0c1a0de0-aaaa-4222-8333-444455556692"))
 	// an agent may ask; the user confirms; no saved flags then
-	run_command(Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556691", source = "resume"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
-	run_command(Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556692", source = "resume"}, CR_SCRIPT)
-	run_command(Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
-	rc := run_command(Claude_Restart_Changed{all = true}, CR_CONTROL)
+	core.run_command(core.Claude_Session_Report{tab_id = idle, session_id = "0c1a0de0-aaaa-4222-8333-444455556691", source = "resume"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = idle, state = "idle"}, CR_SCRIPT)
+	core.run_command(core.Claude_Session_Report{tab_id = busy, session_id = "0c1a0de0-aaaa-4222-8333-444455556692", source = "resume"}, CR_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = busy, state = "idle"}, CR_SCRIPT)
+	rc := core.run_command(core.Claude_Restart_Changed{all = true}, CR_CONTROL)
 	testing.expect_value(t, rc.error, "needs_confirmation")
 	testing.expect(t, rc.confirm_by_user)
 	os.remove(args)
 	if len(state.pending_confirmations) == 1 {
 		confirm_pending(state.pending_confirmations[0].token)
-		inbox_drain()
+		core.inbox_drain()
 	}
 	testing.expect(t, cr_running_again(idle))
 	data, _ := os.read_entire_file(args, context.temp_allocator)
 	testing.expectf(t, !strings.contains(string(data), "--model"), "an agent's restart replays no saved flags: %q", string(data))
-	c, err := parse_command(`{"type":"claude_restart_changed","all":true}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"claude_restart_changed","all":true}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, c.(Claude_Restart_Changed).all, true)
-	testing.expect(t, strings.contains(command_spec("claude_restart_changed").args, "all?"))
+	testing.expect_value(t, c.(core.Claude_Restart_Changed).all, true)
+	testing.expect(t, strings.contains(core.command_spec("claude_restart_changed").args, "all?"))
 }

@@ -15,6 +15,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core"
 
 Palette_Kind :: enum {
 	Action,
@@ -94,40 +95,40 @@ palette_items :: proc() -> [dynamic]Palette_Item {
 		if a.detail != nil do it.detail = a.detail()
 		append(&items, it)
 	}
-	cs := cur()
+	cs := core.cur()
 	for &s in state.open_sessions {
 		if s.home do continue // the agent has its own actions
-		stitle := open_session_title(&s)
+		stitle := core.open_session_title(&s)
 		for tab in s.tabs {
 			detail := stitle
 			if cs != nil && s.id == cs.id do detail = fmt.tprintf("%s · current session", stitle)
 			append(&items, Palette_Item{kind = .Tab, key = fmt.tprintf("tab:%d", tab.id), title = tab.title, detail = detail, id = tab.id})
 		}
 	}
-	sel := find_project(state.selected_project)
+	sel := core.find_project(state.selected_project)
 	listed := make(map[string]bool, context.temp_allocator)
 	if sel != nil {
-		pname := project_display(sel^)
+		pname := core.project_display(sel^)
 		for s in state.sessions {
 			listed[s.id] = true
-			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = session_label(s), detail = pname, project = sel.id, session = s.id})
+			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = core.session_label(s), detail = pname, project = sel.id, session = s.id})
 		}
 	}
-	if c := chats_project(); c != nil {
+	if c := core.chats_project(); c != nil {
 		for s in state.chats {
 			listed[s.id] = true
-			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = session_label(s, true), project = c.id, session = s.id, chat = true})
+			append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.id), title = core.session_label(s, true), project = c.id, session = s.id, chat = true})
 		}
 	}
 	for &s in state.open_sessions {
 		if s.home || listed[s.pi_session_id] do continue
-		ic, place := session_place(&s)
+		ic, place := core.session_place(&s)
 		chat := ic == .Chat
-		append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.pi_session_id), title = open_session_title(&s), detail = chat ? "" : place, id = s.id, chat = chat})
+		append(&items, Palette_Item{kind = .Session, key = fmt.tprintf("session:%s", s.pi_session_id), title = core.open_session_title(&s), detail = chat ? "" : place, id = s.id, chat = chat})
 	}
 	for p in state.projects {
 		if p.group != .Projects do continue // Chats is no project to select
-		append(&items, Palette_Item{kind = .Project, key = fmt.tprintf("project:%s", p.cwd), title = project_name(p), detail = p.name != "" ? p.label : "", id = p.id})
+		append(&items, Palette_Item{kind = .Project, key = fmt.tprintf("project:%s", p.cwd), title = core.project_name(p), detail = p.name != "" ? p.label : "", id = p.id})
 	}
 	for &it, i in items do it.order = i
 	return items
@@ -144,13 +145,13 @@ palette_search :: proc(query: string) -> []Palette_Item {
 		total := 0
 		ok := true
 		for w in words {
-			s, m, hit := fuzzy_score(w, it.title)
+			s, m, hit := core.fuzzy_score(w, it.title)
 			if hit {
 				total += s
 				it.matched |= m
 				continue
 			}
-			s, _, hit = fuzzy_score(w, it.detail)
+			s, _, hit = core.fuzzy_score(w, it.detail)
 			if !hit {
 				ok = false
 				break
@@ -219,7 +220,7 @@ palette_run_index :: proc(i: int) {
 
 palette_run :: proc(it: Palette_Item) {
 	palette_remember(it.key)
-	ui_do(Set_Focus{""})
+	ui_do(core.Set_Focus{""})
 	switch it.kind {
 	case .Action:
 		a := &ACTIONS[it.action]
@@ -228,28 +229,28 @@ palette_run :: proc(it: Palette_Item) {
 			palette.pick_for = it.action + 1
 			delete(palette.pick_menu)
 			palette.pick_menu = "" // the palette's own: no menu toast
-			if platform.run_later != nil do platform.run_later(palette_run_deferred)
+			if core.platform.run_later != nil do core.platform.run_later(palette_run_deferred)
 			return
 		}
 		run_action(a)
 	case .Tab:
-		ui_do(Focus_Tab{it.id})
+		ui_do(core.Focus_Tab{it.id})
 	case .Session:
-		if it.session != "" do ui_do(Open_Session_Cmd{it.project, it.session})
-		else do ui_do(Focus_Session{session = it.id, reopen = true})
+		if it.session != "" do ui_do(core.Open_Session_Cmd{it.project, it.session})
+		else do ui_do(core.Focus_Session{session = it.id, reopen = true})
 	case .Project:
-		ui_do(Select_Project{it.id})
+		ui_do(core.Select_Project{it.id})
 	case .File:
-		ui_do(Open_File{path = it.path})
+		ui_do(core.Open_File{path = it.path})
 	case .App:
-		cs := cur()
+		cs := core.cur()
 		if cs == nil do return
 		// path: a command line; argv (detail's entry): an apps.json app
 		for e in app_entries(cs.cwd) do if e.name == it.title && it.path == "" {
-			ui_do(New_App_Tab{session = cs.id, argv = e.argv, cwd = e.cwd, title = e.name})
+			ui_do(core.New_App_Tab{session = cs.id, argv = e.argv, cwd = e.cwd, title = e.name})
 			return
 		}
-		if it.path != "" do ui_do(New_App_Tab{session = cs.id, command = it.path})
+		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
 	}
 }
 
@@ -277,8 +278,8 @@ palette_run_deferred :: proc() {
 	menu := palette.pick_menu
 	palette.pick_menu = ""
 	defer delete(menu)
-	if platform.pick_folder == nil do return
-	action_folder = strings.clone(platform.pick_folder()) // heap: frames ran during the modal loop
+	if core.platform.pick_folder == nil do return
+	action_folder = strings.clone(core.platform.pick_folder()) // heap: frames ran during the modal loop
 	defer {
 		delete(action_folder)
 		action_folder = ""

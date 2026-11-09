@@ -4,8 +4,8 @@ How Deckhand runs [Claude Code](https://code.claude.com) as a first-class tab: t
 bundled plugin and its `deckhand` command, the credential and its threat model, resume and
 restore, comments, and how text from agents is kept out of a half-typed prompt. The user's view
 is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PROTOCOL.md)
-(§2 tokens, §3 "Claude Code tabs"). Code: `src/claude.odin`, `src/ui_claude.odin`, `src/claude_panels.odin`, `src/claude_status.odin`, `src/dead_tab.odin`,
-`src/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/claude_accounts.odin`, `src/claude_disk.odin`,
+(§2 tokens, §3 "Claude Code tabs"). Code: `src/core/claude.odin`, `src/ui_claude.odin`, `src/core/claude_panels.odin`, `src/core/claude_status.odin`, `src/core/dead_tab.odin`,
+`src/core/claude_reload.odin`, `src/ui_claude_reload.odin`, `src/core/claude_accounts.odin`, `src/core/claude_disk.odin`,
 `integrations/claude-code/`, `tools/deckhand-cli/`.
 
 ## 1. The tab
@@ -29,7 +29,7 @@ is in [GUIDE.md](GUIDE.md#claude-code-tabs); the wire format in [PROTOCOL.md](PR
 - **Claude-only sessions.** `new_claude_session {project_id, cwd?, args?}` (the user's one **New
   session**: **+ New session**, a project's **+** and **…** menu, the **⌄** menu, ⇧⌘N, the File
   menu and the palette; its harness picker's **Claude Code** row, or at once when Claude Code is
-  the only harness installed: `src/harness.odin`) makes an open session with `agent = .Claude` (`Session_Agent`, `src/state.odin`):
+  the only harness installed: `src/core/harness.odin`) makes an open session with `agent = .Claude` (`Session_Agent`, `src/core/state.odin`):
   its first tab is a Claude tab (its *main tab*) and it has no pi tab; other tabs open beside it
   as in a pi session. Rules where pi sessions assume a pi tab first:
   - **Key.** `Open_Session.pi_session_id` holds the main tab's Claude session id (set by its
@@ -218,7 +218,7 @@ settings are inline, never a file.
 
 ## 1b. Accounts
 
-`src/claude_accounts.odin`. **An account in Deckhand is a Claude Code config folder**: what
+`src/core/claude_accounts.odin`. **An account in Deckhand is a Claude Code config folder**: what
 `CLAUDE_CONFIG_DIR` names (its sign-in, settings, transcripts). Sign-ins from the environment
 (`ANTHROPIC_API_KEY`, `apiKeyHelper`, Bedrock, Vertex) need no folder and are untouched: claude
 inherits the login environment as before. Deckhand stores folders and names, never a secret.
@@ -326,7 +326,7 @@ log or the workspace file.
 **What it is.** Caller `{kind: panel, tab_id: <the Claude tab>, claude: true}`:
 
 - every check that applies to a pi tab's bridge applies unchanged (`caller_may` in
-  `src/commands.odin`, the command table's `who`, and each command's own session checks:
+  `src/core/commands.odin`, the command table's `who`, and each command's own session checks:
   `browser_*` and `app_call`/`app_screenshot`/`app_input`/`app_events`/`app_restart`/`app_close`
   only on its own session's tabs; `new_app_tab` only by an `apps.json` name, in its own session,
   behind the user's view (`deckhand app open NAME`; refused in a read-only chat, as `app call` and
@@ -456,7 +456,7 @@ is valid; it learns nothing it can use from outside the tab.
 
 ## 4a. Hot reload and Claude Code updates
 
-`src/claude_reload.odin` (the bars: `src/ui_claude_reload.odin`), parity with pi's hot reload
+`src/core/claude_reload.odin` (the bars: `src/ui_claude_reload.odin`), parity with pi's hot reload
 (PROTOCOL.md "Hot reload"):
 
 - **Kept sessions (Keep sessions on, GUIDE.md).** A Claude tab the session holder kept running
@@ -526,7 +526,7 @@ is valid; it learns nothing it can use from outside the tab.
 
 ## 4b. Rows and tabs at parity with pi's
 
-`src/claude_rows.odin`. What a pi row and tab show, from what Claude Code's hooks report (never
+`src/core/claude_rows.odin`. What a pi row and tab show, from what Claude Code's hooks report (never
 its files):
 
 - **Transcript path and model.** SessionStart's `transcript_path` and `model` go with
@@ -563,7 +563,7 @@ its files):
   Claude-only session the Changes tab's button reads **Ask Claude to review** and sends the same
   fixed prompt with `claude_prompt` to its main tab (held until it is idle and nothing is typed).
 - **Starting one.** There is no separate Claude session action or shortcut:
-  **New session** and **New chat** offer the installed harnesses (`src/harness.odin`), and
+  **New session** and **New chat** offer the installed harnesses (`src/core/harness.odin`), and
   `deckhand --claude DIR` adds DIR and starts a Claude session there (the user's own:
   in front; without Claude Code, the toast says how to install it). If DIR cannot be added
   (Chats' folder, say) nothing starts, never in the project selected before; the same for a
@@ -572,7 +572,7 @@ its files):
 
 ## 4c. Sessions found on disk
 
-`src/claude_disk.odin`. Claude conversations run outside Deckhand are rows too. Deckhand reads
+`src/core/claude_disk.odin`. Claude conversations run outside Deckhand are rows too. Deckhand reads
 them **in its own process only**: no transcript path or content ever reaches an agent (the
 snapshot's found rows have id, title, dates, account; `session_info`, `reveal` and `copy_path`
 work only from Deckhand's own record, so a found row gives them nothing).
@@ -646,7 +646,7 @@ terminal tab. Until then (an older Claude Code, §5a) they come from the hooks' 
 
 ## 5a. Any setup: older Claude Code, hooks that do not run
 
-`src/claude_status.odin` (bars: `src/ui_claude.odin`).
+`src/core/claude_status.odin` (bars: `src/ui_claude.odin`).
 
 - **Dots from the hooks.** OSC 7501 needs Claude Code 2.1.295 or later. Until a tab's process has
   reported it (`tab.prog`), its dot comes from the hooks' turn (`claude_status_dot`): working →
@@ -684,7 +684,7 @@ terminal tab. Until then (an older Claude Code, §5a) they come from the hooks' 
 - **API-key, Bedrock, Vertex.** Nothing here depends on the account or provider: hooks and the
   version by stat work the same.
 
-**Waiting until Claude is idle** (`claude_wait_idle`, `src/claude_wait.odin`; PROTOCOL.md): the
+**Waiting until Claude is idle** (`claude_wait_idle`, `src/core/claude_wait.odin`; PROTOCOL.md): the
 same signals (hooks idle, OSC 7501 not working or blocked), nothing held, nobody typing, for
 300 ms; it ends with `tab_gone` when Claude exits or restarts in the tab, and with `dropped` when
 the user drops the held text it names (`prompt_id`). While waits or held texts exist a timer
@@ -797,7 +797,7 @@ snapshot` before the turn's idle, and a background Bash's launch at once (`bash-
   bar and Restart, 127, flags only for the user, the hung-process wait, the row and the bell;
   todos, tasks and subagents panels, bounds, order, scope; Send now into Claude and its refusals),
   `src/claude_sessions_test.odin` (Claude-only sessions, rows, pin/hide/filters/attention, resume
-  from a row, restore and migration, a dead one, not installed), `src/claude_review_test.odin`
+  from a row, restore and migration, a dead one, not installed), `src/core/claude_review_test.odin`
   (ids a Claude tab may not claim, a dead session resumed in place, agents and restored tabs,
   the history checked on load), `src/claude_chats_test.odin` (Claude in chats; the read-only
   profile: argv, refused flags, kept by restore, restart and an agent's resume, act verbs refused,

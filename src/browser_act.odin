@@ -69,6 +69,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import "core"
 import jg "jsonguard"
 import "core:fmt"
 import "core:os"
@@ -103,72 +104,7 @@ ACT_SENSITIVE :: "this is a password, card or one-time-code field (or inside one
 
 // ---- commands (rows in command_table.odin) ----
 
-Act_Target :: struct {
-	selector: string, // a simple selector or ref=eN (agent_selector_ok)
-	x, y:     f32, // or a point: the page's CSS px from the viewport's top-left
-	has_xy:   bool,
-}
-Act_Button :: enum u8 {
-	Left,
-	Right,
-	Middle,
-}
 
-Browser_Click :: struct {
-	tab_id:    u64,
-	target:    Act_Target,
-	button:    Act_Button,
-	double:    bool,
-	modifiers: int, // ACT_MOD_*
-}
-Browser_Type :: struct {
-	tab_id:   u64,
-	selector: string, // "" = the focused element
-	text:     string,
-	clear:    bool, // select the field's content and delete it first
-	submit:   bool, // press Enter after
-}
-Browser_Press :: struct {
-	tab_id:   u64,
-	selector: string, // focus it first ("" = where focus is)
-	keys:     string, // chords, space separated: "Shift+Tab Enter"
-}
-Browser_Scroll :: struct {
-	tab_id: u64,
-	target: Act_Target, // none: the page at its centre
-	dx, dy: f32, // CSS px; none: the target into view
-}
-Browser_Select :: struct {
-	tab_id:    u64,
-	selector:  string,
-	label:     string,
-	value:     string,
-	has_label: bool,
-	has_value: bool,
-}
-Browser_Hover :: struct {
-	tab_id: u64,
-	target: Act_Target,
-}
-Browser_Upload :: struct {
-	tab_id:   u64,
-	selector: string,
-	paths:    []string,
-}
-Browser_Upload_Answer :: struct {
-	tab_id: u64,
-	allow:  bool,
-}
-// A requester's cancel (socket.odin: its cancel line, or its connection closing): Deckhand's own.
-Request_Cancel :: struct {
-	request_id: u64,
-	closed:     bool, // the connection closed
-}
-
-Browser_Agent_Take_Over :: struct {
-	tab_id: u64,
-	on:     bool, // false: Hand back
-}
 
 // ---- keys (pure) ----
 
@@ -339,9 +275,9 @@ act_path_protected :: proc(path: string) -> bool {
 			append(&dirs, fmt.tprintf("%s/%s", strings.trim_right(home, "/"), sub))
 		}
 	}
-	append(&dirs, data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator))
+	append(&dirs, core.data_dir(context.temp_allocator), browser_profile_root(context.temp_allocator))
 	if home != "" { // both of the data dir's places (the rename: platform.odin data_dir_names)
-		new, old := data_dir_names(home)
+		new, old := core.data_dir_names(home)
 		append(&dirs, new, old)
 	}
 	for d in dirs {
@@ -365,7 +301,7 @@ act_path_shown :: proc(path: string) -> string {
 	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
 	p := path
 	if home != "" && (p == home || strings.has_prefix(p, strings.concatenate({home, "/"}, context.temp_allocator))) do p = strings.concatenate({"~", p[len(home):]}, context.temp_allocator)
-	return one_line(p, context.temp_allocator)
+	return core.one_line(p, context.temp_allocator)
 }
 
 // ---- runtime ----
@@ -415,7 +351,7 @@ Act_Op :: struct {
 	request_id:  u64,
 	tab_id:      u64,
 	kind:        Act_Kind,
-	who:         Caller_Kind,
+	who:         core.Caller_Kind,
 	who_tab:     u64, // the caller's own tab (a pi or Claude tab; Atlas's), 0: none
 	who_text:    string, // owned: the upload bar's "<agent>"
 	stage:       Act_Stage,
@@ -423,7 +359,7 @@ Act_Op :: struct {
 	selector:    string, // owned
 	x, y:        f32,
 	has_xy:      bool,
-	button:      Act_Button,
+	button:      core.Act_Button,
 	double:      bool,
 	mods:        int,
 	text:        string, // owned (type)
@@ -508,22 +444,22 @@ browser_act_recent :: proc(tab_id: u64) -> bool {
 
 // Some browser tab of the session that is not on screen has an agent acting on it (or did in
 // the last ACT_LINGER).
-browser_act_session_background :: proc(s: ^Open_Session) -> bool {
+browser_act_session_background :: proc(s: ^core.Open_Session) -> bool {
 	_, ok := browser_act_background_tab(s)
 	return ok
 }
 
 // Which such tab (the one acted on last).
 @(private = "file")
-browser_act_background_tab :: proc(s: ^Open_Session) -> (tab_id: u64, ok: bool) {
+browser_act_background_tab :: proc(s: ^core.Open_Session) -> (tab_id: u64, ok: bool) {
 	seen := make(map[u64]bool, context.temp_allocator)
 	for op in act_ops do seen[op.tab_id] = true
 	for id, at in act_linger do if time.tick_since(at) < ACT_LINGER do seen[id] = true
 	best: time.Tick
 	for id in seen {
-		os_, tab, _ := find_tab(id)
+		os_, tab, _ := core.find_tab(id)
 		if os_ != s || tab == nil do continue
-		if tab_on_screen(tab.id) do continue // the user sees it (any pane)
+		if core.tab_on_screen(tab.id) do continue // the user sees it (any pane)
 		at := agent_tab_of(id)
 		last := at != nil ? at.last : time.Tick{}
 		if !ok || time.tick_diff(best, last) > 0 do tab_id, best, ok = id, last, true
@@ -532,7 +468,7 @@ browser_act_background_tab :: proc(s: ^Open_Session) -> (tab_id: u64, ok: bool) 
 }
 
 // The sidebar row's text while an agent acts in a tab of s not on screen ("" = none).
-browser_act_session_text :: proc(s: ^Open_Session) -> string {
+browser_act_session_text :: proc(s: ^core.Open_Session) -> string {
 	id, ok := browser_act_background_tab(s)
 	if !ok do return ""
 	// the agent that acted (a Claude tab in a pi session is Claude), else the session's harness
@@ -566,15 +502,15 @@ browser_act_file_dialog :: proc(tab_id: u64) -> bool {
 
 // The requester cancelled its request, or its connection closed (socket.odin): that action or
 // agent read ends (code cancelled).
-act_request_cancel :: proc(c: Request_Cancel) -> Result {
+act_request_cancel :: proc(c: core.Request_Cancel) -> core.Result {
 	why := c.closed ? "the requester's connection closed" : "cancelled by the requester"
 	for op in act_ops do if op.request_id == c.request_id {
 		act_end(op, code_err("cancelled", why))
 		return {ok = true}
 	}
 	if agent_request_end(c.request_id, why, "cancelled") do return {ok = true}
-	if claude_wait_cancel(c.request_id, why) do return {ok = true} // claude_wait.odin
-	return fail("no running request with that id")
+	if core.claude_wait_cancel(c.request_id, why) do return {ok = true} // claude_wait.odin
+	return core.fail("no running request with that id")
 }
 
 @(private = "file")
@@ -606,20 +542,20 @@ own :: proc(dst: ^string, v: string) {
 }
 
 // A finished action's answer (tests also keep it: act_test_finished).
-act_finish :: proc(request_id: u64, r: Result, private := false) {
-	if act_test_finished != nil do act_test_finished[request_id] = strings.clone(result_json(r))
-	emit_event(Finished_Event{request_id = request_id, result = r, private = private})
+act_finish :: proc(request_id: u64, r: core.Result, private := false) {
+	if act_test_finished != nil do act_test_finished[request_id] = strings.clone(core.result_json(r))
+	core.emit_event(core.Finished_Event{request_id = request_id, result = r, private = private})
 }
 
 @(private = "file")
-code_err :: proc(code, msg: string) -> Result {
+code_err :: proc(code, msg: string) -> core.Result {
 	return {error = msg, data = fmt.tprintf(`{{"code":"%s"}}`, code)}
 }
 
 // Ends op (removed from the list): its answer goes. A clipboard the page changed meanwhile is
 // told to the user (toast, bell) and the agent (clipboard_changed in the result).
 @(private = "file")
-act_end :: proc(op: ^Act_Op, r: Result, private := false) {
+act_end :: proc(op: ^Act_Op, r: core.Result, private := false) {
 	// the page changed the clipboard while the input went in: the user hears it (nothing is
 	// put back: the clipboard may hold what a password manager just cleared)
 	if act_clip_changed(op) {
@@ -627,7 +563,7 @@ act_end :: proc(op: ^Act_Op, r: Result, private := false) {
 		msg := fmt.tprintf("%s changed your clipboard during pi's %s", origin, ACT_KIND_NOUNS[op.kind])
 		fmt.printfln("[browser] tab %d: %s", op.tab_id, msg)
 		toast_show(msg)
-		notify_page_clipboard(op.tab_id, msg)
+		core.notify_page_clipboard(op.tab_id, msg)
 	}
 	for x, i in act_ops do if x == op {
 		ordered_remove(&act_ops, i)
@@ -671,10 +607,10 @@ browser_act_popup :: proc(opener, tab_id: u64) {
 
 // The pane of s a popup of tab `opener` goes into: while an agent's action runs there (its click
 // opened it), the acting agent's own pane (open_pane); else 0, the focused pane.
-browser_popup_pane :: proc(s: ^Open_Session, opener: u64) -> u64 {
+browser_popup_pane :: proc(s: ^core.Open_Session, opener: u64) -> u64 {
 	op := act_head(opener)
 	if op == nil do return 0
-	return open_pane(s, {kind = op.who, tab_id = op.who_tab})
+	return core.open_pane(s, {kind = op.who, tab_id = op.who_tab})
 }
 
 // Every action gone, unanswered (unit tests).
@@ -693,19 +629,19 @@ act_test_to_bar :: proc(tab_id: u64) -> bool {
 	op.bar_at = time.tick_now()
 	op.deadline = time.tick_add(op.bar_at, ACT_UPLOAD_WAIT)
 	own(&op.hit, `{"role":"file input","name":"Attachment","tag":"input"}`)
-	if _, tab, _ := find_tab(tab_id); tab != nil {
-		if bt, is := tab.kind.(Browser_Tab); is do own(&op.origin, url_origin(bt.url))
+	if _, tab, _ := core.find_tab(tab_id); tab != nil {
+		if bt, is := tab.kind.(core.Browser_Tab); is do own(&op.origin, url_origin(bt.url))
 	}
 	return true
 }
 
 // ---- commands ----
 
-browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
+browser_act_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
-	case Browser_Upload_Answer:
+	case core.Browser_Upload_Answer:
 		op := act_upload_asking(c.tab_id)
-		if op == nil do return fail("no upload is asking on this tab"), false
+		if op == nil do return core.fail("no upload is asking on this tab"), false
 		if !c.allow {
 			fmt.printfln("[browser] tab %d: upload blocked by the user", c.tab_id)
 			act_end(op, code_err("upload_blocked", "the user pressed Block on the upload bar: nothing was sent"))
@@ -716,8 +652,8 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			return {ok = true}, true
 		}
 		// the page the bar named: still on that origin
-		if _, tab, _ := find_tab(c.tab_id); tab != nil {
-			bt, _ := tab.kind.(Browser_Tab)
+		if _, tab, _ := core.find_tab(c.tab_id); tab != nil {
+			bt, _ := tab.kind.(core.Browser_Tab)
 			if url_origin(bt.url) != op.origin {
 				act_end(op, code_err("page_changed", "the page moved to another site while the upload bar asked: nothing was sent"))
 				return {ok = true}, true
@@ -729,28 +665,28 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 		op.deadline = time.tick_add(now, ACT_TIMEOUT) // the files go now: a fresh timeout from Allow
 		app.redraw = true
 		return {ok = true}, true
-	case Request_Cancel:
+	case core.Request_Cancel:
 		return act_request_cancel(c), true
-	case Browser_Agent_Take_Over:
+	case core.Browser_Agent_Take_Over:
 		_, _, _, err := browser_target(caller, c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		agent_take_over(c.tab_id, c.on)
 		return {ok = true}, true
 	}
-	tab_id := browser_act_command_tab(cmd)
+	tab_id := core.browser_act_command_tab(cmd)
 	_, _, bt, err := browser_target(caller, tab_id)
-	if err != "" do return fail(err), false
+	if err != "" do return core.fail(err), false
 	if r, refused := browser_agent_refused(caller, tab_id); refused do return r, false
 	if act_upload_asking(tab_id) != nil do return code_err("busy", "the upload bar on this tab is asking the user: wait for their answer (the upload's own result), then act"), false
 	if !act_page_allowed(bt.url) do return code_err("page_not_allowed", "agents do not act on this page (file:, chrome:, devtools: and other browser pages are the user's)"), false
-	target_ok :: proc(tg: Act_Target, need: bool) -> (Result, bool) {
+	target_ok :: proc(tg: core.Act_Target, need: bool) -> (core.Result, bool) {
 		if tg.selector != "" && tg.has_xy do return code_err("bad_args", "a target is selector or x,y, not both"), false
 		if need && tg.selector == "" && !tg.has_xy do return code_err("bad_args", "a target is needed: selector (a ref=eN or a simple selector) or x,y"), false
 		if tg.selector != "" && !agent_selector_ok(tg.selector) do return {error = AGENT_SELECTOR_UNSUPPORTED, data = `{"code":"selector_unsupported"}`}, false
 		if tg.has_xy && (tg.x < 0 || tg.y < 0 || tg.x > 100_000 || tg.y > 100_000) do return code_err("bad_args", "x,y are the page's CSS px from the viewport's top-left (not negative)"), false
 		return {}, true
 	}
-	sel_ok :: proc(sel: string, need: bool) -> (Result, bool) {
+	sel_ok :: proc(sel: string, need: bool) -> (core.Result, bool) {
 		if need && sel == "" do return code_err("bad_args", "selector is needed (a ref=eN or a simple selector)"), false
 		if sel != "" && !agent_selector_ok(sel) do return {error = AGENT_SELECTOR_UNSUPPORTED, data = `{"code":"selector_unsupported"}`}, false
 		return {}, true
@@ -759,21 +695,21 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 	op.request_id, op.tab_id, op.who, op.who_tab = request_id, tab_id, caller.kind, caller.tab_id
 	op.deadline = time.tick_add(time.tick_now(), ACT_TIMEOUT) // from acceptance: a queued action waits on its own clock
 	doing: Agent_Doing
-	bad: Result
+	bad: core.Result
 	ok := true
 	#partial switch c in cmd {
-	case Browser_Click:
+	case core.Browser_Click:
 		if bad, ok = target_ok(c.target, true); ok {
 			op.kind, doing = .Click, .Clicking
 			op.selector, op.x, op.y, op.has_xy = strings.clone(c.target.selector), c.target.x, c.target.y, c.target.has_xy
 			op.button, op.double, op.mods = c.button, c.double, c.modifiers
 		}
-	case Browser_Hover:
+	case core.Browser_Hover:
 		if bad, ok = target_ok(c.target, true); ok {
 			op.kind, doing = .Hover, .Hovering
 			op.selector, op.x, op.y, op.has_xy = strings.clone(c.target.selector), c.target.x, c.target.y, c.target.has_xy
 		}
-	case Browser_Scroll:
+	case core.Browser_Scroll:
 		if bad, ok = target_ok(c.target, false); ok {
 			if c.target.selector == "" && c.dx == 0 && c.dy == 0 do bad, ok = code_err("bad_args", "nothing to scroll: dx or dy (CSS px), or a selector to bring into view"), false
 			else if abs(c.dx) > 100_000 || abs(c.dy) > 100_000 do bad, ok = code_err("bad_args", "dx and dy are at most 100000 px"), false
@@ -783,7 +719,7 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			op.selector, op.x, op.y, op.has_xy = strings.clone(c.target.selector), c.target.x, c.target.y, c.target.has_xy
 			op.dx, op.dy = c.dx, c.dy
 		}
-	case Browser_Type:
+	case core.Browser_Type:
 		if bad, ok = sel_ok(c.selector, false); ok {
 			if c.text == "" && !c.submit && !c.clear do bad, ok = code_err("bad_args", "text is needed"), false
 			else if len(c.text) > ACT_TEXT_MAX do bad, ok = code_err("bad_args", fmt.tprintf("text is at most %d bytes a call", ACT_TEXT_MAX)), false
@@ -793,7 +729,7 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			op.kind, doing = .Type, .Typing
 			op.selector, op.text, op.clear, op.submit = strings.clone(c.selector), strings.clone(c.text), c.clear, c.submit
 		}
-	case Browser_Press:
+	case core.Browser_Press:
 		if bad, ok = sel_ok(c.selector, false); ok {
 			if _, kerr := act_keys_parse(c.keys); kerr != "" do bad, ok = code_err("bad_keys", kerr), false
 		}
@@ -801,7 +737,7 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			op.kind, doing = .Press, .Pressing
 			op.selector, op.keys = strings.clone(c.selector), strings.clone(c.keys)
 		}
-	case Browser_Select:
+	case core.Browser_Select:
 		if bad, ok = sel_ok(c.selector, true); ok {
 			if c.has_label == c.has_value do bad, ok = code_err("bad_args", "label or value is needed (one of them)"), false
 		}
@@ -809,7 +745,7 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			op.kind, doing = .Select, .Choosing
 			op.selector, op.label, op.value, op.has_label = strings.clone(c.selector), strings.clone(c.label), strings.clone(c.value), c.has_label
 		}
-	case Browser_Upload:
+	case core.Browser_Upload:
 		if fcode, ferr := act_files_check(c.paths); ferr != "" do bad, ok = code_err(fcode, ferr), false
 		else do bad, ok = sel_ok(c.selector, true)
 		if ok {
@@ -822,13 +758,13 @@ browser_act_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: 
 			}
 			who := agent_who(caller.kind, caller.claude)
 			if caller.kind == .Panel {
-				if s := caller_session(caller); s != nil do who = fmt.tprintf("%s in “%s”", who, open_session_title(s))
+				if s := core.caller_session(caller); s != nil do who = fmt.tprintf("%s in “%s”", who, core.open_session_title(s))
 			}
 			op.who_text = strings.clone(who)
 		}
 	case:
 		ok = false
-		bad = fail("not a browser action")
+		bad = core.fail("not a browser action")
 	}
 	if !ok {
 		act_free(op)
@@ -907,7 +843,7 @@ browser_act_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, data: [^]u8, 
 		}
 		if op.outstanding > 0 && msg_id >= op.first_id && msg_id <= op.last_id {
 			op.outstanding -= 1
-			if ok == 0 && op.send_err == "" do op.send_err = strings.clone(cut_utf8(string(data[:n]), 300))
+			if ok == 0 && op.send_err == "" do op.send_err = strings.clone(core.cut_utf8(string(data[:n]), 300))
 			app.redraw = true
 			return true
 		}
@@ -920,7 +856,7 @@ browser_act_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, data: [^]u8, 
 act_eval :: proc(op: ^Act_Op, b: ^Browser, ctx: i64, req: string, by_value := true, track := true) {
 	p := strings.builder_make(context.temp_allocator)
 	strings.write_string(&p, `{"expression":`)
-	json_quote(&p, strings.concatenate({"(", BROWSER_ACT_JS, ")(", req, ")"}, context.temp_allocator))
+	core.json_quote(&p, strings.concatenate({"(", BROWSER_ACT_JS, ")(", req, ")"}, context.temp_allocator))
 	fmt.sbprintf(&p, `,"contextId":%d,"returnByValue":%v,"silent":true}}`, ctx, by_value)
 	id := cdp_send(agent_tab(op.tab_id), b.cef, "Runtime.evaluate", strings.to_string(p))
 	if !track do return
@@ -931,14 +867,14 @@ act_eval :: proc(op: ^Act_Op, b: ^Browser, ctx: i64, req: string, by_value := tr
 // The clipboard's change count when the action's input first goes (act_send; never the upload
 // bar's wait).
 act_clip_note_input :: proc(op: ^Act_Op) {
-	if op.clip_armed || platform.clipboard_count == nil do return
-	op.clip0 = platform.clipboard_count()
+	if op.clip_armed || core.platform.clipboard_count == nil do return
+	op.clip0 = core.platform.clipboard_count()
 	op.clip_armed = true
 }
 
 // The clipboard changed since the action's input went.
 act_clip_changed :: proc(op: ^Act_Op) -> bool {
-	return op.clip_armed && platform.clipboard_count != nil && platform.clipboard_count() != op.clip0
+	return op.clip_armed && core.platform.clipboard_count != nil && core.platform.clipboard_count() != op.clip0
 }
 
 // The input events of one step, sent at once (CDP runs them in order); their answers are counted.
@@ -960,9 +896,9 @@ act_send :: proc(op: ^Act_Op, b: ^Browser, calls: []string) -> bool {
 }
 
 @(private = "file")
-mouse :: proc(calls: ^[dynamic]string, kind: string, x, y: f64, button: Act_Button, clicks: int, mods: int, pressed: bool) {
-	names := [Act_Button]string{.Left = "left", .Right = "right", .Middle = "middle"}
-	masks := [Act_Button]int{.Left = 1, .Right = 2, .Middle = 4}
+mouse :: proc(calls: ^[dynamic]string, kind: string, x, y: f64, button: core.Act_Button, clicks: int, mods: int, pressed: bool) {
+	names := [core.Act_Button]string{.Left = "left", .Right = "right", .Middle = "middle"}
+	masks := [core.Act_Button]int{.Left = 1, .Right = 2, .Middle = 4}
 	btn := kind == "mouseMoved" ? "none" : names[button]
 	mask := pressed ? masks[button] : 0
 	append(calls, fmt.tprintf(`Input.dispatchMouseEvent {{"type":"%s","x":%.2f,"y":%.2f,"button":"%s","buttons":%d,"clickCount":%d,"modifiers":%d}}`, kind, x, y, btn, mask, clicks, mods))
@@ -972,24 +908,24 @@ mouse :: proc(calls: ^[dynamic]string, kind: string, x, y: f64, button: Act_Butt
 key_calls :: proc(calls: ^[dynamic]string, k: Act_Key) {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"type":"%s","modifiers":%d,"key":`, k.text != "" ? "keyDown" : "rawKeyDown", k.mods)
-	json_quote(&b, k.key)
+	core.json_quote(&b, k.key)
 	strings.write_string(&b, `,"code":`)
-	json_quote(&b, k.code)
+	core.json_quote(&b, k.code)
 	fmt.sbprintf(&b, `,"windowsVirtualKeyCode":%d`, k.vk)
 	if k.text != "" {
 		strings.write_string(&b, `,"text":`)
-		json_quote(&b, k.text)
+		core.json_quote(&b, k.text)
 		strings.write_string(&b, `,"unmodifiedText":`)
-		json_quote(&b, k.text)
+		core.json_quote(&b, k.text)
 	}
 	if k.command != "" do fmt.sbprintf(&b, `,"commands":["%s"]`, k.command)
 	strings.write_byte(&b, '}')
 	append(calls, strings.concatenate({"Input.dispatchKeyEvent ", strings.to_string(b)}, context.temp_allocator))
 	up := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&up, `{{"type":"keyUp","modifiers":%d,"key":`, k.mods)
-	json_quote(&up, k.key)
+	core.json_quote(&up, k.key)
 	strings.write_string(&up, `,"code":`)
-	json_quote(&up, k.code)
+	core.json_quote(&up, k.code)
 	fmt.sbprintf(&up, `,"windowsVirtualKeyCode":%d}}`, k.vk)
 	append(calls, strings.concatenate({"Input.dispatchKeyEvent ", strings.to_string(up)}, context.temp_allocator))
 }
@@ -1035,11 +971,11 @@ act_refusal :: proc(kind: string, plain: bool, want: Act_Key_Kind) -> (code, msg
 
 // One step of an action: done, with its answer.
 @(private = "file")
-act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
-	_, tab, _ := find_tab(op.tab_id)
+act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: core.Result) {
+	_, tab, _ := core.find_tab(op.tab_id)
 	b := browser_of(op.tab_id)
 	if tab == nil || b == nil do return true, code_err("tab_gone", "the tab closed")
-	bt, _ := tab.kind.(Browser_Tab)
+	bt, _ := tab.kind.(core.Browser_Tab)
 	t := agent_tab(op.tab_id)
 	late := time.tick_diff(op.deadline, now) > 0
 	// a file chooser opened under the action: cancelled (agents upload with browser_upload)
@@ -1224,7 +1160,7 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 					text, _ = strings.replace_all(text, "\r", "\n", context.temp_allocator)
 					b2 := strings.builder_make(context.temp_allocator)
 					strings.write_string(&b2, `{"text":`)
-					json_quote(&b2, text)
+					core.json_quote(&b2, text)
 					strings.write_byte(&b2, '}')
 					append(&calls, strings.concatenate({"Input.insertText ", strings.to_string(b2)}, context.temp_allocator))
 				} else {
@@ -1306,9 +1242,9 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 			dh_cef_invalidate(b.cef)
 			req := strings.builder_make(context.temp_allocator)
 			strings.write_string(&req, `{"op":"file_el","sel":`)
-			json_quote(&req, op.selector)
+			core.json_quote(&req, op.selector)
 			strings.write_string(&req, `,"origin":`)
-			json_quote(&req, op.js_origin)
+			core.json_quote(&req, op.js_origin)
 			strings.write_byte(&req, '}')
 			act_eval(op, b, ctx, strings.to_string(req), by_value = false)
 			return false, {}
@@ -1320,10 +1256,10 @@ act_step :: proc(op: ^Act_Op, now: time.Tick) -> (done: bool, r: Result) {
 		strings.write_string(&pb, `{"files":[`)
 		for f, i in op.paths {
 			if i > 0 do strings.write_byte(&pb, ',')
-			json_quote(&pb, f)
+			core.json_quote(&pb, f)
 		}
 		strings.write_string(&pb, `],"objectId":`)
-		json_quote(&pb, op.object_id)
+		core.json_quote(&pb, op.object_id)
 		strings.write_byte(&pb, '}')
 		calls := []string{strings.concatenate({"DOM.setFileInputFiles ", strings.to_string(pb)}, context.temp_allocator)}
 		if !act_send(op, b, calls) do return true, code_err("page_error", "the files could not be sent")
@@ -1385,7 +1321,7 @@ act_keys_count :: proc(keys: string) -> int {
 // the address's origin changed, or our world's context is another (a new document). The address
 // changing within the document (history.replaceState / pushState) is not a new page.
 @(private = "file")
-act_page_changed :: proc(op: ^Act_Op, bt: Browser_Tab, t: ^Agent_Tab, p: ^Page_Extra, ctx: i64) -> bool {
+act_page_changed :: proc(op: ^Act_Op, bt: core.Browser_Tab, t: ^Agent_Tab, p: ^Page_Extra, ctx: i64) -> bool {
 	if time.tick_diff(op.nav0, t.navigated_at) > 0 do return true
 	if p != nil && time.tick_diff(op.navs0, p.nav_started) > 0 do return true
 	// the address may change within the document (an app's replaceState as you type): only its
@@ -1396,7 +1332,7 @@ act_page_changed :: proc(op: ^Act_Op, bt: Browser_Tab, t: ^Agent_Tab, p: ^Page_E
 }
 
 @(private = "file")
-act_changed :: proc(op: ^Act_Op) -> Result {
+act_changed :: proc(op: ^Act_Op) -> core.Result {
 	sent := ""
 	switch op.kind {
 	case .Type:
@@ -1434,13 +1370,13 @@ locate_req :: proc(op: ^Act_Op) -> string {
 		}
 	case .Select:
 		strings.write_string(&req, `{"op":"select","sel":`)
-		json_quote(&req, op.selector)
+		core.json_quote(&req, op.selector)
 		strings.write_string(&req, op.has_label ? `,"label":` : `,"value":`)
-		json_quote(&req, op.has_label ? op.label : op.value)
+		core.json_quote(&req, op.has_label ? op.label : op.value)
 		strings.write_byte(&req, '}')
 	case .Upload:
 		strings.write_string(&req, `{"op":"target","need":"file","scroll":false,"sel":`)
-		json_quote(&req, op.selector)
+		core.json_quote(&req, op.selector)
 		strings.write_byte(&req, '}')
 	}
 	return strings.to_string(req)
@@ -1456,13 +1392,13 @@ into_view :: proc(op: ^Act_Op) -> bool {
 act_req_target :: proc(b: ^strings.Builder, op: ^Act_Op) {
 	if op.selector != "" {
 		strings.write_string(b, `,"sel":`)
-		json_quote(b, op.selector)
+		core.json_quote(b, op.selector)
 	} else if op.has_xy do fmt.sbprintf(b, `,"x":%v,"y":%v`, op.x, op.y)
 }
 
 // The finished action's data (page data: the requester's only).
 @(private = "file")
-act_result :: proc(op: ^Act_Op, b: ^Browser, bt: Browser_Tab, t: ^Agent_Tab, p: ^Page_Extra, after := "") -> Result {
+act_result :: proc(op: ^Act_Op, b: ^Browser, bt: core.Browser_Tab, t: ^Agent_Tab, p: ^Page_Extra, after := "") -> core.Result {
 	w := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&w, `{{"action":"%s"`, ACT_KIND_NAMES[op.kind])
 	if op.kind == .Select {
@@ -1486,7 +1422,7 @@ act_result :: proc(op: ^Act_Op, b: ^Browser, bt: Browser_Tab, t: ^Agent_Tab, p: 
 		strings.write_string(&w, `,"files":[`)
 		for f, i in op.paths {
 			if i > 0 do strings.write_byte(&w, ',')
-			json_quote(&w, filepath.base(f))
+			core.json_quote(&w, filepath.base(f))
 		}
 		strings.write_byte(&w, ']')
 	case .Scroll:
@@ -1509,7 +1445,7 @@ act_result :: proc(op: ^Act_Op, b: ^Browser, bt: Browser_Tab, t: ^Agent_Tab, p: 
 	}
 	navigated := time.tick_diff(op.nav0, t.navigated_at) > 0 || bt.url != op.url0
 	strings.write_string(&w, `,"url":`)
-	json_quote(&w, agent_url_masked(bt.url))
+	core.json_quote(&w, agent_url_masked(bt.url))
 	fmt.sbprintf(&w, `,"navigated":%v,"loading":%v`, navigated, bt.loading)
 	if p != nil && p.ask_id != 0 && p.ask_id != op.dl0 do strings.write_string(&w, `,"download":"waiting_for_user"`)
 	if p != nil && p.dialog do strings.write_string(&w, `,"dialog":"waiting_for_user"`)
@@ -1528,10 +1464,10 @@ browser_act_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 	strings.write_string(b, `,"upload_ask":{"files":[`)
 	for f, i in op.paths {
 		if i > 0 do strings.write_byte(b, ',')
-		json_quote(b, filepath.base(f))
+		core.json_quote(b, filepath.base(f))
 	}
 	strings.write_string(b, `],"who":`)
-	json_quote(b, op.who_text)
+	core.json_quote(b, op.who_text)
 	strings.write_byte(b, '}')
 }
 

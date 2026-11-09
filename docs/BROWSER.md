@@ -206,7 +206,7 @@ build/Deckhand.app/Contents/
 
 ### 2.1 Where browser tabs live
 
-- `Browser_Tab` joins `Tab_Kind` (`src/state.odin`); a session may have any number of them (G1).
+- `Browser_Tab` joins `Tab_Kind` (`src/core/state.odin`); a session may have any number of them (G1).
   The session's pi is the agent that gets its comments and may drive it.
 - **A browser tab belongs to exactly one session** (built: branch `attach`; `src/browser.odin`,
   test `tabs_belong_to_one_session`):
@@ -432,7 +432,7 @@ removed at the next first crop); saving them comes with saving browser tabs.
 
 ### 3.6 Pending comments in Deckhand
 
-Built (branch `attach`, `src/comments.odin`, `src/ui_comments.odin`): one path every source feeds
+Built (branch `attach`, `src/core/comments.odin`, `src/ui_comments.odin`): one path every source feeds
 (the browser's picker, an app's Inspect boxes, later Markdown and diffs). A source writes a crop
 (`comments_crop_path`) and adds the comment (internal `comment_add`): source, tab, a one-line
 `what`, the user's text, the crop, the time. Comments belong to the tab's session (at most 20),

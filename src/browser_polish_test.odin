@@ -11,18 +11,19 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 @(private = "file")
 bp_reset :: proc() -> (a, b: u64) {
 	context.allocator = runtime.heap_allocator()
-	inbox_drain()
+	core.inbox_drain()
 	for id, _ in browsers do browser_drop(id)
-	state = State{}
-	platform = {}
+	state^ = core.State{}
+	core.platform = {}
 	for name in ([]string{"alpha", "beta"}) {
-		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
+		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 		s.active_tab = s.tabs[0].id
 		append(&state.open_sessions, s)
 	}
@@ -66,7 +67,7 @@ browser_download_safe_names :: proc(t: ^testing.T) {
 // An existing file is never overwritten: the next free "name (n).ext" is reserved.
 @(test)
 browser_download_never_overwrites :: proc(t: ^testing.T) {
-	dir := fmt.tprintf("build/test-data/bp-dl-%d-%d", os.get_pid(), new_id())
+	dir := fmt.tprintf("build/test-data/bp-dl-%d-%d", os.get_pid(), core.new_id())
 	os.make_directory_all(dir)
 	defer os.remove_all(dir)
 	keep := fmt.tprintf("%s/a.txt", dir)
@@ -109,21 +110,21 @@ browser_menu_link_stays_in_session :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, b := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	tb := r.created_id
 	testing.expect_value(t, state.current_session, a) // alpha on screen
-	items := make([dynamic]Menu_Item, context.temp_allocator)
+	items := make([dynamic]core.Menu_Item, context.temp_allocator)
 	browser_menu_items(Menu_Browser{tab_id = tb, link = "https://b.example/next", flags = CM_LINK}, &items)
 	found := false
 	for it in items {
 		if it.label != "Open link in new tab" do continue
 		found = true
-		o, is := it.cmd.(Browser_Open)
+		o, is := it.cmd.(core.Browser_Open)
 		testing.expect(t, is && o.session == b && o.url == "https://b.example/next", "in beta")
-		r = run_command(it.cmd, {kind = .UI})
+		r = core.run_command(it.cmd, {kind = .UI})
 		testing.expect(t, r.ok, r.error)
-		s, _, _ := find_tab(r.created_id)
+		s, _, _ := core.find_tab(r.created_id)
 		testing.expect(t, s != nil && s.id == b, "opened in beta")
 	}
 	testing.expect(t, found, "Open link in new tab offered")
@@ -153,24 +154,24 @@ browser_popup_opens_in_session :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, b := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
 	tb := r.created_id
-	r = run_command(Browser_Popup{tab_id = tb, open = true}, {kind = .UI})
+	r = core.run_command(core.Browser_Popup{tab_id = tb, open = true}, {kind = .UI})
 	testing.expect(t, !r.ok && r.error == "no popup was blocked", r.error)
-	run_command(Browser_Update{tab_id = tb, what = {.Blocked}, blocked = "https://pop.example/"}, {kind = .Internal})
-	r = run_command(Browser_Popup{tab_id = tb, open = true}, {kind = .UI})
+	core.run_command(core.Browser_Update{tab_id = tb, what = {.Blocked}, blocked = "https://pop.example/"}, {kind = .Internal})
+	r = core.run_command(core.Browser_Popup{tab_id = tb, open = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	s, tab, _ := find_tab(r.created_id)
+	s, tab, _ := core.find_tab(r.created_id)
 	testing.expect(t, s != nil && s.id == b && state.current_session == a, "in beta, alpha stays on screen")
-	testing.expect_value(t, tab.kind.(Browser_Tab).url, "https://pop.example/")
-	_, tab, _ = find_tab(tb)
-	testing.expect_value(t, tab.kind.(Browser_Tab).blocked_popup, "")
-	run_command(Browser_Update{tab_id = tb, what = {.Blocked}, blocked = "https://pop.example/2"}, {kind = .Internal})
-	n := len(find_session(b).tabs)
-	r = run_command(Browser_Popup{tab_id = tb, open = false}, {kind = .UI})
-	testing.expect(t, r.ok && len(find_session(b).tabs) == n, "× opens nothing")
-	_, tab, _ = find_tab(tb)
-	testing.expect_value(t, tab.kind.(Browser_Tab).blocked_popup, "")
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).url, "https://pop.example/")
+	_, tab, _ = core.find_tab(tb)
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).blocked_popup, "")
+	core.run_command(core.Browser_Update{tab_id = tb, what = {.Blocked}, blocked = "https://pop.example/2"}, {kind = .Internal})
+	n := len(core.find_session(b).tabs)
+	r = core.run_command(core.Browser_Popup{tab_id = tb, open = false}, {kind = .UI})
+	testing.expect(t, r.ok && len(core.find_session(b).tabs) == n, "× opens nothing")
+	_, tab, _ = core.find_tab(tb)
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).blocked_popup, "")
 }
 
 // The polish commands are the user's only (agents get page tools in steps 7 and 8).
@@ -179,31 +180,31 @@ browser_polish_commands_user_only :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _ := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
 	ta := r.created_id
-	pi := find_session(a).tabs[0].id
-	cmds := []Command {
-		Browser_Zoom{ta, .In},
-		Browser_Find{tab_id = ta, text = "x"},
-		Browser_Find_Close{ta},
-		Browser_Dialog{tab_id = ta, ok = true},
-		Browser_Permission{ta, true},
-		Browser_Popup{ta, true},
-		Browser_Edit{ta, .Paste},
-		Browser_Devtools{tab_id = ta, x = -1, y = -1},
-		Browser_External{ta},
-		Browser_Download{0, .Reveal},
+	pi := core.find_session(a).tabs[0].id
+	cmds := []core.Command {
+		core.Browser_Zoom{ta, .In},
+		core.Browser_Find{tab_id = ta, text = "x"},
+		core.Browser_Find_Close{ta},
+		core.Browser_Dialog{tab_id = ta, ok = true},
+		core.Browser_Permission{ta, true},
+		core.Browser_Popup{ta, true},
+		core.Browser_Edit{ta, .Paste},
+		core.Browser_Devtools{tab_id = ta, x = -1, y = -1},
+		core.Browser_External{ta},
+		core.Browser_Download{0, .Reveal},
 	}
 	for cmd in cmds {
-		for caller in ([]Caller{{kind = .Panel, tab_id = pi}, {kind = .Control}, {kind = .Script}, {kind = .App, tab_id = 1}}) {
-			r = run_command(cmd, caller)
-			testing.expectf(t, !r.ok, "%s from %v should be refused", command_type(cmd), caller.kind)
+		for caller in ([]core.Caller{{kind = .Panel, tab_id = pi}, {kind = .Control}, {kind = .Script}, {kind = .App, tab_id = 1}}) {
+			r = core.run_command(cmd, caller)
+			testing.expectf(t, !r.ok, "%s from %v should be refused", core.command_type(cmd), caller.kind)
 		}
 	}
 	// the user's: refused for want of a page, not the caller
-	r = run_command(Browser_Zoom{ta, .In}, {kind = .UI})
+	r = core.run_command(core.Browser_Zoom{ta, .In}, {kind = .UI})
 	testing.expect(t, !r.ok && r.error == "the page is not loaded", r.error)
-	r = run_command(Browser_Zoom{pi, .In}, {kind = .UI})
+	r = core.run_command(core.Browser_Zoom{pi, .In}, {kind = .UI})
 	testing.expect(t, !r.ok && r.error == "not a browser tab", r.error)
 	// Open in default browser: web addresses only
 	testing.expect(t, browser_external_ok("https://x.example") && browser_external_ok("HTTP://x"))
@@ -229,15 +230,15 @@ browser_polish_names_and_wire :: proc(t: ^testing.T) {
 		`{"type":"browser_popup","tab_id":5,"open":true}`,
 	}
 	for w in wire {
-		cmd, err := parse_command(w, context.temp_allocator)
+		cmd, err := core.parse_command(w, context.temp_allocator)
 		testing.expectf(t, err == "", "%s: %s", w, err)
 		sb := strings.builder_make(context.temp_allocator)
-		write_command(&sb, cmd)
+		core.write_command(&sb, cmd)
 		testing.expect_value(t, strings.to_string(sb), w)
 	}
-	_, err := parse_command(`{"type":"browser_zoom","tab_id":5,"step":"sideways"}`, context.temp_allocator)
+	_, err := core.parse_command(`{"type":"browser_zoom","tab_id":5,"step":"sideways"}`, context.temp_allocator)
 	testing.expect(t, err != "", "an unknown step is refused")
-	_, err = parse_command(`{"type":"browser_edit","tab_id":5,"op":"format"}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"browser_edit","tab_id":5,"op":"format"}`, context.temp_allocator)
 	testing.expect(t, err != "", "an unknown op is refused")
 }
 
@@ -339,9 +340,9 @@ browser_download_open_refused :: proc(t: ^testing.T) {
 	clear(&page_downloads)
 	defer clear(&page_downloads)
 	opened := 0
-	platform.open_url = proc(url: string) -> bool {return true}
+	core.platform.open_url = proc(url: string) -> bool {return true}
 	append(&page_downloads, Page_Download{id = 5, tab_id = 1, state = .Done, path = "/tmp/x/a.webloc", quarantined = true})
-	r := run_command(Browser_Download{download_id = 5, op = .Open}, {kind = .UI})
+	r := core.run_command(core.Browser_Download{download_id = 5, op = .Open}, {kind = .UI})
 	testing.expect(t, !r.ok, "a .webloc is not opened")
 	_ = opened
 	// CEF's own path wins when it differs
@@ -368,12 +369,12 @@ browser_file_links_only_from_file_pages :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _ := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
 	tw := r.created_id
-	r = run_command(Browser_Open{session = a, url = "file:///tmp/a.html"}, {kind = .UI})
+	r = core.run_command(core.Browser_Open{session = a, url = "file:///tmp/a.html"}, {kind = .UI})
 	tf := r.created_id
 	has_open :: proc(tab: u64, link: string) -> bool {
-		items := make([dynamic]Menu_Item, context.temp_allocator)
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
 		browser_menu_items(Menu_Browser{tab_id = tab, link = link, flags = CM_LINK}, &items)
 		for it in items do if it.label == "Open link in new tab" do return true
 		return false
@@ -381,11 +382,11 @@ browser_file_links_only_from_file_pages :: proc(t: ^testing.T) {
 	testing.expect(t, !has_open(tw, "file:///etc/passwd"), "a web page's file: link")
 	testing.expect(t, has_open(tf, "file:///tmp/b.html"), "a file: page's file: link")
 	testing.expect(t, has_open(tw, "https://b.example"), "a web link")
-	run_command(Browser_Update{tab_id = tw, what = {.Blocked}, blocked = "file:///etc/passwd"}, {kind = .Internal})
-	r = run_command(Browser_Popup{tab_id = tw, open = true}, {kind = .UI})
+	core.run_command(core.Browser_Update{tab_id = tw, what = {.Blocked}, blocked = "file:///etc/passwd"}, {kind = .Internal})
+	r = core.run_command(core.Browser_Popup{tab_id = tw, open = true}, {kind = .UI})
 	testing.expect(t, !r.ok && strings.contains(r.error, "file:"), r.error)
-	run_command(Browser_Update{tab_id = tf, what = {.Blocked}, blocked = "file:///tmp/b.html"}, {kind = .Internal})
-	r = run_command(Browser_Popup{tab_id = tf, open = true}, {kind = .UI})
+	core.run_command(core.Browser_Update{tab_id = tf, what = {.Blocked}, blocked = "file:///tmp/b.html"}, {kind = .Internal})
+	r = core.run_command(core.Browser_Popup{tab_id = tf, open = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 }
 
@@ -398,12 +399,12 @@ browser_bars_guard_per_tab :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _ := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r1 := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
-	r2 := run_command(Browser_Open{session = a, url = "https://b.example"}, {kind = .UI})
+	r1 := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r2 := core.run_command(core.Browser_Open{session = a, url = "https://b.example"}, {kind = .UI})
 	ta, tb := r1.created_id, r2.created_id
 	p := page_extra(ta)
 	p.perm = PERM_NOTIFICATIONS // the upper bar
-	run_command(Browser_Update{tab_id = ta, what = {.Blocked}, blocked = "https://pop.example/"}, {kind = .Internal}) // the lower
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Blocked}, blocked = "https://pop.example/"}, {kind = .Internal}) // the lower
 	testing.expect(t, !bars_click_ok(ta, bp_at(0)), "the tab just came on screen")
 	testing.expect(t, bars_click_ok(ta, bp_at(600)), "600 ms later")
 	// the upper bar goes (a double click's first click, the page itself): no frame in between
@@ -412,9 +413,9 @@ browser_bars_guard_per_tab :: proc(t: ^testing.T) {
 	testing.expect(t, !bars_click_ok(ta, bp_at(1000)), "still held")
 	testing.expect(t, bars_click_ok(ta, bp_at(1102)), "500 ms after the change")
 	// another tab on screen (this one off it: the frame's tick notes it), then this one again: held
-	session_show_tab(find_session(a), tb)
+	core.session_show_tab(core.find_session(a), tb)
 	browser_polish_pending_tick()
-	session_show_tab(find_session(a), ta)
+	core.session_show_tab(core.find_session(a), ta)
 	testing.expect(t, !bars_click_ok(ta, bp_at(3000)), "back to this tab: held")
 	testing.expect(t, bars_click_ok(ta, bp_at(3500)), "500 ms later")
 	// a new request in the same bar (another download id) is a change
@@ -472,7 +473,7 @@ browser_download_ask_keeps_url :: proc(t: ^testing.T) {
 	defer for id, _ in browsers do browser_drop(id)
 	clear(&page_downloads)
 	defer clear(&page_downloads)
-	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
 	ta := r.created_id
 	b := browser_of(ta)
 	b.cef = 1 // as if loaded (no CEF here: the shim's answer is a stub)
@@ -482,9 +483,9 @@ browser_download_ask_keeps_url :: proc(t: ^testing.T) {
 	p.ask_id = 7
 	p.ask_name = strings.clone("x.txt")
 	p.ask_url = strings.clone("https://a.example/x.txt")
-	home_root = fmt.aprintf("build/test-data/bp-ask-%d-%d", os.get_pid(), new_id())
-	defer {os.remove_all(home_root); home_root = ""}
-	r = run_command(Browser_Download{download_id = 7, op = .Allow}, {kind = .UI})
+	core.home_root = fmt.aprintf("build/test-data/bp-ask-%d-%d", os.get_pid(), core.new_id())
+	defer {os.remove_all(core.home_root); core.home_root = ""}
+	r = core.run_command(core.Browser_Download{download_id = 7, op = .Allow}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	d := download_find(7)
 	testing.expect(t, d != nil && d.url == "https://a.example/x.txt", d != nil ? d.url : "no record")
@@ -497,20 +498,20 @@ browser_agent_commands_are_not_a_gesture :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _ := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
 	ta := r.created_id
-	pi := Caller{kind = .Panel, tab_id = find_session(a).tabs[0].id}
-	cmds := []Command {
-		Browser_Navigate{tab_id = ta, url = "https://a.example/next"},
-		Browser_Reload{ta},
-		Browser_Tabs{},
-		Browser_Read{tab_id = ta},
-		Browser_Page_Wait{tab_id = ta, what = "load"},
-		Browser_Console{tab_id = ta},
-		Browser_Network{tab_id = ta},
-		Browser_Screenshot{tab_id = ta},
+	pi := core.Caller{kind = .Panel, tab_id = core.find_session(a).tabs[0].id}
+	cmds := []core.Command {
+		core.Browser_Navigate{tab_id = ta, url = "https://a.example/next"},
+		core.Browser_Reload{ta},
+		core.Browser_Tabs{},
+		core.Browser_Read{tab_id = ta},
+		core.Browser_Page_Wait{tab_id = ta, what = "load"},
+		core.Browser_Console{tab_id = ta},
+		core.Browser_Network{tab_id = ta},
+		core.Browser_Screenshot{tab_id = ta},
 	}
-	for cmd in cmds do run_command(cmd, pi)
+	for cmd in cmds do core.run_command(cmd, pi)
 	testing.expect(t, page_extra(ta).input_at == {}, "an agent's command counted as the user's gesture")
 	p := page_extra(ta)
 	testing.expect_value(t, download_take(p, bp_at(0), 0), Download_Decision.Ask)
@@ -523,16 +524,16 @@ browser_find_close_releases_focus :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, _ := bp_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
 	ta := r.created_id
 	page_find_tab = ta
 	defer page_find_tab = 0
 	state.focus_widget = "browser_find"
-	testing.expect(t, run_command(Browser_Find_Close{ta}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Browser_Find_Close{ta}, {kind = .UI}).ok)
 	testing.expect_value(t, state.focus_widget, "")
 	// another widget keeps it
 	state.focus_widget = "sidebar_filter"
-	testing.expect(t, run_command(Browser_Find_Close{ta}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Browser_Find_Close{ta}, {kind = .UI}).ok)
 	testing.expect_value(t, state.focus_widget, "sidebar_filter")
 	state.focus_widget = ""
 }

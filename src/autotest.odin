@@ -180,6 +180,7 @@ import "core:strconv"
 import "core:strings"
 import "core:thread"
 import "core:time"
+import "core"
 import gh "ghostty"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -241,12 +242,12 @@ Autotest :: struct {
 
 // Real keyboard/mouse input is dropped in test mode; script-driven native
 // input (ime_*) is let through.
-autotest_allows_input :: proc() -> bool {return !autotest_active || autotest.injecting}
+autotest_allows_input :: proc() -> bool {return !core.autotest_active || autotest.injecting}
 
 autotest: Autotest
 
 autotest_init :: proc() {
-	path := hook_env(.Script)
+	path := core.hook_env(.Script)
 	if path == "" do return
 	data, err := os.read_entire_file(path, context.allocator)
 	if err != nil {
@@ -254,11 +255,11 @@ autotest_init :: proc() {
 		return
 	}
 	autotest.lines = strings.split_lines(string(data))
-	autotest_active = true
+	core.autotest_active = true
 	autotest.retry_line, autotest.audit_wait, autotest.wr_idx, autotest.command_idx = -1, -1, -1, -1
-	autotest.audit = hook_env(.Wait_Audit) == "1"
-	autotest.fail_fast = hook_env(.Script_Fail_Fast) == "1"
-	autotest.step_file = hook_env(.Script_Step, context.allocator)
+	autotest.audit = core.hook_env(.Wait_Audit) == "1"
+	autotest.fail_fast = core.hook_env(.Script_Fail_Fast) == "1"
+	autotest.step_file = core.hook_env(.Script_Step, context.allocator)
 	autotest.path = strings.clone(path)
 	if autotest.audit do log("AUDIT script", path)
 	autotest_platform()
@@ -271,32 +272,32 @@ autotest_init :: proc() {
 // own clipboard. A page (Chromium) still uses the system pasteboard (browser-act).
 autotest_platform :: proc() {
 	// never a modal panel or a Finder window from a script
-	platform.pick_folder = proc() -> string {
+	core.platform.pick_folder = proc() -> string {
 		p := autotest.fake_folder
 		autotest.fake_folder = ""
 		log("folder picker ->", p)
 		return p
 	}
-	platform.reveal = proc(path: string) {
+	core.platform.reveal = proc(path: string) {
 		log("reveal", path)
 		delete(autotest.revealed)
 		autotest.revealed = strings.clone(path)
 	}
 	// kept for assert_clipboard, and what the next paste inserts
-	platform.set_clipboard = proc(text: string) {
+	core.platform.set_clipboard = proc(text: string) {
 		delete(autotest.clipboard)
 		autotest.clipboard = strings.clone(text)
 		autotest_paste_set(text)
 	}
-	platform.get_clipboard = proc() -> string {return autotest.pasteboard}
-	platform.set_clipboard_secret, platform.clear_clipboard_if = nil, nil // the script's own pasteboard (set_clipboard)
-	platform.open_url = proc(url: string) -> bool {
+	core.platform.get_clipboard = proc() -> string {return autotest.pasteboard}
+	core.platform.set_clipboard_secret, core.platform.clear_clipboard_if = nil, nil // the script's own pasteboard (set_clipboard)
+	core.platform.open_url = proc(url: string) -> bool {
 		log("open url", url)
 		delete(autotest.opened_url)
 		autotest.opened_url = strings.clone(url)
 		return true
 	}
-	platform.left_button = proc() -> bool {return autotest.left_down}
+	core.platform.left_button = proc() -> bool {return autotest.left_down}
 }
 
 autotest_paste_set :: proc(text: string) {
@@ -312,11 +313,11 @@ log :: proc(args: ..any) {
 
 // The terminal with the keyboard: Home's while its pane shows.
 screen_text :: proc() -> string {
-	return term_screen_text(key_term())
+	return term_screen_text(core.key_term())
 }
 
 // A terminal's visible text (temp-allocated).
-term_screen_text :: proc(t: ^Term) -> string {
+term_screen_text :: proc(t: ^core.Term) -> string {
 	if t == nil do return ""
 	gh.render_state_update(t.rs, t.gt)
 	b := strings.builder_make(context.temp_allocator)
@@ -490,7 +491,7 @@ script_index :: proc(args: []string) -> (u32, bool) {
 
 autotest_step :: proc() {
 	at := &autotest
-	if !autotest_active do return
+	if !core.autotest_active do return
 	if !at.started {
 		// sokol activates the app at launch: hand focus straight back so the
 		// user's keystrokes stay in their app (real input is dropped anyway)
@@ -516,7 +517,7 @@ autotest_step :: proc() {
 		at.pending_shot = ""
 	}
 	if at.wait_exit {
-		t := active_term()
+		t := core.active_term()
 		if t != nil && t.running && time.tick_diff(at.deadline, now) < 0 do return
 		log("child exited:", t == nil || !t.running)
 		at.wait_exit = false
@@ -527,7 +528,7 @@ autotest_step :: proc() {
 		at.wait_request = 0
 	}
 	if at.wait_state[0] != "" {
-		got := json_path(state_json(), at.wait_state[0])
+		got := core.json_path(core.state_json(), at.wait_state[0])
 		if got == at.wait_state[1] {
 			log("state reached:", at.wait_state[0], "=", got)
 		} else if time.tick_diff(at.deadline, now) > 0 {
@@ -547,7 +548,7 @@ autotest_step :: proc() {
 			msg := strings.concatenate({"TIMEOUT waiting for ", at.waiting_for}, context.temp_allocator)
 			at.waiting_for = ""
 			script_fail(msg)
-			if !autotest_active do return
+			if !core.autotest_active do return
 		} else {
 			return
 		}
@@ -602,10 +603,10 @@ autotest_step :: proc() {
 			ms_s, _, pv := strings.partition(rest, " ")
 			path, _, want := strings.partition(strings.trim_space(pv), " ")
 			want = expand_vars(want)
-			got := json_path(at.last_result, path)
+			got := core.json_path(at.last_result, path)
 			prev := at.command_idx >= 0 ? strings.trim_space(at.lines[at.command_idx]) : ""
 			_, _, prev_json := strings.partition(prev, " ")
-			type := json_path(expand_vars(prev_json), "type")
+			type := core.json_path(expand_vars(prev_json), "type")
 			if got == want {
 				log("result reached:", path, "=", got)
 				at.wr_idx = -1
@@ -655,7 +656,7 @@ autotest_step :: proc() {
 			at.deadline = time.tick_add(time.tick_now(), time.Duration(num(ms_s)) * time.Millisecond)
 			return
 		case "jobs_clock": // jobs_clock SECONDS: the jobs' clock moves on, then a due check
-			jobs_clock_advance(i64(num(rest)))
+			core.jobs_clock_advance(i64(num(rest)))
 		case "window_active": // window_active on|off: as if Deckhand were in front or behind
 			app.window_active = strings.trim_space(rest) == "on"
 		case "jobs_ui": // jobs_ui OPEN_ID [limits]: open a row (and the limits) on the Jobs tab
@@ -758,8 +759,8 @@ autotest_step :: proc() {
 		case "revealed_clear":
 			delete(autotest.revealed)
 			autotest.revealed = ""
-			delete(fs_model.revealed)
-			fs_model.revealed = ""
+			delete(core.fs_model.revealed)
+			core.fs_model.revealed = ""
 		case "toast_clear":
 			toast_clear()
 		case "clipboard_clear":
@@ -806,12 +807,12 @@ autotest_step :: proc() {
 			n, dy := int(num(args[0])), num(args[1])
 			t0 := time.tick_now()
 			for _ in 0 ..< n {
-				files_ui.scroll += dy
+				core.files_ui.scroll += dy
 				w, h := sapp.widthf(), sapp.heightf()
 				ui_layout(w, h)
 			}
 			ms := time.duration_milliseconds(time.tick_since(t0))
-			log(fmt.tprintf("FILES layout while scrolling: %d frames in %.1f ms (%.2f ms per frame), %d rows", n, ms, ms / f64(n), len(files_ui.rows)))
+			log(fmt.tprintf("FILES layout while scrolling: %d frames in %.1f ms (%.2f ms per frame), %d rows", n, ms, ms / f64(n), len(core.files_ui.rows)))
 			app.redraw = true
 		case "drop":
 			paths := make([dynamic]string, context.temp_allocator)
@@ -857,13 +858,13 @@ autotest_step :: proc() {
 			for i in 1 ..= 8 do send({type = .MOUSE_MOVE, mouse_x = x + dx * f32(i) / 8, mouse_y = y, modifiers = sapp.MODIFIER_LMB})
 			send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x + dx, mouse_y = y})
 		case "state":
-			t := active_term()
+			t := core.active_term()
 			if t == nil do continue
 			mt: gh.Mouse_Tracking
 			gh.terminal_get(t.gt, .Mouse_Tracking, &mt)
 			screen: gh.Terminal_Screen
 			gh.terminal_get(t.gt, .Active_Screen, &screen)
-			log(fmt.tprintf("mouse_tracking=%v sgr_1006=%v bracketed_paste_2004=%v focus_1004=%v sync_2026=%v color_scheme_2031=%v screen=%v cols=%d rows=%d", mt, mode_on(t, 1006), mode_on(t, 2004), mode_on(t, 1004), mode_on(t, 2026), mode_on(t, 2031), screen, t.cols, t.rows))
+			log(fmt.tprintf("mouse_tracking=%v sgr_1006=%v bracketed_paste_2004=%v focus_1004=%v sync_2026=%v color_scheme_2031=%v screen=%v cols=%d rows=%d", mt, core.mode_on(t, 1006), core.mode_on(t, 2004), core.mode_on(t, 1004), core.mode_on(t, 2026), core.mode_on(t, 2031), screen, t.cols, t.rows))
 		case "type":
 			type_text(rest)
 		case "key":
@@ -904,12 +905,12 @@ autotest_step :: proc() {
 				send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 			}
 		case "clickcell":
-			t := active_term()
+			t := core.active_term()
 			if t == nil {
 				script_fail("clickcell: no terminal")
 				continue
 			}
-			cell := proc(t: ^Term, c, r: string) -> (f32, f32) {
+			cell := proc(t: ^core.Term, c, r: string) -> (f32, f32) {
 				return t.x + term_pad() + (num(c) + 0.5) * font.cell_w, t.y + term_pad() + (num(r) + 0.5) * font.cell_h
 			}
 			x, y := cell(t, args[1], args[2])
@@ -927,7 +928,7 @@ autotest_step :: proc() {
 		case "mousecell":
 			// mousecell down|move|up COL ROW [shift]: one step of a press held
 			// across frames (a drag the frame loop draws in between)
-			t := active_term()
+			t := core.active_term()
 			for a in args[3:] do if strings.has_prefix(a, "pane=") do t = script_pane_term(a[5:])
 			if t == nil {
 				script_fail("mousecell: no terminal")
@@ -1039,13 +1040,13 @@ autotest_step :: proc() {
 		case "system_appearance":
 			// as if the OS switched (the platform's KVO callback path)
 			on_system_appearance(args[0] == "light")
-			inbox_drain()
+			core.inbox_drain()
 		case "lights":
 			x, y := test_light()
 			log(fmt.tprintf("traffic lights: close button centre %.1f,%.1f; top bar centre y %.1f", x, y, f32(TAB_STRIP_H) / 2))
 		case "copy":
 			key_event("c", sapp.MODIFIER_SUPER)
-			log("clipboard:", fmt.tprintf("%q", clipboard_text()))
+			log("clipboard:", fmt.tprintf("%q", core.clipboard_text()))
 		case "resize":
 			window_set_content_size(num(args[0]), num(args[1]))
 		case "shot":
@@ -1053,7 +1054,7 @@ autotest_step :: proc() {
 			// without taking keyboard focus, redraw, capture next step.
 			window_raise_without_focus()
 			app.redraw = true
-			if t := active_term(); t != nil do t.changed = true
+			if t := core.active_term(); t != nil do t.changed = true
 			at.pending_shot = strings.clone(args[0])
 			at.shot_drawn, at.shot_at = app.frames_drawn, now
 			at.wait_until = time.tick_add(now, 1000 * time.Millisecond) // at most
@@ -1065,11 +1066,11 @@ autotest_step :: proc() {
 			at.cpu_start = cpu_seconds()
 			at.cpu_frames = app.frames_drawn
 			at.cpu_bytes = total_bytes_in()
-			at.cpu_calls = app_frames_called
+			at.cpu_calls = core.app_frames_called
 		case "cpu_end":
 			wall := time.duration_seconds(time.tick_diff(at.cpu_wall, now))
 			cpu := cpu_seconds() - at.cpu_start
-			calls := app_frames_called - at.cpu_calls
+			calls := core.app_frames_called - at.cpu_calls
 			log(fmt.tprintf("CPU %s: %.1f%% over %.1fs, %d frames drawn, %d frame callbacks (%.1f/s), %d pty bytes", rest, 100 * cpu / wall, wall, app.frames_drawn - at.cpu_frames, calls, f64(calls) / wall, total_bytes_in() - at.cpu_bytes))
 		case "atlas":
 			size, glyphs, rasterised, evictions, runs := font_stats()
@@ -1078,7 +1079,7 @@ autotest_step :: proc() {
 			// as if the window went to the background or came to the front
 			// (sokol's UNFOCUSED/FOCUSED; quiet test mode never gets them)
 			send({type = args[0] == "back" ? .UNFOCUSED : .FOCUSED})
-			inbox_drain()
+			core.inbox_drain()
 		case "deactivate":
 			app_deactivate()
 		case "minimize":
@@ -1123,7 +1124,7 @@ autotest_step :: proc() {
 			at.injecting = true
 			took := test_menu_key(chars, mods, int(num(args[0])), key_window)
 			at.injecting = false
-			inbox_drain()
+			core.inbox_drain()
 			got := took ? "menu" : "view"
 			log("key went through:", got)
 			if want != "" {
@@ -1138,25 +1139,25 @@ autotest_step :: proc() {
 			log("menu bar written to", path)
 		case "command", "ui_command", "control_command", "pi_command", "pi_command_bg": // control_command: as an agent (Atlas, the CLI); pi_command: as the pi tab of the session on screen (its bridge); _bg: not waited for (await_bg)
 			text := expand_vars(rest)
-			c, err := parse_command(text, context.temp_allocator)
+			c, err := core.parse_command(text, context.temp_allocator)
 			if err != "" {
 				script_fail("command parse error:", err)
 				continue
 			}
 			at.command_idx = idx
-			kind: Caller_Kind = cmd == "ui_command" ? .UI : cmd == "control_command" ? .Control : strings.has_prefix(cmd, "pi_") ? .Panel : .Script
-			caller := Caller{kind = kind}
-			if kind == .Panel do if cs := cur(); cs != nil do caller.tab_id = cs.tabs[0].id
+			kind: core.Caller_Kind = cmd == "ui_command" ? .UI : cmd == "control_command" ? .Control : strings.has_prefix(cmd, "pi_") ? .Panel : .Script
+			caller := core.Caller{kind = kind}
+			if kind == .Panel do if cs := core.cur(); cs != nil do caller.tab_id = cs.tabs[0].id
 			id, r, finished := script_command(c, caller)
 			delete(at.last_result)
-			at.last_result = strings.clone(result_json(r))
+			at.last_result = strings.clone(core.result_json(r))
 			if r.created_id != 0 do at.prev_created, at.last_created = at.last_created, r.created_id
 			if r.confirm_token != "" {
 				delete(at.last_token)
 				at.last_token = strings.clone(r.confirm_token)
 			}
 			log("result", id, at.last_result)
-			result_free(r)
+			core.result_free(r)
 			if r.pending && cmd == "pi_command_bg" {
 				at.bg_request, at.bg_done = id, finished
 				continue
@@ -1183,16 +1184,16 @@ autotest_step :: proc() {
 			}
 			at.bg_request, at.bg_deadline = 0, {}
 		case "thread_command":
-			c, err := parse_command(expand_vars(rest)) // heap: freed by the thread
+			c, err := core.parse_command(expand_vars(rest)) // heap: freed by the thread
 			if err != "" {
 				script_fail("command parse error:", err)
 				continue
 			}
 			log("wakes so far:", app.wakes)
 			pc := new_clone(c) // a Command is too big to pass by value
-			thread.run_with_poly_data(pc, proc(pc: ^Command) {
-				inbox_submit(pc^, {kind = .Control})
-				command_free(pc^, context.allocator)
+			thread.run_with_poly_data(pc, proc(pc: ^core.Command) {
+				core.inbox_submit(pc^, {kind = .Control})
+				core.command_free(pc^, context.allocator)
 				free(pc)
 			})
 		case "wakes":
@@ -1200,17 +1201,17 @@ autotest_step :: proc() {
 		case "result_file": // result_file NAME: the last command's result to build/NAME.json
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)at.last_result)
 		case "state_json":
-			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)state_json())
+			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)core.state_json())
 		case "screen_hashes": // screen_hashes: per terminal tab "[autotest] screen_hash <tab id> <held> <hash>" (snapshot.odin)
-			for id, x in terms {
-				h, _ := screen_hash(x.gt)
+			for id, x in core.terms {
+				h, _ := core.screen_hash(x.gt)
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
 			}
 		case "quit":
 			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
-			app_quitting = true // the script ends the run: no confirmation
+			core.app_quitting = true // the script ends the run: no confirmation
 			sapp.request_quit()
-			autotest_active = false
+			core.autotest_active = false
 			return
 		case "web_open", "web_waitpaint", "web_title", "web_pixel", "web_click", "web_scroll", "web_js", "web_stats", "web_assert", "web_mouse", "web_keydown", "web_mark", "web_comment":
 			if msg, ok := browser_script(cmd, args, rest); !ok do script_fail(msg)
@@ -1243,7 +1244,7 @@ autotest_step :: proc() {
 
 // How a script command runs: the inbox's drain (a test may stand in for it, e.g. to have an
 // app's reply processed before the drain returns).
-script_drain: proc() = inbox_drain
+script_drain: proc() = core.inbox_drain
 
 // How long a script waits for a long-running command's finished result before it fails with
 // TIMEOUT: this, or the command's own timeout_ms + 10 s when that is longer (script_finish_wait).
@@ -1252,13 +1253,13 @@ script_finish_timeout := 120 * time.Second
 
 // The wait for c's finished result: script_finish_timeout, or c's own timeout_ms + 10 s (so its
 // own timeout error comes first) when that is longer.
-script_finish_wait :: proc(c: Command) -> time.Duration {
+script_finish_wait :: proc(c: core.Command) -> time.Duration {
 	own: time.Duration
 	#partial switch x in c {
-	case App_Call:          own = time.Duration(x.timeout_ms) * time.Millisecond
-	case Browser_Page_Wait: own = time.Duration(x.timeout_ms) * time.Millisecond
-	case Claude_Wait_Idle:  own = time.Duration(x.timeout_ms) * time.Millisecond
-	case Pi_Wait_Idle:      own = time.Duration(x.timeout_ms) * time.Millisecond
+	case core.App_Call:          own = time.Duration(x.timeout_ms) * time.Millisecond
+	case core.Browser_Page_Wait: own = time.Duration(x.timeout_ms) * time.Millisecond
+	case core.Claude_Wait_Idle:  own = time.Duration(x.timeout_ms) * time.Millisecond
+	case core.Pi_Wait_Idle:      own = time.Duration(x.timeout_ms) * time.Millisecond
 	}
 	if own <= 0 do return script_finish_timeout
 	return max(script_finish_timeout, own + 10 * time.Second)
@@ -1266,9 +1267,9 @@ script_finish_wait :: proc(c: Command) -> time.Duration {
 
 // Runs one script command now, in order with anything queued before (main thread). finished:
 // a long-running command's finished event already came (its result is in last_finished).
-script_command :: proc(c: Command, caller: Caller) -> (id: u64, r: Result, finished: bool) {
-	reply: Reply
-	id = inbox_submit(c, caller, &reply)
+script_command :: proc(c: core.Command, caller: core.Caller) -> (id: u64, r: core.Result, finished: bool) {
+	reply: core.Reply
+	id = core.inbox_submit(c, caller, &reply)
 	autotest.submitted, autotest.submitted_done = id, false
 	script_drain()
 	finished = autotest.submitted_done
@@ -1286,7 +1287,7 @@ script_fail :: proc(args: ..any) {
 	if strings.has_prefix(msg, "ASSERT FAILED") || strings.has_prefix(msg, "TIMEOUT") do log(msg)
 	else do log("ASSERT FAILED", msg)
 	at := &autotest
-	if !at.fail_fast || !autotest_active do return
+	if !at.fail_fast || !core.autotest_active do return
 	// fail fast: stop here, as `quit` does (exit status 1: main.odin); no "done:" line, which the
 	// scene scripts read as a script that ran to its end
 	line := at.next > 0 && at.next <= len(at.lines) ? strings.trim_space(at.lines[at.next - 1]) : ""
@@ -1296,9 +1297,9 @@ script_fail :: proc(args: ..any) {
 	at.next = len(at.lines)
 	at.waiting_for = ""
 	at.eventually_on = false
-	app_quitting = true // the script ends the run: no confirmation
+	core.app_quitting = true // the script ends the run: no confirmation
 	sapp.request_quit()
-	autotest_active = false
+	core.autotest_active = false
 }
 
 // The line starting now (DECKHAND_SCRIPT_STEP), so a hung or killed run says where it was.
@@ -1309,26 +1310,26 @@ script_write_step :: proc(idx: int, line: string) {
 }
 
 // Called for every event (events.odin).
-autotest_on_event :: proc(ev: Event) {
+autotest_on_event :: proc(ev: core.Event) {
 	// finished inside script_command's own drain (a fast app's reply): before the script knows
 	// it has to wait, so kept here
-	if f, ok := ev.(Finished_Event); ok && autotest.submitted != 0 && f.request_id == autotest.submitted {
-		log("finished", f.request_id, result_json(f.result))
+	if f, ok := ev.(core.Finished_Event); ok && autotest.submitted != 0 && f.request_id == autotest.submitted {
+		log("finished", f.request_id, core.result_json(f.result))
 		delete(autotest.last_finished)
-		autotest.last_finished = strings.clone(result_json(f.result))
+		autotest.last_finished = strings.clone(core.result_json(f.result))
 		autotest.submitted_done = true
 		return
 	}
-	if f, ok := ev.(Finished_Event); ok && autotest.bg_request != 0 && f.request_id == autotest.bg_request {
-		log("finished", f.request_id, result_json(f.result))
+	if f, ok := ev.(core.Finished_Event); ok && autotest.bg_request != 0 && f.request_id == autotest.bg_request {
+		log("finished", f.request_id, core.result_json(f.result))
 		delete(autotest.last_finished)
-		autotest.last_finished = strings.clone(result_json(f.result))
+		autotest.last_finished = strings.clone(core.result_json(f.result))
 		autotest.bg_done = true
 	}
-	if f, ok := ev.(Finished_Event); ok && autotest.wait_request != 0 && f.request_id == autotest.wait_request {
-		log("finished", f.request_id, result_json(f.result))
+	if f, ok := ev.(core.Finished_Event); ok && autotest.wait_request != 0 && f.request_id == autotest.wait_request {
+		log("finished", f.request_id, core.result_json(f.result))
 		delete(autotest.last_finished)
-		autotest.last_finished = strings.clone(result_json(f.result))
+		autotest.last_finished = strings.clone(core.result_json(f.result))
 		autotest.wait_request = 0
 	}
 }
@@ -1336,7 +1337,7 @@ autotest_on_event :: proc(ev: Event) {
 @(private = "file")
 expand_vars :: proc(s: string) -> string {
 	at := &autotest
-	cs := cur()
+	cs := core.cur()
 	tab, pitab: u64
 	pisession: string
 	if cs != nil {
@@ -1354,12 +1355,12 @@ expand_vars :: proc(s: string) -> string {
 		{"$pisession", pisession},
 		{"$session", fmt.tprint(state.current_session)},
 		{"$pitab", fmt.tprint(pitab)},
-		{"$hometab", fmt.tprint(home_tab() != nil ? home_tab().id : 0)},
+		{"$hometab", fmt.tprint(core.home_tab() != nil ? core.home_tab().id : 0)},
 		{"$tab", fmt.tprint(tab)},
-		{"$chats", fmt.tprint(chats_project() != nil ? chats_project().id : 0)},
+		{"$chats", fmt.tprint(core.chats_project() != nil ? core.chats_project().id : 0)},
 		{"$homedir", os.get_env("HOME", context.temp_allocator)},
 		{"$notesdir", state.settings.home_dir},
-		{"$datadir", home_root},
+		{"$datadir", core.home_root},
 		{"$cwd", cwd},
 	}
 	out := s
@@ -1374,11 +1375,11 @@ expand_vars :: proc(s: string) -> string {
 
 // The terminal of the tab pane SLOT of the current session shows (nil: none).
 @(private = "file")
-script_pane_term :: proc(slot: string) -> ^Term {
-	cs := cur()
+script_pane_term :: proc(slot: string) -> ^core.Term {
+	cs := core.cur()
 	if cs == nil do return nil
 	n := int(num(slot))
-	for &p in cs.panes do if p.slot == n do return pane_term(&p)
+	for &p in cs.panes do if p.slot == n do return core.pane_term(&p)
 	return nil
 }
 
@@ -1386,7 +1387,7 @@ script_pane_term :: proc(slot: string) -> ^Term {
 // layout's rects (the same tab_drop_input a drag reads).
 @(private = "file")
 script_tab_drag_points :: proc(args: []string) -> (x1, y1, x2, y2: f32, ok: bool) {
-	cs := cur()
+	cs := core.cur()
 	if cs == nil || len(args) < 2 do return
 	i := int(num(args[0]))
 	if i < 0 || i >= len(cs.tabs) do return
@@ -1433,7 +1434,7 @@ script_tab_drag_points :: proc(args: []string) -> (x1, y1, x2, y2: f32, ok: bool
 // SLOT before it (in its first child), D logical px across the divider's line.
 @(private = "file")
 script_pane_divider :: proc(args: []string) -> bool {
-	cs := cur()
+	cs := core.cur()
 	if cs == nil || len(args) < 2 do return false
 	n := int(num(args[0]))
 	pane: u64
@@ -1473,7 +1474,7 @@ script_pane_divider :: proc(args: []string) -> bool {
 
 total_bytes_in :: proc() -> int {
 	n := 0
-	for _, t in terms do n += t.bytes_in
+	for _, t in core.terms do n += t.bytes_in
 	return n
 }
 
@@ -1551,7 +1552,7 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: menu rows", got) : fmt.tprintf("ASSERT FAILED menu rows: %q, want %q", got, rest)
 	case "assert_revealed":
 		// the last path shown in Finder (platform.reveal, or a Reveal_In_Finder) contains TEXT; "-" = none since revealed_clear
-		got := autotest.revealed != "" ? autotest.revealed : fs_model.revealed
+		got := autotest.revealed != "" ? autotest.revealed : core.fs_model.revealed
 		ok = rest == "-" ? got == "" : got != "" && strings.contains(got, rest)
 		msg = ok ? fmt.tprint("assert ok: revealed", got) : fmt.tprintf("ASSERT FAILED revealed: %q, want %q in it", got, rest)
 	case "assert_toast":
@@ -1571,7 +1572,7 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 	case "assert_files", "assert_not_files":
 		// the shown tree's rows (Files or Settings; files_rows_text) contain TEXT ("\n" = a line break)
 		want, _ := strings.replace_all(rest, `\n`, "\n", context.temp_allocator)
-		got := files_rows_text(tree_rows())
+		got := core.files_rows_text(core.tree_rows())
 		has := strings.contains(got, want)
 		ok = has == (cmd == "assert_files")
 		if cmd == "assert_files" do msg = ok ? fmt.tprint("assert ok: files rows contain", fmt.tprintf("%q", want)) : fmt.tprintf("ASSERT FAILED files rows: %q not in %q", want, got)
@@ -1583,13 +1584,13 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: rows", section, "=", got) : fmt.tprintf("ASSERT FAILED rows %s: got %q, want %q", section, got, want)
 	case "assert_link":
 		// assert_link URL|-: the link underlined under the pointer (⌘ held), or none
-		t := active_term()
+		t := core.active_term()
 		got := t != nil && t.link_on ? t.link.url : "-"
 		ok = got == rest
 		msg = ok ? fmt.tprint("assert ok: link", got) : fmt.tprintf("ASSERT FAILED link %q, want %q", got, rest)
 	case "assert_drawn_selection":
 		// assert_drawn_selection N: selected cells in the last frame drawn (N > 0: "some"; 0: none)
-		t := active_term()
+		t := core.active_term()
 		got := t != nil ? t.drawn_selected : -1
 		want := len(args) > 0 ? int(num(args[0])) : 0
 		ok = (want == 0 && got == 0) || (want > 0 && got > 0)
@@ -1608,7 +1609,7 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: palette", i, "=", got) : fmt.tprintf("ASSERT FAILED palette %d: got %s, want %s", i, got, args[1])
 	case "assert_pane_cols":
 		t := script_pane_term(args[0])
-		cs := cur()
+		cs := core.cur()
 		w: f32
 		if cs != nil do for p in cs.panes do if p.slot == int(num(args[0])) do w = p.rect.z
 		want := u16(max(2, int((w - 2 * term_pad()) / font.cell_w)))
@@ -1617,13 +1618,13 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 	case "assert_pane_selection":
 		slot, _, want := strings.partition(strings.trim_space(expand_vars(rest)), " ")
 		t := script_pane_term(slot)
-		got := t != nil ? term_selection_text(t) : "<no terminal>"
+		got := t != nil ? core.term_selection_text(t) : "<no terminal>"
 		ok = got == want
 		msg = ok ? fmt.tprint("assert ok: pane", slot, "selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED pane %s selection: got %q, want %q", slot, got, want)
 	case "assert_selection":
 		got := ""
 		if f, _, _ := focused_field(); f != nil do got = tf_selected_text(f)
-		else if t := active_term(); t != nil do got = term_selection_text(t)
+		else if t := core.active_term(); t != nil do got = core.term_selection_text(t)
 		ok = got == rest
 		msg = ok ? fmt.tprint("assert ok: selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED selection: got %q, want %q", got, rest)
 	case "hittest":
@@ -1651,8 +1652,8 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: menu", args[0], got) : fmt.tprintf("ASSERT FAILED menu %s: got %s, want %s", args[0], it != nil ? got : "no such item", args[1])
 	case "assert_state", "assert_result", "assert_finished":
 		path, _, want := strings.partition(strings.trim_space(rest), " ")
-		src := cmd == "assert_state" ? state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
-		got := json_path(src, path)
+		src := cmd == "assert_state" ? core.state_json() : cmd == "assert_finished" ? at.last_finished : at.last_result
+		got := core.json_path(src, path)
 		want = expand_vars(want)
 		ok = got == want
 		msg = ok ? fmt.tprint("assert ok:", path, "=", got) : fmt.tprintf("ASSERT FAILED %s: got %q, want %q", path, got, want)
@@ -1666,29 +1667,29 @@ script_rows_text :: proc(section: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	switch section {
 	case "open":
-		for s, i in sidebar_open() {
+		for s, i in core.sidebar_open() {
 			if i > 0 do strings.write_byte(&b, ',')
-			strings.write_string(&b, open_session_title(s))
+			strings.write_string(&b, core.open_session_title(s))
 		}
 	case "projects":
-		for r, i in sidebar_projects() {
+		for r, i in core.sidebar_projects() {
 			if i > 0 do strings.write_byte(&b, ',')
 			if r.project == nil do fmt.sbprintf(&b, "%s%s/", strings.repeat("+", r.depth, context.temp_allocator), r.name)
-			else do fmt.sbprintf(&b, "%s%s", strings.repeat("+", r.depth, context.temp_allocator), project_name(r.project^))
+			else do fmt.sbprintf(&b, "%s%s", strings.repeat("+", r.depth, context.temp_allocator), core.project_name(r.project^))
 		}
 	case "sessions", "chats":
-		for r, i in sidebar_sessions(section == "chats" ? .Chats : .Sessions) {
+		for r, i in core.sidebar_sessions(section == "chats" ? .Chats : .Sessions) {
 			if i > 0 do strings.write_byte(&b, ',')
-			strings.write_string(&b, session_label(r.session^, section == "chats"))
+			strings.write_string(&b, core.session_label(r.session^, section == "chats"))
 		}
 	case "tree":
 		// as drawn in the last layout: projects, the expanded one's sessions as >title
 		for id, i in drawn.proj {
 			if i > 0 do strings.write_byte(&b, ',')
-			if p := find_project(id); p != nil do strings.write_string(&b, project_name(p^))
+			if p := core.find_project(id); p != nil do strings.write_string(&b, core.project_name(p^))
 			if id != state.selected_project do continue
 			for sid in drawn.sess {
-				for l in sessions_with_new(.Sessions, state.sessions[:]) do if l.id == sid do fmt.sbprintf(&b, ",>%s", session_label(l))
+				for l in core.sessions_with_new(.Sessions, state.sessions[:]) do if l.id == sid do fmt.sbprintf(&b, ",>%s", core.session_label(l))
 			}
 		}
 	}

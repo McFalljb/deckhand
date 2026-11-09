@@ -9,6 +9,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
+import "core"
 
 @(test)
 browser_url_normalizing :: proc(t: ^testing.T) {
@@ -33,16 +34,16 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 		{"app.localhost:5173", "http://app.localhost:5173"},
 	}
 	for c in ok {
-		got, err := browser_url_normalize(c[0])
+		got, err := core.browser_url_normalize(c[0])
 		testing.expectf(t, err == "" && got == c[1], "%q -> %q (%s), want %q", c[0], got, err, c[1])
 	}
 	// not addresses: search is not built in yet; schemes Deckhand does not open
 	bad := []string{"", "   ", "how to bake bread", "foo", "example", "a.b1", "example.c", ".example.com", "example.com.", "host:port", "host:123456", "javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "chrome://settings", "ftp://x.org", "about:config", "https://", "ex ample.com", "under_score.com"}
 	for b in bad {
-		got, err := browser_url_normalize(b)
+		got, err := core.browser_url_normalize(b)
 		testing.expectf(t, err != "" && got == "", "%q should be refused, got %q", b, got)
 	}
-	_, err := browser_url_normalize("how to bake bread")
+	_, err := core.browser_url_normalize("how to bake bread")
 	testing.expect(t, strings.contains(err, "search is not built in"), err)
 }
 
@@ -50,18 +51,18 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 @(private = "file")
 bn_reset :: proc() -> (a, b, home: u64) {
 	context.allocator = runtime.heap_allocator()
-	inbox_drain()
+	core.inbox_drain()
 	for id, _ in browsers do browser_drop(id)
-	state = State{}
-	platform = {}
+	state^ = core.State{}
+	core.platform = {}
 	for name in ([]string{"alpha", "beta"}) {
-		s := Open_Session{id = new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
-		append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+		s := core.Open_Session{id = core.new_id(), pi_session_id = fmt.aprintf("pi-%s", name), cwd = fmt.aprintf("/tmp/%s", name)}
+		append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 		s.active_tab = s.tabs[0].id
 		append(&state.open_sessions, s)
 	}
-	h := Open_Session{id = new_id(), home = true}
-	append(&h.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "Home", status = .Running})
+	h := core.Open_Session{id = core.new_id(), home = true}
+	append(&h.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "Home", status = .Running})
 	h.active_tab = h.tabs[0].id
 	append(&state.open_sessions, h)
 	state.home = h.id
@@ -79,12 +80,12 @@ BN_ALICE :: "alice" + ":" + "hunter2@"
 
 @(private = "file")
 bn_session_of :: proc(tab_id: u64) -> u64 {
-	s, _, _ := find_tab(tab_id)
+	s, _, _ := core.find_tab(tab_id)
 	return s != nil ? s.id : 0
 }
 
 @(private = "file")
-bn_pi :: proc(session: u64) -> u64 {return find_session(session).tabs[0].id}
+bn_pi :: proc(session: u64) -> u64 {return core.find_session(session).tabs[0].id}
 
 // browser_open's session per caller kind: never "whatever is on screen" for an agent.
 @(test)
@@ -92,8 +93,8 @@ browser_open_session_per_caller :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, b, home := bn_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	open :: proc(caller: Caller, session: u64, url := "https://example.com") -> Result {
-		return run_command(Browser_Open{session = session, url = url}, caller)
+	open :: proc(caller: core.Caller, session: u64, url := "https://example.com") -> core.Result {
+		return core.run_command(core.Browser_Open{session = session, url = url}, caller)
 	}
 	// the user and scripts: the session on screen, or the one named
 	r := open({kind = .UI}, 0)
@@ -101,7 +102,7 @@ browser_open_session_per_caller :: proc(t: ^testing.T) {
 	r = open({kind = .UI}, b)
 	testing.expect(t, r.ok && bn_session_of(r.created_id) == b, r.error)
 	testing.expect_value(t, state.current_session, a) // the view stays
-	testing.expect_value(t, find_session(b).active_tab, r.created_id) // focused in its session
+	testing.expect_value(t, core.find_session(b).active_tab, r.created_id) // focused in its session
 	r = open({kind = .Script}, 0)
 	testing.expect(t, r.ok && bn_session_of(r.created_id) == a, r.error)
 	// a pi tab: its own session, even while another is on screen; never another one
@@ -136,13 +137,13 @@ browser_open_session_per_caller :: proc(t: ^testing.T) {
 	r = open({kind = .UI}, a, "")
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, state.focus_widget, "browser_url")
-	_, tab, _ := find_tab(r.created_id)
-	testing.expect_value(t, tab.kind.(Browser_Tab).url, "about:blank")
+	_, tab, _ := core.find_tab(r.created_id)
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).url, "about:blank")
 	testing.expect_value(t, tab.title, "New tab")
 	// normalised
 	r = open({kind = .UI}, a, "example.org/x")
-	_, tab, _ = find_tab(r.created_id)
-	testing.expect_value(t, tab.kind.(Browser_Tab).url, "https://example.org/x")
+	_, tab, _ = core.find_tab(r.created_id)
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).url, "https://example.org/x")
 }
 
 // A pi tab drives its own session's browser tabs only; what the page reports lands in State.
@@ -151,55 +152,55 @@ browser_tabs_driven_and_reported :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a, b, _ := bn_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	ra := run_command(Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
-	rb := run_command(Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
+	ra := core.run_command(core.Browser_Open{session = a, url = "https://a.example"}, {kind = .UI})
+	rb := core.run_command(core.Browser_Open{session = b, url = "https://b.example"}, {kind = .UI})
 	testing.expect(t, ra.ok && rb.ok)
 	ta, tb := ra.created_id, rb.created_id
-	pa := Caller{kind = .Panel, tab_id = bn_pi(a)}
-	r := run_command(Browser_Navigate{tab_id = ta, url = "a.example/next"}, pa)
+	pa := core.Caller{kind = .Panel, tab_id = bn_pi(a)}
+	r := core.run_command(core.Browser_Navigate{tab_id = ta, url = "a.example/next"}, pa)
 	testing.expect(t, r.ok, r.error)
-	_, tab, _ := find_tab(ta)
-	testing.expect_value(t, tab.kind.(Browser_Tab).url, "https://a.example/next")
-	for cmd in ([]Command{Browser_Navigate{tab_id = tb, url = "x.example"}, Browser_Back{tb}, Browser_Forward{tb}, Browser_Reload{tb}, Browser_Stop{tb}}) {
-		r = run_command(cmd, pa)
-		testing.expectf(t, !r.ok && strings.contains(r.error, "own session"), "%s on another session's tab: %s", command_type(cmd), r.error)
+	_, tab, _ := core.find_tab(ta)
+	testing.expect_value(t, tab.kind.(core.Browser_Tab).url, "https://a.example/next")
+	for cmd in ([]core.Command{core.Browser_Navigate{tab_id = tb, url = "x.example"}, core.Browser_Back{tb}, core.Browser_Forward{tb}, core.Browser_Reload{tb}, core.Browser_Stop{tb}}) {
+		r = core.run_command(cmd, pa)
+		testing.expectf(t, !r.ok && strings.contains(r.error, "own session"), "%s on another session's tab: %s", core.command_type(cmd), r.error)
 	}
 	// not a browser tab
-	r = run_command(Browser_Back{bn_pi(a)}, {kind = .UI})
+	r = core.run_command(core.Browser_Back{bn_pi(a)}, {kind = .UI})
 	testing.expect(t, !r.ok && r.error == "not a browser tab", r.error)
 	// no page (no CEF in tests): history is refused, not faked
-	r = run_command(Browser_Back{ta}, pa)
+	r = core.run_command(core.Browser_Back{ta}, pa)
 	testing.expect(t, !r.ok, "nothing loaded")
 	// what CEF reports: address, title, history
 	v := state.version
-	run_command(Browser_Update{tab_id = ta, what = {.Url}, url = "https://a.example/landed"}, {kind = .Internal})
-	run_command(Browser_Update{tab_id = ta, what = {.Nav}, loading = true, can_back = true}, {kind = .Internal})
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Url}, url = "https://a.example/landed"}, {kind = .Internal})
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Nav}, loading = true, can_back = true}, {kind = .Internal})
 	if b := browser_of(ta); b != nil do b.title = strings.clone("Landed") // as on_cef_title keeps it
-	run_command(Browser_Update{tab_id = ta, what = {.Title}, title = "Landed"}, {kind = .Internal})
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Title}, title = "Landed"}, {kind = .Internal})
 	testing.expect(t, state.version > v)
-	_, tab, _ = find_tab(ta)
-	bt := tab.kind.(Browser_Tab)
+	_, tab, _ = core.find_tab(ta)
+	bt := tab.kind.(core.Browser_Tab)
 	testing.expect_value(t, bt.url, "https://a.example/landed")
 	testing.expect(t, bt.loading && bt.can_back && !bt.can_forward)
 	testing.expect_value(t, tab.title, "Landed")
-	sj := state_json()
+	sj := core.state_json()
 	testing.expect(t, strings.contains(sj, `"url":"https://a.example/landed","loading":true,"can_back":true,"can_forward":false`), sj)
 	// a refused popup is shown to agents
-	run_command(Browser_Update{tab_id = ta, what = {.Blocked}, blocked = "https://ads.example/"}, {kind = .Internal})
-	testing.expect(t, strings.contains(state_json(), `"blocked_popup":"https://ads.example/"`))
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Blocked}, blocked = "https://ads.example/"}, {kind = .Internal})
+	testing.expect(t, strings.contains(core.state_json(), `"blocked_popup":"https://ads.example/"`))
 	// only Deckhand reports
-	r = run_command(Browser_Update{tab_id = ta, what = {.Url}, url = "https://evil.example"}, {kind = .Script})
+	r = core.run_command(core.Browser_Update{tab_id = ta, what = {.Url}, url = "https://evil.example"}, {kind = .Script})
 	testing.expect(t, !r.ok)
 	// over the wire: parsed by name, written back the same
-	cmd, err := parse_command(`{"type":"browser_open","session":5,"url":"example.com"}`, context.temp_allocator)
+	cmd, err := core.parse_command(`{"type":"browser_open","session":5,"url":"example.com"}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, cmd.(Browser_Open).url, "example.com")
-	_, err = parse_command(`{"type":"browser_navigate","tab_id":5}`, context.temp_allocator)
+	testing.expect_value(t, cmd.(core.Browser_Open).url, "example.com")
+	_, err = core.parse_command(`{"type":"browser_navigate","tab_id":5}`, context.temp_allocator)
 	testing.expect(t, err != "", "url is required")
-	_, err = parse_command(`{"type":"browser_update","tab_id":5}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"browser_update","tab_id":5}`, context.temp_allocator)
 	testing.expect(t, strings.has_prefix(err, "unknown command"), "internal: not parsed")
 	sb := strings.builder_make(context.temp_allocator)
-	write_command(&sb, Browser_Navigate{tab_id = 7, url = "https://x.example"})
+	core.write_command(&sb, core.Browser_Navigate{tab_id = 7, url = "https://x.example"})
 	testing.expect_value(t, strings.to_string(sb), `{"type":"browser_navigate","tab_id":7,"url":"https://x.example"}`)
 }
 
@@ -208,7 +209,7 @@ browser_tabs_driven_and_reported :: proc(t: ^testing.T) {
 @(test)
 browser_url_userinfo_and_file :: proc(t: ^testing.T) {
 	for b in ([]string{"127.0.0.1@evil.com", "localhost:3000@evil.com/x", BN_USER_PW + "example.com", "a@b.c"}) {
-		got, err := browser_url_normalize(b)
+		got, err := core.browser_url_normalize(b)
 		testing.expectf(t, err != "" && got == "", "%q should be refused, got %q", b, got)
 	}
 	cases := [][2]string {
@@ -218,24 +219,24 @@ browser_url_userinfo_and_file :: proc(t: ^testing.T) {
 		{"https://example.com", "https://example.com"},
 		{"about:blank", "about:blank"},
 	}
-	for c in cases do testing.expectf(t, browser_url_public(c[0]) == c[1], "%q -> %q, want %q", c[0], browser_url_public(c[0]), c[1])
+	for c in cases do testing.expectf(t, core.browser_url_public(c[0]) == c[1], "%q -> %q, want %q", c[0], core.browser_url_public(c[0]), c[1])
 	a, b, home := bn_reset()
 	defer for id, _ in browsers do browser_drop(id)
-	r := run_command(Browser_Open{session = a, url = "file:///etc/hosts"}, {kind = .UI})
+	r := core.run_command(core.Browser_Open{session = a, url = "file:///etc/hosts"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	ta := r.created_id
-	for caller in ([]Caller{{kind = .Panel, tab_id = bn_pi(a)}, {kind = .Control}, {kind = .Control, tab_id = bn_pi(home)}, {kind = .Script}}) {
-		r = run_command(Browser_Open{session = a, url = "file:///etc/hosts"}, caller)
+	for caller in ([]core.Caller{{kind = .Panel, tab_id = bn_pi(a)}, {kind = .Control}, {kind = .Control, tab_id = bn_pi(home)}, {kind = .Script}}) {
+		r = core.run_command(core.Browser_Open{session = a, url = "file:///etc/hosts"}, caller)
 		testing.expectf(t, !r.ok && strings.contains(r.error, "file:"), "%v opens a file: address: %s", caller.kind, r.error)
-		r = run_command(Browser_Navigate{tab_id = ta, url = "FILE:///etc/passwd"}, caller)
+		r = core.run_command(core.Browser_Navigate{tab_id = ta, url = "FILE:///etc/passwd"}, caller)
 		testing.expectf(t, !r.ok && strings.contains(r.error, "file:"), "%v navigates to a file: address: %s", caller.kind, r.error)
 	}
 	_ = b
 	// userinfo never lands in State (what the page reports, what a command opens)
-	r = run_command(Browser_Open{session = a, url = "https://" + BN_ME_SECRET + "example.com/x"}, {kind = .UI})
+	r = core.run_command(core.Browser_Open{session = a, url = "https://" + BN_ME_SECRET + "example.com/x"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	run_command(Browser_Update{tab_id = ta, what = {.Url}, url = "https://" + BN_ME_SECRET + "example.org/y"}, {kind = .Internal})
-	testing.expect(t, !strings.contains(state_json(), "secret"), "userinfo in State")
+	core.run_command(core.Browser_Update{tab_id = ta, what = {.Url}, url = "https://" + BN_ME_SECRET + "example.org/y"}, {kind = .Internal})
+	testing.expect(t, !strings.contains(core.state_json(), "secret"), "userinfo in State")
 }
 
 // Round 2: which pages get one of CEF's 8 slots (browser_page_plan). Only the user unloads: the
@@ -350,20 +351,20 @@ browser_agent_open_keeps_view :: proc(t: ^testing.T) {
 	a, b, _ := bn_reset()
 	defer for id, _ in browsers do browser_drop(id)
 	pi_a := bn_pi(a)
-	r := run_command(Browser_Open{url = "https://example.com"}, {kind = .Panel, tab_id = pi_a})
+	r := core.run_command(core.Browser_Open{url = "https://example.com"}, {kind = .Panel, tab_id = pi_a})
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, find_session(a).active_tab, pi_a)
+	testing.expect_value(t, core.find_session(a).active_tab, pi_a)
 	testing.expect_value(t, state.current_session, a)
-	r = run_command(Browser_Open{session = a, url = "https://example.com"}, {kind = .Control})
+	r = core.run_command(core.Browser_Open{session = a, url = "https://example.com"}, {kind = .Control})
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, find_session(a).active_tab, pi_a)
-	r = run_command(Browser_Open{session = b, url = "https://example.com"}, {kind = .Control})
-	testing.expect_value(t, find_session(b).active_tab, bn_pi(b))
+	testing.expect_value(t, core.find_session(a).active_tab, pi_a)
+	r = core.run_command(core.Browser_Open{session = b, url = "https://example.com"}, {kind = .Control})
+	testing.expect_value(t, core.find_session(b).active_tab, bn_pi(b))
 	testing.expect_value(t, state.current_session, a)
-	r = run_command(Browser_Open{session = a, url = "https://example.com"}, {kind = .UI})
-	testing.expect_value(t, find_session(a).active_tab, r.created_id)
-	r = run_command(Browser_Open{session = a, url = "https://example.com"}, {kind = .Script})
-	testing.expect_value(t, find_session(a).active_tab, r.created_id)
+	r = core.run_command(core.Browser_Open{session = a, url = "https://example.com"}, {kind = .UI})
+	testing.expect_value(t, core.find_session(a).active_tab, r.created_id)
+	r = core.run_command(core.Browser_Open{session = a, url = "https://example.com"}, {kind = .Script})
+	testing.expect_value(t, core.find_session(a).active_tab, r.created_id)
 }
 
 // Round 2: a typed address's user:pass@ never reaches events (the event log and socket events
@@ -371,18 +372,18 @@ browser_agent_open_keeps_view :: proc(t: ^testing.T) {
 @(test)
 browser_credentials_not_in_events :: proc(t: ^testing.T) {
 	U :: "https://" + BN_ALICE + "example.com/x?q=1"
-	cmds := []Command {
-		Browser_Open{session = 1, url = U},
-		Browser_Open{session = 1, url = BN_ALICE + "example.com/x?q=1"}, // typed without a scheme
-		Browser_Navigate{tab_id = 1, url = U},
-		Browser_Update{tab_id = 1, what = {.Url}, url = U},
+	cmds := []core.Command {
+		core.Browser_Open{session = 1, url = U},
+		core.Browser_Open{session = 1, url = BN_ALICE + "example.com/x?q=1"}, // typed without a scheme
+		core.Browser_Navigate{tab_id = 1, url = U},
+		core.Browser_Update{tab_id = 1, what = {.Url}, url = U},
 	}
 	for c in cmds {
-		red := command_json(c, redact = true)
+		red := core.command_json(c, redact = true)
 		testing.expectf(t, !strings.contains(red, "hunter2") && !strings.contains(red, "alice"), "redacted: %s", red)
 		testing.expectf(t, strings.contains(red, "example.com/x?q=1"), "the address stays: %s", red)
-		line := event_json(Command_Event{caller = {kind = .UI}, command = c})
+		line := core.event_json(core.Command_Event{caller = {kind = .UI}, command = c})
 		testing.expectf(t, !strings.contains(line, "hunter2"), "event: %s", line)
-		testing.expect(t, strings.contains(command_json(c), "hunter2"), "unredacted keeps it (the command itself)")
+		testing.expect(t, strings.contains(core.command_json(c), "hunter2"), "unredacted keeps it (the command itself)")
 	}
 }

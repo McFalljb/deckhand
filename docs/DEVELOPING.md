@@ -58,7 +58,7 @@ update only to a bundle with the old bundle id and a signature in the old format
 - **0.1.7 (the bridge).** Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
   `tools/deckhand-cli/`, `.deckhand/apps.json`, `~/Library/Caches/deckhand/cef`,
   `~/.config/deckhand/update.key`, `TERM_PROGRAM=Deckhand`), and the old ones still work
-  (`src/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
+  (`src/core/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
   runs are set under both names (`DECKHAND_SOCKET` and `PI_DESK_SOCKET`, …; never in pi tabs, where
   pi-kit's desk extensions would switch on), and every reader takes the new name first, then the
   old; the scrubs drop an explicit list of Deckhand's names (both families), never every
@@ -103,7 +103,7 @@ Every build is code-signed with one identity: `SIGN_IDENTITY_DEFAULT` in `script
 `build.sh`, `scripts/bundle-app.sh` and `scripts/release.sh` share. It is a self-signed
 certificate, **"Deckhand Self-Signed"**, in your login keychain. `DECKHAND_SIGN_IDENTITY=…`
 overrides it for one build (the setting lives in the script, not the environment: a shell started
-by Deckhand drops `DECKHAND_*` variables from the login environment, `src/login_env.odin`). Make
+by Deckhand drops `DECKHAND_*` variables from the login environment, `src/core/login_env.odin`). Make
 the identity once per Mac:
 
 ```sh
@@ -187,7 +187,7 @@ libghostty-vt's C ABI is not stable yet, and `src/ghostty/ghostty.odin` is hand-
 v1.4.0. `./build.sh test` checks struct sizes, offsets and key-enum values against the C headers,
 so rerun it after bumping the tag.
 
-**Bumping libghostty-vt**, also check terminal snapshots (`src/snapshot.odin`; design
+**Bumping libghostty-vt**, also check terminal snapshots (`src/core/snapshot.odin`; design
 [§5.5](plans/background-core.md#55-terminal-streams-option-a)):
 
 1. `./build.sh test` must pass `snapshot_stored_corpus`. It decodes the GHOSTSNP snapshots that the
@@ -222,7 +222,7 @@ against the local zip. You check the draft and publish it.
 
 **No test hooks in a release** (docs/plans/background-core.md §5.3: a genuine binary must not be
 steerable by its environment). Every test and development knob goes through `hook_env()` in
-`src/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`DECKHAND_SCRIPT` and the
+`src/core/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`DECKHAND_SCRIPT` and the
 rest), `DECKHAND_DATA_DIR`, `DECKHAND_RUNTIME_DIR`, the pi and Claude stand-ins, the updater's
 fixtures. `-define:DECKHAND_TEST_HOOKS=false` (what `DECKHAND_RELEASE=1 ./build.sh` passes)
 compiles the table out, so a release build uses the fixed data and runtime dirs, never enters
@@ -249,10 +249,10 @@ Each release:
    GitHub calls, then `--upload-only` to draft what it left there, checked again).
 3. Open the draft on GitHub, check the notes and the three files, publish it.
 
-The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/update_core.odin` (the
+The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/core/update_core.odin` (the
 updater asks that repository for releases, and `scripts/release.sh` reads it from there; another
 `--repo` or `DECKHAND_RELEASE_REPO` is refused without `--allow-other-repo`). The release's names
-come from the source too: the app from `UPDATE_APP` (`src/update_core.odin`), the zip's from
+come from the source too: the app from `UPDATE_APP` (`src/core/update_core.odin`), the zip's from
 `ZIP_PREFIX` and `ZIP_SUFFIX` (`src/updatesig/updatesig.odin`).
 
 A release, titled "Deckhand X.Y.Z", carries `deckhand-<version>-macos-arm64.zip` (holding exactly
@@ -274,10 +274,10 @@ check) and starts it from there, so an app update never pulls the binary from un
 The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §7.3;
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
 holder only upgrades to a newer `holder_rev`, so **bump `HOLDER_REV`** in `src/holder/holder.odin`
-and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
+and `src/core/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
 (tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. The app upgrades an attached
 holder older than the one it bundles by itself, once per run, after the launch's adopt
-(`holder_upgrade_tick`, `src/holder_restart.odin`): after an update that is the new app, attached
+(`holder_upgrade_tick`, `src/core/holder_restart.odin`): after an update that is the new app, attached
 as the named successor. In a development build the palette's *Restart session holder* upgrades
 the running holder to the one you just built. `DECKHAND_HOLDER_REV=N` (test builds) makes the app
 take its bundled holder for rev N (the keep-sessions scene's automatic upgrade). The
@@ -286,10 +286,10 @@ re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
 
 ### Update signing
 
-Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust
+Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/core/update.odin`). The trust
 anchor is an Ed25519 key of its own, not GitHub or the TLS connection: an update installs only
 when its `.sig` verifies under the public key compiled into the app (`UPDATE_PUBLIC_KEY` in
-`src/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
+`src/core/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
 GitHub (no secret, no CI step), and `scripts/release.sh` signs only the bundle it has just
 built there, never anything downloaded.
 
@@ -342,12 +342,12 @@ built there, never anything downloaded.
 
 Every user-visible change updates [GUIDE.md](GUIDE.md) in the same branch. `./build.sh test`
 checks part of this in `src/docs_test.odin`: every action in `src/actions.odin` (its label and
-shortcut) must appear in GUIDE.md, and every command in `src/command_table.odin` that the user or
+shortcut) must appear in GUIDE.md, and every command in `src/core/command_table.odin` that the user or
 agents may send (`who = .User` or `.Anyone`) must appear in GUIDE.md or
 [PROTOCOL.md](PROTOCOL.md).
 
 GUIDE.md is built into the binary and copied to `<data dir>/atlas/GUIDE.md` for Atlas
-(`src/agent.odin`). If you change Atlas's starter prompt (`ATLAS_PROMPT_STARTER`), add the
+(`src/core/agent.odin`). If you change Atlas's starter prompt (`ATLAS_PROMPT_STARTER`), add the
 previous one to `ATLAS_PROMPT_OLD_STARTERS` so that unedited copies are replaced at startup.
 
 ## Architecture
@@ -359,64 +359,76 @@ small files so that Linux and Windows can follow.
 
 ### Source map
 
+The core (State, commands, the socket, persistence, terminals, pi, Claude, jobs, updates) is
+`src/core/`, package `core`: it imports no window code (sokol, Clay, CEF, the Obj-C shims), so
+`odin test src/core` builds it alone, and `scripts/check-core-boundary.sh` (run by
+`./build.sh test` and CI) fails on a window import. The window (drawing, input, CEF, app tabs,
+editor buffers, the autotest UI) is `src/`, package `main`; it names the core's declarations as
+`core.X`, except `state`, its `^core.State` (`src/state_view.odin`; M3 points it at a replica).
+`src/core/<file>_core.odin` holds the types and constants the core needed from a window file
+(`src/<file>.odin`). The move was mechanical (`scripts/core-move.py`, checked by
+`scripts/core-move-verify.py`; docs/plans/background-core.md §10.2 M2-B); which files are the
+core's is `scripts/core-files.txt`. Paths below are relative to `src/`.
+
 ```
 main.odin      sokol app: init / frame / event. Events become commands, keys routed by focus. Redraws only when something changed.
-state.odin     State: the one plain, serialisable app state struct (ids, no pointers)
-commands.odin  Command union + run_command: the only code that changes State; callers, confirmations
-command_table.odin  every command: args, description, who may send it, confirm class, long-running (caller_may, list_commands)
-home.odin      the Home session: data dir, cwd
-agent.odin     the built-in agent: Home's pi in a terminal (its args: --model, ATLAS.md prompt; unread and notifications from its bridge status; the model it runs)
+core/state.odin State: the one plain, serialisable app state struct (ids, no pointers)
+state_view.odin the window's `state: ^core.State` (the core's State today; M3: the replica)
+core/commands.odin Command union + run_command: the only code that changes State; callers, confirmations
+core/command_table.odin every command: args, description, who may send it, confirm class, long-running (caller_may, list_commands)
+core/home.odin the Home session: data dir, cwd
+core/agent.odin the built-in agent: Home's pi in a terminal (its args: --model, ATLAS.md prompt; unread and notifications from its bridge status; the model it runs)
 drawer.odin    the agent's drawer: frame, header (name, status, model, Model, pin, close), resize, its terminal's mouse
-inbox.odin     command inbox: any thread submits, the main thread drains; reply slots
-events.odin    events (command run, long command finished), command log, own-event filter
-socket.odin    control socket: listener, hello + tokens, subscriptions, pi-tab bridge routing
-socket_posix.odin  Unix socket + per-user 0700 dir, peer pid and parent pid (the OS side of socket.odin)
-claude.odin    Claude Code tabs (docs/CLAUDE.md): start, commands, history, held prompts; ui_claude.odin the held bar
+core/inbox.odin command inbox: any thread submits, the main thread drains; reply slots
+core/events.odin events (command run, long command finished), command log, own-event filter
+core/socket.odin control socket: listener, hello + tokens, subscriptions, pi-tab bridge routing
+core/socket_posix.odin Unix socket + per-user 0700 dir, peer pid and parent pid (the OS side of socket.odin)
+core/claude.odin Claude Code tabs (docs/CLAUDE.md): start, commands, history, held prompts; ui_claude.odin the held bar
 ../tools/deckhand-cli/  the `deckhand` CLI the bundled Claude Code plugin (../integrations/claude-code/) runs: browser and app tools, hooks
-pi_integration.odin  the bundled pi integration (../integrations/pi/, docs/HARNESSES.md): where it is, the `-e` arguments every pi start gets, the minimum pi and its bar
-ctl.odin       `deckhand --ctl`: tiny socket client for scripts and tests
-json_*.odin    hand-written JSON: command parser, encoders for commands/results/events/state (docs/PROTOCOL.md)
+core/pi_integration.odin the bundled pi integration (../integrations/pi/, docs/HARNESSES.md): where it is, the `-e` arguments every pi start gets, the minimum pi and its bar
+core/ctl.odin  `deckhand --ctl`: tiny socket client for scripts and tests
+core/json_*.odin hand-written JSON: command parser, encoders for commands/results/events/state (docs/PROTOCOL.md)
 platform*.odin what commands may ask of the window layer (clipboard, quit, wake, folder picker); macOS hooks
 native/platform_macos.m  macOS: blended title bar, input methods (NSTextInputClient on sokol's view), window drag, appearance (OS light/dark, window)
 textfield.odin single-line text field (edit buffer, cursor, selection, word moves, mouse)
 actions.odin   user-facing actions (label, shortcut, command builder): what the palette offers, and the labels and shortcuts of buttons
 palette.odin   command palette (⌘K): items, fuzzy search and ranking, recents; runs items through the inbox
-sidebar.odin   left column model: which projects, chats and sessions show and in what order (pins, sort, filter, hidden, the Open group)
+core/sidebar.odin left column model: which projects, chats and sessions show and in what order (pins, sort, filter, hidden, the Open group)
 ui_sidebar.odin left column layout and input: filter field, quick filters, sections, context and sort menus, column dividers (and the drawer's left edge)
 ui_setup.odin  the first-run sheet (main folder); folders.odin: the main folder's subfolders and their overrides
 tabhost.odin   tab protocol sketch (docs/TAB-PROTOCOL.md): Tab_View per kind; tab_host_apply_app runs browser, app, Markdown and editor commands
-window_hooks.odin what the core asks of the window (redraw, toast, frames, a tab's view facts for State's JSON, tab host commands, the test step): core files call these, main.odin fills them
+core/window_hooks.odin what the core asks of the window (redraw, toast, frames, a tab's view facts for State's JSON, tab host commands, the test step): core files call these, main.odin fills them
 tab_views.odin the window's side of the tab view hooks: a tab record's view (editor buffer, Markdown view, Changes diff, browser page) made and dropped as the core reports the record; unsaved buffers for the core's questions
-*_wire.odin    the browser, app and Markdown commands' wire layer (type names, inbox copies and frees, events' fields, the socket's tab filter); app_wire.odin also an app's results, events and tab.boxes as its socket sends them
-core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame()
-update*.odin   Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
-agent_status.odin  status of every terminal tab: OSC 7501 records, bridge > OSC 7501 precedence, unseen ("done, not seen yet"), roll-ups, the attention sort's tiers, set_unread, the tooltip line
-notify.odin    the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands
+core/*_wire.odin the browser, app and Markdown commands' wire layer (type names, inbox copies and frees, events' fields, the socket's tab filter); app_wire.odin also an app's results, events and tab.boxes as its socket sends them
+core/core_loop.odin core_tick: the inbox, terminals, persistence, jobs and Claude ticks, called first by frame()
+core/update*.odin Deckhand's own updates: the check (curl to GitHub's API), the offer, download and checks (update_core: versions, release JSON, where it may install, the unpacked bundle; updatesig/: the Ed25519 manifest signatures), the swap and relaunch; ui_update.odin the bar; update_key.odin the public key
+core/agent_status.odin status of every terminal tab: OSC 7501 records, bridge > OSC 7501 precedence, unseen ("done, not seen yet"), roll-ups, the attention sort's tiers, set_unread, the tooltip line
+core/notify.odin the bell's entries: what happened in sessions the user was not looking at (finished, waiting, error, exited) and jobs' results (notify_post); bounded, coalesced, not saved; notifications_* commands
 ui_bell.odin   the bell in the top bar (unread count) and its popover (Today/Earlier, mark all read, clear; an entry focuses its session)
 ui_toolbar.odin top bar buttons (each runs an action), search pill, settings popover (the gear), shortcuts sheet (⌘/), tooltips
-settings_files.odin settings as files: the left column's Settings tab (⌘,): pi's settings files by an allowlist (settings.json, models.json, AGENTS.md…, prompts/, skills/, extensions/), the project's .pi/ and instructions file (Create when missing), extensions' config files and folders, as a tree drawn by ui_files.odin; credential files never shown or opened; pi's JSON settings saved only when pi can read them; Reload pi sessions after a save
+core/settings_files.odin settings as files: the left column's Settings tab (⌘,): pi's settings files by an allowlist (settings.json, models.json, AGENTS.md…, prompts/, skills/, extensions/), the project's .pi/ and instructions file (Create when missing), extensions' config files and folders, as a tree drawn by ui_files.odin; credential files never shown or opened; pi's JSON settings saved only when pi can read them; Reload pi sessions after a save
 icons.odin     a small vector icon set (lines, rings, dots) drawn with sokol_gl, crisp at any scale
 logos.odin     the harnesses' real logos (pi, Claude Code's Clawd) as pixel grids, rasterised into the glyph atlas per pixel size in whole-px cells (assets/harness/: sources, terms)
 editor*.odin   editor tabs: piece-table buffer (editor_buffer), edits and undo (editor), tree-sitter highlighting (editor_syntax), load/save/disk sync (editor_file), git gutter and diffs (editor_git), watching (editor_watch), drawing, input, toolbar, find bars (editor_view), ⌘P finder (editor_finder), commands (editor_commands)
-fs_model.odin  file-system model: listing (gitignore, git status), project files, file commands inside projects
-files.odin     the Files tab's model: expanded folders per tree (State), cached listings, flat rows, its commands
+core/fs_model.odin file-system model: listing (gitignore, git status), project files, file commands inside projects
+core/files.odin the Files tab's model: expanded folders per tree (State), cached listings, flat rows, its commands
 jobs*.odin     Atlas's jobs: note parser and report extraction (jobs_note), cron and local time (jobs_cron), the scheduler, records, delivery and commands (jobs), running pi --mode json (jobs_run)
 ui_jobs.odin   the Jobs tab: rows, row buttons and "…" menu, limits, the notes-folder prompt
-changes.odin   the Changes tab's model: a checkout's uncommitted files and branch commits (git on a worker, debounced), diffs, stage/unstage/discard/commit, changes_* commands; ui_changes.odin its bars, list, "±" button
+core/changes.odin the Changes tab's model: a checkout's uncommitted files and branch commits (git on a worker, debounced), diffs, stage/unstage/discard/commit, changes_* commands; ui_changes.odin its bars, list, "±" button
 ui_files.odin  the Files and Settings tabs: Sessions | Files | Settings | Jobs switch, header buttons, filter, virtualised tree, row menu, drag to a terminal
 native/editor_macos.m  macOS: FSEvents watcher, Trash, Finder reveal
 ui.odin        Clay layout (sidebar, top bar = title bar, confirmation bar, terminal pane, right panel, palette overlay) + drawing, hover/fade motion
 theme.odin     design tokens (spacing, type, radii, sizes, motion) and the three looks (graphite, warm, ghostty), dark and light; appearance (system/light/dark); the terminal's own colours are in term_palette.odin
 font.odin      text: font sets (UI, UI small, mono), shaped-run + glyph caches, growing atlas, sokol_gl quads
 text_*.odin    text backends: CoreText (macOS, src/native/text_coretext.c), stb_truetype (others); box-drawing sprites
-sessions.odin  projects + sessions from ~/.pi/agent/sessions (header cwd); the Chats entry (<data dir>/chats)
-titles.odin    session titles by pi's rule: files streamed once, cached by offset (a worker for big ones), saved as <data dir>/session-titles.tsv
-term.odin      one terminal, the core's side: PTY + reader thread + libghostty-vt, its size (term_resize: cols, rows, cell px)
+core/sessions.odin projects + sessions from ~/.pi/agent/sessions (header cwd); the Chats entry (<data dir>/chats)
+core/titles.odin session titles by pi's rule: files streamed once, cached by offset (a worker for big ones), saved as <data dir>/session-titles.tsv
+core/term.odin one terminal, the core's side: PTY + reader thread + libghostty-vt, its size (term_resize: cols, rows, cell px)
 term_view.odin the window's side of a terminal: drawing, selection, input encoding; sizes the grid from the pane and font
-term_palette.odin the terminal's default colours per look and appearance (answers colour queries)
-pty.odin       PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
+core/term_palette.odin the terminal's default colours per look and appearance (answers colour queries)
+core/pty.odin  PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
 ghostty/       Odin bindings for the libghostty-vt calls used
-snapshot.odin  terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
+core/snapshot.odin terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
 holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
 corewire/      the window/core framed wire (§5.1 of docs/plans/background-core.md) and the in-memory
                transport (its own package; golden vectors in tests/framed-wire/v1/)
@@ -426,12 +438,12 @@ jsonguard/     the check in front of every json.parse/unmarshal of input Deckhan
                The CLI (tools/deckhand-cli) uses it too; json_guard_test.odin fails on a parse
                anywhere in src/ or tools/ that skips it
 autotest.odin  DECKHAND_SCRIPT test mode
-*_test.odin    command-layer tests (tests/unit.py: one thread per process, processes in parallel)
+core/*_test.odin command-layer tests (tests/unit.py: one thread per process, processes in parallel)
 ```
 
 Atlas's prompt is `ATLAS.md` in the main folder's `atlas/` (setting `home_dir`, chosen in the
 first-run sheet). It is copied there from the data dir once, and the data dir's copy stays as the
-fallback. Each subfolder of the main folder may be overridden (`src/folders.odin`, the Settings
+fallback. Each subfolder of the main folder may be overridden (`src/core/folders.odin`, the Settings
 tab's Folders group). The drawer's Model button opens pi's model selector and saves the choice as
 the setting `agent_model`.
 
@@ -616,7 +628,7 @@ restarts, jobs) runs a stand-in or refuses:
   (`tests/scripts/fake-install.sh`). Without it the run prints "Deckhand test mode: no
   DECKHAND_INSTALL_CMD; refusing to run the real install" and exits 127. There is no opt-in.
 
-**Which harnesses a scene has** (`src/harness.odin`): Deckhand looks for pi and Claude Code by stat,
+**Which harnesses a scene has** (`src/core/harness.odin`): Deckhand looks for pi and Claude Code by stat,
 never running them, and what it finds decides the UI (the **New session** picker, Atlas's
 button). In test mode that look never uses PATH (unless `DECKHAND_REAL_PI=1`), only the install
 folders under the scene's fake HOME, so the developer's own pi and claude never change a scene:
@@ -667,7 +679,7 @@ app is up. It also checks the default scale.
 
 ### Launch environment
 
-`src/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
+`src/core/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
 launchd (pid 1: LaunchServices, so Dock, Finder, Spotlight, `open`) or whose `PATH` is launchd's
 bare one; `DECKHAND_GUI_LAUNCH=1` or `0` forces it (scenes; or to turn the import off), and test
 mode (`DECKHAND_SCRIPT`) is never a GUI launch without `DECKHAND_GUI_LAUNCH=1`. A GUI
@@ -703,16 +715,16 @@ kills a refresh's probe group (`login_env_kill_probe` in `cleanup`). Values are 
 logged. `PI_TAB_CMD` and `CLAUDE_TAB_CMD` fall back to pi's managed install
 (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`) and Claude's (`~/.local/bin`,
 `~/.claude/local`), absolute folders only (never one relative to the project); `pi_managed_path` does the same for jobs and the reload probe. Unit tests:
-`src/login_env_test.odin` (fake shells and a stub probe; never the user's shell).
+`src/core/login_env_test.odin` (fake shells and a stub probe; never the user's shell).
 
 Deckhand's own sh scripts (`PI_TAB_CMD`, `CLAUDE_TAB_CMD`, a stand-in command, the Changes tab's
 commit, the jobs' PATH and the reload probe) run as `$SHELL -l -c SCRIPT` for a POSIX login shell
 (zsh, bash, sh, dash, ksh and any shell Deckhand does not know), as always. For a known non-POSIX
-one (fish, nushell, xonsh, elvish, ysh, tcsh/csh, pwsh, `shell_is_posix` in `src/commands.odin`),
+one (fish, nushell, xonsh, elvish, ysh, tcsh/csh, pwsh, `shell_is_posix` in `src/core/commands.odin`),
 `/bin/sh -c SCRIPT` runs them instead, in the environment Deckhand took from the login shell
 (above) or the terminal it was started from. Shell tabs still open `$SHELL -l` itself.
 
-Whether pi is installed (`pi_installed`, `src/harness.odin`): a stat of the PATH new tabs get and
+Whether pi is installed (`pi_installed`, `src/core/harness.odin`): a stat of the PATH new tabs get and
 pi's managed install, else the login shell's own `command -v pi` (that script, as above, on a
 worker, at most 10 s, pi never run). A stat that finds nothing is never the last word: until the
 shell answered, pi counts as there, so a pi only a `.zprofile` adds (nvm, fnm, mise, pnpm) is not

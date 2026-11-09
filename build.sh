@@ -3,7 +3,8 @@
 #   ./build.sh          release build -> build/deckhand
 #   ./build.sh debug    debug build
 #   ./build.sh run      release build, then run
-#   ./build.sh test     binding tests (tests/) and command-layer tests (src/*_test.odin),
+#   ./build.sh test     binding tests (tests/), command-layer tests (src/core/*_test.odin) and the
+#                       window's (src/*_test.odin), the core boundary (scripts/check-core-boundary.sh),
 #                       the holder's, wires' and trust rules' tests (src/holder, src/holderwire, src/corewire,
 #                       src/trust),
 #                       and the fake app for app tabs (build/fake-app, tests/fake-app/)
@@ -15,7 +16,7 @@
 # for older scripts). DECKHAND_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
 # DECKHAND_RELEASE=1 (scripts/release.sh): the release or debug build without the test hooks
-# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no DECKHAND_* overrides,
+# (-define:DECKHAND_TEST_HOOKS=false, src/core/test_hooks.odin): no test mode, no DECKHAND_* overrides,
 # no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
@@ -164,7 +165,7 @@ fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
-  # a release shim has no DECKHAND_CEF_SPARE or DECKHAND_CEF_NETLOG (src/test_hooks.odin);
+  # a release shim has no DECKHAND_CEF_SPARE or DECKHAND_CEF_NETLOG (src/core/test_hooks.odin);
   # build/dh_cef.mode says which one build/dh_cef.a is
   CEF_MODE=dev CEF_SHIM_FLAGS=$CEF_CFLAGS
   if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DDH_RELEASE=1"; fi
@@ -206,7 +207,7 @@ check_link_minos() { # odin build args (package and defines)
   if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
-# Claude Code tabs (src/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
+# Claude Code tabs (src/core/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
 # (and its alias bin/pi-desk) runs (tools/deckhand-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {
@@ -215,7 +216,7 @@ build_claude() {
   cp -R integrations/claude-code build/claude-code
   build_pi
 }
-# pi tabs (src/pi_integration.odin, docs/HARNESSES.md): Deckhand's pi integration, loaded per tab
+# pi tabs (src/core/pi_integration.odin, docs/HARNESSES.md): Deckhand's pi integration, loaded per tab
 # with `pi -e`, next to the binary (build/pi; bundle-app.sh copies it into the app). Its tests stay
 # behind: only what pi loads ships.
 build_pi() {
@@ -285,7 +286,12 @@ case "$MODE" in
     # processes (build/deckhand-core-hooks: 5 re-execs under load, refusals, the keeper adopting)
     build_core_hooks
     odin test src/holder -out:build/holder-tests
-    # command layer (src/*_test.odin); tests share the global State: one thread per process,
+    # the core and the holder link no window code (docs/plans/background-core.md §10.2): the check,
+    # then its test (each forbidden import planted in a temporary tree)
+    scripts/check-core-boundary.sh
+    sh tests/check-core-boundary-test.sh
+    # the core (src/core/*_test.odin, package core: no sokol, Clay or CEF) and the window
+    # (src/*_test.odin); tests share the global State: one thread per process,
     # several processes at once (tests/unit.py; UNIT_JOBS=1 for one at a time)
     python3 tests/unit.py
     # the scenes runner's --changed selection (no app, no git)

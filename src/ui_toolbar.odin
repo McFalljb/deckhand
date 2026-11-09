@@ -19,6 +19,7 @@ package main
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -38,7 +39,7 @@ Button :: enum {
 Button_Info :: struct {
 	element: string, // Clay element id
 	action:  string, // ACTIONS id: what a click runs, the tooltip, enabled or not ("" = a menu)
-	icon:    Icon,
+	icon:    core.Icon,
 }
 
 BUTTONS := [Button]Button_Info {
@@ -70,11 +71,11 @@ button_click :: proc(b: Button) {
 			menu_open(Menu_New{}, {bb.x, bb.y + bb.height + px(SP_1)})
 		}
 	case .Settings:
-		ui_do(Set_Focus{state.focus_widget == "settings" ? "" : "settings"})
+		ui_do(core.Set_Focus{state.focus_widget == "settings" ? "" : "settings"})
 	case .Bell:
-		ui_do(Set_Focus{bell_open() ? "" : "notifications"})
+		ui_do(core.Set_Focus{bell_open() ? "" : "notifications"})
 	case .New_Chat, .Empty_New_Chat: // the harness picker under the button (harness.odin)
-		c := chats_project()
+		c := core.chats_project()
 		d := clay.GetElementData(clay.ID(BUTTONS[b].element))
 		if c == nil || !d.found || job_sheet_open() {
 			action_run(BUTTONS[b].action)
@@ -91,10 +92,10 @@ button_click :: proc(b: Button) {
 // closes its whole session, which always asks first (repeated ⌘W on shell
 // tabs must never close a session silently once the pi tab is current).
 close_tab_click :: proc(tab_id: u64) {
-	s, _, i := find_tab(tab_id)
+	s, _, i := core.find_tab(tab_id)
 	if s == nil do return
-	if i == 0 do ui_do(Close_Session{session = s.id, ask = true})
-	else do ui_do(Close_Tab{tab_id = tab_id})
+	if i == 0 do ui_do(core.Close_Session{session = s.id, ask = true})
+	else do ui_do(core.Close_Tab{tab_id = tab_id})
 }
 
 // A square icon button (the chevron is narrow).
@@ -140,7 +141,7 @@ search_pill :: proc(wide: bool) {
 		layout = {sizing = {clay.SizingFixed(px(SEARCH_W)), clay.SizingFixed(px(TOOL_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(mix(th.bg_app, th.text, TINT_BUTTON + h * (TINT_BUTTON_HOVER - TINT_BUTTON))),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 	}) {
 		col := mix(th.text_muted, th.text_secondary, h)
 		icon(.Search, col, ICON_SIZE_SM)
@@ -164,7 +165,7 @@ lights_buttons :: proc(lead: f32, trail: f32 = 0) {
 
 // Room in the top bar for the wide search pill (the tabs' width estimated
 // from their titles).
-search_wide :: proc(cs: ^Open_Session, bar_w: f32) -> bool {
+search_wide :: proc(cs: ^core.Open_Session, bar_w: f32) -> bool {
 	used := top_bar_fixed_w()
 	if cs != nil && len(cs.panes) <= 1 { // split: the tabs are in the panes' strips
 		max_tab, squeezed := tab_max_w(cs, bar_w - top_bar_fixed_w())
@@ -288,7 +289,7 @@ settings_open :: proc() -> bool {return state.focus_widget == "settings"}
 pop_item_shown :: proc(it: Pop_Item) -> bool {
 	#partial switch it {
 	case .Reload_Pi, .Restart_Claude: return action_ok(POP_ACTIONS[it])
-	case .Agent_Model: return atlas_offered()
+	case .Agent_Model: return core.atlas_offered()
 	}
 	return true
 }
@@ -303,7 +304,7 @@ popover: struct {
 pop_run :: proc(it: Pop_Item) {
 	#partial switch it {
 	case .Chats_Folder, .Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Setup:
-		ui_do(Set_Focus{""})
+		ui_do(core.Set_Focus{""})
 	}
 	if !action_ok(POP_ACTIONS[it]) do return // not now (no other folder to go back from)
 	action_run(POP_ACTIONS[it])
@@ -334,7 +335,7 @@ pop_label :: proc(text: string) {
 @(private = "file")
 pop_sep :: proc() {
 	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(MENU_SEP_H))}, childAlignment = {y = .Center}}}) {
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}}, backgroundColor = cc(theme().border)}) {}
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(theme().border)}) {}
 	}
 }
 
@@ -410,7 +411,7 @@ settings_layout :: proc(w, h: f32) {
 		layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(PAD_OVERLAY)), childGap = pu(2)},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 8},
 	}) {
 		overlay_shadow("settings_shadow", 8)
@@ -423,7 +424,7 @@ settings_layout :: proc(w, h: f32) {
 				backgroundColor = cc(th.bg_field),
 				cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 			}) {
-				modes := [3]Appearance{.System, .Light, .Dark}
+				modes := [3]core.Appearance{.System, .Light, .Dark}
 				for i in 0 ..< 3 {
 					it := Pop_Item(int(Pop_Item.Appearance_System) + i)
 					on := state.settings.appearance == modes[i]
@@ -444,8 +445,8 @@ settings_layout :: proc(w, h: f32) {
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 			pop_label("Look")
 			spacer()
-			light := theme_is_light()
-			for look in Theme_Id {
+			light := core.theme_is_light()
+			for look in core.Theme_Id {
 				it := Pop_Item(int(Pop_Item.Look_Graphite) + int(look))
 				lt := light ? &THEMES_LIGHT[look] : &THEMES[look]
 				on := state.settings.theme == look
@@ -503,7 +504,7 @@ settings_layout :: proc(w, h: f32) {
 			pop_label("Notify me about")
 		}
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
-			for g in Bell_Group {
+			for g in core.Bell_Group {
 				it := Pop_Item(int(Pop_Item.Bell_Finished) + int(g))
 				on := g not_in state.settings.bell_off
 				id := pop_id(it)
@@ -513,7 +514,7 @@ settings_layout :: proc(w, h: f32) {
 					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(CHIP_SMALL_H))}, padding = {pu(SP_1 + 2), pu(SP_1 + 2), 0, 0}, childAlignment = {y = .Center}},
 					backgroundColor = bg,
 					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-					border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+					border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 				}) {
 					clay.TextDynamic(label_tail(POP_ACTIONS[it]), txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
 				}
@@ -534,7 +535,7 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Control_Token, nil)
 		pop_row(.Setup, nil)
 		pop_row(.Tidy_Projects, !state.settings.tidy_off)
-		pop_row(.Update_Checks, !upd.checks_off)
+		pop_row(.Update_Checks, !core.upd.checks_off)
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
 	}
 }
@@ -552,12 +553,12 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 	case .KEY_DOWN:
 		app.redraw = true
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			ui_do(Set_Focus{""}) // a shortcut (⌘N, ⌘Q, ...) closes it and runs as usual
+			ui_do(core.Set_Focus{""}) // a shortcut (⌘N, ⌘Q, ...) closes it and runs as usual
 			return false
 		}
 		n := len(Pop_Item)
 		#partial switch e.key_code {
-		case .ESCAPE:                   ui_do(Set_Focus{""})
+		case .ESCAPE:                   ui_do(core.Set_Focus{""})
 		case .UP, .LEFT, .DOWN, .RIGHT, .TAB:
 			order := POP_ORDER
 			at := -1
@@ -578,7 +579,7 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 	case .MOUSE_DOWN:
 		h := chrome_hit({e.mouse_x, e.mouse_y})
 		if it, ok := h.(Hit_Pop); ok do pop_run(Pop_Item(it))
-		else do ui_do(Set_Focus{""}) // outside (or the settings button again): closes
+		else do ui_do(core.Set_Focus{""}) // outside (or the settings button again): closes
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_SCROLL, .MOUSE_UP:
@@ -635,7 +636,7 @@ shortcuts_layout :: proc(w, h: f32) {
 			layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFit({max = h - px(SHEET_TOP + SP_4)})}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(SP_3)), childGap = pu(SP_1)},
 			backgroundColor = cc(th.bg_elevated),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-			border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		}) {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_1), 0, 0, 0}, childAlignment = {y = .Center}}}) {
 				clay.TextDynamic(action_by_id("shortcuts").label, txt(th.text, WEIGHT_BOLD))
@@ -650,7 +651,7 @@ shortcuts_layout :: proc(w, h: f32) {
 					icon(.Close, mix(th.text_muted, th.text, em), ICON_SIZE_SM)
 				}
 			}
-			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}}, backgroundColor = cc(th.border)}) {}
+			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 			if clay.UI(clay.ID("sheet_rows"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 				clip = {vertical = true, childOffset = clay.GetScrollOffset()},
@@ -690,17 +691,17 @@ shortcuts_event :: proc(e: ^sapp.Event) -> bool {
 	#partial switch e.type {
 	case .KEY_DOWN:
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			ui_do(Set_Focus{""}) // a shortcut closes the sheet and runs as usual
+			ui_do(core.Set_Focus{""}) // a shortcut closes the sheet and runs as usual
 			return false
 		}
-		if e.key_code == .ESCAPE || e.key_code == .ENTER do ui_do(Set_Focus{""})
+		if e.key_code == .ESCAPE || e.key_code == .ENTER do ui_do(core.Set_Focus{""})
 		return true
 	case .MOUSE_MOVE:
 		set_hover(chrome_hit({e.mouse_x, e.mouse_y}), false)
 		return true
 	case .MOUSE_DOWN:
 		_, close := chrome_hit({e.mouse_x, e.mouse_y}).(Hit_Sheet_Close)
-		if close || !inside(clay.ID("sheet_box"), e.mouse_x, e.mouse_y) do ui_do(Set_Focus{""})
+		if close || !inside(clay.ID("sheet_box"), e.mouse_x, e.mouse_y) do ui_do(core.Set_Focus{""})
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
@@ -764,15 +765,15 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 	case Hit_Home: // the agent's button (far right)
 		return act("toggle_agent")
 	case Hit_Close_Tab:
-		if _, _, i := find_tab(u64(x)); i == 0 do return act("close_session") // the pi tab closes its session
+		if _, _, i := core.find_tab(u64(x)); i == 0 do return act("close_session") // the pi tab closes its session
 		return act("close_tab")
 	case Hit_Pin_Project:
-		p := find_project(u64(x))
-		return p != nil && project_pinned(p^) >= 0 ? "Unpin" : "Pin", ""
+		p := core.find_project(u64(x))
+		return p != nil && core.project_pinned(p^) >= 0 ? "Unpin" : "Pin", ""
 	case Hit_Pin_Session:
-		return session_pinned(string(x)) >= 0 ? "Unpin" : "Pin", ""
+		return core.session_pinned(string(x)) >= 0 ? "Unpin" : "Pin", ""
 	case Hit_New_In:
-		if c := chats_project(); c != nil && c.id == u64(x) do return act("new_chat")
+		if c := core.chats_project(); c != nil && c.id == u64(x) do return act("new_chat")
 		return "New session in this project", ""
 	case Hit_Add_Project:
 		return act("add_project")
@@ -781,11 +782,11 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 	case Hit_More_Project, Hit_More_Session, Hit_More_Open:
 		return "More actions", ""
 	case Hit_Info_Session:
-		return fmt.tprintf("Session info: copy it, or send it to %s", agent_name()), ""
+		return fmt.tprintf("Session info: copy it, or send it to %s", core.agent_name()), ""
 	case Hit_New_Job_In:
 		return "New job for this project: a form that writes the job's note", ""
 	case Hit_Sort:
-		return strings.concatenate({"Sorted by ", strings.to_lower(SORT_LABELS[state.sidebar.sort[Sort_Section(x)]], context.temp_allocator), " (sort, show hidden)"}, context.temp_allocator), ""
+		return strings.concatenate({"Sorted by ", strings.to_lower(SORT_LABELS[state.sidebar.sort[core.Sort_Section(x)]], context.temp_allocator), " (sort, show hidden)"}, context.temp_allocator), ""
 	case Hit_Filter:
 		return act("filter")
 	case Hit_Filter_Clear:
@@ -800,8 +801,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		if Pop_Item(x) >= .Look_Graphite && Pop_Item(x) <= .Look_Ghostty do return act(POP_ACTIONS[Pop_Item(x)])
 		if Pop_Item(x) >= .Text_Small && Pop_Item(x) <= .Text_Large do return act(POP_ACTIONS[Pop_Item(x)])
 		if Pop_Item(x) >= .Bell_Finished && Pop_Item(x) <= .Bell_Jobs {
-			g := Bell_Group(int(x) - int(Pop_Item.Bell_Finished))
-			what := [Bell_Group]string{.Finished = "Finished runs", .Waiting = "Questions and dialogs", .Errors = "Errors and exits", .Jobs = "Jobs"}
+			g := core.Bell_Group(int(x) - int(Pop_Item.Bell_Finished))
+			what := [core.Bell_Group]string{.Finished = "Finished runs", .Waiting = "Questions and dialogs", .Errors = "Errors and exits", .Jobs = "Jobs"}
 			return fmt.tprintf("%s: %s (click to turn %s)", what[g], g in state.settings.bell_off ? "off" : "on", g in state.settings.bell_off ? "on" : "off"), ""
 		}
 	case Hit_Bell:
@@ -824,18 +825,18 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return dead_tab_tip_for(x)
 	case Hit_Tab:
 		// a dead pi tab: how it ended; else its status dot's source and age (agent_status.odin)
-		_, tab, _ := find_tab(u64(x))
+		_, tab, _ := core.find_tab(u64(x))
 		if tip := dead_tab_hover_tip(tab); tip != "" do return tip, ""
 		if tab != nil {
 			// a Claude tab: its model too (claude_rows.odin)
-			st, model := status_explain(tab^), claude_tab_tip(tab^)
+			st, model := core.status_explain(tab^), core.claude_tab_tip(tab^)
 			if st != "" && model != "" do return fmt.tprintf("%s — %s", model, st), ""
 			return model != "" ? model : st, ""
 		}
 	case Hit_Open_Row:
-		s := find_session(u64(x))
-		if tip := dead_tab_hover_tip(session_pi_tab(s)); tip != "" do return tip, ""
-		return session_explain(s), ""
+		s := core.find_session(u64(x))
+		if tip := dead_tab_hover_tip(core.session_pi_tab(s)); tip != "" do return tip, ""
+		return core.session_explain(s), ""
 	case Hit_Update:
 		return update_tip(x)
 	case Hit_Comments:
@@ -850,9 +851,9 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return tree_tip(h), ""
 	// a status dot's source and age (agent_status.odin); none without a dot
 	case Hit_Session:
-		if id := open_session_any(string(x)); id != 0 do return session_explain(find_session(id)), ""
+		if id := core.open_session_any(string(x)); id != 0 do return core.session_explain(core.find_session(id)), ""
 	case Hit_Chat:
-		if id := open_session_any(string(x)); id != 0 do return session_explain(find_session(id)), ""
+		if id := core.open_session_any(string(x)); id != 0 do return core.session_explain(core.find_session(id)), ""
 	}
 	return "", ""
 }
@@ -872,7 +873,7 @@ tooltip_layout :: proc(w, h: f32) {
 		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 30},
 	}) {
 		clay.TextDynamic(label, txt(th.text, FONT_UI_SMALL))

@@ -5,16 +5,17 @@ package main
 // in their own colours. No GPU: logo_render writes into a plain buffer.
 
 import "core:testing"
+import "core"
 
 @(test)
 harness_table_maps_every_harness :: proc(t: ^testing.T) {
-	seen: map[Icon]Harness
+	seen: map[core.Icon]core.Harness
 	defer delete(seen)
-	for m, h in HARNESSES {
+	for m, h in core.HARNESSES {
 		testing.expectf(t, m.name != "", "%v has a name", h)
 		testing.expectf(t, m.glyph != .None, "%v has a fallback glyph", h)
 		testing.expectf(t, icon_logo(m.glyph) == .None, "%v's glyph is a plain glyph", h)
-		ic := harness_icon(h)
+		ic := core.harness_icon(h)
 		testing.expectf(t, ic != .None, "%v has an icon", h)
 		if m.logo != .None {
 			testing.expect_value(t, ic, m.logo)
@@ -26,21 +27,21 @@ harness_table_maps_every_harness :: proc(t: ^testing.T) {
 		seen[ic] = h
 	}
 	// the two shipped today have their real logos (Claude's unless built without it)
-	testing.expect_value(t, harness_icon(.Pi), Icon.Logo_Pi)
-	testing.expect_value(t, harness_icon(.Claude), LOGO_CLAUDE_ON ? Icon.Logo_Claude : Icon.Harness_Claude)
+	testing.expect_value(t, core.harness_icon(.Pi), core.Icon.Logo_Pi)
+	testing.expect_value(t, core.harness_icon(.Claude), core.LOGO_CLAUDE_ON ? core.Icon.Logo_Claude : core.Icon.Harness_Claude)
 	testing.expect_value(t, icon_logo(.Logo_Pi), Logo.Pi)
 	testing.expect_value(t, icon_logo(.Logo_Claude), Logo.Claude)
 }
 
 @(test)
 harness_without_logo_falls_back_to_its_glyph :: proc(t: ^testing.T) {
-	testing.expect_value(t, harness_mark_icon({name = "new", glyph = .Harness_Pi}), Icon.Harness_Pi)
-	testing.expect_value(t, harness_mark_icon({name = "new", logo = .Logo_Claude, glyph = .Harness_Claude}), Icon.Logo_Claude)
-	for ic in Icon do if ic != .Logo_Pi && ic != .Logo_Claude do testing.expectf(t, icon_logo(ic) == .None, "%v is no logo", ic)
+	testing.expect_value(t, core.harness_mark_icon({name = "new", glyph = .Harness_Pi}), core.Icon.Harness_Pi)
+	testing.expect_value(t, core.harness_mark_icon({name = "new", logo = .Logo_Claude, glyph = .Harness_Claude}), core.Icon.Logo_Claude)
+	for ic in core.Icon do if ic != .Logo_Pi && ic != .Logo_Claude do testing.expectf(t, icon_logo(ic) == .None, "%v is no logo", ic)
 }
 
 @(private = "file")
-px_at :: proc(buf: []u8, n, x, y: int) -> Rgba {
+px_at :: proc(buf: []u8, n, x, y: int) -> core.Rgba {
 	p := buf[(y * n + x) * 4:][:4]
 	return {p[0], p[1], p[2], p[3]}
 }
@@ -61,14 +62,14 @@ logo_pi_is_crisp_cells_in_its_colours :: proc(t: ^testing.T) {
 			testing.expectf(t, false, "n=%d: px %d has alpha %d", n, i, a)
 			break
 		}
-		at :: proc(buf: []u8, n: int, origin: [2]int, cell, cx, cy: int) -> Rgba {
+		at :: proc(buf: []u8, n: int, origin: [2]int, cell, cx, cy: int) -> core.Rgba {
 			return px_at(buf, n, origin.x + cx * cell + cell / 2, origin.y + cy * cell + cell / 2)
 		}
-		testing.expect_value(t, at(buf, side, origin, cell, 0, 0), Rgba{0xF0, 0x90, 0x82, 255}) // pink, top left
-		testing.expect_value(t, at(buf, side, origin, cell, 2, 1), Rgba{0xF0, 0x90, 0x82, 255})
-		testing.expect_value(t, at(buf, side, origin, cell, 0, 3), Rgba{0x4D, 0x9A, 0xBF, 255}) // blue, the left leg
-		testing.expect_value(t, at(buf, side, origin, cell, 1, 2), Rgba{0x4D, 0x9A, 0xBF, 255})
-		testing.expect_value(t, at(buf, side, origin, cell, 3, 3), Rgba{0xF1, 0xBE, 0x58, 255}) // gold, bottom right
+		testing.expect_value(t, at(buf, side, origin, cell, 0, 0), core.Rgba{0xF0, 0x90, 0x82, 255}) // pink, top left
+		testing.expect_value(t, at(buf, side, origin, cell, 2, 1), core.Rgba{0xF0, 0x90, 0x82, 255})
+		testing.expect_value(t, at(buf, side, origin, cell, 0, 3), core.Rgba{0x4D, 0x9A, 0xBF, 255}) // blue, the left leg
+		testing.expect_value(t, at(buf, side, origin, cell, 1, 2), core.Rgba{0x4D, 0x9A, 0xBF, 255})
+		testing.expect_value(t, at(buf, side, origin, cell, 3, 3), core.Rgba{0xF1, 0xBE, 0x58, 255}) // gold, bottom right
 		testing.expect_value(t, at(buf, side, origin, cell, 3, 0)[3], 0) // empty cells
 		testing.expect_value(t, at(buf, side, origin, cell, 1, 1)[3], 0)
 		testing.expect_value(t, at(buf, side, origin, cell, 2, 3)[3], 0)
@@ -96,8 +97,8 @@ CLAWD_EXPECTED := [?]string {
 
 @(test)
 logo_claude_is_clawd_in_crisp_cells :: proc(t: ^testing.T) {
-	body := Rgba{0xD7, 0x77, 0x57, 255} // Claude Code's clawd_body, rgb(215,119,87)
-	eye := Rgba{0, 0, 0, 255} // its clawd_background, rgb(0,0,0)
+	body := core.Rgba{0xD7, 0x77, 0x57, 255} // Claude Code's clawd_body, rgb(215,119,87)
+	eye := core.Rgba{0, 0, 0, 255} // its clawd_background, rgb(0,0,0)
 	// 1x and 2x row (14, 28), 1x and 2x picker (16, 32): one px per cell at 1x, two at 2x
 	for c in ([][2]int{{14, 1}, {16, 1}, {28, 2}, {32, 2}}) {
 		n, want_cell := c[0], c[1]
@@ -118,7 +119,7 @@ logo_claude_is_clawd_in_crisp_cells :: proc(t: ^testing.T) {
 		for y in 0 ..< side do for x in 0 ..< side {
 			got := px_at(buf, side, x, y)
 			cx, cy := x - origin.x, y - origin.y
-			want := Rgba{}
+			want := core.Rgba{}
 			if cx >= 0 && cy >= 0 && cx < w && cy < h {
 				switch CLAWD_EXPECTED[cy / cell][cx / cell] {
 				case '#': want = body
@@ -149,9 +150,9 @@ logo_render_refuses_nothing_to_draw :: proc(t: ^testing.T) {
 // brand mark would alter it.
 @(test)
 harness_row_icon_dims_to_the_glyph :: proc(t: ^testing.T) {
-	for m, h in HARNESSES {
-		testing.expect_value(t, harness_row_icon(h, false), harness_icon(h))
-		testing.expect_value(t, harness_row_icon(h, true), m.glyph)
-		testing.expectf(t, icon_logo(harness_row_icon(h, true)) == .None, "%v dimmed is no logo", h)
+	for m, h in core.HARNESSES {
+		testing.expect_value(t, core.harness_row_icon(h, false), core.harness_icon(h))
+		testing.expect_value(t, core.harness_row_icon(h, true), m.glyph)
+		testing.expectf(t, icon_logo(core.harness_row_icon(h, true)) == .None, "%v dimmed is no logo", h)
 	}
 }

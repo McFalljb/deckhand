@@ -27,6 +27,7 @@ import "base:runtime"
 import "core:c"
 import "core:crypto"
 import "core:encoding/json"
+import "core"
 import jg "jsonguard"
 import "core:fmt"
 import "core:math"
@@ -45,96 +46,6 @@ import sg "../vendor/sokol-odin/sokol/gfx"
 import sgl "../vendor/sokol-odin/sokol/gl"
 import stbi "vendor:stb/image"
 
-App_Status :: enum {
-	Starting,
-	Running,
-	Stalled, // no frame for APP_STALL_AFTER, but it answers tab.ping
-	Not_Responding, // no answer to tab.ping, or a Mach send timed out
-	Exited,
-}
-
-App_Tab :: struct {
-	argv:       []string, // owned
-	cwd:        string, // owned
-	app_status: App_Status,
-	exit_code:  int, // the last exit (-1 = none yet; 128+N for a signal)
-}
-
-// Commands (rows in command_table.odin).
-New_App_Tab :: struct {
-	session: u64, // 0 = the one on screen (a pi or Claude tab: its own)
-	name:    string, // an app the session's .deckhand/apps.json declares (a pi or Claude tab: only this), or
-	argv:    []string, // what to run (argv[0] on PATH), or
-	command: string, // a command line for /bin/sh -c
-	cwd:     string, // inside the session's folder ("" = it)
-	title:   string,
-}
-App_Restart :: struct {
-	tab_id: u64,
-}
-// Close an app tab: close_tab for an app tab, which a session's own agents may send too.
-App_Close :: struct {
-	tab_id:   u64,
-	confirm:  string, // the user's close rule may ask (close_needs_confirm)
-	comments: Comments_Choice, // pending comments made on it: send or drop (as close_tab)
-}
-// The apps a session's .deckhand/apps.json declares (what new_app_tab's name opens).
-App_Declared :: struct {
-	session: u64, // 0 = the caller's own (the user and scripts: the one on screen)
-}
-App_Input :: struct {
-	tab_id: u64,
-	events: []string, // JSON objects (TAB-PROTOCOL `input` without type/v), sent with "source":"agent"
-}
-App_Events :: struct {
-	tab_id: u64,
-	topic:  string, // "log" for tab.log events, ...
-	since:  u64, // events after this seq
-	limit:  int,
-}
-// Any method of the app's own (tab.describe lists them), passed through.
-App_Call :: struct {
-	tab_id:     u64,
-	method:     string, // the request's `type` on the app's line
-	params:     string, // a JSON object ("" = none): its fields go on the line as given
-	timeout_ms: int,
-}
-// The frame on show (the slot Deckhand holds), as a PNG under the data dir.
-App_Screenshot :: struct {
-	tab_id:   u64,
-	rect:     App_Rect, // the tab's logical px
-	has_rect: bool, // false: the whole frame
-}
-// Draw the app's boxes (tab.boxes) over the tab; hovering shows a box's label.
-App_Inspect :: struct {
-	tab_id: u64,
-	on:     bool,
-}
-App_Rect :: struct {
-	x, y, w, h: f32,
-}
-// One of the app's boxes (tab.boxes): logical tab px.
-App_Box :: struct {
-	id, label: string,
-	rect:      App_Rect,
-}
-// Internal: the app answered a request Deckhand sent it.
-App_Call_Done :: struct {
-	tab_id: u64,
-	wire:   string, // our request id on the app's connection
-	ok:     bool,
-	error:  string,
-	code:   string,
-	data:   string, // JSON
-	from_worker: bool, // a screenshot worker's, not the app's (only it may finish an "s…" wire)
-	file:   string, // the worker's PNG: deleted if its request is gone
-}
-// Internal: the app's status changed (the frame loop saw it).
-App_Update :: struct {
-	tab_id:    u64,
-	status:    App_Status,
-	exit_code: int,
-}
 
 APP_STALL_AFTER :: 2 * time.Second
 APP_PING_TIMEOUT :: 1 * time.Second
@@ -144,13 +55,8 @@ APP_QUIT_TERM :: 2 * time.Second // close: tab.quit, then SIGTERM
 APP_QUIT_KILL :: 5 * time.Second // then SIGKILL
 APP_RESTART_WINDOW :: 30 * time.Second // exit 75 restarts at most 3 times in this
 APP_LOG_LINES :: 2000
-APP_EVENTS_MAX :: 500
-APP_EVENT_TOPICS :: 32 // topics kept per tab
 APP_EXIT_RESTART :: 75
-APP_METHOD_MAX :: 64 // app_call's method: [A-Za-z][A-Za-z0-9_.:/-]*
 APP_PARAMS_MAX :: 256 * 1024 // app_call's params, as JSON text
-APP_BOXES_MAX :: 256 // tab.boxes kept per tab
-APP_BOX_LABEL_MAX :: 200 // bytes of a box's label (id: APP_METHOD_MAX)
 APP_SHOTS_KEPT :: 32 // screenshots kept per tab (older ones are deleted)
 APP_SHOT_TIMEOUT :: 30 * time.Second
 APP_SHOTS_IN_FLIGHT :: 4 // screenshots being encoded at once (each holds a frame copy)
@@ -203,7 +109,7 @@ App_Proc :: struct {
 // An app_screenshot of a hidden app tab, waiting for a frame newer than seq.
 Shot_Wait :: struct {
 	request_id: u64,
-	rect:       App_Rect,
+	rect:       core.App_Rect,
 	has_rect:   bool,
 	seq:        u64,
 	deadline:   time.Tick,
@@ -229,11 +135,11 @@ app_agent_running :: proc(session: u64) -> int {
 
 // Whether the caller is a pi tab started read-only (chat_env: a chat under Chats: read-only);
 // what it was started with, not today's setting.
-pi_chat_readonly :: proc(caller: Caller) -> bool {
+pi_chat_readonly :: proc(caller: core.Caller) -> bool {
 	if caller.kind != .Panel || caller.claude do return false
-	_, tab, _ := find_tab(caller.tab_id)
+	_, tab, _ := core.find_tab(caller.tab_id)
 	if tab == nil do return false
-	pt, is := tab.kind.(Pi_Tab)
+	pt, is := tab.kind.(core.Pi_Tab)
 	return is && pt.readonly
 }
 
@@ -301,81 +207,81 @@ app_of :: proc(tab_id: u64) -> ^App_Proc {return apps[tab_id] or_else nil}
 
 // The app of the tab on screen, or nil.
 tab_app :: proc() -> ^App_Proc {
-	if tab := active_tab(); tab != nil do return app_of(tab.id)
+	if tab := core.active_tab(); tab != nil do return app_of(tab.id)
 	return nil
 }
 
 @(private = "file")
-app_tab_of :: proc(id: u64) -> (^Open_Session, ^Tab, ^App_Tab) {
-	s, tab, _ := find_tab(id)
+app_tab_of :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^core.App_Tab) {
+	s, tab, _ := core.find_tab(id)
 	if tab == nil do return nil, nil, nil
-	at, is := &tab.kind.(App_Tab)
+	at, is := &tab.kind.(core.App_Tab)
 	if !is do return nil, nil, nil
 	return s, tab, at
 }
 
 // ---- commands ----
 
-app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
+app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r: core.Result, changed: bool) {
 	// a pi or Claude tab (panel) reaches only its own session's app tabs, as its browser tabs, and
 	// opens apps only there (new_app_tab, app_declared: app_session)
 	if caller.kind == .Panel {
 		tab_id: u64
 		#partial switch c in cmd {
-		case New_App_Tab, App_Declared:
-		case App_Restart:    tab_id = c.tab_id
-		case App_Close:      tab_id = c.tab_id
-		case App_Input:      tab_id = c.tab_id
-		case App_Events:     tab_id = c.tab_id
-		case App_Call:       tab_id = c.tab_id
-		case App_Screenshot: tab_id = c.tab_id
-		case:                return fail("not allowed for this caller"), false
+		case core.New_App_Tab, core.App_Declared:
+		case core.App_Restart:    tab_id = c.tab_id
+		case core.App_Close:      tab_id = c.tab_id
+		case core.App_Input:      tab_id = c.tab_id
+		case core.App_Events:     tab_id = c.tab_id
+		case core.App_Call:       tab_id = c.tab_id
+		case core.App_Screenshot: tab_id = c.tab_id
+		case:                return core.fail("not allowed for this caller"), false
 		}
 		if tab_id != 0 {
-			ts, _, _ := find_tab(tab_id)
-			own := caller_session(caller)
-			if ts == nil || own == nil || ts != own do return fail("a pi or Claude tab reaches only its own session's app tabs"), false
+			ts, _, _ := core.find_tab(tab_id)
+			own := core.caller_session(caller)
+			if ts == nil || own == nil || ts != own do return core.fail("a pi or Claude tab reaches only its own session's app tabs"), false
 		}
 		// a read-only chat's pi (Chats: read-only, as chat_env starts it) reads apps but runs none
 		#partial switch _ in cmd {
-		case New_App_Tab, App_Restart, App_Close:
-			if !caller.claude && pi_chat_readonly(caller) do return fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), false
+		case core.New_App_Tab, core.App_Restart, core.App_Close:
+			if !caller.claude && pi_chat_readonly(caller) do return core.fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), false
 		}
 	}
 	#partial switch c in cmd {
-	case New_App_Tab:
+	case core.New_App_Tab:
 		s, serr := app_session(caller, c.session)
-		if s == nil do return fail(serr), false
-		if s.home do return fail("Home has only its pi tab"), false
+		if s == nil do return core.fail(serr), false
+		if s.home do return core.fail("Home has only its pi tab"), false
 		agent := caller.kind == .Panel
 		by_agent := agent // behind the view, counted against APP_AGENT_MAX, its title cleaned
 		argv: []string
 		cwd_arg, title := c.cwd, c.title
 		if c.name != "" {
 			// what the project declares, as the palette's "New app tab…" runs it
-			if len(c.argv) > 0 || c.command != "" do return fail("name, or argv or command: not both"), false
-			if agent && c.cwd != "" do return fail("cwd comes from .deckhand/apps.json for a pi or Claude tab"), false
+			if len(c.argv) > 0 || c.command != "" do return core.fail("name, or argv or command: not both"), false
+			if agent && c.cwd != "" do return core.fail("cwd comes from .deckhand/apps.json for a pi or Claude tab"), false
 			e, found := app_entry(s.cwd, c.name)
-			if !found do return fail(app_not_declared(s.cwd, c.name)), false
+			if !found do return core.fail(app_not_declared(s.cwd, c.name)), false
 			argv = e.argv
 			if cwd_arg == "" do cwd_arg = e.cwd
 			if title == "" do title = e.name
 		} else if agent {
 			// a session's own agent runs only what its project declares (apps.json: the agent's own
 			// authority, as its shell; docs/ENGINE-BRIDGE.md, trust model)
-			return fail("a pi or Claude tab opens only the apps its project declares in .deckhand/apps.json, by name (app_declared lists them)"), false
+			return core.fail("a pi or Claude tab opens only the apps its project declares in .deckhand/apps.json, by name (app_declared lists them)"), false
 		} else if len(c.argv) > 0 do argv = c.argv
 		else if strings.trim_space(c.command) != "" do argv = []string{"/bin/sh", "-c", c.command}
-		else do return fail("argv or command is needed"), false
+		else do return core.fail("argv or command is needed"), false
 		cwd := s.cwd
 		if cwd_arg != "" {
 			p := cwd_arg
 			if !filepath.is_abs(p) do p, _ = filepath.join({s.cwd, p}, context.temp_allocator)
 			p, _ = filepath.clean(p, context.temp_allocator)
-			base := fs_real(s.cwd)
-			rp := fs_real(p)
-			if rp != base && !strings.has_prefix(rp, strings.concatenate({base, "/"}, context.temp_allocator)) do return fail("cwd must be inside the session's folder"), false
-			if !os.is_dir(rp) do return fail("cwd is not a folder"), false
+			base := core.fs_real(s.cwd)
+			rp := core.fs_real(p)
+			if rp != base && !strings.has_prefix(rp, strings.concatenate({base, "/"}, context.temp_allocator)) do return core.fail("cwd must be inside the session's folder"), false
+			if !os.is_dir(rp) do return core.fail("cwd is not a folder"), false
 			cwd = rp
 		}
 		if title == "" {
@@ -389,7 +295,7 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		}
 		if by_agent {
 			// the agent's text (its title, or an apps.json name it may have written) in the chrome
-			title = strings.trim_space(one_line(title, context.temp_allocator))
+			title = strings.trim_space(core.one_line(title, context.temp_allocator))
 			if n := strings.rune_count(title); n > APP_TITLE_MAX {
 				i, k := 0, 0
 				for _, j in title {
@@ -402,17 +308,17 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 				title = title[:i]
 			}
 			if title == "" do title = "app"
-			if running := app_agent_running(s.id); running >= APP_AGENT_MAX do return fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", running)), false
+			if running := app_agent_running(s.id); running >= APP_AGENT_MAX do return core.fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", running)), false
 		}
 		owned := make([]string, len(argv))
 		for a, i in argv do owned[i] = strings.clone(a)
-		tab := Tab{id = new_id(), kind = App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
-		pane_add_tab(s, tab, pane = open_pane(s, caller)) // an agent's: in its own tab's pane
+		tab := core.Tab{id = core.new_id(), kind = core.App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
+		core.pane_add_tab(s, tab, pane = core.open_pane(s, caller)) // an agent's: in its own tab's pane
 		if !by_agent {
 			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
 			// the user's, a script's and Home's come to the front
-			session_show_tab(s, tab.id)
-			focus_session(s.id, caller)
+			core.session_show_tab(s, tab.id)
+			core.focus_session(s.id, caller)
 		}
 		a := new(App_Proc)
 		a.tab_id = tab.id
@@ -430,14 +336,14 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 			return {ok = true, created_id = tab.id, data = `{"started":false}`}, true
 		}
 		return {ok = true, created_id = tab.id}, true
-	case App_Restart:
+	case core.App_Restart:
 		_, tab, at := app_tab_of(c.tab_id)
-		if tab == nil do return fail("no such app tab"), false
+		if tab == nil do return core.fail("no such app tab"), false
 		a := app_of(c.tab_id)
-		if a == nil do return fail("no such app tab"), false
+		if a == nil do return core.fail("no such app tab"), false
 		// an agent starting an exited app again: one more running against its session's cap
 		if caller.kind == .Panel && a.by_agent && a.pid == 0 && app_agent_running(a.session) >= APP_AGENT_MAX {
-			return fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", app_agent_running(a.session))), false
+			return core.fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", app_agent_running(a.session))), false
 		}
 		if a.pid != 0 {
 			// a hung app: its group goes first; its ring with it (the last frame stays)
@@ -450,74 +356,74 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		at.app_status = ok ? .Starting : .Exited
 		tab.status = ok ? .Running : .Exited
 		return {ok = ok, error = ok ? "" : "could not start the app"}, true
-	case App_Close:
+	case core.App_Close:
 		// close_tab's close (its confirmation rule, comments, tab.quit then SIGTERM), for app tabs only
-		if _, tab, _ := app_tab_of(c.tab_id); tab == nil do return fail("no such app tab"), false
-		return close_tab_apply(Close_Tab{tab_id = c.tab_id, confirm = c.confirm, comments = c.comments}, caller, request_id)
-	case App_Declared:
+		if _, tab, _ := app_tab_of(c.tab_id); tab == nil do return core.fail("no such app tab"), false
+		return core.close_tab_apply(core.Close_Tab{tab_id = c.tab_id, confirm = c.confirm, comments = c.comments}, caller, request_id)
+	case core.App_Declared:
 		s, serr := app_session(caller, c.session)
-		if s == nil do return fail(serr), false
+		if s == nil do return core.fail(serr), false
 		b := strings.builder_make(context.temp_allocator)
 		fmt.sbprintf(&b, `{{"session":%d,"apps":[`, s.id)
 		for e, i in app_entries(s.cwd) {
 			if i > 0 do strings.write_byte(&b, ',')
 			strings.write_string(&b, `{"name":`)
-			json_quote(&b, e.name)
+			core.json_quote(&b, e.name)
 			strings.write_string(&b, `,"argv":[`)
 			for x, j in e.argv {
 				if j > 0 do strings.write_byte(&b, ',')
-				json_quote(&b, x)
+				core.json_quote(&b, x)
 			}
 			strings.write_byte(&b, ']')
 			if e.cwd != "" {
 				strings.write_string(&b, `,"cwd":`)
-				json_quote(&b, e.cwd)
+				core.json_quote(&b, e.cwd)
 			}
 			strings.write_byte(&b, '}')
 		}
 		strings.write_string(&b, "]}")
 		return {ok = true, data = strings.to_string(b)}, false
-	case App_Input:
+	case core.App_Input:
 		_, tab, _ := app_tab_of(c.tab_id)
-		if tab == nil do return fail("no such app tab"), false
+		if tab == nil do return core.fail("no such app tab"), false
 		a := app_of(c.tab_id)
 		n := 0
-		for ev in c.events do if e := app_input_event_check(ev); e != "" do return fail(e), false
+		for ev in c.events do if e := app_input_event_check(ev); e != "" do return core.fail(e), false
 		for ev in c.events {
 			// {"event":…} -> {"v":1,"type":"input","source":"agent",…}
 			body := strings.trim_space(ev)[1:]
 			line := fmt.tprintf(`{{"v":1,"type":"input","source":"agent",%s`, body)
 			if strings.trim_space(body) == "}" do line = `{"v":1,"type":"input","source":"agent"}`
-			if a != nil && socket_app_send(c.tab_id, line) {
+			if a != nil && core.socket_app_send(c.tab_id, line) {
 				a.inputs += 1
 				n += 1
 			}
 		}
-		if n < len(c.events) do return fail("the app is not connected"), false
+		if n < len(c.events) do return core.fail("the app is not connected"), false
 		return {ok = true, data = fmt.tprintf(`{{"sent":%d}}`, n)}, false
-	case App_Events:
+	case core.App_Events:
 		_, tab, _ := app_tab_of(c.tab_id)
-		if tab == nil do return fail("no such app tab"), false
-		return {ok = true, data = app_events_json(c.tab_id, c.topic, c.since, c.limit)}, false
-	case App_Call:
+		if tab == nil do return core.fail("no such app tab"), false
+		return {ok = true, data = core.app_events_json(c.tab_id, c.topic, c.since, c.limit)}, false
+	case core.App_Call:
 		_, tab, _ := app_tab_of(c.tab_id)
-		if tab == nil do return fail("no such app tab"), false
+		if tab == nil do return core.fail("no such app tab"), false
 		if e, code := app_call_check(c.method, c.params); e != "" do return {error = e, data = fmt.tprintf(`{{"code":%q}}`, code)}, false
 		timeout := c.timeout_ms > 0 ? time.Duration(c.timeout_ms) * time.Millisecond : APP_CALL_TIMEOUT
 		if !app_request(c.tab_id, request_id, c.method, c.params, timeout) do return {error = "the app is not connected", data = `{"code":"tab_gone"}`}, false
 		return {ok = true, pending = true}, false
-	case App_Screenshot:
+	case core.App_Screenshot:
 		return app_screenshot(c, request_id), false
-	case App_Inspect:
+	case core.App_Inspect:
 		_, tab, _ := app_tab_of(c.tab_id)
 		a := app_of(c.tab_id)
-		if tab == nil || a == nil do return fail("no such app tab"), false
+		if tab == nil || a == nil do return core.fail("no such app tab"), false
 		if a.inspect == c.on do return {ok = true}, false
 		a.inspect = c.on
 		a.hover = -1
 		app.redraw = true
 		return {ok = true}, true
-	case App_Call_Done:
+	case core.App_Call_Done:
 		p, has := pending[c.wire]
 		// timed out already, or not ours: only the asked tab's reply counts, an
 		// app's only for an app call, a screenshot worker's only for its screenshot
@@ -530,15 +436,15 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		defer delete(p.type)
 		if p.request_id != 0 {
 			// the app's reply as sent (app_result_of: an error's data holds its code)
-			res := Result{ok = c.ok, error = c.error, data = c.data}
+			res := core.Result{ok = c.ok, error = c.error, data = c.data}
 			if !c.ok && c.code != "" && (c.data == "" || c.data == "{}") {
 				b := strings.builder_make(context.temp_allocator)
 				strings.write_string(&b, `{"code":`)
-				json_quote(&b, c.code)
+				core.json_quote(&b, c.code)
 				strings.write_byte(&b, '}')
 				res.data = strings.to_string(b)
 			}
-			emit_event(Finished_Event{request_id = p.request_id, result = res})
+			core.emit_event(core.Finished_Event{request_id = p.request_id, result = res})
 			return {ok = true}, false
 		}
 		// Deckhand's own: a stall's ping answered
@@ -548,7 +454,7 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 			a.ping_wire = ""
 		}
 		return {ok = true}, false
-	case App_Update:
+	case core.App_Update:
 		_, tab, at := app_tab_of(c.tab_id)
 		if tab == nil do return {ok = true}, false
 		if at.app_status == c.status && (c.status != .Exited || at.exit_code == c.exit_code) do return {ok = true}, false
@@ -559,7 +465,7 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 		} else do tab.status = .Running
 		return {ok = true}, true
 	}
-	return fail("not an app command"), false
+	return core.fail("not an app command"), false
 }
 
 // Whether app_call may pass this on: only the envelope is checked (the
@@ -568,7 +474,7 @@ app_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, 
 // tab.visible: lifecycle and visibility are Deckhand's) and the envelope's
 // message types (an `input` would skip app_input's "source":"agent").
 app_call_check :: proc(method, params: string) -> (error, code: string) {
-	if method == "" || len(method) > APP_METHOD_MAX do return fmt.tprintf("method must be 1 to %d characters", APP_METHOD_MAX), "bad_args"
+	if method == "" || len(method) > core.APP_METHOD_MAX do return fmt.tprintf("method must be 1 to %d characters", core.APP_METHOD_MAX), "bad_args"
 	for ch, i in transmute([]u8)method {
 		letter := ch >= 'a' && ch <= 'z' || ch >= 'A' && ch <= 'Z'
 		if i == 0 && !letter do return "method must start with a letter", "bad_args"
@@ -579,7 +485,7 @@ app_call_check :: proc(method, params: string) -> (error, code: string) {
 	// sent verbatim: a raw CR or LF would end the app's line early (see app_line_ok)
 	if strings.contains_any(params, "\r\n") do return "params cannot contain a raw line break (CR or LF)", "bad_args"
 	if strings.trim_space(params) != "" {
-		members, ok := json_members_raw(params)
+		members, ok := core.json_members_raw(params)
 		if !ok do return "params must be a JSON object", "bad_args"
 		for m in members {
 			if m.key == "id" || m.key == "v" || m.key == "type" do return fmt.tprintf("params cannot set %q (the envelope's)", m.key), "bad_args"
@@ -605,7 +511,7 @@ app_input_event_check :: proc(ev: string) -> string {
 app_call_line :: proc(wire, method, params: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"id":"%s","v":1,"type":`, wire)
-	json_quote(&b, method)
+	core.json_quote(&b, method)
 	p := strings.trim_space(params)
 	if len(p) >= 2 {
 		body := strings.trim_space(p[1:len(p) - 1])
@@ -624,7 +530,7 @@ app_call_line :: proc(wire, method, params: string) -> string {
 app_request :: proc(tab_id, request_id: u64, method, params: string, timeout: time.Duration) -> bool {
 	next_wire += 1
 	wire := fmt.tprintf("a%d", next_wire)
-	if !socket_app_send(tab_id, app_call_line(wire, method, params)) do return false
+	if !core.socket_app_send(tab_id, app_call_line(wire, method, params)) do return false
 	pending[strings.clone(wire)] = {tab_id = tab_id, request_id = request_id, type = strings.clone(method), deadline = time.tick_add(time.tick_now(), timeout)}
 	return true
 }
@@ -644,7 +550,7 @@ app_fail_pending :: proc(tab_id: u64, why, code: string, shots := true) {
 	for k, p in pending do if p.tab_id == tab_id && (shots || p.type != APP_SHOT_TYPE) do append(&gone, k)
 	for k in gone {
 		key, p := delete_key(&pending, k)
-		if p.request_id != 0 do emit_event(Finished_Event{request_id = p.request_id, result = {error = why, data = fmt.tprintf(`{{"code":%q}}`, code)}})
+		if p.request_id != 0 do core.emit_event(core.Finished_Event{request_id = p.request_id, result = {error = why, data = fmt.tprintf(`{{"code":%q}}`, code)}})
 		delete(key)
 		delete(p.type)
 	}
@@ -657,13 +563,13 @@ app_fail_pending :: proc(tab_id: u64, why, code: string, shots := true) {
 // this tab and DECKHAND_APP=1, each with its PI_DESK_ twin (env_names.odin; forge reads those).
 @(private = "file")
 app_env :: proc(tab_id: u64) -> []string {
-	env := child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
+	env := core.child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
-	for e in env do if !env_desk_owned(env_key(e)) && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
+	for e in env do if !core.env_desk_owned(core.env_key(e)) && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
 	own := make([dynamic]string, context.temp_allocator)
-	append(&own, ..socket_child_env({kind = .App, tab_id = tab_id}))
+	append(&own, ..core.socket_child_env({kind = .App, tab_id = tab_id}))
 	append(&own, "DECKHAND_APP=1")
-	append(&out, ..env_with_legacy(own[:]))
+	append(&out, ..core.env_with_legacy(own[:]))
 	return out[:]
 }
 
@@ -673,7 +579,7 @@ app_env :: proc(tab_id: u64) -> []string {
 app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	if frames_ok == 0 {
 		frames_ok = dh_frames_serve_start(sg.mtl_device()) == 1 ? 1 : -1
-		app_shots_prune(app_shots_dir(context.temp_allocator), 24 * time.Hour) // the first app tab of this run
+		app_shots_prune(core.app_shots_dir(context.temp_allocator), 24 * time.Hour) // the first app tab of this run
 	}
 	a.connected, a.stalled, a.sock_seen, a.ping_answered = false, false, false, false
 	a.framed = false
@@ -687,11 +593,11 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	a.started_at = time.tick_now()
 	a.ring.cur_gen = 0 // a new process: its ring comes after its HELLO; the last frame stays
 	a.ring.want_w, a.ring.want_h = 0, 0
-	socket_forget_tab(a.tab_id) // an old process's token and connection
+	core.socket_forget_tab(a.tab_id) // an old process's token and connection
 	app_fail_pending(a.tab_id, "the app restarted", "tab_gone", shots = false)
 	// the log: <data dir>/apps/<tab_id>.log
 	if a.log_path == "" {
-		root := home_root != "" ? home_root : "build/test-data"
+		root := core.home_root != "" ? core.home_root : "build/test-data"
 		dir, _ := filepath.join({root, "apps"}, context.temp_allocator)
 		os.make_directory_all(dir)
 		a.log_path = fmt.aprintf("%s/%d.log", dir, a.tab_id)
@@ -717,25 +623,25 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	posix.fcntl(fds[0], .SETFD, i32(posix.FD_CLOEXEC))
 	posix.fcntl(fds[1], .SETFD, i32(posix.FD_CLOEXEC)) // other spawns meanwhile must not inherit it (dup2 into 1 and 2 clears it there)
 	attr, fa: [512]u8
-	posix_spawnattr_init(&attr)
-	defer posix_spawnattr_destroy(&attr)
-	posix_spawnattr_setflags(&attr, i16(POSIX_SPAWN_SETSID | POSIX_SPAWN_CLOEXEC_DEFAULT))
-	posix_spawn_file_actions_init(&fa)
-	defer posix_spawn_file_actions_destroy(&fa)
-	posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
-	posix_spawn_file_actions_adddup2(&fa, i32(fds[1]), 1)
-	posix_spawn_file_actions_adddup2(&fa, i32(fds[1]), 2)
-	posix_spawn_file_actions_addchdir_np(&fa, strings.clone_to_cstring(cwd, context.temp_allocator))
+	core.posix_spawnattr_init(&attr)
+	defer core.posix_spawnattr_destroy(&attr)
+	core.posix_spawnattr_setflags(&attr, i16(core.POSIX_SPAWN_SETSID | core.POSIX_SPAWN_CLOEXEC_DEFAULT))
+	core.posix_spawn_file_actions_init(&fa)
+	defer core.posix_spawn_file_actions_destroy(&fa)
+	core.posix_spawn_file_actions_addopen(&fa, 0, "/dev/null", i32(posix.O_RDONLY), 0)
+	core.posix_spawn_file_actions_adddup2(&fa, i32(fds[1]), 1)
+	core.posix_spawn_file_actions_adddup2(&fa, i32(fds[1]), 2)
+	core.posix_spawn_file_actions_addchdir_np(&fa, strings.clone_to_cstring(cwd, context.temp_allocator))
 	pid: posix.pid_t
 	// argv[0] on PATH; the child's environment is env
-	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
+	sync.rw_mutex_shared_lock(&core.fork_lock) // fork_lock, pty.odin
 	err := posix.posix_spawnp(&pid, c_argv[0], &fa, &attr, raw_data(c_argv), raw_data(c_env))
-	sync.rw_mutex_shared_unlock(&fork_lock)
+	sync.rw_mutex_shared_unlock(&core.fork_lock)
 	posix.close(fds[1])
 	if err != .NONE {
 		posix.close(fds[0])
 		app_log_line(a, fmt.tprintf("[Deckhand] could not start %s (%v)", argv[0], err))
-		socket_forget_tab(a.tab_id)
+		core.socket_forget_tab(a.tab_id)
 		return false
 	}
 	a.pid = pid
@@ -820,15 +726,15 @@ app_gone :: proc(a: ^App_Proc, code: int) {
 	a.pid = 0
 	a.connected = false
 	if frames_ok == 1 do dh_frames_chan_stop(a.tab_id)
-	socket_forget_tab(a.tab_id)
+	core.socket_forget_tab(a.tab_id)
 	app_fail_pending(a.tab_id, "the app exited", "tab_gone", shots = false)
 	// hidden screenshots waiting for a frame: answered now (the last frame, or no_frame)
 	for w in a.shot_waits {
 		r := app_shot_now(a.tab_id, a, w.rect, w.has_rect, w.request_id)
-		if !r.pending do emit_event(Finished_Event{request_id = w.request_id, result = r})
+		if !r.pending do core.emit_event(core.Finished_Event{request_id = w.request_id, result = r})
 	}
 	clear(&a.shot_waits)
-	app_boxes_forget(a.tab_id) // its boxes went with it
+	core.app_boxes_forget(a.tab_id) // its boxes went with it
 	a.hover = -1
 	delete(a.ping_wire)
 	a.ping_wire = ""
@@ -906,8 +812,8 @@ app_frames_tick :: proc() -> bool {
 	if frames_ok == 1 && dh_frames_take_wake() != 0 do redraw = true // something arrived
 	now := time.tick_now()
 	// new boxes: an inspected tab on screen (any pane's) redraws, its hover follows them
-	if sync.atomic_exchange(&boxes_dirty, false) {
-		for id, a in apps do if a.inspect && tab_on_screen(id) {
+	if sync.atomic_exchange(&core.boxes_dirty, false) {
+		for id, a in apps do if a.inspect && core.tab_on_screen(id) {
 			app_hover_at(a, a.hx, a.hy, a.hin)
 			redraw = true
 		}
@@ -928,23 +834,23 @@ app_frames_tick :: proc() -> bool {
 					append(&a.restarts, now)
 					app_log_line(a, "[Deckhand] exit 75: restarting")
 					if app_spawn(a, at.argv, at.cwd) {
-						run_command(App_Update{tab_id = id, status = .Starting})
+						core.run_command(core.App_Update{tab_id = id, status = .Starting})
 						continue
 					}
 				}
-				run_command(App_Update{tab_id = id, status = .Exited, exit_code = code})
+				core.run_command(core.App_Update{tab_id = id, status = .Exited, exit_code = code})
 				continue
 			}
 		}
 		if a.pid == 0 do continue
 		// the socket: an app that hangs up is gone (its exit comes next)
-		if socket_app_connected(id) do a.sock_seen = true
+		if core.socket_app_connected(id) do a.sock_seen = true
 		else if a.sock_seen && !a.closing {
 			a.sock_seen = false
 			app_log_line(a, "[Deckhand] the app closed its connection: stopping it")
 			posix.killpg(a.pid, .SIGTERM)
 		}
-		visible := tab_on_screen(id) // shown in any pane of the session on screen (panes.odin)
+		visible := core.tab_on_screen(id) // shown in any pane of the session on screen (panes.odin)
 		// a hidden tab is told it shows until it gives its first frame and while a screenshot waits
 		// for one (TAB-PROTOCOL: a tab told it is hidden draws nothing)
 		peek := !visible && (!a.framed || len(a.shot_waits) > 0)
@@ -999,10 +905,10 @@ app_frames_tick :: proc() -> bool {
 			}
 			ordered_remove(&a.shot_waits, i)
 			r := app_shot_now(id, a, w.rect, w.has_rect, w.request_id)
-			if !r.pending do emit_event(Finished_Event{request_id = w.request_id, result = r})
+			if !r.pending do core.emit_event(core.Finished_Event{request_id = w.request_id, result = r})
 		}
 		// visibility: tab.visible when it changes
-		if a.sent_visible != int(told) && socket_app_connected(id) {
+		if a.sent_visible != int(told) && core.socket_app_connected(id) {
 			if w := app_own_request(id, "tab.visible", fmt.tprintf(`{{"visible":%v}}`, told), APP_CALL_TIMEOUT); w != "" {
 				delete(w)
 				a.sent_visible = int(told)
@@ -1011,8 +917,8 @@ app_frames_tick :: proc() -> bool {
 		}
 		// the display: its rate and scale, soon after the hello (which has them too) and whenever
 		// the window's screen changes (another screen, ProMotion/VRR, a scale change)
-		if fps, scale := platform_display(); (a.sent_fps != fps || a.sent_scale != scale) && socket_app_connected(id) {
-			if w := app_own_request(id, "tab.display", app_display_json(fps, scale), APP_CALL_TIMEOUT); w != "" {
+		if fps, scale := platform_display(); (a.sent_fps != fps || a.sent_scale != scale) && core.socket_app_connected(id) {
+			if w := app_own_request(id, "tab.display", core.app_display_json(fps, scale), APP_CALL_TIMEOUT); w != "" {
 				delete(w)
 				a.sent_fps, a.sent_scale = fps, scale
 			}
@@ -1034,7 +940,7 @@ app_frames_tick :: proc() -> bool {
 			a.ping_at, a.ping_answered = {}, false
 		}
 		if want != status && status != .Exited {
-			run_command(App_Update{tab_id = id, status = want})
+			core.run_command(core.App_Update{tab_id = id, status = want})
 			redraw = true
 		}
 		if want == .Stalled && visible && app_badge_changed(a, now) do redraw = true
@@ -1045,7 +951,7 @@ app_frames_tick :: proc() -> bool {
 		for k, p in pending do if time.tick_diff(p.deadline, now) > 0 do append(&late, k)
 		for k in late {
 			key, p := delete_key(&pending, k)
-			if p.request_id != 0 do emit_event(Finished_Event{request_id = p.request_id, result = {error = "the app did not answer in time", data = `{"code":"timeout"}`}})
+			if p.request_id != 0 do core.emit_event(core.Finished_Event{request_id = p.request_id, result = {error = "the app did not answer in time", data = `{"code":"timeout"}`}})
 			if a := app_of(p.tab_id); a != nil && a.ping_wire == key {
 				delete(a.ping_wire)
 				a.ping_wire = ""
@@ -1086,7 +992,7 @@ app_frames_tick :: proc() -> bool {
 // display link's rate: frames.odin).
 app_frames_live :: proc() -> bool {
 	now := time.tick_now()
-	for id, a in apps do if a.pid != 0 && display_tab_live(tab_on_screen(id), a.connected, ring_framed_recently(&a.ring, now)) do return true
+	for id, a in apps do if a.pid != 0 && display_tab_live(core.tab_on_screen(id), a.connected, ring_framed_recently(&a.ring, now)) do return true
 	return false
 }
 
@@ -1097,7 +1003,7 @@ app_should_ping :: proc(in_flight, answered: bool, ping_at, now: time.Tick) -> b
 	return !in_flight && (ping_at == {} || time.tick_diff(ping_at, now) > APP_PING_AGAIN)
 }
 
-app_stall_status :: proc(status: App_Status, in_flight, answered: bool, ping_at, now: time.Tick) -> App_Status {
+app_stall_status :: proc(status: core.App_Status, in_flight, answered: bool, ping_at, now: time.Tick) -> core.App_Status {
 	if answered || status == .Stalled && in_flight && time.tick_diff(ping_at, now) <= APP_PING_TIMEOUT do return .Stalled
 	if ping_at != {} && time.tick_diff(ping_at, now) > APP_PING_TIMEOUT do return .Not_Responding
 	return status
@@ -1175,7 +1081,7 @@ app_drop :: proc(tab_id: u64) {
 	delete_key(&apps, tab_id)
 	app_release_input(a)
 	app_fail_pending(tab_id, "the tab closed", "tab_gone")
-	for w in a.shot_waits do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the tab closed", data = `{"code":"tab_gone"}`}})
+	for w in a.shot_waits do core.emit_event(core.Finished_Event{request_id = w.request_id, result = {error = "the tab closed", data = `{"code":"tab_gone"}`}})
 	clear(&a.shot_waits)
 	// the surfaces go now, whatever the process does; `a` is freed last
 	for &g in a.ring.gens do for s in 0 ..< FRAME_SLOTS do slot_destroy(&g, s)
@@ -1189,15 +1095,15 @@ app_drop :: proc(tab_id: u64) {
 		a.quit_at = time.tick_now()
 		append(&dying, a)
 	} else do app_proc_free(a)
-	app_events_forget(tab_id)
-	app_boxes_forget(tab_id)
+	core.app_events_forget(tab_id)
+	core.app_boxes_forget(tab_id)
 }
 
 @(private = "file")
 app_proc_free :: proc(a: ^App_Proc) {
-	socket_forget_tab(a.tab_id)
-	app_events_forget(a.tab_id) // a closing app's events after app_drop's forget
-	app_boxes_forget(a.tab_id)
+	core.socket_forget_tab(a.tab_id)
+	core.app_events_forget(a.tab_id) // a closing app's events after app_drop's forget
+	core.app_boxes_forget(a.tab_id)
 	if a.out != nil do out_unref(a.out)
 	delete(a.restarts)
 	delete(a.held)
@@ -1237,7 +1143,7 @@ app_shutdown :: proc() {
 // The crop in surface px: rect (logical tab px) times the ring's scale,
 // clamped to the surface (sw x sh px); no rect = the whole frame. ok=false
 // when nothing is left.
-app_shot_rect :: proc(r: App_Rect, has: bool, scale: f32, sw, sh: int) -> (x, y, w, h: int, ok: bool) {
+app_shot_rect :: proc(r: core.App_Rect, has: bool, scale: f32, sw, sh: int) -> (x, y, w, h: int, ok: bool) {
 	if !has do return 0, 0, sw, sh, sw > 0 && sh > 0
 	x0 := clamp(int(math.floor(r.x * scale)), 0, sw)
 	y0 := clamp(int(math.floor(r.y * scale)), 0, sh)
@@ -1276,12 +1182,12 @@ Shot_Job :: struct {
 // replaces it: never past its release) on the main thread, a memcpy of at
 // most the frame; a worker encodes the PNG and finishes the request.
 @(private = "file")
-app_screenshot :: proc(cmd: App_Screenshot, request_id: u64) -> Result {
+app_screenshot :: proc(cmd: core.App_Screenshot, request_id: u64) -> core.Result {
 	_, tab, _ := app_tab_of(cmd.tab_id)
 	a := app_of(cmd.tab_id)
-	if tab == nil || a == nil do return fail("no such app tab")
+	if tab == nil || a == nil do return core.fail("no such app tab")
 	// hidden and running: it draws one frame for this (app_frames_tick), at most APP_PEEK_TIMEOUT
-	if !tab_on_screen(cmd.tab_id) && a.pid != 0 && frames_ok == 1 && request_id != 0 {
+	if !core.tab_on_screen(cmd.tab_id) && a.pid != 0 && frames_ok == 1 && request_id != 0 {
 		if len(a.shot_waits) >= APP_SHOTS_IN_FLIGHT do return {error = "screenshots are still being taken; try again", data = `{"code":"busy"}`}
 		append(&a.shot_waits, Shot_Wait{request_id = request_id, rect = cmd.rect, has_rect = cmd.has_rect, seq = a.ring.shown_seq, deadline = time.tick_add(time.tick_now(), APP_PEEK_TIMEOUT)})
 		return {ok = true, pending = true}
@@ -1290,14 +1196,14 @@ app_screenshot :: proc(cmd: App_Screenshot, request_id: u64) -> Result {
 }
 
 // app_screenshot of the frame Deckhand holds for the tab now.
-app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: App_Rect, has_rect: bool, request_id: u64) -> Result {
-	cmd := App_Screenshot{tab_id = tab_id, rect = rect, has_rect = has_rect}
+app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: core.App_Rect, has_rect: bool, request_id: u64) -> core.Result {
+	cmd := core.App_Screenshot{tab_id = tab_id, rect = rect, has_rect = has_rect}
 	g := ring_gen(&a.ring, a.ring.shown_gen)
 	if a.ring.shown_gen == 0 || g == nil || frames_ok != 1 do return {error = "the app has shown no frame yet", data = `{"code":"no_frame"}`}
 	x, y, w, h, ok := app_shot_rect(cmd.rect, cmd.has_rect, g.scale, g.w, g.h)
 	if !ok do return {error = "the rect is outside the frame", data = `{"code":"bad_args"}`}
 	a.shots += 1
-	meta := fmt.tprintf(`"seq":%d,"tick":%d,"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"visible":%v`, a.ring.shown_seq, a.ring.shown_tick, g.scale, x, y, w, h, tab_on_screen(tab_id))
+	meta := fmt.tprintf(`"seq":%d,"tick":%d,"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"visible":%v`, a.ring.shown_seq, a.ring.shown_tick, g.scale, x, y, w, h, core.tab_on_screen(tab_id))
 	return frame_shot(cmd.tab_id, g.gen, a.ring.shown_slot, x, y, w, h, a.shots, meta, request_id)
 }
 
@@ -1305,7 +1211,7 @@ app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: App_Rect, has_rect: bool, 
 // finishing request_id with {path, w, h, bytes, META}: the slot is copied here (main thread,
 // a memcpy of at most the frame), a worker encodes and writes it. App tabs' app_screenshot and
 // browser tabs' browser_screenshot (browser_agent.odin); N counts the tab's shots.
-frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, meta: string, request_id: u64) -> Result {
+frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, meta: string, request_id: u64) -> core.Result {
 	// each one being written holds a copy of the frame (also after its request
 	// timed out or its tab closed): a few at a time
 	if sync.atomic_load(&shots_running) >= APP_SHOTS_IN_FLIGHT do return {error = "screenshots are still being written; try again", data = `{"code":"busy"}`}
@@ -1314,7 +1220,7 @@ frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, me
 		delete(pixels, runtime.heap_allocator())
 		return {error = "the frame could not be read", data = `{"code":"no_frame"}`}
 	}
-	dir := app_shots_dir(context.temp_allocator)
+	dir := core.app_shots_dir(context.temp_allocator)
 	os.make_directory_all(dir)
 	next_wire += 1
 	wire := fmt.tprintf("s%d", next_wire)
@@ -1338,7 +1244,7 @@ frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, me
 		key, p := delete_key(&pending, wire)
 		delete(key)
 		delete(p.type)
-		return fail("could not start the screenshot writer")
+		return core.fail("could not start the screenshot writer")
 	}
 	return {ok = true, pending = true}
 }
@@ -1384,15 +1290,15 @@ shot_write :: proc(j: ^Shot_Job) {
 		}
 	}
 	if j.old != "" do posix.unlink(strings.clone_to_cstring(j.old, context.temp_allocator))
-	done := App_Call_Done{tab_id = j.tab_id, wire = j.wire, ok = err == "", error = err, from_worker = true, file = err == "" ? j.path : ""}
+	done := core.App_Call_Done{tab_id = j.tab_id, wire = j.wire, ok = err == "", error = err, from_worker = true, file = err == "" ? j.path : ""}
 	if err == "" {
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, `{"path":`)
-		json_quote(&b, j.path)
+		core.json_quote(&b, j.path)
 		fmt.sbprintf(&b, `,"w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
 		done.data = strings.to_string(b)
 	} else do done.code = "write_failed"
-	inbox_submit(done, {kind = .Internal})
+	core.inbox_submit(done, {kind = .Internal})
 	sync.atomic_sub(&shots_running, 1)
 }
 
@@ -1401,9 +1307,9 @@ shot_write :: proc(j: ^Shot_Job) {
 // The hovered box's label (temp), "" = none.
 app_hover_label :: proc(a: ^App_Proc) -> string {
 	if a == nil || !a.inspect || a.hover < 0 do return ""
-	sync.lock(&boxes_mu)
-	defer sync.unlock(&boxes_mu)
-	list := boxes[a.tab_id] or_else nil
+	sync.lock(&core.boxes_mu)
+	defer sync.unlock(&core.boxes_mu)
+	list := core.boxes[a.tab_id] or_else nil
 	if a.hover >= len(list) do return ""
 	return strings.clone(list[a.hover].label, context.temp_allocator)
 }
@@ -1413,9 +1319,9 @@ app_hover_label :: proc(a: ^App_Proc) -> string {
 app_hover_at :: proc(a: ^App_Proc, x, y: f32, inside: bool) -> bool {
 	h := -1
 	if inside {
-		sync.lock(&boxes_mu)
-		h = app_box_at(boxes[a.tab_id] or_else nil, x, y)
-		sync.unlock(&boxes_mu)
+		sync.lock(&core.boxes_mu)
+		h = core.app_box_at(core.boxes[a.tab_id] or_else nil, x, y)
+		sync.unlock(&core.boxes_mu)
 	}
 	if h == a.hover do return false
 	a.hover = h
@@ -1427,9 +1333,9 @@ app_hover_at :: proc(a: ^App_Proc, x, y: f32, inside: bool) -> bool {
 @(private = "file")
 app_draw_boxes :: proc(a: ^App_Proc, x, y, w, h: f32) {
 	th := theme()
-	sync.lock(&boxes_mu)
-	defer sync.unlock(&boxes_mu)
-	list := boxes[a.tab_id] or_else nil
+	sync.lock(&core.boxes_mu)
+	defer sync.unlock(&core.boxes_mu)
+	list := core.boxes[a.tab_id] or_else nil
 	if a.hover >= len(list) do a.hover = -1
 	s := app.dpi
 	t := max(1, math.round(s))
@@ -1502,7 +1408,7 @@ button_name :: proc(b: sapp.Mousebutton) -> string {
 
 @(private = "file")
 send_input :: proc(a: ^App_Proc, line: string) {
-	if socket_app_send(a.tab_id, line) do a.inputs += 1
+	if core.socket_app_send(a.tab_id, line) do a.inputs += 1
 }
 
 // Lets go of what the app holds: key-ups and button-ups for everything
@@ -1526,7 +1432,7 @@ app_focus_tick :: proc() {
 		want := app_wants_keys(a)
 		if want == a.focused do continue
 		if !want do app_release_input(a)
-		else if socket_app_connected(a.tab_id) {
+		else if core.socket_app_connected(a.tab_id) {
 			send_input(a, `{"v":1,"type":"input","event":"focus","focused":true}`)
 			a.focused = true
 		}
@@ -1536,7 +1442,7 @@ app_focus_tick :: proc() {
 // The app has the keyboard: its tab is the focused one (panes.odin), it runs, no widget has the
 // keyboard, the job sheet is shut and the window is in front.
 app_wants_keys :: proc(a: ^App_Proc) -> bool {
-	return tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
+	return core.tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
 }
 
 @(private = "file")
@@ -1548,7 +1454,7 @@ in_tab :: proc(p: [4]f32, x, y: f32) -> bool {
 // while no widget has the keyboard (and never under the modal job sheet);
 // the mouse not under the palette, a menu, a popover, a sheet or Atlas's
 // drawer; a press keeps the moves and the release until the button is up.
-app_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+app_event :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 	a := pane_app(p)
 	if a == nil do return false
 	r := pane_rect(p)
@@ -1571,14 +1477,14 @@ app_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 			// a click on a box: a comment on it for this tab's session's pi
 			if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT {
 				// copied under the lock; the crop and the bar after it (they take their time)
-				sync.lock(&boxes_mu)
-				list := boxes[a.tab_id] or_else nil
-				hit, found := App_Box{}, false
-				if i := app_box_at(list, x, y); i >= 0 {
+				sync.lock(&core.boxes_mu)
+				list := core.boxes[a.tab_id] or_else nil
+				hit, found := core.App_Box{}, false
+				if i := core.app_box_at(list, x, y); i >= 0 {
 					hit = {id = strings.clone(list[i].id, context.temp_allocator), label = strings.clone(list[i].label, context.temp_allocator), rect = list[i].rect}
 					found = true
 				}
-				sync.unlock(&boxes_mu)
+				sync.unlock(&core.boxes_mu)
 				if found do comments_draft_box(a.tab_id, hit, app_box_crop(a.tab_id, hit.rect))
 			}
 			return true
@@ -1618,14 +1524,14 @@ app_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		r, ok := utf16_unit(&app_surrogate, e.char_code)
 		if !ok do return true
 		b := strings.builder_make(context.temp_allocator)
-		json_quote(&b, utf8_string(r))
+		core.json_quote(&b, utf8_string(r))
 		send_input(a, fmt.tprintf(`{{"v":1,"type":"input","event":"char","text":%s}}`, strings.to_string(b)))
 		return true
 	case .MOUSE_DOWN:
 		if !in_tab(r, e.mouse_x, e.mouse_y) do return false
 		// a click in the tab takes the keyboard back; a sliding drawer goes away
-		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
-		if state.focus_widget != "" do ui_do(Set_Focus{""})
+		if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false})
+		if state.focus_widget != "" do ui_do(core.Set_Focus{""})
 		ime_cancel()
 		bn := button_name(e.mouse_button)
 		if bn == "" do return true
@@ -1656,7 +1562,7 @@ app_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 
 // ---- the bar (ui.odin's centre): Inspect; exited / not responding / no frames ----
 
-app_bar_layout :: proc(p: ^Pane) {
+app_bar_layout :: proc(p: ^core.Pane) {
 	a := pane_app(p)
 	if a == nil do return
 	_, tab, at := app_tab_of(a.tab_id)
@@ -1679,14 +1585,14 @@ app_bar_layout :: proc(p: ^Pane) {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		if text != "" {
 			dot(at.app_status == .Stalled ? th.waiting : th.error)
 			clay.TextDynamic(text, txt(th.text))
 		}
 		spacer()
-		if a.inspect do clay.TextDynamic(fmt.tprintf("%d boxes", app_box_count(a.tab_id)), txt(th.text_muted))
+		if a.inspect do clay.TextDynamic(fmt.tprintf("%d boxes", core.app_box_count(a.tab_id)), txt(th.text_muted))
 		// the app's boxes over the tab (tab.boxes); on: highlighted
 		button(cid("app_inspect"), "Inspect", a.inspect, clay.PointerOver(cid("app_inspect")))
 		if wait do button(cid("app_wait"), "Wait", false, clay.PointerOver(cid("app_wait")))
@@ -1699,15 +1605,15 @@ app_bar_layout :: proc(p: ^Pane) {
 @(private = "file")
 app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
 	if cinside("app_inspect", x, y) {
-		ui_do(App_Inspect{tab_id = a.tab_id, on = !a.inspect})
+		ui_do(core.App_Inspect{tab_id = a.tab_id, on = !a.inspect})
 		return true
 	}
 	if cinside("app_restart", x, y) {
-		ui_do(App_Restart{tab_id = a.tab_id})
+		ui_do(core.App_Restart{tab_id = a.tab_id})
 		return true
 	}
 	if cinside("app_log", x, y) {
-		if s, _, _ := find_tab(a.tab_id); s != nil do ui_do(Open_File{path = a.log_path, session = s.id})
+		if s, _, _ := core.find_tab(a.tab_id); s != nil do ui_do(core.Open_File{path = a.log_path, session = s.id})
 		return true
 	}
 	if cinside("app_wait", x, y) {
@@ -1801,15 +1707,15 @@ app_not_declared :: proc(cwd, name: string) -> string {
 
 // The session new_app_tab and app_declared act in: a pi or Claude tab's own, never another;
 // else the one named, or the caller's (Home's and an unbound caller's: the one on screen).
-app_session :: proc(caller: Caller, session: u64) -> (^Open_Session, string) {
+app_session :: proc(caller: core.Caller, session: u64) -> (^core.Open_Session, string) {
 	if caller.kind == .Panel {
-		own := caller_session(caller)
+		own := core.caller_session(caller)
 		if own == nil do return nil, "the calling tab has no session"
 		if session != 0 && session != own.id do return nil, "a pi or Claude tab opens and lists apps in its own session only"
 		return own, ""
 	}
-	s := session != 0 ? find_session(session) : caller_session(caller)
-	if s != nil && s.home && session == 0 do s = cur()
+	s := session != 0 ? core.find_session(session) : core.caller_session(caller)
+	if s != nil && s.home && session == 0 do s = core.cur()
 	if s == nil do return nil, "no open session to open the app in"
 	return s, ""
 }
@@ -1820,7 +1726,7 @@ app_palette_results :: proc(query: string) -> []Palette_Item {
 	out := make([dynamic]Palette_Item, context.temp_allocator)
 	q := strings.trim_space(query)
 	if q != "" do append(&out, Palette_Item{kind = .App, key = "app:run", title = fmt.tprintf("Run “%s” in an app tab", q), path = strings.clone(q, context.temp_allocator), order = 0})
-	if cs := cur(); cs != nil {
+	if cs := core.cur(); cs != nil {
 		for e, i in app_entries(cs.cwd) {
 			if q != "" && !strings.contains(strings.to_lower(e.name, context.temp_allocator), strings.to_lower(q, context.temp_allocator)) do continue
 			append(&out, Palette_Item{kind = .App, key = strings.concatenate({"app:", e.name}, context.temp_allocator), title = e.name, detail = strings.join(e.argv, " ", context.temp_allocator), order = i + 1})
@@ -1928,7 +1834,7 @@ app_wait_done :: proc(fail: proc(msg: string)) -> bool {
 			done = a.ring.shown >= w.n
 			got = fmt.tprintf("%d frames shown", a.ring.shown)
 		case "status":
-			got = at != nil ? APP_STATUS_NAMES[at.app_status] : "?"
+			got = at != nil ? core.APP_STATUS_NAMES[at.app_status] : "?"
 			done = got == w.text
 		case "log":
 			done = app_log_has(a, w.text)
@@ -1962,7 +1868,7 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 			cwd, _ := os.get_working_directory(context.temp_allocator)
 			argv[0], _ = filepath.join({cwd, argv[0]}, context.temp_allocator)
 		}
-		r := run_command(New_App_Tab{argv = argv}, {kind = .Script})
+		r := core.run_command(core.New_App_Tab{argv = argv}, {kind = .Script})
 		if !r.ok do return fmt.tprintf("app_open: %s", r.error), false
 		autotest.last_created = r.created_id
 		app_marks.tab = r.created_id
@@ -2126,7 +2032,7 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		return "", true
 	case "assert_shot_pixel":
 		if len(args) < 3 do return "assert_shot_pixel X Y RRGGBB", false
-		path := json_path(app_last_finished, "data.path")
+		path := core.json_path(app_last_finished, "data.path")
 		w, h, n: c.int
 		px := stbi.load(strings.clone_to_cstring(path, context.temp_allocator), &w, &h, &n, 4)
 		if px == nil do return fmt.tprintf("ASSERT FAILED assert_shot_pixel: cannot read %q", path), false

@@ -1,7 +1,7 @@
 #+build darwin
 package holder
 
-// The libc calls the holder makes, with plain C types (as src/pty_posix.odin declares them),
+// The libc calls the holder makes, with plain C types (as src/core/pty_posix.odin declares them),
 // and the macOS constants they take.
 
 import "core:c"

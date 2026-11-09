@@ -13,38 +13,39 @@ import "core:sync"
 import "core:testing"
 import "core:thread"
 import "core:time"
+import "core"
 
 @(private = "file")
 Tc :: struct {
-	fd:     Sock_Fd,
+	fd:     core.Sock_Fd,
 	buf:    [dynamic]u8,
 	closed: bool,
 	events: [dynamic]string, // lines read while looking for a reply
 }
 
 @(private = "file")
-sk_ui :: Caller{kind = .UI}
+sk_ui :: core.Caller{kind = .UI}
 
 @(private = "file")
 sk_start :: proc(t: ^testing.T) -> string {
 	context.allocator = runtime.heap_allocator()
-	for _, x in terms {
-		term_free(x)
+	for _, x in core.terms {
+		core.term_free(x)
 		free(x)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT},
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	dir := fmt.aprintf("%s/pd-sock-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
 	os.set_env("DECKHAND_RUNTIME_DIR", dir)
-	rdir, ok := sock_runtime_dir(context.temp_allocator)
+	rdir, ok := core.sock_runtime_dir(context.temp_allocator)
 	testing.expect(t, ok, "runtime dir")
-	testing.expect(t, socket_start(rdir), "socket_start")
+	testing.expect(t, core.socket_start(rdir), "socket_start")
 	sk_pin = pi_integration_for_test(t) // pi tabs load the integration, so they get DECKHAND_*
 	return dir
 }
@@ -54,18 +55,18 @@ sk_pin: string
 
 @(private = "file")
 sk_stop :: proc() {
-	socket_stop(proc() {inbox_drain()})
-	socket_line_max = 1 << 20
-	socket_out_cap = 4 << 20
-	socket_hello_ms = 5000
-	socket_max_conns = 64
+	core.socket_stop(proc() {core.inbox_drain()})
+	core.socket_line_max = 1 << 20
+	core.socket_out_cap = 4 << 20
+	core.socket_hello_ms = 5000
+	core.socket_max_conns = 64
 	if sk_pin != "" do pi_integration_test_done(sk_pin)
 	sk_pin = ""
 }
 
 @(private = "file")
 tc_connect :: proc() -> ^Tc {
-	fd, ok := sock_connect(socket_path())
+	fd, ok := core.sock_connect(core.socket_path())
 	if !ok do return nil
 	c := new(Tc)
 	c.fd = fd
@@ -74,7 +75,7 @@ tc_connect :: proc() -> ^Tc {
 
 @(private = "file")
 tc_close :: proc(c: ^Tc) {
-	sock_close(c.fd)
+	core.sock_close(c.fd)
 	delete(c.buf)
 	delete(c.events)
 	free(c)
@@ -82,7 +83,7 @@ tc_close :: proc(c: ^Tc) {
 
 @(private = "file")
 tc_send :: proc(c: ^Tc, line: string) {
-	sock_write_all(c.fd, transmute([]u8)strings.concatenate({line, "\n"}, context.temp_allocator))
+	core.sock_write_all(c.fd, transmute([]u8)strings.concatenate({line, "\n"}, context.temp_allocator))
 }
 
 // Next line from the socket, pumping the inbox while waiting. "" on
@@ -97,10 +98,10 @@ tc_recv :: proc(c: ^Tc, ms := 3000) -> string {
 			return line
 		}
 		if c.closed || time.tick_since(start) > time.Duration(ms) * time.Millisecond do return ""
-		inbox_drain()
-		if sock_wait_readable(c.fd, 5) {
+		core.inbox_drain()
+		if core.sock_wait_readable(c.fd, 5) {
 			chunk: [16 * 1024]u8
-			n := sock_read(c.fd, chunk[:])
+			n := core.sock_read(c.fd, chunk[:])
 			if n <= 0 do c.closed = true
 			else do append(&c.buf, ..chunk[:n])
 		}
@@ -115,7 +116,7 @@ tc_req :: proc(c: ^Tc, id, line: string) -> string {
 	for {
 		l := tc_recv(c)
 		if l == "" do return ""
-		if json_path(l, "id") == id do return l
+		if core.json_path(l, "id") == id do return l
 		append(&c.events, l)
 	}
 }
@@ -156,21 +157,21 @@ socket_handshake :: proc(t: ^testing.T) {
 
 	st, err := os.stat(dir, context.temp_allocator)
 	testing.expect(t, err == nil && transmute(u32)st.mode & 0o077 == 0, "socket dir is 0700")
-	testing.expect(t, strings.has_prefix(socket_path(), dir))
+	testing.expect(t, strings.has_prefix(core.socket_path(), dir))
 
-	tok := socket_mint_token({kind = .Script})
+	tok := core.socket_mint_token({kind = .Script})
 	c, r := tc_hello(tok)
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
-	testing.expect_value(t, json_path(r, "result.data.caller"), "script")
-	testing.expect_value(t, json_path(r, "result.data.v"), "1")
-	testing.expect_value(t, json_path(r, "result.data.capabilities.0"), "commands")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.data.caller"), "script")
+	testing.expect_value(t, core.json_path(r, "result.data.v"), "1")
+	testing.expect_value(t, core.json_path(r, "result.data.capabilities.0"), "commands")
 	// malformed lines after hello: an error, the connection stays
-	testing.expect_value(t, json_path(tc_req(c, "", "not json"), "result.error"), "invalid JSON")
-	testing.expect_value(t, json_path(tc_req(c, "x", `{"id":"x","v":1,"type":"nope"}`), "result.error"), "unknown request type")
-	testing.expect_value(t, json_path(tc_req(c, "x", `{"id":"x","v":1,"type":"command","command":{"type":"close_tab"}}`), "result.error"), "missing field tab_id")
-	testing.expect_value(t, json_path(tc_req(c, "h", `{"id":"h","v":1,"type":"hello","token":"x"}`), "result.error"), "already said hello")
+	testing.expect_value(t, core.json_path(tc_req(c, "", "not json"), "result.error"), "invalid JSON")
+	testing.expect_value(t, core.json_path(tc_req(c, "x", `{"id":"x","v":1,"type":"nope"}`), "result.error"), "unknown request type")
+	testing.expect_value(t, core.json_path(tc_req(c, "x", `{"id":"x","v":1,"type":"command","command":{"type":"close_tab"}}`), "result.error"), "missing field tab_id")
+	testing.expect_value(t, core.json_path(tc_req(c, "h", `{"id":"h","v":1,"type":"hello","token":"x"}`), "result.error"), "already said hello")
 	g := tc_cmd(c, `{"type":"get_state"}`)
-	testing.expect_value(t, json_path(g, "result.data.version"), "0")
+	testing.expect_value(t, core.json_path(g, "result.data.version"), "0")
 	testing.expect(t, !strings.contains(g, tok), "no token in replies")
 	tc_close(c)
 
@@ -185,16 +186,16 @@ socket_handshake :: proc(t: ^testing.T) {
 	for b in bad {
 		c2 := tc_connect()
 		l := tc_req(c2, b[0][:1] == "{" ? "h" : "", b[0])
-		testing.expectf(t, json_path(l, "result.error") == b[1], "%s: got %s", b[0], l)
+		testing.expectf(t, core.json_path(l, "result.error") == b[1], "%s: got %s", b[0], l)
 		testing.expect(t, tc_closed(c2), "closed after a failed hello")
 		tc_close(c2)
 	}
 
 	// an overlong line closes the connection
-	socket_line_max = 1000
+	core.socket_line_max = 1000
 	c3, _ := tc_hello(tok)
 	tc_send(c3, strings.repeat("x", 3000, context.temp_allocator))
-	testing.expect_value(t, json_path(tc_recv(c3), "result.error"), "line too long")
+	testing.expect_value(t, core.json_path(tc_recv(c3), "result.error"), "line too long")
 	testing.expect(t, tc_closed(c3))
 	tc_close(c3)
 }
@@ -207,9 +208,9 @@ socket_bridge_and_capabilities :: proc(t: ^testing.T) {
 	defer sk_stop()
 	tokfile := fmt.tprintf("%s/tab-token", dir)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
-	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
-	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
-	pitab := find_session(sess).tabs[0].id
+	core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
+	sess := core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	pitab := core.find_session(sess).tabs[0].id
 	tab_tok: string
 	for i in 0 ..< 200 {
 		data, err := os.read_entire_file(tokfile, context.temp_allocator)
@@ -220,88 +221,88 @@ socket_bridge_and_capabilities :: proc(t: ^testing.T) {
 		time.sleep(20 * time.Millisecond)
 	}
 	testing.expect_value(t, len(tab_tok), 64)
-	testing.expect(t, !strings.contains(state_json(), tab_tok), "tokens stay out of State")
+	testing.expect(t, !strings.contains(core.state_json(), tab_tok), "tokens stay out of State")
 
 	bridge, r := tc_hello(tab_tok)
-	re_tok := strings.clone(json_path(r, "result.data.reconnect_token"))
+	re_tok := strings.clone(core.json_path(r, "result.data.reconnect_token"))
 	// "panels": the bridge publishes its sections here and hides its terminal sidebar
-	testing.expect_value(t, json_path(r, "result.data.capabilities.#"), "4")
-	testing.expect_value(t, json_path(r, "result.data.capabilities.1"), "panels")
-	testing.expect_value(t, json_path(r, "result.data.caller"), "panel")
-	testing.expect_value(t, json_path(r, "result.data.tab_id"), fmt.tprint(pitab))
+	testing.expect_value(t, core.json_path(r, "result.data.capabilities.#"), "4")
+	testing.expect_value(t, core.json_path(r, "result.data.capabilities.1"), "panels")
+	testing.expect_value(t, core.json_path(r, "result.data.caller"), "panel")
+	testing.expect_value(t, core.json_path(r, "result.data.tab_id"), fmt.tprint(pitab))
 	// panel capability: no control commands, own tab only
-	testing.expect_value(t, json_path(tc_cmd(bridge, `{"type":"add_project","cwd":"/"}`), "result.error"), "not allowed for this caller")
-	testing.expect_value(t, json_path(tc_cmd(bridge, fmt.tprintf(`{{"type":"pi.status","tab_id":%d,"agent":"idle","waiting":false}}`, pitab + 100)), "result.error"), "not allowed for this caller")
-	testing.expect_value(t, json_path(tc_cmd(bridge, `{"type":"get_state"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(tc_cmd(bridge, `{"type":"add_project","cwd":"/"}`), "result.error"), "not allowed for this caller")
+	testing.expect_value(t, core.json_path(tc_cmd(bridge, fmt.tprintf(`{{"type":"pi.status","tab_id":%d,"agent":"idle","waiting":false}}`, pitab + 100)), "result.error"), "not allowed for this caller")
+	testing.expect_value(t, core.json_path(tc_cmd(bridge, `{"type":"get_state"}`), "result.ok"), "true")
 	// panels: top-level requests for the bridge's own tab
-	testing.expect_value(t, json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.set","panel":"todos","title":"Todos","rows":[{"text":"Todos 0/1","head":true},{"text":"○ a"}]}`), "result.ok"), "true")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.0.rows.1.text"), "○ a")
-	testing.expect_value(t, json_path(tc_req(bridge, "p", fmt.tprintf(`{{"id":"p","v":1,"type":"panel.set","tab_id":%d,"panel":"x","rows":[]}}`, pitab + 100)), "result.error"), "not allowed for this caller")
-	testing.expect_value(t, json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.set","panel":"x"}`), "result.error"), "missing field rows")
-	testing.expect_value(t, json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.remove","panel":"todos"}`), "result.ok"), "true")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "0")
+	testing.expect_value(t, core.json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.set","panel":"todos","title":"Todos","rows":[{"text":"Todos 0/1","head":true},{"text":"○ a"}]}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.0.rows.1.text"), "○ a")
+	testing.expect_value(t, core.json_path(tc_req(bridge, "p", fmt.tprintf(`{{"id":"p","v":1,"type":"panel.set","tab_id":%d,"panel":"x","rows":[]}}`, pitab + 100)), "result.error"), "not allowed for this caller")
+	testing.expect_value(t, core.json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.set","panel":"x"}`), "result.error"), "missing field rows")
+	testing.expect_value(t, core.json_path(tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.remove","panel":"todos"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.#"), "0")
 	tc_req(bridge, "p", `{"id":"p","v":1,"type":"panel.set","panel":"todos","rows":[{"text":"kept"}]}`)
 
 	// pi.session and pi.status land in State
-	_, pt, _ := find_tab(pitab)
-	testing.expect(t, close_needs_confirm(pt^), "unknown status: asks")
+	_, pt, _ := core.find_tab(pitab)
+	testing.expect(t, core.close_needs_confirm(pt^), "unknown status: asks")
 	l := tc_req(bridge, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"abc-1","session_file":"/x/abc-1.jsonl","cwd":"/tmp"}`)
-	testing.expect_value(t, json_path(l, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(l, "result.ok"), "true")
 	l = tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"working","waiting":false,"blockers":["CI red"]}`)
-	testing.expect_value(t, json_path(l, "result.ok"), "true")
-	s := state_json()
-	testing.expect_value(t, json_path(s, "open_sessions.0.pi_session_id"), "abc-1")
-	testing.expect_value(t, json_path(s, "open_sessions.0.session_file"), "/x/abc-1.jsonl")
-	testing.expect_value(t, json_path(s, "open_sessions.0.tabs.0.agent"), "working")
-	testing.expect_value(t, json_path(s, "open_sessions.0.tabs.0.blockers.0"), "CI red")
-	_, pt, _ = find_tab(pitab)
-	testing.expect(t, close_needs_confirm(pt^), "working: asks")
+	testing.expect_value(t, core.json_path(l, "result.ok"), "true")
+	s := core.state_json()
+	testing.expect_value(t, core.json_path(s, "open_sessions.0.pi_session_id"), "abc-1")
+	testing.expect_value(t, core.json_path(s, "open_sessions.0.session_file"), "/x/abc-1.jsonl")
+	testing.expect_value(t, core.json_path(s, "open_sessions.0.tabs.0.agent"), "working")
+	testing.expect_value(t, core.json_path(s, "open_sessions.0.tabs.0.blockers.0"), "CI red")
+	_, pt, _ = core.find_tab(pitab)
+	testing.expect(t, core.close_needs_confirm(pt^), "working: asks")
 	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false,"blockers":[]}`)
-	_, pt, _ = find_tab(pitab)
-	testing.expect(t, !close_needs_confirm(pt^), "idle: closes without asking")
-	testing.expect_value(t, json_path(tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"busy","waiting":false}`), "result.error"), "unknown agent busy")
+	_, pt, _ = core.find_tab(pitab)
+	testing.expect(t, !core.close_needs_confirm(pt^), "idle: closes without asking")
+	testing.expect_value(t, core.json_path(tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"busy","waiting":false}`), "result.error"), "unknown agent busy")
 
 	// control drives the pi tab through the bridge
-	ctl, _ := tc_hello(socket_mint_token({kind = .Control}))
-	testing.expect_value(t, json_path(tc_req(ctl, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false}`), "result.error"), "not allowed for this caller")
-	testing.expect_value(t, json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"panel.set","tab_id":%d,"panel":"x","rows":[]}}`, pitab)), "result.error"), "not allowed for this caller")
+	ctl, _ := tc_hello(core.socket_mint_token({kind = .Control}))
+	testing.expect_value(t, core.json_path(tc_req(ctl, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false}`), "result.error"), "not allowed for this caller")
+	testing.expect_value(t, core.json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"panel.set","tab_id":%d,"panel":"x","rows":[]}}`, pitab)), "result.error"), "not allowed for this caller")
 	tc_send(ctl, fmt.tprintf(`{{"id":"p1","v":1,"type":"command","command":{{"type":"pi_prompt","tab_id":%d,"text":"hello pi"}}}}`, pitab))
 	req := tc_recv(bridge)
-	testing.expect_value(t, json_path(req, "type"), "pi.prompt")
-	testing.expect_value(t, json_path(req, "text"), "hello pi")
-	bid := json_path(req, "id")
+	testing.expect_value(t, core.json_path(req, "type"), "pi.prompt")
+	testing.expect_value(t, core.json_path(req, "text"), "hello pi")
+	bid := core.json_path(req, "id")
 	reply := tc_recv(ctl)
-	testing.expect_value(t, json_path(reply, "result.pending"), "true")
-	rid := json_path(reply, "request_id")
+	testing.expect_value(t, core.json_path(reply, "result.pending"), "true")
+	rid := core.json_path(reply, "request_id")
 	tc_send(bridge, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true}}}}`, bid))
 	fin := tc_recv(ctl)
-	testing.expect_value(t, json_path(fin, "event"), "finished")
-	testing.expect_value(t, json_path(fin, "request_id"), rid)
-	testing.expect_value(t, json_path(fin, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(fin, "event"), "finished")
+	testing.expect_value(t, core.json_path(fin, "request_id"), rid)
+	testing.expect_value(t, core.json_path(fin, "result.ok"), "true")
 	// refused while pi waits for the user
 	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"working","waiting":true,"blockers":[]}`)
-	testing.expect_value(t, json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_prompt","tab_id":%d,"text":"x"}}`, pitab)), "result.error"), "pi is waiting for the user")
+	testing.expect_value(t, core.json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_prompt","tab_id":%d,"text":"x"}}`, pitab)), "result.error"), "pi is waiting for the user")
 	// pi_reload: session_restart confirmation (ask: only the user)
-	testing.expect_value(t, json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_reload","tab_id":%d}}`, pitab)), "result.needs_confirmation.by"), "user")
+	testing.expect_value(t, core.json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_reload","tab_id":%d}}`, pitab)), "result.needs_confirmation.by"), "user")
 	// a bridge that goes away fails what it owed
 	tc_send(ctl, fmt.tprintf(`{{"id":"w","v":1,"type":"command","command":{{"type":"pi_wait_idle","tab_id":%d,"timeout_ms":5000}}}}`, pitab))
-	testing.expect_value(t, json_path(tc_recv(bridge), "type"), "pi.wait_idle")
-	testing.expect_value(t, json_path(tc_recv(ctl), "result.pending"), "true")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "1")
+	testing.expect_value(t, core.json_path(tc_recv(bridge), "type"), "pi.wait_idle")
+	testing.expect_value(t, core.json_path(tc_recv(ctl), "result.pending"), "true")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.#"), "1")
 	tc_close(bridge)
 	fin = tc_recv(ctl)
-	testing.expect_value(t, json_path(fin, "result.error"), "the pi tab's bridge disconnected")
+	testing.expect_value(t, core.json_path(fin, "result.error"), "the pi tab's bridge disconnected")
 	testing.expect(t, sk_agent_is("unknown"), "no bridge: unknown")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "0") // the bridge re-sends on reconnect
-	testing.expect_value(t, json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_wait_idle","tab_id":%d}}`, pitab)), "result.error"), "no bridge connected for this tab")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.#"), "0") // the bridge re-sends on reconnect
+	testing.expect_value(t, core.json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_wait_idle","tab_id":%d}}`, pitab)), "result.error"), "no bridge connected for this tab")
 
 	// the tab's process exits: its token is revoked
 	b2, _ := tc_hello(re_tok)
-	run_command(Tab_Exited{tab_id = pitab})
+	core.run_command(core.Tab_Exited{tab_id = pitab})
 	testing.expect(t, tc_closed(b2), "bridge hung up")
 	tc_close(b2)
 	b3, r3 := tc_hello(re_tok)
-	testing.expect_value(t, json_path(r3, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(r3, "result.error"), "unknown token")
 	tc_close(b3)
 	tc_close(ctl)
 }
@@ -311,45 +312,45 @@ socket_confirmation_modes :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
-	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
+	sess := core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
 	state.settings.confirm_close[.Shell] = .Always
-	c, _ := tc_hello(socket_mint_token({kind = .Control}))
-	tab := json_path(tc_cmd(c, fmt.tprintf(`{{"type":"new_shell_tab","session":%d}}`, sess)), "result.created_id")
+	c, _ := tc_hello(core.socket_mint_token({kind = .Control}))
+	tab := core.json_path(tc_cmd(c, fmt.tprintf(`{{"type":"new_shell_tab","session":%d}}`, sess)), "result.created_id")
 	close := fmt.tprintf(`{{"type":"close_tab","tab_id":%s}}`, tab)
 
 	// ask: no token for the caller; a self-made token is refused
 	r := tc_cmd(c, close)
-	testing.expect_value(t, json_path(r, "result.error"), "needs_confirmation")
-	testing.expect_value(t, json_path(r, "result.needs_confirmation.by"), "user")
-	testing.expect_value(t, json_path(r, "result.needs_confirmation.token"), "<missing>")
+	testing.expect_value(t, core.json_path(r, "result.error"), "needs_confirmation")
+	testing.expect_value(t, core.json_path(r, "result.needs_confirmation.by"), "user")
+	testing.expect_value(t, core.json_path(r, "result.needs_confirmation.token"), "<missing>")
 	user_token := strings.clone(state.pending_confirmations[0].token)
 	r = tc_cmd(c, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, user_token))
-	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
+	testing.expect_value(t, core.json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
 	// the socket cannot raise its own mode
 	r = tc_cmd(c, `{"type":"set_confirm_policy","caller":"control","class":"tab_close","mode":"auto"}`)
-	testing.expect_value(t, json_path(r, "result.error"), "not allowed for this caller")
-	run_command(Cancel_Confirmation{token = user_token}, sk_ui)
+	testing.expect_value(t, core.json_path(r, "result.error"), "not allowed for this caller")
+	core.run_command(core.Cancel_Confirmation{token = user_token}, sk_ui)
 
 	// trusted (set by the user): the caller confirms its own token
-	run_command(Set_Confirm_Policy{caller = .Control, class = .Tab_Close, mode = .Trusted}, sk_ui)
+	core.run_command(core.Set_Confirm_Policy{caller = .Control, class = .Tab_Close, mode = .Trusted}, sk_ui)
 	r = tc_cmd(c, close)
-	testing.expect_value(t, json_path(r, "result.needs_confirmation.by"), "caller")
-	tok := json_path(r, "result.needs_confirmation.token")
+	testing.expect_value(t, core.json_path(r, "result.needs_confirmation.by"), "caller")
+	tok := core.json_path(r, "result.needs_confirmation.token")
 	testing.expect(t, len(tok) > 10)
 	// a different caller (another token) cannot use it
-	other, _ := tc_hello(socket_mint_token({kind = .Script}))
-	run_command(Set_Confirm_Policy{caller = .Script, class = .Tab_Close, mode = .Trusted}, sk_ui)
+	other, _ := tc_hello(core.socket_mint_token({kind = .Script}))
+	core.run_command(core.Set_Confirm_Policy{caller = .Script, class = .Tab_Close, mode = .Trusted}, sk_ui)
 	r = tc_cmd(other, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, tok))
-	testing.expect_value(t, json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
+	testing.expect_value(t, core.json_path(r, "result.error"), "only the user can confirm this, in Deckhand")
 	r = tc_cmd(c, fmt.tprintf(`{{"type":"close_tab","tab_id":%s,"confirm":"%s"}}`, tab, tok))
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 
 	// auto: no confirmation
-	run_command(Set_Confirm_Policy{caller = .Control, class = .Tab_Close, mode = .Auto}, sk_ui)
-	tab = json_path(tc_cmd(c, fmt.tprintf(`{{"type":"new_shell_tab","session":%d}}`, sess)), "result.created_id")
+	core.run_command(core.Set_Confirm_Policy{caller = .Control, class = .Tab_Close, mode = .Auto}, sk_ui)
+	tab = core.json_path(tc_cmd(c, fmt.tprintf(`{{"type":"new_shell_tab","session":%d}}`, sess)), "result.created_id")
 	r = tc_cmd(c, fmt.tprintf(`{{"type":"close_tab","tab_id":%s}}`, tab))
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	testing.expect_value(t, len(state.pending_confirmations), 0)
 	tc_close(c)
 	tc_close(other)
@@ -360,52 +361,52 @@ socket_events_and_filters :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
-	s1 := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
-	s2 := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
-	tab1 := find_session(s1).tabs[0].id
-	tab2 := find_session(s2).tabs[0].id
+	core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
+	s1 := core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	s2 := core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	tab1 := core.find_session(s1).tabs[0].id
+	tab2 := core.find_session(s2).tabs[0].id
 
-	a_tok := socket_mint_token({kind = .Control})
+	a_tok := core.socket_mint_token({kind = .Control})
 	a, _ := tc_hello(a_tok)
 	a2, _ := tc_hello(a_tok) // same caller, second connection
-	b, _ := tc_hello(socket_mint_token({kind = .Script}))
-	by_tab, _ := tc_hello(socket_mint_token({kind = .Script}))
-	by_sess, _ := tc_hello(socket_mint_token({kind = .Script}))
-	for c in ([]^Tc{a, a2, b}) do testing.expect_value(t, json_path(tc_req(c, "s", `{"id":"s","v":1,"type":"subscribe"}`), "result.ok"), "true")
+	b, _ := tc_hello(core.socket_mint_token({kind = .Script}))
+	by_tab, _ := tc_hello(core.socket_mint_token({kind = .Script}))
+	by_sess, _ := tc_hello(core.socket_mint_token({kind = .Script}))
+	for c in ([]^Tc{a, a2, b}) do testing.expect_value(t, core.json_path(tc_req(c, "s", `{"id":"s","v":1,"type":"subscribe"}`), "result.ok"), "true")
 	tc_req(by_tab, "s", fmt.tprintf(`{{"id":"s","v":1,"type":"subscribe","tab_id":%d}}`, tab2))
 	tc_req(by_sess, "s", fmt.tprintf(`{{"id":"s","v":1,"type":"subscribe","session":%d}}`, s1))
 
 	// a's command: b sees it (redacted), a and a2 do not
 	tc_cmd(a, fmt.tprintf(`{{"type":"send_text","tab_id":%d,"text":"secret-pw"}}`, tab1))
 	ev := tc_event(b)
-	testing.expect_value(t, json_path(ev, "event"), "command")
-	testing.expect_value(t, json_path(ev, "caller"), "control")
-	testing.expect_value(t, json_path(ev, "command.text"), "<redacted 9 bytes>")
+	testing.expect_value(t, core.json_path(ev, "event"), "command")
+	testing.expect_value(t, core.json_path(ev, "caller"), "control")
+	testing.expect_value(t, core.json_path(ev, "command.text"), "<redacted 9 bytes>")
 	testing.expect(t, !strings.contains(ev, "secret-pw"))
 	// session filter: s1's tab
-	testing.expect_value(t, json_path(tc_event(by_sess), "command.tab_id"), fmt.tprint(tab1))
+	testing.expect_value(t, core.json_path(tc_event(by_sess), "command.tab_id"), fmt.tprint(tab1))
 	// tab filter: tab1 is skipped, tab2 arrives first
 	tc_cmd(b, fmt.tprintf(`{{"type":"focus_tab","tab_id":%d}}`, tab2))
 	ev = tc_event(by_tab)
-	testing.expect_value(t, json_path(ev, "command.type"), "focus_tab")
-	testing.expect_value(t, json_path(ev, "command.tab_id"), fmt.tprint(tab2))
-	testing.expect_value(t, json_path(tc_event(a), "caller"), "script") // a sees b's
+	testing.expect_value(t, core.json_path(ev, "command.type"), "focus_tab")
+	testing.expect_value(t, core.json_path(ev, "command.tab_id"), fmt.tprint(tab2))
+	testing.expect_value(t, core.json_path(tc_event(a), "caller"), "script") // a sees b's
 	// user events reach everyone subscribed
-	run_command(Set_Layout{left_width = 200}, sk_ui)
-	testing.expect_value(t, json_path(tc_event(a), "command.type"), "set_layout")
-	testing.expect_value(t, json_path(tc_event(a2), "command.type"), "focus_tab") // a2: b's, then the ui's
-	testing.expect_value(t, json_path(tc_event(a2), "command.type"), "set_layout")
+	core.run_command(core.Set_Layout{left_width = 200}, sk_ui)
+	testing.expect_value(t, core.json_path(tc_event(a), "command.type"), "set_layout")
+	testing.expect_value(t, core.json_path(tc_event(a2), "command.type"), "focus_tab") // a2: b's, then the ui's
+	testing.expect_value(t, core.json_path(tc_event(a2), "command.type"), "set_layout")
 	// filtered subscribers get only events tied to their session/tab
 	testing.expect_value(t, tc_recv(by_sess, 200), "")
 	// nothing of a's own ever arrived at a or a2: the next lines are replies
 	testing.expect_value(t, len(a.events), 0)
-	testing.expect_value(t, json_path(tc_cmd(a, `{"type":"get_state"}`), "type"), "result")
+	testing.expect_value(t, core.json_path(tc_cmd(a, `{"type":"get_state"}`), "type"), "result")
 	testing.expect_value(t, len(a.events), 0)
-	testing.expect_value(t, json_path(tc_req(a2, "u", `{"id":"u","v":1,"type":"unsubscribe"}`), "type"), "result")
+	testing.expect_value(t, core.json_path(tc_req(a2, "u", `{"id":"u","v":1,"type":"unsubscribe"}`), "type"), "result")
 	testing.expect_value(t, len(a2.events), 0)
 	// after unsubscribe: no more events
-	run_command(Set_Layout{left_width = 210}, sk_ui)
+	core.run_command(core.Set_Layout{left_width = 210}, sk_ui)
 	testing.expect_value(t, tc_recv(a2, 200), "")
 	for c in ([]^Tc{a, a2, b, by_tab, by_sess}) do tc_close(c)
 }
@@ -415,26 +416,26 @@ socket_slow_subscriber_is_dropped :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	socket_out_cap = 16 * 1024
-	slow, _ := tc_hello(socket_mint_token({kind = .Script}))
+	core.socket_out_cap = 16 * 1024
+	slow, _ := tc_hello(core.socket_mint_token({kind = .Script}))
 	tc_req(slow, "s", `{"id":"s","v":1,"type":"subscribe"}`)
 	// the main thread keeps going while nobody reads: ~2 MB of events
 	name := strings.repeat("p", 400, context.temp_allocator)
 	start := time.tick_now()
-	for i in 0 ..< 5000 do run_command(Set_Panel{panel = name, open = i % 2 == 0}, sk_ui)
+	for i in 0 ..< 5000 do core.run_command(core.Set_Panel{panel = name, open = i % 2 == 0}, sk_ui)
 	testing.expectf(t, time.tick_since(start) < 5 * time.Second, "main thread blocked: %v", time.tick_since(start))
 	// the subscriber eventually reads a `dropped` event, and the connection still works
 	dropped := false
 	for i in 0 ..< 10000 {
 		l := tc_recv(slow, 2000)
 		if l == "" do break
-		if json_path(l, "event") == "dropped" {
+		if core.json_path(l, "event") == "dropped" {
 			dropped = true
 			break
 		}
 	}
 	testing.expect(t, dropped, "dropped event")
-	testing.expect_value(t, json_path(tc_cmd(slow, `{"type":"get_state"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(tc_cmd(slow, `{"type":"get_state"}`), "result.ok"), "true")
 	tc_close(slow)
 }
 
@@ -443,7 +444,7 @@ socket_concurrent_connections :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	pid := run_command(Add_Project{cwd = "/tmp"}, sk_ui).created_id
+	pid := core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui).created_id
 	N :: 8
 	Worker :: struct {
 		token: string,
@@ -454,14 +455,14 @@ socket_concurrent_connections :: proc(t: ^testing.T) {
 	workers: [N]Worker
 	threads: [N]^thread.Thread
 	for i in 0 ..< N {
-		workers[i] = {token = socket_mint_token({kind = .Script}), pid = pid}
+		workers[i] = {token = core.socket_mint_token({kind = .Script}), pid = pid}
 		threads[i] = thread.create_and_start_with_poly_data(&workers[i], proc(w: ^Worker) {
-			fd, ok := sock_connect(socket_path())
+			fd, ok := core.sock_connect(core.socket_path())
 			if !ok do return
-			defer sock_close(fd)
+			defer core.sock_close(fd)
 			buf: [dynamic]u8
 			defer delete(buf)
-			next :: proc(fd: Sock_Fd, buf: ^[dynamic]u8) -> string {
+			next :: proc(fd: core.Sock_Fd, buf: ^[dynamic]u8) -> string {
 				for {
 					if i := strings.index_byte(string(buf[:]), '\n'); i >= 0 {
 						l := strings.clone(string(buf[:i]), context.temp_allocator)
@@ -469,18 +470,18 @@ socket_concurrent_connections :: proc(t: ^testing.T) {
 						return l
 					}
 					chunk: [4096]u8
-					n := sock_read(fd, chunk[:])
+					n := core.sock_read(fd, chunk[:])
 					if n <= 0 do return ""
 					append(buf, ..chunk[:n])
 				}
 			}
-			send :: proc(fd: Sock_Fd, s: string) {sock_write_all(fd, transmute([]u8)strings.concatenate({s, "\n"}, context.temp_allocator))}
+			send :: proc(fd: core.Sock_Fd, s: string) {core.sock_write_all(fd, transmute([]u8)strings.concatenate({s, "\n"}, context.temp_allocator))}
 			send(fd, fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s"}}`, w.token))
-			if json_path(next(fd, &buf), "result.ok") != "true" do return
+			if core.json_path(next(fd, &buf), "result.ok") != "true" do return
 			for j in 0 ..< 25 {
 				send(fd, fmt.tprintf(`{{"id":"%d","v":1,"type":"command","command":{{"type":"rename_project","project_id":%d,"name":"w%d"}}}}`, j, w.pid, j))
 				l := next(fd, &buf)
-				if json_path(l, "id") == fmt.tprint(j) && json_path(l, "result.ok") == "true" do w.oks += 1
+				if core.json_path(l, "id") == fmt.tprint(j) && core.json_path(l, "result.ok") == "true" do w.oks += 1
 			}
 			sync.atomic_store(&w.done, true)
 		})
@@ -490,7 +491,7 @@ socket_concurrent_connections :: proc(t: ^testing.T) {
 		all := true
 		for &w in workers do if !sync.atomic_load(&w.done) do all = false
 		if all do break
-		inbox_drain()
+		core.inbox_drain()
 		time.sleep(time.Millisecond)
 	}
 	for th in threads {
@@ -507,16 +508,16 @@ socket_hostile_lines :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	tok := socket_mint_token({kind = .Script})
+	tok := core.socket_mint_token({kind = .Script})
 	// before hello: deep nesting and an oversized line
 	pre := tc_connect()
 	tc_send(pre, strings.repeat("[", 3000, context.temp_allocator))
-	testing.expect_value(t, json_path(tc_recv(pre), "result.ok"), "false")
+	testing.expect_value(t, core.json_path(tc_recv(pre), "result.ok"), "false")
 	testing.expect(t, tc_closed(pre))
 	tc_close(pre)
 	pre = tc_connect()
 	tc_send(pre, fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s","pad":"%s"}}`, tok, strings.repeat("x", 8000, context.temp_allocator)))
-	testing.expect_value(t, json_path(tc_recv(pre), "result.error"), "line too long")
+	testing.expect_value(t, core.json_path(tc_recv(pre), "result.error"), "line too long")
 	testing.expect(t, tc_closed(pre))
 	tc_close(pre)
 
@@ -535,10 +536,10 @@ socket_hostile_lines :: proc(t: ^testing.T) {
 	for h in hostile {
 		tc_send(c, h)
 		l := tc_recv(c)
-		testing.expectf(t, json_path(l, "type") == "result", "%.60s: got %.200s", h, l)
+		testing.expectf(t, core.json_path(l, "type") == "result", "%.60s: got %.200s", h, l)
 	}
 	// still alive and answering
-	testing.expect_value(t, json_path(tc_cmd(c, `{"type":"get_state"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(tc_cmd(c, `{"type":"get_state"}`), "result.ok"), "true")
 	tc_close(c)
 }
 
@@ -548,9 +549,9 @@ socket_hostile_lines :: proc(t: ^testing.T) {
 sk_pi_tab :: proc(t: ^testing.T, dir: string) -> (sess, pitab: u64, env_tok: string) {
 	tokfile := fmt.tprintf("%s/tab-token-%d", dir, time.now()._nsec)
 	os.set_env("DECKHAND_CMD", fmt.tprintf(`printf %%s "$DECKHAND_TOKEN" > %s; exec sleep 30`, tokfile))
-	if state.selected_project == 0 do run_command(Add_Project{cwd = "/tmp"}, sk_ui)
-	sess = run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
-	pitab = find_session(sess).tabs[0].id
+	if state.selected_project == 0 do core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
+	sess = core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	pitab = core.find_session(sess).tabs[0].id
 	for _ in 0 ..< 200 {
 		data, err := os.read_entire_file(tokfile, context.temp_allocator)
 		if err == nil && len(data) == 64 do return sess, pitab, strings.clone(string(data))
@@ -568,31 +569,31 @@ socket_env_token_single_use :: proc(t: ^testing.T) {
 	defer sk_stop()
 	_, pitab, env_tok := sk_pi_tab(t, dir)
 	b1, r := tc_hello(env_tok)
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
-	re := json_path(r, "result.data.reconnect_token")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
+	re := core.json_path(r, "result.data.reconnect_token")
 	testing.expect_value(t, len(re), 64)
 	testing.expect(t, re != env_tok)
 	b2, r2 := tc_hello(env_tok)
-	testing.expect_value(t, json_path(r2, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(r2, "result.error"), "unknown token")
 	tc_close(b2)
 	// reconnect token: several connections at once, same tab, no new token
 	c1, r3 := tc_hello(re)
 	c2, r4 := tc_hello(re)
 	for x in ([]string{r3, r4}) {
-		testing.expect_value(t, json_path(x, "result.data.caller"), "panel")
-		testing.expect_value(t, json_path(x, "result.data.tab_id"), fmt.tprint(pitab))
-		testing.expect_value(t, json_path(x, "result.data.reconnect_token"), "<missing>")
+		testing.expect_value(t, core.json_path(x, "result.data.caller"), "panel")
+		testing.expect_value(t, core.json_path(x, "result.data.tab_id"), fmt.tprint(pitab))
+		testing.expect_value(t, core.json_path(x, "result.data.reconnect_token"), "<missing>")
 	}
 	// tokens minted for scripts stay reusable
-	st := socket_mint_token({kind = .Script})
+	st := core.socket_mint_token({kind = .Script})
 	s1, q1 := tc_hello(st)
 	s2, q2 := tc_hello(st)
-	testing.expect(t, json_path(q1, "result.ok") == "true" && json_path(q2, "result.ok") == "true")
-	testing.expect_value(t, json_path(q1, "result.data.reconnect_token"), "<missing>")
+	testing.expect(t, core.json_path(q1, "result.ok") == "true" && core.json_path(q2, "result.ok") == "true")
+	testing.expect_value(t, core.json_path(q1, "result.data.reconnect_token"), "<missing>")
 	// the reconnect token dies with the tab
-	run_command(Tab_Exited{tab_id = pitab})
+	core.run_command(core.Tab_Exited{tab_id = pitab})
 	c3, r5 := tc_hello(re)
-	testing.expect_value(t, json_path(r5, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(r5, "result.error"), "unknown token")
 	for c in ([]^Tc{b1, c1, c2, c3, s1, s2}) do tc_close(c)
 }
 
@@ -606,17 +607,17 @@ socket_question_does_not_block :: proc(t: ^testing.T) {
 	_, pitab, env_tok := sk_pi_tab(t, dir)
 	bridge, _ := tc_hello(env_tok)
 	l := tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":false,"question":true,"blockers":[]}`)
-	testing.expect_value(t, json_path(l, "result.ok"), "true")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.question"), "true")
-	_, pt, _ := find_tab(pitab)
-	testing.expect(t, !close_needs_confirm(pt^), "idle with a question: no confirmation")
-	ctl, _ := tc_hello(socket_mint_token({kind = .Control}))
+	testing.expect_value(t, core.json_path(l, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.question"), "true")
+	_, pt, _ := core.find_tab(pitab)
+	testing.expect(t, !core.close_needs_confirm(pt^), "idle with a question: no confirmation")
+	ctl, _ := tc_hello(core.socket_mint_token({kind = .Control}))
 	tc_send(ctl, fmt.tprintf(`{{"id":"p","v":1,"type":"command","command":{{"type":"pi_prompt","tab_id":%d,"text":"yes"}}}}`, pitab))
-	testing.expect_value(t, json_path(tc_recv(bridge), "type"), "pi.prompt")
-	testing.expect_value(t, json_path(tc_recv(ctl), "result.pending"), "true")
+	testing.expect_value(t, core.json_path(tc_recv(bridge), "type"), "pi.prompt")
+	testing.expect_value(t, core.json_path(tc_recv(ctl), "result.pending"), "true")
 	tc_req(bridge, "b", `{"id":"b","v":1,"type":"pi.status","agent":"idle","waiting":true,"question":false,"blockers":[]}`)
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.question"), "false")
-	testing.expect_value(t, json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_prompt","tab_id":%d,"text":"x"}}`, pitab)), "result.error"), "pi is waiting for the user")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.question"), "false")
+	testing.expect_value(t, core.json_path(tc_cmd(ctl, fmt.tprintf(`{{"type":"pi_prompt","tab_id":%d,"text":"x"}}`, pitab)), "result.error"), "pi is waiting for the user")
 	tc_close(bridge)
 	tc_close(ctl)
 }
@@ -628,22 +629,22 @@ socket_panel_snapshot_is_own_session :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	s1, _, tok1 := sk_pi_tab(t, dir)
-	run_command(Add_Project{cwd = "/"}, sk_ui)
+	core.run_command(core.Add_Project{cwd = "/"}, sk_ui)
 	s2, _, _ := sk_pi_tab(t, dir)
-	run_command(Quit{}, sk_ui) // parks a confirmation (processes run)
+	core.run_command(core.Quit{}, sk_ui) // parks a confirmation (processes run)
 	testing.expect_value(t, len(state.pending_confirmations), 1)
 	b, _ := tc_hello(tok1)
 	d := tc_cmd(b, `{"type":"get_state"}`)
-	testing.expect_value(t, json_path(d, "result.data.open_sessions.#"), "1")
-	testing.expect_value(t, json_path(d, "result.data.open_sessions.0.id"), fmt.tprint(s1))
-	testing.expect_value(t, json_path(d, "result.data.projects.#"), "1")
-	testing.expect_value(t, json_path(d, "result.data.projects.0.cwd"), resolved("/tmp"))
-	testing.expect_value(t, json_path(d, "result.data.sessions.#"), "0")
-	testing.expect_value(t, json_path(d, "result.data.pending_confirmations.#"), "0")
-	full, _ := tc_hello(socket_mint_token({kind = .Control}))
+	testing.expect_value(t, core.json_path(d, "result.data.open_sessions.#"), "1")
+	testing.expect_value(t, core.json_path(d, "result.data.open_sessions.0.id"), fmt.tprint(s1))
+	testing.expect_value(t, core.json_path(d, "result.data.projects.#"), "1")
+	testing.expect_value(t, core.json_path(d, "result.data.projects.0.cwd"), resolved("/tmp"))
+	testing.expect_value(t, core.json_path(d, "result.data.sessions.#"), "0")
+	testing.expect_value(t, core.json_path(d, "result.data.pending_confirmations.#"), "0")
+	full, _ := tc_hello(core.socket_mint_token({kind = .Control}))
 	f := tc_cmd(full, `{"type":"get_state"}`)
-	testing.expect_value(t, json_path(f, "result.data.open_sessions.#"), "2")
-	testing.expect_value(t, json_path(f, "result.data.open_sessions.1.id"), fmt.tprint(s2))
+	testing.expect_value(t, core.json_path(f, "result.data.open_sessions.#"), "2")
+	testing.expect_value(t, core.json_path(f, "result.data.open_sessions.1.id"), fmt.tprint(s2))
 	tc_close(b)
 	tc_close(full)
 }
@@ -655,22 +656,22 @@ socket_hello_deadline_and_conn_cap :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	socket_hello_ms = 300
+	core.socket_hello_ms = 300
 	silent := tc_connect()
 	start := time.tick_now()
-	testing.expect_value(t, json_path(tc_recv(silent, 2000), "result.error"), "no hello in time")
+	testing.expect_value(t, core.json_path(tc_recv(silent, 2000), "result.error"), "no hello in time")
 	testing.expect(t, tc_closed(silent))
 	testing.expect(t, time.tick_since(start) < 1500 * time.Millisecond)
 	tc_close(silent)
 
-	socket_hello_ms = 5000
-	socket_max_conns = 3
-	tok := socket_mint_token({kind = .Script})
+	core.socket_hello_ms = 5000
+	core.socket_max_conns = 3
+	tok := core.socket_mint_token({kind = .Script})
 	a, _ := tc_hello(tok)
 	b, _ := tc_hello(tok)
 	c, _ := tc_hello(tok)
 	extra := tc_connect()
-	testing.expect_value(t, json_path(tc_recv(extra), "result.error"), "too many connections")
+	testing.expect_value(t, core.json_path(tc_recv(extra), "result.error"), "too many connections")
 	testing.expect(t, tc_closed(extra))
 	tc_close(extra)
 	tc_close(a)
@@ -678,7 +679,7 @@ socket_hello_deadline_and_conn_cap :: proc(t: ^testing.T) {
 	ok := false
 	for _ in 0 ..< 50 {
 		d, r := tc_hello(tok)
-		ok = json_path(r, "result.ok") == "true"
+		ok = core.json_path(r, "result.ok") == "true"
 		tc_close(d)
 		if ok do break
 		time.sleep(20 * time.Millisecond)
@@ -692,8 +693,8 @@ socket_hello_deadline_and_conn_cap :: proc(t: ^testing.T) {
 @(private = "file")
 sk_agent_is :: proc(want: string) -> bool {
 	for _ in 0 ..< 200 {
-		inbox_drain()
-		if json_path(state_json(), "open_sessions.0.tabs.0.agent") == want do return true
+		core.inbox_drain()
+		if core.json_path(core.state_json(), "open_sessions.0.tabs.0.agent") == want do return true
 		time.sleep(10 * time.Millisecond)
 	}
 	return false
@@ -705,38 +706,38 @@ socket_bridge_lifecycle :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	_, pitab, env_tok := sk_pi_tab(t, dir)
-	run_command(Add_Project{cwd = "/"}, sk_ui)
+	core.run_command(core.Add_Project{cwd = "/"}, sk_ui)
 	s2, _, _ := sk_pi_tab(t, dir)
-	other_id := strings.clone(find_session(s2).pi_session_id)
+	other_id := strings.clone(core.find_session(s2).pi_session_id)
 
 	old, r := tc_hello(env_tok)
-	re := strings.clone(json_path(r, "result.data.reconnect_token"))
+	re := strings.clone(core.json_path(r, "result.data.reconnect_token"))
 	tc_req(old, "b", `{"id":"b","v":1,"type":"pi.status","agent":"working","waiting":false,"blockers":[]}`)
 	tc_req(old, "p", `{"id":"p","v":1,"type":"panel.set","panel":"shells","rows":[{"text":"sh1 running"}]}`)
 	// a pi.session naming another open tab's session is refused
 	l := tc_req(old, "s", fmt.tprintf(`{{"id":"s","v":1,"type":"pi.session","pi_session_id":"%s","session_file":"","cwd":"/"}}`, other_id))
-	testing.expect_value(t, json_path(l, "result.error"), "this pi session is open in another tab")
-	testing.expect_value(t, json_path(tc_req(old, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"mine-1","session_file":"/a","cwd":"/"}`), "result.ok"), "true")
-	testing.expect_value(t, json_path(tc_req(old, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"mine-2","session_file":"/b","cwd":"/"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(l, "result.error"), "this pi session is open in another tab")
+	testing.expect_value(t, core.json_path(tc_req(old, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"mine-1","session_file":"/a","cwd":"/"}`), "result.ok"), "true")
+	testing.expect_value(t, core.json_path(tc_req(old, "s", `{"id":"s","v":1,"type":"pi.session","pi_session_id":"mine-2","session_file":"/b","cwd":"/"}`), "result.ok"), "true")
 
 	// a request on the old connection; the runtime reconnects, then the old
 	// connection goes: the request fails at once as "reconnecting"
-	ctl, _ := tc_hello(socket_mint_token({kind = .Control}))
+	ctl, _ := tc_hello(core.socket_mint_token({kind = .Control}))
 	tc_send(ctl, fmt.tprintf(`{{"id":"w","v":1,"type":"command","command":{{"type":"pi_wait_idle","tab_id":%d}}}}`, pitab))
-	testing.expect_value(t, json_path(tc_recv(old), "type"), "pi.wait_idle")
-	testing.expect_value(t, json_path(tc_recv(ctl), "result.pending"), "true")
+	testing.expect_value(t, core.json_path(tc_recv(old), "type"), "pi.wait_idle")
+	testing.expect_value(t, core.json_path(tc_recv(ctl), "result.pending"), "true")
 	new, _ := tc_hello(re)
 	tc_close(old)
 	fin := tc_recv(ctl)
-	testing.expect_value(t, json_path(fin, "result.error"), "the pi tab's bridge is reconnecting")
+	testing.expect_value(t, core.json_path(fin, "result.error"), "the pi tab's bridge is reconnecting")
 	// status stays while a bridge connection remains, and is unknown once none does
 	testing.expect(t, !sk_agent_is("unknown"), "still known while the new connection is open")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "1") // kept while reconnecting
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.#"), "1") // kept while reconnecting
 	tc_close(new)
 	testing.expect(t, sk_agent_is("unknown"), "unknown after the last bridge connection closed")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.0.panels.#"), "0")
-	_, pt, _ := find_tab(pitab)
-	testing.expect(t, close_needs_confirm(pt^), "unknown: asks again")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.panels.#"), "0")
+	_, pt, _ := core.find_tab(pitab)
+	testing.expect(t, core.close_needs_confirm(pt^), "unknown: asks again")
 	tc_close(ctl)
 }
 
@@ -749,10 +750,10 @@ socket_child_env_has_the_shots_dir :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	old := home_root
-	home_root = "/tmp/pd-data-dir-test"
-	defer home_root = old
-	defer socket_forget_tab(4242)
+	old := core.home_root
+	core.home_root = "/tmp/pd-data-dir-test"
+	defer core.home_root = old
+	defer core.socket_forget_tab(4242)
 	has :: proc(env: []string, want: string) -> bool {
 		for e in env do if e == want do return true
 		return false
@@ -766,24 +767,24 @@ socket_child_env_has_the_shots_dir :: proc(t: ^testing.T) {
 	defer os.unset_env("DECKHAND_DATA_DIR")
 	os.set_env("DECKHAND_SHOTS_DIR", "/inherited/apps/shots")
 	defer os.unset_env("DECKHAND_SHOTS_DIR")
-	pi_tab := child_env(socket_pi_env({kind = .Panel, tab_id = 4242}))
+	pi_tab := core.child_env(core.socket_pi_env({kind = .Panel, tab_id = 4242}))
 	testing.expect(t, has(pi_tab, want), "a session's pi tab")
 	testing.expect_value(t, count(pi_tab, "DECKHAND_SHOTS_DIR="), 1)
 	testing.expect_value(t, count(pi_tab, "DECKHAND_DATA_DIR="), 0)
-	atlas := child_env(agent_env(4242))
+	atlas := core.child_env(core.agent_env(4242))
 	testing.expect(t, has(atlas, want), "Atlas")
 	testing.expect_value(t, count(atlas, "DECKHAND_SHOTS_DIR="), 1)
 	testing.expect_value(t, count(atlas, "DECKHAND_DATA_DIR="), 0)
-	app := socket_child_env({kind = .App, tab_id = 4242})
+	app := core.socket_child_env({kind = .App, tab_id = 4242})
 	testing.expect_value(t, count(app, "DECKHAND_SHOTS_DIR=") + count(app, "DECKHAND_SHOTS_DIR="), 0)
 	testing.expect_value(t, count(app, "DECKHAND_DATA_DIR="), 0)
-	shell := child_env()
+	shell := core.child_env()
 	testing.expect_value(t, count(shell, "DECKHAND_SHOTS_DIR="), 0)
 	testing.expect_value(t, count(shell, "DECKHAND_DATA_DIR="), 0)
 	// test mode without a data dir: still absolute, where the shots are written
-	home_root = ""
+	core.home_root = ""
 	seen := false
-	for e in socket_pi_env({kind = .Panel, tab_id = 4242}) do if strings.has_prefix(e, "DECKHAND_SHOTS_DIR=") {
+	for e in core.socket_pi_env({kind = .Panel, tab_id = 4242}) do if strings.has_prefix(e, "DECKHAND_SHOTS_DIR=") {
 		v := e[len("DECKHAND_SHOTS_DIR="):]
 		seen = true
 		testing.expectf(t, strings.has_prefix(v, "/") && strings.has_suffix(v, "/build/test-data/apps/shots"), "%s", v)
@@ -805,30 +806,30 @@ socket_request_cancel :: proc(t: ^testing.T) {
 		browser_agent_reset()
 		for id, _ in browsers do browser_drop(id)
 	}
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("pi-s"), cwd = strings.clone("/tmp/s")}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("pi-s"), cwd = strings.clone("/tmp/s")}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	pt := s.tabs[0].id
-	bt := run_command(Browser_Open{session = s.id, url = "https://a.example"}, {kind = .UI}).created_id
-	tok := socket_mint_token({kind = .Panel, tab_id = pt})
+	bt := core.run_command(core.Browser_Open{session = s.id, url = "https://a.example"}, {kind = .UI}).created_id
+	tok := core.socket_mint_token({kind = .Panel, tab_id = pt})
 	c, _ := tc_hello(tok)
 	other, _ := tc_hello(tok)
 	click := fmt.tprintf(`{{"type":"browser_click","tab_id":%d,"selector":"#a"}}`, bt)
 	r := tc_cmd(c, click)
-	testing.expect_value(t, json_path(r, "result.pending"), "true")
-	rid := json_path(r, "request_id")
+	testing.expect_value(t, core.json_path(r, "result.pending"), "true")
+	rid := core.json_path(r, "request_id")
 	testing.expect(t, rid != "", "a request id")
 	testing.expect_value(t, len(act_ops), 1)
 	// another connection (even the same pi tab's): refused
 	x := tc_req(other, "k", fmt.tprintf(`{{"id":"k","v":1,"type":"cancel","request_id":%s}}`, rid))
-	testing.expect_value(t, json_path(x, "result.ok"), "false")
+	testing.expect_value(t, core.json_path(x, "result.ok"), "false")
 	testing.expect_value(t, len(act_ops), 1)
 	// its own: the action ends, its Finished event says cancelled
 	x = tc_req(c, "k", fmt.tprintf(`{{"id":"k","v":1,"type":"cancel","request_id":%s}}`, rid))
-	testing.expectf(t, json_path(x, "result.ok") == "true", "%s", x)
-	inbox_drain()
+	testing.expectf(t, core.json_path(x, "result.ok") == "true", "%s", x)
+	core.inbox_drain()
 	testing.expect_value(t, len(act_ops), 0)
 	fin := ""
 	for _ in 0 ..< 5 {
@@ -839,12 +840,12 @@ socket_request_cancel :: proc(t: ^testing.T) {
 	testing.expectf(t, fin != "", "a Finished event with cancelled")
 	// a connection closing ends what it still runs
 	r = tc_cmd(other, click)
-	testing.expect_value(t, json_path(r, "result.pending"), "true")
+	testing.expect_value(t, core.json_path(r, "result.pending"), "true")
 	testing.expect_value(t, len(act_ops), 1)
 	tc_close(other)
 	deadline := time.tick_now()
 	for len(act_ops) > 0 && time.tick_since(deadline) < 3 * time.Second {
-		inbox_drain()
+		core.inbox_drain()
 		time.sleep(5 * time.Millisecond)
 	}
 	testing.expect_value(t, len(act_ops), 0)
@@ -862,13 +863,13 @@ socket_claude_token_scope :: proc(t: ^testing.T) {
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
 	sess, pitab, pi_tok := sk_pi_tab(t, dir)
-	run_command(Add_Project{cwd = "/"}, sk_ui)
+	core.run_command(core.Add_Project{cwd = "/"}, sk_ui)
 	other, _, _ := sk_pi_tab(t, dir)
-	run_command(Focus_Session{session = sess}, sk_ui)
+	core.run_command(core.Focus_Session{session = sess}, sk_ui)
 	tokfile := fmt.tprintf("%s/claude-token-%d", dir, time.now()._nsec)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf %%s "$DECKHAND_CLAUDE_TOKEN" > %s; exec sleep 30`, tokfile))
-	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
-	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
+	core.claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	r := core.run_command(core.New_Claude_Tab{session = sess}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	ctab := r.created_id
 	tok := ""
@@ -883,28 +884,28 @@ socket_claude_token_scope :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(tok), 64)
 	// a process outside the tab (this test) holding the token: refused
 	x, rx := tc_hello(tok)
-	testing.expect_value(t, json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
+	testing.expect_value(t, core.json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
 	tc_close(x)
 	// as if this test were the tab's process: accepted, and again (multi-use)
-	socket_claude_pid(ctab, i32(os.get_pid()))
+	core.socket_claude_pid(ctab, i32(os.get_pid()))
 	c, rc := tc_hello(tok)
-	testing.expect_value(t, json_path(rc, "result.ok"), "true")
-	testing.expect_value(t, json_path(rc, "result.data.caller"), "claude")
-	testing.expect_value(t, json_path(rc, "result.data.tab_id"), fmt.tprint(ctab))
-	testing.expect(t, len(json_path(rc, "result.data.reconnect_token")) != 64, "no reconnect token: the env token is the one")
+	testing.expect_value(t, core.json_path(rc, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(rc, "result.data.caller"), "claude")
+	testing.expect_value(t, core.json_path(rc, "result.data.tab_id"), fmt.tprint(ctab))
+	testing.expect(t, len(core.json_path(rc, "result.data.reconnect_token")) != 64, "no reconnect token: the env token is the one")
 	c2, rc2 := tc_hello(tok)
-	testing.expect_value(t, json_path(rc2, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(rc2, "result.ok"), "true")
 	tc_close(c2)
 	sid := "11111111-2222-3333-4444-555555555555"
 	// its own reports: the tab id is its own
 	d := tc_cmd(c, fmt.tprintf(`{{"type":"claude.session","session_id":"%s","source":"startup"}}`, sid))
-	testing.expect_value(t, json_path(d, "result.ok"), "true")
-	_, _, ct := claude_tab_of(ctab)
+	testing.expect_value(t, core.json_path(d, "result.ok"), "true")
+	_, _, ct := core.claude_tab_of(ctab)
 	testing.expect_value(t, ct.session_id, sid)
 	d = tc_cmd(c, fmt.tprintf(`{{"type":"claude.session","tab_id":%d,"session_id":"%s"}}`, pitab, sid))
-	testing.expect_value(t, json_path(d, "result.ok"), "false")
+	testing.expect_value(t, core.json_path(d, "result.ok"), "false")
 	d = tc_cmd(c, `{"type":"claude.turn","state":"idle"}`)
-	testing.expect_value(t, json_path(d, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(d, "result.ok"), "true")
 	// no pi bridge, no control set, no reaching another session
 	for cmd in ([]string {
 		`{"type":"pi.status","agent":"idle","waiting":false}`,
@@ -921,27 +922,27 @@ socket_claude_token_scope :: proc(t: ^testing.T) {
 		fmt.tprintf(`{{"type":"browser_comments","session":%d}}`, other),
 	}) {
 		d = tc_cmd(c, cmd)
-		e := json_path(d, "result.error")
-		testing.expectf(t, json_path(d, "result.ok") == "false" && (e == "not allowed for this caller" || strings.contains(e, "own session")), "refused: %s -> %s", cmd, d)
+		e := core.json_path(d, "result.error")
+		testing.expectf(t, core.json_path(d, "result.ok") == "false" && (e == "not allowed for this caller" || strings.contains(e, "own session")), "refused: %s -> %s", cmd, d)
 	}
 	// its snapshot: its own session, and no Claude history
 	d = tc_cmd(c, `{"type":"get_state"}`)
-	testing.expect_value(t, json_path(d, "result.data.open_sessions.#"), "1")
-	testing.expect_value(t, json_path(d, "result.data.open_sessions.0.id"), fmt.tprint(sess))
+	testing.expect_value(t, core.json_path(d, "result.data.open_sessions.#"), "1")
+	testing.expect_value(t, core.json_path(d, "result.data.open_sessions.0.id"), fmt.tprint(sess))
 	testing.expect(t, !strings.contains(d, `"claude_sessions":[{`), "the history is the user's")
-	testing.expect(t, strings.contains(state_json(), `"claude_sessions":[{`), "the full snapshot has it")
+	testing.expect(t, strings.contains(core.state_json(), `"claude_sessions":[{`), "the full snapshot has it")
 	// a pi tab never reports for a Claude tab
 	p, rp := tc_hello(pi_tok)
-	testing.expect_value(t, json_path(rp, "result.data.caller"), "panel")
+	testing.expect_value(t, core.json_path(rp, "result.data.caller"), "panel")
 	d = tc_cmd(p, fmt.tprintf(`{{"type":"claude.session","tab_id":%d,"session_id":"%s"}}`, ctab, sid))
-	testing.expect_value(t, json_path(d, "result.ok"), "false")
+	testing.expect_value(t, core.json_path(d, "result.ok"), "false")
 	tc_close(p)
 	// closed: the token dies with the tab, and its connections with it
-	run_command(Close_Tab{tab_id = ctab}, sk_ui)
+	core.run_command(core.Close_Tab{tab_id = ctab}, sk_ui)
 	testing.expect(t, tc_closed(c), "its open connections are shut")
 	tc_close(c)
 	c3, rc3 := tc_hello(tok)
-	testing.expect_value(t, json_path(rc3, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(rc3, "result.error"), "unknown token")
 	tc_close(c3)
 }
 
@@ -978,23 +979,23 @@ os.rename(out + ".tmp", out)
 	ok_out, orphan_out := fmt.tprintf("%s/grandchild.json", dir), fmt.tprintf("%s/orphan.json", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`sh -c "sh -c 'python3 -I %s %s child'"; python3 -I %s %s orphan; exec sleep 30`, client, ok_out, client, orphan_out))
 	sess, _, _ := sk_pi_tab(t, dir)
-	claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
-	r := run_command(New_Claude_Tab{session = sess}, sk_ui)
+	core.claude_found = .Yes // the stand-in for claude (claude.odin: claude_installed)
+	r := core.run_command(core.New_Claude_Tab{session = sess}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	read :: proc(path: string) -> string {
 		for _ in 0 ..< 300 {
-			inbox_drain()
+			core.inbox_drain()
 			if data, err := os.read_entire_file(path, context.temp_allocator); err == nil do return string(data)
 			time.sleep(20 * time.Millisecond)
 		}
 		return ""
 	}
 	g := read(ok_out)
-	testing.expectf(t, json_path(g, "reply.result.ok") == "true" && json_path(g, "reply.result.data.caller") == "claude", "grandchild: %s", g)
+	testing.expectf(t, core.json_path(g, "reply.result.ok") == "true" && core.json_path(g, "reply.result.data.caller") == "claude", "grandchild: %s", g)
 	o := read(orphan_out)
-	testing.expect_value(t, json_path(o, "ppid"), "1")
-	testing.expect_value(t, json_path(o, "reply.result.error"), "this token works only from its Claude tab's own processes")
-	run_command(Close_Tab{tab_id = r.created_id}, sk_ui)
+	testing.expect_value(t, core.json_path(o, "ppid"), "1")
+	testing.expect_value(t, core.json_path(o, "reply.result.error"), "this token works only from its Claude tab's own processes")
+	core.run_command(core.Close_Tab{tab_id = r.created_id}, sk_ui)
 }
 
 // A panel caller whose tab Deckhand does not know (yet: before it is in its session) sees no events.
@@ -1003,9 +1004,9 @@ socket_panel_events_fail_closed :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	sk_start(t)
 	defer sk_stop()
-	c, _ := tc_hello(socket_mint_token({kind = .Panel, tab_id = 987654}))
-	testing.expect_value(t, json_path(tc_req(c, "s", `{"id":"s","v":1,"type":"subscribe"}`), "result.ok"), "true")
-	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
+	c, _ := tc_hello(core.socket_mint_token({kind = .Panel, tab_id = 987654}))
+	testing.expect_value(t, core.json_path(tc_req(c, "s", `{"id":"s","v":1,"type":"subscribe"}`), "result.ok"), "true")
+	core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
 	testing.expect_value(t, tc_event(c, 500), "")
 	tc_close(c)
 }
@@ -1029,23 +1030,23 @@ socket_app_hears_nothing_before_its_hello_reply :: proc(t: ^testing.T) {
 		sp := Spam{tab = TAB}
 		th := thread.create_and_start_with_poly_data(&sp, proc(sp: ^Spam) {
 			for !sync.atomic_load(&sp.stop) {
-				socket_app_send(sp.tab, `{"id":"a0","v":1,"type":"tab.visible","visible":true}`)
+				core.socket_app_send(sp.tab, `{"id":"a0","v":1,"type":"tab.visible","visible":true}`)
 			}
 		})
 		c := tc_connect()
-		tc_send(c, fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s"}}`, socket_mint_token({kind = .App, tab_id = TAB}, context.temp_allocator)))
+		tc_send(c, fmt.tprintf(`{{"id":"h","v":1,"type":"hello","token":"%s"}}`, core.socket_mint_token({kind = .App, tab_id = TAB}, context.temp_allocator)))
 		first := tc_recv(c)
 		sync.atomic_store(&sp.stop, true)
 		thread.join(th)
 		thread.destroy(th)
-		if json_path(first, "id") != "h" do early += 1
+		if core.json_path(first, "id") != "h" do early += 1
 		testing.expectf(t, first != "", "round %d: no line at all", i)
 		// the thread's lines do arrive, right after the reply
 		if tc_recv(c, 1000) != "" do sent += 1
 		tc_close(c)
 		// the connection is gone before the next round (the newest open one gets the lines)
 		for _ in 0 ..< 200 {
-			if !socket_app_connected(TAB) do break
+			if !core.socket_app_connected(TAB) do break
 			time.sleep(time.Millisecond)
 		}
 	}
@@ -1066,9 +1067,9 @@ socket_forget_tab_ends_the_connection_at_once :: proc(t: ^testing.T) {
 	still := 0
 	for i in 0 ..< 20 {
 		tab, c := sk_app_tab(t)
-		testing.expectf(t, socket_app_connected(tab), "round %d: connected after its hello", i)
-		socket_forget_tab(tab)
-		if socket_app_connected(tab) do still += 1
+		testing.expectf(t, core.socket_app_connected(tab), "round %d: connected after its hello", i)
+		core.socket_forget_tab(tab)
+		if core.socket_app_connected(tab) do still += 1
 		tc_close(c)
 	}
 	testing.expectf(t, still == 0, "%d of 20 forgotten tabs still had an open connection", still)
@@ -1084,15 +1085,15 @@ fast_tab: u64
 // A session with an app tab whose program is the test: its hello is said, it answers nothing yet.
 @(private = "file")
 sk_app_tab :: proc(t: ^testing.T) -> (tab: u64, c: ^Tc) {
-	run_command(Add_Project{cwd = "/tmp"}, sk_ui)
-	sess := run_command(New_Chat{project_id = state.selected_project}, sk_ui).created_id
-	s := find_session(sess)
+	core.run_command(core.Add_Project{cwd = "/tmp"}, sk_ui)
+	sess := core.run_command(core.New_Chat{project_id = state.selected_project}, sk_ui).created_id
+	s := core.find_session(sess)
 	testing.expect(t, s != nil, "a session")
-	tab = new_id()
-	pane_add_tab(s, Tab{id = tab, kind = App_Tab{exit_code = -1}, title = strings.clone("app"), status = .Running}) // in its pane (panes.odin)
+	tab = core.new_id()
+	core.pane_add_tab(s, core.Tab{id = tab, kind = core.App_Tab{exit_code = -1}, title = strings.clone("app"), status = .Running}) // in its pane (panes.odin)
 	r: string
-	c, r = tc_hello(socket_mint_token({kind = .App, tab_id = tab}))
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	c, r = tc_hello(core.socket_mint_token({kind = .App, tab_id = tab}))
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	return
 }
 
@@ -1107,19 +1108,19 @@ script_keeps_a_reply_that_comes_inside_the_drain :: proc(t: ^testing.T) {
 	fast_tab, fast_app = sk_app_tab(t)
 	defer tc_close(fast_app)
 	script_drain = proc() {
-		inbox_drain() // app_call sends its line
+		core.inbox_drain() // app_call sends its line
 		req := tc_recv(fast_app)
-		tc_send(fast_app, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{"x":7}}}}}}`, json_path(req, "id")))
+		tc_send(fast_app, fmt.tprintf(`{{"id":"%s","v":1,"type":"result","result":{{"ok":true,"data":{{"x":7}}}}}}`, core.json_path(req, "id")))
 		// the reply is read and run before this drain returns
 		for _ in 0 ..< 1000 {
-			inbox_drain()
+			core.inbox_drain()
 			left := false
 			for _, p in pending do if p.tab_id == fast_tab do left = true
 			if !left do break
 			time.sleep(time.Millisecond)
 		}
 	}
-	defer script_drain = inbox_drain
+	defer script_drain = core.inbox_drain
 	// only what this test changes (last_finished: the finished result it gets)
 	was_finished := autotest.last_finished
 	autotest.last_finished = ""
@@ -1127,11 +1128,11 @@ script_keeps_a_reply_that_comes_inside_the_drain :: proc(t: ^testing.T) {
 		delete(autotest.last_finished)
 		autotest.last_finished = was_finished
 	}
-	_, r, finished := script_command(App_Call{tab_id = fast_tab, method = strings.clone("game.get")}, {kind = .Script})
+	_, r, finished := script_command(core.App_Call{tab_id = fast_tab, method = strings.clone("game.get")}, {kind = .Script})
 	testing.expect(t, r.ok && r.pending, "app_call is long-running")
 	testing.expect(t, finished, "its finished result already came")
-	testing.expect_value(t, json_path(autotest.last_finished, "data.x"), "7")
-	result_free(r)
+	testing.expect_value(t, core.json_path(autotest.last_finished, "data.x"), "7")
+	core.result_free(r)
 }
 
 // A script waiting for a long-running command's finished result gives up with a TIMEOUT failure
@@ -1145,23 +1146,23 @@ script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
 	tab, c := sk_app_tab(t)
 	defer tc_close(c)
 	// only what this test changes
-	was_active, was_started, was_next, was_failures, was_lines := autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines
+	was_active, was_started, was_next, was_failures, was_lines := core.autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines
 	was_wait, was_until, was_deadline := autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline
 	was_timeout := script_finish_timeout
 	defer {
-		autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines = was_active, was_started, was_next, was_failures, was_lines
+		core.autotest_active, autotest.started, autotest.next, autotest.failures, autotest.lines = was_active, was_started, was_next, was_failures, was_lines
 		autotest.wait_request, autotest.wait_until, autotest.wait_request_deadline = was_wait, was_until, was_deadline
 		script_finish_timeout = was_timeout
 	}
 	script_finish_timeout = 200 * time.Millisecond
 	run :: proc(lines: []string, ms: time.Duration) {
-		autotest_active, autotest.started, autotest.next, autotest.failures = true, true, 0, 0
+		core.autotest_active, autotest.started, autotest.next, autotest.failures = true, true, 0, 0
 		autotest.wait_request, autotest.wait_until = 0, {}
 		autotest.lines = lines
 		autotest_step()
 		start := time.tick_now()
 		for autotest.failures == 0 && time.tick_since(start) < ms {
-			inbox_drain()
+			core.inbox_drain()
 			autotest_step()
 			time.sleep(10 * time.Millisecond)
 		}
@@ -1171,7 +1172,7 @@ script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
 	testing.expect_value(t, autotest.failures, 1)
 	testing.expect_value(t, autotest.wait_request, 0)
 	app_fail_pending(tab, "the test ended", "tab_gone")
-	inbox_drain()
+	core.inbox_drain()
 	// timeout_ms 600 s: the script still waits after its own 200 ms (until 610 s)
 	run({fmt.tprintf(`command {{"type":"app_call","tab_id":%d,"method":"game.never","timeout_ms":600000}}`, tab)}, 800 * time.Millisecond)
 	testing.expect_value(t, autotest.failures, 0)
@@ -1179,7 +1180,7 @@ script_wait_for_a_finished_result_times_out :: proc(t: ^testing.T) {
 	d := time.tick_diff(time.tick_now(), autotest.wait_request_deadline)
 	testing.expectf(t, d > 600 * time.Second && d <= 610 * time.Second, "deadline in %v", d)
 	app_fail_pending(tab, "the test ended", "tab_gone")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, autotest.wait_request, 0)
 }
 
@@ -1194,9 +1195,9 @@ sk_key :: proc(b: u8) -> (k: [32]u8) {
 // Quit and reopen as far as the control socket goes: every token in memory is gone.
 @(private = "file")
 sk_relaunch :: proc(t: ^testing.T) {
-	rdir, _ := sock_runtime_dir(context.temp_allocator)
-	socket_stop(proc() {inbox_drain()})
-	testing.expect(t, socket_start(rdir), "socket_start again")
+	rdir, _ := core.sock_runtime_dir(context.temp_allocator)
+	core.socket_stop(proc() {core.inbox_drain()})
+	testing.expect(t, core.socket_start(rdir), "socket_start again")
 }
 
 @(private = "file")
@@ -1207,7 +1208,7 @@ sk_file :: proc(path: string) -> string {
 
 @(private = "file")
 sk_hex :: proc(tok: string) -> string {
-	h := token_hash(tok)
+	h := core.token_hash(tok)
 	return string(hex.encode(h[:], context.temp_allocator))
 }
 
@@ -1218,10 +1219,10 @@ socket_tokens_off_writes_nothing :: proc(t: ^testing.T) {
 	dir := sk_start(t)
 	defer sk_stop()
 	path := fmt.tprintf("%s/tokens.json", dir)
-	tok := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
-	socket_tokens_bind(101, 7, {kind = .Pi})
+	tok := core.socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	core.socket_tokens_bind(101, 7, {kind = .Pi})
 	c, r := tc_hello(tok)
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	tc_close(c)
 	testing.expect(t, !os.exists(path), "no tokens.json while keep_sessions is off")
 }
@@ -1235,15 +1236,15 @@ socket_tokens_pi_reconnect_across_relaunch :: proc(t: ^testing.T) {
 	defer sk_stop()
 	path := fmt.tprintf("%s/tokens.json", dir)
 	key := sk_key(3)
-	loaded, why := socket_tokens_enable(path, key[:])
+	loaded, why := core.socket_tokens_enable(path, key[:])
 	testing.expect(t, !loaded && why == "missing", why)
-	env := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
-	ctl := socket_mint_token({kind = .Control, tab_id = 101}, context.temp_allocator, single_use = true) // Home's
-	other := socket_mint_token({kind = .Panel, tab_id = 102}, context.temp_allocator, single_use = true) // not in the holder
-	script := socket_mint_token({kind = .Script}, context.temp_allocator)
-	socket_tokens_bind(101, 7, {kind = .Pi})
+	env := core.socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	ctl := core.socket_mint_token({kind = .Control, tab_id = 101}, context.temp_allocator, single_use = true) // Home's
+	other := core.socket_mint_token({kind = .Panel, tab_id = 102}, context.temp_allocator, single_use = true) // not in the holder
+	script := core.socket_mint_token({kind = .Script}, context.temp_allocator)
+	core.socket_tokens_bind(101, 7, {kind = .Pi})
 	b, r := tc_hello(env)
-	re := json_path(r, "result.data.reconnect_token")
+	re := core.json_path(r, "result.data.reconnect_token")
 	testing.expect_value(t, len(re), 64)
 	tc_close(b)
 	raw := sk_file(path)
@@ -1256,48 +1257,48 @@ socket_tokens_pi_reconnect_across_relaunch :: proc(t: ^testing.T) {
 
 	sk_relaunch(t)
 	x, rx := tc_hello(re)
-	testing.expect_value(t, json_path(rx, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(rx, "result.error"), "unknown token")
 	tc_close(x)
-	loaded, why = socket_tokens_enable(path, key[:])
+	loaded, why = core.socket_tokens_enable(path, key[:])
 	testing.expect(t, loaded, why)
 	x, rx = tc_hello(re)
-	testing.expect_value(t, json_path(rx, "result.error"), "unknown token") // not before its terminal is adopted
+	testing.expect_value(t, core.json_path(rx, "result.error"), "unknown token") // not before its terminal is adopted
 	tc_close(x)
-	testing.expect(t, socket_tokens_adopt(7, 202), "adopted with saved state")
-	testing.expect(t, !socket_tokens_adopt(8, 203), "nothing saved for term 8")
+	testing.expect(t, core.socket_tokens_adopt(7, 202), "adopted with saved state")
+	testing.expect(t, !core.socket_tokens_adopt(8, 203), "nothing saved for term 8")
 	c1, r1 := tc_hello(re)
-	testing.expect_value(t, json_path(r1, "result.ok"), "true")
-	testing.expect_value(t, json_path(r1, "result.data.caller"), "panel")
-	testing.expect_value(t, json_path(r1, "result.data.tab_id"), "202")
-	testing.expect_value(t, json_path(r1, "result.data.reconnect_token"), "<missing>")
+	testing.expect_value(t, core.json_path(r1, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r1, "result.data.caller"), "panel")
+	testing.expect_value(t, core.json_path(r1, "result.data.tab_id"), "202")
+	testing.expect_value(t, core.json_path(r1, "result.data.reconnect_token"), "<missing>")
 	c2, r2 := tc_hello(re) // still multi-use
-	testing.expect_value(t, json_path(r2, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r2, "result.ok"), "true")
 	u, ru := tc_hello(env)
-	testing.expect_value(t, json_path(ru, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(ru, "result.error"), "unknown token")
 	tc_close(u)
 	// Home's control token: still single-use, swapped on its first hello
 	h1, rh := tc_hello(ctl)
-	testing.expect_value(t, json_path(rh, "result.data.caller"), "control")
-	testing.expect_value(t, json_path(rh, "result.data.tab_id"), "202")
-	testing.expect_value(t, len(json_path(rh, "result.data.reconnect_token")), 64)
+	testing.expect_value(t, core.json_path(rh, "result.data.caller"), "control")
+	testing.expect_value(t, core.json_path(rh, "result.data.tab_id"), "202")
+	testing.expect_value(t, len(core.json_path(rh, "result.data.reconnect_token")), 64)
 	h2, rh2 := tc_hello(ctl)
-	testing.expect_value(t, json_path(rh2, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(rh2, "result.error"), "unknown token")
 	for c in ([]^Tc{c1, c2, h1, h2}) do tc_close(c)
 	// a second relaunch still knows it (the adopted entries were written under the same term)
 	sk_relaunch(t)
-	loaded, why = socket_tokens_enable(path, key[:])
+	loaded, why = core.socket_tokens_enable(path, key[:])
 	testing.expect(t, loaded, why)
-	socket_tokens_adopt(7, 303)
+	core.socket_tokens_adopt(7, 303)
 	c3, r3 := tc_hello(re)
-	testing.expect_value(t, json_path(r3, "result.data.tab_id"), "303")
+	testing.expect_value(t, core.json_path(r3, "result.data.tab_id"), "303")
 	tc_close(c3)
 	// the tab ends: revoked, and gone from the file
-	socket_forget_tab(303)
+	core.socket_forget_tab(303)
 	c4, r4 := tc_hello(re)
-	testing.expect_value(t, json_path(r4, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(r4, "result.error"), "unknown token")
 	tc_close(c4)
 	testing.expect(t, !strings.contains(sk_file(path), `"term":7`), sk_file(path))
-	socket_tokens_disable(true)
+	core.socket_tokens_disable(true)
 	testing.expect(t, !os.exists(path), "disable(remove) deletes the file")
 }
 
@@ -1311,26 +1312,26 @@ socket_tokens_fail_closed :: proc(t: ^testing.T) {
 	path := fmt.tprintf("%s/tokens.json", dir)
 	key, other := sk_key(3), sk_key(4)
 	setup :: proc(t: ^testing.T, path: string, key: []u8) -> string {
-		socket_tokens_enable(path, key)
-		re := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator)
-		socket_tokens_bind(101, 7, {kind = .Claude})
-		socket_tokens_ro(101, true, true, "nonce-1")
+		core.socket_tokens_enable(path, key)
+		re := core.socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator)
+		core.socket_tokens_bind(101, 7, {kind = .Claude})
+		core.socket_tokens_ro(101, true, true, "nonce-1")
 		return re
 	}
 	expect_refused :: proc(t: ^testing.T, path: string, key: []u8, tok: string, want: string, loc := #caller_location) {
 		// a relaunch, for tab 101's token (cheaper than restarting the socket: keeps this < 1 s)
-		socket_tokens_disable(false)
-		socket_forget_tab(101)
-		loaded, why := socket_tokens_enable(path, key)
+		core.socket_tokens_disable(false)
+		core.socket_forget_tab(101)
+		loaded, why := core.socket_tokens_enable(path, key)
 		testing.expectf(t, !loaded && strings.contains(why, want), "loaded %v: %s", loaded, why, loc = loc)
-		testing.expect(t, !socket_tokens_adopt(7, 202), "nothing to adopt", loc = loc)
-		testing.expect(t, !claude_adopt_ro_ok(7), "read-only state untrusted", loc = loc)
+		testing.expect(t, !core.socket_tokens_adopt(7, 202), "nothing to adopt", loc = loc)
+		testing.expect(t, !core.claude_adopt_ro_ok(7), "read-only state untrusted", loc = loc)
 		c, r := tc_hello(tok)
-		testing.expect_value(t, json_path(r, "result.error"), "unknown token", loc = loc)
+		testing.expect_value(t, core.json_path(r, "result.error"), "unknown token", loc = loc)
 		tc_close(c)
-		socket_forget_tab(202)
+		core.socket_forget_tab(202)
 		if want != "too large" {
-			_, rok, _ := macfile_read(path, TOKENS_KIND, key, context.temp_allocator)
+			_, rok, _ := core.macfile_read(path, core.TOKENS_KIND, key, context.temp_allocator)
 			testing.expect(t, rok, "rewritten with the new key", loc = loc)
 		}
 	}
@@ -1345,12 +1346,12 @@ socket_tokens_fail_closed :: proc(t: ^testing.T) {
 	expect_refused(t, path, other[:], tok, "bad MAC")
 	// a handover file put in its place
 	tok = setup(t, path, key[:])
-	body, _, _ := macfile_read(path, TOKENS_KIND, key[:], context.temp_allocator)
-	macfile_write(path, "handover", body, key[:])
+	body, _, _ := core.macfile_read(path, core.TOKENS_KIND, key[:], context.temp_allocator)
+	core.macfile_write(path, "handover", body, key[:])
 	expect_refused(t, path, key[:], tok, "not tokens")
 	// MAC'd but out of shape: too deep, a zero term, pid 1, an unknown caller, unknown version
 	for bad in ([]string {
-		strings.concatenate({`{"v":1,"terms":`, strings.repeat("[", JSON_MAX_DEPTH + 2, context.temp_allocator), strings.repeat("]", JSON_MAX_DEPTH + 2, context.temp_allocator), "}"}, context.temp_allocator),
+		strings.concatenate({`{"v":1,"terms":`, strings.repeat("[", core.JSON_MAX_DEPTH + 2, context.temp_allocator), strings.repeat("]", core.JSON_MAX_DEPTH + 2, context.temp_allocator), "}"}, context.temp_allocator),
 		`{"v":1,"terms":[{"term":0,"kind":"shell","tokens":[]}]}`,
 		`{"v":1,"terms":[{"term":4294967296,"kind":"shell","tokens":[]}]}`,
 		`{"v":1,"terms":[{"term":7,"kind":"claude","claude_root":1,"tokens":[]}]}`,
@@ -1361,15 +1362,15 @@ socket_tokens_fail_closed :: proc(t: ^testing.T) {
 		"{\"v\":1,\"terms\":[],\"x\":\"\xff\xfe\"}", // invalid UTF-8: json.parse would trap
 	}) {
 		tok = setup(t, path, key[:])
-		macfile_write(path, TOKENS_KIND, bad, key[:])
+		core.macfile_write(path, core.TOKENS_KIND, bad, key[:])
 		expect_refused(t, path, key[:], tok, "")
 	}
 	// too large
 	tok = setup(t, path, key[:])
-	was := macfile_max
-	macfile_max = 16
+	was := core.macfile_max
+	core.macfile_max = 16
 	expect_refused(t, path, key[:], tok, "too large")
-	macfile_max = was
+	core.macfile_max = was
 }
 
 // A Claude token kept across a relaunch keeps its rule: hellos only from the tab's own processes
@@ -1381,32 +1382,32 @@ socket_tokens_claude_keeps_ancestry :: proc(t: ^testing.T) {
 	defer sk_stop()
 	path := fmt.tprintf("%s/tokens.json", dir)
 	key := sk_key(5)
-	socket_tokens_enable(path, key[:])
-	tok := socket_mint_token({kind = .Panel, tab_id = 301, claude = true}, context.temp_allocator)
-	socket_claude_pid(301, i32(os.get_pid()))
-	socket_tokens_bind(301, 9, {kind = .Claude})
-	socket_tokens_ro(301, true, true, "n1")
-	unacked := socket_mint_token({kind = .Panel, tab_id = 302, claude = true}, context.temp_allocator)
-	socket_claude_pid(302, 99_999_999) // nothing of ours
-	socket_tokens_bind(302, 10, {kind = .Claude})
-	socket_tokens_ro(302, true, false, "n2")
+	core.socket_tokens_enable(path, key[:])
+	tok := core.socket_mint_token({kind = .Panel, tab_id = 301, claude = true}, context.temp_allocator)
+	core.socket_claude_pid(301, i32(os.get_pid()))
+	core.socket_tokens_bind(301, 9, {kind = .Claude})
+	core.socket_tokens_ro(301, true, true, "n1")
+	unacked := core.socket_mint_token({kind = .Panel, tab_id = 302, claude = true}, context.temp_allocator)
+	core.socket_claude_pid(302, 99_999_999) // nothing of ours
+	core.socket_tokens_bind(302, 10, {kind = .Claude})
+	core.socket_tokens_ro(302, true, false, "n2")
 	sk_relaunch(t)
-	loaded, why := socket_tokens_enable(path, key[:])
+	loaded, why := core.socket_tokens_enable(path, key[:])
 	testing.expect(t, loaded, why)
-	testing.expect(t, claude_adopt_ro_ok(9), "acked: trusted")
-	testing.expect(t, !claude_adopt_ro_ok(10), "not acked: stopped")
-	testing.expect(t, !claude_adopt_ro_ok(11), "no state: stopped")
-	socket_tokens_adopt(9, 401)
-	socket_tokens_adopt(10, 402)
-	testing.expect(t, claude_adopt_ro_ok(9), "still trusted once adopted")
+	testing.expect(t, core.claude_adopt_ro_ok(9), "acked: trusted")
+	testing.expect(t, !core.claude_adopt_ro_ok(10), "not acked: stopped")
+	testing.expect(t, !core.claude_adopt_ro_ok(11), "no state: stopped")
+	core.socket_tokens_adopt(9, 401)
+	core.socket_tokens_adopt(10, 402)
+	testing.expect(t, core.claude_adopt_ro_ok(9), "still trusted once adopted")
 	c, r := tc_hello(tok)
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
-	testing.expect_value(t, json_path(r, "result.data.caller"), "claude")
-	testing.expect_value(t, json_path(r, "result.data.tab_id"), "401")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.data.caller"), "claude")
+	testing.expect_value(t, core.json_path(r, "result.data.tab_id"), "401")
 	c2, r2 := tc_hello(tok) // multi-use, as before
-	testing.expect_value(t, json_path(r2, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r2, "result.ok"), "true")
 	x, rx := tc_hello(unacked)
-	testing.expect_value(t, json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
+	testing.expect_value(t, core.json_path(rx, "result.error"), "this token works only from its Claude tab's own processes")
 	for k in ([]^Tc{c, c2, x}) do tc_close(k)
 	raw := sk_file(path)
 	testing.expect(t, strings.contains(raw, fmt.tprintf(`"claude_root":%d`, os.get_pid())) && strings.contains(raw, `"acked":true`), raw)
@@ -1424,28 +1425,28 @@ socket_tokens_start_kept :: proc(t: ^testing.T) {
 	defer sk_stop()
 	path := fmt.tprintf("%s/tokens.json", dir)
 	key := sk_key(6)
-	socket_tokens_enable(path, key[:])
-	socket_tokens_bind(101, 7, {kind = .Pi, pi_ro = true, extras = 5})
-	socket_tokens_bind(102, 8, {kind = .Shell})
-	socket_tokens_bind(103, 9, {kind = .Claude})
+	core.socket_tokens_enable(path, key[:])
+	core.socket_tokens_bind(101, 7, {kind = .Pi, pi_ro = true, extras = 5})
+	core.socket_tokens_bind(102, 8, {kind = .Shell})
+	core.socket_tokens_bind(103, 9, {kind = .Claude})
 	sk_relaunch(t)
-	loaded, why := socket_tokens_enable(path, key[:])
+	loaded, why := core.socket_tokens_enable(path, key[:])
 	testing.expect(t, loaded, why)
-	s7, f7 := socket_tokens_start_of(7)
-	testing.expect(t, f7 && s7 == Held_Start{kind = .Pi, pi_ro = true, extras = 5}, fmt.tprint(s7))
-	s8, _ := socket_tokens_start_of(8)
-	testing.expect_value(t, s8.kind, Held_Kind.Shell)
-	s9, _ := socket_tokens_start_of(9)
-	testing.expect_value(t, s9.kind, Held_Kind.Claude)
-	_, f10 := socket_tokens_start_of(10)
+	s7, f7 := core.socket_tokens_start_of(7)
+	testing.expect(t, f7 && s7 == core.Held_Start{kind = .Pi, pi_ro = true, extras = 5}, fmt.tprint(s7))
+	s8, _ := core.socket_tokens_start_of(8)
+	testing.expect_value(t, s8.kind, core.Held_Kind.Shell)
+	s9, _ := core.socket_tokens_start_of(9)
+	testing.expect_value(t, s9.kind, core.Held_Kind.Claude)
+	_, f10 := core.socket_tokens_start_of(10)
 	testing.expect(t, !f10, "nothing for term 10")
-	socket_tokens_adopt(7, 202)
-	s7, f7 = socket_tokens_start_of(7)
+	core.socket_tokens_adopt(7, 202)
+	s7, f7 = core.socket_tokens_start_of(7)
 	testing.expect(t, f7 && s7.kind == .Pi && s7.pi_ro, "kept once adopted")
 	// a term listed without a kind is out of shape: the whole file is refused
-	macfile_write(path, TOKENS_KIND, `{"v":1,"terms":[{"term":7,"tokens":[]}]}`, key[:])
-	socket_tokens_disable(false)
-	loaded, why = socket_tokens_enable(path, key[:])
+	core.macfile_write(path, core.TOKENS_KIND, `{"v":1,"terms":[{"term":7,"tokens":[]}]}`, key[:])
+	core.socket_tokens_disable(false)
+	loaded, why = core.socket_tokens_enable(path, key[:])
 	testing.expect(t, !loaded, "no kind: refused")
 }
 
@@ -1458,21 +1459,21 @@ socket_tokens_prune_gone :: proc(t: ^testing.T) {
 	defer sk_stop()
 	path := fmt.tprintf("%s/tokens.json", dir)
 	key := sk_key(7)
-	socket_tokens_enable(path, key[:])
-	gone := socket_mint_token({kind = .Panel, tab_id = 102}, context.temp_allocator)
-	socket_tokens_bind(101, 7, {kind = .Shell})
-	socket_tokens_bind(102, 8, {kind = .Pi})
+	core.socket_tokens_enable(path, key[:])
+	gone := core.socket_mint_token({kind = .Panel, tab_id = 102}, context.temp_allocator)
+	core.socket_tokens_bind(101, 7, {kind = .Shell})
+	core.socket_tokens_bind(102, 8, {kind = .Pi})
 	sk_relaunch(t)
-	socket_tokens_enable(path, key[:])
-	socket_tokens_prune({7})
-	_, f8 := socket_tokens_start_of(8)
+	core.socket_tokens_enable(path, key[:])
+	core.socket_tokens_prune({7})
+	_, f8 := core.socket_tokens_start_of(8)
 	testing.expect(t, !f8, "term 8 is gone")
-	testing.expect(t, !socket_tokens_adopt(8, 300), "nothing left for a new term 8")
+	testing.expect(t, !core.socket_tokens_adopt(8, 300), "nothing left for a new term 8")
 	c, r := tc_hello(gone)
-	testing.expect_value(t, json_path(r, "result.error"), "unknown token")
+	testing.expect_value(t, core.json_path(r, "result.error"), "unknown token")
 	tc_close(c)
 	testing.expect(t, !strings.contains(sk_file(path), `"term":8`), sk_file(path))
-	_, f7 := socket_tokens_start_of(7)
+	_, f7 := core.socket_tokens_start_of(7)
 	testing.expect(t, f7, "term 7 is kept")
 }
 
@@ -1485,21 +1486,21 @@ socket_tokens_write_unlocked :: proc(t: ^testing.T) {
 	defer sk_stop()
 	@(static) calls, locked: int
 	calls, locked = 0, 0
-	tokens_write_probe = proc() {
+	core.tokens_write_probe = proc() {
 		calls += 1
-		if !socket_mu_free() do locked += 1
+		if !core.socket_mu_free() do locked += 1
 	}
-	defer tokens_write_probe = nil
+	defer core.tokens_write_probe = nil
 	key := sk_key(8)
-	socket_tokens_enable(fmt.tprintf("%s/tokens.json", dir), key[:])
-	env := socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
-	socket_tokens_bind(101, 7, {kind = .Pi})
+	core.socket_tokens_enable(fmt.tprintf("%s/tokens.json", dir), key[:])
+	env := core.socket_mint_token({kind = .Panel, tab_id = 101}, context.temp_allocator, single_use = true)
+	core.socket_tokens_bind(101, 7, {kind = .Pi})
 	c, r := tc_hello(env) // swaps it for a reconnect token: a write from the connection's thread
-	testing.expect_value(t, json_path(r, "result.ok"), "true")
+	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	tc_close(c)
-	socket_claude_pid(101, 4242)
-	socket_tokens_ro(101, true, true, "n")
-	socket_forget_tab(101)
+	core.socket_claude_pid(101, 4242)
+	core.socket_tokens_ro(101, true, true, "n")
+	core.socket_forget_tab(101)
 	testing.expect(t, calls >= 5, fmt.tprint(calls))
 	testing.expect_value(t, locked, 0)
 }
@@ -1513,22 +1514,22 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	defer sk_stop()
 	@(static) clip: string
 	clip = ""
-	platform.set_clipboard = proc(s: string) {clip = strings.clone(s, runtime.heap_allocator())}
-	for k in ([]Caller_Kind{.Control, .Script, .Panel}) {
-		r := run_command(Copy_Control_Token{}, {kind = k})
+	core.platform.set_clipboard = proc(s: string) {clip = strings.clone(s, runtime.heap_allocator())}
+	for k in ([]core.Caller_Kind{.Control, .Script, .Panel}) {
+		r := core.run_command(core.Copy_Control_Token{}, {kind = k})
 		testing.expectf(t, !r.ok, "%v may not mint a control token", k)
 	}
 	testing.expect_value(t, clip, "")
-	r := run_command(Copy_Control_Token{}, sk_ui)
+	r := core.run_command(core.Copy_Control_Token{}, sk_ui)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.data, "")
-	testing.expect(t, strings.has_prefix(clip, fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='", socket_path())), clip)
+	testing.expect(t, strings.has_prefix(clip, fmt.tprintf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='", core.socket_path())), clip)
 	_, _, rest := strings.partition(clip, "DECKHAND_TOKEN='")
 	tok, _, _ := strings.partition(rest, "'")
 	testing.expect_value(t, len(tok), 64)
-	testing.expect(t, !strings.contains(command_json(Copy_Control_Token{}), tok), "never in the log")
+	testing.expect(t, !strings.contains(core.command_json(core.Copy_Control_Token{}), tok), "never in the log")
 	c, hr := tc_hello(tok)
-	testing.expect_value(t, json_path(hr, "result.data.caller"), "control")
+	testing.expect_value(t, core.json_path(hr, "result.data.caller"), "control")
 	tc_close(c)
 	// with the app's pasteboard: marked concealed and transient (clipboard managers skip it), and
 	// cleared after CONTROL_TOKEN_CLIP_TTL if it still holds the token (its change count)
@@ -1536,17 +1537,17 @@ socket_copy_control_token :: proc(t: ^testing.T) {
 	@(static) cleared: [dynamic]int
 	secret = ""
 	clear(&cleared)
-	platform.set_clipboard_secret = proc(s: string) -> int {secret = strings.clone(s, runtime.heap_allocator()); return 41}
-	platform.clear_clipboard_if = proc(count: int) {append(&cleared, count)}
-	defer platform.set_clipboard_secret, platform.clear_clipboard_if = nil, nil
+	core.platform.set_clipboard_secret = proc(s: string) -> int {secret = strings.clone(s, runtime.heap_allocator()); return 41}
+	core.platform.clear_clipboard_if = proc(count: int) {append(&cleared, count)}
+	defer core.platform.set_clipboard_secret, core.platform.clear_clipboard_if = nil, nil
 	clip = ""
-	testing.expect(t, run_command(Copy_Control_Token{}, sk_ui).ok)
+	testing.expect(t, core.run_command(core.Copy_Control_Token{}, sk_ui).ok)
 	testing.expect(t, strings.contains(secret, "DECKHAND_TOKEN='"), secret)
 	testing.expect_value(t, clip, "") // not through the plain copy
-	control_token_clip_tick()
+	core.control_token_clip_tick()
 	testing.expect_value(t, len(cleared), 0) // not before the deadline
-	control_token_clip.deadline = time.tick_now()
-	control_token_clip_tick()
-	control_token_clip_tick()
+	core.control_token_clip.deadline = time.tick_now()
+	core.control_token_clip_tick()
+	core.control_token_clip_tick()
 	testing.expect(t, len(cleared) == 1 && cleared[0] == 41, fmt.tprint(cleared[:]))
 }

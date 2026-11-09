@@ -1,5 +1,5 @@
 // macOS pieces for the editor and the file-system model (src/editor_watch.odin,
-// src/fs_model.odin): an FSEvents stream over the watched folders (file
+// src/core/fs_model.odin): an FSEvents stream over the watched folders (file
 // events, ~50 ms latency, delivered on a private serial queue), moving to
 // the Trash, and revealing in Finder.
 

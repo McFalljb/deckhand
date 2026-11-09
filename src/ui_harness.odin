@@ -17,6 +17,7 @@ import "core:path/filepath"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
 
@@ -40,20 +41,20 @@ harness_term_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
 
 // Frame upkeep (main.odin, after the layout): the run's terminal follows its place on the sheet.
 harness_term_layout :: proc() {
-	t := harness_run_term()
+	t := core.harness_run_term()
 	if t == nil do return
 	if x, y, w, h, ok := harness_term_rect(); ok do term_set_rect(t, x, y, w, h)
 }
 
 // Drawn above the sheet (main.odin, after the overlays).
 harness_term_draw :: proc() {
-	t := harness_run_term()
+	t := core.harness_run_term()
 	if t == nil do return
 	if _, _, _, _, ok := harness_term_rect(); ok do term_draw(t)
 }
 
 @(private = "file")
-item_mark :: proc(it: Harness_Item) -> (string, Rgba) {
+item_mark :: proc(it: core.Harness_Item) -> (string, core.Rgba) {
 	th := theme()
 	switch it.state {
 	case .Ok, .Built_In:            return "✓", th.done
@@ -65,13 +66,13 @@ item_mark :: proc(it: Harness_Item) -> (string, Rgba) {
 }
 
 @(private = "file")
-item_running :: proc(it: Harness_Item) -> bool {
-	return harness_run.status == .Running && harness_run.item == HARNESS_MANIFEST[it.row].id
+item_running :: proc(it: core.Harness_Item) -> bool {
+	return core.harness_run.status == .Running && core.harness_run.item == core.HARNESS_MANIFEST[it.row].id
 }
 
 // Its button: Install, Update, Copy (shown only), or none.
 @(private = "file")
-item_button :: proc(it: Harness_Item) -> (label: string, what: Setup_Hit_Kind, ok: bool) {
+item_button :: proc(it: core.Harness_Item) -> (label: string, what: Setup_Hit_Kind, ok: bool) {
 	if it.action == .None do return "", .Agent_Action, false
 	if !it.runnable do return it.command != "" ? "Copy" : "", .Agent_Copy, it.command != ""
 	if item_running(it) do return "Running…", .Agent_Action, true
@@ -81,20 +82,20 @@ item_button :: proc(it: Harness_Item) -> (label: string, what: Setup_Hit_Kind, o
 // One line of a card: a mark, the name, what it is now, a button; under it the reason or the note,
 // and the command an action runs.
 @(private = "file")
-item_line :: proc(it: Harness_Item, w: f32, head: bool) {
+item_line :: proc(it: core.Harness_Item, w: f32, head: bool) {
 	th := theme()
-	r := HARNESS_MANIFEST[it.row]
+	r := core.HARNESS_MANIFEST[it.row]
 	mark, mcol := item_mark(it)
 	label, what, has := item_button(it)
 	bw := has ? text_w(label, head ? WEIGHT_BOLD : WEIGHT_REGULAR) + px(2 * SP_3 + SP_2) : 0
 	room := w - px(SP_3 + SP_1 + SP_2) - bw
 	if clay.UI(clay.ID("agent_item_row", u32(it.row)))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, childGap = pu(SP_2), childAlignment = {y = .Top}}}) {
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_3 + SP_1)), clay.SizingFit()}, padding = {0, 0, 2, 0}}}) {
-			if head do icon(harness_icon(r.harness), th.text, HARNESS_ICON_SIZE)
+			if head do icon(core.harness_icon(r.harness), th.text, HARNESS_ICON_SIZE)
 			else do clay.TextDynamic(mark, txt(mcol))
 		}
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom, childGap = 2}}) {
-			status := harness_item_text(it)
+			status := core.harness_item_text(it)
 			if head && it.state == .Ok do status = fmt.tprintf("%s %s", mark, status)
 			name_w := min(text_w(r.name, head ? WEIGHT_BOLD : WEIGHT_REGULAR), room * 0.55)
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, childGap = pu(SP_2)}}) {
@@ -166,11 +167,11 @@ break_long_words :: proc(s: string, room: f32, kind: Font_Kind) -> string {
 
 // One harness's card.
 @(private = "file")
-harness_card :: proc(h: Harness, w: f32) {
+harness_card :: proc(h: core.Harness, w: f32) {
 	th := theme()
-	head: Harness_Item
+	head: core.Harness_Item
 	found := false
-	for it in harness_items do if HARNESS_MANIFEST[it.row].harness == h && HARNESS_MANIFEST[it.row].kind == .Harness {
+	for it in core.harness_items do if core.HARNESS_MANIFEST[it.row].harness == h && core.HARNESS_MANIFEST[it.row].kind == .Harness {
 		head, found = it, true
 	}
 	if !found do return
@@ -178,14 +179,14 @@ harness_card :: proc(h: Harness, w: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = {pu(SP_2), pu(SP_2), pu(SP_2), pu(SP_2)}, childGap = pu(SP_2)},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(head.state == .Too_Old ? th.waiting : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(head.state == .Too_Old ? th.waiting : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 	}) {
 		inner := w - px(2 * SP_2)
 		item_line(head, inner, true)
 		if head.state == .Missing do return // collapsed: a harness the user may not use
 		rec := 0
-		for it in harness_items {
-			r := HARNESS_MANIFEST[it.row]
+		for it in core.harness_items {
+			r := core.HARNESS_MANIFEST[it.row]
 			if r.harness != h || r.kind == .Harness do continue
 			if r.need == .Recommended {
 				if rec == 0 do sub_head("Recommended")
@@ -209,33 +210,33 @@ sub_head :: proc(text: string) {
 @(private = "file")
 run_block :: proc(w: f32) {
 	th := theme()
-	t := harness_run_term()
-	if harness_run.status == .None || t == nil do return
-	r, _ := harness_row(harness_run.item)
-	verb := harness_run.action == .Update ? "Updating" : "Installing"
+	t := core.harness_run_term()
+	if core.harness_run.status == .None || t == nil do return
+	r, _ := core.harness_row(core.harness_run.item)
+	verb := core.harness_run.action == .Update ? "Updating" : "Installing"
 	head: string
 	col := th.text_secondary
-	switch harness_run.status {
+	switch core.harness_run.status {
 	case .Running: head = fmt.tprintf("%s %s… (⌃C stops it)", verb, r.name)
 	case .Done:
 		head = fmt.tprintf("%s %s: finished, checked again", verb, r.name)
 		col = th.done
 	case .Failed:
-		how := exit_text(harness_run.exit)
+		how := core.exit_text(core.harness_run.exit)
 		head = fmt.tprintf("%s %s failed%s", verb, r.name, how != "" ? fmt.tprintf(" (%s)", how) : "")
 		col = th.error
 	case .None:
 	}
 	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
-		cw := harness_run.status != .Running ? text_w("Close", WEIGHT_REGULAR) + px(2 * SP_3 + SP_2) : 0
+		cw := core.harness_run.status != .Running ? text_w("Close", WEIGHT_REGULAR) + px(2 * SP_3 + SP_2) : 0
 		clay.TextDynamic(clip(head, w - cw, WEIGHT_BOLD), txt(col, WEIGHT_BOLD))
 		spacer()
-		if harness_run.status != .Running do button(clay.ID("setupbtn", u32(Setup_Hit_Kind.Agent_Close)), "Close", false, ui_hover == Hit(Hit_Setup{what = .Agent_Close}))
+		if core.harness_run.status != .Running do button(clay.ID("setupbtn", u32(Setup_Hit_Kind.Agent_Close)), "Close", false, ui_hover == Hit(Hit_Setup{what = .Agent_Close}))
 	}
 	hgt := f32(HARNESS_TERM_ROWS) * font.cell_h + 2 * term_pad()
 	if clay.UI(clay.ID("setup_term"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(hgt)}},
-		backgroundColor = cc(term_colors().bg),
+		backgroundColor = cc(core.term_colors().bg),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 	}) {}
 	term_laid_out = true
@@ -245,23 +246,23 @@ run_block :: proc(w: f32) {
 harness_step_body :: proc(w: f32) {
 	th := theme()
 	term_laid_out = false
-	if len(harness_items) == 0 do harness_checklist_refresh()
-	harness_checklist_tick()
+	if len(core.harness_items) == 0 do core.harness_checklist_refresh()
+	core.harness_checklist_tick()
 	installed := 0
-	for h in Harness do if harness_item_installed(h) do installed += 1
+	for h in core.Harness do if core.harness_item_installed(h) do installed += 1
 	intro := "Deckhand runs pi and Claude Code: you need at least one. Its own parts ship inside the app. Install and Update run the command shown, in a terminal here, only when you click; nothing already there is installed again."
 	if installed == 0 do intro = "No coding agent is installed yet: install pi, Claude Code, or both. Deckhand's own parts ship inside the app. Install runs the command shown, in a terminal here, only when you click."
 	cfg := txt(th.text_secondary, FONT_UI_SMALL)
 	cfg.wrapMode = .Words
 	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_1), pu(SP_1), 2, 2}}}) do clay.TextDynamic(intro, cfg)
 	// installed harnesses first: the one the user has is what matters
-	for pass in 0 ..< 2 do for h in Harness do if harness_item_installed(h) == (pass == 0) do harness_card(h, w)
+	for pass in 0 ..< 2 do for h in core.Harness do if core.harness_item_installed(h) == (pass == 0) do harness_card(h, w)
 	run_block(w)
 }
 
 // The step's hits (setup_hit).
 harness_step_hit :: proc() -> Hit {
-	for it in harness_items {
+	for it in core.harness_items {
 		if clay.PointerOver(clay.ID("agent_item_btn", u32(it.row))) do return Hit_Setup{what = .Agent_Action, index = it.row}
 		if clay.PointerOver(clay.ID("agent_item_copy", u32(it.row))) do return Hit_Setup{what = .Agent_Copy, index = it.row}
 	}
@@ -269,15 +270,15 @@ harness_step_hit :: proc() -> Hit {
 }
 
 harness_step_tip :: proc(h: Hit_Setup) -> string {
-	if h.index < 0 || h.index >= len(HARNESS_MANIFEST) do return ""
-	it := harness_item(HARNESS_MANIFEST[h.index].id)
+	if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
+	it := core.harness_item(core.HARNESS_MANIFEST[h.index].id)
 	if it == nil do return ""
 	#partial switch h.what {
 	case .Agent_Action:
 		if item_running(it^) do return "Running in the terminal below"
 		return fmt.tprintf("Run `%s` in a terminal here", it.command)
 	case .Agent_Copy:
-		return fmt.tprintf("Copy `%s`: Deckhand does not run updates for %s installs", it.command, INSTALL_LAYOUT_NAMES[it.layout])
+		return fmt.tprintf("Copy `%s`: Deckhand does not run updates for %s installs", it.command, core.INSTALL_LAYOUT_NAMES[it.layout])
 	}
 	return ""
 }
@@ -287,17 +288,17 @@ harness_step_tip :: proc(h: Hit_Setup) -> string {
 harness_step_click :: proc(h: Hit_Setup) -> string {
 	#partial switch h.what {
 	case .Agent_Action:
-		if h.index < 0 || h.index >= len(HARNESS_MANIFEST) do return ""
-		if harness_run.status == .Running && harness_run.item == HARNESS_MANIFEST[h.index].id do return ""
-		return harness_run_start(HARNESS_MANIFEST[h.index].id)
+		if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
+		if core.harness_run.status == .Running && core.harness_run.item == core.HARNESS_MANIFEST[h.index].id do return ""
+		return core.harness_run_start(core.HARNESS_MANIFEST[h.index].id)
 	case .Agent_Copy:
-		if h.index < 0 || h.index >= len(HARNESS_MANIFEST) do return ""
-		if it := harness_item(HARNESS_MANIFEST[h.index].id); it != nil && it.command != "" {
-			if platform.set_clipboard != nil do platform.set_clipboard(it.command)
+		if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
+		if it := core.harness_item(core.HARNESS_MANIFEST[h.index].id); it != nil && it.command != "" {
+			if core.platform.set_clipboard != nil do core.platform.set_clipboard(it.command)
 			toast_show(fmt.tprintf("Copied: %s", it.command))
 		}
 	case .Agent_Close:
-		harness_run_dismiss()
+		core.harness_run_dismiss()
 	}
 	return ""
 }
@@ -305,7 +306,7 @@ harness_step_click :: proc(h: Hit_Setup) -> string {
 // Keys and the wheel while a run's terminal shows on the sheet: the keyboard is the terminal's
 // while it runs (⌃C stops it; ⌘Q still quits). True if taken.
 harness_step_event :: proc(e: ^sapp.Event) -> bool {
-	t := harness_run_term()
+	t := core.harness_run_term()
 	if t == nil do return false
 	#partial switch e.type {
 	case .MOUSE_SCROLL:
@@ -325,7 +326,7 @@ harness_step_event :: proc(e: ^sapp.Event) -> bool {
 	if !harness_run_takes_key(e, visible, time.tick_now()) {
 		// the habitual Enter right after the click, or a hidden terminal: the run gets nothing,
 		// and the sheet's own keys (Next, Back) stay held while it runs
-		held := harness_run.status == .Running && e.modifiers & sapp.MODIFIER_SUPER == 0
+		held := core.harness_run.status == .Running && e.modifiers & sapp.MODIFIER_SUPER == 0
 		if held && e.type == .KEY_DOWN do app.key_taken = true
 		return held
 	}
@@ -348,31 +349,31 @@ harness_step_event :: proc(e: ^sapp.Event) -> bool {
 
 // A Coding agents row's button: the sheet's checklist. False: not such a row.
 harness_settings_button :: proc(path: string) -> bool {
-	if !strings.has_prefix(path, HARNESS_SETTINGS_ROW) do return false
-	ui_do(Setup_Sheet{open = true})
+	if !strings.has_prefix(path, core.HARNESS_SETTINGS_ROW) do return false
+	ui_do(core.Setup_Sheet{open = true})
 	return true
 }
 
 // A Coding agents row's tooltip ("" = not such a row).
 harness_settings_tip :: proc(path: string, on_button: bool) -> string {
-	if !strings.has_prefix(path, HARNESS_SETTINGS_ROW) do return ""
-	it := harness_item(path[len(HARNESS_SETTINGS_ROW):])
+	if !strings.has_prefix(path, core.HARNESS_SETTINGS_ROW) do return ""
+	it := core.harness_item(path[len(core.HARNESS_SETTINGS_ROW):])
 	if it == nil do return ""
-	r := HARNESS_MANIFEST[it.row]
+	r := core.HARNESS_MANIFEST[it.row]
 	if on_button do return fmt.tprintf("Open the coding agents checklist: `%s`", it.command)
-	return fmt.tprintf("%s: %s. %s", r.name, harness_item_text(it^), r.why)
+	return fmt.tprintf("%s: %s. %s", r.name, core.harness_item_text(it^), r.why)
 }
 
 // ---- the New session picker and the install run's keys (moved from harness.odin and
 // harness_install.odin: the window's) ----
 
 // The picker's rows: a note saying what it starts, then the choices (temp).
-new_session_menu_items :: proc(t: Menu_New_Session, items: ^[dynamic]Menu_Item) {
-	p := find_project(t.project_id)
+new_session_menu_items :: proc(t: core.Menu_New_Session, items: ^[dynamic]core.Menu_Item) {
+	p := core.find_project(t.project_id)
 	if p == nil do return
-	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", project_display(p^))
-	append(items, Menu_Item{label = what, note = true})
-	append(items, ..new_session_choices(p, t.cwd))
+	what := p.group == .Chats ? "New chat with…" : t.cwd != "" ? fmt.tprintf("New session in %s with…", filepath.base(t.cwd)) : fmt.tprintf("New session in %s with…", core.project_display(p^))
+	append(items, core.Menu_Item{label = what, note = true})
+	append(items, ..core.new_session_choices(p, t.cwd))
 }
 
 // Where the picker opens without a click (a shortcut, the palette, the menu bar): under the top
@@ -384,20 +385,20 @@ new_session_anchor :: proc() -> [2]f32 {
 // The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
 // at: where the picker opens (nil = new_session_anchor).
 new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
-	p := find_project(pid)
+	p := core.find_project(pid)
 	if p == nil do return
 	// looked up again (stat only): a harness installed since is offered
-	pi_installed_now()
-	claude_installed_now()
-	items := new_session_choices(p, cwd)
+	core.pi_installed_now()
+	core.claude_installed_now()
+	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:
-		toast_show(NO_HARNESS, err = true)
+		toast_show(core.NO_HARNESS, err = true)
 	case 1:
-		harness_used(items[0].cmd)
+		core.harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")
 	case:
-		menu_open(Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())
+		menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())
 		rows := menu_items()
 		for it, i in rows do if !it.note && !it.sep {
 			menu.selected = i // the first choice: the last used
@@ -408,7 +409,7 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 
 // A number key in the picker: its Nth choice (1-9). False: not the picker, or no such row.
 new_session_number :: proc(key: sapp.Keycode, mods: u32) -> bool {
-	if _, ok := menu.target.(Menu_New_Session); !ok do return false
+	if _, ok := menu.target.(core.Menu_New_Session); !ok do return false
 	if mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT) != 0 do return false // ⌘1…: not a pick
 	n := int(key) - int(sapp.Keycode._1)
 	if key >= .KP_1 && key <= .KP_9 do n = int(key) - int(sapp.Keycode.KP_1)
@@ -428,18 +429,18 @@ new_session_number :: proc(key: sapp.Keycode, mods: u32) -> bool {
 // Whether a key reaches the run's terminal: only while it runs and shows on the sheet (visible),
 // never ⌘ keys (⌘Q quits), and not Enter during HARNESS_ENTER_GRACE after the click.
 harness_run_takes_key :: proc(e: ^sapp.Event, visible: bool, now: time.Tick) -> bool {
-	if harness_run.status != .Running || !visible do return false
+	if core.harness_run.status != .Running || !visible do return false
 	if e.modifiers & sapp.MODIFIER_SUPER != 0 do return false
 	enter := (e.type == .KEY_DOWN || e.type == .KEY_UP) && (e.key_code == .ENTER || e.key_code == .KP_ENTER) || e.type == .CHAR && (e.char_code == '\r' || e.char_code == '\n')
-	if enter && time.tick_diff(harness_run.started, now) < HARNESS_ENTER_GRACE do return false
+	if enter && time.tick_diff(core.harness_run.started, now) < core.HARNESS_ENTER_GRACE do return false
 	return true
 }
 
 // While an install runs on the setup sheet the keyboard stays there (its terminal, ⌃C): whatever
 // moved it (a menu, a command) is undone on the next frame, on the run's step.
 harness_run_keep_sheet :: proc() {
-	if harness_run.status != .Running do return
+	if core.harness_run.status != .Running do return
 	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
 	if state.focus_widget == "setup" do return
-	run_command(Focus_Take{widget = "setup"})
+	core.run_command(core.Focus_Take{widget = "setup"})
 }

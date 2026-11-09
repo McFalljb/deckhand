@@ -8,6 +8,7 @@ package main
 
 import "core:strings"
 import "core:unicode/utf8"
+import "core"
 
 Text_Field :: struct {
 	multiline: bool, // keeps line breaks (the agent's message field)
@@ -118,12 +119,12 @@ word_left :: proc(s: string, off: int) -> int {
 	i := off
 	for i > 0 {
 		r, n := utf8.decode_last_rune(s[:i])
-		if is_word_rune(r) do break
+		if core.is_word_rune(r) do break
 		i -= n
 	}
 	for i > 0 {
 		r, n := utf8.decode_last_rune(s[:i])
-		if !is_word_rune(r) do break
+		if !core.is_word_rune(r) do break
 		i -= n
 	}
 	return i
@@ -134,12 +135,12 @@ word_right :: proc(s: string, off: int) -> int {
 	i := off
 	for i < len(s) {
 		r, n := utf8.decode_rune(s[i:])
-		if is_word_rune(r) do break
+		if core.is_word_rune(r) do break
 		i += n
 	}
 	for i < len(s) {
 		r, n := utf8.decode_rune(s[i:])
-		if !is_word_rune(r) do break
+		if !core.is_word_rune(r) do break
 		i += n
 	}
 	return i
@@ -154,16 +155,16 @@ word_at :: proc(s: string, off: int) -> (lo, hi: int) {
 		at -= n
 	}
 	r0, _ := utf8.decode_rune(s[at:])
-	word := is_word_rune(r0)
+	word := core.is_word_rune(r0)
 	lo, hi = at, at
 	for lo > 0 {
 		r, n := utf8.decode_last_rune(s[:lo])
-		if is_word_rune(r) != word do break
+		if core.is_word_rune(r) != word do break
 		lo -= n
 	}
 	for hi < len(s) {
 		r, n := utf8.decode_rune(s[hi:])
-		if is_word_rune(r) != word do break
+		if core.is_word_rune(r) != word do break
 		hi += n
 	}
 	return

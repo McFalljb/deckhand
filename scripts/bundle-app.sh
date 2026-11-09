@@ -112,7 +112,7 @@ for kind in "" " (GPU)" " (Renderer)" " (Plugin)" " (Alerts)"; do
   sign_code "$h"
 done
 
-# Claude Code tabs (src/claude.odin): the CLI next to the binary (signed before the app: nested
+# Claude Code tabs (src/core/claude.odin): the CLI next to the binary (signed before the app: nested
 # code is signed inside out) and the plugin in Resources (sealed with the app's resources)
 if [ -f build/deckhand-cli ] && [ -d build/claude-code ]; then
   cp build/deckhand-cli "$C/MacOS/deckhand-cli"
@@ -126,7 +126,7 @@ if [ -f build/deckhand-cli ] && [ -d build/claude-code ]; then
 fi
 # the session holder (src/holder, docs/plans/background-core.md §7.1): a signed Mach-O in
 # Contents/Helpers (data files there would break the app's seal), identifier dev.deckhand.core,
-# which holder_install checks on its copy (src/holder_install.odin); signed before the app.
+# which holder_install checks on its copy (src/core/holder_install.odin); signed before the app.
 # Never written in place: a holder may run this very file (a scene's, in test mode), and a
 # signed binary changed under it is killed at its next page-in. Signed beside, then renamed in.
 if [ -f build/deckhand-core ]; then
@@ -136,7 +136,7 @@ if [ -f build/deckhand-core ]; then
   sign_code --identifier dev.deckhand.core build/.deckhand-core.bundled
   mv -f build/.deckhand-core.bundled "$C/Helpers/deckhand-core"
 fi
-# pi tabs (src/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
+# pi tabs (src/core/pi_integration.odin): the pi integration in Resources, loaded with `pi -e`
 if [ -d build/pi ]; then
   rm -rf "$C/Resources/pi"
   cp -R build/pi "$C/Resources/pi"

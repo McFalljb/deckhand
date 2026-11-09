@@ -10,6 +10,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 @(private = "file")
@@ -26,24 +27,24 @@ md_setup :: proc(t: ^testing.T, name, text: string) -> (dir: string, tab_id: u64
 		md_drop(id)
 		editor_drop(id)
 	}
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
 	clear(&opened)
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}, open_url = proc(url: string) -> bool {append(&opened, strings.clone(url, runtime.heap_allocator())); return true}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	made := fmt.tprintf("%s/deckhand-md-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
-	dir = fs_real(made, context.allocator)
-	append(&state.projects, Project{id = new_id(), cwd = dir, label = "proj"})
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = dir}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
+	dir = core.fs_real(made, context.allocator)
+	append(&state.projects, core.Project{id = core.new_id(), cwd = dir, label = "proj"})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = dir}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	path := fmt.tprintf("%s/%s", dir, name)
 	_ = os.write_entire_file(path, transmute([]u8)text)
-	r := run_command(Markdown_Open{path = path}, {kind = .Script})
+	r := core.run_command(core.Markdown_Open{path = path}, {kind = .Script})
 	testing.expect(t, r.ok, r.error)
 	tab_id = r.created_id
 	md_layout_now(t, tab_id)
@@ -62,38 +63,38 @@ md_layout_now :: proc(t: ^testing.T, tab_id: u64) {
 markdown_links_by_caller :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	_, tab := md_setup(t, "a.md", "# Top\n\n[site](https://example.com/x) [mail](mailto:a@example.invalid) [up](#top) [b](b.md)\n")
-	ctl := Caller{kind = .Control}
+	ctl := core.Caller{kind = .Control}
 	// another program's call: a web or mail link waits for the user
 	for url in ([]string{"https://example.com/x", "mailto:a@example.invalid"}) {
-		r := run_command(Markdown_Follow{tab_id = tab, url = url}, ctl)
+		r := core.run_command(core.Markdown_Follow{tab_id = tab, url = url}, ctl)
 		testing.expect_value(t, r.error, "needs_confirmation")
 		testing.expect(t, r.confirm_by_user && r.confirm_token == "", "only the user confirms")
 	}
 	testing.expect_value(t, len(opened), 0)
-	testing.expect_value(t, state.pending_confirmations[0].class, Command_Class.Open_Link)
+	testing.expect_value(t, state.pending_confirmations[0].class, core.Command_Class.Open_Link)
 	// asked again: the same entry
-	_ = run_command(Markdown_Follow{tab_id = tab, url = "https://example.com/x"}, ctl)
+	_ = core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://example.com/x"}, ctl)
 	testing.expect_value(t, len(state.pending_confirmations), 2)
 	// the user confirms the bar: it opens
 	p := state.pending_confirmations[0]
-	r := run_command(Markdown_Follow{tab_id = tab, url = "https://example.com/x", confirm = p.token}, {kind = .UI})
+	r := core.run_command(core.Markdown_Follow{tab_id = tab, url = "https://example.com/x", confirm = p.token}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, len(opened) == 1 && opened[0] == "https://example.com/x", "opened after the user confirmed")
 	// the user's click: no question
-	r = run_command(Markdown_Follow{tab_id = tab, url = "mailto:a@example.invalid"}, {kind = .UI})
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "mailto:a@example.invalid"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, len(opened), 2)
 	// anchors and relative files stay open to every caller
-	testing.expect(t, run_command(Markdown_Follow{tab_id = tab, url = "#top"}, ctl).ok)
-	r = run_command(Markdown_Follow{tab_id = tab, url = "b.md"}, ctl)
+	testing.expect(t, core.run_command(core.Markdown_Follow{tab_id = tab, url = "#top"}, ctl).ok)
+	r = core.run_command(core.Markdown_Follow{tab_id = tab, url = "b.md"}, ctl)
 	testing.expect_value(t, r.error, "no such file") // followed (not asked): b.md does not exist
 }
 
 @(private = "file")
-md_tab_of :: proc(id: u64) -> Markdown_Tab {
-	_, tab, _ := find_tab(id)
+md_tab_of :: proc(id: u64) -> core.Markdown_Tab {
+	_, tab, _ := core.find_tab(id)
 	if tab == nil do return {}
-	return tab.kind.(Markdown_Tab) or_else {}
+	return tab.kind.(core.Markdown_Tab) or_else {}
 }
 
 // Files renames the file: the tab follows it (path, title, its editor).
@@ -102,10 +103,10 @@ markdown_tab_follows_rename :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir, tab := md_setup(t, "a.md", "# A\n")
 	to := fmt.tprintf("%s/c.md", dir)
-	r := run_command(Rename_Path{from = fmt.tprintf("%s/a.md", dir), to = to}, {kind = .UI})
+	r := core.run_command(core.Rename_Path{from = fmt.tprintf("%s/a.md", dir), to = to}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, md_tab_of(tab).path, to)
-	_, tb, _ := find_tab(tab)
+	_, tb, _ := core.find_tab(tab)
 	testing.expect(t, tb != nil && tb.title == "c.md", tb != nil ? tb.title : "no tab")
 	e := editor_of(tab)
 	testing.expect(t, e != nil && e.path == to, e != nil ? e.path : "no editor")
@@ -149,13 +150,13 @@ markdown_shortcut_needs_the_keyboard :: proc(t: ^testing.T) {
 	_, tab := md_setup(t, "a.md", "# A\n")
 	ev := sapp.Event{type = .KEY_DOWN, key_code = .V, modifiers = sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT}
 	state.focus_widget = "agent_input" // typing in Atlas's terminal
-	testing.expect(t, !markdown_event(focused_pane(), &ev), "Atlas keeps ⇧⌘V")
+	testing.expect(t, !markdown_event(core.focused_pane(), &ev), "Atlas keeps ⇧⌘V")
 	testing.expect(t, !md_takes_keys(), "nor does the menu shortcut path take it")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect(t, !md_tab_of(tab).source, "still the preview")
 	state.focus_widget = ""
-	testing.expect(t, markdown_event(focused_pane(), &ev), "the tab's own shortcut")
-	inbox_drain()
+	testing.expect(t, markdown_event(core.focused_pane(), &ev), "the tab's own shortcut")
+	core.inbox_drain()
 	testing.expect(t, md_tab_of(tab).source, "the source now")
 }
 
@@ -175,25 +176,25 @@ markdown_links_follow_on_mouse_up :: proc(t: ^testing.T) {
 	testing.expect(t, x >= 0, "a link piece")
 	click :: proc(x, y: f32, mods: u32) {
 		down := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = x, mouse_y = y, modifiers = mods}
-		markdown_event(focused_pane(), &down)
-		inbox_drain()
+		markdown_event(core.focused_pane(), &down)
+		core.inbox_drain()
 	}
 	click(x, y, 0)
 	testing.expect_value(t, len(opened), 0) // the button is still down
 	up := sapp.Event{type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y}
-	markdown_event(focused_pane(), &up)
-	inbox_drain()
+	markdown_event(core.focused_pane(), &up)
+	core.inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 	click(x, y, sapp.MODIFIER_CTRL)
 	up.modifiers = sapp.MODIFIER_CTRL
-	markdown_event(focused_pane(), &up)
-	inbox_drain()
+	markdown_event(core.focused_pane(), &up)
+	core.inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 	// pressed on the link, released elsewhere: nothing
 	click(x, y, 0)
 	off := sapp.Event{type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = 899, mouse_y = 599}
-	markdown_event(focused_pane(), &off)
-	inbox_drain()
+	markdown_event(core.focused_pane(), &off)
+	core.inbox_drain()
 	testing.expect_value(t, len(opened), 1)
 }
 

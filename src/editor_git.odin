@@ -19,6 +19,7 @@ import "core:slice"
 import "core:strings"
 import "core:thread"
 import "core:time"
+import "core"
 
 Git_Mark :: enum u8 {
 	None,
@@ -49,32 +50,16 @@ git_gutter_free :: proc(g: ^Git_Gutter) {
 
 // The file's HEAD version (any thread; temp allocator).
 git_head_read :: proc(path: string) -> (in_repo, tracked: bool, head: string) {
-	top := git_toplevel(path)
+	top := core.git_toplevel(path)
 	if top == "" do return
 	in_repo = true
-	rel, rerr := filepath.rel(fs_real(top), fs_real(path), context.temp_allocator)
+	rel, rerr := filepath.rel(core.fs_real(top), core.fs_real(path), context.temp_allocator)
 	if rerr != .None do return
-	out, ok := git_run(top, "cat-file", "blob", strings.concatenate({"HEAD:", rel}, context.temp_allocator))
+	out, ok := core.git_run(top, "cat-file", "blob", strings.concatenate({"HEAD:", rel}, context.temp_allocator))
 	if !ok do return
 	return true, true, out
 }
 
-// Internal only: a worker read a file's HEAD version (Git_Head_Done) or a
-// repository's status (Git_Status_Done).
-Git_Head_Done :: struct {
-	tab_id:  u64,
-	gen:     u64, // Git_Gutter.load_gen when it started
-	path:    string,
-	in_repo: bool,
-	tracked: bool,
-	head:    string,
-}
-Git_Status_Done :: struct {
-	root: string,
-	gen:  u64, // Git_Status.gen when it started
-	ok:   bool,
-	out:  string, // git status --porcelain=v1 -z
-}
 
 // Starts reading the file's HEAD version on a worker thread (the result
 // comes back as Git_Head_Done). sync: read it now (an explicit request,
@@ -103,7 +88,7 @@ git_load_head :: proc(e: ^Editor, sync_now := false) {
 	job^ = {e.tab_id, g.load_gen, strings.clone(e.path, runtime.heap_allocator())}
 	thread.run_with_poly_data(job, proc(job: ^Job) {
 		in_repo, tracked, head := git_head_read(job.path)
-		inbox_submit(Git_Head_Done{tab_id = job.tab_id, gen = job.gen, path = job.path, in_repo = in_repo, tracked = tracked, head = head}, {kind = .Internal})
+		core.inbox_submit(core.Git_Head_Done{tab_id = job.tab_id, gen = job.gen, path = job.path, in_repo = in_repo, tracked = tracked, head = head}, {kind = .Internal})
 		delete(job.path, runtime.heap_allocator())
 		free(job, runtime.heap_allocator())
 		free_all(context.temp_allocator)

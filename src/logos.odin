@@ -11,6 +11,7 @@ package main
 // shows the harness's plain glyph instead (sidebar.odin: harness_row_icon).
 
 import "core:math"
+import "core"
 
 Logo :: enum u8 {
 	None,
@@ -20,7 +21,7 @@ Logo :: enum u8 {
 
 Logo_Ink :: struct {
 	key:   u8,
-	color: Rgba,
+	color: core.Rgba,
 }
 
 Logo_Art :: struct {
@@ -44,11 +45,6 @@ LOGO_PI := []string{
 	"BB.G",
 	"B..G",
 }
-
-// Whether Claude Code's mascot is shown. Anthropic's trademark guidelines ask for approval
-// before its marks are used (assets/harness/README.md); build with
-// -define:DECKHAND_CLAUDE_LOGO=false and Claude rows show the plain glyph instead.
-LOGO_CLAUDE_ON :: #config(DECKHAND_CLAUDE_LOGO, true)
 
 // Claude Code: Clawd, the mascot on its welcome screen, as Claude Code 2.1.318 draws it. In the
 // terminal it is three rows of quadrant block characters, each quadrant a cell one wide and
@@ -125,7 +121,7 @@ logo_render :: proc(logo: Logo, n: int, dst: []u8) -> bool {
 	origin, cell := logo_transform(logo, n)
 	for row, cy in art.rows do for key, cx in transmute([]u8)row {
 		if key == '.' do continue
-		color: Rgba
+		color: core.Rgba
 		for ink in art.inks do if ink.key == key do color = ink.color
 		if color[3] == 0 do continue
 		for y in 0 ..< cell do for x in 0 ..< cell {

@@ -1,0 +1,28 @@
+# The core's files (docs/plans/background-core.md §4, §10.2 M2-B): scripts/core-move.py moves
+# src/<name>.odin to src/core/<name>.odin, package core. Every other src/*.odin file is the
+# window's. One name per line; "#" starts a comment.
+#
+# A name whose file is not in src/ is skipped (renamed, or not on this base yet), and so is a
+# file that imports a window package (sokol, Clay, vendor:stb) or links a build/dh_*.a shim: a
+# file that became the window's needs no edit here. Both are printed.
+
+# state, commands, the inbox, events, the socket and the control CLI
+state commands command_table inbox events json_read json_write socket socket_posix ctl
+window_hooks platform core_loop test_hooks env_names
+# terminals and PTYs (the window keeps term_view, term_links)
+term term_palette pty pty_posix agent_status
+# persistence, the instance lock, the session holder's client
+persist macfile instance holder_adopt holder_client holder_install holder_restart holder_successor
+launchd_darwin snapshot
+# sessions, projects and the sidebar's model
+sessions session_info sidebar home folders project_tidy titles worktrees panes panes_commands
+panes_restore files fs_model changes changes_run comments show_file dead_tab notify reload
+# pi, Claude, harnesses, the login environment
+agent pi_integration claude claude_accounts claude_disk claude_panels claude_reload claude_rows
+claude_status claude_wait harness harness_install harness_manifest settings_files login_env
+# jobs
+jobs jobs_cron jobs_note jobs_owner jobs_run
+# updates
+update update_core update_key
+# M2-A2 (#37): the browser, app and Markdown commands' wire forms
+app_wire browser_wire markdown_wire

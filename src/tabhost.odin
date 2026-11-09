@@ -5,6 +5,7 @@ package main
 // the parts they have; texture display, capture and the control channel are
 // stubs (the Markdown tab is drawn by Deckhand too).
 
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 Tab_Display :: enum {
@@ -31,22 +32,22 @@ Tab_View :: struct {
 // Terminal tabs (pi and shell): libghostty-vt in process, drawn by us.
 terminal_host := Tab_View {
 	display = .Drawn,
-	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := term_of(tab_id); t != nil do term_draw(t)},
+	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := core.term_of(tab_id); t != nil do term_draw(t)},
 }
 
-tab_view :: proc(kind: Tab_Kind) -> ^Tab_View {
+tab_view :: proc(kind: core.Tab_Kind) -> ^Tab_View {
 	switch _ in kind {
-	case Pi_Tab, Shell_Tab, Claude_Tab:
+	case core.Pi_Tab, core.Shell_Tab, core.Claude_Tab:
 		return &terminal_host
-	case Editor_Tab:
+	case core.Editor_Tab:
 		return &editor_host // editor_view.odin
-	case Changes_Tab:
+	case core.Changes_Tab:
 		return &changes_host // ui_changes.odin
-	case Markdown_Tab:
+	case core.Markdown_Tab:
 		return &markdown_host // markdown_view.odin
-	case Browser_Tab:
+	case core.Browser_Tab:
 		return &browser_host // browser.odin
-	case App_Tab:
+	case core.App_Tab:
 		return &app_host // app_tab.odin
 	}
 	return nil
@@ -54,27 +55,27 @@ tab_view :: proc(kind: Tab_Kind) -> ^Tab_View {
 
 // The window's side of tab host routing (window_hooks.odin): the browser, app, Markdown and
 // editor commands, and a terminal's links, as commands.odin's apply sent them before.
-tab_host_apply_app :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool) {
+tab_host_apply_app :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (core.Result, bool) {
 	#partial switch _ in cmd {
-	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, List_Dir, Create_File, Create_Dir, Rename_Path, Delete_Path, Reveal_In_Finder, Keep_Tab, Git_Head_Done, Git_Status_Done, File_List_Done:
+	case core.Open_File, core.Editor_State, core.Save_File, core.Goto_Line, core.Reload_File, core.Keep_Buffer, core.Diff_File, core.Set_Wrap, core.List_Dir, core.Create_File, core.Create_Dir, core.Rename_Path, core.Delete_Path, core.Reveal_In_Finder, core.Keep_Tab, core.Git_Head_Done, core.Git_Status_Done, core.File_List_Done:
 		return editor_apply(cmd, caller)
-	case Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
+	case core.Markdown_Open, core.Markdown_Set_View, core.Markdown_Scroll, core.Markdown_Follow:
 		return markdown_apply(cmd, caller)
-	case Terminal_Link:
-		return term_link_apply(cmd.(Terminal_Link), caller) // a browser tab, else the default browser (term_links.odin)
-	case New_App_Tab, App_Restart, App_Close, App_Declared, App_Input, App_Events, App_Call, App_Call_Done, App_Update, App_Screenshot, App_Inspect:
+	case core.Terminal_Link:
+		return term_link_apply(cmd.(core.Terminal_Link), caller) // a browser tab, else the default browser (term_links.odin)
+	case core.New_App_Tab, core.App_Restart, core.App_Close, core.App_Declared, core.App_Input, core.App_Events, core.App_Call, core.App_Call_Done, core.App_Update, core.App_Screenshot, core.App_Inspect:
 		return app_apply(cmd, caller, request_id)
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case core.Browser_Open, core.Browser_Navigate, core.Browser_Back, core.Browser_Forward, core.Browser_Reload, core.Browser_Stop, core.Browser_Update:
 		if r, refused := browser_agent_nav_refused(cmd, caller); refused do return r, false // Take over (browser_agent.odin)
 		r, ch := browser_nav_apply(cmd, caller)
 		browser_agent_nav_ran(cmd, caller, r) // the agent strip; a load wait's navigation (browser_agent.odin)
 		return r, ch
-	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
+	case core.Browser_Zoom, core.Browser_Find, core.Browser_Find_Close, core.Browser_Dialog, core.Browser_Permission, core.Browser_Popup, core.Browser_Edit, core.Browser_Devtools, core.Browser_External, core.Browser_Download:
 		return browser_polish_apply(cmd, caller)
-	case Browser_Tabs, Browser_Read, Browser_Screenshot, Browser_Page_Wait, Browser_Console, Browser_Network, Browser_Comments, Browser_Agent_Stop:
+	case core.Browser_Tabs, core.Browser_Read, core.Browser_Screenshot, core.Browser_Page_Wait, core.Browser_Console, core.Browser_Network, core.Browser_Comments, core.Browser_Agent_Stop:
 		return browser_agent_apply(cmd, caller, request_id)
-	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
+	case core.Browser_Click, core.Browser_Type, core.Browser_Press, core.Browser_Scroll, core.Browser_Select, core.Browser_Hover, core.Browser_Upload, core.Browser_Upload_Answer, core.Browser_Agent_Take_Over, core.Request_Cancel:
 		return browser_act_apply(cmd, caller, request_id)
 	}
-	return fail("not a tab host command"), false
+	return core.fail("not a tab host command"), false
 }

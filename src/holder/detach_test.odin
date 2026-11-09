@@ -1,7 +1,7 @@
 package holder
 
 // The holder's half of the ready handshake (detach.odin) over a socketpair, the launcher's
-// bytes written ahead. The launchd path itself is src/launchd_test.odin's.
+// bytes written ahead. The launchd path itself is src/core/launchd_test.odin's.
 
 import "core:c"
 import "core:fmt"

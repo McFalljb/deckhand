@@ -8,6 +8,7 @@ package main
 
 import "base:runtime"
 import "core:testing"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -20,7 +21,7 @@ dh_input :: proc(tab, from: u64) -> Tab_Drop_Input {
 	b_tabs := make([]Drop_Tab, 2, context.temp_allocator)
 	b_tabs[0], b_tabs[1] = {3, {401, 0, 100, 30}}, {4, {501, 0, 100, 30}}
 	panes := make([]Drop_Pane, 2, context.temp_allocator)
-	all := [Pane_Dir]bool{.Left = true, .Right = true, .Up = true, .Down = true}
+	all := [core.Pane_Dir]bool{.Left = true, .Right = true, .Up = true, .Down = true}
 	panes[0] = {id = 10, zone = {0, 30, 400, 570}, strip = {0, 0, 400, 30}, tabs = a_tabs, room = all}
 	panes[1] = {id = 20, zone = {401, 30, 399, 570}, strip = {401, 0, 399, 30}, tabs = b_tabs, room = all}
 	return {panes = panes, tab = tab, from = from, from_count = 2, main = 1, edge_min = 40, edge_max = 120, mark_w = 2}
@@ -29,7 +30,7 @@ dh_input :: proc(tab, from: u64) -> Tab_Drop_Input {
 @(test)
 tab_drop_zones :: proc(t: ^testing.T) {
 	r := [4]f32{0, 0, 400, 300} // edge zones: 100 px across (a quarter), 75 px down
-	check :: proc(t: ^testing.T, r: [4]f32, x, y: f32, want: Pane_Dir, want_edge: bool, loc := #caller_location) {
+	check :: proc(t: ^testing.T, r: [4]f32, x, y: f32, want: core.Pane_Dir, want_edge: bool, loc := #caller_location) {
 		dir, edge, ok := drop_zone_at(r, x, y, 40, 120)
 		testing.expect(t, ok, "inside", loc = loc)
 		testing.expect_value(t, edge, want_edge, loc = loc)
@@ -63,7 +64,7 @@ tab_drop_strips :: proc(t: ^testing.T) {
 	d := tab_drop_at(dh_input(4, 20), 410, 15)
 	testing.expect(t, d.kind == .Strip && d.pane == 20 && d.gap == 0 && d.index == 0 && !d.noop, "s3 first in B")
 	cmd, ok := tab_drop_command(d, 4)
-	testing.expect(t, ok && cmd.(Move_Tab) == Move_Tab{tab_id = 4, pane = 20, index = 0}, "move_tab B 0")
+	testing.expect(t, ok && cmd.(core.Move_Tab) == core.Move_Tab{tab_id = 4, pane = 20, index = 0}, "move_tab B 0")
 	// s2 (B's first) to B's end: after s3, index counted without s2
 	d = tab_drop_at(dh_input(3, 20), 700, 15)
 	testing.expect(t, d.kind == .Strip && d.gap == 2 && d.index == 1 && !d.noop, "s2 last in B")
@@ -82,7 +83,7 @@ tab_drop_strips :: proc(t: ^testing.T) {
 	d = tab_drop_at(dh_input(1, 10), 700, 15)
 	testing.expect(t, d.kind == .Strip && d.pane == 20 && d.gap == 0 && d.index == 0 && !d.noop, "the pi tab first in B")
 	cmd, ok = tab_drop_command(d, 1)
-	testing.expect(t, ok && cmd.(Move_Tab).pane == 20, "the pi tab moves")
+	testing.expect(t, ok && cmd.(core.Move_Tab).pane == 20, "the pi tab moves")
 	// the pi tab in its own strip: it cannot leave index 0
 	d = tab_drop_at(dh_input(1, 10), 190, 15)
 	testing.expect(t, d.noop && d.gap == 0, "the pi tab stays first")
@@ -100,7 +101,7 @@ tab_drop_bodies :: proc(t: ^testing.T) {
 	d := tab_drop_at(dh_input(3, 20), 200, 300) // s2 to A's centre
 	testing.expect(t, d.kind == .Centre && d.pane == 10 && !d.noop, "A's centre")
 	cmd, ok := tab_drop_command(d, 3)
-	testing.expect(t, ok && cmd.(Move_Tab) == Move_Tab{tab_id = 3, pane = 10, index = -1}, "move_tab to A's end")
+	testing.expect(t, ok && cmd.(core.Move_Tab) == core.Move_Tab{tab_id = 3, pane = 10, index = -1}, "move_tab to A's end")
 	d = tab_drop_at(dh_input(3, 20), 600, 300) // its own pane's centre
 	testing.expect(t, d.kind == .Centre && d.noop, "its own centre")
 	_, ok = tab_drop_command(d, 3)
@@ -108,12 +109,12 @@ tab_drop_bodies :: proc(t: ^testing.T) {
 	// each edge of A: split_pane with the tab
 	for c in ([]struct {
 			x, y: f32,
-			dir:  Pane_Dir,
+			dir:  core.Pane_Dir,
 		}{{10, 300, .Left}, {390, 300, .Right}, {200, 40, .Up}, {200, 590, .Down}}) {
 		d = tab_drop_at(dh_input(3, 20), c.x, c.y)
 		testing.expectf(t, d.kind == .Edge && d.pane == 10 && d.dir == c.dir && !d.noop && d.refused == "", "A's %v edge: %v", c.dir, d)
 		cmd, ok = tab_drop_command(d, 3)
-		testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 10, direction = c.dir, tab_id = 3}, "split_pane with the tab")
+		testing.expect(t, ok && cmd.(core.Split_Pane) == core.Split_Pane{pane = 10, direction = c.dir, tab_id = 3}, "split_pane with the tab")
 	}
 	// its own pane's edge: a split of its own pane with it (it has another tab)…
 	d = tab_drop_at(dh_input(3, 20), 790, 300)
@@ -128,7 +129,7 @@ tab_drop_bodies :: proc(t: ^testing.T) {
 	// the pi tab may split another pane
 	d = tab_drop_at(dh_input(1, 10), 410, 300)
 	cmd, ok = tab_drop_command(d, 1)
-	testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 20, direction = .Left, tab_id = 1}, "the pi tab splits B")
+	testing.expect(t, ok && cmd.(core.Split_Pane) == core.Split_Pane{pane = 20, direction = .Left, tab_id = 1}, "the pi tab splits B")
 	// limits: refused with why, no command
 	full := dh_input(3, 20)
 	full.at_max = true
@@ -174,8 +175,8 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	defer centre_reset()
 	defer tab_drag = {}
 	s := pt_one(2) // pi, shell 1, shell 2
-	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
-	lay :: proc(s: ^Open_Session) {
+	state.layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}
+	lay :: proc(s: ^core.Open_Session) {
 		_ = ui_layout(1400, 860)
 		ui_pane_rects(s)
 	}
@@ -201,7 +202,7 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag.drop.kind == .Strip && tab_drag.drop.gap == 1, "the mark after the pi tab")
 	testing.expect(t, tab_drag.preview.z > 0, "a mark shows")
 	testing.expect(t, tab_drag_release(px0 - 20, y), "the drag's release")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, pt_strip_titles(s, s.panes[0].id), "pi,shell 2,shell 1")
 	// the first split: shell 1 (now tabs[2]) to the pane's right edge
 	lay(s)
@@ -212,9 +213,9 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag.drop.kind == .Edge && tab_drag.drop.dir == .Right, "the right edge")
 	testing.expectf(t, abs(tab_drag.preview.z - z.z / 2) < 1, "the right half previewed: %v", tab_drag.preview)
 	tab_drag_release(z.x + z.z - 10, z.y + z.w / 2)
-	inbox_drain()
+	core.inbox_drain()
 	if !testing.expect_value(t, len(s.panes), 2) do return
-	testing.expect_value(t, pane_of_tab(s, s1).id, s.panes[1].id)
+	testing.expect_value(t, core.pane_of_tab(s, s1).id, s.panes[1].id)
 	testing.expect_value(t, s.tabs[0].id, pi)
 	// Esc cancels a drag; nothing moves
 	lay(s)
@@ -227,8 +228,8 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag_event(&esc), "Esc is the drag's")
 	up := sapp.Event{type = .MOUSE_UP, mouse_x = b.x + b.z / 2, mouse_y = b.y + b.w / 2, mouse_button = .LEFT}
 	testing.expect(t, !tab_drag_event(&up), "cancelled: the release goes on")
-	inbox_drain()
-	testing.expect_value(t, pane_of_tab(s, s2).id, s.panes[0].id)
+	core.inbox_drain()
+	testing.expect_value(t, core.pane_of_tab(s, s2).id, s.panes[0].id)
 	// a leave (sokol sends none while the button is held; should one come) cancels too
 	tab_drag_arm(s2, x, y)
 	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
@@ -241,8 +242,8 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	tab_drag_move(sb.x + sb.width - 40, sb.y + sb.height / 2)
 	testing.expect(t, tab_drag.drop.kind == .Strip && tab_drag.drop.pane == s.panes[1].id && tab_drag.drop.gap == 1, "the end of the right strip")
 	tab_drag_release(sb.x + sb.width - 40, sb.y + sb.height / 2)
-	inbox_drain()
-	if !testing.expect_value(t, pane_of_tab(s, s2).id, s.panes[1].id) do return
+	core.inbox_drain()
+	if !testing.expect_value(t, core.pane_of_tab(s, s2).id, s.panes[1].id) do return
 	testing.expect_value(t, pt_strip_titles(s, s.panes[1].id), "shell 1,shell 2")
 	// the pi tab, alone in the left pane now, to the right pane's centre: that pane holds every
 	// tab, the left one closes, the pi tab is still tabs[0] and first in its strip
@@ -252,7 +253,7 @@ tab_drag_on_the_window :: proc(t: ^testing.T) {
 	tab_drag_arm(pi, x, y)
 	tab_drag_move(b.x + b.z / 2, b.y + b.w / 2)
 	tab_drag_release(b.x + b.z / 2, b.y + b.w / 2)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(s.panes), 1)
 	testing.expect_value(t, s.tabs[0].id, pi)
 	testing.expect_value(t, pt_strip_titles(s, s.panes[0].id), "pi,shell 1,shell 2")
@@ -270,7 +271,7 @@ tab_drop_lone_tab_at_the_limit :: proc(t: ^testing.T) {
 	d := tab_drop_at(full, 10, 300) // A's left edge, s2 alone in B
 	testing.expect_value(t, d.refused, "")
 	cmd, ok := tab_drop_command(d, 3)
-	testing.expect(t, ok && cmd.(Split_Pane) == Split_Pane{pane = 10, direction = .Left, tab_id = 3}, "split_pane")
+	testing.expect(t, ok && cmd.(core.Split_Pane) == core.Split_Pane{pane = 10, direction = .Left, tab_id = 3}, "split_pane")
 	full.from_count = 2
 	d = tab_drop_at(full, 10, 300)
 	testing.expect_value(t, d.refused, "at most 8 panes") // a tab with company: one more pane
@@ -281,31 +282,31 @@ tab_drop_lone_tab_at_the_limit :: proc(t: ^testing.T) {
 @(test)
 panes_cmd_split_lone_tab :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	s := pt_one(PANES_MAX - 1)
-	shells := make([]u64, PANES_MAX - 1, context.temp_allocator)
-	for i in 0 ..< PANES_MAX - 1 do shells[i] = s.tabs[i + 1].id
+	s := pt_one(core.PANES_MAX - 1)
+	shells := make([]u64, core.PANES_MAX - 1, context.temp_allocator)
+	for i in 0 ..< core.PANES_MAX - 1 do shells[i] = s.tabs[i + 1].id
 	for id in shells {
-		r := run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = id}, PT_UI)
+		r := core.run_command(core.Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = id}, PT_UI)
 		testing.expectf(t, r.ok, "split: %s", r.error)
 	}
-	testing.expect_value(t, len(s.panes), PANES_MAX)
-	r := run_command(Split_Pane{pane = pane_of_tab(s, shells[0]).id, direction = .Down}, PT_UI)
+	testing.expect_value(t, len(s.panes), core.PANES_MAX)
+	r := core.run_command(core.Split_Pane{pane = core.pane_of_tab(s, shells[0]).id, direction = .Down}, PT_UI)
 	testing.expect_value(t, r.error, "at most 8 panes") // a new shell: one more pane
-	r = run_command(Split_Pane{pane = pane_of_tab(s, shells[0]).id, direction = .Down, tab_id = shells[1]}, PT_UI)
+	r = core.run_command(core.Split_Pane{pane = core.pane_of_tab(s, shells[0]).id, direction = .Down, tab_id = shells[1]}, PT_UI)
 	testing.expectf(t, r.ok, "a lone tab from another pane: %s", r.error)
-	testing.expect_value(t, len(s.panes), PANES_MAX)
-	testing.expect_value(t, session_check(s), "")
+	testing.expect_value(t, len(s.panes), core.PANES_MAX)
+	testing.expect_value(t, core.session_check(s), "")
 	// room: pi | (s1 | s2) in 740 px; s2 (alone) beside pi needs pi's and s1's room, not s2's
 	s = pt_one(2)
 	pi, s1, s2 := s.tabs[0].id, s.tabs[1].id, s.tabs[2].id
-	run_command(Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s1}, PT_UI)
-	run_command(Split_Pane{pane = pane_of_tab(s, s1).id, direction = .Right, tab_id = s2}, PT_UI)
-	pane_set_ratio(s, s.nodes[s.root].id, 0.7)
-	old_c, old_d, old_pc := app.centre, app.dpi, pane_centre
-	defer app.centre, app.dpi, pane_centre = old_c, old_d, old_pc
+	core.run_command(core.Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s1}, PT_UI)
+	core.run_command(core.Split_Pane{pane = core.pane_of_tab(s, s1).id, direction = .Right, tab_id = s2}, PT_UI)
+	core.pane_set_ratio(s, s.nodes[s.root].id, 0.7)
+	old_c, old_d, old_pc := app.centre, app.dpi, core.pane_centre
+	defer app.centre, app.dpi, core.pane_centre = old_c, old_d, old_pc
 	app.centre, app.dpi = {0, 0, 740, 600}, 1
-	pane_centre_set(740, 600, 1)
-	r = run_command(Split_Pane{pane = pane_of_tab(s, pi).id, direction = .Right, tab_id = s2}, PT_UI)
+	core.pane_centre_set(740, 600, 1)
+	r = core.run_command(core.Split_Pane{pane = core.pane_of_tab(s, pi).id, direction = .Right, tab_id = s2}, PT_UI)
 	testing.expectf(t, r.ok, "room without s2's pane: %s", r.error)
 	testing.expect_value(t, len(s.panes), 3)
 }
@@ -349,7 +350,7 @@ tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
 	defer centre_reset()
 	defer tab_drag = {}
 	s := pt_one(2)
-	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
+	state.layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}
 	_ = ui_layout(1400, 860)
 	ui_pane_rects(s)
 	b := clay.GetElementData(clay.ID("tab", 2)).boundingBox
@@ -358,7 +359,7 @@ tab_drag_ends_when_its_tab_goes :: proc(t: ^testing.T) {
 	tab_drag_arm(id, b.x + b.width / 2, b.y + b.height / 2)
 	tab_drag_move(z.x + z.z - 10, z.y + z.w / 2)
 	testing.expect(t, tab_dragging(), "a drag")
-	r := run_command(Close_Tab{tab_id = id}, PT_UI)
+	r := core.run_command(core.Close_Tab{tab_id = id}, PT_UI)
 	testing.expectf(t, r.ok, "close: %s", r.error)
 	_ = ui_layout(1400, 860)
 	testing.expect_value(t, tab_drag.tab, u64(0))
@@ -375,15 +376,15 @@ tab_drag_owns_the_pointer_in_event :: proc(t: ^testing.T) {
 	defer tab_drag = {}
 	x := pt_two()
 	defer pt_two_done(x)
-	state.layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}
-	session_show_tab(x.s, x.app_id)
+	state.layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}
+	core.session_show_tab(x.s, x.app_id)
 	apps[x.app_id].inspect = true
 	for _ in 0 ..< 3 {
 		_ = ui_layout(1400, 860)
 		ui_pane_rects(x.s)
 	}
 	tb := clay.GetElementData(clay.ID("tab", 1)).boundingBox // the shell, in A's strip
-	pb := session_pane(x.s, x.b)
+	pb := core.session_pane(x.s, x.b)
 	cx, cy := pb.rect.x + pb.rect.z / 2, pb.rect.y + pb.rect.w / 2
 	e := sapp.Event{type = .MOUSE_MOVE, mouse_x = tb.x + tb.width / 2, mouse_y = tb.y + tb.height / 2}
 	event(&e)
@@ -402,7 +403,7 @@ tab_drag_owns_the_pointer_in_event :: proc(t: ^testing.T) {
 	testing.expect(t, tab_drag.drop.kind == .Centre && tab_drag.drop.pane == x.b, "B's middle")
 	e = {type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = cx, mouse_y = cy}
 	event(&e)
-	testing.expect_value(t, pane_of_tab(x.s, x.shell).id, x.b)
+	testing.expect_value(t, core.pane_of_tab(x.s, x.shell).id, x.b)
 	testing.expect_value(t, tab_drag.tab, u64(0))
 	testing.expect_value(t, pointer_capture.pane, u64(0))
 }

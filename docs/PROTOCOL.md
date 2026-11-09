@@ -5,7 +5,7 @@ Deckhand's pi integration in each pi tab (pi-tab control and panels; `integratio
 [HARNESSES.md](HARNESSES.md)), and later tab programs ([TAB-PROTOCOL.md](TAB-PROTOCOL.md)).
 One envelope, one socket, three schemas. Status: the command and state schemas, the socket
 listener, handshake, tokens, subscriptions and the pi-tab status/control half of the bridge
-schema and row panels (§5) are implemented (`src/socket.odin`, tested in `src/core_test.odin`
+schema and row panels (§5) are implemented (`src/core/socket.odin`, tested in `src/core_test.odin`
 and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not yet.
 
 ## 1. Transport and envelope
@@ -18,7 +18,7 @@ and `src/socket_test.odin`); the fixed panel kinds and `panel.action` are not ye
   stable (until M1 it was `deckhand-<pid>.sock` in `$TMPDIR/pi-desk-<uid>`), so a tab that outlives
   Deckhand keeps its `DECKHAND_SOCKET`. Deckhand refuses a directory it does not own, that is not
   a real directory, or whose socket paths would not fit in `sun_path` (104 bytes). Named pipe on
-  Windows (later; OS code is behind `src/socket_posix.odin`).
+  Windows (later; OS code is behind `src/core/socket_posix.odin`).
   Newline-delimited JSON (NDJSON): one UTF-8 JSON object per line, no line breaks inside.
 - Lines up to 1 MiB (4 KiB before `hello`); a longer one gets an error result and the
   connection closes. JSON nested deeper than 64 arrays/objects gets `"JSON nested too deeply"`;
@@ -79,7 +79,7 @@ The first message on a connection is `hello`:
 | `internal` | Deckhand itself (exit notices, finished scans) | never asks for confirmation |
 | `app` | an app tab's program ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) | no commands: it answers the requests Deckhand passes it (its own methods, via `app_call`, and Deckhand's `tab.visible`/`tab.display`/`tab.ping`/`tab.quit`), gets `input` messages and sends events (`tab.log`, `tab.boxes`, …) (§3, app tabs) |
 
-  In code: `Caller{kind, tab_id, claude}` and `caller_may` in `src/commands.odin`.
+  In code: `Caller{kind, tab_id, claude}` and `caller_may` in `src/core/commands.odin`.
 - **Where tokens come from.** Every pi tab Deckhand starts gets a fresh 256-bit random token
   (caller `panel`, that tab) in `DECKHAND_TOKEN`, with `DECKHAND_SOCKET`, and where app
   screenshots go in `DECKHAND_SHOTS_DIR` (`<data dir>/apps/shots`, absolute; the pi integration
@@ -177,7 +177,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `rename_project` | `project_id`, `name` (`""` = path label) | refused for Chats |
 | `open_session` | `project_id`, `pi_session_id` | resumes it; if already open, focuses it (and starts its pi again in the same tab if it exited, as `pi_restart`; a Claude-only session's main Claude tab, as `claude_restart`) → open session id (Chats: its project id). An agent's never starts a restored Claude tab (it would run with the user's saved flags): it stays `not_started` until the user shows it; the same for `focus_session` and `focus_tab`. A pi session's file is looked for first; a Claude session id of the project's (`claude_sessions`; its row in the left column) resumes it as `claude_resume` does (in a Claude-only session; the saved flags only for the user) → the open session id |
 | `new_chat` | `project_id` | starts `pi --session-id <uuid>` → open session id. With the Chats entry's id: a chat, full pi run in the Chats folder (`settings.folders.chats.path`: the chats override, else `<home_dir>/chats`, else `~/Chats`; made on the first chat, with its `AGENTS.md` starter) with pi's normal store, so `cd <chats folder> && pi --resume` finds it; read-only (pi's read tools only and `desk_show`, `--tools read,grep,find,ls,desk_show --exclude-tools 'mcp__*' --no-mcp`, plus `PI_KIT_READONLY=1`; refused on a known pi older than 1.0.4) only with `chats_readonly` |
-| `set_home_dir` | `path` (absolute or `~/…`; `""` = unset), `create`? | **user only**; the main folder (`src/folders.odin`, GUIDE "Your folders"). It must exist unless `create` (then it is made). The missing standard subfolders (`sessions`, `jobs`, `memory`, `atlas`, `chats`; not overridden ones) are made, empty; nothing else is touched or moved. The previous main folder is kept in memory for the Settings tab's **Old main folder** row. Atlas's prompt follows (a copy, docs/ATLAS.md §8), jobs are read again, and if the effective chats folder changed: rescan, as `set_folder` chats. Old name: `set_notes_dir` (same arguments, still accepted) |
+| `set_home_dir` | `path` (absolute or `~/…`; `""` = unset), `create`? | **user only**; the main folder (`src/core/folders.odin`, GUIDE "Your folders"). It must exist unless `create` (then it is made). The missing standard subfolders (`sessions`, `jobs`, `memory`, `atlas`, `chats`; not overridden ones) are made, empty; nothing else is touched or moved. The previous main folder is kept in memory for the Settings tab's **Old main folder** row. Atlas's prompt follows (a copy, docs/ATLAS.md §8), jobs are read again, and if the effective chats folder changed: rescan, as `set_folder` chats. Old name: `set_notes_dir` (same arguments, still accepted) |
 | `set_folder` | `kind` (`sessions`, `jobs`, `memory`, `atlas`, `chats`), `path` (absolute or `~/…`; `""` = the default `<home_dir>/<kind>`) | **user only**; a subfolder's override. It must exist (chats: not yet, made on the first chat). A sessions folder must be named `sessions` (pi-kit writes `<PI_KIT_NOTES_DIR>/sessions/`; Deckhand passes its parent). An override equal to the default is stored as the default. Chats: chats already in the old folder stay there, it becomes an ordinary project (rescan), the new folder leaves Projects and gets its `AGENTS.md` starter. Old name for chats: `set_chats_dir` `{path}` (still accepted) |
 | `setup_sheet` | `open` | **user only**; the first-run sheet: open (step 1), or close. Closing marks `settings.setup_seen`: it does not open by itself again. It opens by itself at start while `home_dir` is unset and `setup_seen` is false (test mode: only with `DECKHAND_FIRST_RUN=1`) |
 | `set_claude_default_flags` | `skip_permissions`, `confirm`? | **user only**; default Claude Code flags for each start of a Claude tab the user makes (off by default; the Settings tab's Claude Code group, the palette). Turning it on is always confirmed by the user (`needs_confirmation` with the warning; resend with `confirm`). `skip_permissions`: `--dangerously-skip-permissions` is added after the tab's flags at the start of a `new_claude_tab`, `new_claude_session` or `claude_resume` whose caller is `ui`, a restored tab when shown, and the user's restart (not when the flags name it or set `--permission-mode`; not past 16 flags). It is never saved into a tab's flags or the history, so turning it off takes it from every later start. Never an agent's, a script's, a panel's or an app's start. A read-only start leaves it out and a toast says so. Saved; `settings.claude_skip_permissions` in the snapshot |
@@ -192,7 +192,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_filter` | `text`?, `running`?, `waiting`?, `pinned`?, `show_hidden`? | the left column's filter (unset fields keep their value; text: one line, at most 200 bytes) |
 | `reveal` | `project_id`, `pi_session_id`? | **user and control only**; shows the project's folder (Chats: its session dir) or the session's file in the file manager; side effect only. `pi_session_id` may be a Claude session id of the project's `claude_sessions` (its row): its transcript file, only while Deckhand knows one under Claude's config dir's `projects/` (checked again, real path, at each use) |
 | `copy_path` | `project_id`, `pi_session_id`? | copies that path (a Claude row's: as `reveal`); side effect only |
-| `session_info` | `project_id`, `pi_session_id`, `to`? | a session's info, read from its session file's header (the first line) and the file's dates only, never its messages (`src/session_info.odin`): `data` = `{text, id, file, project, cwd, title, created, modified, model}`; `text` is a fenced `pi-session` block of `key: value` lines (empty ones left out; `title` from the title cache). A Claude row's id (`claude_sessions`) gives Deckhand's own record instead (never Claude Code's files): a `claude-session` block and `data` with `agent: "Claude Code"`, `id`, `file` (its transcript, as `reveal`; left out when none), `project`, `cwd`, `title`, `used` (last use) and `model` (the last one reported). `to`: `"clipboard"` also copies `text`; `"agent"` (**user only**) opens the agent's drawer and pastes `text` into its input without sending it (bracketed paste; if its pi has not turned that on, `text` is copied instead and the result says so) |
+| `session_info` | `project_id`, `pi_session_id`, `to`? | a session's info, read from its session file's header (the first line) and the file's dates only, never its messages (`src/core/session_info.odin`): `data` = `{text, id, file, project, cwd, title, created, modified, model}`; `text` is a fenced `pi-session` block of `key: value` lines (empty ones left out; `title` from the title cache). A Claude row's id (`claude_sessions`) gives Deckhand's own record instead (never Claude Code's files): a `claude-session` block and `data` with `agent: "Claude Code"`, `id`, `file` (its transcript, as `reveal`; left out when none), `project`, `cwd`, `title`, `used` (last use) and `model` (the last one reported). `to`: `"clipboard"` also copies `text`; `"agent"` (**user only**) opens the agent's drawer and pastes `text` into its input without sending it (bracketed paste; if its pi has not turned that on, `text` is copied instead and the result says so) |
 | `focus_session` | `session` | |
 | `close_session` | `session`, `confirm`?, `comments`? | **confirms** (class `tab_close`) while any of its tabs would ask to close, and always when the user closes it from its pi tab (× or ⌘W); stops its tabs, removes it from the open sessions and the saved workspace (pi's session file stays). With pending comments (§3, Pending comments): the user gets the close prompt; others must pass `comments: "drop"` (`"send"` is refused: closing stops its pi; send first with `comments_send_now`) |
 | `new_shell_tab` | `session`, `cwd`?, `pane`? | → tab id; `cwd`: a folder inside a project where the shell starts (default: the session's folder); `pane`: in that pane of the session (default: the focused one) |
@@ -216,7 +216,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `refresh_shell_env` | | the user's only. **long-running**: asks the login shell for its environment again (Deckhand started from the Dock or Finder) and merges it in (the shell's values win) for new tabs and jobs' default PATH; open tabs keep theirs; refused when Deckhand was started from a terminal. The `finished` event's error says when the shell gave nothing in time. Values are never logged |
 | `quit` | `confirm`? | **confirms** while any process runs |
 | `get_state` | | query: `data` is the state snapshot |
-| `list_commands` | | query: `data` is `{"commands": [{"type", "args"?, "does", "confirm_class"?, "long_running"?}]}`, the commands this caller may send (`args` like `"tab_id, confirm?"`, `?` = optional), from the one command table (`src/command_table.odin`) |
+| `list_commands` | | query: `data` is `{"commands": [{"type", "args"?, "does", "confirm_class"?, "long_running"?}]}`, the commands this caller may send (`args` like `"tab_id, confirm?"`, `?` = optional), from the one command table (`src/core/command_table.odin`) |
 | `set_home` | `open` | shows or hides the agent's drawer; the first open makes and starts the agent's pi (its terminal UI, §8), an open after it exited starts it again → Home's tab id. Opening clears the unread count and, for the user, gives its terminal the keyboard. Hiding is the user's (and scripts'); the agent's own callers and pi tabs may not send it (`"only the user shows or hides the agent's drawer"`) |
 | `set_agent_model` | `model` | **user only**: the agent's model, `"provider/id"` optionally with `":thinking"` (pi's `--model`; `""` = pi's default; no spaces, at most 256 bytes), e.g. `opencode-go/muse-spark-1.2-contributor`. Used at the agent's next start (§8) |
 | `agent_model_picker` | | **user only**: shows the drawer, gives the agent's terminal the keyboard and opens pi's own model selector there (its key, Ctrl+L; once pi reports its status if it is still starting) |
@@ -281,7 +281,7 @@ changes is never touched and shows "Changed on disk: Compare / Keep mine / Reloa
 | `delete_path` | `path`, `confirm`? | **confirms** (class `delete`), then moves it to the Trash (in test mode: into `build/test-trash`) |
 | `reveal_in_finder` | `path` | shows it in the file manager; side effect only (test mode: recorded, nothing opens) |
 
-The Files tab (`src/files.odin`, `src/ui_files.odin`): the left column shows either the projects
+The Files tab (`src/core/files.odin`, `src/ui_files.odin`): the left column shows either the projects
 and sessions or the file tree of the folder of the session on screen (else the selected
 project's; a chat's is the Chats folder). Which folders are open is State (`files.expanded`, per
 tree root = the innermost project or session folder holding the path); the listings, the selected
@@ -319,12 +319,12 @@ never inside `.git`; a pi tab's bridge cannot send these).
 | `changes_discard` | `tab_id`, `path`, `status`?, `confirm`?, `second`? | the user only; long-running, asks first (class `delete`). Back to HEAD: `git restore --source=HEAD --staged --worktree`; refused when that would overwrite something in the work tree (a `D` or `R` entry whose HEAD name exists there) and for a nested git repository. A file HEAD does not have (untracked, added, a rename's new name) is moved to the Trash (staged ones taken out of the index first) and asks a second time (`second`, its own token) |
 | `changes_commit` | `tab_id`, `message` | the user only; long-running. `git commit -F -` with what is staged, run as the user's terminal would: **with the repository's hooks** and signing (every other git call of Deckhand runs with `core.hooksPath=/dev/null`); run through the user's login shell (`$SHELL -l`) so their PATH finds hook tools; bounded at 120 s, then its process group gets SIGTERM and, after a grace, SIGKILL (a leftover `index.lock` is reported, never removed). A refusal's git output shows in the tab; the finished event says only that it failed. Events carry the message's length, not its text |
 
-Atlas's jobs (`src/jobs.odin`, docs/ATLAS.md §3, §7). Job notes live in the jobs folder (`settings.folders.jobs.path`, `<home_dir>/jobs/` by default) as `*.md`;
+Atlas's jobs (`src/core/jobs.odin`, docs/ATLAS.md §3, §7). Job notes live in the jobs folder (`settings.folders.jobs.path`, `<home_dir>/jobs/` by default) as `*.md`;
 their runs and state in `<data dir>/jobs/<id>/`. `job` is a job's id (its note's `id:`).
 
 | type | fields | effect |
 |---|---|---|
-| `job_list` | `unread`? | query (any caller, a pi tab's too): `data` = `{jobs_dir (the jobs folder, "" = none), paused, unread, jobs: [{id, name, path, project (for_project as written), folder, owner (project, atlas, chats or other; src/jobs_owner.odin), owner_name, owner_path, owner_unmatched? (a for_project naming no listed project), schedule, enabled, paused, running, queued, next_due, last_at, unread, paused_why, error, last_status, last_headline, last_run, warnings[], recent[], needs_you[]}]}`; `unread`: only jobs with unread runs. Headlines, run lines and needs-you items are redacted |
+| `job_list` | `unread`? | query (any caller, a pi tab's too): `data` = `{jobs_dir (the jobs folder, "" = none), paused, unread, jobs: [{id, name, path, project (for_project as written), folder, owner (project, atlas, chats or other; src/core/jobs_owner.odin), owner_name, owner_path, owner_unmatched? (a for_project naming no listed project), schedule, enabled, paused, running, queued, next_due, last_at, unread, paused_why, error, last_status, last_headline, last_run, warnings[], recent[], needs_you[]}]}`; `unread`: only jobs with unread runs. Headlines, run lines and needs-you items are redacted |
 | `job_runs` | `job`, `limit`? | query (any caller): the job's newest runs (default 10), each its `meta.json` (`status`, `scheduled_at`, `started`, `ended`, `cost`, `turns`, `headline`, `needs_you`, `blocked` actions with their sha256, `read`), redacted |
 | `job_run_now` | `job` | starts a run now. Refused while all jobs are paused, the job is running, its note does not parse, a spending limit is reached or no slot is free (Runs at once); from anyone but the user also for a paused or disabled job |
 | `job_stop` | `job`? | stops its run (`""`: every run): SIGTERM to the run's process group, SIGKILL after 5 s |
@@ -437,7 +437,7 @@ is for that request only: Chromium keeps nothing (after a reload the page's perm
 ### Claude Code tabs
 
 A Claude tab (`kind: "claude"` in the snapshot) runs `claude --plugin-dir <Deckhand's plugin>` in
-a terminal tab of an open session ([CLAUDE.md](CLAUDE.md), `src/claude.odin`). A **Claude-only
+a terminal tab of an open session ([CLAUDE.md](CLAUDE.md), `src/core/claude.odin`). A **Claude-only
 session** is an open session whose main (first) tab is a Claude tab and that has no pi tab
 (`"agent": "claude"`). Every command that starts claude (`new_claude_tab`, `new_claude_session`,
 `claude_resume`, `open_session` of a Claude session) is refused while Claude Code is not
@@ -455,7 +455,7 @@ installed: install it with …"`).
 | `claude_resume` | `claude_session_id` | reopen a Claude session from Deckhand's history (`claude_sessions` in the snapshot) in a Claude-only session of its project, in the folder it ran in while that is inside the project; an open one (a Claude-only session, or a tab of a pi session) is focused (user) or returned; a dead one starts again in its tab (as `claude_restart`), never a second session with its id; a restored one not started yet starts only when the user shows it. Only the user's own resume (caller `ui`) replays the saved flags; anyone else's starts claude with only `--plugin-dir` and `--resume <id>`. `created_id` = its Claude tab |
 | `claude_rename` | `claude_session_id`, `title` | Deckhand's own title for a Claude session of the history (its row, the session's title; one line, at most 80 characters; `""` = none: "Untitled Claude session" until a prompt names it again). Never logged. Claude Code does not see it |
 | `claude_prompt` | `tab_id`, `text` | a user message for a Claude tab, **held** until it can go: the tab's turn is idle (its hooks: `claude.turn`) and the user has typed nothing into it since their last submitted prompt. Then it is pasted (bracketed) and Enter follows 80 ms later; one at a time. It also waits while the tab's input has no bracketed paste (mode 2004). Text whose first non-blank character is `!`, `/`, `#` or `&` is refused (`"text starting with ! would be a Claude Code command …"`), and so is text with control characters other than tab and newline, and text with an `@file` mention (a word starting `@/`, `@~` or `@.`: Claude Code would attach that file; `"@file mentions would attach files; send the path without @"`). `data = {held, waits, id}` (`waits`: why it waits now, `""` = it goes at the next frame; `id`: this text's, for `claude_wait_idle`'s `prompt_id`). At most 8 wait per tab, 64 KB each; dropped if Claude exits. Never `send_text` into a Claude tab from `control` (`"send prompts to a Claude tab with claude_prompt, not send_text"`) |
-| `claude_wait_idle` | `tab_id`, `timeout_ms`?, `prompt_id`? | wait until a Claude tab is idle, as `pi_wait_idle` for pi (Deckhand answers it itself; `src/claude_wait.odin`): Claude runs, its hooks say `idle` (`turn`), its OSC 7501 status (when it reports one) is neither `working` nor `blocked`, no `claude_prompt` text is held for it and the user has typed nothing into it since their last message, all for 300 ms. A dialog keeps it waiting; background work does not (the `ok` result's `data.background: [{kind, label}]` and `data.background_count` say what its last turn left running: labels are descriptions or `<kind> #<id>`, never commands). **Long-running**: the `finished` result is `ok`, or an error with `data.code` `timeout` (`"still not idle after 2 s: Claude is working"`: why it is busy; `timeout_ms` omitted or 0: no timeout; at most 24 h), `tab_gone` (Claude exited, restarted or its tab closed), `dropped` (the user dropped the held text `prompt_id` names: `claude_prompt`'s `data.id`; it never ran) or `cancelled` (the requester's `cancel` line, or its connection closed: requesters should cancel a wait they give up on). Refused: `"no such Claude tab"`, `"Claude is not running in this tab"`, `"a caller cannot act on its own tab"`, at most 8 per connection and 64 in all. Not from tabs' own callers (pi bridges, Claude tabs' CLI): `"not allowed for this caller"`. Known limits ([CLAUDE.md](CLAUDE.md) §5): another plugin's Stop hook that blocks the stop can end it early on a Claude without OSC 7501; after an interrupt (Esc) no Stop hook runs, so it times out |
+| `claude_wait_idle` | `tab_id`, `timeout_ms`?, `prompt_id`? | wait until a Claude tab is idle, as `pi_wait_idle` for pi (Deckhand answers it itself; `src/core/claude_wait.odin`): Claude runs, its hooks say `idle` (`turn`), its OSC 7501 status (when it reports one) is neither `working` nor `blocked`, no `claude_prompt` text is held for it and the user has typed nothing into it since their last message, all for 300 ms. A dialog keeps it waiting; background work does not (the `ok` result's `data.background: [{kind, label}]` and `data.background_count` say what its last turn left running: labels are descriptions or `<kind> #<id>`, never commands). **Long-running**: the `finished` result is `ok`, or an error with `data.code` `timeout` (`"still not idle after 2 s: Claude is working"`: why it is busy; `timeout_ms` omitted or 0: no timeout; at most 24 h), `tab_gone` (Claude exited, restarted or its tab closed), `dropped` (the user dropped the held text `prompt_id` names: `claude_prompt`'s `data.id`; it never ran) or `cancelled` (the requester's `cancel` line, or its connection closed: requesters should cancel a wait they give up on). Refused: `"no such Claude tab"`, `"Claude is not running in this tab"`, `"a caller cannot act on its own tab"`, at most 8 per connection and 64 in all. Not from tabs' own callers (pi bridges, Claude tabs' CLI): `"not allowed for this caller"`. Known limits ([CLAUDE.md](CLAUDE.md) §5): another plugin's Stop hook that blocks the stop can end it early on a Claude without OSC 7501; after an interrupt (Esc) no Stop hook runs, so it times out |
 | `claude_restart` | `tab_id`, `pick_model`? | a dead Claude tab's **Restart** (`pick_model`: **Restart with model…**, offered when it failed and was found: once the new Claude's turn is idle per the hooks and OSC 7501, its input takes bracketed paste and nothing is typed, Deckhand pastes its own fixed `/model` and Enter, Claude Code's model picker; within 30 s, else a toast says to type it; the only slash command Deckhand ever pastes; the user's only: ignored for any other caller): claude starts again in the same tab with `--resume <its Claude session id>` (plain `claude` without one) and a new token. Only the user's restart (caller `ui`) replays the tab's saved flags; anyone else's starts with `--plugin-dir` and `--resume` alone (the tab keeps the flags for the user). Exit 127 and `claude` still not found (on the children's PATH, `~/.local/bin`, `~/.claude/local`; looked up, never run): refused with how to install it, nothing starts (never a restart loop). An old process that closed its terminal without exiting is waited for first. Refused: `"no such Claude tab"`, `"Claude is running in this tab"`, `"Claude has not started in this tab yet: …"`, `"this tab is restarting"`. Anyone but tabs' own callers |
 | `claude_restart_changed` | `update`?, `all`?, `confirm`? | restart the running Claude tabs that a changed Claude Code file needs restarting for (`tabs[].reload.stale`; `update`: those whose `reload.version` is not `reload.claude.ident`, an older claude; `all`: every running Claude tab, changed or not), each in its tab with `--resume <its Claude session id>` and a new token, once the old process exited: idle ones now (turn idle per the hooks and OSC 7501, nothing typed or held, no subagent running), the others when they are (`reload.queued: "restart"`). A tab without a Claude session id is left out (`no_session`). **Always confirmed** (class `session_restart`): Claude's background work stops and Deckhand cannot see it; every caller but Deckhand's own is confirmed by the user, whatever its confirm policy, and the user's Confirm keeps it the asker's (its own session's tabs left out, no saved flags). Only the user's (caller `ui`) replays the tabs' saved flags. `data`: `{"restarting", "queued", "no_session"}` tab ids. Refused: `"no Claude tab needs a restart"`, `"no Claude tab runs an older Claude Code"`, `"no Claude tab here has reported its conversation …"`. Anyone but tabs' own callers |
 | `claude_reload_later` | `update`? | hide the Claude Code settings bar (`update`: the update bar) until the next change (version), and drop restarts still waiting for idle. The user's |
@@ -517,7 +517,7 @@ never saved and their text is never logged (counts, events and ids only).
 ### Pending comments
 
 Comments the user makes on part of a tab (a browser page; later an app's Inspect boxes, Markdown,
-diffs: docs/BROWSER.md §3.6–3.7, `src/comments.odin`) belong to the open session that holds the
+diffs: docs/BROWSER.md §3.6–3.7, `src/core/comments.odin`) belong to the open session that holds the
 tab and go to **that session's** pi, whichever session is on screen.
 
 - **In the snapshot**, per open session: `comments`: `[{id, source ("browser" | "app"), tab_id,
@@ -685,7 +685,7 @@ folder's directory in pi's store) when Deckhand has a data dir: project-less ses
 `chats`. The Chats folder never also shows as a project, and `add_project` on it is refused. It is
 not a project row: `select_project`, `rename_project`, pins and hiding refuse it; `new_chat` and
 `open_session` with its id start or resume chats. `sidebar` is how the left column shows things
-(pins and hidden items by identity: project cwd, pi session id; `src/sidebar.odin` for the order
+(pins and hidden items by identity: project cwd, pi session id; `src/core/sidebar.odin` for the order
 and filter rules). The Open group at the top of the left column lists every open session except
 Home, the current one first, then the most recently shown.
 
@@ -695,7 +695,7 @@ Home, the current one first, then the most recently shown.
 `bridge` (pi's bridge), `osc7501` (the program's own reports) or `none`; `at` when that source last
 reported; `osc7501` is `{"state", "kind"?, "progress"?, "app"?, "id"?, "title"?, "message"?,
 "records", "at"}` for the most urgent of the tab's OSC 7501 records (`title` and `message` are the
-program's own text: untrusted, one line, bounded). `tab_status_view` in `src/agent_status.odin` is
+program's own text: untrusted, one line, bounded). `tab_status_view` in `src/core/agent_status.odin` is
 the same thing for code.
 
 `focus` is `{"kind": "terminal", "tab_id"}` (the current session's active tab) or `{"kind":
@@ -717,7 +717,7 @@ the model it runs as far as Deckhand can tell, OS notifications sent. The Home s
 
 #### Panes
 
-An open session's centre is split into panes (`src/panes.odin`, `src/panes_commands.odin`):
+An open session's centre is split into panes (`src/core/panes.odin`, `src/core/panes_commands.odin`):
 `focused_pane` (the pane with the keyboard; its tab is `active_tab`), `panes` in leaf order
 (left to right, top to bottom) as `{"id", "slot", "active_tab", "tabs", "rect"?}` — `tabs` the
 pane's strip in order, `rect` its content's last laid-out rect in points `{"x","y","w","h"}`
@@ -743,7 +743,7 @@ raised (`os_notified`); the entries are in `notifications_list`. A pi tab's snap
 #### Hot reload
 
 pi reads its settings, extensions, skills, prompts, themes and context files at start and on
-`/reload`, its own code only at start (ROADMAP G11; `src/reload.odin`, the bars in
+`/reload`, its own code only at start (ROADMAP G11; `src/core/reload.odin`, the bars in
 `src/ui_reload.odin`). While a pi tab runs, Deckhand watches, each for the tabs that read it:
 
 - every pi tab: the agent dir's `settings.json`, `keybindings.json`, `models.json`, `mcp.json`,
@@ -774,7 +774,7 @@ show and before a restart, at most every 10 s; `DECKHAND_PI_PACKAGE` overrides i
 without it has none). `reload.pi_version` is the version on disk now; a tab whose `version` differs is
 offered a restart (`pi_restart_updated`). Atlas is a pi tab like the others here (idle only).
 
-**Claude tabs** (`src/claude_reload.odin`, the bars in `src/ui_claude_reload.odin`; CLAUDE.md
+**Claude tabs** (`src/core/claude_reload.odin`, the bars in `src/ui_claude_reload.odin`; CLAUDE.md
 §4a): only what a running Claude Code reads at start is watched, for the Claude tabs that read it
 (its docs: settings files, `keybindings.json`, skills and subagents apply live and are never
 watched): every Claude tab: the config folder's (`$CLAUDE_CONFIG_DIR`, else `~/.claude`)
@@ -797,7 +797,7 @@ script's target; another layout:
 
 #### Updates
 
-`update` is Deckhand's own update state (src/update.odin; GUIDE.md "Updates"): `checks` (the
+`update` is Deckhand's own update state (src/core/update.odin; GUIDE.md "Updates"): `checks` (the
 daily check is on), `current` (the running version; `""` for a development build, which never
 checks), `phase` (`none`, `checking`, `downloading`, `ready`: checked and waiting for Restart to
 update, `failed`: `message` says why, `installed`: test mode only), `available` (a newer, not
@@ -1034,7 +1034,7 @@ widths, fonts, colours from tones).
 
 ### Status dots
 
-Every terminal tab has a status, from one of two sources (`src/agent_status.odin`):
+Every terminal tab has a status, from one of two sources (`src/core/agent_status.odin`):
 
 - **The pi bridge** (`pi.status`, §4), pi tabs only: `working` → a pulsing running dot (stops when
   idle; static with reduce motion); `waiting` → the waiting colour, and the row's time becomes
@@ -1104,35 +1104,35 @@ tab when it is not the pi tab: a program cannot pass as another session). No dot
 
 | Piece | Where |
 |---|---|
-| command parser (test mode, scripts, socket) | `parse_command`, `parse_request` in `src/json_read.odin` |
-| encoders (commands, results, events, replies, state) | `src/json_write.odin` |
-| inbox (any thread → main thread), reply slots, wake | `src/inbox.odin`, `platform_wake` in `src/platform_darwin.odin` |
-| callers, capabilities, confirmation policy (`confirm_mode`, `close_needs_confirm`) | `src/commands.odin`; settings in `src/state.odin` |
-| the bell: entries, coalescing, `notifications_*`, `notify_post` (jobs) | `src/notify.odin`; the button and popover `src/ui_bell.odin` |
-| status of every terminal tab: OSC 7501 records, precedence, unseen, roll-ups, `set_unread`, the tooltip line | `src/agent_status.odin`; the callbacks registered in `src/term.odin` |
-| hot reload: watched pi files, pi's version, `pi_reload_all`, `pi_restart_updated` | `src/reload.odin`; the bars `src/ui_reload.odin` |
-| Claude tabs' hot reload and Claude Code's version: `claude_restart_changed`, `claude_reload_later` | `src/claude_reload.odin`; the bars `src/ui_claude_reload.odin` |
-| the command table (who may send what, args, confirm class, long-running; `list_commands`) | `src/command_table.odin` |
-| the Home session (data dir, cwd, control token) | `src/home.odin` |
-| events, command log, own-event filter | `src/events.odin` |
-| socket: listener, connections, tokens, subscriptions, bridge routing | `src/socket.odin`; OS side `src/socket_posix.odin` |
-| CLI client | `deckhand --ctl` in `src/ctl.odin` |
-| editor and file commands, file-system model | `src/editor_commands.odin`, `src/fs_model.odin` |
-| jobs: notes, cron, scheduler, runs, Jobs tab | `src/jobs_note.odin`, `src/jobs_cron.odin`, `src/jobs.odin`, `src/jobs_run.odin`, `src/ui_jobs.odin` |
-| the Changes tab: model, git scan, diffs, actions; its UI and the "±" | `src/changes.odin`; `src/ui_changes.odin` |
+| command parser (test mode, scripts, socket) | `parse_command`, `parse_request` in `src/core/json_read.odin` |
+| encoders (commands, results, events, replies, state) | `src/core/json_write.odin` |
+| inbox (any thread → main thread), reply slots, wake | `src/core/inbox.odin`, `platform_wake` in `src/platform_darwin.odin` |
+| callers, capabilities, confirmation policy (`confirm_mode`, `close_needs_confirm`) | `src/core/commands.odin`; settings in `src/core/state.odin` |
+| the bell: entries, coalescing, `notifications_*`, `notify_post` (jobs) | `src/core/notify.odin`; the button and popover `src/ui_bell.odin` |
+| status of every terminal tab: OSC 7501 records, precedence, unseen, roll-ups, `set_unread`, the tooltip line | `src/core/agent_status.odin`; the callbacks registered in `src/core/term.odin` |
+| hot reload: watched pi files, pi's version, `pi_reload_all`, `pi_restart_updated` | `src/core/reload.odin`; the bars `src/ui_reload.odin` |
+| Claude tabs' hot reload and Claude Code's version: `claude_restart_changed`, `claude_reload_later` | `src/core/claude_reload.odin`; the bars `src/ui_claude_reload.odin` |
+| the command table (who may send what, args, confirm class, long-running; `list_commands`) | `src/core/command_table.odin` |
+| the Home session (data dir, cwd, control token) | `src/core/home.odin` |
+| events, command log, own-event filter | `src/core/events.odin` |
+| socket: listener, connections, tokens, subscriptions, bridge routing | `src/core/socket.odin`; OS side `src/core/socket_posix.odin` |
+| CLI client | `deckhand --ctl` in `src/core/ctl.odin` |
+| editor and file commands, file-system model | `src/editor_commands.odin`, `src/core/fs_model.odin` |
+| jobs: notes, cron, scheduler, runs, Jobs tab | `src/core/jobs_note.odin`, `src/core/jobs_cron.odin`, `src/core/jobs.odin`, `src/core/jobs_run.odin`, `src/ui_jobs.odin` |
+| the Changes tab: model, git scan, diffs, actions; its UI and the "±" | `src/core/changes.odin`; `src/ui_changes.odin` |
 | browser tabs: CEF shim, frames, input (`src/native/cef_macos.m`, `src/browser.odin`); navigation commands, toolbar, URL normalising, saving (`src/browser_nav.odin`) | `src/browser.odin`, `src/browser_nav.odin` |
-| Claude tabs: commands, held prompts, history, start (`claude_start`); the held bar; the token's process check (`socket_claude_peer_ok`); the plugin and its CLI | `src/claude.odin`; `src/ui_claude.odin`; `src/socket.odin`, `src/socket_posix.odin`; `integrations/claude-code/`, `tools/deckhand-cli/` |
-| pending comments: model, delivery (`pi.attach`), sources (`browser_comment_add`, `app_comment_add`); the strip and the close prompt | `src/comments.odin`; `src/ui_comments.odin` |
+| Claude tabs: commands, held prompts, history, start (`claude_start`); the held bar; the token's process check (`socket_claude_peer_ok`); the plugin and its CLI | `src/core/claude.odin`; `src/ui_claude.odin`; `src/core/socket.odin`, `src/core/socket_posix.odin`; `integrations/claude-code/`, `tools/deckhand-cli/` |
+| pending comments: model, delivery (`pi.attach`), sources (`browser_comment_add`, `app_comment_add`); the strip and the close prompt | `src/core/comments.odin`; `src/ui_comments.odin` |
 
 ## 8. The built-in agent
 
 Deckhand's own agent ("Atlas", setting `agent_name`) is the Home session's pi in its normal
-terminal UI, shown in a drawer (⌘J; `src/agent.odin`, `src/drawer.odin`). It is a pi tab like
+terminal UI, shown in a drawer (⌘J; `src/core/agent.odin`, `src/drawer.odin`). It is a pi tab like
 any other: the drawer is only where its terminal shows.
 
 - **Start.** `pi --session-dir <data dir>/home --session <file>` (or `--session-id` for a new
   one) after the integration's `-e` paths, cwd = the main folder (`home_dir`), else
-  `<data dir>/home/`, never `~` (`home_cwd` in `src/home.odin`; a session that ran elsewhere is
+  `<data dir>/home/`, never `~` (`home_cwd` in `src/core/home.odin`; a session that ran elsewhere is
   forked into it), env `DECKHAND_SOCKET`,
   `DECKHAND_TOKEN` (its bridge) and `DECKHAND_CONTROL_TOKEN` (the desk tools; §2). Then:
   - `--append-system-prompt <pi agent dir>/APPEND_SYSTEM.md` first, when the user has one:

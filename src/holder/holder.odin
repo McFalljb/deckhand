@@ -31,7 +31,7 @@ import "../trust"
 
 // The holder's revision, in WELCOME. Bump it (by hand) whenever the holder's code changes: src/holder,
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
-// checks src/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
+// checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
 HOLDER_REV :: 3
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)

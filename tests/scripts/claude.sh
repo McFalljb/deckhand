@@ -11,7 +11,7 @@
 # is checked (what the hooks and the CLI printed). A fake HOME and pi, a temp data dir. Needs a
 # CEF build (./build.sh) and build/fake-app (./build.sh test).
 # Both runs start Deckhand with a Claude Code session's markers in its environment (as when it is
-# `open`ed from a shell inside Claude Code): no pi or Claude tab may get them (src/login_env.odin).
+# `open`ed from a shell inside Claude Code): no pi or Claude tab may get them (src/core/login_env.odin).
 # Writes build/claude/ (run1.log, run2.log, claude.log, pi-env.txt, claude-env.txt) and build/shots/claude/.
 # Usage: tests/scripts/claude.sh
 set -eu

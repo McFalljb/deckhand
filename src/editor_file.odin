@@ -19,9 +19,8 @@ import "core:path/filepath"
 import "core:strings"
 import "core:sys/posix"
 import "core:time"
+import "core"
 
-EDITOR_MAX_BYTES :: 20 * 1024 * 1024
-EDITOR_POLL :: 2 * time.Second
 
 text_hash :: proc(data: []u8) -> u64 {return hash.fnv64a(data)}
 
@@ -85,49 +84,47 @@ detect_format :: proc(e: ^Editor) {
 	if e.indent_tabs do e.indent_w = EDITOR_TAB_WIDTH
 }
 
-disk_stamp :: proc(path: string) -> (st: Disk_Stamp, ok: bool) {
-	k, s := path_stat(path)
+disk_stamp :: proc(path: string) -> (st: core.Disk_Stamp, ok: bool) {
+	k, s := core.path_stat(path)
 	return s, k != .Missing
 }
 
 // The stamp of an open file (fstat: never opens the path again).
 @(private = "file")
-fd_stamp :: proc(f: ^os.File) -> (st: Disk_Stamp, ok: bool) {
+fd_stamp :: proc(f: ^os.File) -> (st: core.Disk_Stamp, ok: bool) {
 	sb: posix.stat_t
 	if posix.fstat(posix.FD(os.fd(f)), &sb) != .OK do return {}, false
-	return stamp_of_stat(&sb), posix.S_ISREG(sb.st_mode)
+	return core.stamp_of_stat(&sb), posix.S_ISREG(sb.st_mode)
 }
-
-CREDENTIALS_NOT_OPENED :: "Credentials file: managed by pi (/login), not opened"
 
 // Reads a file the editor may show: a regular file (symlinks followed), at
 // most EDITOR_MAX_BYTES, not binary. Otherwise refused says why (data nil).
 // Opened non-blocking and checked again on the open file, so a FIFO or a
 // device (even one swapped in after the stat) never blocks or streams.
-disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, st: Disk_Stamp, refused: string) {
+disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, st: core.Disk_Stamp, refused: string) {
 	// sign-ins and .env files are never read, by any name (settings_files.odin)
-	if settings_credential(path) do return nil, {}, CREDENTIALS_NOT_OPENED
-	kind, pre := path_stat(path)
+	if core.settings_credential(path) do return nil, {}, core.CREDENTIALS_NOT_OPENED
+	kind, pre := core.path_stat(path)
 	switch kind {
 	case .Missing: return nil, {}, "Cannot open: no such file"
 	case .Dir:     return nil, {}, "This is a folder"
 	case .Other:   return nil, {}, "Not a regular file (a pipe, device or socket): not opened"
 	case .File:
 	}
-	if pre.size > EDITOR_MAX_BYTES do return nil, {}, too_large(pre.size)
+	if pre.size > core.EDITOR_MAX_BYTES do return nil, {}, too_large(pre.size)
 	f, oerr := os.open(path, {.Read, .Non_Blocking})
 	if oerr != nil do return nil, {}, fmt.tprintf("Cannot read: %v", oerr)
 	defer os.close(f)
 	ff, fok := fd_stamp(f)
 	if !fok do return nil, {}, "Not a regular file (a pipe, device or socket): not opened"
-	if credential_inode(ff.dev, ff.inode) do return nil, {}, CREDENTIALS_NOT_OPENED // swapped in after the check
-	if ff.size > EDITOR_MAX_BYTES do return nil, {}, too_large(ff.size)
+	if core.credential_inode(ff.dev, ff.inode) do return nil, {}, core.CREDENTIALS_NOT_OPENED // swapped in after the check
+	if ff.size > core.EDITOR_MAX_BYTES do return nil, {}, too_large(ff.size)
 	buf := make([dynamic]u8, 0, int(ff.size), allocator)
 	chunk: [64 * 1024]u8
 	for {
-		n, rerr := disk_read_chunk(f, chunk[:])
+		n, rerr := core.disk_read_chunk(f, chunk[:])
 		if n > 0 do append(&buf, ..chunk[:n])
-		if len(buf) > EDITOR_MAX_BYTES {
+		if len(buf) > core.EDITOR_MAX_BYTES {
 			delete(buf)
 			return nil, {}, too_large(i64(len(buf)))
 		}
@@ -138,7 +135,7 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 			return nil, {}, fmt.tprintf("Cannot read: %v", rerr)
 		}
 	}
-	if looks_binary(buf[:]) {
+	if core.looks_binary(buf[:]) {
 		delete(buf)
 		return nil, {}, "Binary file: not shown"
 	}
@@ -147,7 +144,7 @@ disk_read :: proc(path: string, allocator := context.allocator) -> (data: []u8, 
 
 @(private = "file")
 too_large :: proc(size: i64) -> string {
-	return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), EDITOR_MAX_BYTES >> 20)
+	return fmt.tprintf("Too large to open (%.1f MB; the editor opens files up to %d MB)", f64(size) / (1 << 20), core.EDITOR_MAX_BYTES >> 20)
 }
 
 // Reads path into e (a fresh editor). False with e.refused set when the
@@ -176,7 +173,7 @@ editor_load :: proc(e: ^Editor, path: string) -> bool {
 }
 
 editor_guide_copy :: proc(path: string) -> bool {
-	g := agent_guide_path()
+	g := core.agent_guide_path()
 	return g != "" && path == g
 }
 

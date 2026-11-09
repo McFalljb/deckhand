@@ -26,6 +26,7 @@ import "core:hash"
 import "core:math"
 import "core:mem"
 import "core:unicode/utf8"
+import "core"
 import sg "../vendor/sokol-odin/sokol/gfx"
 import sgl "../vendor/sokol-odin/sokol/gl"
 import clay "../build/clay-odin"
@@ -230,7 +231,7 @@ fonts_apply :: proc(cfg: Font_Config, dpi: f32) -> bool {
 	m := mono.metrics
 	font.cell_w = max(1, math.round(m.advance))
 	font.cell_h = mono.line_h
-	term_cell = {font.cell_w, font.cell_h} // new terminals start with it (term.odin)
+	core.term_cell = {font.cell_w, font.cell_h} // new terminals start with it (term.odin)
 	font.baseline = mono.baseline
 	font.line_thick = max(1, math.round(m.underline_thickness))
 	font.underline_y = min(font.cell_h - font.line_thick, font.baseline + max(1, math.round(m.underline_pos)))
@@ -604,8 +605,6 @@ concat_ellipsis :: proc(s: string) -> string {
 
 // ---- drawing ----
 
-Rgba :: [4]u8
-
 // Draw calls below must happen between draw_begin() and draw_end().
 draw_begin :: proc(fb_w, fb_h: f32) {
 	sgl.defaults()
@@ -621,7 +620,7 @@ draw_end :: proc() {
 	sgl.end()
 }
 
-draw_rect :: proc(x, y, w, h: f32, col: Rgba) {
+draw_rect :: proc(x, y, w, h: f32, col: core.Rgba) {
 	u := f32(0.5) / f32(font.size)
 	sgl.v2f_t2f_c4b(x, y, u, u, col.r, col.g, col.b, col.a)
 	sgl.v2f_t2f_c4b(x + w, y, u, u, col.r, col.g, col.b, col.a)
@@ -630,7 +629,7 @@ draw_rect :: proc(x, y, w, h: f32, col: Rgba) {
 }
 
 // Draws run `ri` with its pen at (x, baseline).
-draw_run :: proc(ri: u32, x, baseline: f32, col: Rgba) {
+draw_run :: proc(ri: u32, x, baseline: f32, col: core.Rgba) {
 	r := font.runs[ri]
 	inv := 1 / f32(font.size)
 	by := math.round(baseline)
@@ -650,7 +649,7 @@ draw_run :: proc(ri: u32, x, baseline: f32, col: Rgba) {
 		k.subx = u8(q)
 		ag, ok := raster_get(k)
 		if !ok || ag.w == 0 do continue
-		c := ag.color ? Rgba{255, 255, 255, col.a} : col
+		c := ag.color ? core.Rgba{255, 255, 255, col.a} : col
 		gx := ix + f32(ag.x_off)
 		gy := by + math.round(g.y) + f32(ag.y_off)
 		u0, v0 := f32(ag.x) * inv, f32(ag.y) * inv
@@ -684,7 +683,7 @@ draw_logo :: proc(logo: Logo, x, y: f32, n: int, a: u8) {
 
 // Draws a single-line string whose line box's top-left is (x, y). Returns
 // the x after it.
-draw_text :: proc(x, y: f32, s: string, col: Rgba, kind := Font_Kind.UI, bold := false, italic := false, semibold := false) -> f32 {
+draw_text :: proc(x, y: f32, s: string, col: core.Rgba, kind := Font_Kind.UI, bold := false, italic := false, semibold := false) -> f32 {
 	if s == "" do return x
 	ri := text_run(s, kind, bold, italic, semibold)
 	draw_run(ri, x, y + font.sets[kind].baseline, col)

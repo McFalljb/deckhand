@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Every environment read in what Deckhand ships names its variable with a string literal from the
 list below (docs/plans/background-core.md §5.3, "A genuine binary under attacker config";
-src/test_hooks.odin). A test or development knob goes through hook_env() instead, which a release
+src/core/test_hooks.odin). A test or development knob goes through hook_env() instead, which a release
 build compiles out; a name built at run time ("DECKHAND_%s") could not be checked at all, so it is
 refused here. scripts/check-release-build.sh runs this (so release.sh does); ./build.sh test too.
 
@@ -16,7 +16,7 @@ if len(sys.argv) == 3 and sys.argv[1] == "--root":
     ROOT = pathlib.Path(sys.argv[2]).resolve()
 
 # Read by Deckhand, its CLI or its holder in every build: user and system environment, the user's
-# own settings, and what Deckhand itself sets for its tabs (src/test_hooks.odin says why the
+# own settings, and what Deckhand itself sets for its tabs (src/core/test_hooks.odin says why the
 # DECKHAND_ ones are not hooks; scripts/check-release-build.sh ALLOWED is the binary-side list).
 KNOWN = {
     "HOME", "TMPDIR", "SHELL", "PATH", "XDG_CONFIG_HOME", "XDG_RUNTIME_DIR", "XDG_DATA_HOME",
@@ -25,7 +25,7 @@ KNOWN = {
     "CFFIXED_USER_HOME",  # browser.odin: only a test-mode check that the scene set it
     "DECKHAND_SOCKET", "DECKHAND_TOKEN", "DECKHAND_CLAUDE_TOKEN", "DECKHAND_SHOTS_DIR",  # the CLIs' transport
     "DECKHAND_GUI_LAUNCH", "DECKHAND_CEF_SHARED_TEXTURE",  # the user's workarounds
-    # their old names, read after the new ones (src/env_names.odin: the rename's fallback)
+    # their old names, read after the new ones (src/core/env_names.odin: the rename's fallback)
     "PI_DESK_SOCKET", "PI_DESK_TOKEN", "PI_DESK_CLAUDE_TOKEN", "PI_DESK_SHOTS_DIR",
     "PI_DESK_GUI_LAUNCH", "PI_DESK_CEF_SHARED_TEXTURE",
 }

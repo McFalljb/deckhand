@@ -29,14 +29,9 @@ import "core:fmt"
 import "core:os"
 import "core:slice"
 import "core:strings"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
-
-Job_Sheet :: struct {
-	open:        bool,
-	job:         string, // a job's id: edit it ("" = a new job)
-	for_project: string, // a new job's owner, preselected
-}
 
 Sheet_Field :: enum u8 {
 	Name,
@@ -160,28 +155,28 @@ sheet_owners_build :: proc() {
 		delete(c.folder)
 	}
 	clear(&u.choices)
-	ps := make([dynamic]^Project, context.temp_allocator)
-	for &p in state.projects do if p.group == .Projects && project_hide_reason(p) == .None do append(&ps, &p)
-	slice.sort_by(ps[:], proc(a, b: ^Project) -> bool {
+	ps := make([dynamic]^core.Project, context.temp_allocator)
+	for &p in state.projects do if p.group == .Projects && core.project_hide_reason(p) == .None do append(&ps, &p)
+	slice.sort_by(ps[:], proc(a, b: ^core.Project) -> bool {
 		if (a.id == state.selected_project) != (b.id == state.selected_project) do return a.id == state.selected_project
-		return project_active(a^) > project_active(b^)
+		return core.project_active(a^) > core.project_active(b^)
 	})
 	add :: proc(label, value, folder: string) {append(&job_sheet.choices, Sheet_Owner{strings.clone(label), strings.clone(value), strings.clone(folder)})}
 	found := false
 	for p, i in ps {
 		if i >= SHEET_OWNER_MAX do break
-		t := path_tilde(p.cwd)
+		t := core.path_tilde(p.cwd)
 		if t == u.owner do found = true
-		add(project_display(p^), t, t)
+		add(core.project_display(p^), t, t)
 	}
 	// the note's own project, also when it is not among them (hidden, named)
 	if !found && u.owner != "" && !slice.contains([]string{"atlas", "chats", "none"}, strings.to_lower(u.owner, context.temp_allocator)) {
 		label := u.owner
-		if pp, _ := owner_project_named(u.owner, owner_projects()); pp != nil do label = pp.shown
+		if pp, _ := core.owner_project_named(u.owner, core.owner_projects()); pp != nil do label = pp.shown
 		inject_at(&u.choices, 0, Sheet_Owner{strings.clone(label), strings.clone(u.owner), strings.clone(u.folder)})
 	}
-	if a := folder_of(.Atlas); a != "" do add(agent_name(), "atlas", path_tilde(a))
-	add("Chats", "chats", path_tilde(folder_of(.Chats)))
+	if a := core.folder_of(.Atlas); a != "" do add(core.agent_name(), "atlas", core.path_tilde(a))
+	add("Chats", "chats", core.path_tilde(core.folder_of(.Chats)))
 	add("None", "none", "~")
 }
 
@@ -213,7 +208,7 @@ job_sheet_note :: proc(lenient := false) -> (text, err: string) {
 		else do text, err = job_form_new_note(f, u.id, u.date, check = !lenient)
 		if err != "" do return text, err
 	}
-	d := job_parse(text, u.path != "" ? u.path : "/new.md", context.temp_allocator)
+	d := core.job_parse(text, u.path != "" ? u.path : "/new.md", context.temp_allocator)
 	return text, d.err
 }
 
@@ -243,33 +238,33 @@ sheet_fill :: proc(f: Job_Form) {
 }
 
 // The job_sheet command (commands.odin): open (new or edit) or close.
-job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
+job_sheet_apply :: proc(c: core.Job_Sheet, caller: core.Caller) -> (core.Result, bool) {
 	u := &job_sheet
 	if !c.open {
 		if !job_sheet_open() do return {ok = true}, false
 		u.open = false
-		run_command(Focus_Release{widget = "job_sheet"})
+		core.run_command(core.Focus_Release{widget = "job_sheet"})
 		return {ok = true}, true
 	}
-	if harness_run_holds_sheet() do return fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
+	if core.harness_run_holds_sheet() do return core.fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
 	// open already: the user's fields stay (save or cancel it first)
-	if job_sheet_open() do return fail("the job sheet is open (save or cancel it first)"), false
-	if folder_of(.Jobs) == "" do return fail("no main folder (Set up Deckhand…, in the Jobs tab)"), false
+	if job_sheet_open() do return core.fail("the job sheet is open (save or cancel it first)"), false
+	if core.folder_of(.Jobs) == "" do return core.fail("no main folder (Set up Deckhand…, in the Jobs tab)"), false
 	set_s(&u.err, "")
 	set_s(&u.path, "")
 	set_s(&u.orig, "")
 	set_s(&u.base, "")
 	u.note_mode, u.show_note, u.focus = false, false, .Name
-	id, date := job_new_id_date()
+	id, date := core.job_new_id_date()
 	set_s(&u.id, id)
 	set_s(&u.date, date)
 	if c.job != "" {
 		path := ""
 		for r in state.jobs do if r.id == c.job do path = r.path
-		if path == "" do return fail("no such job"), false
-		if err := sheet_load(path); err != "" do return fail(err), false
+		if path == "" do return core.fail("no such job"), false
+		if err := sheet_load(path); err != "" do return core.fail(err), false
 	} else {
-		owner, folder, oerr := job_owner_for_create(c.for_project)
+		owner, folder, oerr := core.job_owner_for_create(c.for_project)
 		if oerr != "" do owner, folder = "none", "~"
 		if c.for_project == "" do owner, folder = "none", "~"
 		sheet_fill({for_project = owner, folder = folder, schedule = "manual", access = "read", notify = "always"})
@@ -278,7 +273,7 @@ job_sheet_apply :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	set_s(&u.start, sheet_now_text())
 	u.discard, u.stale, u.reload_armed = false, false, false
 	u.open = true
-	run_command(Focus_Take{widget = "job_sheet"})
+	core.run_command(core.Focus_Take{widget = "job_sheet"})
 	app.redraw = true
 	return {ok = true}, true
 }
@@ -290,7 +285,7 @@ sheet_load :: proc(path_: string) -> string {
 	u := &job_sheet
 	path := strings.clone(path_, context.temp_allocator) // path_ may be u.path, which set_s frees
 	data, rerr := os.read_entire_file(path, context.temp_allocator)
-	if rerr != nil do return fmt.tprintf("could not read %s", fs_display(path))
+	if rerr != nil do return fmt.tprintf("could not read %s", core.fs_display(path))
 	set_s(&u.err, "")
 	set_s(&u.path, path)
 	set_s(&u.orig, string(data))
@@ -333,7 +328,7 @@ sheet_reload :: proc() {
 // job's row open; or why not (the note changed on disk: Reload shows; the fields stay).
 job_sheet_saved :: proc(path, err: string) -> bool {
 	if !job_sheet_open() do return false
-	if err == JOB_NOTE_STALE {
+	if err == core.JOB_NOTE_STALE {
 		job_sheet.stale = true
 		set_s(&job_sheet.err, "")
 		return false
@@ -343,9 +338,9 @@ job_sheet_saved :: proc(path, err: string) -> bool {
 		return false
 	}
 	job_sheet.open = false
-	run_command(Focus_Release{widget = "job_sheet"})
+	core.run_command(core.Focus_Release{widget = "job_sheet"})
 	if data, rerr := os.read_entire_file(path, context.temp_allocator); rerr == nil {
-		if vals, _, ok := note_front_values(string(data)); ok do jobs_ui_set(vals["id"], false)
+		if vals, _, ok := core.note_front_values(string(data)); ok do jobs_ui_set(vals["id"], false)
 	}
 	return true
 }
@@ -361,9 +356,9 @@ sheet_save :: proc() {
 	}
 	// an edit names the note it started from; jobs.odin refuses it (on the
 	// main thread) when the file changed since: job_sheet_saved
-	based_on := u.path != "" ? job_note_hash(u.orig) : ""
+	based_on := u.path != "" ? core.job_note_hash(u.orig) : ""
 	set_s(&u.err, "")
-	ui_do(Job_Save{path = u.path, text = text, based_on = based_on})
+	ui_do(core.Job_Save{path = u.path, text = text, based_on = based_on})
 }
 
 // The note as the sheet shows it now (the form's, leniently; or the text).
@@ -392,7 +387,7 @@ sheet_cancel :: proc() {
 		u.discard = true
 		return
 	}
-	ui_do(Job_Sheet{open = false})
+	ui_do(core.Job_Sheet{open = false})
 }
 
 // Edit as note / Back to form.
@@ -452,7 +447,7 @@ sheet_field :: proc(f: Sheet_Field, min_h: f32 = 0, mono := false) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = max(px(BUTTON_H), min_h)})}, padding = {pu(SP_2), pu(SP_2), pu(SP_1), pu(SP_1)}, childAlignment = {y = min_h > 0 ? .Top : .Center}},
 		backgroundColor = cc(th.bg_field),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(focused ? th.accent : mix(th.border, th.text_muted, hov ? 0.5 : 0)), width = clay.BorderOutside(pu(focused ? FOCUS_RING_W : BORDER_W))},
+		border = {color = cc(focused ? th.accent : mix(th.border, th.text_muted, hov ? 0.5 : 0)), width = clay.BorderOutside(pu(focused ? FOCUS_RING_W : core.BORDER_W))},
 	}) {
 		tf := &u.fields[f]
 		s := tf_text(tf)
@@ -492,7 +487,7 @@ sheet_chips :: proc(what: Sheet_Hit_Kind, labels: []string, selected: int, first
 				layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(CHIP_H))}, padding = {pu(CHIP_PAD), pu(CHIP_PAD), 0, 0}, childAlignment = {y = .Center}},
 				backgroundColor = bg,
 				cornerRadius = clay.CornerRadiusAll(px(CHIP_H / 2)),
-				border = {color = cc(on ? th.accent : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+				border = {color = cc(on ? th.accent : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 			}) {
 				clay.TextDynamic(l, txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
 			}
@@ -525,7 +520,7 @@ sheet_form :: proc(lw: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(5 * SHEET_ROW_H + 2 * SP_1))}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(SP_1))},
 			backgroundColor = cc(th.bg_field),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-			border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
 			for c, i in u.choices {
@@ -613,12 +608,12 @@ job_sheet_layout :: proc(w, h: f32) {
 			layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFixed(box_h)}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(SP_3)), childGap = pu(SP_2)},
 			backgroundColor = cc(th.bg_elevated),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-			border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		}) {
 			title := u.path != "" ? "Edit job" : "New job"
 			if clay.UI(clay.ID("jobsheet_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_1), pu(SP_1), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 				clay.TextDynamic(title, txt(th.text, WEIGHT_BOLD))
-				if u.path != "" do clay.TextDynamic(fs_display(u.path), txt(th.text_muted, FONT_UI_SMALL))
+				if u.path != "" do clay.TextDynamic(core.fs_display(u.path), txt(th.text_muted, FONT_UI_SMALL))
 				spacer()
 				if narrow && !u.note_mode do sheet_chips(.Preview, {"Form", "Note"}, u.show_note ? 1 : 0)
 			}
@@ -798,7 +793,7 @@ job_sheet_event :: proc(e: ^sapp.Event) -> bool {
 			case .Q:                return false
 			case .ENTER, .KP_ENTER: sheet_save()
 			case .A:                tf_select_all(f)
-			case .C:                if s := tf_selected_text(f); s != "" && platform.set_clipboard != nil do platform.set_clipboard(s)
+			case .C:                if s := tf_selected_text(f); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
 			case .LEFT:             tf_home(f, shift)
 			case .RIGHT:            tf_end(f, shift)
 			case .BACKSPACE:        tf_delete_to_start(f)
@@ -840,7 +835,7 @@ job_sheet_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, clipboard_text())
+		tf_insert(f, core.clipboard_text())
 		app.redraw = true
 		return true
 	case .MOUSE_MOVE:

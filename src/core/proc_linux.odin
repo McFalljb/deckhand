@@ -57,10 +57,12 @@ proc_stat_ppid :: proc(stat: string) -> i32 {
 }
 
 // window_sock.odin's Proc_Look on Linux: the ppid (/proc/<pid>/stat), the effective uid (the
-// second Uid field of /proc/<pid>/status) and the name (/proc/<pid>/comm). Not the exe's base
-// name: /proc/<pid>/exe of another user's process (root's sshd) can't be read, and comm can be
-// set only by the process itself, so a root-owned "sshd" is still root's doing. 0, 0, "" when
+// second Uid field of /proc/<pid>/status) and the name: /proc/<pid>/exe's base name where it can
+// be read, else /proc/<pid>/comm (another user's exe, root's sshd, can't be read). 0, 0, "" when
 // unknown. Temp-allocated.
+// Residual: comm is the execve path's base name (15 bytes), so a setuid-root binary run through
+// a link named sshd shows as root's "sshd". That needs a setuid binary that then runs the user's
+// code; the same user is Linux's trust boundary anyway (background-core.md §8.3).
 proc_look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
 	if pid <= 0 do return 0, 0, ""
 	stat, e1 := os.read_entire_file(fmt.tprintf("/proc/%d/stat", pid), context.temp_allocator)
@@ -69,7 +71,9 @@ proc_look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
 	if e1 != nil || e2 != nil || e3 != nil do return 0, 0, ""
 	euid, ok := proc_status_euid(string(status))
 	if !ok do return 0, 0, ""
-	return proc_stat_ppid(string(stat)), euid, strings.trim_right(string(comm), "\n")
+	name = strings.trim_right(string(comm), "\n")
+	if exe := pid_exe(pid); exe != "" do name = exe[strings.last_index_byte(exe, '/') + 1:]
+	return proc_stat_ppid(string(stat)), euid, name
 }
 
 // The effective uid in a /proc/<pid>/status text ("Uid:\treal\teffective\tsaved\tfs").

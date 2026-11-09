@@ -33,7 +33,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 6
+HOLDER_REV :: 5
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken

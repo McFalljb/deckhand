@@ -32,9 +32,13 @@ if [ -z "$mb" ]; then echo "check-holder-rev: no merge base with $base"; exit 1;
 
 # A file counts only if a line other than a comment or a blank changed: a comment edit (a moved
 # file's path, say) builds the same holder, and a bump would re-exec every running one for nothing.
+# The holder runs on macOS only (until M6-L3), so a `#+build linux` file never counts, nor does an
+# `} else {` that became `} else when ODIN_OS != .Linux {` (the Darwin branch before it is unchanged).
 changed=
 for f in $(git diff --name-only "$mb" HEAD -- src/holder src/holderwire src/trust | grep -v '_test\.odin$' || true); do
+  if [ -f "$f" ] && head -1 "$f" | grep -qx '#+build linux'; then continue; fi
   if git diff -U0 "$mb" HEAD -- "$f" | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' |
+    grep -vE '^[-+][[:space:]]*\} else( when ODIN_OS != \.Linux)? \{[[:space:]]*(//.*)?$' |
     grep -qvE '^[-+][[:space:]]*(//.*)?$'; then
     changed="$changed$f
 "

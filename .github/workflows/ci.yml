@@ -91,6 +91,8 @@ jobs:
         run: TMPDIR="$RUNNER_TEMP" odin test src/core -out:build/deckhand-core-unit-tests -define:ODIN_TEST_THREADS=1 -define:DECKHAND_UPDATE_TEST=true
       - name: The core serves
         run: python3 tests/linux-core-smoke.py build/deckhand-core-serve
+      - name: The core serves from the default dirs (~/.local/state/deckhand/run)
+        run: python3 tests/linux-core-smoke.py --default-dirs build/deckhand-core-serve
 
   # The required scenes (tier "required" in tests/scenes.txt) with the app's default, a separate
   # core: four shards balanced by their typical times, two scenes at a time on each runner

@@ -175,7 +175,7 @@ clang):
 mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
 mkdir -p -m 700 ~/.local/state/deckhand/run   # serve expects its runtime dir (a launcher makes it)
 build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
-python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state
+python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state, a shell tab
 ```
 
 - **What differs** (`when ODIN_OS` blocks and `*_linux.odin` files): `/proc` in place of libproc
@@ -192,7 +192,9 @@ python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a t
   processes are the core's children and a core restart restarts them.
 - **Checks:** `./build.sh test` type-checks `src/coremain` and the core's packages with
   `-target:linux_amd64` (about a second). CI's `linux` job builds the core, runs the wires', the trust
-  rules' and the core's unit tests on Linux, and `tests/linux-core-smoke.py`.
+  rules' and the core's unit tests on Linux, and `tests/linux-core-smoke.py` (also with `--default-dirs`).
+- **No window on Linux:** the window door refuses every framed hello but a hub's
+  (`NO_WINDOW_HERE`): with no code signing, a window hello would be any same-user process's `ui`.
 
 ## Rebuilding libghostty-vt
 

@@ -66,6 +66,8 @@ holder_bin_find :: proc(allocator := context.allocator) -> string {
 // unreadable, the copy fails codesign, a write failed).
 holder_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
 	if autotest_active do return strings.clone(bin), true, ""
+	// the holder of an installed core (core_versions.odin) is an installed, checked copy already
+	if strings.has_prefix(bin, fmt.tprintf("%s/", core_versions_dir(data))) do return strings.clone(bin), true, ""
 	src, rerr := os.read_entire_file(bin, context.temp_allocator)
 	if rerr != nil do return "", false, fmt.tprintf("cannot read %s: %v", bin, rerr)
 	sum := holder_sha256(src)
@@ -123,7 +125,6 @@ holder_bundle_of :: proc(bin: string) -> string {
 // there (the copy is what runs), its quarantine removed, then the temp dir renamed to dir. dir
 // already there with the same main executable (sum): reused. The path returned is the copy's
 // main executable.
-@(private = "file")
 holder_install_bundle :: proc(app, dir, sum: string) -> (path: string, ok: bool, why: string) {
 	rel := fmt.tprintf("%s/Contents/MacOS/%s", CORE_APP, HOLDER_BIN)
 	dest := fmt.tprintf("%s/%s", dir, rel)
@@ -219,7 +220,12 @@ when ODIN_OS == .Darwin {
 	}
 }
 
-@(private = "file")
+// The sha256 (hex) of a file's bytes, "" if unreadable. Temp.
+holder_sha256_file :: proc(path: string) -> string {
+	b, err := os.read_entire_file(path, context.temp_allocator)
+	return err == nil ? holder_sha256(b) : ""
+}
+
 holder_sha256 :: proc(data: []u8) -> string {
 	sum: [sha2.DIGEST_SIZE_256]u8
 	ctx: sha2.Context_256
@@ -325,29 +331,15 @@ core_serve_bin_find :: proc(allocator := context.allocator) -> string {
 	return os.is_file(p) ? strings.clone(p, allocator) : ""
 }
 
-// What to run for a separate core: bin itself in test mode, else the serve binary of an
-// installed, checked copy of Deckhand Core.app in <data>/core/<rev>-<sha12 of both binaries>/ (as
-// the holder's: a running core keeps its files when the app is updated or rebuilt). A bare
-// development build (no Core.app) runs bin where it is. M4-E's `deckhand-core install` replaces it.
+// What to run for a separate core: bin itself in test mode, or for a bare development build (no
+// Core.app); else the serve binary of bin's Core.app installed as current in <data>/core/
+// (core_versions.odin: a running core keeps its files when the app is updated or rebuilt).
 core_install :: proc(bin, data: string) -> (path: string, ok: bool, why: string) {
 	if autotest_active do return strings.clone(bin), true, ""
-	holder := fmt.tprintf("%s/%s", filepath.dir(bin), HOLDER_BIN)
-	app := holder_bundle_of(holder)
+	app := holder_bundle_of(fmt.tprintf("%s/%s", filepath.dir(bin), HOLDER_BIN))
 	if app == "" {
 		fmt.eprintln("Deckhand: background core: no Deckhand Core.app (a bare development build): running", bin, "in place")
 		return strings.clone(bin), true, ""
 	}
-	hs, herr := os.read_entire_file(holder, context.temp_allocator)
-	ss, serr := os.read_entire_file(bin, context.temp_allocator)
-	if herr != nil || serr != nil do return "", false, fmt.tprintf("cannot read %s", app)
-	hsum, ssum := holder_sha256(hs), holder_sha256(ss)
-	both := holder_sha256(transmute([]u8)strings.concatenate({hsum, ssum}, context.temp_allocator))
-	dir := fmt.tprintf("%s/core/%d-c%s", strings.trim_right(data, "/"), HOLDER_REV, both[:12])
-	p, iok, iwhy := holder_install_bundle(app, dir, hsum)
-	if !iok do return "", false, iwhy
-	serve := fmt.tprintf("%s/%s", filepath.dir(p), CORE_SERVE_BIN)
-	if got, err := os.read_entire_file(serve, context.temp_allocator); err != nil || holder_sha256(got) != ssum {
-		return "", false, fmt.tprintf("%s changed while it was copied", app)
-	}
-	return strings.clone(serve), true, ""
+	return core_install_app(app, data)
 }

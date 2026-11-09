@@ -1083,7 +1083,7 @@ framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
 		json_quote(b, spec.type)
 		n += 1
 	}
-	fmt.sbprintf(b, `],"machine":{{"os":"%s","arch":"%s"}},"holder_wire":%d,"snapshot":["%s","vt"]`, ODIN_OS_STRING, ODIN_ARCH_STRING, hw.WIRE, SNAPSHOT_GHOSTSNP)
+	fmt.sbprintf(b, `],"machine":{{"os":"%s","arch":"%s"}},"holder_wire":%d,"snapshot":["%s","vt"],"build":"%s"`, ODIN_OS_STRING, ODIN_ARCH_STRING, hw.WIRE, SNAPSHOT_GHOSTSNP, core_build())
 }
 
 // What a core says it can do beyond its generation (the framed hello's `features`): optional

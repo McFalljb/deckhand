@@ -24,6 +24,7 @@ window_restore :: proc() {}
 app_deactivate :: proc() {}
 app_hide :: proc() {}
 app_unhide :: proc() {}
+app_is_hidden :: proc() -> bool {return false}
 window_capture :: proc(path: string) {}
 platform_window_init :: proc() {}
 platform_ime_cancel :: proc() {}

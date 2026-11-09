@@ -117,6 +117,7 @@ window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", r
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
 app_hide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "hide:", rawptr(nil))}
+app_is_hidden :: proc() -> bool {return intrinsics.objc_send(bool, NS.Application_sharedApplication(), "isHidden")}
 app_unhide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "unhideWithoutActivation")}
 
 // Captures only this window into path (PNG).

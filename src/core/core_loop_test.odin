@@ -172,3 +172,21 @@ core_loop_output_activity :: proc(t: ^testing.T) {
 	delete(calls)
 	calls = nil
 }
+
+// The core's own timed upkeep runs from core_tick, so the timer runs it while no frames do: Copy
+// a control token's clipboard clear (and the holder's retry, upgrade and restart outcome beside it).
+@(test)
+core_loop_tick_clears_token_clipboard :: proc(t: ^testing.T) {
+	@(static) cleared: int
+	cleared = -1
+	l, s, q := loop_setup()
+	defer loop_restore(l, s, q)
+	saved_platform, saved_clip := platform, control_token_clip
+	defer {platform, control_token_clip = saved_platform, saved_clip}
+	platform = {clear_clipboard_if = proc(count: int) {cleared = count}}
+	control_token_clip.count = 7
+	control_token_clip.deadline = time.tick_add(time.tick_now(), -time.Second) // its minute is up
+	testing.expect(t, core_timer_fire(at(0)), "the timer did not tick")
+	testing.expect_value(t, cleared, 7)
+	testing.expect(t, control_token_clip.deadline == {})
+}

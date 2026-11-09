@@ -48,6 +48,10 @@ core_tick_body :: proc() {
 	claude_tick() // Claude tabs: held texts that can go now, their Enter (claude.odin)
 	claude_wait_tick() // claude_wait_idle: waits whose Claude tab is idle, gone or past its deadline (claude_wait.odin)
 	dead_tab_tick() // Restart with model…: pi's selector once the new pi is up (dead_tab.odin)
+	control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)
+	holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
+	holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
+	holder_restart_tick() // Restart session holder's outcome, as a toast (holder_restart.odin; the toast redraws)
 	output_activity_tick(time.tick_now())
 }
 

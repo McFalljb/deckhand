@@ -122,8 +122,8 @@ package main
 //                              (UNFOCUSED/FOCUSED through event(); the app's own idea only)
 //   deactivate                 hand focus back to the previously active app
 //   minimize / restore         miniaturize / deminiaturize the window
-//   hide / unhide              hide the app (⌘H) / show it again (the run's end shows it again:
-//                              AppKit never closes a hidden window, so sokol could not quit)
+//   hide / unhide              hide the app (⌘H) / show it again (a quit shows it again first:
+//                              app_request_quit, main.odin)
 //   frames off|on              frame() returns at once, as if macOS stopped calling it (hidden,
 //                              App Nap; quiet test mode's hidden window still gets 60 a second):
 //                              the core loop's timer ticks the core and this script (core_loop.odin)
@@ -194,7 +194,6 @@ import sapp "../vendor/sokol-odin/sokol/app"
 Autotest :: struct {
 	frames_off:   bool, // `frames off`: frame() returns at once, as if the OS stopped calling it
 	frames_back:  time.Tick, // ...until then at most (script_frames_off)
-	hidden:       bool, // `hide` ran (no `unhide` since)
 	lines:        []string,
 	next:         int,
 	wait_until:   time.Tick,
@@ -1097,10 +1096,8 @@ autotest_step :: proc() {
 			window_restore()
 		case "hide":
 			app_hide()
-			at.hidden = true
 		case "unhide":
 			app_unhide()
-			at.hidden = false
 		case "frames":
 			at.frames_off = len(args) > 0 && args[0] == "off"
 			at.frames_back = time.tick_add(time.tick_now(), FRAMES_OFF_MAX)
@@ -1232,7 +1229,7 @@ autotest_step :: proc() {
 			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
 			core.app_quitting = true // the script ends the run: no confirmation
 			script_show_again()
-			sapp.request_quit()
+			app_request_quit()
 			core.autotest_active = false
 			return
 		case "web_open", "web_waitpaint", "web_title", "web_pixel", "web_click", "web_scroll", "web_js", "web_stats", "web_assert", "web_mouse", "web_keydown", "web_mark", "web_comment":
@@ -1321,7 +1318,7 @@ script_fail :: proc(args: ..any) {
 	at.eventually_on = false
 	core.app_quitting = true // the script ends the run: no confirmation
 	script_show_again()
-	sapp.request_quit()
+	app_request_quit()
 	core.autotest_active = false
 }
 
@@ -1338,13 +1335,9 @@ script_frames_off :: proc() -> bool {
 	return false
 }
 
-// The run ends: frames again, and a hidden app shown again (sokol quits from a frame, by closing
-// the window, which AppKit never does while the app is hidden).
+// The run ends: frames again (sokol quits from a frame; app_request_quit shows a hidden app).
 script_show_again :: proc() {
-	at := &autotest
-	at.frames_off = false
-	if at.hidden do app_unhide()
-	at.hidden = false
+	autotest.frames_off = false
 }
 
 // The line starting now (DECKHAND_SCRIPT_STEP), so a hung or killed run says where it was.

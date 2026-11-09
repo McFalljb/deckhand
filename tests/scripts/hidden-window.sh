@@ -5,7 +5,8 @@
 # session holder. While hidden, the state shows the exit and the question and the bell fires; frames
 # stopped and the core loop's timer ticked instead; once shown, every terminal's screen hash is the
 # one it had while hidden. A fake HOME, a temp data dir and a short runtime dir under $TMPDIR (never
-# the user's); the holder and its children are gone when it ends, however it ends.
+# the user's); the holder and its children are gone when it ends, however it ends. Run 2
+# (hidden-window-2.txt): a quit while hidden ends the app within 10 s.
 # Usage: tests/scripts/hidden-window.sh
 set -eu
 unset CLAUDE_CONFIG_DIR
@@ -28,7 +29,7 @@ trap cleanup EXIT INT TERM
 FAKE_HOME="$W/home"
 PROJ="$W/proj"
 SESS="$FAKE_HOME/.pi/agent/sessions/--$(printf '%s' "${PROJ#/}" | tr / -)--"
-mkdir -p "$PROJ" "$W/data" "$SESS"
+mkdir -p "$PROJ" "$W/data" "$W/data2" "$SESS"
 printf '{"type":"session","version":3,"id":"hhhh-1","cwd":"%s"}\n' "$PROJ" > "$SESS/2026-11-08T10-00-00-000Z_hhhh-1.jsonl"
 
 HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/hidden-window.txt DECKHAND_DATA_DIR="$W/data" DECKHAND_RUNTIME_DIR="$RUN" \
@@ -67,4 +68,21 @@ print("hidden-window: state, bell and screens current while hidden")
 PY
 for _ in 1 2 3 4 5 6 7 8 9 10; do [ -z "$(holders)" ] && break; sleep 0.3; done
 [ -z "$(holders)" ] || { echo "the session holder still runs after Quit and Stop All Sessions"; exit 1; }
+
+# 2: a quit while hidden: the app is gone within 10 s (hidden-window-2.txt)
+HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/hidden-window-2.txt DECKHAND_DATA_DIR="$W/data2" DECKHAND_RUNTIME_DIR="$RUN" \
+  build/deckhand > "$W/run2.log" 2>&1 &
+APP=$!
+for _ in $(seq 100); do grep -q '"type":"quit"' "$W/run2.log" 2>/dev/null && break; sleep 0.1; done
+gone=
+for _ in $(seq 100); do kill -0 "$APP" 2>/dev/null || { gone=1; break; }; sleep 0.1; done
+if [ -z "$gone" ]; then
+  echo "run 2: still running 10 s after a quit while hidden (log: $W/run2.log)"; exit 1
+fi
+wait "$APP" || true
+APP=
+if grep -qE "ASSERT FAILED|TIMEOUT|unknown command" "$W/run2.log" || ! grep -q "workspace save checks" "$W/run2.log"; then
+  echo "run 2 failed (log: $W/run2.log)"; exit 1
+fi
+echo "run 2: a quit while hidden ended the app"
 echo "hidden-window scene ok"

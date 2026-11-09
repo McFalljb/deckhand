@@ -929,6 +929,18 @@ other work touches 200 files.
 - **M3-H, two emulators.** S1 settled snapshot fidelity, but resize ordering, the double parse's
   CPU, and selection and links on the window's copy are new. The per-step screen-hash check and
   the benchmarks are the gate.
+  - **Measured (M3-H, in process; `tests/scripts/term-bench.sh`, against 5f44db9):** idle,
+    `text-flood`, `frame-pause` and a hidden tab's 95 MB `cat` are within noise of M2. A shown
+    tab's 95 MB `cat` is **+40% wall and +48% CPU** (both parses on the main thread). **Accepted
+    for M3:** in M4 the window is its own process and its parse runs in parallel, so M4
+    re-measures wall time per process. If M4 still misses the 10%, the fallback is a per-frame
+    parse budget in the window (it falls behind, and the 4 MiB rule sends a snapshot instead).
+  - **Scrollback depth:** once the 20 MiB scrollback is full, the two copies may keep a
+    different number of the oldest rows (the limit counts page memory, and a decoded terminal
+    lays its pages out differently). The per-step check compares the newest 2000 rows.
+  - **Not done in M3-H** (for M4, or when needed): `history_lines` is sent but always 0 (all
+    history; the decoder could stop early); no zstd on snapshots (in process nothing is
+    gained); a newer snapshot does not replace one still queued (the in-memory queue is FIFO).
 - **M2-C, re-entry and timing.** The timer must never run `core_tick()` inside `frame()` or a
   modal loop. Scenes that assumed ticks happen only in `frame()` may change (R9).
 - **M2-B, init order.** Package-level globals and `@(init)` procs in `core` now run before

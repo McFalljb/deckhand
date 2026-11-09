@@ -151,6 +151,7 @@ client_core_connect :: proc(data: string) -> string {
 	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
 	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
 	core.files_root_reset_send = proc(base: string) {client_send(core.Files_Set_Root{base = base})}
+	core.replica_ui_send = proc(cmd: core.Command, menu: string) {client_send(cmd, menu)}
 	core.replica_request = window_request_run // what this process's core package asks of the window (window_requests.odin)
 	core.replica_facts_text = proc() -> string {return client.facts_sent} // its own snapshot's facts (window_link.odin)
 	core.replica_tab_facts_text = proc(tab_id: u64) -> string {return client.tab_facts_sent[tab_id] or_else ""}

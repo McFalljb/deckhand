@@ -214,6 +214,7 @@ Autotest :: struct {
 	cpu_calls:    u64,
 	cpu_checks:   f64, // terms_check_cpu at cpu_begin
 	wait_request: u64, // pending command: wait for its finished event
+	input_synced: bool, // a separate core: the last input's commands ran there before an element line read the layout
 	early_request: u64, // a separate core: a finished that came before its command's result was read (script_command)
 	early_finished: string, // ...its result's JSON (heap)
 	early_created: u64, // ...and the id it made
@@ -639,12 +640,22 @@ autotest_step :: proc() {
 		if at.audit do script_audit(idx, cmd)
 		// an element-addressed line reads the last layout: one drawn after the last input (not
 		// the same click again right after it: two clickid lines are a double-click)
+		// a separate core: first what that input sent has run there and its delta came back
+		// (client_barrier), then a frame drawn after it, as in process where it ran at once
+		if script_reads_layout(cmd) && client_separate() && !at.input_synced && line != at.input_line {
+			client_barrier()
+			at.input_synced, at.input_drawn = true, app.frames_drawn
+			app.redraw = true
+			at.retry_line, at.next = idx, idx
+			return
+		}
 		if script_reads_layout(cmd) && app.frames_drawn <= at.input_drawn && line != at.input_line {
 			app.redraw = true
 			at.retry_line, at.next = idx, idx
 			return
 		}
 		if script_is_input(cmd) {
+			at.input_synced = false
 			at.input_drawn = app.frames_drawn
 			delete(at.input_line)
 			at.input_line = strings.clone(line)

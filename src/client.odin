@@ -479,7 +479,12 @@ client_on_frames :: proc() {
 				fmt.eprintln("Deckhand: the window's state did not apply:", e, "(asking for all of it)")
 				if client.sock != nil do client_raw(core.window_msg_subscribe()) // the core sends state.full again
 				else do core.window_link_resync()
-			} else do client_got_state()
+			} else {
+				client_got_state()
+				// a separate core: the Files and Settings trees' open folders and filter came in
+				// State, not through this process's commands (files.odin's cache key)
+				if client.sock != nil do core.files_state_gen += 1
+			}
 			app.redraw = true
 		case .Result:
 			if m.id in client.abandoned { // its caller stopped waiting (CLIENT_WAIT): dropped

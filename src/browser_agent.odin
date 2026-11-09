@@ -38,6 +38,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import "core"
 import jg "jsonguard"
 import "core:fmt"
 import "core:strconv"
@@ -67,43 +68,6 @@ AGENT_STRIP_LINGER :: 4 * time.Second
 
 // ---- commands (rows in command_table.odin) ----
 
-Browser_Tabs :: struct {
-	session: u64, // 0: a pi tab's own; for others every session's
-}
-Browser_Read :: struct {
-	tab_id:   u64,
-	mode:     string, // text (default) | outline | html
-	selector: string, // a CSS selector or ref=eN (an outline's); "" = the whole page
-	max:      int, // characters (0 = AGENT_READ_MAX)
-}
-Browser_Screenshot :: struct {
-	tab_id:   u64,
-	rect:     App_Rect, // the page's CSS px from its top-left (the viewport)
-	has_rect: bool,
-}
-Browser_Page_Wait :: struct {
-	tab_id:     u64,
-	what:       string, // load | selector | text (the wire's "for")
-	value:      string, // the selector or the text
-	timeout_ms: int,
-}
-Browser_Console :: struct {
-	tab_id: u64,
-	since:  u64,
-	limit:  int,
-}
-Browser_Network :: struct {
-	tab_id: u64,
-	since:  u64,
-	limit:  int,
-}
-Browser_Comments :: struct {
-	tab_id:  u64, // 0: the session's
-	session: u64,
-}
-Browser_Agent_Stop :: struct {
-	tab_id: u64,
-}
 
 // ---- runtime ----
 
@@ -154,7 +118,7 @@ Agent_Net :: struct {
 // Per browser tab (runtime, keyed by tab id).
 Agent_Tab :: struct {
 	tab_id:        u64,
-	who:           Caller_Kind, // the last agent that used it
+	who:           core.Caller_Kind, // the last agent that used it
 	who_claude:    bool, // ... a Claude tab (caller panel + claude)
 	doing:         Agent_Doing,
 	last:          time.Tick, // its last command ({} = none, or Stop)
@@ -209,7 +173,7 @@ Agent_Op :: struct {
 	cef:        c.int, // the browser it went to
 	reply:      string, // owned: its result ("" = none yet)
 	reply_ok:   bool,
-	rect:       App_Rect,
+	rect:       core.App_Rect,
 	has_rect:   bool,
 	shot_seq:   u64, // the frame seq when the shot's frame was asked for (woken or painted again)
 	woke:       bool,
@@ -326,7 +290,7 @@ agent_param_secret :: proc(name: string) -> bool {
 }
 
 agent_url_masked :: proc(url: string) -> string {
-	u := browser_url_public(url)
+	u := core.browser_url_public(url)
 	q := strings.index_any(u, "?#")
 	if q < 0 do return u
 	b := strings.builder_make(context.temp_allocator)
@@ -413,27 +377,27 @@ agent_origin :: proc(url: string) -> string {
 }
 
 // Who the strip names.
-agent_who :: proc(k: Caller_Kind, claude := false) -> string {
+agent_who :: proc(k: core.Caller_Kind, claude := false) -> string {
 	#partial switch k {
 	case .Panel:   return claude ? "Claude" : "pi"
-	case .Control: return agent_name()
+	case .Control: return core.agent_name()
 	}
 	return "An agent"
 }
 
 // ---- commands ----
 
-browser_agent_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
+browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
-	case Browser_Tabs:
+	case core.Browser_Tabs:
 		return agent_tabs_list(caller, c.session), false
-	case Browser_Read:
+	case core.Browser_Read:
 		_, _, _, err := browser_target(caller, c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		switch c.mode {
 		case "", "text", "outline", "html":
-		case: return fail("mode is text, outline or html"), false
+		case: return core.fail("mode is text, outline or html"), false
 		}
 		if c.selector != "" && !agent_selector_ok(c.selector) do return {error = AGENT_SELECTOR_UNSUPPORTED, data = `{"code":"selector_unsupported"}`}, false
 		op := agent_op(c.tab_id, request_id, .Read, AGENT_READ_TIMEOUT)
@@ -442,18 +406,18 @@ browser_agent_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		op.max = agent_read_max(c.max)
 		agent_touch(c.tab_id, caller, .Reading)
 		return {ok = true, pending = true}, true
-	case Browser_Page_Wait:
+	case core.Browser_Page_Wait:
 		_, _, _, err := browser_target(caller, c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		w: Agent_Wait_For
 		switch c.what {
 		case "", "load": w = .Load
 		case "selector": w = .Selector
 		case "text":     w = .Text
-		case: return fail(`for is load, selector or text`), false
+		case: return core.fail(`for is load, selector or text`), false
 		}
-		if w != .Load && c.value == "" do return fail("value is needed (the selector or the text)"), false
+		if w != .Load && c.value == "" do return core.fail("value is needed (the selector or the text)"), false
 		if w == .Selector && !agent_selector_ok(c.value) do return {error = AGENT_SELECTOR_UNSUPPORTED, data = `{"code":"selector_unsupported"}`}, false
 		op := agent_op(c.tab_id, request_id, .Wait, agent_wait_timeout(c.timeout_ms))
 		op.wait_for = w
@@ -461,26 +425,26 @@ browser_agent_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		op.value = strings.clone(w == .Text ? c.value : "")
 		agent_touch(c.tab_id, caller, .Waiting)
 		return {ok = true, pending = true}, true
-	case Browser_Screenshot:
+	case core.Browser_Screenshot:
 		_, _, _, err := browser_target(caller, c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		if c.has_rect && (c.rect.w <= 0 || c.rect.h <= 0) do return {error = "rect needs a width and a height", data = `{"code":"bad_args"}`}, false
 		op := agent_op(c.tab_id, request_id, .Shot, AGENT_SHOT_TIMEOUT)
 		op.rect, op.has_rect = c.rect, c.has_rect
 		agent_touch(c.tab_id, caller, .Reading)
 		return {ok = true, pending = true}, true
-	case Browser_Console, Browser_Network:
+	case core.Browser_Console, core.Browser_Network:
 		console := false
 		tab_id, since: u64
 		limit: int
-		if x, is := cmd.(Browser_Console); is {
+		if x, is := cmd.(core.Browser_Console); is {
 			console, tab_id, since, limit = true, x.tab_id, x.since, x.limit
-		} else if x, is := cmd.(Browser_Network); is {
+		} else if x, is := cmd.(core.Browser_Network); is {
 			tab_id, since, limit = x.tab_id, x.since, x.limit
 		}
 		_, _, _, err := browser_target(caller, tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, tab_id); refused do return r, false
 		t := agent_tab(tab_id)
 		started := console ? !t.want_console : !t.want_net
@@ -488,36 +452,36 @@ browser_agent_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r
 		else do t.want_net = true
 		t.capture_until = time.tick_add(time.tick_now(), AGENT_CAPTURE_FOR)
 		if started {
-			_, tab, _ := find_tab(tab_id)
+			_, tab, _ := core.find_tab(tab_id)
 			// a blank page has none yet: the first real page's is taken (devtools, Page.frameNavigated)
-			if bt, is := tab.kind.(Browser_Tab); is do set_owned(&t.capture_origin, agent_real_origin(bt.url))
+			if bt, is := tab.kind.(core.Browser_Tab); is do set_owned(&t.capture_origin, agent_real_origin(bt.url))
 		}
 		agent_touch(tab_id, caller, .Reading)
 		return {ok = true, data = agent_log_json(t, console, since, limit, started)}, true
-	case Browser_Comments:
+	case core.Browser_Comments:
 		return agent_comments(caller, c.tab_id, c.session), false
-	case Browser_Agent_Stop:
+	case core.Browser_Agent_Stop:
 		_, _, _, err := browser_target(caller, c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		return {ok = true}, agent_stop(c.tab_id)
 	}
-	return fail("not a browser agent command"), false
+	return core.fail("not a browser agent command"), false
 }
 
 // The navigation commands (browser_nav.odin), once they ran: an agent's shows the strip; any
 // navigation makes a load wait wait for the new document.
-browser_agent_nav_ran :: proc(cmd: Command, caller: Caller, r: Result) {
+browser_agent_nav_ran :: proc(cmd: core.Command, caller: core.Caller, r: core.Result) {
 	if !r.ok do return
-	tab_id := browser_command_tab(cmd)
+	tab_id := core.browser_command_tab(cmd)
 	#partial switch _ in cmd {
-	case Browser_Open:     tab_id = r.created_id
-	case Browser_Update:   return
+	case core.Browser_Open:     tab_id = r.created_id
+	case core.Browser_Update:   return
 	}
 	if tab_id == 0 do return
 	#partial switch _ in cmd {
-	case Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload:
+	case core.Browser_Navigate, core.Browser_Back, core.Browser_Forward, core.Browser_Reload:
 		agent_tab(tab_id).nav_at = time.tick_now()
-	case Browser_Open:
+	case core.Browser_Open:
 		// an agent's: the new tab's first document (blank) is "complete" before its page's. Only an
 		// agent's: the agent state (and its strip) is made for an agent's tab, not the user's
 		if caller.kind == .Panel || caller.kind == .Control do agent_tab(tab_id).nav_at = time.tick_now()
@@ -525,7 +489,7 @@ browser_agent_nav_ran :: proc(cmd: Command, caller: Caller, r: Result) {
 	agent_touch(tab_id, caller, .Driving)
 }
 
-agent_touch :: proc(tab_id: u64, caller: Caller, doing: Agent_Doing) {
+agent_touch :: proc(tab_id: u64, caller: core.Caller, doing: Agent_Doing) {
 	if caller.kind != .Panel && caller.kind != .Control do return // the user's own and scripts': no strip
 	t := agent_tab(tab_id)
 	t.who, t.who_claude, t.doing, t.last = caller.kind, caller.claude, doing, time.tick_now()
@@ -635,7 +599,7 @@ browser_agent_toggle_ok :: proc(tab_id: u64) -> bool {
 }
 
 // An agent's call on a tab the user has taken over: refused at once (user_has_control).
-browser_agent_refused :: proc(caller: Caller, tab_id: u64) -> (Result, bool) {
+browser_agent_refused :: proc(caller: core.Caller, tab_id: u64) -> (core.Result, bool) {
 	if caller.kind != .Panel && caller.kind != .Control do return {}, false
 	t := agent_tab_of(tab_id)
 	if t == nil || !t.user_control do return {}, false
@@ -643,10 +607,10 @@ browser_agent_refused :: proc(caller: Caller, tab_id: u64) -> (Result, bool) {
 }
 
 // The navigation commands (browser_nav.odin) on a tab the user has taken over: refused for agents.
-browser_agent_nav_refused :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
+browser_agent_nav_refused :: proc(cmd: core.Command, caller: core.Caller) -> (core.Result, bool) {
 	#partial switch _ in cmd {
-	case Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop:
-		return browser_agent_refused(caller, browser_command_tab(cmd))
+	case core.Browser_Navigate, core.Browser_Back, core.Browser_Forward, core.Browser_Reload, core.Browser_Stop:
+		return browser_agent_refused(caller, core.browser_command_tab(cmd))
 	}
 	return {}, false
 }
@@ -662,31 +626,31 @@ agent_unwake :: proc(tab_id: u64) {
 // browser_tabs: the caller's session's browser tabs (a pi tab's own; a control caller's named
 // session, or every one).
 @(private = "file")
-agent_tabs_list :: proc(caller: Caller, session: u64) -> Result {
+agent_tabs_list :: proc(caller: core.Caller, session: u64) -> core.Result {
 	want := session
 	if caller.kind == .Panel {
-		own := caller_session(caller)
-		if own == nil do return fail("the calling pi tab has no session")
-		if session != 0 && session != own.id do return fail("a pi tab sees only its own session's browser tabs")
+		own := core.caller_session(caller)
+		if own == nil do return core.fail("the calling pi tab has no session")
+		if session != 0 && session != own.id do return core.fail("a pi tab sees only its own session's browser tabs")
 		want = own.id
-	} else if session != 0 && find_session(session) == nil do return fail("no such session")
+	} else if session != 0 && core.find_session(session) == nil do return core.fail("no such session")
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"tabs":[`)
 	n := 0
 	for s in state.open_sessions {
 		if want != 0 && s.id != want do continue
 		for tab in s.tabs {
-			bt, is := tab.kind.(Browser_Tab)
+			bt, is := tab.kind.(core.Browser_Tab)
 			if !is do continue
 			if n > 0 do strings.write_byte(&b, ',')
 			n += 1
 			br := browser_of(tab.id)
 			page := br == nil ? "closed" : br.cef != 0 ? "open" : br.waiting ? "waiting" : br.lazy ? "unloaded" : br.message != "" ? "closed" : "opening"
 			fmt.sbprintf(&b, `{{"tab_id":%d,"session":%d,"title":`, tab.id, s.id)
-			json_quote(&b, tab.title)
+			core.json_quote(&b, tab.title)
 			strings.write_string(&b, `,"url":`)
-			json_quote(&b, bt.url)
-			on_screen := tab_on_screen(tab.id) // shown in a pane of the session on screen (panes.odin)
+			core.json_quote(&b, bt.url)
+			on_screen := core.tab_on_screen(tab.id) // shown in a pane of the session on screen (panes.odin)
 			comments := 0
 			for cm in s.comments do if cm.tab_id == tab.id do comments += 1
 			fmt.sbprintf(&b, `,"loading":%v,"page":"%s","on_screen":%v,"comments":%d`, bt.loading, page, on_screen, comments)
@@ -700,21 +664,21 @@ agent_tabs_list :: proc(caller: Caller, session: u64) -> Result {
 
 // browser_comments: the session's pending comments (only tab_id's, if given), not consumed.
 @(private = "file")
-agent_comments :: proc(caller: Caller, tab_id, session: u64) -> Result {
-	s: ^Open_Session
+agent_comments :: proc(caller: core.Caller, tab_id, session: u64) -> core.Result {
+	s: ^core.Open_Session
 	if tab_id != 0 {
-		ts, tab, _ := find_tab(tab_id)
-		if tab == nil do return fail("no such tab")
-		if caller.kind == .Panel && caller_session(caller) != ts do return fail("a pi tab sees only its own session's comments")
+		ts, tab, _ := core.find_tab(tab_id)
+		if tab == nil do return core.fail("no such tab")
+		if caller.kind == .Panel && core.caller_session(caller) != ts do return core.fail("a pi tab sees only its own session's comments")
 		s = ts
 	} else if caller.kind == .Panel {
-		s = caller_session(caller)
-		if session != 0 && (s == nil || s.id != session) do return fail("a pi tab sees only its own session's comments")
+		s = core.caller_session(caller)
+		if session != 0 && (s == nil || s.id != session) do return core.fail("a pi tab sees only its own session's comments")
 	} else {
-		s = session != 0 ? find_session(session) : caller.kind == .Control ? nil : cur()
-		if s == nil do return fail(session != 0 ? "no such session" : "session or tab_id is needed")
+		s = session != 0 ? core.find_session(session) : caller.kind == .Control ? nil : core.cur()
+		if s == nil do return core.fail(session != 0 ? "no such session" : "session or tab_id is needed")
 	}
-	if s == nil do return fail("no such session")
+	if s == nil do return core.fail("no such session")
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"session":%d,"comments":[`, s.id)
 	n := 0
@@ -722,10 +686,10 @@ agent_comments :: proc(caller: Caller, tab_id, session: u64) -> Result {
 		if tab_id != 0 && cm.tab_id != tab_id do continue
 		if n > 0 do strings.write_byte(&b, ',')
 		n += 1
-		fmt.sbprintf(&b, `{{"comment_id":%d,"n":%d,"source":"%s","tab_id":%d,"what":`, cm.id, i + 1, COMMENT_SOURCE_NAMES[cm.source], cm.tab_id)
-		json_quote(&b, cm.what)
+		fmt.sbprintf(&b, `{{"comment_id":%d,"n":%d,"source":"%s","tab_id":%d,"what":`, cm.id, i + 1, core.COMMENT_SOURCE_NAMES[cm.source], cm.tab_id)
+		core.json_quote(&b, cm.what)
 		strings.write_string(&b, `,"text":`)
-		json_quote(&b, cm.text)
+		core.json_quote(&b, cm.text)
 		fmt.sbprintf(&b, `,"has_crop":%v}}`, cm.crop != "")
 	}
 	strings.write_string(&b, "]}")
@@ -749,12 +713,12 @@ agent_log_json :: proc(t: ^Agent_Tab, console: bool, since: u64, limit: int, sta
 			n += 1
 			next = max(next, e.seq)
 			fmt.sbprintf(&b, `{{"seq":%d,"level":`, e.seq)
-			json_quote(&b, e.level)
+			core.json_quote(&b, e.level)
 			strings.write_string(&b, `,"text":`)
-			json_quote(&b, e.text)
+			core.json_quote(&b, e.text)
 			if e.source != "" {
 				strings.write_string(&b, `,"source":`)
-				json_quote(&b, e.source)
+				core.json_quote(&b, e.source)
 			}
 			strings.write_byte(&b, '}')
 		}
@@ -769,19 +733,19 @@ agent_log_json :: proc(t: ^Agent_Tab, console: bool, since: u64, limit: int, sta
 			n += 1
 			next = max(next, e.seq)
 			fmt.sbprintf(&b, `{{"seq":%d,"method":`, e.seq)
-			json_quote(&b, e.method)
+			core.json_quote(&b, e.method)
 			strings.write_string(&b, `,"url":`)
-			json_quote(&b, e.url)
+			core.json_quote(&b, e.url)
 			strings.write_string(&b, `,"type":`)
-			json_quote(&b, e.kind)
+			core.json_quote(&b, e.kind)
 			if e.status != 0 do fmt.sbprintf(&b, `,"status":%d`, e.status)
 			if e.mime != "" {
 				strings.write_string(&b, `,"mime":`)
-				json_quote(&b, e.mime)
+				core.json_quote(&b, e.mime)
 			}
 			if e.failed != "" {
 				strings.write_string(&b, `,"failed":`)
-				json_quote(&b, e.failed)
+				core.json_quote(&b, e.failed)
 			}
 			fmt.sbprintf(&b, `,"done":%v}}`, e.done)
 		}
@@ -799,7 +763,7 @@ cdp_send :: proc(t: ^Agent_Tab, cef: c.int, method, params: string) -> c.int {
 	id := next_msg
 	msg := fmt.tprintf(`{{"id":%d,"method":"%s","params":%s}}`, id, method, params)
 	if dh_cef_devtools_send(cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
-	if autotest_active && t != nil {
+	if core.autotest_active && t != nil {
 		if _, has := t.sent[method]; !has do t.sent[strings.clone(method)] = 0
 		t.sent[method] += 1
 	}
@@ -893,7 +857,7 @@ browser_agent_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, method: cst
 		kind, _ := o["type"].(json.String)
 		if len(t.net) >= AGENT_LOG_MAX do net_drop(t, 0)
 		t.seq += 1
-		append(&t.net, Agent_Net{seq = t.seq, id = strings.clone(id), method = strings.clone(cut_utf8(method, 20)), url = strings.clone(cut_utf8(agent_url_masked(url), AGENT_URL_MAX)), kind = strings.clone(cut_utf8(kind, 40))})
+		append(&t.net, Agent_Net{seq = t.seq, id = strings.clone(id), method = strings.clone(core.cut_utf8(method, 20)), url = strings.clone(core.cut_utf8(agent_url_masked(url), AGENT_URL_MAX)), kind = strings.clone(core.cut_utf8(kind, 40))})
 	case "Network.responseReceived", "Network.loadingFailed", "Network.loadingFinished":
 		if !net do break
 		id, _ := o["requestId"].(json.String)
@@ -903,10 +867,10 @@ browser_agent_devtools :: proc(cef: c.int, msg_id: c.int, ok: c.int, method: cst
 				r, _ := o["response"].(json.Object)
 				if st, ok2 := num_i(r["status"]); ok2 do e.status = st
 				mime, _ := r["mimeType"].(json.String)
-				set_owned(&e.mime, cut_utf8(mime, 100))
+				set_owned(&e.mime, core.cut_utf8(mime, 100))
 			case "Network.loadingFailed":
 				et, _ := o["errorText"].(json.String)
-				set_owned(&e.failed, cut_utf8(et != "" ? et : "failed", 200))
+				set_owned(&e.failed, core.cut_utf8(et != "" ? et : "failed", 200))
 				e.done = true
 			case "Network.loadingFinished":
 				e.done = true
@@ -961,7 +925,7 @@ log_add :: proc(t: ^Agent_Tab, level, text, source: string) {
 		ordered_remove(&t.logs, 0)
 	}
 	t.seq += 1
-	append(&t.logs, Agent_Log{seq = t.seq, level = strings.clone(cut_utf8(level, 40)), text = strings.clone(cut_utf8(agent_text_masked(text), AGENT_TEXT_MAX)), source = strings.clone(cut_utf8(source, AGENT_URL_MAX))})
+	append(&t.logs, Agent_Log{seq = t.seq, level = strings.clone(core.cut_utf8(level, 40)), text = strings.clone(core.cut_utf8(agent_text_masked(text), AGENT_TEXT_MAX)), source = strings.clone(core.cut_utf8(source, AGENT_URL_MAX))})
 }
 
 // The recording's entries go (it ended: Stop, expiry, another origin); seq keeps counting.
@@ -1031,7 +995,7 @@ browser_agent_tick :: proc() -> bool {
 	redraw := false
 	// closed tabs: their state goes
 	gone := make([dynamic]u64, context.temp_allocator)
-	for id in agent_tabs do if _, tab, _ := find_tab(id); tab == nil do append(&gone, id)
+	for id in agent_tabs do if _, tab, _ := core.find_tab(id); tab == nil do append(&gone, id)
 	for id in gone {
 		agent_tab_free(agent_tabs[id])
 		delete_key(&agent_tabs, id)
@@ -1079,7 +1043,7 @@ browser_agent_tick :: proc() -> bool {
 		done, r, private := op_step(op, now)
 		if done {
 			// pending: frame_shot's worker answers it
-			if !r.pending do emit_event(Finished_Event{request_id = op.request_id, result = r, private = private})
+			if !r.pending do core.emit_event(core.Finished_Event{request_id = op.request_id, result = r, private = private})
 			ordered_remove(&agent_ops, i)
 			tab_id := op.tab_id
 			op_free(op)
@@ -1102,11 +1066,11 @@ agent_busy :: proc(tab_id: u64) -> bool {
 
 // One op's step: done, with its result (private: a page's content).
 @(private = "file")
-op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, private: bool) {
-	_, tab, _ := find_tab(op.tab_id)
+op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: core.Result, private: bool) {
+	_, tab, _ := core.find_tab(op.tab_id)
 	b := browser_of(op.tab_id)
 	if tab == nil || b == nil do return true, {error = "the tab closed", data = `{"code":"tab_gone"}`}, false
-	bt, _ := tab.kind.(Browser_Tab)
+	bt, _ := tab.kind.(core.Browser_Tab)
 	late := time.tick_diff(op.deadline, now) > 0
 	waited := int(time.duration_milliseconds(time.tick_diff(op.started, now)))
 	// the page: an unloaded tab loads into a free slot (never another tab's); a closed one fails
@@ -1202,16 +1166,16 @@ op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, privat
 		strings.write_string(&args, "(")
 		strings.write_string(&args, BROWSER_READ_JS)
 		strings.write_string(&args, ")(")
-		json_quote(&args, mode)
+		core.json_quote(&args, mode)
 		strings.write_byte(&args, ',')
-		json_quote(&args, sel)
+		core.json_quote(&args, sel)
 		fmt.sbprintf(&args, ",%d,", op.max)
-		json_quote(&args, value)
+		core.json_quote(&args, value)
 		strings.write_byte(&args, ')')
 	}
 	p := strings.builder_make(context.temp_allocator)
 	strings.write_string(&p, `{"expression":`)
-	json_quote(&p, strings.to_string(args))
+	core.json_quote(&p, strings.to_string(args))
 	fmt.sbprintf(&p, `,"contextId":%d,"returnByValue":true,"silent":true}}`, ctx)
 	op.cef = b.cef
 	op.msg_id = cdp_send(t, b.cef, "Runtime.evaluate", strings.to_string(p))
@@ -1242,9 +1206,9 @@ op_step :: proc(op: ^Agent_Op, now: time.Tick) -> (done: bool, r: Result, privat
 // and that frame is taken; a tab not on screen is woken (CEF paints it; the user does not see
 // it) and its next frame taken.
 @(private = "file")
-shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (done: bool, r: Result, private: bool) {
+shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (done: bool, r: core.Result, private: bool) {
 	t := agent_tab(op.tab_id)
-	on_screen := tab_on_screen(b.tab_id) // in any pane: it paints, the user sees it
+	on_screen := core.tab_on_screen(b.tab_id) // in any pane: it paints, the user sees it
 	ready := b.ring.shown_gen != 0 && b.content_w > 0
 	if !on_screen {
 		if !op.woke {
@@ -1278,7 +1242,7 @@ shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (do
 	if !ok do return true, {error = "the rect is outside the page", data = `{"code":"bad_args"}`}, false
 	if !pruned {
 		pruned = true
-		app_shots_prune(app_shots_dir(context.temp_allocator), 24 * time.Hour)
+		app_shots_prune(core.app_shots_dir(context.temp_allocator), 24 * time.Hour)
 	}
 	t.shots += 1
 	meta := fmt.tprintf(`"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"on_screen":%v`, g.scale, x, y, w, h, on_screen)
@@ -1297,11 +1261,11 @@ browser_agent_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 	t := agent_tab_of(tab_id)
 	if t == nil || !agent_strip_on(t) do return
 	strings.write_string(b, `,"agent":{"who":`)
-	json_quote(b, agent_who(t.who, t.who_claude))
+	core.json_quote(b, agent_who(t.who, t.who_claude))
 	fmt.sbprintf(b, `,"doing":"%s","busy":%v,"recording":"%s"`, AGENT_DOING_NAMES[t.doing], agent_busy(tab_id), recording(t))
 	if t.act_target != "" {
 		strings.write_string(b, `,"target":`)
-		json_quote(b, t.act_target)
+		core.json_quote(b, t.act_target)
 	}
 	if browser_act_busy(tab_id) do strings.write_string(b, `,"acting":true`)
 	if t.user_control do strings.write_string(b, `,"control":"user"`)
@@ -1335,7 +1299,7 @@ browser_agent_strip_layout :: proc(b: ^Browser, own_row: bool) {
 			clip = {horizontal = true},
 			layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childAlignment = {y = .Center}},
 			backgroundColor = cc(th.bg_elevated),
-			border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+			border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 		}) {
 			strip_parts(t, what)
 		}
@@ -1384,7 +1348,7 @@ strip_text :: proc(b: ^Browser, room := f32(-1)) -> (what: string, on: bool) {
 	rec := recording(t)
 	if rec != "" do rec = rec == "console,network" ? "recording console, network" : fmt.tprintf("recording %s", rec)
 	// an action names its target ("pi is clicking 'Buy'"); the page wrote that name: one line
-	target := t.doing >= .Clicking && t.act_target != "" ? fmt.tprintf("“%s”", one_line(cut_utf8(t.act_target, 60), context.temp_allocator)) : "this page"
+	target := t.doing >= .Clicking && t.act_target != "" ? fmt.tprintf("“%s”", core.one_line(core.cut_utf8(t.act_target, 60), context.temp_allocator)) : "this page"
 	switch {
 	case t.user_control:     what = fmt.tprintf("You have control · %s waits", who)
 	case doing && rec != "": what = fmt.tprintf("%s is %s · %s", who, AGENT_DOING_NAMES[t.doing], rec)
@@ -1444,9 +1408,9 @@ agent_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string,
 			text = text[len(args[k]):]
 		}
 		text = strings.trim_space(text)
-		v := json_path(src, args[2])
+		v := core.json_path(src, args[2])
 		if v == "<object>" do v = src // a list or an object: the whole answer (its JSON)
-		if strings.contains(v, text) != (args[0] == "has") do return fmt.tprintf("ASSERT FAILED agent_assert %s %s %s %q: the value is %q", args[0], args[1], args[2], text, cut_utf8(v, 3000)), false
+		if strings.contains(v, text) != (args[0] == "has") do return fmt.tprintf("ASSERT FAILED agent_assert %s %s %s %q: the value is %q", args[0], args[1], args[2], text, core.cut_utf8(v, 3000)), false
 		fmt.printfln("[agent] assert ok: %s %s %s %q", args[0], args[1], args[2], text)
 		return "", true
 	case "stops":

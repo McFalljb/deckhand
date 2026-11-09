@@ -18,6 +18,7 @@ package main
 import "core:fmt"
 import "core:path/filepath"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -67,34 +68,32 @@ TOOL_LABEL := [Changes_Tool]string {
 	.More    = "Show more",
 }
 
-CHANGES_ROWS_DRAWN_MAX :: 128
-
 
 // The Changes tab on screen (nil = another tab).
-active_changes :: proc() -> ^Changes_View {
-	tab := active_tab()
+active_changes :: proc() -> ^core.Changes_View {
+	tab := core.active_tab()
 	if tab == nil do return nil
-	if _, is := tab.kind.(Changes_Tab); !is do return nil
-	return changes_view(tab.id)
+	if _, is := tab.kind.(core.Changes_Tab); !is do return nil
+	return core.changes_view(tab.id)
 }
 
 // ---- the top bar's button ----
 
 // The checkout of the session on screen and its model (nil = none).
 @(private = "file")
-session_repo :: proc(cs: ^Open_Session) -> ^Changes_Repo {
+session_repo :: proc(cs: ^core.Open_Session) -> ^core.Changes_Repo {
 	if cs == nil || cs.home || cs.missing do return nil
-	return changes_repo(changes_root_of(cs.cwd))
+	return core.changes_repo(core.changes_root_of(cs.cwd))
 }
 
 @(private = "file")
-button_label :: proc(r: ^Changes_Repo) -> string {
-	n := changes_count(r)
+button_label :: proc(r: ^core.Changes_Repo) -> string {
+	n := core.changes_count(r)
 	return n > 0 ? fmt.tprintf("± %d", min(n, 9999)) : "±"
 }
 
 // The "±" button's width with its gap (0 = not shown: no git checkout).
-changes_button_w :: proc(cs: ^Open_Session) -> f32 {
+changes_button_w :: proc(cs: ^core.Open_Session) -> f32 {
 	r := session_repo(cs)
 	if r == nil do return 0
 	return text_w(button_label(r)) + px(2 * SP_2) + px(SP_1)
@@ -104,7 +103,7 @@ changes_button_w :: proc(cs: ^Open_Session) -> f32 {
 // layout): only when the tabs at their narrowest still fit beside it.
 changes_btn_shown: bool
 
-changes_button_decide :: proc(cs: ^Open_Session, bar_w: f32) {
+changes_button_decide :: proc(cs: ^core.Open_Session, bar_w: f32) {
 	changes_btn_shown = false
 	bw := changes_button_w(cs)
 	if bw == 0 do return
@@ -114,16 +113,16 @@ changes_button_decide :: proc(cs: ^Open_Session, bar_w: f32) {
 }
 
 // Clay: the "±" button (ui.odin's tab strip), after "+".
-changes_tab_button :: proc(cs: ^Open_Session) {
+changes_tab_button :: proc(cs: ^core.Open_Session) {
 	r := session_repo(cs)
 	if r == nil do return
-	changes_ask(r)
+	core.changes_ask(r)
 	th := theme()
 	id := clay.ID("changesbtn")
 	v := active_changes()
 	bg, em := overlay(id, v != nil && v.root == r.root, ui_hover == Hit(Hit_Changes{what = .Button}))
 	col := mix(th.text_muted, th.text, em)
-	if changes_count(r) > 0 do col = mix(th.text_secondary, th.text, em)
+	if core.changes_count(r) > 0 do col = mix(th.text_secondary, th.text, em)
 	if clay.UI(id)({
 		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TOOL_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = bg,
@@ -142,33 +141,33 @@ tool_w :: proc(t: Changes_Tool) -> f32 {return text_w(tool_label(t)) + px(2 * SP
 tool_label :: proc(t: Changes_Tool) -> string {
 	if t == .Review {
 		if v := active_changes(); v != nil {
-			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
+			if s, _, _ := core.find_tab(v.tab_id); s != nil && s.agent == .Claude do return "Ask Claude to review"
 		}
 	}
 	if t == .Merge {
 		if v := active_changes(); v != nil {
-			if r := changes_repo(v.root); r != nil && r.default_branch != "" do return fmt.tprintf("Merge into %s…", r.default_branch)
+			if r := core.changes_repo(v.root); r != nil && r.default_branch != "" do return fmt.tprintf("Merge into %s…", r.default_branch)
 		}
 	}
 	return TOOL_LABEL[t]
 }
 
 // Whether a tool applies now, and why not.
-changes_tool_state :: proc(v: ^Changes_View, t: Changes_Tool) -> (enabled: bool, why: string) {
-	r, f := changes_selected(v)
+changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: bool, why: string) {
+	r, f := core.changes_selected(v)
 	busy := v.busy != ""
 	switch t {
 	case .Refresh:
 		return true, ""
 	case .Review:
-		s, _, _ := find_tab(v.tab_id)
+		s, _, _ := core.find_tab(v.tab_id)
 		if s != nil && s.agent == .Claude {
 			// a Claude-only session: its main Claude tab (claude_prompt holds the text until it is idle)
 			if len(s.tabs) == 0 || s.tabs[0].status != .Running do return false, "this session's Claude is not running"
-			if _, is := s.tabs[0].kind.(Claude_Tab); !is do return false, "this session's Claude is not running"
+			if _, is := s.tabs[0].kind.(core.Claude_Tab); !is do return false, "this session's Claude is not running"
 			return true, ""
 		}
-		pt := session_pi_tab(s)
+		pt := core.session_pi_tab(s)
 		if pt == nil || pt.status != .Running do return false, "this session's pi is not running"
 		if pt.waiting do return false, "pi is waiting for you"
 		return true, ""
@@ -214,7 +213,7 @@ changes_tool_state :: proc(v: ^Changes_View, t: Changes_Tool) -> (enabled: bool,
 }
 
 @(private = "file")
-tool :: proc(v: ^Changes_View, t: Changes_Tool, primary := false) {
+tool :: proc(v: ^core.Changes_View, t: Changes_Tool, primary := false) {
 	th := theme()
 	id := cid("chtool", u32(t))
 	enabled, _ := changes_tool_state(v, t)
@@ -253,13 +252,13 @@ bar :: proc(id: clay.ElementId, h: f32) -> clay.ElementDeclaration {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(h))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}
 }
 
 // What the header says about the checkout: "topic → main · 2 commits".
 @(private = "file")
-branch_text :: proc(r: ^Changes_Repo) -> string {
+branch_text :: proc(r: ^core.Changes_Repo) -> string {
 	if r == nil || !r.loaded do return "Changes"
 	b := r.branch != "" ? r.branch : "detached HEAD"
 	if r.default_branch == "" || r.branch == r.default_branch do return b
@@ -269,14 +268,14 @@ branch_text :: proc(r: ^Changes_Repo) -> string {
 
 // Clay: the bars above the list and the diff (ui.odin's centre column,
 // before the editor's bars).
-changes_bars_layout :: proc(p: ^Pane) {
-	v := pane_changes(p)
+changes_bars_layout :: proc(p: ^core.Pane) {
+	v := core.pane_changes(p)
 	if v == nil do return
-	r := changes_repo(v.root)
-	changes_ask(r)
+	r := core.changes_repo(v.root)
+	core.changes_ask(r)
 	// not laid out in the last pass (or ever): it came on screen, read again. Per view, as each
 	// pane's bars are laid out in turn
-	if v.laid_pass == 0 || v.laid_pass + 1 < ui_layout_pass do changes_refresh(r)
+	if v.laid_pass == 0 || v.laid_pass + 1 < ui_layout_pass do core.changes_refresh(r)
 	v.laid_pass = ui_layout_pass
 	th := theme()
 	avail := pane_width() - px(2 * TERM_PAD)
@@ -302,7 +301,7 @@ changes_bars_layout :: proc(p: ^Pane) {
 			left := room - px(ICON_SIZE_SM + GAP_INLINE) - text_w(title) - px(GAP_INLINE)
 			if left > px(SP_6) {
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
-				clay.TextDynamic(clip(fs_display(v.root), left), txt(th.text_muted))
+				clay.TextDynamic(clip(core.fs_display(v.root), left), txt(th.text_muted))
 			}
 		}
 		spacer()
@@ -317,7 +316,7 @@ changes_bars_layout :: proc(p: ^Pane) {
 	if clay.UI(cid("ch_commit"))(bar(cid("ch_commit"), EDITOR_BAR_H)) {
 		cw := tool_w(.Commit)
 		field_w := avail - cw - px(GAP_INLINE)
-		focused := state.focus_widget == "changes_message" && pane_keys(p)
+		focused := state.focus_widget == "changes_message" && core.pane_keys(p)
 		if field_w > px(SP_6 * 3) {
 			if clay.UI(cid("ch_field"))({
 				layout = {sizing = {clay.SizingFixed(field_w), clay.SizingFixed(px(BUTTON_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
@@ -358,13 +357,13 @@ list_w :: proc() -> f32 {
 ROW :: ROW_H - 4
 
 // Clay: the file list (left of the diff, inside ui.odin's centre row).
-changes_list_layout :: proc(p: ^Pane) {
-	v := pane_changes(p)
+changes_list_layout :: proc(p: ^core.Pane) {
+	v := core.pane_changes(p)
 	if v == nil do return
 	th := theme()
 	ec := editor_colors()
-	r := changes_repo(v.root)
-	rows := changes_rows(r)
+	r := core.changes_repo(v.root)
+	rows := core.changes_rows(r)
 	lw := list_w()
 	// rows that fit: the list's height at the last layout
 	h := px(600)
@@ -376,10 +375,10 @@ changes_list_layout :: proc(p: ^Pane) {
 	if clay.UI(cid("ch_list"))({
 		layout = {sizing = {clay.SizingFixed(lw), clay.SizingGrow()}, layoutDirection = .TopToBottom, padding = {pu(SP_1), pu(SP_1), pu(SP_1), pu(SP_1)}},
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(th.border), width = {right = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {right = pu(core.BORDER_W)}},
 		clip = {vertical = true, horizontal = true, childOffset = {}},
 	}) {
-		inner := lw - px(2 * SP_1) - px(BORDER_W)
+		inner := lw - px(2 * SP_1) - px(core.BORDER_W)
 		if r == nil || !r.loaded {
 			empty_state("Reading the changes…", "git status runs", inner)
 			return
@@ -393,7 +392,7 @@ changes_list_layout :: proc(p: ^Pane) {
 			return
 		}
 		for i in v.list_top ..< min(len(rows), v.list_top + fitn + 1) {
-			if v.drawn_n >= CHANGES_ROWS_DRAWN_MAX do break
+			if v.drawn_n >= core.CHANGES_ROWS_DRAWN_MAX do break
 			row := rows[i]
 			slot := v.drawn_n
 			v.drawn[slot] = i
@@ -406,7 +405,7 @@ changes_list_layout :: proc(p: ^Pane) {
 				continue
 			}
 			f := r.files[row.file]
-			sel := changes_is_selected(v, f)
+			sel := core.changes_is_selected(v, f)
 			bg, em := overlay(id, sel, ui_hover == Hit(Hit_Changes{what = .Row, index = slot}))
 			if clay.UI(id)({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
@@ -456,11 +455,11 @@ changes_list_layout :: proc(p: ^Pane) {
 }
 
 // Clay: the selected file's bar (over the diff, inside ui.odin's centre).
-changes_file_bar_layout :: proc(p: ^Pane) {
-	v := pane_changes(p)
+changes_file_bar_layout :: proc(p: ^core.Pane) {
+	v := core.pane_changes(p)
 	if v == nil do return
 	th := theme()
-	_, f := changes_selected(v)
+	_, f := core.changes_selected(v)
 	avail := pane_width() - list_w() - px(2 * TERM_PAD)
 	if clay.UI(cid("ch_file"))(bar(cid("ch_file"), EDITOR_TOOLBAR_H)) {
 		nav := []Changes_Tool{.Prev, .Next}
@@ -485,8 +484,8 @@ changes_file_bar_layout :: proc(p: ^Pane) {
 }
 
 // Clay: "Show more" under a cut diff.
-changes_more_layout :: proc(p: ^Pane) {
-	v := pane_changes(p)
+changes_more_layout :: proc(p: ^core.Pane) {
+	v := core.pane_changes(p)
 	if v == nil || v.diff_lines <= v.shown do return
 	th := theme()
 	avail := pane_width() - list_w() - px(2 * TERM_PAD)
@@ -501,9 +500,9 @@ changes_more_layout :: proc(p: ^Pane) {
 
 // The diff's status line (editor_view.odin's draw_status_line).
 changes_status_text :: proc(tab_id: u64) -> string {
-	v := changes_view(tab_id)
+	v := core.changes_view(tab_id)
 	if v == nil do return ""
-	r, f := changes_selected(v)
+	r, f := core.changes_selected(v)
 	if f == nil do return ""
 	if v.diff_loading do return "Reading the diff…"
 	if f.scope == .Committed do return fmt.tprintf("Committed on %s, against %s (read-only)", r.branch != "" ? r.branch : "HEAD", r.default_branch)
@@ -533,7 +532,7 @@ status_letter :: proc(s: u8) -> string {
 
 changes_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("changesbtn")) do return Hit_Changes{what = .Button}
-	v := pane_changes(hit_pane()) // the pane under the pointer's (ui_hit set its ids)
+	v := core.pane_changes(hit_pane()) // the pane under the pointer's (ui_hit set its ids)
 	if v == nil do return nil
 	for t in Changes_Tool do if clay.PointerOver(cid("chtool", u32(t))) do return Hit_Changes{what = .Tool, index = int(t)}
 	for slot in 0 ..< v.drawn_n do if clay.PointerOver(cid("chrow", u32(slot))) do return Hit_Changes{what = .Row, index = slot}
@@ -545,8 +544,8 @@ changes_hit :: proc() -> Hit {
 changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 	switch h.what {
 	case .Button:
-		r := session_repo(cur())
-		n := changes_count(r)
+		r := session_repo(core.cur())
+		n := core.changes_count(r)
 		if n == 0 do return "Changes in this checkout (none)", ""
 		return fmt.tprintf("Changes in this checkout: %d %s", n, n == 1 ? "file" : "files"), ""
 	case .Field:
@@ -554,9 +553,9 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 	case .List:
 		return "", ""
 	case .Row:
-		v := pane_changes(hit_pane())
-		r := v != nil ? changes_repo(v.root) : nil
-		rows := changes_rows(r)
+		v := core.pane_changes(hit_pane())
+		r := v != nil ? core.changes_repo(v.root) : nil
+		rows := core.changes_rows(r)
 		if v == nil || h.index >= v.drawn_n || v.drawn[h.index] >= len(rows) do return "", ""
 		row := rows[v.drawn[h.index]]
 		if row.head != "" || r == nil do return "", ""
@@ -564,7 +563,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		b := strings.builder_make(context.temp_allocator)
 		strings.write_string(&b, f.path)
 		if f.old_path != "" do fmt.sbprintf(&b, " (from %s)", f.old_path)
-		fmt.sbprintf(&b, " · %s", change_status_name(f.status))
+		fmt.sbprintf(&b, " · %s", core.change_status_name(f.status))
 		switch f.staged {
 		case .All:    strings.write_string(&b, ", staged")
 		case .Partly: strings.write_string(&b, ", partly staged")
@@ -584,7 +583,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		case .Refresh: tip = "Read the changes again"
 		case .Review:
 			tip = "Ask this session's pi to review these changes"
-			if s, _, _ := find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
+			if s, _, _ := core.find_tab(v.tab_id); s != nil && s.agent == .Claude do tip = "Ask this session's Claude to review these changes (sent once it is idle and nothing is typed)"
 		case .Merge:   tip = fmt.tprintf("%s coming later", strings.trim_suffix(tool_label(.Merge), "…"))
 		case .Commit:  tip, keys = "Commit the staged files (your git hooks run)", "Enter"
 		case .Prev:    tip, keys = "Previous file", "K"
@@ -593,7 +592,7 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 		case .Stage:   tip = "Stage this file (git add)"
 		case .Unstage: tip = "Unstage this file"
 		case .Discard: tip = "Discard this file's uncommitted changes (asks first)"
-		case .More:    tip = fmt.tprintf("Show %d more lines", CHANGES_LINES_STEP)
+		case .More:    tip = fmt.tprintf("Show %d more lines", core.CHANGES_LINES_STEP)
 		}
 		if t == .Merge do return tip, ""
 		if !enabled && why != "" do tip = fmt.tprintf("%s: %s", tip, why)
@@ -603,44 +602,44 @@ changes_tip :: proc(h: Hit_Changes) -> (label, keys: string) {
 }
 
 // A tool's click (and the keys that do the same).
-changes_tool_run :: proc(v: ^Changes_View, t: Changes_Tool) {
+changes_tool_run :: proc(v: ^core.Changes_View, t: Changes_Tool) {
 	if ok, _ := changes_tool_state(v, t); !ok do return
-	s, _, _ := find_tab(v.tab_id)
-	r, f := changes_selected(v)
+	s, _, _ := core.find_tab(v.tab_id)
+	r, f := core.changes_selected(v)
 	switch t {
-	case .Refresh: changes_refresh(r)
+	case .Refresh: core.changes_refresh(r)
 	case .Review:
 		if cmd, _ := changes_review_command(s, changes_review_prompt(v, r)); cmd != nil do ui_do(cmd)
 	case .Merge:
 	case .Commit:
-		ui_do(Changes_Commit{tab_id = v.tab_id, message = tf_text(&changes_message_field)})
-		if state.focus_widget == "changes_message" do ui_do(Set_Focus{""})
-	case .Prev:    changes_step(v, -1)
-	case .Next:    changes_step(v, 1)
+		ui_do(core.Changes_Commit{tab_id = v.tab_id, message = tf_text(&changes_message_field)})
+		if state.focus_widget == "changes_message" do ui_do(core.Set_Focus{""})
+	case .Prev:    core.changes_step(v, -1)
+	case .Next:    core.changes_step(v, 1)
 	case .Open:
-		if f != nil && s != nil do ui_do(Open_File{path = strings.concatenate({v.root, "/", f.path}, context.temp_allocator), line = changes_line_at_cursor(v), session = s.id})
-	case .Stage:   if f != nil do ui_do(Changes_Stage{tab_id = v.tab_id, path = f.path, status = change_status_wire(f.status)})
-	case .Unstage: if f != nil do ui_do(Changes_Unstage{tab_id = v.tab_id, path = f.path, status = change_status_wire(f.status)})
-	case .Discard: if f != nil do ui_do(Changes_Discard{tab_id = v.tab_id, path = f.path, status = change_status_wire(f.status)})
+		if f != nil && s != nil do ui_do(core.Open_File{path = strings.concatenate({v.root, "/", f.path}, context.temp_allocator), line = changes_line_at_cursor(v), session = s.id})
+	case .Stage:   if f != nil do ui_do(core.Changes_Stage{tab_id = v.tab_id, path = f.path, status = core.change_status_wire(f.status)})
+	case .Unstage: if f != nil do ui_do(core.Changes_Unstage{tab_id = v.tab_id, path = f.path, status = core.change_status_wire(f.status)})
+	case .Discard: if f != nil do ui_do(core.Changes_Discard{tab_id = v.tab_id, path = f.path, status = core.change_status_wire(f.status)})
 	case .More:    changes_show_more(v)
 	}
 	app.redraw = true
 }
 
 // What the review button sends, and its label.
-changes_review_command :: proc(s: ^Open_Session, text: string) -> (Command, string) {
+changes_review_command :: proc(s: ^core.Open_Session, text: string) -> (core.Command, string) {
 	if s == nil do return nil, ""
 	if s.agent == .Claude {
 		if len(s.tabs) == 0 do return nil, ""
-		if _, is := s.tabs[0].kind.(Claude_Tab); !is do return nil, ""
-		return Claude_Prompt{tab_id = s.tabs[0].id, text = text}, "Ask Claude to review"
+		if _, is := s.tabs[0].kind.(core.Claude_Tab); !is do return nil, ""
+		return core.Claude_Prompt{tab_id = s.tabs[0].id, text = text}, "Ask Claude to review"
 	}
-	if pt := session_pi_tab(s); pt != nil do return Pi_Prompt{tab_id = pt.id, text = text}, TOOL_LABEL[.Review]
+	if pt := core.session_pi_tab(s); pt != nil do return core.Pi_Prompt{tab_id = pt.id, text = text}, TOOL_LABEL[.Review]
 	return nil, ""
 }
 
 // The prompt "Ask pi to review" sends to the session's pi.
-changes_review_prompt :: proc(v: ^Changes_View, r: ^Changes_Repo) -> string {
+changes_review_prompt :: proc(v: ^core.Changes_View, r: ^core.Changes_Repo) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "Review the uncommitted changes in this checkout (%s): git status and git diff HEAD", v.root)
 	if r != nil && r.ahead > 0 && r.default_branch != "" {
@@ -660,7 +659,7 @@ changes_field_key :: proc(e: ^sapp.Event) -> bool {
 		if v := active_changes(); v != nil do changes_tool_run(v, .Commit)
 		return true
 	case .ESCAPE:
-		ui_do(Set_Focus{""})
+		ui_do(core.Set_Focus{""})
 		return true
 	}
 	return false
@@ -668,7 +667,7 @@ changes_field_key :: proc(e: ^sapp.Event) -> bool {
 
 // Clicks on the "±" button and the tab's bars and list, the list's wheel,
 // j/k and ↑/↓ (main.odin, after the focused field's handling). True if consumed.
-changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+changes_event :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 	#partial switch e.type {
 	case .MOUSE_DOWN:
 		if palette_is_open() || menu.open do return false
@@ -678,26 +677,26 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		if e.mouse_button != .LEFT do return true
 		app.redraw = true
 		tip_dismiss()
-		v := pane_changes(p)
+		v := core.pane_changes(p)
 		switch h.what {
 		case .Button:
-			if cs := cur(); cs != nil do ui_do(Changes_Open{session = cs.id})
+			if cs := core.cur(); cs != nil do ui_do(core.Changes_Open{session = cs.id})
 		case .Tool:
 			if v != nil do changes_tool_run(v, Changes_Tool(h.index))
 		case .Row:
 			if v == nil || h.index >= v.drawn_n do return true
-			r := changes_repo(v.root)
-			rows := changes_rows(r)
+			r := core.changes_repo(v.root)
+			rows := core.changes_rows(r)
 			if v.drawn[h.index] >= len(rows) do return true
 			row := rows[v.drawn[h.index]]
-			if row.head == "" do changes_select(v, r.files[row.file].path, r.files[row.file].scope, r.files[row.file].status)
+			if row.head == "" do core.changes_select(v, r.files[row.file].path, r.files[row.file].scope, r.files[row.file].status)
 		case .Field:
-			if state.focus_widget != "changes_message" do ui_do(Set_Focus{"changes_message"})
+			if state.focus_widget != "changes_message" do ui_do(core.Set_Focus{"changes_message"})
 		case .List:
 		}
 		return true
 	case .MOUSE_SCROLL:
-		v := pane_changes(p)
+		v := core.pane_changes(p)
 		if v == nil || !cinside("ch_list", e.mouse_x, e.mouse_y) do return false
 		step := int(-e.scroll_y)
 		if step == 0 do step = e.scroll_y < 0 ? 1 : (e.scroll_y > 0 ? -1 : 0)
@@ -705,13 +704,13 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		app.redraw = true
 		return true
 	case .KEY_DOWN, .CHAR:
-		v := pane_changes(p)
+		v := core.pane_changes(p)
 		if v == nil || state.focus_widget != "" || palette_is_open() || menu.open do return false
 		if e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) != 0 do return false
 		if e.type == .CHAR do return e.char_code == 'j' || e.char_code == 'k' // taken with their keys
 		#partial switch e.key_code {
-		case .J, .DOWN: changes_step(v, 1)
-		case .K, .UP:   changes_step(v, -1)
+		case .J, .DOWN: core.changes_step(v, 1)
+		case .K, .UP:   core.changes_step(v, -1)
 		case:           return false
 		}
 		app.redraw = true
@@ -726,20 +725,20 @@ changes_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 changes_message_field: Text_Field
 
 // "Show more": CHANGES_LINES_STEP more lines of a long diff.
-changes_show_more :: proc(v: ^Changes_View) {
+changes_show_more :: proc(v: ^core.Changes_View) {
 	if v.diff_lines <= v.shown do return
-	v.shown += CHANGES_LINES_STEP
+	v.shown += core.CHANGES_LINES_STEP
 	e := editor_of(v.tab_id)
 	top := e != nil ? e.top : 0
-	changes_show(v, e != nil ? strings.clone(e.path, context.temp_allocator) : v.root)
+	core.changes_show(v, e != nil ? strings.clone(e.path, context.temp_allocator) : v.root)
 	if e != nil do e.top = top
 }
 
 // The new file's line at the diff editor's cursor: the hunk above it
 // ("@@ -a,b +c,d @@"), counted down to the cursor's line (0 = no hunk).
-changes_line_at_cursor :: proc(v: ^Changes_View) -> int {
+changes_line_at_cursor :: proc(v: ^core.Changes_View) -> int {
 	e := editor_of(v.tab_id)
 	if e == nil || e.refused != "" do return 0
 	text := tb_text(&e.buf, context.temp_allocator)
-	return diff_new_line(text, tb_line_of(&e.buf, e.cursor))
+	return core.diff_new_line(text, tb_line_of(&e.buf, e.cursor))
 }

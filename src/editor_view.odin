@@ -20,6 +20,7 @@ import "core:strconv"
 import "core:text/regex"
 import "core:strings"
 import "core:unicode/utf8"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 import sgl "../vendor/sokol-odin/sokol/gl"
@@ -199,7 +200,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 		msg := e.refused
 		tw := text_width(msg, .UI)
 		draw_text(x + (w - tw) / 2, y + h / 2 - text_line_height(.UI), msg, th.text_secondary)
-		hint := fs_display(e.path)
+		hint := core.fs_display(e.path)
 		hw := text_width(hint, .UI_Small)
 		draw_text(x + (w - hw) / 2, y + h / 2 + px(SP_1), hint, th.text_muted, .UI_Small)
 		return
@@ -262,7 +263,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 			append(&rows, Row{line, sub, ry})
 			// current line, find matches, selection
 			if line == cur_line && sel_lo == sel_hi do draw_rect(m.x - px(SP_1), ry, m.w + px(SP_2), m.lh, ec.current_line)
-			span_rect :: proc(text: string, a, b, rs, re, base_col: int, ox, ry: f32, m: Layout_Metrics, col: Rgba, past_end: bool) {
+			span_rect :: proc(text: string, a, b, rs, re, base_col: int, ox, ry: f32, m: Layout_Metrics, col: core.Rgba, past_end: bool) {
 				lo, hi := max(a, rs), min(b, re)
 				if lo > hi || (lo == hi && !past_end) do return
 				x0 := ox + f32(disp_col(text, lo) - base_col) * m.cw
@@ -284,7 +285,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 			// glyphs
 			dcol := base_col
 			i := rs
-			diff_col := Rgba{}
+			diff_col := core.Rgba{}
 			if e.view != .File && len(text) > 0 {
 				switch text[0] {
 				case '+': diff_col = ec.diff_added
@@ -325,7 +326,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 		sub = 0
 	}
 	// cursor (and an input method's composition there)
-	focused := state.focus_widget == "" && tab_focused(e.tab_id) // no field (the agent's included) has the keyboard, and its pane has (panes.odin)
+	focused := state.focus_widget == "" && core.tab_focused(e.tab_id) // no field (the agent's included) has the keyboard, and its pane has (panes.odin)
 	if cursor_xy.x >= 0 && !e.readonly {
 		cx, cy := cursor_xy.x, cursor_xy.y
 		if focused && ime.marked != "" {
@@ -335,7 +336,7 @@ editor_draw :: proc(e: ^Editor, x, y, w, h: f32) {
 			draw_rect(cx, cy + m.lh - font.line_thick, mw, font.line_thick, th.text)
 			cx += text_width(ime.marked[:clamp(ime.caret, 0, len(ime.marked))], .Mono)
 		}
-		draw_rect(cx, cy, max(px(CARET_W), 1), m.lh, focused ? term_colors().cursor : th.text_muted)
+		draw_rect(cx, cy, max(px(CARET_W), 1), m.lh, focused ? core.term_colors().cursor : th.text_muted)
 		ime.caret_rect = {cx, cy, font.cell_w, m.lh}
 	}
 	sgl_scissor(0, 0, 1 << 15, 1 << 15)
@@ -370,7 +371,7 @@ sgl_scissor :: proc(x, y, w, h: f32) {
 }
 
 @(private = "file")
-draw_cell :: proc(r: rune, x, baseline: f32, col: Rgba) {
+draw_cell :: proc(r: rune, x, baseline: f32, col: core.Rgba) {
 	cps := [1]rune{r}
 	draw_run(text_cell_run(cps[:], false, false, 1), x, baseline, col)
 }
@@ -381,7 +382,7 @@ draw_cell :: proc(r: rune, x, baseline: f32, col: Rgba) {
 draw_status_line :: proc(e: ^Editor, x, y, w, h: f32) {
 	th := theme()
 	draw_rect(x, y, w, h, th.bg_app)
-	draw_rect(x, y, w, px(BORDER_W), th.border)
+	draw_rect(x, y, w, px(core.BORDER_W), th.border)
 	ty := y + (h - text_line_height(.UI_Small)) / 2
 	left := e.notice
 	lcol := th.error
@@ -461,9 +462,9 @@ editor_text_hit :: proc(e: ^Editor, mx, my: f32) -> bool {
 	if e == nil || !e.area_drawn do return false
 	if state.home_open && inside(clay.ID("drawer"), mx, my) do return false
 	if palette_is_open() do return false
-	s := cur()
-	p := pane_of_tab(s, e.tab_id)
-	if p == nil do p = session_focused_pane(s) // a session with no panes yet: its implicit one
+	s := core.cur()
+	p := core.pane_of_tab(s, e.tab_id)
+	if p == nil do p = core.session_focused_pane(s) // a session with no panes yet: its implicit one
 	return pane_inside(p, pid(p, "terminal"), mx, my)
 }
 
@@ -493,8 +494,8 @@ editor_event :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 		}
 		if ev.mouse_button != .LEFT do return false
 		if e.refused != "" do return true
-		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false}) // as for terminals: a sliding drawer goes away
-		if state.focus_widget != "" do ui_do(Set_Focus{""})
+		if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false}) // as for terminals: a sliding drawer goes away
+		if state.focus_widget != "" do ui_do(core.Set_Focus{""})
 		ime_cancel()
 		ed_click(e, offset_at(e, ev.mouse_x, ev.mouse_y), app.clicks, ev.modifiers & sapp.MODIFIER_SHIFT != 0)
 		e.dragging = true
@@ -548,7 +549,7 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	#partial switch ev.type {
 	case .CLIPBOARD_PASTED:
 		if e.readonly do return true
-		ed_insert(e, clipboard_text(), .Other)
+		ed_insert(e, core.clipboard_text(), .Other)
 		return true
 	case .CHAR:
 		if cmd || ctrl do return true
@@ -570,14 +571,14 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	if cmd {
 		#partial switch ev.key_code {
 		case .A:      ed_select_all(e)
-		case .C:      if s := copy_text(e); s != "" && platform.set_clipboard != nil do platform.set_clipboard(s)
+		case .C:      if s := copy_text(e); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
 		case .X:
 			if e.readonly do return true
 			lo, hi := ed_copy_range(e)
-			if platform.set_clipboard != nil do platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
+			if core.platform.set_clipboard != nil do core.platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
 			ed_replace(e, lo, hi, "", .Other)
 		case .Z:      if shift do ed_redo(e); else do ed_undo(e)
-		case .S:      ui_do(Save_File{e.tab_id})
+		case .S:      ui_do(core.Save_File{e.tab_id})
 		case .F:      open_bar(e, alt ? .Replace : .Find)
 		case .G:      find_step(e, shift ? -1 : 1)
 		case .SLASH:  if !e.readonly do ed_toggle_comment(e)
@@ -681,11 +682,11 @@ open_bar :: proc(e: ^Editor, bar: Editor_Bar) {
 		else do tf_select_all(&e.find.query)
 		e.bar = bar
 		e.find.current = -1
-		ui_do(Set_Focus{"editor_find"})
+		ui_do(core.Set_Focus{"editor_find"})
 	case .Goto:
 		tf_set(&e.find.goto_line, "")
 		e.bar = .Goto
-		ui_do(Set_Focus{"editor_goto"})
+		ui_do(core.Set_Focus{"editor_goto"})
 	case .None:
 	}
 	app.redraw = true
@@ -696,7 +697,7 @@ close_bar :: proc(e: ^Editor) {
 	clear(&e.find.matches)
 	delete(e.find.key)
 	e.find.key = ""
-	if strings.has_prefix(state.focus_widget, "editor_") do ui_do(Set_Focus{""})
+	if strings.has_prefix(state.focus_widget, "editor_") do ui_do(core.Set_Focus{""})
 	app.redraw = true
 }
 
@@ -834,7 +835,7 @@ goto_run :: proc(e: ^Editor) {
 editor_focused_field :: proc() -> (f: ^Text_Field, text_id, box_id: clay.ElementId) {
 	e := active_editor()
 	if e == nil do return nil, {}, {}
-	p := focused_pane() // the focused pane's ids (its editor has the keyboard), wherever the pointer is
+	p := core.focused_pane() // the focused pane's ids (its editor has the keyboard), wherever the pointer is
 	switch state.focus_widget {
 	case "editor_find":    return &e.find.query, pid(p, "ed_find_text"), pid(p, "ed_find_box")
 	case "editor_replace": return &e.find.replace, pid(p, "ed_replace_text"), pid(p, "ed_replace_box")
@@ -847,11 +848,11 @@ editor_bar_focused :: proc() -> bool {return strings.has_prefix(state.focus_widg
 
 // Keys of a bar field before the generic text-field handling (main.odin):
 // Enter, Esc, Tab between fields, ⌘G, ⌥⌘F, ⌘S. True if consumed.
-editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
+editor_bar_event :: proc(p: ^core.Pane, ev: ^sapp.Event) -> bool {
 	if ev.type != .KEY_DOWN do return false // keys only: the pointer over another pane keeps the field
 	e := pane_editor(p)
 	if e == nil {
-		if editor_bar_focused() do ui_do(Set_Focus{""})
+		if editor_bar_focused() do ui_do(core.Set_Focus{""})
 		return false
 	}
 	if ev.type != .KEY_DOWN do return false
@@ -863,7 +864,7 @@ editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
 		#partial switch ev.key_code {
 		case .G: find_step(e, shift ? -1 : 1)
 		case .F: if alt do e.bar = .Replace
-		case .S: ui_do(Save_File{e.tab_id})
+		case .S: ui_do(core.Save_File{e.tab_id})
 		case .Z: if shift do ed_redo(e); else do ed_undo(e)
 		case:    return false
 		}
@@ -883,7 +884,7 @@ editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
 		return true
 	case .TAB:
 		if e.bar == .Replace {
-			ui_do(Set_Focus{state.focus_widget == "editor_find" ? "editor_replace" : "editor_find"})
+			ui_do(core.Set_Focus{state.focus_widget == "editor_find" ? "editor_replace" : "editor_find"})
 			return true
 		}
 	}
@@ -892,7 +893,7 @@ editor_bar_event :: proc(p: ^Pane, ev: ^sapp.Event) -> bool {
 
 // Clay: the bars above the editor text (called inside ui.odin's centre
 // column, before the "terminal" element that becomes the text area).
-editor_bars_layout :: proc(p: ^Pane) {
+editor_bars_layout :: proc(p: ^core.Pane) {
 	e := pane_editor(p)
 	if e == nil do return
 	th := theme()
@@ -903,7 +904,7 @@ editor_bars_layout :: proc(p: ^Pane) {
 				clip = {horizontal = true}, // its pane's width at most (bar_w)
 				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
-				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+				border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 			}) {
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(px(DOT)), clay.SizingFixed(px(DOT))}}, backgroundColor = cc(th.waiting), cornerRadius = clay.CornerRadiusAll(px(DOT / 2))}) {}
 				// cut to the room left of the buttons: a long file name never pushes them out of the window
@@ -921,19 +922,19 @@ editor_bars_layout :: proc(p: ^Pane) {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFit()}, padding = {pu(TERM_PAD), pu(TERM_PAD), pu(SP_1), pu(SP_1)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		if e.bar == .Goto {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 				clay.Text("Go to line", txt(th.text_secondary))
-				bar_field(cid("ed_goto_box"), cid("ed_goto_text"), &e.find.goto_line, "line or line:column", state.focus_widget == "editor_goto" && pane_keys(p))
+				bar_field(cid("ed_goto_box"), cid("ed_goto_text"), &e.find.goto_line, "line or line:column", state.focus_widget == "editor_goto" && core.pane_keys(p))
 				clay.TextDynamic(fmt.tprintf("1–%d", tb_line_count(&e.buf)), txt(th.text_muted))
 			}
 			return
 		}
 		f := &e.find
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
-			bar_field(cid("ed_find_box"), cid("ed_find_text"), &f.query, "Find", state.focus_widget == "editor_find" && pane_keys(p))
+			bar_field(cid("ed_find_box"), cid("ed_find_text"), &f.query, "Find", state.focus_widget == "editor_find" && core.pane_keys(p))
 			bar_toggle(cid("ed_case"), "Aa", f.case_sensitive)
 			bar_toggle(cid("ed_regex"), ".*", f.regex)
 			count := "No results"
@@ -949,7 +950,7 @@ editor_bars_layout :: proc(p: ^Pane) {
 		}
 		if e.bar == .Replace {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H - 2 * SP_1))}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
-				bar_field(cid("ed_replace_box"), cid("ed_replace_text"), &f.replace, "Replace", state.focus_widget == "editor_replace" && pane_keys(p))
+				bar_field(cid("ed_replace_box"), cid("ed_replace_text"), &f.replace, "Replace", state.focus_widget == "editor_replace" && core.pane_keys(p))
 				bar_button(cid("ed_replace_one"), "Replace", false)
 				bar_button(cid("ed_replace_all"), "All", false)
 			}
@@ -1016,9 +1017,9 @@ bar_click :: proc(e: ^Editor, mx, my: f32) -> bool {
 	}
 	hit :: proc(name: string) -> bool {return clay.PointerOver(cid(name))}
 	switch {
-	case hit("ed_reload"):  ui_do(Reload_File{tab_id = e.tab_id})
-	case hit("ed_keep"):    ui_do(Keep_Buffer{e.tab_id})
-	case hit("ed_compare"): ui_do(Diff_File{e.tab_id, .Diff_Disk})
+	case hit("ed_reload"):  ui_do(core.Reload_File{tab_id = e.tab_id})
+	case hit("ed_keep"):    ui_do(core.Keep_Buffer{e.tab_id})
+	case hit("ed_compare"): ui_do(core.Diff_File{e.tab_id, .Diff_Disk})
 	case hit("ed_prev"):    find_step(e, -1)
 	case hit("ed_next"):    find_step(e, 1)
 	case hit("ed_close"):   close_bar(e)
@@ -1028,9 +1029,9 @@ bar_click :: proc(e: ^Editor, mx, my: f32) -> bool {
 		e.bar = e.bar == .Replace ? .Find : .Replace
 	case hit("ed_replace_one"): replace_one(e)
 	case hit("ed_replace_all"): replace_all(e)
-	case hit("ed_find_box"):    if state.focus_widget != "editor_find" do ui_do(Set_Focus{"editor_find"})
-	case hit("ed_replace_box"): if state.focus_widget != "editor_replace" do ui_do(Set_Focus{"editor_replace"})
-	case hit("ed_goto_box"):    if state.focus_widget != "editor_goto" do ui_do(Set_Focus{"editor_goto"})
+	case hit("ed_find_box"):    if state.focus_widget != "editor_find" do ui_do(core.Set_Focus{"editor_find"})
+	case hit("ed_replace_box"): if state.focus_widget != "editor_replace" do ui_do(core.Set_Focus{"editor_replace"})
+	case hit("ed_goto_box"):    if state.focus_widget != "editor_goto" do ui_do(core.Set_Focus{"editor_goto"})
 	case hit("ed_bar"), hit("ed_banner"):
 	case:
 		return false
@@ -1072,24 +1073,8 @@ editor_takes_cmd_slash :: proc() -> bool {
 
 Menu_Editor :: distinct u64 // tab id: the right-click menu over its text
 
-Editor_Action :: enum u8 {
-	None,
-	Undo,
-	Redo,
-	Cut,
-	Copy,
-	Paste,
-	Select_All,
-	Toggle_Comment,
-	Indent,
-	Outdent,
-	Find,
-	Replace,
-	Goto,
-}
-
 // Runs an editor step from a button or menu row.
-editor_run_action :: proc(tab_id: u64, a: Editor_Action) {
+editor_run_action :: proc(tab_id: u64, a: core.Editor_Action) {
 	e := editor_of(tab_id)
 	if e == nil do return
 	ro := e.readonly
@@ -1097,13 +1082,13 @@ editor_run_action :: proc(tab_id: u64, a: Editor_Action) {
 	case .None:
 	case .Undo:           ed_undo(e)
 	case .Redo:           ed_redo(e)
-	case .Copy:           if s := copy_text(e); s != "" && platform.set_clipboard != nil do platform.set_clipboard(s)
+	case .Copy:           if s := copy_text(e); s != "" && core.platform.set_clipboard != nil do core.platform.set_clipboard(s)
 	case .Cut:
 		if ro do break
 		lo, hi := ed_copy_range(e)
-		if platform.set_clipboard != nil do platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
+		if core.platform.set_clipboard != nil do core.platform.set_clipboard(tb_copy(&e.buf, lo, hi - lo, context.temp_allocator))
 		ed_replace(e, lo, hi, "", .Other)
-	case .Paste:          if !ro do ed_insert(e, clipboard_text(), .Other)
+	case .Paste:          if !ro do ed_insert(e, core.clipboard_text(), .Other)
 	case .Select_All:     ed_select_all(e)
 	case .Toggle_Comment: if !ro do ed_toggle_comment(e)
 	case .Indent:         if !ro do ed_indent_lines(e, false)
@@ -1116,26 +1101,26 @@ editor_run_action :: proc(tab_id: u64, a: Editor_Action) {
 }
 
 // The right-click menu's rows (ui_sidebar.odin's menu draws and runs them).
-editor_menu_items :: proc(tab_id: u64, items: ^[dynamic]Menu_Item) {
+editor_menu_items :: proc(tab_id: u64, items: ^[dynamic]core.Menu_Item) {
 	e := editor_of(tab_id)
 	if e == nil do return
 	ro := e.readonly || e.refused != ""
 	if e.refused == "" {
-		if !ro do append(items, Menu_Item{label = "Cut", keys = "⌘X", editor = .Cut})
-		append(items, Menu_Item{label = "Copy", keys = "⌘C", editor = .Copy})
-		if !ro do append(items, Menu_Item{label = "Paste", keys = "⌘V", editor = .Paste})
-		append(items, Menu_Item{label = "Select all", keys = "⌘A", editor = .Select_All})
-		append(items, Menu_Item{sep = true})
-		if !ro && e.sx.lang != nil do append(items, Menu_Item{label = "Toggle comment", keys = "⌘/", editor = .Toggle_Comment})
-		if !ro do append(items, Menu_Item{label = "Indent", keys = "⌘]", editor = .Indent})
-		if !ro do append(items, Menu_Item{label = "Outdent", keys = "⌘[", editor = .Outdent})
-		append(items, Menu_Item{label = "Find…", keys = "⌘F", editor = .Find})
-		append(items, Menu_Item{label = "Go to line…", keys = "⌘L", editor = .Goto})
+		if !ro do append(items, core.Menu_Item{label = "Cut", keys = "⌘X", editor = .Cut})
+		append(items, core.Menu_Item{label = "Copy", keys = "⌘C", editor = .Copy})
+		if !ro do append(items, core.Menu_Item{label = "Paste", keys = "⌘V", editor = .Paste})
+		append(items, core.Menu_Item{label = "Select all", keys = "⌘A", editor = .Select_All})
+		append(items, core.Menu_Item{sep = true})
+		if !ro && e.sx.lang != nil do append(items, core.Menu_Item{label = "Toggle comment", keys = "⌘/", editor = .Toggle_Comment})
+		if !ro do append(items, core.Menu_Item{label = "Indent", keys = "⌘]", editor = .Indent})
+		if !ro do append(items, core.Menu_Item{label = "Outdent", keys = "⌘[", editor = .Outdent})
+		append(items, core.Menu_Item{label = "Find…", keys = "⌘F", editor = .Find})
+		append(items, core.Menu_Item{label = "Go to line…", keys = "⌘L", editor = .Goto})
 	}
 	if e.view == .File {
-		append(items, Menu_Item{sep = true})
-		if e.git.in_repo && e.refused == "" do append(items, Menu_Item{label = "Diff with HEAD", cmd = Diff_File{e.tab_id, .Diff_Head}})
-		append(items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_In_Finder{path = e.path}})
+		append(items, core.Menu_Item{sep = true})
+		if e.git.in_repo && e.refused == "" do append(items, core.Menu_Item{label = "Diff with HEAD", cmd = core.Diff_File{e.tab_id, .Diff_Head}})
+		append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = e.path}})
 	}
 }
 
@@ -1147,7 +1132,7 @@ Tool :: struct {
 	keys:    string,
 	enabled: bool,
 	on:      bool, // a toggle that is on
-	step:    Editor_Action,
+	step:    core.Editor_Action,
 	gap:     bool, // a small gap before it (groups)
 }
 
@@ -1182,7 +1167,7 @@ editor_tools :: proc(e: ^Editor) -> []Tool {
 		append(&out, Tool{label = "Wrap", act = "toggle_wrap", enabled = true, on = e.wrap, gap = true})
 	}
 	if file && e.git.in_repo do append(&out, Tool{label = "Diff", act = "diff_head", enabled = true})
-	if file && md_is_markdown_path(e.path) do append(&out, Tool{label = "Preview", act = "markdown_preview", enabled = true})
+	if file && core.md_is_markdown_path(e.path) do append(&out, Tool{label = "Preview", act = "markdown_preview", enabled = true})
 	if e.view == .File do append(&out, Tool{label = "Reveal", act = "reveal_file", enabled = true})
 	return out[:]
 }
@@ -1219,19 +1204,19 @@ toolbar_layout :: proc(e: ^Editor) {
 	shown := len(tools)
 	for shown > 0 && toolbar_width(tools[:shown]) > avail do shown -= 1
 	for shown > 0 && shown < len(tools) && !tools[shown].gap do shown -= 1 // whole groups
-	path := fs_display(e.path)
+	path := core.fs_display(e.path)
 	path_room := avail - toolbar_width(tools[:shown]) - px(GAP_GROUP)
 	if clay.UI(cid("ed_tools"))({
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_TOOLBAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		for t, i in tools[:shown] {
 			if t.gap && i > 0 do group_separator()
 			id := cid("ed_tool", u32(i))
 			hovered := ui_hover == Hit(Hit_Editor_Tool(i)) && t.enabled
-			bg := t.on ? with_alpha(th.accent, 0.3) : (hovered ? mix(th.bg_app, th.text, TINT_BUTTON_HOVER) : Rgba{})
+			bg := t.on ? with_alpha(th.accent, 0.3) : (hovered ? mix(th.bg_app, th.text, TINT_BUTTON_HOVER) : core.Rgba{})
 			col := !t.enabled ? th.text_muted : (hovered || t.on ? th.text : th.text_secondary)
 			if clay.UI(id)({
 				layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TAB_H - SP_1))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},

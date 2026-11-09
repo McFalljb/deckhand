@@ -7,7 +7,7 @@
 #                                        origin/main; CI passes the PR's base, or the push's before)
 #
 # The holder's code: what links into deckhand-core, src/holder, src/holderwire and src/trust,
-# tests (*_test.odin) aside. Also checks the app's copy of the number (src/holder_install.odin)
+# tests (*_test.odin) aside. Also checks the app's copy of the number (src/core/holder_install.odin)
 # is the same as the holder's (src/holder/holder.odin).
 set -eu
 cd "$(dirname "$0")/.."
@@ -15,12 +15,12 @@ cd "$(dirname "$0")/.."
 rev_of() { sed -n 's/^HOLDER_REV :: \([0-9][0-9]*\).*/\1/p' | head -1; }
 
 new=$(rev_of < src/holder/holder.odin)
-app=$(rev_of < src/holder_install.odin)
+app=$(rev_of < src/core/holder_install.odin)
 if [ -z "$new" ] || [ -z "$app" ]; then
-  echo "check-holder-rev: no HOLDER_REV :: N in src/holder/holder.odin or src/holder_install.odin"; exit 1
+  echo "check-holder-rev: no HOLDER_REV :: N in src/holder/holder.odin or src/core/holder_install.odin"; exit 1
 fi
 if [ "$new" != "$app" ]; then
-  echo "check-holder-rev: src/holder/holder.odin has HOLDER_REV $new, src/holder_install.odin has $app"; exit 1
+  echo "check-holder-rev: src/holder/holder.odin has HOLDER_REV $new, src/core/holder_install.odin has $app"; exit 1
 fi
 
 base=${1:-origin/main}
@@ -37,7 +37,7 @@ old=$(git show "$mb:src/holder/holder.odin" 2>/dev/null | rev_of || true)
 if [ -z "$old" ]; then echo "check-holder-rev: no holder at $mb: holder_rev $new is the first"; exit 0; fi
 if [ "$new" -le "$old" ]; then
   echo "check-holder-rev: the holder's code changed since $mb but HOLDER_REV is still $new (was $old). Bump it in"
-  echo "src/holder/holder.odin and src/holder_install.odin. Changed:"
+  echo "src/holder/holder.odin and src/core/holder_install.odin. Changed:"
   echo "$changed" | sed 's/^/  /'
   exit 1
 fi

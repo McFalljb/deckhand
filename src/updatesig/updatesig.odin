@@ -15,7 +15,7 @@ package updatesig
 //
 // Keys: the private key is the 32-byte Ed25519 seed, base64 (44 characters), in a 0600
 // file on the release signer's Mac only (scripts/release.sh); the public key is 32
-// bytes, base64, compiled into the app (src/update_key.odin).
+// bytes, base64, compiled into the app (src/core/update_key.odin).
 
 import "core:crypto"
 import "core:crypto/ed25519"
@@ -50,7 +50,7 @@ SIG_FILE_HEADS := [Format]string {
 SIG_SIZE :: ed25519.SIGNATURE_SIZE // 64
 SEED_SIZE :: ed25519.PRIVATE_KEY_SIZE // 32
 PUB_SIZE :: ed25519.PUBLIC_KEY_SIZE // 32
-// src/update_key.odin's value until a real key is put in; release.sh refuses to ship it
+// src/core/update_key.odin's value until a real key is put in; release.sh refuses to ship it
 PLACEHOLDER_PREFIX :: "PLACEHOLDER"
 
 // The signed message: one field per line, "\n"-terminated, nothing else; its head is format's.

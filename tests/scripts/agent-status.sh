@@ -1,5 +1,5 @@
 #!/bin/sh
-# Agent status for every terminal tab (src/agent_status.odin): a fake agent
+# Agent status for every terminal tab (src/core/agent_status.odin): a fake agent
 # (tests/scripts/fake-7501.py, never a real one) in a shell tab asks for and
 # reports OSC 7501 program status; a fake pi that only sleeps. Checks the
 # query/reply handshake, the dots on the tab, row, Open group and project,

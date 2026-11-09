@@ -11,51 +11,12 @@ import "core:math"
 import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
+import "core"
 import gh "ghostty"
 import sapp "../vendor/sokol-odin/sokol/app"
 
-Term_View :: struct {
-	rs:           gh.Render_State,
-	it:           gh.Row_Iterator,
-	cells:        gh.Row_Cells,
-	kenc:         gh.Key_Encoder,
-	kev:          gh.Key_Event,
-	menc:         gh.Mouse_Encoder,
-	mev:          gh.Mouse_Event,
-	x, y, w, h:   f32, // pane rect in framebuffer px
-	// input state
-	pending_key:  gh.Key, // KEY_DOWN deferred to the CHAR event that follows
-	pending_mods: gh.Mods,
-	pending_cp:   rune,
-	char_handled: bool, // KEY_DOWN already sent the key: drop its CHAR events
-	surrogate:    u32,
-	selecting:    bool,
-	// a drag's anchor and what its press selected (word or line: lo, hi),
-	// tracked by libghostty so they stay on their text through scrolling
-	// and scrollback trims; only while a drag is on
-	sel_refs:     [3]gh.Tracked_Grid_Ref,
-	sel_unit:     int, // 1 cells, 2 words, 3 lines (click count of the press)
-	drag_at:      [2]f32, // the pointer during a selection drag (auto-scroll)
-	drag_scrolled: time.Tick, // last auto-scroll step
-	cursor_px:    [2]f32, // cursor cell's top-left as last drawn (input method anchor)
-	mouse_down:   bool,
-	mouse_button: gh.Mouse_Button, // the press reported to the app (its drags carry it)
-	mouse_cell:   [2]i32,
-	scroll_acc:   f32,
-	focused:      bool,
-	drawn_selected: int, // selected cells in the last drawn frame (test mode reads it)
-	resized:      time.Tick, // last grid resize (throttled while a divider is dragged)
-	// the link under the pointer while ⌘ is held (term_links.odin)
-	link:         Term_Link, // url owned
-	link_on:      bool,
-	link_at:      [2]f32, // the pointer when it was looked up
-	link_key:     Link_Key, // what that lookup depended on
-	link_scanned: bool, // link_key is current
-	link_scans:   int, // lookups made (tests)
-}
-
 // The view's render state and encoders, for a terminal term_init just made.
-term_view_init :: proc(t: ^Term) {
+term_view_init :: proc(t: ^core.Term) {
 	gh.render_state_new(nil, &t.rs)
 	gh.render_state_row_iterator_new(nil, &t.it)
 	gh.render_state_row_cells_new(nil, &t.cells)
@@ -68,7 +29,7 @@ term_view_init :: proc(t: ^Term) {
 
 // Frees what term_view_init made, and a drag's tracked ends and the link (term_free, before the
 // terminal they belong to goes).
-term_view_free :: proc(t: ^Term) {
+term_view_free :: proc(t: ^core.Term) {
 	drag_end(t)
 	term_link_clear(t)
 	gh.mouse_event_free(t.mev)
@@ -84,30 +45,30 @@ term_view_free :: proc(t: ^Term) {
 term_pad :: proc() -> f32 {return f32(TERM_PAD) * app.dpi}
 
 // Fits the grid into the pane rect; resizes terminal and PTY on change.
-term_set_rect :: proc(t: ^Term, x, y, w, h: f32) {
+term_set_rect :: proc(t: ^core.Term, x, y, w, h: f32) {
 	t.x, t.y, t.w, t.h = x, y, w, h
 	// capped at what a snapshot carries (snapshot.odin), so ours always decode
-	cols := u16(clamp(int((w - 2 * term_pad()) / font.cell_w), 2, MAX_TERM_COLS))
-	rows := u16(clamp(int((h - 2 * term_pad()) / font.cell_h), 2, MAX_TERM_ROWS))
+	cols := u16(clamp(int((w - 2 * term_pad()) / font.cell_w), 2, core.MAX_TERM_COLS))
+	rows := u16(clamp(int((h - 2 * term_pad()) / font.cell_h), 2, core.MAX_TERM_ROWS))
 	if cols == t.cols && rows == t.rows do return
 	// a column divider is being dragged: the grid (and the child's PTY)
 	// follows at most every RESIZE_THROTTLE; the release resizes it exactly
 	if (divider.active || pane_dragging()) && t.cols != 0 && time.tick_since(t.resized) < RESIZE_THROTTLE do return
 	t.resized = time.tick_now()
-	term_resize(t, cols, rows, font.cell_w, font.cell_h)
+	core.term_resize(t, cols, rows, font.cell_w, font.cell_h)
 }
 
-rgba :: proc(c: gh.Color_Rgb, a: u8 = 255) -> Rgba {return {c.r, c.g, c.b, a}}
+rgba :: proc(c: gh.Color_Rgb, a: u8 = 255) -> core.Rgba {return {c.r, c.g, c.b, a}}
 
 Glyph_Draw :: struct {
 	x, y:  f32, // cell top-left
 	run:   u32, // shaped run (font.odin)
 	cells: int,
-	col:   Rgba,
+	col:   core.Rgba,
 }
 
 // Draws the whole grid (inside draw_begin/draw_end).
-term_draw :: proc(t: ^Term) {
+term_draw :: proc(t: ^core.Term) {
 	gh.render_state_update(t.rs, t.gt)
 	colors := gh.Render_Colors{size = size_of(gh.Render_Colors)}
 	gh.render_state_get(t.rs, .Colors, &colors)
@@ -306,10 +267,10 @@ to_mods :: proc(m: u32) -> gh.Mods {
 }
 
 @(private = "file")
-send_key :: proc(t: ^Term, action: gh.Key_Action, key: gh.Key, mods: gh.Mods, unshifted: rune, text: string) {
+send_key :: proc(t: ^core.Term, action: gh.Key_Action, key: gh.Key, mods: gh.Mods, unshifted: rune, text: string) {
 	if !t.running do return
 	gh.key_encoder_setopt_from_terminal(t.kenc, t.gt)
-	opt := OPTION_AS_ALT
+	opt := core.OPTION_AS_ALT
 	gh.key_encoder_setopt(t.kenc, .Macos_Option_As_Alt, &opt)
 	gh.key_event_set_action(t.kev, action)
 	gh.key_event_set_key(t.kev, key)
@@ -320,8 +281,8 @@ send_key :: proc(t: ^Term, action: gh.Key_Action, key: gh.Key, mods: gh.Mods, un
 	out: [128]u8
 	n: uint
 	if gh.key_encoder_encode(t.kenc, t.kev, &out[0], len(out), &n) == .Success && n > 0 {
-		pty_write(&t.pty, out[:n])
-		term_scroll_to_bottom(t)
+		core.pty_write(&t.pty, out[:n])
+		core.term_scroll_to_bottom(t)
 	}
 }
 
@@ -353,18 +314,18 @@ mac_key_text :: proc(k: sapp.Keycode, modifiers: u32, kitty: bool) -> string {
 	return ""
 }
 
-kitty_flags :: proc(t: ^Term) -> u8 {
+kitty_flags :: proc(t: ^core.Term) -> u8 {
 	f: u8
 	gh.terminal_get(t.gt, .Kitty_Keyboard_Flags, &f)
 	return f
 }
 
-term_key_down :: proc(t: ^Term, e: ^sapp.Event) {
+term_key_down :: proc(t: ^core.Term, e: ^sapp.Event) {
 	if s := mac_key_text(e.key_code, e.modifiers, kitty_flags(t) != 0); s != "" {
 		t.char_handled = true
 		if t.running {
-			pty_write(&t.pty, transmute([]u8)s)
-			term_scroll_to_bottom(t)
+			core.pty_write(&t.pty, transmute([]u8)s)
+			core.term_scroll_to_bottom(t)
 		}
 		return
 	}
@@ -384,14 +345,14 @@ term_key_down :: proc(t: ^Term, e: ^sapp.Event) {
 	send_key(t, action, key, mods, unshifted, "")
 }
 
-term_key_up :: proc(t: ^Term, e: ^sapp.Event) {
+term_key_up :: proc(t: ^core.Term, e: ^sapp.Event) {
 	if mac_key_text(e.key_code, e.modifiers, kitty_flags(t) != 0) != "" do return // its press was text, not a key
 	key, unshifted := map_key(e.key_code)
 	if key == .Unidentified do return
 	send_key(t, .Release, key, to_mods(e.modifiers), unshifted, "")
 }
 
-term_char :: proc(t: ^Term, e: ^sapp.Event) {
+term_char :: proc(t: ^core.Term, e: ^sapp.Event) {
 	if t.char_handled do return
 	cp := e.char_code
 	if cp < 0x20 || cp == 0x7F do return
@@ -408,35 +369,35 @@ term_char :: proc(t: ^Term, e: ^sapp.Event) {
 	send_key(t, e.key_repeat ? .Repeat : .Press, t.pending_key, t.pending_mods, t.pending_cp, string(buf[:n]))
 }
 
-term_focus :: proc(t: ^Term, focused: bool) {
+term_focus :: proc(t: ^core.Term, focused: bool) {
 	t.focused = focused
 	t.changed = true
-	if !t.running || !mode_on(t, 1004) do return
+	if !t.running || !core.mode_on(t, 1004) do return
 	out: [16]u8
 	n: uint
-	if gh.focus_encode(focused ? .Gained : .Lost, &out[0], len(out), &n) == .Success do pty_write(&t.pty, out[:n])
+	if gh.focus_encode(focused ? .Gained : .Lost, &out[0], len(out), &n) == .Success do core.pty_write(&t.pty, out[:n])
 }
 
 // ---- mouse ----
 
-in_pane :: proc(t: ^Term, mx, my: f32) -> bool {
+in_pane :: proc(t: ^core.Term, mx, my: f32) -> bool {
 	return mx >= t.x && mx < t.x + t.w && my >= t.y && my < t.y + t.h
 }
 
-cell_at :: proc(t: ^Term, mx, my: f32) -> [2]u16 {
+cell_at :: proc(t: ^core.Term, mx, my: f32) -> [2]u16 {
 	cx := clamp(int((mx - t.x - term_pad()) / font.cell_w), 0, int(t.cols) - 1)
 	cy := clamp(int((my - t.y - term_pad()) / font.cell_h), 0, int(t.rows) - 1)
 	return {u16(cx), u16(cy)}
 }
 
-app_tracks_mouse :: proc(t: ^Term) -> bool {
+app_tracks_mouse :: proc(t: ^core.Term) -> bool {
 	mt: gh.Mouse_Tracking
 	gh.terminal_get(t.gt, .Mouse_Tracking, &mt)
 	return mt != .None
 }
 
 @(private = "file")
-send_mouse :: proc(t: ^Term, action: gh.Mouse_Action, button: gh.Mouse_Button, mx, my: f32, mods: gh.Mods) {
+send_mouse :: proc(t: ^core.Term, action: gh.Mouse_Action, button: gh.Mouse_Button, mx, my: f32, mods: gh.Mods) {
 	if !t.running do return
 	gh.mouse_encoder_setopt_from_terminal(t.menc, t.gt)
 	size := gh.Mouse_Encoder_Size {
@@ -458,12 +419,12 @@ send_mouse :: proc(t: ^Term, action: gh.Mouse_Action, button: gh.Mouse_Button, m
 	gh.mouse_event_set_position(t.mev, {mx - t.x, my - t.y})
 	out: [64]u8
 	n: uint
-	if gh.mouse_encoder_encode(t.menc, t.mev, &out[0], len(out), &n) == .Success && n > 0 do pty_write(&t.pty, out[:n])
+	if gh.mouse_encoder_encode(t.menc, t.mev, &out[0], len(out), &n) == .Success && n > 0 do core.pty_write(&t.pty, out[:n])
 }
 
 // Screen coordinates (scrollback included) of a viewport cell.
 @(private = "file")
-to_screen :: proc(t: ^Term, c: [2]u16) -> [2]u32 {
+to_screen :: proc(t: ^core.Term, c: [2]u16) -> [2]u32 {
 	p := gh.Point{tag = .Viewport}
 	p.value.coordinate = {x = c.x, y = u32(c.y)}
 	ref := gh.Grid_Ref{size = size_of(gh.Grid_Ref)}
@@ -473,7 +434,7 @@ to_screen :: proc(t: ^Term, c: [2]u16) -> [2]u32 {
 }
 
 @(private = "file")
-set_selection :: proc(t: ^Term, a, b: [2]u32) {
+set_selection :: proc(t: ^core.Term, a, b: [2]u32) {
 	ra, rb := gh.Grid_Ref{size = size_of(gh.Grid_Ref)}, gh.Grid_Ref{size = size_of(gh.Grid_Ref)}
 	pa := gh.Point{tag = .Screen}
 	pa.value.coordinate = {x = u16(a.x), y = a.y}
@@ -487,7 +448,7 @@ set_selection :: proc(t: ^Term, a, b: [2]u32) {
 
 // Where the current selection started (screen coordinates), if there is one.
 @(private = "file")
-selection_start :: proc(t: ^Term) -> ([2]u32, bool) {
+selection_start :: proc(t: ^core.Term) -> ([2]u32, bool) {
 	sel := gh.Selection{size = size_of(gh.Selection)}
 	if gh.terminal_get(t.gt, .Selection, &sel) != .Success do return {}, false
 	out: gh.Point_Coordinate
@@ -495,7 +456,7 @@ selection_start :: proc(t: ^Term) -> ([2]u32, bool) {
 	return {u32(out.x), out.y}, true
 }
 
-clear_selection :: proc(t: ^Term) {
+clear_selection :: proc(t: ^core.Term) {
 	gh.terminal_set(t.gt, .Selection, nil)
 	t.changed = true
 }
@@ -515,7 +476,7 @@ to_button :: proc(b: sapp.Mousebutton) -> gh.Mouse_Button {
 // double-click for a word, triple-click for a line (a drag after them
 // extends by words or lines), Shift+click extends the selection there. The
 // selection is drawn as it changes, every move of the drag.
-term_mouse_down :: proc(t: ^Term, e: ^sapp.Event, clicks: int) {
+term_mouse_down :: proc(t: ^core.Term, e: ^sapp.Event, clicks: int) {
 	mods := to_mods(e.modifiers)
 	drag_end(t)
 	t.mouse_down = true
@@ -560,7 +521,7 @@ SEL_HI :: 2
 
 // Remembers screen point p as the drag's end i (SEL_*), on its text.
 @(private = "file")
-track :: proc(t: ^Term, i: int, p: [2]u32) {
+track :: proc(t: ^core.Term, i: int, p: [2]u32) {
 	gh.tracked_grid_ref_free(t.sel_refs[i])
 	t.sel_refs[i] = nil
 	pt := gh.Point{tag = .Screen}
@@ -570,7 +531,7 @@ track :: proc(t: ^Term, i: int, p: [2]u32) {
 
 // Where the drag's end i is now (screen coordinates); false if its row is gone.
 @(private = "file")
-tracked :: proc(t: ^Term, i: int) -> ([2]u32, bool) {
+tracked :: proc(t: ^core.Term, i: int) -> ([2]u32, bool) {
 	if t.sel_refs[i] == nil do return {}, false
 	out: gh.Point_Coordinate
 	if gh.tracked_grid_ref_point(t.sel_refs[i], .Screen, &out) != .Success do return {}, false
@@ -579,7 +540,7 @@ tracked :: proc(t: ^Term, i: int) -> ([2]u32, bool) {
 
 // The drag is over (the selection stays): its tracked ends are freed.
 @(private = "file")
-drag_end :: proc(t: ^Term) {
+drag_end :: proc(t: ^core.Term) {
 	t.selecting = false
 	for &r in t.sel_refs {
 		gh.tracked_grid_ref_free(r)
@@ -589,13 +550,13 @@ drag_end :: proc(t: ^Term) {
 
 // A drag cut short (tab or session change, the window lost focus): no more
 // selecting or auto-scroll, and no release for the app either.
-term_cancel_drag :: proc(t: ^Term) {
+term_cancel_drag :: proc(t: ^core.Term) {
 	drag_end(t)
 	t.mouse_down = false
 	t.mouse_button = .Unknown
 }
 
-term_mouse_up :: proc(t: ^Term, e: ^sapp.Event) {
+term_mouse_up :: proc(t: ^core.Term, e: ^sapp.Event) {
 	if !t.mouse_down do return // press was outside the pane
 	t.mouse_down = false
 	if t.selecting {
@@ -607,7 +568,7 @@ term_mouse_up :: proc(t: ^Term, e: ^sapp.Event) {
 	if pressed != .Unknown && app_tracks_mouse(t) do send_mouse(t, .Release, to_button(e.mouse_button), e.mouse_x, e.mouse_y, to_mods(e.modifiers))
 }
 
-term_mouse_move :: proc(t: ^Term, e: ^sapp.Event) {
+term_mouse_move :: proc(t: ^core.Term, e: ^sapp.Event) {
 	if t.selecting {
 		t.drag_at = {e.mouse_x, e.mouse_y}
 		select_to(t, cell_at(t, e.mouse_x, e.mouse_y))
@@ -625,7 +586,7 @@ term_mouse_move :: proc(t: ^Term, e: ^sapp.Event) {
 
 // The selection drag reached viewport cell vc.
 @(private = "file")
-select_to :: proc(t: ^Term, vc: [2]u16) {
+select_to :: proc(t: ^core.Term, vc: [2]u16) {
 	c := to_screen(t, vc)
 	anchor, ok := tracked(t, SEL_ANCHOR)
 	if !ok do return // its row left the scrollback
@@ -653,7 +614,7 @@ AUTOSCROLL_STEP :: 50 * time.Millisecond
 // viewport scrolls a row per AUTOSCROLL_STEP and the selection follows.
 // left_down: the left button is down now; if not, the release never came
 // and the drag ends. Nothing to do (no redraw) without a drag.
-term_drag_tick :: proc(t: ^Term, left_down: bool) {
+term_drag_tick :: proc(t: ^core.Term, left_down: bool) {
 	if !t.selecting || t.rows == 0 do return
 	if !left_down {
 		term_cancel_drag(t)
@@ -686,7 +647,7 @@ WORD_BREAKS :: " \t'\"│`|:;,()[]{}<>$"
 
 // The cells of the word under c (or of the run of spaces, or the single
 // break character), on c's row.
-word_cells :: proc(t: ^Term, c: [2]u16) -> (lo, hi: [2]u16) {
+word_cells :: proc(t: ^core.Term, c: [2]u16) -> (lo, hi: [2]u16) {
 	row := row_runes(t, int(c.y))
 	if len(row) == 0 do return c, c
 	x := min(int(c.x), len(row) - 1)
@@ -711,7 +672,7 @@ SPACER :: rune(-1) // row_runes: the second cell of a wide character
 
 // One viewport row as one rune per cell (0 for empty cells, SPACER for wide
 // characters' second cells; else the grapheme's first codepoint).
-row_runes :: proc(t: ^Term, y: int) -> []rune {
+row_runes :: proc(t: ^core.Term, y: int) -> []rune {
 	gh.render_state_update(t.rs, t.gt)
 	gh.render_state_get(t.rs, .Row_Iterator, &t.it)
 	out := make([dynamic]rune, context.temp_allocator)
@@ -745,17 +706,17 @@ row_runes :: proc(t: ^Term, y: int) -> []rune {
 }
 
 // Text an input method committed: typed into the terminal as UTF-8.
-term_text_input :: proc(t: ^Term, text: string) {
+term_text_input :: proc(t: ^core.Term, text: string) {
 	if !t.running || text == "" do return
-	pty_write(&t.pty, transmute([]u8)text)
-	term_scroll_to_bottom(t)
+	core.pty_write(&t.pty, transmute([]u8)text)
+	core.term_scroll_to_bottom(t)
 }
 
 // An input method's composition at the cursor: drawn over the cells,
 // underlined, with a caret.
-term_draw_marked :: proc(t: ^Term, marked: string, caret: int) {
+term_draw_marked :: proc(t: ^core.Term, marked: string, caret: int) {
 	if marked == "" do return
-	tc := term_colors()
+	tc := core.term_colors()
 	x, y := t.cursor_px.x, t.cursor_px.y
 	w := text_width(marked, .Mono)
 	draw_rect(x, y, w, font.cell_h, tc.bg)
@@ -767,7 +728,7 @@ term_draw_marked :: proc(t: ^Term, marked: string, caret: int) {
 // Wheel: to the app as button 4/5 when it tracks the mouse, as arrow keys on
 // the alternate screen, else scrolls our scrollback. Trackpads deliver
 // fractional deltas, so whole steps are accumulated.
-term_scroll :: proc(t: ^Term, e: ^sapp.Event) {
+term_scroll :: proc(t: ^core.Term, e: ^sapp.Event) {
 	t.scroll_acc += e.scroll_y
 	steps := int(t.scroll_acc)
 	if steps == 0 do return

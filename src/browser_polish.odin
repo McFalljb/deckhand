@@ -43,6 +43,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:time"
 import "core:unicode/utf8"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
 
@@ -120,69 +121,7 @@ CM_CAN_SELECT_ALL :: c.int(1 << 6)
 
 // ---- commands (the user's: who = .User) ----
 
-Browser_Zoom_Step :: enum u8 {
-	Reset,
-	In,
-	Out,
-}
-Browser_Edit_Op :: enum u8 {
-	Undo,
-	Redo,
-	Cut,
-	Copy,
-	Paste,
-	Select_All,
-}
-Browser_Download_Op :: enum u8 {
-	Open,
-	Reveal,
-	Cancel,
-	Dismiss,
-	Allow, // a download the page started without the user's click: go ahead (download_ask)
-	Block, // … or not
-}
 
-Browser_Zoom :: struct {
-	tab_id: u64,
-	step:   Browser_Zoom_Step,
-}
-Browser_Find :: struct {
-	tab_id: u64,
-	text:   string, // "" clears the matches (the bar stays)
-	back:   bool, // the previous match
-}
-Browser_Find_Close :: struct {
-	tab_id: u64,
-}
-Browser_Dialog :: struct {
-	tab_id: u64,
-	ok:     bool,
-	text:   string, // a prompt's answer
-}
-Browser_Permission :: struct {
-	tab_id: u64,
-	allow:  bool,
-}
-Browser_Popup :: struct {
-	tab_id: u64,
-	open:   bool, // false: only the bar goes
-}
-Browser_Edit :: struct {
-	tab_id: u64,
-	op:     Browser_Edit_Op,
-}
-Browser_Devtools :: struct {
-	tab_id: u64,
-	x, y:   i32, // inspect the element at this page position (logical px); -1: just open
-	close:  bool,
-}
-Browser_External :: struct {
-	tab_id: u64,
-}
-Browser_Download :: struct {
-	download_id: u64,
-	op:          Browser_Download_Op,
-}
 
 // ---- runtime per tab ----
 
@@ -278,8 +217,8 @@ page_bars_sig :: proc(tab_id: u64) -> string {
 		if p.ask_id != 0 do fmt.sbprintf(&b, "ask %d;", p.ask_id)
 		if p.find_open do strings.write_string(&b, "find;")
 	}
-	if _, tab, _ := find_tab(tab_id); tab != nil {
-		if bt, is := tab.kind.(Browser_Tab); is && bt.blocked_popup != "" do fmt.sbprintf(&b, "popup %s;", bt.blocked_popup)
+	if _, tab, _ := core.find_tab(tab_id); tab != nil {
+		if bt, is := tab.kind.(core.Browser_Tab); is && bt.blocked_popup != "" do fmt.sbprintf(&b, "popup %s;", bt.blocked_popup)
 	}
 	if d := page_bar_download(tab_id); d != nil do fmt.sbprintf(&b, "download %d %d;", d.id, d.state)
 	strings.write_string(&b, browser_act_bar_sig(tab_id)) // an agent's upload (browser_act.odin)
@@ -413,7 +352,7 @@ dialog_bar_text :: proc(kind: Page_Dialog_Kind, msg, origin, page_url: string) -
 	page := url_origin(page_url)
 	who := origin != "" ? url_origin(origin) : page
 	if who != page do who = fmt.tprintf("%s (embedded frame)", who)
-	return fmt.tprintf("%s says: %s", one_line(who, context.temp_allocator), one_line(msg, context.temp_allocator))
+	return fmt.tprintf("%s says: %s", core.one_line(who, context.temp_allocator), core.one_line(msg, context.temp_allocator))
 }
 
 // Why the bar's Open must not open d ("" = it may).
@@ -530,7 +469,7 @@ zoom_factor :: proc(level: f64) -> f64 {return math.pow(1.2, level)}
 zoom_level :: proc(factor: f64) -> f64 {return math.ln(factor) / math.ln(f64(1.2))}
 
 // The zoom level one step in or out from level (or back to 100%); at the end of the list it stays.
-zoom_next :: proc(level: f64, step: Browser_Zoom_Step) -> f64 {
+zoom_next :: proc(level: f64, step: core.Browser_Zoom_Step) -> f64 {
 	f := zoom_factor(level)
 	switch step {
 	case .Reset: return 0
@@ -566,8 +505,8 @@ download_safe_name :: proc(suggested: string, allocator := context.temp_allocato
 	b := strings.builder_make(context.temp_allocator)
 	for r in s {
 		switch {
-		case rune_breaks_line(r) || r == utf8_error_rune: // control characters, separators, broken UTF-8
-		case rune_hidden(r):                                // one_line's set: direction overrides (a name that reads backwards), invisible characters
+		case core.rune_breaks_line(r) || r == utf8_error_rune: // control characters, separators, broken UTF-8
+		case core.rune_hidden(r):                                // one_line's set: direction overrides (a name that reads backwards), invisible characters
 		case r == ':':                                      strings.write_byte(&b, '_')
 		case: strings.write_rune(&b, r)
 		}
@@ -615,8 +554,8 @@ download_reserve :: proc(dir, name: string, allocator := context.temp_allocator)
 
 // Where downloads go: ~/Downloads; test mode: the data dir's downloads/ (a temp dir).
 downloads_dir :: proc() -> string {
-	if autotest_active || ODIN_TEST {
-		root := home_root != "" ? home_root : "build/test-data"
+	if core.autotest_active || ODIN_TEST {
+		root := core.home_root != "" ? core.home_root : "build/test-data"
 		d, _ := filepath.join({root, "downloads"}, context.temp_allocator)
 		return d
 	}
@@ -650,49 +589,49 @@ Menu_Browser :: struct {
 	more:   bool, // the toolbar's ⋯ menu, not the page's
 }
 
-browser_menu_items :: proc(t: Menu_Browser, items: ^[dynamic]Menu_Item) {
-	_, tab, _ := find_tab(t.tab_id)
+browser_menu_items :: proc(t: Menu_Browser, items: ^[dynamic]core.Menu_Item) {
+	_, tab, _ := core.find_tab(t.tab_id)
 	if tab == nil do return
-	bt, is := tab.kind.(Browser_Tab)
+	bt, is := tab.kind.(core.Browser_Tab)
 	if !is do return
-	sep :: proc(items: ^[dynamic]Menu_Item) {if len(items) > 0 && !items[len(items) - 1].sep do append(items, Menu_Item{sep = true})}
+	sep :: proc(items: ^[dynamic]core.Menu_Item) {if len(items) > 0 && !items[len(items) - 1].sep do append(items, core.Menu_Item{sep = true})}
 	p := page_extras[t.tab_id]
 	if t.more {
-		append(items, Menu_Item{label = "Find in page", keys = "⌘F", action = "browser_find"})
+		append(items, core.Menu_Item{label = "Find in page", keys = "⌘F", action = "browser_find"})
 		sep(items)
 		level := p != nil ? p.zoom_level : 0
-		append(items, Menu_Item{label = fmt.tprintf("Zoom: %s", zoom_percent(level)), note = true})
-		append(items, Menu_Item{label = "Zoom in", keys = "⌘+", cmd = Browser_Zoom{t.tab_id, .In}})
-		append(items, Menu_Item{label = "Zoom out", keys = "⌘−", cmd = Browser_Zoom{t.tab_id, .Out}})
-		append(items, Menu_Item{label = "Actual size", keys = "⌘0", cmd = Browser_Zoom{t.tab_id, .Reset}})
+		append(items, core.Menu_Item{label = fmt.tprintf("Zoom: %s", zoom_percent(level)), note = true})
+		append(items, core.Menu_Item{label = "Zoom in", keys = "⌘+", cmd = core.Browser_Zoom{t.tab_id, .In}})
+		append(items, core.Menu_Item{label = "Zoom out", keys = "⌘−", cmd = core.Browser_Zoom{t.tab_id, .Out}})
+		append(items, core.Menu_Item{label = "Actual size", keys = "⌘0", cmd = core.Browser_Zoom{t.tab_id, .Reset}})
 		sep(items)
-		if bt.url != "" && bt.url != BROWSER_BLANK do append(items, Menu_Item{label = "Copy URL", copy = bt.url})
-		if browser_external_ok(bt.url) do append(items, Menu_Item{label = "Open in default browser", cmd = Browser_External{t.tab_id}})
+		if bt.url != "" && bt.url != core.BROWSER_BLANK do append(items, core.Menu_Item{label = "Copy URL", copy = bt.url})
+		if browser_external_ok(bt.url) do append(items, core.Menu_Item{label = "Open in default browser", cmd = core.Browser_External{t.tab_id}})
 		sep(items)
 		open := p != nil && p.devtools
-		append(items, Menu_Item{label = open ? "Close DevTools" : "DevTools", cmd = Browser_Devtools{tab_id = t.tab_id, x = -1, y = -1, close = open}})
-		append(items, Menu_Item{label = "Show downloads folder", action = "browser_downloads"})
+		append(items, core.Menu_Item{label = open ? "Close DevTools" : "DevTools", cmd = core.Browser_Devtools{tab_id = t.tab_id, x = -1, y = -1, close = open}})
+		append(items, core.Menu_Item{label = "Show downloads folder", action = "browser_downloads"})
 		return
 	}
-	if bt.can_back do append(items, Menu_Item{label = "Back", cmd = Browser_Back{t.tab_id}})
-	if bt.can_forward do append(items, Menu_Item{label = "Forward", cmd = Browser_Forward{t.tab_id}})
-	append(items, Menu_Item{label = "Reload", cmd = Browser_Reload{t.tab_id}})
+	if bt.can_back do append(items, core.Menu_Item{label = "Back", cmd = core.Browser_Back{t.tab_id}})
+	if bt.can_forward do append(items, core.Menu_Item{label = "Forward", cmd = core.Browser_Forward{t.tab_id}})
+	append(items, core.Menu_Item{label = "Reload", cmd = core.Browser_Reload{t.tab_id}})
 	if t.link != "" {
 		sep(items)
-		if s, _, _ := find_tab(t.tab_id); s != nil {
-			if _, err := browser_url_normalize(t.link); err == "" && file_link_ok(bt.url, t.link) do append(items, Menu_Item{label = "Open link in new tab", cmd = Browser_Open{session = s.id, url = t.link}})
+		if s, _, _ := core.find_tab(t.tab_id); s != nil {
+			if _, err := core.browser_url_normalize(t.link); err == "" && file_link_ok(bt.url, t.link) do append(items, core.Menu_Item{label = "Open link in new tab", cmd = core.Browser_Open{session = s.id, url = t.link}})
 		}
-		append(items, Menu_Item{label = "Copy link", copy = t.link})
+		append(items, core.Menu_Item{label = "Copy link", copy = t.link})
 	}
 	if t.flags & (CM_EDITABLE | CM_SELECTION) != 0 {
 		sep(items)
-		if t.flags & CM_EDITABLE != 0 && t.edit & CM_CAN_CUT != 0 do append(items, Menu_Item{label = "Cut", keys = "⌘X", cmd = Browser_Edit{t.tab_id, .Cut}})
-		if t.edit & CM_CAN_COPY != 0 || t.flags & CM_SELECTION != 0 do append(items, Menu_Item{label = "Copy", keys = "⌘C", cmd = Browser_Edit{t.tab_id, .Copy}})
-		if t.flags & CM_EDITABLE != 0 && t.edit & CM_CAN_PASTE != 0 do append(items, Menu_Item{label = "Paste", keys = "⌘V", cmd = Browser_Edit{t.tab_id, .Paste}})
-		if t.flags & CM_EDITABLE != 0 do append(items, Menu_Item{label = "Select all", keys = "⌘A", cmd = Browser_Edit{t.tab_id, .Select_All}})
+		if t.flags & CM_EDITABLE != 0 && t.edit & CM_CAN_CUT != 0 do append(items, core.Menu_Item{label = "Cut", keys = "⌘X", cmd = core.Browser_Edit{t.tab_id, .Cut}})
+		if t.edit & CM_CAN_COPY != 0 || t.flags & CM_SELECTION != 0 do append(items, core.Menu_Item{label = "Copy", keys = "⌘C", cmd = core.Browser_Edit{t.tab_id, .Copy}})
+		if t.flags & CM_EDITABLE != 0 && t.edit & CM_CAN_PASTE != 0 do append(items, core.Menu_Item{label = "Paste", keys = "⌘V", cmd = core.Browser_Edit{t.tab_id, .Paste}})
+		if t.flags & CM_EDITABLE != 0 do append(items, core.Menu_Item{label = "Select all", keys = "⌘A", cmd = core.Browser_Edit{t.tab_id, .Select_All}})
 	}
 	sep(items)
-	append(items, Menu_Item{label = "Inspect", cmd = Browser_Devtools{tab_id = t.tab_id, x = t.x, y = t.y}})
+	append(items, core.Menu_Item{label = "Inspect", cmd = core.Browser_Devtools{tab_id = t.tab_id, x = t.x, y = t.y}})
 }
 
 // Open in default browser: web addresses only (never a local file or app).
@@ -703,33 +642,33 @@ browser_external_ok :: proc(url: string) -> bool {
 
 // ---- commands ----
 
-browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
-	target :: proc(tab_id: u64) -> (s: ^Open_Session, bt: ^Browser_Tab, b: ^Browser, err: string) {
-		tab: ^Tab
-		s, tab, _ = find_tab(tab_id)
+browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
+	target :: proc(tab_id: u64) -> (s: ^core.Open_Session, bt: ^core.Browser_Tab, b: ^Browser, err: string) {
+		tab: ^core.Tab
+		s, tab, _ = core.find_tab(tab_id)
 		if tab == nil do return nil, nil, nil, "no such tab"
 		is: bool
-		bt, is = &tab.kind.(Browser_Tab)
+		bt, is = &tab.kind.(core.Browser_Tab)
 		if !is do return nil, nil, nil, "not a browser tab"
 		b = browser_of(tab_id)
 		return s, bt, b, ""
 	}
 	live :: proc(b: ^Browser) -> string {return b == nil || b.cef == 0 ? "the page is not loaded" : ""}
 	#partial switch c in cmd {
-	case Browser_Zoom:
+	case core.Browser_Zoom:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
 		level := zoom_next(dh_cef_zoom_get(b.cef), c.step)
 		dh_cef_zoom_set(b.cef, level)
 		p.zoom_level = level
 		page_zoom_to_annot(c.tab_id, level)
 		return {ok = true}, true
-	case Browser_Find:
+	case core.Browser_Find:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
 		again := p.find_open && c.text == p.find_text && c.text != ""
 		p.find_open = true
@@ -745,36 +684,36 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 			dh_cef_find(b.cef, t, c.back ? 0 : 1, 1)
 		}
 		return {ok = true}, true
-	case Browser_Find_Close:
+	case core.Browser_Find_Close:
 		_, _, b, err := target(c.tab_id)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
 		if b != nil && b.cef != 0 do dh_cef_find_stop(b.cef)
 		p.find_open, p.find_matches, p.find_active = false, 0, 0
 		set_owned(&p.find_text, "")
-		if page_find_tab == c.tab_id do run_command(Focus_Release{widget = "browser_find"})
+		if page_find_tab == c.tab_id do core.run_command(core.Focus_Release{widget = "browser_find"})
 		return {ok = true}, true
-	case Browser_Dialog:
+	case core.Browser_Dialog:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
-		if !p.dialog || dh_cef_dialog_answer(b.cef, c.ok ? 1 : 0, strings.clone_to_cstring(c.text, context.temp_allocator)) == 0 do return fail("no dialog is open"), false
+		if !p.dialog || dh_cef_dialog_answer(b.cef, c.ok ? 1 : 0, strings.clone_to_cstring(c.text, context.temp_allocator)) == 0 do return core.fail("no dialog is open"), false
 		page_dialog_clear(p) // and the answer field, when it was this tab's
 		return {ok = true}, true
-	case Browser_Permission:
+	case core.Browser_Permission:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
-		if p.perm == 0 || dh_cef_permission_answer(b.cef, c.allow ? 1 : 0) == 0 do return fail("nothing is asked"), false
+		if p.perm == 0 || dh_cef_permission_answer(b.cef, c.allow ? 1 : 0) == 0 do return core.fail("nothing is asked"), false
 		p.perm = 0
 		set_owned(&p.perm_origin, "")
 		return {ok = true}, true
-	case Browser_Popup:
+	case core.Browser_Popup:
 		s, bt, _, err := target(c.tab_id)
-		if err != "" do return fail(err), false
-		if bt.blocked_popup == "" do return fail("no popup was blocked"), false
+		if err != "" do return core.fail(err), false
+		if bt.blocked_popup == "" do return core.fail("no popup was blocked"), false
 		url := strings.clone(bt.blocked_popup, context.temp_allocator)
 		set_owned(&bt.blocked_popup, "")
 		if p := page_extras[c.tab_id]; p != nil {
@@ -783,45 +722,45 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		}
 		if !c.open do return {ok = true}, true
 		// the page's own address for it: an address Deckhand opens (http, https, file, deckhand-test)
-		nurl, nerr := browser_url_normalize(url)
-		if nerr != "" do return fail(nerr), true
-		if !file_link_ok(bt.url, nurl) do return fail("a file: address opens from a file: page only"), true
+		nurl, nerr := core.browser_url_normalize(url)
+		if nerr != "" do return core.fail(nerr), true
+		if !file_link_ok(bt.url, nurl) do return core.fail("a file: address opens from a file: page only"), true
 		// a new tab in the opener's session (never another), on screen there
 		id, oerr := browser_tab_open(s.id, nurl)
-		if id == 0 do return fail(oerr), true
+		if id == 0 do return core.fail(oerr), true
 		return {ok = true, created_id = id}, true
-	case Browser_Edit:
+	case core.Browser_Edit:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		dh_cef_edit(b.cef, i32(c.op))
 		return {ok = true}, false
-	case Browser_Devtools:
+	case core.Browser_Devtools:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
-		if err != "" do return fail(err), false
+		if err != "" do return core.fail(err), false
 		p := page_extra(c.tab_id)
 		if c.close {
 			dh_cef_devtools_close(b.cef)
 			p.devtools = false
 		} else {
-			if dh_cef_devtools_show(b.cef, c.x, c.y) == 0 do return fail("DevTools could not open"), false
+			if dh_cef_devtools_show(b.cef, c.x, c.y) == 0 do return core.fail("DevTools could not open"), false
 			p.devtools = true
 		}
 		return {ok = true}, true
-	case Browser_External:
+	case core.Browser_External:
 		_, bt, _, err := target(c.tab_id)
-		if err != "" do return fail(err), false
-		if !browser_external_ok(bt.url) do return fail("only web addresses (http, https) open in the default browser"), false
-		if platform.open_url == nil || !platform.open_url(bt.url) do return fail("the page could not be opened in the default browser"), false
+		if err != "" do return core.fail(err), false
+		if !browser_external_ok(bt.url) do return core.fail("only web addresses (http, https) open in the default browser"), false
+		if core.platform.open_url == nil || !core.platform.open_url(bt.url) do return core.fail("the page could not be opened in the default browser"), false
 		return {ok = true}, false
-	case Browser_Download:
+	case core.Browser_Download:
 		if c.download_id == 0 && c.op == .Reveal {
 			// the downloads folder itself (⋯'s Show downloads folder)
 			dir := downloads_dir()
 			os.make_directory_all(dir)
 			set_owned(&page_revealed, dir)
-			if platform.reveal != nil do platform.reveal(dir)
+			if core.platform.reveal != nil do core.platform.reveal(dir)
 			return {ok = true}, false
 		}
 		if c.op == .Allow || c.op == .Block {
@@ -835,7 +774,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 				url := strings.clone(p.ask_url, context.temp_allocator)
 				set_owned(&p.ask_name, "")
 				set_owned(&p.ask_url, "")
-				if b == nil || b.cef == 0 do return fail("the page is not loaded"), true
+				if b == nil || b.cef == 0 do return core.fail("the page is not loaded"), true
 				if c.op == .Block {
 					dh_cef_download_answer(b.cef, id, nil)
 					fmt.printfln("[browser] download %d blocked: %s", id, name)
@@ -846,31 +785,31 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 				path := download_reserve(dir, name)
 				if path == "" {
 					dh_cef_download_answer(b.cef, id, nil)
-					return fail(fmt.tprintf("no free name for %q in the downloads folder", name)), true
+					return core.fail(fmt.tprintf("no free name for %q in the downloads folder", name)), true
 				}
 				download_record(tab_id, id, path, url)
 				if dh_cef_download_answer(b.cef, id, strings.clone_to_cstring(path, context.temp_allocator)) == 0 && CEF_BUILT_IN {
 					os.remove(path) // CEF no longer waits for it: the empty file goes
 					if d := download_find(id); d != nil do d.state = .Failed
-					return fail("the download is gone"), true
+					return core.fail("the download is gone"), true
 				}
 				fmt.printfln("[browser] download %d allowed -> %s", id, path)
 				return {ok = true}, true
 			}
-			return fail("no download is waiting for an answer"), false
+			return core.fail("no download is waiting for an answer"), false
 		}
 		d := download_find(u32(c.download_id))
-		if d == nil do return fail("no such download"), false
+		if d == nil do return core.fail("no such download"), false
 		switch c.op {
 		case .Open:
-			if err := download_open_check(d); err != "" do return fail(err), false
-			if platform.open_url == nil || !platform.open_url(file_url(d.path)) do return fail("the file could not be opened"), false
+			if err := download_open_check(d); err != "" do return core.fail(err), false
+			if core.platform.open_url == nil || !core.platform.open_url(file_url(d.path)) do return core.fail("the file could not be opened"), false
 		case .Reveal:
-			if !os.exists(d.path) do return fail("the file is gone"), false
+			if !os.exists(d.path) do return core.fail("the file is gone"), false
 			set_owned(&page_revealed, d.path)
-			if platform.reveal != nil do platform.reveal(d.path)
+			if core.platform.reveal != nil do core.platform.reveal(d.path)
 		case .Cancel:
-			if d.state != .Going do return fail("the download is not running"), false
+			if d.state != .Going do return core.fail("the download is not running"), false
 			dh_cef_download_cancel(d.id)
 		case .Dismiss:
 			d.dismissed = true
@@ -878,7 +817,7 @@ browser_polish_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, change
 		}
 		return {ok = true}, c.op == .Dismiss
 	}
-	return fail("unknown command"), false
+	return core.fail("unknown command"), false
 }
 
 @(private = "file")
@@ -886,7 +825,7 @@ page_dialog_clear :: proc(p: ^Page_Extra) {
 	p.dialog, p.prompt_focus_due = false, false
 	set_owned(&p.dialog_msg, "")
 	set_owned(&p.dialog_origin, "")
-	if page_prompt_tab == p.tab_id do run_command(Focus_Release{widget = "browser_prompt"})
+	if page_prompt_tab == p.tab_id do core.run_command(core.Focus_Release{widget = "browser_prompt"})
 	// the shared answer field forgets what was typed for this tab
 	if page_prompt_tab == p.tab_id {
 		tf_set(&page_prompt_field, "")
@@ -929,27 +868,27 @@ browser_polish_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 	if p == nil do return
 	if p.dialog {
 		fmt.sbprintf(b, `,"dialog":{{"kind":"%s","message":`, PAGE_DIALOG_NAMES[p.dialog_kind])
-		json_quote(b, p.dialog_msg)
+		core.json_quote(b, p.dialog_msg)
 		strings.write_string(b, `,"origin":`)
-		json_quote(b, p.dialog_origin)
+		core.json_quote(b, p.dialog_origin)
 		strings.write_byte(b, '}')
 	}
 	if p.perm != 0 {
 		strings.write_string(b, `,"permission":{"what":`)
-		json_quote(b, perm_names(p.perm, ","))
+		core.json_quote(b, perm_names(p.perm, ","))
 		strings.write_string(b, `,"origin":`)
-		json_quote(b, p.perm_origin)
+		core.json_quote(b, p.perm_origin)
 		strings.write_byte(b, '}')
 	}
 	if p.ask_id != 0 {
 		fmt.sbprintf(b, `,"download_ask":{{"id":%d,"name":`, p.ask_id)
-		json_quote(b, p.ask_name)
+		core.json_quote(b, p.ask_name)
 		strings.write_byte(b, '}')
 	}
 	if p.popups_blocked > 0 do fmt.sbprintf(b, `,"popups_blocked":%d`, p.popups_blocked)
 	if p.find_open {
 		strings.write_string(b, `,"find":{"text":`)
-		json_quote(b, p.find_text)
+		core.json_quote(b, p.find_text)
 		fmt.sbprintf(b, `,"matches":%d,"active":%d}}`, p.find_matches, p.find_active)
 	}
 	n := 0
@@ -958,9 +897,9 @@ browser_polish_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 		strings.write_string(b, n == 0 ? `,"downloads":[` : ",")
 		n += 1
 		fmt.sbprintf(b, `{{"id":%d,"name":`, d.id)
-		json_quote(b, d.name)
+		core.json_quote(b, d.name)
 		strings.write_string(b, `,"path":`)
-		json_quote(b, d.path)
+		core.json_quote(b, d.path)
 		fmt.sbprintf(b, `,"state":"%s","received":%d,"total":%d,"dismissed":%v,"quarantined":%v}}`, DOWNLOAD_STATE_NAMES[d.state], d.received, d.total, d.dismissed, d.quarantined)
 	}
 	if n > 0 do strings.write_byte(b, ']')
@@ -992,7 +931,7 @@ perm_phrase :: proc(bits: u32) -> string {
 
 @(private = "file")
 on_page_cursor :: proc "c" (id: c.int, type: c.int) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
 	p.cursor = cef_cursor(int(type))
@@ -1020,16 +959,16 @@ cef_cursor :: proc(type: int) -> sapp.Mouse_Cursor {
 
 @(private = "file")
 on_page_tooltip :: proc "c" (id: c.int, utf8: cstring) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
-	set_owned(&p.tooltip, cut_utf8(one_line(string(utf8), context.temp_allocator), 300))
+	set_owned(&p.tooltip, core.cut_utf8(core.one_line(string(utf8), context.temp_allocator), 300))
 	app.redraw = true
 }
 
 @(private = "file")
 on_page_menu :: proc "c" (id: c.int, flags, edit: c.int, link: cstring) {
-	context = app_context
+	context = core.app_context
 	b, _ := page_by_cef(id)
 	if b == nil || b != tab_browser() || annot_on(b) do return
 	// an agent's right-click: the page has its contextmenu event, the user gets no menu (browser_act.odin)
@@ -1050,7 +989,7 @@ on_page_menu :: proc "c" (id: c.int, flags, edit: c.int, link: cstring) {
 
 @(private = "file")
 on_page_dialog :: proc "c" (id: c.int, kind: c.int, message, default_text, origin: cstring) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
 	if kind < 0 {
@@ -1059,7 +998,7 @@ on_page_dialog :: proc "c" (id: c.int, kind: c.int, message, default_text, origi
 	} else {
 		p.dialog = true
 		p.dialog_kind = Page_Dialog_Kind(clamp(int(kind), 0, len(Page_Dialog_Kind) - 1))
-		set_owned(&p.dialog_msg, cut_utf8(string(message), 2000))
+		set_owned(&p.dialog_msg, core.cut_utf8(string(message), 2000))
 		set_owned(&p.dialog_origin, string(origin))
 		set_owned(&p.prompt_default, string(default_text))
 		// a prompt's answer field takes the keyboard (now, or when its tab is shown: browser_polish_tick)
@@ -1078,7 +1017,7 @@ on_page_dialog :: proc "c" (id: c.int, kind: c.int, message, default_text, origi
 
 @(private = "file")
 on_page_find :: proc "c" (id: c.int, request, count, active, final_update: c.int) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil || !p.find_open do return
 	p.find_matches = int(count)
@@ -1090,7 +1029,7 @@ on_page_find :: proc "c" (id: c.int, request, count, active, final_update: c.int
 
 @(private = "file")
 on_page_download_path :: proc "c" (id: c.int, dl: u32, suggested, url: cstring, out: [^]u8, cap: c.int) -> c.int {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return 0 // not a tab's page
 	name := download_safe_name(string(suggested))
@@ -1137,7 +1076,7 @@ download_free :: proc(d: ^Page_Download) {
 
 @(private = "file")
 on_page_download :: proc "c" (id: c.int, dl: u32, st: c.int, received, total: i64, path: cstring, quarantined: c.int) {
-	context = app_context
+	context = core.app_context
 	d := download_find(dl)
 	if d == nil do return // not one Deckhand named (refused, or waiting for its bar)
 	was := d.state
@@ -1163,7 +1102,7 @@ on_page_download :: proc "c" (id: c.int, dl: u32, st: c.int, received, total: i6
 
 @(private = "file")
 on_page_permission :: proc "c" (id: c.int, what: u32, origin: cstring) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
 	p.perm = what
@@ -1174,7 +1113,7 @@ on_page_permission :: proc "c" (id: c.int, what: u32, origin: cstring) {
 
 @(private = "file")
 on_page_crashed :: proc "c" (id: c.int, status: c.int) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
 	p.crashed, p.crash_status, p.crash_painted = true, int(status), b.painted
@@ -1189,7 +1128,7 @@ on_page_crashed :: proc "c" (id: c.int, status: c.int) {
 // (browser_act_file_dialog); the user's own click gets the panel.
 @(private = "file")
 on_page_file_dialog :: proc "c" (id: c.int) -> c.int {
-	context = app_context
+	context = core.app_context
 	b, _ := page_by_cef(id)
 	if b == nil do return 0
 	return browser_act_file_dialog(b.tab_id) ? 1 : 0
@@ -1199,7 +1138,7 @@ on_page_file_dialog :: proc "c" (id: c.int) -> c.int {
 // blocked-popup count starts again.
 @(private = "file")
 on_page_navigated :: proc "c" (id: c.int) {
-	context = app_context
+	context = core.app_context
 	b, p := page_by_cef(id)
 	if b == nil do return
 	p.nav_started = time.tick_now()
@@ -1264,7 +1203,7 @@ browser_polish_tick :: proc() {
 			p.crashed = false
 			browser_report({tab_id = id})
 		}
-		if !tab_on_screen(id) do continue // every page on screen (any pane's)
+		if !core.tab_on_screen(id) do continue // every page on screen (any pane's)
 		// zoom is Chromium's per host (another tab, a navigation): follow it
 		if dh_cef_ready(b.cef) != 0 {
 			if z := dh_cef_zoom_get(b.cef); abs(z - p.zoom_level) > 0.0001 {
@@ -1279,12 +1218,12 @@ browser_polish_tick :: proc() {
 		page_zoom_to_annot(id, p.zoom_level)
 	}
 	// the find field and the prompt field belong to the tab they were opened on, while it has the keyboard (panes.odin)
-	if state.focus_widget == "browser_find" && !tab_focused(page_find_tab) do ui_do(Set_Focus{""})
-	if state.focus_widget == "browser_prompt" && !tab_focused(page_prompt_tab) do ui_do(Set_Focus{""})
+	if state.focus_widget == "browser_find" && !core.tab_focused(page_find_tab) do ui_do(core.Set_Focus{""})
+	if state.focus_widget == "browser_prompt" && !core.tab_focused(page_prompt_tab) do ui_do(core.Set_Focus{""})
 	// the find field searches as it is typed
 	if state.focus_widget == "browser_find" && on_screen != nil {
 		p := page_extra(on_screen.tab_id)
-		if t := tf_text(&page_find_field); p.find_open && t != p.find_text do ui_do(Browser_Find{tab_id = on_screen.tab_id, text = t})
+		if t := tf_text(&page_find_field); p.find_open && t != p.find_text do ui_do(core.Browser_Find{tab_id = on_screen.tab_id, text = t})
 	}
 	// a prompt that came while its tab was not on screen: its field takes the keyboard when shown
 	if on_screen != nil && state.focus_widget == "" {
@@ -1293,7 +1232,7 @@ browser_polish_tick :: proc() {
 			tf_set(&page_prompt_field, p.prompt_default)
 			tf_select_all(&page_prompt_field)
 			page_prompt_tab = on_screen.tab_id
-			ui_do(Set_Focus{"browser_prompt"})
+			ui_do(core.Set_Focus{"browser_prompt"})
 		}
 	}
 }
@@ -1305,8 +1244,8 @@ browser_polish_pending_tick :: proc() -> bool {
 	// the bars' click guard follows every tab on screen and its bars (bars_note); one that left
 	// the screen starts again when it comes back
 	now := time.tick_now()
-	for id, b in browsers do if tab_on_screen(id) do bars_note(b.tab_id, now)
-	for id, p in page_extras do if p.bars_on_screen && !tab_on_screen(id) do p.bars_on_screen = false
+	for id, b in browsers do if core.tab_on_screen(id) do bars_note(b.tab_id, now)
+	for id, p in page_extras do if p.bars_on_screen && !core.tab_on_screen(id) do p.bars_on_screen = false
 	for id, p in page_extras {
 		if !p.popup_dirty || time.tick_diff(p.popup_said, time.tick_now()) < time.Second do continue
 		p.popup_said, p.popup_dirty = time.tick_now(), false
@@ -1344,14 +1283,14 @@ browser_find_prepare :: proc() {
 	tf_set(&page_find_field, p.find_text)
 	tf_select_all(&page_find_field)
 	page_find_tab = b.tab_id
-	if !p.find_open do ui_do(Browser_Find{tab_id = b.tab_id, text = p.find_text})
+	if !p.find_open do ui_do(core.Browser_Find{tab_id = b.tab_id, text = p.find_text})
 }
 
 // The zoom actions (palette, View menu): the tab on screen.
-browser_zoom_action :: proc(step: Browser_Zoom_Step) -> (Command, bool) {
+browser_zoom_action :: proc(step: core.Browser_Zoom_Step) -> (core.Command, bool) {
 	b := tab_browser()
 	if b == nil || b.cef == 0 do return nil, false
-	return Browser_Zoom{b.tab_id, step}, true
+	return core.Browser_Zoom{b.tab_id, step}, true
 }
 
 @(private = "file")
@@ -1362,7 +1301,7 @@ find_step :: proc(back: bool) {
 	text := p.find_text
 	if state.focus_widget == "browser_find" && page_find_tab == b.tab_id do text = tf_text(&page_find_field)
 	if text == "" do return
-	ui_do(Browser_Find{tab_id = b.tab_id, text = text, back = back})
+	ui_do(core.Browser_Find{tab_id = b.tab_id, text = text, back = back})
 }
 
 // ---- input (main.odin: after the URL field's keys, before the widgets and the page) ----
@@ -1427,7 +1366,7 @@ pg_bar_at :: proc(e: ^sapp.Event) -> Pg_Bar {
 
 // The bars' buttons and fields, ⋯ and the zoom chip, ⌘F ⌘G ⌘+ ⌘− ⌘0, Enter and Esc in the find and
 // prompt fields; the pointer's shape over the page. True if it took the event.
-browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
+browser_polish_event :: proc(pn: ^core.Pane, e: ^sapp.Event) -> bool {
 	b := pane_browser(pn)
 	if b == nil {
 		if e.type == .MOUSE_MOVE && page_pointer_in { // over another pane now: no page's tooltip
@@ -1449,9 +1388,9 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 			#partial switch e.key_code {
 			case .F:     if only_cmd do browser_find_open(); else do took = false
 			case .G:     if p.find_open && (only_cmd || mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT) do find_step(mods & sapp.MODIFIER_SHIFT != 0); else do took = false
-			case .EQUAL: if only_cmd || mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT do ui_do(Browser_Zoom{b.tab_id, .In}); else do took = false // ⌘+ is ⌘= (with Shift or not)
-			case .MINUS: if only_cmd do ui_do(Browser_Zoom{b.tab_id, .Out}); else do took = false
-			case ._0:    if only_cmd do ui_do(Browser_Zoom{b.tab_id, .Reset}); else do took = false
+			case .EQUAL: if only_cmd || mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT do ui_do(core.Browser_Zoom{b.tab_id, .In}); else do took = false // ⌘+ is ⌘= (with Shift or not)
+			case .MINUS: if only_cmd do ui_do(core.Browser_Zoom{b.tab_id, .Out}); else do took = false
+			case ._0:    if only_cmd do ui_do(core.Browser_Zoom{b.tab_id, .Reset}); else do took = false
 			case: took = false
 			}
 			if took {
@@ -1467,8 +1406,8 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 				app.key_taken = true
 				return true
 			case .ESCAPE:
-				ui_do(Browser_Find_Close{b.tab_id})
-				ui_do(Set_Focus{""})
+				ui_do(core.Browser_Find_Close{b.tab_id})
+				ui_do(core.Set_Focus{""})
 				app.key_taken = true
 				return true
 			}
@@ -1481,11 +1420,11 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 					app.key_taken = true
 					return true
 				}
-				ui_do(Browser_Dialog{tab_id = b.tab_id, ok = true, text = tf_text(&page_prompt_field)})
+				ui_do(core.Browser_Dialog{tab_id = b.tab_id, ok = true, text = tf_text(&page_prompt_field)})
 				app.key_taken = true
 				return true
 			case .ESCAPE:
-				ui_do(Browser_Dialog{tab_id = b.tab_id, ok = false})
+				ui_do(core.Browser_Dialog{tab_id = b.tab_id, ok = false})
 				app.key_taken = true
 				return true
 			}
@@ -1508,40 +1447,40 @@ browser_polish_event :: proc(pn: ^Pane, e: ^sapp.Event) -> bool {
 				bb := d.boundingBox
 				menu_open(Menu_Browser{tab_id = b.tab_id, more = true}, {bb.x + bb.width - px(220), bb.y + bb.height + px(SP_1)})
 			}
-		case hit("pg_zoom", e):         ui_do(Browser_Zoom{b.tab_id, .Reset})
+		case hit("pg_zoom", e):         ui_do(core.Browser_Zoom{b.tab_id, .Reset})
 		case hit("pg_find_prev", e):    find_step(true)
 		case hit("pg_find_next", e):    find_step(false)
-		case hit("pg_find_close", e):   ui_do(Browser_Find_Close{b.tab_id})
+		case hit("pg_find_close", e):   ui_do(core.Browser_Find_Close{b.tab_id})
 		case hit("pg_find_box", e):
 			if state.focus_widget != "browser_find" {
 				page_find_tab = b.tab_id
 				tf_set(&page_find_field, p.find_text)
-				ui_do(Set_Focus{"browser_find"})
+				ui_do(core.Set_Focus{"browser_find"})
 			}
 			took = false // the field places its caret (widget_event)
-		case hit("pg_dialog_ok", e):     ui_do(Browser_Dialog{tab_id = b.tab_id, ok = true, text = page_prompt_answer(b.tab_id, p)})
-		case hit("pg_dialog_cancel", e): ui_do(Browser_Dialog{tab_id = b.tab_id, ok = false})
+		case hit("pg_dialog_ok", e):     ui_do(core.Browser_Dialog{tab_id = b.tab_id, ok = true, text = page_prompt_answer(b.tab_id, p)})
+		case hit("pg_dialog_cancel", e): ui_do(core.Browser_Dialog{tab_id = b.tab_id, ok = false})
 		case hit("pg_prompt_box", e):
 			if page_prompt_tab != b.tab_id {
 				// the shared field: this prompt's default, never another tab's text
 				tf_set(&page_prompt_field, p.prompt_default)
 				page_prompt_tab = b.tab_id
 			}
-			if state.focus_widget != "browser_prompt" do ui_do(Set_Focus{"browser_prompt"})
+			if state.focus_widget != "browser_prompt" do ui_do(core.Set_Focus{"browser_prompt"})
 			took = false
-		case hit("pg_perm_allow", e):  ui_do(Browser_Permission{tab_id = b.tab_id, allow = true})
-		case hit("pg_perm_block", e):  ui_do(Browser_Permission{tab_id = b.tab_id, allow = false})
-		case hit("pg_popup_open", e):  ui_do(Browser_Popup{tab_id = b.tab_id, open = true})
-		case hit("pg_popup_close", e): ui_do(Browser_Popup{tab_id = b.tab_id, open = false})
-		case hit("pg_dlask_allow", e): ui_do(Browser_Download{download_id = u64(p.ask_id), op = .Allow})
-		case hit("pg_dlask_block", e): ui_do(Browser_Download{download_id = u64(p.ask_id), op = .Block})
-		case hit("pg_crash_reload", e): ui_do(Browser_Reload{b.tab_id})
-		case hit("pg_upload_allow", e): ui_do(Browser_Upload_Answer{tab_id = b.tab_id, allow = true}) // browser_act.odin
-		case hit("pg_upload_block", e): ui_do(Browser_Upload_Answer{tab_id = b.tab_id, allow = false})
+		case hit("pg_perm_allow", e):  ui_do(core.Browser_Permission{tab_id = b.tab_id, allow = true})
+		case hit("pg_perm_block", e):  ui_do(core.Browser_Permission{tab_id = b.tab_id, allow = false})
+		case hit("pg_popup_open", e):  ui_do(core.Browser_Popup{tab_id = b.tab_id, open = true})
+		case hit("pg_popup_close", e): ui_do(core.Browser_Popup{tab_id = b.tab_id, open = false})
+		case hit("pg_dlask_allow", e): ui_do(core.Browser_Download{download_id = u64(p.ask_id), op = .Allow})
+		case hit("pg_dlask_block", e): ui_do(core.Browser_Download{download_id = u64(p.ask_id), op = .Block})
+		case hit("pg_crash_reload", e): ui_do(core.Browser_Reload{b.tab_id})
+		case hit("pg_upload_allow", e): ui_do(core.Browser_Upload_Answer{tab_id = b.tab_id, allow = true}) // browser_act.odin
+		case hit("pg_upload_block", e): ui_do(core.Browser_Upload_Answer{tab_id = b.tab_id, allow = false})
 		case hit("pg_dl_open", e), hit("pg_dl_reveal", e), hit("pg_dl_cancel", e), hit("pg_dl_close", e):
 			if d := page_bar_download(b.tab_id); d != nil {
-				op: Browser_Download_Op = hit("pg_dl_open", e) ? .Open : hit("pg_dl_reveal", e) ? .Reveal : hit("pg_dl_cancel", e) ? .Cancel : .Dismiss
-				ui_do(Browser_Download{download_id = u64(d.id), op = op})
+				op: core.Browser_Download_Op = hit("pg_dl_open", e) ? .Open : hit("pg_dl_reveal", e) ? .Reveal : hit("pg_dl_cancel", e) ? .Cancel : .Dismiss
+				ui_do(core.Browser_Download{download_id = u64(d.id), op = op})
 			}
 		case: took = false
 		}
@@ -1613,7 +1552,7 @@ pg_bar :: proc() -> clay.ElementDeclaration {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}
 }
 
@@ -1626,19 +1565,19 @@ pg_room :: proc(reserve: f32) -> f32 {
 }
 
 @(private = "file")
-pg_text :: proc(id: clay.ElementId, s: string, col: Rgba, reserve: f32) {
+pg_text :: proc(id: clay.ElementId, s: string, col: core.Rgba, reserve: f32) {
 	if clay.UI(id)({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
-		clay.TextDynamic(clip(one_line(s, context.temp_allocator), pg_room(reserve)), txt(col))
+		clay.TextDynamic(clip(core.one_line(s, context.temp_allocator), pg_room(reserve)), txt(col))
 	}
 }
 
 // "<origin> wants to …": the origin clipped from the left (the end of the host stays: the part
 // that names the site), the phrase always whole.
 @(private = "file")
-pg_wants_text :: proc(id: clay.ElementId, origin, phrase: string, col: Rgba, reserve: f32) {
+pg_wants_text :: proc(id: clay.ElementId, origin, phrase: string, col: core.Rgba, reserve: f32) {
 	measure :: proc(s: string) -> f32 {return text_w(s)}
-	ph := one_line(phrase, context.temp_allocator)
-	o := clip_left_by(one_line(url_origin(origin), context.temp_allocator), pg_room(reserve) - text_w(ph), measure)
+	ph := core.one_line(phrase, context.temp_allocator)
+	o := clip_left_by(core.one_line(url_origin(origin), context.temp_allocator), pg_room(reserve) - text_w(ph), measure)
 	if clay.UI(id)({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 		clay.TextDynamic(strings.concatenate({o, ph}, context.temp_allocator), txt(col))
 	}
@@ -1665,9 +1604,9 @@ browser_polish_toolbar_layout :: proc(b: ^Browser) {
 // page's tooltip.
 browser_polish_bars_layout :: proc(b: ^Browser) {
 	th := theme()
-	_, tab, _ := find_tab(b.tab_id)
+	_, tab, _ := core.find_tab(b.tab_id)
 	if tab == nil do return
-	bt, _ := tab.kind.(Browser_Tab)
+	bt, _ := tab.kind.(core.Browser_Tab)
 	p := page_extras[b.tab_id]
 	if p != nil && p.crashed {
 		if clay.UI(cid("pg_crash"))(pg_bar()) {
@@ -1711,7 +1650,7 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 		if clay.UI(cid("pg_dlask"))(pg_bar()) {
 			dot(th.waiting)
 			measure :: proc(s: string) -> f32 {return text_w(s)}
-			line := ask_bar_text(one_line(url_origin(bt.url), context.temp_allocator), one_line(p.ask_name, context.temp_allocator), pg_room(px(260)), px(140), measure)
+			line := ask_bar_text(core.one_line(url_origin(bt.url), context.temp_allocator), core.one_line(p.ask_name, context.temp_allocator), pg_room(px(260)), px(140), measure)
 			if clay.UI(cid("pg_dlask_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				clay.TextDynamic(line, txt(th.text))
 			}
@@ -1728,11 +1667,11 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			// the origin clipped from the left (its end names the site), who at most 30 %, the
 			// files' names in the middle of what is left; the phrases always whole
 			room := pg_room(px(260))
-			origin := clip_left_by(one_line(url_origin(bt.url), context.temp_allocator), room * 0.35, measure)
-			asker := clip(one_line(who, context.temp_allocator), max(room * 0.3, px(60)))
+			origin := clip_left_by(core.one_line(url_origin(bt.url), context.temp_allocator), room * 0.35, measure)
+			asker := clip(core.one_line(who, context.temp_allocator), max(room * 0.3, px(60)))
 			tail := fmt.tprintf(" to %s", origin)
 			names_room := max(room - text_w(asker) - text_w(" wants to upload ") - text_w(tail), px(60))
-			line := strings.concatenate({asker, " wants to upload ", clip_middle_keep_ext(one_line(names, context.temp_allocator), names_room, measure), tail}, context.temp_allocator)
+			line := strings.concatenate({asker, " wants to upload ", clip_middle_keep_ext(core.one_line(names, context.temp_allocator), names_room, measure), tail}, context.temp_allocator)
 			if clay.UI(cid("pg_upload_text"))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 				clay.TextDynamic(line, txt(th.text))
 			}
@@ -1746,7 +1685,7 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			dot(th.text_muted)
 			n := p != nil ? p.popups_blocked : 1
 			what := n > 1 ? fmt.tprintf("%d popups blocked", n) : "Popup blocked"
-			pg_text(cid("pg_popup_text"), fmt.tprintf("%s: %s", what, browser_url_public(bt.blocked_popup)), th.text, px(260))
+			pg_text(cid("pg_popup_text"), fmt.tprintf("%s: %s", what, core.browser_url_public(bt.blocked_popup)), th.text, px(260))
 			pg_grow()
 			pg_button(cid("pg_popup_close"), "×")
 			pg_button(cid("pg_popup_open"), "Open", true)
@@ -1758,7 +1697,7 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			switch d.state {
 			case .Going:
 				msg = d.total > 0 ? fmt.tprintf("Downloading %s · %d%%", d.name, int(100 * d.received / max(d.total, 1))) : fmt.tprintf("Downloading %s · %s", d.name, size_text(d.received))
-			case .Done:      msg = fmt.tprintf("Downloaded %s to %s", d.name, fs_display(filepath.dir(d.path)))
+			case .Done:      msg = fmt.tprintf("Downloaded %s to %s", d.name, core.fs_display(filepath.dir(d.path)))
 			case .Cancelled: msg = fmt.tprintf("Download cancelled: %s", d.name)
 			case .Failed:    msg = fmt.tprintf("Download failed: %s", d.name)
 			}
@@ -1805,7 +1744,7 @@ browser_polish_bars_layout :: proc(b: ^Browser) {
 			layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 			backgroundColor = cc(th.bg_elevated),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 			floating = {attachTo = .Root, offset = {x, y}, zIndex = 30},
 		}) {
 			clay.TextDynamic(clip(p.tooltip, tw - px(2 * SP_2)), txt(th.text, FONT_UI_SMALL))

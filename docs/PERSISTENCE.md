@@ -1,7 +1,7 @@
 # Workspace persistence
 
 What Deckhand saves so the next start restores the workspace: projects, open sessions, tabs,
-layout, focus and settings. Code: `src/persist.odin`; tests: `src/persist_test.odin`,
+layout, focus and settings. Code: `src/core/persist.odin`; tests: `src/persist_test.odin`,
 `tests/scripts/restore.sh`.
 
 ## Identities
@@ -51,7 +51,7 @@ token. Per terminal it also says what was started there (`kind`: shell, pi or cl
 `pi_ro` and its optional extensions `extras`): a restored tab of another kind never adopts that
 terminal, and an adopted pi tab is never less read-only than it started. Written whenever a
 holder is attached (at launch or later), rewritten atomically on every mint and revoke (outside
-the socket's lock), MAC'd with the holder's in-memory key (`src/macfile.odin`: a `deckhand-mac
+the socket's lock), MAC'd with the holder's in-memory key (`src/core/macfile.odin`: a `deckhand-mac
 1 tokens <hmac>` line, then the JSON): a file that does not verify is ignored whole. A new
 holder (no terminals) removes the old file; entries for terminals the holder no longer lists
 are dropped at launch.
@@ -59,9 +59,9 @@ are dropped at launch.
 With `keep_sessions` on, a terminal tab (pi, shell, Claude, Home's pi) whose process runs in the
 session holder saves `"held": <terminal id>` (a pi tab started read-only also `"readonly":
 true`), the file then also has a top-level `"holder": <its instance id>` (held ids are adopted
-only from that same holder), and at a quit that hands the sessions over (`src/holder_adopt.odin`) Deckhand writes
+only from that same holder), and at a quit that hands the sessions over (`src/core/holder_adopt.odin`) Deckhand writes
 `<data dir>/handover/<id>.snap` (`0600`: each terminal's snapshot at the offset the holder
-acked, `src/snapshot.odin`) and `<data dir>/handover.json`, MAC'd as `handover`:
+acked, `src/core/snapshot.odin`) and `<data dir>/handover.json`, MAC'd as `handover`:
 `{"v":1,"min_reader":1,"holder":<WELCOME instance>,"written":<unix>,
 "terminals":[{"term","offset","sha256","format","inexact"}]}`. Both are read once at the next
 launch and removed. They are used only when the MAC verifies, `min_reader` ≤ 1, `holder` is the
@@ -193,13 +193,13 @@ run on and the next launch rebuilds them from the tails.
   normal store) and goes back into Chats while chats still run in that folder; a chat from an
   earlier Chats folder (the chats folder changed) goes back into that folder's project.
   `settings.chats_readonly` is saved when set.
-- Claude Code accounts (`src/claude_accounts.odin`, docs/CLAUDE.md §1b): `settings.claude_accounts`
+- Claude Code accounts (`src/core/claude_accounts.odin`, docs/CLAUDE.md §1b): `settings.claude_accounts`
   (`[{dir, label?, added?, removed?}]`: only what the user changed: a name of their own, a folder
   they added, one they removed; absolute folders, at most 64), `settings.claude_account_default`
   (the chosen default's folder; left out: the environment's) and `settings.claude_account_last`
   (the account a Claude session last started with). Folders and names only, never a secret or a
   file's content. Restored in place (no command); found folders are looked for again at start.
-- Folders (`src/folders.odin`): `settings.home_dir` (the main folder), `settings.folders`
+- Folders (`src/core/folders.odin`): `settings.home_dir` (the main folder), `settings.folders`
   (`{"chats": "/abs", …}`: only overridden subfolders) and `settings.setup_seen: true` (the
   first-run sheet was done or skipped), each when set. Restored with `set_folder` (overrides
   first), then `set_home_dir` as the internal caller: nothing is made at restore, and a main

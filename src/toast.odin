@@ -8,6 +8,7 @@ package main
 import "core:fmt"
 import "core:strings"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 
 TOAST_TIME :: 3 * time.Second
@@ -23,9 +24,9 @@ toast: Toast
 
 toast_show :: proc(text: string, err := false) {
 	delete(toast.text)
-	toast = {text = strings.clone(one_line(text, context.temp_allocator)), err = err, until = time.tick_add(time.tick_now(), err ? TOAST_TIME_ERR : TOAST_TIME)}
+	toast = {text = strings.clone(core.one_line(text, context.temp_allocator)), err = err, until = time.tick_add(time.tick_now(), err ? TOAST_TIME_ERR : TOAST_TIME)}
 	app.redraw = true
-	if autotest_active do fmt.println("[autotest] toast:", err ? "error:" : "", toast.text)
+	if core.autotest_active do fmt.println("[autotest] toast:", err ? "error:" : "", toast.text)
 }
 
 toast_clear :: proc() {
@@ -53,7 +54,7 @@ toast_layout :: proc(w, h: f32) {
 		layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFixed(box_h)}, padding = {pu(SP_3), pu(SP_3), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(toast.err ? th.error : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(toast.err ? th.error : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {max((w - box_w) / 2, 0), max(h - box_h - px(SP_3 * 2), 0)}, zIndex = 29, pointerCaptureMode = .Passthrough},
 	}) {
 		clay.TextDynamic(shown, txt(toast.err ? th.error : th.text))

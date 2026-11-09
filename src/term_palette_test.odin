@@ -5,22 +5,23 @@ package main
 // and a terminal taking the active look's colours.
 
 import "core:testing"
+import "core"
 import gh "ghostty"
 
 @(test)
 term_palette_per_look :: proc(t: ^testing.T) {
 	// as they were in theme.odin's THEMES / THEMES_LIGHT
-	testing.expect_value(t, term_colors_of(.Graphite, false).fg, Rgba{0xd4, 0xd4, 0xd8, 255})
-	testing.expect_value(t, term_colors_of(.Warm, false).bg, Rgba{0x1b, 0x18, 0x15, 255})
-	testing.expect_value(t, term_colors_of(.Ghostty, false).bg, Rgba{0x28, 0x2c, 0x34, 255})
-	testing.expect_value(t, term_colors_of(.Graphite, true).cursor, Rgba{0x18, 0x18, 0x1b, 255})
-	testing.expect_value(t, term_colors_of(.Ghostty, true).bg, Rgba{0xff, 0xff, 0xff, 255})
-	testing.expect_value(t, term_colors_of(.Graphite, false).ansi[4], Rgba{0x7a, 0xa2, 0xf7, 255})
-	for look in Theme_Id do for light in ([]bool{false, true}) {
-		tc := term_colors_of(look, light)
+	testing.expect_value(t, core.term_colors_of(.Graphite, false).fg, core.Rgba{0xd4, 0xd4, 0xd8, 255})
+	testing.expect_value(t, core.term_colors_of(.Warm, false).bg, core.Rgba{0x1b, 0x18, 0x15, 255})
+	testing.expect_value(t, core.term_colors_of(.Ghostty, false).bg, core.Rgba{0x28, 0x2c, 0x34, 255})
+	testing.expect_value(t, core.term_colors_of(.Graphite, true).cursor, core.Rgba{0x18, 0x18, 0x1b, 255})
+	testing.expect_value(t, core.term_colors_of(.Ghostty, true).bg, core.Rgba{0xff, 0xff, 0xff, 255})
+	testing.expect_value(t, core.term_colors_of(.Graphite, false).ansi[4], core.Rgba{0x7a, 0xa2, 0xf7, 255})
+	for look in core.Theme_Id do for light in ([]bool{false, true}) {
+		tc := core.term_colors_of(look, light)
 		th := light ? &THEMES_LIGHT[look] : &THEMES[look]
 		testing.expectf(t, th.bg_app == tc.bg, "%v light=%v: bg_app != terminal bg", look, light)
-		p := term_palette(tc)
+		p := core.term_palette(tc)
 		for c, i in tc.ansi do testing.expect_value(t, p[i], gh.Color_Rgb{c.r, c.g, c.b})
 		if !light {
 			// dark: xterm's cube and ramp, as Ghostty's default
@@ -37,7 +38,7 @@ term_palette_per_look :: proc(t: ^testing.T) {
 	saved := state.settings
 	defer state.settings = saved
 	state.settings.theme, state.settings.appearance = .Warm, .Light
-	testing.expect(t, term_colors() == term_colors_of(.Warm, true))
+	testing.expect(t, core.term_colors() == core.term_colors_of(.Warm, true))
 	state.settings.appearance = .Dark
-	testing.expect(t, term_colors() == term_colors_of(.Warm, false))
+	testing.expect(t, core.term_colors() == core.term_colors_of(.Warm, false))
 }

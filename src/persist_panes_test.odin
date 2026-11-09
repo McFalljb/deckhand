@@ -11,21 +11,22 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(private = "file")
 pp_reset :: proc() -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT},
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.persist = {}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -56,10 +57,10 @@ pp_home :: proc() -> string {
 // A session's panes as text: a split is dir(ratio a b), a pane [its tabs' titles], * on the
 // tab it shows, @ before the focused pane. "!" + the problem when session_check finds one.
 @(private = "file")
-pp_desc :: proc(s: ^Open_Session) -> string {
-	if err := session_check(s); err != "" do return fmt.tprintf("!%s", err)
+pp_desc :: proc(s: ^core.Open_Session) -> string {
+	if err := core.session_check(s); err != "" do return fmt.tprintf("!%s", err)
 	b := strings.builder_make(context.temp_allocator)
-	walk :: proc(b: ^strings.Builder, s: ^Open_Session, n: int) {
+	walk :: proc(b: ^strings.Builder, s: ^core.Open_Session, n: int) {
 		x := s.nodes[n]
 		if !x.leaf {
 			fmt.sbprintf(b, "%s(%.3f ", x.dir == .Right ? "right" : "down", x.ratio)
@@ -69,7 +70,7 @@ pp_desc :: proc(s: ^Open_Session) -> string {
 			strings.write_byte(b, ')')
 			return
 		}
-		p := session_pane(s, x.pane)
+		p := core.session_pane(s, x.pane)
 		if p.id == s.focused_pane do strings.write_byte(b, '@')
 		strings.write_byte(b, '[')
 		first := true
@@ -94,10 +95,10 @@ pp_file :: proc(a, tabs: string, active: int, panes: string) -> string {
 }
 
 @(private = "file")
-pp_restore :: proc(t: ^testing.T, text: string, loc := #caller_location) -> ^Open_Session {
+pp_restore :: proc(t: ^testing.T, text: string, loc := #caller_location) -> ^core.Open_Session {
 	pp_reset()
-	rescan_now()
-	testing.expect_value(t, workspace_restore(text), "", loc)
+	core.rescan_now()
+	testing.expect_value(t, core.workspace_restore(text), "", loc)
 	testing.expect_value(t, len(state.open_sessions), 1, loc)
 	if len(state.open_sessions) != 1 do return nil
 	return &state.open_sessions[0]
@@ -145,7 +146,7 @@ panes_saved_old_and_corrupt_files :: proc(t: ^testing.T) {
 		s = pp_restore(t, pp_file(a, pp_shells(a), 2, c))
 		if s != nil do testing.expectf(t, pp_desc(s) == one, "%s: %s", c, pp_desc(s))
 		// and the next save has no panes
-		testing.expectf(t, !strings.contains(workspace_json(), `"panes"`), "%s: saved again", c)
+		testing.expectf(t, !strings.contains(core.workspace_json(), `"panes"`), "%s: saved again", c)
 	}
 }
 
@@ -205,49 +206,49 @@ panes_saved_repairs :: proc(t: ^testing.T) {
 panes_saved_round_trip :: proc(t: ^testing.T) {
 	context.allocator = pp_reset()
 	a := pp_home()
-	rescan_now()
-	r := run_command(Open_Session_Cmd{project_id = state.projects[0].id, pi_session_id = "aaaa-1"})
+	core.rescan_now()
+	r := core.run_command(core.Open_Session_Cmd{project_id = state.projects[0].id, pi_session_id = "aaaa-1"})
 	testing.expect(t, r.ok, r.error)
 	sid := r.created_id
-	for _ in 0 ..< 3 do run_command(New_Shell_Tab{session = sid})
-	s := find_session(sid)
+	for _ in 0 ..< 3 do core.run_command(core.New_Shell_Tab{session = sid})
+	s := core.find_session(sid)
 	sh1, sh2, sh3 := s.tabs[1].id, s.tabs[2].id, s.tabs[3].id
-	single := strings.clone(workspace_json(), context.temp_allocator)
+	single := strings.clone(core.workspace_json(), context.temp_allocator)
 	testing.expect(t, !strings.contains(single, `"panes"`), single)
 	// shell 1 splits off to the left: the pi tab's pane is the second leaf; shell 3 splits below it
-	r = run_command(Split_Pane{pane = s.focused_pane, direction = .Left, tab_id = sh1})
+	r = core.run_command(core.Split_Pane{pane = s.focused_pane, direction = .Left, tab_id = sh1})
 	testing.expect(t, r.ok, r.error)
 	left := r.created_id
 	pi_pane := s.tabs[0].pane
-	r = run_command(Split_Pane{pane = pi_pane, direction = .Down, tab_id = sh3})
+	r = core.run_command(core.Split_Pane{pane = pi_pane, direction = .Down, tab_id = sh3})
 	testing.expect(t, r.ok, r.error)
 	// set_split before Clay ever ran in this process (no layout to keep the ratio at)
-	for n in s.nodes do if !n.leaf && n.dir == .Right do testing.expect(t, run_command(Set_Split{split = n.id, ratio = 0.3472}).ok)
-	for n in s.nodes do if !n.leaf && n.dir == .Down do testing.expect(t, run_command(Set_Split{split = n.id, ratio = 0.62}).ok)
-	run_command(Focus_Tab{tab_id = sh2}) // pi's pane shows shell 2
-	gen := persist.gen
-	run_command(Focus_Pane{pane = left}) // the left pane has the keyboard
-	testing.expect(t, persist.gen > gen, "a pane's focus is saved data")
+	for n in s.nodes do if !n.leaf && n.dir == .Right do testing.expect(t, core.run_command(core.Set_Split{split = n.id, ratio = 0.3472}).ok)
+	for n in s.nodes do if !n.leaf && n.dir == .Down do testing.expect(t, core.run_command(core.Set_Split{split = n.id, ratio = 0.62}).ok)
+	core.run_command(core.Focus_Tab{tab_id = sh2}) // pi's pane shows shell 2
+	gen := core.persist.gen
+	core.run_command(core.Focus_Pane{pane = left}) // the left pane has the keyboard
+	testing.expect(t, core.persist.gen > gen, "a pane's focus is saved data")
 	want := "right(0.347 @[shell 1*] down(0.620 [pi,shell 2*] [shell 3*]))"
 	testing.expect_value(t, pp_desc(s), want)
-	testing.expect_value(t, session_focused_tab(s).title, "shell 1")
-	saved := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect_value(t, core.session_focused_tab(s).title, "shell 1")
+	saved := strings.clone(core.workspace_json(), context.temp_allocator)
 	testing.expectf(t, strings.contains(saved, `"tabs":[{"kind":"pi"},{"kind":"shell","title":"shell 2"`) && strings.contains(saved, `"active_tab":2,"panes":{"tree":{"split":"right","ratio":0.347,"a":{"pane":0},"b":{"split":"down","ratio":0.620,"a":{"pane":1},"b":{"pane":2}}},"tab_pane":[1,1,0,2],"active":[2,1,3],"focused":0}}`), "%s", saved)
 
 	// after a restart: the same layout, the current session started in its focused pane
 	pp_reset()
-	rescan_now()
-	testing.expect_value(t, workspace_restore(saved), "")
-	persist_after_layout(skip = false)
+	core.rescan_now()
+	testing.expect_value(t, core.workspace_restore(saved), "")
+	core.persist_after_layout(skip = false)
 	testing.expect_value(t, len(state.open_sessions), 1)
 	if len(state.open_sessions) != 1 do return
 	s = &state.open_sessions[0]
 	testing.expect_value(t, pp_desc(s), want)
-	testing.expect_value(t, session_focused_tab(s).title, "shell 1")
+	testing.expect_value(t, core.session_focused_tab(s).title, "shell 1")
 	testing.expect(t, s.tabs[0].title == "pi")
 	testing.expect_value(t, state.current_session, s.id)
-	for tab in s.tabs do testing.expect_value(t, tab.status, Tab_Status.Running)
-	again := workspace_json()
+	for tab in s.tabs do testing.expect_value(t, tab.status, core.Tab_Status.Running)
+	again := core.workspace_json()
 	testing.expectf(t, again == saved, "second save differs:\n%s\n---\n%s", saved, again)
 }
 
@@ -262,23 +263,23 @@ panes_saved_claude_and_chat :: proc(t: ^testing.T) {
 	s := pp_restore(t, text)
 	if s != nil {
 		testing.expect_value(t, pp_desc(s), "right(0.400 [A*] @[Claude*])")
-		testing.expect_value(t, s.agent, Session_Agent.Claude)
-		testing.expect(t, strings.contains(workspace_json(), `"tab_pane":[1,0],"active":[1,0],"focused":1`), workspace_json())
+		testing.expect_value(t, s.agent, core.Session_Agent.Claude)
+		testing.expect(t, strings.contains(core.workspace_json(), `"tab_pane":[1,0],"active":[1,0],"focused":1`), core.workspace_json())
 	}
 
 	// a chat (in Chats): its panes come back with it
-	old_root := home_root
-	defer home_root = old_root
-	home_root = pp_dir("chat-data")
+	old_root := core.home_root
+	defer core.home_root = old_root
+	core.home_root = pp_dir("chat-data")
 	pp_reset()
-	rescan_now()
-	c := chats_project()
+	core.rescan_now()
+	c := core.chats_project()
 	if c == nil {
 		testing.fail_now(t, "no Chats")
 	}
 	os.make_directory_all(c.cwd)
 	text = fmt.tprintf(`{{"v":1,"open_sessions":[{{"pi_session_id":"chat-pi-1","cwd":%q,"session_dir":"","project":%q,"chat":true,"tabs":[{{"kind":"pi"}},{{"kind":"shell","title":"A","cwd":%q}}],"active_tab":1,"panes":{{"tree":{{"split":"down","ratio":0.5,"a":{{"pane":0}},"b":{{"pane":1}}}},"tab_pane":[0,1],"active":[0,1],"focused":1}}}}]}}`, c.cwd, c.cwd, c.cwd)
-	testing.expect_value(t, workspace_restore(text), "")
+	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, len(state.open_sessions), 1)
 	if len(state.open_sessions) != 1 do return
 	s = &state.open_sessions[0]
@@ -292,12 +293,12 @@ panes_saved_claude_and_chat :: proc(t: ^testing.T) {
 panes_saved_unset_pane_is_focused :: proc(t: ^testing.T) {
 	context.allocator = pp_reset()
 	pp_home()
-	rescan_now()
-	nodes := []Restore_Node{{dir = .Right, ratio = 0.5, a = 1, b = 2}, {leaf = true, pane = 0}, {leaf = true, pane = 1}}
-	tabs := []Restore_Tab{{kind = .Shell, title = "A"}, {kind = .Shell, title = "B", pane = 0}}
-	r := run_command(Restore_Session{project_id = state.projects[0].id, pi_session_id = "aaaa-1", tabs = tabs, layout = {nodes = nodes, panes = 2, focused = 1}})
+	core.rescan_now()
+	nodes := []core.Restore_Node{{dir = .Right, ratio = 0.5, a = 1, b = 2}, {leaf = true, pane = 0}, {leaf = true, pane = 1}}
+	tabs := []core.Restore_Tab{{kind = .Shell, title = "A"}, {kind = .Shell, title = "B", pane = 0}}
+	r := core.run_command(core.Restore_Session{project_id = state.projects[0].id, pi_session_id = "aaaa-1", tabs = tabs, layout = {nodes = nodes, panes = 2, focused = 1}})
 	testing.expect(t, r.ok, r.error)
-	if s := find_session(r.created_id); s != nil do testing.expect_value(t, pp_desc(s), "right(0.500 [B*] @[pi*,A])")
+	if s := core.find_session(r.created_id); s != nil do testing.expect_value(t, pp_desc(s), "right(0.500 [B*] @[pi*,A])")
 }
 
 // The empty-pane sweep ends even when a pane cannot be removed (a pane the tree does not hold):
@@ -305,16 +306,16 @@ panes_saved_unset_pane_is_focused :: proc(t: ^testing.T) {
 @(test)
 panes_saved_drop_empty_ends :: proc(t: ^testing.T) {
 	context.allocator = pp_reset()
-	s := Open_Session{id = 1}
+	s := core.Open_Session{id = 1}
 	defer {
 		delete(s.tabs)
-		session_panes_free(&s)
+		core.session_panes_free(&s)
 	}
-	append(&s.tabs, Tab{id = 10, kind = Pi_Tab{}, title = "pi", pane = 100})
-	append(&s.panes, Pane{id = 100, active = 10}, Pane{id = 200, slot = 1})
-	append(&s.nodes, Layout_Node{id = 100, leaf = true, pane = 100, parent = -1}) // pane 200 in no leaf
+	append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = "pi", pane = 100})
+	append(&s.panes, core.Pane{id = 100, active = 10}, core.Pane{id = 200, slot = 1})
+	append(&s.nodes, core.Layout_Node{id = 100, leaf = true, pane = 100, parent = -1}) // pane 200 in no leaf
 	s.focused_pane = 100
-	panes_drop_empty(&s)
+	core.panes_drop_empty(&s)
 	testing.expect_value(t, len(s.panes), 2)
-	testing.expect(t, session_check(&s) != "", "refused")
+	testing.expect(t, core.session_check(&s) != "", "refused")
 }

@@ -7,23 +7,24 @@ import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:testing"
+import "core"
 
 @(private = "file")
 reset :: proc() -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT},
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
 	for k in palette.recent do delete(k)
 	clear(&palette.recent)
 	tf_set(&palette.field, "")
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -47,36 +48,36 @@ index_of :: proc(items: []Palette_Item, key: string) -> int {
 
 @(test)
 palette_fuzzy_score :: proc(t: ^testing.T) {
-	_, _, ok := fuzzy_score("xyz", "Look: Ghostty")
+	_, _, ok := core.fuzzy_score("xyz", "Look: Ghostty")
 	testing.expect(t, !ok, "no subsequence: no match")
-	s1, m, ok1 := fuzzy_score("gho", "Look: Ghostty")
+	s1, m, ok1 := core.fuzzy_score("gho", "Look: Ghostty")
 	testing.expect(t, ok1)
 	testing.expect_value(t, m, u64(0b111) << 6) // "Gho" at rune 6
-	s2, _, _ := fuzzy_score("lgh", "Look: Ghostty") // scattered: L, G, h
+	s2, _, _ := core.fuzzy_score("lgh", "Look: Ghostty") // scattered: L, G, h
 	testing.expect(t, s1 > s2, "a substring beats a scattered match")
-	pre, _, _ := fuzzy_score("new", "New chat")
-	mid, _, _ := fuzzy_score("new", "Renew chat")
+	pre, _, _ := core.fuzzy_score("new", "New chat")
+	mid, _, _ := core.fuzzy_score("new", "Renew chat")
 	testing.expect(t, pre > mid, "a prefix beats the middle of a word")
-	ws, _, _ := fuzzy_score("nst", "New shell tab")
-	in_word, _, _ := fuzzy_score("nst", "Unsettled")
+	ws, _, _ := core.fuzzy_score("nst", "New shell tab")
+	in_word, _, _ := core.fuzzy_score("nst", "Unsettled")
 	testing.expect(t, ws > in_word, "word starts beat letters inside a word")
-	_, _, case_ok := fuzzy_score("GHOST", "look: ghostty")
+	_, _, case_ok := core.fuzzy_score("GHOST", "look: ghostty")
 	testing.expect(t, case_ok, "case-insensitive")
 }
 
 @(test)
 palette_search_ranking :: proc(t: ^testing.T) {
 	context.allocator = reset()
-	run_command(Add_Project{cwd = "/tmp/recipe-box"})
-	run_command(Add_Project{cwd = "/tmp/garden"})
-	sess := run_command(New_Chat{project_id = state.selected_project}).created_id
+	core.run_command(core.Add_Project{cwd = "/tmp/recipe-box"})
+	core.run_command(core.Add_Project{cwd = "/tmp/garden"})
+	sess := core.run_command(core.New_Chat{project_id = state.selected_project}).created_id
 	testing.expect(t, sess != 0)
 
 	// empty query: actions first, then tabs, sessions, projects
 	all := palette_search("")
 	testing.expect_value(t, all[0].key, "action:new_session") // no data dir, so no Chats: New chat is not offered
 	testing.expect(t, index_of(all, "action:close_tab") < 0, "close tab is not offered on a pi tab")
-	tab_at := index_of(all, fmt.tprintf("tab:%d", find_session(sess).tabs[0].id))
+	tab_at := index_of(all, fmt.tprintf("tab:%d", core.find_session(sess).tabs[0].id))
 	proj_at := index_of(all, "project:/tmp/garden")
 	testing.expect(t, tab_at > 0 && proj_at > tab_at, "tabs before projects")
 
@@ -105,57 +106,57 @@ palette_search_ranking :: proc(t: ^testing.T) {
 @(test)
 palette_runs_commands :: proc(t: ^testing.T) {
 	context.allocator = reset()
-	run_command(Add_Project{cwd = "/tmp"})
-	sess := run_command(New_Chat{project_id = state.selected_project}).created_id
+	core.run_command(core.Add_Project{cwd = "/tmp"})
+	sess := core.run_command(core.New_Chat{project_id = state.selected_project}).created_id
 
-	run_command(Set_Focus{"palette"}, Caller{kind = .UI})
+	core.run_command(core.Set_Focus{"palette"}, core.Caller{kind = .UI})
 	testing.expect_value(t, state.focus_widget, "palette")
 	v := state.version
 	palette_run(palette_search("ghostty")[0])
-	testing.expect_value(t, state.settings.theme, Theme_Id.Graphite) // queued, not applied directly
-	inbox_drain()
-	testing.expect_value(t, state.settings.theme, Theme_Id.Ghostty)
+	testing.expect_value(t, state.settings.theme, core.Theme_Id.Graphite) // queued, not applied directly
+	core.inbox_drain()
+	testing.expect_value(t, state.settings.theme, core.Theme_Id.Ghostty)
 	testing.expect_value(t, state.focus_widget, "") // the palette closed
 	testing.expect(t, state.version > v)
 	testing.expect_value(t, palette.recent[0], "action:look_ghostty")
 
 	// a new shell tab, then close it from the palette: it asks first
 	palette_run(palette_search("new shell")[0])
-	inbox_drain()
-	s := find_session(sess)
+	core.inbox_drain()
+	s := core.find_session(sess)
 	testing.expect_value(t, len(s.tabs), 2)
-	run_command(Set_Close_Confirm{tab_kind = .Shell, rule = .Always})
+	core.run_command(core.Set_Close_Confirm{tab_kind = .Shell, rule = .Always})
 	palette_run(palette_search("close tab")[0])
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(s.tabs), 2)
 	testing.expect_value(t, len(state.pending_confirmations), 1)
-	testing.expect_value(t, state.pending_confirmations[0].caller.kind, Caller_Kind.UI)
+	testing.expect_value(t, state.pending_confirmations[0].caller.kind, core.Caller_Kind.UI)
 
 	// tabs and projects by name ("pi" ties with the Pin actions: pick the tab)
 	pis := palette_search("pi")
 	palette_run(pis[index_of(pis, fmt.tprintf("tab:%d", s.tabs[0].id))])
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, s.active_tab, s.tabs[0].id)
 
 	// add project: the folder comes from the platform's (modal) picker, run
 	// later from the main queue (platform.run_later), never inside the key or
 	// click handler that chose the action; cancelled = nothing
 	picks = 0
-	platform.pick_folder = proc() -> string {picks += 1; return ""}
+	core.platform.pick_folder = proc() -> string {picks += 1; return ""}
 	n := len(state.projects)
 	palette_run(palette_search("add project")[0])
 	testing.expect_value(t, picks, 0) // not from inside the handler
 	palette_run_deferred()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, picks, 1)
 	testing.expect_value(t, len(state.projects), n)
-	platform.pick_folder = proc() -> string {picks += 1; return "/tmp/picked"}
+	core.platform.pick_folder = proc() -> string {picks += 1; return "/tmp/picked"}
 	testing.expect_value(t, palette_search("add project")[0].key, "action:add_project")
 	palette_run(palette_search("add project")[0])
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, picks, 1)
 	palette_run_deferred()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, picks, 2)
 	testing.expect_value(t, state.projects[0].cwd, "/tmp/picked")
 	palette_run_deferred() // once only
@@ -163,7 +164,7 @@ palette_runs_commands :: proc(t: ^testing.T) {
 
 	// rename: fills the field, then focuses it (a command)
 	palette_run(palette_search("rename")[0])
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.focus_widget, "rename_project")
 	testing.expect_value(t, tf_text(&rename_field), "/tmp/picked")
 }
@@ -228,10 +229,10 @@ menu_action_outcomes :: proc(t: ^testing.T) {
 	action_run("new_shell_tab") // not from a menu: nothing said
 	testing.expect_value(t, toast.text, "")
 	// a folder picker row: its command's failure after the pick
-	platform.pick_folder = proc() -> string {return "relative/not-there"}
+	core.platform.pick_folder = proc() -> string {return "relative/not-there"}
 	action_run("chats_dir", "Chats folder…")
 	palette_run_deferred()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect(t, toast.err && len(toast.text) > len("Chats folder: ") && toast.text[:len("Chats folder: ")] == "Chats folder: ", toast.text)
 	toast_clear()
 }

@@ -84,7 +84,7 @@ each with its own `TMPDIR` under `/tmp` (short enough for the control socket's p
 fails when a test fails and when the number of tests that ran differs from the number of
 `@(test)` procs in `src/*.odin`, so a test cannot silently drop out. Logs: `build/unit/`.
 
-Temp folders: under `odin test` (`src/tmpdir_test.odin`) every test process makes one folder
+Temp folders: under `odin test` (`src/core/tmpdir_test.odin`) every test process makes one folder
 (`dkt-XXXXXX`, in `$TMPDIR` when its path is short, else `/tmp`), points `TMPDIR` at it and
 removes it at exit, so running `odin test` by hand leaves nothing behind either. The
 `integrations/pi` tests keep theirs in one `deckhand-test-XXXXXX` folder each, removed at exit.
@@ -299,7 +299,7 @@ on an efficiency core, caches shared with the other processes): `reload_burst` t
 CPU against 20, and `syntax_large_parse`'s 50 ms wall-clock reparse failed `release.sh` at
 50–54 ms.
 
-Every budget goes through `perf_expect` (`src/cpu_clock_test.odin`): it prints
+Every budget goes through `perf_expect` (`src/core/cpu_clock_test.odin`): it prints
 `PERF label: took X (budget Y)`; over the budget it prints `PERF OVER BUDGET …`, which
 `tests/unit.py` lists at the end as a warning (a GitHub warning in CI), and the test fails only
 past **10×** the budget, or **3×** (`PERF_GATE_USER`) for what a user waits on directly: a key

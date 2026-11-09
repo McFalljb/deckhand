@@ -356,7 +356,7 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
     // (PushMessaging below), since it needs GCM.
     // no warm spare renderer kept for the next navigation (~70-85 MB RSS);
     // DECKHAND_CEF_SPARE=1 keeps Chromium's default (the spike measured both)
-#ifndef DH_RELEASE // test and development knobs: not in a release build (src/test_hooks.odin)
+#ifndef DH_RELEASE // test and development knobs: not in a release build (src/core/test_hooks.odin)
     const char* spare = getenv("DECKHAND_CEF_SPARE");
     if (!spare || strcmp(spare, "1") != 0)
 #endif

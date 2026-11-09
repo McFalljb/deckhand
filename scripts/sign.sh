@@ -3,7 +3,7 @@
 #
 # The identity: SIGN_IDENTITY_DEFAULT below, the one line to change (committed, so it never
 # depends on the environment: Deckhand's terminals drop DECKHAND_* from the login environment,
-# src/login_env.odin). DECKHAND_SIGN_IDENTITY overrides it for one build. The name (or SHA-1) of
+# src/core/login_env.odin). DECKHAND_SIGN_IDENTITY overrides it for one build. The name (or SHA-1) of
 # a code-signing identity in the keychain (scripts/make-signing-identity.sh makes the default). A stable
 # certificate gives the app a stable designated requirement (identifier + certificate leaf hash),
 # so macOS keeps its privacy grants (Desktop, Documents, Downloads, camera...) across rebuilds and

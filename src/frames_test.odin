@@ -13,6 +13,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 @(private = "file")
@@ -166,34 +167,34 @@ app_key_names_follow_sokol :: proc(t: ^testing.T) {
 
 @(test)
 app_commands_parse_and_permissions :: proc(t: ^testing.T) {
-	c, err := parse_command(`{"type":"new_app_tab","argv":["build/fake-app","--exit","75"],"title":"fake"}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"new_app_tab","argv":["build/fake-app","--exit","75"],"title":"fake"}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	nt := c.(New_App_Tab)
+	nt := c.(core.New_App_Tab)
 	testing.expect(t, len(nt.argv) == 3 && nt.argv[2] == "75" && nt.title == "fake", "new_app_tab argv")
-	c, err = parse_command(`{"type":"app_input","tab_id":4,"events":[{"event":"key","action":"down","key":"w"},{"event":"char","text":"é"}]}`, context.temp_allocator)
+	c, err = core.parse_command(`{"type":"app_input","tab_id":4,"events":[{"event":"key","action":"down","key":"w"},{"event":"char","text":"é"}]}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	ai := c.(App_Input)
+	ai := c.(core.App_Input)
 	testing.expect(t, len(ai.events) == 2 && ai.tab_id == 4, "app_input events")
-	_, err = parse_command(`{"type":"app_input","tab_id":4,"events":["key w"]}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"app_input","tab_id":4,"events":["key w"]}`, context.temp_allocator)
 	testing.expect(t, err != "", "events must be objects")
-	c, err = parse_command(`{"type":"app_call","tab_id":4,"method":"tab.ping","timeout_ms":500}`, context.temp_allocator)
+	c, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":"tab.ping","timeout_ms":500}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	ac := c.(App_Call)
+	ac := c.(core.App_Call)
 	testing.expect(t, ac.method == "tab.ping" && ac.timeout_ms == 500, "app_call's method")
-	_, err = parse_command(`{"type":"app_call","tab_id":4}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"app_call","tab_id":4}`, context.temp_allocator)
 	testing.expect(t, err != "", "method is needed")
 	// an app's program sends no commands, not even queries; the internal ones are Deckhand's
-	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, Get_State{}), "app: no queries")
-	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, New_App_Tab{}), "app: no commands")
-	testing.expect(t, caller_may({kind = .Control}, App_Call{}), "control may call apps")
+	testing.expect(t, !core.caller_may({kind = .App, tab_id = 4}, core.Get_State{}), "app: no queries")
+	testing.expect(t, !core.caller_may({kind = .App, tab_id = 4}, core.New_App_Tab{}), "app: no commands")
+	testing.expect(t, core.caller_may({kind = .Control}, core.App_Call{}), "control may call apps")
 	// pi and Claude tabs (panel): their own session's app tabs only (app_apply checks the tab)
-	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Input{}), "pi tabs: their own session's app tabs")
+	testing.expect(t, core.caller_may({kind = .Panel, tab_id = 2}, core.App_Input{}), "pi tabs: their own session's app tabs")
 	// and open, restart and close their own session's (app_apply checks the session: app_open_test.odin)
-	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, New_App_Tab{}), "pi tabs: new app tabs in their own session")
-	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Restart{}), "pi tabs: their own session's restarts")
-	testing.expect(t, caller_may({kind = .Panel, tab_id = 2}, App_Close{}), "pi tabs: their own session's app tabs closed")
-	testing.expect(t, !caller_may({kind = .Script}, App_Update{}), "internal only")
-	testing.expect(t, !caller_may({kind = .Control}, App_Call_Done{}), "internal only")
+	testing.expect(t, core.caller_may({kind = .Panel, tab_id = 2}, core.New_App_Tab{}), "pi tabs: new app tabs in their own session")
+	testing.expect(t, core.caller_may({kind = .Panel, tab_id = 2}, core.App_Restart{}), "pi tabs: their own session's restarts")
+	testing.expect(t, core.caller_may({kind = .Panel, tab_id = 2}, core.App_Close{}), "pi tabs: their own session's app tabs closed")
+	testing.expect(t, !core.caller_may({kind = .Script}, core.App_Update{}), "internal only")
+	testing.expect(t, !core.caller_may({kind = .Control}, core.App_Call_Done{}), "internal only")
 }
 
 // An app's answer counts only for its own tab: another tab's reply with a
@@ -203,9 +204,9 @@ app_replies_only_from_the_asking_tab :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // global maps outlive the test
 	pending[strings.clone("a900")] = {tab_id = 7, type = strings.clone("tab.ping"), deadline = time.tick_add(time.tick_now(), time.Second)}
 	defer app_fail_pending(7, "", "")
-	app_apply(App_Call_Done{tab_id = 8, wire = "a900", ok = true, data = "{}"}, {kind = .Internal}, 0)
+	app_apply(core.App_Call_Done{tab_id = 8, wire = "a900", ok = true, data = "{}"}, {kind = .Internal}, 0)
 	testing.expect(t, "a900" in pending, "tab 8's reply to tab 7's request is ignored")
-	app_apply(App_Call_Done{tab_id = 7, wire = "a900", ok = true, data = "{}"}, {kind = .Internal}, 0)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "a900", ok = true, data = "{}"}, {kind = .Internal}, 0)
 	testing.expect(t, !("a900" in pending), "tab 7's reply finishes it")
 }
 
@@ -215,10 +216,10 @@ app_replies_only_from_the_asking_tab :: proc(t: ^testing.T) {
 app_events_cannot_be_injected :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // global maps outlive the test
 	tab: u64 = 991
-	defer app_events_forget(tab)
-	app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","data":{"text":"hi"}}}],"next":999,"x":[{"y":{"z":0`)
-	app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","data":{"text":"ok"}}`)
-	out := app_events_json(tab, "log", 0, 10)
+	defer core.app_events_forget(tab)
+	core.app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","data":{"text":"hi"}}}],"next":999,"x":[{"y":{"z":0`)
+	core.app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","data":{"text":"ok"}}`)
+	out := core.app_events_json(tab, "log", 0, 10)
 	v, err := json.parse_string(out, .JSON, true, context.temp_allocator)
 	testing.expectf(t, err == nil, "%v: %s", err, out)
 	obj := v.(json.Object)
@@ -240,9 +241,9 @@ app_events_cannot_be_injected :: proc(t: ^testing.T) {
 app_event_topics_are_capped :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // global maps outlive the test
 	tab: u64 = 992
-	defer app_events_forget(tab)
-	for i in 0 ..< APP_EVENT_TOPICS + 10 do app_event_in(tab, fmt.tprintf("tab.t%d", i), `{"type":"event","event":"x"}`)
-	testing.expect_value(t, app_event_topic_count(tab), APP_EVENT_TOPICS)
+	defer core.app_events_forget(tab)
+	for i in 0 ..< core.APP_EVENT_TOPICS + 10 do core.app_event_in(tab, fmt.tprintf("tab.t%d", i), `{"type":"event","event":"x"}`)
+	testing.expect_value(t, core.app_event_topic_count(tab), core.APP_EVENT_TOPICS)
 }
 
 // A stalled app whose ping timed out is pinged again APP_PING_AGAIN later:
@@ -254,13 +255,13 @@ app_stall_pings_again_after_a_timeout :: proc(t: ^testing.T) {
 	testing.expect(t, app_should_ping(false, false, {}, t0), "the first ping")
 	// sent at t0; no answer within APP_PING_TIMEOUT (the wire is dropped)
 	testing.expect(t, !app_should_ping(true, false, t0, at(t0, 500)), "one in flight")
-	testing.expect_value(t, app_stall_status(.Stalled, false, false, t0, at(t0, 1500)), App_Status.Not_Responding)
+	testing.expect_value(t, app_stall_status(.Stalled, false, false, t0, at(t0, 1500)), core.App_Status.Not_Responding)
 	testing.expect(t, !app_should_ping(false, false, t0, at(t0, 2000)), "not before APP_PING_AGAIN")
 	testing.expect(t, app_should_ping(false, false, t0, at(t0, 3500)), "again after a timeout")
 	// the second ping (t1) is answered: stalled, no longer not responding
 	t1 := at(t0, 3500)
-	testing.expect_value(t, app_stall_status(.Not_Responding, true, false, t1, at(t1, 200)), App_Status.Not_Responding)
-	testing.expect_value(t, app_stall_status(.Not_Responding, false, true, t1, at(t1, 300)), App_Status.Stalled)
+	testing.expect_value(t, app_stall_status(.Not_Responding, true, false, t1, at(t1, 200)), core.App_Status.Not_Responding)
+	testing.expect_value(t, app_stall_status(.Not_Responding, false, true, t1, at(t1, 300)), core.App_Status.Stalled)
 	// answered pings repeat too
 	testing.expect(t, app_should_ping(false, true, t1, at(t1, 3500)), "again after an answer")
 }
@@ -279,15 +280,15 @@ frames_hidden_release_spares_the_shown_slot :: proc(t: ^testing.T) {
 app_events_keep_the_apps_json :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // global maps outlive the test
 	tab: u64 = 993
-	defer app_events_forget(tab)
+	defer core.app_events_forget(tab)
 	line := `{"type":"event","event":"tab.log","data":{"f":1e-20,"n":12345678901234567890,"k\u0001":true}}`
-	app_event_in(tab, "tab.log", line)
-	out := app_events_json(tab, "log", 0, 10)
+	core.app_event_in(tab, "tab.log", line)
+	out := core.app_events_json(tab, "log", 0, 10)
 	testing.expectf(t, strings.contains(out, line), "the line as sent: %s", out)
 	// still a single JSON value: no trailing tokens
-	app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log"} {"x":1}`)
-	app_event_in(tab, "tab.log", `[1]`)
-	testing.expect(t, strings.count(app_events_json(tab, "log", 0, 10), `"seq":`) == 1, "trailing tokens and non-objects refused")
+	core.app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log"} {"x":1}`)
+	core.app_event_in(tab, "tab.log", `[1]`)
+	testing.expect(t, strings.count(core.app_events_json(tab, "log", 0, 10), `"seq":`) == 1, "trailing tokens and non-objects refused")
 }
 
 _ :: sapp

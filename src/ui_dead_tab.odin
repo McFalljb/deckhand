@@ -5,6 +5,7 @@ package main
 
 import "core:fmt"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 
 // ---- the bar over a dead pi tab (ui.odin's centre) ----
@@ -35,52 +36,52 @@ DEAD_MODEL_SHORT :: "Model…" // the narrow bar's
 // The tab pane p shows when it is a dead pi or Claude tab (Home is the
 // drawer's, with its own "stopped").
 @(private = "file")
-dead_shown :: proc(p: ^Pane) -> ^Tab {
-	s := cur()
+dead_shown :: proc(p: ^core.Pane) -> ^core.Tab {
+	s := core.cur()
 	if s == nil || s.home do return nil
-	tab := pane_shown(p)
-	if !tab_is_dead(tab) do return nil
+	tab := core.pane_shown(p)
+	if !core.tab_is_dead(tab) do return nil
 	return tab
 }
 
-dead_tab_bar_layout :: proc(p: ^Pane) {
+dead_tab_bar_layout :: proc(p: ^core.Pane) {
 	th := theme()
 	// a restart waiting for the old process: said, no buttons
-	if s := cur(); s != nil && !s.home {
-		if tab := pane_shown(p); tab != nil && tab.status == .Exited && restart_waiting(tab.id) {
+	if s := core.cur(); s != nil && !s.home {
+		if tab := core.pane_shown(p); tab != nil && tab.status == .Exited && core.restart_waiting(tab.id) {
 			if clay.UI(cid("dead_bar"))({
 				clip = {horizontal = true}, // its pane's width at most (bar_w)
 				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
-				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+				border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 			}) {
 				dot(th.text_muted)
-				_, is_claude := tab.kind.(Claude_Tab)
+				_, is_claude := tab.kind.(core.Claude_Tab)
 				clay.TextDynamic(clip(is_claude ? "Restarting: waiting for the old Claude to exit…" : "Restarting: waiting for the old pi to exit…", max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
 			}
 			return
 		}
 	}
 	// its process runs on in a holder that stopped answering: said, no Restart (a second copy)
-	if s := cur(); s != nil && !s.home {
-		if tab := pane_shown(p); tab != nil && tab.status == .Exited && tab_held_away(tab) != 0 {
+	if s := core.cur(); s != nil && !s.home {
+		if tab := core.pane_shown(p); tab != nil && tab.status == .Exited && core.tab_held_away(tab) != 0 {
 			if clay.UI(cid("dead_bar"))({
 				clip = {horizontal = true},
 				layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 				backgroundColor = cc(th.bg_elevated),
-				border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+				border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 			}) {
 				dot(th.text_muted)
-				clay.TextDynamic(clip(HELD_AWAY_TEXT, max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
+				clay.TextDynamic(clip(core.HELD_AWAY_TEXT, max(pane_width() - px(2 * TERM_PAD + DOT + SP_2), px(40))), txt(th.text))
 			}
 			return
 		}
 	}
 	tab := dead_shown(p)
 	if tab == nil do return
-	failed := exit_failed(tab.exit)
-	model := dead_tab_offers_model(tab) // "Restart with model…"
-	msg := dead_tab_tip(tab)
+	failed := core.exit_failed(tab.exit)
+	model := core.dead_tab_offers_model(tab) // "Restart with model…"
+	msg := core.dead_tab_tip(tab)
 	if failed do msg = strings.concatenate({msg, " — its last output is below"}, context.temp_allocator)
 	// a narrow centre: the short label, so both buttons keep their text
 	model_label := DEAD_LABELS[.Restart_Model]
@@ -96,7 +97,7 @@ dead_tab_bar_layout :: proc(p: ^Pane) {
 		clip = {horizontal = true}, // its pane's width at most (bar_w)
 		layout = {sizing = {bar_w(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		dot(failed ? th.error : th.text_muted)
 		clay.TextDynamic(clip(msg, room), txt(th.text))
@@ -114,7 +115,7 @@ dead_tab_hit :: proc() -> Hit {
 
 dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
 	if tab := dead_shown(hit_pane()); tab != nil {
-		if _, is := tab.kind.(Claude_Tab); is {
+		if _, is := tab.kind.(core.Claude_Tab); is {
 			if h.part == .Restart_Model do return "Start Claude Code again, resuming its conversation, then pick another model (/model)", ""
 			return "Start Claude Code again in this tab, resuming its conversation", ""
 		}
@@ -126,17 +127,17 @@ dead_tab_tip_for :: proc(h: Hit_Dead_Tab) -> (label, keys: string) {
 	return "", ""
 }
 
-dead_tab_click :: proc(p: ^Pane, h: Hit_Dead_Tab) {
+dead_tab_click :: proc(p: ^core.Pane, h: Hit_Dead_Tab) {
 	tab := dead_shown(p)
 	if tab == nil do return
-	if _, is := tab.kind.(Claude_Tab); is do ui_do(Claude_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
-	else do ui_do(Pi_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
-	if state.focus_widget != "" do ui_do(Set_Focus{""}) // the keyboard goes to the new pi
+	if _, is := tab.kind.(core.Claude_Tab); is do ui_do(core.Claude_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
+	else do ui_do(core.Pi_Restart{tab_id = tab.id, pick_model = h.part == .Restart_Model})
+	if state.focus_widget != "" do ui_do(core.Set_Focus{""}) // the keyboard goes to the new pi
 	app.redraw = true
 }
 
 // A dead pi or Claude tab's tooltip (its tab, its Open row): how it ended. "" = none.
-dead_tab_hover_tip :: proc(tab: ^Tab) -> string {
-	if !tab_is_dead(tab) do return ""
-	return fmt.tprintf("%s — open it again to restart", dead_tab_tip(tab))
+dead_tab_hover_tip :: proc(tab: ^core.Tab) -> string {
+	if !core.tab_is_dead(tab) do return ""
+	return fmt.tprintf("%s — open it again to restart", core.dead_tab_tip(tab))
 }

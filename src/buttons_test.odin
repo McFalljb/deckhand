@@ -12,23 +12,24 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 @(private = "file")
 bt_reset :: proc() -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true},
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true},
 	}
 	menu = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -115,11 +116,11 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
 	os.set_env("HOME", fmt.tprintf("%s/home", dir))
 	defer os.set_env("HOME", old_home)
-	old_root := home_root
-	home_root = fmt.tprintf("%s/data", dir)
-	defer home_root = old_root
-	rescan_now()
-	r := run_command(Add_Project{cwd = dir}, {kind = .UI})
+	old_root := core.home_root
+	core.home_root = fmt.tprintf("%s/data", dir)
+	defer core.home_root = old_root
+	core.rescan_now()
+	r := core.run_command(core.Add_Project{cwd = dir}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 
 	// no session open: the toolbar, minus the tab strip's; the empty state's New chat
@@ -129,8 +130,8 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 		testing.expectf(t, h == Hit(Hit_Button(b)), "%v: a click at its centre hits %v", b, h)
 	}
 	// a session open: the tab strip's buttons, every tab's close button
-	run_command(New_Chat{project_id = state.selected_project}, {kind = .UI})
-	run_command(New_Shell_Tab{session = cur().id}, {kind = .UI})
+	core.run_command(core.New_Chat{project_id = state.selected_project}, {kind = .UI})
+	core.run_command(core.New_Shell_Tab{session = core.cur().id}, {kind = .UI})
 	for b in ([]Button{.Toggle_Left, .New_Chat, .Search, .New_Tab, .New_Menu, .Settings, .Toggle_Right}) {
 		h, found := hit_at(BUTTONS[b].element)
 		testing.expectf(t, found, "%v: not laid out", b)
@@ -138,7 +139,7 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	}
 	_, empty := hit_at(BUTTONS[.Empty_New_Chat].element)
 	testing.expect(t, !empty, "the empty state is gone while a tab shows")
-	cs := cur()
+	cs := core.cur()
 	for tab, i in cs.tabs {
 		h, found := hit_at("tabclose", u32(i))
 		testing.expectf(t, found && h == Hit(Hit_Close_Tab(tab.id)), "tab %d: close hits %v", i, h)
@@ -150,18 +151,18 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	testing.expectf(t, founda && ha == Hit(Hit_Home{}), "the agent's button: hits %v", ha)
 
 	// the left column hidden: its two buttons move to the top bar
-	run_command(Set_Layout{left_open = false}, {kind = .UI})
+	core.run_command(core.Set_Layout{left_open = false}, {kind = .UI})
 	for b in ([]Button{.Toggle_Left, .New_Chat}) {
 		h, found := hit_at(BUTTONS[b].element)
 		testing.expectf(t, found && h == Hit(Hit_Button(b)), "%v (left hidden): hits %v", b, h)
 	}
-	run_command(Set_Layout{left_open = true}, {kind = .UI})
+	core.run_command(core.Set_Layout{left_open = true}, {kind = .UI})
 
 	// the settings popover: every row and choice (back to ~/Chats shows while
 	// another folder is set); the looks' tooltips
-	r = run_command(Set_Folder{kind = .Chats, path = dir}, {kind = .UI})
+	r = core.run_command(core.Set_Folder{kind = .Chats, path = dir}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	run_command(Set_Focus{"settings"}, {kind = .UI})
+	core.run_command(core.Set_Focus{"settings"}, {kind = .UI})
 	_ = ui_layout(1400, 860) // the popover anchors to the button's last box
 	for it in Pop_Item {
 		// Reload all pi tabs, Restart all Claude tabs: only while such a tab runs (pop_item_shown);
@@ -174,56 +175,56 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	// nothing under it is hit
 	h, _ := hit_at(BUTTONS[.Search].element)
 	testing.expect(t, h == nil, "the popover covers the rest")
-	run_command(Set_Focus{""}, {kind = .UI})
+	core.run_command(core.Set_Focus{""}, {kind = .UI})
 
 	// the shortcuts sheet: its close button
-	run_command(Set_Focus{"shortcuts"}, {kind = .UI})
+	core.run_command(core.Set_Focus{"shortcuts"}, {kind = .UI})
 	h2, found2 := hit_at("sheet_close")
 	testing.expect(t, found2 && h2 == Hit(Hit_Sheet_Close{}))
-	run_command(Set_Focus{""}, {kind = .UI})
+	core.run_command(core.Set_Focus{""}, {kind = .UI})
 
 	// a project row's "…" (laid out while the row is hovered)
-	if p := find_project(state.selected_project); p != nil {
+	if p := core.find_project(state.selected_project); p != nil {
 		hover(Hit_Project(p.id))
 		_ = ui_layout(1400, 860) // fades start at their target: shown at once
 		h3, found3 := hit_at("projmore", 0)
 		testing.expectf(t, found3 && h3 == Hit(Hit_More_Project(p.id)), "project row …: hits %v", h3)
 		hover(nil)
 	}
-	run_command(Close_Session{session = cur().id}, {kind = .UI})
-	for p in state.pending_confirmations do run_command(Cancel_Confirmation{token = p.token}, {kind = .UI})
+	core.run_command(core.Close_Session{session = core.cur().id}, {kind = .UI})
+	for p in state.pending_confirmations do core.run_command(core.Cancel_Confirmation{token = p.token}, {kind = .UI})
 }
 
 @(test)
 buttons_run_their_actions :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
-	ui := Caller{kind = .UI}
+	ui := core.Caller{kind = .UI}
 	// what a click runs goes through the inbox as the user
 	button_click(.Toggle_Left)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.left_open, false)
 	button_click(.Toggle_Right)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.right_open, false)
 	button_click(.Search)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.focus_widget, "palette")
 	button_click(.Settings)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.focus_widget, "settings")
 	button_click(.Settings) // again: closes
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.focus_widget, "")
 	pop_run(.Appearance_Dark)
 	pop_run(.Look_Warm)
 	pop_run(.Reduce_Motion)
-	inbox_drain()
-	testing.expect_value(t, state.settings.appearance, Appearance.Dark)
-	testing.expect_value(t, state.settings.theme, Theme_Id.Warm)
+	core.inbox_drain()
+	testing.expect_value(t, state.settings.appearance, core.Appearance.Dark)
+	testing.expect_value(t, state.settings.theme, core.Theme_Id.Warm)
 	testing.expect_value(t, state.settings.reduce_motion, true)
-	run_command(Set_Focus{"settings"}, ui)
+	core.run_command(core.Set_Focus{"settings"}, ui)
 	pop_run(.Shortcuts) // the sheet replaces the popover
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.focus_widget, "shortcuts")
 	// tooltips wait TIP_DELAY, then show once; a click hides them
 	hover(Hit_Button(.New_Chat))
@@ -234,7 +235,7 @@ buttons_run_their_actions :: proc(t: ^testing.T) {
 	tip_dismiss()
 	testing.expect(t, !tip.shown)
 	hover(nil)
-	run_command(Set_Focus{""}, ui)
+	core.run_command(core.Set_Focus{""}, ui)
 }
 
 // Review fix 1: the pi tab's × and ⌘W close a whole session, so they always
@@ -244,23 +245,23 @@ pi_tab_close_always_asks :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	dir := fmt.tprintf("%s/pd-bt-close-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)
 	os.make_directory_all(dir)
-	ui := Caller{kind = .UI}
-	run_command(Add_Project{cwd = dir}, ui)
-	run_command(New_Chat{project_id = state.selected_project}, ui)
-	cs := cur()
+	ui := core.Caller{kind = .UI}
+	core.run_command(core.Add_Project{cwd = dir}, ui)
+	core.run_command(core.New_Chat{project_id = state.selected_project}, ui)
+	cs := core.cur()
 	if !testing.expect(t, cs != nil) do return
 	cs.tabs[0].agent = .Idle // pi idle: closing would not need a confirmation by itself
 	id := cs.id
 	close_tab_click(cs.tabs[0].id)
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, len(state.pending_confirmations), 1)
-	testing.expect(t, find_session(id) != nil, "still open until the user confirms")
+	testing.expect(t, core.find_session(id) != nil, "still open until the user confirms")
 	// confirming (the bar's Confirm resends with the token) closes it
 	if len(state.pending_confirmations) == 1 {
 		confirm_pending(state.pending_confirmations[0].token)
-		inbox_drain()
+		core.inbox_drain()
 	}
-	testing.expect(t, find_session(id) == nil, "closed after the confirmation")
+	testing.expect(t, core.find_session(id) == nil, "closed after the confirmation")
 	testing.expect_value(t, len(state.pending_confirmations), 0)
 }
 
@@ -269,16 +270,16 @@ pi_tab_close_always_asks :: proc(t: ^testing.T) {
 @(test)
 overlays_are_the_users :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
-	for kind in ([]Caller_Kind{.Control, .Script, .Panel}) {
+	for kind in ([]core.Caller_Kind{.Control, .Script, .Panel}) {
 		for w in ([]string{"settings", "shortcuts", "palette"}) {
-			r := run_command(Set_Focus{w}, {kind = kind})
+			r := core.run_command(core.Set_Focus{w}, {kind = kind})
 			testing.expectf(t, !r.ok, "%v opened %s", kind, w)
 			testing.expect_value(t, state.focus_widget, "")
 		}
 	}
-	r := run_command(Set_Focus{"settings"}, {kind = .UI})
+	r := core.run_command(core.Set_Focus{"settings"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	run_command(Set_Focus{""}, {kind = .Control}) // closing is fine for anyone
+	core.run_command(core.Set_Focus{""}, {kind = .Control}) // closing is fine for anyone
 	testing.expect_value(t, state.focus_widget, "")
 }
 
@@ -289,9 +290,9 @@ hide_left_during_drag_keeps_width :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	state.layout.left_width = 333
 	divider = {active = true, which = 0, x0 = 0, w0 = 333, value = 360}
-	run_command(Set_Layout{left_open = false}, {kind = .UI})
+	core.run_command(core.Set_Layout{left_open = false}, {kind = .UI})
 	divider_release()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.left_width, 333)
 	testing.expect(t, !divider.active)
 }
@@ -304,24 +305,24 @@ hide_left_during_drag_keeps_width :: proc(t: ^testing.T) {
 drawer_edge_resizes_not_terminal :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	if !testing.expect(t, bt_ui(), "fonts") do return
-	home_root = fmt.aprintf("%s/pd-drawer-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	os.make_directory_all(home_root)
+	core.home_root = fmt.aprintf("%s/pd-drawer-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory_all(core.home_root)
 	defer {
 		// shut, slid out at once: later layouts start without the drawer
 		state.home_open, state.layout.drawer_pinned = false, false
 		state.settings.reduce_motion = true
 		_ = ui_layout(1600, 900)
-		for _, x in terms do reader_stop_and_close(x)
-		home_root = ""
+		for _, x in core.terms do core.reader_stop_and_close(x)
+		core.home_root = ""
 		divider = {}
 	}
-	r := run_command(Set_Home{open = true}, {kind = .UI})
+	r := core.run_command(core.Set_Home{open = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	testing.expect(t, agent_term() != nil, "Atlas's terminal")
+	testing.expect(t, core.agent_term() != nil, "Atlas's terminal")
 	state.settings.reduce_motion = true // in place, not sliding
 	for pinned in ([]bool{false, true}) {
 		state.layout.drawer_pinned = pinned
-		state.layout.drawer_width = DRAWER_WIDTH_DEFAULT
+		state.layout.drawer_width = core.DRAWER_WIDTH_DEFAULT
 		_ = ui_layout(1600, 900)
 		d := clay.GetElementData(clay.ID("drawer"))
 		term := clay.GetElementData(clay.ID("drawer_term"))
@@ -339,15 +340,15 @@ drawer_edge_resizes_not_terminal :: proc(t: ^testing.T) {
 		_ = ui_layout(1600, 900)
 		testing.expectf(t, clay.GetElementData(clay.ID("drawer")).boundingBox.width == 520, "pinned=%v: live width", pinned)
 		divider_release()
-		inbox_drain()
+		core.inbox_drain()
 		testing.expectf(t, state.layout.drawer_width == 520, "pinned=%v: saved %v", pinned, state.layout.drawer_width)
 		// a double-click resets it
 		app.clicks = 2
 		_ = ui_layout(1600, 900)
 		e.mouse_x = clay.GetElementData(clay.ID("drawer")).boundingBox.x
 		drawer_event(&e)
-		inbox_drain()
-		testing.expectf(t, !divider.active && state.layout.drawer_width == DRAWER_WIDTH_DEFAULT, "pinned=%v: reset, %v", pinned, state.layout.drawer_width)
+		core.inbox_drain()
+		testing.expectf(t, !divider.active && state.layout.drawer_width == core.DRAWER_WIDTH_DEFAULT, "pinned=%v: reset, %v", pinned, state.layout.drawer_width)
 		// the clamps (moved from the drawer-resize scene): its minimum, 320; the room there is:
 		// sliding over, 70% of the space right of the left column (0.7 * 1300); pinned, what
 		// the panels (320) and the centre's minimum (360) leave of 1300
@@ -362,7 +363,7 @@ drawer_edge_resizes_not_terminal :: proc(t: ^testing.T) {
 			drawer_event(&e)
 			divider_move(e.mouse_x + c.dx)
 			divider_release()
-			inbox_drain()
+			core.inbox_drain()
 			testing.expectf(t, state.layout.drawer_width == c.want, "pinned=%v: dragged %v, width %v, want %v", pinned, c.dx, state.layout.drawer_width, c.want)
 		}
 	}
@@ -376,14 +377,14 @@ drawer_edge_resizes_not_terminal :: proc(t: ^testing.T) {
 divider_bare_click_and_pinned_panels :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	if !testing.expect(t, bt_ui(), "fonts") do return
-	home_root = fmt.aprintf("%s/pd-divider-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	os.make_directory_all(home_root)
+	core.home_root = fmt.aprintf("%s/pd-divider-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory_all(core.home_root)
 	defer {
 		state.home_open, state.layout.drawer_pinned = false, false
 		state.settings.reduce_motion = true
 		_ = ui_layout(1600, 900)
-		for _, x in terms do reader_stop_and_close(x)
-		home_root = ""
+		for _, x in core.terms do core.reader_stop_and_close(x)
+		core.home_root = ""
 		divider = {}
 	}
 	// a small window draws the columns narrower than saved; a bare click keeps the saved widths
@@ -392,13 +393,13 @@ divider_bare_click_and_pinned_panels :: proc(t: ^testing.T) {
 	for which in 0 ..< 2 {
 		divider_press(which, 0, 1)
 		divider_release()
-		inbox_drain()
+		core.inbox_drain()
 	}
 	testing.expect_value(t, state.layout.left_width, 480)
 	testing.expect_value(t, state.layout.right_width, 560)
-	state.layout.left_width, state.layout.right_width = LEFT_WIDTH_DEFAULT, RIGHT_WIDTH_DEFAULT
+	state.layout.left_width, state.layout.right_width = core.LEFT_WIDTH_DEFAULT, core.RIGHT_WIDTH_DEFAULT
 	// pinned at its room limit (1300 - 320 - 360 = 620), saved wider
-	r := run_command(Set_Home{open = true}, {kind = .UI})
+	r := core.run_command(core.Set_Home{open = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	state.settings.reduce_motion = true
 	state.layout.drawer_pinned = true
@@ -407,7 +408,7 @@ divider_bare_click_and_pinned_panels :: proc(t: ^testing.T) {
 	testing.expect_value(t, drawer_w(), 620)
 	divider_press(2, 0, 1) // a bare click on the drawer's edge
 	divider_release()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.drawer_width, 1000)
 	// saved as a drag of its edge leaves it: at the limit
 	state.layout.drawer_width = 620
@@ -420,14 +421,14 @@ divider_bare_click_and_pinned_panels :: proc(t: ^testing.T) {
 	testing.expect_value(t, drawer_w(), 620)
 	testing.expect_value(t, clay.GetElementData(clay.ID("right")).boundingBox.x, x)
 	divider_release()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.right_width, 320)
 	// narrower by 40, then wider by 100: back to the limit (320), the line under the pointer until then
 	_ = ui_layout(1600, 900)
 	divider_press(1, x, 1)
 	divider_move(x + 40)
 	divider_release()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.right_width, 280)
 	_ = ui_layout(1600, 900)
 	x = clay.GetElementData(clay.ID("right")).boundingBox.x
@@ -437,7 +438,7 @@ divider_bare_click_and_pinned_panels :: proc(t: ^testing.T) {
 	testing.expect_value(t, clay.GetElementData(clay.ID("right")).boundingBox.x, x - 30)
 	divider_move(x - 100)
 	divider_release()
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.layout.right_width, 320)
 	_ = ui_layout(1600, 900)
 	testing.expect_value(t, drawer_w(), 620)
@@ -502,8 +503,8 @@ rename_field_keeps_tree_indent :: proc(t: ^testing.T) {
 		clear(&state.projects)
 		clear(&state.sidebar.expanded)
 	}
-	append(&state.projects, Project{id = 101, group = .Projects, cwd = "/pd-test/parent", label = "parent"})
-	append(&state.projects, Project{id = 102, group = .Projects, cwd = "/pd-test/parent/child", label = "child", parent = 101})
+	append(&state.projects, core.Project{id = 101, group = .Projects, cwd = "/pd-test/parent", label = "parent"})
+	append(&state.projects, core.Project{id = 102, group = .Projects, cwd = "/pd-test/parent/child", label = "child", parent = 101})
 	append(&state.sidebar.expanded, "/pd-test/parent")
 	field_x := proc(id: u64) -> (f32, bool) {
 		state.selected_project = id
@@ -529,7 +530,7 @@ rename_field_keys :: proc(t: ^testing.T) {
 		clear(&state.projects)
 		tf_set(&rename_field, "")
 	}
-	append(&state.projects, Project{id = 201, group = .Projects, cwd = "/pd-test/proj", label = "proj"})
+	append(&state.projects, core.Project{id = 201, group = .Projects, cwd = "/pd-test/proj", label = "proj"})
 	state.selected_project = 201
 	key :: proc(code: sapp.Keycode, mods: u32 = 0) {
 		e := sapp.Event{type = .KEY_DOWN, key_code = code, modifiers = mods}
@@ -542,8 +543,8 @@ rename_field_keys :: proc(t: ^testing.T) {
 		}
 	}
 	open :: proc() {
-		run_command(Set_Focus{widget = "rename_project"}, {kind = .UI})
-		tf_set(&rename_field, project_name(find_project(201)^)) // as the palette's Rename project does
+		core.run_command(core.Set_Focus{widget = "rename_project"}, {kind = .UI})
+		tf_set(&rename_field, core.project_name(core.find_project(201)^)) // as the palette's Rename project does
 	}
 
 	open()
@@ -555,24 +556,24 @@ rename_field_keys :: proc(t: ^testing.T) {
 	key(.LEFT, sapp.MODIFIER_SHIFT)
 	key(.C, sapp.MODIFIER_SUPER) // copy leaves the text alone
 	key(.ENTER)
-	inbox_drain()
-	testing.expect_value(t, find_project(201).name, "Renamed x")
+	core.inbox_drain()
+	testing.expect_value(t, core.find_project(201).name, "Renamed x")
 	testing.expect_value(t, state.focus_widget, "")
 
 	open()
 	key(.A, sapp.MODIFIER_SUPER)
 	type("Other")
 	key(.ESCAPE)
-	inbox_drain()
-	testing.expect_value(t, find_project(201).name, "Renamed x")
+	core.inbox_drain()
+	testing.expect_value(t, core.find_project(201).name, "Renamed x")
 	testing.expect_value(t, state.focus_widget, "")
 
 	open()
 	key(.A, sapp.MODIFIER_SUPER)
 	type("Pasted name")
 	key(.ENTER)
-	inbox_drain()
-	testing.expect_value(t, find_project(201).name, "Pasted name")
+	core.inbox_drain()
+	testing.expect_value(t, core.find_project(201).name, "Pasted name")
 }
 
 // A panel whose only row is its head row (pi-kit's "Todos 3/3" with the
@@ -582,12 +583,12 @@ rename_field_keys :: proc(t: ^testing.T) {
 panel_head_only_is_not_a_dropdown :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	if !testing.expect(t, bt_ui(), "fonts") do return
-	s := Open_Session{id = new_id(), pi_session_id = "pi-x", cwd = "/pd-test"}
-	pi := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
-	todos := Panel{id = strings.clone("todos"), title = strings.clone("Todos")}
-	append(&todos.rows, Panel_Row{text = strings.clone("Todos 3/3"), head = true}, Panel_Row{text = ""})
-	shells := Panel{id = strings.clone("shells"), title = strings.clone("Shells")}
-	append(&shells.rows, Panel_Row{text = strings.clone("Shells 1"), head = true}, Panel_Row{text = strings.clone("● npm test")})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = "pi-x", cwd = "/pd-test"}
+	pi := core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi"}
+	todos := core.Panel{id = strings.clone("todos"), title = strings.clone("Todos")}
+	append(&todos.rows, core.Panel_Row{text = strings.clone("Todos 3/3"), head = true}, core.Panel_Row{text = ""})
+	shells := core.Panel{id = strings.clone("shells"), title = strings.clone("Shells")}
+	append(&shells.rows, core.Panel_Row{text = strings.clone("Shells 1"), head = true}, core.Panel_Row{text = strings.clone("● npm test")})
 	append(&pi.panels, todos, shells)
 	append(&s.tabs, pi)
 	s.active_tab = pi.id
@@ -637,12 +638,12 @@ panel_head_only_is_not_a_dropdown :: proc(t: ^testing.T) {
 panels_scroll_follows_shorter_content :: proc(t: ^testing.T) {
 	context.allocator = bt_reset()
 	if !testing.expect(t, bt_ui(), "fonts") do return
-	session :: proc(pi_id: string, rows: int) -> Open_Session {
-		s := Open_Session{id = new_id(), pi_session_id = pi_id, cwd = "/pd-test"}
-		pi := Tab{id = new_id(), kind = Pi_Tab{}, title = "pi"}
-		p := Panel{id = strings.clone("subagents"), title = strings.clone("Subagents")}
-		append(&p.rows, Panel_Row{text = strings.clone("Subagents"), head = true})
-		for i in 0 ..< rows do append(&p.rows, Panel_Row{text = fmt.aprintf("● agent %d", i)})
+	session :: proc(pi_id: string, rows: int) -> core.Open_Session {
+		s := core.Open_Session{id = core.new_id(), pi_session_id = pi_id, cwd = "/pd-test"}
+		pi := core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi"}
+		p := core.Panel{id = strings.clone("subagents"), title = strings.clone("Subagents")}
+		append(&p.rows, core.Panel_Row{text = strings.clone("Subagents"), head = true})
+		for i in 0 ..< rows do append(&p.rows, core.Panel_Row{text = fmt.aprintf("● agent %d", i)})
 		append(&pi.panels, p)
 		append(&s.tabs, pi)
 		s.active_tab = pi.id
@@ -708,11 +709,11 @@ new_chat_button_picker_at_button :: proc(t: ^testing.T) {
 	if !bt_ui() {
 		testing.fail_now(t, "no fonts")
 	}
-	pi_installed_probe = proc() -> bool {return true}
-	claude_installed_probe = proc() -> bool {return true}
+	core.pi_installed_probe = proc() -> bool {return true}
+	core.claude_installed_probe = proc() -> bool {return true}
 	defer {
-		pi_installed_probe = nil
-		claude_installed_probe = nil
+		core.pi_installed_probe = nil
+		core.claude_installed_probe = nil
 		if menu.open do menu_close()
 	}
 	// Chats needs a data dir; an empty pi store under a temp HOME (as buttons_reachable_in_layout)
@@ -721,18 +722,18 @@ new_chat_button_picker_at_button :: proc(t: ^testing.T) {
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator), context.temp_allocator)
 	os.set_env("HOME", fmt.tprintf("%s/home", dir))
 	defer os.set_env("HOME", old_home)
-	old_root := home_root
-	home_root = fmt.tprintf("%s/data", dir)
-	defer home_root = old_root
-	rescan_now()
-	testing.expect(t, chats_project() != nil, "a Chats project")
+	old_root := core.home_root
+	core.home_root = fmt.tprintf("%s/data", dir)
+	defer core.home_root = old_root
+	core.rescan_now()
+	testing.expect(t, core.chats_project() != nil, "a Chats project")
 	for b in ([]Button{.New_Chat, .Empty_New_Chat}) {
 		_ = ui_layout(1400, 860)
 		d := clay.GetElementData(clay.ID(BUTTONS[b].element))
 		if !d.found do continue // the empty centre's button: only with no session open
 		button_click(b)
 		testing.expectf(t, menu.open, "%v: the picker opens", b)
-		_, is_ns := menu.target.(Menu_New_Session)
+		_, is_ns := menu.target.(core.Menu_New_Session)
 		testing.expectf(t, is_ns, "%v: the harness picker", b)
 		bb := d.boundingBox
 		testing.expectf(t, abs(menu.at.x - bb.x) < 1 && menu.at.y >= bb.y + bb.height && menu.at.y < bb.y + bb.height + px(SP_4), "%v: at the button %v, not %v", b, bb, menu.at)

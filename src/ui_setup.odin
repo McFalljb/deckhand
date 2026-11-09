@@ -29,6 +29,7 @@ import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:strings"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
 
@@ -50,7 +51,7 @@ Setup_UI :: struct {
 	err:      string, // heap: why Done failed ("" = none)
 	// the Claude accounts step (shown when two or more were found at the start)
 	acct_show:    bool,
-	accounts:     [dynamic]Setup_Account,
+	accounts:     [dynamic]core.Setup_Account,
 	acct_default: int, // index into accounts
 	acct_msg:     string, // heap: the last add's warning or error ("" = none)
 	acct_msg_err: bool,
@@ -58,18 +59,6 @@ Setup_UI :: struct {
 	field:        Text_Field,
 }
 setup_ui: Setup_UI = {edit = SETUP_EDIT_NONE}
-
-// One account on the sheet's accounts step (strings heap).
-Setup_Account :: struct {
-	dir:        string,
-	label:      string,
-	orig_label: string, // its label now ("" for one added here)
-	keep:       bool, // ticked
-	was_kept:   bool, // configured now (not removed)
-	fixed:      bool, // the environment's default: always kept
-	hand:       bool, // added on the sheet
-	marked:     bool, // has Claude Code's account file or sign-in
-}
 
 SETUP_EDIT_NONE :: -1
 SETUP_EDIT_PATH :: -2
@@ -93,13 +82,6 @@ Setup_Hit_Kind :: enum u8 {
 	Agent_Close, // the run's output goes
 }
 
-Setup_Step :: enum u8 {
-	Agents,
-	Main,
-	Chats,
-	Accounts,
-	Folders,
-}
 Hit_Setup :: struct {
 	what:  Setup_Hit_Kind,
 	index: int,
@@ -108,7 +90,7 @@ Hit_Setup :: struct {
 // The sheet's steps now: 4, or 5 with the accounts step.
 setup_steps :: proc() -> int {return setup_ui.acct_show ? 5 : 4}
 
-setup_step_kind :: proc() -> Setup_Step {
+setup_step_kind :: proc() -> core.Setup_Step {
 	switch setup_ui.step {
 	case 0: return .Agents
 	case 1: return .Main
@@ -121,7 +103,7 @@ setup_step_kind :: proc() -> Setup_Step {
 // A run on the coding agents step keeps the sheet where it is (its terminal shows there).
 @(private = "file")
 run_holds :: proc() -> bool {
-	if harness_run.status != .Running do return false
+	if core.harness_run.status != .Running do return false
 	set_str(&setup_ui.err, "An install is running: wait for it to finish (⌃C in its terminal stops it)")
 	return true
 }
@@ -141,7 +123,7 @@ setup_begin :: proc() {
 	u.step = 0
 	u.touched = false
 	set_str(&u.err, "")
-	p, why := setup_detect()
+	p, why := core.setup_detect()
 	set_str(&u.detected, p)
 	set_str(&u.why, why)
 	u.main = p != "" ? .Detected : .Create
@@ -157,17 +139,17 @@ setup_begin :: proc() {
 		u.separate = true
 		set_str(&u.chats, o)
 	} else if state.settings.home_dir == "" {
-		c := chats_project()
-		if c != nil && c.cwd == real_path(home_chats) && len(state.chats) > 0 do u.separate = true
+		c := core.chats_project()
+		if c != nil && c.cwd == core.real_path(home_chats) && len(state.chats) > 0 do u.separate = true
 	}
 	setup_accounts_begin()
-	harness_checklist_refresh() // looked at again each time the sheet opens
+	core.harness_checklist_refresh() // looked at again each time the sheet opens
 }
 
 // ---- the accounts step ----
 
 @(private = "file")
-account_free :: proc(a: ^Setup_Account) {
+account_free :: proc(a: ^core.Setup_Account) {
 	delete(a.dir)
 	delete(a.label)
 	delete(a.orig_label)
@@ -182,16 +164,16 @@ setup_accounts_begin :: proc() {
 	set_str(&u.acct_msg, "")
 	u.edit = SETUP_EDIT_NONE
 	tf_set(&u.field, "")
-	claude_accounts_refresh()
-	for a in claude_accounts() {
-		append(&u.accounts, Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), keep = true, was_kept = true, fixed = a.default, marked = claude_account_marked(a.dir)})
+	core.claude_accounts_refresh()
+	for a in core.claude_accounts() {
+		append(&u.accounts, core.Setup_Account{dir = strings.clone(a.dir), label = strings.clone(a.label), orig_label = strings.clone(a.label), keep = true, was_kept = true, fixed = a.default, marked = core.claude_account_marked(a.dir)})
 		if a.chosen do u.acct_default = len(u.accounts) - 1
 	}
 	if len(u.accounts) == 0 do u.acct_default = 0
 	for st in state.settings.claude_accounts {
-		if !st.removed || path_kind(st.dir) != .Dir do continue
-		label := st.label != "" ? st.label : claude_account_label_of(st.dir)
-		append(&u.accounts, Setup_Account{dir = strings.clone(st.dir), label = strings.clone(label), orig_label = strings.clone(label), marked = claude_account_marked(st.dir)})
+		if !st.removed || core.path_kind(st.dir) != .Dir do continue
+		label := st.label != "" ? st.label : core.claude_account_label_of(st.dir)
+		append(&u.accounts, core.Setup_Account{dir = strings.clone(st.dir), label = strings.clone(label), orig_label = strings.clone(label), marked = core.claude_account_marked(st.dir)})
 	}
 	u.acct_show = len(u.accounts) >= 2
 }
@@ -200,19 +182,19 @@ setup_accounts_begin :: proc() {
 // HOME or above it, not listed yet. ok with a warning when it has none of Claude Code's files.
 setup_account_add :: proc(path: string) -> (ok: bool, msg: string) {
 	u := &setup_ui
-	d, err := folder_arg(path)
+	d, err := core.folder_arg(path)
 	if err != "" || d == "" do return false, d == "" && err == "" ? "Type a folder's path" : "Type a full path (/… or ~/…)"
-	if path_kind(d) != .Dir do return false, fmt.tprintf("%s: no such folder", fs_display(d))
-	if why := claude_account_dir_refused(d); why != "" {
+	if core.path_kind(d) != .Dir do return false, fmt.tprintf("%s: no such folder", core.fs_display(d))
+	if why := core.claude_account_dir_refused(d); why != "" {
 		if strings.has_prefix(why, "a Claude Code config folder is not your home") do return false, "Not your home folder or above it: pick the Claude Code config folder itself"
 		return false, fmt.tprintf("%s%s", strings.to_upper(why[:1], context.temp_allocator), why[1:])
 	}
-	for &a, i in u.accounts do if a.dir == d || fs_real(a.dir) == fs_real(d) {
+	for &a, i in u.accounts do if a.dir == d || core.fs_real(a.dir) == core.fs_real(d) {
 		if !a.keep do setup_account_toggle(i)
-		return false, fmt.tprintf("%s is already listed (%s)", fs_display(d), a.label)
+		return false, fmt.tprintf("%s is already listed (%s)", core.fs_display(d), a.label)
 	}
-	marked := claude_account_marked(d)
-	append(&u.accounts, Setup_Account{dir = strings.clone(d), label = strings.clone(claude_account_label_of(d)), orig_label = strings.clone(""), keep = true, hand = true, marked = marked})
+	marked := core.claude_account_marked(d)
+	append(&u.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(core.claude_account_label_of(d)), orig_label = strings.clone(""), keep = true, hand = true, marked = marked})
 	if !marked do return true, "It has no Claude Code files yet (.claude.json, .credentials.json): added anyway; Claude Code makes them when you sign in there."
 	return true, ""
 }
@@ -259,8 +241,8 @@ setup_account_set_default :: proc(i: int) {
 setup_account_set_label :: proc(i: int, label: string) {
 	u := &setup_ui
 	if i < 0 || i >= len(u.accounts) do return
-	l := cut_utf8(strings.trim_space(one_line(label, context.temp_allocator)), CLAUDE_ACCOUNT_LABEL_MAX)
-	if l == "" do l = u.accounts[i].fixed ? "Claude" : claude_account_label_of(u.accounts[i].dir)
+	l := core.cut_utf8(strings.trim_space(core.one_line(label, context.temp_allocator)), core.CLAUDE_ACCOUNT_LABEL_MAX)
+	if l == "" do l = u.accounts[i].fixed ? "Claude" : core.claude_account_label_of(u.accounts[i].dir)
 	set_str(&u.accounts[i].label, l)
 	u.touched = true
 }
@@ -271,21 +253,21 @@ setup_accounts_done :: proc() {
 	if !u.acct_show do return
 	// renames in two steps (to the folder's name, then the new one): labels swapped between two
 	// accounts would clash one at a time
-	for a, i in u.accounts do if a.keep && !a.hand && a.was_kept && a.label != a.orig_label do ui_do(Rename_Claude_Account{account = a.dir, label = fmt.tprintf("(renaming %d)", i)})
+	for a, i in u.accounts do if a.keep && !a.hand && a.was_kept && a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = fmt.tprintf("(renaming %d)", i)})
 	for a in u.accounts {
 		if a.hand {
-			if a.keep do ui_do(Add_Claude_Account{dir = a.dir, label = a.label != claude_account_label_of(a.dir) ? a.label : ""})
+			if a.keep do ui_do(core.Add_Claude_Account{dir = a.dir, label = a.label != core.claude_account_label_of(a.dir) ? a.label : ""})
 			continue
 		}
 		if !a.keep {
-			if a.was_kept && !a.fixed do ui_do(Remove_Claude_Account{account = a.dir})
+			if a.was_kept && !a.fixed do ui_do(core.Remove_Claude_Account{account = a.dir})
 			continue
 		}
-		if !a.was_kept do ui_do(Add_Claude_Account{dir = a.dir})
-		if a.label != a.orig_label do ui_do(Rename_Claude_Account{account = a.dir, label = a.label != claude_account_label_of(a.dir) ? a.label : ""})
+		if !a.was_kept do ui_do(core.Add_Claude_Account{dir = a.dir})
+		if a.label != a.orig_label do ui_do(core.Rename_Claude_Account{account = a.dir, label = a.label != core.claude_account_label_of(a.dir) ? a.label : ""})
 	}
 	if u.acct_default >= 0 && u.acct_default < len(u.accounts) && u.accounts[u.acct_default].keep {
-		ui_do(Set_Claude_Account_Default{account = u.accounts[u.acct_default].dir})
+		ui_do(core.Set_Claude_Account_Default{account = u.accounts[u.acct_default].dir})
 	}
 }
 
@@ -314,7 +296,7 @@ edit_end :: proc(keep: bool) {
 // unless the user chose already.
 setup_detect_again :: proc() {
 	if !setup_open() || setup_ui.touched do return
-	p, why := setup_detect()
+	p, why := core.setup_detect()
 	set_str(&setup_ui.detected, p)
 	set_str(&setup_ui.why, why)
 	if p != "" && setup_ui.main == .Create do setup_ui.main = .Detected
@@ -413,9 +395,9 @@ setup_next :: proc() {
 	// chats first: the main folder then makes chats/ only when chats live there
 	if u.separate {
 		if !os.is_dir(u.chats) do os.make_directory_all(u.chats) // setup is the user's explicit choice
-		ui_do(Set_Folder{kind = .Chats, path = u.chats})
-	} else do ui_do(Set_Folder{kind = .Chats, path = ""})
-	ui_do(Set_Home_Dir{path = main, create = u.main == .Create, setup = true}) // closes the sheet only if it worked
+		ui_do(core.Set_Folder{kind = .Chats, path = u.chats})
+	} else do ui_do(core.Set_Folder{kind = .Chats, path = ""})
+	ui_do(core.Set_Home_Dir{path = main, create = u.main == .Create, setup = true}) // closes the sheet only if it worked
 }
 
 // A run on the coding agents step ended (harness_install.odin): what the sheet said about it goes.
@@ -423,11 +405,11 @@ setup_clear_error :: proc() {set_str(&setup_ui.err, "")}
 
 // Done's Set_Home_Dir failed (folders.odin): the sheet stays open and says why.
 setup_failed :: proc(why: string) {
-	set_str(&setup_ui.err, fmt.tprintf("Could not use %s: %s. Choose another folder.", fs_display(setup_main_path()), why))
+	set_str(&setup_ui.err, fmt.tprintf("Could not use %s: %s. Choose another folder.", core.fs_display(setup_main_path()), why))
 }
 
 // What the core tells the sheet (window.setup_sheet, window_hooks.odin).
-setup_sheet_op :: proc(op: Setup_Sheet_Op, why: string) {
+setup_sheet_op :: proc(op: core.Setup_Sheet_Op, why: string) {
 	switch op {
 	case .Begin:        setup_begin()
 	case .Clear_Error:  setup_clear_error()
@@ -437,7 +419,7 @@ setup_sheet_op :: proc(op: Setup_Sheet_Op, why: string) {
 }
 
 // The sheet as get_state shows it (window.setup_state).
-setup_state_now :: proc() -> (Setup_State, bool) {
+setup_state_now :: proc() -> (core.Setup_State, bool) {
 	u := &setup_ui
 	return {step = setup_step_kind(), steps = setup_steps(), err = u.err, acct_show = u.acct_show, accounts = u.accounts[:], acct_default = u.acct_default, acct_msg = u.acct_msg}, true
 }
@@ -453,7 +435,7 @@ setup_back :: proc() {
 // ---- layout ----
 
 @(private = "file")
-para :: proc(text: string, col: Rgba, font: u16 = FONT_UI_SMALL) {
+para :: proc(text: string, col: core.Rgba, font: u16 = FONT_UI_SMALL) {
 	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_1), pu(SP_1), 2, 2}}}) {
 		cfg := txt(col, font)
 		cfg.wrapMode = .Words
@@ -474,7 +456,7 @@ option_row :: proc(i: int, title: string, details: []string, room: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), pu(SP_2), pu(SP_1), pu(SP_1)}, childGap = pu(SP_2), childAlignment = {y = .Top}},
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(sel ? th.accent : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(sel ? th.accent : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 	}) {
 		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_3)), clay.SizingFit()}}}) {
 			clay.TextDynamic(sel ? "●" : "○", txt(sel ? th.accent : th.text_muted))
@@ -514,7 +496,7 @@ accounts_body :: proc(w: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), pu(SP_2), pu(SP_1), pu(SP_1)}, childGap = pu(SP_2), childAlignment = {y = .Top}},
 			backgroundColor = cc(hov_row ? mix(th.bg_elevated, th.text, TINT_BUTTON) : th.bg_elevated),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-			border = {color = cc(sel ? th.accent : th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(sel ? th.accent : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		}) {
 			// the checkbox (the environment's default: always ticked, muted)
 			if clay.UI(clay.ID("setupkeep", u32(i)))({layout = {sizing = {clay.SizingFixed(px(SP_3 + SP_1)), clay.SizingFit()}}}) {
@@ -535,7 +517,7 @@ accounts_body :: proc(w: f32) {
 				} else if clay.UI(clay.ID("setuplabel", u32(i)))({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}}}) {
 					clay.TextDynamic(clip(a.label, room, WEIGHT_BOLD), txt(a.keep ? th.text : th.text_muted, WEIGHT_BOLD))
 				}
-				at := fs_display(a.dir)
+				at := core.fs_display(a.dir)
 				if !a.marked do at = fmt.tprintf("%s · no Claude Code files yet", at)
 				else if a.fixed do at = fmt.tprintf("%s · what `claude` uses in your shell", at)
 				clay.TextDynamic(clip(at, room, FONT_UI_SMALL), txt(a.marked ? th.text_muted : th.waiting, FONT_UI_SMALL))
@@ -553,7 +535,7 @@ accounts_body :: proc(w: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BUTTON_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 			backgroundColor = cc(th.bg_field),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			border = {color = cc(editing ? th.accent : th.border), width = clay.BorderOutside(pu(editing ? FOCUS_RING_W : BORDER_W))},
+			border = {color = cc(editing ? th.accent : th.border), width = clay.BorderOutside(pu(editing ? FOCUS_RING_W : core.BORDER_W))},
 			clip = {horizontal = true},
 		}) {
 			if editing do field_text(clay.ID("setup_field_text"), &u.field, "")
@@ -583,9 +565,9 @@ setup_layout :: proc(w, h: f32) {
 			layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFit({max = h - px(SHEET_TOP + SP_4)})}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(SP_3)), childGap = pu(SP_2)},
 			backgroundColor = cc(th.bg_elevated),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-			border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+			border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		}) {
-			titles := [Setup_Step]string{.Agents = "Your coding agents", .Main = "Where should Deckhand keep your files?", .Chats = "Where should chats run?", .Accounts = "Claude Code accounts", .Folders = "Your folders"}
+			titles := [core.Setup_Step]string{.Agents = "Your coding agents", .Main = "Where should Deckhand keep your files?", .Chats = "Where should chats run?", .Accounts = "Claude Code accounts", .Folders = "Your folders"}
 			kind := setup_step_kind()
 			step := fmt.tprintf("Step %d of %d", u.step + 1, setup_steps())
 			if clay.UI(clay.ID("setup_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_1), pu(SP_1), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
@@ -607,20 +589,20 @@ setup_layout :: proc(w, h: f32) {
 					for o, i in setup_options() {
 						switch o {
 						case .Detected:
-							option_row(i, "Use your notes folder", {fs_display(u.detected), fmt.tprintf("Found: %s", u.why)}, room)
+							option_row(i, "Use your notes folder", {core.fs_display(u.detected), fmt.tprintf("Found: %s", u.why)}, room)
 						case .Create:
 							p := setup_create_path()
 							shown := fmt.tprintf("~/%s", filepath.base(p))
 							option_row(i, os.is_dir(p) ? fmt.tprintf("Use %s", shown) : fmt.tprintf("Create %s", shown), {os.is_dir(p) ? "It is there already: missing subfolders are added" : "A new folder in your home folder"}, room)
 						case .Other:
-							option_row(i, "Choose another folder…", {u.other != "" ? fs_display(u.other) : "Any folder: missing subfolders are added, nothing else is touched"}, room)
+							option_row(i, "Choose another folder…", {u.other != "" ? core.fs_display(u.other) : "Any folder: missing subfolders are added, nothing else is touched"}, room)
 						}
 					}
 				case .Chats:
 					para("Chats run in one folder outside any project (pi and Claude Code alike): files they create in chats land in that folder.", th.text_secondary)
 					main := setup_main_path()
-					option_row(0, "Inside the main folder (chats/)", {fmt.tprintf("%s/chats", fs_display(main))}, room)
-					option_row(1, "Separate folder", {fs_display(u.chats)}, room)
+					option_row(0, "Inside the main folder (chats/)", {fmt.tprintf("%s/chats", core.fs_display(main))}, room)
+					option_row(1, "Separate folder", {core.fs_display(u.chats)}, room)
 					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), 0, 0, 0}}}) {
 						button(clay.ID("setupbtn", u32(Setup_Hit_Kind.Choose_Chats)), "Choose separate folder…", false, ui_hover == Hit(Hit_Setup{what = .Choose_Chats}))
 					}
@@ -628,16 +610,16 @@ setup_layout :: proc(w, h: f32) {
 					accounts_body(box_w - px(2 * SP_3))
 				case .Folders:
 					main := setup_main_path()
-					tree_line(0, fmt.tprintf("%s/", fs_display(main)), "the main folder", box_w - px(2 * SP_3))
-					for k in Folder_Kind {
+					tree_line(0, fmt.tprintf("%s/", core.fs_display(main)), "the main folder", box_w - px(2 * SP_3))
+					for k in core.Folder_Kind {
 						if k == .Chats && u.separate {
-							tree_line(1, "chats →", fmt.tprintf("%s (separate)", fs_display(u.chats)), box_w - px(2 * SP_3))
-						} else do tree_line(1, fmt.tprintf("%s/", FOLDER_NAMES[k]), FOLDER_DOES[k], box_w - px(2 * SP_3))
+							tree_line(1, "chats →", fmt.tprintf("%s (separate)", core.fs_display(u.chats)), box_w - px(2 * SP_3))
+						} else do tree_line(1, fmt.tprintf("%s/", core.FOLDER_NAMES[k]), core.FOLDER_DOES[k], box_w - px(2 * SP_3))
 						if k == .Chats do tree_line(2, "AGENTS.md", "chat instructions: talk, explain, look things up", box_w - px(2 * SP_3))
 					}
 					para("Missing folders are made, empty. Nothing already there is moved or changed.", th.text_secondary)
-					para(setup_claude_line(), th.text_secondary)
-					if v := notes_env_user(); v != "" do para(fmt.tprintf("Your PI_KIT_NOTES_DIR (%s) stays as it is: pi-kit's notes go there.", fs_display(v)), th.text_secondary)
+					para(core.setup_claude_line(), th.text_secondary)
+					if v := core.notes_env_user(); v != "" do para(fmt.tprintf("Your PI_KIT_NOTES_DIR (%s) stays as it is: pi-kit's notes go there.", core.fs_display(v)), th.text_secondary)
 				}
 				if u.err != "" do para(u.err, th.error)
 			}
@@ -700,7 +682,7 @@ setup_event :: proc(e: ^sapp.Event) -> bool {
 		case .ENTER, .KP_ENTER: setup_next()
 		case .ESCAPE:
 			if setup_ui.step > 0 do setup_back()
-			else if !run_holds() do ui_do(Setup_Sheet{open = false})
+			else if !run_holds() do ui_do(core.Setup_Sheet{open = false})
 		case .UP, .DOWN:
 			n := option_count()
 			if n > 0 {
@@ -725,7 +707,7 @@ setup_event :: proc(e: ^sapp.Event) -> bool {
 		if ok && e.mouse_button == .LEFT {
 			switch h.what {
 			case .Option:       option_pick(h.index)
-			case .Skip:         if !run_holds() do ui_do(Setup_Sheet{open = false})
+			case .Skip:         if !run_holds() do ui_do(core.Setup_Sheet{open = false})
 			case .Back:         setup_back()
 			case .Next:         setup_next()
 			case .Choose_Chats: action_run("setup_pick_chats")
@@ -773,10 +755,10 @@ field_event :: proc(e: ^sapp.Event) -> bool {
 		if cmd {
 			#partial switch e.key_code {
 			case .A: tf_select_all(f)
-			case .C: if s := tf_selected_text(f); s != "" do platform.set_clipboard(s)
+			case .C: if s := tf_selected_text(f); s != "" do core.platform.set_clipboard(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {
-					platform.set_clipboard(s)
+					core.platform.set_clipboard(s)
 					tf_backspace(f)
 				}
 			case .LEFT:      tf_home(f, shift)
@@ -808,7 +790,7 @@ field_event :: proc(e: ^sapp.Event) -> bool {
 		}
 		return true
 	case .CLIPBOARD_PASTED:
-		tf_insert(f, one_line(clipboard_text(), context.temp_allocator))
+		tf_insert(f, core.one_line(core.clipboard_text(), context.temp_allocator))
 		app.redraw = true
 		return true
 	case .KEY_UP:

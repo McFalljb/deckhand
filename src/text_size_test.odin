@@ -8,9 +8,10 @@ package main
 import "base:runtime"
 import "core:strings"
 import "core:testing"
+import "core"
 
 @(private = "file")
-ts_fonts :: proc(size: Text_Size) -> bool {
+ts_fonts :: proc(size: core.Text_Size) -> bool {
 	if font.pixels == nil {
 		font.size = ATLAS_MIN
 		font.pixels = make([]u8, ATLAS_MIN * ATLAS_MIN * 4)
@@ -22,75 +23,75 @@ ts_fonts :: proc(size: Text_Size) -> bool {
 @(test)
 text_size_command :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{}
-	persist = {}
+	state^ = core.State{}
+	core.persist = {}
 	defer state.settings.text_size = .Default
 	// JSON both ways
-	for c in ([]Command{Set_Text_Size{.Small}, Set_Text_Size{.Medium}, Set_Text_Size{.Default}, Set_Text_Size{.Large}}) {
-		text := command_json(c)
-		back, err := parse_command(text, context.temp_allocator)
+	for c in ([]core.Command{core.Set_Text_Size{.Small}, core.Set_Text_Size{.Medium}, core.Set_Text_Size{.Default}, core.Set_Text_Size{.Large}}) {
+		text := core.command_json(c)
+		back, err := core.parse_command(text, context.temp_allocator)
 		testing.expectf(t, err == "", "%s: %s", text, err)
-		testing.expectf(t, command_json(back) == text, "round trip: %s -> %s", text, command_json(back))
+		testing.expectf(t, core.command_json(back) == text, "round trip: %s -> %s", text, core.command_json(back))
 	}
-	testing.expect_value(t, command_json(Set_Text_Size{.Large}), `{"type":"set_text_size","size":"large"}`)
-	_, err := parse_command(`{"type":"set_text_size","size":"huge"}`, context.temp_allocator)
+	testing.expect_value(t, core.command_json(core.Set_Text_Size{.Large}), `{"type":"set_text_size","size":"large"}`)
+	_, err := core.parse_command(`{"type":"set_text_size","size":"huge"}`, context.temp_allocator)
 	testing.expect_value(t, err, "unknown size huge")
 	// anyone but a panel; unchanged = no new version
 	v := state.version
-	r := run_command(Set_Text_Size{.Large}, Caller{kind = .Script})
+	r := core.run_command(core.Set_Text_Size{.Large}, core.Caller{kind = .Script})
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, state.settings.text_size, Text_Size.Large)
+	testing.expect_value(t, state.settings.text_size, core.Text_Size.Large)
 	testing.expect_value(t, state.version, v + 1)
-	run_command(Set_Text_Size{.Large}, Caller{kind = .Script})
+	core.run_command(core.Set_Text_Size{.Large}, core.Caller{kind = .Script})
 	testing.expect_value(t, state.version, v + 1)
-	r = run_command(Set_Text_Size{.Small}, Caller{kind = .Panel})
+	r = core.run_command(core.Set_Text_Size{.Small}, core.Caller{kind = .Panel})
 	testing.expect_value(t, r.error, "not allowed for this caller")
-	g := run_command(Get_State{}, Caller{kind = .Script})
+	g := core.run_command(core.Get_State{}, core.Caller{kind = .Script})
 	testing.expect(t, strings.contains(g.data, `"text_size":"large"`), g.data)
 	// the palette's actions
 	testing.expect(t, action_by_id("text_small") != nil && action_by_id("text_large") != nil)
 	action_run("text_medium")
-	inbox_drain()
-	testing.expect_value(t, state.settings.text_size, Text_Size.Medium)
+	core.inbox_drain()
+	testing.expect_value(t, state.settings.text_size, core.Text_Size.Medium)
 }
 
 @(test)
 text_size_saved :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{}
-	persist = {}
+	state^ = core.State{}
+	core.persist = {}
 	defer state.settings.text_size = .Default
 	// the default is not written
-	testing.expect(t, !strings.contains(workspace_json(), "text_size"), workspace_json())
-	run_command(Set_Text_Size{.Large})
-	saved := strings.clone(workspace_json())
+	testing.expect(t, !strings.contains(core.workspace_json(), "text_size"), core.workspace_json())
+	core.run_command(core.Set_Text_Size{.Large})
+	saved := strings.clone(core.workspace_json())
 	testing.expect(t, strings.contains(saved, `"text_size":"large"`), saved)
-	state = State{}
-	persist = {}
-	err := workspace_restore(saved)
+	state^ = core.State{}
+	core.persist = {}
+	err := core.workspace_restore(saved)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, state.settings.text_size, Text_Size.Large)
+	testing.expect_value(t, state.settings.text_size, core.Text_Size.Large)
 	// an unknown size is ignored (the default stays)
-	state = State{}
-	persist = {}
+	state^ = core.State{}
+	core.persist = {}
 	bad, _ := strings.replace_all(saved, `"text_size":"large"`, `"text_size":"huge"`, context.temp_allocator)
-	testing.expect_value(t, workspace_restore(bad), "")
-	testing.expect_value(t, state.settings.text_size, Text_Size.Default)
+	testing.expect_value(t, core.workspace_restore(bad), "")
+	testing.expect_value(t, state.settings.text_size, core.Text_Size.Default)
 }
 
 @(test)
 text_size_fonts :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{}
-	app_context = context
+	state^ = core.State{}
+	core.app_context = context
 	defer {
 		state.settings.text_size = .Default
 		fonts_apply(theme_font_config(theme()), 1)
 	}
-	body, small, width: [Text_Size]f32
-	faces: [Text_Size]Face_Id
-	cell_w, cell_h: [Text_Size]f32
-	for size in Text_Size {
+	body, small, width: [core.Text_Size]f32
+	faces: [core.Text_Size]Face_Id
+	cell_w, cell_h: [core.Text_Size]f32
+	for size in core.Text_Size {
 		if !testing.expect(t, ts_fonts(size), "fonts") do return
 		testing.expect_value(t, font.sets[.UI].px, TYPE_UI_PX[size][0])
 		testing.expect_value(t, font.sets[.UI_Small].px, TYPE_UI_PX[size][1])
@@ -114,7 +115,7 @@ text_size_fonts :: proc(t: ^testing.T) {
 	}
 	// each size has its own face, so its own glyphs in the atlas (the raster
 	// key holds the face)
-	for a in Text_Size do for b in Text_Size do if a != b {
+	for a in core.Text_Size do for b in core.Text_Size do if a != b {
 		testing.expectf(t, faces[a] != faces[b], "%v and %v share a face", a, b)
 	}
 }
@@ -124,14 +125,14 @@ text_size_fonts :: proc(t: ^testing.T) {
 @(test)
 text_size_field_math :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{}
-	app_context = context
+	state^ = core.State{}
+	core.app_context = context
 	defer {
 		state.settings.text_size = .Default
 		fonts_apply(theme_font_config(theme()), 1)
 	}
 	s := "Will it fit? Wide MW, thin il, ünïcödé"
-	for size in Text_Size {
+	for size in core.Text_Size {
 		if !testing.expect(t, ts_fonts(size), "fonts") do return
 		prev := f32(-1)
 		for _, off in s {
@@ -170,8 +171,8 @@ gear_keyboard_order :: proc(t: ^testing.T) {
 @(test)
 text_size_relayout :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}}
-	app_context = context
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true}}
+	core.app_context = context
 	app.dpi = 1
 	defer {
 		state.settings.text_size = .Default
@@ -190,7 +191,7 @@ text_size_relayout :: proc(t: ^testing.T) {
 		return
 	}
 	_, _ = header_w() // measured at the default size
-	for size in ([]Text_Size{.Large, .Small, .Default}) {
+	for size in ([]core.Text_Size{.Large, .Small, .Default}) {
 		ts_fonts(size)
 		w, found := header_w()
 		if !testing.expectf(t, found, "%v: the Projects header", size) do return
@@ -204,8 +205,8 @@ text_size_relayout :: proc(t: ^testing.T) {
 @(test)
 semibold_headers :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	state = State{}
-	app_context = context
+	state^ = core.State{}
+	core.app_context = context
 	defer fonts_apply(theme_font_config(theme()), 1)
 	if !testing.expect(t, ts_fonts(.Default), "fonts") do return
 	for kind in ([]Font_Kind{.UI, .UI_Small}) {

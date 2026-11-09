@@ -6,6 +6,7 @@ package main
 // a visible button; nothing installs without a click.
 
 import "core:fmt"
+import "core"
 import clay "../build/clay-odin"
 
 Update_Part :: enum u8 {
@@ -29,33 +30,33 @@ UPDATE_IDS := [Update_Part]string {
 }
 
 update_bar_shows :: proc() -> bool {
-	if upd.phase == .Downloading || upd.phase == .Installed do return true
-	return upd.offered && !upd.dismissed
+	if core.upd.phase == .Downloading || core.upd.phase == .Installed do return true
+	return core.upd.offered && !core.upd.dismissed
 }
 
 // The bar's text and its buttons, left to right.
 update_bar_parts :: proc() -> (msg: string, parts: [dynamic]Update_Part) {
 	parts = make([dynamic]Update_Part, context.temp_allocator)
-	v := upd.release.version
-	switch upd.phase {
+	v := core.upd.release.version
+	switch core.upd.phase {
 	case .Downloading:
 		msg = fmt.tprintf("Downloading Deckhand %s and checking its signature…", v)
 		append(&parts, Update_Part.Notes)
 	case .Ready:
 		msg = fmt.tprintf("Deckhand %s is ready", v)
-		keeps := holder_keeps_sessions()
-		if quit_would_stop(keeps) || jobs_any_running() || keeps do msg = fmt.tprintf("%s — %s", msg, update_restart_effects(keeps))
+		keeps := core.holder_keeps_sessions()
+		if core.quit_would_stop(keeps) || core.jobs_any_running() || keeps do msg = fmt.tprintf("%s — %s", msg, core.update_restart_effects(keeps))
 		append(&parts, Update_Part.Later, Update_Part.Install)
 	case .Failed:
-		msg = fmt.tprintf("Deckhand %s not installed: %s", v, upd.message)
+		msg = fmt.tprintf("Deckhand %s not installed: %s", v, core.upd.message)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
-		if update_cannot_install() == "" do append(&parts, Update_Part.Update)
+		if core.update_cannot_install() == "" do append(&parts, Update_Part.Update)
 	case .Installed:
 		msg = fmt.tprintf("Deckhand %s is installed: restarting…", v)
 	case .None, .Checking:
 		msg = fmt.tprintf("Deckhand %s is available", v)
 		append(&parts, Update_Part.Notes, Update_Part.Skip, Update_Part.Later)
-		if why := update_cannot_install(); why != "" do msg = fmt.tprintf("%s — %s", msg, why)
+		if why := core.update_cannot_install(); why != "" do msg = fmt.tprintf("%s — %s", msg, why)
 		else do append(&parts, Update_Part.Update)
 	}
 	return
@@ -66,7 +67,7 @@ update_part_label :: proc(p: Update_Part) -> string {
 	case .Notes:   return "Release notes"
 	case .Skip:    return "Skip this version"
 	case .Later:   return "Later"
-	case .Update:  return upd.phase == .Failed ? "Try again" : "Update"
+	case .Update:  return core.upd.phase == .Failed ? "Try again" : "Update"
 	case .Install: return "Restart to update"
 	}
 	return ""
@@ -85,10 +86,10 @@ update_bar :: proc() {
 	if clay.UI(clay.ID("update_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
-		dot(upd.phase == .Failed ? th.error : th.accent)
-		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(upd.phase == .Failed ? th.error : th.text))
+		dot(core.upd.phase == .Failed ? th.error : th.accent)
+		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(core.upd.phase == .Failed ? th.error : th.text))
 		spacer()
 		for p in parts {
 			primary := p == .Update || p == .Install
@@ -118,12 +119,12 @@ update_tip :: proc(h: Hit_Update) -> (label, keys: string) {
 update_click :: proc(h: Hit_Update) {
 	switch h.part {
 	case .Notes:
-		url := upd.release.notes_url != "" ? upd.release.notes_url : UPDATE_RELEASES_URL
-		if platform.open_url != nil do _ = platform.open_url(url)
-	case .Skip:    ui_do(Update_Skip{})
-	case .Later:   ui_do(Update_Later{})
-	case .Update:  ui_do(Update_Download{})
-	case .Install: ui_do(Update_Install{})
+		url := core.upd.release.notes_url != "" ? core.upd.release.notes_url : core.UPDATE_RELEASES_URL
+		if core.platform.open_url != nil do _ = core.platform.open_url(url)
+	case .Skip:    ui_do(core.Update_Skip{})
+	case .Later:   ui_do(core.Update_Later{})
+	case .Update:  ui_do(core.Update_Download{})
+	case .Install: ui_do(core.Update_Install{})
 	}
 	app.redraw = true
 }

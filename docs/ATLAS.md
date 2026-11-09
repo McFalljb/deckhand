@@ -3,14 +3,14 @@
 Status: draft 3, 2026-11-01. Step 1 (§9) is built: `src/jobs*.odin`, `src/ui_jobs.odin`; what
 it does differently from this design is listed under "Step 1 as built" in §9. Decisions taken
 after the first draft are in §10. How Atlas runs today:
-[PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent), `src/agent.odin`.
+[PROTOCOL.md §8](PROTOCOL.md#8-the-built-in-agent), `src/core/agent.odin`.
 
 **Where Atlas runs.** Interactive Atlas starts in Deckhand's main folder (§2), or in the data
 dir's `home/` while no main folder is set or it cannot be reached. It never starts in the user's
 home folder (`~`), even when `~` is the main folder: Atlas runs as part of Deckhand, so a plain
 `ls` or `grep -r` from `~` would walk into Desktop, Documents and Downloads and trigger macOS
 privacy prompts. An Atlas conversation recorded in another folder is copied once into the new
-folder with pi's `--fork` (`src/home.odin`; GUIDE.md "Where it works"). Job runs are separate:
+folder with pi's `--fork` (`src/core/home.odin`; GUIDE.md "Where it works"). Job runs are separate:
 each runs in its job's `folder` (§3.1).
 
 Markers: **Decided** = a settled design decision (not reopened here) · **Proposal** = this doc's choice,
@@ -149,7 +149,7 @@ List open PRs in ~/code repos that wait on me, oldest first, with one line each.
 
 **Scope.** `folder` is the scope link; `for_project` only groups the job in the Jobs tab (its
 owner: a project, Atlas, Chats or Other; without it the folder decides; GUIDE.md "The Jobs tab",
-`src/jobs_owner.odin`). Removing a project from Deckhand never deletes or edits its jobs; they are
+`src/core/jobs_owner.odin`). Removing a project from Deckhand never deletes or edits its jobs; they are
 grouped by their folder then.
 
 **Schedules.** Cron is local time (a DST-skipped time is skipped, a repeated hour runs once).
@@ -231,7 +231,7 @@ Nothing is ever deleted automatically.
 - **Delete:** the row's Delete moves the note to the Trash (`delete_path`, confirms). Deleting the
   file by hand removes the job; its data-dir runs age out.
 
-New commands (rows in `src/command_table.odin`): `job_list` (query), `job_run_now`, `job_stop`,
+New commands (rows in `src/core/command_table.odin`): `job_list` (query), `job_run_now`, `job_stop`,
 `jobs_pause` (anyone), `job_create` (anyone), `job_mark_read`; user-only:
 `jobs_resume`, `job_set_enabled`, `job_approve_action`, `job_revoke_action`,
 `memory_pending_decide`.
@@ -455,7 +455,7 @@ bell in the top bar) consumes. Atlas reads job state on demand, when the user as
 read-only `job_list` / `job_runs` commands (any caller; results redacted).
 
 When a run ends, the scheduler writes its record, then delivers it in one place
-(`jobs_deliver`, `src/jobs.odin`). `notify`: `always`; `attention` (`needs_you`, failures and
+(`jobs_deliver`, `src/core/jobs.odin`). `notify`: `always`; `attention` (`needs_you`, failures and
 safety stops, `folder_missing`, a changed no-agent check); `never`. `quiet`, `unchanged` and
 skipped runs are never pushed, only listed.
 

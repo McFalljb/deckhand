@@ -7,6 +7,7 @@ import "core:fmt"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(test)
 syntax_queries_compile :: proc(t: ^testing.T) {
@@ -102,17 +103,17 @@ syntax_large_parse :: proc(t: ^testing.T) {
 	tb_init(&b, sb.buf[:])
 	defer tb_destroy(&b)
 	// CPU time (this thread's: the parse runs on it): a busy machine slows it less than wall time
-	t0 := thread_cpu_now()
+	t0 := core.thread_cpu_now()
 	sx: Syntax
 	syntax_open(&sx, language_by_name("c"), &b)
 	defer syntax_close(&sx)
-	first := thread_cpu_since(t0)
+	first := core.thread_cpu_since(t0)
 	at := tb_line_start(&b, 25_000)
 	tb_insert(&b, at, "x")
 	syntax_edit(&sx, at, at, at + 1, {25_000, 0}, {25_000, 0}, {25_000, 1})
-	t1 := thread_cpu_now()
+	t1 := core.thread_cpu_now()
 	syntax_reparse(&sx, &b)
-	again := thread_cpu_since(t1)
+	again := core.thread_cpu_since(t1)
 	fmt.printf("syntax: 50k-line C file parsed in %v, reparsed after one edit in %v\n", first, again)
-	perf_expect(t, "syntax_large_parse: incremental reparse of a 50k-line C file", again, 50 * time.Millisecond)
+	core.perf_expect(t, "syntax_large_parse: incremental reparse of a 50k-line C file", again, 50 * time.Millisecond)
 }

@@ -12,32 +12,33 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(private = "file")
-R2_UI :: Caller{kind = .UI}
+R2_UI :: core.Caller{kind = .UI}
 @(private = "file")
-R2_SCRIPT :: Caller{kind = .Script}
+R2_SCRIPT :: core.Caller{kind = .Script}
 @(private = "file")
-R2_CONTROL :: Caller{kind = .Control}
+R2_CONTROL :: core.Caller{kind = .Control}
 
 @(private = "file")
 r2_reset :: proc() -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}}
-	persist = {}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}}
+	core.persist = {}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	wd, _ := os.get_working_directory(context.temp_allocator)
 	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
-	claude_found = .Yes
+	core.claude_found = .Yes
 	return runtime.heap_allocator()
 }
 
@@ -53,7 +54,7 @@ r2_dir :: proc(tag: string) -> string {
 @(private = "file")
 r2_claude_tabs :: proc(id: string) -> int {
 	n := 0
-	for s in state.open_sessions do for tab in s.tabs do if ct, is := tab.kind.(Claude_Tab); is && ct.session_id == id do n += 1
+	for s in state.open_sessions do for tab in s.tabs do if ct, is := tab.kind.(core.Claude_Tab); is && ct.session_id == id do n += 1
 	return n
 }
 
@@ -63,20 +64,20 @@ r2_claude_tabs :: proc(id: string) -> int {
 R2_A :: "b2b2b2b2-0000-4000-8000-000000000001"
 
 @(private = "file")
-r2_restored :: proc(t: ^testing.T, tag: string) -> (a, b: ^Open_Session, dir, log: string) {
+r2_restored :: proc(t: ^testing.T, tag: string) -> (a, b: ^core.Open_Session, dir, log: string) {
 	context.allocator = r2_reset()
 	dir = r2_dir(tag)
-	pid := run_command(Add_Project{cwd = dir}, R2_UI).created_id
-	sa := run_command(New_Claude_Session{project_id = pid}, R2_UI).created_id
-	run_command(Claude_Session_Report{tab_id = find_session(sa).tabs[0].id, session_id = R2_A}, R2_SCRIPT)
-	sb := run_command(New_Claude_Session{project_id = pid}, R2_UI).created_id
-	run_command(Claude_Session_Report{tab_id = find_session(sb).tabs[0].id, session_id = "b2b2b2b2-0000-4000-8000-000000000002"}, R2_SCRIPT)
-	text := strings.clone(workspace_json())
+	pid := core.run_command(core.Add_Project{cwd = dir}, R2_UI).created_id
+	sa := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(sa).tabs[0].id, session_id = R2_A}, R2_SCRIPT)
+	sb := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(sb).tabs[0].id, session_id = "b2b2b2b2-0000-4000-8000-000000000002"}, R2_SCRIPT)
+	text := strings.clone(core.workspace_json())
 	context.allocator = r2_reset()
 	log = fmt.tprintf("%s/argv.log", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$@" >> %s; exec sleep 30`, log))
-	rescan_now()
-	testing.expect_value(t, workspace_restore(text), "")
+	core.rescan_now()
+	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, len(state.open_sessions), 2)
 	if len(state.open_sessions) < 2 do return
 	a, b = &state.open_sessions[0], &state.open_sessions[1]
@@ -93,8 +94,8 @@ r2_a_ran :: proc(log: string) -> bool {
 }
 
 @(private = "file")
-r2_claude_status :: proc(s: ^Open_Session) -> Tab_Status {
-	for tab in s.tabs do if _, is := tab.kind.(Claude_Tab); is do return tab.status
+r2_claude_status :: proc(s: ^core.Open_Session) -> core.Tab_Status {
+	for tab in s.tabs do if _, is := tab.kind.(core.Claude_Tab); is do return tab.status
 	return .Exited
 }
 
@@ -106,9 +107,9 @@ r2_agent_shell_tab :: proc(t: ^testing.T) {
 	{
 		a, _, _, log := r2_restored(t, "shell")
 		if a == nil do return
-		r := run_command(New_Shell_Tab{session = a.id}, R2_CONTROL)
+		r := core.run_command(core.New_Shell_Tab{session = a.id}, R2_CONTROL)
 		testing.expect(t, r.ok, r.error)
-		testing.expect_value(t, r2_claude_status(a), Tab_Status.Not_Started)
+		testing.expect_value(t, r2_claude_status(a), core.Tab_Status.Not_Started)
 		testing.expect(t, !r2_a_ran(log), "new_shell_tab: claude never ran")
 	}
 }
@@ -121,9 +122,9 @@ r2_agent_open_file :: proc(t: ^testing.T) {
 		if a == nil do return
 		f := fmt.tprintf("%s/notes.txt", dir)
 		_ = os.write_entire_file(f, transmute([]u8)string("hi\n"))
-		r := run_command(Open_File{path = f, session = a.id}, R2_CONTROL)
+		r := core.run_command(core.Open_File{path = f, session = a.id}, R2_CONTROL)
 		testing.expect(t, r.ok, r.error)
-		testing.expect_value(t, r2_claude_status(a), Tab_Status.Not_Started)
+		testing.expect_value(t, r2_claude_status(a), core.Tab_Status.Not_Started)
 		testing.expect(t, !r2_a_ran(log), "open_file: claude never ran")
 	}
 }
@@ -134,16 +135,16 @@ r2_agent_close_session :: proc(t: ^testing.T) {
 	{
 		a, b, _, log := r2_restored(t, "close")
 		if a == nil do return
-		r := run_command(Close_Session{session = b.id}, R2_CONTROL)
-		if !r.ok && r.confirm_token != "" do r = run_command(Close_Session{session = b.id, confirm = r.confirm_token}, R2_CONTROL)
+		r := core.run_command(core.Close_Session{session = b.id}, R2_CONTROL)
+		if !r.ok && r.confirm_token != "" do r = core.run_command(core.Close_Session{session = b.id, confirm = r.confirm_token}, R2_CONTROL)
 		testing.expect(t, r.ok, r.error)
 		testing.expect_value(t, len(state.open_sessions), 1)
 		a = &state.open_sessions[0]
-		testing.expect_value(t, r2_claude_status(a), Tab_Status.Not_Started)
+		testing.expect_value(t, r2_claude_status(a), core.Tab_Status.Not_Started)
 		testing.expect(t, !r2_a_ran(log), "close_session: claude never ran")
 		// the user's
-		run_command(Focus_Session{session = a.id}, R2_UI)
-		testing.expect_value(t, r2_claude_status(a), Tab_Status.Running)
+		core.run_command(core.Focus_Session{session = a.id}, R2_UI)
+		testing.expect_value(t, r2_claude_status(a), core.Tab_Status.Running)
 	}
 }
 
@@ -155,39 +156,39 @@ r2_agent_close_session :: proc(t: ^testing.T) {
 r2_chat_claude_restored :: proc(t: ^testing.T) {
 	context.allocator = r2_reset()
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
-	old_root := home_root
+	old_root := core.home_root
 	defer {
 		os.set_env("HOME", old_home)
-		home_root = old_root
-		claude_cli_override = ""
+		core.home_root = old_root
+		core.claude_cli_override = ""
 	}
-	home_root = r2_dir("chat-data")
+	core.home_root = r2_dir("chat-data")
 	os.set_env("HOME", r2_dir("chat-home"))
 	dir := r2_dir("chat-mark")
 	log := fmt.tprintf("%s/argv", dir)
-	claude_cli_override = fmt.tprintf("%s/deckhand-cli", dir)
+	core.claude_cli_override = fmt.tprintf("%s/deckhand-cli", dir)
 	os.set_env("DECKHAND_CLAUDE_CMD", fmt.tprintf(`printf '%%s\n' "$*" >> %s; exec sleep 30`, log))
-	rescan_now()
-	c := chats_project()
+	core.rescan_now()
+	c := core.chats_project()
 	if c == nil {testing.fail(t);return}
 	os.make_directory_all(c.cwd)
-	run_command(Set_Chats_Readonly{on = true}, R2_UI)
+	core.run_command(core.Set_Chats_Readonly{on = true}, R2_UI)
 	sid1 := "c3c3c3c3-0000-4000-8000-000000000001"
 	sid2 := "c3c3c3c3-0000-4000-8000-000000000002"
 	text := fmt.tprintf(`{{"v":1,"open_sessions":[{{"pi_session_id":"chat-pi-1","cwd":%q,"session_dir":"","project":%q,"chat":true,"tabs":[{{"kind":"pi"}},{{"kind":"claude","claude_session_id":%q,"cwd":%q,"args":["--dangerously-skip-permissions"]}}],"active_tab":1}},{{"agent":"claude","claude_session_id":%q,"pi_session_id":"","cwd":%q,"session_dir":"","project":%q,"chat":true,"tabs":[{{"kind":"claude","claude_session_id":%q,"cwd":%q}}],"active_tab":0}}],"current_session":0,
 "claude_sessions":[{{"id":%q,"cwd":%q,"project":%q,"title":"in a chat","used":1700000000}}]}}`, c.cwd, c.cwd, sid1, c.cwd, sid2, c.cwd, c.cwd, sid2, c.cwd, sid1, c.cwd, c.cwd)
-	testing.expect_value(t, workspace_restore(text), "")
+	testing.expect_value(t, core.workspace_restore(text), "")
 	testing.expect_value(t, r2_claude_tabs(sid1), 1)
 	testing.expect_value(t, r2_claude_tabs(sid2), 1)
 	claude_chat := false
-	for &s in state.open_sessions do if s.agent == .Claude && open_session_is_chat(&s) do claude_chat = true
+	for &s in state.open_sessions do if s.agent == .Claude && core.open_session_is_chat(&s) do claude_chat = true
 	testing.expect(t, claude_chat, "the Claude-only chat is back, in Chats")
 	// an agent's focus: nothing starts
-	for &s in state.open_sessions do run_command(Focus_Session{session = s.id}, R2_CONTROL)
+	for &s in state.open_sessions do core.run_command(core.Focus_Session{session = s.id}, R2_CONTROL)
 	time.sleep(100 * time.Millisecond)
 	testing.expect(t, !os.exists(log), "an agent never starts them")
 	// the user's: read-only, the saved bypass left out
-	for &s in state.open_sessions do run_command(Focus_Session{session = s.id, reopen = true}, R2_UI)
+	for &s in state.open_sessions do core.run_command(core.Focus_Session{session = s.id, reopen = true}, R2_UI)
 	data := ""
 	for _ in 0 ..< 200 {
 		if d, err := os.read_entire_file(log, context.temp_allocator); err == nil && strings.count(string(d), "\n") >= 1 {data = string(d);break}
@@ -217,32 +218,32 @@ r2_new_tab_resume_checked :: proc(t: ^testing.T) {
 	P := "r2pi-1"
 	_ = os.write_entire_file(fmt.tprintf("%s/2026-10-30T10-00-00-000Z_%s.jsonl", store, P), transmute([]u8)fmt.tprintf(`{{"type":"session","version":3,"id":"%s","cwd":"%s"}}`+"\n", P, dir))
 	os.set_env("HOME", home)
-	rescan_now()
+	core.rescan_now()
 	pid: u64
 	for p in state.projects do if p.cwd == dir do pid = p.id
 	testing.expect(t, pid != 0)
 	X := "d2d2d2d2-0000-4000-8000-000000000001"
-	a := run_command(New_Chat{project_id = pid}, R2_UI).created_id
-	xt := run_command(New_Claude_Tab{session = a}, R2_UI).created_id
-	run_command(Claude_Session_Report{tab_id = xt, session_id = X}, R2_SCRIPT)
-	run_command(Tab_Exited{tab_id = xt, exit = {known = true, code = 0}}, {kind = .Internal})
-	b := run_command(New_Chat{project_id = pid}, R2_UI).created_id
-	r := run_command(New_Claude_Tab{session = b, resume = X}, R2_UI)
+	a := core.run_command(core.New_Chat{project_id = pid}, R2_UI).created_id
+	xt := core.run_command(core.New_Claude_Tab{session = a}, R2_UI).created_id
+	core.run_command(core.Claude_Session_Report{tab_id = xt, session_id = X}, R2_SCRIPT)
+	core.run_command(core.Tab_Exited{tab_id = xt, exit = {known = true, code = 0}}, {kind = .Internal})
+	b := core.run_command(core.New_Chat{project_id = pid}, R2_UI).created_id
+	r := core.run_command(core.New_Claude_Tab{session = b, resume = X}, R2_UI)
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, r.created_id, xt)
 	testing.expect_value(t, r2_claude_tabs(X), 1)
-	_, tab, _ := find_tab(xt)
+	_, tab, _ := core.find_tab(xt)
 	testing.expect(t, tab != nil && tab.status == .Running, "started again in place")
 	// a pi session's id: refused, from anyone
-	for caller in ([]Caller{R2_UI, R2_SCRIPT, R2_CONTROL}) {
-		rp := run_command(New_Claude_Tab{session = b, resume = P}, caller)
+	for caller in ([]core.Caller{R2_UI, R2_SCRIPT, R2_CONTROL}) {
+		rp := core.run_command(core.New_Claude_Tab{session = b, resume = P}, caller)
 		testing.expectf(t, !rp.ok, "%v: a pi session's id", caller.kind)
 	}
 	// another open Claude-only session's key
-	k := run_command(New_Claude_Session{project_id = pid}, R2_UI).created_id
+	k := core.run_command(core.New_Claude_Session{project_id = pid}, R2_UI).created_id
 	K := "d2d2d2d2-0000-4000-8000-000000000002"
-	run_command(Claude_Session_Report{tab_id = find_session(k).tabs[0].id, session_id = K}, R2_SCRIPT)
-	rk := run_command(New_Claude_Tab{session = b, resume = K}, R2_UI)
-	testing.expect(t, rk.ok && rk.created_id == find_session(k).tabs[0].id, "its own tab, focused")
+	core.run_command(core.Claude_Session_Report{tab_id = core.find_session(k).tabs[0].id, session_id = K}, R2_SCRIPT)
+	rk := core.run_command(core.New_Claude_Tab{session = b, resume = K}, R2_UI)
+	testing.expect(t, rk.ok && rk.created_id == core.find_session(k).tabs[0].id, "its own tab, focused")
 	testing.expect_value(t, r2_claude_tabs(K), 1)
 }

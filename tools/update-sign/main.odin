@@ -5,7 +5,7 @@ package update_sign
 //
 //   update-sign keygen FILE              a new key pair: the private key (base64 seed) into
 //                                        FILE (created 0600, never overwritten); prints only
-//                                        the public key, for src/update_key.odin
+//                                        the public key, for src/core/update_key.odin
 //   update-sign pubkey KEYFILE           the public key of the private key
 //   update-sign sign [--v3] KEYFILE VERSION ZIP CDHASH SIG
 //                                        writes SIG: the signature of ZIP's manifest
@@ -202,6 +202,6 @@ keygen :: proc(path: string) -> int {
 		return 1
 	}
 	fmt.printf("private key written to %s (0600; keep it secret, on this Mac only, with an offline backup)\n", path)
-	fmt.printf("public key (src/update_key.odin, UPDATE_PUBLIC_KEY): %s\n", pub)
+	fmt.printf("public key (src/core/update_key.odin, UPDATE_PUBLIC_KEY): %s\n", pub)
 	return 0
 }

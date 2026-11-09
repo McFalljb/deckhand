@@ -17,6 +17,7 @@ import "core:sys/posix"
 import "core:testing"
 import "core:thread"
 import "core:time"
+import "core"
 
 @(private = "file")
 trashed: [dynamic]string
@@ -34,30 +35,30 @@ setup :: proc() -> string {
 	ids := make([dynamic]u64, context.temp_allocator)
 	for id, _ in editors do append(&ids, id)
 	for id in ids do editor_drop(id)
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT}, next_id = next_id}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT}, next_id = next_id}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	made := fmt.tprintf("%s/deckhand-editor-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
-	dir := fs_real(made, context.allocator)
+	dir := core.fs_real(made, context.allocator)
 	// these tests write files and run git in dir: never anywhere else
 	cwd, _ := os.get_working_directory(context.temp_allocator)
-	ensure(strings.has_prefix(dir, "/") && strings.contains(dir, "/deckhand-editor-test-") && os.is_directory(dir) && dir != fs_real(cwd), "editor tests: no temp folder")
-	append(&state.projects, Project{id = new_id(), cwd = dir, label = "proj"})
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = dir}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
+	ensure(strings.has_prefix(dir, "/") && strings.contains(dir, "/deckhand-editor-test-") && os.is_directory(dir) && dir != core.fs_real(cwd), "editor tests: no temp folder")
+	append(&state.projects, core.Project{id = core.new_id(), cwd = dir, label = "proj"})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = dir}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	clear(&trashed)
-	fs_trash_fn = proc(path: string) -> bool {
+	core.fs_trash_fn = proc(path: string) -> bool {
 		append(&trashed, strings.clone(path, runtime.heap_allocator()))
 		to := fmt.tprintf("%s.trashed", path)
 		return os.rename(path, to) == nil
@@ -81,7 +82,7 @@ read :: proc(path: string) -> string {
 
 @(private = "file")
 open :: proc(t: ^testing.T, path: string, loc := #caller_location) -> ^Editor {
-	r := run_command(Open_File{path = path}, {kind = .Script})
+	r := core.run_command(core.Open_File{path = path}, {kind = .Script})
 	testing.expectf(t, r.ok, "open %s: %s", path, r.error, loc = loc)
 	return editor_of(r.created_id)
 }
@@ -94,13 +95,13 @@ editor_open_dedupe_and_refusals :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State outlives a test
 	dir := setup()
 	p := write(dir, "src/a.ts", "const a = 1;\n")
-	r1 := run_command(Open_File{path = "src/a.ts", line = 1, col = 7}, {kind = .Script}) // relative to the session's folder
+	r1 := core.run_command(core.Open_File{path = "src/a.ts", line = 1, col = 7}, {kind = .Script}) // relative to the session's folder
 	testing.expect(t, r1.ok, r1.error)
-	r2 := run_command(Open_File{path = p}, {kind = .Script})
+	r2 := core.run_command(core.Open_File{path = p}, {kind = .Script})
 	testing.expect_value(t, r2.created_id, r1.created_id) // the same tab, focused
-	testing.expect_value(t, len(cur().tabs), 2)
-	testing.expect_value(t, cur().active_tab, r1.created_id)
-	_, tab, _ := find_tab(r1.created_id)
+	testing.expect_value(t, len(core.cur().tabs), 2)
+	testing.expect_value(t, core.cur().active_tab, r1.created_id)
+	_, tab, _ := core.find_tab(r1.created_id)
 	testing.expect_value(t, tab.title, "a.ts")
 	e := editor_of(r1.created_id)
 	l, c := ed_line_col(e, e.cursor)
@@ -108,17 +109,17 @@ editor_open_dedupe_and_refusals :: proc(t: ^testing.T) {
 	testing.expect_value(t, c, 7)
 	testing.expect_value(t, e.sx.lang.name, "typescript")
 	// state JSON shows the tab as an editor with its path and dirty flag
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.1.kind"), "editor")
-	testing.expect_value(t, json_path(state_json(), "open_sessions.0.tabs.1.dirty"), "false")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.1.kind"), "editor")
+	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.1.dirty"), "false")
 	// refusals: missing, folder, binary
-	testing.expect_value(t, run_command(Open_File{path = "nope.txt"}, {kind = .Script}).error, "no such file")
-	testing.expect_value(t, run_command(Open_File{path = "src"}, {kind = .Script}).error, "that is a folder")
+	testing.expect_value(t, core.run_command(core.Open_File{path = "nope.txt"}, {kind = .Script}).error, "no such file")
+	testing.expect_value(t, core.run_command(core.Open_File{path = "src"}, {kind = .Script}).error, "that is a folder")
 	bin := write(dir, "b.bin", "\x7fELF\x00\x01\x02")
-	rb := run_command(Open_File{path = bin}, {kind = .Script})
+	rb := core.run_command(core.Open_File{path = bin}, {kind = .Script})
 	testing.expect(t, rb.ok)
-	testing.expect_value(t, json_path(rb.data, "refused"), "Binary file: not shown")
+	testing.expect_value(t, core.json_path(rb.data, "refused"), "Binary file: not shown")
 	// a panel caller (a pi tab) may not open files
-	testing.expect(t, !run_command(Open_File{path = p}, {kind = .Panel, tab_id = cur().tabs[0].id}).ok)
+	testing.expect(t, !core.run_command(core.Open_File{path = p}, {kind = .Panel, tab_id = core.cur().tabs[0].id}).ok)
 }
 
 @(test)
@@ -246,7 +247,7 @@ editor_save_is_atomic :: proc(t: ^testing.T) {
 	e := open(t, link)
 	ed_set_cursor(e, tb_len(&e.buf), false)
 	ed_insert(e, "echo more\n")
-	r := run_command(Save_File{e.tab_id}, {kind = .Script})
+	r := core.run_command(core.Save_File{e.tab_id}, {kind = .Script})
 	testing.expect(t, r.ok, r.error)
 	after, _ := os.stat(p, context.temp_allocator)
 	testing.expect_value(t, read(p), "#!/bin/sh\necho hi\necho more\n")
@@ -288,18 +289,18 @@ editor_follows_disk :: proc(t: ^testing.T) {
 	editor_check_disk(e)
 	testing.expect(t, e.disk_changed)
 	testing.expect_value(t, text_of(e), "mine a\nNEW\nb\nc\nd\n")
-	testing.expect_value(t, json_path(editor_state_json(e), "disk"), "changed")
+	testing.expect_value(t, core.json_path(editor_state_json(e), "disk"), "changed")
 	// saving is refused until resolved
-	testing.expect(t, !run_command(Save_File{e.tab_id}, {kind = .Script}).ok)
+	testing.expect(t, !core.run_command(core.Save_File{e.tab_id}, {kind = .Script}).ok)
 	// compare: a read-only diff tab
-	rd := run_command(Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
+	rd := core.run_command(core.Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
 	testing.expect(t, rd.ok, rd.error)
 	d := editor_of(rd.created_id)
 	testing.expect(t, d.readonly && strings.contains(text_of(d), "-theirs") && strings.contains(text_of(d), "+mine a"))
 	// reload from a script asks first (unsaved changes); the user's banner button does not
-	rr := run_command(Reload_File{tab_id = e.tab_id}, {kind = .Script})
+	rr := core.run_command(core.Reload_File{tab_id = e.tab_id}, {kind = .Script})
 	testing.expect_value(t, rr.error, "needs_confirmation")
-	testing.expect(t, run_command(Reload_File{tab_id = e.tab_id}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Reload_File{tab_id = e.tab_id}, {kind = .UI}).ok)
 	testing.expect_value(t, text_of(e), "theirs\n")
 	testing.expect(t, !editor_dirty(e) && !e.disk_changed)
 	// keep mine: the buffer stays and saving overwrites
@@ -308,15 +309,15 @@ editor_follows_disk :: proc(t: ^testing.T) {
 	write(dir, "f.txt", "again\n")
 	editor_check_disk(e)
 	testing.expect(t, e.disk_changed)
-	testing.expect(t, run_command(Keep_Buffer{e.tab_id}, {kind = .Script}).ok)
-	testing.expect(t, run_command(Save_File{e.tab_id}, {kind = .Script}).ok)
+	testing.expect(t, core.run_command(core.Keep_Buffer{e.tab_id}, {kind = .Script}).ok)
+	testing.expect(t, core.run_command(core.Save_File{e.tab_id}, {kind = .Script}).ok)
 	testing.expect_value(t, read(p), text_of(e))
 	// deleted on disk: kept, marked missing; saving writes it again
 	os.remove(p)
 	editor_check_disk(e)
 	testing.expect(t, e.missing)
-	testing.expect_value(t, json_path(editor_state_json(e), "disk"), "missing")
-	testing.expect(t, run_command(Save_File{e.tab_id}, {kind = .Script}).ok)
+	testing.expect_value(t, core.json_path(editor_state_json(e), "disk"), "missing")
+	testing.expect(t, core.run_command(core.Save_File{e.tab_id}, {kind = .Script}).ok)
 	testing.expect(t, os.exists(p) && !e.missing)
 }
 
@@ -325,16 +326,16 @@ editor_close_dirty_asks :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State outlives a test
 	dir := setup()
 	e := open(t, write(dir, "c.txt", "x"))
-	clean := run_command(Close_Tab{tab_id = e.tab_id}, {kind = .Script})
+	clean := core.run_command(core.Close_Tab{tab_id = e.tab_id}, {kind = .Script})
 	testing.expect(t, clean.ok) // nothing unsaved: closes at once
 	testing.expect(t, editor_of(clean.created_id) == nil)
 	e = open(t, write(dir, "c.txt", "x"))
 	id := e.tab_id
 	ed_insert(e, "y")
-	r := run_command(Close_Tab{tab_id = id}, {kind = .UI})
+	r := core.run_command(core.Close_Tab{tab_id = id}, {kind = .UI})
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expect(t, strings.contains(r.confirm_summary, "unsaved changes"), r.confirm_summary)
-	testing.expect(t, run_command(Close_Tab{tab_id = id, confirm = r.confirm_token}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = id, confirm = r.confirm_token}, {kind = .UI}).ok)
 	testing.expect(t, editor_of(id) == nil)
 	testing.expect_value(t, read(fmt.tprintf("%s/c.txt", dir)), "x")
 }
@@ -373,10 +374,10 @@ editor_find_replace :: proc(t: ^testing.T) {
 editor_git_gutter :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State outlives a test
 	dir := setup()
-	if _, ok := git_run(dir, "init", "-q"); !ok do return // no git here
+	if _, ok := core.git_run(dir, "init", "-q"); !ok do return // no git here
 	p := write(dir, "g.txt", "one\ntwo\nthree\nfour\n")
-	git_run(dir, "add", "g.txt")
-	git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
+	core.git_run(dir, "add", "g.txt")
+	core.git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
 	write(dir, ".gitignore", "ignored/\n")
 	write(dir, "ignored/x.txt", "x")
 	write(dir, "new.txt", "n")
@@ -393,25 +394,25 @@ editor_git_gutter :: proc(t: ^testing.T) {
 	testing.expect(t, e.git.removed[2])
 	testing.expect_value(t, e.git.counts, [3]int{1, 1, 1})
 	// list_dir: .git and ignored hidden, git codes per entry
-	run_command(List_Dir{path = "."}, {kind = .Script}) // starts git status on a worker
+	core.run_command(core.List_Dir{path = "."}, {kind = .Script}) // starts git status on a worker
 	settle(proc() -> bool {return !any_git_loading()})
-	r := run_command(List_Dir{path = "."}, {kind = .Script})
+	r := core.run_command(core.List_Dir{path = "."}, {kind = .Script})
 	testing.expect(t, !strings.contains(r.data, "git_pending"), r.data)
 	testing.expect(t, r.ok, r.error)
 	names := make(map[string]string, context.temp_allocator)
 	for i in 0 ..< 10 {
-		n := json_path(r.data, fmt.tprintf("entries.%d.name", i))
+		n := core.json_path(r.data, fmt.tprintf("entries.%d.name", i))
 		if n == "<missing>" do break
-		names[n] = json_path(r.data, fmt.tprintf("entries.%d.git", i))
+		names[n] = core.json_path(r.data, fmt.tprintf("entries.%d.git", i))
 	}
 	testing.expect(t, !(".git" in names) && !("ignored" in names), r.data)
 	testing.expect_value(t, names["new.txt"], "??")
 	testing.expect_value(t, names["g.txt"], "<missing>") // committed, saved file unchanged
 	// the diff view against HEAD
-	rd := run_command(Diff_File{e.tab_id, .Diff_Head}, {kind = .Script})
+	rd := core.run_command(core.Diff_File{e.tab_id, .Diff_Head}, {kind = .Script})
 	testing.expect(t, rd.ok && strings.contains(text_of(editor_of(rd.created_id)), "+ONE"))
 	// ⌘P's list: git's view of the project
-	files := fs_project_files(dir)
+	files := core.fs_project_files(dir)
 	testing.expect(t, len(files) == 3, fmt.tprint(files)) // .gitignore, g.txt, new.txt
 }
 
@@ -419,43 +420,43 @@ editor_git_gutter :: proc(t: ^testing.T) {
 fs_commands_inside_projects :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator() // State outlives a test
 	dir := setup()
-	r := run_command(Create_File{path = "sub/new.txt"}, {kind = .Script})
+	r := core.run_command(core.Create_File{path = "sub/new.txt"}, {kind = .Script})
 	testing.expect(t, r.ok, r.error)
 	testing.expect(t, os.exists(fmt.tprintf("%s/sub/new.txt", dir)))
-	testing.expect_value(t, run_command(Create_File{path = "sub/new.txt"}, {kind = .Script}).error, "already exists")
-	testing.expect(t, run_command(Create_Dir{path = "d1/d2"}, {kind = .Script}).ok)
+	testing.expect_value(t, core.run_command(core.Create_File{path = "sub/new.txt"}, {kind = .Script}).error, "already exists")
+	testing.expect(t, core.run_command(core.Create_Dir{path = "d1/d2"}, {kind = .Script}).ok)
 	// outside every project, the project root itself, .git: refused
-	testing.expect_value(t, run_command(Create_File{path = "/tmp/deckhand-outside.txt"}, {kind = .Script}).error, "only inside a project folder")
-	testing.expect_value(t, run_command(Delete_Path{path = dir}, {kind = .UI}).error, "not on a project folder itself")
-	testing.expect_value(t, run_command(Create_File{path = ".git/x"}, {kind = .Script}).error, "not inside .git")
-	testing.expect_value(t, run_command(Create_File{path = "../escape.txt"}, {kind = .Script}).error, "only inside a project folder")
+	testing.expect_value(t, core.run_command(core.Create_File{path = "/tmp/deckhand-outside.txt"}, {kind = .Script}).error, "only inside a project folder")
+	testing.expect_value(t, core.run_command(core.Delete_Path{path = dir}, {kind = .UI}).error, "not on a project folder itself")
+	testing.expect_value(t, core.run_command(core.Create_File{path = ".git/x"}, {kind = .Script}).error, "not inside .git")
+	testing.expect_value(t, core.run_command(core.Create_File{path = "../escape.txt"}, {kind = .Script}).error, "only inside a project folder")
 	// rename: open tabs follow
 	e := open(t, fmt.tprintf("%s/sub/new.txt", dir))
-	testing.expect(t, run_command(Rename_Path{from = "sub", to = "moved"}, {kind = .Script}).ok)
-	_, tab, _ := find_tab(e.tab_id)
-	testing.expect_value(t, tab.kind.(Editor_Tab).path, fmt.tprintf("%s/moved/new.txt", dir))
+	testing.expect(t, core.run_command(core.Rename_Path{from = "sub", to = "moved"}, {kind = .Script}).ok)
+	_, tab, _ := core.find_tab(e.tab_id)
+	testing.expect_value(t, tab.kind.(core.Editor_Tab).path, fmt.tprintf("%s/moved/new.txt", dir))
 	testing.expect_value(t, e.path, fmt.tprintf("%s/moved/new.txt", dir))
 	// delete: always confirmed (class delete); a script cannot confirm it itself
-	rs := run_command(Delete_Path{path = "moved/new.txt"}, {kind = .Script})
+	rs := core.run_command(core.Delete_Path{path = "moved/new.txt"}, {kind = .Script})
 	testing.expect_value(t, rs.error, "needs_confirmation")
 	testing.expect(t, rs.confirm_by_user)
 	testing.expect(t, os.exists(fmt.tprintf("%s/moved/new.txt", dir)))
 	testing.expect_value(t, len(state.pending_confirmations), 1)
-	testing.expect_value(t, state.pending_confirmations[0].class, Command_Class.Delete)
+	testing.expect_value(t, state.pending_confirmations[0].class, core.Command_Class.Delete)
 	// the user confirms in the UI -> moved to the Trash
 	tok := state.pending_confirmations[0].token
-	testing.expect(t, run_command(Delete_Path{path = "moved/new.txt", confirm = tok}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Delete_Path{path = "moved/new.txt", confirm = tok}, {kind = .UI}).ok)
 	testing.expect_value(t, len(trashed), 1)
 	testing.expect(t, !os.exists(fmt.tprintf("%s/moved/new.txt", dir)))
 	editor_check_disk(e)
 	testing.expect(t, e.missing)
 	// reveal in Finder: remembered, never opened from tests
-	testing.expect(t, run_command(Reveal_In_Finder{path = "d1"}, {kind = .Script}).ok)
-	testing.expect_value(t, fs_model.revealed, fmt.tprintf("%s/d1", dir))
+	testing.expect(t, core.run_command(core.Reveal_In_Finder{path = "d1"}, {kind = .Script}).ok)
+	testing.expect_value(t, core.fs_model.revealed, fmt.tprintf("%s/d1", dir))
 	// editor_state over the wire
-	st := run_command(Editor_State{e.tab_id}, {kind = .Control})
-	testing.expect_value(t, json_path(st.data, "cursor.line"), "1")
-	testing.expect_value(t, json_path(st.data, "language"), "plain")
+	st := core.run_command(core.Editor_State{e.tab_id}, {kind = .Control})
+	testing.expect_value(t, core.json_path(st.data, "cursor.line"), "1")
+	testing.expect_value(t, core.json_path(st.data, "language"), "plain")
 }
 
 @(test)
@@ -477,7 +478,7 @@ editor_buttons_and_menu :: proc(t: ^testing.T) {
 	dir := setup()
 	e := open(t, write(dir, "m.c", "int x;\n"))
 	labels :: proc(id: u64) -> string {
-		items := make([dynamic]Menu_Item, context.temp_allocator)
+		items := make([dynamic]core.Menu_Item, context.temp_allocator)
 		editor_menu_items(id, &items)
 		b := strings.builder_make(context.temp_allocator)
 		for it in items do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
@@ -498,7 +499,7 @@ editor_buttons_and_menu :: proc(t: ^testing.T) {
 	time.sleep(10 * time.Millisecond)
 	write(dir, "m.c", "long x;\n")
 	editor_check_disk(e)
-	rd := run_command(Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
+	rd := core.run_command(core.Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
 	ld := labels(rd.created_id)
 	testing.expect(t, !strings.contains(ld, "Cut|") && !strings.contains(ld, "Paste|") && strings.contains(ld, "Copy|"), ld)
 }
@@ -507,7 +508,7 @@ editor_buttons_and_menu :: proc(t: ^testing.T) {
 @(private = "file")
 settle :: proc(done: proc() -> bool) {
 	for _ in 0 ..< 500 {
-		inbox_drain()
+		core.inbox_drain()
 		if done() do return
 		time.sleep(10 * time.Millisecond)
 	}
@@ -516,7 +517,7 @@ settle :: proc(done: proc() -> bool) {
 @(private = "file")
 any_git_loading :: proc() -> bool {
 	for _, e in editors do if e.git.loading do return true
-	for s in fs_model.status do if s.loading do return true
+	for s in core.fs_model.status do if s.loading do return true
 	return false
 }
 
@@ -524,15 +525,15 @@ any_git_loading :: proc() -> bool {
 
 // A second project with an open session (not current); returns its folder and session.
 @(private = "file")
-second_session :: proc() -> (dir: string, s: ^Open_Session) {
+second_session :: proc() -> (dir: string, s: ^core.Open_Session) {
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
 	if tmp == "" do tmp = "/tmp"
 	made := fmt.tprintf("%s/deckhand-editor-test-b-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(made)
-	dir = fs_real(made, context.allocator)
-	append(&state.projects, Project{id = new_id(), cwd = dir, label = "projb"})
-	ns := Open_Session{id = new_id(), pi_session_id = strings.clone("s-2"), project_id = state.projects[len(state.projects) - 1].id, cwd = dir}
-	append(&ns.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
+	dir = core.fs_real(made, context.allocator)
+	append(&state.projects, core.Project{id = core.new_id(), cwd = dir, label = "projb"})
+	ns := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-2"), project_id = state.projects[len(state.projects) - 1].id, cwd = dir}
+	append(&ns.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
 	ns.active_tab = ns.tabs[0].id
 	append(&state.open_sessions, ns)
 	return dir, &state.open_sessions[len(state.open_sessions) - 1]
@@ -545,15 +546,15 @@ review_delete_parks_the_resolved_path :: proc(t: ^testing.T) {
 	b, sb := second_session()
 	write(a, "x.txt", "a")
 	write(b, "x.txt", "b")
-	r := run_command(Delete_Path{path = "x.txt"}, {kind = .Script}) // relative to session A (current)
+	r := core.run_command(core.Delete_Path{path = "x.txt"}, {kind = .Script}) // relative to session A (current)
 	testing.expect_value(t, r.error, "needs_confirmation")
 	testing.expect(t, strings.contains(r.confirm_summary, fmt.tprintf("%s/x.txt", a)), r.confirm_summary)
 	// the user switches to session B, then confirms the bar
 	state.current_session = sb.id
 	p := state.pending_confirmations[0]
-	parked := p.command.(Delete_Path)
+	parked := p.command.(core.Delete_Path)
 	testing.expect_value(t, parked.path, fmt.tprintf("%s/x.txt", a))
-	testing.expect(t, run_command(Delete_Path{path = parked.path, confirm = p.token}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Delete_Path{path = parked.path, confirm = p.token}, {kind = .UI}).ok)
 	testing.expect(t, !os.exists(fmt.tprintf("%s/x.txt", a)), "A's file trashed")
 	testing.expect(t, os.exists(fmt.tprintf("%s/x.txt", b)), "B's file kept")
 }
@@ -562,36 +563,36 @@ review_delete_parks_the_resolved_path :: proc(t: ^testing.T) {
 review_paths_resolve_against_the_callers_session :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	a := setup()
-	sa := cur()
+	sa := core.cur()
 	atab := sa.tabs[0].id
 	b, sb := second_session()
 	write(a, "f.txt", "in a")
 	write(b, "f.txt", "in b")
 	state.current_session = sb.id // the user looks at B
-	ctl := Caller{kind = .Control, tab_id = atab} // bound to session A's pi tab
-	r := run_command(Open_File{path = "f.txt"}, ctl)
+	ctl := core.Caller{kind = .Control, tab_id = atab} // bound to session A's pi tab
+	r := core.run_command(core.Open_File{path = "f.txt"}, ctl)
 	testing.expect(t, r.ok, r.error)
 	e := editor_of(r.created_id)
 	testing.expect(t, e != nil && e.path == fmt.tprintf("%s/f.txt", a), e != nil ? e.path : "nil")
-	s, _, _ := find_tab(r.created_id)
+	s, _, _ := core.find_tab(r.created_id)
 	testing.expect(t, s != nil && s.id == sa.id, "opened in the caller's own session")
 	// inside its own project: no confirmation
-	testing.expect(t, run_command(Create_File{path = "new.txt"}, ctl).ok)
+	testing.expect(t, core.run_command(core.Create_File{path = "new.txt"}, ctl).ok)
 	testing.expect(t, os.exists(fmt.tprintf("%s/new.txt", a)))
 	// another known project: confirmation (class fs_write), the absolute path parked
-	rc := run_command(Create_File{path = fmt.tprintf("%s/other.txt", b)}, ctl)
+	rc := core.run_command(core.Create_File{path = fmt.tprintf("%s/other.txt", b)}, ctl)
 	testing.expect_value(t, rc.error, "needs_confirmation")
 	testing.expect(t, !os.exists(fmt.tprintf("%s/other.txt", b)))
-	testing.expect_value(t, state.pending_confirmations[len(state.pending_confirmations) - 1].class, Command_Class.Fs_Write)
-	rr := run_command(Rename_Path{from = fmt.tprintf("%s/f.txt", b), to = fmt.tprintf("%s/g.txt", b)}, ctl)
+	testing.expect_value(t, state.pending_confirmations[len(state.pending_confirmations) - 1].class, core.Command_Class.Fs_Write)
+	rr := core.run_command(core.Rename_Path{from = fmt.tprintf("%s/f.txt", b), to = fmt.tprintf("%s/g.txt", b)}, ctl)
 	testing.expect_value(t, rr.error, "needs_confirmation")
 	// a pi tab's bridge (panel caller) stays inside its own session's project
-	pan := Caller{kind = .Panel, tab_id = atab}
-	pr, _ := editor_apply(Create_File{path = fmt.tprintf("%s/p.txt", b)}, pan)
+	pan := core.Caller{kind = .Panel, tab_id = atab}
+	pr, _ := editor_apply(core.Create_File{path = fmt.tprintf("%s/p.txt", b)}, pan)
 	testing.expect(t, !pr.ok && !os.exists(fmt.tprintf("%s/p.txt", b)), pr.error)
 	// the user and scripts: the session on screen (opening the file showed A; back to B)
 	state.current_session = sb.id
-	testing.expect(t, run_command(Create_File{path = "user.txt"}, {kind = .Script}).ok)
+	testing.expect(t, core.run_command(core.Create_File{path = "user.txt"}, {kind = .Script}).ok)
 	testing.expect(t, os.exists(fmt.tprintf("%s/user.txt", b)))
 }
 
@@ -603,7 +604,7 @@ review_reload_into_binary_refuses :: proc(t: ^testing.T) {
 	e := open(t, p)
 	// replaced by a binary file; nothing noticed it yet; the user reloads
 	write(dir, "r.txt", "\x7fELF\x00\x00\x01")
-	testing.expect(t, run_command(Reload_File{tab_id = e.tab_id}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Reload_File{tab_id = e.tab_id}, {kind = .UI}).ok)
 	testing.expect(t, e.refused != "", "shows why instead of the bytes")
 	testing.expect(t, e.readonly)
 	testing.expect(t, !strings.contains(text_of(e), "ELF"))
@@ -615,7 +616,7 @@ review_reload_into_binary_refuses :: proc(t: ^testing.T) {
 	write(dir, "s.txt", "\x00\x01\x02")
 	editor_check_disk(f)
 	testing.expect(t, f.disk_changed)
-	testing.expect(t, run_command(Reload_File{tab_id = f.tab_id}, {kind = .UI}).ok)
+	testing.expect(t, core.run_command(core.Reload_File{tab_id = f.tab_id}, {kind = .UI}).ok)
 	testing.expect(t, f.refused != "", "binary on disk: refused, not an empty clean buffer")
 }
 
@@ -628,7 +629,7 @@ review_save_never_overwrites_a_newer_write :: proc(t: ^testing.T) {
 	ed_insert(e, "mine ")
 	time.sleep(10 * time.Millisecond)
 	write(dir, "n.txt", "theirs\n") // the watcher has not told us yet
-	r := run_command(Save_File{e.tab_id}, {kind = .Script})
+	r := core.run_command(core.Save_File{e.tab_id}, {kind = .Script})
 	testing.expect(t, !r.ok, "refused")
 	testing.expect_value(t, read(p), "theirs\n")
 	testing.expect(t, e.disk_changed, "the banner shows")
@@ -653,15 +654,15 @@ review_only_regular_files :: proc(t: ^testing.T) {
 			}
 		}
 	})
-	r := run_command(Open_File{path = fifo}, {kind = .Script})
+	r := core.run_command(core.Open_File{path = fifo}, {kind = .Script})
 	thread.join(th)
 	thread.destroy(th)
 	testing.expect(t, r.ok, r.error)
 	if e := editor_of(r.created_id); e != nil do testing.expect(t, e.refused != "", "a FIFO is not opened")
-	rd := run_command(Open_File{path = "/dev/null"}, {kind = .Script})
+	rd := core.run_command(core.Open_File{path = "/dev/null"}, {kind = .Script})
 	if e := editor_of(rd.created_id); e != nil do testing.expect(t, e.refused != "", "a device is not opened")
 	// restored editor tabs on non-regular files are skipped
-	run_command(Restore_Session{project_id = state.projects[0].id, pi_session_id = "s-r", tabs = {{kind = .Editor, cwd = fifo}}}, {kind = .Internal})
+	core.run_command(core.Restore_Session{project_id = state.projects[0].id, pi_session_id = "s-r", tabs = {{kind = .Editor, cwd = fifo}}}, {kind = .Internal})
 	last := state.open_sessions[len(state.open_sessions) - 1]
 	testing.expect_value(t, len(last.tabs), 1) // only the pi tab
 }
@@ -691,20 +692,20 @@ review_git_runs_bounded_and_raw :: proc(t: ^testing.T) {
 	dir := setup()
 	// a stuck command is killed at the timeout
 	k := time.tick_now()
-	_, ok := run_bounded(dir, {"sleep", "5"}, 200 * time.Millisecond)
+	_, ok := core.run_bounded(dir, {"sleep", "5"}, 200 * time.Millisecond)
 	testing.expect(t, !ok)
 	testing.expect(t, time.tick_since(k) < 2 * time.Second)
-	if _, gok := git_run(dir, "init", "-q"); !gok do return
+	if _, gok := core.git_run(dir, "init", "-q"); !gok do return
 	// textconv must not change what the gutter compares against
 	write(dir, ".gitattributes", "*.txt diff=upper\n")
-	git_run(dir, "config", "diff.upper.textconv", "tr a-z A-Z")
+	core.git_run(dir, "config", "diff.upper.textconv", "tr a-z A-Z")
 	p := write(dir, "low.txt", "abc\n")
-	git_run(dir, "add", ".")
-	git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
+	core.git_run(dir, "add", ".")
+	core.git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
 	e := open(t, p)
 	// the HEAD text arrives from a worker thread
 	for i := 0; i < 300 && !e.git.loaded; i += 1 {
-		inbox_drain()
+		core.inbox_drain()
 		time.sleep(10 * time.Millisecond)
 	}
 	testing.expect(t, e.git.loaded && e.git.tracked)
@@ -765,10 +766,10 @@ review_watch_only_projects_and_files :: proc(t: ^testing.T) {
 	os.make_directory_all(outside)
 	defer os.remove_all(outside)
 	open(t, write(outside, "loose.txt", "x"))
-	for f in watched_folders() do testing.expectf(t, !strings.has_prefix(f, fs_real(outside)), "watches %s recursively", f)
+	for f in watched_folders() do testing.expectf(t, !strings.has_prefix(f, core.fs_real(outside)), "watches %s recursively", f)
 	home := os.get_env("HOME", context.temp_allocator)
-	watch_folder(fs_real(home))
-	for f in watched_folders() do testing.expectf(t, f != fs_real(home), "watches the home folder recursively")
+	watch_folder(core.fs_real(home))
+	for f in watched_folders() do testing.expectf(t, f != core.fs_real(home), "watches the home folder recursively")
 }
 
 @(test)
@@ -780,7 +781,7 @@ review_save_refuses_read_only_files :: proc(t: ^testing.T) {
 	defer os.change_mode(p, os.perm_number(0o644))
 	e := open(t, p)
 	ed_insert(e, "x")
-	r := run_command(Save_File{e.tab_id}, {kind = .Script})
+	r := core.run_command(core.Save_File{e.tab_id}, {kind = .Script})
 	testing.expect(t, !r.ok)
 	testing.expect(t, strings.contains(r.error, "read-only"), r.error)
 	testing.expect_value(t, read(p), "keep\n")
@@ -790,10 +791,10 @@ review_save_refuses_read_only_files :: proc(t: ^testing.T) {
 
 @(private = "file")
 git_repo_with :: proc(t: ^testing.T, dir, name, text: string) -> (path: string, ok: bool) {
-	if _, gok := git_run(dir, "init", "-q"); !gok do return "", false
+	if _, gok := core.git_run(dir, "init", "-q"); !gok do return "", false
 	path = write(dir, name, text)
-	git_run(dir, "add", ".")
-	git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
+	core.git_run(dir, "add", ".")
+	core.git_run(dir, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "commit", "-qm", "x")
 	return path, true
 }
 
@@ -809,7 +810,7 @@ review2_git_results_follow_their_load :: proc(t: ^testing.T) {
 	e.git.head_stale = true
 	git_load_head(e)
 	testing.expect(t, e.git.loading)
-	testing.expect(t, run_command(Rename_Path{from = p, to = fmt.tprintf("%s/b.txt", dir)}, {kind = .Script}).ok)
+	testing.expect(t, core.run_command(core.Rename_Path{from = p, to = fmt.tprintf("%s/b.txt", dir)}, {kind = .Script}).ok)
 	settle(proc() -> bool {return !any_git_loading()})
 	testing.expect(t, !e.git.loading, "a dropped result ends the load")
 	testing.expect(t, e.git.head_stale, "and asks for another")
@@ -824,11 +825,11 @@ review2_git_results_follow_their_load :: proc(t: ^testing.T) {
 	settle(proc() -> bool {return !any_git_loading()})
 	testing.expect(t, e.git.head_stale, "a change during the load is not lost")
 	// status: a change while git status runs leaves it not ok
-	run_command(List_Dir{path = "."}, {kind = .Script})
-	fs_model_changed(fmt.tprintf("%s/b.txt", dir))
+	core.run_command(core.List_Dir{path = "."}, {kind = .Script})
+	core.fs_model_changed(fmt.tprintf("%s/b.txt", dir))
 	settle(proc() -> bool {return !any_git_loading()})
 	found := false
-	for s in fs_model.status do if s.root == fs_real(dir) {
+	for s in core.fs_model.status do if s.root == core.fs_real(dir) {
 		found = true
 		testing.expect(t, !s.ok, "a change during git status: not ok")
 	}
@@ -840,9 +841,9 @@ review2_read_errors_refuse :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := setup()
 	p := write(dir, "big.txt", strings.repeat("x", 200_000, context.temp_allocator))
-	old := disk_read_chunk
-	defer disk_read_chunk = old
-	disk_read_chunk = proc(f: ^os.File, b: []u8) -> (int, os.Error) {
+	old := core.disk_read_chunk
+	defer core.disk_read_chunk = old
+	core.disk_read_chunk = proc(f: ^os.File, b: []u8) -> (int, os.Error) {
 		@(static) calls := 0
 		calls += 1
 		if calls % 2 == 0 do return 0, .Invalid_File // the second read fails
@@ -852,15 +853,15 @@ review2_read_errors_refuse :: proc(t: ^testing.T) {
 	testing.expect(t, e.refused != "", "a failed read is not a short file")
 	testing.expect_value(t, tb_len(&e.buf), 0)
 	// reload with a failing read: never a truncated clean buffer
-	disk_read_chunk = old
+	core.disk_read_chunk = old
 	f := open(t, write(dir, "c.txt", strings.repeat("y", 200_000, context.temp_allocator)))
-	disk_read_chunk = proc(f: ^os.File, b: []u8) -> (int, os.Error) {
+	core.disk_read_chunk = proc(f: ^os.File, b: []u8) -> (int, os.Error) {
 		@(static) calls := 0
 		calls += 1
 		if calls % 2 == 0 do return 0, .Invalid_File
 		return os.read(f, b)
 	}
-	run_command(Reload_File{tab_id = f.tab_id}, {kind = .UI})
+	core.run_command(core.Reload_File{tab_id = f.tab_id}, {kind = .UI})
 	testing.expect(t, f.refused != "" || tb_len(&f.buf) == 200_000, "reload: refused or whole")
 	testing.expect(t, !(f.refused == "" && tb_len(&f.buf) < 200_000), "never truncated")
 }
@@ -869,18 +870,18 @@ review2_read_errors_refuse :: proc(t: ^testing.T) {
 review2_own_root_includes_the_session_folder :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	dir := setup()
-	s := cur()
+	s := core.cur()
 	// the session runs in a worktree outside the project folder
 	wt := fmt.tprintf("%s-wt", dir)
 	os.make_directory_all(wt)
 	defer os.remove_all(wt)
-	s.cwd = fs_real(wt, context.allocator)
-	ctl := Caller{kind = .Control, tab_id = s.tabs[0].id}
-	testing.expect(t, run_command(Create_File{path = "in-wt.txt"}, ctl).ok, "inside its own session folder: no confirmation")
+	s.cwd = core.fs_real(wt, context.allocator)
+	ctl := core.Caller{kind = .Control, tab_id = s.tabs[0].id}
+	testing.expect(t, core.run_command(core.Create_File{path = "in-wt.txt"}, ctl).ok, "inside its own session folder: no confirmation")
 	testing.expect(t, os.exists(fmt.tprintf("%s/in-wt.txt", s.cwd)))
-	pr, _ := editor_apply(Create_File{path = "p.txt"}, Caller{kind = .Panel, tab_id = s.tabs[0].id})
+	pr, _ := editor_apply(core.Create_File{path = "p.txt"}, core.Caller{kind = .Panel, tab_id = s.tabs[0].id})
 	testing.expect(t, pr.ok, pr.error)
-	testing.expect(t, run_command(Create_File{path = fmt.tprintf("%s/in-proj.txt", dir)}, ctl).ok, "the project folder too")
+	testing.expect(t, core.run_command(core.Create_File{path = fmt.tprintf("%s/in-proj.txt", dir)}, ctl).ok, "the project folder too")
 }
 
 @(test)
@@ -893,10 +894,10 @@ review2_cmd_slash_in_read_only_tabs :: proc(t: ^testing.T) {
 	write(dir, "s.c", "long x;\n")
 	ed_insert(e, "y")
 	editor_check_disk(e)
-	rd := run_command(Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
+	rd := core.run_command(core.Diff_File{e.tab_id, .Diff_Disk}, {kind = .Script})
 	testing.expect(t, rd.ok)
 	testing.expect(t, !editor_takes_cmd_slash(), "a diff view: the shortcuts sheet")
-	bin := run_command(Open_File{path = write(dir, "b.bin", "\x00\x01")}, {kind = .Script})
+	bin := core.run_command(core.Open_File{path = write(dir, "b.bin", "\x00\x01")}, {kind = .Script})
 	testing.expect(t, bin.ok)
 	testing.expect(t, !editor_takes_cmd_slash(), "a refused file: the shortcuts sheet")
 }

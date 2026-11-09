@@ -1,7 +1,7 @@
 package holder
 
 // The holder's side of its launch (docs/plans/background-core.md §6, as the S2 spike proved it).
-// The launcher (src/launchd_darwin.odin) bootstraps a launchd job whose program is
+// The launcher (src/core/launchd_darwin.odin) bootstraps a launchd job whose program is
 // `deckhand-core __detach hold-args...`:
 //
 //   __detach    the job's own process. It forks and exits; the child calls setsid and execs

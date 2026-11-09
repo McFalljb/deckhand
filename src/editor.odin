@@ -15,6 +15,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode"
 import "core:unicode/utf8"
+import "core"
 
 Edit_Kind :: enum u8 {
 	Other, // paste, cut, indent, reload: never merged
@@ -40,18 +41,10 @@ Undo_Group :: struct {
 
 UNDO_MAX :: 1000 // groups kept
 
-// What a tab shows: the file, or a read-only diff of it.
-Editor_View :: enum u8 {
-	File,
-	Diff_Disk, // buffer vs the file on disk ("Compare" on the changed-on-disk banner)
-	Diff_Head, // buffer vs git HEAD
-	Changes, // a Changes tab's diff (changes.odin)
-}
-
 Editor :: struct {
 	tab_id:      u64,
 	path:        string, // absolute (owned)
-	view:        Editor_View,
+	view:        core.Editor_View,
 	buf:         Text_Buffer,
 	cursor:      int,
 	anchor:      int, // == cursor: no selection
@@ -76,7 +69,7 @@ Editor :: struct {
 	always_readonly: bool, // never editable (a Markdown tab's source): editor_reopen keeps readonly
 	refused:     string, // not shown: why (binary, too large, unreadable)
 	// the file on disk (editor_file.odin)
-	disk:        Disk_Stamp,
+	disk:        core.Disk_Stamp,
 	disk_hash:   u64, // hash of the text on disk, as last read or written
 	disk_text:   string, // the disk version while the banner shows (Compare)
 	disk_refused: string, // the changed file cannot be shown (binary, huge, not a file): Reload says why
@@ -110,7 +103,7 @@ editor_of :: proc(tab_id: u64) -> ^Editor {return editors[tab_id] or_else nil}
 
 // The current tab's editor (nil for other tabs).
 tab_editor :: proc() -> ^Editor {
-	if tab := active_tab(); tab != nil do return editor_of(tab.id)
+	if tab := core.active_tab(); tab != nil do return editor_of(tab.id)
 	return nil
 }
 

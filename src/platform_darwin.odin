@@ -11,6 +11,7 @@ import "core:fmt"
 import "core:strings"
 import "core:sync"
 import NS "core:sys/darwin/Foundation"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 foreign import libsystem "system:System"
@@ -46,18 +47,18 @@ platform_wake :: proc() {
 
 @(private = "file")
 on_wake :: proc "c" (ctx: rawptr) {
-	context = app_context
+	context = core.app_context
 	defer free_all(context.temp_allocator)
 	sync.atomic_store(&wake_pending, false)
 	app.wakes += 1
-	if app.ready do inbox_drain()
+	if app.ready do core.inbox_drain()
 }
 
 // Runs p from the main queue: outside sokol's event and frame callbacks
 // (for modal loops such as the folder picker).
 platform_run_later :: proc(p: proc()) {
 	dispatch_async_f(&dispatch_main_q, rawptr(p), proc "c" (ctx: rawptr) {
-		context = app_context
+		context = core.app_context
 		defer free_all(context.temp_allocator)
 		(proc())(ctx)()
 	})
@@ -181,20 +182,20 @@ platform_notify :: proc(title, body: string) {
 platform_window_init :: proc() {
 	@(static) cb := Ime_Callbacks {
 		insert = proc "c" (utf8: [^]u8, n: c.int) {
-			context = app_context
+			context = core.app_context
 			ime_commit(string(utf8[:n]))
 		},
 		marked = proc "c" (utf8: [^]u8, n: c.int, caret: c.int) {
-			context = app_context
+			context = core.app_context
 			ime_set_marked(string(utf8[:n]), int(caret))
 		},
 		caret_rect = proc "c" (x, y, w, h: ^f32) {
-			context = app_context
+			context = core.app_context
 			r := ime_anchor()
 			x^, y^, w^, h^ = r[0], r[1], r[2], r[3]
 		},
 		option_composes = proc "c" () -> c.int {
-			context = app_context
+			context = core.app_context
 			return ime_option_composes() ? 1 : 0
 		},
 	}
@@ -208,11 +209,11 @@ platform_ime_cancel :: proc() {dh_mac_ime_cancel()}
 platform_system_light :: proc() -> bool {return dh_mac_system_light() != 0}
 platform_watch_appearance :: proc() {
 	dh_mac_watch_appearance(proc "c" (light: c.int) {
-		context = app_context
+		context = core.app_context
 		on_system_appearance(light != 0)
 	})
 }
-platform_set_appearance :: proc(mode: Appearance) {
+platform_set_appearance :: proc(mode: core.Appearance) {
 	dh_mac_set_appearance(c.int(mode == .Light ? 1 : mode == .Dark ? 2 : 0))
 }
 test_window_light :: proc() -> bool {return dh_mac_test_window_light() != 0}
@@ -276,18 +277,18 @@ foreign pdplatform {
 platform_menu_begin :: proc() {
 	@(static) cb := Menu_Callbacks {
 		fire = proc "c" (tag: c.int) {
-			context = app_context
+			context = core.app_context
 			runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD() // AppKit may call in while Odin code runs (tests: dump, keys)
 			menubar_fire(int(tag))
 		},
 		state = proc "c" (tag: c.int) -> c.int {
-			context = app_context
+			context = core.app_context
 			runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD() // AppKit may call in while Odin code runs (tests: dump, keys)
 			enabled, checked := menubar_state(int(tag))
 			return c.int((enabled ? 1 : 0) | (checked ? 2 : 0))
 		},
 		title = proc "c" (tag: c.int, buf: [^]u8, cap: c.int) -> c.int {
-			context = app_context
+			context = core.app_context
 			runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD() // AppKit may call in while Odin code runs (tests: dump, keys)
 			t := menubar_title(int(tag))
 			if len(t) >= int(cap) do return 0

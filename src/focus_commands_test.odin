@@ -5,59 +5,60 @@ package main
 
 import "core:mem"
 import "core:testing"
+import "core"
 
 @(private = "file")
 fc_redraws: int
 
 @(test)
 focus_commands_replace_direct_writes :: proc(t: ^testing.T) {
-	saved := window
-	defer window = saved
-	window = window_hooks_app()
-	window.state_changed = proc() {fc_redraws += 1}
-	inbox_drain()
-	state = State{}
+	saved := core.window
+	defer core.window = saved
+	core.window = window_hooks_app()
+	core.window.state_changed = proc() {fc_redraws += 1}
+	core.inbox_drain()
+	state^ = core.State{}
 	fc_redraws = 0
 	// focus_take: no caller rules (the job sheet's, the URL field's, an install's sheet)
-	r := run_command(Focus_Take{widget = "setup"})
+	r := core.run_command(core.Focus_Take{widget = "setup"})
 	testing.expect(t, r.ok)
 	testing.expect_value(t, state.focus_widget, "setup")
 	testing.expect_value(t, fc_redraws, 1)
-	r = run_command(Focus_Take{widget = "setup"}) // already there: nothing changes
+	r = core.run_command(core.Focus_Take{widget = "setup"}) // already there: nothing changes
 	testing.expect_value(t, fc_redraws, 1)
 	// focus_release: only the widget that has it
-	r = run_command(Focus_Release{widget = "job_sheet"})
+	r = core.run_command(core.Focus_Release{widget = "job_sheet"})
 	testing.expect(t, r.ok)
 	testing.expect_value(t, state.focus_widget, "setup")
 	testing.expect_value(t, fc_redraws, 1)
-	r = run_command(Focus_Release{widget = "setup"})
+	r = core.run_command(core.Focus_Release{widget = "setup"})
 	testing.expect_value(t, state.focus_widget, "")
 	testing.expect_value(t, fc_redraws, 2)
-	r = run_command(Focus_Release{widget = ""})
+	r = core.run_command(core.Focus_Release{widget = ""})
 	testing.expect_value(t, fc_redraws, 2)
 	// set_last_harness, and the picker's harness_used goes through it
-	r = run_command(Set_Last_Harness{harness = .Claude})
-	testing.expect_value(t, state.settings.last_harness, Harness.Claude)
+	r = core.run_command(core.Set_Last_Harness{harness = .Claude})
+	testing.expect_value(t, state.settings.last_harness, core.Harness.Claude)
 	testing.expect_value(t, fc_redraws, 3)
-	harness_used(New_Chat{})
-	testing.expect_value(t, state.settings.last_harness, Harness.Pi)
+	core.harness_used(core.New_Chat{})
+	testing.expect_value(t, state.settings.last_harness, core.Harness.Pi)
 	testing.expect_value(t, fc_redraws, 4)
 	// Deckhand's own: no socket caller may send them
-	for kind in ([]Caller_Kind{.UI, .Script, .Control, .Panel, .App}) {
-		testing.expectf(t, !run_command(Focus_Take{widget = "palette"}, {kind = kind}).ok, "%v", kind)
-		testing.expectf(t, !run_command(Focus_Release{widget = "setup"}, {kind = kind}).ok, "%v", kind)
-		testing.expectf(t, !run_command(Set_Last_Harness{harness = .Claude}, {kind = kind}).ok, "%v", kind)
+	for kind in ([]core.Caller_Kind{.UI, .Script, .Control, .Panel, .App}) {
+		testing.expectf(t, !core.run_command(core.Focus_Take{widget = "palette"}, {kind = kind}).ok, "%v", kind)
+		testing.expectf(t, !core.run_command(core.Focus_Release{widget = "setup"}, {kind = kind}).ok, "%v", kind)
+		testing.expectf(t, !core.run_command(core.Set_Last_Harness{harness = .Claude}, {kind = kind}).ok, "%v", kind)
 	}
 }
 
 // An install on the setup sheet keeps the keyboard there through focus_take.
 @(test)
 focus_install_keeps_the_setup_sheet :: proc(t: ^testing.T) {
-	inbox_drain()
-	state = State{}
-	old := harness_run.status
-	defer harness_run.status = old
-	harness_run.status = .Running
+	core.inbox_drain()
+	state^ = core.State{}
+	old := core.harness_run.status
+	defer core.harness_run.status = old
+	core.harness_run.status = .Running
 	state.focus_widget = "palette"
 	harness_run_keep_sheet()
 	testing.expect_value(t, state.focus_widget, "setup")
@@ -68,17 +69,17 @@ focus_install_keeps_the_setup_sheet :: proc(t: ^testing.T) {
 // did not make (a literal, another writer's).
 @(test)
 focus_take_frees_only_its_own :: proc(t: ^testing.T) {
-	inbox_drain()
-	state = State{}
+	core.inbox_drain()
+	state^ = core.State{}
 	track: mem.Tracking_Allocator
 	mem.tracking_allocator_init(&track, context.allocator)
 	defer mem.tracking_allocator_destroy(&track)
 	context.allocator = mem.tracking_allocator(&track)
 	state.focus_widget = "palette" // a literal: left alone
-	run_command(Focus_Take{widget = "setup"})
-	run_command(Focus_Take{widget = "browser_url"})
+	core.run_command(core.Focus_Take{widget = "setup"})
+	core.run_command(core.Focus_Take{widget = "browser_url"})
 	testing.expect_value(t, state.focus_widget, "browser_url")
-	run_command(Focus_Release{widget = "browser_url"})
+	core.run_command(core.Focus_Release{widget = "browser_url"})
 	testing.expect_value(t, state.focus_widget, "")
 	n := 0
 	for _, e in track.allocation_map do if e.size == len("setup") || e.size == len("browser_url") do n += 1

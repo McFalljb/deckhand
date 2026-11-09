@@ -7,15 +7,16 @@ package main
 // page. The core asks the window about its buffers (unsaved changes) through the queries here.
 
 import "core:strings"
+import "core"
 
 // window.view_open: the tab's view, unless it has one, then line or anchor (tab_view_goto).
-tab_view_open :: proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
+tab_view_open :: proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
 	#partial switch k in kind {
-	case Editor_Tab:
+	case core.Editor_Tab:
 		if editor_of(tab_id) == nil do editor_new(tab_id, k.path)
-	case Markdown_Tab:
+	case core.Markdown_Tab:
 		if md_view_of(tab_id) == nil do md_view_new(tab_id, k.path)
-	case Changes_Tab:
+	case core.Changes_Tab:
 		if editor_of(tab_id) != nil do break
 		e := new(Editor)
 		e.tab_id, e.view, e.readonly, e.goal_col = tab_id, .Changes, true, -1
@@ -23,7 +24,7 @@ tab_view_open :: proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
 		e.eol, e.indent_w = "\n", 4
 		tb_init(&e.buf, nil)
 		editors[tab_id] = e
-	case Browser_Tab:
+	case core.Browser_Tab:
 		browser_restore(tab_id, k.url) // browser_nav.odin
 	}
 	view_goto(tab_id, kind, line, anchor) // the record may not be in its session yet (show_file)
@@ -32,13 +33,13 @@ tab_view_open :: proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
 // window.view_goto: a Markdown view scrolls to the heading (anchor), else to the source line; an
 // editor goes to the line (column 1). 0 and "": stays.
 tab_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
-	if _, tab, _ := find_tab(tab_id); tab != nil do view_goto(tab_id, tab.kind, line, anchor)
+	if _, tab, _ := core.find_tab(tab_id); tab != nil do view_goto(tab_id, tab.kind, line, anchor)
 }
 
 @(private = "file")
-view_goto :: proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
+view_goto :: proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
 	#partial switch _ in kind {
-	case Markdown_Tab:
+	case core.Markdown_Tab:
 		v := md_view_of(tab_id)
 		if v == nil do return
 		if anchor != "" {
@@ -47,7 +48,7 @@ view_goto :: proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
 		} else if line > 0 {
 			v.want_line = line
 		}
-	case Editor_Tab:
+	case core.Editor_Tab:
 		if e := editor_of(tab_id); e != nil && line > 0 do ed_goto(e, line, 1)
 	}
 }
@@ -72,7 +73,7 @@ tab_view_moved :: proc(tab_id: u64, path: string) {
 
 // window.files_deleted: the buffers of files under `under` look at the disk again.
 tab_views_files_deleted :: proc(under: string) {
-	for _, ed in editors do if within(fs_real(ed.path), under) do editor_check_disk(ed)
+	for _, ed in editors do if core.within(core.fs_real(ed.path), under) do editor_check_disk(ed)
 }
 
 // window.changes_diff: the Changes tab's diff editor shows text, or why there is none (message;
@@ -101,7 +102,7 @@ tab_view_changes_rewind :: proc(tab_id: u64) {
 tab_views_unsaved :: proc(under: string) -> int {
 	if under == "" do return editors_unsaved()
 	n := 0
-	for _, ed in editors do if ed.path != "" && wt_within(fs_real(ed.path), under) && editor_dirty(ed) do n += 1
+	for _, ed in editors do if ed.path != "" && core.wt_within(core.fs_real(ed.path), under) && editor_dirty(ed) do n += 1
 	return n
 }
 

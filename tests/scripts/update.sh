@@ -1,5 +1,5 @@
 #!/bin/sh
-# Deckhand's own updates (src/update.odin) in test mode, against local files only (file://,
+# Deckhand's own updates (src/core/update.odin) in test mode, against local files only (file://,
 # never GitHub): a fake installed Deckhand.app 0.1.0 in build/update/install (NOT
 # /Applications), a "latest release" JSON and its assets made here: ad-hoc-signed fake
 # bundles, zipped with ditto, their .sha256, and .sig files signed with the THROWAWAY test
@@ -122,7 +122,7 @@ if [ -n "${UPDATE_RELEASE_SIGN:-}" ]; then
 fi
 grep -q "update relaunch: $W/install/Deckhand.app" "$W/run1.log" || { echo "the relaunch was not logged"; fail=1; }
 # the relaunched app can start: nothing the old one started (its pi, the relaunch's sh) holds its
-# instance lock (src/instance.odin, close-on-exec); run 2 below starts on the same data dir
+# instance lock (src/core/instance.odin, close-on-exec); run 2 below starts on the same data dir
 holders=$(lsof -t "$W/data/instance.lock" 2>/dev/null || true)
 [ -z "$holders" ] || { echo "the instance lock is still held after the update quit: $holders"; fail=1; }
 ls -a "$W/install" | grep -q '^\.deckhand-update-' && { echo "a staged bundle was left behind"; fail=1; }

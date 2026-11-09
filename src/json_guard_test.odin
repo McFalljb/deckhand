@@ -14,6 +14,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 import jg "jsonguard"
 
 // Runs body in a forked child. ok: the child returned normally (exit 0);
@@ -107,17 +108,17 @@ json_guard_json5_desyncs_are_refused :: proc(t: ^testing.T) {
 @(test)
 json_guard_parse_request_survives_hostile_lines :: proc(t: ^testing.T) {
 	ok, why := survives(proc() {
-		_, err := parse_request(hostile_deep_array(), context.temp_allocator)
+		_, err := core.parse_request(hostile_deep_array(), context.temp_allocator)
 		if err == "" do posix._exit(3)
 	})
 	testing.expectf(t, ok, "deep array through parse_request: %s", why)
 	ok, why = survives(proc() {
-		_, err := parse_request(hostile_deep_object(), context.temp_allocator)
+		_, err := core.parse_request(hostile_deep_object(), context.temp_allocator)
 		if err == "" do posix._exit(3)
 	})
 	testing.expectf(t, ok, "deep object through parse_request: %s", why)
 	ok, why = survives(proc() {
-		_, err := parse_request(hostile_hello_bad_utf8(), context.temp_allocator)
+		_, err := core.parse_request(hostile_hello_bad_utf8(), context.temp_allocator)
 		if err == "" do posix._exit(3)
 	})
 	testing.expectf(t, ok, "invalid UTF-8 through parse_request: %s", why)
@@ -132,24 +133,24 @@ json_guard_socket_survives_hostile_hello :: proc(t: ^testing.T) {
 		ok, why := survives(proc() {
 			dir := fmt.aprintf("%s/pd-jg-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
 			os.set_env("DECKHAND_RUNTIME_DIR", dir)
-			rdir, rok := sock_runtime_dir(context.temp_allocator)
-			if !rok || !socket_start(rdir) do posix._exit(4)
-			fd, cok := sock_connect(socket_path())
+			rdir, rok := core.sock_runtime_dir(context.temp_allocator)
+			if !rok || !core.socket_start(rdir) do posix._exit(4)
+			fd, cok := core.sock_connect(core.socket_path())
 			if !cok do posix._exit(5)
-			sock_write_all(fd, transmute([]u8)strings.concatenate({hostile_line, "\n"}, context.temp_allocator))
+			core.sock_write_all(fd, transmute([]u8)strings.concatenate({hostile_line, "\n"}, context.temp_allocator))
 			buf: [dynamic]u8
 			start := time.tick_now()
 			for strings.index_byte(string(buf[:]), '\n') < 0 {
 				if time.tick_since(start) > 5 * time.Second do posix._exit(6)
-				if sock_wait_readable(fd, 20) {
+				if core.sock_wait_readable(fd, 20) {
 					chunk: [4096]u8
-					n := sock_read(fd, chunk[:])
+					n := core.sock_read(fd, chunk[:])
 					if n <= 0 do posix._exit(7)
 					append(&buf, ..chunk[:n])
 				}
 			}
 			reply := string(buf[:strings.index_byte(string(buf[:]), '\n')])
-			if json_path(reply, "result.ok") != "false" do posix._exit(8)
+			if core.json_path(reply, "result.ok") != "false" do posix._exit(8)
 		})
 		testing.expectf(t, ok, "hostile hello %d through the control socket: %s", i, why)
 	}
@@ -177,53 +178,53 @@ jg_tmp_file :: proc(name, text: string) -> string {
 
 @(private = "file")
 SITES := [?]Site {
-	{"parse_request", proc(s: string) -> bool {_, err := parse_request(s, context.temp_allocator); return err != ""}},
-	{"parse_command", proc(s: string) -> bool {_, err := parse_command(s, context.temp_allocator); return err != ""}},
-	{"state_from_json", proc(s: string) -> bool {_, err := state_from_json(s, context.temp_allocator); return err != ""}},
-	{"workspace_restore", proc(s: string) -> bool {return workspace_restore(s) != ""}},
-	{"release_parse (update manifest)", proc(s: string) -> bool {_, err := release_parse(s, context.temp_allocator); return err != ""}},
-	{"app_result_of (app tab reply)", proc(s: string) -> bool {_, ok := app_result_of(s); return !ok}},
-	{"app_boxes_parse (app tab event)", proc(s: string) -> bool {_, ok := app_boxes_parse(s); return !ok}},
+	{"parse_request", proc(s: string) -> bool {_, err := core.parse_request(s, context.temp_allocator); return err != ""}},
+	{"parse_command", proc(s: string) -> bool {_, err := core.parse_command(s, context.temp_allocator); return err != ""}},
+	{"state_from_json", proc(s: string) -> bool {_, err := core.state_from_json(s, context.temp_allocator); return err != ""}},
+	{"workspace_restore", proc(s: string) -> bool {return core.workspace_restore(s) != ""}},
+	{"release_parse (update manifest)", proc(s: string) -> bool {_, err := core.release_parse(s, context.temp_allocator); return err != ""}},
+	{"app_result_of (app tab reply)", proc(s: string) -> bool {_, ok := core.app_result_of(s); return !ok}},
+	{"app_boxes_parse (app tab event)", proc(s: string) -> bool {_, ok := core.app_boxes_parse(s); return !ok}},
 	{"app_input_event_check", proc(s: string) -> bool {return app_input_event_check(s) != ""}},
-	{"json_members_raw", proc(s: string) -> bool {_, ok := json_members_raw(s); return !ok}},
-	{"json_path (ctl, scenes)", proc(s: string) -> bool {return json_path(s, "id") == "<invalid json>"}},
-	{"settings_digest (pi settings.json)", proc(s: string) -> bool {return settings_digest(jg_tmp_file("settings.json", s)) == ""}},
-	{"pkg_version (package.json)", proc(s: string) -> bool {return pkg_version(jg_tmp_file("package.json", s)) == ""}},
-	{"pkg_name (package.json)", proc(s: string) -> bool {return pkg_name(jg_tmp_file("package.json", s)) == ""}},
-	{"header_cwd (pi session header)", proc(s: string) -> bool {return header_cwd(jg_tmp_file("s.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))) == ""}},
-	{"session_facts_read (pi session header)", proc(s: string) -> bool {_, err := session_facts_read(jg_tmp_file("f.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))); return err != ""}},
+	{"json_members_raw", proc(s: string) -> bool {_, ok := core.json_members_raw(s); return !ok}},
+	{"json_path (ctl, scenes)", proc(s: string) -> bool {return core.json_path(s, "id") == "<invalid json>"}},
+	{"settings_digest (pi settings.json)", proc(s: string) -> bool {return core.settings_digest(jg_tmp_file("settings.json", s)) == ""}},
+	{"pkg_version (package.json)", proc(s: string) -> bool {return core.pkg_version(jg_tmp_file("package.json", s)) == ""}},
+	{"pkg_name (package.json)", proc(s: string) -> bool {return core.pkg_name(jg_tmp_file("package.json", s)) == ""}},
+	{"header_cwd (pi session header)", proc(s: string) -> bool {return core.header_cwd(jg_tmp_file("s.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))) == ""}},
+	{"session_facts_read (pi session header)", proc(s: string) -> bool {_, err := core.session_facts_read(jg_tmp_file("f.jsonl", strings.concatenate({s, "\n"}, context.temp_allocator))); return err != ""}},
 	{"title_scan_file (pi session lines)", proc(s: string) -> bool {
 		line := strings.concatenate({`{"type":"message","message":{"role":"user","content":`, s, "}}\n"}, context.temp_allocator)
-		sc: Title_Scan
-		title_scan_file(jg_tmp_file("t.jsonl", line), &sc, i64(len(line)))
+		sc: core.Title_Scan
+		core.title_scan_file(jg_tmp_file("t.jsonl", line), &sc, i64(len(line)))
 		return sc.first_user == ""
 	}},
 	{"update_load (update.json)", proc(s: string) -> bool {
-		home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
-		_ = os.write_entire_file(fmt.tprintf("%s/%s", update_data_dir(), UPDATE_FILE), transmute([]u8)s)
-		upd.checks_off = false
-		update_load()
-		return !upd.checks_off
+		core.home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", core.update_data_dir(), core.UPDATE_FILE), transmute([]u8)s)
+		core.upd.checks_off = false
+		core.update_load()
+		return !core.upd.checks_off
 	}},
 	{"hints_load (claude-hints.json)", proc(s: string) -> bool {
-		home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
-		_ = os.write_entire_file(fmt.tprintf("%s/%s", update_data_dir(), CLAUDE_HINTS_FILE), transmute([]u8)s)
-		claude_status_reset()
-		tab := Tab{id = 1 << 40, kind = Claude_Tab{}}
+		core.home_root = strings.trim_suffix(jg_tmp_file("x", ""), "/x")
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", core.update_data_dir(), core.CLAUDE_HINTS_FILE), transmute([]u8)s)
+		core.claude_status_reset()
+		tab := core.Tab{id = 1 << 40, kind = core.Claude_Tab{}}
 		tab.reload.version = "2.1.250" // older than CLAUDE_MIN_VERSION: the hint reads the file
-		return claude_status_message(&tab) != ""
+		return core.claude_status_message(&tab) != ""
 	}},
 	{"manifest_load (pi integration extensions.json)", proc(s: string) -> bool {
 		p := jg_tmp_file("extensions.json", s)
-		pi_integration_override = strings.trim_suffix(p, "/extensions.json")
-		pi_integration_forget()
-		return len(pi_integration_optional()) == 0
+		core.pi_integration_override = strings.trim_suffix(p, "/extensions.json")
+		core.pi_integration_forget()
+		return len(core.pi_integration_optional()) == 0
 	}},
 	{"pi_package_find (pi settings.json, JSON5)", proc(s: string) -> bool {
 		p := jg_tmp_file("settings.json", s)
-		return !pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
+		return !core.pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
 	}},
-	{"handover_parse (holder handover.json, after its MAC)", proc(s: string) -> bool {_, ok, _ := handover_parse(s); return !ok}},
+	{"handover_parse (holder handover.json, after its MAC)", proc(s: string) -> bool {_, ok, _ := core.handover_parse(s); return !ok}},
 	{"app_entries (.deckhand/apps.json)", proc(s: string) -> bool {
 		p := jg_tmp_file(".deckhand/apps.json", s)
 		return len(app_entries(strings.trim_suffix(p, "/.deckhand/apps.json"))) == 0
@@ -588,13 +589,13 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 	testing.expectf(t, len(files) > 100, "found %d .odin files under src/ and tools/", len(files))
 	// file, top-level proc, call, limit ("" = jg's default, jg.MAX_DEPTH), spec ("" = strict JSON)
 	WANT := [?]Parse_Site {
-		{"src/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
+		{"src/core/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
 		{"src/app_tab.odin", "app_input_event_check", "jg.parse_string", "", ""},
 		{"src/app_tab.odin", "app_entries", "jg.parse", "", ""},
-		{"src/app_wire.odin", "json_string_of", "jg.parse_string", "", ""},
-		{"src/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
-		{"src/app_wire.odin", "app_event_in", "json.parse_value", "parser", ""},
-		{"src/app_wire.odin", "app_boxes_parse", "jg.parse_string", "", ""},
+		{"src/core/app_wire.odin", "json_string_of", "jg.parse_string", "", ""},
+		{"src/core/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
+		{"src/core/app_wire.odin", "app_event_in", "json.parse_value", "parser", ""},
+		{"src/core/app_wire.odin", "app_boxes_parse", "jg.parse_string", "", ""},
 		{"src/browser.odin", "rlz_off", "jg.parse", "", ""},
 		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
 		{"src/browser_act.odin", "act_step", "jg.parse_string", "", ""},
@@ -608,45 +609,45 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse", "", ""},
 		{"src/browser_annotate.odin", "on_cef_devtools", "jg.parse_string", "", ""}, // a page's binding payload
-		{"src/claude_disk.odin", "found_read", "jg.parse", "", ""}, // Claude transcripts (seen 16 deep)
-		{"src/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
-		{"src/claude_status.odin", "hints_load", "jg.parse", "", ""},
-		{"src/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
-		{"src/ctl.odin", "json_path", "jg.parse_string", "", ""},
-		{"src/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
-		{"src/jobs.odin", "job_load", "jg.parse", "", ""},
-		{"src/jobs.odin", "job_load", "jg.parse", "", ""},
-		{"src/jobs.odin", "ledger_ready", "jg.parse", "", ""},
-		{"src/jobs_run.odin", "run_event", "jg.parse_string", "transcript", ""}, // pi's JSON events
-		{"src/json_read.odin", "json_members_raw", "json.make_parser", "jg.shape_ok", ""},
-		{"src/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
-		{"src/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
-		{"src/json_read.odin", "json_members_raw", "json.parse_object_key", "parser", ""},
-		{"src/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
-		{"src/json_read.odin", "json_members_raw", "json.parse_value", "parser", ""},
-		{"src/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
-		{"src/json_read.odin", "parse_command", "jg.parse_string", "", ""},
-		{"src/json_read.odin", "parse_request", "jg.parse_string", "", ""},
-		{"src/json_read.odin", "state_from_json", "jg.parse_string", "", ""},
-		{"src/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
-		{"src/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
-		{"src/reload.odin", "settings_digest", "jg.parse", "", ""},
-		{"src/reload.odin", "pkg_version", "jg.parse", "", ""},
-		{"src/reload.odin", "pkg_name", "jg.parse", "", ""},
-		{"src/reload.odin", "add_settings_paths", "jg.parse", "", ""},
-		{"src/reload.odin", "add_local", "jg.parse", "", ""},
-		{"src/session_info.odin", "session_facts_read", "jg.parse_string", "", ""},
-		{"src/sessions.odin", "header_cwd", "jg.parse", "", ""},
-		{"src/settings_files.odin", "settings_packages", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
-		{"src/snapshot.odin", "snapshot_unpack", "json.parse", "json_shape_ok", ""},
-		{"src/snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok", ""},
-		{"src/socket.odin", "app_conn_line", "json.parse_string", "json_valid", ""},
-		{"src/titles.odin", "title_line", "jg.parse", "transcript", ""},
-		{"src/update.odin", "update_load", "jg.parse", "", ""},
-		{"src/update_core.odin", "release_parse", "jg.parse_string", "", ""}, // the network
-		{"src/holder_adopt.odin", "handover_parse", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
-		{"src/holder_adopt.odin", "handover_parse", "jg.unmarshal_string", "custom", ""},
-		{"src/socket.odin", "tokens_load", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
+		{"src/core/claude_disk.odin", "found_read", "jg.parse", "", ""}, // Claude transcripts (seen 16 deep)
+		{"src/core/claude_disk.odin", "found_cwd", "jg.parse", "", ""},
+		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},
+		{"src/core/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
+		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
+		{"src/core/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
+		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},
+		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},
+		{"src/core/jobs.odin", "ledger_ready", "jg.parse", "", ""},
+		{"src/core/jobs_run.odin", "run_event", "jg.parse_string", "transcript", ""}, // pi's JSON events
+		{"src/core/json_read.odin", "json_members_raw", "json.make_parser", "jg.shape_ok", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.parse_object_key", "parser", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.expect_token", "parser", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.parse_value", "parser", ""},
+		{"src/core/json_read.odin", "json_members_raw", "json.advance_token", "parser", ""},
+		{"src/core/json_read.odin", "parse_command", "jg.parse_string", "", ""},
+		{"src/core/json_read.odin", "parse_request", "jg.parse_string", "", ""},
+		{"src/core/json_read.odin", "state_from_json", "jg.parse_string", "", ""},
+		{"src/core/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
+		{"src/core/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
+		{"src/core/reload.odin", "settings_digest", "jg.parse", "", ""},
+		{"src/core/reload.odin", "pkg_version", "jg.parse", "", ""},
+		{"src/core/reload.odin", "pkg_name", "jg.parse", "", ""},
+		{"src/core/reload.odin", "add_settings_paths", "jg.parse", "", ""},
+		{"src/core/reload.odin", "add_local", "jg.parse", "", ""},
+		{"src/core/session_info.odin", "session_facts_read", "jg.parse_string", "", ""},
+		{"src/core/sessions.odin", "header_cwd", "jg.parse", "", ""},
+		{"src/core/settings_files.odin", "settings_packages", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
+		{"src/core/snapshot.odin", "snapshot_unpack", "json.parse", "json_shape_ok", ""},
+		{"src/core/snapshot.odin", "snapshot_unpack", "json.unmarshal", "json_shape_ok", ""},
+		{"src/core/socket.odin", "app_conn_line", "json.parse_string", "json_valid", ""},
+		{"src/core/titles.odin", "title_line", "jg.parse", "transcript", ""},
+		{"src/core/update.odin", "update_load", "jg.parse", "", ""},
+		{"src/core/update_core.odin", "release_parse", "jg.parse_string", "", ""}, // the network
+		{"src/core/holder_adopt.odin", "handover_parse", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
+		{"src/core/holder_adopt.odin", "handover_parse", "jg.unmarshal_string", "custom", ""},
+		{"src/core/socket.odin", "tokens_load", "jg.parse_string", "custom", ""}, // MAC'd, then json_shape_ok's item count
 		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
 		{"src/holderwire/schema.odin", "schema_problems", "jg.parse_string", "", ""},
 		{"src/holderwire/wire.odin", "decode", "json.parse", "json_shape_ok", ""},

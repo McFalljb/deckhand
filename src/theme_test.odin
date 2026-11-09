@@ -8,20 +8,21 @@ package main
 
 import "core:fmt"
 import "core:testing"
+import "core"
 
 @(test)
 theme_contrast :: proc(t: ^testing.T) {
-	check :: proc(t: ^testing.T, what: string, fg, bg: Rgba, min: f32) {
-		r := contrast_ratio(fg, bg)
+	check :: proc(t: ^testing.T, what: string, fg, bg: core.Rgba, min: f32) {
+		r := core.contrast_ratio(fg, bg)
 		testing.expectf(t, r >= min, "%s: %.2f:1, want >= %.1f", what, r, min)
 	}
-	for look in Theme_Id do for light in ([]bool{false, true}) {
+	for look in core.Theme_Id do for light in ([]bool{false, true}) {
 		th := light ? &THEMES_LIGHT[look] : &THEMES[look]
-		tc := term_colors_of(look, light)
-		name := fmt.tprintf("%s %s", THEME_NAMES[look], light ? "light" : "dark")
+		tc := core.term_colors_of(look, light)
+		name := fmt.tprintf("%s %s", core.THEME_NAMES[look], light ? "light" : "dark")
 		surfaces := [?]struct {
 			n: string,
-			c: Rgba,
+			c: core.Rgba,
 		}{{"bg_app", th.bg_app}, {"bg_sidebar", th.bg_sidebar}, {"bg_panel", th.bg_panel}, {"bg_elevated", th.bg_elevated}, {"bg_field", th.bg_field}}
 		for s in surfaces {
 			check(t, fmt.tprintf("%s text on %s", name, s.n), th.text, s.c, 4.5)
@@ -45,6 +46,6 @@ theme_contrast :: proc(t: ^testing.T) {
 		}
 		// the chrome's centre column is the terminal's background
 		testing.expectf(t, th.bg_app == tc.bg, "%s: bg_app != term_bg", name)
-		testing.expectf(t, (contrast_ratio(tc.fg, tc.bg) > 1) && (light == (lab_of(tc.fg).l < lab_of(tc.bg).l)), "%s: variant is the wrong way round", name)
+		testing.expectf(t, (core.contrast_ratio(tc.fg, tc.bg) > 1) && (light == (core.lab_of(tc.fg).l < core.lab_of(tc.bg).l)), "%s: variant is the wrong way round", name)
 	}
 }

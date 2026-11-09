@@ -10,6 +10,7 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 @(private = "file")
@@ -18,14 +19,14 @@ reset :: proc() {
 	ids := make([dynamic]u64, context.temp_allocator)
 	for id, _ in editors do append(&ids, id)
 	for id in ids do editor_drop(id)
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State{layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true}}
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}}
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	tf_set(&palette.field, "")
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
@@ -151,25 +152,25 @@ menubar_enable_and_check_rules :: proc(t: ^testing.T) {
 	// checkmarks follow the state
 	_, c = state_of("toggle_left")
 	testing.expect(t, c)
-	run_command(Set_Layout{left_open = false})
+	core.run_command(core.Set_Layout{left_open = false})
 	_, c = state_of("toggle_left")
 	testing.expect(t, !c)
 	_, c = state_of("appearance_system")
 	testing.expect(t, c)
 	_, c = state_of("appearance_dark")
 	testing.expect(t, !c)
-	run_command(Set_Appearance{mode = .Dark})
+	core.run_command(core.Set_Appearance{mode = .Dark})
 	_, c = state_of("appearance_dark")
 	testing.expect(t, c)
 	// a text field has the keyboard: the Edit items act on it
-	run_command(Set_Focus{"palette"}, {kind = .UI})
+	core.run_command(core.Set_Focus{"palette"}, {kind = .UI})
 	for id in ([]string{"cut", "copy", "paste", "select_all"}) {
 		e, _ = state_of(id)
 		testing.expectf(t, e, "%s in the palette's field", id)
 	}
 	e, _ = state_of("undo")
 	testing.expect(t, !e, "fields have no undo")
-	run_command(Set_Focus{""}, {kind = .UI})
+	core.run_command(core.Set_Focus{""}, {kind = .UI})
 
 	// an editor: Save only with changes; undo, find
 	tmp := os.get_env("TMPDIR", context.temp_allocator)
@@ -177,15 +178,15 @@ menubar_enable_and_check_rules :: proc(t: ^testing.T) {
 	dir := fmt.tprintf("%s/deckhand-menubar-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(dir)
 	defer os.remove_all(dir)
-	append(&state.projects, Project{id = new_id(), cwd = strings.clone(dir), label = "proj"})
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = strings.clone(dir)}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
+	append(&state.projects, core.Project{id = core.new_id(), cwd = strings.clone(dir), label = "proj"})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-1"), project_id = state.projects[0].id, cwd = strings.clone(dir)}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	path := fmt.tprintf("%s/a.txt", dir)
 	_ = os.write_entire_file(path, transmute([]u8)string("hello\n"))
-	r := run_command(Open_File{path = path}, {kind = .Script})
+	r := core.run_command(core.Open_File{path = path}, {kind = .Script})
 	testing.expect(t, r.ok, r.error)
 	ed := editor_of(r.created_id)
 	if ed == nil do return
@@ -207,7 +208,7 @@ menubar_enable_and_check_rules :: proc(t: ^testing.T) {
 	testing.expect(t, !e)
 	cmd, ok := action_by_id("next_tab").make()
 	testing.expect(t, ok)
-	if ft, is := cmd.(Focus_Tab); is do testing.expect_value(t, ft.tab_id, state.open_sessions[0].tabs[0].id) // round to the pi tab
+	if ft, is := cmd.(core.Focus_Tab); is do testing.expect_value(t, ft.tab_id, state.open_sessions[0].tabs[0].id) // round to the pi tab
 	// one session: nothing to step to
 	e, _ = state_of("next_session")
 	testing.expect(t, !e)
@@ -218,25 +219,25 @@ menubar_enable_and_check_rules :: proc(t: ^testing.T) {
 menubar_terminal_text_size :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	reset()
-	testing.expect_value(t, term_text_pt(), f32(TYPE_CODE_PX))
+	testing.expect_value(t, term_text_pt(), f32(core.TYPE_CODE_PX))
 	e, _ := state_of("text_reset")
 	testing.expect(t, !e, "already the look's size")
 	action_run("text_bigger")
-	inbox_drain()
-	testing.expect_value(t, state.settings.term_text_pt, TYPE_CODE_PX + 1)
-	testing.expect_value(t, theme_font_config(theme()).mono_pt, f32(TYPE_CODE_PX + 1))
+	core.inbox_drain()
+	testing.expect_value(t, state.settings.term_text_pt, core.TYPE_CODE_PX + 1)
+	testing.expect_value(t, theme_font_config(theme()).mono_pt, f32(core.TYPE_CODE_PX + 1))
 	action_run("text_smaller")
-	inbox_drain()
+	core.inbox_drain()
 	testing.expect_value(t, state.settings.term_text_pt, 0) // back to the look's: stored as 0
-	r := run_command(Set_Terminal_Text_Size{pt = TERM_TEXT_MAX + 1})
+	r := core.run_command(core.Set_Terminal_Text_Size{pt = core.TERM_TEXT_MAX + 1})
 	testing.expect(t, !r.ok, "too big")
-	r = run_command(Set_Terminal_Text_Size{pt = TERM_TEXT_MIN})
+	r = core.run_command(core.Set_Terminal_Text_Size{pt = core.TERM_TEXT_MIN})
 	testing.expect(t, r.ok)
 	e, _ = state_of("text_smaller")
 	testing.expect(t, !e, "the smallest size")
 	e, _ = state_of("text_reset")
 	testing.expect(t, e)
-	run_command(Set_Terminal_Text_Size{pt = 0})
+	core.run_command(core.Set_Terminal_Text_Size{pt = 0})
 }
 
 // Help › Deckhand user guide: Atlas's copy of the guide, read-only, only when
@@ -250,36 +251,36 @@ menubar_user_guide_read_only :: proc(t: ^testing.T) {
 	dir := fmt.aprintf("%s/deckhand-guide-test-%d", strings.trim_right(tmp, "/"), time.now()._nsec)
 	os.make_directory_all(fmt.tprintf("%s/atlas", dir))
 	defer os.remove_all(dir)
-	was := home_root
-	home_root = dir
-	defer home_root = was
-	append(&state.projects, Project{id = new_id(), cwd = strings.clone(dir), label = "proj"})
-	s := Open_Session{id = new_id(), pi_session_id = strings.clone("s-g"), project_id = state.projects[0].id, cwd = strings.clone(dir)}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Exited})
+	was := core.home_root
+	core.home_root = dir
+	defer core.home_root = was
+	append(&state.projects, core.Project{id = core.new_id(), cwd = strings.clone(dir), label = "proj"})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = strings.clone("s-g"), project_id = state.projects[0].id, cwd = strings.clone(dir)}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Exited})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
 	e, _ := state_of("user_guide")
 	testing.expect(t, !e, "no copy of the guide yet: disabled")
-	path := agent_guide_path()
+	path := core.agent_guide_path()
 	_ = os.write_entire_file(path, transmute([]u8)string("# guide\n"))
 	e, _ = state_of("user_guide")
 	testing.expect(t, e, "the copy exists: enabled")
 	action_run("user_guide")
-	inbox_drain()
+	core.inbox_drain()
 	ed := tab_editor()
 	testing.expect(t, ed != nil && ed.readonly, "opens read-only")
 	if ed == nil do return
 	ed_insert(ed, "x")
 	testing.expect(t, !editor_dirty(ed), "no edits")
-	r := run_command(Save_File{ed.tab_id})
+	r := core.run_command(core.Save_File{ed.tab_id})
 	testing.expect(t, !r.ok, "no saves")
 	data, _ := os.read_entire_file(path, context.temp_allocator)
 	testing.expect_value(t, string(data), "# guide\n")
 	// opened another way (Files, an agent): read-only too
-	r = run_command(Close_Tab{tab_id = ed.tab_id})
+	r = core.run_command(core.Close_Tab{tab_id = ed.tab_id})
 	testing.expect(t, r.ok, r.error)
-	r = run_command(Open_File{path = path}, {kind = .Script})
+	r = core.run_command(core.Open_File{path = path}, {kind = .Script})
 	ed2 := editor_of(r.created_id)
 	testing.expect(t, ed2 != nil && ed2.readonly, "the guide copy is always read-only")
 	if ed2 != nil do editor_drop(ed2.tab_id)

@@ -1,6 +1,7 @@
 package main
 
 import "core:fmt"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -31,29 +32,29 @@ pane_drag: Pane_Drag
 
 // The pane an event at (x, y) is for: the press's pane while one is held, else the pane under
 // the point, else the focused one (keys; a point outside every pane).
-event_pane :: proc(e: ^sapp.Event) -> ^Pane {
-	s := cur()
-	if s == nil do return focused_pane()
+event_pane :: proc(e: ^sapp.Event) -> ^core.Pane {
+	s := core.cur()
+	if s == nil do return core.focused_pane()
 	#partial switch e.type {
 	case .MOUSE_DOWN, .MOUSE_UP, .MOUSE_MOVE, .MOUSE_SCROLL, .MOUSE_ENTER, .MOUSE_LEAVE:
 		if pointer_capture.pane != 0 {
-			if p := session_pane(s, pointer_capture.pane); p != nil do return p
+			if p := core.session_pane(s, pointer_capture.pane); p != nil do return p
 			pointer_capture = {} // its pane went
 		}
 		if p := pane_at(e.mouse_x, e.mouse_y); p != nil do return p
 	}
-	return focused_pane()
+	return core.focused_pane()
 }
 
 // The pane under the pointer for the hit tests (the last layout's rects), else the focused one.
-hit_pane :: proc() -> ^Pane {
+hit_pane :: proc() -> ^core.Pane {
 	if p := pane_at(app.pointer.x, app.pointer.y); p != nil do return p
-	return focused_pane()
+	return core.focused_pane()
 }
 
 // A press: records its pane (capture) and focuses it when it has not the keyboard.
 pane_press :: proc(e: ^sapp.Event) {
-	s := cur()
+	s := core.cur()
 	if s == nil || len(s.panes) <= 1 do return
 	if over_overlay() || (state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) do return
 	p := pane_at(e.mouse_x, e.mouse_y)
@@ -63,10 +64,10 @@ pane_press :: proc(e: ^sapp.Event) {
 	}
 	pointer_capture = {pane = p.id}
 	if p.id == s.focused_pane do return
-	run_command(Focus_Pane{pane = p.id}, {kind = .UI}) // now: this same click acts in it
+	core.run_command(core.Focus_Pane{pane = p.id}, {kind = .UI}) // now: this same click acts in it
 	// the click's own drag must outlive the focus change (drags_follow_focus ends the drags of
 	// tabs that left the screen; this one's did not, but the focused tab changed)
-	if tab := active_tab(); tab != nil do app.drag_tab = tab.id
+	if tab := core.active_tab(); tab != nil do app.drag_tab = tab.id
 	app.redraw = true
 }
 
@@ -83,9 +84,9 @@ pane_pointer_moved :: proc(e: ^sapp.Event) {
 	if now == pointer_pane do return
 	before := pointer_pane
 	pointer_pane = now
-	s := cur()
+	s := core.cur()
 	if before == 0 || s == nil do return
-	old := session_pane(s, before)
+	old := core.session_pane(s, before)
 	if old == nil do return
 	ids := ids_pane_begin(old)
 	defer ids_pane_end(ids)
@@ -111,7 +112,7 @@ pane_divider_hot :: proc(split: u64) -> bool {
 
 // The divider under (x, y) (its split's id; 0 = none): DIVIDER_HIT px wide across its line.
 pane_divider_at :: proc(x, y: f32) -> u64 {
-	s := cur()
+	s := core.cur()
 	if s == nil || len(s.panes) <= 1 do return 0
 	grab := px(DIVIDER_HIT) / 2
 	for n in s.nodes {
@@ -132,17 +133,17 @@ pane_divider_at :: proc(x, y: f32) -> u64 {
 pane_divider_press :: proc(split: u64, clicks: int) {
 	if clicks >= 2 {
 		pane_drag = {}
-		ui_do(Set_Split{split = split, ratio = 0.5})
+		ui_do(core.Set_Split{split = split, ratio = 0.5})
 		return
 	}
-	s := cur()
+	s := core.cur()
 	for n in s.nodes do if n.id == split do pane_drag = {split = split, ratio = n.ratio, active = true}
 }
 
 // The drag follows the pointer: the share it gives child a, kept so neither side is under its
 // panes' minimum sizes (when there is room for both).
 pane_divider_move :: proc(x, y: f32) {
-	s := cur()
+	s := core.cur()
 	if s == nil || !pane_drag.active do return
 	for n, i in s.nodes {
 		if n.leaf || n.id != pane_drag.split do continue
@@ -150,12 +151,12 @@ pane_divider_move :: proc(x, y: f32) {
 		if !d.found do return
 		b := d.boundingBox
 		across := n.dir == .Right
-		total := (across ? b.width : b.height) - px(BORDER_W)
+		total := (across ? b.width : b.height) - px(core.BORDER_W)
 		if total <= 0 do return
-		at := (across ? x - b.x : y - b.y) - px(BORDER_W) / 2
-		ma, mb := pane_split_mins(s, i, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H))
+		at := (across ? x - b.x : y - b.y) - px(core.BORDER_W) / 2
+		ma, mb := core.pane_split_mins(s, i, px(core.BORDER_W), px(core.PANE_MIN_W), px(core.PANE_MIN_H))
 		if total >= ma + mb do at = clamp(at, ma, total - mb)
-		pane_drag.ratio = clamp(at / total, RATIO_MIN, 1 - RATIO_MIN)
+		pane_drag.ratio = clamp(at / total, core.RATIO_MIN, 1 - core.RATIO_MIN)
 		app.redraw = true
 		return
 	}
@@ -164,7 +165,7 @@ pane_divider_move :: proc(x, y: f32) {
 // The drag ends: the divider's place is set (one set_split).
 pane_divider_release :: proc() {
 	if !pane_drag.active do return
-	ui_do(Set_Split{split = pane_drag.split, ratio = pane_drag.ratio})
+	ui_do(core.Set_Split{split = pane_drag.split, ratio = pane_drag.ratio})
 	pane_drag.active = false
 	app.redraw = true
 }
@@ -173,16 +174,16 @@ pane_divider_release :: proc() {
 
 // A pane strip's "+" or a divider under the pointer.
 pane_hit :: proc() -> Hit {
-	s := cur()
+	s := core.cur()
 	if s == nil || len(s.panes) <= 1 do return nil
 	for &p in s.panes do if clay.PointerOver(pid(&p, "pane_new")) do return Hit_Pane_New(p.id)
 	return nil
 }
 
 pane_click :: proc(h: Hit_Pane_New) {
-	s := cur()
+	s := core.cur()
 	if s == nil do return
-	ui_do(New_Shell_Tab{session = s.id, pane = u64(h)})
+	ui_do(core.New_Shell_Tab{session = s.id, pane = u64(h)})
 }
 
 // The terminal throttles PTY resizes while a divider (a column's or a pane's) is dragged.
@@ -219,34 +220,34 @@ pane_key :: proc(e: ^sapp.Event) -> bool {
 }
 
 // ⌘D / ⇧⌘D: the focused pane splits; a new shell opens in the new pane.
-pane_split_action :: proc(d: Pane_Dir) -> (Command, bool) {
-	cs := cur()
-	if cs == nil || cs.home || len(cs.panes) >= PANES_MAX do return nil, false
-	return Split_Pane{direction = d}, true
+pane_split_action :: proc(d: core.Pane_Dir) -> (core.Command, bool) {
+	cs := core.cur()
+	if cs == nil || cs.home || len(cs.panes) >= core.PANES_MAX do return nil, false
+	return core.Split_Pane{direction = d}, true
 }
 
-pane_focus_action :: proc(d: Pane_Dir) -> (Command, bool) {
-	cs := cur()
+pane_focus_action :: proc(d: core.Pane_Dir) -> (core.Command, bool) {
+	cs := core.cur()
 	if cs == nil || len(cs.panes) <= 1 do return nil, false
-	if pane_neighbour(cs, cs.focused_pane, d) == 0 do return nil, false
-	return Focus_Pane{direction = PANE_DIR_NAMES[d]}, true
+	if core.pane_neighbour(cs, cs.focused_pane, d) == 0 do return nil, false
+	return core.Focus_Pane{direction = core.PANE_DIR_NAMES[d]}, true
 }
 
 // ⇧⌃⌘arrows: the focused tab moves to the neighbouring pane, or into a new pane that way when
 // there is none (not a pane's only tab, not the main tab... it may: a pi tab moves like any).
-pane_move_action :: proc(d: Pane_Dir) -> (Command, bool) {
-	cs := cur()
+pane_move_action :: proc(d: core.Pane_Dir) -> (core.Command, bool) {
+	cs := core.cur()
 	if cs == nil || cs.home do return nil, false
-	session_panes_init(cs)
-	tab := session_focused_id(cs)
+	core.session_panes_init(cs)
+	tab := core.session_focused_id(cs)
 	if tab == 0 do return nil, false
-	if n := pane_neighbour(cs, cs.focused_pane, d); n != 0 do return Move_Tab{tab_id = tab, pane = n, index = -1}, true
-	if pane_tab_count(cs, cs.focused_pane) <= 1 || len(cs.panes) >= PANES_MAX do return nil, false
-	return Split_Pane{pane = cs.focused_pane, direction = d, tab_id = tab}, true
+	if n := core.pane_neighbour(cs, cs.focused_pane, d); n != 0 do return core.Move_Tab{tab_id = tab, pane = n, index = -1}, true
+	if core.pane_tab_count(cs, cs.focused_pane) <= 1 || len(cs.panes) >= core.PANES_MAX do return nil, false
+	return core.Split_Pane{pane = cs.focused_pane, direction = d, tab_id = tab}, true
 }
 // A divider's line runs top to bottom (its split's panes are side by side).
 pane_divider_across :: proc(split: u64) -> bool {
-	s := cur()
+	s := core.cur()
 	if s != nil do for n in s.nodes do if n.id == split do return n.dir == .Right
 	return true
 }
@@ -256,12 +257,12 @@ pane_divider_across :: proc(split: u64) -> bool {
 // A Clay id for an element of pane p: slot 0 gives exactly clay.ID(name), so a session with one
 // pane keeps every id scripts and tests click; another slot hashes its own label ("name#slot"),
 // so no slot's id can meet another's whatever the index.
-pid :: proc(p: ^Pane, name: string) -> clay.ElementId {
+pid :: proc(p: ^core.Pane, name: string) -> clay.ElementId {
 	return pidi(p, name, 0)
 }
 
 // pid for an element that already takes an index (rows, buttons): slot 0 is clay.ID(name, i).
-pidi :: proc(p: ^Pane, name: string, i: int) -> clay.ElementId {
+pidi :: proc(p: ^core.Pane, name: string, i: int) -> clay.ElementId {
 	slot := p != nil ? p.slot : 0
 	if slot == 0 do return clay.ID(name, u32(i))
 	return clay.ID(fmt.tprintf("%s#%d", name, slot), u32(i)) // temp: an id lives for its frame
@@ -277,25 +278,25 @@ pidi :: proc(p: ^Pane, name: string, i: int) -> clay.ElementId {
 // tab a bar acts on still comes from its pane explicitly (pane_shown and friends).
 
 @(private = "file")
-ids_pane_at: ^Pane
+ids_pane_at: ^core.Pane
 
 // Clay ids from now on are pane p's; returns the one before, for ids_pane_end.
-ids_pane_begin :: proc(p: ^Pane) -> ^Pane {
+ids_pane_begin :: proc(p: ^core.Pane) -> ^core.Pane {
 	old := ids_pane_at
 	ids_pane_at = p
 	return old
 }
-ids_pane_end :: proc(old: ^Pane) {ids_pane_at = old}
+ids_pane_end :: proc(old: ^core.Pane) {ids_pane_at = old}
 
 // The pane the per-tab bars' ids are for now.
-ids_pane :: proc() -> ^Pane {return ids_pane_at != nil ? ids_pane_at : focused_pane()}
+ids_pane :: proc() -> ^core.Pane {return ids_pane_at != nil ? ids_pane_at : core.focused_pane()}
 
 cid :: proc(name: string, i: u32 = 0) -> clay.ElementId {return pidi(ids_pane(), name, int(i))}
 
 // A pane's element (cid/pid) under x, y as the pane shows it: inside its box and its pane's frame.
 // A bar is clipped to its pane; what is cut off there is never hit (a box can reach into the
 // next pane or a column while its pane gets the event: event_pane's focused pane off any pane).
-pane_inside :: proc(p: ^Pane, id: clay.ElementId, x, y: f32) -> bool {
+pane_inside :: proc(p: ^core.Pane, id: clay.ElementId, x, y: f32) -> bool {
 	if !inside(id, x, y) do return false
 	if p == nil || p.frame.z <= 0 do return true // not laid out yet
 	f := p.frame
@@ -313,13 +314,13 @@ bar_w :: proc() -> clay.SizingAxis {return clay.SizingGrow({max = pane_width()})
 // The width (framebuffer px) the per-tab bars of the pane being laid out have: the centre's with
 // one pane, else that pane's (its last layout, else its place in the tree).
 pane_width :: proc() -> f32 {
-	s := cur()
+	s := core.cur()
 	if s == nil || len(s.panes) <= 1 do return centre_width()
 	p := ids_pane()
 	if p == nil do return centre_width()
 	// its place in the tree in the centre (as laid out: not its content's last width, which a bar
 	// wider than the pane would feed back into)
-	if app.centre.z > 0 do for r in pane_rects(s, app.centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
+	if app.centre.z > 0 do for r in core.pane_rects(s, app.centre, px(core.BORDER_W), px(core.PANE_MIN_W), px(core.PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
 	if p.rect.z > 0 do return p.rect.z
 	return centre_width()
 }
@@ -330,9 +331,9 @@ pane_width :: proc() -> f32 {
 // gets when shown without bars of its own; so a tab with bars (a Changes header, a browser's
 // toolbar) coming and going never resizes the pane's other terminals. Else tab_rect.
 term_target_rect :: proc(tab_id: u64) -> [4]f32 {
-	s, tab, _ := find_tab(tab_id)
+	s, tab, _ := core.find_tab(tab_id)
 	if s == nil || tab == nil || s.id != state.current_session do return tab_rect(tab_id)
-	p := pane_of_tab(s, tab_id)
+	p := core.pane_of_tab(s, tab_id)
 	if p == nil || p.frame.z <= 0 do return tab_rect(tab_id)
 	if p.active == tab_id {
 		if d := clay.GetElementData(pid(p, "terminal")); d.found && d.boundingBox.width > 0 {
@@ -348,32 +349,32 @@ term_target_rect :: proc(tab_id: u64) -> [4]f32 {
 	return f
 }
 
-pane_editor :: proc(p: ^Pane) -> ^Editor {
-	if t := pane_shown(p); t != nil do return editor_of(t.id)
+pane_editor :: proc(p: ^core.Pane) -> ^Editor {
+	if t := core.pane_shown(p); t != nil do return editor_of(t.id)
 	return nil
 }
 
-pane_browser :: proc(p: ^Pane) -> ^Browser {
-	if t := pane_shown(p); t != nil do return browsers[t.id]
+pane_browser :: proc(p: ^core.Pane) -> ^Browser {
+	if t := core.pane_shown(p); t != nil do return browsers[t.id]
 	return nil
 }
 
-pane_app :: proc(p: ^Pane) -> ^App_Proc {
-	if t := pane_shown(p); t != nil do return app_of(t.id)
+pane_app :: proc(p: ^core.Pane) -> ^App_Proc {
+	if t := core.pane_shown(p); t != nil do return app_of(t.id)
 	return nil
 }
 
 // Pane p's content rect (framebuffer px): its laid-out rect, else the one the window last laid
 // out (app.pane).
-pane_rect :: proc(p: ^Pane) -> [4]f32 {
+pane_rect :: proc(p: ^core.Pane) -> [4]f32 {
 	if p != nil && p.rect.z > 0 do return p.rect
 	return app.pane
 }
 
 // The pane of the current session whose content holds the point (framebuffer px), or nil. With
 // no pane laid out yet: the focused pane.
-pane_at :: proc(x, y: f32) -> ^Pane {
-	s := cur()
+pane_at :: proc(x, y: f32) -> ^core.Pane {
+	s := core.cur()
 	if s == nil do return nil
 	laid := false
 	for &p in s.panes {
@@ -382,23 +383,23 @@ pane_at :: proc(x, y: f32) -> ^Pane {
 		laid = true
 		if x >= r.x && y >= r.y && x < r.x + r.z && y < r.y + r.w do return &p
 	}
-	return laid ? nil : session_focused_pane(s)
+	return laid ? nil : core.session_focused_pane(s)
 }
 
 // Where tab `tab_id` is drawn (framebuffer px): in the current session its pane's laid-out
 // rect; else (another session, or not laid out yet) its pane's place in the session's tree
 // inside the rect the window last laid out (app.pane), what it will get when shown.
 tab_rect :: proc(tab_id: u64) -> [4]f32 {
-	s, tab, _ := find_tab(tab_id)
+	s, tab, _ := core.find_tab(tab_id)
 	if tab == nil do return app.pane
-	p := session_pane(s, tab.pane)
+	p := core.session_pane(s, tab.pane)
 	if p == nil do return app.pane
 	if s.id == state.current_session && p.rect.z > 0 do return p.rect
 	centre := app.centre.z > 0 ? app.centre : app.pane
 	if centre.z <= 0 do return app.pane
 	if len(s.panes) <= 1 do return app.pane // one pane: its content is the centre's (under the session's bars)
 	// the pane's place in the tree, less its strip (its tab's bars are not counted)
-	for r in pane_rects(s, centre, px(BORDER_W), px(PANE_MIN_W), px(PANE_MIN_H)) do if r.pane == p.id {
+	for r in core.pane_rects(s, centre, px(core.BORDER_W), px(core.PANE_MIN_W), px(core.PANE_MIN_H)) do if r.pane == p.id {
 		strip := min(px(TAB_STRIP_H), r.rect.w)
 		return {r.rect.x, r.rect.y + strip, r.rect.z, r.rect.w - strip}
 	}

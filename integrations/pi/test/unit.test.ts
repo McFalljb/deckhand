@@ -1595,10 +1595,10 @@ test("desk-browser: desk_show shows the user a file in its own session (a .md re
 	}
 });
 
-test("desk-browser: a read-only pi chat keeps desk_show: Deckhand's real argv allowlist (PI_READONLY_CHAT_ARGS, src/commands.odin) applied to the tools a read-only pi tab registers", async () => {
-	const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), "../../../src/commands.odin"), "utf8");
+test("desk-browser: a read-only pi chat keeps desk_show: Deckhand's real argv allowlist (PI_READONLY_CHAT_ARGS, src/core/commands.odin) applied to the tools a read-only pi tab registers", async () => {
+	const src = fs.readFileSync(path.join(path.dirname(new URL(import.meta.url).pathname), "../../../src/core/commands.odin"), "utf8");
 	const m = src.match(/^PI_READONLY_CHAT_ARGS :: \[\?\]string\{([^}]*)\}/m);
-	assert.ok(m, "PI_READONLY_CHAT_ARGS is a literal list in src/commands.odin");
+	assert.ok(m, "PI_READONLY_CHAT_ARGS is a literal list in src/core/commands.odin");
 	const argv = [...m![1].matchAll(/"([^"]*)"/g)].map((x) => x[1]);
 	const i = argv.lastIndexOf("--tools");
 	assert.ok(i >= 0, "a --tools allowlist");

@@ -11,52 +11,12 @@ package main
 // draw_icon for it.
 
 import "core:math"
+import "core"
 import clay "../build/clay-odin"
 import sgl "../vendor/sokol-odin/sokol/gl"
 
-Icon :: enum u8 {
-	None,
-	Search, // magnifier
-	Compose, // square and pencil: new chat
-	Plus,
-	Chevron_Down,
-	Sidebar_Left, // a window with its left column (filled while shown)
-	Sidebar_Left_On,
-	Sidebar_Right,
-	Sidebar_Right_On,
-	Sliders, // settings
-	Close,
-	More, // three dots
-	Check,
-	// the Files tab's header (ui_files.odin)
-	New_File, // a page and a plus
-	New_Folder, // a folder and a plus
-	Collapse_All, // a box with a minus
-	Refresh, // a circular arrow
-	Reveal, // a folder with an arrow out of it
-	// the left column: what a row is (ui_sidebar.odin), the tree and sort controls
-	Folder, // a project (and its sessions)
-	Chat, // a speech bubble: a chat, outside any project
-	Chevron_Right, // a folded tree row or section
-	Sort, // two arrows, up and down
-	Branch, // a git branch: two commits on a line, a third off it (the Files tab's checkout switcher)
-	// the bell (ui_bell.odin)
-	Bell, // the notification centre
-	Alert, // a triangle with "!": an error, pi exited
-	Clock, // a job (the bell; the left column's Jobs tab)
-	Play, // a triangle: run now
-	Pause, // two bars: pause
-	Info, // a ring with an "i": a session's info (ui_sidebar.odin)
-	// which agent a session runs (sidebar.odin: HARNESSES): its real logo (logos.odin), in its
-	// own colours; the plain glyphs stay as the fallback for a harness without one
-	Logo_Pi,
-	Logo_Claude,
-	Harness_Pi, // "π": a bar on two legs
-	Harness_Claude, // a six-pointed asterisk
-}
-
 // The logo an icon draws (.None: a vector icon in the caller's colour).
-icon_logo :: proc(ic: Icon) -> Logo {
+icon_logo :: proc(ic: core.Icon) -> Logo {
 	#partial switch ic {
 	case .Logo_Pi:
 		return .Pi
@@ -70,7 +30,7 @@ ICON_GRID :: 16
 
 // A Clay element that draws `ic` in `col`, `size` logical px square.
 // customData carries the icon, userData the colour (packed RGBA).
-icon :: proc(ic: Icon, col: Rgba, size: f32 = ICON_SIZE) {
+icon :: proc(ic: core.Icon, col: core.Rgba, size: f32 = ICON_SIZE) {
 	packed := uintptr(col.r) | uintptr(col.g) << 8 | uintptr(col.b) << 16 | uintptr(col.a) << 24
 	if clay.UI()({
 		layout = {sizing = {clay.SizingFixed(px(size)), clay.SizingFixed(px(size))}},
@@ -80,13 +40,13 @@ icon :: proc(ic: Icon, col: Rgba, size: f32 = ICON_SIZE) {
 }
 
 // From a custom render command (ui_draw).
-icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (Icon, Rgba) {
+icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (core.Icon, core.Rgba) {
 	p := uintptr(cmd.userData)
-	return Icon(uintptr(cmd.renderData.custom.customData)), {u8(p), u8(p >> 8), u8(p >> 16), u8(p >> 24)}
+	return core.Icon(uintptr(cmd.renderData.custom.customData)), {u8(p), u8(p >> 8), u8(p >> 16), u8(p >> 24)}
 }
 
 // Draws `ic` into the box (framebuffer px), inside draw_begin/draw_end.
-draw_icon :: proc(ic: Icon, x, y, w, h: f32, col: Rgba) {
+draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba) {
 	if col.a == 0 do return
 	if logo := icon_logo(ic); logo != .None {
 		// a logo: rasterised at the box's whole-px size, centred on the pixel grid
@@ -305,14 +265,14 @@ draw_icon :: proc(ic: Icon, x, y, w, h: f32, col: Rgba) {
 // ---- primitives (framebuffer px; inside sgl.begin_quads) ----
 
 @(private = "file")
-vtx :: proc(x, y: f32, col: Rgba, a: f32) {
+vtx :: proc(x, y: f32, col: core.Rgba, a: f32) {
 	u := f32(0.5) / f32(font.size) // the atlas's white texel (draw_rect)
 	sgl.v2f_t2f_c4b(x, y, u, u, col.r, col.g, col.b, u8(f32(col.a) * a))
 }
 
 // A quad with alpha a0 along edge p0-p1 and a1 along edge p3-p2.
 @(private = "file")
-quad :: proc(p0, p1, p2, p3: [2]f32, col: Rgba, a0, a1: f32) {
+quad :: proc(p0, p1, p2, p3: [2]f32, col: core.Rgba, a0, a1: f32) {
 	vtx(p0.x, p0.y, col, a0)
 	vtx(p1.x, p1.y, col, a0)
 	vtx(p2.x, p2.y, col, a1)
@@ -321,7 +281,7 @@ quad :: proc(p0, p1, p2, p3: [2]f32, col: Rgba, a0, a1: f32) {
 
 // A stroke from (x0,y0) to (x1,y1), w px wide, with a feathered edge.
 // Square caps (half the width beyond each end) unless `round`.
-stroke_line :: proc(x0, y0, x1, y1, w: f32, col: Rgba, round := false) {
+stroke_line :: proc(x0, y0, x1, y1, w: f32, col: core.Rgba, round := false) {
 	a, b := [2]f32{x0, y0}, [2]f32{x1, y1}
 	d := b - a
 	l := math.sqrt(d.x * d.x + d.y * d.y)
@@ -355,7 +315,7 @@ stroke_line :: proc(x0, y0, x1, y1, w: f32, col: Rgba, round := false) {
 
 // An arc of radius r from angle a0 to a1 (radians, counter-clockwise from
 // the right, y up), w px wide.
-arc :: proc(cx, cy, r, a0, a1, w: f32, col: Rgba) {
+arc :: proc(cx, cy, r, a0, a1, w: f32, col: core.Rgba) {
 	steps :: 16
 	for i in 0 ..< steps {
 		u0 := a0 + (a1 - a0) * f32(i) / steps
@@ -365,7 +325,7 @@ arc :: proc(cx, cy, r, a0, a1, w: f32, col: Rgba) {
 }
 
 // A rectangle outline whose strokes are centred on l, t, r, b.
-stroke_rect :: proc(l, t, r, b, w: f32, col: Rgba) {
+stroke_rect :: proc(l, t, r, b, w: f32, col: core.Rgba) {
 	stroke_line(l, t, r, t, w, col)
 	stroke_line(l, b, r, b, w, col)
 	stroke_line(l, t, l, b, w, col)
@@ -375,7 +335,7 @@ stroke_rect :: proc(l, t, r, b, w: f32, col: Rgba) {
 ICON_SEGMENTS :: 32
 
 // A circle outline of radius r (stroke centre), w px wide.
-stroke_ring :: proc(cx, cy, r, w: f32, col: Rgba) {
+stroke_ring :: proc(cx, cy, r, w: f32, col: core.Rgba) {
 	inner, outer := max(r - w / 2, 0), r + w / 2
 	ring(cx, cy, inner - 0.5, inner + 0.5, col, 0, 1)
 	ring(cx, cy, inner + 0.5, outer - 0.5, col, 1, 1)
@@ -383,14 +343,14 @@ stroke_ring :: proc(cx, cy, r, w: f32, col: Rgba) {
 }
 
 // A filled circle of radius r.
-fill_disc :: proc(cx, cy, r: f32, col: Rgba) {
+fill_disc :: proc(cx, cy, r: f32, col: core.Rgba) {
 	ring(cx, cy, 0, max(r - 0.5, 0), col, 1, 1)
 	ring(cx, cy, max(r - 0.5, 0), r + 0.5, col, 1, 0)
 }
 
 // The band between radii r0 and r1, alpha a0 at r0 and a1 at r1.
 @(private = "file")
-ring :: proc(cx, cy, r0, r1: f32, col: Rgba, a0, a1: f32) {
+ring :: proc(cx, cy, r0, r1: f32, col: core.Rgba, a0, a1: f32) {
 	if r1 <= r0 do return
 	r0 := max(r0, 0)
 	for i in 0 ..< ICON_SEGMENTS {

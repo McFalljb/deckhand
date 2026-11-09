@@ -9,7 +9,7 @@ file's tests run as one chunk; chunks go to -j workers, the slowest first (build
 from the last run). The timing tests
 (TIMING below) run after the rest, one at a time, so the other chunks' load does not skew them.
 
-The perf layer: a time budget (perf_expect, src/cpu_clock_test.odin) never fails this run unless
+The perf layer: a time budget (perf_expect, src/core/cpu_clock_test.odin) never fails this run unless
 it is 10x over (an accidentally quadratic change); over the budget it is a warning in the summary
 ("perf: over budget"), so a busy machine cannot fail a gate. --perf-strict
 (DECKHAND_PERF_STRICT=1, for a quiet machine) fails at the budget itself.

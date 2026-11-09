@@ -14,6 +14,7 @@ package main
 import "core:fmt"
 import "core:strconv"
 import "core:strings"
+import "core"
 
 Job_Form :: struct {
 	name:        string,
@@ -73,14 +74,14 @@ note_title :: proc(body: string, summary: string) -> string {
 
 // The form from a note (temp allocator); err when it cannot be read as one.
 job_form_from_note :: proc(text: string) -> (f: Job_Form, err: string) {
-	vals, ferr, ok := note_front_values(text)
+	vals, ferr, ok := core.note_front_values(text)
 	if !ok do return f, ferr
-	_, body, _, _ := note_split(text)
+	_, body, _, _ := core.note_split(text)
 	f.name = note_title(body, vals["summary"])
 	f.for_project = vals["for_project"]
 	f.folder = vals["folder"]
 	f.schedule = vals["schedule"]
-	prompt, _ := note_section(body, "prompt")
+	prompt, _ := core.note_section(body, "prompt")
 	f.prompt = strings.trim_space(prompt)
 	f.access = vals["access"] != "" ? vals["access"] : "read"
 	f.notify = vals["notify"] != "" ? vals["notify"] : "always"
@@ -93,7 +94,7 @@ job_form_check :: proc(f: Job_Form) -> string {
 	if strings.trim_space(f.name) == "" do return "Name: give the job a name"
 	if strings.contains_any(f.name, "\r\n") do return "Name: one line"
 	if strings.trim_space(f.prompt) == "" do return "Prompt: say what the job should do"
-	for l in strings.split_lines(f.prompt, context.temp_allocator) do if note_known_heading(l) do return "Prompt: it cannot hold a ## Prompt, ## Check or ## Recent runs heading"
+	for l in strings.split_lines(f.prompt, context.temp_allocator) do if core.note_known_heading(l) do return "Prompt: it cannot hold a ## Prompt, ## Check or ## Recent runs heading"
 	for k in JOB_FORM_KEYS do if strings.contains_any(form_value(f, k), "\r\n") do return fmt.tprintf("%s: one line", k)
 	return ""
 }
@@ -104,10 +105,10 @@ job_form_check :: proc(f: Job_Form) -> string {
 // value did not change keeps its line as it was.
 job_note_apply_form :: proc(base: string, f: Job_Form, check := true) -> (text: string, err: string) {
 	if check do if e := job_form_check(f); e != "" do return "", e
-	vals, ferr, ok := note_front_values(base)
+	vals, ferr, ok := core.note_front_values(base)
 	if !ok do return "", ferr
-	eol := note_eol(base)
-	_, body, front_end, _ := note_split(base)
+	eol := core.note_eol(base)
+	_, body, front_end, _ := core.note_split(base)
 	head := base[:front_end]
 	// summary: a summary of its own stays; one that was the title follows the name
 	summary := ""
@@ -124,7 +125,7 @@ job_note_apply_form :: proc(base: string, f: Job_Form, check := true) -> (text: 
 			for k in JOB_FORM_KEYS {
 				v := strings.trim_space(form_value(f, k, summary))
 				if done[k] || v == "" do continue
-				fmt.sbprintf(&b, "%s: %s%s", k, yaml_quote(v), eol)
+				fmt.sbprintf(&b, "%s: %s%s", k, core.yaml_quote(v), eol)
 			}
 			strings.write_string(&b, l)
 			continue
@@ -146,10 +147,10 @@ job_note_apply_form :: proc(base: string, f: Job_Form, check := true) -> (text: 
 			strings.write_string(&b, l) // unchanged: its quoting and comment stay
 			continue
 		}
-		fmt.sbprintf(&b, "%s: %s%s", key, yaml_quote(v), eol)
+		fmt.sbprintf(&b, "%s: %s%s", key, core.yaml_quote(v), eol)
 	}
 	// the body: the title, then the Prompt section
-	name := strings.trim_space(one_line(f.name, context.temp_allocator))
+	name := strings.trim_space(core.one_line(f.name, context.temp_allocator))
 	prompt := strings.trim_space(f.prompt)
 	blines := strings.split_lines(body, context.temp_allocator)
 	out := make([dynamic]string, context.temp_allocator)
@@ -164,7 +165,7 @@ job_note_apply_form :: proc(base: string, f: Job_Form, check := true) -> (text: 
 	start, end := -1, len(out)
 	for l, i in out {
 		n := strings.trim_right(l, "\r")
-		if start >= 0 && note_known_heading(n) {
+		if start >= 0 && core.note_known_heading(n) {
 			end = i
 			break
 		}
@@ -200,7 +201,7 @@ job_note_apply_form :: proc(base: string, f: Job_Form, check := true) -> (text: 
 
 // A new note from the form: the template (id, date), with the form in it.
 job_form_new_note :: proc(f: Job_Form, id, date: string, check := true) -> (string, string) {
-	base := job_template(id, one_line(strings.trim_space(f.name) != "" ? f.name : "New job", context.temp_allocator), "manual", "-", "~", date, f.for_project)
+	base := core.job_template(id, core.one_line(strings.trim_space(f.name) != "" ? f.name : "New job", context.temp_allocator), "manual", "-", "~", date, f.for_project)
 	return job_note_apply_form(base, f, check)
 }
 
@@ -274,14 +275,14 @@ sched_preset_detect :: proc(s: string) -> (p: Sched_Preset, every_n, at: string)
 // "next run: Mon 03 Nov 07:00 (local)", "runs only when you click Run now",
 // or why the schedule does not parse.
 sched_next_text :: proc(s: string) -> (text: string, ok: bool) {
-	sc, err := schedule_parse(s)
+	sc, err := core.schedule_parse(s)
 	if err != "" do return fmt.tprintf("Schedule: %s", err), false
 	if sc.kind == .Manual do return "Runs only when you click Run now", true
-	now := jobs_now()
-	next := schedule_next(sc, now, 0)
+	now := core.jobs_now()
+	next := core.schedule_next(sc, now, 0)
 	if next <= 0 do return "No next run", true
 	if sc.kind == .At && next <= now do return "That time has passed", false
-	c, wday := unix_to_local(next)
+	c, wday := core.unix_to_local(next)
 	days := [7]string{"Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"}
 	return fmt.tprintf("Next run: %s %04d-%02d-%02d %02d:%02d", days[wday % 7], c.year, c.month, c.day, c.hour, c.minute), true
 }

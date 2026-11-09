@@ -58,7 +58,7 @@ update only to a bundle with the old bundle id and a signature in the old format
 - **0.1.7 (the bridge).** Every name is Deckhand's (`DECKHAND_*` variables and test hooks,
   `tools/deckhand-cli/`, `.deckhand/apps.json`, `~/Library/Caches/deckhand/cef`,
   `~/.config/deckhand/update.key`, `TERM_PROGRAM=Deckhand`), and the old ones still work
-  (`src/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
+  (`src/core/env_names.odin` lists them): the variables Deckhand sets in Claude tabs, app tabs and job
   runs are set under both names (`DECKHAND_SOCKET` and `PI_DESK_SOCKET`, …; never in pi tabs, where
   pi-kit's desk extensions would switch on), and every reader takes the new name first, then the
   old; the scrubs drop an explicit list of Deckhand's names (both families), never every
@@ -103,7 +103,7 @@ Every build is code-signed with one identity: `SIGN_IDENTITY_DEFAULT` in `script
 `build.sh`, `scripts/bundle-app.sh` and `scripts/release.sh` share. It is a self-signed
 certificate, **"Deckhand Self-Signed"**, in your login keychain. `DECKHAND_SIGN_IDENTITY=…`
 overrides it for one build (the setting lives in the script, not the environment: a shell started
-by Deckhand drops `DECKHAND_*` variables from the login environment, `src/login_env.odin`). Make
+by Deckhand drops `DECKHAND_*` variables from the login environment, `src/core/login_env.odin`). Make
 the identity once per Mac:
 
 ```sh
@@ -187,7 +187,7 @@ libghostty-vt's C ABI is not stable yet, and `src/ghostty/ghostty.odin` is hand-
 v1.4.0. `./build.sh test` checks struct sizes, offsets and key-enum values against the C headers,
 so rerun it after bumping the tag.
 
-**Bumping libghostty-vt**, also check terminal snapshots (`src/snapshot.odin`; design
+**Bumping libghostty-vt**, also check terminal snapshots (`src/core/snapshot.odin`; design
 [§5.5](plans/background-core.md#55-terminal-streams-option-a)):
 
 1. `./build.sh test` must pass `snapshot_stored_corpus`. It decodes the GHOSTSNP snapshots that the
@@ -222,7 +222,7 @@ against the local zip. You check the draft and publish it.
 
 **No test hooks in a release** (docs/plans/background-core.md §5.3: a genuine binary must not be
 steerable by its environment). Every test and development knob goes through `hook_env()` in
-`src/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`DECKHAND_SCRIPT` and the
+`src/core/test_hooks.odin`, whose `HOOK_ENV` table names them: test mode (`DECKHAND_SCRIPT` and the
 rest), `DECKHAND_DATA_DIR`, `DECKHAND_RUNTIME_DIR`, the pi and Claude stand-ins, the updater's
 fixtures. `-define:DECKHAND_TEST_HOOKS=false` (what `DECKHAND_RELEASE=1 ./build.sh` passes)
 compiles the table out, so a release build uses the fixed data and runtime dirs, never enters
@@ -249,10 +249,10 @@ Each release:
    GitHub calls, then `--upload-only` to draft what it left there, checked again).
 3. Open the draft on GitHub, check the notes and the three files, publish it.
 
-The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/update_core.odin` (the
+The GitHub repository's name lives in one place: `UPDATE_REPO` in `src/core/update_core.odin` (the
 updater asks that repository for releases, and `scripts/release.sh` reads it from there; another
 `--repo` or `DECKHAND_RELEASE_REPO` is refused without `--allow-other-repo`). The release's names
-come from the source too: the app from `UPDATE_APP` (`src/update_core.odin`), the zip's from
+come from the source too: the app from `UPDATE_APP` (`src/core/update_core.odin`), the zip's from
 `ZIP_PREFIX` and `ZIP_SUFFIX` (`src/updatesig/updatesig.odin`).
 
 A release, titled "Deckhand X.Y.Z", carries `deckhand-<version>-macos-arm64.zip` (holding exactly
@@ -274,10 +274,10 @@ check) and starts it from there, so an app update never pulls the binary from un
 The holder upgrades itself in place (`UPGRADE`, docs/plans/background-core.md §7.3;
 `src/holder/upgrade.odin`, `keeper.odin`, `state.odin`): same pid, every session kept. A running
 holder only upgrades to a newer `holder_rev`, so **bump `HOLDER_REV`** in `src/holder/holder.odin`
-and `src/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
+and `src/core/holder_install.odin` with any change to `src/holder`, `src/holderwire` or `src/trust`
 (tests aside); `scripts/check-holder-rev.sh` fails CI otherwise. The app upgrades an attached
 holder older than the one it bundles by itself, once per run, after the launch's adopt
-(`holder_upgrade_tick`, `src/holder_restart.odin`): after an update that is the new app, attached
+(`holder_upgrade_tick`, `src/core/holder_restart.odin`): after an update that is the new app, attached
 as the named successor. In a development build the palette's *Restart session holder* upgrades
 the running holder to the one you just built. `DECKHAND_HOLDER_REV=N` (test builds) makes the app
 take its bundled holder for rev N (the keep-sessions scene's automatic upgrade). The
@@ -286,10 +286,10 @@ re-exec tests run the holder built with test hooks (`build/deckhand-core-hooks`,
 
 ### Update signing
 
-Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/update.odin`). The trust
+Deckhand updates itself from GitHub releases (GUIDE.md, "Updates"; `src/core/update.odin`). The trust
 anchor is an Ed25519 key of its own, not GitHub or the TLS connection: an update installs only
 when its `.sig` verifies under the public key compiled into the app (`UPDATE_PUBLIC_KEY` in
-`src/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
+`src/core/update_key.odin`). **The private key lives only on the release signer's Mac**, never in
 GitHub (no secret, no CI step), and `scripts/release.sh` signs only the bundle it has just
 built there, never anything downloaded.
 
@@ -342,12 +342,12 @@ built there, never anything downloaded.
 
 Every user-visible change updates [GUIDE.md](GUIDE.md) in the same branch. `./build.sh test`
 checks part of this in `src/docs_test.odin`: every action in `src/actions.odin` (its label and
-shortcut) must appear in GUIDE.md, and every command in `src/command_table.odin` that the user or
+shortcut) must appear in GUIDE.md, and every command in `src/core/command_table.odin` that the user or
 agents may send (`who = .User` or `.Anyone`) must appear in GUIDE.md or
 [PROTOCOL.md](PROTOCOL.md).
 
 GUIDE.md is built into the binary and copied to `<data dir>/atlas/GUIDE.md` for Atlas
-(`src/agent.odin`). If you change Atlas's starter prompt (`ATLAS_PROMPT_STARTER`), add the
+(`src/core/agent.odin`). If you change Atlas's starter prompt (`ATLAS_PROMPT_STARTER`), add the
 previous one to `ATLAS_PROMPT_OLD_STARTERS` so that unedited copies are replaced at startup.
 
 ## Architecture
@@ -431,7 +431,7 @@ autotest.odin  DECKHAND_SCRIPT test mode
 
 Atlas's prompt is `ATLAS.md` in the main folder's `atlas/` (setting `home_dir`, chosen in the
 first-run sheet). It is copied there from the data dir once, and the data dir's copy stays as the
-fallback. Each subfolder of the main folder may be overridden (`src/folders.odin`, the Settings
+fallback. Each subfolder of the main folder may be overridden (`src/core/folders.odin`, the Settings
 tab's Folders group). The drawer's Model button opens pi's model selector and saves the choice as
 the setting `agent_model`.
 
@@ -616,7 +616,7 @@ restarts, jobs) runs a stand-in or refuses:
   (`tests/scripts/fake-install.sh`). Without it the run prints "Deckhand test mode: no
   DECKHAND_INSTALL_CMD; refusing to run the real install" and exits 127. There is no opt-in.
 
-**Which harnesses a scene has** (`src/harness.odin`): Deckhand looks for pi and Claude Code by stat,
+**Which harnesses a scene has** (`src/core/harness.odin`): Deckhand looks for pi and Claude Code by stat,
 never running them, and what it finds decides the UI (the **New session** picker, Atlas's
 button). In test mode that look never uses PATH (unless `DECKHAND_REAL_PI=1`), only the install
 folders under the scene's fake HOME, so the developer's own pi and claude never change a scene:
@@ -667,7 +667,7 @@ app is up. It also checks the default scale.
 
 ### Launch environment
 
-`src/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
+`src/core/login_env.odin` runs at startup, before any thread. A GUI launch is one whose parent is
 launchd (pid 1: LaunchServices, so Dock, Finder, Spotlight, `open`) or whose `PATH` is launchd's
 bare one; `DECKHAND_GUI_LAUNCH=1` or `0` forces it (scenes; or to turn the import off), and test
 mode (`DECKHAND_SCRIPT`) is never a GUI launch without `DECKHAND_GUI_LAUNCH=1`. A GUI
@@ -703,16 +703,16 @@ kills a refresh's probe group (`login_env_kill_probe` in `cleanup`). Values are 
 logged. `PI_TAB_CMD` and `CLAUDE_TAB_CMD` fall back to pi's managed install
 (`$PI_CODING_AGENT_DIR/bin`, `~/.pi/agent/bin`) and Claude's (`~/.local/bin`,
 `~/.claude/local`), absolute folders only (never one relative to the project); `pi_managed_path` does the same for jobs and the reload probe. Unit tests:
-`src/login_env_test.odin` (fake shells and a stub probe; never the user's shell).
+`src/core/login_env_test.odin` (fake shells and a stub probe; never the user's shell).
 
 Deckhand's own sh scripts (`PI_TAB_CMD`, `CLAUDE_TAB_CMD`, a stand-in command, the Changes tab's
 commit, the jobs' PATH and the reload probe) run as `$SHELL -l -c SCRIPT` for a POSIX login shell
 (zsh, bash, sh, dash, ksh and any shell Deckhand does not know), as always. For a known non-POSIX
-one (fish, nushell, xonsh, elvish, ysh, tcsh/csh, pwsh, `shell_is_posix` in `src/commands.odin`),
+one (fish, nushell, xonsh, elvish, ysh, tcsh/csh, pwsh, `shell_is_posix` in `src/core/commands.odin`),
 `/bin/sh -c SCRIPT` runs them instead, in the environment Deckhand took from the login shell
 (above) or the terminal it was started from. Shell tabs still open `$SHELL -l` itself.
 
-Whether pi is installed (`pi_installed`, `src/harness.odin`): a stat of the PATH new tabs get and
+Whether pi is installed (`pi_installed`, `src/core/harness.odin`): a stat of the PATH new tabs get and
 pi's managed install, else the login shell's own `command -v pi` (that script, as above, on a
 worker, at most 10 s, pi never run). A stat that finds nothing is never the last word: until the
 shell answered, pi counts as there, so a pi only a `.zprofile` adds (nvm, fnm, mise, pnpm) is not

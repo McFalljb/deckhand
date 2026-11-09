@@ -8,6 +8,7 @@ package main
 import "core:path/filepath"
 import "core:slice"
 import "core:strings"
+import "core"
 
 @(private = "file")
 Finder :: struct {
@@ -31,21 +32,21 @@ finder: Finder
 // ⌘P: opens the palette on the current project's files (or closes it).
 palette_open_files :: proc() {
 	if palette_is_open() && palette.files {
-		ui_do(Set_Focus{""})
+		ui_do(core.Set_Focus{""})
 		return
 	}
-	if fs_base_dir() == "" do return
+	if core.fs_base_dir() == "" do return
 	palette_reset()
 	palette.files = true
 	palette.was_open = true
-	ui_do(Set_Focus{"palette"})
+	ui_do(core.Set_Focus{"palette"})
 }
 
 file_finder_results :: proc(query: string) -> []Palette_Item {
-	base := fs_base_dir()
+	base := core.fs_base_dir()
 	if base == "" do return nil
-	root := fs_real(base)
-	files := fs_project_files(root)
+	root := core.fs_real(base)
+	files := core.fs_project_files(root)
 	if root != finder.root || query != finder.query || raw_data(files) != finder.list || len(files) != finder.n {
 		delete(finder.root)
 		delete(finder.query)
@@ -76,12 +77,12 @@ rank :: proc(files: []string, query: string) {
 		ok := true
 		name := filepath.base(f)
 		for w in words {
-			if s, m, hit := fuzzy_score(w, name); hit {
+			if s, m, hit := core.fuzzy_score(w, name); hit {
 				total += 2 * s
 				matched |= m
 				continue
 			}
-			s, _, hit := fuzzy_score(w, f)
+			s, _, hit := core.fuzzy_score(w, f)
 			if !hit {
 				ok = false
 				break

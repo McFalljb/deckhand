@@ -36,6 +36,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import "core"
 import jg "jsonguard"
 import "core:fmt"
 import "core:math"
@@ -208,10 +209,10 @@ annot_quote :: proc(s: string, n: int) -> string {
 		strings.write_byte(&b, '"')
 		return strings.to_string(b)
 	}
-	t := strings.join(strings.fields(one_line(s, context.temp_allocator), context.temp_allocator), " ", context.temp_allocator)
+	t := strings.join(strings.fields(core.one_line(s, context.temp_allocator), context.temp_allocator), " ", context.temp_allocator)
 	q := quote(t)
 	for len(q) > n && len(t) > 0 {
-		t = cut_utf8(t, max(len(t) * (n - 6) / len(q), 0)) // escapes make q longer than t
+		t = core.cut_utf8(t, max(len(t) * (n - 6) / len(q), 0)) // escapes make q longer than t
 		q = quote(strings.concatenate({t, "…"}, context.temp_allocator))
 	}
 	return q
@@ -280,7 +281,7 @@ annot_pick_free :: proc(p: ^Annot_Pick) {
 // with the crop taken at the pick (the comment owns its file now, or it is removed on a refusal),
 // and its marker.
 annot_pick_add :: proc(tab_id: u64, p: ^Annot_Pick, text, crop: string) -> (id: u64, err: string) {
-	r := run_command(Comment_Add{source = .Browser, tab_id = tab_id, what = annot_pick_what(p), text = text, crop = crop}, {kind = .Internal})
+	r := core.run_command(core.Comment_Add{source = .Browser, tab_id = tab_id, what = annot_pick_what(p), text = text, crop = crop}, {kind = .Internal})
 	if !r.ok {
 		if crop != "" do os.remove(crop)
 		return 0, r.error
@@ -318,7 +319,7 @@ cdp :: proc(a: ^Annot, b: ^Browser, method: string, params: string, call := Anno
 	msg := strings.to_string(s)
 	if dh_cef_devtools_send(b.cef, raw_data(msg), c.size_t(len(msg))) == 0 do return 0
 	if call != .None do a.pending[id] = call
-	if autotest_active {
+	if core.autotest_active {
 		if _, has := a.sent[method]; !has do a.sent[strings.clone(method)] = 0
 		a.sent[method] += 1
 	}
@@ -330,7 +331,7 @@ cdp :: proc(a: ^Annot, b: ^Browser, method: string, params: string, call := Anno
 run :: proc(a: ^Annot, b: ^Browser, code: string, ctx: i64) {
 	p := strings.builder_make(context.temp_allocator)
 	strings.write_string(&p, `{"expression":`)
-	json_quote(&p, code)
+	core.json_quote(&p, code)
 	fmt.sbprintf(&p, `,"contextId":%d,"silent":true%s`, ctx, "}")
 	cdp(a, b, "Runtime.evaluate", strings.to_string(p))
 }
@@ -352,14 +353,14 @@ install :: proc(a: ^Annot, b: ^Browser) {
 	p := strings.builder_make(context.temp_allocator)
 	cdp(a, b, "Page.enable", "{}")
 	strings.write_string(&p, `{"source":`)
-	json_quote(&p, ANNOT_JS)
+	core.json_quote(&p, ANNOT_JS)
 	fmt.sbprintf(&p, `,"worldName":"%s"}}`, ANNOT_WORLD)
 	cdp(a, b, "Page.addScriptToEvaluateOnNewDocument", strings.to_string(p))
 	// agents' password tracker (browser_act.js init): from each document's start, a field ever
 	// seen as a password one stays sensitive
 	q := strings.builder_make(context.temp_allocator)
 	strings.write_string(&q, `{"source":`)
-	json_quote(&q, ACT_INIT_JS)
+	core.json_quote(&q, ACT_INIT_JS)
 	fmt.sbprintf(&q, `,"worldName":"%s"}}`, ANNOT_WORLD)
 	cdp(a, b, "Page.addScriptToEvaluateOnNewDocument", strings.to_string(q))
 	cdp(a, b, "Page.getFrameTree", "{}", .Frame_Tree)
@@ -372,7 +373,7 @@ attach_world :: proc(a: ^Annot, b: ^Browser, frame_id: string) {
 	if frame_id == "" do return
 	p := strings.builder_make(context.temp_allocator)
 	strings.write_string(&p, `{"frameId":`)
-	json_quote(&p, frame_id)
+	core.json_quote(&p, frame_id)
 	fmt.sbprintf(&p, `,"worldName":"%s"}}`, ANNOT_WORLD)
 	cdp(a, b, "Page.createIsolatedWorld", strings.to_string(p), .World)
 }
@@ -415,7 +416,7 @@ str :: proc(o: json.Object, k: string) -> string {
 // A CDP message (the shim's observer, on the main thread).
 @(private = "file")
 on_cef_devtools :: proc "c" (id: c.int, msg_id: c.int, ok: c.int, method: cstring, data: [^]u8, n: c.size_t) {
-	context = app_context
+	context = core.app_context
 	if browser_agent_devtools(id, msg_id, ok, method, data, n) do return // an agent's call (browser_agent.odin)
 	b: ^Browser
 	for _, x in browsers do if x.cef == id do b = x
@@ -525,7 +526,7 @@ annot_message :: proc(a: ^Annot, b: ^Browser, ctx: i64, m: json.Object) {
 		r, ok := rect_of(m["r"])
 		a.has_hover = ok && a.on && a.ptr_in
 		a.hover = r
-		set_str(&a.hover_label, cut_utf8(one_line(str(m, "label"), context.temp_allocator), 120))
+		set_str(&a.hover_label, core.cut_utf8(core.one_line(str(m, "label"), context.temp_allocator), 120))
 		if a.hover_again do ask_hover(a, b)
 	case "pick", "area":
 		if seq == 0 || seq != a.pick_seq do return
@@ -542,15 +543,15 @@ annot_message :: proc(a: ^Annot, b: ^Browser, ctx: i64, m: json.Object) {
 		p.scroll = a.scroll
 		p.url = strings.clone(a.url)
 		p.title = strings.clone(a.title)
-		p.tag = strings.clone(cut_utf8(str(m, "tag"), 40))
-		p.role = strings.clone(cut_utf8(str(m, "role"), 80))
-		p.itype = strings.clone(cut_utf8(str(m, "type"), 40))
-		p.name = strings.clone(cut_utf8(str(m, "name"), 400))
-		p.selector = strings.clone(cut_utf8(str(m, "sel"), 1000))
-		p.text = strings.clone(cut_utf8(str(m, "text"), 2000))
+		p.tag = strings.clone(core.cut_utf8(str(m, "tag"), 40))
+		p.role = strings.clone(core.cut_utf8(str(m, "role"), 80))
+		p.itype = strings.clone(core.cut_utf8(str(m, "type"), 40))
+		p.name = strings.clone(core.cut_utf8(str(m, "name"), 400))
+		p.selector = strings.clone(core.cut_utf8(str(m, "sel"), 1000))
+		p.text = strings.clone(core.cut_utf8(str(m, "text"), 2000))
 		if els, is := m["els"].(json.Array); is do for e in els {
 			if len(p.els) >= 5 do break
-			if s, is_s := e.(json.String); is_s do append(&p.els, strings.clone(cut_utf8(s, 400)))
+			if s, is_s := e.(json.String); is_s do append(&p.els, strings.clone(core.cut_utf8(s, 400)))
 		}
 		// the crop now (§3.3: all context when the marker is made), from the frame on screen
 		box := [4]int{int(math.floor(r.x * a.zoom)), int(math.floor(r.y * a.zoom)), int(math.ceil(r[2] * a.zoom)), int(math.ceil(r[3] * a.zoom))}
@@ -604,7 +605,7 @@ track_list :: proc(a: ^Annot) -> string {
 		if mk.tab_id != a.tab_id || mk.kind != .Element || mk.url != key do continue
 		if n > 0 do strings.write_byte(&s, ',')
 		fmt.sbprintf(&s, `{{"id":%d,"k":"e","seq":%d,"sel":`, cid, mk.seq)
-		json_quote(&s, mk.selector)
+		core.json_quote(&s, mk.selector)
 		strings.write_byte(&s, '}')
 		n += 1
 	}
@@ -626,7 +627,7 @@ annot_tick :: proc() {
 	// a comment sent, deleted or cleared takes its marker
 	clear(&gone)
 	for cid in annot_markers {
-		if _, pc, _ := comment_find(cid); pc == nil do append(&gone, cid)
+		if _, pc, _ := core.comment_find(cid); pc == nil do append(&gone, cid)
 	}
 	for cid in gone {
 		marker_free(annot_markers[cid])
@@ -663,7 +664,7 @@ annot_tick :: proc() {
 @(private = "file")
 quoted :: proc(s: string) -> string {
 	b := strings.builder_make(context.temp_allocator)
-	json_quote(&b, s)
+	core.json_quote(&b, s)
 	return strings.to_string(b)
 }
 
@@ -700,7 +701,7 @@ in_pane :: proc(p: [4]f32, x, y: f32) -> bool {
 
 // The Annotate button, ⌘⇧., badge clicks, and in comment mode the mouse over the page and the
 // keys (the page gets neither). True if it took the event.
-annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+annot_event :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 	b := pane_browser(p)
 	if b == nil do return false
 	r := pane_rect(p)
@@ -763,7 +764,7 @@ annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 		return true
 	case .MOUSE_DOWN:
 		if !inside_page do return false
-		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
+		if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false})
 		if e.mouse_button == .LEFT {
 			a.press, a.press_at, a.dragging = true, pt, false
 			a.ptr = pt
@@ -800,7 +801,7 @@ annot_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 // ---- drawing (browser_draw, inside its sgl quads) ----
 
 @(private = "file")
-outline :: proc(r: [4]f32, t: f32, col: Rgba) {
+outline :: proc(r: [4]f32, t: f32, col: core.Rgba) {
 	draw_rect(r.x, r.y, r[2], t, col)
 	draw_rect(r.x, r.y + r[3] - t, r[2], t, col)
 	draw_rect(r.x, r.y, t, r[3], col)
@@ -838,7 +839,7 @@ annot_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 		}
 	}
 	// markers, numbered as the session's list
-	if s, _, _ := find_tab(tab_id); s != nil {
+	if s, _, _ := core.find_tab(tab_id); s != nil {
 		lh := text_line_height(.UI)
 		pad := px(SP_1)
 		for cm, i in s.comments {
@@ -935,9 +936,9 @@ annot_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 	a := annots[tab_id]
 	if a == nil do return
 	fmt.sbprintf(b, `,"mode":"%s","annot_ready":%v,"doc_url":`, a.on ? "comment" : "browse", a.ctx != 0)
-	json_quote(b, a.url)
+	core.json_quote(b, a.url)
 	strings.write_string(b, `,"markers":[`)
-	s, _, _ := find_tab(tab_id)
+	s, _, _ := core.find_tab(tab_id)
 	n := 0
 	if s != nil do for cm, i in s.comments {
 		mk, has := annot_markers[cm.id]
@@ -947,9 +948,9 @@ annot_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
 		if n > 0 do strings.write_byte(b, ',')
 		n += 1
 		fmt.sbprintf(b, `{{"comment_id":%d,"n":%d,"kind":"%s","selector":`, cm.id, i + 1, mk.kind == .Area ? "area" : "element")
-		json_quote(b, mk.selector)
+		core.json_quote(b, mk.selector)
 		strings.write_string(b, `,"url":`)
-		json_quote(b, mk.url)
+		core.json_quote(b, mk.url)
 		fmt.sbprintf(b, `,"box":"%d,%d %dx%d","where":"%s","badge":"%d,%d"%s`, int(math.round(mk.doc.x)), int(math.round(mk.doc.y)), int(math.round(mk.doc[2])), int(math.round(mk.doc[3])), ANNOT_WHERE_NAMES[at_], int(math.round(badge.x * a.zoom)), int(math.round(badge.y * a.zoom)), "}")
 	}
 	strings.write_byte(b, ']')
@@ -1020,20 +1021,20 @@ annot_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string,
 		switch args[0] {
 		case "crop":
 			if len(args) < 4 do return "annot_assert crop N W H", false
-			s := cur()
+			s := core.cur()
 			n := int(f(args[1]))
 			if s == nil || n < 1 || n > len(s.comments) do return fmt.tprintf("ASSERT FAILED annot_assert crop: no comment %d", n), false
 			path := s.comments[n - 1].crop
 			pw, ph, pok := png_size(path)
 			if !pok do return fmt.tprintf("ASSERT FAILED annot_assert crop: %q is not a PNG", path), false
 			ew, eh := f(args[2]) * app.dpi, f(args[3]) * app.dpi
-			if k := f32(COMMENT_CROP_SIDE) / max(ew, eh); k < 1 do ew, eh = ew * k, eh * k
+			if k := f32(core.COMMENT_CROP_SIDE) / max(ew, eh); k < 1 do ew, eh = ew * k, eh * k
 			if abs(f32(pw) - ew) > 2 || abs(f32(ph) - eh) > 2 do return fmt.tprintf("ASSERT FAILED annot_assert crop: %dx%d px, want %.0fx%.0f", pw, ph, ew, eh), false
 			fmt.printfln("[annot] assert ok: crop %d is %dx%d px", n, pw, ph)
 			return "", true
 		case "what", "what_not":
 			if len(args) < 3 do return "annot_assert what|what_not N TEXT", false
-			s := cur()
+			s := core.cur()
 			n := int(f(args[1]))
 			if s == nil || n < 1 || n > len(s.comments) do return fmt.tprintf("ASSERT FAILED annot_assert %s: no comment %d", args[0], n), false
 			text := strings.trim_space(want[len(args[1]):])

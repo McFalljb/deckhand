@@ -18,6 +18,7 @@ import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 
 AUDIT_WIDTHS :: [?]f32{WINDOW_MIN_W, 1280, 1600, 2000}
@@ -186,19 +187,19 @@ audit :: proc(cmds: clay.ClayArray(clay.RenderCommand), where_: string, w: f32, 
 @(private = "file")
 au_reset :: proc(data_dir: string) -> runtime.Allocator {
 	context.allocator = runtime.heap_allocator()
-	for _, t in terms {
-		term_free(t)
+	for _, t in core.terms {
+		core.term_free(t)
 		free(t)
 	}
-	clear(&terms)
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true},
+	clear(&core.terms)
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true, right_open = true},
 	}
-	persist = {}
+	core.persist = {}
 	menu = {}
-	home_root = data_dir
-	platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
+	core.home_root = data_dir
+	core.platform = {quit = proc() {}, set_clipboard = proc(s: string) {}}
 	os.set_env("SHELL", "/bin/sh")
 	os.set_env("DECKHAND_CMD", "sleep 30")
 	return runtime.heap_allocator()
@@ -260,7 +261,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 		full := make([dynamic]string, context.temp_allocator)
 		append(&full, "-c", "user.name=t", "-c", "user.email=t@example.invalid", "-c", "commit.gpgsign=false", "-c", "init.defaultBranch=main")
 		append(&full, ..args)
-		git_run(dir, ..full[:])
+		core.git_run(dir, ..full[:])
 	}
 	au_git(alpha, "init", "-q")
 	au_git(alpha, "add", "main.c")
@@ -283,23 +284,23 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/skills/a-skill-with-a-rather-long-name-that-keeps-going-on/SKILL.md", home), transmute([]u8)string("# s"))
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/APPEND_SYSTEM.md", home), transmute([]u8)string("x"))
 	for f in ([]string{"settings.json", "models.json", "keybindings.json", "mcp.json", "AGENTS.md", "SYSTEM.md"}) do _ = os.write_entire_file(fmt.tprintf("%s/.pi/agent/%s", home, f), transmute([]u8)string("{}"))
-	rescan_now()
+	core.rescan_now()
 	pa, pl: u64
 	for p in state.projects {
 		if p.cwd == alpha do pa = p.id
 		if p.cwd == long do pl = p.id
 	}
-	c := chats_project()
+	c := core.chats_project()
 	if !testing.expect(t, pa != 0 && pl != 0 && c != nil, "projects and Chats scanned") do return
-	run_command(Select_Project{pa}, {kind = .UI})
-	run_command(Open_Session_Cmd{project_id = pl, pi_session_id = "g1"}, {kind = .UI})
-	run_command(Open_Session_Cmd{project_id = c.id, pi_session_id = "c1"}, {kind = .UI})
-	run_command(New_Chat{project_id = pa}, {kind = .UI})
-	run_command(Open_Session_Cmd{project_id = pa, pi_session_id = "r2"}, {kind = .UI})
-	run_command(New_Shell_Tab{session = cur().id}, {kind = .UI})
-	if wr := wt_repo_for(alpha); wr != nil {
+	core.run_command(core.Select_Project{pa}, {kind = .UI})
+	core.run_command(core.Open_Session_Cmd{project_id = pl, pi_session_id = "g1"}, {kind = .UI})
+	core.run_command(core.Open_Session_Cmd{project_id = c.id, pi_session_id = "c1"}, {kind = .UI})
+	core.run_command(core.New_Chat{project_id = pa}, {kind = .UI})
+	core.run_command(core.Open_Session_Cmd{project_id = pa, pi_session_id = "r2"}, {kind = .UI})
+	core.run_command(core.New_Shell_Tab{session = core.cur().id}, {kind = .UI})
+	if wr := core.wt_repo_for(alpha); wr != nil {
 		for _ in 0 ..< 1000 {
-			inbox_drain()
+			core.inbox_drain()
 			if wr.loaded && !wr.loading do break
 			time.sleep(10 * time.Millisecond)
 		}
@@ -316,20 +317,20 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	au_git(wt_long, "add", "staged.c")
 	// in g1's session (its own tabs: the pi tab only), so r2's tab strip stays as it was
 	ch_session := open_session_of(pl, "g1")
-	r := run_command(Changes_Open{session = ch_session, path = wt_long}, {kind = .UI})
+	r := core.run_command(core.Changes_Open{session = ch_session, path = wt_long}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	ch_tab := r.created_id
-	if cr := changes_repo(wt_long); cr != nil {
+	if cr := core.changes_repo(wt_long); cr != nil {
 		for _ in 0 ..< 1000 {
-			changes_ask(cr)
-			changes_tick()
-			inbox_drain()
-			if v := changes_view(ch_tab); cr.loaded && !cr.loading && v != nil && !v.diff_loading do break
+			core.changes_ask(cr)
+			core.changes_tick()
+			core.inbox_drain()
+			if v := core.changes_view(ch_tab); cr.loaded && !cr.loading && v != nil && !v.diff_loading do break
 			time.sleep(10 * time.Millisecond)
 		}
 		testing.expect(t, cr.loaded && len(cr.files) >= 4, "the changes scanned")
 	}
-	if v := changes_view(ch_tab); v != nil {
+	if v := core.changes_view(ch_tab); v != nil {
 		v.notice = strings.clone("git commit failed: pre-commit: lint found 3 problems in src/importers/csv-with-a-rather-long-folder-name/parse.c and more")
 		v.notice_err = true
 		v.diff_lines = 12000 // "Show more" shows
@@ -337,44 +338,44 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	// a Markdown tab in g1's session too (its toolbar, preview and source)
 	md_file := fmt.tprintf("%s/NOTES.md", alpha)
 	_ = os.write_entire_file(md_file, transmute([]u8)string(MD_AUDIT_DOC))
-	r = run_command(Markdown_Open{path = md_file, session = ch_session}, {kind = .UI})
+	r = core.run_command(core.Markdown_Open{path = md_file, session = ch_session}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	md_tab := r.created_id
-	run_command(Focus_Session{session = open_session_of(pa, "r2")}, {kind = .UI})
-	r = run_command(Open_File{path = fmt.tprintf("%s/main.c", alpha)}, {kind = .UI})
+	core.run_command(core.Focus_Session{session = open_session_of(pa, "r2")}, {kind = .UI})
+	r = core.run_command(core.Open_File{path = fmt.tprintf("%s/main.c", alpha)}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	// Atlas's drawer (shown below): a long model id, a working status
-	r = run_command(Set_Home{open = true}, {kind = .UI})
+	r = core.run_command(core.Set_Home{open = true}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	run_command(Set_Home{open = false}, {kind = .UI})
+	core.run_command(core.Set_Home{open = false}, {kind = .UI})
 	state.focus_widget = ""
-	run_command(Set_Agent_Model{model = "opencode-go/muse-spark-1.2-contributor-with-a-rather-long-model-id"}, {kind = .UI})
+	core.run_command(core.Set_Agent_Model{model = "opencode-go/muse-spark-1.2-contributor-with-a-rather-long-model-id"}, {kind = .UI})
 	for d in ([]string{"skills", "skills/a-skill-with-a-rather-long-name-that-keeps-going-on", "extensions"}) {
-		r = run_command(Files_Expand{path = fmt.tprintf("%s/.pi/agent/%s", home, d), expanded = true}, {kind = .UI})
+		r = core.run_command(core.Files_Expand{path = fmt.tprintf("%s/.pi/agent/%s", home, d), expanded = true}, {kind = .UI})
 		testing.expect(t, r.ok, r.error)
 	}
 
 	// the bell: entries of every kind (unread ones: the button's count), one
 	// from yesterday (the Earlier group), long titles
 	{
-		gs := find_session(open_session_of(pl, "g1"))
+		gs := core.find_session(open_session_of(pl, "g1"))
 		testing.expect(t, gs != nil, "g1 is open")
 		if gs != nil {
-			notice_test_now = time.now()
-			defer notice_test_now = {}
-			for k in ([]Notice_Kind{.Error, .Exited, .Waiting, .Finished}) {
-				notice_test_now._nsec += i64(11 * time.Second) // past coalescing: each its own entry
-				notify_session(gs, &gs.tabs[0], k)
+			core.notice_test_now = time.now()
+			defer core.notice_test_now = {}
+			for k in ([]core.Notice_Kind{.Error, .Exited, .Waiting, .Finished}) {
+				core.notice_test_now._nsec += i64(11 * time.Second) // past coalescing: each its own entry
+				core.notify_session(gs, &gs.tabs[0], k)
 			}
-			for st in Job_Status {
-				run_command(Notify_Post{job = {job_id = fmt.tprintf("nightly-%v", st), title = "Nightly dependency audit across every project with a long name", status = st, summary = "3 advisories, 1 needs a decision about the lockfile and the pinned versions", run_dir = "/tmp/x"}})
-				inbox_drain()
+			for st in core.Job_Status {
+				core.run_command(core.Notify_Post{job = {job_id = fmt.tprintf("nightly-%v", st), title = "Nightly dependency audit across every project with a long name", status = st, summary = "3 advisories, 1 needs a decision about the lockfile and the pinned versions", run_dir = "/tmp/x"}})
+				core.inbox_drain()
 			}
 			state.notices.items[0].at._nsec -= i64(36 * time.Hour)
 			state.notices.items[1].read = true
 		}
 	}
-	testing.expect(t, notices_unread() >= 6, "bell entries for the audit")
+	testing.expect(t, core.notices_unread() >= 6, "bell entries for the audit")
 	// the Jobs tab: a notes folder and rows of every kind (long names, an
 	// error, a change to review, needs you, unread, run lines)
 	saved_notes := state.settings.home_dir
@@ -384,14 +385,14 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	os.make_directory_all(fmt.tprintf("%s/memory-elsewhere-with-a-long-name", root))
 	state.settings.folders[.Memory] = strings.clone(fmt.tprintf("%s/memory-elsewhere-with-a-long-name", root))
 	state.home_dir_prev = strings.clone(fmt.tprintf("%s/memory", state.settings.home_dir))
-	settings_gen += 1
+	core.settings_gen += 1
 	state.settings.jobs_paused = true
-	mk :: proc(id, name, project: string) -> Job_Row {
-		r := Job_Row{id = id, name = name, project = project, schedule = "0 7 * * 1-5", path = "/tmp/pd-audit-notes/jobs/x.md", enabled = true}
+	mk :: proc(id, name, project: string) -> core.Job_Row {
+		r := core.Job_Row{id = id, name = name, project = project, schedule = "0 7 * * 1-5", path = "/tmp/pd-audit-notes/jobs/x.md", enabled = true}
 		return r
 	}
 	j1 := mk("a1", "Morning triage of every open pull request across all of my repositories", "pi-kit")
-	j1.last_status, j1.last_headline, j1.unread, j1.last_run, j1.next_due = "ok", "3 PRs wait on you (oldest: pi-kit#9) and a very long headline that keeps on going", 2, "20261101T070000Z-1", jobs_now() + 3600
+	j1.last_status, j1.last_headline, j1.unread, j1.last_run, j1.next_due = "ok", "3 PRs wait on you (oldest: pi-kit#9) and a very long headline that keeps on going", 2, "20261101T070000Z-1", core.jobs_now() + 3600
 	append(&j1.recent, "- 2026-11-01 07:00 ✅ ok 1m12s $0.08 — 3 PRs wait on you (oldest: pi-kit#9) with more text · [run](file:///x/summary.md)", "- 2026-10-31 07:00 ⏭ skipped (asleep) ×3")
 	append(&j1.needs_you, "blocked: bash `git push origin main --force-with-lease` in ~/workspace/pi-kit")
 	j2 := mk("b2", "Heartbeat", "")
@@ -422,13 +423,13 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	// every width at every text size; the looks, light and dark at the default size
 	widths, sizes := AUDIT_WIDTHS, TEXT_SIZE_ORDER
 	combo := 0 // the width/look/appearance combinations so far: this part takes every LAYOUT_PARTS-th
-	for run in 0 ..< len(Text_Size) * len(widths) {
+	for run in 0 ..< len(core.Text_Size) * len(widths) {
 		w := widths[run % len(widths)]
 		if size := sizes[run / len(widths)]; size != state.settings.text_size {
 			state.settings.text_size = size
 			fonts_apply(theme_font_config(theme()), 1)
 		}
-		for look in Theme_Id {
+		for look in core.Theme_Id {
 			for light in ([]bool{false, true}) {
 				if state.settings.text_size != .Default && (look != .Graphite || light) do continue
 				combo += 1
@@ -438,7 +439,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 				for cols in 0 ..< 4 {
 					state.layout.left_open = cols & 1 == 0
 					state.layout.right_open = cols & 2 == 0
-					for tab in Left_Tab {
+					for tab in core.Left_Tab {
 						state.layout.left_tab = tab
 						where_ := fmt.tprintf("w=%.0f %v %s left=%v right=%v %v", w, look, light ? "light" : "dark", state.layout.left_open, state.layout.right_open, tab)
 						cmds := ui_layout(w, AUDIT_H)
@@ -458,7 +459,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 					}
 					// hovered rows (their buttons instead of the time) and open menus
 					if state.layout.left_open {
-						first_open := sidebar_open()[0].id
+						first_open := core.sidebar_open()[0].id
 						for h in ([]Hit{Hit_Open_Row(first_open), Hit_Project(pl), Hit_Project(pa), Hit_Session("r2"), Hit_Chat("c1")}) {
 							ui_hover = h
 							cmds := ui_layout(w, AUDIT_H)
@@ -476,11 +477,11 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 					state.home_open = true
 					state.settings.reduce_motion = true // in place, not sliding
 					for working in ([]bool{false, true}) {
-						if ht := home_tab(); ht != nil do ht.agent = working ? .Working : .Idle
+						if ht := core.home_tab(); ht != nil do ht.agent = working ? .Working : .Idle
 						cmds := ui_layout(w, AUDIT_H)
 						report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d drawer working=%v", w, look, light ? "light" : "dark", cols, working), w, "drawer_head", 5, {"drawer_model", "drawer_model_name", "drawer_pin", "drawer_close"})[:], &problems)
 					}
-					if ht := home_tab(); ht != nil do ht.agent = .Idle
+					if ht := core.home_tab(); ht != nil do ht.agent = .Idle
 					// sliding out, its terminal still shows (it has a rect); gone once out
 					state.settings.reduce_motion = false
 					state.home_open = false
@@ -511,7 +512,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 						menu_close()
 					}
 					// the Changes tab: header, commit row, notice, list, file bar, Show more; hovered
-					if cs := find_session(ch_session); cs != nil && ch_tab != 0 {
+					if cs := core.find_session(ch_session); cs != nil && ch_tab != 0 {
 						prev := state.current_session
 						state.current_session = cs.id
 						cs.active_tab = ch_tab
@@ -529,16 +530,16 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 						state.current_session = prev
 					}
 					// the Markdown tab's toolbar: preview and source
-					if cs := find_session(ch_session); cs != nil && md_tab != 0 {
+					if cs := core.find_session(ch_session); cs != nil && md_tab != 0 {
 						prev := state.current_session
 						state.current_session = cs.id
 						cs.active_tab = md_tab
 						for source in ([]bool{false, true}) {
-							run_command(Markdown_Set_View{tab_id = md_tab, source = source}, {kind = .UI})
+							core.run_command(core.Markdown_Set_View{tab_id = md_tab, source = source}, {kind = .UI})
 							cmds := ui_layout(w, AUDIT_H)
 							report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d markdown source=%v", w, look, light ? "light" : "dark", cols, source), w)[:], &problems)
 						}
-						run_command(Markdown_Set_View{tab_id = md_tab, source = false}, {kind = .UI})
+						core.run_command(core.Markdown_Set_View{tab_id = md_tab, source = false}, {kind = .UI})
 						state.current_session = prev
 					}
 					// the settings popover over it all
@@ -559,7 +560,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 						state.focus_widget = "setup"
 						// the accounts step: found ones, one typed in without Claude Code's files, a long label, a warning
 						for d, k in ([]string{"/Users/someone/.claude", "/Users/someone/.claude-work", "/Volumes/External/a-very-long-folder-name-for-claude/config-of-the-team"}) {
-							append(&setup_ui.accounts, Setup_Account{dir = strings.clone(d), label = strings.clone(k == 2 ? "A rather long account name for here" : claude_account_label_of(d)), orig_label = strings.clone(""), keep = k != 1, fixed = k == 0, hand = k == 2, marked = k != 2})
+							append(&setup_ui.accounts, core.Setup_Account{dir = strings.clone(d), label = strings.clone(k == 2 ? "A rather long account name for here" : core.claude_account_label_of(d)), orig_label = strings.clone(""), keep = k != 1, fixed = k == 0, hand = k == 2, marked = k != 2})
 						}
 						setup_ui.acct_show = true
 						setup_ui.acct_default = 2
@@ -630,14 +631,14 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 	fonts_apply(theme_font_config(theme()), 1)
 	testing.expectf(t, problems == 0, "%d layout problems", problems)
 	state.layout.left_open, state.layout.right_open = true, true
-	close_all()
+	core.close_all()
 }
 
 // Fonts and Clay once, at 1x, without a window (layout only, no drawing).
 audit_ui :: proc() -> bool {
 	@(static) ready: bool
 	if ready do return true
-	app_context = context // text measuring (Clay's callback) runs in it
+	core.app_context = context // text measuring (Clay's callback) runs in it
 	app.dpi = 1
 	font.size = ATLAS_MIN
 	font.pixels = make([]u8, ATLAS_MIN * ATLAS_MIN * 4)
@@ -656,7 +657,7 @@ rename_field_always_shows :: proc(t: ^testing.T) {
 	os.make_directory_all(root)
 	context.allocator = au_reset("")
 	if !testing.expect(t, audit_ui(), "fonts") do return
-	r := run_command(Add_Project{cwd = root}, {kind = .UI})
+	r := core.run_command(core.Add_Project{cwd = root}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	shown :: proc() -> bool {
 		_ = ui_layout(1400, AUDIT_H)
@@ -667,9 +668,9 @@ rename_field_always_shows :: proc(t: ^testing.T) {
 	state.sidebar.folded[.Projects] = true
 	testing.expect(t, shown(), "Projects folded")
 	state.sidebar.folded[.Projects] = false
-	run_command(Set_Filter{text = "zzzz"}, {kind = .UI})
+	core.run_command(core.Set_Filter{text = "zzzz"}, {kind = .UI})
 	testing.expect(t, shown(), "filtered out")
-	run_command(Set_Filter{text = ""}, {kind = .UI})
+	core.run_command(core.Set_Filter{text = ""}, {kind = .UI})
 	state.focus_widget = ""
 }
 
@@ -713,7 +714,7 @@ markdown_preview_audit :: proc(t: ^testing.T) {
 			lay_free(&v.lay)
 			free(v)
 		}
-		for size in Text_Size do for dpi in ([]f32{1, 2}) {
+		for size in core.Text_Size do for dpi in ([]f32{1, 2}) {
 			state.settings.text_size = size
 			app.dpi = dpi
 			fonts_apply(theme_font_config(theme()), dpi)
@@ -776,15 +777,15 @@ markdown_layout_pathological :: proc(t: ^testing.T) {
 	run :: proc(t: ^testing.T, name, text: string, limit: time.Duration) -> (gate_ok, budget_ok: bool) {
 		v := new(Md_View)
 		v.doc = md_parse(text)
-		t0 := thread_cpu_now() // CPU time: a busy machine does not fail it
+		t0 := core.thread_cpu_now() // CPU time: a busy machine does not fail it
 		for w in ([]f32{700, 1300}) do md_layout(v, w)
-		d := thread_cpu_since(t0)
+		d := core.thread_cpu_since(t0)
 		fmt.printfln("markdown layout: %s (%d KB) in %.1f ms", name, len(text) / 1000, f64(d) / f64(time.Millisecond))
 		md_free(v.doc)
 		lay_free(&v.lay)
 		free(v)
 		free_all(context.temp_allocator)
-		gate_ok = perf_expect(t, fmt.tprintf("markdown layout: %s (%d KB)", name, len(text) / 1000), d, limit)
+		gate_ok = core.perf_expect(t, fmt.tprintf("markdown layout: %s (%d KB)", name, len(text) / 1000), d, limit)
 		return gate_ok, d <= limit
 	}
 	small_gate, small_budget := true, true
@@ -813,11 +814,11 @@ markdown_html_pathological :: proc(t: ^testing.T) {
 	if !testing.expect(t, audit_ui(), "fonts") do return
 	v := new(Md_View)
 	v.doc = md_parse(strings.concatenate({"<div>\n", strings.repeat("<a ", 350_000, context.temp_allocator), "\n"}, context.temp_allocator))
-	t0 := thread_cpu_now() // CPU time: a busy machine does not fail it
+	t0 := core.thread_cpu_now() // CPU time: a busy machine does not fail it
 	md_layout(v, 700)
-	d := thread_cpu_since(t0)
+	d := core.thread_cpu_since(t0)
 	fmt.printfln("markdown layout: an unclosed '<' in HTML, 1 MB, in %.1f ms", f64(d) / f64(time.Millisecond))
-	perf_expect(t, "markdown_html_pathological: an unclosed '<' in HTML, 1 MB", d, time.Second)
+	core.perf_expect(t, "markdown_html_pathological: an unclosed '<' in HTML, 1 MB", d, time.Second)
 	md_free(v.doc)
 	lay_free(&v.lay)
 	free(v)
@@ -837,7 +838,7 @@ confirm_bar_keeps_its_buttons :: proc(t: ^testing.T) {
 	path := fmt.tprintf("Delete %s?", strings.repeat("/averyveryverylongfoldernamewithoutanyspaces", 12, context.temp_allocator))
 	for summary in ([]string{"Close this session?", long, path}) {
 		clear(&state.pending_confirmations)
-		append(&state.pending_confirmations, Pending_Confirmation{token = "tok", summary = summary, command = Quit{}, class = .App_Quit, caller = {kind = .UI}})
+		append(&state.pending_confirmations, core.Pending_Confirmation{token = "tok", summary = summary, command = core.Quit{}, class = .App_Quit, caller = {kind = .UI}})
 		for left_open in ([]bool{true, false}) {
 			state.layout.left_open = left_open
 			for w in ([]f32{WINDOW_MIN_W, 1280}) {
@@ -880,12 +881,12 @@ disk_banner_keeps_its_buttons :: proc(t: ^testing.T) {
 	os.make_directory_all(root)
 	context.allocator = au_reset("")
 	if !testing.expect(t, audit_ui(), "fonts") do return
-	ui := Caller{kind = .UI}
-	run_command(Add_Project{cwd = root}, ui)
-	run_command(New_Chat{project_id = state.selected_project}, ui)
+	ui := core.Caller{kind = .UI}
+	core.run_command(core.Add_Project{cwd = root}, ui)
+	core.run_command(core.New_Chat{project_id = state.selected_project}, ui)
 	file := fmt.tprintf("%s/%s.txt", root, strings.repeat("a-file-with-a-long-name-", 8, context.temp_allocator))
 	_ = os.write_entire_file(file, transmute([]u8)string("hello\n"))
-	r := run_command(Open_File{path = file}, ui)
+	r := core.run_command(core.Open_File{path = file}, ui)
 	if !testing.expect(t, r.ok, r.error) do return
 	e := tab_editor()
 	if !testing.expect(t, e != nil, "an editor tab") do return
@@ -901,6 +902,6 @@ disk_banner_keeps_its_buttons :: proc(t: ^testing.T) {
 			testing.expectf(t, inside_box(b, Box{0, 0, w, AUDIT_H}) && inside_box(b, bb), "w=%v: %s at %v, banner %v", w, name, b, bb)
 		}
 	}
-	if cs := cur(); cs != nil do run_command(Close_Session{session = cs.id}, ui)
-	for p in state.pending_confirmations do run_command(Cancel_Confirmation{token = p.token}, ui)
+	if cs := core.cur(); cs != nil do core.run_command(core.Close_Session{session = cs.id}, ui)
+	for p in state.pending_confirmations do core.run_command(core.Cancel_Confirmation{token = p.token}, ui)
 }

@@ -3,6 +3,7 @@ package main
 // The scene runner's platform layer (autotest.odin; `./build.sh test`).
 
 import "core:testing"
+import "core"
 
 // A script's copies and pastes stay in the app: scenes run side by side (and beside other runs on
 // the machine), and the system pasteboard is shared, so a copy in one scene could replace what
@@ -11,24 +12,24 @@ import "core:testing"
 // clipboard. Only a page (Chromium) still uses the system pasteboard.
 @(test)
 autotest_clipboard_stays_in_the_app :: proc(t: ^testing.T) {
-	saved := platform
+	saved := core.platform
 	defer {
-		platform = saved
+		core.platform = saved
 		delete(autotest.clipboard)
 		delete(autotest.pasteboard)
 		autotest.clipboard, autotest.pasteboard = "", ""
 	}
-	platform = {}
+	core.platform = {}
 	autotest_platform()
-	testing.expect(t, platform.get_clipboard != nil)
-	platform.set_clipboard("copied in a scene")
-	testing.expect_value(t, clipboard_text(), "copied in a scene")
+	testing.expect(t, core.platform.get_clipboard != nil)
+	core.platform.set_clipboard("copied in a scene")
+	testing.expect_value(t, core.clipboard_text(), "copied in a scene")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene") // assert_clipboard
 	// `paste`: what the next paste reads, not what Deckhand copied
 	autotest_paste_set("typed by the script")
-	testing.expect_value(t, clipboard_text(), "typed by the script")
+	testing.expect_value(t, core.clipboard_text(), "typed by the script")
 	testing.expect_value(t, autotest.clipboard, "copied in a scene")
 	// no platform (unit tests): nothing to paste
-	platform = {}
-	testing.expect_value(t, clipboard_text(), "")
+	core.platform = {}
+	testing.expect_value(t, core.clipboard_text(), "")
 }

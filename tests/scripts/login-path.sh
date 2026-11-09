@@ -6,7 +6,7 @@
 # from the sidebar and checks which pi its tabs ran (the project argument
 # opens a new session too). The pis are tiny shell scripts: never a real pi.
 #   1. SHELL=/bin/zsh, ~/.zshrc puts ~/brew/bin first: the pi tabs find the
-#      fake pi there (src/login_env.odin takes `zsh -i -l -c`'s environment).
+#      fake pi there (src/core/login_env.odin takes `zsh -i -l -c`'s environment).
 #   2. a shell whose interactive start fails: the fallback folders
 #      (DECKHAND_PATH_DIRS stands in for /opt/homebrew/bin and the rest)
 #   3. no pi anywhere: the tab says so and names the profile to fix

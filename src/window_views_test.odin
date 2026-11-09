@@ -9,6 +9,7 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 import "core:testing"
+import "core"
 
 @(private = "file")
 wv_opened: [dynamic]u64
@@ -20,11 +21,11 @@ wv_dropped: [dynamic]u64
 @(private = "file")
 wv_reset :: proc() -> (session: u64, dir: string) {
 	context.allocator = runtime.heap_allocator()
-	inbox_drain()
-	state = State {
-		layout = {left_width = LEFT_WIDTH_DEFAULT, right_width = RIGHT_WIDTH_DEFAULT},
+	core.inbox_drain()
+	state^ = core.State {
+		layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT},
 	}
-	platform = {}
+	core.platform = {}
 	clear(&wv_opened)
 	clear(&wv_dropped)
 	wv_open_line = 0
@@ -32,8 +33,8 @@ wv_reset :: proc() -> (session: u64, dir: string) {
 	os.remove_all(dir)
 	os.make_directory_all(dir)
 	_ = os.write_entire_file(strings.concatenate({dir, "/notes.txt"}, context.temp_allocator), transmute([]u8)string("one\ntwo\nthree\n"))
-	s := Open_Session{id = new_id(), pi_session_id = "pi-wv", cwd = fs_real(dir)}
-	append(&s.tabs, Tab{id = new_id(), kind = Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
+	s := core.Open_Session{id = core.new_id(), pi_session_id = "pi-wv", cwd = core.fs_real(dir)}
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running, agent = .Idle})
 	s.active_tab = s.tabs[0].id
 	append(&state.open_sessions, s)
 	state.current_session = s.id
@@ -42,9 +43,9 @@ wv_reset :: proc() -> (session: u64, dir: string) {
 
 // A fake window that only records the view hooks.
 @(private = "file")
-wv_fake :: proc() -> Window_Hooks {
+wv_fake :: proc() -> core.Window_Hooks {
 	h := window_hooks_app()
-	h.view_open = proc(tab_id: u64, kind: Tab_Kind, line: int, anchor: string) {
+	h.view_open = proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
 		append(&wv_opened, tab_id)
 		wv_open_line = line
 	}
@@ -56,18 +57,18 @@ wv_fake :: proc() -> Window_Hooks {
 // show_file makes a record and the window its view (at the line); closing the tab drops it.
 @(test)
 window_views_follow_tab_records :: proc(t: ^testing.T) {
-	saved := window
-	defer window = saved
-	window = wv_fake()
+	saved := core.window
+	defer core.window = saved
+	core.window = wv_fake()
 	_, dir := wv_reset()
 	defer os.remove_all(dir)
-	r := run_command(Show_File{path = "notes.txt", line = 2}, {kind = .UI})
+	r := core.run_command(core.Show_File{path = "notes.txt", line = 2}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	testing.expect_value(t, len(wv_opened), 1)
 	if len(wv_opened) == 1 do testing.expect_value(t, wv_opened[0], r.created_id)
 	testing.expect_value(t, wv_open_line, 2)
 	testing.expect(t, editor_of(r.created_id) == nil) // the fake window made none
-	c := run_command(Close_Tab{tab_id = r.created_id}, {kind = .Internal})
+	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, c.ok, c.error)
 	testing.expect_value(t, len(wv_dropped), 1)
 	if len(wv_dropped) == 1 do testing.expect_value(t, wv_dropped[0], r.created_id)
@@ -76,19 +77,19 @@ window_views_follow_tab_records :: proc(t: ^testing.T) {
 // The app's window: the same record gets a real editor at the line, and it goes with the tab.
 @(test)
 window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
-	saved := window
-	defer window = saved
-	window = window_hooks_app()
+	saved := core.window
+	defer core.window = saved
+	core.window = window_hooks_app()
 	_, dir := wv_reset()
 	defer os.remove_all(dir)
-	r := run_command(Show_File{path = "notes.txt", line = 3}, {kind = .UI})
+	r := core.run_command(core.Show_File{path = "notes.txt", line = 3}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	e := editor_of(r.created_id)
 	testing.expect(t, e != nil)
 	if e != nil do testing.expect_value(t, tb_line_of(&e.buf, e.cursor), 2) // 0-based
-	testing.expect(t, !window_tab_dirty(r.created_id))
-	testing.expect_value(t, window_unsaved_files(), 0)
-	run_command(Close_Tab{tab_id = r.created_id}, {kind = .Internal})
+	testing.expect(t, !core.window_tab_dirty(r.created_id))
+	testing.expect_value(t, core.window_unsaved_files(), 0)
+	core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, editor_of(r.created_id) == nil)
 }
 
@@ -96,31 +97,31 @@ window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
 // only the window can do is refused.
 @(test)
 window_views_no_window :: proc(t: ^testing.T) {
-	saved := window
-	defer window = saved
-	window = {}
+	saved := core.window
+	defer core.window = saved
+	core.window = {}
 	session, dir := wv_reset()
 	defer os.remove_all(dir)
-	r := run_command(Show_File{path = "notes.txt"}, {kind = .UI})
+	r := core.run_command(core.Show_File{path = "notes.txt"}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
-	_, tab, _ := find_tab(r.created_id)
+	_, tab, _ := core.find_tab(r.created_id)
 	testing.expect(t, tab != nil)
 	testing.expect(t, editor_of(r.created_id) == nil)
-	testing.expect(t, !window_tab_dirty(r.created_id))
-	testing.expect_value(t, window_unsaved_files(), 0)
-	testing.expect_value(t, window_unsaved_files(dir), 0)
-	testing.expect(t, !window_job_sheet_open())
-	testing.expect(t, !window_job_sheet_holds_quit())
-	testing.expect(t, !window_job_sheet_saved("x", ""))
-	testing.expect(t, !window_changes_diff(r.created_id, "p", "text"))
-	testing.expect_value(t, window_dpi(), f32(0))
-	_, ok := window_setup_state()
+	testing.expect(t, !core.window_tab_dirty(r.created_id))
+	testing.expect_value(t, core.window_unsaved_files(), 0)
+	testing.expect_value(t, core.window_unsaved_files(dir), 0)
+	testing.expect(t, !core.window_job_sheet_open())
+	testing.expect(t, !core.window_job_sheet_holds_quit())
+	testing.expect(t, !core.window_job_sheet_saved("x", ""))
+	testing.expect(t, !core.window_changes_diff(r.created_id, "p", "text"))
+	testing.expect_value(t, core.window_dpi(), f32(0))
+	_, ok := core.window_setup_state()
 	testing.expect(t, !ok)
-	js := run_command(Job_Sheet{open = true}, {kind = .UI})
+	js := core.run_command(core.Job_Sheet{open = true}, {kind = .UI})
 	testing.expect_value(t, js.error, "no window")
-	tl := run_command(Terminal_Link{tab_id = find_session(session).tabs[0].id, url = "https://example.com"}, {kind = .UI})
+	tl := core.run_command(core.Terminal_Link{tab_id = core.find_session(session).tabs[0].id, url = "https://example.com"}, {kind = .UI})
 	testing.expect_value(t, tl.error, "no window")
 	// closing works without a window too
-	c := run_command(Close_Tab{tab_id = r.created_id}, {kind = .Internal})
+	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, c.ok, c.error)
 }

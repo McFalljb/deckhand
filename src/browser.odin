@@ -37,6 +37,7 @@ package main
 
 import "core:c"
 import "core:encoding/json"
+import "core"
 import jg "jsonguard"
 import "core:fmt"
 import "core:os"
@@ -49,14 +50,6 @@ import sapp "../vendor/sokol-odin/sokol/app"
 import sg "../vendor/sokol-odin/sokol/gfx"
 import sgl "../vendor/sokol-odin/sokol/gl"
 import clay "../build/clay-odin"
-
-Browser_Tab :: struct {
-	url:           string, // the page's address now; what it opens with (owned; browser_nav.odin)
-	loading:       bool,
-	can_back:      bool,
-	can_forward:   bool,
-	blocked_popup: string, // the last popup refused for want of a user gesture ("" = none)
-}
 
 // Runtime per browser tab (outside State), keyed by tab id.
 Browser :: struct {
@@ -130,7 +123,7 @@ browser_of :: proc(tab_id: u64) -> ^Browser {return browsers[tab_id]}
 
 // The browser of the tab on screen, or nil.
 tab_browser :: proc() -> ^Browser {
-	if tab := active_tab(); tab != nil do return browsers[tab.id]
+	if tab := core.active_tab(); tab != nil do return browsers[tab.id]
 	return nil
 }
 
@@ -139,14 +132,14 @@ tab_browser :: proc() -> ^Browser {
 // session on screen stays). 0 and why: no such session, or Home (only its pi tab). Callers:
 // browser_open (a command, browser_nav.odin), popups, test mode's web_open; they bump State.
 browser_tab_open :: proc(session: u64, url: string, background := false, pane: u64 = 0) -> (id: u64, err: string) {
-	cs := find_session(session)
+	cs := core.find_session(session)
 	if cs == nil do return 0, "no such session"
 	if cs.home do return 0, "Home has only its pi tab"
 	title := url == "about:blank" ? "New tab" : "Browser"
 	// State never holds a user name or password (browser_url_public); the page gets the URL as given
-	tab := Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(browser_url_public(url))}, title = strings.clone(title), status = .Running}
-	pane_add_tab(cs, tab, pane = pane)
-	if !background do session_show_tab(cs, tab.id)
+	tab := core.Tab{id = core.new_id(), kind = core.Browser_Tab{url = strings.clone(core.browser_url_public(url))}, title = strings.clone(title), status = .Running}
+	core.pane_add_tab(cs, tab, pane = pane)
+	if !background do core.session_show_tab(cs, tab.id)
 	browser_attach(tab.id, url)
 	return tab.id, ""
 }
@@ -201,7 +194,7 @@ cef_start :: proc() -> bool {
 	if !CEF_BUILT_IN do return false
 	// macOS's Library lookups ignore $HOME: a scene without CFFIXED_USER_HOME
 	// on its fake home would let Chromium write the user's ~/Library (RLZ)
-	if autotest_active && os.get_env("CFFIXED_USER_HOME", context.temp_allocator) == "" {
+	if core.autotest_active && os.get_env("CFFIXED_USER_HOME", context.temp_allocator) == "" {
 		fmt.println("[browser] test mode: CEF needs CFFIXED_USER_HOME (the scene's fake home)")
 		return false
 	}
@@ -223,19 +216,19 @@ cef_start :: proc() -> bool {
 		title = on_cef_title,
 		loading = on_cef_loading,
 		closed = on_cef_closed,
-		log = proc "c" (s: cstring) {context = app_context; fmt.println("[browser]", s)},
+		log = proc "c" (s: cstring) {context = core.app_context; fmt.println("[browser]", s)},
 		address = on_cef_address,
 		nav = on_cef_nav,
 		popup = on_cef_popup,
 	}
 	// test mode never touches the network (SPIKE: the real policy for Chromium's
 	// Google services is open, see the report)
-	no_network: c.int = autotest_active || hook_env(.Cef_Offline) == "1" ? 1 : 0
+	no_network: c.int = core.autotest_active || core.hook_env(.Cef_Offline) == "1" ? 1 : 0
 	t0 := time.tick_now()
 	ok := dh_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
 	cef_start_ms = time.duration_milliseconds(time.tick_since(t0))
 	if ok do cef_state = .Running
-	if ok && autotest_active {
+	if ok && core.autotest_active {
 		// deckhand-test://web/NAME: the fixtures in tests/web (no network)
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		web, _ := filepath.join({cwd, "tests", "web"}, context.temp_allocator)
@@ -287,7 +280,7 @@ by_cef :: proc(id: c.int) -> ^Browser {
 
 @(private = "file")
 on_cef_painted :: proc "c" (id: c.int, w, h: c.int, accelerated: c.int, written: rawptr) {
-	context = app_context
+	context = core.app_context
 	b := by_cef(id)
 	if b == nil do return
 	if written != nil && written == b.drawn_tex do b.overwrites += 1
@@ -303,7 +296,7 @@ on_cef_painted :: proc "c" (id: c.int, w, h: c.int, accelerated: c.int, written:
 // loop makes it once that passed, browser_ring_sizing). 1 = made.
 @(private = "file")
 on_cef_ring :: proc "c" (tab_id: u64, w, h: c.int) -> c.int {
-	context = app_context
+	context = core.app_context
 	b := browsers[tab_id]
 	if b == nil || !b.chan do return 0
 	browser_paint_size(b, int(w), int(h))
@@ -407,7 +400,7 @@ browser_frames_tick :: proc() -> bool {
 		p: Frames_Poll
 		dh_frames_poll(id, &p)
 		if p.has_frame != 0 {
-			if tab_on_screen(id) || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
+			if core.tab_on_screen(id) || browser_agent_wakes(id) { // or painted for an agent's screenshot (browser_agent.odin)
 				og, os_, retire := ring_take(&b.ring, p.gen, p.slot, p.seq, p.tick)
 				if retire do dh_frames_retire(id, og, u32(os_))
 				b.ring.last_frame = now // live frames on screen: the display link stays fast (frames.odin)
@@ -425,7 +418,7 @@ browser_frames_tick :: proc() -> bool {
 // A browser tab on screen painted within DISPLAY_FAST_HOLD (the display link's rate: frames.odin).
 browser_frames_live :: proc() -> bool {
 	now := time.tick_now()
-	for id, b in browsers do if display_tab_live(tab_on_screen(id), false, ring_framed_recently(&b.ring, now)) do return true
+	for id, b in browsers do if display_tab_live(core.tab_on_screen(id), false, ring_framed_recently(&b.ring, now)) do return true
 	return false
 }
 
@@ -436,7 +429,7 @@ browser_frames_committed :: proc() {
 
 @(private = "file")
 on_cef_title :: proc "c" (id: c.int, utf8: cstring) {
-	context = app_context
+	context = core.app_context
 	b := by_cef(id)
 	if b == nil do return
 	delete(b.title)
@@ -448,7 +441,7 @@ on_cef_title :: proc "c" (id: c.int, utf8: cstring) {
 // The main frame's address (a link, a redirect, back/forward).
 @(private = "file")
 on_cef_address :: proc "c" (id: c.int, utf8: cstring) {
-	context = app_context
+	context = core.app_context
 	b := by_cef(id)
 	if b == nil do return
 	browser_report({tab_id = b.tab_id, what = {.Url}, url = string(utf8)})
@@ -456,7 +449,7 @@ on_cef_address :: proc "c" (id: c.int, utf8: cstring) {
 
 @(private = "file")
 on_cef_nav :: proc "c" (id: c.int, loading, can_back, can_forward: c.int) {
-	context = app_context
+	context = core.app_context
 	b := by_cef(id)
 	if b == nil do return
 	browser_report({tab_id = b.tab_id, what = {.Nav}, loading = loading != 0, can_back = can_back != 0, can_forward = can_forward != 0})
@@ -474,10 +467,10 @@ on_cef_nav :: proc "c" (id: c.int, loading, can_back, can_forward: c.int) {
 // browser_report that follows bumps State's version and sends the event.
 @(private = "file")
 on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, background: c.int) -> u64 {
-	context = app_context
+	context = core.app_context
 	ob := by_cef(opener)
 	if ob == nil do return 0
-	s, _, _ := find_tab(ob.tab_id)
+	s, _, _ := core.find_tab(ob.tab_id)
 	if s == nil do return 0
 	u := string(url)
 	if user_gesture == 0 {
@@ -515,10 +508,10 @@ browser_chan :: proc(b: ^Browser) -> bool {
 	if b.chan do return true
 	b.chan = dh_frames_local_open(b.tab_id, sg.mtl_device()) == 1
 	browser_frames ||= b.chan
-	if autotest_active {
+	if core.autotest_active {
 		// count writes into any texture an uncompleted GPU frame samples;
 		// DECKHAND_TEST_GPU_LAG_MS: a slow GPU (the completed handler's work waits)
-		lag, _ := strconv.parse_int(hook_env(.Gpu_Lag_Ms))
+		lag, _ := strconv.parse_int(core.hook_env(.Gpu_Lag_Ms))
 		dh_frames_test_track(1, c.int(lag))
 	}
 	return b.chan
@@ -526,13 +519,13 @@ browser_chan :: proc(b: ^Browser) -> bool {
 
 @(private = "file")
 on_cef_loading :: proc "c" (id: c.int, loading: c.int) {
-	context = app_context
+	context = core.app_context
 	if b := by_cef(id); b != nil do b.loading = loading != 0
 }
 
 @(private = "file")
 on_cef_closed :: proc "c" (id: c.int) {
-	context = app_context
+	context = core.app_context
 	b := by_cef(id)
 	if b == nil do return // Deckhand closed it (browser_drop) or quit
 	// the page closed itself (window.close()): say so; Reload opens it again
@@ -565,13 +558,13 @@ browser_tick :: proc() {
 	browser_url_check() // the URL field belongs to the tab it was opened on (browser_nav.odin)
 	if len(browsers) == 0 do return
 	now := time.tick_now()
-	for _, b in browsers do if tab_on_screen(b.tab_id) {
+	for _, b in browsers do if core.tab_on_screen(b.tab_id) {
 		b.shown_at = now // the page plan's LRU: never an on-screen page's slot
 		b.lazy = false // shown: its page opens
 	}
 	browser_pages()
 	for _, b in browsers {
-		hidden := !tab_on_screen(b.tab_id)
+		hidden := !core.tab_on_screen(b.tab_id)
 		// a popup's browser is not there until CEF made it (on_after_created)
 		if b.cef == 0 || dh_cef_ready(b.cef) == 0 do continue
 		focused := browser_wants_keys(b)
@@ -600,7 +593,7 @@ browser_tick :: proc() {
 // The page has Deckhand's keyboard: its tab is the focused one (panes.odin) and no widget has
 // the keyboard.
 browser_wants_keys :: proc(b: ^Browser) -> bool {
-	return tab_focused(b.tab_id) && state.focus_widget == ""
+	return core.tab_focused(b.tab_id) && state.focus_widget == ""
 }
 
 BROWSER_WAIT_MESSAGE :: "Too many open pages: this one opens when another closes"
@@ -613,13 +606,13 @@ browser_pages :: proc() {
 	list := make([dynamic]^Browser, context.temp_allocator)
 	pages := make([dynamic]Page_Info, context.temp_allocator)
 	for _, b in browsers {
-		s, _, _ := find_tab(b.tab_id)
+		s, _, _ := core.find_tab(b.tab_id)
 		if s == nil do continue
 		live := b.cef != 0
 		wants := !live && !b.lazy && (b.message == "" || b.waiting)
 		if !live && !wants do continue
 		append(&list, b)
-		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = tab_on_screen(b.tab_id), pinned = live && dh_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
+		append(&pages, Page_Info{session = s.id, live = live, wants = wants, visible = core.tab_on_screen(b.tab_id), pinned = live && dh_cef_ready(b.cef) == 0, shown = i64(b.shown_at._nsec)})
 	}
 	if len(pages) == 0 do return
 	want_any := false
@@ -699,7 +692,7 @@ browser_draw :: proc(tab_id: u64, x, y, w, h: f32) {
 	dw, dh := min(f32(b.content_w), w), min(f32(b.content_h), h)
 	u, v := dw / f32(g.w), dh / f32(g.h)
 	b.drawn_tex = dh_frames_slot_texture(b.tab_id, g.gen, c.int(b.ring.shown_slot))
-	if autotest_active do dh_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
+	if core.autotest_active do dh_frames_sampled(b.drawn_tex) // in flight until this frame's GPU work completes
 	sgl.end()
 	sgl.texture({g.view[b.ring.shown_slot]}, browser_sampler)
 	sgl.begin_quads()
@@ -755,7 +748,7 @@ in_page :: proc(p: [4]f32, x, y: f32) -> bool {
 // Forwards the event to the browser pane p shows. True if it took it. As for
 // an editor tab (editor_event): keys only while no widget has the keyboard;
 // the mouse not under the palette, a menu or a sheet, nor in Atlas's drawer.
-browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
+browser_event :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 	b := pane_browser(p)
 	if b == nil do return false
 	r := pane_rect(p)
@@ -764,7 +757,7 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	if b.cef == 0 {
 		// the page closed itself: its Reload button (ui.odin) opens it again
 		if e.type == .MOUSE_DOWN && b.closed_by_page && cinside("browser_reload", e.mouse_x, e.mouse_y) {
-			ui_do(Browser_Reload{b.tab_id})
+			ui_do(core.Browser_Reload{b.tab_id})
 			return true
 		}
 		return false
@@ -792,8 +785,8 @@ browser_event :: proc(p: ^Pane, e: ^sapp.Event) -> bool {
 	case .MOUSE_DOWN:
 		if !in_page(r, e.mouse_x, e.mouse_y) do return false
 		// a click in the page takes the keyboard back; a sliding drawer goes away
-		if state.home_open && !state.layout.drawer_pinned do ui_do(Set_Home{open = false})
-		if state.focus_widget != "" do ui_do(Set_Focus{""})
+		if state.home_open && !state.layout.drawer_pinned do ui_do(core.Set_Home{open = false})
+		if state.focus_widget != "" do ui_do(core.Set_Focus{""})
 		ime_cancel()
 		b.buttons |= flag
 		browser_act_user_input(b.tab_id) // an agent acting here pauses (browser_act.odin)
@@ -1029,7 +1022,7 @@ browser_wait_done :: proc(fail: proc(msg: string)) -> bool {
 // split: the keyboard in a shell beside it).
 script_browser :: proc() -> ^Browser {
 	if b := tab_browser(); b != nil do return b
-	if s := cur(); s != nil do for &p in s.panes do if b := pane_browser(&p); b != nil do return b
+	if s := core.cur(); s != nil do for &p in s.panes do if b := pane_browser(&p); b != nil do return b
 	return nil
 }
 
@@ -1043,7 +1036,7 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 			url = fmt.tprintf("file://%s/%s", cwd, url)
 		}
 		// the test's own session: the one on screen (a user's action)
-		cs := cur()
+		cs := core.cur()
 		if cs == nil do return "web_open: no session", false
 		id, err := browser_tab_open(cs.id, url)
 		if id == 0 do return fmt.tprintf("web_open: %s", err), false
@@ -1224,12 +1217,12 @@ browser_script :: proc(cmd: string, args: []string, rest: string) -> (msg: strin
 browser_debug_tick :: proc() {
 	@(static) done: bool
 	if done do return
-	url := hook_env(.Debug_Browser)
+	url := core.hook_env(.Debug_Browser)
 	if url == "" {
 		done = true
 		return
 	}
-	cs := cur()
+	cs := core.cur()
 	if cs == nil do return
 	done = true
 	browser_tab_open(cs.id, url) // the session on screen: as if the user opened it there
@@ -1244,7 +1237,7 @@ browser_reload_button :: proc() {
 // The folder that holds the browser's profile, cache and log (its "browser" folder).
 @(private = "file")
 browser_root :: proc(allocator := context.allocator) -> string {
-	root := home_root != "" ? home_root : "build/test-data"
+	root := core.home_root != "" ? core.home_root : "build/test-data"
 	if !filepath.is_abs(root) {
 		cwd, _ := os.get_working_directory(context.temp_allocator)
 		root, _ = filepath.join({cwd, root}, context.temp_allocator)

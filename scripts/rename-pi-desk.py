@@ -64,14 +64,14 @@ PROTECT_GLOBAL = [
 
 # Per file: extra spans kept (regexes), for the old-product lines in code.
 PROTECT_FILE = {
-    "src/instance.odin": [
+    "src/core/instance.odin": [
         r"pi-desk-<uid>", r'"pi-desk-"', r'"pi-desk"', r"pi-desk is (?:running|using)[^\"]*", r"Quit pi-desk first",
         r"running pi-desk\b", r"pi-desk 0\.1", r"pi-desk-<pid>\.sock", r"\bold pi-desk\b",
     ],
-    "src/instance_test.odin": [r"[\w/.$%-]*pi-desk[\w/.$%-]*", r"pi-desk"],
-    "src/socket_posix.odin": [r"pi-desk-%d", r"/pi-desk\"", r"pi-desk-<uid>", r"/pi-desk,", r"pi-desk 0\.1\.x",
+    "src/core/instance_test.odin": [r"[\w/.$%-]*pi-desk[\w/.$%-]*", r"pi-desk"],
+    "src/core/socket_posix.odin": [r"pi-desk-%d", r"/pi-desk\"", r"pi-desk-<uid>", r"/pi-desk,", r"pi-desk 0\.1\.x",
                                r"running pi-desk", r"XDG_RUNTIME_DIR/pi-desk"],
-    "src/runtime_dir_test.odin": [r"pi-desk-\d+", r"pi-desk-%d", r"/pi-desk\b"],
+    "src/core/runtime_dir_test.odin": [r"pi-desk-\d+", r"pi-desk-%d", r"/pi-desk\b"],
     "src/main.odin": [r"running pi-desk", r"pi-desk 0\.1"],
     # The read-only guard matches the kept `pi-desk` / `pi-desk-cli` command words.
     "tools/pi-desk-cli/readonly.odin": [r'"pi-desk"', r'len\("pi-desk"\)', r'"-cli"', r"`pi-desk` \(its old name, an alias\) or `pi-desk-cli`"],
@@ -91,7 +91,7 @@ PROTECT_FILE = {
     "tools/pi-desk-cli/manual.md": [r"`pi-desk` still works as an alias"],
     "integrations/claude-code/README.md": [r"`pi-desk` \(`bin/pi-desk`\) is a kept alias"],
     "tests/readonly-vectors.json": [r"pi-kit's MUTATING"],
-    "src/claude_reload.odin": [r'"bin/pi-desk"'],
+    "src/core/claude_reload.odin": [r'"bin/pi-desk"'],
     # pi-kit's own bridge variables: pi tabs never get them (an installed pi-kit's desk extensions
     # switch on with them), and the tests say so. Not Deckhand's to rename.
     r"^(integrations/pi/|src/pi_integration(_test)?\.odin$|tests/scripts/pi-chat-readonly\.sh$)": [

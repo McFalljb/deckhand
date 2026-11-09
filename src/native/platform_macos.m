@@ -689,7 +689,7 @@ void dh_mac_test_scale(double scale) {
     replace([NSWindow class], @selector(backingScaleFactor), (IMP)test_backing_scale, NULL);
 }
 
-// ---- jobs (src/jobs.odin) ----
+// ---- jobs (src/core/jobs.odin) ----
 
 // No App Nap while a job runs (its timers stay on time).
 static id job_activity;

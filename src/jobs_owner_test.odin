@@ -11,12 +11,13 @@ import "core:os"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(private = "file")
 HOME_T :: "/Users/tester"
 
 @(private = "file")
-OWNER_FIXTURE := [?]Owner_Project {
+OWNER_FIXTURE := [?]core.Owner_Project {
 		{id = 1, cwd = "/Users/tester/code/api", name = "", shown = "api"},
 		{id = 2, cwd = "/Users/tester/code/api/web", name = "Frontend", shown = "Frontend"},
 		{id = 3, cwd = "/Users/tester/code/docs", name = "", shown = "docs"},
@@ -34,28 +35,28 @@ jobs_owner_rules :: proc(t: ^testing.T) {
 	ps := OWNER_FIXTURE[:]
 	atlas := "/Users/tester/deckhand/atlas"
 	chats := "/Users/tester/deckhand/chats"
-	r :: proc(fp, folder: string, ps: []Owner_Project, atlas, chats: string) -> Job_Owner {return job_owner_resolve(fp, folder, ps, atlas, chats)}
+	r :: proc(fp, folder: string, ps: []core.Owner_Project, atlas, chats: string) -> core.Job_Owner {return core.job_owner_resolve(fp, folder, ps, atlas, chats)}
 	// folder inference: the deepest listed project, whole components
 	o := r("", "/Users/tester/code/api/web/src", ps, atlas, chats)
-	testing.expect_value(t, o.kind, Job_Owner_Kind.Project)
+	testing.expect_value(t, o.kind, core.Job_Owner_Kind.Project)
 	testing.expect_value(t, o.project, 2)
 	testing.expect_value(t, r("", "/Users/tester/code/api/lib", ps, atlas, chats).project, 1)
 	testing.expect_value(t, r("", "/Users/tester/code/api", ps, atlas, chats).project, 1)
 	testing.expect_value(t, r("", "/Users/tester/code/apifoo/x", ps, atlas, chats).project, 7) // not api
 	// hidden projects never take a job by folder; home only exactly
-	testing.expect_value(t, r("", "/Users/tester/code/old/x", ps, atlas, chats).kind, Job_Owner_Kind.Other)
-	testing.expect_value(t, r("", "/Users/tester/random", ps, atlas, chats).kind, Job_Owner_Kind.Other)
+	testing.expect_value(t, r("", "/Users/tester/code/old/x", ps, atlas, chats).kind, core.Job_Owner_Kind.Other)
+	testing.expect_value(t, r("", "/Users/tester/random", ps, atlas, chats).kind, core.Job_Owner_Kind.Other)
 	testing.expect_value(t, r("", "/Users/tester", ps, atlas, chats).project, 6)
-	testing.expect_value(t, r("", "/tmp/x", ps, atlas, chats).kind, Job_Owner_Kind.Other)
+	testing.expect_value(t, r("", "/tmp/x", ps, atlas, chats).kind, core.Job_Owner_Kind.Other)
 	// Atlas's and the chats folder
-	testing.expect_value(t, r("", atlas, ps, atlas, chats).kind, Job_Owner_Kind.Atlas)
-	testing.expect_value(t, r("", "/Users/tester/deckhand/chats/sub", ps, atlas, chats).kind, Job_Owner_Kind.Chats)
-	testing.expect_value(t, r("", "/Users/tester/deckhand/atlasx", ps, atlas, chats).kind, Job_Owner_Kind.Other)
-	testing.expect_value(t, r("", atlas, ps, "", chats).kind, Job_Owner_Kind.Other) // no main folder
+	testing.expect_value(t, r("", atlas, ps, atlas, chats).kind, core.Job_Owner_Kind.Atlas)
+	testing.expect_value(t, r("", "/Users/tester/deckhand/chats/sub", ps, atlas, chats).kind, core.Job_Owner_Kind.Chats)
+	testing.expect_value(t, r("", "/Users/tester/deckhand/atlasx", ps, atlas, chats).kind, core.Job_Owner_Kind.Other)
+	testing.expect_value(t, r("", atlas, ps, "", chats).kind, core.Job_Owner_Kind.Other) // no main folder
 	// for_project wins over the folder
-	testing.expect_value(t, r("atlas", "/Users/tester/code/api", ps, atlas, chats).kind, Job_Owner_Kind.Atlas)
-	testing.expect_value(t, r("Chats", "/Users/tester/code/api", ps, atlas, chats).kind, Job_Owner_Kind.Chats)
-	testing.expect_value(t, r("none", "/Users/tester/code/api", ps, atlas, chats).kind, Job_Owner_Kind.Other)
+	testing.expect_value(t, r("atlas", "/Users/tester/code/api", ps, atlas, chats).kind, core.Job_Owner_Kind.Atlas)
+	testing.expect_value(t, r("Chats", "/Users/tester/code/api", ps, atlas, chats).kind, core.Job_Owner_Kind.Chats)
+	testing.expect_value(t, r("none", "/Users/tester/code/api", ps, atlas, chats).kind, core.Job_Owner_Kind.Other)
 	testing.expect_value(t, r("~/code/docs", "/Users/tester/code/api", ps, atlas, chats).project, 3) // by path
 	testing.expect_value(t, r("/Users/tester/code/docs/", "/x", ps, atlas, chats).project, 3)
 	testing.expect_value(t, r("frontend", "/x", ps, atlas, chats).project, 2) // by its rename, any case
@@ -63,19 +64,19 @@ jobs_owner_rules :: proc(t: ^testing.T) {
 	testing.expect_value(t, r("~/code/old", "/x", ps, atlas, chats).project, 5) // named: hidden ones too
 	// a missing project: the folder decides, and the row says so
 	o = r("pi-kit", "/Users/tester/code/api/x", ps, atlas, chats)
-	testing.expect_value(t, o.kind, Job_Owner_Kind.Project)
+	testing.expect_value(t, o.kind, core.Job_Owner_Kind.Project)
 	testing.expect_value(t, o.project, 1)
 	testing.expect_value(t, o.unmatched, "pi-kit")
 	o = r("docs", "/tmp", ps, atlas, chats) // two projects named docs: no match
-	testing.expect_value(t, o.kind, Job_Owner_Kind.Other)
+	testing.expect_value(t, o.kind, core.Job_Owner_Kind.Other)
 	testing.expect_value(t, o.unmatched, "docs")
 	// the row says which: several projects of that name, or none
-	testing.expect_value(t, job_owner_warning(o), "⚠ for_project: several projects are named docs (use the folder); grouped by its folder")
+	testing.expect_value(t, core.job_owner_warning(o), "⚠ for_project: several projects are named docs (use the folder); grouped by its folder")
 	o = r("pi-kit", "/x", ps, atlas, chats)
-	testing.expect_value(t, job_owner_warning(o), "⚠ for_project: pi-kit is not one of your projects; grouped by its folder")
-	testing.expect_value(t, job_owner_warning(r("web", "/x", ps, atlas, chats)), "")
-	testing.expect_value(t, path_tilde("/Users/tester/code"), "~/code")
-	testing.expect_value(t, path_tilde("/Users/testerx"), "/Users/testerx")
+	testing.expect_value(t, core.job_owner_warning(o), "⚠ for_project: pi-kit is not one of your projects; grouped by its folder")
+	testing.expect_value(t, core.job_owner_warning(r("web", "/x", ps, atlas, chats)), "")
+	testing.expect_value(t, core.path_tilde("/Users/tester/code"), "~/code")
+	testing.expect_value(t, core.path_tilde("/Users/testerx"), "/Users/testerx")
 }
 
 // The template per owner: for_project and folder written, the note parses
@@ -83,8 +84,8 @@ jobs_owner_rules :: proc(t: ^testing.T) {
 @(test)
 jobs_owner_template :: proc(t: ^testing.T) {
 	for fp in ([]string{"", "atlas", "chats", "none", "~/code/api"}) {
-		text := job_template("abc123", "Triage", "manual", "Do it.", fp == "" ? "~" : (fp == "~/code/api" ? fp : "~/x"), "2026-11-01", fp)
-		d := job_parse(text, "/n/jobs/triage.md", context.temp_allocator)
+		text := core.job_template("abc123", "Triage", "manual", "Do it.", fp == "" ? "~" : (fp == "~/code/api" ? fp : "~/x"), "2026-11-01", fp)
+		d := core.job_parse(text, "/n/jobs/triage.md", context.temp_allocator)
 		testing.expectf(t, d.err == "", "%q: %s", fp, d.err)
 		testing.expect_value(t, d.for_project, fp)
 		testing.expect_value(t, strings.contains(text, "\nfor_project: "), fp != "")
@@ -101,10 +102,10 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	os.make_directory_all(fmt.tprintf("%s/jobs", notes))
 	proj := fmt.aprintf("%s/code/api", dir)
 	os.make_directory_all(proj)
-	old_root := home_root
-	home_root = fmt.aprintf("%s/data", dir)
-	os.make_directory_all(home_root)
-	jobs_reset()
+	old_root := core.home_root
+	core.home_root = fmt.aprintf("%s/data", dir)
+	os.make_directory_all(core.home_root)
+	core.jobs_reset()
 	saved := state.settings
 	// a fake HOME: setting the main folder rescans pi's store (never the user's)
 	old_home := strings.clone(os.get_env("HOME", context.temp_allocator))
@@ -112,80 +113,80 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	os.make_directory_all(fake_home)
 	os.set_env("HOME", fake_home)
 	defer {
-		jobs_reset()
-		jobs_rows_free_all()
+		core.jobs_reset()
+		core.jobs_rows_free_all()
 		// the rescan's projects live in its arena: leave none behind
 		state.projects = {}
 		state.settings = saved
-		home_root = old_root
+		core.home_root = old_root
 		os.set_env("HOME", old_home)
 		os.remove_all(dir)
 	}
-	ui := Caller{kind = .UI}
-	ctl := Caller{kind = .Control}
+	ui := core.Caller{kind = .UI}
+	ctl := core.Caller{kind = .Control}
 	state.settings.home_dir = ""
-	testing.expect(t, run_command(Set_Home_Dir{path = notes}, ui).ok)
-	state.projects = make([dynamic]Project, context.temp_allocator)
-	append(&state.projects, Project{id = 77, cwd = proj, label = "api"})
+	testing.expect(t, core.run_command(core.Set_Home_Dir{path = notes}, ui).ok)
+	state.projects = make([dynamic]core.Project, context.temp_allocator)
+	append(&state.projects, core.Project{id = 77, cwd = proj, label = "api"})
 	cases := [?]struct {
 		fp, want_fp, folder_suffix: string,
-		kind:                       Job_Owner_Kind,
+		kind:                       core.Job_Owner_Kind,
 	}{{"atlas", "atlas", "/notes/atlas", .Atlas}, {"chats", "chats", "/notes/chats", .Chats}, {"none", "none", "", .Other}, {"api", "", "/code/api", .Project}, {proj, "", "/code/api", .Project}}
 	for c, i in cases {
-		r := run_command(Job_Create{name = fmt.tprintf("job %d", i), prompt = "Check it.", for_project = c.fp}, ctl)
+		r := core.run_command(core.Job_Create{name = fmt.tprintf("job %d", i), prompt = "Check it.", for_project = c.fp}, ctl)
 		testing.expectf(t, r.ok, "%s: %s", c.fp, r.error)
 		path := strings.clone(r.data[len(`{"path":"`):len(r.data) - 2], context.temp_allocator)
 		data, _ := os.read_entire_file(path, context.temp_allocator)
-		d := job_parse(string(data), path, context.temp_allocator)
+		d := core.job_parse(string(data), path, context.temp_allocator)
 		testing.expectf(t, d.err == "", "%s: %s", c.fp, d.err)
 		if c.want_fp != "" do testing.expect_value(t, d.for_project, c.want_fp)
 		else do testing.expectf(t, strings.has_suffix(d.for_project, "/code/api"), "for_project %q", d.for_project)
 		if c.folder_suffix != "" do testing.expectf(t, strings.has_suffix(d.folder, c.folder_suffix), "%s: folder %s", c.fp, d.folder)
-		testing.expect_value(t, job_owner_resolve(d.for_project, d.folder, owner_projects(), folder_of(.Atlas), folder_of(.Chats)).kind, c.kind)
+		testing.expect_value(t, core.job_owner_resolve(d.for_project, d.folder, core.owner_projects(), core.folder_of(.Atlas), core.folder_of(.Chats)).kind, c.kind)
 	}
-	testing.expect(t, !run_command(Job_Create{for_project = "no-such-project"}, ctl).ok, "an unknown project is refused")
+	testing.expect(t, !core.run_command(core.Job_Create{for_project = "no-such-project"}, ctl).ok, "an unknown project is refused")
 	// job_save and job_sheet are the user's
-	testing.expect_value(t, run_command(Job_Save{text = "x"}, ctl).error, "not allowed for this caller")
-	testing.expect_value(t, run_command(Job_Sheet{open = true}, ctl).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Job_Save{text = "x"}, ctl).error, "not allowed for this caller")
+	testing.expect_value(t, core.run_command(core.Job_Sheet{open = true}, ctl).error, "not allowed for this caller")
 	// the sheet's Create: enabled, whatever the text said
 	f := Job_Form{name = "Sheet job", for_project = "none", folder = "~", schedule = "every 2h", prompt = "Line one.\nLine two.", access = "full", notify = "attention", max_turns = "40"}
-	id, date := job_new_id_date()
+	id, date := core.job_new_id_date()
 	text, err := job_form_new_note(f, id, date)
 	testing.expect_value(t, err, "")
 	testing.expect(t, strings.contains(text, "# Sheet job\n\n## Prompt\nLine one.\nLine two.\n\n## Recent runs"), text)
 	text, _ = strings.replace(text, "enabled: true", "enabled: false", 1, context.temp_allocator)
-	r := run_command(Job_Save{text = text}, ui)
+	r := core.run_command(core.Job_Save{text = text}, ui)
 	testing.expect(t, r.ok, r.error)
 	path := strings.clone(r.data[len(`{"path":"`):len(r.data) - 2], context.temp_allocator)
 	// the sheet's keyboard and the Jobs tab are commands (focus_take, focus_release, Job_Save's own
 	// layout), not the window's writes: open takes the keyboard, Cancel gives it back, Save
 	// gives it back and shows the Jobs tab
 	{
-		testing.expect(t, run_command(Job_Sheet{open = true}, ui).ok)
+		testing.expect(t, core.run_command(core.Job_Sheet{open = true}, ui).ok)
 		testing.expect_value(t, state.focus_widget, "job_sheet")
-		testing.expect(t, run_command(Job_Sheet{open = false}, ui).ok)
+		testing.expect(t, core.run_command(core.Job_Sheet{open = false}, ui).ok)
 		testing.expect_value(t, state.focus_widget, "")
-		testing.expect(t, run_command(Job_Sheet{open = true}, ui).ok)
+		testing.expect(t, core.run_command(core.Job_Sheet{open = true}, ui).ok)
 		state.layout.left_open, state.layout.left_tab = false, .Sessions
-		id2, date2 := job_new_id_date()
+		id2, date2 := core.job_new_id_date()
 		f2 := f
 		f2.name = "Sheet job 2"
 		text2, _ := job_form_new_note(f2, id2, date2)
-		r2 := run_command(Job_Save{text = text2}, ui)
+		r2 := core.run_command(core.Job_Save{text = text2}, ui)
 		testing.expect(t, r2.ok, r2.error)
 		testing.expect(t, !job_sheet_open())
 		testing.expect_value(t, state.focus_widget, "")
 		testing.expect(t, state.layout.left_open)
-		testing.expect_value(t, state.layout.left_tab, Left_Tab.Jobs)
+		testing.expect_value(t, state.layout.left_tab, core.Left_Tab.Jobs)
 	}
 	data, _ := os.read_entire_file(path, context.temp_allocator)
 	testing.expect(t, strings.contains(string(data), "enabled: true"), "written enabled")
-	testing.expect_value(t, run_command(Job_Save{text = text}, ui).error, fmt.tprintf("id: %s is another job's (give this one its own)", id))
+	testing.expect_value(t, core.run_command(core.Job_Save{text = text}, ui).error, fmt.tprintf("id: %s is another job's (give this one its own)", id))
 	// Save: Recent runs and unknown keys stay; the id must stay
-	with_runs := job_note_set_recent(string(data), {"- 2026-11-01 07:00 ✅ ok — fine"})
+	with_runs := core.job_note_set_recent(string(data), {"- 2026-11-01 07:00 ✅ ok — fine"})
 	with_runs, _ = strings.replace(with_runs, "notify: attention", "notify: attention\ntouches: [outside]\naliases: [x]", 1, context.temp_allocator)
 	_ = os.write_entire_file(path, transmute([]u8)with_runs)
-	jobs_scan(true)
+	core.jobs_scan(true)
 	g, _ := job_form_from_note(with_runs)
 	g.prompt = "A new prompt."
 	g.schedule = "30 7 * * 1-5"
@@ -193,18 +194,18 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	edited, eerr := job_note_apply_form(with_runs, g)
 	testing.expect_value(t, eerr, "")
 	// an edit names the text it started from: refused once the file changed since
-	testing.expect(t, !run_command(Job_Save{path = path, text = edited}, ui).ok, "based_on is required")
-	r = run_command(Job_Save{path = path, text = edited, based_on = job_note_hash(string(data))}, ui)
-	testing.expect_value(t, r.error, JOB_NOTE_STALE)
+	testing.expect(t, !core.run_command(core.Job_Save{path = path, text = edited}, ui).ok, "based_on is required")
+	r = core.run_command(core.Job_Save{path = path, text = edited, based_on = core.job_note_hash(string(data))}, ui)
+	testing.expect_value(t, r.error, core.JOB_NOTE_STALE)
 	still, _ := os.read_entire_file(path, context.temp_allocator)
 	testing.expect_value(t, string(still), with_runs) // refused: the file as it was
 	os.chmod(path, {.Read_User, .Write_User, .Read_Group, .Read_Other}) // 0644, as an editor leaves it
-	r = run_command(Job_Save{path = path, text = edited, based_on = job_note_hash(with_runs)}, ui)
+	r = core.run_command(core.Job_Save{path = path, text = edited, based_on = core.job_note_hash(with_runs)}, ui)
 	testing.expect(t, r.ok, r.error)
 	if fi, serr := os.stat(path, context.temp_allocator); serr == nil {
 		testing.expect_value(t, fi.mode & os.Permissions_All, os.Permissions{.Read_User, .Write_User, .Read_Group, .Read_Other})
 	} else do testing.fail_now(t, "stat")
-	if ents, derr := os.read_all_directory_by_path(folder_of(.Jobs), context.temp_allocator); derr == nil {
+	if ents, derr := os.read_all_directory_by_path(core.folder_of(.Jobs), context.temp_allocator); derr == nil {
 		for e in ents do testing.expect(t, !strings.contains(e.name, ".deckhand-") && !strings.contains(e.name, ".tmp-"), e.name) // no temp file left
 	}
 	data, _ = os.read_entire_file(path, context.temp_allocator)
@@ -215,8 +216,8 @@ jobs_owner_create_and_save :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(s, "\nmax_turns:"), "a cleared key goes")
 	testing.expect(t, strings.contains(s, `schedule: "30 7 * * 1-5"`), s)
 	other, _ := strings.replace(edited, fmt.tprintf("id: %s", id), "id: zzz999", 1, context.temp_allocator)
-	testing.expect(t, strings.has_prefix(run_command(Job_Save{path = path, text = other, based_on = job_note_hash(s)}, ui).error, "id: keep"), "the id stays")
-	testing.expect(t, !run_command(Job_Save{path = path, text = "no frontmatter", based_on = job_note_hash(s)}, ui).ok, "it must parse")
+	testing.expect(t, strings.has_prefix(core.run_command(core.Job_Save{path = path, text = other, based_on = core.job_note_hash(s)}, ui).error, "id: keep"), "the id stays")
+	testing.expect(t, !core.run_command(core.Job_Save{path = path, text = "no frontmatter", based_on = core.job_note_hash(s)}, ui).ok, "it must parse")
 }
 
 // form → note → form gives the same fields; note text edited → form.
@@ -225,7 +226,7 @@ jobs_form_round_trip :: proc(t: ^testing.T) {
 	f := Job_Form{name = "Morning: triage", for_project = "~/code/api", folder = "~/code/api", schedule = "0 7 * * 1-5", prompt = "List PRs.\n\nOldest first.", access = "read", notify = "never", model = "anthropic/claude-x", hours = "07-22", max_cost = "0.50", timeout = "20m", max_turns = "40"}
 	text, err := job_form_new_note(f, "abc123", "2026-11-01")
 	testing.expect_value(t, err, "")
-	d := job_parse(text, "/n/jobs/x.md", context.temp_allocator)
+	d := core.job_parse(text, "/n/jobs/x.md", context.temp_allocator)
 	testing.expect_value(t, d.err, "")
 	testing.expect_value(t, d.name, "Morning: triage")
 	testing.expect_value(t, d.max_turns, 40)
@@ -279,7 +280,7 @@ jobs_form_summary_and_title :: proc(t: ^testing.T) {
 	testing.expect(t, strings.contains(titled, "---\n\n# Lint all\n"), titled)
 	testing.expect_value(t, strings.count(titled, "# Lint all"), 1)
 	// a value that reads as a YAML list item is quoted, and reads back
-	testing.expect_value(t, yaml_quote("- nightly"), `"- nightly"`)
+	testing.expect_value(t, core.yaml_quote("- nightly"), `"- nightly"`)
 	h.name = "- nightly"
 	h.model = "-x"
 	listy, _ := job_note_apply_form(untitled, h)
@@ -300,7 +301,7 @@ jobs_form_presets :: proc(t: ^testing.T) {
 		s, err := sched_preset_text(c.p, c.n, c.at, c.custom)
 		testing.expect_value(t, err, "")
 		testing.expect_value(t, s, c.want)
-		_, perr := schedule_parse(s)
+		_, perr := core.schedule_parse(s)
 		testing.expectf(t, perr == "", "%s: %s", s, perr)
 		p, n, at := sched_preset_detect(s)
 		testing.expect_value(t, p, c.p)
@@ -331,7 +332,7 @@ session_info_from_header :: proc(t: ^testing.T) {
 	path := fmt.tprintf("%s/2026-10-30T10-00-00-000Z_demo-1.jsonl", dir)
 	body := `{"type":"session","version":3,"id":"demo-1","timestamp":"2026-10-30T10:00:00.000Z","cwd":"/Users/tester/code/demo","provider":"anthropic","modelId":"claude-x"}` + "\n" + `{"type":"message","message":{"role":"user","content":"SECRET CONVERSATION TEXT"}}` + "\n"
 	_ = os.write_entire_file(path, transmute([]u8)body)
-	f, err := session_facts_read(path)
+	f, err := core.session_facts_read(path)
 	testing.expect_value(t, err, "")
 	testing.expect_value(t, f.id, "demo-1")
 	testing.expect_value(t, f.cwd, "/Users/tester/code/demo")
@@ -339,23 +340,23 @@ session_info_from_header :: proc(t: ^testing.T) {
 	testing.expect_value(t, f.model, "anthropic/claude-x")
 	testing.expect(t, strings.has_suffix(f.modified, "Z"), f.modified)
 	f.project, f.title = "demo", "Fix the ``` demo build"
-	text := session_info_text(f)
+	text := core.session_info_text(f)
 	testing.expect(t, strings.has_prefix(text, "````pi-session\n") && strings.has_suffix(text, "\n````"), text)
 	testing.expect(t, strings.contains(text, "\nid: demo-1\n") && strings.contains(text, fmt.tprintf("\nfile: %s\n", path)) && strings.contains(text, "\nfolder: /Users/tester/code/demo\n") && strings.contains(text, "\nproject: demo\n") && strings.contains(text, "\nmodel: anthropic/claude-x\n"), text)
 	testing.expect(t, !strings.contains(text, "SECRET"), "never the conversation")
 	// a title is the user's words: a secret pasted into it is not passed on
 	f.title = "deploy with API_KEY=abcdef1234567890xyz"
-	testing.expect(t, !strings.contains(session_info_text(f), "abcdef1234567890xyz"), "title redacted")
+	testing.expect(t, !strings.contains(core.session_info_text(f), "abcdef1234567890xyz"), "title redacted")
 	// a header without a timestamp: the file name's; no model: no line
 	path2 := fmt.tprintf("%s/2026-10-31T08-15-30-000Z_demo-2.jsonl", dir)
 	_ = os.write_entire_file(path2, transmute([]u8)string(`{"type":"session","version":3,"id":"demo-2","cwd":"/x"}` + "\n"))
-	f2, _ := session_facts_read(path2)
+	f2, _ := core.session_facts_read(path2)
 	testing.expect_value(t, f2.created, "2026-10-31T08:15:30Z")
-	testing.expect(t, !strings.contains(session_info_text(f2), "model:"))
+	testing.expect(t, !strings.contains(core.session_info_text(f2), "model:"))
 	// not a session file
 	path3 := fmt.tprintf("%s/x.jsonl", dir)
 	_ = os.write_entire_file(path3, transmute([]u8)string(`{"type":"message"}` + "\n"))
-	_, e3 := session_facts_read(path3)
+	_, e3 := core.session_facts_read(path3)
 	testing.expect(t, e3 != "")
 }
 
@@ -370,18 +371,18 @@ jobs_groups_cached :: proc(t: ^testing.T) {
 		state.version += 1
 	}
 	state.projects = {}
-	rows := make([dynamic]Job_Row, context.temp_allocator)
-	append(&rows, Job_Row{id = "a", name = "A", project = "none", folder = "/x"}, Job_Row{id = "b", name = "B", project = "chats", folder = "/y"})
+	rows := make([dynamic]core.Job_Row, context.temp_allocator)
+	append(&rows, core.Job_Row{id = "a", name = "A", project = "none", folder = "/x"}, core.Job_Row{id = "b", name = "B", project = "chats", folder = "/y"})
 	state.jobs = rows
 	state.version += 1
-	g1 := jobs_groups()
-	g2 := jobs_groups()
+	g1 := core.jobs_groups()
+	g2 := core.jobs_groups()
 	testing.expect_value(t, len(g1), 2)
 	testing.expect(t, raw_data(g1) == raw_data(g2), "the same groups while nothing changed")
-	testing.expect_value(t, g1[0].owner.kind, Job_Owner_Kind.Chats)
+	testing.expect_value(t, g1[0].owner.kind, core.Job_Owner_Kind.Chats)
 	// a row's owner changed (a rescan)
 	state.jobs[1].project = "none"
-	g3 := jobs_groups()
+	g3 := core.jobs_groups()
 	testing.expect_value(t, len(g3), 1)
 	testing.expect_value(t, len(g3[0].rows), 2)
 }

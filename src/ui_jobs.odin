@@ -16,6 +16,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 
 Jobs_Hit_Kind :: enum u8 {
@@ -113,7 +114,7 @@ Jobs_Ui :: struct {
 	},
 	expanded:    string, // owned: the row shown open
 	limits_open: bool,
-	groups:      [dynamic]Job_Owner, // drawn group rows by slot (strings in the arena)
+	groups:      [dynamic]core.Job_Owner, // drawn group rows by slot (strings in the arena)
 	folded:      [dynamic]string, // owned: folded groups (job_owner_key); not saved
 }
 
@@ -123,7 +124,7 @@ ju: Jobs_Ui
 jobs_shown :: proc() -> bool {return state.layout.left_open && state.layout.left_tab == .Jobs}
 
 @(private = "file")
-job_row_of :: proc(id: string) -> ^Job_Row {
+job_row_of :: proc(id: string) -> ^core.Job_Row {
 	for &r in state.jobs do if r.id == id do return &r
 	return nil
 }
@@ -131,7 +132,7 @@ job_row_of :: proc(id: string) -> ^Job_Row {
 // "in 5m", "in 3h", "in 2d" from the scheduler's clock.
 @(private = "file")
 rel_future :: proc(t: i64) -> string {
-	d := t - jobs_now()
+	d := t - core.jobs_now()
 	switch {
 	case d < 60:        return "now"
 	case d < 3600:      return fmt.tprintf("in %dm", d / 60)
@@ -142,7 +143,7 @@ rel_future :: proc(t: i64) -> string {
 
 // The row's second line and its colour.
 @(private = "file")
-job_line :: proc(r: Job_Row) -> (string, Rgba) {
+job_line :: proc(r: core.Job_Row) -> (string, core.Rgba) {
 	th := theme()
 	switch {
 	case r.err != "":  return fmt.tprintf("Error: %s", r.err), th.error
@@ -155,11 +156,11 @@ job_line :: proc(r: Job_Row) -> (string, Rgba) {
 	else if !r.enabled do next = "disabled"
 	else if r.next_due > 0 do next = fmt.tprintf("next %s", rel_future(r.next_due))
 	if r.last_status == "" do return fmt.tprintf("%s · no runs yet", next), th.text_muted
-	return fmt.tprintf("%s · %s %s", next, job_status_icon(r.last_status), r.last_headline), th.text_muted
+	return fmt.tprintf("%s · %s %s", next, core.job_status_icon(r.last_status), r.last_headline), th.text_muted
 }
 
 @(private = "file")
-job_dot :: proc(r: Job_Row) -> Rgba {
+job_dot :: proc(r: core.Job_Row) -> core.Rgba {
 	th := theme()
 	switch {
 	case r.err != "":   return th.error
@@ -183,9 +184,9 @@ limit_value :: proc(row: Job_Limit_Row) -> f64 {
 	case .Week:        return l.week
 	case .Month:       return l.month
 	case .Concurrency: return f64(l.concurrency)
-	case .Loop_Calls:  return f64(limit_loop())
-	case .Stall:       return f64(limit_stall())
-	case .Fail_Pause:  return f64(limit_fail())
+	case .Loop_Calls:  return f64(core.limit_loop())
+	case .Stall:       return f64(core.limit_stall())
+	case .Fail_Pause:  return f64(core.limit_fail())
 	}
 	return 0
 }
@@ -204,7 +205,7 @@ limit_text :: proc(row: Job_Limit_Row, v: f64) -> string {
 
 // The command a limit's button sends: the next step after its value.
 @(private = "file")
-limit_next :: proc(row: Job_Limit_Row) -> Command {
+limit_next :: proc(row: Job_Limit_Row) -> core.Command {
 	steps := JOB_LIMIT_STEPS[row]
 	cur := limit_value(row)
 	next := steps[0]
@@ -212,7 +213,7 @@ limit_next :: proc(row: Job_Limit_Row) -> Command {
 		next = steps[(i + 1) % len(steps)]
 		break
 	}
-	c: Set_Job_Limits
+	c: core.Set_Job_Limits
 	switch row {
 	case .Max_Cost:    c.max_cost = next
 	case .Timeout:     c.timeout = i64(next)
@@ -237,7 +238,7 @@ jobs_panel :: proc(row_w: f32) {
 	a := virtual.arena_allocator(&ju.arena)
 	ju.drawn = make([dynamic]string, a)
 	ju.buttons = make(type_of(ju.buttons), a)
-	ju.groups = make([dynamic]Job_Owner, a)
+	ju.groups = make([dynamic]core.Job_Owner, a)
 
 	// header: Jobs, unread, then the buttons
 	if clay.UI(clay.ID("jobs_head"))({
@@ -256,10 +257,10 @@ jobs_panel :: proc(row_w: f32) {
 		if clay.UI()({layout = {sizing = {clay.SizingGrow({min = px(GAP_GROUP - 2 * GAP_BUTTONS)}), clay.SizingFit()}}}) {}
 		for tool in Jobs_Tool {
 			id := clay.ID("jobstool", u32(tool))
-			enabled := tool != .New_Job || folder_of(.Jobs) != ""
+			enabled := tool != .New_Job || core.folder_of(.Jobs) != ""
 			hovered := enabled && ui_hover == Hit(Hit_Jobs{what = .Tool, index = int(tool)})
 			bg, em := overlay(id, tool == .Limits && ju.limits_open, hovered)
-			ic: Icon
+			ic: core.Icon
 			switch tool {
 			case .New_Job:   ic = .Plus
 			case .Pause_All: ic = state.settings.jobs_paused ? .Play : .Pause
@@ -291,7 +292,7 @@ jobs_panel :: proc(row_w: f32) {
 		gap(SP_1)
 	}
 	if ju.limits_open do jobs_limits(row_w)
-	if folder_of(.Jobs) == "" {
+	if core.folder_of(.Jobs) == "" {
 		empty_state("No main folder", "Job notes live in its jobs/ folder", row_w)
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), 0, 0, 0}}}) {
 			small_button(clay.ID("jobs_notes_dir"), "Set up Deckhand…", ui_hover == Hit(Hit_Jobs{what = .Notes_Dir}))
@@ -304,8 +305,8 @@ jobs_panel :: proc(row_w: f32) {
 	}) {
 		if len(state.jobs) == 0 do empty_state("No jobs yet", "New job (+) writes a job note", row_w)
 		// grouped by owner (jobs_owner.odin): projects by name, then Atlas, Chats, Other
-		for g in jobs_groups() {
-			folded := list_index(ju.folded[:], job_owner_key(g.owner)) >= 0
+		for g in core.jobs_groups() {
+			folded := core.list_index(ju.folded[:], core.job_owner_key(g.owner)) >= 0
 			job_group_row(g, folded, row_w, a)
 			if folded do continue
 			for i in g.rows do job_row(state.jobs[i], g.owner, row_w, a)
@@ -358,10 +359,10 @@ jobs_limits :: proc(row_w: f32) {
 // while one is unread; on hover "+" (New job for it). A click goes to its
 // project (Atlas: the drawer; Chats: the Sessions tab); Other folds.
 @(private = "file")
-job_group_row :: proc(g: Job_Group, folded: bool, row_w: f32, a: runtime.Allocator) {
+job_group_row :: proc(g: core.Job_Group, folded: bool, row_w: f32, a: runtime.Allocator) {
 	th := theme()
 	slot := len(ju.groups)
-	append(&ju.groups, Job_Owner{kind = g.owner.kind, project = g.owner.project, path = strings.clone(g.owner.path, a), name = strings.clone(g.owner.name, a)})
+	append(&ju.groups, core.Job_Owner{kind = g.owner.kind, project = g.owner.project, path = strings.clone(g.owner.path, a), name = strings.clone(g.owner.name, a)})
 	id := clay.ID("jobgroup", u32(slot))
 	new_hover := ui_hover == Hit(Hit_Jobs{what = .Group_New, index = slot})
 	fold_hover := ui_hover == Hit(Hit_Jobs{what = .Group_Fold, index = slot})
@@ -378,7 +379,7 @@ job_group_row :: proc(g: Job_Group, folded: bool, row_w: f32, a: runtime.Allocat
 		if clay.UI(fid)({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON + SP_1)), clay.SizingFixed(px(ROW_BUTTON))}, childAlignment = {x = .Center, y = .Center}}}) {
 			icon(folded ? .Chevron_Right : .Chevron_Down, fold_hover ? th.text : th.text_muted, TREE_CHEVRON)
 		}
-		ic := Icon.Folder
+		ic := core.Icon.Folder
 		switch g.owner.kind {
 		case .Project: ic = .Folder
 		case .Atlas:   ic = .Compose
@@ -389,7 +390,7 @@ job_group_row :: proc(g: Job_Group, folded: bool, row_w: f32, a: runtime.Allocat
 		count := fmt.tprintf("%d", len(g.rows))
 		right := text_w(count) + (hovered ? px(ROW_BUTTON + GAP_INLINE) : 0) + (unread ? px(DOT + GAP_INLINE) : 0)
 		room := row_w - px(PAD_ROW - SP_1 + PAD_ROW + TREE_CHEVRON + SP_1 + KIND_ICON + 4 * GAP_INLINE) - right
-		clay.TextDynamic(clip(job_owner_label(g.owner), room, WEIGHT_BOLD), txt(mix(th.text_secondary, th.text, em), WEIGHT_BOLD))
+		clay.TextDynamic(clip(core.job_owner_label(g.owner), room, WEIGHT_BOLD), txt(mix(th.text_secondary, th.text, em), WEIGHT_BOLD))
 		spacer()
 		if unread do dot(th.accent)
 		clay.TextDynamic(count, txt(th.text_muted))
@@ -409,9 +410,9 @@ job_group_row :: proc(g: Job_Group, folded: bool, row_w: f32, a: runtime.Allocat
 
 // The for_project value of a group's owner (New job for it).
 @(private = "file")
-owner_value :: proc(o: Job_Owner) -> string {
+owner_value :: proc(o: core.Job_Owner) -> string {
 	switch o.kind {
-	case .Project: return path_tilde(o.path)
+	case .Project: return core.path_tilde(o.path)
 	case .Atlas:   return "atlas"
 	case .Chats:   return "chats"
 	case .Other:   return "none"
@@ -422,15 +423,15 @@ owner_value :: proc(o: Job_Owner) -> string {
 @(private = "file")
 group_fold :: proc(slot: int) {
 	if slot >= len(ju.groups) do return
-	key := job_owner_key(ju.groups[slot])
-	if at := list_index(ju.folded[:], key); at >= 0 {
+	key := core.job_owner_key(ju.groups[slot])
+	if at := core.list_index(ju.folded[:], key); at >= 0 {
 		delete(ju.folded[at])
 		ordered_remove(&ju.folded, at)
 	} else do append(&ju.folded, strings.clone(key))
 }
 
 @(private = "file")
-job_row :: proc(r: Job_Row, owner: Job_Owner, row_w: f32, a: runtime.Allocator) {
+job_row :: proc(r: core.Job_Row, owner: core.Job_Owner, row_w: f32, a: runtime.Allocator) {
 	th := theme()
 	slot := len(ju.drawn)
 	append(&ju.drawn, strings.clone(r.id, a))
@@ -449,8 +450,8 @@ job_row :: proc(r: Job_Row, owner: Job_Owner, row_w: f32, a: runtime.Allocator) 
 			dot(job_dot(r))
 			// where it runs, when that is not the group's own folder
 			where_ := ""
-			if owner.kind != .Project || r.folder != owner.path do where_ = path_tilde(r.folder)
-			if owner.kind == .Project && r.folder != owner.path && path_within(r.folder, owner.path) do where_ = r.folder[len(owner.path) + 1:]
+			if owner.kind != .Project || r.folder != owner.path do where_ = core.path_tilde(r.folder)
+			if owner.kind == .Project && r.folder != owner.path && core.path_within(r.folder, owner.path) do where_ = r.folder[len(owner.path) + 1:]
 			right := px(DOT + GAP_INLINE + ROW_BUTTON) + (r.unread > 0 ? px(DOT + GAP_INLINE) : 0)
 			name_room := inner - right - px(GAP_INLINE)
 			pw := text_w(where_, FONT_UI_SMALL)
@@ -478,7 +479,7 @@ job_row :: proc(r: Job_Row, owner: Job_Owner, row_w: f32, a: runtime.Allocator) 
 		}
 		if !open do return
 		// the open row's text wraps: nothing it says is cut off
-		small :: proc(text: string, col: Rgba, room: f32, mono := false) {
+		small :: proc(text: string, col: core.Rgba, room: f32, mono := false) {
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = px(FILES_ROW_H - 4)})}, padding = {pu(DOT + GAP_INLINE), 0, 2, 2}, childAlignment = {y = .Center}}}) {
 				cfg := txt(col, mono ? FONT_MONO : FONT_UI_SMALL)
 				cfg.wrapMode = .Words
@@ -486,7 +487,7 @@ job_row :: proc(r: Job_Row, owner: Job_Owner, row_w: f32, a: runtime.Allocator) 
 			}
 		}
 		for w in r.warnings do small(fmt.tprintf("⚠ %s", w), th.waiting, inner)
-		if w := job_owner_warning(job_owner_of(r, owner_projects())); w != "" do small(w, th.waiting, inner)
+		if w := core.job_owner_warning(core.job_owner_of(r, core.owner_projects())); w != "" do small(w, th.waiting, inner)
 		if len(r.needs_you) > 0 {
 			small("Needs you:", th.text_secondary, inner)
 			for n in r.needs_you do small(fmt.tprintf("• %s", n), th.waiting, inner)
@@ -536,7 +537,7 @@ job_row :: proc(r: Job_Row, owner: Job_Owner, row_w: f32, a: runtime.Allocator) 
 jobs_hit :: proc() -> Hit {
 	if !jobs_shown() do return nil
 	for tool in Jobs_Tool do if clay.PointerOver(clay.ID("jobstool", u32(tool))) {
-		if tool == .New_Job && folder_of(.Jobs) == "" do return nil
+		if tool == .New_Job && core.folder_of(.Jobs) == "" do return nil
 		return Hit_Jobs{what = .Tool, index = int(tool)}
 	}
 	if clay.PointerOver(clay.ID("jobs_resume_all")) do return Hit_Jobs{what = .Resume_All}
@@ -565,21 +566,21 @@ jobs_tip :: proc(h: Hit_Jobs) -> (label, keys: string) {
 		case .Limits:    return "Limits and safety stops", ""
 		}
 	case .Row:
-		if h.index < len(ju.drawn) do if r := job_row_of(ju.drawn[h.index]); r != nil do return fmt.tprintf("%s · %s · %s", r.name, r.schedule, fs_display(r.path)), ""
+		if h.index < len(ju.drawn) do if r := job_row_of(ju.drawn[h.index]); r != nil do return fmt.tprintf("%s · %s · %s", r.name, r.schedule, core.fs_display(r.path)), ""
 	case .More:       return "More actions", ""
 	case .Group:
 		if h.index < len(ju.groups) {
 			o := ju.groups[h.index]
 			switch o.kind {
-			case .Project: return fmt.tprintf("Go to %s (%s)", o.name, fs_display(o.path)), ""
-			case .Atlas:   return fmt.tprintf("Open %s", agent_name()), ""
+			case .Project: return fmt.tprintf("Go to %s (%s)", o.name, core.fs_display(o.path)), ""
+			case .Atlas:   return fmt.tprintf("Open %s", core.agent_name()), ""
 			case .Chats:   return "Show Chats", ""
 			case .Other:   return "Jobs of no project: click to fold or unfold", ""
 			}
 		}
 	case .Group_Fold: return "Fold or unfold", ""
 	case .Group_New:
-		if h.index < len(ju.groups) do return fmt.tprintf("New job for %s", job_owner_label(ju.groups[h.index])), ""
+		if h.index < len(ju.groups) do return fmt.tprintf("New job for %s", core.job_owner_label(ju.groups[h.index])), ""
 	case .Button:
 		if h.index < len(ju.buttons) do switch ju.buttons[h.index].what {
 		case .Run_Now:   return "Run it now", ""
@@ -603,8 +604,8 @@ jobs_click :: proc(h: Hit_Jobs) {
 	switch h.what {
 	case .Tool:
 		switch Jobs_Tool(h.index) {
-		case .New_Job:   ui_do(Job_Sheet{open = true}) // the job sheet (ui_job_sheet.odin)
-		case .Pause_All: ui_do(state.settings.jobs_paused ? Command(Jobs_Resume{}) : Command(Jobs_Pause{}))
+		case .New_Job:   ui_do(core.Job_Sheet{open = true}) // the job sheet (ui_job_sheet.odin)
+		case .Pause_All: ui_do(state.settings.jobs_paused ? core.Command(core.Jobs_Resume{}) : core.Command(core.Jobs_Pause{}))
 		case .Limits:    ju.limits_open = !ju.limits_open
 		}
 	case .Row:
@@ -619,12 +620,12 @@ jobs_click :: proc(h: Hit_Jobs) {
 		if h.index >= len(ju.buttons) do return
 		b := ju.buttons[h.index]
 		switch b.what {
-		case .Run_Now:   ui_do(Job_Run_Now{job = b.job})
-		case .Stop:      ui_do(Job_Stop{job = b.job})
-		case .Edit:      ui_do(Job_Sheet{open = true, job = b.job})
-		case .Open_Note: ui_do(Job_Open{job = b.job, what = "note"})
-		case .Report:    ui_do(Job_Open{job = b.job, what = "report"})
-		case .Mark_Read: ui_do(Job_Mark_Read{job = b.job})
+		case .Run_Now:   ui_do(core.Job_Run_Now{job = b.job})
+		case .Stop:      ui_do(core.Job_Stop{job = b.job})
+		case .Edit:      ui_do(core.Job_Sheet{open = true, job = b.job})
+		case .Open_Note: ui_do(core.Job_Open{job = b.job, what = "note"})
+		case .Report:    ui_do(core.Job_Open{job = b.job, what = "report"})
+		case .Mark_Read: ui_do(core.Job_Mark_Read{job = b.job})
 		}
 	case .Limit:      ui_do(limit_next(Job_Limit_Row(h.index)))
 	case .Notes_Dir:  action_run("setup") // the first-run sheet (ui_setup.odin)
@@ -633,18 +634,18 @@ jobs_click :: proc(h: Hit_Jobs) {
 		o := ju.groups[h.index]
 		switch o.kind {
 		case .Project:
-			ui_do(Set_Left_Tab{tab = .Sessions})
-			ui_do(Select_Project{o.project})
-		case .Atlas: ui_do(Set_Home{open = true})
+			ui_do(core.Set_Left_Tab{tab = .Sessions})
+			ui_do(core.Select_Project{o.project})
+		case .Atlas: ui_do(core.Set_Home{open = true})
 		case .Chats:
-			ui_do(Set_Left_Tab{tab = .Sessions})
-			if state.sidebar.folded[.Chats] do ui_do(Set_Sidebar_Folded{section = .Chats, folded = false})
+			ui_do(core.Set_Left_Tab{tab = .Sessions})
+			if state.sidebar.folded[.Chats] do ui_do(core.Set_Sidebar_Folded{section = .Chats, folded = false})
 		case .Other: group_fold(h.index)
 		}
 	case .Group_Fold: group_fold(h.index)
 	case .Group_New:
-		if h.index < len(ju.groups) do ui_do(Job_Sheet{open = true, for_project = owner_value(ju.groups[h.index])})
-	case .Resume_All: ui_do(Jobs_Resume{})
+		if h.index < len(ju.groups) do ui_do(core.Job_Sheet{open = true, for_project = owner_value(ju.groups[h.index])})
+	case .Resume_All: ui_do(core.Jobs_Resume{})
 	case .List:
 	}
 }
@@ -655,25 +656,25 @@ jobs_context :: proc(h: Hit_Jobs, at: [2]f32) {
 }
 
 // The "…" menu of a job.
-jobs_menu_items :: proc(id: string, items: ^[dynamic]Menu_Item) {
+jobs_menu_items :: proc(id: string, items: ^[dynamic]core.Menu_Item) {
 	r := job_row_of(id)
 	if r == nil do return
-	add :: proc(items: ^[dynamic]Menu_Item, label: string, cmd: Command) {append(items, Menu_Item{label = label, cmd = cmd})}
-	if r.running do add(items, "Stop", Job_Stop{job = r.id})
-	else if r.err == "" do add(items, "Run now", Job_Run_Now{job = r.id})
-	if r.paused do add(items, "Resume", Jobs_Resume{job = r.id})
-	else do add(items, "Pause", Jobs_Pause{job = r.id})
-	if r.err == "" do add(items, r.enabled ? "Disable" : "Enable", Job_Set_Enabled{job = r.id, on = !r.enabled})
-	append(items, Menu_Item{sep = true})
-	add(items, "Edit…", Job_Sheet{open = true, job = r.id})
-	add(items, "Open note", Job_Open{job = r.id, what = "note"})
+	add :: proc(items: ^[dynamic]core.Menu_Item, label: string, cmd: core.Command) {append(items, core.Menu_Item{label = label, cmd = cmd})}
+	if r.running do add(items, "Stop", core.Job_Stop{job = r.id})
+	else if r.err == "" do add(items, "Run now", core.Job_Run_Now{job = r.id})
+	if r.paused do add(items, "Resume", core.Jobs_Resume{job = r.id})
+	else do add(items, "Pause", core.Jobs_Pause{job = r.id})
+	if r.err == "" do add(items, r.enabled ? "Disable" : "Enable", core.Job_Set_Enabled{job = r.id, on = !r.enabled})
+	append(items, core.Menu_Item{sep = true})
+	add(items, "Edit…", core.Job_Sheet{open = true, job = r.id})
+	add(items, "Open note", core.Job_Open{job = r.id, what = "note"})
 	if r.last_run != "" {
-		add(items, "Open last report", Job_Open{job = r.id, what = "report"})
-		add(items, "Open run folder", Job_Open{job = r.id, what = "run_folder"})
+		add(items, "Open last report", core.Job_Open{job = r.id, what = "report"})
+		add(items, "Open run folder", core.Job_Open{job = r.id, what = "run_folder"})
 	}
-	if r.unread > 0 do add(items, "Mark read", Job_Mark_Read{job = r.id})
-	append(items, Menu_Item{sep = true})
-	add(items, "Delete…", Job_Delete{job = r.id})
+	if r.unread > 0 do add(items, "Mark read", core.Job_Mark_Read{job = r.id})
+	append(items, core.Menu_Item{sep = true})
+	add(items, "Delete…", core.Job_Delete{job = r.id})
 }
 
 // Opens a row and the limits (tests: the layout audit, scenes).

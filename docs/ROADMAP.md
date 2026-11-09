@@ -80,7 +80,7 @@ real terminal running the agent's own TUI; everything around it is native UI.
   are separate window processes. Not tmux itself (no native Windows, a second terminal emulation in
   front of Ghostty, two copies of the state). Today it is one process; the rule that keeps the
   split cheap is already enforced: no sokol/window calls in state, commands or services (they go
-  through `platform`, `src/platform.odin`). The split itself comes later.
+  through `platform`, `src/core/platform.odin`). The split itself comes later.
 - **Data model:** Project → Session → Tabs (`Tab_Kind` union). One plain, serialisable app-state
   struct; every change is a command with a typed target id, submitted to one inbox and run by
   `run_command` on the main thread. Focus, layout and pending confirmations are State too.
@@ -166,7 +166,7 @@ Groundwork for the command layer and state.
   divider, double-click resets). All through commands (`set_pinned`, `set_hidden`, `set_sort`,
   `set_sidebar_folded`, `set_filter`, `reveal`, `copy_path`) and saved in `workspace.json`.
   Tidy project list (2026-11-01, `set_tidy_projects`, gear "Tidy project list", on by default;
-  rules in `src/project_tidy.odin`): projects in temp folders and ones whose folder is gone are
+  rules in `src/core/project_tidy.odin`): projects in temp folders and ones whose folder is gone are
   hidden unless pinned or open (Show hidden shows them tagged "temp" / "folder missing"; filter
   text finds them). Rows nest, sessions never move (2026-11-01): git roots and
   worktrees are top-level; 2+ sibling folders in a folder that is no project share a group row (under its parent project);
@@ -193,7 +193,7 @@ Groundwork for the command layer and state.
 
 - ✅ Session status dots from `pi.status` (working pulse, waiting for you, question, error);
   the bell for notifications.
-- ✅ Agent status for every terminal tab (2026-11-03, `src/agent_status.odin`): any program that
+- ✅ Agent status for every terminal tab (2026-11-03, `src/core/agent_status.odin`): any program that
   speaks OSC 7501 (Claude Code ≥ 2.1.295) gets the same dots, roll-up and bell as pi (the bridge
   wins on a pi tab); "done, not seen yet" with Mark as unread; the Needs attention sort; a
   tooltip naming the status's source and age. Next: a per-program icon from `app`.
@@ -393,7 +393,7 @@ Groundwork for the command layer and state.
 | 2026-10-30 | Close confirmation is a setting per tab kind, default `auto`: shells ask only while a program runs in the foreground; pi tabs always ask until the bridge reports busy/idle | The common terminal behaviour; no prompt for idle shells. |
 | 2026-10-30 | Command log rotates at 10 MB, three files | Bounded disk use. |
 | 2026-10-31 | Home: a slide-over pane (⌘J); its pi in `<data dir>/home` with cwd = the user's home folder (cwd superseded 2026-11-04); starts on first open; one `control` token bound to its tab | Home works across projects (paths resolve as the user types them) while its sessions stay out of pi's project store; lazy start costs nothing until used; binding the token to the tab lets Deckhand refuse self-actions server-side. |
-| 2026-10-31 | One command table (`src/command_table.odin`) for permissions and `list_commands` | A new command is listed for the agents that may send it, and its permission is decided in one place. |
+| 2026-10-31 | One command table (`src/core/command_table.odin`) for permissions and `list_commands` | A new command is listed for the agents that may send it, and its permission is decided in one place. |
 | 2026-11-04 | Deckhand ships its own pi integration (`integrations/pi`: bridge, Atlas's desk tools, browser and app tools, panels), loaded into every pi tab with `pi -e`, as its Claude plugin with `--plugin-dir`; pi tabs get `DECKHAND_*` variables instead of `DECKHAND_SOCKET`/`DECKHAND_TOKEN`/`DECKHAND_CONTROL_TOKEN`; pi 1.4.0 minimum | No feature needs a pi-kit change or install any more, nothing is written to `~/.pi`, and an installed pi-kit's desk extensions go inert without being edited (docs/HARNESSES.md). Replaces the 2026-10-30 decision that the bridge lives in pi-kit. |
 | 2026-11-04 | Read-only pi chats are enforced by pi itself: every start of a chat's pi (new, resume, restore, restart, reload, any caller) ends with `--tools read,grep,find,ls --exclude-tools 'mcp__*' --no-mcp` (`PI_READONLY_ARGS`, shared with read-only jobs), plus `PI_KIT_READONLY=1`; no bash; refused (chats and read jobs) on a known pi older than 1.0.4; follows the setting at each start, unlike Claude tabs | pi-kit is optional, so `PI_KIT_READONLY` alone left a chat that says read-only able to write without it; pi's plain-name `--tools` is an allowlist for every tool (an unnamed extension tool is never registered), and pi keeps the last `--tools`, so the flags go last. Bash is left out as in jobs: pi has no read-only bash of its own. It limits the model's tools only: installed extensions' own code still runs. 1.0.4 brought `--no-mcp` and `*` patterns. |
 | 2026-11-03 | Claude-only sessions: an open session's `agent` is `pi` or `claude`; a Claude session's main tab is its Claude tab and its key (pins, hide, rows, bell) is Claude's session id; its rows come from Deckhand's own history (100), never Claude Code's files; "Resume Claude: …" menu rows replaced by the rows; no Claude chats yet | Claude as a peer of pi with the least new machinery: every key-based path (pins, status, Open group, bell) works unchanged; privacy (no transcripts read); a chat's read-only setting cannot bind Claude, so Claude stays in projects until that is designed. |

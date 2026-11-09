@@ -9,6 +9,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 
 Claude_Reload_Part :: enum u8 {
@@ -43,18 +44,18 @@ claude_reload_counts :: proc(update: bool) -> (n: Reload_Counts) {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if _, is := t.kind.(Claude_Tab); !is do continue
-			if t.status == .Exited && restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
+			if _, is := t.kind.(core.Claude_Tab); !is do continue
+			if t.status == .Exited && core.restart_waiting(t.id) && strings.has_prefix(t.reload.note, "restarting") {
 				n.reloading += 1
 				continue
 			}
 			if t.status != .Running do continue
-			if update ? !claude_reload_outdated(&t) : !t.reload.stale do continue
+			if update ? !core.claude_reload_outdated(&t) : !t.reload.stale do continue
 			if t.reload.queued == .Restart {
 				n.queued += 1
 				continue
 			}
-			switch claude_restart_class(&t) {
+			switch core.claude_restart_class(&t) {
 			case .Idle:           n.idle += 1
 			case .Busy, .Blocked: n.busy += 1
 			case .No_Bridge:      n.no_bridge += 1
@@ -80,8 +81,8 @@ tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
 claude_reload_message :: proc(update: bool) -> (msg: string, can: bool) {
 	n := claude_reload_counts(update)
 	head := "Claude Code settings changed"
-	if update do head = fmt.tprintf("Claude Code updated to %s", claude_version_label(state.reload.claude.version))
-	else if plugin := claude_plugin_dir(); plugin != "" && len(state.reload.claude.changed) > 0 {
+	if update do head = fmt.tprintf("Claude Code updated to %s", core.claude_version_label(state.reload.claude.version))
+	else if plugin := core.claude_plugin_dir(); plugin != "" && len(state.reload.claude.changed) > 0 {
 		only := true
 		for p in state.reload.claude.changed do if !strings.has_prefix(p, strings.concatenate({plugin, "/"}, context.temp_allocator)) do only = false
 		if only do head = "Deckhand's Claude plugin changed"
@@ -113,14 +114,14 @@ short_path :: proc(p: string) -> string {
 
 // What one Claude tab does about it, for Details ("" = not concerned).
 @(private = "file")
-tab_line :: proc(s: ^Open_Session, t: ^Tab, update: bool) -> string {
+tab_line :: proc(s: ^core.Open_Session, t: ^core.Tab, update: bool) -> string {
 	what: string
 	switch {
 	case t.reload.queued == .Restart:
 		what = t.reload.note != "" ? t.reload.note : "restarts when idle"
-	case update ? claude_reload_outdated(t) : t.reload.stale:
-		switch claude_restart_class(t) {
-		case .Idle:      what = update ? fmt.tprintf("idle, on %s", claude_version_label(t.reload.version)) : "idle"
+	case update ? core.claude_reload_outdated(t) : t.reload.stale:
+		switch core.claude_restart_class(t) {
+		case .Idle:      what = update ? fmt.tprintf("idle, on %s", core.claude_version_label(t.reload.version)) : "idle"
 		case .Busy:      what = "busy: restarts once idle"
 		case .Blocked:   what = "a subagent runs"
 		case .No_Bridge: what = "never reported its conversation (its hooks did not run)"
@@ -130,7 +131,7 @@ tab_line :: proc(s: ^Open_Session, t: ^Tab, update: bool) -> string {
 	case:
 		return ""
 	}
-	return fmt.tprintf("%s · %s — %s", session_where(s), t.title, what)
+	return fmt.tprintf("%s · %s — %s", core.session_where(s), t.title, what)
 }
 
 // Both bars and their Details, at the top of the centre (ui.odin), under pi's.
@@ -153,7 +154,7 @@ bar :: proc(update: bool) {
 	if clay.UI(clay.ID(update ? "claude_update_bar" : "claude_reload_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		dot(update ? th.done : th.accent)
 		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(th.text))
@@ -184,14 +185,14 @@ details_list :: proc(update: bool) {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if _, is := t.kind.(Claude_Tab); !is || t.status != .Running do continue
+			if _, is := t.kind.(core.Claude_Tab); !is || t.status != .Running do continue
 			if l := tab_line(&s, &t, update); l != "" do append(&tabs, l)
 		}
 	}
 	if clay.UI(clay.ID(update ? "claude_update_list" : "claude_reload_list"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD + DOT + SP_2), pu(TERM_PAD), pu(SP_1), pu(SP_2)}, childGap = pu(SP_1 / 2), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		room := centre_width() - px(2 * TERM_PAD + DOT + SP_2)
 		if len(lines) > 0 {
@@ -232,16 +233,16 @@ claude_reload_tip :: proc(h: Hit_Claude_Reload) -> (label, keys: string) {
 // A click on a bar's button (main.odin).
 claude_reload_click :: proc(h: Hit_Claude_Reload) {
 	switch h.part {
-	case .Restart:        ui_do(Claude_Restart_Changed{})
-	case .Update_Restart: ui_do(Claude_Restart_Changed{update = true})
+	case .Restart:        ui_do(core.Claude_Restart_Changed{})
+	case .Update_Restart: ui_do(core.Claude_Restart_Changed{update = true})
 	case .Details:        open_details[0] = !open_details[0]
 	case .Update_Details: open_details[1] = !open_details[1]
 	case .Later:
 		open_details[0] = false
-		ui_do(Claude_Reload_Later{})
+		ui_do(core.Claude_Reload_Later{})
 	case .Update_Later:
 		open_details[1] = false
-		ui_do(Claude_Reload_Later{update = true})
+		ui_do(core.Claude_Reload_Later{update = true})
 	}
 	app.redraw = true
 }

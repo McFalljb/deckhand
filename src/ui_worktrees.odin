@@ -18,6 +18,7 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:strings"
 import "core:time"
+import "core"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
@@ -56,7 +57,7 @@ wt_drawn: [dynamic]Wt_Key
 
 // Row i of the last layout, now (ok = false: gone since).
 @(private = "file")
-wt_drawn_row :: proc(i: int) -> (r: ^Wt_Repo, row: Wt_Row, ok: bool) {
+wt_drawn_row :: proc(i: int) -> (r: ^core.Wt_Repo, row: Wt_Row, ok: bool) {
 	if i < 0 || i >= len(wt_drawn) do return
 	k := wt_drawn[i]
 	r, _ = wt_current()
@@ -77,14 +78,14 @@ Menu_Worktree :: struct {
 
 // The repository of the Files tab's project and the folder its tree shows
 // (nil: not in git). counts: see wt_repo_for.
-wt_current :: proc(counts := true) -> (r: ^Wt_Repo, root: string) {
-	base := files_base()
+wt_current :: proc(counts := true) -> (r: ^core.Wt_Repo, root: string) {
+	base := core.files_base()
 	if base == "" do return nil, ""
-	return wt_repo_for(base, counts), files_root_for(base)
+	return core.wt_repo_for(base, counts), core.files_root_for(base)
 }
 
 // The menu's rows: checkouts, then branches without one.
-wt_menu_rows :: proc(r: ^Wt_Repo) -> []Wt_Row {
+wt_menu_rows :: proc(r: ^core.Wt_Repo) -> []Wt_Row {
 	out := make([dynamic]Wt_Row, context.temp_allocator)
 	if r == nil do return nil
 	for _, i in r.checkouts do append(&out, Wt_Row{checkout = i, branch = -1})
@@ -95,18 +96,18 @@ wt_menu_rows :: proc(r: ^Wt_Repo) -> []Wt_Row {
 // A piece of state shown after a name: its text and colour.
 Wt_Badge :: struct {
 	text: string,
-	col:  Rgba,
+	col:  core.Rgba,
 }
 
 // A checkout's state: ahead/behind, changed files, merged, gone, locked.
-wt_checkout_badges :: proc(c: Wt_Checkout) -> []Wt_Badge {
+wt_checkout_badges :: proc(c: core.Wt_Checkout) -> []Wt_Badge {
 	th := theme()
 	out := make([dynamic]Wt_Badge, context.temp_allocator)
-	switch wt_cleanup_phase(c.path) {
+	switch core.wt_cleanup_phase(c.path) {
 	case "checking": append(&out, Wt_Badge{"Checking…", th.text_muted})
 	case "removing": append(&out, Wt_Badge{"Removing…", th.text_muted})
 	}
-	if e := wt_cleanup_error(c.path); e != "" do append(&out, Wt_Badge{fmt.tprintf("⚠ %s", e), th.error})
+	if e := core.wt_cleanup_error(c.path); e != "" do append(&out, Wt_Badge{fmt.tprintf("⚠ %s", e), th.error})
 	if c.missing || c.prunable do append(&out, Wt_Badge{c.missing ? "⚠ missing" : "⚠ prunable", th.error})
 	if c.ahead > 0 do append(&out, Wt_Badge{fmt.tprintf("↑%d", c.ahead), th.text_secondary})
 	if c.behind > 0 do append(&out, Wt_Badge{fmt.tprintf("↓%d", c.behind), th.text_secondary})
@@ -117,13 +118,13 @@ wt_checkout_badges :: proc(c: Wt_Checkout) -> []Wt_Badge {
 }
 
 // A branch's state against the default branch, and its last commit's age.
-wt_branch_badges :: proc(b: Wt_Branch) -> []Wt_Badge {
+wt_branch_badges :: proc(b: core.Wt_Branch) -> []Wt_Badge {
 	th := theme()
 	out := make([dynamic]Wt_Badge, context.temp_allocator)
 	if b.ahead > 0 do append(&out, Wt_Badge{fmt.tprintf("↑%d", b.ahead), th.text_secondary})
 	if b.behind > 0 do append(&out, Wt_Badge{fmt.tprintf("↓%d", b.behind), th.text_secondary})
 	if b.merged do append(&out, Wt_Badge{"✓ merged", th.done})
-	if b.date > 0 do append(&out, Wt_Badge{ago(time.unix(b.date, 0)), th.text_muted})
+	if b.date > 0 do append(&out, Wt_Badge{core.ago(time.unix(b.date, 0)), th.text_muted})
 	return out[:]
 }
 
@@ -144,7 +145,7 @@ badges :: proc(bs: []Wt_Badge) {
 
 // A path for a row: ~ for the home folder, the middle cut when long.
 wt_short_path :: proc(p: string, room: f32) -> string {
-	d := fs_display(p)
+	d := core.fs_display(p)
 	if text_w(d, FONT_UI_SMALL) <= room do return d
 	// keep the last folder whole: "…/parent/name"
 	i := strings.last_index_byte(d, '/')
@@ -155,9 +156,9 @@ wt_short_path :: proc(p: string, room: f32) -> string {
 }
 
 // The switcher's label: "main checkout · main", "worktree · feature".
-wt_switch_label :: proc(r: ^Wt_Repo, root: string) -> string {
-	if c := wt_checkout(r, root); c != nil do return fmt.tprintf("%s · %s", wt_kind(c^), wt_branch_label(c^))
-	return wt_where(root).linked ? "worktree" : "main checkout"
+wt_switch_label :: proc(r: ^core.Wt_Repo, root: string) -> string {
+	if c := core.wt_checkout(r, root); c != nil do return fmt.tprintf("%s · %s", core.wt_kind(c^), core.wt_branch_label(c^))
+	return core.wt_where(root).linked ? "worktree" : "main checkout"
 }
 
 // ---- layout ----
@@ -179,7 +180,7 @@ wt_switcher :: proc(row_w: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(WT_SWITCH_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 	}) {
 		icon(.Branch, mix(th.text_muted, th.text_secondary, em), ICON_SIZE_SM)
 		clay.TextDynamic(clip(label, room), txt(mix(th.text_secondary, th.text, em)))
@@ -237,7 +238,7 @@ wt_menu_layout :: proc(w, h: f32) {
 		layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = clay.PaddingAll(pu(PAD_OVERLAY))},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD + SP_1)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 8},
 	}) {
 		overlay_shadow("wt_menu_shadow", 8)
@@ -245,7 +246,7 @@ wt_menu_layout :: proc(w, h: f32) {
 		for row, i in rows[:n] {
 			if row.checkout < 0 && (i == 0 || rows[i - 1].checkout >= 0) {
 				if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(MENU_SEP_H))}, childAlignment = {y = .Center}}}) {
-					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BORDER_W))}}, backgroundColor = cc(th.border)}) {}
+					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 				}
 				wt_heading("wthead", 1, fmt.tprintf("Branches without a worktree · vs %s", r.default_branch != "" ? r.default_branch : "?"), inner)
 			}
@@ -290,7 +291,7 @@ wt_more_button :: proc(i: int, shown: bool) {
 }
 
 @(private = "file")
-wt_checkout_row :: proc(r: ^Wt_Repo, c: Wt_Checkout, i: int, root: string, inner: f32) {
+wt_checkout_row :: proc(r: ^core.Wt_Repo, c: core.Wt_Checkout, i: int, root: string, inner: f32) {
 	th := theme()
 	id := clay.ID("wtrow", u32(i))
 	hovered := ui_hover == Hit(Hit_Files{what = .Wt_Row, index = i}) || ui_hover == Hit(Hit_Files{what = .Wt_More, index = i})
@@ -312,13 +313,13 @@ wt_checkout_row :: proc(r: ^Wt_Repo, c: Wt_Checkout, i: int, root: string, inner
 				bw := min(badges_w(bs), text_room * 0.6)
 				weight: u16 = current ? WEIGHT_BOLD : WEIGHT_REGULAR
 				col := c.missing ? th.text_muted : mix(th.text_secondary, th.text, em)
-				clay.TextDynamic(clip(wt_branch_label(c), text_room - bw - px(SP_2), weight), txt(col, weight))
+				clay.TextDynamic(clip(core.wt_branch_label(c), text_room - bw - px(SP_2), weight), txt(col, weight))
 				spacer()
 				if badges_w(bs) <= text_room * 0.6 do badges(bs)
 				else if len(bs) > 0 do clay.TextDynamic(clip(bs[0].text, bw, FONT_UI_SMALL), txt(bs[0].col, FONT_UI_SMALL)) // the first only
 			}
 			// where it is
-			kind := wt_kind(c)
+			kind := core.wt_kind(c)
 			kw := text_w(kind, FONT_UI_SMALL)
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 				clay.TextDynamic(kind, txt(th.text_muted, FONT_UI_SMALL))
@@ -330,7 +331,7 @@ wt_checkout_row :: proc(r: ^Wt_Repo, c: Wt_Checkout, i: int, root: string, inner
 }
 
 @(private = "file")
-wt_branch_row :: proc(b: Wt_Branch, i: int, inner: f32) {
+wt_branch_row :: proc(b: core.Wt_Branch, i: int, inner: f32) {
 	th := theme()
 	id := clay.ID("wtrow", u32(i))
 	hovered := ui_hover == Hit(Hit_Files{what = .Wt_Row, index = i}) || ui_hover == Hit(Hit_Files{what = .Wt_More, index = i})
@@ -448,7 +449,7 @@ wt_menu_pick :: proc(i: int) {
 	}
 	c := r.checkouts[row.checkout]
 	if c.missing || c.bare do return
-	ui_do(Files_Set_Root{path = c.path})
+	ui_do(core.Files_Set_Root{path = c.path})
 	wt_menu_close()
 }
 
@@ -475,33 +476,33 @@ wt_menu_actions :: proc(i: int, at: [2]f32) {
 
 // A worktree row's actions: open a terminal or a session there, Reveal,
 // copy its path or branch; Clean up for a merged, clean worktree.
-wt_menu_items :: proc(t: Menu_Worktree, items: ^[dynamic]Menu_Item) {
-	sep :: proc(items: ^[dynamic]Menu_Item) {append(items, Menu_Item{sep = true})}
+wt_menu_items :: proc(t: Menu_Worktree, items: ^[dynamic]core.Menu_Item) {
+	sep :: proc(items: ^[dynamic]core.Menu_Item) {append(items, core.Menu_Item{sep = true})}
 	r, _ := wt_current()
-	c := wt_checkout(r, t.path)
+	c := core.wt_checkout(r, t.path)
 	if t.path != "" && c != nil && !c.missing && !c.bare {
-		if cs := cur(); cs != nil && !cs.home do append(items, Menu_Item{label = "Open terminal here", cmd = New_Shell_Tab{session = cs.id, cwd = t.path}})
+		if cs := core.cur(); cs != nil && !cs.home do append(items, core.Menu_Item{label = "Open terminal here", cmd = core.New_Shell_Tab{session = cs.id, cwd = t.path}})
 		if p := files_project(); p != nil {
 			// a session in the checkout: the installed harnesses' picker (harness.odin; pi: a worktree
 			// session, Claude: a Claude-only session kept with the project's)
-			append(items, Menu_Item{label = "New session here", picker = Menu_New_Session{project_id = p.id, cwd = t.path}})
+			append(items, core.Menu_Item{label = "New session here", picker = core.Menu_New_Session{project_id = p.id, cwd = t.path}})
 		}
-		if cs := cur(); cs != nil && !cs.home do append(items, Menu_Item{label = "Show changes", cmd = Changes_Open{session = cs.id, path = t.path}})
-		append(items, Menu_Item{label = "Reveal in Finder", cmd = Reveal_In_Finder{path = t.path}})
+		if cs := core.cur(); cs != nil && !cs.home do append(items, core.Menu_Item{label = "Show changes", cmd = core.Changes_Open{session = cs.id, path = t.path}})
+		append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = t.path}})
 		sep(items)
 	}
-	if t.path != "" do append(items, Menu_Item{label = "Copy path", copy = t.path})
-	if t.branch != "" do append(items, Menu_Item{label = "Copy branch name", copy = t.branch})
-	if c != nil && wt_cleanable(r, c^) {
+	if t.path != "" do append(items, core.Menu_Item{label = "Copy path", copy = t.path})
+	if t.branch != "" do append(items, core.Menu_Item{label = "Copy branch name", copy = t.branch})
+	if c != nil && core.wt_cleanable(r, c^) {
 		sep(items)
-		append(items, Menu_Item{label = "Clean up…", cmd = Worktree_Cleanup{path = t.path}})
+		append(items, core.Menu_Item{label = "Clean up…", cmd = core.Worktree_Cleanup{path = t.path}})
 	}
 }
 
 // The project of the Files tab: the session on screen's, else the selected one.
-files_project :: proc() -> ^Project {
-	if cs := cur(); cs != nil && !cs.home do return find_project(cs.project_id)
-	return find_project(state.selected_project)
+files_project :: proc() -> ^core.Project {
+	if cs := core.cur(); cs != nil && !cs.home do return core.find_project(cs.project_id)
+	return core.find_project(state.selected_project)
 }
 
 // Tooltips of the switcher and its rows.
@@ -518,10 +519,10 @@ wt_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			return b.name, ""
 		}
 		c := r.checkouts[row.checkout]
-		if c.missing do return fmt.tprintf("%s is gone (git worktree prune drops it)", fs_display(c.path)), ""
+		if c.missing do return fmt.tprintf("%s is gone (git worktree prune drops it)", core.fs_display(c.path)), ""
 		vs := c.upstream != "" && !c.gone ? c.upstream : r.default_branch
-		if c.main && c.upstream == "" do return fs_display(c.path), ""
-		return fmt.tprintf("%s · ahead/behind %s", fs_display(c.path), vs), ""
+		if c.main && c.upstream == "" do return core.fs_display(c.path), ""
+		return fmt.tprintf("%s · ahead/behind %s", core.fs_display(c.path), vs), ""
 	}
 	return "", ""
 }

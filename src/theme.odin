@@ -13,6 +13,7 @@ package main
 // picks one (system, light, dark), State.settings.appearance.
 
 import "core:time"
+import "core"
 
 // ---- spacing (4/8 grid) ----
 SP_1 :: 4
@@ -31,23 +32,10 @@ PAD_ROW :: SP_2 // a row's inner left and right padding
 PAD_OVERLAY :: SP_1 // inside menus, the settings popover and the sheet
 SEPARATOR_H :: 16 // a vertical separator between button groups
 
-// ---- type ----
-// UI text (system font, two sizes) and code (the look's terminal family),
-// in logical px; the text layer scales by the display (font.odin). The UI
-// sizes follow Settings.text_size (the gear's "Text size"); code stays put.
-TYPE_CODE_PX :: 14
-
-// The chrome's text size. Default first: the zero value, not saved.
-Text_Size :: enum {
-	Default,
-	Small,
-	Medium,
-	Large,
-}
 // Smallest to largest, as the gear shows them.
-TEXT_SIZE_ORDER :: [4]Text_Size{.Small, .Medium, .Default, .Large}
+TEXT_SIZE_ORDER :: [4]core.Text_Size{.Small, .Medium, .Default, .Large}
 // UI body and secondary (small) text per size, logical px.
-TYPE_UI_PX := [Text_Size][2]f32 {
+TYPE_UI_PX := [core.Text_Size][2]f32 {
 	.Small   = {12, 11},
 	.Medium  = {13, 11},
 	.Default = {14, 12},
@@ -61,7 +49,6 @@ WEIGHT_HEADER :: FONT_SEMIBOLD // section headers (sidebar sections, panels, Set
 // ---- shape ----
 RADIUS_SM :: 4
 RADIUS_MD :: 6
-BORDER_W :: 1 // dividers
 FOCUS_RING_W :: 1 // text field outline in the accent colour
 CARET_W :: 1.5
 
@@ -137,14 +124,8 @@ MENU_ROW_H :: 26
 MENU_SEP_H :: SP_2
 // Column dividers (drag to resize; double-click resets).
 DIVIDER_HIT :: 6 // grab width across the 1 px line
-LEFT_MIN :: 200
-LEFT_MAX :: 480
-RIGHT_MIN :: 240
-RIGHT_MAX :: 560
 CENTRE_MIN :: 360 // the terminal never gets narrower; small windows shrink the columns first
-PANE_MIN_W :: 240 // a pane's content, at least (logical px; ~28 columns); split_pane refuses less
-PANE_MIN_H :: 140 // (~6 rows)
-WINDOW_MIN_W :: LEFT_MIN + CENTRE_MIN + RIGHT_MIN // the window's smallest size (its layout is audited down to it)
+WINDOW_MIN_W :: core.LEFT_MIN + CENTRE_MIN + core.RIGHT_MIN // the window's smallest size (its layout is audited down to it)
 WINDOW_MIN_H :: 480
 RESIZE_THROTTLE :: 120 * time.Millisecond // terminal grid (and PTY) resizes while a divider is dragged
 TERM_PAD :: SP_3 // between the terminal pane edge and its cell grid
@@ -193,44 +174,38 @@ SCROLL_STEP :: 10 // px per wheel unit in the chrome's lists
 
 // ---- colours ----
 
-Theme_Id :: enum {
-	Graphite,
-	Warm,
-	Ghostty,
-}
-
 Theme :: struct {
 	font_family:    string, // wanted terminal/UI family; the text layer picks the face
 	// surfaces
-	bg_app:         Rgba, // centre column; equals the terminal background
-	bg_sidebar:     Rgba,
-	bg_panel:       Rgba, // right column
-	bg_elevated:    Rgba, // bars, buttons
-	bg_field:       Rgba, // text fields
-	hover:          Rgba, // overlay on any surface (alpha)
-	selected:       Rgba, // overlay on any surface (alpha)
+	bg_app:         core.Rgba, // centre column; equals the terminal background
+	bg_sidebar:     core.Rgba,
+	bg_panel:       core.Rgba, // right column
+	bg_elevated:    core.Rgba, // bars, buttons
+	bg_field:       core.Rgba, // text fields
+	hover:          core.Rgba, // overlay on any surface (alpha)
+	selected:       core.Rgba, // overlay on any surface (alpha)
 	// text
-	text:           Rgba,
-	text_secondary: Rgba,
-	text_muted:     Rgba,
-	text_on_accent: Rgba,
-	border:         Rgba,
+	text:           core.Rgba,
+	text_secondary: core.Rgba,
+	text_muted:     core.Rgba,
+	text_on_accent: core.Rgba,
+	border:         core.Rgba,
 	// one accent: focus and the primary action
-	accent:         Rgba,
-	selection:      Rgba, // text selection in fields (alpha)
-	scrim:          Rgba, // behind the command palette (alpha)
-	shadow:         Rgba, // under menus and popovers (alpha; overlay_shadow)
+	accent:         core.Rgba,
+	selection:      core.Rgba, // text selection in fields (alpha)
+	scrim:          core.Rgba, // behind the command palette (alpha)
+	shadow:         core.Rgba, // under menus and popovers (alpha; overlay_shadow)
 	// status
-	running:        Rgba,
-	waiting:        Rgba, // waiting for you
-	done:           Rgba,
-	error:          Rgba,
+	running:        core.Rgba,
+	waiting:        core.Rgba, // waiting for you
+	done:           core.Rgba,
+	error:          core.Rgba,
 	// the terminal's selected cells' background (text keeps its colour); the terminal's default
 	// colours are its own (term_palette.odin)
-	term_selection: Rgba,
+	term_selection: core.Rgba,
 }
 
-THEMES := [Theme_Id]Theme {
+THEMES := [core.Theme_Id]Theme {
 	// Neutral dark: zinc greys, a calm blue accent.
 	.Graphite = {
 		font_family    = "Menlo",
@@ -318,7 +293,7 @@ THEMES := [Theme_Id]Theme {
 // colours (also used as text) 4.5:1; theme_test.odin checks every look in
 // both appearances. Terminal colours 1-6 reach 4.5:1 on the background,
 // their bright variants 3:1; 7 and 15 are light greys (backgrounds).
-THEMES_LIGHT := [Theme_Id]Theme {
+THEMES_LIGHT := [core.Theme_Id]Theme {
 	// Neutral light: zinc greys on near-white, a deeper blue accent (blue-600)
 	// so the focus ring and "+" read on light surfaces.
 	.Graphite = {
@@ -405,16 +380,8 @@ THEMES_LIGHT := [Theme_Id]Theme {
 	},
 }
 
-// Light or dark, independent of the look: `system` follows the OS
-// appearance (State.system_light, reported by the platform layer).
-Appearance :: enum {
-	System,
-	Light,
-	Dark,
-}
-
 // The active look in the active appearance.
-theme :: proc() -> ^Theme {return theme_is_light() ? &THEMES_LIGHT[state.settings.theme] : &THEMES[state.settings.theme]}
+theme :: proc() -> ^Theme {return core.theme_is_light() ? &THEMES_LIGHT[state.settings.theme] : &THEMES[state.settings.theme]}
 
 // Fonts for a look: its terminal family first, then the default chain
 // (JetBrains Mono, SF Mono, Menlo); UI text in the system font at the
@@ -494,16 +461,16 @@ Syntax_Token :: enum u8 {
 }
 
 Editor_Colors :: struct {
-	syntax:        [Syntax_Token]Rgba, // Plain = the text colour
-	line_number:   Rgba,
-	current_line:  Rgba, // background of the cursor's line (alpha)
-	find_match:    Rgba, // other matches (alpha)
-	diff_added:    Rgba,
-	diff_modified: Rgba,
-	diff_removed:  Rgba,
+	syntax:        [Syntax_Token]core.Rgba, // Plain = the text colour
+	line_number:   core.Rgba,
+	current_line:  core.Rgba, // background of the cursor's line (alpha)
+	find_match:    core.Rgba, // other matches (alpha)
+	diff_added:    core.Rgba,
+	diff_modified: core.Rgba,
+	diff_removed:  core.Rgba,
 }
 
-EDITOR_COLORS := [Theme_Id]Editor_Colors {
+EDITOR_COLORS := [core.Theme_Id]Editor_Colors {
 	.Graphite = {
 		syntax = {
 			.Plain = {0xd4, 0xd4, 0xd8, 255}, .Comment = {0x6e, 0x6e, 0x78, 255}, .Keyword = {0xc2, 0x9b, 0xe0, 255},
@@ -544,7 +511,7 @@ EDITOR_COLORS := [Theme_Id]Editor_Colors {
 
 // The light variant of each look's editor colours (contrast at least 4.5:1
 // against the light background for code, like the light terminal palettes).
-EDITOR_COLORS_LIGHT := [Theme_Id]Editor_Colors {
+EDITOR_COLORS_LIGHT := [core.Theme_Id]Editor_Colors {
 	.Graphite = {
 		syntax = {
 			.Plain = {0x27, 0x27, 0x2a, 255}, .Comment = {0x6e, 0x6e, 0x78, 255}, .Keyword = {0x7c, 0x3a, 0xb5, 255},
@@ -584,5 +551,5 @@ EDITOR_COLORS_LIGHT := [Theme_Id]Editor_Colors {
 }
 
 editor_colors :: proc() -> ^Editor_Colors {
-	return theme_is_light() ? &EDITOR_COLORS_LIGHT[state.settings.theme] : &EDITOR_COLORS[state.settings.theme]
+	return core.theme_is_light() ? &EDITOR_COLORS_LIGHT[state.settings.theme] : &EDITOR_COLORS[state.settings.theme]
 }

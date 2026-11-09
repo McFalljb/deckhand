@@ -5,7 +5,7 @@ package holder
 //
 //   deckhand-core relaunch --pid P --app BUNDLE --exe EXE --run DIR [--no-open]
 //
-// The app that is updating starts it (src/update.odin) right after it swapped the new bundle in,
+// The app that is updating starts it (src/core/update.odin) right after it swapped the new bundle in,
 // before it quits. The helper:
 //   1. listens on DIR/successor.sock (0600, in the runtime dir: 0700 and ours) and says "ready\n"
 //      on stdout;
@@ -16,7 +16,7 @@ package holder
 //      the new app themselves);
 //   4. hands the secret to the first peer of successor.sock that passes the check, at most until
 //      the secret expires (holderwire.SUCCESSOR_TTL after it arrived), then removes the socket and
-//      exits. The new app connects at launch (src/holder_successor.odin) and says HELLO with it.
+//      exits. The new app connects at launch (src/core/holder_successor.odin) and says HELLO with it.
 //
 // The ready wire, plain bytes both ways: app → "<pid>\n"; helper → "<secret>\n"; app → "ok\n".
 // The check (ad hoc, §5.4: it guards against accidents, not a same-user attacker): the peer is

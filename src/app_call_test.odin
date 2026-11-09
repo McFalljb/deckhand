@@ -12,21 +12,22 @@ import "core:math"
 import "core:strings"
 import "core:testing"
 import "core:time"
+import "core"
 
 @(test)
 app_call_parses_method_and_params :: proc(t: ^testing.T) {
-	c, err := parse_command(`{"type":"app_call","tab_id":4,"method":"game.get","params":{"path":"square"},"timeout_ms":500}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"app_call","tab_id":4,"method":"game.get","params":{"path":"square"},"timeout_ms":500}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	ac := c.(App_Call)
+	ac := c.(core.App_Call)
 	testing.expect_value(t, ac.method, "game.get")
 	testing.expect_value(t, ac.params, `{"path":"square"}`)
 	testing.expect_value(t, ac.timeout_ms, 500)
-	c, err = parse_command(`{"type":"app_call","tab_id":4,"method":"tab.describe"}`, context.temp_allocator)
+	c, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":"tab.describe"}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, c.(App_Call).params, "")
-	_, err = parse_command(`{"type":"app_call","tab_id":4,"method":"game.get","params":[1]}`, context.temp_allocator)
+	testing.expect_value(t, c.(core.App_Call).params, "")
+	_, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":"game.get","params":[1]}`, context.temp_allocator)
 	testing.expect(t, err != "", "params must be an object")
-	_, err = parse_command(`{"type":"app_call","tab_id":4,"method":7}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":7}`, context.temp_allocator)
 	testing.expect(t, err != "", "method must be a string")
 }
 
@@ -49,7 +50,7 @@ app_call_checks_only_the_envelope :: proc(t: ^testing.T) {
 	ok(t, "editor:spawn_entity", `{}`)
 	ok(t, "a", "")
 	bad(t, "", "", "bad_args")
-	bad(t, strings.repeat("m", APP_METHOD_MAX + 1, context.temp_allocator), "", "bad_args")
+	bad(t, strings.repeat("m", core.APP_METHOD_MAX + 1, context.temp_allocator), "", "bad_args")
 	bad(t, "game get", "", "bad_args")
 	bad(t, "game.get\n", "", "bad_args")
 	bad(t, `game"get`, "", "bad_args")
@@ -78,25 +79,25 @@ app_call_line_keeps_the_params :: proc(t: ^testing.T) {
 // code and the app's other fields (traceback, path, …) in data.
 @(test)
 app_results_are_kept_as_sent :: proc(t: ^testing.T) {
-	r, valid := app_result_of(`{"id":"a3","v":1,"type":"result","result":{"ok":true,"data":{"f":1e-20,"n":12345678901234567890,"k\u0001":true}}}`)
+	r, valid := core.app_result_of(`{"id":"a3","v":1,"type":"result","result":{"ok":true,"data":{"f":1e-20,"n":12345678901234567890,"k\u0001":true}}}`)
 	testing.expect(t, valid, "a result line")
 	testing.expect_value(t, r.id, "a3")
 	testing.expect(t, r.ok, "ok")
 	testing.expect_value(t, r.data, `{"f":1e-20,"n":12345678901234567890,"k\u0001":true}`)
-	r, valid = app_result_of(`{"id":"a4","v":1,"type":"result","result":{"ok":false,"error":"no field 'hpp'","code":"no_path","path":"entities[e:1:1].hpp","at":"hpp"}}`)
+	r, valid = core.app_result_of(`{"id":"a4","v":1,"type":"result","result":{"ok":false,"error":"no field 'hpp'","code":"no_path","path":"entities[e:1:1].hpp","at":"hpp"}}`)
 	testing.expect(t, valid && !r.ok, "an error")
 	testing.expect_value(t, r.error, "no field 'hpp'")
 	testing.expect_value(t, r.code, "no_path")
 	testing.expect_value(t, r.data, `{"code":"no_path","path":"entities[e:1:1].hpp","at":"hpp"}`)
-	r, valid = app_result_of(`{"id":"a5","type":"result","result":{"ok":true}}`)
+	r, valid = core.app_result_of(`{"id":"a5","type":"result","result":{"ok":true}}`)
 	testing.expect(t, valid && r.ok && r.data == "{}", "no data: {}")
 	// not one JSON object: refused
-	_, valid = app_result_of(`{"id":"a6","type":"result","result":{"ok":true,"data":1}} {"x":1}`)
+	_, valid = core.app_result_of(`{"id":"a6","type":"result","result":{"ok":true,"data":1}} {"x":1}`)
 	testing.expect(t, !valid, "trailing tokens refused")
-	_, valid = app_result_of(`{"id":"a6","type":"result","result":[1]}`)
+	_, valid = core.app_result_of(`{"id":"a6","type":"result","result":[1]}`)
 	testing.expect(t, !valid, "result must be an object")
 	// whatever the data, the finished result is one JSON value
-	r, valid = app_result_of(`{"id":"a7","type":"result","result":{"ok":true,"data":[1,{"a":"}]"}]}}`)
+	r, valid = core.app_result_of(`{"id":"a7","type":"result","result":{"ok":true,"data":[1,{"a":"}]"}]}}`)
 	testing.expect(t, valid, "array data")
 	_, err := json.parse_string(r.data, .JSON, true, context.temp_allocator)
 	testing.expect(t, err == nil, r.data)
@@ -116,16 +117,16 @@ app_screenshot_rect_is_clamped :: proc(t: ^testing.T) {
 	testing.expect(t, !ok, "outside the frame")
 	_, _, _, _, ok = app_shot_rect({x = 1, y = 1, w = 0, h = 10}, true, 1, 800, 600)
 	testing.expect(t, !ok, "empty")
-	c, err := parse_command(`{"type":"app_screenshot","tab_id":4,"rect":{"x":1,"y":2,"w":3,"h":4.5}}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"app_screenshot","tab_id":4,"rect":{"x":1,"y":2,"w":3,"h":4.5}}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	sc := c.(App_Screenshot)
+	sc := c.(core.App_Screenshot)
 	testing.expect(t, sc.tab_id == 4 && sc.has_rect && sc.rect.w == 3 && sc.rect.h == 4.5, "rect parsed")
-	c, err = parse_command(`{"type":"app_screenshot","tab_id":4}`, context.temp_allocator)
-	testing.expect(t, err == "" && !c.(App_Screenshot).has_rect, "no rect: the whole frame")
-	_, err = parse_command(`{"type":"app_screenshot","tab_id":4,"rect":{"x":1}}`, context.temp_allocator)
+	c, err = core.parse_command(`{"type":"app_screenshot","tab_id":4}`, context.temp_allocator)
+	testing.expect(t, err == "" && !c.(core.App_Screenshot).has_rect, "no rect: the whole frame")
+	_, err = core.parse_command(`{"type":"app_screenshot","tab_id":4,"rect":{"x":1}}`, context.temp_allocator)
 	testing.expect(t, err != "", "a rect needs x, y, w, h")
-	testing.expect(t, caller_may({kind = .Control}, App_Screenshot{}), "control may take screenshots")
-	testing.expect(t, !caller_may({kind = .App, tab_id = 4}, App_Screenshot{}), "an app may not")
+	testing.expect(t, core.caller_may({kind = .Control}, core.App_Screenshot{}), "control may take screenshots")
+	testing.expect(t, !core.caller_may({kind = .App, tab_id = 4}, core.App_Screenshot{}), "an app may not")
 }
 
 // tab.boxes: the app's list of {id, label, rect} in tab px replaces the last
@@ -133,45 +134,45 @@ app_screenshot_rect_is_clamped :: proc(t: ^testing.T) {
 @(test)
 app_boxes_are_parsed_and_capped :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	boxes, ok := app_boxes_parse(`{"type":"event","event":"tab.boxes","boxes":[{"id":"e:1:1","label":"square","rect":{"x":20,"y":40,"w":40,"h":40}},{"id":"e:2:1","rect":{"x":20,"y":120,"w":200,"h":20}},{"label":"no id","rect":{"x":0,"y":0,"w":1,"h":1}},{"id":"e:9:1","label":"no rect"},{"id":"e:3:1","label":"coin","rect":{"x":300,"y":200,"w":16.5,"h":16}}]}`)
-	defer app_boxes_free(boxes)
+	boxes, ok := core.app_boxes_parse(`{"type":"event","event":"tab.boxes","boxes":[{"id":"e:1:1","label":"square","rect":{"x":20,"y":40,"w":40,"h":40}},{"id":"e:2:1","rect":{"x":20,"y":120,"w":200,"h":20}},{"label":"no id","rect":{"x":0,"y":0,"w":1,"h":1}},{"id":"e:9:1","label":"no rect"},{"id":"e:3:1","label":"coin","rect":{"x":300,"y":200,"w":16.5,"h":16}}]}`)
+	defer core.app_boxes_free(boxes)
 	testing.expect(t, ok, "parsed")
 	testing.expect_value(t, len(boxes), 3)
-	testing.expect(t, boxes[0].id == "e:1:1" && boxes[0].label == "square" && boxes[0].rect == App_Rect{20, 40, 40, 40}, "the square")
+	testing.expect(t, boxes[0].id == "e:1:1" && boxes[0].label == "square" && boxes[0].rect == core.App_Rect{20, 40, 40, 40}, "the square")
 	testing.expect(t, boxes[1].label == "e:2:1", "no label: the id")
 	testing.expect_value(t, boxes[2].rect.w, f32(16.5))
 	// hit: the last box listed that holds the point (drawn on top)
-	testing.expect_value(t, app_box_at(boxes, 30, 50), 0)
-	testing.expect_value(t, app_box_at(boxes, 305, 205), 2)
-	testing.expect_value(t, app_box_at(boxes, 5, 5), -1)
-	over := []App_Box{{id = "a", rect = {0, 0, 100, 100}}, {id = "b", rect = {10, 10, 10, 10}}}
-	testing.expect_value(t, app_box_at(over, 15, 15), 1)
+	testing.expect_value(t, core.app_box_at(boxes, 30, 50), 0)
+	testing.expect_value(t, core.app_box_at(boxes, 305, 205), 2)
+	testing.expect_value(t, core.app_box_at(boxes, 5, 5), -1)
+	over := []core.App_Box{{id = "a", rect = {0, 0, 100, 100}}, {id = "b", rect = {10, 10, 10, 10}}}
+	testing.expect_value(t, core.app_box_at(over, 15, 15), 1)
 	// capped
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_string(&b, `{"event":"tab.boxes","boxes":[`)
-	for i in 0 ..< APP_BOXES_MAX + 20 {
+	for i in 0 ..< core.APP_BOXES_MAX + 20 {
 		if i > 0 do strings.write_byte(&b, ',')
 		strings.write_string(&b, `{"id":"x","label":"`)
-		strings.write_string(&b, strings.repeat("L", APP_BOX_LABEL_MAX + 50, context.temp_allocator))
+		strings.write_string(&b, strings.repeat("L", core.APP_BOX_LABEL_MAX + 50, context.temp_allocator))
 		strings.write_string(&b, `","rect":{"x":0,"y":0,"w":1,"h":1}}`)
 	}
 	strings.write_string(&b, `]}`)
-	many, mok := app_boxes_parse(strings.to_string(b))
-	defer app_boxes_free(many)
-	testing.expect(t, mok && len(many) == APP_BOXES_MAX, "at most APP_BOXES_MAX")
-	testing.expect(t, len(many[0].label) <= APP_BOX_LABEL_MAX + len("…"), "labels capped")
-	_, bad := app_boxes_parse(`{"event":"tab.boxes","boxes":{"e:1:1":{"x":1}}}`)
+	many, mok := core.app_boxes_parse(strings.to_string(b))
+	defer core.app_boxes_free(many)
+	testing.expect(t, mok && len(many) == core.APP_BOXES_MAX, "at most APP_BOXES_MAX")
+	testing.expect(t, len(many[0].label) <= core.APP_BOX_LABEL_MAX + len("…"), "labels capped")
+	_, bad := core.app_boxes_parse(`{"event":"tab.boxes","boxes":{"e:1:1":{"x":1}}}`)
 	testing.expect(t, !bad, "boxes must be a list")
-	empty, eok := app_boxes_parse(`{"event":"tab.boxes","boxes":[]}`)
+	empty, eok := core.app_boxes_parse(`{"event":"tab.boxes","boxes":[]}`)
 	testing.expect(t, eok && len(empty) == 0, "an empty list clears them")
 }
 
 @(test)
 app_inspect_parses :: proc(t: ^testing.T) {
-	c, err := parse_command(`{"type":"app_inspect","tab_id":4,"on":true}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"app_inspect","tab_id":4,"on":true}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect(t, c.(App_Inspect).on && c.(App_Inspect).tab_id == 4, "on")
-	testing.expect(t, caller_may({kind = .Control}, App_Inspect{}), "control may toggle it")
+	testing.expect(t, c.(core.App_Inspect).on && c.(core.App_Inspect).tab_id == 4, "on")
+	testing.expect(t, core.caller_may({kind = .Control}, core.App_Inspect{}), "control may toggle it")
 }
 
 // An app's own method may be called "app_screenshot": when the app exits, a
@@ -196,11 +197,11 @@ app_results_cannot_forge_screenshots :: proc(t: ^testing.T) {
 	pending[strings.clone("s950")] = {tab_id = 7, type = strings.clone(APP_SHOT_TYPE), deadline = time.tick_add(time.tick_now(), time.Second)}
 	pending[strings.clone("a951")] = {tab_id = 7, type = strings.clone("game.get"), deadline = time.tick_add(time.tick_now(), time.Second)}
 	defer app_fail_pending(7, "", "")
-	app_apply(App_Call_Done{tab_id = 7, wire = "s950", ok = true, data = `{"path":"/etc/passwd"}`}, {kind = .Internal}, 0)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s950", ok = true, data = `{"path":"/etc/passwd"}`}, {kind = .Internal}, 0)
 	testing.expect(t, "s950" in pending, "the app's forged reply to a screenshot is ignored")
-	app_apply(App_Call_Done{tab_id = 7, wire = "a951", ok = true, data = "{}", from_worker = true}, {kind = .Internal}, 0)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "a951", ok = true, data = "{}", from_worker = true}, {kind = .Internal}, 0)
 	testing.expect(t, "a951" in pending, "a worker cannot finish an app call")
-	app_apply(App_Call_Done{tab_id = 7, wire = "s950", ok = true, data = "{}", from_worker = true}, {kind = .Internal}, 0)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s950", ok = true, data = "{}", from_worker = true}, {kind = .Internal}, 0)
 	testing.expect(t, !("s950" in pending), "the worker finishes its screenshot")
 }
 
@@ -209,39 +210,39 @@ app_results_cannot_forge_screenshots :: proc(t: ^testing.T) {
 @(test)
 app_json_is_strict :: proc(t: ^testing.T) {
 	for bad in ([]string{`{"a":"a\'b"}`, `{"a":"\uzzzz"}`, `[1,2,]`, `{"a":1,}`, `01`, "{\v\"a\":1}", `{"a":1} {"b":2}`, `{'a':1}`, `{a:1}`, `[1 2]`, `{"a" 1}`, `"x`, "\"a\tb\"", `-`, `1.`, `.5`, `1e`, `+1`, `NaN`, `[true,tru]`, `nul`, `{"a":1`, ``, `  `, "\"\xff\""}) {
-		testing.expectf(t, !json_valid(bad), "refused: %q", bad)
+		testing.expectf(t, !core.json_valid(bad), "refused: %q", bad)
 	}
 	for good in ([]string{`{"a":1}`, ` {"a" : [1, -2.5e-3, 0, 1E+9, true, false, null, "x\"\\\/\b\f\n\r\té"]} `, `{"f":1e400,"n":12345678901234567890}`, `[]`, `{}`, `"é"`, `0`, `[[[]]]`}) {
-		testing.expectf(t, json_valid(good), "accepted: %q", good)
+		testing.expectf(t, core.json_valid(good), "accepted: %q", good)
 	}
-	deep := strings.concatenate({strings.repeat("[", JSON_MAX_DEPTH + 1, context.temp_allocator), strings.repeat("]", JSON_MAX_DEPTH + 1, context.temp_allocator)}, context.temp_allocator)
-	testing.expect(t, !json_valid(deep), "too deep")
-	ok := strings.concatenate({strings.repeat("[", JSON_MAX_DEPTH, context.temp_allocator), strings.repeat("]", JSON_MAX_DEPTH, context.temp_allocator)}, context.temp_allocator)
-	testing.expect(t, json_valid(ok), "deep enough")
+	deep := strings.concatenate({strings.repeat("[", core.JSON_MAX_DEPTH + 1, context.temp_allocator), strings.repeat("]", core.JSON_MAX_DEPTH + 1, context.temp_allocator)}, context.temp_allocator)
+	testing.expect(t, !core.json_valid(deep), "too deep")
+	ok := strings.concatenate({strings.repeat("[", core.JSON_MAX_DEPTH, context.temp_allocator), strings.repeat("]", core.JSON_MAX_DEPTH, context.temp_allocator)}, context.temp_allocator)
+	testing.expect(t, core.json_valid(ok), "deep enough")
 	// replies and events with invalid JSON are refused, not passed on
-	_, valid := app_result_of(`{"id":"a1","type":"result","result":{"ok":true,"data":{"a":"a\'b"}}}`)
+	_, valid := core.app_result_of(`{"id":"a1","type":"result","result":{"ok":true,"data":{"a":"a\'b"}}}`)
 	testing.expect(t, !valid, "an invalid reply is refused")
-	_, valid = app_result_of(`{"id":"a1","type":"result","result":{"ok":true,"data":[1,2,]}}`)
+	_, valid = core.app_result_of(`{"id":"a1","type":"result","result":{"ok":true,"data":[1,2,]}}`)
 	testing.expect(t, !valid, "a trailing comma is refused")
 	context.allocator = runtime.heap_allocator()
 	tab: u64 = 994
-	defer app_events_forget(tab)
-	app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","text":"\uzzzz"}`)
-	app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","n":01}`)
-	testing.expect(t, strings.count(app_events_json(tab, "log", 0, 10), `"seq":`) == 0, "invalid events are refused")
+	defer core.app_events_forget(tab)
+	core.app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","text":"\uzzzz"}`)
+	core.app_event_in(tab, "tab.log", `{"type":"event","event":"tab.log","n":01}`)
+	testing.expect(t, strings.count(core.app_events_json(tab, "log", 0, 10), `"seq":`) == 0, "invalid events are refused")
 }
 
 // Finding 4: params go to the app as the caller wrote them (no re-marshal:
 // big integers, 1e400 and the key order survive), and must be strict JSON.
 @(test)
 app_call_params_are_kept_raw :: proc(t: ^testing.T) {
-	c, err := parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"z":1,"a":12345678901234567890,"f":1e400}}`, context.temp_allocator)
+	c, err := core.parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"z":1,"a":12345678901234567890,"f":1e400}}`, context.temp_allocator)
 	testing.expect_value(t, err, "")
-	testing.expect_value(t, c.(App_Call).params, `{"z":1,"a":12345678901234567890,"f":1e400}`)
-	m, merr := parse_request(`{"id":"h1","v":1,"type":"command","command":{"type":"app_call","tab_id":4,"method":"m","params":{"z":[1,2],"a":-0.0}}}`, context.temp_allocator)
+	testing.expect_value(t, c.(core.App_Call).params, `{"z":1,"a":12345678901234567890,"f":1e400}`)
+	m, merr := core.parse_request(`{"id":"h1","v":1,"type":"command","command":{"type":"app_call","tab_id":4,"method":"m","params":{"z":[1,2],"a":-0.0}}}`, context.temp_allocator)
 	testing.expect_value(t, merr, "")
-	testing.expect_value(t, m.command.(App_Call).params, `{"z":[1,2],"a":-0.0}`)
-	_, err = parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"a":1,}}`, context.temp_allocator)
+	testing.expect_value(t, m.command.(core.App_Call).params, `{"z":[1,2],"a":-0.0}`)
+	_, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"a":1,}}`, context.temp_allocator)
 	testing.expect(t, err != "", "params must be strict JSON")
 	// reserved names in any case
 	e, code := app_call_check("TAB.Quit", "")
@@ -259,22 +260,22 @@ app_call_refuses_raw_line_breaks :: proc(t: ^testing.T) {
 		e, code := app_call_check("m", p)
 		testing.expectf(t, e != "" && code == "bad_args", "params %q: %s", p, e)
 	}
-	_, err := parse_command("{\"type\":\"app_call\",\"tab_id\":4,\"method\":\"m\",\"params\":{\"a\":1\r,\"b\":{\"type\":\"tab.quit\"}}}", context.temp_allocator)
+	_, err := core.parse_command("{\"type\":\"app_call\",\"tab_id\":4,\"method\":\"m\",\"params\":{\"a\":1\r,\"b\":{\"type\":\"tab.quit\"}}}", context.temp_allocator)
 	testing.expect(t, err != "", "a CR in the params")
-	_, err = parse_command("{\"type\":\"app_call\",\"tab_id\":4,\r\"method\":\"m\",\"params\":{\"a\":1}}", context.temp_allocator)
+	_, err = core.parse_command("{\"type\":\"app_call\",\"tab_id\":4,\r\"method\":\"m\",\"params\":{\"a\":1}}", context.temp_allocator)
 	testing.expect(t, err != "", "a CR elsewhere in the request line")
-	_, merr := parse_request("{\"id\":\"h1\",\"v\":1,\"type\":\"command\",\"command\":{\"type\":\"app_call\",\"tab_id\":4,\"method\":\"m\",\"params\":{\"a\":\r1}}}", context.temp_allocator)
+	_, merr := core.parse_request("{\"id\":\"h1\",\"v\":1,\"type\":\"command\",\"command\":{\"type\":\"app_call\",\"tab_id\":4,\"method\":\"m\",\"params\":{\"a\":\r1}}}", context.temp_allocator)
 	testing.expect(t, merr != "", "a CR through the socket's command request")
 	// the raw params slice is the only "params": the parser refuses duplicate keys
-	_, err = parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"a":1},"params":{"type":"tab.quit"}}`, context.temp_allocator)
+	_, err = core.parse_command(`{"type":"app_call","tab_id":4,"method":"m","params":{"a":1},"params":{"type":"tab.quit"}}`, context.temp_allocator)
 	testing.expect(t, err != "", "two params")
 	// escaped ones inside strings are fine
 	e, _ := app_call_check("m", `{"a":"x\r\ny"}`)
 	testing.expect_value(t, e, "")
 	// the backstop on every line Deckhand sends an app
-	testing.expect(t, app_line_ok(`{"v":1,"type":"m","a":1}`), "a plain line")
-	testing.expect(t, !app_line_ok("{\"v\":1,\"type\":\"m\",\"a\":1}\r{\"type\":\"tab.quit\"}"), "CR")
-	testing.expect(t, !app_line_ok("{\"v\":1,\"type\":\"m\"\n}"), "LF")
+	testing.expect(t, core.app_line_ok(`{"v":1,"type":"m","a":1}`), "a plain line")
+	testing.expect(t, !core.app_line_ok("{\"v\":1,\"type\":\"m\",\"a\":1}\r{\"type\":\"tab.quit\"}"), "CR")
+	testing.expect(t, !core.app_line_ok("{\"v\":1,\"type\":\"m\"\n}"), "LF")
 }
 
 // "type\u0000" is not "type" to Deckhand but is to a C-string parser.
@@ -291,10 +292,10 @@ app_keys_cannot_hold_nul :: proc(t: ^testing.T) {
 // fields, valid JSON numbers whatever the scale.
 @(test)
 app_display_json_fields :: proc(t: ^testing.T) {
-	testing.expect_value(t, app_display_json(240, 1), `{"fps":240,"scale":1}`)
-	testing.expect_value(t, app_display_json(120, 2), `{"fps":120,"scale":2}`)
-	testing.expect_value(t, app_display_json(60, 1.5), `{"fps":60,"scale":1.5}`)
-	v, err := json.parse_string(app_display_json(144, 2), .JSON, true, context.temp_allocator)
+	testing.expect_value(t, core.app_display_json(240, 1), `{"fps":240,"scale":1}`)
+	testing.expect_value(t, core.app_display_json(120, 2), `{"fps":120,"scale":2}`)
+	testing.expect_value(t, core.app_display_json(60, 1.5), `{"fps":60,"scale":1.5}`)
+	v, err := json.parse_string(core.app_display_json(144, 2), .JSON, true, context.temp_allocator)
 	testing.expect_value(t, err, nil)
 	testing.expect_value(t, v.(json.Object)["fps"].(json.Integer), 144)
 }

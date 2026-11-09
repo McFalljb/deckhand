@@ -11,6 +11,7 @@ package main
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core"
 import clay "../build/clay-odin"
 
 Reload_Part :: enum u8 {
@@ -50,11 +51,11 @@ Reload_Counts :: struct {
 
 // The running pi tabs the reload bar (restart: the restart bar) is about.
 reload_counts :: proc(restart: bool) -> (n: Reload_Counts) {
-	want := restart ? Reload_Op.Restart : Reload_Op.Reload
+	want := restart ? core.Reload_Op.Restart : core.Reload_Op.Reload
 	for &s in state.open_sessions {
-		t := session_pi_tab(&s)
+		t := core.session_pi_tab(&s)
 		if t == nil do continue
-		if reload_step_is(t, restart) { 	// under way (a restarting tab is briefly not running)
+		if core.reload_step_is(t, restart) { 	// under way (a restarting tab is briefly not running)
 			n.reloading += 1
 			continue
 		}
@@ -63,8 +64,8 @@ reload_counts :: proc(restart: bool) -> (n: Reload_Counts) {
 			n.queued += 1
 			continue
 		}
-		if restart ? !reload_outdated(t) : !t.reload.stale do continue
-		switch reload_class(t) {
+		if restart ? !core.reload_outdated(t) : !t.reload.stale do continue
+		switch core.reload_class(t) {
 		case .Idle:           n.idle += 1
 		case .Busy, .Blocked: n.busy += 1
 		case .No_Bridge:      n.no_bridge += 1
@@ -92,7 +93,7 @@ tabs_word :: proc(k: int) -> string {return k == 1 ? "tab" : "tabs"}
 reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 	n := reload_counts(restart)
 	if restart {
-		version := restart_on_version() // else only the pi extensions changed
+		version := core.restart_on_version() // else only the pi extensions changed
 		head := version ? fmt.tprintf("pi updated to %s", state.reload.pi_version) : "pi extensions changed"
 		on := version ? fmt.tprintf(" on pi %s", state.reload.pi_version) : ""
 		switch {
@@ -110,10 +111,10 @@ reload_message :: proc(restart: bool) -> (msg: string, can: bool) {
 		return fmt.tprintf("%s — %d %s without Deckhand's bridge: restart by hand", head, n.no_bridge, tabs_word(n.no_bridge)), false
 	}
 	head := "pi settings changed"
-	if ap := agent_prompt_path(); ap != "" && len(state.reload.changed) > 0 {
+	if ap := core.agent_prompt_path(); ap != "" && len(state.reload.changed) > 0 {
 		only := true
 		for p in state.reload.changed do if p != ap do only = false
-		if only do head = fmt.tprintf("%s's prompt changed", agent_name())
+		if only do head = fmt.tprintf("%s's prompt changed", core.agent_name())
 	}
 	switch {
 	case n.idle > 0:
@@ -142,17 +143,17 @@ short_path :: proc(p: string) -> string {
 
 // What one pi tab does about it, for Details ("" = not concerned).
 @(private = "file")
-tab_line :: proc(s: ^Open_Session, t: ^Tab, restart: bool) -> string {
-	want := restart ? Reload_Op.Restart : Reload_Op.Reload
+tab_line :: proc(s: ^core.Open_Session, t: ^core.Tab, restart: bool) -> string {
+	want := restart ? core.Reload_Op.Restart : core.Reload_Op.Reload
 	what: string
 	switch {
 	case t.reload.queued == want:
 		what = len(t.blockers) > 0 ? fmt.tprintf("waits for %s", t.blockers[0]) : (t.agent == .Working ? "working: when idle" : t.waiting ? "waiting for you: when idle" : "when idle")
-	case reload_step_is(t, restart):
+	case core.reload_step_is(t, restart):
 		what = restart ? "restarting" : "reloading"
-	case restart ? reload_outdated(t) : t.reload.stale:
-		switch reload_class(t) {
-		case .Idle:      what = restart ? (reload_version_outdated(t) ? fmt.tprintf("idle, on pi %s", t.reload.version) : "idle, started with other pi extensions") : "idle"
+	case restart ? core.reload_outdated(t) : t.reload.stale:
+		switch core.reload_class(t) {
+		case .Idle:      what = restart ? (core.reload_version_outdated(t) ? fmt.tprintf("idle, on pi %s", t.reload.version) : "idle, started with other pi extensions") : "idle"
 		case .Busy:      what = t.waiting ? "waiting for you" : "working"
 		case .Blocked:   what = fmt.tprintf("background work: %s", t.blockers[0])
 		case .No_Bridge: what = "no status from its bridge"
@@ -162,7 +163,7 @@ tab_line :: proc(s: ^Open_Session, t: ^Tab, restart: bool) -> string {
 	case:
 		return ""
 	}
-	return fmt.tprintf("%s — %s", session_where(s), what)
+	return fmt.tprintf("%s — %s", core.session_where(s), what)
 }
 
 // Both bars and their Details, at the top of the centre (ui.odin).
@@ -185,7 +186,7 @@ bar :: proc(restart: bool) {
 	if clay.UI(clay.ID(restart ? "restart_bar" : "reload_bar"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		dot(restart ? th.done : th.accent)
 		clay.TextDynamic(clip(msg, max(centre_width() - used, px(80))), txt(th.text))
@@ -214,14 +215,14 @@ details_list :: proc(restart: bool) {
 	}
 	tabs := make([dynamic]string, context.temp_allocator)
 	for &s in state.open_sessions {
-		t := session_pi_tab(&s)
+		t := core.session_pi_tab(&s)
 		if t == nil || t.status != .Running do continue
 		if l := tab_line(&s, t, restart); l != "" do append(&tabs, l)
 	}
 	if clay.UI(clay.ID(restart ? "restart_list" : "reload_list"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(TERM_PAD + DOT + SP_2), pu(TERM_PAD), pu(SP_1), pu(SP_2)}, childGap = pu(SP_1 / 2), layoutDirection = .TopToBottom},
 		backgroundColor = cc(th.bg_elevated),
-		border = {color = cc(th.border), width = {bottom = pu(BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		room := centre_width() - px(2 * TERM_PAD + DOT + SP_2)
 		if len(lines) > 0 {
@@ -262,16 +263,16 @@ reload_tip :: proc(h: Hit_Reload) -> (label, keys: string) {
 // A click on a bar's button (main.odin).
 reload_click :: proc(h: Hit_Reload) {
 	switch h.part {
-	case .Reload:          ui_do(Pi_Reload_All{only_changed = true})
-	case .Restart:         ui_do(Pi_Restart_Updated{})
+	case .Reload:          ui_do(core.Pi_Reload_All{only_changed = true})
+	case .Restart:         ui_do(core.Pi_Restart_Updated{})
 	case .Reload_Details:  reload_ui.details = !reload_ui.details
 	case .Restart_Details: reload_ui.restart_details = !reload_ui.restart_details
 	case .Reload_Later:
 		reload_ui.details = false
-		ui_do(Pi_Reload_Later{})
+		ui_do(core.Pi_Reload_Later{})
 	case .Restart_Later:
 		reload_ui.restart_details = false
-		ui_do(Pi_Reload_Later{restart = true})
+		ui_do(core.Pi_Reload_Later{restart = true})
 	}
 	app.redraw = true
 }

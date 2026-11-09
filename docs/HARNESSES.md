@@ -63,7 +63,7 @@ The Claude integration already lived in Deckhand (`integrations/claude-code`, `-
   from every copy run.** Only built-in extensions can be "replaceable".
 - So **two copies of the bridge would break**: both would connect as the tab and both would answer
   `pi.prompt` and `pi.attach` (prompts and comments sent twice). §4 is how that is avoided.
-- **Minimum pi: 1.4.0** (`PI_MIN_VERSION`, `src/pi_integration.odin`). Deckhand's code relies on
+- **Minimum pi: 1.4.0** (`PI_MIN_VERSION`, `src/core/pi_integration.odin`). Deckhand's code relies on
   pi 1.4 behaviour (`--tools` allowlists, image prompts) and pi-kit, where this code was proven,
   pins 1.5.0 (recommended). `-e` itself is much older. **Still to confirm with one real-pi run on
   1.4.0** (§9).
@@ -96,7 +96,7 @@ does, in load order.
 pi's extension API usage is unchanged from pi-kit's. `lib/text.ts` carries the two helpers the
 rows need from pi-kit's shell and guardrails (`clip`, `redact`, `duration`).
 
-**Loading** (`src/pi_integration.odin`). Every pi start (`start_pi`: a new tab, session or chat,
+**Loading** (`src/core/pi_integration.odin`). Every pi start (`start_pi`: a new tab, session or chat,
 Atlas, a restore, Restart, a dead tab's restart, a hot-reload restart) gets one
 `-e <dir>/extensions/<name>` per required extension, and per optional one turned on
 (`pi_extension_on`: the user's choice in the Settings tab's "pi extensions" group, `set_pi_extension`,
@@ -195,7 +195,7 @@ described in [CLAUDE.md](CLAUDE.md).
 ## 6. The harness manifest
 
 One data table, `HARNESS_MANIFEST` in
-[`src/harness_manifest.odin`](../src/harness_manifest.odin), one row per item; a new harness adds
+[`src/core/harness_manifest.odin`](../src/core/harness_manifest.odin), one row per item; a new harness adds
 rows (and its `Harness` value), not code paths. The setup sheet's first step and Settings →
 Coding agents draw it (`src/ui_harness.odin`). Setup reads the user's harness config and never
 writes it.
@@ -240,7 +240,7 @@ answers are dropped too, and pi's version probed again). Test mode never looks a
 
 ## 7. Install and update
 
-`src/harness_install.odin`. Deckhand works out a harness's
+`src/core/harness_install.odin`. Deckhand works out a harness's
 layout from where its binary links to, without running it (`install_layout`).
 
 | Layout (by real path) | pi | Claude Code | Runs after a click? |

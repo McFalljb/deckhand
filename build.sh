@@ -16,7 +16,7 @@
 # for older scripts). DECKHAND_NO_CEF=1: the bare binary at build/deckhand (and a
 # build/pi-desk link to it), no browser (docs/BROWSER.md §1.5).
 # DECKHAND_RELEASE=1 (scripts/release.sh): the release or debug build without the test hooks
-# (-define:DECKHAND_TEST_HOOKS=false, src/test_hooks.odin): no test mode, no DECKHAND_* overrides,
+# (-define:DECKHAND_TEST_HOOKS=false, src/core/test_hooks.odin): no test mode, no DECKHAND_* overrides,
 # no --print-token. Scenes need the hooks: build again without it before running them.
 # Needs: odin, clang (Xcode command line tools). Does NOT need Zig: libghostty-vt
 # comes prebuilt from vendor/libghostty-vt/ (see scripts/build-ghostty.sh).
@@ -165,7 +165,7 @@ fi
 if [ $WITH_CEF = 1 ]; then
   CEF=$(scripts/fetch-cef.sh)
   CEF_CFLAGS="-O2 -Wall -DCEF_API_VERSION=$CEF_API_VERSION"
-  # a release shim has no DECKHAND_CEF_SPARE or DECKHAND_CEF_NETLOG (src/test_hooks.odin);
+  # a release shim has no DECKHAND_CEF_SPARE or DECKHAND_CEF_NETLOG (src/core/test_hooks.odin);
   # build/dh_cef.mode says which one build/dh_cef.a is
   CEF_MODE=dev CEF_SHIM_FLAGS=$CEF_CFLAGS
   if [ "${DECKHAND_RELEASE:-0}" = 1 ]; then CEF_MODE=release CEF_SHIM_FLAGS="$CEF_CFLAGS -DDH_RELEASE=1"; fi
@@ -207,7 +207,7 @@ check_link_minos() { # odin build args (package and defines)
   if [ $# = 0 ]; then echo "check-minos: found no link inputs"; exit 1; fi
   scripts/check-minos.sh $MACOS_MIN "$@"
 }
-# Claude Code tabs (src/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
+# Claude Code tabs (src/core/claude.odin, docs/CLAUDE.md): the deckhand CLI the plugin's bin/deckhand
 # (and its alias bin/pi-desk) runs (tools/deckhand-cli; from src/ only src/jsonguard, which imports only core), and the plugin itself next to the binary
 # (build/claude-code; bundle-app.sh copies both into the app)
 build_claude() {
@@ -216,7 +216,7 @@ build_claude() {
   cp -R integrations/claude-code build/claude-code
   build_pi
 }
-# pi tabs (src/pi_integration.odin, docs/HARNESSES.md): Deckhand's pi integration, loaded per tab
+# pi tabs (src/core/pi_integration.odin, docs/HARNESSES.md): Deckhand's pi integration, loaded per tab
 # with `pi -e`, next to the binary (build/pi; bundle-app.sh copies it into the app). Its tests stay
 # behind: only what pi loads ships.
 build_pi() {

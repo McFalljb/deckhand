@@ -20,23 +20,10 @@ import "core:c"
 import "core:strings"
 import "core:unicode"
 import "core:unicode/utf8"
+import "core"
 import gh "ghostty"
 import sapp "../vendor/sokol-odin/sokol/app"
 import clay "../build/clay-odin"
-
-Terminal_Link :: struct {
-	tab_id:   u64, // a pi or shell tab (Home's Atlas too)
-	url:      string,
-	external: bool, // the default browser even for http(s) (⇧⌘-click)
-}
-
-// A link on the grid: its URL and its first and last cells (viewport col,
-// row; in reading order, the rows between are whole).
-Term_Link :: struct {
-	url:  string,
-	a, b: [2]int,
-	osc8: bool, // an OSC 8 hyperlink (its text may differ from its target)
-}
 
 LINK_MAX_ROWS :: 8 // soft-wrapped rows read either side of the pointer's
 LINK_TIP_MAX :: 160 // runes of a URL shown in the tip
@@ -52,7 +39,7 @@ LINK_TIP_MAX :: 160 // runes of a URL shown in the tip
 term_url_allowed :: proc(url: string) -> bool {
 	if url == "" || !utf8.valid_string(url) do return false
 	for i in 0 ..< len(url) do if url[i] <= 0x20 || url[i] == 0x7f || url[i] == '\\' do return false
-	if one_line(url, context.temp_allocator) != url do return false
+	if core.one_line(url, context.temp_allocator) != url do return false
 	for p in ([]string{"https://", "http://"}) {
 		if !ascii_prefix(url, p) do continue
 		rest := url[len(p):]
@@ -84,7 +71,7 @@ ascii_prefix :: proc(s, p: string) -> bool {
 // (https://accounts.goo…evil.io). Temp-allocated.
 LINK_HOST_TAIL :: 30
 link_label :: proc(url: string, max: int) -> string {
-	s := one_line(url, context.temp_allocator)
+	s := core.one_line(url, context.temp_allocator)
 	if strings.rune_count(s) <= max do return s
 	head, scheme := "", ""
 	if k := strings.index(s, "://"); k >= 0 {
@@ -266,7 +253,7 @@ row_wraps :: proc(gt: gh.Terminal, y: int) -> bool {
 // The link under viewport cell vc of a terminal of cols x rows (URL in the
 // temp allocator). The pointer's row is read with the rows it soft-wraps
 // with, so a long URL counts as one.
-term_link_at_cell :: proc(gt: gh.Terminal, cols, rows: int, vc: [2]int) -> (Term_Link, bool) {
+term_link_at_cell :: proc(gt: gh.Terminal, cols, rows: int, vc: [2]int) -> (core.Term_Link, bool) {
 	if vc.x < 0 || vc.y < 0 || vc.x >= cols || vc.y >= rows do return {}, false
 	top, bottom := vc.y, vc.y
 	for top > 0 && vc.y - top < LINK_MAX_ROWS && row_wraps(gt, top - 1) do top -= 1
@@ -312,11 +299,11 @@ term_link_at_cell :: proc(gt: gh.Terminal, cols, rows: int, vc: [2]int) -> (Term
 	at := (vc.y - top) * cols + vc.x
 	lo, hi, url, osc8, ok := link_in_cells(cells, at)
 	if !ok do return {}, false
-	return Term_Link{url = url, a = {lo % cols, top + lo / cols}, b = {hi % cols, top + hi / cols}, osc8 = osc8}, true
+	return core.Term_Link{url = url, a = {lo % cols, top + lo / cols}, b = {hi % cols, top + hi / cols}, osc8 = osc8}, true
 }
 
 // The link under the pointer (framebuffer px) in t's grid; none in the padding.
-term_link_at :: proc(t: ^Term, mx, my: f32) -> (Term_Link, bool) {
+term_link_at :: proc(t: ^core.Term, mx, my: f32) -> (core.Term_Link, bool) {
 	if t == nil || t.gt == nil || t.cols == 0 || !in_pane(t, mx, my) do return {}, false
 	fx := (mx - t.x - term_pad()) / font.cell_w
 	fy := (my - t.y - term_pad()) / font.cell_h
@@ -329,16 +316,6 @@ term_link_at :: proc(t: ^Term, mx, my: f32) -> (Term_Link, bool) {
 link_cmd_held: bool // ⌘ is down now (term_links_event); the underline and tip show only then
 @(private = "file")
 link_cursor: bool // the hand is ours (a link under the pointer)
-
-// What a hover lookup depended on: looked up again only when it changes.
-Link_Key :: struct {
-	at:     [2]f32,
-	pane:   [2]f32, // the pane's x, y (a moved pane under a still pointer)
-	bytes:  int, // the terminal's output so far
-	offset: u64, // its scroll position
-	cols, rows: u16,
-	cmd:    bool,
-}
 
 // Every input event, first (before fields, menus and sheets take keys): ⌘
 // going down or up, and the modifiers mouse events carry. The window losing
@@ -363,16 +340,16 @@ term_links_event :: proc(e: ^sapp.Event) {
 // anything it depends on changed. Called before the layout and from input
 // events, never while drawing: the tip and the underline only read t.link.
 // True if a link is under the pointer.
-term_link_tick :: proc(t: ^Term, pt: [2]f32) -> bool {
+term_link_tick :: proc(t: ^core.Term, pt: [2]f32) -> bool {
 	if t == nil do return false
 	sb: gh.Scrollbar
 	if t.gt != nil do gh.terminal_get(t.gt, .Scrollbar, &sb)
-	key := Link_Key{at = pt, pane = {t.x, t.y}, bytes = t.bytes_in, offset = sb.offset, cols = t.cols, rows = t.rows, cmd = link_cmd_held}
+	key := core.Link_Key{at = pt, pane = {t.x, t.y}, bytes = t.bytes_in, offset = sb.offset, cols = t.cols, rows = t.rows, cmd = link_cmd_held}
 	if t.link_scanned && key == t.link_key do return t.link_on
 	t.link_key = key
 	t.link_scanned = true
 	t.link_at = pt
-	l, ok := Term_Link{}, false
+	l, ok := core.Term_Link{}, false
 	if link_cmd_held {
 		t.link_scans += 1
 		l, ok = term_link_at(t, pt.x, pt.y)
@@ -396,7 +373,7 @@ term_link_tick :: proc(t: ^Term, pt: [2]f32) -> bool {
 	return true
 }
 
-term_link_clear :: proc(t: ^Term) {
+term_link_clear :: proc(t: ^core.Term) {
 	t.link_scanned = false
 	if !t.link_on do return
 	delete(t.link.url)
@@ -410,14 +387,14 @@ term_link_clear :: proc(t: ^Term) {
 // pointer is over it); every other terminal has none. The pointer becomes a
 // hand over one.
 term_links_frame :: proc() {
-	t, at := pane_term(hit_pane()), agent_term() // the terminal of the pane under the pointer (panes.odin)
+	t, at := core.pane_term(hit_pane()), core.agent_term() // the terminal of the pane under the pointer (panes.odin)
 	p := app.pointer
 	none := [2]f32{-1e9, -1e9}
 	in_drawer := state.home_open && inside(clay.ID("drawer"), p.x, p.y)
 	on := false
 	if t != nil && term_link_tick(t, in_drawer || over_overlay() ? none : p) do on = true
 	if at != nil && term_link_tick(at, state.home_open && inside(clay.ID("drawer_term"), p.x, p.y) && !over_overlay() ? p : none) do on = true
-	for _, x in terms do if x != t && x != at && x.link_on do term_link_clear(x)
+	for _, x in core.terms do if x != t && x != at && x.link_on do term_link_clear(x)
 	if on {
 		link_cursor = true
 		if sapp.get_mouse_cursor() != .POINTING_HAND do sapp.set_mouse_cursor(.POINTING_HAND)
@@ -430,15 +407,15 @@ term_links_frame :: proc() {
 }
 
 // The tab a terminal belongs to (0: none).
-term_tab_id :: proc(t: ^Term) -> u64 {
-	for id, x in terms do if x == t do return id
+term_tab_id :: proc(t: ^core.Term) -> u64 {
+	for id, x in core.terms do if x == t do return id
 	return 0
 }
 
 // A press in a terminal pane on a link: ⌘-click opens it (⇧⌘: in the
 // default browser), right-click or ⌃-click (without ⌘) opens its menu. True if taken
 // (the program and the selection never see it).
-term_link_mouse_down :: proc(t: ^Term, e: ^sapp.Event) -> bool {
+term_link_mouse_down :: proc(t: ^core.Term, e: ^sapp.Event) -> bool {
 	// taken only as ⌘-click (open) or right-click / ⌃-click (the menu, as a
 	// right click everywhere on macOS); ⌘⌃-click and anything else stay the
 	// program's (or the selection's)
@@ -455,13 +432,13 @@ term_link_mouse_down :: proc(t: ^Term, e: ^sapp.Event) -> bool {
 		menu_open(Menu_Term_Link{tab_id = tab_id, url = l.url}, {e.mouse_x, e.mouse_y})
 		return true
 	}
-	ui_do(Terminal_Link{tab_id = tab_id, url = l.url, external = e.modifiers & sapp.MODIFIER_SHIFT != 0})
+	ui_do(core.Terminal_Link{tab_id = tab_id, url = l.url, external = e.modifiers & sapp.MODIFIER_SHIFT != 0})
 	app.redraw = true
 	return true
 }
 
 // Draws the hovered link's underline (inside term_draw).
-term_link_draw :: proc(t: ^Term, ox, oy: f32, col: Rgba) {
+term_link_draw :: proc(t: ^core.Term, ox, oy: f32, col: core.Rgba) {
 	// only reads: term_link_tick looked it up before the layout
 	if !t.link_on || !link_cmd_held do return
 	l := t.link
@@ -477,8 +454,8 @@ term_link_draw :: proc(t: ^Term, ox, oy: f32, col: Rgba) {
 // when the pointer is down there). In the overlay layer (main.odin draws
 // "linktip" above the terminals).
 term_link_tip_layout :: proc() {
-	t: ^Term
-	for x in ([]^Term{active_term(), agent_term()}) do if x != nil && x.link_on {
+	t: ^core.Term
+	for x in ([]^core.Term{core.active_term(), core.agent_term()}) do if x != nil && x.link_on {
 		t = x
 		break
 	}
@@ -494,7 +471,7 @@ term_link_tip_layout :: proc() {
 		layout = {sizing = {clay.SizingFit({max = max(t.w - 2 * pad, 0)}), clay.SizingFixed(px(TIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-		border = {color = cc(th.border), width = clay.BorderOutside(pu(BORDER_W))},
+		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 30},
 	}) {
 		clay.TextDynamic(text, txt(th.text, FONT_UI_SMALL))
@@ -508,14 +485,14 @@ Menu_Term_Link :: struct {
 	url:    string, // owned by the menu
 }
 
-term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]Menu_Item) {
+term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]core.Menu_Item) {
 	shown := strings.clone(link_label(m.url, 80), context.temp_allocator)
-	append(items, Menu_Item{label = shown, note = true})
-	append(items, Menu_Item{sep = true})
+	append(items, core.Menu_Item{label = shown, note = true})
+	append(items, core.Menu_Item{sep = true})
 	mail := ascii_prefix(m.url, "mailto:")
-	append(items, Menu_Item{label = "Open link", keys = "⌘-click", cmd = Terminal_Link{tab_id = m.tab_id, url = m.url}})
-	if !mail do append(items, Menu_Item{label = "Open in default browser", keys = "⇧⌘-click", cmd = Terminal_Link{tab_id = m.tab_id, url = m.url, external = true}})
-	append(items, Menu_Item{label = "Copy link", copy = m.url})
+	append(items, core.Menu_Item{label = "Open link", keys = "⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url}})
+	if !mail do append(items, core.Menu_Item{label = "Open in default browser", keys = "⇧⌘-click", cmd = core.Terminal_Link{tab_id = m.tab_id, url = m.url, external = true}})
+	append(items, core.Menu_Item{label = "Copy link", copy = m.url})
 }
 
 // ---- the command ----
@@ -524,22 +501,22 @@ term_link_menu_items :: proc(m: Menu_Term_Link, items: ^[dynamic]Menu_Item) {
 @(private = "file")
 browser_usable :: proc() -> bool {return CEF_BUILT_IN && cef_state != .Failed}
 
-term_link_apply :: proc(c: Terminal_Link, caller: Caller) -> (Result, bool) {
-	s, tab, _ := find_tab(c.tab_id)
-	if tab == nil do return fail("no such tab"), false
+term_link_apply :: proc(c: core.Terminal_Link, caller: core.Caller) -> (core.Result, bool) {
+	s, tab, _ := core.find_tab(c.tab_id)
+	if tab == nil do return core.fail("no such tab"), false
 	#partial switch _ in tab.kind {
-	case Pi_Tab, Shell_Tab, Claude_Tab:
+	case core.Pi_Tab, core.Shell_Tab, core.Claude_Tab:
 	case:
-		return fail("not a terminal tab"), false
+		return core.fail("not a terminal tab"), false
 	}
-	if !term_url_allowed(c.url) do return fail("only http, https and mailto links open from a terminal"), false
+	if !term_url_allowed(c.url) do return core.fail("only http, https and mailto links open from a terminal"), false
 	if !ascii_prefix(c.url, "mailto:") {
 		if !c.external && browser_usable() && !s.home {
 			id, _ := browser_tab_open(s.id, c.url)
 			if id != 0 do return {ok = true, created_id = id}, true
 		}
 	}
-	if platform.open_url == nil do return fail("cannot open links here"), false
-	if !platform.open_url(c.url) do return fail("the link could not be opened"), false
+	if core.platform.open_url == nil do return core.fail("cannot open links here"), false
+	if !core.platform.open_url(c.url) do return core.fail("the link could not be opened"), false
 	return {ok = true}, false
 }

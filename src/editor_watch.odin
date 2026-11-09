@@ -13,6 +13,7 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:time"
+import "core"
 
 @(private = "file")
 Watch :: struct {
@@ -40,7 +41,7 @@ on_change :: proc "c" (path: cstring, flags: u32) {
 	append(&watch.pending, Watch_Event{strings.clone(string(path), runtime.heap_allocator()), flags})
 	sync.mutex_unlock(&watch.lock)
 	sync.atomic_store(&watch.any, true)
-	if platform.wake != nil do platform.wake()
+	if core.platform.wake != nil do core.platform.wake()
 }
 
 // Adds a project folder to the watched set (the file model listed it).
@@ -60,16 +61,16 @@ watch_folder :: proc(folder: string) {
 // such a folder) is followed by the stat poll alone.
 watch_sync :: proc() {
 	want := make([dynamic]string, context.temp_allocator)
-	home := fs_real(os.get_env("HOME", context.temp_allocator))
+	home := core.fs_real(os.get_env("HOME", context.temp_allocator))
 	too_wide :: proc(f, home: string) -> bool {
 		return f == "/" || f == "" || f == home || (home != "" && strings.has_prefix(home, f) && home[len(f)] == '/')
 	}
 	for f in watch.folders do if !too_wide(f, home) do append(&want, f)
-	for f in reload_watch_dirs() do if !too_wide(f, home) do append(&want, f) // pi's config folders (reload.odin)
+	for f in core.reload_watch_dirs() do if !too_wide(f, home) do append(&want, f) // pi's config folders (reload.odin)
 	for _, e in editors {
 		if e.view != .File || e.path == "" do continue
-		d := fs_real(dir_of(e.path))
-		if fs_root_of(d) == "" || too_wide(d, home) do continue
+		d := core.fs_real(dir_of(e.path))
+		if core.fs_root_of(d) == "" || too_wide(d, home) do continue
 		append(&want, d)
 	}
 	keep := make([dynamic]string, context.temp_allocator)
@@ -102,10 +103,10 @@ dir_of :: proc(path: string) -> string {
 // Main thread, every frame callback: queued changes, the poll, and the
 // git gutter of the shown editor once typing paused.
 editor_tick :: proc() {
-	fs_model_tick()
-	settings_poll() // the Settings tab's folders outside projects (settings_files.odin)
-	reload_tick() // hot reload: pi's config files and version (reload.odin)
-	claude_reload_tick() // and Claude Code's (claude_reload.odin)
+	core.fs_model_tick()
+	core.settings_poll() // the Settings tab's folders outside projects (settings_files.odin)
+	core.reload_tick() // hot reload: pi's config files and version (reload.odin)
+	core.claude_reload_tick() // and Claude Code's (claude_reload.odin)
 	if sync.atomic_load(&watch.any) {
 		sync.mutex_lock(&watch.lock)
 		paths := watch.pending
@@ -113,21 +114,21 @@ editor_tick :: proc() {
 		sync.atomic_store(&watch.any, false)
 		sync.mutex_unlock(&watch.lock)
 		for p in paths {
-			reload_fs_event(p.path) // one of pi's config folders? (reload.odin)
+			core.reload_fs_event(p.path) // one of pi's config folders? (reload.odin)
 			editor_path_changed(p.path, p.flags)
 			delete(p.path, runtime.heap_allocator())
 		}
 		delete(paths)
 		app.redraw = true
 	}
-	if len(editors) > 0 && time.tick_since(watch.last_poll) > EDITOR_POLL {
+	if len(editors) > 0 && time.tick_since(watch.last_poll) > core.EDITOR_POLL {
 		watch.last_poll = time.tick_now()
 		for _, e in editors do editor_check_disk(e)
 	}
 	// every editor on screen (any pane's: an outside change shows in its gutter there too)
 	for id, e in editors {
-		if !tab_on_screen(id) do continue
-		files_keep_edited_preview()
+		if !core.tab_on_screen(id) do continue
+		core.files_keep_edited_preview()
 		git_gutter_update(e)
 		// a slow reparse waited for typing to pause (editor_syntax.odin): now
 		if e.sx.stale && e.sx.tree != nil && !syntax_deferring(&e.sx) do app.redraw = true
@@ -138,11 +139,11 @@ editor_tick :: proc() {
 // file at (or in a folder event for) that path looks at the disk; a change
 // under .git may have moved HEAD.
 editor_path_changed :: proc(path: string, flags: u32 = 0) {
-	fs_model_changed(path, flags)
+	core.fs_model_changed(path, flags)
 	in_git := strings.contains(path, "/.git/") || strings.has_suffix(path, "/.git")
 	for _, e in editors {
 		if e.view != .File do continue
-		rp := fs_real(e.path)
+		rp := core.fs_real(e.path)
 		if in_git {
 			repo := path[:strings.index(path, "/.git")]
 			if strings.has_prefix(rp, repo) {

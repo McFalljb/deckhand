@@ -5,13 +5,17 @@ out everything the script does by rule, and what is left must be the hand edits.
 Both trees (BASE, before the move, and HEAD, after it) are normalised the same way:
   - a moved file is compared at its old path (src/core/x.odin with src/x.odin), as package main,
     with its relative imports, foreign imports and #load paths resolved to the files they name;
-  - in Odin code (not comments or strings): every `core.` prefix, every `import "core"` line,
-    `state^` and the bare `&state` (the window's `state: ^core.State`) are taken out;
+  - in Odin code (not comments or strings): every `core.` prefix and every `import "core"` line
+    are taken out;
+  - in BASE's window files (src/*.odin that stay; after the moved declarations are cut), State
+    used by value is written as the move must write it with the window's `state: ^core.State`:
+    the bare `state` becomes `state^` and `&state` becomes `state` (HEAD is left as it is, so a
+    `state^` the move dropped, or an `&` it kept, is a difference);
   - everywhere else in the repository, paths of moved files read as before (src/core/x.odin ->
     src/x.odin), and tests/scenes.txt's area globs too;
   - each declaration in src/core/<stem>_core.odin must be, word for word, one that BASE's
-    src/<stem>.odin has: it is cut from there (as the script cuts it) and the rest of that
-    window file is compared;
+    src/<stem>.odin has at file level (not inside a `when` or `foreign` block): it is cut from
+    there (as the script cuts it) and the rest of that window file is compared;
   - src/state_view.odin must be the script's (STATE_VIEW_TEXT).
 Then HEAD minus scripts/core-move-hand.patch (reversed, in a temporary copy) must equal BASE,
 apart from @(private) dropped from core declarations the window uses (listed). Anything else is
@@ -126,8 +130,7 @@ def unhand(head):
 # --- normalisation -----------------------------------------------------------------------------
 
 def strip_code(text, counts):
-    """Takes out the move's rules in Odin code: `core.`, `import "core"`, `state^`, bare
-    `&state`, `package core`."""
+    """Takes out the move's rules in Odin code: `core.`, `import "core"`, `package core`."""
     text = re.sub(r"(?m)^package core\b", "package main", text, count=1)
     # the script's import: alone after the package line (with a blank line before it), or among
     # the others
@@ -149,18 +152,44 @@ def strip_code(text, counts):
                 counts["prefix"] += 1
                 i += 5
                 continue
-            if text.startswith("state^", i) and (i + 6 >= n or not re.match(r"[\w.]", text[i + 6])):
-                counts["deref"] += 1
-                out.append("state")
-                i += 6
-                continue
-            if text.startswith("&state", i) and (i + 6 >= n or not re.match(r"[\w.\[]", text[i + 6])):
-                counts["addr"] += 1
-                out.append("state")
-                i += 6
-                continue
         out.append(text[i])
         i += 1
+    return "".join(out)
+
+
+def window_state(text, counts):
+    """BASE's window code as it must read with `state: ^core.State`: the global used by value
+    (`x := state`, `state = y`, `f(state)`) becomes `state^`, its address (`&state`) `state`.
+    Left alone: `state.x` and `state[i]` (Odin dereferences the pointer for them), a name being
+    declared or a field named (`state: T`, `{state = .On}`, `f(state = 1)`), and every `state`
+    in a declaration that declares its own (a parameter, a local, a loop variable)."""
+    mask = osrc.code_mask(text)
+    own = []  # spans of top-level declarations with a `state` of their own
+    for d in osrc.top_decls(text, mask):
+        body = text[d.start:d.end]
+        if re.search(r"(?<![\w.])state\s*(:|,[\w\s,]*:)|\bfor\s+(\w+\s*,\s*)?state\b", body):
+            own.append((d.start, d.end))
+    out, at = [], 0
+    for m in re.finditer(r"(?<![\w.])(&?)state(?![\w.\[^])", text):
+        i = m.start()
+        if not mask[i] or (not m.group(1) and i > 0 and text[i - 1] == "&"):
+            continue
+        if any(s <= i < e for s, e in own):
+            continue
+        after = text[m.end():]
+        if re.match(r"[ \t]*:", after):
+            continue
+        if re.match(r"[ \t]*=(?!=)", after) and re.search(r"[{,(][ \t\n]*$", text[:i]):
+            continue
+        out.append(text[at:i])
+        if m.group(1):
+            out.append("state")
+            counts["addr"] += 1
+        else:
+            out.append("state^")
+            counts["deref"] += 1
+        at = m.end()
+    out.append(text[at:])
     return "".join(out)
 
 
@@ -289,6 +318,9 @@ def main():
         for d in hdecls:
             bd = bdecls.get(d.name)
             htxt = ht[d.head_start:d.end].rstrip("\n")
+            if bd and bd.depth:
+                problems.append(f"{p}: {d.name} is inside a `{bd.block}` block in BASE's {wf}: moved out of it")
+                continue
             if not bd or nb[wf][bd.head_start:bd.end].rstrip("\n") != htxt:
                 problems.append(f"{p}: {d.name} is not, word for word, a declaration of BASE's {wf}")
                 continue
@@ -303,6 +335,14 @@ def main():
                 problems.append(f"{p}: a line that is no moved declaration: {ln!r}")
         nb[wf], _ = cm.cut_blocks(nb[wf], spans)
         blocks[wf] = names
+
+    # BASE's window files with the window's State a pointer (the moved declarations are cut:
+    # in the core, state is still the value)
+    if "src/state_view.odin" in head:
+        stays = set(moved_back.values())
+        for p in nb:
+            if re.fullmatch(r"src/[^/]+\.odin", p) and p not in stays:
+                nb[p] = window_state(nb[p], counts)
 
     if "src/state_view.odin" in head and head["src/state_view.odin"] != cm.STATE_VIEW_TEXT:
         problems.append("src/state_view.odin is not the script's (core-move.py STATE_VIEW_TEXT)")

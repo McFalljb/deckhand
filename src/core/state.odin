@@ -112,8 +112,11 @@ Tab_Live :: struct {
 	holder_lost:  bool,
 	holder_degraded: bool,
 	claude_wait:  Claude_Wait, // a Claude tab: why a message can't go in now (claude_ready)
+	claude_typed: bool, // claude_typed: the user typed in its prompt since the last message
 	claude_quiet: bool, // claude_hooks_silent, and its banner not dismissed (claude_status_message)
 	claude_restart: Reload_Class, // claude_restart_class
+	claude_status:  string, // claude_status_message: the bar over it (heap)
+	claude_background: int, // claude_background_running
 	app_connected:  bool, // an app tab: its program's connection is open (socket_app_connected)
 	changes_busy:   string, // a Changes tab: the action running ("Staging…"; Changes_View.busy; heap)
 	changes_notice: string, // and the last one's outcome (Changes_View.notice; heap)

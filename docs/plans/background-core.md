@@ -1068,6 +1068,12 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   `new_app_tab` gets its `created_id` at once as in process; the window's own pending commands get
   their `finished`. Test mode: a script line keeps its caller (`as`), and every state read first
   waits until the core ran what the window sent (`client_barrier`).
+- **Claude tabs and the keyboard:** Core.app's CLI is `MacOS/deckhand` (`claude_cli_path` finds
+  it, so the hooks get `DECKHAND_CLI`). `Tab.live` also carries a Claude tab's typed flag, its
+  status bar's text (the core's dismissals and update command) and its background count
+  (`claude_typed`, `claude_status`, `claude_background`). A `set_focus` from the window waits
+  (250 ms at most) for the core's answer before the next key is routed, so keys typed right
+  after ⌘K reach the palette, as in process.
 
 **M4-D as built** (where it differs from the row above):
 - **Quit paths are one table,** `quit_route` (`src/main.odin`, unit-tested): ⌘Q, the Dock's Quit

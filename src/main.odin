@@ -322,6 +322,13 @@ on_system_appearance :: proc(light: bool) {
 ui_do :: proc(cmd: core.Command) {
 	if window_only_quit(cmd) do return
 	if lost_core_save(cmd) do return
+	// a separate core: which widget has the keyboard is the core's (state.focus_widget), so the
+	// next event waits for it (bounded: client_before_event) before it is routed, as in process
+	// (⌘K, then typing). Not here: the caller may hold a view a delta's View_Drop would free.
+	if _, is := cmd.(core.Set_Focus); is && client_separate() && client.sock != nil {
+		client_send_focus(cmd) // client.odin
+		return
+	}
 	client_send(cmd) // client.odin
 }
 

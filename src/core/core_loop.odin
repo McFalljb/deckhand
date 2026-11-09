@@ -65,6 +65,7 @@ core_tick_body :: proc() {
 	tab_term_facts_tick(time.tick_now())
 	tab_live_tick()
 	core_live_tick() // the update bar, the install run, worktree clean ups (core_live.odin)
+	wt_window_tick() // a separate window's worktree switcher: its repository read here too (worktrees.odin)
 	app_boxes_tick() // an inspected app tab's boxes (app_tab_core.odin)
 	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 	term_streams_flush() // what the terminals parsed this tick, to the window's copies (term_stream.odin)
@@ -255,15 +256,20 @@ tab_live_tick :: proc() {
 		}
 		if ct, is := &tab.kind.(Claude_Tab); is {
 			l.claude_wait = claude_wait_of(&tab, ct)
+			l.claude_typed = claude_typed(tab.id)
 			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)
 			l.claude_restart = claude_restart_class(&tab)
+			l.claude_status = claude_status_message(&tab)
+			l.claude_background = claude_background_running(tab.id)
 		}
 		if _, is := tab.kind.(App_Tab); is do l.app_connected = socket_app_connected(tab.id)
 		if v := changes_view(tab.id); v != nil do l.changes_busy, l.changes_notice, l.changes_notice_err = v.busy, v.notice, v.notice_err
 		if l == tab.live do continue
 		delete(tab.live.changes_busy)
 		delete(tab.live.changes_notice)
+		delete(tab.live.claude_status)
 		l.changes_busy, l.changes_notice = strings.clone(l.changes_busy), strings.clone(l.changes_notice) // the view's change under it
+		l.claude_status = strings.clone(l.claude_status)
 		tab.live = l
 		changed = true
 	}

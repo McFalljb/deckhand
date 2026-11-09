@@ -847,7 +847,7 @@ wt_cleanup_pre :: proc(p: string) -> (main, err: string) {
 	if main == "" || !os.is_dir(main) do return "", "no main checkout to run git in"
 	if wt_cleanup_busy(p) do return "", "a clean up of it is running"
 	for s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's folders are not this Mac's
 		if wt_within(fs_real(s.cwd), p) do return "", "a session runs in it"
 		for tab in s.tabs do if _, is := tab.kind.(Shell_Tab); is && tab.cwd != "" && wt_within(fs_real(tab.cwd), p) do return "", "a shell tab runs in it"
 	}

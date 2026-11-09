@@ -258,6 +258,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `machine_add` | `name`, `target`, `via`? | **user only**, with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`); `name`: at most 64 bytes, unique. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
 | `machine_remove` | `no` | **user only**: forgets a machine (its link ends; nothing on it is touched) |
 | `machine_connect` | `no` | **user only**: connects now: Take back from that machine's own window or another hub (`taken`), or a retry without waiting for the backoff |
+| `machine_login` | `no` | **user only**: **Log in…** for a `needs_login` machine: a shell tab in an open session of this Mac (the one on screen, else the last shown) runs `/bin/sh -c 'exec ssh -S "$1" -M -o ControlPersist=600 -- "$2"'` with the link's control path and the target as arguments, so ssh's password, host key or code prompt is answered in a real terminal; the link then reuses that master. `created_id` = the tab. Refused for a `via` machine |
 | `holder_replace` | `stop` | **user only**: answers `state.holder_ask` (a session holder from another build answered, and its code is not this build's: nothing was sent to it, no second holder started). `stop: true` stops it (SIGTERM, then SIGKILL after 3 s; only a process that runs a `deckhand-core`), removes its socket and starts a new holder: its sessions end. `false`: run on without a holder |
 | `core_handover` | `to` | **user only**, a separate core: hand every session over to another core process (§7.2 of the background-core design): `"current"`, the core `deckhand-core-serve install` made current (an update, or *Use this app's core*), or `"previous"` (*Use previous core*). The target is checked (`deckhand-core-serve check`: its signature and generation) first. Job runs get up to 2 min to end, then stop as `stopped (update)`. The window's connection then ends and it dials the new core |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
@@ -727,6 +728,19 @@ not a project row: `select_project`, `rename_project`, pins and hiding refuse it
 (pins and hidden items by identity: project cwd, pi session id; `src/core/sidebar.odin` for the order
 and filter rules). The Open group at the top of the left column lists every open session except
 Home, the current one first, then the most recently shown.
+
+**Other machines' entries** (Machines over SSH, §5a "The hub"; `src/core/machine_mirror.odin`):
+with a machine online, its projects (not its Chats entry) and open sessions (not its Home) are in
+`projects` and `open_sessions` too, after this Mac's, each with `"machine": "<its name>"` (its
+tabs too). Their ids are `{machine, id}` packed into one number: the machine's number (1-8191,
+`machines`' `no`) times 2^40 plus its own id (below 2^40), so every id stays below 2^53; this Mac's
+ids are unchanged (machine 0). Their `pi_session_id`s read `m<no>:<its id>`. While one of its
+projects is selected, `sessions` is that project's sessions as that machine lists them. Each is
+one pane holding its tabs; a tab keeps its kind, title and status only (no path, URL or account).
+They are another machine's text, cleaned (printable, no bidi controls, bounded) and capped (300
+projects, 64 open sessions of 32 tabs). They are never saved in `workspace.json`, and never carry
+that machine's confirmations. `focus_session` and `select_project` take their ids (this Mac's view
+of them); any other command naming one is refused for now (a later version runs it there).
 
 `agent_status` (§5 Status dots): on an open session, its row's dot (the strongest of its tabs:
 `waiting` > `error` > `unseen` > `question` > `working` > `exited` > `none`); on every terminal tab
@@ -1226,8 +1240,13 @@ from the `uname -sm` probe) through `skew_check`; `state.machines`
 `needs_update`; `not_installed`; `taken`), `version`, `os`, `arch` and `error` (another machine's
 text, cleaned: printable runes only, no bidi controls; `version` at most 64 bytes, `error` 128). It reconnects after
 1 s, doubling to 60 s, and from 1 s again after a minute up. **Caps from the first byte:** every
-`window.request` and `confirmation.parked` from a hub link is dropped, never acted on; nothing else
-a hub link sends is read yet.
+`window.request` and `confirmation.parked` from a hub link is dropped, never acted on. Online, the
+hub sends `state.subscribe` (and `select_project` with that machine's own id while one of its
+projects is selected here) and keeps that core's `state.full` and `state.delta` as a replica of its
+State (decoded as a window decodes them: bounded, applied whole or not at all; a refused one asks
+for `state.full` again), merged into this core's State (§ "Other machines' entries" above). Down,
+the merged entries stay as last seen; up again, a fresh `state.full` replaces them. Nothing else a
+hub link sends is read yet.
 
 Waits are bounded so the core never hangs on the window: a `window.request` that wants an answer
 waits at most 250 ms, then the core goes on as if no window were attached. A `tab_host.call` does

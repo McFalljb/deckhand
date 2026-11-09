@@ -265,7 +265,7 @@ sidebar_projects :: proc() -> []Sidebar_Row {
 	top := make([dynamic]int, context.temp_allocator)
 	words := filter_words()
 	for &p in state.projects {
-		if p.group != .Projects do continue
+		if p.group != .Projects || p.machine != 0 do continue // another machine's: under its name (machine_projects)
 		reason := project_hide_reason(p)
 		r := Sidebar_Row{project = &p, pin = project_pinned(p), hidden = reason != .None, reason = reason}
 		st := project_quick_status(p.id, project_status(p.id))
@@ -479,6 +479,7 @@ claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 		}
 		return s
 	}
+	if p.machine != 0 do return // this Mac's Claude history is not another machine's
 	for r in state.claude_history do if r.project == p.cwd && !session_listed(out[:], r.id) do append(out, row(r)) // a pi session's id is its row (older data)
 	for &o in state.open_sessions {
 		if o.home || o.agent != .Claude || o.project_id != p.id || o.pi_session_id == "" || session_listed(out[:], o.pi_session_id) do continue
@@ -558,7 +559,7 @@ sidebar_open :: proc() -> []^Open_Session {
 	rows := make([dynamic]^Open_Session, context.temp_allocator)
 	words := filter_words()
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's: under its name (machine_sessions)
 		st := session_quick_status(&s)
 		if st != .Waiting { 	// waiting work always shows
 			if _, ok := filter_score(words, open_session_title(&s), session_project_name(&s)); !ok do continue
@@ -622,7 +623,7 @@ open_session_stats: int
 // An open session's file is looked at most once a second (title, age): the
 // running dot redraws ten times a second.
 open_session_refresh :: proc(s: ^Open_Session) {
-	if s.session_file == "" do return
+	if s.session_file == "" || s.machine != 0 do return // another machine's file is not on this Mac
 	if s.checked != {} && time.tick_since(s.checked) < time.Second do return
 	s.checked = time.tick_now()
 	open_session_stats += 1

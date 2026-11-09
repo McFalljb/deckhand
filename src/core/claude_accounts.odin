@@ -436,7 +436,7 @@ claude_account_dir_refused :: proc(d: string) -> string {
 		return x == d || rx == rd || within(x, d) || within(rx, rd)
 	}
 	if d == "/" || holds(d, rd, h) do return "a Claude Code config folder is not your home folder or above it"
-	for p in state.projects do if holds(d, rd, p.cwd) do return fmt.tprintf("it holds the project %s: pick the Claude Code config folder itself", p.label != "" ? p.label : p.cwd)
+	for p in state.projects do if p.machine == 0 && holds(d, rd, p.cwd) do return fmt.tprintf("it holds the project %s: pick the Claude Code config folder itself", p.label != "" ? p.label : p.cwd)
 	if holds(d, rd, state.settings.home_dir) do return "it holds Deckhand's main folder: pick the Claude Code config folder itself"
 	if holds(d, rd, chats_cwd()) do return "it holds the chats folder: pick the Claude Code config folder itself"
 	return ""

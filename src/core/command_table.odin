@@ -69,6 +69,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "machine_add", args = "name, target, via?", does = "add a machine reached over ssh (target: an ~/.ssh/config alias or user@host); via: a development or test build's command in place of `ssh … connect`; created_id = its number", who = .User},
 	{type = "machine_remove", args = "no", does = "remove a machine (its link ends)", who = .User},
 	{type = "machine_connect", args = "no", does = "connect to a machine now (Take back from its own window, or retry)", who = .User},
+	{type = "machine_login", args = "no", does = "log in to a machine whose ssh wants a password, a host key or 2FA: a shell tab on this Mac runs ssh in the foreground, and the link then uses that connection", who = .User},
 	{type = "holder_replace", args = "stop", does = "answers state.holder_ask: stop the session holder from another build (its sessions end) and start a new one, or run on without one", who = .User},
 	{type = "core_handover", args = "to", does = `a separate core hands its sessions over to another core process: "current" (the installed core) or "previous" (Use previous core); job runs get 2 min`, who = .User},
 	{type = "set_keep_sessions", args = "on", does = "keep sessions running when Deckhand quits or updates (on by default; the session holder keeps their processes; reopening Deckhand adopts them)", who = .User},

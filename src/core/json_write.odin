@@ -207,6 +207,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Connect:     return "machine_connect"
+	case Machine_Login:       return "machine_login"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
 	case Core_Handover:       return "core_handover"
@@ -470,6 +471,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Machine_Remove:
 		kv_u64(&w, "no", c.no)
 	case Machine_Connect:
+		kv_u64(&w, "no", c.no)
+	case Machine_Login:
 		kv_u64(&w, "no", c.no)
 	case Holder_Replace:
 		kv_bool(&w, "stop", c.stop)
@@ -1347,6 +1350,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if i > 0 do strings.write_byte(b, ',')
 		o := obj_begin(b)
 		kv_u64(&o, "id", p.id)
+		if p.machine != 0 do kv_str(&o, "machine", machine_name(p.machine)) // another machine's (machine_mirror.odin)
 		kv_str(&o, "cwd", p.cwd)
 		kv_str(&o, "label", p.label)
 		kv_str(&o, "name", p.name)
@@ -1421,6 +1425,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		if i > 0 do strings.write_byte(b, ',')
 		o := obj_begin(b)
 		kv_u64(&o, "id", os.id)
+		if os.machine != 0 do kv_str(&o, "machine", machine_name(os.machine)) // another machine's (machine_mirror.odin)
 		// a Claude-only session (claude.odin): its main tab is a Claude tab, and its id (here and as
 		// claude_session_id) is that tab's Claude session id
 		kv_str(&o, "agent", os.agent == .Claude ? "claude" : "pi")
@@ -1469,6 +1474,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			if j > 0 do strings.write_byte(b, ',')
 			to := obj_begin(b)
 			kv_u64(&to, "id", t.id)
+			if t.machine != 0 do kv_str(&to, "machine", machine_name(t.machine))
 			kv_str(&to, "kind", tab_kind_name(t.kind))
 			kv_str(&to, "title", t.title)
 			kv_str(&to, "status", TAB_STATUS_NAMES[t.status])

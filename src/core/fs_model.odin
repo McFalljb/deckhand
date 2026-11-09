@@ -171,8 +171,8 @@ fs_base_roots :: proc() -> []string {
 		for x in out do if x == r do return
 		append(out, r)
 	}
-	for p in state.projects do add(&out, p.cwd)
-	for s in state.open_sessions do if !s.home do add(&out, s.cwd)
+	for p in state.projects do if p.machine == 0 do add(&out, p.cwd) // another machine's folders are not this Mac's
+	for s in state.open_sessions do if !s.home && s.machine == 0 do add(&out, s.cwd)
 	return out[:]
 }
 
@@ -180,7 +180,7 @@ fs_base_roots :: proc() -> []string {
 // selected project's ("" = none).
 fs_base_dir :: proc() -> string {
 	if cs := cur(); cs != nil && !cs.home do return cs.cwd
-	if p := find_project(state.selected_project); p != nil do return p.cwd
+	if p := find_project(state.selected_project); p != nil && p.machine == 0 do return p.cwd // another machine's folder is not this Mac's
 	return ""
 }
 

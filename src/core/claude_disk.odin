@@ -427,7 +427,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	_ = virtual.arena_init_growing(arena)
 	context.allocator = virtual.arena_allocator(arena)
 	out^ = make([dynamic]Claude_Disk)
-	if p == nil || p.cwd == "" do return
+	if p == nil || p.cwd == "" || p.machine != 0 do return // another machine's transcripts are not on this Mac
 	if chats != (p.group == .Chats) do return
 	Cand :: struct {
 		id, path, account: string,

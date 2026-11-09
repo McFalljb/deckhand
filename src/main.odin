@@ -904,7 +904,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
 		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
-		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In:
+		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it
@@ -1347,7 +1347,7 @@ ime_anchor :: proc() -> [4]f32 {
 // and ⌘` show it): the current session's title.
 update_window_title :: proc() {
 	title := "Deckhand"
-	if cs := core.cur(); cs != nil {
+	if cs := core.cur_view(); cs != nil {
 		_, place := core.session_place(cs)
 		title = fmt.tprintf("%s · %s — Deckhand", place, core.open_session_title(cs))
 	}

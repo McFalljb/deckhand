@@ -54,8 +54,8 @@ budget_take :: proc(n: int) -> bool {
 
 // Sets what one message of text's size may decode to: before wire_read on any message (replica_apply;
 // the core's reads of the window's messages, window_link.odin).
-wire_read_budget :: proc(text: string) {
-	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, READ_BUDGET_MAX)
+wire_read_budget :: proc(text: string, max := READ_BUDGET_MAX) {
+	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, max)
 }
 
 // What one of the window's messages may decode to (window_link.odin): commands and facts, far
@@ -68,9 +68,10 @@ wire_read_budget_window :: proc(text: string) {
 	read_budget = clamp(READ_BUDGET_WINDOW_PER_BYTE * len(text), READ_BUDGET_WINDOW_MIN, READ_BUDGET_WINDOW_MAX)
 }
 
-// Applies one state.full or state.delta message to r. "" = applied.
-replica_apply :: proc(r: ^State, text: string, allocator := context.allocator) -> string {
-	wire_read_budget(text)
+// Applies one state.full or state.delta message to r. "" = applied. budget_max: what it may decode
+// to at most (another machine's stream: MIRROR_READ_MAX).
+replica_apply :: proc(r: ^State, text: string, allocator := context.allocator, budget_max := READ_BUDGET_MAX) -> string {
+	wire_read_budget(text, budget_max)
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return "invalid JSON"
 	msg, ok := v.(json.Object)

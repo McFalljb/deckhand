@@ -314,7 +314,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	ui_win_w = w
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
-	cs := core.cur()
+	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
 	palette_sync()
 	if clay.UI(clay.ID("root"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .LeftToRight},
@@ -562,6 +562,10 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 					} else if away := core.pane_shown(p); empty && away != nil && core.tab_held_away(away) != 0 {
 						clay.Text("Still running in the session holder", txt(th.text_secondary))
 						clay.Text(core.HELD_AWAY_TEXT, txt(th.text_muted))
+					} else if empty && cs != nil && cs.machine != 0 {
+						// another machine's session: its tabs show, its terminals come over in M6-C
+						clay.Text("Connecting…", txt(th.text_secondary))
+						clay.TextDynamic(fmt.tprintf("This runs on %s. Working in it from here comes in a later update.", core.machine_name(cs.machine)), txt(th.text_muted))
 					} else if empty {
 						clay.Text("No session open", txt(th.text_secondary))
 						clay.Text("Pick one on the left, or start a new chat", txt(th.text_muted))
@@ -1076,6 +1080,7 @@ Hit :: union {
 	Hit_Kids,
 	Hit_Info_Session,
 	Hit_New_Job_In,
+	Hit_Machine, // another machine's button (ui_sidebar.odin)
 	// the toolbar, settings popover, shortcuts sheet (ui_toolbar.odin)
 	Hit_Button,
 	Hit_Pop,
@@ -1130,6 +1135,7 @@ Hit_Group :: distinct string // a group row of the Projects tree: its folder (op
 Hit_Kids :: distinct u64 // a parent row's "N folders": opens or collapses its nested rows
 Hit_Info_Session :: distinct string // a session row's ⓘ: its info menu (pi session id)
 Hit_New_Job_In :: distinct u64 // "New job…" under the selected project (project id)
+Hit_Machine :: distinct u64 // a machine row's button: Log in…, Connect, Take back… (machine number)
 Hit_Button :: distinct Button
 Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}

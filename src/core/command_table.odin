@@ -164,6 +164,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "claude_status_dismiss", args = "tab_id", does = "a window in another process: the user closed a Claude tab's status banner", who = .Internal},
 	{type = "app_socket", args = "tab_id op line", does = "a window in another process: an app tab's token (mint), a line to its program (send), its connection dropped (forget)", who = .Internal},
 	{type = "harness_install", args = "item command dismiss", does = "a window in another process: the setup sheet's Install or Update (the command it showed), or Close", who = .Internal},
+	{type = "holder_restart", does = "a window in another process: the palette's Restart session holder (development builds)", who = .Internal},
 	{type = "fs_changed", args = "paths flags", does = "a window in another process: what its file watcher saw", who = .Internal},
 	{type = "git_head_done", args = "tab_id, path, in_repo, tracked, head", does = "a worker read an editor file's HEAD version", who = .Internal},
 	{type = "git_status_done", args = "root, ok, out", does = "a worker ran git status for a repository", who = .Internal},

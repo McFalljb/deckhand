@@ -1137,9 +1137,9 @@ Window → core:
 
 | type | fields | what it does |
 |---|---|---|
-| `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes |
+| `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes; over `core.sock` it then sends `view_open` for each started editor, Markdown and browser tab (a new window process has none of their views) |
 | `command` | `id`, `command`, `menu?`, `now?`, `as?` | a command run as `ui`, in its wire form (every field, unlike events' and the log's; the UI-only fields `close_session.ask`, `focus_session.reopen` and `set_home_dir.setup` are read only here). `id` `""`: no result. `now`: run at once, else queued in the inbox. `menu`: a menu row's label (a failure is shown as a toast). `as` (`{kind, tab_id}`, `kind` `script`, `control` or `panel`): a test-mode script line's own caller, honoured only by a core in test mode |
-| `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: a comment, a widget taking or releasing the keyboard, the New session picker's choice, a git HEAD read, the OS appearance, a session seen; with a separate core also `app_socket` (an app tab's token, a line to its program, its connection dropped), `harness_install` (the setup sheet's Install, Update or Close, with the command it showed) and `fs_changed` (what the window's file watcher saw)); anything else is refused |
+| `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: a comment, a widget taking or releasing the keyboard, the New session picker's choice, a git HEAD read, the OS appearance, a session seen; with a separate core also `app_socket` (an app tab's token, a line to its program, its connection dropped), `harness_install` (the setup sheet's Install, Update or Close, with the command it showed), `fs_changed` (what the window's file watcher saw) and `holder_restart` (the palette's Restart session holder, development builds)); anything else is refused |
 | `tab_host.event` | `id`, `command: {"<type>": {fields}}`, `now?` | what a page, an app or a window worker reported (`TAB_HOST_COMMANDS`: `browser_update`, `browser_popup_open`, `app_update`, `app_call_done`), run as the **`tab_host` caller**: answers and tab records only. It cannot confirm, change a setting or a confirmation policy, show a file, or reach another session's tabs (a popup opens in its opener's session); it has no token. Anything else is refused |
 | `finished` | `id`, `changed`, `private`, `wait_ms`, `result` | the window's answer to a `tab_host.call` (`changed`: the window's own state moved; `private`: its data is a page's content, the requester's only; `wait_ms`, with a `pending` result: how long the window itself may take to end it, as an upload's bar waiting for the user). Taken only for a call the core is running or waiting on |
 | `finished` | `request_id`, `private`, `result` | the end of a request the window answered `pending` (an agent's read, action, wait or screenshot, an app call); the core sends `result` to the requester. Taken only for a request the core is waiting on |
@@ -1152,7 +1152,7 @@ Core → window:
 | type | fields | |
 |---|---|---|
 | `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `live`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`; `live` is filled only over `core.sock`: the core's runtime a window in another process shows, as `Core_Live` in `src/core/core_live.odin`: the update bar, the setup sheet's install run, worktree clean-ups, the pi config folders to watch). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
-| `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went) |
+| `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went). A pane's `rect` and `frame` are not sent (the window lays them out): a replica's pane keeps its own |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `finished` | `request_id`, `result` | over `core.sock`: the end of one of the window's own commands that answered `pending` (`request_id` as its `result` gave it; test mode's script waits for it) |
 | `toast` | `text`, `err` | a short line at the bottom of the window |
@@ -1233,7 +1233,12 @@ tick. Frames the core took off the link while it streams a terminal wait in a ca
 (`cw.Backlog`); past its cap the window is closed. A caller nobody set (`Caller_Kind.None`, the
 zero value) is refused by every rule.
 
-**Test mode** compares the window's replica with the core's State after every script step; a
+**Test mode** over `core.sock`: each script step first waits until the core ran what the window
+sent and its delta came back (a no-op command's result), as in process where it ran at once; a `waitstate` that is reached waits one more drawn frame (the layout of what
+it reached). A script line whose work is the core's (`jobs_clock`, `detach_window`,
+`attach_window`) goes as `{"type":"script.core","id","line"}`, which only a core in test mode takes:
+`detach_window` makes the core act as if no window were attached (`no_window`, no requests) while
+the link stays for the script's lines. Test mode also compares the window's replica with the core's State after every script step; a
 difference fails the scene. It also compares each shown terminal's copy with the core's terminal
 by screen hash (the newest 2000 rows: once the scrollback is full, the two may keep a different
 number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link

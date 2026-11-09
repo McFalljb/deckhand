@@ -16,6 +16,7 @@ Core_Live :: struct {
 	harness:  Harness_Run_Live, // the setup sheet's install run (ui_harness.odin)
 	cleanups: []Wt_Cleanup_Live, // the worktree switcher's clean ups in flight or failed
 	watch:    []string, // pi's config folders the window's file watcher watches for hot reload (reload_watch_dirs)
+	holder_restart: bool, // the palette offers Restart session holder (holder_restart_available)
 }
 
 Update_Live :: struct {
@@ -106,6 +107,7 @@ live_make :: proc(a: runtime.Allocator) -> Core_Live {
 	dirs := reload_watch_dirs()
 	l.watch = make([]string, len(dirs), a)
 	for d, i in dirs do l.watch[i] = strings.clone(d, a)
+	l.holder_restart = holder_restart_available()
 	return l
 }
 

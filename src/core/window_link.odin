@@ -46,6 +46,7 @@ import "base:runtime"
 import "core:encoding/json"
 import "core:fmt"
 import "core:reflect"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:time"
@@ -70,6 +71,7 @@ WINDOW_COMMANDS := [?]typeid {
 	App_Socket, // a separate core: an app tab's token, a line to its program, its connection forgotten
 	Harness_Install, // a separate core: the setup sheet's Install, Update or Close (harness_install.odin)
 	Fs_Changed, // a separate core: what the window's file watcher saw (fs_model.odin)
+	Holder_Restart, // a separate core: the palette's Restart session holder (holder_restart.odin)
 }
 
 // What a frame from the core is (window_msg_parse).
@@ -103,6 +105,7 @@ Window_Link :: struct {
 	on_frames:  proc(), // in process: the window reads what the core just sent
 	on_drain:   proc(), // in process: a top-level inbox drain starts (the window frees what its replica retired)
 	subscribed: bool,
+	held_off:   bool, // test mode over core.sock: detach_window's window plays gone, its link kept for the script (script_core_line)
 	sent:       State_Sent, // what the window's replica holds
 	dirty:      bool, // window_state_changed since the last delta
 	replies:    [dynamic]^Link_Reply, // queued commands' replies, freed once delivered
@@ -145,8 +148,8 @@ Link_Reply :: struct {
 @(private = "file")
 link: ^Window_Link
 
-// The window is attached (in process).
-window_attached :: proc() -> bool {return link != nil}
+// The window is attached (test mode over core.sock: not while detach_window holds it off).
+window_attached :: proc() -> bool {return link != nil && !link.held_off}
 
 // Attaches the window: the only way to get the ui caller (main.odin's client, at init). Returns
 // the window's end of the transport. on_frames is called after the core sends it anything.
@@ -715,7 +718,7 @@ window_command_ok :: proc(id: typeid) -> bool {
 // Main thread.
 window_link_request :: proc(r: Window_Request, want_reply: bool) -> (reply: Window_Reply, answered: bool) {
 	if replica_process && replica_request != nil do return replica_request(r), true // the window's own (window_hooks.odin)
-	if link == nil do return
+	if link == nil || link.held_off do return
 	id := ""
 	if want_reply {
 		link.next_ask += 1
@@ -1031,10 +1034,54 @@ link_message :: proc(text: string) -> (command: bool) {
 		link_run(cmd, {kind = .Tab_Host}, id, now, "")
 	case "finished":
 		tab_host_finished_msg(obj, text) // a call's answer, or a pending request's end (tabhost_route.odin)
+	case "script.core":
+		// test mode over core.sock: a script line's core half (autotest.odin's script_on_core)
+		when TEST_HOOKS {
+			if autotest_active {
+				link_reply_now(id, script_core_line(string(obj["line"].(json.String) or_else "")), 0)
+				return
+			}
+		}
+		fmt.eprintln("Deckhand: an unknown window message:", type)
 	case:
 		fmt.eprintln("Deckhand: an unknown window message:", type)
 	}
 	return
+}
+
+// Test mode over core.sock: what a script line does in the core's process (in process the script
+// calls it itself): `jobs_clock SECONDS`; detach_window and attach_window, which in process close
+// and open the link: here the core plays windowless (no_window, no requests) while the link
+// stays, for the script's own lines.
+@(private = "file")
+script_core_line :: proc(line: string) -> Result {
+	cmd, _, rest := strings.partition(strings.trim_space(line), " ")
+	switch cmd {
+	case "detach_window":
+		link.held_off = true
+		tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
+		return {ok = true}
+	case "attach_window":
+		link.held_off = false
+		return {ok = true}
+	case "jobs_clock":
+		n, ok := strconv.parse_i64(strings.trim_space(rest))
+		if !ok do return fail("jobs_clock: not a number")
+		jobs_clock_advance(n)
+		return {ok = true}
+	}
+	return fail(fmt.tprintf("not a core script line: %s", cmd))
+}
+
+// A script line for the core's process (test mode over core.sock: script_core_line).
+window_msg_script_core :: proc(line, id: string) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, `{{"v":%d,"type":"script.core","id":`, PROTOCOL_VERSION)
+	json_quote(&b, id)
+	strings.write_string(&b, `,"line":`)
+	json_quote(&b, line)
+	strings.write_string(&b, "}")
+	return strings.to_string(b)
 }
 
 // The callers test mode's script may run a line as (window_msg_command's "as").

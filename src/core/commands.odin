@@ -528,6 +528,7 @@ Command :: union {
 	Set_Keep_Sessions,
 	Set_Separate_Core,
 	Holder_Replace,
+	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
 	Claude_Typed,
 	Claude_Status_Dismiss,
@@ -1475,6 +1476,9 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true
 	case Holder_Replace:
 		return holder_replace(c.stop), true
+	case Holder_Restart:
+		holder_restart_start()
+		return {ok = true}, false
 	case Core_Handover:
 		return core_handover_start(c.to), false
 	case Claude_Typed:

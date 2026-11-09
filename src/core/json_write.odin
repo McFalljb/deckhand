@@ -203,6 +203,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Separate_Core:   return "set_separate_core"
 	case Holder_Replace:      return "holder_replace"
+	case Holder_Restart:      return "holder_restart"
 	case Core_Handover:       return "core_handover"
 	case Claude_Typed:        return "claude_typed"
 	case Claude_Status_Dismiss: return "claude_status_dismiss"
@@ -939,7 +940,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Pi_Attached:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_u64(&w, "attachment_id", c.attachment_id)
-	case Rescan, Refresh_Shell_Env, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel:
+	case Rescan, Refresh_Shell_Env, Get_State, List_Commands, Agent_Model_Picker, Jobs_Sync, Jobs_Tick, Comments_Ask_Cancel, Holder_Restart:
 	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		browser_command_write(&w, cmd, redact) // below
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:

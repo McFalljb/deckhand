@@ -572,6 +572,7 @@ link_message :: proc(text: string) {
 	}
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	obj, ok := v.(json.Object)
+	wire_read_budget(text) // wire_read's limit for this message (state_read.odin)
 	if jerr != nil || !ok {
 		fmt.eprintln("Deckhand: a window message that is not a JSON object")
 		return
@@ -673,6 +674,7 @@ window_command_decode_for_test :: proc(text: string) -> (Command, string) {
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return nil, "invalid JSON"
 	obj, _ := v.(json.Object)
+	wire_read_budget(text)
 	return window_command_decode(obj["command"])
 }
 

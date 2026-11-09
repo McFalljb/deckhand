@@ -109,7 +109,7 @@ window_views_no_window :: proc(t: ^testing.T) {
 	_, tab, _ := core.find_tab(r.created_id)
 	testing.expect(t, tab != nil)
 	testing.expect(t, editor_of(r.created_id) == nil)
-	if dirty, dknown := core.window_tab_dirty(r.created_id); true do testing.expect(t, !dirty && dknown)
+	if dirty, dknown := core.window_tab_dirty(r.created_id); true do testing.expect(t, !dirty && !dknown, "no window: not known")
 	_, known := core.window_unsaved_files()
 	testing.expect(t, !known, "no window: not known")
 	_, known = core.window_unsaved_files(dir)

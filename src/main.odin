@@ -16,6 +16,7 @@ import "core:strings"
 import "core:time"
 import "core:unicode/utf8"
 import "core"
+import cw "corewire"
 import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 import sg "../vendor/sokol-odin/sokol/gfx"
@@ -48,6 +49,7 @@ App :: struct {
 	key_in_widget:  bool, // the last KEY_DOWN went to a widget
 	key_taken:      bool, // the last KEY_DOWN was the chrome's: drop its CHAR/KEY_UP
 	window_active:  bool, // the window has the keyboard (sokol FOCUSED/UNFOCUSED)
+	last_frame_at:  time.Tick, // a separate core: the last frame's start (the timer reads the core only between frames)
 	window_title:   string,
 }
 
@@ -77,6 +79,10 @@ init :: proc "c" () {
 	ui_init()
 	core.platform = platform_app()
 	win_os = win_os_app() // the window's own (win_os.odin)
+	if separate_core_wanted(core.data_dir(context.temp_allocator)) {
+		init_separate() // the core is another process (client_core.odin)
+		return
+	}
 	client_connect() // the window's link: the core's requests reach it while the workspace comes back (client.odin)
 	app.window_active = true
 	platform_window_init()
@@ -170,6 +176,56 @@ init :: proc "c" () {
 	core.core_loop_start() // core_tick also while no frames run (core_loop.odin)
 }
 
+// init with a separate core (client_core.odin): the window's own setup, then the core's link.
+// Nothing of the core runs here: no instance lock, socket, workspace, holder, jobs or core loop
+// (the core process has them). The first-run sheet is the in-process window's only for now.
+init_separate :: proc() {
+	app.window_active = true
+	platform_window_init()
+	menubar_install()
+	platform_watch_appearance()
+	autotest_init()
+	script_drain = client_drain // the script's commands go over core.sock
+	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
+	if core.autotest_active && core.hook_env(.Data_Dir) == "" {
+		cwd, _ := os.get_working_directory(context.temp_allocator)
+		core.home_root = strings.concatenate({cwd, "/build/test-data"})
+	} else do core.home_root = core.data_dir()
+	if core.home_root == "" {
+		platform_alert("Deckhand can't start", "Deckhand can't find your home folder, so it has nowhere to keep its files")
+		os.exit(1)
+	}
+	if why := client_core_connect(core.home_root); why != "" {
+		fmt.eprintln("Deckhand:", why)
+		if core.autotest_active {
+			fmt.println("[autotest] core refused:", why)
+			os.exit(3)
+		}
+		platform_alert("Deckhand can't start", why)
+		os.exit(1)
+	}
+	if core.autotest_active do fmt.printfln("[autotest] core: attached to pid %d", client.core_pid)
+	// `deckhand DIR`: DIR's project, and a new chat there once the pane has a size
+	if app_args.dir != "" {
+		r := client_call_wait(core.Add_Project{app_args.dir}, 5 * time.Second)
+		app.launch_project = launch_project(r)
+		if app.launch_project != 0 do app.pending_start = true
+		else do fmt.eprintfln("Deckhand: %s: %s", app_args.dir, r.error)
+	}
+	client_internal(core.System_Appearance{light = platform_system_light()})
+	// what the window's views read from the core package's caches of the disk (accounts, titles)
+	core.claude_accounts_refresh()
+	if !core.autotest_active || core.hook_env(.Data_Dir) != "" do core.titles_load(core.data_dir(context.temp_allocator))
+	app.ready = true
+	app.redraw = true
+	// frames stop while hidden: the core's messages are read by a timer then (and the script runs)
+	core.platform.core_timer(50 * time.Millisecond, proc() {
+		if time.tick_since(app.last_frame_at) < 50 * time.Millisecond do return
+		client_io(0)
+		autotest_step()
+	})
+}
+
 // The app's platform layer: every entry set (a nil one would make its
 // commands do nothing without a word).
 platform_app :: proc() -> core.Platform {
@@ -240,12 +296,23 @@ on_system_appearance :: proc(light: bool) {
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
+	if window_only_quit(cmd) do return
 	client_send(cmd) // client.odin
+}
+
+// A separate core: Quit Deckhand (⌘Q) closes the window and the sessions run on in the core
+// (until M4-D); only Quit Deckhand and Stop All Sessions reaches the core. True: handled here.
+window_only_quit :: proc(cmd: core.Command) -> bool {
+	q, is := cmd.(core.Quit)
+	if !is || !client_separate() || q.stop_sessions do return false
+	app_request_quit()
+	return true
 }
 
 // A menu row's command: as ui_do, then its outcome is shown where nothing
 // else would show it (menu_result: a failure, a copy).
 ui_do_menu :: proc(cmd: core.Command, label: string) {
+	if window_only_quit(cmd) do return
 	client_send(cmd, menu = label)
 }
 
@@ -260,7 +327,11 @@ frame :: proc "c" () {
 	client.busy += 1 // the replica's retired blocks wait for client_after_tick (client.odin)
 	defer client.busy -= 1
 	client_facts() // what the last event changed of the window's facts, before the core reads them (client.odin)
-	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
+	if client_separate() { // the core is another process: what it sent, then the script's step
+		app.last_frame_at = time.tick_now()
+		client_io(0)
+		autotest_step()
+	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
 	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
@@ -323,7 +394,7 @@ frame :: proc "c" () {
 			if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
 		}
 	}
-	if app.pane.z > 0 do core.persist_after_layout(skip = app.pending_start)
+	if app.pane.z > 0 && !client_separate() do core.persist_after_layout(skip = app.pending_start)
 	browser_tick() // browser tabs follow the pane; new textures (browser.odin)
 	annot_tick() // their annotation overlays and markers (browser_annotate.odin)
 	browser_polish_tick() // their zoom, bars and fields (browser_polish.odin)
@@ -331,6 +402,7 @@ frame :: proc "c" () {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
 		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
+		else if cmd != nil && client_separate() do client_call(cmd)
 		else if cmd != nil do core.run_command(cmd)
 		t = active_view()
 	}
@@ -420,7 +492,7 @@ event :: proc(e: ^sapp.Event) {
 	client.busy += 1 // as in frame(): no release mid-event (client_on_drain)
 	defer client.busy -= 1
 	client_before_event() // the replica holds what timers did since the last frame (client.odin)
-	defer core.inbox_drain()
+	defer client_drain()
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
@@ -764,6 +836,17 @@ event :: proc(e: ^sapp.Event) {
 		}
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
+		// a separate core: the window closes, the core and its sessions run on (until M4-D: ⌘Q)
+		if client_separate() {
+			if !core.app_quitting && len(tab_views_unsaved_paths()) > 0 {
+				sapp.cancel_quit()
+				toast_show("Save or close the files with unsaved changes first: the window closes, the sessions run on", true)
+				return
+			}
+			platform_hide_windows()
+			if core.autotest_active do fmt.println("[autotest] quit: windows hidden")
+			return
+		}
 		// window close / Cmd+Q from the menu: ask first if anything runs
 		if !core.app_quitting {
 			sapp.cancel_quit()
@@ -1148,6 +1231,16 @@ utf8_string :: proc(r: rune) -> string {
 
 cleanup :: proc "c" () {
 	context = core.app_context
+	if client_separate() { // the core's things are the core process's
+		cw.sock_flush(client.sock)
+		browser_shutdown()
+		app_shutdown()
+		comments_draft_shutdown()
+		sgl.shutdown()
+		sg.shutdown()
+		if autotest.failures > 0 do os.exit(1)
+		return
+	}
 	core.core_loop_stop()
 	core.login_env_kill_probe() // a refresh's shell still running (login_env.odin)
 	core.harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)

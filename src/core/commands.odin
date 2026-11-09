@@ -232,6 +232,23 @@ Set_Keep_Sessions :: struct {
 // turns it off for everyone who never chose.
 keep_sessions_default_on := true // on by default: this line alone turns it off again (revert its commit)
 
+// Settings › Experimental › Run sessions in a background core (docs/plans/background-core.md
+// §10.3 M4-C): the window and the core as two processes (`deckhand-core serve` over core.sock).
+// Read by the window at launch (main.odin separate_core_wanted), so a change takes effect at the
+// next launch. User-only. Off by default until M4-E flips this line.
+Set_Separate_Core :: struct {
+	on: bool,
+}
+separate_core_default_on := false
+
+// A window in another process: the user typed in a Claude tab's prompt (claude_note_typed), so
+// held texts wait (internal; window.command only).
+Claude_Typed :: struct {
+	tab_id: u64,
+}
+// How a replica process tells its core (client.odin sets it; nil in a core).
+claude_typed_send: proc(tab_id: u64)
+
 // Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
 CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second
 control_token_clip: struct {
@@ -473,6 +490,8 @@ Command :: union {
 	Set_Notify,
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
+	Set_Separate_Core,
+	Claude_Typed,
 	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
@@ -1402,6 +1421,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
+		return {ok = true}, true
+	case Claude_Typed:
+		_, tab, _ := find_tab(c.tab_id)
+		claude_note_typed(tab)
+		return {ok = true}, false
+	case Set_Separate_Core:
+		if state.settings.separate_core == c.on do return {ok = true}, false
+		state.settings.separate_core = c.on
+		window_toast(c.on ? "Sessions run in a background core from the next launch: quit Deckhand and open it again" : "Sessions run in Deckhand itself from the next launch: Quit Deckhand and Stop All Sessions, then open it again")
 		return {ok = true}, true
 	case Set_Confirm_Policy:
 		if c.caller == .None || c.caller == .UI || c.caller == .Internal || c.caller == .Tab_Host do return fail("ui, internal and tab_host callers have fixed policies"), false

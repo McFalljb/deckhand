@@ -10,10 +10,12 @@ import "core:crypto"
 import "core:fmt"
 import "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
 import cw "corewire"
+import "trust"
 
 @(private = "file")
 Hc :: struct {
@@ -228,40 +230,72 @@ hs_framed_caller: core.Caller
 @(private = "file")
 hs_framed_left: [dynamic]u8
 
-// The framed hello: refused while nobody takes framed connections (and the env token is not used
-// up); with a handler, the reply carries §5.2's fields, the connection leaves the line server, and
-// the bytes the client sent right after its hello line reach the handler.
+// The framed hello is the window's only (docs/plans/background-core.md §10.3 M4-C): refused while
+// nobody takes framed connections; with the door open (a separate core), refused with a line
+// token, with a wrong window token, and from a process that descends from the core; with the
+// window token the reply carries §5.2's fields, the connection leaves the line server as the ui
+// caller, and the bytes the client sent right after its hello line reach the handler.
 @(test)
 socket_framed_hello :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	hs_start(t)
+	dir := hs_start(t)
 	defer hs_stop()
 	tok := core.socket_mint_token({kind = .Control}, context.temp_allocator, single_use = true)
 	n, rn := hs_plain(tok, `,"framed":true`)
 	testing.expect_value(t, core.json_path(rn, "result.error"), "framed mode is not available in this build")
 	hs_close(n)
+	rdir, _ := core.sock_runtime_dir(context.temp_allocator)
+	testing.expect(t, core.window_token_publish(rdir), "window.token written")
+	wtok := core.window_token_read(rdir)
+	testing.expect_value(t, len(wtok), 64)
+	ids := []string{trust.own_signature().identifier}
+	core.window_peer_ids = ids // the "window" is this test binary
+	defer core.window_peer_ids = trust.WINDOW_IDS
+	core.window_door_pids_for_test(0, 0)
 	hs_framed_fd = -1
 	clear(&hs_framed_left)
-	core.socket_framed_handler = proc(fd: core.Sock_Fd, caller: core.Caller, leftover: []u8) {
+	core.socket_framed_handler = proc(fd: core.Sock_Fd, caller: core.Caller, leftover: []u8, peer: trust.Peer, version: string) {
 		hs_framed_caller = caller
 		append(&hs_framed_left, ..leftover)
 		hs_framed_fd = fd // last: the test thread waits for it
 	}
+	// a line token's caller never gets the framed wire, nor a wrong window token
+	tok2 := core.socket_mint_token({kind = .Control}, context.temp_allocator)
+	n, rn = hs_plain(tok2, `,"framed":true`)
+	testing.expect(t, strings.has_prefix(core.json_path(rn, "result.error"), "framed mode is only for Deckhand's window"), rn)
+	hs_close(n)
+	n, rn = hs_plain(strings.repeat("0", 64, context.temp_allocator), `,"framed":true`)
+	testing.expect(t, strings.has_prefix(core.json_path(rn, "result.error"), "framed mode is only for Deckhand's window"), rn)
+	hs_close(n)
+	// a process that descends from the core (a tab's program) is no window
+	core.window_door_pids_for_test(i32(posix.getpid()), 0)
+	n, rn = hs_plain(wtok, `,"framed":true`)
+	testing.expect_value(t, core.json_path(rn, "result.error"), "a program running in a Deckhand tab can't be its window")
+	hs_close(n)
+	core.window_door_pids_for_test(0, 0)
+	// the window's code must be the window's: another identifier is refused
+	core.window_peer_ids = []string{"dev.deckhand.not-the-window"}
+	n, rn = hs_plain(wtok, `,"framed":true`)
+	testing.expect(t, strings.has_prefix(core.json_path(rn, "result.error"), "the window's code is not Deckhand's"), rn)
+	hs_close(n)
+	core.window_peer_ids = ids
+	testing.expect(t, hs_framed_fd < 0, "nothing was handed over")
 	c := hs_connect()
 	frame := make([dynamic]u8, context.temp_allocator)
 	cw.encode(&frame, 0, .Data, transmute([]u8)string(`{"type":"state.subscribe"}`))
-	line := fmt.tprintf("{{\"id\":\"f\",\"v\":1,\"type\":\"hello\",\"token\":\"%s\",\"framed\":true}}\n", tok)
+	line := fmt.tprintf("{{\"id\":\"f\",\"v\":1,\"type\":\"hello\",\"token\":\"%s\",\"framed\":true}}\n", wtok)
 	both := strings.concatenate({line, string(frame[:])}, context.temp_allocator)
 	core.sock_write_all(c.fd, transmute([]u8)both)
 	r := hs_recv(c)
 	testing.expect_value(t, core.json_path(r, "result.ok"), "true")
 	testing.expect_value(t, core.json_path(r, "result.data.framed"), "true")
+	testing.expect_value(t, core.json_path(r, "result.data.caller"), "ui")
 	testing.expect_value(t, core.json_path(r, "result.data.generation"), fmt.tprint(cw.GENERATION))
 	for k in ([]string{"version", "features", "methods", "machine", "holder_wire", "snapshot"}) do testing.expect(t, core.json_path(r, fmt.tprintf("result.data.%s", k)) != "<missing>", k)
 	start := time.tick_now()
 	for hs_framed_fd < 0 && time.tick_since(start) < 2 * time.Second do time.sleep(time.Millisecond)
 	testing.expect(t, hs_framed_fd >= 0, "the handler took the connection")
-	testing.expect_value(t, hs_framed_caller.kind, core.Caller_Kind.Control)
+	testing.expect_value(t, hs_framed_caller.kind, core.Caller_Kind.UI)
 	// the core's end as a framed transport: the frame sent with the hello, then an echo
 	tr: cw.Sock_Transport
 	cw.sock_open(&tr, hs_framed_fd, initial = hs_framed_left[:])
@@ -285,6 +319,9 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	free(c)
 	delete(hs_framed_left)
 	hs_framed_left = nil
+	core.window_door_stop()
+	testing.expect(t, core.window_token_read(rdir) == "", "window.token goes at stop")
+	_ = dir
 	free_all(context.temp_allocator)
 }
 

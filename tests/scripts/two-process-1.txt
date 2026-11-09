@@ -1,0 +1,11 @@
+# tests/scripts/two-process.sh, run 1: the window with a separate core starts a shell, then closes.
+waitfor ARGS: 15000
+command {"type":"new_shell_tab","session":$session}
+wait 1500
+type echo MARK-$((6*7)) $$
+key enter
+waitfor MARK-42 10000
+wait 800
+screen_hashes
+dump two-process-1
+quit

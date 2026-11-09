@@ -65,6 +65,7 @@ Hook :: enum u8 {
 	Update_Version,
 	Update_App,
 	Proto_Log, // the window's link prints its frames (client.odin)
+	Separate_Core, // 1: the window runs its core as another process (deckhand-core serve); 0: in process (main.odin)
 }
 
 when TEST_HOOKS {
@@ -100,6 +101,7 @@ when TEST_HOOKS {
 		.Update_Version   = "DECKHAND_UPDATE_VERSION",
 		.Update_App       = "DECKHAND_UPDATE_APP",
 		.Proto_Log        = "DECKHAND_PROTO_LOG",
+		.Separate_Core    = "DECKHAND_SEPARATE_CORE",
 	}
 }
 

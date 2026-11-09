@@ -1,0 +1,9 @@
+# tests/scripts/two-process.sh, run 2: a new window attaches to the same core: the same shell, as it was.
+waitfor MARK-42 15000
+wait 800
+screen_hashes
+dump two-process-2
+type echo AGAIN-$((7*6))
+key enter
+waitfor AGAIN-42 10000
+quit

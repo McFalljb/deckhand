@@ -59,6 +59,7 @@ core_tick_body :: proc() {
 	holder_restart_tick() // Restart session holder's outcome, as a toast (holder_restart.odin; the toast redraws)
 	output_activity_tick(time.tick_now())
 	tab_term_facts_tick(time.tick_now())
+	tab_live_tick()
 	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 	term_streams_flush() // what the terminals parsed this tick, to the window's copies (term_stream.odin)
 }
@@ -184,6 +185,29 @@ tab_term_facts_tick :: proc(now: time.Tick) {
 		recent := t != nil && t.running && t.last_output != {} && time.tick_diff(t.last_output, now) < TAB_OUTPUT_RECENT
 		if tab.has_term == (t != nil) && tab.output_recent == recent do continue
 		tab.has_term, tab.output_recent = t != nil, recent
+		changed = true
+	}
+	if changed do window_state_changed()
+}
+
+// What a window in another process reads of each tab instead of the core's runtime (Tab_Live):
+// only while one is attached over core.sock; changed only when one flips.
+tab_live_tick :: proc() {
+	if !window_link_is_sock() do return
+	changed := false
+	for &s in state.open_sessions do for &tab in s.tabs {
+		l: Tab_Live
+		l.away = tab_held_away(&tab)
+		l.dead = tab_is_dead(&tab)
+		l.restart_wait = restart_waiting(tab.id)
+		if t := terms[tab.id] or_else nil; t != nil do l.held = t.pty.held != 0
+		if ct, is := &tab.kind.(Claude_Tab); is {
+			l.claude_wait = claude_wait_of(&tab, ct)
+			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)
+			l.claude_restart = claude_restart_class(&tab)
+		}
+		if l == tab.live do continue
+		tab.live = l
 		changed = true
 	}
 	if changed do window_state_changed()

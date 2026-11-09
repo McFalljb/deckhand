@@ -178,6 +178,7 @@ package main
 // current session's panes by slot), $ptab0…$ptab7 (the tab each shows). assert_screen, waitfor and dump read
 // the terminal with the keyboard (Home's while its pane shows).
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -192,6 +193,7 @@ import clay "../build/clay-odin"
 import sapp "../vendor/sokol-odin/sokol/app"
 
 Autotest :: struct {
+	cpu_core_start: f64, // a separate core: its process's CPU seconds at cpu_begin
 	frames_off:   bool, // `frames off`: frame() returns at once, as if the OS stopped calling it
 	frames_back:  time.Tick, // ...until then at most (script_frames_off)
 	lines:        []string,
@@ -1087,7 +1089,7 @@ autotest_step :: proc() {
 		case "system_appearance":
 			// as if the OS switched (the platform's KVO callback path)
 			on_system_appearance(args[0] == "light")
-			core.inbox_drain()
+			script_drain()
 		case "lights":
 			x, y := test_light()
 			log(fmt.tprintf("traffic lights: close button centre %.1f,%.1f; top bar centre y %.1f", x, y, f32(TAB_STRIP_H) / 2))
@@ -1111,6 +1113,7 @@ autotest_step :: proc() {
 		case "cpu_begin":
 			at.cpu_wall = now
 			at.cpu_start = cpu_seconds()
+			at.cpu_core_start = client_separate() ? pid_cpu_seconds(client.core_pid) : 0
 			at.cpu_frames = app.frames_drawn
 			at.cpu_bytes = total_bytes_in()
 			at.cpu_calls = core.app_frames_called
@@ -1120,6 +1123,10 @@ autotest_step :: proc() {
 			cpu := cpu_seconds() - at.cpu_start - (at.terms_check_cpu - at.cpu_checks) // without the terminal copies' checks (test mode's)
 			calls := core.app_frames_called - at.cpu_calls
 			log(fmt.tprintf("CPU %s: %.1f%% over %.1fs, %d frames drawn, %d frame callbacks (%.1f/s), %d pty bytes", rest, 100 * cpu / wall, wall, app.frames_drawn - at.cpu_frames, calls, f64(calls) / wall, total_bytes_in() - at.cpu_bytes))
+			if client_separate() { // per process: the window above, the core here (benchmarks: term-bench.sh)
+				ccpu := pid_cpu_seconds(client.core_pid) - at.cpu_core_start
+				log(fmt.tprintf("CPU %s core: %.1f%% over %.1fs (%.2f CPU-s; window %.2f CPU-s); replies waited at most %.0f ms, %d gave up", rest, 100 * ccpu / wall, wall, ccpu, cpu, time.duration_milliseconds(client_wait_max), client_wait_gave_up))
+			}
 		case "atlas":
 			size, glyphs, rasterised, evictions, runs := font_stats()
 			log(fmt.tprintf("atlas %dx%d px (%d KB), %d glyphs cached, %d rasterised, %d evictions, %d runs, mono %q %.0fpx cell %.0fx%.0f", size, size, int(size) * int(size) * 4 / 1024, glyphs, rasterised, evictions, runs, font.sets[.Mono].family, font.sets[.Mono].px, font.cell_w, font.cell_h))
@@ -1127,7 +1134,7 @@ autotest_step :: proc() {
 			// as if the window went to the background or came to the front
 			// (sokol's UNFOCUSED/FOCUSED; quiet test mode never gets them)
 			send({type = args[0] == "back" ? .UNFOCUSED : .FOCUSED})
-			core.inbox_drain()
+			script_drain()
 		case "deactivate":
 			app_deactivate()
 		case "minimize":
@@ -1182,7 +1189,7 @@ autotest_step :: proc() {
 			at.injecting = true
 			took := test_menu_key(chars, mods, int(num(args[0])), key_window)
 			at.injecting = false
-			core.inbox_drain()
+			script_drain()
 			got := took ? "menu" : "view"
 			log("key went through:", got)
 			if want != "" {
@@ -1261,6 +1268,12 @@ autotest_step :: proc() {
 		case "state_json":
 			_ = os.write_entire_file(fmt.tprintf("build/%s.json", args[0]), transmute([]u8)core.state_json())
 		case "screen_hashes": // screen_hashes: per terminal tab "[autotest] screen_hash <tab id> <held> <hash>" (snapshot.odin)
+			if client_separate() { // the window's copies (the core's terminals are in its process)
+				for id, v in term_views do if v.gt != nil {
+					h, _ := core.screen_hash(v.gt)
+					fmt.printfln("[autotest] screen_hash %d view %x", id, h)
+				}
+			}
 			for id, x in core.terms {
 				h, _ := core.screen_hash(x.gt)
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
@@ -1334,6 +1347,12 @@ autotest_push_facts :: proc() {
 // Runs one script command now, in order with anything queued before (main thread). finished:
 // a long-running command's finished event already came (its result is in last_finished).
 script_command :: proc(c: core.Command, caller: core.Caller) -> (id: u64, r: core.Result, finished: bool) {
+	// a separate core: the script's commands go over the window's link, as the user's (ui); a
+	// long-running one's finished event is not followed (client_core.odin)
+	if client_separate() {
+		r = core.result_clone(client_call_wait(c, SCRIPT_CORE_WAIT), runtime.heap_allocator())
+		return 0, r, false
+	}
 	reply: core.Reply
 	id = core.inbox_submit(c, caller, &reply)
 	autotest.submitted, autotest.submitted_done = id, false

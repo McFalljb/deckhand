@@ -338,9 +338,11 @@ reader_main :: proc(t: ^Term) {
 		n := pty_read(&t.pty, buf)
 		if n == 0 do continue
 		sync.lock(&r.mu)
+		first := len(r.inbox) == 0 // the main thread took everything: it may be asleep (output_wake)
 		if n < 0 do r.eof = true
 		else do append(&r.inbox, ..buf[:n])
 		sync.unlock(&r.mu)
+		if first do output_wake()
 		if n < 0 do return
 	}
 }
@@ -349,6 +351,29 @@ reader_start :: proc(t: ^Term) {
 	t.reader.stop = false
 	t.reader.eof = false
 	t.reader.thread = thread.create_and_start_with_poly_data(t, reader_main)
+}
+
+// A separate core (deckhand-core serve) has no frames: its loop sleeps until woken or its timer
+// fires, and its timer slows to CORE_TIMER_SLOW when idle (and App Nap stretches it). So a
+// reader's first bytes after the main thread took them all wake the loop at once (§10.3 M4-C),
+// and the loop runs again at once while any terminal has more than a tick parsed (output_backlog).
+// Off in process: the window's frames run the core. Any thread.
+output_wake_on: bool
+
+output_wake :: proc() {
+	if sync.atomic_load(&output_wake_on) && platform.wake != nil do platform.wake()
+}
+
+// Some terminal has output waiting past what this tick parsed (READ_BUDGET): the loop goes again
+// without sleeping. Main thread.
+output_backlog :: proc() -> bool {
+	for _, t in terms {
+		sync.lock(&t.reader.mu)
+		n := len(t.reader.inbox)
+		sync.unlock(&t.reader.mu)
+		if n > 0 do return true
+	}
+	return holder_output_waiting()
 }
 
 // Stops the reader and closes the PTY (hangs up the child).

@@ -51,6 +51,7 @@ import "core:sync"
 import "core:time"
 import cw "../corewire"
 import jg "../jsonguard"
+import "../trust"
 
 // The internal commands the window may send (window.command), run with the internal caller.
 // Nothing else is decoded from window.command; a socket never sees this list.
@@ -63,6 +64,7 @@ WINDOW_COMMANDS := [?]typeid {
 	System_Appearance, // the OS switched light or dark
 	Notifications_Mark_Read, // the window came to the front: the session on screen is seen
 	Set_Unread, // ...and its tabs' finished marks
+	Claude_Typed, // a separate core: the user typed in a Claude tab's prompt (claude_note_typed)
 }
 
 // What a frame from the core is (window_msg_parse).
@@ -86,7 +88,9 @@ Window_Msg :: struct {
 }
 
 Window_Link :: struct {
-	t:          ^cw.Mem_Transport, // heap: a window closed for overflowing keeps its end (link_close_overflowed)
+	t:          ^cw.Mem_Transport, // heap: a window closed for overflowing keeps its end (link_close_overflowed); nil over core.sock
+	sock:       ^cw.Sock_Transport, // a separate core: the window's connection on core.sock (window_sock.odin); nil in process
+	sock_peer:  trust.Peer, // ...its peer as read at accept (sock_open's peer_check)
 	core_end:   cw.Mem_End,
 	win_end:    cw.Mem_End,
 	on_frames:  proc(), // in process: the window reads what the core just sent
@@ -205,10 +209,16 @@ core_detach_window :: proc(keep_transport := false) {
 	link_facts_free()
 	delete(link.asking)
 	state_sent_free(&link.sent)
-	cw.mem_close(link.core_end)
-	if !keep_transport {
-		cw.mem_destroy(link.t)
-		free(link.t, heap)
+	if link.sock != nil {
+		cw.sock_flush(link.sock) // what is queued (a last toast) goes if the socket takes it now
+		cw.sock_destroy(link.sock)
+		free(link.sock, heap)
+	} else {
+		cw.mem_close(link.core_end)
+		if !keep_transport {
+			cw.mem_destroy(link.t)
+			free(link.t, heap)
+		}
 	}
 	free(link, heap)
 	link = nil
@@ -431,6 +441,15 @@ window_link_pump :: proc() -> (capped: bool) {
 			f.payload = make([]u8, len(bf.payload), context.temp_allocator)
 			copy(f.payload, bf.payload)
 			delete(bf.payload, runtime.heap_allocator())
+		} else if link.sock != nil {
+			err: cw.Recv_Error
+			f, err = cw.sock_recv(link.sock, context.temp_allocator)
+			if err == .Closed {
+				fmt.eprintln("Deckhand: the window's connection ended:", cw.sock_reason(link.sock))
+				core_detach_window() // the window went (or its peer changed): what it owed ends
+				break
+			}
+			if err != .None do break
 		} else {
 			err: cw.Recv_Error
 			f, err = cw.mem_recv(link.core_end, context.temp_allocator)
@@ -457,6 +476,11 @@ window_link_send_text :: proc(text: string) -> bool {
 // CREDIT it sends back is read here, so the stream can go on in the same tick.
 window_link_send_frame :: proc(channel: u32, kind: cw.Kind, payload: []u8) -> cw.Send_Error {
 	if link == nil || link.overflowed do return .Closed
+	if link.sock != nil {
+		e := cw.sock_send(link.sock, channel, kind, payload)
+		if e == .None do cw.sock_flush(link.sock)
+		return e // its CREDITs come back on the socket: the pump reads them
+	}
 	if e := cw.mem_send(link.core_end, channel, kind, payload); e != .None do return e
 	if link.on_frames != nil do link.on_frames()
 	link_take_credits()
@@ -693,8 +717,9 @@ window_link_request :: proc(r: Window_Request, want_reply: bool) -> (reply: Wind
 	append(&link.asking, Link_Ask{id = id})
 	at := len(link.asking) - 1
 	sent := link_send(strings.to_string(b))
+	if sent && link.sock != nil do link_sock_wait(at) // over core.sock: a bounded wait (WINDOW_REPLY_WAIT)
 	// in process the window answered while it was sent: pump past the per-pump cap until its reply
-	if sent do for window_link_pump() && link != nil && !link.asking[at].got {}
+	else if sent do for window_link_pump() && link != nil && !link.asking[at].got {}
 	if link == nil do return // it went meanwhile
 	a := link.asking[at]
 	resize(&link.asking, at)
@@ -771,6 +796,14 @@ window_link_send :: proc(text: string) -> bool {
 @(private = "file")
 link_send :: proc(text: string) -> bool {
 	if link == nil do return false
+	if link.sock != nil {
+		if e := cw.sock_send(link.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
+			fmt.eprintln("Deckhand: the window's connection refused a message:", e)
+			return false
+		}
+		cw.sock_flush(link.sock) // never blocks: the rest goes when the socket takes it (window_link_io)
+		return true
+	}
 	if e := cw.mem_send(link.core_end, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
 		// a window that does not read (in process it always does): its state starts again from a full
 		fmt.eprintln("Deckhand: the window's link refused a message:", e)
@@ -863,6 +896,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		wire_free(&link.facts, type_info_of(Window_Facts), heap)
 		link.facts, link.has_facts = f, true
 		hello_set(&f)
+		if link.sock != nil do link_layout_apply(&link.facts) // in process the layout writes them itself
 	case "window.tab_facts":
 		n, nok := obj["tab_id"].(json.Integer)
 		if !nok || n <= 0 {
@@ -1012,3 +1046,92 @@ window_app_hello :: proc(tab_id: u64) -> (service, key: string, device: u64, fps
 	key = strings.clone(hello.keys[tab_id] or_else "", context.temp_allocator)
 	return strings.clone(hello.service, context.temp_allocator), key, hello.device, hello.fps, hello.scale, hello.known
 }
+
+// The window's layout facts into the core's State (a window over core.sock): what it wrote there
+// itself in process (the panes' rects and their area). Window-only fields: no delta follows.
+@(private = "file")
+link_layout_apply :: proc(f: ^Window_Facts) {
+	if f.centre.x > 0 do pane_centre_set(f.centre.x, f.centre.y, f.centre.z)
+	for pf in f.panes {
+		s := find_session(pf.session)
+		if s == nil do continue
+		for &p in s.panes do if p.id == pf.pane do p.rect, p.frame = pf.rect, pf.frame
+	}
+}
+
+// ---- a separate core: the window over core.sock (window_sock.odin takes the connection) ----
+
+// How long the core waits for a window.reply over core.sock (design Q9's bound): past it, the
+// request answers as if there were no window, and a late reply is dropped (link_reply_in).
+WINDOW_REPLY_WAIT := 250 * time.Millisecond
+
+// Attaches the window that said its framed hello on fd (window_sock.odin checked it): the link's
+// transport is the socket, leftover the bytes its hello's reader read past the line. A window
+// already attached goes first (one window at a time; the newer is the one the user sees).
+// Main thread.
+core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer) -> bool {
+	if link != nil {
+		fmt.eprintln("Deckhand: a new window attached: the previous one is let go")
+		core_detach_window()
+	}
+	heap := runtime.heap_allocator()
+	link = new(Window_Link, heap)
+	link.sock = new(cw.Sock_Transport, heap)
+	link.sock_peer = peer
+	cw.sock_open(link.sock, fd, peer_check = link_sock_peer_ok, peer_data = &link.sock_peer, initial = leftover, allocator = heap)
+	link.replies = make([dynamic]^Link_Reply, heap)
+	link.untracked = make([dynamic]string, heap)
+	cw.backlog_init(&link.backlog, allocator = heap)
+	link.sent.sections = make(map[string]string, heap)
+	link.tab_facts = make(map[u64]Tab_Facts, heap)
+	link.asking = make([dynamic]Link_Ask, heap)
+	return true
+}
+
+// The bytes on the window's socket come from the process checked at accept (§5.3).
+@(private = "file")
+link_sock_peer_ok :: proc(fd: Sock_Fd, data: rawptr) -> bool {
+	return trust.peer_still((^trust.Peer)(data)^, trust.peer_read(fd)) == .Allow
+}
+
+// The window's socket for the core loop's poll: fd -1 with no window over core.sock; out: bytes
+// wait to be written.
+window_link_fd :: proc() -> (fd: Sock_Fd, out: bool) {
+	if link == nil || link.sock == nil do return -1, false
+	return link.sock.fd, cw.sock_wants_write(link.sock)
+}
+
+// The core loop's turn on the window's socket: what is queued goes out as the socket takes it;
+// a socket that failed lets the window go. Main thread.
+window_link_io :: proc() {
+	if link == nil || link.sock == nil do return
+	if _, why := cw.sock_flush(link.sock); why != .None {
+		fmt.eprintln("Deckhand: the window's connection ended:", why)
+		core_detach_window()
+	}
+}
+
+// Waits for the reply to link.asking[at] (link_sock_wait's caller sent it), at most
+// WINDOW_REPLY_WAIT, reading the window's messages meanwhile as the pump does (what the window
+// sends while it answers runs in order, as in process).
+@(private = "file")
+link_sock_wait :: proc(at: int) {
+	deadline := time.tick_add(time.tick_now(), WINDOW_REPLY_WAIT)
+	for link != nil && link.sock != nil && !link.asking[at].got {
+		window_link_io()
+		window_link_pump()
+		if link == nil || link.sock == nil || link.asking[at].got do return
+		left := time.tick_diff(time.tick_now(), deadline)
+		if left <= 0 {
+			window_link_slow_replies += 1
+			return
+		}
+		cw.sock_wait(link.sock, max(1, int(time.duration_milliseconds(left))))
+	}
+}
+
+// Requests whose reply did not come within WINDOW_REPLY_WAIT (tests, logs).
+window_link_slow_replies: int
+
+// The link is over core.sock (a separate core).
+window_link_is_sock :: proc() -> bool {return link != nil && link.sock != nil}

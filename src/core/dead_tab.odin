@@ -177,6 +177,10 @@ restart_picking :: proc(tab: u64) -> bool {
 }
 
 restart_waiting :: proc(tab: u64) -> bool {
+	if replica_process {
+		_, t, _ := find_tab(tab)
+		return t != nil && t.live.restart_wait // the core's (Tab_Live)
+	}
 	for w in restart_waits do if w.tab == tab do return true
 	return false
 }

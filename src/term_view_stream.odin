@@ -178,7 +178,7 @@ term_fit_rect :: proc(tab_id: u64, x, y, w, h: f32) {
 	term_fits[tab_id] = {cols = cols, rows = rows, cell = {font.cell_w, font.cell_h}, resized = time.tick_now(), rect = {x, y, w, h}}
 	if !client_link_up() do return // no core to tell
 	client_frame(cw.JSON_CHANNEL, .Data, transmute([]u8)fmt.tprintf(`{{"v":%d,"type":"term.resize","tab_id":%d,"cols":%d,"rows":%d,"cell_w":%v,"cell_h":%v}}`, core.PROTOCOL_VERSION, tab_id, cols, rows, font.cell_w, font.cell_h))
-	core.window_link_pump()
+	client_pump()
 }
 
 // A new cell size (fonts_apply): every terminal is asked for its grid again at the next layout.
@@ -229,7 +229,7 @@ term_views_theme :: proc() {
 // stream, the copy's history).
 term_views_check :: proc() -> (out: string, compared: int) {
 	if !client.attached do return
-	core.term_streams_flush(retry_now = true)
+	if !client_separate() do core.term_streams_flush(retry_now = true)
 	term_views_theme()
 	for id, v in term_views {
 		t := core.term_of(id)
@@ -268,7 +268,7 @@ term_view_attach :: proc(tab_id: u64) -> ^Term_View {
 	term_view_init(v)
 	term_views[tab_id] = v
 	client_frame(cw.JSON_CHANNEL, .Data, transmute([]u8)fmt.tprintf(`{{"v":%d,"type":"term.attach","id":"t%d","tab_id":%d,"history_lines":0}}`, core.PROTOCOL_VERSION, tab_id, tab_id))
-	core.window_link_pump() // term.attached, then the snapshot, arrive at once (term_view_frame)
+	client_pump() // term.attached, then the snapshot, arrive at once (term_view_frame)
 	if term_views[tab_id] != v do return nil // refused (term_view_json freed it)
 	return v
 }
@@ -277,7 +277,7 @@ term_view_attach :: proc(tab_id: u64) -> ^Term_View {
 term_view_detach :: proc(v: ^Term_View) {
 	if v.channel != 0 && client.attached {
 		client_frame(cw.JSON_CHANNEL, .Data, transmute([]u8)fmt.tprintf(`{{"v":%d,"type":"term.detach","channel":%d}}`, core.PROTOCOL_VERSION, v.channel))
-		core.window_link_pump()
+		client_pump()
 	}
 	term_view_drop(v)
 }
@@ -497,7 +497,7 @@ term_view_input :: proc(v: ^Term_View, bytes: []u8) {
 	}
 	if v.channel == 0 || !client.attached do return
 	client_frame(v.channel, .Data, bytes)
-	core.window_link_pump() // written to the PTY now, as the window's own pty_write did
+	client_pump() // written to the PTY now, as the window's own pty_write did
 }
 
 // The terminal gained or lost the keyboard: the core reports it to the program if it asked (1004).
@@ -505,7 +505,7 @@ term_view_focus_send :: proc(v: ^Term_View, focused: bool) {
 	if v.channel == 0 || !client.attached do return
 	b := [1]u8{focused ? 1 : 0}
 	client_frame(v.channel, .Focus, b[:])
-	core.window_link_pump()
+	client_pump()
 }
 
 // The user's selection in tab tab_id's copy (core.window_term_selection: Copy_Selection).

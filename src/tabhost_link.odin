@@ -68,7 +68,7 @@ tab_host_report_now :: proc(cmd: core.Command) -> core.Result {
 	text, ok := core.tab_host_msg_event(cmd, id, now = true)
 	if !ok do return core.fail("not a tab host report")
 	if !tab_host_raw(text) do return core.no_window()
-	core.window_link_pump()
+	client_pump()
 	return client_take_result(id)
 }
 
@@ -86,6 +86,6 @@ tab_host_raw :: proc(text: string) -> bool {
 // The core reads what was sent: now on the main thread, else at its next drain.
 @(private = "file")
 tab_host_pump :: proc() {
-	if sync.current_thread_id() == client.main do core.window_link_pump()
+	if sync.current_thread_id() == client.main do client_pump()
 	else if core.platform.wake != nil do core.platform.wake()
 }

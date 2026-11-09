@@ -33,7 +33,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 4
+HOLDER_REV :: 5
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -124,6 +124,7 @@ Conn :: struct {
 	closing_since: time.Tick,
 	dead:          bool,
 	serial:        u64, // this connection's number (a freed Conn's address may come back)
+	secret_out:    bool, // out held a successor secret (GOODBYE_ACK): zeroed when freed
 }
 
 Holder :: struct {
@@ -330,6 +331,7 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 @(private)
 conn_free :: proc(cn: ^Conn) {
 	if cn.fd >= 0 do close(cn.fd)
+	if cn.secret_out do trust.wipe(raw_data(cn.out)[:cap(cn.out)])
 	holderwire.stream_destroy(&cn.rx)
 	delete(cn.out)
 	free(cn)
@@ -549,6 +551,7 @@ conn_read :: proc(h: ^Holder, cn: ^Conn) {
 	}
 	cn.last_rx = time.tick_now()
 	holderwire.stream_feed(&cn.rx, h.buf[:n])
+	if !cn.welcomed do trust.wipe(h.buf[:n]) // a HELLO may carry the successor secret (its frame is wiped once decoded)
 	// before HELLO only a HELLO, judged by its header (nothing of a big payload is buffered)
 	if hd, whole := holderwire.parse_header(cn.rx.buf[cn.rx.head:]); whole && !cn.welcomed {
 		if hd.kind != u8(holderwire.Kind.Hello) || hd.len > holderwire.MAX_CONTROL {
@@ -884,7 +887,8 @@ goodbye_handover :: proc(h: ^Holder, cn: ^Conn, successor: bool) {
 		trust.wipe(raw[:])
 		h.successor_until = time.tick_add(time.tick_now(), h.cfg.successor_ttl)
 	}
-	send_msg(cn, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor})
+	holderwire.encode(&cn.out, .Goodbye_Ack, 0, holderwire.Goodbye_Ack{terminals = acks[:], successor_secret = h.successor}, secret = h.successor != "")
+	cn.secret_out = h.successor != ""
 	conn_close_after(cn)
 	cn.linger = true
 	h.core = nil

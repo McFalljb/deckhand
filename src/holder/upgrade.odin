@@ -280,7 +280,7 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 	fd := c.int(fdn)
 	set_cloexec(fd)
 	set_nosigpipe(fd)
-	blob, fds, ok := handoff_take(fd, time.tick_add(time.tick_now(), HANDOFF_WAIT))
+	blob, fds, go, ok := handoff_take(fd, time.tick_add(time.tick_now(), HANDOFF_WAIT))
 	if !ok {
 		log_line("resume: the keeper refused us or went away: exiting")
 		close(fd)
@@ -320,6 +320,14 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 	if !send_all_by(fd, done, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 		// the keeper is gone (it can no longer adopt): we have the terminals, so we serve
 		log_line("resume: could not tell the keeper we took over")
+	} else if go {
+		// a keeper that says GO: serve only once it did (a keeper whose DONE wait ran out adopts the
+		// terminals itself, and never says it). Its copies of the masters keep the sessions if we exit.
+		ack: [4]u8
+		if !recv_all_by(fd, ack[:], time.tick_add(time.tick_now(), HANDOFF_WAIT)) || string(ack[:]) != HANDOFF_GO {
+			log_line("resume: the keeper did not say GO: it keeps the terminals; exiting")
+			os.exit(1)
+		}
 	}
 	close(fd)
 	hlog(h, "upgraded in place: holder_rev %d, %d terminals, instance %s", HOLDER_REV, len(h.terms), h.instance)

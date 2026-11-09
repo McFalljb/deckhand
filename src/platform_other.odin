@@ -9,6 +9,7 @@ import "core:time"
 
 platform_wake :: proc() {}
 platform_alert :: proc(title, text: string, button := "Quit") {}
+platform_ask :: proc(title, text, yes, no: string) -> bool {return false}
 platform_hide_windows :: proc() {}
 platform_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) {}
 window_minimised :: proc() -> bool {return false}

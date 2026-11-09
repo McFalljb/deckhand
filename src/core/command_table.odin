@@ -64,6 +64,8 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_notify", args = "on", does = "OS notifications from the agent while Deckhand is in the background", who = .User},
 	{type = "copy_control_token", does = "Settings › Copy a control token: a new control token for `deckhand --ctl`, as shell exports, onto the clipboard (never in the result or a log); the user's", who = .User},
 	{type = "set_separate_core", args = "on", does = "experimental: run sessions in a background core (deckhand-core serve) from the next launch", who = .User},
+	{type = "holder_replace", args = "stop", does = "answers state.holder_ask: stop the session holder from another build (its sessions end) and start a new one, or run on without one", who = .User},
+	{type = "core_handover", args = "to", does = `a separate core hands its sessions over to another core process: "current" (the installed core) or "previous" (Use previous core); job runs get 2 min`, who = .User},
 	{type = "set_keep_sessions", args = "on", does = "keep sessions running when Deckhand quits or updates (on by default; the session holder keeps their processes; reopening Deckhand adopts them)", who = .User},
 	{type = "set_tidy_projects", args = "on", does = "tidy the Projects list (default on): temp and missing folders hidden (show_hidden shows them, with the reason), subfolders folded into their project", who = .User},
 	{type = "set_pinned", args = "cwd? | project_id? | pi_session_id?, pinned, index?", does = "pin or unpin a project or a session (a project's or a chat) at the top of its section; index places it among the pinned; unpinning works for ones that are gone (cwd, pi_session_id)", who = .Anyone},

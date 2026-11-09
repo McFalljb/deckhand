@@ -202,6 +202,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Tidy_Projects:   return "set_tidy_projects"
 	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Separate_Core:   return "set_separate_core"
+	case Holder_Replace:      return "holder_replace"
+	case Core_Handover:       return "core_handover"
 	case Claude_Typed:        return "claude_typed"
 	case Claude_Status_Dismiss: return "claude_status_dismiss"
 	case Copy_Control_Token:  return "copy_control_token"
@@ -448,6 +450,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Separate_Core:
 		kv_bool(&w, "on", c.on)
+	case Holder_Replace:
+		kv_bool(&w, "stop", c.stop)
+	case Core_Handover:
+		kv_str(&w, "to", c.to)
 	case Claude_Typed:
 		kv_u64(&w, "tab_id", c.tab_id)
 	case Claude_Status_Dismiss:

@@ -91,7 +91,7 @@ STATE_SECTIONS := [?]State_Section {
 	{"view", {"sidebar", "files", "focus_widget", "layout", "home_open", "system_light", "home_dir_prev"}},
 	{"settings", {"settings"}},
 	{"jobs", {"jobs", "jobs_unread", "jobs_notified"}},
-	{"confirmations", {"pending_confirmations", "comments_ask"}},
+	{"confirmations", {"pending_confirmations", "comments_ask", "holder_ask"}},
 	{"notifications", {"notices", "agent"}},
 	{"reload", {"reload"}},
 	{"claude", {"claude_history", "claude_readonly_ids", "claude_disk", "claude_disk_chats"}},

@@ -38,7 +38,7 @@ import "../trust"
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh; trust.CORE_IDS)
 HOLDER_BIN :: "deckhand-core"
 CORE_APP :: "Deckhand Core.app" // in Deckhand.app/Contents/Helpers (scripts/bundle-app.sh)
-HOLDER_REV :: 4 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 5 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 CORE_LOG :: "core.log" // in the runtime dir: a separate core's stderr (deckhand-core serve)
 

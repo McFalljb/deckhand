@@ -184,6 +184,7 @@ foreign pdplatform {
 	dh_mac_notify :: proc(title, body: cstring) ---
 	dh_mac_quiet :: proc() ---
 	dh_mac_alert :: proc(title, text, button: cstring) ---
+	dh_mac_ask :: proc(title, text, yes, no: cstring) -> c.int ---
 	dh_mac_hide_windows :: proc() ---
 	dh_mac_test_scale :: proc(scale: f64) ---
 	dh_mac_left_button_down :: proc() -> c.int ---
@@ -229,6 +230,11 @@ platform_quiet :: proc() {dh_mac_quiet()}
 // A modal alert with one Quit button (before the window is of use: instance.odin)
 platform_hide_windows :: proc() {dh_mac_hide_windows()}
 platform_alert :: proc(title, text: string, button := "Quit") {dh_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator), strings.clone_to_cstring(button, context.temp_allocator))}
+// A modal question: true for yes.
+platform_ask :: proc(title, text, yes, no: string) -> bool {
+	t := context.temp_allocator
+	return dh_mac_ask(strings.clone_to_cstring(title, t), strings.clone_to_cstring(text, t), strings.clone_to_cstring(yes, t), strings.clone_to_cstring(no, t)) == 1
+}
 
 // Test mode, before sokol starts: every screen and window reports this backing scale
 // (DECKHAND_SCALE; src/native/platform_macos.m).

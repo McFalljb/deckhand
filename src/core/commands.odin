@@ -241,6 +241,22 @@ Set_Separate_Core :: struct {
 }
 separate_core_default_on := false
 
+// The answer to state.holder_ask (a session holder from another build runs, holder_client.odin):
+// stop true stops it (SIGTERM, then SIGKILL), removes its socket and starts a new holder; its
+// sessions end. false: run on without a holder, as before. User-only.
+Holder_Replace :: struct {
+	stop: bool,
+}
+
+// A separate core hands its sessions over to another core process (docs/plans/background-core.md
+// §7.2, core_handover.odin): to "current" (the installed core this app's install pointed
+// current at: an update, or Use this app's core) or "previous" (Use previous core). Job runs
+// get up to 2 min to end, then stop. The window's connection ends; it dials the new core.
+// User-only; only a separate core does it.
+Core_Handover :: struct {
+	to: string,
+}
+
 // A window in another process: the user typed in a Claude tab's prompt (claude_note_typed), so
 // held texts wait (internal; window.command only).
 Claude_Typed :: struct {
@@ -511,6 +527,8 @@ Command :: union {
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
 	Set_Separate_Core,
+	Holder_Replace,
+	Core_Handover,
 	Claude_Typed,
 	Claude_Status_Dismiss,
 	Copy_Control_Token,
@@ -1450,6 +1468,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
+	case Holder_Replace:
+		return holder_replace(c.stop), true
+	case Core_Handover:
+		return core_handover_start(c.to), false
 	case Claude_Typed:
 		_, tab, _ := find_tab(c.tab_id)
 		claude_note_typed(tab)

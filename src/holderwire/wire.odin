@@ -14,6 +14,7 @@
 //   optional fields only. Unknown fields are ignored; an unknown kind gets UNKNOWN{kind}.
 package holderwire
 
+import "core:mem"
 import "core:encoding/endian"
 import "core:encoding/json"
 import "core:time"
@@ -301,14 +302,21 @@ is_known :: proc(kind: u8) -> bool {
 }
 
 // Appends a control frame. False if the payload would be too large.
-encode :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, msg: $T) -> bool {
+encode :: proc(out: ^[dynamic]u8, kind: Kind, terminal: u32, msg: $T, secret := false) -> bool {
 	spec, _ := spec_of(u8(kind))
 	assert(spec.payload == .Json, "encode: not a JSON kind")
 	data, err := json.marshal(msg, {}, context.temp_allocator)
+	// secret: msg carries one (a successor secret): the JSON's own copy is zeroed once appended
+	defer if secret do wipe_bytes(data)
 	if err != nil || len(data) > MAX_CONTROL do return false
 	put_header(out, u8(kind), terminal, len(data))
 	append(out, ..data)
 	return true
+}
+
+// Zeroes b in a way the compiler keeps (trust.wipe's twin: holderwire imports nothing of ours).
+wipe_bytes :: proc(b: []u8) {
+	if len(b) > 0 do mem.zero_explicit(raw_data(b), len(b))
 }
 
 // INPUT: raw bytes.

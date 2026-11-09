@@ -7,6 +7,8 @@ package core
 
 import "base:runtime"
 import "core:encoding/json"
+import "core:fmt"
+import "core:os"
 import "core:reflect"
 import "core:strings"
 import "core:testing"
@@ -90,9 +92,17 @@ fh_begin :: proc(attach := true) -> (a, b, pa, ta, app, ed, md, pb, tb: u64) {
 	b, pb = sb.id, sb.tabs[0].id
 	tb = add(sb, Browser_Tab{url = strings.clone("https://b.example/")})
 	state.current_session = a
+	// files no tab shows yet (open_file and markdown_open resolve them in the core)
+	fh_dir = fmt.aprintf("%s/deckhand-th-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec, allocator = heap)
+	os.make_directory_all(fh_dir)
+	_ = os.write_entire_file(fmt.tprintf("%s/new.txt", fh_dir), transmute([]u8)string("x\n"))
+	_ = os.write_entire_file(fmt.tprintf("%s/new.md", fh_dir), transmute([]u8)string("# x\n"))
 	if attach do fh.end = core_attach_window(fh_on_frames)
 	return
 }
+
+@(private = "file")
+fh_dir: string
 
 @(private = "file")
 fh_done :: proc() {
@@ -107,6 +117,9 @@ fh_done :: proc() {
 	fh = {}
 	inbox_drain()
 	state = State{}
+	os.remove_all(fh_dir)
+	delete(fh_dir, heap)
+	fh_dir = ""
 }
 
 @(private = "file")
@@ -138,12 +151,12 @@ fh_routed :: proc(a, ta, app, ed, md, pa: u64) -> []Command {
 		App_Call{tab_id = app, method = "tab.describe"},
 		App_Screenshot{tab_id = app},
 		App_Inspect{tab_id = app, on = true},
-		Open_File{path = "/tmp", session = a},
+		Open_File{path = fmt.tprintf("%s/new.txt", fh_dir), session = a},
 		Editor_State{tab_id = ed},
 		Save_File{tab_id = ed},
 		Goto_Line{tab_id = ed, line = 1},
 		Set_Wrap{tab_id = ed, on = true},
-		Markdown_Open{path = "/tmp/x.md", session = a},
+		Markdown_Open{path = fmt.tprintf("%s/new.md", fh_dir), session = a},
 		Markdown_Set_View{tab_id = md, source = true},
 		Markdown_Scroll{tab_id = md, line = 2},
 		Terminal_Link{tab_id = pa, url = "https://z.example/"},

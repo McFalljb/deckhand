@@ -356,6 +356,14 @@ ACTIONS := [?]Action {
 	{id = "restart_session_holder", label = "Restart session holder", make = proc() -> (core.Command, bool) {
 		return nil, core.holder_restart_available()
 	}, ui = core.holder_restart_start, detail = proc() -> string {return "development build: upgrade in place, sessions keep running"}},
+	// development builds only (client.odin, tabhost_route.odin): the window plays gone, so agents'
+	// page, app and file-view calls answer no_window (M4's case, now); Attach window brings it back
+	{id = "detach_window", label = "Detach window", make = proc() -> (core.Command, bool) {
+		return nil, core.TEST_HOOKS && client.attached
+	}, ui = client_detach, detail = proc() -> string {return "development build: agents' page and app calls answer no_window"}},
+	{id = "attach_window", label = "Attach window", make = proc() -> (core.Command, bool) {
+		return nil, core.TEST_HOOKS && client.detached
+	}, ui = client_reattach, detail = proc() -> string {return "development build: the window is the core's client again"}},
 	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (core.Command, bool) {
 		return core.Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},

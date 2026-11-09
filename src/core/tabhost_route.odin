@@ -543,8 +543,73 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if platform.open_url == nil do return fail("cannot open links here"), false
 		if !platform.open_url(c.url) do return fail("the link could not be opened"), false
 		return {ok = true}, false
-	case Open_File, Editor_State, Save_File, Goto_Line, Reload_File, Keep_Buffer, Diff_File, Set_Wrap, Git_Head_Done,
-	     Markdown_Open, Markdown_Set_View, Markdown_Scroll, Markdown_Follow:
+	case Open_File:
+		s, p, err := file_open_target(caller, c.session, c.path)
+		if err != "" do return fail(err), false
+		// the file's tab, if one is open: in front (a preview's single click keeps it a preview)
+		if tab := session_file_tab(s, p, true); tab != nil {
+			if !tab_host_up() do return no_window(), false
+			session_show_tab(s, tab.id)
+			if et := &tab.kind.(Editor_Tab); !c.preview do et.preview = false // opened for good (double-click, Enter)
+			focus_session(s.id, caller)
+			if c.line > 0 do routed(Goto_Line{tab_id = tab.id, line = c.line, col = c.col}, caller, request_id)
+			return {ok = true, created_id = tab.id}, true
+		}
+		return routed(Open_File{path = p, line = c.line, col = c.col, session = s.id, preview = c.preview}, caller, request_id, new_id())
+	case Markdown_Open:
+		s, p, err := file_open_target(caller, c.session, c.path)
+		if err != "" do return fail(err), false
+		if tab := session_file_tab(s, p, false); tab != nil {
+			if !tab_host_up() do return no_window(), false
+			session_show_tab(s, tab.id)
+			focus_session(s.id, caller)
+			if c.anchor != "" do routed(Markdown_Scroll{tab_id = tab.id, anchor = c.anchor}, caller, request_id)
+			return {ok = true, created_id = tab.id}, true
+		}
+		return routed(Markdown_Open{path = p, session = s.id, anchor = c.anchor}, caller, request_id, new_id())
+	case Diff_File:
+		s, _, et := editor_tab_of(c.tab_id)
+		if et == nil || et.view != .File do return fail("no such file tab"), false
+		if c.against != .Diff_Head && c.against != .Diff_Disk do return fail("against: head or disk"), false
+		// one diff tab per file and kind: refreshed when asked again (the window makes its text)
+		id: u64
+		for t in s.tabs do if x, is := t.kind.(Editor_Tab); is && x.view == c.against && x.path == et.path do id = t.id
+		return routed(cmd, caller, request_id, id != 0 ? id : new_id())
+	case Reload_File:
+		s, tab, et := editor_tab_of(c.tab_id)
+		if et == nil do return fail("no such editor tab"), false
+		if et.view != .File do return fail("nothing to reload"), false
+		if !tab_host_up() do return no_window(), false
+		// unsaved changes are the user's: another caller confirms first
+		ch := false
+		if caller.kind != .UI && window_tab_dirty(c.tab_id) {
+			gr, go_on, gch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("discard the unsaved changes to %q in %s?", tab.title, session_where(s)))
+			if !go_on do return gr, gch
+			ch = gch
+		}
+		r, rch := routed(cmd, caller, request_id)
+		return r, rch || ch
+	case Editor_State, Save_File, Goto_Line, Keep_Buffer, Set_Wrap:
+		if _, _, et := editor_tab_of(editor_command_tab(cmd)); et == nil do return fail("no such editor tab"), false
+		return routed(cmd, caller, request_id)
+	case Markdown_Set_View:
+		_, _, mt := markdown_tab_of(c.tab_id)
+		if mt == nil do return fail("no such Markdown tab"), false
+		if mt.source == c.source do return {ok = true}, false
+		return routed(cmd, caller, request_id)
+	case Markdown_Scroll:
+		if _, _, mt := markdown_tab_of(c.tab_id); mt == nil do return fail("no such Markdown tab"), false
+		return routed(cmd, caller, request_id)
+	case Markdown_Follow:
+		s, _, mt := markdown_tab_of(c.tab_id)
+		if mt == nil do return fail("no such Markdown tab"), false
+		// the window says what the link is (one of the document's, as laid out); the core acts on it
+		r, ch := routed(cmd, caller, request_id)
+		if !r.ok || r.data == "" do return r, ch
+		r2, ch2 := markdown_follow_act(c, s, caller, request_id, r.data)
+		return r2, ch || ch2
+	case Git_Head_Done:
+		if !tab_host_up() do return {ok = true}, false // the editor went with the window
 		return routed(cmd, caller, request_id)
 	}
 	return fail("not a tab host command"), false
@@ -621,6 +686,69 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		}
 		r.created_id = tab_id
 		return true
+	case Open_File:
+		if !r.ok do return false
+		s := find_session(c.session)
+		if s == nil do return false
+		tab := Tab{id = tab_id, kind = Editor_Tab{path = strings.clone(c.path), preview = c.preview}, title = title_for(c.path, .File), status = .Running}
+		// a preview takes the place of the session's preview tab, unless that one has unsaved changes
+		at := -1
+		if c.preview {
+			for t, i in s.tabs {
+				et, is := t.kind.(Editor_Tab)
+				if is && et.preview && !window_tab_dirty(t.id) do at = i
+			}
+		}
+		if at >= 0 {
+			old := &s.tabs[at]
+			// as close_tab cleans up a tab
+			drop_term(old.id)
+			forget_confirmations_for(old.id)
+			socket_forget_tab(old.id)
+			tab_clear_panels(old)
+			delete(old.panels)
+			if et, is := old.kind.(Editor_Tab); is do delete(et.path)
+			delete(old.title)
+			tab.pane = old.pane // in its place: its pane, and shown where it was shown
+			for &pn in s.panes do if pn.active == old.id do pn.active = tab.id
+			old^ = tab
+		} else {
+			pane_add_tab(s, tab)
+		}
+		session_show_tab(s, tab_id)
+		focus_session(s.id, caller)
+		r.created_id = tab_id
+		return true
+	case Markdown_Open:
+		if !r.ok do return false
+		s := find_session(c.session)
+		if s == nil do return false
+		pane_add_tab(s, Tab{id = tab_id, kind = Markdown_Tab{path = strings.clone(c.path)}, title = strings.clone(filepath.base(c.path)), status = .Running})
+		session_show_tab(s, tab_id)
+		focus_session(s.id, caller)
+		r.created_id = tab_id
+		return true
+	case Diff_File:
+		if !r.ok do return false
+		s, _, et := editor_tab_of(c.tab_id)
+		if et == nil do return false
+		if _, t, _ := find_tab(tab_id); t == nil {
+			path := strings.clone(et.path)
+			pane_add_tab(s, Tab{id = tab_id, kind = Editor_Tab{path = path, view = c.against}, title = title_for(path, c.against), status = .Running})
+		}
+		session_show_tab(s, tab_id)
+		r.created_id = tab_id
+		return true
+	case Markdown_Set_View:
+		if !r.ok do return false
+		_, _, mt := markdown_tab_of(c.tab_id)
+		if mt == nil do return false
+		mt.source = c.source
+		return true
+	case Save_File:
+		if !r.ok do return false
+		if _, _, et := editor_tab_of(c.tab_id); et != nil do settings_after_save(c.tab_id, et.path) // pi reads it at start: offer a reload
+		return false
 	case App_Restart:
 		if !window_changed do return false // refused before anything ran
 		_, tab, at := app_tab_of(c.tab_id)
@@ -871,7 +999,107 @@ app_declared_json :: proc(s: ^Open_Session) -> string {
 	return strings.to_string(b)
 }
 
-// ---- editor records ----
+// ---- editor and Markdown records ----
+
+@(private = "file")
+editor_tab_of :: proc(id: u64) -> (^Open_Session, ^Tab, ^Editor_Tab) {
+	s, tab, _ := find_tab(id)
+	if tab == nil do return nil, nil, nil
+	et, is := &tab.kind.(Editor_Tab)
+	if !is do return nil, nil, nil
+	return s, tab, et
+}
+
+@(private = "file")
+markdown_tab_of :: proc(id: u64) -> (^Open_Session, ^Tab, ^Markdown_Tab) {
+	s, tab, _ := find_tab(id)
+	if tab == nil do return nil, nil, nil
+	mt, is := &tab.kind.(Markdown_Tab)
+	if !is do return nil, nil, nil
+	return s, tab, mt
+}
+
+@(private = "file")
+editor_command_tab :: proc(cmd: Command) -> u64 {
+	#partial switch c in cmd {
+	case Editor_State: return c.tab_id
+	case Save_File:    return c.tab_id
+	case Goto_Line:    return c.tab_id
+	case Keep_Buffer:  return c.tab_id
+	case Set_Wrap:     return c.tab_id
+	}
+	return 0
+}
+
+// Where open_file and markdown_open open: the caller's own session (a tab-bound caller), else the
+// one on screen (Home has only its pi tab, so Home's control opens files in the one on screen),
+// and the file, absolute (a relative path: from the named session's folder, else the caller's).
+@(private = "file")
+file_open_target :: proc(caller: Caller, session: u64, path: string) -> (s: ^Open_Session, p: string, err: string) {
+	s = session != 0 ? find_session(session) : caller_session(caller)
+	if s != nil && s.home && session == 0 do s = cur()
+	if s == nil do return nil, "", "no open session to open the file in"
+	if s.home do return nil, "", "Home has only its pi tab"
+	if path == "" do return nil, "", "path is empty"
+	p = path
+	if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
+	if !filepath.is_abs(p) {
+		base := session != 0 ? s.cwd : fs_base_for(caller)
+		if base == "" do base = s.cwd
+		p, _ = filepath.join({base, p}, context.temp_allocator)
+	}
+	p, _ = filepath.clean(p, context.temp_allocator)
+	if settings_credential(p) do return nil, "", CREDENTIAL_REFUSED // sign-ins and .env files: never shown (settings_files.odin)
+	switch path_kind(p) {
+	case .Missing: return nil, "", "no such file"
+	case .Dir:     return nil, "", "that is a folder"
+	case .File, .Other: // other kinds open as a tab that says why
+	}
+	return s, p, ""
+}
+
+// The session's tab that shows file p: an editor's file view (editor) or a Markdown tab.
+@(private = "file")
+session_file_tab :: proc(s: ^Open_Session, p: string, editor: bool) -> ^Tab {
+	rp := fs_real(p)
+	for &tab in s.tabs {
+		if editor {
+			et, is := tab.kind.(Editor_Tab)
+			if is && et.view == .File && fs_real(et.path) == rp do return &tab
+		} else {
+			mt, is := tab.kind.(Markdown_Tab)
+			if is && fs_real(mt.path) == rp do return &tab
+		}
+	}
+	return nil
+}
+
+// What a Markdown link is, as the window answered markdown_follow ({"follow":"external"} or
+// {"follow":"open","path":…,"anchor":…}): the core opens it. A web or mail link leaves Deckhand
+// (the user's browser or mail, signed in): only the user's click, or a call the user confirms.
+@(private = "file")
+markdown_follow_act :: proc(c: Markdown_Follow, s: ^Open_Session, caller: Caller, request_id: u64, data: string) -> (Result, bool) {
+	switch json_path(data, "follow") {
+	case "external":
+		url := c.url
+		scheme := strings.to_lower(url[:max(strings.index_byte(url, ':'), 0)], context.temp_allocator)
+		changed := false
+		if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
+			what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", one_line(url[len("mailto:"):], context.temp_allocator)) : one_line(url, context.temp_allocator))
+			gr, go_on, ch := confirm_gate(Markdown_Follow{tab_id = c.tab_id, url = url}, .Open_Link, caller, c.confirm, what)
+			if !go_on do return gr, ch
+			changed = ch
+		}
+		if platform.open_url != nil do _ = platform.open_url(url)
+		return {ok = true}, changed
+	case "open":
+		p := json_path(data, "path")
+		if p == "" do return fail("empty link"), false
+		if path_kind(p) != .Dir && md_is_markdown_path(p) do return tab_host_apply(Markdown_Open{path = p, session = s.id, anchor = json_path(data, "anchor")}, caller, request_id)
+		return run_command(Open_File{path = p, session = s.id}, caller), true
+	}
+	return {ok = true}, false
+}
 
 @(private = "file")
 keep_tab :: proc(tab: ^Tab) -> (Result, bool) {

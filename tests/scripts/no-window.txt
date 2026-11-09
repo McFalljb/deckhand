@@ -1,0 +1,69 @@
+# The core with no window (tests/scripts/no-window.sh; design §10.2, M3-G): after detach_window,
+# every command a window hosts answers no_window at once; what the core keeps still answers;
+# after attach_window the same commands answer again. $last: the tab under test.
+wait 1500
+assert_state open_sessions.# 1
+# ---- a Markdown tab
+command {"type":"markdown_open","path":"$homedir/proj/notes.md"}
+assert_result ok true
+detach_window
+control_command {"type":"markdown_scroll","tab_id":$last,"anchor":"later"}
+assert_result ok false
+assert_result data.code no_window
+command {"type":"markdown_open","path":"$homedir/proj/notes.md"}
+assert_result data.code no_window
+command {"type":"markdown_view","tab_id":$last,"source":true}
+assert_result data.code no_window
+assert_state open_sessions.0.tabs.1.source false
+attach_window
+command {"type":"markdown_scroll","tab_id":$last,"anchor":"later"}
+assert_result ok true
+command {"type":"markdown_view","tab_id":$last,"source":true}
+assert_result ok true
+assert_state open_sessions.0.tabs.1.source true
+# ---- an editor tab
+command {"type":"open_file","path":"$homedir/proj/a.txt"}
+assert_result ok true
+detach_window
+control_command {"type":"editor_state","tab_id":$last}
+assert_result data.code no_window
+control_command {"type":"goto","tab_id":$last,"line":2}
+assert_result data.code no_window
+command {"type":"open_file","path":"$homedir/proj/a.txt"}
+assert_result data.code no_window
+# what the core keeps answers without a window: its state, the project's files
+command {"type":"get_state"}
+assert_result ok true
+command {"type":"list_dir","path":"$homedir/proj"}
+assert_result ok true
+attach_window
+control_command {"type":"editor_state","tab_id":$last}
+assert_result ok true
+assert_result data.path $homedir/proj/a.txt
+# ---- an app tab: its program keeps running; calls to it wait for a window
+app_open build/fake-app
+app_waitstatus running 20000
+detach_window
+control_command {"type":"app_call","tab_id":$last,"method":"tab.describe"}
+assert_result data.code no_window
+control_command {"type":"app_screenshot","tab_id":$last}
+assert_result data.code no_window
+control_command {"type":"app_input","tab_id":$last,"events":[{"event":"key","key":"a"}]}
+assert_result data.code no_window
+control_command {"type":"app_events","tab_id":$last,"topic":"log"}
+assert_result ok true
+# ---- browser tabs: an agent's open and list, the user's open; nothing is made
+control_command {"type":"browser_open","session":$session,"url":"https://example.com/"}
+assert_result ok false
+assert_result data.code no_window
+control_command {"type":"browser_tabs","session":$session}
+assert_result data.code no_window
+ui_command {"type":"browser_open","url":"https://example.com/"}
+assert_result data.code no_window
+assert_state open_sessions.0.tabs.# 4
+attach_window
+control_command {"type":"app_call","tab_id":$last,"method":"tab.describe"}
+assert_finished ok true
+control_command {"type":"browser_tabs","session":$session}
+assert_result ok true
+quit

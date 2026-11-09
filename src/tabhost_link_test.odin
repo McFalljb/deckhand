@@ -10,10 +10,13 @@ import "core:strings"
 import "core:testing"
 import "core"
 
+// (This file is in every build of the package: only a test build attaches here.)
 @(init)
 tab_host_unit_attach :: proc "contextless" () {
-	context = runtime.default_context()
-	client_attach_host()
+	when ODIN_TEST {
+		context = runtime.default_context()
+		client_attach_host()
+	}
 }
 
 // The window's link off (what the core does with no window), and back on.

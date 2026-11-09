@@ -21,80 +21,20 @@ editor_tab :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^Editor) {
 	return s, tab, editor_of(id)
 }
 
-editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
+// The window's part of the editor commands: the buffer, its cursor and view (the core checked the
+// caller, the file and the tab, made any confirmation, and keeps the tabs' records:
+// tabhost_route.odin). tab_id: the tab open_file or diff_file makes (or refreshes).
+editor_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
 	case core.Open_File:
-		// default session: the caller's own (a tab-bound caller), else the one on screen;
-		// Home has only its pi tab, so Home's control opens files in the one on screen
-		s := c.session != 0 ? core.find_session(c.session) : core.caller_session(caller)
-		if s != nil && s.home && c.session == 0 do s = core.cur()
-		if s == nil do return core.fail("no open session to open the file in"), false
-		if s.home do return core.fail("Home has only its pi tab"), false
-		if c.path == "" do return core.fail("path is empty"), false
-		p := c.path
-		if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
-		if !filepath.is_abs(p) {
-			// relative: from the named session's folder, else the caller's
-			base := c.session != 0 ? s.cwd : core.fs_base_for(caller)
-			if base == "" do base = s.cwd
-			p, _ = filepath.join({base, p}, context.temp_allocator)
-		}
-		p, _ = filepath.clean(p, context.temp_allocator)
-		if core.settings_credential(p) do return core.fail(core.CREDENTIAL_REFUSED), false // sign-ins and .env files: never shown (settings_files.odin)
-		switch core.path_kind(p) {
-		case .Missing: return core.fail("no such file"), false
-		case .Dir:     return core.fail("that is a folder"), false
-		case .File, .Other: // other kinds open as a tab that says why
-		}
-		rp := core.fs_real(p)
-		for &tab in s.tabs {
-			et, is := &tab.kind.(core.Editor_Tab)
-			if !is || et.view != .File || core.fs_real(et.path) != rp do continue
-			core.session_show_tab(s, tab.id)
-			if !c.preview do et.preview = false // opened for good (double-click, Enter)
-			core.focus_session(s.id, caller)
-			if e := editor_of(tab.id); e != nil && c.line > 0 do ed_goto(e, c.line, c.col)
-			return {ok = true, created_id = tab.id}, true
-		}
-		tab := core.Tab{id = core.new_id(), kind = core.Editor_Tab{path = strings.clone(p), preview = c.preview}, title = core.title_for(p, .File), status = .Running}
-		e := editor_new(tab.id, p)
+		// the core resolved the path and the session; its record follows (a preview's place too)
+		if tab_id == 0 do return core.fail("no tab for the file"), false
+		e := editor_of(tab_id)
+		if e == nil do e = editor_new(tab_id, c.path)
 		if c.line > 0 do ed_goto(e, c.line, c.col)
-		// a preview takes the place of the session's preview tab, unless that one has unsaved changes
-		at := -1
-		if c.preview {
-			for t, i in s.tabs {
-				et, is := t.kind.(core.Editor_Tab)
-				if is && et.preview && !editor_dirty(editor_of(t.id)) do at = i
-			}
-		}
-		if at >= 0 {
-			old := &s.tabs[at]
-			// as close_tab cleans up a tab
-			core.drop_term(old.id)
-			core.forget_confirmations_for(old.id)
-			core.socket_forget_tab(old.id)
-			core.tab_clear_panels(old)
-			delete(old.panels)
-			if et, is := old.kind.(core.Editor_Tab); is do delete(et.path)
-			delete(old.title)
-			tab.pane = old.pane // in its place: its pane, and shown where it was shown
-			for &pn in s.panes do if pn.active == old.id do pn.active = tab.id
-			old^ = tab
-		} else {
-			core.pane_add_tab(s, tab)
-		}
-		core.session_show_tab(s, tab.id)
-		core.focus_session(s.id, caller)
-		r = {ok = true, created_id = tab.id}
+		r = {ok = true, created_id = tab_id}
 		if e.refused != "" do r.data = fmt.aprintf(`{{"refused":%s}}`, quoted(e.refused))
 		return r, true
-	case core.Keep_Tab:
-		_, tab, _ := editor_tab(c.tab_id)
-		if tab == nil do return core.fail("no such editor tab"), false
-		et := &tab.kind.(core.Editor_Tab)
-		if !et.preview do return {ok = true}, false
-		et.preview = false
-		return {ok = true}, true
 	case core.Editor_State:
 		_, _, e := editor_tab(c.tab_id)
 		if e == nil do return core.fail("no such editor tab"), false
@@ -122,8 +62,7 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 			e.notice = strings.clone(err)
 			return core.fail(err), false
 		}
-		core.settings_after_save(e.tab_id, e.path) // pi reads it at start: offer a reload
-		return {ok = true}, true
+		return {ok = true}, true // the core offers a reload for a file pi reads at start
 	case core.Goto_Line:
 		_, _, e := editor_tab(c.tab_id)
 		if e == nil do return core.fail("no such editor tab"), false
@@ -131,13 +70,10 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 		ed_goto(e, c.line, c.col)
 		return {ok = true}, false // the cursor is the editor's, not State
 	case core.Reload_File:
-		s, tab, e := editor_tab(c.tab_id)
+		_, _, e := editor_tab(c.tab_id)
 		if e == nil do return core.fail("no such editor tab"), false
 		if e.view != .File || e.refused != "" do return core.fail("nothing to reload"), false
-		if editor_dirty(e) && caller.kind != .UI {
-			gr, go_on, ch := core.confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("discard the unsaved changes to %q in %s?", tab.title, core.session_where(s)))
-			if !go_on do return gr, ch
-		}
+		// unsaved changes: the core asked first (another caller's reload is confirmed)
 		if e.disk_changed {
 			editor_take_disk(e)
 		} else {
@@ -159,9 +95,10 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 		editor_keep_mine(e)
 		return {ok = true}, true
 	case core.Diff_File:
-		s, tab, e := editor_tab(c.tab_id)
+		_, _, e := editor_tab(c.tab_id)
 		if e == nil || e.view != .File do return core.fail("no such file tab"), false
-		if c.against == .File do return core.fail("against: head or disk"), false
+		if c.against != .Diff_Head && c.against != .Diff_Disk do return core.fail("against: head or disk"), false
+		if tab_id == 0 do return core.fail("no tab for the diff"), false
 		path := strings.clone(e.path, context.temp_allocator)
 		base_text: string
 		switch c.against {
@@ -181,25 +118,18 @@ editor_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result,
 		}
 		name := filepath.base(path)
 		text := unified_diff(base_text, tb_text(&e.buf, context.temp_allocator), c.against == .Diff_Head ? fmt.tprintf("HEAD:%s", name) : fmt.tprintf("%s (disk)", name), fmt.tprintf("%s (editor)", name))
-		_ = tab
-		// one diff tab per file and kind: refreshed when asked again
-		for t in s.tabs {
-			et, is := t.kind.(core.Editor_Tab)
-			if !is || et.view != c.against || et.path != path do continue
-			if d := editor_of(t.id); d != nil do editor_set_text(d, text)
-			core.session_show_tab(s, t.id)
-			return {ok = true, created_id = t.id}, true
+		// one diff tab per file and kind (the core's): its view refreshed, else made
+		if d := editor_of(tab_id); d != nil {
+			editor_set_text(d, text)
+			return {ok = true, created_id = tab_id}, true
 		}
-		nt := core.Tab{id = core.new_id(), kind = core.Editor_Tab{path = strings.clone(path), view = c.against}, title = core.title_for(path, c.against), status = .Running}
 		d := new(Editor)
-		d.tab_id, d.view, d.readonly, d.goal_col = nt.id, c.against, true, -1
+		d.tab_id, d.view, d.readonly, d.goal_col = tab_id, c.against, true, -1
 		d.path = strings.clone(path)
 		d.eol, d.indent_w = "\n", 4
 		tb_init(&d.buf, transmute([]u8)strings.clone(text))
-		editors[nt.id] = d
-		core.pane_add_tab(s, nt)
-		core.session_show_tab(s, nt.id)
-		return {ok = true, created_id = nt.id}, true
+		editors[tab_id] = d
+		return {ok = true, created_id = tab_id}, true
 	case core.Set_Wrap:
 		_, _, e := editor_tab(c.tab_id)
 		if e == nil do return core.fail("no such editor tab"), false

@@ -671,6 +671,10 @@ autotest_step :: proc() {
 			core.jobs_clock_advance(i64(num(rest)))
 		case "window_active": // window_active on|off: as if Deckhand were in front or behind
 			app.window_active = strings.trim_space(rest) == "on"
+		case "detach_window": // the window plays gone (M4's no-window cases): the core answers no_window for its tabs
+			client_detach() // client.odin
+		case "attach_window": // ...and comes back: the whole state again, its pages and apps as they were
+			client_reattach()
 		case "jobs_ui": // jobs_ui OPEN_ID [limits]: open a row (and the limits) on the Jobs tab
 			jobs_ui_set(len(args) > 0 && args[0] != "-" ? args[0] : "", len(args) > 1 && args[1] == "limits")
 		case "replace_in_file": // replace_in_file PATH OLD|NEW: an outside edit (another editor, an agent)

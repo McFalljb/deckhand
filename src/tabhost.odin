@@ -60,9 +60,9 @@ tab_view :: proc(kind: core.Tab_Kind) -> ^Tab_View {
 tab_host_apply_app :: proc(cmd: core.Command, caller: core.Caller, request_id: u64, tab_id: u64 = 0) -> (core.Result, bool) {
 	#partial switch _ in cmd {
 	case core.Open_File, core.Editor_State, core.Save_File, core.Goto_Line, core.Reload_File, core.Keep_Buffer, core.Diff_File, core.Set_Wrap, core.Git_Head_Done:
-		return editor_apply(cmd, caller)
+		return editor_apply(cmd, caller, tab_id)
 	case core.Markdown_Open, core.Markdown_Set_View, core.Markdown_Scroll, core.Markdown_Follow:
-		return markdown_apply(cmd, caller)
+		return markdown_apply(cmd, caller, tab_id)
 	case core.Terminal_Link:
 		return term_link_apply(cmd.(core.Terminal_Link), caller, tab_id) // a browser tab (term_links.odin)
 	case core.New_App_Tab, core.App_Restart, core.App_Input, core.App_Call, core.App_Call_Done, core.App_Screenshot, core.App_Inspect:

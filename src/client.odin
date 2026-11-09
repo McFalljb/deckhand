@@ -70,6 +70,7 @@ Client :: struct {
 	sock:      ^cw.Sock_Transport,
 	core_pid:  i32,
 	abandoned: map[string]bool, // results that came past CLIENT_WAIT: dropped when they come
+	focus_wait: string, // a separate core: the last Set_Focus's id, waited for before the next event (client_before_event; heap)
 	lost:      bool, // the core's connection ended
 	gave_up:   bool, // ...and no reconnect will be tried (client_core_give_up)
 	reconnects: int, // reconnects since reconnects_since (reconnect_allowed)
@@ -184,6 +185,20 @@ client_send :: proc(cmd: core.Command, menu := "") {
 	client_pump()
 }
 
+// A separate core: a Set_Focus (ui_do), whose answer the next event waits for (client_before_event).
+client_send_focus :: proc(cmd: core.Command) {
+	client_facts()
+	id := client_id()
+	client_raw(core.window_msg_command(cmd, id))
+	if old := client.focus_wait; old != "" { // the newer one decides
+		if old in client.results {
+			client_take_result(old)
+			delete(old, runtime.heap_allocator())
+		} else do client.abandoned[old] = true // (the map owns the key)
+	}
+	client.focus_wait = strings.clone(id, runtime.heap_allocator())
+}
+
 // A ui command's result, after everything queued before it ran (ui_run). Temp-allocated strings.
 client_run :: proc(cmd: core.Command) -> core.Result {
 	if !client.attached {
@@ -286,6 +301,12 @@ client_before_event :: proc() {
 	if !client.attached do return
 	if client.sock != nil do client_io(0)
 	else do core.window_link_flush()
+	if client.focus_wait != "" { // which widget has the keyboard, before this event is routed (ui_do)
+		id := client.focus_wait
+		client.focus_wait = ""
+		if client.sock != nil && !client.lost do client_wait(id)
+		delete(id, runtime.heap_allocator())
+	}
 	client_facts()
 }
 

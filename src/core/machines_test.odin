@@ -191,3 +191,16 @@ machines_reachable_setting :: proc(t: ^testing.T) {
 	}
 	testing.expect(t, found, "set_machines_reachable is a command")
 }
+
+// Review round 2 (PR #69): the hello reply's machine.os and .arch are kept only when they are
+// values uname -sm gives (darwin|linux, arm64|amd64); anything else leaves the old ones.
+@(test)
+machines_hello_os_arch :: proc(t: ^testing.T) {
+	hostile := strings.concatenate({strings.repeat("a", 300, context.temp_allocator), "‮gnp"}, context.temp_allocator)
+	o, a := machine_os_arch_from_hello(hostile, "arm64", "darwin", "arm64")
+	testing.expect(t, o == "darwin" && a == "arm64", "a hostile os leaves both")
+	o, a = machine_os_arch_from_hello("linux", "⁦x86", "darwin", "arm64")
+	testing.expect(t, o == "darwin" && a == "arm64", "a hostile arch leaves both")
+	o, a = machine_os_arch_from_hello("linux", "amd64", "darwin", "arm64")
+	testing.expect(t, o == "linux" && a == "amd64", "known values are taken")
+}

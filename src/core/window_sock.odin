@@ -411,10 +411,12 @@ window_door_core_id :: proc() -> string {
 	return strings.clone(string(door.core_id[:]), context.temp_allocator)
 }
 
-// Tests: the hub door's setting, and the sshd check off (as DECKHAND_HUB_WITHOUT_SSHD).
-window_door_hub_for_test :: proc(allowed, without_sshd: bool) {
-	sync.guard(&door.mu)
-	door.hub_ok, door.hub_no_sshd, door.hub_known = allowed, without_sshd, true
+when TEST_HOOKS {
+	// Tests: the hub door's setting, and the sshd check off (as DECKHAND_HUB_WITHOUT_SSHD).
+	window_door_hub_for_test :: proc(allowed, without_sshd: bool) {
+		sync.guard(&door.mu)
+		door.hub_ok, door.hub_no_sshd, door.hub_known = allowed, without_sshd, true
+	}
 }
 
 // Tests: the pids a window must not descend from (the test's client is its own process).

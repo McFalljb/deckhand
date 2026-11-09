@@ -224,6 +224,16 @@ machine_uname_parse :: proc(text: string) -> (os_name, arch: string, ok: bool) {
 	return os_name, arch, true
 }
 
+// The hello reply's machine{os, arch}, taken only when both are values `uname -sm` gives here
+// (machine_uname_parse: darwin|linux, arm64|amd64); else the old ones (another machine's text never
+// reaches State or machines.json, nor makes its core path one Deckhand does not know).
+machine_os_arch_from_hello :: proc(os_name, arch, old_os, old_arch: string) -> (string, string) {
+	os_ok := os_name == "darwin" || os_name == "linux"
+	arch_ok := arch == "arm64" || arch == "amd64"
+	if !os_ok || !arch_ok do return old_os, old_arch
+	return os_name, arch
+}
+
 // The probe's answer: the first line `uname -sm` could have printed (a remote rc file's lines
 // before it are skipped).
 machine_probe_answer :: proc(text: string) -> (os_name, arch: string, ok: bool) {
@@ -690,9 +700,10 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 		return
 	}
 	heap := runtime.heap_allocator()
-	if mos, march := json_path(line, "result.data.machine.os"), json_path(line, "result.data.machine.arch"); mos != l.os || march != l.arch {
+	if mos, march := machine_os_arch_from_hello(json_path(line, "result.data.machine.os"), json_path(line, "result.data.machine.arch"), l.os, l.arch); mos != l.os || march != l.arch {
+		mos, march = strings.clone(mos, heap), strings.clone(march, heap)
 		delete(l.os, heap); delete(l.arch, heap)
-		l.os, l.arch = strings.clone(mos, heap), strings.clone(march, heap)
+		l.os, l.arch = mos, march
 	}
 	l.sock = new(cw.Sock_Transport, heap)
 	cw.sock_open(l.sock, l.fd, initial = rest, allocator = heap)

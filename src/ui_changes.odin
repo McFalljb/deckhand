@@ -80,9 +80,8 @@ active_changes :: proc() -> ^core.Changes_View {
 // ---- the top bar's button ----
 
 // The checkout of the session on screen and its model (nil = none).
-@(private = "file")
 session_repo :: proc(cs: ^core.Open_Session) -> ^core.Changes_Repo {
-	if cs == nil || cs.home || cs.missing do return nil
+	if cs == nil || cs.home || cs.missing || cs.machine != 0 do return nil // another machine's folder is not this Mac's
 	return core.changes_repo(core.changes_root_of(cs.cwd))
 }
 

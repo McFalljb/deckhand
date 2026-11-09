@@ -1270,6 +1270,7 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 // closed. So its socket is only half-closed (SHUT_WR, through a dup) and kept open until the
 // peer closes it or LINGER_FOR passes (window_door_tick: link_linger_tick).
 LINGER_FOR :: 2 * time.Second
+LINGER_READS :: 16 // a turn reads at most this many times per let-go link (a peer that keeps sending can't hold the main thread)
 
 @(private = "file")
 lingering: [dynamic]struct {
@@ -1285,18 +1286,29 @@ link_linger_start :: proc() {
 	if fd < 0 do return
 	posix.fcntl(fd, .SETFD, i32(posix.FD_CLOEXEC))
 	posix.shutdown(fd, .WR) // the peer reads what was sent, then its end
+	link_linger_add(fd)
+}
+
+@(private = "file")
+link_linger_add :: proc(fd: Sock_Fd) {
 	if lingering == nil do lingering = make([dynamic]type_of(lingering[0]), runtime.heap_allocator())
 	append(&lingering, type_of(lingering[0]){fd, time.tick_add(time.tick_now(), LINGER_FOR)})
 }
 
-// Main thread: a let-go link whose peer closed, or whose time passed, closes.
-link_linger_tick :: proc(all := false) {
+// Tests: an fd (nonblocking) as a let-go link, and how many there are.
+link_linger_add_for_test :: proc(fd: Sock_Fd) {link_linger_add(fd)}
+link_linger_count :: proc() -> int {return len(lingering)}
+
+// Main thread: a let-go link whose peer closed, or whose time passed, closes. At most max_reads
+// reads each (what it still sent is dropped); reads: how many were made in all.
+link_linger_tick :: proc(all := false, max_reads := LINGER_READS) -> (reads: int) {
 	buf: [4096]u8
 	for i := len(lingering) - 1; i >= 0; i -= 1 {
 		x := lingering[i]
 		done := all || time.tick_diff(x.until, time.tick_now()) >= 0
-		for !done {
+		for k := 0; !done && k < max_reads; k += 1 {
 			n := posix.read(x.fd, &buf[0], len(buf)) // nonblocking: the transport set it on the shared description
+			reads += 1
 			if n > 0 do continue // whatever it still sent: dropped
 			done = n == 0 || (posix.errno() != .EAGAIN && posix.errno() != .EWOULDBLOCK && posix.errno() != .EINTR)
 			break
@@ -1306,6 +1318,7 @@ link_linger_tick :: proc(all := false) {
 			unordered_remove(&lingering, i)
 		}
 	}
+	return
 }
 
 // The bytes on the window's socket come from the process checked at accept (§5.3).

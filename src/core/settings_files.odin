@@ -182,10 +182,12 @@ CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
 CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
 CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 
-// The Machines group (machines.odin; Settings › Experimental › Machines over SSH on): a machine's
-// row is MACHINE_ROW + its number (Connect / Take back, Remove); the last row adds one.
+// The Machines group (machines.odin; Settings › Experimental › Machines over SSH on, or other
+// machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
+// then a row adds one, and the last allows other machines to connect to this one (the hub door).
 MACHINE_ROW :: "deckhand:machine:"
 MACHINE_ADD_ROW :: "deckhand:machine-add"
+MACHINE_REACH_ROW :: "deckhand:machine-reachable"
 
 // A machine row's number (ok false: not one).
 machine_row_no :: proc(path: string) -> (no: u64, ok: bool) {
@@ -352,16 +354,20 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	}
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
-	// Machines over SSH (machines.odin), while the experimental setting is on
-	if state.settings.remote_machines {
-		for m in state.machines {
+	// Machines over SSH (machines.odin), while the experimental setting is on (or this machine
+	// lets others in: the row that turns it off stays)
+	if state.settings.remote_machines || state.settings.machines_reachable {
+		if state.settings.remote_machines do for m in state.machines {
 			detail := fmt.tprintf("%s · %s", m.target != "" ? m.target : "via", MACHINE_STATUS_NAMES[m.status])
 			if m.status == .Online && m.version != "" do detail = fmt.tprintf("%s %s", detail, m.version)
 			if m.error != "" do detail = fmt.tprintf("%s: %s", detail, m.error)
 			button := m.status == .Taken ? "Take back" : m.status == .Online || m.status == .Connecting ? "" : "Connect"
 			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = button, remove = true})
 		}
-		add(&out, {group = "machines", label = "Add machine…", detail = "an ~/.ssh/config alias or user@host", path = MACHINE_ADD_ROW, button = "Add…"})
+		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add machine…", detail = "an ~/.ssh/config alias or user@host", path = MACHINE_ADD_ROW, button = "Add…"})
+		reach := state.settings.machines_reachable
+		detail := reach ? "on: another machine that logs in here over ssh as you can view and drive this one's sessions" : "off: no other machine can reach this one's sessions"
+		add(&out, {group = "machines", label = "Allow other machines to connect to this one", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Allow"})
 	}
 	return out[:]
 }
@@ -855,9 +861,9 @@ sf_machines: string // ...and the machines (settings_machines_key)
 
 @(private = "file")
 settings_machines_key :: proc() -> string {
-	if !state.settings.remote_machines do return ""
+	if !state.settings.remote_machines && !state.settings.machines_reachable do return ""
 	b := strings.builder_make(context.temp_allocator)
-	strings.write_string(&b, "on;")
+	fmt.sbprintf(&b, "%v%v;", state.settings.remote_machines, state.settings.machines_reachable)
 	for m in state.machines do fmt.sbprintf(&b, "%d|%s|%v|%s|%s;", m.no, m.name, m.status, m.version, m.error)
 	return strings.to_string(b)
 }

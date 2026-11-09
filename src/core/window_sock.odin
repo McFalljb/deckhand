@@ -14,11 +14,17 @@ package core
 //
 // The hub (§10.4 M6-A): another machine's core, through `deckhand-core-serve connect` run here over
 // its ssh, says the framed hello with "peer":"hub" and this run's window token (connect reads it
-// as this user). It is a second way to `ui`, so it gets the same checks in the same order, with
-// the core's identifier (trust.CORE_IDS) in place of the window's and no window floor (the hub
-// checks skew itself): the token; this user, still that process; the core's code; not a
-// descendant of this core or its holder. Its link is the window's (window_link.odin, `hub` set):
-// the newest connection wins, and the other side is told who took it (Viewed from <machine>).
+// as this user). It is a second way to `ui`, so the door is closed unless the user opened it here
+// (Settings › Machines › Allow other machines to connect to this one, machines_reachable, off by
+// default), and then it gets the window's checks in the same order, with the core's identifier
+// (trust.CORE_IDS) in place of the window's and no window floor (the hub checks skew itself): the
+// token; this user, still that process; the core's code; then it must have come in through ssh (a
+// root-owned sshd or sshd-session among its ancestors: a process a tab detached has launchd's);
+// not a descendant of this core or its holder; and not this core itself (the hub sends its core's
+// id, `--core`: a Mac that sshes to itself). Its link is the window's (window_link.odin, `hub`
+// set): the newest connection wins, and the other side is told who took it (Viewed from <machine>).
+// What is left: a process of this user that can ssh here (Remote Login on, its keys) while the
+// setting is on can be a hub; this user's own code is the user's trust boundary (§5.4).
 // Ad hoc and self-signed builds stop accidents, not a determined process of the same user (§5.4).
 //
 // A framed connection leaves the line server (conn_handoff): the reader thread queues it here
@@ -35,6 +41,8 @@ import "core:os"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
+import "core:time"
+import "core:unicode/utf8"
 
 import cw "../corewire"
 import "../trust"
@@ -69,6 +77,10 @@ door: struct {
 	floor:      cw.Version, // the newest window version that attached (WINDOW_FLOOR_FILE keeps it across runs)
 	holder_pid: i32, // the session holder's (main thread keeps it current)
 	own_pid:    i32,
+	core_id:    [64]u8, // hex: this run's, which a hub of this core sends (`--core`): a core is not its own hub
+	hub_ok:     bool, // Settings › Machines › Allow other machines to connect (main thread keeps it current)
+	hub_known:  bool, // ...from the saved settings: the loop's first turn (a hub hello waits for it, ≤ 5 s)
+	hub_no_sshd: bool, // test builds: DECKHAND_HUB_WITHOUT_SSHD=1 (the --via scenes have no sshd)
 	arrived:    [dynamic]Window_Arrival,
 }
 
@@ -90,8 +102,13 @@ window_token_publish :: proc(run_dir: string) -> bool {
 		os.remove(tmp)
 		return false
 	}
+	crypto.rand_bytes(raw[:])
+	id := hex32(raw)
+	trust.wipe(raw[:])
 	sync.guard(&door.mu)
 	copy(door.token[:], hex)
+	copy(door.core_id[:], id)
+	when TEST_HOOKS do door.hub_no_sshd = hook_env(.Hub_Without_Sshd) == "1"
 	delete(door.path, runtime.heap_allocator())
 	door.path = strings.clone(path, runtime.heap_allocator())
 	door.own_pid = i32(posix.getpid())
@@ -121,27 +138,46 @@ Window_Hello :: struct {
 	floor:        cw.Floor, // its version against the window floor
 	holder_child: bool, // it descends from this core or its session holder
 	hub:          bool, // a hub hello: the core's identifier, no window floor
+	allowed:      bool, // a hub: this machine lets other machines connect (machines_reachable)
+	via_sshd:     bool, // a hub: a root-owned sshd or sshd-session is among its ancestors
+	self:         bool, // a hub: its core is this one
 }
+
+HUB_NOT_ALLOWED :: "this machine does not let other machines connect (Settings › Machines › Allow other machines to connect to this one)"
 
 // "" = the window may attach; else why not (in the order the checks run).
 window_hello_refusal :: proc(h: Window_Hello) -> string {
+	if h.hub && !h.allowed do return HUB_NOT_ALLOWED // closed: nothing else is looked at
 	if !h.token_ok do return "framed mode is only for Deckhand's window (with the core's window token)"
 	who := h.hub ? "the hub" : "the window"
 	if !h.same_user do return fmt.tprintf("%s must run as this user", who)
 	if !h.still do return fmt.tprintf("%s's process changed since it connected", who)
 	if h.code != .Allow do return fmt.tprintf(h.hub ? "the hub's code is not Deckhand's core (%v)" : "the window's code is not Deckhand's (%v)", h.code)
 	if !h.hub && h.floor != .Allow do return "This Deckhand is older than the one last used with these sessions"
+	if h.hub && !h.via_sshd do return "the hub must come in through ssh"
 	if h.holder_child do return h.hub ? "a program running in a Deckhand tab can't be its hub" : "a program running in a Deckhand tab can't be its window"
+	if h.hub && h.self do return "a core can't be its own hub"
 	return ""
 }
 
 // The framed hello's checks (a connection's reader thread, before the reply). at_accept and tok:
-// the peer as read at accept. version: the window's, for the floor (temp allocator).
-window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_Token, token: string, hub := false) -> (why, version: string) {
+// the peer as read at accept. version: the window's, for the floor (temp allocator). core_id: a
+// hub hello's `core` (its core's id).
+window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_Token, token: string, hub := false, core_id := "") -> (why, version: string) {
+	// a core that connect just launched: the saved setting is read in the loop's first turn
+	for i := 0; hub && i < 250; i += 1 {
+		sync.lock(&door.mu)
+		known := door.hub_known
+		sync.unlock(&door.mu)
+		if known do break
+		time.sleep(20 * time.Millisecond)
+	}
 	sync.lock(&door.mu)
 	on, want, holder, own, floor := door.on, door.token, door.holder_pid, door.own_pid, door.floor
+	hub_ok, no_sshd, own_id := door.hub_ok, door.hub_no_sshd, door.core_id
 	sync.unlock(&door.mu)
-	h := Window_Hello{hub = hub}
+	h := Window_Hello{hub = hub, allowed = hub_ok}
+	if hub && !hub_ok do return window_hello_refusal(h), ""
 	h.token_ok = on && hex64_equal(string(want[:]), token)
 	h.same_user = trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) == .Allow
 	h.still = trust.peer_still(at_accept, trust.peer_read(fd)) == .Allow
@@ -153,15 +189,67 @@ window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_
 	if hub do version = "" // a core's version: not the window floor's
 	h.floor = hub ? .Allow : cw.window_floor_check(floor, version)
 	h.holder_child = pid_descends_from(at_accept.pid, {own, holder})
+	if hub {
+		h.via_sshd = no_sshd || pid_via_sshd(at_accept.pid)
+		h.self = core_id != "" && hex64_equal(string(own_id[:]), core_id)
+	}
 	return window_hello_refusal(h), version
 }
 
-// A hub hello's machine name as the window shows it (Viewed from <machine>): printable, at most
-// 64 bytes, else "another machine" (temp allocator).
+// A hub hello's machine name as the window shows it (Viewed from <machine>): printable (text_ok),
+// at most 64 bytes, else "another machine" (temp allocator).
 hub_from_name :: proc(from: string) -> string {
-	if from == "" || len(from) > 64 do return "another machine"
-	for r in from do if r < 0x20 || r == 0x7f do return "another machine"
+	if from == "" || len(from) > 64 || !text_ok(from) do return "another machine"
 	return strings.clone(from, context.temp_allocator)
+}
+
+// Text from another machine is shown only when every rune is printable: valid UTF-8, no C0 or
+// C1 control, DEL, line or paragraph separator, BOM, or bidi control (which could reorder what
+// the user reads).
+text_rune_ok :: proc(r: rune) -> bool {
+	switch r {
+	case utf8.RUNE_ERROR, 0x00 ..< 0x20, 0x7f ..= 0x9f: return false
+	case 0x061c, 0x200e, 0x200f, 0x202a ..= 0x202e, 0x2066 ..= 0x2069: return false // bidi
+	case 0x2028, 0x2029, 0xfeff: return false
+	}
+	return true
+}
+
+text_ok :: proc(s: string) -> bool {
+	for r in s do if !text_rune_ok(r) do return false
+	return true
+}
+
+// s with every rune text_ok refuses as '?', cut at a rune's edge to at most max bytes (temp
+// allocator): another machine's version, error and name as State carries them.
+text_clean :: proc(s: string, max: int) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for r in s {
+		w := text_rune_ok(r) ? utf8.rune_size(r) : 1
+		if strings.builder_len(b) + w > max do break
+		if text_rune_ok(r) do strings.write_rune(&b, r)
+		else do strings.write_byte(&b, '?')
+	}
+	return strings.to_string(b)
+}
+
+// A process's parent, effective uid and executable's name (0, 0, "": gone or not readable).
+Proc_Look :: #type proc(pid: i32) -> (parent: i32, uid: u32, name: string)
+
+// Whether a root-owned sshd or sshd-session is among pid's ancestors (itself excluded), within
+// 64 steps: the peer came in through ssh. Only root makes a root-owned process, so a same-user
+// process can't fake one; one a tab detached (nohup, setsid, launchctl) is launchd's.
+pid_via_sshd :: proc(pid: i32, look: Proc_Look = proc_look) -> bool {
+	p := pid
+	for _ in 0 ..< 64 {
+		if p <= 1 do return false
+		parent, _, _ := look(p)
+		if parent <= 1 || parent == p do return false
+		_, uid, name := look(parent)
+		if uid == 0 && (name == "sshd" || name == "sshd-session") do return true
+		p = parent
+	}
+	return false
 }
 
 // Whether pid's ancestors (itself included) hold one of these pids (0s skipped). At most 64 steps.
@@ -205,6 +293,7 @@ window_door_tick :: proc() {
 	sync.unlock(&hc.mu)
 	sync.lock(&door.mu)
 	door.holder_pid = holder
+	door.hub_ok, door.hub_known = state.settings.machines_reachable, true // Settings › Machines › Allow other machines to connect
 	if len(door.arrived) == 0 {
 		sync.unlock(&door.mu)
 		return
@@ -314,6 +403,18 @@ core_skew_message :: proc(s: cw.Skew) -> string {
 	case .Core_Older_Generation: return "Deckhand's background core is older than this app: Quit Deckhand and Stop All Sessions, then open Deckhand again"
 	}
 	return ""
+}
+
+// This run's core id (hex), which this core's hub links send (`--core`, machines.odin).
+window_door_core_id :: proc() -> string {
+	sync.guard(&door.mu)
+	return strings.clone(string(door.core_id[:]), context.temp_allocator)
+}
+
+// Tests: the hub door's setting, and the sshd check off (as DECKHAND_HUB_WITHOUT_SSHD).
+window_door_hub_for_test :: proc(allowed, without_sshd: bool) {
+	sync.guard(&door.mu)
+	door.hub_ok, door.hub_no_sshd, door.hub_known = allowed, without_sshd, true
 }
 
 // Tests: the pids a window must not descend from (the test's client is its own process).

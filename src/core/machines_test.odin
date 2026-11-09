@@ -142,3 +142,52 @@ machines_backoff_fake_clock :: proc(t: ^testing.T) {
 	testing.expect_value(t, machine_backoff_down(&b, now), time.Second)
 	testing.expect_value(t, machine_backoff_down(&b, now), 2 * time.Second)
 }
+
+// Review round 1 (PR #69): what comes before the answer (a remote rc file's output) is skipped,
+// a link that sends too much without one fails at once (no busy poll), and the probe has a deadline.
+@(test)
+machines_scan_round1 :: proc(t: ^testing.T) {
+	// the probe: the first line uname -sm could have printed
+	os_name, arch, ok := machine_probe_answer("Welcome to the lab\nLast login: today\nDarwin arm64\n")
+	testing.expect(t, ok && os_name == "darwin" && arch == "arm64", "past an rc file's lines")
+	_, _, ok = machine_probe_answer("hello there\n")
+	testing.expect(t, !ok, "no answer")
+	// the hello reply: the first line that is a JSON object; the frames start after it
+	text := "motd line\n\n{\"id\":\"hub\",\"result\":{\"ok\":true}}\nFRAMES"
+	s, line, rest := machine_hello_scan(transmute([]u8)text, 1 << 20)
+	testing.expect_value(t, s, Machine_Scan.Found)
+	testing.expect_value(t, line, `{"id":"hub","result":{"ok":true}}`)
+	testing.expect_value(t, text[rest:], "FRAMES")
+	s, _, _ = machine_hello_scan(transmute([]u8)string("motd\n{\"id\""), 1 << 20)
+	testing.expect_value(t, s, Machine_Scan.Wait)
+	// the cap: fail now, not wait (its fd would stay readable and the loop would spin)
+	big := make([]u8, 64, context.temp_allocator)
+	for &b in big do b = 'x'
+	s, _, _ = machine_hello_scan(big, 64)
+	testing.expect_value(t, s, Machine_Scan.Too_Long)
+	testing.expect(t, MACHINE_PROBE_WAIT == 30 * time.Second, "the probe's deadline")
+	// this core's id rides along, so the other end can refuse a core that is its own hub
+	run := "/Users/someone/Library/Application Support/Deckhand/run"
+	id := strings.repeat("0f", 32, context.temp_allocator)
+	m := Machine{no = 7, name = "nuc", target = "me@nuc", os = "darwin", arch = "arm64", core_path = machine_core_path_for("darwin")}
+	argv, why := machine_argv(m, run, "Some-Mac", core_id = id)
+	testing.expect_value(t, why, "")
+	testing.expect(t, strings.has_suffix(argv[len(argv) - 1], fmt.tprintf("connect --from Some-Mac --core %s", id)), argv[len(argv) - 1])
+	_, why = machine_argv(m, run, "Some-Mac", core_id = "x'; id")
+	testing.expect(t, why != "", "a core id is hex only")
+	v := Machine{no = 2, name = "m2", via = "build/deckhand-core-serve connect"}
+	va, _ := machine_argv(v, run, "Some-Mac", core_id = id, test_build = true)
+	testing.expect_value(t, strings.join(va, " ", context.temp_allocator), fmt.tprintf("build/deckhand-core-serve connect --from Some-Mac --core %s", id))
+}
+
+// The setting that opens the hub door: off by default, the user's only.
+@(test)
+machines_reachable_setting :: proc(t: ^testing.T) {
+	testing.expect(t, !machines_reachable_default_on, "off by default")
+	found := false
+	for e in COMMAND_SPECS do if e.type == "set_machines_reachable" {
+		found = true
+		testing.expect_value(t, e.who, Command_Who.User)
+	}
+	testing.expect(t, found, "set_machines_reachable is a command")
+}

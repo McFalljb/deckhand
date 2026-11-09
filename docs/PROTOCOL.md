@@ -254,6 +254,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): run tabs' processes in the session holder, so they survive a core restart or crash, an update, and a quit without Stop All; the next core adopts them, and their tokens survive in a MAC'd `tokens.json` (§2) |
 | `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
 | `set_remote_machines` | `on` | **user only**, off by default (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default): Settings › Experimental › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub") |
+| `set_machines_reachable` | `on` | **user only**, off by default (`machines_reachable_default_on`, `src/core/machines.odin`; `state.settings.machines_reachable`, saved when it differs from the default): Settings › Machines › *Allow other machines to connect to this one*. Off, this core's hub door refuses every hub hello (§5a, "The hub"); on, another machine's core that logs in here over ssh as this user can view and drive this machine's sessions. Separate from `remote_machines`, which reaches out |
 | `machine_add` | `name`, `target`, `via`? | **user only**, with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`); `name`: at most 64 bytes, unique. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
 | `machine_remove` | `no` | **user only**: forgets a machine (its link ends; nothing on it is touched) |
 | `machine_connect` | `no` | **user only**: connects now: Take back from that machine's own window or another hub (`taken`), or a retry without waiting for the backoff |
@@ -701,7 +702,7 @@ without asking. Exited tabs never ask.
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
-              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": false,
+              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": false, "machines_reachable": false,
               "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
               "home_dir": "/Users/me/deckhand", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/deckhand/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},
@@ -1196,22 +1197,34 @@ older one, which is told to quit (`window.request quit`).
 `src/coremain/connect.odin`). This Mac's core reaches another machine's core by running the user's
 own `ssh -S <run>/ssh-<n>.ctl -o ControlMaster=auto -o ControlPersist=600 -o BatchMode=yes -o
 Compression=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -- <target> '"$HOME/<core
-path>" connect --from <this Mac>'` (argv only, on a socketpair; `<n>` the machine's number, so the
-ControlPath stays within 86 bytes). `deckhand-core-serve connect` on that machine dials its
+path>" connect --from <this Mac> --core <this core's id>'` (argv only, on a socketpair; `<n>` the
+machine's number, so the ControlPath stays within 86 bytes; the id is 64 hex, new each run). `deckhand-core-serve connect` on that machine dials its
 `core.sock` (launching a core when none answers), checks the core's code as the window does, and
-says the hub hello: `{"type":"hello","framed":true,"peer":"hub","from":"<this Mac>","token":"<its
-window.token>"}`; then it copies bytes both ways. That core checks the hub as it checks a window, in
-the same order, with the core's identifier (`trust.CORE_IDS`) in place of the window's and no
-window floor: the token; this user, still that process; the core's designated requirement; not a
-descendant of that core or its session holder. The caller is `ui`. The hub's link is the window's
+says the hub hello: `{"type":"hello","framed":true,"peer":"hub","from":"<this Mac>","core":"<id>",
+"token":"<its window.token>"}`; then it copies bytes both ways. **The door is closed by default:**
+that core refuses every hub hello unless its user turned on Settings › Machines › *Allow other
+machines to connect to this one* (`set_machines_reachable`; a Linux core's install over ssh turns
+it on there, M6-E). Then it checks the hub as it checks a window, in the same order, with the
+core's identifier (`trust.CORE_IDS`) in place of the window's and no window floor: the token; this
+user, still that process; the core's designated requirement; **it came in through ssh** (a
+root-owned `sshd` or `sshd-session` among its ancestors, at most 64 steps; a process a tab detached
+with `nohup`, `setsid` or `launchctl` is launchd's child, and only root makes a root-owned
+process); not a descendant of that core or its session holder; and **not that core itself** (its
+`core` is not this run's id: a Mac that sshes to itself). The caller is `ui`. **What is left:** a
+process of this user that can ssh to this machine (Remote Login on, the user's keys) while the
+setting is on can still be a hub; this user's own code is the user's trust boundary (§8.3 of the
+design). Until M6-L1 reads `/proc`, a Linux core finds no sshd and refuses every hub. The hub's link is the window's
 link with `hub` set: the newest connection wins. A window it replaces gets `window.request`
 `viewed_from` (`text`: the hub's machine) and shows *Viewed from <machine>* with **Take Back**,
 dialling again only then; a hub it replaces gets `{"type":"hub.taken","by":"<machine>"}` (`""`:
 that machine's own window) and waits for `machine_connect`. Notifications on a core whose link is a
-hub are its own banners. This Mac reads the hello reply through `skew_check`; `state.machines`
+hub are its own banners. This Mac reads the hello reply (the first JSON line: lines a remote rc
+file prints before it are skipped; 1 MiB without one, or 30 s, ends the attempt, as do 4 KiB or 30 s
+from the `uname -sm` probe) through `skew_check`; `state.machines`
 (and `get_state`'s `machines`, without targets) has each machine's `status` (`connecting`,
 `online`, `offline`, `needs_login`: ssh's exit 255 asking for a password, host key or code;
-`needs_update`; `not_installed`; `taken`), `version`, `os`, `arch` and `error`. It reconnects after
+`needs_update`; `not_installed`; `taken`), `version`, `os`, `arch` and `error` (another machine's
+text, cleaned: printable runes only, no bidi controls; `version` at most 64 bytes, `error` 128). It reconnects after
 1 s, doubling to 60 s, and from 1 s again after a minute up. **Caps from the first byte:** every
 `window.request` and `confirmation.parked` from a hub link is dropped, never acted on; nothing else
 a hub link sends is read yet.

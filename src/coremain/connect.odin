@@ -1,11 +1,12 @@
 package main
 
-// `deckhand-core-serve connect [--from NAME]` (docs/plans/background-core.md §10.4 M6-A): run on
+// `deckhand-core-serve connect [--from NAME] [--core ID]` (docs/plans/background-core.md §10.4 M6-A): run on
 // this machine by another machine's ssh (its hub link, src/core/machines.odin). It dials this
 // machine's core.sock, launching a core as `deckhand --ctl` does when none answers (≤ 15 s),
 // checks that the process there is this user's and has the core's code (core_peer_check, as the
 // window does), and says the hub hello: framed, "peer":"hub", this run's window token (it runs as
-// this user, so it can read run/window.token) and NAME, the other machine's (Viewed from <NAME>).
+// this user, so it can read run/window.token), NAME, the other machine's (Viewed from <NAME>), and
+// ID, its core's (64 hex: the door refuses a core that is its own hub).
 // Then it copies bytes, stdin to the socket and the socket to stdout, until either side ends. It
 // reads none of them: the hello reply and the frames are the other machine's to read.
 
@@ -16,14 +17,18 @@ import "core:time"
 
 import "../core"
 
-CONNECT_USAGE :: "usage: deckhand-core-serve connect [--from NAME]"
+CONNECT_USAGE :: "usage: deckhand-core-serve connect [--from NAME] [--core ID]"
 
 connect_main :: proc(args: []string) -> int {
-	from := ""
-	if len(args) == 2 && args[0] == "--from" do from = args[1]
-	else if len(args) != 0 {
-		fmt.eprintln(CONNECT_USAGE)
-		return 2
+	from, core_id := "", ""
+	for i := 0; i < len(args); i += 2 {
+		ok := i + 1 < len(args)
+		if ok && args[i] == "--from" do from = args[i + 1]
+		else if ok && args[i] == "--core" && core.hex64_ok(args[i + 1]) do core_id = args[i + 1]
+		else {
+			fmt.eprintln(CONNECT_USAGE)
+			return 2
+		}
 	}
 	posix.signal(.SIGPIPE, auto_cast posix.SIG_IGN)
 	when core.TEST_HOOKS do core.autotest_active = core.hook_env(.Script) != ""
@@ -70,6 +75,7 @@ connect_main :: proc(args: []string) -> int {
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, `{{"id":"hub","v":%d,"type":"hello","framed":true,"peer":"hub","from":`, core.PROTOCOL_VERSION)
 	core.json_quote(&b, from)
+	if core_id != "" do fmt.sbprintf(&b, `,"core":"%s"`, core_id)
 	fmt.sbprintf(&b, `,"token":"%s"}}`, core.window_token_read(run))
 	strings.write_byte(&b, '\n')
 	if !core.sock_write_all(fd, b.buf[:]) {

@@ -203,6 +203,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Separate_Core:   return "set_separate_core"
 	case Set_Remote_Machines: return "set_remote_machines"
+	case Set_Machines_Reachable: return "set_machines_reachable"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Connect:     return "machine_connect"
@@ -459,6 +460,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Separate_Core:
 		kv_bool(&w, "on", c.on)
 	case Set_Remote_Machines:
+		kv_bool(&w, "on", c.on)
+	case Set_Machines_Reachable:
 		kv_bool(&w, "on", c.on)
 	case Machine_Add:
 		kv_str(&w, "name", c.name)
@@ -1742,6 +1745,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_bool(&st, "tidy_projects", !s.settings.tidy_off)
 		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
 		kv_bool(&st, "remote_machines", s.settings.remote_machines)
+		kv_bool(&st, "machines_reachable", s.settings.machines_reachable)
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)

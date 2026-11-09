@@ -307,6 +307,7 @@ settings_defaults :: proc() {
 	state.settings.keep_sessions, state.settings.keep_sessions_chosen = keep_sessions_default(), false
 	state.settings.separate_core = separate_core_default_on
 	state.settings.remote_machines = remote_machines_default_on
+	state.settings.machines_reachable = machines_reachable_default_on
 }
 
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
@@ -537,6 +538,7 @@ Command :: union {
 	Set_Keep_Sessions,
 	Set_Separate_Core,
 	Set_Remote_Machines,
+	Set_Machines_Reachable,
 	Machine_Add,
 	Machine_Remove,
 	Machine_Connect,
@@ -1490,6 +1492,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Set_Remote_Machines: // Settings › Experimental › Machines over SSH (machines.odin)
 		if state.settings.remote_machines == c.on do return {ok = true}, false
 		state.settings.remote_machines = c.on
+		return {ok = true}, true
+	case Set_Machines_Reachable: // Settings › Machines › Allow other machines to connect (the hub door, window_sock.odin)
+		if state.settings.machines_reachable == c.on do return {ok = true}, false
+		state.settings.machines_reachable = c.on
 		return {ok = true}, true
 	case Machine_Add:     return machine_add_apply(c), false // the machines section changes itself (machines_publish)
 	case Machine_Remove:  return machine_remove_apply(c), false

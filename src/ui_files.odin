@@ -689,6 +689,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			if p == core.CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
 			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
 			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
+			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this one" : "Let another machine's Deckhand connect to this one over ssh. It must log in as you (Remote Login on, your keys), and then sees and drives this machine's sessions", ""
 			if p == core.MACHINE_ADD_ROW do return "Add a machine: type its ssh target (an ~/.ssh/config alias or user@host), then Enter. Deckhand runs your own ssh, which must log in without a prompt", ""
 			if _, ok := core.machine_row_no(p); ok do return "Connect to this machine now (Take back: its own window or another Mac lets go)", ""
 			if strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
@@ -1229,6 +1230,10 @@ settings_folder_button :: proc(path: string) -> bool {
 	}
 	if no, ok := core.machine_row_no(path); ok {
 		ui_do(core.Machine_Connect{no = no})
+		return true
+	}
+	if path == core.MACHINE_REACH_ROW {
+		ui_do(core.Set_Machines_Reachable{on = !state.settings.machines_reachable})
 		return true
 	}
 	switch path {

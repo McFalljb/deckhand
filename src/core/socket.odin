@@ -812,7 +812,7 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		if err == "" && m.framed && m.peer != "" && m.peer != "hub" do err = "framed mode is only for Deckhand's window"
 		if err == "" && m.framed {
 			hub := m.peer == "hub"
-			why, version := window_hello_check(c.fd, c.peer, c.peer_tok, m.token, hub)
+			why, version := window_hello_check(c.fd, c.peer, c.peer_tok, m.token, hub, m.core)
 			if why != "" {
 				conn_push(c, reply_json(m.id, fail(why)), force = true)
 				return false

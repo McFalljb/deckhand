@@ -2,7 +2,8 @@
 # Remote machines, the link (docs/plans/background-core.md §10.4 M6-A): a window with a separate
 # core turns on Settings › Experimental › Machines over SSH and adds a machine whose link is
 # `--via 'deckhand-core-serve connect'` with a data and runtime dir of its own (a second core on
-# this Mac; no ssh, no sshd). connect launches that core, says the hub hello, and the machine shows
+# this Mac; no ssh, no sshd: DECKHAND_HUB_WITHOUT_SSHD=1 lets its door skip the sshd check, and its
+# saved settings allow other machines in). connect launches that core, says the hub hello, and the machine shows
 # `online` with its version. The other core asks its "window" (the hub) to set the clipboard: the
 # local core drops it and the window's clipboard is untouched. Then the other core is killed (-9):
 # `offline`, and `online` again once the next connect has launched it again.
@@ -34,7 +35,8 @@ trap cleanup EXIT
 mkdir -p "$W/data" "$W/data2" "$W/home" "$W/home2" "$W/proj2"
 # the other machine: its own HOME, data and runtime dirs; test mode (DECKHAND_SCRIPT), so the core
 # connect launches is started directly and prints a control token in its log
-VIA="env HOME=$W/home2 DECKHAND_DATA_DIR=$W/data2 DECKHAND_RUNTIME_DIR=$RUN2 DECKHAND_SCRIPT=remote-link $ROOT/build/deckhand-core-serve connect"
+printf '{"v":1,"settings":{"machines_reachable":true}}\n' > "$W/data2/workspace.json"
+VIA="env HOME=$W/home2 DECKHAND_DATA_DIR=$W/data2 DECKHAND_RUNTIME_DIR=$RUN2 DECKHAND_SCRIPT=remote-link DECKHAND_HUB_WITHOUT_SSHD=1 $ROOT/build/deckhand-core-serve connect"
 cat > "$W/window.txt" <<TXT
 # tests/scripts/remote-link.sh's window: the link comes up, goes down when the other core dies, and comes back
 ui_command {"type":"set_remote_machines","on":true}

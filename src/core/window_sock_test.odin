@@ -140,7 +140,7 @@ thread_join_answer :: proc(th: ^thread.Thread) {
 // window's checks in the same order with the core's identifier, and no window floor.
 @(test)
 hub_hello_refusal_table :: proc(t: ^testing.T) {
-	ok := Window_Hello{hub = true, token_ok = true, same_user = true, still = true, code = .Allow, floor = .Below_Floor}
+	ok := Window_Hello{hub = true, allowed = true, via_sshd = true, token_ok = true, same_user = true, still = true, code = .Allow, floor = .Below_Floor}
 	testing.expect_value(t, window_hello_refusal(ok), "") // the floor is the window's only
 	bad := ok
 	bad.holder_child = true
@@ -169,6 +169,8 @@ hub_door_refusals :: proc(t: ^testing.T) {
 	own := trust.own_signature().identifier
 	me := i32(posix.getpid())
 	window_door_pids_for_test(0, 0)
+	window_door_hub_for_test(allowed = true, without_sshd = true) // round 1's checks: hub_door_round1
+	defer window_door_hub_for_test(allowed = false, without_sshd = false)
 	when TEST_HOOKS {
 		window_peer_ids, hub_peer_ids = []string{own}, []string{"dev.deckhand.core"}
 		defer {window_peer_ids, hub_peer_ids = trust.WINDOW_IDS, trust.CORE_IDS}
@@ -190,4 +192,129 @@ hub_door_refusals :: proc(t: ^testing.T) {
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
 	testing.expect_value(t, why, "a program running in a Deckhand tab can't be its hub")
 	window_door_pids_for_test(0, 0)
+}
+
+// Review round 1 (PR #69): the hub door is closed unless this machine allows other machines in
+// (Settings › Machines), the hub must come through sshd, and a core can't be its own hub.
+@(test)
+hub_hello_refusal_round1 :: proc(t: ^testing.T) {
+	ok := Window_Hello{hub = true, allowed = true, token_ok = true, same_user = true, still = true, code = .Allow, via_sshd = true}
+	testing.expect_value(t, window_hello_refusal(ok), "")
+	bad := ok
+	bad.allowed = false
+	testing.expect_value(t, window_hello_refusal(bad), HUB_NOT_ALLOWED)
+	bad.token_ok = false // closed first: nothing else is said
+	testing.expect_value(t, window_hello_refusal(bad), HUB_NOT_ALLOWED)
+	bad = ok
+	bad.via_sshd = false
+	testing.expect_value(t, window_hello_refusal(bad), "the hub must come in through ssh")
+	bad = ok
+	bad.self = true
+	testing.expect_value(t, window_hello_refusal(bad), "a core can't be its own hub")
+	// a window needs neither
+	win := Window_Hello{token_ok = true, same_user = true, still = true, code = .Allow, floor = .Allow}
+	testing.expect_value(t, window_hello_refusal(win), "")
+}
+
+// sshd's ancestry: a root-owned sshd or sshd-session above the peer, within 64 steps.
+@(test)
+hub_via_sshd_walk :: proc(t: ^testing.T) {
+	look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
+		switch pid {
+		case 100: return 90, 501, "deckhand-core-serve" // connect
+		case 90:  return 80, 501, "zsh"
+		case 80:  return 70, 501, "sshd-session" // the user's half
+		case 70:  return 1, 0, "sshd-session" // root's
+		case 200: return 1, 501, "deckhand-core-serve" // detached from a tab: launchd's
+		case 300: return 310, 501, "deckhand-core-serve"
+		case 310: return 1, 501, "sshd" // a user's own sshd
+		case 400: return 400, 501, "loop" // its own parent
+		}
+		return 0, 0, ""
+	}
+	testing.expect(t, pid_via_sshd(100, look), "under root's sshd-session")
+	testing.expect(t, !pid_via_sshd(200, look), "launchd's child")
+	testing.expect(t, !pid_via_sshd(300, look), "a user-owned sshd is not sshd")
+	testing.expect(t, !pid_via_sshd(400, look), "a loop ends")
+	testing.expect(t, !pid_via_sshd(0, look), "no pid")
+}
+
+// The real check: closed by default, then sshd, then self.
+@(test)
+hub_door_round1 :: proc(t: ^testing.T) {
+	dir := fmt.tprintf("%s/dkhr1-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory(dir)
+	defer os.remove_all(dir)
+	testing.expect(t, window_token_publish(dir), "publish")
+	defer {window_door_stop(); socket_framed_handler = nil}
+	token := window_token_read(dir)
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer {posix.close(fds[0]); posix.close(fds[1])}
+	posix.write(fds[1], raw_data(string("x")), 1)
+	peer, tok := trust.peer_read_token(fds[0])
+	own := trust.own_signature().identifier
+	window_door_pids_for_test(0, 0)
+	when TEST_HOOKS {
+		window_peer_ids, hub_peer_ids = []string{"dev.pi-desk.app"}, []string{own}
+		defer {window_peer_ids, hub_peer_ids = trust.WINDOW_IDS, trust.CORE_IDS}
+	}
+	other := strings.repeat("ab", 32, context.temp_allocator)
+	// off by default
+	window_door_hub_for_test(allowed = false, without_sshd = true)
+	why, _ := window_hello_check(fds[0], peer, tok, token, hub = true, core_id = other)
+	testing.expect_value(t, why, HUB_NOT_ALLOWED)
+	// allowed, but this test binary is under no sshd
+	if !pid_via_sshd(i32(posix.getpid())) {
+		window_door_hub_for_test(allowed = true, without_sshd = false)
+		why, _ = window_hello_check(fds[0], peer, tok, token, hub = true, core_id = other)
+		testing.expect_value(t, why, "the hub must come in through ssh")
+	}
+	window_door_hub_for_test(allowed = true, without_sshd = true)
+	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true, core_id = other)
+	testing.expect_value(t, why, "")
+	// this core's own id: itself
+	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true, core_id = window_door_core_id())
+	testing.expect_value(t, why, "a core can't be its own hub")
+	testing.expect(t, hex64_ok(window_door_core_id()), "a core id")
+	window_door_hub_for_test(allowed = false, without_sshd = false)
+}
+
+// Text from another machine is shown only cleaned: printable, no bidi controls, bounded.
+@(test)
+hub_text_cleaned :: proc(t: ^testing.T) {
+	testing.expect_value(t, hub_from_name("NUC"), "NUC")
+	testing.expect_value(t, hub_from_name("evil‮gnp.exe"), "another machine")
+	testing.expect_value(t, hub_from_name("a⁦b"), "another machine")
+	testing.expect_value(t, hub_from_name("a\u0085b"), "another machine") // C1
+	testing.expect_value(t, text_clean("ok \x1b[31mred‮!", 128), "ok ?[31mred?!")
+	testing.expect_value(t, text_clean("\xff\xfeab", 128), "??ab")
+	long := strings.repeat("é", 100, context.temp_allocator) // 200 bytes
+	c := text_clean(long, 64)
+	testing.expect(t, len(c) <= 64 && len(c) == 64, "cut at a rune's edge")
+	testing.expect_value(t, text_clean("1.2.3", 64), "1.2.3")
+}
+
+// A let-go link is drained at most LINGER_READS reads per turn (the main thread is not held).
+@(test)
+link_linger_bounded :: proc(t: ^testing.T) {
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer posix.close(fds[1])
+	for x in fds do posix.fcntl(x, .SETFL, posix.fcntl(x, .GETFL) | posix.O_NONBLOCK)
+	buf: [4096]u8
+	sent := 0
+	for sent < 200 << 10 {
+		n := posix.write(fds[1], &buf[0], len(buf))
+		if n <= 0 do break
+		sent += int(n)
+	}
+	link_linger_add_for_test(Sock_Fd(fds[0]))
+	n0 := link_linger_count()
+	testing.expect(t, sent >= 2 * 4096, "the socket holds two reads' worth")
+	reads := link_linger_tick(max_reads = 2)
+	testing.expect_value(t, reads, 2)
+	testing.expect_value(t, link_linger_count(), n0) // more waits, no EOF: still lingering
+	link_linger_tick(all = true)
+	testing.expect_value(t, link_linger_count(), n0 - 1)
 }

@@ -1060,7 +1060,10 @@ pi is installed; Claude Code's once it has been used:
   connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
   <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
   use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
-  the sidebar in a later version.
+  the sidebar in a later version. **Allow other machines to connect to this one** (off by default,
+  separate from Machines over SSH): turn it on on the Mac you want to reach. Then another
+  machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
+  drive this Mac's sessions. Off, no other machine can.
 
 Click a file to open it in an editor tab. Press ⌘, again to go back to Sessions.
 

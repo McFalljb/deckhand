@@ -14,13 +14,17 @@ package core
 // edited), run with argv only, never through a local shell:
 //   ssh -S <run>/ssh-<n>.ctl -o ControlMaster=auto -o ControlPersist=600 -o BatchMode=yes
 //       -o Compression=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -- <target>
-//       '"$HOME/<core path>" connect --from <this Mac>'
+//       '"$HOME/<core path>" connect --from <this Mac> --core <this core's id>'
 // on a socketpair: its stdin and stdout are one end, the transport (src/corewire) the other; its
 // stderr is a pipe, read for why it failed. The remote command is one of two constant paths plus
-// this Mac's name in [A-Za-z0-9._-] (machine_from_name), so nothing typed reaches the remote
-// shell. A machine whose OS is not known yet is asked first (`uname -sm`, the same ssh).
-// `deckhand-core-serve connect` on the other end says the hub hello (window_sock.odin) and copies
-// bytes; its hello reply is the first line on the link, read here through skew_check.
+// this Mac's name in [A-Za-z0-9._-] (machine_from_name) and this core's id (hex: the other end
+// refuses a core that is its own hub), so nothing typed reaches the remote shell. A machine whose
+// OS is not known yet is asked first (`uname -sm`, the same ssh; ≤ 30 s). `deckhand-core-serve
+// connect` on the other end says the hub hello (window_sock.odin) and copies bytes; its hello
+// reply is the first JSON line on the link (lines before it, a remote rc file's, are skipped),
+// read here through skew_check. Its version and error, and a hub.taken's name, are another
+// machine's text: State carries them cleaned (text_clean: printable, no bidi controls, bounded).
+// Bytes past a cap with no answer end the attempt at once.
 //
 // Caps from the first byte: the remote core treats the hub as its window, so it sends what a
 // window would act on. Every window.request (clipboard, open_url, notify, reveal, pick_folder…)
@@ -48,6 +52,16 @@ import jg "../jsonguard"
 remote_machines_default_on := false
 
 Set_Remote_Machines :: struct {
+	on: bool,
+}
+
+// Settings › Machines › Allow other machines to connect to this one: the hub door
+// (window_sock.odin). Off by default, and separate from Machines over SSH (which reaches out):
+// on, another machine's core that logs in here over ssh as this user can view and drive this
+// machine's sessions. User-only. A Linux core's install over ssh turns it on there (M6-E).
+machines_reachable_default_on :: false
+
+Set_Machines_Reachable :: struct {
 	on: bool,
 }
 // Adds a machine: name (what Deckhand calls it), target (an ~/.ssh/config alias or user@host);
@@ -103,7 +117,11 @@ MACHINE_BACKOFF_MIN :: time.Second
 MACHINE_BACKOFF_MAX :: 60 * time.Second
 MACHINE_UP_RESET :: 60 * time.Second // up this long: the next drop waits MACHINE_BACKOFF_MIN again
 MACHINE_HELLO_WAIT :: 30 * time.Second // connect may launch a core (15 s) first
-MACHINE_STDERR_MAX :: 4096
+MACHINE_PROBE_WAIT :: 30 * time.Second
+MACHINE_STDERR_MAX :: 4096 // also the probe's output's cap
+MACHINE_HELLO_MAX :: 1 << 20 // the bytes before the hello reply's newline
+MACHINE_VERSION_MAX :: 64 // State's version and error from another machine (text_clean)
+MACHINE_ERROR_MAX :: 128
 
 // Where a machine's core is, by its OS (its own data dir's core/current, §8.4).
 MACHINE_CORE_PATHS := [?][2]string {
@@ -161,13 +179,16 @@ machine_ctl_path :: proc(run: string, no: u64) -> string {
 
 // What runs for machine m: `ssh … <target> 'uname -sm'` (probe) or `ssh … connect`, or its via
 // command (development and test builds only). argv[0] is looked up on PATH. Temp allocator.
-machine_argv :: proc(m: Machine, run, from: string, probe := false, test_build := TEST_HOOKS) -> (argv: []string, why: string) {
+// core_id: this core's (hex, window_door_core_id; "" = none sent).
+machine_argv :: proc(m: Machine, run, from: string, core_id := "", probe := false, test_build := TEST_HOOKS) -> (argv: []string, why: string) {
 	out := make([dynamic]string, context.temp_allocator)
+	if core_id != "" && !hex64_ok(core_id) do return nil, "this core's id is not hex"
 	if m.via != "" {
 		if !test_build do return nil, "via is only for development and test builds"
 		for f in strings.fields(m.via, context.temp_allocator) do append(&out, f)
 		if len(out) == 0 do return nil, "via is empty"
 		append(&out, "--from", machine_from_name(from))
+		if core_id != "" do append(&out, "--core", core_id)
 		return out[:], ""
 	}
 	if w := machine_target_error(m.target); w != "" do return nil, w
@@ -180,6 +201,7 @@ machine_argv :: proc(m: Machine, run, from: string, probe := false, test_build :
 		want := machine_core_path_for(m.os)
 		if want == "" || m.core_path != want do return nil, "this machine's core path is not one Deckhand knows"
 		remote = fmt.tprintf(`"$HOME/%s" connect --from %s`, want[2:], machine_from_name(from))
+		if core_id != "" do remote = fmt.tprintf("%s --core %s", remote, core_id)
 	}
 	append(&out, "ssh", "-S", ctl, "-o", "ControlMaster=auto", "-o", "ControlPersist=600", "-o", "BatchMode=yes", "-o", "Compression=yes", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "--", m.target, remote)
 	return out[:], ""
@@ -200,6 +222,37 @@ machine_uname_parse :: proc(text: string) -> (os_name, arch: string, ok: bool) {
 	case:                    return "", "", false
 	}
 	return os_name, arch, true
+}
+
+// The probe's answer: the first line `uname -sm` could have printed (a remote rc file's lines
+// before it are skipped).
+machine_probe_answer :: proc(text: string) -> (os_name, arch: string, ok: bool) {
+	rest := text
+	for line in strings.split_lines_iterator(&rest) {
+		if o, a, lok := machine_uname_parse(line); lok do return o, a, true
+	}
+	return "", "", false
+}
+
+Machine_Scan :: enum u8 {
+	Wait, // no answer yet
+	Found,
+	Too_Long, // cap bytes and no answer: the attempt ends now (its fd would stay readable)
+}
+
+// The hello reply in buf: the first whole line that is a JSON object (lines before it skipped);
+// rest: where the frames start.
+machine_hello_scan :: proc(buf: []u8, cap: int) -> (s: Machine_Scan, line: string, rest: int) {
+	text := string(buf)
+	at := 0
+	for {
+		nl := strings.index_byte(text[at:], '\n')
+		if nl < 0 do break
+		l := strings.trim_space(text[at:at + nl])
+		if strings.has_prefix(l, "{") do return .Found, l, at + nl + 1
+		at += nl + 1
+	}
+	return len(buf) >= cap ? .Too_Long : .Wait, "", 0
 }
 
 // ---- the status table ----
@@ -421,10 +474,10 @@ mlink_set :: proc(l: ^Mach_Link, s: Machine_Status, why := "", version := "") {
 	if l.status == s && l.error == why && l.version == version do return
 	l.status = s
 	delete(l.error, heap)
-	l.error = strings.clone(why, heap)
+	l.error = strings.clone(text_clean(why, MACHINE_ERROR_MAX), heap) // another machine's text (its error, ssh's stderr, a hub.taken's name)
 	if s == .Online || version != "" {
 		delete(l.version, heap)
-		l.version = strings.clone(version, heap)
+		l.version = strings.clone(text_clean(version, MACHINE_VERSION_MAX), heap)
 	}
 	if autotest_active do fmt.printfln("[autotest] machine %s: %s%s%s", l.name, MACHINE_STATUS_NAMES[s], why != "" ? ": " : "", why)
 	machines_publish()
@@ -481,7 +534,7 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 mlink_start :: proc(l: ^Mach_Link) {
 	run, rwhy := sock_runtime_dir_why(context.temp_allocator)
 	probe := l.via == "" && l.os == ""
-	argv, why := machine_argv(l.m, run, mach.from, probe)
+	argv, why := machine_argv(l.m, run, mach.from, window_door_core_id(), probe)
 	if rwhy != "" do why = rwhy
 	if why != "" {
 		l.phase = .Stopped // a bad entry or a release build's via: nothing to retry
@@ -579,8 +632,12 @@ machines_tick :: proc() {
 		case .Probe:
 			mlink_read_err(l)
 			mlink_read_raw(l, MACHINE_STDERR_MAX)
-			if l.exited {
-				if os_name, arch, ok := machine_uname_parse(string(l.inbuf[:])); ok && l.exit_code == 0 {
+			if len(l.inbuf) >= MACHINE_STDERR_MAX {
+				mlink_down(l, {stderr = "too much output for uname -sm"})
+			} else if !l.exited && time.tick_diff(l.started, now) > MACHINE_PROBE_WAIT {
+				mlink_down(l, {stderr = "no answer to uname -sm"})
+			} else if l.exited {
+				if os_name, arch, ok := machine_probe_answer(string(l.inbuf[:])); ok && l.exit_code == 0 {
 					heap := runtime.heap_allocator()
 					delete(l.os, heap); delete(l.arch, heap); delete(l.core_path, heap)
 					l.os, l.arch, l.core_path = strings.clone(os_name, heap), strings.clone(arch, heap), strings.clone(machine_core_path_for(os_name), heap)
@@ -591,14 +648,16 @@ machines_tick :: proc() {
 				} else if l.exit_code == 0 {
 					l.phase = .Stopped
 					mlink_close(l)
-					mlink_set(l, .Offline, fmt.tprintf("not a Mac or Linux: %s", strings.trim_space(string(l.inbuf[:]))))
+					mlink_set(l, .Offline, fmt.tprintf("not a Mac or Linux: %s", machine_last_line(string(l.inbuf[:]))))
 				} else do mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
 			}
 		case .Hello:
 			mlink_read_err(l)
-			mlink_read_raw(l, 1 << 20)
-			if nl := strings.index_byte(string(l.inbuf[:]), '\n'); nl >= 0 {
-				mlink_hello(l, string(l.inbuf[:nl]), l.inbuf[nl + 1:])
+			mlink_read_raw(l, MACHINE_HELLO_MAX)
+			if s, line, rest := machine_hello_scan(l.inbuf[:], MACHINE_HELLO_MAX); s == .Found {
+				mlink_hello(l, line, l.inbuf[rest:])
+			} else if s == .Too_Long {
+				mlink_down(l, {stderr = "too much output and no answer from its core"})
 			} else if l.exited { // its stdout's EOF alone waits for the exit: the exit code says why
 				mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
 			} else if time.tick_diff(l.started, now) > MACHINE_HELLO_WAIT {
@@ -669,7 +728,7 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			mlink_close(l)
 			l.phase = .Stopped
 			l.backoff = {}
-			mlink_set(l, .Taken, by != "" && by != "<invalid json>" ? fmt.tprintf("viewed from %s", by) : "in use by that machine's own window")
+			mlink_set(l, .Taken, by != "" && by != "<invalid json>" ? fmt.tprintf("viewed from %s", hub_from_name(by)) : "in use by that machine's own window")
 			return
 		}
 	}

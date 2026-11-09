@@ -315,6 +315,7 @@ Settings :: struct {
 	keep_sessions_chosen: bool, // the user set keep_sessions (saved only then: keep_sessions_default)
 	separate_core: bool, // the window and the core run as two processes from the next launch (Set_Separate_Core; on by default)
 	remote_machines: bool, // Settings › Experimental › Machines over SSH (machines.odin; off by default: remote_machines_default_on)
+	machines_reachable: bool, // Settings › Machines › Allow other machines to connect to this one (the hub door, window_sock.odin; off by default)
 	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
 	// added, removed folders) and the account a new Claude session last started with
 	claude_accounts:     [dynamic]Claude_Account_Setting,

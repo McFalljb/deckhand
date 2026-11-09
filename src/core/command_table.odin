@@ -64,6 +64,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_notify", args = "on", does = "OS notifications from the agent while Deckhand is in the background", who = .User},
 	{type = "copy_control_token", does = "Settings › Copy a control token: a new control token for `deckhand --ctl`, as shell exports, onto the clipboard (never in the result or a log); the user's", who = .User},
 	{type = "set_separate_core", args = "on", does = "run sessions in a background core (deckhand-core serve) from the next launch (on by default)", who = .User},
+	{type = "set_machines_reachable", args = "on", does = "Settings › Machines › Allow other machines to connect to this one (off by default): another machine's core that logs in here over ssh as this user may view and drive this machine's sessions", who = .User},
 	{type = "set_remote_machines", args = "on", does = "Settings › Experimental › Machines over SSH (off by default): links to the machines in Settings › Machines", who = .User},
 	{type = "machine_add", args = "name, target, via?", does = "add a machine reached over ssh (target: an ~/.ssh/config alias or user@host); via: a development or test build's command in place of `ssh … connect`; created_id = its number", who = .User},
 	{type = "machine_remove", args = "no", does = "remove a machine (its link ends)", who = .User},

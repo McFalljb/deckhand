@@ -2,8 +2,8 @@
 # keep_sessions (holder_client.odin, holder_adopt.odin; docs/plans/background-core.md §7.2, §7.7):
 # 1. turns the setting on, starts a session (a fake pi holding a bridge connection,
 #    fake-pi-keep.py) with 6 shells printing counters and quits mid-output;
-#    the session holder (build/deckhand-core, spawned directly: test mode never uses launchd)
-#    keeps them running.
+#    the session holder (Deckhand Core.app's deckhand-core, spawned directly: test mode never uses
+#    launchd) keeps them running; the app attached after checking its code (src/trust).
 # 2. relaunches: every terminal is adopted from its snapshot, its screen hash equal to the one at
 #    the handover and, against a reference terminal fed every byte, equal with the probes; the
 #    kept pi's bridge reconnects with its reconnect token (tokens.json). The palette's Restart
@@ -60,6 +60,12 @@ finish() { # n [killed]: the app ended; its log has no failure (and, unless kill
 # 1: keep_sessions on, 6 counting shells, quit (a handover)
 start 1; finish 1
 [ -n "$(holders)" ] || { echo "no session holder running after run 1"; exit 1; }
+# it runs from Deckhand Core.app (test mode: the bundle's own binary, in place; holder_install), and
+# the app attached to it after checking its code (trust.peer_dr_check)
+for p in $(holders); do
+  case "$(ps -o comm= -p "$p")" in */"Deckhand Core.app/Contents/MacOS/deckhand-core") ;; *) echo "the session holder does not run from Deckhand Core.app: $(ps -o comm= -p "$p")"; exit 1 ;; esac
+done
+! grep -q "refused its peer" "$W/run1.log" || { echo "run 1: the app refused the holder's code"; grep "refused its peer" "$W/run1.log"; exit 1; }
 grep -q '"held":' "$W/data/workspace.json" || { echo "no held ids saved"; cat "$W/data/workspace.json"; exit 1; }
 [ -f "$W/data/handover.json" ] || { echo "no handover.json"; exit 1; }
 # the window goes away before the handover's waits (no beachball over a frozen window at quit)

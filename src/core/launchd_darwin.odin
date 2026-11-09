@@ -12,9 +12,11 @@ package core
 //   3. The job runs `deckhand-core __detach hold ...` (src/holder/detach.odin): fork, the
 //      parent exits, the child calls setsid and execs `hold --ready`, which waits for ppid 1.
 //   4. The child connects to ready and sends its pid. The launcher checks the peer
-//      (trust.ready_peer_allowed: the socket's process is that pid, of this user), that its
-//      parent is launchd and that it runs bin; boots the job out (that kills only the job's own
-//      process, long gone); then sends the environment (it carries tokens), and reads the ack.
+//      (trust.ready_peer_allowed: the socket's process is that pid, of this user; then its code
+//      by the token read at accept, trust.peer_dr_check: the holder's designated requirement,
+//      P8), that its parent is launchd and that it runs bin; boots the job out (that kills only
+//      the job's own process, long gone); then sends the environment (it carries tokens), and
+//      reads the ack.
 //
 // A launcher killed between bootstrap and bootout leaks a loaded job that never runs again:
 // every launch first sweeps our labels that are not running and older than a minute, and
@@ -110,11 +112,13 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 // is booted out (booted set) once the peer passed, before the environment goes.
 @(private = "file")
 launchd_ready_serve :: proc(cfd: Sock_Fd, exe: string, env: []string, domain, label: string, booted: ^bool, deadline: i64, launchctl: string) -> (pid: i32, why: string) {
-	at_accept := trust.peer_read(cfd) // before any byte is read
+	at_accept, tok := trust.peer_read_token(cfd) // before any byte is read
 	line, lok := launchd_read_until(cfd, '\n', 32, deadline)
 	if !lok do return 0, "no pid from the peer"
 	claimed := launchd_parse_pid(line)
 	if d := trust.ready_peer_allowed(.Adhoc, trust.own_uid(), claimed, at_accept); d != .Allow do return 0, fmt.tprintf("refused a peer (%v)", d)
+	// its code, by the token from accept (§5.3 P8): the holder's designated requirement
+	if d, got := trust.peer_dr_check(tok, trust.CORE_IDS); d != .Allow do return 0, fmt.tprintf("refused pid %d: its code: %v (identifier %q, status %d)", claimed, d, got.identifier, got.status)
 	if pp := pid_parent(claimed); pp != 1 do return 0, fmt.tprintf("refused pid %d: its parent is %d, not launchd", claimed, pp)
 	if got := launchd_realpath(holder_pid_exe(claimed)); exe == "" || got != exe do return 0, fmt.tprintf("refused pid %d: it runs %q, not %q", claimed, got, exe)
 	launchd_bootout(domain, label, launchctl)

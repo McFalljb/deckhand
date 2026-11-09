@@ -171,6 +171,7 @@ python3 -I scripts/check-env-reads.py >"$H/out.txt" 2>&1 && ok "env lint: the tr
 grep -q -- '-DDH_RELEASE=1' build.sh && grep -q '#ifndef DH_RELEASE' src/native/cef_macos.m && ok "the CEF shim's knobs are out of release builds" || bad "build.sh or cef_macos.m lost DH_RELEASE"
 grep -q '^DECKHAND_RELEASE=1 ./build.sh$' scripts/release.sh && ok "release.sh builds without hooks" || bad "release.sh does not build with DECKHAND_RELEASE=1"
 grep -q 'scripts/check-release-build.sh "$EXE"' scripts/release.sh && ok "release.sh checks its binaries" || bad "release.sh does not run check-release-build.sh"
+grep 'scripts/check-release-build.sh "$EXE"' scripts/release.sh | grep -qF '$CORE_REL/Contents/MacOS/deckhand-core" "$BUILT/$CORE_REL/Contents/MacOS/deckhand"' && ok "release.sh checks Deckhand Core.app's binaries" || bad "release.sh does not check Deckhand Core.app's binaries"
 DECKHAND_RELEASE=1 ./build.sh test >"$H/out.txt" 2>&1 && bad "build.sh test ran without hooks" || ok "build.sh refuses DECKHAND_RELEASE=1 for tests"
 
 if [ $fail = 1 ]; then echo "release checks failed (last output: $W/out.txt)"; exit 1; fi

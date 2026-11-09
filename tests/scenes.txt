@@ -87,6 +87,7 @@ release-checks      | full     |                       |   11 | scripts/release.
 update-from-release | manual   | noci                  |   30 | tests/scripts/update-from-release.sh scripts/release.sh | tests/scripts/update-from-release.sh
 restore             | required | smoke                 |   20 | src/core/titles.odin src/core/home.odin tests/scripts/restore*
 run-home            | full     | test-data             |   15 | src/core/home.odin src/drawer.odin src/core/agent.odin tests/scripts/run.sh tests/scripts/home.txt | tests/scripts/run.sh tests/scripts/home.txt
+sign-dr             | full     |                       |    2 | src/trust/* scripts/sign.sh tests/sign-dr/* tests/scripts/sign-dr.sh
 settings            | required |                       |   21 | src/core/settings_files.odin src/core/files.odin src/ui_files.odin tests/scripts/settings.* src/core/ui_files_core.odin
 setup               | required |                       |   42 | src/ui_setup.odin src/core/folders.odin src/core/claude_accounts.odin src/jobs_form.odin tests/scripts/setup* tests/scripts/fake-pi-json.py src/core/ui_setup_core.odin
 sidebar             | full     |                       |   35 | src/core/sidebar.odin src/ui_sidebar.odin src/core/titles.odin tests/scripts/sidebar* src/core/ui_sidebar_core.odin

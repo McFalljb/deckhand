@@ -312,6 +312,8 @@ esac
 
 if [ $WITH_CEF = 1 ]; then
   scripts/bundle-app.sh "$CEF" "$MACOS_MIN"
+  # the whole bundle, Deckhand Core.app in it, sealed as macOS will check it (under a second)
+  codesign --verify --deep --strict build/Deckhand.app || { echo "build.sh: build/Deckhand.app does not verify (codesign --verify --deep --strict)"; exit 1; }
   # what the app ships: the CEF framework (prebuilt) and the helpers
   scripts/check-minos.sh $MACOS_MIN build/Deckhand.app
 elif [ "$MODE" != test ] && [ "$MODE" != fake-app ]; then

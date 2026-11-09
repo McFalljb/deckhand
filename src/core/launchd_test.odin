@@ -119,6 +119,78 @@ holder_install_refuses :: proc(t: ^testing.T) {
 	testing.expect(t, !ok3, "a missing binary")
 }
 
+// A tiny Deckhand Core.app at dir: a C main executable and one data file in Resources, signed ad
+// hoc as a bundle with identifier id (its Info.plist's). The main executable's path.
+@(private = "file")
+lt_core_app :: proc(t: ^testing.T, dir, id: string, ret := 0) -> string {
+	app := fmt.tprintf("%s/%s", dir, CORE_APP)
+	os.make_directory_all(fmt.tprintf("%s/Contents/MacOS", app))
+	os.make_directory_all(fmt.tprintf("%s/Contents/Resources/integrations", app))
+	_ = os.write_entire_file(fmt.tprintf("%s/Contents/Info.plist", app), transmute([]byte)fmt.tprintf(`<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict><key>CFBundleExecutable</key><string>deckhand-core</string><key>CFBundleIdentifier</key><string>%s</string><key>CFBundlePackageType</key><string>APPL</string><key>CFBundleShortVersionString</key><string>9.8.7</string></dict></plist>
+`, id))
+	_ = os.write_entire_file(fmt.tprintf("%s/Contents/Resources/integrations/data.txt", app), transmute([]byte)string("integration\n"))
+	exe := fmt.tprintf("%s/Contents/MacOS/deckhand-core", app)
+	if !lt_cc(t, fmt.tprintf("int main(void) {{ return %d; }}\n", ret), exe, "") do return ""
+	os.remove(fmt.tprintf("%s.c", exe)) // a stray file in MacOS would not be sealed
+	o, st := run_group({"/usr/bin/codesign", "-f", "-s", "-", app}, 30 * time.Second, merge_stderr = true)
+	if !testing.expectf(t, st == .Ok, "codesign %s: %s", app, o) do return ""
+	return exe
+}
+
+// Deckhand Core.app is installed whole (§10.3 M4-A): copied, checked (--deep: its resources too),
+// then unquarantined, under core/<rev>-<sha12>/; the holder runs from the copy.
+@(test)
+holder_install_core_app :: proc(t: ^testing.T) {
+	d := lt_dir("app")
+	defer os.remove_all(d)
+	src := fmt.tprintf("%s/src", d)
+	bin := lt_core_app(t, src, HOLDER_ID)
+	if bin == "" do return
+	testing.expect_value(t, holder_bundle_of(bin), fmt.tprintf("%s/%s", src, CORE_APP))
+	testing.expect_value(t, holder_bundle_of(fmt.tprintf("%s/deckhand-core", d)), "")
+	res := fmt.tprintf("%s/%s/Contents/Resources/integrations/data.txt", src, CORE_APP)
+	for p in ([]string{bin, res}) {
+		_, xst := run_group({"/usr/bin/xattr", "-w", QUARANTINE_XATTR, "0081;00000000;Test;", p}, 10 * time.Second)
+		testing.expect(t, xst == .Ok && holder_quarantined(p), "the source is quarantined")
+	}
+	data := fmt.tprintf("%s/data", d)
+	path, ok, why := holder_install(bin, data)
+	if !testing.expectf(t, ok, "install: %s", why) do return
+	defer delete(path)
+	testing.expectf(t, strings.has_prefix(path, fmt.tprintf("%s/core/%d-", data, HOLDER_REV)) && strings.has_suffix(path, fmt.tprintf("/%s/Contents/MacOS/deckhand-core", CORE_APP)), "the copy's main executable: %s", path)
+	copy_app := holder_bundle_of(path)
+	testing.expect_value(t, holder_verify(copy_app), "")
+	testing.expect(t, !holder_quarantined(path), "the copy's binary has no quarantine")
+	testing.expect(t, !holder_quarantined(fmt.tprintf("%s/Contents/Resources/integrations/data.txt", copy_app)), "nor its resources")
+	st: posix.stat_t
+	posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &st)
+	ino := st.st_ino
+	again, ok2, _ := holder_install(bin, data)
+	defer delete(again)
+	testing.expect(t, ok2 && again == path, "identical: reused")
+	posix.stat(strings.clone_to_cstring(again, context.temp_allocator), &st)
+	testing.expect_value(t, st.st_ino, ino)
+
+	// a resource changed after signing: the copy fails --deep, nothing is installed
+	bad := fmt.tprintf("%s/bad", d)
+	bad_bin := lt_core_app(t, bad, HOLDER_ID, 1)
+	if bad_bin == "" do return
+	_ = os.write_entire_file(fmt.tprintf("%s/%s/Contents/Resources/integrations/data.txt", bad, CORE_APP), transmute([]byte)string("changed\n"))
+	_, ok3, why3 := holder_install(bad_bin, data)
+	testing.expectf(t, !ok3 && strings.contains(why3, "signature"), "a changed resource: refused (%s)", why3)
+	// signed, but not as the holder
+	other := fmt.tprintf("%s/other", d)
+	other_bin := lt_core_app(t, other, "dev.example.other", 2)
+	if other_bin == "" do return
+	_, ok4, why4 := holder_install(other_bin, data)
+	testing.expectf(t, !ok4, "another identifier: refused (%s)", why4)
+	// only the good install is left: no temp dirs
+	entries, _ := os.read_all_directory_by_path(fmt.tprintf("%s/core", data), context.temp_allocator)
+	testing.expectf(t, len(entries) == 1, "left in core/: %d entries", len(entries))
+}
+
 // The direct spawn: `bin hold --run --data`, in a session of its own, stdin /dev/null, output to
 // <run>/holder.log, nothing blocked.
 @(test)
@@ -201,6 +273,9 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	bin := fmt.tprintf("%s/deckhand-core", d)
 	o, bst := run_group({"odin", "build", "src/holder", fmt.tprintf("-out:%s", bin), "-minimum-os-version:14.0"}, 120 * time.Second, merge_stderr = true)
 	if !testing.expectf(t, bst == .Ok, "odin build src/holder: %s", o) do return
+	// as build.sh signs it (ad hoc here, as this test binary is: the launcher checks its identifier, P8)
+	co, cst := run_group({"/usr/bin/codesign", "-f", "-s", "-", "-i", HOLDER_ID, bin}, 30 * time.Second, merge_stderr = true)
+	if !testing.expectf(t, cst == .Ok, "codesign: %s", co) do return
 
 	{
 		drun := fmt.tprintf("%s/drun", d)
@@ -271,6 +346,25 @@ launchd_launch_real :: proc(t: ^testing.T) {
 	// its own temp dir is gone
 	entries, _ := os.read_all_directory_by_path(run, context.temp_allocator)
 	for e in entries do testing.expectf(t, !strings.has_prefix(e.name, LAUNCHD_JOB_DIR) || e.name == "job-busy02", "left: %s", e.name)
+
+	// the same holder signed with another identifier: the launcher refuses it before the
+	// environment (P8: its code, by the token from accept), and the launch fails
+	swapped := fmt.tprintf("%s/swapped/deckhand-core", d)
+	os.make_directory_all(fmt.tprintf("%s/swapped", d))
+	sb, _ := os.read_entire_file(bin, context.temp_allocator)
+	_ = os.write_entire_file(swapped, sb)
+	posix.chmod(strings.clone_to_cstring(swapped, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+	so, sst := run_group({"/usr/bin/codesign", "-f", "-s", "-", "-i", "dev.deckhand.swapped", swapped}, 30 * time.Second, merge_stderr = true)
+	if !testing.expectf(t, sst == .Ok, "codesign: %s", so) do return
+	saved := holder_ready_timeout
+	holder_ready_timeout = 3 * time.Second
+	defer holder_ready_timeout = saved
+	spid, slabel, sok, swhy := launchd_launch(swapped, run, data, {"LT_MARK=yes", "PATH=/usr/bin:/bin"}, TEST_LABEL_PREFIX)
+	defer if slabel != "" do launchd_bootout(domain, slabel)
+	defer if spid > 0 do posix.kill(posix.pid_t(spid), .SIGKILL)
+	testing.expectf(t, !sok && spid == 0, "a swapped holder is refused: %v %d %s", sok, spid, swhy)
+	log, _ := os.read_entire_file(fmt.tprintf("%s/%s", run, HOLDER_LOG), context.temp_allocator)
+	testing.expectf(t, strings.contains(string(log), "ready:"), "the refused holder saw no environment: %q", string(log))
 }
 
 // A bootstrap that fails (or times out) may still have loaded the job: it is booted out on

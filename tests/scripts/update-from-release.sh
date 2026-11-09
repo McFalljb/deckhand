@@ -118,8 +118,9 @@ v=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleShortVersionString' "$I/Contents/
 [ "$v" = "$VERSION" ] || { echo "update-from-release: the install is $v, not $VERSION"; fail=1; }
 codesign --verify --deep --strict "$I" || { echo "update-from-release: the installed bundle does not verify"; fail=1; }
 [ -d "$I/Contents/Frameworks/Chromium Embedded Framework.framework" ] || { echo "update-from-release: no CEF in the installed bundle"; fail=1; }
-[ -x "$I/Contents/Helpers/deckhand-core" ] || { echo "update-from-release: no session holder in the installed bundle"; fail=1; }
-scripts/check-release-build.sh "$I/Contents/MacOS/Deckhand" "$I/Contents/Helpers/deckhand-core" || fail=1
+CORE="$I/Contents/Helpers/Deckhand Core.app"
+[ -x "$CORE/Contents/MacOS/deckhand-core" ] || { echo "update-from-release: no session holder (Deckhand Core.app) in the installed bundle"; fail=1; }
+scripts/check-release-build.sh "$I/Contents/MacOS/Deckhand" "$CORE/Contents/MacOS/deckhand-core" "$CORE/Contents/MacOS/deckhand" || fail=1
 if [ $fail = 1 ]; then echo "update-from-release: FAILED (log: $W/run.log)"; exit 1; fi
 rm -rf "$W/install" "$W/rel"
 echo "update-from-release: $PREV's updater installed $VERSION"

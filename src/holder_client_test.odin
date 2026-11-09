@@ -824,6 +824,8 @@ holder_restart_dev_only :: proc(t: ^testing.T) {
 	defer os.remove_all(d)
 	os.make_directory_all(fmt.tprintf("%s/repo/build", d))
 	_ = os.write_entire_file(fmt.tprintf("%s/repo/build.sh", d), transmute([]byte)string("#!/bin/sh\n"))
+	testing.expect(t, core.holder_bin_dev_build(fmt.tprintf("%s/repo/build/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core", d)))
+	testing.expect(t, !core.holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core", d)))
 	testing.expect(t, core.holder_bin_dev_build(fmt.tprintf("%s/repo/build/Deckhand.app/Contents/Helpers/deckhand-core", d)))
 	testing.expect(t, core.holder_bin_dev_build(fmt.tprintf("%s/repo/build/deckhand-core", d)))
 	testing.expect(t, !core.holder_bin_dev_build(fmt.tprintf("%s/Applications/Deckhand.app/Contents/Helpers/deckhand-core", d)))

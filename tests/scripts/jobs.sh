@@ -12,7 +12,7 @@
 # with the stored action; DECKHAND_SCHEDULED_AT set (and no Deckhand socket or
 # tokens); no approvals: a prompt edited in the file runs as edited, a job
 # from control (an agent's job_create) runs on its schedule, and Deckhand has
-# no Keychain code (no Security framework, no SecItem symbols);
+# no Keychain code (no SecItem or SecKeychain symbols; Security only for code signing);
 # ATLAS.md copied into the notes folder; redaction; the Jobs tab's buttons;
 # idle CPU. Screenshots: build/shots/jobs/ (dark and light).
 # Usage: tests/scripts/jobs.sh
@@ -122,11 +122,13 @@ chk "scheduler.log" 'grep -q "skipped (asleep)" "$D/scheduler.log"'
 chk "edited prompt ran" 'grep -q -- " -- OK as edited" "$FAKE_HOME/pi-env-ok1.txt"'
 chk "no approval key file" '[ ! -e "$D/approval.key" ]'
 chk "no approval record in state.json" '! grep -lq "approved" "$D"/*/state.json'
-# no Keychain code path: the binary neither links the Security framework nor calls SecItem*
+# no Keychain code path: the binary calls no SecItem* or SecKeychain*, and of the Security
+# framework only the code-signing checks (src/trust: our own signature and a peer's,
+# docs/plans/background-core.md §5.4)
 BIN=build/deckhand
 [ -f build/Deckhand.app/Contents/MacOS/Deckhand ] && BIN=build/Deckhand.app/Contents/MacOS/Deckhand
 chk "no SecItem/SecKeychain symbols" '! nm -u "$BIN" | grep -qE "_Sec(Item|Keychain)"'
-chk "no Security framework" '! otool -L "$BIN" | grep -q Security.framework'
+chk "only code-signing Security symbols" '! nm -u "$BIN" | grep -E "^_k?Sec" | grep -vqE "^_(Sec(Code|StaticCode|Requirement)[A-Za-z]*|SecCertificateCopyData|kSecCodeInfo[A-Za-z]*|kSecGuestAttributeAudit)$"'
 # nothing outside the fake places: no notes written to the real vault
 if [ $fail = 1 ]; then echo "jobs scene failed (log: $W/run.log)"; exit 1; fi
 echo "jobs scene ok"

@@ -1,7 +1,10 @@
 package trust
 
+import "core:fmt"
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
+import "core:time"
 
 @(test)
 peer_allowed_table :: proc(t: ^testing.T) {
@@ -216,4 +219,167 @@ successor_secret_compare :: proc(t: ^testing.T) {
 	testing.expect(t, !successor_secret_ok(a, ""))
 	testing.expect(t, !successor_secret_ok("", ""), "no secret is never a match")
 	testing.expect(t, !successor_secret_ok(a[:10], a[:10]), "only 256-bit secrets")
+}
+
+// ---- designated requirements (§5.4): the three modes as tables ----
+
+@(test)
+mode_of_signature_table :: proc(t: ^testing.T) {
+	leaf :: "0123456789abcdef0123456789abcdef01234567"
+	cases := []struct {
+		adhoc:  bool,
+		leaf:   string,
+		team:   string,
+		apple:  bool,
+		want:   Mode,
+		wantok: bool,
+	} {
+		{true, "", "", false, .Adhoc, true}, // ad hoc and linker-signed
+		{true, leaf, "ABCDE12345", true, .Adhoc, true}, // the ad-hoc flag wins: no signer to trust
+		{false, leaf, "", false, .Self_Signed, true},
+		{false, leaf, "ABCDE12345", true, .Developer_Id, true},
+		{false, leaf, "ABCDE12345", false, .Self_Signed, true}, // a self-signed cert with an OU is still self-signed
+		{false, leaf, "", true, .Adhoc, false}, // Apple-anchored without a Team ID: not ours to describe
+		{false, leaf, "abcde12345", true, .Adhoc, false}, // a Team ID is [A-Z0-9]{10}
+		{false, leaf, "ABCDE\"1234", true, .Adhoc, false},
+		{false, "", "", false, .Adhoc, false}, // signed, but no leaf certificate read
+		{false, "0123", "", false, .Adhoc, false},
+		{false, "0123456789ABCDEF0123456789ABCDEF01234567", "", false, .Adhoc, false}, // lower-case hex only
+	}
+	for c, i in cases {
+		m, ok := mode_of_signature(c.adhoc, c.leaf, c.team, c.apple)
+		testing.expectf(t, ok == c.wantok && (!ok || m == c.want), "case %d: %v %v", i, m, ok)
+	}
+}
+
+@(test)
+peer_requirement_table :: proc(t: ^testing.T) {
+	leaf :: "0123456789abcdef0123456789abcdef01234567"
+	adhoc := Own_Signature{ok = true, mode = .Adhoc, identifier = "dev.deckhand.core"}
+	self := Own_Signature{ok = true, mode = .Self_Signed, identifier = "dev.deckhand.core", leaf_sha1 = leaf}
+	devid := Own_Signature{ok = true, mode = .Developer_Id, identifier = "dev.deckhand.core", leaf_sha1 = leaf, team_id = "ABCDE12345"}
+	cases := []struct {
+		own:  Own_Signature,
+		ids:  []string,
+		want: string, // "" = refused
+	} {
+		{adhoc, {"dev.deckhand.core"}, `identifier "dev.deckhand.core"`},
+		{self, {"dev.deckhand.core"}, `identifier "dev.deckhand.core" and certificate leaf = H"` + leaf + `"`},
+		{self, {"dev.pi-desk.app", "dev.deckhand.app"}, `(identifier "dev.pi-desk.app" or identifier "dev.deckhand.app") and certificate leaf = H"` + leaf + `"`},
+		{devid, {"dev.deckhand.core"}, `anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345" and identifier "dev.deckhand.core"`},
+		{devid, {"a", "b"}, `anchor apple generic and certificate leaf[subject.OU] = "ABCDE12345" and (identifier "a" or identifier "b")`},
+		{Own_Signature{}, {"dev.deckhand.core"}, ""}, // our own signature unknown
+		{self, {}, ""}, // nobody
+		{self, {""}, ""},
+		{self, {`x" or anchor apple`}, ""}, // no requirement-language syntax through an identifier
+		{self, {"dev.deckhand.core", "a b"}, ""},
+		{Own_Signature{ok = true, mode = .Self_Signed, leaf_sha1 = "bad"}, {"x"}, ""},
+		{Own_Signature{ok = true, mode = .Developer_Id, leaf_sha1 = leaf, team_id = `X" or "`}, {"x"}, ""},
+	}
+	for c, i in cases {
+		got, ok := peer_requirement(c.own, c.ids)
+		testing.expectf(t, ok == (c.want != "") && got == c.want, "case %d: %q %v", i, got, ok)
+	}
+}
+
+@(test)
+peer_code_allowed_table :: proc(t: ^testing.T) {
+	leaf :: "0123456789abcdef0123456789abcdef01234567"
+	ids := []string{"dev.pi-desk.app", "dev.deckhand.app"}
+	good := Code_Check{found = true, valid = true, meets = true, identifier = "dev.pi-desk.app"}
+	cases := []struct {
+		mode: Mode,
+		got:  Code_Check,
+		want: Decision,
+	} {
+		{.Adhoc, good, .Allow},
+		{.Self_Signed, good, .Allow},
+		{.Self_Signed, Code_Check{found = true, valid = true, meets = true, identifier = "dev.deckhand.app"}, .Allow}, // the flip's id
+		{.Self_Signed, Code_Check{found = true, valid = true, meets = false, identifier = "dev.pi-desk.app"}, .Wrong_Signer}, // ad hoc, or another certificate
+		{.Self_Signed, Code_Check{found = true, valid = true, meets = true, identifier = "dev.deckhand.core"}, .Wrong_Identity}, // not a window
+		{.Self_Signed, Code_Check{found = true, valid = true, meets = true, identifier = ""}, .Wrong_Identity},
+		{.Self_Signed, Code_Check{found = true, valid = false, identifier = "dev.pi-desk.app"}, .Bad_Signature},
+		{.Self_Signed, Code_Check{found = false, status = -67065}, .No_Code}, // exec'd since
+		{.Adhoc, Code_Check{found = true, valid = true, meets = false, identifier = "dev.pi-desk.app"}, .Wrong_Signer},
+		// Developer_Id: the hardened runtime, and never debuggable
+		{.Developer_Id, Code_Check{found = true, valid = true, meets = true, identifier = "dev.pi-desk.app", flags = CS_RUNTIME}, .Allow},
+		{.Developer_Id, good, .No_Runtime},
+		{.Developer_Id, Code_Check{found = true, valid = true, meets = true, identifier = "dev.pi-desk.app", flags = CS_RUNTIME | CS_GET_TASK_ALLOW}, .Debuggable},
+		{.Developer_Id, Code_Check{found = true, valid = true, meets = false, identifier = "dev.pi-desk.app", flags = CS_RUNTIME}, .Wrong_Signer},
+		// the runtime flags only matter under a Developer ID (S2: ad hoc and self-signed can't load CEF with it)
+		{.Self_Signed, Code_Check{found = true, valid = true, meets = true, identifier = "dev.pi-desk.app", flags = CS_GET_TASK_ALLOW}, .Allow},
+	}
+	for c, i in cases {
+		own := Own_Signature{ok = true, mode = c.mode, identifier = "dev.deckhand.core", leaf_sha1 = leaf, team_id = "ABCDE12345"}
+		got := peer_code_allowed(own, ids, c.got)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v", i, got, c.want)
+	}
+	testing.expect(t, peer_code_allowed(Own_Signature{}, ids, good) == .No_Code, "our own signature unknown: nothing passes")
+	testing.expect(t, peer_code_allowed(Own_Signature{ok = true}, nil, good) == .Wrong_Identity, "no identifiers: nothing passes")
+}
+
+// The identifier tables (§10.3): one line each to change.
+@(test)
+identifier_tables :: proc(t: ^testing.T) {
+	testing.expect_value(t, len(WINDOW_IDS), 1)
+	testing.expect_value(t, WINDOW_IDS[0], "dev.pi-desk.app")
+	testing.expect_value(t, len(CORE_IDS), 1)
+	testing.expect_value(t, CORE_IDS[0], "dev.deckhand.core")
+}
+
+// The real Security framework on this (linker-signed: ad hoc) test binary: its own signature is
+// Adhoc, a socketpair peer (ourselves) passes with our identifier and fails with another, and a
+// token saved before its process exec'd finds no code (-67065).
+@(test)
+peer_dr_check_real :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	else {
+		own := own_signature()
+		if !testing.expect(t, own.ok && own.mode == .Adhoc && own.identifier != "", "own signature") do return
+		testing.expect(t, own_signature().identifier == own.identifier, "read once, the same")
+		fds: [2]posix.FD
+		testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+		b := [1]u8{1}
+		posix.write(fds[1], &b[0], 1)
+		_, tok := peer_read_token(fds[0])
+		d, got := peer_dr_check(tok, {own.identifier})
+		testing.expectf(t, d == .Allow, "ourselves: %v %v", d, got)
+		testing.expect_value(t, got.identifier, own.identifier)
+		d2, _ := peer_dr_check(tok, {"dev.deckhand.other"})
+		testing.expect_value(t, d2, Decision.Wrong_Identity)
+		posix.close(fds[0])
+		posix.close(fds[1])
+
+		// a child that writes, then execs /bin/sleep: the token from before the exec has no code
+		testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+		defer posix.close(fds[0])
+		pid := posix.fork()
+		if pid == 0 {
+			posix.dup2(fds[1], 3)
+			argv := []cstring{"/bin/sh", "-c", "printf x >&3; read y <&3; exec /bin/sleep 5", nil}
+			posix.execv(argv[0], raw_data(argv))
+			posix._exit(127)
+		}
+		posix.close(fds[1])
+		defer {
+			posix.kill(pid, .SIGKILL)
+			st: i32
+			posix.waitpid(pid, &st, {})
+		}
+		one: [1]u8
+		testing.expect(t, posix.read(fds[0], &one[0], 1) == 1)
+		before, btok := peer_read_token(fds[0])
+		testing.expect(t, before.ok && before.pid == i32(pid))
+		sh_d, sh := peer_dr_check(btok, {own.identifier})
+		// (/bin/sh is a trampoline: by now it may be bash)
+		testing.expectf(t, sh_d == .Wrong_Identity && strings.has_prefix(sh.identifier, "com.apple."), "/bin/sh: %v %v", sh_d, sh)
+		posix.write(fds[0], raw_data(string("go\n")), 3)
+		for _ in 0 ..< 500 {
+			if now := peer_read(fds[0]); now.ok && now.pidversion != before.pidversion do break
+			time.sleep(2 * time.Millisecond)
+		}
+		gone := code_check_token(btok, fmt.tprintf(`identifier "%s"`, sh.identifier))
+		testing.expectf(t, !gone.found && gone.status == errSecCSNoSuchCode, "exec'd since: %v", gone)
+		testing.expect(t, peer_code_allowed(own, {sh.identifier}, gone) == .No_Code)
+	}
 }

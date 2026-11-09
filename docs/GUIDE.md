@@ -1472,19 +1472,27 @@ Deckhand does not come within the minute, the next Deckhand you open gets them, 
 Kept Claude tabs keep the plugin they started with until you restart them: the plugin bar offers
 it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)).
 
-**Releases are signed ad hoc for now**, without an Apple Developer ID. Two consequences:
+**Releases are self-signed for now** (0.1.6 and before were signed ad hoc), without an Apple
+Developer ID. Two consequences:
 
 - **Other programs running as you can control the kept sessions.** The session holder, the
-  relaunch helper and Deckhand check that the other side is you (the same macOS user), not that
-  it is Deckhand: the secrets and the signed state files guard against accidents (a stale socket,
-  another copy), not against a program of yours that sets out to type into your terminals. That
-  is close to today's position (such a program can already edit Deckhand's and Claude's settings),
-  and it ends with the Developer ID.
-- **Privacy permissions, Full Disk Access above all, may not follow an update.** macOS knows an
-  ad-hoc app by its exact code, so after each update Deckhand is a new app to it: folders under
-  Desktop, Documents or Downloads may ask again, and a **Full Disk Access** grant silently stops
-  applying. After an update, check **System Settings › Privacy & Security › Full Disk Access**,
-  remove the old Deckhand entry and add the new one.
+  relaunch helper and Deckhand check that the other side is you (the same macOS user) and, in a
+  self-signed copy, that its code is Deckhand's: the right part (`dev.deckhand.core` for the session
+  holder and Deckhand Core) signed with the same certificate. Those checks, the secrets and the
+  signed state files guard against accidents (another user, a stale socket, another copy, a stray
+  program or one signed by someone else), not against a program of yours that sets out to type
+  into your terminals: on the Mac that builds Deckhand, any program of yours may sign with its
+  certificate (macOS lets `codesign` use it without asking), and a self-signed app can't turn on
+  the hardened runtime that keeps other code out of it. That is close to today's position (such a
+  program can already edit Deckhand's and Claude's settings), and it ends with the Developer ID.
+  A copy signed ad hoc (built without the certificate) checks only that the other side is you
+  and names the right part.
+- **Privacy permissions, Full Disk Access above all, may not follow an update from an ad-hoc
+  release.** macOS knows an ad-hoc app by its exact code, so after each update it is a new app:
+  folders under Desktop, Documents or Downloads may ask again, and a **Full Disk Access** grant
+  silently stops applying. After such an update, check **System Settings › Privacy & Security ›
+  Full Disk Access**, remove the old Deckhand entry and add the new one. Self-signed releases keep
+  them (one certificate, release after release).
 
 Release builds have no test or development switches: no test mode, no `DECKHAND_*` overrides of
 where data and sockets live, and no token printed at start. To drive Deckhand from a terminal, take a token

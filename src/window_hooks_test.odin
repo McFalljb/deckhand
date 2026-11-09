@@ -3,6 +3,7 @@ package main
 // The core's window hooks (window_hooks.odin): redraws and toasts reach the window only through
 // them, once per command that changed State, as app.redraw did.
 
+import "base:runtime"
 import "core:testing"
 import "core"
 
@@ -31,6 +32,7 @@ wh_reset :: proc() {
 
 @(test)
 window_hooks_redraw_once_per_changed_command :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	core.window = wh_fake()
@@ -71,6 +73,7 @@ window_hooks_toast_goes_through_the_hook :: proc(t: ^testing.T) {
 
 @(test)
 window_hooks_tab_host_commands_need_a_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	wh_reset()

@@ -1651,6 +1651,7 @@ centre_reset :: proc() {
 // two panes across need 2 * 240 + 1 px, at scale 2 twice that; down, 2 * 140 + 1.
 @(test)
 pane_room_from_the_sent_centre :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	defer centre_reset()
 	s := pt_one(3)
 	p := s.panes[0].id
@@ -1681,6 +1682,7 @@ pane_room_from_the_sent_centre :: proc(t: ^testing.T) {
 // (no Clay): in 1001 px across (1000 + the divider), a pane is at least 240 px, so 0.1 becomes 0.24.
 @(test)
 pane_ratio_from_the_sent_centre :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	defer centre_reset()
 	s := pt_one(2)
 	r := core.run_command(core.Split_Pane{pane = s.panes[0].id, direction = .Right, tab_id = s.tabs[1].id}, PT_UI)

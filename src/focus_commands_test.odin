@@ -3,6 +3,7 @@ package main
 // The commands that replaced the window's direct State writes (design §10.2, M2-A):
 // focus_take, focus_release, set_last_harness. Deckhand's own; no outside caller sends them.
 
+import "base:runtime"
 import "core:mem"
 import "core:testing"
 import "core"
@@ -12,6 +13,7 @@ fc_redraws: int
 
 @(test)
 focus_commands_replace_direct_writes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	core.window = window_hooks_app()
@@ -54,6 +56,7 @@ focus_commands_replace_direct_writes :: proc(t: ^testing.T) {
 // An install on the setup sheet keeps the keyboard there through focus_take.
 @(test)
 focus_install_keeps_the_setup_sheet :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
 	old := core.harness_run.status
@@ -69,6 +72,7 @@ focus_install_keeps_the_setup_sheet :: proc(t: ^testing.T) {
 // did not make (a literal, another writer's).
 @(test)
 focus_take_frees_only_its_own :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	core.inbox_drain()
 	state^ = core.State{}
 	track: mem.Tracking_Allocator

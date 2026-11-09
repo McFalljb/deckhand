@@ -57,6 +57,7 @@ wv_fake :: proc() -> core.Window_Hooks {
 // show_file makes a record and the window its view (at the line); closing the tab drops it.
 @(test)
 window_views_follow_tab_records :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	core.window = wv_fake()
@@ -77,6 +78,7 @@ window_views_follow_tab_records :: proc(t: ^testing.T) {
 // The app's window: the same record gets a real editor at the line, and it goes with the tab.
 @(test)
 window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	core.window = window_hooks_app()
@@ -97,6 +99,7 @@ window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
 // only the window can do is refused.
 @(test)
 window_views_no_window :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
 	saved := core.window
 	defer core.window = saved
 	core.window = {}

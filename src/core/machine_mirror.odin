@@ -38,6 +38,11 @@ MIRROR_TABS_MAX :: 32 // per open session
 MIRROR_LIST_MAX :: MAX_SESSIONS // the selected project's sessions
 MIRROR_TEXT_MAX :: 160 // names, titles, session ids (bytes)
 MIRROR_PATH_MAX :: 1024
+// What another machine's state stream may decode to: per message (state_read.odin's budget, far
+// below a window's own core's), and the bytes of the messages applied since its last state.full.
+// Past the second, its deltas are left until a fresh state.full (asked for) replaces the replica.
+MIRROR_READ_MAX :: 64 << 20
+MIRROR_STREAM_MAX :: 4 << 20
 
 // Machine `machine`'s id `id` as this core holds it. Machine 0 (this Mac): id itself. False: it does
 // not pack (no id, 2^40 or more, or no such machine number).
@@ -58,10 +63,6 @@ Machine_Mirror :: struct {
 	sessions: [dynamic]Session, // in arena: its selected project's (state.sessions while that is selected here)
 	selected: u64, // its selected project (packed)
 }
-
-// The machine whose sessions list state.sessions is (0: this Mac's).
-@(private = "file")
-mirror_sessions_of: u64
 
 // Whether the left column lists other machines: Machines over SSH is on and one is added.
 machines_in_sidebar :: proc() -> bool {return state.settings.remote_machines && len(state.machines) > 0}
@@ -169,7 +170,6 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	if id_machine(state.selected_project) == no && find_project(state.selected_project) == nil {
 		state.selected_project = 0
 		state.sessions = {}
-		mirror_sessions_of = 0
 	}
 	window_state_changed()
 }
@@ -184,13 +184,7 @@ state_mirrored_sessions :: proc(no: u64) -> (n: int) {
 // same project (select_project went to it), else none yet.
 mirror_sessions_show :: proc(no: u64, m: ^Machine_Mirror) {
 	if id_machine(state.selected_project) != no do return
-	if m.selected == state.selected_project {
-		state.sessions = m.sessions
-		mirror_sessions_of = no
-	} else {
-		if mirror_sessions_of == no do mirror_sessions_of = 0
-		state.sessions = {}
-	}
+	state.sessions = m.selected == state.selected_project ? m.sessions : {}
 }
 
 // Takes machine no's entries out of State (its projects are m's; its open sessions are freed).
@@ -201,10 +195,8 @@ mirror_unmerge :: proc(no: u64) {
 		wire_free(&state.open_sessions[i], type_info_of(Open_Session), heap)
 		ordered_remove(&state.open_sessions, i)
 	}
-	if mirror_sessions_of == no {
-		state.sessions = {}
-		mirror_sessions_of = 0
-	}
+	// state.sessions is that machine's while one of its projects is selected (else this Mac's)
+	if id_machine(state.selected_project) == no do state.sessions = {}
 }
 
 // Machine no is gone (removed, or Machines over SSH turned off): its entries leave State, and what

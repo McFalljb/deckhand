@@ -110,6 +110,18 @@ mirror_merge_and_unmerge :: proc(t: ^testing.T) {
 	testing.expect(t, !strings.contains(gs, "SECRET-TOKEN"), "get_state never carries another machine's confirmation token")
 	testing.expect(t, strings.contains(gs, `"machine":"nuc"`) && strings.contains(gs, `"machine":"mini"`), "get_state names each entry's machine")
 
+	// a project of this Mac's selected after one of machine 3's: its sessions stay through 3's merges
+	state.selected_project = pid
+	mirror_merge(3, &r3, &m3)
+	testing.expect(t, len(state.sessions) == 1 && state.sessions[0].id == "m3:abc", "machine 3's project selected: its sessions")
+	state.selected_project = local_project
+	state.sessions = make([dynamic]Session, runtime.heap_allocator())
+	append(&state.sessions, Session{id = "local-1"})
+	mirror_merge(3, &r3, &m3)
+	testing.expect(t, len(state.sessions) == 1 && state.sessions[0].id == "local-1", "this Mac's sessions list is not another machine's to clear")
+	delete(state.sessions)
+	state.sessions = {}
+
 	// a delta on machine 3 (a tab gone) changes only machine 3's entries
 	context.allocator = runtime.heap_allocator()
 	replica_free(&r3)

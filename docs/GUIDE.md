@@ -18,24 +18,25 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 ## Contents
 
 1. [The window](#the-window) (and [the first run](#the-first-run))
-2. [Projects, sessions and chats](#projects-sessions-and-chats)
-3. [Tabs](#tabs)
-4. [The terminal](#the-terminal)
-5. [Editor tabs](#editor-tabs)
-6. [The Files tab](#the-files-tab)
-7. [The Changes tab](#the-changes-tab)
-8. [The Settings tab](#the-settings-tab)
-9. [Hot reload](#hot-reload)
-10. [Atlas](#atlas)
-11. [Jobs](#jobs)
-12. [The bell](#the-bell)
-13. [The palette and the gear](#the-palette-and-the-gear)
-14. [Updates](#updates)
-15. [Your data](#your-data) (and [your folders](#your-folders))
-16. [Troubleshooting](#troubleshooting)
-17. [All shortcuts](#all-shortcuts)
-18. [All palette actions](#all-palette-actions)
-19. [Coming soon](#coming-soon)
+2. [How Deckhand runs](#how-deckhand-runs): the window, Deckhand Core, the session holder, ⌘Q
+3. [Projects, sessions and chats](#projects-sessions-and-chats)
+4. [Tabs](#tabs)
+5. [The terminal](#the-terminal)
+6. [Editor tabs](#editor-tabs)
+7. [The Files tab](#the-files-tab)
+8. [The Changes tab](#the-changes-tab)
+9. [The Settings tab](#the-settings-tab)
+10. [Hot reload](#hot-reload)
+11. [Atlas](#atlas)
+12. [Jobs](#jobs)
+13. [The bell](#the-bell)
+14. [The palette and the gear](#the-palette-and-the-gear)
+15. [Updates](#updates)
+16. [Your data](#your-data) (and [your folders](#your-folders))
+17. [Troubleshooting](#troubleshooting)
+18. [All shortcuts](#all-shortcuts)
+19. [All palette actions](#all-palette-actions)
+20. [Coming soon](#coming-soon)
 
 ## The window
 
@@ -63,8 +64,7 @@ above the tabs with **Cancel** and **Confirm**.
 
 ### The first run
 
-The first time Deckhand starts without a main folder (new users, and once after the update that
-added it), a **Set up Deckhand** sheet opens over the window. It has four steps (five when
+The first time Deckhand starts without a main folder, a **Set up Deckhand** sheet opens over the window. It has four steps (five when
 Deckhand finds more than one Claude Code account):
 
 0. **Your coding agents**: a checklist per harness (pi, Claude Code), from the
@@ -83,18 +83,12 @@ Deckhand finds more than one Claude Code account):
      Code needs nothing more ("nothing else needed").
 
    Every **Install** and **Update** shows its exact command first and runs only when you click it,
-   in a terminal on the sheet (its output live; the keyboard is the terminal's while it runs, so ⌃C
-   stops it; the sheet stays until it ends). Something already installed is never installed again;
-   the install script also stops if it finds the harness on your login shell's PATH. Afterwards
-   Deckhand looks again and ticks what it finds. An update runs the copy Deckhand found, by its full
-   path (and the npm, bun, pnpm or brew next to it), and refuses if that copy has changed since.
-   Updates run for the official installer, Homebrew,
-   npm, bun and pnpm installs; for nix, mise and anything Deckhand cannot place it shows the command
-   with **Copy** (or says to use that package manager), and an npm folder that needs `sudo` is left
-   to you: Deckhand never runs `sudo` (a `sudo` inside a run refuses and prints the command for you
-   to run). A pi package installed from git or a local folder counts as found (its version can't be checked,
-   and the sheet says so); a project's own `.pi/settings.json` is noted, and an old pin there is
-   flagged, but never counts as installed. Settings → **Coding agents** lists the same, and its
+   in a terminal on the sheet (⌃C stops it). Something already installed is never installed
+   again, and an update runs the copy Deckhand found, by its full path. Deckhand updates official
+   installer, Homebrew, npm, bun and pnpm installs; for the others it shows the command with
+   **Copy**. Deckhand never runs `sudo`: an npm folder that needs it is left to you. A pi package
+   installed from git or a local folder counts as found, without a version; one only in a
+   project's `.pi/settings.json` never counts. Settings → **Coding agents** lists the same, and its
    **Install…** and **Update…** open this step.
 1. **The main folder**, where your notes, jobs, memory, Atlas's prompt and chats live (see
    [Your folders](#your-folders)):
@@ -131,9 +125,6 @@ is set, the Settings tab's **Folders** group. It starts at the coding agents wit
 folders filled in, and Esc there closes it without changing anything. Enter goes to the next step (Done on the
 last), Esc goes back, ↑↓ change the choice.
 
-If you already had a notes folder set (before the main folder existed), it simply becomes the
-main folder and the sheet does not open.
-
 ### pi in Deckhand
 
 Deckhand brings its own pi integration, so a pi tab needs nothing else installed: the status
@@ -155,9 +146,76 @@ installed in pi; another extension that publishes those panels itself takes them
 [pi-kit](https://github.com/McFalljb/pi-kit) is optional extras that also work outside Deckhand:
 guardrails, background shells, session notes, skills and agents for delegating and reviewing work,
 and its sidebar in a plain terminal. Installed, it works next to Deckhand's integration: its own
-Deckhand parts (`desk-bridge`, `desk`, `desk-browser`) stay inactive in Deckhand's tabs, because
-Deckhand no longer gives pi the variables they wait for, and its sidebar hands its sections to
-Deckhand's right column as before.
+Deckhand parts (`desk-bridge`, `desk`, `desk-browser`) stay inactive in Deckhand's tabs, and its
+sidebar hands its sections to Deckhand's right column.
+
+## How Deckhand runs
+
+Deckhand is three programs:
+
+- **The window** (`Deckhand.app`): what you see and type into. Browser tabs, app tabs and
+  unsaved editor files live here.
+- **Deckhand Core**: your projects, sessions and tabs, jobs, Atlas, the bell and the control
+  socket. It runs on its own (`Deckhand Core.app`, inside `Deckhand.app`), and the window is a
+  view of it. With no window open, its macOS notifications come from Deckhand Core.
+- **The session holder**: keeps the terminals of your pi, Claude and shell tabs, so they outlive
+  Deckhand Core when it restarts or updates.
+
+**⌘Q closes only the window** (so do Quit in the Dock and closing the window). Your sessions,
+shells and jobs keep running, and the first time a note says so. Open Deckhand again and
+everything is as you left it, a turn that went on meanwhile included. Unsaved files keep the
+window open until you save or close them.
+
+**Quit Deckhand and Stop All Sessions…** (the Deckhand menu) stops everything: the window,
+Deckhand Core, the holder and every tab's program. It asks first while something runs. The next
+start restores your sessions as after any quit: pi and Claude resume their conversations, shells
+start fresh.
+
+**What survives what:**
+
+- **⌘Q, or closing the window**: pi, Claude, shells and jobs keep running, schedules too.
+  Browser pages close and load again when you open Deckhand; app tabs stop.
+- **[An update](#updates)**: sessions keep running, and their screens come back as they were.
+  Pages reload and app tabs restart. A job run has up to two minutes to finish, then stops
+  ("stopped (update)").
+- **Deckhand Core crashes**: sessions keep running in the holder, and their screens are rebuilt
+  from the last 1 MiB they printed. A job run in progress stops.
+- **The session holder crashes**: its tabs stop and say "the session holder stopped". pi and
+  Claude resume from their files when you restart them; shells start fresh.
+- **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start
+  restores your sessions. Scheduled jobs wait until Deckhand runs again.
+
+**When Deckhand Core stops by itself.** With no window, no tab's program running, no job run and
+no scheduled job for 10 minutes, it saves and exits; opening Deckhand starts it again. If it
+crashes, the holder starts it again and the window reconnects. If it keeps crashing (or never
+comes up), the window offers **Use Previous Core** (the one from before the last update) or **Run
+Sessions in Deckhand Itself**. The palette's **Use previous core** does the first at any time;
+that choice holds until you install another version.
+
+**Settings that change this** (both on by default, both in the gear and the palette, and only
+you can change them):
+
+- **Keep sessions when quitting** (the palette's **Keep sessions running when Deckhand quits**):
+  tabs' programs run in the session holder. Off, they stop whenever Deckhand Core stops.
+- **Sessions in a background core** (the palette's **Run sessions in a background core (at the
+  next launch)**): off, Deckhand runs as one program again, and ⌘Q asks while sessions run (Keep
+  sessions still keeps them in the holder). It takes effect once Deckhand Core has stopped (**Quit
+  Deckhand and Stop All Sessions…**).
+
+**Sessions with no tab.** Sessions the holder keeps that no tab comes back for (you started with
+`--fresh`, or the saved workspace couldn't be read) are never stopped behind your back: they keep
+running unseen, a message says how many, and **Quit Deckhand and Stop All Sessions…** ends them.
+If the running holder is from a build signed differently, Deckhand sends it nothing and asks:
+**Stop It and Start a New One** (its sessions end) or **Keep It Running** (Deckhand runs without a
+holder). In a build from source, the palette's **Restart session holder** upgrades the holder in
+place to the one you built, and every session keeps running.
+
+**Who can control your sessions.** Releases are signed with Deckhand's own certificate ("Deckhand
+Self-Signed"), not yet an Apple Developer ID. The window, Deckhand Core and the holder only talk
+to the same macOS user running code signed with that certificate. That stops other users, stale
+sockets, stray copies and code signed by anyone else. It doesn't stop a program of yours that sets
+out to type into your terminals: such a program can already edit Deckhand's and Claude's
+settings. The Developer ID will close that gap.
 
 ## Projects, sessions and chats
 
@@ -322,31 +380,22 @@ that wait for you visible.
 
 ### Chats settings (the gear)
 
-- **Chats: read-only** starts chats as read-only pi instead of full pi. Off by default. pi itself
-  limits what the model may call, with or without pi-kit: only pi's read tools (read, grep, find,
-  ls) and `desk_show` (it shows you a file in a tab, nothing more), as a read-only job does without
-  `desk_show` (`--tools read,grep,find,ls,desk_show --exclude-tools 'mcp__*' --no-mcp`).
-  The model cannot call edit, write or bash, so it **cannot run shell commands**, and it has no
-  MCP or other extension tools (Deckhand's own browser and app tools included; its status,
-  waits and comments keep working, as they are not tools). With pi-kit
-  installed its read-only guardrails (`PI_KIT_READONLY=1`) are on as well. What this does not
-  cover: the extensions you installed still load and run their own code (their hooks and slash
-  commands; an extension that commits or writes notes when a turn ends still does), and an
-  extension tool named read, grep, find or ls replaces pi's own. Your own `!` commands typed into
-  pi still run; they are yours, not the model's. Deckhand starts whatever `pi` your login shell
-  finds: a wrapper or shim named `pi` that adds its own `--tools` could widen the list. Read-only
-  chats need pi 1.0.4 or newer: with an older pi (as Deckhand last saw it on disk) a read-only chat
-  does not start and says so; while Deckhand does not know pi's version yet it starts. It applies
-  at every start of a chat's pi (new, resumed, restored, restarted): a running chat keeps what it
-  started with until it starts again, and then follows the setting as it is then. That differs on
-  purpose from Claude chats below, which stay read-only once started read-only. Claude in chats (**+ New chat**'s **Claude Code**, or a Claude tab in a
-  chat) then starts read-only too, with Claude Code's own controls: plan mode, the tools that edit
-  files, spawn agents, schedule work or use MCP denied, and Deckhand's guard on commands (the same
-  list of mutating commands pi-kit blocks); it cannot click or type in your pages and apps either.
-  The tab reads "read-only". Of your extra flags only `--model`, `--effort`, `--fallback-model`
-  and `--verbose` go along. Turning the setting on applies when a Claude tab in a chat next starts;
-  a tab that started read-only stays read-only (start a new chat for a full one). If Deckhand cannot confirm that Claude Code took its read-only settings
-  (an older Claude Code), it stops the tab and says so: update Claude Code, then Restart.
+- **Chats: read-only** starts chats as read-only. Off by default.
+  - **pi** gets only its read tools (read, grep, find, ls) and `desk_show` (`--tools
+    read,grep,find,ls,desk_show --exclude-tools 'mcp__*' --no-mcp`), plus pi-kit's read-only
+    guardrails (`PI_KIT_READONLY=1`) when pi-kit is installed. The model cannot edit, write or run
+    shell commands, and has no MCP or extension tools (Deckhand's browser and app tools included;
+    status, waits and comments still work). Not covered: your extensions' own code (their hooks
+    and slash commands) still runs, an extension tool named like a read tool replaces it, your own
+    `!` commands run, and a `pi` wrapper that adds its own `--tools` could widen the list. It
+    needs pi 1.0.4 or newer, and applies at every start of a chat's pi.
+  - **Claude** in chats starts read-only too, with Claude Code's own controls: plan mode, the
+    tools that edit files, spawn agents, schedule work or use MCP denied, and Deckhand's guard on
+    mutating commands; it can't click or type in your pages and apps either. The tab reads
+    "read-only". Of your extra flags only `--model`, `--effort`, `--fallback-model` and
+    `--verbose` go along. A tab that started read-only stays read-only (start a new chat for a
+    full one). If Deckhand can't confirm that Claude Code took its read-only settings (an older
+    Claude Code), it stops the tab and says so.
 - **Chats folder…** picks another folder for new chats; chats already in the old folder stay
   there, and that folder becomes an ordinary project. **Chats folder: back to the default**
   undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as the
@@ -418,8 +467,7 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     and each page or app fits its own pane. Only the pane with the keyboard gets your typing; a
     click in another pane's page gives that pane the keyboard and clicks there too.
   - Each session's panes come back when Deckhand restarts: the same splits and sizes, the
-    same tabs in each pane, the tab each pane showed, and the pane with the keyboard. (A
-    Deckhand from before panes opens the same workspace with every tab back in one pane.)
+    same tabs in each pane, the tab each pane showed, and the pane with the keyboard.
   - **Agents and panes.** A session's pi or Claude tab can't split panes or move tabs; it sees
     which tabs sit side by side, and the tabs it opens (a file it shows, a page, an app, a
     page its click opened) go behind what you see, in the pane that holds its own tab (a file
@@ -440,11 +488,10 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   first, and says so when its processes are still running. pi's session file stays: you can
   open it again from the list.
 
-Sessions you switch away from keep running in the background. ⌘Q closes the window and your
-sessions keep running in Deckhand Core (see [Sessions in a background
-core](#the-gear-quick-settings)); **Quit Deckhand and Stop All Sessions…** stops them, and asks first
-while they run. On the next start Deckhand restores your open sessions, tabs and layout, and
-starts each session again when you first look at it.
+Sessions you switch away from keep running in the background, and so do they when you close the
+window with ⌘Q ([How Deckhand runs](#how-deckhand-runs)). After **Quit Deckhand and Stop All
+Sessions…**, the next start restores your open sessions, tabs and layout, and starts each session
+again when you first look at it.
 
 **A tab belongs to one session.** A tab you open goes into the session on screen; one an agent
 opens goes into that agent's own session, never "whichever session you happen to be looking at".
@@ -561,7 +608,7 @@ Deckhand's own shortcuts come first even then: ⌘T opens a shell tab, ⌘W clos
   the toolbar, and the palette has them too ("Browser: take over from the agent",
   "Browser: hand back to the agent", "Browser: stop the agent"). pi never types into password, card or one-time-code
   fields; an upload asks you first in a bar (**Allow** / **Block**); a page that changes your
-  clipboard while pi acts is named in a toast. Details: BROWSER.md, step 8.
+  clipboard while pi acts is named in a toast. Details: [BROWSER.md §4](BROWSER.md#4-agent-control).
 - **App tabs by agents**: a session's pi (or Claude) can open the apps your project lists in
   `.deckhand/apps.json`, by name, in its own session: never another program, never another
   session. Deckhand does not ask you first: an agent that can write apps.json can already run
@@ -762,7 +809,7 @@ they would with one you type (the pictures as files Claude reads); it waits
   its prompt (the button's tooltip says why it cannot go yet). Anywhere else it goes to pi.
 - Comments always go to **their own tab's session**, even when you look at another session. A
   session keeps at most 20; at most 8 pictures go with one message (the rest go as text and say
-  so). They are not kept when you quit Deckhand.
+  so). Closing the window keeps them; they are lost when Deckhand Core stops or updates.
 - **Closing** a tab that has comments asks first: **Send and close**, **Drop and close** or
   **Cancel**. In a Claude session (no pi), Send and close goes to its Claude tab, with all of the
   session's comments. Closing a session with comments asks too: **Send now** (the session stays open:
@@ -871,11 +918,8 @@ screen, else of the selected project. Press ⌘⇧E again to go back to Sessions
 - **A folder that cannot be opened** shows a red line under it saying why, with **Retry**. "macOS
   needs permission" means macOS privacy protects it (Desktop, Documents, Downloads, iCloud Drive,
   removable and network volumes): allow Deckhand in **System Settings › Privacy & Security ›
-  Files and Folders** (or **Full Disk Access**), then click **Retry**. A self-signed release
-  (signed with one certificate, release after release) keeps what you allow across updates; coming
-  from a release signed ad hoc, macOS asks once more. A build signed ad hoc (one built without the
-  signing certificate, docs/DEVELOPING.md "Code signing") is a new app to macOS after each update or
-  rebuild, so it may ask again.
+  Files and Folders** (or **Full Disk Access**), then click **Retry**. Releases keep what you
+  allow across updates ([Updates](#updates) says when macOS asks again).
 
 ### Worktrees
 
@@ -1115,8 +1159,8 @@ when the build session finishes").
   main folder applies from Atlas's next start. A main folder inside Documents or Desktop still
   gets that prompt once, for that folder.
 - **Its conversation moves with it.** pi records the folder a conversation runs in and resumes
-  it there. So when Atlas's conversation was recorded in another folder (`~`, where
-  Atlas used to start, or your previous main folder), Atlas's next start
+  it there. So when Atlas's conversation was recorded in another folder (your previous main
+  folder, or `~`), Atlas's next start
   copies it once into a new conversation in the new folder (pi's `--fork`), with all its
   history. The old session file in the data dir's `home/` is left as it was, as a backup.
   Atlas resumes as before, in the old folder, with a pi older than 1.4.0, a session file
@@ -1297,16 +1341,15 @@ the job sheet, Atlas or another agent), and an edited note runs as edited. What 
 
 Check new and changed jobs in the Jobs tab and the note itself.
 
-Deckhand keeps nothing about jobs in your macOS Keychain. Older versions kept a "Deckhand jobs
-approval key" there; it is no longer used, and you may delete it in Keychain Access.
-
 ### Running
 
 - **Run now** runs it at once (also a paused or disabled job, when you click it). **Stop** ends
   a run (pi and everything it started).
 - **Pause** / **Resume** one job, or **Pause all** / **Resume all** in the header (the palette:
   "Pause all jobs", "Resume all jobs", "Stop all running jobs"). Running runs finish.
-- A run that was due while your Mac slept or Deckhand was closed runs late if it is only a little
+- Jobs run while the window is closed: Deckhand Core keeps their schedules
+  ([How Deckhand runs](#how-deckhand-runs)). A run that was due while your Mac slept or Deckhand
+  Core wasn't running (after Stop All Sessions, or a logout) runs late if it is only a little
   late (up to half the time between runs, 2 minutes to 2 hours); later than that it is skipped,
   not caught up, and its row says so ("skipped (asleep)" or "skipped (closed)"). A run still going when the next one is due: the next one is
   skipped.
@@ -1360,7 +1403,7 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 - **Mark all read** and **Clear** are in its header (also in the palette).
 - Looking at a session marks its entries read. Entries from the same session within 10 seconds
   replace each other, so a flapping session does not flood the list. At most 200 entries are
-  kept, and they are not saved: a restart empties the bell.
+  kept, and they are not saved: the bell empties when Deckhand Core stops.
 - **To choose what the bell collects**, use the gear's **Notify me about** chips: Finished,
   Waiting, Errors (errors and exits) and Jobs. Something you asked for that Deckhand could not do
   (Send to Atlas's text left on the clipboard, and why) always shows in the bell, even with Errors off.
@@ -1404,56 +1447,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
 - **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
-- **Keep sessions when quitting** (the palette's **Keep sessions running when Deckhand quits**):
-  on by default. A session holder keeps your tabs' programs running while Deckhand is closed or
-  [updating](#updates), and reopening Deckhand picks them up again. Only
-  you can change it (agents cannot). If Deckhand cannot confirm that a read-only Claude tab is
-  still guarded after reopening, it stops that tab (Restart starts it again). With it on, ⌘Q
-  asks nothing about the tabs the holder keeps; **Quit Deckhand and Stop All Sessions…** (the
-  Deckhand menu) quits and stops them too. Screens come back exactly after a quit; after a crash
-  they are rebuilt from what the programs printed since (the last 1 MiB). If the holder itself
-  stops, its tabs say "the session holder stopped". Sessions the holder keeps that no tab comes
-  back for (you started with `--fresh`, or the saved workspace couldn't be read) are never
-  stopped behind your back: they keep running unseen, a message says how many, and **Quit
-  Deckhand and Stop All Sessions…** ends them. If a holder is running but doesn't answer (for
-  example after an update), Deckhand doesn't start a second one: it says so, and tabs opened
-  then stop when Deckhand quits. If it still hasn't answered after 30 seconds, the tabs that were
-  waiting for its sessions start fresh. If the holder that answers is from another build of
-  Deckhand (one signed differently), Deckhand sends it nothing and asks once: **Stop It and Start
-  a New One** (its sessions end) or **Keep It Running** (Deckhand runs without a holder, as
-  above).
-  When a newer Deckhand (after an update, or one you put in place yourself) finds the holder
-  from an older one, it upgrades that holder in place by itself, once: the same process, every
-  session kept, nothing to see. Only if that fails does a message say so; the sessions keep
-  running either way. Tabs you open during those few seconds stop when Deckhand quits.
-  In a development build (one you built from source), the palette's **Restart session holder**
-  upgrades the running holder in place to the holder you just built: same process, every session
-  keeps running and nothing is redrawn. If the new holder fails to start or to verify, the old
-  one's keeper keeps the sessions (marked degraded: they work, and their exit codes still show).
-
-- **Sessions in a background core** (the palette's **Run sessions in a background core (at the
-  next launch)**): on by default, and read when Deckhand opens. Your tabs run in Deckhand Core, a
-  process of its own, and the window talks to it over a socket only Deckhand's own window may
-  use. ⌘Q (or Quit in the Dock, or closing the window) closes the window and Deckhand Core keeps
-  your sessions running; the first time, a note says so. Opening Deckhand again shows them as
-  they are, a turn that went on meanwhile included; while the window is closed, notifications
-  come from Deckhand Core. **Quit Deckhand and Stop All Sessions…** stops Deckhand Core too. With
-  no window, no tab's program running, no job run and no scheduled job for 10 minutes, Deckhand
-  Core saves and exits by itself (opening Deckhand starts it again). If Deckhand Core stops
-  unexpectedly, the window (or, with no window, the session holder) starts it again and carries
-  on. If no Deckhand Core comes up when you open Deckhand, it offers **Use Previous Core**, or
-  **Run Sessions in Deckhand Itself** (this setting off, from then on).
-  Logging out stops both; the next launch restores your sessions as usual. When Deckhand opens
-  and finds Deckhand Core from an older version (after an update), it hands your sessions over
-  to its own Deckhand Core at once: they keep running, and job runs get up to two minutes to
-  finish first (any still running then stop, as "stopped (update)"). If the running Deckhand Core
-  is newer than this Deckhand, it asks: update Deckhand, or **Use This App's Core**. The
-  palette's **Use previous core** hands the sessions to the Deckhand Core from before the last
-  update. Either way that choice holds (relaunches and new windows use the previous core) until
-  a different version of Deckhand is installed. Turned off, Deckhand runs everything in its own
-  process as before: ⌘Q then asks while sessions run (Keep sessions still keeps them through the
-  session holder). Turning it off takes effect once Deckhand Core has stopped (**Quit Deckhand and
-  Stop All Sessions…**); until then Deckhand opens as its window. Only you can change it.
+- **Keep sessions when quitting** and **Sessions in a background core**: see
+  [How Deckhand runs](#how-deckhand-runs). Both on by default.
 
 ## Updates
 
@@ -1471,63 +1466,45 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
 - **Later**: hides the bar until the next check finds a release.
 - **Update**: downloads the release and checks it. Nothing is replaced yet, and you can keep
   working. Then the bar says "Deckhand 0.1.1 is ready" with **Restart to update**.
-- **Restart to update**: replaces Deckhand and restarts it. With **Keep sessions** on, the
-  sessions the session holder keeps (pi, Claude, shells) **carry on through the update**: a pi
-  turn keeps running, and the new Deckhand shows each screen as it was. Browser pages reload, app
-  tabs restart, and running jobs stop; Deckhand asks first only when something would stop (an app
-  tab, a job, unsaved files). With it off, restarting stops every session, shell and job, and
-  Deckhand asks first while any runs (sessions resume from their files afterwards).
+- **Restart to update**: replaces Deckhand and restarts the window. Your sessions **carry on
+  through the update**: the new window installs its Deckhand Core, and the running one hands your
+  sessions over to it, each screen exactly as it was (a pi turn keeps running). Browser pages
+  reload and app tabs restart. A job run gets up to two minutes to finish, then stops ("stopped
+  (update)"). Deckhand asks first only when something would stop (an app tab, a job, unsaved
+  files). Kept Claude tabs keep the plugin they started with until you restart them; the plugin
+  bar offers it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)). With **Keep
+  sessions** off, the update stops every session, shell and job (sessions resume from their files
+  afterwards). If the running Deckhand Core is newer than this Deckhand, Deckhand asks: update
+  Deckhand, or **Use This App's Core**.
 
 **What is checked before anything is replaced.** The download goes into a private folder in the
 data dir. Deckhand refuses it unless its size matches the release, its SHA-256 matches the
 release's `.sha256`, and its **signature** (the release's `.sig`, made with Deckhand's release
 key, whose public half is built into Deckhand) is valid for that version, file, size and SHA-256.
 Only then is it unpacked. Then Deckhand also refuses it if it holds anything but `Deckhand.app`,
-a link pointing outside the app, or a setuid file, if its bundle id is not `dev.pi-desk.app`, if
-its version is not the release's, if a file in it is writable by others, if
-`codesign --verify --deep --strict` fails, or if the app's code hash (CDHash) is not the one the
-signature names. It never installs an older or the same version. Right before **Restart to
-update** replaces Deckhand, it checks the prepared copy once more (yours, same code hash, same
-version); a copy changed since is refused. The old app is kept as `Deckhand.app.old-<version>`
-next to the new one until Deckhand starts a second time after the update (whatever version you
-run then), which removes it.
+a link pointing outside the app, or a setuid file, if its bundle id is not Deckhand's
+(`dev.pi-desk.app` until the [rename](#from-pi-desk-to-deckhand) finishes), if its version is not
+the release's, if a file in it is writable by others, if `codesign --verify --deep --strict`
+fails, or if the app's code hash (CDHash) is not the one the signature names. It never installs
+an older or the same version. Right before **Restart to update** replaces Deckhand, it checks the
+prepared copy once more; a copy changed since is refused. The old app is kept as
+`Deckhand.app.old-<version>` until Deckhand starts a second time after the update. The new
+Deckhand Core is checked again before it gets your sessions: it must be signed with the same
+certificate, and only it gets the one-time secret that lets it take them over.
 
-**How the sessions reach the new Deckhand.** The old Deckhand hands every kept terminal over to
-the session holder (as at a quit), and the holder gives it a one-time secret that only the new
-Deckhand may use, for one minute. A small relaunch helper takes that secret (never through the
-command line, the environment, a file or a log), waits for the old Deckhand to quit, opens the new
-one and gives the secret only to it. Until then the holder lets no other Deckhand take the
-sessions; one that starts meanwhile (another copy) says so and runs without them. If the new
-Deckhand does not come within the minute, the next Deckhand you open gets them, as after a crash.
-Kept Claude tabs keep the plugin they started with until you restart them: the plugin bar offers
-it ([Claude tabs](#claude-tabs-claude-code-settings-and-updates)).
+**Privacy permissions.** Releases are signed with one certificate, release after release, so
+macOS keeps what you allowed (Desktop, Documents, Downloads, Full Disk Access) across updates.
+Coming from 0.1.6 or earlier (signed ad hoc), macOS asks once more: check **System Settings ›
+Privacy & Security › Full Disk Access**, remove the old Deckhand entry and add the new one. A
+build from source signed ad hoc (without the certificate, [DEVELOPING.md](DEVELOPING.md#code-signing))
+is a new app to macOS after every rebuild. Who may control your sessions:
+[How Deckhand runs](#how-deckhand-runs).
 
-**Releases are self-signed for now** (0.1.6 and before were signed ad hoc), without an Apple
-Developer ID. Two consequences:
-
-- **Other programs running as you can control the kept sessions.** The session holder, the
-  relaunch helper and Deckhand check that the other side is you (the same macOS user) and, in a
-  self-signed copy, that its code is Deckhand's: the right part (`dev.deckhand.core` for the session
-  holder and Deckhand Core) signed with the same certificate. Those checks, the secrets and the
-  signed state files guard against accidents (another user, a stale socket, another copy, a stray
-  program or one signed by someone else), not against a program of yours that sets out to type
-  into your terminals: on the Mac that builds Deckhand, any program of yours may sign with its
-  certificate (macOS lets `codesign` use it without asking), and a self-signed app can't turn on
-  the hardened runtime that keeps other code out of it. That is close to today's position (such a
-  program can already edit Deckhand's and Claude's settings), and it ends with the Developer ID.
-  A copy signed ad hoc (built without the certificate) checks only that the other side is you
-  and names the right part.
-- **Privacy permissions, Full Disk Access above all, may not follow an update from an ad-hoc
-  release.** macOS knows an ad-hoc app by its exact code, so after each update it is a new app:
-  folders under Desktop, Documents or Downloads may ask again, and a **Full Disk Access** grant
-  silently stops applying. After such an update, check **System Settings › Privacy & Security ›
-  Full Disk Access**, remove the old Deckhand entry and add the new one. Self-signed releases keep
-  them (one certificate, release after release).
-
-Release builds have no test or development switches: no test mode, no `DECKHAND_*` overrides of
-where data and sockets live, and no token printed at start. To drive Deckhand from a terminal, take a token
-with **Copy a control token** (the gear): it puts `export DECKHAND_SOCKET=… DECKHAND_TOKEN=…` on the
-clipboard for `deckhand --ctl` (it works until you quit Deckhand).
+**Release builds have no test or development switches**: no test mode, no `DECKHAND_*`
+overrides of where data and sockets live, and no token printed at start. To drive Deckhand from a
+terminal, take a token with **Copy a control token** (the gear): it puts `export
+DECKHAND_SOCKET=… DECKHAND_TOKEN=…` on the clipboard for `deckhand --ctl`, which starts
+Deckhand Core if it isn't running.
 
 **When Deckhand cannot replace itself**, the bar says why and offers only **Release notes**:
 when it runs from a folder you cannot write to, from a disk image, or from macOS's temporary
@@ -1605,7 +1582,7 @@ to you (`0700`), and its files are `0600`:
 | `jobs/<id>/` | each job's state, its runs (`runs/`) and pi's sessions of them (`sessions/`) |
 | `jobs/scheduler.log` | what the scheduler did: runs started, skipped and why |
 | `update.json` | [updates](#updates): the setting, a skipped version, when it last checked |
-| `instance.lock` | held while Deckhand runs: a second Deckhand on the same data says "Deckhand is already running" and quits |
+| `core/`, `run/` | Deckhand Core and the session holder: the installed cores, the sockets and their logs; PERSISTENCE.md has these and the other files |
 | `updates/` | an update being downloaded and checked (removed afterwards) |
 
 Elsewhere:
@@ -1615,7 +1592,7 @@ Elsewhere:
 - **Your folders**: notes, jobs, memory, Atlas's prompt and chats live in the main folder (see
   below). These are yours: Deckhand's data dir above is machine-only state.
 - **Chats** run in the chats folder; their sessions are in pi's store like any other.
-- The control socket lives in a private folder in the data dir (`run/core.sock`).
+- The control socket is `run/core.sock` in the data dir, in a private folder.
 
 ### Your folders
 
@@ -1676,7 +1653,7 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 
 ### Backups
 
-To back up Deckhand, copy the data dir (with Deckhand closed) and `~/.pi/agent` (pi's sessions and
+To back up Deckhand, copy the data dir (after **Quit Deckhand and Stop All Sessions…**) and `~/.pi/agent` (pi's sessions and
 settings). Your projects are your own folders. Deckhand itself keeps:
 `workspace.json.bak-<time>` when you start with `--fresh`, `workspace.json.bad-<time>` when the
 saved workspace could not be read, and `atlas/ATLAS.md.bak-<date>` when a newer starter replaced
@@ -1704,28 +1681,22 @@ signal that stopped it, and its output above it says why. Click the bar's **Rest
 
 **Where Deckhand's environment comes from.** Started from a terminal, Deckhand and everything it
 starts use that terminal's environment, unchanged. Started from the Dock, Finder, Spotlight or
-`open`, macOS gives an app only a minimal environment (often just `/usr/bin:/bin:/usr/sbin:/sbin`,
-or a Nix profile's folders), so Deckhand asks your interactive login shell (`$SHELL -i -l`, as a
-Terminal window would, at most 4 s) for its environment and merges it in: your shell's values
-win, as in a terminal (so `AWS_PROFILE`, Homebrew's `brew shellenv` or a 1Password
-`SSH_AUTH_SOCK` set in `~/.zshrc` reach your tabs), variables the shell does not set are kept, and
-`PATH` becomes the shell's, in the shell's order, followed by any folders only the started-with
-`PATH` had. If the shell fails or takes over
-4 s, `PATH` gets `~/.pi/agent/bin`, `/opt/homebrew/bin`, `/usr/local/bin`, `~/.local/bin`,
-`~/.npm-global/bin`, `~/.volta/bin` and `~/.bun/bin` where they exist. Values are never logged.
+`open`, macOS gives an app only a minimal environment, so Deckhand asks your interactive login
+shell (`$SHELL -i -l`, at most 4 s) for its environment and merges it in: your shell's values win
+(so `AWS_PROFILE`, Homebrew's `brew shellenv` or a 1Password `SSH_AUTH_SOCK` set in `~/.zshrc`
+reach your tabs), and `PATH` becomes the shell's, followed by any folders only the original `PATH`
+had. If the shell fails or takes over 4 s, `PATH` gets `~/.pi/agent/bin`, `/opt/homebrew/bin`,
+`/usr/local/bin`, `~/.local/bin`, `~/.npm-global/bin`, `~/.volta/bin` and `~/.bun/bin` where they
+exist. Values are never logged.
 
-**You changed your shell profile.** Use the gear's **Refresh shell environment** (or ⌘K): it asks
-your login shell again and new tabs (pi, Claude, shell, apps) use the result, as does the `PATH`
-jobs use when none is saved for them; tabs already open keep the environment they started with
-(restart a session's pi from its dead-tab bar, or close and reopen a tab). Jobs' other
-variables, Deckhand's check for a newer pi on disk, and the git that the Changes tab and the
-editor run keep the environment Deckhand started with until you restart it. Started from a terminal there is nothing to refresh: Deckhand uses that
-terminal's environment, so start it again from there. Putting what GUI-started tools need in
-`~/.zprofile` (for example `export PATH="$HOME/.pi/agent/bin:$PATH"`,
-`eval "$(/opt/homebrew/bin/brew shellenv)"`, `export AWS_PROFILE=...`) still works and is read by
-every login shell. If a provider in pi fails with a credentials or profile error only in Deckhand,
-the variable it needs is probably set only in a file Deckhand's shells did not read: refresh, or
-move it to `~/.zprofile`.
+**You changed your shell profile.** Use the gear's **Refresh shell environment** (or ⌘K): new tabs
+(pi, Claude, shell, apps) and jobs without a saved `PATH` use the result. Tabs already open keep
+the environment they started with (restart them). Started from a terminal there is nothing to
+refresh: stop Deckhand (**Quit Deckhand and Stop All Sessions…**, since Deckhand Core keeps the
+environment it started with) and start it again from there. What GUI-started tools need is safest in `~/.zprofile`
+(for example `export PATH="$HOME/.pi/agent/bin:$PATH"` or `export AWS_PROFILE=...`). If a
+provider in pi fails with a credentials or profile error only in Deckhand, the variable it needs
+is probably set in a file Deckhand's shells didn't read: refresh, or move it to `~/.zprofile`.
 
 **A pi tab says "pi was not found".** pi is neither on your login shell's PATH nor in pi's own
 install folder (`$PI_CODING_AGENT_DIR/bin` when it is an absolute path, else `~/.pi/agent/bin`). When pi is only in that
@@ -1738,8 +1709,14 @@ tabs do the same for `claude` with `~/.local/bin` and `~/.claude/local`.
 **A session shows "Session gone".** Its session file or folder no longer exists; click the button
 to close it.
 
-**Where are the logs?** `commands.log` in the data dir (every command and its result). Errors at
-start-up go to the terminal you started Deckhand from. A pi session's own logs are pi's.
+**Where are the logs?** `commands.log` in the data dir (every command and its result), and
+`run/core.log` and `run/holder.log` (what Deckhand Core and the session holder print). The
+window's errors go to the terminal you started Deckhand from. A pi session's own logs are pi's.
+
+**Deckhand says it can't start its background core.** The message says why. **Use Previous Core**
+goes back to the core from before the last update; **Run Sessions in Deckhand Itself** turns off
+[Sessions in a background core](#how-deckhand-runs) so Deckhand runs as one program. `run/core.log`
+has the details.
 
 **To reset the layout**, start Deckhand with `--fresh` (`build/deckhand --fresh`): it starts with
 nothing open and keeps the old workspace as `workspace.json.bak-<time>`. To reset just one
@@ -2008,6 +1985,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 
 Planned; this guide covers each once it ships:
 
-- **Jobs while Deckhand is closed** (a background helper), heartbeat and no-agent check jobs,
-  and Atlas's shared memory (design: [ATLAS.md](ATLAS.md)).
+- **Jobs after Stop All Sessions and across a restart of the Mac** (Deckhand Core started at
+  login), heartbeat and no-agent check jobs, and Atlas's shared memory (design:
+  [ATLAS.md](ATLAS.md)). Jobs already run while the window is closed.
+- **Sessions on other machines** in the same sidebar, over SSH, and **several windows**
+  ([ROADMAP.md](ROADMAP.md)).
 - **Merging** from the Changes tab.

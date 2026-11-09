@@ -1,47 +1,34 @@
 # Harnesses: what Deckhand ships, what it needs, what is optional
 
 Deckhand runs two agent harnesses, **pi** and **Claude Code**. For each it ships its own
-integration inside `Deckhand.app` and loads it per tab, for that run only, so a user installs the
-harness and nothing else. This document is the design: what each integration does, how it is
-loaded, how it steps back when the user has something of their own, and what is still to come.
+integration and loads it per tab, for that run only, so a user installs the harness and nothing
+else. This document covers what each integration does, how it is loaded, how it steps back when
+the user has something of their own, and how setup checks and installs the harnesses. §9 lists
+what still needs a check against a real pi.
 
-The design was worked out from pi 1.5.0's source as installed, read on disk and never run. §2 to §7
-are built; §8 describes what pi-kit keeps; §9 lists what still needs a check against a real pi.
-
-Contents: 1. [Before](#1-before-what-deckhand-got-from-pi-kit) ·
+Contents: 1. [Origin](#1-origin-pi-kit) ·
 2. [pi: loading from a path](#2-pi-loading-from-a-path) ·
 3. [The pi integration](#3-the-pi-integration) ·
 4. [Overlap: how Deckhand steps back](#4-overlap-how-deckhand-steps-back) ·
 5. [Claude Code](#5-claude-code---plugin-dir) ·
 6. [The harness manifest](#6-the-harness-manifest) ·
 7. [Install and update](#7-install-and-update) ·
-8. [pi-kit](#8-pi-kit-after-the-move) · 9. [Not verified](#9-not-verified-without-a-real-pi)
+8. [pi-kit](#8-pi-kit) · 9. [Not verified](#9-not-verified-without-a-real-pi)
 
-## 1. Before: what Deckhand got from pi-kit
+**Where the integrations live.** Both are in the app bundle: `Contents/Resources/pi` and
+`Contents/Resources/claude-code` in `Deckhand.app`, and `Contents/Resources/integrations/{pi,claude-code}`
+in the nested `Deckhand Core.app`. The core uses its own copy. A separate core runs from its
+installed copy under `<data>/core/<version>-<sha12>/`, which is kept while any process (a pi
+with one of its `-e` paths, a holder, a core) still runs from it, so live tabs keep their paths
+across an update (`src/core/core_versions.odin`).
 
-Before the integration was bundled, every Deckhand feature in a pi tab came from
-[pi-kit](https://github.com/McFalljb/pi-kit), which users installed separately. Deckhand never
-checked it was there; it only noticed afterwards that no bridge connected (`agent == .Unknown`,
-`No_Bridge`). A new feature needed changes in both repositories.
+## 1. Origin: pi-kit
 
-| Feature | pi-kit file | Without it | Now |
-|---|---|---|---|
-| Status dots, bell, unseen, Atlas "needs you" (`pi.status`) | `extensions/desk-bridge` | Dots fall back to pi's own OSC 7501 report, which is coarser | bundled `bridge` |
-| Session id and restore (`pi.session`) | desk-bridge | Deckhand can't tell which session file the tab uses | bundled `bridge` |
-| Waits (`pi.wait_idle`), prompts into tabs (`pi.prompt`) | desk-bridge | Atlas `desk_wait`/`desk_prompt` and "Send now" fail | bundled `bridge` |
-| Reload from Deckhand (`pi.reload`) | desk-bridge | "type /reload yourself" | bundled `bridge` (`/deckhand-reload`) |
-| Comments with the next message (`pi.attach`/`attached`) | desk-bridge `input` hook | Comments wait forever | bundled `bridge` |
-| Panels (todos, subagents, shells) | `sidebar/index.ts` + `rows.ts`, forwarded by desk-bridge | No right-hand panels | bundled `panels` (todos, subagents, and shells from `kit:shell:rows`) |
-| Atlas's tools (`desk_*`, Claude-tab driving) | `extensions/desk` | Atlas can't drive Deckhand | bundled `desk` |
-| Browser tools (`browser_*`) | `extensions/desk-browser` | No browser access in pi tabs | bundled `browser` |
-| App-tab tools (`app_*`) | desk-browser (pi tabs), `desk/app.ts` (Atlas) | No app-tab access | bundled `browser`, `desk` |
-| Read-only chats (`PI_KIT_READONLY=1`) | `guardrails` | Was unsafe without pi-kit; now enforced by pi's own `--tools` allowlist | allowlist, plus the bundled optional `guardrails` (or pi-kit's) |
-| Ask/block rules on shell commands, secret redaction | `guardrails` | None | bundled optional `guardrails` (on by default) |
-| Session-note reminder before compaction (`PI_KIT_NOTES_DIR`) | `extensions/notes` (the `session-notes` skill stays in pi-kit) | No reminder | bundled optional `notes` (off by default) |
-| Background shells and timers (`kit:shell:rows`) | `shell` | No shell tools, panel or blockers | bundled optional `shell` (on by default) |
-| Atlas's guide to its tools (the desk skill) | `skills/desk` | Atlas had only the tool descriptions | bundled `skills/deckhand-desk`, `--skill` for Atlas |
-
-The Claude integration already lived in Deckhand (`integrations/claude-code`, `--plugin-dir`).
+Every pi feature of Deckhand's (the bridge, panels, Atlas's desk tools, the browser and app-tab
+tools, and the optional guardrails, shell and notes) came from
+[pi-kit](https://github.com/McFalljb/pi-kit), and the extension API use is unchanged. §3's table
+names each extension's pi-kit source. The Claude integration was always Deckhand's own
+(`integrations/claude-code`, `--plugin-dir`).
 
 ## 2. pi: loading from a path
 
@@ -70,13 +57,12 @@ The Claude integration already lived in Deckhand (`integrations/claude-code`, `-
 
 ## 3. The pi integration
 
-`integrations/pi/` (its [README](../integrations/pi/README.md)), copied into the app as
-`Contents/Resources/pi` by `build.sh` and `scripts/bundle-app.sh` (`build/pi` beside a bare build;
-`DECKHAND_PI_INTEGRATION` overrides it in test mode only. Test mode (`DECKHAND_SCRIPT`) is itself
-switched on by the environment, so whoever sets Deckhand's environment can point it at other
-extensions: the same trust boundary as `DECKHAND_CMD`, which names the command a pi tab runs). It
-is watched like pi's own extensions: a change shows the reload bar over pi tabs. Tests: `node --test` on
-`integrations/pi/test/*.test.ts`, run by `./build.sh test`; they never start pi.
+`integrations/pi/` (its [README](../integrations/pi/README.md)), copied into the bundles by
+`build.sh` and `scripts/bundle-app.sh` (`build/pi` beside a bare build). `DECKHAND_PI_INTEGRATION`
+overrides it in test mode only; test mode is itself set by the environment, the same trust
+boundary as `DECKHAND_CMD`. It is watched like pi's own extensions: a change shows the reload bar
+over pi tabs. Tests: `node --test` on `integrations/pi/test/*.test.ts`, run by `./build.sh test`;
+they never start pi.
 
 **Layout.** One folder per extension under `extensions/`, shared code in `lib/`, and
 `extensions.json`, the manifest: each extension's name, whether it is required, and what it
@@ -93,8 +79,8 @@ does, in load order.
 | `notes` (optional, off) | `extensions/notes` | interactive and print runs, not pi-subagents children |
 | `skills/deckhand-desk` (Atlas) | `skills/desk` | `--skill`, Atlas only |
 
-pi's extension API usage is unchanged from pi-kit's. `lib/text.ts` carries the two helpers the
-rows need from pi-kit's shell and guardrails (`clip`, `redact`, `duration`).
+`lib/text.ts` carries the helpers the rows need from pi-kit's shell and guardrails (`clip`,
+`redact`, `duration`).
 
 **Loading** (`src/core/pi_integration.odin`). Every pi start (`start_pi`: a new tab, session or chat,
 Atlas, a restore, Restart, a dead tab's restart, a hot-reload restart) gets one
@@ -127,20 +113,18 @@ not it.
 
 ## 4. Overlap: how Deckhand steps back
 
-1. **Its own old copies: a namespace switch.** The bundled copy reads `DECKHAND_SOCKET`,
-   `DECKHAND_TOKEN`, `DECKHAND_CONTROL_TOKEN` and `DECKHAND_SHOTS_DIR`, keeps tokens under
-   `Symbol.for("deckhand.*")`, uses `deckhand:*` for its internal events
-   (`deckhand:command`, `deckhand:control:command`, `deckhand:control`, `deckhand:tab`) and
-   `/deckhand-reload`. Deckhand no longer sets `DECKHAND_SOCKET`, `DECKHAND_TOKEN` or
-   `DECKHAND_CONTROL_TOKEN` for pi tabs. pi-kit's desk-bridge and desk-browser switch on only with
-   `DECKHAND_SOCKET` + `DECKHAND_TOKEN` (or its `Symbol.for("pi-kit.desk-bridge.token")`), and desk
-   with `DECKHAND_SOCKET` + `DECKHAND_CONTROL_TOKEN`, so **every installed pi-kit goes inert by
-   itself**: no duplicate tools, no second bridge, nothing to edit. The internal event names had to
-   change too: pi-kit's bridge and desk register their `kit:desk:command` and
-   `kit:desk:control:command` listeners at load, active or not, and would answer "not connected"
-   first; its bridge registers `/desk-reload` at load. App tabs keep `DECKHAND_SOCKET` and
-   `DECKHAND_TOKEN` ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)), Claude tabs their own variables, and test
-   mode's `DECKHAND_*` (DEVELOPING.md) are unchanged.
+1. **pi-kit's desk extensions: a namespace switch.** The bundled copy reads `DECKHAND_SOCKET`,
+   `DECKHAND_TOKEN`, `DECKHAND_CONTROL_TOKEN` and `DECKHAND_SHOTS_DIR`, moves them out of
+   `process.env` at load (`adoptEnv`, `lib/protocol.ts`), keeps tokens under
+   `Symbol.for("deckhand.*")`, uses `deckhand:*` for its internal events (`deckhand:command`,
+   `deckhand:control:command`, `deckhand:control`, `deckhand:tab`) and `/deckhand-reload`. A pi
+   tab never gets `PI_DESK_SOCKET`, `PI_DESK_TOKEN` or `PI_DESK_CONTROL_TOKEN` (`socket_pi_env`),
+   and pi-kit's desk-bridge, desk-browser and desk switch on only with those, so **an installed
+   pi-kit goes inert by itself**: no duplicate tools, no second bridge, nothing to edit. The
+   internal event names differ too: pi-kit's bridge and desk register `kit:desk:command` and
+   `kit:desk:control:command` listeners at load, active or not, and its bridge registers
+   `/desk-reload`. App tabs ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)) and Claude tabs
+   ([CLAUDE.md](CLAUDE.md) §3) have their own variables.
 2. **The event bus as a public contract.** The bridge keeps emitting `kit:desk:mode` and accepting
    `kit:desk:panels` (now merged by panel name, so several producers can publish). pi-kit's
    sidebar keeps handing its panels over and doesn't draw its column in Deckhand. The mode is said
@@ -271,7 +255,7 @@ layout. The version bar keeps bare names (`harness_update_bare`), as a user type
 
 **Running one.** Only the user's click on **Install** or **Update**, one run at a time, in a
 terminal on the setup sheet's first step: the command shows before the click (on the row) and at
-the top of the output; the keyboard is the terminal's while it runs and shows (⌃C stops it; ⌘Q still quits;
+the top of the output; the keyboard is the terminal's while it runs and shows (⌃C stops it; ⌘Q still works;
 Enter is ignored for a second after the click, so the habitual Enter cannot answer a prompt);
 the sheet is modal until it ends: nothing moves the keyboard off it, an agent or the user's own
 menus (`set_focus`, closing the sheet, a job sheet are refused; anything else is undone on the next
@@ -299,18 +283,13 @@ the exact command as `"$@"` (`tests/scripts/fake-install.sh`); without it the ru
 and exits 127, and Deckhand's stderr says "test mode: refusing to run the real install command".
 Afterwards the existing "restart N idle tabs" bars take over for tabs on the old version.
 
-## 8. pi-kit after the move
+## 8. pi-kit
 
-**Moved into Deckhand:** desk-bridge, desk, desk-browser, and the panel producers from the sidebar.
-
-**Also in Deckhand, as optional extensions (Settings):** guardrails, shell, notes; and the desk
-skill, for Atlas.
-
-**Stays in pi-kit, optional, works in any terminal:** its own guardrails, shell and notes, the
-sidebar column, model-rules, versions, the other skills and the agents. In Deckhand they work next to the bundled
-integration. pi-kit's desk-bridge, desk and desk-browser are dead code once users run this
-Deckhand; removing them is a later pi-kit change. Atlas memory ([ATLAS.md](ATLAS.md) §6) is
-planned as part of Deckhand.
+pi-kit stays optional and works in any terminal: its own guardrails, shell and notes, the sidebar
+column, model-rules, versions, its other skills and its agents. In Deckhand they work next to the
+bundled integration (§4). pi-kit's desk-bridge, desk and desk-browser go inert in Deckhand (§4
+item 1) and can be removed from pi-kit. Atlas memory ([ATLAS.md](ATLAS.md) §6) is planned as
+part of Deckhand.
 
 ## 9. Not verified without a real pi
 

@@ -72,40 +72,36 @@ carry over, because Deckhand reads the same data folder. The old names keep work
 
 ## First run
 
-On the first start, a setup sheet walks you through:
-
-1. **Coding agents.** pi and Claude Code each list what they need and what is recommended (for
-   pi, two packages that fill its Todos and Subagents panels). Each **Install** or **Update**
-   shows its exact command first and runs only when you click it. Deckhand never runs `sudo`.
-2. **The main folder**, where your notes, jobs, memory, Atlas's prompt and chats live.
-3. **Chats**, inside the main folder or in a folder of their own.
-4. **Claude Code accounts**, if you have more than one.
-
-You can skip it and come back later from the gear or the menu bar (**Deckhand › Set up
-Deckhand…**). See [The first run](docs/GUIDE.md#the-first-run) in the guide.
-
-Started from the Dock or Finder, Deckhand reads your login shell's environment (`PATH`, Homebrew,
-variables from `~/.zshrc`), so agents and tools find what they would find in a terminal.
+On the first start, a setup sheet walks you through your coding agents (each **Install** or
+**Update** shows its exact command and runs only when you click it; Deckhand never runs `sudo`),
+the main folder for your notes, jobs, memory and chats, and your Claude Code accounts if you
+have several. You can skip it and reopen it from **Deckhand › Set up Deckhand…**. See
+[The first run](docs/GUIDE.md#the-first-run).
 
 ## Supported agents
 
 - **pi.** Deckhand loads its own pi integration into each pi it starts (`pi -e`, for that run
-  only) and writes nothing to pi's settings. It gives pi tabs status dots, panels, Atlas's tools,
-  comments, and browser and app-tab tools.
-- **Claude Code.** Deckhand starts `claude` with its bundled plugin (`--plugin-dir`), using your
-  own install, account and settings. Claude gets the same browser and app-tab tools through a
-  `deckhand` command, your comments with your next message, and resumes after a relaunch.
+  only) and writes nothing to pi's settings.
+- **Claude Code.** Deckhand starts your own `claude` with its bundled plugin (`--plugin-dir`),
+  with your own account and settings.
 
-[pi-kit](https://github.com/McFalljb/pi-kit) is an optional set of extras for pi (guardrails,
-background shells, session notes, skills). Deckhand does not need it. See
-[docs/HARNESSES.md](docs/HARNESSES.md) for what each integration does and how setup checks it.
+Both get status dots, comments, and tools for the browser and app tabs you give them.
+[pi-kit](https://github.com/McFalljb/pi-kit) is an optional set of extras for pi; Deckhand does
+not need it. See [docs/HARNESSES.md](docs/HARNESSES.md).
+
+## Sessions keep running
+
+Closing the window (⌘Q) does not stop your agents. Deckhand's sessions, jobs and Atlas run in a
+background process, **Deckhand Core**, and the window shows them again when you reopen it. An
+update keeps them running too. **Deckhand › Quit Deckhand and Stop All Sessions…** stops
+everything. See [How Deckhand runs](docs/GUIDE.md#how-deckhand-runs).
 
 ## Features
 
 - **Agent tabs**: pi and Claude Code in their full terminal UIs, with a status dot per tab and
   session (working, waiting for you, finished, error).
 - **Tabs per session**: shells, a code editor, a Markdown viewer, browser tabs and app tabs, next
-  to the agent's tab.
+  to the agent's tab, in split panes if you like.
 - **Projects and sessions**: a sidebar with projects, sessions and chats, pins and a filter.
   Sessions reopen where you left them.
 - **Files and Changes**: a file tree per project and a git view to stage, discard and commit.
@@ -125,8 +121,8 @@ troubleshooting. The guide is also built into the app (**Help › Deckhand user 
 ## Updating
 
 Deckhand checks GitHub Releases and offers new versions in the app. Each update is checked
-against a signature before it is installed. See [Updates](docs/GUIDE.md#updates). pi-desk 0.1.x
-does not update to Deckhand; see [Coming from pi-desk](#coming-from-pi-desk).
+against its signature before it is installed. Your sessions keep running through the update:
+browser pages reload and app tabs restart. See [Updates](docs/GUIDE.md#updates).
 
 ## Building from source
 
@@ -140,8 +136,8 @@ cd deckhand
 ./build.sh test   # unit tests
 ```
 
-[docs/DEVELOPING.md](docs/DEVELOPING.md) covers the build, the architecture, the tests and the
-release process. To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
+[docs/DEVELOPING.md](docs/DEVELOPING.md) covers the build, the architecture, code signing and
+releases. To contribute, see [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Documentation
 
@@ -160,10 +156,11 @@ Design and reference:
 - [TAB-PROTOCOL.md](docs/TAB-PROTOCOL.md): how a program becomes a Deckhand tab (draft).
 - [ENGINE-BRIDGE.md](docs/ENGINE-BRIDGE.md): a game engine in an app tab (design draft).
 - [ROADMAP.md](docs/ROADMAP.md): what is done and what comes next.
+- [plans/](docs/plans/): design records (the background core, split panes).
 
 For contributors:
 
-- [DEVELOPING.md](docs/DEVELOPING.md): building, architecture and releases.
+- [DEVELOPING.md](docs/DEVELOPING.md): building, architecture, signing and releases.
 - [TESTING.md](docs/TESTING.md): unit tests, test-mode scenes and CI.
 - [CONTRIBUTING.md](CONTRIBUTING.md) and [SECURITY.md](SECURITY.md).
 - Integration sources: [integrations/pi](integrations/pi/README.md) and

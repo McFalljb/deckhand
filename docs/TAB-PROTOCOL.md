@@ -25,8 +25,8 @@ annotation boxes, focus rings) and shortcuts keep working on top.
 sokol_gfx supports wrapping native textures ("ADVANCED TOPIC: Injecting native 3D-API textures"
 in `vendor/sokol-odin/sokol/c/sokol_gfx.h`). Frame handshake: the program signals "frame ready"
 (control channel event or a shared fence); Deckhand redraws on it, so idle tabs cost nothing. The
-size follows the tab's pane (its own pane when the session is split): Deckhand sends `resize{w, h, scale}`; the program reallocates or Deckhand
-hands it a new surface.
+size follows the tab's pane: Deckhand sends `resize{w, h, scale}`; the program reallocates or
+Deckhand hands it a new surface.
 
 Fallback: **native child view.** The program's own view is attached to the window's native
 handle (`sapp_macos_get_window`, `sapp_win32_get_hwnd`, `sapp_x11_get_window`) and positioned
@@ -61,7 +61,9 @@ The program exposes commands, state and events over the envelope in [PROTOCOL.md
 (NDJSON, `{id, type, v, …}`, `hello` with version and token). Deckhand starts the program with
 `DECKHAND_SOCKET` and a per-tab `DECKHAND_TOKEN`, or connects to an address the program announces.
 The program speaks first (`hello`); Deckhand's hello reply is the first line it gets, and nothing
-(requests, `input`) is sent before that reply.
+(requests, `input`) is sent before that reply. The token and the socket are the core's; the
+program itself is a child of the window, which draws its frames, so it stops when the window
+closes ([How Deckhand runs](GUIDE.md#how-deckhand-runs)).
 Which requests a program answers is its own business: Deckhand passes any method through
 (`app_call {method, params}`, PROTOCOL.md) and keeps only `tab.quit`, `tab.visible` and `tab.display` for itself.
 Agents ask the program with `tab.describe` first. Suggested common requests:
@@ -84,7 +86,7 @@ in logical px) for Deckhand's Inspect overlay.
 
 | Tab | Display | Input | Control |
 |---|---|---|---|
-| terminal (pi, shell, Claude) | drawn by Deckhand from libghostty-vt in process | encoded by libghostty-vt to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md) |
+| terminal (pi, shell, Claude) | drawn by the window from its own libghostty-vt copy, fed by the core (PROTOCOL.md §5a) | encoded by the window, sent to the core, which writes it to the PTY | pi tabs: the bridge (PROTOCOL.md §4); Claude tabs: the plugin's hooks and `deckhand` CLI (CLAUDE.md) |
 | markdown | drawn by Deckhand (own parser, `src/markdown.odin`) | Deckhand | Deckhand commands (open, scroll, find) |
 | game engine | texture, via a small Odin package linked into the engine | forwarded input events | the package implements `tab.*`: this **is** the engine bridge ([ENGINE-BRIDGE.md](ENGINE-BRIDGE.md)): inspect/set state, pause/step, capture, inject input, hit test |
 | browser | CEF off-screen rendering into the texture | forwarded to CEF | Chrome DevTools Protocol behind an adapter that answers `tab.*` (hit test, capture, act) |
@@ -94,16 +96,14 @@ in logical px) for Deckhand's Inspect overlay.
 
 `src/tabhost.odin` has the in-process interface as types: `Tab_Display` and `Tab_View` (draw,
 texture, input, capture, control), and `tab_view(kind)` picks the host for each tab kind. The
-frame draws each pane's shown tab (one per pane when the session is split) through `tab_view(kind).draw`. Terminal, editor, Changes and Markdown
+frame draws each pane's shown tab through `tab_view(kind).draw`. Terminal, editor, Changes and Markdown
 tabs are `.Drawn`; browser tabs (`src/browser.odin`) and app tabs (`src/app_tab.odin`, frames
 over IOSurface) are `.Texture` and draw their texture themselves. Input is routed per tab kind in
-`main.odin`, and an app's control requests go through `app_call` on the socket (PROTOCOL.md), not
-through `Tab_View.control`. Clay `.Image` render commands are not used (`ui_draw`).
+`main.odin`, and an app's control requests go through `app_call` on the core's socket
+(PROTOCOL.md), not through `Tab_View.control`. Clay `.Image` render commands are not used (`ui_draw`).
 
 ## Open questions
 
 - Who allocates the shared surface (Deckhand, so it controls size and format, is the default) and
   how a crashed program's surface is released.
 - Linux: dmabuf import needs EGL; sokol's Linux backend uses GLX by default.
-- Whether a separate window process (the planned process split, [ROADMAP.md](ROADMAP.md))
-  renders the same tab protocol textures from the core, or each window imports them directly.

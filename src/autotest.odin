@@ -1329,7 +1329,12 @@ FRAMES_OFF_MAX :: 90 * time.Second
 script_frames_off :: proc() -> bool {
 	at := &autotest
 	if !at.frames_off do return false
-	if time.tick_diff(at.frames_back, time.tick_now()) < 0 do return true
+	if time.tick_diff(at.frames_back, time.tick_now()) < 0 {
+		// sokol's frame goes on after ours and would carry out a quit (it closes the window): drop
+		// the request, as a frame that never runs would never see it (core_quit_stalled's case)
+		sapp.cancel_quit()
+		return true
+	}
 	at.frames_off = false
 	script_fail(fmt.tprintf("TIMEOUT: frames off for %v and the script did not move on (nothing ticked the core: core_loop.odin's timer)", FRAMES_OFF_MAX))
 	return false

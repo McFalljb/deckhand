@@ -20,6 +20,9 @@ app_frames_called: u64 // frame callbacks, drawn or not (frame-pause measurement
 
 CORE_IDLE_AFTER :: 50 * time.Millisecond // no frame for this long: the timer ticks the core
 CORE_TIMER_EVERY :: 50 * time.Millisecond // the timer's period (platform.core_timer)
+CORE_TIMER_SLOW :: 500 * time.Millisecond // ...after CORE_IDLE_SLOW_AFTER of ticks with nothing going on
+CORE_IDLE_SLOW_AFTER :: 3 * time.Second
+QUIT_STALL_AFTER :: 200 * time.Millisecond // a quit waiting this long for a frame: the timer closes the window
 OUTPUT_ACTIVE_FOR :: 2 * time.Second // a terminal's output this recent holds off App Nap (Q11)
 
 // The core loop's own state (main thread only).
@@ -27,7 +30,9 @@ Core_Loop :: struct {
 	ticking:     bool, // core_tick runs now
 	frame_depth: int, // frame() runs now (a modal loop it started may call frame() again)
 	missed:      bool, // a call came while ticking or in a frame: run once that ends
-	last_frame:  time.Tick, // the last frame's start; {} = none yet
+	last_frame:  time.Tick, // the last frame's end (its start while it runs); {} = none yet
+	period:      time.Duration, // the timer's period now (CORE_TIMER_EVERY or CORE_TIMER_SLOW); 0 = not started
+	idle_since:  time.Tick, // the timer's ticks have found nothing going on since; {} = something is
 	stopped:     bool, // the timer does nothing more (quitting)
 	timer_ticks: u64, // ticks the timer ran (test mode logs it: hidden-window.sh)
 	skipped:     u64, // timer fires skipped because a tick or a frame ran
@@ -78,8 +83,10 @@ core_tick :: proc() {
 core_frame_begin :: proc(now: time.Tick) {
 	core_loop.frame_depth += 1
 	core_loop.last_frame = now
+	core_loop_wake() // frames are back: the timer at its fast pace for when they stop
 }
-core_frame_end :: proc() {
+core_frame_end :: proc(now: time.Tick) {
+	core_loop.last_frame = now // the 50 ms count from here: a long frame just ran the core
 	core_loop.frame_depth -= 1
 	if core_loop.frame_depth > 0 do return
 	core_loop.frame_depth = 0
@@ -109,13 +116,54 @@ core_timer_fire :: proc(now: time.Tick) -> bool {
 	if !core_timer_due(now) do return false
 	core_loop.timer_ticks += 1
 	core_tick()
+	// nothing going on for a while (hidden and idle): a slower pace, back at once when there is
+	if core_loop_busy() {
+		core_loop_wake()
+	} else if core_loop.idle_since == {} {
+		core_loop.idle_since = now
+	} else if time.tick_diff(core_loop.idle_since, now) >= CORE_IDLE_SLOW_AFTER {
+		core_timer_set(CORE_TIMER_SLOW)
+	}
 	return true
+}
+
+// What the slow pace would delay: a terminal's recent output or a running job (activity_hold),
+// the token's clipboard clear, the holder's attach retry. (Jobs' and Claude waits' own timers,
+// socket commands and other threads' work arrive through the inbox: core_loop_wake.)
+core_loop_busy :: proc() -> bool {
+	return activity_reasons != {} || control_token_clip.deadline != {} || hc.successor_retry != {}
+}
+
+// Main thread: a frame, or a wake (work in the inbox): the timer back at its fast pace.
+core_loop_wake :: proc() {
+	core_loop.idle_since = {}
+	if core_loop.period != 0 do core_timer_set(CORE_TIMER_EVERY)
+}
+
+// A quit sokol would carry out from its next frame (it closes the window), while no frame has run
+// for QUIT_STALL_AFTER (minimised, App Nap): the window side closes the window itself. Never
+// inside a frame or a tick, nor once the quit went through (core_loop_stop).
+core_quit_stalled :: proc(now: time.Tick) -> bool {
+	if !app_quitting || core_loop.stopped || core_loop.frame_depth > 0 || core_loop.ticking do return false
+	return core_loop.last_frame == {} || time.tick_diff(core_loop.last_frame, now) >= QUIT_STALL_AFTER
+}
+
+@(private = "file")
+core_timer_fire_now :: proc() {core_timer_fire(time.tick_now())}
+
+// The timer's period, set on the platform's timer only when it changes.
+@(private = "file")
+core_timer_set :: proc(every: time.Duration) {
+	if core_loop.period == every do return
+	core_loop.period = every
+	if platform.core_timer != nil do platform.core_timer(every, core_timer_fire_now)
 }
 
 // Main thread, once init is done: the platform's timer starts (nil in unit tests: nothing).
 core_loop_start :: proc() {
 	core_loop.stopped = false
-	if platform.core_timer != nil do platform.core_timer(CORE_TIMER_EVERY, proc() {core_timer_fire(time.tick_now())})
+	core_loop.period, core_loop.idle_since = 0, {}
+	core_timer_set(CORE_TIMER_EVERY)
 }
 
 // Quitting: the timer does nothing more.

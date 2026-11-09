@@ -84,20 +84,20 @@ core_loop_timer_skips_frames :: proc(t: ^testing.T) {
 	testing.expect_value(t, probe.runs, 0)
 	core_frame_begin(at(600)) // a frame from inside that modal loop
 	testing.expect(t, !core_timer_fire(at(700)))
-	core_frame_end()
+	core_frame_end(at(700))
 	testing.expect_value(t, probe.runs, 0) // still inside the outer frame
-	core_frame_end()
+	core_frame_end(at(710))
 	testing.expect_value(t, probe.runs, 1) // the skipped tick, once, after the frame
 	testing.expect_value(t, core_loop.skipped, 2)
 	testing.expect(t, !core_loop.missed)
 	// a frame with no timer call in it runs nothing extra at its end
 	core_frame_begin(at(800))
-	core_frame_end()
+	core_frame_end(at(800))
 	testing.expect_value(t, probe.runs, 1)
 	// a tick from inside a frame (frame() calls core_tick) runs at once
 	core_frame_begin(at(900))
 	core_tick()
-	core_frame_end()
+	core_frame_end(at(900))
 	testing.expect_value(t, probe.runs, 2)
 }
 
@@ -109,7 +109,7 @@ core_loop_idle_rule :: proc(t: ^testing.T) {
 	defer loop_restore(l, s, q)
 	testing.expect(t, core_timer_fire(at(0)), "no frame yet: ticks") // before the first frame
 	core_frame_begin(at(10))
-	core_frame_end()
+	core_frame_end(at(10))
 	testing.expect(t, !core_timer_fire(at(30)))
 	testing.expect(t, !core_timer_fire(at(59))) // 49 ms
 	testing.expect(t, core_timer_fire(at(60))) // 50 ms
@@ -120,7 +120,7 @@ core_loop_idle_rule :: proc(t: ^testing.T) {
 	// frames are back (60 Hz): the timer stays out
 	for i in 0 ..< 10 {
 		core_frame_begin(at(200 + 16 * i))
-		core_frame_end()
+		core_frame_end(at(200 + 16 * i + 2))
 		testing.expect(t, !core_timer_fire(at(200 + 16 * i + 8)))
 	}
 	testing.expect_value(t, probe.runs, 4)
@@ -134,7 +134,7 @@ core_loop_idle_rule :: proc(t: ^testing.T) {
 	testing.expect(t, !core_timer_fire(at(10_000)))
 	core_frame_begin(at(10_001))
 	core_loop.missed = true
-	core_frame_end()
+	core_frame_end(at(10_001))
 	testing.expect_value(t, probe.runs, 4) // nor after a frame
 }
 
@@ -189,4 +189,78 @@ core_loop_tick_clears_token_clipboard :: proc(t: ^testing.T) {
 	testing.expect(t, core_timer_fire(at(0)), "the timer did not tick")
 	testing.expect_value(t, cleared, 7)
 	testing.expect(t, control_token_clip.deadline == {})
+}
+
+// The 50 ms count from a frame's end, not its start: a 70 ms frame, then the timer 5 ms later,
+// must not tick (a frame just ran the core).
+@(test)
+core_loop_idle_from_frame_end :: proc(t: ^testing.T) {
+	l, s, q := loop_setup()
+	defer loop_restore(l, s, q)
+	core_frame_begin(at(0))
+	core_frame_end(at(70))
+	testing.expect(t, !core_timer_fire(at(75)), "ticked 5 ms after a frame ended")
+	testing.expect(t, !core_timer_fire(at(119)))
+	testing.expect(t, core_timer_fire(at(120)))
+	testing.expect_value(t, probe.runs, 1)
+}
+
+// A quit that frames would carry out (sokol closes the window from a frame) while no frame runs
+// (minimised, App Nap): after QUIT_STALL_AFTER the timer says to close the window itself.
+@(test)
+core_loop_quit_stalled :: proc(t: ^testing.T) {
+	l, s, q := loop_setup()
+	defer loop_restore(l, s, q)
+	core_frame_begin(at(0))
+	core_frame_end(at(10))
+	testing.expect(t, !core_quit_stalled(at(1000)), "not quitting")
+	app_quitting = true
+	testing.expect(t, !core_quit_stalled(at(150)), "frames may still come")
+	testing.expect(t, core_quit_stalled(at(210)))
+	core_frame_begin(at(300)) // inside a frame (a modal loop): never
+	testing.expect(t, !core_quit_stalled(at(600)))
+	core_frame_end(at(600))
+	core_loop_stop() // the quit went through (QUIT_REQUESTED, cleanup)
+	testing.expect(t, !core_quit_stalled(at(2000)))
+}
+
+// After CORE_IDLE_SLOW_AFTER of timer ticks with nothing going on, the timer slows to
+// CORE_TIMER_SLOW; a frame, a wake or something going on brings it back to CORE_TIMER_EVERY.
+@(test)
+core_loop_timer_backs_off :: proc(t: ^testing.T) {
+	@(static) periods: [dynamic]time.Duration
+	clear(&periods)
+	l, s, q := loop_setup()
+	defer loop_restore(l, s, q)
+	saved_platform, saved_reasons, saved_clip := platform, activity_reasons, control_token_clip
+	defer {platform, activity_reasons, control_token_clip = saved_platform, saved_reasons, saved_clip}
+	activity_reasons, control_token_clip = {}, {}
+	platform = {core_timer = proc(every: time.Duration, fire: proc()) {append(&periods, every)}}
+	core_loop_start()
+	testing.expect_value(t, len(periods), 1)
+	testing.expect_value(t, periods[0], CORE_TIMER_EVERY)
+	ms := 0
+	for ; ms < 2900; ms += 50 do core_timer_fire(at(ms))
+	testing.expect_value(t, len(periods), 1) // under 3 s idle: still 50 ms
+	for ; ms < 3200; ms += 50 do core_timer_fire(at(ms))
+	testing.expect_value(t, len(periods), 2)
+	testing.expect_value(t, periods[1], CORE_TIMER_SLOW)
+	core_timer_fire(at(ms + 500)) // slow and idle: nothing changes
+	testing.expect_value(t, len(periods), 2)
+	core_loop_wake() // a command from another thread
+	testing.expect_value(t, len(periods), 3)
+	testing.expect_value(t, periods[2], CORE_TIMER_EVERY)
+	for ms = 10_000; ms < 13_500; ms += 50 do core_timer_fire(at(ms)) // slow again
+	testing.expect_value(t, periods[len(periods) - 1], CORE_TIMER_SLOW)
+	core_frame_begin(at(20_000)) // frames are back
+	core_frame_end(at(20_010))
+	testing.expect_value(t, periods[len(periods) - 1], CORE_TIMER_EVERY)
+	for ms = 30_000; ms < 33_500; ms += 50 do core_timer_fire(at(ms))
+	testing.expect_value(t, periods[len(periods) - 1], CORE_TIMER_SLOW)
+	control_token_clip.deadline = time.tick_add(time.tick_now(), time.Hour) // a clear to come: busy
+	core_timer_fire(at(34_000))
+	testing.expect_value(t, periods[len(periods) - 1], CORE_TIMER_EVERY)
+	control_token_clip = {}
+	delete(periods)
+	periods = nil
 }

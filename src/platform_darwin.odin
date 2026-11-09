@@ -58,7 +58,10 @@ on_wake :: proc "c" (ctx: rawptr) {
 	defer free_all(context.temp_allocator)
 	sync.atomic_store(&wake_pending, false)
 	app.wakes += 1
-	if app.ready do core.inbox_drain()
+	if app.ready {
+		core.core_loop_wake() // work came in: the core loop's timer at its fast pace
+		core.inbox_drain()
+	}
 }
 
 // Runs p from the main queue: outside sokol's event and frame callbacks
@@ -78,21 +81,27 @@ core_timer_proc: proc()
 
 // The core loop's timer (core_loop.odin): fire every `every` from the main queue, which runs while
 // sokol's frames are slowed or stopped (hidden, minimised, App Nap) and in modal loops too (the
-// core's guard keeps it out of frame() and the loops frame() started). Some leeway lets macOS
-// coalesce its wakeups. Once: a second call changes only what it fires.
+// core's guard keeps it out of frame() and the loops frame() started). Half a period of leeway
+// lets macOS coalesce its wakeups. A second call sets the period and what it fires (the core slows
+// it while idle). A quit that waits for a frame none runs: the window closed here (core_quit_stalled).
 platform_core_timer :: proc(every: time.Duration, fire: proc()) {
 	core_timer_proc = fire
-	if core_timer_source != nil do return
+	ns := u64(every)
+	if core_timer_source != nil {
+		dispatch_source_set_timer(core_timer_source, dispatch_time(0, i64(ns)), ns, ns / 2)
+		return
+	}
 	src := dispatch_source_create(&_dispatch_source_type_timer, 0, 0, &dispatch_main_q)
 	if src == nil do return
-	ns := u64(every)
-	dispatch_source_set_timer(src, dispatch_time(0, i64(ns)), ns, ns / 5)
+	dispatch_source_set_timer(src, dispatch_time(0, i64(ns)), ns, ns / 2)
 	dispatch_source_set_event_handler_f(src, proc "c" (ctx: rawptr) {
 		context = core.app_context
 		// a guard, not free_all: in a modal loop the temp memory of the frame or tick that started
 		// it is still in use (the fire is skipped then, but this handler still runs)
 		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
 		if app.ready && core_timer_proc != nil do core_timer_proc()
+		// sokol closes the window (its quit) only from a frame: none came (minimised, App Nap)
+		if app.ready && core.core_quit_stalled(time.tick_now()) do window_close()
 	})
 	dispatch_resume(src)
 	core_timer_source = src
@@ -113,6 +122,7 @@ window_send_back :: proc() {intrinsics.objc_send(nil, window(), "orderBack:", ra
 window_set_content_size :: proc(w, h: f32) {
 	intrinsics.objc_send(nil, window(), "setContentSize:", NS.Size{NS.Float(w), NS.Float(h)})
 }
+window_close :: proc() {intrinsics.objc_send(nil, window(), "performClose:", rawptr(nil))}
 window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", rawptr(nil))}
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
@@ -197,7 +207,8 @@ platform_display_link_fps :: proc() -> f32 {return dh_mac_display_link_fps()}
 // Test mode: report this rate as the screen's (0 = the real one).
 platform_test_display_fps :: proc(fps: int) {dh_mac_test_display_fps(c.int(fps))}
 
-// While a job runs: no App Nap (timers on time; the system may still sleep).
+// While a job runs or a terminal had output in the last 2 s (activity_hold): no App Nap (timers on
+// time; the system may still sleep).
 platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
 
 // Quiet test mode, before sokol starts: never activates, window off-screen

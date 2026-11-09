@@ -197,7 +197,8 @@ platform_app :: proc() -> core.Platform {
 
 // Ends the run as sokol does, from its next frame, by closing the window. AppKit never closes a
 // window while the app is hidden (⌘H): the quit would wait until the user showed it again, so it is
-// shown first (without taking focus).
+// shown first (without taking focus): the window shows for a moment before it closes. With no
+// frames at all (minimised, App Nap), the core loop's timer closes it (core_quit_stalled).
 app_request_quit :: proc() {
 	if app_is_hidden() do app_unhide()
 	sapp.request_quit()
@@ -311,7 +312,7 @@ frame :: proc "c" () {
 
 	if script_frames_off() do return // test mode: as if macOS stopped calling frame() (autotest.odin)
 	core.core_frame_begin(time.tick_now()) // the core loop's timer stays out of frames (core_loop.odin)
-	defer core.core_frame_end() // and runs a tick it skipped meanwhile
+	defer core.core_frame_end(time.tick_now()) // and runs a tick it skipped meanwhile
 	core.app_frames_called += 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)

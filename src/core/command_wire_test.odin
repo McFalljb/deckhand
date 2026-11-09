@@ -28,6 +28,7 @@ ui_command_fill :: proc(i, round: int) -> Command {
 	f := Sw_Fill{n = round * 7, a = context.temp_allocator}
 	cmd: Command
 	sw_fill_variant(&cmd, type_info_of(Command), i, &f)
+	awkward_floats(&cmd, type_info_of(Command), round) // no short decimals: a rounding writer shows
 	// fields whose text must itself be JSON
 	#partial switch &c in cmd {
 	case App_Call:
@@ -41,6 +42,27 @@ ui_command_fill :: proc(i, round: int) -> Command {
 		c.modifiers &= 1 << len(ACT_MOD_NAMES) - 1 // only the bits that have a name
 	}
 	return cmd
+}
+
+// Every float in v gets a value with no short decimal form (0.4123457...), whatever the fill
+// gave it, so a writer that rounds (%.3f) loses it and the round trip says so.
+@(private = "file")
+awkward_floats :: proc(data: rawptr, ti: ^runtime.Type_Info, round: int) {
+	#partial switch v in ti.variant {
+	case runtime.Type_Info_Named:
+		awkward_floats(data, v.base, round)
+	case runtime.Type_Info_Struct:
+		for k in 0 ..< int(v.field_count) do awkward_floats(rawptr(uintptr(data) + v.offsets[k]), v.types[k], round)
+	case runtime.Type_Info_Float:
+		x := 0.41234567 + f64(round)
+		if ti.size == 4 do (^f32)(data)^ = f32(x)
+		else do (^f64)(data)^ = x
+	case runtime.Type_Info_Union:
+		if reflect.union_variant_typeid(any{data, ti.id}) == nil do return
+		tag := reflect.get_union_variant_raw_tag(any{data, ti.id})
+		idx := v.no_nil ? tag : tag - 1
+		if idx >= 0 && idx < i64(len(v.variants)) do awkward_floats(data, v.variants[idx], round)
+	}
 }
 
 @(test)

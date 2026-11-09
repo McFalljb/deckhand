@@ -1009,6 +1009,14 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
 		obj_end(&w)
 		return
+	// the log rounds the ratio to 3 decimals: a pixel off in a pane's width
+	case Set_Split:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "split", c.split)
+		kv_f32(&w, "ratio", c.ratio)
+		obj_end(&w)
+		return
 	// fields the log writes as a count or redacts: the whole command here
 	case New_Claude_Tab:
 		w := obj_begin(b)

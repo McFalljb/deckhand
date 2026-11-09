@@ -41,9 +41,13 @@ run() { # NAME HOME [VAR=VALUE...]
   name=$1 home=$2
   shift 2
   mkdir -p "$W/data-$name"
+  rt=$(mktemp -d "${TMPDIR:-/tmp}/dkhs.XXXXXX") # a short runtime dir: a socket path in it must fit sun_path
   env -u PI_KIT_NOTES_DIR -u DECKHAND_CMD -u DECKHAND_INSTALL_CMD HOME="$home" CFFIXED_USER_HOME="$home" SHELL=/bin/sh \
-    DECKHAND_SCRIPT="tests/scripts/harness-setup-$name.txt" DECKHAND_DATA_DIR="$W/data-$name" DECKHAND_FIRST_RUN=1 \
+    DECKHAND_SCRIPT="tests/scripts/harness-setup-$name.txt" DECKHAND_DATA_DIR="$W/data-$name" DECKHAND_RUNTIME_DIR="$rt" DECKHAND_FIRST_RUN=1 \
     "$@" build/deckhand > "$W/run-$name.log" 2>&1 || true
+  # a separate core (DECKHAND_SEPARATE_CORE=1) logs in its own file: read with the run's
+  cat "$rt/core.log" >> "$W/run-$name.log" 2>/dev/null || true
+  rm -rf "$rt"
   grep -E "ASSERT FAILED|done:|TIMEOUT|no element|unknown command" "$W/run-$name.log" || true
   if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command" "$W/run-$name.log" || ! grep -q "done:" "$W/run-$name.log"; then echo "FAILED: run $name ($W/run-$name.log)"; fail=1; fi
 }
@@ -75,8 +79,8 @@ printf '#!/bin/sh\nexit 1\n' > "$H3/.npm-global/bin/npm"
 chmod 755 "$H3/.npm-global/bin/npm"
 fake_claude "$H3" "$H3/.local/share/claude/versions/2.1.100"
 run old "$H3"
-# (a separate core says it in its own log: DECKHAND_SEPARATE_CORE=1)
-chk "test mode refused the real update" 'grep -qs "test mode: refusing to run the real install command" "$W/run-old.log" "$W/data-old/run/core.log"'
+# (a separate core says it in its own log, read with the run's)
+chk "test mode refused the real update" 'grep -qs "test mode: refusing to run the real install command" "$W/run-old.log"'
 chk "nothing ran" '[ ! -e "$H3/install-argv.txt" ]'
 
 # 4. nix and mise: shown only

@@ -1067,7 +1067,8 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   `tab_host.call` waits 250 ms for the window's answer (as a `window.request`), so an agent's
   `new_app_tab` gets its `created_id` at once as in process; the window's own pending commands get
   their `finished`. Test mode: a script line keeps its caller (`as`), and every state read first
-  waits until the core ran what the window sent (`client_barrier`).
+  waits until the core ran what the window sent (`client_barrier`); the core's half of a script
+  line (`jobs_clock`, `detach_window`) goes as `script.core`.
 - **Claude tabs and the keyboard:** Core.app's CLI is `MacOS/deckhand` (`claude_cli_path` finds
   it, so the hooks get `DECKHAND_CLI`). `Tab.live` also carries a Claude tab's typed flag, its
   status bar's text (the core's dismissals and update command) and its background count

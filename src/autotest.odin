@@ -204,6 +204,7 @@ Autotest :: struct {
 	wait_until:   time.Tick,
 	waiting_for:  string,
 	wait_state:   [2]string, // waitstate: path, value (owned; "" = none)
+	wait_state_at: u64, // a separate core: app.frames_drawn when it was first reached (0: not yet)
 	wait_exit:    bool,
 	pending_shot: string,
 	deadline:     time.Tick,
@@ -577,6 +578,13 @@ autotest_step :: proc() {
 	}
 	if at.wait_state[0] != "" {
 		got := core.json_path(script_state_json(), at.wait_state[0])
+		// a separate core: the delta that reached it came after this frame's layout, so one more
+		// frame lays it out (the panes' rects) before the next line reads it, as in process
+		if got == at.wait_state[1] && client_separate() && (at.wait_state_at == 0 || app.frames_drawn <= at.wait_state_at) {
+			if at.wait_state_at == 0 do at.wait_state_at = app.frames_drawn
+			app.redraw = true
+			return
+		}
 		if got == at.wait_state[1] {
 			log("state reached:", at.wait_state[0], "=", got)
 		} else if time.tick_diff(at.deadline, now) > 0 {
@@ -586,7 +594,7 @@ autotest_step :: proc() {
 		}
 		delete(at.wait_state[0])
 		delete(at.wait_state[1])
-		at.wait_state = {}
+		at.wait_state, at.wait_state_at = {}, 0
 	}
 	if at.waiting_for != "" {
 		if strings.contains(screen_text(), at.waiting_for) {
@@ -721,13 +729,16 @@ autotest_step :: proc() {
 			at.deadline = time.tick_add(time.tick_now(), time.Duration(num(ms_s)) * time.Millisecond)
 			return
 		case "jobs_clock": // jobs_clock SECONDS: the jobs' clock moves on, then a due check
-			core.jobs_clock_advance(i64(num(rest)))
+			if client_separate() do script_on_core(line) // the scheduler is the core's
+			else do core.jobs_clock_advance(i64(num(rest)))
 		case "window_active": // window_active on|off: as if Deckhand were in front or behind
 			app.window_active = strings.trim_space(rest) == "on"
 		case "detach_window": // the window plays gone (M4's no-window cases): the core answers no_window for its tabs
-			client_detach() // client.odin
+			if client_separate() do script_on_core(line) // the core plays it: the script's lines still go over the link
+			else do client_detach() // client.odin
 		case "attach_window": // ...and comes back: the whole state again, its pages and apps as they were
-			client_reattach()
+			if client_separate() do script_on_core(line)
+			else do client_reattach()
 		case "jobs_ui": // jobs_ui OPEN_ID [limits]: open a row (and the limits) on the Jobs tab
 			jobs_ui_set(len(args) > 0 && args[0] != "-" ? args[0] : "", len(args) > 1 && args[1] == "limits")
 		case "replace_in_file": // replace_in_file PATH OLD|NEW: an outside edit (another editor, an agent)
@@ -1466,6 +1477,21 @@ script_show_again :: proc() {
 script_write_step :: proc(idx: int, line: string) {
 	text := fmt.tprintf("%s:%d: %s\n", autotest.path, idx + 1, line)
 	_ = os.write_entire_file(autotest.step_file, transmute([]u8)text)
+}
+
+// A script line whose work is in the core's process, sent to a separate core (window_link.odin's
+// script_core_line), its result waited for.
+script_on_core :: proc(line: string) {
+	client_facts()
+	id := client_next_id()
+	client_send_raw(core.window_msg_script_core(line, id))
+	start := time.tick_now()
+	for !(id in client.results) && !client.lost && time.tick_since(start) < SCRIPT_CORE_WAIT do client_io(20)
+	if !(id in client.results) {
+		script_fail("the background core did not answer:", line)
+		return
+	}
+	if r := client_take_result(id); !r.ok do script_fail(line, "in the core:", r.error)
 }
 
 // A script's quit with a separate core: the core quits as an in-process Deckhand would (Quit,

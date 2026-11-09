@@ -62,7 +62,18 @@ holder_restart_text :: proc(r: Holder_Upgrade_Result, auto := false) -> (msg: st
 	return fmt.aprintf("Session holder not %s: %s. Sessions run on as before", auto ? "upgraded" : "restarted", r.error), true
 }
 
+// The palette's Restart, from a window in another process (WINDOW_COMMANDS; in process the
+// window calls holder_restart_start itself). Its outcome is a toast, as there.
+Holder_Restart :: struct {}
+
+// Restart is offered: the core's (a replica's live section) or this process's.
+holder_restart_offered :: proc() -> bool {
+	if replica_process do return state.live.holder_restart
+	return holder_restart_available()
+}
+
 holder_restart_start :: proc() {
+	if !holder_restart_available() do return
 	if !holder_upgrade_run(false) do window_toast("The session holder is already restarting")
 }
 

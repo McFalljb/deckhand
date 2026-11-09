@@ -358,15 +358,15 @@ ACTIONS := [?]Action {
 	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (core.Command, bool) {
 		return core.Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
 	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}},
-	// development builds only (holder_restart.odin): the session holder re-execs into this build's
-	// holder binary in place; sessions keep running
+	// development builds only (holder_restart.odin, the core's): the session holder re-execs into
+	// this build's holder binary in place; sessions keep running
 	{id = "restart_session_holder", label = "Restart session holder", make = proc() -> (core.Command, bool) {
-		return nil, core.holder_restart_available()
-	}, ui = core.holder_restart_start, detail = proc() -> string {return "development build: upgrade in place, sessions keep running"}},
+		return nil, core.holder_restart_offered()
+	}, ui = proc() {client_internal(core.Holder_Restart{})}, detail = proc() -> string {return "development build: upgrade in place, sessions keep running"}},
 	// development builds only (client.odin, tabhost_route.odin): the window plays gone, so agents'
 	// page, app and file-view calls answer no_window (M4's case, now); Attach window brings it back
 	{id = "detach_window", label = "Detach window", make = proc() -> (core.Command, bool) {
-		return nil, core.TEST_HOOKS && client.attached
+		return nil, core.TEST_HOOKS && client.attached && !client_separate() // a separate core's window: ⌘Q closes it for real
 	}, ui = client_detach, detail = proc() -> string {return "development build: agents' page and app calls answer no_window"}},
 	{id = "attach_window", label = "Attach window", make = proc() -> (core.Command, bool) {
 		return nil, core.TEST_HOOKS && client.detached

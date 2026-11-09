@@ -32,7 +32,7 @@ Tab_View :: struct {
 // Terminal tabs (pi and shell): libghostty-vt in process, drawn by us.
 terminal_host := Tab_View {
 	display = .Drawn,
-	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := core.term_of(tab_id); t != nil do term_draw(t)},
+	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := term_view_of(tab_id); t != nil do term_draw(t)}, // the window's copy (term_view_stream.odin)
 }
 
 tab_view :: proc(kind: core.Tab_Kind) -> ^Tab_View {

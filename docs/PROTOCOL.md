@@ -1140,8 +1140,32 @@ results and reads State at once). The delta before a result compares every secti
 changes that bumped no version (a parked or consumed confirmation). In process the wait is nil;
 M4 bounds it (250 ms, then the call shows as pending).
 
+**Terminal streams** (design §5.5, M3-H; `src/core/term_stream.odin`, `src/term_view_stream.odin`).
+The window keeps its own copy of each terminal it shows, fed on a channel of its own (≥ 1) with
+exactly the bytes the core's terminal parses; the core alone answers the program's queries and sets
+the size. A tab hidden for 2 s detaches.
+
+| from | message or frame | |
+|---|---|---|
+| window | `term.attach` `id`, `tab_id`, `history_lines` (0: all) | the core answers `term.attached` `id`, `tab_id`, `channel`, `offset` (or `error`), then `SNAPSHOT` on that channel |
+| window | `term.detach` `channel` | the stream ends |
+| window | `term.resize` `tab_id`, `cols`, `rows`, `cell_w`, `cell_h` | what the tab's pane fits; the core resizes the terminal and the PTY (it alone decides) |
+| core | `term.scroll` `channel` | the core typed or pasted into it: the copy scrolls to the bottom |
+| core | `[ch] SNAPSHOT` | meta JSON + GHOSTSNP at the attach offset, screen first (the window draws at the codec's READY, history pages follow newest first); trimmed, oldest scrollback first, to fit one frame. Exempt from credit |
+| core | `[ch] DATA` | the bytes from the offset on, at most 64 KiB a frame, sent at the end of every core tick |
+| core | `[ch] RESIZE` | `{"offset","cols","rows","xpixel","ypixel"}`: applied after exactly the bytes before `offset` |
+| core | `[ch] CLOSE` | the terminal went |
+| window | `[ch] DATA` | input for the program (the window's key, mouse and paste encoders, from its copy's modes) |
+| window | `[ch] CREDIT` | u32 LE: DATA bytes taken. The window starts with 256 KiB; more than 4 MiB waiting and the core sends a fresh `SNAPSHOT` instead |
+| window | `[ch] FOCUS` | one byte, 1 gained, 0 lost: reported to the program if it asked (mode 1004) |
+
+`copy_selection` copies the window's copy's selection (no window: `nothing selected`).
+
 **Test mode** compares the window's replica with the core's State after every script step; a
-difference fails the scene. Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link.
+difference fails the scene. It also compares each shown terminal's copy with the core's terminal
+by screen hash (the newest 2000 rows: once the scrollback is full, the two may keep a different
+number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link
+(a terminal channel's by kind and size).
 
 ## 6. Redaction
 

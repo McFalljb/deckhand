@@ -1026,7 +1026,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		_, tab, _ := find_tab(c.tab_id)
 		t := tab != nil ? term_of(tab.id) : nil
 		if t == nil do return fail("no such terminal tab"), false
-		text := term_selection_text(t)
+		text := window_term_selection(tab.id) // the selection is the window's copy's (term_view.odin)
 		if text == "" do return fail("nothing selected"), false
 		if platform.set_clipboard != nil do platform.set_clipboard(text)
 		return {ok = true}, false // side effect only

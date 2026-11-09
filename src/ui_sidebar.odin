@@ -1453,7 +1453,7 @@ sidebar_drop :: proc(paths: []string, x, y: f32) {
 	}
 	tab: ^core.Tab
 	if !(state.home_open && inside(clay.ID("drawer"), x, y)) {
-		if t := core.active_term(); t != nil && in_pane(t, x, y) do tab = core.active_tab()
+		if t := active_view(); t != nil && in_pane(t, x, y) do tab = core.active_tab()
 	}
 	if tab == nil || len(paths) == 0 do return
 	b := strings.builder_make(context.temp_allocator)

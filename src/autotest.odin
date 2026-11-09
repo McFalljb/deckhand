@@ -210,6 +210,7 @@ Autotest :: struct {
 	wait_request: u64, // pending command: wait for its finished event
 	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
 	replica_checked: time.Tick, // the last divergence check (autotest_check_replica)
+	terms_checked:   int, // terminal copies compared with the core's (autotest_check_terms)
 	submitted:    u64, // the command script_command is running: its finished event may come in the same drain
 	submitted_done: bool, // it came (last_finished holds it)
 	last_result:  string, // JSON of the last command result
@@ -322,36 +323,60 @@ log :: proc(args: ..any) {
 
 // The terminal with the keyboard: Home's while its pane shows.
 screen_text :: proc() -> string {
-	return term_screen_text(core.key_term())
+	return term_screen_text(key_view())
 }
 
-// A terminal's visible text (temp-allocated).
-term_screen_text :: proc(t: ^core.Term) -> string {
-	if t == nil do return ""
-	gh.render_state_update(t.rs, t.gt)
+// A terminal's visible text, as the window's copy shows it (temp-allocated).
+term_screen_text :: proc(t: ^Term_View) -> string {
+	if t == nil || t.gt == nil do return ""
+	text := rs_screen_text(t.rs, t.it, t.cells, t.gt)
+	t.changed = true // render state was consumed here; redraw
+	return text
+}
+
+// The same for any terminal (the core's, in tests), through a render state of its own.
+gt_screen_text :: proc(gt: gh.Terminal) -> string {
+	if gt == nil do return ""
+	rs: gh.Render_State
+	it: gh.Row_Iterator
+	cells: gh.Row_Cells
+	gh.render_state_new(nil, &rs)
+	gh.render_state_row_iterator_new(nil, &it)
+	gh.render_state_row_cells_new(nil, &cells)
+	defer {
+		gh.render_state_row_cells_free(cells)
+		gh.render_state_row_iterator_free(it)
+		gh.render_state_free(rs)
+	}
+	return rs_screen_text(rs, it, cells, gt)
+}
+
+@(private = "file")
+rs_screen_text :: proc(rs: gh.Render_State, it: gh.Row_Iterator, cells: gh.Row_Cells, gt: gh.Terminal) -> string {
+	it, cells := it, cells
+	gh.render_state_update(rs, gt)
 	b := strings.builder_make(context.temp_allocator)
-	gh.render_state_get(t.rs, .Row_Iterator, &t.it)
-	for gh.render_state_row_iterator_next(t.it) {
-		gh.render_state_row_get(t.it, .Cells, &t.cells)
-		for gh.render_state_row_cells_next(t.cells) {
+	gh.render_state_get(rs, .Row_Iterator, &it)
+	for gh.render_state_row_iterator_next(it) {
+		gh.render_state_row_get(it, .Cells, &cells)
+		for gh.render_state_row_cells_next(cells) {
 			raw: gh.Cell
-			gh.render_state_row_cells_get(t.cells, .Raw, &raw)
+			gh.render_state_row_cells_get(cells, .Raw, &raw)
 			wide: gh.Cell_Wide
 			gh.cell_get(raw, .Wide, &wide)
 			if wide == .Spacer_Tail do continue
 			n: u32
-			gh.render_state_row_cells_get(t.cells, .Graphemes_Len, &n)
+			gh.render_state_row_cells_get(cells, .Graphemes_Len, &n)
 			if n == 0 || n > 16 {
 				strings.write_byte(&b, ' ')
 				continue
 			}
 			buf: [16]u32
-			gh.render_state_row_cells_get(t.cells, .Graphemes_Buf, &buf[0])
+			gh.render_state_row_cells_get(cells, .Graphemes_Buf, &buf[0])
 			for i in 0 ..< n do strings.write_rune(&b, rune(buf[i]))
 		}
 		strings.write_byte(&b, '\n')
 	}
-	t.changed = true // render state was consumed here; redraw
 	return strings.to_string(b)
 }
 
@@ -572,6 +597,7 @@ autotest_step :: proc() {
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
 		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
+		autotest_check_terms() // and each shown terminal's copy (M3-H)
 		cmd, _, rest := strings.partition(line, " ")
 		args := strings.fields(rest, context.temp_allocator)
 		if idx != at.retry_line {
@@ -921,12 +947,12 @@ autotest_step :: proc() {
 				send({type = .MOUSE_UP, mouse_button = .LEFT, mouse_x = x, mouse_y = y})
 			}
 		case "clickcell":
-			t := core.active_term()
+			t := active_view()
 			if t == nil {
 				script_fail("clickcell: no terminal")
 				continue
 			}
-			cell := proc(t: ^core.Term, c, r: string) -> (f32, f32) {
+			cell := proc(t: ^Term_View, c, r: string) -> (f32, f32) {
 				return t.x + term_pad() + (num(c) + 0.5) * font.cell_w, t.y + term_pad() + (num(r) + 0.5) * font.cell_h
 			}
 			x, y := cell(t, args[1], args[2])
@@ -944,7 +970,7 @@ autotest_step :: proc() {
 		case "mousecell":
 			// mousecell down|move|up COL ROW [shift]: one step of a press held
 			// across frames (a drag the frame loop draws in between)
-			t := core.active_term()
+			t := active_view()
 			for a in args[3:] do if strings.has_prefix(a, "pane=") do t = script_pane_term(a[5:])
 			if t == nil {
 				script_fail("mousecell: no terminal")
@@ -1070,7 +1096,7 @@ autotest_step :: proc() {
 			// without taking keyboard focus, redraw, capture next step.
 			window_raise_without_focus()
 			app.redraw = true
-			if t := core.active_term(); t != nil do t.changed = true
+			if t := active_view(); t != nil do t.changed = true
 			at.pending_shot = strings.clone(args[0])
 			at.shot_drawn, at.shot_at = app.frames_drawn, now
 			at.wait_until = time.tick_add(now, 1000 * time.Millisecond) // at most
@@ -1234,7 +1260,7 @@ autotest_step :: proc() {
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
 			}
 		case "quit":
-			log(fmt.tprintf("done: %d asserts, %d failed", at.asserts, at.failures))
+			log(fmt.tprintf("done: %d asserts, %d failed; %d terminal copies checked", at.asserts, at.failures, at.terms_checked))
 			core.app_quitting = true // the script ends the run: no confirmation
 			script_show_again()
 			app_request_quit()
@@ -1314,6 +1340,14 @@ script_command :: proc(c: core.Command, caller: core.Caller) -> (id: u64, r: cor
 autotest_check_replica :: proc() {
 	autotest.replica_checked = time.tick_now()
 	if d := client_check(); d != "" do script_fail(fmt.tprintf("the window's replica diverged from the core's State: %s", d))
+}
+
+// Each shown terminal's copy in the window must equal the core's terminal after every script step
+// (design §10.2, M3-H): the screen hash of both (term_view_stream.odin).
+autotest_check_terms :: proc() {
+	d, n := term_views_check()
+	autotest.terms_checked += n
+	if d != "" do script_fail(fmt.tprintf("the window's terminal copy diverged from the core's: %s", d))
 }
 
 script_fail :: proc(args: ..any) {
@@ -1434,11 +1468,11 @@ expand_vars :: proc(s: string) -> string {
 
 // The terminal of the tab pane SLOT of the current session shows (nil: none).
 @(private = "file")
-script_pane_term :: proc(slot: string) -> ^core.Term {
+script_pane_term :: proc(slot: string) -> ^Term_View {
 	cs := core.cur()
 	if cs == nil do return nil
 	n := int(num(slot))
-	for &p in cs.panes do if p.slot == n do return core.pane_term(&p)
+	for &p in cs.panes do if p.slot == n do return pane_view(&p)
 	return nil
 }
 
@@ -1643,13 +1677,13 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 		msg = ok ? fmt.tprint("assert ok: rows", section, "=", got) : fmt.tprintf("ASSERT FAILED rows %s: got %q, want %q", section, got, want)
 	case "assert_link":
 		// assert_link URL|-: the link underlined under the pointer (⌘ held), or none
-		t := core.active_term()
+		t := active_view()
 		got := t != nil && t.link_on ? t.link.url : "-"
 		ok = got == rest
 		msg = ok ? fmt.tprint("assert ok: link", got) : fmt.tprintf("ASSERT FAILED link %q, want %q", got, rest)
 	case "assert_drawn_selection":
 		// assert_drawn_selection N: selected cells in the last frame drawn (N > 0: "some"; 0: none)
-		t := core.active_term()
+		t := active_view()
 		got := t != nil ? t.drawn_selected : -1
 		want := len(args) > 0 ? int(num(args[0])) : 0
 		ok = (want == 0 && got == 0) || (want > 0 && got > 0)
@@ -1677,13 +1711,13 @@ script_check :: proc(cmd, rest: string, args: []string) -> (ok: bool, msg: strin
 	case "assert_pane_selection":
 		slot, _, want := strings.partition(strings.trim_space(expand_vars(rest)), " ")
 		t := script_pane_term(slot)
-		got := t != nil ? core.term_selection_text(t) : "<no terminal>"
+		got := t != nil ? term_view_selection(t.tab_id) : "<no terminal>"
 		ok = got == want
 		msg = ok ? fmt.tprint("assert ok: pane", slot, "selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED pane %s selection: got %q, want %q", slot, got, want)
 	case "assert_selection":
 		got := ""
 		if f, _, _ := focused_field(); f != nil do got = tf_selected_text(f)
-		else if t := core.active_term(); t != nil do got = core.term_selection_text(t)
+		else if t := active_view(); t != nil do got = term_view_selection(t.tab_id)
 		ok = got == rest
 		msg = ok ? fmt.tprint("assert ok: selection =", fmt.tprintf("%q", got)) : fmt.tprintf("ASSERT FAILED selection: got %q, want %q", got, rest)
 	case "hittest":

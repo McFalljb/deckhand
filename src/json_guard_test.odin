@@ -638,6 +638,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
 		{"src/core/tabhost_route.odin", "tab_host_call_parse", "jg.parse_string", "", ""}, // the window reads the core's tab_host.call
+		{"src/term_view_stream.odin", "term_view_json", "jg.parse_string", "", ""}, // the window reads the core's term.* messages
+		{"src/term_view_stream.odin", "view_resize", "jg.unmarshal", "", ""}, // a terminal stream's RESIZE
 		{"src/core/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
 		{"src/core/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
 		{"src/core/reload.odin", "settings_digest", "jg.parse", "", ""},

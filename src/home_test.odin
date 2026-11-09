@@ -889,7 +889,7 @@ atlas_failed_fork_resumes_the_old_session :: proc(t: ^testing.T) {
 	testing.expect(t, core.run_command(core.Tab_Exited{tab_id = ht.id, exit = {known = true, code = 1}}, {kind = .Internal}).ok)
 	testing.expect_value(t, state.home_fork_from, "")
 	testing.expect_value(t, core.home_session().pi_session_id, "old-1")
-	if x := core.term_of(ht.id); x != nil do testing.expect(t, strings.contains(term_screen_text(x), "could not move"), term_screen_text(x))
+	if x := core.term_of(ht.id); x != nil do testing.expect(t, strings.contains(gt_screen_text(x.gt), "could not move"), gt_screen_text(x.gt))
 	else do testing.fail_now(t, "its terminal is kept")
 	args := hf_start(t)
 	testing.expect(t, hf_resumed(args, "old-1"), args)

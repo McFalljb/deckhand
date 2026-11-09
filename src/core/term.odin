@@ -1,10 +1,12 @@
 package core
 
 // Terminal pane, the core's side: a child process on our own PTY, its output parsed by
-// libghostty-vt, which answers the program's queries. The window's side (term_view.odin) draws
-// it cell by cell from the render state; keyboard, mouse and paste input go through
-// libghostty-vt's encoders so the bytes match what the app asked for (legacy, kitty keyboard,
-// SGR mouse, bracketed paste).
+// libghostty-vt, which answers the program's queries. The window keeps its own copy of each
+// terminal it shows (term_view.odin, design §5.5): the core streams it the same bytes
+// (term_stream.odin), and the window draws it cell by cell and encodes keyboard, mouse and paste
+// input with libghostty-vt's encoders from its copy's modes (legacy, kitty keyboard, SGR mouse,
+// bracketed paste). Every byte this terminal parses goes through term_vt_write, so the stream's
+// offsets count exactly what both copies parse.
 
 import "core:c"
 import "core:fmt"
@@ -41,8 +43,9 @@ Term :: struct {
 	holder_away:  u32, // that holder still runs (lost, not gone): its terminal id, the process runs on there
 	mute_replies: bool, // feeding replayed bytes: query replies are dropped (§7.2 P4)
 	replies_dropped: int, // how many (tests)
-	// the window's side: drawing, selection, links, key and mouse encoding (term_view.odin)
-	using view:   Term_View,
+	// the stream offset: every byte gt parsed (term_vt_write), the program's and Deckhand's own
+	// notes alike; never reset (a new gt is sent as a snapshot at the offset reached)
+	offset:       u64,
 }
 
 // The cell size (framebuffer px) the window measured last (fonts_apply, font.odin): a new
@@ -52,17 +55,22 @@ term_cell: [2]f32
 // Default fg/bg/cursor/palette from the active look (term_palette.odin). Programs
 // that set their own colours (OSC 4/10/11) keep them.
 term_apply_theme :: proc(t: ^Term) {
-	tc := term_colors()
+	gt_apply_theme(t.gt, term_colors())
+	t.changed = true
+	term_report_color_scheme(t)
+}
+
+// The look's default colours on any terminal: the core's, and the window's copy (term_view.odin),
+// which sets them itself (they are not in the byte stream).
+gt_apply_theme :: proc(gt: gh.Terminal, tc: ^Term_Colors) {
 	fg := gh.Color_Rgb{tc.fg.r, tc.fg.g, tc.fg.b}
 	bg := gh.Color_Rgb{tc.bg.r, tc.bg.g, tc.bg.b}
 	cc := gh.Color_Rgb{tc.cursor.r, tc.cursor.g, tc.cursor.b}
 	pal := term_palette(tc)
-	gh.terminal_set(t.gt, .Color_Foreground, &fg)
-	gh.terminal_set(t.gt, .Color_Background, &bg)
-	gh.terminal_set(t.gt, .Color_Cursor, &cc)
-	gh.terminal_set(t.gt, .Color_Palette, &pal)
-	t.changed = true
-	term_report_color_scheme(t)
+	gh.terminal_set(gt, .Color_Foreground, &fg)
+	gh.terminal_set(gt, .Color_Background, &bg)
+	gh.terminal_set(gt, .Color_Cursor, &cc)
+	gh.terminal_set(gt, .Color_Palette, &pal)
 }
 
 // The terminal's light/dark, for CSI ? 996 n and mode 2031 reports.
@@ -102,29 +110,45 @@ TERM_SCROLLBACK_MAX :: 20 * 1024 * 1024
 CONT_TRIM_EVERY :: 1024 * 1024
 
 // A fresh libghostty terminal for t: Deckhand's defaults (scrollback, mode
-// 2027), then term_attach_gt.
+// 2027), then term_attach_gt. A window streaming t gets it as a snapshot.
 term_new_gt :: proc(t: ^Term) -> bool {
 	if gh.terminal_new(nil, &t.gt, t.cols, t.rows) != .Success do return false
-	max_bytes := uint(TERM_SCROLLBACK_MAX)
-	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
 	grapheme_clusters(t)
 	term_attach_gt(t)
+	term_stream_reset(t) // term_stream.odin
 	return true
 }
 
-// What Deckhand hangs on a terminal, which a snapshot does not carry: the
-// callbacks (query replies, colour scheme, OSC 7501/133), continuation
-// tracking, and the theme's default colours (programs' own colours stay).
-// Run on every new terminal and on one decoded from a snapshot (term_adopt_gt).
+// What Deckhand sets on every terminal that a snapshot does not carry, the
+// core's and the window's copies alike (the one helper for both, design §5.5):
+// the scrollback limit, continuation tracking (so it can be snapshotted at any
+// byte offset) and the look's default colours (programs' own colours stay).
+// The core's also gets its callbacks (term_attach_gt); a window's copy gets
+// none: it never answers queries (write_pty is dropped) or reads OSC 7501/133.
+gt_setup :: proc(gt: gh.Terminal, tc: ^Term_Colors) {
+	max_bytes := uint(TERM_SCROLLBACK_MAX)
+	gh.terminal_set(gt, .Scrollback_Max_Bytes, &max_bytes)
+	// a decoded terminal that kept its continuation (DECODER_OPT_RETAIN_CONTINUATION) has the limit
+	// already: set again, the unfinished sequence it holds would be dropped
+	cont, have: c.size_t
+	gh.terminal_get(gt, .Continuation_Max_Bytes, &have)
+	cont = TERM_CONTINUATION_MAX
+	if have != cont do gh.terminal_set(gt, .Continuation_Max_Bytes, &cont)
+	gt_apply_theme(gt, tc)
+}
+
+// What Deckhand hangs on the core's terminal: gt_setup, then the callbacks
+// (query replies, colour scheme, OSC 7501/133). Run on every new terminal and
+// on one decoded from a snapshot (term_adopt_gt).
 term_attach_gt :: proc(t: ^Term) {
+	gt_setup(t.gt, term_colors())
 	gh.terminal_set(t.gt, .Userdata, t)
 	gh.terminal_set(t.gt, .Write_Pty, rawptr(on_write_pty))
 	gh.terminal_set(t.gt, .Color_Scheme, rawptr(on_color_scheme))
 	term_status_register(t) // OSC 7501 and OSC 133 (agent_status.odin)
-	cont := TERM_CONTINUATION_MAX
-	gh.terminal_set(t.gt, .Continuation_Max_Bytes, &cont)
 	t.cont_fed = 0
-	term_apply_theme(t)
+	t.changed = true
+	term_report_color_scheme(t)
 }
 
 // Replaces t's terminal with gt (decoded from a snapshot; t takes ownership)
@@ -132,16 +156,13 @@ term_attach_gt :: proc(t: ^Term) {
 // theme, as term_start sets them. Modes and grapheme clustering come from the
 // snapshot.
 term_adopt_gt :: proc(t: ^Term, gt: gh.Terminal) {
-	window_term_drag_cancel(t) // its tracked ends belong to the old terminal
 	if t.gt != nil do gh.terminal_free(t.gt)
 	t.gt = gt
 	gh.terminal_get(gt, .Cols, &t.cols)
 	gh.terminal_get(gt, .Rows, &t.rows)
-	max_bytes := uint(TERM_SCROLLBACK_MAX)
-	gh.terminal_set(t.gt, .Scrollback_Max_Bytes, &max_bytes)
 	gh.terminal_resize(t.gt, t.cols, t.rows, u32(t.cell.x), u32(t.cell.y))
 	term_attach_gt(t)
-	t.changed = true
+	term_stream_reset(t) // a window streaming t gets the new terminal as a snapshot (term_stream.odin)
 }
 
 // The continuation buffer keeps the capacity of the longest sequence it held
@@ -161,7 +182,6 @@ term_init :: proc(t: ^Term, cols, rows: u16) -> bool {
 	t.cols, t.rows = cols, rows
 	t.cell = term_cell
 	if !term_new_gt(t) do return false
-	window_term_view_new(t) // its view's render state and encoders (term_view.odin)
 	t.pty.fd = -1
 	return true
 }
@@ -191,15 +211,25 @@ on_write_pty :: proc "c" (gt: gh.Terminal, userdata: rawptr, data: [^]u8, n: c.s
 term_feed_replayed :: proc(t: ^Term, bytes: []u8) {
 	if len(bytes) == 0 do return
 	t.mute_replies = true
-	gh.terminal_vt_write(t.gt, raw_data(bytes), len(bytes))
+	term_vt_write(t, bytes)
 	t.mute_replies = false
-	t.cont_fed += len(bytes)
-	if t.cont_fed >= CONT_TRIM_EVERY && term_continuation_trim(t.gt) do t.cont_fed = 0
 	t.changed = true
 }
 
+// Bytes into the core's terminal: parsed, counted at the stream offset, and queued for every
+// window that streams it (term_stream.odin), so its copy parses exactly the same bytes. Every
+// write into a Term's gt goes through here (the program's output and Deckhand's own notes).
+term_vt_write :: proc(t: ^Term, bytes: []u8) {
+	if len(bytes) == 0 do return
+	gh.terminal_vt_write(t.gt, raw_data(bytes), len(bytes))
+	t.offset += u64(len(bytes))
+	t.cont_fed += len(bytes)
+	if t.cont_fed >= CONT_TRIM_EVERY && term_continuation_trim(t.gt) do t.cont_fed = 0
+	term_stream_bytes(t, bytes)
+}
+
 term_free :: proc(t: ^Term) {
-	window_term_view_free(t)
+	term_stream_term_gone(t) // its windows' channels close (term_stream.odin)
 	reader_stop_and_close(t)
 	delete(t.reader.inbox)
 	gh.terminal_free(t.gt)
@@ -210,7 +240,6 @@ term_free :: proc(t: ^Term) {
 // False if the process could not be started.
 term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = nil, start: Held_Start = {}) -> bool {
 	reader_stop_and_close(t)
-	window_term_drag_cancel(t) // its tracked ends belong to the old terminal
 	// a new terminal per process: clean modes, scrollback and kitty flags
 	gh.terminal_free(t.gt)
 	term_new_gt(t)
@@ -236,7 +265,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	}
 	if !ok {
 		msg := "\x1b[31mfailed to start process\x1b[0m\r\n"
-		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
+		term_vt_write(t, transmute([]u8)msg)
 		t.running = false
 	} else {
 		t.pty = p
@@ -342,10 +371,8 @@ term_pump :: proc(t: ^Term) {
 	sync.lock(&t.reader.mu)
 	n := min(len(t.reader.inbox), READ_BUDGET)
 	if n > 0 {
-		gh.terminal_vt_write(t.gt, raw_data(t.reader.inbox), uint(n))
+		term_vt_write(t, t.reader.inbox[:n])
 		remove_range(&t.reader.inbox, 0, n)
-		t.cont_fed += n
-		if t.cont_fed >= CONT_TRIM_EVERY && term_continuation_trim(t.gt) do t.cont_fed = 0
 	}
 	eof := t.reader.eof && len(t.reader.inbox) == 0
 	sync.unlock(&t.reader.mu)
@@ -373,7 +400,7 @@ term_pump :: proc(t: ^Term) {
 			if holder_alive() do t.holder_away = t.pty.held // it runs on there: never restarted here (tab_held_away)
 		}
 		msg := t.holder_away != 0 ? "\r\n\x1b[2m[the session holder isn't answering: this session runs on in it]\x1b[0m" : t.holder_lost ? "\r\n\x1b[2m[the session holder stopped]\x1b[0m" : how != "" ? strings.concatenate({"\r\n\x1b[2m[process exited: ", how, "]\x1b[0m"}, context.temp_allocator) : "\r\n\x1b[2m[process exited]\x1b[0m"
-		gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
+		term_vt_write(t, transmute([]u8)msg)
 		t.changed = true
 		reader_stop_and_close(t)
 	}
@@ -387,6 +414,7 @@ term_resize :: proc(t: ^Term, cols, rows: u16, cell_w, cell_h: f32) {
 	t.cols, t.rows, t.cell = cols, rows, {cell_w, cell_h}
 	gh.terminal_resize(t.gt, cols, rows, u32(cell_w), u32(cell_h))
 	pty_resize(&t.pty, cols, rows, u32(f32(cols) * cell_w), u32(f32(rows) * cell_h))
+	term_stream_resized(t) // its windows' copies resize at this byte offset (term_stream.odin)
 	t.changed = true
 }
 
@@ -410,21 +438,27 @@ term_paste :: proc(t: ^Term, text: string) {
 }
 
 // Selected text as a string (temp allocator), "" without a selection.
-term_selection_text :: proc(t: ^Term) -> string {
+term_selection_text :: proc(t: ^Term) -> string {return gt_selection_text(t.gt)}
+
+// The same for any terminal (the window's copy holds the user's selection: term_view.odin).
+gt_selection_text :: proc(gt: gh.Terminal) -> string {
 	sel := gh.Selection{size = size_of(gh.Selection)}
-	if gh.terminal_get(t.gt, .Selection, &sel) != .Success do return ""
+	if gh.terminal_get(gt, .Selection, &sel) != .Success do return ""
 	opts := gh.Selection_Format_Options{size = size_of(gh.Selection_Format_Options), emit = .Plain, unwrap = true, trim = true, selection = &sel}
 	p: [^]u8
 	n: uint
-	if gh.terminal_selection_format_alloc(t.gt, nil, opts, &p, &n) != .Success do return ""
+	if gh.terminal_selection_format_alloc(gt, nil, opts, &p, &n) != .Success do return ""
 	s := strings.clone(string(p[:n]), context.temp_allocator)
 	gh.free(nil, p, n)
 	return s
 }
 
+// The core typed or pasted into t (a command): the window's copy scrolls back down too, as it
+// does when the user types (term_stream.odin's term.scroll).
 term_scroll_to_bottom :: proc(t: ^Term) {
 	sv := gh.Scroll_Viewport{tag = .Bottom}
 	gh.terminal_scroll_viewport(t.gt, sv)
+	term_stream_scroll_bottom(t)
 	t.changed = true
 }
 

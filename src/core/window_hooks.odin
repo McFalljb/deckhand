@@ -64,11 +64,11 @@ Window_Hooks :: struct {
 	watch_folder:   proc(folder: string), // watch this project folder too
 	watch_sync:     proc(), // the set of folders to watch changed (open files, reload's folders)
 
-	// ---- terminals: the core's Term, the window's Term_View (term_view.odin) ----
-	term_view_new:  proc(t: ^Term), // a terminal was made: its view's render state and encoders
-	term_view_free: proc(t: ^Term), // before the terminal goes
-	term_drag_cancel: proc(t: ^Term), // its terminal is replaced: a drag's tracked ends go
-	term_fit:       proc(t: ^Term, tab_id: u64), // size a new terminal to its tab's pane (before its child starts)
+	// ---- terminals: the window keeps its own copy of the ones it shows (term_stream.odin) ----
+	// the grid a new terminal gets from its tab's pane (before its child starts); ok false: no pane yet
+	term_fit:       proc(tab_id: u64) -> (cols, rows: u16, cell: [2]f32, ok: bool),
+	// the user's selection in the window's copy of the tab's terminal ("": none). M4: a window.request
+	term_selection: proc(tab_id: u64) -> string,
 
 	// ---- sheets and the window's own state ----
 	job_sheet:      proc(c: Job_Sheet, caller: Caller) -> (Result, bool), // the job_sheet command (ui_job_sheet.odin)
@@ -194,10 +194,12 @@ window_tab_dirty :: proc(tab_id: u64) -> (dirty, known: bool) {
 window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
 window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}
 
-window_term_view_new :: proc(t: ^Term) {if window.term_view_new != nil do window.term_view_new(t)}
-window_term_view_free :: proc(t: ^Term) {if window.term_view_free != nil do window.term_view_free(t)}
-window_term_drag_cancel :: proc(t: ^Term) {if window.term_drag_cancel != nil do window.term_drag_cancel(t)}
-window_term_fit :: proc(t: ^Term, tab_id: u64) {if window.term_fit != nil do window.term_fit(t, tab_id)}
+window_term_fit :: proc(t: ^Term, tab_id: u64) {
+	if window.term_fit == nil do return
+	if cols, rows, cell, ok := window.term_fit(tab_id); ok do term_resize(t, cols, rows, cell.x, cell.y)
+}
+// No window: no selection.
+window_term_selection :: proc(tab_id: u64) -> string {return window.term_selection != nil ? window.term_selection(tab_id) : ""}
 
 window_job_sheet :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	if window.job_sheet == nil do return fail("no window"), false

@@ -28,6 +28,7 @@ package core
 //   {"type":"result","id":"7","request_id":N,"result":{...}}   the socket's reply (reply_json)
 //   {"type":"toast","text":"…","err":false}
 //   tab_host.call: a browser, app, Markdown or editor command for the window's part (tabhost_route.odin)
+// Terminal streams (channels ≥ 1, term.* messages): term_stream.odin.
 //
 // Order (design Q9): a command's state.delta is sent before its result, so the window, which waits
 // for its own result, has the new state when it reads it. In process the wait is nil: the window
@@ -62,6 +63,7 @@ Window_Msg_Kind :: enum u8 {
 	Result,
 	Toast,
 	Tab_Host_Call, // tab_host_call_parse takes the text (tabhost_route.odin)
+	Term, // term.attached, term.scroll: the window's terminal streams take the text (term_view.odin)
 }
 
 Window_Msg :: struct {
@@ -90,6 +92,9 @@ Window_Link :: struct {
 	too_large_version: u64,
 	full_builds: int, // state.full texts built (tests)
 	untracked:  [dynamic]string, // test mode: writes no trigger announced (window_link_check; heap)
+	// what the window sent while the core sent it a terminal's frames (link_send reads its CREDITs
+	// at once, in process): the rest waits here, in order, for the next pump
+	backlog:    [dynamic]cw.Frame,
 }
 
 @(private = "file")
@@ -121,6 +126,7 @@ core_attach_window :: proc(on_frames: proc(), on_pull: proc(tab_id: u64) = nil, 
 	link.on_drain = on_drain
 	link.replies = make([dynamic]^Link_Reply, heap)
 	link.untracked = make([dynamic]string, heap)
+	link.backlog = make([dynamic]cw.Frame, heap)
 	link.sent.sections = make(map[string]string, heap)
 	return link.win_end, true
 }
@@ -156,6 +162,7 @@ window_link_orphans_for_test :: proc() -> int {return len(link_orphans)}
 core_detach_window :: proc() {
 	if link == nil do return
 	heap := runtime.heap_allocator()
+	term_streams_window_gone() // its terminal streams end (term_stream.odin)
 	link_free_replies() // the delivered ones; the inbox may still hold the others
 	if len(link.replies) > 0 && link_orphans == nil do link_orphans = make([dynamic]^Link_Reply, heap)
 	for r in link.replies {
@@ -165,6 +172,8 @@ core_detach_window :: proc() {
 	delete(link.replies)
 	for u in link.untracked do delete(u, heap)
 	delete(link.untracked)
+	for f in link.backlog do delete(f.payload, heap)
+	delete(link.backlog)
 	browser_facts_clear()
 	state_sent_free(&link.sent)
 	cw.mem_close(link.core_end)
@@ -372,11 +381,59 @@ window_link_pump :: proc() {
 	if link == nil do return
 	link.pumping += 1
 	defer link.pumping -= 1
-	for {
-		f, err := cw.mem_recv(link.core_end, context.temp_allocator)
-		if err != .None do break
-		if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do continue // M3-H: terminal streams
+	for link != nil {
+		f: cw.Frame
+		if len(link.backlog) > 0 { // read early by link_send: before anything still in the transport
+			f = link.backlog[0]
+			ordered_remove(&link.backlog, 0)
+			p := f.payload
+			f.payload = make([]u8, len(p), context.temp_allocator)
+			copy(f.payload, p)
+			delete(p, runtime.heap_allocator())
+		} else {
+			err: cw.Recv_Error
+			f, err = cw.mem_recv(link.core_end, context.temp_allocator)
+			if err != .None do break
+		}
+		if f.channel != cw.JSON_CHANNEL {
+			term_stream_frame(f) // a terminal stream's input, credit or focus (term_stream.odin)
+			continue
+		}
+		if f.kind != u8(cw.Kind.Data) do continue
 		link_message(string(f.payload))
+	}
+}
+
+// A JSON message for the window (term_stream.odin). False: no window.
+window_link_send_text :: proc(text: string) -> bool {
+	if link == nil do return false
+	link_send(text)
+	return true
+}
+
+// A frame on a terminal channel (term_stream.odin). In process the window takes it at once; the
+// CREDIT it sends back is read here, so the stream can go on in the same tick.
+window_link_send_frame :: proc(channel: u32, kind: cw.Kind, payload: []u8) -> cw.Send_Error {
+	if link == nil do return .Closed
+	if e := cw.mem_send(link.core_end, channel, kind, payload); e != .None do return e
+	if link.on_frames != nil do link.on_frames()
+	link_take_credits()
+	return .None
+}
+
+// Everything the window has sent: its CREDITs count now, the rest waits in the backlog, in order.
+@(private = "file")
+link_take_credits :: proc() {
+	heap := runtime.heap_allocator()
+	for link != nil {
+		f, err := cw.mem_recv(link.core_end, heap)
+		if err != .None do return
+		if f.channel != cw.JSON_CHANNEL && f.kind == u8(cw.Kind.Credit) && len(link.backlog) == 0 {
+			term_stream_frame(f)
+			delete(f.payload, heap)
+			continue
+		}
+		append(&link.backlog, f)
 	}
 }
 
@@ -490,6 +547,8 @@ window_msg_parse :: proc(text: string) -> (m: Window_Msg, err: string) {
 	switch type {
 	case STATE_FULL, STATE_DELTA:
 		m.kind = .State
+	case "term.attached", "term.scroll":
+		m.kind = .Term
 	case "result":
 		m.kind = .Result
 		m.id, _ = obj["id"].(json.String)
@@ -635,6 +694,8 @@ link_message :: proc(text: string) {
 			return
 		}
 		browser_facts_set(u64(n), f)
+	case "term.attach", "term.detach", "term.resize":
+		term_stream_message(type, obj, id) // term_stream.odin
 	case "window.command":
 		cmd, err := window_command_decode(obj["command"])
 		if err != "" {

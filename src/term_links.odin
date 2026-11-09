@@ -271,7 +271,7 @@ term_link_at_cell :: proc(gt: gh.Terminal, cols, rows: int, vc: [2]int) -> (core
 }
 
 // The link under the pointer (framebuffer px) in t's grid; none in the padding.
-term_link_at :: proc(t: ^core.Term, mx, my: f32) -> (core.Term_Link, bool) {
+term_link_at :: proc(t: ^Term_View, mx, my: f32) -> (core.Term_Link, bool) {
 	if t == nil || t.gt == nil || t.cols == 0 || !in_pane(t, mx, my) do return {}, false
 	fx := (mx - t.x - term_pad()) / font.cell_w
 	fy := (my - t.y - term_pad()) / font.cell_h
@@ -308,11 +308,11 @@ term_links_event :: proc(e: ^sapp.Event) {
 // anything it depends on changed. Called before the layout and from input
 // events, never while drawing: the tip and the underline only read t.link.
 // True if a link is under the pointer.
-term_link_tick :: proc(t: ^core.Term, pt: [2]f32) -> bool {
+term_link_tick :: proc(t: ^Term_View, pt: [2]f32) -> bool {
 	if t == nil do return false
 	sb: gh.Scrollbar
 	if t.gt != nil do gh.terminal_get(t.gt, .Scrollbar, &sb)
-	key := core.Link_Key{at = pt, pane = {t.x, t.y}, bytes = t.bytes_in, offset = sb.offset, cols = t.cols, rows = t.rows, cmd = link_cmd_held}
+	key := core.Link_Key{at = pt, pane = {t.x, t.y}, bytes = int(t.offset), offset = sb.offset, cols = t.cols, rows = t.rows, cmd = link_cmd_held}
 	if t.link_scanned && key == t.link_key do return t.link_on
 	t.link_key = key
 	t.link_scanned = true
@@ -341,7 +341,7 @@ term_link_tick :: proc(t: ^core.Term, pt: [2]f32) -> bool {
 	return true
 }
 
-term_link_clear :: proc(t: ^core.Term) {
+term_link_clear :: proc(t: ^Term_View) {
 	t.link_scanned = false
 	if !t.link_on do return
 	delete(t.link.url)
@@ -355,14 +355,14 @@ term_link_clear :: proc(t: ^core.Term) {
 // pointer is over it); every other terminal has none. The pointer becomes a
 // hand over one.
 term_links_frame :: proc() {
-	t, at := core.pane_term(hit_pane()), core.agent_term() // the terminal of the pane under the pointer (panes.odin)
+	t, at := pane_view(hit_pane()), agent_view() // the terminal of the pane under the pointer (panes.odin)
 	p := app.pointer
 	none := [2]f32{-1e9, -1e9}
 	in_drawer := state.home_open && inside(clay.ID("drawer"), p.x, p.y)
 	on := false
 	if t != nil && term_link_tick(t, in_drawer || over_overlay() ? none : p) do on = true
 	if at != nil && term_link_tick(at, state.home_open && inside(clay.ID("drawer_term"), p.x, p.y) && !over_overlay() ? p : none) do on = true
-	for _, x in core.terms do if x != t && x != at && x.link_on do term_link_clear(x)
+	for _, x in term_views do if x != t && x != at && x.link_on do term_link_clear(x)
 	if on {
 		link_cursor = true
 		if sapp.get_mouse_cursor() != .POINTING_HAND do sapp.set_mouse_cursor(.POINTING_HAND)
@@ -375,15 +375,12 @@ term_links_frame :: proc() {
 }
 
 // The tab a terminal belongs to (0: none).
-term_tab_id :: proc(t: ^core.Term) -> u64 {
-	for id, x in core.terms do if x == t do return id
-	return 0
-}
+term_tab_id :: proc(t: ^Term_View) -> u64 {return t.tab_id}
 
 // A press in a terminal pane on a link: ⌘-click opens it (⇧⌘: in the
 // default browser), right-click or ⌃-click (without ⌘) opens its menu. True if taken
 // (the program and the selection never see it).
-term_link_mouse_down :: proc(t: ^core.Term, e: ^sapp.Event) -> bool {
+term_link_mouse_down :: proc(t: ^Term_View, e: ^sapp.Event) -> bool {
 	// taken only as ⌘-click (open) or right-click / ⌃-click (the menu, as a
 	// right click everywhere on macOS); ⌘⌃-click and anything else stay the
 	// program's (or the selection's)
@@ -406,7 +403,7 @@ term_link_mouse_down :: proc(t: ^core.Term, e: ^sapp.Event) -> bool {
 }
 
 // Draws the hovered link's underline (inside term_draw).
-term_link_draw :: proc(t: ^core.Term, ox, oy: f32, col: core.Rgba) {
+term_link_draw :: proc(t: ^Term_View, ox, oy: f32, col: core.Rgba) {
 	// only reads: term_link_tick looked it up before the layout
 	if !t.link_on || !link_cmd_held do return
 	l := t.link
@@ -422,8 +419,8 @@ term_link_draw :: proc(t: ^core.Term, ox, oy: f32, col: core.Rgba) {
 // when the pointer is down there). In the overlay layer (main.odin draws
 // "linktip" above the terminals).
 term_link_tip_layout :: proc() {
-	t: ^core.Term
-	for x in ([]^core.Term{core.active_term(), core.agent_term()}) do if x != nil && x.link_on {
+	t: ^Term_View
+	for x in ([]^Term_View{active_view(), agent_view()}) do if x != nil && x.link_on {
 		t = x
 		break
 	}

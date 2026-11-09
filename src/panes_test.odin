@@ -70,6 +70,7 @@ Two :: struct {
 	a, b:                               u64, // panes
 	pi, shell, editor, browser, app_id: u64, // tabs
 	term:                               ^core.Term,
+	view:                               ^Term_View, // the window's copy of term (no core stream)
 }
 
 pt_two :: proc() -> Two {
@@ -101,6 +102,9 @@ pt_two :: proc() -> Two {
 	// stand-ins: found by the lookups, never run
 	x.term = new(core.Term)
 	core.terms[x.shell] = x.term
+	x.view = new(Term_View)
+	x.view.tab_id = x.shell
+	term_views[x.shell] = x.view
 	ed := new(Editor)
 	ed.tab_id = x.editor
 	editors[x.editor] = ed
@@ -117,6 +121,8 @@ pt_two :: proc() -> Two {
 // The stand-ins go (never freed through drop_term: they never started).
 pt_two_done :: proc(x: Two) {
 	delete_key(&core.terms, x.shell)
+	delete_key(&term_views, x.shell)
+	free(x.view)
 	delete_key(&editors, x.editor)
 	delete_key(&browsers, x.browser)
 	delete_key(&apps, x.app_id)
@@ -621,13 +627,13 @@ panes_drags_follow_the_screen :: proc(t: ^testing.T) {
 	core.session_show_tab(x.s, x.shell)
 	drags_follow_focus()
 	testing.expect_value(t, app.drag_tab, x.shell)
-	x.term.mouse_down = true
+	x.view.mouse_down = true
 	core.session_show_tab(x.s, x.browser) // B focused: A's shell is still on screen
 	drags_follow_focus()
-	testing.expect(t, x.term.mouse_down, "kept: still on screen")
+	testing.expect(t, x.view.mouse_down, "kept: still on screen")
 	core.session_show_tab(x.s, x.pi) // A shows its pi tab: the shell left the screen
 	drags_follow_focus()
-	testing.expect(t, !x.term.mouse_down, "ended")
+	testing.expect(t, !x.view.mouse_down, "ended")
 }
 
 // Where a tab is drawn: its pane's laid-out rect in the current session; else, before a layout
@@ -1064,9 +1070,9 @@ panes_press_keeps_its_drag :: proc(t: ^testing.T) {
 	drags_follow_focus()
 	e := sapp.Event{type = .MOUSE_DOWN, mouse_x = 50, mouse_y = 50, mouse_button = .LEFT}
 	pane_press(&e) // click-through
-	x.term.mouse_down = true // the selection term_mouse_down starts
+	x.view.mouse_down = true // the selection term_mouse_down starts
 	drags_follow_focus() // the next event
-	testing.expect(t, x.term.mouse_down, "the press's own drag survives the focus change")
+	testing.expect(t, x.view.mouse_down, "the press's own drag survives the focus change")
 	mv := sapp.Event{type = .MOUSE_MOVE, mouse_x = 150, mouse_y = 50}
 	testing.expect_value(t, event_pane(&mv).id, x.a) // held: still A's
 	pane_release()

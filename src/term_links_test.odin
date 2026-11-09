@@ -320,7 +320,7 @@ term_link_rescan :: proc(t: ^testing.T) {
 	defer font.cell_w, font.cell_h = saved_w, saved_h
 	font.cell_w, font.cell_h = 10, 20
 	g := vt("a https://example.com/x b\r\n")
-	tm := core.Term{gt = g, cols = 30, rows = 5, view = {w = 300, h = 100}}
+	tm := Term_View{gt = g, cols = 30, rows = 5, w = 300, h = 100}
 	defer {
 		term_link_clear(&tm)
 		gh.terminal_free(g)
@@ -336,7 +336,7 @@ term_link_rescan :: proc(t: ^testing.T) {
 	// output arrives: looked up again
 	s := "more\r\n"
 	gh.terminal_vt_write(g, raw_data(s), len(s))
-	tm.bytes_in += len(s)
+	tm.offset += u64(len(s))
 	term_link_tick(&tm, pt)
 	testing.expect_value(t, tm.link_scans, scans + 1)
 	// the pointer moves: again

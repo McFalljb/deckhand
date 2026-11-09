@@ -296,7 +296,7 @@ drawer_event :: proc(e: ^sapp.Event) -> bool {
 			return true
 		}
 	}
-	t := core.agent_term()
+	t := agent_view()
 	in_term := state.home_open && t != nil && inside(clay.ID("drawer_term"), e.mouse_x, e.mouse_y) && !over_overlay()
 	#partial switch e.type {
 	case .MOUSE_DOWN:

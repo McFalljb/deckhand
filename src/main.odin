@@ -261,11 +261,14 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 		tab_dirty = tab_view_dirty,
 		watch_folder = watch_folder, // editor_watch.odin
 		watch_sync = watch_sync,
-		// terminals' views (term_view.odin)
-		term_view_new = term_view_init,
-		term_view_free = term_view_free,
-		term_drag_cancel = term_cancel_drag,
-		term_fit = proc(t: ^core.Term, tab_id: u64) {if r := tab_rect(tab_id); r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)},
+		// terminals: the window's copies (term_view_stream.odin)
+		term_fit = proc(tab_id: u64) -> (cols, rows: u16, cell: [2]f32, ok: bool) {
+			r := tab_rect(tab_id)
+			if r.z <= 0 do return
+			cols, rows = term_grid_fit(r.z, r.w)
+			return cols, rows, {font.cell_w, font.cell_h}, true
+		},
+		term_selection = term_view_selection,
 		// sheets (ui_job_sheet.odin, ui_setup.odin)
 		job_sheet = job_sheet_apply,
 		job_sheet_open = job_sheet_open,
@@ -313,17 +316,18 @@ frame :: proc "c" () {
 	defer client.busy -= 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
+	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
-	t := core.active_term()
+	t := active_view() // the window's copies of the terminals it shows (term_view_stream.odin)
 	// Output-driven redraws are capped near 60 Hz; input redraws at once.
-	at := core.agent_term() // Atlas's terminal in the drawer (also while it slides out)
+	at := agent_view() // Atlas's terminal in the drawer (also while it slides out)
 	drags_follow_focus()
 	left_down := core.platform.left_button == nil || core.platform.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
 	shown_changed := false // a terminal in another pane on screen (panes.odin)
-	for x in core.terms_on_screen() do if x != t && x.changed do shown_changed = true
+	for x in views_on_screen() do if x != t && x.changed do shown_changed = true
 	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
@@ -347,7 +351,7 @@ frame :: proc "c" () {
 		app.font_theme = state.settings.theme
 		app.font_size = state.settings.text_size
 		fonts_apply(theme_font_config(theme()), d)
-		for _, t in core.terms do t.cols = 0 // new cell size: resize at the next layout
+		term_fits_forget() // new cell size: every terminal resizes at the next layout
 	}
 
 	w, h := sapp.widthf(), sapp.heightf()
@@ -356,7 +360,7 @@ frame :: proc "c" () {
 	cmds := ui_layout(w, h)
 	bar_layout_done()
 	if at != nil {
-		if x, y, tw, th, ok := drawer_term_rect(); ok do term_set_rect(at, x, y, tw, th)
+		if x, y, tw, th, ok := drawer_term_rect(); ok do term_fit_rect(at.tab_id, x, y, tw, th)
 	}
 	harness_run_keep_sheet() // a running install keeps the setup sheet (harness_install.odin)
 	harness_term_layout() // the setup sheet's install terminal (ui_harness.odin)
@@ -366,9 +370,9 @@ frame :: proc "c" () {
 		ui_pane_rects(cs) // each pane's content rect (panes.odin)
 		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
 		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
-		if cs != nil do for tab in cs.tabs do if t := core.term_of(tab.id); t != nil {
+		if cs != nil do for tab in cs.tabs do if core.term_of(tab.id) != nil {
 			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
-			if r.z > 0 do term_set_rect(t, r.x, r.y, r.z, r.w)
+			if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
 		}
 	}
 	if app.pane.z > 0 do core.persist_after_layout(skip = app.pending_start)
@@ -380,7 +384,7 @@ frame :: proc "c" () {
 		cmd := launch_start(app_args.claude, app.launch_project)
 		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
 		else if cmd != nil do core.run_command(cmd)
-		t = core.active_term()
+		t = active_view()
 	}
 
 	editors_frame_begin() // an editor takes hits only where this frame draws it (editor_view.odin)
@@ -422,7 +426,7 @@ frame :: proc "c" () {
 	browser_frames_committed() // the same for browser tabs
 	app.redraw = font_frame_done() // the atlas grew or started over: draw again
 	if t != nil do t.changed = false
-	for x in core.terms_on_screen() do x.changed = false // every pane's terminal was drawn
+	for x in views_on_screen() do x.changed = false // every pane's terminal was drawn
 	if at != nil do at.changed = false
 	app.frames_drawn += 1
 	platform_frame_drawn()
@@ -438,7 +442,7 @@ drags_follow_focus :: proc() {
 	if tab := core.active_tab(); tab != nil do id = tab.id
 	if id == app.drag_tab do return
 	app.drag_tab = id
-	for tab_id, x in core.terms do if !core.tab_on_screen(tab_id) do term_cancel_drag(x)
+	for tab_id, x in term_views do if !core.tab_on_screen(tab_id) do term_cancel_drag(x)
 }
 
 over_sidebar :: proc(x: f32) -> bool {
@@ -645,11 +649,11 @@ event :: proc(e: ^sapp.Event) {
 	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
-	t := core.active_term()
-	mt := core.pane_term(fp) // the pointer's: the pane under it (or holding its press)
+	t := active_view()
+	mt := pane_view(fp) // the pointer's: the pane under it (or holding its press)
 	tab := core.active_tab()
 	cs := core.cur()
-	kt := core.key_term()
+	kt := key_view()
 	ktab := core.key_tab()
 	#partial switch e.type {
 	case .KEY_DOWN:
@@ -806,7 +810,7 @@ event :: proc(e: ^sapp.Event) {
 		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
-		for _, x in core.terms {
+		for _, x in term_views {
 			term_cancel_drag(x) // its release may go to another app
 			term_link_clear(x) // and ⌘'s
 		}
@@ -859,7 +863,7 @@ bar_click_ok :: proc(token: string) -> bool {
 }
 
 // Pane p's tab at its draw rect; IME marked text when its terminal (t) has the keyboard.
-pane_draw :: proc(p: ^core.Pane, t: ^core.Term, typing: bool) {
+pane_draw :: proc(p: ^core.Pane, t: ^Term_View, typing: bool) {
 	tab := core.pane_shown(p)
 	if tab == nil || (core.term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
@@ -867,7 +871,7 @@ pane_draw :: proc(p: ^core.Pane, t: ^core.Term, typing: bool) {
 	v := tab_view(tab.kind) // nil: a kind this window does not know (a newer core's; nothing to draw)
 	if v == nil || v.draw == nil do return
 	v.draw(tab.id, r.x, r.y, r.z, r.w)
-	if pt := core.term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
+	if pt := term_view_peek(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
 }
 
 // Hit under the pointer from the last layout (no click).
@@ -1139,7 +1143,7 @@ ime_commit :: proc(text: string) {
 	if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
-	} else if t := core.key_term(); t != nil {
+	} else if t := key_view(); t != nil {
 		core.claude_note_typed(core.key_tab())
 		term_text_input(t, text)
 	} else if ed := active_editor(); ed != nil {
@@ -1155,7 +1159,7 @@ ime_set_marked :: proc(text: string, caret: int) {
 	ime.marked = strings.clone(text)
 	ime.caret = caret
 	app.redraw = true
-	if t := core.key_term(); t != nil do t.changed = true
+	if t := key_view(); t != nil do t.changed = true
 }
 
 ime_cancel :: proc() {
@@ -1170,7 +1174,7 @@ ime_option_composes :: proc() -> bool {return state.focus_widget != "" || active
 // The candidate window's anchor: the field caret, else the terminal cursor.
 ime_anchor :: proc() -> [4]f32 {
 	if state.focus_widget == "" {
-		if t := core.key_term(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
+		if t := key_view(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
 	}
 	return ime.caret_rect // a field's caret, or the editor's (editor_draw)
 }

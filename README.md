@@ -1,16 +1,31 @@
 # Deckhand
 
+[![Latest release](https://img.shields.io/github/v/release/McFalljb/deckhand)](https://github.com/McFalljb/deckhand/releases/latest)
+[![macOS 14+ on Apple silicon](https://img.shields.io/badge/macOS-14%2B%20arm64-lightgrey)](#requirements)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-blue)](LICENSE)
+
 A native macOS desk for coding agents: [pi](https://pi.dev) and
 [Claude Code](https://code.claude.com) sessions, with the terminals, editor, browser and files
 they work with, in one window.
 
-![Deckhand with a pi session open: projects and sessions on the left, pi's terminal UI in the middle with Markdown, browser and shell tabs beside it, and pi's todo list on the right](docs/images/deckhand.png)
+![A pi session at work in Deckhand: the prompt is typed, the agent reads, edits and tests while its todo list fills in; then a Markdown tab is dragged into a split pane and a browser tab opens beside the agent](docs/images/deckhand-demo.gif)
 
-Deckhand is for people who run coding agents in a terminal and want their projects, sessions and
-the things they check the agent's work against in one place. Each agent runs in its own full
-terminal UI, exactly as it would in a terminal. Deckhand adds tabs around it, a project list with
-status, and tools that let the agent read and act on the browser and app tabs you give it.
-Deckhand uses your own agent installs and accounts; it has no accounts or keys of its own.
+- **Close the window, agents keep running.** Sessions run in a background process, Deckhand
+  Core, and keep running through updates too. Open the window again and they are there.
+- **Each agent in its own full terminal UI**, as in a terminal, with a status dot per session:
+  working, waiting for you, finished.
+- **Split panes.** Drag a tab to a pane's edge to put a shell, the editor, a Markdown file, a
+  browser or an app beside the agent.
+- **Browser and app tabs the agent can use.** A built-in Chromium the agent can read and act on,
+  and app tabs drawn at your display's rate (up to 240 Hz).
+- **Your own installs and accounts.** Deckhand has no accounts or keys of its own.
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh
+```
+
+macOS 14 or later on Apple silicon. [Install](#install) says what the script does, and how to
+download the app by hand.
 
 Deckhand is an early project in active development. Expect rough edges, and changes to its files
 and protocol between releases.
@@ -97,6 +112,8 @@ update keeps them running too. **Deckhand › Quit Deckhand and Stop All Session
 everything. See [How Deckhand runs](docs/GUIDE.md#how-deckhand-runs).
 
 ## Features
+
+![Deckhand with three sessions open: projects and sessions with status dots on the left, a pi session in a split pane with a browser tab on a demo app beside it, and pi's todo list on the right](docs/images/deckhand.png)
 
 - **Agent tabs**: pi and Claude Code in their full terminal UIs, with a status dot per tab and
   session (working, waiting for you, finished, error).

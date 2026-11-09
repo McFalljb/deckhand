@@ -259,6 +259,8 @@ SWEEP_IDLE_MS :: 1000
 // what deltas retired is freed here too, every SWEEP_MS or past DEFERRED_MAX blocks: it does not
 // pile up until the window shows again.
 client_on_drain :: proc() {
+	// an event's edits reach the core before the commands queued meanwhile run (a close_tab, a reload)
+	client_facts()
 	if client.busy > 0 do return
 	now := time.tick_now()
 	if time.tick_diff(client.released, now) < SWEEP_MS * time.Millisecond && deferred_count(&client.deferred) <= DEFERRED_MAX do return
@@ -473,6 +475,7 @@ client_on_frames :: proc() {
 			client.busy += 1
 			window_on_request(text)
 			client.busy -= 1
+			client_facts() // what answering it changed (docs/PROTOCOL.md §5a)
 			client.receiving = true
 		case .Confirmation_Parked:
 			app.redraw = true // the confirmation bar shows it from the replica, with the delta that follows

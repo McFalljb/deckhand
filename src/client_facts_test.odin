@@ -101,3 +101,27 @@ client_after_tick_waits_while_nested :: proc(t: ^testing.T) {
 	client_after_tick()
 	testing.expect_value(t, deferred_count(&client.deferred), 0)
 }
+
+// #50 review: an event's edit reaches the core before the commands queued meanwhile run (a
+// script's close_tab, an agent's reload): the drain pushes the window's facts first.
+@(test)
+client_drain_pushes_facts_first :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	e := new(Editor)
+	e.tab_id, e.view = 33, .File
+	editors[33] = e
+	defer {
+		delete_key(&editors, 33)
+		free(e)
+		client_facts_forget(33)
+	}
+	client_test_facts()
+	core.window_link_pump()
+	dirty, _ := core.window_tab_dirty(33)
+	testing.expect(t, !dirty, "clean at first")
+	e.saved_group = 1 // an edit since the save
+	client_on_drain()
+	core.window_link_pump()
+	dirty, _ = core.window_tab_dirty(33)
+	testing.expect(t, dirty, "the core sees the edit")
+}

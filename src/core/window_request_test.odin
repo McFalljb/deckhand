@@ -20,6 +20,7 @@ Fake_Window :: struct {
 	last:   Window_Request, // temp
 	parked: int,
 	holds_quit: bool, // what it answers job_sheet_holds_quit
+	flood: int, // commands it sends before a reply (past the per-pump cap)
 }
 
 fw: Fake_Window
@@ -48,6 +49,7 @@ fw_on_frames :: proc() {
 			append(&fw.ops, r.op)
 			fw.last = r
 			if id == "" do continue
+			for i in 0 ..< fw.flood do fw_send(window_msg_command(Set_Files_Filter{text = fmt.tprintf("f%d", i)}, ""))
 			rep := Window_Reply{ok = r.op != .Job_Sheet_Holds_Quit || fw.holds_quit, count = 41, cols = 100, rows = 30, cell = {8, 16}, changed = true, result = {ok = true, data = `{"sheet":"open"}`}}
 			fw_send(window_msg_reply(id, &rep))
 		}
@@ -250,4 +252,17 @@ zero_caller_refused :: proc(t: ^testing.T) {
 	testing.expect(t, !owns_tab({}, 1))
 	r := run_command(Set_Confirm_Policy{caller = .None, class = .Tab_Close, mode = .Auto}, {kind = .UI})
 	testing.expect(t, !r.ok, "no policy for nobody")
+}
+
+// #50 review: a reply behind more than a pump's cap of commands still reaches its request.
+@(test)
+window_reply_behind_the_cap :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	defer state = State{}
+	if !testing.expect(t, fw_attach()) do return
+	defer core_detach_window()
+	fw.flood = 2 * WINDOW_COMMANDS_PER_PUMP
+	count, marked := window_clipboard_secret("export X=1")
+	testing.expect(t, marked && count == 41, "the reply came")
 }

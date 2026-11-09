@@ -123,7 +123,8 @@ tab_host_call :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64
 	append(&host.calling, Host_Calling{id = id, request_id = request_id})
 	window_link_flush() // what earlier commands changed reaches the replica first: the window's part reads it
 	sent := window_link_send(tab_host_msg_call(id, cmd, caller, request_id, tab_id))
-	if sent do window_link_pump() // in process the window answered while it was sent
+	// in process the window answered while it was sent: pump past the per-pump cap until its answer
+	if sent do for window_link_pump() && !(id in host.answers) {}
 	me := pop(&host.calling)
 	if !sent {
 		if id in host.answers do host_answer_drop(id) // cannot be: nothing was sent

@@ -693,7 +693,8 @@ window_link_request :: proc(r: Window_Request, want_reply: bool) -> (reply: Wind
 	append(&link.asking, Link_Ask{id = id})
 	at := len(link.asking) - 1
 	sent := link_send(strings.to_string(b))
-	if sent do window_link_pump() // in process the window answered while it was sent
+	// in process the window answered while it was sent: pump past the per-pump cap until its reply
+	if sent do for window_link_pump() && link != nil && !link.asking[at].got {}
 	if link == nil do return // it went meanwhile
 	a := link.asking[at]
 	resize(&link.asking, at)

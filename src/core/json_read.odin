@@ -16,6 +16,9 @@ Rd :: struct {
 	obj: json.Object,
 	err: string,
 	a:   runtime.Allocator,
+	// the window's own commands (parse_command_ui, window_link.odin only): the UI-only fields
+	// are read too. Never set for a socket, script or test-mode line.
+	ui:  bool,
 }
 
 @(private = "file")
@@ -73,6 +76,25 @@ opt_f32 :: proc(r: ^Rd, k: string) -> Maybe(f32) {
 	}
 	if r.err == "" do r.err = strings.concatenate({k, " must be a number"}, context.temp_allocator)
 	return nil
+}
+
+@(private = "file")
+opt_f64 :: proc(r: ^Rd, k: string) -> Maybe(f64) {
+	v, ok := r.obj[k]
+	if !ok do return nil
+	#partial switch n in v {
+	case json.Integer: return f64(n)
+	case json.Float:   return f64(n)
+	}
+	if r.err == "" do r.err = strings.concatenate({k, " must be a number"}, context.temp_allocator)
+	return nil
+}
+
+// A UI-only flag: read only from the window's own commands (Rd.ui); anyone else's is ignored.
+@(private = "file")
+ui_flag :: proc(r: ^Rd, k: string) -> bool {
+	if !r.ui do return false
+	return opt_bool(r, k).? or_else false
 }
 
 @(private = "file")
@@ -495,10 +517,23 @@ json_depth_ok :: proc(text: string) -> bool {
 
 // One command from its JSON text: {"type": "close_tab", "tab_id": 3, ...}.
 parse_command :: proc(text: string, allocator := context.allocator) -> (Command, string) {
+	return parse_command_as(text, false, allocator)
+}
+
+// The window's commands (window_link.odin, the in-process attach; never a socket line): as
+// parse_command, plus the UI-only fields (Close_Session.ask, Focus_Session.reopen,
+// Set_Home_Dir.setup). Their text is command_wire_json's.
+@(private)
+parse_command_ui :: proc(text: string, allocator := context.allocator) -> (Command, string) {
+	return parse_command_as(text, true, allocator)
+}
+
+@(private = "file")
+parse_command_as :: proc(text: string, ui: bool, allocator: runtime.Allocator) -> (Command, string) {
 	if !json_depth_ok(text) do return nil, "JSON nested too deeply"
 	v, err := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if err != nil do return nil, "invalid JSON"
-	cmd, cerr := command_from_value(v, allocator)
+	cmd, cerr := command_from_value_as(v, ui, allocator)
 	if cerr == "" do cerr = app_call_raw_params(&cmd, text, allocator)
 	return cmd, cerr
 }
@@ -524,9 +559,14 @@ app_call_raw_params :: proc(cmd: ^Command, text: string, allocator: runtime.Allo
 }
 
 command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cmd: Command, err: string) {
+	return command_from_value_as(v, false, allocator)
+}
+
+@(private = "file")
+command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Allocator) -> (cmd: Command, err: string) {
 	obj, ok := v.(json.Object)
 	if !ok do return nil, "a command must be a JSON object"
-	r := Rd{obj = obj, a = allocator}
+	r := Rd{obj = obj, a = allocator, ui = ui}
 	t, _ := obj["type"].(json.String)
 	switch t {
 	case "add_project":         cmd = Add_Project{cwd = get_str(&r, "cwd")}
@@ -534,8 +574,8 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "rename_project":      cmd = Rename_Project{project_id = get_u64(&r, "project_id"), name = get_str(&r, "name")}
 	case "open_session":        cmd = Open_Session_Cmd{project_id = get_u64(&r, "project_id"), pi_session_id = get_str(&r, "pi_session_id")}
 	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
-	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session")}
-	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), comments = opt_comments(&r)}
+	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session"), reopen = ui_flag(&r, "reopen")}
+	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), ask = ui_flag(&r, "ask"), comments = opt_comments(&r)}
 	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true), pane = opt_u64(&r, "pane")}
 	case "split_pane":
 		d, ok := pane_dir_parse(get_str(&r, "direction"))
@@ -562,7 +602,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "list_commands":       cmd = List_Commands{}
 	case "set_home":            cmd = Set_Home{open = get_bool(&r, "open")}
 	case "set_chats_dir":       cmd = Set_Folder{kind = .Chats, path = get_str(&r, "path", optional = true)} // the old name
-	case "set_home_dir":        cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true), create = opt_bool(&r, "create").? or_else false}
+	case "set_home_dir":        cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true), create = opt_bool(&r, "create").? or_else false, setup = ui_flag(&r, "setup")}
 	case "set_folder":          cmd = Set_Folder{kind = get_enum(&r, "kind", FOLDER_NAMES), path = get_str(&r, "path", optional = true)}
 	case "setup_sheet":         cmd = Setup_Sheet{open = get_bool(&r, "open")}
 	case "set_chats_readonly":  cmd = Set_Chats_Readonly{on = get_bool(&r, "on")}
@@ -685,7 +725,7 @@ command_from_value :: proc(v: json.Value, allocator := context.allocator) -> (cm
 	case "set_notes_dir":       cmd = Set_Home_Dir{path = get_str(&r, "path", optional = true)} // the old name
 	case "set_pi_path":         cmd = Set_Pi_Path{path = get_str(&r, "path")}
 	case "set_job_limits":
-		f :: proc(r: ^Rd, k: string) -> Maybe(f64) {v := opt_f32(r, k); if x, ok := v.?; ok do return f64(x); return nil}
+		f :: opt_f64
 		n :: proc(r: ^Rd, k: string) -> Maybe(int) {if _, ok := r.obj[k]; !ok do return nil; return int(min(get_u64(r, k), 1 << 30))}
 		t :: proc(r: ^Rd, k: string) -> Maybe(i64) {if _, ok := r.obj[k]; !ok do return nil; return i64(min(get_u64(r, k), 1 << 40))}
 		cmd = Set_Job_Limits{max_cost = f(&r, "max_cost"), day = f(&r, "day"), week = f(&r, "week"), month = f(&r, "month"), timeout = t(&r, "timeout"), stall = t(&r, "stall"), max_turns = n(&r, "max_turns"), concurrency = n(&r, "concurrency"), loop_calls = n(&r, "loop_calls"), fail_pause = n(&r, "fail_pause")}

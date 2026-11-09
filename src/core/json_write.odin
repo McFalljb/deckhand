@@ -942,6 +942,159 @@ command_json :: proc(cmd: Command, redact := false) -> string {
 	return strings.to_string(b)
 }
 
+// A command as the window sends it to its core (window_link.odin; design §10.2, M3-F): what
+// parse_command_ui reads back into the same command. command_json is the log's and the events'
+// encoding, which writes counts for lists, leaves out tokens and limits and never writes the
+// UI-only fields; this one writes every field. Temp allocator. Never logged or sent to an agent.
+command_wire_json :: proc(cmd: Command) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	write_command_wire(&b, cmd)
+	return strings.to_string(b)
+}
+
+// The commands whose log form drops something are written here in full; the rest as
+// write_command (unredacted) writes them.
+@(private = "file")
+write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
+	strs :: proc(w: ^Jw, k: string, list: []string) {
+		key(w, k)
+		strings.write_byte(w.b, '[')
+		for x, i in list {
+			if i > 0 do strings.write_byte(w.b, ',')
+			json_quote(w.b, x)
+		}
+		strings.write_byte(w.b, ']')
+	}
+	// the log form plus fields it never writes: its closing brace comes off first
+	plus :: proc(b: ^strings.Builder, cmd: Command) -> Jw {
+		write_command(b, cmd)
+		strings.pop_byte(b)
+		return {b = b, first = false}
+	}
+	#partial switch c in cmd {
+	// UI-only fields (parse_command_ui reads them; a socket's parse never does)
+	case Close_Session:
+		w := plus(b, cmd)
+		if c.ask do kv_bool(&w, "ask", true)
+		obj_end(&w)
+		return
+	case Focus_Session:
+		w := plus(b, cmd)
+		if c.reopen do kv_bool(&w, "reopen", true)
+		obj_end(&w)
+		return
+	case Set_Home_Dir:
+		w := plus(b, cmd)
+		if c.setup do kv_bool(&w, "setup", true)
+		obj_end(&w)
+		return
+	// limits and timeouts the log leaves out
+	case App_Call:
+		w := plus(b, cmd)
+		if c.timeout_ms != 0 do kv_u64(&w, "timeout_ms", u64(max(c.timeout_ms, 0)))
+		obj_end(&w)
+		return
+	case App_Events:
+		w := plus(b, cmd)
+		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
+		obj_end(&w)
+		return
+	case Browser_Console:
+		w := plus(b, cmd)
+		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
+		obj_end(&w)
+		return
+	case Browser_Network:
+		w := plus(b, cmd)
+		if c.limit != 0 do kv_u64(&w, "limit", u64(max(c.limit, 0)))
+		obj_end(&w)
+		return
+	// fields the log writes as a count or redacts: the whole command here
+	case New_Claude_Tab:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		if c.session != 0 do kv_u64(&w, "session", c.session)
+		if c.project_id != 0 do kv_u64(&w, "project_id", c.project_id)
+		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
+		if c.resume != "" do kv_str(&w, "resume", c.resume)
+		if len(c.args) > 0 do strs(&w, "args", c.args)
+		if c.account != "" do kv_str(&w, "account", c.account)
+		obj_end(&w)
+		return
+	case New_Claude_Session:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "project_id", c.project_id)
+		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
+		if len(c.args) > 0 do strs(&w, "args", c.args)
+		if c.account != "" do kv_str(&w, "account", c.account)
+		obj_end(&w)
+		return
+	case Claude_Rename:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_str(&w, "claude_session_id", c.claude_session_id)
+		kv_str(&w, "title", c.title)
+		obj_end(&w)
+		return
+	case Pi_Reload_All:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		if c.only_changed do kv_bool(&w, "only_changed", true)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+		obj_end(&w)
+		return
+	case Pi_Restart_Updated:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+		obj_end(&w)
+		return
+	case Claude_Restart_Changed:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		if c.update do kv_bool(&w, "update", true)
+		if c.all do kv_bool(&w, "all", true)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+		obj_end(&w)
+		return
+	case App_Input:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "tab_id", c.tab_id)
+		key(&w, "events")
+		strings.write_byte(b, '[')
+		for e, i in c.events {
+			if i > 0 do strings.write_byte(b, ',')
+			strings.write_string(b, e) // each a JSON object (get_raw_list)
+		}
+		strings.write_byte(b, ']')
+		obj_end(&w)
+		return
+	case Browser_Click:
+		w := obj_begin(b)
+		kv_str(&w, "type", command_type(cmd))
+		kv_u64(&w, "tab_id", c.tab_id)
+		if c.target.selector != "" do kv_str(&w, "selector", c.target.selector)
+		if c.target.has_xy {
+			key(&w, "x")
+			fmt.sbprintf(b, "%v", c.target.x)
+			key(&w, "y")
+			fmt.sbprintf(b, "%v", c.target.y)
+		}
+		if c.button != .Left do kv_str(&w, "button", ACT_BUTTON_NAMES[c.button])
+		if c.double do kv_bool(&w, "double", true)
+		if c.modifiers != 0 {
+			names := make([dynamic]string, context.temp_allocator)
+			for n, i in ACT_MOD_NAMES do if c.modifiers & (1 << uint(i)) != 0 do append(&names, n)
+			strs(&w, "modifiers", names[:])
+		}
+		obj_end(&w)
+		return
+	}
+	write_command(b, cmd)
+}
+
 // ---- results and events ----
 
 write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {

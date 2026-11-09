@@ -1,0 +1,14 @@
+# tests/scripts/window-attach.sh, run 1: a separate core keeps the session (keep_sessions on, so a
+# core that dies leaves it in the holder); a fake pi in a turn prints a tick every 0.2 s. The
+# scene kills this window (-9) once the dump is written; the wait is never reached.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+assert_result ok true
+command {"type":"add_project","cwd":"$cwd/build/window-attach/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"wwww-1"}
+assert_result ok true
+waitfor turn-tick 5 15000
+wait 2500
+dump window-attach-1
+wait 60000

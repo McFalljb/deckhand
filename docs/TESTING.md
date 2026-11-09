@@ -148,6 +148,7 @@ name only; **paid** = real pi, never from the runner. Tag **smoke** = also part 
 | `agent-status` | OSC 7501 agent status for any terminal tab: handshake, dots, malformed input, unread/seen | 33 | |
 | `app-tab` | app tabs: frames over IOSurface, input, resize, stall, crash, restart | 28 | |
 | `hidden-window` | the core loop while frames stop (the app hidden, ⌘H): a fake pi's 20 MiB through the session holder, its question (bell, OS notification) and a shell's exit all in the state while hidden; frames stopped and the core loop's timer ticked; screen hashes equal once shown; a quit while hidden, or while no frames run, ends the app within 10 s | 9 | unit: `core_loop_test.odin` (the guard, the 50 ms rule) |
+| `window-attach` | a separate core (M4-D): the window killed (-9) during a fake pi's turn, the core and the turn run on; a new window shows the same pi process further along; the core killed (-9), the window launches a core again, which adopts the turn from the session holder, and shows it from a fresh `state.full` | 16 | unit: `core_loop_test.odin` (the idle exit), `quit_route_test.odin` (the quit paths) |
 | `keep-sessions` | `keep_sessions`: 6 shells and a pi kept by the session holder through a quit; relaunch adopts every terminal exactly (screen hash at handover, a reference terminal with probes), same pids, counters went on; after a kill -9 of the app, adopted from the tails (inexact, same pids); Quit and Stop All Sessions ends the holder; a kill -9 of the holder ends every tab with `holder_lost`; the palette's Restart session holder upgrades it in place without the sessions noticing | 8 | |
 | `login-path` | the GUI-launch environment: bare PATH, failing shell, no pi, Nix-like PATH, Claude markers | 26 | |
 | `app-calls` | app_call under load at app start: every call finishes, hello reply first, default scale | 24 | its scale check repeats `test_scale_test.odin` |
@@ -177,6 +178,19 @@ assert little or nothing. They never run in CI and do not count as coverage.
 |---|---|---|
 | `looks`, `font`, `shots`, `text-shots`, `readme-shot` | screenshots of the looks, the UI font, the chrome (before/after pairs), text rendering, the README image | shots: nothing (or almost nothing) asserted; `looks`, `font` and `shots` overlap |
 | `persist-cpu`, `panels-cpu`, `text-flood`, `run-frame-pause` | CPU and frame numbers to read by eye (`run-frame-pause` needs the window shown) | benchmarks: nothing asserted |
+
+### By hand (no scene)
+
+Checked by a person before a release that changes them; scenes can't reach them.
+
+- **The minimised window** (a separate core): minimise during a pi turn, wait, restore: the turn's
+  output is there and a toast raised meanwhile shows after (it waits while hidden or minimised).
+- **Dock › Quit** and `osascript -e 'quit app "Deckhand"'`: as ⌘Q (in process: it asks if
+  anything would stop and hands kept sessions over; with a separate core: the window closes and
+  `pgrep -fl deckhand-core-serve` still shows the core).
+- **Logout** (and restart): both sides save and exit; the next launch restores as usual.
+- **Force Quit** (⌥⌘⎋) of the window and of Deckhand Core; macOS 14 and 15
+  (docs/plans/background-core.md, "Release readiness").
 
 ### Paid (real pi, never from the runner)
 

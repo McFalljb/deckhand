@@ -49,6 +49,7 @@ Client :: struct {
 	replica:   core.State,
 	next:      u64,
 	results:   map[string]core.Result, // heap copies, until taken
+	pending:   map[string]u64, // a separate core: the core's request id of a result that said pending, until taken (its finished: client_call_wait)
 	receiving: bool,
 	log:       bool,
 	main:      int, // the main thread's id: other threads only queue (client_internal)
@@ -431,6 +432,7 @@ client_take :: proc(id: string) -> core.Result {
 	if !ok do return core.fail("the core sent no result")
 	key, _ := delete_key(&client.results, id)
 	delete(key, runtime.heap_allocator())
+	if k, _ := delete_key(&client.pending, id); k != "" do delete(k, runtime.heap_allocator())
 	out := result_temp(r)
 	core.result_free(r)
 	return out
@@ -490,6 +492,12 @@ client_on_frames :: proc() {
 				core.result_free(old)
 				client.results[m.id] = r
 			} else do client.results[strings.clone(m.id, heap)] = r
+			if m.result.pending && m.request_id != 0 && client.sock != nil && !(m.id in client.pending) {
+				if client.pending == nil do client.pending = make(map[string]u64, heap)
+				client.pending[strings.clone(m.id, heap)] = m.request_id
+			}
+		case .Finished:
+			core.window_test_event(core.Finished_Event{request_id = m.request_id, result = m.result}) // test mode's script waits for it (autotest_on_event)
 		case .Toast:
 			toast_show(m.text, m.err)
 		case .Tab_Host_Call:

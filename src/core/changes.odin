@@ -202,7 +202,28 @@ Changes_View :: struct {
 
 changes_views: map[u64]^Changes_View
 
-changes_view :: proc(tab_id: u64) -> ^Changes_View {return changes_views[tab_id] or_else nil}
+changes_view :: proc(tab_id: u64) -> ^Changes_View {
+	v := changes_views[tab_id] or_else nil
+	if v == nil && replica_process {
+		// a window with a separate core: its own view of the tab (its list, selection and diff, from
+		// its own scans); the core runs the actions (changes_status has their outcome)
+		if _, tab, _ := find_tab(tab_id); tab != nil {
+			if ct, is := tab.kind.(Changes_Tab); is do v = changes_view_new(tab_id, ct.root)
+		}
+	}
+	return v
+}
+
+// The action running on the tab's checkout and the last one's outcome: the core's (a window
+// with a separate core: the tab's Tab_Live), else the view's own.
+changes_status :: proc(v: ^Changes_View) -> (busy, notice: string, err: bool) {
+	if replica_process {
+		_, tab, _ := find_tab(v.tab_id)
+		if tab == nil do return
+		return tab.live.changes_busy, tab.live.changes_notice, tab.live.changes_notice_err
+	}
+	return v.busy, v.notice, v.notice_err
+}
 
 // The checkout's model (made on first use; nil = not a git checkout).
 changes_repo :: proc(root: string) -> ^Changes_Repo {
@@ -250,6 +271,7 @@ changes_ask :: proc(r: ^Changes_Repo) {
 // Main thread, every frame callback (fs_model_tick): starts the scans that
 // are due. Cheap when nothing is.
 changes_tick :: proc() {
+	if window_link_is_sock() do for _, v in changes_views do changes_ask(changes_repo(v.root))
 	for r in changes_repos {
 		if r.loading {
 			if !r.slow && time.tick_since(r.started) >= CHANGES_SLOW {
@@ -666,6 +688,7 @@ changes_drop :: proc(tab_id: u64) {
 // refused editor as a message with the path under it).
 @(private = "file")
 changes_message :: proc(v: ^Changes_View, msg: string, path := "") {
+	if window_link_is_sock() do return // its own view says it (changes_view)
 	window_changes_diff(v.tab_id, path != "" ? path : v.root, "", msg)
 	window_state_changed()
 }
@@ -768,6 +791,7 @@ changes_is_selected :: proc(v: ^Changes_View, f: Change_File) -> bool {
 // else the nearest one; its diff is read again.
 @(private = "file")
 changes_view_follow :: proc(v: ^Changes_View, r: ^Changes_Repo) {
+	if window_link_is_sock() do return // a window in another process follows the list itself (changes_view)
 	if r.err != "" {
 		changes_message(v, r.err)
 		return

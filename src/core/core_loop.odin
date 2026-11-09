@@ -7,6 +7,7 @@ package core
 // skipped and run once that ends (core_tick_guarded, core_frame_end).
 
 import "base:runtime"
+import "core:strings"
 import "core:time"
 
 // The context Odin code runs in from C callbacks (ghostty's, the platform's, CEF's); main sets it
@@ -63,6 +64,8 @@ core_tick_body :: proc() {
 	output_activity_tick(time.tick_now())
 	tab_term_facts_tick(time.tick_now())
 	tab_live_tick()
+	core_live_tick() // the update bar, the install run, worktree clean ups (core_live.odin)
+	app_boxes_tick() // an inspected app tab's boxes (app_tab_core.odin)
 	tab_host_tick() // the window's calls and requests past their deadline (tabhost_route.odin)
 	term_streams_flush() // what the terminals parsed this tick, to the window's copies (term_stream.odin)
 }
@@ -252,7 +255,12 @@ tab_live_tick :: proc() {
 			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)
 			l.claude_restart = claude_restart_class(&tab)
 		}
+		if _, is := tab.kind.(App_Tab); is do l.app_connected = socket_app_connected(tab.id)
+		if v := changes_view(tab.id); v != nil do l.changes_busy, l.changes_notice, l.changes_notice_err = v.busy, v.notice, v.notice_err
 		if l == tab.live do continue
+		delete(tab.live.changes_busy)
+		delete(tab.live.changes_notice)
+		l.changes_busy, l.changes_notice = strings.clone(l.changes_busy), strings.clone(l.changes_notice) // the view's change under it
 		tab.live = l
 		changed = true
 	}

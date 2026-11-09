@@ -593,6 +593,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 	WANT := [?]Parse_Site {
 		{"src/core/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
 		{"src/app_tab.odin", "app_input_event_check", "jg.parse_string", "", ""},
+		{"src/app_tab.odin", "app_mint_tick", "jg.parse_string", "", ""}, // a separate core's app token (App_Socket's answer)
 		{"src/core/app_tab_core.odin", "app_entries", "jg.parse", "", ""},
 		{"src/core/app_wire.odin", "json_string_of", "jg.parse_string", "", ""},
 		{"src/core/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
@@ -635,6 +636,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/window_link.odin", "window_msg_parse", "jg.parse_string", "", ""}, // the window reads the core's frames
 		{"src/core/window_link.odin", "link_message", "jg.parse_string", "", ""}, // the core reads the window's frames
 		{"src/core/window_link.odin", "window_request_parse", "jg.parse_string", "", ""}, // the window reads the core's window.request
+		{"src/core/window_link.odin", "replica_facts_read", "jg.parse_string", "", ""}, // a separate core's window reads the facts it sent
 		{"src/core/window_link.odin", "window_command_decode_for_test", "jg.parse_string", "", ""}, // tests
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts

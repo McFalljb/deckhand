@@ -107,6 +107,10 @@ Tab_Live :: struct {
 	claude_wait:  Claude_Wait, // a Claude tab: why a message can't go in now (claude_ready)
 	claude_quiet: bool, // claude_hooks_silent, and its banner not dismissed (claude_status_message)
 	claude_restart: Reload_Class, // claude_restart_class
+	app_connected:  bool, // an app tab: its program's connection is open (socket_app_connected)
+	changes_busy:   string, // a Changes tab: the action running ("Staging…"; Changes_View.busy; heap)
+	changes_notice: string, // and the last one's outcome (Changes_View.notice; heap)
+	changes_notice_err: bool,
 }
 
 // This process is a window whose core is another process (main.odin, a separate core): `state`
@@ -384,6 +388,7 @@ State :: struct {
 	claude_readonly_ids:   [dynamic]string, // Claude sessions that ran read-only, outside the history's cap (claude.odin §1a; saved)
 	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
+	live:                  Core_Live, // the core's runtime a window in another process shows (core_live.odin; not saved)
 }
 
 // A session holder whose code is not ours answered (holder_client.odin Refused_Code): the window

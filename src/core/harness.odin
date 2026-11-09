@@ -220,8 +220,4 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	return out[:]
 }
 
-// A picker row (or the only harness) was chosen: it goes first next time.
-harness_used :: proc(cmd: Command) {
-	if h, ok := harness_of(cmd); ok do run_command(Set_Last_Harness{harness = h})
-}
 

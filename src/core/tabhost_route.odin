@@ -105,6 +105,7 @@ host: struct {
 	answers: map[string]Host_Answer, // answers to the calls being run now (host.calling), until taken (heap keys)
 	waits:   [dynamic]^Host_Wait,
 	calling: [dynamic]Host_Calling, // the calls being run now (nested: a link inside a Markdown tab)
+	answered: bool, // an answer came (tab_host_call's wait over core.sock looks again)
 }
 
 // The most a window's own wait_ms may ask for (a backstop, not a promise).
@@ -123,8 +124,15 @@ tab_host_call :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64
 	append(&host.calling, Host_Calling{id = id, request_id = request_id})
 	window_link_flush() // what earlier commands changed reaches the replica first: the window's part reads it
 	sent := window_link_send(tab_host_msg_call(id, cmd, caller, request_id, tab_id))
-	// in process the window answered while it was sent: pump past the per-pump cap until its answer
-	if sent do for window_link_pump() && !(id in host.answers) {}
+	// in process the window answered while it was sent: pump past the per-pump cap until its answer;
+	// over core.sock a bounded wait (WINDOW_REPLY_WAIT, as a window.request's), then pending
+	if sent && window_link_is_sock() {
+		deadline := time.tick_add(time.tick_now(), WINDOW_REPLY_WAIT)
+		for !(id in host.answers) {
+			host.answered = false
+			if !window_link_wait_once(deadline, &host.answered) && !host.answered do break
+		}
+	} else if sent do for window_link_pump() && !(id in host.answers) {}
 	me := pop(&host.calling)
 	if !sent {
 		if id in host.answers do host_answer_drop(id) // cannot be: nothing was sent
@@ -232,6 +240,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 			result_free(old.result)
 			host.answers[id] = {result_clone(r, heap), changed, wait}
 		} else do host.answers[strings.clone(id, heap)] = {result_clone(r, heap), changed, wait}
+		host.answered = true
 		return
 	}
 	n, nok := obj["request_id"].(json.Integer)

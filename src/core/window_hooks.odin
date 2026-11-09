@@ -89,6 +89,7 @@ Window_Op :: enum u8 {
 	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
 	Notify, // a separate core's OS notification (text: title, message: body), shown by the window's own
 	Quit, // the core ends on purpose (a quit, Stop All) or let this window go for a newer one (text: why): the window quits too, never reconnects
+	App_Boxes, // a separate core: tab_id's app sent new tab.boxes (text: {"boxes":[…]}), drawn while inspected
 }
 
 Window_Request :: struct {
@@ -133,6 +134,7 @@ Window_Facts :: struct {
 	// process: the panes' area (w, h px, scale: the room checks) and the shown session's pane rects
 	centre:               [3]f32,
 	panes:                []Pane_Fact,
+	exe:                  string, // a separate core's window: its own executable (the app bundle Deckhand's updates replace)
 }
 
 Pane_Fact :: struct {
@@ -172,6 +174,11 @@ window_test_event :: proc(ev: Event) {if window.test_event != nil do window.test
 @(private = "file")
 ask :: proc(r: Window_Request) {_, _ = window_link_request(r, false)}
 
+// A window whose core is another process (replica_process): what its own core package asks of the
+// window is done there at once (the window sets it: its caches' views, the Changes tab's diff,
+// the folders its own models watch). nil: dropped, as with no window.
+replica_request: proc(r: Window_Request) -> Window_Reply
+
 window_clipboard_set :: proc(text: string) {ask({op = .Clipboard_Set, text = text})}
 // A secret onto the clipboard; ok false: put there plainly (or no window), nothing to clear.
 window_clipboard_secret :: proc(text: string) -> (count: int, ok: bool) {
@@ -189,6 +196,8 @@ window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
 window_notify :: proc(title, body: string) {ask({op = .Notify, text = title, message = body})}
 // A separate core: the window goes too (it must not reconnect). why: for its log.
 window_quit :: proc(why: string) {ask({op = .Quit, text = why})}
+// A separate core: an app tab's new tab.boxes for the window to draw (text: {"boxes":[…]}).
+window_app_boxes :: proc(tab_id: u64, text: string) {ask({op = .App_Boxes, tab_id = tab_id, text = text})}
 window_set_appearance :: proc(mode: Appearance) {ask({op = .Appearance, mode = mode})}
 // The window's copy of the tab's terminal: its selection onto the clipboard. False: none (or no window).
 window_copy_selection :: proc(tab_id: u64) -> bool {

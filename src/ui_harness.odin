@@ -41,8 +41,15 @@ harness_term_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
 
 // Frame upkeep (main.odin, after the layout): the run's terminal follows its place on the sheet.
 harness_term_layout :: proc() {
-	if core.harness_run_term() == nil do return
+	if !harness_has_term() do return
 	if x, y, w, h, ok := harness_term_rect(); ok do term_fit_rect(core.harness_run.term_id, x, y, w, h)
+}
+
+// The run has a terminal to show: the core's (with a separate core, its id is enough: the window
+// streams it like a tab's).
+harness_has_term :: proc() -> bool {
+	if client_separate() do return core.harness_run.term_id != 0
+	return core.harness_run_term() != nil
 }
 
 // Drawn above the sheet (main.odin, after the overlays).
@@ -209,8 +216,7 @@ sub_head :: proc(text: string) {
 @(private = "file")
 run_block :: proc(w: f32) {
 	th := theme()
-	t := core.harness_run_term()
-	if core.harness_run.status == .None || t == nil do return
+	if core.harness_run.status == .None || !harness_has_term() do return
 	r, _ := core.harness_row(core.harness_run.item)
 	verb := core.harness_run.action == .Update ? "Updating" : "Installing"
 	head: string
@@ -289,6 +295,13 @@ harness_step_click :: proc(h: Hit_Setup) -> string {
 	case .Agent_Action:
 		if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
 		if core.harness_run.status == .Running && core.harness_run.item == core.HARNESS_MANIFEST[h.index].id do return ""
+		if client_separate() { // the core runs it, in a terminal of its own (its answer: a toast if refused)
+			if core.harness_run.status == .Running do return "Another install is running: wait for it (⌃C in its terminal stops it)"
+			it := core.harness_item(core.HARNESS_MANIFEST[h.index].id)
+			if it == nil do return ""
+			client_internal(core.Harness_Install{item = core.HARNESS_MANIFEST[h.index].id, command = it.command})
+			return ""
+		}
 		return core.harness_run_start(core.HARNESS_MANIFEST[h.index].id)
 	case .Agent_Copy:
 		if h.index < 0 || h.index >= len(core.HARNESS_MANIFEST) do return ""
@@ -297,7 +310,8 @@ harness_step_click :: proc(h: Hit_Setup) -> string {
 			toast_show(fmt.tprintf("Copied: %s", it.command))
 		}
 	case .Agent_Close:
-		core.harness_run_dismiss()
+		if client_separate() do client_internal(core.Harness_Install{dismiss = true})
+		else do core.harness_run_dismiss()
 	}
 	return ""
 }
@@ -381,6 +395,11 @@ new_session_anchor :: proc() -> [2]f32 {
 	return {max((f32(sapp.width()) - px(MENU_W)) / 2, 0), px(TAB_STRIP_H + SP_4)}
 }
 
+// A picker row (or the only harness) was chosen: it goes first next time (the core's setting).
+harness_used :: proc(cmd: core.Command) {
+	if h, ok := core.harness_of(cmd); ok do client_internal(core.Set_Last_Harness{harness = h})
+}
+
 // The user's "New session" in project pid (in cwd, a checkout of it; "" = its folder), see the top.
 // at: where the picker opens (nil = new_session_anchor).
 new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
@@ -394,7 +413,7 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 	case 0:
 		toast_show(core.NO_HARNESS, err = true)
 	case 1:
-		core.harness_used(items[0].cmd)
+		harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")
 	case:
 		menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())

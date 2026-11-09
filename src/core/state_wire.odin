@@ -95,6 +95,7 @@ STATE_SECTIONS := [?]State_Section {
 	{"notifications", {"notices", "agent"}},
 	{"reload", {"reload"}},
 	{"claude", {"claude_history", "claude_readonly_ids", "claude_disk", "claude_disk_chats"}},
+	{"live", {"live"}}, // a separate core's runtime the window shows (core_live.odin)
 }
 
 // Sections named in §5.8 that are not State (nothing sends them yet).

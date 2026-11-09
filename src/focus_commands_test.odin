@@ -42,7 +42,8 @@ focus_commands_replace_direct_writes :: proc(t: ^testing.T) {
 	r = core.run_command(core.Set_Last_Harness{harness = .Claude})
 	testing.expect_value(t, state.settings.last_harness, core.Harness.Claude)
 	testing.expect_value(t, fc_redraws, 3)
-	core.harness_used(core.New_Chat{})
+	harness_used(core.New_Chat{})
+	core.inbox_drain()
 	testing.expect_value(t, state.settings.last_harness, core.Harness.Pi)
 	testing.expect_value(t, fc_redraws, 4)
 	// Deckhand's own: no socket caller may send them

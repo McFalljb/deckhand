@@ -376,16 +376,16 @@ ACTIONS := [?]Action {
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
 	// Deckhand's own updates (update.odin)
 	{id = "check_updates", label = "Check for Updates…", make = proc() -> (core.Command, bool) {return core.Update_Check{}, true}, detail = proc() -> string {
-		if core.upd.offered do return fmt.tprintf("%s available", core.upd.release.version)
-		return core.upd.current != "" ? fmt.tprintf("Deckhand %s", core.upd.current) : ""
+		if core.update_view().offered do return fmt.tprintf("%s available", core.update_view().release.version)
+		return core.update_view().current != "" ? fmt.tprintf("Deckhand %s", core.update_view().current) : ""
 	}},
 	{id = "update_checks", label = "Check for updates automatically", make = proc() -> (core.Command, bool) {
-		return core.Set_Update_Check{on = core.upd.checks_off}, true
-	}, detail = proc() -> string {return core.upd.checks_off ? "off" : "on (about once a day)"}},
+		return core.Set_Update_Check{on = core.update_view().checks_off}, true
+	}, detail = proc() -> string {return core.update_view().checks_off ? "off" : "on (about once a day)"}},
 	{id = "update_install", label = "Restart to update Deckhand", make = proc() -> (core.Command, bool) {
-		if core.upd.phase != .Ready do return nil, false
+		if core.update_view().phase != .Ready do return nil, false
 		return core.Update_Install{}, true
-	}, detail = proc() -> string {return core.upd.release.version}},
+	}, detail = proc() -> string {return core.update_view().release.version}},
 	// hot reload (reload.odin): /reload every pi tab; restart them on a new pi
 	{id = "reload_all_pi", label = "Reload all pi tabs", make = proc() -> (core.Command, bool) {
 		for &s in state.open_sessions do if t := core.session_pi_tab(&s); t != nil && t.status == .Running do return core.Pi_Reload_All{}, true

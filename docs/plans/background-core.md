@@ -1052,13 +1052,22 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   process 1.8 s).
 - **Not done:** zstd on snapshots and `history_lines`' early stop; `--ctl` and `deckhand DIR`
   launching a core (the window does); the core's own notifications (they go through the window:
-  `window.request notify`); the window floor on disk; app tabs, the setup sheet's install run,
-  the Changes tab, worktree cleanup progress and the update UI stay the in-process window's;
-  after the core's connection ends the window quits (no reconnect). **Hot reload sees only
-  stamps:** pi's config folders are watched by FSEvents in the window, and the core runs the
-  reload ticks, so a separate core sees an edit inside a watched folder (an extension's file) only
-  when the folder's own stamp or a watched file changes (RELOAD_POLL, 2 s); a known gap until the
-  core watches them itself (before the default flips).
+  `window.request notify`); the window floor on disk; after the core's connection ends the
+  window quits (no reconnect).
+- **The gaps closed after M4-C** (before the default flips): the core's runtime a window shows
+  goes in State's `live` section (`src/core/core_live.odin`: the update bar, the setup sheet's
+  install run, worktree clean-ups, pi's config folders to watch) and in `Tab.live` (an app's
+  connection, the Changes tab's busy and notice), refreshed at every flush over `core.sock`. App
+  tabs: the core mints the token and carries the app's lines (`window.command app_socket`), and
+  sends inspected boxes (`window.request app_boxes`). The setup sheet's Install runs in the core
+  (`harness_install`, the command the sheet showed, checked against the core's). The window's
+  FSEvents go to the core (`fs_changed`): hot reload and the Changes and worktree models see
+  edits inside watched folders. A Changes tab's view (diff, selection) is the window's own, its
+  status the core's. The first-run sheet opens from the window when the core says it is due. A
+  `tab_host.call` waits 250 ms for the window's answer (as a `window.request`), so an agent's
+  `new_app_tab` gets its `created_id` at once as in process; the window's own pending commands get
+  their `finished`. Test mode: a script line keeps its caller (`as`), and every state read first
+  waits until the core ran what the window sent (`client_barrier`).
 
 **M4-D as built** (where it differs from the row above):
 - **Quit paths are one table,** `quit_route` (`src/main.odin`, unit-tested): ⌘Q, the Dock's Quit

@@ -531,6 +531,9 @@ Command :: union {
 	Core_Handover,
 	Claude_Typed,
 	Claude_Status_Dismiss,
+	App_Socket, // a separate core: the window's app tabs' connections (app_tab_core.odin)
+	Harness_Install, // and the setup sheet's install runs (harness_install.odin)
+	Fs_Changed, // and what its file watcher saw (fs_model.odin)
 	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
@@ -822,6 +825,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	// app tabs: answers and queries (App_Call_Done finishes its request itself)
 	#partial switch _ in cmd {
 	case App_Call_Done, App_Events, App_Declared: q3 = true
+	case App_Socket, Fs_Changed: q3 = true // a separate core's window: an app's lines and tokens, the watcher's paths
 	// browser tabs' queries: their answers hold page content (the requester's only)
 	case Browser_Tabs, Browser_Console, Browser_Network, Browser_Comments: q3 = true
 	}
@@ -1481,6 +1485,16 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if tab == nil do return {ok = true}, false
 		claude_status_dismiss(tab)
 		return {ok = true}, true
+	case App_Socket:
+		return app_socket_apply(c), false
+	case Harness_Install:
+		return harness_install_apply(c), false
+	case Fs_Changed:
+		for p, i in c.paths {
+			reload_fs_event(p) // one of pi's config folders? (reload.odin: the core has no watcher of its own)
+			fs_model_changed(p, i < len(c.flags) ? c.flags[i] : 0)
+		}
+		return {ok = true}, false
 	case Set_Separate_Core:
 		if state.settings.separate_core == c.on do return {ok = true}, false
 		state.settings.separate_core = c.on

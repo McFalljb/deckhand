@@ -517,6 +517,14 @@ fs_root_of :: proc(path: string) -> string {
 
 // Main thread, every frame callback (editor_tick): restarts what a rate
 // limit held back. Cheap when nothing waits.
+// A separate core's window (WINDOW_COMMANDS): what its file watcher saw (editor_watch.odin), so
+// the core's file models (the Files tree's, git status, worktrees, the Changes tabs) follow, as
+// the window's own do. flags: the watcher's, per path.
+Fs_Changed :: struct {
+	paths: []string,
+	flags: []u32,
+}
+
 fs_model_tick :: proc() {
 	for &s in fs_model.status do if s.want && !s.ok && !s.loading && time.tick_since(s.started) >= FS_STATUS_GAP do status_load(&s)
 	for root, &fl in fs_model.files do if fl.stale do list_refresh(root, &fl)

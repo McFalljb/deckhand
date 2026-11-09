@@ -117,6 +117,11 @@ editor_tick :: proc() {
 		watch.pending = {}
 		sync.atomic_store(&watch.any, false)
 		sync.mutex_unlock(&watch.lock)
+		if client_separate() { // a separate core's file models follow too (fs_model.odin's Fs_Changed)
+			fc := core.Fs_Changed{paths = make([]string, len(paths), context.temp_allocator), flags = make([]u32, len(paths), context.temp_allocator)}
+			for p, i in paths do fc.paths[i], fc.flags[i] = p.path, p.flags
+			client_internal(fc)
+		}
 		for p in paths {
 			if !client_separate() do core.reload_fs_event(p.path) // one of pi's config folders? (reload.odin; a separate core polls)
 			editor_path_changed(p.path, p.flags)

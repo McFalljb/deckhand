@@ -155,7 +155,8 @@ tool_label :: proc(t: Changes_Tool) -> string {
 // Whether a tool applies now, and why not.
 changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: bool, why: string) {
 	r, f := core.changes_selected(v)
-	busy := v.busy != ""
+	vbusy, _, _ := core.changes_status(v)
+	busy := vbusy != ""
 	switch t {
 	case .Refresh:
 		return true, ""
@@ -174,7 +175,7 @@ changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: 
 	case .Merge:
 		return false, "coming later"
 	case .Commit:
-		if busy do return false, v.busy
+		if busy do return false, vbusy
 		staged := false
 		if r != nil do for g in r.files do if g.scope == .Uncommitted && g.staged != .None do staged = true
 		if !staged do return false, "stage files first"
@@ -190,20 +191,20 @@ changes_tool_state :: proc(v: ^core.Changes_View, t: Changes_Tool) -> (enabled: 
 	case .Stage:
 		if f == nil do return false, "no file selected"
 		if f.scope == .Committed do return false, "already committed on the branch"
-		if busy do return false, v.busy
+		if busy do return false, vbusy
 		if f.status == 'U' do return false, "a conflict: resolve it in a terminal"
 		if !f.unstaged do return false, "nothing to stage"
 		return true, ""
 	case .Unstage:
 		if f == nil do return false, "no file selected"
 		if f.scope == .Committed do return false, "already committed on the branch"
-		if busy do return false, v.busy
+		if busy do return false, vbusy
 		if f.staged == .None do return false, "nothing staged"
 		return true, ""
 	case .Discard:
 		if f == nil do return false, "no file selected"
 		if f.scope == .Committed do return false, "committed on the branch: not discarded here"
-		if busy do return false, v.busy
+		if busy do return false, vbusy
 		if f.status == 'U' do return false, "a conflict: resolve it in a terminal"
 		return true, ""
 	case .More:
@@ -336,11 +337,12 @@ changes_bars_layout :: proc(p: ^core.Pane) {
 		if avail >= cw do tool(v, .Commit, primary = true)
 	}
 	// the last action's outcome, or what runs now
-	msg := v.busy != "" ? v.busy : v.notice
+	vbusy, vnotice, verr := core.changes_status(v)
+	msg := vbusy != "" ? vbusy : vnotice
 	if msg != "" {
 		if clay.UI(cid("ch_notice"))(bar(cid("ch_notice"), EDITOR_BAR_H - SP_2)) {
-			col := v.notice_err && v.busy == "" ? th.error : th.text_secondary
-			dot(v.notice_err && v.busy == "" ? th.error : (v.busy != "" ? th.running : th.done))
+			col := verr && vbusy == "" ? th.error : th.text_secondary
+			dot(verr && vbusy == "" ? th.error : (vbusy != "" ? th.running : th.done))
 			if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
 			clay.TextDynamic(clip(msg, avail - px(DOT + GAP_INLINE)), txt(col))
 		}

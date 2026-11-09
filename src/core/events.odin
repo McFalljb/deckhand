@@ -97,6 +97,7 @@ emit_event :: proc(ev: Event) {
 	window_test_event(ev) // test mode's script (autotest.odin)
 	persist_on_event(ev)
 	socket_publish(ev)
+	window_link_finished(ev) // a separate window's own pending command (window_link.odin)
 }
 
 // A subscriber never receives events it caused itself (an agent reacting to

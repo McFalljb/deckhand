@@ -104,6 +104,11 @@ App_Proc :: struct {
 	// a hidden tab draws on demand: its first frame, and one per app_screenshot (app_frames_tick)
 	framed:      bool, // this process gave a frame Deckhand took
 	shot_waits:  [dynamic]Shot_Wait,
+	// a separate core: the token asked for (app_mint_ask), and what starts once it comes
+	mint_id:     string,
+	mint_argv:   []string,
+	mint_cwd:    string,
+	mint_at:     time.Tick,
 }
 
 // An app_screenshot of a hidden app tab, waiting for a frame newer than seq.
@@ -259,7 +264,7 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64, tab_i
 			body := strings.trim_space(ev)[1:]
 			line := fmt.tprintf(`{{"v":1,"type":"input","source":"agent",%s`, body)
 			if strings.trim_space(body) == "}" do line = `{"v":1,"type":"input","source":"agent"}`
-			if a != nil && core.socket_app_send(c.tab_id, line) {
+			if a != nil && app_sock_send(c.tab_id, line) {
 				a.inputs += 1
 				n += 1
 			}
@@ -385,7 +390,7 @@ app_call_line :: proc(wire, method, params: string) -> string {
 app_request :: proc(tab_id, request_id: u64, method, params: string, timeout: time.Duration) -> bool {
 	next_wire += 1
 	wire := fmt.tprintf("a%d", next_wire)
-	if !core.socket_app_send(tab_id, app_call_line(wire, method, params)) do return false
+	if !app_sock_send(tab_id, app_call_line(wire, method, params)) do return false
 	pending[strings.clone(wire)] = {tab_id = tab_id, request_id = request_id, type = strings.clone(method), deadline = time.tick_add(time.tick_now(), timeout)}
 	return true
 }
@@ -417,15 +422,95 @@ app_fail_pending :: proc(tab_id: u64, why, code: string, shots := true) {
 // PI_DESK_* and the test hooks) and PI_KIT_*, plus its socket, a fresh single-use `app` token for
 // this tab and DECKHAND_APP=1, each with its PI_DESK_ twin (env_names.odin; forge reads those).
 @(private = "file")
-app_env :: proc(tab_id: u64) -> []string {
+// sock: its socket and token, the core's when it is another process (App_Socket's mint).
+app_env :: proc(tab_id: u64, sock: []string) -> []string {
 	env := core.child_base_env() // after "Refresh shell environment", the refreshed one (login_env.odin)
 	out := make([dynamic]string, context.temp_allocator)
 	for e in env do if !core.env_desk_owned(core.env_key(e)) && !strings.has_prefix(e, "PI_KIT_") do append(&out, e)
 	own := make([dynamic]string, context.temp_allocator)
-	append(&own, ..core.socket_child_env({kind = .App, tab_id = tab_id}))
+	if sock != nil do append(&own, ..sock)
+	else do append(&own, ..core.socket_child_env({kind = .App, tab_id = tab_id}))
 	append(&own, "DECKHAND_APP=1")
 	append(&out, ..core.env_with_legacy(own[:]))
 	return out[:]
+}
+
+// A separate core mints the app's token (App_Socket): asked for when the process should start,
+// which starts once the answer comes (app_mint_tick). Never waited for: a tab_host call runs this.
+@(private = "file")
+app_mint_ask :: proc(a: ^App_Proc, argv: []string, cwd: string) {
+	app_mint_drop(a)
+	a.mint_id = strings.clone(client_next_id())
+	a.mint_argv = make([]string, len(argv))
+	for x, i in argv do a.mint_argv[i] = strings.clone(x)
+	a.mint_cwd = strings.clone(cwd)
+	a.mint_at = time.tick_now()
+	text, _ := core.window_msg_internal(core.App_Socket{tab_id = a.tab_id, op = .Mint}, a.mint_id, now = true)
+	client_send_raw(text)
+}
+
+@(private = "file")
+app_mint_drop :: proc(a: ^App_Proc, taken := false) {
+	if a.mint_id == "" do return
+	if taken {
+	} else if a.mint_id in client.results do client_take_result(a.mint_id)
+	else do client.abandoned[strings.clone(a.mint_id, runtime.heap_allocator())] = true // its late answer is dropped
+	delete(a.mint_id)
+	for x in a.mint_argv do delete(x)
+	delete(a.mint_argv)
+	delete(a.mint_cwd)
+	a.mint_id, a.mint_argv, a.mint_cwd = "", nil, ""
+}
+
+// The token came (the process starts), or did not within APP_CALL_TIMEOUT (it shows as exited).
+@(private = "file")
+app_mint_tick :: proc(a: ^App_Proc) {
+	if a.mint_id == "" do return
+	if !(a.mint_id in client.results) {
+		if time.tick_since(a.mint_at) < APP_CALL_TIMEOUT && !client.lost do return
+		app_log_line(a, "[Deckhand] Deckhand's background core gave no token for the app: not started")
+		app_mint_drop(a)
+		tab_host_report_now(core.App_Update{tab_id = a.tab_id, status = .Exited, exit_code = 127})
+		return
+	}
+	r := client_take_result(a.mint_id)
+	sock := make([dynamic]string, context.temp_allocator)
+	if r.ok {
+		v, err := jg.parse_string(r.data, .JSON, true, context.temp_allocator)
+		if list, is := v.(json.Array); err == nil && is do for x in list do if e, es := x.(json.String); es do append(&sock, e)
+	}
+	started := len(sock) > 0 && app_spawn_env(a, a.mint_argv, a.mint_cwd, app_env(a.tab_id, sock[:]))
+	if !r.ok do app_log_line(a, fmt.tprintf("[Deckhand] no token from Deckhand's background core: %s", r.error))
+	app_mint_drop(a, taken = true)
+	if !started do tab_host_report_now(core.App_Update{tab_id = a.tab_id, status = .Exited, exit_code = 127})
+}
+
+// The app's connection is the core's socket's: in process the window calls it; with a separate
+// core, through it (App_Socket; whether it is connected: the tab's Tab_Live).
+@(private = "file")
+app_sock_send :: proc(tab_id: u64, line: string) -> bool {
+	if !client_separate() do return core.socket_app_send(tab_id, line)
+	if !app_sock_connected(tab_id) || !core.app_line_ok(line) do return false
+	client_internal(core.App_Socket{tab_id = tab_id, op = .Send, line = line})
+	return true
+}
+
+@(private = "file")
+app_sock_connected :: proc(tab_id: u64) -> bool {
+	if !client_separate() do return core.socket_app_connected(tab_id)
+	_, tab, _ := find_tab(tab_id)
+	return tab != nil && tab.live.app_connected
+}
+
+@(private = "file")
+app_sock_forget :: proc(tab_id: u64) {
+	if !client_separate() {
+		core.socket_forget_tab(tab_id)
+		return
+	}
+	// run as read, as Mint is (now): never after a token minted since
+	text, _ := core.window_msg_internal(core.App_Socket{tab_id = tab_id, op = .Forget}, "", now = true)
+	client_send_raw(text)
 }
 
 // Starts (or restarts) the tab's process: its own session (so its process
@@ -448,7 +533,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	a.started_at = time.tick_now()
 	a.ring.cur_gen = 0 // a new process: its ring comes after its HELLO; the last frame stays
 	a.ring.want_w, a.ring.want_h = 0, 0
-	core.socket_forget_tab(a.tab_id) // an old process's token and connection
+	app_sock_forget(a.tab_id) // an old process's token and connection
 	app_fail_pending(a.tab_id, "the app restarted", "tab_gone", shots = false)
 	// the log: <data dir>/apps/<tab_id>.log
 	if a.log_path == "" {
@@ -463,9 +548,18 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 		a.out.log_fd = posix.open(strings.clone_to_cstring(a.log_path, context.temp_allocator), {.WRONLY, .CREAT, .APPEND, .CLOEXEC}, {.IRUSR, .IWUSR})
 	}
 	app_log_line(a, fmt.tprintf("[Deckhand] starting: %s", strings.join(argv, " ", context.temp_allocator)))
+	if client_separate() {
+		app_mint_ask(a, argv, cwd)
+		return true
+	}
+	return app_spawn_env(a, argv, cwd, app_env(a.tab_id, nil))
+}
+
+// The rest of app_spawn, with the app's environment.
+@(private = "file")
+app_spawn_env :: proc(a: ^App_Proc, argv: []string, cwd: string, env: []string) -> bool {
 	c_argv := make([]cstring, len(argv) + 1, context.temp_allocator)
 	for x, i in argv do c_argv[i] = strings.clone_to_cstring(x, context.temp_allocator)
-	env := app_env(a.tab_id)
 	c_env := make([]cstring, len(env) + 1, context.temp_allocator)
 	for e, i in env do c_env[i] = strings.clone_to_cstring(e, context.temp_allocator)
 	// the channel first: the hello reply carries its key; the process is set once spawned
@@ -497,7 +591,7 @@ app_spawn :: proc(a: ^App_Proc, argv: []string, cwd: string) -> bool {
 	if err != .NONE {
 		posix.close(fds[0])
 		app_log_line(a, fmt.tprintf("[Deckhand] could not start %s (%v)", argv[0], err))
-		core.socket_forget_tab(a.tab_id)
+		app_sock_forget(a.tab_id)
 		return false
 	}
 	a.pid = pid
@@ -582,7 +676,7 @@ app_gone :: proc(a: ^App_Proc, code: int) {
 	a.pid = 0
 	a.connected = false
 	if frames_ok == 1 do dh_frames_chan_stop(a.tab_id)
-	core.socket_forget_tab(a.tab_id)
+	app_sock_forget(a.tab_id)
 	app_fail_pending(a.tab_id, "the app exited", "tab_gone", shots = false)
 	// hidden screenshots waiting for a frame: answered now (the last frame, or no_frame)
 	for w in a.shot_waits {
@@ -674,6 +768,7 @@ app_frames_tick :: proc() -> bool {
 			redraw = true
 		}
 	}
+	for _, a in apps do app_mint_tick(a)
 	for id, a in apps {
 		_, tab, at := app_tab_of(id)
 		if tab == nil do continue
@@ -700,7 +795,7 @@ app_frames_tick :: proc() -> bool {
 		}
 		if a.pid == 0 do continue
 		// the socket: an app that hangs up is gone (its exit comes next)
-		if core.socket_app_connected(id) do a.sock_seen = true
+		if app_sock_connected(id) do a.sock_seen = true
 		else if a.sock_seen && !a.closing {
 			a.sock_seen = false
 			app_log_line(a, "[Deckhand] the app closed its connection: stopping it")
@@ -764,7 +859,7 @@ app_frames_tick :: proc() -> bool {
 			if !r.pending do tab_host_finished(w.request_id, r)
 		}
 		// visibility: tab.visible when it changes
-		if a.sent_visible != int(told) && core.socket_app_connected(id) {
+		if a.sent_visible != int(told) && app_sock_connected(id) {
 			if w := app_own_request(id, "tab.visible", fmt.tprintf(`{{"visible":%v}}`, told), APP_CALL_TIMEOUT); w != "" {
 				delete(w)
 				a.sent_visible = int(told)
@@ -773,7 +868,7 @@ app_frames_tick :: proc() -> bool {
 		}
 		// the display: its rate and scale, soon after the hello (which has them too) and whenever
 		// the window's screen changes (another screen, ProMotion/VRR, a scale change)
-		if fps, scale := platform_display(); (a.sent_fps != fps || a.sent_scale != scale) && core.socket_app_connected(id) {
+		if fps, scale := platform_display(); (a.sent_fps != fps || a.sent_scale != scale) && app_sock_connected(id) {
 			if w := app_own_request(id, "tab.display", core.app_display_json(fps, scale), APP_CALL_TIMEOUT); w != "" {
 				delete(w)
 				a.sent_fps, a.sent_scale = fps, scale
@@ -935,6 +1030,7 @@ app_drop :: proc(tab_id: u64) {
 	a := app_of(tab_id)
 	if a == nil do return
 	delete_key(&apps, tab_id)
+	app_mint_drop(a)
 	app_release_input(a)
 	app_fail_pending(tab_id, "the tab closed", "tab_gone")
 	for w in a.shot_waits do tab_host_finished(w.request_id, {error = "the tab closed", data = `{"code":"tab_gone"}`})
@@ -957,7 +1053,7 @@ app_drop :: proc(tab_id: u64) {
 
 @(private = "file")
 app_proc_free :: proc(a: ^App_Proc) {
-	core.socket_forget_tab(a.tab_id)
+	app_sock_forget(a.tab_id)
 	core.app_events_forget(a.tab_id) // a closing app's events after app_drop's forget
 	core.app_boxes_forget(a.tab_id)
 	if a.out != nil do out_unref(a.out)
@@ -1264,7 +1360,7 @@ button_name :: proc(b: sapp.Mousebutton) -> string {
 
 @(private = "file")
 send_input :: proc(a: ^App_Proc, line: string) {
-	if core.socket_app_send(a.tab_id, line) do a.inputs += 1
+	if app_sock_send(a.tab_id, line) do a.inputs += 1
 }
 
 // Lets go of what the app holds: key-ups and button-ups for everything
@@ -1288,7 +1384,7 @@ app_focus_tick :: proc() {
 		want := app_wants_keys(a)
 		if want == a.focused do continue
 		if !want do app_release_input(a)
-		else if core.socket_app_connected(a.tab_id) {
+		else if app_sock_connected(a.tab_id) {
 			send_input(a, `{"v":1,"type":"input","event":"focus","focused":true}`)
 			a.focused = true
 		}
@@ -1633,7 +1729,7 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 			cwd, _ := os.get_working_directory(context.temp_allocator)
 			argv[0], _ = filepath.join({cwd, argv[0]}, context.temp_allocator)
 		}
-		r := core.run_command(core.New_App_Tab{argv = argv}, {kind = .Script})
+		_, r, _ := script_command(core.New_App_Tab{argv = argv}, {kind = .Script}) // a separate core's too (autotest.odin)
 		if !r.ok do return fmt.tprintf("app_open: %s", r.error), false
 		autotest.last_created = r.created_id
 		app_marks.tab = r.created_id

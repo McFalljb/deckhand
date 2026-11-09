@@ -663,6 +663,7 @@ probe: struct {
 
 // The folders FSEvents should watch for us (editor_watch.odin's watch_sync).
 reload_watch_dirs :: proc() -> []string {
+	if replica_process do return state.live.watch // a separate core's (its Fs_Changed hears them)
 	out := make([dynamic]string, context.temp_allocator)
 	for i in rw.dirs do if rw.srcs[i].kind == .Dir do append(&out, rw.srcs[i].path)
 	return out[:]

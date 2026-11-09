@@ -151,6 +151,9 @@ client_core_connect :: proc(data: string) -> string {
 	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
 	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
 	core.files_root_reset_send = proc(base: string) {client_send(core.Files_Set_Root{base = base})}
+	core.replica_request = window_request_run // what this process's core package asks of the window (window_requests.odin)
+	core.replica_facts_text = proc() -> string {return client.facts_sent} // its own snapshot's facts (window_link.odin)
+	core.replica_tab_facts_text = proc(tab_id: u64) -> string {return client.tab_facts_sent[tab_id] or_else ""}
 	return client_core_subscribe()
 }
 
@@ -169,6 +172,8 @@ client_core_reconnect :: proc() -> string {
 	clear(&client.results)
 	for k in client.abandoned do delete(k, heap)
 	clear(&client.abandoned)
+	for k in client.pending do delete(k, heap)
+	clear(&client.pending)
 	term_views_drop_all() // their channels were the old connection's (term_view_stream.odin)
 	client_facts_forget_all()
 	got_full = false
@@ -323,7 +328,7 @@ client_core_handover :: proc(to: string) -> string {
 	if core.autotest_active do fmt.println("[autotest] core: handing over to", to)
 	client.handing_over = true
 	defer client.handing_over = false
-	r := client_call_wait(core.Core_Handover{to = to}, 15 * time.Second)
+	r, _ := client_call_wait(core.Core_Handover{to = to}, 15 * time.Second)
 	if !r.ok && !client.lost { // gone already: it went ahead
 		fmt.eprintln("Deckhand: background core: the handover was refused:", r.error)
 		return fmt.tprintf("Deckhand's background core could not be updated: %s", r.error)
@@ -395,6 +400,9 @@ client_core_give_up :: proc(why: string) {
 client_layout_facts :: proc(f: ^core.Window_Facts) {
 	if client.sock == nil do return
 	f.centre = {app.centre.z, app.centre.w, app.dpi}
+	@(static) exe: string
+	if exe == "" do exe = strings.clone(core.executable_path(), runtime.heap_allocator())
+	f.exe = exe // the bundle the core's updates replace (update.odin's update_window_exe)
 	cs := core.cur()
 	if cs == nil do return
 	panes := make([]core.Pane_Fact, len(cs.panes), context.temp_allocator)
@@ -405,14 +413,44 @@ client_layout_facts :: proc(f: ^core.Window_Facts) {
 // Test mode's script commands over core.sock: a ui command, its result waited for up to wait.
 SCRIPT_CORE_WAIT :: 10 * time.Second
 
-client_call_wait :: proc(cmd: core.Command, wait: time.Duration) -> core.Result {
+// Test mode over core.sock: until the core ran everything the window sent so far and its delta
+// came back: a no-op command queued behind them, whose result comes after that delta (Q9).
+// Bounded (SCRIPT_CORE_WAIT).
+client_barrier :: proc() {
 	client_facts()
 	id := client_next_id()
-	client_send_raw(core.window_msg_command(cmd, id, now = true))
+	text, _ := core.window_msg_internal(core.Focus_Release{}, id) // widget "": changes nothing
+	client_send_raw(text)
+	start := time.tick_now()
+	for !(id in client.results) && !client.lost && time.tick_since(start) < SCRIPT_CORE_WAIT do client_io(20)
+	if id in client.results do client_take_result(id)
+	else do client.abandoned[strings.clone(id, runtime.heap_allocator())] = true
+}
+
+client_call_wait :: proc(cmd: core.Command, wait: time.Duration, as: core.Caller = {}) -> (r: core.Result, request_id: u64) {
+	client_facts()
+	id := client_next_id()
+	client_send_raw(core.window_msg_command(cmd, id, now = true, as = as))
 	start := time.tick_now()
 	for !(id in client.results) && !client.lost && time.tick_since(start) < wait do client_io(20)
-	if id in client.results do return client_take_result(id)
-	return core.fail("the background core did not answer in time")
+	if !(id in client.results) do return core.fail("the background core did not answer in time"), 0
+	request_id = client.pending[id] or_else 0 // pending: the core sends its finished (window_link_finished)
+	return client_take_result(id), request_id
+}
+
+// A separate core's runtime the window follows each frame (the replica's live section): its install
+// run, into this process's core.harness_run (what the setup sheet reads), and pi's config folders
+// for the file watcher (watch_sync reads core.reload_watch_dirs). The run's strings are the
+// replica's; nothing here frees them (the core runs it: Harness_Install). When a run ends the
+// checklist looks again, as the core's own does.
+client_live_mirror :: proc() {
+	l := state.live.harness
+	h := &core.harness_run
+	if h.term_id != l.term_id do h.started = time.tick_now() // the Enter grace from when this window saw it start
+	was := h.status
+	h.term_id, h.item, h.action, h.command, h.status, h.exit = l.term_id, l.item, l.action, l.command, l.status, l.exit
+	if was == .Running && h.status != .Running do core.harness_checklist_refresh(full = true)
+	watch_sync() // and pi's config folders the core wants watched (live.watch; a no-op when unchanged)
 }
 
 // `deckhand --ctl` with a separate core (main.odin, before core.ctl_main): when DECKHAND_SOCKET is

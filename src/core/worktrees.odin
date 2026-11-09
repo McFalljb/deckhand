@@ -790,13 +790,32 @@ wt_cleanup_busy :: proc(path: string) -> bool {return path in wt_busy}
 
 // A clean up in flight for path: "checking", "removing" ("" = none).
 wt_cleanup_phase :: proc(path: string) -> string {
+	if replica_process { // the core's (core_live.odin)
+		for c in state.live.cleanups do if c.path == path do return c.phase
+		return ""
+	}
 	b, ok := wt_busy[path]
 	if !ok do return ""
 	return b == .Checking ? "checking" : "removing"
 }
 
 // Why the last clean up of path stopped ("" = none).
-wt_cleanup_error :: proc(path: string) -> string {return wt_errors[path] or_else ""}
+wt_cleanup_error :: proc(path: string) -> string {
+	if replica_process { // the core's (core_live.odin)
+		for c in state.live.cleanups do if c.path == path do return c.error
+		return ""
+	}
+	return wt_errors[path] or_else ""
+}
+
+// The clean ups in flight or failed, for a window in another process (core_live_tick).
+wt_cleanups_live :: proc(a: runtime.Allocator) -> []Wt_Cleanup_Live {
+	out := make([dynamic]Wt_Cleanup_Live, a)
+	for p, b in wt_busy do append(&out, Wt_Cleanup_Live{path = strings.clone(p, a), phase = b == .Checking ? "checking" : "removing", error = strings.clone(wt_errors[p] or_else "", a)})
+	for p, e in wt_errors do if !(p in wt_busy) do append(&out, Wt_Cleanup_Live{path = strings.clone(p, a), error = strings.clone(e, a)})
+	slice.sort_by(out[:], proc(x, y: Wt_Cleanup_Live) -> bool {return x.path < y.path}) // maps have no order: the same list compares equal
+	return out[:]
+}
 
 @(private = "file")
 wt_set_error :: proc(path, err: string) {

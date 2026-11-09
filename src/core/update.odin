@@ -120,6 +120,18 @@ Update_Prepared :: struct {
 
 // Main thread, at start (main.odin): the saved choices, leftovers of an earlier update,
 // and the timer (not in test mode without a fixture URL).
+// A separate core (serve.odin sets update_from_window): the app bundle its updates replace is the
+// window's (window.facts exe: the first window to say it), read by the timer thread once known.
+update_from_window: bool
+update_window_exe: string
+update_window_known: bool // atomic
+
+update_window_exe_set :: proc(exe: string) {
+	if exe == "" || sync.atomic_load(&update_window_known) do return
+	update_window_exe = strings.clone(exe)
+	sync.atomic_store(&update_window_known, true)
+}
+
 update_init :: proc() {
 	update_load()
 	if autotest_active {
@@ -147,7 +159,10 @@ update_init :: proc() {
 		t.delay = 300 * time.Millisecond
 	}
 	thread.run_with_poly_data(t, proc(t: ^Timer) {
-		version, bundle, why := update_env_find(t.test, t.version, t.app)
+		// a separate core: what it replaces is its window's bundle, known once a window said
+		// where it runs (never the core's own executable: its installed copy)
+		for update_from_window && !t.test && !sync.atomic_load(&update_window_known) && !app_quitting do time.sleep(200 * time.Millisecond)
+		version, bundle, why := update_env_find(t.test, t.version, t.app, update_window_exe)
 		inbox_submit(Update_Env{version = version, bundle = bundle, why_not = why}, {kind = .Internal})
 		free_all(context.temp_allocator)
 		time.sleep(t.delay)
@@ -159,13 +174,14 @@ update_init :: proc() {
 }
 
 // The running version and the bundle Deckhand may replace (any thread; temp allocator).
-update_env_find :: proc(test: bool, test_version, test_app: string) -> (version, bundle, why: string) {
+// exe: the running window's executable ("" = this process's).
+update_env_find :: proc(test: bool, test_version, test_app: string, exe := "") -> (version, bundle, why: string) {
 	if test {
 		if test_app == "" || under_applications(test_app) do return test_version, "", "test mode installs only into a fake folder, never under /Applications"
 		b, w := install_decision(upath(test_app, "Contents", "MacOS", "Deckhand"), path_writable)
 		return test_version, b, w
 	}
-	exe := executable_path()
+	exe := exe != "" ? exe : executable_path()
 	if exe == "" do return "", "", "cannot find Deckhand's own executable"
 	b, w := install_decision(exe, path_writable)
 	app := b
@@ -909,14 +925,15 @@ update_save :: proc() {
 
 // get_state's "update" (json_write.odin): what the user sees; no paths.
 update_state_json :: proc(b: ^strings.Builder) {
-	fmt.sbprintf(b, `{{"checks":%v,"current":`, !upd.checks_off)
-	json_quote(b, upd.current)
-	fmt.sbprintf(b, `,"phase":"%s","available":%v,"latest":`, UPDATE_PHASE_NAMES[upd.phase], upd.offered)
-	json_quote(b, upd.release.version)
+	u := update_view() // a separate core's window: the core's (core_live.odin)
+	fmt.sbprintf(b, `{{"checks":%v,"current":`, !u.checks_off)
+	json_quote(b, u.current)
+	fmt.sbprintf(b, `,"phase":"%s","available":%v,"latest":`, UPDATE_PHASE_NAMES[u.phase], u.offered)
+	json_quote(b, u.release.version)
 	strings.write_string(b, `,"skipped":`)
-	json_quote(b, upd.skipped)
-	fmt.sbprintf(b, `,"dismissed":%v,"can_install":%v,"last_check":%d,"message":`, upd.dismissed, update_cannot_install(release = false) == "", upd.last_ok)
-	json_quote(b, upd.message)
+	json_quote(b, u.skipped)
+	fmt.sbprintf(b, `,"dismissed":%v,"can_install":%v,"last_check":%d,"message":`, u.dismissed, u.can_install, u.last_ok)
+	json_quote(b, u.message)
 	strings.write_byte(b, '}')
 }
 

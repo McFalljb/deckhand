@@ -164,6 +164,7 @@ init :: proc "c" () {
 	core.update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
 	app.ready = true
 	app.redraw = true
+	core.core_loop_start() // core_tick also while no frames run (core_loop.odin)
 }
 
 // The app's platform layer: every entry set (a nil one would make its
@@ -174,7 +175,7 @@ platform_app :: proc() -> core.Platform {
 		get_clipboard = proc() -> string {return string(sapp.get_clipboard_string())},
 		quit = proc() {
 			core.app_quitting = true
-			sapp.request_quit()
+			app_request_quit()
 		},
 		wake = platform_wake,
 		pick_folder = platform_pick_folder,
@@ -190,7 +191,17 @@ platform_app :: proc() -> core.Platform {
 		clear_clipboard_if = platform_clipboard_clear_if,
 		trash = fs_trash, // editor_platform_*.odin
 		activity = platform_activity,
+		core_timer = platform_core_timer,
 	}
+}
+
+// Ends the run as sokol does, from its next frame, by closing the window. AppKit never closes a
+// window while the app is hidden (⌘H): the quit would wait until the user showed it again, so it is
+// shown first (without taking focus): the window shows for a moment before it closes. With no
+// frames at all (minimised, App Nap), the core loop's timer closes it (core_quit_stalled).
+app_request_quit :: proc() {
+	if app_is_hidden() do app_unhide()
+	sapp.request_quit()
 }
 
 // The window's side of the core's hooks (window_hooks.odin), filled in before main runs so the
@@ -299,6 +310,9 @@ frame :: proc "c" () {
 	context = core.app_context
 	defer free_all(context.temp_allocator)
 
+	if script_frames_off() do return // test mode: as if macOS stopped calling frame() (autotest.odin)
+	core.core_frame_begin(time.tick_now()) // the core loop's timer stays out of frames (core_loop.odin)
+	defer core.core_frame_end(time.tick_now()) // and runs a tick it skipped meanwhile
 	core.app_frames_called += 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
@@ -316,10 +330,6 @@ frame :: proc "c" () {
 	if ui_wants_frame() do app.redraw = true // a fade or a running dot is moving
 	if tip_due() do app.redraw = true // the pointer rested on a control: one frame for its tooltip
 	if toast_tick() do app.redraw = true // a menu choice's outcome went away (toast.odin)
-	core.control_token_clip_tick() // Copy a control token: off the clipboard after a minute (commands.odin)
-	core.holder_successor_retry_tick() // after REFUSED{secret}: attach again once the reservation lapsed (holder_client.odin)
-	core.holder_upgrade_tick() // an older holder than the bundled one: upgraded once, after the adopt (holder_restart.odin)
-	if core.holder_restart_tick() do app.redraw = true // Restart session holder's outcome (holder_restart.odin)
 	if app_frames_tick() do app.redraw = true // app tabs: a frame arrived, an exit, a stall (app_tab.odin)
 	dh_cef_pump_due() // CEF's pump when its timer is overdue (cef_macos.m)
 	if browser_frames_tick() do app.redraw = true // browser tabs: a frame CEF painted (browser.odin)
@@ -809,6 +819,7 @@ event :: proc(e: ^sapp.Event) {
 		}
 		// the window goes first: the handover can wait seconds (an upgrade in flight, the ack, the
 		// snapshots), and nothing is drawn meanwhile
+		core.core_loop_stop() // no tick from the timer during the handover's waits
 		platform_hide_windows()
 		if core.autotest_active do fmt.println("[autotest] quit: windows hidden")
 		// keep_sessions: the holder keeps the held tabs (snapshots and handover.json first);
@@ -1176,6 +1187,7 @@ utf8_string :: proc(r: rune) -> string {
 
 cleanup :: proc "c" () {
 	context = core.app_context
+	core.core_loop_stop()
 	core.login_env_kill_probe() // a refresh's shell still running (login_env.odin)
 	core.harness_no_sudo_sweep(at_quit = true) // a run's no-sudo folder (harness_install.odin)
 	core.persist_quit()

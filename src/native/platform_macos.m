@@ -695,7 +695,7 @@ void dh_mac_test_scale(double scale) {
 static id job_activity;
 void dh_mac_activity(int on) {
     if (on && !job_activity) {
-        job_activity = [[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Deckhand job running"];
+        job_activity = [[NSProcessInfo processInfo] beginActivityWithOptions:NSActivityUserInitiatedAllowingIdleSystemSleep reason:@"Deckhand: a job runs or a terminal has output"];
     } else if (!on && job_activity) {
         [[NSProcessInfo processInfo] endActivity:job_activity];
         job_activity = nil;

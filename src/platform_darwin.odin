@@ -10,6 +10,7 @@ import "core:c"
 import "core:fmt"
 import "core:strings"
 import "core:sync"
+import "core:time"
 import NS "core:sys/darwin/Foundation"
 import "core"
 import sapp "../vendor/sokol-odin/sokol/app"
@@ -21,6 +22,12 @@ foreign libsystem {
 	@(link_name = "_dispatch_main_q")
 	dispatch_main_q: u8 // the main queue object; dispatch_get_main_queue() is &_dispatch_main_q
 	dispatch_async_f :: proc(queue: rawptr, ctx: rawptr, work: proc "c" (ctx: rawptr)) ---
+	_dispatch_source_type_timer: u8 // DISPATCH_SOURCE_TYPE_TIMER is &_dispatch_source_type_timer
+	dispatch_source_create :: proc(type: rawptr, handle: uintptr, mask: c.ulong, queue: rawptr) -> rawptr ---
+	dispatch_source_set_timer :: proc(source: rawptr, start: u64, interval: u64, leeway: u64) ---
+	dispatch_source_set_event_handler_f :: proc(source: rawptr, handler: proc "c" (ctx: rawptr)) ---
+	dispatch_resume :: proc(object: rawptr) ---
+	dispatch_time :: proc(base: u64, delta: i64) -> u64 ---
 	system :: proc(cmd: cstring) -> c.int ---
 	getrusage :: proc(who: c.int, usage: ^Rusage) -> c.int ---
 }
@@ -51,7 +58,10 @@ on_wake :: proc "c" (ctx: rawptr) {
 	defer free_all(context.temp_allocator)
 	sync.atomic_store(&wake_pending, false)
 	app.wakes += 1
-	if app.ready do core.inbox_drain()
+	if app.ready {
+		core.core_loop_wake() // work came in: the core loop's timer at its fast pace
+		core.inbox_drain()
+	}
 }
 
 // Runs p from the main queue: outside sokol's event and frame callbacks
@@ -62,6 +72,39 @@ platform_run_later :: proc(p: proc()) {
 		defer free_all(context.temp_allocator)
 		(proc())(ctx)()
 	})
+}
+
+@(private = "file")
+core_timer_source: rawptr
+@(private = "file")
+core_timer_proc: proc()
+
+// The core loop's timer (core_loop.odin): fire every `every` from the main queue, which runs while
+// sokol's frames are slowed or stopped (hidden, minimised, App Nap) and in modal loops too (the
+// core's guard keeps it out of frame() and the loops frame() started). Half a period of leeway
+// lets macOS coalesce its wakeups. A second call sets the period and what it fires (the core slows
+// it while idle). A quit that waits for a frame none runs: the window closed here (core_quit_stalled).
+platform_core_timer :: proc(every: time.Duration, fire: proc()) {
+	core_timer_proc = fire
+	ns := u64(every)
+	if core_timer_source != nil {
+		dispatch_source_set_timer(core_timer_source, dispatch_time(0, i64(ns)), ns, ns / 2)
+		return
+	}
+	src := dispatch_source_create(&_dispatch_source_type_timer, 0, 0, &dispatch_main_q)
+	if src == nil do return
+	dispatch_source_set_timer(src, dispatch_time(0, i64(ns)), ns, ns / 2)
+	dispatch_source_set_event_handler_f(src, proc "c" (ctx: rawptr) {
+		context = core.app_context
+		// a guard, not free_all: in a modal loop the temp memory of the frame or tick that started
+		// it is still in use (the fire is skipped then, but this handler still runs)
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+		if app.ready && core_timer_proc != nil do core_timer_proc()
+		// sokol closes the window (its quit) only from a frame: none came (minimised, App Nap)
+		if app.ready && core.core_quit_stalled(time.tick_now()) do window_close()
+	})
+	dispatch_resume(src)
+	core_timer_source = src
 }
 
 cpu_seconds :: proc() -> f64 {
@@ -79,9 +122,13 @@ window_send_back :: proc() {intrinsics.objc_send(nil, window(), "orderBack:", ra
 window_set_content_size :: proc(w, h: f32) {
 	intrinsics.objc_send(nil, window(), "setContentSize:", NS.Size{NS.Float(w), NS.Float(h)})
 }
+window_close :: proc() {intrinsics.objc_send(nil, window(), "performClose:", rawptr(nil))}
 window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", rawptr(nil))}
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
+app_hide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "hide:", rawptr(nil))}
+app_is_hidden :: proc() -> bool {return intrinsics.objc_send(bool, NS.Application_sharedApplication(), "isHidden")}
+app_unhide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "unhideWithoutActivation")}
 
 // Captures only this window into path (PNG).
 window_capture :: proc(path: string) {
@@ -160,7 +207,8 @@ platform_display_link_fps :: proc() -> f32 {return dh_mac_display_link_fps()}
 // Test mode: report this rate as the screen's (0 = the real one).
 platform_test_display_fps :: proc(fps: int) {dh_mac_test_display_fps(c.int(fps))}
 
-// While a job runs: no App Nap (timers on time; the system may still sleep).
+// While a job runs or a terminal had output in the last 2 s (activity_hold): no App Nap (timers on
+// time; the system may still sleep).
 platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
 
 // Quiet test mode, before sokol starts: never activates, window off-screen

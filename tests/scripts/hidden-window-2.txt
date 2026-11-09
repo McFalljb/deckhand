@@ -1,0 +1,11 @@
+# Run 2 of hidden-window.sh: a quit while the app is hidden (⌘H) ends the run. sokol quits by
+# closing the window from a frame, which AppKit never does while the app is hidden: the quit path
+# shows it again first (main.odin, app_request_quit). The quit goes through the product's own
+# path (platform.quit), never the script's `quit`; hidden-window.sh wants the app gone in 10 s.
+wait 500
+window back
+hide
+wait 500
+ui_command {"type":"quit"}
+assert_result ok true
+wait 30000

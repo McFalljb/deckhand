@@ -1,0 +1,11 @@
+# Run 3 of hidden-window.sh: a quit while no frames run and the app is NOT hidden (minimised, App
+# Nap). sokol closes the window only from a frame; the core loop's timer closes it itself once the
+# quit has waited QUIT_STALL_AFTER (core_loop.odin, core_quit_stalled). hidden-window.sh wants the
+# app gone in 10 s.
+wait 500
+window back
+frames off
+wait 300
+ui_command {"type":"quit"}
+assert_result ok true
+wait 30000

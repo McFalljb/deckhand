@@ -1306,7 +1306,7 @@ jobs_running_changed :: proc() {
 	n := 0
 	for j in sched.jobs do if j.run != nil do n += 1
 	sync.atomic_store(&sched.running, n)
-	if platform.activity != nil do platform.activity(n > 0)
+	activity_hold(.Jobs, n > 0)
 }
 
 // Delivery (§7), all in one place: the Jobs tab's unread marker, the

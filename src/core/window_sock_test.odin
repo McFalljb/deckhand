@@ -181,7 +181,9 @@ hub_door_refusals :: proc(t: ^testing.T) {
 	why, _ := window_hello_check(fds[0], peer, tok, token)
 	testing.expect_value(t, why, "")
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
-	testing.expect(t, strings.has_prefix(why, "the hub's code is not Deckhand's core"), why)
+	// Linux: no code signing, the same user is the whole check (background-core.md §8.3)
+	when ODIN_OS == .Linux do testing.expect_value(t, why, "")
+	else do testing.expect(t, strings.has_prefix(why, "the hub's code is not Deckhand's core"), why)
 	when TEST_HOOKS do window_peer_ids, hub_peer_ids = []string{"dev.pi-desk.app"}, []string{own}
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
 	testing.expect_value(t, why, "")

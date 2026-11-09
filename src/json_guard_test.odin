@@ -617,6 +617,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/claude_status.odin", "hints_load", "jg.parse", "", ""},
 		{"src/core/ctl.odin", "ctl_main", "jg.parse_string", "", ""},
 		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
+		{"src/core/machines.odin", "machines_read", "jg.parse_string", "", ""},
+		{"src/core/machines.odin", "hub_msg_type", "jg.parse_string", "", ""},
 		{"src/core/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
 		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},
 		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},

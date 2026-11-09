@@ -14,8 +14,8 @@ package core
 //   projects, sessions, view, settings, jobs, confirmations, notifications, reload, claude,
 //   tabs:<session id>, panes:<session id>, panels:<tab id>
 //
-// (`update` and `machines` in §5.8 are not State: Deckhand's updates live in update.odin, and
-// machines come with remote cores, M4. Their names are kept for them.)
+// (`update` in §5.8 is not State: Deckhand's updates live in update.odin. Its name is kept.)
+// `machines` (machines.odin) is the other machines over SSH and their links' status.
 //
 // The encoding follows the types, so a field added to State is on the wire at once, and the
 // completeness test (state_wire_test.odin) fails on a field that is neither carried nor listed
@@ -96,10 +96,11 @@ STATE_SECTIONS := [?]State_Section {
 	{"reload", {"reload"}},
 	{"claude", {"claude_history", "claude_readonly_ids", "claude_disk", "claude_disk_chats"}},
 	{"live", {"live"}}, // a separate core's runtime the window shows (core_live.odin)
+	{"machines", {"machines"}}, // other machines over SSH and their links (machines.odin)
 }
 
 // Sections named in §5.8 that are not State (nothing sends them yet).
-STATE_SECTIONS_RESERVED := [?]string{"update", "machines"}
+STATE_SECTIONS_RESERVED := [?]string{"update"}
 
 // The per-session and per-tab sections: "tabs:5", "panes:5", "panels:12".
 SECTION_TABS :: "tabs:"

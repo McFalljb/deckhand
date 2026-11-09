@@ -135,3 +135,59 @@ thread_join_answer :: proc(th: ^thread.Thread) {
 	thread.join(th)
 	thread.destroy(th)
 }
+
+// The hub door (§10.4 M6-A): another machine's core is a second way to `ui`, so its hello gets the
+// window's checks in the same order with the core's identifier, and no window floor.
+@(test)
+hub_hello_refusal_table :: proc(t: ^testing.T) {
+	ok := Window_Hello{hub = true, token_ok = true, same_user = true, still = true, code = .Allow, floor = .Below_Floor}
+	testing.expect_value(t, window_hello_refusal(ok), "") // the floor is the window's only
+	bad := ok
+	bad.holder_child = true
+	testing.expect_value(t, window_hello_refusal(bad), "a program running in a Deckhand tab can't be its hub")
+	bad = ok
+	bad.code = .Wrong_Identity
+	testing.expect_value(t, window_hello_refusal(bad), "the hub's code is not Deckhand's core (Wrong_Identity)")
+}
+
+// The real check on a socketpair (this test binary is the peer): a hub hello is refused with a
+// window's identifier, from a descendant of this core or its holder, and with a wrong token; with
+// the core's identifier, from outside, with the token, it is let in.
+@(test)
+hub_door_refusals :: proc(t: ^testing.T) {
+	dir := fmt.tprintf("%s/dkhub-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory(dir)
+	defer os.remove_all(dir)
+	testing.expect(t, window_token_publish(dir), "publish")
+	defer {window_door_stop(); socket_framed_handler = nil}
+	token := window_token_read(dir)
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer {posix.close(fds[0]); posix.close(fds[1])}
+	posix.write(fds[1], raw_data(string("x")), 1) // the token names the last process to use the socket: this one
+	peer, tok := trust.peer_read_token(fds[0])
+	own := trust.own_signature().identifier
+	me := i32(posix.getpid())
+	window_door_pids_for_test(0, 0)
+	when TEST_HOOKS {
+		window_peer_ids, hub_peer_ids = []string{own}, []string{"dev.deckhand.core"}
+		defer {window_peer_ids, hub_peer_ids = trust.WINDOW_IDS, trust.CORE_IDS}
+	}
+	// a window's identifier: a window, not a hub
+	why, _ := window_hello_check(fds[0], peer, tok, token)
+	testing.expect_value(t, why, "")
+	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
+	testing.expect(t, strings.has_prefix(why, "the hub's code is not Deckhand's core"), why)
+	when TEST_HOOKS do window_peer_ids, hub_peer_ids = []string{"dev.pi-desk.app"}, []string{own}
+	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
+	testing.expect_value(t, why, "")
+	// a wrong token
+	wrong := strings.concatenate({token[:63], token[63] == '0' ? "1" : "0"}, context.temp_allocator)
+	why, _ = window_hello_check(fds[0], peer, tok, wrong, hub = true)
+	testing.expect_value(t, why, "framed mode is only for Deckhand's window (with the core's window token)")
+	// a descendant of this core (here: the test process itself)
+	window_door_pids_for_test(me, 0)
+	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
+	testing.expect_value(t, why, "a program running in a Deckhand tab can't be its hub")
+	window_door_pids_for_test(0, 0)
+}

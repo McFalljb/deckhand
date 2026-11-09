@@ -535,7 +535,7 @@ state_wire_refusals :: proc(t: ^testing.T) {
 		testing.expectf(t, state_full_json(&r) == text, "the replica is unchanged after: %.80s", b)
 	}
 	// a newer core's additions are ignored: an unknown section, key, enum name, union variant
-	newer := `{"type":"state.delta","version":42,"sections":{"machines":[],"tabs:10":[{"id":11,"kind":{"quantum_tab":{}},"status":"teleported","colour":"red"}],"panels:11":[]}}`
+	newer := `{"type":"state.delta","version":42,"sections":{"teleporters":[],"tabs:10":[{"id":11,"kind":{"quantum_tab":{}},"status":"teleported","colour":"red"}],"panels:11":[]}}`
 	testing.expect_value(t, replica_apply(&r, newer, context.temp_allocator), "")
 	testing.expect_value(t, len(r.open_sessions[0].tabs), 1)
 	testing.expect_value(t, r.open_sessions[0].tabs[0].status, Tab_Status.Running)

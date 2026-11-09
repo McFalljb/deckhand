@@ -86,6 +86,8 @@ window_request_run :: proc(q: core.Window_Request) -> (r: core.Window_Reply) {
 		if core.platform.notify != nil do core.platform.notify(q.text, q.message) // a separate core's (its own platform)
 	case .Quit:
 		client_core_quit(q.text) // the core ends on purpose, or another window took over: no reconnect (client_core.odin)
+	case .Viewed_From:
+		client_core_viewed(q.text) // another machine's Deckhand took the core: Take back, or quit (client_core.odin)
 	case .App_Boxes:
 		core.app_event_in(q.tab_id, "tab.boxes", q.text) // a separate core's: drawn as the app sent them (app_tab.odin)
 	}

@@ -1,0 +1,144 @@
+package core
+
+// Other machines over SSH (machines.odin; §10.4 M6-A): the registry, the ssh argv, the status
+// table and the backoff, as pure procs (no ssh runs). The hub door's refusals are in
+// window_sock_test.odin; the link itself in tests/scripts/remote-link.sh.
+
+import "core:fmt"
+import "core:os"
+import "core:strings"
+import "core:sys/posix"
+import "core:testing"
+import "core:time"
+
+import cw "../corewire"
+
+@(test)
+machines_registry_round_trip :: proc(t: ^testing.T) {
+	dir := fmt.tprintf("%s/dkm-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	os.make_directory(dir)
+	defer os.remove_all(dir)
+	path := fmt.tprintf("%s/%s", dir, MACHINES_FILE)
+	none, next0, ok0 := machines_read(path, context.temp_allocator)
+	testing.expect(t, ok0 && len(none) == 0 && next0 == 1, "no file: none, numbers from 1")
+	list := []Machine {
+		{no = 1, name = "NUC \"lab\"", target = "me@nuc", os = "linux", arch = "amd64", core_path = machine_core_path_for("linux")},
+		{no = 3, name = "mini", target = "mini", via = "build/deckhand-core-serve connect"},
+	}
+	testing.expect_value(t, machines_write(path, list, 4), "")
+	st: posix.stat_t
+	testing.expect(t, posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &st) == .OK)
+	testing.expectf(t, transmute(u16)st.st_mode & 0o777 == 0o600, "mode %o", transmute(u16)st.st_mode & 0o777)
+	got, next, ok := machines_read(path, context.temp_allocator)
+	testing.expect(t, ok)
+	testing.expect_value(t, next, u64(4))
+	testing.expect_value(t, len(got), 2)
+	if len(got) == 2 {
+		testing.expect_value(t, got[0], list[0])
+		testing.expect_value(t, got[1], list[1])
+	}
+	// written again over the old one: still 0600
+	testing.expect_value(t, machines_write(path, list[:1], 4), "")
+	testing.expect(t, posix.stat(strings.clone_to_cstring(path, context.temp_allocator), &st) == .OK)
+	testing.expect(t, transmute(u16)st.st_mode & 0o777 == 0o600, "0600 after a rewrite")
+	_ = os.write_entire_file(path, transmute([]u8)string("{not json"))
+	_, _, bad := machines_read(path, context.temp_allocator)
+	testing.expect(t, !bad, "a broken file is not read as empty")
+}
+
+@(test)
+machines_ssh_argv :: proc(t: ^testing.T) {
+	run := "/Users/someone/Library/Application Support/Deckhand/run"
+	m := Machine{no = 7, name = "nuc", target = "me@nuc", os = "darwin", arch = "arm64", core_path = machine_core_path_for("darwin")}
+	argv, why := machine_argv(m, run, "Some-Mac.local")
+	testing.expect_value(t, why, "")
+	joined := strings.join(argv, " ", context.temp_allocator)
+	testing.expect_value(t, argv[0], "ssh")
+	for o in ([?]string{"-o BatchMode=yes", "-o ControlMaster=auto", "-o ControlPersist=600", "-o Compression=yes"}) do testing.expectf(t, strings.contains(joined, o), "%s in %s", o, joined)
+	ctl := ""
+	for a, i in argv do if a == "-S" && i + 1 < len(argv) do ctl = argv[i + 1]
+	testing.expect(t, strings.has_suffix(ctl, "/ssh-7.ctl"), ctl)
+	testing.expectf(t, len(ctl) <= MACHINE_CTL_MAX, "ControlPath %d bytes", len(ctl))
+	n := len(argv)
+	testing.expect(t, argv[n - 3] == "--" && argv[n - 2] == "me@nuc", "the target after --, as its own argument")
+	testing.expect_value(t, argv[n - 1], `"$HOME/Library/Application Support/Deckhand/core/current/Deckhand Core.app/Contents/MacOS/deckhand-core-serve" connect --from Some-Mac`)
+	probe, pwhy := machine_argv({no = 7, target = "me@nuc"}, run, "x", probe = true)
+	testing.expect(t, pwhy == "" && probe[len(probe) - 1] == "uname -sm", "the probe")
+	// a run dir that would pass the ControlPath limit is refused, not truncated
+	_, why = machine_argv(m, strings.concatenate({run, "/a-much-longer-folder-name"}, context.temp_allocator), "x")
+	testing.expect(t, strings.contains(why, "control socket"), why)
+	// what the user typed never becomes an option or reaches a shell
+	for bad in ([?]string{"-oProxyCommand=touch /tmp/x", "a;b", "host name", "$(id)", "a`b`", "h'q"}) {
+		x := m
+		x.target = bad
+		_, why = machine_argv(x, run, "x")
+		testing.expectf(t, why != "", "target %q refused", bad)
+	}
+	x := m
+	x.core_path = "~/evil\"; rm -rf ~"
+	_, why = machine_argv(x, run, "x")
+	testing.expect(t, why != "", "a core path Deckhand does not know is refused")
+	testing.expect_value(t, machine_from_name("Jo's Mac;rm.local"), "Jo-s-Mac-rm")
+	// --via: test builds only
+	v := Machine{no = 2, name = "m2", via = "env A=1 build/deckhand-core-serve connect"}
+	va, vwhy := machine_argv(v, run, "Some-Mac", test_build = true)
+	testing.expect_value(t, vwhy, "")
+	testing.expect_value(t, strings.join(va, " ", context.temp_allocator), "env A=1 build/deckhand-core-serve connect --from Some-Mac")
+	_, vwhy = machine_argv(v, run, "Some-Mac", test_build = false)
+	testing.expect(t, strings.contains(vwhy, "only for development and test builds"), vwhy)
+	// uname -sm
+	os_name, arch, uok := machine_uname_parse("Linux x86_64\n")
+	testing.expect(t, uok && os_name == "linux" && arch == "amd64", "linux")
+	_, _, uok = machine_uname_parse("FreeBSD amd64")
+	testing.expect(t, !uok, "not a Mac or Linux")
+}
+
+@(test)
+machines_status_table :: proc(t: ^testing.T) {
+	cases := []struct {
+		o:    Machine_Outcome,
+		want: Machine_Status,
+	} {
+		{{replied = true, ok = true, skew = .Ok}, .Online},
+		{{replied = true, ok = true, skew = .Core_Older}, .Online},
+		{{replied = true, ok = true, skew = .Core_Below_Min}, .Needs_Update},
+		{{replied = true, ok = true, skew = .Core_Older_Generation}, .Needs_Update},
+		{{replied = true, ok = true, skew = .Core_Newer_Generation}, .Needs_Update},
+		{{replied = true, ok = false, error = "framed mode is only for Deckhand's window (with the core's window token)"}, .Offline},
+		{{exited = true, exit_code = 255, stderr = "me@nuc: Permission denied (publickey,password).\r\n"}, .Needs_Login},
+		{{exited = true, exit_code = 255, stderr = "Host key verification failed.\n"}, .Needs_Login},
+		{{exited = true, exit_code = 255, stderr = "ssh: connect to host nuc port 22: Connection refused\n"}, .Offline},
+		{{exited = true, exit_code = 1, stderr = "Permission denied"}, .Offline}, // not ssh's own failure
+		{{exited = true, exit_code = 127, stderr = "zsh:1: no such file or directory: /Users/me/Library/…"}, .Not_Installed},
+		{{stderr = "no answer from its core"}, .Offline},
+	}
+	for c, i in cases {
+		got, why := machine_status_of(c.o)
+		testing.expectf(t, got == c.want, "case %d: %v, want %v (%s)", i, got, c.want, why)
+	}
+	_, why := machine_status_of({exited = true, exit_code = 255, stderr = "debug1: x\nssh: connect to host nuc port 22: Connection refused\n"})
+	testing.expect_value(t, why, "ssh: connect to host nuc port 22: Connection refused")
+	_, why = machine_status_of({replied = true, ok = false, error = "the hub must run as this user"})
+	testing.expect_value(t, why, "the hub must run as this user")
+	_ = cw.GENERATION
+}
+
+@(test)
+machines_backoff_fake_clock :: proc(t: ^testing.T) {
+	b: Machine_Backoff
+	now := time.Tick{_nsec = 1_000_000_000_000}
+	want := []time.Duration{1, 2, 4, 8, 16, 32, 60, 60}
+	for w in want {
+		got := machine_backoff_down(&b, now)
+		testing.expect_value(t, got, w * time.Second)
+		now = time.tick_add(now, got)
+	}
+	// up for 30 s: still backing off
+	machine_backoff_up(&b, now)
+	testing.expect_value(t, machine_backoff_down(&b, time.tick_add(now, 30 * time.Second)), 60 * time.Second)
+	// up for a minute: back to 1 s, then doubling again
+	machine_backoff_up(&b, now)
+	now = time.tick_add(now, MACHINE_UP_RESET)
+	testing.expect_value(t, machine_backoff_down(&b, now), time.Second)
+	testing.expect_value(t, machine_backoff_down(&b, now), 2 * time.Second)
+}

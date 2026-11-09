@@ -306,6 +306,7 @@ keep_sessions_default :: proc() -> bool {return keep_sessions_default_on && !aut
 settings_defaults :: proc() {
 	state.settings.keep_sessions, state.settings.keep_sessions_chosen = keep_sessions_default(), false
 	state.settings.separate_core = separate_core_default_on
+	state.settings.remote_machines = remote_machines_default_on
 }
 
 // Settings › Copy a control token: a new control token, as the shell exports `deckhand --ctl` reads,
@@ -535,6 +536,10 @@ Command :: union {
 	Set_Tidy_Projects,
 	Set_Keep_Sessions,
 	Set_Separate_Core,
+	Set_Remote_Machines,
+	Machine_Add,
+	Machine_Remove,
+	Machine_Connect,
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
@@ -1482,6 +1487,13 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
+	case Set_Remote_Machines: // Settings › Experimental › Machines over SSH (machines.odin)
+		if state.settings.remote_machines == c.on do return {ok = true}, false
+		state.settings.remote_machines = c.on
+		return {ok = true}, true
+	case Machine_Add:     return machine_add_apply(c), false // the machines section changes itself (machines_publish)
+	case Machine_Remove:  return machine_remove_apply(c), false
+	case Machine_Connect: return machine_connect_apply(c), false
 	case Holder_Replace:
 		return holder_replace(c.stop), true
 	case Holder_Restart:

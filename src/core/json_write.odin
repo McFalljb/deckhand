@@ -202,6 +202,10 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Tidy_Projects:   return "set_tidy_projects"
 	case Set_Keep_Sessions:   return "set_keep_sessions"
 	case Set_Separate_Core:   return "set_separate_core"
+	case Set_Remote_Machines: return "set_remote_machines"
+	case Machine_Add:         return "machine_add"
+	case Machine_Remove:      return "machine_remove"
+	case Machine_Connect:     return "machine_connect"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
 	case Core_Handover:       return "core_handover"
@@ -454,6 +458,16 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Separate_Core:
 		kv_bool(&w, "on", c.on)
+	case Set_Remote_Machines:
+		kv_bool(&w, "on", c.on)
+	case Machine_Add:
+		kv_str(&w, "name", c.name)
+		kv_str(&w, "target", c.target)
+		if c.via != "" do kv_str(&w, "via", c.via)
+	case Machine_Remove:
+		kv_u64(&w, "no", c.no)
+	case Machine_Connect:
+		kv_u64(&w, "no", c.no)
 	case Holder_Replace:
 		kv_bool(&w, "stop", c.stop)
 	case Core_Handover:
@@ -1557,6 +1571,24 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	fmt.sbprintf(b, `,"pi_installed":%v`, pi_installed()) // pi found (harness.odin): stat, else the login shell's answer
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
+	if !writing_tab_view && len(s.machines) > 0 { // other machines over SSH (machines.odin): never their ssh target
+		strings.write_string(b, `,"machines":[`)
+		for m, i in s.machines {
+			if i > 0 do strings.write_byte(b, ',')
+			fmt.sbprintf(b, `{{"no":%d,"name":`, m.no)
+			json_quote(b, m.name)
+			fmt.sbprintf(b, `,"status":"%s","version":`, MACHINE_STATUS_NAMES[m.status])
+			json_quote(b, m.version)
+			strings.write_string(b, `,"os":`)
+			json_quote(b, m.os)
+			strings.write_string(b, `,"arch":`)
+			json_quote(b, m.arch)
+			strings.write_string(b, `,"error":`)
+			json_quote(b, m.error)
+			strings.write_byte(b, '}')
+		}
+		strings.write_byte(b, ']')
+	}
 	claude_history_json(b, s.claude_history[:], s.claude_disk[:], s.claude_disk_chats[:]) // Claude sessions Deckhand ran (claude.odin); not in a pi or Claude tab's own view
 	key(&w, "home")
 	{
@@ -1709,6 +1741,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		kv_bool(&st, "notify", !s.settings.notify_off)
 		kv_bool(&st, "tidy_projects", !s.settings.tidy_off)
 		kv_bool(&st, "keep_sessions", s.settings.keep_sessions)
+		kv_bool(&st, "remote_machines", s.settings.remote_machines)
 		key(&st, "bell")
 		bo := obj_begin(b)
 		for g in Bell_Group do kv_bool(&bo, BELL_GROUP_NAMES[g], g not_in s.settings.bell_off)

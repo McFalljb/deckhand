@@ -253,6 +253,10 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `copy_control_token` | — | **user only**: a new control token (unbound, `tab_id` 0) for `deckhand --ctl`, as `export DECKHAND_SOCKET='…' DECKHAND_TOKEN='…'`, onto the clipboard; the result and the log never hold it. The one way a release build mints a control token (§2) |
 | `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): run tabs' processes in the session holder, so they survive a core restart or crash, an update, and a quit without Stop All; the next core adopts them, and their tokens survive in a MAC'd `tokens.json` (§2) |
 | `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
+| `set_remote_machines` | `on` | **user only**, off by default (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default): Settings › Experimental › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub") |
+| `machine_add` | `name`, `target`, `via`? | **user only**, with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`); `name`: at most 64 bytes, unique. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
+| `machine_remove` | `no` | **user only**: forgets a machine (its link ends; nothing on it is touched) |
+| `machine_connect` | `no` | **user only**: connects now: Take back from that machine's own window or another hub (`taken`), or a retry without waiting for the backoff |
 | `holder_replace` | `stop` | **user only**: answers `state.holder_ask` (a session holder from another build answered, and its code is not this build's: nothing was sent to it, no second holder started). `stop: true` stops it (SIGTERM, then SIGKILL after 3 s; only a process that runs a `deckhand-core`), removes its socket and starts a new holder: its sessions end. `false`: run on without a holder |
 | `core_handover` | `to` | **user only**, a separate core: hand every session over to another core process (§7.2 of the background-core design): `"current"`, the core `deckhand-core-serve install` made current (an update, or *Use this app's core*), or `"previous"` (*Use previous core*). The target is checked (`deckhand-core-serve check`: its signature and generation) first. Job runs get up to 2 min to end, then stop as `stopped (update)`. The window's connection then ends and it dials the new core |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
@@ -697,7 +701,7 @@ without asking. Exited tabs never ask.
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
-              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true,
+              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": false,
               "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
               "home_dir": "/Users/me/deckhand", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/deckhand/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},
@@ -1147,12 +1151,12 @@ Core → window:
 
 | type | fields | |
 |---|---|---|
-| `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `live`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`; `live` is filled only over `core.sock`: the core's runtime a window in another process shows, as `Core_Live` in `src/core/core_live.odin`: the update bar, the setup sheet's install run, worktree clean-ups, the pi config folders to watch). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
+| `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `live`, `machines`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`; `live` is filled only over `core.sock`: the core's runtime a window in another process shows, as `Core_Live` in `src/core/core_live.odin`: the update bar, the setup sheet's install run, worktree clean-ups, the pi config folders to watch). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
 | `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went). A pane's `rect` and `frame` are not sent (the window lays them out): a replica's pane keeps its own |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `finished` | `request_id`, `result` | over `core.sock`: the end of one of the window's own commands that answered `pending` (`request_id` as its `result` gave it; test mode's script waits for it) |
 | `toast` | `text`, `err` | a short line at the bottom of the window |
-| `window.request` | `id`, `request: {op, …}` | what the core asks the window to do; `id` `""`: no reply. `op`: `clipboard_set` (`text`), `clipboard_secret` (`text`; reply `ok`, `count`: marked concealed, the change count after), `clipboard_clear_if` (`count`), `open_url` (`text`; reply `ok`), `reveal` (`path`), `appearance` (`mode`), `copy_selection` (`tab_id`: the window's copy's selection onto the clipboard; reply `ok`: there was one), `term_fit` (`tab_id`; reply `ok`, `cols`, `rows`, `cell`: a new terminal's grid from its pane), `view_open` (`tab_id`, `kind`, `line`, `anchor`), `view_goto` (the same), `view_drop`, `view_moved` (`path`), `files_deleted` (`path`), `changes_diff` (`tab_id`, `path`, `text`, `message`), `changes_rewind`, `commit_message_clear`, `watch_folder` (`path`), `watch_sync`, `setup_sheet` (`setup`, `text`), `job_sheet` (`job_sheet`, `caller`; reply `result`, `changed`), `job_sheet_saved` (`path`, `message`; reply `ok`: the sheet closed), `job_sheet_holds_quit` (reply `ok`: it has changes, asks to discard them, and the quit stops), `notify` (`text`: title, `message`: body; a separate core's notification, shown by the window), `quit` (`text`: why; a separate core ends on purpose, a Quit or Stop All, or let this window go for a newer one: the window quits too and does not reconnect), `app_boxes` (`tab_id`, `text`: a separate core's app tab's `tab.boxes`, drawn while inspected). With no window, or no reply, each answers as if there were none, at once: the core never waits on the window (in process the reply comes while the request is sent) |
+| `window.request` | `id`, `request: {op, …}` | what the core asks the window to do; `id` `""`: no reply. `op`: `clipboard_set` (`text`), `clipboard_secret` (`text`; reply `ok`, `count`: marked concealed, the change count after), `clipboard_clear_if` (`count`), `open_url` (`text`; reply `ok`), `reveal` (`path`), `appearance` (`mode`), `copy_selection` (`tab_id`: the window's copy's selection onto the clipboard; reply `ok`: there was one), `term_fit` (`tab_id`; reply `ok`, `cols`, `rows`, `cell`: a new terminal's grid from its pane), `view_open` (`tab_id`, `kind`, `line`, `anchor`), `view_goto` (the same), `view_drop`, `view_moved` (`path`), `files_deleted` (`path`), `changes_diff` (`tab_id`, `path`, `text`, `message`), `changes_rewind`, `commit_message_clear`, `watch_folder` (`path`), `watch_sync`, `setup_sheet` (`setup`, `text`), `job_sheet` (`job_sheet`, `caller`; reply `result`, `changed`), `job_sheet_saved` (`path`, `message`; reply `ok`: the sheet closed), `job_sheet_holds_quit` (reply `ok`: it has changes, asks to discard them, and the quit stops), `notify` (`text`: title, `message`: body; a separate core's notification, shown by the window), `quit` (`text`: why; a separate core ends on purpose, a Quit or Stop All, or let this window go for a newer one: the window quits too and does not reconnect), `app_boxes` (`tab_id`, `text`: a separate core's app tab's `tab.boxes`, drawn while inspected), `viewed_from` (`text`: another machine took this core through the hub door: *Viewed from <machine>* with **Take Back**, and no reconnect until then). With no window, or no reply, each answers as if there were none, at once: the core never waits on the window (in process the reply comes while the request is sent) |
 | `confirmation.parked` | `summary`, `by_user` | a confirmation waits in the confirmation bar; its record follows in the next `state.delta` |
 | `tab_host.call` | `id`, `request_id`, `tab_id`, `caller: {kind, tab_id, claude}`, `command: {"<type>": {fields}}` | the window's part of a browser, app, Markdown or editor command (`src/core/tabhost_route.odin`): CEF, an app's process and frames, a buffer, a view. The core checks the caller, resolves the target and runs the confirmation gate first, and changes the tab's records from the window's answer (`finished`) |
 
@@ -1177,7 +1181,7 @@ that does not read is cut off, and the peer re-checked before each read's bytes 
 window checks the reply with `skew_check`, and the core checks the window against the window
 floor (`src/corewire/skew.odin`; design §7.5).
 
-Framed mode is for the window only. The hello's `token` must be the one in
+Framed mode is for the window (and the hub, below) only. The hello's `token` must be the one in
 `<runtime dir>/window.token` (0600, written fresh when the core starts, gone when it stops).
 Before it replies, the core checks, in this order: the peer read at accept is this user and still
 the process that sent the hello; its code has the window's designated requirement; its version is
@@ -1187,6 +1191,30 @@ hello gets `"framed mode is only for Deckhand's window (with the core's window t
 caller is `ui`. The window checks the core first, before it sends a byte: this user, and Deckhand
 Core.app's designated requirement (`core_peer_check`). A newer window that attaches replaces the
 older one, which is told to quit (`window.request quit`).
+
+**The hub** (Machines over SSH, design §10.4 M6-A; `src/core/machines.odin`,
+`src/coremain/connect.odin`). This Mac's core reaches another machine's core by running the user's
+own `ssh -S <run>/ssh-<n>.ctl -o ControlMaster=auto -o ControlPersist=600 -o BatchMode=yes -o
+Compression=yes -o ServerAliveInterval=15 -o ServerAliveCountMax=4 -- <target> '"$HOME/<core
+path>" connect --from <this Mac>'` (argv only, on a socketpair; `<n>` the machine's number, so the
+ControlPath stays within 86 bytes). `deckhand-core-serve connect` on that machine dials its
+`core.sock` (launching a core when none answers), checks the core's code as the window does, and
+says the hub hello: `{"type":"hello","framed":true,"peer":"hub","from":"<this Mac>","token":"<its
+window.token>"}`; then it copies bytes both ways. That core checks the hub as it checks a window, in
+the same order, with the core's identifier (`trust.CORE_IDS`) in place of the window's and no
+window floor: the token; this user, still that process; the core's designated requirement; not a
+descendant of that core or its session holder. The caller is `ui`. The hub's link is the window's
+link with `hub` set: the newest connection wins. A window it replaces gets `window.request`
+`viewed_from` (`text`: the hub's machine) and shows *Viewed from <machine>* with **Take Back**,
+dialling again only then; a hub it replaces gets `{"type":"hub.taken","by":"<machine>"}` (`""`:
+that machine's own window) and waits for `machine_connect`. Notifications on a core whose link is a
+hub are its own banners. This Mac reads the hello reply through `skew_check`; `state.machines`
+(and `get_state`'s `machines`, without targets) has each machine's `status` (`connecting`,
+`online`, `offline`, `needs_login`: ssh's exit 255 asking for a password, host key or code;
+`needs_update`; `not_installed`; `taken`), `version`, `os`, `arch` and `error`. It reconnects after
+1 s, doubling to 60 s, and from 1 s again after a minute up. **Caps from the first byte:** every
+`window.request` and `confirmation.parked` from a hub link is dropped, never acted on; nothing else
+a hub link sends is read yet.
 
 Waits are bounded so the core never hangs on the window: a `window.request` that wants an answer
 waits at most 250 ms, then the core goes on as if no window were attached. A `tab_host.call` does

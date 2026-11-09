@@ -148,6 +148,7 @@ serve_main :: proc(args: []string) -> int {
 		core.persist_load(false)
 		core.claude_disk_launching = false
 	}
+	core.machines_load() // other machines over SSH (machines.odin): links start at the loop's first turn
 	core.holder_adopt_all()
 	// the restored current tab is focused (its session starts), as the in-process window does after
 	// its first layout: a window that attaches, or reconnects after a crash, finds it current
@@ -189,7 +190,7 @@ serve_platform :: proc() -> bool {
 		run_later = proc(p: proc()) {append(&loop.later, p)},
 		notify = proc(title, body: string) {
 			if core.autotest_active do fmt.println("[autotest] notify:", title, "-", body, core.window_attached() ? "" : "(Deckhand Core)")
-			if core.window_attached() do core.window_notify(title, body)
+			if core.window_attached() && !core.window_link_hub() do core.window_notify(title, body) // a hub drops it: the core's own banner
 			else if !core.autotest_active do dh_core_notify(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(body, context.temp_allocator))
 		},
 		trash = proc(path: string) -> bool {return dh_core_trash(strings.clone_to_cstring(path, context.temp_allocator)) == 1},
@@ -204,7 +205,7 @@ serve_platform :: proc() -> bool {
 
 @(private = "file")
 serve_loop :: proc() {
-	pfd: [2]posix.pollfd
+	pfd: [2 + 32]posix.pollfd // the wake pipe, the window's socket, the machines' links (machines_poll_fds)
 	for !loop.quit {
 		// how long to sleep: until the timer, or not at all while the last tick left output to parse
 		timeout := -1
@@ -216,6 +217,7 @@ serve_loop :: proc() {
 			pfd[1] = {fd = fd, events = out ? {.IN, .OUT} : {.IN}}
 			n = 2
 		}
+		n += core.machines_poll_fds(pfd[n:])
 		if at, ok := core.term_stream_retry_at(); ok { // a window's snapshot backs off: try it when due
 			ms := max(0, int(time.duration_milliseconds(time.tick_diff(time.tick_now(), at))) + 1)
 			timeout = timeout < 0 ? ms : min(timeout, ms)
@@ -230,6 +232,7 @@ serve_loop :: proc() {
 		for p in later do p()
 		delete(later)
 		core.window_door_tick()
+		core.machines_tick()
 		now := time.tick_now()
 		if loop.every > 0 && time.tick_diff(loop.next_fire, now) >= 0 {
 			loop.next_fire = time.tick_add(now, loop.every)
@@ -282,6 +285,7 @@ serve_stop :: proc(run: string) {
 	core.close_all()
 	core.holder_client_stop()
 	core.comments_shutdown()
+	core.machines_stop()
 	core.core_handover_finish(run) // a handover: the locks go, the successor starts with the holder's secret
 	dh_core_activity(0)
 	// the window's link (not one of srv.conns) goes last: a window that reconnects finds the core

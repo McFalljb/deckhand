@@ -11,6 +11,14 @@ package core
 //   4. its version is not below the window floor (the newest window that attached to this core);
 //   5. it does not descend from this core or its session holder (a tab's program is no window).
 // Any other framed hello is refused: the framed wire is the window's only (M4-B's review).
+//
+// The hub (§10.4 M6-A): another machine's core, through `deckhand-core-serve connect` run here over
+// its ssh, says the framed hello with "peer":"hub" and this run's window token (connect reads it
+// as this user). It is a second way to `ui`, so it gets the same checks in the same order, with
+// the core's identifier (trust.CORE_IDS) in place of the window's and no window floor (the hub
+// checks skew itself): the token; this user, still that process; the core's code; not a
+// descendant of this core or its holder. Its link is the window's (window_link.odin, `hub` set):
+// the newest connection wins, and the other side is told who took it (Viewed from <machine>).
 // Ad hoc and self-signed builds stop accidents, not a determined process of the same user (§5.4).
 //
 // A framed connection leaves the line server (conn_handoff): the reader thread queues it here
@@ -36,8 +44,10 @@ WINDOW_TOKEN_FILE :: "window.token"
 // The identifiers a window's code may have (the unit tests set the test binary's own).
 when TEST_HOOKS {
 	window_peer_ids: []string = trust.WINDOW_IDS
+	hub_peer_ids: []string = trust.CORE_IDS
 } else {
 	window_peer_ids :: trust.WINDOW_IDS
+	hub_peer_ids :: trust.CORE_IDS
 }
 
 @(private = "file")
@@ -46,6 +56,8 @@ Window_Arrival :: struct {
 	leftover: []u8, // heap
 	peer:     trust.Peer,
 	version:  string, // heap: the window's release version ("" for a development build)
+	hub:      bool, // another machine's core (its hello said "peer":"hub")
+	from:     string, // heap: that machine's name
 }
 
 @(private = "file")
@@ -108,37 +120,48 @@ Window_Hello :: struct {
 	code:         trust.Decision, // trust.peer_dr_check over window_peer_ids
 	floor:        cw.Floor, // its version against the window floor
 	holder_child: bool, // it descends from this core or its session holder
+	hub:          bool, // a hub hello: the core's identifier, no window floor
 }
 
 // "" = the window may attach; else why not (in the order the checks run).
 window_hello_refusal :: proc(h: Window_Hello) -> string {
 	if !h.token_ok do return "framed mode is only for Deckhand's window (with the core's window token)"
-	if !h.same_user do return "the window must run as this user"
-	if !h.still do return "the window's process changed since it connected"
-	if h.code != .Allow do return fmt.tprintf("the window's code is not Deckhand's (%v)", h.code)
-	if h.floor != .Allow do return "This Deckhand is older than the one last used with these sessions"
-	if h.holder_child do return "a program running in a Deckhand tab can't be its window"
+	who := h.hub ? "the hub" : "the window"
+	if !h.same_user do return fmt.tprintf("%s must run as this user", who)
+	if !h.still do return fmt.tprintf("%s's process changed since it connected", who)
+	if h.code != .Allow do return fmt.tprintf(h.hub ? "the hub's code is not Deckhand's core (%v)" : "the window's code is not Deckhand's (%v)", h.code)
+	if !h.hub && h.floor != .Allow do return "This Deckhand is older than the one last used with these sessions"
+	if h.holder_child do return h.hub ? "a program running in a Deckhand tab can't be its hub" : "a program running in a Deckhand tab can't be its window"
 	return ""
 }
 
 // The framed hello's checks (a connection's reader thread, before the reply). at_accept and tok:
 // the peer as read at accept. version: the window's, for the floor (temp allocator).
-window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_Token, token: string) -> (why, version: string) {
+window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_Token, token: string, hub := false) -> (why, version: string) {
 	sync.lock(&door.mu)
 	on, want, holder, own, floor := door.on, door.token, door.holder_pid, door.own_pid, door.floor
 	sync.unlock(&door.mu)
-	h: Window_Hello
+	h := Window_Hello{hub = hub}
 	h.token_ok = on && hex64_equal(string(want[:]), token)
 	h.same_user = trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) == .Allow
 	h.still = trust.peer_still(at_accept, trust.peer_read(fd)) == .Allow
 	h.code = .No_Code
 	if h.token_ok && h.same_user && h.still {
-		d, got := trust.peer_dr_check(tok, window_peer_ids)
+		d, got := trust.peer_dr_check(tok, hub ? hub_peer_ids : window_peer_ids)
 		h.code, version = d, got.version
 	}
-	h.floor = cw.window_floor_check(floor, version)
+	if hub do version = "" // a core's version: not the window floor's
+	h.floor = hub ? .Allow : cw.window_floor_check(floor, version)
 	h.holder_child = pid_descends_from(at_accept.pid, {own, holder})
 	return window_hello_refusal(h), version
+}
+
+// A hub hello's machine name as the window shows it (Viewed from <machine>): printable, at most
+// 64 bytes, else "another machine" (temp allocator).
+hub_from_name :: proc(from: string) -> string {
+	if from == "" || len(from) > 64 do return "another machine"
+	for r in from do if r < 0x20 || r == 0x7f do return "another machine"
+	return strings.clone(from, context.temp_allocator)
 }
 
 // Whether pid's ancestors (itself included) hold one of these pids (0s skipped). At most 64 steps.
@@ -154,9 +177,9 @@ pid_descends_from :: proc(pid: i32, of: []i32) -> bool {
 
 // socket_framed_handler: a window passed its hello (a reader thread). It waits for the main thread.
 @(private = "file")
-window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.Peer, version: string) {
+window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.Peer, version: string, hub: bool, from: string) {
 	heap := runtime.heap_allocator()
-	a := Window_Arrival{fd = fd, leftover = make([]u8, len(leftover), heap), peer = peer, version = strings.clone(version, heap)}
+	a := Window_Arrival{fd = fd, leftover = make([]u8, len(leftover), heap), peer = peer, version = strings.clone(version, heap), hub = hub, from = strings.clone(from, heap)}
 	copy(a.leftover, leftover)
 	sync.lock(&door.mu)
 	if !door.on {
@@ -164,6 +187,7 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 		sock_close(fd)
 		delete(a.leftover, heap)
 		delete(a.version, heap)
+		delete(a.from, heap)
 		return
 	}
 	if door.arrived == nil do door.arrived = make([dynamic]Window_Arrival, heap)
@@ -175,6 +199,7 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 // Main thread, each turn of the core loop: windows that said their hello attach (the newest one
 // stays), and the door learns the holder's pid.
 window_door_tick :: proc() {
+	link_linger_tick() // links let go for a newer one close once their peer read the last word
 	sync.lock(&hc.mu)
 	holder := hc.pid
 	sync.unlock(&hc.mu)
@@ -189,16 +214,19 @@ window_door_tick :: proc() {
 	sync.unlock(&door.mu)
 	heap := runtime.heap_allocator()
 	for a, i in got {
-		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer) {
-			sync.lock(&door.mu)
-			was := door.floor
-			door.floor = cw.window_floor_raise(door.floor, a.version)
-			now := door.floor
-			sync.unlock(&door.mu)
-			if now != was do window_floor_save(now)
+		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer, a.hub, a.from) {
+			if !a.hub { // a window's version raises the floor; a hub's is a core's (none here)
+				sync.lock(&door.mu)
+				was := door.floor
+				door.floor = cw.window_floor_raise(door.floor, a.version)
+				now := door.floor
+				sync.unlock(&door.mu)
+				if now != was do window_floor_save(now)
+			}
 		} else do sock_close(a.fd)
 		delete(a.leftover, heap)
 		delete(a.version, heap)
+		delete(a.from, heap)
 	}
 	delete(got)
 }
@@ -243,9 +271,11 @@ window_door_stop :: proc() {
 		sock_close(a.fd)
 		delete(a.leftover, runtime.heap_allocator())
 		delete(a.version, runtime.heap_allocator())
+		delete(a.from, runtime.heap_allocator())
 	}
 	delete(got)
 	if window_link_is_sock() do core_detach_window()
+	link_linger_tick(all = true)
 }
 
 // ---- the window's side: the core it dials ----
@@ -267,6 +297,11 @@ core_peer_check :: proc(fd: Sock_Fd) -> (peer: trust.Peer, why: string) {
 		return p, fmt.tprintf("the process on core.sock is not Deckhand's core: its code: %v (identifier %q, status %d)", d, got.identifier, got.status)
 	}
 	return p, ""
+}
+
+// The process on fd is still the one core_peer_check found (connect's relay, src/coremain).
+core_peer_still :: proc(fd: Sock_Fd, peer: trust.Peer) -> bool {
+	return trust.peer_still(peer, trust.peer_read(fd)) == .Allow
 }
 
 // What the window says when a core's hello reply shows skew (§7.5; M4-E adds the handovers).

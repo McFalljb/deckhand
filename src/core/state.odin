@@ -314,6 +314,7 @@ Settings :: struct {
 	keep_sessions: bool, // sessions keep running in the session holder when Deckhand quits or updates (on by default: keep_sessions_default)
 	keep_sessions_chosen: bool, // the user set keep_sessions (saved only then: keep_sessions_default)
 	separate_core: bool, // the window and the core run as two processes from the next launch (Set_Separate_Core; on by default)
+	remote_machines: bool, // Settings › Experimental › Machines over SSH (machines.odin; off by default: remote_machines_default_on)
 	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
 	// added, removed folders) and the account a new Claude session last started with
 	claude_accounts:     [dynamic]Claude_Account_Setting,
@@ -399,6 +400,7 @@ State :: struct {
 	claude_disk:          [dynamic]Claude_Disk, // the selected project's Claude transcripts found on disk (claude_disk.odin; not saved)
 	claude_disk_chats:    [dynamic]Claude_Disk, // the chats folder's
 	live:                  Core_Live, // the core's runtime a window in another process shows (core_live.odin; not saved)
+	machines:              []Machine_View, // Settings › Machines: each machine and its link's status (machines.odin; not saved)
 }
 
 // A session holder whose code is not ours answered (holder_client.odin Refused_Code): the window

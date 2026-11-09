@@ -1048,6 +1048,19 @@ pi is installed; Claude Code's once it has been used:
   integration (**Built in**) and the recommended items. **Install…**, **Update…** and **Show…**
   open the setup sheet's coding agents step, where the command shows and runs. **Refresh** looks
   again.
+- **Machines (experimental)**: with the gear's **Experimental: Machines over SSH** on (off by
+  default; a development build until every part of remote machines is in). Each machine you added,
+  with how its link is: `connecting`, `online` and its core's version, `offline`, `needs_login`
+  (ssh asked for a password, a host key or a code: log in once with `ssh` in a terminal),
+  `needs_update`, `not_installed`, or `taken` (that Mac's own window, or another Mac, is showing
+  it). **Connect** tries now, **Take back** takes it from whoever showed it last, and **Remove**
+  forgets it (nothing on it is touched). **Add machine…**: type its ssh target, an `~/.ssh/config`
+  alias or `user@host`, then Enter. Deckhand runs your own `ssh` with your `~/.ssh/config` (never
+  edited), without prompts (`BatchMode`), and starts that machine's Deckhand core there. The newest
+  connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
+  <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
+  use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
+  the sidebar in a later version.
 
 Click a file to open it in an editor tab. Press ⌘, again to go back to Sessions.
 
@@ -1451,6 +1464,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   [A tidy project list](#a-tidy-project-list)). On by default.
 - **Keep sessions when quitting** and **Sessions in a background core**: see
   [How Deckhand runs](#how-deckhand-runs). Both on by default.
+- **Experimental: Machines over SSH**: other machines' sessions over `ssh` (off by default; see
+  [The Settings tab](#the-settings-tab), Machines).
 
 ## Updates
 
@@ -1940,6 +1955,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
 | Run sessions in a background core (at the next launch) |  | on by default: on or off (the gear's row) |
+| Experimental: Machines over SSH |  | off by default: on or off (the gear's row); see [The Settings tab](#the-settings-tab), Machines |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |

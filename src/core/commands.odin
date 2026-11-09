@@ -1152,12 +1152,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if window_job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then quit"), true
 		// keep_sessions: what the session holder keeps running is not stopped, so not asked about
 		keeps := !c.stop_sessions && holder_keeps_sessions()
-		if quit_would_stop(keeps) || (keeps && window_unsaved_files() > 0) {
+		unsaved, known := window_unsaved_files() // not known (no window to ask): asked, never taken as none
+		if quit_would_stop(keeps) || (keeps && (unsaved > 0 || !known)) {
 			what := "quit Deckhand? Running sessions will be stopped."
-			if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
+			if unsaved > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", unsaved, unsaved == 1 ? "" : "s")
+			else if !known do what = fmt.tprintf("%s %s", what, unsaved_files_note(unsaved, known))
 			if keeps || c.stop_sessions {
 				what = keeps ? "quit Deckhand? Sessions the session holder keeps run on; others will be stopped." : "quit Deckhand and stop all sessions? Every session, including those kept running, will be stopped."
-				if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+				if note := unsaved_files_note(unsaved, known); note != "" do what = fmt.tprintf("%s %s", what, note)
 			}
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what)
 			if !go_on do return gr, ch

@@ -11,6 +11,7 @@ package core
 // view: it reports that a tab record appeared or went (view_open, view_drop) and asks what it
 // needs to know (tab_dirty, unsaved_files, job_sheet_holds_quit).
 
+import "core:fmt"
 import "core:strings"
 
 Window_Hooks :: struct {
@@ -171,8 +172,19 @@ window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") -> b
 }
 window_changes_rewind :: proc(tab_id: u64) {if window.changes_rewind != nil do window.changes_rewind(tab_id)}
 window_commit_message_clear :: proc() {if window.commit_message_clear != nil do window.commit_message_clear()}
-// No window: no buffers, so nothing unsaved.
-window_unsaved_files :: proc(under := "") -> int {return window.unsaved_files != nil ? window.unsaved_files(under) : 0}
+// Buffers with unsaved changes ("" = all; else in that folder). known false: no window to ask
+// (a detached or headless core, M4), so it cannot say: a caller asks or refuses, never takes 0.
+window_unsaved_files :: proc(under := "") -> (n: int, known: bool) {
+	if window.unsaved_files == nil do return 0, false
+	return window.unsaved_files(under), true
+}
+
+// What a quit or update prompt says about unsaved files ("" = none to mention).
+unsaved_files_note :: proc(n: int, known: bool) -> string {
+	if !known do return "No window can say whether open files have unsaved changes; any are lost."
+	if n > 0 do return fmt.tprintf("%d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
+	return ""
+}
 window_tab_dirty :: proc(tab_id: u64) -> bool {return window.tab_dirty != nil && window.tab_dirty(tab_id)}
 window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
 window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}

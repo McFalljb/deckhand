@@ -88,13 +88,15 @@ window_views_app_window_makes_the_editor :: proc(t: ^testing.T) {
 	testing.expect(t, e != nil)
 	if e != nil do testing.expect_value(t, tb_line_of(&e.buf, e.cursor), 2) // 0-based
 	testing.expect(t, !core.window_tab_dirty(r.created_id))
-	testing.expect_value(t, core.window_unsaved_files(), 0)
+	n, known := core.window_unsaved_files()
+	testing.expect(t, n == 0 && known)
 	core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, editor_of(r.created_id) == nil)
 }
 
-// No window: the tab record still opens, the queries say nothing is unsaved or held, and what
-// only the window can do is refused.
+// No window: the tab record still opens, the queries say nothing is held, unsaved files are not
+// known (never "none": a quit or a clean up asks or refuses), and what only the window can do is
+// refused.
 @(test)
 window_views_no_window :: proc(t: ^testing.T) {
 	saved := core.window
@@ -108,8 +110,10 @@ window_views_no_window :: proc(t: ^testing.T) {
 	testing.expect(t, tab != nil)
 	testing.expect(t, editor_of(r.created_id) == nil)
 	testing.expect(t, !core.window_tab_dirty(r.created_id))
-	testing.expect_value(t, core.window_unsaved_files(), 0)
-	testing.expect_value(t, core.window_unsaved_files(dir), 0)
+	_, known := core.window_unsaved_files()
+	testing.expect(t, !known, "no window: not known")
+	_, known = core.window_unsaved_files(dir)
+	testing.expect(t, !known)
 	testing.expect(t, !core.window_job_sheet_open())
 	testing.expect(t, !core.window_job_sheet_holds_quit())
 	testing.expect(t, !core.window_job_sheet_saved("x", ""))

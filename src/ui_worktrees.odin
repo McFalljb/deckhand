@@ -502,7 +502,8 @@ wt_menu_items :: proc(t: Menu_Worktree, items: ^[dynamic]core.Menu_Item) {
 // The project of the Files tab: the session on screen's, else the selected one.
 files_project :: proc() -> ^core.Project {
 	if cs := core.cur(); cs != nil && !cs.home do return core.find_project(cs.project_id)
-	return core.find_project(state.selected_project)
+	if p := core.find_project(state.selected_project); p != nil && p.machine == 0 do return p
+	return nil
 }
 
 // Tooltips of the switcher and its rows.

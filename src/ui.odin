@@ -314,7 +314,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	ui_win_w = w
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
-	cs := core.cur()
+	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
 	palette_sync()
 	if clay.UI(clay.ID("root"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .LeftToRight},

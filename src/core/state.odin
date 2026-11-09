@@ -466,7 +466,16 @@ key_tab :: proc() -> ^Tab {
 	return active_tab()
 }
 
+// The session on screen as commands and actions see it: nil when it is another machine's
+// (machine_mirror.odin), so nothing that defaults to "the session on screen" (a split, a shown
+// file, quick-open, the Files tab's folder) acts on it here. The window draws cur_view().
 cur :: proc() -> ^Open_Session {
+	s := find_session(state.current_session)
+	return s != nil && s.machine == 0 ? s : nil
+}
+
+// The session on screen, whichever machine's: for drawing it (its tab bar, "Connecting…").
+cur_view :: proc() -> ^Open_Session {
 	return find_session(state.current_session)
 }
 

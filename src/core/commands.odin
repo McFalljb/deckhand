@@ -2481,6 +2481,7 @@ chat_env :: proc(project_id: u64, env: []string) -> []string {
 // or why not.
 // argv: what runs in place of the login shell (machine_login), title its tab's.
 shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []string = nil, title := "") -> (u64, string) {
+	if s.machine != 0 do return 0, "this session runs on another machine" // never a local shell in it (machine_mirror.odin)
 	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = title != "" ? strings.clone(title) : fmt.aprintf("shell %d", len(s.tabs))}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)

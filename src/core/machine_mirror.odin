@@ -28,6 +28,9 @@ import "core:fmt"
 import "core:mem/virtual"
 import "core:reflect"
 import "core:strings"
+import "core:time"
+
+import cw "../corewire"
 
 MACHINE_ID_SHIFT :: 40
 MACHINE_ID_MASK :: (u64(1) << MACHINE_ID_SHIFT) - 1
@@ -39,10 +42,63 @@ MIRROR_LIST_MAX :: MAX_SESSIONS // the selected project's sessions
 MIRROR_TEXT_MAX :: 160 // names, titles, session ids (bytes)
 MIRROR_PATH_MAX :: 1024
 // What another machine's state stream may decode to: per message (state_read.odin's budget, far
-// below a window's own core's), and the bytes of the messages applied since its last state.full.
-// Past the second, its deltas are left until a fresh state.full (asked for) replaces the replica.
+// below a window's own core's), and the bytes of its deltas since its last state.full. Past the
+// second, its deltas are left until a fresh state.full (asked for) replaces the replica. A full is at
+// most a frame (cw.MAX_PAYLOAD) and never counts toward the deltas' cap; a refused one is asked for
+// again after MIRROR_FULL_RETRY.
 MIRROR_READ_MAX :: 64 << 20
 MIRROR_STREAM_MAX :: 4 << 20
+MIRROR_FULL_RETRY :: 30 * time.Second
+
+Mirror_Stream :: struct {
+	bytes:      int, // its deltas' bytes since its last state.full
+	want_full:  bool, // deltas wait for a state.full
+	full_again: time.Tick, // a refused full: ask again then ({} = not waiting)
+}
+
+Mirror_Take :: enum u8 {
+	Apply,
+	Skip, // left: a delta while a full is awaited, or a full over a frame
+	Ask_Full, // left, and a state.full asked for
+}
+
+// What to do with a state message of size bytes (full: a state.full).
+mirror_stream_take :: proc(s: ^Mirror_Stream, size: int, full: bool, now: time.Tick) -> Mirror_Take {
+	if full {
+		if size > cw.MAX_PAYLOAD {
+			mirror_stream_refused(s, true, now)
+			return .Skip
+		}
+		return .Apply
+	}
+	if s.want_full do return .Skip
+	s.bytes += size
+	if s.bytes > MIRROR_STREAM_MAX {
+		s.want_full = true
+		return .Ask_Full
+	}
+	return .Apply
+}
+
+// A message went into the replica.
+mirror_stream_applied :: proc(s: ^Mirror_Stream, full: bool) {
+	if full do s^ = {}
+}
+
+// The replica refused a message: true = ask for a state.full now (a delta); a full waits first.
+mirror_stream_refused :: proc(s: ^Mirror_Stream, full: bool, now: time.Tick) -> bool {
+	s.want_full = true
+	if !full do return true
+	s.full_again = time.tick_add(now, MIRROR_FULL_RETRY)
+	return false
+}
+
+// A refused full's wait is over: ask again now.
+mirror_stream_due :: proc(s: ^Mirror_Stream, now: time.Tick) -> bool {
+	if s.full_again == {} || time.tick_diff(s.full_again, now) < 0 do return false
+	s.full_again = {}
+	return true
+}
 
 // Machine `machine`'s id `id` as this core holds it. Machine 0 (this Mac): id itself. False: it does
 // not pack (no id, 2^40 or more, or no such machine number).

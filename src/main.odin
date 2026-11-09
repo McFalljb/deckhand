@@ -1347,7 +1347,7 @@ ime_anchor :: proc() -> [4]f32 {
 // and ⌘` show it): the current session's title.
 update_window_title :: proc() {
 	title := "Deckhand"
-	if cs := core.cur(); cs != nil {
+	if cs := core.cur_view(); cs != nil {
 		_, place := core.session_place(cs)
 		title = fmt.tprintf("%s · %s — Deckhand", place, core.open_session_title(cs))
 	}

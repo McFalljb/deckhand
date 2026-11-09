@@ -315,7 +315,8 @@ untitled_label :: proc(chat: bool, when_: string, allocator := context.allocator
 // The listed sessions take the titles the worker read (titles_tick); only
 // changed ones are copied into the lists' arenas.
 refresh_listed_titles :: proc() {
-	for &s in state.sessions do if t := title_cached(s.path, context.temp_allocator); t != s.title do s.title = strings.clone(t, virtual.arena_allocator(&sessions_arena))
+	// another machine's project selected: its list and titles are its own (machine_mirror.odin)
+	if id_machine(state.selected_project) == 0 do for &s in state.sessions do if t := title_cached(s.path, context.temp_allocator); t != s.title do s.title = strings.clone(t, virtual.arena_allocator(&sessions_arena))
 	for &s in state.chats do if t := title_cached(s.path, context.temp_allocator); t != s.title do s.title = strings.clone(t, virtual.arena_allocator(&chats_arena))
 }
 

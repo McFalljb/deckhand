@@ -433,8 +433,7 @@ Mach_Link :: struct {
 	replica:   State, // heap: its State as its core last sent it (state_read.odin)
 	mirror:    Machine_Mirror, // what of it is merged into State (machine_mirror.odin)
 	merged:    bool, // its entries are in State
-	stream:    int, // bytes of its state messages applied since its last state.full (MIRROR_STREAM_MAX)
-	want_full: bool, // past that: its deltas wait for the state.full asked for
+	stream:    Mirror_Stream, // its state stream's bounds (machine_mirror.odin)
 }
 
 @(private = "file")
@@ -693,6 +692,7 @@ machines_tick :: proc() {
 		case .Up:
 			mlink_read_err(l)
 			mlink_pump(l)
+			if l.phase == .Up && mirror_stream_due(&l.stream, now) do mlink_send(l, window_msg_subscribe()) // a refused full: asked again
 		}
 	}
 }
@@ -728,7 +728,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	l.phase = .Up
 	machine_backoff_up(&l.backoff, time.tick_now())
 	mlink_set(l, .Online, why, version)
-	l.stream, l.want_full = 0, true
+	l.stream = {want_full = true} // deltas wait for its first state.full
 	mlink_send(l, window_msg_subscribe()) // its state (M6-B): state.full, then deltas
 	if id_machine(state.selected_project) == l.no do mlink_send(l, window_msg_command(Select_Project{project_id = id_local(state.selected_project)}, "", now = true))
 }
@@ -746,20 +746,21 @@ mlink_send :: proc(l: ^Mach_Link, text: string) -> bool {
 // again (subscribing again sends it).
 @(private = "file")
 mlink_state :: proc(l: ^Mach_Link, text: string, full: bool) {
-	if full do l.stream, l.want_full = 0, false
-	else if l.want_full do return
-	l.stream += len(text)
-	if l.stream > MIRROR_STREAM_MAX { 	// the replica could only grow: a fresh state.full replaces it
-		l.want_full = true
+	now := time.tick_now()
+	switch mirror_stream_take(&l.stream, len(text), full, now) {
+	case .Apply:
+	case .Skip:
+		return
+	case .Ask_Full: // the replica could only grow: a fresh state.full replaces it
 		mlink_send(l, window_msg_subscribe())
 		return
 	}
 	if e := replica_apply(&l.replica, text, runtime.heap_allocator(), MIRROR_READ_MAX); e != "" {
-		fmt.eprintfln("Deckhand: machine %s: its state was refused (%s): asking for all of it again", l.name, text_clean(e, 200))
-		l.want_full = true
-		mlink_send(l, window_msg_subscribe())
+		fmt.eprintfln("Deckhand: machine %s: its state was refused (%s)", l.name, text_clean(e, 200))
+		if mirror_stream_refused(&l.stream, full, now) do mlink_send(l, window_msg_subscribe())
 		return
 	}
+	mirror_stream_applied(&l.stream, full)
 	mirror_merge(l.no, &l.replica, &l.mirror)
 	l.merged = true
 	if autotest_active do fmt.printfln("[autotest] machine %s: state %d", l.name, l.replica.version)
@@ -798,6 +799,7 @@ mlink_pump :: proc(l: ^Mach_Link) {
 		return
 	}
 	for _ in 0 ..< 256 {
+		runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD() // each frame's temp memory goes with it (a state message is up to a frame)
 		f, err := cw.sock_recv(l.sock, context.temp_allocator)
 		if err == .Closed {
 			mlink_reap(l)
@@ -806,12 +808,13 @@ mlink_pump :: proc(l: ^Mach_Link) {
 		}
 		if err != .None do return
 		if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do continue
-		switch hub_msg_type(string(f.payload)) {
+		kind := hub_msg_type(string(f.payload)) // parsed once here; a state message once more, into the replica
+		switch kind {
 		case STATE_FULL, STATE_DELTA:
-			mlink_state(l, string(f.payload), hub_msg_type(string(f.payload)) == STATE_FULL)
+			mlink_state(l, string(f.payload), kind == STATE_FULL)
 		case "window.request", "confirmation.parked":
 			mach.dropped += 1
-			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, hub_msg_type(string(f.payload)))
+			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, kind)
 		case "hub.taken":
 			by := json_path(string(f.payload), "by")
 			mlink_close(l)

@@ -250,7 +250,7 @@ files_expanded_dirs :: proc(root: string) -> []string {
 // selected project's ("" = none). Real path.
 files_base :: proc() -> string {
 	if cs := cur(); cs != nil && !cs.home && cs.cwd != "" do return fs_real(cs.cwd)
-	if p := find_project(state.selected_project); p != nil do return fs_real(p.cwd)
+	if p := find_project(state.selected_project); p != nil && p.machine == 0 do return fs_real(p.cwd) // another machine's folder is not this Mac's
 	return ""
 }
 

@@ -231,6 +231,7 @@ TAB_OUTPUT_RECENT :: 1500 * time.Millisecond
 tab_term_facts_tick :: proc(now: time.Tick) {
 	changed := false
 	for &s in state.open_sessions do for &tab in s.tabs {
+		if tab.machine != 0 do continue // another machine's: its own core's facts (machine_mirror.odin)
 		t := terms[tab.id] or_else nil
 		recent := t != nil && t.running && t.last_output != {} && time.tick_diff(t.last_output, now) < TAB_OUTPUT_RECENT
 		if tab.has_term == (t != nil) && tab.output_recent == recent do continue

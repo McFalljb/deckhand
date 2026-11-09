@@ -180,7 +180,7 @@ fs_base_roots :: proc() -> []string {
 // selected project's ("" = none).
 fs_base_dir :: proc() -> string {
 	if cs := cur(); cs != nil && !cs.home do return cs.cwd
-	if p := find_project(state.selected_project); p != nil do return p.cwd
+	if p := find_project(state.selected_project); p != nil && p.machine == 0 do return p.cwd // another machine's folder is not this Mac's
 	return ""
 }
 

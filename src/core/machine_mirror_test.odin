@@ -9,6 +9,7 @@ import "base:runtime"
 import "core:fmt"
 import "core:strings"
 import "core:testing"
+import "core:time"
 
 @(test)
 mirror_id_packing :: proc(t: ^testing.T) {
@@ -184,4 +185,99 @@ mirror_commands_refused :: proc(t: ^testing.T) {
 	testing.expect(t, machine_command_refuses(New_Shell_Tab{session = sid}) != "", "and on its session")
 	testing.expect_value(t, machine_command_refuses(Focus_Session{session = sid}), "") // the view is this Mac's
 	testing.expect_value(t, machine_command_refuses(Close_Tab{tab_id = 10}), "")
+}
+
+// Review round 1: another machine's session on screen is not "the session on screen" for anything
+// that acts (cur): a split, a shown file or quick-open, the Files tab's base. Nothing local is added
+// to it, and no local folder it names is read.
+@(private = "file")
+rv_replica :: proc() -> State {
+	context.allocator = runtime.heap_allocator()
+	r: State
+	append(&r.projects, Project{id = 5, group = .Projects, cwd = strings.clone("/tmp"), label = strings.clone("tmp")})
+	os := Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/tmp"), title = strings.clone("t")}
+	append(&os.tabs, Tab{id = 10, kind = Shell_Tab{}, title = strings.clone("sh"), status = .Running})
+	os.active_tab = 10
+	append(&r.open_sessions, os)
+	return r
+}
+
+@(private = "file")
+rv_on_screen :: proc(r: ^State, m: ^Machine_Mirror) -> u64 {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	state.machines = make([]Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	mirror_merge(3, r, m)
+	sid, _ := id_pack(3, 9)
+	run_command(Focus_Session{session = sid}, {kind = .UI})
+	return sid
+}
+
+@(private = "file")
+rv_local_tabs :: proc(sid: u64) -> (n: int) {
+	if s := find_session(sid); s != nil do for tab in s.tabs do if tab.machine == 0 do n += 1
+	return
+}
+
+@(test)
+mirror_on_screen_acts_nowhere :: proc(t: ^testing.T) {
+	r := rv_replica()
+	m: Machine_Mirror
+	sid := rv_on_screen(&r, &m)
+	testing.expect(t, state.current_session == sid && cur_view() != nil, "shown (the window draws it)")
+	testing.expect(t, cur() == nil, "but not the session commands act in")
+	run_command(Split_Pane{direction = .Right}, {kind = .UI}) // ⌘D
+	run_command(Show_File{path = "/etc/hosts"}, {kind = .Script})
+	run_command(Show_File{path = "/etc/hosts"}, {kind = .UI}) // quick-open's
+	testing.expect_value(t, rv_local_tabs(sid), 0)
+	testing.expect(t, len(terms) == 0, "no terminal started here")
+	testing.expect(t, files_base() == "" || files_base() != fs_real("/tmp"), "the Files tab never lists a folder another machine named")
+	testing.expect(t, fs_base_dir() != "/tmp", "nor bases paths on it")
+	s := find_session(sid)
+	_, err := shell_tab_start(s, s.cwd)
+	testing.expect(t, err != "", "shell_tab_start refuses another machine's session")
+	mirror_unmerge(3)
+	mirror_free(&m)
+	replica_free(&r, runtime.heap_allocator())
+}
+
+@(test)
+mirror_titles_not_refreshed_here :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	r := rv_replica()
+	r.selected_project = 5
+	append(&r.sessions, Session{id = strings.clone("abc"), path = strings.clone("/nope/x.jsonl"), title = strings.clone("remote title")})
+	m: Machine_Mirror
+	state = State{}
+	state.machines = make([]Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	pid, _ := id_pack(3, 5)
+	state.selected_project = pid
+	mirror_merge(3, &r, &m)
+	refresh_listed_titles()
+	testing.expect(t, len(state.sessions) == 1 && state.sessions[0].title == "remote title", "another machine's titles are its own")
+	mirror_unmerge(3)
+	mirror_free(&m)
+	replica_free(&r, runtime.heap_allocator())
+}
+
+// Review round 1: another machine's stream. A state.full never counts toward the deltas' cap (a
+// full over 4 MiB looped: counted, past the cap, asked for again); deltas past the cap ask for one
+// full and wait for it; a refused full is asked for again only after a wait.
+@(test)
+mirror_stream_bounds :: proc(t: ^testing.T) {
+	st: Mirror_Stream
+	now := time.tick_now()
+	testing.expect_value(t, mirror_stream_take(&st, 5 << 20, true, now), Mirror_Take.Apply)
+	mirror_stream_applied(&st, true)
+	testing.expect_value(t, st.bytes, 0)
+	testing.expect_value(t, mirror_stream_take(&st, 3 << 20, false, now), Mirror_Take.Apply)
+	testing.expect_value(t, mirror_stream_take(&st, 2 << 20, false, now), Mirror_Take.Ask_Full)
+	testing.expect_value(t, mirror_stream_take(&st, 10, false, now), Mirror_Take.Skip) // waits for the full
+	testing.expect_value(t, mirror_stream_take(&st, 5 << 20, true, now), Mirror_Take.Apply)
+	testing.expect(t, !mirror_stream_refused(&st, true, now), "a refused full is not asked for again at once")
+	testing.expect(t, !mirror_stream_due(&st, now), "not yet")
+	testing.expect(t, mirror_stream_due(&st, time.tick_add(now, MIRROR_FULL_RETRY)), "after the wait")
+	testing.expect(t, mirror_stream_refused(&st, false, now), "a refused delta asks for a full at once")
 }

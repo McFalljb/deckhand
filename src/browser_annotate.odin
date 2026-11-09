@@ -286,6 +286,9 @@ annot_pick_add :: proc(tab_id: u64, p: ^Annot_Pick, text, crop: string) -> (id: 
 		if crop != "" do os.remove(crop)
 		return 0, r.error
 	}
+	// a separate core that did not answer in time: the comment comes (or not) in the state; no
+	// marker, it would be filed under id 0 (the crop is the command's now)
+	if r.pending do return 0, ""
 	doc := [4]f32{p.box.x + p.scroll.x, p.box.y + p.scroll.y, p.box[2], p.box[3]}
 	annot_markers[r.created_id] = {
 		tab_id   = tab_id,

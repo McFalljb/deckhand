@@ -1,0 +1,25 @@
+# tests/scripts/reload-separate.sh: with a separate core, pi is updated and its tab restarts on
+# the new pi, run by the core (the window process runs no reload tick: run_command's replica
+# check fails the run if it does).
+wait 800
+command {"type":"select_project","project_id":$project}
+wait 300
+command {"type":"open_session","project_id":$project,"pi_session_id":"aaaa-1"}
+waitfor aaaa-1 10000
+wait 2500
+assert_state open_sessions.0.tabs.0.agent idle
+assert_state open_sessions.0.tabs.0.reload.version 1.4.0
+command {"type":"new_shell_tab","session":$session}
+wait 1500
+type sh ~/bump.sh
+key enter
+eventually 8000
+assert_state reload.pi_version 1.5.0
+command {"type":"focus_tab","tab_id":$pitab}
+wait 500
+clickid restart_go
+eventually 8000
+assert_state open_sessions.0.tabs.0.reload.version 1.5.0
+assert_state open_sessions.0.tabs.0.reload.note restarted on pi 1.5.0
+assert_state open_sessions.0.tabs.0.agent idle
+quit

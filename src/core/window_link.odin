@@ -65,6 +65,7 @@ WINDOW_COMMANDS := [?]typeid {
 	Notifications_Mark_Read, // the window came to the front: the session on screen is seen
 	Set_Unread, // ...and its tabs' finished marks
 	Claude_Typed, // a separate core: the user typed in a Claude tab's prompt (claude_note_typed)
+	Claude_Status_Dismiss, // and closed a Claude tab's status banner (claude_status_dismiss)
 }
 
 // What a frame from the core is (window_msg_parse).

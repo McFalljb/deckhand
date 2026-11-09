@@ -55,10 +55,14 @@ client_pump :: proc() -> bool {
 	return core.window_link_pump()
 }
 
-// The core's inbox runs (in process), or what the core sent is read (separate).
+// The core's inbox runs (in process), or what the core sent is read (separate). Separate, the
+// window's own inbox runs too: its workers' results for its caches (the Files tree's listing and
+// git codes, the worktree switcher, the Changes tab: File_List_Done, Git_Status_Done,
+// Worktrees_Done, Changes_*_Done; window_local_command).
 client_drain :: proc() {
 	if client.sock != nil {
 		client_io(0)
+		core.inbox_drain()
 		return
 	}
 	core.inbox_drain()
@@ -143,6 +147,7 @@ client_core_connect :: proc(data: string) -> string {
 	client.attached = true
 	core.replica_process = true
 	core.claude_typed_send = proc(tab_id: u64) {client_internal(core.Claude_Typed{tab_id = tab_id})}
+	core.claude_status_dismiss_send = proc(tab_id: u64) {client_internal(core.Claude_Status_Dismiss{tab_id = tab_id})}
 	client_send_raw(core.window_msg_subscribe())
 	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
 	if !got_full do return "Deckhand's background core sent no state"

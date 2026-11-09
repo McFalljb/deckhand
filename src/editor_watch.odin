@@ -105,8 +105,12 @@ dir_of :: proc(path: string) -> string {
 editor_tick :: proc() {
 	core.fs_model_tick()
 	core.settings_poll() // the Settings tab's folders outside projects (settings_files.odin)
-	core.reload_tick() // hot reload: pi's config files and version (reload.odin)
-	core.claude_reload_tick() // and Claude Code's (claude_reload.odin)
+	// hot reload: pi's config files and version (reload.odin), and Claude Code's
+	// (claude_reload.odin); a separate core runs them itself (serve.odin)
+	if !client_separate() {
+		core.reload_tick()
+		core.claude_reload_tick()
+	}
 	if sync.atomic_load(&watch.any) {
 		sync.mutex_lock(&watch.lock)
 		paths := watch.pending
@@ -114,7 +118,7 @@ editor_tick :: proc() {
 		sync.atomic_store(&watch.any, false)
 		sync.mutex_unlock(&watch.lock)
 		for p in paths {
-			core.reload_fs_event(p.path) // one of pi's config folders? (reload.odin)
+			if !client_separate() do core.reload_fs_event(p.path) // one of pi's config folders? (reload.odin; a separate core polls)
 			editor_path_changed(p.path, p.flags)
 			delete(p.path, runtime.heap_allocator())
 		}

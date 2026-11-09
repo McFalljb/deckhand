@@ -175,8 +175,11 @@ window_arrived :: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.
 // Main thread, each turn of the core loop: windows that said their hello attach (the newest one
 // stays), and the door learns the holder's pid.
 window_door_tick :: proc() {
+	sync.lock(&hc.mu)
+	holder := hc.pid
+	sync.unlock(&hc.mu)
 	sync.lock(&door.mu)
-	door.holder_pid = hc.pid
+	door.holder_pid = holder
 	if len(door.arrived) == 0 {
 		sync.unlock(&door.mu)
 		return

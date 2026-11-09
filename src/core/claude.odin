@@ -352,7 +352,7 @@ claude_plugin_dir :: proc() -> string {
 	exe := executable_path()
 	if exe == "" do return ""
 	dir := filepath.dir(exe)
-	for c in ([]string{"../Resources/claude-code", "claude-code"}) {
+	for c in ([]string{"../Resources/claude-code", "../Resources/integrations/claude-code", "claude-code"}) { // Deckhand.app, Deckhand Core.app (a separate core), a bare build
 		p, _ := filepath.join({dir, c}, context.temp_allocator)
 		if os.exists(strings.concatenate({p, "/.claude-plugin/plugin.json"}, context.temp_allocator)) do return p
 	}

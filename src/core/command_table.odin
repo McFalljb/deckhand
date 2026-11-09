@@ -159,6 +159,7 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "refresh_shell_env_done", args = "request_id, ok", does = "a worker read the login shell's environment", who = .Internal},
 	{type = "bridge_done", args = "request_id, ok, error?", does = "a pi tab's bridge answered", who = .Internal},
 	{type = "claude_typed", args = "tab_id", does = "a window in another process: the user typed in a Claude tab's prompt", who = .Internal},
+	{type = "claude_status_dismiss", args = "tab_id", does = "a window in another process: the user closed a Claude tab's status banner", who = .Internal},
 	{type = "git_head_done", args = "tab_id, path, in_repo, tracked, head", does = "a worker read an editor file's HEAD version", who = .Internal},
 	{type = "git_status_done", args = "root, ok, out", does = "a worker ran git status for a repository", who = .Internal},
 	{type = "file_list_done", args = "root, out", does = "a worker refreshed a project's file list", who = .Internal},

@@ -98,6 +98,11 @@ serve_main :: proc(args: []string) -> int {
 	if files do core.titles_load(core.data_dir(context.temp_allocator))
 	core.claude_accounts_refresh()
 	core.rescan_now(claude = false)
+	// the window's token first: a window that sees core.sock answer finds the token too
+	if !core.window_token_publish(run) {
+		fmt.eprintln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)
+		return 1
+	}
 	if !core.socket_start() {
 		fmt.eprintln("deckhand-core serve: cannot listen on core.sock")
 		return 1
@@ -108,10 +113,6 @@ serve_main :: proc(args: []string) -> int {
 			fmt.printf("export DECKHAND_SOCKET='%s' DECKHAND_TOKEN='%s'\n", core.socket_path(), core.socket_mint_token({kind = .Control}, context.temp_allocator))
 			os.flush(os.stdout)
 		}
-	}
-	if !core.window_token_publish(run) {
-		fmt.eprintln("deckhand-core serve: cannot write", run, "/", core.WINDOW_TOKEN_FILE)
-		return 1
 	}
 	core.state.settings.keep_sessions = core.keep_sessions_default()
 	if files {
@@ -200,6 +201,8 @@ serve_loop :: proc() {
 			loop.next_fire = time.tick_add(now, loop.every)
 			if loop.fire != nil do loop.fire() // core_timer_fire: a tick (no frames here)
 		} else do core.core_tick()
+		core.reload_tick() // hot reload: pi's (its RELOAD_POLL stamps: the window's watcher is not ours)
+		core.claude_reload_tick() // and Claude Code's
 		core.window_link_io()
 		loop_again = core.output_backlog() && terms_bytes_in() != before
 		free_all(context.temp_allocator)

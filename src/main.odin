@@ -79,7 +79,14 @@ init :: proc "c" () {
 	ui_init()
 	core.platform = platform_app()
 	win_os = win_os_app() // the window's own (win_os.odin)
-	if separate_core_wanted(core.data_dir(context.temp_allocator)) {
+	// the saved setting: never the user's own workspace.json in test mode without a data dir
+	// (that run's is build/test-data, as home_root below)
+	mode_data := core.data_dir(context.temp_allocator)
+	if core.hook_env(.Script) != "" && core.hook_env(.Data_Dir) == "" {
+		cwd, _ := os.get_working_directory(context.temp_allocator)
+		mode_data = strings.concatenate({cwd, "/build/test-data"}, context.temp_allocator)
+	}
+	if separate_core_wanted(mode_data) {
 		init_separate() // the core is another process (client_core.odin)
 		return
 	}
@@ -221,7 +228,7 @@ init_separate :: proc() {
 	// frames stop while hidden: the core's messages are read by a timer then (and the script runs)
 	core.platform.core_timer(50 * time.Millisecond, proc() {
 		if time.tick_since(app.last_frame_at) < 50 * time.Millisecond do return
-		client_io(0)
+		client_drain()
 		autotest_step()
 	})
 }
@@ -329,7 +336,7 @@ frame :: proc "c" () {
 	client_facts() // what the last event changed of the window's facts, before the core reads them (client.odin)
 	if client_separate() { // the core is another process: what it sent, then the script's step
 		app.last_frame_at = time.tick_now()
-		client_io(0)
+		client_drain()
 		autotest_step()
 	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)

@@ -228,7 +228,10 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 	if tab == nil do return
 	window_state_changed()
-	if replica_process do return // the core's runtime is in the other process (separate core: in-process only)
+	if replica_process { // the core's runtime is in the other process: it dismisses it (Claude_Status_Dismiss)
+		if claude_status_dismiss_send != nil do claude_status_dismiss_send(tab.id)
+		return
+	}
 	if claude_hooks_silent(tab, now) {
 		rt_of(tab.id).dismissed = true
 		return

@@ -1279,6 +1279,8 @@ autotest_step :: proc() {
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
 			}
 		case "quit":
+			// a separate core: the window process ran core work on its replica (core.run_command)
+			if core.replica_core_runs > 0 do script_fail("the window process ran", core.replica_core_runs, "core command(s) on its replica (see the log)")
 			log(fmt.tprintf("done: %d asserts, %d failed; %d terminal copies checked", at.asserts, at.failures, at.terms_checked))
 			core.app_quitting = true // the script ends the run: no confirmation
 			script_show_again()

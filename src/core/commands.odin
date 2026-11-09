@@ -246,8 +246,27 @@ separate_core_default_on := false
 Claude_Typed :: struct {
 	tab_id: u64,
 }
+// A window in another process: the user closed a Claude tab's status banner (claude_status_dismiss;
+// internal; window.command only).
+Claude_Status_Dismiss :: struct {
+	tab_id: u64,
+}
 // How a replica process tells its core (client.odin sets it; nil in a core).
 claude_typed_send: proc(tab_id: u64)
+claude_status_dismiss_send: proc(tab_id: u64)
+
+// The commands a window process runs itself with a separate core (replica_process): its own
+// workers' results, for its own caches (the Files tree, the worktree switcher, the Changes tab).
+// Anything else run there acts on the replica, not the core: test builds count and log it
+// (run_command; autotest fails the scene).
+window_local_command :: proc(cmd: Command) -> bool {
+	#partial switch _ in cmd {
+	case File_List_Done, Git_Status_Done, Worktrees_Done, Changes_Scan_Done, Changes_Diff_Done: return true
+	}
+	return false
+}
+
+replica_core_runs: int // test builds: the core commands a window process ran (window_local_command)
 
 // Copy a control token's clipboard entry: cleared at deadline if it still holds the token.
 CONTROL_TOKEN_CLIP_TTL :: 60 * time.Second
@@ -492,6 +511,7 @@ Command :: union {
 	Set_Keep_Sessions,
 	Set_Separate_Core,
 	Claude_Typed,
+	Claude_Status_Dismiss,
 	Copy_Control_Token,
 	Set_Confirm_Policy,
 	Set_Close_Confirm,
@@ -739,6 +759,12 @@ after_command_check: proc(cmd: Command)
 // Runs one command on the main thread. request_id ties it to its events.
 run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id: u64 = 0) -> Result {
 	if window.test_facts != nil do window.test_facts() // unit tests only (window_hooks.odin)
+	when TEST_HOOKS {
+		if replica_process && !window_local_command(cmd) {
+			replica_core_runs += 1
+			fmt.eprintfln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
+		}
+	}
 	r: Result
 	changed := false
 	if !caller_may(caller, cmd) {
@@ -1426,6 +1452,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		_, tab, _ := find_tab(c.tab_id)
 		claude_note_typed(tab)
 		return {ok = true}, false
+	case Claude_Status_Dismiss:
+		_, tab, _ := find_tab(c.tab_id)
+		claude_status_dismiss(tab)
+		return {ok = true}, true
 	case Set_Separate_Core:
 		if state.settings.separate_core == c.on do return {ok = true}, false
 		state.settings.separate_core = c.on

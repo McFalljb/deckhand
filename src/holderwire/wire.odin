@@ -239,11 +239,10 @@ Supervise :: struct {
 }
 
 Supervise_Status :: struct {
-	core:        bool, // a core is attached
-	crashes:     i64, // core crashes in the last 5 min
-	rolled_back: bool, // two crashes: the previous core runs (the update rolled back)
-	gave_up:     bool, // it stopped relaunching (too many failures in a row)
-	previous:    bool, // a previous core is installed (Use previous core can work)
+	core:     bool, // a core is attached
+	crashes:  i64, // failed cores and launches in a row (since the last healthy core)
+	gave_up:  bool, // it stopped relaunching (too many failures in a row)
+	previous: bool, // a previous core is installed (Use previous core can work)
 }
 
 Foreground_Is :: struct {

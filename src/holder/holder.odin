@@ -335,7 +335,6 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 	delete(h.instance)
 	delete(h.buf)
 	delete(h.sup.path)
-	delete(h.sup.crashes)
 	delete(h.sup_launchers)
 	free(h)
 }

@@ -61,12 +61,29 @@ core_handover_refusals :: proc(t: ^testing.T) {
 	testing.expect(t, !core_handover_pending())
 }
 
-// The window never hands a rolled-back core (or the user's previous one) back to current.
+// Use previous core is sticky: the marker holds while current is the build it turned from (a
+// reinstall of that build keeps it); making another build current ends it. Nothing else does.
 @(test)
-core_handover_keeps_a_rollback :: proc(t: ^testing.T) {
-	testing.expect(t, core_handover_keep("aaa", "bbb", true)) // the supervisor rolled back
-	testing.expect(t, core_handover_keep("aaa", "aaa", false)) // it is the previous core
-	testing.expect(t, !core_handover_keep("aaa", "bbb", false))
-	testing.expect(t, !core_handover_keep("", "", false)) // unknown builds are not a match
+core_use_previous_sticks :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	data := fmt.tprintf("%s/dkup-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	defer remove_tree(data)
+	vdir := core_versions_dir(data)
+	for k in ([]string{"0.1.7-aaaaaaaaaaaa", "0.1.8-bbbbbbbbbbbb", "0.1.9-cccccccccccc"}) {
+		bin := fmt.tprintf("%s/%s/%s/Contents/MacOS", vdir, k, CORE_APP)
+		testing.expect_value(t, os.make_directory_all(bin), nil)
+		_ = os.write_entire_file(fmt.tprintf("%s/%s", bin, CORE_SERVE_BIN), transmute([]u8)string("x"))
+	}
+	testing.expect(t, core_use_previous_set(data) != "", "no current core: nothing to go back from")
+	testing.expect_value(t, core_make_current(vdir, "0.1.7-aaaaaaaaaaaa"), "")
+	testing.expect(t, core_use_previous_set(data) != "", "no previous core")
+	testing.expect_value(t, core_make_current(vdir, "0.1.8-bbbbbbbbbbbb"), "")
+	testing.expect_value(t, core_use_previous_serve(data), "")
+	testing.expect_value(t, core_use_previous_set(data), "")
+	testing.expect(t, strings.contains(core_use_previous_serve(data), "/0.1.7-aaaaaaaaaaaa/"), core_use_previous_serve(data))
+	testing.expect_value(t, core_make_current(vdir, "0.1.8-bbbbbbbbbbbb"), "") // the same build again
+	testing.expect(t, core_use_previous_serve(data) != "", "a reinstall of the same build ended it")
+	testing.expect_value(t, core_make_current(vdir, "0.1.9-cccccccccccc"), "") // an update
+	testing.expect_value(t, core_use_previous_serve(data), "")
+	testing.expect(t, !os.exists(fmt.tprintf("%s/%s", vdir, CORE_USE_PREVIOUS)))
 }
-

@@ -1449,16 +1449,16 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
   Sessions…** stops Deckhand Core too. With no window, no tab's program running, no job run and
   no scheduled job for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand
   starts it again). If Deckhand Core stops unexpectedly, the window (or, with no window, the
-  session holder) starts it again and carries on; if an updated one stops twice within five
-  minutes, the one from before the update is started instead and Deckhand says "Update rolled
-  back". If no Deckhand Core comes up when you open Deckhand, it offers **Use Previous Core**.
+  session holder) starts it again and carries on. If no Deckhand Core comes up when you open
+  Deckhand, it offers **Use Previous Core**.
   Logging out stops both; the next launch restores your sessions as usual. When Deckhand opens
   and finds Deckhand Core from an older version (after an update), it hands your sessions over
   to its own Deckhand Core at once: they keep running, and job runs get up to two minutes to
   finish first (any still running then stop, as "stopped (update)"). If the running Deckhand Core
   is newer than this Deckhand, it asks: update Deckhand, or **Use This App's Core**. The
   palette's **Use previous core** hands the sessions to the Deckhand Core from before the last
-  update (the window closes: open Deckhand again). Still the window's alone for now: app tabs, the setup
+  update. Either way that choice holds (relaunches and new windows use the previous core) until
+  a different version of Deckhand is installed. Still the window's alone for now: app tabs, the setup
   sheet's installs, the Changes tab and the update dialog. Only you can change it.
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers

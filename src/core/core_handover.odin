@@ -39,16 +39,12 @@ handover: struct {
 	quit:    bool, // platform.quit was called for it
 }
 
-// Whether a window keeps an older core instead of handing it to its own (client_core.odin): it is
-// the previous installed core (the user's Use previous core), or the supervisor rolled back to it.
-core_handover_keep :: proc(core_build, previous_build: string, rolled_back: bool) -> bool {
-	return rolled_back || (core_build != "" && core_build == previous_build)
-}
-
-// Tests: a handover under way, or none.
-core_handover_pending_set :: proc(on: bool) {
-	delete(handover.to)
-	handover.to = on ? strings.clone("/test/deckhand-core-serve") : ""
+when ODIN_TEST {
+	// Tests: a handover under way, or none.
+	core_handover_pending_set :: proc(on: bool) {
+		delete(handover.to)
+		handover.to = on ? strings.clone("/test/deckhand-core-serve") : ""
+	}
 }
 
 // This process is a separate core (deckhand-core-serve: coremain sets it).
@@ -82,6 +78,11 @@ core_handover_start :: proc(to: string) -> Result {
 	}
 	c, ok, cwhy := core_check(path)
 	if !ok do return fail(fmt.tprintf("the new background core failed its check: %s", cwhy))
+	// the user's choice, kept until another build is made current: windows and the holder's
+	// supervisor launch previous, and no window hands it back (client_core.odin)
+	if to == CORE_PREVIOUS {
+		if w := core_use_previous_set(home_root); w != "" do return fail(w)
+	}
 	handover.to = strings.clone(path)
 	handover.formats = make([]string, len(c.snapshot))
 	for f, i in c.snapshot do handover.formats[i] = strings.clone(f)

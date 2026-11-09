@@ -2,20 +2,21 @@
 package holder
 
 // The supervisor (docs/plans/background-core.md §6 "Core crashes", §7.7): the holder relaunches
-// a separate core that crashed, so the sessions get a core back with no window open. Rollback is
-// decided here, never by the core that is crashing.
+// a separate core that crashed, so the sessions get a core back with no window open. It never
+// rolls back by itself: going back to the previous core is the user's choice (Use previous core).
 //
 // - A separate core says SUPERVISE{core, path} after its WELCOME. Only such a core is watched:
 //   an in-process core (the window's) never is.
-// - It goes without GOODBYE (a crash: EOF, an error, the pong timeout), or a launch never comes
-//   back within SUP_LAUNCH_WAIT: the holder launches one again, after a backoff (1 s, 2 s, 4 s ...
-//   30 s), through `<serve> launch` (src/coremain): that runs the launchd launcher, so the core
-//   never descends from the holder. Any GOODBYE (a handover, a shutdown, an idle exit) ends the
-//   watch: nothing is relaunched.
-// - Two crashes within SUP_CRASH_WINDOW: the previous installed core (<data>/core/previous) is
-//   launched instead (the update rolled back; its SUPERVISE_STATUS says so, and the core shows it).
-// - SUP_HEALTHY attached without a crash: healthy, the counts start over.
-// - SUP_MAX_FAILURES launches in a row that never got healthy: it gives up (the window's
+// - It goes without GOODBYE (a crash: EOF, an error, the pong timeout), or a launch (or a
+//   handover's named successor) never says SUPERVISE within SUP_LAUNCH_WAIT: the holder launches
+//   one again, after a backoff (1 s, 2 s, 4 s ... 30 s), through `<serve> launch` (src/coremain):
+//   that runs the launchd launcher, so the core never descends from the holder. Any other GOODBYE
+//   (a plain handover, a shutdown, an idle exit) ends the watch: nothing is relaunched.
+// - What is launched: <data>/core/current, or <data>/core/previous while the user's Use previous
+//   core marker (<data>/core/use-previous) names the current key; with nothing installed (a
+//   development or test build), the binary the core named.
+// - SUP_HEALTHY attached: healthy, the failure count starts over.
+// - SUP_MAX_FAILURES launches in a row that never got healthy: it gives up (a window's
 //   SUPERVISE{use_previous} starts again).
 // - A window (its designated requirement checked) may send SUPERVISE{status} or {use_previous}
 //   as its first frame: when its core never comes up it offers Use previous core (P6).
@@ -31,7 +32,6 @@ import "core:time"
 import "../holderwire"
 import "../trust"
 
-SUP_CRASH_WINDOW :: 5 * time.Minute
 SUP_HEALTHY :: 60 * time.Second
 SUP_LAUNCH_WAIT :: 20 * time.Second // a launched core that has not said SUPERVISE by then failed
 SUP_BACKOFF_MAX :: 30 * time.Second
@@ -39,20 +39,20 @@ SUP_MAX_FAILURES :: 6
 SUP_SERVE_BIN :: "deckhand-core-serve"
 SUP_O_WRONLY :: 0x0001
 SUP_O_APPEND :: 0x0008
-SUP_PREVIOUS :: "core/previous/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN // under the data dir
+SUP_CURRENT :: "core/current/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN // under the data dir
+SUP_PREVIOUS :: "core/previous/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN
+SUP_MARKER :: "core/use-previous" // core_versions.odin's CORE_USE_PREVIOUS
 
 Supervisor :: struct {
-	path:         string, // the serve binary the last separate core named (heap); "" = none watched
-	attached:     bool, // that core is attached now
-	attached_at:  time.Tick,
-	healthy:      bool, // it stayed SUP_HEALTHY
-	crashes:      [dynamic]time.Tick, // within SUP_CRASH_WINDOW
-	failures:     int, // launches since the last healthy core
-	next_launch:  time.Tick, // zero: none planned
-	launched_at:  time.Tick, // zero: no launch waiting for its SUPERVISE
-	rolled_back:  bool,
-	use_previous: bool, // the next launch is the previous core's
-	gave_up:      bool,
+	path:        string, // the serve binary the last separate core named (heap); "" = none watched
+	attached:    bool, // that core is attached now
+	attached_at: time.Tick,
+	healthy:     bool, // it stayed SUP_HEALTHY
+	failures:    int, // launches since the last healthy core
+	next_launch: time.Tick, // zero: none planned
+	launched_at: time.Tick, // zero: no launch (or successor) waiting for its SUPERVISE
+	asked:       bool, // a window asked for a launch (SUPERVISE{use_previous})
+	gave_up:     bool,
 }
 
 // What the supervisor wants now (pure; supervisor_test.odin drives it on a fake clock).
@@ -102,12 +102,7 @@ sup_core_gone :: proc(s: ^Supervisor, crashed: bool, now: time.Tick) {
 
 @(private = "file")
 sup_failed :: proc(s: ^Supervisor, now: time.Tick) {
-	for len(s.crashes) > 0 && time.tick_diff(s.crashes[0], now) > SUP_CRASH_WINDOW do ordered_remove(&s.crashes, 0)
-	append(&s.crashes, now)
 	s.failures += 1
-	if len(s.crashes) >= 2 && !s.rolled_back {
-		s.rolled_back, s.use_previous = true, true
-	}
 	if s.failures >= SUP_MAX_FAILURES {
 		s.gave_up = true
 		s.next_launch = {}
@@ -120,38 +115,60 @@ sup_failed :: proc(s: ^Supervisor, now: time.Tick) {
 sup_tick :: proc(s: ^Supervisor, now: time.Tick, core_attached: bool) -> Sup_Action {
 	if s.attached && !s.healthy && time.tick_diff(s.attached_at, now) >= SUP_HEALTHY {
 		s.healthy, s.failures = true, 0
-		s.rolled_back, s.use_previous = false, false // a core that stays up: the next crash starts over
-		clear(&s.crashes)
 	}
-	if s.launched_at != {} && time.tick_diff(s.launched_at, now) >= SUP_LAUNCH_WAIT {
+	if sup_wait_over(s, now) {
 		s.launched_at = {}
 		sup_failed(s, now) // it never came back
 	}
-	if s.next_launch == {} || core_attached || s.gave_up || (s.path == "" && !s.use_previous) do return .None
+	if s.next_launch == {} || core_attached || s.gave_up || (s.path == "" && !s.asked) do return .None
 	if time.tick_diff(s.next_launch, now) < 0 do return .None
 	s.next_launch = {}
 	s.launched_at = now
 	return .Launch
 }
 
-// The window's Use previous core: the previous core is launched at once (when no core is attached).
+// A launch, or a handover's named successor, did not say SUPERVISE in time.
+sup_wait_over :: proc(s: ^Supervisor, now: time.Tick) -> bool {
+	return s.launched_at != {} && time.tick_diff(s.launched_at, now) >= SUP_LAUNCH_WAIT
+}
+
+// The window's Use previous core (it wrote the marker first): a core is launched at once (when
+// none is attached), whatever failed before.
 sup_use_previous :: proc(s: ^Supervisor, now: time.Tick) {
-	s.use_previous, s.gave_up, s.failures = true, false, 0
-	s.rolled_back = true // a window's own launch and handover follow it (client_core.odin)
+	s.asked, s.gave_up, s.failures = true, false, 0
 	s.next_launch = now
 }
 
-// The serve binary the next launch runs: the previous installed core's after a rollback (or when
-// the window asked), else the one the core named.
+// The serve binary the next launch runs: previous while the user's marker names the current key,
+// else current; with nothing installed, the one the core named.
 sup_launch_path :: proc(s: ^Supervisor, data_dir: string) -> string {
-	if s.use_previous do return fmt.tprintf("%s/%s", strings.trim_right(data_dir, "/"), SUP_PREVIOUS)
+	d := strings.trim_right(data_dir, "/")
+	prev := fmt.tprintf("%s/%s", d, SUP_PREVIOUS)
+	if sup_marked(d) && sup_is_file(prev) do return prev
+	if cur := fmt.tprintf("%s/%s", d, SUP_CURRENT); sup_is_file(cur) do return cur
 	return s.path
+}
+
+// <data>/core/use-previous holds the key <data>/core/current points at.
+@(private = "file")
+sup_marked :: proc(d: string) -> bool {
+	tmp := context.temp_allocator
+	buf: [256]u8
+	n := posix.readlink(strings.clone_to_cstring(fmt.tprintf("%s/core/current", d), tmp), raw_data(buf[:]), len(buf))
+	if n <= 0 || n >= len(buf) do return false
+	cur := string(buf[:n])
+	fd := open(strings.clone_to_cstring(fmt.tprintf("%s/%s", d, SUP_MARKER), tmp), 0) // O_RDONLY
+	if fd < 0 do return false
+	defer close(fd)
+	mb: [256]u8
+	m := read(fd, &mb[0], len(mb))
+	return m > 0 && strings.trim_space(string(mb[:m])) == cur
 }
 
 sup_status :: proc(h: ^Holder) -> holderwire.Supervise_Status {
 	s := &h.sup
 	prev := h.cfg.data_dir != "" && sup_is_file(fmt.tprintf("%s/%s", strings.trim_right(h.cfg.data_dir, "/"), SUP_PREVIOUS))
-	return {core = h.core != nil, crashes = i64(len(s.crashes)), rolled_back = s.rolled_back, gave_up = s.gave_up, previous = prev}
+	return {core = h.core != nil, crashes = i64(s.failures), gave_up = s.gave_up, previous = prev}
 }
 
 // The loop's part (timers): launch when due. The launcher (`<serve> launch`) is our child only
@@ -163,6 +180,8 @@ sup_run :: proc(h: ^Holder) {
 		if r := waitpid(p, &st, WNOHANG); r == p || (r < 0 && errno() == ECHILD) do unordered_remove(&h.sup_launchers, i)
 	}
 	if h.forked do return // a keeper: Security.framework is not safe after fork (keeper.odin)
+	// a handover's successor that never came: its secret goes, so the core launched now is welcomed
+	if sup_wait_over(&h.sup, time.tick_now()) do successor_clear(h)
 	if sup_tick(&h.sup, time.tick_now(), h.core != nil) != .Launch do return
 	path := sup_launch_path(&h.sup, h.cfg.data_dir)
 	if why := sup_launch(h, path); why != "" {
@@ -171,7 +190,7 @@ sup_run :: proc(h: ^Holder) {
 		sup_failed(&h.sup, time.tick_now())
 		return
 	}
-	hlog(h, "supervisor: launched the core %s%s", path, h.sup.use_previous ? " (the previous one)" : "")
+	hlog(h, "supervisor: launched the core %s", path)
 }
 
 // `<path> launch --run R --data D`: its file checked first, as UPGRADE's is. "" = started.

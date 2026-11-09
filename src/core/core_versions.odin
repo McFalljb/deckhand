@@ -34,6 +34,7 @@ import hw "../holderwire"
 CORE_VERSIONS_DIR :: "core"
 CORE_CURRENT :: "current"
 CORE_PREVIOUS :: "previous"
+CORE_USE_PREVIOUS :: "use-previous" // the user's Use previous core: the current key it turned from
 
 // <data>/core
 core_versions_dir :: proc(data: string) -> string {
@@ -100,9 +101,30 @@ core_install_app :: proc(app, data: string) -> (serve: string, ok: bool, why: st
 core_make_current :: proc(vdir, key: string) -> string {
 	old := core_link_read(vdir, CORE_CURRENT)
 	if old == key do return ""
+	os.remove(fmt.tprintf("%s/%s", vdir, CORE_USE_PREVIOUS)) // another version: Use previous core ends
 	if old != "" && !core_link_set(vdir, CORE_PREVIOUS, old) do return fmt.tprintf("cannot point %s/%s at %s", vdir, CORE_PREVIOUS, old)
 	if !core_link_set(vdir, CORE_CURRENT, key) do return fmt.tprintf("cannot point %s/%s at %s", vdir, CORE_CURRENT, key)
 	return ""
+}
+
+// Use previous core (the palette's, or the window's offer when no core comes up): sticky while
+// current stays the build the user turned from; making another build current ends it
+// (core_make_current). No timer: only the user's choice and an install change it.
+core_use_previous_set :: proc(data: string) -> string {
+	vdir := core_versions_dir(data)
+	cur := core_link_read(vdir, CORE_CURRENT)
+	if cur == "" || core_serve_of(data, CORE_PREVIOUS) == "" do return "no previous core is installed"
+	if err := os.write_entire_file(fmt.tprintf("%s/%s", vdir, CORE_USE_PREVIOUS), transmute([]u8)cur); err != nil do return fmt.tprintf("cannot write %s/%s", vdir, CORE_USE_PREVIOUS)
+	return ""
+}
+
+// The serve binary to run while Use previous core holds (the marker names current), else "". Temp.
+core_use_previous_serve :: proc(data: string) -> string {
+	vdir := core_versions_dir(data)
+	cur := core_link_read(vdir, CORE_CURRENT)
+	b, err := os.read_entire_file(fmt.tprintf("%s/%s", vdir, CORE_USE_PREVIOUS), context.temp_allocator)
+	if err != nil || cur == "" || strings.trim_space(string(b)) != cur do return ""
+	return core_serve_of(data, CORE_PREVIOUS)
 }
 
 // The serve binary that <data>/core/<which> (current or previous) points at, "" if none. Temp.

@@ -173,8 +173,7 @@ client_core_reconnect :: proc() -> string {
 	client_facts_forget_all()
 	got_full = false
 	old := client.sock // the dead link stays client.sock until a new one is up (client_separate holds)
-	// never a handover here: the core that answers is the supervisor's or a successor's (a
-	// rollback stays rolled back)
+	// never a handover here: the core that answers is the supervisor's or a successor's
 	if _, why := client_core_dial(core.home_root); why != "" do return why
 	cw.sock_destroy(old)
 	free(old, heap)
@@ -236,11 +235,7 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 	if bin == "" do return "Deckhand Core.app (its deckhand-core-serve) is missing from this copy of Deckhand"
 	exe, ok, why := core.core_install(bin, data)
 	if !ok do return why
-	// after a rollback (or Use Previous Core) the holder's supervisor starts the previous core: so
-	// does the window, never the update that kept stopping (the core lock lets one of them run)
-	if st, sok := core.holder_supervise_ask(run, "status"); sok && st.rolled_back {
-		if prev := core.core_serve_of(data, core.CORE_PREVIOUS); prev != "" do exe = prev
-	}
+	if prev := core.core_use_previous_serve(data); prev != "" do exe = prev // the user's Use previous core
 	if core.autotest_active do fmt.println("[autotest] core: launching", exe)
 	_, lok, lwhy := core.core_launch(exe, run, data, from_tab)
 	if !lok do return lwhy
@@ -302,15 +297,9 @@ client_core_handover_to :: proc(hello: Core_Hello, data: string) -> (to, why: st
 	case .Ok:
 		return "", "" // a development build (no version) never hands over to another of its kind
 	case .Core_Older, .Core_Below_Min, .Core_Older_Generation:
-		// never undo a rollback: the core the supervisor fell back to, or the user's Use previous core
-		prev := core.core_serve_of(data, core.CORE_PREVIOUS)
-		rolled := false
-		if run, rwhy := core.sock_runtime_dir_why(context.temp_allocator); rwhy == "" {
-			st, ok := core.holder_supervise_ask(run, "status")
-			rolled = ok && st.rolled_back
-		}
-		if core.core_handover_keep(hello.build, prev == "" ? "" : core.core_build_of(prev), rolled) {
-			fmt.eprintln("Deckhand: background core: keeping the previous core that runs (a rollback, or Use previous core)")
+		// the user's Use previous core holds (core_use_previous_serve): keep the core it chose
+		if core.core_use_previous_serve(data) != "" {
+			fmt.eprintln("Deckhand: background core: keeping the previous core (Use previous core)")
 			return "", hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
 		}
 	case .Core_Newer_Generation:
@@ -466,12 +455,17 @@ client_core_offer_previous :: proc() -> bool {
 	if rwhy != "" do return false
 	st, ok := core.holder_supervise_ask(run, "status")
 	if !ok || !st.previous || st.core do return false
-	text := fmt.tprintf("Deckhand's background core keeps stopping%s. Your sessions are still running. Use the background core from before the last update?", st.crashes > 0 ? fmt.tprintf(" (%d time%s in 5 minutes)", st.crashes, st.crashes == 1 ? "" : "s") : "")
+	text := fmt.tprintf("Deckhand's background core keeps stopping%s. Your sessions are still running. Use the background core from before the last update?", st.crashes > 0 ? fmt.tprintf(" (%d time%s in a row)", st.crashes, st.crashes == 1 ? "" : "s") : "")
 	if core.autotest_active {
 		fmt.println("[autotest] core: offer previous:", text)
 		return false
 	}
 	if !platform_ask("Deckhand's background core isn't starting", text, "Use Previous Core", "Quit") do return false
+	// sticky until another build is installed: the holder and this window launch previous
+	if why := core.core_use_previous_set(core.home_root); why != "" {
+		fmt.eprintln("Deckhand: background core: Use previous core:", why)
+		return false
+	}
 	_, ok = core.holder_supervise_ask(run, "use_previous")
 	return ok
 }

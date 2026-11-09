@@ -129,7 +129,6 @@ Holder_Client :: struct {
 	refused_pid:  i32, // a holder whose code is not ours answered (Refused_Code): the user is asked (state.holder_ask)
 	refused_path: string, // its socket
 	hung_since:   time.Tick, // a holder answered but never WELCOMEd (Warn_Running): its held_away tabs wait at most PONG_TIMEOUT
-	rollback_told: bool, // SUPERVISE_STATUS said rolled_back: said once
 }
 
 hc := Holder_Client{fd = -1}
@@ -670,15 +669,7 @@ holder_frame :: proc(f: hw.Frame) {
 		why := "the holder refused the upgrade"
 		if hw.decode(f, .Upgrade_Failed, &m, context.temp_allocator) == .None do why = m.error
 		upgrade_finish_locked({error = strings.clone(why), holder_rev = hc.holder_rev, pid = hc.pid})
-	case .Supervise_Status:
-		m: hw.Supervise_Status
-		if hw.decode(f, .Supervise_Status, &m, context.temp_allocator) == .None && m.rolled_back && !hc.rollback_told {
-			hc.rollback_told = true
-			fmt.eprintln("Deckhand: background core: the session holder's supervisor rolled the update back (the new core crashed twice)")
-			if autotest_active do fmt.println("[autotest] core: rolled back")
-			window_toast("Update rolled back: the updated background core stopped twice, so the previous one runs your sessions.", err = true)
-		}
-	case .Pong, .Unknown:
+	case .Supervise_Status, .Pong, .Unknown:
 	case:
 		fmt.eprintln("Deckhand: session holder: ignoring a frame of kind", f.kind)
 	}

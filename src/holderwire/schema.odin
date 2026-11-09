@@ -131,7 +131,6 @@ SPECS := []Kind_Spec {
 	{"SUPERVISE_STATUS", .Supervise_Status, false, .Json, {
 		{name = "core", type = .Bool, required = true},
 		{name = "crashes", type = .Int, required = true},
-		{name = "rolled_back", type = .Bool, required = true},
 		{name = "gave_up", type = .Bool, required = true},
 		{name = "previous", type = .Bool, required = true},
 	}},

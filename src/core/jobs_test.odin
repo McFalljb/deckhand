@@ -339,45 +339,67 @@ jobs_commands_callers :: proc(t: ^testing.T) {
 	testing.expect(t, limit_stall() >= 1 && limit_loop() >= 2 && limit_fail() >= 1)
 }
 
-// An `at` job due while a handover is under way (core_handover.odin) is not used up: it keeps its
-// due time, and the successor's scheduler takes it (paused here, so nothing starts: it is skipped).
+// A handover (core_handover.odin) uses nothing up: a run queued behind the concurrency limit and
+// an `at` job due meanwhile keep their due times, and the successor (here: the scheduler read
+// again from disk) runs both. Their folder is missing, so a run "starts" as folder_missing.
 @(test)
 jobs_wait_for_a_handover :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	dir := fmt.aprintf("%s/pd-jobs-ho-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
-	notes := fmt.aprintf("%s/notes", dir)
-	os.make_directory_all(fmt.tprintf("%s/jobs", notes))
-	old_root := home_root
-	home_root = fmt.aprintf("%s/data", dir)
-	os.make_directory_all(home_root)
-	jobs_reset()
-	saved := state.settings
-	state.settings.home_dir = ""
-	defer {
+	when ODIN_TEST {
+		context.allocator = runtime.heap_allocator()
+		dir := fmt.aprintf("%s/pd-jobs-ho-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+		notes := fmt.aprintf("%s/notes", dir)
+		os.make_directory_all(fmt.tprintf("%s/jobs", notes))
+		old_root := home_root
+		home_root = fmt.aprintf("%s/data", dir)
+		os.make_directory_all(home_root)
+		jobs_reset()
+		saved := state.settings
+		state.settings.home_dir = ""
+		defer {
+			core_handover_pending_set(false)
+			jobs_test_busy = 0
+			jobs_reset()
+			jobs_rows_free_all()
+			state.settings = saved
+			home_root = old_root
+			os.remove_all(dir)
+		}
+		ui := Caller{kind = .UI}
+		testing.expect(t, run_command(Set_Home_Dir{path = notes}, ui).ok)
+		gone := fmt.tprintf("%s/no-such-folder", dir)
+		r := run_command(Job_Create{name = "Queued", schedule = "at 2030-01-01 08:00", prompt = "x", folder = gone}, ui)
+		testing.expect(t, r.ok, r.error)
+		r = run_command(Job_Create{name = "Later", schedule = "at 2030-01-01 09:00", prompt = "x", folder = gone}, ui)
+		testing.expect(t, r.ok, r.error)
+		jobs_scan(true)
+		jobs_check(1_800_000_000) // 2027: their due times computed
+		row :: proc(name: string) -> Job_Row {
+			run_command(Jobs_Sync{})
+			for j in state.jobs do if j.name == name do return j
+			return {}
+		}
+		q_due, l_due := row("Queued").next_due, row("Later").next_due
+		testing.expect(t, q_due > 0 && l_due > q_due)
+		// Queued waits behind the limit; then the handover starts
+		state.settings.job_limits.concurrency = 1
+		jobs_test_busy = 1
+		jobs_check(q_due + 1)
+		testing.expect(t, row("Queued").queued)
+		core_handover_pending_set(true)
+		jobs_test_busy = 0 // the slot frees: still nothing starts while it hands over
+		jobs_check(l_due + 1)
+		for name in ([]string{"Queued", "Later"}) {
+			rw := row(name)
+			testing.expectf(t, rw.next_due != 0 && rw.enabled && rw.last_at == 0, "%s kept for the successor: %v", name, rw)
+		}
+		// the successor: the scheduler again, from the notes and the saved state
 		core_handover_pending_set(false)
 		jobs_reset()
-		jobs_rows_free_all()
-		state.settings = saved
-		home_root = old_root
-		os.remove_all(dir)
+		jobs_scan(true)
+		jobs_check(l_due + 2)
+		for name in ([]string{"Queued", "Later"}) {
+			rw := row(name)
+			testing.expectf(t, rw.next_due == 0 && !rw.enabled && rw.last_status == "folder_missing", "%s ran on the successor: %v", name, rw)
+		}
 	}
-	ui := Caller{kind = .UI}
-	testing.expect(t, run_command(Set_Home_Dir{path = notes}, ui).ok)
-	r := run_command(Job_Create{name = "Once", schedule = "at 2030-01-01 09:00", prompt = "x"}, ui)
-	testing.expect(t, r.ok, r.error)
-	jobs_scan(true)
-	start := i64(1_800_000_000) // 2027: before it is due
-	jobs_check(start) // its due time computed
-	run_command(Jobs_Sync{})
-	due := state.jobs[0].next_due
-	testing.expect(t, due > start)
-	state.settings.jobs_paused = true
-	core_handover_pending_set(true)
-	jobs_check(due + 1)
-	run_command(Jobs_Sync{})
-	testing.expect_value(t, state.jobs[0].next_due, due) // kept for the successor
-	core_handover_pending_set(false)
-	jobs_check(due + 2)
-	run_command(Jobs_Sync{})
-	testing.expect_value(t, state.jobs[0].next_due, i64(0)) // taken (skipped: paused)
 }

@@ -46,17 +46,17 @@ chmod 700 "$K/shared"
 
 # ---- release.sh's refusals, before any build -----------------------------------------------
 R="$W/repo"
-mkdir -p "$R/scripts" "$R/src/updatesig" "$R/tools/update-sign" "$R/build" "$W/bin"
+mkdir -p "$R/scripts" "$R/src/core" "$R/src/updatesig" "$R/tools/update-sign" "$R/build" "$W/bin"
 cp scripts/release.sh scripts/sign.sh "$R/scripts/"
 cp src/updatesig/updatesig.odin "$R/src/updatesig/"
-cp src/core/update_core.odin "$R/src/" # UPDATE_REPO, the repository release.sh uploads to
+cp src/core/update_core.odin "$R/src/core/" # UPDATE_REPO, the repository release.sh uploads to
 cp tools/update-sign/main.odin "$R/tools/update-sign/"
 cp build/update-sign "$R/build/"
 touch "$R/build/update-sign"
 printf 'build/\ndist/\n' > "$R/.gitignore"
 printf '#!/bin/sh\necho "fake gh: must not be called" >&2\nexit 1\n' > "$W/bin/gh"
 chmod +x "$W/bin/gh"
-keyfile() { printf 'package main\nUPDATE_PUBLIC_KEY :: "%s"\n' "$1" > "$R/src/core/update_key.odin"; }
+keyfile() { printf 'package core\nUPDATE_PUBLIC_KEY :: "%s"\n' "$1" > "$R/src/core/update_key.odin"; }
 keyfile "$TEST_PUB"
 git -C "$R" init -q
 git -C "$R" add -A

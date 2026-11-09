@@ -23,6 +23,9 @@ U_UI :: core.Caller{kind = .UI}
 when !core.DECKHAND_UPDATE_TEST {
 	@(private = "file")
 	UPDATE_TEST_PUBLIC_KEY :: ""
+} else {
+	@(private = "file")
+	UPDATE_TEST_PUBLIC_KEY :: core.UPDATE_TEST_PUBLIC_KEY
 }
 
 // a temp folder of its own (absolute), removed by the caller

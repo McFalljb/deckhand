@@ -81,10 +81,12 @@ tab_views_files_deleted :: proc(under: string) {
 tab_view_changes_diff :: proc(tab_id: u64, path, text, message: string) -> bool {
 	e := editor_of(tab_id)
 	if e == nil do return false
+	// copy, then free: path or message may be the editor's own (e.path, e.refused)
+	refused, p := strings.clone(message), strings.clone(path)
 	delete(e.refused)
-	e.refused = strings.clone(message)
 	delete(e.path)
-	e.path = strings.clone(path)
+	e.refused, e.path = refused, p
+	// no message: there is a diff, and text is it (a message keeps the last text under it)
 	if message == "" do editor_set_text(e, text) // keeps the scroll position (a refresh of the same file)
 	return true
 }

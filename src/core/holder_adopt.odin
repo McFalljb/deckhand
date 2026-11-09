@@ -118,7 +118,7 @@ handover_dir_ready :: proc() -> string {
 }
 
 // Writes bytes to path: a 0600 temp file beside it (O_EXCL, O_NOFOLLOW), fsync, rename.
-@(private = "file")
+@(private)
 file_write_private :: proc(path: string, bytes: []u8) -> bool {
 	tmp := fmt.tprintf("%s.tmp-%d", path, posix.getpid())
 	ctmp := strings.clone_to_cstring(tmp, context.temp_allocator)

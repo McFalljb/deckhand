@@ -562,6 +562,10 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 					} else if away := core.pane_shown(p); empty && away != nil && core.tab_held_away(away) != 0 {
 						clay.Text("Still running in the session holder", txt(th.text_secondary))
 						clay.Text(core.HELD_AWAY_TEXT, txt(th.text_muted))
+					} else if empty && cs != nil && cs.machine != 0 && shown != nil && core.tab_kind_id(shown.kind) == .Browser {
+						// another machine's page lives in this window once its agent (or you) opens it here
+						clay.Text("Not open in this window", txt(th.text_secondary))
+						clay.TextDynamic(fmt.tprintf("This page was opened on %s before this Mac connected. Open it again from there to see it here.", core.machine_name(cs.machine)), txt(th.text_muted))
 					} else if empty && cs != nil && cs.machine != 0 {
 						// another machine's session: its terminals are relayed; its other tabs show there only
 						clay.Text("Shown on its machine only", txt(th.text_secondary))

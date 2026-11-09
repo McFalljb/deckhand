@@ -7,11 +7,15 @@ package core
 // State, one thread (tests/unit.py).
 
 import "base:runtime"
+import "core:encoding/base64"
 import "core:encoding/endian"
+import "core:encoding/json"
 import "core:fmt"
+import "core:os"
 import "core:strings"
 import "core:testing"
 import cw "../corewire"
+import jg "../jsonguard"
 
 @(private = "file")
 Rt_Frame :: struct {
@@ -220,13 +224,21 @@ route_on_behalf_lowers :: proc(t: ^testing.T) {
 	testing.expect(t, json_path(last_result(), "result.ok") == "true" && state.settings.remote_machines, "ui: the user's")
 	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"window.command","id":"w","now":true,"command":{"focus_take":{"widget":"x"}}}`)
 	testing.expect(t, strings.contains(last_result(), "not a hub's"), "a hub's window.command is refused (never internal)")
-	// review round 1: a window's other messages (the tab_host caller, a call's answer, a request's
-	// reply) are never a hub's either
-	for m in ([]string{`{"v":1,"type":"tab_host.event","id":"e","now":true,"command":{"browser_update":{"tab_id":1}}}`, `{"v":1,"type":"finished","id":"f","result":{"ok":true}}`, `{"v":1,"type":"window.reply","id":"r","reply":{"ok":true}}`}) {
-		n := len(rt_win)
-		rt_window_send(cw.JSON_CHANNEL, .Data, m)
-		testing.expect(t, len(rt_win) == n + 1 && strings.contains(rt_win[n].payload, "not a hub's"), "refused")
-	}
+	// review round 1: a request's reply is never a hub's
+	n := len(rt_win)
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"window.reply","id":"r","reply":{"ok":true}}`)
+	testing.expect(t, len(rt_win) == n + 1 && strings.contains(rt_win[n].payload, "not a hub's"), "refused")
+	// M6-D: its window hosts this core's pages, so it reports them (Browser_Update, nothing else
+	// of the tab_host caller's) and answers this core's calls (a finished nobody waits for: dropped)
+	n = len(rt_win)
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"tab_host.event","id":"e","now":true,"command":{"app_update":{"tab_id":1}}}`)
+	testing.expect(t, len(rt_win) == n + 1 && json_path(rt_win[n].payload, "result.ok") == "false", "an app's report from a hub is refused")
+	n = len(rt_win)
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"tab_host.event","id":"e","now":true,"command":{"browser_popup_open":{"opener":1,"url":"https://x.test/"}}}`)
+	testing.expect(t, len(rt_win) == n + 1 && json_path(rt_win[n].payload, "result.ok") == "false", "a popup from a hub is refused")
+	n = len(rt_win)
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"finished","id":"f","result":{"ok":true}}`)
+	testing.expect_value(t, len(rt_win), n)
 }
 
 // The terminal relay: attach maps the window's channel to the other machine's; frames pass both
@@ -382,4 +394,135 @@ route_snapshot_max_honoured :: proc(t: ^testing.T) {
 	for st in term_streams() do if st.tab_id == 77 do ok = st.vt && st.snap_max == 4096
 	testing.expect(t, ok, "its stream keeps the limit")
 	for f in rt_win do if f.kind == .Snapshot do testing.expect(t, len(f.payload) <= 4096, "the snapshot fits it")
+}
+
+// Another machine's browser tabs (machine_browser.odin; §10.4 M6-D): its core's tab_host.call goes
+// to this Mac's window with its ids packed and its caller capped, only for its own tabs and the
+// commands an agent drives; the window's answers go back with its ids unpacked; an address of this
+// Mac's networks is refused, its loopback asked to be forwarded; a page's report goes to it.
+@(test)
+remote_browser_calls :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, _ := rt_begin()
+	defer rt_end_test()
+	defer delete(machine_test_links.ports)
+	pi, _ := id_pack(3, 11)
+	page, _ := id_pack(3, 12)
+	for &s in state.open_sessions do if s.id == sid {
+		append(&s.tabs, Tab{id = pi, machine = 3, kind = Pi_Tab{}, title = strings.clone("pi"), status = .Running, pane = sid})
+		append(&s.tabs, Tab{id = page, machine = 3, kind = Browser_Tab{url = strings.clone("https://x.test/")}, title = strings.clone("x"), status = .Running, pane = sid})
+	}
+	call :: proc(cmd: string, tab_id: u64 = 0, caller := `{"kind":"panel","tab_id":11}`) {
+		machine_tab_host_call(3, fmt.tprintf(`{{"v":1,"type":"tab_host.call","id":"h7","request_id":77,"tab_id":%d,"caller":%s,"command":%s}}`, tab_id, caller, cmd))
+	}
+	to_window :: proc() -> string {
+		for i := len(rt_win) - 1; i >= 0; i -= 1 do if json_path(rt_win[i].payload, "type") == "tab_host.call" do return rt_win[i].payload
+		return ""
+	}
+	// its own tab: to the window, ids packed, a pi tab's caller bound to its packed tab
+	call(`{"browser_read":{"tab_id":12}}`)
+	w := to_window()
+	testing.expect_value(t, json_path(w, "command.browser_read.tab_id"), fmt.tprint(page))
+	testing.expect_value(t, json_path(w, "caller.kind"), "panel")
+	testing.expect_value(t, json_path(w, "caller.tab_id"), fmt.tprint(pi))
+	hrid := json_path(w, "request_id")
+	testing.expect(t, hrid != "77" && hrid != "0", "a request id of this core's")
+	// the window answers pending, then ends it: both go back under its ids
+	x := json_path(w, "id")
+	tab_host_finished_from_window(fmt.tprintf(`{{"v":1,"type":"finished","id":"%s","changed":false,"private":true,"wait_ms":0,"result":{{"ok":true,"pending":true}}}}`, x))
+	testing.expect_value(t, json_path(rt_last_text(), "id"), "h7")
+	testing.expect_value(t, json_path(rt_last_text(), "result.pending"), "true")
+	tab_host_finished_from_window(fmt.tprintf(`{{"v":1,"type":"finished","request_id":%s,"private":true,"result":{{"ok":true,"data":{{"text":"hi"}}}}}}`, hrid))
+	testing.expect_value(t, json_path(rt_last_text(), "request_id"), "77")
+	testing.expect_value(t, json_path(rt_last_text(), "result.data.text"), "hi")
+	testing.expect_value(t, machine_browser_waiting(), 0)
+	// another machine's tab, or an id past 2^40 (a local one can't be named: its ids are packed),
+	// an app tab, an upload, the clipboard's Edit, a bad caller: refused, nothing to the window
+	n := len(rt_win)
+	other, _ := id_pack(4, 12)
+	for c in ([]string{fmt.tprintf(`{{"browser_read":{{"tab_id":%d}}}}`, other), `{"new_app_tab":{"session":9,"name":"x"}}`, `{"browser_upload":{"tab_id":12,"paths":["/etc/passwd"]}}`, `{"browser_edit":{"tab_id":12,"op":"paste"}}`, `{"browser_external":{"tab_id":12}}`, `{"open_file":{"path":"/etc/passwd"}}`}) {
+		call(c)
+		testing.expectf(t, json_path(rt_last_text(), "result.ok") == "false", "%s: refused", c)
+	}
+	call(`{"new_app_tab":{"session":9,"name":"x"}}`)
+	testing.expect_value(t, json_path(rt_last_text(), "result.data.code"), "not_on_remote")
+	call(`{"browser_read":{"tab_id":12}}`, caller = fmt.tprintf(`{{"kind":"panel","tab_id":%d}}`, other))
+	testing.expect_value(t, json_path(rt_last_text(), "result.ok"), "false")
+	call(`{"browser_tabs":{}}`, caller = `{"kind":"control"}`)
+	testing.expect(t, json_path(rt_last_text(), "result.ok") == "false", "no tab, no session: refused (never every session)")
+	call(fmt.tprintf(`{{"browser_type":{{"tab_id":12,"text":"%s"}}}}`, strings.repeat("a", REMOTE_TEXT_MAX + 1, context.temp_allocator)))
+	testing.expect(t, json_path(rt_last_text(), "result.ok") == "false", "a text past the bound: refused")
+	testing.expect_value(t, len(rt_win), n)
+	// addresses: file:, data:, javascript: and this Mac's LAN never; its loopback is asked to be
+	// forwarded (the bar), once
+	for u in ([]string{"file:///etc/passwd", "data:text/html,x", "javascript:alert(1)", "http://192.168.1.1/", "http://169.254.169.254/", "http://0x7f000001:3000/", "http://printer.local/", "http://[::1]:3000/", "chrome://settings", "devtools://x"}) {
+		call(fmt.tprintf(`{{"browser_navigate":{{"tab_id":12,"url":"%s"}}}}`, u))
+		testing.expectf(t, json_path(rt_last_text(), "result.ok") == "false", "%s: refused", u)
+	}
+	testing.expect_value(t, len(rt_win), n)
+	asks := len(state.pending_confirmations)
+	call(`{"browser_navigate":{"tab_id":12,"url":"http://localhost:3000/a?b"}}`)
+	testing.expect_value(t, json_path(rt_last_text(), "result.data.code"), "needs_forward")
+	call(`{"browser_navigate":{"tab_id":12,"url":"http://localhost:3000/"}}`)
+	testing.expect_value(t, len(state.pending_confirmations), asks + 1)
+	if len(state.pending_confirmations) > asks {
+		f, is := state.pending_confirmations[asks].command.(Machine_Forward)
+		testing.expect(t, is && f.no == 3 && f.port == 3000, "the bar asks to forward port 3000 from it")
+		testing.expect(t, strings.contains(state.pending_confirmations[asks].summary, "nuc"), "naming the machine")
+	}
+	// forwarded (to this Mac's 3001): the page opens this Mac's end of it
+	machine_test_links.ports[3] = {remote = 3000, local = 3001}
+	call(`{"browser_navigate":{"tab_id":12,"url":"http://localhost:3000/a?b"}}`)
+	testing.expect_value(t, json_path(to_window(), "command.browser_navigate.url"), "http://127.0.0.1:3001/a?b")
+	call(`{"browser_open":{"url":"https://example.com/"}}`, tab_id = 13)
+	w = to_window()
+	made, _ := id_pack(3, 13)
+	testing.expect_value(t, json_path(w, "tab_id"), fmt.tprint(made))
+	tab_host_finished_from_window(fmt.tprintf(`{{"v":1,"type":"finished","id":"%s","changed":true,"result":{{"ok":true,"created_id":%d}}}}`, json_path(w, "id"), made))
+	testing.expect_value(t, json_path(rt_last_text(), "result.created_id"), "13")
+	// a reply over the bound (8 MiB of PNG in base64) is refused
+	big := remote_result(3, typeid_of(Browser_Screenshot), {ok = true, data = strings.repeat("a", REMOTE_DATA_MAX + 1, context.temp_allocator)})
+	testing.expect(t, !big.ok && strings.contains(big.data, "too_large"), "too large: refused")
+	// browser_tabs' list: its ids as that machine has them
+	tabs := remote_result(3, typeid_of(Browser_Tabs), {ok = true, data = fmt.tprintf(`{{"tabs":[{{"tab_id":%d,"session":%d,"url":"u"}}]}}`, page, sid)})
+	testing.expect_value(t, json_path(tabs.data, "tabs.0.tab_id"), "12")
+	testing.expect_value(t, json_path(tabs.data, "tabs.0.session"), "9")
+	// what the window saw of its page goes to it, its tab id unpacked; nothing changes here
+	r := run_command(Browser_Update{tab_id = page, what = {.Url, .Title}, url = "https://x.test/b", title = "B"}, {kind = .Tab_Host})
+	testing.expect(t, r.ok, "taken")
+	testing.expect_value(t, json_path(rt_last_text(), "type"), "tab_host.event")
+	testing.expect_value(t, json_path(rt_last_text(), "command.browser_update.tab_id"), "12")
+	// the link goes: what waited for it goes too
+	call(`{"browser_read":{"tab_id":12}}`)
+	testing.expect_value(t, machine_browser_waiting(), 2)
+	machine_route_down(3)
+	testing.expect_value(t, machine_browser_waiting(), 0)
+}
+
+// The window's finished, as its link would hand it over.
+@(private = "file")
+tab_host_finished_from_window :: proc(text: string) {
+	v, _ := jg.parse_string(text, .JSON, true, context.temp_allocator)
+	tab_host_finished_msg(v.(json.Object), text)
+}
+
+// The other core's side: a screenshot from its hub comes as bytes, kept in its own shots dir.
+@(test)
+hub_shot_kept :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	rt_begin()
+	defer rt_end_test()
+	window_link_for_test().hub = true
+	defer window_link_for_test().hub = false
+	png := "\x89PNG\r\n\x1a\nrest"
+	b64 := base64.encode(transmute([]u8)png, allocator = context.temp_allocator)
+	r := hub_shot_keep({ok = true, data = fmt.tprintf(`{{"png_base64":"%s","w":3,"path":"/etc/passwd","h":4}}`, b64)})
+	path := json_path(r.data, "path")
+	testing.expect(t, r.ok && strings.has_prefix(path, app_shots_dir(context.temp_allocator)), "written to its own shots dir")
+	testing.expect(t, !strings.contains(r.data, "png_base64") && json_path(r.data, "w") == "3" && json_path(r.data, "h") == "4", "the rest kept, the bytes gone")
+	got, rerr := os.read_entire_file(path, context.temp_allocator)
+	testing.expect(t, rerr == nil && string(got) == png, "the bytes")
+	os.remove(path)
+	bad := hub_shot_keep({ok = true, data = `{"png_base64":"bm90IGEgcG5n"}`})
+	testing.expect(t, !bad.ok, "not a PNG: refused")
 }

@@ -37,12 +37,14 @@ package core
 // session other than its own tab's (Browser_Popup_Open takes the opener's).
 
 import "base:runtime"
+import "core:encoding/base64"
 import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
 import "core:reflect"
 import "core:strings"
+import "core:sys/posix"
 import "core:time"
 import jg "../jsonguard"
 
@@ -53,6 +55,10 @@ TAB_HOST_COMMANDS := [?]typeid {
 	App_Update, // an app tab's process started or exited
 	App_Call_Done, // an app screenshot worker's answer
 }
+
+// What a hub (another machine's core, this core's window: §10.4 M6-D) may report of this core's
+// pages: what its window's CEF saw. Never a popup (its window opens none for them) or an app's.
+HUB_TAB_HOST_COMMANDS := [?]typeid{Browser_Update}
 
 TAB_HOST_CALL_WAIT :: 10 * time.Second // a call the window has not answered by then: timeout
 TAB_HOST_GRACE :: 10 * time.Second // past a pending request's own timeout: the core gives up on it
@@ -200,11 +206,15 @@ tab_host_data_private :: proc(cmd: Command) -> bool {
 // (request_id). Main thread (window_link.odin).
 tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 	heap := runtime.heap_allocator()
+	if machine_tab_host_finished(obj, text) do return // one of another machine's calls (machine_browser.odin)
 	r, rerr := tab_host_result_read(obj, text)
 	if rerr != "" {
 		fmt.eprintln("Deckhand: a finished from the window refused:", rerr)
 		return
 	}
+	// this core's window is another machine's core (the hub): a screenshot comes as bytes, kept
+	// here in this core's own shots dir
+	if window_link_hub() && strings.contains(r.data, `"png_base64"`) do r = hub_shot_keep(r)
 	private := bool(obj["private"].(json.Boolean) or_else false)
 	id := string(obj["id"].(json.String) or_else "")
 	if id != "" {
@@ -275,6 +285,7 @@ tab_host_finished_msg :: proc(obj: json.Object, text: string) {
 
 // Ends the calls and requests past their deadline (core_tick).
 tab_host_tick :: proc() {
+	machine_browser_tick() // another machine's calls (machine_browser.odin)
 	if len(host.waits) == 0 do return
 	now := time.tick_now()
 	for i := len(host.waits) - 1; i >= 0; i -= 1 {
@@ -289,6 +300,7 @@ tab_host_tick :: proc() {
 // The window went (window_link.odin's core_detach_window): what it still owed ends with no_window.
 tab_host_detached :: proc() {
 	heap := runtime.heap_allocator()
+	machine_browser_detached() // what the window owed other machines (machine_browser.odin)
 	for w in host.waits {
 		if w.request_id != 0 && !w.ended do emit_event(Finished_Event{request_id = w.request_id, result = {error = "the window went away before it answered", data = `{"code":"no_window"}`}})
 		host_wait_free(w)
@@ -452,7 +464,7 @@ command_variant_read :: proc(v: json.Value, only: []typeid) -> (cmd: Command, er
 	return nil, "empty"
 }
 
-@(private = "file")
+@(private)
 tab_host_result_read :: proc(obj: json.Object, text: string) -> (r: Result, err: string) {
 	ro, ok := obj["result"].(json.Object)
 	if !ok do return {}, "no result"
@@ -1222,4 +1234,53 @@ browser_any_command_tab :: proc(cmd: Command) -> u64 {
 	if t := browser_command_tab(cmd); t != 0 do return t
 	if t := browser_agent_command_tab(cmd); t != 0 do return t
 	return browser_act_command_tab(cmd)
+}
+
+// ---- a hub's screenshots (§10.4 M6-D) ----
+
+HUB_SHOTS_KEPT :: 24 // the hub's screenshots kept in the shots dir (older ones go)
+
+@(private = "file")
+hub_shots: u64
+
+// A screenshot the hub's window made of one of this core's pages comes back as bytes (png_base64:
+// the hub never names a file of its own, and this core reads none of its): written to this core's
+// own shots dir, 0600; the answer then names that file, as a window's own does.
+hub_shot_keep :: proc(r: Result) -> Result {
+	members, ok := json_members_raw(strings.trim_space(r.data))
+	if !ok do return {error = "the screenshot came back unreadable", data = `{"code":"bad_answer"}`}
+	png: []u8
+	rest := strings.builder_make(context.temp_allocator)
+	for m in members {
+		if m.key == "png_base64" {
+			v, err := jg.parse_string(m.raw, .JSON, false, context.temp_allocator)
+			s, is := v.(json.String)
+			if err != nil || !is || len(s) > REMOTE_DATA_MAX do return {error = "the screenshot came back unreadable", data = `{"code":"bad_answer"}`}
+			derr: base64.Error
+			png, derr = base64.decode(s, allocator = context.temp_allocator)
+			if derr != nil do return {error = "the screenshot came back unreadable", data = `{"code":"bad_answer"}`}
+			continue
+		}
+		if m.key == "path" do continue
+		strings.write_byte(&rest, ',')
+		json_quote(&rest, m.key)
+		strings.write_byte(&rest, ':')
+		strings.write_string(&rest, m.raw)
+	}
+	if len(png) > REMOTE_SHOT_MAX do return {error = "the screenshot is too large", data = `{"code":"too_large"}`}
+	if len(png) < 8 || string(png[:8]) != "\x89PNG\r\n\x1a\n" do return {error = "the screenshot came back unreadable", data = `{"code":"bad_answer"}`}
+	dir := app_shots_dir(context.temp_allocator)
+	os.make_directory_all(dir)
+	hub_shots += 1
+	path := fmt.tprintf("%s/hub-%d-%d.png", dir, posix.getpid(), hub_shots)
+	if !file_write_private(path, png) do return {error = "the screenshot could not be written", data = `{"code":"write_failed"}`}
+	if hub_shots > HUB_SHOTS_KEPT do posix.unlink(strings.clone_to_cstring(fmt.tprintf("%s/hub-%d-%d.png", dir, posix.getpid(), hub_shots - HUB_SHOTS_KEPT), context.temp_allocator))
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"path":`)
+	json_quote(&b, path)
+	strings.write_string(&b, strings.to_string(rest))
+	strings.write_byte(&b, '}')
+	out := r
+	out.data = strings.to_string(b)
+	return out
 }

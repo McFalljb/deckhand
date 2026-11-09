@@ -25,7 +25,11 @@
 //    leaves that to on_before_popup, which refuses them as before (blocked_popup) and Deckhand
 //    shows its bar with Open;
 //  - native file choosers (dialog handler): cancelled while an agent's action runs on the tab
-//    (callbacks.file_dialog; the agent hears use_browser_upload), the default panel otherwise.
+//    (callbacks.file_dialog; the agent hears use_browser_upload), the default panel otherwise;
+//  - another machine's pages (§8.3 P7, §10.4 M6-D): each machine's own request context (its own
+//    in-memory storage: none of this Mac's cookies or logins), every request checked before it
+//    goes, redirects and workers' included (callbacks.net, off the IO thread: it may look the
+//    name up); no downloads, permissions, file choosers or popups.
 
 #include "include/capi/cef_context_menu_handler_capi.h"
 #include "include/capi/cef_dialog_handler_capi.h"
@@ -100,6 +104,9 @@ static int pol_slot(cef_browser_t* b) {
     RELEASE(b);
     return i;
 }
+
+// Slot i holds another machine's page (M6-D).
+static int pol_remote(int i) { return i >= 1 && i <= MAX_BROWSERS && DH_MACHINE(slots[i].tab_id) != 0; }
 
 // ---- cursor, tooltip ----
 
@@ -272,7 +279,7 @@ void dh_cef_zoom_set(int i, double level) {
 // ---- downloads: Deckhand picks the file; progress comes back ----
 
 static int CEF_CALLBACK pol_can_download(cef_download_handler_t* self, cef_browser_t* b, const cef_string_t* url, const cef_string_t* method) {
-    if (b) RELEASE(b);
+    if (pol_remote(pol_slot(b))) return 0; // another machine's page writes nothing here
     // Chromium asks here for downloads a page starts by script too (no user gesture known
     // here): Deckhand decides in on_before_download (download_policy: the user's own click in
     // the tab just now, or a bar that asks)
@@ -411,6 +418,10 @@ static int pol_perm_busy(int i) { return pol_prompt[i] || pol_media[i]; }
 static int CEF_CALLBACK pol_on_prompt(cef_permission_handler_t* self, cef_browser_t* b, uint64_t prompt_id, const cef_string_t* origin,
                                       uint32_t perms, cef_permission_prompt_callback_t* callback) {
     int i = pol_slot(b);
+    if (pol_remote(i)) { // another machine's page: no permission here, not even asked
+        if (callback) RELEASE(callback);
+        return 0;
+    }
     // Chromium's own "multiple automatic downloads" question: granted here, as Deckhand asks
     // per download itself (download_take: one per user gesture, otherwise its bar)
     if (perms == CEF_PERMISSION_TYPE_MULTIPLE_DOWNLOADS && callback) {
@@ -449,8 +460,9 @@ static int CEF_CALLBACK pol_on_media(cef_permission_handler_t* self, cef_browser
     int i = pol_slot(b);
     if (f) RELEASE(f);
     uint32_t cam_mic = CEF_MEDIA_PERMISSION_DEVICE_AUDIO_CAPTURE | CEF_MEDIA_PERMISSION_DEVICE_VIDEO_CAPTURE;
-    // the camera and the microphone only (never the screen); one at a time
-    if (!i || !pcb.permission || slots[i].closing || !perms || (perms & ~cam_mic) || pol_perm_busy(i) || !callback) {
+    // the camera and the microphone only (never the screen); one at a time; never for another
+    // machine's page
+    if (!i || pol_remote(i) || !pcb.permission || slots[i].closing || !perms || (perms & ~cam_mic) || pol_perm_busy(i) || !callback) {
         if (callback) RELEASE(callback);
         return 0; // Alloy's default: denied
     }
@@ -510,7 +522,7 @@ static int CEF_CALLBACK pol_on_file_dialog(cef_dialog_handler_t* self, cef_brows
                                            cef_string_list_t accept_extensions, cef_string_list_t accept_descriptions,
                                            cef_file_dialog_callback_t* callback) {
     int i = pol_slot(b);
-    if (i && pcb.file_dialog && pcb.file_dialog(i)) {
+    if (pol_remote(i) || (i && pcb.file_dialog && pcb.file_dialog(i))) { // another machine's page reads no file here
         if (callback) {
             callback->cancel(callback);
             RELEASE(callback);
@@ -574,6 +586,159 @@ void dh_cef_devtools_close(int i) {
 
 // Test mode only (browser_polish.odin's page_crash): the renderer dies as a crash would.
 void dh_cef_test_crash(int i) { dh_cef_navigate(i, "chrome://crash"); }
+
+// ---- another machine's pages (§8.3 P7, §10.4 M6-D) ----
+//
+// Each machine gets a request context of its own (in memory: none of this Mac's profile, cookies
+// or logins), whose handler sees every request of its pages before it goes, a service worker's
+// too. A request goes on only if callbacks.net says so (src/browser.odin: http, https, ws, wss to
+// a public address, or this Mac's loopback on a port the user forwarded from that machine; a name
+// is looked up first). Its answer may take a lookup, so it runs on a thread of its own and the
+// request waits (RV_CONTINUE_ASYNC). A redirect is checked again: on_resource_redirect sends a
+// refused one nowhere, and the redirected request comes through on_before_resource_load too.
+
+#define REMOTE_CONTEXTS 32
+#define REMOTE_URL_MAX 8192
+typedef struct {
+    cef_request_context_handler_t h; // first: CEF's pointer is ours
+    cef_resource_request_handler_t r;
+    uint64_t machine;
+    cef_request_context_t* ctx; // our reference
+} Remote_Ctx;
+static Remote_Ctx remote_ctx[REMOTE_CONTEXTS];
+
+static uint64_t remote_machine_of_r(cef_resource_request_handler_t* self) {
+    for (int k = 0; k < REMOTE_CONTEXTS; k++)
+        if (&remote_ctx[k].r == self) return remote_ctx[k].machine;
+    return 0;
+}
+
+static char* remote_url_utf8(cef_request_t* req) {
+    cef_string_userfree_t u = req ? req->get_url(req) : NULL;
+    char* out = u ? utf8_of(u) : NULL;
+    if (u) p_cef_string_userfree_utf16_free(u);
+    return out;
+}
+
+// callbacks.net's answer, or no (none, too long, the scheme's own test fixtures aside).
+static int remote_allowed(uint64_t machine, const char* url) {
+    if (!machine || !url || strlen(url) > REMOTE_URL_MAX || !cb.net) return 0;
+#ifndef DH_RELEASE
+    if (test_root[0] && strncmp(url, "deckhand-test://", 16) == 0) return 1; // test mode's fixtures (no network)
+#endif
+    return cb.net(machine, url, 1) == 1;
+}
+
+typedef struct {
+    cef_callback_t* callback;
+    uint64_t machine;
+    char* url;
+} Remote_Check;
+
+static void* remote_check_run(void* arg) {
+    Remote_Check* c = arg;
+    int ok = remote_allowed(c->machine, c->url);
+    if (!ok) fprintf(stderr, "Deckhand cef: machine %llu: a request refused (this Mac's network)\n", (unsigned long long)c->machine);
+    if (ok) c->callback->cont(c->callback);
+    else c->callback->cancel(c->callback);
+    RELEASE(c->callback);
+    free(c->url);
+    free(c);
+    return NULL;
+}
+
+static cef_return_value_t CEF_CALLBACK remote_before_load(cef_resource_request_handler_t* self, cef_browser_t* b, cef_frame_t* f, cef_request_t* req,
+                                                          cef_callback_t* callback) {
+    if (b) RELEASE(b);
+    if (f) RELEASE(f);
+    char* url = remote_url_utf8(req);
+    if (req) RELEASE(req);
+    uint64_t machine = remote_machine_of_r(self);
+    Remote_Check* c = calloc(1, sizeof *c);
+    pthread_t t;
+    pthread_attr_t at;
+    if (!url || !machine || !callback || !c || pthread_attr_init(&at) != 0) goto refuse;
+    pthread_attr_setdetachstate(&at, PTHREAD_CREATE_DETACHED);
+    *c = (Remote_Check){callback, machine, url};
+    if (pthread_create(&t, &at, remote_check_run, c) != 0) {
+        pthread_attr_destroy(&at);
+        goto refuse;
+    }
+    pthread_attr_destroy(&at);
+    return RV_CONTINUE_ASYNC; // the thread continues or cancels it (and releases callback)
+refuse:
+    free(c);
+    free(url);
+    if (callback) RELEASE(callback);
+    return RV_CANCEL;
+}
+
+// A redirect to where the page may not go (no lookup here: on the IO thread) goes nowhere; the
+// redirected request is checked in full as it starts (remote_before_load).
+static void CEF_CALLBACK remote_redirect(cef_resource_request_handler_t* self, cef_browser_t* b, cef_frame_t* f, cef_request_t* req,
+                                         cef_response_t* resp, cef_string_t* new_url) {
+    if (b) RELEASE(b);
+    if (f) RELEASE(f);
+    if (req) RELEASE(req);
+    if (resp) RELEASE(resp);
+    if (!new_url) return;
+    char* u = utf8_of(new_url);
+    uint64_t machine = remote_machine_of_r(self);
+    // a literal host or a scheme it may never reach: refused now (a name waits for its lookup)
+    int literal_refused = !u || !cb.net || strlen(u) > REMOTE_URL_MAX || cb.net(machine, u, 0) == 0;
+#ifndef DH_RELEASE
+    if (u && test_root[0] && strncmp(u, "deckhand-test://", 16) == 0) literal_refused = 0;
+#endif
+    free(u);
+    if (literal_refused) {
+        fprintf(stderr, "Deckhand cef: machine %llu: a redirect refused (this Mac's network)\n", (unsigned long long)machine);
+        p_cef_string_utf16_clear(new_url);
+        cef_string_t blocked = str16("about:blank#blocked");
+        *new_url = blocked; // CEF takes it
+    }
+}
+
+static cef_resource_request_handler_t* CEF_CALLBACK remote_get_rrh(cef_request_context_handler_t* self, cef_browser_t* b, cef_frame_t* f, cef_request_t* req,
+                                                                   int is_navigation, int is_download, const cef_string_t* initiator, int* disable_default) {
+    if (b) RELEASE(b);
+    if (f) RELEASE(f);
+    if (req) RELEASE(req);
+    return &((Remote_Ctx*)self)->r; // every request of its pages (static: no reference to count)
+}
+
+// Machine machine's request context (made the first time; kept until quit). NULL: none.
+static cef_request_context_t* remote_context(uint64_t machine) {
+    int free_k = -1;
+    for (int k = 0; k < REMOTE_CONTEXTS; k++) {
+        if (remote_ctx[k].ctx && remote_ctx[k].machine == machine) return remote_ctx[k].ctx;
+        if (!remote_ctx[k].ctx && free_k < 0) free_k = k;
+    }
+    if (free_k < 0 || !cb.net) return NULL;
+    Remote_Ctx* e = &remote_ctx[free_k];
+    INIT_BASE(e->h);
+    e->h.get_resource_request_handler = remote_get_rrh;
+    INIT_BASE(e->r);
+    e->r.on_before_resource_load = remote_before_load;
+    e->r.on_resource_redirect = remote_redirect;
+    e->machine = machine;
+    cef_request_context_settings_t rs;
+    memset(&rs, 0, sizeof rs);
+    rs.size = sizeof rs; // cache_path empty: in memory, nothing of this Mac's profile
+    e->ctx = p_cef_request_context_create_context(&rs, &e->h);
+    if (!e->ctx) {
+        say(@"another machine's request context could not be made");
+        return NULL;
+    }
+#ifndef DH_RELEASE
+    if (test_root[0]) { // test mode's fixtures there too
+        cef_string_t n = str16("deckhand-test"), d = str16("");
+        e->ctx->register_scheme_handler_factory(e->ctx, &n, &d, &test_factory);
+        p_cef_string_utf16_clear(&n);
+        p_cef_string_utf16_clear(&d);
+    }
+#endif
+    return e->ctx;
+}
 
 // ---- wiring (dh_cef_start, before cef_initialize) ----
 

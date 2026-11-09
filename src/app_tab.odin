@@ -26,6 +26,7 @@ package main
 import "base:runtime"
 import "core:c"
 import "core:crypto"
+import "core:encoding/base64"
 import "core:encoding/json"
 import "core"
 import jg "jsonguard"
@@ -1133,6 +1134,7 @@ Shot_Job :: struct {
 	pixels:  []u8, // BGRA, w*h*4, owned
 	w, h:    int,
 	meta:    string, // owned: the reply's other fields (seq, tick, scale, rect)
+	inline:  bool, // another machine's page (M6-D): the PNG goes back in the answer (png_base64), no file here
 }
 
 // Copies the frame on show (the slot Deckhand holds until a newer frame
@@ -1168,7 +1170,7 @@ app_shot_now :: proc(tab_id: u64, a: ^App_Proc, rect: core.App_Rect, has_rect: b
 // finishing request_id with {path, w, h, bytes, META}: the slot is copied here (main thread,
 // a memcpy of at most the frame), a worker encodes and writes it. App tabs' app_screenshot and
 // browser tabs' browser_screenshot (browser_agent.odin); N counts the tab's shots.
-frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, meta: string, request_id: u64) -> core.Result {
+frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, meta: string, request_id: u64, inline := false) -> core.Result {
 	// each one being written holds a copy of the frame (also after its request
 	// timed out or its tab closed): a few at a time
 	if sync.atomic_load(&shots_running) >= APP_SHOTS_IN_FLIGHT do return {error = "screenshots are still being written; try again", data = `{"code":"busy"}`}
@@ -1191,8 +1193,9 @@ frame_shot :: proc(tab_id: u64, gen: u32, slot: int, x, y, w, h: int, n: u64, me
 		w      = w,
 		h      = h,
 		meta   = strings.clone(meta, ha),
+		inline = inline,
 	}
-	if n > APP_SHOTS_KEPT do job.old = fmt.aprintf("%s/%d-%d.png", dir, tab_id, n - APP_SHOTS_KEPT, allocator = ha)
+	if n > APP_SHOTS_KEPT && !inline do job.old = fmt.aprintf("%s/%d-%d.png", dir, tab_id, n - APP_SHOTS_KEPT, allocator = ha)
 	pending[strings.clone(wire)] = {tab_id = tab_id, request_id = request_id, type = strings.clone(APP_SHOT_TYPE), deadline = time.tick_add(time.tick_now(), APP_SHOT_TIMEOUT)}
 	sync.atomic_add(&shots_running, 1)
 	if thread.create_and_start_with_poly_data(job, shot_write, self_cleanup = true) == nil {
@@ -1236,7 +1239,21 @@ shot_write :: proc(j: ^Shot_Job) {
 	ok := stbi.write_png_to_func(sink, &png, c.int(j.w), c.int(j.h), 4, raw_data(p), c.int(j.w * 4)) != 0
 	err := ""
 	if !ok do err = "the PNG could not be encoded"
-	else {
+	else if j.inline {
+		// another machine's page: its bytes go back to its core, which keeps them (no file here)
+		if len(png) > core.REMOTE_SHOT_MAX {
+			err = "the screenshot is larger than another machine may get (8 MiB): ask for a rect"
+		} else {
+			b := strings.builder_make(context.temp_allocator)
+			strings.write_string(&b, `{"png_base64":"`)
+			strings.write_string(&b, base64.encode(png[:], allocator = context.temp_allocator))
+			fmt.sbprintf(&b, `","w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
+			done := core.App_Call_Done{tab_id = j.tab_id, wire = j.wire, ok = true, from_worker = true, data = strings.to_string(b)}
+			tab_host_report(done)
+			sync.atomic_sub(&shots_running, 1)
+			return
+		}
+	} else {
 		tmp := strings.concatenate({j.path, ".tmp"}, context.temp_allocator)
 		fd := posix.open(strings.clone_to_cstring(tmp, context.temp_allocator), {.WRONLY, .CREAT, .TRUNC, .CLOEXEC}, {.IRUSR, .IWUSR})
 		wrote := fd >= 0 && posix.write(fd, raw_data(png), uint(len(png))) == len(png)
@@ -1254,7 +1271,7 @@ shot_write :: proc(j: ^Shot_Job) {
 		core.json_quote(&b, j.path)
 		fmt.sbprintf(&b, `,"w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
 		done.data = strings.to_string(b)
-	} else do done.code = "write_failed"
+	} else do done.code = j.inline && ok ? "too_large" : "write_failed"
 	tab_host_report(done) // a worker thread: queued on the link (tabhost_link.odin)
 	sync.atomic_sub(&shots_running, 1)
 }

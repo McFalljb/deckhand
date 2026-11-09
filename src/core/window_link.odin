@@ -957,9 +957,11 @@ link_message :: proc(text: string) -> (command: bool) {
 	id := string(obj["id"].(json.String) or_else "")
 	now := bool(obj["now"].(json.Boolean) or_else false)
 	if link.hub do switch type {
-	case "window.facts", "window.tab_facts", "window.command", "script.core", "tab_host.event", "finished", "window.reply":
-		// a window's own (its facts, the internal caller, test mode, the tab_host caller, a call's
-		// answer, a request's reply): never another machine's core's
+	case "window.facts", "window.tab_facts", "window.command", "script.core", "window.reply":
+		// a window's own (its facts, the internal caller, test mode, a request's reply): never
+		// another machine's core's. Its tab_host.event (a page's report, Browser_Update only) and
+		// finished (a call's answer: this core's browser tabs live in its window, §10.4 M6-D) are
+		// taken: only the calls this core sent wait for an answer (tabhost_route.odin)
 		fmt.eprintln("Deckhand: a hub sent", type, "(refused)")
 		link_reply_now(id, fail(fmt.tprintf("%s is a window's, not a hub's", type)), 0)
 		return
@@ -1047,8 +1049,9 @@ link_message :: proc(text: string) -> (command: bool) {
 		link_run(cmd, {kind = .Internal}, id, now, "")
 	case "tab_host.event":
 		command = true
-		// a page's, an app's or a window worker's report: the tab_host caller, never ui
-		cmd, err := command_variant_read(obj["command"], TAB_HOST_COMMANDS[:])
+		// a page's, an app's or a window worker's report: the tab_host caller, never ui; a hub's:
+		// what its window saw of one of this core's pages, nothing else
+		cmd, err := command_variant_read(obj["command"], link.hub ? HUB_TAB_HOST_COMMANDS[:] : TAB_HOST_COMMANDS[:])
 		if err != "" {
 			fmt.eprintln("Deckhand: a tab_host.event refused:", err)
 			link_reply_now(id, fail(fmt.tprintf("tab_host.event: %s", err)), 0)

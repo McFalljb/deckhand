@@ -84,6 +84,21 @@ Machine_Remove :: struct {
 Machine_Connect :: struct {
 	no: u64,
 }
+// Forward a port from a machine (§13 Q4, §10.4 M6-D): its localhost:port reaches this Mac's
+// 127.0.0.1 (port, or the next free one) through the link's ssh, and that machine's pages may then
+// open it. User-only: the bar's Forward (a page there asked for it), or by hand. confirm: the
+// bar's token (its question goes).
+Machine_Forward :: struct {
+	no:      u64,
+	port:    int,
+	confirm: string,
+}
+
+// A port forwarded from a machine: its localhost:remote is this Mac's 127.0.0.1:local.
+Forwarded_Port :: struct {
+	remote, local: u16,
+}
+
 // Log in… (needs_login): a shell tab here runs `ssh -M` to it in the foreground, so its password,
 // host key or 2FA prompt is answered in a real terminal; the link then uses that master. User-only.
 Machine_Login :: struct {
@@ -110,6 +125,7 @@ Machine_View :: struct {
 	os:      string, // "darwin", "linux" ("" = not known yet)
 	arch:    string,
 	error:   string, // why it is not online
+	ports:   []Forwarded_Port, // forwarded to this Mac while the link is up (Machine_Forward)
 }
 
 // One registry entry (machines.json).
@@ -436,6 +452,7 @@ Mach_Link :: struct {
 	mirror:    Machine_Mirror, // what of it is merged into State (machine_mirror.odin)
 	merged:    bool, // its entries are in State
 	stream:    Mirror_Stream, // its state stream's bounds (machine_mirror.odin)
+	ports:     [dynamic]Forwarded_Port, // forwarded while up (heap; the link's master holds them)
 }
 
 @(private = "file")
@@ -461,6 +478,7 @@ when TEST_HOOKS {
 		up:     map[u64]bool,
 		texts:  [dynamic]string, // heap
 		frames: [dynamic]Machine_Test_Frame,
+		ports:  map[u64]Forwarded_Port, // one forward per machine (machine_forward_local)
 	}
 }
 
@@ -530,10 +548,16 @@ machines_publish :: proc() {
 	a := virtual.arena_allocator(&mach.arena)
 	views := make([dynamic]Machine_View, 0, len(mach.links), a)
 	for l in mach.links {
-		append(&views, Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a)})
+		append(&views, Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), ports = ports_copy(l.ports[:], a)})
 	}
 	state.machines = views[:]
 	window_state_changed()
+
+	ports_copy :: proc(p: []Forwarded_Port, a: runtime.Allocator) -> []Forwarded_Port {
+		out := make([]Forwarded_Port, len(p), a)
+		copy(out, p)
+		return out
+	}
 }
 
 @(private = "file")
@@ -594,6 +618,10 @@ mlink_close :: proc(l: ^Mach_Link, wait := false) {
 	}
 	clear(&l.inbuf)
 	clear(&l.errbuf)
+	if len(l.ports) > 0 {
+		clear(&l.ports) // forwards are the link's: asked for again once it is up again
+		machines_publish()
+	}
 }
 
 // The link ended without a hub.taken: a status from what it came to, then a wait (backoff).
@@ -876,6 +904,8 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			machine_route_reply(l.no, string(f.payload))
 		case "term.attached", "term.scroll":
 			machine_term_json(l.no, kind, string(f.payload))
+		case "tab_host.call": // its browser tabs' pages, in this Mac's window (machine_browser.odin)
+			machine_tab_host_call(l.no, string(f.payload))
 		case "window.request", "confirmation.parked":
 			mach.dropped += 1
 			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, kind)
@@ -965,6 +995,7 @@ mlink_free :: proc(l: ^Mach_Link) {
 	for s in ([?]string{l.name, l.target, l.os, l.arch, l.core_path, l.via, l.version, l.error}) do delete(s, heap)
 	delete(l.inbuf)
 	delete(l.errbuf)
+	delete(l.ports)
 	free(l, heap)
 }
 
@@ -1056,4 +1087,132 @@ machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) 
 	// tried again soon after: the link uses the master once the login is through
 	if l.phase == .Idle do l.next_at, l.backoff = {}, {}
 	return {ok = true, created_id = id}, true
+}
+
+// ---- forwarded ports (§13 Q4, §10.4 M6-D) ----
+
+MACHINE_PORTS_MAX :: 16 // forwards per machine
+MACHINE_FORWARD_TRIES :: 50 // ports tried past the asked one when it is taken here
+MACHINE_FORWARD_WAIT :: 5 * time.Second // ssh -O forward answers at once (the master does it)
+
+// This Mac's port for machine no's localhost:port. False: not forwarded.
+machine_forward_local :: proc(no: u64, port: int) -> (u16, bool) {
+	when TEST_HOOKS do if machine_test_links.on {
+		p, has := machine_test_links.ports[no]
+		return p.local, has && int(p.remote) == port
+	}
+	l, _ := mlink_find(no)
+	if l == nil do return 0, false
+	for p in l.ports do if int(p.remote) == port do return p.local, true
+	return 0, false
+}
+
+// A page of machine no asked for its localhost:port: the bar asks the user to forward it (once
+// while the question waits). The question is this core's, its text its own: the machine named,
+// the port a number.
+machine_forward_ask :: proc(no: u64, port: int) {
+	if port <= 0 || port > 65535 do return
+	asks := 0
+	for p in state.pending_confirmations do if f, is := p.command.(Machine_Forward); is {
+		if f.no == no && f.port == port do return
+		asks += 1
+	}
+	if asks >= MACHINE_PORTS_MAX do return
+	summary := fmt.aprintf("Forward port %d from %s to this Mac? A page there wants its localhost:%d", port, machine_name(no), port, allocator = runtime.heap_allocator())
+	append(&state.pending_confirmations, Pending_Confirmation{token = new_uuid(), summary = summary, command = Machine_Forward{no = no, port = port}, class = .Open_Link, caller = {kind = .UI}})
+	window_confirmation_parked(summary, true)
+	window_state_changed()
+}
+
+// What forwards machine m's localhost:remote to this Mac's 127.0.0.1:local: the link's own master
+// (-S, -O forward), never through a shell; 127.0.0.1 named, so a GatewayPorts in the user's config
+// never opens it to the network.
+machine_forward_argv :: proc(m: Machine, run: string, local, remote: int) -> (argv: []string, why: string) {
+	if w := machine_target_error(m.target); w != "" do return nil, w
+	ctl := machine_ctl_path(run, m.no)
+	if len(ctl) > MACHINE_CTL_MAX do return nil, fmt.tprintf("ssh's control socket %s is longer than %d bytes", ctl, MACHINE_CTL_MAX)
+	out := make([]string, 9, context.temp_allocator)
+	out[0], out[1], out[2], out[3], out[4] = "ssh", "-S", ctl, "-O", "forward"
+	out[5], out[6] = "-L", fmt.tprintf("127.0.0.1:%d:localhost:%d", local, remote)
+	out[7], out[8] = "--", m.target
+	return out, ""
+}
+
+// Whether port is free here on 127.0.0.1 and ::1 (localhost reaches both).
+@(private = "file")
+machine_port_free :: proc(port: int) -> bool {
+	free4 :: proc(port: int) -> bool {
+		fd := posix.socket(.INET, .STREAM)
+		if fd < 0 do return false
+		defer posix.close(fd)
+		addr := posix.sockaddr_in{sin_family = .INET, sin_port = u16be(port), sin_addr = {s_addr = u32be(0x7f000001)}}
+		return posix.bind(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK
+	}
+	free6 :: proc(port: int) -> bool {
+		fd := posix.socket(.INET6, .STREAM)
+		if fd < 0 do return true // no IPv6 here: nothing listens there
+		defer posix.close(fd)
+		addr := posix.sockaddr_in6{sin6_family = .INET6, sin6_port = u16be(port)}
+		addr.sin6_addr.s6_addr[15] = 1
+		return posix.bind(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK
+	}
+	return free4(port) && free6(port)
+}
+
+machine_forward_apply :: proc(c: Machine_Forward) -> Result {
+	// the bar's question goes, whatever happens next
+	if c.confirm != "" do for p, i in state.pending_confirmations do if p.token == c.confirm {
+		ordered_remove(&state.pending_confirmations, i)
+		window_state_changed()
+		break
+	}
+	l, _ := mlink_find(c.no)
+	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
+	if c.port <= 0 || c.port > 65535 do return fail("port: 1 to 65535")
+	if l.phase != .Up do return fail(fmt.tprintf("%s is not online", l.name))
+	for p in l.ports do if int(p.remote) == c.port do return {ok = true, data = fmt.tprintf(`{{"port":%d}}`, p.local)}
+	if len(l.ports) >= MACHINE_PORTS_MAX do return fail(fmt.tprintf("%d ports are forwarded from %s already", MACHINE_PORTS_MAX, l.name))
+	local := c.port
+	if l.via == "" {
+		// a test build's via reaches a core on this Mac: its localhost is this Mac's already
+		local = 0
+		for p in c.port ..< min(c.port + MACHINE_FORWARD_TRIES, 65536) do if machine_port_free(p) {
+			local = p
+			break
+		}
+		if local == 0 do return fail(fmt.tprintf("no free port here near %d", c.port))
+		run, rwhy := sock_runtime_dir_why(context.temp_allocator)
+		if rwhy != "" do return fail(rwhy)
+		argv, why := machine_forward_argv(l.m, run, local, c.port)
+		if why != "" do return fail(why)
+		if err := machine_forward_run(argv); err != "" do return fail(fmt.tprintf("ssh could not forward port %d from %s: %s", c.port, l.name, err))
+	}
+	append(&l.ports, Forwarded_Port{remote = u16(c.port), local = u16(local)})
+	machines_publish()
+	window_toast(local == c.port ? fmt.tprintf("Port %d from %s is forwarded to this Mac", c.port, l.name) : fmt.tprintf("Port %d from %s is forwarded to this Mac's port %d", c.port, l.name, local))
+	return {ok = true, data = fmt.tprintf(`{{"port":%d}}`, local)}
+}
+
+// Runs ssh -O forward and waits for it (MACHINE_FORWARD_WAIT at most). "" = it worked; else
+// ssh's last line, cleaned.
+@(private = "file")
+machine_forward_run :: proc(argv: []string) -> string {
+	pid, fd, efd, ok := machine_spawn(argv)
+	if !ok do return "ssh did not start"
+	defer {posix.close(fd); posix.close(efd)}
+	deadline := time.tick_add(time.tick_now(), MACHINE_FORWARD_WAIT)
+	st: i32
+	for {
+		if posix.waitpid(pid, &st, {.NOHANG}) == pid do break
+		if time.tick_diff(deadline, time.tick_now()) > 0 {
+			posix.kill(-pid, .SIGKILL)
+			for posix.waitpid(pid, &st, {}) < 0 && posix.errno() == .EINTR {}
+			return "no answer from ssh"
+		}
+		time.sleep(10 * time.Millisecond)
+	}
+	if posix.WIFEXITED(st) && posix.WEXITSTATUS(st) == 0 do return ""
+	buf: [512]u8
+	n := posix.read(efd, raw_data(buf[:]), len(buf))
+	return text_clean(machine_last_line(n > 0 ? string(buf[:n]) : ""), MACHINE_ERROR_MAX)
 }

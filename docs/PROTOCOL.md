@@ -259,6 +259,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `machine_remove` | `no` | **user only**: forgets a machine (its link ends; nothing on it is touched) |
 | `machine_connect` | `no` | **user only**: connects now: Take back from that machine's own window or another hub (`taken`), or a retry without waiting for the backoff |
 | `machine_login` | `no` | **user only**: **Log in…** for a `needs_login` machine: a shell tab in an open session of this Mac (the one on screen, else the last shown) runs `/bin/sh -c 'exec ssh -S "$1" -M -o ControlPersist=600 -- "$2"'` with the link's control path and the target as arguments, so ssh's password, host key or code prompt is answered in a real terminal; the link then reuses that master. `created_id` = the tab. Refused for a `via` machine |
+| `machine_forward` | `no`, `port`, `confirm`? | **user only**: forwards that machine's `localhost:port` to this Mac over its link's own ssh master (`ssh -S … -O forward -L 127.0.0.1:<local>:localhost:<port>`; `<local>` is `port`, or the next free one here), so that machine's pages here may open it (see "Another machine's browser tabs" in §5a). The bar asks for it when one of its pages wants its `localhost:port` (`confirm`: the bar's token). Kept while the link is up (`machines.N.ports`, at most 16). `data`: `{"port":<local>}` |
 | `holder_replace` | `stop` | **user only**: answers `state.holder_ask` (a session holder from another build answered, and its code is not this build's: nothing was sent to it, no second holder started). `stop: true` stops it (SIGTERM, then SIGKILL after 3 s; only a process that runs a `deckhand-core`), removes its socket and starts a new holder: its sessions end. `false`: run on without a holder |
 | `core_handover` | `to` | **user only**, a separate core: hand every session over to another core process (§7.2 of the background-core design): `"current"`, the core `deckhand-core-serve install` made current (an update, or *Use this app's core*), or `"previous"` (*Use previous core*). The target is checked (`deckhand-core-serve check`: its signature and generation) first. Job runs get up to 2 min to end, then stop as `stopped (update)`. The window's connection then ends and it dials the new core |
 | `set_tidy_projects` | `on` | **user only**: the tidy Projects list (default on; `state.settings.tidy_projects`). Temp folders (`$TMPDIR` and its real path, `/tmp`, `/private/tmp`, `/var/folders`, `/private/var/folders`) and missing folders are hidden unless pinned or open (`show_hidden` shows them; filter text finds them); rows nest, sessions never move (every project lists only the sessions run in its own folder): git roots and worktrees (`.git`), projects added by hand (`add_project`, saved) and pinned ones are top-level; 2+ other projects that are not hidden, in a folder that is no project (not home or `/`), share a group row for that folder (`group_dir`); every other row, project or group row, goes under the row above it (whole path components), the deepest of a listed project that is shown (hidden ones are skipped; never home or `/`) and a group row's folder, else top-level: a project nested (`parent`) or in that group (`group_dir`), a group row under the project (`group_in`) or inside the other group row (`group_up`). Off: every folder a top-level row |
@@ -736,7 +737,8 @@ tabs too). Their ids are `{machine, id}` packed into one number: the machine's n
 `machines`' `no`) times 2^40 plus its own id (below 2^40), so every id stays below 2^53; this Mac's
 ids are unchanged (machine 0). Their `pi_session_id`s read `m<no>:<its id>`. While one of its
 projects is selected, `sessions` is that project's sessions as that machine lists them. Each is
-one pane holding its tabs; a tab keeps its kind, title and status only (no path, URL or account).
+one pane holding its tabs; a tab keeps its kind, title and status only (no path or account; a
+browser tab its `url`, `loading`, `can_back` and `can_forward`, for its toolbar here).
 They are another machine's text, cleaned (printable, no bidi controls, bounded) and capped (300
 projects, 64 open sessions of 32 tabs). They are never saved in `workspace.json`, and never carry
 that machine's confirmations. Their tabs carry `has_term`. `focus_session` and `select_project`
@@ -1267,8 +1269,9 @@ with that machine's token, and Cancel cancels it there.
 or `"control"`. It runs as that caller (`caller_may` and confirmations again, and the
 UI-only fields only for `ui`), so it can only lower `ui`. None, `none`, `internal`, `panel`,
 `script` (it may send a Claude tab's `claude.*` reports) or anything else is refused, as are a
-hub's `window.command`, `window.facts`, `window.tab_facts`, `script.core`, `tab_host.event`,
-`finished` and `window.reply` (a window's own) and test mode's `as`.
+hub's `window.command`, `window.facts`, `window.tab_facts`, `script.core` and `window.reply` (a
+window's own) and test mode's `as`. A hub's `tab_host.event` may be `browser_update` only (what its
+window saw of this core's page), and its `finished` ends only a `tab_host.call` this core sent it.
 
 **Terminals on another machine** are relayed, not parsed: this core keeps no terminal for them.
 The window's `term.attach` on such a tab gets a channel of this core's at once; the hub attaches it
@@ -1282,6 +1285,35 @@ local program's; a snapshot over 2 MiB or not the VT replay (a GHOSTSNP's decode
 another machine), a `RESIZE` outside the grid limits, `DATA` past twice the credit, more than 4
 snapshots a second, or a channel given twice ends that stream there, attached again 2 s later. An OSC 52 from it is its
 core's `window.request`, which is dropped (and Deckhand's terminals ignore OSC 52 anyway).
+
+**Another machine's browser tabs** (design §8.2, §8.3 P7, §10.4 M6-D; `src/core/machine_browser.odin`,
+`src/browser_remote.odin`, `src/native/cef_polish.inc`). Their pages live in this Mac's window:
+that core sends the hub the `tab_host.call` a window would get, and the hub routes it to its window
+with every id packed (an id that does not pack is refused, so it names only that machine's tabs)
+and its caller capped (`panel` bound to its packed tab, else `script` with none; `browser_tabs`
+without a tab must name a session). Only the browser commands an agent drives go: open, navigate,
+back, forward, reload, stop, zoom, find, dialog, tabs, read, screenshot, wait, console, network,
+click, type, press, scroll, select, hover, take over, stop, cancel. Anything else (`new_app_tab`, a
+Markdown or editor view, upload, download, permission, edit, external, devtools, popup, comments)
+answers `{"ok":false,"data":{"code":"not_on_remote"}}`. Each of its strings is UTF-8 and at most 16
+KiB. An address is http or https, never `file:`, `data:`, `javascript:`, `chrome:` or the like, and
+never this Mac's network: loopback, `0.0.0.0/8`, RFC 1918, link-local, CGNAT, multicast, IPv6 ULA,
+link-local and site-local, IPv4 inside IPv6, `localhost`, `*.localhost`, `*.local`, in any IPv4
+form (decimal, octal, hex, fewer parts): `{"code":"refused_address"}`. Its `localhost:P` (or
+`127.0.0.1:P`) is refused with `{"code":"needs_forward","port":P}`, and the bar asks *Forward port
+P from <machine> to this Mac?*; once the user forwards it (`machine_forward`), the page opens this
+Mac's end of it (`http://127.0.0.1:<local>/…`). The window's answer goes back as a `finished`
+under that core's ids (`created_id` and `browser_tabs`' ids unpacked; `data` over about 11 MiB
+refused as `too_large`). A screenshot comes back as bytes, `png_base64` (a PNG of at most 8 MiB),
+never a path of this Mac's; that core writes it to its own shots dir and answers its agent with
+that `path`. What the window sees of a page (`browser_update`) goes to that core as a
+`tab_host.event`. In CEF each machine's pages run in a request context of its own (in memory:
+none of this Mac's cookies or logins), with no downloads, permissions, file choosers, popups or
+script clipboard access, and every request, redirects and workers' included, is checked before it
+goes: the same rule, with the forwarded ports allowed and a host name looked up first (any private
+or loopback address, or none, refuses it). **What is left:** a name that resolves differently for
+Chromium a moment after that lookup (DNS rebinding); a page may still write the clipboard on a
+click, as any page can.
 
 Waits are bounded so the core never hangs on the window: a `window.request` that wants an answer
 waits at most 250 ms, then the core goes on as if no window were attached. A `tab_host.call` does

@@ -75,6 +75,7 @@ Browser :: struct {
 	first_paint: time.Duration, // from opened_at, CEF start included
 	buttons:     c.int, // mouse buttons held (CEF modifier flags)
 	opens:       int, // browsers created for this tab (tests: a page is not reopened behind your back)
+	seen_tab:    bool, // another machine's: its tab was in State (browser_remote_tick)
 	closed_by_page: bool, // window.close(): not reopened until Reload
 	lazy:        bool, // restored or unloaded: its page opens when it is shown (browser_page_plan)
 	waiting:     bool, // no CEF slot was free: opens when one frees (message says so)
@@ -146,6 +147,7 @@ browser_attach :: proc(tab_id: u64, url: string) -> ^Browser {
 browser_go :: proc(tab_id: u64, url: string) {
 	b := browsers[tab_id]
 	if b == nil do return
+	if !browser_remote_url_ok(tab_id, url) do return
 	delete(b.url)
 	b.url = strings.clone(url)
 	if b.cef != 0 do dh_cef_navigate(b.cef, strings.clone_to_cstring(url, context.temp_allocator))
@@ -204,10 +206,12 @@ cef_start :: proc() -> bool {
 		address = on_cef_address,
 		nav = on_cef_nav,
 		popup = on_cef_popup,
+		net = on_cef_net, // another machine's pages (browser_remote.odin)
 	}
 	// test mode never touches the network (SPIKE: the real policy for Chromium's
 	// Google services is open, see the report)
 	no_network: c.int = core.autotest_active || core.hook_env(.Cef_Offline) == "1" ? 1 : 0
+	if no_network == 1 && core.hook_env(.Cef_Loopback) == "1" do no_network = 2 // remote-browser.sh: its own loopback servers
 	t0 := time.tick_now()
 	ok := dh_cef_start(sg.mtl_device(), strings.clone_to_cstring(profile, context.temp_allocator), strings.clone_to_cstring(log_file, context.temp_allocator), shared, no_network, &cbs) == 1
 	cef_start_ms = time.duration_milliseconds(time.tick_since(t0))
@@ -454,6 +458,7 @@ on_cef_popup :: proc "c" (opener, slot: c.int, url: cstring, user_gesture, backg
 	context = core.app_context
 	ob := by_cef(opener)
 	if ob == nil do return 0
+	if core.id_machine(ob.tab_id) != 0 do return 0 // another machine's page opens no popups (M6-D)
 	s, _, _ := find_tab(ob.tab_id)
 	if s == nil do return 0
 	u := string(url)
@@ -547,6 +552,7 @@ release_input :: proc(b: ^Browser) {
 browser_tick :: proc() {
 	browser_url_check() // the URL field belongs to the tab it was opened on (browser_nav.odin)
 	if len(browsers) == 0 do return
+	browser_remote_tick() // another machine's pages: its forwarded ports, its closed tabs (browser_remote.odin)
 	now := time.tick_now()
 	for _, b in browsers do if core.tab_on_screen(b.tab_id) {
 		b.shown_at = now // the page plan's LRU: never an on-screen page's slot
@@ -623,6 +629,10 @@ browser_pages :: proc() {
 		b := list[i]
 		if !browser_chan(b) {
 			b.waiting, b.message = false, "The browser has no frame channel left (too many tabs)"
+			continue
+		}
+		if !browser_remote_url_ok(b.tab_id, b.url) {
+			b.waiting, b.message = false, "This address does not open from another machine"
 			continue
 		}
 		r := tab_rect(b.tab_id) // its pane's size (panes.odin)

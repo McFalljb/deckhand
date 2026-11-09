@@ -186,6 +186,15 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		if caller.kind == .UI do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))
 		return {}, false
 	}
+	if caller.kind == .Tab_Host {
+		// what the window reports of that machine's page goes to it; its own screenshot worker's
+		// answer is the window's (its request is this core's, machine_browser.odin)
+		#partial switch c in cmd {
+		case Browser_Update: return machine_browser_update(no, c), true
+		case App_Call_Done:  return {}, false
+		}
+		return fail("another machine's tabs report nothing else here"), true
+	}
 	if caller.kind != .UI do return fail("this is on another machine: only you can work in it from here for now"), true
 	if !machine_link_up(no) do return machine_offline(no), true
 	if len(route.forwards) >= ROUTE_FORWARDS_MAX do return fail("too many commands are waiting for other machines"), true
@@ -202,7 +211,7 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	return {ok = true, pending = true}, true
 }
 
-@(private = "file")
+@(private)
 machine_offline :: proc(no: u64) -> Result {
 	return {error = fmt.tprintf("%s is not connected", machine_name(no)), data = `{"code":"machine_offline"}`}
 }
@@ -496,6 +505,7 @@ machine_route_up :: proc(no: u64) {
 // here go; its terminals' window channels stay, to attach again when it is up. gone: the machine
 // itself went (removed, Machines over SSH off): its terminals close too.
 machine_route_down :: proc(no: u64, gone := false) {
+	machine_browser_down(no) // its pages' calls (machine_browser.odin)
 	for i := len(route.forwards) - 1; i >= 0; i -= 1 do if route.forwards[i].machine == no do forward_finish(i, machine_offline(no))
 	for i := len(route.proxies) - 1; i >= 0; i -= 1 do if route.proxies[i].machine == no do proxy_drop(i)
 	for i := len(route.relays) - 1; i >= 0; i -= 1 {

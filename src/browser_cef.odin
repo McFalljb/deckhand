@@ -20,6 +20,9 @@ Cef_Callbacks :: struct {
 	address: proc "c" (id: c.int, utf8: cstring), // the main frame's URL
 	nav:     proc "c" (id: c.int, loading, can_back, can_forward: c.int),
 	popup:   proc "c" (opener, slot: c.int, url: cstring, user_gesture, background: c.int) -> u64, // a tab for the popup (0 = refused)
+	// another machine's page may load url (1; 0 = refused); lookup 0: a name counts as allowed
+	// (browser_remote.odin). Any thread
+	net:     proc "c" (machine: u64, url: cstring, lookup: c.int) -> c.int,
 }
 
 // A CDP message from browser id: a method's result (msg_id > 0, method nil; ok: its "result",

@@ -1114,6 +1114,7 @@ confirm_pending :: proc(token: string) {
 		case core.Job_Delete:  cmd = core.Job_Delete{job = c.job, confirm = token}
 		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
 		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
+		case core.Machine_Forward: cmd = core.Machine_Forward{no = c.no, port = c.port, confirm = token} // a page of that machine asked (M6-D)
 		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
 		}
 		ui_do(cmd)

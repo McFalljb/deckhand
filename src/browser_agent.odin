@@ -1246,7 +1246,7 @@ shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (do
 	}
 	t.shots += 1
 	meta := fmt.tprintf(`"scale":%.2f,"rect":{{"x":%d,"y":%d,"w":%d,"h":%d}},"on_screen":%v`, g.scale, x, y, w, h, on_screen)
-	res := frame_shot(op.tab_id, g.gen, b.ring.shown_slot, x, y, w, h, t.shots, meta, op.request_id)
+	res := frame_shot(op.tab_id, g.gen, b.ring.shown_slot, x, y, w, h, t.shots, meta, op.request_id, inline = core.id_machine(op.tab_id) != 0)
 	if res.pending {
 		// frame_shot's worker finishes the request; this op is done
 		return true, res, false

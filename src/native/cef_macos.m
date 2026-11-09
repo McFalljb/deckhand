@@ -55,6 +55,7 @@
 #import <IOSurface/IOSurface.h>
 #import <objc/runtime.h>
 #include <dlfcn.h>
+#include <pthread.h>
 #include <mach-o/dyld.h>
 #include <mach-o/getsect.h>
 #include <mach/mach_vm.h>
@@ -77,7 +78,11 @@
 #include "include/capi/cef_load_handler_capi.h"
 #include "include/capi/cef_registration_capi.h"
 #include "include/capi/cef_render_handler_capi.h"
+#include "include/capi/cef_callback_capi.h"
 #include "include/capi/cef_request_capi.h"
+#include "include/capi/cef_request_context_capi.h"
+#include "include/capi/cef_request_context_handler_capi.h"
+#include "include/capi/cef_resource_request_handler_capi.h"
 #include "include/capi/cef_resource_handler_capi.h"
 #include "include/capi/cef_response_capi.h"
 #include "include/capi/cef_scheme_capi.h"
@@ -102,6 +107,10 @@ typedef struct {
     void (*address)(int id, const char* utf8);
     void (*nav)(int id, int loading, int can_back, int can_forward);
     uint64_t (*popup)(int opener, int slot, const char* url, int user_gesture, int background);
+    // another machine's page (§10.4 M6-D) may load url: 1 yes, 0 no. lookup 0: a name counts as
+    // allowed (it is looked up when its request starts). Any thread: cef_polish.inc calls it off
+    // CEF's IO thread when it looks names up
+    int (*net)(uint64_t machine, const char* url, int lookup);
 } dh_cef_callbacks;
 
 // ---- the framework's entry points (dlsym'd; prototypes from the headers) ----
@@ -117,7 +126,8 @@ typedef struct {
     X(cef_string_utf16_clear)              \
     X(cef_string_utf8_clear)               \
     X(cef_string_userfree_utf16_free)      \
-    X(cef_register_scheme_handler_factory)
+    X(cef_register_scheme_handler_factory) \
+    X(cef_request_context_create_context)
 #define DECL(name) static __typeof__(name)* p_##name;
 CEF_FNS(DECL)
 
@@ -163,6 +173,9 @@ typedef struct {
     double created_at, first_paint_at; // seconds (mach)
 } Slot;
 static Slot slots[MAX_BROWSERS + 1]; // index 0 unused: ids are 1..MAX
+// Another machine's tab: its number, from bits 40-52 of its id (src/core/machine_mirror.odin); 0: this Mac's.
+#define DH_MACHINE(tab_id) (((uint64_t)(tab_id) >> 40) & 0x1fff)
+static cef_request_context_t* remote_context(uint64_t machine); // cef_polish.inc
 static int creating; // slot being created (create_browser_sync calls back before it returns)
 
 static double now_s(void) {
@@ -310,7 +323,7 @@ static void disable_features(cef_command_line_t* cl, const char* features) {
     add_switch_value(cl, "disable-features", merged);
 }
 
-static int offline; // dh_cef_start: no network at all (test mode)
+static int offline; // dh_cef_start: no network at all (test mode); 2: but loopback (remote-browser.sh)
 
 // Chromium features that phone home, off (network policy, BROWSER.md).
 // Unknown names are ignored by Chromium: tests/scripts/browser-netpolicy.sh
@@ -374,7 +387,7 @@ static void CEF_CALLBACK on_before_cmdline(cef_app_t* self, const cef_string_t* 
         // (IP literals too), no QUIC: pages come from file:// only.
         add_switch_value(cl, "host-resolver-rules", "MAP * ~NOTFOUND");
         add_switch_value(cl, "proxy-server", "http://127.0.0.1:9");
-        add_switch_value(cl, "proxy-bypass-list", "<-loopback>");
+        if (offline != 2) add_switch_value(cl, "proxy-bypass-list", "<-loopback>"); // 2: the scene's own loopback servers
         add_switch(cl, "disable-quic");
     } else {
         // RLZ's ping host (also held off by rlz_ping_delay, browser.odin):
@@ -620,6 +633,7 @@ static int CEF_CALLBACK on_before_popup(cef_life_span_handler_t* self, cef_brows
     RELEASE(b);
     if (f) RELEASE(f);
     if (!opener || !cb.popup || shutting_down) return 1;
+    if (DH_MACHINE(slots[opener].tab_id)) return 1; // another machine's page opens no popups (M6-D)
     int i = free_slot();
     char* url = utf8_of(target_url);
     // no slot left: Deckhand still hears of it (refused), the page gets nothing
@@ -1095,9 +1109,16 @@ void dh_cef_pump_due(void) {
 int dh_cef_running(void) { return started == 1 && !shutting_down; }
 
 // A windowless browser for url, w x h logical px at scale. Returns its id
-// (1..8) or 0.
+// (1..8) or 0. Another machine's tab (its id packed with that machine's number, §10.4 M6-D) opens
+// in that machine's own request context (cef_polish.inc: its own in-memory storage, every request
+// checked), with no script access to the clipboard; never in the global one.
 int dh_cef_open(const char* url, int w, int h, float scale, uint64_t tab_id) {
     if (!dh_cef_running()) return 0;
+    cef_request_context_t* ctx = NULL;
+    if (DH_MACHINE(tab_id)) {
+        ctx = remote_context(DH_MACHINE(tab_id));
+        if (!ctx) return 0;
+    }
     int i = free_slot();
     if (!i) return 0;
     Slot* s = &slots[i];
@@ -1116,9 +1137,14 @@ int dh_cef_open(const char* url, int w, int h, float scale, uint64_t tab_id) {
     bs.size = sizeof bs;
     bs.windowless_frame_rate = 60;
     bs.background_color = 0xFFFFFFFF;
+    if (ctx) {
+        bs.javascript_access_clipboard = STATE_DISABLED;
+        bs.javascript_dom_paste = STATE_DISABLED;
+        ((cef_base_ref_counted_t*)ctx)->add_ref((cef_base_ref_counted_t*)ctx); // the call takes one reference; the table keeps its own
+    }
     cef_string_t u = str16(url);
     creating = i;
-    cef_browser_t* b = p_cef_browser_host_create_browser_sync(&wi, &client, &u, &bs, NULL, NULL);
+    cef_browser_t* b = p_cef_browser_host_create_browser_sync(&wi, &client, &u, &bs, NULL, ctx);
     creating = 0;
     p_cef_string_utf16_clear(&u);
     if (!b) {

@@ -68,6 +68,7 @@ Hook :: enum u8 {
 	Separate_Core, // 1: the window runs its core as another process (deckhand-core serve); 0: in process (main.odin)
 	Core_Handover, // self: the window hands the core it finds over to a new one of the same binary at its attach (client_core.odin)
 	Hub_Without_Sshd, // 1: the hub door skips its sshd check (window_sock.odin): the --via scenes run connect without ssh
+	Cef_Loopback, // 1: test mode's offline CEF still reaches loopback (remote-browser.sh's own servers)
 }
 
 when TEST_HOOKS {
@@ -106,6 +107,7 @@ when TEST_HOOKS {
 		.Separate_Core    = "DECKHAND_SEPARATE_CORE",
 		.Core_Handover    = "DECKHAND_CORE_HANDOVER",
 		.Hub_Without_Sshd = "DECKHAND_HUB_WITHOUT_SSHD",
+		.Cef_Loopback     = "DECKHAND_CEF_LOOPBACK",
 	}
 }
 

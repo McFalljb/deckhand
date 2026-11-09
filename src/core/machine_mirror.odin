@@ -16,11 +16,11 @@ package core
 // projects is selected here, that project's sessions. Nothing else: never its confirmations,
 // jobs, settings or panels. Another machine's State is untrusted: every string is cleaned
 // (text_clean: printable, no bidi controls, bounded), every list capped, an id that does not pack
-// is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
-// nothing this Mac's core could act on. They are never saved (persist.odin), never started here
-// (term_start refuses their tab ids), and a command naming one runs on that machine, not here
-// (machine_route.odin, M6-C), except focusing one and selecting one of its projects (this Mac's
-// view). A merge replaces that machine's entries whole; other machines' and this Mac's are not
+// is dropped, and a tab keeps only its kind (no paths or runtime; a browser tab its address and
+// history, for its toolbar: M6-D): the merged entries carry nothing this Mac's core could act on.
+// They are never saved (persist.odin), never started here (term_start refuses their tab ids),
+// and a command naming one runs on that machine, not here (machine_route.odin, M6-C), except
+// focusing one and selecting one of its projects (this Mac's view). A merge replaces that machine's entries whole; other machines' and this Mac's are not
 // touched.
 
 import "base:runtime"
@@ -40,6 +40,7 @@ MIRROR_TABS_MAX :: 32 // per open session
 MIRROR_LIST_MAX :: MAX_SESSIONS // the selected project's sessions
 MIRROR_TEXT_MAX :: 160 // names, titles, session ids (bytes)
 MIRROR_PATH_MAX :: 1024
+MIRROR_URL_MAX :: 2048 // a browser tab's address
 // What another machine's state stream may decode to: per message (state_read.odin's budget, far
 // below a window's own core's), and the bytes of its deltas since its last state.full. Past the
 // second, its deltas are left until a fresh state.full (asked for) replaces the replica. A full is at
@@ -194,7 +195,12 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			if len(ns.tabs) >= MIRROR_TABS_MAX do break
 			tid, tok := id_pack(no, tab.id)
 			if !tok do continue
-			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
+			kind := tab_kind_bare(tab.kind)
+			if bt, is := tab.kind.(Browser_Tab); is {
+				// its page lives in this Mac's window (M6-D): the toolbar shows its address and history
+				kind = Browser_Tab{url = mirror_text(bt.url, MIRROR_URL_MAX, heap), loading = bt.loading, can_back = bt.can_back, can_forward = bt.can_forward}
+			}
+			append(&ns.tabs, Tab{id = tid, machine = no, kind = kind, title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
 		}
 		if len(ns.tabs) == 0 { 	// an open session always has its main tab
 			wire_free(&ns, type_info_of(Open_Session), heap)

@@ -429,6 +429,9 @@ core/term_palette.odin the terminal's default colours per look and appearance (a
 core/pty.odin  PTY interface;  pty_posix.odin = forkpty (macOS, Linux); ConPTY later
 ghostty/       Odin bindings for the libghostty-vt calls used
 core/snapshot.odin terminal snapshots (meta JSON + GHOSTSNP, the VT fallback) and the screen hash
+core/state_wire.odin the window's state stream (state.full, state.delta by section; §5.8 of docs/plans/background-core.md);
+               core/state_read.odin decodes it into a State-shaped replica. The API is grow-only:
+               schema/released-v1.json (core/api_schema_test.odin writes build/api-schema-v1.json to refresh it)
 holderwire/    the session holder's wire codec (its own package; schema/released-holder.json)
 corewire/      the window/core framed wire (§5.1 of docs/plans/background-core.md) and the in-memory
                transport (its own package; golden vectors in tests/framed-wire/v1/)

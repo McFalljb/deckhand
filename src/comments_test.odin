@@ -624,7 +624,7 @@ comments_app_box_crop_at_click :: proc(t: ^testing.T) {
 	id, err := core.app_comment_add(app_tab.id, box.id, box.label, box.rect, "collect it", crop)
 	testing.expect_value(t, err, "")
 	_, cm, _ := core.comment_find(id)
-	testing.expect(t, cm != nil && cm.crop == crop)
+	testing.expect(t, cm != nil && cm.crop == core.fs_real(crop)) // kept by its resolved path
 	testing.expect(t, os.exists(crop))
 	// refused (not an app tab): its crop goes
 	crop2 := c_crop(32)

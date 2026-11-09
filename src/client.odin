@@ -140,9 +140,11 @@ client_internal :: proc(cmd: core.Command) {
 // replaced two frames ago.
 client_after_tick :: proc() {
 	if !client.attached do return
-	deferred_release(&client.deferred)
 	now := time.tick_now()
-	client.released = now
+	if client.busy <= 1 { // frame() on its own: not a frame a modal loop runs under an event or a menu
+		deferred_release(&client.deferred)
+		client.released = now
+	}
 	every := app.redraw ? SWEEP_MS : SWEEP_IDLE_MS
 	sweep := time.tick_diff(client.swept, now) >= time.Duration(every) * time.Millisecond
 	if sweep do client.swept = now

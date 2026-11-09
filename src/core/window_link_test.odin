@@ -242,11 +242,16 @@ window_link_refused_send :: proc(t: ^testing.T) {
 	state.selected_project = 3
 	state.version += 1
 	window_link_flush()
-	window_link_flush(sweep = true)
-	window_link_flush(sweep = true)
+	window_link_flush(sweep = true) // the full, too large as well
+	builds := window_link_for_test().full_builds
+	for _ in 0 ..< 100 do window_link_flush(sweep = true)
 	testing.expect_value(t, len(wl_frames), 0)
-	// it fits again: the whole state, not a delta
+	// round 2, finding 2: not built again on every flush while State is unchanged
+	testing.expect_value(t, window_link_for_test().full_builds, builds)
+	testing.expect(t, len(window_link_for_test().untracked) <= 64, "test mode's notes are capped")
+	// it fits again (State changed): the whole state, not a delta
 	link_max_payload = saved
+	window_state_changed()
 	window_link_flush()
 	if testing.expect_value(t, len(wl_frames), 1) do testing.expect_value(t, json_path(wl_frames[0], "type"), STATE_FULL)
 	for f in wl_frames do testing.expect_value(t, replica_apply(&replica, f), "")

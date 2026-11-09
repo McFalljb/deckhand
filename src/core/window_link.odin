@@ -86,6 +86,9 @@ Window_Link :: struct {
 	pumping:    int,
 	need_full:  bool, // a state message was refused: the next flush sends state.full
 	too_large_said: bool,
+	too_large:  bool, // the last state.full was over the frame limit, at State.version too_large_version
+	too_large_version: u64,
+	full_builds: int, // state.full texts built (tests)
 	untracked:  [dynamic]string, // test mode: writes no trigger announced (window_link_check; heap)
 }
 
@@ -197,6 +200,8 @@ window_link_toast :: proc(text: string, err: bool) -> bool {
 window_link_flush :: proc(sweep := false) {
 	if link == nil || !link.subscribed do return
 	link_free_replies()
+	// an over-limit state.full is built again only once State changed (not on every frame's sweep)
+	if link.need_full && link.too_large && !link.dirty && state.version == link.too_large_version do return
 	triggered := link.dirty || link.sent.version != state.version
 	if !triggered && !sweep && !link.need_full do return
 	when TEST_HOOKS {
@@ -204,6 +209,7 @@ window_link_flush :: proc(sweep := false) {
 	}
 	link.dirty = false
 	if link.need_full {
+		link.full_builds += 1
 		link_send_state(state_full_json(&state, &link.sent))
 		return
 	}
@@ -224,9 +230,11 @@ link_send_state :: proc(text: string) {
 			link.too_large_said = true
 		}
 		link.need_full = true
-		when TEST_HOOKS do append(&link.untracked, strings.clone("<state over the frame limit>", runtime.heap_allocator()))
+		link.too_large, link.too_large_version = true, state.version
+		when TEST_HOOKS do if len(link.untracked) < 64 do append(&link.untracked, strings.clone("<state over the frame limit>", runtime.heap_allocator()))
 		return
 	}
+	link.too_large = false
 	if !link_send(text) {
 		link.need_full = true
 		return
@@ -242,6 +250,8 @@ link_max_payload := cw.MAX_PAYLOAD
 // Writes the core makes outside commands with no version bump and no window_state_changed,
 // that the check lets through: each a path (section with "*" for ids, "[*]" for list positions)
 // and the site that makes it. This list is meant to shrink: give such a write a trigger instead.
+// The check is best-effort: triggers are not per section, so an untracked write that shares a
+// flush with any trigger is sent along with it and not flagged (per-section triggers: a follow-up).
 UNTRACKED_OK := [?]struct {
 	path, site: string,
 }{}

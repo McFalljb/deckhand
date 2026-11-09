@@ -46,7 +46,11 @@ platform_left_button :: proc() -> bool {return true}
 platform_clipboard_count :: proc() -> int {return 0}
 platform_clipboard_set_secret :: proc(text: string) -> int {return 0}
 platform_clipboard_clear_if :: proc(count: int) {}
-platform_run_later :: proc(p: proc()) {p()}
+platform_run_later :: proc(p: proc()) {
+	client.busy += 1 // as the darwin trampoline
+	defer client.busy -= 1
+	p()
+}
 test_beeps :: proc() -> int {return 0}
 test_panels :: proc() -> int {return 0}
 test_has_input_context :: proc() -> bool {return true}

@@ -74,3 +74,26 @@ client_deferred_bounded_while_hidden :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, most <= 2 * DEFERRED_MAX + 256, "retired blocks: %d at most", most)
 }
+
+// Round 2, finding 4: a frame inside something else busy (a modal loop under an event or a menu
+// action) does not free what the replica retired: only a frame on its own (busy <= 1) does.
+@(test)
+client_after_tick_waits_while_nested :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	saved := client
+	defer client = saved
+	client = {}
+	deferred_init(&client.deferred)
+	defer for r in client.deferred.retired do delete(r)
+	client.attached = true // no link: the flush does nothing
+	a := deferred_allocator(&client.deferred)
+	for _ in 0 ..< 3 do free(new(int, a), a)
+	client.busy = 2
+	client_after_tick()
+	client_after_tick()
+	testing.expect_value(t, deferred_count(&client.deferred), 3)
+	client.busy = 1
+	client_after_tick()
+	client_after_tick()
+	testing.expect_value(t, deferred_count(&client.deferred), 0)
+}

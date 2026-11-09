@@ -11,6 +11,7 @@ import "core:encoding/json"
 import "core:math"
 import os "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -221,6 +222,12 @@ app_call_done_file_only_in_shots_dir :: proc(t: ^testing.T) {
 	ours := strings.concatenate({shots, "/s961.png"}, context.temp_allocator)
 	testing.expect(t, os.write_entire_file(ours, transmute([]u8)string("x")) == nil, "written")
 	defer os.remove(ours)
+	// round 2, finding 3: a link in the folder is not followed, even to a shot of ours
+	lnk := strings.concatenate({shots, "/s962.png"}, context.temp_allocator)
+	posix.symlink(strings.clone_to_cstring(ours, context.temp_allocator), strings.clone_to_cstring(lnk, context.temp_allocator))
+	defer os.remove(lnk)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s962", ok = true, data = "{}", from_worker = true, file = lnk}, {kind = .Internal}, 0)
+	testing.expect(t, os.is_file(ours), "the link's target is left alone")
 	app_apply(core.App_Call_Done{tab_id = 7, wire = "s961", ok = true, data = "{}", from_worker = true, file = ours}, {kind = .Internal}, 0)
 	testing.expect(t, !os.is_file(ours), "a stale shot of ours is removed")
 }

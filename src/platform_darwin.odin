@@ -70,6 +70,8 @@ platform_run_later :: proc(p: proc()) {
 	dispatch_async_f(&dispatch_main_q, rawptr(p), proc "c" (ctx: rawptr) {
 		context = core.app_context
 		defer free_all(context.temp_allocator)
+		client.busy += 1 // as event(): the replica's retired blocks wait (client.odin)
+		defer client.busy -= 1
 		(proc())(ctx)()
 	})
 }

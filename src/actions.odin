@@ -712,6 +712,8 @@ action_by_id :: proc(id: string) -> ^Action {
 // Actions with a folder picker ask for the folder first (outside the event
 // handler: the picker is a modal loop).
 action_run :: proc(id: string, menu := "") {
+	client.busy += 1 // it may hold the replica across a drain (client_on_drain)
+	defer client.busy -= 1
 	a := action_by_id(id)
 	if a == nil do return
 	if id != "quit" && job_sheet_open() do return // modal: nothing behind it takes over (menubar.odin greys these)

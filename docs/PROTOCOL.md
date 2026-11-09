@@ -854,7 +854,8 @@ Tab `kind`: `pi`, `shell`, `editor`, `markdown`, `browser` (see [Browser tabs](#
 `app`, `changes`. Markdown tabs carry
 `path`, `source` (the source view is showing), `line` (the source line at the top of the view),
 `links`, `headings` and `matches` (the find bar's match count). Editor tabs carry
-`path`, `dirty`, `"preview": true` for a preview tab and, for read-only diff views, `view`
+`path`, `dirty` (left out when no window is attached: whether its buffer has unsaved changes is
+not known then), `"preview": true` for a preview tab and, for read-only diff views, `view`
 (`disk`\|`head`); `editor_state` has the rest.
 Tab `status`: `running`, `exited`, or `not_started` (restored from the saved workspace and not
 started yet: a session's tabs start when it is focused, docs/PERSISTENCE.md). An exited tab

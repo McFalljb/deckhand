@@ -181,6 +181,7 @@ SITES := [?]Site {
 	{"parse_request", proc(s: string) -> bool {_, err := core.parse_request(s, context.temp_allocator); return err != ""}},
 	{"parse_command", proc(s: string) -> bool {_, err := core.parse_command(s, context.temp_allocator); return err != ""}},
 	{"state_from_json", proc(s: string) -> bool {_, err := core.state_from_json(s, context.temp_allocator); return err != ""}},
+	{"replica_apply (the window's state.full/state.delta)", proc(s: string) -> bool {r: core.State; return core.replica_apply(&r, s, context.temp_allocator) != ""}},
 	{"workspace_restore", proc(s: string) -> bool {return core.workspace_restore(s) != ""}},
 	{"release_parse (update manifest)", proc(s: string) -> bool {_, err := core.release_parse(s, context.temp_allocator); return err != ""}},
 	{"app_result_of (app tab reply)", proc(s: string) -> bool {_, ok := core.app_result_of(s); return !ok}},
@@ -629,6 +630,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/json_read.odin", "parse_command", "jg.parse_string", "", ""},
 		{"src/core/json_read.odin", "parse_request", "jg.parse_string", "", ""},
 		{"src/core/json_read.odin", "state_from_json", "jg.parse_string", "", ""},
+		{"src/core/state_read.odin", "replica_apply", "jg.parse_string", "", ""}, // the window's state stream (state.full, state.delta)
 		{"src/core/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
 		{"src/core/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
 		{"src/core/reload.odin", "settings_digest", "jg.parse", "", ""},

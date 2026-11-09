@@ -263,3 +263,34 @@ window_link_socket_never_ui :: proc(t: ^testing.T) {
 		testing.expectf(t, !strings.contains(string(data), "core_attach_window("), "%s calls core_attach_window", f.name)
 	}
 }
+
+// A command that changes State without a version bump (one that parks or consumes a
+// confirmation answers "not changed") still has its change in the replica when its result
+// arrives: the flush before a result compares every section. after_command_check plays the
+// untracked write, inside the command.
+@(test)
+window_link_untracked_change_before_reply :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	wl_begin()
+	replica: State
+	defer {
+		after_command_check = nil
+		wl_end_test(&replica)
+	}
+	wl_send(window_msg_subscribe())
+	testing.expect_value(t, replica_apply(&replica, wl_frames[0]), "")
+	for now, i in ([]bool{true, false}) {
+		@(static) mark: u64
+		mark = u64(40 + i)
+		after_command_check = proc(cmd: Command) {state.selected_project = mark}
+		clear(&wl_frames)
+		before := state.version
+		wl_send(window_msg_command(Get_State{}, "g", now = now)) // a query: changes nothing itself
+		if !now do inbox_drain()
+		testing.expect_value(t, state.version, before) // no bump: the case
+		last := wl_frames[len(wl_frames) - 1]
+		testing.expect_value(t, json_path(last, "type"), "result")
+		for f in wl_frames[:len(wl_frames) - 1] do testing.expect_value(t, replica_apply(&replica, f), "")
+		testing.expectf(t, replica.selected_project == mark, "now=%v: the replica has %d", now, replica.selected_project)
+	}
+}

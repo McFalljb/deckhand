@@ -281,7 +281,7 @@ annot_pick_free :: proc(p: ^Annot_Pick) {
 // with the crop taken at the pick (the comment owns its file now, or it is removed on a refusal),
 // and its marker.
 annot_pick_add :: proc(tab_id: u64, p: ^Annot_Pick, text, crop: string) -> (id: u64, err: string) {
-	r := core.run_command(core.Comment_Add{source = .Browser, tab_id = tab_id, what = annot_pick_what(p), text = text, crop = crop}, {kind = .Internal})
+	r := client_call(core.Comment_Add{source = .Browser, tab_id = tab_id, what = annot_pick_what(p), text = text, crop = crop}, .Internal)
 	if !r.ok {
 		if crop != "" do os.remove(crop)
 		return 0, r.error

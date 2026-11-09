@@ -442,5 +442,5 @@ harness_run_keep_sheet :: proc() {
 	if core.harness_run.status != .Running do return
 	if setup_ui.step != 0 do setup_ui.step = 0 // the Agents step, where the run shows
 	if state.focus_widget == "setup" do return
-	core.run_command(core.Focus_Take{widget = "setup"})
+	client_call(core.Focus_Take{widget = "setup"}, .Internal)
 }

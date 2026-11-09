@@ -243,7 +243,7 @@ job_sheet_apply :: proc(c: core.Job_Sheet, caller: core.Caller) -> (core.Result,
 	if !c.open {
 		if !job_sheet_open() do return {ok = true}, false
 		u.open = false
-		core.run_command(core.Focus_Release{widget = "job_sheet"})
+		client_call(core.Focus_Release{widget = "job_sheet"}, .Internal)
 		return {ok = true}, true
 	}
 	if core.harness_run_holds_sheet() do return core.fail("an install is running on the setup sheet: wait for it, or ⌃C in its terminal"), false
@@ -273,7 +273,7 @@ job_sheet_apply :: proc(c: core.Job_Sheet, caller: core.Caller) -> (core.Result,
 	set_s(&u.start, sheet_now_text())
 	u.discard, u.stale, u.reload_armed = false, false, false
 	u.open = true
-	core.run_command(core.Focus_Take{widget = "job_sheet"})
+	client_call(core.Focus_Take{widget = "job_sheet"}, .Internal)
 	app.redraw = true
 	return {ok = true}, true
 }
@@ -338,7 +338,7 @@ job_sheet_saved :: proc(path, err: string) -> bool {
 		return false
 	}
 	job_sheet.open = false
-	core.run_command(core.Focus_Release{widget = "job_sheet"})
+	client_call(core.Focus_Release{widget = "job_sheet"}, .Internal)
 	if data, rerr := os.read_entire_file(path, context.temp_allocator); rerr == nil {
 		if vals, _, ok := core.note_front_values(string(data)); ok do jobs_ui_set(vals["id"], false)
 	}

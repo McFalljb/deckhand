@@ -575,7 +575,7 @@ browser_comment_add :: proc(tab_id: u64, box: [4]int, what, text: string) -> (id
 	b := browser_of(tab_id)
 	if b == nil do return 0, "no such browser tab"
 	crop := ring_crop(tab_id, &b.ring, b.content_w, b.content_h, app.dpi, box)
-	r := core.run_command(core.Comment_Add{source = .Browser, tab_id = tab_id, what = core.browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, {kind = .Internal})
+	r := client_call(core.Comment_Add{source = .Browser, tab_id = tab_id, what = core.browser_comment_what(box, what, b.title, b.url), text = text, crop = crop}, .Internal)
 	if !r.ok && crop != "" do os.remove(crop)
 	if crop != "" do delete(crop)
 	return r.created_id, r.error

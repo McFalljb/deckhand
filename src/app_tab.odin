@@ -834,11 +834,11 @@ app_frames_tick :: proc() -> bool {
 					append(&a.restarts, now)
 					app_log_line(a, "[Deckhand] exit 75: restarting")
 					if app_spawn(a, at.argv, at.cwd) {
-						core.run_command(core.App_Update{tab_id = id, status = .Starting})
+						client_call(core.App_Update{tab_id = id, status = .Starting}, .Internal)
 						continue
 					}
 				}
-				core.run_command(core.App_Update{tab_id = id, status = .Exited, exit_code = code})
+				client_call(core.App_Update{tab_id = id, status = .Exited, exit_code = code}, .Internal)
 				continue
 			}
 		}
@@ -940,7 +940,7 @@ app_frames_tick :: proc() -> bool {
 			a.ping_at, a.ping_answered = {}, false
 		}
 		if want != status && status != .Exited {
-			core.run_command(core.App_Update{tab_id = id, status = want})
+			client_call(core.App_Update{tab_id = id, status = want}, .Internal)
 			redraw = true
 		}
 		if want == .Stalled && visible && app_badge_changed(a, now) do redraw = true
@@ -1298,7 +1298,7 @@ shot_write :: proc(j: ^Shot_Job) {
 		fmt.sbprintf(&b, `,"w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
 		done.data = strings.to_string(b)
 	} else do done.code = "write_failed"
-	core.inbox_submit(done, {kind = .Internal})
+	client_internal(done) // a worker thread: queued on the link (client.odin)
 	sync.atomic_sub(&shots_running, 1)
 }
 

@@ -691,7 +691,7 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core
 		if b != nil && b.cef != 0 do dh_cef_find_stop(b.cef)
 		p.find_open, p.find_matches, p.find_active = false, 0, 0
 		set_owned(&p.find_text, "")
-		if page_find_tab == c.tab_id do core.run_command(core.Focus_Release{widget = "browser_find"})
+		if page_find_tab == c.tab_id do client_call(core.Focus_Release{widget = "browser_find"}, .Internal)
 		return {ok = true}, true
 	case core.Browser_Dialog:
 		_, _, b, err := target(c.tab_id)
@@ -825,7 +825,7 @@ page_dialog_clear :: proc(p: ^Page_Extra) {
 	p.dialog, p.prompt_focus_due = false, false
 	set_owned(&p.dialog_msg, "")
 	set_owned(&p.dialog_origin, "")
-	if page_prompt_tab == p.tab_id do core.run_command(core.Focus_Release{widget = "browser_prompt"})
+	if page_prompt_tab == p.tab_id do client_call(core.Focus_Release{widget = "browser_prompt"}, .Internal)
 	// the shared answer field forgets what was typed for this tab
 	if page_prompt_tab == p.tab_id {
 		tf_set(&page_prompt_field, "")

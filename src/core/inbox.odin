@@ -54,6 +54,7 @@ inbox_submit :: proc(cmd: Command, caller: Caller, reply: ^Reply = nil, menu := 
 // (window_link.odin: its queued commands join the queue), and its state delta goes at the end.
 inbox_drain :: proc() {
 	heap := runtime.heap_allocator()
+	ui_ran := false // the user's commands: their delta compares every section (window_link_flush)
 	for {
 		window_link_pump()
 		sync.lock(&inbox_mu)
@@ -62,10 +63,11 @@ inbox_drain :: proc() {
 		sync.unlock(&inbox_mu)
 		if len(batch) == 0 {
 			delete(batch)
-			window_link_flush()
+			window_link_flush(sweep = ui_ran)
 			return
 		}
 		for r in batch {
+			if r.caller.kind == .UI do ui_ran = true
 			res := run_command(r.cmd, r.caller, r.id)
 			if r.reply != nil {
 				r.reply.result = result_clone(res, heap)

@@ -1153,13 +1153,8 @@ files_edit_check :: proc() {
 // Runs a command as the user now and returns its result (the inbox, as
 // ui_do, but waiting for the answer: the field shows errors).
 ui_run :: proc(cmd: core.Command) -> core.Result {
-	reply: core.Reply
-	core.inbox_submit(cmd, {kind = .UI}, &reply)
-	core.inbox_drain()
-	r := reply.result
-	out := core.Result{ok = r.ok, error = strings.clone(r.error, context.temp_allocator), created_id = r.created_id}
-	core.result_free(r)
-	return out
+	r := client_run(cmd) // client.odin: after what was queued before it, its delta first
+	return core.Result{ok = r.ok, error = r.error, created_id = r.created_id}
 }
 
 // Esc in the filter field clears it; Enter or ↓ moves into the tree.

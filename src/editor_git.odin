@@ -88,7 +88,7 @@ git_load_head :: proc(e: ^Editor, sync_now := false) {
 	job^ = {e.tab_id, g.load_gen, strings.clone(e.path, runtime.heap_allocator())}
 	thread.run_with_poly_data(job, proc(job: ^Job) {
 		in_repo, tracked, head := git_head_read(job.path)
-		core.inbox_submit(core.Git_Head_Done{tab_id = job.tab_id, gen = job.gen, path = job.path, in_repo = in_repo, tracked = tracked, head = head}, {kind = .Internal})
+		client_internal(core.Git_Head_Done{tab_id = job.tab_id, gen = job.gen, path = job.path, in_repo = in_repo, tracked = tracked, head = head})
 		delete(job.path, runtime.heap_allocator())
 		free(job, runtime.heap_allocator())
 		free_all(context.temp_allocator)

@@ -114,7 +114,7 @@ core_attach_window :: proc(on_frames: proc()) -> cw.Mem_End {
 core_detach_window :: proc() {
 	if link == nil do return
 	heap := runtime.heap_allocator()
-	link_sweep(all = true)
+	link_free_replies(all = true)
 	delete(link.replies)
 	state_sent_free(&link.sent)
 	cw.mem_close(link.core_end)
@@ -137,15 +137,37 @@ window_link_toast :: proc(text: string, err: bool) -> bool {
 	return true
 }
 
-// The state delta, if anything changed since the window's replica was sent (a command bumped
-// State.version, or window_state_changed was called). Main thread; also from inbox_drain's end
-// and before each of the window's results.
-window_link_flush :: proc() {
+// The state delta, if anything changed since the window's replica was sent: a command bumped
+// State.version, or window_state_changed was called. Main thread; at every inbox_drain's end
+// and before each of the window's results. sweep: compare every section whatever the triggers
+// said (the window's frames, a few times a second: the core still changes some fields in its
+// ticks with neither, e.g. a tab's reload bookkeeping). Test mode logs what a sweep found that no
+// trigger announced ("[replica] untracked"), so those writes can be found.
+window_link_flush :: proc(sweep := false) {
 	if link == nil || !link.subscribed do return
-	link_sweep()
-	if !link.dirty && link.sent.version == state.version do return
+	link_free_replies()
+	triggered := link.dirty || link.sent.version != state.version
+	if !triggered && !sweep do return
 	link.dirty = false
-	if text, ok := state_delta_json(&state, &link.sent); ok do link_send(text)
+	text, ok := state_delta_json(&state, &link.sent)
+	if !ok do return
+	when TEST_HOOKS {
+		if !triggered do fmt.eprintln("[replica] untracked: a change with no version bump and no window_state_changed:", delta_section_names(text))
+	}
+	link_send(text)
+}
+
+// The section names a state.delta carries (test mode's log).
+@(private = "file")
+delta_section_names :: proc(text: string) -> string {
+	members, ok := json_members_raw(text)
+	if !ok do return "?"
+	names := make([dynamic]string, context.temp_allocator)
+	for m in members do if m.key == "sections" {
+		inner, iok := json_members_raw(m.raw)
+		if iok do for x in inner do append(&names, x.key)
+	}
+	return strings.join(names[:], " ", context.temp_allocator)
 }
 
 // Reads every frame the window sent and acts on it: a queued command goes into the inbox (it
@@ -163,8 +185,9 @@ window_link_pump :: proc() {
 }
 
 // Whether the replica equals the core's State (test mode, after every script step, autotest.odin):
-// "" or which sections differ. Run window_link_flush first: a section that still differs is a
-// change the stream missed (no version bump, no window_state_changed) or a write by the window.
+// "" or which sections differ. Run window_link_flush(sweep = true) first: a section that still
+// differs is a write by the window into its replica (one that bypassed commands), or a section
+// the replica decodes differently from how the core encodes it.
 window_link_diverged :: proc(replica: ^State) -> string {
 	if link == nil || !link.subscribed do return ""
 	mine := state_sections(&state)
@@ -303,7 +326,7 @@ link_send :: proc(text: string) {
 
 // Frees the replies the inbox has delivered (and signalled: it signals right after deliver).
 @(private = "file")
-link_sweep :: proc(all := false) {
+link_free_replies :: proc(all := false) {
 	heap := runtime.heap_allocator()
 	keep := 0
 	for r in link.replies {
@@ -320,17 +343,19 @@ link_sweep :: proc(all := false) {
 }
 
 // A queued command's reply: its delta first, then the result (Q9).
+// The flush before a result compares every section: a command may change State without a
+// version bump (one that parks a confirmation answers "not changed").
 @(private = "file")
 link_deliver :: proc(r: ^Reply, request_id: u64) {
 	lr := (^Link_Reply)(r)
-	window_link_flush()
+	window_link_flush(sweep = true)
 	link_send(reply_json(lr.id, r.result, request_id))
 	lr.delivered = true
 }
 
 @(private = "file")
 link_reply_now :: proc(id: string, r: Result, request_id: u64) {
-	window_link_flush()
+	window_link_flush(sweep = true)
 	if id != "" do link_send(reply_json(id, r, request_id))
 }
 

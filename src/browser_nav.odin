@@ -128,7 +128,7 @@ browser_nav_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Re
 			browser_url_tab = id
 			delete(browser_url_error)
 			browser_url_error = ""
-			core.run_command(core.Focus_Take{widget = "browser_url"})
+			client_call(core.Focus_Take{widget = "browser_url"}, .Internal)
 		}
 		return {ok = true, created_id = id}, true
 	case core.Browser_Navigate:
@@ -217,7 +217,7 @@ browser_restore :: proc(tab_id: u64, url: string) {
 // What CEF reported, into State (from browser.odin's callbacks; the inbox
 // runs it after the pump, never inside CEF's own call).
 browser_report :: proc(u: core.Browser_Update) {
-	core.inbox_submit(u, {kind = .Internal})
+	client_internal(u)
 }
 
 // ---- the toolbar (ui.odin's centre, above the page) ----

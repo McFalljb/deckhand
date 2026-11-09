@@ -801,6 +801,8 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 	if is_claude && ct.guard_stopped do extra = "read-only guard not confirmed: stopped"
 	if tab.status == .Not_Started do extra = cs != nil && cs.missing ? "gone" : "not started"
 	if tc := tab; core.tab_held_away(&tc) != 0 do extra = "in the session holder" // not reachable: never started here
+	// a kind this window does not know: a newer core's (the replica decodes it as nil, state_read.odin)
+	if tab.kind == nil do extra = "needs a newer Deckhand"
 	return
 }
 

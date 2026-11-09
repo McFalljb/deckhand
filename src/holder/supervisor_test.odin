@@ -64,6 +64,7 @@ supervisor_crashes_backoff_rollback_health :: proc(t: ^testing.T) {
 	testing.expect_value(t, sup_tick(&s2, at(now + 1000), false), Sup_Action.None)
 	// the window's Use previous core starts it again
 	sup_use_previous(&s2, at(now + 1000))
+	testing.expect(t, s2.rolled_back) // the window launches the previous core too
 	testing.expect_value(t, sup_tick(&s2, at(now + 1000), false), Sup_Action.Launch)
 	testing.expect_value(t, sup_launch_path(&s2, "/d"), "/d/" + SUP_PREVIOUS)
 }

@@ -236,6 +236,11 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 	if bin == "" do return "Deckhand Core.app (its deckhand-core-serve) is missing from this copy of Deckhand"
 	exe, ok, why := core.core_install(bin, data)
 	if !ok do return why
+	// after a rollback (or Use Previous Core) the holder's supervisor starts the previous core: so
+	// does the window, never the update that kept stopping (the core lock lets one of them run)
+	if st, sok := core.holder_supervise_ask(run, "status"); sok && st.rolled_back {
+		if prev := core.core_serve_of(data, core.CORE_PREVIOUS); prev != "" do exe = prev
+	}
 	if core.autotest_active do fmt.println("[autotest] core: launching", exe)
 	_, lok, lwhy := core.core_launch(exe, run, data, from_tab)
 	if !lok do return lwhy

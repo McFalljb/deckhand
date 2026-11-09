@@ -45,12 +45,10 @@ core_handover_keep :: proc(core_build, previous_build: string, rolled_back: bool
 	return rolled_back || (core_build != "" && core_build == previous_build)
 }
 
-when ODIN_TEST {
-	// Tests: a handover under way, or none.
-	core_handover_pending_set :: proc(on: bool) {
-		delete(handover.to)
-		handover.to = on ? strings.clone("/test/deckhand-core-serve") : ""
-	}
+// Tests: a handover under way, or none.
+core_handover_pending_set :: proc(on: bool) {
+	delete(handover.to)
+	handover.to = on ? strings.clone("/test/deckhand-core-serve") : ""
 }
 
 // This process is a separate core (deckhand-core-serve: coremain sets it).

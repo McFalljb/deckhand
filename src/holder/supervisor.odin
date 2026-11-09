@@ -137,6 +137,7 @@ sup_tick :: proc(s: ^Supervisor, now: time.Tick, core_attached: bool) -> Sup_Act
 // The window's Use previous core: the previous core is launched at once (when no core is attached).
 sup_use_previous :: proc(s: ^Supervisor, now: time.Tick) {
 	s.use_previous, s.gave_up, s.failures = true, false, 0
+	s.rolled_back = true // a window's own launch and handover follow it (client_core.odin)
 	s.next_launch = now
 }
 

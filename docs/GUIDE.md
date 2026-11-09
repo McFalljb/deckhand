@@ -1539,7 +1539,17 @@ setting. **Check for updates automatically** (the gear, or the palette) turns th
 off. Your choices (the setting, the skipped version, the last check's time) are in
 `<data dir>/update.json`.
 
-**To update by hand**, download the zip from the
+**To update by hand**, quit Deckhand (**Quit Deckhand and Stop All Sessions…**: this stops your
+sessions, which the in-app update keeps) and run the install script again:
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh
+```
+
+It downloads the latest release, checks its SHA-256 and code signature and replaces
+`Deckhand.app` where it is (`/Applications`, else `~/Applications`; `sh -s -- --dir PATH` for
+another folder, `--version X.Y.Z` for a given release). It refuses to run while Deckhand runs.
+[Read it](https://github.com/McFalljb/deckhand/blob/main/scripts/install.sh) before you pipe it to `sh`. Or download the zip from the
 [releases page](https://github.com/McFalljb/deckhand/releases), check it with
 `shasum -a 256 -c deckhand-<version>-macos-arm64.zip.sha256`, quit Deckhand and replace
 `Deckhand.app` in Applications.
@@ -1547,9 +1557,10 @@ off. Your choices (the setting, the skipped version, the last check's time) are 
 ### From pi-desk to Deckhand
 
 pi-desk is now Deckhand. pi-desk 0.1.x does not update itself to Deckhand: install it fresh. Quit
-pi-desk first (the two must not run at the same time), delete `pi-desk.app`, then download Deckhand
-from the [releases page](https://github.com/McFalljb/deckhand/releases) and move `Deckhand.app` to
-Applications. Your projects, sessions, settings, Atlas, jobs and Claude accounts carry over.
+pi-desk first (the two must not run at the same time), delete `pi-desk.app`, then install Deckhand with
+`curl -fsSL https://raw.githubusercontent.com/McFalljb/deckhand/main/scripts/install.sh | sh` (or
+download it from the [releases page](https://github.com/McFalljb/deckhand/releases) and move
+`Deckhand.app` to Applications). Your projects, sessions, settings, Atlas, jobs and Claude accounts carry over.
 While pi-desk runs, Deckhand does not start: it says so and quits. From Deckhand on, releases come
 as `deckhand-<version>-macos-arm64.zip`.
 

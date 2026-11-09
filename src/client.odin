@@ -79,15 +79,20 @@ client_attach_host :: proc() {
 	client.main = sync.current_thread_id()
 	client.results = make(map[string]core.Result, heap)
 	client.facts_sent = make(map[u64]string, heap)
-	client.end = core.core_attach_window(client_on_frames, client_pull)
+	end, ok := core.core_attach_window(client_on_frames, client_pull)
+	if !ok do return
+	client.end = end
 	client.host = true
 }
 
 // The window's unit tests: the tab host's link off (what the core does with no window), or on again.
 client_host_set :: proc(on: bool) {
 	if on == client.host || client.attached do return
-	if on do client.end = core.core_attach_window(client_on_frames, client_pull)
-	else do core.core_detach_window()
+	if on {
+		end, ok := core.core_attach_window(client_on_frames, client_pull)
+		if !ok do return
+		client.end = end
+	} else do core.core_detach_window()
 	client.host = on
 }
 
@@ -97,6 +102,7 @@ client_detach :: proc() {
 	if !client.attached do return
 	core.core_detach_window()
 	client.attached, client.detached = false, true
+	// TODO(M3-H): term_views_drop_all() here: the window's terminal views go with it (M3-H adds it)
 	heap := runtime.heap_allocator()
 	for _, v in client.facts_sent do delete(v, heap)
 	clear(&client.facts_sent)
@@ -105,8 +111,10 @@ client_detach :: proc() {
 // Test mode's attach_window: the window comes back; the replica gets the whole state again.
 client_reattach :: proc() {
 	if !client.detached do return
+	end, ok := core.core_attach_window(client_on_frames, client_pull, client_on_drain)
+	if !ok do return
 	client.detached = false
-	client.end = core.core_attach_window(client_on_frames, client_pull)
+	client.end = end
 	client.attached = true
 	client_raw(core.window_msg_subscribe())
 	core.window_link_pump()
@@ -329,7 +337,9 @@ client_on_frames :: proc() {
 		case .Tab_Host_Call:
 			// the window's part may call the core, which answers on this link: read by the inner loop
 			client.receiving = false
+			client.busy += 1 // window code runs (it may hold replica pointers): no release mid-call
 			tab_host_on_call(text) // tabhost_link.odin
+			client.busy -= 1
 			client.receiving = true
 		case .Unknown:
 		}

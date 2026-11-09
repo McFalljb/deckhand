@@ -97,7 +97,7 @@ fh_begin :: proc(attach := true) -> (a, b, pa, ta, app, ed, md, pb, tb: u64) {
 	os.make_directory_all(fh_dir)
 	_ = os.write_entire_file(fmt.tprintf("%s/new.txt", fh_dir), transmute([]u8)string("x\n"))
 	_ = os.write_entire_file(fmt.tprintf("%s/new.md", fh_dir), transmute([]u8)string("# x\n"))
-	if attach do fh.end = core_attach_window(fh_on_frames)
+	if attach do fh.end, _ = core_attach_window(fh_on_frames)
 	return
 }
 

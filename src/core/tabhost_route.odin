@@ -582,7 +582,8 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !tab_host_up() do return no_window(), false
 		// unsaved changes are the user's: another caller confirms first
 		ch := false
-		if caller.kind != .UI && window_tab_dirty(c.tab_id) {
+		// not known (no window to ask): ask, as if there were
+		if dirty, known := window_tab_dirty(c.tab_id); caller.kind != .UI && (dirty || !known) {
 			gr, go_on, gch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("discard the unsaved changes to %q in %s?", tab.title, session_where(s)))
 			if !go_on do return gr, gch
 			ch = gch
@@ -696,7 +697,7 @@ tab_host_after :: proc(cmd: Command, caller: Caller, tab_id: u64, r: ^Result, wi
 		if c.preview {
 			for t, i in s.tabs {
 				et, is := t.kind.(Editor_Tab)
-				if is && et.preview && !window_tab_dirty(t.id) do at = i
+				if dirty, known := window_tab_dirty(t.id); is && et.preview && known && !dirty do at = i
 			}
 		}
 		if at >= 0 {

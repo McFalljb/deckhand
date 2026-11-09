@@ -172,7 +172,7 @@ snapshot_vt_body :: proc(gt: gh.Terminal, allocator := context.allocator) -> (bo
 	return sb.buf[:], cont_ok
 }
 
-@(private = "file")
+@(private)
 snapshot_pack :: proc(meta: Snapshot_Meta, body: []u8, allocator := context.allocator) -> []u8 {
 	mj, _ := json.marshal(meta, {}, context.temp_allocator)
 	out := make([]u8, 4 + len(mj) + len(body), allocator)

@@ -26,9 +26,11 @@ package core
 // window's channel, the window's DATA, CREDIT and FOCUS go there, and term.resize and term.detach
 // follow. Credit passes through end to end. A link that goes down keeps the window's channels;
 // up again, each is attached again and its fresh snapshot replaces the window's copy. Its bytes are
-// untrusted: the window's own parser and snapshot checks take them as they take a local program's,
-// and here a RESIZE outside the grid limits, DATA past twice the credit, or more than
-// RELAY_SNAPS_PER_SEC snapshots ends that stream there, attached again RELAY_RETRY later.
+// untrusted: its snapshots are asked for as the VT replay ("snapshot":"vt"), so the window's own
+// parser takes them as it takes its DATA and a local program's; a GHOSTSNP (whose decoder has no
+// MAC against another machine) or any other snapshot, a RESIZE outside the grid limits, DATA past
+// twice the credit, more than RELAY_SNAPS_PER_SEC snapshots, or a channel given twice ends that
+// stream there, attached again RELAY_RETRY later.
 // OSC 52 from its terminals is its core's window.request, which is dropped (machines.odin).
 
 import "base:runtime"
@@ -93,6 +95,8 @@ route: struct {
 
 // The relays (tests).
 machine_relays :: proc() -> []^Term_Relay {return route.relays[:]}
+@(private)
+route_relays_for_test :: proc() -> ^[dynamic]^Term_Relay {return &route.relays}
 
 // ---- commands ----
 
@@ -333,7 +337,9 @@ machine_term_attach :: proc(id: string, tab_id: u64, history: int) {
 relay_attach :: proc(r: ^Term_Relay) {
 	r.remote, r.asking, r.in_flight = 0, false, 0
 	if !machine_link_up(r.machine) do return
-	r.asking = machine_link_send_text(r.machine, fmt.tprintf(`{{"v":%d,"type":"term.attach","id":"r%d","tab_id":%d,"history_lines":%d}}`, PROTOCOL_VERSION, r.channel, id_local(r.tab_id), r.history))
+	// its snapshots as the VT replay: the window's parser takes them as it takes their DATA, and the
+	// GHOSTSNP decoder never sees another machine's bytes
+	r.asking = machine_link_send_text(r.machine, fmt.tprintf(`{{"v":%d,"type":"term.attach","id":"r%d","tab_id":%d,"history_lines":%d,"snapshot":"vt"}}`, PROTOCOL_VERSION, r.channel, id_local(r.tab_id), r.history))
 	if autotest_active do fmt.printfln("[autotest] machine %s: terminal %d attaching (channel %d)", machine_name(r.machine), id_local(r.tab_id), r.channel)
 }
 
@@ -398,6 +404,12 @@ machine_term_frame :: proc(no: u64, f: cw.Frame) {
 		r.in_flight += len(f.payload)
 		window_link_send_frame(r.channel, .Data, f.payload)
 	case .Snapshot:
+		// only the VT replay we asked for: never a GHOSTSNP (libghostty's decoder, no MAC from
+		// another machine) or anything else
+		if meta, _, err := snapshot_unpack(f.payload); err != .None || meta.format != SNAPSHOT_VT {
+			relay_restart(r, "a snapshot that is not the VT replay")
+			return
+		}
 		now := time.tick_now()
 		if r.snaps_at == {} || time.tick_diff(r.snaps_at, now) >= time.Second do r.snaps, r.snaps_at = 0, now
 		r.snaps += 1
@@ -444,7 +456,10 @@ machine_term_json :: proc(no: u64, type: string, text: string) {
 			relay_free(i)
 			return
 		}
-		for x in route.relays do if x != r && x.machine == no && x.remote == u32(ch) do return // a channel it gave twice
+		for x in route.relays do if x != r && x.machine == no && x.remote == u32(ch) { 	// a channel it gave twice
+			relay_restart(r, "a channel it gave twice")
+			return
+		}
 		r.remote = u32(ch)
 		if autotest_active do fmt.printfln("[autotest] machine %s: terminal %d attached (channel %d there)", machine_name(no), id_local(r.tab_id), ch)
 	case "term.scroll":

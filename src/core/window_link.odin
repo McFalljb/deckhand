@@ -957,8 +957,9 @@ link_message :: proc(text: string) -> (command: bool) {
 	id := string(obj["id"].(json.String) or_else "")
 	now := bool(obj["now"].(json.Boolean) or_else false)
 	if link.hub do switch type {
-	case "window.facts", "window.tab_facts", "window.command", "script.core":
-		// a window's own (its facts, the internal caller, test mode): never another machine's core's
+	case "window.facts", "window.tab_facts", "window.command", "script.core", "tab_host.event", "finished", "window.reply":
+		// a window's own (its facts, the internal caller, test mode, the tab_host caller, a call's
+		// answer, a request's reply): never another machine's core's
 		fmt.eprintln("Deckhand: a hub sent", type, "(refused)")
 		link_reply_now(id, fail(fmt.tprintf("%s is a window's, not a hub's", type)), 0)
 		return
@@ -1112,16 +1113,15 @@ window_msg_script_core :: proc(line, id: string) -> string {
 SCRIPT_AS_NAMES := #partial [Caller_Kind]string{.Script = "script", .Control = "control", .Panel = "panel"}
 
 // A hub's command's caller (§8.3): its on_behalf {"kind"}, which the hub checked with caller_may
-// first; this core applies that kind's rules again. Only ui, control or script: never above ui,
-// never internal, and a panel's (bound to a tab of the hub's) is not one this core could check.
-// False: none, or another kind (refused).
+// first; this core applies that kind's rules again. Only ui or control: never above ui, never
+// internal; not script (it may send a Claude tab's claude.* reports, who = .Claude) nor a panel's
+// (bound to a tab of the hub's). False: none, or another kind (refused).
 hub_on_behalf :: proc(obj: json.Object) -> (Caller, bool) {
 	ob, ok := obj["on_behalf"].(json.Object)
 	if !ok do return {}, false
 	switch string(ob["kind"].(json.String) or_else "") {
 	case "ui":      return {kind = .UI}, true
 	case "control": return {kind = .Control}, true
-	case "script":  return {kind = .Script}, true
 	}
 	return {}, false
 }

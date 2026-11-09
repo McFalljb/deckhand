@@ -211,15 +211,22 @@ route_on_behalf_lowers :: proc(t: ^testing.T) {
 	user_only := `{"type":"set_remote_machines","on":true}`
 	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"control"}`, user_only))
 	testing.expect(t, json_path(last_result(), "result.ok") == "false" && !state.settings.remote_machines, "control can't change a user-only setting")
-	for ob in ([]string{"", `{"kind":"none"}`, `{"kind":"internal"}`, `{"kind":"panel"}`, `{}`}) {
+	for ob in ([]string{"", `{"kind":"none"}`, `{"kind":"internal"}`, `{"kind":"panel"}`, `{"kind":"script"}`, `{}`}) {
 		rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(ob, user_only))
-		testing.expect(t, strings.contains(last_result(), "on_behalf"), "on_behalf none, missing or another kind: refused")
+		testing.expect(t, strings.contains(last_result(), "on_behalf"), "on_behalf none, missing, script (claude.* reports) or another kind: refused")
 	}
 	testing.expect(t, !state.settings.remote_machines, "nothing changed")
 	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"ui"}`, user_only))
 	testing.expect(t, json_path(last_result(), "result.ok") == "true" && state.settings.remote_machines, "ui: the user's")
 	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"window.command","id":"w","now":true,"command":{"focus_take":{"widget":"x"}}}`)
 	testing.expect(t, strings.contains(last_result(), "not a hub's"), "a hub's window.command is refused (never internal)")
+	// review round 1: a window's other messages (the tab_host caller, a call's answer, a request's
+	// reply) are never a hub's either
+	for m in ([]string{`{"v":1,"type":"tab_host.event","id":"e","now":true,"command":{"browser_update":{"tab_id":1}}}`, `{"v":1,"type":"finished","id":"f","result":{"ok":true}}`, `{"v":1,"type":"window.reply","id":"r","reply":{"ok":true}}`}) {
+		n := len(rt_win)
+		rt_window_send(cw.JSON_CHANNEL, .Data, m)
+		testing.expect(t, len(rt_win) == n + 1 && strings.contains(rt_win[n].payload, "not a hub's"), "refused")
+	}
 }
 
 // The terminal relay: attach maps the window's channel to the other machine's; frames pass both
@@ -238,6 +245,7 @@ route_term_relay :: proc(t: ^testing.T) {
 	testing.expect(t, json_path(rt_win[len(rt_win) - 1].payload, "channel") == json_u64_text(u64(ch)), "the window has its channel at once")
 	sent := rt_last_text()
 	testing.expect(t, json_path(sent, "type") == "term.attach" && json_path(sent, "tab_id") == "10", "attached there, its id unpacked")
+	testing.expect_value(t, json_path(sent, "snapshot"), "vt") // never GHOSTSNP from another machine (review round 1)
 	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":7,"offset":0}}`, json_path(sent, "id")))
 	testing.expect_value(t, rel.remote, u32(7))
 	// from there: on the window's channel
@@ -276,8 +284,18 @@ route_term_relay :: proc(t: ^testing.T) {
 	testing.expect_value(t, json_path(sent, "type"), "term.attach")
 	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":9,"offset":0}}`, json_path(sent, "id")))
 	before = len(rt_win)
-	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = transmute([]u8)string("snap")})
-	testing.expect(t, len(rt_win) == before + 1 && rt_win[before].channel == ch && rt_win[before].kind == .Snapshot, "its fresh snapshot on the same window channel")
+	vt := snapshot_pack({format = SNAPSHOT_VT, cols = 80, rows = 24, inexact = true}, transmute([]u8)string("hi"), context.temp_allocator)
+	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = vt})
+	testing.expect(t, len(rt_win) == before + 1 && rt_win[before].channel == ch && rt_win[before].kind == .Snapshot, "its fresh VT snapshot on the same window channel")
+	// review round 1: a GHOSTSNP (or anything else) from another machine never reaches the window's
+	// decoder: the stream ends there, attached again later
+	for bad in ([][]u8{snapshot_pack({format = SNAPSHOT_GHOSTSNP, cols = 80, rows = 24}, transmute([]u8)string("GHOSTSNP...."), context.temp_allocator), transmute([]u8)string("snap")}) {
+		machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = bad})
+		testing.expect(t, rel.remote == 0 && rel.retry_at != {} && len(rt_win) == before + 1, "refused, the stream ends there")
+		rel.retry_at = {}
+		machine_route_up(3)
+		machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":9,"offset":0}}`, json_path(rt_last_text(), "id")))
+	}
 	// hostile: a resize past the limits, DATA past the credit: the stream ends there (attached again later)
 	n := len(machine_test_links.texts)
 	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Resize), payload = transmute([]u8)string(`{"offset":0,"cols":65535,"rows":65535,"xpixel":0,"ypixel":0}`)})
@@ -290,6 +308,15 @@ route_term_relay :: proc(t: ^testing.T) {
 	defer delete(big)
 	machine_term_frame(3, {channel = 11, kind = u8(cw.Kind.Data), payload = big})
 	testing.expect(t, rel.remote == 0 && rel.retry_at != {}, "DATA past twice the credit ends it there")
+	// review round 1: a channel it gave twice ends that stream (attached again later), never stuck
+	rel.retry_at = {}
+	machine_route_up(3)
+	other := new(Term_Relay)
+	other^ = {channel = 999, machine = 3, tab_id = tid, remote = 12}
+	append(&route_relays_for_test()^, other)
+	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":12,"offset":0}}`, json_path(rt_last_text(), "id")))
+	testing.expect(t, rel.remote == 0 && !rel.asking && rel.retry_at != {}, "a duplicate channel restarts it")
+	machine_term_detach(999)
 	// detach: there too, and the relay goes
 	rel.remote = 11
 	rt_window_send(cw.JSON_CHANNEL, .Data, fmt.tprintf(`{{"v":1,"type":"term.detach","channel":%s}}`, json_u64_text(u64(ch))))
@@ -304,4 +331,20 @@ json_u64_text :: proc(n: u64) -> string {
 	b := strings.builder_make(context.temp_allocator)
 	strings.write_u64(&b, n)
 	return strings.to_string(b)
+}
+
+// Review round 1: another machine's core sends its snapshots as the VT replay (the parser that
+// takes its DATA), never GHOSTSNP.
+@(test)
+route_vt_snapshot_fit :: proc(t: ^testing.T) {
+	tm := new(Term, runtime.heap_allocator())
+	term_init(tm, 80, 24)
+	defer {
+		term_free(tm)
+		free(tm, runtime.heap_allocator())
+	}
+	blob, err := snapshot_encode_fit(tm.gt, {}, 1 << 20, vt = true)
+	testing.expect_value(t, err, Snapshot_Error.None)
+	meta, _, uerr := snapshot_unpack(blob)
+	testing.expect(t, uerr == .None && meta.format == SNAPSHOT_VT, "a VT snapshot")
 }

@@ -1084,6 +1084,9 @@ set_hover :: proc(h: Hit, over_terminal: bool) {
 
 // The user confirmed a pending command: resend it with its token.
 confirm_pending :: proc(token: string) {
+	// TODO(M6-D/E): another machine's confirmations asked here (machine_route.odin) re-send the
+	// user's command with its token; a type missing below (or Changes_Discard's second question)
+	// can't be confirmed from here. Not reachable yet: only terminal tabs' commands reach one.
 	for p in state.pending_confirmations {
 		if p.token != token do continue
 		// a command this window cannot decode (a newer core's: the replica holds nil) is never

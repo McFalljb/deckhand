@@ -10,7 +10,8 @@ merged (M3-F: #44); M3-G and M3-H are in review. M1 is broken into PRs in §10.1
 §10.2, M4 in §10.3, M6 in §10.4. The user's decisions are in §2.
 
 Revision 7 (2026-11-09): §10.4 (M6 in PRs, checked against `main` efeefb1, v0.2.0). The M6 row
-in §10; §8.2's `file.read` replaced by bytes in the reply (§10.4); R10; Q12 and Q13.
+in §10; §8.2's `file.read` replaced by bytes in the reply (§10.4); R10; Q12 and Q13, decided by
+the user on 2026-11-09 (decision 8 in §2: the M6 release gate).
 
 Revision 6: §10.3 (M4 in PRs, checked against `main` 2a3bd0b and the M3-G and M3-H branches).
 **M4 no longer waits for D0:** the DR checks anchor on the self-signed identity (§5.4). Decisions
@@ -79,6 +80,7 @@ Contents: 1 Goal · 2 Decisions · 3 Process model · 4 What moves where · 5 Pr
 | 5 | Apple Developer ID | **Deckhand will get one, though not now.** The design assumes it. Ad-hoc builds get no special safeguards; §5.4 states what they trust. **2026-11-08: M4 doesn't wait for it,** and nothing is built that waits for it. The checks anchor on the self-signed identity "Deckhand Self-Signed" (§5.4). The swap later is the one line `SIGN_IDENTITY_DEFAULT` in `scripts/sign.sh`. |
 | 6 | What a core runs (2026-11-08) | **Every core is fully featured:** sessions, jobs, scheduler and Atlas. The window is a view of its own machine and every connected one. Remotes over SSH (M6). The local Atlas is the hub (§8.6). |
 | 7 | Releases (2026-11-08) | **No release until the split is complete** (M4 merged). Then the user makes the release and sets the new core and window up on their machine. The release checklist is in §10.3. |
+| 8 | Remote (2026-11-09) | **No release carries M6 until M6-A to F and L1–L4 are merged**, the Linux holder (L3) included. A remote Mac's own window and the hub: the newest connection wins, with **Take back**. Screenshots come back as bytes in the reply, with no `file.read` (§8.2, §10.4). |
 
 **In this design (open to review):**
 
@@ -720,7 +722,7 @@ subset.
 | pi, Claude, shells, jobs | On the remote host |
 | Browser tabs | In the local CEF, capped (§8.3) |
 | App tabs | Left out in v1 |
-| Screenshots, crops | Bytes in the `finished` reply, written by the remote core (§10.4; no `file.read`) |
+| Screenshots, crops | Bytes in the `finished` reply, written by the remote core; no `file.read` (decided 2026-11-09, §10.4) |
 
 ### 8.3 Trust in both directions
 
@@ -819,7 +821,7 @@ Every step ships on its own.
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
 | M4 | **Separate core** (`Deckhand Core.app`), **signed with the self-signed identity; it does not wait for D0** (§5.4). It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Plus M3's carry-overs (M3-F2). `released-v1.json` is done (M3-E). **Six PRs in §10.3.** Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 6–7.5 weeks elapsed (8.5–10.5 of work) |
 | M5 | Login agent; jobs while closed | Scheduled jobs with Deckhand closed | 1–2 weeks |
-| M6 | **Remote:** the SSH link and hub door, every machine in the sidebar, remote terminals, remote browser tabs with the CEF caps, install and one-click update, the hub Atlas; then a **headless Linux core, systemd, its holder and release target**. **Six Mac→Mac PRs and four Linux PRs in §10.4.** | **#5 done** | 9.5–12 weeks Mac→Mac + 5–6.5 for Linux (§10.4) |
+| M6 | **Remote:** the SSH link and hub door, every machine in the sidebar, remote terminals, remote browser tabs with the CEF caps, install and one-click update, the hub Atlas; then a **headless Linux core, systemd, its holder and release target**. **Six Mac→Mac PRs and four Linux PRs in §10.4;** no release carries M6 until all ten are merged. | **#5 done** | 9.5–12 weeks Mac→Mac + 5–6.5 for Linux (§10.4) |
 | M7 | Several windows | More windows | 2–4 weeks |
 
 Order: M1 → M2 → M3 → M4 → M5, M6, M7. D0 happens whenever the user gets the Developer ID; it
@@ -1281,7 +1283,7 @@ own sessions (§8.3); remote updates are a one-click offer (decision 4, §8.5); 
 - **No `file.read`.** A remote session's screenshots and crops are made in the local window. Their
   bytes return in the `finished` reply to the remote core's `tab_host.call` (base64, capped at
   8 MiB), and the remote core writes them to its own shots dir. That gives a remote core no read
-  path into the local disk. **This replaces §8.2's `file.read`.**
+  path into the local disk. **This replaces §8.2's `file.read`** (decided by the user, 2026-11-09).
 - **Behind a default until the last Mac PR:** `remote_machines_default_on := false` in
   `src/core/commands.odin`, with Settings › Experimental: *Machines over SSH* (user-only), as
   `keep_sessions` and `separate_core` were. M6-F flips it.
@@ -1322,12 +1324,15 @@ D and E in parallel: about **8–10 weeks**.
 
 Sizes: L1 1.5–2 weeks, L2 0.5–1, L3 2–2.5, L4 1, so **5–6.5 weeks** for Linux, against §10's
 earlier 2–3. The holder (L3) is most of the gap: §10's figure assumed the core and holder were
-nearly portable, and the holder is not. **Usable on the NUC after L1, L2 and L4** (3–4 weeks):
-sessions there survive the window and the SSH link, but not an update of that machine's core
-until L3.
+nearly portable, and the holder is not. **Build order:** L1 → L2 → L3, with L4 after L1 (it picks
+up the holder once L3 merges). Between L1 and L3 the Linux core on `main` runs without a holder,
+which is a step in the build, never a release.
+
+**The release gate (decided 2026-11-09):** no Deckhand release carries M6 until M6-A to F **and**
+L1–L4 are all merged, the holder port (L3) included. Linux ships working in full or not at all.
 
 **Total for M6: about 14.5–18.5 weeks of work** (Mac→Mac 9.5–12, Linux 5–6.5). §10 estimated
-9–14. With L1 beside B–F, elapsed is about 11–14 weeks.
+9–14. With L1 built beside B–F, elapsed to the release gate is about 11–14 weeks.
 
 **Riskiest parts:**
 - **M6-C, forwarded `ui`.** A remote id carries the user's `ui` to another machine. `on_behalf`
@@ -1353,14 +1358,12 @@ bytes only: stdio ↔ `core.sock`. Next the `hub` branch of `window_hello_check`
 `online`, then `offline` after kill -9, then `online` again, and the dropped `window.request` is
 asserted.
 
-**Open questions** (also Q12 and Q13 in §13):
+**Decided by the user (2026-11-09)** (Q12 and Q13 in §13):
 - **A remote Mac with its own window open.** The hub and that Mac's window would both want to be
-  its one window (one window per core until M7). **Proposed: the newest attach wins,** as for two
-  windows today. The other side shows *Viewed from <machine>* with **Take back**. The user's real
-  remote is a headless NUC, so this only touches Mac→Mac use.
-- **Ship Linux before its holder?** **Proposed: yes.** L1, L2 and L4 make the NUC usable in 3–4
-  weeks. Until L3, an update or crash of the NUC's core restarts its sessions, and pi and Claude
-  resume from disk.
+  its one window (one window per core until M7). **The newest connection wins,** as for two
+  windows today. The other side shows *Viewed from <machine>* with **Take back**. M6-A builds it.
+- **Linux scope.** The release waits until Linux works in full, holder included: the gate above.
+- **Screenshots.** The bytes come back in the reply, with no `file.read` (§8.2 changed).
 
 ---
 
@@ -1430,8 +1433,8 @@ Test builds keep the hooks and use per-test dirs; they skip DR checks as ad-hoc 
 | Q9 | Does the window wait for its own command replies? 104 window call sites use the result at once. | Yes: the core sends the state delta before the reply. In process (M3) the wait is nil; M4 measures it over `core.sock` and bounds it (250 ms, then the call shows as pending). |
 | Q10 | Which caller do a page's own events (popups, dialogs, downloads) use? | A new `tab_host` caller: answers and tab records only, never `ui` |
 | Q11 | Does a hidden window keep App Nap off while terminals produce output? Parsing then keeps up, but it costs energy. | Yes, while a terminal has had output in the last 2 s (M2-C) |
-| Q12 | A remote Mac with its own window open: the hub and that window both want to be its one window (§10.4) | The newest attach wins; the other shows *Viewed from <machine>* with **Take back** |
-| Q13 | Ship the Linux core before its holder (§10.4: L1, L2, L4 before L3)? | Yes: the NUC is usable in 3–4 weeks; until L3 an update of its core restarts its sessions |
+| Q12 | A remote Mac with its own window open: the hub and that window both want to be its one window (§10.4) | **Decided (2026-11-09):** the newest connection wins; the other side shows *Viewed from <machine>* with **Take back** |
+| Q13 | Ship the Linux core before its holder? | **Decided (2026-11-09): no.** No release carries M6 until M6-A to F and L1–L4 are merged, the holder port (L3) included. L1 may still be built beside M6-B to F (§10.4). |
 
 ---
 

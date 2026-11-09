@@ -556,3 +556,30 @@ state_wire_replica_frees_what_it_holds :: proc(t: ^testing.T) {
 	testing.expectf(t, len(track.allocation_map) == 0, "%d allocations left after replica_free", len(track.allocation_map))
 	testing.expectf(t, len(track.bad_free_array) == 0, "%d bad frees", len(track.bad_free_array))
 }
+
+// A pending confirmation's command travels as its own JSON (write_command, command_from_value).
+// One that does not parse back would make every message with the confirmations section
+// fail, so the window could never catch up: each command that can be parked (a confirm
+// class in the table) must come back as itself.
+@(test)
+state_wire_every_parked_command_comes_back :: proc(t: ^testing.T) {
+	u := runtime.type_info_base(type_info_of(Command)).variant.(runtime.Type_Info_Union)
+	n := 0
+	for vt, i in u.variants {
+		f := Sw_Fill{a = context.temp_allocator}
+		cmd: Command
+		sw_fill_variant(&cmd, type_info_of(Command), i, &f)
+		spec := command_spec(command_type(cmd))
+		if spec == nil || spec.confirm == nil do continue
+		n += 1
+		s: State
+		s.open_sessions = make([dynamic]Open_Session, context.temp_allocator)
+		s.pending_confirmations = make([dynamic]Pending_Confirmation, context.temp_allocator)
+		append(&s.pending_confirmations, Pending_Confirmation{token = "tok", summary = "sure?", command = cmd, class = spec.confirm.?, caller = {kind = .Control}})
+		r: State
+		err := replica_apply(&r, state_full_json(&s), context.temp_allocator)
+		if !testing.expectf(t, err == "", "%s parked: the replica refuses it: %s", spec.type, err) do continue
+		testing.expectf(t, len(r.pending_confirmations) == 1 && reflect.union_variant_typeid(r.pending_confirmations[0].command) == vt.id, "%s parked: came back as %v", spec.type, r.pending_confirmations[0].command)
+	}
+	testing.expectf(t, n >= 10, "%d commands with a confirm class", n)
+}

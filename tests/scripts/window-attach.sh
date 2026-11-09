@@ -6,7 +6,8 @@
 # 2. a new window attaches to the same core: the same pi process, its turn further along, on screen.
 #    Then the core is killed (-9): the window does not quit. It launches a core again, which adopts
 #    the turn from the session holder, and shows it from a fresh state.full: same pi process,
-#    further along still.
+#    further along still. Then that core gets a plain SIGTERM (its handover and save hold core.lock
+#    while the window dials): the window reconnects again, to the core it relaunches.
 # A fake HOME, a fake pi, a temp data dir and a short runtime dir (never the user's).
 # Usage: tests/scripts/window-attach.sh
 set -eu
@@ -15,7 +16,7 @@ ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
 W="$ROOT/build/window-attach"
-rm -rf "$W" "$ROOT"/build/window-attach-[123].txt
+rm -rf "$W" "$ROOT"/build/window-attach-[1234].txt
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/dkwa.XXXXXX") # core.sock's path must fit in sun_path
 APP=
 cores() { pgrep -f "deckhand-core-serve serve --run $RUN" || true; }
@@ -60,11 +61,16 @@ wait_for "$W/run2.log" "core: attached to pid $CORE" 20
 wait_for "$ROOT/build/window-attach-2.txt" "turn-tick" 20
 kill -9 "$CORE"
 wait_for "$W/run2.log" "core: reattached to pid" 20
+wait_for "$ROOT/build/window-attach-3.txt" "turn-tick" 30
+MID=$(cores)
+kill -TERM "$MID" # a plain stop: its handover and save hold core.lock while the window dials
+for _ in $(seq 200); do [ "$(grep -c "core: reattached to pid" "$W/run2.log")" -ge 2 ] && break; sleep 0.1; done
+[ "$(grep -c "core: reattached to pid" "$W/run2.log")" -ge 2 ] || { echo "no reconnect after the core's SIGTERM"; tail -20 "$W/run2.log"; exit 1; }
 wait "$APP" || true; APP=
 if failed 2 || ! grep -q "done:" "$W/run2.log"; then echo "run 2 failed (log: $W/run2.log)"; tail -20 "$W/run2.log"; exit 1; fi
 NEW=$(cores)
-[ -n "$NEW" ] && [ "$NEW" != "$CORE" ] || { echo "no new core after the kill ($CORE -> ${NEW:-none})"; exit 1; }
-python3 - "$ROOT/build/window-attach-1.txt" "$ROOT/build/window-attach-2.txt" "$ROOT/build/window-attach-3.txt" <<'PY'
+[ -n "$NEW" ] && [ "$NEW" != "$CORE" ] && [ "$NEW" != "$MID" ] || { echo "no new core after the kill ($CORE -> ${NEW:-none})"; exit 1; }
+python3 - "$ROOT/build/window-attach-1.txt" "$ROOT/build/window-attach-2.txt" "$ROOT/build/window-attach-3.txt" "$ROOT/build/window-attach-4.txt" <<'PY'
 import re, sys
 dumps = [open(p).read() for p in sys.argv[1:]]
 got = [[(int(t), p) for t, p in re.findall(r"turn-tick (\d+) pid (\d+)", d)] for d in dumps]
@@ -72,9 +78,9 @@ pids = [sorted({p for _, p in g}) for g in got]
 ticks = [max([t for t, _ in g] or [0]) for g in got]
 fail = []
 if len(pids[0]) != 1 or any(p != pids[0] for p in pids): fail.append(f"the pi process: {pids}")
-if not (ticks[0] < ticks[1] < ticks[2]): fail.append(f"the turn did not go on: last ticks {ticks}")
+if not (ticks[0] < ticks[1] < ticks[2] < ticks[3]): fail.append(f"the turn did not go on: last ticks {ticks}")
 if fail: sys.exit("\n".join(fail))
-print(f"one turn (pi {pids[0][0]}): tick {ticks[0]}, window killed, tick {ticks[1]} in a new window, core killed, tick {ticks[2]} after the reconnect")
+print(f"one turn (pi {pids[0][0]}): tick {ticks[0]}, window killed, tick {ticks[1]} in a new window, core killed, tick {ticks[2]} after the reconnect, core stopped (SIGTERM), tick {ticks[3]} after the next")
 PY
 kill -TERM "$NEW"
 for _ in $(seq 50); do [ -z "$(cores)" ] && break; sleep 0.1; done

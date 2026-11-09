@@ -4,6 +4,7 @@ package main
 // ⌘Q, the Dock's Quit, logout and Stop All, in process and with a separate core.
 
 import "core:testing"
+import "core:time"
 
 @(test)
 quit_paths_table :: proc(t: ^testing.T) {
@@ -30,4 +31,16 @@ quit_paths_table :: proc(t: ^testing.T) {
 	for r in rows {
 		testing.expectf(t, quit_route(r.from, r.separate, r.quitting) == r.want, "%v separate=%v quitting=%v: %v, want %v", r.from, r.separate, r.quitting, quit_route(r.from, r.separate, r.quitting), r.want)
 	}
+}
+
+// A separate core that keeps stopping (client_core_tick): at most RECONNECTS_MAX reconnects in a
+// minute, then the window gives up; a minute later it may again.
+@(test)
+reconnect_limit :: proc(t: ^testing.T) {
+	t0 := time.Tick{_nsec = 1_000_000_000}
+	since: time.Tick
+	n: int
+	for i in 0 ..< RECONNECTS_MAX do testing.expectf(t, reconnect_allowed(&since, &n, time.tick_add(t0, time.Duration(i) * time.Second)), "reconnect %d", i + 1)
+	testing.expect(t, !reconnect_allowed(&since, &n, time.tick_add(t0, 30 * time.Second)), "one too many within the minute")
+	testing.expect(t, reconnect_allowed(&since, &n, time.tick_add(t0, RECONNECTS_PER)), "a minute later")
 }

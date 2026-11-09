@@ -317,6 +317,7 @@ on_system_appearance :: proc(light: bool) {
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
 	if window_only_quit(cmd) do return
+	if lost_core_save(cmd) do return
 	client_send(cmd) // client.odin
 }
 
@@ -328,6 +329,16 @@ window_only_quit :: proc(cmd: core.Command) -> bool {
 	if !is || q.confirm != "" do return false
 	if quit_route(q.stop_sessions ? .Stop_All : .Menu, client_separate(), app_closing()) != .Close_Window do return false
 	app_request_quit()
+	return true
+}
+
+// ⌘S with the separate core gone (client.lost): the window saves the buffer itself, as the core's
+// tab host call would have had it do, so unsaved work is never stuck behind a dead core.
+lost_core_save :: proc(cmd: core.Command) -> bool {
+	c, is := cmd.(core.Save_File)
+	if !is || !client.lost do return false
+	r, _ := editor_apply(c, {kind = .UI})
+	if !r.ok do toast_show(r.error, true)
 	return true
 }
 
@@ -390,13 +401,14 @@ quit_notice_once :: proc() {
 		fmt.println("[autotest] quit notice")
 		return
 	}
-	platform_alert("Your sessions keep running", "Deckhand's window closes, and its background core keeps your sessions and jobs running. Open Deckhand again to see them. To stop them too, choose Quit Deckhand and Stop All Sessions… in the Deckhand menu.")
+	platform_alert("Your sessions keep running", "Deckhand's window closes, and its background core keeps your sessions and jobs running. Open Deckhand again to see them. To stop them too, choose Quit Deckhand and Stop All Sessions… in the Deckhand menu.", "OK")
 }
 
 // A menu row's command: as ui_do, then its outcome is shown where nothing
 // else would show it (menu_result: a failure, a copy).
 ui_do_menu :: proc(cmd: core.Command, label: string) {
 	if window_only_quit(cmd) do return
+	if lost_core_save(cmd) do return
 	client_send(cmd, menu = label)
 }
 
@@ -926,7 +938,7 @@ event :: proc(e: ^sapp.Event) {
 			app.close_asked = {}
 			if !core.app_quitting && len(tab_views_unsaved_paths()) > 0 {
 				sapp.cancel_quit()
-				toast_show("Save or close the files with unsaved changes first: the window closes, the sessions run on", true)
+				toast_show(client.lost ? "Save (⌘S) or close the files with unsaved changes first: Deckhand's background core is gone" : "Save or close the files with unsaved changes first: the window closes, the sessions run on", true)
 				return
 			}
 			if !app_closing() do quit_notice_once()

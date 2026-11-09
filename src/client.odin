@@ -70,6 +70,9 @@ Client :: struct {
 	core_pid:  i32,
 	abandoned: map[string]bool, // results that came past CLIENT_WAIT: dropped when they come
 	lost:      bool, // the core's connection ended
+	gave_up:   bool, // ...and no reconnect will be tried (client_core_give_up)
+	reconnects: int, // reconnects since reconnects_since (reconnect_allowed)
+	reconnects_since: time.Tick,
 }
 
 client: Client

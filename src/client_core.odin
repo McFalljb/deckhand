@@ -33,6 +33,9 @@ import "trust"
 
 CLIENT_WAIT :: 250 * time.Millisecond
 CORE_START_WAIT :: 15 * time.Second
+CORE_RELAUNCH_EVERY :: time.Second // while no core answers (client_core_dial)
+RECONNECTS_MAX :: 3 // reconnects in RECONNECTS_PER: past it the window gives up (client_core_tick)
+RECONNECTS_PER :: 60 * time.Second
 
 // The longest a command waited for its result over core.sock this run (the 250 ms bound: Q9), and
 // how many gave up waiting (test mode logs them).
@@ -173,15 +176,17 @@ client_core_subscribe :: proc() -> string {
 	return ""
 }
 
-// Dials core.sock until a core with a window token answers its hello, launching one (once) if
-// none does, for up to CORE_START_WAIT. "" = client.sock is the link.
+// Dials core.sock until a core with a window token answers its hello, for up to CORE_START_WAIT,
+// launching one every CORE_RELAUNCH_EVERY while none does: a core that is still stopping (its
+// handover and save, under core.lock) makes the first launch exit at once. "" = client.sock is the
+// link.
 @(private = "file")
 client_core_dial :: proc(data: string) -> string {
 	run, rwhy := core.sock_runtime_dir_why(context.temp_allocator)
 	if rwhy != "" do return rwhy
 	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
 	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
-	launched := false
+	last_launch: time.Tick
 	for {
 		if fd, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" {
@@ -192,8 +197,8 @@ client_core_dial :: proc(data: string) -> string {
 			}
 			core.sock_close(fd) // not a core's (yet): no window token
 		}
-		if !launched {
-			launched = true
+		if last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY {
+			last_launch = time.tick_now()
 			if why := client_core_launch(run, data); why != "" do return why
 		}
 		if time.tick_diff(time.tick_now(), deadline) <= 0 do return "Deckhand's background core did not start within 15 s"
@@ -207,13 +212,13 @@ client_got_state :: proc() {got_full = true}
 
 // Launches a core for this data dir (the bundled deckhand-core, installed as the holder is).
 @(private = "file")
-client_core_launch :: proc(run, data: string) -> string {
+client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 	bin := core.core_serve_bin_find(context.temp_allocator)
 	if bin == "" do return "Deckhand Core.app (its deckhand-core-serve) is missing from this copy of Deckhand"
 	exe, ok, why := core.core_install(bin, data)
 	if !ok do return why
 	if core.autotest_active do fmt.println("[autotest] core: launching", exe)
-	_, lok, lwhy := core.core_launch(exe, run, data)
+	_, lok, lwhy := core.core_launch(exe, run, data, from_tab)
 	if !lok do return lwhy
 	return ""
 }
@@ -274,17 +279,36 @@ client_core_quit :: proc(why: string) {
 	app_request_quit()
 }
 
-// The frame's and the hidden window's turn: a lost connection is dialled again; one that cannot be
-// (no core within 15 s) says why and ends the window.
+// The frame's and the hidden window's turn: a lost connection is dialled again. One that cannot be
+// (no core within 15 s, or more than RECONNECTS_MAX in RECONNECTS_PER) gives up, once.
 client_core_tick :: proc() {
-	if !client.lost || core.app_quitting do return
-	if why := client_core_reconnect(); why != "" {
-		fmt.eprintln("Deckhand: cannot reconnect to the background core:", why)
-		if core.autotest_active do fmt.println("[autotest] core refused:", why)
-		else do platform_alert("Deckhand lost its background core", why)
-		core.app_quitting = true
-		app_request_quit()
+	if !client.lost || core.app_quitting || client.gave_up do return
+	if !reconnect_allowed(&client.reconnects_since, &client.reconnects, time.tick_now()) {
+		client_core_give_up(fmt.tprintf("its background core stopped more than %d times in a minute", RECONNECTS_MAX))
+		return
 	}
+	if why := client_core_reconnect(); why != "" do client_core_give_up(why)
+}
+
+// At most RECONNECTS_MAX reconnects in any RECONNECTS_PER window that starts at the first one.
+reconnect_allowed :: proc(since: ^time.Tick, count: ^int, now: time.Tick) -> bool {
+	if since^ == {} || time.tick_diff(since^, now) >= RECONNECTS_PER {
+		since^, count^ = now, 0
+	}
+	count^ += 1
+	return count^ <= RECONNECTS_MAX
+}
+
+// No core to reconnect to: said once (gave_up first, so the timer's turns inside the alert's modal
+// loop do nothing), then the window closes as ⌘Q closes it. Never with app_quitting: a buffer with
+// unsaved changes keeps the window open (QUIT_REQUESTED), and ⌘S still saves it (ui_do).
+@(private = "file")
+client_core_give_up :: proc(why: string) {
+	client.gave_up = true
+	fmt.eprintln("Deckhand: cannot reconnect to the background core:", why)
+	if core.autotest_active do fmt.println("[autotest] core: gave up:", why)
+	else do platform_alert("Deckhand lost its background core", fmt.tprintf("Deckhand can't reach its background core: %s. Files with unsaved changes stay open so you can save them; then quit and open Deckhand again.", why), "OK")
+	app_request_quit()
 }
 
 // The window's layout facts the core wrote into its State itself in process (separate only):
@@ -329,7 +353,7 @@ ctl_core_ensure :: proc() {
 		core.sock_close(fd)
 		return
 	}
-	if why := client_core_launch(run, data); why != "" {
+	if why := client_core_launch(run, data, from_tab = true); why != "" {
 		fmt.eprintln("deckhand --ctl: cannot start Deckhand's background core:", why)
 		return
 	}

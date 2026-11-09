@@ -651,13 +651,13 @@ void dh_mac_hide_windows(void) {
 }
 
 // A modal alert with one Quit button (instance.odin: another Deckhand or Deckhand runs).
-void dh_mac_alert(const char* title, const char* text) {
+void dh_mac_alert(const char* title, const char* text, const char* button) {
     [NSApp activateIgnoringOtherApps:YES];
     NSAlert* a = [[NSAlert alloc] init];
     a.alertStyle = NSAlertStyleWarning;
     a.messageText = @(title);
     a.informativeText = @(text);
-    [a addButtonWithTitle:@"Quit"];
+    [a addButtonWithTitle:@(button)];
     [a runModal];
 }
 

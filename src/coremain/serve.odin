@@ -248,7 +248,6 @@ terms_bytes_in :: proc() -> int {
 @(private = "file")
 serve_stop :: proc() {
 	core.core_loop_stop()
-	core.window_door_stop() // the window's link and any waiting: they are not srv.conns
 	if core.app_stop_sessions do core.holder_shutdown()
 	else do core.holder_handover()
 	core.persist_quit()
@@ -261,6 +260,9 @@ serve_stop :: proc() {
 	core.holder_client_stop()
 	core.comments_shutdown()
 	dh_core_activity(0)
+	// the window's link (not one of srv.conns) goes last: a window that reconnects finds the core
+	// gone, not one still holding core.lock through its handover and save
+	core.window_door_stop()
 	if core.autotest_active do fmt.println("[autotest] core: stopped")
 }
 

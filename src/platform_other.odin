@@ -8,7 +8,7 @@ import "core:time"
 // Stubs until Linux/Windows get their own versions (frames drain the inbox).
 
 platform_wake :: proc() {}
-platform_alert :: proc(title, text: string) {}
+platform_alert :: proc(title, text: string, button := "Quit") {}
 platform_hide_windows :: proc() {}
 platform_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) {}
 window_minimised :: proc() -> bool {return false}

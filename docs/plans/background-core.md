@@ -1068,9 +1068,11 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   reaches it through an `applicationShouldTerminate:` added to sokol's delegate at run time; a
   quit Apple event with a reason is logout, restart or shutdown. The first ⌘Q's notice is a
   one-time alert (`<data>/background-core-noticed`).
-- **Reconnect, not quit:** when `core.sock` closes, the window dials again, launching a core if
-  none answers (≤ 15 s, blocking the main thread meanwhile), then drops its terminal copies and
-  facts and takes a fresh `state.full`. A core that ends on purpose (a Quit, Stop All) or lets a
+- **Reconnect, not quit:** when `core.sock` closes, the window dials again, launching a core every
+  second while none answers (≤ 15 s, blocking the main thread meanwhile), then drops its terminal
+  copies and facts and takes a fresh `state.full`. A stopping core lets its window go last, after
+  its handover and save. At most 3 reconnects a minute; then, or when no core comes, the window
+  says so once and closes as ⌘Q does: unsaved buffers keep it open, and ⌘S saves them directly. A core that ends on purpose (a Quit, Stop All) or lets a
   window go for a newer one first sends `window.request quit`: that window quits instead. A core
   that exits by SIGTERM (logout, a handover's predecessor) sends nothing, so windows reconnect.
   The core now focuses the restored current tab itself at start (`persist_after_layout`), which
@@ -1081,7 +1083,8 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   10 s idle exit (no core, no terminal) already existed.
 - **`--ctl`** launches a core when `DECKHAND_SOCKET` is this data dir's `core.sock`, separate mode
   is on and nothing answers. Every core launch drops what Deckhand sets for tabs (tokens, socket,
-  tab ids: `core_launch_env`), so one launched from a tab carries none of it. `deckhand DIR` needed nothing new: its window launches the core.
+  tab ids: `core_launch_env`), so one launched from a tab carries none of it; from a tab, Claude Code's settings
+  (`CLAUDE_CONFIG_DIR`…) go too. `deckhand DIR` needed nothing new: its window launches the core.
 - **The window floor** is `<data>/window-floor`, read at serve's start, written when it rises.
 - **Hidden and minimised:** a toast's seconds start once the window shows; `claude_accounts`'
   per-frame cache also turns over per core tick (frames stop while hidden, and a separate core

@@ -292,4 +292,8 @@ core_launch_env_drops_tab_names :: proc(t: ^testing.T) {
 	env := []string{"HOME=/Users/u", "PATH=/usr/bin", "DECKHAND_TOKEN=t", "DECKHAND_SOCKET=/r/core.sock", "DECKHAND_CONTROL_TOKEN=c", "DECKHAND_CLAUDE_TOKEN=x", "DECKHAND_CLAUDE_TAB=7", "DECKHAND_APP=4", "DECKHAND_JOB=j", "DECKHAND_RUN=r", "PI_DESK_SOCKET=/r/core.sock", "PI_DESK_TOKEN=t", "DECKHAND_DATA_DIR=/d", "DECKHAND_SIGN_IDENTITY=me"}
 	got := core_launch_env(env)
 	testing.expectf(t, len(got) == 4 && got[0] == "HOME=/Users/u" && got[1] == "PATH=/usr/bin" && got[2] == "DECKHAND_DATA_DIR=/d" && got[3] == "DECKHAND_SIGN_IDENTITY=me", "%v", got)
+	// from a tab: Claude Code's settings and session markers go too (the window's launch keeps the settings)
+	claude := []string{"HOME=/Users/u", "CLAUDE_CONFIG_DIR=/c", "CLAUDECODE=1"}
+	testing.expectf(t, len(core_launch_env(claude, from_tab = true)) == 1, "%v", core_launch_env(claude, from_tab = true))
+	testing.expectf(t, len(core_launch_env(claude)) == 2, "%v", core_launch_env(claude))
 }

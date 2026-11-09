@@ -13,4 +13,4 @@ wait 8000
 waitfor turn-tick 15000
 wait 800
 dump window-attach-4
-quit
+quit_window

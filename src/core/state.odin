@@ -104,6 +104,13 @@ Tab_Live :: struct {
 	dead:         bool, // tab_is_dead: Restart is offered
 	restart_wait: bool, // restart_waiting: a restart waits for the old process
 	held:         bool, // its process runs in the session holder (a quit keeps it: quit_would_stop)
+	// its terminal as get_state shows it (json_write.odin): the holder's terminal id and pid,
+	// adopted inexactly, the holder lost, an upgrade's keeper serving it
+	held_term:    u32,
+	pid:          i32,
+	inexact:      bool,
+	holder_lost:  bool,
+	holder_degraded: bool,
 	claude_wait:  Claude_Wait, // a Claude tab: why a message can't go in now (claude_ready)
 	claude_quiet: bool, // claude_hooks_silent, and its banner not dismissed (claude_status_message)
 	claude_restart: Reload_Class, // claude_restart_class

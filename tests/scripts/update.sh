@@ -111,6 +111,8 @@ run() { # SCRIPT VERSION LOG [DIR: what `deckhand DIR` starts in; default the pr
     DECKHAND_UPDATE_URL="file://$W/rel/latest.json" DECKHAND_UPDATE_DOWNLOAD="file://$W/rel/download/" \
     DECKHAND_UPDATE_VERSION="$2" DECKHAND_UPDATE_APP="$W/install/Deckhand.app" \
     DECKHAND_CMD='while [ "${1:-}" = -e ]; do shift 2; done; echo "ARGS: $*"; exec sleep 600' "$BIN" ${4-"$PROJ"} > "$3" 2>&1 || true
+  # a separate core prints what it did (the relaunch, the handover) in its own log: read with the run's
+  if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v '^export DECKHAND_SOCKET=' "$RUN/core.log" >> "$3" || true; : > "$RUN/core.log"; fi # (not its control token)
 }
 fail=0
 check_log() { # LOG
@@ -171,8 +173,10 @@ id=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleIdentifier' "$W/install/Deckhand
 # 4b: another copy (another executable, its own data dir) in the minute the holder waits
 mkdir -p "$W/other" "$W/data-other"
 cp "$BIN" "$W/other/deckhand-update-test"
+[ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && cp "$W/deckhand-core-serve" "$W/deckhand-core" "$W/other/" # its own core, beside it
 HOME="$FAKE_HOME" SHELL=/bin/sh DECKHAND_SCRIPT=tests/scripts/update-4b.txt DECKHAND_SCRIPT_FAIL_FAST=1 DECKHAND_DATA_DIR="$W/data-other" DECKHAND_RUNTIME_DIR="$RUN" \
   "$W/other/deckhand-update-test" > "$W/run4b.log" 2>&1 || true
+if [ "${DECKHAND_SEPARATE_CORE:-0}" = 1 ] && [ -f "$RUN/core.log" ]; then grep -v "^export DECKHAND_SOCKET=" "$RUN/core.log" >> "$W/run4b.log" || true; : > "$RUN/core.log"; fi
 check_log "$W/run4b.log"
 grep -q "refused: secret" "$W/run4b.log" || { echo "run 4b: another Deckhand was not refused by the waiting holder"; fail=1; }
 [ "$(holders | wc -l | tr -d ' ')" = 1 ] || { echo "run 4b: not exactly one session holder: $(holders)"; fail=1; }

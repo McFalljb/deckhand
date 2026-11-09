@@ -8,4 +8,4 @@ waitfor MARK-42 10000
 wait 800
 screen_hashes
 dump two-process-1
-quit
+quit_window

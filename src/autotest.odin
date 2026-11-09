@@ -160,7 +160,10 @@ package main
 //   assert_finished PATH VALUE same, on the last long-running command's finished result
 //   state_json NAME            app state as JSON to build/NAME.json
 //   screen_hashes              log every terminal's screen_hash (tab id, holder terminal, hash)
-//   quit                       quit without confirmation; exit status 1 if an assert failed
+//   quit                       quit without confirmation; exit status 1 if an assert failed. A
+//                              separate core quits too (Quit, as in process: keep_sessions holds),
+//                              so the next run on the data dir starts a fresh one
+//   quit_window                the same, but a separate core runs on (as ⌘Q: two-process, handover)
 //
 // DECKHAND_SCRIPT_FAIL_FAST=1 (the scenes' default: tests/scripts/fresh-build.sh, tests/scenes.py):
 // the first failed check, wait (waitfor, waitstate, waitresult, a command's TIMEOUT...) or missing
@@ -1281,11 +1284,12 @@ autotest_step :: proc() {
 				h, _ := core.screen_hash(x.gt)
 				fmt.printfln("[autotest] screen_hash %d %d %x", id, x.pty.held, h)
 			}
-		case "quit":
+		case "quit", "quit_window":
 			// a separate core: the window process ran core work on its replica (core.run_command)
 			if core.replica_core_runs > 0 do script_fail("the window process ran", core.replica_core_runs, "core command(s) on its replica (see the log)")
 			log(fmt.tprintf("done: %d asserts, %d failed; %d terminal copies checked", at.asserts, at.failures, at.terms_checked))
 			core.app_quitting = true // the script ends the run: no confirmation
+			if cmd == "quit" && client_separate() do script_core_quit()
 			script_show_again()
 			app_request_quit()
 			core.autotest_active = false
@@ -1448,6 +1452,20 @@ script_show_again :: proc() {
 script_write_step :: proc(idx: int, line: string) {
 	text := fmt.tprintf("%s:%d: %s\n", autotest.path, idx + 1, line)
 	_ = os.write_entire_file(autotest.step_file, transmute([]u8)text)
+}
+
+// A script's quit with a separate core: the core quits as an in-process Deckhand would (Quit,
+// confirmed as the user would), so the next run on this data dir starts a fresh core.
+script_core_quit :: proc() {
+	r, _ := client_call_wait(core.Quit{}, SCRIPT_CORE_WAIT)
+	if !r.ok && r.confirm_token != "" do r, _ = client_call_wait(core.Quit{confirm = r.confirm_token}, SCRIPT_CORE_WAIT)
+	if !r.ok {
+		fmt.eprintln("[autotest] the core did not quit:", r.error)
+		return
+	}
+	// until it is gone (its instance lock with it), as an in-process quit is when the process ends
+	start := time.tick_now()
+	for !client.lost && time.tick_since(start) < SCRIPT_CORE_WAIT do client_io(20)
 }
 
 // The snapshot a script reads. A separate core: what the window sent before (a click's command,

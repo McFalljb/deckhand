@@ -2,4 +2,4 @@
 # to a new core process, then attaches to that one: the session's terminals adopted, still running.
 waitstate 20000 open_sessions.0.tabs.1.status running
 assert_state open_sessions.0.tabs.0.status running
-quit
+quit_window

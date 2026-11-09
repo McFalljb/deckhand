@@ -249,7 +249,10 @@ tab_live_tick :: proc() {
 		l.away = tab_held_away(&tab)
 		l.dead = tab_is_dead(&tab)
 		l.restart_wait = restart_waiting(tab.id)
-		if t := terms[tab.id] or_else nil; t != nil do l.held = t.pty.held != 0
+		if t := terms[tab.id] or_else nil; t != nil {
+			l.held, l.held_term, l.inexact, l.holder_lost = t.pty.held != 0, t.pty.held, t.inexact, t.holder_lost
+			if t.pty.held != 0 do l.pid, l.holder_degraded = t.pty.pid, holder_term_degraded(t.pty.held)
+		}
 		if ct, is := &tab.kind.(Claude_Tab); is {
 			l.claude_wait = claude_wait_of(&tab, ct)
 			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)

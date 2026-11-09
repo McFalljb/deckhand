@@ -29,4 +29,4 @@ command {"type":"send_text","tab_id":$last,"text":"sh ~/edit-ext.sh\n"}
 eventually 8000
 assert_state reload.changed.0 $homedir/.pi/agent/extensions/demo/index.ts
 assert_state open_sessions.0.tabs.0.reload.stale true
-quit
+quit_window

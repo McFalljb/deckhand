@@ -263,6 +263,7 @@ window_link_flush :: proc(sweep := false) {
 	if link == nil || !link.subscribed do return
 	tab_term_facts_tick(time.tick_now()) // a terminal made or gone this tick goes with this delta
 	core_live_tick() // over core.sock: what a command did to the runtime goes with its delta (core_live.odin)
+	tab_live_tick() // ...and to each tab's (core_loop.odin)
 	link_free_replies()
 	// an over-limit state.full is built again only once State changed (not on every frame's sweep)
 	if link.need_full && link.too_large && !link.dirty && state.version == link.too_large_version do return

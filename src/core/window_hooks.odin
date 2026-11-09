@@ -113,11 +113,13 @@ App_View :: struct {
 
 // Something the window shows changed: it draws a frame soon.
 window_state_changed :: proc() {
+	window_link_dirty() // the window's replica gets it at the next flush (window_link.odin)
 	if window.state_changed != nil do window.state_changed()
 }
 
 // A short line at the bottom of the window (what a menu choice did, or why not).
 window_toast :: proc(text: string, err := false) {
+	if window_link_toast(text, err) do return // an attached window gets it as a message (window_link.odin)
 	if window.toast != nil do window.toast(text, err)
 }
 

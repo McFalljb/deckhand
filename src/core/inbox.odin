@@ -50,16 +50,19 @@ inbox_submit :: proc(cmd: Command, caller: Caller, reply: ^Reply = nil, menu := 
 	return id
 }
 
-// Runs everything queued, in order. Main thread only.
+// Runs everything queued, in order. Main thread only. The window's frames are read first
+// (window_link.odin: its queued commands join the queue), and its state delta goes at the end.
 inbox_drain :: proc() {
 	heap := runtime.heap_allocator()
 	for {
+		window_link_pump()
 		sync.lock(&inbox_mu)
 		batch := inbox_queue
 		inbox_queue = make([dynamic]Request, heap)
 		sync.unlock(&inbox_mu)
 		if len(batch) == 0 {
 			delete(batch)
+			window_link_flush()
 			return
 		}
 		for r in batch {
@@ -75,6 +78,18 @@ inbox_drain :: proc() {
 		}
 		delete(batch)
 	}
+}
+
+// Runs cmd now, with a request id of its own, outside the queue (what a direct run_command did):
+// the window's calls that need their result at once (window_link.odin). Main thread.
+inbox_run_now :: proc(cmd: Command, caller: Caller, menu := "") -> (Result, u64) {
+	sync.lock(&inbox_mu)
+	inbox_next += 1
+	id := inbox_next
+	sync.unlock(&inbox_mu)
+	res := run_command(cmd, caller, id)
+	if menu != "" do menu_result(menu, cmd, res)
+	return res, id
 }
 
 result_clone :: proc(r: Result, allocator: runtime.Allocator) -> Result {

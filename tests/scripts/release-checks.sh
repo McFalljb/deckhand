@@ -154,6 +154,10 @@ plant16 'DECKHAND_SUCCESS/deckhand-core-sPI_DESK_CEF_SHARDECKHAND_CEF_SHACLAUDE_
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "16-byte pieces of allowed names pass" || bad "a 16-byte piece of an allowed name refused: $(cat "$H/out.txt")"
 plant16 'DECKHAND_SCRIPT_\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a 16-byte piece of a hook name passed" || ok "a 16-byte piece of a hook name refused"
+plant16 'DECKHAND_CLAUDE_\001'
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a piece shared by a hook (DECKHAND_CLAUDE_BIN) passed" || ok "a piece shared by a hook refused"
+plant16 'DECKHAND_SUCCESSDECKHAND_CLI\001'
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "a piece run on into an allowed name passes" || bad "a piece run on into an allowed name refused: $(cat "$H/out.txt")"
 plant16 '\001DECKHAND_SUCCESS\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an unaligned piece passed" || ok "an unaligned piece refused"
 cp /usr/bin/true "$H/planted"

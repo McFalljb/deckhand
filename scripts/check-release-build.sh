@@ -58,18 +58,20 @@ for s in $NAMES; do
 done
 
 # An optimised build keeps some strings it compares against as 16-byte pieces at 16-byte aligned
-# offsets (__literal16), so DECKHAND_SUCCESSOR_SECRET shows as "DECKHAND_SUCCESS" run on into the
-# next piece. Such a match passes when it starts on a 16-byte boundary with the first 16 bytes of an
-# allowed name; what follows is checked the same way if it is another DECKHAND_/PI_DESK_ piece.
-# (scripts/check-env-reads.py, on the source, is the main guard against an unknown knob.)
-ALLOWED16=$(printf '%s\n' "$ALLOWED" | cut -c1-16 | awk 'length == 16')
-piece16() { # OFFSET MATCH
+# offsets (__literal16), run on into the next piece. Only these pieces, of allowed names, pass:
+#   DECKHAND_SUCCESS  DECKHAND_SUCCESSOR_SECRET
+#   PI_DESK_CEF_SHAR  PI_DESK_CEF_SHARED_TEXTURE
+#   DECKHAND_CEF_SHA  DECKHAND_CEF_SHARED_TEXTURE
+# A new one fails the release: check it is a piece of an allowed name, never a hook's, then add it.
+PIECES="DECKHAND_SUCCESS PI_DESK_CEF_SHAR DECKHAND_CEF_SHA"
+piece16() { # OFFSET MATCH: a run of listed pieces, ending in non-name bytes or an allowed name
   o=$1 p=$2
-  while [ $((o % 16)) = 0 ] && [ ${#p} -ge 16 ]; do
+  while [ $((o % 16)) = 0 ]; do
     c=$(printf '%s' "$p" | cut -c1-16)
-    printf '%s\n' "$ALLOWED16" | grep -qxF -- "$c" || return 1
+    case " $PIECES " in *" $c "*) ;; *) return 1 ;; esac
     p=${p#"$c"} o=$((o + 16))
     case $p in DECKHAND_*|PI_DESK_*) ;; *) return 0 ;; esac
+    printf '%s\n' "$ALLOWED" | grep -qxF -- "$p" && return 0
   done
   return 1
 }
@@ -85,7 +87,7 @@ for bin in "$@"; do
   done
   # the catch-all: every DECKHAND_ and PI_DESK_ name in it (lower case too: no knob slips past as
   # DECKHAND_x)
-  for m in $(LC_ALL=C grep -aobE '(DECKHAND|PI_DESK)_[A-Za-z0-9_]*' "$bin" | LC_ALL=C sort -t: -k2 -u); do
+  for m in $(LC_ALL=C grep -aobE '(DECKHAND|PI_DESK)_[A-Za-z0-9_]*' "$bin" | LC_ALL=C sort -u); do
     off=${m%%:*} s=${m#*:}
     printf '%s\n' "$ALLOWED" | grep -qxF -- "$s" && continue
     piece16 "$off" "$s" && continue

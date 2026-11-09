@@ -30,7 +30,17 @@ fi
 mb=$(git merge-base "$base" HEAD 2>/dev/null || true)
 if [ -z "$mb" ]; then echo "check-holder-rev: no merge base with $base"; exit 1; fi
 
-changed=$(git diff --name-only "$mb" HEAD -- src/holder src/holderwire src/trust | grep -v '_test\.odin$' || true)
+# A file counts only if a line other than a comment or a blank changed: a comment edit (a moved
+# file's path, say) builds the same holder, and a bump would re-exec every running one for nothing.
+changed=
+for f in $(git diff --name-only "$mb" HEAD -- src/holder src/holderwire src/trust | grep -v '_test\.odin$' || true); do
+  if git diff -U0 "$mb" HEAD -- "$f" | grep -E '^[-+]' | grep -vE '^(\+\+\+|---) ' |
+    grep -qvE '^[-+][[:space:]]*(//.*)?$'; then
+    changed="$changed$f
+"
+  fi
+done
+changed=$(printf '%s' "$changed")
 if [ -z "$changed" ]; then echo "check-holder-rev: holder code unchanged since $mb (holder_rev $new)"; exit 0; fi
 
 old=$(git show "$mb:src/holder/holder.odin" 2>/dev/null | rev_of || true)

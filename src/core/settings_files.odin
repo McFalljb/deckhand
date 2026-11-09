@@ -44,6 +44,7 @@ import "core:path/filepath"
 import "base:runtime"
 import "core:mem/virtual"
 import "core:slice"
+import "core:strconv"
 import "core:strings"
 import "core:time"
 
@@ -180,6 +181,20 @@ ATLAS_MODEL_ROW :: "deckhand:atlas-model"
 CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
 CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
 CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
+
+// The Machines group (machines.odin; Settings › Experimental › Machines over SSH on, or other
+// machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
+// then a row adds one, and the last allows other machines to connect to this one (the hub door).
+MACHINE_ROW :: "deckhand:machine:"
+MACHINE_ADD_ROW :: "deckhand:machine-add"
+MACHINE_REACH_ROW :: "deckhand:machine-reachable"
+
+// A machine row's number (ok false: not one).
+machine_row_no :: proc(path: string) -> (no: u64, ok: bool) {
+	if !strings.has_prefix(path, MACHINE_ROW) do return 0, false
+	n, nok := strconv.parse_u64(path[len(MACHINE_ROW):], 10)
+	return n, nok
+}
 
 // The pi extensions group (pi_integration.odin): one row per optional extension of Deckhand's pi
 // integration, PI_EXT_ROW + its name, with a Turn on / Turn off button (Set_Pi_Extension).
@@ -339,6 +354,21 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	}
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
+	// Machines over SSH (machines.odin), while the experimental setting is on (or this machine
+	// lets others in: the row that turns it off stays)
+	if state.settings.remote_machines || state.settings.machines_reachable {
+		if state.settings.remote_machines do for m in state.machines {
+			detail := fmt.tprintf("%s · %s", m.target != "" ? m.target : "via", MACHINE_STATUS_NAMES[m.status])
+			if m.status == .Online && m.version != "" do detail = fmt.tprintf("%s %s", detail, m.version)
+			if m.error != "" do detail = fmt.tprintf("%s: %s", detail, m.error)
+			button := m.status == .Taken ? "Take back" : m.status == .Online || m.status == .Connecting ? "" : "Connect"
+			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = button, remove = true})
+		}
+		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add machine…", detail = "an ~/.ssh/config alias or user@host", path = MACHINE_ADD_ROW, button = "Add…"})
+		reach := state.settings.machines_reachable
+		detail := reach ? "on: another machine that logs in here over ssh as you can view and drive this one's sessions" : "off: no other machine can reach this one's sessions"
+		add(&out, {group = "machines", label = "Allow other machines to connect to this one", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Allow"})
+	}
 	return out[:]
 }
 
@@ -817,6 +847,7 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "claude":  return "Claude Code (global)"
 	case "claude-accounts": return "Claude accounts"
 	case "agents":  return "Coding agents"
+	case "machines": return "Machines (experimental)"
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
@@ -825,6 +856,17 @@ settings_group_label :: proc(group, cwd: string) -> string {
 
 @(private = "file")
 sf_model: string // the model the rows were built with
+@(private = "file")
+sf_machines: string // ...and the machines (settings_machines_key)
+
+@(private = "file")
+settings_machines_key :: proc() -> string {
+	if !state.settings.remote_machines && !state.settings.machines_reachable do return ""
+	b := strings.builder_make(context.temp_allocator)
+	fmt.sbprintf(&b, "%v%v;", state.settings.remote_machines, state.settings.machines_reachable)
+	for m in state.machines do fmt.sbprintf(&b, "%d|%s|%v|%s|%s;", m.no, m.name, m.status, m.version, m.error)
+	return strings.to_string(b)
+}
 
 
 // The Settings tab's rows (settings_ui), rebuilt only when what they show changed.
@@ -832,9 +874,12 @@ settings_tree_rows :: proc() -> []Files_Row {
 	v := &settings_ui
 	cwd := settings_project_cwd()
 	model := agent_model() // the Atlas group's model row
-	if v.built && v.root == cwd && v.state_gen == files_state_gen && v.cache_gen == files_cache_gen && sf_built_gen == settings_gen && model == sf_model do return v.rows[:]
+	machines := settings_machines_key() // the Machines group follows its links' status
+	if v.built && v.root == cwd && v.state_gen == files_state_gen && v.cache_gen == files_cache_gen && sf_built_gen == settings_gen && model == sf_model && machines == sf_machines do return v.rows[:]
 	delete(sf_model)
 	sf_model = strings.clone(model)
+	delete(sf_machines)
+	sf_machines = strings.clone(machines)
 	virtual.arena_destroy(&v.arena)
 	_ = virtual.arena_init_growing(&v.arena)
 	a := virtual.arena_allocator(&v.arena)

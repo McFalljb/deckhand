@@ -84,13 +84,15 @@ Conn :: struct {
 	peer:        trust.Peer, // the peer read at accept, before any byte was read (the window's checks)
 	peer_tok:    trust.Audit_Token,
 	version:     string, // a framed hello's window version (temp: until the handoff)
+	hub:         bool, // a framed hello from another machine's core (window_sock.odin)
+	from:        string, // ...that machine's name (temp: until the handoff)
 }
 
 // Who takes a connection after its framed hello (docs/PROTOCOL.md §5a): the fd, the caller (the
 // window's, ui), the bytes the reader read past the hello line (valid during the call), the peer
 // read at accept and the window's version. Nil: a framed hello is refused. A separate core sets it
 // (window_sock.odin: window_token_publish); only the window's hello gets that far.
-socket_framed_handler: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.Peer, version: string)
+socket_framed_handler: proc(fd: Sock_Fd, caller: Caller, leftover: []u8, peer: trust.Peer, version: string, hub: bool, from: string)
 
 @(private = "file")
 Origin :: struct {
@@ -807,13 +809,15 @@ conn_line :: proc(c: ^Conn, line: string) -> bool {
 		if err == "" && m.framed && socket_framed_handler == nil do err = "framed mode is not available in this build"
 		// the framed wire is the window's only: its own token and checks, never a line token's caller
 		if err == "" && m.framed && (m.type != "hello" || m.token_id != "") do err = "framed mode is only for Deckhand's window"
+		if err == "" && m.framed && m.peer != "" && m.peer != "hub" do err = "framed mode is only for Deckhand's window"
 		if err == "" && m.framed {
-			why, version := window_hello_check(c.fd, c.peer, c.peer_tok, m.token)
+			hub := m.peer == "hub"
+			why, version := window_hello_check(c.fd, c.peer, c.peer_tok, m.token, hub, m.core)
 			if why != "" {
 				conn_push(c, reply_json(m.id, fail(why)), force = true)
 				return false
 			}
-			c.caller, c.version = {kind = .UI}, version
+			c.caller, c.version, c.hub, c.from = {kind = .UI}, version, hub, hub_from_name(m.from)
 			return conn_welcome(c, m.id, 0, "", false, true)
 		}
 		if err == "" && m.type == "hello" && m.token_id != "" do return conn_challenge(c, m)
@@ -1059,7 +1063,7 @@ conn_handoff :: proc(c: ^Conn, leftover: []u8) {
 	sync.unlock(&srv.mu)
 	h := socket_framed_handler
 	if h == nil do sock_close(c.fd) // cleared since the hello: nobody takes it
-	else do h(c.fd, c.caller, leftover, c.peer, c.version)
+	else do h(c.fd, c.caller, leftover, c.peer, c.version, c.hub, c.from)
 	for l in c.out do delete(l)
 	delete(c.out)
 	free(c)

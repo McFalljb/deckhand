@@ -49,6 +49,7 @@ import "core:reflect"
 import "core:strconv"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:time"
 import cw "../corewire"
 import jg "../jsonguard"
@@ -129,6 +130,8 @@ Window_Link :: struct {
 	next_ask:   u64,
 	asking:     [dynamic]Link_Ask, // requests waiting for their reply (nested: one inside another's answer)
 	following:  map[u64]bool, // over core.sock: its commands answered pending, whose finished it is sent (window_link_finished)
+	hub:        bool, // another machine's core, not a window (window_sock.odin's hub door; §10.4 M6-A)
+	hub_from:   string, // heap: that machine's name
 }
 
 @(private = "file")
@@ -232,6 +235,7 @@ core_detach_window :: proc(keep_transport := false) {
 			free(link.t, heap)
 		}
 	}
+	delete(link.hub_from, heap)
 	free(link, heap)
 	link = nil
 	tab_host_detached() // what the window owed ends: no_window (tabhost_route.odin)
@@ -1228,14 +1232,27 @@ WINDOW_REPLY_WAIT := 250 * time.Millisecond
 // transport is the socket, leftover the bytes its hello's reader read past the line. A window
 // already attached goes first (one window at a time; the newer is the one the user sees).
 // Main thread.
-core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer) -> bool {
+core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, hub := false, from := "") -> bool {
+	// the newest connection wins (§10.4, decided 2026-11-09): the one it replaces is told who took
+	// it, and waits for its user's Take back rather than reconnecting (they would take turns)
 	if link != nil {
-		fmt.eprintln("Deckhand: a new window attached: the previous one is let go")
-		window_quit("another Deckhand window attached") // it quits, not reconnects (they would take turns)
+		fmt.eprintln("Deckhand: a new", hub ? "hub" : "window", "attached: the previous", link.hub ? "hub" : "window", "is let go")
+		if link.hub {
+			b := strings.builder_make(context.temp_allocator)
+			fmt.sbprintf(&b, `{{"v":%d,"type":"hub.taken","by":`, PROTOCOL_VERSION)
+			json_quote(&b, hub ? from : "")
+			strings.write_byte(&b, '}')
+			link_send(strings.to_string(b))
+		} else if hub {
+			window_viewed_from(from) // Viewed from <machine>, with Take back
+		} else do window_quit("another Deckhand window attached") // it quits, not reconnects
+		link_linger_start()
 		core_detach_window()
 	}
 	heap := runtime.heap_allocator()
 	link = new(Window_Link, heap)
+	link.hub = hub
+	link.hub_from = strings.clone(from, heap)
 	link.sock = new(cw.Sock_Transport, heap)
 	link.sock_peer = peer
 	cw.sock_open(link.sock, fd, peer_check = link_sock_peer_ok, peer_data = &link.sock_peer, initial = leftover, allocator = heap)
@@ -1246,6 +1263,62 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer) -
 	link.tab_facts = make(map[u64]Tab_Facts, heap)
 	link.asking = make([dynamic]Link_Ask, heap)
 	return true
+}
+
+// A link let go for a newer one: its last message (quit, viewed_from, hub.taken) must reach it, and
+// the peer checks every read against this process (trust.peer_still), which fails once this side
+// closed. So its socket is only half-closed (SHUT_WR, through a dup) and kept open until the
+// peer closes it or LINGER_FOR passes (window_door_tick: link_linger_tick).
+LINGER_FOR :: 2 * time.Second
+LINGER_READS :: 16 // a turn reads at most this many times per let-go link (a peer that keeps sending can't hold the main thread)
+
+@(private = "file")
+lingering: [dynamic]struct {
+	fd:    Sock_Fd,
+	until: time.Tick,
+}
+
+@(private = "file")
+link_linger_start :: proc() {
+	if link == nil || link.sock == nil do return
+	cw.sock_flush(link.sock)
+	fd := posix.dup(link.sock.fd)
+	if fd < 0 do return
+	posix.fcntl(fd, .SETFD, i32(posix.FD_CLOEXEC))
+	posix.shutdown(fd, .WR) // the peer reads what was sent, then its end
+	link_linger_add(fd)
+}
+
+@(private = "file")
+link_linger_add :: proc(fd: Sock_Fd) {
+	if lingering == nil do lingering = make([dynamic]type_of(lingering[0]), runtime.heap_allocator())
+	append(&lingering, type_of(lingering[0]){fd, time.tick_add(time.tick_now(), LINGER_FOR)})
+}
+
+// Tests: an fd (nonblocking) as a let-go link, and how many there are.
+link_linger_add_for_test :: proc(fd: Sock_Fd) {link_linger_add(fd)}
+link_linger_count :: proc() -> int {return len(lingering)}
+
+// Main thread: a let-go link whose peer closed, or whose time passed, closes. At most max_reads
+// reads each (what it still sent is dropped); reads: how many were made in all.
+link_linger_tick :: proc(all := false, max_reads := LINGER_READS) -> (reads: int) {
+	buf: [4096]u8
+	for i := len(lingering) - 1; i >= 0; i -= 1 {
+		x := lingering[i]
+		done := all || time.tick_diff(x.until, time.tick_now()) >= 0
+		for k := 0; !done && k < max_reads; k += 1 {
+			n := posix.read(x.fd, &buf[0], len(buf)) // nonblocking: the transport set it on the shared description
+			reads += 1
+			if n > 0 do continue // whatever it still sent: dropped
+			done = n == 0 || (posix.errno() != .EAGAIN && posix.errno() != .EWOULDBLOCK && posix.errno() != .EINTR)
+			break
+		}
+		if done {
+			posix.close(x.fd)
+			unordered_remove(&lingering, i)
+		}
+	}
+	return
 }
 
 // The bytes on the window's socket come from the process checked at accept (§5.3).
@@ -1303,3 +1376,7 @@ window_link_slow_replies: int
 
 // The link is over core.sock (a separate core).
 window_link_is_sock :: proc() -> bool {return link != nil && link.sock != nil}
+
+// The attached link is another machine's core (the hub), not a window: it drops what a window
+// would show (notifications among them), so the core keeps its own.
+window_link_hub :: proc() -> bool {return link != nil && link.hub}

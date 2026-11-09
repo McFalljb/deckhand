@@ -689,6 +689,9 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			if p == core.CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
 			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
 			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
+			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this one" : "Let another machine's Deckhand connect to this one over ssh. It must log in as you (Remote Login on, your keys), and then sees and drives this machine's sessions", ""
+			if p == core.MACHINE_ADD_ROW do return "Add a machine: type its ssh target (an ~/.ssh/config alias or user@host), then Enter. Deckhand runs your own ssh, which must log in without a prompt", ""
+			if _, ok := core.machine_row_no(p); ok do return "Connect to this machine now (Take back: its own window or another Mac lets go)", ""
 			if strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
 			if k, ok := core.folder_row_kind(p); ok do return fmt.tprintf("Pick the %s folder (%s)", core.FOLDER_NAMES[k], core.FOLDER_DOES[k]), ""
 		}
@@ -725,7 +728,11 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 	case .Folder_Reveal: return "Reveal in Finder", ""
 	case .Retry:
 		if r, ok := files_error_row(h.index); ok do return fmt.tprintf("%s. Retry lists the folder again", r.error), ""
-	case .Account_Remove: return "Remove this account from Deckhand's list (its folder is not touched)", ""
+	case .Account_Remove:
+		if h.index >= 0 && h.index < len(fu.drawn) {
+			if _, ok := core.machine_row_no(fu.drawn[h.index]); ok do return "Remove this machine from Deckhand's list (nothing on it is touched)", ""
+		}
+		return "Remove this account from Deckhand's list (its folder is not touched)", ""
 	case .Account_Default: return "Make this the default account: new Claude sessions start in it unless their project last used another", ""
 	case .Filter:       return on_settings() ? "Filter settings files" : "Filter files", ""
 	case .Filter_Clear: return "Clear the filter", "Esc"
@@ -778,6 +785,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if k, ok := core.folder_row_kind(fu.drawn[h.index]); ok do ui_do(core.Set_Folder{kind = k, path = ""})
 		case .Account_Remove:
 			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
+			else if no, ok := core.machine_row_no(fu.drawn[h.index]); ok do ui_do(core.Machine_Remove{no = no})
 		case .Account_Default:
 			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
 		case .Folder_Reveal:
@@ -1091,6 +1099,19 @@ files_commit_edit :: proc() {
 		app.redraw = true
 		return
 	}
+	// a machine's ssh target (Settings → Machines → Add machine…): it is its name too
+	if fu.edit == .Rename && fu.target == core.MACHINE_ADD_ROW {
+		ar := ui_run(core.Machine_Add{name = name, target = name})
+		if !ar.ok {
+			delete(fu.edit_err)
+			fu.edit_err = strings.clone(ar.error)
+			app.redraw = true
+			return
+		}
+		fu.edit = .None
+		ui_do(core.Set_Focus{"files"})
+		return
+	}
 	// a Claude account's name (Settings → Claude accounts): no file is renamed
 	if fu.edit == .Rename && strings.has_prefix(fu.target, core.CLAUDE_ACCOUNT_ROW) {
 		ar := ui_run(core.Rename_Claude_Account{account = fu.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
@@ -1199,6 +1220,20 @@ settings_folder_button :: proc(path: string) -> bool {
 	if strings.has_prefix(path, core.CLAUDE_ACCOUNT_ROW) {
 		label := core.claude_account_label_now(path[len(core.CLAUDE_ACCOUNT_ROW):])
 		files_begin_edit(.Rename, path, label)
+		return true
+	}
+	// Machines (machines.odin): Add machine… types its target in the row's field; a machine's
+	// Connect or Take back connects now
+	if path == core.MACHINE_ADD_ROW {
+		files_begin_edit(.Rename, path, "")
+		return true
+	}
+	if no, ok := core.machine_row_no(path); ok {
+		ui_do(core.Machine_Connect{no = no})
+		return true
+	}
+	if path == core.MACHINE_REACH_ROW {
+		ui_do(core.Set_Machines_Reachable{on = !state.settings.machines_reachable})
 		return true
 	}
 	switch path {

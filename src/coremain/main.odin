@@ -8,6 +8,9 @@
 //                                                   prints the installed serve binary
 //   deckhand-core-serve launch --run DIR --data DIR  starts this binary's core through the launchd
 //                                                   launcher, then exits (the holder's supervisor)
+//   deckhand-core-serve connect [--from NAME]       another machine's hub link, over its ssh: the
+//                                                   hub hello on this machine's core.sock, then
+//                                                   stdio <-> the socket (connect.odin)
 //
 // The plan has one binary (deckhand-core gaining `serve`). Linking the core package and the
 // holder's `hold` into one executable crashes Odin's LLVM backend at -o:speed (an assertion in
@@ -32,6 +35,7 @@ main :: proc() {
 	}
 	if len(os.args) == 4 && os.args[1] == "install" && os.args[2] == "--data" do os.exit(install_main(os.args[3]))
 	if len(os.args) == 6 && os.args[1] == "launch" && os.args[2] == "--run" && os.args[4] == "--data" do os.exit(launch_main(os.args[3], os.args[5]))
+	if len(os.args) >= 2 && os.args[1] == "connect" do os.exit(connect_main(os.args[2:]))
 	fmt.eprintln(SERVE_USAGE)
 	os.exit(2)
 }

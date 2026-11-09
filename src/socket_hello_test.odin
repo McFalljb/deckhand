@@ -254,7 +254,7 @@ socket_framed_hello :: proc(t: ^testing.T) {
 	core.window_door_pids_for_test(0, 0)
 	hs_framed_fd = -1
 	clear(&hs_framed_left)
-	core.socket_framed_handler = proc(fd: core.Sock_Fd, caller: core.Caller, leftover: []u8, peer: trust.Peer, version: string) {
+	core.socket_framed_handler = proc(fd: core.Sock_Fd, caller: core.Caller, leftover: []u8, peer: trust.Peer, version: string, hub: bool, from: string) {
 		hs_framed_caller = caller
 		append(&hs_framed_left, ..leftover)
 		hs_framed_fd = fd // last: the test thread waits for it

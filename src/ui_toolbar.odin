@@ -234,6 +234,7 @@ Pop_Item :: enum {
 	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
 	Separate_Core, // run sessions in a background core (on by default; read at launch); last so earlier rows keep their ids
+	Remote_Machines, // Experimental: Machines over SSH (machines.odin; off by default); last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.
@@ -245,7 +246,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
 	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
 	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Shortcuts, .Settings_Files, .Control_Token, .Setup, .Tidy_Projects, .Update_Checks,
-	.Keep_Sessions, .Separate_Core,
+	.Keep_Sessions, .Separate_Core, .Remote_Machines,
 }
 
 POP_ACTIONS := [Pop_Item]string {
@@ -282,6 +283,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Keep_Sessions     = "keep_sessions",
 	.Control_Token     = "copy_control_token",
 	.Separate_Core     = "separate_core",
+	.Remote_Machines   = "remote_machines",
 }
 
 settings_open :: proc() -> bool {return state.focus_widget == "settings"}
@@ -541,6 +543,7 @@ settings_layout :: proc(w, h: f32) {
 		pop_row(.Update_Checks, !core.update_view().checks_off)
 		pop_row(.Keep_Sessions, state.settings.keep_sessions)
 		pop_row(.Separate_Core, state.settings.separate_core)
+		pop_row(.Remote_Machines, state.settings.remote_machines)
 	}
 }
 

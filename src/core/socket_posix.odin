@@ -227,7 +227,21 @@ when ODIN_OS == .Darwin {
 		if proc_pidinfo(c.int(pid), PROC_PIDTBSDINFO, 0, &buf, size_of(buf)) != size_of(buf) do return 0
 		return (^i32)(&buf[16])^
 	}
+
+	// window_sock.odin's Proc_Look: pbi_ppid and pbi_uid (offset 20), and proc_pidpath's base name.
+	proc_look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {
+		if pid <= 0 do return 0, 0, ""
+		buf: [PROC_BSDINFO_SIZE]u8
+		if proc_pidinfo(c.int(pid), PROC_PIDTBSDINFO, 0, &buf, size_of(buf)) != size_of(buf) do return 0, 0, ""
+		path: [4096]u8
+		n := proc_pidpath(c.int(pid), &path[0], u32(len(path)))
+		if n <= 0 do return 0, 0, ""
+		full := string(path[:n])
+		if i := strings.last_index_byte(full, '/'); i >= 0 do full = full[i + 1:]
+		return (^i32)(&buf[16])^, (^u32)(&buf[20])^, strings.clone(full, context.temp_allocator)
+	}
 } else {
 	sock_peer_pid :: proc(fd: Sock_Fd) -> i32 {return 0} // Linux: SO_PEERCRED (later)
 	pid_parent :: proc(pid: i32) -> i32 {return 0}
+	proc_look :: proc(pid: i32) -> (parent: i32, uid: u32, name: string) {return 0, 0, ""} // Linux: /proc (M6-E); until then no hub gets in
 }

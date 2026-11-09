@@ -167,7 +167,7 @@ Holder :: struct {
 	listen_paused_at:  time.Tick,
 	owns_dirs:         bool, // cfg.run_dir and data_dir are ours to free (state_decode)
 	sup:               Supervisor, // a separate core's crashes and relaunches (supervisor.odin)
-	sup_launcher:      c.int, // a supervisor launch's `<serve> launch` until reaped, else 0
+	sup_launchers:     [dynamic]c.int, // supervisor launches' `<serve> launch` until reaped
 	forked:            bool, // a keeper serving (a fork that never exec'd): no Security.framework, so no supervisor
 }
 
@@ -336,6 +336,7 @@ holder_free :: proc(h: ^Holder, kill_children := false) {
 	delete(h.buf)
 	delete(h.sup.path)
 	delete(h.sup.crashes)
+	delete(h.sup_launchers)
 	free(h)
 }
 
@@ -748,7 +749,12 @@ handle_frame :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 	case .Goodbye:
 		m: holderwire.Goodbye
 		if holderwire.decode(f, .Goodbye, &m, context.temp_allocator) != .None do return
-		if cn.supervised do sup_core_gone(&h.sup, false, time.tick_now()) // a goodbye: nothing to relaunch
+		// a goodbye: nothing to relaunch, unless it names a successor (a core's handover): that one
+		// must say SUPERVISE in time, or it counts as a crash (supervisor.odin)
+		if cn.supervised {
+			if m.mode == "handover" && m.successor do sup_successor_named(&h.sup, time.tick_now())
+			else do sup_core_gone(&h.sup, false, time.tick_now())
+		}
 		switch m.mode {
 		case "handover": goodbye_handover(h, cn, m.successor)
 		case "shutdown": shutdown(h)

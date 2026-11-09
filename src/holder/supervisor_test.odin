@@ -106,3 +106,27 @@ supervise_needs_a_window :: proc(t: ^testing.T) {
 	testing.expect(t, h.sup.next_launch != {}, "no relaunch planned after the crash")
 	h.sup.next_launch = {} // never launch /x
 }
+
+// A handover's successor that dies before it says SUPERVISE counts as a crash: relaunched, and a
+// second failure rolls back to the previous core. A core that then stays up resets the rollback.
+@(test)
+supervisor_successor_dies :: proc(t: ^testing.T) {
+	s: Supervisor
+	defer {delete(s.path); delete(s.crashes)}
+	sup_core_said(&s, "/x/deckhand-core-serve", at(0))
+	sup_successor_named(&s, at(100)) // GOODBYE{handover, successor}
+	testing.expect_value(t, sup_tick(&s, at(110), false), Sup_Action.None)
+	testing.expect_value(t, sup_tick(&s, at(120), false), Sup_Action.None) // SUP_LAUNCH_WAIT ran out
+	testing.expect_value(t, s.failures, 1)
+	testing.expect_value(t, sup_tick(&s, at(121), false), Sup_Action.Launch)
+	_ = sup_tick(&s, at(141), false) // that one never came back either
+	testing.expect(t, s.rolled_back)
+	testing.expect_value(t, sup_tick(&s, at(143), false), Sup_Action.Launch)
+	testing.expect_value(t, sup_launch_path(&s, "/d"), "/d/" + SUP_PREVIOUS)
+	sup_core_said(&s, "/d/" + SUP_PREVIOUS, at(144))
+	_ = sup_tick(&s, at(205), true)
+	testing.expect(t, s.healthy && !s.rolled_back && !s.use_previous)
+	// a plain goodbye (no successor): nothing is waited for
+	sup_core_gone(&s, false, at(300))
+	testing.expect_value(t, sup_tick(&s, at(400), false), Sup_Action.None)
+}

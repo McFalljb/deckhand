@@ -886,6 +886,9 @@ jobs_check :: proc(now: i64) {
 			continue
 		}
 		if now < j.next_due || j.queued do continue
+		// a core handing over (core_handover.odin): what is due waits for the successor, its due
+		// time and queue place kept (an `at` job is not used up)
+		if core_handover_pending() do continue
 		due := j.next_due
 		late := now - due
 		reason := ""
@@ -932,6 +935,7 @@ slot_free :: proc() -> bool {
 // Queued runs start in due order as slots free up.
 @(private = "file")
 jobs_dequeue :: proc() {
+	if core_handover_pending() do return // the successor starts them (jobs_check)
 	for slot_free() {
 		next: ^Job
 		for j in sched.jobs do if j.queued && j.run == nil && (next == nil || j.queued_due < next.queued_due) do next = j

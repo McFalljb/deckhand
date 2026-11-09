@@ -80,6 +80,14 @@ sup_core_said :: proc(s: ^Supervisor, path: string, now: time.Tick) {
 	s.next_launch, s.launched_at = {}, {}
 }
 
+// The watched core said GOODBYE{handover, successor}: its successor must say SUPERVISE within
+// SUP_LAUNCH_WAIT, or it counts as a crash (relaunch, then rollback), as a launch of ours does.
+sup_successor_named :: proc(s: ^Supervisor, now: time.Tick) {
+	if !s.attached do return
+	s.attached = false
+	s.next_launch, s.launched_at = {}, now
+}
+
 // The watched core's connection ended: crashed (no GOODBYE), or said GOODBYE (nothing to relaunch).
 sup_core_gone :: proc(s: ^Supervisor, crashed: bool, now: time.Tick) {
 	if !s.attached && s.launched_at == {} do return // not a watched core's
@@ -112,6 +120,7 @@ sup_failed :: proc(s: ^Supervisor, now: time.Tick) {
 sup_tick :: proc(s: ^Supervisor, now: time.Tick, core_attached: bool) -> Sup_Action {
 	if s.attached && !s.healthy && time.tick_diff(s.attached_at, now) >= SUP_HEALTHY {
 		s.healthy, s.failures = true, 0
+		s.rolled_back, s.use_previous = false, false // a core that stays up: the next crash starts over
 		clear(&s.crashes)
 	}
 	if s.launched_at != {} && time.tick_diff(s.launched_at, now) >= SUP_LAUNCH_WAIT {
@@ -147,9 +156,10 @@ sup_status :: proc(h: ^Holder) -> holderwire.Supervise_Status {
 // The loop's part (timers): launch when due. The launcher (`<serve> launch`) is our child only
 // for the launch itself; it is reaped here.
 sup_run :: proc(h: ^Holder) {
-	if h.sup_launcher > 0 {
+	for i := len(h.sup_launchers) - 1; i >= 0; i -= 1 {
 		st: c.int
-		if r := waitpid(h.sup_launcher, &st, WNOHANG); r == h.sup_launcher || (r < 0 && errno() == ECHILD) do h.sup_launcher = 0
+		p := h.sup_launchers[i]
+		if r := waitpid(p, &st, WNOHANG); r == p || (r < 0 && errno() == ECHILD) do unordered_remove(&h.sup_launchers, i)
 	}
 	if h.forked do return // a keeper: Security.framework is not safe after fork (keeper.odin)
 	if sup_tick(&h.sup, time.tick_now(), h.core != nil) != .Launch do return
@@ -175,7 +185,7 @@ sup_launch :: proc(h: ^Holder, path: string) -> string {
 	log := strings.clone_to_cstring(fmt.tprintf("%s/core.log", h.cfg.run_dir), tmp)
 	pid, why := spawn_detached(argv, log)
 	if why != "" do return why
-	h.sup_launcher = pid
+	append(&h.sup_launchers, pid)
 	return ""
 }
 

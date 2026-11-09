@@ -60,3 +60,13 @@ core_handover_refusals :: proc(t: ^testing.T) {
 	testing.expect(t, !r.ok, "a control caller handed the core over")
 	testing.expect(t, !core_handover_pending())
 }
+
+// The window never hands a rolled-back core (or the user's previous one) back to current.
+@(test)
+core_handover_keeps_a_rollback :: proc(t: ^testing.T) {
+	testing.expect(t, core_handover_keep("aaa", "bbb", true)) // the supervisor rolled back
+	testing.expect(t, core_handover_keep("aaa", "aaa", false)) // it is the previous core
+	testing.expect(t, !core_handover_keep("aaa", "bbb", false))
+	testing.expect(t, !core_handover_keep("", "", false)) // unknown builds are not a match
+}
+

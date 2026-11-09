@@ -338,3 +338,46 @@ jobs_commands_callers :: proc(t: ^testing.T) {
 	run_command(Set_Job_Limits{stall = 0, loop_calls = 0, fail_pause = 0}, ui)
 	testing.expect(t, limit_stall() >= 1 && limit_loop() >= 2 && limit_fail() >= 1)
 }
+
+// An `at` job due while a handover is under way (core_handover.odin) is not used up: it keeps its
+// due time, and the successor's scheduler takes it (paused here, so nothing starts: it is skipped).
+@(test)
+jobs_wait_for_a_handover :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	dir := fmt.aprintf("%s/pd-jobs-ho-%d", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), time.now()._nsec % 1_000_000_000)
+	notes := fmt.aprintf("%s/notes", dir)
+	os.make_directory_all(fmt.tprintf("%s/jobs", notes))
+	old_root := home_root
+	home_root = fmt.aprintf("%s/data", dir)
+	os.make_directory_all(home_root)
+	jobs_reset()
+	saved := state.settings
+	state.settings.home_dir = ""
+	defer {
+		core_handover_pending_set(false)
+		jobs_reset()
+		jobs_rows_free_all()
+		state.settings = saved
+		home_root = old_root
+		os.remove_all(dir)
+	}
+	ui := Caller{kind = .UI}
+	testing.expect(t, run_command(Set_Home_Dir{path = notes}, ui).ok)
+	r := run_command(Job_Create{name = "Once", schedule = "at 2030-01-01 09:00", prompt = "x"}, ui)
+	testing.expect(t, r.ok, r.error)
+	jobs_scan(true)
+	start := i64(1_800_000_000) // 2027: before it is due
+	jobs_check(start) // its due time computed
+	run_command(Jobs_Sync{})
+	due := state.jobs[0].next_due
+	testing.expect(t, due > start)
+	state.settings.jobs_paused = true
+	core_handover_pending_set(true)
+	jobs_check(due + 1)
+	run_command(Jobs_Sync{})
+	testing.expect_value(t, state.jobs[0].next_due, due) // kept for the successor
+	core_handover_pending_set(false)
+	jobs_check(due + 2)
+	run_command(Jobs_Sync{})
+	testing.expect_value(t, state.jobs[0].next_due, i64(0)) // taken (skipped: paused)
+}

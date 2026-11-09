@@ -293,12 +293,21 @@ client_core_handover_to :: proc(hello: Core_Hello, data: string) -> (to, why: st
 		if core.autotest_active && core.hook_env(.Core_Handover) == "self" do return "self", "" // installs nothing in test mode
 	}
 	bundled := core.core_serve_bin_find(context.temp_allocator)
-	mine := bundled == "" ? "" : core.core_build_of(bundled)
 	switch hello.skew {
 	case .Ok:
-		// a development build has no version: another build (a rebuild) is replaced by this one's
-		if mine == "" || hello.build == "" || hello.build == mine || core.core_version() != "" do return "", ""
+		return "", "" // a development build (no version) never hands over to another of its kind
 	case .Core_Older, .Core_Below_Min, .Core_Older_Generation:
+		// never undo a rollback: the core the supervisor fell back to, or the user's Use previous core
+		prev := core.core_serve_of(data, core.CORE_PREVIOUS)
+		rolled := false
+		if run, rwhy := core.sock_runtime_dir_why(context.temp_allocator); rwhy == "" {
+			st, ok := core.holder_supervise_ask(run, "status")
+			rolled = ok && st.rolled_back
+		}
+		if core.core_handover_keep(hello.build, prev == "" ? "" : core.core_build_of(prev), rolled) {
+			fmt.eprintln("Deckhand: background core: keeping the previous core that runs (a rollback, or Use previous core)")
+			return "", hello.skew == .Core_Older ? "" : core.core_skew_message(hello.skew)
+		}
 	case .Core_Newer_Generation:
 		msg := core.core_skew_message(hello.skew)
 		if core.autotest_active || !platform_ask("Update Deckhand", fmt.tprintf("%s. Update Deckhand, or hand your sessions to this older app's core (they keep running).", msg), "Use This App's Core", "Quit") do return "", msg

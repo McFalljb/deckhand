@@ -145,6 +145,11 @@ core_in_use :: proc() -> string {
 // in_use names ("<vdir>/<name>/"). Pure but for the file system (core_versions_test.odin).
 core_collect :: proc(vdir, in_use: string) {
 	if in_use == "?" do return
+	real := "" // the command lines may name it by its resolved path
+	if r := posix.realpath(strings.clone_to_cstring(vdir, context.temp_allocator), nil); r != nil {
+		real = strings.clone(string(r), context.temp_allocator)
+		posix.free(r)
+	}
 	keep := []string{core_link_read(vdir, CORE_CURRENT), core_link_read(vdir, CORE_PREVIOUS)}
 	entries, err := os.read_all_directory_by_path(vdir, context.temp_allocator)
 	if err != nil do return
@@ -154,6 +159,7 @@ core_collect :: proc(vdir, in_use: string) {
 		st: posix.stat_t
 		if posix.lstat(strings.clone_to_cstring(e.fullpath, context.temp_allocator), &st) != .OK || !posix.S_ISDIR(st.st_mode) do continue
 		if strings.contains(in_use, fmt.tprintf("%s/%s/", vdir, e.name)) do continue
+		if real != "" && strings.contains(in_use, fmt.tprintf("%s/%s/", real, e.name)) do continue
 		fmt.eprintln("Deckhand: background core: removing an unused version,", e.fullpath)
 		remove_tree(e.fullpath)
 	}

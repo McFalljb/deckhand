@@ -8,16 +8,27 @@ inputs:
 runs:
   using: composite
   steps:
+    # The release tarball is cached by version and checksum (GitHub's release downloads sometimes
+    # answer 504) and checked against ODIN_SHA256 on every run, cached or not
+    - name: Cache Odin
+      uses: actions/cache@v4
+      with:
+        path: ${{ runner.temp }}/odin-dl
+        key: odin-${{ runner.os }}-arm64-${{ env.ODIN_VERSION }}-${{ env.ODIN_SHA256 }}
+
     - name: Odin (pinned, checksummed)
       shell: bash
       run: |
-        # asset name checked for dev-2026-09; check it again when bumping ODIN_VERSION
-        curl -sSfL -o odin.tar.gz \
-          "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
-        echo "${ODIN_SHA256}  odin.tar.gz" | shasum -a 256 -c
+        dl="$RUNNER_TEMP/odin-dl/odin.tar.gz"
+        if [ ! -f "$dl" ]; then
+          mkdir -p "$RUNNER_TEMP/odin-dl"
+          # asset name checked for dev-2026-09; check it again when bumping ODIN_VERSION
+          curl -sSfL --retry 5 --retry-all-errors --retry-delay 10 -o "$dl" \
+            "https://github.com/odin-lang/Odin/releases/download/${ODIN_VERSION}/odin-macos-arm64-${ODIN_VERSION}.tar.gz"
+        fi
+        echo "${ODIN_SHA256}  $dl" | shasum -a 256 -c
         mkdir -p "$RUNNER_TEMP/odin"
-        tar -xzf odin.tar.gz -C "$RUNNER_TEMP/odin" --strip-components 1
-        rm odin.tar.gz
+        tar -xzf "$dl" -C "$RUNNER_TEMP/odin" --strip-components 1
         echo "$RUNNER_TEMP/odin" >> "$GITHUB_PATH"
         "$RUNNER_TEMP/odin/odin" version
 

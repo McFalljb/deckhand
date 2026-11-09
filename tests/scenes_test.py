@@ -48,9 +48,10 @@ class CoreSelection(unittest.TestCase):
         self.assertIn("worktrees", picked)
         self.assertNotIn("browser-a", picked)
 
-    def test_terminal_socket_and_persistence_select_everything(self):
+    def test_terminal_socket_and_persistence_select_core(self):
         for f in ("src/core/term.odin", "src/core/pty_posix.odin", "src/core/socket.odin", "src/core/persist.odin"):
-            self.assertTrue(any(scenes.fnmatch.fnmatchcase(f, g) for g in self.special["@all"]), f)
+            self.assertTrue(any(scenes.fnmatch.fnmatchcase(f, g) for g in self.special["@core"]), f)
+            self.assertFalse(any(scenes.fnmatch.fnmatchcase(f, g) for g in self.special["@all"]), f)
 
 
 class Freshness(unittest.TestCase):

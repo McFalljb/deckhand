@@ -77,6 +77,8 @@ window_on_request :: proc(text: string) {
 		r.ok = job_sheet_holds_quit()
 	case .Notify:
 		if core.platform.notify != nil do core.platform.notify(q.text, q.message) // a separate core's (its own platform)
+	case .Quit:
+		client_core_quit(q.text) // the core ends on purpose, or another window took over: no reconnect (client_core.odin)
 	}
 	if id != "" do window_reply(id, r)
 }

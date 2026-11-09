@@ -285,11 +285,25 @@ core_label_prefix := "dev.deckhand.core."
 
 // Starts a separate core (`deckhand-core serve`, src/coremain) for run and data, as the holder is
 // started: through launchd (its own coalition), or directly in test mode and with
-// DECKHAND_HOLDER_DIRECT=1, or when the launchd launch fails. pid: the core's.
-core_launch :: proc(bin, run, data: string) -> (pid: i32, ok: bool, why: string) {
-	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, nil, "serve")
-	lpid, _, lok, lwhy := launchd_launch(bin, run, data, nil, core_label_prefix, mode = "serve")
+// DECKHAND_HOLDER_DIRECT=1, or when the launchd launch fails. pid: the core's. Its environment
+// is this process's without what Deckhand sets for a tab (core_launch_env): `deckhand --ctl` run
+// in a tab launches one too, and the core must not carry that tab's tokens, socket or ids.
+// from_tab (`deckhand --ctl`): Claude Code's settings (CLAUDE_CONFIG_DIR…) go too, as the login
+// environment's merge drops them (login_env.odin): an agent's shell is not the user's.
+core_launch :: proc(bin, run, data: string, from_tab := false) -> (pid: i32, ok: bool, why: string) {
+	ours, _ := os.environ(context.temp_allocator)
+	env := core_launch_env(ours, from_tab)
+	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve")
+	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve")
 	if lok do return lpid, true, ""
 	fmt.eprintln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
-	return holder_launch_direct(bin, run, data, nil, "serve")
+	return holder_launch_direct(bin, run, data, env, "serve")
+}
+
+// env without the names Deckhand sets for its tabs, jobs and control callers, under either name
+// (env_tab_dropped: the same scrub a tab's own environment gets). Temp allocator.
+core_launch_env :: proc(env: []string, from_tab := false) -> []string {
+	out := make([dynamic]string, 0, len(env), context.temp_allocator)
+	for e in login_env_strip_claude(env, from_tab) do if !env_tab_dropped(env_key(e)) do append(&out, e)
+	return out[:]
 }

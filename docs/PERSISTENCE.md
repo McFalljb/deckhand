@@ -73,6 +73,15 @@ Otherwise the terminals are rebuilt from the holder's tails (`inexact`). If the 
 written at quit (disk full, an unwritable data dir), nothing is sent to the holder: the sessions
 run on and the next launch rebuilds them from the tails.
 
+With a separate core (`deckhand-core serve`, docs/plans/background-core.md §10.3 M4-C/D) the core
+owns all of the above; the window writes nothing here but `<data dir>/background-core-noticed`
+(an empty marker: the first ⌘Q's note that the sessions run on was shown). The core also keeps
+`<data dir>/window-floor`: one `X.Y.Z` line, the newest window version that attached (P5), so a
+core that exits (idle for 10 minutes, a crash, a handover) and starts again still refuses an
+older window. The core saves `workspace.json` at its own exit (a Quit, Stop All, SIGTERM, the
+idle exit) and focuses the restored current tab itself when it starts, so a window that attaches,
+or reconnects after the core crashed, finds that session started.
+
 - `projects`: projects added by hand, renamed, selected, or holding a saved session. Projects
   derived from pi's store are found again by scanning; saved entries add names and bring back
   hand-added projects (on top, in saved order). A project whose folder is gone shows as missing.

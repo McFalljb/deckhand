@@ -263,3 +263,37 @@ core_loop_timer_backs_off :: proc(t: ^testing.T) {
 	delete(periods)
 	periods = nil
 }
+
+// A separate core's idle exit (core_idle_due, §6 "Idle"): 10 minutes with nothing to keep it, on a
+// fake clock; a window, a tab's process, a job run or an enabled schedule each keeps it, and starts the count again.
+@(test)
+core_idle_exit_rule :: proc(t: ^testing.T) {
+	t0 := time.Tick{_nsec = 1_000_000_000}
+	at :: proc(t0: time.Tick, d: time.Duration) -> time.Tick {return time.tick_add(t0, d)}
+	since: time.Tick
+	testing.expect(t, !core_idle_due(&since, {}, t0)) // the count starts
+	testing.expect(t, !core_idle_due(&since, {}, at(t0, CORE_IDLE_EXIT - time.Second)))
+	testing.expect(t, core_idle_due(&since, {}, at(t0, CORE_IDLE_EXIT)))
+	for keep in ([]Idle_Facts{{window = true}, {tab_process = true}, {job_run = true}, {job_schedule = true}}) {
+		since = {}
+		testing.expect(t, !core_idle_due(&since, {}, t0))
+		testing.expect(t, !core_idle_due(&since, keep, at(t0, CORE_IDLE_EXIT)), "kept")
+		testing.expect_value(t, since, time.Tick{}) // reset: 10 more minutes from when it goes
+		testing.expect(t, !core_idle_due(&since, {}, at(t0, CORE_IDLE_EXIT + time.Second)))
+		testing.expect(t, !core_idle_due(&since, {}, at(t0, 2 * CORE_IDLE_EXIT)))
+		testing.expect(t, core_idle_due(&since, {}, at(t0, 2 * CORE_IDLE_EXIT + time.Second)))
+	}
+}
+
+// A core launched by `deckhand --ctl` in a tab (core_launch_env): none of the tab's tokens, socket
+// or ids, under either name; the rest of the environment, test hooks included, goes through.
+@(test)
+core_launch_env_drops_tab_names :: proc(t: ^testing.T) {
+	env := []string{"HOME=/Users/u", "PATH=/usr/bin", "DECKHAND_TOKEN=t", "DECKHAND_SOCKET=/r/core.sock", "DECKHAND_CONTROL_TOKEN=c", "DECKHAND_CLAUDE_TOKEN=x", "DECKHAND_CLAUDE_TAB=7", "DECKHAND_APP=4", "DECKHAND_JOB=j", "DECKHAND_RUN=r", "PI_DESK_SOCKET=/r/core.sock", "PI_DESK_TOKEN=t", "DECKHAND_DATA_DIR=/d", "DECKHAND_SIGN_IDENTITY=me"}
+	got := core_launch_env(env)
+	testing.expectf(t, len(got) == 4 && got[0] == "HOME=/Users/u" && got[1] == "PATH=/usr/bin" && got[2] == "DECKHAND_DATA_DIR=/d" && got[3] == "DECKHAND_SIGN_IDENTITY=me", "%v", got)
+	// from a tab: Claude Code's settings and session markers go too (the window's launch keeps the settings)
+	claude := []string{"HOME=/Users/u", "CLAUDE_CONFIG_DIR=/c", "CLAUDECODE=1"}
+	testing.expectf(t, len(core_launch_env(claude, from_tab = true)) == 1, "%v", core_launch_env(claude, from_tab = true))
+	testing.expectf(t, len(core_launch_env(claude)) == 2, "%v", core_launch_env(claude))
+}

@@ -1770,6 +1770,13 @@ jobs_any_running :: proc() -> bool {
 	return false
 }
 
+// Some enabled job will run on its own later (a schedule, not manual; not paused,
+// gone or broken): a separate core stays for it (core_idle_due).
+jobs_any_scheduled :: proc() -> bool {
+	for j in sched.jobs do if job_enabled(j) && !j.paused && !j.gone && j.def.schedule.kind != .Manual && job_runnable(j) == "" do return true
+	return false
+}
+
 // Quit: every run's tree gets SIGTERM, a short grace, then SIGKILL; each
 // run is recorded "stopped (quit)" (no notifications).
 jobs_shutdown :: proc() {

@@ -1438,9 +1438,15 @@ offered. If the check fails (offline, GitHub down) nothing shows; the attempt is
 - **Experimental › Sessions in a background core** (the palette's **Run sessions in a background
   core (experimental; at the next launch)**): off by default, and read when Deckhand opens. With
   it on, your tabs run in Deckhand Core, a process of its own, and the window talks to it over a
-  socket only Deckhand's own window may use. ⌘Q closes the window and Deckhand Core keeps your
-  sessions running; opening Deckhand again shows them as they are; **Quit Deckhand and Stop All
-  Sessions…** stops Deckhand Core too. Still the window's alone for now: app tabs, the setup
+  socket only Deckhand's own window may use. ⌘Q (or Quit in the Dock, or closing the window)
+  closes the window and Deckhand Core keeps your sessions running; the first time, a note says
+  so. Opening Deckhand again shows them as they are, a turn that went on meanwhile included;
+  while the window is closed, notifications come from Deckhand Core. **Quit Deckhand and Stop All
+  Sessions…** stops Deckhand Core too. With no window, no tab's program running, no job run and
+  no scheduled job for 10 minutes, Deckhand Core saves and exits by itself (opening Deckhand
+  starts it again). If
+  Deckhand Core stops unexpectedly, the window starts it again and carries on. Logging out
+  stops both; the next launch restores your sessions as usual. Still the window's alone for now: app tabs, the setup
   sheet's installs, the Changes tab and the update dialog. Only you can change it.
 - **Release notes**: the release's page on GitHub, in your browser.
 - **Skip this version**: it is not offered again (a newer one is). **Check for Updates…** offers

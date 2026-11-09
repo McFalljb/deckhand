@@ -1,0 +1,16 @@
+# tests/scripts/window-attach.sh, run 2: a new window attaches to the same core: the turn ran on
+# while no window was there, and still runs here. Then the scene kills the core (-9): this window
+# reconnects to the core it launches again, which adopts the turn from the holder. Then the scene
+# stops that core (SIGTERM: its handover and save, under core.lock): the window reconnects again.
+waitfor turn-tick 15000
+wait 800
+dump window-attach-2
+wait 8000
+waitfor turn-tick 15000
+wait 800
+dump window-attach-3
+wait 8000
+waitfor turn-tick 15000
+wait 800
+dump window-attach-4
+quit

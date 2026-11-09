@@ -35,6 +35,7 @@ Core_Loop :: struct {
 	idle_since:  time.Tick, // the timer's ticks have found nothing going on since; {} = something is
 	stopped:     bool, // the timer does nothing more (quitting)
 	timer_ticks: u64, // ticks the timer ran (test mode logs it: hidden-window.sh)
+	ticks:       u64, // core ticks run (per-tick caches: claude_accounts, which frames alone left stale while hidden)
 	skipped:     u64, // timer fires skipped because a tick or a frame ran
 }
 core_loop: Core_Loop
@@ -74,6 +75,7 @@ core_tick :: proc() {
 	core_loop.ticking = true
 	defer core_loop.ticking = false
 	core_loop.missed = false
+	core_loop.ticks += 1
 	core_tick_body()
 	// a nested call came meanwhile: once more, then stop (it may come again in a long modal)
 	for i := 0; core_loop.missed && i < 2; i += 1 {
@@ -172,6 +174,48 @@ core_loop_start :: proc() {
 
 // Quitting: the timer does nothing more.
 core_loop_stop :: proc() {core_loop.stopped = true}
+
+// ---- a separate core's idle exit (docs/plans/background-core.md §6 "Idle", Q2) ----
+//
+// `deckhand-core serve` with nothing to do saves and exits: no window attached, no tab's process
+// running, no job run and no enabled job schedule, for CORE_IDLE_EXIT (not a setting): a schedule
+// keeps it, or its jobs would silently stop (M5's login agent starts a core for them). Its holder,
+// left with no core and no terminal, exits on its own.
+
+CORE_IDLE_EXIT :: 10 * time.Minute
+
+Idle_Facts :: struct {
+	window:      bool, // a window is attached
+	tab_process: bool, // some tab's process runs (a held one too)
+	job_run:     bool, // a job run is under way
+	job_schedule: bool, // an enabled job has a schedule (until M5's login agent starts a core for it)
+}
+
+// What keeps the core now.
+core_idle_facts :: proc() -> (f: Idle_Facts) {
+	f.window = window_attached()
+	f.job_run = jobs_any_running()
+	f.job_schedule = jobs_any_scheduled()
+	for _, t in terms do if t.running {
+		f.tab_process = true
+		break
+	}
+	return
+}
+
+// The idle rule on any clock: since is when the core last had nothing to do ({} = it has
+// something). True: exit now.
+core_idle_due :: proc(since: ^time.Tick, f: Idle_Facts, now: time.Tick) -> bool {
+	if f.window || f.tab_process || f.job_run || f.job_schedule {
+		since^ = {}
+		return false
+	}
+	if since^ == {} {
+		since^ = now
+		return false
+	}
+	return time.tick_diff(since^, now) >= CORE_IDLE_EXIT
+}
 
 // A terminal tab's record says what the window shows of its terminal (the window reads only its
 // replica, never a Term): that the core has one, and that it printed lately (the tab strip's

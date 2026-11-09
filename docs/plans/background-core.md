@@ -1060,6 +1060,38 @@ and E's last commit flips the default after D merges. Elapsed: about **6–7.5 w
   when the folder's own stamp or a watched file changes (RELOAD_POLL, 2 s); a known gap until the
   core watches them itself (before the default flips).
 
+**M4-D as built** (where it differs from the row above):
+- **Quit paths are one table,** `quit_route` (`src/main.odin`, unit-tested): ⌘Q, the Dock's Quit
+  and closing the window close only the window with a separate core (in process: ask the core,
+  then the holder's handover, as before); Stop All goes to the core; logout terminates at once (the
+  core saves on launchd's SIGTERM, the in-process window in its cleanup). `-[NSApp terminate:]`
+  reaches it through an `applicationShouldTerminate:` added to sokol's delegate at run time; a
+  quit Apple event with a reason is logout, restart or shutdown. The first ⌘Q's notice is a
+  one-time alert (`<data>/background-core-noticed`).
+- **Reconnect, not quit:** when `core.sock` closes, the window dials again, launching a core every
+  second while none answers (≤ 15 s, blocking the main thread meanwhile), then drops its terminal
+  copies and facts and takes a fresh `state.full`. A stopping core lets its window go last, after
+  its handover and save. At most 3 reconnects a minute; then, or when no core comes, the window
+  says so once and closes as ⌘Q does: unsaved buffers keep it open, and ⌘S saves them directly. A core that ends on purpose (a Quit, Stop All) or lets a
+  window go for a newer one first sends `window.request quit`: that window quits instead. A core
+  that exits by SIGTERM (logout, a handover's predecessor) sends nothing, so windows reconnect.
+  The core now focuses the restored current tab itself at start (`persist_after_layout`), which
+  M4-C left to the in-process window's first layout.
+- **Idle exit** in serve's loop (`core_idle_due`, unit-tested on a fake clock). An enabled,
+  scheduled job also keeps the core (unlike Q1's default), so schedules don't silently stop
+  before M5's login agent. The holder's own
+  10 s idle exit (no core, no terminal) already existed.
+- **`--ctl`** launches a core when `DECKHAND_SOCKET` is this data dir's `core.sock`, separate mode
+  is on and nothing answers. Every core launch drops what Deckhand sets for tabs (tokens, socket,
+  tab ids: `core_launch_env`), so one launched from a tab carries none of it; from a tab, Claude Code's settings
+  (`CLAUDE_CONFIG_DIR`…) go too. `deckhand DIR` needed nothing new: its window launches the core.
+- **The window floor** is `<data>/window-floor`, read at serve's start, written when it rises.
+- **Hidden and minimised:** a toast's seconds start once the window shows; `claude_accounts`'
+  per-frame cache also turns over per core tick (frames stop while hidden, and a separate core
+  draws none).
+- **Not done:** app tabs exiting as `window_closed` (the separate window's app tabs are the M4 gaps
+  work); a minimised-window scene (TESTING.md's by-hand list instead), as for Dock Quit and logout.
+
 **Riskiest parts:**
 - **M4-C, the `ui` door over a socket.** It was a proc call no socket could reach. Now it is a DR
   check plus `window.token`, and under the self-signed identity a same-user process can pass the

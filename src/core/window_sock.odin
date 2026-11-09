@@ -54,7 +54,7 @@ door: struct {
 	on:         bool, // a separate core's: framed hellos are looked at
 	token:      [64]u8, // hex
 	path:       string, // heap: run/window.token
-	floor:      cw.Version, // the newest window version that attached (in memory: this core's run)
+	floor:      cw.Version, // the newest window version that attached (WINDOW_FLOOR_FILE keeps it across runs)
 	holder_pid: i32, // the session holder's (main thread keeps it current)
 	own_pid:    i32,
 	arrived:    [dynamic]Window_Arrival,
@@ -191,13 +191,43 @@ window_door_tick :: proc() {
 	for a, i in got {
 		if i == len(got) - 1 && core_attach_window_sock(a.fd, a.leftover, a.peer) {
 			sync.lock(&door.mu)
+			was := door.floor
 			door.floor = cw.window_floor_raise(door.floor, a.version)
+			now := door.floor
 			sync.unlock(&door.mu)
+			if now != was do window_floor_save(now)
 		} else do sock_close(a.fd)
 		delete(a.leftover, heap)
 		delete(a.version, heap)
 	}
 	delete(got)
+}
+
+// The window floor on disk (P5), so a core that exits (idle, a crash, a handover) and starts again
+// keeps it: <data>/window-floor, one "X.Y.Z" line. None, or not a version: no floor yet.
+WINDOW_FLOOR_FILE :: "window-floor"
+
+// Main thread, at serve's start (home_root set).
+window_floor_load :: proc() {
+	if home_root == "" do return
+	b, err := os.read_entire_file(fmt.tprintf("%s/%s", home_root, WINDOW_FLOOR_FILE), context.temp_allocator)
+	if err != nil do return
+	v, ok := cw.version_parse(strings.trim_space(string(b)))
+	if !ok do return
+	sync.guard(&door.mu)
+	door.floor = v
+}
+
+// The floor changed: written through a temp file and a rename (a crash leaves the old one).
+window_floor_save :: proc(v: cw.Version) {
+	if home_root == "" do return
+	path := fmt.tprintf("%s/%s", home_root, WINDOW_FLOOR_FILE)
+	tmp := fmt.tprintf("%s.new", path)
+	text := fmt.tprintf("%d.%d.%d\n", v.major, v.minor, v.patch)
+	if os.write_entire_file(tmp, transmute([]u8)text) != nil || os.rename(tmp, path) != nil {
+		fmt.eprintln("Deckhand: the window floor could not be saved in", path)
+		os.remove(tmp)
+	}
 }
 
 // The core stops: no more windows; the attached one and any waiting are let go, and the token file

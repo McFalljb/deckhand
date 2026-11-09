@@ -104,6 +104,10 @@ platform_core_timer :: proc(every: time.Duration, fire: proc()) {
 		if app.ready && core_timer_proc != nil do core_timer_proc()
 		// sokol closes the window (its quit) only from a frame: none came (minimised, App Nap)
 		if app.ready && core.core_quit_stalled(time.tick_now()) do window_close()
+		else if app.ready && separate_close_stalled(time.tick_now()) {
+			app.close_asked = {}
+			window_close()
+		}
 	})
 	dispatch_resume(src)
 	core_timer_source = src
@@ -127,6 +131,7 @@ window_set_content_size :: proc(w, h: f32) {
 window_close :: proc() {intrinsics.objc_send(nil, window(), "performClose:", rawptr(nil))}
 window_minimize :: proc() {intrinsics.objc_send(nil, window(), "miniaturize:", rawptr(nil))}
 window_restore :: proc() {intrinsics.objc_send(nil, window(), "deminiaturize:", rawptr(nil))}
+window_minimised :: proc() -> bool {return intrinsics.objc_send(bool, window(), "isMiniaturized")}
 app_deactivate :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "deactivate")}
 app_hide :: proc() {intrinsics.objc_send(nil, NS.Application_sharedApplication(), "hide:", rawptr(nil))}
 app_is_hidden :: proc() -> bool {return intrinsics.objc_send(bool, NS.Application_sharedApplication(), "isHidden")}
@@ -178,7 +183,7 @@ foreign pdplatform {
 	dh_mac_test_ime :: proc(kind: c.int, text: cstring, key_code: c.int, alt: c.int, ops: cstring) ---
 	dh_mac_notify :: proc(title, body: cstring) ---
 	dh_mac_quiet :: proc() ---
-	dh_mac_alert :: proc(title, text: cstring) ---
+	dh_mac_alert :: proc(title, text, button: cstring) ---
 	dh_mac_hide_windows :: proc() ---
 	dh_mac_test_scale :: proc(scale: f64) ---
 	dh_mac_left_button_down :: proc() -> c.int ---
@@ -192,7 +197,12 @@ foreign pdplatform {
 	dh_mac_display_link_fps :: proc() -> f32 ---
 	dh_mac_test_display_fps :: proc(fps: c.int) ---
 	dh_mac_display_link_cap :: proc(cap: c.int) ---
+	dh_mac_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) ---
 }
+
+// -[NSApp terminate:] (the Dock's Quit, logout) asks cb first (main.odin's on_terminate): after
+// sokol's delegate exists (init).
+platform_terminate_hook :: proc(cb: proc "c" (logout: c.int) -> c.int) {dh_mac_terminate_hook(cb)}
 
 // The display link's rate: at most cap frames per second (0 = the screen's maximum). Cheap when
 // unchanged (each frame; main.odin).
@@ -218,7 +228,7 @@ platform_activity :: proc(on: bool) {dh_mac_activity(on ? 1 : 0)}
 platform_quiet :: proc() {dh_mac_quiet()}
 // A modal alert with one Quit button (before the window is of use: instance.odin)
 platform_hide_windows :: proc() {dh_mac_hide_windows()}
-platform_alert :: proc(title, text: string) {dh_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator))}
+platform_alert :: proc(title, text: string, button := "Quit") {dh_mac_alert(strings.clone_to_cstring(title, context.temp_allocator), strings.clone_to_cstring(text, context.temp_allocator), strings.clone_to_cstring(button, context.temp_allocator))}
 
 // Test mode, before sokol starts: every screen and window reports this backing scale
 // (DECKHAND_SCALE; src/native/platform_macos.m).

@@ -651,13 +651,13 @@ void dh_mac_hide_windows(void) {
 }
 
 // A modal alert with one Quit button (instance.odin: another Deckhand or Deckhand runs).
-void dh_mac_alert(const char* title, const char* text) {
+void dh_mac_alert(const char* title, const char* text, const char* button) {
     [NSApp activateIgnoringOtherApps:YES];
     NSAlert* a = [[NSAlert alloc] init];
     a.alertStyle = NSAlertStyleWarning;
     a.messageText = @(title);
     a.informativeText = @(text);
-    [a addButtonWithTitle:@"Quit"];
+    [a addButtonWithTitle:@(button)];
     [a runModal];
 }
 
@@ -700,4 +700,30 @@ void dh_mac_activity(int on) {
         [[NSProcessInfo processInfo] endActivity:job_activity];
         job_activity = nil;
     }
+}
+
+// ---- Dock Quit, logout, restart, shutdown (main.odin's quit_route) ----
+//
+// sokol's app delegate has no applicationShouldTerminate:, so -[NSApp terminate:] (the Dock's
+// Quit, a script's `quit app`, logout) went straight to applicationWillTerminate: and cleanup,
+// skipping what ⌘Q does. It gets one at run time (vendor files untouched): cb(logout) says
+// whether to terminate now (1) or not (0: the window carries out the quit its own way and
+// terminates later). logout: the quit Apple event gives a reason (log out, restart, shut down).
+
+static int (*terminate_cb)(int logout);
+
+static NSApplicationTerminateReply should_terminate(id self, SEL _cmd, NSApplication* sender) {
+    NSAppleEventDescriptor* e = [[NSAppleEventManager sharedAppleEventManager] currentAppleEvent];
+    int logout = e != nil && e.eventClass == kCoreEventClass && e.eventID == kAEQuitApplication &&
+                 [e attributeDescriptorForKeyword:kAEQuitReason] != nil;
+    if (!terminate_cb || terminate_cb(logout)) return NSTerminateNow;
+    return NSTerminateCancel;
+}
+
+void dh_mac_terminate_hook(int (*cb)(int logout)) {
+    terminate_cb = cb;
+    id d = NSApp.delegate;
+    if (!d) return;
+    SEL sel = @selector(applicationShouldTerminate:);
+    class_replaceMethod([d class], sel, (IMP)should_terminate, "Q@:@");
 }

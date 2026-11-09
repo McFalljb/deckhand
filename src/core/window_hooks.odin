@@ -88,6 +88,7 @@ Window_Op :: enum u8 {
 	Job_Sheet_Saved, // Job_Save's answer (path, message: its error); reply: ok (the sheet closed)
 	Job_Sheet_Holds_Quit, // a quit: reply ok when the sheet has changes (it asks to discard them; the quit stops)
 	Notify, // a separate core's OS notification (text: title, message: body), shown by the window's own
+	Quit, // the core ends on purpose (a quit, Stop All) or let this window go for a newer one (text: why): the window quits too, never reconnects
 }
 
 Window_Request :: struct {
@@ -184,9 +185,10 @@ window_open_url :: proc(url: string) -> bool {
 	return answered && r.ok
 }
 window_reveal :: proc(path: string) {ask({op = .Reveal, path = path})}
-// A separate core's OS notification goes through the window (none attached: none; M4-D gives the
-// core its own banners).
+// A separate core's OS notification goes through the window (none attached: serve shows its own).
 window_notify :: proc(title, body: string) {ask({op = .Notify, text = title, message = body})}
+// A separate core: the window goes too (it must not reconnect). why: for its log.
+window_quit :: proc(why: string) {ask({op = .Quit, text = why})}
 window_set_appearance :: proc(mode: Appearance) {ask({op = .Appearance, mode = mode})}
 // The window's copy of the tab's terminal: its selection onto the clipboard. False: none (or no window).
 window_copy_selection :: proc(tab_id: u64) -> bool {

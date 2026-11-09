@@ -18,15 +18,14 @@ package core
 // (text_clean: printable, no bidi controls, bounded), every list capped, an id that does not pack
 // is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
 // nothing this Mac's core could act on. They are never saved (persist.odin), never started here
-// (term_start refuses their tab ids), and a command naming one is refused until M6-C forwards it
-// (machine_command_refuses), except focusing one and selecting one of its projects (this Mac's
+// (term_start refuses their tab ids), and a command naming one runs on that machine, not here
+// (machine_route.odin, M6-C), except focusing one and selecting one of its projects (this Mac's
 // view). A merge replaces that machine's entries whole; other machines' and this Mac's are not
 // touched.
 
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
-import "core:reflect"
 import "core:strings"
 import "core:time"
 
@@ -195,7 +194,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			if len(ns.tabs) >= MIRROR_TABS_MAX do break
 			tid, tok := id_pack(no, tab.id)
 			if !tok do continue
-			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, pane = pane})
+			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
 		}
 		if len(ns.tabs) == 0 { 	// an open session always has its main tab
 			wire_free(&ns, type_info_of(Open_Session), heap)
@@ -270,29 +269,12 @@ mirror_free :: proc(m: ^Machine_Mirror) {
 	m^ = {}
 }
 
-// Fields of a command that name an open session, tab, pane or project.
+// Fields of a command that name an open session, tab, pane, split or project (machine_route.odin
+// routes a command by them).
 @(private = "file")
-MACHINE_ID_FIELDS := [?]string{"tab_id", "session", "project_id", "pane", "tab"}
+MACHINE_ID_FIELDS := [?]string{"tab_id", "session", "project_id", "pane", "tab", "split", "opener"}
 
-// Why a command can't run here ("" = it can): it names another machine's id. This Mac's view of
-// another machine (which session is current, which project selected) is its own; anything else
-// would act there, which M6-C forwards on the link.
-machine_command_refuses :: proc(cmd: Command) -> string {
-	#partial switch _ in cmd {
-	case Focus_Session, Select_Project:
-		return ""
-	}
-	cmd := cmd
-	v := reflect.get_union_variant(cmd)
-	if v.data == nil do return ""
-	st, ok := runtime.type_info_base(type_info_of(v.id)).variant.(runtime.Type_Info_Struct)
-	if !ok do return ""
-	for k in 0 ..< int(st.field_count) {
-		if st.types[k].id != typeid_of(u64) do continue
-		named := false
-		for f in MACHINE_ID_FIELDS do if f == st.names[k] do named = true
-		if !named do continue
-		if id_machine((^u64)(uintptr(v.data) + st.offsets[k])^) != 0 do return "this is on another machine: for now its sessions are shown here, not worked in"
-	}
-	return ""
+machine_id_field :: proc(name: string) -> bool {
+	for f in MACHINE_ID_FIELDS do if f == name do return true
+	return false
 }

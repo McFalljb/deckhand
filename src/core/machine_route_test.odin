@@ -1,0 +1,307 @@
+package core
+
+// Working in another machine's sessions (machine_route.odin; §10.4 M6-C): commands routed by the
+// machine of the ids they name, on_behalf only lowering ui on the other core, and its terminals
+// relayed between the window's channel and its own. No process runs: the machine's link is the
+// test hook in machines.odin (machine_test_links), the window the in-process link. Shared global
+// State, one thread (tests/unit.py).
+
+import "base:runtime"
+import "core:encoding/endian"
+import "core:fmt"
+import "core:strings"
+import "core:testing"
+import cw "../corewire"
+
+@(private = "file")
+Rt_Frame :: struct {
+	channel: u32,
+	kind:    cw.Kind,
+	payload: string, // heap
+}
+
+@(private = "file")
+rt_win: [dynamic]Rt_Frame // what the window received
+@(private = "file")
+rt_end: cw.Mem_End
+@(private = "file")
+rt_finished: [dynamic]Result // the Finished_Events (heap)
+
+@(private = "file")
+rt_on_frames :: proc() {
+	for {
+		f, err := cw.mem_recv(rt_end, context.temp_allocator)
+		if err != .None do return
+		append(&rt_win, Rt_Frame{channel = f.channel, kind = cw.Kind(f.kind), payload = strings.clone(string(f.payload), runtime.heap_allocator())})
+	}
+}
+
+// State with machine 3's session (packed id S, its shell tab T with a terminal), machine 3's link up
+// (or not), a window attached.
+@(private = "file")
+rt_begin :: proc(up := true) -> (sid, tid: u64) {
+	context.allocator = runtime.heap_allocator()
+	state = State{}
+	sid, _ = id_pack(3, 9)
+	tid, _ = id_pack(3, 10)
+	s := Open_Session{id = sid, machine = 3, pi_session_id = strings.clone("m3:abc"), cwd = strings.clone("/home/me")}
+	append(&s.tabs, Tab{id = tid, machine = 3, kind = Shell_Tab{}, title = strings.clone("sh"), status = .Running, has_term = true, pane = sid})
+	s.active_tab = tid
+	append(&state.open_sessions, s)
+	state.machines = make([]Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	machine_test_links.on = true
+	machine_test_links.up = make(map[u64]bool)
+	machine_test_links.up[3] = up
+	rt_win = make([dynamic]Rt_Frame)
+	rt_finished = make([dynamic]Result)
+	window.test_event = proc(ev: Event) {
+		if f, ok := ev.(Finished_Event); ok do append(&rt_finished, result_clone(f.result, runtime.heap_allocator()))
+	}
+	ok: bool
+	rt_end, ok = core_attach_window(rt_on_frames)
+	assert(ok)
+	return
+}
+
+@(private = "file")
+rt_end_test :: proc() {
+	core_detach_window()
+	machine_route_down(3, gone = true)
+	window.test_event = nil
+	machine_test_links.on = false
+	for x in machine_test_links.texts do delete(x)
+	for x in machine_test_links.frames do delete(x.payload)
+	clear(&machine_test_links.texts)
+	clear(&machine_test_links.frames)
+	delete(machine_test_links.up)
+	for f in rt_win do delete(f.payload)
+	delete(rt_win)
+	for r in rt_finished do result_free(r)
+	delete(rt_finished)
+	inbox_drain()
+	state = State{}
+}
+
+@(private = "file")
+rt_last_text :: proc() -> string {
+	n := len(machine_test_links.texts)
+	return n > 0 ? machine_test_links.texts[n - 1] : ""
+}
+
+// The window's message on its link (term.attach, a frame), then the core reads it.
+@(private = "file")
+rt_window_send :: proc(channel: u32, kind: cw.Kind, payload: string) {
+	assert(cw.mem_send(rt_end, channel, kind, transmute([]u8)payload) == .None)
+	window_link_pump()
+}
+
+@(test)
+route_by_id :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, tid := rt_begin(up = false)
+	defer rt_end_test()
+	// this Mac's ids and none: here
+	_, routed := machine_route(Close_Tab{tab_id = 10}, {kind = .UI}, 1)
+	testing.expect(t, !routed, "a local id runs here")
+	_, routed = machine_route(Get_State{}, {kind = .UI}, 1)
+	testing.expect(t, !routed, "no id: here")
+	// another machine's, its link down: machine_offline, nothing sent
+	r := run_command(Close_Tab{tab_id = tid}, {kind = .UI}, 1)
+	testing.expect(t, !r.ok && strings.contains(r.data, `"machine_offline"`), "a link that is down answers machine_offline")
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	machine_test_links.up[3] = true
+	// only the user's are forwarded; ids of two machines are refused
+	r = run_command(Close_Tab{tab_id = tid}, {kind = .Script}, 2)
+	testing.expect(t, !r.ok && !r.pending, "a script's command on another machine's id is refused")
+	r = run_command(Close_Tab{tab_id = tid}, {kind = .Control}, 2)
+	testing.expect(t, !r.ok && !r.pending, "so is an agent's (M6-F)")
+	r = run_command(Move_Tab{tab_id = tid, pane = 77}, {kind = .UI}, 2)
+	testing.expect(t, !r.ok && !r.pending, "ids of two machines are refused")
+	testing.expect_value(t, len(machine_test_links.texts), 0)
+	// the user's: forwarded, ids unpacked, on_behalf ui, pending until its result
+	r = run_command(New_Shell_Tab{session = sid}, {kind = .UI}, 42)
+	testing.expect(t, r.ok && r.pending, "forwarded: pending")
+	sent := rt_last_text()
+	testing.expect(t, strings.contains(sent, `"on_behalf":{"kind":"ui"}`), "with on_behalf ui")
+	testing.expect_value(t, json_path(sent, "command.session"), "9")
+	testing.expect_value(t, json_path(sent, "type"), "command")
+	// its result finishes the request: created_id packed, the error cleaned, no data
+	id := json_path(sent, "id")
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","request_id":5,"result":{{"ok":true,"created_id":11,"data":{{"x":1}}}}}}`, id))
+	if testing.expect_value(t, len(rt_finished), 1) {
+		want, _ := id_pack(3, 11)
+		testing.expect_value(t, rt_finished[0].created_id, want)
+		testing.expect(t, rt_finished[0].ok && rt_finished[0].data == "", "ok, no data")
+	}
+	// a result for no command of ours (another machine's number, or again): nothing
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true}}}}`, id))
+	machine_route_reply(4, `{"type":"result","id":"h999","result":{"ok":true}}`)
+	testing.expect_value(t, len(rt_finished), 1)
+	// pending there: its finished ends it; a pi session id loses its "m3:"; a session it opened
+	// is shown here
+	state.current_session = 0
+	r = run_command(Open_Session_Cmd{project_id = sid, pi_session_id = "m3:abc"}, {kind = .UI}, 43)
+	sent = rt_last_text()
+	testing.expect_value(t, json_path(sent, "command.pi_session_id"), "abc")
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","request_id":8,"result":{{"ok":true,"pending":true}}}}`, json_path(sent, "id")))
+	testing.expect_value(t, len(rt_finished), 1)
+	machine_route_reply(3, `{"type":"finished","request_id":8,"result":{"ok":true,"created_id":9}}`)
+	testing.expect_value(t, len(rt_finished), 2)
+	testing.expect(t, state.current_session == sid, "the session it opened shows here")
+	// its error, cleaned
+	run_command(Close_Tab{tab_id = tid}, {kind = .UI}, 46)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"no\u202eway"}}}}`, json_path(rt_last_text(), "id")))
+	if testing.expect_value(t, len(rt_finished), 3) do testing.expect(t, strings.has_prefix(rt_finished[2].error, "no") && !strings.contains(rt_finished[2].error, "\u202e"), "its error, cleaned")
+	// the link drops with one waiting: machine_offline
+	run_command(Close_Tab{tab_id = tid}, {kind = .UI}, 44)
+	machine_route_down(3)
+	if testing.expect_value(t, len(rt_finished), 4) do testing.expect(t, strings.contains(rt_finished[3].data, "machine_offline"), "what waited ends offline")
+	// the view is this Mac's: focusing its session runs here, and goes there too
+	state.current_session = 0
+	n := len(machine_test_links.texts)
+	machine_test_links.up[3] = true
+	r = run_command(Focus_Session{session = sid}, {kind = .UI}, 45)
+	testing.expect(t, r.ok && state.current_session == sid, "focused here")
+	testing.expect(t, len(machine_test_links.texts) == n + 1 && json_path(rt_last_text(), "command.session") == "9", "and there")
+}
+
+// Another machine's confirmation is asked here, with this core's token; confirming sends the
+// user's command again with that machine's token, and Cancel cancels it there.
+@(test)
+route_confirmation :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	sid, _ := rt_begin()
+	defer rt_end_test()
+	run_command(Close_Session{session = sid, ask = true}, {kind = .UI}, 50)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"needs_confirmation","needs_confirmation":{{"token":"REMOTE-1","summary":"close it?"}}}}}}`, json_path(rt_last_text(), "id")))
+	if !testing.expect_value(t, len(state.pending_confirmations), 1) do return
+	p := state.pending_confirmations[0]
+	testing.expect(t, p.token != "REMOTE-1" && strings.has_prefix(p.summary, "On nuc: "), "asked here, this core's token")
+	testing.expect(t, len(rt_finished) == 1 && rt_finished[0].confirm_token == p.token, "the result carries it")
+	run_command(Close_Session{session = sid, confirm = p.token}, {kind = .UI}, 51)
+	testing.expect_value(t, json_path(rt_last_text(), "command.confirm"), "REMOTE-1")
+	testing.expect_value(t, len(state.pending_confirmations), 0)
+	// asked again, then cancelled: there too
+	run_command(Close_Session{session = sid, ask = true}, {kind = .UI}, 52)
+	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":false,"error":"needs_confirmation","needs_confirmation":{{"token":"REMOTE-2","summary":"x"}}}}}}`, json_path(rt_last_text(), "id")))
+	if !testing.expect_value(t, len(state.pending_confirmations), 1) do return
+	run_command(Cancel_Confirmation{token = state.pending_confirmations[0].token}, {kind = .UI}, 53)
+	testing.expect_value(t, len(state.pending_confirmations), 0)
+	testing.expect_value(t, json_path(rt_last_text(), "command.token"), "REMOTE-2")
+}
+
+// The other core's side: a hub's command runs as its on_behalf, never above ui; none, or another
+// kind, is refused; a hub never sends the internal caller's window.command.
+@(test)
+route_on_behalf_lowers :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	rt_begin()
+	defer rt_end_test()
+	window_link_for_test().hub = true
+	defer window_link_for_test().hub = false
+	hub_cmd :: proc(on_behalf, command: string) -> string {
+		ob := on_behalf != "" ? fmt.tprintf(`,"on_behalf":%s`, on_behalf) : ""
+		return fmt.tprintf(`{{"v":1,"type":"command","id":"q","now":true%s,"command":%s}}`, ob, command)
+	}
+	last_result :: proc() -> string {
+		for i := len(rt_win) - 1; i >= 0; i -= 1 do if json_path(rt_win[i].payload, "type") == "result" do return rt_win[i].payload
+		return ""
+	}
+	user_only := `{"type":"set_remote_machines","on":true}`
+	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"control"}`, user_only))
+	testing.expect(t, json_path(last_result(), "result.ok") == "false" && !state.settings.remote_machines, "control can't change a user-only setting")
+	for ob in ([]string{"", `{"kind":"none"}`, `{"kind":"internal"}`, `{"kind":"panel"}`, `{}`}) {
+		rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(ob, user_only))
+		testing.expect(t, strings.contains(last_result(), "on_behalf"), "on_behalf none, missing or another kind: refused")
+	}
+	testing.expect(t, !state.settings.remote_machines, "nothing changed")
+	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"ui"}`, user_only))
+	testing.expect(t, json_path(last_result(), "result.ok") == "true" && state.settings.remote_machines, "ui: the user's")
+	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"window.command","id":"w","now":true,"command":{"focus_take":{"widget":"x"}}}`)
+	testing.expect(t, strings.contains(last_result(), "not a hub's"), "a hub's window.command is refused (never internal)")
+}
+
+// The terminal relay: attach maps the window's channel to the other machine's; frames pass both
+// ways unparsed, credit end to end; the link dropping keeps the window's channel and attaching
+// again brings a fresh snapshot; hostile frames end the stream there; detach goes through.
+@(test)
+route_term_relay :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, tid := rt_begin()
+	defer rt_end_test()
+	attach := fmt.tprintf(`{{"v":1,"type":"term.attach","id":"t1","tab_id":%s,"history_lines":0}}`, json_u64_text(tid))
+	rt_window_send(cw.JSON_CHANNEL, .Data, attach)
+	if !testing.expect_value(t, len(machine_relays()), 1) do return
+	rel := machine_relays()[0]
+	ch := rel.channel
+	testing.expect(t, json_path(rt_win[len(rt_win) - 1].payload, "channel") == json_u64_text(u64(ch)), "the window has its channel at once")
+	sent := rt_last_text()
+	testing.expect(t, json_path(sent, "type") == "term.attach" && json_path(sent, "tab_id") == "10", "attached there, its id unpacked")
+	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":7,"offset":0}}`, json_path(sent, "id")))
+	testing.expect_value(t, rel.remote, u32(7))
+	// from there: on the window's channel
+	before := len(rt_win)
+	machine_term_frame(3, {channel = 7, kind = u8(cw.Kind.Data), payload = transmute([]u8)string("hi\r\n")})
+	machine_term_frame(3, {channel = 8, kind = u8(cw.Kind.Data), payload = transmute([]u8)string("not ours")})
+	machine_term_frame(4, {channel = 7, kind = u8(cw.Kind.Data), payload = transmute([]u8)string("another machine's")})
+	if testing.expect_value(t, len(rt_win), before + 1) {
+		f := rt_win[before]
+		testing.expect(t, f.channel == ch && f.kind == .Data && f.payload == "hi\r\n", "its DATA, on the window's channel")
+	}
+	// from the window: input and credit, there
+	rt_window_send(ch, .Data, "echo hi\r")
+	credit: [4]u8
+	endian.put_u32(credit[:], .Little, 4)
+	rt_window_send(ch, .Credit, string(credit[:]))
+	fr := machine_test_links.frames
+	if testing.expect_value(t, len(fr), 2) {
+		testing.expect(t, fr[0].channel == 7 && fr[0].kind == .Data && string(fr[0].payload) == "echo hi\r", "typing goes there")
+		testing.expect(t, fr[1].channel == 7 && fr[1].kind == .Credit, "credit passes through")
+	}
+	testing.expect_value(t, rel.in_flight, 0)
+	// resize: there, its id unpacked; its RESIZE back checked
+	rt_window_send(cw.JSON_CHANNEL, .Data, fmt.tprintf(`{{"v":1,"type":"term.resize","tab_id":%s,"cols":100,"rows":30,"cell_w":8,"cell_h":16}}`, json_u64_text(tid)))
+	testing.expect(t, json_path(rt_last_text(), "type") == "term.resize" && json_path(rt_last_text(), "cols") == "100" && json_path(rt_last_text(), "tab_id") == "10", "resize goes there")
+	before = len(rt_win)
+	machine_term_frame(3, {channel = 7, kind = u8(cw.Kind.Resize), payload = transmute([]u8)string(`{"offset":4,"cols":100,"rows":30,"xpixel":800,"ypixel":480}`)})
+	testing.expect_value(t, len(rt_win), before + 1)
+	// the link drops mid-stream: the window's channel stays; up again, attached again there
+	machine_route_down(3)
+	machine_test_links.up[3] = false
+	testing.expect(t, len(machine_relays()) == 1 && rel.remote == 0, "kept, not attached there")
+	machine_test_links.up[3] = true
+	machine_route_up(3)
+	sent = rt_last_text()
+	testing.expect_value(t, json_path(sent, "type"), "term.attach")
+	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":9,"offset":0}}`, json_path(sent, "id")))
+	before = len(rt_win)
+	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Snapshot), payload = transmute([]u8)string("snap")})
+	testing.expect(t, len(rt_win) == before + 1 && rt_win[before].channel == ch && rt_win[before].kind == .Snapshot, "its fresh snapshot on the same window channel")
+	// hostile: a resize past the limits, DATA past the credit: the stream ends there (attached again later)
+	n := len(machine_test_links.texts)
+	machine_term_frame(3, {channel = 9, kind = u8(cw.Kind.Resize), payload = transmute([]u8)string(`{"offset":0,"cols":65535,"rows":65535,"xpixel":0,"ypixel":0}`)})
+	testing.expect(t, rel.remote == 0 && json_path(rt_last_text(), "type") == "term.detach" && len(machine_test_links.texts) == n + 1, "a resize past the limits ends it there")
+	testing.expect_value(t, len(rt_win), before + 1)
+	rel.retry_at = {}
+	machine_route_up(3)
+	machine_term_json(3, "term.attached", fmt.tprintf(`{{"type":"term.attached","id":"%s","tab_id":10,"channel":11,"offset":0}}`, json_path(rt_last_text(), "id")))
+	big := make([]u8, RELAY_IN_FLIGHT_MAX + 1)
+	defer delete(big)
+	machine_term_frame(3, {channel = 11, kind = u8(cw.Kind.Data), payload = big})
+	testing.expect(t, rel.remote == 0 && rel.retry_at != {}, "DATA past twice the credit ends it there")
+	// detach: there too, and the relay goes
+	rel.remote = 11
+	rt_window_send(cw.JSON_CHANNEL, .Data, fmt.tprintf(`{{"v":1,"type":"term.detach","channel":%s}}`, json_u64_text(u64(ch))))
+	testing.expect(t, len(machine_relays()) == 0 && json_path(rt_last_text(), "type") == "term.detach" && json_path(rt_last_text(), "channel") == "11", "detached there")
+	// a tab with no terminal, or a local id with no terminal: refused at once
+	rt_window_send(cw.JSON_CHANNEL, .Data, fmt.tprintf(`{{"v":1,"type":"term.attach","id":"t2","tab_id":%d,"history_lines":0}}`, (u64(3) << 40) | 999))
+	testing.expect(t, len(machine_relays()) == 0 && strings.contains(rt_win[len(rt_win) - 1].payload, "error"), "no such terminal")
+}
+
+@(private = "file")
+json_u64_text :: proc(n: u64) -> string {
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_u64(&b, n)
+	return strings.to_string(b)
+}

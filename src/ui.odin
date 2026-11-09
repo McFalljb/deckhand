@@ -529,7 +529,7 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	old := ids_pane_begin(p)
 	defer ids_pane_end(old)
 	split := cs != nil && len(cs.panes) > 1
-	shown := core.pane_shown(p)
+	shown := core.pane_tab(cs, p) // another machine's too: its terminals are relayed
 	empty := (shown == nil || !shown.has_term) && pane_editor(p) == nil && pane_browser(p) == nil && pane_app(p) == nil
 	if clay.UI(pid(p, "pane"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}}) {
 		if split do pane_strip_layout(cs, p)
@@ -563,9 +563,9 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 						clay.Text("Still running in the session holder", txt(th.text_secondary))
 						clay.Text(core.HELD_AWAY_TEXT, txt(th.text_muted))
 					} else if empty && cs != nil && cs.machine != 0 {
-						// another machine's session: its tabs show, its terminals come over in M6-C
-						clay.Text("Connecting…", txt(th.text_secondary))
-						clay.TextDynamic(fmt.tprintf("This runs on %s. Working in it from here comes in a later update.", core.machine_name(cs.machine)), txt(th.text_muted))
+						// another machine's session: its terminals are relayed; its other tabs show there only
+						clay.Text("Shown on its machine only", txt(th.text_secondary))
+						clay.TextDynamic(fmt.tprintf("This tab runs on %s. Its terminals work from here; this kind of tab does not yet.", core.machine_name(cs.machine)), txt(th.text_muted))
 					} else if empty {
 						clay.Text("No session open", txt(th.text_secondary))
 						clay.Text("Pick one on the left, or start a new chat", txt(th.text_muted))

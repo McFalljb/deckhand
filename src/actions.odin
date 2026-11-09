@@ -86,7 +86,7 @@ ACTIONS := [?]Action {
 		core.chats_instructions_ensure(core.date_stamp())
 	}},
 	{id = "new_shell_tab", label = "New shell tab", keys = "⌘T", make = proc() -> (core.Command, bool) {
-		cs := core.cur()
+		cs := core.cur_view() // another machine's session: a shell there (machine_route.odin)
 		if cs == nil do return nil, false
 		return core.New_Shell_Tab{session = cs.id}, true
 	}},
@@ -176,7 +176,7 @@ ACTIONS := [?]Action {
 		return core.Browser_Download{download_id = 0, op = .Reveal}, true
 	}},
 	{id = "close_tab", label = "Close tab", keys = "⌘W", make = proc() -> (core.Command, bool) {
-		cs := core.cur()
+		cs := core.cur_view() // another machine's: closed there
 		if cs == nil || len(cs.tabs) == 0 || cs.active_tab == cs.tabs[0].id do return nil, false // the pi tab stays
 		return core.Close_Tab{tab_id = cs.active_tab}, true
 	}},
@@ -194,7 +194,7 @@ ACTIONS := [?]Action {
 		return n == 1 ? "1 file" : fmt.tprintf("%d files", n)
 	}},
 	{id = "close_session", label = "Close session", make = proc() -> (core.Command, bool) {
-		cs := core.cur()
+		cs := core.cur_view() // another machine's: closed there
 		if cs == nil do return nil, false
 		return core.Close_Session{session = cs.id}, true
 	}},
@@ -701,7 +701,7 @@ tab_step :: proc(d: int) -> (core.Command, bool) {
 
 // The focused pane's i-th tab (panes.odin).
 tab_nth :: proc(i: int) -> (core.Command, bool) {
-	cs := core.cur()
+	cs := core.cur_view() // another machine's: its tab there
 	if cs == nil do return nil, false
 	strip := core.pane_strip(cs, core.session_focused_pane(cs))
 	if i >= len(strip) do return nil, false

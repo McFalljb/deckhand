@@ -619,6 +619,8 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/ctl.odin", "json_path", "jg.parse_string", "", ""},
 		{"src/core/machines.odin", "machines_read", "jg.parse_string", "", ""},
 		{"src/core/machines.odin", "hub_msg_type", "jg.parse_string", "", ""},
+		{"src/core/machine_route.odin", "machine_term_frame", "jg.unmarshal", "", ""}, // a relayed RESIZE (≤ 512 bytes)
+		{"src/core/machine_route.odin", "machine_term_json", "jg.parse_string", "", ""}, // term.attached, term.scroll from another machine
 		{"src/core/harness_manifest.odin", "pi_settings_sources", "jg.parse", "", "JSON5"}, // pi's settings.json: a person edits it
 		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},
 		{"src/core/jobs.odin", "job_load", "jg.parse", "", ""},

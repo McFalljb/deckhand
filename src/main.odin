@@ -518,8 +518,9 @@ frame :: proc "c" () {
 		// and the replica's, which the window's own reads take (term_target_rect, tab_rect)
 		if rs := find_session(state.current_session); rs != nil && rs != cs do ui_pane_rects(rs)
 		if cs != nil && len(cs.panes) == 0 do if p := core.session_focused_pane(cs); p != nil do p.rect = app.pane // the implicit pane: the centre's
-		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows
-		if cs != nil do for tab in cs.tabs do if tab.has_term {
+		// every terminal tab to its pane's rect, hidden ones too, so a tab switch never reflows (another
+		// machine's too: its core resizes them, machine_route.odin)
+		if vs := core.cur_view(); vs != nil do for tab in vs.tabs do if tab.has_term {
 			r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
 			if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
 		}
@@ -551,6 +552,8 @@ frame :: proc "c" () {
 		for &p in cs.panes do pane_draw(&p, t, typing)
 	} else if p := core.focused_pane(); p != nil {
 		pane_draw(p, t, typing)
+	} else if vs := core.cur_view(); vs != nil && vs.machine != 0 {
+		pane_draw(core.session_focused_pane(vs), t, typing) // another machine's: its one pane, a relayed terminal
 	} // else the layout's empty state shows
 	ui_draw(cmds, drawer_at, overlay)
 	if at != nil && agent_running() {
@@ -799,12 +802,14 @@ event :: proc(e: ^sapp.Event) {
 	if annot_event(fp, e) do return // a browser tab's Annotate, badges, comment mode (browser_annotate.odin)
 	if browser_event(fp, e) do return // a browser tab on screen: the page gets it (browser.odin)
 	if app_event(fp, e) do return // an app tab on screen: the app gets it (app_tab.odin)
+	// the session on screen's, whichever machine's: another machine's terminals are relayed copies
+	// and its tabs' commands run there (machine_route.odin)
 	t := active_view()
 	mt := pane_view(fp) // the pointer's: the pane under it (or holding its press)
-	tab := core.active_tab()
-	cs := core.cur()
+	tab := core.active_tab_view()
+	cs := core.cur_view()
 	kt := key_view()
-	ktab := core.key_tab()
+	ktab := core.key_tab_view()
 	#partial switch e.type {
 	case .KEY_DOWN:
 		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
@@ -1028,7 +1033,7 @@ bar_click_ok :: proc(token: string) -> bool {
 
 // Pane p's tab at its draw rect; IME marked text when its terminal (t) has the keyboard.
 pane_draw :: proc(p: ^core.Pane, t: ^Term_View, typing: bool) {
-	tab := core.pane_shown(p)
+	tab := core.pane_tab(core.cur_view(), p) // another machine's: only its terminals draw (no editor, page or app of it here)
 	if tab == nil || (!tab.has_term && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
 	if r.z <= 0 || r.w <= 0 do return

@@ -118,12 +118,13 @@ term_view_of :: proc(tab_id: u64) -> ^Term_View {
 // The view of a tab if it has one (no attach).
 term_view_peek :: proc(tab_id: u64) -> ^Term_View {return term_views[tab_id] or_else nil}
 
+// (Another machine's session on screen too: its terminals are relayed copies, machine_route.odin.)
 active_view :: proc() -> ^Term_View {
-	if tab := core.active_tab(); tab != nil do return term_view_of(tab.id)
+	if tab := core.active_tab_view(); tab != nil do return term_view_of(tab.id)
 	return nil
 }
 key_view :: proc() -> ^Term_View {
-	if tab := core.key_tab(); tab != nil do return term_view_of(tab.id)
+	if tab := core.key_tab_view(); tab != nil do return term_view_of(tab.id)
 	return nil
 }
 // Atlas's, in the drawer: attached only while the drawer is open (it still draws while it slides
@@ -134,7 +135,7 @@ agent_view :: proc() -> ^Term_View {
 	return state.home_open ? term_view_of(tab.id) : term_view_peek(tab.id)
 }
 pane_view :: proc(p: ^core.Pane) -> ^Term_View {
-	if tab := core.pane_shown(p); tab != nil do return term_view_of(tab.id)
+	if tab := core.pane_tab(core.cur_view(), p); tab != nil do return term_view_of(tab.id)
 	return nil
 }
 // The setup sheet's install run's (ui_harness.odin): attached while the sheet is open.
@@ -146,7 +147,7 @@ harness_view :: proc() -> ^Term_View {
 // The views of the terminals on screen in the current session's panes (temp allocator).
 views_on_screen :: proc() -> []^Term_View {
 	out := make([dynamic]^Term_View, context.temp_allocator)
-	cs := core.cur()
+	cs := core.cur_view()
 	if cs == nil do return out[:]
 	for tab in cs.tabs do if core.session_tab_shown(cs, tab.id) {
 		if v := term_view_peek(tab.id); v != nil do append(&out, v)
@@ -193,7 +194,7 @@ term_views_tick :: proc() {
 	home := core.home_tab()
 	gone := make([dynamic]^Term_View, context.temp_allocator)
 	for id, v in term_views {
-		on := core.tab_on_screen(id) || (home != nil && id == home.id && state.home_open) || (id == core.harness_run.term_id && setup_open())
+		on := core.session_tab_shown(core.cur_view(), id) || (home != nil && id == home.id && state.home_open) || (id == core.harness_run.term_id && setup_open())
 		if on do v.shown = now
 		// a snapshot that does not decode: attached again once a second, never every frame (the
 		// core encodes each one anew)

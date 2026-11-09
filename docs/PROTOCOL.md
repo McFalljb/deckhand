@@ -739,8 +739,10 @@ projects is selected, `sessions` is that project's sessions as that machine list
 one pane holding its tabs; a tab keeps its kind, title and status only (no path, URL or account).
 They are another machine's text, cleaned (printable, no bidi controls, bounded) and capped (300
 projects, 64 open sessions of 32 tabs). They are never saved in `workspace.json`, and never carry
-that machine's confirmations. `focus_session` and `select_project` take their ids (this Mac's view
-of them); any other command naming one is refused for now (a later version runs it there).
+that machine's confirmations. Their tabs carry `has_term`. `focus_session` and `select_project`
+take their ids (this Mac's view of them; the user's `focus_session` also goes to that machine, so
+its restored tabs start), and `copy_selection` copies the window's own copy here. Any other
+command naming one runs on that machine (§5a, "Working on another machine"): the user's only.
 
 `agent_status` (§5 Status dots): on an open session, its row's dot (the strongest of its tabs:
 `waiting` > `error` > `unseen` > `question` > `working` > `exited` > `none`); on every terminal tab
@@ -1245,8 +1247,38 @@ hub sends `state.subscribe` (and `select_project` with that machine's own id whi
 projects is selected here) and keeps that core's `state.full` and `state.delta` as a replica of its
 State (decoded as a window decodes them: bounded, applied whole or not at all; a refused one asks
 for `state.full` again), merged into this core's State (§ "Other machines' entries" above). Down,
-the merged entries stay as last seen; up again, a fresh `state.full` replaces them. Nothing else a
-hub link sends is read yet.
+the merged entries stay as last seen; up again, a fresh `state.full` replaces them.
+
+**Working on another machine** (design §8.3, §10.4 M6-C; `src/core/machine_route.odin`). A
+command naming ids of one other machine (`tab_id`, `session`, `project_id`, `pane`, `tab`, `split`,
+`opener`; ids of two machines are refused) is checked here first (`caller_may`); then only the
+user's (`ui`) is forwarded. Any other caller's is refused (agents and Atlas: a later version, as
+`control`). The hub sends it on that machine's link as `{"type":"command","id":"h<n>","now":true,
+"on_behalf":{"kind":"ui"},"command":{…}}`, its ids unpacked and a `pi_session_id`'s `m<no>:` taken
+off, and answers `pending`. That core's `result` (and its `finished`, for one it answered pending)
+ends the request here: `created_id` packed (a session it opened or made is shown here too), the
+error cleaned, no `data`. Its state change arrives through the mirror before the result. A link
+that is down, or goes down while it waits, answers `{"ok":false,"data":{"code":"machine_offline"}}`;
+no answer in 30 s fails it. A `needs_confirmation` for the user is asked here: the bar shows *On
+<machine>: <its summary>* with a token of this core's; confirming sends the user's command again
+with that machine's token, and Cancel cancels it there.
+
+**`on_behalf`** (the other core's side): a hub's `command` must carry `on_behalf` `{"kind":"ui"}`,
+`"control"` or `"script"`. It runs as that caller (`caller_may` and confirmations again, and the
+UI-only fields only for `ui`), so it can only lower `ui`. None, `none`, `internal`, `panel` or
+anything else is refused, as are a hub's `window.command`, `window.facts`, `window.tab_facts` and
+`script.core` (a window's own) and test mode's `as`.
+
+**Terminals on another machine** are relayed, not parsed: this core keeps no terminal for them.
+The window's `term.attach` on such a tab gets a channel of this core's at once; the hub attaches it
+on the link (`term.attach` with its own id) and maps the two channels. `SNAPSHOT`, `DATA`,
+`RESIZE`, `CLOSE` and `term.scroll` come back on the window's channel; the window's `DATA`,
+`CREDIT` and `FOCUS`, `term.resize` and `term.detach` go there. Credit passes through end to end.
+Down, the window's channels stay; up again, each is attached again and its fresh snapshot replaces
+the window's copy. That machine's bytes are untrusted: the window parses them as it parses a local
+program's, and a `RESIZE` outside the grid limits, `DATA` past twice the credit, or more than 4
+snapshots a second ends that stream there, attached again 2 s later. An OSC 52 from it is its
+core's `window.request`, which is dropped (and Deckhand's terminals ignore OSC 52 anyway).
 
 Waits are bounded so the core never hangs on the window: a `window.request` that wants an answer
 waits at most 250 ms, then the core goes on as if no window were attached. A `tab_host.call` does

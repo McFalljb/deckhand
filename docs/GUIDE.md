@@ -255,10 +255,16 @@ do: **Log in…** (ssh wants a password, a host key or a code: a shell tab here 
 you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…** or
 **Update** (for now these two say what to do on that machine; Deckhand does them in a later
 version). Under it are its open sessions, then its projects; click a project to list its sessions,
-as that machine has them. Click an open session to show it: its tabs show, read-only for now (the
-terminal reads *Connecting…*; working in it from here comes in a later version). While the machine
-is offline its rows are greyed and show what it had when last seen; they come back up to date when
-it does. Nothing of another machine is saved on this Mac.
+as that machine has them. Click an open session to show it, or one of a project's sessions to open
+it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
+that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
+**⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
+*On <machine>: …*. Its other kinds of tab (editors, pages, apps) show only on that machine for
+now, and agents and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
+is ignored), open windows or notify here. If the link drops, its terminals reconnect with their
+screen when it comes back. While the machine is offline its rows are greyed and show what it had
+when last seen; they come back up to date when it does. Nothing of another machine is saved on this
+Mac.
 
 A session's **title** is pi's own: the name you gave it with `/name` in pi, else your first
 message, else "Untitled session · <date>" (see [Troubleshooting](#troubleshooting)).

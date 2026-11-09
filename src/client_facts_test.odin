@@ -50,6 +50,8 @@ browser_facts_go_with_the_tab :: proc(t: ^testing.T) {
 @(test)
 client_deferred_bounded_while_hidden :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
+	tl_host_off() // the unit tests' tab host link (tabhost_link_test.odin): one window per core
+	defer tl_host_on()
 	saved_state, saved_client := state, client
 	core.state = core.State{}
 	client = {}

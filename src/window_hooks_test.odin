@@ -58,6 +58,8 @@ window_hooks_redraw_once_per_changed_command :: proc(t: ^testing.T) {
 window_hooks_toast_goes_through_the_hook :: proc(t: ^testing.T) {
 	saved := core.window
 	defer core.window = saved
+	tl_host_off() // an attached window gets its toasts as messages (window_link.odin)
+	defer tl_host_on()
 	core.window = wh_fake()
 	wh_reset()
 	core.window_toast("hello")
@@ -74,15 +76,13 @@ window_hooks_toast_goes_through_the_hook :: proc(t: ^testing.T) {
 @(test)
 window_hooks_tab_host_commands_need_a_window :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
-	saved := core.window
-	defer core.window = saved
 	wh_reset()
-	core.window = {}
+	tl_host_off()
 	r := core.run_command(core.Browser_Tabs{}, {kind = .Script})
 	testing.expect(t, !r.ok)
-	testing.expect_value(t, r.error, "no window")
+	testing.expect_value(t, core.json_path(r.data, "code"), "no_window")
 	// with one, the window's host answers (no browser tabs: an empty list, not a refusal)
-	core.window = window_hooks_app()
+	tl_host_on()
 	r = core.run_command(core.Browser_Tabs{}, {kind = .Script})
-	testing.expect(t, r.error != "no window")
+	testing.expectf(t, r.ok, "%v", r)
 }

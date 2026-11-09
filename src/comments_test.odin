@@ -437,7 +437,11 @@ tabs_belong_to_one_session :: proc(t: ^testing.T) {
 	defer c_done()
 	a, b := ids[0], ids[1]
 	state.current_session = a
-	id, err := browser_tab_open(b, "file:///y.html")
+	open :: proc(session: u64, url: string) -> (u64, string) {
+		r := core.run_command(core.Browser_Open{session = session, url = url}, {kind = .Internal})
+		return r.created_id, r.error
+	}
+	id, err := open(b, "file:///y.html")
 	testing.expect(t, id != 0, err)
 	defer core.drop_term(id)
 	s, tab, _ := core.find_tab(id)
@@ -447,12 +451,12 @@ tabs_belong_to_one_session :: proc(t: ^testing.T) {
 	testing.expect_value(t, len(c_sess(a).tabs), 2)
 	testing.expect_value(t, state.current_session, a) // the user's view stays
 	testing.expect_value(t, c_sess(b).active_tab, id)
-	id, err = browser_tab_open(999999, "file:///z.html")
+	id, err = open(999999, "file:///z.html")
 	testing.expect(t, id == 0 && err == "no such session", err)
 	home := core.Open_Session{id = core.new_id(), home = true}
 	append(&home.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, status = .Running})
 	append(&state.open_sessions, home)
-	id, err = browser_tab_open(home.id, "file:///z.html")
+	id, err = open(home.id, "file:///z.html")
 	testing.expect(t, id == 0, "Home has only its pi tab")
 	// no command moves tabs between sessions: none is named for it but move_tab (between the panes
 	// of one session), and none takes a tab and another session

@@ -619,7 +619,7 @@ browser_menu_items :: proc(t: Menu_Browser, items: ^[dynamic]core.Menu_Item) {
 	if t.link != "" {
 		sep(items)
 		if s, _, _ := core.find_tab(t.tab_id); s != nil {
-			if _, err := core.browser_url_normalize(t.link); err == "" && file_link_ok(bt.url, t.link) do append(items, core.Menu_Item{label = "Open link in new tab", cmd = core.Browser_Open{session = s.id, url = t.link}})
+			if _, err := core.browser_url_normalize(t.link); err == "" && core.browser_file_link_ok(bt.url, t.link) do append(items, core.Menu_Item{label = "Open link in new tab", cmd = core.Browser_Open{session = s.id, url = t.link}})
 		}
 		append(items, core.Menu_Item{label = "Copy link", copy = t.link})
 	}
@@ -642,7 +642,9 @@ browser_external_ok :: proc(url: string) -> bool {
 
 // ---- commands ----
 
-browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
+// The window's part of the page commands (the core checked the caller and the tab first:
+// tabhost_route.odin). tab_id: the tab browser_popup opens (0 = only the bar goes).
+browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	target :: proc(tab_id: u64) -> (s: ^core.Open_Session, bt: ^core.Browser_Tab, b: ^Browser, err: string) {
 		tab: ^core.Tab
 		s, tab, _ = core.find_tab(tab_id)
@@ -711,24 +713,19 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core
 		set_owned(&p.perm_origin, "")
 		return {ok = true}, true
 	case core.Browser_Popup:
-		s, bt, _, err := target(c.tab_id)
+		_, bt, _, err := target(c.tab_id)
 		if err != "" do return core.fail(err), false
-		if bt.blocked_popup == "" do return core.fail("no popup was blocked"), false
-		url := strings.clone(bt.blocked_popup, context.temp_allocator)
-		set_owned(&bt.blocked_popup, "")
 		if p := page_extras[c.tab_id]; p != nil {
 			p.popups_blocked, p.popup_dirty = 0, false
 			set_owned(&p.popup_url, "")
 		}
-		if !c.open do return {ok = true}, true
-		// the page's own address for it: an address Deckhand opens (http, https, file, deckhand-test)
-		nurl, nerr := core.browser_url_normalize(url)
+		if tab_id == 0 do return {ok = true}, true
+		// the refused popup's page, in a new tab of the opener's session (the core adds its record
+		// and clears the bar's address)
+		nurl, nerr := core.browser_url_normalize(bt.blocked_popup)
 		if nerr != "" do return core.fail(nerr), true
-		if !file_link_ok(bt.url, nurl) do return core.fail("a file: address opens from a file: page only"), true
-		// a new tab in the opener's session (never another), on screen there
-		id, oerr := browser_tab_open(s.id, nurl)
-		if id == 0 do return core.fail(oerr), true
-		return {ok = true, created_id = id}, true
+		browser_attach(tab_id, nurl)
+		return {ok = true, created_id = tab_id}, true
 	case core.Browser_Edit:
 		_, _, b, err := target(c.tab_id)
 		if err == "" do err = live(b)
@@ -833,11 +830,6 @@ page_dialog_clear :: proc(p: ^Page_Extra) {
 	}
 }
 
-// A file: address opens from a file: page only (the popup bar, Open link in new tab).
-file_link_ok :: proc(page_url, link: string) -> bool {
-	is_file :: proc(u: string) -> bool {return strings.has_prefix(strings.to_lower(u, context.temp_allocator), "file:")}
-	return !is_file(link) || is_file(page_url)
-}
 
 // A popup refused for want of a user gesture (browser.odin's on_cef_popup): counted, and the
 // bar and the log follow at most once a second (popup_blocked_note; the rest: browser_polish_tick).

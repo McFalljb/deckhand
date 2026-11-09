@@ -1095,5 +1095,5 @@ persist_after_layout :: proc(skip: bool) {
 // A dim line in a terminal before its child starts (restored shells).
 term_note :: proc(t: ^Term, text: string) {
 	msg := fmt.tprintf("\x1b[2m%s\x1b[0m\r\n", text)
-	gh.terminal_vt_write(t.gt, raw_data(msg), len(msg))
+	term_vt_write(t, transmute([]u8)msg)
 }

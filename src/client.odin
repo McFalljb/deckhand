@@ -21,7 +21,11 @@ package main
 // `state` across messages. To make a slip harmless the replica lives in a deferred-free allocator:
 // what a delta replaces stays readable until two frames later (client_after_tick).
 //
-// Dev builds: DECKHAND_PROTO_LOG=1 prints every frame on the link to stderr (first 300 bytes).
+// Terminals (M3-H): the window's copies of the terminals it shows are streamed on channels ≥ 1
+// and term.* messages (term_view_stream.odin); client_frame sends their input and requests.
+//
+// Dev builds: DECKHAND_PROTO_LOG=1 prints every frame on the link to stderr (first 300 bytes;
+// a terminal channel's frames by kind and size).
 
 import "base:runtime"
 import "core:fmt"
@@ -47,6 +51,8 @@ Client :: struct {
 	released:  time.Tick, // the last deferred_release
 	busy:      int, // inside frame() or event() (main.odin): the window may hold pointers into the replica
 	facts_sent: map[u64]string, // each browser tab's facts as last sent (client_pull)
+	host:      bool, // the link carries the tab host only (the window's unit tests: client_attach_host)
+	detached:  bool, // test mode's detach_window: the window plays gone until attach_window
 }
 
 client: Client
@@ -68,6 +74,61 @@ client_attach :: proc() {
 	core.window_link_pump() // the core answers with state.full (client_on_frames applied it)
 	state = &client.replica
 }
+
+// The window's unit tests: the link for the tab host only (tabhost_link.odin), so the core reaches
+// the window's tabs by message as in the app; `state` stays the core's and commands go straight in.
+client_attach_host :: proc() {
+	if client.attached || client.host do return
+	heap := runtime.heap_allocator()
+	client.main = sync.current_thread_id()
+	client.results = make(map[string]core.Result, heap)
+	client.facts_sent = make(map[u64]string, heap)
+	end, ok := core.core_attach_window(client_on_frames, client_pull)
+	if !ok do return
+	client.end = end
+	client.host = true
+}
+
+// The window's unit tests: the tab host's link off (what the core does with no window), or on again.
+client_host_set :: proc(on: bool) {
+	if on == client.host || client.attached do return
+	if on {
+		end, ok := core.core_attach_window(client_on_frames, client_pull)
+		if !ok do return
+		client.end = end
+	} else do core.core_detach_window()
+	client.host = on
+}
+
+// Test mode's detach_window: the window plays gone (M4's no-window cases, now). The core ends what
+// the window owed and answers no_window for its tabs; the replica stays as it was. Main thread.
+client_detach :: proc() {
+	if !client.attached do return
+	core.core_detach_window()
+	client.attached, client.detached = false, true
+	term_views_drop_all() // the window.s terminal copies go with it: their channels are gone (term_view_stream.odin)
+	heap := runtime.heap_allocator()
+	for _, v in client.facts_sent do delete(v, heap)
+	clear(&client.facts_sent)
+}
+
+// Test mode's attach_window: the window comes back; the replica gets the whole state again.
+client_reattach :: proc() {
+	if !client.detached do return
+	end, ok := core.core_attach_window(client_on_frames, client_pull, client_on_drain)
+	if !ok do return
+	client.detached = false
+	client.end = end
+	client.attached = true
+	client_raw(core.window_msg_subscribe())
+	core.window_link_pump()
+}
+
+// The link is up (tabhost_link.odin sends on it).
+client_link_up :: proc() -> bool {return client.attached || client.host}
+client_send_raw :: proc(text: string) {client_raw(text)}
+client_next_id :: proc() -> string {return client_id()}
+client_take_result :: proc(id: string) -> core.Result {return client_take(id)}
 
 // A ui command; its outcome comes back as state (ui_do). menu: a menu row's label, whose
 // failure is shown (core.menu_result).
@@ -219,8 +280,17 @@ client_id :: proc() -> string {
 
 @(private = "file")
 client_raw :: proc(text: string) -> bool {
-	if client.log do fmt.eprintfln("[proto] window -> core %s", text[:min(len(text), 300)])
-	if e := cw.mem_send(client.end, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
+	return client_frame(cw.JSON_CHANNEL, .Data, transmute([]u8)text)
+}
+
+// One frame to the core: a JSON message on channel 0, or a terminal stream's (term_view_stream.odin).
+// The caller pumps the core (core.window_link_pump) when it wants it read now. False: refused.
+client_frame :: proc(channel: u32, kind: cw.Kind, payload: []u8) -> bool {
+	if client.log {
+		if channel == cw.JSON_CHANNEL do fmt.eprintfln("[proto] window -> core %s", string(payload[:min(len(payload), 300)]))
+		else do fmt.eprintfln("[proto] window -> core [%d] %v %d bytes", channel, kind, len(payload))
+	}
+	if e := cw.mem_send(client.end, channel, kind, payload); e != .None {
 		fmt.eprintln("Deckhand: the window's link refused a message:", e)
 		return false
 	}
@@ -254,7 +324,12 @@ client_on_frames :: proc() {
 	for {
 		f, err := cw.mem_recv(client.end, context.temp_allocator)
 		if err != .None do return
-		if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do continue
+		if f.channel != cw.JSON_CHANNEL {
+			if client.log do fmt.eprintfln("[proto] core -> window [%d] %v %d bytes", f.channel, cw.Kind(f.kind), len(f.payload))
+			term_view_frame(f) // a terminal's stream (term_view_stream.odin)
+			continue
+		}
+		if f.kind != u8(cw.Kind.Data) do continue
 		text := string(f.payload)
 		if client.log do fmt.eprintfln("[proto] core -> window %s", text[:min(len(text), 300)])
 		m, perr := core.window_msg_parse(text)
@@ -277,6 +352,15 @@ client_on_frames :: proc() {
 			} else do client.results[strings.clone(m.id, heap)] = r
 		case .Toast:
 			toast_show(m.text, m.err)
+		case .Tab_Host_Call:
+			// the window's part may call the core, which answers on this link: read by the inner loop
+			client.receiving = false
+			client.busy += 1 // window code runs (it may hold replica pointers): no release mid-call
+			tab_host_on_call(text) // tabhost_link.odin
+			client.busy -= 1
+			client.receiving = true
+		case .Term:
+			term_view_json(text) // term.attached, term.scroll (term_view_stream.odin)
 		case .Unknown:
 		}
 	}

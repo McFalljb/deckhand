@@ -269,7 +269,7 @@ handover_feed :: proc(t: ^Term) {
 	holder_pull(t.pty.held, &t.reader)
 	sync.lock(&t.reader.mu)
 	if n := len(t.reader.inbox); n > 0 {
-		gh.terminal_vt_write(t.gt, raw_data(t.reader.inbox), uint(n))
+		term_vt_write(t, t.reader.inbox[:n])
 		clear(&t.reader.inbox)
 	}
 	sync.unlock(&t.reader.mu)
@@ -458,6 +458,7 @@ adopt_tab :: proc(s: ^Open_Session, tab: ^Tab, id: u32, snaps: map[u32]Handover_
 		// no usable snapshot (crash restart): a fresh terminal at the holder's size, its whole tail
 		t.cols, t.rows = max(cols, 2), max(rows, 2)
 		gh.terminal_resize(t.gt, t.cols, t.rows, u32(t.cell.x), u32(t.cell.y))
+		term_stream_reset(t) // not through term_resize: a window streaming it starts again
 		if autotest_active {
 			hsh, _ := screen_hash(t.gt)
 			fmt.printfln("[autotest] adopted %d hash %x inexact", id, hsh)

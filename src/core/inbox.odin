@@ -264,7 +264,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return cmd
 	case Comment_Delete, Comments_Clear, Comments_Send_Now, Comments_Ask_Cancel, Pi_Attached:
 		return cmd
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		return browser_command_clone(cmd, allocator)
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
 		return browser_polish_command_clone(cmd, allocator)
@@ -322,7 +322,7 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		claude_extra_free(cmd, allocator)
 	case Claude_Model_Report: delete(c.model, allocator)
 	case Claude_Wait_Idle, Claude_Wait_Tick:
-	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update:
+	case Browser_Open, Browser_Navigate, Browser_Back, Browser_Forward, Browser_Reload, Browser_Stop, Browser_Update, Browser_Popup_Open:
 		browser_command_free(cmd, allocator)
 	case Browser_Zoom, Browser_Find, Browser_Find_Close, Browser_Dialog, Browser_Permission, Browser_Popup, Browser_Edit, Browser_Devtools, Browser_External, Browser_Download:
 		browser_polish_command_free(cmd, allocator)

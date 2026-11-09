@@ -65,7 +65,8 @@ term_resize_by_cols_and_rows :: proc(t: ^testing.T) {
 	saved_w, saved_h, saved_dpi := font.cell_w, font.cell_h, app.dpi
 	defer font.cell_w, font.cell_h, app.dpi = saved_w, saved_h, saved_dpi
 	font.cell_w, font.cell_h, app.dpi = 10, 20, 1
-	term_set_rect(term, 0, 0, 40 * 10 + 2 * TERM_PAD, 12 * 20 + 2 * TERM_PAD)
+	cols, rows := term_grid_fit(40 * 10 + 2 * TERM_PAD, 12 * 20 + 2 * TERM_PAD) // what term_fit_rect asks the core for
+	core.term_resize(term, cols, rows, font.cell_w, font.cell_h)
 	c, r = rz_grid(term)
 	testing.expect_value(t, c, 40)
 	testing.expect_value(t, r, 12)

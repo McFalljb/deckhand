@@ -32,7 +32,7 @@ Tab_View :: struct {
 // Terminal tabs (pi and shell): libghostty-vt in process, drawn by us.
 terminal_host := Tab_View {
 	display = .Drawn,
-	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := core.term_of(tab_id); t != nil do term_draw(t)},
+	draw = proc(tab_id: u64, x, y, w, h: f32) {if t := term_view_of(tab_id); t != nil do term_draw(t)}, // the window's copy (term_view_stream.odin)
 }
 
 tab_view :: proc(kind: core.Tab_Kind) -> ^Tab_View {
@@ -53,25 +53,27 @@ tab_view :: proc(kind: core.Tab_Kind) -> ^Tab_View {
 	return nil
 }
 
-// The window's side of tab host routing (window_hooks.odin): the browser, app, Markdown and
-// editor commands, and a terminal's links, as commands.odin's apply sent them before.
-tab_host_apply_app :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (core.Result, bool) {
+// The window's part of a routed command (a tab_host.call, tabhost_link.odin): the browser, app,
+// Markdown and editor commands and a terminal's links. The core checked the caller and the records
+// first and changes the records from the answer (src/core/tabhost_route.odin). tab_id: the tab
+// the call makes (browser_open, a popup's, terminal_link's, new_app_tab), else 0.
+tab_host_apply_app :: proc(cmd: core.Command, caller: core.Caller, request_id: u64, tab_id: u64 = 0) -> (core.Result, bool) {
 	#partial switch _ in cmd {
-	case core.Open_File, core.Editor_State, core.Save_File, core.Goto_Line, core.Reload_File, core.Keep_Buffer, core.Diff_File, core.Set_Wrap, core.List_Dir, core.Create_File, core.Create_Dir, core.Rename_Path, core.Delete_Path, core.Reveal_In_Finder, core.Keep_Tab, core.Git_Head_Done, core.Git_Status_Done, core.File_List_Done:
-		return editor_apply(cmd, caller)
+	case core.Open_File, core.Editor_State, core.Save_File, core.Goto_Line, core.Reload_File, core.Keep_Buffer, core.Diff_File, core.Set_Wrap, core.Git_Head_Done:
+		return editor_apply(cmd, caller, tab_id)
 	case core.Markdown_Open, core.Markdown_Set_View, core.Markdown_Scroll, core.Markdown_Follow:
-		return markdown_apply(cmd, caller)
+		return markdown_apply(cmd, caller, tab_id)
 	case core.Terminal_Link:
-		return term_link_apply(cmd.(core.Terminal_Link), caller) // a browser tab, else the default browser (term_links.odin)
-	case core.New_App_Tab, core.App_Restart, core.App_Close, core.App_Declared, core.App_Input, core.App_Events, core.App_Call, core.App_Call_Done, core.App_Update, core.App_Screenshot, core.App_Inspect:
-		return app_apply(cmd, caller, request_id)
-	case core.Browser_Open, core.Browser_Navigate, core.Browser_Back, core.Browser_Forward, core.Browser_Reload, core.Browser_Stop, core.Browser_Update:
+		return term_link_apply(cmd.(core.Terminal_Link), caller, tab_id) // a browser tab (term_links.odin)
+	case core.New_App_Tab, core.App_Restart, core.App_Input, core.App_Call, core.App_Call_Done, core.App_Screenshot, core.App_Inspect:
+		return app_apply(cmd, caller, request_id, tab_id)
+	case core.Browser_Open, core.Browser_Navigate, core.Browser_Back, core.Browser_Forward, core.Browser_Reload, core.Browser_Stop:
 		if r, refused := browser_agent_nav_refused(cmd, caller); refused do return r, false // Take over (browser_agent.odin)
-		r, ch := browser_nav_apply(cmd, caller)
+		r, ch := browser_nav_apply(cmd, caller, tab_id)
 		browser_agent_nav_ran(cmd, caller, r) // the agent strip; a load wait's navigation (browser_agent.odin)
 		return r, ch
 	case core.Browser_Zoom, core.Browser_Find, core.Browser_Find_Close, core.Browser_Dialog, core.Browser_Permission, core.Browser_Popup, core.Browser_Edit, core.Browser_Devtools, core.Browser_External, core.Browser_Download:
-		return browser_polish_apply(cmd, caller)
+		return browser_polish_apply(cmd, caller, tab_id)
 	case core.Browser_Tabs, core.Browser_Read, core.Browser_Screenshot, core.Browser_Page_Wait, core.Browser_Console, core.Browser_Network, core.Browser_Comments, core.Browser_Agent_Stop:
 		return browser_agent_apply(cmd, caller, request_id)
 	case core.Browser_Click, core.Browser_Type, core.Browser_Press, core.Browser_Scroll, core.Browser_Select, core.Browser_Hover, core.Browser_Upload, core.Browser_Upload_Answer, core.Browser_Agent_Take_Over, core.Request_Cancel:

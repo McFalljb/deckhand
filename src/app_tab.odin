@@ -121,26 +121,12 @@ APP_PEEK_TIMEOUT :: 3 * time.Second
 // App tabs a session's agents may have running at once (also while closing).
 APP_AGENT_MAX :: 8
 
-// An agent's app tab title: one line of at most this many characters.
-APP_TITLE_MAX :: 80
-// apps.json is read only up to this size.
-APP_JSON_MAX :: 256 * 1024
 // App tabs a session's agents opened that still run, closing ones included.
 app_agent_running :: proc(session: u64) -> int {
 	n := 0
 	for _, a in apps do if a.by_agent && a.session == session && a.pid != 0 do n += 1
 	for a in dying do if a.by_agent && a.session == session && a.pid != 0 do n += 1
 	return n
-}
-
-// Whether the caller is a pi tab started read-only (chat_env: a chat under Chats: read-only);
-// what it was started with, not today's setting.
-pi_chat_readonly :: proc(caller: core.Caller) -> bool {
-	if caller.kind != .Panel || caller.claude do return false
-	_, tab, _ := core.find_tab(caller.tab_id)
-	if tab == nil do return false
-	pt, is := tab.kind.(core.Pi_Tab)
-	return is && pt.readonly
 }
 
 // An app tab's output: the last APP_LOG_LINES lines and the log file.
@@ -222,120 +208,28 @@ app_tab_of :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^core.App_Tab) {
 
 // ---- commands ----
 
-app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r: core.Result, changed: bool) {
-	// a pi or Claude tab (panel) reaches only its own session's app tabs, as its browser tabs, and
-	// opens apps only there (new_app_tab, app_declared: app_session)
-	if caller.kind == .Panel {
-		tab_id: u64
-		#partial switch c in cmd {
-		case core.New_App_Tab, core.App_Declared:
-		case core.App_Restart:    tab_id = c.tab_id
-		case core.App_Close:      tab_id = c.tab_id
-		case core.App_Input:      tab_id = c.tab_id
-		case core.App_Events:     tab_id = c.tab_id
-		case core.App_Call:       tab_id = c.tab_id
-		case core.App_Screenshot: tab_id = c.tab_id
-		case:                return core.fail("not allowed for this caller"), false
-		}
-		if tab_id != 0 {
-			ts, _, _ := core.find_tab(tab_id)
-			own := core.caller_session(caller)
-			if ts == nil || own == nil || ts != own do return core.fail("a pi or Claude tab reaches only its own session's app tabs"), false
-		}
-		// a read-only chat's pi (Chats: read-only, as chat_env starts it) reads apps but runs none
-		#partial switch _ in cmd {
-		case core.New_App_Tab, core.App_Restart, core.App_Close:
-			if !caller.claude && pi_chat_readonly(caller) do return core.fail("a read-only chat's pi may read apps, not open, restart or close them (it was started under Chats: read-only)"), false
-		}
-	}
+// The window's part of the app tab commands (the core checked the caller and the records first,
+// and changes them from the answer: tabhost_route.odin). tab_id: the tab new_app_tab makes.
+app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
 	case core.New_App_Tab:
-		s, serr := app_session(caller, c.session)
-		if s == nil do return core.fail(serr), false
-		if s.home do return core.fail("Home has only its pi tab"), false
-		agent := caller.kind == .Panel
-		by_agent := agent // behind the view, counted against APP_AGENT_MAX, its title cleaned
-		argv: []string
-		cwd_arg, title := c.cwd, c.title
-		if c.name != "" {
-			// what the project declares, as the palette's "New app tab…" runs it
-			if len(c.argv) > 0 || c.command != "" do return core.fail("name, or argv or command: not both"), false
-			if agent && c.cwd != "" do return core.fail("cwd comes from .deckhand/apps.json for a pi or Claude tab"), false
-			e, found := app_entry(s.cwd, c.name)
-			if !found do return core.fail(app_not_declared(s.cwd, c.name)), false
-			argv = e.argv
-			if cwd_arg == "" do cwd_arg = e.cwd
-			if title == "" do title = e.name
-		} else if agent {
-			// a session's own agent runs only what its project declares (apps.json: the agent's own
-			// authority, as its shell; docs/ENGINE-BRIDGE.md, trust model)
-			return core.fail("a pi or Claude tab opens only the apps its project declares in .deckhand/apps.json, by name (app_declared lists them)"), false
-		} else if len(c.argv) > 0 do argv = c.argv
-		else if strings.trim_space(c.command) != "" do argv = []string{"/bin/sh", "-c", c.command}
-		else do return core.fail("argv or command is needed"), false
-		cwd := s.cwd
-		if cwd_arg != "" {
-			p := cwd_arg
-			if !filepath.is_abs(p) do p, _ = filepath.join({s.cwd, p}, context.temp_allocator)
-			p, _ = filepath.clean(p, context.temp_allocator)
-			base := core.fs_real(s.cwd)
-			rp := core.fs_real(p)
-			if rp != base && !strings.has_prefix(rp, strings.concatenate({base, "/"}, context.temp_allocator)) do return core.fail("cwd must be inside the session's folder"), false
-			if !os.is_dir(rp) do return core.fail("cwd is not a folder"), false
-			cwd = rp
-		}
-		if title == "" {
-			// the program's name (a command line's first word)
-			prog := argv[0]
-			if len(argv) > 2 && argv[0] == "/bin/sh" {
-				words := strings.fields(argv[2], context.temp_allocator)
-				prog = len(words) > 0 ? words[0] : "app"
-			}
-			title = filepath.base(prog)
-		}
+		// what the core resolved: the session, argv, folder and title; the tab's record follows
+		by_agent := caller.kind == .Panel // behind the view, counted against APP_AGENT_MAX, its title cleaned
+		if tab_id == 0 || len(c.argv) == 0 do return core.fail("no app to start"), false
 		if by_agent {
-			// the agent's text (its title, or an apps.json name it may have written) in the chrome
-			title = strings.trim_space(core.one_line(title, context.temp_allocator))
-			if n := strings.rune_count(title); n > APP_TITLE_MAX {
-				i, k := 0, 0
-				for _, j in title {
-					if k == APP_TITLE_MAX {
-						i = j
-						break
-					}
-					k += 1
-				}
-				title = title[:i]
-			}
-			if title == "" do title = "app"
-			if running := app_agent_running(s.id); running >= APP_AGENT_MAX do return core.fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", running)), false
-		}
-		owned := make([]string, len(argv))
-		for a, i in argv do owned[i] = strings.clone(a)
-		tab := core.Tab{id = core.new_id(), kind = core.App_Tab{argv = owned, cwd = strings.clone(cwd), exit_code = -1}, title = strings.clone(title), status = .Running}
-		core.pane_add_tab(s, tab, pane = core.open_pane(s, caller)) // an agent's: in its own tab's pane
-		if !by_agent {
-			// an agent's (a pi or Claude tab's) opens behind the user's view, as its browser tabs;
-			// the user's, a script's and Home's come to the front
-			core.session_show_tab(s, tab.id)
-			core.focus_session(s.id, caller)
+			if running := app_agent_running(c.session); running >= APP_AGENT_MAX do return core.fail(fmt.tprintf("this session already has %d app tabs its agents opened running (or still closing): close one first (app_close)", running)), false
 		}
 		a := new(App_Proc)
-		a.tab_id = tab.id
-		a.title = strings.clone(title)
+		a.tab_id = tab_id
+		a.title = strings.clone(c.title)
 		a.sent_visible = -1
 		a.hover = -1
 		a.ring.shown_slot = -1
-		a.session, a.by_agent = s.id, by_agent
-		apps[tab.id] = a
-		if !app_spawn(a, owned, cwd) {
-			_, t, at := app_tab_of(tab.id)
-			at.app_status = .Exited
-			t.status = .Exited
-			at.exit_code = 127
-			return {ok = true, created_id = tab.id, data = `{"started":false}`}, true
-		}
-		return {ok = true, created_id = tab.id}, true
+		a.session, a.by_agent = c.session, by_agent
+		apps[tab_id] = a
+		started := app_spawn(a, c.argv, c.cwd) // the record follows (argv and cwd are the core's)
+		if !started do return {ok = true, created_id = tab_id, data = `{"started":false}`}, true
+		return {ok = true, created_id = tab_id}, true
 	case core.App_Restart:
 		_, tab, at := app_tab_of(c.tab_id)
 		if tab == nil do return core.fail("no such app tab"), false
@@ -353,36 +247,7 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r
 		}
 		clear(&a.restarts) // the user's restart starts the exit-75 count over
 		ok := app_spawn(a, at.argv, at.cwd)
-		at.app_status = ok ? .Starting : .Exited
-		tab.status = ok ? .Running : .Exited
-		return {ok = ok, error = ok ? "" : "could not start the app"}, true
-	case core.App_Close:
-		// close_tab's close (its confirmation rule, comments, tab.quit then SIGTERM), for app tabs only
-		if _, tab, _ := app_tab_of(c.tab_id); tab == nil do return core.fail("no such app tab"), false
-		return core.close_tab_apply(core.Close_Tab{tab_id = c.tab_id, confirm = c.confirm, comments = c.comments}, caller, request_id)
-	case core.App_Declared:
-		s, serr := app_session(caller, c.session)
-		if s == nil do return core.fail(serr), false
-		b := strings.builder_make(context.temp_allocator)
-		fmt.sbprintf(&b, `{{"session":%d,"apps":[`, s.id)
-		for e, i in app_entries(s.cwd) {
-			if i > 0 do strings.write_byte(&b, ',')
-			strings.write_string(&b, `{"name":`)
-			core.json_quote(&b, e.name)
-			strings.write_string(&b, `,"argv":[`)
-			for x, j in e.argv {
-				if j > 0 do strings.write_byte(&b, ',')
-				core.json_quote(&b, x)
-			}
-			strings.write_byte(&b, ']')
-			if e.cwd != "" {
-				strings.write_string(&b, `,"cwd":`)
-				core.json_quote(&b, e.cwd)
-			}
-			strings.write_byte(&b, '}')
-		}
-		strings.write_string(&b, "]}")
-		return {ok = true, data = strings.to_string(b)}, false
+		return {ok = ok, error = ok ? "" : "could not start the app"}, true // the core sets its status
 	case core.App_Input:
 		_, tab, _ := app_tab_of(c.tab_id)
 		if tab == nil do return core.fail("no such app tab"), false
@@ -444,7 +309,7 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r
 				strings.write_byte(&b, '}')
 				res.data = strings.to_string(b)
 			}
-			core.emit_event(core.Finished_Event{request_id = p.request_id, result = res})
+			tab_host_finished(p.request_id, res)
 			return {ok = true}, false
 		}
 		// Deckhand's own: a stall's ping answered
@@ -454,16 +319,6 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r
 			a.ping_wire = ""
 		}
 		return {ok = true}, false
-	case core.App_Update:
-		_, tab, at := app_tab_of(c.tab_id)
-		if tab == nil do return {ok = true}, false
-		if at.app_status == c.status && (c.status != .Exited || at.exit_code == c.exit_code) do return {ok = true}, false
-		at.app_status = c.status
-		if c.status == .Exited {
-			at.exit_code = c.exit_code
-			tab.status = .Exited
-		} else do tab.status = .Running
-		return {ok = true}, true
 	}
 	return core.fail("not an app command"), false
 }
@@ -550,7 +405,7 @@ app_fail_pending :: proc(tab_id: u64, why, code: string, shots := true) {
 	for k, p in pending do if p.tab_id == tab_id && (shots || p.type != APP_SHOT_TYPE) do append(&gone, k)
 	for k in gone {
 		key, p := delete_key(&pending, k)
-		if p.request_id != 0 do core.emit_event(core.Finished_Event{request_id = p.request_id, result = {error = why, data = fmt.tprintf(`{{"code":%q}}`, code)}})
+		if p.request_id != 0 do tab_host_finished(p.request_id, {error = why, data = fmt.tprintf(`{{"code":%q}}`, code)})
 		delete(key)
 		delete(p.type)
 	}
@@ -731,7 +586,7 @@ app_gone :: proc(a: ^App_Proc, code: int) {
 	// hidden screenshots waiting for a frame: answered now (the last frame, or no_frame)
 	for w in a.shot_waits {
 		r := app_shot_now(a.tab_id, a, w.rect, w.has_rect, w.request_id)
-		if !r.pending do core.emit_event(core.Finished_Event{request_id = w.request_id, result = r})
+		if !r.pending do tab_host_finished(w.request_id, r)
 	}
 	clear(&a.shot_waits)
 	core.app_boxes_forget(a.tab_id) // its boxes went with it
@@ -834,11 +689,11 @@ app_frames_tick :: proc() -> bool {
 					append(&a.restarts, now)
 					app_log_line(a, "[Deckhand] exit 75: restarting")
 					if app_spawn(a, at.argv, at.cwd) {
-						client_call(core.App_Update{tab_id = id, status = .Starting}, .Internal)
+						tab_host_report_now(core.App_Update{tab_id = id, status = .Starting})
 						continue
 					}
 				}
-				client_call(core.App_Update{tab_id = id, status = .Exited, exit_code = code}, .Internal)
+				tab_host_report_now(core.App_Update{tab_id = id, status = .Exited, exit_code = code})
 				continue
 			}
 		}
@@ -905,7 +760,7 @@ app_frames_tick :: proc() -> bool {
 			}
 			ordered_remove(&a.shot_waits, i)
 			r := app_shot_now(id, a, w.rect, w.has_rect, w.request_id)
-			if !r.pending do core.emit_event(core.Finished_Event{request_id = w.request_id, result = r})
+			if !r.pending do tab_host_finished(w.request_id, r)
 		}
 		// visibility: tab.visible when it changes
 		if a.sent_visible != int(told) && core.socket_app_connected(id) {
@@ -940,7 +795,7 @@ app_frames_tick :: proc() -> bool {
 			a.ping_at, a.ping_answered = {}, false
 		}
 		if want != status && status != .Exited {
-			client_call(core.App_Update{tab_id = id, status = want}, .Internal)
+			tab_host_report_now(core.App_Update{tab_id = id, status = want})
 			redraw = true
 		}
 		if want == .Stalled && visible && app_badge_changed(a, now) do redraw = true
@@ -951,7 +806,7 @@ app_frames_tick :: proc() -> bool {
 		for k, p in pending do if time.tick_diff(p.deadline, now) > 0 do append(&late, k)
 		for k in late {
 			key, p := delete_key(&pending, k)
-			if p.request_id != 0 do core.emit_event(core.Finished_Event{request_id = p.request_id, result = {error = "the app did not answer in time", data = `{"code":"timeout"}`}})
+			if p.request_id != 0 do tab_host_finished(p.request_id, {error = "the app did not answer in time", data = `{"code":"timeout"}`})
 			if a := app_of(p.tab_id); a != nil && a.ping_wire == key {
 				delete(a.ping_wire)
 				a.ping_wire = ""
@@ -1081,7 +936,7 @@ app_drop :: proc(tab_id: u64) {
 	delete_key(&apps, tab_id)
 	app_release_input(a)
 	app_fail_pending(tab_id, "the tab closed", "tab_gone")
-	for w in a.shot_waits do core.emit_event(core.Finished_Event{request_id = w.request_id, result = {error = "the tab closed", data = `{"code":"tab_gone"}`}})
+	for w in a.shot_waits do tab_host_finished(w.request_id, {error = "the tab closed", data = `{"code":"tab_gone"}`})
 	clear(&a.shot_waits)
 	// the surfaces go now, whatever the process does; `a` is freed last
 	for &g in a.ring.gens do for s in 0 ..< FRAME_SLOTS do slot_destroy(&g, s)
@@ -1298,7 +1153,7 @@ shot_write :: proc(j: ^Shot_Job) {
 		fmt.sbprintf(&b, `,"w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
 		done.data = strings.to_string(b)
 	} else do done.code = "write_failed"
-	client_internal(done) // a worker thread: queued on the link (client.odin)
+	tab_host_report(done) // a worker thread: queued on the link (tabhost_link.odin)
 	sync.atomic_sub(&shots_running, 1)
 }
 
@@ -1629,97 +1484,6 @@ app_bar_click :: proc(a: ^App_Proc, x, y: f32) -> bool {
 
 // ---- the palette's app mode ("New app tab…") ----
 
-// Apps listed in the session's .deckhand/apps.json ({"apps":[{"name","argv","cwd"?}]}).
-App_Entry :: struct {
-	name: string,
-	argv: []string,
-	cwd:  string,
-}
-
-// The project file: <cwd>/.deckhand/apps.json, else its name before the rename (0.1.7),
-// <cwd>/.pi-desk/apps.json, read for good (it is committed in the user's repos; never moved).
-// Both there: .deckhand/ only. Temp-allocated.
-app_json_path :: proc(cwd: string) -> string {
-	path, _ := filepath.join({cwd, ".deckhand", "apps.json"}, context.temp_allocator)
-	if os.exists(path) do return path
-	old, _ := filepath.join({cwd, ".pi-desk", "apps.json"}, context.temp_allocator)
-	return os.exists(old) ? old : path
-}
-
-app_entries :: proc(cwd: string) -> []App_Entry {
-	data, ok := app_json_read(app_json_path(cwd))
-	if !ok do return nil
-	v, perr := jg.parse(data, .JSON, true, context.temp_allocator)
-	if perr != nil do return nil
-	root, _ := v.(json.Object) // another shape lists nothing (an agent may have written the file)
-	list, _ := root["apps"].(json.Array)
-	out := make([dynamic]App_Entry, context.temp_allocator)
-	for x in list {
-		o, _ := x.(json.Object)
-		name, _ := o["name"].(json.String)
-		av, _ := o["argv"].(json.Array)
-		cw, _ := o["cwd"].(json.String)
-		if name == "" || strings.rune_count(name) > APP_TITLE_MAX || len(av) == 0 do continue
-		argv := make([]string, len(av), context.temp_allocator)
-		for s, i in av do argv[i] = s.(json.String) or_else ""
-		append(&out, App_Entry{name = name, argv = argv, cwd = cw})
-	}
-	return out[:]
-}
-
-// apps.json's bytes (temp): a regular file, not a symbolic link, at most APP_JSON_MAX bytes.
-// Opened without following a link and without blocking (a FIFO), then checked on the open file
-// (an agent may have written it); never more than APP_JSON_MAX+1 bytes read.
-@(private = "file")
-app_json_read :: proc(path: string) -> ([]u8, bool) {
-	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.CLOEXEC, .NOFOLLOW, .NONBLOCK})
-	if fd < 0 do return nil, false
-	defer posix.close(fd)
-	st: posix.stat_t
-	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) || st.st_size > APP_JSON_MAX do return nil, false
-	buf := make([]u8, APP_JSON_MAX + 1, context.temp_allocator)
-	n := 0
-	for n < len(buf) {
-		want: int = len(buf) - n
-		got := posix.read(fd, raw_data(buf[n:]), uint(want))
-		if got < 0 && posix.errno() == .EINTR do continue
-		if got <= 0 do break
-		n += int(got)
-	}
-	if n > APP_JSON_MAX do return nil, false // grew since fstat
-	return buf[:n], true
-}
-
-// The entry of the session's apps.json named `name`.
-app_entry :: proc(cwd, name: string) -> (App_Entry, bool) {
-	for e in app_entries(cwd) do if e.name == name do return e, true
-	return {}, false
-}
-
-// Why `name` cannot open: the names the session declares.
-app_not_declared :: proc(cwd, name: string) -> string {
-	names := make([dynamic]string, context.temp_allocator)
-	for e in app_entries(cwd) do append(&names, fmt.tprintf("%q", e.name))
-	file := strings.has_suffix(app_json_path(cwd), "/.pi-desk/apps.json") ? ".pi-desk/apps.json" : ".deckhand/apps.json" // the one read
-	if len(names) == 0 do return fmt.tprintf("no app %q: the session's folder declares none (%s)", name, file)
-	return fmt.tprintf("no app %q in the session's %s (declared: %s)", name, file, strings.join(names[:], ", ", context.temp_allocator))
-}
-
-// The session new_app_tab and app_declared act in: a pi or Claude tab's own, never another;
-// else the one named, or the caller's (Home's and an unbound caller's: the one on screen).
-app_session :: proc(caller: core.Caller, session: u64) -> (^core.Open_Session, string) {
-	if caller.kind == .Panel {
-		own := core.caller_session(caller)
-		if own == nil do return nil, "the calling tab has no session"
-		if session != 0 && session != own.id do return nil, "a pi or Claude tab opens and lists apps in its own session only"
-		return own, ""
-	}
-	s := session != 0 ? core.find_session(session) : core.caller_session(caller)
-	if s != nil && s.home && session == 0 do s = core.cur()
-	if s == nil do return nil, "no open session to open the app in"
-	return s, ""
-}
-
 // The palette's app mode: the typed command line, then the session's
 // apps.json entries matching it.
 app_palette_results :: proc(query: string) -> []Palette_Item {
@@ -1727,7 +1491,7 @@ app_palette_results :: proc(query: string) -> []Palette_Item {
 	q := strings.trim_space(query)
 	if q != "" do append(&out, Palette_Item{kind = .App, key = "app:run", title = fmt.tprintf("Run “%s” in an app tab", q), path = strings.clone(q, context.temp_allocator), order = 0})
 	if cs := core.cur(); cs != nil {
-		for e, i in app_entries(cs.cwd) {
+		for e, i in core.app_entries(cs.cwd) {
 			if q != "" && !strings.contains(strings.to_lower(e.name, context.temp_allocator), strings.to_lower(q, context.temp_allocator)) do continue
 			append(&out, Palette_Item{kind = .App, key = strings.concatenate({"app:", e.name}, context.temp_allocator), title = e.name, detail = strings.join(e.argv, " ", context.temp_allocator), order = i + 1})
 		}

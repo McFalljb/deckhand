@@ -21,6 +21,7 @@ browser_command_type :: proc(cmd: Command) -> string {
 	case Browser_Reload:   return "browser_reload"
 	case Browser_Stop:     return "browser_stop"
 	case Browser_Update:   return "browser_update"
+	case Browser_Popup_Open: return "browser_popup_open"
 	}
 	return ""
 }
@@ -34,6 +35,10 @@ browser_command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Com
 		x := c
 		x.url, x.title, x.blocked = s(c.url, allocator), s(c.title, allocator), s(c.blocked, allocator)
 		return x
+	case Browser_Popup_Open:
+		x := c
+		x.url = s(c.url, allocator)
+		return x
 	}
 	return cmd
 }
@@ -46,6 +51,7 @@ browser_command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 		delete(c.url, allocator)
 		delete(c.title, allocator)
 		delete(c.blocked, allocator)
+	case Browser_Popup_Open: delete(c.url, allocator)
 	}
 }
 
@@ -58,6 +64,7 @@ browser_command_tab :: proc(cmd: Command) -> u64 {
 	case Browser_Reload:   return c.tab_id
 	case Browser_Stop:     return c.tab_id
 	case Browser_Update:   return c.tab_id
+	case Browser_Popup_Open: return c.opener
 	}
 	return 0
 }

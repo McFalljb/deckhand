@@ -41,14 +41,13 @@ harness_term_rect :: proc() -> (x, y, w, h: f32, ok: bool) {
 
 // Frame upkeep (main.odin, after the layout): the run's terminal follows its place on the sheet.
 harness_term_layout :: proc() {
-	t := core.harness_run_term()
-	if t == nil do return
-	if x, y, w, h, ok := harness_term_rect(); ok do term_set_rect(t, x, y, w, h)
+	if core.harness_run_term() == nil do return
+	if x, y, w, h, ok := harness_term_rect(); ok do term_fit_rect(core.harness_run.term_id, x, y, w, h)
 }
 
 // Drawn above the sheet (main.odin, after the overlays).
 harness_term_draw :: proc() {
-	t := core.harness_run_term()
+	t := harness_view()
 	if t == nil do return
 	if _, _, _, _, ok := harness_term_rect(); ok do term_draw(t)
 }
@@ -306,7 +305,7 @@ harness_step_click :: proc(h: Hit_Setup) -> string {
 // Keys and the wheel while a run's terminal shows on the sheet: the keyboard is the terminal's
 // while it runs (⌃C stops it; ⌘Q still quits). True if taken.
 harness_step_event :: proc(e: ^sapp.Event) -> bool {
-	t := core.harness_run_term()
+	t := harness_view()
 	if t == nil do return false
 	#partial switch e.type {
 	case .MOUSE_SCROLL:

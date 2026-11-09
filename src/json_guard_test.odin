@@ -227,9 +227,9 @@ SITES := [?]Site {
 		return !core.pi_package_find(strings.trim_suffix(p, "/settings.json"), "x").listed
 	}},
 	{"handover_parse (holder handover.json, after its MAC)", proc(s: string) -> bool {_, ok, _ := core.handover_parse(s); return !ok}},
-	{"app_entries (.deckhand/apps.json)", proc(s: string) -> bool {
+	{"core.app_entries (.deckhand/apps.json)", proc(s: string) -> bool {
 		p := jg_tmp_file(".deckhand/apps.json", s)
-		return len(app_entries(strings.trim_suffix(p, "/.deckhand/apps.json"))) == 0
+		return len(core.app_entries(strings.trim_suffix(p, "/.deckhand/apps.json"))) == 0
 	}},
 }
 
@@ -593,7 +593,7 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 	WANT := [?]Parse_Site {
 		{"src/core/agent.odin", "json_field", "jg.parse_string", "transcript", ""}, // pi session lines
 		{"src/app_tab.odin", "app_input_event_check", "jg.parse_string", "", ""},
-		{"src/app_tab.odin", "app_entries", "jg.parse", "", ""},
+		{"src/core/app_tab_core.odin", "app_entries", "jg.parse", "", ""},
 		{"src/core/app_wire.odin", "json_string_of", "jg.parse_string", "", ""},
 		{"src/core/app_wire.odin", "app_event_in", "json.make_parser", "json_valid", ""},
 		{"src/core/app_wire.odin", "app_event_in", "json.parse_value", "parser", ""},
@@ -637,6 +637,9 @@ json_guard_every_parse_site_is_guarded :: proc(t: ^testing.T) {
 		{"src/core/window_link.odin", "window_command_decode_for_test", "jg.parse_string", "", ""}, // tests
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
 		{"src/core/window_link.odin", "json_diff_path", "jg.parse_string", "", ""}, // test mode: the core's own section texts
+		{"src/core/tabhost_route.odin", "tab_host_call_parse", "jg.parse_string", "", ""}, // the window reads the core's tab_host.call
+		{"src/term_view_stream.odin", "term_view_json", "jg.parse_string", "", ""}, // the window reads the core's term.* messages
+		{"src/term_view_stream.odin", "view_resize", "jg.unmarshal", "", ""}, // a terminal stream's RESIZE
 		{"src/core/persist.odin", "workspace_restore", "jg.parse_string", "", ""},
 		{"src/core/pi_integration.odin", "manifest_load", "jg.unmarshal", "", ""},
 		{"src/core/reload.odin", "settings_digest", "jg.parse", "", ""},

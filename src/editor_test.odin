@@ -879,7 +879,7 @@ review2_own_root_includes_the_session_folder :: proc(t: ^testing.T) {
 	ctl := core.Caller{kind = .Control, tab_id = s.tabs[0].id}
 	testing.expect(t, core.run_command(core.Create_File{path = "in-wt.txt"}, ctl).ok, "inside its own session folder: no confirmation")
 	testing.expect(t, os.exists(fmt.tprintf("%s/in-wt.txt", s.cwd)))
-	pr, _ := editor_apply(core.Create_File{path = "p.txt"}, core.Caller{kind = .Panel, tab_id = s.tabs[0].id})
+	pr, _ := core.files_cmd_apply(core.Create_File{path = "p.txt"}, core.Caller{kind = .Panel, tab_id = s.tabs[0].id})
 	testing.expect(t, pr.ok, pr.error)
 	testing.expect(t, core.run_command(core.Create_File{path = fmt.tprintf("%s/in-proj.txt", dir)}, ctl).ok, "the project folder too")
 }

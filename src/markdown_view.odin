@@ -1423,48 +1423,21 @@ md_tab :: proc(id: u64) -> (^core.Open_Session, ^core.Tab, ^Md_View) {
 	return s, tab, md_view_of(id)
 }
 
-markdown_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Result, changed: bool) {
+// The window's part of the Markdown commands: the preview (the core checked the caller, the file
+// and the tab, and keeps the tabs' records: tabhost_route.odin). tab_id: the tab markdown_open makes.
+markdown_apply :: proc(cmd: core.Command, caller: core.Caller, tab_id: u64 = 0) -> (r: core.Result, changed: bool) {
 	#partial switch c in cmd {
 	case core.Markdown_Open:
-		s := c.session != 0 ? core.find_session(c.session) : core.caller_session(caller)
-		if s != nil && s.home && c.session == 0 do s = core.cur()
-		if s == nil do return core.fail("no open session to open the file in"), false
-		if s.home do return core.fail("Home has only its pi tab"), false
-		if c.path == "" do return core.fail("path is empty"), false
-		p := c.path
-		if strings.has_prefix(p, "~/") do p = strings.concatenate({os.get_env("HOME", context.temp_allocator), p[1:]}, context.temp_allocator)
-		if !filepath.is_abs(p) {
-			base := c.session != 0 ? s.cwd : core.fs_base_for(caller)
-			if base == "" do base = s.cwd
-			p, _ = filepath.join({base, p}, context.temp_allocator)
+		// the core resolved the path and the session; its record follows
+		if tab_id == 0 do return core.fail("no tab for the file"), false
+		v := md_view_of(tab_id)
+		if v == nil do v = md_view_new(tab_id, c.path)
+		if c.anchor != "" {
+			delete(v.want)
+			v.want = strings.clone(c.anchor)
 		}
-		p, _ = filepath.clean(p, context.temp_allocator)
-		if core.settings_credential(p) do return core.fail(core.CREDENTIAL_REFUSED), false
-		switch core.path_kind(p) {
-		case .Missing: return core.fail("no such file"), false
-		case .Dir:     return core.fail("that is a folder"), false
-		case .File, .Other:
-		}
-		rp := core.fs_real(p)
-		for &tab in s.tabs {
-			mt, is := tab.kind.(core.Markdown_Tab)
-			if !is || core.fs_real(mt.path) != rp do continue
-			core.session_show_tab(s, tab.id)
-			core.focus_session(s.id, caller)
-			if v := md_view_of(tab.id); v != nil && c.anchor != "" {
-				delete(v.want)
-				v.want = strings.clone(c.anchor)
-			}
-			app.redraw = true
-			return {ok = true, created_id = tab.id}, true
-		}
-		tab := core.Tab{id = core.new_id(), kind = core.Markdown_Tab{path = strings.clone(p)}, title = strings.clone(filepath.base(p)), status = .Running}
-		v := md_view_new(tab.id, p)
-		if c.anchor != "" do v.want = strings.clone(c.anchor)
-		core.pane_add_tab(s, tab)
-		core.session_show_tab(s, tab.id)
-		core.focus_session(s.id, caller)
-		return {ok = true, created_id = tab.id}, true
+		app.redraw = true
+		return {ok = true, created_id = tab_id}, true
 	case core.Markdown_Set_View:
 		_, tab, v := md_tab(c.tab_id)
 		if tab == nil || v == nil do return core.fail("no such Markdown tab"), false
@@ -1485,9 +1458,8 @@ markdown_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Resul
 			delete(e.find.key)
 			e.find.key = ""
 		}
-		mt.source = c.source
 		app.redraw = true
-		return {ok = true}, true
+		return {ok = true}, true // the core sets the record's view
 	case core.Markdown_Scroll:
 		_, tab, v := md_tab(c.tab_id)
 		if tab == nil || v == nil do return core.fail("no such Markdown tab"), false
@@ -1516,9 +1488,10 @@ markdown_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core.Resul
 	return core.fail("unknown command"), false
 }
 
-// A link: #anchor scrolls; http(s) and mailto open in the browser; a
-// relative or absolute path opens (.md in a Markdown tab, other files in
-// the editor). Other schemes are not followed.
+// A link: #anchor scrolls here; for the rest the window says what the link is and the core acts
+// (tabhost_route.odin's markdown_follow_act): http(s) and mailto open in the browser (the user's
+// click, or a call the user confirms), a relative or absolute path opens (.md in a Markdown tab,
+// other files in the editor), a folder shows in Finder. Other schemes are not followed.
 @(private = "file")
 md_follow :: proc(v: ^Md_View, s: ^core.Open_Session, doc_path: string, c: core.Markdown_Follow, caller: core.Caller) -> (core.Result, bool) {
 	url := c.url
@@ -1538,17 +1511,7 @@ md_follow :: proc(v: ^Md_View, s: ^core.Open_Session, doc_path: string, c: core.
 	if scheme, has := url_scheme(url); has {
 		switch scheme {
 		case "http", "https", "mailto":
-			// it leaves Deckhand (the user's browser or mail, signed in): only the
-			// user's click, or a call the user confirms in Deckhand
-			changed := false
-			if (caller.kind != .UI && caller.kind != .Internal) || c.confirm != "" {
-				what := fmt.tprintf("open %s?", scheme == "mailto" ? fmt.tprintf("a mail to %s", core.one_line(url[len("mailto:"):], context.temp_allocator)) : core.one_line(url, context.temp_allocator))
-				gr, go_on, ch := core.confirm_gate(core.Markdown_Follow{tab_id = c.tab_id, url = url}, .Open_Link, caller, c.confirm, what)
-				if !go_on do return gr, ch
-				changed = ch
-			}
-			if core.platform.open_url != nil do _ = core.platform.open_url(url)
-			return {ok = true}, changed
+			return {ok = true, data = `{"follow":"external"}`}, false // it leaves Deckhand: the core decides
 		}
 		set_notice(v, fmt.tprintf("Not opened: %s: links", scheme))
 		return core.fail("only http, https and mailto links open"), false
@@ -1569,14 +1532,17 @@ md_follow :: proc(v: ^Md_View, s: ^core.Open_Session, doc_path: string, c: core.
 		set_notice(v, fmt.tprintf("No such file: %s", url))
 		return core.fail("no such file"), false
 	}
-	if kind != .Dir && core.md_is_markdown_path(p) {
-		return markdown_apply(core.Markdown_Open{path = p, session = s.id, anchor = frag}, caller)
-	}
 	if kind == .Dir {
 		fs_reveal(p)
 		return {ok = true}, false
 	}
-	return core.run_command(core.Open_File{path = p, session = s.id}, caller), true
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"follow":"open","path":`)
+	core.json_quote(&b, p)
+	strings.write_string(&b, `,"anchor":`)
+	core.json_quote(&b, frag)
+	strings.write_byte(&b, '}')
+	return {ok = true, data = strings.to_string(b)}, false
 }
 
 @(private = "file")

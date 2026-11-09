@@ -109,7 +109,7 @@ dead_tab_exit_status :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.exit_text(tb.exit), "code 3")
 	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.status"), "exited")
 	testing.expect_value(t, core.json_path(core.state_json(), "open_sessions.0.tabs.0.exit"), "code 3")
-	testing.expect(t, strings.contains(term_screen_text(core.term_of(tab)), "[process exited: code 3]"), "the terminal says how it ended")
+	testing.expect(t, strings.contains(gt_screen_text(core.term_of(tab).gt), "[process exited: code 3]"), "the terminal says how it ended")
 	testing.expect_value(t, core.dead_tab_tip(tb), "pi exited (code 3)")
 
 	// killed by a signal (a hangup, as when a parent dies): said as one
@@ -120,7 +120,7 @@ dead_tab_exit_status :: proc(t: ^testing.T) {
 	_, tb, _ = core.find_tab(tab)
 	testing.expect_value(t, tb.exit, core.Exit_Info{known = true, signal = 1})
 	testing.expect_value(t, core.exit_text(tb.exit), "signal 1 (SIGHUP)")
-	testing.expect(t, strings.contains(term_screen_text(core.term_of(tab)), "[process exited: signal 1 (SIGHUP)]"))
+	testing.expect(t, strings.contains(gt_screen_text(core.term_of(tab).gt), "[process exited: signal 1 (SIGHUP)]"))
 }
 
 @(test)
@@ -286,7 +286,7 @@ dead_tab_failed_restart_keeps_it :: proc(t: ^testing.T) {
 	testing.expect_value(t, tb.status, core.Tab_Status.Exited)
 	testing.expect_value(t, tb.exit, core.Exit_Info{known = true, code = 4})
 	testing.expect(t, core.term_of(tab) == old, "its old terminal (and output) stays")
-	testing.expect(t, strings.contains(term_screen_text(old), "[process exited: code 4]"))
+	testing.expect(t, strings.contains(gt_screen_text(old.gt), "[process exited: code 4]"))
 	testing.expect(t, core.tab_is_dead(tb), "the bar still shows")
 	testing.expect(t, strings.contains(toast.text, "could not start pi"), toast.text)
 	// opening it again: the same, and said
@@ -348,7 +348,7 @@ dead_tab_unknown_exit_waits :: proc(t: ^testing.T) {
 	testing.expect_value(t, tb.exit, core.Exit_Info{})
 	testing.expect(t, core.exit_failed(tb.exit))
 	testing.expect_value(t, core.dead_tab_tip(tb), "pi exited")
-	text := term_screen_text(core.term_of(tab))
+	text := gt_screen_text(core.term_of(tab).gt)
 	testing.expect(t, strings.contains(text, "[process exited]"), text)
 	core.pty_reap()
 	testing.expect(t, core.pty_dying(child), "hung up on, still running")

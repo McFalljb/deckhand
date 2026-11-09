@@ -392,7 +392,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 	case core.Browser_Tabs:
 		return agent_tabs_list(caller, c.session), false
 	case core.Browser_Read:
-		_, _, _, err := browser_target(caller, c.tab_id)
+		_, _, _, err := core.browser_target(caller, c.tab_id)
 		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		switch c.mode {
@@ -407,7 +407,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 		agent_touch(c.tab_id, caller, .Reading)
 		return {ok = true, pending = true}, true
 	case core.Browser_Page_Wait:
-		_, _, _, err := browser_target(caller, c.tab_id)
+		_, _, _, err := core.browser_target(caller, c.tab_id)
 		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		w: Agent_Wait_For
@@ -426,7 +426,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 		agent_touch(c.tab_id, caller, .Waiting)
 		return {ok = true, pending = true}, true
 	case core.Browser_Screenshot:
-		_, _, _, err := browser_target(caller, c.tab_id)
+		_, _, _, err := core.browser_target(caller, c.tab_id)
 		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, c.tab_id); refused do return r, false
 		if c.has_rect && (c.rect.w <= 0 || c.rect.h <= 0) do return {error = "rect needs a width and a height", data = `{"code":"bad_args"}`}, false
@@ -443,7 +443,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 		} else if x, is := cmd.(core.Browser_Network); is {
 			tab_id, since, limit = x.tab_id, x.since, x.limit
 		}
-		_, _, _, err := browser_target(caller, tab_id)
+		_, _, _, err := core.browser_target(caller, tab_id)
 		if err != "" do return core.fail(err), false
 		if r, refused := browser_agent_refused(caller, tab_id); refused do return r, false
 		t := agent_tab(tab_id)
@@ -461,7 +461,7 @@ browser_agent_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: 
 	case core.Browser_Comments:
 		return agent_comments(caller, c.tab_id, c.session), false
 	case core.Browser_Agent_Stop:
-		_, _, _, err := browser_target(caller, c.tab_id)
+		_, _, _, err := core.browser_target(caller, c.tab_id)
 		if err != "" do return core.fail(err), false
 		return {ok = true}, agent_stop(c.tab_id)
 	}
@@ -1043,7 +1043,7 @@ browser_agent_tick :: proc() -> bool {
 		done, r, private := op_step(op, now)
 		if done {
 			// pending: frame_shot's worker answers it
-			if !r.pending do core.emit_event(core.Finished_Event{request_id = op.request_id, result = r, private = private})
+			if !r.pending do tab_host_finished(op.request_id, r, private)
 			ordered_remove(&agent_ops, i)
 			tab_id := op.tab_id
 			op_free(op)

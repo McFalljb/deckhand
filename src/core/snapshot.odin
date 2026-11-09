@@ -261,9 +261,16 @@ SCREEN_MODES_DEC := [?]u16{1, 3, 4, 5, 6, 7, 8, 9, 12, 25, 40, 45, 47, 66, 67, 6
 // modifyOtherKeys. To check those, compare against a reference terminal fed
 // the same bytes with screen_equal_probed, which writes SCREEN_PROBES into
 // both so that hidden state shows on screen.
-screen_hash :: proc(gt: gh.Terminal) -> (h: u64, both: bool) {
+//
+// last_rows > 0: only that many rows of each screen, from the end (the screen and its newest
+// history), and not how many rows there are in all: the window's per-step check
+// (term_view_stream.odin), where all of a big scrollback would take seconds, and where the two
+// copies may keep a different number of the oldest rows once the scrollback is full (the limit
+// is in bytes of page memory, and a terminal decoded from a snapshot lays its pages out
+// differently from one that parsed every byte: rows are dropped a page at a time).
+screen_hash :: proc(gt: gh.Terminal, last_rows := 0) -> (h: u64, both: bool) {
 	sb := strings.builder_make(context.temp_allocator)
-	both = screen_dump(gt, &sb)
+	both = screen_dump(gt, &sb, last_rows)
 	h = 0xcbf29ce484222325
 	for b in sb.buf[:] {h = (h ~ u64(b)) * 0x100000001b3}
 	return
@@ -308,13 +315,13 @@ screen_equal_probed :: proc(a, b: gh.Terminal) -> bool {
 // state has it, and updating one would take gt's dirty flags from the app's
 // renderer) and the inactive primary screen. Without a clone (an unfinished
 // sequence over the limit) those are left out and `both` is false.
-screen_dump :: proc(gt: gh.Terminal, sb: ^strings.Builder) -> (both: bool) {
+screen_dump :: proc(gt: gh.Terminal, sb: ^strings.Builder, last_rows := 0) -> (both: bool) {
 	screen: gh.Terminal_Screen
 	gh.terminal_get(gt, .Active_Screen, &screen)
 	clone, cloned := gt_clone(gt)
 	defer if cloned do gh.terminal_free(clone)
-	dump_state(gt, cloned ? clone : nil, sb)
-	dump_rows(gt, sb)
+	dump_state(gt, cloned ? clone : nil, sb, totals = last_rows <= 0)
+	dump_rows(gt, sb, last_rows)
 	if !cloned do return false
 	if screen != .Alternate do return true
 	for leave in ([?]string{"\x1b[?1049l", "\x1b[?1047l", "\x1b[?47l"}) {
@@ -324,12 +331,12 @@ screen_dump :: proc(gt: gh.Terminal, sb: ^strings.Builder) -> (both: bool) {
 	}
 	if screen != .Primary do return false
 	strings.write_string(sb, "primary\n")
-	dump_rows(clone, sb)
+	dump_rows(clone, sb, last_rows)
 	return true
 }
 
 @(private = "file")
-dump_state :: proc(gt, clone: gh.Terminal, sb: ^strings.Builder) {
+dump_state :: proc(gt, clone: gh.Terminal, sb: ^strings.Builder, totals := true) {
 	cols, rows: u16
 	total, history: c.size_t
 	screen: gh.Terminal_Screen
@@ -338,7 +345,8 @@ dump_state :: proc(gt, clone: gh.Terminal, sb: ^strings.Builder) {
 	gh.terminal_get(gt, .Total_Rows, &total)
 	gh.terminal_get(gt, .Scrollback_Rows, &history)
 	gh.terminal_get(gt, .Active_Screen, &screen)
-	fmt.sbprintf(sb, "size %dx%d total %d history %d screen %v\n", cols, rows, total, history, screen)
+	if totals do fmt.sbprintf(sb, "size %dx%d total %d history %d screen %v\n", cols, rows, total, history, screen)
+	else do fmt.sbprintf(sb, "size %dx%d screen %v\n", cols, rows, screen) // the newest rows only: how deep the scrollback goes is left out
 	cx, cy: u16
 	pending, visible: bool
 	gh.terminal_get(gt, .Cursor_X, &cx)
@@ -384,14 +392,15 @@ dump_state :: proc(gt, clone: gh.Terminal, sb: ^strings.Builder) {
 }
 
 @(private = "file")
-dump_rows :: proc(gt: gh.Terminal, sb: ^strings.Builder) {
+dump_rows :: proc(gt: gh.Terminal, sb: ^strings.Builder, last_rows := 0) {
 	cols: u16
 	total: c.size_t
 	gh.terminal_get(gt, .Cols, &cols)
 	gh.terminal_get(gt, .Total_Rows, &total)
 	graphemes: [64]u32
 	uri: [2048]u8
-	for y in 0 ..< int(total) {
+	first := last_rows > 0 ? max(int(total) - last_rows, 0) : 0
+	for y in first ..< int(total) {
 		ref := gh.Grid_Ref{size = size_of(gh.Grid_Ref)}
 		pt := gh.Point{tag = .Screen}
 		pt.value.coordinate = {0, u32(y)}
@@ -403,7 +412,7 @@ dump_rows :: proc(gt: gh.Terminal, sb: ^strings.Builder) {
 		gh.row_get(row, .Wrap, &wrap)
 		gh.row_get(row, .Wrap_Continuation, &cont)
 		gh.row_get(row, .Semantic_Prompt, &mark)
-		fmt.sbprintf(sb, "%d%s%s m%d|", y, wrap ? "W" : "", cont ? "C" : "", mark)
+		fmt.sbprintf(sb, "%d%s%s m%d|", y - first, wrap ? "W" : "", cont ? "C" : "", mark) // from the first row dumped
 		last := strings.builder_make(context.temp_allocator)
 		for x in 0 ..< int(cols) {
 			pt.value.coordinate = {u16(x), u32(y)}

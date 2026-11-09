@@ -370,10 +370,9 @@ browser_agent_url_masking :: proc(t: ^testing.T) {
 	got := len(at.logs) > 0 ? at.logs[len(at.logs) - 1].text : ""
 	testing.expect_value(t, got, "redirect to https://a.example/cb?code=***&ok=1 done")
 	// a read's page URL
-	r := core.run_command(core.Browser_Read{tab_id = ta}, pi_a)
+	r := core.run_command(core.Browser_Read{tab_id = ta}, pi_a, 4242) // the core waits for its finished
 	testing.expect(t, r.pending)
 	op := agent_ops[len(agent_ops) - 1]
-	op.request_id = 4242 // (run_command gives none here)
 	autotest.bg_request = op.request_id
 	op.reply = strings.clone(`{"result":{"type":"string","value":"{\"mode\":\"text\",\"text\":\"hi\",\"chars\":2,\"truncated\":false,\"url\":\"https://a.example/cb?state=s1&id_token=t1\",\"title\":\"T\",\"frames\":0}"}}`)
 	op.reply_ok = true

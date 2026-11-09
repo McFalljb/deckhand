@@ -585,7 +585,11 @@ tab and go to **that session's** pi, whichever session is on screen.
 {"ok": false, "error": "needs_confirmation", "needs_confirmation": {"summary": "Close \"shell 1\"? Its process is still running.", "by": "user"}}
 {"ok": false, "error": "needs_confirmation", "needs_confirmation": {"token": "…", "summary": "…", "by": "caller"}}
 {"ok": true, "data": { …state… }}
+{"ok": false, "error": "no window: …", "data": {"code": "no_window"}}
 ```
+
+`no_window`: the command needs the page, app or file view that Deckhand's window hosts, and no
+window is attached (§5a).
 
 `state.version` moves only when state changed: queries, failures and side-effect-only commands
 (`copy_selection`, `send_text`) leave it alone.
@@ -1123,7 +1127,7 @@ in process through an in-memory transport carrying the framed wire's JSON channe
 
 **The `ui` caller has one door.** Only `core_attach_window()` (called by the window at init) makes
 this connection, and only it runs commands as `ui`. No socket hello, token or `--ctl` path reaches
-it: no token is ever made for the `ui` or `internal` caller, and `state.subscribe` is not a socket
+it: no token is ever made for the `ui`, `internal` or `tab_host` caller, and `state.subscribe` is not a socket
 request (`unknown request type`).
 
 Window → core:
@@ -1132,7 +1136,10 @@ Window → core:
 |---|---|---|
 | `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes |
 | `command` | `id`, `command`, `menu?`, `now?` | a command run as `ui`, in its wire form (every field, unlike events' and the log's; the UI-only fields `close_session.ask`, `focus_session.reopen` and `set_home_dir.setup` are read only here). `id` `""`: no result. `now`: run at once, else queued in the inbox. `menu`: a menu row's label (a failure is shown as a toast) |
-| `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: an app's status, a screenshot worker's answer, CEF's reports, a comment, a widget taking or releasing the keyboard, a git HEAD read, the OS appearance, a session seen); anything else is refused |
+| `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: a comment, a widget taking or releasing the keyboard, a git HEAD read, the OS appearance, a session seen); anything else is refused |
+| `tab_host.event` | `id`, `command: {"<type>": {fields}}`, `now?` | what a page, an app or a window worker reported (`TAB_HOST_COMMANDS`: `browser_update`, `browser_popup_open`, `app_update`, `app_call_done`), run as the **`tab_host` caller**: answers and tab records only. It cannot confirm, change a setting or a confirmation policy, show a file, or reach another session's tabs (a popup opens in its opener's session); it has no token. Anything else is refused |
+| `finished` | `id`, `changed`, `private`, `wait_ms`, `result` | the window's answer to a `tab_host.call` (`changed`: the window's own state moved; `private`: its data is a page's content, the requester's only; `wait_ms`, with a `pending` result: how long the window itself may take to end it, as an upload's bar waiting for the user). Taken only for a call the core is running or waiting on |
+| `finished` | `request_id`, `private`, `result` | the end of a request the window answered `pending` (an agent's read, action, wait or screenshot, an app call); the core sends `result` to the requester. Taken only for a request the core is waiting on |
 | `window.browser_facts` | `tab_id`, `facts` (or `null`) | what only the window knows of a browser tab (comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask), typed; get_state writes it. The core asks for it fresh before it writes a browser tab |
 
 Core → window:
@@ -1143,6 +1150,16 @@ Core → window:
 | `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went) |
 | `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
 | `toast` | `text`, `err` | a short line at the bottom of the window |
+| `tab_host.call` | `id`, `request_id`, `tab_id`, `caller: {kind, tab_id, claude}`, `command: {"<type>": {fields}}` | the window's part of a browser, app, Markdown or editor command (`src/core/tabhost_route.odin`): CEF, an app's process and frames, a buffer, a view. The core checks the caller, resolves the target and runs the confirmation gate first, and changes the tab's records from the window's answer (`finished`) |
+
+**Tab host routing (M3-G).** The tab's record (URL, title, path, app status, pane) is the core's;
+its page, app, buffer and view are the window's. With no window attached every routed command
+answers `{"ok":false,"error":"no window: …","data":{"code":"no_window"}}` and nothing is made. A
+call the window does not answer within 10 s answers `timeout`; a request it answered `pending`
+gets its own timeout or the answer's `wait_ms` (at most 15 min), whichever is longer, plus 10 s
+(60 s with neither), then `timeout`. A request ends once: a `finished` for it that comes before
+its call's answer ends it, and the answer only updates the records. A call the link refuses
+answers `no_window` at once. A window that detaches ends every wait with `no_window`.
 
 **Over `core.sock` (M4).** A hello (plain or challenge) with `"framed": true` asks for framed
 mode: the reply is the line connection's last line, and it carries, beside the usual fields,
@@ -1162,8 +1179,32 @@ results and reads State at once). The delta before a result compares every secti
 changes that bumped no version (a parked or consumed confirmation). In process the wait is nil;
 M4 bounds it (250 ms, then the call shows as pending).
 
+**Terminal streams** (design §5.5, M3-H; `src/core/term_stream.odin`, `src/term_view_stream.odin`).
+The window keeps its own copy of each terminal it shows, fed on a channel of its own (≥ 1) with
+exactly the bytes the core's terminal parses; the core alone answers the program's queries and sets
+the size. A tab hidden for 2 s detaches.
+
+| from | message or frame | |
+|---|---|---|
+| window | `term.attach` `id`, `tab_id`, `history_lines` (0: all) | the core answers `term.attached` `id`, `tab_id`, `channel`, `offset` (or `error`), then `SNAPSHOT` on that channel |
+| window | `term.detach` `channel` | the stream ends |
+| window | `term.resize` `tab_id`, `cols`, `rows`, `cell_w`, `cell_h` | what the tab's pane fits; the core resizes the terminal and the PTY (it alone decides) |
+| core | `term.scroll` `channel` | the core typed or pasted into it: the copy scrolls to the bottom |
+| core | `[ch] SNAPSHOT` | meta JSON + GHOSTSNP at the attach offset, screen first (the window draws at the codec's READY, history pages follow newest first); trimmed, oldest scrollback first, to fit one frame (then without Kitty images, then the screen alone); one that cannot be made yet is tried again after a back-off (50 ms, doubling to 2 s). Exempt from credit. A RESIZE the link refuses is replaced by a snapshot |
+| core | `[ch] DATA` | the bytes from the offset on, at most 64 KiB a frame, sent at the end of every core tick |
+| core | `[ch] RESIZE` | `{"offset","cols","rows","xpixel","ypixel"}`: applied after exactly the bytes before `offset` |
+| core | `[ch] CLOSE` | the terminal went |
+| window | `[ch] DATA` | input for the program (the window's key, mouse and paste encoders, from its copy's modes) |
+| window | `[ch] CREDIT` | u32 LE: DATA bytes taken. The window starts with 256 KiB; more than 4 MiB waiting and the core sends a fresh `SNAPSHOT` instead |
+| window | `[ch] FOCUS` | one byte, 1 gained, 0 lost: reported to the program if it asked (mode 1004) |
+
+`copy_selection` copies the window's copy's selection (no window: `nothing selected`).
+
 **Test mode** compares the window's replica with the core's State after every script step; a
-difference fails the scene. Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link.
+difference fails the scene. It also compares each shown terminal's copy with the core's terminal
+by screen hash (the newest 2000 rows: once the scrollback is full, the two may keep a different
+number of the oldest rows). Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link
+(a terminal channel's by kind and size).
 
 ## 6. Redaction
 
@@ -1195,7 +1236,8 @@ difference fails the scene. Dev builds: `DECKHAND_PROTO_LOG=1` prints every fram
 | events, command log, own-event filter | `src/core/events.odin` |
 | socket: listener, connections, tokens, subscriptions, bridge routing | `src/core/socket.odin`; OS side `src/core/socket_posix.odin` |
 | CLI client | `deckhand --ctl` in `src/core/ctl.odin` |
-| editor and file commands, file-system model | `src/editor_commands.odin`, `src/core/fs_model.odin` |
+| editor and file commands, file-system model | `src/core/editor_commands_core.odin` (records, file commands), `src/editor_commands.odin` (buffers), `src/core/fs_model.odin` |
+| tab host routing: `tab_host.call`, `finished`, `tab_host.event`, `no_window`, timeouts | `src/core/tabhost_route.odin`; the window's side `src/tabhost_link.odin`, `src/tabhost.odin` |
 | jobs: notes, cron, scheduler, runs, Jobs tab | `src/core/jobs_note.odin`, `src/core/jobs_cron.odin`, `src/core/jobs.odin`, `src/core/jobs_run.odin`, `src/ui_jobs.odin` |
 | the Changes tab: model, git scan, diffs, actions; its UI and the "±" | `src/core/changes.odin`; `src/ui_changes.odin` |
 | browser tabs: CEF shim, frames, input (`src/native/cef_macos.m`, `src/browser.odin`); navigation commands, toolbar, URL normalising, saving (`src/browser_nav.odin`) | `src/browser.odin`, `src/browser_nav.odin` |

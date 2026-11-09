@@ -1920,6 +1920,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
+| Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |
 | Reload all pi tabs |  | `/reload` every idle pi tab, busy ones once idle ([Hot reload](#hot-reload)) |
 | Check for Updates… |  | check for a newer Deckhand now ([Updates](#updates)) |
 | Check for updates automatically |  | on or off: the daily check ([Updates](#updates)) |

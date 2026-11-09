@@ -309,8 +309,9 @@ window_link_socket_never_ui :: proc(t: ^testing.T) {
 		fd, r := hello(tok)
 		defer sock_close(fd)
 		caller := json_path(r, "result.data.caller")
-		testing.expectf(t, caller != "ui" && caller != "internal", "%v: hello says %q", kind, r)
-		if kind == .UI || kind == .Internal {
+		testing.expectf(t, caller != "ui" && caller != "internal" && caller != "tab_host", "%v: hello says %q", kind, r)
+		if kind == .UI || kind == .Internal || kind == .Tab_Host { // the window's link only
+
 			testing.expectf(t, json_path(r, "result.error") == "unknown token", "%v: %q", kind, r)
 			continue
 		}

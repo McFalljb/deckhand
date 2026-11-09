@@ -3,7 +3,8 @@ package core
 // What the core asks of the window (design §10.2, M2-A): a proc table beside `platform`
 // (platform.odin), filled in by main.odin (window_hooks_app). Core files never set app.redraw
 // or show a toast themselves; they call these. M3 turns each entry into a message, so the
-// table's shape is the message list. Nil entries do nothing (a headless core), and a query
+// table's shape is the message list (M3-G: browser, app, Markdown and editor commands went first,
+// as tab_host.call, tabhost_route.odin). Nil entries do nothing (a headless core), and a query
 // answers as if there were no window: no buffers, nothing unsaved, no sheet open.
 //
 // The core owns state and records; the window owns views and buffers (design §4). So the core
@@ -38,8 +39,6 @@ Window_Hooks :: struct {
 	// a Markdown tab's preview: the source line at its top, its links and headings, find
 	// matches (-1: no find bar on the preview); ok false = not laid out yet
 	md_view:        proc(tab_id: u64, source: bool) -> (line, links, headings, matches: int, ok: bool),
-	// browser, app, Markdown and editor commands: the tab's host runs them (commands.odin)
-	tab_host_apply: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool),
 	test_step:      proc(), // test mode's script step, after the inbox (autotest.odin, core_loop.odin)
 	test_event:     proc(ev: Event), // test mode: every event, as it is emitted (autotest.odin)
 
@@ -65,11 +64,11 @@ Window_Hooks :: struct {
 	watch_folder:   proc(folder: string), // watch this project folder too
 	watch_sync:     proc(), // the set of folders to watch changed (open files, reload's folders)
 
-	// ---- terminals: the core's Term, the window's Term_View (term_view.odin) ----
-	term_view_new:  proc(t: ^Term), // a terminal was made: its view's render state and encoders
-	term_view_free: proc(t: ^Term), // before the terminal goes
-	term_drag_cancel: proc(t: ^Term), // its terminal is replaced: a drag's tracked ends go
-	term_fit:       proc(t: ^Term, tab_id: u64), // size a new terminal to its tab's pane (before its child starts)
+	// ---- terminals: the window keeps its own copy of the ones it shows (term_stream.odin) ----
+	// the grid a new terminal gets from its tab's pane (before its child starts); ok false: no pane yet
+	term_fit:       proc(tab_id: u64) -> (cols, rows: u16, cell: [2]f32, ok: bool),
+	// the user's selection in the window's copy of the tab's terminal ("": none). M4: a window.request
+	term_selection: proc(tab_id: u64) -> string,
 
 	// ---- sheets and the window's own state ----
 	job_sheet:      proc(c: Job_Sheet, caller: Caller) -> (Result, bool), // the job_sheet command (ui_job_sheet.odin)
@@ -123,13 +122,6 @@ window_state_changed :: proc() {
 window_toast :: proc(text: string, err := false) {
 	if window_link_toast(text, err) do return // an attached window gets it as a message (window_link.odin)
 	if window.toast != nil do window.toast(text, err)
-}
-
-// A browser, app, Markdown or editor command: its tab's host runs it (the window's, today in
-// process; M3-G routes it). No window: refused.
-window_tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result, bool) {
-	if window.tab_host_apply == nil do return fail("no window"), false
-	return window.tab_host_apply(cmd, caller, request_id)
 }
 
 // A browser tab's page facts the window has, into its object in State (none without a window):
@@ -202,10 +194,12 @@ window_tab_dirty :: proc(tab_id: u64) -> (dirty, known: bool) {
 window_watch_folder :: proc(folder: string) {if window.watch_folder != nil do window.watch_folder(folder)}
 window_watch_sync :: proc() {if window.watch_sync != nil do window.watch_sync()}
 
-window_term_view_new :: proc(t: ^Term) {if window.term_view_new != nil do window.term_view_new(t)}
-window_term_view_free :: proc(t: ^Term) {if window.term_view_free != nil do window.term_view_free(t)}
-window_term_drag_cancel :: proc(t: ^Term) {if window.term_drag_cancel != nil do window.term_drag_cancel(t)}
-window_term_fit :: proc(t: ^Term, tab_id: u64) {if window.term_fit != nil do window.term_fit(t, tab_id)}
+window_term_fit :: proc(t: ^Term, tab_id: u64) {
+	if window.term_fit == nil do return
+	if cols, rows, cell, ok := window.term_fit(tab_id); ok do term_resize(t, cols, rows, cell.x, cell.y)
+}
+// No window: no selection.
+window_term_selection :: proc(tab_id: u64) -> string {return window.term_selection != nil ? window.term_selection(tab_id) : ""}
 
 window_job_sheet :: proc(c: Job_Sheet, caller: Caller) -> (Result, bool) {
 	if window.job_sheet == nil do return fail("no window"), false

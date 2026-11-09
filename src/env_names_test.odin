@@ -124,21 +124,21 @@ data_dir_reads_both :: proc(t: ^testing.T) {
 apps_json_reads_both :: proc(t: ^testing.T) {
 	proj := rn_tmp("proj")
 	defer {os.remove_all(proj); delete(proj, runtime.heap_allocator())}
-	testing.expect_value(t, len(app_entries(proj)), 0)
-	testing.expect(t, strings.contains(app_not_declared(proj, "nope"), ".deckhand/apps.json"), app_not_declared(proj, "nope"))
-	testing.expect_value(t, app_json_path(proj), fmt.tprintf("%s/.deckhand/apps.json", proj))
+	testing.expect_value(t, len(core.app_entries(proj)), 0)
+	testing.expect(t, strings.contains(core.app_not_declared(proj, "nope"), ".deckhand/apps.json"), core.app_not_declared(proj, "nope"))
+	testing.expect_value(t, core.app_json_path(proj), fmt.tprintf("%s/.deckhand/apps.json", proj))
 	os.make_directory_all(fmt.tprintf("%s/.pi-desk", proj))
 	_ = os.write_entire_file(fmt.tprintf("%s/.pi-desk/apps.json", proj), transmute([]byte)string(`{"apps":[{"name":"old","argv":["true"]}]}`))
-	e := app_entries(proj)
+	e := core.app_entries(proj)
 	testing.expect(t, len(e) == 1 && e[0].name == "old", "the old project file is read")
 	// a refusal names the file it read (review polish)
-	why := app_not_declared(proj, "nope")
+	why := core.app_not_declared(proj, "nope")
 	testing.expect(t, strings.contains(why, ".pi-desk/apps.json") && !strings.contains(why, ".deckhand/"), why)
 	os.make_directory_all(fmt.tprintf("%s/.deckhand", proj))
 	_ = os.write_entire_file(fmt.tprintf("%s/.deckhand/apps.json", proj), transmute([]byte)string(`{"apps":[{"name":"new","argv":["true"]}]}`))
-	e = app_entries(proj)
+	e = core.app_entries(proj)
 	testing.expect(t, len(e) == 1 && e[0].name == "new", "both: the new one only")
-	testing.expect(t, strings.contains(app_not_declared(proj, "nope"), ".deckhand/apps.json"), app_not_declared(proj, "nope"))
+	testing.expect(t, strings.contains(core.app_not_declared(proj, "nope"), ".deckhand/apps.json"), core.app_not_declared(proj, "nope"))
 	testing.expect(t, os.exists(fmt.tprintf("%s/.pi-desk/apps.json", proj)), "the old one is left where it is")
 }
 

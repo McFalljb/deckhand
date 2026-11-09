@@ -105,6 +105,8 @@ window_views_no_window :: proc(t: ^testing.T) {
 	saved := core.window
 	defer core.window = saved
 	core.window = {}
+	tl_host_off() // and no tab host link (tabhost_link.odin)
+	defer tl_host_on()
 	session, dir := wv_reset()
 	defer os.remove_all(dir)
 	r := core.run_command(core.Show_File{path = "notes.txt"}, {kind = .UI})
@@ -127,7 +129,7 @@ window_views_no_window :: proc(t: ^testing.T) {
 	js := core.run_command(core.Job_Sheet{open = true}, {kind = .UI})
 	testing.expect_value(t, js.error, "no window")
 	tl := core.run_command(core.Terminal_Link{tab_id = core.find_session(session).tabs[0].id, url = "https://example.com"}, {kind = .UI})
-	testing.expect_value(t, tl.error, "no window")
+	testing.expect_value(t, tl.error, "cannot open links here") // no window and no default browser (core.platform)
 	// closing works without a window too
 	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, c.ok, c.error)

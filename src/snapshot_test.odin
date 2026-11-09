@@ -42,18 +42,16 @@ term_tracks_continuation :: proc(t: ^testing.T) {
 	core.term_free(term)
 }
 
-// ---- the corpus (a subset of S1's; the full run is tools/vt-snapshot-spike on spike/vt-snapshot) ----
+// ---- the corpus (a subset of S1's; the full run is tools/vt-snapshot-spike on spike/vt-snapshot);
+// term_view_stream_test.odin streams it too ----
 
-@(private = "file")
 Snap_Resize :: struct {
 	cols, rows: u16,
 }
-@(private = "file")
 Snap_Event :: union {
 	string,
 	Snap_Resize,
 }
-@(private = "file")
 Snap_Case :: struct {
 	name:       string,
 	cols, rows: u16,
@@ -63,16 +61,13 @@ Snap_Case :: struct {
 ESC :: "\x1b"
 
 // Built once, outside the tests' allocators (the tests reset the temp one).
-@(private = "file")
 snap_corpus_cache: []Snap_Case
 
-@(private = "file")
 snap_corpus :: proc() -> []Snap_Case {
 	if snap_corpus_cache == nil do snap_corpus_cache = snap_corpus_build()
 	return snap_corpus_cache
 }
 
-@(private = "file")
 snap_corpus_build :: proc() -> []Snap_Case {
 	a := runtime.heap_allocator()
 	out := make([dynamic]Snap_Case, a)
@@ -623,7 +618,8 @@ term_rect_clamped :: proc(t: ^testing.T) {
 	term := new(core.Term)
 	defer free(term)
 	testing.expect(t, core.term_init(term, 80, 24))
-	term_set_rect(term, 0, 0, 10_000, 5_000)
+	cols, rows := term_grid_fit(10_000, 5_000) // what term_fit_rect asks the core for
+	core.term_resize(term, cols, rows, font.cell_w, font.cell_h)
 	testing.expect_value(t, int(term.cols), core.MAX_TERM_COLS)
 	testing.expect_value(t, int(term.rows), core.MAX_TERM_ROWS)
 	gt_cols: u16

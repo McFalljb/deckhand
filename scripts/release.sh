@@ -54,7 +54,7 @@ cd "$ROOT"
 
 VERSION="" UPLOAD=1 PACKAGE=1 ROTATING_FROM="" ALLOW_OTHER_REPO=0 SKIP_PREV=0 PREV_TAG=""
 KEY=${DECKHAND_UPDATE_KEY_FILE:-$HOME/.config/deckhand/update.key}
-# the key's place before the rename (0.1.7): used, with a warning, while the new one is missing
+# the key's place before the rename (0.2.0): used, with a warning, while the new one is missing
 if [ -z "${DECKHAND_UPDATE_KEY_FILE:-}" ] && [ ! -e "$KEY" ] && [ -e "$HOME/.config/pi-desk/update.key" ]; then
   KEY=$HOME/.config/pi-desk/update.key
   echo "release: warning: using the key at its old place, $KEY; move it to ~/.config/deckhand/ (mkdir -m 700 ~/.config/deckhand && mv \"$KEY\" ~/.config/deckhand/)" >&2
@@ -196,7 +196,7 @@ CORE_REL="Contents/Helpers/Deckhand Core.app"
   { echo "release: $BUILT still has the bare Contents/Helpers/deckhand-core (an old build/ tree? remove build/Deckhand.app and build again)" >&2; exit 1; }
 scripts/check-release-build.sh "$EXE" "$BUILT/Contents/MacOS/deckhand-cli" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core" "$BUILT/$CORE_REL/Contents/MacOS/deckhand-core-serve" "$BUILT/$CORE_REL/Contents/MacOS/deckhand" ||
   { echo "release: $BUILT has test hooks in it" >&2; exit 1; }
-# the CLI's old name, a link Claude tabs started before 0.1.7 still run (scripts/bundle-app.sh)
+# the CLI's old name, a link Claude tabs started before 0.2.0 still run (scripts/bundle-app.sh)
 [ "$(readlink "$BUILT/Contents/MacOS/pi-desk-cli" 2>/dev/null)" = deckhand-cli ] ||
   { echo "release: $BUILT has no Contents/MacOS/pi-desk-cli -> deckhand-cli link" >&2; exit 1; }
 [ -d "$BUILT/Contents/Frameworks/Chromium Embedded Framework.framework" ] ||

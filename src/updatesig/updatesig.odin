@@ -26,10 +26,10 @@ import "core:fmt"
 import "core:os"
 import "core:strings"
 
-// The formats. v2 still carries the old name (every release up to 0.1.7 is signed with it, and
+// The formats. v2 still carries the old name (every release up to 0.2.0 is signed with it, and
 // Deckhand 0.1.6 and older read only v2). v3 is the same format under Deckhand's name, which
-// releases from 0.1.8 on are signed with (0.1.8 also changes the bundle id, which 0.1.6 refuses
-// anyway). 0.1.7 reads both, so it can take 0.1.8; a .sig's head says which manifest it signs,
+// releases from 0.2.1 on are signed with (0.2.1 also changes the bundle id, which 0.1.6 refuses
+// anyway). 0.2.0 reads both, so it can take 0.2.1; a .sig's head says which manifest it signs,
 // so a v2 signature never verifies a v3 manifest or the other way round.
 Format :: enum u8 {
 	V2,

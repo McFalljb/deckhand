@@ -148,7 +148,7 @@ App_Entry :: struct {
 	cwd:  string,
 }
 
-// The project file: <cwd>/.deckhand/apps.json, else its name before the rename (0.1.7),
+// The project file: <cwd>/.deckhand/apps.json, else its name before the rename (0.2.0),
 // <cwd>/.pi-desk/apps.json, read for good (it is committed in the user's repos; never moved).
 // Both there: .deckhand/ only. Temp-allocated.
 app_json_path :: proc(cwd: string) -> string {

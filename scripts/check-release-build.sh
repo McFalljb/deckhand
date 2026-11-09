@@ -2,7 +2,7 @@
 # A release build has no test hooks (docs/plans/background-core.md §5.3, "A genuine binary under
 # attacker config"; src/core/test_hooks.odin): fails if any binary given holds the name of a hook's
 # environment variable (src/core/test_hooks.odin's HOOK_ENV), `--print-token`, the updater's test
-# key, or any other `DECKHAND_…` or `PI_DESK_…` (the old names, 0.1.7's rename) name not in ALLOWED
+# key, or any other `DECKHAND_…` or `PI_DESK_…` (the old names, 0.2.0's rename) name not in ALLOWED
 # below (a knob added outside HOOK_ENV, such as a getenv in the CEF shim, is caught too). scripts/release.sh runs it on the app's executables;
 # tests/scripts/release-checks.sh tests it.
 # Usage: scripts/check-release-build.sh BINARY...   (run from anywhere; reads src/ next to it)

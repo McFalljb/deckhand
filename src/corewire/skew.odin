@@ -18,9 +18,9 @@ import "core:strings"
 GENERATION :: 1
 
 // The oldest core this window works with. Raise it when the window starts to rely on something an
-// older core lacks that `features` cannot gate. 0.1.7 is the first release that can carry a
-// separate core (the latest release is 0.1.6, before M1).
-CORE_MIN :: Version{0, 1, 7}
+// older core lacks that `features` cannot gate. 0.2.0 is the first release that carries a
+// separate core.
+CORE_MIN :: Version{0, 2, 0}
 
 Version :: struct {
 	major, minor, patch: int,

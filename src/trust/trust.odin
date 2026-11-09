@@ -36,7 +36,7 @@ Mode :: enum {
 	Developer_Id, // from D0: the Apple anchor and our Team ID, hardened runtime
 }
 
-// The window's signing identifiers the core accepts (§10.3). The rename's 0.1.8 flip adds
+// The window's signing identifiers the core accepts (§10.3). The rename's 0.2.1 flip adds
 // "dev.deckhand.app" here (docs/DEVELOPING.md "The rename").
 WINDOW_IDS :: []string{"dev.pi-desk.app"}
 // The core's and the holder's (Deckhand Core.app, scripts/bundle-app.sh).

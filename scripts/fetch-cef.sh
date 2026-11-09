@@ -23,7 +23,7 @@ if [ -z "$VERSION" ] || [ -z "$FILE" ] || [ -z "$SHA256" ]; then
   echo "fetch-cef: $PIN has no pin for $ARCH" >&2; exit 1
 fi
 CACHE="${DECKHAND_CEF_CACHE:-$HOME/Library/Caches/deckhand/cef}"
-# the cache's place before the rename (0.1.7): moved once, with a link back for older checkouts
+# the cache's place before the rename (0.2.0): moved once, with a link back for older checkouts
 OLD_CACHE="$HOME/Library/Caches/pi-desk/cef"
 if [ -z "${DECKHAND_CEF_CACHE:-}" ] && [ ! -e "$CACHE" ] && [ -d "$OLD_CACHE" ] && [ ! -L "$OLD_CACHE" ]; then
   mkdir -p "$(dirname "$CACHE")"

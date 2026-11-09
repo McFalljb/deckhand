@@ -1,7 +1,7 @@
 package core
 
 // The environment names Deckhand sets for its tabs, jobs and control callers, and their old
-// pi-desk names (the rename, 0.1.7). Until 0.2.0 (or 3 releases after 0.1.7, whichever is later)
+// pi-desk names (the rename, 0.2.0). Until 3 releases after 0.2.0
 // every DECKHAND_X below is set with its PI_DESK_X twin, so tools that read the old name keep
 // working (forge's engine reads PI_DESK_SOCKET and PI_DESK_TOKEN). Readers prefer DECKHAND_X and
 // fall back to PI_DESK_X for good: a session held across an update (keep_sessions) keeps the
@@ -23,7 +23,7 @@ DESK_SET_ENV := [?]string {
 }
 
 // The PI_DESK_ twins set beside the new names: the ones something outside Deckhand's own code
-// may read (the CLI and bin/deckhand of a tab started before 0.1.7, forge, a job's own scripts,
+// may read (the CLI and bin/deckhand of a tab started before 0.2.0, forge, a job's own scripts,
 // a control token's user). Not CONTROL_TOKEN (only pi's Atlas gets one), nor CLAUDE_TAB,
 // CLAUDE_READONLY and CLAUDE_ACCOUNT: nothing reads those, and an old account marker would reach
 // claude and its Bash (CLAUDE_ACCOUNT_SH unsets only the new one).

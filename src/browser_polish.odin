@@ -691,7 +691,7 @@ browser_polish_apply :: proc(cmd: core.Command, caller: core.Caller) -> (r: core
 		if b != nil && b.cef != 0 do dh_cef_find_stop(b.cef)
 		p.find_open, p.find_matches, p.find_active = false, 0, 0
 		set_owned(&p.find_text, "")
-		if page_find_tab == c.tab_id do core.run_command(core.Focus_Release{widget = "browser_find"})
+		if page_find_tab == c.tab_id do client_call(core.Focus_Release{widget = "browser_find"}, .Internal)
 		return {ok = true}, true
 	case core.Browser_Dialog:
 		_, _, b, err := target(c.tab_id)
@@ -825,7 +825,7 @@ page_dialog_clear :: proc(p: ^Page_Extra) {
 	p.dialog, p.prompt_focus_due = false, false
 	set_owned(&p.dialog_msg, "")
 	set_owned(&p.dialog_origin, "")
-	if page_prompt_tab == p.tab_id do core.run_command(core.Focus_Release{widget = "browser_prompt"})
+	if page_prompt_tab == p.tab_id do client_call(core.Focus_Release{widget = "browser_prompt"}, .Internal)
 	// the shared answer field forgets what was typed for this tab
 	if page_prompt_tab == p.tab_id {
 		tf_set(&page_prompt_field, "")
@@ -861,48 +861,23 @@ download_find :: proc(id: u32) -> ^Page_Download {
 
 // `,"zoom":1.25,"crashed":false,"devtools":false` and, while shown, `"dialog"`, `"permission"`,
 // `"find"`, `"downloads"` (this tab's).
-browser_polish_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
+browser_polish_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 	p := page_extras[tab_id]
-	level := p != nil ? p.zoom_level : 0
-	fmt.sbprintf(b, `,"zoom":%s,"crashed":%v,"devtools":%v`, zoom_json(level), p != nil && p.crashed, p != nil && p.devtools)
+	f.zoom = zoom_factor(p != nil ? p.zoom_level : 0)
+	f.crashed, f.devtools = p != nil && p.crashed, p != nil && p.devtools
 	if p == nil do return
-	if p.dialog {
-		fmt.sbprintf(b, `,"dialog":{{"kind":"%s","message":`, PAGE_DIALOG_NAMES[p.dialog_kind])
-		core.json_quote(b, p.dialog_msg)
-		strings.write_string(b, `,"origin":`)
-		core.json_quote(b, p.dialog_origin)
-		strings.write_byte(b, '}')
-	}
-	if p.perm != 0 {
-		strings.write_string(b, `,"permission":{"what":`)
-		core.json_quote(b, perm_names(p.perm, ","))
-		strings.write_string(b, `,"origin":`)
-		core.json_quote(b, p.perm_origin)
-		strings.write_byte(b, '}')
-	}
-	if p.ask_id != 0 {
-		fmt.sbprintf(b, `,"download_ask":{{"id":%d,"name":`, p.ask_id)
-		core.json_quote(b, p.ask_name)
-		strings.write_byte(b, '}')
-	}
-	if p.popups_blocked > 0 do fmt.sbprintf(b, `,"popups_blocked":%d`, p.popups_blocked)
-	if p.find_open {
-		strings.write_string(b, `,"find":{"text":`)
-		core.json_quote(b, p.find_text)
-		fmt.sbprintf(b, `,"matches":%d,"active":%d}}`, p.find_matches, p.find_active)
-	}
-	n := 0
+	f.extras = true
+	if p.dialog do f.dialog = core.Browser_Dialog_Fact{kind = PAGE_DIALOG_NAMES[p.dialog_kind], message = p.dialog_msg, origin = p.dialog_origin}
+	if p.perm != 0 do f.permission = core.Browser_Permission_Fact{what = perm_names(p.perm, ","), origin = p.perm_origin}
+	if p.ask_id != 0 do f.download_ask = core.Browser_Ask_Fact{id = u64(p.ask_id), name = p.ask_name}
+	f.popups_blocked = int(p.popups_blocked)
+	if p.find_open do f.find = core.Browser_Find_Fact{text = p.find_text, matches = int(p.find_matches), active = int(p.find_active)}
+	downloads := make([dynamic]core.Browser_Download_Fact, context.temp_allocator)
 	for d in page_downloads {
 		if d.tab_id != tab_id do continue
-		strings.write_string(b, n == 0 ? `,"downloads":[` : ",")
-		n += 1
-		fmt.sbprintf(b, `{{"id":%d,"name":`, d.id)
-		core.json_quote(b, d.name)
-		strings.write_string(b, `,"path":`)
-		core.json_quote(b, d.path)
-		fmt.sbprintf(b, `,"state":"%s","received":%d,"total":%d,"dismissed":%v,"quarantined":%v}}`, DOWNLOAD_STATE_NAMES[d.state], d.received, d.total, d.dismissed, d.quarantined)
+		append(&downloads, core.Browser_Download_Fact{id = u64(d.id), name = d.name, path = d.path, state = DOWNLOAD_STATE_NAMES[d.state], received = i64(d.received), total = i64(d.total), dismissed = d.dismissed, quarantined = d.quarantined})
 	}
-	if n > 0 do strings.write_byte(b, ']')
+	f.downloads = downloads[:]
 }
 
 // "notifications", "camera,microphone", …

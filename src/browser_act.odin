@@ -1458,17 +1458,12 @@ act_result :: proc(op: ^Act_Op, b: ^Browser, bt: core.Browser_Tab, t: ^Agent_Tab
 // ---- State and drawing ----
 
 // `,"upload_ask":{files, who}` while the tab's upload bar asks (base names only, never paths).
-browser_act_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
+browser_act_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 	op := act_upload_asking(tab_id)
 	if op == nil do return
-	strings.write_string(b, `,"upload_ask":{"files":[`)
-	for f, i in op.paths {
-		if i > 0 do strings.write_byte(b, ',')
-		core.json_quote(b, filepath.base(f))
-	}
-	strings.write_string(b, `],"who":`)
-	core.json_quote(b, op.who_text)
-	strings.write_byte(b, '}')
+	files := make([]string, len(op.paths), context.temp_allocator)
+	for p, i in op.paths do files[i] = filepath.base(p)
+	f.upload_ask = core.Browser_Upload_Fact{files = files, who = op.who_text}
 }
 
 // The upload bar's words (browser_polish.odin draws it): who asks and the files' full paths.

@@ -854,7 +854,8 @@ Tab `kind`: `pi`, `shell`, `editor`, `markdown`, `browser` (see [Browser tabs](#
 `app`, `changes`. Markdown tabs carry
 `path`, `source` (the source view is showing), `line` (the source line at the top of the view),
 `links`, `headings` and `matches` (the find bar's match count). Editor tabs carry
-`path`, `dirty`, `"preview": true` for a preview tab and, for read-only diff views, `view`
+`path`, `dirty` (left out when no window is attached: whether its buffer has unsaved changes is
+not known then), `"preview": true` for a preview tab and, for read-only diff views, `view`
 (`disk`\|`head`); `editor_state` has the rest.
 Tab `status`: `running`, `exited`, or `not_started` (restored from the saved workspace and not
 started yet: a session's tabs start when it is focused, docs/PERSISTENCE.md). An exited tab
@@ -1086,6 +1087,44 @@ on screen; a click on the entry focuses that tab.
 **Tooltip**: hovering a dotted tab or session row says what, from where and how long ago:
 `claude-code: waiting for permission · OSC 7501, 2m ago — Apply these edits?` (a row's names the
 tab when it is not the pi tab: a program cannot pass as another session). No dot, no tooltip.
+
+## 5a. The window's link (M4: over `core.sock`)
+
+The window is a client of its core (docs/plans/background-core.md §10.2, M3-F). Today it attaches
+in process through an in-memory transport carrying the framed wire's JSON channel
+(`src/corewire`, `src/core/window_link.odin`, `src/client.odin`); M4 carries the same messages over
+`core.sock` in framed mode. Every message is a JSON object with `"v":1`.
+
+**The `ui` caller has one door.** Only `core_attach_window()` (called by the window at init) makes
+this connection, and only it runs commands as `ui`. No socket hello, token or `--ctl` path reaches
+it: no token is ever made for the `ui` or `internal` caller, and `state.subscribe` is not a socket
+request (`unknown request type`).
+
+Window → core:
+
+| type | fields | what it does |
+|---|---|---|
+| `state.subscribe` | | the core answers `state.full`, then sends `state.delta` as State changes |
+| `command` | `id`, `command`, `menu?`, `now?` | a command run as `ui`, in its wire form (every field, unlike events' and the log's; the UI-only fields `close_session.ask`, `focus_session.reopen` and `set_home_dir.setup` are read only here). `id` `""`: no result. `now`: run at once, else queued in the inbox. `menu`: a menu row's label (a failure is shown as a toast) |
+| `window.command` | `id`, `command: {"<type>": {fields}}`, `now?` | one of the internal commands the window reports (`WINDOW_COMMANDS`: an app's status, a screenshot worker's answer, CEF's reports, a comment, a widget taking or releasing the keyboard, a git HEAD read, the OS appearance, a session seen); anything else is refused |
+| `window.browser_facts` | `tab_id`, `facts` (or `null`) | what only the window knows of a browser tab (comment mode and markers, zoom, bars, downloads, the agent strip, an upload's ask), typed; get_state writes it. The core asks for it fresh before it writes a browser tab |
+
+Core → window:
+
+| type | fields | |
+|---|---|---|
+| `state.full` | `version`, `state` | every section of State (§5.8 of the design: `projects`, `sessions`, `view`, `settings`, `jobs`, `confirmations`, `notifications`, `reload`, `claude`, `tabs:<session>`, `panes:<session>`, `panels:<tab>`). Carries what `get_state` keeps from agents (confirmation tokens, transcript paths, account folders) |
+| `state.delta` | `version`, `sections` | the sections that changed (`null`: the section went) |
+| `result` | `id`, `request_id?`, `result` | a command's result, as on the socket |
+| `toast` | `text`, `err` | a short line at the bottom of the window |
+
+**Order.** A command's `state.delta` is sent before its `result` (the window waits for its own
+results and reads State at once). The delta before a result compares every section, so it holds
+changes that bumped no version (a parked or consumed confirmation). In process the wait is nil;
+M4 bounds it (250 ms, then the call shows as pending).
+
+**Test mode** compares the window's replica with the core's State after every script step; a
+difference fails the scene. Dev builds: `DECKHAND_PROTO_LOG=1` prints every frame on the link.
 
 ## 6. Redaction
 

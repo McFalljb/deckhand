@@ -196,6 +196,12 @@ socket_stop :: proc(pump: proc() = nil) {
 // read it there, e.g. `ps eww`), so it works for one hello only. Any thread.
 socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single_use := false) -> string {
 	tok := random_token(allocator)
+	// the user's and Deckhand's own callers have no token: the window's one door is
+	// core_attach_window (window_link.odin). A token this returns for them knows nothing.
+	if !token_caller_ok(caller) {
+		fmt.eprintln("Deckhand: no token is made for the", CALLER_NAMES[caller.kind], "caller")
+		return tok
+	}
 	sync.lock(&srv.mu)
 	srv.next_ref += 1
 	srv.tokens[strings.clone(tok)] = {caller = caller, ref = srv.next_ref, single_use = single_use}
@@ -204,6 +210,9 @@ socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single
 	tokens_flush()
 	return tok
 }
+
+// Callers a token may stand for: never ui (only the window's attach is the user) nor internal.
+token_caller_ok :: proc(c: Caller) -> bool {return c.kind != .UI && c.kind != .Internal}
 
 @(private = "file")
 random_token :: proc(allocator := context.allocator) -> string {
@@ -1166,7 +1175,7 @@ socket_tokens_ro_of :: proc(term: u32) -> (ro: Ro_Saved, found: bool) {
 // this run's from now on: kept by the token itself). srv.mu held.
 @(private = "file")
 token_find :: proc(tok: string) -> (Token_Entry, bool) {
-	if e, ok := srv.tokens[tok]; ok do return e, true
+	if e, ok := srv.tokens[tok]; ok do return e, token_caller_ok(e.caller)
 	if len(srv.hashed) == 0 do return {}, false
 	h := token_hash(tok)
 	he, ok := srv.hashed[h]

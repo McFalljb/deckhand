@@ -209,6 +209,7 @@ Autotest :: struct {
 	cpu_calls:    u64,
 	wait_request: u64, // pending command: wait for its finished event
 	wait_request_deadline: time.Tick, // then TIMEOUT (script_finish_timeout)
+	replica_checked: time.Tick, // the last divergence check (autotest_check_replica)
 	submitted:    u64, // the command script_command is running: its finished event may come in the same drain
 	submitted_done: bool, // it came (last_finished holds it)
 	last_result:  string, // JSON of the last command result
@@ -507,6 +508,8 @@ autotest_step :: proc() {
 		app_deactivate()
 	}
 	now := time.tick_now()
+	// the replica against the core's State, between steps too (what terminals and timers did)
+	if time.tick_diff(at.replica_checked, now) >= 200 * time.Millisecond do autotest_check_replica()
 	if at.pending_shot != "" do app.redraw = true // keep presenting while raised
 	if time.tick_diff(at.wait_until, now) < 0 {
 		// a shot: once the raised window has drawn SHOT_FRAMES frames (and SHOT_MIN passed), not the
@@ -568,6 +571,7 @@ autotest_step :: proc() {
 		line := strings.trim_space(at.lines[at.next])
 		at.next += 1
 		if line == "" || line[0] == '#' do continue
+		autotest_check_replica() // after the step before this one (design §10.2, M3-F)
 		cmd, _, rest := strings.partition(line, " ")
 		args := strings.fields(rest, context.temp_allocator)
 		if idx != at.retry_line {
@@ -1300,6 +1304,14 @@ script_command :: proc(c: core.Command, caller: core.Caller) -> (id: u64, r: cor
 // look for ("ASSERT FAILED", or "TIMEOUT" for a wait): many run the app with `|| true` and read
 // its log, so a failure without one ("dragtab: no such tab or place") would pass the scene.
 @(private = "file")
+// The window's replica must equal the core's State after every script step (design §10.2,
+// M3-F, R14): a difference is a UI write that bypassed commands or a change the state stream
+// missed, and fails the scene. The window then gets the whole state again.
+autotest_check_replica :: proc() {
+	autotest.replica_checked = time.tick_now()
+	if d := client_check(); d != "" do script_fail(fmt.tprintf("the window's replica diverged from the core's State: %s", d))
+}
+
 script_fail :: proc(args: ..any) {
 	autotest.failures += 1
 	msg := fmt.tprint(..args)

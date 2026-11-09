@@ -844,7 +844,8 @@ close_needs_confirm :: proc(tab: Tab) -> bool {
 			t := term_of(tab.id)
 			return t != nil && pty_foreground_busy(&t.pty)
 		case Editor_Tab:
-			return window_tab_dirty(tab.id) // unsaved changes
+			dirty, known := window_tab_dirty(tab.id)
+			return dirty || !known // unsaved changes (not known with no window: ask)
 		case Changes_Tab, Browser_Tab:
 			return false // nothing of its own to lose
 		case Markdown_Tab:
@@ -1152,12 +1153,14 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if window_job_sheet_holds_quit() do return fail("the job sheet has changes: discard them first (Cancel or Esc), then quit"), true
 		// keep_sessions: what the session holder keeps running is not stopped, so not asked about
 		keeps := !c.stop_sessions && holder_keeps_sessions()
-		if quit_would_stop(keeps) || (keeps && window_unsaved_files() > 0) {
+		unsaved, known := window_unsaved_files() // not known (no window to ask): asked, never taken as none
+		if quit_would_stop(keeps) || !known || (keeps && unsaved > 0) {
 			what := "quit Deckhand? Running sessions will be stopped."
-			if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", n, n == 1 ? "" : "s")
+			if unsaved > 0 do what = fmt.tprintf("quit Deckhand? Running sessions will be stopped, and %d file%s with unsaved changes will be lost.", unsaved, unsaved == 1 ? "" : "s")
+			else if !known do what = fmt.tprintf("%s %s", what, unsaved_files_note(unsaved, known))
 			if keeps || c.stop_sessions {
 				what = keeps ? "quit Deckhand? Sessions the session holder keeps run on; others will be stopped." : "quit Deckhand and stop all sessions? Every session, including those kept running, will be stopped."
-				if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+				if note := unsaved_files_note(unsaved, known); note != "" do what = fmt.tprintf("%s %s", what, note)
 			}
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what)
 			if !go_on do return gr, ch
@@ -1802,6 +1805,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		by_trusted := !force_ask && caller == p.caller && confirm_mode(p.caller, p.class) == .Trusted
 		if !by_user && !by_trusted do return fail("only the user can confirm this, in Deckhand"), false, false
 		ordered_remove(&state.pending_confirmations, i)
+		window_state_changed() // consumed: callers that go on (Quit) may answer "not changed"
 		return {}, true, true
 	}
 	return fail("unknown or expired confirmation token"), false, false
@@ -2119,6 +2123,7 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 	for &tab in s.tabs {
 		if tab.status != .Not_Started do continue
 		if tab_held_away(&tab) != 0 do continue // it runs on in the session holder (holder_client.odin)
+		window_state_changed() // statuses change here, also from ticks (hot reload) that say nothing
 		if _, is_cl := tab.kind.(Claude_Tab); is_cl && !claude do continue // an agent's: never (§3); in a chat read-only while chats are (claude_start)
 		if et, is_ed := tab.kind.(Editor_Tab); is_ed {
 			// no process: the file opens again (a gone file says so in its tab)
@@ -2204,6 +2209,7 @@ stop_pi_tab :: proc(tab: ^Tab) -> (pid: i32) {
 	if agent_picker.tab == tab.id do agent_picker = {}
 	agent_pending_drop(tab.id)
 	tab.status, tab.agent, tab.waiting, tab.question = .Exited, .Unknown, false, false
+	window_state_changed() // from reload ticks too
 	for b in tab.blockers do delete(b)
 	clear(&tab.blockers)
 	prog_summary_free(&tab.prog) // its terminal (and records) went with drop_term
@@ -2359,6 +2365,7 @@ new_term :: proc(tab_id: u64) -> ^Term {
 
 drop_term :: proc(tab_id: u64) {
 	window_view_drop(tab_id) // its buffer, Markdown view, page or app (tab_views.odin)
+	browser_facts_set(tab_id, nil) // what the window said of its page (window.browser_facts)
 	changes_drop(tab_id) // a Changes tab's view (changes.odin)
 	if t := term_of(tab_id); t != nil {
 		term_free(t)

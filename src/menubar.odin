@@ -258,6 +258,8 @@ menubar_fire :: proc(tag: int) {
 }
 
 menubar_run :: proc(it: ^Bar_Item) {
+	client.busy += 1 // as event(): no release of the replica's retired blocks under it (client.odin)
+	defer client.busy -= 1
 	ime_cancel()
 	if it.action != "" {
 		action_run(it.action)

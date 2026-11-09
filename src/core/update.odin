@@ -323,9 +323,10 @@ update_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		// keep_sessions: what the session holder keeps carries on through the update (§7.4), so
 		// only what would stop is asked about
 		keeps := holder_keeps_sessions()
-		if quit_would_stop(keeps) || jobs_any_running() || (keeps && window_unsaved_files() > 0) {
+		unsaved, known := window_unsaved_files() // not known (no window to ask): asked, never taken as none
+		if quit_would_stop(keeps) || jobs_any_running() || (keeps && (unsaved > 0 || !known)) {
 			what := fmt.tprintf("restart Deckhand to update to %s? %s", upd.release.version, update_restart_effects(keeps))
-			if n := window_unsaved_files(); n > 0 do what = fmt.tprintf("%s %d file%s with unsaved changes will be lost.", what, n, n == 1 ? "" : "s")
+			if note := unsaved_files_note(unsaved, known); note != "" do what = fmt.tprintf("%s %s", what, note)
 			gr, go_on, ch := confirm_gate(cmd, .App_Quit, caller, c.confirm, what, force_ask = true)
 			if !go_on do return gr, ch
 		}

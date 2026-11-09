@@ -529,20 +529,23 @@ comments_close_act :: proc(s: ^Open_Session, tab_id: u64, choice: Comments_Choic
 comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {
 	case Comment_Add:
+		// never read, copy or remove a file that is not one of our crops (it is not removed either)
+		crop, crop_ok := comments_crop_ok(c.crop) // the resolved path, used from here on
+		if !crop_ok do return fail("crop: not one of Deckhand's comment crops"), false
 		s, tab, _ := find_tab(c.tab_id)
 		refuse :: proc(crop, msg: string) -> (Result, bool) {
 			if crop != "" do os.remove(crop)
 			return fail(msg), false
 		}
-		if tab == nil do return refuse(c.crop, "no such tab")
-		if s.home do return refuse(c.crop, "Home has only its pi tab")
+		if tab == nil do return refuse(crop, "no such tab")
+		if s.home do return refuse(crop, "Home has only its pi tab")
 		switch c.source {
-		case .Browser: if _, is := tab.kind.(Browser_Tab); !is do return refuse(c.crop, "not a browser tab")
-		case .App:     if _, is := tab.kind.(App_Tab); !is do return refuse(c.crop, "not an app tab")
+		case .Browser: if _, is := tab.kind.(Browser_Tab); !is do return refuse(crop, "not a browser tab")
+		case .App:     if _, is := tab.kind.(App_Tab); !is do return refuse(crop, "not an app tab")
 		}
 		text := strings.trim_space(c.text)
-		if text == "" do return refuse(c.crop, "the comment is empty")
-		if len(s.comments) >= COMMENTS_MAX do return refuse(c.crop, fmt.tprintf("too many comments waiting for this session's pi (max %d): send or clear them first", COMMENTS_MAX))
+		if text == "" do return refuse(crop, "the comment is empty")
+		if len(s.comments) >= COMMENTS_MAX do return refuse(crop, fmt.tprintf("too many comments waiting for this session's pi (max %d): send or clear them first", COMMENTS_MAX))
 		pc := Pending_Comment {
 			id      = new_id(),
 			rev     = 1,
@@ -550,7 +553,7 @@ comments_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Res
 			tab_id  = c.tab_id,
 			what    = strings.clone(cut_utf8(strings.trim_space(one_line(c.what, context.temp_allocator)), COMMENT_WHAT_MAX)),
 			text    = strings.clone(cut_utf8(text, COMMENT_TEXT_MAX)),
-			crop    = strings.clone(c.crop),
+			crop    = strings.clone(crop),
 			created = time.now(),
 		}
 		append(&s.comments, pc)
@@ -627,10 +630,29 @@ crop_n: int
 
 // Where a source writes its next crop: <data dir>/comments/c-<pid>-<n>.png (a temp folder without
 // a data dir). The first use in a run removes crops a Deckhand that is gone left behind.
+// The folder crops are written in (temp allocator).
+comments_crop_dir :: proc() -> string {
+	if home_root != "" {
+		dir, _ := filepath.join({home_root, "comments"}, context.temp_allocator)
+		return dir
+	}
+	return fmt.tprintf("%s/deckhand-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
+}
+
+// Whether crop is one of ours: a c-<pid>-<n>.png file directly in comments_crop_dir(), after
+// following links. Comment_Add's crop comes from the window (window.command), and the core
+// reads, copies and removes it: never a path elsewhere.
+// real: the resolved path ("" for no crop; temp allocator), which Comment_Add uses from here on.
+comments_crop_ok :: proc(crop: string) -> (real: string, ok: bool) {
+	if crop == "" do return "", true
+	real = fs_file_directly_in(crop, comments_crop_dir()) or_return // never a link
+	name := filepath.base(real)
+	if !strings.has_prefix(name, "c-") || !strings.has_suffix(name, ".png") do return "", false
+	return real, true
+}
+
 comments_crop_path :: proc() -> string {
-	dir: string
-	if home_root != "" do dir, _ = filepath.join({home_root, "comments"}, context.temp_allocator)
-	else do dir = fmt.tprintf("%s/deckhand-comments", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"))
+	dir := comments_crop_dir()
 	if crop_n == 0 {
 		os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User})
 		if infos, rerr := os.read_all_directory_by_path(dir, context.temp_allocator); rerr == nil {

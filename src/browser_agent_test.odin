@@ -230,7 +230,7 @@ browser_agent_strip_state :: proc(t: ^testing.T) {
 	_ = a
 	tab_json :: proc(tab_id: u64) -> string {
 		b := strings.builder_make(context.temp_allocator)
-		browser_agent_tab_json(&b, tab_id)
+		test_facts_json(&b, tab_id, agent = true)
 		return strings.to_string(b)
 	}
 	core.run_command(core.Browser_Reload{tab_id = ta}, {kind = .UI})
@@ -554,4 +554,16 @@ browser_agent_open_marks_navigation :: proc(t: ^testing.T) {
 	// the user's own: no agent state (no strip on a script's or the user's read of it)
 	u := core.run_command(core.Browser_Open{session = a, url = "https://d.example"}, {kind = .UI})
 	testing.expect(t, agent_tab_of(u.created_id) == nil, "the user's browser_open: no agent state")
+}
+
+// One part of a browser tab's facts as State's JSON writes it (the agent strip or an upload's
+// ask), alone: "" when that part has nothing (tests).
+test_facts_json :: proc(b: ^strings.Builder, tab_id: u64, agent := false, act := false) {
+	f: core.Browser_Facts
+	if agent do browser_agent_tab_facts(&f, tab_id)
+	if act do browser_act_tab_facts(&f, tab_id)
+	if f.agent == nil && f.upload_ask == nil do return
+	full := strings.builder_make(context.temp_allocator)
+	core.browser_facts_write(&full, &f)
+	strings.write_string(b, strings.trim_prefix(strings.to_string(full), `,"zoom":1,"crashed":false,"devtools":false`))
 }

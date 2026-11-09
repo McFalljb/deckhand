@@ -1257,19 +1257,18 @@ shot_step :: proc(op: ^Agent_Op, b: ^Browser, now: time.Tick, late: bool) -> (do
 // ---- State (json_write.odin, inside a browser tab's object) ----
 
 // `,"agent":{who, doing, busy, recording}` while the strip shows.
-browser_agent_tab_json :: proc(b: ^strings.Builder, tab_id: u64) {
+browser_agent_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 	t := agent_tab_of(tab_id)
 	if t == nil || !agent_strip_on(t) do return
-	strings.write_string(b, `,"agent":{"who":`)
-	core.json_quote(b, agent_who(t.who, t.who_claude))
-	fmt.sbprintf(b, `,"doing":"%s","busy":%v,"recording":"%s"`, AGENT_DOING_NAMES[t.doing], agent_busy(tab_id), recording(t))
-	if t.act_target != "" {
-		strings.write_string(b, `,"target":`)
-		core.json_quote(b, t.act_target)
+	f.agent = core.Browser_Agent_Fact {
+		who       = agent_who(t.who, t.who_claude),
+		doing     = AGENT_DOING_NAMES[t.doing],
+		busy      = agent_busy(tab_id),
+		recording = recording(t),
+		target    = t.act_target,
+		acting    = browser_act_busy(tab_id),
+		user      = t.user_control,
 	}
-	if browser_act_busy(tab_id) do strings.write_string(b, `,"acting":true`)
-	if t.user_control do strings.write_string(b, `,"control":"user"`)
-	strings.write_byte(b, '}')
 }
 
 @(private = "file")

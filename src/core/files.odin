@@ -633,7 +633,7 @@ files_visible :: proc(n: int, scroll, view_h, row_h: f32) -> (first, last: int, 
 files_keep_edited_preview :: proc() {
 	for s in state.open_sessions do for tab in s.tabs {
 		et, is := tab.kind.(Editor_Tab)
-		if is && et.preview && window_tab_dirty(tab.id) do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
+		if dirty, _ := window_tab_dirty(tab.id); is && et.preview && dirty do run_command(Keep_Tab{tab_id = tab.id}, {kind = .Internal})
 	}
 }
 

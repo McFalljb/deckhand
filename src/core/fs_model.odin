@@ -108,6 +108,23 @@ fs_trash_or_fake :: proc(path: string) -> bool {
 // The real path (symlinks resolved): realpath of the longest part that
 // exists, then the rest as written (cleaned). Relative paths are from the
 // process's folder. Never "" for a non-empty path.
+// Whether path is a regular file directly in dir: not a link itself (lstat), and the folder its
+// resolved path is in is dir's resolved path exactly. real: that resolved path (temp allocator),
+// what the caller uses from the check on.
+fs_file_directly_in :: proc(path, dir: string) -> (real: string, ok: bool) {
+	if path == "" || dir == "" do return "", false
+	st: posix.stat_t
+	if posix.lstat(strings.clone_to_cstring(path, context.temp_allocator), &st) != .OK || !posix.S_ISREG(st.st_mode) do return "", false
+	real = fs_real(path)
+	rdir := fs_real(dir)
+	if real == "" || rdir == "" do return "", false
+	{
+		context.allocator = context.temp_allocator
+		if filepath.dir(real) != rdir do return "", false
+	}
+	return real, true
+}
+
 fs_real :: proc(path: string, allocator := context.temp_allocator) -> string {
 	if path == "" do return ""
 	p := path

@@ -633,8 +633,10 @@ open_session_refresh :: proc(s: ^Open_Session) {
 	}
 	s.mtime = fi.modification_time
 	if fi.size != s.title_size {
+		t := title_of(s.session_file, fi.size, fi.modification_time) // cached (titles.odin)
+		if t != s.title do window_state_changed() // read when drawn, not by a command: the window's replica follows
 		delete(s.title)
-		s.title = title_of(s.session_file, fi.size, fi.modification_time) // cached (titles.odin)
+		s.title = t
 		s.title_size = fi.size
 	}
 }

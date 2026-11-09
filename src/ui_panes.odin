@@ -64,7 +64,7 @@ pane_press :: proc(e: ^sapp.Event) {
 	}
 	pointer_capture = {pane = p.id}
 	if p.id == s.focused_pane do return
-	core.run_command(core.Focus_Pane{pane = p.id}, {kind = .UI}) // now: this same click acts in it
+	client_call(core.Focus_Pane{pane = p.id}) // now: this same click acts in it
 	// the click's own drag must outlive the focus change (drags_follow_focus ends the drags of
 	// tabs that left the screen; this one's did not, but the focused tab changed)
 	if tab := core.active_tab(); tab != nil do app.drag_tab = tab.id

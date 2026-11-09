@@ -821,7 +821,9 @@ wt_cleanup_pre :: proc(p: string) -> (main, err: string) {
 		if wt_within(fs_real(s.cwd), p) do return "", "a session runs in it"
 		for tab in s.tabs do if _, is := tab.kind.(Shell_Tab); is && tab.cwd != "" && wt_within(fs_real(tab.cwd), p) do return "", "a shell tab runs in it"
 	}
-	if window_unsaved_files(p) > 0 do return "", "an editor tab has unsaved changes in it"
+	unsaved, known := window_unsaved_files(p)
+	if !known do return "", "no window can say whether an editor tab has unsaved changes in it" // never taken as none
+	if unsaved > 0 do return "", "an editor tab has unsaved changes in it"
 	return main, ""
 }
 

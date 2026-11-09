@@ -411,12 +411,14 @@ in_scope :: proc(cwd, scope: string) -> bool {
 @(private = "file")
 set_version :: proc(t: ^Tab, v: string) {
 	if t.reload.version == v do return
+	window_state_changed() // also from ticks, outside commands
 	delete(t.reload.version)
 	t.reload.version = strings.clone(v)
 }
 
 @(private = "file")
 set_note :: proc(t: ^Tab, note: string) {
+	if t.reload.note != note do window_state_changed() // also from ticks, outside commands
 	delete(t.reload.note)
 	t.reload.note = strings.clone(cut_utf8(one_line(note, context.temp_allocator), RELOAD_NOTE_MAX))
 }
@@ -779,7 +781,10 @@ claude_reload_tick :: proc() {
 	tabs := running_claude()
 	kicks := make([dynamic]u64, context.temp_allocator)
 	for &s in state.open_sessions do for &t in s.tabs {
-		if _, is := t.kind.(Claude_Tab); is && t.status != .Running do t.reload.started = false
+		if _, is := t.kind.(Claude_Tab); is && t.status != .Running && t.reload.started {
+			t.reload.started = false
+			window_state_changed() // a tick, not a command: the window's replica follows
+		}
 	}
 	for x in tabs {
 		t := x.t
@@ -787,6 +792,7 @@ claude_reload_tick :: proc() {
 			// a new process reads every file anew
 			t.reload.started = true
 			t.reload.stale = false
+			window_state_changed()
 			set_version(t, state.reload.claude.ident)
 			if strings.has_prefix(t.reload.note, "restarting") do set_note(t, "restarted")
 		}

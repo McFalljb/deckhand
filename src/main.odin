@@ -80,7 +80,7 @@ init :: proc "c" () {
 	platform_window_init()
 	menubar_install() // the macOS menu bar (menubar.odin)
 	// the OS appearance before anything is drawn, then its changes
-	core.run_command(core.System_Appearance{light = platform_system_light()})
+	client_call(core.System_Appearance{light = platform_system_light()}, .Internal) // before the attach: straight in
 	platform_watch_appearance()
 	autotest_init()
 	if core.autotest_active do core.platform.notify = proc(title, body: string) {fmt.println("[autotest] notify:", title, "-", body)}
@@ -134,7 +134,7 @@ init :: proc "c" () {
 	}
 	// the saved workspace (persist.odin); test mode only with an explicit
 	// DECKHAND_DATA_DIR, so scripts never read or write the user's
-	state.settings.keep_sessions = core.keep_sessions_default() // until the saved workspace says otherwise
+	core.state.settings.keep_sessions = core.keep_sessions_default() // until the saved workspace says otherwise (the core's, before the window attaches)
 	if !core.autotest_active || core.hook_env(.Data_Dir) != "" {
 		core.persist_init(core.data_dir(context.temp_allocator))
 		core.claude_disk_launching = true // no transcript read on the main thread while it comes back
@@ -162,6 +162,7 @@ init :: proc "c" () {
 		else do fmt.eprintfln("Deckhand: %s: %s", dir, r.error)
 	}
 	core.update_init() // Deckhand's own updates: saved choices, leftovers, the check timer (update.odin)
+	client_attach() // the window as its core's client: `state` is the replica from here on (client.odin)
 	app.ready = true
 	app.redraw = true
 	core.core_loop_start() // core_tick also while no frames run (core_loop.odin)
@@ -226,12 +227,7 @@ window_hooks_app :: proc() -> core.Window_Hooks {
 			}
 			return false
 		},
-		browser_json = proc(b: ^strings.Builder, tab_id: u64) {
-			annot_tab_json(b, tab_id) // comment mode, markers (browser_annotate.odin)
-			browser_polish_tab_json(b, tab_id) // zoom, bars, downloads (browser_polish.odin)
-			browser_agent_tab_json(b, tab_id) // the agent strip (browser_agent.odin)
-			browser_act_tab_json(b, tab_id) // an upload's ask (browser_act.odin)
-		},
+		browser_facts = browser_facts_of, // client.odin (an attached window sends them instead)
 		browser_page = proc(tab_id: u64) -> string {
 			b := browser_of(tab_id)
 			if b == nil do return ""
@@ -291,19 +287,19 @@ window_hooks_init :: proc "contextless" () {
 // The OS switched between light and dark (platform layer, main thread; the
 // test mode's `system_appearance` too).
 on_system_appearance :: proc(light: bool) {
-	core.inbox_submit(core.System_Appearance{light = light}, {kind = .Internal})
+	client_internal(core.System_Appearance{light = light})
 }
 
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
-	core.inbox_submit(cmd, {kind = .UI})
+	client_send(cmd) // client.odin
 }
 
 // A menu row's command: as ui_do, then its outcome is shown where nothing
 // else would show it (menu_result: a failure, a copy).
 ui_do_menu :: proc(cmd: core.Command, label: string) {
-	core.inbox_submit(cmd, {kind = .UI}, menu = label)
+	client_send(cmd, menu = label)
 }
 
 frame :: proc "c" () {
@@ -314,7 +310,10 @@ frame :: proc "c" () {
 	core.core_frame_begin(time.tick_now()) // the core loop's timer stays out of frames (core_loop.odin)
 	defer core.core_frame_end(time.tick_now()) // and runs a tick it skipped meanwhile
 	core.app_frames_called += 1
+	client.busy += 1 // the replica's retired blocks wait for client_after_tick (client.odin)
+	defer client.busy -= 1
 	core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
+	client_after_tick() // what the tick changed, into the window's replica (client.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
 	t := core.active_term()
@@ -380,7 +379,7 @@ frame :: proc "c" () {
 	if app.pending_start && app.pane.z > 0 {
 		app.pending_start = false
 		cmd := launch_start(app_args.claude, app.launch_project)
-		if _, is := cmd.(core.New_Claude_Session); is do core.run_command(cmd, {kind = .UI}) // the user's: in front, toast if Claude Code is missing
+		if _, is := cmd.(core.New_Claude_Session); is do client_call(cmd) // the user's: in front, toast if Claude Code is missing
 		else if cmd != nil do core.run_command(cmd)
 		t = core.active_term()
 	}
@@ -467,6 +466,9 @@ event_os :: proc "c" (e: ^sapp.Event) {
 }
 
 event :: proc(e: ^sapp.Event) {
+	client.busy += 1 // as in frame(): no release mid-event (client_on_drain)
+	defer client.busy -= 1
+	client_before_event() // the replica holds what timers did since the last frame (client.odin)
 	defer core.inbox_drain()
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
@@ -800,8 +802,8 @@ event :: proc(e: ^sapp.Event) {
 	case .FOCUSED:
 		app.window_active = true
 		// the session on screen is seen now: its bell entries are read
-		if core.notify_wants_seen(state.current_session) do core.inbox_submit(core.Notifications_Mark_Read{session = state.current_session}, {kind = .Internal})
-		for id in core.status_wants_seen() do core.inbox_submit(core.Set_Unread{tab_id = id, unread = false}, {kind = .Internal}) // agent_status.odin
+		if core.notify_wants_seen(state.current_session) do client_internal(core.Notifications_Mark_Read{session = state.current_session})
+		for id in core.status_wants_seen() do client_internal(core.Set_Unread{tab_id = id, unread = false}) // agent_status.odin
 		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
@@ -863,7 +865,9 @@ pane_draw :: proc(p: ^core.Pane, t: ^core.Term, typing: bool) {
 	if tab == nil || (core.term_of(tab.id) == nil && editor_of(tab.id) == nil && browser_of(tab.id) == nil && app_of(tab.id) == nil) do return
 	r := pane_draw_rect(p)
 	if r.z <= 0 || r.w <= 0 do return
-	tab_view(tab.kind).draw(tab.id, r.x, r.y, r.z, r.w)
+	v := tab_view(tab.kind) // nil: a kind this window does not know (a newer core's; nothing to draw)
+	if v == nil || v.draw == nil do return
+	v.draw(tab.id, r.x, r.y, r.z, r.w)
 	if pt := core.term_of(tab.id); pt != nil && pt == t && typing do term_draw_marked(pt, ime.marked, ime.caret)
 }
 
@@ -910,6 +914,12 @@ set_hover :: proc(h: Hit, over_terminal: bool) {
 confirm_pending :: proc(token: string) {
 	for p in state.pending_confirmations {
 		if p.token != token do continue
+		// a command this window cannot decode (a newer core's: the replica holds nil) is never
+		// confirmed blind; Cancel still works
+		if p.command == nil {
+			toast_show("This needs a newer Deckhand to confirm: cancel it, or confirm it there", true)
+			return
+		}
 		cmd := p.command
 		#partial switch c in p.command {
 		case core.Close_Tab: cmd = core.Close_Tab{tab_id = c.tab_id, confirm = token, comments = c.comments}

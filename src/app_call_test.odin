@@ -9,7 +9,9 @@ package main
 import "base:runtime"
 import "core:encoding/json"
 import "core:math"
+import os "core:os"
 import "core:strings"
+import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "core"
@@ -203,6 +205,31 @@ app_results_cannot_forge_screenshots :: proc(t: ^testing.T) {
 	testing.expect(t, "a951" in pending, "a worker cannot finish an app call")
 	app_apply(core.App_Call_Done{tab_id = 7, wire = "s950", ok = true, data = "{}", from_worker = true}, {kind = .Internal}, 0)
 	testing.expect(t, !("s950" in pending), "the worker finishes its screenshot")
+}
+
+// M3-F review round 1, finding 5: App_Call_Done comes over window.command, and a stale worker
+// answer's file is removed: only a file in app_shots_dir(), never a path elsewhere.
+@(test)
+app_call_done_file_only_in_shots_dir :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	path := "build/app-call-done-elsewhere.png"
+	testing.expect(t, os.write_entire_file(path, transmute([]u8)string("x")) == nil, "written")
+	defer os.remove(path)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s960", ok = true, data = "{}", from_worker = true, file = path}, {kind = .Internal}, 0)
+	testing.expect(t, os.is_file(path), "a file outside the shots folder is left alone")
+	shots := core.app_shots_dir(context.temp_allocator)
+	os.make_directory_all(shots)
+	ours := strings.concatenate({shots, "/s961.png"}, context.temp_allocator)
+	testing.expect(t, os.write_entire_file(ours, transmute([]u8)string("x")) == nil, "written")
+	defer os.remove(ours)
+	// round 2, finding 3: a link in the folder is not followed, even to a shot of ours
+	lnk := strings.concatenate({shots, "/s962.png"}, context.temp_allocator)
+	posix.symlink(strings.clone_to_cstring(ours, context.temp_allocator), strings.clone_to_cstring(lnk, context.temp_allocator))
+	defer os.remove(lnk)
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s962", ok = true, data = "{}", from_worker = true, file = lnk}, {kind = .Internal}, 0)
+	testing.expect(t, os.is_file(ours), "the link's target is left alone")
+	app_apply(core.App_Call_Done{tab_id = 7, wire = "s961", ok = true, data = "{}", from_worker = true, file = ours}, {kind = .Internal}, 0)
+	testing.expect(t, !os.is_file(ours), "a stale shot of ours is removed")
 }
 
 // Finding 2 and 5: lines from apps are strict RFC 8259 JSON, nested at most

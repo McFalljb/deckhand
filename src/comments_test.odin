@@ -117,7 +117,7 @@ c_last :: proc() -> C_Push {return len(c_pushes) > 0 ? c_pushes[len(c_pushes) - 
 // A crop file of n bytes in a temp folder.
 @(private = "file")
 c_crop :: proc(n: int) -> string {
-	p := fmt.aprintf("%s/pd-crop-test-%d-%d.png", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/"), os.get_pid(), time.now()._nsec)
+	p := core.comments_crop_path() // where a source writes one: Comment_Add takes no crop from elsewhere
 	data := make([]u8, n, context.temp_allocator)
 	for i in 0 ..< n do data[i] = u8(i)
 	_ = os.write_entire_file(p, data)
@@ -624,7 +624,7 @@ comments_app_box_crop_at_click :: proc(t: ^testing.T) {
 	id, err := core.app_comment_add(app_tab.id, box.id, box.label, box.rect, "collect it", crop)
 	testing.expect_value(t, err, "")
 	_, cm, _ := core.comment_find(id)
-	testing.expect(t, cm != nil && cm.crop == crop)
+	testing.expect(t, cm != nil && cm.crop == core.fs_real(crop)) // kept by its resolved path
 	testing.expect(t, os.exists(crop))
 	// refused (not an app tab): its crop goes
 	crop2 := c_crop(32)

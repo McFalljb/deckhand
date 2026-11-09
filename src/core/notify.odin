@@ -409,6 +409,7 @@ notify_os :: proc(n: Notice) {
 		return
 	}
 	ns.os_sent += 1
+	window_state_changed() // State.notices: not always inside a command that says it changed
 }
 
 // What happened, in words: "Finished", "Waiting for you", …

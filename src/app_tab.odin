@@ -428,7 +428,7 @@ app_apply :: proc(cmd: core.Command, caller: core.Caller, request_id: u64) -> (r
 		// timed out already, or not ours: only the asked tab's reply counts, an
 		// app's only for an app call, a screenshot worker's only for its screenshot
 		if !has || p.tab_id != c.tab_id || c.from_worker != (p.type == APP_SHOT_TYPE) {
-			if c.from_worker && c.file != "" do posix.unlink(strings.clone_to_cstring(c.file, context.temp_allocator)) // nobody wants it now
+			if real, ours := app_shot_ours(c.file); c.from_worker && ours do posix.unlink(strings.clone_to_cstring(real, context.temp_allocator)) // nobody wants it now
 			return {ok = true}, false
 		}
 		key, _ := delete_key(&pending, c.wire)
@@ -834,11 +834,11 @@ app_frames_tick :: proc() -> bool {
 					append(&a.restarts, now)
 					app_log_line(a, "[Deckhand] exit 75: restarting")
 					if app_spawn(a, at.argv, at.cwd) {
-						core.run_command(core.App_Update{tab_id = id, status = .Starting})
+						client_call(core.App_Update{tab_id = id, status = .Starting}, .Internal)
 						continue
 					}
 				}
-				core.run_command(core.App_Update{tab_id = id, status = .Exited, exit_code = code})
+				client_call(core.App_Update{tab_id = id, status = .Exited, exit_code = code}, .Internal)
 				continue
 			}
 		}
@@ -940,7 +940,7 @@ app_frames_tick :: proc() -> bool {
 			a.ping_at, a.ping_answered = {}, false
 		}
 		if want != status && status != .Exited {
-			core.run_command(core.App_Update{tab_id = id, status = want})
+			client_call(core.App_Update{tab_id = id, status = want}, .Internal)
 			redraw = true
 		}
 		if want == .Stalled && visible && app_badge_changed(a, now) do redraw = true
@@ -1298,7 +1298,7 @@ shot_write :: proc(j: ^Shot_Job) {
 		fmt.sbprintf(&b, `,"w":%d,"h":%d,"bytes":%d,%s}}`, j.w, j.h, len(png), j.meta)
 		done.data = strings.to_string(b)
 	} else do done.code = "write_failed"
-	core.inbox_submit(done, {kind = .Internal})
+	client_internal(done) // a worker thread: queued on the link (client.odin)
 	sync.atomic_sub(&shots_running, 1)
 }
 
@@ -2047,4 +2047,12 @@ app_script :: proc(cmd: string, args: []string, rest: string) -> (msg: string, o
 		return "", true
 	}
 	return fmt.tprintf("unknown command %s", cmd), false
+}
+
+// Whether file is a screenshot worker's: a file directly in core.app_shots_dir(), links followed.
+// App_Call_Done can come over window.command (window_link.odin): its file is removed only then.
+// If app hosting moves into the core, recheck App_Call_Done's place in WINDOW_COMMANDS.
+// real: the resolved path (temp allocator), what the caller removes.
+app_shot_ours :: proc(file: string) -> (real: string, ok: bool) {
+	return core.fs_file_directly_in(file, core.app_shots_dir(context.temp_allocator)) // never a link
 }

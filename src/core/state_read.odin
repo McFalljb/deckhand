@@ -52,9 +52,15 @@ budget_take :: proc(n: int) -> bool {
 	return true
 }
 
+// Sets what one message of text's size may decode to: before wire_read on any message (replica_apply;
+// the core's reads of the window's messages, window_link.odin).
+wire_read_budget :: proc(text: string) {
+	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, READ_BUDGET_MAX)
+}
+
 // Applies one state.full or state.delta message to r. "" = applied.
 replica_apply :: proc(r: ^State, text: string, allocator := context.allocator) -> string {
-	read_budget = clamp(READ_BUDGET_PER_BYTE * len(text), READ_BUDGET_MIN, READ_BUDGET_MAX)
+	wire_read_budget(text)
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	if jerr != nil do return "invalid JSON"
 	msg, ok := v.(json.Object)

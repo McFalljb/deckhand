@@ -65,6 +65,7 @@ Agent_State :: enum {
 
 Tab :: struct {
 	id:       u64,
+	machine:  u64, // another machine's (machine_mirror.odin: its number; 0 = this Mac's)
 	kind:     Tab_Kind,
 	title:    string,
 	status:   Tab_Status,
@@ -169,6 +170,7 @@ Session_Agent :: enum u8 {
 
 Open_Session :: struct {
 	id:            u64,
+	machine:       u64, // another machine's, mirrored (machine_mirror.odin: its number; 0 = this Mac's)
 	agent:         Session_Agent,
 	pi_session_id: string, // pi's session id (a UUID; Deckhand picks it for new chats); agent .Claude: its main tab's Claude session id ("" until reported)
 	session_dir:   string, // "" = pi's default store
@@ -501,7 +503,7 @@ tab_kind_id :: proc(k: Tab_Kind) -> Tab_Kind_Id {
 }
 
 any_running :: proc() -> bool {
-	for s in state.open_sessions do for t in s.tabs do if t.status == .Running do return true
+	for s in state.open_sessions do for t in s.tabs do if t.status == .Running && t.machine == 0 do return true // another machine's runs there
 	return false
 }
 
@@ -512,7 +514,7 @@ any_running :: proc() -> bool {
 quit_would_stop :: proc(keeps: bool) -> bool {
 	if !keeps do return any_running()
 	for s in state.open_sessions do for t in s.tabs {
-		if t.status != .Running do continue
+		if t.status != .Running || t.machine != 0 do continue
 		switch _ in t.kind {
 		case Editor_Tab, Markdown_Tab, Browser_Tab, Changes_Tab:
 			continue

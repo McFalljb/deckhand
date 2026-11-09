@@ -248,6 +248,18 @@ The Sessions tab has three sections:
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
 
+**Other machines** (with **Experimental: Machines over SSH** on and a machine added in Settings ›
+Machines): after this Mac's sections, each machine has its own, under its name, with a dot for its
+link (green online, amber when it needs you, grey offline) and a button when there is something to
+do: **Log in…** (ssh wants a password, a host key or a code: a shell tab here runs `ssh` to it so
+you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…** or
+**Update** (for now these two say what to do on that machine; Deckhand does them in a later
+version). Under it are its open sessions, then its projects; click a project to list its sessions,
+as that machine has them. Click an open session to show it: its tabs show, read-only for now (the
+terminal reads *Connecting…*; working in it from here comes in a later version). While the machine
+is offline its rows are greyed and show what it had when last seen; they come back up to date when
+it does. Nothing of another machine is saved on this Mac.
+
 A session's **title** is pi's own: the name you gave it with `/name` in pi, else your first
 message, else "Untitled session · <date>" (see [Troubleshooting](#troubleshooting)).
 
@@ -1060,7 +1072,7 @@ pi is installed; Claude Code's once it has been used:
   connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
   <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
   use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
-  the sidebar in a later version. **Allow other machines to connect to this one** (off by default,
+  the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)). **Allow other machines to connect to this one** (off by default,
   separate from Machines over SSH): turn it on on the Mac you want to reach. Then another
   machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
   drive this Mac's sessions. Off, no other machine can.

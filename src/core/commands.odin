@@ -542,6 +542,7 @@ Command :: union {
 	Machine_Add,
 	Machine_Remove,
 	Machine_Connect,
+	Machine_Login,
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
@@ -810,6 +811,8 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		r = fail("not allowed for this caller")
 	} else if why := claude_readonly_refuses(caller, cmd); why != "" {
 		r = fail(why) // a read-only Claude tab acting on a page or an app (claude.odin)
+	} else if why := machine_command_refuses(cmd); why != "" {
+		r = fail(why) // another machine's session, tab or project (machine_mirror.odin)
 	} else {
 		r, changed = apply(cmd, caller, request_id)
 	}
@@ -990,6 +993,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		p := find_project(c.project_id)
 		if p == nil do return fail("no such project"), false
 		if p.group == .Chats do return fail(CHATS_NOT_A_PROJECT), false
+		if p.machine != 0 { 	// another machine's: its core lists its sessions (machines.odin)
+			machine_select_project(p^)
+			return {ok = true}, true
+		}
 		select_project(p^)
 		return {ok = true}, true
 	case Rename_Project:
@@ -1500,6 +1507,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Machine_Add:     return machine_add_apply(c), false // the machines section changes itself (machines_publish)
 	case Machine_Remove:  return machine_remove_apply(c), false
 	case Machine_Connect: return machine_connect_apply(c), false
+	case Machine_Login:   return machine_login_apply(c, caller)
 	case Holder_Replace:
 		return holder_replace(c.stop), true
 	case Holder_Restart:
@@ -2212,7 +2220,7 @@ select_project :: proc(p: Project) {
 }
 
 project_by_cwd :: proc(cwd: string) -> ^Project {
-	for &p in state.projects do if p.group == .Projects && p.cwd == cwd do return &p
+	for &p in state.projects do if p.group == .Projects && p.machine == 0 && p.cwd == cwd do return &p
 	return nil
 }
 
@@ -2256,7 +2264,7 @@ focus_session :: proc(id: u64, caller: Caller) {
 // shows the session; they run with its saved flags); else they stay not started.
 @(private = "file")
 start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
-	if s.missing do return
+	if s.missing || s.machine != 0 do return // gone, or another machine's: nothing of it runs here (machine_mirror.odin)
 	for &tab in s.tabs {
 		if tab.status != .Not_Started do continue
 		if tab_held_away(&tab) != 0 do continue // it runs on in the session holder (holder_client.odin)
@@ -2471,12 +2479,13 @@ chat_env :: proc(project_id: u64, env: []string) -> []string {
 
 // A new shell tab of s in pane `pane` (0: the focused one), started in cwd, not shown yet: its id,
 // or why not.
-shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0) -> (u64, string) {
-	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = fmt.aprintf("shell %d", len(s.tabs))}
+// argv: what runs in place of the login shell (machine_login), title its tab's.
+shell_tab_start :: proc(s: ^Open_Session, cwd: string, pane: u64 = 0, argv: []string = nil, title := "") -> (u64, string) {
+	tab := Tab{id = new_id(), kind = Shell_Tab{}, title = title != "" ? strings.clone(title) : fmt.aprintf("shell %d", len(s.tabs))}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	id := pane_add_tab(s, tab, pane = pane).id // first: its terminal is sized to its pane (tab_rect)
 	t := new_term(id)
-	if !term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) {
+	if !term_start(t, argv != nil ? argv : {login_shell(), "-l"}, cwd, start = {kind = .Shell}) {
 		drop_term(id)
 		pane_tab_gone(s, id)
 		for x, i in s.tabs do if x.id == id {

@@ -27,6 +27,7 @@ Sidebar_Group :: enum {
 
 Project :: struct {
 	id:      u64, // runtime id, kept across rescans (matched by cwd)
+	machine: u64, // another machine's, mirrored (machine_mirror.odin: its number; 0 = this Mac's)
 	group:   Sidebar_Group,
 	name:    string, // display name; "" = use label
 	dir:     string, // full path of the session directory
@@ -135,7 +136,7 @@ apply_scan :: proc(scan: ^Scan_Result) {
 	for &p in scan.projects {
 		p.id = 0
 		for o in state.projects {
-			if o.group != .Projects || o.cwd != p.cwd do continue
+			if o.group != .Projects || o.machine != 0 || o.cwd != p.cwd do continue
 			p.id = o.id
 			p.added = o.added
 			p.by_hand = o.by_hand
@@ -145,6 +146,7 @@ apply_scan :: proc(scan: ^Scan_Result) {
 	}
 	chats_id: u64
 	for o in state.projects {
+		if o.machine != 0 do continue // another machine's: added again below (machines_projects_again)
 		if o.group == .Chats {
 			chats_id = o.id
 			continue
@@ -170,6 +172,7 @@ apply_scan :: proc(scan: ^Scan_Result) {
 	}
 	state.projects = scan.projects
 	projects_tidy() // temp and missing folders, nested and grouped rows
+	machines_projects_again() // other machines' projects (machine_mirror.odin)
 	if current_scan != nil {
 		virtual.arena_destroy(&current_scan.arena)
 		free(current_scan, heap)
@@ -185,7 +188,9 @@ apply_scan :: proc(scan: ^Scan_Result) {
 	}
 	// one main-thread budget for reading titles (titles.odin) in the whole rescan
 	budget := i64(TITLE_INLINE_BUDGET)
-	if p := find_project(state.selected_project); p != nil && p.dir != "" do scan_sessions(p^, &budget)
+	if p := find_project(state.selected_project); p != nil && p.machine != 0 {
+		// another machine's: its core lists its sessions (machine_mirror.odin)
+	} else if p != nil && p.dir != "" do scan_sessions(p^, &budget)
 	else do clear(&state.sessions)
 	scan_chats(&budget)
 	claude_disk_rescan() // Claude Code's transcripts of the selected project and Chats (claude_disk.odin)

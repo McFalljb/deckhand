@@ -541,6 +541,7 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 			projects_section(cs, text_w_max, row_w)
 			gap(GAP_SECTION)
 			chats_section(cs, text_w_max, row_w)
+			machines_sections(cs, text_w_max) // other machines, each under its name (Machines over SSH)
 		}
 	}
 }
@@ -1258,6 +1259,7 @@ sidebar_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("open", u32(i))) do return Hit_Open_Row(id)
 	}
 	for path, i in drawn.group do if clay.PointerOver(clay.ID("grp", u32(i))) do return Hit_Group(path)
+	for m in state.machines do if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
 	for id, i in drawn.proj {
 		if clay.PointerOver(clay.ID("projkids", u32(i))) do return Hit_Kids(id)
 		if clay.PointerOver(clay.ID("projpin", u32(i))) do return Hit_Pin_Project(id)
@@ -1302,6 +1304,8 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 			open, forced := row_state(p.cwd)
 			if !forced do ui_do(core.Set_Row_Expanded{path = p.cwd, expanded = !open})
 		}
+	case Hit_Machine:
+		machine_action(u64(h))
 	case Hit_Open_Row:
 		// focus it and show its project's sessions
 		if s := core.find_session(u64(h)); s != nil {
@@ -1351,6 +1355,11 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 
 // A right click (or ⌃-click): the row's context menu. True if it had one.
 sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
+	// another machine's rows have no menu yet: what it offers would act there (M6-C)
+	#partial switch h in hit {
+	case Hit_Project: if core.id_machine(u64(h)) != 0 do return false
+	case Hit_Open_Row: if core.id_machine(u64(h)) != 0 do return false
+	}
 	#partial switch h in hit {
 	case Hit_Project, Hit_Pin_Project, Hit_More_Project:
 		id: u64
@@ -1495,4 +1504,163 @@ waiting_filtered_row :: proc() {
 new_session_target_gone :: proc() -> bool {
 	t, ok := menu.target.(core.Menu_New_Session)
 	return ok && core.find_project(t.project_id) == nil
+}
+
+// ---- other machines (machine_mirror.odin; Settings › Experimental › Machines over SSH) ----
+
+MACHINE_STATUS_LABELS := [core.Machine_Status]string {
+	.Connecting    = "connecting…",
+	.Online        = "online",
+	.Offline       = "offline",
+	.Needs_Login   = "needs you to log in",
+	.Needs_Update  = "needs an update",
+	.Not_Installed = "no Deckhand there",
+	.Taken         = "in use there",
+}
+
+// What a machine's row offers for its status ("" = nothing).
+machine_action_label :: proc(s: core.Machine_Status) -> string {
+	#partial switch s {
+	case .Needs_Login:   return "Log in…"
+	case .Not_Installed: return "Install…"
+	case .Needs_Update:  return "Update"
+	case .Taken:         return "Take back"
+	case .Offline:       return "Connect"
+	}
+	return ""
+}
+
+// A machine row's button. Install and Update are a later update's (M6-E): until then they say what
+// to do there.
+@(private = "file")
+machine_action :: proc(no: u64) {
+	for m in state.machines do if m.no == no {
+		#partial switch m.status {
+		case .Needs_Login:   ui_do(core.Machine_Login{no = no})
+		case .Offline, .Taken: ui_do(core.Machine_Connect{no = no})
+		case .Not_Installed: toast_show(fmt.tprintf("Install Deckhand on %s and open it once; installing it from here comes in a later update", m.name))
+		case .Needs_Update:  toast_show(fmt.tprintf("Update Deckhand on %s (%s); updating it from here comes in a later update", m.name, m.error))
+		}
+	}
+}
+
+// Each other machine under its name, after this Mac's sections: a status dot and what to do, its
+// open sessions, then its projects (the selected one with its sessions). While it is not online
+// its rows are greyed: what it showed last (kept in memory only).
+@(private = "file")
+machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
+	if !core.machines_in_sidebar() do return
+	th := theme()
+	for m in state.machines {
+		live := m.status == .Online
+		gap(GAP_SECTION)
+		if clay.UI(clay.ID("machhead", u32(m.no)))({
+			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+		}) {
+			dot(machine_dot(m.status))
+			label := MACHINE_STATUS_LABELS[m.status]
+			act := machine_action_label(m.status)
+			room := text_w_max - px(DOT) - text_w(label, FONT_UI_SMALL) - 3 * px(GAP_INLINE)
+			if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
+			clay.TextDynamic(clip(strings.to_upper(m.name, context.temp_allocator), room, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_muted, FONT_UI_SMALL | WEIGHT_HEADER))
+			clay.TextDynamic(label, txt(th.text_muted, FONT_UI_SMALL))
+			spacer()
+			if act != "" {
+				id := clay.ID("machact", u32(m.no))
+				bg, em := overlay(id, false, ui_hover == Hit(Hit_Machine(m.no)))
+				if clay.UI(id)({
+					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(ROW_BUTTON))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
+					backgroundColor = bg,
+					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+				}) {
+					clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, em), FONT_UI_SMALL))
+				}
+			}
+		}
+		n := 0
+		for &s in state.open_sessions do if s.machine == m.no && !s.home {
+			machine_open_row(&s, cs, live, text_w_max)
+			n += 1
+		}
+		for &p in state.projects do if p.machine == m.no && p.group == .Projects {
+			append(&drawn.proj, p.id)
+			machine_project_row(&p, len(drawn.proj) - 1, live, text_w_max)
+			if p.id == state.selected_project && !tree.folded do machine_sessions(live, text_w_max)
+			n += 1
+		}
+		if n == 0 do list_note(live ? "Nothing there yet" : "Not connected", 0, text_w_max)
+	}
+}
+
+@(private = "file")
+machine_dot :: proc(s: core.Machine_Status) -> core.Rgba {
+	th := theme()
+	#partial switch s {
+	case .Online:     return th.done
+	case .Connecting: return th.running
+	case .Needs_Login, .Needs_Update, .Not_Installed: return th.waiting
+	}
+	return with_alpha(th.text_muted, EXITED_ALPHA)
+}
+
+// One of its open sessions: its place and title, its dot while online. A click shows it (its
+// tabs here are read-only until its terminals come over, M6-C).
+@(private = "file")
+machine_open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, live: bool, text_w_max: f32) {
+	th := theme()
+	append(&drawn.open, s.id)
+	id := clay.ID("open", u32(len(drawn.open) - 1)) // ids follow the drawn rows (sidebar_hit)
+	bg, em := overlay(id, cs != nil && s.id == cs.id, ui_hover == Hit(Hit_Open_Row(s.id)))
+	if clay.UI(id)(row_cfg(bg)) {
+		st, _ := core.session_row_status(s)
+		_, place := core.session_place(s)
+		title := core.open_session_title(s)
+		col := live ? mix(th.text_secondary, th.text, em) : th.text_muted
+		room := text_w_max - px(KIND_ICON) - 3 * px(GAP_INLINE) - (live && st != .None ? px(DOT) : 0)
+		icon(.Folder, th.text_muted, KIND_ICON)
+		lead := fmt.tprintf("%s ·", place)
+		pw := min(text_w(lead), max(room * 0.4, room - text_w(title)))
+		clay.TextDynamic(clip(lead, pw), txt(th.text_muted))
+		clay.TextDynamic(clip(title, room - pw), txt(col))
+		spacer()
+		if live && st != .None do dot(status_color(st))
+	}
+}
+
+// One of its projects: a click selects it, and its sessions come from that machine.
+@(private = "file")
+machine_project_row :: proc(p: ^core.Project, i: int, live: bool, text_w_max: f32) {
+	th := theme()
+	id := clay.ID("proj", u32(i))
+	selected := p.id == state.selected_project
+	bg, em := overlay(id, false, ui_hover == Hit(Hit_Project(p.id)))
+	if clay.UI(id)(row_cfg(bg)) {
+		col := live ? mix(th.text_secondary, th.text, em) : th.text_muted
+		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON)), clay.SizingFit()}, childAlignment = {x = .Center, y = .Center}}}) {
+			icon(selected && !tree.folded ? .Chevron_Down : .Chevron_Right, th.text_muted, TREE_CHEVRON)
+		}
+		icon(.Folder, th.text_muted, KIND_ICON)
+		clay.TextDynamic(clip(core.project_display(p^), text_w_max - px(TREE_CHEVRON + KIND_ICON) - 2 * px(GAP_INLINE)), txt(col, selected ? WEIGHT_BOLD : WEIGHT_REGULAR))
+	}
+}
+
+// The selected project's sessions, as that machine lists them (read-only rows for now).
+@(private = "file")
+machine_sessions :: proc(live: bool, text_w_max: f32) {
+	th := theme()
+	rows := core.sidebar_sessions(.Sessions)
+	if len(rows) == 0 do list_note(live ? "No sessions yet" : "Not connected", TREE_INDENT, text_w_max)
+	shown, more := capped_rows(rows, tree.all_sessions)
+	for r in shown {
+		cfg := row_cfg({})
+		cfg.layout.padding.left = pu(PAD_ROW + TREE_INDENT)
+		if clay.UI()(cfg) {
+			st := core.session_status(r.session.id)
+			icon(core.harness_row_icon(core.session_harness(r.session^), !live), th.text_muted, HARNESS_ICON_SIZE)
+			clay.TextDynamic(clip(core.session_label(r.session^), text_w_max - px(TREE_INDENT + HARNESS_ICON_SIZE + DOT) - 3 * px(GAP_INLINE)), txt(live ? th.text_secondary : th.text_muted))
+			spacer()
+			if live && st != .None do dot(status_color(st))
+		}
+	}
+	if more > 0 do action_row(clay.ID("showmore", 0), Hit_Show_More(0), .None, fmt.tprintf("Show %d more", more), TREE_INDENT, text_w_max)
 }

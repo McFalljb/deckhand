@@ -1,0 +1,250 @@
+package core
+
+// Other machines in the sidebar (docs/plans/background-core.md §8.1, §10.4 M6-B): each linked
+// machine's State, as its core streams it to this core (state.subscribe on the hub link,
+// machines.odin), is kept as a replica (state_read.odin) and merged into this core's State, so the
+// window keeps one State and one core.
+//
+// Ids are {machine, id} packed into the u64 every id already is: machine 0 is this Mac (every
+// local id unchanged), and another machine's id is its number (1-8191, machines.json) in bits
+// 40-52 over its own id, which must be below 2^40. Every packed id stays below 2^53, so the
+// TypeScript agents read it exactly. A machine's pi session ids get "m<no>:" before them, so pins,
+// status and "already open" never mix them with this Mac's.
+//
+// What is merged: its projects (not its Chats entry), its open sessions (not Home) with their
+// tabs, each session in one pane (its own split layout is not mirrored), and, while one of its
+// projects is selected here, that project's sessions. Nothing else: never its confirmations,
+// jobs, settings or panels. Another machine's State is untrusted: every string is cleaned
+// (text_clean: printable, no bidi controls, bounded), every list capped, an id that does not pack
+// is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
+// nothing this Mac's core could act on. They are never saved (persist.odin), never started here
+// (term_start refuses their tab ids), and a command naming one is refused until M6-C forwards it
+// (machine_command_refuses), except focusing one and selecting one of its projects (this Mac's
+// view). A merge replaces that machine's entries whole; other machines' and this Mac's are not
+// touched.
+
+import "base:runtime"
+import "core:fmt"
+import "core:mem/virtual"
+import "core:reflect"
+import "core:strings"
+
+MACHINE_ID_SHIFT :: 40
+MACHINE_ID_MASK :: (u64(1) << MACHINE_ID_SHIFT) - 1
+
+MIRROR_PROJECTS_MAX :: 300
+MIRROR_SESSIONS_MAX :: 64 // open sessions
+MIRROR_TABS_MAX :: 32 // per open session
+MIRROR_LIST_MAX :: MAX_SESSIONS // the selected project's sessions
+MIRROR_TEXT_MAX :: 160 // names, titles, session ids (bytes)
+MIRROR_PATH_MAX :: 1024
+
+// Machine `machine`'s id `id` as this core holds it. Machine 0 (this Mac): id itself. False: it does
+// not pack (no id, 2^40 or more, or no such machine number).
+id_pack :: proc(machine, id: u64) -> (u64, bool) {
+	if machine == 0 do return id, true
+	if machine > MACHINE_NO_MAX || id == 0 || id > MACHINE_ID_MASK do return 0, false
+	return machine << MACHINE_ID_SHIFT | id, true
+}
+
+// Which machine an id is on (0: this Mac), and its id there.
+id_machine :: proc(id: u64) -> u64 {return id >> MACHINE_ID_SHIFT}
+id_local :: proc(id: u64) -> u64 {return id & MACHINE_ID_MASK}
+
+// What State holds of one machine besides its open sessions (those are State's own, heap).
+Machine_Mirror :: struct {
+	arena:    virtual.Arena,
+	projects: [dynamic]Project, // in arena; State's entries are copies of these (apply_scan adds them again)
+	sessions: [dynamic]Session, // in arena: its selected project's (state.sessions while that is selected here)
+	selected: u64, // its selected project (packed)
+}
+
+// The machine whose sessions list state.sessions is (0: this Mac's).
+@(private = "file")
+mirror_sessions_of: u64
+
+// Whether the left column lists other machines: Machines over SSH is on and one is added.
+machines_in_sidebar :: proc() -> bool {return state.settings.remote_machines && len(state.machines) > 0}
+
+// Machine no's name (State's machines section), for get_state's `machine`.
+machine_name :: proc(no: u64) -> string {
+	for m in state.machines do if m.no == no do return m.name
+	return fmt.tprintf("machine %d", no)
+}
+
+@(private = "file")
+mirror_text :: proc(s: string, max: int, a: runtime.Allocator) -> string {
+	return strings.clone(text_clean(s, max), a)
+}
+
+// A tab's kind without what it holds (paths, URLs, accounts): which kind it is, only.
+@(private = "file")
+tab_kind_bare :: proc(k: Tab_Kind) -> Tab_Kind {
+	switch _ in k {
+	case Pi_Tab:       return Pi_Tab{}
+	case Shell_Tab:    return Shell_Tab{}
+	case Editor_Tab:   return Editor_Tab{}
+	case Changes_Tab:  return Changes_Tab{}
+	case Markdown_Tab: return Markdown_Tab{}
+	case Browser_Tab:  return Browser_Tab{}
+	case App_Tab:      return App_Tab{}
+	case Claude_Tab:   return Claude_Tab{}
+	}
+	return Shell_Tab{}
+}
+
+// Machine no's entries from r (its replica) into State, replacing what was there of it.
+mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
+	heap := runtime.heap_allocator()
+	context.allocator = heap
+	// this Mac's view of them stays: when each was last shown (the Open group's order)
+	shown := make(map[u64]i64, 16, context.temp_allocator)
+	for s in state.open_sessions do if s.machine == no do shown[s.id] = s.shown_at
+	mirror_unmerge(no)
+	virtual.arena_free_all(&m.arena)
+	a := virtual.arena_allocator(&m.arena)
+
+	m.projects = make([dynamic]Project, a)
+	for p in r.projects {
+		if len(m.projects) >= MIRROR_PROJECTS_MAX do break
+		if p.group != .Projects do continue
+		id, ok := id_pack(no, p.id)
+		if !ok do continue
+		append(&m.projects, Project{id = id, machine = no, group = .Projects, name = mirror_text(p.name, MIRROR_TEXT_MAX, a), cwd = mirror_text(p.cwd, MIRROR_PATH_MAX, a), label = mirror_text(p.label, MIRROR_TEXT_MAX, a), newest = p.newest, created = p.created, missing = p.missing, repo = p.repo})
+	}
+	for p in m.projects do append(&state.projects, p)
+
+	for &os in r.open_sessions {
+		if state_mirrored_sessions(no) >= MIRROR_SESSIONS_MAX do break
+		if os.home do continue
+		id, ok := id_pack(no, os.id)
+		if !ok do continue
+		pid, _ := id_pack(no, os.project_id)
+		ns := Open_Session {
+			id            = id,
+			machine       = no,
+			agent         = os.agent,
+			project_id    = pid,
+			pi_session_id = fmt.aprintf("m%d:%s", no, text_clean(os.pi_session_id, MIRROR_TEXT_MAX)),
+			session_dir   = mirror_text(os.session_dir, MIRROR_PATH_MAX, heap),
+			session_file  = mirror_text(os.session_file, MIRROR_PATH_MAX, heap),
+			cwd           = mirror_text(os.cwd, MIRROR_PATH_MAX, heap),
+			title         = mirror_text(os.title, MIRROR_TEXT_MAX, heap),
+			missing       = os.missing,
+			shown_at      = shown[id] or_else 0,
+		}
+		pane := id // its one pane: the session's own id (no tab or pane of that machine has it)
+		for tab in os.tabs {
+			if len(ns.tabs) >= MIRROR_TABS_MAX do break
+			tid, tok := id_pack(no, tab.id)
+			if !tok do continue
+			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, pane = pane})
+		}
+		if len(ns.tabs) == 0 { 	// an open session always has its main tab
+			wire_free(&ns, type_info_of(Open_Session), heap)
+			continue
+		}
+		active, _ := id_pack(no, os.active_tab)
+		found := false
+		for t in ns.tabs do if t.id == active do found = true
+		if !found do active = ns.tabs[0].id
+		ns.active_tab = active
+		append(&ns.panes, Pane{id = pane, active = active})
+		append(&ns.nodes, Layout_Node{id = pane, leaf = true, pane = pane, parent = -1})
+		append(&ns.pane_mru, pane)
+		ns.focused_pane = pane
+		append(&state.open_sessions, ns)
+	}
+
+	m.sessions = make([dynamic]Session, a)
+	m.selected, _ = id_pack(no, r.selected_project)
+	for x in r.sessions {
+		if len(m.sessions) >= MIRROR_LIST_MAX do break
+		append(&m.sessions, Session{id = fmt.aprintf("m%d:%s", no, text_clean(x.id, MIRROR_TEXT_MAX), allocator = a), path = mirror_text(x.path, MIRROR_PATH_MAX, a), when_ = mirror_text(x.when_, 32, a), title = mirror_text(x.title, MIRROR_TEXT_MAX, a), untitled = mirror_text(x.untitled, MIRROR_TEXT_MAX, a), modified = x.modified, claude = x.claude})
+	}
+	mirror_sessions_show(no, m)
+
+	// what this Mac showed of it and is gone there
+	if id_machine(state.current_session) == no && find_session(state.current_session) == nil do state.current_session = 0
+	if id_machine(state.selected_project) == no && find_project(state.selected_project) == nil {
+		state.selected_project = 0
+		state.sessions = {}
+		mirror_sessions_of = 0
+	}
+	window_state_changed()
+}
+
+@(private = "file")
+state_mirrored_sessions :: proc(no: u64) -> (n: int) {
+	for s in state.open_sessions do if s.machine == no do n += 1
+	return
+}
+
+// While one of machine no's projects is selected here: its sessions, once that machine shows the
+// same project (select_project went to it), else none yet.
+mirror_sessions_show :: proc(no: u64, m: ^Machine_Mirror) {
+	if id_machine(state.selected_project) != no do return
+	if m.selected == state.selected_project {
+		state.sessions = m.sessions
+		mirror_sessions_of = no
+	} else {
+		if mirror_sessions_of == no do mirror_sessions_of = 0
+		state.sessions = {}
+	}
+}
+
+// Takes machine no's entries out of State (its projects are m's; its open sessions are freed).
+mirror_unmerge :: proc(no: u64) {
+	heap := runtime.heap_allocator()
+	for i := len(state.projects) - 1; i >= 0; i -= 1 do if state.projects[i].machine == no do ordered_remove(&state.projects, i)
+	for i := len(state.open_sessions) - 1; i >= 0; i -= 1 do if state.open_sessions[i].machine == no {
+		wire_free(&state.open_sessions[i], type_info_of(Open_Session), heap)
+		ordered_remove(&state.open_sessions, i)
+	}
+	if mirror_sessions_of == no {
+		state.sessions = {}
+		mirror_sessions_of = 0
+	}
+}
+
+// Machine no is gone (removed, or Machines over SSH turned off): its entries leave State, and what
+// this Mac showed of it.
+mirror_drop :: proc(no: u64, m: ^Machine_Mirror) {
+	mirror_unmerge(no)
+	mirror_free(m)
+	if id_machine(state.current_session) == no do state.current_session = 0
+	if id_machine(state.selected_project) == no do state.selected_project = 0
+	window_state_changed()
+}
+
+mirror_free :: proc(m: ^Machine_Mirror) {
+	virtual.arena_destroy(&m.arena)
+	m^ = {}
+}
+
+// Fields of a command that name an open session, tab, pane or project.
+@(private = "file")
+MACHINE_ID_FIELDS := [?]string{"tab_id", "session", "project_id", "pane", "tab"}
+
+// Why a command can't run here ("" = it can): it names another machine's id. This Mac's view of
+// another machine (which session is current, which project selected) is its own; anything else
+// would act there, which M6-C forwards on the link.
+machine_command_refuses :: proc(cmd: Command) -> string {
+	#partial switch _ in cmd {
+	case Focus_Session, Select_Project:
+		return ""
+	}
+	cmd := cmd
+	v := reflect.get_union_variant(cmd)
+	if v.data == nil do return ""
+	st, ok := runtime.type_info_base(type_info_of(v.id)).variant.(runtime.Type_Info_Struct)
+	if !ok do return ""
+	for k in 0 ..< int(st.field_count) {
+		if st.types[k].id != typeid_of(u64) do continue
+		named := false
+		for f in MACHINE_ID_FIELDS do if f == st.names[k] do named = true
+		if !named do continue
+		if id_machine((^u64)(uintptr(v.data) + st.offsets[k])^) != 0 do return "this is on another machine: for now its sessions are shown here, not worked in"
+	}
+	return ""
+}

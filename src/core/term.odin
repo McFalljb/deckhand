@@ -252,6 +252,7 @@ term_start :: proc(t: ^Term, argv: []string, cwd: string, extra_env: []string = 
 	// keep_sessions: a tab's process lives in the session holder (holder_client.odin)
 	tab_id: u64
 	for id, x in terms do if x == t do tab_id = id
+	if id_machine(tab_id) != 0 do return false // another machine's tab (machine_mirror.odin): it runs there, never here
 	p: Pty
 	ok: bool
 	// a tab's (it may not be in its session yet: a new session's pi tab), not the setup sheet's install run

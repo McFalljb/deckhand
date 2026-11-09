@@ -278,7 +278,7 @@ workspace_json :: proc() -> string {
 
 	saved := make([dynamic]^Open_Session, context.temp_allocator)
 	for &s in state.open_sessions {
-		if s.home do continue
+		if s.home || s.machine != 0 do continue // another machine's is its own to save (machine_mirror.odin)
 		// a Claude-only session once its Claude session id came (claude.session), a pi session once its file is there
 		keep := s.agent == .Claude ? s.pi_session_id != "" : s.restored || session_on_disk(s)
 		if keep do append(&saved, &s)
@@ -291,7 +291,7 @@ workspace_json :: proc() -> string {
 	strings.write_byte(&w.b, '[')
 	n := 0
 	for p in state.projects {
-		if p.group != .Projects do continue // Chats is always there
+		if p.group != .Projects || p.machine != 0 do continue // Chats is always there; another machine's is its own
 		keep := p.dir == "" || p.name != "" || p.by_hand || p.id == state.selected_project
 		for s in saved do if s.project_id == p.id do keep = true
 		if !keep do continue
@@ -305,7 +305,7 @@ workspace_json :: proc() -> string {
 		close_obj(&w)
 	}
 	strings.write_byte(&w.b, ']')
-	if p := find_project(state.selected_project); p != nil do ks(&w, "selected_project", p.cwd)
+	if p := find_project(state.selected_project); p != nil && p.machine == 0 do ks(&w, "selected_project", p.cwd)
 
 	strings.write_string(&w.b, ",\n")
 	w.first = true
@@ -967,7 +967,7 @@ workspace_restore :: proc(text: string) -> string {
 	}
 
 	if sel, is := root["selected_project"].(json.String); is {
-		for p in state.projects do if p.cwd == sel {
+		for p in state.projects do if p.cwd == sel && p.machine == 0 {
 			if p.id != state.selected_project do run(Select_Project{project_id = p.id})
 			break
 		}
@@ -1055,7 +1055,7 @@ known :: proc(pane: int) -> Maybe(int) {return pane >= 0 ? pane : nil}
 // saved "added" says that) and not selected (the saved selection is restored after).
 @(private = "file")
 ensure_project :: proc(cwd: string) -> ^Project {
-	for &p in state.projects do if p.cwd == cwd do return &p
+	for &p in state.projects do if p.cwd == cwd && p.machine == 0 do return &p
 	want, _ := filepath.clean(cwd, context.temp_allocator)
 	want = real_path(want)
 	if c := chats_project(); c != nil && c.cwd == want do return nil

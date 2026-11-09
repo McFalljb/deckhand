@@ -194,7 +194,7 @@ reload_in_scope :: proc(s: ^Open_Session, scope: string) -> bool {
 @(private = "file")
 running_pi :: proc(s: ^Open_Session) -> ^Tab {
 	t := session_pi_tab(s)
-	if t == nil || t.status != .Running do return nil
+	if t == nil || t.status != .Running || t.machine != 0 do return nil // another machine's pi is its core's (machine_mirror.odin)
 	return t
 }
 

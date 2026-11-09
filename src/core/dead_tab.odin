@@ -75,6 +75,7 @@ CLAUDE_PICKER_WAIT :: 30 * time.Second
 // or one whose restart waits for the old process).
 tab_is_dead :: proc(tab: ^Tab) -> bool {
 	if tab == nil || tab.status != .Exited || tab_held_away(tab) != 0 do return false // still runs in the holder: no Restart
+	if tab.machine != 0 do return false // another machine's (machine_mirror.odin): never restarted here
 	switch _ in tab.kind {
 	case Pi_Tab, Claude_Tab:
 	case Shell_Tab, Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab:
@@ -88,7 +89,7 @@ tab_is_dead :: proc(tab: ^Tab) -> bool {
 // still not found (its bar says so: nothing is started, nothing more said).
 // user: the user opened it (a Claude tab gets its saved flags, CLAUDE.md §3).
 restart_if_dead :: proc(s: ^Open_Session, user := false) {
-	if s.missing do return
+	if s.missing || s.machine != 0 do return // gone, or another machine's (machine_mirror.odin)
 	if tab := session_pi_tab(s); tab_is_dead(tab) do pi_tab_restart(s, tab, false)
 	again :: proc(s: ^Open_Session, tab: ^Tab, user: bool) {
 		if tab == nil do return

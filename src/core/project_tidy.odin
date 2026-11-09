@@ -158,7 +158,7 @@ projects_tidy :: proc() {
 	roots := temp_roots()
 	for &p in state.projects {
 		p.parent, p.group_dir, p.group_in, p.group_up = 0, "", 0, ""
-		p.temp = on && p.group == .Projects && is_temp_path(p.cwd, roots)
+		p.temp = on && p.group == .Projects && p.machine == 0 && is_temp_path(p.cwd, roots)
 	}
 	tidy_shown = tidy_shown_sig()
 	if !on || nesting_off_for_tests do return
@@ -170,10 +170,10 @@ projects_tidy :: proc() {
 	}
 	// a nestable row: not a repository, not added by hand, not pinned
 	nestable :: proc(p: Project) -> bool {
-		return p.group == .Projects && !p.repo && !p.by_hand && project_pinned(p) < 0
+		return p.group == .Projects && p.machine == 0 && !p.repo && !p.by_hand && project_pinned(p) < 0 // another machine's: its own rows
 	}
 	listed :: proc(dir: string) -> bool {
-		for q in state.projects do if q.group == .Projects && q.cwd == dir do return true
+		for q in state.projects do if q.group == .Projects && q.machine == 0 && q.cwd == dir do return true
 		return false
 	}
 	// group rows first: 2+ nestable listed folders that are not hidden, in a
@@ -195,7 +195,7 @@ projects_tidy :: proc() {
 	above :: proc(path: string, groups: []string, home, home_real: string) -> (proj: int, group: string) {
 		proj = -1
 		for q, j in state.projects {
-			if q.group != .Projects || q.cwd == path || !path_within(path, q.cwd) || never(q.cwd, home, home_real) || project_hide_reason(q) != .None do continue
+			if q.group != .Projects || q.machine != 0 || q.cwd == path || !path_within(path, q.cwd) || never(q.cwd, home, home_real) || project_hide_reason(q) != .None do continue
 			if proj < 0 || len(q.cwd) > len(state.projects[proj].cwd) do proj = j
 		}
 		for g in groups do if g != path && path_within(path, g) && len(g) > len(group) do group = g

@@ -965,6 +965,7 @@ claude_tab_of_session :: proc(id: string) -> u64 {
 }
 
 claude_open_tab :: proc(id: string) -> u64 {
+	if id == "" do return 0
 	for s in state.open_sessions do for tab in s.tabs do if ct, is := tab.kind.(Claude_Tab); is && ct.session_id == id && tab.status != .Exited do return tab.id
 	return 0
 }

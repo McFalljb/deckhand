@@ -29,7 +29,13 @@ package core
 // Caps from the first byte: the remote core treats the hub as its window, so it sends what a
 // window would act on. Every window.request (clipboard, open_url, notify, reveal, pick_folder…)
 // and confirmation.parked from a hub link is dropped here, unread, and never acted on (§8.3).
-// M6-B reads its state; nothing else is read yet.
+//
+// Its state (M6-B): once online the link sends state.subscribe, and the other core's state.full
+// and state.delta go into a replica of its State (state_read.odin: bounded decode), merged into
+// this core's State (machine_mirror.odin). A replica that refuses a message asks for state.full
+// again. Down, the merged entries stay as last seen (the sidebar greys them); up again, a fresh
+// state.full replaces them. Selecting one of its projects here sends it select_project, so its
+// sessions come. Nothing else is read from it yet.
 //
 // Reconnects back off: 1 s, doubling to 60 s, back to 1 s after a minute up. A link the other
 // machine's own window took back (hub.taken) waits for the user's Take back (machine_connect).
@@ -74,6 +80,11 @@ Machine_Remove :: struct {
 }
 // Connect now: Take back from that machine's window, or retry without waiting. User-only.
 Machine_Connect :: struct {
+	no: u64,
+}
+// Log in… (needs_login): a shell tab here runs `ssh -M` to it in the foreground, so its password,
+// host key or 2FA prompt is answered in a real terminal; the link then uses that master. User-only.
+Machine_Login :: struct {
 	no: u64,
 }
 
@@ -419,6 +430,9 @@ Mach_Link :: struct {
 	sock:      ^cw.Sock_Transport,
 	exit_code: int,
 	exited:    bool,
+	replica:   State, // heap: its State as its core last sent it (state_read.odin)
+	mirror:    Machine_Mirror, // what of it is merged into State (machine_mirror.odin)
+	merged:    bool, // its entries are in State
 }
 
 @(private = "file")
@@ -630,6 +644,7 @@ machines_tick :: proc() {
 		if !on { // the setting went off: every link ends; turned on again, each starts afresh
 			if l.phase != .Idle || l.fd >= 0 do mlink_close(l)
 			mlink_reap(l)
+			mlink_unmerge(l)
 			l.phase, l.next_at, l.backoff = .Idle, {}, {}
 			mlink_set(l, .Offline, "Machines over SSH is off")
 			continue
@@ -711,6 +726,55 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	l.phase = .Up
 	machine_backoff_up(&l.backoff, time.tick_now())
 	mlink_set(l, .Online, why, version)
+	mlink_send(l, window_msg_subscribe()) // its state (M6-B): state.full, then deltas
+	if id_machine(state.selected_project) == l.no do mlink_send(l, window_msg_command(Select_Project{project_id = id_local(state.selected_project)}, "", now = true))
+}
+
+// Sends one JSON message on an online link (false: not sent; the link's pump finds out why).
+@(private = "file")
+mlink_send :: proc(l: ^Mach_Link, text: string) -> bool {
+	if l.sock == nil || l.phase != .Up do return false
+	if cw.sock_send(l.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)text) != .None do return false
+	cw.sock_flush(l.sock)
+	return true
+}
+
+// Its state message into the replica, then into State. A message the replica refuses: state.full
+// again (subscribing again sends it).
+@(private = "file")
+mlink_state :: proc(l: ^Mach_Link, text: string) {
+	if e := replica_apply(&l.replica, text, runtime.heap_allocator()); e != "" {
+		fmt.eprintfln("Deckhand: machine %s: its state was refused (%s): asking for all of it again", l.name, text_clean(e, 200))
+		mlink_send(l, window_msg_subscribe())
+		return
+	}
+	mirror_merge(l.no, &l.replica, &l.mirror)
+	l.merged = true
+	if autotest_active do fmt.printfln("[autotest] machine %s: state %d", l.name, l.replica.version)
+}
+
+// Its entries leave State, and its replica goes (removed, or Machines over SSH turned off).
+@(private = "file")
+mlink_unmerge :: proc(l: ^Mach_Link) {
+	if !l.merged && l.replica.version == 0 do return
+	mirror_drop(l.no, &l.mirror)
+	replica_free(&l.replica, runtime.heap_allocator())
+	l.merged = false
+}
+
+// Other machines' projects into State again (apply_scan replaced the list: sessions.odin).
+machines_projects_again :: proc() {
+	for l in mach.links do if l.merged do for p in l.mirror.projects do append(&state.projects, p)
+}
+
+// One of machine p.machine's projects selected here: its sessions, once that machine has it
+// selected too (select_project goes to it; the reply's state brings them).
+machine_select_project :: proc(p: Project) {
+	state.selected_project = p.id
+	l, _ := mlink_find(p.machine)
+	if l == nil do return
+	mirror_sessions_show(l.no, &l.mirror)
+	mlink_send(l, window_msg_command(Select_Project{project_id = id_local(p.id)}, "", now = true))
 }
 
 // Frames from an online link. Caps from the first byte: what a window would act on is dropped
@@ -731,6 +795,8 @@ mlink_pump :: proc(l: ^Mach_Link) {
 		if err != .None do return
 		if f.channel != cw.JSON_CHANNEL || f.kind != u8(cw.Kind.Data) do continue
 		switch hub_msg_type(string(f.payload)) {
+		case STATE_FULL, STATE_DELTA:
+			mlink_state(l, string(f.payload))
 		case "window.request", "confirmation.parked":
 			mach.dropped += 1
 			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, hub_msg_type(string(f.payload)))
@@ -860,6 +926,7 @@ machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 		inject_at(&mach.links, i, l)
 		return fail(w)
 	}
+	mlink_unmerge(l)
 	mlink_free(l)
 	machines_publish()
 	return {ok = true}
@@ -873,4 +940,39 @@ machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 	mlink_close(l)
 	l.phase, l.next_at, l.backoff = .Idle, {}, {}
 	return {ok = true}
+}
+
+// What Log in… runs: the link's own ssh (the core's PATH) as the ControlMaster, interactive, in
+// /bin/sh with the control path and target as arguments (never in the script's text).
+machine_login_argv :: proc(m: Machine, run: string) -> (argv: []string, why: string) {
+	if m.via != "" do return nil, "this machine is reached through a test build's command: there is nothing to log in to"
+	if w := machine_target_error(m.target); w != "" do return nil, w
+	ctl := machine_ctl_path(run, m.no)
+	if len(ctl) > MACHINE_CTL_MAX do return nil, fmt.tprintf("ssh's control socket %s is longer than %d bytes", ctl, MACHINE_CTL_MAX)
+	out := make([]string, 6, context.temp_allocator)
+	out[0], out[1], out[2], out[3], out[4], out[5] = "/bin/sh", "-c", `exec ssh -S "$1" -M -o ControlPersist=600 -- "$2"`, "deckhand-login", ctl, m.target
+	return out, ""
+}
+
+machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) {
+	l, _ := mlink_find(c.no)
+	if l == nil do return fail(fmt.tprintf("no machine %d", c.no)), false
+	run, rwhy := sock_runtime_dir_why(context.temp_allocator)
+	if rwhy != "" do return fail(rwhy), false
+	argv, why := machine_login_argv(l.m, run)
+	if why != "" do return fail(why), false
+	// a session of this Mac's to hold the tab: the one on screen, else the last shown
+	s := cur()
+	if s == nil || s.home || s.machine != 0 {
+		s = nil
+		for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && (s == nil || o.shown_at > s.shown_at) do s = &o
+	}
+	if s == nil do return fail("open a session on this Mac first: the login runs in a tab there"), false
+	id, err := shell_tab_start(s, s.cwd, argv = argv, title = fmt.tprintf("Log in to %s", l.name))
+	if err != "" do return fail(err), false
+	session_show_tab(s, id)
+	focus_session(s.id, caller)
+	// tried again soon after: the link uses the master once the login is through
+	if l.phase == .Idle do l.next_at, l.backoff = {}, {}
+	return {ok = true, created_id = id}, true
 }

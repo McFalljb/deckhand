@@ -416,7 +416,7 @@ chats_folder_too_wide :: proc(d: string) -> bool {
 	if d == "" || d == "/" do return true
 	home := os.get_env("HOME", context.temp_allocator)
 	if home != "" && (d == home || d == real_path(home)) do return true
-	for p in state.projects do if p.group == .Projects && p.cwd != "" && path_under(p.cwd, d) do return true
+	for p in state.projects do if p.group == .Projects && p.machine == 0 && p.cwd != "" && path_under(p.cwd, d) do return true
 	for f in jobs_folders() do if path_under(f, d) || path_under(real_path(f), d) do return true
 	return false
 }

@@ -67,7 +67,7 @@ Owner_Project :: struct {
 owner_projects :: proc() -> []Owner_Project {
 	out := make([dynamic]Owner_Project, context.temp_allocator)
 	for p in state.projects {
-		if p.group != .Projects do continue
+		if p.group != .Projects || p.machine != 0 do continue // jobs run on this Mac
 		append(&out, Owner_Project{id = p.id, cwd = p.cwd, name = p.name, shown = project_display(p), hidden = project_hide_reason(p) != .None})
 	}
 	return out[:]

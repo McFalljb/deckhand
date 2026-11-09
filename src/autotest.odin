@@ -1896,6 +1896,14 @@ script_rows_text :: proc(section: string) -> string {
 			if i > 0 do strings.write_byte(&b, ',')
 			strings.write_string(&b, core.session_label(r.session^, section == "chats"))
 		}
+	case "machines":
+		// each other machine: name:status:the tabs of its open sessions here (machine_mirror.odin)
+		for m, i in state.machines {
+			if i > 0 do strings.write_byte(&b, ',')
+			n := 0
+			for s in state.open_sessions do if s.machine == m.no do n += len(s.tabs)
+			fmt.sbprintf(&b, "%s:%s:%d", m.name, core.MACHINE_STATUS_NAMES[m.status], n)
+		}
 	case "tree":
 		// as drawn in the last layout: projects, the expanded one's sessions as >title
 		for id, i in drawn.proj {

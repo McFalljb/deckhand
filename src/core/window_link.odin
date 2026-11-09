@@ -964,7 +964,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		// a window that attached to a running core (after another window quit) gets the views of
 		// the tabs that have one, as start_restored_tabs gives them: a page loads when shown, a
 		// buffer reads its file. A view the window already has stays (view_open is a no-op then).
-		if link.sock != nil do for &os in state.open_sessions do for &t in os.tabs do if t.status == .Running {
+		if link.sock != nil do for &os in state.open_sessions do for &t in os.tabs do if t.status == .Running && t.machine == 0 {
 			#partial switch _ in t.kind {
 			case Editor_Tab, Markdown_Tab, Browser_Tab: window_view_open(t.id, t.kind)
 			}

@@ -255,6 +255,13 @@ wt_known_checkout :: proc(path: string) -> bool {
 
 // ---- the model ----
 
+// A separate core: the window's worktree switcher reads the window's own model, so the core reads
+// the Files tab's repository too, for the commands it runs on those rows (wt_known_checkout).
+wt_window_tick :: proc() {
+	if !window_link_is_sock() do return
+	if b := files_base(); b != "" do _ = wt_repo_for(b, counts = false)
+}
+
 // The repository holding dir, its scan started if it is not current (""
 // or not in a repository: nil). counts: the changed-file counts must be
 // current too (the switcher's menu, list_worktrees); without, only a

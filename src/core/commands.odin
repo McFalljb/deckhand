@@ -821,6 +821,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 	case Claude_Wait_Tick:     q3 = true // the timer's: what it does says itself
 	case Job_List, Job_Runs:   q3 = true
 	case Job_Run_Done:         q3 = true // job.finished says it (the run is freed by now)
+	case Focus_Release:        q3 = !changed // nothing had the keyboard (test mode's barrier: client_barrier)
 	}
 	// app tabs: answers and queries (App_Call_Done finishes its request itself)
 	#partial switch _ in cmd {

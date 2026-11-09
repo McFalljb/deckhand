@@ -29,7 +29,8 @@ assert_state open_sessions.0.tabs.3.kind claude
 assert_state open_sessions.0.tabs.3.id $tab
 # (its turn starts unknown: claude_test.odin; here the fake's SessionStart may beat this line)
 waitfor FAKE CLAUDE ARGS: --plugin-dir 10000
-assert_screen claude-code
+# (which plugin: claude-check.py, from the fake's log; the path on screen wraps where it is long,
+# as a separate core's Core.app path is)
 # its SessionStart hook: the session id with the tab and in the history; the turn idle
 waitstate 10000 open_sessions.0.tabs.3.claude_session_id 0c1a0de0-1111-4222-8333-444455556666
 waitstate 5000 open_sessions.0.tabs.3.turn idle
@@ -161,10 +162,12 @@ waitfor PROMPT: half typed 10000
 waitfor PROMPT: from atlas 15000
 waitstate 5000 open_sessions.0.tabs.3.held 0
 waitstate 10000 open_sessions.0.tabs.3.turn idle
-# the bar's Drop
+# the bar's Drop (typed first: an idle Claude takes a held text at the core's next tick)
+type x
+eventually
+assert_state open_sessions.0.tabs.3.typed true
 control_command {"type":"claude_prompt","tab_id":$tab,"text":"never sent"}
 assert_result ok true
-type x
 wait 300
 assert_state open_sessions.0.tabs.3.held 1
 clickid cl_held_drop

@@ -749,8 +749,9 @@ fs_reveal_path :: proc(path: string, caller: Caller) -> string {
 	if e != "" && caller.kind != .Panel && wt_known_checkout(fs_abs(path, caller)) do p, e = fs_real(fs_abs(path, caller)), "" // a worktree of a project
 	if e != "" do return e
 	if !os.exists(p) do return "no such file or folder"
-	if autotest_active || platform.quit == nil || ODIN_TEST {
-		// never opens Finder from tests: remembered instead
+	// never opens Finder from tests: remembered instead; a separate core's window shows it (in
+	// test mode its own reveal only records it: autotest.odin)
+	if ODIN_TEST || (autotest_active || platform.quit == nil) && !window_link_is_sock() {
 		delete(fs_model.revealed)
 		fs_model.revealed = strings.clone(p)
 		return ""

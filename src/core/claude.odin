@@ -193,7 +193,7 @@ claude_note_typed :: proc(tab: ^Tab) {
 	if tab == nil do return
 	if _, is := tab.kind.(Claude_Tab); !is do return
 	if replica_process { // the core's runtime is in the other process: it hears it (Claude_Typed)
-		if tab.live.claude_wait != .Typing && claude_typed_send != nil do claude_typed_send(tab.id)
+		if !tab.live.claude_typed && claude_typed_send != nil do claude_typed_send(tab.id)
 		return
 	}
 	rt := claude_rt[tab.id]
@@ -204,7 +204,13 @@ claude_note_typed :: proc(tab: ^Tab) {
 	}
 }
 
-claude_typed :: proc(tab_id: u64) -> bool {return claude_rt[tab_id].typed}
+claude_typed :: proc(tab_id: u64) -> bool {
+	if replica_process { // the core's (Tab_Live)
+		_, tab, _ := find_tab(tab_id)
+		return tab != nil && tab.live.claude_typed
+	}
+	return claude_rt[tab_id].typed
+}
 
 // Whether a held text may go into the tab now: running, its turn idle per both signals (the
 // hooks: Stop, or SessionStart; and Claude's own OSC 7501 program status when it reports one,
@@ -362,13 +368,19 @@ claude_plugin_dir :: proc() -> string {
 // Tests: the CLI's path instead of the one next to the binary ("-" = none).
 claude_cli_override: string
 
-// The deckhand-cli binary next to Deckhand's own ("" = missing). Temp-allocated.
+// The deckhand-cli binary next to Deckhand's own ("" = missing): deckhand-cli in Deckhand.app and
+// a bare build, deckhand in Deckhand Core.app (a separate core, scripts/bundle-app.sh). Temp-allocated.
 claude_cli_path :: proc() -> string {
 	if claude_cli_override != "" do return claude_cli_override == "-" ? "" : claude_cli_override
 	exe := executable_path()
 	if exe == "" do return ""
 	p, _ := filepath.join({filepath.dir(exe), "deckhand-cli"}, context.temp_allocator)
-	return os.exists(p) ? p : ""
+	if os.exists(p) do return p
+	if strings.has_suffix(filepath.dir(exe), "Core.app/Contents/MacOS") {
+		p, _ = filepath.join({filepath.dir(exe), "deckhand"}, context.temp_allocator)
+		if os.exists(p) do return p
+	}
+	return ""
 }
 
 // claude, or why there is none (the shell's "command not found" says too little).

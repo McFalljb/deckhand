@@ -57,7 +57,7 @@ for i, a in enumerate(starts):
     h = s["hooks"]["PreToolUse"][0]["hooks"][0]
     ack = s["hooks"]["SessionStart"][0]["hooks"][0]["command"]
     check(" hook readonly-ack " in ack and len(ack.split()[-1]) == 32, f"start {i + 1}: the SessionStart ack with a nonce")
-    check(h["onFailure"] == "block" and h["command"].endswith(" hook readonly || exit 2") and "deckhand-cli" in h["command"], f"start {i + 1}: the guard fails closed")
+    check(h["onFailure"] == "block" and h["command"].endswith(" hook readonly || exit 2") and ("deckhand-cli" in h["command"] or "Core.app/Contents/MacOS/deckhand'" in h["command"]), f"start {i + 1}: the guard fails closed")  # a separate core's CLI is Core.app's deckhand
 check(starts[1][starts[1].index("--resume") + 1].startswith("7e5d0000"), "the restore resumes it")
 envs = open(envf).read().split()
 check(envs == ["1", "1", "1"], f"DECKHAND_CLAUDE_READONLY=1 at every start: {envs}")

@@ -322,6 +322,12 @@ on_system_appearance :: proc(light: bool) {
 ui_do :: proc(cmd: core.Command) {
 	if window_only_quit(cmd) do return
 	if lost_core_save(cmd) do return
+	// a separate core: which widget has the keyboard is the core's (state.focus_widget), so the
+	// window waits for it (bounded) before it routes the next key, as in process (⌘K, then typing)
+	if _, is := cmd.(core.Set_Focus); is && client_separate() {
+		client_run(cmd)
+		return
+	}
 	client_send(cmd) // client.odin
 }
 

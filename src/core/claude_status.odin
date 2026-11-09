@@ -208,9 +208,10 @@ old_version :: proc(tab: ^Tab) -> string {
 claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if tab == nil do return ""
 	if _, is := tab.kind.(Claude_Tab); !is || tab.status != .Running do return ""
+	if replica_process do return tab.live.claude_status // the core's (Tab_Live): its dismissals, its harness
 	old := old_version(tab)
 	if claude_hooks_silent(tab, now) {
-		if !replica_process && rt_of(tab.id).dismissed do return ""
+		if rt_of(tab.id).dismissed do return ""
 		why := "`disableAllHooks` in your Claude settings, or your organisation's managed `allowManagedHooksOnly`"
 		if old != "" do why = fmt.tprintf("Claude Code %s (older than %s), %s", old, CLAUDE_MIN_VERSION, why)
 		return fmt.tprintf("Deckhand's Claude Code hooks aren't running here (likely %s; or a startup dialog is still open: answer it first): a new session is not saved and can't resume; comments, held messages and panels don't work", why)
@@ -284,7 +285,8 @@ claude_status_dot :: proc(tab: Tab, dot: Row_Status) -> Row_Status {
 // The snapshot's fields for a Claude tab (claude_tab_json): counts only, never Claude's text.
 claude_status_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	tab := tab
-	if n := claude_background_running(tab.id); n > 0 do fmt.sbprintf(b, `,"background":%d`, n)
+	n := replica_process ? tab.live.claude_background : claude_background_running(tab.id) // a window's replica: the core's (Tab_Live)
+	if n > 0 do fmt.sbprintf(b, `,"background":%d`, n)
 	if claude_hooks_silent(&tab) do strings.write_string(b, `,"hooks":"silent"`)
 	if v := old_version(&tab); v != "" {
 		strings.write_string(b, `,"claude_version_old":`)

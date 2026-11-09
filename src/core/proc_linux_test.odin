@@ -4,6 +4,7 @@ package core
 // /proc and SO_PEERCRED (proc_linux.odin): what the Linux core reads in place of libproc.
 
 import "core:fmt"
+import "core:strings"
 import "core:sys/posix"
 import "core:testing"
 
@@ -42,6 +43,9 @@ proc_reads_self :: proc(t: ^testing.T) {
 	testing.expect_value(t, parent, i32(posix.getppid()))
 	testing.expect_value(t, uid, u32(posix.geteuid()))
 	testing.expect(t, name != "", "own name")
+	// the exe's base name where it can be read (CI's test binary's name is longer than comm's 15)
+	exe := pid_exe(me)
+	testing.expectf(t, name == exe[strings.last_index_byte(exe, '/') + 1:], "%q vs %q", name, exe)
 	_, uid1, name1 := proc_look(1)
 	testing.expect_value(t, uid1, u32(0))
 	testing.expect(t, name1 != "", "pid 1's name")

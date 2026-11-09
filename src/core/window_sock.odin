@@ -141,12 +141,18 @@ Window_Hello :: struct {
 	allowed:      bool, // a hub: this machine lets other machines connect (machines_reachable)
 	via_sshd:     bool, // a hub: a root-owned sshd or sshd-session is among its ancestors
 	self:         bool, // a hub: its core is this one
+	no_window:    bool, // this OS has no window (Linux): only a hub may say a framed hello
 }
+
+// Linux (docs/plans/background-core.md §8.3): with no code signing, a window hello would be any
+// same-user process's way to `ui`, past the hub's opt-in and its sshd check.
+NO_WINDOW_HERE :: "this core has no window here: only a hub may connect in framed mode"
 
 HUB_NOT_ALLOWED :: "this machine does not let other machines connect (Settings › Machines › Allow other machines to connect to this one)"
 
 // "" = the window may attach; else why not (in the order the checks run).
 window_hello_refusal :: proc(h: Window_Hello) -> string {
+	if !h.hub && h.no_window do return NO_WINDOW_HERE
 	if h.hub && !h.allowed do return HUB_NOT_ALLOWED // closed: nothing else is looked at
 	if !h.token_ok do return "framed mode is only for Deckhand's window (with the core's window token)"
 	who := h.hub ? "the hub" : "the window"
@@ -176,7 +182,8 @@ window_hello_check :: proc(fd: Sock_Fd, at_accept: trust.Peer, tok: trust.Audit_
 	on, want, holder, own, floor := door.on, door.token, door.holder_pid, door.own_pid, door.floor
 	hub_ok, no_sshd, own_id := door.hub_ok, door.hub_no_sshd, door.core_id
 	sync.unlock(&door.mu)
-	h := Window_Hello{hub = hub, allowed = hub_ok}
+	h := Window_Hello{hub = hub, allowed = hub_ok, no_window = ODIN_OS == .Linux}
+	if !hub && h.no_window do return window_hello_refusal(h), ""
 	if hub && !hub_ok do return window_hello_refusal(h), ""
 	h.token_ok = on && hex64_equal(string(want[:]), token)
 	h.same_user = trust.peer_allowed(.Adhoc, trust.own_uid(), at_accept) == .Allow

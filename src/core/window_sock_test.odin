@@ -177,9 +177,10 @@ hub_door_refusals :: proc(t: ^testing.T) {
 		window_peer_ids, hub_peer_ids = []string{own}, []string{"dev.deckhand.core"}
 		defer {window_peer_ids, hub_peer_ids = trust.WINDOW_IDS, trust.CORE_IDS}
 	}
-	// a window's identifier: a window, not a hub
+	// a window's identifier: a window, not a hub (Linux has no window: refused there, PR #68 round 1)
 	why, _ := window_hello_check(fds[0], peer, tok, token)
-	testing.expect_value(t, why, "")
+	when ODIN_OS == .Linux do testing.expect_value(t, why, NO_WINDOW_HERE)
+	else do testing.expect_value(t, why, "")
 	why, _ = window_hello_check(fds[0], peer, tok, token, hub = true)
 	// Linux: no code signing, the same user is the whole check (background-core.md §8.3)
 	when ODIN_OS == .Linux do testing.expect_value(t, why, "")
@@ -218,6 +219,11 @@ hub_hello_refusal_round1 :: proc(t: ^testing.T) {
 	// a window needs neither
 	win := Window_Hello{token_ok = true, same_user = true, still = true, code = .Allow, floor = .Allow}
 	testing.expect_value(t, window_hello_refusal(win), "")
+	// review round 1 (PR #68): an OS with no window (Linux) lets only a hub in, whatever else holds
+	win.no_window = true
+	testing.expect_value(t, window_hello_refusal(win), NO_WINDOW_HERE)
+	ok.no_window = true
+	testing.expect_value(t, window_hello_refusal(ok), "")
 }
 
 // sshd's ancestry: a root-owned sshd or sshd-session above the peer, within 64 steps.

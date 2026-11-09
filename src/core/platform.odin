@@ -56,10 +56,10 @@ data_dir :: proc(allocator := context.allocator) -> string {
 }
 
 // The data dir under home; "" when home is not an absolute path (never one relative to the cwd:
-// the launch then refuses to start, main.odin). The rename (0.1.7) reads both names:
+// the launch then refuses to start, main.odin). The rename (0.2.0) reads both names:
 // ~/Library/Application Support/Deckhand when it is there (or neither is: a new install), else
 // the old ~/Library/Application Support/pi-desk, where every install up to 0.1.6 keeps its data.
-// Nothing is moved yet (0.1.8 moves it, with a link back), so a downgrade still finds it.
+// Nothing is moved yet (0.2.1 moves it, with a link back), so a downgrade still finds it.
 data_dir_under :: proc(home: string, allocator := context.allocator) -> string {
 	if !strings.has_prefix(home, "/") do return ""
 	new, old := data_dir_names(home, context.temp_allocator)
@@ -84,7 +84,7 @@ data_dir_names :: proc(home: string, allocator := context.temp_allocator) -> (ne
 data_dir_note: string
 
 // new when it is a folder or old is not one; else old. A link counts as what it points to. Both
-// there (a dev copy, a downgrade, or 0.1.8 moved it and the link came back as a folder): old
+// there (a dev copy, a downgrade, or 0.2.1 moved it and the link came back as a folder): old
 // while a session holder answers under it (its held sessions must never be orphaned), else new;
 // said once on stderr either way.
 data_dir_pick :: proc(new, old: string) -> string {

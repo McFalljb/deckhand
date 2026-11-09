@@ -119,7 +119,7 @@ hook_env :: proc(h: Hook, allocator := context.temp_allocator) -> string {
 }
 
 // A hook's value and whether it is set at all (an empty value counts: DECKHAND_PATH_DIRS="").
-// The rename (0.1.7): when DECKHAND_X is unset, its old name PI_DESK_X counts, with a one-line
+// The rename (0.2.0): when DECKHAND_X is unset, its old name PI_DESK_X counts, with a one-line
 // warning (once per hook) naming the new one, so a dev launcher or a forge script that still
 // sets PI_DESK_DATA_DIR never opens the user's real data dir. Not refused: forge sets both while
 // it moves over. Release builds have neither name (the hooks are compiled out).

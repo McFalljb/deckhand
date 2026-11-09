@@ -748,10 +748,11 @@ update_swap :: proc() -> string {
 	if old_at == backup do update_set(&upd.staged, "")
 	update_save()
 	// the helper waits for the secret our quit's handover gets (GOODBYE{handover, successor}); test
-	// mode's starts nothing (the scene starts the new app: the same test binary)
+	// mode's starts nothing (the scene starts the new app: the same test binary, a window as in a
+	// bundle: a separate core's window's executable, not the core's)
 	helped := false
 	if helper != "" {
-		new_exe := upd.test ? executable_path() : update_bundle_exe(bundle)
+		new_exe := upd.test ? (update_window_exe != "" ? update_window_exe : executable_path()) : update_bundle_exe(bundle)
 		run, rwhy := sock_runtime_dir_why(context.temp_allocator)
 		if rwhy == "" && new_exe != "" {
 			ok, why := relaunch_helper_start(helper, bundle, new_exe, run, no_open = upd.test)

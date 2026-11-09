@@ -1,7 +1,8 @@
 package main
 
-// The window with a separate core (docs/plans/background-core.md §10.3 M4-C; the default, unless
-// Settings › Run sessions in a background core is off or DECKHAND_SEPARATE_CORE=0): the core is
+// The window with a separate core (docs/plans/background-core.md §10.3 M4-C): the default, unless
+// Settings › Sessions in a background core is off (or, in test and development builds,
+// DECKHAND_SEPARATE_CORE=0, which wins over the setting); the core is
 // `deckhand-core serve`, another process, and the window's link is core.sock.
 //
 // - Dial: core.sock in the runtime dir; none answers with a window token: the window launches one
@@ -122,6 +123,20 @@ separate_core_wanted :: proc(data: string) -> bool {
 	return core.separate_core_default_on
 }
 
+// A separate core still runs for data's runtime dir (its window.token is there and core.sock
+// answers): the setting was turned off while its sessions run on, and core.lock is its, so this
+// launch attaches to it all the same (main.odin) until Quit and Stop All Sessions ends it.
+separate_core_running :: proc(data: string) -> bool {
+	if core.hook_env(.Separate_Core) == "0" do return false // a test's or a developer's explicit choice
+	run := core.hook_env(.Runtime_Dir)
+	if run == "" do run = fmt.tprintf("%s/run", strings.trim_right(data, "/"))
+	if !os.exists(fmt.tprintf("%s/%s", run, core.WINDOW_TOKEN_FILE)) do return false
+	fd, ok := core.sock_connect(fmt.tprintf("%s/%s", run, core.CORE_SOCK))
+	if !ok do return false
+	core.sock_close(fd)
+	return true
+}
+
 // Connects to the separate core (launching it if none runs), says the framed hello and subscribes:
 // from here `state` is the replica. "" = attached, else why not. Main thread, at init.
 client_core_connect :: proc(data: string) -> string {
@@ -156,6 +171,20 @@ client_core_connect :: proc(data: string) -> string {
 	core.replica_facts_text = proc() -> string {return client.facts_sent} // its own snapshot's facts (window_link.odin)
 	core.replica_tab_facts_text = proc(tab_id: u64) -> string {return client.tab_facts_sent[tab_id] or_else ""}
 	return client_core_subscribe()
+}
+
+// No core came up and the window runs the core in its own process instead (main.odin's fallback):
+// whatever client_core_connect set up goes, so the in-process link starts clean.
+client_core_abandon :: proc() {
+	if client.sock != nil {
+		cw.sock_destroy(client.sock)
+		free(client.sock, runtime.heap_allocator())
+		client.sock = nil
+	}
+	client.attached, client.lost = false, false
+	core.replica_process = false
+	core.claude_typed_send, core.claude_status_dismiss_send, core.files_root_reset_send = nil, nil, nil
+	core.replica_ui_send, core.replica_request, core.replica_facts_text, core.replica_tab_facts_text = nil, nil, nil, nil
 }
 
 // The connection to the core ended (client_core_lost), and the window is not quitting: the old
@@ -243,7 +272,12 @@ client_core_launch :: proc(run, data: string, from_tab := false) -> string {
 	if !ok do return why
 	if prev := core.core_use_previous_serve(data); prev != "" do exe = prev // the user's Use previous core
 	if core.autotest_active do fmt.println("[autotest] core: launching", exe)
-	_, lok, lwhy := core.core_launch(exe, run, data, from_tab)
+	// after an update the relaunch helper gives the holder's successor secret to the new window's
+	// executable only (holder_successor.odin): its core says the holder's HELLO with it
+	secret := core.successor_secret_take(run)
+	defer core.trust_wipe(transmute([]u8)secret)
+	if core.autotest_active && secret != "" do fmt.println("[autotest] core: launching with the successor secret")
+	_, lok, lwhy := core.core_launch(exe, run, data, from_tab, secret = secret)
 	if !lok do return lwhy
 	return ""
 }

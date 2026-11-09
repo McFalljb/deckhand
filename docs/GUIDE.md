@@ -1441,7 +1441,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   no window, no tab's program running, no job run and no scheduled job for 10 minutes, Deckhand
   Core saves and exits by itself (opening Deckhand starts it again). If Deckhand Core stops
   unexpectedly, the window (or, with no window, the session holder) starts it again and carries
-  on. If no Deckhand Core comes up when you open Deckhand, it offers **Use Previous Core**.
+  on. If no Deckhand Core comes up when you open Deckhand, it offers **Use Previous Core**, or
+  **Run Sessions in Deckhand Itself** (this setting off, from then on).
   Logging out stops both; the next launch restores your sessions as usual. When Deckhand opens
   and finds Deckhand Core from an older version (after an update), it hands your sessions over
   to its own Deckhand Core at once: they keep running, and job runs get up to two minutes to
@@ -1451,7 +1452,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   update. Either way that choice holds (relaunches and new windows use the previous core) until
   a different version of Deckhand is installed. Turned off, Deckhand runs everything in its own
   process as before: ⌘Q then asks while sessions run (Keep sessions still keeps them through the
-  session holder). Only you can change it.
+  session holder). Turning it off takes effect once Deckhand Core has stopped (**Quit Deckhand and
+  Stop All Sessions…**); until then Deckhand opens as its window. Only you can change it.
 
 ## Updates
 

@@ -624,7 +624,6 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_tidy_projects":   cmd = Set_Tidy_Projects{on = get_bool(&r, "on")}
 	case "set_keep_sessions":   cmd = Set_Keep_Sessions{on = get_bool(&r, "on")}
 	case "set_separate_core":   cmd = Set_Separate_Core{on = get_bool(&r, "on")}
-	case "claude_typed":        cmd = Claude_Typed{tab_id = get_u64(&r, "tab_id")}
 	case "copy_control_token":  cmd = Copy_Control_Token{}
 	case "update_check":        cmd = Update_Check{}
 	case "update_skip":         cmd = Update_Skip{}

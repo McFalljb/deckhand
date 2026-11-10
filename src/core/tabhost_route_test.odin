@@ -363,7 +363,7 @@ tab_host_late_answers_and_timeouts :: proc(t: ^testing.T) {
 		testing.expect_value(t, json_path(fh.events[3].result.data, "code"), "no_window")
 	}
 	r = run_command(Browser_Read{tab_id = ta}, {kind = .Script}, 505)
-	testing.expect_value(t, json_path(r.data, "code"), "no_window")
+	testing.expect_value(t, json_path(r.data, "code"), ODIN_OS == .Darwin ? "no_window" : "browser_not_here") // no window ever runs on Linux
 }
 
 // The tab_host caller (a page's or an app's reports): TAB_HOST_COMMANDS and nothing else, so it

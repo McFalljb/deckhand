@@ -974,7 +974,7 @@ mlink_reap :: proc(l: ^Mach_Link) {
 
 // At the core's end: every link closed, every child reaped.
 machines_stop :: proc() {
-	page_forwards_drop(0) // before the links: each cancel uses its machine's master
+	page_forwards_stop() // before the links: each cancel uses its machine's master
 	for l in mach.links do mlink_close(l, wait = true)
 }
 
@@ -1025,7 +1025,7 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 	l, i := mlink_find(c.no)
 	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
-	page_forwards_drop(l.no) // while its entry is there to cancel them with
+	page_forwards_drop(l.no) // each forward keeps its own cancel: they outlive the entry
 	mlink_close(l, wait = true)
 	ordered_remove(&mach.links, i)
 	if w := machines_save(); w != "" {

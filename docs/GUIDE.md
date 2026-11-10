@@ -265,7 +265,8 @@ palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens
 or the last one of this Mac's you looked at when another machine's is on screen. Deckhand asks
 that machine's ssh connection to forward a free port of this Mac (`127.0.0.1` only) to that port
 on the machine's own `127.0.0.1`, never to another host, and stops the forward when you close the
-tab, when the link drops or when you remove the machine. The tab is like any other local tab:
+tab, when the link drops or when you remove the machine (if that machine's ssh does not answer,
+Deckhand keeps asking, less and less often, until it does or the connection is gone). The tab is like any other local tab:
 you and this Mac's agents can use it. While it is open, any program of yours on this Mac can
 reach that port too, as with your own `ssh -L`. Its agents' browser is that machine's own: they never open pages in this Mac's
 browser, and while you view that machine from here (or if it has no window, like a Linux machine)

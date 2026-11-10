@@ -1,27 +1,39 @@
 package core
 
 // A machine's web page in a local browser tab (issue #5; the user's decision of 2026-11-09): the
-// user asks for a port on another machine (a dev server on its localhost:3000), and this core asks
-// that machine's ssh ControlMaster (machines.odin's `ssh-<n>.ctl`) for a local forward:
-//   ssh -F /dev/null -S <ctl> -O forward -L 127.0.0.1:<local>:127.0.0.1:<port> -- <target>
-// argv only, never through a shell. ssh takes no 0 for a local forward's port ("Bad local
-// forwarding specification"), so <local> is a free loopback port picked here (bound, read, closed),
-// tried again with another if ssh cannot bind it. Both ends are 127.0.0.1: the forward listens on
-// this Mac's loopback only, and reaches only that machine's own loopback, never another host.
-// The page opens in an ordinary local browser tab (browser_open as the user) in the session on
-// screen, or the last shown session of this Mac's when that is another machine's (Home holds no
-// browser tabs): only the user and this Mac's own agents drive it, as any local tab.
+// user asks for a port on another machine (a dev server on its localhost:3000), and this core
+// starts an ssh of its own for that page alone, as its own process group, which only forwards:
+//   ssh -o ControlMaster=no -o ControlPath=none -o BatchMode=yes … -N
+//       -L 127.0.0.1:<local>:127.0.0.1:<port> -- <target>
+// argv only, never through a shell; the user's ssh config applies (aliases, keys, ProxyJump), but
+// never the link's ControlMaster: closing the page is ending that child (SIGTERM to its group,
+// SIGKILL after PAGE_KILL_WAIT), and a dead child holds no listener. Nothing is asked of a master,
+// so nothing can be left forwarded by one. BatchMode: it needs key-based login to the machine (no
+// prompt can show). <local> is a free loopback port picked here (bound, read, closed), another one
+// if ssh cannot bind it. Both ends are 127.0.0.1: the forward listens on this Mac's loopback only,
+// and reaches only that machine's own loopback, never another host.
+//
+// The command answers pending; the core loop's tick waits (never blocking) until the port accepts
+// a connection, then opens an ordinary local browser tab there (browser_open as the user) in the
+// session on screen, or the last shown session of this Mac's when that is another machine's (Home
+// holds no browser tabs), and finishes the request. The child exiting first, or PAGE_OPEN_WAIT
+// passing, fails it with ssh's last line.
 //
 // User-only (who = .User), and never while this core is viewed from another machine (its window
-// is a hub then). Each forward is kept with its tab; it is cancelled (`-O cancel`) when the tab
-// closes, the machine's link drops, the machine is removed, the setting goes off or the core stops,
-// without waiting: the core loop reaps each cancel and tries a failed one again until ssh has it
-// (the forward table below). Opening waits for ssh (each try at most PAGE_SSH_WAIT).
-// Residual: while a forward is open, any process of this user on this Mac can reach that remote
-// port through it, as with the user's own `ssh -L`.
+// is a hub then). The child ends when the tab closes, the machine's link drops, the machine is
+// removed, the setting goes off or the core stops; at most PAGE_FORWARDS_MAX children run at once,
+// opening and closing ones too.
+//
+// Residuals: while a page is open, any process of this user on this Mac can reach that remote
+// port through it, as with the user's own `ssh -L`. ssh has no option that skips the config's
+// own LocalForward/RemoteForward but keeps the command line's -L (ClearAllForwardings clears
+// both), so a forward the user's config gives that host is asked for again by this child: the
+// link's master holds it already, so it fails to bind (ExitOnForwardFailure=no: that does not end
+// the child; ours is checked by connecting to it). A port another local process binds between
+// the pick and ssh's bind would be connected to as ours, unless ssh said its bind failed first.
 //
 // Test builds: a `via` machine has no ssh. Its "remote" is this Mac (a second core), so its
-// forward is the port itself, kept in the table with nothing to cancel (tests/scripts/remote-page.sh).
+// forward is the port itself, with no child (tests/scripts/remote-page.sh).
 
 import "core:fmt"
 import "core:strconv"
@@ -40,9 +52,11 @@ Machine_Open_Page :: struct {
 }
 
 PAGE_PATH_MAX :: 1024
-PAGE_FORWARDS_MAX :: 16 // open at once, every machine's
-PAGE_SSH_WAIT :: 3 * time.Second // each `ssh -O`: the master is local, so it answers at once
+PAGE_FORWARDS_MAX :: 16 // children at once, every machine's, opening and closing ones too
+PAGE_OPEN_WAIT :: 10 * time.Second // ssh connects and forwards, or the request fails
+PAGE_KILL_WAIT :: 1 * time.Second // SIGTERM, then SIGKILL
 PAGE_SSH_TRIES :: 3 // a picked port another process took first: another one
+PAGE_OUT_MAX :: 4096 // of ssh's output: its errors come first
 PAGE_WAIT_TAB :: TAB_HOST_PENDING_DEFAULT + TAB_HOST_GRACE // a tab the window answered pending: until it is recorded
 
 // ---- checks (pure) ----
@@ -92,23 +106,6 @@ machine_page_spec :: proc(q: string) -> (port: u64, path: string, ok: bool) {
 	return n, s[end:], true
 }
 
-// `ssh -O forward` (or cancel) on machine m's ControlMaster. Temp allocator.
-machine_forward_argv :: proc(m: Machine, run: string, local, remote: int, cancel := false) -> (argv: []string, why: string) {
-	if m.via != "" do return nil, "this machine is reached through a test build's command: it has no ssh"
-	if w := machine_target_error(m.target); w != "" do return nil, w
-	if local < 1 || local > 65535 || remote < 1 || remote > 65535 do return nil, "the port is 1 to 65535"
-	ctl := machine_ctl_path(run, m.no)
-	if len(ctl) > MACHINE_CTL_MAX do return nil, fmt.tprintf("ssh's control socket %s is longer than %d bytes", ctl, MACHINE_CTL_MAX)
-	// -F /dev/null: the mux client sends every forward ssh_config gives the host with ours, so a
-	// cancel would also cancel the user's own LocalForward/RemoteForward (-S names the master: no
-	// config is needed). ClearAllForwardings would clear the command line's -L too.
-	out := make([]string, 11, context.temp_allocator)
-	out[0], out[1], out[2], out[3], out[4] = "ssh", "-F", "/dev/null", "-S", ctl
-	out[5], out[6] = "-O", cancel ? "cancel" : "forward"
-	out[7], out[8] = "-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote)
-	out[9], out[10] = "--", m.target
-	return out, ""
-}
 
 // A loopback port nothing listens on now (0: none): bound, read and closed, for ssh to bind next.
 page_free_port :: proc() -> int {
@@ -128,40 +125,103 @@ page_free_port :: proc() -> int {
 	return int(got.sin_port)
 }
 
-// ---- the forward table (main thread) ----
-//
-// A forward stays in the table until ssh says it is gone: its cancel exited 0, or the master is
-// gone (no control socket, or ssh cannot connect to it: its listeners went with it). A cancel runs
-// as a child the core loop reaps (never waited for here); one that fails or takes longer than
-// PAGE_SSH_WAIT is tried again after 2, 4, 8… s (at most PAGE_RETRY_MAX), for as long as the core
-// runs, whether or not the machine is still listed (each entry holds its own cancel argv).
 
-PAGE_RETRY_MAX :: 60 * time.Second
-PAGE_OUT_MAX :: 1024 // of a cancel's output: enough for ssh's one line
+// The page's own ssh (temp allocator): a new connection, never a ControlMaster's, that only
+// forwards. The options come before the user's config (ssh takes the first value it is given):
+// no agent or X11 forwarding, no LocalCommand, never a prompt, and a config's
+// ClearAllForwardings=yes cannot clear our -L.
+machine_page_ssh_argv :: proc(target: string, local, remote: int) -> (argv: []string, why: string) {
+	if w := machine_target_error(target); w != "" do return nil, w
+	if local < 1 || local > 65535 || remote < 1 || remote > 65535 do return nil, "the port is 1 to 65535"
+	out := [?]string {
+		"ssh",
+		"-o", "ControlMaster=no",
+		"-o", "ControlPath=none",
+		"-o", "BatchMode=yes",
+		"-o", "ClearAllForwardings=no",
+		"-o", "ExitOnForwardFailure=no",
+		"-o", "ForwardAgent=no",
+		"-o", "ForwardX11=no",
+		"-o", "PermitLocalCommand=no",
+		"-o", "ServerAliveInterval=15",
+		"-o", "ServerAliveCountMax=4",
+		"-N",
+		"-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote),
+		"--", target,
+	}
+	return slice_clone_temp(out[:]), ""
+
+	slice_clone_temp :: proc(a: []string) -> []string {
+		b := make([]string, len(a), context.temp_allocator)
+		copy(b, a)
+		return b
+	}
+}
+
+// What ssh's output says went wrong, for the user (at most MACHINE_ERROR_MAX bytes).
+machine_page_ssh_error :: proc(out: string) -> string {
+	if strings.contains(out, "Permission denied") do return "opening pages needs key-based login to this machine (ssh runs without prompts)"
+	line := machine_last_line(out)
+	if line == "" do return "ssh ended"
+	return text_clean(line, MACHINE_ERROR_MAX)
+}
+
+// ssh could not listen on our port (another process took it after the pick).
+machine_page_bind_failed :: proc(out: string, local: int) -> bool {
+	return strings.contains(out, fmt.tprintf("cannot listen to port: %d", local)) || strings.contains(out, fmt.tprintf(":%d: Address already in use", local))
+}
+
+// Something accepts connections on this Mac's 127.0.0.1:port (never blocks past a few ms).
+page_listening :: proc(port: int) -> bool {
+	fd := posix.socket(.INET, .STREAM, .TCP)
+	if fd < 0 do return false
+	defer posix.close(fd)
+	posix.fcntl(fd, .SETFL, posix.fcntl(fd, .GETFL) | posix.O_NONBLOCK)
+	addr := posix.sockaddr_in {
+		sin_family = .INET,
+		sin_port   = posix.in_port_t(port),
+		sin_addr   = {s_addr = 0x7f000001}, // 127.0.0.1 (u32be)
+	}
+	when ODIN_OS == .Darwin do addr.sin_len = size_of(addr)
+	if posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK do return true
+	if posix.errno() != .EINPROGRESS do return false
+	pfd := posix.pollfd{fd = fd, events = {.OUT}}
+	if posix.poll(&pfd, 1, 5) <= 0 do return false
+	err: i32
+	n := posix.socklen_t(size_of(err))
+	if posix.getsockopt(fd, posix.SOL_SOCKET, .ERROR, &err, &n) != .OK do return false
+	return err == 0
+}
+
+// ---- the page children (main thread) ----
 
 Page_Phase :: enum u8 {
+	Opening, // its ssh starts; the request waits for the port (or a via machine's next tick)
 	Open, // its tab is open (or about to be)
-	Closing, // its cancel runs (pid)
-	Retry, // its cancel is due at next_at ({}: now)
+	Closing, // SIGTERM sent (SIGKILL after PAGE_KILL_WAIT): gone once reaped
 }
 
 Page_Forward :: struct {
-	machine: u64,
-	tab_id:  u64,
-	local:   int, // this Mac's loopback port
-	remote:  int, // the machine's
-	opened:  time.Tick,
-	waiting: bool, // its tab is not recorded yet (the window answered pending)
-	phase:   Page_Phase,
-	cancel:  []string, // `ssh -O cancel` (heap; nil: a test build's via machine, nothing to cancel)
-	ctl:     string, // its master's control socket (heap)
-	pid:     posix.pid_t, // Closing: the cancel
-	fd:      posix.FD, // and its output (stdout and stderr; ours non-blocking)
-	started: time.Tick,
-	tries:   int,
-	next_at: time.Tick,
-	out:     [PAGE_OUT_MAX]u8,
-	out_n:   int,
+	machine:    u64,
+	tab_id:     u64,
+	local:      int, // this Mac's loopback port
+	remote:     int, // the machine's
+	phase:      Page_Phase,
+	child:      bool, // false: a test build's via machine (no ssh)
+	pid:        posix.pid_t, // 0: reaped (or none)
+	fd:         posix.FD, // its output (stdout and stderr; ours non-blocking)
+	started:    time.Tick, // Opening: the ssh's start; Closing: the SIGTERM's
+	killed:     bool, // SIGKILL sent
+	opened:     time.Tick,
+	waiting:    bool, // its tab is not recorded yet (the window answered pending)
+	tries:      int,
+	request_id: u64, // Opening: the request it finishes (0: finished)
+	caller:     Caller,
+	path:       string, // heap
+	name:       string, // heap: the machine's
+	target:     string, // heap: its ssh target
+	out:        [PAGE_OUT_MAX]u8,
+	out_n:      int,
 }
 
 @(private = "file")
@@ -170,98 +230,194 @@ page: struct {
 }
 
 when TEST_HOOKS {
-	page_cancel_argv_for_test: []string // run in place of each `ssh -O cancel` (unit tests: no ssh)
+	page_ssh_argv_for_test: []string // run in place of ssh, %PORT% the local port (unit tests)
+	page_test_finished: map[u64]string // the requests finished: their results' JSON (unit tests)
 }
 
 page_forwards_list :: proc() -> []Page_Forward {return page.forwards[:]}
 
-@(private = "file")
-page_port_kept :: proc(local: int) -> bool {
-	for f in page.forwards do if f.cancel != nil && f.local == local do return true
-	return false
-}
-
-page_forwards_open :: proc() -> int {
-	n := 0
-	for f in page.forwards do if f.phase == .Open do n += 1
-	return n
-}
-
-// Keeps f with a heap copy of its cancel argv and control socket. False: f is open and
-// PAGE_FORWARDS_MAX are (closing ones do not count: they wait only for ssh).
-page_forward_add :: proc(f: Page_Forward, cancel: []string, ctl: string) -> bool {
-	if f.phase == .Open && page_forwards_open() >= PAGE_FORWARDS_MAX do return false
-	heap := runtime.heap_allocator()
-	if page.forwards == nil do page.forwards = make([dynamic]Page_Forward, heap)
-	x := f
-	x.cancel, x.ctl, x.pid, x.fd = nil, "", 0, -1
-	if cancel != nil {
-		x.cancel = make([]string, len(cancel), heap)
-		for a, i in cancel do x.cancel[i] = strings.clone(a, heap)
-		x.ctl = strings.clone(ctl, heap)
-	}
-	append(&page.forwards, x)
-	return true
-}
+// PAGE_FORWARDS_MAX children: opening, open and closing ones alike.
+page_forwards_full :: proc() -> bool {return len(page.forwards) >= PAGE_FORWARDS_MAX}
 
 @(private = "file")
 page_forward_remove :: proc(i: int) {
 	f := &page.forwards[i]
 	if f.fd >= 0 do posix.close(f.fd)
 	heap := runtime.heap_allocator()
-	for a in f.cancel do delete(a, heap)
-	delete(f.cancel, heap)
-	delete(f.ctl, heap)
+	delete(f.path, heap)
+	delete(f.name, heap)
+	delete(f.target, heap)
 	ordered_remove(&page.forwards, i)
 }
 
-// An open forward is to be cancelled: the next tick starts it.
 @(private = "file")
-page_forward_close :: proc(f: ^Page_Forward, why: string) {
+page_finish :: proc(f: ^Page_Forward, r: Result) {
+	if f.request_id == 0 do return
+	when TEST_HOOKS {
+		if page_test_finished != nil do page_test_finished[f.request_id] = strings.clone(result_json(r))
+	}
+	emit_event(Finished_Event{request_id = f.request_id, result = r})
+	f.request_id = 0
+}
+
+// f's ssh, on f.local. False: it did not start.
+@(private = "file")
+page_child_start :: proc(f: ^Page_Forward, now: time.Tick) -> bool {
+	argv, why := machine_page_ssh_argv(f.target, f.local, f.remote)
+	when TEST_HOOKS do if page_ssh_argv_for_test != nil {
+		argv, why = make([]string, len(page_ssh_argv_for_test), context.temp_allocator), ""
+		for a, i in page_ssh_argv_for_test do argv[i], _ = strings.replace_all(a, "%PORT%", fmt.tprint(f.local), context.temp_allocator)
+	}
+	if why != "" do return false
+	pid, fd, ok := page_spawn(argv)
+	if !ok do return false
+	f.pid, f.fd, f.started, f.out_n, f.killed = pid, fd, now, 0, false
+	return true
+}
+
+// Reads what f's ssh wrote (the first PAGE_OUT_MAX bytes kept; the rest drained) and reaps it if it
+// ended. True: its child is gone (never for a via machine's).
+@(private = "file")
+page_child_poll :: proc(f: ^Page_Forward) -> (ended: bool) {
+	if !f.child do return false
+	if f.fd >= 0 {
+		buf: [4096]u8
+		for {
+			n := posix.read(f.fd, &buf[0], len(buf))
+			if n <= 0 do break
+			f.out_n += copy(f.out[f.out_n:], buf[:n])
+		}
+	}
+	if f.pid > 0 {
+		st: i32
+		if posix.waitpid(f.pid, &st, {.NOHANG}) != f.pid do return false
+		f.pid = 0
+	}
+	return true
+}
+
+// SIGKILL to f's group and reap it at once (a killed process ends at once): a retry's.
+@(private = "file")
+page_child_kill_now :: proc(f: ^Page_Forward) {
+	if f.pid > 0 {
+		posix.killpg(f.pid, .SIGKILL)
+		st: i32
+		for posix.waitpid(f.pid, &st, {}) < 0 && posix.errno() == .EINTR {}
+	}
+	if f.fd >= 0 do posix.close(f.fd)
+	f.pid, f.fd = 0, -1
+}
+
+// f ends: an opening request fails (why), and its ssh gets SIGTERM (reaped by the tick).
+@(private = "file")
+page_forward_close :: proc(f: ^Page_Forward, why: string, now: time.Tick) {
+	if f.phase == .Closing do return
 	if autotest_active do fmt.printfln("[autotest] page forward %d closed: %s", f.local, why)
-	f.phase, f.next_at, f.tries = .Retry, {}, 0
+	if f.phase == .Opening do page_finish(f, fail(fmt.tprintf("the page of %s did not open: %s", f.name, why)))
+	if f.pid > 0 do posix.killpg(f.pid, .SIGTERM)
+	f.phase, f.started, f.killed = .Closing, now, false
 }
 
-// Machine no's open forwards are cancelled (0: every machine's): its link dropped, it was removed or
-// the setting went off. They stay in the table until ssh has cancelled them.
+// Machine no's pages end (0: every machine's): its link dropped, it was removed or the setting
+// went off.
 page_forwards_drop :: proc(no: u64) {
-	for &f in page.forwards do if f.phase == .Open && (no == 0 || f.machine == no) do page_forward_close(&f, "its link ended")
+	now := time.tick_now()
+	for &f in page.forwards do if no == 0 || f.machine == no do page_forward_close(&f, "its link ended", now)
 }
 
-// The core stops: every forward's cancel is tried once more, all at once, for at most PAGE_SSH_WAIT.
+// The core stops: every page's ssh ends, waited for at most PAGE_KILL_WAIT and a little more.
 page_forwards_stop :: proc() {
-	page_forwards_drop(0)
-	for &f in page.forwards do if f.phase == .Retry do f.next_at = {}
-	page_forwards_tick(time.tick_now())
-	for {
-		running := false
-		for f in page.forwards do if f.phase == .Closing do running = true
-		if !running do break
-		time.sleep(20 * time.Millisecond)
-		page_forwards_tick(time.tick_now(), retry = false)
+	now := time.tick_now()
+	for &f in page.forwards do page_forward_close(&f, "Deckhand stopped", now)
+	deadline := time.tick_add(now, PAGE_KILL_WAIT + 500 * time.Millisecond)
+	for len(page.forwards) > 0 && time.tick_diff(time.tick_now(), deadline) > 0 {
+		page_forwards_tick(time.tick_now())
+		if len(page.forwards) > 0 do time.sleep(20 * time.Millisecond)
+	}
+	for len(page.forwards) > 0 {
+		page_child_kill_now(&page.forwards[0])
+		page_forward_remove(0)
 	}
 }
 
-// The core loop's turn: a forward whose tab closed is cancelled (one the window answered pending
-// waits PAGE_WAIT_TAB for its tab); cancels due start, running ones are reaped. Never blocks.
-page_forwards_tick :: proc(now: time.Tick, alive := page_tab_alive, retry := true) {
+// The core loop's turn (never blocks): an opening page's port is tried and its tab opened; a page
+// whose tab closed ends (one the window answered pending waits PAGE_WAIT_TAB for its tab); ended
+// children are reaped and their entries go.
+page_forwards_tick :: proc(now: time.Tick, alive := page_tab_alive) {
 	for i := len(page.forwards) - 1; i >= 0; i -= 1 {
 		f := &page.forwards[i]
-		if f.phase == .Open {
+		ended := page_child_poll(f)
+		switch f.phase {
+		case .Closing:
+			if !f.child || ended {
+				page_forward_remove(i)
+				continue
+			}
+			if !f.killed && time.tick_diff(f.started, now) > PAGE_KILL_WAIT {
+				posix.killpg(f.pid, .SIGKILL)
+				f.killed = true
+			}
+		case .Open:
+			if ended { // the connection ended (the network, the machine): its tab no longer loads
+				if autotest_active do fmt.printfln("[autotest] page forward %d closed: its ssh ended", f.local)
+				page_forward_remove(i)
+				continue
+			}
 			if alive(f.tab_id) {
 				f.waiting = false
 				continue
 			}
 			if f.waiting && time.tick_diff(f.opened, now) <= PAGE_WAIT_TAB do continue
-			page_forward_close(f, "its tab closed")
-		}
-		if f.phase == .Retry && retry && (f.next_at == {} || time.tick_diff(f.next_at, now) >= 0) {
-			if page_cancel_start(f, now) {
-				page_forward_remove(i)
-				continue
+			page_forward_close(f, "its tab closed", now)
+		case .Opening:
+			out := string(f.out[:f.out_n])
+			if f.child && machine_page_bind_failed(out, f.local) {
+				page_child_kill_now(f)
+				f.tries += 1
+				if f.tries < PAGE_SSH_TRIES {
+					if f.local = page_pick_port(); f.local != 0 && page_child_start(f, now) do continue
+				}
+				page_forward_close(f, "ssh could not listen on a port of this Mac", now)
+			} else if ended {
+				page_forward_close(f, machine_page_ssh_error(out), now)
+			} else if !f.child || page_listening(f.local) {
+				page_open_tab(f, now)
+			} else if time.tick_diff(f.started, now) > PAGE_OPEN_WAIT {
+				page_forward_close(f, fmt.tprintf("ssh did not forward the port in %v", PAGE_OPEN_WAIT), now)
 			}
 		}
-		if f.phase == .Closing && page_cancel_reap(f, now) do page_forward_remove(i)
+	}
+}
+
+// The port answers: its tab opens, and the request finishes (the window's own finished does it
+// when it answers pending).
+@(private = "file")
+page_open_tab :: proc(f: ^Page_Forward, now: time.Tick) {
+	s := machine_local_session()
+	if s == nil {
+		page_forward_close(f, "no session of this Mac's is open: the page opens in a browser tab there", now)
+		return
+	}
+	r, ch, tab_id := browser_open_tab(s, machine_page_url(f.local, f.path), f.caller, f.request_id)
+	if !r.ok {
+		page_finish(f, r)
+		page_forward_close(f, "its tab did not open", now)
+		return
+	}
+	if autotest_active do fmt.printfln("[autotest] page forward %d: %s port %d", f.local, f.name, f.remote)
+	f.phase, f.tab_id, f.waiting, f.opened = .Open, tab_id, r.pending, now
+	if r.pending {
+		f.request_id = 0 // the window's finished ends it
+	} else {
+		if s.id != state.current_session {
+			focus_session(s.id, f.caller)
+			ch = true
+		}
+		page_finish(f, r)
+	}
+	if ch {
+		state.version += 1
+		window_state_changed()
 	}
 }
 
@@ -272,72 +428,16 @@ page_tab_alive :: proc(tab_id: u64) -> bool {
 	return is
 }
 
-// True: nothing is left to cancel (a via machine's, or the master is gone with its listeners).
+// A free loopback port no page uses (0: none).
 @(private = "file")
-page_cancel_start :: proc(f: ^Page_Forward, now: time.Tick) -> (gone: bool) {
-	if f.cancel == nil do return true
-	st: posix.stat_t
-	if posix.stat(strings.clone_to_cstring(f.ctl, context.temp_allocator), &st) != .OK && posix.errno() == .ENOENT do return true
-	argv := f.cancel
-	when TEST_HOOKS do if page_cancel_argv_for_test != nil do argv = page_cancel_argv_for_test
-	pid, fd, ok := page_spawn(argv)
-	if !ok {
-		page_cancel_later(f, now)
-		return false
+page_pick_port :: proc() -> int {
+	outer: for _ in 0 ..< 4 {
+		p := page_free_port()
+		if p == 0 do return 0
+		for f in page.forwards do if f.local == p do continue outer
+		return p
 	}
-	f.phase, f.pid, f.fd, f.started, f.out_n = .Closing, pid, fd, now, 0
-	return false
-}
-
-// True: the forward is gone. A cancel that failed (or ran past PAGE_SSH_WAIT: killed) is tried later.
-@(private = "file")
-page_cancel_reap :: proc(f: ^Page_Forward, now: time.Tick) -> (gone: bool) {
-	page_cancel_read(f)
-	st: i32
-	if posix.waitpid(f.pid, &st, {.NOHANG}) != f.pid {
-		if time.tick_diff(f.started, now) <= PAGE_SSH_WAIT do return false
-		posix.killpg(f.pid, .SIGKILL)
-		for posix.waitpid(f.pid, &st, {}) < 0 && posix.errno() == .EINTR {}
-		page_cancel_done(f)
-		page_cancel_later(f, now)
-		return false
-	}
-	page_cancel_read(f)
-	page_cancel_done(f)
-	if posix.WIFEXITED(st) && posix.WEXITSTATUS(st) == 0 do return true
-	// "Control socket connect(<ctl>): Connection refused" (or No such file): no master, no listeners;
-	// "… forwarding request failed: port not found" (mux.c): the master has no such forward (one it
-	// never added, or an earlier cancel that it took before that ssh was killed)
-	out := string(f.out[:f.out_n])
-	if strings.contains(out, "Control socket connect") || strings.contains(out, "port not found") do return true
-	page_cancel_later(f, now)
-	return false
-}
-
-@(private = "file")
-page_cancel_read :: proc(f: ^Page_Forward) {
-	buf: [4096]u8
-	for {
-		n := posix.read(f.fd, &buf[0], len(buf))
-		if n <= 0 do return
-		k := copy(f.out[f.out_n:], buf[:n])
-		f.out_n += k
-	}
-}
-
-@(private = "file")
-page_cancel_done :: proc(f: ^Page_Forward) {
-	if f.fd >= 0 do posix.close(f.fd)
-	f.pid, f.fd = 0, -1
-}
-
-@(private = "file")
-page_cancel_later :: proc(f: ^Page_Forward, now: time.Tick) {
-	f.tries += 1
-	wait := time.Second << uint(min(f.tries, 6))
-	if wait > PAGE_RETRY_MAX do wait = PAGE_RETRY_MAX
-	f.phase, f.next_at = .Retry, time.tick_add(now, wait)
-	if autotest_active do fmt.printfln("[autotest] page forward %d: cancel failed, again in %v", f.local, wait)
+	return 0
 }
 
 // Spawns argv (looked up on PATH) in its own process group: stdin /dev/null, stdout and stderr one
@@ -380,15 +480,10 @@ page_spawn :: proc(argv: []string) -> (pid: posix.pid_t, fd: posix.FD, ok: bool)
 when TEST_HOOKS {
 	page_forwards_reset_for_test :: proc() {
 		for len(page.forwards) > 0 {
-			f := &page.forwards[0]
-			if f.pid > 0 {
-				posix.killpg(f.pid, .SIGKILL)
-				st: i32
-				posix.waitpid(f.pid, &st, {})
-			}
+			page_child_kill_now(&page.forwards[0])
 			page_forward_remove(0)
 		}
-		page_cancel_argv_for_test = nil
+		page_ssh_argv_for_test = nil
 	}
 }
 
@@ -406,56 +501,33 @@ machine_open_page_apply :: proc(c: Machine_Open_Page, caller: Caller, request_id
 	if !ok do return fail(fmt.tprintf("no machine %d", c.no)), false
 	if !machine_link_up(c.no) do return fail(fmt.tprintf("%s is not online", m.name)), false
 	if !tab_host_up() do return no_window(), false
-	if page_forwards_open() >= PAGE_FORWARDS_MAX do return fail(fmt.tprintf("%d web pages of other machines are open: close one first", PAGE_FORWARDS_MAX)), false
-	s := machine_local_session()
-	if s == nil do return fail("open a session on this Mac first: the page opens in a browser tab there"), false
-	remote := int(c.port)
-	local := 0
-	cancel: []string // nil: a via machine's (nothing to cancel)
-	ctl: string
+	if page_forwards_full() do return fail(fmt.tprintf("%d web pages of other machines are open or closing: close one first", PAGE_FORWARDS_MAX)), false
+	if machine_local_session() == nil do return fail("open a session on this Mac first: the page opens in a browser tab there"), false
+	return page_forward_open(c.no, m, int(c.port), path, caller, request_id)
+}
+
+// Starts the page's ssh (none for a via machine): the tick opens its tab. Pending, or why not.
+page_forward_open :: proc(no: u64, m: Machine, remote: int, path: string, caller: Caller, request_id: u64) -> (Result, bool) {
+	now := time.tick_now()
+	heap := runtime.heap_allocator()
+	f := Page_Forward{machine = no, remote = remote, phase = .Opening, started = now, request_id = request_id, caller = caller, fd = -1}
 	if m.via != "" {
 		when !TEST_HOOKS do return fail("via is only for development and test builds"), false
-		local = remote // a test build's "machine" is this Mac: its port is here already
+		f.local = remote // a test build's "machine" is this Mac: its port is here already
 	} else {
-		run, rwhy := sock_runtime_dir_why(context.temp_allocator)
-		if rwhy != "" do return fail(rwhy), false
-		ctl = machine_ctl_path(run, m.no)
-		why := "no free port on this Mac"
-		for _ in 0 ..< PAGE_SSH_TRIES {
-			try := page_free_port()
-			if try == 0 || page_port_kept(try) do continue // one still being cancelled: never reused
-			argv, aw := machine_forward_argv(m, run, try, remote)
-			if aw != "" do return fail(aw), false
-			undo, _ := machine_forward_argv(m, run, try, remote, cancel = true)
-			out, st := run_group(argv, PAGE_SSH_WAIT, cap = MACHINE_STDERR_MAX, merge_stderr = true)
-			if st == .Ok {
-				local, cancel = try, undo
-				break
-			}
-			why = st == .Timed_Out ? "ssh did not answer" : text_clean(machine_last_line(out), MACHINE_ERROR_MAX)
-			if st == .Timed_Out || st == .Too_Big {
-				// the master may still open it when it answers: cancelled as a closed tab's would be
-				page_forward_add({machine = c.no, local = try, remote = remote, phase = .Retry}, undo, ctl)
-				break
-			}
-			if st == .Start_Failed do break
-		}
-		if local == 0 do return fail(fmt.tprintf("ssh could not forward port %d of %s: %s", remote, m.name, why)), false
+		f.child = true
+		f.local = page_pick_port()
+		if f.local == 0 do return fail("no free port on this Mac"), false
+		if _, why := machine_page_ssh_argv(m.target, f.local, remote); why != "" do return fail(why), false
 	}
-	f := Page_Forward{machine = c.no, local = local, remote = remote, opened = time.tick_now()}
-	r, ch, tab_id := browser_open_tab(s, machine_page_url(local, path), caller, request_id)
-	if !r.ok {
-		if autotest_active do fmt.printfln("[autotest] page forward %d closed: its tab did not open", local)
-		f.phase = .Retry
-		page_forward_add(f, cancel, ctl)
-		return r, ch
+	f.path, f.name, f.target = strings.clone(path, heap), strings.clone(m.name, heap), strings.clone(m.target, heap)
+	if page.forwards == nil do page.forwards = make([dynamic]Page_Forward, heap)
+	append(&page.forwards, f)
+	last := &page.forwards[len(page.forwards) - 1]
+	if f.child && !page_child_start(last, now) {
+		last.request_id = 0
+		page_forward_remove(len(page.forwards) - 1)
+		return fail("ssh could not start"), false
 	}
-	f.tab_id, f.waiting = tab_id, r.pending
-	page_forward_add(f, cancel, ctl) // room checked above
-	if autotest_active do fmt.printfln("[autotest] page forward %d: %s port %d", local, m.name, remote)
-	if !r.pending && s.id != state.current_session {
-		focus_session(s.id, caller)
-		ch = true
-	}
-	return r, ch
+	return {ok = true, pending = true}, false
 }

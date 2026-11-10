@@ -758,7 +758,7 @@ machines_tick :: proc() {
 		}
 	}
 	machine_route_tick(now)
-	page_forwards_tick(now) // a web page's tab closed: its forward goes (machine_page.odin)
+	page_forwards_tick(now) // web pages: their ssh children, tabs and requests (machine_page.odin)
 }
 
 // The hello reply line came: online (frames from here on) or a status.
@@ -974,7 +974,7 @@ mlink_reap :: proc(l: ^Mach_Link) {
 
 // At the core's end: every link closed, every child reaped.
 machines_stop :: proc() {
-	page_forwards_stop() // before the links: each cancel uses its machine's master
+	page_forwards_stop() // its web pages' ssh children end (machine_page.odin)
 	for l in mach.links do mlink_close(l, wait = true)
 }
 
@@ -1025,7 +1025,7 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 	l, i := mlink_find(c.no)
 	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
-	page_forwards_drop(l.no) // each forward keeps its own cancel: they outlive the entry
+	page_forwards_drop(l.no) // its web pages' ssh children end
 	mlink_close(l, wait = true)
 	ordered_remove(&mach.links, i)
 	if w := machines_save(); w != "" {

@@ -1,11 +1,12 @@
 #!/bin/sh
 # A machine's web page in a local tab (issue #5; src/core/machine_page.odin): as remote-link.sh, a
 # second core on this Mac is reached through `--via` (no ssh, no sshd: DECKHAND_HUB_WITHOUT_SSHD=1).
-# A via machine is this Mac, so its "forward" is the port itself: this checks the command (user
-# only, its checks), the tab it opens (a plain local browser tab at http://127.0.0.1:<port>/<path>,
-# from the command and from the sidebar's Open web page… through the palette) and the forward
-# table (each tab's entry goes when it closes). Not covered without real ssh: `ssh -O forward` and
-# `-O cancel` on a ControlMaster (their argv is unit-tested: machine_page_test.odin). Test mode's
+# A via machine is this Mac, so its "forward" is the port itself, with no ssh: this checks the
+# command (user only, its checks, its pending answer finished by the core loop's tick), the tab it
+# opens (a plain local browser tab at http://127.0.0.1:<port>/<path>, from the command and from the
+# sidebar's Open web page… through the palette) and the page table (each tab's entry goes when it
+# closes). Not covered without real ssh: the page's own `ssh -N -L` (its argv, its ending and the
+# tick's handling of a child are unit-tested with /bin/sh: machine_page_test.odin). Test mode's
 # Chromium is offline (a dead proxy, loopback too), so the page itself is not loaded.
 # Usage: tests/scripts/remote-page.sh
 set -eu
@@ -54,6 +55,8 @@ ui_command {"type":"machine_open_page","no":1,"port":$P,"path":"//evil.example/"
 assert_result ok false
 ui_command {"type":"machine_open_page","no":1,"port":$P,"path":"hello?x=1"}
 assert_result ok true
+assert_result pending true
+assert_finished ok true
 eventually 10000
 assert_state open_sessions.0.tabs.1.kind browser
 assert_state open_sessions.0.tabs.1.url http://127.0.0.1:$P/hello?x=1

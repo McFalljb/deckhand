@@ -2,15 +2,17 @@
 # Make a Deckhand release, on the release signer's Mac, in one command (docs/DEVELOPING.md,
 # "Releases"): checks, build (with CEF) and tests, the version in Info.plist, code signing
 # (optional Developer ID and notarization), the zip and its SHA-256, the updater's signature
-# (.sig) from the bundle just built, then a DRAFT GitHub Release with the three files, whose
-# .sig is downloaded again and verified against the local zip. Publish the draft on GitHub.
+# (.sig) from the bundle just built, the Linux core's tarball that CI built for the tag
+# (scripts/release-linux.sh: downloaded, checked against CI's sha256, signed here), then a DRAFT
+# GitHub Release with the six files, whose .sigs are downloaded again and verified against the
+# local files. Publish the draft on GitHub.
 #
 # Usage: scripts/release.sh --version X.Y.Z [--no-upload | --upload-only] [--key FILE]
 #                           [--repo OWNER/NAME [--allow-other-repo]] [--rotating-from OLDPUB]
 #                           [--prev vX.Y.Z | --skip-prev-updater]
 #   --version      the version; HEAD must be exactly the tag vX.Y.Z (git describe
 #                  --exact-match), already pushed to the release repository
-#   --no-upload    a dry run: everything into dist/, no GitHub calls at all
+#   --no-upload    a dry run: everything into dist/, nothing uploaded (gh still reads CI's Linux run)
 #   --upload-only  draft what an earlier --no-upload run left in dist/ (checked again first)
 #   --key FILE     the update key (default: $DECKHAND_UPDATE_KEY_FILE, else
 #                  ~/.config/deckhand/update.key); a 600 file of yours in a private folder,
@@ -46,8 +48,11 @@
 #   asks for an ad-hoc release on purpose. A "Developer ID Application: ..." identity there is
 #   signed like MACOS_CERT_P12's (hardened runtime, timestamp).
 #
-# Writes dist/deckhand-<version>-macos-arm64.zip (holding Deckhand.app), its .sha256, its .sig and
-# release-notes.md.
+# Writes dist/deckhand-<version>-macos-arm64.zip (holding Deckhand.app), its .sha256, its .sig,
+# dist/deckhand-core-<version>-linux-x86_64.tar.gz with its .sha256 and .sig, and release-notes.md.
+# The Linux tarball comes from the "Linux release tarball" workflow (.github/workflows/
+# release-linux.yml) run that the tag's push started: release.sh checks before building that it
+# has not failed, and after the Mac files that it passed.
 set -eu
 ROOT=$(cd "$(dirname "$0")/.." && pwd)
 cd "$ROOT"
@@ -139,6 +144,11 @@ case "$ZIP_PREFIX" in */*|"") echo "release: no usable ZIP_PREFIX in src/updates
 case "$ZIP_SUFFIX" in */*|"") echo "release: no usable ZIP_SUFFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; *.zip) ;; *) echo "release: ZIP_SUFFIX in src/updatesig/updatesig.odin does not end in .zip" >&2; exit 1 ;; esac
 NAME="$ZIP_PREFIX$VERSION${ZIP_SUFFIX%.zip}"
 NOTES="$DIST/release-notes.md"
+# the Linux core's tarball (src/updatesig/updatesig.odin LINUX_TAR_PREFIX and LINUX_TAR_SUFFIX;
+# scripts/release-linux.sh)
+LINUX_TAR="$(sed -n 's/^LINUX_TAR_PREFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)$VERSION$(sed -n 's/^LINUX_TAR_SUFFIX :: "\(.*\)"$/\1/p' src/updatesig/updatesig.odin)"
+case "$LINUX_TAR" in "deckhand-core-$VERSION-linux-x86_64.tar.gz") ;; *) echo "release: no usable LINUX_TAR_PREFIX/SUFFIX in src/updatesig/updatesig.odin" >&2; exit 1 ;; esac
+COMMIT=$(git rev-parse HEAD)
 
 TMP=$(mktemp -d "${TMPDIR:-/tmp}/deckhand-release.XXXXXX")
 KC=""
@@ -165,6 +175,9 @@ if [ -z "${MACOS_CERT_P12:-}" ] || [ -z "${MACOS_CERT_PASSWORD:-}" ]; then
   sign_resolve || exit 1
   [ "$SIGN_AS" != - ] || echo "release: DECKHAND_SIGN_IDENTITY=-: an AD-HOC release, on purpose (users are asked for their privacy grants again)" >&2
 fi
+# --- the Linux tarball's CI run: there and not failed, before the long build ------------------
+scripts/release-linux.sh --preflight --version "$VERSION" --commit "$COMMIT" --repo "$REPO" ||
+  { echo "release: the Linux core's tarball is not on its way (above)" >&2; exit 1; }
 # --- build and test ------------------------------------------------------------------
 ./build.sh test
 # the time budgets at their own limits (the perf layer: docs/TESTING.md "Timing tests"): a summary
@@ -368,6 +381,10 @@ if [ $SKIP_PREV = 0 ]; then
     { echo "release: the current release's updater did not install $DIST/$NAME.zip" >&2; exit 1; }
 fi
 
+# --- the Linux core's tarball: CI's, checked against CI's sha256, signed here ------------------
+scripts/release-linux.sh --version "$VERSION" --commit "$COMMIT" --repo "$REPO" --key "$KEY" --pub "$SIGN_PUB" --out "$DIST" ||
+  { echo "release: no Linux tarball (above); the Mac files are in $DIST/" >&2; exit 1; }
+
 echo "release: $DIST/$NAME.zip ($(du -h "$DIST/$NAME.zip" | cut -f1)), signature: $SIGNED, notarized: $NOTARIZED, update CDHash: $CDHASH"
 cat "$DIST/$NAME.zip.sha256"
 cleanup
@@ -379,7 +396,7 @@ if [ $UPLOAD = 0 ]; then
   exit 0
 fi
 [ -n "$TMP" ] || TMP=$(mktemp -d "${TMPDIR:-/tmp}/deckhand-release.XXXXXX")
-for f in "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" "$NOTES"; do
+for f in "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" "$DIST/$LINUX_TAR" "$DIST/$LINUX_TAR.sha256" "$DIST/$LINUX_TAR.sig" "$NOTES"; do
   [ -s "$f" ] || { echo "release: $f missing (run without --upload-only first)" >&2; exit 1; }
 done
 # what goes up is what was signed here
@@ -387,6 +404,10 @@ done
   { echo "release: $DIST/$NAME.zip does not match its .sha256" >&2; exit 1; }
 build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$NAME.zip" "$DIST/$NAME.zip.sig" >/dev/null ||
   { echo "release: $DIST/$NAME.zip.sig does not verify" >&2; exit 1; }
+(cd "$DIST" && shasum -a 256 -c "$LINUX_TAR.sha256") >/dev/null ||
+  { echo "release: $DIST/$LINUX_TAR does not match its .sha256" >&2; exit 1; }
+build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$LINUX_TAR" "$DIST/$LINUX_TAR.sig" >/dev/null ||
+  { echo "release: $DIST/$LINUX_TAR.sig does not verify" >&2; exit 1; }
 command -v gh >/dev/null || { echo "release: gh (GitHub CLI) is needed to upload" >&2; exit 1; }
 if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
   # a re-run: replace the assets, but only on a release nobody has published yet
@@ -395,15 +416,20 @@ if gh release view "$TAG" --repo "$REPO" >/dev/null 2>&1; then
     echo "release: $TAG is already published: refusing to replace its assets" >&2
     exit 1
   fi
-  gh release upload "$TAG" --repo "$REPO" --clobber "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig"
+  gh release upload "$TAG" --repo "$REPO" --clobber "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" \
+    "$DIST/$LINUX_TAR" "$DIST/$LINUX_TAR.sha256" "$DIST/$LINUX_TAR.sig"
 else
   # --verify-tag: the tag must already be on GitHub (gh would otherwise make one)
   gh release create "$TAG" --repo "$REPO" --draft --verify-tag --title "Deckhand $VERSION" \
-    --notes-file "$NOTES" --generate-notes "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig"
+    --notes-file "$NOTES" --generate-notes "$DIST/$NAME.zip" "$DIST/$NAME.zip.sha256" "$DIST/$NAME.zip.sig" \
+    "$DIST/$LINUX_TAR" "$DIST/$LINUX_TAR.sha256" "$DIST/$LINUX_TAR.sig"
 fi
 # the round trip: what GitHub serves is what was signed here
 mkdir -p "$TMP/rt"
 gh release download "$TAG" --repo "$REPO" -p "$NAME.zip.sig" -D "$TMP/rt"
 cmp -s "$DIST/$NAME.zip.sig" "$TMP/rt/$NAME.zip.sig" || { echo "release: the uploaded .sig differs from the one signed" >&2; exit 1; }
 build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$NAME.zip" "$TMP/rt/$NAME.zip.sig"
-echo "release: draft $TAG on $REPO has the zip, .sha256 and .sig; check it and publish it on GitHub"
+gh release download "$TAG" --repo "$REPO" -p "$LINUX_TAR.sig" -D "$TMP/rt"
+cmp -s "$DIST/$LINUX_TAR.sig" "$TMP/rt/$LINUX_TAR.sig" || { echo "release: the uploaded Linux .sig differs from the one signed" >&2; exit 1; }
+build/update-sign verify "$SIGN_PUB" "$VERSION" "$DIST/$LINUX_TAR" "$TMP/rt/$LINUX_TAR.sig"
+echo "release: draft $TAG on $REPO has the zip and the Linux tarball, each with its .sha256 and .sig; check it and publish it on GitHub"

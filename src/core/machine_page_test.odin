@@ -11,6 +11,10 @@ import "core:sys/posix"
 import "core:testing"
 import "core:time"
 
+// A release build (-define:DECKHAND_TEST_HOOKS=false) compiles _test files too, and these tests
+// use helpers that exist only with the test hooks: the whole file is behind them.
+when TEST_HOOKS {
+
 @(test)
 machine_page_ssh_argv_test :: proc(t: ^testing.T) {
 	argv, why := machine_page_ssh_argv("me@nuc", 41234, 3000)
@@ -325,3 +329,4 @@ machine_page_user_only :: proc(t: ^testing.T) {
 		testing.expectf(t, may == (k == .UI || k == .Internal), "%v may send machine_open_page: %v", k, may)
 	}
 }
+} // when TEST_HOOKS

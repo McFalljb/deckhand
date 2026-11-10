@@ -14,6 +14,10 @@ import "core:time"
 import cw "../corewire"
 import "../trust"
 
+// A release build (-define:DECKHAND_TEST_HOOKS=false) compiles _test files too, and these tests
+// use helpers that exist only with the test hooks: the whole file is behind them.
+when TEST_HOOKS {
+
 @(test)
 window_hello_refusal_table :: proc(t: ^testing.T) {
 	ok := Window_Hello{token_ok = true, same_user = true, still = true, code = .Allow, floor = .Allow}
@@ -328,3 +332,4 @@ link_linger_bounded :: proc(t: ^testing.T) {
 	link_linger_tick(all = true)
 	testing.expect_value(t, link_linger_count(), n0 - 1)
 }
+} // when TEST_HOOKS

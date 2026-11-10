@@ -21,6 +21,13 @@ event, a caller that may only report. With no window attached, a routed command 
 their tabs stay, and the pages load again when shown. See [How Deckhand
 runs](GUIDE.md#how-deckhand-runs).
 
+**Only this machine's.** Another machine's agents never drive this Mac's CEF: a browser tab is
+always its own machine's, in a window there. A core whose sessions are viewed from another
+machine (or one with no window at all, such as a Linux core) answers its agents' browser commands
+`browser_not_here` at once; this Mac's core drops any tab host message from another machine, and
+the window opens no page for another machine's tab ("Shown on its machine only"). (Decided
+2026-11-09; design §8.2.)
+
 ## 1. Engine: CEF
 
 Why CEF and not WKWebView: CEF renders off-screen into a texture Deckhand draws, so Deckhand can

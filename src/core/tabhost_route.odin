@@ -62,8 +62,26 @@ NO_WINDOW_ERROR :: "no window: this tab's page, app or file view lives in Deckha
 
 no_window :: proc() -> Result {return {error = NO_WINDOW_ERROR, data = `{"code":"no_window"}`}}
 
-// Whether a window hosts tabs now.
-tab_host_up :: proc() -> bool {return window_attached()}
+BROWSER_NOT_HERE_ERROR :: "no browser here: browser tabs run only on the machine they belong to, in its own Deckhand window, and this machine has none (its sessions are viewed from another machine, or it has no window)"
+
+// A browser command with no window of this machine's (design §8.2): its agents' browser is this
+// machine's own, never another machine's, so it does not wait for one.
+browser_not_here :: proc() -> Result {return {error = BROWSER_NOT_HERE_ERROR, data = `{"code":"browser_not_here"}`}}
+
+// Whether a window of this machine's hosts tabs now. A hub (another machine's core, viewing this
+// one's sessions) hosts none: this core's pages, apps and file views stay here (§8.2).
+tab_host_up :: proc() -> bool {return window_attached() && !window_link_hub()}
+
+// The answer to a command a window would host, none being here: browser_not_here for a browser
+// command while another machine views this one (or on a machine with no window at all), else
+// no_window (one may attach).
+@(private = "file")
+tab_host_absent :: proc(cmd: Command) -> Result {
+	browser := strings.has_prefix(command_type(cmd), "browser_")
+	when ODIN_OS != .Darwin do if browser do return browser_not_here() // no window runs here
+	if browser && window_link_hub() do return browser_not_here()
+	return no_window()
+}
 
 // May the tab_host caller send cmd?
 tab_host_may :: proc(cmd: Command) -> bool {
@@ -619,7 +637,8 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !ascii_prefix(c.url, "mailto:") && !c.external && !s.home && tab_host_up() {
 			if r, ch := routed(cmd, caller, request_id, new_id()); r.ok do return r, ch
 		}
-		if !window_attached() do return no_window(), false // the user's ⌘-click: there is a window
+		// the user's ⌘-click: there is a window (a hub's opens nothing for this core: §8.2)
+		if !window_attached() || window_link_hub() do return no_window(), false
 		if !window_open_url(c.url) do return fail("the link could not be opened"), false
 		return {ok = true}, false
 	case Open_File:
@@ -703,7 +722,7 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 // Step 2 and 3: the window's part, then the records its answer says.
 @(private = "file")
 routed :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64 = 0) -> (Result, bool) {
-	if !tab_host_up() do return no_window(), false
+	if !tab_host_up() do return tab_host_absent(cmd), false
 	r, ch, answered := tab_host_call(cmd, caller, request_id, tab_id)
 	if !answered do return r, false // pending: its finished completes it (tab_host_finished_msg)
 	ach := tab_host_after(cmd, caller, tab_id, &r, ch)

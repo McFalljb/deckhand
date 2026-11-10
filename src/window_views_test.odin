@@ -90,3 +90,14 @@ window_views_no_window :: proc(t: ^testing.T) {
 	c := core.run_command(core.Close_Tab{tab_id = r.created_id}, {kind = .Internal})
 	testing.expect(t, c.ok, c.error)
 }
+
+// Another machine's tab never gets a view here (§8.2): no page in this Mac's CEF, no buffer.
+@(test)
+window_views_not_for_another_machine :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	id, _ := core.id_pack(3, 77)
+	tab_view_open(id, core.Browser_Tab{url = "http://127.0.0.1:5432/"}, 0, "")
+	tab_view_open(id + 1, core.Editor_Tab{path = "/etc/hosts"}, 0, "")
+	testing.expect(t, browser_of(id) == nil, "no browser for another machine's tab")
+	testing.expect(t, editor_of(id + 1) == nil, "no editor for another machine's tab")
+}

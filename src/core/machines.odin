@@ -869,6 +869,11 @@ mlink_pump :: proc(l: ^Mach_Link) {
 		}
 		if f.kind != u8(cw.Kind.Data) do continue
 		kind := hub_msg_type(string(f.payload)) // parsed once here; a state message once more, into the replica
+		if hub_msg_dropped(kind) {
+			mach.dropped += 1
+			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, kind)
+			continue
+		}
 		switch kind {
 		case STATE_FULL, STATE_DELTA:
 			mlink_state(l, string(f.payload), kind == STATE_FULL)
@@ -876,9 +881,6 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			machine_route_reply(l.no, string(f.payload))
 		case "term.attached", "term.scroll":
 			machine_term_json(l.no, kind, string(f.payload))
-		case "window.request", "confirmation.parked":
-			mach.dropped += 1
-			if autotest_active do fmt.printfln("[autotest] machine %s: dropped %s", l.name, kind)
 		case "hub.taken":
 			by := json_path(string(f.payload), "by")
 			mlink_close(l)
@@ -889,6 +891,18 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			return
 		}
 	}
+}
+
+// What another machine's core sends that is never acted on here: its window's requests and
+// confirmations (M6-A), and a tab host's calls and reports: its agents' browser, app and file-view
+// tabs live on that machine only (§8.2), never in this Mac's window or its CEF. (Its core sends
+// none: tabhost_route.odin's tab_host_up.)
+hub_msg_dropped :: proc(kind: string) -> bool {
+	switch kind {
+	case "window.request", "confirmation.parked", "tab_host.call", "tab_host.event":
+		return true
+	}
+	return false
 }
 
 // A message's type, read without decoding the rest ("" = not one).

@@ -31,6 +31,7 @@ Fake_Host :: struct {
 	last_tab: u64,
 	events:   [dynamic]Finished_Event, // the finished events the core emitted (results heap)
 	opened:   [dynamic]string, // the links it was asked to open (window.request open_url; temp)
+	requests: int, // window.requests of any op
 }
 
 @(private = "file")
@@ -44,6 +45,7 @@ fh_on_frames :: proc() {
 		if err != .None do return
 		text := string(f.payload)
 		if json_path(text, "type") == "window.request" {
+			fh.requests += 1
 			id, q, _ := window_request_parse(text)
 			if q.op != .Open_Url do continue
 			append(&fh.opened, strings.clone(q.text, context.temp_allocator))
@@ -194,7 +196,9 @@ tab_host_no_window :: proc(t: ^testing.T) {
 		before := len(find_session(a).tabs)
 		v := state.version
 		r := run_command(c, {kind = .UI}, 77)
-		testing.expectf(t, !r.ok && json_path(r.data, "code") == "no_window", "%s: %v", command_type(c), r)
+		want := "no_window"
+		when ODIN_OS != .Darwin do if strings.has_prefix(command_type(c), "browser_") do want = "browser_not_here" // no window ever runs there
+		testing.expectf(t, !r.ok && json_path(r.data, "code") == want, "%s: %v, want %s", command_type(c), r, want)
 		testing.expectf(t, !r.pending, "%s: never pending without a window", command_type(c))
 		testing.expectf(t, len(find_session(a).tabs) == before && state.version == v, "%s: nothing changed", command_type(c))
 	}
@@ -208,6 +212,38 @@ tab_host_no_window :: proc(t: ^testing.T) {
 	testing.expectf(t, r.ok, "app_events without a window: %v", r)
 	r = run_command(Keep_Tab{tab_id = ed}, {kind = .Script})
 	testing.expectf(t, r.ok, "keep_tab is the record's: %v", r)
+}
+
+// Another machine's window (a hub: this core's sessions are viewed from there) hosts none of this
+// core's tabs (§8.2): nothing goes to it as a tab_host.call. Browser commands answer
+// browser_not_here (this machine has no Deckhand browser now), the rest no_window; never pending,
+// nothing changes. (A core with no window on this Mac still answers no_window: one may come back.)
+@(test)
+tab_host_hub_hosts_nothing :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _, pa, ta, app, ed, md, _, _ := fh_begin()
+	defer fh_done()
+	window_link_for_test().hub = true
+	defer window_link_for_test().hub = false
+	for c in fh_routed(a, ta, app, ed, md, pa) {
+		before := len(find_session(a).tabs)
+		v := state.version
+		r := run_command(c, {kind = .UI}, 77)
+		want := strings.has_prefix(command_type(c), "browser_") ? "browser_not_here" : "no_window"
+		testing.expectf(t, !r.ok && json_path(r.data, "code") == want, "%s: %v, want %s", command_type(c), r, want)
+		if want == "browser_not_here" do testing.expectf(t, strings.contains(r.error, "only on the machine"), "%s: %q", command_type(c), r.error)
+		testing.expectf(t, !r.pending, "%s: never pending", command_type(c))
+		testing.expectf(t, len(find_session(a).tabs) == before && state.version == v, "%s: nothing changed", command_type(c))
+	}
+	testing.expectf(t, len(fh.calls) == 0, "nothing went to the hub: %v", fh.calls)
+	testing.expect_value(t, tab_host_waiting(), 0)
+	// nor any view of this core's tabs (their paths and addresses stay here), nor a link to open
+	window_view_open(ta, Browser_Tab{url = "https://a.example/"})
+	window_view_open(ed, Editor_Tab{path = "/tmp/x.txt"})
+	window_view_goto(ed, 3, "")
+	window_view_moved(ed, "/tmp/y.txt")
+	window_view_drop(ed)
+	testing.expectf(t, fh.requests == 0, "no window.request went to the hub: %d", fh.requests)
 }
 
 // With a window: each routed command goes to it as one tab_host.call, and its answer comes back.
@@ -327,7 +363,7 @@ tab_host_late_answers_and_timeouts :: proc(t: ^testing.T) {
 		testing.expect_value(t, json_path(fh.events[3].result.data, "code"), "no_window")
 	}
 	r = run_command(Browser_Read{tab_id = ta}, {kind = .Script}, 505)
-	testing.expect_value(t, json_path(r.data, "code"), "no_window")
+	testing.expect_value(t, json_path(r.data, "code"), ODIN_OS == .Darwin ? "no_window" : "browser_not_here") // no window ever runs on Linux
 }
 
 // The tab_host caller (a page's or an app's reports): TAB_HOST_COMMANDS and nothing else, so it

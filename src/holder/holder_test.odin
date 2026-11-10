@@ -1168,3 +1168,39 @@ successor_secret_reserves_the_holder :: proc(t: ^testing.T) {
 		testing.expectf(t, !strings.contains(string(fr.payload), secret2) || fr.kind == .Goodbye_Ack, "the secret in a %v frame", fr.kind)
 	}
 }
+
+// Linux, review round 1: pidfd_open failing for any reason but ESRCH (ENOSYS on an old kernel,
+// EPERM under seccomp, EMFILE) never marks a live orphan ended (its PTY would be released): its
+// liveness is polled instead, and its exit is still seen.
+@(test)
+orphan_without_pidfd_is_polled :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return
+	else {
+		test_pidfd_errno = ENOSYS
+		defer test_pidfd_errno = 0
+		sync.mutex_lock(&fork_lock)
+		pid := c.int(posix.fork())
+		if pid == 0 {
+			for {posix.sleep(60)}
+		}
+		sync.mutex_unlock(&fork_lock)
+		defer kill(pid, SIGKILL)
+		h: Holder
+		h.kq = -1
+		h.cfg.quiet = true
+		term := Term{id = 7, pid = pid, orphan = true, master = -1}
+		append(&h.terms, &term)
+		defer delete(h.terms)
+		defer if h.kq >= 0 do close(h.kq)
+		orphans_watch(&h)
+		testing.expect(t, !term.reaped, "a live orphan was marked ended when pidfd_open failed with ENOSYS")
+		orphans_poll(&h)
+		testing.expect(t, !term.reaped, "a live orphan was marked ended by the poll")
+		kill(pid, SIGKILL)
+		st: c.int
+		waitpid(pid, &st, 0)
+		orphans_poll(&h)
+		testing.expect(t, term.reaped, "the orphan's exit was not seen")
+		testing.expect_value(t, term.exit.code, i64(-1))
+	}
+}

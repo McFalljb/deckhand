@@ -619,6 +619,33 @@ reexec_keeper_reaped :: proc(t: ^testing.T) {
 	testing.expectf(t, zombies == "", "zombie children of the holder: %q", zombies)
 }
 
+// Review round 1 (Linux): the old image has another child (an unreaped launcher, say) at the
+// upgrade. The new image still reaps its keeper, and that child too: no zombie stays behind.
+@(test)
+reexec_keeper_reaped_with_a_stray :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return // macOS finds the keeper by its live token (unchanged)
+	else {
+		r, ok := rig_new(t)
+		defer rig_free(t, r)
+		if !ok || !rig_start(t, r) do return
+		rig_attach(t, r)
+		rig_spawn(t, r, 1, COUNTER)
+		rig_hook(r, "stray-child")
+		failed, closed := rig_upgrade(r, r.bin)
+		testing.expectf(t, closed, "%q", failed)
+		if !closed do return
+		if _, aok := rig_attach(t, r); !aok do return
+		zombies := ""
+		start := time.tick_now()
+		for time.tick_since(start) < 4 * time.Second {
+			zombies = holder_zombies(r.pid)
+			if zombies == "" && time.tick_since(start) > 1500 * time.Millisecond do break // the stray exits 1 s after its fork
+			rig_read(r, 50)
+		}
+		testing.expectf(t, zombies == "", "zombie children of the holder: %q", zombies)
+	}
+}
+
 // The holder's children that are zombies ("pid stat" lines), from ps.
 holder_zombies :: proc(holder: c.int) -> string {
 	out := fmt.tprintf("%s.ps", os.get_env("TMPDIR", context.temp_allocator))

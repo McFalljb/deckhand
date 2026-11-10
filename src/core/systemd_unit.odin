@@ -137,3 +137,6 @@ systemd_scope_wanted :: proc(test_mode, hook_systemd, hook_direct: bool) -> bool
 	if test_mode do return hook_systemd
 	return !hook_direct
 }
+
+// Whether args may go on systemd-run's command line (scope_launch).
+systemd_scope_args_ok :: proc(args: []string) -> bool {return true}

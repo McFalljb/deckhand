@@ -398,6 +398,20 @@ handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {
 
 // ---- orphans (keeper.odin) ----
 
+// Tests make pidfd_open fail with this errno (an old kernel, seccomp); 0 otherwise, always.
+test_pidfd_errno: c.int
+
+@(private = "file")
+pidfd_open :: proc(pid: c.int) -> c.int {
+	if test_pidfd_errno != 0 {
+		__errno_location()^ = test_pidfd_errno
+		return -1
+	}
+	return c.int(syscall(SYS_pidfd_open, pid, c.uint(0)))
+}
+
+orphans_poll :: proc(h: ^Holder) {}
+
 // Watches every orphan that still runs: a pidfd each, in an epoll set (h.kq; made on first use)
 // whose events carry the pidfd and the pid. One that is gone already ended unseen.
 orphans_watch :: proc(h: ^Holder) {
@@ -410,7 +424,7 @@ orphans_watch :: proc(h: ^Holder) {
 				return
 			}
 		}
-		pfd := c.int(syscall(SYS_pidfd_open, c.int(t.pid), c.uint(0)))
+		pfd := pidfd_open(t.pid)
 		if pfd < 0 {
 			hlog(h, "terminal %d: pid %d is gone already (errno %d): exit unknown", t.id, t.pid, errno())
 			orphan_ended(t, -1, false)

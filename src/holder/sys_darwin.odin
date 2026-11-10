@@ -294,6 +294,9 @@ relisten :: proc(h: ^Holder) {}
 
 // ---- orphans (keeper.odin) ----
 
+// Linux's fallback for an orphan with no pidfd: never needed here (kqueue).
+orphans_poll :: proc(h: ^Holder) {}
+
 // Registers every orphan that still runs with the kqueue (made on first use). One that is gone
 // already ended unseen: its exit is unknown (code -1).
 orphans_watch :: proc(h: ^Holder) {

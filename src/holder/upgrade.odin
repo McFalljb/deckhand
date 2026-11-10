@@ -104,6 +104,15 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	for x in ([]c.int{h.listen_fd, h.lock_fd, h.wake_fd, wake_write_fd, h.kq}) do if x >= 0 && !is_cloexec(x) do return "an fd is not close-on-exec"
 	for o in h.conns do if !is_cloexec(o.fd) do return "a connection is not close-on-exec"
 
+	// test hook: a child of the old image that is neither a session nor the keeper (an unreaped
+	// launcher, say), exiting after the exec: the new image must still reap it and the keeper
+	if _, on := hook("stray-child", true); on {
+		if s := posix.fork(); s == 0 {
+			posix.sleep(1)
+			_exit(0)
+		}
+	}
+
 	// 5. the keeper
 	kp: [2]c.int
 	sync_lock()

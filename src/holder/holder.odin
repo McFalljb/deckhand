@@ -114,6 +114,8 @@ Term :: struct {
 	spawned_at:                 time.Tick,
 	requester:                  u64, // the asking connection's serial
 	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from orphans_read
+	polled:                     bool, // Linux: an orphan with no pidfd: orphans_poll checks it is still that process
+	start_time:                 u64, // Linux: its start time (/proc/<pid>/stat), against pid reuse
 }
 
 Conn :: struct {

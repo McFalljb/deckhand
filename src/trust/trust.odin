@@ -92,10 +92,13 @@ ready_peer_allowed :: proc(mode: Mode, own_uid: u32, launched_pid: i32, at_accep
 // The holder upgrade's keeper (§7.3 step 4): the peer on its socketpair must be the holder's own
 // pid running a NEW image (the exec happened: pidversion changed). Then image_allowed decides on
 // what that image is. old_pidversion: the image that forked the keeper.
+// Linux has no pidversion (peer_linux.odin): there the exec is shown by the socket itself, whose
+// other end only the exec'd image holds (the old one never writes to it, and kills the keeper if
+// its execve fails), so the pid is the check.
 successor_image_allowed :: proc(mode: Mode, own_uid: u32, holder_pid, old_pidversion: i32, peer: Peer) -> Decision {
 	if d := peer_allowed(mode, own_uid, peer); d != .Allow do return d
 	if holder_pid <= 0 || peer.pid != holder_pid do return .Changed
-	if peer.pidversion == old_pidversion do return .Not_Exec
+	when ODIN_OS != .Linux do if peer.pidversion == old_pidversion do return .Not_Exec
 	return .Allow
 }
 

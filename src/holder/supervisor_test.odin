@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The supervisor (supervisor.odin) on a fake clock, and SUPERVISE over a socketpair.

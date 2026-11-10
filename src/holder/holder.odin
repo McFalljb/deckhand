@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The session holder (docs/plans/background-core.md §3, §5.6, §5.7, §7.2): one poll() loop
@@ -16,6 +15,9 @@ package holder
 // - GOODBYE_ACK follows every OUTPUT up to each acked offset; nothing is sent after it. The
 //   connection then stays open until the core closes it (at most LINGER): a peer that closed its
 //   end can no longer be read (LOCAL_PEERTOKEN fails), and the core checks it on the ack.
+// - On Linux (M6-L3, sys_linux.odin) the same, with SO_PEERCRED: the peer is the same user only
+//   (§8.3), read at accept; there is no live token to read again, so peer_still holds by
+//   construction.
 // - The HMAC key is in WELCOME and nowhere else.
 
 import "core:c"
@@ -33,7 +35,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 5
+HOLDER_REV :: 6
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -111,7 +113,7 @@ Term :: struct {
 	exec_fd:                    c.int,
 	spawned_at:                 time.Tick,
 	requester:                  u64, // the asking connection's serial
-	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from kqueue
+	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from orphans_read
 }
 
 Conn :: struct {
@@ -141,7 +143,7 @@ Holder :: struct {
 	sock_path:         string,
 	lock_fd:           c.int,
 	wake_fd:           c.int, // SIGCHLD self-pipe's read end, or -1
-	kq:                c.int, // kqueue watching orphans' exits (NOTE_EXITSTATUS), or -1
+	kq:                c.int, // watching orphans' exits (macOS: a kqueue, NOTE_EXITSTATUS; Linux: an epoll set of pidfds), or -1
 	upgrade_error:     string, // the keeper adopted the terminals: why the new image did not get them (WELCOME)
 	can_upgrade:       bool, // the holder binary (never an in-process test holder): UPGRADE may exec
 	keeper_pid:        c.int, // after an upgrade: the keeper (our child) until it is reaped, else 0
@@ -245,7 +247,7 @@ run_dir_problem :: proc(dir: string) -> string {
 	if posix.lstat(strings.clone_to_cstring(dir, context.temp_allocator), &st) != .OK do return "missing"
 	if !posix.S_ISDIR(st.st_mode) do return "not a directory"
 	if u32(st.st_uid) != trust.own_uid() do return "not owned by us"
-	if transmute(u16)st.st_mode & 0o777 != 0o700 do return "not mode 0700"
+	if st.st_mode & {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IWGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH} != posix.S_IRWXU do return "not mode 0700"
 	return ""
 }
 
@@ -260,7 +262,7 @@ holder_listen :: proc(h: ^Holder) -> bool {
 		return false
 	}
 	copy(addr.sun_path[:], h.sock_path)
-	addr.sun_len = size_of(addr)
+	when ODIN_OS == .Darwin do addr.sun_len = size_of(addr)
 	sync_lock()
 	h.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0)
 	if h.listen_fd >= 0 do set_cloexec(h.listen_fd)
@@ -428,7 +430,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	}
 
 	timeout := min(timeout_ms, next_timer_ms(h))
-	n := poll(raw_data(fds), c.uint(len(fds)), c.int(max(timeout, 0)))
+	n := poll(raw_data(fds), auto_cast len(fds), c.int(max(timeout, 0)))
 	if n > 0 {
 		for pfd, k in fds {
 			if pfd.revents == 0 do continue

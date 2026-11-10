@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The supervisor (docs/plans/background-core.md §6 "Core crashes", §7.7): the holder relaunches
@@ -23,6 +22,10 @@ package holder
 //
 // The binary launched is checked first (trust.image_allowed on the file, as UPGRADE's path), and
 // again by the launcher on the live process (its ready check, P8).
+//
+// On Linux `<serve> launch` starts the core through systemd (its user unit, or a transient scope:
+// src/core launch_linux.odin), so it never descends from the holder there either. No window runs on
+// Linux and no code signature names one, so a SUPERVISE as a first frame is refused there.
 
 import "core:c"
 import "core:fmt"
@@ -37,10 +40,13 @@ SUP_LAUNCH_WAIT :: 20 * time.Second // a launched core that has not said SUPERVI
 SUP_BACKOFF_MAX :: 30 * time.Second
 SUP_MAX_FAILURES :: 6
 SUP_SERVE_BIN :: "deckhand-core-serve"
-SUP_O_WRONLY :: 0x0001
-SUP_O_APPEND :: 0x0008
-SUP_CURRENT :: "core/current/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN // under the data dir
-SUP_PREVIOUS :: "core/previous/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN
+when ODIN_OS == .Linux {
+	SUP_CURRENT :: "core/current/" + SUP_SERVE_BIN // under the data dir (src/core launch_linux.odin's install)
+	SUP_PREVIOUS :: "core/previous/" + SUP_SERVE_BIN
+} else {
+	SUP_CURRENT :: "core/current/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN // under the data dir
+	SUP_PREVIOUS :: "core/previous/Deckhand Core.app/Contents/MacOS/" + SUP_SERVE_BIN
+}
 SUP_MARKER :: "core/use-previous" // core_versions.odin's CORE_USE_PREVIOUS
 
 Supervisor :: struct {
@@ -245,6 +251,11 @@ supervise_window :: proc(h: ^Holder, cn: ^Conn, f: holderwire.Frame) {
 	}
 	if h.forked {
 		conn_drop(h, cn, "SUPERVISE: a keeper does not supervise")
+		return
+	}
+	when ODIN_OS == .Linux {
+		// no window here, and without code signing any process of this user would pass as one
+		conn_drop(h, cn, "SUPERVISE from a window: there is no window on Linux")
 		return
 	}
 	peer, tok := trust.peer_read_token(posix.FD(cn.fd))

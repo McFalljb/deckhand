@@ -1,13 +1,11 @@
-#+build darwin
 package holder
 
-// Starting session processes on a PTY (as src/core/pty_posix.odin's pty_spawn does), the signal
-// state the holder and its children start with, and the TCC disclaim at start.
+// Starting session processes on a PTY (as src/core/pty_posix.odin's pty_spawn does) and the signal
+// state the holder and its children start with. The fds inherited at start (cloexec_inherited) and
+// the TCC disclaim (macOS) are the OS files' (sys_darwin.odin, sys_linux.odin).
 
 import "core:c"
 import "core:fmt"
-import "core:os"
-import "core:strconv"
 import "core:strings"
 import "core:sync"
 
@@ -27,20 +25,6 @@ reset_signals :: proc "contextless" () {
 	}
 	empty: u32
 	sigprocmask(SIG_SETMASK, &empty, nil)
-}
-
-// Every fd above 2 this process has made close-on-exec: one a launcher leaked to us (a shell, a
-// CI runner, a direct start that did not use POSIX_SPAWN_CLOEXEC_DEFAULT) never reaches a
-// session. At start, before any fd of the holder's own is open (theirs are close-on-exec).
-cloexec_inherited :: proc() {
-	F_GETFD :: 1
-	rl: Rlimit
-	top := c.int(OPEN_MAX)
-	if getrlimit(RLIMIT_NOFILE, &rl) == 0 do top = c.int(min(max(rl.cur, rl.max), OPEN_MAX)) // above the soft limit too
-	for fd in c.int(3) ..< top {
-		flags := fcntl(fd, F_GETFD)
-		if flags >= 0 && flags & FD_CLOEXEC == 0 do fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
-	}
 }
 
 // RLIMIT_NOFILE as the holder was started with (raise_fd_limit raises its own): set again in
@@ -127,43 +111,4 @@ exit_from_wait :: proc(status: c.int) -> (code, signal: i64, ended: bool) {
 	if low == 0 do return i64((int(status) >> 8) & 0xff), 0, true
 	if low != 0x7f do return 0, i64(low), true
 	return 0, 0, false // stopped, not ended
-}
-
-RESPONSIBLE_ENV :: "_DECKHAND_RESPONSIBLE"
-
-// §5.7, S2: the holder is TCC-responsible for itself (and so for its children), not Deckhand.app
-// or launchd's job. Re-execs this binary in place (POSIX_SPAWN_SETEXEC keeps the pid) with the
-// disclaim attribute, marking the environment with our pid so the new image knows it is done.
-// Returns only when there is nothing to do or the re-exec failed (logged; the holder carries on).
-disclaim_responsibility :: proc() {
-	own := getpid()
-	buf: [16]u8
-	pid_str := strconv.write_int(buf[:], i64(own), 10)
-	if os.get_env(RESPONSIBLE_ENV, context.temp_allocator) == pid_str { // env-read-ok: a constant: the TCC re-exec marker
-		log_line("TCC: responsible for itself (disclaimed)")
-		return
-	}
-	fnp := dlsym(RTLD_DEFAULT, "responsibility_spawnattrs_setdisclaim")
-	if fnp == nil {
-		log_line("TCC disclaim unavailable (no responsibility_spawnattrs_setdisclaim): carrying on")
-		return
-	}
-	setdisclaim := cast(proc "c" (attr: ^rawptr, disclaim: c.int) -> c.int)fnp
-	path_buf: [4096]u8
-	n := proc_pidpath(own, &path_buf, size_of(path_buf))
-	if n <= 0 {
-		log_line("TCC disclaim: no executable path: carrying on")
-		return
-	}
-	path := strings.clone_to_cstring(string(path_buf[:n]), context.temp_allocator)
-	setenv(RESPONSIBLE_ENV, strings.clone_to_cstring(pid_str, context.temp_allocator), 1)
-	attr: rawptr
-	posix_spawnattr_init(&attr)
-	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETEXEC)
-	setdisclaim(&attr, 1)
-	c_argv := make([]cstring, len(os.args) + 1, context.temp_allocator)
-	for a, i in os.args do c_argv[i] = strings.clone_to_cstring(a, context.temp_allocator)
-	r := posix_spawn(nil, path, nil, &attr, raw_data(c_argv), _NSGetEnviron()^)
-	posix_spawnattr_destroy(&attr)
-	log_line(fmt.tprintf("TCC disclaim: re-exec failed (%d): carrying on", r))
 }

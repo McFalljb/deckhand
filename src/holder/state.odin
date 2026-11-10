@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The holder's state, as an upgrade hands it from the old image to the new one (docs/plans/

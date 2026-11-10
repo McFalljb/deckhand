@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // UPGRADE{path} (docs/plans/background-core.md §7.3): the holder re-execs into a new binary in
@@ -116,6 +115,10 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	set_cloexec(kp[1])
 	sync_unlock()
 	set_nosigpipe(kp[0])
+	if !handoff_giver_prepare(kp[0]) {
+		close(kp[0]); close(kp[1])
+		return fmt.tprintf("the keeper's socket: errno %d", errno())
+	}
 	me := trust.self_peer()
 	if !me.ok {
 		close(kp[0]); close(kp[1])
@@ -203,6 +206,10 @@ dry_run :: proc(h: ^Holder, path: string, blob: []u8, fds: []c.int, own: trust.C
 	set_cloexec(dp[1])
 	sync_unlock()
 	set_nosigpipe(dp[0])
+	if !handoff_giver_prepare(dp[0]) {
+		close(dp[0]); close(dp[1])
+		return fmt.tprintf("the dry run's socket: errno %d", errno())
+	}
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	argv := resume_argv(h, cpath, "--dry-run-resume", dp[1])
 	env := _NSGetEnviron()^

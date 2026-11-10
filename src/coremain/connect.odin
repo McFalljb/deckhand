@@ -2,7 +2,8 @@ package main
 
 // `deckhand-core-serve connect [--from NAME] [--core ID]` (docs/plans/background-core.md §10.4 M6-A): run on
 // this machine by another machine's ssh (its hub link, src/core/machines.odin). It dials this
-// machine's core.sock, launching a core as `deckhand --ctl` does when none answers (≤ 15 s),
+// machine's core.sock, launching a core as `deckhand --ctl` does when none answers (≤ 15 s; on
+// Linux through the systemd user unit when `install` wrote it: launch_linux.odin),
 // checks that the process there is this user's and has the core's code (core_peer_check, as the
 // window does), and says the hub hello: framed, "peer":"hub", this run's window token (it runs as
 // this user, so it can read run/window.token), NAME, the other machine's (Viewed from <NAME>), and
@@ -62,6 +63,7 @@ connect_main :: proc(args: []string) -> int {
 		}
 		if time.tick_diff(time.tick_now(), deadline) <= 0 {
 			fmt.eprintln("deckhand-core-serve connect: no core answered within 15 s")
+			when ODIN_OS == .Linux do fmt.eprintfln("deckhand-core-serve connect: its log: journalctl --user -u deckhand-core (systemd), else %s/%s", run, core.CORE_LOG)
 			return 1
 		}
 		time.sleep(50 * time.Millisecond)

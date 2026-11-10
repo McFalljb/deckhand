@@ -6,6 +6,7 @@ package core
 import "base:runtime"
 import "core:fmt"
 import "core:os"
+import "core:path/filepath"
 import "core:strings"
 import "core:testing"
 import "core:time"
@@ -70,9 +71,9 @@ core_use_previous_sticks :: proc(t: ^testing.T) {
 	defer remove_tree(data)
 	vdir := core_versions_dir(data)
 	for k in ([]string{"0.1.7-aaaaaaaaaaaa", "0.1.8-bbbbbbbbbbbb", "0.1.9-cccccccccccc"}) {
-		bin := fmt.tprintf("%s/%s/%s/Contents/MacOS", vdir, k, CORE_APP)
-		testing.expect_value(t, os.make_directory_all(bin), nil)
-		_ = os.write_entire_file(fmt.tprintf("%s/%s", bin, CORE_SERVE_BIN), transmute([]u8)string("x"))
+		serve := fmt.tprintf("%s/%s/%s", vdir, k, core_serve_rel())
+		testing.expect_value(t, os.make_directory_all(filepath.dir(serve)), nil)
+		_ = os.write_entire_file(serve, transmute([]u8)string("x"))
 	}
 	testing.expect(t, core_use_previous_set(data) != "", "no current core: nothing to go back from")
 	testing.expect_value(t, core_make_current(vdir, "0.1.7-aaaaaaaaaaaa"), "")

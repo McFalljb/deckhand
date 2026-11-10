@@ -132,8 +132,15 @@ core_serve_of :: proc(data, which: string) -> string {
 	vdir := core_versions_dir(data)
 	key := core_link_read(vdir, which)
 	if key == "" do return ""
-	p := fmt.tprintf("%s/%s/%s/Contents/MacOS/%s", vdir, key, CORE_APP, CORE_SERVE_BIN)
+	p := fmt.tprintf("%s/%s/%s", vdir, key, core_serve_rel())
 	return os.is_file(p) ? p : ""
+}
+
+// The serve binary's path inside an install dir: in its Core.app on macOS, alone on Linux
+// (launch_linux.odin). Temp.
+core_serve_rel :: proc() -> string {
+	when ODIN_OS == .Linux do return CORE_SERVE_BIN
+	return fmt.tprintf("%s/Contents/MacOS/%s", CORE_APP, CORE_SERVE_BIN)
 }
 
 // What <vdir>/<name> points at: a key (one path element), else "".
@@ -159,7 +166,9 @@ core_link_set :: proc(vdir, name, key: string) -> bool {
 
 // Every process's command line (this user's and others': ps shows them all), one per line. Temp.
 core_in_use :: proc() -> string {
-	out, st := run_group({"/bin/ps", "-axww", "-o", "args="}, 10 * time.Second)
+	argv := []string{"/bin/ps", "-axww", "-o", "args="}
+	when ODIN_OS == .Linux do argv = {"ps", "-e", "-ww", "-o", "args="} // procps
+	out, st := run_group(argv, 10 * time.Second)
 	return st == .Ok ? out : "?" // unknown: nothing is collected
 }
 

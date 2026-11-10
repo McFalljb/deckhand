@@ -5,7 +5,7 @@ Deckhand starts it in a Claude tab's PTY as `fake-claude.py --plugin-dir DIR [--
 It behaves like Claude Code where Deckhand can see it: it runs the plugin's hooks (DIR/hooks/
 hooks.json) with realistic JSON on stdin, and the plugin's `deckhand` command, and shows a prompt.
 
-- Prints `FAKE CLAUDE ARGS: …` and `session <id>` (the --resume id, else a new uuid4); exits 3
+- Prints `FAKE CLAUDE ARGS: …`, `--resume <id>` when resumed (its own line, for `waitfor`) and `session <id>` (the --resume id, else a new uuid4); exits 3
   without --plugin-dir.
 - SessionStart hooks (source "resume" with --resume, else "startup").
 - FAKE_CLAUDE_SCRIPT: a file of CLI calls, one per line (shell words), run as DIR/bin/deckhand
@@ -391,6 +391,8 @@ def clean(line):
 def main():
     plugin_dir, resume, rest = parse_args(sys.argv[1:])
     out("FAKE CLAUDE ARGS: " + " ".join(sys.argv[1:]))
+    if resume:  # on a line of its own: at a long worktree path the one above wraps through the id
+        out(f"--resume {resume}")
     if not plugin_dir or not os.path.isfile(os.path.join(plugin_dir, "hooks", "hooks.json")):
         out("fake claude: --plugin-dir DIR (with hooks/hooks.json) is required")
         sys.exit(3)

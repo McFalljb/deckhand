@@ -547,6 +547,11 @@ ACTIONS := [?]Action {
 		if !is do return nil, false
 		return core.Open_File{path = mt.path}, true
 	}},
+	// another machine's web page in a local browser tab (machine_page.odin): the palette asks for its port
+	{id = "machine_open_page", label = "Open a machine's web page…", make = proc() -> (core.Command, bool) {
+		for m in state.machines do if m.status == .Online do return core.Set_Focus{"palette"}, true
+		return nil, false
+	}, prepare = proc() {palette_open_pages(0)}},
 	// app tabs (app_tab.odin): the palette asks for a command line, or lists .deckhand/apps.json's
 	{id = "new_app_tab", label = "New app tab…", make = proc() -> (core.Command, bool) {
 		cs := core.cur()

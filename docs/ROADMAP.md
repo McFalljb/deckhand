@@ -177,6 +177,11 @@ Design: [plans/background-core.md](plans/background-core.md) (G13, G14).
   Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)). Planned as six Mac→Mac PRs,
   then four Linux PRs: [plans/background-core.md §10.4](plans/background-core.md#104-m6-in-prs).
 - ⬜ **M7** Several windows on one core.
+- ⬜ **M8** A remote machine's own browser, shown here: a full browser running on that machine
+  (headless, so a Linux core has one too), its frames streamed into a tab of this window and the
+  user's input sent back, so that machine's agents drive their own browser and the user sees it.
+  Until then, **Open web page…** forwards one of its ports to a plain local tab (issue #5's
+  smaller step), and its agents have no browser while it is viewed from here (M6-D).
 - ⬜ **D0** An Apple Developer ID: notarized builds and the hardened runtime. One line in
   `scripts/sign.sh` switches the identity; the trust checks follow by themselves.
 

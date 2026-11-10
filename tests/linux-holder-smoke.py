@@ -83,7 +83,7 @@ class Dirs:
             os.makedirs(p, mode=0o700)
         # keep_sessions on: test mode's default is off (commands.odin keep_sessions_default)
         with open(f"{self.data}/workspace.json", "w") as f:
-            json.dump({"settings": {"keep_sessions": True}}, f)
+            json.dump({"v": 1, "settings": {"keep_sessions": True}}, f)
         self.env = {
             "HOME": self.home,
             "SHELL": "/bin/sh",

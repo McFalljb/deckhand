@@ -10,7 +10,7 @@ Users start with the [README](../README.md) and the [user guide](GUIDE.md); the 
 2. [Building and running](#building-and-running) ([the rename](#the-rename), [code signing](#code-signing), [the Linux core](#building-the-linux-core))
 3. [Rebuilding libghostty-vt](#rebuilding-libghostty-vt)
 4. [Pinned versions](#pinned-versions)
-5. [Releases](#releases) ([update signing](#update-signing))
+5. [Releases](#releases) ([the Linux tarball](#the-linux-tarball), [update signing](#update-signing))
 6. [Contributing](#contributing)
 7. [Architecture](#architecture)
 8. [Looks](#looks)
@@ -183,7 +183,7 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
 
 - **systemd** (M6-L2, `src/core/launch_linux.odin`, `src/core/systemd_unit.odin`): `install`
   copies the binary, and the session holder `deckhand-core` beside it, to
-  `~/.local/share/deckhand/core/<version>-<sha12>/` (`dev` for now; the sha of the pair), points
+  `~/.local/share/deckhand/core/<version>-<sha12>/` (a release's `DECKHAND_VERSION`, else `dev`; the sha of the pair; with the CLI and the integrations found beside it: [the Linux tarball](#the-linux-tarball)), points
   `core/current` at it, writes `~/.config/systemd/user/deckhand-core.service` (0644, atomically)
   and runs `systemctl --user daemon-reload`. The unit runs `core/current`'s binary (`Type=exec`)
   with `Restart=on-failure` (not after exit 2 or 3: usage, another core running; at most 5 starts
@@ -285,12 +285,14 @@ v1.4.0. `./build.sh test` checks struct sizes, offsets and key-enum values again
 ## Releases
 
 Releases are built and signed on the release signer's Mac with one command,
-`scripts/release.sh --version X.Y.Z`. CI tests every push but builds no releases.
+`scripts/release.sh --version X.Y.Z`. CI tests every push and builds one release file, the Linux
+core's tarball (below), which the Mac then checks and signs.
 
-1. Commit everything, `git tag vX.Y.Z`, `git push origin vX.Y.Z`.
-2. `scripts/release.sh --version X.Y.Z` (or first `--no-upload`, a dry run into `dist/`, then
-   `--upload-only` to draft what it left there).
-3. Check the draft on GitHub (notes and the three files) and publish it.
+1. Commit everything, `git tag vX.Y.Z`, `git push origin vX.Y.Z`. The push starts the **Linux
+   release tarball** workflow (`.github/workflows/release-linux.yml`, about 90 s).
+2. `scripts/release.sh --version X.Y.Z` (or first `--no-upload`, a dry run into `dist/` that
+   uploads nothing, then `--upload-only` to draft what it left there).
+3. Check the draft on GitHub (notes and the six files) and publish it.
 
 What `release.sh` does:
 
@@ -305,6 +307,11 @@ What `release.sh` does:
   `dev.deckhand.core`).
 - **Packs** the zip, unpacks it again to check its signature and CDHash, and writes the `.sha256`
   and the `.sig` ([Update signing](#update-signing)).
+- **Fetches the Linux tarball** (`scripts/release-linux.sh`, [below](#the-linux-tarball)): before
+  the build it finds the tag's run of the Linux workflow and refuses if there is none or it
+  failed; after the Mac files the run must have passed. It downloads the run's artifact, checks it
+  against the sha256 the run printed and checks its listing and binaries, then signs it with the
+  update key.
 - **Tests the update path:** the current release's updater installs the new zip
   (`tests/scripts/update-from-release.sh`, 1–2 min). A published binary has no update fixtures,
   so the script builds the updater from the latest release's tag in a temporary worktree (as the
@@ -312,10 +319,11 @@ What `release.sh` does:
   checks the installed bundle. `--prev TAG` names the tag; `--skip-prev-updater` is only for a
   first release.
 - **Drafts** the GitHub Release with `gh --verify-tag` (the tag must be pushed; a re-run replaces a
-  draft's files, never a published release's), then downloads the `.sig` again and verifies it.
+  draft's files, never a published release's), then downloads both `.sig`s again and verifies them.
 
 A release, "Deckhand X.Y.Z", carries `deckhand-<version>-macos-arm64.zip` (exactly
-`Deckhand.app`), its `.sha256` and its `.sig`. Until the Developer ID it is self-signed and not
+`Deckhand.app`), its `.sha256` and its `.sig`, and `deckhand-core-<version>-linux-x86_64.tar.gz`
+with its `.sha256` and `.sig`. Until the Developer ID it is self-signed and not
 notarized, so Gatekeeper blocks the first open (the README says what to do); the notes say so. The
 app is about 340 MB, mostly Chromium, and carries the third-party licences in
 `Contents/Resources/licenses/`. The repository's name lives in one place, `UPDATE_REPO` in
@@ -339,6 +347,79 @@ uses the fixed data and runtime dirs, never enters test mode, and has no `--prin
 `scripts/check-env-reads.py` (in `./build.sh test` and `check-release-build.sh`) fails on any
 environment read that is not a known literal name, so a new knob can't skip `hook_env()`.
 After a release build, run `./build.sh` again before the scenes: they need the hooks.
+
+### The Linux tarball
+
+A Linux machine runs only the core (no window), so its release file is the core, its session
+holder, the CLI and the integrations, installed by Deckhand over SSH (M6-E; [design
+§8.4](plans/background-core.md#84-install)).
+
+- **Built by CI**, never on the Mac: `.github/workflows/release-linux.yml` on ubuntu-latest, on the
+  push of a `v*` tag (also on workflow_dispatch with a `version`, and on pull requests that change
+  the packing, as `0.0.0`). It has `permissions: contents: read` and no secrets. It runs
+  `scripts/pack-linux.sh X.Y.Z dist`, which builds `deckhand-core-serve` with
+  `-define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_VERSION=X.Y.Z`, and the holder and the CLI
+  without hooks, checks them with `scripts/check-release-build.sh`, and packs. Then
+  `tests/linux-release-check.sh` installs the tarball once. The job uploads the tarball as the
+  run's artifact, named after the tarball, and prints `tarball-sha256 <hex> <name>`.
+- **The version** is the `DECKHAND_VERSION` define: on Linux `core_version()` returns it, as macOS
+  reads Info.plist. So `install` makes `core/X.Y.Z-<sha12>/`, and `check` and the framed hello
+  carry the version. The build id (the hello's and `check`'s `build`) is the first 12 of the
+  sha256 of the holder and serve pair, as on macOS.
+- **Layout** (what M6-E's extractor and `install` expect):
+  ```
+  deckhand-core-X.Y.Z-linux-x86_64/            the only top-level entry
+    deckhand-core-serve   0755  the core; `deckhand-core-serve install --data DIR` installs all below
+    deckhand-core         0755  the session holder
+    deckhand              0755  the CLI (claude_cli_path on Linux)
+    pi/                         the pi integration (extensions/, lib/, skills/, extensions.json, ...)
+    claude-code/                the Claude Code plugin (.claude-plugin/plugin.json, bin/, hooks/, skills/)
+    LICENSE  THIRD_PARTY_NOTICES.md
+  ```
+  It is a GNU tar, gzip'd. It holds regular files and folders only: no symlinks, hard links or
+  devices (`pack-linux.sh` fails on any). Owner and group are `0:0` (numeric). Modes are
+  0755 for folders and executables and 0644 for the rest, nothing writable by group or others.
+  Names are sorted, and every mtime is the tag commit's time (`gzip -n`: no name or time in the
+  header). `install` on Linux copies `deckhand-core-serve`, `deckhand-core`, `deckhand`, `pi/` and
+  `claude-code/` from beside the binary into `core/<key>/`.
+- **The `.sig`** is the updater's v3 format with `cdhash none`, since Linux has no code signature.
+  The size and the sha256 cover the whole tarball. The manifest signed is exactly:
+  ```
+  deckhand update v3
+  version X.Y.Z
+  file deckhand-core-X.Y.Z-linux-x86_64.tar.gz
+  size <bytes, decimal>
+  sha256 <64 lower-case hex>
+  cdhash none
+  ```
+  Each line ends with `\n`. The `.sig` file is three lines: `deckhand-update-sig v3`,
+  `cdhash none`, `signature <base64 Ed25519 over the manifest>`. Use `UPDATE_PUBLIC_KEY`, the key
+  the app's updater trusts. In code: `updatesig.linux_tar_name`, `sig_file_parse(text,
+  allow_none = true)` (the app's updater never passes it), `updatesig.manifest(..., cdhash =
+  "none", format = .V3)` and `updatesig.verify`. `update-sign` signs and verifies it
+  (`sign --v3 KEY X.Y.Z TARBALL none SIG`), and refuses `none` for a zip, and a tarball without
+  `--v3` or with a CDHash.
+- **What release.sh checks before signing** (`scripts/release-linux.sh`, all argv):
+  1. The run must be the workflow's, for a `push`, with headBranch `vX.Y.Z` and headSha the tag's
+     commit, and it must have passed.
+  2. The artifact must be exactly that tarball.
+  3. Its sha256 must be the one value the run's log prints.
+  4. Every member must be under the top folder, with no `..` part, no absolute path and no link.
+     The binaries, `pi/extensions.json` and `claude-code/.claude-plugin/plugin.json` must be
+     there.
+  5. `check-release-build.sh` must pass on the three binaries.
+
+  It writes `dist/<tarball>.sha256` from the log's value, then signs and verifies.
+- **M6-E's install must**:
+  1. verify the `.sig` on the Mac (for the version and name it expects) before anything is copied;
+  2. check the tarball's sha256 against the signed manifest;
+  3. refuse any member that is absolute, has a `..` part, lies outside the one top folder, or is
+     not a regular file or folder (a symlink, a hard link, a device), as `zip_names_check` does for
+     the app's zip;
+  4. extract into a new staging folder, then run its `deckhand-core-serve install --data
+     ~/.local/share/deckhand`.
+
+  The download's `.sha256` is a convenience only; the `.sig` is the trust anchor.
 
 ### Update signing
 

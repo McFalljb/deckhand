@@ -76,6 +76,19 @@ piece16() { # OFFSET MATCH: a run of listed pieces, ending in non-name bytes or 
   return 1
 }
 
+# An x86-64 build (the Linux tarball) can load an 8-byte string it compares against as the
+# immediate of `movabs r64, imm64` (REX.W 48/49, then B8-BF), followed by the next instruction's
+# bytes, which may look like a name's tail (PI_DESK_ then `48 39` = "H9"). That match passes only
+# when its first 8 bytes are themselves an allowed name (only PI_DESK_ is that short) and the rest
+# is the start of an instruction, not a name: a REX prefix (H-O) and at most 2 bytes more.
+imm64() { # OFFSET MATCH BINARY
+  [ "$1" -ge 2 ] || return 1
+  case "$(printf '%s' "$2" | cut -c9-)" in [H-O]|[H-O]?|[H-O]??) ;; *) return 1 ;; esac
+  op=$(dd if="$3" bs=1 skip=$(($1 - 2)) count=2 2>/dev/null | od -An -tx1 | tr -d ' \n')
+  case "$op" in 48b[89a-f]|49b[89a-f]) ;; *) return 1 ;; esac
+  printf '%s\n' "$ALLOWED" | grep -qxF -- "$(printf '%s' "$2" | cut -c1-8)"
+}
+
 fail=0
 for bin in "$@"; do
   [ -f "$bin" ] || { echo "check-release-build: no file $bin" >&2; fail=1; continue; }
@@ -91,6 +104,7 @@ for bin in "$@"; do
     off=${m%%:*} s=${m#*:}
     printf '%s\n' "$ALLOWED" | grep -qxF -- "$s" && continue
     piece16 "$off" "$s" && continue
+    imm64 "$off" "$s" "$bin" && continue
     printf '%s\n' "$NAMES" | grep -qxF -- "$s" && continue # reported above
     echo "check-release-build: $bin holds \"$s\": not a hook in src/core/test_hooks.odin, nor allowed in scripts/check-release-build.sh (a test or development knob? compile it out of release builds)" >&2
     fail=1

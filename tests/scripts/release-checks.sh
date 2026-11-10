@@ -268,6 +268,16 @@ plant16 'DECKHAND_SUCCESSDECKHAND_CLI\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "a piece run on into an allowed name passes" || bad "a piece run on into an allowed name refused: $(cat "$H/out.txt")"
 plant16 '\001DECKHAND_SUCCESS\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an unaligned piece passed" || ok "an unaligned piece refused"
+# an x86-64 movabs imm64 (48 b8 + 8 bytes): an allowed 8-byte name run on into the next
+# instruction passes; any other imm64 match, or the same bytes without the opcode, fails
+cp /usr/bin/true "$H/planted"; printf '\001\110\270PI_DESK_H9\007\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "an imm64 PI_DESK_ run on into an instruction passes" || bad "an imm64 PI_DESK_ refused: $(cat "$H/out.txt")"
+cp /usr/bin/true "$H/planted"; printf '\001\110\270PI_DESK_SCRIPT\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an imm64 run on into a hook's name passed" || ok "an imm64 run on into a hook's name refused"
+cp /usr/bin/true "$H/planted"; printf '\001\110\270DECKHAND_X9\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an imm64 DECKHAND_X9 passed" || ok "an imm64 whose 8 bytes are not an allowed name refused"
+cp /usr/bin/true "$H/planted"; printf '\001\001\001PI_DESK_H9\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "PI_DESK_H9 without the opcode passed" || ok "PI_DESK_H9 without the opcode refused"
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"

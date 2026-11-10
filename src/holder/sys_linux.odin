@@ -382,12 +382,14 @@ keeper_parent_is :: proc(holder_pid: i32) -> bool {return getppid() == c.int(hol
 // forked on our argv (`--keeper`, resume_keeper). 0: none given.
 handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {return resume_keeper}
 
-// Reaps every child of ours that has ended and is not a session (whose status the loop reads for
-// its EXITED): one the old image left before an upgrade's exec (a launcher), the keeper. WNOHANG:
-// a child still running is left alone. /proc unreadable: nothing is reaped.
+// Reaps every child of ours that has ended and is untracked: one the old image left before an
+// upgrade's exec (a launcher of its supervisor). Sessions (the loop reads their status for
+// EXITED), the keeper (keeper_pid) and the supervisor's launchers (sup_launchers) are reaped by
+// their own paths, which clear their tracking: never here, so no stale tracker can later take a
+// reused pid's status. WNOHANG: a child still running is left alone. /proc unreadable: nothing.
 reap_strays :: proc(h: ^Holder) {
-	me := getpid()
-	b, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", me, me), context.temp_allocator)
+	// this thread's children (the holder forks from its one thread; Linux 3.17+)
+	b, err := os.read_entire_file("/proc/thread-self/children", context.temp_allocator)
 	if err != nil do return
 	outer: for f in strings.fields(string(b), context.temp_allocator) {
 		n, ok := strconv.parse_int(f, 10)

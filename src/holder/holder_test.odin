@@ -1204,3 +1204,30 @@ orphan_without_pidfd_is_polled :: proc(t: ^testing.T) {
 		testing.expect_value(t, term.exit.code, i64(-1))
 	}
 }
+
+// Linux, review round 2: reap_strays leaves tracked children (the keeper, the supervisor's
+// launchers) to their own reapers, which then clear their tracking; a stale tracker could
+// otherwise eat the status of a later session that got the same pid.
+@(test)
+reap_strays_skips_tracked :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return
+	else {
+		spawn_exit :: proc() -> c.int {
+			sync.mutex_lock(&fork_lock)
+			p := c.int(posix.fork())
+			if p == 0 do _exit(0)
+			sync.mutex_unlock(&fork_lock)
+			return p
+		}
+		k, l := spawn_exit(), spawn_exit()
+		h: Holder
+		h.keeper_pid = k
+		append(&h.sup_launchers, l)
+		defer delete(h.sup_launchers)
+		time.sleep(200 * time.Millisecond) // both ended: zombies
+		reap_strays(&h)
+		st: c.int
+		testing.expect_value(t, waitpid(k, &st, WNOHANG), k) // still ours to reap: not taken
+		testing.expect_value(t, waitpid(l, &st, WNOHANG), l)
+	}
+}

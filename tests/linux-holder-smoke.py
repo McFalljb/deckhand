@@ -162,10 +162,20 @@ def token_in(text):
 
 
 def open_shell(link, home):
-    """A project, a session and a shell tab whose shell writes its pid: (tab id, shell pid)."""
+    """A project, a pi session (a session file on disk, so the workspace restores it; its tab runs
+    pi's stand-in) and a shell tab whose shell writes its pid: (tab id, shell pid)."""
     pid_file = f"{home}/shell-pid"
-    project = link.ok({"type": "add_project", "cwd": home})["created_id"]
-    session = link.ok({"type": "new_chat", "project_id": project})["created_id"]
+    proj = f"{home}/proj"
+    sess = f"{home}/.pi/agent/sessions/--{proj.lstrip('/').replace('/', '-')}--"
+    os.makedirs(proj, exist_ok=True)
+    os.makedirs(sess, exist_ok=True)
+    with open(f"{sess}/2026-11-01T10-00-00-000Z_hhhh-1.jsonl", "w") as f:
+        f.write(json.dumps({"type": "session", "version": 3, "id": "hhhh-1", "cwd": proj}) + "\n")
+    project = link.ok({"type": "add_project", "cwd": proj})["created_id"]
+    link.ok({"type": "rescan"})
+    link.ok({"type": "open_session", "project_id": project, "pi_session_id": "hhhh-1"})
+    st = link.ok({"type": "get_state"})["data"]
+    session = st["open_sessions"][0]["id"]
     tab = link.ok({"type": "new_shell_tab", "session": session})["created_id"]
     link.ok({"type": "send_text", "tab_id": tab, "text": f"echo $$ > {pid_file}.tmp && mv {pid_file}.tmp {pid_file}\r"})
     pid = int(wait_for("shell pid file", lambda: os.path.exists(pid_file) and open(pid_file).read().strip()))

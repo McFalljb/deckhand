@@ -268,7 +268,7 @@ free port of this Mac (`127.0.0.1` only) to that port on the machine's own `127.
 host; the tab opens once the forward answers. That ssh cannot ask for a password or passphrase, so
 **opening pages needs key-based login to that machine** (a key ssh can use without asking: in your
 agent, or without a passphrase). Deckhand ends it when you close the tab, when the link drops or
-when you remove the machine; if the connection drops by itself, the tab stays but no longer loads. The tab is like any other local tab:
+when you remove the machine; if the connection drops by itself, its tab closes. The tab is like any other local tab:
 you and this Mac's agents can use it. While it is open, any program of yours on this Mac can
 reach that port too, as with your own `ssh -L`. Its agents' browser is that machine's own: they never open pages in this Mac's
 browser, and while you view that machine from here (or if it has no window, like a Linux machine)

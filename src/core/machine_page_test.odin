@@ -5,6 +5,7 @@ package core
 // stands in for it (page_ssh_argv_for_test); the scene remote-page.sh opens one through a test
 // build's `via` machine.
 
+import "core:strconv"
 import "core:strings"
 import "core:sys/posix"
 import "core:testing"
@@ -16,7 +17,7 @@ machine_page_ssh_argv_test :: proc(t: ^testing.T) {
 	testing.expect_value(t, why, "")
 	// its own connection (never the link's master), no prompt, only our forward; the user's config
 	// applies for the rest (aliases, keys, ProxyJump)
-	want := []string{"ssh", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "BatchMode=yes", "-o", "ClearAllForwardings=no", "-o", "ExitOnForwardFailure=no", "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "PermitLocalCommand=no", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-N", "-L", "127.0.0.1:41234:127.0.0.1:3000", "--", "me@nuc"}
+	want := []string{"ssh", "-o", "ControlMaster=no", "-o", "ControlPath=none", "-o", "ControlPersist=no", "-o", "ForkAfterAuthentication=no", "-o", "RequestTTY=no", "-o", "BatchMode=yes", "-o", "ClearAllForwardings=no", "-o", "ExitOnForwardFailure=no", "-o", "ForwardAgent=no", "-o", "ForwardX11=no", "-o", "PermitLocalCommand=no", "-o", "ServerAliveInterval=15", "-o", "ServerAliveCountMax=4", "-N", "-L", "127.0.0.1:41234:127.0.0.1:3000", "--", "me@nuc"}
 	testing.expectf(t, slice_eq(argv, want), "argv %v", argv)
 	// what the user typed never becomes an option
 	for bad in ([?]string{"-oProxyCommand=touch /tmp/x", "a;b", "host name", ""}) {
@@ -39,6 +40,32 @@ machine_page_ssh_argv_test :: proc(t: ^testing.T) {
 		for x, i in a do if x != b[i] do return false
 		return true
 	}
+}
+
+// A listening socket on 127.0.0.1:port, this process's (-1: none).
+test_listen :: proc(port: int) -> posix.FD {
+	fd := posix.socket(.INET, .STREAM, .TCP)
+	addr := posix.sockaddr_in{sin_family = .INET, sin_port = posix.in_port_t(port), sin_addr = {s_addr = 0x7f000001}}
+	when ODIN_OS == .Darwin do addr.sin_len = size_of(addr)
+	if posix.bind(fd, (^posix.sockaddr)(&addr), size_of(addr)) != .OK || posix.listen(fd, 4) != .OK {
+		posix.close(fd)
+		return -1
+	}
+	return fd
+}
+
+// review round 3: whose listener it is (Darwin: proc_pidinfo's socket offsets against the kernel)
+@(test)
+machine_page_owner :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	p := page_free_port()
+	fd := test_listen(p)
+	if !testing.expect(t, fd >= 0, "listen") do return
+	defer posix.close(fd)
+	me := posix.getpid()
+	testing.expect(t, page_listener_owned(me, p), "this process listens there")
+	testing.expect(t, !page_listener_owned(me, p + 1 if p < 65535 else p - 1), "not on another port")
+	testing.expect(t, !page_listener_owned(posix.getppid(), p), "another process does not")
 }
 
 @(test)
@@ -128,7 +155,9 @@ machine_page_children :: proc(t: ^testing.T) {
 	page_forwards_tick(time.tick_add(time.tick_now(), PAGE_OPEN_WAIT + time.Second))
 	got = finished(73)
 	testing.expectf(t, strings.contains(got, "did not forward"), "73: %s", got)
-	testing.expect(t, settle(), "SIGTERM ended it, and it was reaped")
+	// closed at that later time: past its SIGKILL too, then reaped
+	page_forwards_tick(time.tick_add(time.tick_now(), PAGE_OPEN_WAIT + PAGE_KILL_WAIT + 2 * time.Second))
+	testing.expect(t, settle(), "SIGTERM, then SIGKILL to the group, then the reap")
 
 	// an ssh that ignores SIGTERM: the link drops; the entry stays until the child is reaped, SIGKILL
 	// after PAGE_KILL_WAIT
@@ -145,6 +174,76 @@ machine_page_children :: proc(t: ^testing.T) {
 	page_forwards_tick(time.tick_add(time.tick_now(), PAGE_KILL_WAIT + 100 * time.Millisecond))
 	testing.expect(t, settle(), "SIGKILL ended it, and it was reaped")
 	testing.expect(t, posix.kill(pid, posix.Signal(0)) != .OK, "gone")
+
+	// review round 3: a page whose ssh ends by itself loses its tab (a reload never reaches whatever
+	// takes the port next)
+	page_test_closed_tab = 0
+	page_ssh_argv_for_test = sh("sleep 0.3")
+	_, _ = page_forward_open(9, m, 3000, "/", ui, 0)
+	page_forwards_list()[0].phase, page_forwards_list()[0].tab_id = .Open, 555
+	tab_555 :: proc(id: u64) -> bool {return id == 555}
+	for _ in 0 ..< 100 {
+		page_forwards_tick(time.tick_now(), tab_555)
+		if page_forwards_list()[0].phase == .Closing do break
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expect_value(t, page_test_closed_tab, u64(555))
+	testing.expect(t, settle(), "its entry went")
+
+	// review round 3: the group gets SIGKILL after PAGE_KILL_WAIT even when the ssh itself ended at
+	// SIGTERM (a ProxyCommand helper that ignores it), and only then is the ssh reaped
+	page_ssh_argv_for_test = sh("(trap '' TERM; exec sleep 31) & echo \"helper $!\"; wait")
+	_, _ = page_forward_open(9, m, 3000, "/", ui, 75)
+	ready()
+	helper := 0
+	{
+		f := &page_forwards_list()[0]
+		out := string(f.out[:f.out_n])
+		if k := strings.index(out, "helper "); k >= 0 {
+			line := out[k + 7:]
+			if e := strings.index_byte(line, '\n'); e >= 0 do line = line[:e]
+			helper, _ = strconv.parse_int(strings.trim_space(line))
+		}
+	}
+	if !testing.expect(t, helper > 0, "the helper's pid") do return
+	page_forwards_drop(9)
+	time.sleep(300 * time.Millisecond) // the ssh stand-in ends at SIGTERM; its helper does not
+	page_forwards_tick(time.tick_now())
+	testing.expect_value(t, len(page_forwards_list()), 1)
+	testing.expect(t, posix.kill(posix.pid_t(helper), posix.Signal(0)) == .OK, "the helper still runs: the entry stays")
+	testing.expect(t, settle(), "SIGKILL to the group, then the reap")
+	// killed with the group (its zombie is launchd's to reap: a moment later)
+	gone := false
+	for _ in 0 ..< 50 {
+		if posix.kill(posix.pid_t(helper), posix.Signal(0)) != .OK {
+			gone = true
+			break
+		}
+		time.sleep(20 * time.Millisecond)
+	}
+	testing.expect(t, gone, "the helper is gone too")
+
+	// review round 3: a listener on the port that is not our ssh's is never taken for the page:
+	// another port is tried
+	page_ssh_argv_for_test = sh("exec sleep 30")
+	_, _ = page_forward_open(9, m, 3000, "/", ui, 76)
+	first := page_forwards_list()[0].local
+	lfd := test_listen(first)
+	defer posix.close(lfd)
+	page_forwards_tick(time.tick_now())
+	{
+		f := page_forwards_list()[0]
+		testing.expect_value(t, f.phase, Page_Phase.Opening)
+		testing.expect_value(t, f.tries, 1)
+		testing.expect(t, f.local != first, "another port")
+	}
+	page_forwards_reset_for_test()
+	// and our ssh's own listener is (this test has no session: the tab cannot open, so it fails there)
+	page_ssh_argv_for_test = {"python3", "-c", "import socket,sys,time\ns=socket.socket()\ns.bind(('127.0.0.1',int(sys.argv[1])))\ns.listen()\nprint('ready',flush=True)\ntime.sleep(30)", "%PORT%"}
+	_, _ = page_forward_open(9, m, 3000, "/", ui, 77)
+	got = finished(77)
+	testing.expectf(t, strings.contains(got, "no session"), "77 reached the tab: %s", got)
+	page_forwards_reset_for_test()
 
 	// the cap counts every phase (opening, open, closing)
 	via := Machine{no = 8, name = "test", via = "x connect"}

@@ -7,7 +7,7 @@
 # Part 2, --real (CI only: it uses the runner's real HOME, and sudo to turn linger on for the
 # runner's own user, which Deckhand itself never does): the user manager comes up, `install`
 # reloads it, `connect` starts the core through the unit, a restart and a stop are clean, and
-# KillMode is process.
+# KillMode is process. The core's session holder runs in a scope of its own and outlives the stop.
 #
 # Usage: tests/linux-systemd-check.sh [--real] [build/deckhand-core-serve]
 set -euo pipefail
@@ -25,6 +25,10 @@ serve=$(HOME="$home" "$BIN" install --data "$data")
 case "$serve" in "$data/core/dev-"*"/deckhand-core-serve") ;; *) fail "install printed $serve" ;; esac
 [ -x "$serve" ] || fail "$serve is not executable"
 cmp -s "$serve" "$BIN" || fail "$serve differs from $BIN"
+# the session holder beside it goes with it (M6-L3)
+if [ -f "$(dirname "$BIN")/deckhand-core" ]; then
+	cmp -s "$(dirname "$serve")/deckhand-core" "$(dirname "$BIN")/deckhand-core" || fail "the session holder was not installed beside $serve"
+fi
 [ "$(readlink "$data/core/current")" = "$(basename "$(dirname "$serve")")" ] || fail "core/current does not point at the install"
 unit="$home/.config/systemd/user/deckhand-core.service"
 [ -f "$unit" ] || fail "no unit at $unit"
@@ -66,8 +70,19 @@ cat "$home/connect.err" >&2
 systemctl --user is-active --quiet deckhand-core.service || fail "connect did not start the unit"
 pid=$(systemctl --user show -p MainPID --value deckhand-core.service)
 [ "$(readlink "/proc/$pid/exe")" = "$(realpath "$HOME/.local/share/deckhand/core/current/deckhand-core-serve")" ] || fail "the unit runs $(readlink "/proc/$pid/exe")"
+# M6-L3: keep_sessions is on by default, so the core started its session holder, from
+# core/current's dir and in a transient scope of its own, never in the core's unit
+run="$HOME/.local/state/deckhand/run"
+hpid=
+for _ in $(seq 50); do hpid=$(pgrep -f "deckhand-core hold --run $run" | head -1 || true); [ -n "$hpid" ] && break; sleep 0.2; done
+[ -n "$hpid" ] || fail "the core started no session holder: $(journalctl --user -u deckhand-core --no-pager | tail -20)"
+[ "$(readlink "/proc/$hpid/exe")" = "$(dirname "$(realpath "$HOME/.local/share/deckhand/core/current/deckhand-core-serve")")/deckhand-core" ] || fail "the holder runs $(readlink "/proc/$hpid/exe")"
+grep -qE 'deckhand-holder-[0-9a-f]{8}\.scope' "/proc/$hpid/cgroup" || fail "the holder is not in a scope of its own: $(cat "/proc/$hpid/cgroup")"
 systemctl --user restart deckhand-core.service
 systemctl --user is-active --quiet deckhand-core.service || fail "not active after a restart"
 systemctl --user stop deckhand-core.service
 [ "$(systemctl --user show -p Result --value deckhand-core.service)" = success ] || fail "the stop was not clean: $(journalctl --user -u deckhand-core --no-pager | tail -20)"
-echo "linux-systemd-check: part 2 ok (the unit starts on demand, restarts and stops cleanly)"
+kill -0 "$hpid" 2>/dev/null || fail "stopping the core's unit stopped the session holder"
+scope=$(grep -oE 'deckhand-holder-[0-9a-f]{8}\.scope' "/proc/$hpid/cgroup")
+systemctl --user stop "$scope" # clean up: the holder and its sessions
+echo "linux-systemd-check: part 2 ok (the unit starts on demand, restarts and stops cleanly; the holder in $scope outlives it)"

@@ -140,7 +140,9 @@ successor_image_table :: proc(t: ^testing.T) {
 		want: Decision,
 	} {
 		{Peer{ok = true, pid = 100, pidversion = 8, euid = me}, .Allow}, // the holder, exec'd
-		{Peer{ok = true, pid = 100, pidversion = 7, euid = me}, .Not_Exec}, // the old image itself
+		// the old image itself; Linux has no pidversion: the socket's other end is the exec'd
+		// image's alone (trust.odin), so the pid is the check there
+		{Peer{ok = true, pid = 100, pidversion = 7, euid = me}, ODIN_OS == .Linux ? .Allow : .Not_Exec},
 		{Peer{ok = true, pid = 101, pidversion = 8, euid = me}, .Changed}, // another process
 		{Peer{ok = true, pid = 100, pidversion = 8, euid = 0}, .Other_User},
 		{Peer{}, .No_Peer}, // it exited (EINVAL)
@@ -389,4 +391,69 @@ peer_dr_check_real :: proc(t: ^testing.T) {
 		testing.expectf(t, !gone.found && gone.status == errSecCSNoSuchCode, "exec'd since: %v", gone)
 		testing.expect(t, peer_code_allowed(own, {sh.identifier}, gone) == .No_Code)
 	}
+}
+
+// Linux (no signatures, peer_linux.odin): a file is the holder's code when it is a regular ELF
+// file of ours that no other user may write; another user's file has no identifier, a
+// world-writable or non-ELF one is not valid. Group-writable is allowed.
+@(test)
+code_identity_of_file_linux :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return
+	else {
+		own := code_identity_self()
+		testing.expectf(t, own.ok && own.valid && own.identifier == CORE_IDS[0], "own %v", own)
+		me := self_peer()
+		tok: Audit_Token
+		tok.val[5] = u32(me.pid)
+		testing.expect_value(t, image_allowed(.Adhoc, own, code_identity_of_token(tok)), Decision.Allow)
+		testing.expect_value(t, image_allowed(.Adhoc, own, code_identity_of_file("/bin/sh")), Decision.Wrong_Identity) // root's
+		testing.expect(t, !code_identity_of_file("/nonexistent/deckhand-core").ok)
+		testing.expect(t, !code_identity_of_file("/tmp").ok, "a directory")
+
+		tmpl := strings.clone_to_cstring(fmt.tprintf("%s/dh-trust-XXXXXX", strings.trim_right(posix_tmpdir(), "/")), context.temp_allocator)
+		dir := posix.mkdtemp(([^]u8)(tmpl))
+		testing.expect(t, dir != nil)
+		if dir == nil do return
+		defer posix.rmdir(dir)
+		write :: proc(path: string, data: string, mode: posix.mode_t) {
+			c := strings.clone_to_cstring(path, context.temp_allocator)
+			fd := posix.open(c, {.WRONLY, .CREAT, .EXCL, .NOFOLLOW}, mode)
+			posix.write(fd, raw_data(data), len(data))
+			posix.fchmod(fd, mode) // past the umask
+			posix.close(fd)
+		}
+		elf :: "\x7fELF\x02\x01\x01\x00"
+		cases := []struct {
+			name, data: string,
+			mode:       posix.mode_t,
+			want:       Decision,
+		} {
+			{"ok", elf, {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IXOTH}, .Allow},
+			{"group-writable", elf, {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IWGRP, .IXGRP}, .Allow},
+			{"world-writable", elf, {.IRUSR, .IWUSR, .IXUSR, .IROTH, .IWOTH, .IXOTH}, .Bad_Signature},
+			{"script", "#!/bin/sh\n", {.IRUSR, .IWUSR, .IXUSR}, .Bad_Signature},
+			{"short", "\x7fE", {.IRUSR, .IWUSR, .IXUSR}, .Bad_Signature},
+		}
+		for c in cases {
+			path := fmt.tprintf("%s/%s", string(dir), c.name)
+			write(path, c.data, c.mode)
+			defer posix.unlink(strings.clone_to_cstring(path, context.temp_allocator))
+			got := image_allowed(.Adhoc, own, code_identity_of_file(path))
+			testing.expectf(t, got == c.want, "%s: %v, want %v", c.name, got, c.want)
+		}
+		// a link to an allowed file is that file
+		target := fmt.tprintf("%s/ok", string(dir))
+		write(target, elf, {.IRUSR, .IWUSR, .IXUSR})
+		defer posix.unlink(strings.clone_to_cstring(target, context.temp_allocator))
+		link := fmt.tprintf("%s/link", string(dir))
+		posix.symlink(strings.clone_to_cstring(target, context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
+		defer posix.unlink(strings.clone_to_cstring(link, context.temp_allocator))
+		testing.expect_value(t, image_allowed(.Adhoc, own, code_identity_of_file(link)), Decision.Allow)
+	}
+}
+
+@(private = "file")
+posix_tmpdir :: proc() -> string {
+	if v := posix.getenv("TMPDIR"); v != nil && len(v) > 0 do return string(v)
+	return "/tmp"
 }

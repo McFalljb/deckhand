@@ -189,7 +189,7 @@ ready_connect :: proc(path: string) -> (posix.FD, bool) {
 	if len(path) >= len(addr.sun_path) do return -1, false
 	addr.sun_family = .UNIX
 	for i in 0 ..< len(path) do addr.sun_path[i] = c.char(path[i])
-	addr.sun_len = u8(size_of(addr))
+	when ODIN_OS == .Darwin do addr.sun_len = u8(size_of(addr))
 	fd := posix.FD(socket(AF_UNIX, SOCK_STREAM, 0))
 	if fd < 0 do return -1, false
 	set_cloexec(c.int(fd)) // never into the holder's children

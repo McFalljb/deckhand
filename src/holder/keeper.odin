@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The upgrade's handoff and its keeper (docs/plans/background-core.md §7.3 steps 3–6).
@@ -36,7 +35,14 @@ package holder
 // the holder in place (keeper_adopt) instead of exec'ing the old binary, whose file could have
 // been swapped as well. The sessions are not its children (they stay the new image's, or
 // launchd's once it is gone), so their exits come from kqueue EVFILT_PROC NOTE_EXITSTATUS, which
-// reports the wait status for non-children (S2): orphans, `degraded` in WELCOME.
+// reports the wait status for non-children (S2): orphans, `degraded` in WELCOME. On Linux a pidfd
+// says when an orphan exits but not how (code -1, unknown): orphans_watch in sys_linux.odin.
+//
+// On Linux (sys_linux.odin) the peer is read differently, to the same effect: the giver's end
+// has SO_PASSCRED (handoff_giver_prepare), so the hello carries its writer's credentials from the
+// kernel (SCM_CREDENTIALS; SO_PEERCRED would name the socketpair's maker). There is no
+// pidversion: the "new image" is the exec's (only the exec'd image has the taker's end), and
+// trust.successor_image_allowed says so.
 
 import "core:c"
 import "core:encoding/endian"
@@ -105,9 +111,9 @@ recv_all_by :: proc(fd: c.int, b: []u8, deadline: time.Tick) -> bool {
 // Waits for the taker's hello; the peer as it is now (the hello's writer) and its full token.
 handoff_await_hello :: proc(fd: c.int, deadline: time.Tick) -> (peer: trust.Peer, tok: trust.Audit_Token, ok: bool) {
 	b: [8]u8
-	if !recv_all_by(fd, b[:], deadline) || string(b[:4]) != HANDOFF_MAGIC do return {}, {}, false
-	peer, tok = trust.peer_read_token(posix.FD(fd))
-	return peer, tok, peer.ok
+	peer, tok, ok = handoff_hello_peer(fd, b[:], deadline) // the OS's way to the writer (sys_*.odin)
+	if !ok || string(b[:4]) != HANDOFF_MAGIC do return {}, {}, false
+	return peer, tok, true
 }
 
 // The state and its fds to the taker (the fds are copied: the giver keeps its own).
@@ -121,7 +127,7 @@ handoff_give :: proc(fd: c.int, blob: []u8, fds: []c.int, deadline: time.Tick, m
 		batch := fds[i:min(i + HANDOFF_FDS_PER_MSG, len(fds))]
 		ctl: [size_of(Cmsghdr) + 4 * HANDOFF_FDS_PER_MSG]u8
 		cm := (^Cmsghdr)(&ctl[0])
-		cm.len = u32(size_of(Cmsghdr) + 4 * len(batch))
+		cm.len = auto_cast (size_of(Cmsghdr) + 4 * len(batch))
 		cm.level, cm.type = SOL_SOCKET, SCM_RIGHTS
 		for f, k in batch do endian.put_u32(ctl[size_of(Cmsghdr) + 4 * k:][:4], .Little, u32(f))
 		one: u8 = 'F'
@@ -163,7 +169,7 @@ handoff_take :: proc(fd: c.int, deadline: time.Tick) -> (blob: []u8, fds: [dynam
 		ctl: [size_of(Cmsghdr) + 4 * HANDOFF_FDS_PER_MSG]u8
 		one: u8
 		iov := Iovec{&one, 1}
-		msg := Msghdr{iov = &iov, iovlen = 1, control = &ctl[0], controllen = u32(len(ctl))}
+		msg := Msghdr{iov = &iov, iovlen = 1, control = &ctl[0], controllen = auto_cast len(ctl)}
 		if !wait_fd(fd, POLLIN, deadline) do return fail(&fds)
 		sync_lock() // received fds are not close-on-exec until we say so
 		r := recvmsg(fd, &msg, 0)
@@ -202,7 +208,8 @@ keeper_run :: proc(h: ^Holder, k: c.int, holder_pid, old_pv: i32, blob: []u8, fd
 	if h.wake_fd >= 0 do close(h.wake_fd)
 	if wake_write_fd >= 0 do close(wake_write_fd)
 	h.wake_fd, wake_write_fd = -1, -1
-	h.kq = -1 // a kqueue is not inherited by fork
+	when ODIN_OS == .Linux do if h.kq >= 0 do close(h.kq) // an epoll set is inherited (a kqueue is not)
+	h.kq = -1
 	hlog(h, "keeper: holding %d terminals for the new image", len(h.terms))
 
 	why: string
@@ -252,6 +259,7 @@ keeper_run :: proc(h: ^Holder, k: c.int, holder_pid, old_pv: i32, blob: []u8, fd
 @(private)
 keeper_kill_successor :: proc(h: ^Holder, k: c.int, holder_pid: i32, verified: trust.Peer) -> bool {
 	now := trust.peer_read(posix.FD(k))
+	when ODIN_OS == .Linux do if !keeper_parent_is(holder_pid) do now = {} // SO_PEERCRED is not live (sys_linux.odin)
 	if !now.ok || now.pid != holder_pid || now.pid != verified.pid || now.pidversion != verified.pidversion {
 		hlog(h, "keeper: the new image did not say DONE and is no longer the one checked: not killed")
 		return false
@@ -272,32 +280,10 @@ keeper_adopt :: proc(h: ^Holder, why: string) -> ! {
 	// would hang up every session. It ends once its sessions do (handle_upgrade says so).
 	h.can_upgrade = false
 	h.forked = true // nor the supervisor's code checks (Security.framework)
+	relisten(h) // Linux: a core's SO_PEERCRED then names the keeper (sys_linux.odin)
 	orphans_watch(h)
 	install_sigchld(h)
 	os.exit(holder_serve(h))
-}
-
-// Registers every orphan that still runs with the kqueue (made on first use). One that is gone
-// already ended unseen: its exit is unknown (code -1).
-orphans_watch :: proc(h: ^Holder) {
-	for t in h.terms {
-		if !t.orphan || t.reaped do continue
-		if h.kq < 0 {
-			sync_lock()
-			h.kq = kqueue()
-			if h.kq >= 0 do set_cloexec(h.kq)
-			sync_unlock()
-			if h.kq < 0 {
-				hlog(h, "kqueue: errno %d: orphans' exits are unknown", errno())
-				return
-			}
-		}
-		ev := Kevent{ident = uintptr(t.pid), filter = EVFILT_PROC, flags = EV_ADD | EV_ONESHOT, fflags = NOTE_EXIT | NOTE_EXITSTATUS}
-		if kevent(h.kq, &ev, 1, nil, 0, nil) != 0 {
-			hlog(h, "terminal %d: pid %d is gone already (errno %d): exit unknown", t.id, t.pid, errno())
-			orphan_ended(t, -1, false)
-		}
-	}
 }
 
 @(private)
@@ -307,23 +293,6 @@ orphan_ended :: proc(t: ^Term, status: int, known: bool) {
 	if known {
 		code, sig, ended := exit_from_wait(c.int(status))
 		if ended do t.exit = holderwire.Exit_Status{code = code, signal = sig}
-	}
-}
-
-// The kqueue is readable: the orphans that exited, with their wait status.
-orphans_read :: proc(h: ^Holder) {
-	evs: [32]Kevent
-	zero := Timespec{}
-	for {
-		n := kevent(h.kq, nil, 0, &evs[0], len(evs), &zero)
-		if n <= 0 do return
-		for ev in evs[:n] {
-			if ev.filter != EVFILT_PROC || ev.fflags & NOTE_EXIT == 0 do continue
-			for t in h.terms do if t.orphan && !t.reaped && uintptr(t.pid) == ev.ident {
-				orphan_ended(t, ev.data, ev.fflags & NOTE_EXITSTATUS != 0)
-			}
-		}
-		if int(n) < len(evs) do return
 	}
 }
 

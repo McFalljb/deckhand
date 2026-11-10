@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The upgrade's state (state.odin): what the old image hands the new one, round-tripped, and

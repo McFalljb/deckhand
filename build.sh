@@ -298,10 +298,11 @@ case "$MODE" in
     # processes (build/deckhand-core-hooks: 5 re-execs under load, refusals, the keeper adopting)
     build_core_hooks
     odin test src/holder -out:build/holder-tests
-    # the core on Linux (docs/plans/background-core.md §10.4 M6-L1): type-checked here, built and
+    # the core and the holder on Linux (docs/plans/background-core.md §10.4 M6-L1, L3): type-checked here, built and
     # unit-tested by CI's linux job (docs/DEVELOPING.md "Building the Linux core"); about a second
     odin check src/coremain -target:linux_amd64
     for p in core trust corewire holderwire; do odin check src/$p -no-entry-point -target:linux_amd64; done
+    odin check src/holder -target:linux_amd64
     # the core and the holder link no window code (docs/plans/background-core.md §10.2): the check,
     # then its test (each forbidden import planted in a temporary tree)
     scripts/check-core-boundary.sh

@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // UPGRADE{path} (docs/plans/background-core.md §7.3): the holder re-execs into a new binary in
@@ -105,6 +104,15 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	for x in ([]c.int{h.listen_fd, h.lock_fd, h.wake_fd, wake_write_fd, h.kq}) do if x >= 0 && !is_cloexec(x) do return "an fd is not close-on-exec"
 	for o in h.conns do if !is_cloexec(o.fd) do return "a connection is not close-on-exec"
 
+	// test hook: a child of the old image that is neither a session nor the keeper (an unreaped
+	// launcher, say), exiting after the exec: the new image must still reap it and the keeper
+	if _, on := hook("stray-child", true); on {
+		if s := posix.fork(); s == 0 {
+			posix.sleep(1)
+			_exit(0)
+		}
+	}
+
 	// 5. the keeper
 	kp: [2]c.int
 	sync_lock()
@@ -116,12 +124,15 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	set_cloexec(kp[1])
 	sync_unlock()
 	set_nosigpipe(kp[0])
+	if !handoff_giver_prepare(kp[0]) {
+		close(kp[0]); close(kp[1])
+		return fmt.tprintf("the keeper's socket: errno %d", errno())
+	}
 	me := trust.self_peer()
 	if !me.ok {
 		close(kp[0]); close(kp[1])
 		return "cannot read our own audit token"
 	}
-	argv := resume_argv(h, cpath, "--resume", kp[1])
 	keeper := posix.fork()
 	if keeper < 0 {
 		close(kp[0]); close(kp[1])
@@ -133,6 +144,8 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 	}
 	close(kp[0])
 	clear_cloexec(kp[1]) // the one fd the new image inherits
+	// Linux: the new image reaps the keeper by this pid (the socket can't name it: handoff_keeper_pid)
+	argv := resume_argv(h, cpath, "--resume", kp[1], ODIN_OS == .Linux ? c.int(keeper) : 0)
 
 	// 6. exec
 	dirty := false
@@ -174,9 +187,12 @@ upgrade_run :: proc(h: ^Holder, cn: ^Conn, path: string) -> string {
 // `path hold --run DIR --data DIR --resume FD`: the dirs are the state's (and checked against
 // it), there so that ps and pgrep still tell which holder serves which run dir.
 @(private)
-resume_argv :: proc(h: ^Holder, path: cstring, flag: cstring, fd: c.int) -> [9]cstring {
+// keeper > 0: `--keeper PID` too (Linux; the new image reaps that child).
+resume_argv :: proc(h: ^Holder, path: cstring, flag: cstring, fd: c.int, keeper: c.int = 0) -> [11]cstring {
 	tmp := context.temp_allocator
-	return {path, "hold", "--run", strings.clone_to_cstring(h.cfg.run_dir, tmp), "--data", strings.clone_to_cstring(h.cfg.data_dir, tmp), flag, strings.clone_to_cstring(fmt.tprintf("%d", fd), tmp), nil}
+	a := [11]cstring{path, "hold", "--run", strings.clone_to_cstring(h.cfg.run_dir, tmp), "--data", strings.clone_to_cstring(h.cfg.data_dir, tmp), flag, strings.clone_to_cstring(fmt.tprintf("%d", fd), tmp), nil, nil, nil}
+	if keeper > 0 do a[8], a[9] = "--keeper", strings.clone_to_cstring(fmt.tprintf("%d", keeper), tmp)
+	return a
 }
 
 // Sends everything queued for cn, waiting up to the deadline (the loop is paused meanwhile).
@@ -203,6 +219,10 @@ dry_run :: proc(h: ^Holder, path: string, blob: []u8, fds: []c.int, own: trust.C
 	set_cloexec(dp[1])
 	sync_unlock()
 	set_nosigpipe(dp[0])
+	if !handoff_giver_prepare(dp[0]) {
+		close(dp[0]); close(dp[1])
+		return fmt.tprintf("the dry run's socket: errno %d", errno())
+	}
 	cpath := strings.clone_to_cstring(path, context.temp_allocator)
 	argv := resume_argv(h, cpath, "--dry-run-resume", dp[1])
 	env := _NSGetEnviron()^
@@ -315,7 +335,7 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 	h.can_upgrade = true
 	orphans_watch(h)
 	// the keeper is our child (the old image forked it): reaped once it exits after DONE (timers)
-	if kp := trust.peer_read(posix.FD(fd)); kp.ok && kp.pid > 0 && kp.pid != i32(getpid()) do h.keeper_pid = c.int(kp.pid)
+	if kp := handoff_keeper_pid(h, fd); kp > 0 && kp != getpid() do h.keeper_pid = kp // sys_*.odin
 	done := transmute([]u8)string("DONE")
 	if !send_all_by(fd, done, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 		// the keeper is gone (it can no longer adopt): we have the terminals, so we serve

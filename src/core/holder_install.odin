@@ -38,7 +38,7 @@ import "../trust"
 HOLDER_ID :: "dev.deckhand.core" // its signing identifier (build.sh, scripts/bundle-app.sh; trust.CORE_IDS)
 HOLDER_BIN :: "deckhand-core"
 CORE_APP :: "Deckhand Core.app" // in Deckhand.app/Contents/Helpers (scripts/bundle-app.sh)
-HOLDER_REV :: 5 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
+HOLDER_REV :: 6 // the bundled holder's revision (src/holder HOLDER_REV; scripts/check-holder-rev.sh): the install dir's prefix
 HOLDER_LOG :: "holder.log" // in the runtime dir: the holder's stderr
 CORE_LOG :: "core.log" // in the runtime dir: a separate core's stderr (deckhand-core serve)
 
@@ -170,7 +170,13 @@ holder_install_bundle :: proc(app, dir, sum: string) -> (path: string, ok: bool,
 // "" if path (a binary, or a bundle with everything in it) is validly signed (strict) as our own
 // signature says the holder must be (trust.peer_requirement: its identifier, and under the
 // self-signed identity our certificate; ad hoc: the identifier only), else why not.
+// On Linux (no signatures): the file as the holder's own image checks see it (trust
+// code_identity_of_file: a regular ELF file of ours that no other user may write).
 holder_verify :: proc(path: string) -> string {
+	when ODIN_OS == .Linux {
+		d := trust.image_allowed(.Adhoc, trust.code_identity_self(), trust.code_identity_of_file(path))
+		return d == .Allow ? "" : fmt.tprintf("the session holder %s fails its check: %v", path, d)
+	}
 	text, rok := trust.peer_requirement(trust.own_signature(), trust.CORE_IDS)
 	if !rok do return fmt.tprintf("the session holder %s cannot be checked: this process's own signature is unreadable", path)
 	out, st := run_group({"/usr/bin/codesign", "--verify", "--strict", "--deep", "-R", fmt.tprintf("=%s", text), path}, 20 * time.Second, merge_stderr = true)
@@ -238,19 +244,24 @@ holder_sha256 :: proc(data: []u8) -> string {
 // The holder started as this process's child, in a session of its own: `bin hold --run run
 // --data data` with env (nil = this process's), stdin /dev/null, stdout and stderr appended to <run>/holder.log, signals at
 // their defaults and none blocked, no other descriptor. A thread reaps it when it exits (it is
-// only ever our child while we live; after we exit launchd adopts it). Test mode and
-// DECKHAND_HOLDER_DIRECT=1 use this; the launchd launch falls back to it.
-holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold", secret := "") -> (pid: i32, ok: bool, why: string) {
-	argv := []cstring{
+// only ever our child while we live; after we exit launchd adopts it), unless reap is false (the
+// caller waits for it). Test mode and DECKHAND_HOLDER_DIRECT=1 use this; the launchd launch falls
+// back to it. prefix: argv that runs the rest (Linux: systemd-run's scope, launch_linux.odin);
+// its first element is what is spawned.
+holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode := "hold", secret := "", prefix: []string = nil, reap := true) -> (pid: i32, ok: bool, why: string) {
+	args := make([dynamic]cstring, 0, len(prefix) + 8, context.temp_allocator)
+	for a in prefix do append(&args, strings.clone_to_cstring(a, context.temp_allocator))
+	append(&args,
 		strings.clone_to_cstring(bin, context.temp_allocator),
 		strings.clone_to_cstring(mode, context.temp_allocator), // hold, or serve (a separate core)
 		"--run",
 		strings.clone_to_cstring(run, context.temp_allocator),
 		"--data",
 		strings.clone_to_cstring(data, context.temp_allocator),
-		secret != "" ? "--secret-stdin" : nil, // a handover's successor: the secret on a pipe (serve only)
-		nil,
-	}
+	)
+	if secret != "" do append(&args, "--secret-stdin") // a handover's successor: the secret on a pipe (serve only)
+	append(&args, nil)
+	argv := args[:]
 	// the secret's pipe: written now (65 bytes fit any pipe buffer), its read end the child's stdin
 	sp: [2]posix.FD = {-1, -1}
 	if secret != "" {
@@ -291,12 +302,17 @@ holder_launch_direct :: proc(bin, run, data: string, env: []string = nil, mode :
 	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
 	err := posix.posix_spawn(&p, argv[0], &fa, &attr, raw_data(argv), envp)
 	sync.rw_mutex_shared_unlock(&fork_lock)
-	if err != .NONE do return 0, false, fmt.tprintf("cannot start %s: %s", bin, posix.strerror(err))
-	thread.create_and_start_with_poly_data(p, proc(p: posix.pid_t) {
+	if err != .NONE do return 0, false, fmt.tprintf("cannot start %s: %s", argv[0], posix.strerror(err))
+	if reap do holder_reap_later(i32(p))
+	return i32(p), true, ""
+}
+
+// A thread reaps our child pid when it exits.
+holder_reap_later :: proc(pid: i32) {
+	thread.create_and_start_with_poly_data(posix.pid_t(pid), proc(p: posix.pid_t) {
 		st: i32
 		for posix.waitpid(p, &st, {}) < 0 && posix.errno() == .EINTR {}
 	}, self_cleanup = true)
-	return i32(p), true, ""
 }
 
 when ODIN_OS == .Darwin {
@@ -317,14 +333,6 @@ foreign holderspawn {
 	holder_spawnattr_setsigmask :: proc(attr: rawptr, set: ^posix.sigset_t) -> posix.Errno ---
 	@(link_name = "posix_spawn_file_actions_addopen")
 	holder_spawn_addopen :: proc(fa: rawptr, fd: i32, path: cstring, oflag: i32, mode: u16) -> posix.Errno ---
-}
-
-when ODIN_OS != .Darwin {
-	// No launchd: the holder is always the direct child (Linux is not wired up for it yet).
-	holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: bool, why: string) {
-		if len(run) + RUNTIME_HOLDER_NEED > SUN_PATH_MAX do return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket", run)
-		return holder_launch_direct(bin, run, data, env)
-	}
 }
 
 // A temp name of this call's own in dir: the pid and a per-process number (two threads may

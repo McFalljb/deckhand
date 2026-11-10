@@ -6,11 +6,10 @@ package core
 // starts it when no core answers, and serve reports linger in the hello (machine.linger).
 //
 // The unit is never enabled: it starts on demand, and the core's idle exit (§6, exit 0) stops it.
-// Restart=on-failure stands in for the holder's supervisor (no holder until M6-L3), except for
-// usage errors (2) and another core already running (3, instance_guard). KillMode=process: a stop
-// or restart signals the core alone, never the cgroup, so the sessions' processes are not killed
-// by systemd. Until M6-L3's holder, a PTY's shell still gets SIGHUP when the core (its master)
-// exits; with the holder (its own transient unit) the sessions outlive the core.
+// Restart=on-failure restarts a failed core (the holder's supervisor does too, through `launch`),
+// except for usage errors (2) and another core already running (3, instance_guard).
+// KillMode=process: a stop or restart signals the core alone, never the cgroup. The sessions run
+// in the holder's own scope (M6-L3, launch_linux.odin), so they outlive the core either way.
 
 import "core:fmt"
 import "core:strings"
@@ -112,4 +111,37 @@ linger_parse :: proc(out: string, ok: bool) -> Linger {
 // is launched directly, as macOS's launchd fallback does.
 systemd_start_wanted :: proc(bin, current: string, from_core, test_mode, unit_there, use_previous: bool) -> bool {
 	return !from_core && !test_mode && unit_there && !use_previous && current != "" && bin == current
+}
+
+// ---- transient scopes (M6-L3) ----
+//
+// The holder, and a core started directly (a handover's successor, a launch with no unit), each
+// run in a transient scope of their own: `systemd-run --user --scope … -- <bin> …`. systemd-run
+// moves itself into the new scope and execs the rest, so the pid spawned is the holder's (or the
+// core's), outside the launcher's cgroup: stopping deckhand-core.service never reaches it, and a
+// successor core is no longer left in a unit that went inactive. --collect: the scope goes once
+// its processes do, failed or not.
+
+SYSTEMD_RUN :: "/usr/bin/systemd-run"
+
+// systemd-run's argv before the command, for a scope named unit (".scope" is added by systemd).
+systemd_scope_argv :: proc(unit: string, allocator := context.temp_allocator) -> []string {
+	a := make([]string, 8, allocator)
+	a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7] = SYSTEMD_RUN, "--user", "--scope", "--quiet", "--collect", "--unit", unit, "--"
+	return a
+}
+
+// Whether a launch goes through a scope: always outside test mode (unless DECKHAND_HOLDER_DIRECT
+// asks for a direct child); in test mode only when DECKHAND_HOLDER_SYSTEMD asks for it.
+systemd_scope_wanted :: proc(test_mode, hook_systemd, hook_direct: bool) -> bool {
+	if test_mode do return hook_systemd
+	return !hook_direct
+}
+
+// Whether args may go on systemd-run's command line (scope_launch). systemd-run v254+ expands
+// $NAME and ${NAME} there, and older ones have no --expand-environment=no to stop it (Ubuntu
+// 22.04 has 249): so no '$' at all, whatever the version; such a launch is a direct spawn.
+systemd_scope_args_ok :: proc(args: []string) -> bool {
+	for a in args do if strings.contains_rune(a, '$') do return false
+	return true
 }

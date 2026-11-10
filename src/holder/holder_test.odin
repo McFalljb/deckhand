@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // An in-process holder and a fake core over a socketpair, with /bin/sh children. Every test
@@ -409,7 +408,7 @@ child_signal_state :: proc(t: ^testing.T) {
 	old_act: Sigaction
 	sigaction(SIGPIPE, &ign, &old_act)
 	defer sigaction(SIGPIPE, &old_act, nil)
-	block: u32 = 1 << (31 - 1) // SIGUSR2
+	block: u32 = 1 << u32(SIGUSR2 - 1)
 	old_mask: u32
 	pthread_sigmask(SIG_BLOCK, &block, &old_mask)
 	defer pthread_sigmask(SIG_SETMASK, &old_mask, nil)
@@ -425,7 +424,7 @@ child_signal_state :: proc(t: ^testing.T) {
 	out := output_of(t, f, 1)
 	testing.expectf(t, strings.contains(out, "st=141"), "SIGPIPE not default in the child: %q", out)
 	lines := strings.split_lines(strings.trim_space(out), context.temp_allocator)
-	testing.expectf(t, strings.trim_space(lines[len(lines) - 1]) == "0", "the child's mask is not empty: %q", out)
+	testing.expectf(t, mask_empty(lines[len(lines) - 1]), "the child's mask is not empty: %q", out)
 }
 
 // No core: output goes to the 1 MiB tail and the program never stalls; the next core's
@@ -660,7 +659,7 @@ test_run_dir :: proc(t: ^testing.T, name: string) -> (run: string, crun: cstring
 	if tmp == "" do tmp = "/tmp"
 	run = fmt.tprintf("%s/dh-%s-%s", tmp, name, string(hex.encode(r[:], context.temp_allocator)))
 	crun = strings.clone_to_cstring(run, context.temp_allocator)
-	testing.expect_value(t, mkdir(crun, 0o700), 0)
+	testing.expect_value(t, posix.mkdir(crun, posix.S_IRWXU), posix.result.OK)
 	return
 }
 
@@ -670,7 +669,7 @@ test_run_dir :: proc(t: ^testing.T, name: string) -> (run: string, crun: cstring
 @(test)
 shutdown_stops_listening :: proc(t: ^testing.T) {
 	run, crun := test_run_dir(t, "shut")
-	defer rmdir(crun)
+	defer posix.rmdir(crun)
 	cfg := test_cfg()
 	cfg.run_dir = run
 	cfg.shutdown_wait = 2 * time.Second
@@ -763,6 +762,9 @@ unknown_and_early_frames :: proc(t: ^testing.T) {
 // on: the peer changed since accept, so the core is dropped.
 @(test)
 changed_peer_is_dropped :: proc(t: ^testing.T) {
+	// Linux: SO_PEERCRED is fixed at connect, so a forked writer can't be told apart (the same
+	// user is the trust boundary there, src/trust/peer_linux.odin; core's transport test skips too)
+	when ODIN_OS == .Linux do return
 	h := new_test_holder(t)
 	defer holder_free(h, true)
 	f := fake_connect(t, h)
@@ -771,7 +773,7 @@ changed_peer_is_dropped :: proc(t: ^testing.T) {
 	ping := make([dynamic]u8, context.temp_allocator)
 	holderwire.encode(&ping, .Ping, 0, holderwire.Empty{})
 	sync.mutex_lock(&fork_lock)
-	pid := fork()
+	pid := c.int(posix.fork())
 	if pid == 0 {
 		write(f.fd, raw_data(ping), len(ping))
 		_exit(0)
@@ -784,14 +786,6 @@ changed_peer_is_dropped :: proc(t: ^testing.T) {
 	testing.expect(t, h.core == nil)
 }
 
-foreign import libc_test "system:System"
-@(default_calling_convention = "c")
-foreign libc_test {
-	fork :: proc() -> c.int ---
-	mkdir :: proc(path: cstring, mode: u16) -> c.int ---
-	rmdir :: proc(path: cstring) -> c.int ---
-}
-
 // The run dir must be ours and 0700; instance.lock held exclusively → Lock_Busy.
 @(test)
 start_checks :: proc(t: ^testing.T) {
@@ -802,10 +796,10 @@ start_checks :: proc(t: ^testing.T) {
 	base := fmt.tprintf("%s/dh-holder-%s", tmp, string(hex.encode(r[:], context.temp_allocator)))
 	run := fmt.tprintf("%s/run", base)
 	cs :: proc(s: string) -> cstring {return strings.clone_to_cstring(s, context.temp_allocator)}
-	testing.expect_value(t, mkdir(cs(base), 0o700), 0)
-	defer rmdir(cs(base))
-	testing.expect_value(t, mkdir(cs(run), 0o755), 0)
-	defer rmdir(cs(run))
+	testing.expect_value(t, posix.mkdir(cs(base), posix.S_IRWXU), posix.result.OK)
+	defer posix.rmdir(cs(base))
+	testing.expect_value(t, posix.mkdir(cs(run), posix.S_IRWXU + {.IRGRP, .IXGRP, .IROTH, .IXOTH}), posix.result.OK)
+	defer posix.rmdir(cs(run))
 
 	cfg := test_cfg()
 	cfg.run_dir = run
@@ -989,8 +983,8 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	if tmp == "" do tmp = "/tmp"
 	run := fmt.tprintf("%s/dh-emfile-%s", tmp, string(hex.encode(r[:], context.temp_allocator)))
 	crun := strings.clone_to_cstring(run, context.temp_allocator)
-	testing.expect_value(t, mkdir(crun, 0o700), 0)
-	defer rmdir(crun)
+	testing.expect_value(t, posix.mkdir(crun, posix.S_IRWXU), posix.result.OK)
+	defer posix.rmdir(crun)
 	cfg := test_cfg()
 	cfg.run_dir = run
 	cfg.test_accept_errno = EMFILE
@@ -1001,7 +995,7 @@ accept_emfile_backs_off :: proc(t: ^testing.T) {
 	addr: posix.sockaddr_un
 	addr.sun_family = .UNIX
 	for i in 0 ..< len(h.sock_path) do addr.sun_path[i] = c.char(h.sock_path[i])
-	addr.sun_len = u8(size_of(addr))
+	when ODIN_OS == .Darwin do addr.sun_len = u8(size_of(addr))
 	sync.mutex_lock(&fork_lock)
 	fd := posix.FD(socket(AF_UNIX, SOCK_STREAM, 0))
 	set_cloexec(c.int(fd))
@@ -1045,7 +1039,21 @@ child_holds_only_stdio :: proc(t: ^testing.T) {
 	_, ok := exited_of(t, h, f, 2)
 	testing.expect(t, ok)
 	out := strings.fields(output_of(t, f, 2), context.temp_allocator)
-	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "the child holds more than 0-2: %v", out)
+	testing.expectf(t, slice_eq(out, LS_DEV_FD), "the child holds more than 0-2: %v", out)
+}
+
+// What `ls /dev/fd` lists from a process that holds only 0-2: those, and the ones ls opens to read
+// the directory (macOS's two; GNU ls opens one).
+when ODIN_OS == .Linux {
+	LS_DEV_FD :: []string{"0", "1", "2", "3"}
+} else {
+	LS_DEV_FD :: []string{"0", "1", "2", "3", "4"}
+}
+
+// `ps -o sigmask=`'s answer for an empty mask: "0" on macOS, "0000000000000000" from procps.
+mask_empty :: proc(s: string) -> bool {
+	v, ok := strconv.parse_u64_of_base(strings.trim_space(s), 16)
+	return ok && v == 0
 }
 
 slice_eq :: proc(a, b: []string) -> bool {
@@ -1158,5 +1166,68 @@ successor_secret_reserves_the_holder :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.previous, "handover")
 	for fk in ([]^Fake{a, b}) do for fr in fk.frames {
 		testing.expectf(t, !strings.contains(string(fr.payload), secret2) || fr.kind == .Goodbye_Ack, "the secret in a %v frame", fr.kind)
+	}
+}
+
+// Linux, review round 1: pidfd_open failing for any reason but ESRCH (ENOSYS on an old kernel,
+// EPERM under seccomp, EMFILE) never marks a live orphan ended (its PTY would be released): its
+// liveness is polled instead, and its exit is still seen.
+@(test)
+orphan_without_pidfd_is_polled :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return
+	else {
+		test_pidfd_errno = ENOSYS
+		defer test_pidfd_errno = 0
+		sync.mutex_lock(&fork_lock)
+		pid := c.int(posix.fork())
+		if pid == 0 {
+			for {posix.sleep(60)}
+		}
+		sync.mutex_unlock(&fork_lock)
+		defer kill(pid, SIGKILL)
+		h: Holder
+		h.kq = -1
+		h.cfg.quiet = true
+		term := Term{id = 7, pid = pid, orphan = true, master = -1}
+		append(&h.terms, &term)
+		defer delete(h.terms)
+		defer if h.kq >= 0 do close(h.kq)
+		orphans_watch(&h)
+		testing.expect(t, !term.reaped, "a live orphan was marked ended when pidfd_open failed with ENOSYS")
+		orphans_poll(&h)
+		testing.expect(t, !term.reaped, "a live orphan was marked ended by the poll")
+		kill(pid, SIGKILL)
+		st: c.int
+		waitpid(pid, &st, 0)
+		orphans_poll(&h)
+		testing.expect(t, term.reaped, "the orphan's exit was not seen")
+		testing.expect_value(t, term.exit.code, i64(-1))
+	}
+}
+
+// Linux, review round 2: reap_strays leaves tracked children (the keeper, the supervisor's
+// launchers) to their own reapers, which then clear their tracking; a stale tracker could
+// otherwise eat the status of a later session that got the same pid.
+@(test)
+reap_strays_skips_tracked :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return
+	else {
+		spawn_exit :: proc() -> c.int {
+			sync.mutex_lock(&fork_lock)
+			p := c.int(posix.fork())
+			if p == 0 do _exit(0)
+			sync.mutex_unlock(&fork_lock)
+			return p
+		}
+		k, l := spawn_exit(), spawn_exit()
+		h: Holder
+		h.keeper_pid = k
+		append(&h.sup_launchers, l)
+		defer delete(h.sup_launchers)
+		time.sleep(200 * time.Millisecond) // both ended: zombies
+		reap_strays(&h)
+		st: c.int
+		testing.expect_value(t, waitpid(k, &st, WNOHANG), k) // still ours to reap: not taken
+		testing.expect_value(t, waitpid(l, &st, WNOHANG), l)
 	}
 }

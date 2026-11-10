@@ -94,3 +94,24 @@ systemd_start_wanted_cases :: proc(t: ^testing.T) {
 	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = false, unit_there = false, use_previous = false), "no unit")
 	testing.expect(t, !systemd_start_wanted(bin = "", current = "", from_core = false, test_mode = false, unit_there = true, use_previous = false), "no current core")
 }
+
+@(test)
+systemd_scope_cases :: proc(t: ^testing.T) {
+	testing.expect(t, argv_eq(systemd_scope_argv("deckhand-holder-0a1b2c3d"), {"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", "deckhand-holder-0a1b2c3d", "--"}))
+	testing.expect(t, systemd_scope_wanted(false, false, false))
+	testing.expect(t, !systemd_scope_wanted(false, false, true), "DECKHAND_HOLDER_DIRECT: a direct child")
+	testing.expect(t, !systemd_scope_wanted(true, false, false), "test mode: direct unless asked")
+	testing.expect(t, systemd_scope_wanted(true, true, false))
+}
+
+// Review round 1: systemd-run (v254+) expands $NAME and ${NAME} in the command line, and older
+// ones don't know --expand-environment=no: a scope launch whose argv has a '$' is refused (the
+// direct spawn instead), whatever the version.
+@(test)
+systemd_scope_dollar_refused :: proc(t: ^testing.T) {
+	testing.expect(t, systemd_scope_args_ok({"/home/u/.local/share/deckhand/core/current/deckhand-core", "hold", "--run", "/home/u/.local/state/deckhand/run", "--data", "/home/u/.local/share/deckhand"}))
+	testing.expect(t, !systemd_scope_args_ok({"/home/u/bin/deckhand-core", "hold", "--run", "/tmp/$HOME/run", "--data", "/d"}), "$ in --run")
+	testing.expect(t, !systemd_scope_args_ok({"/home/u/bin/deckhand-core", "hold", "--run", "/r", "--data", "/d/${X}"}), "${} in --data")
+	testing.expect(t, !systemd_scope_args_ok({"/home/$u/deckhand-core", "hold"}), "$ in the binary's path")
+	testing.expect(t, systemd_scope_args_ok({"/home/u/100%/deckhand-core", "hold"}), "% is not expanded in a scope's command")
+}

@@ -19,8 +19,7 @@ pid_exe :: proc(pid: i32) -> string {
 	return err == nil ? p : ""
 }
 
-// The session holder's executable (holder_client.odin, holder_successor.odin); no holder runs on
-// Linux until M6-L3.
+// The session holder's executable (holder_client.odin, holder_successor.odin).
 holder_pid_exe :: proc(pid: i32) -> string {return pid_exe(pid)}
 
 // The process at the other end of a connected Unix socket: SO_PEERCRED, the process that called

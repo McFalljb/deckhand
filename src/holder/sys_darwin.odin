@@ -5,6 +5,13 @@ package holder
 // and the macOS constants they take.
 
 import "core:c"
+import "core:fmt"
+import "core:os"
+import "core:strconv"
+import "core:strings"
+import "core:sys/posix"
+import "core:time"
+import "../trust"
 
 foreign import libc "system:System"
 
@@ -211,4 +218,131 @@ set_nonblock :: proc(fd: c.int) {
 set_nosigpipe :: proc(fd: c.int) {
 	one: c.int = 1
 	setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &one, size_of(one))
+}
+
+SUP_O_WRONLY :: 0x0001 // what the supervisor opens the core's log with (supervisor.odin)
+SUP_O_APPEND :: 0x0008
+
+// Every fd above 2 this process has made close-on-exec: one a launcher leaked to us (a shell, a
+// CI runner, a direct start that did not use POSIX_SPAWN_CLOEXEC_DEFAULT) never reaches a
+// session. At start, before any fd of the holder's own is open (theirs are close-on-exec).
+cloexec_inherited :: proc() {
+	F_GETFD :: 1
+	rl: Rlimit
+	top := c.int(OPEN_MAX)
+	if getrlimit(RLIMIT_NOFILE, &rl) == 0 do top = c.int(min(max(rl.cur, rl.max), OPEN_MAX)) // above the soft limit too
+	for fd in c.int(3) ..< top {
+		flags := fcntl(fd, F_GETFD)
+		if flags >= 0 && flags & FD_CLOEXEC == 0 do fcntl(fd, F_SETFD, flags | FD_CLOEXEC)
+	}
+}
+
+RESPONSIBLE_ENV :: "_DECKHAND_RESPONSIBLE"
+
+// §5.7, S2: the holder is TCC-responsible for itself (and so for its children), not Deckhand.app
+// or launchd's job. Re-execs this binary in place (POSIX_SPAWN_SETEXEC keeps the pid) with the
+// disclaim attribute, marking the environment with our pid so the new image knows it is done.
+// Returns only when there is nothing to do or the re-exec failed (logged; the holder carries on).
+disclaim_responsibility :: proc() {
+	own := getpid()
+	buf: [16]u8
+	pid_str := strconv.write_int(buf[:], i64(own), 10)
+	if os.get_env(RESPONSIBLE_ENV, context.temp_allocator) == pid_str { // env-read-ok: a constant: the TCC re-exec marker
+		log_line("TCC: responsible for itself (disclaimed)")
+		return
+	}
+	fnp := dlsym(RTLD_DEFAULT, "responsibility_spawnattrs_setdisclaim")
+	if fnp == nil {
+		log_line("TCC disclaim unavailable (no responsibility_spawnattrs_setdisclaim): carrying on")
+		return
+	}
+	setdisclaim := cast(proc "c" (attr: ^rawptr, disclaim: c.int) -> c.int)fnp
+	path_buf: [4096]u8
+	n := proc_pidpath(own, &path_buf, size_of(path_buf))
+	if n <= 0 {
+		log_line("TCC disclaim: no executable path: carrying on")
+		return
+	}
+	path := strings.clone_to_cstring(string(path_buf[:n]), context.temp_allocator)
+	setenv(RESPONSIBLE_ENV, strings.clone_to_cstring(pid_str, context.temp_allocator), 1)
+	attr: rawptr
+	posix_spawnattr_init(&attr)
+	posix_spawnattr_setflags(&attr, POSIX_SPAWN_SETEXEC)
+	setdisclaim(&attr, 1)
+	c_argv := make([]cstring, len(os.args) + 1, context.temp_allocator)
+	for a, i in os.args do c_argv[i] = strings.clone_to_cstring(a, context.temp_allocator)
+	r := posix_spawn(nil, path, nil, &attr, raw_data(c_argv), _NSGetEnviron()^)
+	posix_spawnattr_destroy(&attr)
+	log_line(fmt.tprintf("TCC disclaim: re-exec failed (%d): carrying on", r))
+}
+
+// ---- the upgrade's handoff (keeper.odin) ----
+
+// The giver's end of a handoff socketpair: nothing to set (LOCAL_PEERTOKEN is live).
+handoff_giver_prepare :: proc(fd: c.int) -> bool {return true}
+
+// The taker's 8-byte hello into b, and the process that wrote it: the peer's live audit token,
+// read with the bytes in hand (the token is the process that wrote them).
+handoff_hello_peer :: proc(fd: c.int, b: []u8, deadline: time.Tick) -> (peer: trust.Peer, tok: trust.Audit_Token, ok: bool) {
+	if !recv_all_by(fd, b, deadline) do return {}, {}, false
+	peer, tok = trust.peer_read_token(posix.FD(fd))
+	return peer, tok, peer.ok
+}
+
+// LOCAL_PEERTOKEN is live: a core reads the keeper's pid without it.
+relisten :: proc(h: ^Holder) {}
+
+// ---- orphans (keeper.odin) ----
+
+// Linux's: the new image reaps the old one's other children (never needed here: unchanged).
+reap_strays :: proc(h: ^Holder) {}
+
+// Linux's fallback for an orphan with no pidfd: never needed here (kqueue).
+orphans_poll :: proc(h: ^Holder) {}
+
+// Registers every orphan that still runs with the kqueue (made on first use). One that is gone
+// already ended unseen: its exit is unknown (code -1).
+orphans_watch :: proc(h: ^Holder) {
+	for t in h.terms {
+		if !t.orphan || t.reaped do continue
+		if h.kq < 0 {
+			sync_lock()
+			h.kq = kqueue()
+			if h.kq >= 0 do set_cloexec(h.kq)
+			sync_unlock()
+			if h.kq < 0 {
+				hlog(h, "kqueue: errno %d: orphans' exits are unknown", errno())
+				return
+			}
+		}
+		ev := Kevent{ident = uintptr(t.pid), filter = EVFILT_PROC, flags = EV_ADD | EV_ONESHOT, fflags = NOTE_EXIT | NOTE_EXITSTATUS}
+		if kevent(h.kq, &ev, 1, nil, 0, nil) != 0 {
+			hlog(h, "terminal %d: pid %d is gone already (errno %d): exit unknown", t.id, t.pid, errno())
+			orphan_ended(t, -1, false)
+		}
+	}
+}
+
+// The kqueue is readable: the orphans that exited, with their wait status.
+orphans_read :: proc(h: ^Holder) {
+	evs: [32]Kevent
+	zero := Timespec{}
+	for {
+		n := kevent(h.kq, nil, 0, &evs[0], len(evs), &zero)
+		if n <= 0 do return
+		for ev in evs[:n] {
+			if ev.filter != EVFILT_PROC || ev.fflags & NOTE_EXIT == 0 do continue
+			for t in h.terms do if t.orphan && !t.reaped && uintptr(t.pid) == ev.ident {
+				orphan_ended(t, ev.data, ev.fflags & NOTE_EXITSTATUS != 0)
+			}
+		}
+		if int(n) < len(evs) do return
+	}
+}
+
+// The keeper at the other end of the new image's handoff socket (upgrade.odin's resume): its live
+// token's pid. 0 = unknown.
+handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {
+	kp := trust.peer_read(posix.FD(fd))
+	return kp.ok ? c.int(kp.pid) : 0
 }

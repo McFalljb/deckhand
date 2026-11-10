@@ -8,12 +8,19 @@ package core
 // directly in its own session (setsid; holder_launch_direct), its output in <run>/core.log, and
 // is reparented once its launcher exits. The arguments are launchd_darwin.odin's core_launch's.
 //
+// The session holder (M6-L3) and a core started directly each run in a transient scope of their
+// own (systemd_scope_argv: deckhand-holder-<rand>.scope, deckhand-core-<rand>.scope), so stopping
+// the core's unit never reaches the sessions, and a handover's successor is tracked by systemd.
+// No user manager, or a scope that never runs the binary: spawned directly, with a warning. Test
+// mode spawns directly unless DECKHAND_HOLDER_SYSTEMD=1.
+//
 // The install: <data>/core/<version>-<sha12>/deckhand-core-serve (version "dev" until a release
 // carries one, M6-L4; sha12 of the binary), made current as on macOS (core_make_current), then
 // the unit (its ExecStart is core/current's binary), `systemctl --user daemon-reload`, and the
 // linger check. No sudo, ever: enabling linger is the user's own choice (`linger --enable`, or
 // the command shown).
 
+import "core:crypto"
 import "core:fmt"
 import "core:os"
 import "core:path/filepath"
@@ -22,8 +29,8 @@ import "core:sys/posix"
 import "core:time"
 
 core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> (pid: i32, ok: bool, why: string) {
-	// a running core's handover (secret or not) or Use previous: bin directly (systemd_start_wanted;
-	// M6-L3 moves the successor to systemd-run). 5 s: within connect's 15 s, with retries
+	// a running core's handover (secret or not) or Use previous: bin in a scope of its own
+	// (systemd_start_wanted, scope_launch). 5 s: within connect's 15 s, with retries
 	current := core_serve_of(data, CORE_CURRENT)
 	if systemd_start_wanted(real_path(bin), real_path(current), core_separate, autotest_active, systemd_unit_ours(data), core_use_previous_serve(data) != "") {
 		out, st := run_group(systemd_argv(.Start), 5 * time.Second, merge_stderr = true)
@@ -31,7 +38,62 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 		fmt.eprintfln("Deckhand: background core: systemctl --user start %s failed (%v: %s): starting it directly", SYSTEMD_UNIT, st, strings.trim_space(out))
 	}
 	ours, _ := os.environ(context.temp_allocator)
-	return holder_launch_direct(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
+	return scope_launch(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
+}
+
+// Starts a session holder for run and data, running bin (holder_install), with env (nil = this
+// process's), in a scope of its own. pid: the holder's.
+holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: bool, why: string) {
+	if len(run) + RUNTIME_HOLDER_NEED > SUN_PATH_MAX {
+		return 0, false, fmt.tprintf("the runtime dir %s is too long for the session holder's socket (sun_path is %d bytes)", run, SUN_PATH_MAX + 1)
+	}
+	return scope_launch(bin, run, data, env, "hold", "")
+}
+
+SCOPE_WAIT :: 3 * time.Second // systemd-run has made the scope and exec'd bin
+
+// holder_launch_direct, wrapped in a transient scope when systemd_scope_wanted (mode "hold": the
+// holder; "serve": a core). The scope's launch is ours only once /proc/<pid>/exe is bin: until then
+// it is waited for here, and on failure (systemd-run exited, or never exec'd bin within SCOPE_WAIT,
+// then killed: never two) bin is spawned directly.
+@(private = "file")
+scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string) -> (pid: i32, ok: bool, why: string) {
+	if !systemd_scope_wanted(autotest_active, hook_env(.Holder_Systemd) == "1", hook_env(.Holder_Direct) == "1") || !os.is_file(SYSTEMD_RUN) {
+		return holder_launch_direct(bin, run, data, env, mode, secret)
+	}
+	if !systemd_scope_args_ok({bin, run, data}) {
+		fmt.eprintfln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", bin, run, data)
+		return holder_launch_direct(bin, run, data, env, mode, secret)
+	}
+	r: [4]u8
+	crypto.rand_bytes(r[:])
+	unit := fmt.tprintf("deckhand-%s-%02x%02x%02x%02x", mode == "serve" ? "core" : "holder", r[0], r[1], r[2], r[3])
+	p, sok, swhy := holder_launch_direct(bin, run, data, env, mode, secret, systemd_scope_argv(unit), reap = false)
+	if sok {
+		want := real_path(bin)
+		deadline := time.tick_add(time.tick_now(), SCOPE_WAIT)
+		for {
+			st: i32
+			if posix.waitpid(posix.pid_t(p), &st, {.NOHANG}) == posix.pid_t(p) {
+				swhy = fmt.tprintf("systemd-run exited (status %d)", st)
+				break
+			}
+			if want != "" && real_path(fmt.tprintf("/proc/%d/exe", p)) == want {
+				holder_reap_later(p)
+				return p, true, ""
+			}
+			if time.tick_diff(time.tick_now(), deadline) <= 0 {
+				// still ours and unreaped (a zombie at worst): never a reused pid
+				posix.kill(posix.pid_t(p), .SIGKILL)
+				for posix.waitpid(posix.pid_t(p), &st, {}) < 0 && posix.errno() == .EINTR {}
+				swhy = fmt.tprintf("it did not run %s within %v", bin, SCOPE_WAIT)
+				break
+			}
+			time.sleep(10 * time.Millisecond)
+		}
+	}
+	fmt.eprintfln("Deckhand: %s: the systemd scope %s failed (%s): starting it directly, outside a scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", unit, swhy)
+	return holder_launch_direct(bin, run, data, env, mode, secret)
 }
 
 // path with every link resolved ("" when it cannot be). Temp.
@@ -63,33 +125,57 @@ systemd_unit_ours :: proc(data: string) -> bool {
 // `install --data DIR` on Linux: this binary into <data>/core/<key>/, made current, then the unit
 // for the default data dir. serve: the installed copy. note: what the user should know ("" = none:
 // the unit is loaded and linger is on).
+// The session holder (deckhand-core) beside this binary goes with it, and the key's sha12 is then
+// of the pair (core_pair_sum, as a Core.app's); without one, of this binary alone, and sessions
+// stop with the core.
 core_install_linux :: proc(exe, data: string) -> (serve: string, note: string, ok: bool) {
 	src, rerr := os.read_entire_file(exe, context.temp_allocator)
 	if rerr != nil do return "", fmt.tprintf("cannot read %s: %v", exe, rerr), false
-	sum := holder_sha256(src)
+	hpath := fmt.tprintf("%s/%s", filepath.dir(exe), HOLDER_BIN)
+	hsrc, herr := os.read_entire_file(hpath, context.temp_allocator)
+	sum := herr == nil ? core_pair_sum(filepath.dir(exe)) : holder_sha256(src)
+	if sum == "" do return "", fmt.tprintf("cannot read %s and %s", exe, hpath), false
+	notes: [dynamic]string
+	notes.allocator = context.temp_allocator
+	if herr != nil do append(&notes, fmt.tprintf("no session holder beside it (%s): sessions stop when the core does", hpath))
 	v := core_version()
 	if v == "" do v = "dev"
 	key := fmt.tprintf("%s-%s", v, sum[:12])
 	vdir := core_versions_dir(data)
 	dir := fmt.tprintf("%s/%s", vdir, key)
 	dest := fmt.tprintf("%s/%s", dir, CORE_SERVE_BIN)
-	if holder_sha256_file(dest) != sum {
-		if w := file_install(dest, src, {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IXOTH}); w != "" do return "", w, false
+	exec_mode :: posix.mode_t{.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IXOTH}
+	// the holder first: a dir with serve in it is a whole install
+	if herr == nil {
+		hdest := fmt.tprintf("%s/%s", dir, HOLDER_BIN)
+		if holder_sha256_file(hdest) != holder_sha256(hsrc) {
+			if w := file_install(hdest, hsrc, exec_mode); w != "" do return "", w, false
+		}
+	}
+	if holder_sha256_file(dest) != holder_sha256(src) {
+		if w := file_install(dest, src, exec_mode); w != "" do return "", w, false
 	}
 	if w := core_make_current(vdir, key); w != "" do return "", w, false
 	core_collect(vdir, core_in_use())
 	serve = strings.clone(dest)
 
 	home := data_home(TEST_HOOKS, context.temp_allocator)
-	if data != data_dir_under(home, context.temp_allocator) do return serve, "not the default data dir: no systemd unit (the core is started directly)", true
+	no_unit := ""
 	run := runtime_dir_linux(data)
-	if run == "" do return serve, "no runtime dir: no systemd unit", true
 	text, tok := systemd_unit_text(fmt.tprintf("%s/%s/%s", vdir, CORE_CURRENT, CORE_SERVE_BIN), run, data)
-	if !tok do return serve, fmt.tprintf("a path cannot go in a systemd unit (%s, %s): no unit", run, data), true
+	if data != data_dir_under(home, context.temp_allocator) {
+		no_unit = "not the default data dir: no systemd unit (the core is started directly)"
+	} else if run == "" {
+		no_unit = "no runtime dir: no systemd unit"
+	} else if !tok {
+		no_unit = fmt.tprintf("a path cannot go in a systemd unit (%s, %s): no unit", run, data)
+	}
+	if no_unit != "" {
+		append(&notes, no_unit)
+		return serve, strings.join(notes[:], "; ", context.temp_allocator), true
+	}
 	unit := systemd_unit_path()
 	if w := file_install(unit, transmute([]u8)text, {.IRUSR, .IWUSR, .IRGRP, .IROTH}); w != "" do return serve, w, false
-	notes: [dynamic]string
-	notes.allocator = context.temp_allocator
 	if out, st := run_group(systemd_argv(.Reload), 20 * time.Second, merge_stderr = true); st != .Ok {
 		append(&notes, fmt.tprintf("no systemd user manager (systemctl --user daemon-reload: %v %s): the core is started directly", st, strings.trim_space(out)))
 	}

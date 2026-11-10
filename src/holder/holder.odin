@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // The session holder (docs/plans/background-core.md §3, §5.6, §5.7, §7.2): one poll() loop
@@ -16,12 +15,16 @@ package holder
 // - GOODBYE_ACK follows every OUTPUT up to each acked offset; nothing is sent after it. The
 //   connection then stays open until the core closes it (at most LINGER): a peer that closed its
 //   end can no longer be read (LOCAL_PEERTOKEN fails), and the core checks it on the ack.
+// - On Linux (M6-L3, sys_linux.odin) the same, with SO_PEERCRED: the peer is the same user only
+//   (§8.3), read at accept; there is no live token to read again, so peer_still holds by
+//   construction.
 // - The HMAC key is in WELCOME and nowhere else.
 
 import "core:c"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:crypto"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -33,7 +36,7 @@ import "../trust"
 // src/holderwire or src/trust outside tests. scripts/check-holder-rev.sh fails CI otherwise, and
 // checks src/core/holder_install.odin's HOLDER_REV (the app's copy) matches. A core upgrades a holder
 // whose holder_rev is older than its own (UPGRADE, §7.3).
-HOLDER_REV :: 5
+HOLDER_REV :: 6
 TAIL_CAP :: 1024 * 1024 // per terminal (§3)
 QUEUE_CAP :: 8 * 1024 * 1024 // per core: past this, masters are not read (§5.6)
 QUEUE_CAP_INPUT :: 8 * 1024 * 1024 // per terminal: INPUT the program has not taken
@@ -111,7 +114,9 @@ Term :: struct {
 	exec_fd:                    c.int,
 	spawned_at:                 time.Tick,
 	requester:                  u64, // the asking connection's serial
-	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from kqueue
+	orphan:                     bool, // not our child (adopted by an upgrade's keeper): its exit comes from orphans_read
+	polled:                     bool, // Linux: an orphan with no pidfd: orphans_poll checks it is still that process
+	start_time:                 u64, // Linux: its start time (/proc/<pid>/stat), against pid reuse
 }
 
 Conn :: struct {
@@ -141,7 +146,7 @@ Holder :: struct {
 	sock_path:         string,
 	lock_fd:           c.int,
 	wake_fd:           c.int, // SIGCHLD self-pipe's read end, or -1
-	kq:                c.int, // kqueue watching orphans' exits (NOTE_EXITSTATUS), or -1
+	kq:                c.int, // watching orphans' exits (macOS: a kqueue, NOTE_EXITSTATUS; Linux: an epoll set of pidfds), or -1
 	upgrade_error:     string, // the keeper adopted the terminals: why the new image did not get them (WELCOME)
 	can_upgrade:       bool, // the holder binary (never an in-process test holder): UPGRADE may exec
 	keeper_pid:        c.int, // after an upgrade: the keeper (our child) until it is reaped, else 0
@@ -245,7 +250,7 @@ run_dir_problem :: proc(dir: string) -> string {
 	if posix.lstat(strings.clone_to_cstring(dir, context.temp_allocator), &st) != .OK do return "missing"
 	if !posix.S_ISDIR(st.st_mode) do return "not a directory"
 	if u32(st.st_uid) != trust.own_uid() do return "not owned by us"
-	if transmute(u16)st.st_mode & 0o777 != 0o700 do return "not mode 0700"
+	if st.st_mode & {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IWGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH} != posix.S_IRWXU do return "not mode 0700"
 	return ""
 }
 
@@ -260,7 +265,7 @@ holder_listen :: proc(h: ^Holder) -> bool {
 		return false
 	}
 	copy(addr.sun_path[:], h.sock_path)
-	addr.sun_len = size_of(addr)
+	when ODIN_OS == .Darwin do addr.sun_len = size_of(addr)
 	sync_lock()
 	h.listen_fd = socket(AF_UNIX, SOCK_STREAM, 0)
 	if h.listen_fd >= 0 do set_cloexec(h.listen_fd)
@@ -428,7 +433,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 	}
 
 	timeout := min(timeout_ms, next_timer_ms(h))
-	n := poll(raw_data(fds), c.uint(len(fds)), c.int(max(timeout, 0)))
+	n := poll(raw_data(fds), auto_cast len(fds), c.int(max(timeout, 0)))
 	if n > 0 {
 		for pfd, k in fds {
 			if pfd.revents == 0 do continue
@@ -437,6 +442,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 			case .Wake:
 				drain: [64]u8
 				for read(h.wake_fd, &drain, size_of(drain)) > 0 {}
+				reap_strays(h) // Linux: children that are neither sessions nor tracked (sys_linux.odin)
 			case .Orphans:
 				orphans_read(h)
 			case .Conn:
@@ -510,6 +516,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	for term in h.terms {
 		if term.pending do t = min(t, ms_until(term.spawned_at, h.cfg.spawn_timeout))
 		if !term.reaped && !term.orphan do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
+		else if !term.reaped && term.polled do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
 		else if !term.final do t = min(t, ms_until(term.reaped_at, h.cfg.exit_grace))
 	}
 	if h.idle do t = min(t, ms_until(h.idle_since, h.cfg.idle_exit))
@@ -1006,6 +1013,7 @@ timers :: proc(h: ^Holder) {
 		st: c.int
 		if r := waitpid(h.keeper_pid, &st, WNOHANG); r == h.keeper_pid || (r < 0 && errno() == ECHILD) do h.keeper_pid = 0
 	}
+	orphans_poll(h) // Linux: orphans with no pidfd (sys_linux.odin); nothing on macOS
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {
 		t := h.terms[i]
 		if t.pending && time.tick_since(t.spawned_at) >= h.cfg.spawn_timeout do spawn_resolve(h, t, true)
@@ -1081,6 +1089,9 @@ on_sigchld :: proc "c" (sig: c.int) {
 // --data DIR` (its dry run; upgrade.odin).
 // Exit codes: 0 done (idle or GOODBYE{shutdown}), 1 a start failure, 2 usage, 3 instance.lock
 // held exclusively.
+// `--keeper PID` of a new image's argv (upgrade.odin resume_argv; Linux), else 0.
+resume_keeper: c.int
+
 hold_main :: proc(args: []string) -> int {
 	run_dir, data_dir, ready, resume, dry: string
 	for i := 0; i < len(args); i += 1 {
@@ -1091,6 +1102,10 @@ hold_main :: proc(args: []string) -> int {
 		case "--ready": ready = args[i + 1]
 		case "--resume": resume = args[i + 1]
 		case "--dry-run-resume": dry = args[i + 1]
+		case "--keeper": // after an UPGRADE's exec (Linux): the keeper the old image forked
+			n, ok := strconv.parse_int(args[i + 1], 10)
+			if !ok || n <= 0 || n > int(max(i32)) do return usage()
+			resume_keeper = c.int(n)
 		case: return usage()
 		}
 		i += 1
@@ -1102,14 +1117,15 @@ hold_main :: proc(args: []string) -> int {
 	reset_signals()
 
 	if resume != "" || dry != "" {
-		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") do return usage()
+		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") || (resume_keeper != 0 && resume == "") do return usage()
 		raise_fd_limit() // before it takes every master; a resource limit survives exec, but not the raise
 		h := holder_resume(dry != "" ? dry : resume, dry != "", run_dir, data_dir)
 		if h == nil do return 1
 		install_sigchld(h)
+		reap_strays(h) // Linux: the old image's other children that ended before the handler was in
 		return holder_serve(h)
 	}
-	if run_dir == "" || data_dir == "" do return usage()
+	if run_dir == "" || data_dir == "" || resume_keeper != 0 do return usage()
 
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
 	raise_fd_limit() // after it: the re-exec'd holder would take the raised limit for the original

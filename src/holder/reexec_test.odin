@@ -1,4 +1,3 @@
-#+build darwin
 package holder
 
 // UPGRADE with real processes (docs/plans/background-core.md §7.3, §12 "Holder re-exec"): the
@@ -38,6 +37,7 @@ import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "../holderwire"
+import "../trust"
 
 HOOKS_BIN :: "build/deckhand-core-hooks"
 SWAPPED_BIN :: "build/deckhand-core-swapped" // the same, signed as dev.deckhand.swapped
@@ -163,7 +163,7 @@ rig_attach :: proc(t: ^testing.T, r: ^Rig, timeout := 15 * time.Second) -> (w: h
 		addr: posix.sockaddr_un
 		addr.sun_family = .UNIX
 		for ch, i in r.sock do addr.sun_path[i] = c.char(ch)
-		addr.sun_len = u8(size_of(addr))
+		when ODIN_OS == .Darwin do addr.sun_len = u8(size_of(addr))
 		if posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK {
 			set_cloexec(c.int(fd))
 			set_nonblock(c.int(fd))
@@ -327,10 +327,45 @@ counters_ok :: proc(t: ^testing.T, text: string, id: u32) -> int {
 }
 
 proc_ppid :: proc(pid: c.int) -> c.int {
-	info: [136]u8 // struct proc_bsdinfo
-	if proc_pidinfo(pid, 3, 0, &info, size_of(info)) != size_of(info) do return -1 // PROC_PIDTBSDINFO
-	v := (^u32)(&info[16])^ // pbi_ppid
-	return c.int(v)
+	when ODIN_OS == .Linux {
+		// /proc/<pid>/stat: the ppid is the second field after the last ")" (comm may hold one)
+		b, err := os.read_entire_file(fmt.tprintf("/proc/%d/stat", pid), context.temp_allocator)
+		if err != nil do return -1
+		s := string(b)
+		i := strings.last_index_byte(s, ')')
+		if i < 0 do return -1
+		f := strings.fields(s[i + 1:], context.temp_allocator)
+		if len(f) < 2 do return -1
+		v, ok := strconv.parse_int(f[1], 10)
+		return ok ? c.int(v) : -1
+	} else {
+		info: [136]u8 // struct proc_bsdinfo
+		if proc_pidinfo(pid, 3, 0, &info, size_of(info)) != size_of(info) do return -1 // PROC_PIDTBSDINFO
+		v := (^u32)(&info[16])^ // pbi_ppid
+		return c.int(v)
+	}
+}
+
+// The binary a swap puts in place: SWAPPED_BIN (signed as dev.deckhand.swapped) on macOS. Linux has
+// no signatures: a copy of the hooks binary that any user may write fails the holder's file check
+// (trust.code_identity_of_file) as the wrong identifier does on macOS. Made in the rig's dir.
+swapped_bin :: proc(r: ^Rig) -> string {
+	when ODIN_OS == .Linux {
+		p := fmt.tprintf("%s/core-swapped", r.dir)
+		b, _ := os.read_entire_file(r.bin, context.temp_allocator)
+		_ = os.write_entire_file(p, b)
+		posix.chmod(strings.clone_to_cstring(p, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH})
+		return p
+	} else {
+		return abs_path(SWAPPED_BIN)
+	}
+}
+
+// What the holder says of the swapped binary (UPGRADE_FAILED's error).
+when ODIN_OS == .Linux {
+	SWAPPED_REFUSAL :: "Bad_Signature"
+} else {
+	SWAPPED_REFUSAL :: "Wrong_Identity"
 }
 
 @(test)
@@ -392,7 +427,7 @@ reexec_under_load :: proc(t: ^testing.T) {
 	out := rig_text(r, 7)
 	testing.expectf(t, strings.contains(out, "st=141"), "SIGPIPE not default after the upgrades: %q", out)
 	ls := strings.split_lines(strings.trim_space(out), context.temp_allocator)
-	testing.expectf(t, strings.trim_space(ls[len(ls) - 1]) == "0", "a blocked mask leaked: %q", out)
+	testing.expectf(t, mask_empty(ls[len(ls) - 1]), "a blocked mask leaked: %q", out)
 }
 
 @(test)
@@ -403,13 +438,13 @@ reexec_refusals :: proc(t: ^testing.T) {
 	rig_attach(t, r)
 	rig_spawn(t, r, 1, COUNTER)
 	testing.expect(t, rig_wait_text(r, 1, "c3\r\n"))
-	swapped := abs_path(SWAPPED_BIN)
+	swapped := swapped_bin(r)
 	cases := []struct {
 		path, hook, want: string,
 	} {
 		{"build/deckhand-core-hooks", "", "absolute"},
 		{"/nonexistent/deckhand-core", "", "not a file"},
-		{swapped, "", "Wrong_Identity"},
+		{swapped, "", SWAPPED_REFUSAL},
 		{"/bin/sh", "", "Wrong_Identity"},
 		{r.bin, "dry-run-fail", "dry run"},
 		{r.bin, "exec-fail", "execve"},
@@ -453,10 +488,15 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	if swap {
 		path = fmt.tprintf("%s/core-a", r.dir)
 		evil := fmt.tprintf("%s/core-evil", r.dir)
-		for pair in ([][2]string{{r.bin, path}, {abs_path(SWAPPED_BIN), evil}}) {
-			b, _ := os.read_entire_file(pair[0], context.temp_allocator)
-			_ = os.write_entire_file(pair[1], b)
-			posix.chmod(strings.clone_to_cstring(pair[1], context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+		b, _ := os.read_entire_file(r.bin, context.temp_allocator)
+		_ = os.write_entire_file(path, b)
+		posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+		b, _ = os.read_entire_file(swapped_bin(r), context.temp_allocator)
+		_ = os.write_entire_file(evil, b)
+		when ODIN_OS == .Linux {
+			posix.chmod(strings.clone_to_cstring(evil, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IWOTH}) // any user may write it
+		} else {
+			posix.chmod(strings.clone_to_cstring(evil, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
 		}
 		rig_hook(r, "swap", evil)
 	} else if how == .Crash {
@@ -474,6 +514,18 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	if !aok do return
 	if w2.pid > 0 && w2.pid != i64(r.pid) do append(&r.extra, c.int(w2.pid))
 	testing.expectf(t, w2.pid != i64(r.pid), "the WELCOME is from the holder's pid %d, not a keeper", w2.pid)
+	// a new connection's socket names the keeper too, as the core's welcome_peer_ok wants (Linux:
+	// relisten; one queued before it names the old holder's pid, and the core tries again)
+	{
+		fd := posix.socket(.UNIX, .STREAM)
+		addr: posix.sockaddr_un
+		addr.sun_family = .UNIX
+		for ch, i in r.sock do addr.sun_path[i] = c.char(ch)
+		when ODIN_OS == .Darwin do addr.sun_len = u8(size_of(addr))
+		testing.expect(t, posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
+		testing.expect_value(t, i64(trust.peer_read(fd).pid), w2.pid)
+		posix.close(fd)
+	}
 	testing.expect_value(t, w2.previous, "upgrade")
 	testing.expect_value(t, w2.instance, w.instance)
 	want := [Adopt_How]string{.Swap = "failed verification", .Crash = "stopped", .Hang = "in time", .No_Go = "before it could serve"}
@@ -505,15 +557,17 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	g, eok := rig_wait(r, .Exited, 4)
 	e: holderwire.Exited
 	testing.expect(t, eok && decode_got(g, .Exited, &e))
-	testing.expect_value(t, e.code, 3)
+	// macOS reads an orphan's wait status (NOTE_EXITSTATUS); Linux sees the exit but not how (-1)
+	ORPHAN_KNOWN :: ODIN_OS != .Linux
+	testing.expect_value(t, e.code, ORPHAN_KNOWN ? 3 : -1)
 	testing.expect_value(t, e.signal, 0)
 	testing.expect_value(t, e.offset, r.next[4])
 	rig_send(r, .Signal, 5, holderwire.Signal{signal = 15, target = "pid"})
 	g, eok = rig_wait(r, .Exited, 5)
 	testing.expect(t, eok && decode_got(g, .Exited, &e))
-	testing.expect_value(t, e.signal, 15)
+	testing.expect_value(t, e.signal, ORPHAN_KNOWN ? 15 : 0)
 	// a new session is the keeper's own child, not degraded
-	pid := rig_spawn(t, r, 9, `printf hi; exit 5`)
+	pid := rig_spawn(t, r, 9, `printf hi; sleep 1; exit 5`) // alive while its parent is read
 	testing.expect_value(t, proc_ppid(pid), c.int(w2.pid))
 	g, eok = rig_wait(r, .Exited, 9)
 	testing.expect(t, eok && decode_got(g, .Exited, &e) && e.code == 5)
@@ -563,6 +617,33 @@ reexec_keeper_reaped :: proc(t: ^testing.T) {
 		rig_read(r, 50)
 	}
 	testing.expectf(t, zombies == "", "zombie children of the holder: %q", zombies)
+}
+
+// Review round 1 (Linux): the old image has another child (an unreaped launcher, say) at the
+// upgrade. The new image still reaps its keeper, and that child too: no zombie stays behind.
+@(test)
+reexec_keeper_reaped_with_a_stray :: proc(t: ^testing.T) {
+	when ODIN_OS != .Linux do return // macOS finds the keeper by its live token (unchanged)
+	else {
+		r, ok := rig_new(t)
+		defer rig_free(t, r)
+		if !ok || !rig_start(t, r) do return
+		rig_attach(t, r)
+		rig_spawn(t, r, 1, COUNTER)
+		rig_hook(r, "stray-child")
+		failed, closed := rig_upgrade(r, r.bin)
+		testing.expectf(t, closed, "%q", failed)
+		if !closed do return
+		if _, aok := rig_attach(t, r); !aok do return
+		zombies := ""
+		start := time.tick_now()
+		for time.tick_since(start) < 4 * time.Second {
+			zombies = holder_zombies(r.pid)
+			if zombies == "" && time.tick_since(start) > 1500 * time.Millisecond do break // the stray exits 1 s after its fork
+			rig_read(r, 50)
+		}
+		testing.expectf(t, zombies == "", "zombie children of the holder: %q", zombies)
+	}
 }
 
 // The holder's children that are zombies ("pid stat" lines), from ps.
@@ -646,5 +727,5 @@ reexec_session_fds :: proc(t: ^testing.T) {
 	// ls lists what it inherited plus the two it opens to read the directory (3 and 4, the lowest
 	// free ones, if none leaked: child_holds_only_stdio)
 	out := strings.fields(rig_run(t, r, 2, "exec /bin/ls /dev/fd"), context.temp_allocator)
-	testing.expectf(t, slice_eq(out, []string{"0", "1", "2", "3", "4"}), "a session after the upgrade holds more than 0-2: %v", out)
+	testing.expectf(t, slice_eq(out, LS_DEV_FD), "a session after the upgrade holds more than 0-2: %v", out)
 }

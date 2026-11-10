@@ -26,8 +26,8 @@ main :: proc() {
 		os.exit(hold_main(os.args[2:]))
 	case "__detach":
 		os.exit(detach_main(os.args[2:]))
-	case "relaunch":
-		os.exit(relaunch_main(os.args[2:]))
+	case "relaunch": // the macOS app updater's (relaunch.odin)
+		when ODIN_OS == .Darwin do os.exit(relaunch_main(os.args[2:]))
 	}
 	fmt.eprintln(USAGE)
 	os.exit(2)

@@ -215,7 +215,6 @@ exit_of_wire :: proc(code, signal: i64) -> Exit_Info {
 // keep_sessions on (a holder is launched when none answers), or off when a holder socket is
 // there (sessions from an earlier run are adopted even after the setting went off).
 holder_client_start :: proc() -> bool {
-	when ODIN_OS != .Darwin do return false // no session holder on Linux until M6-L3: tabs are the core's children
 	if hc.on do return true
 	if hc.tried || home_root == "" do return false
 	when ODIN_TEST {
@@ -1175,7 +1174,13 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 	if f.kind == u8(hw.Kind.Refused) do return fail("refused")
 	w: hw.Welcome
 	if e := hw.decode(f, .Welcome, &w, context.temp_allocator); e != .None do return fail(fmt.tprintf("bad WELCOME: %v", e))
-	if d := trust.welcome_peer_ok(peer, w.pid); d != .Allow do return fail("WELCOME pid is not the socket's peer")
+	if d := trust.welcome_peer_ok(peer, w.pid); d != .Allow {
+		// Linux: SO_PEERCRED is the listener's at connect. A connection queued before an adopting
+		// keeper listened again (src/holder relisten) names the old holder's pid: a new one names
+		// the keeper. Tried again until the deadline, and refused if it never matches.
+		when ODIN_OS == .Linux do return fail("retry: WELCOME pid is not the socket's peer")
+		else do return fail("WELCOME pid is not the socket's peer")
+	}
 	if w.wire < hw.WIRE_MIN || w.wire > hw.WIRE do return fail("WELCOME wire")
 	// the same holder run: an upgrade keeps its instance and its key
 	key, kok := hex.decode(transmute([]u8)w.hmac_key, context.temp_allocator)
@@ -1307,7 +1312,10 @@ holder_children :: proc(pid: i32) -> int {
 		n := proc_listchildpids(posix.pid_t(pid), &buf[0], i32(size_of(buf))) // jobs_run.odin's
 		return max(0, int(n))
 	} else {
-		return 0
+		// its main thread's children (the holder forks from its one thread)
+		data, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", pid, pid), context.temp_allocator)
+		if err != nil do return 0
+		return len(strings.fields(string(data), context.temp_allocator))
 	}
 }
 

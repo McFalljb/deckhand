@@ -333,3 +333,10 @@ orphans_read :: proc(h: ^Holder) {
 		if int(n) < len(evs) do return
 	}
 }
+
+// The keeper at the other end of the new image's handoff socket (upgrade.odin's resume): its live
+// token's pid. 0 = unknown.
+handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {
+	kp := trust.peer_read(posix.FD(fd))
+	return kp.ok ? c.int(kp.pid) : 0
+}

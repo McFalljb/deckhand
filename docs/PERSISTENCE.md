@@ -180,7 +180,8 @@ Test mode saves and restores only with an explicit `DECKHAND_DATA_DIR`.
 ## Kept sessions
 
 With `keep_sessions` on (the default), the session holder keeps the tabs' processes running
-across core restarts and updates. These let the next core take them back:
+across core restarts and updates (on Linux too, where the holder runs in a systemd scope of its
+own; an orphan an upgrade's keeper adopts ends with an unknown exit code there). These let the next core take them back:
 
 - **`<data dir>/tokens.json`**: the socket tokens of the tabs whose process runs in the holder, so
   those processes can reconnect to the next core (PROTOCOL.md §2). Keyed by holder terminal,

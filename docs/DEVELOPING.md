@@ -173,14 +173,17 @@ clang):
 
 ```sh
 mkdir -p build && odin build src/coremain -out:build/deckhand-core-serve -o:speed
+odin build src/holder -out:build/deckhand-core -o:speed   # the session holder, beside it
 build/deckhand-core-serve serve --run ~/.local/state/deckhand/run --data ~/.local/share/deckhand
 python3 tests/linux-core-smoke.py build/deckhand-core-serve   # test mode in a temp dir: hello, get_state, a shell tab
+python3 tests/linux-holder-smoke.py build/deckhand-core-serve # a shell outlives SIGTERM and kill -9 of the core
 build/deckhand-core-serve install --data ~/.local/share/deckhand   # the binary and the systemd user unit (below)
 tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake HOME; systemd-analyze verify
 ```
 
 - **systemd** (M6-L2, `src/core/launch_linux.odin`, `src/core/systemd_unit.odin`): `install`
-  copies the binary to `~/.local/share/deckhand/core/<version>-<sha12>/` (`dev` for now), points
+  copies the binary, and the session holder `deckhand-core` beside it, to
+  `~/.local/share/deckhand/core/<version>-<sha12>/` (`dev` for now; the sha of the pair), points
   `core/current` at it, writes `~/.config/systemd/user/deckhand-core.service` (0644, atomically)
   and runs `systemctl --user daemon-reload`. The unit runs `core/current`'s binary (`Type=exec`)
   with `Restart=on-failure` (not after exit 2 or 3: usage, another core running; at most 5 starts
@@ -190,9 +193,23 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
   answers, and the idle exit (10 min, exit 0) stops it. Any other binary, no unit, no user
   manager (or a failed start), another data dir, test mode, Use previous core, or a running
   core's handover: that binary is spawned directly, as before. Its log:
-  `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing the
-  sessions' processes on a stop or restart, but until the holder (M6-L3) a PTY's shell still
-  gets SIGHUP when the core exits.
+  `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing
+  processes left in the unit's cgroup on a stop or restart.
+- **The session holder** (M6-L3, `src/holder/sys_linux.odin`): `keep_sessions` works as on macOS.
+  The core starts the holder with `systemd-run --user --scope --collect --unit
+  deckhand-holder-<rand> -- deckhand-core hold …`, so it runs in a transient scope of its own and
+  stopping or restarting `deckhand-core.service` never reaches the sessions. A core started
+  directly (a handover's successor, no unit) gets its own `deckhand-core-<rand>` scope the same
+  way. No user manager, or a scope that does not run the binary within 3 s: spawned directly, with
+  a warning in the log. Test mode spawns directly unless `DECKHAND_HOLDER_SYSTEMD=1`. Find them
+  with `systemctl --user list-units 'deckhand-*'`. The holder's supervisor relaunches a crashed
+  core with `deckhand-core-serve launch` (the unit, else a scope).
+  What differs from macOS: a `pidfd` per orphan in an `epoll` set (an upgrade's keeper sees an
+  orphan exit, but not its code); the upgrade's handoff reads its peer from `SCM_CREDENTIALS`
+  (`SO_PASSCRED`) and, with no pidversion, trusts the pid on a socket only the exec'd image
+  holds; a keeper that adopts calls `listen()` again so `SO_PEERCRED` names it; the code check
+  is a file check (`trust.code_identity_of_file`: a regular ELF file of ours that other users
+  can't write); no TCC disclaim; and no relaunch helper (the macOS app updater's).
 - **Linger:** without it the user manager, and the core, stop when the user's last login ends.
   `install` says so; `deckhand-core-serve linger` prints `on`, `off` or `unknown`
   (`loginctl show-user UID`), and `linger --enable` (the user's yes) runs `loginctl
@@ -209,13 +226,16 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
 - **Dirs:** data in `~/.local/share/deckhand`, sockets in `~/.local/state/deckhand/run` (0700;
   never `$XDG_RUNTIME_DIR`, which logout removes). A data dir given with `DECKHAND_DATA_DIR` keeps
   its sockets in `<data>/run`.
-- **No session holder yet** (M6-L3): `keep_sessions` is off and can't be turned on, so tab
-  processes are the core's children and a core restart restarts them.
-- **Checks:** `./build.sh test` type-checks `src/coremain` and the core's packages with
-  `-target:linux_amd64` (about a second). CI's `linux` job builds the core, runs the wires', the trust
-  rules' and the core's unit tests on Linux, `tests/linux-core-smoke.py` (also with `--default-dirs`),
-  and `tests/linux-systemd-check.sh --real`, which turns linger on for the runner's user (with
-  sudo: CI only) and starts the unit from `connect`, then restarts and stops it.
+- **Checks:** `./build.sh test` type-checks `src/coremain`, `src/holder` and the core's packages
+  with `-target:linux_amd64` (about a second). CI's `linux` job builds the core and the holder,
+  runs the wires', the trust rules', the holder's (re-exec under load included) and the core's
+  unit tests on Linux, `tests/linux-core-smoke.py` (also with `--default-dirs`),
+  `tests/linux-holder-smoke.py` (a shell outlives SIGTERM and kill -9 of the core, adopted
+  exactly, then from the tails), and `tests/linux-systemd-check.sh --real`, which turns linger
+  on for the runner's user (with sudo: CI only) and starts the unit from `connect` (its holder in
+  a scope), then restarts and stops it. Last, `linux-holder-smoke.py --systemd` runs a core as a
+  transient service with systemd's default `KillMode=control-group` and checks that
+  `systemctl --user stop` leaves its shell running.
 - **No window on Linux:** the window door refuses every framed hello but a hub's
   (`NO_WINDOW_HERE`): with no code signing, a window hello would be any same-user process's `ui`.
 
@@ -424,6 +444,10 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
   closing the window close only the window; *Quit Deckhand and Stop All Sessions…* stops the core
   and the holder; logout ends everything. User-facing behaviour:
   [How Deckhand runs](GUIDE.md#how-deckhand-runs).
+- **On Linux** there is no window and no Core.app: `core/<version>-<sha12>/` holds
+  `deckhand-core-serve` and `deckhand-core`, the core runs as the systemd user unit
+  `deckhand-core.service` (or in a `deckhand-core-<rand>` scope), and the holder in a
+  `deckhand-holder-<rand>` scope of its own ([Building the Linux core](#building-the-linux-core)).
 - **Core.app** (`dev.deckhand.core`, `LSUIElement`) holds `MacOS/deckhand-core` (the holder),
   `MacOS/deckhand-core-serve` (the core) and `MacOS/deckhand` (the CLI), and the integrations in
   `Resources/integrations/`. The core and the holder are two binaries because linking both into

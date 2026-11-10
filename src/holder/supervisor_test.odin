@@ -83,9 +83,9 @@ supervisor_launch_path :: proc(t: ^testing.T) {
 		posix.system(strings.clone_to_cstring(cmd, tmp))
 	}
 	for k in ([]string{"1-aaa", "2-bbb"}) {
-		bin := fmt.tprintf("%s/core/%s/Deckhand Core.app/Contents/MacOS", d, k)
-		posix.system(cs(fmt.tprintf("mkdir -p '%s'", bin)))
-		put(fmt.tprintf("%s/%s", bin, SUP_SERVE_BIN), "x")
+		serve := fmt.tprintf("%s/core/%s/%s", d, k, SUP_CURRENT[len("core/current/"):]) // the OS's layout
+		posix.system(cs(fmt.tprintf("mkdir -p '%s'", serve[:strings.last_index_byte(serve, '/')])))
+		put(serve, "x")
 	}
 	posix.symlink("2-bbb", cs(fmt.tprintf("%s/core/current", d)))
 	posix.symlink("1-aaa", cs(fmt.tprintf("%s/core/previous", d)))
@@ -115,11 +115,18 @@ supervise_needs_a_window :: proc(t: ^testing.T) {
 	f2 := fake_connect(t, h)
 	defer fake_free(f2)
 	fake_send(f2, .Supervise, 0, holderwire.Supervise{op = "status"})
-	g, ok := wait_for(h, f2, .Supervise_Status)
-	st: holderwire.Supervise_Status
-	testing.expect(t, ok && decode_got(g, .Supervise_Status, &st))
-	testing.expect(t, !st.core && !st.gave_up && st.crashes == 0)
-	testing.expect(t, wait_eof(h, f2))
+	when ODIN_OS == .Linux {
+		// no window on Linux: refused whatever the code (supervise_window)
+		testing.expect(t, wait_eof(h, f2))
+		testing.expect_value(t, len(f2.frames), 0)
+		ok: bool
+	} else {
+		g, ok := wait_for(h, f2, .Supervise_Status)
+		st: holderwire.Supervise_Status
+		testing.expect(t, ok && decode_got(g, .Supervise_Status, &st))
+		testing.expect(t, !st.core && !st.gave_up && st.crashes == 0)
+		testing.expect(t, wait_eof(h, f2))
+	}
 	// a core's SUPERVISE{core}: it is watched, and its crash plans a relaunch
 	f3 := fake_connect(t, h)
 	defer fake_free(f3)

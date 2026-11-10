@@ -1086,7 +1086,8 @@ pi is installed; Claude Code's once it has been used:
   drive this Mac's sessions. Off, no other machine can. A Linux machine (development builds) runs its core as your
   systemd user service `deckhand-core`, started when needed. Unless lingering is on for you there,
   it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
-  keeps it running.
+  keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a
+  session holder of their own (`deckhand-holder-…` in `systemctl --user list-units`).
 
 Click a file to open it in an editor tab. Press ⌘, again to go back to Sessions.
 

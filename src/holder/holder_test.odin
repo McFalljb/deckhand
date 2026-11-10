@@ -762,6 +762,9 @@ unknown_and_early_frames :: proc(t: ^testing.T) {
 // on: the peer changed since accept, so the core is dropped.
 @(test)
 changed_peer_is_dropped :: proc(t: ^testing.T) {
+	// Linux: SO_PEERCRED is fixed at connect, so a forked writer can't be told apart (the same
+	// user is the trust boundary there, src/trust/peer_linux.odin; core's transport test skips too)
+	when ODIN_OS == .Linux do return
 	h := new_test_holder(t)
 	defer holder_free(h, true)
 	f := fake_connect(t, h)

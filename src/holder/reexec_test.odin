@@ -554,7 +554,7 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	testing.expect(t, eok && decode_got(g, .Exited, &e))
 	testing.expect_value(t, e.signal, ORPHAN_KNOWN ? 15 : 0)
 	// a new session is the keeper's own child, not degraded
-	pid := rig_spawn(t, r, 9, `printf hi; exit 5`)
+	pid := rig_spawn(t, r, 9, `printf hi; sleep 1; exit 5`) // alive while its parent is read
 	testing.expect_value(t, proc_ppid(pid), c.int(w2.pid))
 	g, eok = rig_wait(r, .Exited, 9)
 	testing.expect(t, eok && decode_got(g, .Exited, &e) && e.code == 5)

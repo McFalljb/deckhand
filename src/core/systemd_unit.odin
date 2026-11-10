@@ -6,11 +6,10 @@ package core
 // starts it when no core answers, and serve reports linger in the hello (machine.linger).
 //
 // The unit is never enabled: it starts on demand, and the core's idle exit (§6, exit 0) stops it.
-// Restart=on-failure stands in for the holder's supervisor (no holder until M6-L3), except for
-// usage errors (2) and another core already running (3, instance_guard). KillMode=process: a stop
-// or restart signals the core alone, never the cgroup, so the sessions' processes are not killed
-// by systemd. Until M6-L3's holder, a PTY's shell still gets SIGHUP when the core (its master)
-// exits; with the holder (its own transient unit) the sessions outlive the core.
+// Restart=on-failure restarts a failed core (the holder's supervisor does too, through `launch`),
+// except for usage errors (2) and another core already running (3, instance_guard).
+// KillMode=process: a stop or restart signals the core alone, never the cgroup. The sessions run
+// in the holder's own scope (M6-L3, launch_linux.odin), so they outlive the core either way.
 
 import "core:fmt"
 import "core:strings"

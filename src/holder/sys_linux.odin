@@ -17,7 +17,10 @@ package holder
 //   keeper that adopts listens again (relisten), so a core's SO_PEERCRED names the keeper.
 
 import "core:c"
+import "core:fmt"
+import "core:os"
 import "core:strconv"
+import "core:strings"
 import "core:sys/posix"
 import "core:time"
 import "../trust"
@@ -373,6 +376,25 @@ relisten :: proc(h: ^Holder) {
 // The keeper may SIGKILL the holder's pid only while it is still the image it checked. Linux has
 // no pidversion: it is still our parent (the keeper is the old image's fork) and so not a reused pid.
 keeper_parent_is :: proc(holder_pid: i32) -> bool {return getppid() == c.int(holder_pid)}
+
+// The keeper, for the new image to reap (upgrade.odin's resume). SO_PEERCRED on a socketpair
+// names its maker (the old image: this pid), never the keeper. The keeper is the old image's fork,
+// and exec keeps children: it is the one child of ours that runs no session. 0 when that is not
+// one process (it is then left unreaped, as before).
+handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {
+	me := getpid()
+	b, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", me, me), context.temp_allocator)
+	if err != nil do return 0
+	found: c.int
+	outer: for f in strings.fields(string(b), context.temp_allocator) {
+		n, ok := strconv.parse_int(f, 10)
+		if !ok || n <= 0 do continue
+		for t in h.terms do if c.int(n) == t.pid do continue outer
+		if found != 0 do return 0
+		found = c.int(n)
+	}
+	return found
+}
 
 // ---- orphans (keeper.odin) ----
 

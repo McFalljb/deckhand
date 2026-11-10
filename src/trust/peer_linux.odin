@@ -69,17 +69,17 @@ code_identity_of_token :: proc(tok: Audit_Token) -> Code_Identity {
 }
 
 // A file as the holder's code (links followed): a regular file (else ok false), owned by us
-// (else no identifier), not writable by other users and an ELF image (else not valid). Never
+// (else no identifier), not writable by other users and an ELF image (else not valid). The file
+// opened is the one checked (fstat on it; O_NONBLOCK: a FIFO never blocks the open). Never
 // executed or changed here.
 code_identity_of_file :: proc(path: string) -> Code_Identity {
-	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	fd := posix.open(strings.clone_to_cstring(path, context.temp_allocator), {.CLOEXEC, .NONBLOCK})
+	if fd < 0 do return {}
+	defer posix.close(fd)
 	st: posix.stat_t
-	if posix.stat(cpath, &st) != .OK || !posix.S_ISREG(st.st_mode) do return {}
+	if posix.fstat(fd, &st) != .OK || !posix.S_ISREG(st.st_mode) do return {}
 	if u32(st.st_uid) != own_uid() do return {ok = true, valid = true}
 	if .IWOTH in st.st_mode do return {ok = true}
-	fd := posix.open(cpath, {.CLOEXEC})
-	if fd < 0 do return {ok = true}
-	defer posix.close(fd)
 	magic: [4]u8
 	if posix.read(fd, &magic[0], 4) != 4 || string(magic[:]) != "\x7fELF" do return {ok = true}
 	return {ok = true, valid = true, identifier = CORE_IDS[0]}

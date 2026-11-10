@@ -322,7 +322,7 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 	h.can_upgrade = true
 	orphans_watch(h)
 	// the keeper is our child (the old image forked it): reaped once it exits after DONE (timers)
-	if kp := trust.peer_read(posix.FD(fd)); kp.ok && kp.pid > 0 && kp.pid != i32(getpid()) do h.keeper_pid = c.int(kp.pid)
+	if kp := handoff_keeper_pid(h, fd); kp > 0 && kp != getpid() do h.keeper_pid = kp // sys_*.odin
 	done := transmute([]u8)string("DONE")
 	if !send_all_by(fd, done, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 		// the keeper is gone (it can no longer adopt): we have the terminals, so we serve

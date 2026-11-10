@@ -514,8 +514,18 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	if !aok do return
 	if w2.pid > 0 && w2.pid != i64(r.pid) do append(&r.extra, c.int(w2.pid))
 	testing.expectf(t, w2.pid != i64(r.pid), "the WELCOME is from the holder's pid %d, not a keeper", w2.pid)
-	// the socket names the keeper too, as the core's welcome_peer_ok wants (Linux: relisten)
-	testing.expect_value(t, i64(trust.peer_read(posix.FD(r.f.fd)).pid), w2.pid)
+	// a new connection's socket names the keeper too, as the core's welcome_peer_ok wants (Linux:
+	// relisten; one queued before it names the old holder's pid, and the core tries again)
+	{
+		fd := posix.socket(.UNIX, .STREAM)
+		addr: posix.sockaddr_un
+		addr.sun_family = .UNIX
+		for ch, i in r.sock do addr.sun_path[i] = c.char(ch)
+		when ODIN_OS == .Darwin do addr.sun_len = u8(size_of(addr))
+		testing.expect(t, posix.connect(fd, (^posix.sockaddr)(&addr), size_of(addr)) == .OK)
+		testing.expect_value(t, i64(trust.peer_read(fd).pid), w2.pid)
+		posix.close(fd)
+	}
 	testing.expect_value(t, w2.previous, "upgrade")
 	testing.expect_value(t, w2.instance, w.instance)
 	want := [Adopt_How]string{.Swap = "failed verification", .Crash = "stopped", .Hang = "in time", .No_Go = "before it could serve"}

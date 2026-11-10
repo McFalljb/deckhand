@@ -1174,7 +1174,13 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 	if f.kind == u8(hw.Kind.Refused) do return fail("refused")
 	w: hw.Welcome
 	if e := hw.decode(f, .Welcome, &w, context.temp_allocator); e != .None do return fail(fmt.tprintf("bad WELCOME: %v", e))
-	if d := trust.welcome_peer_ok(peer, w.pid); d != .Allow do return fail("WELCOME pid is not the socket's peer")
+	if d := trust.welcome_peer_ok(peer, w.pid); d != .Allow {
+		// Linux: SO_PEERCRED is the listener's at connect. A connection queued before an adopting
+		// keeper listened again (src/holder relisten) names the old holder's pid: a new one names
+		// the keeper. Tried again until the deadline, and refused if it never matches.
+		when ODIN_OS == .Linux do return fail("retry: WELCOME pid is not the socket's peer")
+		else do return fail("WELCOME pid is not the socket's peer")
+	}
 	if w.wire < hw.WIRE_MIN || w.wire > hw.WIRE do return fail("WELCOME wire")
 	// the same holder run: an upgrade keeps its instance and its key
 	key, kok := hex.decode(transmute([]u8)w.hmac_key, context.temp_allocator)

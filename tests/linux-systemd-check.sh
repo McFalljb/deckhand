@@ -58,9 +58,10 @@ for _ in $(seq 50); do [ -S "$XDG_RUNTIME_DIR/bus" ] && break; sleep 0.2; done
 "$BIN" install --data "$HOME/.local/share/deckhand" 2>&1 | tee /dev/stderr | grep -q 'no systemd user manager' && fail "install did not reach the user manager"
 systemctl --user cat deckhand-core.service >/dev/null || fail "the user manager does not see the unit"
 [ "$(systemctl --user show -p KillMode --value deckhand-core.service)" = process ] || fail "KillMode"
-# connect: no core answers, so it starts the unit; the hub hello is refused (the door is closed by
-# default) and stdin is empty: either way it ends
-"$BIN" connect </dev/null >/dev/null 2>"$home/connect.err" || true
+# connect, from core/current as another machine's ssh runs it: no core answers, so it starts the
+# unit (only core/current's binary does); the hub hello is refused (the door is closed by default)
+# and stdin is empty: either way it ends
+"$HOME/.local/share/deckhand/core/current/deckhand-core-serve" connect </dev/null >/dev/null 2>"$home/connect.err" || true
 cat "$home/connect.err" >&2
 systemctl --user is-active --quiet deckhand-core.service || fail "connect did not start the unit"
 pid=$(systemctl --user show -p MainPID --value deckhand-core.service)

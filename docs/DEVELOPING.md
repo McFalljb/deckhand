@@ -182,12 +182,14 @@ tests/linux-systemd-check.sh build/deckhand-core-serve   # install under a fake 
 - **systemd** (M6-L2, `src/core/launch_linux.odin`, `src/core/systemd_unit.odin`): `install`
   copies the binary to `~/.local/share/deckhand/core/<version>-<sha12>/` (`dev` for now), points
   `core/current` at it, writes `~/.config/systemd/user/deckhand-core.service` (0644, atomically)
-  and runs `systemctl --user daemon-reload`. The unit runs `core/current`'s binary with
-  `Restart=on-failure` (not after exit 2 or 3: usage, another core running), `KillMode=process`
+  and runs `systemctl --user daemon-reload`. The unit runs `core/current`'s binary (`Type=exec`)
+  with `Restart=on-failure` (not after exit 2 or 3: usage, another core running; at most 5 starts
+  a minute), `KillMode=process`
   and `DECKHAND_GUI_LAUNCH=1` (the login shell's environment, as under launchd). It is never
-  enabled: `connect` starts it with `systemctl --user start` when no core answers,
-  and the idle exit (10 min, exit 0) stops it. No unit, no user manager, another data dir, test
-  mode or a handover's successor: the core is spawned directly, as before. Its log:
+  enabled: `connect` from `core/current` starts it with `systemctl --user start` when no core
+  answers, and the idle exit (10 min, exit 0) stops it. Any other binary, no unit, no user
+  manager (or a failed start), another data dir, test mode, Use previous core, or a running
+  core's handover: that binary is spawned directly, as before. Its log:
   `journalctl --user -u deckhand-core`. `KillMode=process` keeps systemd from killing the
   sessions' processes on a stop or restart, but until the holder (M6-L3) a PTY's shell still
   gets SIGHUP when the core exits.

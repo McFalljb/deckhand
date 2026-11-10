@@ -23,14 +23,18 @@ LINGER_COMMAND :: "loginctl enable-linger" // what the user runs (shown, never r
 systemd_unit_text :: proc(serve, run, data: string, allocator := context.temp_allocator) -> (text: string, ok: bool) {
 	b := strings.builder_make(allocator)
 	strings.write_string(&b, "# Written by `deckhand-core-serve install` (Deckhand), and again by every install.\n")
-	strings.write_string(&b, "[Unit]\nDescription=Deckhand core\n\n")
-	strings.write_string(&b, "[Service]\nType=simple\nExecStart=")
+	// a failing core stops being restarted after 5 starts in a minute (RestartSec alone never
+	// trips the default limit); Type=exec: start fails when the binary cannot run, so
+	// core_launch falls back to a direct spawn
+	strings.write_string(&b, "[Unit]\nDescription=Deckhand core\nStartLimitIntervalSec=60\nStartLimitBurst=5\n\n")
+	strings.write_string(&b, "[Service]\nType=exec\nExecStart=")
 	for p in ([]string{serve, run, data}) do if !strings.has_prefix(p, "/") || strings.contains_any(p, "\n\r") do return "", false
-	systemd_quote(&b, serve)
+	if strings.contains_rune(serve, '$') do return "", false // the executable's '$' is not unescaped
+	systemd_quote(&b, serve, false)
 	strings.write_string(&b, " serve --run ")
-	systemd_quote(&b, run)
+	systemd_quote(&b, run, true)
 	strings.write_string(&b, " --data ")
-	systemd_quote(&b, data)
+	systemd_quote(&b, data, true)
 	strings.write_string(&b, "\n")
 	// the core asks the login shell for the user's environment (login_env.odin), as under launchd
 	strings.write_string(&b, "Environment=DECKHAND_GUI_LAUNCH=1\n")
@@ -39,18 +43,18 @@ systemd_unit_text :: proc(serve, run, data: string, allocator := context.temp_al
 	return strings.to_string(b), true
 }
 
-// One ExecStart word, double-quoted: '\' and '"' escaped, '%' (a specifier) and '$' (a
-// variable) doubled.
+// One ExecStart word, double-quoted, byte by byte: '\\' and '"' escaped, '%' (a specifier)
+// doubled, and in an argument (arg: where systemd expands variables) '$' doubled.
 @(private = "file")
-systemd_quote :: proc(b: ^strings.Builder, s: string) {
+systemd_quote :: proc(b: ^strings.Builder, s: string, arg: bool) {
 	strings.write_byte(b, '"')
-	for r in s {
-		switch r {
+	for i in 0 ..< len(s) {
+		switch s[i] {
 		case '\\', '"': strings.write_byte(b, '\\')
 		case '%': strings.write_byte(b, '%')
-		case '$': strings.write_byte(b, '$')
+		case '$': if arg do strings.write_byte(b, '$')
 		}
-		strings.write_rune(b, r)
+		strings.write_byte(b, s[i])
 	}
 	strings.write_byte(b, '"')
 }
@@ -99,4 +103,13 @@ linger_parse :: proc(out: string, ok: bool) -> Linger {
 	case "Linger=no":  return .Off
 	}
 	return .Unknown
+}
+
+// Whether core_launch goes through the unit: only a launch from outside a core (connect, the
+// supervisor; not a running core's handover, whose successor would be a second process in the
+// active unit, where `systemctl start` does nothing), of core/current's binary (bin and current
+// resolved), with the unit there, Use previous core not holding, and not in test mode. Else bin
+// is launched directly, as macOS's launchd fallback does.
+systemd_start_wanted :: proc(bin, current: string, from_core, test_mode, unit_there, use_previous: bool) -> bool {
+	return !from_core && !test_mode && unit_there && !use_previous && current != "" && bin == current
 }

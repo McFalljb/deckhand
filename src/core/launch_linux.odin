@@ -22,14 +22,26 @@ import "core:sys/posix"
 import "core:time"
 
 core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> (pid: i32, ok: bool, why: string) {
-	// a handover's successor takes its secret on a pipe: always direct (M6-L3 moves it to systemd-run)
-	if secret == "" && !autotest_active && systemd_unit_ours(data) {
-		out, st := run_group(systemd_argv(.Start), 20 * time.Second, merge_stderr = true)
+	// a running core's handover (secret or not) or Use previous: bin directly (systemd_start_wanted;
+	// M6-L3 moves the successor to systemd-run). 5 s: within connect's 15 s, with retries
+	current := core_serve_of(data, CORE_CURRENT)
+	if systemd_start_wanted(real_path(bin), real_path(current), core_separate, autotest_active, systemd_unit_ours(data), core_use_previous_serve(data) != "") {
+		out, st := run_group(systemd_argv(.Start), 5 * time.Second, merge_stderr = true)
 		if st == .Ok do return 0, true, ""
 		fmt.eprintfln("Deckhand: background core: systemctl --user start %s failed (%v: %s): starting it directly", SYSTEMD_UNIT, st, strings.trim_space(out))
 	}
 	ours, _ := os.environ(context.temp_allocator)
 	return holder_launch_direct(bin, run, data, core_launch_env(ours, from_tab), "serve", secret)
+}
+
+// path with every link resolved ("" when it cannot be). Temp.
+@(private = "file")
+real_path :: proc(path: string) -> string {
+	if path == "" do return ""
+	r := posix.realpath(strings.clone_to_cstring(path, context.temp_allocator), nil)
+	if r == nil do return ""
+	defer posix.free(r)
+	return strings.clone(string(r), context.temp_allocator)
 }
 
 // ~/.config/systemd/user/deckhand-core.service ("" with no home). Temp.

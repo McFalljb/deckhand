@@ -12,7 +12,8 @@ systemd_unit_text_fields :: proc(t: ^testing.T) {
 	testing.expect(t, ok)
 	want := []string{
 		"[Unit]\n",
-		"[Service]\nType=simple\n",
+		"StartLimitIntervalSec=60\nStartLimitBurst=5\n", // a failing core stops retrying (RestartSec alone never trips the default)
+		"[Service]\nType=exec\n", // start fails when the binary cannot run, so the direct fallback runs
 		`ExecStart="/home/u/.local/share/deckhand/core/current/deckhand-core-serve" serve --run "/home/u/.local/state/deckhand/run" --data "/home/u/.local/share/deckhand"` + "\n",
 		"Environment=DECKHAND_GUI_LAUNCH=1\n", // the login shell's environment, as a launchd launch gets
 		"Restart=on-failure\n",
@@ -26,10 +27,14 @@ systemd_unit_text_fields :: proc(t: ^testing.T) {
 @(test)
 systemd_unit_quoting :: proc(t: ^testing.T) {
 	// a home with a space, a quote, a backslash, '%' and '$': each quoted so systemd reads it back
-	// as the one path (no specifier, no variable)
-	text, ok := systemd_unit_text(`/home/a b"c\d%e$f/serve`, "/r", "/d")
+	// as the one path (no specifier, no variable; '$$' only in the arguments, where systemd
+	// expands variables)
+	text, ok := systemd_unit_text(`/home/a b"c\d%e/serve`, `/r$x`, "/d é")
 	testing.expect(t, ok)
-	testing.expectf(t, strings.contains(text, `ExecStart="/home/a b\"c\\d%%e$$f/serve" serve`), "got:\n%s", text)
+	testing.expectf(t, strings.contains(text, `ExecStart="/home/a b\"c\\d%%e/serve" serve --run "/r$$x" --data "/d é"`), "got:\n%s", text)
+	// a '$' in the executable is not doubled by systemd's reading: refused
+	_, dok := systemd_unit_text("/home/a$b/serve", "/r", "/d")
+	testing.expect(t, !dok, "a '$' in the executable's path refused")
 	// a line break would end the line: refused
 	for bad in ([]string{"/a\nb", "/a\rb", "relative/serve", ""}) {
 		_, bok := systemd_unit_text(bad, "/r", "/d")
@@ -73,4 +78,19 @@ argv_eq :: proc(a, b: []string) -> bool {
 	if len(a) != len(b) do return false
 	for x, i in a do if x != b[i] do return false
 	return true
+}
+
+// Only a launch from outside a core (connect, the supervisor) of core/current's binary goes through
+// the unit. A running core's handover (or Use previous) launches its bin directly: inside the
+// active unit, `systemctl start` would do nothing and the old core's exit would leave none.
+@(test)
+systemd_start_wanted_cases :: proc(t: ^testing.T) {
+	cur := "/h/.local/share/deckhand/core/dev-aaaaaaaaaaaa/deckhand-core-serve"
+	testing.expect(t, systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = false, unit_there = true, use_previous = false))
+	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = true, test_mode = false, unit_there = true, use_previous = false), "a handover from a running core")
+	testing.expect(t, !systemd_start_wanted(bin = "/h/build/deckhand-core-serve", current = cur, from_core = false, test_mode = false, unit_there = true, use_previous = false), "another binary than current's")
+	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = false, unit_there = true, use_previous = true), "Use previous core holds")
+	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = true, unit_there = true, use_previous = false), "test mode")
+	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = false, unit_there = false, use_previous = false), "no unit")
+	testing.expect(t, !systemd_start_wanted(bin = "", current = "", from_core = false, test_mode = false, unit_there = true, use_previous = false), "no current core")
 }

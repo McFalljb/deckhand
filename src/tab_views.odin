@@ -12,6 +12,7 @@ import "core"
 
 // window.view_open: the tab's view, unless it has one, then line or anchor (tab_view_goto).
 tab_view_open :: proc(tab_id: u64, kind: core.Tab_Kind, line: int, anchor: string) {
+	if core.id_machine(tab_id) != 0 do return // another machine's tab: its views live there (§8.2), never a page in this Mac's CEF
 	#partial switch k in kind {
 	case core.Editor_Tab:
 		if editor_of(tab_id) == nil do editor_new(tab_id, k.path)

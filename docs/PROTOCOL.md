@@ -599,7 +599,9 @@ tab and go to **that session's** pi, whichever session is on screen.
 ```
 
 `no_window`: the command needs the page, app or file view that Deckhand's window hosts, and no
-window is attached (§5a).
+window is attached (§5a). `browser_not_here`: a browser command on a machine whose sessions are
+viewed from another machine, or that has no window at all: browser tabs run only on the machine
+they belong to, so retrying will not help until a window of that machine's own attaches.
 
 `state.version` moves only when state changed: queries, failures and side-effect-only commands
 (`copy_selection`, `send_text`) leave it alone.
@@ -1242,7 +1244,13 @@ from the `uname -sm` probe) through `skew_check`; `state.machines`
 `needs_update`; `not_installed`; `taken`), `version`, `os`, `arch` and `error` (another machine's
 text, cleaned: printable runes only, no bidi controls; `version` at most 64 bytes, `error` 128). It reconnects after
 1 s, doubling to 60 s, and from 1 s again after a minute up. **Caps from the first byte:** every
-`window.request` and `confirmation.parked` from a hub link is dropped, never acted on. Online, the
+`window.request`, `confirmation.parked`, `tab_host.call` and `tab_host.event` from a hub link is
+dropped, never acted on: another machine's agents never drive this Mac's window or browser. Their
+browser is their own machine's (design §8.2): a core viewed from another machine hosts no tabs
+there, so its own agents' browser commands answer `{"ok":false,"error":"no browser here: browser
+tabs run only on the machine they belong to…","data":{"code":"browser_not_here"}}` at once (its
+app, Markdown and editor commands `no_window`), and nothing goes over the link. A core that can
+have no window (Linux) answers `browser_not_here` too. Online, the
 hub sends `state.subscribe` (and `select_project` with that machine's own id while one of its
 projects is selected here) and keeps that core's `state.full` and `state.delta` as a replica of its
 State (decoded as a window decodes them: bounded, applied whole or not at all; a refused one asks

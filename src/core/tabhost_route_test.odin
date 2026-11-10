@@ -210,6 +210,32 @@ tab_host_no_window :: proc(t: ^testing.T) {
 	testing.expectf(t, r.ok, "keep_tab is the record's: %v", r)
 }
 
+// Another machine's window (a hub: this core's sessions are viewed from there) hosts none of this
+// core's tabs (§8.2): nothing goes to it as a tab_host.call. Browser commands answer
+// browser_not_here (this machine has no Deckhand browser now), the rest no_window; never pending,
+// nothing changes. (A core with no window on this Mac still answers no_window: one may come back.)
+@(test)
+tab_host_hub_hosts_nothing :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, _, pa, ta, app, ed, md, _, _ := fh_begin()
+	defer fh_done()
+	window_link_for_test().hub = true
+	defer window_link_for_test().hub = false
+	for c in fh_routed(a, ta, app, ed, md, pa) {
+		if _, is := c.(Terminal_Link); is do continue // the user's ⌘-click: the link opens as the window's request
+		before := len(find_session(a).tabs)
+		v := state.version
+		r := run_command(c, {kind = .UI}, 77)
+		want := strings.has_prefix(command_type(c), "browser_") ? "browser_not_here" : "no_window"
+		testing.expectf(t, !r.ok && json_path(r.data, "code") == want, "%s: %v, want %s", command_type(c), r, want)
+		if want == "browser_not_here" do testing.expectf(t, strings.contains(r.error, "only on the machine"), "%s: %q", command_type(c), r.error)
+		testing.expectf(t, !r.pending, "%s: never pending", command_type(c))
+		testing.expectf(t, len(find_session(a).tabs) == before && state.version == v, "%s: nothing changed", command_type(c))
+	}
+	testing.expectf(t, len(fh.calls) == 0, "nothing went to the hub: %v", fh.calls)
+	testing.expect_value(t, tab_host_waiting(), 0)
+}
+
 // With a window: each routed command goes to it as one tab_host.call, and its answer comes back.
 @(test)
 tab_host_routes_every_command :: proc(t: ^testing.T) {

@@ -383,3 +383,12 @@ route_snapshot_max_honoured :: proc(t: ^testing.T) {
 	testing.expect(t, ok, "its stream keeps the limit")
 	for f in rt_win do if f.kind == .Snapshot do testing.expect(t, len(f.payload) <= 4096, "the snapshot fits it")
 }
+
+// What another machine's core sends that this core never acts on (machines.odin's mlink_pump):
+// its window requests and confirmations (M6-A), and anything of a tab host's: its agents' browser,
+// app and file-view calls stay on that machine (§8.2), they never reach this Mac's window or CEF.
+@(test)
+hub_drops_tab_host :: proc(t: ^testing.T) {
+	for k in ([]string{"window.request", "confirmation.parked", "tab_host.call", "tab_host.event"}) do testing.expectf(t, hub_msg_dropped(k), "%s: dropped", k)
+	for k in ([]string{"result", "finished", "term.attached", STATE_FULL, "hub.taken"}) do testing.expectf(t, !hub_msg_dropped(k), "%s: read", k)
+}

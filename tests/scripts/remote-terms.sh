@@ -6,7 +6,8 @@
 # sees its output (the terminal relayed through this core). A window resize reaches its PTY. An
 # OSC 52 from it leaves this Mac's clipboard alone. The link drops (its connect is killed, the
 # other core runs on) and comes back: the shell is attached again, its screen back from a fresh
-# snapshot, and typing works again. Closing the tab closes it there.
+# snapshot, and typing works again. Closing the tab closes it there. That core's agents get no
+# browser while it is viewed from here: browser_open answers browser_not_here (§8.2).
 # Usage: tests/scripts/remote-terms.sh
 set -eu
 unset CLAUDE_CONFIG_DIR
@@ -111,6 +112,10 @@ PID=$(ctl2 "{\"type\":\"add_project\",\"cwd\":\"$W/proj2\"}" | id_of)
 [ -n "$PID" ] || { echo "add_project on the other core failed"; exit 1; }
 SID=$(ctl2 "{\"type\":\"new_chat\",\"project_id\":$PID}" | id_of)
 [ -n "$SID" ] || { echo "new_chat on the other core failed"; exit 1; }
+# its agents' browser is its own machine's (design §8.2): with this Mac's core viewing it, a
+# browser_open there is refused at once, saying why, and nothing opens in this Mac's window
+OUT=$(ctl2 "{\"type\":\"browser_open\",\"session\":$SID,\"url\":\"https://example.com/\"}" 2>&1 || true)
+case "$OUT" in *browser_not_here*"only on the machine"*|*"only on the machine"*browser_not_here*) ;; *) echo "remote-terms: browser_open on the other machine was not refused as browser_not_here: $OUT"; exit 1 ;; esac
 # the window typed into the other machine's shell: it ran there, in its session's folder
 until_file "$W/proj2/osc.txt" 60
 grep -q "M6C-42" "$W/proj2/relay.txt" || { echo "remote-terms: the echo did not run on the other machine"; exit 1; }
@@ -132,6 +137,6 @@ want = ["online", "offline", "online"]
 it = iter(seq)
 if not all(any(s == w for s in it) for w in want):
     sys.exit(f"remote-terms: statuses {seq}, want {want} in order")
-print(f"remote-terms: {' -> '.join(want)}; typed, resized, OSC 52 ignored, attached again, closed")
+print(f"remote-terms: {' -> '.join(want)}; typed, resized, OSC 52 ignored, browser refused there, attached again, closed")
 PY
 echo "remote-terms: ok"

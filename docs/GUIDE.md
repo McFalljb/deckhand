@@ -259,7 +259,9 @@ as that machine has them. Click an open session to show it, or one of a project'
 it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
 **⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
-*On <machine>: …*. Its other kinds of tab (editors, pages, apps) show only on that machine for
+*On <machine>: …*. Its agents' browser is that machine's own: they never open pages in this Mac's
+browser, and while you view that machine from here (or if it has no window, like a Linux machine)
+their browser tools answer that no browser is available there. Its other kinds of tab (editors, pages, apps) show only on that machine for
 now, and agents and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
 is ignored), open windows or notify here. If the link drops, its terminals reconnect with their
 screen when it comes back. While the machine is offline its rows are greyed and show what it had

@@ -31,6 +31,7 @@ Fake_Host :: struct {
 	last_tab: u64,
 	events:   [dynamic]Finished_Event, // the finished events the core emitted (results heap)
 	opened:   [dynamic]string, // the links it was asked to open (window.request open_url; temp)
+	requests: int, // window.requests of any op
 }
 
 @(private = "file")
@@ -44,6 +45,7 @@ fh_on_frames :: proc() {
 		if err != .None do return
 		text := string(f.payload)
 		if json_path(text, "type") == "window.request" {
+			fh.requests += 1
 			id, q, _ := window_request_parse(text)
 			if q.op != .Open_Url do continue
 			append(&fh.opened, strings.clone(q.text, context.temp_allocator))
@@ -194,7 +196,9 @@ tab_host_no_window :: proc(t: ^testing.T) {
 		before := len(find_session(a).tabs)
 		v := state.version
 		r := run_command(c, {kind = .UI}, 77)
-		testing.expectf(t, !r.ok && json_path(r.data, "code") == "no_window", "%s: %v", command_type(c), r)
+		want := "no_window"
+		when ODIN_OS != .Darwin do if strings.has_prefix(command_type(c), "browser_") do want = "browser_not_here" // no window ever runs there
+		testing.expectf(t, !r.ok && json_path(r.data, "code") == want, "%s: %v, want %s", command_type(c), r, want)
 		testing.expectf(t, !r.pending, "%s: never pending without a window", command_type(c))
 		testing.expectf(t, len(find_session(a).tabs) == before && state.version == v, "%s: nothing changed", command_type(c))
 	}
@@ -222,7 +226,6 @@ tab_host_hub_hosts_nothing :: proc(t: ^testing.T) {
 	window_link_for_test().hub = true
 	defer window_link_for_test().hub = false
 	for c in fh_routed(a, ta, app, ed, md, pa) {
-		if _, is := c.(Terminal_Link); is do continue // the user's ⌘-click: the link opens as the window's request
 		before := len(find_session(a).tabs)
 		v := state.version
 		r := run_command(c, {kind = .UI}, 77)
@@ -234,6 +237,13 @@ tab_host_hub_hosts_nothing :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, len(fh.calls) == 0, "nothing went to the hub: %v", fh.calls)
 	testing.expect_value(t, tab_host_waiting(), 0)
+	// nor any view of this core's tabs (their paths and addresses stay here), nor a link to open
+	window_view_open(ta, Browser_Tab{url = "https://a.example/"})
+	window_view_open(ed, Editor_Tab{path = "/tmp/x.txt"})
+	window_view_goto(ed, 3, "")
+	window_view_moved(ed, "/tmp/y.txt")
+	window_view_drop(ed)
+	testing.expectf(t, fh.requests == 0, "no window.request went to the hub: %d", fh.requests)
 }
 
 // With a window: each routed command goes to it as one tab_host.call, and its answer comes back.

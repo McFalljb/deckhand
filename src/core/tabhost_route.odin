@@ -637,7 +637,8 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 		if !ascii_prefix(c.url, "mailto:") && !c.external && !s.home && tab_host_up() {
 			if r, ch := routed(cmd, caller, request_id, new_id()); r.ok do return r, ch
 		}
-		if !window_attached() do return no_window(), false // the user's ⌘-click: there is a window
+		// the user's ⌘-click: there is a window (a hub's opens nothing for this core: §8.2)
+		if !window_attached() || window_link_hub() do return no_window(), false
 		if !window_open_url(c.url) do return fail("the link could not be opened"), false
 		return {ok = true}, false
 	case Open_File:

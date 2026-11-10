@@ -207,16 +207,19 @@ window_copy_selection :: proc(tab_id: u64) -> bool {
 	return answered && r.ok
 }
 
+// A tab's view is this machine's window's: a hub (another machine viewing this one) gets none, nor
+// the tab's path or address (§8.2; it would drop them anyway).
 window_view_open :: proc(tab_id: u64, kind: Tab_Kind, line := 0, anchor := "") {
+	if window_link_hub() do return
 	ask({op = .View_Open, tab_id = tab_id, kind = kind, line = line, anchor = anchor})
 }
 window_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
 	_, t, _ := find_tab(tab_id)
-	if t == nil do return
+	if t == nil || window_link_hub() do return
 	ask({op = .View_Goto, tab_id = tab_id, kind = t.kind, line = line, anchor = anchor})
 }
-window_view_drop :: proc(tab_id: u64) {ask({op = .View_Drop, tab_id = tab_id})}
-window_view_moved :: proc(tab_id: u64, path: string) {ask({op = .View_Moved, tab_id = tab_id, path = path})}
+window_view_drop :: proc(tab_id: u64) {if !window_link_hub() do ask({op = .View_Drop, tab_id = tab_id})}
+window_view_moved :: proc(tab_id: u64, path: string) {if !window_link_hub() do ask({op = .View_Moved, tab_id = tab_id, path = path})}
 window_files_deleted :: proc(under: string) {ask({op = .Files_Deleted, path = under})}
 window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") {
 	ask({op = .Changes_Diff, tab_id = tab_id, path = path, text = text, message = message})

@@ -601,7 +601,8 @@ tab and go to **that session's** pi, whichever session is on screen.
 `no_window`: the command needs the page, app or file view that Deckhand's window hosts, and no
 window is attached (§5a). `browser_not_here`: a browser command on a machine whose sessions are
 viewed from another machine, or that has no window at all: browser tabs run only on the machine
-they belong to, so retrying will not help until a window of that machine's own attaches.
+they belong to, so retrying will not help until a window of that machine's own attaches (never, on
+a machine with no window).
 
 `state.version` moves only when state changed: queries, failures and side-effect-only commands
 (`copy_selection`, `send_text`) leave it alone.
@@ -1249,7 +1250,8 @@ dropped, never acted on: another machine's agents never drive this Mac's window 
 browser is their own machine's (design §8.2): a core viewed from another machine hosts no tabs
 there, so its own agents' browser commands answer `{"ok":false,"error":"no browser here: browser
 tabs run only on the machine they belong to…","data":{"code":"browser_not_here"}}` at once (its
-app, Markdown and editor commands `no_window`), and nothing goes over the link. A core that can
+app, Markdown and editor commands and a ⌘-clicked terminal link `no_window`), and nothing goes over
+the link, not even a tab's view. A core that can
 have no window (Linux) answers `browser_not_here` too. Online, the
 hub sends `state.subscribe` (and `select_project` with that machine's own id while one of its
 projects is selected here) and keeps that core's `state.full` and `state.delta` as a replica of its

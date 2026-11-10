@@ -11,8 +11,11 @@ package update_sign
 //                                        writes SIG: the signature of ZIP's manifest
 //                                        (version, file name, size, SHA-256, the app's CDHash);
 //                                        --v3: the format releases from 0.1.8 on use (src/updatesig)
-//   update-sign verify PUBKEY VERSION ZIP SIG   exit 0 if SIG is good for ZIP under PUBKEY
-//   update-sign manifest VERSION ZIP CDHASH     prints the signed manifest
+//                                        ZIP may instead be the Linux core's tarball
+//                                        (deckhand-core-X.Y.Z-linux-x86_64.tar.gz): then CDHASH is
+//                                        "none" and --v3 is required
+//   update-sign verify PUBKEY VERSION ZIP SIG   exit 0 if SIG is good for ZIP (or the tarball)
+//   update-sign manifest VERSION ZIP CDHASH     prints the signed manifest (v2; a tarball's v3)
 //
 // The private key is read only from KEYFILE, which must be a regular file of yours with
 // mode 0600 (or 0400); never from the environment. It is never printed or logged.
@@ -61,7 +64,7 @@ run :: proc(args: []string) -> int {
 			fmt.eprintln("update-sign: cannot read", args[4])
 			return 1
 		}
-		cd, b64, format, pok := sig.sig_file_parse(string(data))
+		cd, b64, format, pok := sig.sig_file_parse(string(data), allow_none = true) // manifest_of: none for the tarball only
 		if !pok {
 			fmt.eprintln("update-sign: not a Deckhand .sig file")
 			return 1
@@ -76,7 +79,7 @@ run :: proc(args: []string) -> int {
 		return 0
 	case "manifest":
 		if len(args) != 4 do return usage()
-		m, ok := manifest_of(args[1], args[2], args[3])
+		m, ok := manifest_of(args[1], args[2], args[3], args[3] == sig.CDHASH_NONE ? .V3 : .V2)
 		if !ok do return 1
 		fmt.print(m)
 		return 0
@@ -94,18 +97,29 @@ valid_version :: proc(v: string) -> bool {
 	return true
 }
 
+// The manifest of the app's zip (a real CDHash) or of the Linux core's tarball (cdhash none, v3
+// only): the file's name says which.
 manifest_of :: proc(version, zip, cdhash: string, format := sig.Format.V2) -> (string, bool) {
-	if !sig.cdhash_valid(cdhash) {
-		fmt.eprintln("update-sign: CDHASH must be the app's CDHash (40 or 64 hex digits, codesign -dvvv)")
-		return "", false
-	}
 	if !valid_version(version) {
 		fmt.eprintln("update-sign: VERSION must be X.Y.Z (releases with a suffix are not offered as updates)")
 		return "", false
 	}
 	name := sig.zip_name(version, context.temp_allocator)
-	if filepath.base(zip) != name {
-		fmt.eprintf("update-sign: %s is not named %s\n", zip, name)
+	tar := sig.linux_tar_name(version, context.temp_allocator)
+	switch filepath.base(zip) {
+	case name:
+		if !sig.cdhash_valid(cdhash) {
+			fmt.eprintln("update-sign: CDHASH must be the app's CDHash (40 or 64 hex digits, codesign -dvvv)")
+			return "", false
+		}
+	case tar:
+		if cdhash != sig.CDHASH_NONE || format != .V3 {
+			fmt.eprintf("update-sign: the Linux tarball is signed with --v3 and CDHASH %s\n", sig.CDHASH_NONE)
+			return "", false
+		}
+		name = tar
+	case:
+		fmt.eprintf("update-sign: %s is not named %s or %s\n", zip, name, tar)
 		return "", false
 	}
 	sum, size, ok := sig.file_sha256(zip)

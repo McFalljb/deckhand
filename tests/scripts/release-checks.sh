@@ -12,6 +12,11 @@
 #   planted with a single hook string, or any DECKHAND_ name the check does not allow, fail it;
 #   the source lint (scripts/check-env-reads.py) refuses an env read of a built or unknown name;
 #   release.sh builds with DECKHAND_RELEASE=1 and runs the check; build.sh refuses it for tests
+#   the Linux tarball (scripts/release-linux.sh, with a fake gh serving a run, its artifact and its
+#   log): signed v3 with cdhash none when it all holds; refused with no run for the tag's push at
+#   its commit, a failed or unfinished run, no artifact, a sha256 that is not the log's (or none,
+#   or two), a member with .., absolute, outside its folder, a link, a missing binary, a hook
+#   string; update-sign's none rules; release.sh refusing before its build
 # Usage: tests/scripts/release-checks.sh   (builds build/update-sign)
 set -eu
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
@@ -47,7 +52,7 @@ chmod 700 "$K/shared"
 # ---- release.sh's refusals, before any build -----------------------------------------------
 R="$W/repo"
 mkdir -p "$R/scripts" "$R/src/core" "$R/src/updatesig" "$R/tools/update-sign" "$R/build" "$W/bin"
-cp scripts/release.sh scripts/sign.sh "$R/scripts/"
+cp scripts/release.sh scripts/release-linux.sh scripts/sign.sh "$R/scripts/"
 cp src/updatesig/updatesig.odin "$R/src/updatesig/"
 cp src/core/update_core.odin "$R/src/core/" # UPDATE_REPO, the repository release.sh uploads to
 cp tools/update-sign/main.odin "$R/tools/update-sign/"
@@ -61,7 +66,7 @@ keyfile "$TEST_PUB"
 git -C "$R" init -q
 git -C "$R" add -A
 git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qm one
-rel() { (cd "$R" && PATH="$W/bin:$PATH" HOME="$W/home" scripts/release.sh --key "$K/private/k" "$@") > "$W/out.txt" 2>&1; }
+rel() { (cd "$R" && PATH="${GH_BIN:-$W/bin}:$PATH" HOME="$W/home" scripts/release.sh --key "$K/private/k" "$@") > "$W/out.txt" 2>&1; }
 refused() { # WHAT WANT_TEXT ARGS...
   what=$1 want=$2; shift 2
   if rel "$@"; then bad "$what: release.sh went ahead"
@@ -108,6 +113,109 @@ else ok "--allow-other-repo lets another repository through"; fi
 (export DECKHAND_SIGN_IDENTITY="Deckhand No Such Identity $$"; refused "a signing identity not in the keychain" "no code-signing identity" --version 0.5.0 --no-upload)
 (export DECKHAND_SIGN_IDENTITY=-; rel --version 0.5.0 --no-upload || true)
 grep -q "an AD-HOC release, on purpose" "$W/out.txt" && ok "DECKHAND_SIGN_IDENTITY=- goes on to an ad-hoc release" || bad "DECKHAND_SIGN_IDENTITY=-: $(tail -1 "$W/out.txt")"
+
+# ---- the Linux core's tarball (scripts/release-linux.sh): CI's run, its sha256, its signature ----
+# a fake gh serving one run list, one artifact and one log from $FAKE_GH (no network)
+G="$W/gh"
+mkdir -p "$G/bin"
+cat > "$G/bin/gh" <<'GH'
+#!/bin/sh
+D=${FAKE_GH:?}
+echo "$*" >> "$D/calls"
+case "$1 $2" in
+  "run list") cat "$D/runs.tsv" ;;
+  "run download")
+    dir=""
+    while [ $# -gt 0 ]; do [ "$1" = --dir ] && dir=$2; shift; done
+    [ -n "$dir" ] && [ -d "$D/artifact" ] || { echo "no artifact" >&2; exit 1; }
+    cp "$D/artifact/"* "$dir/" ;;
+  "run view") cat "$D/log.txt" ;;
+  *) echo "fake gh: not expected: $*" >&2; exit 1 ;;
+esac
+GH
+chmod +x "$G/bin/gh"
+LV=0.9.0
+LNAME=deckhand-core-$LV-linux-x86_64.tar.gz
+LTOP=${LNAME%.tar.gz}
+LC=0123456789abcdef0123456789abcdef01234567
+T=$(printf '\t')
+fixture() { # KIND: the artifact, a passed run of it, and its log's sha256 line
+  rm -rf "$G/artifact" "$G/calls"; mkdir -p "$G/artifact"
+  python3 -I tests/scripts/release-fixture.py "$G/artifact/$LNAME" "$LTOP" "$1" /usr/bin/true
+  printf '%s\n' "42${T}push${T}v$LV${T}$LC${T}completed${T}success" > "$G/runs.tsv"
+  printf 'tarball\tpack\t2026-11-09T00:00:00Z tarball-sha256 %s %s\n' "$(shasum -a 256 "$G/artifact/$LNAME" | cut -d' ' -f1)" "$LNAME" > "$G/log.txt"
+}
+LOUT="$W/linux-out"
+mkdir -p "$W/tmp"
+lin() { (PATH="$G/bin:$PATH" FAKE_GH="$G" TMPDIR="$W/tmp" scripts/release-linux.sh --version $LV --commit $LC --repo someone/deckhand "$@") > "$W/out.txt" 2>&1; }
+lin_fetch() { rm -rf "$LOUT"; lin --key "$K/private/k" --pub "$TEST_PUB" --out "$LOUT"; }
+lin_refused() { # WHAT WANT_TEXT [--preflight]
+  what=$1 want=$2; shift 2
+  rm -rf "$LOUT"
+  if [ "${1:-}" = --preflight ]; then lin --preflight; else lin_fetch; fi && { bad "linux: $what: went ahead"; return; }
+  if grep -q -- "$want" "$W/out.txt"; then ok "linux: $what refused"; else bad "linux: $what: refused for another reason: $(tail -1 "$W/out.txt")"; fi
+  [ ! -e "$LOUT/$LNAME.sig" ] || bad "linux: $what: a .sig was written"
+}
+
+fixture good
+if lin_fetch; then
+  build/update-sign verify "$TEST_PUB" $LV "$LOUT/$LNAME" "$LOUT/$LNAME.sig" >/dev/null && ok "linux: the tarball is fetched, checked and signed" || bad "linux: its .sig does not verify"
+  [ "$(head -2 "$LOUT/$LNAME.sig")" = "deckhand-update-sig v3
+cdhash none" ] && ok "linux: the .sig is v3 with cdhash none" || bad "linux: the .sig's head: $(head -2 "$LOUT/$LNAME.sig")"
+  (cd "$LOUT" && shasum -a 256 -c "$LNAME.sha256") >/dev/null 2>&1 && ok "linux: its .sha256 checks" || bad "linux: its .sha256 does not check"
+  grep -qF "$(cat "$K/private/k")" "$W/out.txt" && bad "linux: the private key is in the output" || ok "linux: the private key is not printed"
+  grep -q -- "--workflow release-linux.yml --event push" "$G/calls" && ok "linux: the run is the workflow's, for a push" || bad "linux: gh run list was: $(head -1 "$G/calls")"
+else bad "linux: a good tarball was refused: $(tail -1 "$W/out.txt")"; fi
+[ -z "$(ls -A "$W/tmp")" ] && ok "linux: no temp folder left" || bad "linux: a temp folder was left in $W/tmp"
+
+fixture good; : > "$G/runs.tsv"
+lin_refused "no run" "push the tag (git push origin v$LV), wait for that workflow" --preflight
+lin_refused "no run (fetch)" "release-linux.yml"
+fixture good; printf '%s\n' "42${T}push${T}v$LV${T}fedcba9876543210fedcba9876543210fedcba98${T}completed${T}success" > "$G/runs.tsv"
+lin_refused "a run at another commit" "no run of"
+fixture good; printf '%s\n' "42${T}push${T}v0.8.0${T}$LC${T}completed${T}success" > "$G/runs.tsv"
+lin_refused "a run for another tag" "no run of"
+fixture good; printf '%s\n' "42${T}workflow_dispatch${T}v$LV${T}$LC${T}completed${T}success" > "$G/runs.tsv"
+lin_refused "a run by hand, not the tag's push" "no run of"
+fixture good; printf '%s\n' "42${T}push${T}v$LV${T}$LC${T}completed${T}failure" > "$G/runs.tsv"
+lin_refused "a failed run" "ended failure" --preflight
+lin_refused "a failed run (fetch)" "ended failure"
+fixture good; printf '%s\n' "42${T}push${T}v$LV${T}$LC${T}in_progress${T}" > "$G/runs.tsv"
+lin --preflight && ok "linux: a run still going passes the preflight" || bad "linux: preflight refused a run still going: $(tail -1 "$W/out.txt")"
+lin_refused "a run still going (fetch)" "is in_progress: wait for it"
+fixture good; rm -rf "$G/artifact"
+lin_refused "no artifact" "has no artifact $LNAME"
+fixture good; sed -i '' 's/tarball-sha256 [0-9a-f]*/tarball-sha256 0000000000000000000000000000000000000000000000000000000000000000/' "$G/log.txt"
+lin_refused "a sha256 mismatch" "is not the one run 42 printed"
+fixture good; : > "$G/log.txt"
+lin_refused "no sha256 in the log" "has no \"tarball-sha256"
+fixture good; printf 'x\ty\tz tarball-sha256 %s %s\n' 1111111111111111111111111111111111111111111111111111111111111111 "$LNAME" >> "$G/log.txt"
+lin_refused "two sha256 values in the log" "more than one sha256"
+fixture good; printf 'x\ty\tz tarball-sha256 %s %s.evil\n' 1111111111111111111111111111111111111111111111111111111111111111 "$LNAME" >> "$G/log.txt"
+lin_fetch && ok "linux: a sha256 line for another name is ignored" || bad "linux: another name's line counted: $(tail -1 "$W/out.txt")"
+for k in dotdot:"a member with .." abs:"a member outside" symlink:"not a file or a folder" hardlink:"not a file or a folder" outside:"a member outside" missing:"has no $LTOP/deckhand-core" hook:"test hooks"; do
+  fixture "${k%%:*}"
+  lin_refused "a tarball with ${k%%:*}" "${k#*:}"
+done
+# update-sign: none only for the tarball, and only in v3; a zip still needs its CDHash
+U="$W/usign"; rm -rf "$U"; mkdir -p "$U"
+echo x > "$U/$LNAME"; echo x > "$U/deckhand-$LV-macos-arm64.zip"
+build/update-sign sign "$K/private/k" $LV "$U/$LNAME" none "$U/s" >/dev/null 2>&1 && bad "update-sign: a v2 tarball .sig was made" || ok "update-sign: a tarball needs --v3"
+build/update-sign sign --v3 "$K/private/k" $LV "$U/$LNAME" 0123456789abcdef0123456789abcdef01234567 "$U/s" >/dev/null 2>&1 && bad "update-sign: a tarball signed with a CDHash" || ok "update-sign: a tarball's cdhash is none"
+build/update-sign sign --v3 "$K/private/k" $LV "$U/deckhand-$LV-macos-arm64.zip" none "$U/s" >/dev/null 2>&1 && bad "update-sign: a zip signed with cdhash none" || ok "update-sign: a zip needs its CDHash"
+build/update-sign sign --v3 "$K/private/k" $LV "$U/$LNAME" none "$U/t.sig" >/dev/null
+sed 's/^deckhand-update-sig v3$/pi-desk-update-sig v2/' "$U/t.sig" > "$U/t2.sig"
+build/update-sign verify "$TEST_PUB" $LV "$U/$LNAME" "$U/t2.sig" >/dev/null 2>&1 && bad "update-sign: a v2 cdhash none .sig verified" || ok "update-sign: a v2 cdhash none .sig refused"
+cp "$U/$LNAME" "$U/deckhand-$LV-macos-arm64.zip"; cp "$U/t.sig" "$U/z.sig"
+build/update-sign verify "$TEST_PUB" $LV "$U/deckhand-$LV-macos-arm64.zip" "$U/z.sig" >/dev/null 2>&1 && bad "update-sign: a cdhash none .sig verified a zip" || ok "update-sign: a cdhash none .sig never verifies a zip"
+# release.sh: the run is looked for before the build, and the tarball fetched after the Mac files
+(export DECKHAND_SIGN_IDENTITY=- FAKE_GH="$G" GH_BIN="$G/bin"; : > "$G/runs.tsv"
+ refused "release.sh with no Linux run for the tag" "no run of the \"Linux release tarball\" workflow" --version 0.5.0 --no-upload)
+(export DECKHAND_SIGN_IDENTITY=- FAKE_GH="$G" GH_BIN="$G/bin"; printf '%s\n' "42${T}push${T}v0.5.0${T}$(git -C "$R" rev-parse HEAD)${T}completed${T}failure" > "$G/runs.tsv"
+ refused "release.sh with a failed Linux run" "ended failure" --version 0.5.0 --no-upload)
+grep -q '^scripts/release-linux.sh --preflight --version "$VERSION" --commit "$COMMIT" --repo "$REPO"' scripts/release.sh && ok "release.sh looks for the Linux run before building" || bad "release.sh has no Linux preflight"
+grep -q '^scripts/release-linux.sh --version "$VERSION" --commit "$COMMIT" --repo "$REPO" --key "$KEY" --pub "$SIGN_PUB" --out "$DIST"' scripts/release.sh && ok "release.sh fetches and signs the Linux tarball" || bad "release.sh does not fetch the Linux tarball"
+[ "$(grep -c '"$DIST/$LINUX_TAR" "$DIST/$LINUX_TAR.sha256" "$DIST/$LINUX_TAR.sig"' scripts/release.sh)" = 3 ] && ok "release.sh checks and uploads the Linux files" || bad "release.sh does not upload the Linux files (create and upload)"
 # the release's names come from the app's source: none there, no release
 sed -i '' '/^UPDATE_APP ::/d' "$R/src/core/update_core.odin"
 git -C "$R" -c user.name=t -c user.email=t@example.invalid commit -qam noapp
@@ -160,6 +268,16 @@ plant16 'DECKHAND_SUCCESSDECKHAND_CLI\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "a piece run on into an allowed name passes" || bad "a piece run on into an allowed name refused: $(cat "$H/out.txt")"
 plant16 '\001DECKHAND_SUCCESS\001'
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an unaligned piece passed" || ok "an unaligned piece refused"
+# an x86-64 movabs imm64 (48 b8 + 8 bytes): an allowed 8-byte name run on into the next
+# instruction passes; any other imm64 match, or the same bytes without the opcode, fails
+cp /usr/bin/true "$H/planted"; printf '\001\110\270PI_DESK_H9\007\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && ok "an imm64 PI_DESK_ run on into an instruction passes" || bad "an imm64 PI_DESK_ refused: $(cat "$H/out.txt")"
+cp /usr/bin/true "$H/planted"; printf '\001\110\270PI_DESK_SCRIPT\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an imm64 run on into a hook's name passed" || ok "an imm64 run on into a hook's name refused"
+cp /usr/bin/true "$H/planted"; printf '\001\110\270DECKHAND_X9\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "an imm64 DECKHAND_X9 passed" || ok "an imm64 whose 8 bytes are not an allowed name refused"
+cp /usr/bin/true "$H/planted"; printf '\001\001\001PI_DESK_H9\001' >> "$H/planted"
+scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "PI_DESK_H9 without the opcode passed" || ok "PI_DESK_H9 without the opcode refused"
 cp /usr/bin/true "$H/planted"
 printf '\001DECKHAND_HOLDER_HOOKS\001' >> "$H/planted"
 scripts/check-release-build.sh "$H/planted" >"$H/out.txt" 2>&1 && bad "a binary holding DECKHAND_HOLDER_HOOKS passed" || ok "a binary holding DECKHAND_HOLDER_HOOKS refused"

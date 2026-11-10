@@ -78,7 +78,9 @@ sig_file_make :: proc(cdhash, sig_b64: string, allocator := context.allocator, f
 
 // A .sig file: its CDHash (lower case), signature (temp allocator) and format (v2 or v3: the
 // manifest it signs is that format's), or ok = false. Exactly the three lines, in order.
-sig_file_parse :: proc(text: string) -> (cdhash, sig_b64: string, format: Format, ok: bool) {
+// allow_none: a Linux tarball's .sig, whose cdhash is CDHASH_NONE (v3 only); the app's updater
+// never passes it.
+sig_file_parse :: proc(text: string, allow_none := false) -> (cdhash, sig_b64: string, format: Format, ok: bool) {
 	if len(text) > 4096 do return
 	lines := strings.split_lines(strings.trim_right(text, "\n"), context.temp_allocator)
 	if len(lines) != 3 do return
@@ -90,7 +92,8 @@ sig_file_parse :: proc(text: string) -> (cdhash, sig_b64: string, format: Format
 	if !strings.has_prefix(lines[1], "cdhash ") || !strings.has_prefix(lines[2], "signature ") do return
 	cdhash = strings.to_lower(lines[1][len("cdhash "):], context.temp_allocator)
 	sig_b64 = lines[2][len("signature "):]
-	if !cdhash_valid(cdhash) || len(sig_b64) == 0 do return "", "", .V2, false
+	cd_ok := cdhash_valid(cdhash) || (allow_none && format == .V3 && cdhash == CDHASH_NONE)
+	if !cd_ok || len(sig_b64) == 0 do return "", "", .V2, false
 	return cdhash, sig_b64, format, true
 }
 
@@ -101,6 +104,17 @@ ZIP_SUFFIX :: "-macos-arm64.zip"
 // The release asset's name for a version.
 zip_name :: proc(version: string, allocator := context.allocator) -> string {
 	return fmt.aprintf("%s%s%s", ZIP_PREFIX, version, ZIP_SUFFIX, allocator = allocator)
+}
+
+// The Linux core's release tarball (M6-L4, scripts/pack-linux.sh; docs/DEVELOPING.md "Releases"):
+// LINUX_TAR_PREFIX + X.Y.Z + LINUX_TAR_SUFFIX, signed in v3 with cdhash CDHASH_NONE (Linux has no
+// code signature: the manifest's size and SHA-256 cover the whole tarball).
+LINUX_TAR_PREFIX :: "deckhand-core-"
+LINUX_TAR_SUFFIX :: "-linux-x86_64.tar.gz"
+CDHASH_NONE :: "none"
+
+linux_tar_name :: proc(version: string, allocator := context.allocator) -> string {
+	return fmt.aprintf("%s%s%s", LINUX_TAR_PREFIX, version, LINUX_TAR_SUFFIX, allocator = allocator)
 }
 
 // Base64 of exactly n bytes (surrounding whitespace ignored), or ok = false.

@@ -14,8 +14,10 @@ package core
 // No user manager, or a scope that never runs the binary: spawned directly, with a warning. Test
 // mode spawns directly unless DECKHAND_HOLDER_SYSTEMD=1.
 //
-// The install: <data>/core/<version>-<sha12>/deckhand-core-serve (version "dev" until a release
-// carries one, M6-L4; sha12 of the binary), made current as on macOS (core_make_current), then
+// The install: <data>/core/<version>-<sha12>/deckhand-core-serve, with the holder, the CLI
+// (deckhand) and the integrations (pi/, claude-code/) found beside it (the release tarball's
+// layout, scripts/pack-linux.sh; version: a release build's -define, else "dev"; sha12 of the
+// serve and holder pair), made current as on macOS (core_make_current), then
 // the unit (its ExecStart is core/current's binary), `systemctl --user daemon-reload`, and the
 // linger check. No sudo, ever: enabling linger is the user's own choice (`linger --enable`, or
 // the command shown).
@@ -152,6 +154,18 @@ core_install_linux :: proc(exe, data: string) -> (serve: string, note: string, o
 			if w := file_install(hdest, hsrc, exec_mode); w != "" do return "", w, false
 		}
 	}
+	// the CLI and the integrations beside this binary (the release tarball's), before serve too
+	from := filepath.dir(exe)
+	if cli, cerr := os.read_entire_file(fmt.tprintf("%s/%s", from, LINUX_CLI_BIN), context.temp_allocator); cerr == nil {
+		cdest := fmt.tprintf("%s/%s", dir, LINUX_CLI_BIN)
+		if holder_sha256_file(cdest) != holder_sha256(cli) {
+			if w := file_install(cdest, cli, exec_mode); w != "" do return "", w, false
+		}
+	}
+	for name in LINUX_INTEGRATIONS {
+		if !os.is_dir(fmt.tprintf("%s/%s", from, name)) || os.exists(fmt.tprintf("%s/%s", dir, name)) do continue
+		if w := tree_install(fmt.tprintf("%s/%s", from, name), dir, name); w != "" do return "", w, false
+	}
 	if holder_sha256_file(dest) != holder_sha256(src) {
 		if w := file_install(dest, src, exec_mode); w != "" do return "", w, false
 	}
@@ -183,6 +197,32 @@ core_install_linux :: proc(exe, data: string) -> (serve: string, note: string, o
 		append(&notes, fmt.tprintf("linger is off: jobs on this machine stop when you log out of it. To keep them running: %s", LINGER_COMMAND))
 	}
 	return serve, strings.join(notes[:], "; ", context.temp_allocator), true
+}
+
+// The CLI beside a Linux core (claude_cli_path), and the integrations' folders (pi_integration_dir,
+// claude_plugin_dir), which install copies with it.
+LINUX_CLI_BIN :: "deckhand"
+LINUX_INTEGRATIONS := [?]string{"pi", "claude-code"}
+
+// Copies the folder from to <dir>/<name>: cp -R into a new folder beside it, then renamed in.
+// Links are copied as links (cp -R never follows them). "" = done, else why not.
+@(private = "file")
+tree_install :: proc(from, dir, name: string) -> string {
+	if err := os.make_directory_all(dir, {.Read_User, .Write_User, .Execute_User}); err != nil && !os.is_dir(dir) {
+		return fmt.tprintf("cannot make %s: %v", dir, err)
+	}
+	tmp := fmt.tprintf("%s/.%s.%d.tmp", dir, name, posix.getpid())
+	remove_tree(tmp) // ours from an earlier try (the pid in the name)
+	if out, st := run_group({"/bin/cp", "-R", "--", from, tmp}, 60 * time.Second, merge_stderr = true); st != .Ok {
+		remove_tree(tmp)
+		return fmt.tprintf("cannot copy %s: %v %s", from, st, strings.trim_space(out))
+	}
+	if posix.rename(strings.clone_to_cstring(tmp, context.temp_allocator), strings.clone_to_cstring(fmt.tprintf("%s/%s", dir, name), context.temp_allocator)) != 0 {
+		e := posix.errno()
+		remove_tree(tmp)
+		return fmt.tprintf("cannot install %s/%s: %s", dir, name, posix.strerror(e))
+	}
+	return ""
 }
 
 // Writes data to path atomically: a new file beside it (O_EXCL, no link followed), synced, then

@@ -13,6 +13,10 @@ import "core:strings"
 import "core:testing"
 import cw "../corewire"
 
+// A release build (-define:DECKHAND_TEST_HOOKS=false) compiles _test files too, and these tests
+// use helpers that exist only with the test hooks: the whole file is behind them.
+when TEST_HOOKS {
+
 @(private = "file")
 Rt_Frame :: struct {
 	channel: u32,
@@ -392,3 +396,4 @@ hub_drops_tab_host :: proc(t: ^testing.T) {
 	for k in ([]string{"window.request", "confirmation.parked", "tab_host.call", "tab_host.event"}) do testing.expectf(t, hub_msg_dropped(k), "%s: dropped", k)
 	for k in ([]string{"result", "finished", "term.attached", STATE_FULL, "hub.taken"}) do testing.expectf(t, !hub_msg_dropped(k), "%s: read", k)
 }
+} // when TEST_HOOKS

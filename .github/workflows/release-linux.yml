@@ -8,6 +8,14 @@ name: Linux release tarball
 on:
   push:
     tags: ["v*"]
+  # a pull request that changes how the tarball is made builds one (version 0.0.0)
+  pull_request:
+    paths:
+      - .github/workflows/release-linux.yml
+      - scripts/pack-linux.sh
+      - scripts/check-release-build.sh
+      - tests/linux-release-check.sh
+  # (GitHub runs it by hand only once this file is on main)
   workflow_dispatch:
     inputs:
       version:
@@ -40,7 +48,7 @@ jobs:
             [ "$REF_TYPE" = tag ] || { echo "not a tag: $REF_NAME"; exit 1; }
             v=${REF_NAME#v}
           else
-            v=$INPUT_VERSION
+            v=${INPUT_VERSION:-0.0.0}
           fi
           printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$' || { echo "not X.Y.Z: $v"; exit 1; }
           echo "VERSION=$v" >> "$GITHUB_ENV"

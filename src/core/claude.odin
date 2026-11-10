@@ -369,14 +369,16 @@ claude_plugin_dir :: proc() -> string {
 claude_cli_override: string
 
 // The deckhand-cli binary next to Deckhand's own ("" = missing): deckhand-cli in Deckhand.app and
-// a bare build, deckhand in Deckhand Core.app (a separate core, scripts/bundle-app.sh). Temp-allocated.
+// a bare build, deckhand in Deckhand Core.app (a separate core, scripts/bundle-app.sh) and beside a
+// Linux core. Temp-allocated.
 claude_cli_path :: proc() -> string {
 	if claude_cli_override != "" do return claude_cli_override == "-" ? "" : claude_cli_override
 	exe := executable_path()
 	if exe == "" do return ""
 	p, _ := filepath.join({filepath.dir(exe), "deckhand-cli"}, context.temp_allocator)
 	if os.exists(p) do return p
-	if strings.has_suffix(filepath.dir(exe), "Core.app/Contents/MacOS") {
+	// Deckhand Core.app's, and the Linux release's (scripts/pack-linux.sh: the CLI is deckhand there)
+	if ODIN_OS == .Linux || strings.has_suffix(filepath.dir(exe), "Core.app/Contents/MacOS") {
 		p, _ = filepath.join({filepath.dir(exe), "deckhand"}, context.temp_allocator)
 		if os.exists(p) do return p
 	}

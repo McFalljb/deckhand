@@ -1096,16 +1096,25 @@ framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
 // behaviour is gated on these (§7.5).
 CORE_FEATURES := [?]string{"challenge_hello"}
 
-// This core's release version ("X.Y.Z" from its bundle's Info.plist), or "" for a development
-// build. Read once.
+// This core's release version ("X.Y.Z" from its bundle's Info.plist; on Linux, which has no
+// Info.plist, LINUX_RELEASE_VERSION), or "" for a development build. Read once.
 @(private = "file")
 core_version_once: sync.Once
 @(private = "file")
 core_version_value: string
 
+// A Linux release build's version: -define:DECKHAND_VERSION=X.Y.Z (scripts/pack-linux.sh). Not
+// read on macOS.
+LINUX_RELEASE_VERSION :: #config(DECKHAND_VERSION, "")
+
 core_version :: proc() -> string {
 	sync.once_do(&core_version_once, proc() {
-		v, _, _ := update_env_find(false, "", "")
+		when ODIN_OS == .Linux {
+			v := LINUX_RELEASE_VERSION
+			if pv, ok := semver_parse(v); !ok || pv.pre || semver_string(pv) != v do v = ""
+		} else {
+			v, _, _ := update_env_find(false, "", "")
+		}
 		core_version_value = strings.clone(v, runtime.heap_allocator())
 	})
 	return core_version_value

@@ -1,0 +1,58 @@
+# The Linux core's release tarball (docs/DEVELOPING.md "Releases"; M6-L4): on a vX.Y.Z tag, build
+# deckhand-core-X.Y.Z-linux-x86_64.tar.gz (scripts/pack-linux.sh: no test hooks, the version baked
+# in), install it once (tests/linux-release-check.sh), upload it as this run's artifact and print
+# its sha256. scripts/release.sh, on the release signer's Mac, downloads it, checks it against that
+# line and signs it there: no key and no secret here. workflow_dispatch builds one for testing.
+name: Linux release tarball
+
+on:
+  push:
+    tags: ["v*"]
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "X.Y.Z for the tarball's name and the core's version (a test build)"
+        default: "0.0.0"
+
+permissions:
+  contents: read
+
+jobs:
+  tarball:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    env:
+      ODIN_VERSION: dev-2026-09
+      # ci.yml's pins (update both with ODIN_VERSION); .github/actions/setup checks it
+      ODIN_SHA256_LINUX: 167c3e1d7056419dad2e04bb3bd98715b7ff286d4c125f3c5a5ee337c6254283
+      # never interpolated into a script: read from the environment
+      REF_TYPE: ${{ github.ref_type }}
+      REF_NAME: ${{ github.ref_name }}
+      INPUT_VERSION: ${{ inputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with: { persist-credentials: false }
+      - uses: ./.github/actions/setup
+        with: { cef: "false" }
+      - name: The version (the tag's, else the input)
+        run: |
+          if [ "$GITHUB_EVENT_NAME" = push ]; then
+            [ "$REF_TYPE" = tag ] || { echo "not a tag: $REF_NAME"; exit 1; }
+            v=${REF_NAME#v}
+          else
+            v=$INPUT_VERSION
+          fi
+          printf '%s' "$v" | grep -Eq '^(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})$' || { echo "not X.Y.Z: $v"; exit 1; }
+          echo "VERSION=$v" >> "$GITHUB_ENV"
+          echo "TARBALL=deckhand-core-$v-linux-x86_64.tar.gz" >> "$GITHUB_ENV"
+      - name: Build and pack (no test hooks)
+        run: scripts/pack-linux.sh "$VERSION" dist
+      - name: Install it once (listing, install, version and build id)
+        run: tests/linux-release-check.sh "dist/$TARBALL" "$VERSION"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.TARBALL }}
+          path: dist/${{ env.TARBALL }}
+          if-no-files-found: error
+      - name: Its sha256 (scripts/release.sh checks the download against this line)
+        run: echo "tarball-sha256 $(sha256sum "dist/$TARBALL" | cut -d' ' -f1) $TARBALL"

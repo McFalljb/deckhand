@@ -37,6 +37,7 @@ import "core:sys/posix"
 import "core:testing"
 import "core:time"
 import "../holderwire"
+import "../trust"
 
 HOOKS_BIN :: "build/deckhand-core-hooks"
 SWAPPED_BIN :: "build/deckhand-core-swapped" // the same, signed as dev.deckhand.swapped
@@ -513,6 +514,8 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	if !aok do return
 	if w2.pid > 0 && w2.pid != i64(r.pid) do append(&r.extra, c.int(w2.pid))
 	testing.expectf(t, w2.pid != i64(r.pid), "the WELCOME is from the holder's pid %d, not a keeper", w2.pid)
+	// the socket names the keeper too, as the core's welcome_peer_ok wants (Linux: relisten)
+	testing.expect_value(t, i64(trust.peer_read(posix.FD(r.f.fd)).pid), w2.pid)
 	testing.expect_value(t, w2.previous, "upgrade")
 	testing.expect_value(t, w2.instance, w.instance)
 	want := [Adopt_How]string{.Swap = "failed verification", .Crash = "stopped", .Hang = "in time", .No_Go = "before it could serve"}

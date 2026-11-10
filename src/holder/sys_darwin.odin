@@ -294,6 +294,9 @@ relisten :: proc(h: ^Holder) {}
 
 // ---- orphans (keeper.odin) ----
 
+// Linux's: the new image reaps the old one's other children (never needed here: unchanged).
+reap_strays :: proc(h: ^Holder) {}
+
 // Linux's fallback for an orphan with no pidfd: never needed here (kqueue).
 orphans_poll :: proc(h: ^Holder) {}
 

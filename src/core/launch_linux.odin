@@ -61,6 +61,10 @@ scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string
 	if !systemd_scope_wanted(autotest_active, hook_env(.Holder_Systemd) == "1", hook_env(.Holder_Direct) == "1") || !os.is_file(SYSTEMD_RUN) {
 		return holder_launch_direct(bin, run, data, env, mode, secret)
 	}
+	if !systemd_scope_args_ok({bin, run, data}) {
+		fmt.eprintfln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope", mode == "serve" ? "background core" : "session holder", bin, run, data)
+		return holder_launch_direct(bin, run, data, env, mode, secret)
+	}
 	r: [4]u8
 	crypto.rand_bytes(r[:])
 	unit := fmt.tprintf("deckhand-%s-%02x%02x%02x%02x", mode == "serve" ? "core" : "holder", r[0], r[1], r[2], r[3])

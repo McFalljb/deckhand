@@ -378,22 +378,24 @@ relisten :: proc(h: ^Holder) {
 keeper_parent_is :: proc(holder_pid: i32) -> bool {return getppid() == c.int(holder_pid)}
 
 // The keeper, for the new image to reap (upgrade.odin's resume). SO_PEERCRED on a socketpair
-// names its maker (the old image: this pid), never the keeper. The keeper is the old image's fork,
-// and exec keeps children: it is the one child of ours that runs no session. 0 when that is not
-// one process (it is then left unreaped, as before).
-handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {
+// names its maker (the old image: this pid), never the keeper, so the old image puts the pid it
+// forked on our argv (`--keeper`, resume_keeper). 0: none given.
+handoff_keeper_pid :: proc(h: ^Holder, fd: c.int) -> c.int {return resume_keeper}
+
+// Reaps every child of ours that has ended and is not a session (whose status the loop reads for
+// its EXITED): one the old image left before an upgrade's exec (a launcher), the keeper. WNOHANG:
+// a child still running is left alone. /proc unreadable: nothing is reaped.
+reap_strays :: proc(h: ^Holder) {
 	me := getpid()
 	b, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", me, me), context.temp_allocator)
-	if err != nil do return 0
-	found: c.int
+	if err != nil do return
 	outer: for f in strings.fields(string(b), context.temp_allocator) {
 		n, ok := strconv.parse_int(f, 10)
 		if !ok || n <= 0 do continue
 		for t in h.terms do if c.int(n) == t.pid do continue outer
-		if found != 0 do return 0
-		found = c.int(n)
+		st: c.int
+		waitpid(c.int(n), &st, WNOHANG)
 	}
-	return found
 }
 
 // ---- orphans (keeper.odin) ----
@@ -410,7 +412,42 @@ pidfd_open :: proc(pid: c.int) -> c.int {
 	return c.int(syscall(SYS_pidfd_open, pid, c.uint(0)))
 }
 
-orphans_poll :: proc(h: ^Holder) {}
+// The orphans with no pidfd (orphans_watch), on the loop's timers: ended once the pid is gone, a
+// zombie (dead, its new parent has not reaped it), or another process (a different start time).
+// A /proc it can't read leaves it running: a live orphan is never marked ended.
+orphans_poll :: proc(h: ^Holder) {
+	for t in h.terms {
+		if !t.orphan || !t.polled || t.reaped do continue
+		if kill(t.pid, 0) != 0 && errno() == ESRCH {
+			orphan_ended(t, -1, false)
+			continue
+		}
+		state, start, ok := proc_stat(t.pid)
+		if !ok do continue
+		if state == "Z" || state == "X" || (t.start_time != 0 && start != t.start_time) do orphan_ended(t, -1, false)
+	}
+}
+
+// /proc/<pid>/stat's state (field 3) and start time (field 22), read after the last ')' (comm may
+// hold one). ok false: unreadable.
+@(private = "file")
+proc_stat :: proc(pid: c.int) -> (state: string, start: u64, ok: bool) {
+	b, err := os.read_entire_file(fmt.tprintf("/proc/%d/stat", pid), context.temp_allocator)
+	if err != nil do return "", 0, false
+	s := string(b)
+	i := strings.last_index_byte(s, ')')
+	if i < 0 do return "", 0, false
+	f := strings.fields(s[i + 1:], context.temp_allocator)
+	if len(f) < 20 do return "", 0, false
+	start, ok = strconv.parse_u64(f[19], 10)
+	return f[0], start, ok
+}
+
+@(private = "file")
+proc_start_time :: proc(pid: c.int) -> u64 {
+	_, start, ok := proc_stat(pid)
+	return ok ? start : 0
+}
 
 // Watches every orphan that still runs: a pidfd each, in an epoll set (h.kq; made on first use)
 // whose events carry the pidfd and the pid. One that is gone already ended unseen.
@@ -426,7 +463,14 @@ orphans_watch :: proc(h: ^Holder) {
 		}
 		pfd := pidfd_open(t.pid)
 		if pfd < 0 {
-			hlog(h, "terminal %d: pid %d is gone already (errno %d): exit unknown", t.id, t.pid, errno())
+			if e := errno(); e != ESRCH {
+				// no pidfd (ENOSYS: before Linux 5.3; EPERM: seccomp; EMFILE): never taken for gone,
+				// its liveness is polled instead (orphans_poll)
+				t.polled, t.start_time = true, proc_start_time(t.pid)
+				hlog(h, "terminal %d: no pidfd for pid %d (errno %d): its exit is polled", t.id, t.pid, e)
+				continue
+			}
+			hlog(h, "terminal %d: pid %d is gone already: exit unknown", t.id, t.pid)
 			orphan_ended(t, -1, false)
 			continue
 		}

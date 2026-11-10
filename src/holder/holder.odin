@@ -24,6 +24,7 @@ import "core:c"
 import "core:encoding/hex"
 import "core:fmt"
 import "core:crypto"
+import "core:strconv"
 import "core:strings"
 import "core:sync"
 import "core:sys/posix"
@@ -441,6 +442,7 @@ holder_step :: proc(h: ^Holder, timeout_ms: int) {
 			case .Wake:
 				drain: [64]u8
 				for read(h.wake_fd, &drain, size_of(drain)) > 0 {}
+				reap_strays(h) // Linux: children that are neither sessions nor tracked (sys_linux.odin)
 			case .Orphans:
 				orphans_read(h)
 			case .Conn:
@@ -514,6 +516,7 @@ next_timer_ms :: proc(h: ^Holder) -> int {
 	for term in h.terms {
 		if term.pending do t = min(t, ms_until(term.spawned_at, h.cfg.spawn_timeout))
 		if !term.reaped && !term.orphan do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
+		else if !term.reaped && term.polled do t = min(t, int(time.duration_milliseconds(h.cfg.reap_interval)) + 1)
 		else if !term.final do t = min(t, ms_until(term.reaped_at, h.cfg.exit_grace))
 	}
 	if h.idle do t = min(t, ms_until(h.idle_since, h.cfg.idle_exit))
@@ -1010,6 +1013,7 @@ timers :: proc(h: ^Holder) {
 		st: c.int
 		if r := waitpid(h.keeper_pid, &st, WNOHANG); r == h.keeper_pid || (r < 0 && errno() == ECHILD) do h.keeper_pid = 0
 	}
+	orphans_poll(h) // Linux: orphans with no pidfd (sys_linux.odin); nothing on macOS
 	for i := len(h.terms) - 1; i >= 0; i -= 1 {
 		t := h.terms[i]
 		if t.pending && time.tick_since(t.spawned_at) >= h.cfg.spawn_timeout do spawn_resolve(h, t, true)
@@ -1085,6 +1089,9 @@ on_sigchld :: proc "c" (sig: c.int) {
 // --data DIR` (its dry run; upgrade.odin).
 // Exit codes: 0 done (idle or GOODBYE{shutdown}), 1 a start failure, 2 usage, 3 instance.lock
 // held exclusively.
+// `--keeper PID` of a new image's argv (upgrade.odin resume_argv; Linux), else 0.
+resume_keeper: c.int
+
 hold_main :: proc(args: []string) -> int {
 	run_dir, data_dir, ready, resume, dry: string
 	for i := 0; i < len(args); i += 1 {
@@ -1095,6 +1102,10 @@ hold_main :: proc(args: []string) -> int {
 		case "--ready": ready = args[i + 1]
 		case "--resume": resume = args[i + 1]
 		case "--dry-run-resume": dry = args[i + 1]
+		case "--keeper": // after an UPGRADE's exec (Linux): the keeper the old image forked
+			n, ok := strconv.parse_int(args[i + 1], 10)
+			if !ok || n <= 0 || n > int(max(i32)) do return usage()
+			resume_keeper = c.int(n)
 		case: return usage()
 		}
 		i += 1
@@ -1106,14 +1117,14 @@ hold_main :: proc(args: []string) -> int {
 	reset_signals()
 
 	if resume != "" || dry != "" {
-		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") do return usage()
+		if run_dir == "" || data_dir == "" || ready != "" || (resume != "" && dry != "") || (resume_keeper != 0 && resume == "") do return usage()
 		raise_fd_limit() // before it takes every master; a resource limit survives exec, but not the raise
 		h := holder_resume(dry != "" ? dry : resume, dry != "", run_dir, data_dir)
 		if h == nil do return 1
 		install_sigchld(h)
 		return holder_serve(h)
 	}
-	if run_dir == "" || data_dir == "" do return usage()
+	if run_dir == "" || data_dir == "" || resume_keeper != 0 do return usage()
 
 	disclaim_responsibility() // re-execs in place (same pid) unless already done
 	raise_fd_limit() // after it: the re-exec'd holder would take the raised limit for the original

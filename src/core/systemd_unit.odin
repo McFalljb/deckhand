@@ -138,5 +138,10 @@ systemd_scope_wanted :: proc(test_mode, hook_systemd, hook_direct: bool) -> bool
 	return !hook_direct
 }
 
-// Whether args may go on systemd-run's command line (scope_launch).
-systemd_scope_args_ok :: proc(args: []string) -> bool {return true}
+// Whether args may go on systemd-run's command line (scope_launch). systemd-run v254+ expands
+// $NAME and ${NAME} there, and older ones have no --expand-environment=no to stop it (Ubuntu
+// 22.04 has 249): so no '$' at all, whatever the version; such a launch is a direct spawn.
+systemd_scope_args_ok :: proc(args: []string) -> bool {
+	for a in args do if strings.contains_rune(a, '$') do return false
+	return true
+}

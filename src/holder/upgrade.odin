@@ -336,7 +336,6 @@ holder_resume :: proc(fd_arg: string, dry: bool, run_dir, data_dir: string) -> ^
 	orphans_watch(h)
 	// the keeper is our child (the old image forked it): reaped once it exits after DONE (timers)
 	if kp := handoff_keeper_pid(h, fd); kp > 0 && kp != getpid() do h.keeper_pid = kp // sys_*.odin
-	reap_strays(h) // Linux: the old image's other children that already ended
 	done := transmute([]u8)string("DONE")
 	if !send_all_by(fd, done, time.tick_add(time.tick_now(), HANDOFF_WAIT)) {
 		// the keeper is gone (it can no longer adopt): we have the terminals, so we serve

@@ -62,7 +62,7 @@ scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string
 		return holder_launch_direct(bin, run, data, env, mode, secret)
 	}
 	if !systemd_scope_args_ok({bin, run, data}) {
-		fmt.eprintfln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope", mode == "serve" ? "background core" : "session holder", bin, run, data)
+		fmt.eprintfln("Deckhand: %s: a '$' in %s, %s or %s (systemd-run would expand it): started directly, outside a systemd scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", bin, run, data)
 		return holder_launch_direct(bin, run, data, env, mode, secret)
 	}
 	r: [4]u8
@@ -92,7 +92,7 @@ scope_launch :: proc(bin, run, data: string, env: []string, mode, secret: string
 			time.sleep(10 * time.Millisecond)
 		}
 	}
-	fmt.eprintfln("Deckhand: %s: the systemd scope %s failed (%s): starting it directly", mode == "serve" ? "background core" : "session holder", unit, swhy)
+	fmt.eprintfln("Deckhand: %s: the systemd scope %s failed (%s): starting it directly, outside a scope, so stopping the core's service can end the session holder and its sessions", mode == "serve" ? "background core" : "session holder", unit, swhy)
 	return holder_launch_direct(bin, run, data, env, mode, secret)
 }
 

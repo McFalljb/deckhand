@@ -395,6 +395,8 @@ reap_strays :: proc(h: ^Holder) {
 		n, ok := strconv.parse_int(f, 10)
 		if !ok || n <= 0 do continue
 		for t in h.terms do if c.int(n) == t.pid do continue outer
+		if c.int(n) == h.keeper_pid do continue
+		for l in h.sup_launchers do if c.int(n) == l do continue outer
 		st: c.int
 		waitpid(c.int(n), &st, WNOHANG)
 	}

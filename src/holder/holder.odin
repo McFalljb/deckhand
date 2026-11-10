@@ -1122,6 +1122,7 @@ hold_main :: proc(args: []string) -> int {
 		h := holder_resume(dry != "" ? dry : resume, dry != "", run_dir, data_dir)
 		if h == nil do return 1
 		install_sigchld(h)
+		reap_strays(h) // Linux: the old image's other children that ended before the handler was in
 		return holder_serve(h)
 	}
 	if run_dir == "" || data_dir == "" || resume_keeper != 0 do return usage()

@@ -1526,6 +1526,7 @@ machine_action_label :: proc(s: core.Machine_Status) -> string {
 	case .Needs_Update:  return "Update"
 	case .Taken:         return "Take back"
 	case .Offline:       return "Connect"
+	case .Online:        return "Open web page…" // a port of its own: machine_page.odin
 	}
 	return ""
 }
@@ -1538,6 +1539,9 @@ machine_action :: proc(no: u64) {
 		#partial switch m.status {
 		case .Needs_Login:   ui_do(core.Machine_Login{no = no})
 		case .Offline, .Taken: ui_do(core.Machine_Connect{no = no})
+		case .Online:
+			palette_open_pages(no) // the palette asks for the port
+			ui_do(core.Set_Focus{"palette"})
 		case .Not_Installed: toast_show(fmt.tprintf("Install Deckhand on %s and open it once; installing it from here comes in a later update", m.name))
 		case .Needs_Update:  toast_show(fmt.tprintf("Update Deckhand on %s (%s); updating it from here comes in a later update", m.name, m.error))
 		}

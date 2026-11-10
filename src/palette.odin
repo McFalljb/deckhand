@@ -24,6 +24,7 @@ Palette_Kind :: enum {
 	Project,
 	File, // ⌘P: a file of the current project (editor_finder.odin)
 	App, // "New app tab…": a command line or an apps.json entry (app_tab.odin)
+	Page, // "Open a machine's web page…": PORT[/path] on an online machine (machine_page.odin)
 }
 
 PALETTE_KIND_NAMES := [Palette_Kind]string {
@@ -33,6 +34,7 @@ PALETTE_KIND_NAMES := [Palette_Kind]string {
 	.Project = "Project",
 	.File    = "File",
 	.App     = "App",
+	.Page    = "Page",
 }
 
 Palette_Item :: struct {
@@ -62,6 +64,8 @@ Palette :: struct {
 	pick_menu: string, // the context menu row that asked for it (owned; "" = not a menu): its outcome is shown
 	files:    bool, // file mode (⌘P): only the current project's files
 	apps:     bool, // app mode ("New app tab…"): the query is a command line to run in an app tab
+	pages:    bool, // page mode ("Open a machine's web page…"): the query is PORT[/path]
+	page_for: u64, // ...on this machine (0 = each online one)
 }
 
 palette: Palette
@@ -76,6 +80,7 @@ palette_reset :: proc() {
 	palette.selected, palette.first = 0, 0
 	palette.files = false
 	palette.apps = false
+	palette.pages, palette.page_for = false, 0
 	palette.was_open = true
 }
 
@@ -190,6 +195,7 @@ palette_search :: proc(query: string) -> []Palette_Item {
 palette_results :: proc() -> []Palette_Item {
 	if palette.files do return file_finder_results(tf_text(&palette.field))
 	if palette.apps do return app_palette_results(tf_text(&palette.field))
+	if palette.pages do return page_palette_results(tf_text(&palette.field))
 	return palette_search(tf_text(&palette.field))
 }
 
@@ -251,6 +257,8 @@ palette_run :: proc(it: Palette_Item) {
 			return
 		}
 		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
+	case .Page:
+		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do(core.Machine_Open_Page{no = it.id, port = port, path = path})
 	}
 }
 
@@ -302,4 +310,25 @@ run_action :: proc(a: ^Action, menu := "") {
 	}
 	if menu != "" do ui_do_menu(cmd, menu)
 	else do ui_do(cmd)
+}
+
+// Page mode: "PORT[/path]" opens on the machine asked for (the sidebar's Open web page…), else on
+// each online machine; nothing until the query is a port.
+page_palette_results :: proc(query: string) -> []Palette_Item {
+	out := make([dynamic]Palette_Item, context.temp_allocator)
+	port, path, ok := core.machine_page_spec(query)
+	if !ok do return out[:]
+	for m in state.machines {
+		if m.status != .Online || (palette.page_for != 0 && m.no != palette.page_for) do continue
+		shown := path == "" ? "/" : path
+		append(&out, Palette_Item{kind = .Page, key = fmt.tprintf("page:%d", m.no), title = fmt.tprintf("Open %s's 127.0.0.1:%d%s in a browser tab", m.name, port, shown), path = strings.clone(strings.trim_space(query), context.temp_allocator), id = m.no, order = len(out)})
+	}
+	return out[:]
+}
+
+// Page mode for machine no (0 = any online one): the palette asks for its port.
+palette_open_pages :: proc(no: u64) {
+	palette_reset()
+	palette.pages, palette.page_for = true, no
+	palette.was_open = true
 }

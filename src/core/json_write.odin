@@ -208,6 +208,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Connect:     return "machine_connect"
 	case Machine_Login:       return "machine_login"
+	case Machine_Open_Page:   return "machine_open_page"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
 	case Core_Handover:       return "core_handover"
@@ -474,6 +475,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_u64(&w, "no", c.no)
 	case Machine_Login:
 		kv_u64(&w, "no", c.no)
+	case Machine_Open_Page:
+		kv_u64(&w, "no", c.no)
+		kv_u64(&w, "port", c.port)
+		if c.path != "" do kv_str(&w, "path", c.path)
 	case Holder_Replace:
 		kv_bool(&w, "stop", c.stop)
 	case Core_Handover:

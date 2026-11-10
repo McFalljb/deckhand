@@ -719,6 +719,18 @@ tab_host_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (Result
 	return fail("not a tab host command"), false
 }
 
+// A browser tab at url in session s, as browser_open (its checks) with the tab's id known up front
+// (machine_page.odin keeps its forward with it, even when the window answers pending).
+browser_open_tab :: proc(s: ^Open_Session, url: string, caller: Caller, request_id: u64) -> (r: Result, changed: bool, tab_id: u64) {
+	if s.home do return fail("Home has only its pi tab"), false, 0
+	nurl, uerr := browser_url_normalize(url)
+	if uerr != "" do return fail(uerr), false, 0
+	if ferr := browser_file_check(caller, nurl); ferr != "" do return fail(ferr), false, 0
+	tab_id = new_id()
+	r, changed = routed(Browser_Open{session = s.id, url = url}, caller, request_id, tab_id)
+	return
+}
+
 // Step 2 and 3: the window's part, then the records its answer says.
 @(private = "file")
 routed :: proc(cmd: Command, caller: Caller, request_id: u64, tab_id: u64 = 0) -> (Result, bool) {

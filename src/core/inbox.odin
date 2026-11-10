@@ -125,6 +125,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	switch c in cmd {
 	case Add_Project:         return Add_Project{cwd = s(c.cwd, allocator)}
 	case Machine_Add:         return Machine_Add{name = s(c.name, allocator), target = s(c.target, allocator), via = s(c.via, allocator)}
+	case Machine_Open_Page:   return Machine_Open_Page{no = c.no, port = c.port, path = s(c.path, allocator)}
 	case App_Socket:          return App_Socket{tab_id = c.tab_id, op = c.op, line = s(c.line, allocator)}
 	case Harness_Install:     return Harness_Install{item = s(c.item, allocator), command = s(c.command, allocator), dismiss = c.dismiss}
 	case Fs_Changed:
@@ -291,6 +292,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Add_Project:         delete(c.cwd, allocator)
+	case Machine_Open_Page:   delete(c.path, allocator)
 	case Machine_Add:
 		delete(c.name, allocator)
 		delete(c.target, allocator)

@@ -311,7 +311,6 @@ machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string
 	return .Offline, last != "" ? last : "the connection ended"
 }
 
-@(private = "file")
 machine_last_line :: proc(text: string) -> string {
 	t := strings.trim_space(text)
 	if i := strings.last_index_byte(t, '\n'); i >= 0 do t = t[i + 1:]
@@ -498,6 +497,13 @@ machine_link_send_frame :: proc(no: u64, channel: u32, kind: cw.Kind, payload: [
 	return true
 }
 
+// Machine no's registry entry (machine_page.odin), its strings the link's.
+machine_entry :: proc(no: u64) -> (Machine, bool) {
+	l, _ := mlink_find(no)
+	if l == nil do return {}, false
+	return l.m, true
+}
+
 // Dropped from hub links so far (tests).
 machines_dropped :: proc() -> int {return mach.dropped}
 
@@ -602,6 +608,7 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	s, why := machine_status_of(o)
 	mlink_close(l)
 	machine_route_down(l.no) // what waited for it ends; its terminals attach again when it is up
+	page_forwards_drop(l.no) // its web pages' forwards (machine_page.odin)
 	l.phase = .Idle
 	l.next_at = time.tick_add(time.tick_now(), machine_backoff_down(&l.backoff, time.tick_now()))
 	mlink_set(l, s, why)
@@ -700,6 +707,7 @@ machines_tick :: proc() {
 			mlink_reap(l)
 			mlink_unmerge(l)
 			machine_route_down(l.no, gone = true) // what waited for it, its terminals (machine_route.odin)
+			page_forwards_drop(l.no)
 			l.phase, l.next_at, l.backoff = .Idle, {}, {}
 			mlink_set(l, .Offline, "Machines over SSH is off")
 			continue
@@ -750,6 +758,7 @@ machines_tick :: proc() {
 		}
 	}
 	machine_route_tick(now)
+	page_forwards_tick(now) // a web page's tab closed: its forward goes (machine_page.odin)
 }
 
 // The hello reply line came: online (frames from here on) or a status.
@@ -885,6 +894,7 @@ mlink_pump :: proc(l: ^Mach_Link) {
 			by := json_path(string(f.payload), "by")
 			mlink_close(l)
 			machine_route_down(l.no)
+			page_forwards_drop(l.no)
 			l.phase = .Stopped
 			l.backoff = {}
 			mlink_set(l, .Taken, by != "" && by != "<invalid json>" ? fmt.tprintf("viewed from %s", hub_from_name(by)) : "in use by that machine's own window")
@@ -964,6 +974,7 @@ mlink_reap :: proc(l: ^Mach_Link) {
 
 // At the core's end: every link closed, every child reaped.
 machines_stop :: proc() {
+	page_forwards_drop(0) // before the links: each cancel uses its machine's master
 	for l in mach.links do mlink_close(l, wait = true)
 }
 
@@ -1014,6 +1025,7 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 	l, i := mlink_find(c.no)
 	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
+	page_forwards_drop(l.no) // while its entry is there to cancel them with
 	mlink_close(l, wait = true)
 	ordered_remove(&mach.links, i)
 	if w := machines_save(); w != "" {
@@ -1037,6 +1049,16 @@ machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 	return {ok = true}
 }
 
+// A session of this Mac's to hold a tab for a machine (Log in…, Open web page…): the one on
+// screen, else the last shown (Home holds only its pi tab; another machine's is not this Mac's).
+machine_local_session :: proc() -> ^Open_Session {
+	s := cur()
+	if s != nil && !s.home && s.machine == 0 do return s
+	s = nil
+	for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && (s == nil || o.shown_at > s.shown_at) do s = &o
+	return s
+}
+
 // What Log in… runs: the link's own ssh (the core's PATH) as the ControlMaster, interactive, in
 // /bin/sh with the control path and target as arguments (never in the script's text).
 machine_login_argv :: proc(m: Machine, run: string) -> (argv: []string, why: string) {
@@ -1056,12 +1078,7 @@ machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) 
 	if rwhy != "" do return fail(rwhy), false
 	argv, why := machine_login_argv(l.m, run)
 	if why != "" do return fail(why), false
-	// a session of this Mac's to hold the tab: the one on screen, else the last shown
-	s := cur()
-	if s == nil || s.home || s.machine != 0 {
-		s = nil
-		for &o in state.open_sessions do if !o.home && o.machine == 0 && !o.missing && (s == nil || o.shown_at > s.shown_at) do s = &o
-	}
+	s := machine_local_session()
 	if s == nil do return fail("open a session on this Mac first: the login runs in a tab there"), false
 	id, err := shell_tab_start(s, s.cwd, argv = argv, title = fmt.tprintf("Log in to %s", l.name))
 	if err != "" do return fail(err), false

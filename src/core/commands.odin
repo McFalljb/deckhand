@@ -546,6 +546,7 @@ Command :: union {
 	Machine_Remove,
 	Machine_Connect,
 	Machine_Login,
+	Machine_Open_Page, // a machine's web page in a local browser tab (machine_page.odin)
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
@@ -1514,6 +1515,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Machine_Remove:  return machine_remove_apply(c), false
 	case Machine_Connect: return machine_connect_apply(c), false
 	case Machine_Login:   return machine_login_apply(c, caller)
+	case Machine_Open_Page: return machine_open_page_apply(c, caller, request_id)
 	case Holder_Replace:
 		return holder_replace(c.stop), true
 	case Holder_Restart:

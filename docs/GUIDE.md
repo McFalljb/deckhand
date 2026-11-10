@@ -259,7 +259,15 @@ as that machine has them. Click an open session to show it, or one of a project'
 it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
 **⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
-*On <machine>: …*. Its agents' browser is that machine's own: they never open pages in this Mac's
+*On <machine>: …*. **Open web page…** on an online machine's row (or **Open a machine's web page…** in the
+palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens the page its own
+`localhost` serves there (a dev server) in an ordinary browser tab here: in the session on screen,
+or the last one of this Mac's you looked at when another machine's is on screen. Deckhand asks
+that machine's ssh connection to forward a free port of this Mac (`127.0.0.1` only) to that port
+on the machine's own `127.0.0.1`, never to another host, and stops the forward when you close the
+tab, when the link drops or when you remove the machine. The tab is like any other local tab:
+you and this Mac's agents can use it. While it is open, any program of yours on this Mac can
+reach that port too, as with your own `ssh -L`. Its agents' browser is that machine's own: they never open pages in this Mac's
 browser, and while you view that machine from here (or if it has no window, like a Linux machine)
 their browser tools answer that no browser is available there. Its other kinds of tab (editors, pages, apps) show only on that machine for
 now, and agents and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
@@ -1932,6 +1940,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Browser: open the blocked popup |  | the popup the page tried to open, in a new tab of the same session |
 | Browser: show downloads folder |  | the folder downloads go to, in Finder |
 | New app tab… |  | a program that draws into the tab (asks for the command) |
+| Open a machine's web page… |  | a page an online machine serves on its own `127.0.0.1` (asks for the port), in a local browser tab through its ssh connection; see [Projects, sessions and chats](#projects-sessions-and-chats) |
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |

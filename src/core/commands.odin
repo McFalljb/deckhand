@@ -300,7 +300,6 @@ control_token_clip_tick :: proc() {
 	control_token_clip = {}
 }
 keep_sessions_default :: proc() -> bool {
-	when ODIN_OS != .Darwin do return false // no session holder on Linux until M6-L3
 	return keep_sessions_default_on && !autotest_active
 }
 
@@ -1496,9 +1495,6 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, false // side effect only: the token is on the clipboard, nowhere else
 	case Set_Keep_Sessions:
 		// the user's choice (only the user may run it; the restore runs it for a saved choice)
-		when ODIN_OS != .Darwin {
-			if c.on do return fail("sessions can't be kept running on Linux yet: there is no session holder"), false
-		}
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true

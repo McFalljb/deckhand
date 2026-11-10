@@ -94,3 +94,12 @@ systemd_start_wanted_cases :: proc(t: ^testing.T) {
 	testing.expect(t, !systemd_start_wanted(bin = cur, current = cur, from_core = false, test_mode = false, unit_there = false, use_previous = false), "no unit")
 	testing.expect(t, !systemd_start_wanted(bin = "", current = "", from_core = false, test_mode = false, unit_there = true, use_previous = false), "no current core")
 }
+
+@(test)
+systemd_scope_cases :: proc(t: ^testing.T) {
+	testing.expect(t, argv_eq(systemd_scope_argv("deckhand-holder-0a1b2c3d"), {"/usr/bin/systemd-run", "--user", "--scope", "--quiet", "--collect", "--unit", "deckhand-holder-0a1b2c3d", "--"}))
+	testing.expect(t, systemd_scope_wanted(false, false, false))
+	testing.expect(t, !systemd_scope_wanted(false, false, true), "DECKHAND_HOLDER_DIRECT: a direct child")
+	testing.expect(t, !systemd_scope_wanted(true, false, false), "test mode: direct unless asked")
+	testing.expect(t, systemd_scope_wanted(true, true, false))
+}

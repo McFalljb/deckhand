@@ -54,6 +54,7 @@ Hook :: enum u8 {
 	Install_Cmd,
 	Gpu_Lag_Ms,
 	Holder_Direct,
+	Holder_Systemd, // 1: Linux test mode starts the holder and a direct core in a systemd scope, as outside it (launch_linux.odin)
 	Holder_Rev, // the bundled holder's rev as the app sees it (holder_upgrade_wanted): a scene's upgrade at attach
 	Temp_Roots,
 	Debug_Browser,
@@ -92,6 +93,7 @@ when TEST_HOOKS {
 		.Install_Cmd      = "DECKHAND_INSTALL_CMD",
 		.Gpu_Lag_Ms       = "DECKHAND_TEST_GPU_LAG_MS",
 		.Holder_Direct    = "DECKHAND_HOLDER_DIRECT",
+		.Holder_Systemd   = "DECKHAND_HOLDER_SYSTEMD",
 		.Holder_Rev       = "DECKHAND_HOLDER_REV",
 		.Temp_Roots       = "DECKHAND_TEMP_ROOTS",
 		.Debug_Browser    = "DECKHAND_DEBUG_BROWSER",

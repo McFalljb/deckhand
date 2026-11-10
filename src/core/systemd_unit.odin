@@ -113,3 +113,28 @@ linger_parse :: proc(out: string, ok: bool) -> Linger {
 systemd_start_wanted :: proc(bin, current: string, from_core, test_mode, unit_there, use_previous: bool) -> bool {
 	return !from_core && !test_mode && unit_there && !use_previous && current != "" && bin == current
 }
+
+// ---- transient scopes (M6-L3) ----
+//
+// The holder, and a core started directly (a handover's successor, a launch with no unit), each
+// run in a transient scope of their own: `systemd-run --user --scope … -- <bin> …`. systemd-run
+// moves itself into the new scope and execs the rest, so the pid spawned is the holder's (or the
+// core's), outside the launcher's cgroup: stopping deckhand-core.service never reaches it, and a
+// successor core is no longer left in a unit that went inactive. --collect: the scope goes once
+// its processes do, failed or not.
+
+SYSTEMD_RUN :: "/usr/bin/systemd-run"
+
+// systemd-run's argv before the command, for a scope named unit (".scope" is added by systemd).
+systemd_scope_argv :: proc(unit: string, allocator := context.temp_allocator) -> []string {
+	a := make([]string, 8, allocator)
+	a[0], a[1], a[2], a[3], a[4], a[5], a[6], a[7] = SYSTEMD_RUN, "--user", "--scope", "--quiet", "--collect", "--unit", unit, "--"
+	return a
+}
+
+// Whether a launch goes through a scope: always outside test mode (unless DECKHAND_HOLDER_DIRECT
+// asks for a direct child); in test mode only when DECKHAND_HOLDER_SYSTEMD asks for it.
+systemd_scope_wanted :: proc(test_mode, hook_systemd, hook_direct: bool) -> bool {
+	if test_mode do return hook_systemd
+	return !hook_direct
+}

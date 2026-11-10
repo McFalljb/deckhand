@@ -215,7 +215,6 @@ exit_of_wire :: proc(code, signal: i64) -> Exit_Info {
 // keep_sessions on (a holder is launched when none answers), or off when a holder socket is
 // there (sessions from an earlier run are adopted even after the setting went off).
 holder_client_start :: proc() -> bool {
-	when ODIN_OS != .Darwin do return false // no session holder on Linux until M6-L3: tabs are the core's children
 	if hc.on do return true
 	if hc.tried || home_root == "" do return false
 	when ODIN_TEST {
@@ -1307,7 +1306,10 @@ holder_children :: proc(pid: i32) -> int {
 		n := proc_listchildpids(posix.pid_t(pid), &buf[0], i32(size_of(buf))) // jobs_run.odin's
 		return max(0, int(n))
 	} else {
-		return 0
+		// its main thread's children (the holder forks from its one thread)
+		data, err := os.read_entire_file(fmt.tprintf("/proc/%d/task/%d/children", pid, pid), context.temp_allocator)
+		if err != nil do return 0
+		return len(strings.fields(string(data), context.temp_allocator))
 	}
 }
 

@@ -242,7 +242,8 @@ machine_page_children :: proc(t: ^testing.T) {
 	page_ssh_argv_for_test = {"python3", "-c", "import socket,sys,time\ns=socket.socket()\ns.bind(('127.0.0.1',int(sys.argv[1])))\ns.listen()\nprint('ready',flush=True)\ntime.sleep(30)", "%PORT%"}
 	_, _ = page_forward_open(9, m, 3000, "/", ui, 77)
 	got = finished(77)
-	testing.expectf(t, strings.contains(got, "no session"), "77 reached the tab: %s", got)
+	// (Linux has no window and no owner check: the listener is never ours there, so it fails earlier)
+	when ODIN_OS == .Darwin do testing.expectf(t, strings.contains(got, "no session"), "77 reached the tab: %s", got)
 	page_forwards_reset_for_test()
 
 	// the cap counts every phase (opening, open, closing)

@@ -27,7 +27,14 @@ pty_open :: proc(p: ^Pty) -> bool {return p.fd >= 0 || p.held != 0}
 // the pipe and the new master are close-on-exec; every other place that
 // forks or spawns (from any thread) holds it shared around the fork, so no
 // child is born holding a descriptor in that window. (POSIX_SPAWN_CLOEXEC_DEFAULT
-// is macOS only, and Odin's os.process_start is a plain fork.)
+// is macOS only.)
+//
+// Children are started with posix_spawn, never a plain fork (#78): in a process that loads CEF
+// (the window, which runs the core in process in the fallback), a fork child runs the atfork
+// handlers, and one that hangs there never execs and keeps our flocks (core.lock, instance.lock)
+// after we quit. pty_spawn's forkpty is the exception: the shell needs the pty as its controlling
+// terminal, which posix_spawn can't set up, and it runs in the window only in that fallback (the
+// background core and the session holder load no CEF).
 fork_lock: sync.RW_Mutex
 
 Pty :: struct {

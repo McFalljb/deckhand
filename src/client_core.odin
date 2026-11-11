@@ -241,6 +241,8 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 	path := fmt.tprintf("%s/%s", run, core.CORE_SOCK)
 	deadline := time.tick_add(time.tick_now(), CORE_START_WAIT)
 	last_launch: time.Tick
+	core.core_refused_take(run) // an earlier core's: not this start's
+	refused: string // why the last core launched refused to start (instance_guard), for the timeout's message
 	for {
 		if fd, ok := core.sock_connect(path); ok {
 			if core.window_token_read(run) != "" {
@@ -251,11 +253,18 @@ client_core_dial :: proc(data: string, launch := true) -> (hello: Core_Hello, wh
 			}
 			core.sock_close(fd) // not a core's (yet): no window token
 		}
+		// a core refused to start (instance_guard) says why. Not final: one launched a second ago
+		// may still be starting and hold the lock; told only if no core comes up
+		if r := core.core_refused_take(run); r != "" do refused = r
 		if launch && (last_launch == {} || time.tick_since(last_launch) >= CORE_RELAUNCH_EVERY) {
 			last_launch = time.tick_now()
 			if why = client_core_launch(run, data); why != "" do return
 		}
-		if time.tick_diff(time.tick_now(), deadline) <= 0 do return {}, launch ? "Deckhand's background core did not start within 15 s" : "Deckhand's new background core did not start within 15 s"
+		if time.tick_diff(time.tick_now(), deadline) <= 0 {
+			why = launch ? "Deckhand's background core did not start within 15 s" : "Deckhand's new background core did not start within 15 s"
+			if refused != "" do why = fmt.tprintf("%s. It said: %s", why, strings.trim_right(refused, "."))
+			return {}, why
+		}
 		time.sleep(20 * time.Millisecond)
 	}
 }

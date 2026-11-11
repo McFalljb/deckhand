@@ -126,7 +126,9 @@ init :: proc "c" () {
 	// one Deckhand per data dir, and none beside a running pi-desk 0.1.x (instance.odin), before
 	// anything is written there; test mode looks for Deckhand only in a runtime dir of its own
 	check_old := !core.autotest_active || core.hook_env(.Runtime_Dir) != ""
-	if why := core.instance_guard(core.home_root, check_old); why != "" {
+	why := core.instance_guard(core.home_root, check_old)
+	if why != "" && !core.autotest_active && instance_offer_end(why, core.instance_refused_by) do why = core.instance_guard(core.home_root, check_old)
+	if why != "" {
 		if core.autotest_active {
 			fmt.println("[autotest] instance refused:", why)
 			os.exit(3)
@@ -221,6 +223,8 @@ init_separate :: proc(note := "") -> bool {
 		os.exit(1)
 	}
 	why := client_core_connect(core.home_root)
+	// a leftover Deckhand process holds the data dir's lock (#78): the user may end it, then the core starts
+	if why != "" && !core.autotest_active && instance_offer_end(why, core.instance_holder_now(core.home_root)) do why = client_core_connect(core.home_root)
 	if why != "" && client_core_offer_previous() do why = client_core_connect(core.home_root)
 	if why != "" {
 		fmt.eprintln("Deckhand:", why)
@@ -260,6 +264,18 @@ init_separate :: proc(note := "") -> bool {
 		autotest_step()
 	})
 	return true
+}
+
+// A lock in the data dir is held by h (instance_guard refused, or the core did: why). When h is a
+// leftover Deckhand process (lock_holder_endable), the user is asked to end it: true = ended, start
+// again. Declined: Deckhand quits (the same alert would follow).
+instance_offer_end :: proc(why: string, h: core.Lock_Holder) -> bool {
+	if !core.lock_holder_endable(h) do return false
+	text := fmt.tprintf("%s\n\nIt is a Deckhand process left over from an earlier run (its app has quit), %s. Ending it lets Deckhand start.", why, core.lock_holder_text(h))
+	if !platform_ask("Deckhand can't start", text, "End It and Start", "Quit") do os.exit(1)
+	if core.lock_holder_end(h) do return true
+	platform_alert("Deckhand can't start", fmt.tprintf("%s could not be ended. Quit it in Activity Monitor, then open Deckhand again.", core.lock_holder_text(h)))
+	os.exit(1)
 }
 
 // The app's platform layer: every entry set (a nil one would make its

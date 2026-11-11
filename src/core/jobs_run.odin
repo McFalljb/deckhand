@@ -136,30 +136,40 @@ run_spawn :: proc(r: ^Job_Run, argv, env: []string, cwd, stderr_path: string) ->
 	// neither end reaches another child (a shell opened during the run); dup2 into pi's stdout clears it there
 	posix.fcntl(fds[0], .SETFD, i32(posix.FD_CLOEXEC))
 	posix.fcntl(fds[1], .SETFD, i32(posix.FD_CLOEXEC))
-	lock := posix.FD(r.lock_fd)
+	// posix_spawn, never a plain fork: a fork child runs the atfork handlers (CEF's, in the
+	// window) and one that hangs there keeps our flocks after we quit (#78)
+	lock := i32(r.lock_fd)
+	attr, fa: [512]u8 // opaque (a pointer on macOS, a struct elsewhere)
+	posix_spawnattr_init(&attr)
+	defer posix_spawnattr_destroy(&attr)
+	posix_spawnattr_setflags(&attr, i16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
+	posix_spawnattr_setpgroup(&attr, 0) // its own group, led by itself
+	posix_spawn_file_actions_init(&fa)
+	defer posix_spawn_file_actions_destroy(&fa)
+	posix_spawn_file_actions_adddup2(&fa, i32(null), 0)
+	posix_spawn_file_actions_adddup2(&fa, i32(fds[1]), 1)
+	posix_spawn_file_actions_adddup2(&fa, i32(errf), 2)
+	// pi keeps the run lock (close-on-exec for every other child): macOS's inherit action under
+	// CLOEXEC_DEFAULT; glibc (2.29+) clears close-on-exec on a dup2 onto itself
+	if lock >= 0 {
+		when ODIN_OS == .Darwin {
+			posix_spawn_file_actions_addinherit_np(&fa, lock)
+		} else {
+			posix_spawn_file_actions_adddup2(&fa, lock, lock)
+		}
+	}
+	posix_spawn_file_actions_addchdir_np(&fa, c_cwd)
+	pid: posix.pid_t
 	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
-	pid := posix.fork()
-	if pid != 0 do sync.rw_mutex_shared_unlock(&fork_lock)
-	if pid < 0 {
+	err := posix.posix_spawn(&pid, c_argv[0], &fa, &attr, raw_data(c_argv), raw_data(c_env))
+	sync.rw_mutex_shared_unlock(&fork_lock)
+	if err != .NONE {
 		posix.close(fds[0])
 		posix.close(fds[1])
 		posix.close(errf)
 		posix.close(null)
 		return false
 	}
-	if pid == 0 {
-		// only async-signal-safe calls from here
-		posix.setpgid(0, 0)
-		posix.dup2(null, 0)
-		posix.dup2(fds[1], 1)
-		posix.dup2(errf, 2)
-		for fd in posix.FD(3) ..< 256 do if fd != lock do posix.close(fd)
-		posix.fcntl(lock, .SETFD, i32(0)) // pi keeps the run lock (close-on-exec for every other child)
-		if posix.chdir(c_cwd) != .OK do posix._exit(126)
-		posix.execve(c_argv[0], raw_data(c_argv), raw_data(c_env))
-		posix._exit(127)
-	}
-	posix.setpgid(pid, pid) // also from here: no race with an early kill
 	posix.close(fds[1])
 	posix.close(errf)
 	posix.close(null)

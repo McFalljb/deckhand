@@ -41,6 +41,7 @@ when ODIN_OS == .Darwin {
 	foreign applib {
 		posix_spawn_file_actions_addchdir_np :: proc(fa: rawptr, path: cstring) -> posix.Errno ---
 		posix_spawn_file_actions_addopen :: proc(fa: rawptr, fd: i32, path: cstring, oflag: i32, mode: u16) -> posix.Errno ---
+		posix_spawn_file_actions_addinherit_np :: proc(fa: rawptr, fd: i32) -> posix.Errno --- // keeps fd under CLOEXEC_DEFAULT
 	}
 	POSIX_SPAWN_SETSID :: 0x0400
 } else {
@@ -219,40 +220,73 @@ run_bounded :: proc(dir: string, cmd: []string, timeout: time.Duration, input :=
 
 // run_bounded with the exit code: ran = it started, ended within timeout and its output was read
 // (code: its exit status, or the signal that ended it); out is read whatever the code.
+// posix_spawn, never a plain fork: a fork child runs the atfork handlers (CEF's, in the window)
+// and one that hangs there keeps our flocks (core.lock, instance.lock) after we quit (#78).
 run_bounded_exit :: proc(dir: string, cmd: []string, timeout: time.Duration, input := "") -> (out: string, code: int, ran: bool) {
+	if len(cmd) == 0 do return "", 0, false
 	tmpdir := os.get_env("TMPDIR", context.temp_allocator)
 	if tmpdir == "" do tmpdir = "/tmp"
 	path := fmt.tprintf("%s/deckhand-run-%d-%d.out", strings.trim_right(tmpdir, "/"), os.get_pid(), sync.atomic_add(&run_seq, 1))
-	f, ferr := os.open(path, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
-	if ferr != nil do return "", 0, false
+	cpath := strings.clone_to_cstring(path, context.temp_allocator)
+	out_fd := posix.open(cpath, {.RDWR, .CREAT, .EXCL, .CLOEXEC}, {.IRUSR, .IWUSR})
+	if out_fd < 0 do return "", 0, false
 	defer {
-		os.close(f)
-		os.remove(path)
+		posix.close(out_fd)
+		posix.unlink(cpath)
 	}
-	stdin: ^os.File
-	defer if stdin != nil do os.close(stdin)
+	// stdin: the input from a file (unlinked at once; the open fd keeps it), else /dev/null
+	in_fd: posix.FD
 	if input != "" {
-		ipath := fmt.tprintf("%s.in", path)
-		ierr: os.Error
-		stdin, ierr = os.open(ipath, {.Read, .Write, .Create, .Excl}, os.perm_number(0o600))
-		if ierr != nil do return "", 0, false
-		os.remove(ipath) // the open handle keeps it until closed
-		if _, werr := os.write_string(stdin, input); werr != nil do return "", 0, false
-		if _, serr := os.seek(stdin, 0, .Start); serr != nil do return "", 0, false
+		ipath := strings.clone_to_cstring(fmt.tprintf("%s.in", path), context.temp_allocator)
+		in_fd = posix.open(ipath, {.RDWR, .CREAT, .EXCL, .CLOEXEC}, {.IRUSR, .IWUSR})
+		if in_fd < 0 do return "", 0, false
+		posix.unlink(ipath)
+		if posix.write(in_fd, raw_data(input), uint(len(input))) != len(input) || posix.lseek(in_fd, 0, .SET) != 0 {
+			posix.close(in_fd)
+			return "", 0, false
+		}
+	} else {
+		in_fd = posix.open("/dev/null", {.RDWR, .CLOEXEC})
+		if in_fd < 0 do return "", 0, false
 	}
-	sync.rw_mutex_shared_lock(&fork_lock) // a plain fork (fork_lock, pty.odin)
-	p, perr := os.process_start({command = cmd, working_dir = dir, stdout = f, stdin = stdin})
+	defer posix.close(in_fd)
+	cargv := make([]cstring, len(cmd) + 1, context.temp_allocator)
+	for a, i in cmd do cargv[i] = strings.clone_to_cstring(a, context.temp_allocator)
+	attr, fa: [512]u8 // opaque (a pointer on macOS, a struct elsewhere)
+	posix_spawnattr_init(&attr)
+	defer posix_spawnattr_destroy(&attr)
+	posix_spawnattr_setflags(&attr, i16(POSIX_SPAWN_CLOEXEC_DEFAULT))
+	posix_spawn_file_actions_init(&fa)
+	defer posix_spawn_file_actions_destroy(&fa)
+	posix_spawn_file_actions_adddup2(&fa, i32(in_fd), 0)
+	posix_spawn_file_actions_adddup2(&fa, i32(out_fd), 1)
+	posix_spawn_file_actions_addopen(&fa, 2, "/dev/null", i32(posix.O_WRONLY), 0)
+	if dir != "" do posix_spawn_file_actions_addchdir_np(&fa, strings.clone_to_cstring(dir, context.temp_allocator))
+	pid: posix.pid_t
+	sync.rw_mutex_shared_lock(&fork_lock) // fork_lock, pty.odin
+	err := posix.posix_spawnp(&pid, cargv[0], &fa, &attr, raw_data(cargv), posix.environ)
 	sync.rw_mutex_shared_unlock(&fork_lock)
-	if perr != nil do return "", 0, false
-	st, werr := os.process_wait(p, timeout)
-	if werr != nil || !st.exited {
-		_ = os.process_kill(p)
-		_, _ = os.process_wait(p)
-		return "", 0, false
+	if err != .NONE do return "", 0, false
+	deadline := time.tick_add(time.tick_now(), timeout)
+	wstatus: i32
+	for {
+		r := posix.waitpid(pid, &wstatus, {.NOHANG})
+		if r == pid do break
+		if r < 0 && posix.errno() != .EINTR do return "", 0, false
+		if time.tick_diff(time.tick_now(), deadline) <= 0 {
+			posix.kill(pid, .SIGKILL) // ours and unreaped: never a reused pid
+			for posix.waitpid(pid, &wstatus, {}) < 0 && posix.errno() == .EINTR {}
+			return "", 0, false
+		}
+		time.sleep(5 * time.Millisecond)
 	}
 	data, rerr := os.read_entire_file(path, context.temp_allocator)
 	if rerr != nil do return "", 0, false
-	return string(data), st.exit_code, true
+	switch {
+	case posix.WIFEXITED(wstatus): code = int(posix.WEXITSTATUS(wstatus))
+	case posix.WIFSIGNALED(wstatus): code = int(posix.WTERMSIG(wstatus))
+	}
+	return string(data), code, true
 }
 
 // The repository root holding path ("" = not in a repository).

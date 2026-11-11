@@ -253,7 +253,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `copy_control_token` | — | **user only**: a new control token (unbound, `tab_id` 0) for `deckhand --ctl`, as `export DECKHAND_SOCKET='…' DECKHAND_TOKEN='…'`, onto the clipboard; the result and the log never hold it. The one way a release build mints a control token (§2) |
 | `set_keep_sessions` | `on` | **user only**, on by default (off in test mode until a scene turns it on; `state.settings.keep_sessions`, always saved): run tabs' processes in the session holder, so they survive a core restart or crash, an update, and a quit without Stop All; the next core adopts them, and their tokens survive in a MAC'd `tokens.json` (§2) |
 | `set_separate_core` | `on` | **user only**, on by default (`separate_core_default_on`; `state.settings.separate_core`, saved when it differs from the default): read at the next launch: on, the core is its own process, `deckhand-core-serve serve`, and the window its client over `core.sock` (§5a); off, the core runs in the window's process. A change takes effect once the running core has stopped |
-| `set_remote_machines` | `on` | **user only**, off by default (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default): Settings › Experimental › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub") |
+| `set_remote_machines` | `on` | **user only**, on by default since M6-F (`remote_machines_default_on`, `src/core/machines.odin`; `state.settings.remote_machines`, saved when it differs from the default, so off is an opt-out): Settings › Machines over SSH. On, a separate core keeps a link to each machine in `machines.json` (§5a, "The hub"); with none, nothing runs |
 | `set_machines_reachable` | `on` | **user only**, off by default (`machines_reachable_default_on`, `src/core/machines.odin`; `state.settings.machines_reachable`, saved when it differs from the default): Settings › Machines › *Allow other machines to connect to this one*. Off, this core's hub door refuses every hub hello (§5a, "The hub"); on, another machine's core that logs in here over ssh as this user can view and drive this machine's sessions. Separate from `remote_machines`, which reaches out |
 | `machine_add` | `name`, `target`, `via`? | **user only**, with `remote_machines` on: adds a machine to `<data>/machines.json` (0600; numbers from 1, never reused; `created_id` = its number). `target`: an `~/.ssh/config` alias or `user@host` (letters, digits and `. _ - @ :`, not starting with `-`); `name`: at most 64 bytes, unique. `via`: a command run in place of `ssh … connect`, development and test builds only (refused in a release build) |
 | `machine_remove` | `no` | **user only**: forgets a machine (its link ends; nothing on it is touched; an install running to it ends and removes what it copied) |
@@ -709,7 +709,7 @@ without asking. Exited tabs never ask.
                           "control": {…}, "panel": {…}},
               "confirm_close": {"pi": "auto", "shell": "auto"},
               "theme": "graphite", "reduce_motion": false, "appearance": "system", "light": false, "text_size": "default", "chats_readonly": false,
-              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": false, "machines_reachable": false,
+              "agent_name": "", "agent_model": "", "notify": true, "tidy_projects": true, "keep_sessions": true, "separate_core": true, "remote_machines": true, "machines_reachable": false,
               "bell": {"finished": true, "waiting": true, "errors": true, "jobs": true, "os": true},
               "home_dir": "/Users/me/deckhand", "setup_seen": false,
               "folders": {"sessions": {"path": "/Users/me/deckhand/sessions", "custom": false}, "jobs": {…}, "memory": {…}, "atlas": {…},
@@ -748,7 +748,8 @@ projects, 64 open sessions of 32 tabs). They are never saved in `workspace.json`
 that machine's confirmations. Their tabs carry `has_term`. `focus_session` and `select_project`
 take their ids (this Mac's view of them; the user's `focus_session` also goes to that machine, so
 its restored tabs start), and `copy_selection` copies the window's own copy here. Any other
-command naming one runs on that machine (§5a, "Working on another machine"): the user's only.
+command naming one runs on that machine (§5a, "Working on another machine"): the user's and
+Atlas's only. Its jobs are in `machine_jobs` (§5a, "Other machines' jobs and bells").
 
 `agent_status` (§5 Status dots): on an open session, its row's dot (the strongest of its tabs:
 `waiting` > `error` > `unseen` > `question` > `working` > `exited` > `none`); on every terminal tab
@@ -1272,16 +1273,52 @@ the merged entries stay as last seen; up again, a fresh `state.full` replaces th
 **Working on another machine** (design §8.3, §10.4 M6-C; `src/core/machine_route.odin`). A
 command naming ids of one other machine (`tab_id`, `session`, `project_id`, `pane`, `tab`, `split`,
 `opener`; ids of two machines are refused) is checked here first (`caller_may`); then only the
-user's (`ui`) is forwarded. Any other caller's is refused (agents and Atlas: a later version, as
-`control`). The hub sends it on that machine's link as `{"type":"command","id":"h<n>","now":true,
-"on_behalf":{"kind":"ui"},"command":{…}}`, its ids unpacked and a `pi_session_id`'s `m<no>:` taken
+user's (`ui`) and Atlas's (`control`, M6-F) are forwarded, and only when they are this machine's
+own: a command that came over a hub link (another machine viewing this one) is refused, so no
+machine drives a third through this one. Any other caller's is refused. The hub sends it on that
+machine's link as `{"type":"command","id":"h<n>","now":true,"on_behalf":{"kind":"ui"|"control"},
+"command":{…}}` (the caller's own kind), its ids unpacked and a `pi_session_id`'s `m<no>:` taken
 off, and answers `pending`. That core's `result` (and its `finished`, for one it answered pending)
-ends the request here: `created_id` packed (a session it opened or made is shown here too), the
-error cleaned, no `data`. Its state change arrives through the mirror before the result. A link
-that is down, or goes down while it waits, answers `{"ok":false,"data":{"code":"machine_offline"}}`;
-no answer in 30 s fails it. A `needs_confirmation` for the user is asked here: the bar shows *On
-<machine>: <its summary>* with a token of this core's; confirming sends the user's command again
-with that machine's token, and Cancel cancels it there.
+ends the request here: `created_id` packed (a session the user opened or made is shown here too),
+its error and `data` as below (of its `data` only a known `code`: `timeout`, `tab_gone`,
+`cancelled`, `dropped`, `browser_not_here`, `no_window`, `machine_offline`). Its state change arrives through
+the mirror before the result. A link that is down, or goes down while it waits, answers
+`{"ok":false,"data":{"code":"machine_offline"}}`; no answer in 30 s fails it (`pi_wait_idle` and
+`claude_wait_idle`: their own `timeout_ms` plus 10 s, at most 130 s). A `needs_confirmation` for
+the user's command is asked here: the bar shows *On <machine>: <its summary>* with a token of this
+core's; confirming sends the user's command again with that machine's token, and Cancel cancels it
+there. Atlas's is refused instead ("on <machine> this needs the user's confirmation"): the user
+does it from the window. A result's error is this core's own words for a known code, else
+`on <machine>: ` and that machine's text (one line, cleaned, at most 160 bytes), its `data` only
+`{"code"?, "id"?}` (`id`: a `claude_prompt`'s held text, an integer below 2^53), and the result
+itself carries `"machine": "<its name here>"` beside `data`: only a forwarded result has it (a
+local app's error `data` may hold any field, so `data` never says whose). The desk tools put an
+error from another machine after a note, fenced as its data.
+
+**What the `caller.hub` gate does not stop.** A machine allowed to connect to this one (*Allow
+other machines to connect to this one*) acts as the user here, with `ui`: it can type into this
+machine's shell tabs and prompt its sessions, Atlas included. So it can reach whatever this
+machine reaches, its other machines too: through a shell here (`ssh`), or by asking this
+machine's Atlas, whose commands are then this machine's own `control`. The gate only stops a hub's
+own commands from being forwarded straight on. Allow other machines to connect only to machines you
+trust as yourself.
+
+**Other machines' jobs and bells** (design §8.6, §10.4 M6-F; `src/core/machine_mirror.odin`). A
+remote core can't notify (its `window.request` is dropped), so this core rings for it, naming the
+machine: a job of its that needs the user (`needs_you`, unread) once per run (its `last_run`),
+and each new entry of its bell (not its `job_needs_you`, rung from the job) once, by its id. A core
+run seen for the first time (its hello's `core` id), on connecting or after it restarted, sets the
+mark without ringing: a reconnect or a fresh `state.full` never rings what it had. Of its bell only
+the newest 20 entries are read per state, and at most 4 ring per machine a minute (the rest are
+dropped). Its entries are in `notifications_list` with `"machine"`: the title and `place` start
+with the machine's name, its `session_id`/`tab_id` are packed ids of its mirrored session (else 0),
+its `job_id` reads `m<no>:<its id>`, and no `pi_session_id` or run folder is kept. Its jobs (at most
+100) are in `get_state`'s `machine_jobs` (`id` `m<no>:<its id>`, `machine`, `name`, `schedule`,
+`enabled`, `paused`, `running`, `next_due`, `last_at`, `last_status` (a known word, else
+`unknown`), `last_headline`, `unread`, `needs_you`: at most 5 lines): read-only, no paths; no job
+command finds one. Every string is one line without control, bidi or invisible characters, and
+bounded. Removing the machine, or turning Machines over SSH off, takes its entries and jobs away;
+a link that drops keeps them as last seen.
 
 **`on_behalf`** (the other core's side): a hub's `command` must carry `on_behalf` `{"kind":"ui"}`
 or `"control"`. It runs as that caller (`caller_may` and confirmations again, and the

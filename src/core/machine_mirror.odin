@@ -12,9 +12,21 @@ package core
 // status and "already open" never mix them with this Mac's.
 //
 // What is merged: its projects (not its Chats entry), its open sessions (not Home) with their
-// tabs, each session in one pane (its own split layout is not mirrored), and, while one of its
-// projects is selected here, that project's sessions. Nothing else: never its confirmations,
-// jobs, settings or panels. Another machine's State is untrusted: every string is cleaned
+// tabs, each session in one pane (its own split layout is not mirrored), while one of its projects
+// is selected here, that project's sessions, and (M6-F) its jobs, read-only (State.machine_jobs:
+// no paths, ids "m<no>:<its id>" so no job command here finds one). Nothing else: never its
+// confirmations, settings or panels.
+//
+// Its bell and its jobs that need the user ring here (mirror_alerts, M6-F, §8.6): its core can't
+// use window.request, so this core makes the notification, naming the machine. A bell entry rings
+// once: ids above the newest seen of that core's run (a core seen for the first time, or a new run
+// of it, sets that mark without ringing, so a reconnect or a fresh state.full never rings old
+// ones); a job that needs the user rings once per run (its last_run), unread ones too when first
+// seen. At most MIRROR_BELL_SCAN of its newest entries are looked at per state, and at most
+// MIRROR_RING_PER_MIN ring per machine a minute (the rest are dropped and logged). Every string is
+// text_clean_remote's (one line, no control, bidi or invisible characters, bounded); its job
+// lines and folders, a run's folder and a pi session id are dropped. What it rang goes with the
+// machine (removed, or Machines over SSH off); a link that drops keeps them as last seen. Another machine's State is untrusted: every string is cleaned
 // (text_clean: printable, no bidi controls, bounded), every list capped, an id that does not pack
 // is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
 // nothing this Mac's core could act on. They are never saved (persist.odin), never started here
@@ -48,6 +60,11 @@ MIRROR_PATH_MAX :: 1024
 MIRROR_READ_MAX :: 64 << 20
 MIRROR_STREAM_MAX :: 4 << 20
 MIRROR_FULL_RETRY :: 30 * time.Second
+MIRROR_JOBS_MAX :: 100 // its jobs
+MIRROR_JOB_LINES :: 5 // per job: its needs-you lines (the first rings)
+MIRROR_LINE_MAX :: 200 // a headline, a summary, a needs-you line (bytes)
+MIRROR_BELL_SCAN :: 20 // its newest bell entries looked at per state
+MIRROR_RING_PER_MIN :: 4 // what rings here from one machine, per minute
 
 Mirror_Stream :: struct {
 	bytes:      int, // its deltas' bytes since its last state.full
@@ -117,6 +134,15 @@ Machine_Mirror :: struct {
 	projects: [dynamic]Project, // in arena; State's entries are copies of these (apply_scan adds them again)
 	sessions: [dynamic]Session, // in arena: its selected project's (state.sessions while that is selected here)
 	selected: u64, // its selected project (packed)
+	jobs:     [dynamic]Job_Row, // in arena; State.machine_jobs holds copies
+	// what rang here (mirror_alerts): heap, kept across reconnects, gone with the machine
+	bell_based: bool, // bell_seen is set for bell_run
+	bell_run:   string, // its core's run id (its hello's) when bell_seen was set
+	bell_seen:  u64, // its newest bell entry's id seen
+	jobs_rang:  map[string]string, // its job's id here -> the run whose needs-you rang
+	rang_at:    time.Tick, // the rate window's start
+	rang_n:     int,
+	dropped:    int, // not rung: past the rate (logs)
 }
 
 // Whether the left column lists other machines: Machines over SSH is on and one is added.
@@ -131,6 +157,26 @@ machine_name :: proc(no: u64) -> string {
 @(private = "file")
 mirror_text :: proc(s: string, max: int, a: runtime.Allocator) -> string {
 	return strings.clone(text_clean(s, max), a)
+}
+
+// Another machine's text as the bell, the Jobs tab and Atlas see it (M6-F): one line, without
+// control, bidi or invisible characters (one_line), then printable and bounded (text_clean)
+// (temp). Stricter than text_clean, and only for other machines' text: this Mac's own titles keep
+// their emoji sequences.
+text_clean_remote :: proc(s: string, max: int) -> string {
+	return strings.trim_space(text_clean(one_line(s, context.temp_allocator), max))
+}
+
+@(private = "file")
+remote_text :: proc(s: string, max: int, a: runtime.Allocator) -> string {
+	return strings.clone(text_clean_remote(s, max), a)
+}
+
+// A job's status word: one this Mac knows, else "unknown".
+@(private = "file")
+remote_status :: proc(s: string) -> string {
+	if s == "" do return ""
+	return job_status_icon(s) != "•" ? s : "unknown"
 }
 
 // A tab's kind without what it holds (paths, URLs, accounts): which kind it is, only.
@@ -220,6 +266,39 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	}
 	mirror_sessions_show(no, m)
 
+	m.jobs = make([dynamic]Job_Row, a)
+	for j in r.jobs {
+		if len(m.jobs) >= MIRROR_JOBS_MAX do break
+		if j.machine != 0 do continue // its own machines' (never chained)
+		jid := text_clean_remote(j.id, 64)
+		if jid == "" do continue
+		row := Job_Row {
+			id            = fmt.aprintf("m%d:%s", no, jid, allocator = a),
+			machine       = no,
+			name          = remote_text(j.name != "" ? j.name : j.id, MIRROR_TEXT_MAX, a),
+			schedule      = remote_text(j.schedule, 80, a),
+			enabled       = j.enabled,
+			paused        = j.paused,
+			paused_why    = remote_text(j.paused_why, MIRROR_TEXT_MAX, a),
+			running       = j.running,
+			queued        = j.queued,
+			err           = remote_text(j.err, MIRROR_LINE_MAX, a),
+			next_due      = max(j.next_due, 0),
+			last_at       = max(j.last_at, 0),
+			last_status   = strings.clone(remote_status(text_clean_remote(j.last_status, 32)), a),
+			last_headline = remote_text(j.last_headline, MIRROR_LINE_MAX, a),
+			last_run      = remote_text(j.last_run, 64, a),
+			unread        = clamp(j.unread, 0, 999),
+		}
+		row.needs_you = make([dynamic]string, a)
+		for x in j.needs_you {
+			if len(row.needs_you) >= MIRROR_JOB_LINES do break
+			if line := remote_text(x, MIRROR_LINE_MAX, a); line != "" do append(&row.needs_you, line)
+		}
+		append(&m.jobs, row)
+	}
+	for j in m.jobs do append(&state.machine_jobs, j)
+
 	// what this Mac showed of it and is gone there
 	if id_machine(state.current_session) == no && find_session(state.current_session) == nil do state.current_session = 0
 	if id_machine(state.selected_project) == no && find_project(state.selected_project) == nil {
@@ -252,6 +331,7 @@ mirror_unmerge :: proc(no: u64) {
 	}
 	// state.sessions is that machine's while one of its projects is selected (else this Mac's)
 	if id_machine(state.selected_project) == no do state.sessions = {}
+	for i := len(state.machine_jobs) - 1; i >= 0; i -= 1 do if state.machine_jobs[i].machine == no do ordered_remove(&state.machine_jobs, i)
 }
 
 // Machine no is gone (removed, or Machines over SSH turned off): its entries leave State, and what
@@ -259,14 +339,109 @@ mirror_unmerge :: proc(no: u64) {
 mirror_drop :: proc(no: u64, m: ^Machine_Mirror) {
 	mirror_unmerge(no)
 	mirror_free(m)
+	notify_drop_machine(no) // what it rang here
 	if id_machine(state.current_session) == no do state.current_session = 0
 	if id_machine(state.selected_project) == no do state.selected_project = 0
 	window_state_changed()
 }
 
 mirror_free :: proc(m: ^Machine_Mirror) {
+	heap := runtime.heap_allocator()
+	delete(m.bell_run, heap)
+	for k, v in m.jobs_rang {
+		delete(k, heap)
+		delete(v, heap)
+	}
+	delete(m.jobs_rang)
 	virtual.arena_destroy(&m.arena)
 	m^ = {}
+}
+
+// Machine no's bell entries and its jobs that need the user, rung here (after mirror_merge: its
+// jobs are m.jobs). run: its core's run id (its hello's).
+mirror_alerts :: proc(no: u64, r: ^State, m: ^Machine_Mirror, run: string) {
+	heap := runtime.heap_allocator()
+	now := time.tick_now()
+	newest: u64
+	for x in r.notices.items do newest = max(newest, x.id)
+	if !m.bell_based || m.bell_run != run { 	// a core seen for the first time: what it has is old
+		delete(m.bell_run, heap)
+		m.bell_run = strings.clone(run, heap)
+		m.bell_based, m.bell_seen = true, newest
+	} else {
+		items := r.notices.items[:]
+		for x in items[max(len(items) - MIRROR_BELL_SCAN, 0):] {
+			if x.id <= m.bell_seen || x.machine != 0 do continue // seen, or its own machines' (never chained)
+			if x.kind < min(Notice_Kind) || x.kind > max(Notice_Kind) || x.kind == .Job_Needs_You do continue // its jobs' ring below, once per run
+			mirror_ring(no, m, remote_notice(no, x), now)
+		}
+		m.bell_seen = max(m.bell_seen, newest)
+	}
+	if m.jobs_rang == nil do m.jobs_rang = make(map[string]string, 16, heap)
+	for j in m.jobs {
+		if len(j.needs_you) == 0 || j.unread <= 0 || j.last_run == "" do continue
+		if prev, rang := m.jobs_rang[j.id]; rang {
+			if prev == j.last_run do continue
+			delete(prev, heap)
+			m.jobs_rang[j.id] = strings.clone(j.last_run, heap)
+		} else do m.jobs_rang[strings.clone(j.id, heap)] = strings.clone(j.last_run, heap)
+		n := Notice{kind = .Job_Needs_You, machine = no, job_id = strings.clone(j.id, heap), title = fmt.aprintf("%s · %s", machine_name(no), j.name, allocator = heap), summary = strings.clone(j.needs_you[0], heap)}
+		mirror_ring(no, m, n, now)
+	}
+	// jobs it no longer has
+	gone := make([dynamic]string, context.temp_allocator)
+	for k in m.jobs_rang {
+		found := false
+		for j in m.jobs do if j.id == k do found = true
+		if !found do append(&gone, k)
+	}
+	for k in gone {
+		key, v := delete_key(&m.jobs_rang, k)
+		delete(key, heap)
+		delete(v, heap)
+	}
+}
+
+// Another machine's bell entry as this Mac's (heap; cleaned).
+@(private = "file")
+remote_notice :: proc(no: u64, x: Notice) -> Notice {
+	heap := runtime.heap_allocator()
+	n := Notice{kind = x.kind, machine = no, claude = x.claude}
+	title := text_clean_remote(x.title, MIRROR_TEXT_MAX)
+	n.summary = remote_text(x.summary, MIRROR_LINE_MAX, heap)
+	if x.job_id != "" {
+		n.job_id = fmt.aprintf("m%d:%s", no, text_clean_remote(x.job_id, 64), allocator = heap)
+		n.title = fmt.aprintf("%s · %s", machine_name(no), title, allocator = heap)
+		return n
+	}
+	n.title = strings.clone(title, heap)
+	place := text_clean_remote(x.place, MIRROR_TEXT_MAX)
+	n.place = place != "" ? fmt.aprintf("%s · %s", machine_name(no), place, allocator = heap) : strings.clone(machine_name(no), heap)
+	// its session, tab and project: only ids that pack and are mirrored here
+	if sid, ok := id_pack(no, x.session); ok && find_session(sid) != nil {
+		n.session = sid
+		if tid, tok := id_pack(no, x.tab_id); tok {
+			if _, t, _ := find_tab(tid); t != nil do n.tab_id = tid
+		}
+		if pid, pok := id_pack(no, x.project_id); pok && find_project(pid) != nil do n.project_id = pid
+	}
+	return n
+}
+
+// Rings n here (owned), unless machine no rang MIRROR_RING_PER_MIN already this minute.
+@(private = "file")
+mirror_ring :: proc(no: u64, m: ^Machine_Mirror, n: Notice, now: time.Tick) {
+	n := n
+	if m.rang_at == {} || time.tick_diff(m.rang_at, now) >= time.Minute do m.rang_at, m.rang_n = now, 0
+	if m.rang_n >= MIRROR_RING_PER_MIN {
+		if m.dropped == 0 || m.dropped % 50 == 0 do fmt.eprintfln("Deckhand: machine %s rings too often: %d not rung", machine_name(no), m.dropped + 1)
+		m.dropped += 1
+		notice_free(&n)
+		return
+	}
+	m.rang_n += 1
+	if autotest_active do fmt.printfln("[autotest] machine %s: rang %s %s", machine_name(no), NOTICE_KIND_NAMES[n.kind], n.title)
+	if notify_remote(n) do window_state_changed() // (n is the bell's now, or freed)
 }
 
 // Fields of a command that name an open session, tab, pane, split or project (machine_route.odin
@@ -278,3 +453,4 @@ machine_id_field :: proc(name: string) -> bool {
 	for f in MACHINE_ID_FIELDS do if f == name do return true
 	return false
 }
+

@@ -316,7 +316,7 @@ Settings :: struct {
 	keep_sessions: bool, // sessions keep running in the session holder when Deckhand quits or updates (on by default: keep_sessions_default)
 	keep_sessions_chosen: bool, // the user set keep_sessions (saved only then: keep_sessions_default)
 	separate_core: bool, // the window and the core run as two processes from the next launch (Set_Separate_Core; on by default)
-	remote_machines: bool, // Settings › Experimental › Machines over SSH (machines.odin; off by default: remote_machines_default_on)
+	remote_machines: bool, // Settings › Machines over SSH (machines.odin; on by default: remote_machines_default_on)
 	machines_reachable: bool, // Settings › Machines › Allow other machines to connect to this one (the hub door, window_sock.odin; off by default)
 	// Claude Code accounts (claude_accounts.odin; user-only): what the user changed (labels,
 	// added, removed folders) and the account a new Claude session last started with
@@ -395,6 +395,7 @@ State :: struct {
 	jobs:                  [dynamic]Job_Row, // Atlas's jobs as the Jobs tab shows them (jobs.odin; from the notes and the data dir)
 	jobs_unread:           int, // unread job runs
 	jobs_notified:         int, // OS notifications sent for jobs (tests)
+	machine_jobs:          [dynamic]Job_Row, // other machines' jobs, read-only (machine_mirror.odin; its arena's, never saved)
 	home_dir_prev:         string, // the main folder before the user changed it (offered in Finder; not saved)
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
 	holder_ask:            Holder_Ask, // a session holder from another build runs: the window asks once whether to replace it (holder_client.odin)

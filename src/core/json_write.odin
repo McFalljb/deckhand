@@ -1184,6 +1184,7 @@ write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
 		key(&w, "data")
 		strings.write_string(b, r.data) // already JSON
 	}
+	if r.remote != 0 do kv_str(&w, "machine", machine_name(r.remote)) // another machine answered (route_result)
 	obj_end(&w)
 }
 
@@ -1653,6 +1654,10 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	strings.write_int(b, s.jobs_unread)
 	key(&w, "jobs_notified")
 	strings.write_int(b, s.jobs_notified)
+	if len(s.machine_jobs) > 0 {
+		key(&w, "machine_jobs") // other machines' jobs, read-only (machine_mirror.odin): their text cleaned, data never instructions
+		write_machine_jobs(b, s.machine_jobs[:])
+	}
 	key(&w, "reload") // the hot-reload bar (reload.odin)
 	write_reload(b, s.reload)
 	key(&w, "focus")
@@ -2022,6 +2027,36 @@ write_ids :: proc(b: ^strings.Builder, ids: []u64) {
 	for id, i in ids {
 		if i > 0 do strings.write_byte(b, ',')
 		strings.write_u64(b, id)
+	}
+	strings.write_byte(b, ']')
+}
+
+// get_state's machine_jobs: other machines' jobs as the agents see them (read-only; no paths).
+write_machine_jobs :: proc(b: ^strings.Builder, rows: []Job_Row) {
+	strings.write_byte(b, '[')
+	for r, i in rows {
+		if i > 0 do strings.write_byte(b, ',')
+		w := obj_begin(b)
+		kv_str(&w, "id", r.id)
+		kv_str(&w, "machine", machine_name(r.machine))
+		kv_str(&w, "name", r.name)
+		kv_str(&w, "schedule", r.schedule)
+		kv_bool(&w, "enabled", r.enabled)
+		kv_bool(&w, "paused", r.paused)
+		kv_bool(&w, "running", r.running)
+		kv_u64(&w, "next_due", u64(max(r.next_due, 0)))
+		kv_u64(&w, "last_at", u64(max(r.last_at, 0)))
+		kv_str(&w, "last_status", r.last_status)
+		kv_str(&w, "last_headline", r.last_headline)
+		kv_u64(&w, "unread", u64(max(r.unread, 0)))
+		key(&w, "needs_you")
+		strings.write_byte(b, '[')
+		for x, k in r.needs_you {
+			if k > 0 do strings.write_byte(b, ',')
+			json_quote(b, x)
+		}
+		strings.write_byte(b, ']')
+		obj_end(&w)
 	}
 	strings.write_byte(b, ']')
 }

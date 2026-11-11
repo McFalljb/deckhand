@@ -1,6 +1,6 @@
 #!/bin/sh
 # Remote machines, the link (docs/plans/background-core.md §10.4 M6-A): a window with a separate
-# core turns on Settings › Experimental › Machines over SSH and adds a machine whose link is
+# core turns on Settings › Machines over SSH and adds a machine whose link is
 # `--via 'deckhand-core-serve connect'` with a data and runtime dir of its own (a second core on
 # this Mac; no ssh, no sshd: DECKHAND_HUB_WITHOUT_SSHD=1 lets its door skip the sshd check, and its
 # saved settings allow other machines in). connect launches that core, says the hub hello, and the machine shows

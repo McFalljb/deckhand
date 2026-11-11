@@ -1506,7 +1506,7 @@ new_session_target_gone :: proc() -> bool {
 	return ok && core.find_project(t.project_id) == nil
 }
 
-// ---- other machines (machine_mirror.odin; Settings › Experimental › Machines over SSH) ----
+// ---- other machines (machine_mirror.odin; Settings › Machines over SSH) ----
 
 MACHINE_STATUS_LABELS := [core.Machine_Status]string {
 	.Connecting    = "connecting…",

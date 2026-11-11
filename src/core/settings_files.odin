@@ -182,7 +182,7 @@ CLAUDE_FLAGS_HEAD_ROW :: "deckhand:claude-default-flags-head"
 CLAUDE_FLAGS_ROW :: "deckhand:claude-default-flags"
 CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 
-// The Machines group (machines.odin; Settings › Experimental › Machines over SSH on, or other
+// The Machines group (machines.odin; Settings › Machines over SSH on, or other
 // machines allowed in): a machine's row is MACHINE_ROW + its number (Connect / Take back, Remove);
 // then a row adds one, and the last allows other machines to connect to this one (the hub door).
 MACHINE_ROW :: "deckhand:machine:"

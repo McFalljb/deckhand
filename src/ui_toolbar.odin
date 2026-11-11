@@ -234,7 +234,7 @@ Pop_Item :: enum {
 	Keep_Sessions, // keep sessions running when Deckhand quits (on by default); drawn after Update checks; last so earlier rows keep their ids
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
 	Separate_Core, // run sessions in a background core (on by default; read at launch); last so earlier rows keep their ids
-	Remote_Machines, // Experimental: Machines over SSH (machines.odin; off by default); last so earlier rows keep their ids
+	Remote_Machines, // Machines over SSH (machines.odin; on by default); last so earlier rows keep their ids
 }
 
 // The rows top to bottom: the keyboard walks them in this order.

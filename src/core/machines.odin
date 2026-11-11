@@ -1,9 +1,10 @@
 package core
 
 // Other machines over SSH (docs/plans/background-core.md §8, §10.4 M6-A): the registry, the link
-// to each machine's core and its status. Behind Settings › Experimental › Machines over SSH
-// (remote_machines_default_on, off until M6-F). Only a separate core (deckhand-core-serve serve)
-// runs links.
+// to each machine's core and its status. Behind Settings › Machines over SSH
+// (remote_machines_default_on: on since M6-F, an opt-out). Only a separate core
+// (deckhand-core-serve serve) runs links, and only to the machines the user added: with none,
+// nothing runs (no ssh, no process).
 //
 // The registry is <data>/machines.json (0600): {"next":N,"machines":[{no, name, target, os, arch,
 // core_path, via?}]}. Numbers come from `next`, 1-8191, never reused (M6-B packs them into ids).
@@ -56,8 +57,9 @@ import "core:time"
 import cw "../corewire"
 import jg "../jsonguard"
 
-// Settings › Experimental › Machines over SSH: off by default until M6-F flips it (one line).
-remote_machines_default_on := false
+// Settings › Machines over SSH: on by default since M6-F (an opt-out; with no machine added it
+// starts nothing).
+remote_machines_default_on := true
 
 Set_Remote_Machines :: struct {
 	on: bool,
@@ -1059,6 +1061,7 @@ mlink_state :: proc(l: ^Mach_Link, text: string, full: bool) {
 	mirror_stream_applied(&l.stream, full)
 	if checks_key(&l.replica) != checks_before do machines_publish() // its checklist (Machine_View.checklist)
 	mirror_merge(l.no, &l.replica, &l.mirror)
+	mirror_alerts(l.no, &l.replica, &l.mirror, l.core_run) // its bell and its jobs that need you, rung here (M6-F)
 	l.merged = true
 	if autotest_active do fmt.printfln("[autotest] machine %s: state %d", l.name, l.replica.version)
 }
@@ -1237,7 +1240,7 @@ mlink_free :: proc(l: ^Mach_Link) {
 // ---- the commands (user-only: command_table.odin) ----
 
 machine_add_apply :: proc(c: Machine_Add) -> Result {
-	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
+	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	if !core_separate do return fail("machines need Sessions in a background core (the gear)")
 	if !mach.loaded do return fail("machines.json could not be read: fix or remove it first")
 	name := strings.trim_space(c.name)
@@ -1285,7 +1288,7 @@ machine_remove_apply :: proc(c: Machine_Remove) -> Result {
 machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 	l, _ := mlink_find(c.no)
 	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
-	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
+	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	if l.phase == .Up || l.phase == .Hello || l.phase == .Probe do return {ok = true}
 	mlink_close(l)
 	l.phase, l.next_at, l.backoff = .Idle, {}, {}

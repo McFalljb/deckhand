@@ -493,6 +493,28 @@ Open note, Open last report, Open run folder, Mark read, Delete (confirmed; the 
 Trash, the history stays). Header: New job, Pause all / Resume all, Limits, unread count. New
 heartbeat and New memory curation come with steps 5 and 3.
 
+### 7.1 Other machines (decided 2026-11-08, design background-core.md §8.6; M6-F)
+
+Every machine's core runs its own jobs and its own Atlas; the window shows them all. **The local
+Atlas is the hub:** it sees the other machines' projects, sessions and jobs in `get_state` (under
+each machine's name; desk_state fences each machine's part as data) and acts on their ids as
+`control` there (`on_behalf`, PROTOCOL.md §5a "Working on another machine"): that machine applies
+`control`'s rules again, so user-only settings and every `machine_*` command stay refused, and a
+command it wants confirmed is refused here, not asked. Only this machine's own Atlas and user go
+through: a machine viewing this one never reaches a third through it, and **remote Atlases stay
+on their machine** (a remote core can send this one nothing but answers). There is no
+Atlas-to-Atlas channel. That gate is about direct forwarding only: a machine this one lets connect
+(*Allow other machines to connect*) acts as the user here, so it can prompt this Atlas, and through
+it, or a shell here, reach the machines this one reaches. Let only machines you trust as yourself
+connect.
+
+**Their jobs and bells reach the user here**, because a remote core can't notify: this core
+rings for a job there that needs the user (once per run) and for each new entry of that machine's
+bell, naming the machine, at most 4 a minute per machine (PROTOCOL.md §5a "Other machines' jobs
+and bells"). The Jobs tab lists their jobs after this Mac's, under each machine's name, read-only
+(what each is up to, and the first thing it needs you for). Everything that comes from another
+machine is untrusted: one line, no control, bidi or invisible characters, bounded, capped.
+
 ## 8. Migration: ATLAS.md
 
 Today: `<data dir>/atlas/ATLAS.md`. New: `<atlas folder>/ATLAS.md` (`<home_dir>/atlas/`). At Atlas's start:

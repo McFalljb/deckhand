@@ -271,3 +271,89 @@ mirror_stream_bounds :: proc(t: ^testing.T) {
 	testing.expect(t, mirror_stream_due(&st, time.tick_add(now, MIRROR_FULL_RETRY)), "after the wait")
 	testing.expect(t, mirror_stream_refused(&st, false, now), "a refused delta asks for a full at once")
 }
+
+// M6-F: another machine's job that needs the user rings here once, naming the machine, and again
+// only for a new run; its bell entries ring once (a core seen for the first time, or again after a
+// reconnect, rings none of what it had); hostile text is cleaned; past the rate per machine
+// nothing rings; the machine removed takes its entries and jobs with it.
+@(test)
+mirror_alerts_ring_once :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	mm_reset()
+	defer {
+		notice_test_now = {}
+		state = State{}
+	}
+	notice_test_now = time.now()
+	later :: proc() {notice_test_now = time.time_add(notice_test_now, 20 * time.Second)} // past coalescing
+	r := mm_replica(5, 9, 1)
+	m: Machine_Mirror
+	needs := proc(r: ^State, run: string) {
+		for &j in r.jobs do delete(j.needs_you)
+		clear(&r.jobs)
+		j := Job_Row{id = strings.clone("daily"), name = strings.clone("Dai​ly‮\nreport"), last_run = strings.clone(run), unread = 1, last_status = strings.clone("needs_you"), path = strings.clone("/home/me/jobs/daily.md")}
+		append(&j.needs_you, strings.clone("sign the\x1b[31m form"))
+		append(&r.jobs, j)
+	}
+	rang :: proc(kind: Notice_Kind) -> (n: int) {
+		for x in state.notices.items do if x.kind == kind && x.machine == 3 do n += 1
+		return
+	}
+	// an old bell entry and a job that needs you, first seen: the job rings, the entry does not
+	append(&r.notices.items, Notice{id = 40, kind = .Waiting, title = strings.clone("old"), session = 9})
+	needs(&r, "run-1")
+	mirror_merge(3, &r, &m)
+	mirror_alerts(3, &r, &m, "core-a")
+	testing.expect_value(t, rang(.Job_Needs_You), 1)
+	testing.expect_value(t, rang(.Waiting), 0)
+	if testing.expect_value(t, len(state.machine_jobs), 1) {
+		j := state.machine_jobs[0]
+		testing.expect_value(t, j.id, "m3:daily")
+		testing.expect(t, j.path == "" && j.folder == "", "no paths")
+		testing.expect(t, !strings.contains(j.name, "​") && !strings.contains(j.name, "‮") && !strings.contains(j.name, "\n"), "its name: one line, nothing invisible")
+	}
+	for x in state.notices.items do if x.kind == .Job_Needs_You {
+		testing.expect(t, strings.has_prefix(x.title, "nuc · "), "it names the machine")
+		testing.expect(t, !strings.contains(x.summary, "\x1b") && x.run_dir == "", "cleaned, no folder")
+	}
+	// the same state again, a reconnect (the same core), a fresh full: nothing new rings
+	later()
+	for _ in 0 ..< 3 {
+		mirror_merge(3, &r, &m)
+		mirror_alerts(3, &r, &m, "core-a")
+	}
+	testing.expect_value(t, rang(.Job_Needs_You), 1)
+	// a new run that needs you: once more
+	later()
+	needs(&r, "run-2")
+	mirror_merge(3, &r, &m)
+	mirror_alerts(3, &r, &m, "core-a")
+	testing.expect_value(t, len(state.notices.items), 2)
+	// a new bell entry rings, naming the machine, its session mirrored here; its own machines' never
+	later()
+	append(&r.notices.items, Notice{id = 41, kind = .Waiting, title = strings.clone("now"), session = 9, place = strings.clone("proj")})
+	append(&r.notices.items, Notice{id = 42, kind = .Waiting, title = strings.clone("chained"), machine = 2})
+	mirror_merge(3, &r, &m)
+	mirror_alerts(3, &r, &m, "core-a")
+	testing.expect_value(t, rang(.Waiting), 1)
+	for x in state.notices.items do if x.kind == .Waiting {
+		testing.expect(t, strings.has_prefix(x.place, "nuc · "), "where: the machine")
+		sid, _ := id_pack(3, 9)
+		testing.expect_value(t, x.session, sid)
+	}
+	// a flood: at most MIRROR_RING_PER_MIN a minute (3 rang so far)
+	for i in 0 ..< 10 do append(&r.notices.items, Notice{id = u64(50 + i), kind = .Error, title = strings.clone("spam"), session = u64(1000 + i)})
+	mirror_merge(3, &r, &m)
+	mirror_alerts(3, &r, &m, "core-a")
+	testing.expect_value(t, rang(.Error), MIRROR_RING_PER_MIN - 3)
+	// a new run of its core: what it has is old (the mark again)
+	mirror_merge(3, &r, &m)
+	mirror_alerts(3, &r, &m, "core-b")
+	testing.expect_value(t, rang(.Error), MIRROR_RING_PER_MIN - 3)
+	// removed: its entries and jobs go
+	mirror_drop(3, &m)
+	testing.expect_value(t, len(state.machine_jobs), 0)
+	n := 0
+	for x in state.notices.items do if x.machine == 3 do n += 1
+	testing.expect_value(t, n, 0)
+}

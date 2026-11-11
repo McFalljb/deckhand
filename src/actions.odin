@@ -351,8 +351,8 @@ ACTIONS := [?]Action {
 	{id = "separate_core", label = "Run sessions in a background core (at the next launch)", make = proc() -> (core.Command, bool) {
 		return core.Set_Separate_Core{on = !state.settings.separate_core}, true
 	}, detail = proc() -> string {return state.settings.separate_core ? "on" : "off"}},
-	// Settings › Experimental (machines.odin): links to the machines in Settings › Machines
-	{id = "remote_machines", label = "Experimental: Machines over SSH", make = proc() -> (core.Command, bool) {
+	// machines.odin (on by default): links to the machines in Settings › Machines
+	{id = "remote_machines", label = "Machines over SSH", make = proc() -> (core.Command, bool) {
 		return core.Set_Remote_Machines{on = !state.settings.remote_machines}, true
 	}, detail = proc() -> string {return state.settings.remote_machines ? "on" : "off"}},
 	// a separate core only (core_handover.odin): the sessions go back to the core before the last update

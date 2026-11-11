@@ -336,6 +336,10 @@ ditto -c -k --keepParent "$APP" "$DIST/$NAME.zip"
   echo "shasum -a 256 -c $NAME.zip.sha256"
   echo '```'
   echo
+  echo "\`$LINUX_TAR\` (with its \`.sha256\` and \`.sig\`) is Deckhand's core for another machine running"
+  echo "Linux on x86_64, reached over ssh: you don't download it yourself. Settings › Machines installs it"
+  echo "there and checks its signature first."
+  echo
   if [ $NOTARIZED = 1 ]; then
     echo "The app is signed with a Developer ID and notarized by Apple."
   else

@@ -273,8 +273,10 @@ you and this Mac's agents can use it. While it is open, any program of yours on 
 reach that port too, as with your own `ssh -L`. Its agents' browser is that machine's own: they never open pages in this Mac's
 browser, and while you view that machine from here (or if it has no window, like a Linux machine)
 their browser tools answer that no browser is available there. Its other kinds of tab (editors, pages, apps) show only on that machine for
-now, and agents and Atlas can't act on it yet. Its programs can't use this Mac's clipboard (OSC 52
-is ignored), open windows or notify here. If the link drops, its terminals reconnect with their
+now. This Mac's [Atlas](#what-atlas-can-do) sees its sessions and jobs and can work in its
+sessions; this Mac's other agents can't act on it. Its programs can't use this Mac's clipboard (OSC 52
+is ignored), open windows or notify here, but its jobs that need you and its bell's new entries
+ring [the bell](#the-bell) here. If the link drops, its terminals reconnect with their
 screen when it comes back. While the machine is offline its rows are greyed and show what it had
 when last seen; they come back up to date when it does. Nothing of another machine is saved on this
 Mac.
@@ -1097,7 +1099,7 @@ pi is installed; Claude Code's once it has been used:
   machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
   drive this Mac's sessions. Off, no other machine can. A machine you allow acts as you on this
   Mac: it can type into its shells and prompt its sessions and its Atlas, and so reach the machines
-  this Mac reaches. Allow only machines you trust as yourself. A Linux machine (development builds) runs its core as your
+  this Mac reaches. Allow only machines you trust as yourself. A Linux machine (x86_64) runs its core as your
   systemd user service `deckhand-core`, started when needed. Unless lingering is on for you there,
   it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
   keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a

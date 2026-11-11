@@ -111,7 +111,8 @@ nightly canary and CI on macOS.
 
 - 🔨 Codex-style look and motion (G7): themes, appearance, text size and motion are in; polish goes on.
 - ⬜ Selection: menus for every shortcut.
-- ⬜ A Linux compile job in CI, so platform assumptions don't rot until phase 5.
+- ✅ A Linux job in CI that builds the core and the session holder and runs their unit tests
+  (M6-L1, L3), so platform assumptions don't rot until phase 5.
 
 ### Editor and panes
 

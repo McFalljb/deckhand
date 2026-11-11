@@ -13,6 +13,9 @@ Revision 7 (2026-11-09): §10.4 (M6 in PRs, checked against `main` efeefb1, v0.2
 in §10; §8.2's `file.read` replaced by bytes in the reply (§10.4); R10; Q12 and Q13, decided by
 the user on 2026-11-09 (decision 8 in §2: the M6 release gate).
 
+Status (2026-11-11): M1–M4 and M6 are merged: M6-A to F (#69, #70, #71, #74, #75, #81, #82) and
+L1–L4 (#68, #73, #76, #77). M5 and M7 are still to do.
+
 Revision 6: §10.3 (M4 in PRs, checked against `main` 2a3bd0b and the M3-G and M3-H branches).
 **M4 no longer waits for D0:** the DR checks anchor on the self-signed identity (§5.4). Decisions
 6 and 7 in §2; the D0 and M4 rows and the order in §10; R2, R5, Q8.
@@ -822,7 +825,7 @@ Every step ships on its own.
 | M3 | **In-process client and server** (map M1): replica and decoder, in-memory streams, the `ui` path, tab host routing. **Four PRs in §10.2.** | The real protocol under every test | 5–7 weeks |
 | M4 | **Separate core** (`Deckhand Core.app`), **signed with the self-signed identity; it does not wait for D0** (§5.4). It covers: mutual window ↔ core DR checks and the window floor; challenge-response bridge hellos; lifecycle; ⌘Q and stop-all; `no_window`; the skew handshake and `CORE_MIN`; install and core handover; supervisor rollback and `SUPERVISE`. Job runs become core children; a handover waits ≤ 2 min for them, then stops them as `stopped_by_update`. Plus M3's carry-overs (M3-F2). `released-v1.json` is done (M3-E). **Six PRs in §10.3.** Two security review rounds. | **#4 done:** status, bell, CLI, hooks, held prompts and jobs work with the window closed | 6–7.5 weeks elapsed (8.5–10.5 of work) |
 | M5 | Login agent; jobs while closed | Scheduled jobs with Deckhand closed | 1–2 weeks |
-| M6 | **Remote:** the SSH link and hub door, every machine in the sidebar, remote terminals, no remote browser here (each machine's agents use its own), install and one-click update, the hub Atlas; then a **headless Linux core, systemd, its holder and release target**. **Six Mac→Mac PRs and four Linux PRs in §10.4;** no release carries M6 until all ten are merged. | **#5 done** | 9.5–12 weeks Mac→Mac + 5–6.5 for Linux (§10.4) |
+| M6 | ✅ (merged: the PRs are in the status line at the top) **Remote:** the SSH link and hub door, every machine in the sidebar, remote terminals, no remote browser here (each machine's agents use its own), install and one-click update, the hub Atlas; then a **headless Linux core, systemd, its holder and release target**. **Six Mac→Mac PRs and four Linux PRs in §10.4;** no release carries M6 until all ten are merged. | **#5 done** | 9.5–12 weeks Mac→Mac + 5–6.5 for Linux (§10.4) |
 | M7 | Several windows | More windows | 2–4 weeks |
 
 Order: M1 → M2 → M3 → M4 → M5, M6, M7. D0 happens whenever the user gets the Developer ID; it

@@ -128,6 +128,9 @@ everything. See [How Deckhand runs](docs/GUIDE.md#how-deckhand-runs).
 - **Atlas**: an agent in a drawer on the right that drives the app for you: it opens sessions,
   sends prompts and watches them finish. It runs in your main folder.
 - **Jobs**: pi prompts that run on a schedule, written as notes in your main folder.
+- **Other machines**: sessions on your other Macs and Linux machines in the same sidebar, over
+  your own `ssh`. Deckhand installs and updates their core; Atlas works there too, and their
+  jobs and bells ring here.
 - **Control socket**: a local JSON protocol for scripts and agents
   ([docs/PROTOCOL.md](docs/PROTOCOL.md)).
 

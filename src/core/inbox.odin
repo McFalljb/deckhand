@@ -125,6 +125,8 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	switch c in cmd {
 	case Add_Project:         return Add_Project{cwd = s(c.cwd, allocator)}
 	case Machine_Add:         return Machine_Add{name = s(c.name, allocator), target = s(c.target, allocator), via = s(c.via, allocator)}
+	case Machine_Remove:      return Machine_Remove{no = c.no, confirm = s(c.confirm, allocator)}
+	case Machine_Rename:      return Machine_Rename{no = c.no, name = s(c.name, allocator)}
 	case Machine_Open_Page:   return Machine_Open_Page{no = c.no, port = c.port, path = s(c.path, allocator)}
 	case App_Socket:          return App_Socket{tab_id = c.tab_id, op = c.op, line = s(c.line, allocator)}
 	case Harness_Install:     return Harness_Install{item = s(c.item, allocator), command = s(c.command, allocator), dismiss = c.dismiss}
@@ -283,7 +285,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 		return browser_agent_clone(cmd, allocator)
 	case Browser_Click, Browser_Type, Browser_Press, Browser_Scroll, Browser_Select, Browser_Hover, Browser_Upload, Browser_Upload_Answer, Browser_Agent_Take_Over, Request_Cancel:
 		return browser_act_clone(cmd, allocator)
-	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Set_Machines_Reachable, Machine_Remove, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Holder_Replace, Holder_Restart, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
+	case Setup_Sheet, Set_Chats_Readonly, Set_Sort, Set_Sidebar_Folded, Select_Project, New_Chat, Focus_Session, Focus_Tab, Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Copy_Selection, Set_Layout, Rescan, Refresh_Shell_Env, Refresh_Shell_Env_Done, Get_State, List_Commands, Set_Home, Agent_Model_Picker, Set_Notify, Set_Tidy_Projects, Set_Keep_Sessions, Set_Separate_Core, Set_Remote_Machines, Set_Machines_Reachable, Machine_Connect, Machine_Login, Machine_Install, Machine_Linger, Holder_Replace, Holder_Restart, Claude_Typed, Claude_Status_Dismiss, Copy_Control_Token, Set_Confirm_Policy, Set_Close_Confirm, Set_Theme, Set_Reduce_Motion, Set_Appearance, Set_Text_Size, System_Appearance, Tab_Exited, Rescan_Done, Pi_Wait_Idle, Pi_Restart:
 		return cmd
 	}
 	return cmd
@@ -293,6 +295,8 @@ command_free :: proc(cmd: Command, allocator: runtime.Allocator) {
 	#partial switch c in cmd {
 	case Add_Project:         delete(c.cwd, allocator)
 	case Machine_Open_Page:   delete(c.path, allocator)
+	case Machine_Remove:      delete(c.confirm, allocator)
+	case Machine_Rename:      delete(c.name, allocator)
 	case Machine_Add:
 		delete(c.name, allocator)
 		delete(c.target, allocator)

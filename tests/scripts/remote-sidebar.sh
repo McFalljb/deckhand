@@ -49,7 +49,19 @@ ui_command {"type":"machine_add","name":"m2","target":"","via":"$W/via.sh"}
 waitstate 30000 machines.0.status online
 eventually 20000
 assert_rows machines m2:online:3
-assert_drawn M2
+assert_drawn m2
+assert_not_drawn M2
+assert_drawn Add a machine…
+rclickid machhead 1
+assert_menurows Open web page…|-|Rename…|Remove…
+key escape
+ui_command {"type":"set_left_tab","tab":"settings"}
+wait 500
+assert_drawn Machines
+assert_not_drawn experimental
+assert_not_drawn via ·
+ui_command {"type":"set_left_tab","tab":"sessions"}
+wait 300
 assert_rows open -
 clickid open 0
 waitfor $ 20000

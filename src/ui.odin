@@ -424,7 +424,7 @@ palette_layout :: proc(w, h: f32) {
 			if clay.UI(clay.ID("palette_input"))({
 				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H + SP_2))}, padding = {pu(SP_3), pu(SP_3), 0, 0}, childAlignment = {y = .Center}},
 			}) {
-				field_text(clay.ID("palette_text"), &palette.field, palette.files ? "Open a file in this project" : palette.apps ? "A command to run in an app tab" : palette.pages ? "A port on that machine, e.g. 3000 or 3000/admin" : "Search actions, tabs, sessions, projects")
+				field_text(clay.ID("palette_text"), &palette.field, palette.files ? "Open a file in this project" : palette.apps ? "A command to run in an app tab" : palette.pages ? "A port on that machine, e.g. 3000 or 3000/admin" : palette.machine_pick == .Remove ? "Which machine to remove" : palette.machine_pick == .Connect ? "Which machine to connect to" : "Search actions, tabs, sessions, projects")
 			}
 			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 			gap(SP_1)
@@ -1081,6 +1081,8 @@ Hit :: union {
 	Hit_Info_Session,
 	Hit_New_Job_In,
 	Hit_Machine, // another machine's button (ui_sidebar.odin)
+	Hit_Machine_Head, // its header: the tooltip says why, right click its menu
+	Hit_Machine_Add, // + Add a machine…
 	// the toolbar, settings popover, shortcuts sheet (ui_toolbar.odin)
 	Hit_Button,
 	Hit_Pop,
@@ -1136,6 +1138,8 @@ Hit_Kids :: distinct u64 // a parent row's "N folders": opens or collapses its n
 Hit_Info_Session :: distinct string // a session row's ⓘ: its info menu (pi session id)
 Hit_New_Job_In :: distinct u64 // "New job…" under the selected project (project id)
 Hit_Machine :: distinct u64 // a machine row's button: Log in…, Connect, Take back… (machine number)
+Hit_Machine_Head :: distinct u64 // a machine's header (machine number)
+Hit_Machine_Add :: struct {}
 Hit_Button :: distinct Button
 Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}

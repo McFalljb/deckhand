@@ -626,8 +626,9 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_separate_core":   cmd = Set_Separate_Core{on = get_bool(&r, "on")}
 	case "set_remote_machines": cmd = Set_Remote_Machines{on = get_bool(&r, "on")}
 	case "set_machines_reachable": cmd = Set_Machines_Reachable{on = get_bool(&r, "on")}
-	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name"), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
-	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no")}
+	case "machine_add":         cmd = Machine_Add{name = get_str(&r, "name", optional = true), target = get_str(&r, "target", optional = true), via = get_str(&r, "via", optional = true)}
+	case "machine_remove":      cmd = Machine_Remove{no = get_u64(&r, "no"), confirm = get_str(&r, "confirm", optional = true)}
+	case "machine_rename":      cmd = Machine_Rename{no = get_u64(&r, "no"), name = get_str(&r, "name")}
 	case "machine_connect":     cmd = Machine_Connect{no = get_u64(&r, "no")}
 	case "machine_login":       cmd = Machine_Login{no = get_u64(&r, "no")}
 	case "machine_install":     cmd = Machine_Install{no = get_u64(&r, "no"), cancel = opt_bool(&r, "cancel").? or_else false}

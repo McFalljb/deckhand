@@ -206,6 +206,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Machines_Reachable: return "set_machines_reachable"
 	case Machine_Add:         return "machine_add"
 	case Machine_Remove:      return "machine_remove"
+	case Machine_Rename:      return "machine_rename"
 	case Machine_Connect:     return "machine_connect"
 	case Machine_Login:       return "machine_login"
 	case Machine_Install:     return "machine_install"
@@ -473,6 +474,10 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.via != "" do kv_str(&w, "via", c.via)
 	case Machine_Remove:
 		kv_u64(&w, "no", c.no)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
+	case Machine_Rename:
+		kv_u64(&w, "no", c.no)
+		kv_str(&w, "name", c.name)
 	case Machine_Connect:
 		kv_u64(&w, "no", c.no)
 	case Machine_Login:

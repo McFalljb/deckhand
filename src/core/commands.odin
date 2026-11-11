@@ -543,6 +543,7 @@ Command :: union {
 	Set_Machines_Reachable,
 	Machine_Add,
 	Machine_Remove,
+	Machine_Rename,
 	Machine_Connect,
 	Machine_Login,
 	Machine_Open_Page, // a machine's web page in a local browser tab (machine_page.odin)
@@ -1518,7 +1519,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		state.settings.machines_reachable = c.on
 		return {ok = true}, true
 	case Machine_Add:     return machine_add_apply(c), false // the machines section changes itself (machines_publish)
-	case Machine_Remove:  return machine_remove_apply(c), false
+	case Machine_Remove:  return machine_remove_apply(c, caller)
+	case Machine_Rename:  return machine_rename_apply(c), false
 	case Machine_Connect: return machine_connect_apply(c), false
 	case Machine_Login:   return machine_login_apply(c, caller)
 	case Machine_Open_Page: return machine_open_page_apply(c, caller, request_id)
@@ -2125,6 +2127,9 @@ same_target :: proc(a, b: Command) -> bool {
 		y, ok := b.(Claude_Restart_Changed)
 		return ok && x.update == y.update && x.all == y.all
 	// file commands are parked with absolute paths (editor_apply resolves them first)
+	case Machine_Remove:
+		y, ok := b.(Machine_Remove)
+		return ok && x.no == y.no
 	case Delete_Path:
 		y, ok := b.(Delete_Path)
 		return ok && x.path == y.path

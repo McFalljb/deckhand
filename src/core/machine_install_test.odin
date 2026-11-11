@@ -527,7 +527,7 @@ r2_auto_install_unsupported :: proc(t: ^testing.T) {
 	defer fixture_down(&f)
 	machine_probe_for_test(f.no, "Plan9 mips\n", 0)
 	fa, _ := machine_facts(f.no)
-	testing.expect_value(t, fa.status, Machine_Status.Offline)
+	testing.expect_value(t, fa.status, Machine_Status.Unsupported)
 	machine_outcome_for_test(f.no, {exited = true, exit_code = 127})
 	p, _, _, _, _ := machine_install_job_for_test(f.no)
 	testing.expect_value(t, p, Machine_Job.None)

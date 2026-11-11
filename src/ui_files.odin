@@ -248,6 +248,7 @@ files_panel :: proc(row_w_: f32) {
 		}
 	}
 	if fu.edit == .New_File || fu.edit == .New_Folder do files_new_row(root)
+	if settings && machine_editing() do machine_edit_row(row_w)
 
 	if !settings && root == "" {
 		empty_state("No project", "Pick a project or open a session", row_w)
@@ -436,7 +437,7 @@ files_row :: proc(r: core.Files_Row, slot: int, row_w: f32, a: runtime.Allocator
 		// a Folders row's icon buttons (Reset, Reveal in Finder) before its Change…
 		icons_w := f32(int(r.reset) + int(r.reveal) + int(r.remove) + int(r.make_default)) * px(ROW_BUTTON - SP_1 + SP_1)
 		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - max(px(ROW_BUTTON + SP_1), create_w + icons_w + px(SP_1))
-		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" {
+		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" && !machine_editing() {
 			files_name_box(room)
 		} else if r.rel != "" {
 			// filter results: the name, then its folder
@@ -568,9 +569,46 @@ files_new_row :: proc(root: string) {
 	}
 }
 
+// A machine's add or rename field (Settings › Machines; the sidebar's + Add a machine…, its
+// header's Rename…, the palette): its own block above the list, with its error under it.
+machine_editing :: proc() -> bool {
+	if fu.edit != .Rename do return false
+	_, ok := core.machine_row_no(fu.target)
+	return ok || fu.target == core.MACHINE_ADD_ROW
+}
+
+// Opens the add field (no = 0) or machine no's rename field, in the Settings tab.
+machine_edit_begin :: proc(no: u64 = 0) {
+	if state.layout.left_tab != .Settings || !state.layout.left_open do ui_do(core.Set_Left_Tab{tab = .Settings})
+	if no == 0 {
+		files_begin_edit(.Rename, core.MACHINE_ADD_ROW, "")
+		return
+	}
+	for m in state.machines do if m.no == no do files_begin_edit(.Rename, fmt.tprintf("%s%d", core.MACHINE_ROW, no), m.name)
+}
+
+@(private = "file")
+machine_edit_row :: proc(row_w: f32) {
+	th := theme()
+	title := "Add a machine"
+	if no, ok := core.machine_row_no(fu.target); ok do for m in state.machines do if m.no == no do title = fmt.tprintf("Rename %s", m.name)
+	if clay.UI(clay.ID("machine_edit"))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = {pu(SP_2), pu(SP_1), 0, pu(SP_1)}, childGap = pu(2)},
+	}) {
+		clay.TextDynamic(clip(title, row_w - px(SP_3), FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		if state.focus_widget == "files_name" do files_name_box(0, fu.target == core.MACHINE_ADD_ROW ? "user@host or an ~/.ssh/config name" : "")
+		if fu.edit_err != "" {
+			cfg := txt(th.error, FONT_UI_SMALL)
+			cfg.wrapMode = .Newlines
+			text, _ := wrap_clip(fu.edit_err, row_w - px(SP_3), 4, FONT_UI_SMALL)
+			clay.TextDynamic(text, cfg)
+		}
+	}
+}
+
 // The name field (rename in a row, or new file/folder): accent ring.
 @(private = "file")
-files_name_box :: proc(w: f32) {
+files_name_box :: proc(w: f32, placeholder := "") {
 	th := theme()
 	if clay.UI(clay.ID("files_name_box"))({
 		layout = {sizing = {w > 0 ? clay.SizingFixed(w) : clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H - 2))}, padding = clay.PaddingAll(pu(FOCUS_RING_W))},
@@ -582,7 +620,7 @@ files_name_box :: proc(w: f32) {
 			backgroundColor = cc(th.bg_field),
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM - FOCUS_RING_W)),
 		}) {
-			field_text(clay.ID("files_name_text"), &files_name_field, "")
+			field_text(clay.ID("files_name_text"), &files_name_field, placeholder)
 		}
 	}
 }
@@ -690,8 +728,8 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
 			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
 			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this one" : "Let another machine's Deckhand connect to this one over ssh. It must log in as you (Remote Login on, your keys), and then sees and drives this machine's sessions", ""
-			if p == core.MACHINE_ADD_ROW do return "Add a machine: type its ssh target (an ~/.ssh/config alias or user@host), then Enter. Deckhand runs your own ssh, which must log in without a prompt", ""
-			if _, ok := core.machine_row_no(p); ok do return "Connect to this machine now (Take back: its own window or another Mac lets go)", ""
+			if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
+			if no, ok := core.machine_row_no(p); ok do for m in state.machines do if m.no == no do return machine_action_tip(m), ""
 			if strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
 			if k, ok := core.folder_row_kind(p); ok do return fmt.tprintf("Pick the %s folder (%s)", core.FOLDER_NAMES[k], core.FOLDER_DOES[k]), ""
 		}
@@ -702,6 +740,14 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 		p := fu.drawn[h.index]
 		if tip := harness_settings_tip(p, false); tip != "" do return tip, ""
 		if p == core.ATLAS_MODEL_ROW do return fmt.tprintf("%s's model: %s", core.agent_name(), core.sf_model_note()), ""
+		// Machines: what a row is, in plain words (never its id)
+		if no, ok := core.machine_row_no(p); ok do for m in state.machines do if m.no == no do return machine_tip(m), ""
+		if no, id, ok := core.machine_check_row(p); ok do for m in state.machines do if m.no == no do for c in m.checklist do if c.id == id {
+			r, _ := core.harness_row(id)
+			return fmt.tprintf("%s on %s: %s (as that machine's own list says)", r.name, m.name, core.MACHINE_CHECK_WORDS[c.state]), ""
+		}
+		if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
+		if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "On: another machine that logs in here over ssh as you can see and drive this Mac's sessions" : "Off: no other machine can reach this Mac's sessions", ""
 		if p == core.CLAUDE_FLAGS_HEAD_ROW || p == core.CLAUDE_FLAGS_ROW || p == core.CLAUDE_FLAGS_WARN_ROW do return fmt.tprintf("Default Claude Code flags for new tabs: %s. Only the tabs you start (new tab, session, chat, your resume); never agents', panels' or apps', nor a read-only chat. With it, Claude edits files and runs commands without asking.", state.settings.claude_skip_permissions ? "--dangerously-skip-permissions" : "none"), ""
 		if strings.has_prefix(p, core.PI_EXT_ROW) {
 			name := p[len(core.PI_EXT_ROW):]
@@ -730,7 +776,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 		if r, ok := files_error_row(h.index); ok do return fmt.tprintf("%s. Retry lists the folder again", r.error), ""
 	case .Account_Remove:
 		if h.index >= 0 && h.index < len(fu.drawn) {
-			if _, ok := core.machine_row_no(fu.drawn[h.index]); ok do return "Remove this machine from Deckhand's list (nothing on it is touched)", ""
+			if _, ok := core.machine_row_no(fu.drawn[h.index]); ok do return "Remove this machine from Deckhand (asks first; nothing on it is deleted)", ""
 		}
 		return "Remove this account from Deckhand's list (its folder is not touched)", ""
 	case .Account_Default: return "Make this the default account: new Claude sessions start in it unless their project last used another", ""
@@ -785,7 +831,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if k, ok := core.folder_row_kind(fu.drawn[h.index]); ok do ui_do(core.Set_Folder{kind = k, path = ""})
 		case .Account_Remove:
 			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Remove_Claude_Account{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
-			else if no, ok := core.machine_row_no(fu.drawn[h.index]); ok do ui_do(core.Machine_Remove{no = no})
+			else if no, ok := core.machine_row_no(fu.drawn[h.index]); ok do ui_do_menu(core.Machine_Remove{no = no}, "Remove") // asks first
 		case .Account_Default:
 			if p := fu.drawn[h.index]; strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do ui_do(core.Set_Claude_Account_Default{account = p[len(core.CLAUDE_ACCOUNT_ROW):]})
 		case .Folder_Reveal:
@@ -1093,15 +1139,12 @@ files_commit_edit :: proc() {
 		files_cancel_edit()
 		return
 	}
-	if err := files_name_error(name); err != "" {
-		delete(fu.edit_err)
-		fu.edit_err = strings.clone(err)
-		app.redraw = true
-		return
-	}
-	// a machine's ssh target (Settings → Machines → Add machine…): it is its name too
-	if fu.edit == .Rename && fu.target == core.MACHINE_ADD_ROW {
-		ar := ui_run(core.Machine_Add{name = name, target = name})
+	// a machine (Settings → Machines): its ssh target (Add a machine…; the core cleans it and names
+	// it), or its new name (Rename…). Not a file name: no file rule applies
+	if machine_editing() {
+		ar: core.Result
+		if no, ok := core.machine_row_no(fu.target); ok do ar = ui_run(core.Machine_Rename{no = no, name = name})
+		else do ar = ui_run(core.Machine_Add{target = name})
 		if !ar.ok {
 			delete(fu.edit_err)
 			fu.edit_err = strings.clone(ar.error)
@@ -1109,7 +1152,15 @@ files_commit_edit :: proc() {
 			return
 		}
 		fu.edit = .None
+		delete(fu.edit_err)
+		fu.edit_err = ""
 		ui_do(core.Set_Focus{"files"})
+		return
+	}
+	if err := files_name_error(name); err != "" {
+		delete(fu.edit_err)
+		fu.edit_err = strings.clone(err)
+		app.redraw = true
 		return
 	}
 	// a Claude account's name (Settings → Claude accounts): no file is renamed
@@ -1164,6 +1215,7 @@ files_cancel_edit :: proc() {
 
 // The name field lost the keyboard (a click elsewhere): the edit ends.
 files_edit_check :: proc() {
+	if client.focus_wait != "" do return // a Set_Focus on its way (machine_edit_begin): not lost yet
 	if fu.edit != .None && state.focus_widget != "files_name" {
 		fu.edit = .None
 		delete(fu.edit_err)
@@ -1222,23 +1274,14 @@ settings_folder_button :: proc(path: string) -> bool {
 		files_begin_edit(.Rename, path, label)
 		return true
 	}
-	// Machines (machines.odin): Add machine… types its target in the row's field; a machine's
-	// Connect or Take back connects now
+	// Machines (machines.odin): Add a machine… opens the add field; a machine's button does what
+	// the sidebar's does (machine_run_action)
 	if path == core.MACHINE_ADD_ROW {
-		files_begin_edit(.Rename, path, "")
+		machine_edit_begin()
 		return true
 	}
 	if no, ok := core.machine_row_no(path); ok {
-		for m in state.machines do if m.no == no {
-			switch core.machine_row_button(m) {
-			case "Cancel": ui_do(core.Machine_Install{no = no, cancel = true})
-			case "Install…", "Update":
-				if m.update == .Command_Only do toast_show(core.machine_update_command(m.name))
-				else do ui_do(core.Machine_Install{no = no})
-			case "Keep running…": ui_do(core.Machine_Linger{no = no})
-			case: ui_do(core.Machine_Connect{no = no})
-			}
-		}
+		machine_run_action(no)
 		return true
 	}
 	// another machine's coding agent: its command copied, to run in a shell tab there (read-only here)

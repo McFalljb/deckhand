@@ -355,6 +355,23 @@ ACTIONS := [?]Action {
 	{id = "remote_machines", label = "Machines over SSH", make = proc() -> (core.Command, bool) {
 		return core.Set_Remote_Machines{on = !state.settings.remote_machines}, true
 	}, detail = proc() -> string {return state.settings.remote_machines ? "on" : "off"}},
+	// the machines themselves: the same add field, commands and Settings group as the sidebar's
+	{id = "machine_add", label = "Add a machine…", make = proc() -> (core.Command, bool) {
+		return core.Set_Left_Tab{tab = .Settings}, state.settings.remote_machines
+	}, ui = proc() {machine_add_open()}, detail = proc() -> string {return "over ssh"}},
+	{id = "machine_remove", label = "Remove a machine…", make = proc() -> (core.Command, bool) {
+		return core.Set_Focus{"palette"}, state.settings.remote_machines && len(state.machines) > 0
+	}, prepare = proc() {palette_open_machines(.Remove)}},
+	{id = "machine_connect", label = "Connect to a machine", make = proc() -> (core.Command, bool) {
+		if state.settings.remote_machines do for m in state.machines do if machine_connectable(m) do return core.Set_Focus{"palette"}, true
+		return nil, false
+	}, prepare = proc() {palette_open_machines(.Connect)}},
+	{id = "machines_settings", label = "Machines settings", make = proc() -> (core.Command, bool) {
+		return core.Set_Left_Tab{tab = .Settings}, state.settings.remote_machines || state.settings.machines_reachable
+	}, ui = proc() {
+		ui_do(core.Set_Left_Tab{tab = .Settings})
+		core.files_select_in(&core.settings_ui, state.settings.remote_machines ? core.MACHINE_ADD_ROW : core.MACHINE_REACH_ROW) // scrolled into view
+	}},
 	// a separate core only (core_handover.odin): the sessions go back to the core before the last update
 	{id = "use_previous_core", label = "Use previous core", make = proc() -> (core.Command, bool) {
 		return core.Core_Handover{to = core.CORE_PREVIOUS}, client_separate()

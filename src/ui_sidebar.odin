@@ -183,7 +183,10 @@ Menu_Target :: union {
 	Menu_Job, // a job's "…" (ui_jobs.odin)
 	Menu_Browser, // a browser tab's page (right click) or its ⋯ (browser_polish.odin)
 	Menu_Term_Link, // a link in a terminal (term_links.odin)
+	Menu_Machine, // another machine's header (right click)
 }
+
+Menu_Machine :: distinct u64 // its number
 
 Menu :: struct {
 	open:     bool,
@@ -346,6 +349,8 @@ menu_items :: proc() -> []core.Menu_Item {
 		browser_menu_items(t, &items)
 	case Menu_Term_Link:
 		term_link_menu_items(t, &items)
+	case Menu_Machine:
+		machine_menu_items(u64(t), &items)
 	case Menu_Sort:
 		sec := core.Sort_Section(t)
 		for by in core.Sort_By do append(&items, core.Menu_Item{label = SORT_LABELS[by], check = state.sidebar.sort[sec] == by, cmd = core.Set_Sort{section = sec, by = by}})
@@ -382,6 +387,7 @@ menu_run :: proc(i: int) {
 			tf_select_all(&rename_field) // typing replaces it
 			ui_do(core.Set_Focus{"rename_session"})
 		}
+		if mm, ok := target.(Menu_Machine); ok do machine_edit_begin(u64(mm)) // its name field, in Settings
 		if p, ok := target.(Menu_Project); ok {
 			ui_do(core.Select_Project{u64(p)})
 			if pp := core.find_project(u64(p)); pp != nil do tf_set(&rename_field, core.project_name(pp^))
@@ -400,6 +406,9 @@ menu_run :: proc(i: int) {
 		if t, ok := target.(Menu_Files); ok && files_step(strings.clone(t.path, context.temp_allocator), it.files) do toast_show("Path copied")
 	} else if it.cmd != nil {
 		ui_do_menu(it.cmd, it.label)
+	} else if mm, ok := target.(Menu_Machine); ok && it.label == "Open web page…" {
+		palette_open_pages(u64(mm)) // the palette asks for the port
+		ui_do(core.Set_Focus{"palette"})
 	}
 	menu_close()
 }
@@ -1263,7 +1272,11 @@ sidebar_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("open", u32(i))) do return Hit_Open_Row(id)
 	}
 	for path, i in drawn.group do if clay.PointerOver(clay.ID("grp", u32(i))) do return Hit_Group(path)
-	for m in state.machines do if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
+	for m in state.machines {
+		if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
+		if clay.PointerOver(clay.ID("machhead", u32(m.no))) do return Hit_Machine_Head(m.no)
+	}
+	if clay.PointerOver(clay.ID("machadd")) do return Hit_Machine_Add{}
 	for id, i in drawn.proj {
 		if clay.PointerOver(clay.ID("projkids", u32(i))) do return Hit_Kids(id)
 		if clay.PointerOver(clay.ID("projpin", u32(i))) do return Hit_Pin_Project(id)
@@ -1309,7 +1322,9 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 			if !forced do ui_do(core.Set_Row_Expanded{path = p.cwd, expanded = !open})
 		}
 	case Hit_Machine:
-		machine_action(u64(h))
+		machine_run_action(u64(h))
+	case Hit_Machine_Add:
+		machine_add_open()
 	case Hit_Open_Row:
 		// focus it and show its project's sessions
 		if s := core.find_session(u64(h)); s != nil {
@@ -1378,6 +1393,8 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 		else do return false
 	case Hit_New_Job_In:
 		menu_open(Menu_Project(u64(h)), at)
+	case Hit_Machine_Head: menu_open(Menu_Machine(u64(h)), at)
+	case Hit_Machine:      menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Session:
 		menu_open(Menu_Session{project_id = state.selected_project, pi_session_id = string(h)}, at)
 	case Hit_Chat:
@@ -1512,53 +1529,19 @@ new_session_target_gone :: proc() -> bool {
 
 // ---- other machines (machine_mirror.odin; Settings › Machines over SSH) ----
 
-MACHINE_STATUS_LABELS := [core.Machine_Status]string {
-	.Connecting    = "connecting…",
-	.Online        = "online",
-	.Offline       = "offline",
-	.Needs_Login   = "needs you to log in",
-	.Needs_Update  = "needs an update",
-	.Not_Installed = "no Deckhand there",
-	.Taken         = "in use there",
-}
-
-// What a machine's row offers ("" = nothing): its install or update while one runs (Cancel), Update
-// for an older core (machine_install.odin), else what its status wants.
-machine_action_label :: proc(m: core.Machine_View) -> string {
-	#partial switch m.job {
-	case .Fetching, .Verifying, .Copying, .Handing_Over: return "Cancel"
-	case .Cleaning: return ""
-	}
-	if m.update != .None do return "Update"
-	if m.status == .Online && m.linger == .Off do return "Keep running…" // Linux: linger is off there
-	#partial switch m.status {
-	case .Needs_Login:   return "Log in…"
-	case .Not_Installed: return "Install…"
-	case .Taken:         return "Take back"
-	case .Offline:       return "Connect"
-	case .Online:        return "Open web page…" // a port of its own: machine_page.odin
-	}
-	return ""
-}
-
-// What the row's status says: its job's phase while one runs, else its status.
-machine_status_label :: proc(m: core.Machine_View) -> string {
-	if m.job != .None && m.job != .Done && m.job != .Failed do return fmt.tprintf("%s…", core.MACHINE_JOB_NAMES[m.job])
-	return MACHINE_STATUS_LABELS[m.status]
-}
-
-// A machine row's button.
-@(private = "file")
-machine_action :: proc(no: u64) {
+// What a machine's button does, the sidebar's and Settings' alike (core.machine_action_label).
+// A failure shows as a toast (ui_do_menu): never a click that does nothing.
+machine_run_action :: proc(no: u64) {
 	for m in state.machines do if m.no == no {
-		switch machine_action_label(m) {
-		case "Cancel":         ui_do(core.Machine_Install{no = no, cancel = true})
-		case "Install…", "Update":
+		label := core.machine_action_label(m)
+		switch label {
+		case "Cancel":         ui_do_menu(core.Machine_Install{no = no, cancel = true}, "Cancel the install")
+		case "Install…", "Update", "Retry":
 			if m.update == .Command_Only do toast_show(core.machine_update_command(m.name))
-			else do ui_do(core.Machine_Install{no = no})
-		case "Keep running…":  ui_do(core.Machine_Linger{no = no}) // the user said yes: linger --enable there
-		case "Log in…":        ui_do(core.Machine_Login{no = no})
-		case "Connect", "Take back": ui_do(core.Machine_Connect{no = no})
+			else do ui_do_menu(core.Machine_Install{no = no}, label == "Update" ? "Update" : "Install")
+		case "Keep running…":  ui_do_menu(core.Machine_Linger{no = no}, label) // the user said yes: linger --enable there
+		case "Log in…":        ui_do_menu(core.Machine_Login{no = no}, label)
+		case "Connect", "Take back": ui_do_menu(core.Machine_Connect{no = no}, label)
 		case "Open web page…":
 			palette_open_pages(no) // the palette asks for the port
 			ui_do(core.Set_Focus{"palette"})
@@ -1566,26 +1549,64 @@ machine_action :: proc(no: u64) {
 	}
 }
 
-// Each other machine under its name, after this Mac's sections: a status dot and what to do, its
-// open sessions, then its projects (the selected one with its sessions). While it is not online
-// its rows are greyed: what it showed last (kept in memory only).
+// What a machine's button does, in a few words (its tooltip, the sidebar's and Settings').
+machine_action_tip :: proc(m: core.Machine_View) -> string {
+	switch core.machine_action_label(m) {
+	case "Cancel":        return "Stop the install (what it copied is removed)"
+	case "Retry":         return "Try the install again"
+	case "Install…":      return "Install Deckhand there over your ssh (nothing runs there but Deckhand's own install)"
+	case "Update":
+		if m.update == .Command_Only do return "Show what to do on that machine"
+		return "Install this Mac's version there; its sessions keep running"
+	case "Keep running…": return "Keep its jobs running after you log out of it (asks its login manager; no password)"
+	case "Log in…":       return "Open a tab here that runs ssh to it, so you can type its password or passphrase"
+	case "Take back":     return "Show its sessions here again (its own window lets go)"
+	case "Connect":       return "Try to connect now"
+	case "Open web page…": return "Open a page it serves on its own localhost (a dev server) in a tab here"
+	}
+	return ""
+}
+
+// A machine in a tooltip: its name and target, why (or its status), then ssh's own words.
+machine_tip :: proc(m: core.Machine_View) -> string {
+	label, why, raw := core.machine_status_text(m)
+	head := m.name
+	if m.target != "" && m.target != m.name do head = fmt.tprintf("%s (%s)", m.name, m.target)
+	tip := fmt.tprintf("%s: %s", head, why != "" ? why : label)
+	if m.status == .Online && m.version != "" && why == "" do tip = fmt.tprintf("%s, Deckhand %s", tip, m.version)
+	if raw != "" && raw != why do tip = fmt.tprintf("%s\n%s", tip, raw) // cleaned and bounded where it was kept (text_clean)
+	return tip
+}
+
+MACHINE_ADD_TIP :: "Add a machine you reach with ssh: user@host or a name from ~/.ssh/config. Deckhand uses your own ssh and keys"
+
+// The sidebar's + Add a machine…, the palette's, Settings' row: the same add field.
+machine_add_open :: proc() {machine_edit_begin()}
+
+// Each other machine under its name, after this Mac's sections: a status dot, what is wrong and
+// what to do, its open sessions, then its projects (the selected one with its sessions). While it
+// is not online its rows are greyed: what it showed last (kept in memory only). Then + Add a
+// machine…, while Machines over SSH is on.
 @(private = "file")
 machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
-	if !core.machines_in_sidebar() do return
+	if !state.settings.remote_machines do return
 	th := theme()
-	for m in state.machines {
+	if core.machines_in_sidebar() do for m in state.machines {
 		live := m.status == .Online
 		gap(GAP_SECTION)
-		if clay.UI(clay.ID("machhead", u32(m.no)))({
+		label, why, _ := core.machine_status_text(m)
+		hid := clay.ID("machhead", u32(m.no))
+		if clay.UI(hid)({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
 		}) {
-			dot(machine_dot(m.status))
-			label := machine_status_label(m)
-			act := machine_action_label(m)
-			room := text_w_max - px(DOT) - text_w(label, FONT_UI_SMALL) - 3 * px(GAP_INLINE)
+			dot(machine_dot(m))
+			act := core.machine_action_label(m)
+			// its name (never cut to nothing: the status gives way first), its status, its button
+			room := text_w_max - px(DOT) - 3 * px(GAP_INLINE)
 			if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
-			clay.TextDynamic(clip(strings.to_upper(m.name, context.temp_allocator), room, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_muted, FONT_UI_SMALL | WEIGHT_HEADER))
-			clay.TextDynamic(label, txt(th.text_muted, FONT_UI_SMALL))
+			name_w := min(text_w(m.name, FONT_UI_SMALL | WEIGHT_HEADER), max(room * 0.6, room - text_w(label, FONT_UI_SMALL)))
+			clay.TextDynamic(clip(m.name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_secondary, FONT_UI_SMALL | WEIGHT_HEADER))
+			if lw := room - name_w; lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
 			if act != "" {
 				id := clay.ID("machact", u32(m.no))
@@ -1599,6 +1620,8 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 				}
 			}
 		}
+		// what is wrong, in plain words, while it is not online (its tooltip has ssh's own)
+		if why != "" && !live do list_note(why, 0, text_w_max)
 		n := 0
 		for &s in state.open_sessions do if s.machine == m.no && !s.home {
 			machine_open_row(&s, cs, live, text_w_max)
@@ -1610,19 +1633,38 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 			if p.id == state.selected_project && !tree.folded do machine_sessions(live, text_w_max)
 			n += 1
 		}
-		if n == 0 do list_note(live ? "Nothing there yet" : "Not connected", 0, text_w_max)
+		if n == 0 && (why == "" || live) do list_note(live ? "Nothing there yet" : "Not connected", 0, text_w_max)
 	}
+	gap(GAP_SECTION)
+	action_row(clay.ID("machadd"), Hit_Machine_Add{}, .Plus, "Add a machine…", 0, text_w_max)
 }
 
 @(private = "file")
-machine_dot :: proc(s: core.Machine_Status) -> core.Rgba {
+machine_dot :: proc(m: core.Machine_View) -> core.Rgba {
 	th := theme()
-	#partial switch s {
+	if core.machine_install_failed(m) do return th.error
+	#partial switch m.status {
 	case .Online:     return th.done
 	case .Connecting: return th.running
-	case .Needs_Login, .Needs_Update, .Not_Installed: return th.waiting
+	case .Needs_Login, .Needs_Update, .Not_Installed, .Refused: return th.waiting
 	}
 	return with_alpha(th.text_muted, EXITED_ALPHA)
+}
+
+// A machine header's right-click menu: what applies to it now.
+machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
+	for m in state.machines do if m.no == no {
+		#partial switch m.status {
+		case .Needs_Login: append(items, core.Menu_Item{label = "Log in…", cmd = core.Machine_Login{no = no}})
+		case .Taken:       append(items, core.Menu_Item{label = "Take back", cmd = core.Machine_Connect{no = no}})
+		case .Offline:     append(items, core.Menu_Item{label = "Connect", cmd = core.Machine_Connect{no = no}})
+		case .Refused, .Unsupported: append(items, core.Menu_Item{label = "Try again", cmd = core.Machine_Connect{no = no}}) // after the fix on that machine
+		}
+		if m.status == .Online do append(items, core.Menu_Item{label = "Open web page…"}) // menu_run: the palette asks for the port
+		if len(items) > 0 do append(items, core.Menu_Item{sep = true})
+		append(items, core.Menu_Item{label = "Rename…", rename = true})
+		append(items, core.Menu_Item{label = "Remove…", cmd = core.Machine_Remove{no = no}})
+	}
 }
 
 // One of its open sessions: its place and title, its dot while online. A click shows it (its

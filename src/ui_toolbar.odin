@@ -784,6 +784,12 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return "New session in this project", ""
 	case Hit_Add_Project:
 		return act("add_project")
+	case Hit_Machine_Add:
+		return MACHINE_ADD_TIP, ""
+	case Hit_Machine: // its button: what it does
+		for m in state.machines do if m.no == u64(x) do return machine_action_tip(m), ""
+	case Hit_Machine_Head: // its header: why, in plain words, then ssh's own
+		for m in state.machines do if m.no == u64(x) do return machine_tip(m), ""
 	case Hit_Close_Session:
 		return act("close_session")
 	case Hit_More_Project, Hit_More_Session, Hit_More_Open:
@@ -872,18 +878,28 @@ tooltip_layout :: proc(w, h: f32) {
 	label, keys := hit_tip(ui_hover)
 	if label == "" do return
 	th := theme()
-	tw := text_w(label) + px(2 * SP_2) + (keys != "" ? text_w(keys) + px(SP_2) : 0)
+	// a second line (after "\n", muted): the raw text a plain first line came from (machine_tip)
+	first, _, second := strings.partition(label, "\n")
+	second = core.one_line(second, context.temp_allocator)
+	max_w := w - px(2 * SP_2 + SP_1)
+	tw := min(max(text_w(first, FONT_UI_SMALL), text_w(second, FONT_UI_SMALL)), max_w) + px(2 * SP_2) + (keys != "" ? text_w(keys) + px(SP_2) : 0)
+	th_px := px(TIP_H) * (second != "" ? 1.8 : 1)
 	x := clamp(tip.at.x - px(SP_2), px(SP_1), max(w - tw - px(SP_1), 0))
 	y := tip.at.y + px(TIP_OFFSET)
-	if y + px(TIP_H) > h do y = tip.at.y - px(TIP_OFFSET) - px(TIP_H)
+	if y + th_px > h do y = tip.at.y - px(TIP_OFFSET) - th_px
 	if clay.UI(clay.ID("tooltip"))({
-		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(th_px)}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 30},
 	}) {
-		clay.TextDynamic(label, txt(th.text, FONT_UI_SMALL))
+		if second == "" {
+			clay.TextDynamic(label, txt(th.text, FONT_UI_SMALL))
+		} else if clay.UI()({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}, layoutDirection = .TopToBottom, childGap = pu(2)}}) {
+			clay.TextDynamic(clip(first, max_w, FONT_UI_SMALL), txt(th.text, FONT_UI_SMALL))
+			clay.TextDynamic(clip(second, max_w, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		}
 		if keys != "" do clay.TextDynamic(keys, txt(th.text_muted, FONT_UI_SMALL))
 	}
 }

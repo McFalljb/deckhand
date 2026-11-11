@@ -74,13 +74,21 @@ machines_reachable_default_on :: false
 Set_Machines_Reachable :: struct {
 	on: bool,
 }
-// Adds a machine: name (what Deckhand calls it), target (an ~/.ssh/config alias or user@host);
+// Adds a machine: target (an ~/.ssh/config alias or user@host; a leading `ssh ` or `ssh://` is
+// dropped), name (what Deckhand calls it; "": the target's host part, machine_default_name);
 // via: a development or test build's command in place of `ssh … connect`. User-only.
 Machine_Add :: struct {
 	name, target, via: string,
 }
+// Removes a machine (the user confirms first: nothing on it is touched). User-only.
 Machine_Remove :: struct {
-	no: u64,
+	no:      u64,
+	confirm: string,
+}
+// Renames a machine: only what Deckhand calls it; its ssh target stays. User-only.
+Machine_Rename :: struct {
+	no:   u64,
+	name: string,
 }
 // Connect now: Take back from that machine's window, or retry without waiting. User-only.
 Machine_Connect :: struct {
@@ -100,6 +108,14 @@ Machine_Status :: enum u8 {
 	Needs_Update, // its core is below CORE_MIN or another generation
 	Not_Installed, // no core at its path
 	Taken, // that machine's own window (or another hub) took it back
+	Refused, // its Deckhand does not let other machines connect (its Allow other machines… is off)
+	Unsupported, // not a Mac or Linux (uname -sm)
+}
+
+// Statuses only the user can fix: no retry on a timer (a failed login every minute could trip
+// fail2ban there), only on the user's Connect, Log in…, or an edit (machine_rename).
+machine_status_waits_for_user :: proc(s: Machine_Status) -> bool {
+	return s == .Needs_Login || s == .Refused || s == .Unsupported
 }
 
 // A machine as State's `machines` section carries it (Settings › Machines).
@@ -346,6 +362,7 @@ Machine_Outcome :: struct {
 
 machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string) {
 	if o.replied {
+		if !o.ok && strings.contains(o.error, "does not let other machines connect") do return .Refused, o.error // HUB_NOT_ALLOWED
 		if !o.ok do return .Offline, o.error
 		switch o.skew {
 		case .Ok, .Core_Older:      return .Online, ""
@@ -362,6 +379,92 @@ machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string
 	}
 	if o.exited && (o.exit_code == 127 || o.exit_code == 126) do return .Not_Installed, "no Deckhand core at its path"
 	return .Offline, last != "" ? last : "the connection ended"
+}
+
+// ---- what the user reads (the sidebar, Settings and their tooltips: one place) ----
+
+// A machine's status in plain words: label (a few words: the sidebar's header, Settings' row), why
+// (a sentence that says what is wrong and what to do; "" = nothing to say) and raw (the text it
+// came from, ssh's or the install's, cleaned: a tooltip's second line; "" = none). Temp.
+machine_status_text :: proc(m: Machine_View) -> (label, why, raw: string) {
+	// its install or update: while it runs, then a failure that still applies
+	if m.job != .None && m.job != .Done && m.job != .Failed do return fmt.tprintf("%s…", MACHINE_JOB_NAMES[m.job]), "", ""
+	if machine_install_failed(m) {
+		w, r := machine_install_why(m.job_note)
+		what := m.update != .None ? "Update" : "Install"
+		return fmt.tprintf("%s failed", strings.to_lower(what, context.temp_allocator)), fmt.tprintf("%s failed: %s", what, w), r
+	}
+	switch m.status {
+	case .Connecting:    return "connecting…", "", ""
+	case .Online:
+		if m.linger == .Off do return "online", "Its jobs stop when you log out of it: Keep running… keeps them going", ""
+		return "online", "", ""
+	case .Offline:
+		why, raw = machine_offline_why(m.error, m.target != "" ? m.target : m.name)
+		return "offline", why, raw
+	case .Needs_Login:   return "needs you to log in", "ssh wants a password or a key: Log in…", m.error
+	case .Needs_Update:
+		if m.update == .Command_Only do return "needs an update", "Its Deckhand runs from outside its own folder: update it on that machine", ""
+		if strings.contains(m.error, "newer") do return "needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""
+		return "needs an update", "Its Deckhand is too old for this Mac: Update", ""
+	case .Not_Installed: return "no Deckhand there", "Deckhand isn't installed there: Install…", ""
+	case .Taken:
+		if strings.has_prefix(m.error, "viewed from ") do return "in use there", fmt.tprintf("Shown from %s now: Take back shows it here", m.error[len("viewed from "):]), ""
+		return "in use there", "Its own window is showing it: Take back shows it here", ""
+	case .Refused:       return "not allowed", "Turn on Allow other machines to connect on that Mac", ""
+	case .Unsupported:   return "not supported", "Not a Mac or Linux machine", m.error
+	}
+	return "", "", ""
+}
+
+// A failed install or update that still applies (its machine has no Deckhand, or one to update);
+// one the user cancelled is not.
+machine_install_failed :: proc(m: Machine_View) -> bool {
+	return m.job == .Failed && m.job_note != "cancelled" && (m.status == .Not_Installed || m.update != .None)
+}
+
+// Why an install failed, in plain words, and the note it came from when that was a program's
+// (tar, scp: a tooltip's second line). Temp.
+machine_install_why :: proc(note: string) -> (why, raw: string) {
+	has :: proc(s: string, any: ..string) -> bool {
+		for a in any do if strings.contains(s, a) do return true
+		return false
+	}
+	switch {
+	case note == "":                                           return "it stopped", ""
+	case has(note, "No space left", "Disk quota"):             return "its disk is full", note
+	case has(note, "Write error", "Cannot write", "cannot write"): return "it could not write the files there (is its disk full?)", note
+	case has(note, "Permission denied"):                       return "it was not allowed to write the files there", note
+	case has(note, "link went down"):                          return "the connection dropped", ""
+	case has(note, "refused this Mac"):                        return "it is installed, but it does not allow other machines to connect: turn on Allow other machines to connect there", ""
+	case has(note, "timed out", "took over"):                  return "it took too long", ""
+	}
+	// a program's own words ("tar: …", "scp: …"): say it plainly, keep them for the tooltip
+	if i := strings.index(note, ": "); i > 0 && i < 24 && !strings.contains(note[:i], " ") do return "the copy there did not work", note
+	return note, ""
+}
+
+// Why a machine is offline, in plain words (the common ssh failures as a sentence), and ssh's own
+// line when the sentence came from it. host: what it is reached as (its target, else its name). Temp.
+machine_offline_why :: proc(err, host: string) -> (why, raw: string) {
+	has :: proc(s: string, any: ..string) -> bool {
+		for a in any do if strings.contains(s, a) do return true
+		return false
+	}
+	h := host
+	if i := strings.last_index_byte(h, '@'); i >= 0 do h = h[i + 1:]
+	switch {
+	case err == "":                                                              return "Not connected", ""
+	case has(err, "Could not resolve hostname", "nodename nor servname", "Name or service not known"): return fmt.tprintf("Can't find a computer called %s", text_clean(h, 64)), err
+	case has(err, "Connection refused"):                                          return "It refused the connection", err
+	case has(err, "timed out"):                                                   return "The connection timed out", err
+	case has(err, "No route to host", "Network is unreachable", "Host is down"):  return "Can't reach it on the network", err
+	case has(err, "Machines over SSH is off"):                                    return "Machines over SSH is off", ""
+	case has(err, "no answer from its core", "no answer to uname"):               return "Deckhand there did not answer", ""
+	case has(err, "connecting again after the install"):                          return "Connecting again after the install", ""
+	case err == "the connection ended":                                           return "The connection ended", ""
+	}
+	return "The connection failed", err
 }
 
 machine_last_line :: proc(text: string) -> string {
@@ -495,7 +598,10 @@ Mach_Link :: struct {
 	linger:    Linger, // its last hello's machine.linger (Linux), or what linger --enable said
 	auto_install: bool, // added by the user: its first attempt's finding of no core starts an install (M6-E); any status but connecting clears it (mlink_set)
 	drain_skew: cw.Skew, // Draining: the hello's
+	login_until: time.Tick, // Log in… ran: while its control socket is not there yet (≤ MACHINE_LOGIN_WAIT), looked for once a second; there, the link connects
 }
+
+MACHINE_LOGIN_WAIT :: 10 * time.Minute
 
 @(private = "file")
 mach: struct {
@@ -567,12 +673,20 @@ when TEST_HOOKS {
 		mlink_probe_done(l, time.tick_now())
 		if l.phase == .Idle do l.phase = .Stopped
 	}
-	// mlink_down with outcome o (a finished attempt).
-	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome) {
+	// mlink_down with outcome o (a finished attempt). waits: it waits for the user (no retry on
+	// the timer), as mlink_down left it; then no attempt runs in a test either way.
+	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome) -> (waits: bool) {
 		if l, _ := mlink_find(no); l != nil {
 			mlink_down(l, o)
+			waits = l.phase == .Stopped
 			l.phase = .Stopped
 		}
+		return
+	}
+	// Machine no's link would try again on its own (its timer, or a login's socket), or waits.
+	machine_retries_for_test :: proc(no: u64) -> bool {
+		l, _ := mlink_find(no)
+		return l != nil && (l.phase == .Idle || l.login_until != {})
 	}
 	machines_reset_for_test :: proc() {
 		for l in mach.links do mlink_free(l)
@@ -748,6 +862,8 @@ MACHINE_STATUS_NAMES := [Machine_Status]string {
 	.Needs_Update  = "needs_update",
 	.Not_Installed = "not_installed",
 	.Taken         = "taken",
+	.Refused       = "refused",
+	.Unsupported   = "unsupported",
 }
 
 // Ends what runs for l: its process group gets SIGTERM and the tick reaps it, or (wait) SIGKILL and
@@ -788,6 +904,7 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	if was_up do machine_install_link_down(l.no) // an update started on it ends (machine_install.odin)
 	l.phase = .Idle
 	l.next_at = time.tick_add(time.tick_now(), machine_backoff_down(&l.backoff, time.tick_now()))
+	if machine_status_waits_for_user(s) do l.phase, l.backoff = .Stopped, {} // until the user's Connect, Log in… or an edit
 	mlink_set(l, s, why)
 	// added by the user and no core there: its install starts, once (machine_install.odin)
 	if s == .Not_Installed && auto && state.settings.remote_machines {
@@ -822,7 +939,9 @@ mlink_start :: proc(l: ^Mach_Link) {
 	l.phase = probe ? .Probe : .Hello
 	l.started = time.tick_now()
 	if autotest_active do fmt.printfln("[autotest] machine %s: %s", l.name, probe ? "probe" : "connect")
-	mlink_set(l, .Connecting)
+	// a retry on the timer leaves the machine's status as it is (its row keeps its button, and
+	// does not flicker); the first try, and the user's (its backoff reset), say connecting
+	if l.backoff.delay == 0 do mlink_set(l, .Connecting)
 }
 
 // Spawns argv (looked up on PATH) in its own process group: stdin and stdout one end of a
@@ -897,6 +1016,20 @@ machines_tick :: proc() {
 		mlink_reap(l)
 		switch l.phase {
 		case .Stopped:
+			// after Log in…: connect once its login's control socket is there (no attempt before:
+			// each would be a failed login there)
+			if l.login_until != {} && time.tick_diff(l.next_at, now) >= 0 {
+				l.next_at = time.tick_add(now, time.Second)
+				if time.tick_diff(l.login_until, now) >= 0 {
+					l.login_until = {}
+				} else if run, rwhy := sock_runtime_dir_why(context.temp_allocator); rwhy == "" {
+					st: posix.stat_t
+					if posix.stat(strings.clone_to_cstring(machine_ctl_path(run, l.no), context.temp_allocator), &st) == .OK {
+						l.login_until = {}
+						l.phase, l.next_at, l.backoff = .Idle, {}, {}
+					}
+				}
+			}
 		case .Idle:
 			if l.next_at == {} || time.tick_diff(l.next_at, now) >= 0 do mlink_start(l)
 		case .Probe:
@@ -957,8 +1090,9 @@ mlink_probe_done :: proc(l: ^Mach_Link, now: time.Tick) {
 		l.next_at = now
 	} else if l.exit_code == 0 {
 		l.phase = .Stopped
+		uname := strings.clone(machine_last_line(string(l.inbuf[:])), context.temp_allocator) // mlink_close clears inbuf
 		mlink_close(l)
-		mlink_set(l, .Offline, fmt.tprintf("not a Mac or Linux: %s", machine_last_line(string(l.inbuf[:]))))
+		mlink_set(l, .Unsupported, uname)
 	} else do mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
 }
 
@@ -1239,20 +1373,70 @@ mlink_free :: proc(l: ^Mach_Link) {
 
 // ---- the commands (user-only: command_table.odin) ----
 
+// What the user typed for a machine, as ssh takes it: spaces trimmed, and a leading `ssh ` or an
+// `ssh://` (and a trailing /) dropped, as people paste them. Temp (a slice of s).
+machine_target_clean :: proc(s: string) -> string {
+	t := strings.trim_space(s)
+	if len(t) > 4 && strings.equal_fold(t[:4], "ssh ") do t = strings.trim_space(t[4:])
+	if len(t) > 6 && strings.equal_fold(t[:6], "ssh://") do t = strings.trim_right(t[6:], "/")
+	return t
+}
+
+// Why the add field's text cannot be used, in plain words with an example ("" = it can).
+machine_target_plain_error :: proc(target: string) -> string {
+	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like jb@nuc.local"
+	if machine_target_error(target) == "" do return ""
+	if len(target) > 255 do return "That is too long for a machine's address"
+	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like jb@nuc.local: ssh's options go in ~/.ssh/config"
+	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like jb@nuc.local", text_clean(target, 40))
+}
+
+// What Deckhand calls a machine unless the user names it: its target's host part (nuc for
+// jb@nuc.home.arpa), an ~/.ssh/config name as it is, an IP address whole. Temp (a slice).
+machine_default_name :: proc(target: string) -> string {
+	h := target
+	if i := strings.last_index_byte(h, '@'); i >= 0 do h = h[i + 1:]
+	if i := strings.index_byte(h, ':'); i >= 0 do h = h[:i]
+	ip := true
+	for c in transmute([]u8)h do if !(c >= '0' && c <= '9') && c != '.' do ip = false
+	if !ip do if i := strings.index_byte(h, '.'); i > 0 do h = h[:i]
+	return h != "" ? h : target
+}
+
+// A machine's name as the user gave it: one line, trimmed, at most 64 bytes (whole runes). Temp.
+machine_name_clean :: proc(name: string) -> string {
+	return strings.trim_space(cut_utf8(strings.trim_space(one_line(name, context.temp_allocator)), 64))
+}
+
+@(private = "file")
+machine_name_taken :: proc(name: string, but: u64 = 0) -> bool {
+	for l in mach.links do if l.no != but && strings.equal_fold(l.name, name) do return true
+	return false
+}
+
 machine_add_apply :: proc(c: Machine_Add) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	if !core_separate do return fail("machines need Sessions in a background core (the gear)")
 	if !mach.loaded do return fail("machines.json could not be read: fix or remove it first")
-	name := strings.trim_space(c.name)
-	if w := machine_name_error(name); w != "" do return fail(w)
-	for l in mach.links do if strings.equal_fold(l.name, name) do return fail(fmt.tprintf("a machine is already called %s", name))
+	target := machine_target_clean(c.target)
 	if c.via != "" {
 		if !TEST_HOOKS do return fail("via is only for development and test builds")
-	} else if w := machine_target_error(c.target); w != "" do return fail(w)
+		target = c.target
+	} else {
+		if w := machine_target_plain_error(target); w != "" do return fail(w)
+		for l in mach.links do if l.target == target do return fail(fmt.tprintf("%s is already in your machines, as %s", target, l.name))
+	}
+	name := machine_name_clean(c.name)
+	if name == "" || name == strings.trim_space(c.target) {
+		name = machine_default_name(target) // nuc, not jb@nuc.home.arpa
+		if machine_name_taken(name) do name = target // two machines called nuc: the second by its whole target
+	}
+	if w := machine_name_error(name); w != "" do return fail(w)
+	if machine_name_taken(name) do return fail(fmt.tprintf("a machine is already called %s", name))
 	if mach.next > MACHINE_NO_MAX do return fail("no machine numbers left")
 	heap := runtime.heap_allocator()
 	l := new(Mach_Link, heap)
-	l.m = Machine{no = mach.next, name = strings.clone(name, heap), target = strings.clone(c.target, heap), via = strings.clone(c.via, heap)}
+	l.m = Machine{no = mach.next, name = strings.clone(name, heap), target = strings.clone(target, heap), via = strings.clone(c.via, heap)}
 	l.fd, l.err_fd = -1, -1
 	l.auto_install = true // the user's add: no core there, and Deckhand installs one (M6-E)
 	mach.next += 1
@@ -1267,20 +1451,53 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 	return {ok = true, created_id = l.no}
 }
 
-machine_remove_apply :: proc(c: Machine_Remove) -> Result {
+// What Remove asks first.
+machine_remove_question :: proc(name: string) -> string {
+	return fmt.tprintf("Remove %s from Deckhand? Nothing on it is deleted, and its sessions keep running there. You can add it again any time.", name)
+}
+
+machine_remove_apply :: proc(c: Machine_Remove, caller: Caller) -> (Result, bool) {
 	l, i := mlink_find(c.no)
-	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
+	if l == nil do return fail(fmt.tprintf("no machine %d", c.no)), false
+	// the user confirms (the bar), whoever's policy
+	if caller.kind != .Internal {
+		gr, go_on, ch := confirm_gate(Machine_Remove{no = c.no}, .Settings_Write, caller, c.confirm, machine_remove_question(l.name), force_ask = true)
+		if !go_on do return gr, ch
+	}
 	page_forwards_drop(l.no) // its web pages' ssh children end
 	machine_install_drop(l.no, removed = true) // its install ends (and its remote cleanup runs)
 	mlink_close(l, wait = true)
 	ordered_remove(&mach.links, i)
 	if w := machines_save(); w != "" {
 		inject_at(&mach.links, i, l)
-		return fail(w)
+		return fail(w), true
 	}
-	mlink_unmerge(l)
+	mlink_unmerge(l) // its session on screen: this Mac's last one shows instead (mirror_drop)
 	machine_route_down(l.no, gone = true)
 	mlink_free(l)
+	machines_publish()
+	return {ok = true}, true
+}
+
+machine_rename_apply :: proc(c: Machine_Rename) -> Result {
+	l, _ := mlink_find(c.no)
+	if l == nil do return fail(fmt.tprintf("no machine %d", c.no))
+	name := machine_name_clean(c.name)
+	if w := machine_name_error(name); w != "" do return fail(w)
+	if machine_name_taken(name, but = l.no) do return fail(fmt.tprintf("a machine is already called %s", name))
+	heap := runtime.heap_allocator()
+	if name != l.name {
+		old := l.name
+		l.name = strings.clone(name, heap)
+		if w := machines_save(); w != "" {
+			delete(l.name, heap)
+			l.name = old
+			return fail(w)
+		}
+		delete(old, heap)
+	}
+	// an edit is the user's: one that waits for them tries again
+	if l.phase == .Stopped && machine_status_waits_for_user(l.status) do l.phase, l.next_at, l.backoff = .Idle, {}, {}
 	machines_publish()
 	return {ok = true}
 }
@@ -1291,7 +1508,7 @@ machine_connect_apply :: proc(c: Machine_Connect) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	if l.phase == .Up || l.phase == .Hello || l.phase == .Probe do return {ok = true}
 	mlink_close(l)
-	l.phase, l.next_at, l.backoff = .Idle, {}, {}
+	l.phase, l.next_at, l.backoff, l.login_until = .Idle, {}, {}, {}
 	return {ok = true}
 }
 
@@ -1317,6 +1534,8 @@ machine_login_argv :: proc(m: Machine, run: string) -> (argv: []string, why: str
 	return out, ""
 }
 
+MACHINE_LOGIN_NO_SESSION :: "Open a chat or session on this Mac, then click Log in… again: the login runs in a tab there"
+
 machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) {
 	l, _ := mlink_find(c.no)
 	if l == nil do return fail(fmt.tprintf("no machine %d", c.no)), false
@@ -1325,12 +1544,25 @@ machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) 
 	argv, why := machine_login_argv(l.m, run)
 	if why != "" do return fail(why), false
 	s := machine_local_session()
-	if s == nil do return fail("open a session on this Mac first: the login runs in a tab there"), false
+	changed := false
+	if s == nil {
+		// none open: a new chat holds the login's tab
+		ch := chats_project()
+		if ch == nil || !pi_installed() do return fail(MACHINE_LOGIN_NO_SESSION), false
+		rr, _ := open_new_session(ch^, new_uuid(), "")
+		if !rr.ok do return fail(MACHINE_LOGIN_NO_SESSION), false
+		s, changed = find_session(rr.created_id), true
+		if s == nil do return fail(MACHINE_LOGIN_NO_SESSION), true
+	}
 	id, err := shell_tab_start(s, s.cwd, argv = argv, title = fmt.tprintf("Log in to %s", l.name))
-	if err != "" do return fail(err), false
+	if err != "" do return fail(err), changed
 	session_show_tab(s, id)
 	focus_session(s.id, caller)
-	// tried again soon after: the link uses the master once the login is through
-	if l.phase == .Idle do l.next_at, l.backoff = {}, {}
+	// the link connects once the login's control socket is there (the tick looks once a second)
+	if l.phase != .Up && l.phase != .Hello && l.phase != .Probe {
+		mlink_close(l)
+		l.phase, l.next_at, l.backoff = .Stopped, {}, {}
+		l.login_until = time.tick_add(time.tick_now(), MACHINE_LOGIN_WAIT)
+	}
 	return {ok = true, created_id = id}, true
 }

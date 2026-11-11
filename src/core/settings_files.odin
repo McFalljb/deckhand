@@ -367,23 +367,22 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	}
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
-	// Machines over SSH (machines.odin), while the experimental setting is on (or this machine
-	// lets others in: the row that turns it off stays)
+	// Machines over SSH (machines.odin), while the setting is on (or this machine lets others in:
+	// the row that turns it off stays)
 	if state.settings.remote_machines || state.settings.machines_reachable {
 		if state.settings.remote_machines do for m in state.machines {
-			detail := fmt.tprintf("%s · %s", m.target != "" ? m.target : "via", MACHINE_STATUS_NAMES[m.status])
-			if m.status == .Online && m.version != "" do detail = fmt.tprintf("%s %s", detail, m.version)
-			if m.error != "" do detail = fmt.tprintf("%s: %s", detail, m.error)
-			if m.job != .None do detail = fmt.tprintf("%s · %s%s%s", detail, MACHINE_JOB_NAMES[m.job], m.job_note != "" ? ": " : "", m.job_note)
-			if m.linger == .Off do detail = fmt.tprintf("%s · linger is off: its jobs stop when you log out of it", detail)
-			button := machine_row_button(m)
-			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = button, remove = true})
+			// its status in plain words, as the sidebar says it (machine_status_text); its target
+			// and ssh's own words are in the row's tooltip
+			label, why, _ := machine_status_text(m)
+			detail := why != "" ? why : label // what is wrong and what to do, else its status
+			if m.status == .Online && m.version != "" && why == "" && m.job == .None do detail = fmt.tprintf("%s · Deckhand %s", detail, m.version)
+			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = machine_action_label(m), remove = true})
 			for c in m.checklist {
 				r, _ := harness_row(c.id)
-				add(&out, {group = "machines", label = fmt.tprintf("%s: %s", m.name, r.name), detail = fmt.tprintf("%s%s%s", HARNESS_STATE_NAMES[c.state], c.command != "" ? " · " : "", c.command), path = fmt.tprintf("%s%d:%s", MACHINE_CHECK_ROW, m.no, c.id), button = c.command != "" ? "Copy" : ""})
+				add(&out, {group = "machines", label = fmt.tprintf("%s: %s", m.name, r.name), detail = fmt.tprintf("%s%s%s", MACHINE_CHECK_WORDS[c.state], c.command != "" ? " · " : "", c.command), path = fmt.tprintf("%s%d:%s", MACHINE_CHECK_ROW, m.no, c.id), button = c.command != "" ? "Copy" : ""})
 			}
 		}
-		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add machine…", detail = "an ~/.ssh/config alias or user@host", path = MACHINE_ADD_ROW, button = "Add…"})
+		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add a machine…", detail = "user@host or an ~/.ssh/config name", path = MACHINE_ADD_ROW, button = "Add…"})
 		reach := state.settings.machines_reachable
 		detail := reach ? "on: another machine that logs in here over ssh as you can view and drive this one's sessions" : "off: no other machine can reach this one's sessions"
 		add(&out, {group = "machines", label = "Allow other machines to connect to this one", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Allow"})
@@ -391,21 +390,37 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	return out[:]
 }
 
-// A machine row's button in Settings: Cancel while its install runs, Install… / Update (M6-E),
-// Keep running… (Linux linger off), Take back, Connect.
-machine_row_button :: proc(m: Machine_View) -> string {
+// Another machine's coding agent's state, in plain words (its Settings row and tooltip).
+MACHINE_CHECK_WORDS := [Harness_Item_State]string {
+	.Missing       = "not installed",
+	.Too_Old       = "needs an update",
+	.Ok            = "installed",
+	.Built_In      = "built in",
+	.Not_Loaded    = "not loaded",
+	.Needs_Harness = "needs its coding agent first",
+	.Unchecked     = "not checked yet",
+}
+
+// What a machine's row offers, in the sidebar and in Settings ("" = nothing): Cancel while its
+// install or update runs, Retry after one failed, Update (M6-E), Keep running… (Linux linger
+// off), else what its status wants. Never Connect where it cannot work (refused, unsupported:
+// the row says what to do instead).
+machine_action_label :: proc(m: Machine_View) -> string {
 	#partial switch m.job {
 	case .Fetching, .Verifying, .Copying, .Handing_Over: return "Cancel"
 	case .Cleaning: return ""
 	}
+	if machine_install_failed(m) do return "Retry"
 	if m.update != .None do return "Update"
+	if m.status == .Online && m.linger == .Off do return "Keep running…" // Linux: linger is off there
 	#partial switch m.status {
+	case .Needs_Login:   return "Log in…"
 	case .Not_Installed: return "Install…"
 	case .Taken:         return "Take back"
-	case .Online:        return m.linger == .Off ? "Keep running…" : ""
-	case .Connecting:    return ""
+	case .Offline:       return "Connect"
+	case .Online:        return "Open web page…" // a port of its own: machine_page.odin
 	}
-	return "Connect"
+	return ""
 }
 
 // The instructions file pi reads in dir: the first of these that is a
@@ -883,7 +898,7 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	case "claude":  return "Claude Code (global)"
 	case "claude-accounts": return "Claude accounts"
 	case "agents":  return "Coding agents"
-	case "machines": return "Machines (experimental)"
+	case "machines": return "Machines"
 	case "claude-project": return fmt.tprintf("Claude Code · %s", filepath.base(cwd))
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])

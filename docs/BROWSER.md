@@ -168,7 +168,9 @@ Deckhand.app/Contents/
 `[‹] [›] [⟳/✕] [ address field ] [agent strip] [zoom chip] [Annotate] [⋯]`
 
 - The address field takes a URL: `http`, `https`, `about:blank` as typed; a bare host gets
-  `https://`, a local one (`localhost`, `*.localhost`, `127.*`, `[::1]`) `http://`. Anything else
+  `https://`, a local one `http://`: `localhost`, `*.localhost`, `127.*`, `[::1]`, a private or
+  tailnet IPv4 (`10.*`, `172.16–31.*`, `192.168.*`, `169.254.*`, `100.64–127.*`), and a one-word
+  machine name with a port or a path (`nuc:3001`, `nuc/`). Anything else
   is refused: **search is not built**. `file:` is the user's only. A `user:pass@` part never
   reaches State, the workspace or events (`browser_url_public`).
 - ⋯ has Find in page, zoom, Copy URL, Open in default browser, DevTools and the downloads folder.

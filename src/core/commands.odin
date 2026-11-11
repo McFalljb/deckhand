@@ -2649,9 +2649,12 @@ scan_worker :: proc(request_id: u64) {
 
 // What the URL field's text becomes: a URL with a scheme Deckhand opens
 // (http, https, file, about, deckhand-test: test fixtures) as is; a bare host
-// ("example.com", "example.com/path", "host:8080") gets https://, a local one
-// (localhost, 127.x, [::1]) http://. Anything else (words, spaces) is not a
-// web address: search is not built in yet (BROWSER.md §2.2). Pure.
+// ("example.com", "example.com/path", "example.com:8080") gets https://, a local
+// one http://: localhost, 127.x, [::1], a private or tailnet IPv4 (10.x, 172.16-31.x,
+// 192.168.x, 169.254.x, 100.64-127.x), and a one-word machine name with a port or a
+// path ("nuc:3001", "nuc/": a LAN or tailnet host; a dev server rarely has TLS). A
+// bare word alone, or anything with spaces, is not a web address: search is not
+// built in yet (BROWSER.md §2.2). Pure.
 browser_url_normalize :: proc(text: string, allocator := context.temp_allocator) -> (url: string, err: string) {
 	t := strings.trim_space(text)
 	if t == "" do return "", "type a web address"
@@ -2689,7 +2692,12 @@ browser_url_normalize :: proc(text: string, allocator := context.temp_allocator)
 		host = host[:k]
 	}
 	if host == "" do return "", "not a web address"
-	local := host == "localhost" || strings.has_suffix(host, ".localhost") || host == "[::1]" || strings.has_prefix(host, "127.")
+	local := host == "localhost" || strings.has_suffix(host, ".localhost") || host == "[::1]" || strings.has_prefix(host, "127.") || private_ipv4(host)
+	// a one-word machine name (LAN, tailnet) counts only with a port or a path: "nuc" alone could be a search
+	if !local && !strings.contains_rune(host, '.') && len(host) <= 63 && (len(hostport) > len(host) || end < len(t)) {
+		local = host[0] != '-' && host[len(host) - 1] != '-'
+		for r in host do if !(r >= 'a' && r <= 'z' || r >= '0' && r <= '9' || r == '-') do local = false
+	}
 	if !local {
 		// letters, digits, - and . with a dot inside and a top-level part of letters (or an IPv4 address)
 		if !strings.contains_rune(host, '.') || strings.has_prefix(host, ".") || strings.has_suffix(host, ".") do return "", "not a web address (search is not built in yet)"
@@ -2703,6 +2711,22 @@ browser_url_normalize :: proc(text: string, allocator := context.temp_allocator)
 		}
 	}
 	return strings.concatenate({local ? "http://" : "https://", t}, allocator), ""
+
+	// 10.x, 172.16-31.x, 192.168.x, 169.254.x and 100.64-127.x (CGNAT: a tailnet's), four numbers 0-255
+	private_ipv4 :: proc(h: string) -> bool {
+		n: [4]int
+		parts := strings.split(h, ".", context.temp_allocator)
+		if len(parts) != 4 do return false
+		for p, i in parts {
+			if len(p) == 0 || len(p) > 3 do return false
+			for r in p {
+				if r < '0' || r > '9' do return false
+				n[i] = n[i] * 10 + int(r - '0')
+			}
+			if n[i] > 255 do return false
+		}
+		return n[0] == 10 || n[0] == 172 && n[1] >= 16 && n[1] <= 31 || n[0] == 192 && n[1] == 168 || n[0] == 169 && n[1] == 254 || n[0] == 100 && n[1] >= 64 && n[1] <= 127
+	}
 
 	port_ok :: proc(s: string) -> bool {
 		// ":" then 1-5 digits

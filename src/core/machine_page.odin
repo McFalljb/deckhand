@@ -215,6 +215,7 @@ when TEST_HOOKS {
 	page_ssh_argv_for_test: []string // run in place of ssh, %PORT% the local port (unit tests)
 	page_test_finished: map[u64]string // the requests finished: their results' JSON (unit tests)
 	page_test_closed_tab: u64 // the last tab closed because its ssh ended (unit tests)
+	page_test_toast: string // the last failure toast (unit tests; heap)
 }
 
 page_forwards_list :: proc() -> []Page_Forward {return page.forwards[:]}
@@ -241,6 +242,15 @@ page_finish :: proc(f: ^Page_Forward, r: Result) {
 	}
 	emit_event(Finished_Event{request_id = f.request_id, result = r})
 	f.request_id = 0
+	// the user's (the palette, the sidebar): a failure that comes later shows too
+	if !r.ok && f.caller.kind == .UI && !f.caller.hub {
+		msg := fmt.tprintf("Open web page: %s", r.error)
+		when TEST_HOOKS {
+			delete(page_test_toast)
+			page_test_toast = strings.clone(msg)
+		}
+		window_toast(msg, err = true)
+	}
 }
 
 // f's ssh, on f.local. False: it did not start.
@@ -437,13 +447,15 @@ when ODIN_OS == .Darwin {
 	}
 }
 
+MACHINE_PAGE_NO_SESSION :: "Open a chat or session on this Mac, then try again: the page opens in a browser tab there"
+
 // The port answers: its tab opens, and the request finishes (the window's own finished does it
 // when it answers pending).
 @(private = "file")
 page_open_tab :: proc(f: ^Page_Forward, now: time.Tick) {
 	s := machine_local_session()
 	if s == nil {
-		page_forward_close(f, "no session of this Mac's is open: the page opens in a browser tab there", now)
+		page_forward_close(f, "no session of this Mac's is open: open one, then try again", now)
 		return
 	}
 	r, ch, tab_id := browser_open_tab(s, machine_page_url(f.local, f.path), f.caller, f.request_id)
@@ -547,8 +559,10 @@ machine_open_page_apply :: proc(c: Machine_Open_Page, caller: Caller, request_id
 	if !machine_link_up(c.no) do return fail(fmt.tprintf("%s is not online", m.name)), false
 	if !tab_host_up() do return no_window(), false
 	if page_forwards_full() do return fail(fmt.tprintf("%d web pages of other machines are open or closing: close one first", PAGE_FORWARDS_MAX)), false
-	if machine_local_session() == nil do return fail("open a session on this Mac first: the page opens in a browser tab there"), false
-	return page_forward_open(c.no, m, int(c.port), path, caller, request_id)
+	s, changed := machine_host_session() // none open: a new chat holds the page's tab
+	if s == nil do return fail(MACHINE_PAGE_NO_SESSION), changed
+	r, ch := page_forward_open(c.no, m, int(c.port), path, caller, request_id)
+	return r, ch || changed
 }
 
 // Starts the page's ssh (none for a via machine): the tick opens its tab. Pending, or why not.

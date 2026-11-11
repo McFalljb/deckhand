@@ -425,7 +425,8 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:
-		toast_show(core.NO_HARNESS, err = true)
+		if core.id_machine(pid) != 0 do toast_show("No coding agent is installed on that machine: Settings › Machines lists what it needs", err = true)
+		else do toast_show(core.NO_HARNESS, err = true)
 	case 1:
 		harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")

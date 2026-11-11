@@ -72,8 +72,12 @@ Set_Remote_Machines :: struct {
 machines_reachable_default_on :: false
 
 Set_Machines_Reachable :: struct {
-	on: bool,
+	on:      bool,
+	confirm: string, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
 }
+
+// What turning Allow other machines to connect on asks first (the guide's warning, plainly).
+MACHINES_REACH_QUESTION :: "Allow other machines to connect to this Mac? A machine you allow acts as you on this Mac: it can see and drive its sessions, type into its shells and prompt its agents. Allow only machines you trust as yourself."
 // Adds a machine: target (an ~/.ssh/config alias or user@host; a leading `ssh ` or `ssh://` is
 // dropped), name (what Deckhand calls it; "": the target's host part, machine_default_name);
 // via: a development or test build's command in place of `ssh … connect`. User-only.
@@ -201,7 +205,19 @@ machine_target_error :: proc(target: string) -> string {
 		ok := (c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '.' || c == '_' || c == '-' || c == '@' || c == ':'
 		if !ok do return "a target holds only letters, digits and . _ - @ :"
 	}
+	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
 	return ""
+}
+
+MACHINE_PORT_ERROR :: "To use another port, add a Host entry to ~/.ssh/config and type its name here."
+
+// host:2222 (one colon, digits after it): ssh would read it all as the host's name. An IPv6
+// address has more colons.
+machine_target_has_port :: proc(target: string) -> bool {
+	i := strings.last_index_byte(target, ':')
+	if i < 0 || i == len(target) - 1 || strings.count(target, ":") != 1 do return false
+	for c in transmute([]u8)target[i + 1:] do if c < '0' || c > '9' do return false
+	return true
 }
 
 // This Mac's name as the hub hello says it (Viewed from <machine>): the host name without
@@ -358,6 +374,7 @@ Machine_Outcome :: struct {
 	exited:    bool, // the process ended (before a reply)
 	exit_code: int,
 	stderr:    string,
+	up:        bool, // the link was online in this attempt (then it dropped): never a login's
 }
 
 machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string) {
@@ -372,9 +389,11 @@ machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string
 		}
 	}
 	last := machine_last_line(o.stderr)
-	if o.exited && o.exit_code == 255 {
+	// a login's failure is ssh's last word, before the link came up; a link that was up and then
+	// dropped is offline (a prompt's words earlier in its output do not count): it retries
+	if o.exited && o.exit_code == 255 && !o.up {
 		for p in ([?]string{"Permission denied", "Host key verification failed", "password", "passphrase", "keyboard-interactive"}) {
-			if strings.contains(o.stderr, p) do return .Needs_Login, last
+			if strings.contains(last, p) do return .Needs_Login, last
 		}
 	}
 	if o.exited && (o.exit_code == 127 || o.exit_code == 126) do return .Not_Installed, "no Deckhand core at its path"
@@ -675,8 +694,9 @@ when TEST_HOOKS {
 	}
 	// mlink_down with outcome o (a finished attempt). waits: it waits for the user (no retry on
 	// the timer), as mlink_down left it; then no attempt runs in a test either way.
-	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome) -> (waits: bool) {
+	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome, up := false) -> (waits: bool) {
 		if l, _ := mlink_find(no); l != nil {
+			if up do l.phase = .Up // it was online, then this
 			mlink_down(l, o)
 			waits = l.phase == .Stopped
 			l.phase = .Stopped
@@ -895,8 +915,10 @@ mlink_close :: proc(l: ^Mach_Link, wait := false) {
 // The link ended without a hub.taken: a status from what it came to, then a wait (backoff).
 @(private = "file")
 mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
-	s, why := machine_status_of(o)
 	was_up := l.phase == .Up
+	o := o
+	o.up = o.up || was_up
+	s, why := machine_status_of(o)
 	auto := l.auto_install // mlink_set clears it
 	mlink_close(l)
 	machine_route_down(l.no) // what waited for it ends; its terminals attach again when it is up
@@ -1386,6 +1408,7 @@ machine_target_clean :: proc(s: string) -> string {
 machine_target_plain_error :: proc(target: string) -> string {
 	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like jb@nuc.local"
 	if machine_target_error(target) == "" do return ""
+	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
 	if len(target) > 255 do return "That is too long for a machine's address"
 	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like jb@nuc.local: ssh's options go in ~/.ssh/config"
 	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like jb@nuc.local", text_clean(target, 40))
@@ -1522,6 +1545,17 @@ machine_local_session :: proc() -> ^Open_Session {
 	return s
 }
 
+// A session of this Mac's for a tab about another machine (Log in…'s, a web page's): the one in
+// view, else a new chat (when pi is there). nil: neither. changed: a chat was opened.
+machine_host_session :: proc() -> (s: ^Open_Session, changed: bool) {
+	if s = machine_local_session(); s != nil do return
+	ch := chats_project()
+	if ch == nil || !pi_installed() do return nil, false
+	rr, _ := open_new_session(ch^, new_uuid(), "")
+	if !rr.ok do return nil, false
+	return find_session(rr.created_id), true
+}
+
 // What Log in… runs: the link's own ssh (the core's PATH) as the ControlMaster, interactive, in
 // /bin/sh with the control path and target as arguments (never in the script's text).
 machine_login_argv :: proc(m: Machine, run: string) -> (argv: []string, why: string) {
@@ -1543,17 +1577,8 @@ machine_login_apply :: proc(c: Machine_Login, caller: Caller) -> (Result, bool) 
 	if rwhy != "" do return fail(rwhy), false
 	argv, why := machine_login_argv(l.m, run)
 	if why != "" do return fail(why), false
-	s := machine_local_session()
-	changed := false
-	if s == nil {
-		// none open: a new chat holds the login's tab
-		ch := chats_project()
-		if ch == nil || !pi_installed() do return fail(MACHINE_LOGIN_NO_SESSION), false
-		rr, _ := open_new_session(ch^, new_uuid(), "")
-		if !rr.ok do return fail(MACHINE_LOGIN_NO_SESSION), false
-		s, changed = find_session(rr.created_id), true
-		if s == nil do return fail(MACHINE_LOGIN_NO_SESSION), true
-	}
+	s, changed := machine_host_session()
+	if s == nil do return fail(MACHINE_LOGIN_NO_SESSION), changed
 	id, err := shell_tab_start(s, s.cwd, argv = argv, title = fmt.tprintf("Log in to %s", l.name))
 	if err != "" do return fail(err), changed
 	session_show_tab(s, id)

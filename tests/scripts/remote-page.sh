@@ -70,6 +70,14 @@ type $P/docs
 key enter
 eventually 10000
 assert_state open_sessions.0.tabs.1.url http://127.0.0.1:$P/docs
+# no session of this Mac's open: a new chat holds the page's tab (as Log in…'s)
+ui_command {"type":"close_session","session":\$session}
+ui_command {"type":"close_session","session":\$session,"confirm":"\$token"}
+waitstate 10000 open_sessions.# 0
+ui_command {"type":"machine_open_page","no":1,"port":$P,"path":"again"}
+assert_result ok true
+eventually 10000
+assert_state open_sessions.0.tabs.1.url http://127.0.0.1:$P/again
 quit_window
 TXT
 env HOME="$W/home" SHELL=/bin/sh DECKHAND_SEPARATE_CORE=1 DECKHAND_SCRIPT="$W/window.txt" \
@@ -83,6 +91,6 @@ if grep -qE "ASSERT FAILED|TIMEOUT|no element|unknown command|core refused" "$W/
 fi
 LOG="$RUN/core.log"
 n=$(grep -c "\[autotest\] page forward $P: m2 port $P" "$LOG" || true)
-[ "$n" = 2 ] || { echo "remote-page: want 2 forwards opened, got $n"; grep "page forward" "$LOG"; exit 1; }
+[ "$n" = 3 ] || { echo "remote-page: want 3 forwards opened, got $n"; grep "page forward" "$LOG"; exit 1; }
 grep -q "\[autotest\] page forward $P closed: its tab closed" "$LOG" || { echo "remote-page: the closed tab's forward did not go"; grep "page forward" "$LOG"; exit 1; }
 echo "remote-page: ok"

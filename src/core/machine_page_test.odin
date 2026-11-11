@@ -96,6 +96,8 @@ machine_page_children :: proc(t: ^testing.T) {
 		for _, v in page_test_finished do delete(v)
 		delete(page_test_finished)
 		page_test_finished = nil
+		delete(page_test_toast)
+		page_test_toast = ""
 	}
 	m := Machine{no = 9, name = "nuc", target = "me@nuc"}
 	ui := Caller{kind = .UI}
@@ -140,6 +142,14 @@ machine_page_children :: proc(t: ^testing.T) {
 	got := finished(71)
 	testing.expectf(t, strings.contains(got, `"ok":false`) && strings.contains(got, "key-based login"), "71: %s", got)
 	testing.expect(t, settle(), "its entry went")
+	// the user's: the later failure shows (a toast); an agent's is its own result only
+	testing.expectf(t, strings.has_prefix(page_test_toast, "Open web page: ") && strings.contains(page_test_toast, "key-based login"), "toast: %q", page_test_toast)
+	delete(page_test_toast)
+	page_test_toast = ""
+	r, _ = page_forward_open(9, m, 3000, "/", Caller{kind = .Panel}, 70)
+	finished(70)
+	testing.expect(t, settle(), "its entry went")
+	testing.expect_value(t, page_test_toast, "")
 
 	// a port ssh could not bind: another port, at most PAGE_SSH_TRIES, then it fails
 	page_ssh_argv_for_test = sh("echo 'bind [127.0.0.1]:%PORT%: Address already in use'; exec sleep 30")

@@ -188,6 +188,7 @@ CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 MACHINE_ROW :: "deckhand:machine:"
 MACHINE_ADD_ROW :: "deckhand:machine-add"
 MACHINE_REACH_ROW :: "deckhand:machine-reachable"
+MACHINE_SSH_ROW :: "deckhand:machine-ssh" // Machines over SSH is off: Turn on
 // Its coding agents (its core's checklist, read-only here): MACHINE_CHECK_ROW + no + ":" + item id,
 // with Copy (the command, run in a shell tab there).
 MACHINE_CHECK_ROW :: "deckhand:machine-check:"
@@ -367,9 +368,14 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 	}
 	// Coding agents (ui_harness.odin): the harness checklist's states; Install…/Update… open the sheet
 	for r in harness_settings_rows() do add(&out, r)
-	// Machines over SSH (machines.odin), while the setting is on (or this machine lets others in:
-	// the row that turns it off stays)
-	if state.settings.remote_machines || state.settings.machines_reachable {
+	// Machines over SSH (machines.odin): always there, so turning it off never looks like the
+	// machines were deleted (the off row says so, with Turn on)
+	{
+		if !state.settings.remote_machines {
+			n := len(state.machines)
+			detail := n == 0 ? "turn it on to add a machine" : n == 1 ? "your machine is kept: turn it on to connect" : fmt.tprintf("your %d machines are kept: turn it on to connect", n)
+			add(&out, {group = "machines", label = "Machines over SSH is off", detail = detail, path = MACHINE_SSH_ROW, button = "Turn on"})
+		}
 		if state.settings.remote_machines do for m in state.machines {
 			// its status in plain words, as the sidebar says it (machine_status_text); its target
 			// and ssh's own words are in the row's tooltip
@@ -384,8 +390,8 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		}
 		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add a machine…", detail = "user@host or an ~/.ssh/config name", path = MACHINE_ADD_ROW, button = "Add…"})
 		reach := state.settings.machines_reachable
-		detail := reach ? "on: another machine that logs in here over ssh as you can view and drive this one's sessions" : "off: no other machine can reach this one's sessions"
-		add(&out, {group = "machines", label = "Allow other machines to connect to this one", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Allow"})
+		detail := reach ? "ON · they can see and drive this Mac's sessions" : "off"
+		add(&out, {group = "machines", label = "Allow other machines to connect", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Turn on…"})
 	}
 	return out[:]
 }

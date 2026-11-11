@@ -1132,6 +1132,7 @@ confirm_pending :: proc(token: string) {
 		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
 		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
+		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		}
 		ui_do(cmd)
 		return
@@ -1375,6 +1376,7 @@ update_window_title :: proc() {
 	if cs := core.cur_view(); cs != nil {
 		_, place := core.session_place(cs)
 		title = fmt.tprintf("%s · %s — Deckhand", place, core.open_session_title(cs))
+		if cs.machine != 0 do title = fmt.tprintf("%s · %s", core.machine_name(cs.machine), title) // another machine's session
 	}
 	if title == app.window_title do return
 	delete(app.window_title)

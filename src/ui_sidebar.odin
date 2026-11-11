@@ -1378,6 +1378,7 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 	#partial switch h in hit {
 	case Hit_Project: if core.id_machine(u64(h)) != 0 do return false
 	case Hit_Open_Row: if core.id_machine(u64(h)) != 0 do return false
+	case Hit_Session: if core.id_machine(state.selected_project) != 0 do return false
 	}
 	#partial switch h in hit {
 	case Hit_Project, Hit_Pin_Project, Hit_More_Project:
@@ -1604,7 +1605,8 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 			// its name (never cut to nothing: the status gives way first), its status, its button
 			room := text_w_max - px(DOT) - 3 * px(GAP_INLINE)
 			if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
-			name_w := min(text_w(m.name, FONT_UI_SMALL | WEIGHT_HEADER), max(room * 0.6, room - text_w(label, FONT_UI_SMALL)))
+			nw := text_w(m.name, FONT_UI_SMALL | WEIGHT_HEADER)
+			name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48))) // never cut to nothing
 			clay.TextDynamic(clip(m.name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_secondary, FONT_UI_SMALL | WEIGHT_HEADER))
 			if lw := room - name_w; lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
@@ -1708,17 +1710,26 @@ machine_project_row :: proc(p: ^core.Project, i: int, live: bool, text_w_max: f3
 	}
 }
 
-// The selected project's sessions, as that machine lists them (read-only rows for now).
+// The selected project's sessions, as that machine lists them. While it is online a click opens
+// one there (Open_Session_Cmd, as a local row's: machine_route.odin sends it), and + New session
+// starts one there (the local row's harness picker).
 @(private = "file")
 machine_sessions :: proc(live: bool, text_w_max: f32) {
 	th := theme()
 	rows := core.sidebar_sessions(.Sessions)
 	if len(rows) == 0 do list_note(live ? "No sessions yet" : "Not connected", TREE_INDENT, text_w_max)
 	shown, more := capped_rows(rows, tree.all_sessions)
-	for r in shown {
+	for r, k in shown {
+		id := clay.ID("sessoff", u32(k)) // not clickable while it is not online
 		cfg := row_cfg({})
+		if live {
+			append(&drawn.sess, keep(r.session.id))
+			id = clay.ID("sess", u32(len(drawn.sess) - 1)) // ids follow the drawn rows (sidebar_hit)
+			bg, _ := overlay(id, false, ui_hover == Hit(Hit_Session(r.session.id)))
+			cfg = row_cfg(bg)
+		}
 		cfg.layout.padding.left = pu(PAD_ROW + TREE_INDENT)
-		if clay.UI()(cfg) {
+		if clay.UI(id)(cfg) {
 			st := core.session_status(r.session.id)
 			icon(core.harness_row_icon(core.session_harness(r.session^), !live), th.text_muted, HARNESS_ICON_SIZE)
 			clay.TextDynamic(clip(core.session_label(r.session^), text_w_max - px(TREE_INDENT + HARNESS_ICON_SIZE + DOT) - 3 * px(GAP_INLINE)), txt(live ? th.text_secondary : th.text_muted))
@@ -1727,4 +1738,5 @@ machine_sessions :: proc(live: bool, text_w_max: f32) {
 		}
 	}
 	if more > 0 do action_row(clay.ID("showmore", 0), Hit_Show_More(0), .None, fmt.tprintf("Show %d more", more), TREE_INDENT, text_w_max)
+	if live do action_row(clay.ID("new"), Hit_New{}, .Plus, "New session", TREE_INDENT, text_w_max) // the harness picker (harness.odin)
 }

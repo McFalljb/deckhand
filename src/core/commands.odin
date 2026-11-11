@@ -1516,6 +1516,11 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return {ok = true}, true
 	case Set_Machines_Reachable: // Settings › Machines › Allow other machines to connect (the hub door, window_sock.odin)
 		if state.settings.machines_reachable == c.on do return {ok = true}, false
+		// on: the user confirms first, with the warning (a saved setting coming back does not ask)
+		if c.on && caller.kind != .Internal {
+			gr, go_on, ch := confirm_gate(cmd, .Settings_Write, caller, c.confirm, MACHINES_REACH_QUESTION, force_ask = true)
+			if !go_on do return gr, ch
+		}
 		state.settings.machines_reachable = c.on
 		return {ok = true}, true
 	case Machine_Add:     return machine_add_apply(c), false // the machines section changes itself (machines_publish)
@@ -2130,6 +2135,9 @@ same_target :: proc(a, b: Command) -> bool {
 	case Machine_Remove:
 		y, ok := b.(Machine_Remove)
 		return ok && x.no == y.no
+	case Set_Machines_Reachable:
+		y, ok := b.(Set_Machines_Reachable)
+		return ok && x.on == y.on
 	case Delete_Path:
 		y, ok := b.(Delete_Path)
 		return ok && x.path == y.path

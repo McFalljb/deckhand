@@ -269,7 +269,7 @@ palette_run :: proc(it: Palette_Item) {
 		}
 		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
 	case .Page:
-		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do(core.Machine_Open_Page{no = it.id, port = port, path = path})
+		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do_menu(core.Machine_Open_Page{no = it.id, port = port, path = path}, "Open web page") // a failure shows (a later one: machine_page.odin)
 	case .Machine:
 		// the same commands as the sidebar's: Remove asks first, Connect is the row's button
 		if palette.machine_pick == .Remove do ui_do_menu(core.Machine_Remove{no = it.id}, "Remove")

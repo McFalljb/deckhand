@@ -468,6 +468,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_bool(&w, "on", c.on)
 	case Set_Machines_Reachable:
 		kv_bool(&w, "on", c.on)
+		if c.confirm != "" do kv_str(&w, "confirm", c.confirm)
 	case Machine_Add:
 		kv_str(&w, "name", c.name)
 		kv_str(&w, "target", c.target)

@@ -24,7 +24,7 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 		{"example.com", "https://example.com"},
 		{"docs.example.co.uk/path/x?q=1", "https://docs.example.co.uk/path/x?q=1"},
 		{"example.com:8443/x", "https://example.com:8443/x"},
-		{"10.0.0.5", "https://10.0.0.5"},
+		{"8.8.8.8", "https://8.8.8.8"},
 		{"bücher.de", "https://bücher.de"},
 		// local ones http:// (a dev server rarely has TLS)
 		{"localhost", "http://localhost"},
@@ -32,13 +32,20 @@ browser_url_normalizing :: proc(t: ^testing.T) {
 		{"127.0.0.1:8080", "http://127.0.0.1:8080"},
 		{"[::1]:9000/x", "http://[::1]:9000/x"},
 		{"app.localhost:5173", "http://app.localhost:5173"},
+		// a LAN or tailnet machine: a private address, or a one-word name with a port or a path
+		{"10.0.0.5", "http://10.0.0.5"},
+		{"192.168.1.20:8080/x", "http://192.168.1.20:8080/x"},
+		{"100.101.102.103:3001", "http://100.101.102.103:3001"},
+		{"mcfalljb-nuc:3001", "http://mcfalljb-nuc:3001"},
+		{"NUC:3001/admin?x=1", "http://NUC:3001/admin?x=1"},
+		{"nuc/", "http://nuc/"},
 	}
 	for c in ok {
 		got, err := core.browser_url_normalize(c[0])
 		testing.expectf(t, err == "" && got == c[1], "%q -> %q (%s), want %q", c[0], got, err, c[1])
 	}
 	// not addresses: search is not built in yet; schemes Deckhand does not open
-	bad := []string{"", "   ", "how to bake bread", "foo", "example", "a.b1", "example.c", ".example.com", "example.com.", "host:port", "host:123456", "javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "chrome://settings", "ftp://x.org", "about:config", "https://", "ex ample.com", "under_score.com"}
+	bad := []string{"", "   ", "how to bake bread", "foo", "example", "a.b1", "example.c", ".example.com", "example.com.", "host:port", "host:123456", "-nuc:3001", "nuc-:3001", "nu_c:3001", "nuc:", "172.32.0.1x:80", "javascript:alert(1)", "data:text/html,x", "mailto:a@b.c", "chrome://settings", "ftp://x.org", "about:config", "https://", "ex ample.com", "under_score.com"}
 	for b in bad {
 		got, err := core.browser_url_normalize(b)
 		testing.expectf(t, err != "" && got == "", "%q should be refused, got %q", b, got)

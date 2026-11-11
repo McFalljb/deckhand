@@ -565,7 +565,9 @@ A browser tab shows a web page (Chromium, inside Deckhand). The bar above the pa
 - **The address field.** Click it (or press ⌘L while the browser tab is on screen) to type an
   address, then press Enter or **Go**; Esc gives the keyboard back to the page. A full address
   (`https://…`, `http://…`, `file://…`) opens as typed; a bare host like `example.com` or
-  `example.com/docs` gets `https://`, and `localhost:3000` or `127.0.0.1:8080` gets `http://`.
+  `example.com/docs` gets `https://`. A machine on your own network or tailnet gets `http://`:
+  `localhost:3000`, `127.0.0.1:8080`, a private address like `192.168.1.20`, or a one-word
+  machine name with a port or a slash (`nuc:3001`, `nuc/`; `nuc` alone is taken for a word).
   Anything else (words, spaces) is refused with the reason under the field: searching from the
   address field is not built in yet.
 - **The tab's title** is the page's title.

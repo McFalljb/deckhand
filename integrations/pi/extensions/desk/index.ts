@@ -43,7 +43,7 @@ import type { ExtensionAPI, ExtensionContext } from "@earendil-works/pi-coding-a
 import { adoptEnv, backoff, browserRefusal, deskSocket, CONTROL_EVENT, CONTROL_READY, envToken, HelloFlow, line, parse, TAB_EVENT } from "../../lib/protocol.ts";
 import { appCallCommand, appEventsText, appInputEvents, appReplyText, shotFile, shotText } from "../../lib/app.ts";
 import { type Cmd, COMMANDS, confirmedBy, parkedFor, parseCommands, runDescription } from "../../lib/commands.ts";
-import { agentTabOf, agentTarget, type AgentKind, alreadyTrue, eventsText, exited, filterState, findTab, fires, idleCommand, idleText, type Notice, noticeFor, type On, promptCommand, promptSent, refusal, type Seen, seenFrom, seenOf, stateText, tabLabel, tabLine, WATCH_ON, watchHits, watchText } from "../../lib/state.ts";
+import { agentTabOf, agentTarget, type AgentKind, alreadyTrue, errorText, eventsText, exited, filterState, findTab, fires, idleCommand, idleText, type Notice, noticeFor, type On, promptCommand, promptSent, refusal, resultText, type Seen, seenFrom, seenOf, stateText, tabLabel, tabLine, WATCH_ON, watchHits, watchText } from "../../lib/state.ts";
 
 const ENV = "DECKHAND_CONTROL_TOKEN";
 const HELLO_TIMEOUT_MS = 5000;
@@ -370,12 +370,12 @@ export default function (pi: ExtensionAPI) {
 				const ms = seconds(p.timeout_s) * 1000;
 				const { result, waited } = await run(cmd, ms, signal);
 				const nc = result.needs_confirmation;
-				if (result.error !== "needs_confirmation" || !nc) return text(`${waited ? "Finished: " : ""}${JSON.stringify(result)}`);
+				if (result.error !== "needs_confirmation" || !nc) return text(`${waited ? "Finished: " : ""}${resultText(result)}`);
 				if (nc.by === "caller")
 					return text(`${JSON.stringify(result)}\nThe user lets this caller confirm this kind of command itself. Resend the same command with "confirm": "<token>" only if the user asked for exactly this; otherwise send cancel_confirmation with the token.`);
 				onUpdate?.({ content: [{ type: "text", text: `Waiting for the user to confirm in Deckhand: ${nc.summary ?? cmd.type}` }], details: undefined });
 				const out = await confirmation(cmd, ms, signal);
-				return text(`Needed the user's confirmation in Deckhand (${nc.summary ?? cmd.type}): ${out.outcome ?? out.error}.${out.result ? ` Result: ${JSON.stringify(out.result)}` : ""}`);
+				return text(`Needed the user's confirmation in Deckhand (${nc.summary ?? cmd.type}): ${out.outcome ?? out.error}.${out.result ? ` Result: ${resultText(out.result)}` : ""}`);
 			},
 		});
 	}
@@ -415,7 +415,7 @@ export default function (pi: ExtensionAPI) {
 				const { tab, kind } = await agentTab(p);
 				const go = async () => {
 					const { result } = await run(promptCommand(kind, tab, p.text), 60_000, signal);
-					if (!result.ok) throw new Error(`Deckhand did not deliver the prompt to tab ${tab}: ${result.error ?? "unknown"}`);
+					if (!result.ok) throw new Error(`Deckhand did not deliver the prompt to tab ${tab}: ${errorText(result)}`);
 					const sent = promptSent(kind, tab, result);
 					const promptId = kind === "claude" ? Number(result.data?.id) || undefined : undefined;
 					// a pi prompt has run once delivered: "Prompt delivered." then the wait (as before Claude tabs)

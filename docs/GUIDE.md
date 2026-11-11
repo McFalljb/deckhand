@@ -1094,7 +1094,9 @@ pi is installed; Claude Code's once it has been used:
   the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)). **Allow other machines to connect to this one** (off by default,
   separate from Machines over SSH): turn it on on the Mac you want to reach. Then another
   machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
-  drive this Mac's sessions. Off, no other machine can. A Linux machine (development builds) runs its core as your
+  drive this Mac's sessions. Off, no other machine can. A machine you allow acts as you on this
+  Mac: it can type into its shells and prompt its sessions and its Atlas, and so reach the machines
+  this Mac reaches. Allow only machines you trust as yourself. A Linux machine (development builds) runs its core as your
   systemd user service `deckhand-core`, started when needed. Unless lingering is on for you there,
   it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
   keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a

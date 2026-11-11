@@ -503,7 +503,10 @@ each machine's name; desk_state fences each machine's part as data) and acts on 
 command it wants confirmed is refused here, not asked. Only this machine's own Atlas and user go
 through: a machine viewing this one never reaches a third through it, and **remote Atlases stay
 on their machine** (a remote core can send this one nothing but answers). There is no
-Atlas-to-Atlas channel.
+Atlas-to-Atlas channel. That gate is about direct forwarding only: a machine this one lets connect
+(*Allow other machines to connect*) acts as the user here, so it can prompt this Atlas, and through
+it, or a shell here, reach the machines this one reaches. Let only machines you trust as yourself
+connect.
 
 **Their jobs and bells reach the user here**, because a remote core can't notify: this core
 rings for a job there that needs the user (once per run) and for each new entry of that machine's

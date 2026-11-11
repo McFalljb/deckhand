@@ -14,8 +14,9 @@ package core
 // user does it from the window). A wait (pi_wait_idle, claude_wait_idle) waits its own timeout
 // there, plus ROUTE_WAIT_SLACK. The answer is "pending"; the command's
 // state arrives through the mirror before its result (that core flushes its delta first, Q9), and
-// the result finishes the request here, its created_id packed, its error cleaned, and of its data
-// only a known code (ROUTE_CODES). A link
+// the result finishes the request here (route_result): its created_id packed, its error this
+// core's words for a known code (ROUTE_CODES) or "on <machine>: " and its text cleaned and cut
+// short, its data only {machine, code?, id? (a claude_prompt's held text)}. A link
 // that is down answers machine_offline. Its view stays this Mac's: focusing one of its sessions and
 // selecting one of its projects run here (Focus_Session also goes there, so its restored tabs
 // start), and Copy_Selection copies the window's own copy here (the user's ⌘C).
@@ -61,11 +62,23 @@ RELAY_SNAPS_PER_SEC :: 4
 RELAY_SNAP_MAX :: 2 << 20 // a snapshot from another machine, at most (asked for as snapshot_max): parsed on the window's main thread
 RELAY_RETRY :: 2 * time.Second
 ROUTE_TEXT_MAX :: 300 // its errors and confirmation summaries (text_clean)
+ROUTE_REMOTE_ERROR_MAX :: 160 // another machine's error text here, cut to this (bytes; after "on <machine>: ")
 ROUTE_WAIT_SLACK :: 10 * time.Second // a forwarded wait: its own timeout, plus this
 ROUTE_WAIT_MAX :: 130 * time.Second
 // The data codes a forwarded command's result keeps (data.code; everything else in its data is
-// dropped): what the agents' tools read.
+// dropped): what the agents' tools read. Each comes with this core's own words, never that
+// machine's (review round 1).
 ROUTE_CODES := [?]string{"timeout", "tab_gone", "cancelled", "dropped", "browser_not_here", "no_window", "machine_offline"}
+@(private = "file")
+ROUTE_CODE_TEXTS := [?]string {
+	"it did not finish in time",
+	"that tab is gone",
+	"it was cancelled",
+	"the user dropped the prompt before it was sent",
+	"browser tabs run only in that machine's own window",
+	"that machine has no window",
+	"it is not connected",
+}
 
 @(private = "file")
 Forward :: struct {
@@ -276,11 +289,7 @@ machine_route_reply :: proc(no: u64, text: string) {
 		if idx < 0 do return
 	} else do return
 	rr := m.result
-	r := Result{ok = rr.ok, error = text_clean(rr.error, ROUTE_TEXT_MAX)}
-	if rr.created_id != 0 do r.created_id, _ = id_pack(no, rr.created_id)
-	if code := json_path(rr.data, "code"); code != "" do for c in ROUTE_CODES do if c == code {
-		r.data = fmt.tprintf(`{{"code":"%s"}}`, c)
-	}
+	r := route_result(no, route.forwards[idx], rr)
 	if !rr.ok && rr.error == "needs_confirmation" {
 		f := route.forwards[idx]
 		if f.kind != .UI { 	// Atlas's: never asked in this Mac's bar
@@ -290,6 +299,39 @@ machine_route_reply :: proc(no: u64, text: string) {
 		}
 	}
 	forward_finish(idx, r)
+}
+
+// A forwarded command's result as this core answers it (review round 1): ok and created_id
+// (packed); the error in this core's words for a known code, else "on <machine>: " and that
+// machine's text, one line, cleaned and cut short (the agents' tools mark it as that machine's
+// data); data {"machine": <its name here>, "code"?: a known code, "id"?: a claude_prompt's held
+// text's id (an integer, 1 to 2^53-1)}, nothing else of what it sent.
+@(private = "file")
+route_result :: proc(no: u64, f: ^Forward, rr: Result) -> Result {
+	r := Result{ok = rr.ok}
+	if rr.created_id != 0 do r.created_id, _ = id_pack(no, rr.created_id)
+	b := strings.builder_make(context.temp_allocator)
+	strings.write_string(&b, `{"machine":`)
+	json_quote(&b, machine_name(no))
+	known := -1
+	if code := json_path(rr.data, "code"); code != "" do for c, i in ROUTE_CODES do if c == code do known = i
+	if known >= 0 do fmt.sbprintf(&b, `,"code":"%s"`, ROUTE_CODES[known])
+	if _, is := f.cmd.(Claude_Prompt); is && rr.data != "" {
+		if v, err := jg.parse_string(rr.data, .JSON, true, context.temp_allocator); err == nil {
+			if o, ok := v.(json.Object); ok {
+				if id, iok := o["id"].(json.Integer); iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `,"id":%d`, id)
+			}
+		}
+	}
+	strings.write_byte(&b, '}')
+	r.data = strings.to_string(b)
+	switch {
+	case known >= 0:
+		r.error = rr.ok ? "" : fmt.tprintf("on %s: %s", machine_name(no), ROUTE_CODE_TEXTS[known])
+	case rr.error != "":
+		r.error = fmt.tprintf("on %s: %s", machine_name(no), text_clean_remote(rr.error, ROUTE_REMOTE_ERROR_MAX))
+	}
+	return r
 }
 
 // That machine wants the user to confirm f's command: asked here (the bar), with a token of this

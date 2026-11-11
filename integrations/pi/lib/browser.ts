@@ -33,8 +33,12 @@ const tabId = (tab: unknown, what = "tab") => {
  * labelled with what it holds. Everything inside is page data.
  */
 export function fence(label: string, body: string): string {
-	const runs = body.match(/`+/g) ?? [];
-	const n = Math.max(3, ...runs.map((r) => r.length + 1));
+	// one pass for the longest run (no spread: a hostile text may hold more runs than a call takes arguments)
+	let n = 3;
+	for (let i = 0, run = 0; i < body.length; i++) {
+		run = body.charCodeAt(i) === 96 ? run + 1 : 0;
+		if (run + 1 > n) n = run + 1;
+	}
 	const f = "`".repeat(n);
 	return `${f}${label}\n${body}\n${f}`;
 }

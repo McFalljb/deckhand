@@ -1280,15 +1280,26 @@ machine's link as `{"type":"command","id":"h<n>","now":true,"on_behalf":{"kind":
 "command":{…}}` (the caller's own kind), its ids unpacked and a `pi_session_id`'s `m<no>:` taken
 off, and answers `pending`. That core's `result` (and its `finished`, for one it answered pending)
 ends the request here: `created_id` packed (a session the user opened or made is shown here too),
-the error cleaned, and of its `data` only a known `code` (`timeout`, `tab_gone`, `cancelled`,
-`dropped`, `browser_not_here`, `no_window`, `machine_offline`). Its state change arrives through
+its error and `data` as below (of its `data` only a known `code`: `timeout`, `tab_gone`,
+`cancelled`, `dropped`, `browser_not_here`, `no_window`, `machine_offline`). Its state change arrives through
 the mirror before the result. A link that is down, or goes down while it waits, answers
 `{"ok":false,"data":{"code":"machine_offline"}}`; no answer in 30 s fails it (`pi_wait_idle` and
 `claude_wait_idle`: their own `timeout_ms` plus 10 s, at most 130 s). A `needs_confirmation` for
 the user's command is asked here: the bar shows *On <machine>: <its summary>* with a token of this
 core's; confirming sends the user's command again with that machine's token, and Cancel cancels it
 there. Atlas's is refused instead ("on <machine> this needs the user's confirmation"): the user
-does it from the window.
+does it from the window. A result's error is this core's own words for a known code, else
+`on <machine>: ` and that machine's text (one line, cleaned, at most 160 bytes), and its `data` is
+`{"machine": "<its name here>", "code"?, "id"?}` (`id`: a `claude_prompt`'s held text, an integer
+below 2^53); the desk tools put an error from another machine after a note, fenced as its data.
+
+**What the `caller.hub` gate does not stop.** A machine allowed to connect to this one (*Allow
+other machines to connect to this one*) acts as the user here, with `ui`: it can type into this
+machine's shell tabs and prompt its sessions, Atlas included. So it can reach whatever this
+machine reaches, its other machines too: through a shell here (`ssh`), or by asking this
+machine's Atlas, whose commands are then this machine's own `control`. The gate only stops a hub's
+own commands from being forwarded straight on. Allow other machines to connect only to machines you
+trust as yourself.
 
 **Other machines' jobs and bells** (design §8.6, §10.4 M6-F; `src/core/machine_mirror.odin`). A
 remote core can't notify (its `window.request` is dropped), so this core rings for it, naming the

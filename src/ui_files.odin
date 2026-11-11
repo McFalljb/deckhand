@@ -727,7 +727,8 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			if p == core.CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
 			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
 			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
-			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this one" : "Let another machine's Deckhand connect to this one over ssh. It must log in as you (Remote Login on, your keys), and then sees and drives this machine's sessions", ""
+			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this Mac" : "Let your other machines connect to this Mac over ssh, as you (asks first)", ""
+			if p == core.MACHINE_SSH_ROW do return "Turn on Machines over SSH: your machines connect again", ""
 			if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
 			if no, ok := core.machine_row_no(p); ok do for m in state.machines do if m.no == no do return machine_action_tip(m), ""
 			if strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
@@ -747,6 +748,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			return fmt.tprintf("%s on %s: %s (as that machine's own list says)", r.name, m.name, core.MACHINE_CHECK_WORDS[c.state]), ""
 		}
 		if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
+		if p == core.MACHINE_SSH_ROW do return "Machines over SSH is off: Deckhand keeps no link to your machines, and keeps the list", ""
 		if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "On: another machine that logs in here over ssh as you can see and drive this Mac's sessions" : "Off: no other machine can reach this Mac's sessions", ""
 		if p == core.CLAUDE_FLAGS_HEAD_ROW || p == core.CLAUDE_FLAGS_ROW || p == core.CLAUDE_FLAGS_WARN_ROW do return fmt.tprintf("Default Claude Code flags for new tabs: %s. Only the tabs you start (new tab, session, chat, your resume); never agents', panels' or apps', nor a read-only chat. With it, Claude edits files and runs commands without asking.", state.settings.claude_skip_permissions ? "--dangerously-skip-permissions" : "none"), ""
 		if strings.has_prefix(p, core.PI_EXT_ROW) {
@@ -1293,7 +1295,11 @@ settings_folder_button :: proc(path: string) -> bool {
 		return true
 	}
 	if path == core.MACHINE_REACH_ROW {
-		ui_do(core.Set_Machines_Reachable{on = !state.settings.machines_reachable})
+		ui_do_menu(core.Set_Machines_Reachable{on = !state.settings.machines_reachable}, "Allow other machines to connect") // on: asks first
+		return true
+	}
+	if path == core.MACHINE_SSH_ROW {
+		ui_do_menu(core.Set_Remote_Machines{on = true}, "Turn on Machines over SSH")
 		return true
 	}
 	switch path {

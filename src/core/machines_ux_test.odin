@@ -173,3 +173,18 @@ machines_ux_no_retry :: proc(t: ^testing.T) {
 }
 
 } // when TEST_HOOKS
+
+// Allow other machines to connect: turning it on asks first, with the warning; off does not.
+@(test)
+machines_ux_reachable_asks :: proc(t: ^testing.T) {
+	saved := state.settings.machines_reachable
+	defer state.settings.machines_reachable = saved
+	state.settings.machines_reachable = false
+	r := run_command(Set_Machines_Reachable{on = true}, {kind = .UI})
+	testing.expect(t, !r.ok && r.error == "needs_confirmation" && strings.contains(r.confirm_summary, "Allow only machines you trust as yourself"), r.confirm_summary)
+	testing.expect(t, !state.settings.machines_reachable, "not on before the yes")
+	r = run_command(Set_Machines_Reachable{on = true, confirm = r.confirm_token}, {kind = .UI})
+	testing.expect(t, r.ok && state.settings.machines_reachable, r.error)
+	r = run_command(Set_Machines_Reachable{on = false}, {kind = .UI})
+	testing.expect(t, r.ok && !state.settings.machines_reachable, "off at once")
+}

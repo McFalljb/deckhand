@@ -72,8 +72,12 @@ Set_Remote_Machines :: struct {
 machines_reachable_default_on :: false
 
 Set_Machines_Reachable :: struct {
-	on: bool,
+	on:      bool,
+	confirm: string, // turning it on: the user confirms first (MACHINES_REACH_QUESTION)
 }
+
+// What turning Allow other machines to connect on asks first (the guide's warning, plainly).
+MACHINES_REACH_QUESTION :: "Allow other machines to connect to this Mac? A machine you allow acts as you on this Mac: it can see and drive its sessions, type into its shells and prompt its agents. Allow only machines you trust as yourself."
 // Adds a machine: target (an ~/.ssh/config alias or user@host; a leading `ssh ` or `ssh://` is
 // dropped), name (what Deckhand calls it; "": the target's host part, machine_default_name);
 // via: a development or test build's command in place of `ssh … connect`. User-only.

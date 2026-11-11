@@ -60,11 +60,25 @@ wait 500
 assert_drawn Machines
 assert_not_drawn experimental
 assert_not_drawn via ·
+# the Machines group is the last one: wheel the list to its end
+scroll -60 150 400
+wait 50
+scroll -60 150 400
+wait 300
+# (a narrow sidebar cuts the row's label; the whole of it is in the tooltip)
+assert_drawn Allow other
+clickid fcreate @deckhand:machine-reachable
+wait 500
+assert_drawn Allow other machines to connect to this Mac?
+clickid confirm_no
+wait 300
+waitstate 3000 settings.machines_reachable false
 ui_command {"type":"set_left_tab","tab":"sessions"}
 wait 300
 assert_rows open -
 clickid open 0
 waitfor $ 20000
+assert_drawn on m2
 eventually 20000
 assert_rows machines m2:offline:3
 assert_drawn offline

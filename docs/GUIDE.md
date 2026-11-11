@@ -266,7 +266,9 @@ you fixed it). Deckhand does not keep retrying a machine that needs you (to log 
 this Mac): it tries again when you click. An offline machine is retried on its own, less and less
 often. Under it are its open sessions, then its projects; click a project to list its sessions,
 as that machine has them. Click an open session to show it, or one of a project's sessions to open
-it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
+it there (**+ New session** under it starts one there), and work in its terminals as in a local tab.
+While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
+and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
 **⌘1**–**⌘9** and clicking its tabs act on that machine; a confirmation it asks for shows here as
 *On <machine>: …*. **Open web page…** on an online machine's row (or **Open a machine's web page…** in the
@@ -1092,7 +1094,8 @@ pi is installed; Claude Code's once it has been used:
   open the setup sheet's coding agents step, where the command shows and runs. **Refresh** looks
   again.
 - **Machines**: with the gear's **Machines over SSH** on (on by default; turn it off and Deckhand
-  keeps no link to any machine). Until you add a machine nothing happens: no `ssh`, no process.
+  keeps no link to any machine, and the group says *Machines over SSH is off* with **Turn on**:
+  your machines are kept). Until you add a machine nothing happens: no `ssh`, no process.
   Each machine you added, with what is wrong and what to do in plain words, or its status
   (`online` and its Deckhand version); point at it for its ssh address and ssh's own words. Its
   button is the sidebar's: **Connect** tries now, **Log in…**, **Take back** takes it from whoever
@@ -1104,8 +1107,9 @@ pi is installed; Claude Code's once it has been used:
   connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
   <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
   use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
-  the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)). **Allow other machines to connect to this one** (off by default,
-  separate from Machines over SSH): turn it on on the Mac you want to reach. Then another
+  the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)). **Allow other machines to connect** (off by default,
+  separate from Machines over SSH): turn it on on the Mac you want to reach (**Turn on…** asks
+  first). Then another
   machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
   drive this Mac's sessions. Off, no other machine can. A machine you allow acts as you on this
   Mac: it can type into its shells and prompt its sessions and its Atlas, and so reach the machines

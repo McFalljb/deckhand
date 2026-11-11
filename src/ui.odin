@@ -688,9 +688,22 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 	}) {
 		if !state.layout.left_open do lights_buttons(px(LIGHTS_X + LIGHTS_W + SP_2 - TERM_PAD), px(SP_2))
 		if cs != nil {
+			// another machine's session: one quiet marker of where it runs, before its tabs
+			marker_w: f32 = 0
+			if cs.machine != 0 {
+				label := clip(fmt.tprintf("on %s", core.machine_name(cs.machine)), px(140), FONT_UI_SMALL)
+				marker_w = text_w(label, FONT_UI_SMALL) + px(2 * SP_2 + SP_1)
+				if clay.UI(clay.ID("remote_marker"))({
+					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TAB_H - SP_1))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
+					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+					border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
+				}) {
+					clay.TextDynamic(label, txt(th.text_muted, FONT_UI_SMALL))
+				}
+			}
 			if len(cs.panes) <= 1 {
 				left, _ := column_widths()
-				strip_tabs(cs, nil, w - left * app.dpi - top_bar_fixed_w())
+				strip_tabs(cs, nil, w - left * app.dpi - top_bar_fixed_w() - marker_w)
 			}
 			tool_button(.New_Tab)
 			tool_button(.New_Menu, menu.open && menu.target == Menu_Target(Menu_New{}))

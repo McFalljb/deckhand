@@ -838,13 +838,16 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return dead_tab_tip_for(x)
 	case Hit_Tab:
 		// a dead pi tab: how it ended; else its status dot's source and age (agent_status.odin)
-		_, tab, _ := find_tab(u64(x))
+		ts, tab, _ := find_tab(u64(x))
 		if tip := dead_tab_hover_tip(tab); tip != "" do return tip, ""
 		if tab != nil {
 			// a Claude tab: its model too (claude_rows.odin)
 			st, model := core.status_explain(tab^), core.claude_tab_tip(tab^)
-			if st != "" && model != "" do return fmt.tprintf("%s — %s", model, st), ""
-			return model != "" ? model : st, ""
+			tip := model != "" ? model : st
+			if st != "" && model != "" do tip = fmt.tprintf("%s — %s", model, st)
+			// another machine's tab: where it runs, first
+			if ts != nil && ts.machine != 0 do tip = tip != "" ? fmt.tprintf("On %s · %s", core.machine_name(ts.machine), tip) : fmt.tprintf("On %s", core.machine_name(ts.machine))
+			return tip, ""
 		}
 	case Hit_Open_Row:
 		s := core.find_session(u64(x))

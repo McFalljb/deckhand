@@ -80,7 +80,7 @@ MACHINE_JOB_NAMES := [Machine_Job]string {
 	.Verifying    = "checking",
 	.Copying      = "installing",
 	.Cleaning     = "cleaning up",
-	.Handing_Over = "handing over",
+	.Handing_Over = "starting",
 	.Failed       = "failed",
 	.Done         = "installed",
 }
@@ -152,7 +152,7 @@ machine_update_offer :: proc(here, there: string, status: Machine_Status, skew: 
 
 // What to do instead, for a core outside Deckhand's folder (Command_Only).
 machine_update_command :: proc(name: string) -> string {
-	return fmt.tprintf("Deckhand on %s runs a core from outside its own folder: update it there (open Deckhand on %s, or run that build's `deckhand-core-serve install --data <its data folder>`)", name, name)
+	return fmt.tprintf("Deckhand on %s wasn't installed by Deckhand, so it can't be updated from here: update it on %s (open Deckhand there)", name, name)
 }
 
 // The Linux release asset for a version (scripts/pack-linux.sh) and its one top dir.
@@ -328,7 +328,7 @@ tarball_verify :: proc(path, sig_text, version: string, want_size: i64, key: str
 	cd, sig_b64, format, sok := tarball_sig_parse(sig_text)
 	if !sok do return "its signature file is not one Deckhand reads"
 	manifest := usig.manifest(version, name, size, sum, cd, context.temp_allocator, format)
-	if !usig.verify(key, transmute([]byte)manifest, sig_b64) do return "its signature is not valid"
+	if !usig.verify(key, transmute([]byte)manifest, sig_b64) do return "the download's signature does not match, so nothing was installed: try again later, or update Deckhand on this Mac first"
 	return ""
 }
 
@@ -1008,7 +1008,7 @@ machine_install_tick :: proc(now: time.Tick) {
 		got := machine_linger_answer(string(l.child.out[:l.child.out_n]))
 		if !l.gone { // else its machine went (or Machines over SSH did): nothing to say of it
 			if got == .On do machine_linger_set(l.no, .On)
-			else do window_toast(fmt.tprintf("Linger is still off on %s (polkit wants a password there): run `%s` on it yourself", l.name, LINGER_COMMAND), err = true)
+			else do window_toast(fmt.tprintf("Keep running: %s's login manager wants a password, so its jobs still stop when you log out. Run `%s` on %s yourself", l.name, LINGER_COMMAND, l.name), err = true)
 		}
 		heap := runtime.heap_allocator()
 		delete(l.name, heap)

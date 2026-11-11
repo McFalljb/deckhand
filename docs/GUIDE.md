@@ -470,8 +470,8 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   down**): the pane with the keyboard splits in two and a new shell opens in the new half. A
   session has at most 8 panes, and a split needs room for two panes of at least 240 × 140
   points. Once split, each pane has its own strip of tabs (they leave the title bar), with a
-  **+** for a new shell in that pane; the pane with the keyboard has an accent line under its
-  strip. Click in a pane to give it the keyboard (the click also acts there, so a click in a
+  **+** whose menu opens a new shell, Claude, browser or app tab in that pane; the pane with the
+  keyboard has an accent line under its strip. Click in a pane to give it the keyboard (the click also acts there, so a click in a
   shell starts a selection at once), or press ⌃⌘←, ⌃⌘→, ⌃⌘↑ or ⌃⌘↓ (**Focus pane left**,
   **Focus pane right**, **Focus pane up**, **Focus pane down**). A selection you drag from one
   pane over another stays in the pane where you pressed. ⌘1–⌘9, ⇧⌘] and ⇧⌘[ and ⌘W act on

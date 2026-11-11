@@ -578,7 +578,7 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	}
 }
 
-// A pane's own strip (the session is split): its tabs, then "+" (a new shell in it). The focused
+// A pane's own strip (the session is split): its tabs, then "+" (the new-tab menu, for it). The focused
 // pane's strip has an accent line along its bottom.
 @(private = "file")
 pane_strip_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
@@ -1105,7 +1105,7 @@ Hit_Session :: distinct string // pi session id
 Hit_New :: struct {}
 Hit_Tab :: distinct u64 // tab id
 Hit_Close_Tab :: distinct u64 // tab id (a pi tab's closes its session)
-Hit_Pane_New :: distinct u64 // a pane strip's "+": a new shell in that pane (pane id)
+Hit_Pane_New :: distinct u64 // a pane strip's "+": the new-tab menu, for that pane (pane id)
 Hit_Pane_Divider :: distinct u64 // a divider between panes (its split's id)
 Hit_Confirm :: distinct string // confirmation token
 Hit_Cancel :: distinct string

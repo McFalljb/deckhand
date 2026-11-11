@@ -1043,6 +1043,14 @@ panes_split_layout :: proc(t: ^testing.T) {
 	clay.SetPointerState(app.pointer, false)
 	_ = ui_layout(1400, 860)
 	testing.expect_value(t, ui_hit(), Hit(Hit_Pane_New(b)))
+	// its click (#80): the title bar's new-tab menu, for that pane, tab kinds only
+	pane_click(Hit_Pane_New(b))
+	nm, is_new := menu.target.(Menu_New)
+	testing.expect(t, menu.open && is_new && nm.pane == b, "the pane's new-tab menu")
+	items := menu_items()
+	testing.expect(t, len(items) > 0 && items[0].label == "New shell tab", "a new shell first")
+	for it in items do testing.expectf(t, it.label != "New chat" && !strings.has_prefix(it.label, "New session"), "no %q", it.label)
+	menu_close()
 	// three panes: B split down; nobody under the minimum
 	r = core.run_command(core.Split_Pane{pane = b, direction = .Down, tab_id = ids[1]}, PT_UI)
 	testing.expectf(t, r.ok, "split down: %s", r.error)

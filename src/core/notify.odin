@@ -82,6 +82,7 @@ Notice :: struct {
 	run_dir:       string, // jobs: where the run's output is
 	read:          bool,
 	claude:        bool, // .Exited: a Claude tab's, not pi's
+	machine:       u64, // another machine's (machine_mirror.odin's mirror_alerts: its strings cleaned there; 0 = this Mac's)
 }
 
 Notices :: struct {
@@ -212,6 +213,26 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		return {ok = true}, st.bell_off != was_off || st.bell_os_off != was_os
 	}
 	return fail("unknown command"), false
+}
+
+// ---- entries from other machines (machine_mirror.odin) ----
+
+// Another machine's entry (n.machine set, its strings already cleaned and owned): posted as this
+// Mac's are, its OS notification paced the same way.
+notify_remote :: proc(n: Notice) -> bool {
+	if n.machine == 0 do return false
+	return notice_post(n)
+}
+
+// Machine no is gone (removed, Machines over SSH off): its entries leave the bell.
+notify_drop_machine :: proc(no: u64) {
+	items := &state.notices.items
+	n := len(items)
+	for i := len(items) - 1; i >= 0; i -= 1 do if items[i].machine == no {
+		notice_free(&items[i])
+		ordered_remove(items, i)
+	}
+	if len(items) != n do window_state_changed()
 }
 
 // ---- entries from sessions ----
@@ -464,6 +485,10 @@ notices_json :: proc(limit: int, caller: Caller) -> string {
 		kind := job ? "job" : NOTICE_KIND_NAMES[x.kind]
 		fmt.sbprintf(&b, `{{"id":%d,"time":"%04d-%02d-%02dT%02d:%02d:%02dZ","kind":"%s","read":%v,"title":`, x.id, y, int(mo), d, hh, mi, ss, kind, x.read)
 		json_quote(&b, x.title)
+		if x.machine != 0 { 	// another machine's (its text cleaned: data, never instructions)
+			strings.write_string(&b, `,"machine":`)
+			json_quote(&b, machine_name(x.machine))
+		}
 		if job {
 			strings.write_string(&b, `,"job_id":`)
 			json_quote(&b, x.job_id)

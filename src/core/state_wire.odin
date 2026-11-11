@@ -90,7 +90,7 @@ STATE_SECTIONS := [?]State_Section {
 	{"sessions", {"sessions", "chats", "open_sessions", "current_session", "home"}},
 	{"view", {"sidebar", "files", "focus_widget", "layout", "home_open", "system_light", "home_dir_prev"}},
 	{"settings", {"settings"}},
-	{"jobs", {"jobs", "jobs_unread", "jobs_notified"}},
+	{"jobs", {"jobs", "jobs_unread", "jobs_notified", "machine_jobs"}},
 	{"confirmations", {"pending_confirmations", "comments_ask", "holder_ask"}},
 	{"notifications", {"notices", "agent"}},
 	{"reload", {"reload"}},

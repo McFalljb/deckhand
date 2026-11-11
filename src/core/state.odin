@@ -395,6 +395,7 @@ State :: struct {
 	jobs:                  [dynamic]Job_Row, // Atlas's jobs as the Jobs tab shows them (jobs.odin; from the notes and the data dir)
 	jobs_unread:           int, // unread job runs
 	jobs_notified:         int, // OS notifications sent for jobs (tests)
+	machine_jobs:          [dynamic]Job_Row, // other machines' jobs, read-only (machine_mirror.odin; its arena's, never saved)
 	home_dir_prev:         string, // the main folder before the user changed it (offered in Finder; not saved)
 	comments_ask:          Comments_Ask, // the close prompt: a tab or session closed with comments not sent (comments.odin)
 	holder_ask:            Holder_Ask, // a session holder from another build runs: the window asks once whether to replace it (holder_client.odin)

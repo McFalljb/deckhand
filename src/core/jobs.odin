@@ -100,6 +100,7 @@ Job_Row :: struct {
 	unread:        int,
 	recent:        [dynamic]string, // the note's run lines, newest first
 	needs_you:     [dynamic]string, // the last run's
+	machine:       u64, // another machine's (State.machine_jobs, machine_mirror.odin: read-only, its strings cleaned; 0 = this Mac's)
 }
 
 // ---- runtime ----

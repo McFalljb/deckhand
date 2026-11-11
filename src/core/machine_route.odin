@@ -5,12 +5,17 @@ package core
 //
 // Commands. A command naming another machine's id (machine_mirror.odin's id fields: all of one
 // machine, else refused) runs there, not here. run_command checks caller_may first; then only the
-// user's (ui) are forwarded, on that machine's link, with every id unpacked, a pi session id's
-// "m<no>:" taken off, and "on_behalf":{"kind":"ui"}: its core applies ui's rules again
-// (window_link.odin's hub_on_behalf: never above ui, never internal). Any other caller's is
-// refused here (agents and Atlas come in M6-F, as control). The answer is "pending"; the command's
+// user's (ui) and Atlas's (control, M6-F) are forwarded, and only when they are this machine's own
+// (not Caller.hub: a machine viewing this one never drives a third through it), on that machine's
+// link, with every id unpacked, a pi session id's "m<no>:" taken off, and "on_behalf":{"kind":
+// "ui"|"control"} (the caller's own kind): its core applies that kind's rules again (window_link.
+// odin's hub_on_behalf: never above ui, never internal). Any other caller's is refused here. A
+// control command that machine wants confirmed is refused here, not asked in this Mac's bar (the
+// user does it from the window). A wait (pi_wait_idle, claude_wait_idle) waits its own timeout
+// there, plus ROUTE_WAIT_SLACK. The answer is "pending"; the command's
 // state arrives through the mirror before its result (that core flushes its delta first, Q9), and
-// the result finishes the request here, its created_id packed, its error cleaned, no data. A link
+// the result finishes the request here, its created_id packed, its error cleaned, and of its data
+// only a known code (ROUTE_CODES). A link
 // that is down answers machine_offline. Its view stays this Mac's: focusing one of its sessions and
 // selecting one of its projects run here (Focus_Session also goes there, so its restored tabs
 // start), and Copy_Selection copies the window's own copy here (the user's ⌘C).
@@ -56,6 +61,11 @@ RELAY_SNAPS_PER_SEC :: 4
 RELAY_SNAP_MAX :: 2 << 20 // a snapshot from another machine, at most (asked for as snapshot_max): parsed on the window's main thread
 RELAY_RETRY :: 2 * time.Second
 ROUTE_TEXT_MAX :: 300 // its errors and confirmation summaries (text_clean)
+ROUTE_WAIT_SLACK :: 10 * time.Second // a forwarded wait: its own timeout, plus this
+ROUTE_WAIT_MAX :: 130 * time.Second
+// The data codes a forwarded command's result keeps (data.code; everything else in its data is
+// dropped): what the agents' tools read.
+ROUTE_CODES := [?]string{"timeout", "tab_gone", "cancelled", "dropped", "browser_not_here", "no_window", "machine_offline"}
 
 @(private = "file")
 Forward :: struct {
@@ -64,7 +74,9 @@ Forward :: struct {
 	request_id: u64, // this core's (the window's command)
 	remote_rid: u64, // that core's, once its result said pending
 	cmd:        Command, // the user's, ids packed (heap): a confirmation asked here holds it
+	kind:       Caller_Kind, // .UI or .Control
 	sent:       time.Tick,
+	wait:       time.Duration, // its answer, at most this late
 }
 
 @(private = "file")
@@ -169,7 +181,7 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	if c, is := cmd.(Cancel_Confirmation); is {
 		for p, i in route.proxies do if p.token == c.token { 	// asked here for another machine
 			// there too, as the user's (another caller's cancel drops it here only: it expires there)
-			if caller.kind == .UI do machine_link_send_text(p.machine, hub_command_json(Cancel_Confirmation{token = p.remote}, "", .UI))
+			if caller.kind == .UI && !caller.hub do machine_link_send_text(p.machine, hub_command_json(Cancel_Confirmation{token = p.remote}, "", .UI))
 			proxy_drop(i)
 			return {ok = true}, true
 		}
@@ -183,16 +195,17 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		return {}, false // this Mac's view; the window's own copy's selection
 	case Focus_Session:
 		// this Mac's view; the user's goes there too, so its restored tabs start
-		if caller.kind == .UI do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))
+		if caller.kind == .UI && !caller.hub do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))
 		return {}, false
 	}
-	if caller.kind != .UI do return fail("this is on another machine: only you can work in it from here for now"), true
+	// the user's and Atlas's, from this machine only: never a hub's (no reaching a third machine)
+	if (caller.kind != .UI && caller.kind != .Control) || caller.hub do return fail("this is on another machine: only you and Atlas on this machine can work in it from here"), true
 	if !machine_link_up(no) do return machine_offline(no), true
 	if len(route.forwards) >= ROUTE_FORWARDS_MAX do return fail("too many commands are waiting for other machines"), true
 	heap := runtime.heap_allocator()
 	route.next += 1
 	f := new(Forward, heap)
-	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), sent = time.tick_now()}
+	f^ = {id = route.next, machine = no, request_id = request_id, cmd = command_clone(cmd, heap), kind = caller.kind, sent = time.tick_now(), wait = route_wait(cmd)}
 	if !machine_link_send_text(no, hub_command_json(command_for_machine(cmd, no), fmt.tprintf("h%d", f.id), caller.kind)) {
 		forward_free(f)
 		return machine_offline(no), true
@@ -200,6 +213,19 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	append(&route.forwards, f)
 	if autotest_active do fmt.printfln("[autotest] machine %s: forwarded %s", machine_name(no), command_type(cmd))
 	return {ok = true, pending = true}, true
+}
+
+// How long a forwarded command's answer may take: a wait's own timeout there, plus slack.
+@(private = "file")
+route_wait :: proc(cmd: Command) -> time.Duration {
+	ms: u64
+	#partial switch c in cmd {
+	case Pi_Wait_Idle:     ms = c.timeout_ms
+	case Claude_Wait_Idle: ms = c.timeout_ms
+	case:                  return ROUTE_WAIT
+	}
+	if ms == 0 || ms > u64(ROUTE_WAIT_MAX / time.Millisecond) do return ROUTE_WAIT_MAX
+	return clamp(time.Duration(ms) * time.Millisecond + ROUTE_WAIT_SLACK, ROUTE_WAIT, ROUTE_WAIT_MAX)
 }
 
 @(private = "file")
@@ -221,7 +247,7 @@ forward_finish :: proc(i: int, r: Result) {
 	ordered_remove(&route.forwards, i)
 	defer forward_free(f)
 	r := r
-	if r.ok && r.created_id != 0 {
+	if r.ok && r.created_id != 0 && f.kind == .UI {
 		// it opened or made one of its sessions: shown here, as a local one would be
 		if s := find_session(r.created_id); s != nil && s.machine == f.machine && state.current_session != s.id {
 			run_command(Focus_Session{session = s.id}, {kind = .Internal})
@@ -252,7 +278,17 @@ machine_route_reply :: proc(no: u64, text: string) {
 	rr := m.result
 	r := Result{ok = rr.ok, error = text_clean(rr.error, ROUTE_TEXT_MAX)}
 	if rr.created_id != 0 do r.created_id, _ = id_pack(no, rr.created_id)
-	if !rr.ok && rr.error == "needs_confirmation" && rr.confirm_token != "" do r = proxy_park(route.forwards[idx], rr)
+	if code := json_path(rr.data, "code"); code != "" do for c in ROUTE_CODES do if c == code {
+		r.data = fmt.tprintf(`{{"code":"%s"}}`, c)
+	}
+	if !rr.ok && rr.error == "needs_confirmation" {
+		f := route.forwards[idx]
+		if f.kind != .UI { 	// Atlas's: never asked in this Mac's bar
+			r = fail(fmt.tprintf("on %s this needs the user's confirmation: ask the user to do it from Deckhand's window", machine_name(no)))
+		} else if rr.confirm_token != "" {
+			r = proxy_park(f, rr)
+		}
+	}
 	forward_finish(idx, r)
 }
 
@@ -514,7 +550,7 @@ machine_route_down :: proc(no: u64, gone := false) {
 machine_route_tick :: proc(now: time.Tick) {
 	for i := len(route.forwards) - 1; i >= 0; i -= 1 {
 		f := route.forwards[i]
-		if time.tick_diff(f.sent, now) > ROUTE_WAIT do forward_finish(i, fail(fmt.tprintf("%s did not answer in time", machine_name(f.machine))))
+		if time.tick_diff(f.sent, now) > f.wait do forward_finish(i, fail(fmt.tprintf("%s did not answer in time", machine_name(f.machine))))
 	}
 	for r in route.relays do if r.retry_at != {} && time.tick_diff(r.retry_at, now) >= 0 {
 		r.retry_at = {}

@@ -1059,6 +1059,7 @@ mlink_state :: proc(l: ^Mach_Link, text: string, full: bool) {
 	mirror_stream_applied(&l.stream, full)
 	if checks_key(&l.replica) != checks_before do machines_publish() // its checklist (Machine_View.checklist)
 	mirror_merge(l.no, &l.replica, &l.mirror)
+	mirror_alerts(l.no, &l.replica, &l.mirror, l.core_run) // its bell and its jobs that need you, rung here (M6-F)
 	l.merged = true
 	if autotest_active do fmt.printfln("[autotest] machine %s: state %d", l.name, l.replica.version)
 }

@@ -303,13 +303,58 @@ jobs_panel :: proc(row_w: f32) {
 		layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom, childGap = pu(2)},
 		clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 	}) {
-		if len(state.jobs) == 0 do empty_state("No jobs yet", "New job (+) writes a job note", row_w)
+		if len(state.jobs) == 0 && len(state.machine_jobs) == 0 do empty_state("No jobs yet", "New job (+) writes a job note", row_w)
 		// grouped by owner (jobs_owner.odin): projects by name, then Atlas, Chats, Other
 		for g in core.jobs_groups() {
 			folded := core.list_index(ju.folded[:], core.job_owner_key(g.owner)) >= 0
 			job_group_row(g, folded, row_w, a)
 			if folded do continue
 			for i in g.rows do job_row(state.jobs[i], g.owner, row_w, a)
+		}
+		machine_jobs_sections(row_w)
+	}
+}
+
+// Other machines' jobs (machine_mirror.odin, M6-F), after this Mac's: under each machine's name,
+// read-only rows (what it is up to, and the first thing it needs you for). Greyed while that
+// machine is not online (what it showed last). Nothing here while no machine has jobs.
+@(private = "file")
+machine_jobs_sections :: proc(row_w: f32) {
+	if len(state.machine_jobs) == 0 do return
+	th := theme()
+	inner := row_w - px(2 * PAD_ROW)
+	for m in state.machines {
+		n := 0
+		for r in state.machine_jobs do if r.machine == m.no do n += 1
+		if n == 0 do continue
+		live := m.status == .Online
+		gap(SP_2)
+		if clay.UI(clay.ID("jobmach", u32(m.no)))({
+			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+		}) {
+			label := fmt.tprintf("On %s", m.name)
+			note := live ? fmt.tprintf("%d", n) : "not connected"
+			clay.TextDynamic(clip(label, inner - text_w(note) - px(GAP_INLINE), WEIGHT_BOLD), txt(th.text_secondary, WEIGHT_BOLD))
+			spacer()
+			clay.TextDynamic(note, txt(th.text_muted))
+		}
+		k := 0
+		for r in state.machine_jobs do if r.machine == m.no {
+			k += 1
+			if clay.UI(clay.ID("jobmachrow", u32(m.no) * 1000 + u32(k)))({
+				layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = px(JOB_ROW_H)})}, padding = {pu(PAD_ROW), pu(PAD_ROW), pu(SP_1), pu(SP_1)}, layoutDirection = .TopToBottom, childGap = pu(2)},
+			}) {
+				name_col := live ? th.text : th.text_secondary
+				if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_BUTTON))}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}}}) {
+					dot(live ? job_dot(r) : with_alpha(th.text_muted, EXITED_ALPHA))
+					clay.TextDynamic(clip(r.name, inner - px(DOT + GAP_INLINE)), txt(name_col))
+				}
+				line, col := job_line(r)
+				if len(r.needs_you) > 0 do line, col = fmt.tprintf("Needs you: %s", r.needs_you[0]), th.waiting
+				if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H - 6))}, padding = {pu(DOT + GAP_INLINE), 0, 0, 0}, childAlignment = {y = .Center}}}) {
+					clay.TextDynamic(clip(line, inner - px(DOT + GAP_INLINE), FONT_UI_SMALL), txt(live ? col : th.text_muted, FONT_UI_SMALL))
+				}
+			}
 		}
 	}
 }

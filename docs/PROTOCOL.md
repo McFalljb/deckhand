@@ -748,7 +748,8 @@ projects, 64 open sessions of 32 tabs). They are never saved in `workspace.json`
 that machine's confirmations. Their tabs carry `has_term`. `focus_session` and `select_project`
 take their ids (this Mac's view of them; the user's `focus_session` also goes to that machine, so
 its restored tabs start), and `copy_selection` copies the window's own copy here. Any other
-command naming one runs on that machine (§5a, "Working on another machine"): the user's only.
+command naming one runs on that machine (§5a, "Working on another machine"): the user's and
+Atlas's only. Its jobs are in `machine_jobs` (§5a, "Other machines' jobs and bells").
 
 `agent_status` (§5 Status dots): on an open session, its row's dot (the strongest of its tabs:
 `waiting` > `error` > `unseen` > `question` > `working` > `exited` > `none`); on every terminal tab
@@ -1272,16 +1273,39 @@ the merged entries stay as last seen; up again, a fresh `state.full` replaces th
 **Working on another machine** (design §8.3, §10.4 M6-C; `src/core/machine_route.odin`). A
 command naming ids of one other machine (`tab_id`, `session`, `project_id`, `pane`, `tab`, `split`,
 `opener`; ids of two machines are refused) is checked here first (`caller_may`); then only the
-user's (`ui`) is forwarded. Any other caller's is refused (agents and Atlas: a later version, as
-`control`). The hub sends it on that machine's link as `{"type":"command","id":"h<n>","now":true,
-"on_behalf":{"kind":"ui"},"command":{…}}`, its ids unpacked and a `pi_session_id`'s `m<no>:` taken
+user's (`ui`) and Atlas's (`control`, M6-F) are forwarded, and only when they are this machine's
+own: a command that came over a hub link (another machine viewing this one) is refused, so no
+machine drives a third through this one. Any other caller's is refused. The hub sends it on that
+machine's link as `{"type":"command","id":"h<n>","now":true,"on_behalf":{"kind":"ui"|"control"},
+"command":{…}}` (the caller's own kind), its ids unpacked and a `pi_session_id`'s `m<no>:` taken
 off, and answers `pending`. That core's `result` (and its `finished`, for one it answered pending)
-ends the request here: `created_id` packed (a session it opened or made is shown here too), the
-error cleaned, no `data`. Its state change arrives through the mirror before the result. A link
-that is down, or goes down while it waits, answers `{"ok":false,"data":{"code":"machine_offline"}}`;
-no answer in 30 s fails it. A `needs_confirmation` for the user is asked here: the bar shows *On
-<machine>: <its summary>* with a token of this core's; confirming sends the user's command again
-with that machine's token, and Cancel cancels it there.
+ends the request here: `created_id` packed (a session the user opened or made is shown here too),
+the error cleaned, and of its `data` only a known `code` (`timeout`, `tab_gone`, `cancelled`,
+`dropped`, `browser_not_here`, `no_window`, `machine_offline`). Its state change arrives through
+the mirror before the result. A link that is down, or goes down while it waits, answers
+`{"ok":false,"data":{"code":"machine_offline"}}`; no answer in 30 s fails it (`pi_wait_idle` and
+`claude_wait_idle`: their own `timeout_ms` plus 10 s, at most 130 s). A `needs_confirmation` for
+the user's command is asked here: the bar shows *On <machine>: <its summary>* with a token of this
+core's; confirming sends the user's command again with that machine's token, and Cancel cancels it
+there. Atlas's is refused instead ("on <machine> this needs the user's confirmation"): the user
+does it from the window.
+
+**Other machines' jobs and bells** (design §8.6, §10.4 M6-F; `src/core/machine_mirror.odin`). A
+remote core can't notify (its `window.request` is dropped), so this core rings for it, naming the
+machine: a job of its that needs the user (`needs_you`, unread) once per run (its `last_run`),
+and each new entry of its bell (not its `job_needs_you`, rung from the job) once, by its id. A core
+run seen for the first time (its hello's `core` id), on connecting or after it restarted, sets the
+mark without ringing: a reconnect or a fresh `state.full` never rings what it had. Of its bell only
+the newest 20 entries are read per state, and at most 4 ring per machine a minute (the rest are
+dropped). Its entries are in `notifications_list` with `"machine"`: the title and `place` start
+with the machine's name, its `session_id`/`tab_id` are packed ids of its mirrored session (else 0),
+its `job_id` reads `m<no>:<its id>`, and no `pi_session_id` or run folder is kept. Its jobs (at most
+100) are in `get_state`'s `machine_jobs` (`id` `m<no>:<its id>`, `machine`, `name`, `schedule`,
+`enabled`, `paused`, `running`, `next_due`, `last_at`, `last_status` (a known word, else
+`unknown`), `last_headline`, `unread`, `needs_you`: at most 5 lines): read-only, no paths; no job
+command finds one. Every string is one line without control, bidi or invisible characters, and
+bounded. Removing the machine, or turning Machines over SSH off, takes its entries and jobs away;
+a link that drops keeps them as last seen.
 
 **`on_behalf`** (the other core's side): a hub's `command` must carry `on_behalf` `{"kind":"ui"}`
 or `"control"`. It runs as that caller (`caller_may` and confirmations again, and the

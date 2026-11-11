@@ -364,6 +364,7 @@ Inst_Verify :: struct {
 	key:       string,
 	work:      string, // the job's temp dir (the worker unpacks into it; removes it when abandoned)
 	why:       string, // the answer ("" = it passed)
+	found:     string, // Copy_App: the Core.app's release version, as its core will say it ("" = a development build)
 }
 
 @(private = "file")
@@ -377,7 +378,7 @@ Inst_Job :: struct {
 	update:    bool, // a core runs there: handed over after the copy
 	phase:     Machine_Job,
 	nonce:     string,
-	version:   string, // this Mac's core's
+	version:   string, // what its new core will say: this Mac's (Tarball), the copied Core.app's (Copy_App, once checked)
 	work:      string, // the local temp dir ("" = none)
 	app:       string, // the Core.app copied (Copy_App)
 	size:      i64, // the tarball's, from the release
@@ -397,6 +398,7 @@ Linger_Job :: struct {
 	no:    u64,
 	name:  string, // heap
 	child: Inst_Child,
+	gone:  bool, // its machine was removed, or Machines over SSH went off: no answer is shown
 }
 
 @(private = "file")
@@ -549,7 +551,7 @@ random_nonce :: proc() -> string {
 machine_install_apply :: proc(c: Machine_Install, caller: Caller) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
 	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user installs or updates another machine's Deckhand")
-	if window_link_hub() do return fail("this machine is viewed from another one: install from there")
+	if caller_from_hub(caller) do return fail("this machine is viewed from another one: install from there")
 	if c.cancel {
 		j, _ := job_find(c.no)
 		if j != nil && job_active(j) do job_fail(j, "cancelled")
@@ -602,6 +604,7 @@ machine_install_start :: proc(no: u64) -> Result {
 	case .Copy_App:
 		app := install_app_source()
 		if app == "" {
+			work_remove(j)
 			job_set(j, .Failed, "this Mac has no Deckhand Core.app to copy")
 			return fail(j.note)
 		}
@@ -617,7 +620,7 @@ machine_install_start :: proc(no: u64) -> Result {
 machine_linger_apply :: proc(c: Machine_Linger, caller: Caller) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
 	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user turns on linger on another machine")
-	if window_link_hub() do return fail("this machine is viewed from another one: do it from there")
+	if caller_from_hub(caller) do return fail("this machine is viewed from another one: do it from there")
 	f, ok := machine_facts(c.no)
 	if !ok do return fail(fmt.tprintf("no machine %d", c.no))
 	if f.os != "linux" && !f.via do return fail("linger is Linux's")
@@ -771,6 +774,7 @@ verify_run :: proc(v: ^Inst_Verify) -> string {
 		st: posix.stat_t
 		serve := fmt.tprintf("%s/Contents/MacOS/%s", v.path, CORE_SERVE_BIN)
 		if posix.lstat(strings.clone_to_cstring(serve, context.temp_allocator), &st) != .OK || !posix.S_ISREG(st.st_mode) do return fmt.tprintf("%s has no %s", v.path, CORE_SERVE_BIN)
+		v.found = strings.clone(app_release_version(v.path), runtime.heap_allocator())
 		when TEST_HOOKS do if install_skip_dr_for_test do return ""
 		return holder_verify(v.path) // its designated requirement, as our own signature gives it
 	case .Tarball:
@@ -790,10 +794,35 @@ verify_run :: proc(v: ^Inst_Verify) -> string {
 	return "unknown install"
 }
 
+// A Core.app's release version as its core says it (core_version: a pre-release or none is a
+// development build's ""). Temp; any thread.
+app_release_version :: proc(app: string) -> string {
+	v := plist_value(upath(app, "Contents", "Info.plist"), "CFBundleShortVersionString")
+	if pv, ok := semver_parse(v); !ok || pv.pre do return ""
+	return v
+}
+
+// Copy_App, checked: the job waits for the copied app's version (core/current's may differ from
+// the running core's), and an update never installs one that is not newer than what runs there.
+// "" = go on.
+@(private = "file")
+copied_version_take :: proc(j: ^Inst_Job, found: string) -> string {
+	heap := runtime.heap_allocator()
+	delete(j.version, heap)
+	j.version = strings.clone(found, heap)
+	if !j.update do return ""
+	f, ok := machine_facts(j.no)
+	if !ok do return "the machine is gone"
+	c, cok := cw.version_parse(found)
+	t, tok := cw.version_parse(f.version)
+	if cok && tok && !cw.version_less(t, c) do return fmt.tprintf("this Mac's Core.app is %s and %s runs %s: never a downgrade", found, f.name, f.version)
+	return ""
+}
+
 @(private = "file")
 verify_free :: proc(v: ^Inst_Verify) {
 	heap := runtime.heap_allocator()
-	for s in ([?]string{v.path, v.sig, v.version, v.key, v.work, v.why}) do delete(s, heap)
+	for s in ([?]string{v.path, v.sig, v.version, v.key, v.work, v.why, v.found}) do delete(s, heap)
 	free(v, heap)
 }
 
@@ -872,8 +901,12 @@ copy_done :: proc(j: ^Inst_Job) {
 	j.until = time.tick_add(time.tick_now(), INSTALL_HANDOVER_WAIT)
 	job_set(j, .Handing_Over)
 	if j.update && machine_link_up(j.no) {
-		j.sent = machine_link_send_text(j.no, hub_command_json(Core_Handover{to = CORE_CURRENT}, "", .UI))
-		if autotest_active && j.sent do fmt.printfln("[autotest] machine %s install: core_handover sent", j.name)
+		// what answers on the link now: another core may have connected since the job started
+		if f, ok := machine_facts(j.no); !ok || !f.installed {
+			job_set(j, .Failed, machine_update_command(j.name))
+			return
+		}
+		j.sent = machine_handover_send(j.no)
 	} else {
 		machine_reconnect_now(j.no) // its next hello says what runs there
 	}
@@ -895,8 +928,14 @@ machine_install_hello :: proc(no: u64, version: string, installed: bool) -> bool
 		return false
 	}
 	j.sent = true
-	if autotest_active do fmt.printfln("[autotest] machine %s install: core_handover sent", j.name)
-	return true
+	return true // the link sends it (machine_handover_send's text), on the hello's link
+}
+
+// core_handover{current} as the user's: what an install's update sends the old core, one text for
+// every path (copy_done's up link, a hello's: machines.odin). Temp.
+machine_handover_text :: proc(name: string) -> string {
+	if autotest_active do fmt.printfln("[autotest] machine %s install: core_handover sent", name)
+	return hub_command_json(Core_Handover{to = CORE_CURRENT}, "", .UI)
 }
 
 // Machine no's core refused the hub hello (why: its answer): a job waiting for its new core says
@@ -923,7 +962,10 @@ machine_install_drop :: proc(no: u64, removed := false) {
 		if removed do j.gone = true
 		if job_active(j) && j.phase != .Cleaning do job_fail(j, removed ? "the machine was removed" : "Machines over SSH is off")
 	}
-	for l in inst.lingers do if no == 0 || l.no == no do child_signal(&l.child, .SIGTERM)
+	for l in inst.lingers do if no == 0 || l.no == no {
+		l.gone = true
+		child_signal(&l.child, .SIGTERM)
+	}
 	if removed do for i := len(inst.jobs) - 1; i >= 0; i -= 1 {
 		j := inst.jobs[i]
 		if j.no == no && !job_active(j) {
@@ -945,11 +987,12 @@ machine_install_tick :: proc(now: time.Tick) {
 			v := j.verify
 			if v == nil do break
 			sync.lock(&v.mu)
-			done, why := v.done, strings.clone(v.why, context.temp_allocator)
+			done, why, found := v.done, strings.clone(v.why, context.temp_allocator), strings.clone(v.found, context.temp_allocator)
 			sync.unlock(&v.mu)
 			if !done do break
 			j.verify = nil
 			verify_free(v)
+			if why == "" && j.kind == .Copy_App do why = copied_version_take(j, found)
 			if why != "" do job_fail(j, why)
 			else do copy_start(j)
 		case .Copying:
@@ -970,8 +1013,10 @@ machine_install_tick :: proc(now: time.Tick) {
 		l := inst.lingers[i]
 		if !child_tick(&l.child, now) do continue
 		got := machine_linger_answer(string(l.child.out[:l.child.out_n]))
-		if got == .On do machine_linger_set(l.no, .On)
-		else do window_toast(fmt.tprintf("Linger is still off on %s (polkit wants a password there): run `%s` on it yourself", l.name, LINGER_COMMAND), err = true)
+		if !l.gone { // else its machine went (or Machines over SSH did): nothing to say of it
+			if got == .On do machine_linger_set(l.no, .On)
+			else do window_toast(fmt.tprintf("Linger is still off on %s (polkit wants a password there): run `%s` on it yourself", l.name, LINGER_COMMAND), err = true)
+		}
 		heap := runtime.heap_allocator()
 		delete(l.name, heap)
 		free(l, heap)
@@ -1002,6 +1047,23 @@ machine_install_stop :: proc() {
 }
 
 // ---- children ----
+
+CHILD_READ_BUDGET :: 64 << 10 // bytes read from one child's output per turn of the loop
+
+// Reads what fd has (non-blocking), at most budget bytes this turn: the first len(keep) bytes ever
+// are kept (kept counts them), the rest read and dropped. eof: the writer closed it. A child that
+// writes without end costs the loop at most budget per turn (machine_page.odin's children too).
+pipe_drain :: proc(fd: posix.FD, keep: []u8, kept: ^int, budget: int) -> (read: int, eof: bool) {
+	buf: [4096]u8
+	for read < budget {
+		n := posix.read(fd, &buf[0], uint(min(len(buf), budget - read)))
+		if n == 0 do return read, true
+		if n < 0 do return read, false
+		read += int(n)
+		if kept^ < len(keep) do kept^ += copy(keep[kept^:], buf[:n])
+	}
+	return read, false
+}
 
 // Starts argv in its own process group: stdin in_fd (-1: /dev/null), stdout and stderr one pipe.
 @(private = "file")
@@ -1057,17 +1119,9 @@ child_signal :: proc(c: ^Inst_Child, sig: posix.Signal) {
 @(private = "file")
 child_tick :: proc(c: ^Inst_Child, now: time.Tick) -> bool {
 	if c.fd >= 0 {
-		buf: [4096]u8
-		for {
-			n := posix.read(c.fd, &buf[0], len(buf))
-			if n <= 0 {
-				if n == 0 {
-					posix.close(c.fd)
-					c.fd = -1
-				}
-				break
-			}
-			c.out_n += copy(c.out[c.out_n:], buf[:n])
+		if _, eof := pipe_drain(c.fd, c.out[:], &c.out_n, CHILD_READ_BUDGET); eof {
+			posix.close(c.fd)
+			c.fd = -1
 		}
 	}
 	if c.pid <= 0 do return true
@@ -1088,12 +1142,7 @@ child_tick :: proc(c: ^Inst_Child, now: time.Tick) -> bool {
 	c.exit = posix.WIFEXITED(st) ? int(posix.WEXITSTATUS(st)) : -1
 	c.pid = 0
 	if c.fd >= 0 {
-		buf: [4096]u8
-		for {
-			n := posix.read(c.fd, &buf[0], len(buf))
-			if n <= 0 do break
-			c.out_n += copy(c.out[c.out_n:], buf[:n])
-		}
+		pipe_drain(c.fd, c.out[:], &c.out_n, CHILD_READ_BUDGET) // what it left, at most a budget's
 		posix.close(c.fd)
 		c.fd = -1
 	}

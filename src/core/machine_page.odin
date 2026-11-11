@@ -264,14 +264,7 @@ page_child_start :: proc(f: ^Page_Forward, now: time.Tick) -> bool {
 @(private = "file")
 page_child_poll :: proc(f: ^Page_Forward) -> (exited: bool) {
 	if !f.child do return false
-	if f.fd >= 0 {
-		buf: [4096]u8
-		for {
-			n := posix.read(f.fd, &buf[0], len(buf))
-			if n <= 0 do break
-			f.out_n += copy(f.out[f.out_n:], buf[:n])
-		}
-	}
+	if f.fd >= 0 do pipe_drain(f.fd, f.out[:], &f.out_n, CHILD_READ_BUDGET) // bounded per turn (machine_install.odin)
 	if f.pid <= 0 do return true
 	info: posix.siginfo_t
 	if posix.waitid(.P_PID, posix.id_t(f.pid), &info, {.EXITED, .NOHANG, .NOWAIT}) != 0 do return false
@@ -548,7 +541,7 @@ machine_open_page_apply :: proc(c: Machine_Open_Page, caller: Caller, request_id
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first"), false
 	// the user's only, at this Mac's own window: never a hub's (another machine viewing this one)
 	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens a machine's web page"), false
-	if window_link_hub() do return fail("this machine is viewed from another one: open the page there"), false
+	if caller_from_hub(caller) do return fail("this machine is viewed from another one: open the page there"), false
 	if w := machine_page_port_error(c.port); w != "" do return fail(w), false
 	path, pwhy := machine_page_path(c.path)
 	if pwhy != "" do return fail(pwhy), false

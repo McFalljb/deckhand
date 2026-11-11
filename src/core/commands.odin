@@ -792,7 +792,13 @@ Caller :: struct {
 	kind:   Caller_Kind,
 	tab_id: u64,
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
+	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
 }
+
+// The command came from another machine's core: its own link said so (kept with it in the inbox),
+// or this core's attached link is a hub now. What only this machine's own user may start
+// (machine_install, machine_linger, machine_open_page) is refused then.
+caller_from_hub :: proc(c: Caller) -> bool {return c.hub || window_link_hub()}
 
 fail :: proc(msg: string) -> Result {return {error = msg}}
 

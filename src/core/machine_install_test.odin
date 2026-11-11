@@ -6,6 +6,7 @@ package core
 // its children with /bin/sh in place of ssh. No ssh runs; the scene remote-install.sh installs
 // through a test build's `via` machine.
 
+import "core:encoding/json"
 import "core:fmt"
 import "core:os"
 import "core:strconv"
@@ -368,6 +369,138 @@ machine_grant_marker :: proc(t: ^testing.T) {
 	for name in ([]string{"machine_install", "machine_linger"}) {
 		for s in COMMAND_SPECS do if s.type == name do testing.expectf(t, s.who == .User, "%s is user-only", name)
 	}
+}
+
+// ---- review round 1 ----
+
+// (1) A command a hub queued keeps where it came from: refused even once that hub is gone (an
+// oversized frame detaches it before the inbox runs the command).
+@(test)
+r1_hub_provenance :: proc(t: ^testing.T) {
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	machine_status_set_for_test(f.no, .Not_Installed)
+	testing.expect(t, !window_link_hub(), "no hub attached now")
+	hub := Caller{kind = .UI, hub = true}
+	r := machine_install_apply({no = f.no}, hub)
+	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
+	r = machine_linger_apply({no = f.no}, hub)
+	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
+	r, _ = machine_open_page_apply({no = f.no, port = 3000}, hub, 0)
+	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
+	// what a hub link's command is read as
+	v, _ := json.parse_string(`{"on_behalf":{"kind":"ui"}}`, allocator = context.temp_allocator)
+	c, ok := hub_on_behalf(v.(json.Object))
+	testing.expect(t, ok && c.kind == .UI && c.hub, "a hub's ui command carries hub")
+	p, _, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.None)
+}
+
+// (2) A child's output is read at most CHILD_READ_BUDGET bytes per turn, the first ones kept.
+@(test)
+r1_read_budget :: proc(t: ^testing.T) {
+	p: [2]posix.FD
+	testing.expect(t, posix.pipe(&p) == .OK, "a pipe")
+	defer {posix.close(p[0]); posix.close(p[1])}
+	posix.fcntl(p[0], .SETFL, posix.fcntl(p[0], .GETFL) | posix.O_NONBLOCK)
+	posix.fcntl(p[1], .SETFL, posix.fcntl(p[1], .GETFL) | posix.O_NONBLOCK)
+	chunk: [4096]u8
+	for &b in chunk do b = 'x'
+	written := 0
+	for written < 60 << 10 {
+		n := posix.write(p[1], &chunk[0], len(chunk))
+		if n <= 0 do break
+		written += int(n)
+	}
+	keep: [100]u8
+	kept := 0
+	got, eof := pipe_drain(p[0], keep[:], &kept, 16 << 10)
+	testing.expectf(t, got == 16 << 10 && !eof && kept == 100, "one turn: %d read, %d kept", got, kept)
+	got, _ = pipe_drain(p[0], keep[:], &kept, 16 << 10)
+	testing.expect(t, got == 16 << 10 && kept == 100, "the next turn: the next budget, nothing more kept")
+	testing.expect(t, CHILD_READ_BUDGET <= 256 << 10, "a small budget per turn")
+}
+
+// (3) After the copy, an up link's core gets core_handover only if its hello (now) said it is of
+// Deckhand's own folder: another core may have connected meanwhile.
+@(test)
+r1_handover_rechecks_installed :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	fake_app(f.dir, "")
+	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exit 0`, "ssh"}
+	machine_status_set_for_test(f.no, .Needs_Update, "0.1.0", installed = true, skew = cw.Skew.Core_Below_Min)
+	machine_test_links.on = true
+	machine_test_links.up = make(map[u64]bool)
+	machine_test_links.up[f.no] = true
+	defer {
+		machine_test_links.on = false
+		for x in machine_test_links.texts do delete(x)
+		clear(&machine_test_links.texts)
+		delete(machine_test_links.up)
+	}
+	r := machine_install_apply({no = f.no}, {kind = .UI})
+	testing.expectf(t, r.ok, "update: %s", r.error)
+	testing.expect_value(t, tick_until(f.no, .Copying), Machine_Job.Copying)
+	machine_status_set_for_test(f.no, .Online, "0.1.5", installed = false) // another core came up meanwhile
+	got := tick_until(f.no, .Failed)
+	testing.expect_value(t, got, Machine_Job.Failed)
+	for x in machine_test_links.texts do testing.expectf(t, !strings.contains(x, "core_handover"), "never sent to it: %s", x)
+}
+
+// (4) A compatible older core's hello (Online) gets the handover too: one sender for both.
+// (5) The job waits for the copied app's version (core/current's), not the running core's.
+@(test)
+r1_online_hello_and_version :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	fake_app(f.dir, "0.4.0")
+	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exit 0`, "ssh"}
+	machine_status_set_for_test(f.no, .Not_Installed)
+	r := machine_install_apply({no = f.no}, {kind = .UI})
+	testing.expectf(t, r.ok, "install: %s", r.error)
+	testing.expect_value(t, tick_until(f.no, .Handing_Over), Machine_Job.Handing_Over)
+	// an Online hello from an older core of Deckhand's own: the frame goes on that link
+	line := `{"result":{"ok":true,"data":{"framed":true,"generation":1,"version":"0.2.5","machine":{"os":"darwin","arch":"arm64","installed":true}}}}`
+	sent := machine_hello_for_test(f.no, line)
+	testing.expectf(t, strings.contains(sent, `"core_handover"`) && strings.contains(sent, `"current"`), "sent: %q", sent)
+	// the running core's version ("" here) is not what was copied
+	machine_install_hello(f.no, core_version(), true)
+	p, _, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.Handing_Over)
+	machine_install_hello(f.no, "0.4.0", true)
+	p, _, _, _, _ = machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.Done)
+	// never a downgrade: the copied 0.4.0 to a 0.5.0 of an older generation
+	machine_status_set_for_test(f.no, .Needs_Update, "0.5.0", installed = true, skew = cw.Skew.Core_Older_Generation)
+	r = machine_install_apply({no = f.no}, {kind = .UI})
+	got := r.ok ? tick_until(f.no, .Failed) : .Failed
+	_, note, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expectf(t, got == .Failed && (strings.contains(note, "downgrade") || strings.contains(r.error, "downgrade")), "%v %s %s", got, note, r.error)
+}
+
+// (6) machine_add's automatic install is armed for its first finding only.
+@(test)
+r1_auto_install_once :: proc(t: ^testing.T) {
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	machine_outcome_for_test(f.no, {exited = true, exit_code = 255, stderr = "ssh: connect to host nuc port 22: Connection refused"})
+	machine_outcome_for_test(f.no, {exited = true, exit_code = 127})
+	p, _, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.None)
+}
+
+@(private = "file")
+fake_app :: proc(dir, version: string) {
+	app := fmt.tprintf("%s/core/Deckhand Core.app", dir)
+	os.make_directory_all(fmt.tprintf("%s/Contents/MacOS", app))
+	_ = os.write_entire_file(fmt.tprintf("%s/Contents/MacOS/%s", app, CORE_SERVE_BIN), transmute([]u8)string("x"))
+	if version != "" {
+		_ = os.write_entire_file(fmt.tprintf("%s/Contents/Info.plist", app), transmute([]u8)fmt.tprintf(`<?xml version="1.0" encoding="UTF-8"?><plist version="1.0"><dict><key>CFBundleShortVersionString</key><string>%s</string></dict></plist>`, version))
+	}
+	install_app_for_test, install_skip_dr_for_test = strings.clone(app), true
 }
 
 } // when TEST_HOOKS

@@ -529,6 +529,36 @@ when TEST_HOOKS {
 		mlink_set(l, s, "", version)
 		l.phase = .Stopped // no attempt runs in a test
 	}
+	// mlink_hello on a socketpair with line as the reply: what it sent (its JSON frames, joined).
+	machine_hello_for_test :: proc(no: u64, line: string) -> string {
+		l, _ := mlink_find(no)
+		if l == nil do return ""
+		fds: [2]posix.FD
+		if posix.socketpair(.UNIX, .STREAM, .IP, &fds) != .OK do return ""
+		posix.fcntl(fds[1], .SETFL, posix.fcntl(fds[1], .GETFL) | posix.O_NONBLOCK)
+		l.fd, l.phase = fds[0], .Hello
+		mlink_hello(l, line, nil)
+		heap := runtime.heap_allocator()
+		peer: cw.Sock_Transport
+		cw.sock_open(&peer, fds[1], allocator = heap)
+		b := strings.builder_make(context.temp_allocator)
+		for _ in 0 ..< 64 {
+			f, err := cw.sock_recv(&peer, context.temp_allocator)
+			if err != .None do break
+			if f.channel == cw.JSON_CHANNEL do fmt.sbprintln(&b, string(f.payload))
+		}
+		cw.sock_destroy(&peer) // closes fds[1]
+		mlink_close(l)
+		l.phase = .Stopped
+		return strings.to_string(b)
+	}
+	// mlink_down with outcome o (a finished attempt).
+	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome) {
+		if l, _ := mlink_find(no); l != nil {
+			mlink_down(l, o)
+			l.phase = .Stopped
+		}
+	}
 	machines_reset_for_test :: proc() {
 		for l in mach.links do mlink_free(l)
 		clear(&mach.links)
@@ -541,6 +571,13 @@ machine_link_up :: proc(no: u64) -> bool {
 	when TEST_HOOKS do if machine_test_links.on do return machine_test_links.up[no]
 	l, _ := mlink_find(no)
 	return l != nil && l.phase == .Up && l.sock != nil
+}
+
+// An install's core_handover on machine no's up link (machine_install.odin's copy_done).
+machine_handover_send :: proc(no: u64) -> bool {
+	name := ""
+	if l, _ := mlink_find(no); l != nil do name = l.name
+	return machine_link_send_text(no, machine_handover_text(name))
 }
 
 // A JSON message on machine no's link (false: not online, or it refused it).
@@ -732,6 +769,8 @@ mlink_close :: proc(l: ^Mach_Link, wait := false) {
 mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	s, why := machine_status_of(o)
 	was_up := l.phase == .Up
+	auto := l.auto_install
+	l.auto_install = false // armed for the user's add's first finding only, whatever it is
 	mlink_close(l)
 	machine_route_down(l.no) // what waited for it ends; its terminals attach again when it is up
 	page_forwards_drop(l.no) // its web pages' forwards (machine_page.odin)
@@ -740,8 +779,7 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	l.next_at = time.tick_add(time.tick_now(), machine_backoff_down(&l.backoff, time.tick_now()))
 	mlink_set(l, s, why)
 	// added by the user and no core there: its install starts, once (machine_install.odin)
-	if s == .Not_Installed && l.auto_install && state.settings.remote_machines {
-		l.auto_install = false
+	if s == .Not_Installed && auto && state.settings.remote_machines {
 		if r := machine_install_start(l.no); !r.ok do fmt.eprintln("Deckhand: machine", l.name, "install:", r.error)
 	}
 }
@@ -919,6 +957,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 		mlink_down(l, o)
 		return
 	}
+	l.auto_install = false // a core answered: nothing to install on its own
 	gen, _ := strconv.parse_i64(json_path(line, "result.data.generation"))
 	version := json_path(line, "result.data.version")
 	o.skew = cw.skew_check(cw.GENERATION, gen, core_version(), version)
@@ -941,7 +980,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 			l.sock = new(cw.Sock_Transport, heap)
 			cw.sock_open(l.sock, l.fd, initial = rest, allocator = heap)
 			clear(&l.inbuf)
-			cw.sock_send(l.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)hub_command_json(Core_Handover{to = CORE_CURRENT}, "", .UI))
+			cw.sock_send(l.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)machine_handover_text(l.name))
 			cw.sock_flush(l.sock)
 			l.phase, l.started, l.drain_skew = .Draining, time.tick_now(), o.skew
 			return
@@ -965,6 +1004,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	mlink_send(l, window_msg_subscribe()) // its state (M6-B): state.full, then deltas
 	if id_machine(state.selected_project) == l.no do mlink_send(l, hub_command_json(Select_Project{project_id = id_local(state.selected_project)}, "", .UI))
 	machine_route_up(l.no) // the window's terminals of it attach again, each from a fresh snapshot (machine_route.odin)
+	if handover do mlink_send(l, machine_handover_text(l.name)) // a compatible older core of Deckhand's own: the same handover
 }
 
 // Sends one JSON message on an online link (false: not sent; the link's pump finds out why).

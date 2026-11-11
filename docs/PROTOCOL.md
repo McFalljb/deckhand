@@ -1289,9 +1289,11 @@ the user's command is asked here: the bar shows *On <machine>: <its summary>* wi
 core's; confirming sends the user's command again with that machine's token, and Cancel cancels it
 there. Atlas's is refused instead ("on <machine> this needs the user's confirmation"): the user
 does it from the window. A result's error is this core's own words for a known code, else
-`on <machine>: ` and that machine's text (one line, cleaned, at most 160 bytes), and its `data` is
-`{"machine": "<its name here>", "code"?, "id"?}` (`id`: a `claude_prompt`'s held text, an integer
-below 2^53); the desk tools put an error from another machine after a note, fenced as its data.
+`on <machine>: ` and that machine's text (one line, cleaned, at most 160 bytes), its `data` only
+`{"code"?, "id"?}` (`id`: a `claude_prompt`'s held text, an integer below 2^53), and the result
+itself carries `"machine": "<its name here>"` beside `data`: only a forwarded result has it (a
+local app's error `data` may hold any field, so `data` never says whose). The desk tools put an
+error from another machine after a note, fenced as its data.
 
 **What the `caller.hub` gate does not stop.** A machine allowed to connect to this one (*Allow
 other machines to connect to this one*) acts as the user here, with `ui`: it can type into this

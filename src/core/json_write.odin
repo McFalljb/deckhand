@@ -1184,6 +1184,7 @@ write_result :: proc(b: ^strings.Builder, r: Result, redact := false) {
 		key(&w, "data")
 		strings.write_string(b, r.data) // already JSON
 	}
+	if r.remote != 0 do kv_str(&w, "machine", machine_name(r.remote)) // another machine answered (route_result)
 	obj_end(&w)
 }
 

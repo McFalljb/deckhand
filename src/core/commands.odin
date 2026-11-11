@@ -775,6 +775,7 @@ Result :: struct {
 	confirm_summary: string,
 	confirm_by_user: bool, // needs_confirmation: only the user can confirm (in the UI)
 	data:            string, // query results (JSON)
+	remote:          u64, // the machine that answered (machine_route.odin's route_result only; 0 = this one): "machine" beside data, never in it, so no local command's data can claim it
 }
 
 // Who sent a command. tab_id is the caller's own tab for pi-tab callers.

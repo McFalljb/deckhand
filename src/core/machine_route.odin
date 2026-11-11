@@ -16,7 +16,8 @@ package core
 // state arrives through the mirror before its result (that core flushes its delta first, Q9), and
 // the result finishes the request here (route_result): its created_id packed, its error this
 // core's words for a known code (ROUTE_CODES) or "on <machine>: " and its text cleaned and cut
-// short, its data only {machine, code?, id? (a claude_prompt's held text)}. A link
+// short, its data only {code?, id? (a claude_prompt's held text)}, and Result.remote set (the
+// reply's top-level "machine", which only this sets). A link
 // that is down answers machine_offline. Its view stays this Mac's: focusing one of its sessions and
 // selecting one of its projects run here (Focus_Session also goes there, so its restored tabs
 // start), and Copy_Selection copies the window's own copy here (the user's ⌘C).
@@ -304,27 +305,27 @@ machine_route_reply :: proc(no: u64, text: string) {
 // A forwarded command's result as this core answers it (review round 1): ok and created_id
 // (packed); the error in this core's words for a known code, else "on <machine>: " and that
 // machine's text, one line, cleaned and cut short (the agents' tools mark it as that machine's
-// data); data {"machine": <its name here>, "code"?: a known code, "id"?: a claude_prompt's held
-// text's id (an integer, 1 to 2^53-1)}, nothing else of what it sent.
+// data); data {"code"?: a known code, "id"?: a claude_prompt's held text's id (an integer, 1 to
+// 2^53-1)}, nothing else of what it sent; remote = no (round 2: the reply's top-level "machine",
+// beside data, which only this sets: a local app's error data may hold any field).
 @(private = "file")
 route_result :: proc(no: u64, f: ^Forward, rr: Result) -> Result {
-	r := Result{ok = rr.ok}
+	r := Result{ok = rr.ok, remote = no}
 	if rr.created_id != 0 do r.created_id, _ = id_pack(no, rr.created_id)
 	b := strings.builder_make(context.temp_allocator)
-	strings.write_string(&b, `{"machine":`)
-	json_quote(&b, machine_name(no))
+	strings.write_byte(&b, '{')
 	known := -1
 	if code := json_path(rr.data, "code"); code != "" do for c, i in ROUTE_CODES do if c == code do known = i
-	if known >= 0 do fmt.sbprintf(&b, `,"code":"%s"`, ROUTE_CODES[known])
+	if known >= 0 do fmt.sbprintf(&b, `"code":"%s"`, ROUTE_CODES[known])
 	if _, is := f.cmd.(Claude_Prompt); is && rr.data != "" {
 		if v, err := jg.parse_string(rr.data, .JSON, true, context.temp_allocator); err == nil {
 			if o, ok := v.(json.Object); ok {
-				if id, iok := o["id"].(json.Integer); iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `,"id":%d`, id)
+				if id, iok := o["id"].(json.Integer); iok && id > 0 && id < 1 << 53 do fmt.sbprintf(&b, `%s"id":%d`, known >= 0 ? "," : "", id)
 			}
 		}
 	}
 	strings.write_byte(&b, '}')
-	r.data = strings.to_string(b)
+	if strings.builder_len(b) > 2 do r.data = strings.to_string(b)
 	switch {
 	case known >= 0:
 		r.error = rr.ok ? "" : fmt.tprintf("on %s: %s", machine_name(no), ROUTE_CODE_TEXTS[known])

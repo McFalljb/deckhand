@@ -142,7 +142,7 @@ route_by_id :: proc(t: ^testing.T) {
 	if testing.expect_value(t, len(rt_finished), 1) {
 		want, _ := id_pack(3, 11)
 		testing.expect_value(t, rt_finished[0].created_id, want)
-		testing.expect(t, rt_finished[0].ok && rt_finished[0].data == `{"machine":"nuc"}`, "ok, none of its data: only whose it is")
+		testing.expect(t, rt_finished[0].ok && rt_finished[0].data == "" && rt_finished[0].remote == 3, "ok, none of its data; whose it is beside it")
 	}
 	// a result for no command of ours (another machine's number, or again): nothing
 	machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true}}}}`, id))
@@ -194,7 +194,10 @@ route_control :: proc(t: ^testing.T) {
 	if testing.expect_value(t, len(rt_finished), 1) {
 		// review round 1: a known code's text is this core's own, never that machine's
 		testing.expect_value(t, json_path(rt_finished[0].data, "code"), "timeout")
-		testing.expect_value(t, json_path(rt_finished[0].data, "machine"), "nuc")
+		// review round 2: whose it is, outside data, where nothing local can put it
+		testing.expect_value(t, rt_finished[0].remote, u64(3))
+		testing.expect_value(t, json_path(result_json(rt_finished[0]), "machine"), "nuc")
+		testing.expect_value(t, json_path(rt_finished[0].data, "machine"), "<missing>")
 		testing.expect(t, !strings.contains(rt_finished[0].data, "secret"), "nothing else of its data")
 		testing.expect(t, !strings.contains(rt_finished[0].error, "rm -rf") && strings.contains(rt_finished[0].error, "nuc"), "this core's words, naming the machine")
 	}
@@ -205,8 +208,8 @@ route_control :: proc(t: ^testing.T) {
 		e := rt_finished[1].error
 		testing.expect(t, strings.has_prefix(e, "on nuc: "), "another machine's error: said whose")
 		testing.expect(t, len(e) <= len("on nuc: ") + ROUTE_REMOTE_ERROR_MAX && !strings.contains(e, "\u200b"), "cut short, nothing invisible")
-		testing.expect_value(t, json_path(rt_finished[1].data, "machine"), "nuc")
-		testing.expect_value(t, json_path(rt_finished[1].data, "code"), "<missing>")
+		testing.expect_value(t, rt_finished[1].remote, u64(3))
+		testing.expect_value(t, rt_finished[1].data, "") // none of its data
 	}
 	// review round 1: a remote Claude prompt's held id comes back (and only it), so a wait can
 	// name it and end with dropped
@@ -224,7 +227,7 @@ route_control :: proc(t: ^testing.T) {
 		run_command(Claude_Prompt{tab_id = tid, text = "hi"}, {kind = .Control, tab_id = 1}, 66)
 		n := len(rt_finished)
 		machine_route_reply(3, fmt.tprintf(`{{"type":"result","id":"%s","result":{{"ok":true,"data":%s}}}}`, json_path(rt_last_text(), "id"), bad))
-		if testing.expect_value(t, len(rt_finished), n + 1) do testing.expect_value(t, json_path(rt_finished[n].data, "id"), "<missing>")
+		if testing.expect_value(t, len(rt_finished), n + 1) do testing.expect_value(t, rt_finished[n].data, "")
 	}
 	for x in rt_finished do result_free(x)
 	clear(&rt_finished)

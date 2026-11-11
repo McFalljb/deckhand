@@ -189,6 +189,17 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	if p == nil do return out[:]
 	order := [2]Harness{.Pi, .Claude}
 	if state.settings.last_harness == .Claude do order = {.Claude, .Pi}
+	// another machine's project: what that machine has (its checklist), with its own account;
+	// never this Mac's harnesses, accounts or folders
+	if no := id_machine(p.id); no != 0 {
+		pi, claude := machine_harnesses(no)
+		for h in order {
+			if h == .Pi && pi do append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = New_Chat{project_id = p.id}})
+			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id}})
+		}
+		for &it, i in out do it.keys = fmt.tprint(i + 1)
+		return out[:]
+	}
 	for h in order {
 		switch h {
 		case .Pi:
@@ -218,6 +229,20 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	}
 	for &it, i in out do if i < 9 do it.keys = fmt.tprint(i + 1)
 	return out[:]
+}
+
+// Which harnesses machine no has, as its checklist says (found, old or not). No checklist yet:
+// its default, pi, only.
+machine_harnesses :: proc(no: u64) -> (pi, claude: bool) {
+	for m in state.machines do if m.no == no {
+		if len(m.checklist) == 0 do return true, false
+		for c in m.checklist do if c.state == .Ok || c.state == .Too_Old || c.state == .Unchecked {
+			if c.id == "pi" do pi = true
+			if c.id == "claude" do claude = true
+		}
+		return
+	}
+	return true, false
 }
 
 

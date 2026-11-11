@@ -250,7 +250,8 @@ The Sessions tab has three sections:
 
 **Other machines** (with **Machines over SSH** on, as it is by default): **+ Add a machine…** at
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
-Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter.
+Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
+(for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
 Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); **Rename…** changes that.
 After this Mac's sections, each machine has its own, under its name, with a dot (green online,
 amber when it needs you, red when its install failed, grey offline), what is wrong in plain words,
@@ -266,7 +267,8 @@ you fixed it). Deckhand does not keep retrying a machine that needs you (to log 
 this Mac): it tries again when you click. An offline machine is retried on its own, less and less
 often. Under it are its open sessions, then its projects; click a project to list its sessions,
 as that machine has them. Click an open session to show it, or one of a project's sessions to open
-it there (**+ New session** under it starts one there), and work in its terminals as in a local tab.
+it there (**+ New session** under it starts one there, with what that machine has installed and its
+own Claude Code account), and work in its terminals as in a local tab.
 While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
 and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
@@ -274,7 +276,8 @@ that machine, and its output comes back here. **⌘T** (or **+** › New shell t
 *On <machine>: …*. **Open web page…** on an online machine's row (or **Open a machine's web page…** in the
 palette) asks for a port on that machine, like `3000` or `3000/admin`, and opens the page its own
 `localhost` serves there (a dev server) in an ordinary browser tab here: in the session on screen,
-or the last one of this Mac's you looked at when another machine's is on screen. Deckhand starts
+or the last one of this Mac's you looked at when another machine's is on screen (with none open,
+in a new chat). Deckhand starts
 an ssh of its own for that page (a new connection with your ssh config, not the machine's link), which forwards a
 free port of this Mac (`127.0.0.1` only) to that port on the machine's own `127.0.0.1`, never to another
 host; the tab opens once the forward answers. That ssh cannot ask for a password or passphrase, so

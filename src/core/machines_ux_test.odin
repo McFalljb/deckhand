@@ -18,6 +18,13 @@ machines_ux_target_and_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, machine_target_clean("ssh://jb@nuc/"), "jb@nuc")
 	testing.expect_value(t, machine_target_clean("SSH nuc"), "nuc")
 	testing.expect_value(t, machine_target_clean("sshbox"), "sshbox")
+	// a port is refused, with how to use one (ssh reads host:2222 as a host's name)
+	for port in ([?]string{"ssh://jb@nuc:2222/", "jb@nuc:2222", "nuc:22"}) {
+		w := machine_target_plain_error(machine_target_clean(port))
+		testing.expectf(t, strings.contains(w, "To use another port, add a Host entry to ~/.ssh/config and type its name here."), "%q: %q", port, w)
+		testing.expectf(t, machine_target_error(machine_target_clean(port)) != "", "%q taken", port)
+	}
+	testing.expect_value(t, machine_target_error("fe80::1"), "") // an IPv6 address is not a port
 	// a bad target says what is allowed, with an example
 	testing.expect_value(t, machine_target_plain_error("jb@nuc"), "")
 	for bad in ([?]string{"", "jb@nuc -p 22", "-oProxyCommand=x", "a;b", "$(id)"}) {
@@ -163,6 +170,12 @@ machines_ux_no_retry :: proc(t: ^testing.T) {
 	testing.expect(t, machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "jb@nuc: Permission denied (publickey)."}), "needs_login waits")
 	testing.expect(t, machine_outcome_for_test(no, {replied = true, ok = false, error = HUB_NOT_ALLOWED}), "refused waits")
 	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "ssh: connect to host nuc port 22: Connection refused"}), "offline retries")
+	// a login's words earlier in ssh's output, then the network went: offline, and it retries
+	dropped := "(jb@nuc) Password: \nclient_loop: send disconnect: Broken pipe"
+	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = dropped}, up = true), "up, then dropped: retries")
+	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = dropped}), "a later line that is not a login's: retries")
+	s, _ := machine_status_of({exited = true, exit_code = 255, stderr = "jb@nuc: Permission denied (publickey).", up = true})
+	testing.expect_value(t, s, Machine_Status.Offline)
 	machine_outcome_for_test(no, {replied = true, ok = false, error = HUB_NOT_ALLOWED})
 	testing.expect(t, !machine_retries_for_test(no), "refused: nothing runs")
 	testing.expect(t, machine_connect_apply({no = no}).ok, "Connect")
@@ -170,6 +183,34 @@ machines_ux_no_retry :: proc(t: ^testing.T) {
 	machine_outcome_for_test(no, {replied = true, ok = false, error = HUB_NOT_ALLOWED})
 	testing.expect(t, machine_rename_apply({no = no, name = "m3"}).ok, "rename")
 	testing.expect(t, machine_retries_for_test(no), "an edit tries again")
+}
+
+// + New session on another machine: what that machine has (its checklist), never this Mac's
+// harnesses or accounts; with no checklist yet, its default (pi) only.
+@(test)
+machines_ux_remote_new_session :: proc(t: ^testing.T) {
+	saved := state.machines
+	defer state.machines = saved
+	p := Project{id = 2 << MACHINE_ID_SHIFT | 7, group = .Projects}
+	checks := []Machine_Check{{id = "pi", state = .Missing}, {id = "claude", state = .Ok}}
+	views := []Machine_View{{no = 2, status = .Online, checklist = checks}}
+	state.machines = views
+	items := new_session_choices(&p, "")
+	testing.expect_value(t, len(items), 1)
+	if len(items) == 1 {
+		c, is := items[0].cmd.(New_Claude_Session)
+		testing.expect(t, is && c.project_id == p.id && c.account == "" && c.cwd == "", "Claude Code there, with its own account")
+	}
+	views[0].checklist = nil // not known yet
+	items = new_session_choices(&p, "")
+	testing.expect_value(t, len(items), 1)
+	if len(items) == 1 {
+		_, is := items[0].cmd.(New_Chat)
+		testing.expect(t, is, "its default: pi")
+	}
+	views[0].checklist = []Machine_Check{{id = "pi", state = .Too_Old}, {id = "claude", state = .Missing}}
+	items = new_session_choices(&p, "")
+	testing.expect(t, len(items) == 1 && items[0].label == "pi", "pi only")
 }
 
 } // when TEST_HOOKS

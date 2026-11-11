@@ -57,6 +57,15 @@ assert_pane_cols 2
 wait 700
 divider pane 0 -200
 waitstate 3000 open_sessions.0.panes.0.rect.w 240
+# the right pane's "+": the new-tab menu (tab kinds only); its shell opens in that pane
+clickid pane_new#1
+assert_menurows New shell tab|New Claude tab — Claude Code not installed|New browser tab|New app tab…
+clickid menurow 0
+waitstate 5000 open_sessions.0.panes.1.tabs.# 2
+assert_state open_sessions.0.focused_pane $pane1
+key w cmd
+waitstate 5000 open_sessions.0.panes.1.tabs.# 1
+mousecell click 3 3 pane=2
 # ⌘T: a second shell in the bottom pane; ⇧⌃⌘← moves it to the pi tab's pane
 key t cmd
 waitstate 5000 open_sessions.0.panes.2.tabs.# 2

@@ -185,10 +185,16 @@ pane_hit :: proc() -> Hit {
 	return nil
 }
 
+// Its "+": the title bar's new-tab menu, its tabs opening in that pane (menu_run).
 pane_click :: proc(h: Hit_Pane_New) {
 	s := core.cur()
 	if s == nil do return
-	ui_do(core.New_Shell_Tab{session = s.id, pane = u64(h)})
+	p := core.session_pane(s, u64(h))
+	if p == nil do return
+	if d := clay.GetElementData(pid(p, "pane_new")); d.found {
+		bb := d.boundingBox
+		menu_open(Menu_New{pane = p.id}, {bb.x, bb.y + bb.height + px(SP_1)})
+	}
 }
 
 // The terminal throttles PTY resizes while a divider (a column's or a pane's) is dragged.

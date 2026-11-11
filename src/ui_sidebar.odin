@@ -168,7 +168,9 @@ Menu_Session :: struct {
 	info:          string, // owned: the ⓘ menu, the session's info block shown on top ("" = the row menu)
 }
 Menu_Sort :: distinct core.Sort_Section
-Menu_New :: struct {} // the tab strip's "+" menu (ui_toolbar.odin)
+Menu_New :: struct {
+	pane: u64, // a pane strip's "+" (ui_panes.odin): its new tab opens in that pane; 0 = the title bar's
+} // the tab strip's "+" menu (ui_toolbar.odin)
 Menu_Target :: union {
 	core.Menu_New_Session, // the harness picker of "New session" (harness.odin)
 	Menu_Project,
@@ -307,6 +309,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		}
 	case Menu_New:
 		for id in ([]string{"new_shell_tab", "new_claude_tab", "new_browser_tab", "new_app_tab", "new_chat", "new_session"}) {
+			if t.pane != 0 && (id == "new_chat" || id == "new_session") do continue // a pane's "+": tabs only
 			a := action_by_id(id)
 			if a == nil || !action_ok(id) do continue
 			label := a.label
@@ -367,6 +370,7 @@ menu_run :: proc(i: int) {
 		return
 	}
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
+	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
 	if it.rename {
 		if t, ok := target.(Menu_Session); ok {
 			// a Claude session's row: its field takes the row (claude_rename on Enter)

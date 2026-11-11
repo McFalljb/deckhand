@@ -2,7 +2,7 @@ package core
 
 // Install and one-click update of another machine's core (docs/plans/background-core.md §8.4, §8.5,
 // §10.4 M6-E). User-only (who = .User), never from a hub (this core viewed from another machine),
-// behind Settings › Experimental › Machines over SSH.
+// behind Settings › Machines over SSH.
 //
 //   machine_install{no}         Install… (no core there) or Update (an older core of Deckhand's own)
 //   machine_install{no,cancel}  Cancel
@@ -550,7 +550,7 @@ random_nonce :: proc() -> string {
 // ---- the commands ----
 
 machine_install_apply :: proc(c: Machine_Install, caller: Caller) -> Result {
-	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
+	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	if c.cancel {
 		j, _ := job_find(c.no)
 		if j != nil && job_active(j) do job_fail(j, "cancelled")
@@ -617,7 +617,7 @@ machine_install_start :: proc(no: u64) -> Result {
 }
 
 machine_linger_apply :: proc(c: Machine_Linger, caller: Caller) -> Result {
-	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
+	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
 	f, ok := machine_facts(c.no)
 	if !ok do return fail(fmt.tprintf("no machine %d", c.no))
 	if f.os != "linux" && !f.via do return fail("linger is Linux's")

@@ -173,9 +173,11 @@ Design: [plans/background-core.md](plans/background-core.md) (G13, G14).
   Builds are self-signed with "Deckhand Self-Signed". On by default, with an opt-out in Settings.
 - ⬜ **M5** Jobs while closed: a login agent, so schedules run after Stop All and after a restart
   of the Mac.
-- ⬜ **M6** Remote machines: sessions on other hosts in the same sidebar, over SSH, with a headless
-  Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)). Planned as six Mac→Mac PRs,
-  then four Linux PRs: [plans/background-core.md §10.4](plans/background-core.md#104-m6-in-prs).
+- ✅ **M6** Remote machines: sessions on other hosts in the same sidebar, over SSH, with a headless
+  Linux core ([#5](https://github.com/McFalljb/deckhand/issues/5)): six Mac→Mac PRs, then four
+  Linux PRs ([plans/background-core.md §10.4](plans/background-core.md#104-m6-in-prs)). The local
+  Atlas reaches every machine; their jobs and bells ring here (M6-F). On by default, with an
+  opt-out in Settings; nothing runs until a machine is added.
 - ⬜ **M7** Several windows on one core.
 - ⬜ **M8** A remote machine's own browser, shown here: a full browser running on that machine
   (headless, so a Linux core has one too), its frames streamed into a tab of this window and the
@@ -216,6 +218,7 @@ Decisions that still shape the code. Superseded ones are gone; their history is 
 | 2026-11-07 | Sessions outlive the window: a core process plus a session holder (not tmux); ⌘Q closes only the window; **Quit Deckhand and Stop All Sessions…** stops everything | Reattach after a window crash or an update; tmux has no native Windows and would double the emulation. [plans/background-core.md](plans/background-core.md) §2. |
 | 2026-11-08 | Every core is fully featured (sessions, jobs, Atlas), with or without a window; remotes are cores too | Nothing local-only that remote machines must undo. |
 | 2026-11-08 | Builds are signed with "Deckhand Self-Signed" until a Developer ID; the trust checks pick their mode from the process's own signature | The split didn't wait for a Developer ID; switching later is one line. |
+| 2026-11-11 | Atlas on another machine's ids acts as `control` there, and only this machine's own user and Atlas are forwarded; a confirmation that machine wants for Atlas is refused, not asked here | No machine drives a third through this one; a remote token never reaches an agent. |
 
 ## 7. Open questions
 

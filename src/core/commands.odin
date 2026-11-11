@@ -1509,7 +1509,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.keep_sessions == c.on && state.settings.keep_sessions_chosen do return {ok = true}, false
 		state.settings.keep_sessions, state.settings.keep_sessions_chosen = c.on, true
 		return {ok = true}, true
-	case Set_Remote_Machines: // Settings › Experimental › Machines over SSH (machines.odin)
+	case Set_Remote_Machines: // Settings › Machines over SSH (machines.odin)
 		if state.settings.remote_machines == c.on do return {ok = true}, false
 		state.settings.remote_machines = c.on
 		return {ok = true}, true

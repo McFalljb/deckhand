@@ -248,8 +248,8 @@ The Sessions tab has three sections:
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
 
-**Other machines** (with **Experimental: Machines over SSH** on and a machine added in Settings ›
-Machines): after this Mac's sections, each machine has its own, under its name, with a dot for its
+**Other machines** (with **Machines over SSH** on, as it is by default, and a machine added in
+Settings › Machines): after this Mac's sections, each machine has its own, under its name, with a dot for its
 link (green online, amber when it needs you, grey offline) and a button when there is something to
 do: **Log in…** (ssh wants a password, a host key or a code: a shell tab here runs `ssh` to it so
 you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…**,
@@ -1079,8 +1079,9 @@ pi is installed; Claude Code's once it has been used:
   integration (**Built in**) and the recommended items. **Install…**, **Update…** and **Show…**
   open the setup sheet's coding agents step, where the command shows and runs. **Refresh** looks
   again.
-- **Machines (experimental)**: with the gear's **Experimental: Machines over SSH** on (off by
-  default; a development build until every part of remote machines is in). Each machine you added,
+- **Machines**: with the gear's **Machines over SSH** on (on by default; turn it off and Deckhand
+  keeps no link to any machine). Until you add a machine nothing happens: no `ssh`, no process.
+  Each machine you added,
   with how its link is: `connecting`, `online` and its core's version, `offline`, `needs_login`
   (ssh asked for a password, a host key or a code: log in once with `ssh` in a terminal),
   `needs_update`, `not_installed`, or `taken` (that Mac's own window, or another Mac, is showing
@@ -1287,7 +1288,12 @@ In short, Atlas can:
   message when that happens and tells you (`desk_watch`; at most 5 at a time);
 - tell you **what happened while you were away**, from the bell's entries (`desk_events`);
 - **show you a file** in a tab of a session it names (`desk_show`; see
-  [Files an agent shows you](#files-an-agent-shows-you)).
+  [Files an agent shows you](#files-an-agent-shows-you));
+- **reach your other machines** ([Machines over SSH](#projects-sessions-and-chats)): it sees
+  their sessions and jobs, under each machine's name, and can prompt, wait for and work in their
+  sessions as on this Mac. That machine applies Atlas's rules again: anything it would ask you to
+  confirm is refused (do it yourself from the window), and Atlas cannot add, remove, update or
+  connect machines. Each machine's own Atlas stays on that machine and never reaches this one.
 
 What it cannot do:
 
@@ -1322,6 +1328,11 @@ Click **Jobs** at the top of the left column (palette: "Show jobs"). Job notes l
 folder (`<main folder>/jobs/`); without a main folder the tab says so and offers **Set up
 Deckhand…**. The header has **New job** (+, the [job sheet](#the-job-sheet)), **Pause all** /
 **Resume all** and **Limits**, and the count of unread runs.
+
+**Other machines' jobs** run on their own machine, on its schedule, even while this Mac sleeps.
+They are listed after this Mac's, under each machine's name (greyed while it is not connected):
+what each is up to and, when a run needs you, what for. They are read-only here: run, edit or
+pause them from a session on that machine. A run there that needs you rings the bell here.
 
 Jobs are grouped by **who they belong to**: each of your projects that has jobs (by name), then
 **Atlas**, **Chats** and **Other**. A group's row shows its name and how many jobs it has (a dot
@@ -1475,6 +1486,7 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 | Stopped with an error | pi's run ended with an error |
 | pi exited | pi's process exited |
 | Jobs | a job's run finished, needs you or failed ([Jobs](#jobs)) |
+| Another machine's | its own bell's entries, and its jobs that need you, named with the machine ([Machines over SSH](#projects-sessions-and-chats)) |
 
 - The bell shows the unread count. Click it to see the entries, newest first, under Today and
   Earlier. Click an entry to go to that session (it reopens a closed one) and mark it read.
@@ -1490,6 +1502,11 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   (finished runs only go to the bell). Pacing: at most one per session every 10 seconds, and in a
   burst the first two, then one "N sessions need you" summary. A build run from the repo
   (no app bundle) bounces the Dock icon instead.
+- **Other machines** can't notify you themselves, so this Mac rings for them: each new entry of
+  their bell once, and each job run there that needs you once (also one from while you were
+  away, when it connects). What a machine already had the first time it connects, or after its
+  core restarted, does not ring again. At most 4 a minute ring for one machine. Removing the
+  machine, or turning Machines over SSH off, takes its entries away.
 
 ## The palette and the gear
 
@@ -1527,8 +1544,8 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   [A tidy project list](#a-tidy-project-list)). On by default.
 - **Keep sessions when quitting** and **Sessions in a background core**: see
   [How Deckhand runs](#how-deckhand-runs). Both on by default.
-- **Experimental: Machines over SSH**: other machines' sessions over `ssh` (off by default; see
-  [The Settings tab](#the-settings-tab), Machines).
+- **Machines over SSH**: other machines' sessions over `ssh` (on by default; nothing happens until
+  you add a machine; see [The Settings tab](#the-settings-tab), Machines).
 
 ## Updates
 
@@ -2019,7 +2036,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
 | Run sessions in a background core (at the next launch) |  | on by default: on or off (the gear's row) |
-| Experimental: Machines over SSH |  | off by default: on or off (the gear's row); see [The Settings tab](#the-settings-tab), Machines |
+| Machines over SSH |  | on by default: on or off (the gear's row); see [The Settings tab](#the-settings-tab), Machines |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |

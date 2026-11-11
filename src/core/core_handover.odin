@@ -127,6 +127,8 @@ core_handover_finish :: proc(run: string) {
 	instance_lock_release(instance_fd)
 	instance_core_fd, instance_fd = -1, -1
 	if len(secret) != 64 do fmt.eprintln("Deckhand: background core: no successor secret (no held session, or no ack): the successor attaches as any core does")
+	// a scene's older core hands over to the new one, which says its own version (remote-install.sh)
+	when TEST_HOOKS do posix.unsetenv(strings.clone_to_cstring(HOOK_ENV[.Core_Version], context.temp_allocator))
 	pid, ok, why := core_launch(handover.to, run, home_root, secret = len(secret) == 64 ? secret : "")
 	if !ok {
 		self := executable_path()

@@ -17,6 +17,14 @@ Core_Live :: struct {
 	cleanups: []Wt_Cleanup_Live, // the worktree switcher's clean ups in flight or failed
 	watch:    []string, // pi's config folders the window's file watcher watches for hot reload (reload_watch_dirs)
 	holder_restart: bool, // the palette offers Restart session holder (holder_restart_available)
+	checklist: []Harness_Check_Live, // viewed from another machine (a hub): this machine's coding agents checklist, which its row shows (M6-E)
+}
+
+// One row of the checklist, as another machine's Deckhand shows it (read-only, Copy).
+Harness_Check_Live :: struct {
+	id:      string, // HARNESS_MANIFEST's
+	state:   Harness_Item_State,
+	command: string, // what installs or updates it ("" = nothing to do)
 }
 
 Update_Live :: struct {
@@ -86,6 +94,15 @@ harness_run_now :: proc() -> Harness_Run_Live {
 // in the temp allocator to compare, then again in an arena of its own).
 core_live_tick :: proc() {
 	if !window_link_is_sock() do return
+	// a hub (another machine's core) shows this machine's checklist on its row: looked at once per
+	// hub link, and again when the login shell's answer about pi comes
+	if window_link_hub() {
+		if !live_hub_checked {
+			live_hub_checked = true
+			harness_checklist_refresh(bump = false)
+		}
+		harness_checklist_tick()
+	} else do live_hub_checked = false
 	l := live_make(context.temp_allocator)
 	if live_same(&l, &state.live) do return
 	fresh: virtual.Arena
@@ -95,6 +112,9 @@ core_live_tick :: proc() {
 	state.live = live_make(virtual.arena_allocator(&live_arena))
 	window_state_changed()
 }
+
+@(private = "file")
+live_hub_checked: bool
 
 @(private = "file")
 live_make :: proc(a: runtime.Allocator) -> Core_Live {
@@ -108,6 +128,10 @@ live_make :: proc(a: runtime.Allocator) -> Core_Live {
 	l.watch = make([]string, len(dirs), a)
 	for d, i in dirs do l.watch[i] = strings.clone(d, a)
 	l.holder_restart = holder_restart_available()
+	if window_link_hub() {
+		l.checklist = make([]Harness_Check_Live, len(harness_items), a)
+		for it, i in harness_items do l.checklist[i] = {id = strings.clone(HARNESS_MANIFEST[it.row].id, a), state = it.state, command = strings.clone(it.command, a)}
+	}
 	return l
 }
 

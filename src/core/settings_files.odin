@@ -188,6 +188,19 @@ CLAUDE_FLAGS_WARN_ROW :: "deckhand:claude-default-flags-warning"
 MACHINE_ROW :: "deckhand:machine:"
 MACHINE_ADD_ROW :: "deckhand:machine-add"
 MACHINE_REACH_ROW :: "deckhand:machine-reachable"
+// Its coding agents (its core's checklist, read-only here): MACHINE_CHECK_ROW + no + ":" + item id,
+// with Copy (the command, run in a shell tab there).
+MACHINE_CHECK_ROW :: "deckhand:machine-check:"
+
+// A machine checklist row's machine and item (ok false: not one).
+machine_check_row :: proc(path: string) -> (no: u64, id: string, ok: bool) {
+	if !strings.has_prefix(path, MACHINE_CHECK_ROW) do return 0, "", false
+	rest := path[len(MACHINE_CHECK_ROW):]
+	i := strings.index_byte(rest, ':')
+	if i < 0 do return 0, "", false
+	n, nok := strconv.parse_u64(rest[:i], 10)
+	return n, rest[i + 1:], nok
+}
 
 // A machine row's number (ok false: not one).
 machine_row_no :: proc(path: string) -> (no: u64, ok: bool) {
@@ -361,8 +374,14 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 			detail := fmt.tprintf("%s · %s", m.target != "" ? m.target : "via", MACHINE_STATUS_NAMES[m.status])
 			if m.status == .Online && m.version != "" do detail = fmt.tprintf("%s %s", detail, m.version)
 			if m.error != "" do detail = fmt.tprintf("%s: %s", detail, m.error)
-			button := m.status == .Taken ? "Take back" : m.status == .Online || m.status == .Connecting ? "" : "Connect"
+			if m.job != .None do detail = fmt.tprintf("%s · %s%s%s", detail, MACHINE_JOB_NAMES[m.job], m.job_note != "" ? ": " : "", m.job_note)
+			if m.linger == .Off do detail = fmt.tprintf("%s · linger is off: its jobs stop when you log out of it", detail)
+			button := machine_row_button(m)
 			add(&out, {group = "machines", label = m.name, detail = detail, path = fmt.tprintf("%s%d", MACHINE_ROW, m.no), button = button, remove = true})
+			for c in m.checklist {
+				r, _ := harness_row(c.id)
+				add(&out, {group = "machines", label = fmt.tprintf("%s: %s", m.name, r.name), detail = fmt.tprintf("%s%s%s", HARNESS_STATE_NAMES[c.state], c.command != "" ? " · " : "", c.command), path = fmt.tprintf("%s%d:%s", MACHINE_CHECK_ROW, m.no, c.id), button = c.command != "" ? "Copy" : ""})
+			}
 		}
 		if state.settings.remote_machines do add(&out, {group = "machines", label = "Add machine…", detail = "an ~/.ssh/config alias or user@host", path = MACHINE_ADD_ROW, button = "Add…"})
 		reach := state.settings.machines_reachable
@@ -370,6 +389,23 @@ settings_file_rows :: proc() -> []Settings_File_Row {
 		add(&out, {group = "machines", label = "Allow other machines to connect to this one", detail = detail, path = MACHINE_REACH_ROW, button = reach ? "Turn off" : "Allow"})
 	}
 	return out[:]
+}
+
+// A machine row's button in Settings: Cancel while its install runs, Install… / Update (M6-E),
+// Keep running… (Linux linger off), Take back, Connect.
+machine_row_button :: proc(m: Machine_View) -> string {
+	#partial switch m.job {
+	case .Fetching, .Verifying, .Copying, .Handing_Over: return "Cancel"
+	case .Cleaning: return ""
+	}
+	if m.update != .None do return "Update"
+	#partial switch m.status {
+	case .Not_Installed: return "Install…"
+	case .Taken:         return "Take back"
+	case .Online:        return m.linger == .Off ? "Keep running…" : ""
+	case .Connecting:    return ""
+	}
+	return "Connect"
 }
 
 // The instructions file pi reads in dir: the first of these that is a
@@ -864,7 +900,10 @@ settings_machines_key :: proc() -> string {
 	if !state.settings.remote_machines && !state.settings.machines_reachable do return ""
 	b := strings.builder_make(context.temp_allocator)
 	fmt.sbprintf(&b, "%v%v;", state.settings.remote_machines, state.settings.machines_reachable)
-	for m in state.machines do fmt.sbprintf(&b, "%d|%s|%v|%s|%s;", m.no, m.name, m.status, m.version, m.error)
+	for m in state.machines {
+		fmt.sbprintf(&b, "%d|%s|%v|%s|%s|%v|%s|%v|%v;", m.no, m.name, m.status, m.version, m.error, m.job, m.job_note, m.update, m.linger)
+		for c in m.checklist do fmt.sbprintf(&b, "%s|%v|%s;", c.id, c.state, c.command)
+	}
 	return strings.to_string(b)
 }
 

@@ -25,6 +25,7 @@ import "core:os"
 import "core:slice"
 import "core:strings"
 import "core:sync"
+import "core:sys/posix"
 import "core:thread"
 import "core:time"
 import "base:runtime"
@@ -1074,6 +1075,10 @@ conn_handoff :: proc(c: ^Conn, leftover: []u8) {
 framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
 	fmt.sbprintf(b, `,"framed":true,"generation":%d,"version":`, cw.GENERATION)
 	json_quote(b, core_version())
+	if id := window_door_core_id(); hex64_ok(id) { // this run's id: a hub's install tells its new core from the old one by it
+		strings.write_string(b, `,"core":`)
+		json_quote(b, id)
+	}
 	strings.write_string(b, `,"features":[`)
 	for f, i in CORE_FEATURES {
 		if i > 0 do strings.write_byte(b, ',')
@@ -1089,7 +1094,24 @@ framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
 	}
 	linger := "" // Linux: false when jobs stop at logout (§8.4, launch_linux.odin); unknown: left out
 	when ODIN_OS == .Linux do if linger_state != .Unknown do linger = linger_state == .On ? `,"linger":true` : `,"linger":false`
-	fmt.sbprintf(b, `],"machine":{{"os":"%s","arch":"%s"%s}},"holder_wire":%d,"snapshot":["%s","vt"],"build":"%s"`, ODIN_OS_STRING, ODIN_ARCH_STRING, linger, hw.WIRE, SNAPSHOT_GHOSTSNP, core_build())
+	// installed: this core runs from <data>/core/ (M6-E: another machine's Update hands over only such a core)
+	fmt.sbprintf(b, `],"machine":{{"os":"%s","arch":"%s"%s,"installed":%v}},"holder_wire":%d,"snapshot":["%s","vt"],"build":"%s"`, ODIN_OS_STRING, ODIN_ARCH_STRING, linger, core_installed(), hw.WIRE, SNAPSHOT_GHOSTSNP, core_build())
+}
+
+// This process runs from <data>/core/<key>/ (an installed core: core_versions.odin), both paths
+// resolved. Read once.
+core_installed :: proc() -> bool {
+	@(static) value, done: bool
+	if !done && home_root != "" {
+		done = true
+		exe := executable_path()
+		vdir := posix.realpath(strings.clone_to_cstring(core_versions_dir(home_root), context.temp_allocator), nil)
+		if vdir != nil {
+			value = exe != "" && strings.has_prefix(exe, strings.concatenate({string(vdir), "/"}, context.temp_allocator))
+			posix.free(vdir)
+		}
+	}
+	return value
 }
 
 // What a core says it can do beyond its generation (the framed hello's `features`): optional
@@ -1115,6 +1137,7 @@ core_version :: proc() -> string {
 		} else {
 			v, _, _ := update_env_find(false, "", "")
 		}
+		when TEST_HOOKS do if t := hook_env(.Core_Version); t != "" do v = t // a scene's older core (remote-install.sh)
 		core_version_value = strings.clone(v, runtime.heap_allocator())
 	})
 	return core_version_value

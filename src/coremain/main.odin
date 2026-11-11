@@ -6,6 +6,8 @@
 //   deckhand-core-serve check                       this core's facts, one JSON line (core_versions.odin)
 //   deckhand-core-serve install --data DIR          this Core.app into DIR/core/<v>/, made current;
 //                                                   prints the installed serve binary
+//   deckhand-core-serve install --data DIR --allow-hubs   Linux: also lets other machines connect
+//                                                   (machines-reachable.grant, read at serve's start)
 //   deckhand-core-serve launch --run DIR --data DIR  starts this binary's core through the launchd
 //                                                   launcher, then exits (the holder's supervisor)
 //   deckhand-core-serve connect [--from NAME]       another machine's hub link, over its ssh: the
@@ -37,6 +39,8 @@ main :: proc() {
 		os.exit(0)
 	}
 	if len(os.args) == 4 && os.args[1] == "install" && os.args[2] == "--data" do os.exit(install_main(os.args[3]))
+	// Linux only: the install another machine's Deckhand ran over ssh (M6-E) lets it connect
+	when ODIN_OS == .Linux do if len(os.args) == 5 && os.args[1] == "install" && os.args[2] == "--data" && os.args[4] == "--allow-hubs" do os.exit(install_main(os.args[3], allow_hubs = true))
 	if len(os.args) == 6 && os.args[1] == "launch" && os.args[2] == "--run" && os.args[4] == "--data" do os.exit(launch_main(os.args[3], os.args[5]))
 	if len(os.args) >= 2 && os.args[1] == "connect" do os.exit(connect_main(os.args[2:]))
 	when ODIN_OS == .Linux do if len(os.args) >= 2 && os.args[1] == "linger" do os.exit(linger_main(os.args[2:]))
@@ -47,12 +51,20 @@ main :: proc() {
 // `install --data DIR`: the Core.app this binary is in, installed and made current. On Linux
 // (no Core.app): this binary, then the systemd user unit and the linger check
 // (core.core_install_linux); what the user should know goes to stderr.
-install_main :: proc(data: string) -> int {
+install_main :: proc(data: string, allow_hubs := false) -> int {
 	exe := core.executable_path()
 	when ODIN_OS == .Linux {
 		lserve, note, lok := core.core_install_linux(exe, data)
 		if note != "" do fmt.eprintln("deckhand-core-serve install:", note)
 		if !lok do return 1
+		// --allow-hubs: Settings › Machines › Allow other machines to connect, on at the core's next
+		// start (a headless core has no window to turn it on; the user asked from the other machine)
+		if allow_hubs {
+			if w := core.machines_reachable_grant_write(data); w != "" {
+				fmt.eprintln("deckhand-core-serve install:", w)
+				return 1
+			}
+		}
 		fmt.println(lserve)
 		return 0
 	}

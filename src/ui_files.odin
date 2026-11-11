@@ -1229,7 +1229,24 @@ settings_folder_button :: proc(path: string) -> bool {
 		return true
 	}
 	if no, ok := core.machine_row_no(path); ok {
-		ui_do(core.Machine_Connect{no = no})
+		for m in state.machines do if m.no == no {
+			switch core.machine_row_button(m) {
+			case "Cancel": ui_do(core.Machine_Install{no = no, cancel = true})
+			case "Install…", "Update":
+				if m.update == .Command_Only do toast_show(core.machine_update_command(m.name))
+				else do ui_do(core.Machine_Install{no = no})
+			case "Keep running…": ui_do(core.Machine_Linger{no = no})
+			case: ui_do(core.Machine_Connect{no = no})
+			}
+		}
+		return true
+	}
+	// another machine's coding agent: its command copied, to run in a shell tab there (read-only here)
+	if no, id, ok := core.machine_check_row(path); ok {
+		for m in state.machines do if m.no == no do for c in m.checklist do if c.id == id && c.command != "" {
+			if win_os.set_clipboard != nil do win_os.set_clipboard(c.command)
+			toast_show(fmt.tprintf("Copied: %s (run it in a shell tab on %s)", c.command, m.name))
+		}
 		return true
 	}
 	if path == core.MACHINE_REACH_ROW {

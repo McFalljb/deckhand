@@ -252,9 +252,9 @@ The Sessions tab has three sections:
 Machines): after this Mac's sections, each machine has its own, under its name, with a dot for its
 link (green online, amber when it needs you, grey offline) and a button when there is something to
 do: **Log in…** (ssh wants a password, a host key or a code: a shell tab here runs `ssh` to it so
-you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…** or
-**Update** (for now these two say what to do on that machine; Deckhand does them in a later
-version). Under it are its open sessions, then its projects; click a project to list its sessions,
+you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…**,
+**Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
+and **Cancel** while an install runs. Under it are its open sessions, then its projects; click a project to list its sessions,
 as that machine has them. Click an open session to show it, or one of a project's sessions to open
 it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
@@ -1099,6 +1099,29 @@ pi is installed; Claude Code's once it has been used:
   it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
   keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a
   session holder of their own (`deckhand-holder-…` in `systemctl --user list-units`).
+  Under each online machine, its coding agents (pi, Claude Code and their extras, as that
+  machine's own checklist has them) are listed read-only, each with **Copy** for the command that
+  installs or updates it there: open a shell tab on that machine and paste it.
+
+#### Installing and updating other machines
+
+- **Install.** Add a machine that has no Deckhand, or click **Install…** on its row: Deckhand
+  installs its core there over your ssh. To another Mac (Apple silicon), it checks this Mac's
+  installed Deckhand Core.app against Deckhand's signature and copies it; to a Linux machine
+  (x86_64), it downloads the release's Linux core for this Mac's version from GitHub, checks its
+  signature and checksum here, then copies it. Nothing is downloaded on the other machine, and
+  nothing runs there but Deckhand's own install (`deckhand-core-serve install`, into its
+  Deckhand folder; never `sudo`). A Linux machine has no window to turn on **Allow other machines
+  to connect**, so the install turns it on there: you asked for it from this Mac. Another Mac's
+  stays as it is: turn it on there. **Cancel** stops it and removes what it copied.
+- **Update.** When this Mac's Deckhand is newer than a machine's core, or that core is too old to
+  work with (`needs_update`), its row shows **Update**. A click installs this Mac's version as
+  above and hands that machine's sessions over to the new core: they keep running, with a short
+  pause. Never to an older version. A core that does not run from Deckhand's own folder (or is
+  too old to say where it runs) is left alone: the button says what to do on that machine.
+- **Linger (Linux).** If lingering is off there, the machine's jobs stop when you log out of it,
+  and its row offers **Keep running…**: a click asks that machine's login manager to turn it on
+  for you (no password, no `sudo`). If it refuses, run `loginctl enable-linger` there yourself.
 
 Click a file to open it in an editor tab. Press ⌘, again to go back to Sessions.
 

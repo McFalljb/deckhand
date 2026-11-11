@@ -546,6 +546,8 @@ Command :: union {
 	Machine_Connect,
 	Machine_Login,
 	Machine_Open_Page, // a machine's web page in a local browser tab (machine_page.odin)
+	Machine_Install, // Install… and Update of another machine's core (machine_install.odin)
+	Machine_Linger, // Linux: linger on there (machine_install.odin)
 	Holder_Replace,
 	Holder_Restart, // a separate core's window: the palette's Restart session holder (holder_restart.odin)
 	Core_Handover,
@@ -790,7 +792,13 @@ Caller :: struct {
 	kind:   Caller_Kind,
 	tab_id: u64,
 	claude: bool, // kind panel: a Claude tab's plugin and CLI (claude.odin), not a pi tab's bridge
+	hub:    bool, // it came over a hub link (another machine's core, on_behalf): kept with a queued command, so a hub that is gone by the time it runs still counts (caller_from_hub)
 }
+
+// The command came from another machine's core: its own link said so (kept with it in the inbox),
+// or this core's attached link is a hub now. A User_Here command (every machine_*) is refused
+// then (caller_may).
+caller_from_hub :: proc(c: Caller) -> bool {return c.hub || window_link_hub()}
 
 fail :: proc(msg: string) -> Result {return {error = msg}}
 
@@ -880,6 +888,7 @@ caller_may :: proc(caller: Caller, cmd: Command) -> bool {
 	if caller.kind == .Tab_Host do return tab_host_may(cmd) // a page's or an app's reports only (tabhost_route.odin)
 	spec := command_spec(command_type(cmd))
 	if spec == nil || !who_allows(caller.kind, spec.who) do return false
+	if spec.who == .User_Here && caller_from_hub(caller) do return false // the one gate: this machine's own user only
 	// a Claude tab (panel + claude): its own claude.* reports, never a pi bridge's; and only
 	// a Claude tab sends those (scripts too, for tests)
 	if spec.who == .Claude do return caller.kind != .Panel || (caller.claude && caller.tab_id == claude_command_tab(cmd))
@@ -1512,6 +1521,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 	case Machine_Connect: return machine_connect_apply(c), false
 	case Machine_Login:   return machine_login_apply(c, caller)
 	case Machine_Open_Page: return machine_open_page_apply(c, caller, request_id)
+	case Machine_Install: return machine_install_apply(c, caller), false // its job changes the machines section itself
+	case Machine_Linger:  return machine_linger_apply(c, caller), false
 	case Holder_Replace:
 		return holder_replace(c.stop), true
 	case Holder_Restart:

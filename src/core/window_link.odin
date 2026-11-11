@@ -1120,8 +1120,8 @@ hub_on_behalf :: proc(obj: json.Object) -> (Caller, bool) {
 	ob, ok := obj["on_behalf"].(json.Object)
 	if !ok do return {}, false
 	switch string(ob["kind"].(json.String) or_else "") {
-	case "ui":      return {kind = .UI}, true
-	case "control": return {kind = .Control}, true
+	case "ui":      return {kind = .UI, hub = true}, true
+	case "control": return {kind = .Control, hub = true}, true
 	}
 	return {}, false
 }

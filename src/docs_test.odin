@@ -27,7 +27,7 @@ docs_cover_actions_and_commands :: proc(t: ^testing.T) {
 	for top in MENUBAR do testing.expectf(t, strings.contains(core.ATLAS_GUIDE, fmt.tprintf("**%s**", top.title)), "docs/GUIDE.md has no **%s** menu", top.title)
 	for x in SHORTCUTS_EXTRA do testing.expectf(t, strings.contains(core.ATLAS_GUIDE, x.keys), "docs/GUIDE.md does not list shortcut %s (%s)", x.keys, x.label)
 	for s in core.COMMAND_SPECS {
-		if s.who != .User && s.who != .Anyone do continue
+		if s.who != .User && s.who != .User_Here && s.who != .Anyone do continue
 		name := fmt.tprintf("`%s`", s.type)
 		testing.expectf(t, strings.contains(core.ATLAS_GUIDE, name) || strings.contains(DOC_PROTOCOL, name), "neither docs/GUIDE.md nor docs/PROTOCOL.md mentions command %s", name)
 	}

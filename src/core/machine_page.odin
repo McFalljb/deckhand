@@ -132,35 +132,12 @@ page_free_port :: proc() -> int {
 // never in the background (a config's ForkAfterAuthentication would leave our process group, and
 // its listener our cleanup), no tty, no agent or X11 forwarding, no LocalCommand, never a prompt,
 // and a config's ClearAllForwardings=yes cannot clear our -L.
+// The shared builder's Forward mode (machines.odin ssh_argv); machine_page_ssh_argv_test pins
+// every argument.
 machine_page_ssh_argv :: proc(target: string, local, remote: int) -> (argv: []string, why: string) {
 	if w := machine_target_error(target); w != "" do return nil, w
 	if local < 1 || local > 65535 || remote < 1 || remote > 65535 do return nil, "the port is 1 to 65535"
-	out := [?]string {
-		"ssh",
-		"-o", "ControlMaster=no",
-		"-o", "ControlPath=none",
-		"-o", "ControlPersist=no",
-		"-o", "ForkAfterAuthentication=no",
-		"-o", "RequestTTY=no",
-		"-o", "BatchMode=yes",
-		"-o", "ClearAllForwardings=no",
-		"-o", "ExitOnForwardFailure=no",
-		"-o", "ForwardAgent=no",
-		"-o", "ForwardX11=no",
-		"-o", "PermitLocalCommand=no",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=4",
-		"-N",
-		"-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote),
-		"--", target,
-	}
-	return slice_clone_temp(out[:]), ""
-
-	slice_clone_temp :: proc(a: []string) -> []string {
-		b := make([]string, len(a), context.temp_allocator)
-		copy(b, a)
-		return b
-	}
+	return ssh_argv(target, .Forward, extra = {"-N", "-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote)})
 }
 
 // What ssh's output says went wrong, for the user (at most MACHINE_ERROR_MAX bytes).
@@ -287,14 +264,7 @@ page_child_start :: proc(f: ^Page_Forward, now: time.Tick) -> bool {
 @(private = "file")
 page_child_poll :: proc(f: ^Page_Forward) -> (exited: bool) {
 	if !f.child do return false
-	if f.fd >= 0 {
-		buf: [4096]u8
-		for {
-			n := posix.read(f.fd, &buf[0], len(buf))
-			if n <= 0 do break
-			f.out_n += copy(f.out[f.out_n:], buf[:n])
-		}
-	}
+	if f.fd >= 0 do pipe_drain(f.fd, f.out[:], &f.out_n, CHILD_READ_BUDGET) // bounded per turn (machine_install.odin)
 	if f.pid <= 0 do return true
 	info: posix.siginfo_t
 	if posix.waitid(.P_PID, posix.id_t(f.pid), &info, {.EXITED, .NOHANG, .NOWAIT}) != 0 do return false
@@ -569,9 +539,6 @@ when TEST_HOOKS {
 
 machine_open_page_apply :: proc(c: Machine_Open_Page, caller: Caller, request_id: u64) -> (Result, bool) {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first"), false
-	// the user's only, at this Mac's own window: never a hub's (another machine viewing this one)
-	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens a machine's web page"), false
-	if window_link_hub() do return fail("this machine is viewed from another one: open the page there"), false
 	if w := machine_page_port_error(c.port); w != "" do return fail(w), false
 	path, pwhy := machine_page_path(c.path)
 	if pwhy != "" do return fail(pwhy), false

@@ -137,6 +137,7 @@ serve_main :: proc(args: []string) -> int {
 		core.persist_load(false)
 		core.claude_disk_launching = false
 	}
+	core.machines_reachable_grant_take() // Linux: an install over ssh let other machines connect (machine_install.odin)
 	core.machines_load() // other machines over SSH (machines.odin): links start at the loop's first turn
 	core.holder_adopt_all()
 	// the restored current tab is focused (its session starts), as the in-process window does after

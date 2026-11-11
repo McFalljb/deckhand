@@ -208,6 +208,8 @@ command_type :: proc(cmd: Command) -> string {
 	case Machine_Remove:      return "machine_remove"
 	case Machine_Connect:     return "machine_connect"
 	case Machine_Login:       return "machine_login"
+	case Machine_Install:     return "machine_install"
+	case Machine_Linger:      return "machine_linger"
 	case Machine_Open_Page:   return "machine_open_page"
 	case Holder_Replace:      return "holder_replace"
 	case Holder_Restart:      return "holder_restart"
@@ -474,6 +476,11 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Machine_Connect:
 		kv_u64(&w, "no", c.no)
 	case Machine_Login:
+		kv_u64(&w, "no", c.no)
+	case Machine_Install:
+		kv_u64(&w, "no", c.no)
+		if c.cancel do kv_bool(&w, "cancel", true)
+	case Machine_Linger:
 		kv_u64(&w, "no", c.no)
 	case Machine_Open_Page:
 		kv_u64(&w, "no", c.no)
@@ -1599,7 +1606,19 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 			json_quote(b, m.arch)
 			strings.write_string(b, `,"error":`)
 			json_quote(b, m.error)
-			strings.write_byte(b, '}')
+			// its install or update, Update's offer, linger, its coding agents (machine_install.odin)
+			fmt.sbprintf(b, `,"job":"%s","job_note":`, strings.to_lower(fmt.tprint(m.job), context.temp_allocator))
+			json_quote(b, m.job_note)
+			fmt.sbprintf(b, `,"update":"%s","linger":"%s","checklist":[`, strings.to_lower(fmt.tprint(m.update), context.temp_allocator), strings.to_lower(fmt.tprint(m.linger), context.temp_allocator))
+			for c, k in m.checklist {
+				if k > 0 do strings.write_byte(b, ',')
+				strings.write_string(b, `{"id":`)
+				json_quote(b, c.id)
+				fmt.sbprintf(b, `,"state":"%s","command":`, HARNESS_STATE_NAMES[c.state])
+				json_quote(b, c.command)
+				strings.write_byte(b, '}')
+			}
+			strings.write_string(b, "]}")
 		}
 		strings.write_byte(b, ']')
 	}

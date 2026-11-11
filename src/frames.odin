@@ -82,7 +82,7 @@ when ODIN_OS == .Darwin {
 		// pure rules (frames_test.odin)
 		dh_frames_key_equal :: proc(a, b: [^]u8) -> c.int ---
 		dh_frames_sender_in :: proc(sender_pgid, sender_sid, pgid, sid: c.int) -> c.int ---
-		dh_frames_on_frame :: proc(cur_gen: u32, has_latest: c.int, latest_slot, gen, slot: u32, release_slot: ^u32) -> c.int ---
+		dh_frames_on_frame :: proc(cur_gen: u32, has_latest: c.int, latest_slot, latest_gen: u32, latest_seq: u64, gen, slot: u32, seq: u64, release_slot: ^u32) -> c.int ---
 		dh_frames_encode :: proc(id: c.int, a, b: u32, c_, d: u64, buf: [^]u8) -> c.int ---
 	}
 }

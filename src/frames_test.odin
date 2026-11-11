@@ -77,19 +77,37 @@ frames_key_and_sender_checks :: proc(t: ^testing.T) {
 frames_only_current_frames_count :: proc(t: ^testing.T) {
 	rel: u32 = 99
 	// stale gen, no ring yet, bad slot: dropped
-	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 4, 0, &rel), 0)
-	testing.expect_value(t, dh_frames_on_frame(0, 0, 0, 0, 0, &rel), 0)
-	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 5, 3, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 0, 0, 4, 0, 1, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(0, 0, 0, 0, 0, 0, 0, 1, &rel), 0)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 0, 0, 5, 3, 1, &rel), 0)
 	// the first: taken
-	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 5, 1, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 0, 0, 0, 5, 1, 1, &rel), 1)
 	testing.expect_value(t, rel, 99)
 	// a newer one while slot 1 waits unshown: slot 1 goes back at once
-	testing.expect_value(t, dh_frames_on_frame(5, 1, 1, 5, 2, &rel), 2)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 1, 5, 1, 5, 2, 2, &rel), 2)
 	testing.expect_value(t, rel, 1)
 	// the same slot again (never happens with a correct app): nothing to release twice
 	rel = 99
-	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 2, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 2, 5, 2, 3, &rel), 1)
 	testing.expect_value(t, rel, 99)
+}
+
+// #79: FRAMEs can arrive out of order. Within a ring, one older than a frame already
+// taken is dropped (its slot goes back); an equal seq is taken (an app that never sets
+// seq still shows every frame); a new ring starts over at any seq.
+@(test)
+frames_out_of_order_frames_drop :: proc(t: ^testing.T) {
+	rel: u32 = 99
+	// N+1 (slot 2) taken and waiting, then N (slot 1): dropped, nothing else released
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 11, 5, 1, 10, &rel), 3)
+	testing.expect_value(t, rel, 99)
+	// N+1 already shown (nothing waiting), then N: dropped
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 2, 5, 11, 5, 1, 10, &rel), 3)
+	// the same seq again (an app that never sets it): taken, as before
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 2, 5, 11, 5, 1, 11, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 11, 5, 1, 11, &rel), 2)
+	// a new ring (the app restarted, its seq starts over): a low seq is taken
+	testing.expect_value(t, dh_frames_on_frame(6, 0, 2, 5, 11, 6, 0, 1, &rel), 1)
 }
 
 @(test)

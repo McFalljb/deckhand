@@ -100,11 +100,16 @@ int dh_frames_sender_in(int sender_pgid, int sender_sid, int pgid, int sid) {
 }
 
 // What a FRAME does to the latest-not-yet-shown slot. cur_gen: the ring the
-// app must use now; has_latest/latest_slot: an unshown frame already waiting.
+// app must use now; has_latest/latest_slot: an unshown frame already waiting;
+// latest_gen/latest_seq: the last frame taken (shown or not).
 // Returns 0 = drop (stale gen or bad slot), 1 = take it, 2 = take it and
-// release *release_slot (the older unshown latest, replaced).
-int dh_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, uint32_t gen, uint32_t slot, uint32_t* release_slot) {
+// release *release_slot (the older unshown latest, replaced), 3 = drop it and
+// release its own slot (older than a frame of this ring already taken: it
+// arrived out of order; an equal seq is taken, for apps that never set it).
+// A new ring starts over: gens are never reused.
+int dh_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, uint32_t latest_gen, uint64_t latest_seq, uint32_t gen, uint32_t slot, uint64_t seq, uint32_t* release_slot) {
     if (gen != cur_gen || cur_gen == 0 || slot >= PDF_SLOTS) return 0;
+    if (gen == latest_gen && seq < latest_seq) return 3;
     if (has_latest && latest_slot != slot) {
         *release_slot = latest_slot;
         return 2;
@@ -362,8 +367,9 @@ static void q_frame(pdf_frame* m, mach_msg_audit_trailer_t* t) {
     pid_t pid = audit_token_to_pid(t->msgh_audit);
     if (pid <= 0 || !dh_frames_sender_in(getpgid(pid), getsid(pid), pgid, sid)) return;
     os_unfair_lock_lock(&g_lock);
-    action = c->cur_gen == m->gen ? dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, m->gen, m->slot, &rel) : 0;
-    if (action == 0) c->stale++;
+    action = c->cur_gen == m->gen ? dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, c->latest_gen, c->latest_seq, m->gen, m->slot, m->seq, &rel) : 0;
+    if (action == 3) rel = m->slot; // out of order: never shown, back at once
+    if (action == 0 || action == 3) c->stale++;
     else {
         if (action == 2) c->replaced++;
         c->rx++;
@@ -375,8 +381,8 @@ static void q_frame(pdf_frame* m, mach_msg_audit_trailer_t* t) {
         c->latest_t = pdf_now_ms();
     }
     os_unfair_lock_unlock(&g_lock);
-    if (action == 2) q_release(c, m->gen, rel); // never shown: back at once
-    if (action) atomic_store(&g_wake, 1);
+    if (action == 2 || action == 3) q_release(c, m->gen, rel); // never shown: back at once
+    if (action == 1 || action == 2) atomic_store(&g_wake, 1);
 }
 
 static void q_ring_done(pdf_ring_done* m, mach_msg_audit_trailer_t* t) {
@@ -1001,7 +1007,8 @@ void dh_frames_local_unacquire(uint64_t tab_id, uint32_t gen, int slot) {
 // FRAME, in process: the slot holds a finished w x h px frame at its
 // top-left (its GPU writes have completed). It is Deckhand's now; the frame loop takes it at its next poll.
 // An older frame waiting unshown is replaced and its slot freed at once (it
-// was never drawn). 1 = taken.
+// was never drawn); one not newer than a frame already taken is dropped.
+// 1 = taken.
 int dh_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq, int w, int h) {
     int action = 0;
     os_unfair_lock_lock(&g_lock);
@@ -1009,8 +1016,9 @@ int dh_frames_local_frame(uint64_t tab_id, uint32_t gen, int slot, uint64_t seq,
     pdf_ring_store* r = c && c->local && slot >= 0 && slot < PDF_SLOTS ? ring_of(c, gen) : NULL;
     if (r && r->state[slot] == PDF_SLOT_WRITING) {
         uint32_t rel = 0;
-        action = dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, gen, (uint32_t)slot, &rel);
-        if (action == 0) {
+        action = dh_frames_on_frame(c->cur_gen, c->has_latest, c->latest_slot, c->latest_gen, c->latest_seq, gen, (uint32_t)slot, seq, &rel);
+        if (action == 0 || action == 3) {
+            action = 0;
             c->stale++;
             r->state[slot] = PDF_SLOT_FREE;
         } else {
@@ -1087,6 +1095,8 @@ typedef struct dh_frames_conn {
     float p_scale;
     id<MTLTexture> p_tex[PDF_SLOTS];
     int dead;
+    uint32_t sent_gen; // the last FRAME sent (FRAMEs go out in seq order)
+    uint64_t sent_seq;
     uint64_t frames_sent, frames_dropped, rings;
 } dh_frames_conn;
 
@@ -1249,6 +1259,10 @@ void dh_frames_unacquire(dh_frames_conn* c, int slot) {
 // After the frame's command buffers were committed on mtl_queue: one empty
 // command buffer whose completed handler sends FRAME (0 timeout: dropped
 // if Deckhand's queue is full; then the slot is the app's again at once).
+// Completed handlers can run at once on different threads: the send happens
+// under the lock (a 0 timeout never blocks), and a frame older than one
+// already sent is dropped instead, so FRAMEs go out in seq order (an equal
+// seq is still sent).
 void dh_frames_present(dh_frames_conn* c, uint32_t gen, int slot, uint64_t seq, uint64_t tick, void* mtl_queue) {
     id<MTLCommandQueue> q = (__bridge id<MTLCommandQueue>)mtl_queue;
     id<MTLCommandBuffer> cb = [q commandBuffer];
@@ -1261,14 +1275,18 @@ void dh_frames_present(dh_frames_conn* c, uint32_t gen, int slot, uint64_t seq, 
         m.seq = seq;
         m.tick = tick;
         os_unfair_lock_lock(&c->lock);
-        if (c->gen == gen && c->state[slot] == 1) c->state[slot] = 2;
-        os_unfair_lock_unlock(&c->lock);
-        kern_return_t kr = mach_msg(&m.h, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof m, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
-        os_unfair_lock_lock(&c->lock);
-        if (kr == KERN_SUCCESS) c->frames_sent++;
-        else {
+        kern_return_t kr = KERN_FAILURE;
+        if (gen != c->sent_gen || seq >= c->sent_seq) {
+            if (c->gen == gen && c->state[slot] == 1) c->state[slot] = 2;
+            kr = mach_msg(&m.h, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof m, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
+        }
+        if (kr == KERN_SUCCESS) {
+            c->frames_sent++;
+            c->sent_gen = gen;
+            c->sent_seq = seq;
+        } else {
             c->frames_dropped++;
-            if (c->gen == gen && c->state[slot] == 2) c->state[slot] = 0;
+            if (c->gen == gen && c->state[slot] != 0) c->state[slot] = 0;
         }
         os_unfair_lock_unlock(&c->lock);
     }];

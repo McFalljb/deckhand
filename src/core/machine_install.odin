@@ -292,6 +292,7 @@ tarball_tree_check :: proc(root, top: string) -> string {
 			p := upath(dir, e.name)
 			r := strings.concatenate({rel, "/", e.name}, context.temp_allocator)
 			if posix.lstat(strings.clone_to_cstring(p, context.temp_allocator), &st) != .OK do return fmt.tprintf("cannot read %s in the tarball", r)
+			if posix.S_ISLNK(st.st_mode) do return fmt.tprintf("%s in the tarball is a link", r) // first: a link's own mode is 0777 on Linux
 			if .ISUID in st.st_mode || .ISGID in st.st_mode do return fmt.tprintf("%s in the tarball is setuid or setgid", r)
 			if .IWGRP in st.st_mode || .IWOTH in st.st_mode do return fmt.tprintf("%s in the tarball is writable by others", r)
 			switch {
@@ -299,8 +300,6 @@ tarball_tree_check :: proc(root, top: string) -> string {
 				if why := walk(p, r, depth + 1, count); why != "" do return why
 			case posix.S_ISREG(st.st_mode):
 				if st.st_nlink > 1 do return fmt.tprintf("%s in the tarball is a hard link", r)
-			case posix.S_ISLNK(st.st_mode):
-				return fmt.tprintf("%s in the tarball is a link", r)
 			case:
 				return fmt.tprintf("%s in the tarball is not a file or folder", r)
 			}

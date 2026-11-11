@@ -440,15 +440,7 @@ update_user_agent :: proc() -> string {
 // no cookies, no credentials; to `out` (a path) or, with out == "", the body (temp).
 // Any thread.
 curl_get :: proc(url, ua: string, test: bool, max: i64, out := "", json_api := false) -> (body: string, err: string) {
-	args := make([dynamic]string, context.temp_allocator)
-	append(&args, "/usr/bin/curl", "-q", "--silent", "--show-error", "--fail", "--location", "--max-redirs", "5")
-	append(&args, "--proto", test ? "=file" : "=https", "--proto-redir", test ? "=file" : "=https")
-	append(&args, "--max-filesize", fmt.tprintf("%d", max), "--connect-timeout", "20", "--max-time", out == "" ? "60" : "1800")
-	append(&args, "--user-agent", ua)
-	if json_api do append(&args, "--header", "Accept: application/vnd.github+json")
-	if out != "" do append(&args, "--output", out)
-	append(&args, "--", url)
-	text, st := run_group(args[:], out == "" ? 70 * time.Second : 1810 * time.Second, cap = int(max) + 1, merge_stderr = false)
+	text, st := run_group(curl_argv(url, ua, test, max, out, json_api), out == "" ? 70 * time.Second : 1810 * time.Second, cap = int(max) + 1, merge_stderr = false)
 	switch st {
 	case .Ok:
 		if out == "" && i64(len(text)) > max do return "", "the answer is too big"
@@ -462,6 +454,19 @@ curl_get :: proc(url, ua: string, test: bool, max: i64, out := "", json_api := f
 	case .Failed:
 	}
 	return "", "the download failed (offline, or GitHub did not answer)"
+}
+
+// curl_get's argv (temp; also M6-E's downloads, run as a child of the tick: machine_install.odin).
+curl_argv :: proc(url, ua: string, test: bool, max: i64, out := "", json_api := false) -> []string {
+	args := make([dynamic]string, context.temp_allocator)
+	append(&args, "/usr/bin/curl", "-q", "--silent", "--show-error", "--fail", "--location", "--max-redirs", "5")
+	append(&args, "--proto", test ? "=file" : "=https", "--proto-redir", test ? "=file" : "=https")
+	append(&args, "--max-filesize", fmt.tprintf("%d", max), "--connect-timeout", "20", "--max-time", out == "" ? "60" : "1800")
+	append(&args, "--user-agent", ua)
+	if json_api do append(&args, "--header", "Accept: application/vnd.github+json")
+	if out != "" do append(&args, "--output", out)
+	append(&args, "--", url)
+	return args[:]
 }
 
 // ---- prepare: download, check, unpack, stage (a worker) ----

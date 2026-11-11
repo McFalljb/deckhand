@@ -132,35 +132,12 @@ page_free_port :: proc() -> int {
 // never in the background (a config's ForkAfterAuthentication would leave our process group, and
 // its listener our cleanup), no tty, no agent or X11 forwarding, no LocalCommand, never a prompt,
 // and a config's ClearAllForwardings=yes cannot clear our -L.
+// The shared builder's Forward mode (machines.odin ssh_argv); machine_page_ssh_argv_test pins
+// every argument.
 machine_page_ssh_argv :: proc(target: string, local, remote: int) -> (argv: []string, why: string) {
 	if w := machine_target_error(target); w != "" do return nil, w
 	if local < 1 || local > 65535 || remote < 1 || remote > 65535 do return nil, "the port is 1 to 65535"
-	out := [?]string {
-		"ssh",
-		"-o", "ControlMaster=no",
-		"-o", "ControlPath=none",
-		"-o", "ControlPersist=no",
-		"-o", "ForkAfterAuthentication=no",
-		"-o", "RequestTTY=no",
-		"-o", "BatchMode=yes",
-		"-o", "ClearAllForwardings=no",
-		"-o", "ExitOnForwardFailure=no",
-		"-o", "ForwardAgent=no",
-		"-o", "ForwardX11=no",
-		"-o", "PermitLocalCommand=no",
-		"-o", "ServerAliveInterval=15",
-		"-o", "ServerAliveCountMax=4",
-		"-N",
-		"-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote),
-		"--", target,
-	}
-	return slice_clone_temp(out[:]), ""
-
-	slice_clone_temp :: proc(a: []string) -> []string {
-		b := make([]string, len(a), context.temp_allocator)
-		copy(b, a)
-		return b
-	}
+	return ssh_argv(target, .Forward, extra = {"-N", "-L", fmt.tprintf("127.0.0.1:%d:127.0.0.1:%d", local, remote)})
 }
 
 // What ssh's output says went wrong, for the user (at most MACHINE_ERROR_MAX bytes).

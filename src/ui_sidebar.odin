@@ -1518,12 +1518,18 @@ MACHINE_STATUS_LABELS := [core.Machine_Status]string {
 	.Taken         = "in use there",
 }
 
-// What a machine's row offers for its status ("" = nothing).
-machine_action_label :: proc(s: core.Machine_Status) -> string {
-	#partial switch s {
+// What a machine's row offers ("" = nothing): its install or update while one runs (Cancel), Update
+// for an older core (machine_install.odin), else what its status wants.
+machine_action_label :: proc(m: core.Machine_View) -> string {
+	#partial switch m.job {
+	case .Fetching, .Verifying, .Copying, .Handing_Over: return "Cancel"
+	case .Cleaning: return ""
+	}
+	if m.update != .None do return "Update"
+	if m.status == .Online && m.linger == .Off do return "Keep running…" // Linux: linger is off there
+	#partial switch m.status {
 	case .Needs_Login:   return "Log in…"
 	case .Not_Installed: return "Install…"
-	case .Needs_Update:  return "Update"
 	case .Taken:         return "Take back"
 	case .Offline:       return "Connect"
 	case .Online:        return "Open web page…" // a port of its own: machine_page.odin
@@ -1531,19 +1537,27 @@ machine_action_label :: proc(s: core.Machine_Status) -> string {
 	return ""
 }
 
-// A machine row's button. Install and Update are a later update's (M6-E): until then they say what
-// to do there.
+// What the row's status says: its job's phase while one runs, else its status.
+machine_status_label :: proc(m: core.Machine_View) -> string {
+	if m.job != .None && m.job != .Done && m.job != .Failed do return fmt.tprintf("%s…", core.MACHINE_JOB_NAMES[m.job])
+	return MACHINE_STATUS_LABELS[m.status]
+}
+
+// A machine row's button.
 @(private = "file")
 machine_action :: proc(no: u64) {
 	for m in state.machines do if m.no == no {
-		#partial switch m.status {
-		case .Needs_Login:   ui_do(core.Machine_Login{no = no})
-		case .Offline, .Taken: ui_do(core.Machine_Connect{no = no})
-		case .Online:
+		switch machine_action_label(m) {
+		case "Cancel":         ui_do(core.Machine_Install{no = no, cancel = true})
+		case "Install…", "Update":
+			if m.update == .Command_Only do toast_show(core.machine_update_command(m.name))
+			else do ui_do(core.Machine_Install{no = no})
+		case "Keep running…":  ui_do(core.Machine_Linger{no = no}) // the user said yes: linger --enable there
+		case "Log in…":        ui_do(core.Machine_Login{no = no})
+		case "Connect", "Take back": ui_do(core.Machine_Connect{no = no})
+		case "Open web page…":
 			palette_open_pages(no) // the palette asks for the port
 			ui_do(core.Set_Focus{"palette"})
-		case .Not_Installed: toast_show(fmt.tprintf("Install Deckhand on %s and open it once; installing it from here comes in a later update", m.name))
-		case .Needs_Update:  toast_show(fmt.tprintf("Update Deckhand on %s (%s); updating it from here comes in a later update", m.name, m.error))
 		}
 	}
 }
@@ -1562,8 +1576,8 @@ machines_sections :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
 		}) {
 			dot(machine_dot(m.status))
-			label := MACHINE_STATUS_LABELS[m.status]
-			act := machine_action_label(m.status)
+			label := machine_status_label(m)
+			act := machine_action_label(m)
 			room := text_w_max - px(DOT) - text_w(label, FONT_UI_SMALL) - 3 * px(GAP_INLINE)
 			if act != "" do room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2 + GAP_INLINE)
 			clay.TextDynamic(clip(strings.to_upper(m.name, context.temp_allocator), room, FONT_UI_SMALL | WEIGHT_HEADER), txt(th.text_muted, FONT_UI_SMALL | WEIGHT_HEADER))

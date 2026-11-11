@@ -70,6 +70,8 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "machine_remove", args = "no", does = "remove a machine (its link ends)", who = .User},
 	{type = "machine_connect", args = "no", does = "connect to a machine now (Take back from its own window, or retry)", who = .User},
 	{type = "machine_open_page", args = "no, port, path?", does = "open a web page served on a machine's own 127.0.0.1:port (a dev server) in a browser tab here: long-running: an ssh of its own (key-based login, no prompt) forwards a free 127.0.0.1 port of this Mac to it while the tab is open; finished created_id = the tab", who = .User},
+	{type = "machine_install", args = "no, cancel?", does = "install Deckhand's core on a machine that has none, or update an older one of Deckhand's own (copied over its ssh: a Mac's Core.app, or for Linux the release's tarball, signature-checked here), then hand its sessions over to it; cancel: stop it", who = .User},
+	{type = "machine_linger", args = "no", does = "Linux: turn on linger on a machine (loginctl enable-linger, no sudo), so its jobs run after you log out of it", who = .User},
 	{type = "machine_login", args = "no", does = "log in to a machine whose ssh wants a password, a host key or 2FA: a shell tab on this Mac runs ssh in the foreground, and the link then uses that connection", who = .User},
 	{type = "holder_replace", args = "stop", does = "answers state.holder_ask: stop the session holder from another build (its sessions end) and start a new one, or run on without one", who = .User},
 	{type = "core_handover", args = "to", does = `a separate core hands its sessions over to another core process: "current" (the installed core) or "previous" (Use previous core); job runs get 2 min`, who = .User},

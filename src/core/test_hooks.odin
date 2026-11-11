@@ -69,6 +69,9 @@ Hook :: enum u8 {
 	Separate_Core, // 1: the window runs its core as another process (deckhand-core serve); 0: in process (main.odin)
 	Core_Handover, // self: the window hands the core it finds over to a new one of the same binary at its attach (client_core.odin)
 	Hub_Without_Sshd, // 1: the hub door skips its sshd check (window_sock.odin): the --via scenes run connect without ssh
+	Test_Ssh, // a via machine's install runs this in place of `ssh … <target>`, the remote command after it (machine_install.odin)
+	Core_Release, // file:///dir/: the Linux core's release (release.json, the tarball, its .sig) instead of GitHub's (machine_install.odin)
+	Core_Version, // X.Y.Z: the version this core says (core_version); a handover's successor no longer has it (core_handover.odin)
 }
 
 when TEST_HOOKS {
@@ -108,6 +111,9 @@ when TEST_HOOKS {
 		.Separate_Core    = "DECKHAND_SEPARATE_CORE",
 		.Core_Handover    = "DECKHAND_CORE_HANDOVER",
 		.Hub_Without_Sshd = "DECKHAND_HUB_WITHOUT_SSHD",
+		.Test_Ssh         = "DECKHAND_TEST_SSH",
+		.Core_Release     = "DECKHAND_TEST_CORE_RELEASE",
+		.Core_Version     = "DECKHAND_TEST_CORE_VERSION",
 	}
 }
 

@@ -248,13 +248,23 @@ The Sessions tab has three sections:
   and **+ New session**. Its Claude sessions are listed with its pi sessions, marked **Claude**.
 - **Chats**: your chats, with **+ New chat**.
 
-**Other machines** (with **Machines over SSH** on, as it is by default, and a machine added in
-Settings › Machines): after this Mac's sections, each machine has its own, under its name, with a dot for its
-link (green online, amber when it needs you, grey offline) and a button when there is something to
-do: **Log in…** (ssh wants a password, a host key or a code: a shell tab here runs `ssh` to it so
-you can answer, and the link then uses that login), **Connect**, **Take back**, **Install…**,
-**Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
-and **Cancel** while an install runs. Under it are its open sessions, then its projects; click a project to list its sessions,
+**Other machines** (with **Machines over SSH** on, as it is by default): **+ Add a machine…** at
+the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
+Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter.
+Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); **Rename…** changes that.
+After this Mac's sections, each machine has its own, under its name, with a dot (green online,
+amber when it needs you, red when its install failed, grey offline), what is wrong in plain words,
+and a button when there is something to do: **Log in…** (ssh wants a password, a host key or a
+code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no session is open,
+and the link connects once you are in), **Connect**, **Take back**, **Install…**, **Retry** (an
+install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
+and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Right-click
+it for **Connect**, **Log in…** or **Take back**, **Open web page…**, **Rename…** and **Remove…**.
+A machine that refuses this Mac says to turn on **Allow other machines to connect** on it, and
+one that is not a Mac or Linux says so; neither offers Connect (right-click › **Try again** after
+you fixed it). Deckhand does not keep retrying a machine that needs you (to log in, or to allow
+this Mac): it tries again when you click. An offline machine is retried on its own, less and less
+often. Under it are its open sessions, then its projects; click a project to list its sessions,
 as that machine has them. Click an open session to show it, or one of a project's sessions to open
 it there, and work in its terminals as in a local tab: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
@@ -1083,14 +1093,14 @@ pi is installed; Claude Code's once it has been used:
   again.
 - **Machines**: with the gear's **Machines over SSH** on (on by default; turn it off and Deckhand
   keeps no link to any machine). Until you add a machine nothing happens: no `ssh`, no process.
-  Each machine you added,
-  with how its link is: `connecting`, `online` and its core's version, `offline`, `needs_login`
-  (ssh asked for a password, a host key or a code: log in once with `ssh` in a terminal),
-  `needs_update`, `not_installed`, or `taken` (that Mac's own window, or another Mac, is showing
-  it). **Connect** tries now, **Take back** takes it from whoever showed it last, and **Remove**
-  forgets it (nothing on it is touched). **Add machine…**: type its ssh target, an `~/.ssh/config`
-  alias or `user@host`, then Enter. Deckhand runs your own `ssh` with your `~/.ssh/config` (never
-  edited), without prompts (`BatchMode`), and starts that machine's Deckhand core there. The newest
+  Each machine you added, with what is wrong and what to do in plain words, or its status
+  (`online` and its Deckhand version); point at it for its ssh address and ssh's own words. Its
+  button is the sidebar's: **Connect** tries now, **Log in…**, **Take back** takes it from whoever
+  showed it last, and so on. The **×** removes it after you confirm: nothing on it is deleted, and
+  its sessions keep running there. **Add a machine…**: type `user@host` or a name from
+  `~/.ssh/config`, then Enter (a pasted `ssh jb@nuc` or `ssh://jb@nuc` works too). Deckhand runs
+  your own `ssh` with your `~/.ssh/config` (never edited), without prompts (`BatchMode`), and
+  starts that machine's Deckhand there. The newest
   connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
   <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
   use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
@@ -1118,9 +1128,10 @@ pi is installed; Claude Code's once it has been used:
   nothing runs there but Deckhand's own install (`deckhand-core-serve install`, into its
   Deckhand folder; never `sudo`). A Linux machine has no window to turn on **Allow other machines
   to connect**, so the install turns it on there: you asked for it from this Mac. Another Mac's
-  stays as it is: turn it on there. **Cancel** stops it and removes what it copied.
+  stays as it is: turn it on there. **Cancel** stops it and removes what it copied. If it
+  fails, its row says why (*Install failed: its disk is full*) and offers **Retry**.
 - **Update.** When this Mac's Deckhand is newer than a machine's core, or that core is too old to
-  work with (`needs_update`), its row shows **Update**. A click installs this Mac's version as
+  work with (**needs an update**), its row shows **Update**. A click installs this Mac's version as
   above and hands that machine's sessions over to the new core: they keep running, with a short
   pause. Never to an older version. A core that does not run from Deckhand's own folder (or is
   too old to say where it runs) is left alone: the button says what to do on that machine.
@@ -1995,6 +2006,10 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Browser: show downloads folder |  | the folder downloads go to, in Finder |
 | New app tab… |  | a program that draws into the tab (asks for the command) |
 | Open a machine's web page… |  | a page an online machine serves on its own `127.0.0.1` (asks for the port), in a local browser tab through its ssh connection; see [Projects, sessions and chats](#projects-sessions-and-chats) |
+| Add a machine… |  | the add field in Settings › Machines (Machines over SSH on) |
+| Remove a machine… |  | asks which, then to confirm: nothing on it is deleted |
+| Connect to a machine |  | asks which: Connect, Log in… or Take back, as its button |
+| Machines settings |  | Settings, at the Machines group |
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |

@@ -25,6 +25,7 @@ Palette_Kind :: enum {
 	File, // ⌘P: a file of the current project (editor_finder.odin)
 	App, // "New app tab…": a command line or an apps.json entry (app_tab.odin)
 	Page, // "Open a machine's web page…": PORT[/path] on an online machine (machine_page.odin)
+	Machine, // "Remove a machine…", "Connect to a machine": one of the machines (machines.odin)
 }
 
 PALETTE_KIND_NAMES := [Palette_Kind]string {
@@ -35,6 +36,7 @@ PALETTE_KIND_NAMES := [Palette_Kind]string {
 	.File    = "File",
 	.App     = "App",
 	.Page    = "Page",
+	.Machine = "Machine",
 }
 
 Palette_Item :: struct {
@@ -66,6 +68,13 @@ Palette :: struct {
 	apps:     bool, // app mode ("New app tab…"): the query is a command line to run in an app tab
 	pages:    bool, // page mode ("Open a machine's web page…"): the query is PORT[/path]
 	page_for: u64, // ...on this machine (0 = each online one)
+	machine_pick: Machine_Pick, // machine mode: the query picks a machine to remove or connect to
+}
+
+Machine_Pick :: enum u8 {
+	None,
+	Remove,
+	Connect,
 }
 
 palette: Palette
@@ -81,6 +90,7 @@ palette_reset :: proc() {
 	palette.files = false
 	palette.apps = false
 	palette.pages, palette.page_for = false, 0
+	palette.machine_pick = .None
 	palette.was_open = true
 }
 
@@ -196,6 +206,7 @@ palette_results :: proc() -> []Palette_Item {
 	if palette.files do return file_finder_results(tf_text(&palette.field))
 	if palette.apps do return app_palette_results(tf_text(&palette.field))
 	if palette.pages do return page_palette_results(tf_text(&palette.field))
+	if palette.machine_pick != .None do return machine_palette_results(tf_text(&palette.field))
 	return palette_search(tf_text(&palette.field))
 }
 
@@ -259,6 +270,10 @@ palette_run :: proc(it: Palette_Item) {
 		if it.path != "" do ui_do(core.New_App_Tab{session = cs.id, command = it.path})
 	case .Page:
 		if port, path, ok := core.machine_page_spec(it.path); ok do ui_do(core.Machine_Open_Page{no = it.id, port = port, path = path})
+	case .Machine:
+		// the same commands as the sidebar's: Remove asks first, Connect is the row's button
+		if palette.machine_pick == .Remove do ui_do_menu(core.Machine_Remove{no = it.id}, "Remove")
+		else do machine_run_action(it.id)
 	}
 }
 
@@ -330,5 +345,39 @@ page_palette_results :: proc(query: string) -> []Palette_Item {
 palette_open_pages :: proc(no: u64) {
 	palette_reset()
 	palette.pages, palette.page_for = true, no
+	palette.was_open = true
+}
+
+// Machine mode ("Remove a machine…", "Connect to a machine"): the machines it applies to, matching
+// the query (their name or target).
+machine_palette_results :: proc(query: string) -> []Palette_Item {
+	out := make([dynamic]Palette_Item, context.temp_allocator)
+	for m in state.machines {
+		if palette.machine_pick == .Connect && !machine_connectable(m) do continue
+		label, why, _ := core.machine_status_text(m)
+		detail := why != "" ? why : label
+		if query != "" {
+			_, _, a := core.fuzzy_score(query, m.name)
+			_, _, b := core.fuzzy_score(query, m.target)
+			if !a && !b do continue
+		}
+		title := palette.machine_pick == .Remove ? fmt.tprintf("Remove %s…", m.name) : fmt.tprintf("%s %s", core.machine_action_label(m), m.name)
+		append(&out, Palette_Item{kind = .Machine, key = fmt.tprintf("machine:%d", m.no), title = title, detail = detail, id = m.no, order = len(out)})
+	}
+	return out[:]
+}
+
+// What "Connect to a machine" lists: a machine whose button connects (Connect, Take back, Log in…).
+machine_connectable :: proc(m: core.Machine_View) -> bool {
+	switch core.machine_action_label(m) {
+	case "Connect", "Take back", "Log in…": return true
+	}
+	return false
+}
+
+// Machine mode: the palette asks which machine.
+palette_open_machines :: proc(pick: Machine_Pick) {
+	palette_reset()
+	palette.machine_pick = pick
 	palette.was_open = true
 }

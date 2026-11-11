@@ -340,7 +340,10 @@ mirror_drop :: proc(no: u64, m: ^Machine_Mirror) {
 	mirror_unmerge(no)
 	mirror_free(m)
 	notify_drop_machine(no) // what it rang here
-	if id_machine(state.current_session) == no do state.current_session = 0
+	if id_machine(state.current_session) == no {
+		state.current_session = 0
+		if s := machine_local_session(); s != nil do focus_session(s.id, {kind = .Internal}) // this Mac's last session, not an empty view
+	}
 	if id_machine(state.selected_project) == no do state.selected_project = 0
 	window_state_changed()
 }

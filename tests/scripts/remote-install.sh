@@ -75,6 +75,10 @@ ui_command {"type":"machine_add","name":"m2","target":"","via":"$W/via.sh"}
 waitstate 60000 machines.0.job done
 waitstate 30000 machines.0.status online
 waitstate 120000 machines.0.update button
+assert_drawn Update
+hover machact 1
+wait 1300
+assert_tip Install this Mac's version there; its sessions keep running
 ui_command {"type":"machine_install","no":1}
 waitstate 120000 machines.0.job done
 waitstate 30000 machines.0.status online

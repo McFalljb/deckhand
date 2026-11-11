@@ -925,7 +925,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
 		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
-		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine:
+		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_Add:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it
@@ -1131,6 +1131,7 @@ confirm_pending :: proc(token: string) {
 		case core.Changes_Discard: cmd = core.Changes_Discard{tab_id = c.tab_id, path = c.path, status = c.status, second = c.second, confirm = token}
 		case core.Markdown_Follow: cmd = core.Markdown_Follow{tab_id = c.tab_id, url = c.url, confirm = token}
 		case core.Set_Claude_Default_Flags: cmd = core.Set_Claude_Default_Flags{skip_permissions = c.skip_permissions, confirm = token}
+		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		}
 		ui_do(cmd)
 		return

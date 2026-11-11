@@ -8,9 +8,11 @@ name: Linux release tarball
 on:
   push:
     tags: ["v*"]
-  # a pull request that changes how the tarball is made builds one (version 0.0.0)
+  # a pull request that changes how the tarball is made, or what goes in it (src/), builds one
+  # (version 0.0.0)
   pull_request:
     paths:
+      - "src/**"
       - .github/workflows/release-linux.yml
       - scripts/pack-linux.sh
       - scripts/check-release-build.sh

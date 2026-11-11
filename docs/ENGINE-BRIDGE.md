@@ -173,8 +173,7 @@ is the ring generation, `slot` 0–2, `seq` the engine's rising frame counter.
   still ticks).
 - Messages with a stale `gen` are dropped by both sides.
 - `seq` rises, and `FRAME`s are sent in `seq` order. Within a ring, Deckhand drops a `FRAME` whose
-  `seq` is not newer than one it already took and releases its slot at once; a new ring starts
-  over.
+  `seq` is older than one it already took and releases its slot at once; a new ring starts over.
 - **Only `FRAME` may be dropped:** it is sent with timeout 0, and on failure the engine takes the
   slot back.
 - `HELLO` and `RING_DONE` are sent with no timeout. `RING` and `RELEASE` go from Deckhand's Mach

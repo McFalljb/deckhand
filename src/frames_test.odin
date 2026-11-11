@@ -92,17 +92,20 @@ frames_only_current_frames_count :: proc(t: ^testing.T) {
 	testing.expect_value(t, rel, 99)
 }
 
-// #79: FRAMEs can arrive out of order. Within a ring, one not newer than a frame
-// already taken is dropped (its slot goes back); a new ring starts over at any seq.
+// #79: FRAMEs can arrive out of order. Within a ring, one older than a frame already
+// taken is dropped (its slot goes back); an equal seq is taken (an app that never sets
+// seq still shows every frame); a new ring starts over at any seq.
 @(test)
 frames_out_of_order_frames_drop :: proc(t: ^testing.T) {
 	rel: u32 = 99
 	// N+1 (slot 2) taken and waiting, then N (slot 1): dropped, nothing else released
 	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 11, 5, 1, 10, &rel), 3)
 	testing.expect_value(t, rel, 99)
-	// N+1 already shown (nothing waiting), then N, or N+1 again: dropped
+	// N+1 already shown (nothing waiting), then N: dropped
 	testing.expect_value(t, dh_frames_on_frame(5, 0, 2, 5, 11, 5, 1, 10, &rel), 3)
-	testing.expect_value(t, dh_frames_on_frame(5, 0, 2, 5, 11, 5, 1, 11, &rel), 3)
+	// the same seq again (an app that never sets it): taken, as before
+	testing.expect_value(t, dh_frames_on_frame(5, 0, 2, 5, 11, 5, 1, 11, &rel), 1)
+	testing.expect_value(t, dh_frames_on_frame(5, 1, 2, 5, 11, 5, 1, 11, &rel), 2)
 	// a new ring (the app restarted, its seq starts over): a low seq is taken
 	testing.expect_value(t, dh_frames_on_frame(6, 0, 2, 5, 11, 6, 0, 1, &rel), 1)
 }

@@ -104,11 +104,12 @@ int dh_frames_sender_in(int sender_pgid, int sender_sid, int pgid, int sid) {
 // latest_gen/latest_seq: the last frame taken (shown or not).
 // Returns 0 = drop (stale gen or bad slot), 1 = take it, 2 = take it and
 // release *release_slot (the older unshown latest, replaced), 3 = drop it and
-// release its own slot (not newer than a frame of this ring already taken:
-// it arrived out of order). A new ring starts over: gens are never reused.
+// release its own slot (older than a frame of this ring already taken: it
+// arrived out of order; an equal seq is taken, for apps that never set it).
+// A new ring starts over: gens are never reused.
 int dh_frames_on_frame(uint32_t cur_gen, int has_latest, uint32_t latest_slot, uint32_t latest_gen, uint64_t latest_seq, uint32_t gen, uint32_t slot, uint64_t seq, uint32_t* release_slot) {
     if (gen != cur_gen || cur_gen == 0 || slot >= PDF_SLOTS) return 0;
-    if (gen == latest_gen && seq <= latest_seq) return 3;
+    if (gen == latest_gen && seq < latest_seq) return 3;
     if (has_latest && latest_slot != slot) {
         *release_slot = latest_slot;
         return 2;
@@ -1260,7 +1261,8 @@ void dh_frames_unacquire(dh_frames_conn* c, int slot) {
 // if Deckhand's queue is full; then the slot is the app's again at once).
 // Completed handlers can run at once on different threads: the send happens
 // under the lock (a 0 timeout never blocks), and a frame older than one
-// already sent is dropped instead, so FRAMEs go out in seq order.
+// already sent is dropped instead, so FRAMEs go out in seq order (an equal
+// seq is still sent).
 void dh_frames_present(dh_frames_conn* c, uint32_t gen, int slot, uint64_t seq, uint64_t tick, void* mtl_queue) {
     id<MTLCommandQueue> q = (__bridge id<MTLCommandQueue>)mtl_queue;
     id<MTLCommandBuffer> cb = [q commandBuffer];
@@ -1274,7 +1276,7 @@ void dh_frames_present(dh_frames_conn* c, uint32_t gen, int slot, uint64_t seq, 
         m.tick = tick;
         os_unfair_lock_lock(&c->lock);
         kern_return_t kr = KERN_FAILURE;
-        if (gen != c->sent_gen || seq > c->sent_seq) {
+        if (gen != c->sent_gen || seq >= c->sent_seq) {
             if (c->gen == gen && c->state[slot] == 1) c->state[slot] = 2;
             kr = mach_msg(&m.h, MACH_SEND_MSG | MACH_SEND_TIMEOUT, sizeof m, 0, MACH_PORT_NULL, 0, MACH_PORT_NULL);
         }

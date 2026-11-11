@@ -156,8 +156,8 @@ machine_update_command :: proc(name: string) -> string {
 }
 
 // The Linux release asset for a version (scripts/pack-linux.sh) and its one top dir.
-core_tarball_name :: proc(version: string) -> string {return fmt.tprintf("deckhand-core-%s-linux-x86_64.tar.gz", version)}
-core_tarball_top :: proc(version: string) -> string {return fmt.tprintf("deckhand-core-%s-linux-x86_64", version)}
+core_tarball_name :: proc(version: string) -> string {return usig.linux_tar_name(version, context.temp_allocator)}
+core_tarball_top :: proc(version: string) -> string {return strings.trim_suffix(core_tarball_name(version), ".tar.gz")}
 
 // 16 lower-case hex digits.
 install_nonce_ok :: proc(s: string) -> bool {
@@ -309,15 +309,12 @@ tarball_tree_check :: proc(root, top: string) -> string {
 	}
 }
 
-// A Linux tarball's .sig (M6-L4, scripts/release-linux.sh): v3 only, `cdhash none`, exactly the
-// three lines. Its manifest is v3's with `cdhash none`.
+// A Linux tarball's .sig (M6-L4, scripts/release-linux.sh): updatesig's, v3 with `cdhash none`
+// only (allow_none, which the app's own updater never passes).
 tarball_sig_parse :: proc(text: string) -> (cdhash, sig_b64: string, format: usig.Format, ok: bool) {
-	if len(text) > UPDATE_SMALL_MAX do return
-	lines := strings.split_lines(strings.trim_right(text, "\n"), context.temp_allocator)
-	if len(lines) != 3 || lines[0] != usig.SIG_FILE_HEAD_V3 || lines[1] != "cdhash none" || !strings.has_prefix(lines[2], "signature ") do return
-	sig_b64 = lines[2][len("signature "):]
-	if sig_b64 == "" do return
-	return "none", sig_b64, .V3, true
+	cdhash, sig_b64, format, ok = usig.sig_file_parse(text, allow_none = true)
+	if !ok || format != .V3 || cdhash != usig.CDHASH_NONE do return "", "", .V3, false
+	return
 }
 
 // The downloaded tarball (path) against its .sig (sig_text) for version, under key; then its
@@ -901,6 +898,14 @@ machine_install_hello :: proc(no: u64, version: string, installed: bool) -> bool
 	j.sent = true
 	if autotest_active do fmt.printfln("[autotest] machine %s install: core_handover sent", j.name)
 	return true
+}
+
+// Machine no's core refused the hub hello (why: its answer): a job waiting for its new core says
+// so at once (another Mac's Allow other machines to connect is off until the user turns it on).
+machine_install_refused :: proc(no: u64, why: string) {
+	j, _ := job_find(no)
+	if j == nil || j.phase != .Handing_Over do return
+	job_set(j, .Failed, fmt.tprintf("installed, but its core refused this Mac: %s", why))
 }
 
 // Machine no's link went down (machines.odin): a job that started on an up link is cancelled

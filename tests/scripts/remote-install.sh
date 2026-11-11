@@ -5,11 +5,11 @@
 # DECKHAND_TEST_SSH (a /bin/sh stand-in that runs the remote command with that HOME), and its data
 # dir is the one the install script writes ($HOME/Library/Application Support/Deckhand).
 #   1. The machine is added with nothing installed: its connect finds no core (127), the install
-#      starts by itself, copies this Mac's core/current Deckhand Core.app (a bundle laid out and
-#      signed here from build/'s binaries, installed into this Mac's data dir first), runs its
-#      `install`, and the machine comes up online.
-#   2. Its core is made an older one (DECKHAND_TEST_CORE_VERSION=0.1.0, below CORE_MIN: needs_update)
-#      with a session of two shells. Update (machine_install) copies again, its old core gets
+#      starts by itself, copies this Mac's core/current Deckhand Core.app (build/Deckhand.app's,
+#      installed into this Mac's data dir first), runs its `install`, and the machine comes up
+#      online.
+#   2. Its core is replaced by an older one (DECKHAND_TEST_CORE_VERSION=0.1.0, below CORE_MIN:
+#      needs_update; started while that machine is unreachable) with a session of two shells. Update (machine_install) copies again, its old core gets
 #      core_handover on the link, and the new core comes up: the shells' pids are the same, and
 #      each terminal's screen hash at the handover is the one the new core adopted.
 # Usage: tests/scripts/remote-install.sh
@@ -18,7 +18,6 @@ unset CLAUDE_CONFIG_DIR
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 cd "$ROOT"
 . tests/scripts/fresh-build.sh
-. scripts/sign.sh
 W="$ROOT/build/remote-install"
 rm -rf "$W"
 RUN=$(mktemp -d "${TMPDIR:-/tmp}/dkri.XXXXXX") # this Mac's core
@@ -41,36 +40,24 @@ cleanup() {
 }
 trap cleanup EXIT
 mkdir -p "$W/data" "$D2" "$W/home" "$W/proj2"
-printf '{"v":1,"settings":{"machines_reachable":true}}\n' > "$D2/workspace.json"
+# a pi session of that machine's on disk (a session is saved, and so handed over, once its file is)
+SESS="$H2/.pi/agent/sessions/--$(printf '%s' "${W#/}/proj2" | tr / -)--"
+mkdir -p "$SESS"
+printf '{"type":"session","version":3,"id":"rrrr-1","cwd":"%s"}\n' "$W/proj2" > "$SESS/2026-11-01T10-00-00-000Z_rrrr-1.jsonl"
+printf '{"v":1,"settings":{"machines_reachable":true,"keep_sessions":true}}\n' > "$D2/workspace.json"
 
-# this Mac's Deckhand Core.app, as scripts/bundle-app.sh lays it out (a scene has no CEF build),
-# signed as build.sh signs, then installed: core/current is what the install copies
-sign_resolve
-CA="$W/src/Deckhand Core.app"
-mkdir -p "$CA/Contents/MacOS"
-cat > "$CA/Contents/Info.plist" <<'PL'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-<key>CFBundleExecutable</key><string>deckhand-core</string>
-<key>CFBundleIdentifier</key><string>dev.deckhand.core</string>
-<key>CFBundleName</key><string>Deckhand Core</string>
-<key>CFBundlePackageType</key><string>APPL</string>
-<key>CFBundleShortVersionString</key><string>0.1</string>
-<key>LSUIElement</key><true/>
-</dict></plist>
-PL
-cp build/deckhand-core build/deckhand-core-serve "$CA/Contents/MacOS/"
-sign_code --identifier dev.deckhand.core "$CA/Contents/MacOS/deckhand-core-serve"
-sign_code "$CA"
+# this Mac's installed core: build/Deckhand.app's Deckhand Core.app installed into its data dir
+# (core/current is what the install copies)
+CA="build/Deckhand.app/Contents/Helpers/Deckhand Core.app"
+[ -x "$CA/Contents/MacOS/deckhand-core-serve" ] || { echo "remote-install: no $CA (./build.sh)"; exit 1; }
 "$CA/Contents/MacOS/deckhand-core-serve" install --data "$W/data" > /dev/null
 INSTALLED="$D2/core/current/Deckhand Core.app/Contents/MacOS/deckhand-core-serve"
 
-# the via command: the installed core's connect there (none yet: exit 127, not_installed); the
-# file "old" makes the core it launches an older one
+# that machine's environment, and the via command: the installed core's connect there (none
+# yet: exit 127, not_installed); while the file "hold" is there, it is unreachable
 cat > "$W/via.sh" <<VIA
 #!/bin/sh
-[ -f "$W/old" ] && export DECKHAND_TEST_CORE_VERSION=0.1.0
+[ -f "$W/hold" ] && { echo "unreachable for now" >&2; exit 1; }
 exec env HOME="$H2" DECKHAND_DATA_DIR="$D2" DECKHAND_RUNTIME_DIR="$RUN2" DECKHAND_SCRIPT=remote-install \
   DECKHAND_HUB_WITHOUT_SSHD=1 SHELL=/bin/sh DECKHAND_CMD='$FAKE_PI' "$INSTALLED" connect "\$@"
 VIA
@@ -109,14 +96,26 @@ until_log "$RUN/core.log" "machine m2 install: installed" 60
 until_log "$RUN/core.log" "machine m2: online" 30
 [ -x "$INSTALLED" ] || { echo "remote-install: nothing installed at $INSTALLED"; exit 1; }
 ls -d "$D2"/core/.incoming-* 2>/dev/null && { echo "remote-install: a staging dir was left"; exit 1; }
-# 2. its core, an older one, with a session of two shells
+# 2. its core, an older one (unreachable meanwhile), with a session of two shells
+touch "$W/hold"
+for p in $(cores "$RUN2"); do kill "$p"; done
+until_log "$RUN/core.log" "machine m2: offline" 30
+while [ -n "$(cores "$RUN2")" ]; do sleep 0.1; done
+N0=$(grep -c "^export DECKHAND_SOCKET" "$RUN2/core.log" || true)
+env HOME="$H2" DECKHAND_DATA_DIR="$D2" DECKHAND_RUNTIME_DIR="$RUN2" DECKHAND_SCRIPT=remote-install DECKHAND_HUB_WITHOUT_SSHD=1 \
+  SHELL=/bin/sh DECKHAND_CMD="$FAKE_PI" DECKHAND_TEST_CORE_VERSION=0.1.0 "$INSTALLED" launch --run "$RUN2" --data "$D2"
+i=0
+while [ "$(grep -c "^export DECKHAND_SOCKET" "$RUN2/core.log" || true)" -le "$N0" ]; do
+  i=$((i + 1)); [ $i -gt 300 ] && { echo "remote-install: the older core did not start"; tail "$RUN2/core.log"; exit 1; }
+  sleep 0.1
+done
 TOK=$(sed -n "s/^export DECKHAND_SOCKET='\(.*\)' DECKHAND_TOKEN='\(.*\)'$/\2/p" "$RUN2/core.log" | tail -1)
-[ -n "$TOK" ] || { echo "no control token in the other core's log"; cat "$RUN2/core.log"; exit 1; }
 ctl2() { DECKHAND_SOCKET="$RUN2/core.sock" DECKHAND_TOKEN="$TOK" HOME="$H2" build/deckhand --ctl "$1"; }
 id_of() { sed -n 's/.*"created_id":\([0-9]*\).*/\1/p'; }
 PID=$(ctl2 "{\"type\":\"add_project\",\"cwd\":\"$W/proj2\"}" | id_of)
-SID=$(ctl2 "{\"type\":\"new_chat\",\"project_id\":$PID}" | id_of)
-[ -n "$SID" ] || { echo "new_chat on the other core failed"; exit 1; }
+ctl2 '{"type":"rescan"}' > /dev/null
+SID=$(ctl2 "{\"type\":\"open_session\",\"project_id\":$PID,\"pi_session_id\":\"rrrr-1\"}" | id_of)
+[ -n "$SID" ] || { echo "open_session on the other core failed"; exit 1; }
 ctl2 "{\"type\":\"new_shell_tab\",\"session\":$SID}" | grep -q '"ok":true' || { echo "new_shell_tab failed"; exit 1; }
 ctl2 "{\"type\":\"new_shell_tab\",\"session\":$SID}" | grep -q '"ok":true' || { echo "new_shell_tab failed"; exit 1; }
 HOLDER=$(pgrep -f "deckhand-core hold --run $RUN2" | head -1)
@@ -124,8 +123,7 @@ HOLDER=$(pgrep -f "deckhand-core hold --run $RUN2" | head -1)
 sleep 1
 KIDS1=$(pgrep -P "$HOLDER" | sort | tr '\n' ' ')
 [ "$(echo $KIDS1 | wc -w)" -ge 3 ] || { echo "remote-install: the holder runs $KIDS1"; exit 1; }
-touch "$W/old"
-for p in $(cores "$RUN2"); do kill "$p"; done # its sessions stay in the holder; connect starts the old one
+rm -f "$W/hold" # reachable again: its hello says 0.1.0, below CORE_MIN
 until_log "$RUN/core.log" "machine m2: needs_update" 60
 until_log "$RUN/core.log" "machine m2 install: core_handover sent" 120
 until_log "$RUN/core.log" "machine m2 install: installed" 120

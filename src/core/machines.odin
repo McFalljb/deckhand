@@ -146,6 +146,7 @@ MACHINE_BACKOFF_MAX :: 60 * time.Second
 MACHINE_UP_RESET :: 60 * time.Second // up this long: the next drop waits MACHINE_BACKOFF_MIN again
 MACHINE_HELLO_WAIT :: 30 * time.Second // connect may launch a core (15 s) first
 MACHINE_PROBE_WAIT :: 30 * time.Second
+MACHINE_DRAIN_WAIT :: 10 * time.Second // an older core told to hand over: its link closes by then
 MACHINE_STDERR_MAX :: 4096 // also the probe's output's cap
 MACHINE_HELLO_MAX :: 1 << 20 // the bytes before the hello reply's newline
 MACHINE_VERSION_MAX :: 64 // State's version and error from another machine (text_clean)
@@ -461,6 +462,7 @@ Mach_Phase :: enum u8 {
 	Hello, // connect runs: waiting for its hello reply line
 	Up, // frames
 	Stopped, // taken, removed, or the setting is off: no retry
+	Draining, // an older core's hello got core_handover (M6-E): nothing more is sent or read until it closes (≤ MACHINE_DRAIN_WAIT)
 }
 
 @(private = "file")
@@ -489,6 +491,7 @@ Mach_Link :: struct {
 	installed: bool, // its last hello said its core runs from Deckhand's own folder (M6-E)
 	linger:    Linger, // its last hello's machine.linger (Linux), or what linger --enable said
 	auto_install: bool, // added by the user: an install starts once if it has no core (M6-E)
+	drain_skew: cw.Skew, // Draining: the hello's
 }
 
 @(private = "file")
@@ -881,6 +884,18 @@ machines_tick :: proc() {
 			} else if time.tick_diff(l.started, now) > MACHINE_HELLO_WAIT {
 				mlink_down(l, {stderr = "no answer from its core"})
 			}
+		case .Draining:
+			mlink_read_err(l)
+			gone := false
+			if _, err := cw.sock_flush(l.sock); err != .None do gone = true
+			for _ in 0 ..< 256 {
+				if gone do break
+				runtime.DEFAULT_TEMP_ALLOCATOR_TEMP_GUARD()
+				_, err := cw.sock_recv(l.sock, context.temp_allocator)
+				if err == .Closed do gone = true
+				if err != .None do break
+			}
+			if gone || time.tick_diff(l.started, now) > MACHINE_DRAIN_WAIT do mlink_down(l, {replied = true, ok = true, skew = l.drain_skew})
 		case .Up:
 			mlink_read_err(l)
 			mlink_pump(l)
@@ -900,6 +915,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	if !o.ok {
 		o.error = json_path(line, "result.error")
 		if o.error == "" || o.error == "<invalid json>" do o.error = "its core did not take the hub"
+		machine_install_refused(l.no, o.error) // an install's new core that refuses this Mac (its setting off)
 		mlink_down(l, o)
 		return
 	}
@@ -919,11 +935,16 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	s, why := machine_status_of(o)
 	if s != .Online {
 		if handover {
-			sock: cw.Sock_Transport
-			cw.sock_open(&sock, l.fd, initial = rest, allocator = context.temp_allocator)
-			// one small frame on a socketpair with nothing queued: one write (never waited for)
-			cw.sock_send(&sock, cw.JSON_CHANNEL, .Data, transmute([]u8)hub_command_json(Core_Handover{to = CORE_CURRENT}, "", .UI))
-			cw.sock_flush(&sock)
+			// the link stays open until that core quits (its frames are dropped unread), so the
+			// command reaches it from a live peer; then the status as the hello said
+			heap := runtime.heap_allocator()
+			l.sock = new(cw.Sock_Transport, heap)
+			cw.sock_open(l.sock, l.fd, initial = rest, allocator = heap)
+			clear(&l.inbuf)
+			cw.sock_send(l.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)hub_command_json(Core_Handover{to = CORE_CURRENT}, "", .UI))
+			cw.sock_flush(l.sock)
+			l.phase, l.started, l.drain_skew = .Draining, time.tick_now(), o.skew
+			return
 		}
 		mlink_down(l, o)
 		return

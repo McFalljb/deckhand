@@ -101,6 +101,7 @@ serve_main :: proc(args: []string) -> int {
 	core.window_floor_load() // the window floor of earlier runs (window_sock.odin)
 	if why := core.instance_guard(core.home_root, !core.autotest_active || core.hook_env(.Runtime_Dir) != ""); why != "" {
 		fmt.eprintln("deckhand-core serve:", why)
+		core.core_refused_write(run, why) // its window says why (client_core_dial)
 		return 3
 	}
 	fmt.eprintfln("deckhand-core serve: pid %d, data %s, run %s", posix.getpid(), data, run)

@@ -1817,6 +1817,12 @@ goes back to the core from before the last update; **Run Sessions in Deckhand It
 [Sessions in a background core](#how-deckhand-runs) so Deckhand runs as one program. `run/core.log`
 has the details.
 
+**Deckhand says another process holds `core.lock` or `instance.lock`.** The message names the
+process (its pid and program). When it is a Deckhand process left over after its app quit (an
+older Deckhand's child that hung before it could start its program, and kept the lock), Deckhand
+offers **End It and Start**. Anything else, quit it yourself (Activity Monitor), then open
+Deckhand again.
+
 **To reset the layout**, start Deckhand with `--fresh` (`build/deckhand --fresh`): it starts with
 nothing open and keeps the old workspace as `workspace.json.bak-<time>`. To reset just one
 column's width, double-click its edge.

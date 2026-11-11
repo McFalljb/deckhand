@@ -90,8 +90,13 @@ instance_legacy_exe :: proc(path: string) -> bool {
 	return true
 }
 
-// What the alert says (old: the Deckhand found, or 0; refused: which lock was held).
-instance_message :: proc(old: int, refused := Instance_Refusal.Running) -> string {
+// What the alert says (old: the Deckhand found, or 0; refused: which lock was held; holder: the
+// process found holding it, lock_holder.odin).
+instance_message :: proc(old: int, refused := Instance_Refusal.Running, holder := Lock_Holder{}) -> string {
+	if old == 0 && holder.pid != 0 {
+		if refused == .Older do return fmt.tprintf("Another program holds %s in Deckhand's data folder: %s. Quit it first.", INSTANCE_LOCK_FILE, lock_holder_text(holder))
+		return fmt.tprintf("Deckhand is already running (or pi-desk is using the same data): %s holds %s. Quit it first.", lock_holder_text(holder), CORE_LOCK_FILE)
+	}
 	if refused == .Older do return "An older Deckhand is running with the same data. Quit it first."
 	if old != 0 do return "pi-desk is running with the same data. Quit pi-desk first (and delete pi-desk.app: Deckhand replaces it), then open Deckhand again."
 	return "Deckhand is already running (or pi-desk is using the same data). Quit it first."
@@ -116,6 +121,55 @@ when ODIN_OS == .Darwin {
 
 instance_fd: posix.FD = -1 // instance.lock (SH)
 instance_core_fd: posix.FD = -1 // core.lock (EX)
+instance_refused_by: Lock_Holder // the process holding the lock that refused the last instance_guard (temp)
+
+// Who holds the lock that refused (lock_holder_find on its file).
+instance_holder_of :: proc(dir: string, refused: Instance_Refusal) -> Lock_Holder {
+	return lock_holder_find(fmt.tprintf("%s/%s", dir, refused == .Older ? INSTANCE_LOCK_FILE : CORE_LOCK_FILE))
+}
+
+// The window, after its core refused (client_core_dial): whether the locks are still refused now
+// and who holds the one that is. Takes them and lets them go at once when free.
+instance_holder_now :: proc(dir: string) -> Lock_Holder {
+	core_fd, inst_fd, refused := instance_locks_take(dir)
+	if refused == .None {
+		instance_lock_release(inst_fd)
+		instance_lock_release(core_fd)
+		return {}
+	}
+	return instance_holder_of(dir, refused)
+}
+
+// A separate core refused by instance_guard writes why to <run>/core.refused (0600), so its
+// window says why instead of waiting out its start (client_core_dial).
+CORE_REFUSED_FILE :: "core.refused"
+CORE_REFUSED_MAX :: 1024
+
+core_refused_write :: proc(run, why: string) {
+	if run == "" do return
+	// whole or not at all: the window reads and removes it every 20 ms
+	path := strings.clone_to_cstring(fmt.tprintf("%s/%s", run, CORE_REFUSED_FILE), context.temp_allocator)
+	tmp := strings.clone_to_cstring(fmt.tprintf("%s/%s.tmp", run, CORE_REFUSED_FILE), context.temp_allocator)
+	fd := posix.open(tmp, {.WRONLY, .CREAT, .TRUNC, .CLOEXEC, .NOFOLLOW}, {.IRUSR, .IWUSR})
+	if fd < 0 do return
+	text := why[:min(len(why), CORE_REFUSED_MAX)]
+	ok := posix.write(fd, raw_data(text), uint(len(text))) == len(text)
+	posix.close(fd)
+	if !ok || posix.rename(tmp, path) != 0 do posix.unlink(tmp)
+}
+
+// What a refused core wrote, cleaned and bounded, and the file gone; "" = none.
+core_refused_take :: proc(run: string) -> string {
+	path := strings.clone_to_cstring(fmt.tprintf("%s/%s", run, CORE_REFUSED_FILE), context.temp_allocator)
+	fd := posix.open(path, {.CLOEXEC, .NOFOLLOW, .NONBLOCK})
+	if fd < 0 do return ""
+	buf: [CORE_REFUSED_MAX]u8
+	n := posix.read(fd, &buf[0], len(buf))
+	posix.close(fd)
+	posix.unlink(path)
+	if n <= 0 do return ""
+	return text_clean(strings.trim_space(string(buf[:n])), CORE_REFUSED_MAX)
+}
 
 // At start (main.odin init), before anything is written to dir: "" = go on (the lock is held
 // until the process ends), else why not. check_old: look for a running pi-desk 0.1.x too.
@@ -127,7 +181,11 @@ instance_guard :: proc(dir: string, check_old: bool) -> string {
 		}
 	}
 	core_fd, inst_fd, refused := instance_locks_take(dir)
-	if refused != .None do return instance_message(0, refused)
+	if refused != .None {
+		instance_refused_by = instance_holder_of(dir, refused)
+		return instance_message(0, refused, instance_refused_by)
+	}
+	instance_refused_by = {}
 	instance_core_fd, instance_fd = core_fd, inst_fd
 	return ""
 }

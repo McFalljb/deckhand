@@ -172,6 +172,9 @@ is the ring generation, `slot` 0–2, `seq` the engine's rising frame counter.
   `RELEASE`. The engine renders only into slots it holds; with none, it skips rendering (the sim
   still ticks).
 - Messages with a stale `gen` are dropped by both sides.
+- `seq` rises, and `FRAME`s are sent in `seq` order. Within a ring, Deckhand drops a `FRAME` whose
+  `seq` is not newer than one it already took and releases its slot at once; a new ring starts
+  over.
 - **Only `FRAME` may be dropped:** it is sent with timeout 0, and on failure the engine takes the
   slot back.
 - `HELLO` and `RING_DONE` are sent with no timeout. `RING` and `RELEASE` go from Deckhand's Mach
@@ -391,8 +394,10 @@ a running recording's tick goes with the comment, so an agent can replay to it.
    `RING_DONE` when switching rings. Copying the connect half of `frames_macos.m` is fine.
 4. **The frame rule:** render only into held slots; after `sg_commit`, an empty command buffer's
    completed handler sends `FRAME {gen, slot, seq, tick}` with timeout 0 (take the slot back if
-   it fails). Send `HELLO` and `RING_DONE` with no timeout. Drain `RING` and `RELEASE` promptly:
-   Deckhand gives up after 250 ms. With no free slot, skip rendering and keep ticking.
+   it fails). Completed handlers can run at once on different threads: send under a lock, and
+   drop a frame older than one already sent instead of sending it (the connect half does). Send
+   `HELLO` and `RING_DONE` with no timeout. Drain `RING` and `RELEASE` promptly: Deckhand gives up
+   after 250 ms. With no free slot, skip rendering and keep ticking.
 5. **Pace** to `display.fps`, then each `tab.display`, or a lower cap of your own. Render nothing
    while `tab.visible` is false.
 6. **Death:** a dead name or socket EOF means `--on-desk-exit=window|exit`. Never touch the old

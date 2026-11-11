@@ -539,9 +539,6 @@ when TEST_HOOKS {
 
 machine_open_page_apply :: proc(c: Machine_Open_Page, caller: Caller, request_id: u64) -> (Result, bool) {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first"), false
-	// the user's only, at this Mac's own window: never a hub's (another machine viewing this one)
-	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user opens a machine's web page"), false
-	if caller_from_hub(caller) do return fail("this machine is viewed from another one: open the page there"), false
 	if w := machine_page_port_error(c.port); w != "" do return fail(w), false
 	path, pwhy := machine_page_path(c.path)
 	if pwhy != "" do return fail(pwhy), false

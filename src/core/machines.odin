@@ -489,8 +489,9 @@ Mach_Link :: struct {
 	stream:    Mirror_Stream, // its state stream's bounds (machine_mirror.odin)
 	skew:      cw.Skew, // its last hello's
 	installed: bool, // its last hello said its core runs from Deckhand's own folder (M6-E)
+	core_run:  string, // heap: its last hello's run id (`core`; "" = an older core's, none)
 	linger:    Linger, // its last hello's machine.linger (Linux), or what linger --enable said
-	auto_install: bool, // added by the user: an install starts once if it has no core (M6-E)
+	auto_install: bool, // added by the user: its first attempt's finding of no core starts an install (M6-E); any status but connecting clears it (mlink_set)
 	drain_skew: cw.Skew, // Draining: the hello's
 }
 
@@ -526,7 +527,9 @@ when TEST_HOOKS {
 		l, _ := mlink_find(no)
 		if l == nil do return
 		l.installed, l.skew = installed, skew
-		mlink_set(l, s, "", version)
+		delete(l.version, runtime.heap_allocator())
+		l.version = strings.clone(version, runtime.heap_allocator())
+		mlink_set(l, s, "")
 		l.phase = .Stopped // no attempt runs in a test
 	}
 	// mlink_hello on a socketpair with line as the reply: what it sent (its JSON frames, joined).
@@ -551,6 +554,16 @@ when TEST_HOOKS {
 		mlink_close(l)
 		l.phase = .Stopped
 		return strings.to_string(b)
+	}
+	// The probe exited with code and out: as the tick takes it.
+	machine_probe_for_test :: proc(no: u64, out: string, code: int) {
+		l, _ := mlink_find(no)
+		if l == nil do return
+		clear(&l.inbuf)
+		append(&l.inbuf, ..transmute([]u8)out)
+		l.phase, l.exited, l.exit_code = .Probe, true, code
+		mlink_probe_done(l, time.tick_now())
+		if l.phase == .Idle do l.phase = .Stopped
 	}
 	// mlink_down with outcome o (a finished attempt).
 	machine_outcome_for_test :: proc(no: u64, o: Machine_Outcome) {
@@ -674,7 +687,7 @@ machines_changed :: proc() {if mach.loaded || mach.links != nil do machines_publ
 
 // What machine_install.odin reads of a machine's link (its strings the link's).
 Machine_Facts :: struct {
-	name, target, os, arch, version: string,
+	name, target, os, arch, version, core_run: string,
 	via:       bool,
 	status:    Machine_Status,
 	skew:      cw.Skew,
@@ -684,7 +697,7 @@ Machine_Facts :: struct {
 machine_facts :: proc(no: u64) -> (f: Machine_Facts, ok: bool) {
 	l, _ := mlink_find(no)
 	if l == nil do return {}, false
-	return {name = l.name, target = l.target, os = l.os, arch = l.arch, version = l.version, via = l.via != "", status = l.status, skew = l.skew, installed = l.installed}, true
+	return {name = l.name, target = l.target, os = l.os, arch = l.arch, version = l.version, core_run = l.core_run, via = l.via != "", status = l.status, skew = l.skew, installed = l.installed}, true
 }
 
 // Connect again now (after an install: its next hello says what runs there).
@@ -714,16 +727,13 @@ machines_save :: proc() -> string {
 }
 
 @(private = "file")
-mlink_set :: proc(l: ^Mach_Link, s: Machine_Status, why := "", version := "") {
+mlink_set :: proc(l: ^Mach_Link, s: Machine_Status, why := "") {
 	heap := runtime.heap_allocator()
-	if l.status == s && l.error == why && l.version == version do return
+	if s != .Connecting do l.auto_install = false // the attempt after the user's add ended, whatever it found
+	if l.status == s && l.error == why do return
 	l.status = s
 	delete(l.error, heap)
 	l.error = strings.clone(text_clean(why, MACHINE_ERROR_MAX), heap) // another machine's text (its error, ssh's stderr, a hub.taken's name)
-	if s == .Online || version != "" {
-		delete(l.version, heap)
-		l.version = strings.clone(text_clean(version, MACHINE_VERSION_MAX), heap)
-	}
 	if autotest_active do fmt.printfln("[autotest] machine %s: %s%s%s", l.name, MACHINE_STATUS_NAMES[s], why != "" ? ": " : "", why)
 	machines_publish()
 }
@@ -769,8 +779,7 @@ mlink_close :: proc(l: ^Mach_Link, wait := false) {
 mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	s, why := machine_status_of(o)
 	was_up := l.phase == .Up
-	auto := l.auto_install
-	l.auto_install = false // armed for the user's add's first finding only, whatever it is
+	auto := l.auto_install // mlink_set clears it
 	mlink_close(l)
 	machine_route_down(l.no) // what waited for it ends; its terminals attach again when it is up
 	page_forwards_drop(l.no) // its web pages' forwards (machine_page.odin)
@@ -896,19 +905,7 @@ machines_tick :: proc() {
 			} else if !l.exited && time.tick_diff(l.started, now) > MACHINE_PROBE_WAIT {
 				mlink_down(l, {stderr = "no answer to uname -sm"})
 			} else if l.exited {
-				if os_name, arch, ok := machine_probe_answer(string(l.inbuf[:])); ok && l.exit_code == 0 {
-					heap := runtime.heap_allocator()
-					delete(l.os, heap); delete(l.arch, heap); delete(l.core_path, heap)
-					l.os, l.arch, l.core_path = strings.clone(os_name, heap), strings.clone(arch, heap), strings.clone(machine_core_path_for(os_name), heap)
-					if w := machines_save(); w != "" do fmt.eprintln("Deckhand: machines:", w)
-					mlink_close(l)
-					l.phase = .Idle
-					l.next_at = now
-				} else if l.exit_code == 0 {
-					l.phase = .Stopped
-					mlink_close(l)
-					mlink_set(l, .Offline, fmt.tprintf("not a Mac or Linux: %s", machine_last_line(string(l.inbuf[:]))))
-				} else do mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
+				mlink_probe_done(l, now)
 			}
 		case .Hello:
 			mlink_read_err(l)
@@ -945,6 +942,24 @@ machines_tick :: proc() {
 	page_forwards_tick(now) // web pages: their ssh children, tabs and requests (machine_page.odin)
 }
 
+// The probe (uname -sm) exited: its OS and arch kept and the connect next, or a status.
+@(private = "file")
+mlink_probe_done :: proc(l: ^Mach_Link, now: time.Tick) {
+	if os_name, arch, ok := machine_probe_answer(string(l.inbuf[:])); ok && l.exit_code == 0 {
+		heap := runtime.heap_allocator()
+		delete(l.os, heap); delete(l.arch, heap); delete(l.core_path, heap)
+		l.os, l.arch, l.core_path = strings.clone(os_name, heap), strings.clone(arch, heap), strings.clone(machine_core_path_for(os_name), heap)
+		if w := machines_save(); w != "" do fmt.eprintln("Deckhand: machines:", w)
+		mlink_close(l)
+		l.phase = .Idle
+		l.next_at = now
+	} else if l.exit_code == 0 {
+		l.phase = .Stopped
+		mlink_close(l)
+		mlink_set(l, .Offline, fmt.tprintf("not a Mac or Linux: %s", machine_last_line(string(l.inbuf[:]))))
+	} else do mlink_down(l, {exited = true, exit_code = l.exit_code, stderr = string(l.errbuf[:])})
+}
+
 // The hello reply line came: online (frames from here on) or a status.
 @(private = "file")
 mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
@@ -957,9 +972,17 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 		mlink_down(l, o)
 		return
 	}
-	l.auto_install = false // a core answered: nothing to install on its own
 	gen, _ := strconv.parse_i64(json_path(line, "result.data.generation"))
-	version := json_path(line, "result.data.version")
+	version := text_clean(json_path(line, "result.data.version"), MACHINE_VERSION_MAX)
+	run := json_path(line, "result.data.core")
+	if !hex64_ok(run) do run = "" // an older core's (none) or not an id
+	// what this hello says of its core, whatever its status: kept here, the one place
+	heap := runtime.heap_allocator()
+	if version != l.version || run != l.core_run {
+		delete(l.version, heap); delete(l.core_run, heap)
+		l.version, l.core_run = strings.clone(version, heap), strings.clone(run, heap)
+		machines_publish()
+	}
 	o.skew = cw.skew_check(cw.GENERATION, gen, core_version(), version)
 	l.skew = o.skew
 	l.installed = json_path(line, "result.data.machine.installed") == "true" // absent (an older core): false
@@ -970,13 +993,12 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	}
 	// an install's handover (machine_install.odin): an older core of Deckhand's own gets
 	// core_handover{current} on this link, as the user's, once
-	handover := machine_install_hello(l.no, text_clean(version, MACHINE_VERSION_MAX), l.installed)
+	handover := machine_install_hello(l.no, l.core_run, l.installed)
 	s, why := machine_status_of(o)
 	if s != .Online {
 		if handover {
 			// the link stays open until that core quits (its frames are dropped unread), so the
 			// command reaches it from a live peer; then the status as the hello said
-			heap := runtime.heap_allocator()
 			l.sock = new(cw.Sock_Transport, heap)
 			cw.sock_open(l.sock, l.fd, initial = rest, allocator = heap)
 			clear(&l.inbuf)
@@ -988,7 +1010,6 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 		mlink_down(l, o)
 		return
 	}
-	heap := runtime.heap_allocator()
 	if mos, march := machine_os_arch_from_hello(json_path(line, "result.data.machine.os"), json_path(line, "result.data.machine.arch"), l.os, l.arch); mos != l.os || march != l.arch {
 		mos, march = strings.clone(mos, heap), strings.clone(march, heap)
 		delete(l.os, heap); delete(l.arch, heap)
@@ -999,7 +1020,7 @@ mlink_hello :: proc(l: ^Mach_Link, line: string, rest: []u8) {
 	clear(&l.inbuf)
 	l.phase = .Up
 	machine_backoff_up(&l.backoff, time.tick_now())
-	mlink_set(l, .Online, why, version)
+	mlink_set(l, .Online, why)
 	l.stream = {want_full = true} // deltas wait for its first state.full
 	mlink_send(l, window_msg_subscribe()) // its state (M6-B): state.full, then deltas
 	if id_machine(state.selected_project) == l.no do mlink_send(l, hub_command_json(Select_Project{project_id = id_local(state.selected_project)}, "", .UI))
@@ -1207,7 +1228,7 @@ mlink_find :: proc(no: u64) -> (^Mach_Link, int) {
 @(private = "file")
 mlink_free :: proc(l: ^Mach_Link) {
 	heap := runtime.heap_allocator()
-	for s in ([?]string{l.name, l.target, l.os, l.arch, l.core_path, l.via, l.version, l.error}) do delete(s, heap)
+	for s in ([?]string{l.name, l.target, l.os, l.arch, l.core_path, l.via, l.version, l.error, l.core_run}) do delete(s, heap)
 	delete(l.inbuf)
 	delete(l.errbuf)
 	free(l, heap)

@@ -275,8 +275,8 @@ machine_install_job :: proc(t: ^testing.T) {
 	install_app_for_test, install_skip_dr_for_test = app, true
 	install_ssh_for_test = {"/bin/sh", "-c", fmt.tprintf(`HOME="%s" exec /bin/sh -c "$1"`, f.home), "ssh"}
 	// only the user, never a hub, never with the setting off
-	r := machine_install_apply({no = f.no}, {kind = .Control})
-	testing.expect(t, !r.ok, "control may not install")
+	testing.expect(t, !caller_may({kind = .Control}, Machine_Install{no = f.no}), "control may not install")
+	r: Result
 	machine_status_set_for_test(f.no, .Online, "0.3.0", installed = true)
 	r = machine_install_apply({no = f.no}, {kind = .UI})
 	testing.expect(t, !r.ok, "nothing to install on an online machine of the same version")
@@ -293,9 +293,10 @@ machine_install_job :: proc(t: ^testing.T) {
 	entries, _ := os.read_all_directory_by_path(fmt.tprintf("%s/Library/Application Support/Deckhand/core", f.home), context.temp_allocator)
 	testing.expect_value(t, len(entries), 0) // its staging dir went
 	// an older core's hello gets the handover (once); this Mac's version ends it
-	testing.expect(t, machine_install_hello(f.no, "0.1.0", true), "the old core is told to hand over")
-	testing.expect(t, !machine_install_hello(f.no, "0.1.0", true), "...once")
-	machine_install_hello(f.no, core_version(), true)
+	// a core of no run id (an older one) is the old core: told to hand over, once; a new run is the new core
+	testing.expect(t, machine_install_hello(f.no, "", true), "the old core is told to hand over")
+	testing.expect(t, !machine_install_hello(f.no, "", true), "...once")
+	machine_install_hello(f.no, RUN_B, true)
 	p, _, _, sent, _ := machine_install_job_for_test(f.no)
 	testing.expect(t, p == .Done && sent, "done on the new core's hello")
 	entries, _ = os.read_all_directory_by_path(upath(home_root, INSTALL_DIR), context.temp_allocator)
@@ -337,7 +338,7 @@ machine_install_cancel :: proc(t: ^testing.T) {
 	testing.expect(t, os.exists(fmt.tprintf("%s/cleaned", f.home)), "the remote cleanup ran")
 	// a hello from a core outside Deckhand's folder: never told to hand over
 	machine_status_set_for_test(f.no, .Online, "0.1.0", installed = false, skew = cw.Skew.Core_Older)
-	testing.expect(t, !machine_install_hello(f.no, "0.1.0", false), "no handover outside the folder")
+	testing.expect(t, !machine_install_hello(f.no, "", false), "no handover outside the folder")
 	// removed: the job goes
 	machine_install_drop(f.no, removed = true)
 	p, _, _, _, _ := machine_install_job_for_test(f.no)
@@ -367,7 +368,7 @@ machine_grant_marker :: proc(t: ^testing.T) {
 	testing.expect(t, os.exists(other), "...nor what it points at removed")
 	// the commands are the user's only
 	for name in ([]string{"machine_install", "machine_linger"}) {
-		for s in COMMAND_SPECS do if s.type == name do testing.expectf(t, s.who == .User, "%s is user-only", name)
+		for s in COMMAND_SPECS do if s.type == name do testing.expectf(t, s.who == .User_Here, "%s is user-only", name)
 	}
 }
 
@@ -377,23 +378,16 @@ machine_grant_marker :: proc(t: ^testing.T) {
 // oversized frame detaches it before the inbox runs the command).
 @(test)
 r1_hub_provenance :: proc(t: ^testing.T) {
-	f := fixture_up(t)
-	defer fixture_down(&f)
-	machine_status_set_for_test(f.no, .Not_Installed)
 	testing.expect(t, !window_link_hub(), "no hub attached now")
 	hub := Caller{kind = .UI, hub = true}
-	r := machine_install_apply({no = f.no}, hub)
-	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
-	r = machine_linger_apply({no = f.no}, hub)
-	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
-	r, _ = machine_open_page_apply({no = f.no, port = 3000}, hub, 0)
-	testing.expect(t, !r.ok && strings.contains(r.error, "viewed from another"), r.error)
+	testing.expect(t, !caller_may(hub, Machine_Install{no = 1}), "install")
+	testing.expect(t, !caller_may(hub, Machine_Linger{no = 1}), "linger")
+	testing.expect(t, !caller_may(hub, Machine_Open_Page{no = 1, port = 3000}), "open page")
+	testing.expect(t, caller_may({kind = .UI}, Machine_Install{no = 1}), "this machine's user may")
 	// what a hub link's command is read as
 	v, _ := json.parse_string(`{"on_behalf":{"kind":"ui"}}`, allocator = context.temp_allocator)
 	c, ok := hub_on_behalf(v.(json.Object))
 	testing.expect(t, ok && c.kind == .UI && c.hub, "a hub's ui command carries hub")
-	p, _, _, _, _ := machine_install_job_for_test(f.no)
-	testing.expect_value(t, p, Machine_Job.None)
 }
 
 // (2) A child's output is read at most CHILD_READ_BUDGET bytes per turn, the first ones kept.
@@ -450,35 +444,102 @@ r1_handover_rechecks_installed :: proc(t: ^testing.T) {
 }
 
 // (4) A compatible older core's hello (Online) gets the handover too: one sender for both.
-// (5) The job waits for the copied app's version (core/current's), not the running core's.
 @(test)
 r1_online_hello_and_version :: proc(t: ^testing.T) {
 	when ODIN_OS != .Darwin do return
 	f := fixture_up(t)
 	defer fixture_down(&f)
-	fake_app(f.dir, "0.4.0")
+	fake_app(f.dir, "")
 	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exit 0`, "ssh"}
-	machine_status_set_for_test(f.no, .Not_Installed)
+	machine_hello_for_test(f.no, hello_line(0, "", RUN_A, true)) // an older generation's core of Deckhand's own
 	r := machine_install_apply({no = f.no}, {kind = .UI})
-	testing.expectf(t, r.ok, "install: %s", r.error)
+	testing.expectf(t, r.ok, "update: %s", r.error)
 	testing.expect_value(t, tick_until(f.no, .Handing_Over), Machine_Job.Handing_Over)
-	// an Online hello from an older core of Deckhand's own: the frame goes on that link
-	line := `{"result":{"ok":true,"data":{"framed":true,"generation":1,"version":"0.2.5","machine":{"os":"darwin","arch":"arm64","installed":true}}}}`
-	sent := machine_hello_for_test(f.no, line)
+	// the same run answering Online: the frame goes on that link
+	sent := machine_hello_for_test(f.no, hello_line(1, "", RUN_A, true))
 	testing.expectf(t, strings.contains(sent, `"core_handover"`) && strings.contains(sent, `"current"`), "sent: %q", sent)
-	// the running core's version ("" here) is not what was copied
-	machine_install_hello(f.no, core_version(), true)
 	p, _, _, _, _ := machine_install_job_for_test(f.no)
 	testing.expect_value(t, p, Machine_Job.Handing_Over)
-	machine_install_hello(f.no, "0.4.0", true)
-	p, _, _, _, _ = machine_install_job_for_test(f.no)
-	testing.expect_value(t, p, Machine_Job.Done)
-	// never a downgrade: the copied 0.4.0 to a 0.5.0 of an older generation
-	machine_status_set_for_test(f.no, .Needs_Update, "0.5.0", installed = true, skew = cw.Skew.Core_Older_Generation)
-	r = machine_install_apply({no = f.no}, {kind = .UI})
+}
+
+// ---- review round 2 ----
+
+// (1) Every machine_* command is behind the one gate: never a hub's, nor control's or a script's.
+@(test)
+r2_machine_commands_gated :: proc(t: ^testing.T) {
+	n := 0
+	for s in COMMAND_SPECS do if strings.has_prefix(s.type, "machine_") {
+		testing.expectf(t, s.who == .User_Here, "%s is not behind the hub gate (who = .User_Here)", s.type)
+		n += 1
+	}
+	testing.expect(t, n >= 7, "the machine commands")
+	hub := Caller{kind = .UI, hub = true}
+	for cmd in ([]Command{Machine_Add{name = "x", target = "evil"}, Machine_Remove{no = 1}, Machine_Connect{no = 1}, Machine_Login{no = 1}, Machine_Install{no = 1}, Machine_Linger{no = 1}, Machine_Open_Page{no = 1, port = 3000}}) {
+		testing.expectf(t, !caller_may(hub, cmd), "a hub's %s", command_type(cmd))
+		testing.expectf(t, caller_may({kind = .UI}, cmd), "the user's %s", command_type(cmd))
+		r := run_command(cmd, hub)
+		testing.expectf(t, !r.ok && r.error == "not allowed for this caller", "run from a hub: %s", r.error)
+	}
+}
+
+// (2) The downgrade guard sees the version a non-Online hello said (no injecting it).
+@(test)
+r2_downgrade_seen_from_hello :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	fake_app(f.dir, "0.4.0")
+	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exit 0`, "ssh"}
+	machine_hello_for_test(f.no, hello_line(0, "0.5.0", RUN_A, true)) // older generation: Needs_Update
+	fa, _ := machine_facts(f.no)
+	testing.expect_value(t, fa.version, "0.5.0")
+	r := machine_install_apply({no = f.no}, {kind = .UI})
 	got := r.ok ? tick_until(f.no, .Failed) : .Failed
 	_, note, _, _, _ := machine_install_job_for_test(f.no)
 	testing.expectf(t, got == .Failed && (strings.contains(note, "downgrade") || strings.contains(r.error, "downgrade")), "%v %s %s", got, note, r.error)
+}
+
+// (3) Two development builds both say version "": the old core's reconnect is not the new core.
+@(test)
+r2_done_by_run_id :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	fake_app(f.dir, "")
+	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exit 0`, "ssh"}
+	machine_hello_for_test(f.no, hello_line(0, "", RUN_A, true))
+	r := machine_install_apply({no = f.no}, {kind = .UI})
+	testing.expectf(t, r.ok, "update: %s", r.error)
+	testing.expect_value(t, tick_until(f.no, .Handing_Over), Machine_Job.Handing_Over)
+	sent := machine_hello_for_test(f.no, hello_line(0, "", RUN_A, true)) // the old core again
+	p, _, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.Handing_Over)
+	testing.expectf(t, strings.contains(sent, `"core_handover"`), "the old core is told: %q", sent)
+	machine_hello_for_test(f.no, hello_line(1, "", RUN_B, true)) // a new run
+	p, _, _, _, _ = machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.Done)
+}
+
+// (4) An unsupported uname ends the add's first attempt: a later Connect's no-core installs nothing.
+@(test)
+r2_auto_install_unsupported :: proc(t: ^testing.T) {
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	machine_probe_for_test(f.no, "Plan9 mips\n", 0)
+	fa, _ := machine_facts(f.no)
+	testing.expect_value(t, fa.status, Machine_Status.Offline)
+	machine_outcome_for_test(f.no, {exited = true, exit_code = 127})
+	p, _, _, _, _ := machine_install_job_for_test(f.no)
+	testing.expect_value(t, p, Machine_Job.None)
+}
+
+RUN_A :: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"
+RUN_B :: "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+
+// A framed hello reply of a core of generation gen, version and run id.
+@(private = "file")
+hello_line :: proc(gen: int, version, run: string, installed: bool) -> string {
+	return fmt.tprintf(`{{"result":{{"ok":true,"data":{{"framed":true,"generation":%d,"version":"%s","core":"%s","machine":{{"os":"darwin","arch":"arm64","installed":%v}}}}}}}}`, gen, version, run, installed)
 }
 
 // (6) machine_add's automatic install is armed for its first finding only.

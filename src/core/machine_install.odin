@@ -378,7 +378,8 @@ Inst_Job :: struct {
 	update:    bool, // a core runs there: handed over after the copy
 	phase:     Machine_Job,
 	nonce:     string,
-	version:   string, // what its new core will say: this Mac's (Tarball), the copied Core.app's (Copy_App, once checked)
+	version:   string, // this Mac's core's (Tarball: the release fetched)
+	before:    string, // an update: the run id of the core that answered there before it (its hello's `core`)
 	work:      string, // the local temp dir ("" = none)
 	app:       string, // the Core.app copied (Copy_App)
 	size:      i64, // the tarball's, from the release
@@ -450,7 +451,7 @@ job_set :: proc(j: ^Inst_Job, p: Machine_Job, note := "") {
 @(private = "file")
 job_free :: proc(j: ^Inst_Job) {
 	heap := runtime.heap_allocator()
-	for s in ([?]string{j.name, j.target, j.os_name, j.nonce, j.version, j.work, j.app, j.note}) do delete(s, heap)
+	for s in ([?]string{j.name, j.target, j.os_name, j.nonce, j.version, j.before, j.work, j.app, j.note}) do delete(s, heap)
 	free(j, heap)
 }
 
@@ -550,8 +551,6 @@ random_nonce :: proc() -> string {
 
 machine_install_apply :: proc(c: Machine_Install, caller: Caller) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
-	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user installs or updates another machine's Deckhand")
-	if caller_from_hub(caller) do return fail("this machine is viewed from another one: install from there")
 	if c.cancel {
 		j, _ := job_find(c.no)
 		if j != nil && job_active(j) do job_fail(j, "cancelled")
@@ -591,7 +590,7 @@ machine_install_start :: proc(no: u64) -> Result {
 	}
 	heap := runtime.heap_allocator()
 	j := new(Inst_Job, heap)
-	j^ = {no = no, name = strings.clone(f.name, heap), target = strings.clone(f.target, heap), via = f.via, os_name = strings.clone(os_name, heap), kind = kind, update = update, version = strings.clone(version, heap), nonce = random_nonce(), was_up = f.status == .Online}
+	j^ = {no = no, name = strings.clone(f.name, heap), target = strings.clone(f.target, heap), via = f.via, os_name = strings.clone(os_name, heap), kind = kind, update = update, version = strings.clone(version, heap), before = strings.clone(update ? f.core_run : "", heap), nonce = random_nonce(), was_up = f.status == .Online}
 	j.child.fd = -1
 	if inst.jobs == nil do inst.jobs = make([dynamic]^Inst_Job, heap)
 	append(&inst.jobs, j)
@@ -619,8 +618,6 @@ machine_install_start :: proc(no: u64) -> Result {
 
 machine_linger_apply :: proc(c: Machine_Linger, caller: Caller) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Experimental › Machines over SSH first")
-	if caller.kind != .UI && caller.kind != .Internal do return fail("only the user turns on linger on another machine")
-	if caller_from_hub(caller) do return fail("this machine is viewed from another one: do it from there")
 	f, ok := machine_facts(c.no)
 	if !ok do return fail(fmt.tprintf("no machine %d", c.no))
 	if f.os != "linux" && !f.via do return fail("linger is Linux's")
@@ -802,14 +799,10 @@ app_release_version :: proc(app: string) -> string {
 	return v
 }
 
-// Copy_App, checked: the job waits for the copied app's version (core/current's may differ from
-// the running core's), and an update never installs one that is not newer than what runs there.
-// "" = go on.
+// Copy_App, checked: an update never installs a Core.app (found: its version) that is not newer
+// than what runs there (core/current's may differ from the running core's). "" = go on.
 @(private = "file")
-copied_version_take :: proc(j: ^Inst_Job, found: string) -> string {
-	heap := runtime.heap_allocator()
-	delete(j.version, heap)
-	j.version = strings.clone(found, heap)
+copied_version_check :: proc(j: ^Inst_Job, found: string) -> string {
 	if !j.update do return ""
 	f, ok := machine_facts(j.no)
 	if !ok do return "the machine is gone"
@@ -912,21 +905,21 @@ copy_done :: proc(j: ^Inst_Job) {
 	}
 }
 
-// Machine no's hello came (machines.odin), from a core of version; installed: its hello said it
-// runs from Deckhand's folder. True: send core_handover{current} on it now (once, an older core
-// of Deckhand's own after the install's copy).
-machine_install_hello :: proc(no: u64, version: string, installed: bool) -> bool {
+// Machine no's hello came (machines.odin) from the core of run id run; installed: its hello said
+// it runs from Deckhand's folder. Another run than the one before the copy is the new core (a
+// fresh install's first). True: send core_handover{current} on it now (the old core, once).
+machine_install_hello :: proc(no: u64, run: string, installed: bool) -> bool {
 	j, _ := job_find(no)
 	if j == nil || j.phase != .Handing_Over do return false
-	if version == j.version {
-		job_set(j, .Done)
-		return false
-	}
-	if j.sent do return false // the old core still waits for its job runs: until j.until
 	if !installed {
 		job_set(j, .Failed, machine_update_command(j.name))
 		return false
 	}
+	if run != "" && run != j.before {
+		job_set(j, .Done)
+		return false
+	}
+	if j.sent do return false // the old core still waits for its job runs: until j.until
 	j.sent = true
 	return true // the link sends it (machine_handover_send's text), on the hello's link
 }
@@ -992,7 +985,7 @@ machine_install_tick :: proc(now: time.Tick) {
 			if !done do break
 			j.verify = nil
 			verify_free(v)
-			if why == "" && j.kind == .Copy_App do why = copied_version_take(j, found)
+			if why == "" && j.kind == .Copy_App do why = copied_version_check(j, found)
 			if why != "" do job_fail(j, why)
 			else do copy_start(j)
 		case .Copying:

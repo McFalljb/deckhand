@@ -1075,6 +1075,10 @@ conn_handoff :: proc(c: ^Conn, leftover: []u8) {
 framed_fields :: proc(b: ^strings.Builder, caller: Caller) {
 	fmt.sbprintf(b, `,"framed":true,"generation":%d,"version":`, cw.GENERATION)
 	json_quote(b, core_version())
+	if id := window_door_core_id(); hex64_ok(id) { // this run's id: a hub's install tells its new core from the old one by it
+		strings.write_string(b, `,"core":`)
+		json_quote(b, id)
+	}
 	strings.write_string(b, `,"features":[`)
 	for f, i in CORE_FEATURES {
 		if i > 0 do strings.write_byte(b, ',')

@@ -17,6 +17,7 @@ Command_Who :: enum {
 	Own_Session, // anyone but apps; a pi or Claude tab only for its own session (the command checks: browser_*, app_*)
 	User_Control, // the user, control callers (the Home agent) and Deckhand itself: opens a Finder window
 	Claude, // a Claude tab's plugin for its own tab (caller panel + claude), scripts (tests), Deckhand; never a pi tab's bridge
+	User_Here, // as User, and never from a hub (another machine's core viewing this one), queued or not (caller_may): every machine_* command
 }
 
 Command_Spec :: struct {
@@ -66,13 +67,13 @@ COMMAND_SPECS := [?]Command_Spec {
 	{type = "set_separate_core", args = "on", does = "run sessions in a background core (deckhand-core serve) from the next launch (on by default)", who = .User},
 	{type = "set_machines_reachable", args = "on", does = "Settings › Machines › Allow other machines to connect to this one (off by default): another machine's core that logs in here over ssh as this user may view and drive this machine's sessions", who = .User},
 	{type = "set_remote_machines", args = "on", does = "Settings › Experimental › Machines over SSH (off by default): links to the machines in Settings › Machines", who = .User},
-	{type = "machine_add", args = "name, target, via?", does = "add a machine reached over ssh (target: an ~/.ssh/config alias or user@host); via: a development or test build's command in place of `ssh … connect`; created_id = its number", who = .User},
-	{type = "machine_remove", args = "no", does = "remove a machine (its link ends)", who = .User},
-	{type = "machine_connect", args = "no", does = "connect to a machine now (Take back from its own window, or retry)", who = .User},
-	{type = "machine_open_page", args = "no, port, path?", does = "open a web page served on a machine's own 127.0.0.1:port (a dev server) in a browser tab here: long-running: an ssh of its own (key-based login, no prompt) forwards a free 127.0.0.1 port of this Mac to it while the tab is open; finished created_id = the tab", who = .User},
-	{type = "machine_install", args = "no, cancel?", does = "install Deckhand's core on a machine that has none, or update an older one of Deckhand's own (copied over its ssh: a Mac's Core.app, or for Linux the release's tarball, signature-checked here), then hand its sessions over to it; cancel: stop it", who = .User},
-	{type = "machine_linger", args = "no", does = "Linux: turn on linger on a machine (loginctl enable-linger, no sudo), so its jobs run after you log out of it", who = .User},
-	{type = "machine_login", args = "no", does = "log in to a machine whose ssh wants a password, a host key or 2FA: a shell tab on this Mac runs ssh in the foreground, and the link then uses that connection", who = .User},
+	{type = "machine_add", args = "name, target, via?", does = "add a machine reached over ssh (target: an ~/.ssh/config alias or user@host); via: a development or test build's command in place of `ssh … connect`; created_id = its number", who = .User_Here},
+	{type = "machine_remove", args = "no", does = "remove a machine (its link ends)", who = .User_Here},
+	{type = "machine_connect", args = "no", does = "connect to a machine now (Take back from its own window, or retry)", who = .User_Here},
+	{type = "machine_open_page", args = "no, port, path?", does = "open a web page served on a machine's own 127.0.0.1:port (a dev server) in a browser tab here: long-running: an ssh of its own (key-based login, no prompt) forwards a free 127.0.0.1 port of this Mac to it while the tab is open; finished created_id = the tab", who = .User_Here},
+	{type = "machine_install", args = "no, cancel?", does = "install Deckhand's core on a machine that has none, or update an older one of Deckhand's own (copied over its ssh: a Mac's Core.app, or for Linux the release's tarball, signature-checked here), then hand its sessions over to it; cancel: stop it", who = .User_Here},
+	{type = "machine_linger", args = "no", does = "Linux: turn on linger on a machine (loginctl enable-linger, no sudo), so its jobs run after you log out of it", who = .User_Here},
+	{type = "machine_login", args = "no", does = "log in to a machine whose ssh wants a password, a host key or 2FA: a shell tab on this Mac runs ssh in the foreground, and the link then uses that connection", who = .User_Here},
 	{type = "holder_replace", args = "stop", does = "answers state.holder_ask: stop the session holder from another build (its sessions end) and start a new one, or run on without one", who = .User},
 	{type = "core_handover", args = "to", does = `a separate core hands its sessions over to another core process: "current" (the installed core) or "previous" (Use previous core); job runs get 2 min`, who = .User},
 	{type = "set_keep_sessions", args = "on", does = "keep sessions running when Deckhand quits or updates (on by default; the session holder keeps their processes; reopening Deckhand adopts them)", who = .User},
@@ -311,7 +312,7 @@ who_allows :: proc(kind: Caller_Kind, who: Command_Who) -> bool {
 	switch who {
 	case .Anyone:   return kind != .Panel && kind != .App
 	case .Query:    return kind != .App // an app tab's program sends no commands
-	case .User:     return kind == .UI || kind == .Internal
+	case .User, .User_Here: return kind == .UI || kind == .Internal
 	case .Report:   return kind != .Control && kind != .App
 	case .Bridge:   return kind == .Panel
 	case .Internal: return kind == .Internal

@@ -796,8 +796,8 @@ Caller :: struct {
 }
 
 // The command came from another machine's core: its own link said so (kept with it in the inbox),
-// or this core's attached link is a hub now. What only this machine's own user may start
-// (machine_install, machine_linger, machine_open_page) is refused then.
+// or this core's attached link is a hub now. A User_Here command (every machine_*) is refused
+// then (caller_may).
 caller_from_hub :: proc(c: Caller) -> bool {return c.hub || window_link_hub()}
 
 fail :: proc(msg: string) -> Result {return {error = msg}}
@@ -888,6 +888,7 @@ caller_may :: proc(caller: Caller, cmd: Command) -> bool {
 	if caller.kind == .Tab_Host do return tab_host_may(cmd) // a page's or an app's reports only (tabhost_route.odin)
 	spec := command_spec(command_type(cmd))
 	if spec == nil || !who_allows(caller.kind, spec.who) do return false
+	if spec.who == .User_Here && caller_from_hub(caller) do return false // the one gate: this machine's own user only
 	// a Claude tab (panel + claude): its own claude.* reports, never a pi bridge's; and only
 	// a Claude tab sends those (scripts too, for tests)
 	if spec.who == .Claude do return caller.kind != .Panel || (caller.claude && caller.tab_id == claude_command_tab(cmd))

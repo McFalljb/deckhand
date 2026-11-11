@@ -147,12 +147,15 @@ CORE_REFUSED_MAX :: 1024
 
 core_refused_write :: proc(run, why: string) {
 	if run == "" do return
+	// whole or not at all: the window reads and removes it every 20 ms
 	path := strings.clone_to_cstring(fmt.tprintf("%s/%s", run, CORE_REFUSED_FILE), context.temp_allocator)
-	fd := posix.open(path, {.WRONLY, .CREAT, .TRUNC, .CLOEXEC, .NOFOLLOW}, {.IRUSR, .IWUSR})
+	tmp := strings.clone_to_cstring(fmt.tprintf("%s/%s.tmp", run, CORE_REFUSED_FILE), context.temp_allocator)
+	fd := posix.open(tmp, {.WRONLY, .CREAT, .TRUNC, .CLOEXEC, .NOFOLLOW}, {.IRUSR, .IWUSR})
 	if fd < 0 do return
 	text := why[:min(len(why), CORE_REFUSED_MAX)]
-	posix.write(fd, raw_data(text), uint(len(text)))
+	ok := posix.write(fd, raw_data(text), uint(len(text))) == len(text)
 	posix.close(fd)
+	if !ok || posix.rename(tmp, path) != 0 do posix.unlink(tmp)
 }
 
 // What a refused core wrote, cleaned and bounded, and the file gone; "" = none.

@@ -142,6 +142,9 @@ run_spawn :: proc(r: ^Job_Run, argv, env: []string, cwd, stderr_path: string) ->
 	attr, fa: [512]u8 // opaque (a pointer on macOS, a struct elsewhere)
 	posix_spawnattr_init(&attr)
 	defer posix_spawnattr_destroy(&attr)
+	// Linux has no CLOEXEC_DEFAULT: pi gets only what is not close-on-exec. core.lock,
+	// instance.lock and run locks are opened O_CLOEXEC; sockets (sock_new, sock_accept), the link's
+	// dup and every pipe set FD_CLOEXEC as they are made; Odin's os.open and os.pipe use O_CLOEXEC.
 	posix_spawnattr_setflags(&attr, i16(POSIX_SPAWN_SETPGROUP | POSIX_SPAWN_CLOEXEC_DEFAULT))
 	posix_spawnattr_setpgroup(&attr, 0) // its own group, led by itself
 	posix_spawn_file_actions_init(&fa)

@@ -70,11 +70,14 @@ lock_exe_deckhand_paths :: proc(t: ^testing.T) {
 		"/Applications/Deckhand.app/Contents/MacOS/Deckhand",
 		"/Users/me/.Trash/Deckhand 10.41.22.app/Contents/MacOS/Deckhand",
 		"/Applications/pi-desk.app/Contents/MacOS/pi-desk",
-		"/Applications/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core-serve",
 	}
 	no := []string{
 		"/bin/sleep",
 		"/Applications/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core", // the session holder
+		// the background core: launchd's (ppid 1), single-threaded while it starts (review of #84)
+		"/Applications/Deckhand.app/Contents/Helpers/Deckhand Core.app/Contents/MacOS/deckhand-core-serve",
+		"/Applications/Deckhand.app/Contents/MacOS/Deckhand Helper",
+		"/Applications/Deckhand.app/Contents/MacOS/DeckhandX",
 		"/Applications/Other.app/Contents/MacOS/Deckhand",
 		"/tmp/Deckhand.app/Deckhand",
 		"/tmp/Deckhand",
@@ -102,4 +105,28 @@ run_bounded_exit_spawns :: proc(t: ^testing.T) {
 	testing.expect(t, time.tick_since(start) < 2 * time.Second, "killed at the timeout")
 	_, _, ran = run_bounded_exit("", {"/nonexistent/deckhand-test"}, time.Second)
 	testing.expect(t, !ran, "a missing program does not run")
+}
+
+// Before each signal the holder must still be the leftover found: the same start and program,
+// ppid 1, one thread, and the lock file still open (review of #84).
+@(test)
+lock_holder_still_rechecks :: proc(t: ^testing.T) {
+	h := Lock_Holder{pid = 4242, ppid = 1, start = 99, exe = "/Applications/Deckhand.app/Contents/MacOS/Deckhand", threads = 1}
+	testing.expect(t, lock_holder_still(h, h, true), "the same leftover")
+	testing.expect(t, !lock_holder_still(h, h, false), "the lock file no longer open")
+	now := h
+	now.threads = 3
+	testing.expect(t, !lock_holder_still(h, now, true), "more threads: not a stuck fork child")
+	now = h
+	now.start = 100
+	testing.expect(t, !lock_holder_still(h, now, true), "another start: pid reused")
+	now = h
+	now.exe = "/bin/sleep"
+	testing.expect(t, !lock_holder_still(h, now, true), "another program")
+	now = h
+	now.ppid = 77
+	testing.expect(t, !lock_holder_still(h, now, true), "a parent again")
+	now = h
+	now.pid = 4243
+	testing.expect(t, !lock_holder_still(h, now, true), "another pid")
 }

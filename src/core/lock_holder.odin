@@ -22,6 +22,8 @@ Lock_Holder :: struct {
 	start:   i64, // its start time: with pid and exe, its identity (pid reuse)
 	exe:     string, // temp
 	threads: int,
+	dev:     u64, // the lock file (re-checked before each signal)
+	ino:     u64,
 	others:  int, // more processes with the file open (then it is never ended)
 }
 
@@ -40,6 +42,7 @@ lock_holder_find :: proc(path: string) -> (h: Lock_Holder) {
 		}
 		if p, ok := lock_proc_ident(pid); ok do h = p
 	}
+	if h.pid != 0 do h.dev, h.ino = u64(st.st_dev), u64(st.st_ino)
 	return
 }
 
@@ -52,12 +55,14 @@ lock_holder_text :: proc(h: Lock_Holder) -> string {
 	return s
 }
 
-// A Deckhand executable: …/<Deckhand*|pi-desk*>.app/Contents/MacOS/<Deckhand|pi-desk|deckhand-core-serve>
-// (the app, an older app, the background core; wherever the bundle is, the Trash included). Not
-// the session holder (deckhand-core): it holds instance.lock shared, never the lock that refuses.
+// A Deckhand window's executable: …/<Deckhand*|pi-desk*>.app/Contents/MacOS/<Deckhand|pi-desk>
+// (this app or an older one, wherever the bundle is: the Trash renames it "Deckhand 10.41.22.app").
+// Only the window loads CEF, whose atfork handlers can hang a fork child. Never the background
+// core (deckhand-core-serve: launchd's, ppid 1, single-threaded while it starts) or the session
+// holder (deckhand-core).
 lock_exe_deckhand :: proc(exe: string) -> bool {
 	switch filepath.base(exe) {
-	case "Deckhand", "pi-desk", "deckhand-core-serve":
+	case "Deckhand", "pi-desk":
 	case: return false
 	}
 	macos := filepath.dir(exe)
@@ -79,12 +84,17 @@ lock_holder_endable :: proc(h: Lock_Holder) -> bool {
 	}
 }
 
-// pid is still the process h found: alive (not a zombie), same start time, same executable,
-// still a leftover.
+// pid is still the process h found: alive (not a zombie), same start time and executable, still
+// a leftover (ppid 1, one thread) and still holding the lock file open.
 lock_holder_same :: proc(h: Lock_Holder) -> bool {
 	if h.pid <= 1 do return false
-	p, ok := lock_proc_ident(h.pid)
-	return ok && p.ppid == 1 && p.start == h.start && p.exe == h.exe
+	now, ok := lock_proc_ident(h.pid)
+	return ok && lock_holder_still(h, now, lock_pid_has(h.pid, h.dev, h.ino))
+}
+
+// h, as looked up again now (has_file: it still has the lock file open), is the leftover found.
+lock_holder_still :: proc(h, now: Lock_Holder, has_file: bool) -> bool {
+	return has_file && now.pid == h.pid && now.ppid == 1 && now.threads == 1 && now.start == h.start && now.exe == h.exe
 }
 
 // Ends h after the user confirmed: SIGTERM, then SIGKILL if it is still there after a short

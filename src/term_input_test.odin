@@ -99,7 +99,7 @@ mac_line_editing_keys :: proc(t: ^testing.T) {
 	testing.expect_value(t, mac_key_text(.RIGHT, ALT, false), "\x1bf")
 	testing.expect_value(t, mac_key_text(.DELETE, ALT, false), "\x1bd")
 	testing.expect_value(t, mac_key_text(.DELETE, ALT, true), "") // kitty: the encoder's CSI 3;3~
-	// other modifier sets keep the encoder (⇧⌥← selects in apps that know it)
+	// other modifier sets keep the encoder (⌥⇧← selects in apps that know it)
 	testing.expect_value(t, mac_key_text(.LEFT, ALT | SHIFT, false), "")
 	testing.expect_value(t, mac_key_text(.BACKSPACE, SUPER | SHIFT, false), "")
 	testing.expect_value(t, mac_key_text(.BACKSPACE, ALT, false), "")

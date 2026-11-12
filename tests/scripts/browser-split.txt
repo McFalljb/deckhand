@@ -8,7 +8,7 @@ web_open tests/web/browser.html
 web_waitpaint 10000
 web_title ready 5000
 web_assert view 779x784
-# the page splits off into its own pane right of the pi tab's (⇧⌃⌘→); the keyboard goes back left
+# the page splits off into its own pane right of the pi tab's (⌃⇧⌘→); the keyboard goes back left
 key right cmd ctrl shift
 waitstate 5000 open_sessions.0.panes.# 2
 assert_state open_sessions.0.focused_pane $pane1

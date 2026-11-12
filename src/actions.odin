@@ -312,7 +312,7 @@ ACTIONS := [?]Action {
 	{id = "toggle_right", label = "Toggle right column", keys = "⌥⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{right_open = !state.layout.right_open}, true
 	}},
-	{id = "settings", label = "Edit settings files…", keys = "⌘,", prepare = proc() {ui_do(core.Set_Left_Tab{tab = .Settings})}, make = proc() -> (core.Command, bool) {
+	{id = "settings", label = "Settings…", keys = "⌘,", prepare = proc() {ui_do(core.Set_Left_Tab{tab = .Settings})}, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"files"}, true // the left column's Settings tab, with the keyboard (settings_files.odin)
 	}},
 	{id = "quick_settings", label = "Quick settings", no_palette = true, make = proc() -> (core.Command, bool) {
@@ -440,7 +440,7 @@ ACTIONS := [?]Action {
 		return core.Set_Focus{"rename_project"}, true
 	}},
 	// the left column (sidebar.odin): pins, hiding, filter, sort
-	{id = "filter", label = "Filter projects and sessions", keys = "⌘⇧F", prepare = proc() {
+	{id = "filter", label = "Filter projects and sessions", keys = "⇧⌘F", prepare = proc() {
 		tf_set(&filter_field, state.sidebar.filter)
 		tf_select_all(&filter_field)
 	}, make = proc() -> (core.Command, bool) {return core.Set_Focus{"sidebar_filter"}, true}},
@@ -519,10 +519,10 @@ ACTIONS := [?]Action {
 	{id = "focus_pane_right", label = "Focus pane right", keys = "⌃⌘→", make = proc() -> (core.Command, bool) {return pane_focus_action(.Right)}},
 	{id = "focus_pane_up", label = "Focus pane up", keys = "⌃⌘↑", make = proc() -> (core.Command, bool) {return pane_focus_action(.Up)}},
 	{id = "focus_pane_down", label = "Focus pane down", keys = "⌃⌘↓", make = proc() -> (core.Command, bool) {return pane_focus_action(.Down)}},
-	{id = "move_tab_left", label = "Move tab to the pane left", keys = "⇧⌃⌘←", make = proc() -> (core.Command, bool) {return pane_move_action(.Left)}},
-	{id = "move_tab_right", label = "Move tab to the pane right", keys = "⇧⌃⌘→", make = proc() -> (core.Command, bool) {return pane_move_action(.Right)}},
-	{id = "move_tab_up", label = "Move tab to the pane above", keys = "⇧⌃⌘↑", make = proc() -> (core.Command, bool) {return pane_move_action(.Up)}},
-	{id = "move_tab_down", label = "Move tab to the pane below", keys = "⇧⌃⌘↓", make = proc() -> (core.Command, bool) {return pane_move_action(.Down)}},
+	{id = "move_tab_left", label = "Move tab to the pane left", keys = "⌃⇧⌘←", make = proc() -> (core.Command, bool) {return pane_move_action(.Left)}},
+	{id = "move_tab_right", label = "Move tab to the pane right", keys = "⌃⇧⌘→", make = proc() -> (core.Command, bool) {return pane_move_action(.Right)}},
+	{id = "move_tab_up", label = "Move tab to the pane above", keys = "⌃⇧⌘↑", make = proc() -> (core.Command, bool) {return pane_move_action(.Up)}},
+	{id = "move_tab_down", label = "Move tab to the pane below", keys = "⌃⇧⌘↓", make = proc() -> (core.Command, bool) {return pane_move_action(.Down)}},
 	// tabs and sessions in order (the Window menu)
 	{id = "next_tab", label = "Next tab", keys = "⇧⌘]", make = proc() -> (core.Command, bool) {return tab_step(1)}},
 	{id = "prev_tab", label = "Previous tab", keys = "⇧⌘[", make = proc() -> (core.Command, bool) {return tab_step(-1)}},
@@ -630,7 +630,7 @@ ACTIONS := [?]Action {
 		return core.Diff_File{e.tab_id, .Diff_Head}, true
 	}},
 	// the Files tab (ui_files.odin)
-	{id = "show_files", label = "Files", keys = "⌘⇧E", prepare = proc() {
+	{id = "show_files", label = "Files", keys = "⇧⌘E", prepare = proc() {
 		if state.layout.left_tab != .Files do ui_do(core.Set_Left_Tab{tab = .Files})
 	}, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"files"}, true // the Files tab, with the keyboard (opens the left column)

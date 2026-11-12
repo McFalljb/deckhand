@@ -704,7 +704,7 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
-	// ⌘⇧F: the left column's filter, from anywhere
+	// ⇧⌘F: the left column's filter, from anywhere
 	if e.type == .KEY_DOWN && e.key_code == .F && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 		ime_cancel()
 		if menu.open do menu_close()
@@ -720,7 +720,7 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
-	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⇧⌃⌘arrows move the tab,
+	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⌃⇧⌘arrows move the tab,
 	// ⇧⌘W unsplit; from anywhere but a text field
 	if e.type == .KEY_DOWN && state.focus_widget == "" && pane_key(e) {
 		ime_cancel()
@@ -728,7 +728,7 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
-	// ⌘⇧E: the Files tab with the keyboard, from anywhere; again: back to Sessions
+	// ⇧⌘E: the Files tab with the keyboard, from anywhere; again: back to Sessions
 	if e.type == .KEY_DOWN && e.key_code == .E && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT) == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 		ime_cancel()
 		if menu.open do menu_close()
@@ -895,6 +895,7 @@ event :: proc(e: ^sapp.Event) {
 		if e.mouse_button == .RIGHT || (e.mouse_button == .LEFT && e.modifiers & sapp.MODIFIER_CTRL != 0) {
 			clay.SetPointerState(app.pointer, false)
 			if b, ok := hit.(Hit_Button); ok && Button(b) == .New_Tab do button_click(.New_Menu) // "+": its menu
+			else if tb, ok1 := hit.(Hit_Tab); ok1 do tab_context(u64(tb), app.pointer) // ui_panes.odin
 			else if j, ok2 := hit.(Hit_Jobs); ok2 do jobs_context(j, app.pointer)
 			else do sidebar_context(hit, app.pointer)
 			return

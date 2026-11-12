@@ -314,7 +314,7 @@ browser_url_key :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 		ui_do(core.Set_Focus{""})
 		return true
 	case .PERIOD:
-		// ⌘⇧. (Annotate): the field lets go, comment mode toggles (browser_annotate.odin)
+		// ⇧⌘. (Annotate): the field lets go, comment mode toggles (browser_annotate.odin)
 		mods := e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT)
 		if mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT {
 			ui_do(core.Set_Focus{""})

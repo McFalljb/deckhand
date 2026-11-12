@@ -78,7 +78,11 @@ assert_result error not allowed for this caller
 clickid settings
 wait 200
 shot setup/gear-dark
-clickid pop 26
+# its last group's row, picked with the keyboard (↑ from the top wraps to the end; the list
+# scrolls it into view in a short window): Copy a control token, then Set up Deckhand…
+key up
+key up
+key enter
 eventually
 assert_state focus.id setup
 shot setup/reopened-dark

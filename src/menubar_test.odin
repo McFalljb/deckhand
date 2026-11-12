@@ -66,7 +66,7 @@ menubar_built_from_the_action_table :: proc(t: ^testing.T) {
 		// ⌃ without ⌘ is the terminal's (readline ⌃G, ⌃A…): a menu item would flash on every press
 		testing.expectf(t, pk.mods & sapp.MODIFIER_SUPER != 0 || it.native != .None, "%s: %q is a ⌃ key without ⌘", id, k)
 		// ⌘⌫ ⌘← ⌘→ (and ⇧⌘← ⇧⌘→, ⌥⌘…) are the terminal's line editing: never a menu's; with ⌃ (the
-		// panes' ⌃⌘← ⇧⌃⌘←) they are not
+		// panes' ⌃⌘← ⌃⇧⌘←) they are not
 		testing.expectf(t, !(pk.code == .BACKSPACE || pk.code == .LEFT || pk.code == .RIGHT) || pk.mods & sapp.MODIFIER_CTRL != 0, "%s: %q is a terminal key", id, k)
 		norm := fmt.tprintf("%v+%d", pk.code, pk.mods)
 		testing.expectf(t, norm not_in keys, "shortcut %s on both %s and %s", k, keys[norm], id)
@@ -89,6 +89,24 @@ menubar_built_from_the_action_table :: proc(t: ^testing.T) {
 			testing.expectf(t, norm not_in keys || x.keys == "⌘/", "%s (%s) is also the menu's %s", part, x.label, keys[norm])
 		}
 	}
+	// shortcuts are written in Apple's order (⌃⌥⇧⌘): "⇧⌘F", never "⌘⇧F"
+	apple_order :: proc(keys: string) -> bool {
+		last := -1
+		for r in keys {
+			k := strings.index_rune("⌃⌥⇧⌘", r)
+			if k < 0 do continue
+			if k < last do return false
+			last = k
+		}
+		return true
+	}
+	for a in ACTIONS do testing.expectf(t, apple_order(a.keys), "action %s: %q is not in ⌃⌥⇧⌘ order", a.id, a.keys)
+	for it in menubar_items() do testing.expectf(t, apple_order(menubar_keys(it)), "menu item %s: %q is not in ⌃⌥⇧⌘ order", menubar_item_id(it), menubar_keys(it))
+	for x in SHORTCUTS_EXTRA do for part in strings.split(x.keys, ", ", context.temp_allocator) do testing.expectf(t, apple_order(part), "%s: %q is not in ⌃⌥⇧⌘ order", x.label, part)
+	// one name each: the bell's item reads Notifications; ⌘, opens Settings
+	testing.expect_value(t, menubar_item_title(menubar_find("notifications")), "Notifications")
+	testing.expect_value(t, menubar_item_title(menubar_find("settings")), "Settings…")
+	testing.expect_value(t, menubar_item_title(menubar_find("settings_tab")), "Settings")
 	// the sheet: grouped like the menus, every menu shortcut on it
 	rows := shortcut_rows()
 	testing.expect(t, rows[0].head && rows[0].label == "Deckhand")

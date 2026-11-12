@@ -7,10 +7,9 @@ package main
 //     the inbox as the user (action_run), exactly like the palette; its
 //     tooltip is that action's label and shortcut
 //   - the search pill (opens the command palette)
-//   - the settings popover (focus widget "settings"; a click on the gear):
-//     appearance, look, reduce motion, Chats, rescan, keyboard shortcuts,
-//     Edit settings files… (the left column's Settings tab, ⌘,: settings_files.odin)
-//     and Set up Deckhand… (the first-run sheet, ui_setup.odin); every row runs an action
+//   - the settings popover (focus widget "settings"; a click on the gear): its
+//     rows in groups (POP_GROUPS: Display, Notifications, Sessions, Deckhand),
+//     a list that scrolls in a short window; every row runs an action
 //   - the keyboard shortcuts sheet (focus widget "shortcuts"; ⌘/), listed
 //     from the action table
 //   - the one tooltip system: after the pointer rests TIP_DELAY on a control,
@@ -34,6 +33,7 @@ Button :: enum {
 	Toggle_Right,
 	Empty_New_Chat, // the centre's empty state
 	Empty_Close, // the centre when the session is gone
+	Empty_Add_Project, // the centre's empty state: the Projects header's "+"
 }
 
 Button_Info :: struct {
@@ -53,6 +53,7 @@ BUTTONS := [Button]Button_Info {
 	.Toggle_Right   = {"togglepanels", "toggle_right", .Sidebar_Right},
 	.Empty_New_Chat = {"emptynew", "new_chat", .None},
 	.Empty_Close    = {"emptyclose", "close_session", .None},
+	.Empty_Add_Project = {"emptyadd", "add_project", .None},
 }
 
 NEW_MENU_TIP :: "New tab, chat or session"
@@ -83,6 +84,8 @@ button_click :: proc(b: Button) {
 		}
 		bb := d.boundingBox
 		new_session_ui(c.id, at = [2]f32{bb.x, bb.y + bb.height + px(SP_1)})
+	case .Empty_Add_Project:
+		add_project_dialog() // as the Projects header's "+" (ui_sidebar.odin)
 	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close:
 		action_run(BUTTONS[b].action)
 	}
@@ -182,7 +185,7 @@ search_wide :: proc(cs: ^core.Open_Session, bar_w: f32) -> bool {
 // Top bar buttons under the pointer (enabled ones only).
 toolbar_hit :: proc() -> Hit {
 	for b in Button {
-		if b == .Empty_New_Chat || b == .Empty_Close do continue
+		if b == .Empty_New_Chat || b == .Empty_Close || b == .Empty_Add_Project do continue
 		if clay.PointerOver(clay.ID(BUTTONS[b].element)) && button_enabled(b) do return Hit_Button(b)
 	}
 	return nil
@@ -190,7 +193,7 @@ toolbar_hit :: proc() -> Hit {
 
 // The centre's empty-state buttons.
 empty_hit :: proc() -> Hit {
-	for b in ([]Button{.Empty_New_Chat, .Empty_Close}) {
+	for b in ([]Button{.Empty_New_Chat, .Empty_Close, .Empty_Add_Project}) {
 		if clay.PointerOver(clay.ID(BUTTONS[b].element)) && button_enabled(b) do return Hit_Button(b)
 	}
 	return nil
@@ -237,17 +240,25 @@ Pop_Item :: enum {
 	Remote_Machines, // Machines over SSH (machines.odin; on by default); last so earlier rows keep their ids
 }
 
-// The rows top to bottom: the keyboard walks them in this order.
+// The rows top to bottom, in their groups (POP_GROUPS): the keyboard walks them in this order.
 POP_ORDER :: [len(Pop_Item)]Pop_Item {
+	// Display
 	.Appearance_System, .Appearance_Light, .Appearance_Dark,
 	.Look_Graphite, .Look_Warm, .Look_Ghostty,
 	.Text_Small, .Text_Medium, .Text_Default, .Text_Large,
-	.Reduce_Motion, .Notifications, .Agent_Model,
-	.Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
-	.Chats_Readonly, .Chats_Folder, .Chats_Folder_Default,
-	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env, .Shortcuts, .Settings_Files, .Control_Token, .Setup, .Tidy_Projects, .Update_Checks,
+	.Reduce_Motion,
+	// Notifications
+	.Notifications, .Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
+	// Sessions: switches, then one-shot actions
+	.Agent_Model, .Chats_Readonly, .Chats_Folder, .Chats_Folder_Default, .Tidy_Projects,
 	.Keep_Sessions, .Separate_Core, .Remote_Machines,
+	.Rescan, .Reload_Pi, .Restart_Claude, .Refresh_Env,
+	// Deckhand
+	.Update_Checks, .Settings_Files, .Shortcuts, .Setup, .Control_Token,
 }
+
+// The popover's group headers, top to bottom.
+POP_GROUPS :: [?]string{"Display", "Notifications", "Sessions", "Deckhand"}
 
 POP_ACTIONS := [Pop_Item]string {
 	.Appearance_System = "appearance_system",
@@ -336,12 +347,7 @@ pop_label :: proc(text: string) {
 	clay.TextDynamic(text, txt(theme().text_secondary))
 }
 
-@(private = "file")
-pop_sep :: proc() {
-	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(MENU_SEP_H))}, childAlignment = {y = .Center}}}) {
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(theme().border)}) {}
-	}
-}
+POP_HEAD_H :: SP_4 + SP_1 + 2 // a group's header (pop_head)
 
 // A row that is one control: label, then a switch or a detail and shortcut.
 @(private = "file")
@@ -397,6 +403,7 @@ settings_layout :: proc(w, h: f32) {
 	}
 	if !popover.opened do popover.selected = -1
 	popover.opened = true
+	pop_scroll_to()
 	th := theme()
 	box_w := px(POPOVER_W)
 	x, y := w - box_w - px(SP_2), px(TAB_STRIP_H)
@@ -420,6 +427,12 @@ settings_layout :: proc(w, h: f32) {
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 8},
 	}) {
 		overlay_shadow("settings_shadow", 8)
+		// taller than the window: the rows scroll (the selected one is kept in view: pop_scroll_to)
+		if clay.UI(clay.ID("settings_list"))({
+			layout = {sizing = {clay.SizingGrow(), clay.SizingFit({max = max(h - y - px(SP_4 + 2 * PAD_OVERLAY + core.BORDER_W), px(POPOVER_ROW_H))})}, layoutDirection = .TopToBottom, childGap = pu(2)},
+			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
+		}) { // (its rows, down to the close of the list, keep their old indent)
+		pop_head(0)
 		// Appearance: a segmented control
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
 			pop_label("Appearance")
@@ -501,11 +514,10 @@ settings_layout :: proc(w, h: f32) {
 			}
 		}
 		pop_row(.Reduce_Motion, state.settings.reduce_motion)
+		pop_head(1)
 		pop_row(.Notifications, !state.settings.notify_off)
-		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
-		pop_sep()
 		// the bell: what it collects (one chip per group), and macOS notifications
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}}}) {
 			pop_label("Notify me about")
 		}
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
@@ -526,24 +538,51 @@ settings_layout :: proc(w, h: f32) {
 			}
 		}
 		pop_row(.Bell_OS, !state.settings.bell_os_off)
-		pop_sep()
+		pop_head(2)
+		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
 		pop_row(.Chats_Readonly, state.settings.chats_readonly)
 		pop_row(.Chats_Folder, nil)
 		if action_ok(POP_ACTIONS[.Chats_Folder_Default]) do pop_row(.Chats_Folder_Default, nil)
-		pop_sep()
+		pop_row(.Tidy_Projects, !state.settings.tidy_off)
+		pop_row(.Keep_Sessions, state.settings.keep_sessions)
+		pop_row(.Separate_Core, state.settings.separate_core)
+		pop_row(.Remote_Machines, state.settings.remote_machines)
 		pop_row(.Rescan, nil)
 		if pop_item_shown(.Reload_Pi) do pop_row(.Reload_Pi, nil)
 		if pop_item_shown(.Restart_Claude) do pop_row(.Restart_Claude, nil)
 		pop_row(.Refresh_Env, nil)
-		pop_row(.Shortcuts, nil)
-		pop_row(.Settings_Files, nil)
-		pop_row(.Control_Token, nil)
-		pop_row(.Setup, nil)
-		pop_row(.Tidy_Projects, !state.settings.tidy_off)
+		pop_head(3)
 		pop_row(.Update_Checks, !core.update_view().checks_off)
-		pop_row(.Keep_Sessions, state.settings.keep_sessions)
-		pop_row(.Separate_Core, state.settings.separate_core)
-		pop_row(.Remote_Machines, state.settings.remote_machines)
+		pop_row(.Settings_Files, nil)
+		pop_row(.Shortcuts, nil)
+		pop_row(.Setup, nil)
+		pop_row(.Control_Token, nil)
+		}
+	}
+}
+
+// The keyboard's row in view: the list scrolls by what it is out (its box from the last layout).
+@(private = "file")
+pop_scroll_to :: proc() {
+	if popover.selected < 0 do return
+	sc := clay.GetScrollContainerData(clay.ID("settings_list"))
+	list, row := clay.GetElementData(clay.ID("settings_list")), clay.GetElementData(pop_id(Pop_Item(popover.selected)))
+	if !sc.found || !list.found || !row.found do return
+	l, r := list.boundingBox, row.boundingBox
+	if r.y < l.y do sc.scrollPosition.y += l.y - r.y
+	else if r.y + r.height > l.y + l.height do sc.scrollPosition.y -= r.y + r.height - l.y - l.height
+}
+
+// A group's header (POP_GROUPS), a line along the top of all but the first. Short, so the
+// popover still fits a window of usual height without scrolling.
+@(private = "file")
+pop_head :: proc(g: int) {
+	groups := POP_GROUPS
+	if clay.UI(clay.ID("pop_head", u32(g)))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Bottom}},
+		border = {color = cc(theme().border), width = {top = g > 0 ? pu(core.BORDER_W) : 0}},
+	}) {
+		clay.TextDynamic(groups[g], txt(theme().text_muted, FONT_UI_SMALL | WEIGHT_HEADER))
 	}
 }
 
@@ -589,7 +628,12 @@ settings_event :: proc(e: ^sapp.Event) -> bool {
 		else do ui_do(core.Set_Focus{""}) // outside (or the settings button again): closes
 		app.redraw = true
 		return true
-	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_SCROLL, .MOUSE_UP:
+	case .MOUSE_SCROLL: // the list, when taller than the window
+		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
+		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		app.redraw = true
+		return true
+	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:
 		return true
 	}
 	return false

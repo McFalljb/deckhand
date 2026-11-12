@@ -29,7 +29,7 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 10. [Hot reload](#hot-reload)
 11. [Atlas](#atlas)
 12. [Jobs](#jobs)
-13. [The bell](#the-bell)
+13. [Notifications](#notifications)
 14. [The palette and the gear](#the-palette-and-the-gear)
 15. [Updates](#updates)
 16. [Your data](#your-data) (and [your folders](#your-folders))
@@ -43,7 +43,7 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 From left to right:
 
 - **The left column** (⌘B shows or hides it). Four tabs at its top: **Sessions** (your projects,
-  sessions and chats), **Files** (⌘⇧E), **Settings** (⌘,) and **Jobs** (a dot when a job's run
+  sessions and chats), **Files** (⇧⌘E), **Settings** (⌘,) and **Jobs** (a dot when a job's run
   is unread). When the column is narrow the tabs show icons instead of names.
 - **The centre**: the tabs of the session you are looking at, and the tab itself (pi, a shell, a
   file or the session's changes).
@@ -303,7 +303,7 @@ their browser tools answer that no browser is available there. Its other kinds o
 now. This Mac's [Atlas](#what-atlas-can-do) sees its sessions and jobs and can work in its
 sessions; this Mac's other agents can't act on it. Its programs can't use this Mac's clipboard (OSC 52
 is ignored), open windows or notify here, but its jobs that need you and its bell's new entries
-ring [the bell](#the-bell) here. If the link drops, its terminals reconnect with their
+ring the bell ([Notifications](#notifications)) here. If the link drops, its terminals reconnect with their
 screen when it comes back. While the machine is offline its rows are greyed and show what it had
 when last seen; they come back up to date when it does. Nothing of another machine is saved on this
 Mac.
@@ -386,7 +386,8 @@ that wait for you visible.
 ### Everyday tasks
 
 - **To add a project**, click **+** on the PROJECTS heading and pick a folder, drop a folder onto
-  the left column, or use the palette's "Add project…". From a terminal, `build/deckhand DIR`
+  the left column, or use the palette's "Add project…" (with nothing open, the centre has an
+  **Add project…** button beside **New chat**). From a terminal, `build/deckhand DIR`
   adds DIR and starts a new session there.
 - **To open a session**, click it. If it is already open, Deckhand shows it instead of starting it
   twice.
@@ -435,7 +436,7 @@ that wait for you visible.
   Needs attention (sessions waiting for you or stopped with an error first, then those that
   finished while you were away, then working ones, then the rest).
 - **To fold** a section, click its heading. A folded Open section still shows waiting sessions.
-- **To filter**, press ⌘⇧F (or click the Filter field) and type: words match project names and
+- **To filter**, press ⇧⌘F (or click the Filter field) and type: words match project names and
   paths and session titles, loosely. The **Running**, **Waiting** and **Pinned** chips under it
   narrow the list further. Esc in the field clears it.
 - **To pick up new pi sessions** started outside Deckhand, use the gear's "Rescan sessions".
@@ -493,8 +494,11 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   ⌥⌘↓ and ⌥⌘↑ go to the next and previous open session (Window menu).
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
   running a command, or an editor with unsaved changes.
+- **Right-click a tab** for its menu: **Split pane right**, **Split pane down**, the **Move tab to
+  the pane …** that apply, and **Close tab** (on the pi tab: **Close session**, which asks first).
 - **To split the centre into panes**, press ⌘D (**Split pane right**) or ⇧⌘D (**Split pane
-  down**): the pane with the keyboard splits in two and a new shell opens in the new half. A
+  down**), or pick either at the end of the **+** menu (the ⌄ beside **+**, or a pane's own
+  **+**) or a tab's right-click menu: the pane with the keyboard splits in two and a new shell opens in the new half. A
   session has at most 8 panes, and a split needs room for two panes of at least 240 × 140
   points. Once split, each pane has its own strip of tabs (they leave the title bar), with a
   **+** whose menu opens a new shell, Claude, browser or app tab in that pane; the pane with the
@@ -503,7 +507,7 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   **Focus pane right**, **Focus pane up**, **Focus pane down**). A selection you drag from one
   pane over another stays in the pane where you pressed. ⌘1–⌘9, ⇧⌘] and ⇧⌘[ and ⌘W act on
   the tabs of the pane with the keyboard.
-  - **To move a tab to another pane**, press ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑ or ⇧⌃⌘↓ (**Move tab to the pane
+  - **To move a tab to another pane**, press ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑ or ⌃⇧⌘↓ (**Move tab to the pane
     left**, **Move tab to the pane right**, **Move tab to the pane above**, **Move tab to the pane
     below**); with no pane that way, the tab splits off into a new pane there. A pane whose last
     tab closes or moves away closes too, and the keyboard goes back to the pane you used last.
@@ -588,8 +592,8 @@ A browser tab shows a web page (Chromium, inside Deckhand). The bar above the pa
   Anything else (words, spaces) is refused with the reason under the field: searching from the
   address field is not built in yet.
 - **The tab's title** is the page's title.
-- **Annotate ⌘⇧.** at the right end turns comment mode on and off; while it is on, its hint
-  takes the address field's place (see [Comments for the agent](#comments-for-the-agent)). ⌘⇧. works while
+- **Annotate ⇧⌘.** at the right end turns comment mode on and off; while it is on, its hint
+  takes the address field's place (see [Comments for the agent](#comments-for-the-agent)). ⇧⌘. works while
   you type an address too: the field lets go.
 - **The zoom chip** ("125%") shows when the page is not at 100%; click it for 100%.
 - **⋯** at the right end: **Find in page**, the zoom (**Zoom in**, **Zoom out**, **Actual
@@ -960,8 +964,8 @@ guide).
 
 ## The Files tab
 
-**⌘⇧E** (or the Files tab at the top of the left column) shows the file tree of the session on
-screen, else of the selected project. Press ⌘⇧E again to go back to Sessions.
+**⇧⌘E** (or the Files tab at the top of the left column) shows the file tree of the session on
+screen, else of the selected project. Press ⇧⌘E again to go back to Sessions.
 
 - **Git status** colours rows and adds a letter: green **A** (added) and **U** (untracked),
   amber **M** (modified), **R** (renamed) and **•** (a folder with changes inside), red **D**
@@ -1055,7 +1059,7 @@ does run the repository's configured clean filters (for example git-lfs) on chan
 
 ## The Settings tab
 
-**⌘,** (or the gear's **Edit settings files…**) shows your agents' settings as files, in groups.
+**⌘,** (or the gear's **Settings…**) shows your agents' settings as files, in groups.
 Its title names the one you have installed ("pi settings", "Claude Code settings"), or reads
 **Settings** with both. pi's groups (pi, this project's `.pi/`, extensions, Atlas) show only when
 pi is installed; Claude Code's once it has been used:
@@ -1494,7 +1498,7 @@ you.
 
 - Each run's report (the end of pi's answer: a `## Summary`, and `## Needs you` when something
   needs you) is one line in the row and the note, and in full under **Last report**.
-- **The bell** gets every run's result (finished, needs you, failed); see [The bell](#the-bell).
+- **The bell** gets every run's result (finished, needs you, failed); see [Notifications](#notifications).
 - **macOS notifications** while Deckhand is in the background: runs that need you or failed come
   through the bell's notifications; a finished run raises one only with `notify: always`.
 - A run's files live in Deckhand's data dir, `jobs/<id>/runs/<time>/` (**Open run folder**): its
@@ -1513,7 +1517,7 @@ would ask you about is blocked instead, and the run reports it under "Needs you"
 gets Deckhand's control socket, so it cannot create jobs through Deckhand (its prompt also tells
 it not to create or edit jobs).
 
-## The bell
+## Notifications
 
 The bell in the top bar collects what happened in sessions you were **not looking at**:
 
@@ -1558,7 +1562,11 @@ included. The full list is [below](#all-palette-actions).
 
 ### The gear: Quick settings
 
-Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
+Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes. Its rows come
+in four groups, switches first and one-shot actions at the end of their group; in a short
+window the list scrolls.
+
+**Display**
 
 - **Appearance**: System (follows macOS), Light or Dark.
 - **Look**: Graphite, Warm or Ghostty (one swatch each). The terminals follow the look, so pi
@@ -1567,23 +1575,33 @@ Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes.
   panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
   keep their size. It applies at once and is remembered.
 - **Reduce motion**: no fades, slides or pulsing dots.
+
+**Notifications**
+
 - **Agent notifications**: Atlas's macOS notifications.
+- **Notify me about** and **Also notify in macOS**: see [Notifications](#notifications).
+
+**Sessions**
+
 - **Atlas model…**: see [Its model](#its-model).
-- **Notify me about** and **Also notify in macOS**: see [The bell](#the-bell).
 - **Chats: read-only**, **Chats folder…**: see [Chats settings](#chats-settings-the-gear).
-- **Rescan sessions**, and, while such a tab runs, **Reload all pi tabs** and **Restart all Claude
-  tabs** (see [Hot reload](#hot-reload)), **Refresh shell
-  environment** (see [Where Deckhand's environment comes from](#troubleshooting): new tabs only),
-  **Keyboard shortcuts** (⌘/), **Edit settings files…** (⌘,) and **Copy a control token** (for
-  `deckhand --ctl`: see [Updates](#updates), "Release builds").
-- **Set up Deckhand…**: the [first run](#the-first-run) sheet again (coding agents, main folder, chats).
-- **Check for updates automatically**: see [Updates](#updates). On by default.
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
 - **Keep sessions when quitting** and **Sessions in a background core**: see
   [How Deckhand runs](#how-deckhand-runs). Both on by default.
 - **Machines over SSH**: other machines' sessions over `ssh` (on by default; nothing happens until
   you add a machine; see [The Settings tab](#the-settings-tab), Machines).
+- **Rescan sessions**, and, while such a tab runs, **Reload all pi tabs** and **Restart all Claude
+  tabs** (see [Hot reload](#hot-reload)), and **Refresh shell environment** (see
+  [Where Deckhand's environment comes from](#troubleshooting): new tabs only).
+
+**Deckhand**
+
+- **Check for updates automatically**: see [Updates](#updates). On by default.
+- **Settings…** (⌘,): the left column's [Settings tab](#the-settings-tab).
+- **Keyboard shortcuts** (⌘/).
+- **Set up Deckhand…**: the [first run](#the-first-run) sheet again (coding agents, main folder, chats).
+- **Copy a control token**: for `deckhand --ctl` (see [Updates](#updates), "Release builds").
 
 ## Updates
 
@@ -1916,19 +1934,19 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Find next, Find previous | ⌘G, ⇧⌘G | |
 | Find in page | ⌘F | the browser tab on screen: the find bar |
 | Go to line… | ⌘L | in a browser tab: its address field |
-| Filter projects and sessions | ⌘⇧F | |
+| Filter projects and sessions | ⇧⌘F | |
 
 **View**
 
 | Menu item | Shortcut | Notes |
 |---|---|---|
 | Toggle left column | ⌘B | |
-| Sessions, Files, Settings files | ⌘⇧E (Files) | the left column's tabs (⌘⇧E again: back to Sessions) |
+| Sessions, Files, Settings | ⇧⌘E (Files) | the left column's tabs (⇧⌘E again: back to Sessions) |
 | Jobs |  | the left column's Jobs tab (Atlas's jobs) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Toggle right panels | ⌥⌘B | the right column |
 | Command palette | ⌘K | Search or run a command (the palette) |
-| Bell |  | the notifications |
+| Notifications |  | the bell's list |
 | Toggle Atlas | ⌘J | |
 | Markdown preview | ⇧⌘V | a `.md` file as a document, or back to its source (Markdown tabs) |
 | Appearance ▸ System, Light, Dark |  | |
@@ -1952,7 +1970,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | the neighbouring pane gets the keyboard |
-| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑, ⇧⌃⌘↓ | or into a new pane that way |
+| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | or into a new pane that way |
 | Bring all to front |  | |
 
 **Help**
@@ -2062,11 +2080,11 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | |
-| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⇧⌃⌘←, ⇧⌃⌘→, ⇧⌃⌘↑, ⇧⌃⌘↓ | |
+| Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | |
 | Deckhand user guide |  | this guide in a Markdown tab |
 | Markdown preview | ⇧⌘V | a `.md` file as a document, or its source |
 | Open in editor |  | edit the Markdown tab's file in an editor tab |
-| Edit settings files… | ⌘, | the Settings tab |
+| Settings… | ⌘, | the Settings tab |
 | Edit pi settings (settings.json) |  | |
 | Edit pi models (models.json) |  | |
 | Edit global AGENTS.md |  | |
@@ -2098,7 +2116,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Restart all Claude tabs |  | every running Claude tab; asks first |
 | Add project… |  | pick a folder |
 | Rename project |  | rename the selected project |
-| Filter projects and sessions | ⌘⇧F | |
+| Filter projects and sessions | ⇧⌘F | |
 | Clear filter |  | |
 | Filter: running, Filter: waiting for you, Filter: pinned |  | the quick filters |
 | Show hidden projects and sessions |  | |
@@ -2113,7 +2131,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Go to line… | ⌘L | |
 | Toggle soft wrap |  | |
 | Diff with HEAD |  | |
-| Files | ⌘⇧E | the Files tab |
+| Files | ⇧⌘E | the Files tab |
 | Sessions and projects |  | the Sessions tab |
 | New file…, New folder… |  | in the Files tab |
 | Collapse all folders, Refresh files |  | the Files tab |

@@ -184,6 +184,7 @@ Menu_Target :: union {
 	Menu_Browser, // a browser tab's page (right click) or its ⋯ (browser_polish.odin)
 	Menu_Term_Link, // a link in a terminal (term_links.odin)
 	Menu_Machine, // another machine's header (right click)
+	Menu_Tab, // a tab (right click: ui_panes.odin)
 }
 
 Menu_Machine :: distinct u64 // its number
@@ -335,6 +336,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			}
 			append(&items, core.Menu_Item{label = label, keys = a.keys, action = id})
 		}
+		pane_split_items(&items) // Split pane right / down (ui_panes.odin)
 	case core.Menu_New_Session:
 		new_session_menu_items(t, &items)
 	case Menu_Editor:
@@ -351,6 +353,8 @@ menu_items :: proc() -> []core.Menu_Item {
 		term_link_menu_items(t, &items)
 	case Menu_Machine:
 		machine_menu_items(u64(t), &items)
+	case Menu_Tab:
+		tab_menu_items(u64(t), &items)
 	case Menu_Sort:
 		sec := core.Sort_Section(t)
 		for by in core.Sort_By do append(&items, core.Menu_Item{label = SORT_LABELS[by], check = state.sidebar.sort[sec] == by, cmd = core.Set_Sort{section = sec, by = by}})
@@ -570,7 +574,7 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 	}
 }
 
-// The filter field: text and placeholder, ⌘⇧F, a clear button while it holds text.
+// The filter field: text and placeholder, ⇧⌘F, a clear button while it holds text.
 @(private = "file")
 filter_row :: proc(row_w: f32) {
 	th := theme()
@@ -592,7 +596,7 @@ filter_row :: proc(row_w: f32) {
 				field_text(clay.ID("filter_text"), &filter_field, "Filter projects and sessions")
 			} else {
 				text := state.sidebar.filter
-				room := row_w - px(3 * SP_2 + SP_6 + ICON_SIZE_SM) - text_w("⌘⇧F")
+				room := row_w - px(3 * SP_2 + SP_6 + ICON_SIZE_SM) - text_w("⇧⌘F")
 				if text != "" do clay.TextDynamic(clip(text, room), txt(th.text))
 				else do clay.TextDynamic(clip("Filter", room), txt(th.text_muted))
 			}
@@ -608,7 +612,7 @@ filter_row :: proc(row_w: f32) {
 					icon(.Close, mix(th.text_muted, th.text, em), ICON_SIZE_SM - 2)
 				}
 			} else if !focused {
-				clay.Text("⌘⇧F", txt(th.text_muted, FONT_UI_SMALL))
+				clay.Text("⇧⌘F", txt(th.text_muted, FONT_UI_SMALL))
 				if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_1)), clay.SizingFit()}}}) {}
 			}
 		}
@@ -1495,7 +1499,7 @@ session_row_project :: proc(sid: string) -> u64 {
 	return state.selected_project
 }
 
-// The keyboard into the filter field (⌘⇧F, a click on it).
+// The keyboard into the filter field (⇧⌘F, a click on it).
 filter_focus :: proc() {
 	if state.focus_widget != "sidebar_filter" do tf_set(&filter_field, state.sidebar.filter)
 	tf_select_all(&filter_field)

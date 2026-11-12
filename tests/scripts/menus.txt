@@ -285,7 +285,7 @@ assert_state open_sessions.# 3
 # ==== the tab strip's "+" menu (right click on +) ====
 rclickid newshell
 eventually
-assert_menurows New shell tab|New Claude tab|New browser tab|New app tab…|New chat|New session in bravo
+assert_menurows New shell tab|New Claude tab|New browser tab|New app tab…|New chat|New session in bravo|-|Split pane right|Split pane down
 clickmenu New shell tab
 eventually
 assert_state open_sessions.2.tabs.# 2

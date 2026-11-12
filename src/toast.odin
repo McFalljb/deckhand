@@ -2,7 +2,8 @@ package main
 
 // A short line at the bottom of the window for a few seconds: what a menu
 // choice did when nothing else on screen shows it ("Session info copied"),
-// or why it could not (menu_result, ui_sidebar.odin). One at a time: a new
+// or why it could not (menu_result, ui_sidebar.odin; an error's reason wraps
+// to two lines and stays longer). One at a time: a new
 // one replaces the last. Not saved, not in the bell.
 
 import "core:fmt"
@@ -13,7 +14,8 @@ import clay "../build/clay-odin"
 
 TOAST_TIME :: 3 * time.Second
 TOAST_TIME_ERR :: 7 * time.Second // long enough to read why
-TOAST_W_MAX :: 560 // logical px; longer text is cut
+TOAST_W_MAX :: 560 // logical px; longer text is cut (an error's wraps first)
+TOAST_ERR_LINES :: 2
 
 Toast :: struct {
 	text:  string, // owned; "" = none
@@ -56,8 +58,17 @@ toast_layout :: proc(w, h: f32) {
 	th := theme()
 	inner := min(px(TOAST_W_MAX), w - px(2 * SP_3 + 2 * SP_2))
 	shown := clip(toast.text, inner)
-	box_w := text_w(shown) + px(2 * SP_3)
 	box_h := px(TIP_H + SP_2)
+	if toast.err { // why something failed: up to TOAST_ERR_LINES lines, so the reason reads whole
+		lines: int
+		shown, lines = wrap_clip(toast.text, inner, TOAST_ERR_LINES)
+		box_h += f32(max(lines, 1) - 1) * text_line_height(.UI)
+	}
+	box_w: f32 = 0
+	for l in strings.split_lines(shown, context.temp_allocator) do box_w = max(box_w, text_w(l))
+	box_w += px(2 * SP_3)
+	cfg := txt(toast.err ? th.error : th.text)
+	cfg.wrapMode = .Newlines
 	if clay.UI(clay.ID("toast"))({
 		layout = {sizing = {clay.SizingFixed(box_w), clay.SizingFixed(box_h)}, padding = {pu(SP_3), pu(SP_3), 0, 0}, childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_elevated),
@@ -65,6 +76,6 @@ toast_layout :: proc(w, h: f32) {
 		border = {color = cc(toast.err ? th.error : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {max((w - box_w) / 2, 0), max(h - box_h - px(SP_3 * 2), 0)}, zIndex = 29, pointerCaptureMode = .Passthrough},
 	}) {
-		clay.TextDynamic(shown, txt(toast.err ? th.error : th.text))
+		clay.TextDynamic(shown, cfg)
 	}
 }

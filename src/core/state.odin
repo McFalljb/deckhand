@@ -208,7 +208,7 @@ Layout :: struct {
 	drawer_pinned: bool, // pinned: the drawer takes layout space instead of sliding over
 	panels:      [dynamic]string, // open panels in the right column, in order
 	collapsed:   [dynamic]string, // panel ids whose section is folded (any tab); at most COLLAPSED_MAX, oldest dropped
-	left_tab:    Left_Tab, // what the left column shows (⌘⇧E switches)
+	left_tab:    Left_Tab, // what the left column shows (⇧⌘E switches)
 }
 
 // The left column's tabs.

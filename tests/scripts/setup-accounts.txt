@@ -25,7 +25,7 @@ ui_command {"type":"set_appearance","mode":"dark"}
 # Add folder…: a picked folder outside HOME
 hover setupbtn 10
 eventually
-assert_tip Pick a Claude Code config folder (hidden folders: ⌘⇧.)
+assert_tip Pick a Claude Code config folder (hidden folders: ⇧⌘.)
 pick_folder $datadir/../outside/Team Claude
 clickid setupbtn 10
 eventually

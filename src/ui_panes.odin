@@ -197,6 +197,46 @@ pane_click :: proc(h: Hit_Pane_New) {
 	}
 }
 
+// ---- the tab menu (right click on a tab) and the new-tab menu's split rows ----
+
+Menu_Tab :: distinct u64 // tab id
+
+// Rows of action ids that apply now, with their labels and shortcuts.
+@(private = "file")
+action_items :: proc(items: ^[dynamic]core.Menu_Item, ids: []string) {
+	for id in ids {
+		a := action_by_id(id)
+		if a == nil || !action_ok(id) do continue
+		append(items, core.Menu_Item{label = action_label(a), keys = a.keys, action = id})
+	}
+}
+
+// The new-tab menu's (the "+" or ⌄) last rows: Split pane right / down, for the pane it is in.
+pane_split_items :: proc(items: ^[dynamic]core.Menu_Item) {
+	if !action_ok("split_right") && !action_ok("split_down") do return
+	if len(items) > 0 do append(items, core.Menu_Item{sep = true})
+	action_items(items, {"split_right", "split_down"})
+}
+
+// A tab's right click: the tab comes to the front (its pane focused), then its menu.
+tab_context :: proc(tab_id: u64, at: [2]f32) {
+	s, _, _ := find_tab(tab_id)
+	if s == nil do return
+	ui_do(core.Focus_Tab{tab_id})
+	menu_open(Menu_Tab(tab_id), at)
+}
+
+// What the panes' actions do to the focused tab, then its ×'s close (a pi tab's closes its session,
+// asking first, as the × does).
+tab_menu_items :: proc(tab_id: u64, items: ^[dynamic]core.Menu_Item) {
+	s, _, i := find_tab(tab_id)
+	if s == nil do return
+	action_items(items, {"split_right", "split_down", "move_tab_left", "move_tab_right", "move_tab_up", "move_tab_down"})
+	if len(items) > 0 do append(items, core.Menu_Item{sep = true})
+	if i == 0 do append(items, core.Menu_Item{label = "Close session", cmd = core.Close_Session{session = s.id, ask = true}})
+	else do append(items, core.Menu_Item{label = "Close tab", keys = "⌘W", cmd = core.Close_Tab{tab_id = tab_id}})
+}
+
 // The terminal throttles PTY resizes while a divider (a column's or a pane's) is dragged.
 pane_dragging :: proc() -> bool {return pane_drag.active}
 
@@ -244,7 +284,7 @@ pane_focus_action :: proc(d: core.Pane_Dir) -> (core.Command, bool) {
 	return core.Focus_Pane{direction = core.PANE_DIR_NAMES[d]}, true
 }
 
-// ⇧⌃⌘arrows: the focused tab moves to the neighbouring pane, or into a new pane that way when
+// ⌃⇧⌘arrows: the focused tab moves to the neighbouring pane, or into a new pane that way when
 // there is none (not a pane's only tab, not the main tab... it may: a pi tab moves like any).
 pane_move_action :: proc(d: core.Pane_Dir) -> (core.Command, bool) {
 	cs := core.cur()

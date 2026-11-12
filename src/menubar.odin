@@ -54,7 +54,7 @@ MENUBAR := [?]Bar_Item {
 		{id = "about", title = "About Deckhand", native = .About},
 		{action = "check_updates"}, // Deckhand's own updates (update.odin)
 		SEP,
-		{action = "settings", title = "Settings…"},
+		{action = "settings"},
 		{action = "setup"}, // "Set up Deckhand…": the first-run sheet (ui_setup.odin)
 		SEP,
 		{id = "hide", title = "Hide Deckhand", keys = "⌘H", native = .Hide},
@@ -100,13 +100,13 @@ MENUBAR := [?]Bar_Item {
 		{action = "toggle_left", check = proc() -> bool {return state.layout.left_open}},
 		{action = "show_sessions", title = "Sessions", check = proc() -> bool {return left_tab_shown(.Sessions)}},
 		{action = "show_files", title = "Files", check = proc() -> bool {return left_tab_shown(.Files)}},
-		{id = "settings_tab", action = "settings", title = "Settings files", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
+		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
 		{action = "show_jobs", title = "Jobs", check = proc() -> bool {return left_tab_shown(.Jobs)}},
 		{action = "changes_open"}, // "Show changes"
 		{action = "toggle_right", title = "Toggle right panels", check = proc() -> bool {return state.layout.right_open}},
 		SEP,
 		{action = "palette", title = "Command palette"},
-		{action = "notifications", title = "Bell"},
+		{action = "notifications"},
 		{action = "toggle_agent", check = proc() -> bool {return state.home_open}},
 		{action = "markdown_preview"},
 		SEP,

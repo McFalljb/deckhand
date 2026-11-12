@@ -287,8 +287,12 @@ own Claude Code account), and work in its terminals as in a local tab.
 sessions (right click, or its **…**) has **New session on nuc in api** for each online machine with
 a project of the same folder name (`api`): the last part of its folder, exactly, upper and lower
 case as they are. When one machine has several, each shows its folder there (*New session on nuc
-in api (~/work/api)*). It does what **+ New session** under that project does: it selects it and
-starts a fresh session there, with that machine's coding agents and account. **New session on
+in api (~/work/api)*: `~` only for the home of the user you log in there as, when you added it as
+`user@host`; a long folder is cut in its middle). At most three rows per machine and eight in all;
+the rest is counted (*and 4 more on nuc*). It does what **+ New session** under that project does: it selects it and
+starts a fresh session there, with that machine's coding agents and account. If that machine went
+offline or restarted, or the project moved, after the menu was drawn, nothing starts and a toast
+says so (an open picker for another machine's project does the same after a restart there). **New session on
 another machine…** in the palette does the same for the selected project (and says so when no
 machine has a project of that name). Nothing of this Mac's goes with it: not the conversation,
 not your uncommitted changes, not a path, account or git state. Push or sync your work yourself

@@ -166,10 +166,14 @@ pi_installed_now :: proc() -> bool {
 atlas_offered :: proc() -> bool {return state.home_open || agent_running() || pi_installed()}
 
 // The picker's target (ui_sidebar.odin menus): a new session in the project, in cwd (a checkout
-// of it; "" = the project's folder). cwd is owned while the menu is open.
+// of it; "" = the project's folder). cwd is owned while the menu is open. Another machine's
+// project: its core's run and the project's folder when the picker opened (a restart there gives
+// ids out again: ui_handoff.odin checks them before a choice starts anything); owned too.
 Menu_New_Session :: struct {
 	project_id: u64,
 	cwd:        string,
+	run:        string,
+	folder:     string,
 }
 
 // Which harness a picker row's command starts.

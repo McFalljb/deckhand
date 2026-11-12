@@ -36,8 +36,8 @@ setup :: proc(f: ^Fixture) {
 	append(&state.projects, core.Project{id = 2, group = .Chats, cwd = strings.clone("/Users/me/chats/api"), label = strings.clone("api")})
 	state.selected_project = 1
 	state.machines = make([]core.Machine_View, 3)
-	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online, checklist = NUC_CHECKS[:]}
-	state.machines[1] = {no = 4, name = "box", target = "box", status = .Online}
+	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online, core_run = "r-nuc-1", checklist = NUC_CHECKS[:]}
+	state.machines[1] = {no = 4, name = "box", target = "jb@box", status = .Online, core_run = "r-box-1"}
 	state.machines[2] = {no = 5, name = "old", target = "old", status = .Offline}
 	remote_project(&f.r3, 7, "/home/jb/src/api")
 	remote_project(&f.r3, 8, "/home/jb/src/web")
@@ -64,6 +64,13 @@ teardown :: proc(f: ^Fixture) {
 	core.replica_free(&f.r5, runtime.heap_allocator())
 	toast_clear()
 	state^ = core.State{}
+}
+
+// The window draws the menu (what a click acts on is what was drawn last).
+@(private = "file")
+drawn_now :: proc() {
+	audit_ui()
+	_ = ui_layout(2000, 1400)
 }
 
 @(private = "file")
@@ -135,10 +142,15 @@ handoff_matching :: proc(t: ^testing.T) {
 		for r in hostile.cwd do testing.expectf(t, r >= 0x20 && r != 0x7f && r != 0x202e, "cleaned: %q", hostile.cwd)
 		testing.expect(t, core.handoff_name(hostile.cwd) != "api", hostile.cwd)
 	}
-	testing.expect_value(t, core.handoff_short("/home/jb"), "~")
-	testing.expect_value(t, core.handoff_short("/Users/jb/x/y"), "~/x/y")
-	testing.expect_value(t, core.handoff_short("/root/api"), "~/api")
-	testing.expect_value(t, core.handoff_short("/opt/api"), "/opt/api")
+	testing.expect_value(t, core.handoff_short("/home/jb", "jb"), "~")
+	testing.expect_value(t, core.handoff_short("/Users/jb/x/y", "jb"), "~/x/y")
+	testing.expect_value(t, core.handoff_short("/root/api", "root"), "~/api")
+	testing.expect_value(t, core.handoff_short("/opt/api", "jb"), "/opt/api")
+	// only the home of the user its link logs in as; not known: in full
+	testing.expect_value(t, core.handoff_short("/home/alice/api", "jb"), "/home/alice/api")
+	testing.expect_value(t, core.handoff_short("/home/jbx/api", "jb"), "/home/jbx/api")
+	testing.expect_value(t, core.handoff_short("/home/jb/api", ""), "/home/jb/api")
+	testing.expect_value(t, core.handoff_short("/root/api", "jb"), "/root/api")
 	testing.expect_value(t, core.handoff_name("/"), "")
 	testing.expect_value(t, core.handoff_name(""), "")
 }
@@ -208,6 +220,7 @@ handoff_runs_new_session :: proc(t: ^testing.T) {
 	at := -1
 	for it, i in menu_items() do if it.label == "New session on nuc in api" do at = i
 	if !testing.expect(t, at >= 0, "the row") do return
+	drawn_now()
 	menu_run(at)
 	core.inbox_drain()
 	testing.expect_value(t, state.selected_project, pid(3, 7))
@@ -275,4 +288,197 @@ handoff_palette_action :: proc(t: ^testing.T) {
 	testing.expect(t, !action_ok("new_session_elsewhere"), "not for Chats")
 	state.selected_project = pid(3, 7)
 	testing.expect(t, !action_ok("new_session_elsewhere"), "not for another machine's project")
+}
+
+// A row acts on what it showed: the list changed after it was drawn (nuc went offline, so the
+// row under the pointer is box's now): nothing starts, a toast says so. Drawn again, box's row is
+// box's. A project gone or moved since: the same.
+@(test)
+handoff_click_is_what_was_drawn :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+
+	row :: proc(label: string) -> int {
+		for it, i in menu_items() do if it.label == label do return i
+		return -1
+	}
+	menu_open(Menu_Project(1), {})
+	drawn_now()
+	at := row("New session on nuc in api")
+	if !testing.expect(t, at >= 0, "nuc's row") do return
+	state.machines[0].status = .Offline // before the click, after the draw
+	testing.expect_value(t, menu_items()[at].label, "New session on box in api (~/work/api)")
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "That machine is no longer available")
+	testing.expect_value(t, state.selected_project, 1)
+	_, picker := menu.target.(core.Menu_New_Session)
+	testing.expect(t, !picker, "no picker")
+	if menu.open do menu_close()
+	toast_clear()
+
+	// drawn again: the row there is box's, and it is box's that starts
+	menu_open(Menu_Project(1), {})
+	drawn_now()
+	menu_run(row("New session on box in api (~/work/api)"))
+	core.inbox_drain()
+	testing.expect_value(t, state.selected_project, pid(4, 7))
+	testing.expect(t, toast.text != HANDOFF_GONE, toast.text) // box has pi only: it starts at once
+	if menu.open do menu_close()
+	state.selected_project = 1
+	state.machines[0].status = .Online
+
+	// its folder changed since the draw (another project under that id): nothing starts
+	menu_open(Menu_Project(1), {})
+	drawn_now()
+	at = row("New session on nuc in api")
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/other/api"
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "That machine is no longer available")
+	testing.expect_value(t, state.selected_project, 1)
+	if menu.open do menu_close()
+	toast_clear()
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/src/api"
+
+	// that machine's core restarted since the draw: the same
+	menu_open(Menu_Project(1), {})
+	drawn_now()
+	at = row("New session on nuc in api")
+	state.machines[0].core_run = "r-nuc-2"
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "That machine is no longer available")
+	testing.expect_value(t, state.selected_project, 1)
+}
+
+// One machine with many matches can't flood the menu: at most 3 rows per machine and 8 in all,
+// then "and N more on <machine>" as plain text.
+@(test)
+handoff_capped :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	core.mirror_unmerge(4)
+	for i in 0 ..< 200 do remote_project(&f.r4, u64(100 + i), strings.concatenate({"/srv/", strings.repeat("x", i % 7 + 1, context.temp_allocator), "/", strings.repeat("y", i / 7 + 1, context.temp_allocator), "/api"}, context.temp_allocator))
+	core.mirror_merge(4, &f.r4, &f.m4)
+
+	got := core.handoff_targets(1)
+	rows, notes := 0, 0
+	for g in got {
+		if g.project_id == 0 do notes += 1
+		else do rows += 1
+	}
+	testing.expect_value(t, rows, 4) // nuc 1, box 3
+	testing.expect_value(t, notes, 1)
+	testing.expect_value(t, got[len(got) - 1].label, "and 199 more on box")
+	menu_open(Menu_Project(1), {})
+	items := menu_items()
+	testing.expect(t, len(items) < 30, "bounded")
+	for it in items do if it.label == "and 199 more on box" do testing.expect(t, it.note, "plain text")
+	menu_close()
+
+	// 8 in all: more machines with matches each add their note
+	machines := make([]core.Machine_View, 5)
+	copy(machines, state.machines)
+	machines[3] = {no = 6, name = "m6", status = .Online}
+	machines[4] = {no = 7, name = "m7", status = .Online}
+	state.machines = machines
+	r6, r7: core.State
+	m6, m7: core.Machine_Mirror
+	for i in 0 ..< 5 {
+		remote_project(&r6, u64(10 + i), strings.concatenate({"/a", strings.repeat("z", i + 1, context.temp_allocator), "/api"}, context.temp_allocator))
+		remote_project(&r7, u64(10 + i), strings.concatenate({"/b", strings.repeat("z", i + 1, context.temp_allocator), "/api"}, context.temp_allocator))
+	}
+	core.mirror_merge(6, &r6, &m6)
+	core.mirror_merge(7, &r7, &m7)
+	defer {
+		core.mirror_unmerge(6)
+		core.mirror_unmerge(7)
+		core.mirror_free(&m6)
+		core.mirror_free(&m7)
+		core.replica_free(&r6, runtime.heap_allocator())
+		core.replica_free(&r7, runtime.heap_allocator())
+	}
+	got = core.handoff_targets(1)
+	rows = 0
+	b := strings.builder_make(context.temp_allocator)
+	for g in got {
+		if g.project_id != 0 do rows += 1
+		else do strings.write_string(&b, g.label)
+	}
+	testing.expect_value(t, rows, 8) // nuc 1, box 3, m6 3, m7 1
+	testing.expect_value(t, strings.to_string(b), "and 199 more on boxand 2 more on m6and 4 more on m7")
+}
+
+// Several on a machine stay told apart: another user's home in full, a long folder cut in its
+// middle (both ends kept).
+@(test)
+handoff_folders_distinct :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	core.mirror_unmerge(4)
+	clear(&f.r4.projects)
+	long := strings.concatenate({"/srv/", strings.repeat("deep/", 30, context.temp_allocator), "end/api"}, context.temp_allocator)
+	remote_project(&f.r4, 20, "/home/jb/work/api")
+	remote_project(&f.r4, 21, "/home/alice/work/api")
+	remote_project(&f.r4, 22, long)
+	core.mirror_merge(4, &f.r4, &f.m4)
+
+	got := core.handoff_targets(1)
+	testing.expect_value(t, len(got), 4)
+	if len(got) != 4 do return
+	testing.expect_value(t, got[1].label, "New session on box in api (~/work/api)")
+	testing.expect_value(t, got[2].label, "New session on box in api (/home/alice/work/api)")
+	l := got[3].label
+	testing.expectf(t, strings.has_prefix(l, "New session on box in api (/srv/deep/") && strings.has_suffix(l, "/end/api)") && strings.contains(l, "…") && len(l) < 100, "middle-clipped: %q", l)
+	// the link's user not known (an ssh config name): every folder in full
+	state.machines[1].target = "box"
+	got = core.handoff_targets(1)
+	testing.expect_value(t, got[1].label, "New session on box in api (/home/jb/work/api)")
+}
+
+// An open harness picker for another machine's project starts nothing once that machine's core
+// restarted (its run id changed) or the project under that id has another folder: a toast says
+// to choose the project again. The existing "+ New session" too (Hit_New: new_session_ui).
+@(test)
+handoff_picker_restart :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f: Fixture
+	setup(&f)
+	defer teardown(&f)
+	pick :: proc() -> int {
+		for it, i in menu_items() do if it.label == "pi" do return i
+		return -1
+	}
+
+	state.selected_project = pid(3, 7)
+	new_session_ui(pid(3, 7)) // "+ New session" under nuc's api
+	testing.expect(t, menu.open, "the picker")
+	state.machines[0].core_run = "r-nuc-2"
+	menu_run(pick())
+	core.inbox_drain()
+	testing.expect(t, !menu.open, "closed")
+	testing.expect_value(t, toast.text, "That machine restarted: choose the project again")
+	toast_clear()
+
+	new_session_ui(pid(3, 7))
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/elsewhere/api"
+	menu_run(pick())
+	core.inbox_drain()
+	testing.expect(t, !menu.open, "closed")
+	testing.expect_value(t, toast.text, "That machine restarted: choose the project again")
+	toast_clear()
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/src/api"
+
+	// unchanged: it goes (the route says the machine's link is down here: not that toast)
+	new_session_ui(pid(3, 7))
+	menu_run(pick())
+	core.inbox_drain()
+	testing.expect(t, toast.text != "That machine restarted: choose the project again", toast.text)
 }

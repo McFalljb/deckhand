@@ -431,7 +431,8 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 		harness_used(items[0].cmd)
 		ui_do_menu(items[0].cmd, p.group == .Chats ? "New chat" : "New session")
 	case:
-		menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd}, at.? or_else new_session_anchor())
+		run, folder := handoff_picker_identity(p^) // another machine's: what a choice checks again (ui_handoff.odin)
+		menu_open(core.Menu_New_Session{project_id = pid, cwd = cwd, run = run, folder = folder}, at.? or_else new_session_anchor())
 		rows := menu_items()
 		for it, i in rows do if !it.note && !it.sep {
 			menu.selected = i // the first choice: the last used

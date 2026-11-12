@@ -137,6 +137,7 @@ Machine_View :: struct {
 	update:    Update_Offer, // Update on its row (machine_update_offer)
 	linger:    Linger, // Linux: its hello's machine.linger (Unknown: not said)
 	checklist: []Machine_Check, // its coding agents, as its core's checklist says (read-only here)
+	core_run:  string, // its core's run id (its hello's `core`; "" = not known): a restart there changes it
 }
 
 // One row of another machine's coding agents checklist (its core's live.checklist, cleaned).
@@ -817,7 +818,7 @@ machines_publish :: proc() {
 	views := make([dynamic]Machine_View, 0, len(mach.links), a)
 	for l in mach.links {
 		job, note := machine_install_view(l.no)
-		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger}
+		v := Machine_View{no = l.no, name = strings.clone(l.name, a), target = strings.clone(l.target, a), status = l.status, version = strings.clone(l.version, a), os = strings.clone(l.os, a), arch = strings.clone(l.arch, a), error = strings.clone(l.error, a), job = job, job_note = strings.clone(note, a), linger = l.linger, core_run = strings.clone(l.core_run, a)}
 		v.update = machine_update_offer(core_version(), l.version, l.status, l.skew, l.installed)
 		v.checklist = machine_checks_of(&l.replica, a)
 		append(&views, v)

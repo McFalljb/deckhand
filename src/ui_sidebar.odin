@@ -200,6 +200,7 @@ menu: Menu
 
 menu_open :: proc(target: Menu_Target, at: [2]f32) {
 	menu_close()
+	handoff_drawn_clear() // what the last menu drew (ui_handoff.odin)
 	menu.target = target
 	if s, ok := target.(Menu_Session); ok do menu.target = Menu_Session{s.project_id, strings.clone(s.pi_session_id), strings.clone(s.info)}
 	if f, ok := target.(Menu_Files); ok do menu.target = Menu_Files{strings.clone(f.path)}
@@ -210,7 +211,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 		menu.target = m
 	}
 	if l, ok := target.(Menu_Term_Link); ok do menu.target = Menu_Term_Link{tab_id = l.tab_id, url = strings.clone(l.url)}
-	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd)}
+	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder)}
 	menu.at = at
 	menu.selected = -1
 	menu.open = true
@@ -226,7 +227,11 @@ menu_close :: proc() {
 	if j, ok := menu.target.(Menu_Job); ok do delete(j.id)
 	if m, ok := menu.target.(Menu_Browser); ok do delete(m.link)
 	if l, ok := menu.target.(Menu_Term_Link); ok do delete(l.url)
-	if n, ok := menu.target.(core.Menu_New_Session); ok do delete(n.cwd)
+	if n, ok := menu.target.(core.Menu_New_Session); ok {
+		delete(n.cwd)
+		delete(n.run)
+		delete(n.folder)
+	}
 	if w, ok := menu.target.(Menu_Worktree); ok {
 		delete(w.path)
 		delete(w.branch)
@@ -380,10 +385,11 @@ menu_run :: proc(i: int) {
 		at := menu.at
 		cwd := strings.clone(ns.cwd, context.temp_allocator)
 		menu_close()
-		if core.id_machine(ns.project_id) != 0 do handoff_start(ns.project_id, at) // New session on <machine>… (ui_handoff.odin)
+		if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
 		else do new_session_ui(ns.project_id, cwd, at)
 		return
 	}
+	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
 	if it.rename {
@@ -1277,6 +1283,7 @@ menu_layout :: proc(w, h: f32) {
 		menu_close()
 		return
 	}
+	handoff_drawn_note(items) // what a click on a row acts on (ui_handoff.odin)
 	box_h := px(2 * PAD_OVERLAY)
 	// as wide as its longest row, between MENU_W and MENU_W_MAX (longer labels are cut)
 	need: f32 = 0

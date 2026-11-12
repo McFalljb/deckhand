@@ -187,10 +187,10 @@ fleet_counts_machines :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.sessions_waiting_count(), 1)
 
 	// the headers: this Mac's says one working, nuc's one waiting, box's nothing
-	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 420, .Sessions
+	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 900, .Sessions // wide: this Mac's name is the host's, any length (CI's are long)
 	state.settings.reduce_motion = true
 	defer state.settings.reduce_motion = false
-	cmds := ui_layout(1600, 1400)
+	cmds := ui_layout(2200, 1400)
 	here, _ := fl_box("machhead", 0)
 	nuc, _ := fl_box("machhead", 3)
 	box, okb := fl_box("machhead", 4)

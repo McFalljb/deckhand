@@ -60,6 +60,18 @@ Glyph_Draw :: struct {
 	col:   core.Rgba,
 }
 
+// A copy's shine at u (0..1 across the selection) when it is k (0..1) through: a soft band
+// SHINE_W wide whose centre eases from just before the selection to just past it, so it is 0
+// everywhere at both ends; at most SHINE_ALPHA.
+shine_alpha :: proc(u, k: f32) -> f32 {
+	if k <= 0 || k >= 1 do return 0
+	e := k * k * (3 - 2 * k) // ease-in-out
+	centre := -SHINE_W + (1 + 2 * SHINE_W) * e
+	d := 1 - abs(u - centre) / SHINE_W
+	if d <= 0 do return 0
+	return SHINE_ALPHA * d * d * (3 - 2 * d)
+}
+
 // Draws the whole grid (inside draw_begin/draw_end).
 term_draw :: proc(t: ^Term_View) {
 	if t.gt == nil do return // its snapshot has not come yet
@@ -78,6 +90,10 @@ term_draw :: proc(t: ^Term_View) {
 
 	gh.render_state_get(t.rs, .Row_Iterator, &t.it)
 	t.drawn_selected = 0
+	// a selection just copied (term_view_copied): its cells, for the shine after the loop
+	shine := flash(t.tab_id ~ SALT_SHINE, t.copies, DUR_SHINE)
+	shone: [dynamic][3]f32 // x, y, width
+	if shine > 0 do shone = make([dynamic][3]f32, context.temp_allocator)
 	row := 0
 	for gh.render_state_row_iterator_next(t.it) {
 		gh.render_state_row_get(t.it, .Cells, &t.cells)
@@ -112,6 +128,7 @@ term_draw :: proc(t: ^Term_View) {
 				sc := theme().term_selection
 				bg = {sc.r, sc.g, sc.b}
 				has_bg = true
+				if shine > 0 do append(&shone, [3]f32{x, y, font.cell_w * f32(span)})
 			}
 			if has_bg do draw_rect(x, y, font.cell_w * f32(span), font.cell_h, rgba(bg))
 
@@ -170,6 +187,21 @@ term_draw :: proc(t: ^Term_View) {
 			}
 		}
 		row += 1
+	}
+	if len(shone) > 0 {
+		// a band of the text colour across the selection, left to right (a little slanted), under
+		// the text: once, over DUR_SHINE
+		lo, hi := [2]f32{max(f32), max(f32)}, [2]f32{min(f32), min(f32)}
+		for c in shone {
+			lo = {min(lo.x, c.x), min(lo.y, c.y)}
+			hi = {max(hi.x, c.x + c.z), max(hi.y, c.y + font.cell_h)}
+		}
+		span := (hi.x - lo.x) + 0.5 * (hi.y - lo.y)
+		for c in shone {
+			a := shine_alpha(((c.x + c.z / 2 - lo.x) + 0.5 * (c.y + font.cell_h / 2 - lo.y)) / max(span, 1), 1 - shine)
+			if a > 0 do draw_rect(c.x, c.y, c.z, font.cell_h, rgba(colors.foreground, u8(a * 255)))
+		}
+		shine_frame() // the next frame too, while it runs and is seen (ui.odin ui_wants_frame)
 	}
 	for g in glyphs do draw_run(g.run, g.x, g.y + font.baseline, g.col)
 	term_link_draw(t, ox, oy, rgba(colors.foreground)) // a link under the pointer while ⌘ is held

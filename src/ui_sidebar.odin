@@ -782,9 +782,13 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 	row_hover := ui_hover == Hit(Hit_Open_Row(s.id))
 	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
 	bg, em := overlay(id, current, row_hover || hovered)
+	v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
+	if !live do v = {progress = -1} // what it showed last: no status
+	// it turned waiting, finished or error just now: a brief wash, its mark pops (by session: the
+	// row moves up when it turns waiting)
+	lit := status_flash(id, s.id ~ SALT_FLASH_ROW, v, s.machine, live)
+	bg = flash_wash(bg, v.dot, lit)
 	if clay.UI(id)(row_cfg(bg)) {
-		v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
-		if !live do v = {progress = -1} // what it showed last: no status
 		st := v.dot
 		ic, place := core.session_place(s)
 		chat := ic == .Chat
@@ -848,7 +852,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
 		if !hovered && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
-		status_mark_el(v)
+		status_mark_el(v, lit)
 		row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
 		row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
 	}

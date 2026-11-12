@@ -157,6 +157,22 @@ BADGE_H :: 16 // unread count on the top bar button
 DUR_HOVER :: 120 * time.Millisecond // hover fades, ease-out
 DUR_SWITCH :: 160 * time.Millisecond // selection/tab switch, ease-out
 DUR_SLIDE :: 180 * time.Millisecond // the agent's drawer in and out, ease-out
+// A status that turns waiting, finished or error (ui.odin flash, status_flash): its row and tab
+// wash in its colour, peaking at FLASH_ALPHA over the background and easing out (quadratic) over
+// DUR_FLASH; its mark pops to 1 + FLASH_POP and settles over the first FLASH_POP_PART of it.
+DUR_FLASH :: 600 * time.Millisecond
+FLASH_ALPHA :: 0.12 // body and secondary text stay 4.5:1 over its peak in every look; muted words keep 3/4 of their contrast (flash_test)
+FLASH_POP :: 0.25
+FLASH_POP_PART :: 0.5
+// Only a status that began at most FLASH_FRESH ago flashes, and none that began before the window
+// (or another machine's link) was up FLASH_SETTLE: a connect's many rows stay still.
+FLASH_FRESH :: 2 * time.Second
+FLASH_SETTLE :: 1 * time.Second
+// A copied terminal selection (term_view.odin): a soft band of the text colour sweeps across it
+// once, SHINE_W of its width wide, at most SHINE_ALPHA.
+DUR_SHINE :: 250 * time.Millisecond
+SHINE_W :: 0.3
+SHINE_ALPHA :: 0.22
 PULSE_FPS :: 10 // "running" dot redraw rate; no redraws without a running dot
 PULSE_PERIOD :: 1600 * time.Millisecond
 PULSE_MIN :: 0.4 // dimmest point of the running dot (alpha)

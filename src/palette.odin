@@ -326,6 +326,7 @@ run_action :: proc(a: ^Action, menu := "") {
 		if menu != "" do toast_show(fmt.tprintf("%s: not available now", strings.trim_suffix(menu, "…")), err = true)
 		return
 	}
+	done := a.done != nil ? strings.clone(a.done(), context.temp_allocator) : "" // before it changes what it reads
 	if a.prepare != nil do a.prepare()
 	if a.ui != nil {
 		a.ui()
@@ -333,6 +334,7 @@ run_action :: proc(a: ^Action, menu := "") {
 	}
 	if menu != "" do ui_do_menu(cmd, menu)
 	else do ui_do(cmd)
+	if done != "" do toast_show(done) // a failure's toast (menu_result) replaces it
 }
 
 // Page mode: "PORT[/path]" opens on the machine asked for (the sidebar's Open web page…), else on

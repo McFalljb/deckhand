@@ -384,6 +384,11 @@ An open session's row says how long its status has been what it is, on the right
 a row waiting for you adds what it asks when there is room ("3m · Apply these edits?"), else
 "Waiting for you". Every status keeps the same room, so nothing moves when one changes.
 
+When a session turns to waiting for you, finished or an error, its open row and its tab wash
+briefly in that colour and the mark pops once (about half a second). Working and idle never do,
+nor a repeat of the same status, nor the rows that arrive with Deckhand starting or a machine
+connecting. **Reduce motion** leaves it out.
+
 Green is not a session's colour: it means a machine is online, or a job's last run went well.
 
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
@@ -917,7 +922,7 @@ else.
   edge to scroll back while selecting. **Shift+click** extends the selection; a click clears it.
 - When the program uses the mouse (pi does), drags go to it: pi selects in its own view as you
   drag. Hold **Shift** while dragging to select in the terminal instead.
-- **To copy**, press ⌘C. **To paste**, press ⌘V.
+- **To copy**, press ⌘C (the copied text shines once). **To paste**, press ⌘V.
 - **To scroll**, use the wheel or trackpad (pi handles its own scrolling).
 - **To make the text bigger or smaller**, press ⌘+ or ⌘− (⌘0: back to the look's size), or use
   the View menu. It sets the terminals' and the editor's text size and is remembered.
@@ -1618,7 +1623,7 @@ window the list scrolls.
 - **Text size**: Small, Medium, Default or Large, for the sidebar, tabs, menus, popovers and
   panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
   keep their size. It applies at once and is remembered.
-- **Reduce motion**: no fades, slides, pulsing dots or turning marks.
+- **Reduce motion**: no fades, slides, pulsing dots, turning marks, status flashes or copy shines.
 
 **Notifications**
 

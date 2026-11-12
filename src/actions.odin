@@ -28,7 +28,14 @@ Action :: struct {
 	pick_folder: bool, // make receives the picked folder in action_folder
 	ui:          proc(), // runs instead of make's command (a UI step: the harness picker); make still says whether it applies
 	no_palette:  bool, // a button and a shortcut only (the palette itself)
+	// optional: a short toast once its command is sent ("Pinned"), for an action whose outcome
+	// nothing on screen shows; read before it runs (a toggle says what it turns to)
+	done:        proc() -> string,
 }
+
+// A toggle's toast: what it turns to ("Reduce motion on"), from whether it is on now.
+@(private = "file")
+turns :: proc(what: string, on_now: bool) -> string {return fmt.tprintf("%s %s", what, on_now ? "off" : "on")}
 
 // The folder a pick_folder action got (valid while its make runs).
 action_folder: string
@@ -55,10 +62,10 @@ ACTIONS := [?]Action {
 	}},
 	{id = "chats_readonly", label = "Chats: read-only", make = proc() -> (core.Command, bool) {
 		return core.Set_Chats_Readonly{on = !state.settings.chats_readonly}, true
-	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}},
+	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}, done = proc() -> string {return state.settings.chats_readonly ? "Chats: full access" : "Chats read-only"}},
 	{id = "claude_skip_permissions", label = "Claude Code: skip permissions in new tabs", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
-	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "on: --dangerously-skip-permissions in the tabs you start" : "off"}},
+	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "on: --dangerously-skip-permissions in the tabs you start" : "off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
 	{id = "chats_dir", label = "Chats folder…", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return core.Set_Folder{kind = .Chats, path = state.settings.folders[.Chats]}, true // listing
 		return core.Set_Folder{kind = .Chats, path = action_folder}, true
@@ -260,11 +267,11 @@ ACTIONS := [?]Action {
 	{id = "jobs_pause_all", label = "Pause all jobs", make = proc() -> (core.Command, bool) {
 		if state.settings.jobs_paused do return nil, false
 		return core.Jobs_Pause{}, true
-	}},
+	}, done = proc() -> string {return "Jobs paused"}},
 	{id = "jobs_resume_all", label = "Resume all jobs", make = proc() -> (core.Command, bool) {
 		if !state.settings.jobs_paused do return nil, false
 		return core.Jobs_Resume{}, true
-	}},
+	}, done = proc() -> string {return "Jobs resumed"}},
 	{id = "jobs_stop_all", label = "Stop all running jobs", make = proc() -> (core.Command, bool) {
 		for r in state.jobs do if r.running do return core.Job_Stop{}, true
 		return nil, false
@@ -278,7 +285,7 @@ ACTIONS := [?]Action {
 	}, detail = proc() -> string {return state.layout.drawer_pinned ? "pinned" : ""}},
 	{id = "agent_notify", label = "Agent notifications", make = proc() -> (core.Command, bool) {
 		return core.Set_Notify{on = state.settings.notify_off}, true
-	}, detail = proc() -> string {return state.settings.notify_off ? "off" : "on"}},
+	}, detail = proc() -> string {return state.settings.notify_off ? "off" : "on"}, done = proc() -> string {return turns("Agent notifications", !state.settings.notify_off)}},
 	// the bell (notify.odin, ui_bell.odin)
 	{id = "notifications", label = "Notifications", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"notifications"}, true
@@ -293,16 +300,16 @@ ACTIONS := [?]Action {
 	}},
 	{id = "bell_finished", label = "Notify me about: Finished", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{finished = .Finished in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Finished in state.settings.bell_off ? "off" : "on"}},
+	}, detail = proc() -> string {return .Finished in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Finished alerts", .Finished not_in state.settings.bell_off)}},
 	{id = "bell_waiting", label = "Notify me about: Needs you", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{waiting = .Waiting in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Waiting in state.settings.bell_off ? "off" : "on"}},
+	}, detail = proc() -> string {return .Waiting in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Needs-you alerts", .Waiting not_in state.settings.bell_off)}},
 	{id = "bell_errors", label = "Notify me about: Errors", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{errors = .Errors in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Errors in state.settings.bell_off ? "off" : "on"}},
+	}, detail = proc() -> string {return .Errors in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Error alerts", .Errors not_in state.settings.bell_off)}},
 	{id = "bell_jobs", label = "Notify me about: Jobs", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{jobs = .Jobs in state.settings.bell_off}, true
-	}, detail = proc() -> string {return .Jobs in state.settings.bell_off ? "off" : "on"}},
+	}, detail = proc() -> string {return .Jobs in state.settings.bell_off ? "off" : "on"}, done = proc() -> string {return turns("Job alerts", .Jobs not_in state.settings.bell_off)}},
 	// the gear's grid (ui_toolbar.odin): each steps to the next choice
 	{id = "bell_os_waiting", label = "Needs you: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Waiting), true}, detail = proc() -> string {return bell_os_detail(.Waiting)}},
 	{id = "bell_os_finished", label = "Finished: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Finished), true}, detail = proc() -> string {return bell_os_detail(.Finished)}},
@@ -314,7 +321,7 @@ ACTIONS := [?]Action {
 	{id = "bell_sound_jobs", label = "Jobs: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Jobs), true}, detail = proc() -> string {return bell_sound_detail(.Jobs)}},
 	{id = "bell_dock", label = "Badge Dock icon", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{dock = state.settings.bell_dock_off}, true
-	}, detail = proc() -> string {return state.settings.bell_dock_off ? "off" : "on (sessions waiting for you)"}},
+	}, detail = proc() -> string {return state.settings.bell_dock_off ? "off" : "on (sessions waiting for you)"}, done = proc() -> string {return turns("Dock badge", !state.settings.bell_dock_off)}},
 	{id = "toggle_left", label = "Toggle left column", keys = "⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{left_open = !state.layout.left_open}, true
 	}},
@@ -350,8 +357,8 @@ ACTIONS := [?]Action {
 	{id = "text_large", label = "Text size: Large", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Large}, true}, detail = proc() -> string {return state.settings.text_size == .Large ? "current" : ""}},
 	{id = "reduce_motion", label = "Reduce motion", make = proc() -> (core.Command, bool) {
 		return core.Set_Reduce_Motion{!state.settings.reduce_motion}, true
-	}, detail = proc() -> string {return state.settings.reduce_motion ? "on" : "off"}},
-	{id = "rescan", label = "Rescan sessions", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}},
+	}, detail = proc() -> string {return state.settings.reduce_motion ? "on" : "off"}, done = proc() -> string {return turns("Reduce motion", state.settings.reduce_motion)}},
+	{id = "rescan", label = "Rescan sessions", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}, done = proc() -> string {return "Rescanning sessions…"}},
 	// login_env.odin: Dock and Finder launches only (a terminal's environment is that terminal's)
 	{id = "refresh_shell_env", label = "Refresh shell environment", make = proc() -> (core.Command, bool) {return core.Refresh_Shell_Env{}, true}, detail = proc() -> string {
 		return core.login_env.gui ? "new tabs only" : "uses the terminal's"
@@ -387,7 +394,7 @@ ACTIONS := [?]Action {
 	}, detail = proc() -> string {return "background core"}},
 	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (core.Command, bool) {
 		return core.Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
-	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}},
+	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}, done = proc() -> string {return turns("Keep sessions running", state.settings.keep_sessions)}},
 	// development builds only (holder_restart.odin, the core's): the session holder re-execs into
 	// this build's holder binary in place; sessions keep running
 	{id = "restart_session_holder", label = "Restart session holder", make = proc() -> (core.Command, bool) {
@@ -411,7 +418,7 @@ ACTIONS := [?]Action {
 	}},
 	{id = "update_checks", label = "Check for updates automatically", make = proc() -> (core.Command, bool) {
 		return core.Set_Update_Check{on = core.update_view().checks_off}, true
-	}, detail = proc() -> string {return core.update_view().checks_off ? "off" : "on (about once a day)"}},
+	}, detail = proc() -> string {return core.update_view().checks_off ? "off" : "on (about once a day)"}, done = proc() -> string {return turns("Update checks", !core.update_view().checks_off)}},
 	{id = "update_install", label = "Restart to update Deckhand", make = proc() -> (core.Command, bool) {
 		if core.update_view().phase != .Ready do return nil, false
 		return core.Update_Install{}, true
@@ -465,12 +472,12 @@ ACTIONS := [?]Action {
 		p := core.find_project(state.selected_project)
 		if p == nil || core.project_pinned(p^) >= 0 do return nil, false
 		return core.Set_Pinned{project_id = p.id, pinned = true}, true
-	}, detail = proc() -> string {p := core.find_project(state.selected_project); return p != nil ? core.project_name(p^) : ""}},
+	}, detail = proc() -> string {p := core.find_project(state.selected_project); return p != nil ? core.project_name(p^) : ""}, done = proc() -> string {return "Pinned"}},
 	{id = "unpin_project", label = "Unpin project", make = proc() -> (core.Command, bool) {
 		p := core.find_project(state.selected_project)
 		if p == nil || core.project_pinned(p^) < 0 do return nil, false
 		return core.Set_Pinned{project_id = p.id, pinned = false}, true
-	}, detail = proc() -> string {p := core.find_project(state.selected_project); return p != nil ? core.project_name(p^) : ""}},
+	}, detail = proc() -> string {p := core.find_project(state.selected_project); return p != nil ? core.project_name(p^) : ""}, done = proc() -> string {return "Unpinned"}},
 	{id = "hide_project", label = "Hide project", make = proc() -> (core.Command, bool) {
 		p := core.find_project(state.selected_project)
 		if p == nil || core.project_hidden(p^) do return nil, false
@@ -480,12 +487,12 @@ ACTIONS := [?]Action {
 		cs := core.cur()
 		if cs == nil || !core.session_known(cs.pi_session_id) || core.session_pinned(cs.pi_session_id) >= 0 do return nil, false
 		return core.Set_Pinned{pi_session_id = cs.pi_session_id, pinned = true}, true
-	}},
+	}, done = proc() -> string {return "Pinned"}},
 	{id = "unpin_session", label = "Unpin session", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || core.session_pinned(cs.pi_session_id) < 0 do return nil, false
 		return core.Set_Pinned{pi_session_id = cs.pi_session_id, pinned = false}, true
-	}},
+	}, done = proc() -> string {return "Unpinned"}},
 	{id = "hide_session", label = "Hide session", make = proc() -> (core.Command, bool) {
 		cs := core.cur()
 		if cs == nil || !core.session_known(cs.pi_session_id) || core.session_hidden(cs.pi_session_id) do return nil, false
@@ -664,7 +671,7 @@ ACTIONS := [?]Action {
 		root := core.files_root()
 		if root == "" do return nil, false
 		return core.Files_Collapse_All{root = root}, true
-	}},
+	}, done = proc() -> string {return "Folders collapsed"}},
 	{id = "files_refresh", label = "Refresh files", make = proc() -> (core.Command, bool) {
 		root := core.files_root()
 		if root == "" do return nil, false
@@ -696,7 +703,7 @@ ACTIONS := [?]Action {
 	}, prepare = proc() {
 		// the project's .pi/ folders are in the project's tree: closed one by one
 		for p in core.settings_open_pi_dirs() do ui_do(core.Files_Expand{path = p, expanded = false})
-	}},
+	}, done = proc() -> string {return "Folders collapsed"}},
 	{id = "settings_refresh", label = "Refresh settings files", make = proc() -> (core.Command, bool) {
 		return core.Set_Left_Tab{tab = .Settings}, true
 	}, prepare = proc() {

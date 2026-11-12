@@ -29,22 +29,40 @@ icon_logo :: proc(ic: core.Icon) -> Logo {
 ICON_GRID :: 16
 
 // A Clay element that draws `ic` in `col`, `size` logical px square.
-// customData carries the icon and its parameter (a mark's step or percent: bits 8-15), userData
-// the colour (packed RGBA).
-icon :: proc(ic: core.Icon, col: core.Rgba, size: f32 = ICON_SIZE, param: u8 = 0) {
+// customData carries the icon, its parameter (a mark's step or percent: bits 8-15) and how much it
+// is drawn larger than its box (a flashing mark's pop, 1..ICON_GROW_MAX: bits 16-23), userData the
+// colour (packed RGBA). The box (the layout) never grows: only the drawing does, around its centre.
+icon :: proc(ic: core.Icon, col: core.Rgba, size: f32 = ICON_SIZE, param: u8 = 0, scale: f32 = 1) {
 	packed := uintptr(col.r) | uintptr(col.g) << 8 | uintptr(col.b) << 16 | uintptr(col.a) << 24
+	grow := uintptr(u8(clamp((scale - 1) * ICON_GROW_STEPS, 0, 255) + 0.5))
 	if clay.UI()({
 		layout = {sizing = {clay.SizingFixed(px(size)), clay.SizingFixed(px(size))}},
-		custom = {customData = rawptr(uintptr(ic) | uintptr(param) << 8)},
+		custom = {customData = rawptr(uintptr(ic) | uintptr(param) << 8 | grow << 16)},
 		userData = rawptr(packed),
 	}) {}
 }
+
+ICON_GROW_STEPS :: 400 // per 1.0 of scale: 255 steps is up to 1.64x
 
 // From a custom render command (ui_draw).
 icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (core.Icon, core.Rgba, u8) {
 	p := uintptr(cmd.userData)
 	d := uintptr(cmd.renderData.custom.customData)
 	return core.Icon(u8(d)), {u8(p), u8(p >> 8), u8(p >> 16), u8(p >> 24)}, u8(d >> 8)
+}
+
+// How much larger than its box an icon is drawn (icon's scale; exactly 1 at rest).
+icon_scale_of_command :: proc(cmd: ^clay.RenderCommand) -> f32 {
+	return 1 + f32(u8(uintptr(cmd.renderData.custom.customData) >> 16)) / ICON_GROW_STEPS
+}
+
+// The box an icon is drawn in: its layout box, or (popping) that box grown about its centre.
+icon_draw_box :: proc(cmd: ^clay.RenderCommand) -> (x, y, w, h: f32) {
+	b := cmd.boundingBox
+	g := icon_scale_of_command(cmd)
+	if g == 1 do return b.x, b.y, b.width, b.height
+	w, h = b.width * g, b.height * g
+	return b.x - (w - b.width) / 2, b.y - (h - b.height) / 2, w, h
 }
 
 // Draws `ic` into the box (framebuffer px), inside draw_begin/draw_end. param: a working mark's

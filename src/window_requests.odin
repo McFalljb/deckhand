@@ -45,6 +45,7 @@ window_request_run :: proc(q: core.Window_Request) -> (r: core.Window_Reply) {
 	case .Copy_Selection:
 		if s := term_view_selection(q.tab_id); s != "" {
 			clipboard_set(s)
+			term_view_copied(q.tab_id) // the copied cells shine once
 			r.ok = true
 		}
 	case .Term_Fit:

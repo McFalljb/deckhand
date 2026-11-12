@@ -73,6 +73,7 @@ Term_View :: struct {
 	scroll_acc:   f32,
 	focused:      bool,
 	drawn_selected: int, // selected cells in the last drawn frame (test mode reads it)
+	copies:       i64, // selections copied (term_view_copied): each one's shine (term_draw)
 	// the link under the pointer while ⌘ is held (term_links.odin)
 	link:         core.Term_Link, // url owned
 	link_on:      bool,
@@ -513,6 +514,14 @@ term_view_focus_send :: proc(v: ^Term_View, focused: bool) {
 term_view_selection :: proc(tab_id: u64) -> string {
 	v := term_view_peek(tab_id)
 	return v != nil && v.gt != nil ? core.gt_selection_text(v.gt) : ""
+}
+
+// Its selection was just copied: the selected cells shine once (term_draw).
+term_view_copied :: proc(tab_id: u64) {
+	v := term_view_peek(tab_id)
+	if v == nil do return
+	v.copies += 1
+	v.changed = true // drawn (the shine asks for the frames after it)
 }
 
 view_scroll_bottom :: proc(v: ^Term_View) {

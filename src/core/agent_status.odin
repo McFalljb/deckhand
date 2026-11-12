@@ -42,8 +42,11 @@ package core
 // by libghostty-vt before we see it.
 //
 // For other code (the API to rely on):
-//   tab_status_view(tab)      a tab's status: dot, source, when, app, kind, message, unseen
-//   session_row_status(s)     an open session's dot (the strongest of its tabs)
+//   tab_status_view(tab)      a tab's status: dot, source, when, app, kind, message, unseen,
+//                             progress (0..1, -1 none) and since (when it became this status)
+//   status_mark(view)         the shape the window draws for it (one per status and kind)
+//   session_row_status(s)     an open session's dot (the strongest of its tabs); session_row_view,
+//                             session_status_view, project_status_view: that tab's whole view
 //   status_rank, attention_tier   ordering (the dot shown; the "attention" sort)
 //   status_explain(tab)       the tooltip line: what, from which source, how long ago
 
@@ -541,6 +544,8 @@ Tab_Status_View :: struct {
 	kind:   Prog_Kind,
 	msg:    string, // OSC 7501's message (one line, untrusted); borrowed
 	unseen: bool,
+	progress: f32, // OSC 7501's progress while working, 0..1; -1 = none reported
+	since:  time.Time, // when this status began (Tab.status_since; {} = not known)
 }
 
 // The bridge speaks for this tab: a pi tab whose bridge reports.
@@ -553,7 +558,7 @@ status_bridge_owns :: proc(tab: Tab) -> bool {
 // (a pi tab: exited or not reporting yet). An unseen tab with nothing more
 // urgent shows the unseen dot.
 tab_status_view :: proc(tab: Tab) -> Tab_Status_View {
-	v := Tab_Status_View{unseen = tab.unseen}
+	v := Tab_Status_View{unseen = tab.unseen, progress = -1, since = tab.status_since}
 	_, is_pi := tab.kind.(Pi_Tab)
 	switch {
 	case status_bridge_owns(tab):
@@ -569,6 +574,8 @@ tab_status_view :: proc(tab: Tab) -> Tab_Status_View {
 		case .Done, .Idle, .None:  v.dot = .None
 		}
 		if v.dot == .None && is_pi && tab.status == .Exited do v.dot = .Exited
+		// how far it got, when it said (another machine's too: mirror_merge kept it in -1..100)
+		if tab.prog.state == .Working && tab.prog.progress >= 0 do v.progress = clamp(f32(tab.prog.progress) / 100, 0, 1)
 	case is_pi:
 		v.dot = pi_tab_status(tab) // exited, or none
 	}
@@ -586,6 +593,80 @@ tab_status_view :: proc(tab: Tab) -> Tab_Status_View {
 	// not over a dead pi tab's faint dot: its Restart bar says it exited (dead_tab.odin)
 	if tab.unseen && v.dot == .None do v.dot = .Unseen
 	return v
+}
+
+// ---- the mark (what the window draws for a status: ui.odin status_mark_el) ----
+
+// One shape per status, so colour is never the only signal (docs/GUIDE.md "Status marks").
+Status_Mark :: enum u8 {
+	None, // nothing drawn (no status slot)
+	Idle, // a quiet small dot: open, nothing going on
+	Exited, // a faint dot: its process ended
+	Working, // a turning arc (still under Reduce motion)
+	Progress, // working, with a reported progress: a pie filled that far
+	Waiting, // waiting for you, kind unknown: a solid disc
+	Permission, // it wants a yes or no: a shield
+	Question, // it asked you something: "?"
+	Auth, // it wants a login: a lock
+	Done, // finished, not seen yet: a check
+	Error, // stopped with an error: "!"
+}
+
+// The mark for a status (a tab's, or the tab a row's status came from).
+status_mark :: proc(v: Tab_Status_View) -> Status_Mark {
+	switch v.dot {
+	case .None:     return .Idle
+	case .Exited:   return .Exited
+	case .Running:  return v.progress >= 0 ? .Progress : .Working
+	case .Question: return .Question // its answer ended with a question
+	case .Unseen:   return .Done
+	case .Error:    return .Error
+	case .Waiting:
+		switch v.kind {
+		case .Permission: return .Permission
+		case .Question:   return .Question
+		case .Auth:       return .Auth
+		case .None:       return .Waiting
+		}
+	}
+	return .Idle
+}
+
+// What a status is, for since (status_since_sweep): its dot and, waiting, its kind. Progress and
+// repeat reports are not a new status.
+status_key :: proc(v: Tab_Status_View) -> u16 {
+	kind := v.dot == .Waiting ? v.kind : Prog_Kind.None
+	return u16(v.dot) | u16(kind) << 8
+}
+
+// This Mac's tabs whose status changed take now as its start (run_command, after a command that
+// changed State: every status change is one). Other machines' tabs: mirror_merge.
+status_since_sweep :: proc(now := time.Time{}) {
+	now := now != {} ? now : time.now()
+	for &s in state.open_sessions {
+		if s.machine != 0 do continue
+		for &t in s.tabs {
+			k := status_key(tab_status_view(t))
+			if k == t.status_key do continue
+			t.status_key, t.status_since = k, now
+		}
+	}
+}
+
+// An open session's status as its strongest tab shows it (session_row_status); none: {dot None}.
+session_row_view :: proc(s: ^Open_Session) -> Tab_Status_View {
+	_, from := session_row_status(s)
+	if from == nil do return {progress = -1}
+	return tab_status_view(from^)
+}
+
+// A listed session's status (session_status's, with the rest of its tab's view).
+session_status_view :: proc(pi_session_id: string) -> Tab_Status_View {
+	if pi_session_id == "" do return {progress = -1}
+	for &s in state.open_sessions do if s.pi_session_id == pi_session_id do return session_row_view(&s)
+	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
+	if id := claude_open_tab(pi_session_id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do return tab_status_view(tab^)
+	return {progress = -1}
 }
 
 // A tab with a terminal: pi and shell tabs, and any other kind that runs one.
@@ -689,8 +770,20 @@ status_explain :: proc(tab: Tab) -> string {
 	case .Osc7501: from = "OSC 7501"
 	case .None:    from = is_claude ? "Claude Code hooks" : "no status reported"
 	}
-	when_ := ago(v.at)
-	if when_ != "" && when_ != "now" do when_ = fmt.tprintf("%s ago", when_)
+	// how long: since the status began (working for 3m, finished 3m ago), else since its source
+	// last reported (a status from before this core started)
+	when_ := ago(v.since)
+	if when_ == "now" {
+		// as it is
+	} else if when_ != "" {
+		#partial switch v.dot {
+		case .Waiting, .Running, .Question: when_ = fmt.tprintf("for %s", when_)
+		case:                               when_ = fmt.tprintf("%s ago", when_)
+		}
+	} else {
+		when_ = ago(v.at)
+		if when_ != "" && when_ != "now" do when_ = fmt.tprintf("%s ago", when_)
+	}
 	line := when_ != "" ? fmt.tprintf("%s: %s · %s, %s", who, what, from, when_) : fmt.tprintf("%s: %s · %s", who, what, from)
 	if v.msg != "" do line = fmt.tprintf("%s — %s", line, cut_utf8(v.msg, 120))
 	return line
@@ -734,13 +827,5 @@ pi_tab_status :: proc(tab: Tab) -> Row_Status {
 
 // A session's dot: the strongest of its open tabs (agent_status.odin).
 session_status :: proc(pi_session_id: string) -> Row_Status {
-	if pi_session_id == "" do return .None
-	for &s in state.open_sessions {
-		if s.pi_session_id != pi_session_id do continue
-		st, _ := session_row_status(&s)
-		return st
-	}
-	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
-	if id := claude_open_tab(pi_session_id); id != 0 do if _, tab, _ := find_tab(id); tab != nil do return tab_status_view(tab^).dot
-	return .None
+	return session_status_view(pi_session_id).dot
 }

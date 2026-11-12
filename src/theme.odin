@@ -62,7 +62,8 @@ TAB_MAX_W :: 200 // longer titles are cut with an ellipsis
 BAR_H :: 44 // confirmation bar (its smallest height: a long summary wraps)
 CONFIRM_LINES :: 4 // the most lines a confirmation's summary takes; the last is cut with an ellipsis
 BUTTON_H :: 28
-DOT :: 6 // status dot
+DOT :: 6 // a dot (unread, a machine's link, a job's run)
+MARK :: 12 // a status mark (icons.odin draw_mark): every state in one box, so nothing moves when it changes
 PANEL_ROW_H :: 24 // panel rows in the right column (denser than session rows)
 // Icons (icons.odin): vector shapes on a 16-unit grid, one stroke width.
 ICON_SIZE :: 16
@@ -159,6 +160,8 @@ DUR_SLIDE :: 180 * time.Millisecond // the agent's drawer in and out, ease-out
 PULSE_FPS :: 10 // "running" dot redraw rate; no redraws without a running dot
 PULSE_PERIOD :: 1600 * time.Millisecond
 PULSE_MIN :: 0.4 // dimmest point of the running dot (alpha)
+SPIN_STEPS :: 12 // a working mark's turn, in PULSE_FPS steps (1.2 s)
+IDLE_ALPHA :: 0.45 // an idle mark's quiet dot
 // Tints towards the text colour (0..1): secondary button at rest and on
 // hover, primary button on hover; an exited session's dot alpha.
 TINT_BUTTON :: 0.06

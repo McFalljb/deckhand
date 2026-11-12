@@ -1117,6 +1117,19 @@ Every terminal tab has a status, from one of two sources (`src/core/agent_status
   character boundary) and all are made one line with no bidi or invisible characters; base64 is
   decoded (and malformed reports dropped) by libghostty-vt.
 
+**Marks, progress and since.** The window draws each status as a mark of its own shape
+(`status_mark`; GUIDE.md "Status marks"): blocked's `kind` picks one (permission, question,
+auth; none: a generic waiting mark), and working with a `progress` is a pie. A tab's status view
+carries `progress` (OSC 7501's, 0..1, while working only; -1 none) and `since`
+(`Tab.status_since`): when its dot, and while waiting its kind, last changed. The core sets it
+after the command that changed it (`status_since_sweep`); a repeat report, a new message or new
+progress does not move it (`at` does, so it is not used). Not saved: after a restart it is
+unknown until the status changes. Another machine's tabs carry their OSC 7501 summary (state and
+kind this build knows, `progress` in -1..100, `app` and message through `text_clean_remote`, no
+id or title: `mirror_prog`) and a `since` that clock skew cannot bend (`mirror_since`): unchanged
+across merges, kept; changed while linked, this Mac's now; first seen, that machine's own, never
+ahead of now and forgotten past a year.
+
 **Precedence**, per tab: the bridge while it reports (a pi tab whose `agent` is not `unknown`) >
 OSC 7501 > none. A pi tab without a bridge (a pi older than 1.4.0, which Deckhand starts without its integration) shows its OSC 7501 status, if any; a
 connected bridge's tab ignores OSC 7501 for its dot, the bell and unseen. A shell tab with no OSC

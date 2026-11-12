@@ -29,24 +29,27 @@ icon_logo :: proc(ic: core.Icon) -> Logo {
 ICON_GRID :: 16
 
 // A Clay element that draws `ic` in `col`, `size` logical px square.
-// customData carries the icon, userData the colour (packed RGBA).
-icon :: proc(ic: core.Icon, col: core.Rgba, size: f32 = ICON_SIZE) {
+// customData carries the icon and its parameter (a mark's step or percent: bits 8-15), userData
+// the colour (packed RGBA).
+icon :: proc(ic: core.Icon, col: core.Rgba, size: f32 = ICON_SIZE, param: u8 = 0) {
 	packed := uintptr(col.r) | uintptr(col.g) << 8 | uintptr(col.b) << 16 | uintptr(col.a) << 24
 	if clay.UI()({
 		layout = {sizing = {clay.SizingFixed(px(size)), clay.SizingFixed(px(size))}},
-		custom = {customData = rawptr(uintptr(ic))},
+		custom = {customData = rawptr(uintptr(ic) | uintptr(param) << 8)},
 		userData = rawptr(packed),
 	}) {}
 }
 
 // From a custom render command (ui_draw).
-icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (core.Icon, core.Rgba) {
+icon_of_command :: proc(cmd: ^clay.RenderCommand) -> (core.Icon, core.Rgba, u8) {
 	p := uintptr(cmd.userData)
-	return core.Icon(uintptr(cmd.renderData.custom.customData)), {u8(p), u8(p >> 8), u8(p >> 16), u8(p >> 24)}
+	d := uintptr(cmd.renderData.custom.customData)
+	return core.Icon(u8(d)), {u8(p), u8(p >> 8), u8(p >> 16), u8(p >> 24)}, u8(d >> 8)
 }
 
-// Draws `ic` into the box (framebuffer px), inside draw_begin/draw_end.
-draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba) {
+// Draws `ic` into the box (framebuffer px), inside draw_begin/draw_end. param: a working mark's
+// step (0..SPIN_STEPS-1), a progress mark's percent (0..100).
+draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0) {
 	if col.a == 0 do return
 	if logo := icon_logo(ic); logo != .None {
 		// a logo: rasterised at the box's whole-px size, centred on the pixel grid
@@ -259,6 +262,79 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba) {
 	case .Pause:
 		stroke_line(X(ox, s, sw, 6), P(oy, s, 4), X(ox, s, sw, 6), P(oy, s, 12), sw, col, false)
 		stroke_line(X(ox, s, sw, 10), P(oy, s, 4), X(ox, s, sw, 10), P(oy, s, 12), sw, col, false)
+	case .Mark_Idle, .Mark_Exited, .Mark_Working, .Mark_Progress, .Mark_Waiting, .Mark_Permission, .Mark_Question, .Mark_Auth, .Mark_Done, .Mark_Error:
+		draw_mark(ic, ox, oy, s, sw, col, param)
+	}
+}
+
+// MARK_RING_R: a working or progress mark's ring (grid units): its outer edge stays inside the box with
+// the stroke, as the glyphs' do (each spans about 2..14 of the 16 units, centred on 8,8).
+MARK_RING_R :: 5.5
+
+// A status mark (core.Status_Mark) on the 16-unit grid at (ox, oy), unit s px, stroke sw px.
+@(private = "file")
+draw_mark :: proc(ic: core.Icon, ox, oy, s, sw: f32, col: core.Rgba, param: u8) {
+	P :: proc(o, s, v: f32) -> f32 {return o + v * s}
+	snap :: proc(v, sw: f32) -> f32 {return int(sw) % 2 == 1 ? math.floor(v) + 0.5 : math.round(v)}
+	X :: proc(ox, s, sw, v: f32) -> f32 {return snap(ox + v * s, sw)}
+	// round shapes on the box's centre; a glyph's vertical strokes on the pixel grid (cx)
+	mx, my := P(ox, s, 8), P(oy, s, 8)
+	cx := X(ox, s, sw, 8)
+	dot_r := max(1.1 * s, sw * 0.75) // a glyph's dot ("?", "!"), as Alert's and Info's
+	#partial switch ic {
+	case .Mark_Idle:
+		fill_disc(mx, my, 2 * s, col)
+	case .Mark_Exited:
+		fill_disc(mx, my, 3.5 * s, col)
+	case .Mark_Waiting:
+		fill_disc(mx, my, 4.5 * s, col)
+	case .Mark_Working:
+		// a faint track, a bright arc turning clockwise one step a frame
+		track := col
+		track.a = u8(f32(col.a) * 0.25)
+		r := MARK_RING_R * s
+		stroke_ring(mx, my, r, sw, track)
+		head := f32(math.PI / 2) - f32(param % SPIN_STEPS) * 2 * math.PI / SPIN_STEPS
+		arc(mx, my, r, head - 0.55 * math.PI, head, sw, col)
+	case .Mark_Progress:
+		// the ring, and a pie inside it from twelve o'clock, clockwise
+		stroke_ring(mx, my, MARK_RING_R * s, sw, col)
+		f := f32(min(param, 100)) / 100
+		pr := MARK_RING_R * s - sw / 2 - max(1, 1.25 * s) // a clear gap inside the ring
+		if f >= 0.995 do fill_disc(mx, my, pr, col)
+		else if f > 0 do fill_sector(mx, my, pr, math.PI / 2 - f * 2 * math.PI, math.PI / 2, col)
+	case .Mark_Permission:
+		// a shield: a flat top rising to a point, straight sides, a point below
+		l, r := X(ox, s, sw, 3.5), X(ox, s, sw, 12.5)
+		c := (l + r) / 2 // between its snapped sides, so it is symmetric
+		t, peak, side, bot := P(oy, s, 3.25), P(oy, s, 1.75), P(oy, s, 8.5), P(oy, s, 14.25)
+		stroke_line(l, t, c, peak, sw, col, true)
+		stroke_line(c, peak, r, t, sw, col, true)
+		stroke_line(r, t, r, side, sw, col)
+		stroke_line(r, side, c, bot, sw, col, true)
+		stroke_line(c, bot, l, side, sw, col, true)
+		stroke_line(l, side, l, t, sw, col)
+	case .Mark_Question:
+		// a hook over the top, down to the middle, a dot under it
+		hx, hy, hr := cx, P(oy, s, 5.5), 3.25 * s
+		a0 := f32(-40 * math.PI / 180)
+		arc(hx, hy, hr, a0, math.PI, sw, col)
+		ex, ey := hx + hr * math.cos(a0), hy - hr * math.sin(a0)
+		stroke_line(ex, ey, cx, P(oy, s, 9.25), sw, col, true)
+		stroke_line(cx, P(oy, s, 9.25), cx, P(oy, s, 10.25), sw, col, true)
+		fill_disc(cx, P(oy, s, 13.25), dot_r, col)
+	case .Mark_Auth:
+		// a lock: a solid body, a shackle over it (together about 2.75..13.25: centred)
+		l, r := math.round(P(ox, s, 3.5)), math.round(P(ox, s, 12.5))
+		top, bot := math.round(P(oy, s, 6.75)), math.round(P(oy, s, 13.25))
+		draw_rect(l, top, r - l, bot - top, col)
+		arc((l + r) / 2, top, 3 * s, 0, math.PI, sw, col)
+	case .Mark_Done:
+		stroke_line(P(ox, s, 3), P(oy, s, 8.5), P(ox, s, 6.5), P(oy, s, 12), sw, col, true)
+		stroke_line(P(ox, s, 6.5), P(oy, s, 12), P(ox, s, 13), P(oy, s, 4), sw, col, true)
+	case .Mark_Error:
+		stroke_line(cx, P(oy, s, 2.75), cx, P(oy, s, 9.5), sw, col, true)
+		fill_disc(cx, P(oy, s, 13), dot_r, col)
 	}
 }
 
@@ -346,6 +422,22 @@ stroke_ring :: proc(cx, cy, r, w: f32, col: core.Rgba) {
 fill_disc :: proc(cx, cy, r: f32, col: core.Rgba) {
 	ring(cx, cy, 0, max(r - 0.5, 0), col, 1, 1)
 	ring(cx, cy, max(r - 0.5, 0), r + 0.5, col, 1, 0)
+}
+
+// A filled pie slice of radius r from angle a0 to a1 (radians, counter-clockwise from the right,
+// y up), its round edge feathered.
+fill_sector :: proc(cx, cy, r, a0, a1: f32, col: core.Rgba) {
+	if a1 <= a0 || r <= 0 do return
+	steps := max(2, int((a1 - a0) / (2 * math.PI) * ICON_SEGMENTS) + 1)
+	c := [2]f32{cx, cy}
+	inner, outer := max(r - 0.5, 0), r + 0.5
+	for i in 0 ..< steps {
+		u0 := a0 + (a1 - a0) * f32(i) / f32(steps)
+		u1 := a0 + (a1 - a0) * f32(i + 1) / f32(steps)
+		d0, d1 := [2]f32{math.cos(u0), -math.sin(u0)}, [2]f32{math.cos(u1), -math.sin(u1)}
+		quad(c, c, c + d1 * inner, c + d0 * inner, col, 1, 1)
+		quad(c + d0 * inner, c + d1 * inner, c + d1 * outer, c + d0 * outer, col, 1, 0)
+	}
 }
 
 // The band between radii r0 and r1, alpha a0 at r0 and a1 at r1.

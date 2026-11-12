@@ -274,8 +274,8 @@ A machine that refuses this Mac says to turn on **Allow other machines to connec
 one that is not a Mac or Linux says so; neither offers Connect (right-click › **Try again** after
 you fixed it). Deckhand does not keep retrying a machine that needs you (to log in, or to allow
 this Mac): it tries again when you click. An offline machine is retried on its own, less and less
-often. Under it are its open sessions, then its projects, drawn as this Mac's are (*Waiting for
-you*, the time, the dot; an open session's age is not known here) and thinned by the filter and
+often. Under it are its open sessions, then its projects, drawn as this Mac's are (the status
+mark, how long it has been so and what it asks; an open session's age is not known here) and thinned by the filter and
 the Running, Waiting and Pinned chips like this Mac's (its header stays). Click a project to list its sessions,
 as that machine has them. A machine with no projects yet says so: Deckhand can't add a folder on
 another machine, so start pi or Claude Code in a folder there and the project shows here. The
@@ -361,27 +361,35 @@ Under **Show hidden** every hidden project carries its reason: **temp**, **folde
 **hidden** (hidden by you). To see every folder as its own top-level row again, turn off **Tidy
 project list** in the gear (or the palette); it is on by default and remembered.
 
-### Status dots
+### Status marks
 
-A dot on a tab says what the program in it is doing, and a dot after a session's row says the
-same for the most urgent of its tabs (a project's row: of its open sessions):
+A mark on a tab says what the program in it is doing, and a mark after a session's row says the
+same for the most urgent of its tabs (a project's row: of its open sessions). Each status has its
+own shape as well as its colour, so you can tell them apart without the colour:
 
-| Dot | Meaning |
+| Mark | Meaning |
 |---|---|
-| none | idle, not open, or not reporting yet |
-| pulsing blue-green | working |
-| amber, "Waiting for you" | it needs your answer: a pi dialog, or a program asking permission, a question or a login |
-| blue (the accent: terracotta in Warm) | it finished while you were not looking (or you marked it unread); looking at the tab clears it |
-| faint amber | its last answer asked you a question |
-| red | its last run ended with an error |
-| grey | pi exited |
+| a quiet small dot | open, nothing going on (or not reporting yet); a row that is not open has no mark |
+| a turning arc (blue-green) | working; it holds still with **Reduce motion** |
+| a pie (blue-green) | working, and it said how far along it is: filled that far |
+| a shield (amber) | it wants a yes or no: permission to run a tool or make an edit |
+| **?** (amber) | it asked you something (faint amber: its last answer ended with a question) |
+| a lock (amber) | it wants you to log in |
+| a solid disc (amber) | it waits for you, for something it did not name (a pi dialog) |
+| a check (blue, the accent: terracotta in Warm) | it finished while you were not looking (or you marked it unread); looking at the tab clears it |
+| **!** (red) | its last run ended with an error |
+| a faint dot | its process exited |
+
+An open session's row says how long its status has been what it is, on the right ("4m", "1h");
+a row waiting for you adds what it asks when there is room ("3m · Apply these edits?"), else
+"Waiting for you". Every status keeps the same room, so nothing moves when one changes.
 
 Green is not a session's colour: it means a machine is online, or a job's last run went well.
 
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
-could speak for a pi tab, its bridge wins. Hover a dot's tab or row to see what it is, where it
-came from (pi bridge or OSC 7501) and how long ago it was reported.
+could speak for a pi tab, its bridge wins. Hover a mark's tab or row to see what it is in words,
+what it said, where it came from (pi bridge or OSC 7501) and for how long.
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.
@@ -1588,7 +1596,7 @@ window the list scrolls.
 - **Text size**: Small, Medium, Default or Large, for the sidebar, tabs, menus, popovers and
   panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
   keep their size. It applies at once and is remembered.
-- **Reduce motion**: no fades, slides or pulsing dots.
+- **Reduce motion**: no fades, slides, pulsing dots or turning marks.
 
 **Notifications**
 

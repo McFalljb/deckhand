@@ -190,20 +190,79 @@ pulse :: proc() -> f32 {
 ui_wants_frame :: proc() -> bool {
 	again := panels_clamped
 	panels_clamped = false
-	return again || animating || (pulsing && pulse_step() != pulse_drawn)
+	return again || animating || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+}
+
+@(private = "file")
+spinning: bool // a working mark turns where it can be seen (spin_visible): draw at PULSE_FPS
+
+// Whether the last layout has a turning mark on screen (tests).
+ui_spinning :: proc() -> bool {return spinning}
+
+// Whether a working mark is drawn where it can be seen: inside the window and the list that
+// clips it. Motion off (Reduce motion): it holds still, and asks for nothing.
+@(private = "file")
+spin_visible :: proc(cmds: clay.ClayArray(clay.RenderCommand), w, h: f32) -> bool {
+	if state.settings.reduce_motion do return false
+	clip := [4]f32{0, 0, w, h}
+	stack: [dynamic][4]f32
+	stack.allocator = context.temp_allocator
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		b := c.boundingBox
+		#partial switch c.commandType {
+		case .ScissorStart:
+			append(&stack, clip)
+			clip = {max(clip[0], b.x), max(clip[1], b.y), min(clip[2], b.x + b.width), min(clip[3], b.y + b.height)}
+		case .ScissorEnd:
+			if len(stack) > 0 do clip = pop(&stack)
+		case .Custom:
+			ic, _, _ := icon_of_command(c)
+			if ic != .Mark_Working do continue
+			if b.x < clip[2] && b.x + b.width > clip[0] && b.y < clip[3] && b.y + b.height > clip[1] do return true
+		}
+	}
+	return false
+}
+
+@(private = "file")
+ages_shown: bool // a status's age ("4m") is on screen: draw again when the minute turns
+@(private = "file")
+age_minute_drawn: i64
+
+@(private = "file")
+age_minute :: proc() -> i64 {return time.now()._nsec / i64(time.Minute)}
+
+// How long a status has been what it is ("now", "4m", "1h"): "" with no status (none, or a dead
+// tab's) or no known start. Keeps the row's age fresh: a frame when the minute turns.
+status_age :: proc(v: core.Tab_Status_View) -> string {
+	if v.dot == .None || v.dot == .Exited || v.since == {} do return ""
+	ages_shown = true
+	return core.ago(v.since)
 }
 
 // ---- status ----
 
-// A tab's dot in the tab strip: its status (the bridge, OSC 7501 or unseen:
+// A tab's status in the tab strip: its status (the bridge, OSC 7501 or unseen:
 // agent_status.odin), else recent output or an agent acting in a browser tab.
-tab_strip_status :: proc(tab: core.Tab, active: bool) -> core.Row_Status {
+tab_strip_view :: proc(tab: core.Tab, active: bool) -> core.Tab_Status_View {
 	view := core.tab_status_view(tab)
 	_, is_pi := tab.kind.(core.Pi_Tab)
-	if view.dot != .None || is_pi do return view.dot // a status (done or idle: no dot) leaves room for recent output
-	if tab.status == .Running && tab.output_recent do return .Running // recent output (the core's terminal, in the replica's record)
-	if !active && browser_act_recent(tab.id) do return .Running // an agent acts in this tab behind (browser_act.odin)
-	return .None
+	if view.dot != .None || is_pi do return view // a status (done or idle: none) leaves room for recent output
+	if tab.status == .Running && tab.output_recent do view.dot = .Running // recent output (the core's terminal, in the replica's record)
+	else if !active && browser_act_recent(tab.id) do view.dot = .Running // an agent acts in this tab behind (browser_act.odin)
+	return view
+}
+
+tab_strip_status :: proc(tab: core.Tab, active: bool) -> core.Row_Status {return tab_strip_view(tab, active).dot}
+
+// Whether a tab has a status mark: every tab that can have a status (a terminal, a page an agent
+// may act in) keeps its mark's room, a quiet dot while nothing goes on, so it never moves.
+tab_shows_mark :: proc(tab: core.Tab) -> bool {
+	#partial switch _ in tab.kind {
+	case core.Pi_Tab, core.Shell_Tab, core.Claude_Tab, core.Browser_Tab: return true
+	}
+	return tab.has_term
 }
 
 
@@ -219,6 +278,53 @@ status_color :: proc(st: core.Row_Status) -> core.Rgba {
 	case .Unseen:   return th.accent // "finished, not seen yet": the accent, as unread is in the Jobs tab and the bell (green is "online", "ran ok")
 	}
 	return {}
+}
+
+// The icon each status mark is drawn with (icons.odin draw_mark).
+MARK_ICONS := [core.Status_Mark]core.Icon {
+	.None       = .None,
+	.Idle       = .Mark_Idle,
+	.Exited     = .Mark_Exited,
+	.Working    = .Mark_Working,
+	.Progress   = .Mark_Progress,
+	.Waiting    = .Mark_Waiting,
+	.Permission = .Mark_Permission,
+	.Question   = .Mark_Question,
+	.Auth       = .Mark_Auth,
+	.Done       = .Mark_Done,
+	.Error      = .Mark_Error,
+}
+
+// A status mark's colour: its status's (status_color), but working is steady (the arc's turn is
+// its motion, not a pulse) and idle is a quiet grey.
+mark_color :: proc(m: core.Status_Mark, st: core.Row_Status) -> core.Rgba {
+	th := theme()
+	#partial switch m {
+	case .None:              return {}
+	case .Idle:              return with_alpha(th.text_muted, IDLE_ALPHA)
+	case .Working, .Progress: return th.running
+	}
+	return status_color(st)
+}
+
+// A working mark's step: it turns at PULSE_FPS while one is on screen (spin_visible); still under
+// Reduce motion.
+@(private = "file")
+spin_step :: proc() -> u8 {
+	if state.settings.reduce_motion do return 0
+	return u8(pulse_step() % SPIN_STEPS) // its frames: spin_visible, after the layout
+}
+
+// A status's mark (core.status_mark), MARK px square: every state the same box, so a row or tab
+// never moves when its status changes.
+status_mark_el :: proc(v: core.Tab_Status_View) {
+	m := core.status_mark(v)
+	param: u8
+	#partial switch m {
+	case .Working:  param = spin_step()
+	case .Progress: param = u8(clamp(v.progress, 0, 1) * 100 + 0.5)
+	}
+	icon(MARK_ICONS[m], mark_color(m, v.dot), MARK, param)
 }
 
 // ---- building blocks ----
@@ -308,9 +414,10 @@ ui_layout_pass: u64
 
 ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	ui_layout_pass += 1
-	animating, pulsing = false, false
+	animating, pulsing, ages_shown = false, false, false
 	drawer_laid_out = false
 	pulse_drawn = pulse_step()
+	age_minute_drawn = age_minute()
 	ui_win_w = w
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
@@ -348,6 +455,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		tooltip_layout(w, h)
 	}
 	cmds := clay.EndLayout(0)
+	spinning = spin_visible(cmds, w, h) // frames for a turning mark only where it is seen
 	if panels_scroll_clamp() do panels_clamped = true // drawn again at the clamped offset (ui_wants_frame)
 	return cmds
 }
@@ -742,15 +850,15 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 		hovered := ui_hover == Hit(Hit_Tab(tab.id)) || close_hover
 		bg, em := overlay(id, active && !quiet, hovered || quiet)
 		ic, label, extra := tab_label(cs, tab)
-		st := tab_strip_status(tab, active)
-		show_dot := st != .None && st != .Exited
+		view := tab_strip_view(tab, active)
+		show_mark := tab_shows_mark(tab)
 		dirty := editor_dirty(editor_of(tab.id))
 		font: u16 = WEIGHT_REGULAR
 		if et, is := tab.kind.(core.Editor_Tab); is && et.preview do font |= FONT_ITALIC // a preview: the next one replaces it
 		// the title is cut to the widest a tab may be; a short tab is padded to TAB_MIN_W
 		// squeezed: only the active tab keeps its close button (the others: ⌘W once active)
 		close := !squeezed || active
-		fixed := tab_fixed_w(ic, show_dot, dirty, extra, close)
+		fixed := tab_fixed_w(ic, show_mark, dirty, extra, close)
 		room := max_tab + (close ? tab_close_w() : 0) - fixed
 		title := clip(label, room, font)
 		if clay.UI(id)({
@@ -763,7 +871,7 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 			backgroundColor = bg,
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 		}) {
-			if show_dot do dot(status_color(st))
+			if show_mark do status_mark_el(view)
 			if dirty do dot(th.text_secondary) // unsaved changes
 			col := mix(th.text_secondary, th.text, em)
 			if tab.status != .Running do col = th.text_muted
@@ -838,7 +946,7 @@ tab_max_w :: proc(cs: ^core.Open_Session, room: f32, p: ^core.Pane = nil) -> (ma
 	for tab in cs.tabs {
 		if p != nil && tab.pane != p.id do continue
 		ic, label, extra := tab_label(cs, tab)
-		natural += clamp(text_w(label) + tab_fixed_w(ic, true, false, extra), px(TAB_MIN_W), px(TAB_MAX_W))
+		natural += clamp(text_w(label) + tab_fixed_w(ic, tab_shows_mark(tab), false, extra), px(TAB_MIN_W), px(TAB_MAX_W))
 	}
 	if natural <= avail do return px(TAB_MAX_W), false
 	return clamp((avail - tab_close_w()) / n, px(TAB_MIN_W), px(TAB_MAX_W)), true
@@ -852,7 +960,7 @@ bar_compact: bool
 // buttons (the search pill as an icon), the agent's button, the gaps.
 top_bar_fixed_w :: proc() -> f32 {
 	w := px(2 * TERM_PAD) + 5 * px(TOOL_BUTTON + SP_1) + px(NEW_MENU_W + SP_1) + bell_extra_w()
-	w += px(SP_2 + SP_3 + AVATAR - 6 + SP_2 + DOT + SP_2) // the agent's button with a dot
+	w += px(SP_2 + SP_3 + AVATAR - 6 + SP_2 + MARK + SP_2) // the agent's button with a status mark
 	if !bar_compact do w += text_w(core.agent_name()) + px(SP_2) // and its name
 	if changes_btn_shown do w += changes_button_w(core.cur()) // the "±" button (ui_changes.odin), when it fits
 	if !state.layout.left_open do w += px(LIGHTS_X + LIGHTS_W + SP_2 - TERM_PAD) + 2 * px(TOOL_BUTTON + SP_1) + px(SP_2)
@@ -862,12 +970,12 @@ top_bar_fixed_w :: proc() -> f32 {
 // A tab's close button and the gap before it.
 tab_close_w :: proc() -> f32 {return px(TAB_H - SP_2 + SP_2)}
 
-// A tab's width besides its title: padding, icon, dots, note, close button, gaps.
-tab_fixed_w :: proc(ic: core.Icon, show_dot, dirty: bool, extra: string, close := true) -> f32 {
+// A tab's width besides its title: padding, icon, status mark, unsaved dot, note, close button, gaps.
+tab_fixed_w :: proc(ic: core.Icon, show_mark, dirty: bool, extra: string, close := true) -> f32 {
 	w := px(SP_3 + SP_1) + px(SP_2) // padding, the gap before the spacer
 	if close do w += tab_close_w()
 	if ic != .None do w += px(KIND_ICON + SP_2)
-	if show_dot do w += px(DOT + SP_2)
+	if show_mark do w += px(MARK + SP_2)
 	if dirty do w += px(DOT + SP_2)
 	if extra != "" do w += text_w(extra) + px(SP_2)
 	return w
@@ -894,9 +1002,11 @@ agent_button :: proc() {
 	}) {
 		avatar(AVATAR - 6)
 		if !bar_compact do clay.TextDynamic(core.agent_name(), txt(needs ? th.waiting : mix(th.text_secondary, th.text, em)))
-		if ht := core.home_tab(); ht != nil && !needs {
-			if st := core.pi_tab_status(ht^); st != .None do dot(status_color(st))
-		}
+		// its status mark's box in every state (top_bar_fixed_w counts it): nothing moves when it changes
+		v := core.Tab_Status_View{progress = -1}
+		if ht := core.home_tab(); ht != nil && !needs do v = core.tab_status_view(ht^)
+		if v.dot != .None do status_mark_el(v)
+		else if clay.UI()({layout = {sizing = {clay.SizingFixed(px(MARK)), clay.SizingFixed(px(MARK))}}}) {}
 		if !state.home_open && ch.unread > 0 {
 			n := ch.unread > 99 ? "99+" : fmt.tprint(ch.unread)
 			if clay.UI(clay.ID("agent_unread"))({
@@ -1358,8 +1468,8 @@ ui_draw :: proc(cmds: clay.ClayArray(clay.RenderCommand), from, to: i32) {
 			sgl.scissor_rect(0, 0, 1 << 15, 1 << 15, true)
 			sgl.begin_quads()
 		case .Custom:
-			ic, col := icon_of_command(cmd)
-			draw_icon(ic, b.x, b.y, b.width, b.height, col)
+			ic, col, param := icon_of_command(cmd)
+			draw_icon(ic, b.x, b.y, b.width, b.height, col, param)
 		case .None, .Image, .OverlayColorStart, .OverlayColorEnd:
 		}
 	}

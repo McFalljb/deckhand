@@ -82,6 +82,10 @@ Tab :: struct {
 	// any terminal tab: what its program reports over OSC 7501 (agent_status.odin)
 	prog:     Prog_Summary,
 	unseen:   bool, // its agent finished while the user was not looking, or "Mark as unread"; not saved
+	// when its status mark last changed (status_since_sweep; another machine's: mirror_merge), and
+	// what it was then (status_key): the rows' "4m". {} = not known (restored); not saved
+	status_since: time.Time,
+	status_key:   u16,
 	pane:     u64, // the pane of its session it sits in (panes.odin); not saved
 	held:     u32, // restored with a session holder terminal id (workspace.json "held"): adopted at launch, then 0
 	// its process still runs in a session holder this run could not attach to (it answered but

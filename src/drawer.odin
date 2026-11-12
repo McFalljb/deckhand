@@ -128,7 +128,7 @@ drawer_header :: proc(dw: f32) {
 	gap := px(SP_2)
 	button_w := text_w("Model", FONT_UI_SMALL) + px(2 * SP_2)
 	used := px(DRAWER_PAD + SP_2) + px(AVATAR) + text_w(core.agent_name(), WEIGHT_BOLD) + 2 * px(TAB_H) + button_w + 6 * gap
-	if ht != nil && ht.agent == .Working do used += px(DOT) + gap
+	if ht != nil && ht.agent == .Working do used += px(MARK) + gap
 	if status != "" do used += text_w(status, FONT_UI_SMALL) + gap
 	room := dw - used
 	if clay.UI(clay.ID("drawer_head"))({
@@ -138,7 +138,7 @@ drawer_header :: proc(dw: f32) {
 	}) {
 		avatar(AVATAR)
 		clay.TextDynamic(core.agent_name(), txt(th.text, WEIGHT_BOLD))
-		if ht != nil && ht.agent == .Working do dot(with_alpha(th.running, 1))
+		if ht != nil && ht.agent == .Working do status_mark_el({dot = .Running, progress = -1}) // working: the turning arc
 		if status != "" do clay.TextDynamic(status, txt(col, FONT_UI_SMALL))
 		spacer()
 		// the model as Deckhand knows it, then the button that opens pi's selector

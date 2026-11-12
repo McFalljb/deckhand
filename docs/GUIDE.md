@@ -183,6 +183,9 @@ start fresh.
   ("stopped (update)").
 - **Deckhand Core crashes**: sessions keep running in the holder, and their screens are rebuilt
   from the last 1 MiB they printed. A job run in progress stops.
+- **The Mac sleeps, or Deckhand Core stalls for a while**: sessions keep running. If the holder
+  stopped hearing from Deckhand Core meanwhile, the core attaches to it again and its tabs carry
+  on. Both logs (`holder.log`, `core.log` in the runtime folder) give each line's time in UTC.
 - **The session holder crashes**: its tabs stop and say "the session holder stopped". pi and
   Claude resume from their files when you restart them; shells start fresh.
 - **Stop All Sessions, a logout or a restart of the Mac**: everything stops. The next start

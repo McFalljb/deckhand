@@ -578,6 +578,45 @@ refused_and_ping_timeout :: proc(t: ^testing.T) {
 	testing.expect_value(t, w.previous, "crash")
 }
 
+// #108: a core dropped for its silence (stopped, starved, or asleep while the holder woke) is
+// let in again like any core: its running terminal is in the new WELCOME (same pid, its TAIL),
+// INPUT on the new connection reaches the program and its OUTPUT comes back. Nothing respawned.
+@(test)
+dropped_core_attaches_again :: proc(t: ^testing.T) {
+	cfg := test_cfg()
+	cfg.pong_timeout = 300 * time.Millisecond
+	h := new_test_holder(t, cfg)
+	defer holder_free(h, true)
+	a := fake_connect(t, h)
+	defer fake_free(a)
+	hello(t, h, a)
+	sp := spawn_ok(t, h, a, 1, `printf 'ready\n'; while read x; do printf 'got:%s\n' "$x"; done`)
+	testing.expect(t, wait_output(t, h, a, 1, "ready"))
+	testing.expect(t, wait_eof(h, a, 5 * time.Second), "a silent core was not dropped")
+	testing.expect(t, h.core == nil)
+	b := fake_connect(t, h)
+	defer fake_free(b)
+	w := hello(t, h, b)
+	testing.expect_value(t, w.previous, "crash")
+	if !testing.expect_value(t, len(w.terminals), 1) do return
+	testing.expect_value(t, w.terminals[0].pid, sp.pid)
+	testing.expect(t, w.terminals[0].exit == nil, "the terminal ended")
+	testing.expect(t, wait_output(t, h, b, 1, "ready"), "no TAIL")
+	fake_input(b, 1, "again\n")
+	testing.expect(t, wait_output(t, h, b, 1, "got:again"), "INPUT after the rejoin")
+	testing.expect_value(t, len(h.terms), 1)
+}
+
+// The silence is measured on awake_now's clock: it moves on with time.tick_now while the machine
+// is awake (it stops only while it sleeps, which a test cannot do).
+@(test)
+awake_clock_advances :: proc(t: ^testing.T) {
+	a0, t0 := awake_now(), time.tick_now()
+	time.sleep(50 * time.Millisecond)
+	da, dt := time.tick_diff(a0, awake_now()), time.tick_since(t0)
+	testing.expectf(t, da >= 40 * time.Millisecond && da <= dt + 5 * time.Millisecond, "awake %v, tick %v", da, dt)
+}
+
 // Past queue_cap queued for a core that does not read, the masters are not read (the program
 // blocks); once the core reads, everything arrives in order.
 @(test)

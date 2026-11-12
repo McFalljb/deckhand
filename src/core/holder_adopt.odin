@@ -188,13 +188,13 @@ holder_handover :: proc() -> bool {
 	for _, t in terms do if t.running && t.pty.held != 0 do append(&held, t)
 	if len(held) == 0 do return false
 	if why := handover_dir_ready(); why != "" {
-		fmt.eprintln("Deckhand: session holder: no handover (the handover folder:", why, "): the sessions run on, restored from the holder's tails next launch")
+		log_ln("Deckhand: session holder: no handover (the handover folder:", why, "): the sessions run on, restored from the holder's tails next launch")
 		holder_leave()
 		return true
 	}
 	probe := data_path(HANDOVER_DIR + "/probe")
 	if !file_write_private(probe, transmute([]u8)string("ok")) {
-		fmt.eprintln("Deckhand: session holder: no handover (cannot write the data dir): the sessions run on, restored from the holder's tails next launch")
+		log_ln("Deckhand: session holder: no handover (cannot write the data dir): the sessions run on, restored from the holder's tails next launch")
 		holder_leave()
 		return true
 	}
@@ -217,7 +217,7 @@ holder_handover :: proc() -> bool {
 		if done || time.tick_diff(time.tick_now(), deadline) <= 0 do break
 	}
 	if !hc.acked {
-		fmt.eprintln("Deckhand: session holder: no GOODBYE_ACK; the next launch restores from the tails")
+		log_ln("Deckhand: session holder: no GOODBYE_ACK; the next launch restores from the tails")
 		return true
 	}
 	if successor && relaunch_helper_waiting() { // a core's handover keeps it for its successor (core_handover_finish)
@@ -242,7 +242,7 @@ holder_handover :: proc() -> bool {
 		meta := Snapshot_Meta{offset = off, xpixel = i64(min(f32(t.cols) * t.cell.x, 65535)), ypixel = i64(min(f32(t.rows) * t.cell.y, 65535))}
 		blob, used, err := snapshot_encode(t.gt, meta, core_handover_formats(), fallback_ok = true, allocator = context.temp_allocator)
 		if err != .None || !file_write_private(snap_path(id), blob) {
-			fmt.eprintln("Deckhand: session holder: no snapshot of terminal", id, err)
+			log_ln("Deckhand: session holder: no snapshot of terminal", id, err)
 			continue
 		}
 		sum := token_hash(string(blob))
@@ -255,7 +255,7 @@ holder_handover :: proc() -> bool {
 	file.terminals = list[:]
 	body, _ := json.marshal(file, {}, context.temp_allocator)
 	if ok, why := macfile_write(data_path(HANDOVER_FILE), HANDOVER_KIND, string(body), hc.key[:]); !ok {
-		fmt.eprintln("Deckhand: session holder: cannot write handover.json:", why)
+		log_ln("Deckhand: session holder: cannot write handover.json:", why)
 		handover_clear()
 	}
 	sock_shutdown(hc.fd) // done: the holder lingers until we close (src/holder: LINGER)
@@ -291,16 +291,16 @@ handover_take :: proc() -> map[u32]Handover_Snap {
 	defer handover_clear()
 	body, ok, why := macfile_read(data_path(HANDOVER_FILE), HANDOVER_KIND, hc.key[:], context.temp_allocator)
 	if !ok {
-		if why != "missing" do fmt.eprintln("Deckhand: handover.json not used:", why)
+		if why != "missing" do log_ln("Deckhand: handover.json not used:", why)
 		return out
 	}
 	f, pok, pwhy := handover_parse(body)
 	if !pok {
-		fmt.eprintln("Deckhand: handover.json not used:", pwhy)
+		log_ln("Deckhand: handover.json not used:", pwhy)
 		return out
 	}
 	if d := trust.handover_fresh(f.min_reader, HANDOVER_READER, f.holder, hc.instance, hc.previous); d != .Use {
-		fmt.eprintln("Deckhand: handover.json not used:", d)
+		log_ln("Deckhand: handover.json not used:", d)
 		return out
 	}
 	for t in f.terminals {
@@ -308,7 +308,7 @@ handover_take :: proc() -> map[u32]Handover_Snap {
 		if !rok do continue
 		sum := token_hash(string(blob))
 		if string(hex.encode(sum[:], context.temp_allocator)) != t.sha256 {
-			fmt.eprintln("Deckhand: handover: the snapshot of terminal", t.term, "does not match handover.json: not used")
+			log_ln("Deckhand: handover: the snapshot of terminal", t.term, "does not match handover.json: not used")
 			continue
 		}
 		out[u32(t.term)] = {offset = t.offset, blob = blob, inexact = t.inexact}
@@ -334,13 +334,13 @@ holder_adopt_all :: proc() {
 	}
 	// the held ids are this holder's only if saved with it (two holders both number from 1)
 	same := held_holder != "" && held_holder == hc.instance
-	if any_held && !same do fmt.eprintln("Deckhand: session holder: workspace.json's held ids are another holder's: not adopted")
+	if any_held && !same do log_ln("Deckhand: session holder: workspace.json's held ids are another holder's: not adopted")
 	listed := make(map[u32]bool, 16, context.temp_allocator)
 	for &s in state.open_sessions do for &t in s.tabs do if t.held != 0 {
 		listed[t.held] = true
 		if !same do t.held = 0 // restored as without a holder
 	}
-	if !hc.tokens_loaded && any_held && hc.tokens_why != "missing" do fmt.eprintln("Deckhand: tokens.json not used:", hc.tokens_why) // enabled at attach (holder_connect)
+	if !hc.tokens_loaded && any_held && hc.tokens_why != "missing" do log_ln("Deckhand: tokens.json not used:", hc.tokens_why) // enabled at attach (holder_connect)
 	snaps := handover_take()
 	untrusted := 0
 	for &s in state.open_sessions do for &tab in s.tabs {
@@ -359,7 +359,7 @@ holder_adopt_all :: proc() {
 		// tab (workspace.json is not MAC'd: an edit could put a Claude's id on a shell tab)
 		saved, known := socket_tokens_start_of(id)
 		if hc.tokens_loaded && (!known || saved.kind != kind) {
-			fmt.eprintln("Deckhand: session holder: terminal", id, "was not started as this", HELD_KIND_NAMES[kind], "tab (tokens.json): not adopted")
+			log_ln("Deckhand: session holder: terminal", id, "was not started as this", HELD_KIND_NAMES[kind], "tab (tokens.json): not adopted")
 			continue
 		}
 		if !adopt_tab(&s, &tab, id, snaps, saved, known) do continue
@@ -404,12 +404,12 @@ holder_adopt_all :: proc() {
 	}
 	sync.unlock(&hc.mu)
 	for id in gone {
-		fmt.eprintln("Deckhand: session holder: releasing terminal", id, "(no tab claims it)")
+		log_ln("Deckhand: session holder: releasing terminal", id, "(no tab claims it)")
 		socket_tokens_release(id)
 		holder_release(id)
 	}
 	if kept > 0 {
-		fmt.eprintln("Deckhand: session holder:", kept, "terminal(s) no restored tab claims: kept running")
+		log_ln("Deckhand: session holder:", kept, "terminal(s) no restored tab claims: kept running")
 		note = strings.concatenate({holder_kept_text(kept), note == "" ? "" : " ", note}, context.temp_allocator)
 	}
 	if note != "" do window_toast(note, err = true)

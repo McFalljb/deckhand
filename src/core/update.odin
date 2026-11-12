@@ -724,7 +724,7 @@ update_swap :: proc() -> string {
 			if exe, iok, iwhy := holder_install(bin, home_root); iok {
 				helper = strings.clone(exe, context.temp_allocator)
 				delete(exe)
-			} else do fmt.eprintln("Deckhand: update: no relaunch helper (", iwhy, "): sessions are kept; the new app attaches to them as after a quit (no successor is named)")
+			} else do log_ln("Deckhand: update: no relaunch helper (", iwhy, "): sessions are kept; the new app attaches to them as after a quit (no successor is named)")
 		}
 	}
 	backup := fmt.tprintf("%s.old-%s", bundle, upd.current)
@@ -765,7 +765,7 @@ update_swap :: proc() -> string {
 		run, rwhy := sock_runtime_dir_why(context.temp_allocator)
 		if rwhy == "" && new_exe != "" {
 			ok, why := relaunch_helper_start(helper, bundle, new_exe, run, no_open = upd.test)
-			if !ok do fmt.eprintln("Deckhand: update:", why, "- relaunching without a successor")
+			if !ok do log_ln("Deckhand: update:", why, "- relaunching without a successor")
 			helped = ok
 		}
 	}
@@ -928,7 +928,7 @@ update_save :: proc() {
 	fmt.sbprintf(&b, `,"backup_starts":%d,"staged":`, upd.backup_starts)
 	json_quote(&b, upd.staged)
 	strings.write_string(&b, "}\n")
-	if e := write_atomic(p, strings.to_string(b)); e != "" do fmt.eprintln("Deckhand: could not save", p, ":", e)
+	if e := write_atomic(p, strings.to_string(b)); e != "" do log_ln("Deckhand: could not save", p, ":", e)
 }
 
 // ---- the wire ----

@@ -355,7 +355,7 @@ agent_prompt_migrate :: proc(today: string) -> bool {
 	bak := fmt.tprintf("%s.bak-%s", path, today)
 	if !os.exists(bak) && os.rename(path, bak) != nil do return false
 	if e := write_atomic(path, strings.concatenate({front, ATLAS_PROMPT_STARTER}, context.temp_allocator)); e != "" {
-		fmt.eprintln("Deckhand: could not update Atlas's prompt:", e)
+		log_ln("Deckhand: could not update Atlas's prompt:", e)
 		return false
 	}
 	return true
@@ -379,7 +379,7 @@ agent_guide_install :: proc() {
 	path := agent_guide_path()
 	if path == "" do return
 	if data, err := os.read_entire_file(path, context.temp_allocator); err == nil && string(data) == ATLAS_GUIDE do return
-	if e := write_atomic(path, ATLAS_GUIDE); e != "" do fmt.eprintln("Deckhand: could not write Atlas's copy of the guide:", e)
+	if e := write_atomic(path, ATLAS_GUIDE); e != "" do log_ln("Deckhand: could not write Atlas's copy of the guide:", e)
 }
 
 // ---- the start ----

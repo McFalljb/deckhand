@@ -149,7 +149,7 @@ manifest_load :: proc(dir: string) {
 			raw: Raw
 			if jg.unmarshal(data, &raw, .JSON, context.temp_allocator) == nil {
 				for e in raw.extensions do append(&manifest, Pi_Extension{name = strings.clone(e.name), required = e.required, default_on = e.default_on, does = strings.clone(e.does)})
-			} else do fmt.eprintln("Deckhand: the pi integration's extensions.json is not valid JSON")
+			} else do log_ln("Deckhand: the pi integration's extensions.json is not valid JSON")
 		}
 	}
 }

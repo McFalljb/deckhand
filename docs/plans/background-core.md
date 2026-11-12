@@ -431,7 +431,7 @@ JSON; terminal bytes are raw.
 | `GOODBYE{mode: handover\|shutdown}` | `GOODBYE_ACK{terminals[{id, offset}], successor_secret}` |
 | `FOREGROUND` | `FOREGROUND_IS{pgid}` |
 | `UPGRADE{path}` | `UPGRADE_FAILED{error}` |
-| `PING` (every 5 s) | `PONG`. A core that misses pongs for 30 s is dropped. |
+| `PING` (every 5 s) | `PONG`. A core that misses pongs for 30 s is dropped (counted on a clock that stops while the Mac sleeps). A dropped core that still runs attaches again, as after an `UPGRADE` (same instance and key; #108). |
 | — | `REFUSED{code: wire\|identity\|floor\|attached\|secret, error}`, then close |
 
 The holder disclaims TCC responsibility at start (herdr's `macos_responsibility.rs`).

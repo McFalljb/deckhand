@@ -27,6 +27,10 @@ import "../trust"
 
 foreign import libc {"system:c", "system:util"} // forkpty: libutil before glibc 2.34
 
+// The clock a core's silence is measured on (pong_timeout; sys_darwin.odin): time.tick_now is
+// CLOCK_MONOTONIC here, which already stops during a suspend.
+awake_now :: proc() -> time.Tick {return time.tick_now()}
+
 TIOCSWINSZ :: 0x5414
 TIOCGWINSZ :: 0x5413
 EAGAIN :: 11

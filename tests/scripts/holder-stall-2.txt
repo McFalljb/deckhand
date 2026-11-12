@@ -1,0 +1,11 @@
+# tests/scripts/holder-stall.sh, run 2: after the core was stopped past the holder's pong timeout and
+# continued, a new window attaches to that same core: its pi tab still runs (never restarted), its
+# output goes on, and what is typed reaches the pi through the holder.
+waitstate 20000 open_sessions.0.tabs.0.status running
+waitfor stall-tick 15000
+type after-stall
+key enter
+waitfor got:after-stall 15000
+wait 500
+dump holder-stall-2
+quit_window

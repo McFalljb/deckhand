@@ -159,7 +159,7 @@ window_attached :: proc() -> bool {return link != nil && !link.held_off}
 // Main thread.
 core_attach_window :: proc(on_frames: proc(), on_drain: proc() = nil) -> (end: cw.Mem_End, ok: bool) {
 	if link != nil {
-		fmt.eprintln("Deckhand: a second window may not attach while one is attached")
+		log_ln("Deckhand: a second window may not attach while one is attached")
 		return {}, false // one window at a time, in a release build too
 	}
 	heap := runtime.heap_allocator()
@@ -298,7 +298,7 @@ window_link_flush :: proc(sweep := false) {
 link_send_state :: proc(text: string) {
 	if len(text) > link_max_payload {
 		if !link.too_large_said {
-			fmt.eprintfln("Deckhand: the window's state message is %d bytes, over the link's %d: the window keeps the state it has until State shrinks", len(text), link_max_payload)
+			log_fln("Deckhand: the window's state message is %d bytes, over the link's %d: the window keeps the state it has until State shrinks", len(text), link_max_payload)
 			link.too_large_said = true
 		}
 		link.need_full = true
@@ -463,7 +463,7 @@ window_link_pump :: proc() -> (capped: bool) {
 			err: cw.Recv_Error
 			f, err = cw.sock_recv(link.sock, context.temp_allocator)
 			if err == .Closed {
-				fmt.eprintln("Deckhand: the window's connection ended:", cw.sock_reason(link.sock))
+				log_ln("Deckhand: the window's connection ended:", cw.sock_reason(link.sock))
 				core_detach_window() // the window went (or its peer changed): what it owed ends
 				break
 			}
@@ -528,7 +528,7 @@ link_take_credits :: proc() {
 // transport closes a peer past its cap. Called where nothing iterates the streams (pump, flush).
 @(private = "file")
 link_close_overflowed :: proc() {
-	fmt.eprintln("Deckhand: the window sent more than its link holds: it is closed")
+	log_ln("Deckhand: the window sent more than its link holds: it is closed")
 	core_detach_window(keep_transport = true) // in process the window keeps its end: its sends now fail (a few KiB kept)
 }
 
@@ -754,7 +754,7 @@ link_reply_in :: proc(obj: json.Object) {
 	id := string(obj["id"].(json.String) or_else "")
 	for &a in link.asking do if a.id == id && !a.got {
 		if e := wire_read(obj["reply"], &a.reply, type_info_of(Window_Reply), context.temp_allocator); e != "" {
-			fmt.eprintln("Deckhand: a window.reply refused:", e)
+			log_ln("Deckhand: a window.reply refused:", e)
 			a.reply = {}
 		}
 		a.got = true
@@ -862,7 +862,7 @@ link_send :: proc(text: string) -> bool {
 	if link == nil do return false
 	if link.sock != nil {
 		if e := cw.sock_send(link.sock, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
-			fmt.eprintln("Deckhand: the window's connection refused a message:", e)
+			log_ln("Deckhand: the window's connection refused a message:", e)
 			return false
 		}
 		cw.sock_flush(link.sock) // never blocks: the rest goes when the socket takes it (window_link_io)
@@ -870,7 +870,7 @@ link_send :: proc(text: string) -> bool {
 	}
 	if e := cw.mem_send(link.core_end, cw.JSON_CHANNEL, .Data, transmute([]u8)text); e != .None {
 		// a window that does not read (in process it always does): its state starts again from a full
-		fmt.eprintln("Deckhand: the window's link refused a message:", e)
+		log_ln("Deckhand: the window's link refused a message:", e)
 		return false
 	}
 	if link.on_frames != nil do link.on_frames()
@@ -943,14 +943,14 @@ window_link_finished :: proc(ev: Event) {
 @(private = "file")
 link_message :: proc(text: string) -> (command: bool) {
 	if !json_depth_ok(text) {
-		fmt.eprintln("Deckhand: a window message nested too deeply")
+		log_ln("Deckhand: a window message nested too deeply")
 		return
 	}
 	v, jerr := jg.parse_string(text, .JSON, true, context.temp_allocator)
 	obj, ok := v.(json.Object)
 	wire_read_budget_window(text) // wire_read's limit for this message, a window's (state_read.odin)
 	if jerr != nil || !ok {
-		fmt.eprintln("Deckhand: a window message that is not a JSON object")
+		log_ln("Deckhand: a window message that is not a JSON object")
 		return
 	}
 	type, _ := obj["type"].(json.String)
@@ -960,7 +960,7 @@ link_message :: proc(text: string) -> (command: bool) {
 	case "window.facts", "window.tab_facts", "window.command", "script.core", "tab_host.event", "finished", "window.reply":
 		// a window's own (its facts, the internal caller, test mode, the tab_host caller, a call's
 		// answer, a request's reply): never another machine's core's
-		fmt.eprintln("Deckhand: a hub sent", type, "(refused)")
+		log_ln("Deckhand: a hub sent", type, "(refused)")
 		link_reply_now(id, fail(fmt.tprintf("%s is a window's, not a hub's", type)), 0)
 		return
 	}
@@ -1008,7 +1008,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		f: Window_Facts
 		if e := wire_read(obj["facts"], &f, type_info_of(Window_Facts), heap); e != "" {
 			wire_free(&f, type_info_of(Window_Facts), heap)
-			fmt.eprintln("Deckhand: window.facts refused:", e)
+			log_ln("Deckhand: window.facts refused:", e)
 			return
 		}
 		wire_free(&link.facts, type_info_of(Window_Facts), heap)
@@ -1019,7 +1019,7 @@ link_message :: proc(text: string) -> (command: bool) {
 	case "window.tab_facts":
 		n, nok := obj["tab_id"].(json.Integer)
 		if !nok || n <= 0 {
-			fmt.eprintln("Deckhand: window.tab_facts without a tab_id")
+			log_ln("Deckhand: window.tab_facts without a tab_id")
 			return
 		}
 		window_tab_facts_drop(u64(n))
@@ -1029,7 +1029,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		f: Tab_Facts
 		if e := wire_read(fv, &f, type_info_of(Tab_Facts), heap); e != "" {
 			wire_free(&f, type_info_of(Tab_Facts), heap)
-			fmt.eprintln("Deckhand: window.tab_facts refused:", e)
+			log_ln("Deckhand: window.tab_facts refused:", e)
 			return
 		}
 		link.tab_facts[u64(n)] = f
@@ -1040,7 +1040,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		command = true
 		cmd, err := window_command_decode(obj["command"])
 		if err != "" {
-			fmt.eprintln("Deckhand: a window.command refused:", err)
+			log_ln("Deckhand: a window.command refused:", err)
 			link_reply_now(id, fail(err), 0)
 			return
 		}
@@ -1050,7 +1050,7 @@ link_message :: proc(text: string) -> (command: bool) {
 		// a page's, an app's or a window worker's report: the tab_host caller, never ui
 		cmd, err := command_variant_read(obj["command"], TAB_HOST_COMMANDS[:])
 		if err != "" {
-			fmt.eprintln("Deckhand: a tab_host.event refused:", err)
+			log_ln("Deckhand: a tab_host.event refused:", err)
 			link_reply_now(id, fail(fmt.tprintf("tab_host.event: %s", err)), 0)
 			return
 		}
@@ -1065,9 +1065,9 @@ link_message :: proc(text: string) -> (command: bool) {
 				return
 			}
 		}
-		fmt.eprintln("Deckhand: an unknown window message:", type)
+		log_ln("Deckhand: an unknown window message:", type)
 	case:
-		fmt.eprintln("Deckhand: an unknown window message:", type)
+		log_ln("Deckhand: an unknown window message:", type)
 	}
 	return
 }
@@ -1269,7 +1269,7 @@ core_attach_window_sock :: proc(fd: Sock_Fd, leftover: []u8, peer: trust.Peer, h
 	// the newest connection wins (§10.4, decided 2026-11-09): the one it replaces is told who took
 	// it, and waits for its user's Take back rather than reconnecting (they would take turns)
 	if link != nil {
-		fmt.eprintln("Deckhand: a new", hub ? "hub" : "window", "attached: the previous", link.hub ? "hub" : "window", "is let go")
+		log_ln("Deckhand: a new", hub ? "hub" : "window", "attached: the previous", link.hub ? "hub" : "window", "is let go")
 		if link.hub {
 			b := strings.builder_make(context.temp_allocator)
 			fmt.sbprintf(&b, `{{"v":%d,"type":"hub.taken","by":`, PROTOCOL_VERSION)
@@ -1372,7 +1372,7 @@ window_link_fd :: proc() -> (fd: Sock_Fd, out: bool) {
 window_link_io :: proc() {
 	if link == nil || link.sock == nil do return
 	if _, why := cw.sock_flush(link.sock); why != .None {
-		fmt.eprintln("Deckhand: the window's connection ended:", why)
+		log_ln("Deckhand: the window's connection ended:", why)
 		core_detach_window()
 	}
 }

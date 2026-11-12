@@ -53,7 +53,7 @@ holder_launch :: proc(bin, run, data: string, env: []string) -> (pid: i32, ok: b
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, holder_label_prefix)
 	if lok do return lpid, true, ""
-	fmt.eprintln("Deckhand: session holder: the launchd launch failed:", lwhy, "- starting it directly")
+	log_ln("Deckhand: session holder: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env)
 }
 
@@ -103,7 +103,7 @@ launchd_launch :: proc(bin, run, data: string, env: []string, prefix: string, la
 		p, w := launchd_ready_serve(cfd, exe, env, domain, label, &booted, deadline, launchctl, secret)
 		sock_close(cfd)
 		if p > 0 do return p, label, true, ""
-		fmt.eprintln("Deckhand: session holder: ready:", w)
+		log_ln("Deckhand: session holder: ready:", w)
 		if booted do return 0, label, false, w // the real child was answered and failed
 	}
 }
@@ -197,7 +197,7 @@ launchd_bootout :: proc(domain, label: string, launchctl := LAUNCHCTL) {
 	out, st := run_group({launchctl, "bootout", fmt.tprintf("%s/%s", domain, label)}, 10 * time.Second, merge_stderr = true)
 	// gone already (it never loaded, or a sweep raced us) is fine; anything else is worth a line
 	if st != .Ok && !strings.contains(out, "No such process") && !strings.contains(out, "Could not find service") {
-		fmt.eprintln("Deckhand: session holder: launchctl bootout", label, ":", strings.trim_space(out))
+		log_ln("Deckhand: session holder: launchctl bootout", label, ":", strings.trim_space(out))
 	}
 }
 
@@ -313,7 +313,7 @@ core_launch :: proc(bin, run, data: string, from_tab := false, secret := "") -> 
 	if autotest_active || hook_env(.Holder_Direct) == "1" do return holder_launch_direct(bin, run, data, env, "serve", secret)
 	lpid, _, lok, lwhy := launchd_launch(bin, run, data, env, core_label_prefix, mode = "serve", secret = secret)
 	if lok do return lpid, true, ""
-	fmt.eprintln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
+	log_ln("Deckhand: background core: the launchd launch failed:", lwhy, "- starting it directly")
 	return holder_launch_direct(bin, run, data, env, "serve", secret)
 }
 

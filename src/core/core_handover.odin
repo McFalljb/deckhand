@@ -88,7 +88,7 @@ core_handover_start :: proc(to: string) -> Result {
 	for f, i in c.snapshot do handover.formats[i] = strings.clone(f)
 	handover.until = time.tick_add(time.tick_now(), jobs_handover_wait)
 	n := jobs_running_count()
-	fmt.eprintfln("Deckhand: background core: handing over to %s (%s, build %s)%s", path, c.version == "" ? "a development build" : c.version, c.build, n > 0 ? fmt.tprintf(" once %d job run(s) end, at most %v", n, jobs_handover_wait) : "")
+	log_fln("Deckhand: background core: handing over to %s (%s, build %s)%s", path, c.version == "" ? "a development build" : c.version, c.build, n > 0 ? fmt.tprintf(" once %d job run(s) end, at most %v", n, jobs_handover_wait) : "")
 	if autotest_active do fmt.printfln("[autotest] core handover: to %s, %d job run(s)", to, n)
 	return {ok = true} // the next tick quits (this result reaches the window first)
 }
@@ -126,15 +126,15 @@ core_handover_finish :: proc(run: string) {
 	instance_lock_release(instance_core_fd)
 	instance_lock_release(instance_fd)
 	instance_core_fd, instance_fd = -1, -1
-	if len(secret) != 64 do fmt.eprintln("Deckhand: background core: no successor secret (no held session, or no ack): the successor attaches as any core does")
+	if len(secret) != 64 do log_ln("Deckhand: background core: no successor secret (no held session, or no ack): the successor attaches as any core does")
 	// a scene's older core hands over to the new one, which says its own version (remote-install.sh)
 	when TEST_HOOKS do posix.unsetenv(strings.clone_to_cstring(HOOK_ENV[.Core_Version], context.temp_allocator))
 	pid, ok, why := core_launch(handover.to, run, home_root, secret = len(secret) == 64 ? secret : "")
 	if !ok {
 		self := executable_path()
-		fmt.eprintln("Deckhand: background core: the successor did not start:", why, "- starting this core's binary again,", self)
+		log_ln("Deckhand: background core: the successor did not start:", why, "- starting this core's binary again,", self)
 		pid, ok, why = core_launch(self, run, home_root, secret = len(secret) == 64 ? secret : "")
 	}
-	if !ok do fmt.eprintln("Deckhand: background core: no core started:", why, "- the next window launches one")
+	if !ok do log_ln("Deckhand: background core: no core started:", why, "- the next window launches one")
 	else if autotest_active do fmt.printfln("[autotest] core handover: successor pid %d", pid)
 }

@@ -845,7 +845,7 @@ run_command :: proc(cmd: Command, caller := Caller{kind = .Internal}, request_id
 		// a window process runs only its own caches' commands, and they change no State
 		if replica_process && (!window_local_command(cmd) || changed) {
 			replica_core_runs += 1
-			fmt.eprintfln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
+			log_fln("Deckhand: BUG: the window process ran %s on its replica (it is the core's to run)", command_type(cmd))
 		}
 	}
 	if !caller_may(caller, cmd) {
@@ -2663,7 +2663,7 @@ test_mode :: proc() -> bool {return hook_env(.Script) != ""}
 
 // Said on Deckhand's stderr (the scene's log) whenever test mode refuses a real binary.
 test_mode_refused :: proc(what: string) {
-	fmt.eprintf("Deckhand: test mode: refusing to run the real %s (no stand-in command set)\n", what)
+	log_f("Deckhand: test mode: refusing to run the real %s (no stand-in command set)\n", what)
 }
 
 // What a pi tab runs: DECKHAND_CMD (tests, benchmarks), else pi (PI_TAB_CMD); in test mode the

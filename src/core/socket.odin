@@ -156,14 +156,14 @@ socket_start :: proc(dir := "") -> bool {
 		why: string
 		d, why = sock_runtime_dir_why(context.temp_allocator)
 		if why != "" {
-			fmt.eprintln("Deckhand: control socket:", why)
+			log_ln("Deckhand: control socket:", why)
 			return false
 		}
 	}
 	path := fmt.aprintf("%s/%s", d, CORE_SOCK)
 	fd, ok := sock_listen(path)
 	if !ok {
-		fmt.eprintln("Deckhand: control socket: cannot listen on", path)
+		log_ln("Deckhand: control socket: cannot listen on", path)
 		delete(path)
 		return false
 	}
@@ -173,7 +173,7 @@ socket_start :: proc(dir := "") -> bool {
 	srv.running = true
 	srv.accept = thread.create_and_start(accept_loop)
 	if srv.accept == nil {
-		fmt.eprintln("Deckhand: control socket: cannot start the accept thread")
+		log_ln("Deckhand: control socket: cannot start the accept thread")
 		sock_close(fd)
 		sock_unlink(path)
 		delete(path)
@@ -233,7 +233,7 @@ socket_mint_token :: proc(caller: Caller, allocator := context.allocator, single
 	// the user's and Deckhand's own callers have no token: the window's one door is
 	// core_attach_window (window_link.odin). A token this returns for them knows nothing.
 	if !token_caller_ok(caller) {
-		fmt.eprintln("Deckhand: no token is made for the", CALLER_NAMES[caller.kind], "caller")
+		log_ln("Deckhand: no token is made for the", CALLER_NAMES[caller.kind], "caller")
 		return tok
 	}
 	sync.lock(&srv.mu)
@@ -1310,7 +1310,7 @@ socket_tokens_enable :: proc(path: string, key: []u8) -> (loaded: bool, why: str
 		clear(&srv.held_root)
 		clear(&srv.held_ro)
 		clear(&srv.held_start)
-		if why != "missing" do fmt.eprintln("Deckhand: tokens.json not trusted, old tokens are unknown:", why)
+		if why != "missing" do log_ln("Deckhand: tokens.json not trusted, old tokens are unknown:", why)
 	}
 	srv.tok_on = true
 	tokens_save()
@@ -1570,7 +1570,7 @@ tokens_flush :: proc() {
 	sync.unlock(&srv.mu)
 	if tokens_write_probe != nil do tokens_write_probe()
 	if ok, why := macfile_write(path, TOKENS_KIND, body, key[:]); !ok {
-		fmt.eprintln("Deckhand: cannot save tokens.json:", why)
+		log_ln("Deckhand: cannot save tokens.json:", why)
 	}
 	sync.lock(&srv.mu)
 	srv.tok_written = gen

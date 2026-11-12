@@ -22,6 +22,9 @@ package core
 // the key's length, ids (non-zero, unique), TAIL starts against the WELCOME offsets. A failure
 // at the handshake closes the connection and the app runs without a holder; one later is
 // "holder lost": every held terminal ends (unknown exit) and its tab says the holder stopped.
+// Except when the holder closed the connection but still runs (it dropped this core after its pong
+// timeout: the core was stopped, or the Mac slept): the core attaches to the same holder run
+// again, as after an upgrade (holder_rejoin, #108), and its tabs go on as they were.
 //
 // Threads: the main thread connects, spawns and writes; a reader thread decodes frames into
 // the Held entries (hc.mu) and pings every 5 s (so a paused frame loop never gets us dropped).
@@ -119,8 +122,12 @@ Holder_Client :: struct {
 	adopt_done:    bool, // the launch's adopt ran: terminals a later WELCOME lists are kept unseen
 	unreachable:   bool, // a holder answered but did not attach (Warn_Running): it may run kept sessions
 	path:      string, // the socket connected to (an upgrade reconnects to it)
+	listed:    map[u32]bool, // the last reattach's WELCOME terminals (release_again)
 	holder_rev: i64, // WELCOME.holder_rev
 	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
+	rejoining: bool, // the holder dropped us and the reader attaches again: frames wait in pending (wmu)
+	released:  map[u32]bool, // terminals this core RELEASEd (or gave up spawning): sent again to a holder that still lists them after a reattach (mu)
+	stuck:     bool, // a send blocked for SO_SNDTIMEO: the holder does not read (hung), so the end is no drop to rejoin after
 	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
 	up_done:   bool, // the outcome is in up_result (mu)
@@ -271,7 +278,7 @@ holder_client_start :: proc() -> bool {
 					append(&silent, path)
 				} else do answered = true
 			case .Stale:
-				fmt.eprintln("Deckhand: session holder: removing a dead holder's socket", path)
+				log_ln("Deckhand: session holder: removing a dead holder's socket", path)
 				sock_unlink(path)
 			}
 		}
@@ -287,7 +294,7 @@ holder_client_start :: proc() -> bool {
 		// attach is tried again once the reservation has lapsed (holder_successor_retry_tick).
 		hc.tried, hc.unreachable = true, true
 		if hc.successor_retries < SUCCESSOR_RETRIES do hc.successor_retry = time.tick_add(time.tick_now(), hw.SUCCESSOR_TTL + 2 * time.Second)
-		fmt.eprintln("Deckhand: session holder: it is reserved for the Deckhand an update relaunches; trying again once that lapses")
+		log_ln("Deckhand: session holder: it is reserved for the Deckhand an update relaunches; trying again once that lapses")
 		window_toast("The session holder is reserved for the Deckhand an update is starting. Its sessions come back here in about a minute if that Deckhand doesn't take them; tabs opened now stop when Deckhand quits.", err = true)
 		return false
 	}
@@ -300,13 +307,13 @@ holder_client_start :: proc() -> bool {
 			// another build's holder: never a silent second one, and nothing of ours goes to it. The
 			// user is asked once whether to stop it (Holder_Replace; the window shows state.holder_ask)
 			n := holder_children(hc.refused_pid)
-			fmt.eprintln("Deckhand: session holder: one from another build runs (pid", hc.refused_pid, ",", n, "sessions): asking whether to replace it")
+			log_ln("Deckhand: session holder: one from another build runs (pid", hc.refused_pid, ",", n, "sessions): asking whether to replace it")
 			state.holder_ask = {pid = hc.refused_pid, sessions = n}
 			window_state_changed()
 			return false
 		}
 		hc.hung_since = time.tick_now()
-		fmt.eprintln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
+		log_ln("Deckhand: session holder: one runs but does not answer; no second one is started, new tabs stop at quit")
 		window_toast("The session holder isn't answering: tabs opened now stop when Deckhand quits. Sessions it keeps aren't shown.", err = true)
 		return false
 	case .Launch:
@@ -314,18 +321,18 @@ holder_client_start :: proc() -> bool {
 	hc.tried = true
 	bin := holder_bin_find(context.temp_allocator)
 	if bin == "" {
-		fmt.eprintln("Deckhand: session holder: deckhand-core not found; sessions stop at quit")
+		log_ln("Deckhand: session holder: deckhand-core not found; sessions stop at quit")
 		return false
 	}
 	exe, iok, iwhy := holder_install(bin, home_root)
 	if !iok {
-		fmt.eprintln("Deckhand: session holder: install failed:", iwhy)
+		log_ln("Deckhand: session holder: install failed:", iwhy)
 		return false
 	}
 	defer delete(exe)
 	before := holder_socks(run)
 	if _, lok, lwhy := holder_launch(exe, run, home_root, nil); !lok {
-		fmt.eprintln("Deckhand: session holder: cannot start it:", lwhy)
+		log_ln("Deckhand: session holder: cannot start it:", lwhy)
 		return false
 	}
 	deadline := time.tick_now()
@@ -336,7 +343,7 @@ holder_client_start :: proc() -> bool {
 		}
 		time.sleep(20 * time.Millisecond)
 	}
-	fmt.eprintln("Deckhand: session holder: it did not answer within 5 s")
+	log_ln("Deckhand: session holder: it did not answer within 5 s")
 	return false
 }
 
@@ -384,14 +391,14 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	if !ok do return refused ? .Stale : .Answered // not refused (EACCES, a race): not known dead
 	peer, tok := trust.peer_read_token(fd)
 	if d := trust.peer_allowed(.Adhoc, trust.own_uid(), peer); d != .Allow {
-		fmt.eprintln("Deckhand: session holder: refused its peer:", d)
+		log_ln("Deckhand: session holder: refused its peer:", d)
 		sock_close(fd)
 		return .Answered
 	}
 	// its code, before HELLO: SPAWN carries the environment and its tokens (§5.3, P9), HELLO the
 	// successor secret. Another build's holder (an older one signed otherwise): the user decides
 	if why := holder_peer_code_ok(tok); why != "" {
-		fmt.eprintln("Deckhand: session holder: refused its peer:", why)
+		log_ln("Deckhand: session holder: refused its peer:", why)
 		sock_close(fd)
 		refused_code_pid = peer.pid
 		return .Refused_Code
@@ -401,7 +408,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	rx_reset()
 	handshake_got = 0
 	fail :: proc(why: string) -> Connect_Result {
-		fmt.eprintln("Deckhand: session holder:", why)
+		log_ln("Deckhand: session holder:", why)
 		sock_close(hc.fd)
 		hc.fd = -1
 		for _, h in hc.held do held_free(h)
@@ -471,7 +478,7 @@ holder_connect :: proc(path: string, secret: string) -> Connect_Result {
 	hc.pid = peer.pid
 	copy(hc.key[:], key)
 	hc.next_id = max_id + 1
-	hc.on, hc.lost, hc.handed, hc.stop = true, false, false, false
+	hc.on, hc.lost, hc.handed, hc.stop, hc.stuck = true, false, false, false, false
 	// tokens.json from now on, whenever the holder was attached (at launch or mid-run): its
 	// processes keep their tokens across a quit. A new holder's key verifies no older file.
 	tpath := fmt.tprintf("%s/tokens.json", strings.trim_right(home_root, "/"))
@@ -555,14 +562,26 @@ holder_reader :: proc() {
 		if !sock_wait_readable(hc.fd, 100) do continue
 		n := sock_read(hc.fd, buf)
 		why := ""
+		ended := n <= 0 // the connection ended (or failed): not a peer that changed
 		if n <= 0 do why = n == 0 ? "the holder closed the connection" : "read failed"
-		else if d := trust.peer_still(hc.peer, trust.peer_read(hc.fd)); d != .Allow do why = fmt.tprintf("its peer changed since connect: %v", d)
+		else if d := trust.peer_still(hc.peer, trust.peer_read(hc.fd)); d != .Allow {
+			why = fmt.tprintf("its peer changed since connect: %v", d)
+			// a peer that closed its end can no longer be read (No_Peer): the connection ended
+			// with bytes still unread. They are not used (a rejoin's TAIL has them again).
+			ended = d == .No_Peer
+		}
 		if why != "" {
 			// mid-upgrade, the old image's connection closes at its exec: the new image (or the
 			// keeper) serves the same socket
 			if sync.atomic_load(&hc.upgrading) && holder_reattach() {
 				// frames that came behind the new image's TAILs are in hc.rx already (a quiet
 				// session sends nothing more), as after a first attach
+				if !holder_frames() do return
+				continue
+			}
+			// the holder ended the connection itself but still runs: it dropped this core (its
+			// pong timeout: the core was stopped, or the Mac slept). Attach to it again (#108).
+			if ended && !sync.atomic_load(&hc.upgrading) && !sync.atomic_load(&hc.stuck) && !sync.atomic_load(&hc.handed) && holder_alive() && holder_rejoin(why) {
 				if !holder_frames() do return
 				continue
 			}
@@ -648,7 +667,7 @@ holder_frame :: proc(f: hw.Frame) {
 	case .Spawn_Failed:
 		m: hw.Spawn_Failed
 		if h == nil || h.spawn != .Waiting do return
-		if hw.decode(f, .Spawn_Failed, &m, context.temp_allocator) == .None do fmt.eprintln("Deckhand: session holder: spawn failed:", m.error)
+		if hw.decode(f, .Spawn_Failed, &m, context.temp_allocator) == .None do log_ln("Deckhand: session holder: spawn failed:", m.error)
 		h.spawn = .Failed
 		sync.cond_broadcast(&hc.cond)
 	case .Foreground_Is:
@@ -671,7 +690,7 @@ holder_frame :: proc(f: hw.Frame) {
 		upgrade_finish_locked({error = strings.clone(why), holder_rev = hc.holder_rev, pid = hc.pid})
 	case .Supervise_Status, .Pong, .Unknown:
 	case:
-		fmt.eprintln("Deckhand: session holder: ignoring a frame of kind", f.kind)
+		log_ln("Deckhand: session holder: ignoring a frame of kind", f.kind)
 	}
 }
 
@@ -680,7 +699,7 @@ holder_frame :: proc(f: hw.Frame) {
 holder_lose :: proc(why: string) {
 	sync.lock(&hc.mu)
 	defer sync.unlock(&hc.mu)
-	if !hc.handed do fmt.eprintln("Deckhand: session holder lost:", why)
+	if !hc.handed do log_ln("Deckhand: session holder lost:", why)
 	hc.lost = true
 	hc.on = false
 	for _, h in hc.held do if !h.eof {
@@ -707,7 +726,7 @@ holder_write :: proc(frame: []u8) -> bool {
 	sync.lock(&hc.wmu)
 	defer sync.unlock(&hc.wmu)
 	if sync.atomic_load(&hc.lost) || sync.atomic_load(&hc.handed) do return false
-	if hc.upgrading {
+	if hc.upgrading || hc.rejoining {
 		// whole frames wait for the new image (INPUT is never split across the exec); a PING or
 		// FOREGROUND is only worth sending now. A SPAWN fails at once: queued, holder_spawn would
 		// block the main thread for its whole wait, and the holder run it after the tab started
@@ -721,6 +740,7 @@ holder_write :: proc(frame: []u8) -> bool {
 	if sock_write_all(hc.fd, frame) do return true
 	// a 5 s block (SO_SNDTIMEO) or an error, maybe part-way through the frame: nothing more can
 	// follow it on the wire. Shut the socket: the reader sees the end and loses the holder.
+	send_failed()
 	sock_shutdown(hc.fd)
 	return false
 }
@@ -802,6 +822,10 @@ holder_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16
 	else {
 		delete_key(&hc.held, id)
 		held_free(h)
+		if sent {
+			held_ids_map(&hc.released)
+			hc.released[id] = true
+		}
 	}
 	sync.unlock(&hc.mu)
 	if sent && !ok do holder_send(.Release, id, hw.Empty{}) // a late SPAWNED: nothing keeps it
@@ -865,6 +889,10 @@ holder_release :: proc(id: u32) {
 		if !handed && !h.eof && h.pid > 0 do append(&hc.dying, h.pid)
 		delete_key(&hc.held, id)
 		held_free(h)
+	}
+	if !handed {
+		held_ids_map(&hc.released)
+		hc.released[id] = true // its RELEASE may be lost if the holder drops us now (holder_connect_again)
 	}
 	sync.unlock(&hc.mu)
 	if !handed do holder_send(.Release, id, hw.Empty{})
@@ -933,10 +961,12 @@ holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawpt
 	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode, successor = successor})
 	deadline := time.tick_add(time.tick_now(), holder_quit_upgrade_wait)
 	sync.lock(&hc.wmu)
-	for hc.upgrading && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
+	// a rejoin too (holder_rejoin): its GOODBYE goes on the new connection; a failed rejoin loses
+	// the holder (lost: nothing to say goodbye to, as today)
+	for (hc.upgrading || hc.rejoining) && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
 		sync.unlock(&hc.wmu)
 		if time.tick_diff(time.tick_now(), deadline) <= 0 {
-			fmt.eprintln("Deckhand: session holder: still upgrading at quit: leaving it the sessions (no GOODBYE)")
+			log_ln("Deckhand: session holder: still upgrading or reattaching at quit: leaving it the sessions (no GOODBYE)")
 			holder_leave()
 			return false
 		}
@@ -1031,11 +1061,11 @@ holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
 	hw.encode(&out, .Upgrade, 0, hw.Upgrade{path = path})
 	sync.lock(&hc.wmu)
 	sync.lock(&hc.mu)
-	if !hc.on || hc.lost || hc.handed || hc.fd < 0 || hc.upgrading {
-		busy := hc.upgrading
+	if !hc.on || hc.lost || hc.handed || hc.fd < 0 || hc.upgrading || hc.rejoining {
+		why := hc.upgrading ? "an upgrade is already running" : hc.rejoining ? "the session holder is reattaching: try again" : "no session holder is attached"
 		sync.unlock(&hc.mu)
 		sync.unlock(&hc.wmu)
-		return {error = strings.clone(busy ? "an upgrade is already running" : "no session holder is attached")}
+		return {error = strings.clone(why)}
 	}
 	hc.upgrading, hc.up_done, hc.upgrade_told = true, false, false
 	sync.unlock(&hc.mu)
@@ -1087,7 +1117,22 @@ upgrade_release :: proc() {
 	sync.unlock(&hc.mu)
 	if !hc.upgrading || !done do return
 	hc.upgrading = false
+	pending_send_locked()
+}
+
+// Right after a send to the holder failed: one that blocked SO_SNDTIMEO (EAGAIN) is a holder that
+// stopped reading, hung; any other error (EPIPE, ECONNRESET) is a holder that closed the
+// connection, which a rejoin may follow (holder_reader).
+@(private = "file")
+send_failed :: proc() {
+	if e := posix.errno(); e == .EAGAIN || e == .EWOULDBLOCK do sync.atomic_store(&hc.stuck, true)
+}
+
+// The frames held back (an upgrade, a rejoin) go out, whole and in order (wmu held).
+@(private = "file")
+pending_send_locked :: proc() {
 	if len(hc.pending) > 0 && hc.fd >= 0 && !sync.atomic_load(&hc.lost) && !sock_write_all(hc.fd, hc.pending[:]) {
+		send_failed()
 		sock_shutdown(hc.fd) // part of it may be out (holder_write): the reader loses the holder
 	}
 	clear(&hc.pending)
@@ -1098,45 +1143,127 @@ upgrade_release :: proc() {
 // (instance and key), then continue every terminal's stream from its TAIL. False: lost.
 @(private = "file")
 holder_reattach :: proc() -> bool {
+	old_pid := hc.pid
+	if why, done := holder_connect_again(HOLDER_REATTACH_WAIT); !done {
+		if why != "" do log_ln("Deckhand: session holder: after the upgrade:", why)
+		return false
+	}
+	sync.lock(&hc.mu)
+	res := Holder_Upgrade_Result{holder_rev = hc.holder_rev, pid = hc.pid}
+	switch {
+	case hc.previous == "crash":
+		// the holder dropped this core (its pong timeout) before it took the UPGRADE: the same
+		// image answered, nothing was upgraded (#108)
+		res.error = strings.clone("the session holder dropped the connection before the upgrade: nothing was upgraded")
+	case hc.upgrade_error_seen != "":
+		res.adopted = true
+		res.error = strings.clone(hc.upgrade_error_seen)
+	case hc.pid != old_pid:
+		res.error = strings.clone("another process answered for the holder")
+	case:
+		res.ok = true
+	}
+	upgrade_finish_locked(res)
+	sync.unlock(&hc.mu)
+	upgrade_release()
+	holder_supervise_me() // a new image starts with no supervisor state
+	if autotest_active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
+	return true
+}
+
+// How long a rejoin tries: the holder that dropped us answers at once (it has no core attached).
+HOLDER_REJOIN_WAIT :: HOLDER_WAIT
+
+// The reader thread saw the holder close the connection while it still runs (#108): it dropped
+// this core (no frame within its pong timeout: the core was stopped or starved, or the Mac slept
+// and the holder woke first). Attach to the same holder run again, exactly as after an upgrade
+// (holder_connect_again: the peer and its code checked as at any attach, a HELLO the holder
+// answers as for any core, then the same instance and key): its terminals go on from their
+// TAILs and no tab ends. Frames sent meanwhile wait (holder_write) and go out after. False:
+// lost (another core attached first, another holder answers, or none within HOLDER_REJOIN_WAIT).
+@(private = "file")
+holder_rejoin :: proc(why: string) -> bool {
+	sync.lock(&hc.wmu)
+	hc.rejoining = true
+	sync.unlock(&hc.wmu)
+	log_fln("Deckhand: session holder: the connection ended (%s) but the holder still runs: attaching to it again", why)
+	err, done := holder_connect_again(HOLDER_REJOIN_WAIT)
+	sync.lock(&hc.wmu)
+	hc.rejoining = false
+	if done do pending_send_locked()
+	else {
+		clear(&hc.pending)
+		if hc.fd >= 0 do sock_close(hc.fd) // holder_lose shuts nothing more
+		hc.fd = -1
+	}
+	sync.unlock(&hc.wmu)
+	if !done {
+		log_ln("Deckhand: session holder: could not attach again:", err == "" ? "no answer" : err)
+		return false
+	}
+	sync.lock(&hc.mu)
+	n := 0
+	for _, h in hc.held do if !h.eof do n += 1
+	sync.unlock(&hc.mu)
+	log_fln("Deckhand: session holder: attached again; %d running terminal(s) kept", n)
+	holder_supervise_me() // the holder took us for crashed: watched again, its relaunch called off
+	if autotest_active do fmt.printfln("[autotest] holder rejoined: %d running terminals", n)
+	return true
+}
+
+// hc's id sets live on the heap whatever allocator the calling thread has (as hc.rx, rx_reset).
+@(private = "file")
+held_ids_map :: proc(m: ^map[u32]bool) {
+	if m.allocator.procedure == nil do m^ = make(map[u32]bool, runtime.heap_allocator())
+}
+
+// After a reattach: a terminal this core released that the holder still lists never got its
+// RELEASE (it went out in the gap and was lost, or sat unread when the holder dropped us): sent
+// again (queued: rejoining or upgrading is set, so it goes out right after the reattach). Kept and
+// claimed terminals are still in hc.held, never in released.
+@(private = "file")
+release_again :: proc() {
+	again := make([dynamic]u32, context.temp_allocator)
+	sync.lock(&hc.mu)
+	gone := make([dynamic]u32, context.temp_allocator)
+	for id in hc.released {
+		if hc.listed[id] && hc.held[id] == nil do append(&again, id)
+		else do append(&gone, id) // gone from the holder: forgotten
+	}
+	for id in gone do delete_key(&hc.released, id)
+	sync.unlock(&hc.mu)
+	for id in again {
+		log_fln("Deckhand: session holder: terminal %d was released but still runs there: RELEASE again", id)
+		holder_send(.Release, id, hw.Empty{})
+	}
+}
+
+// The current connection closed: connect to hc.path again until d has passed, as the same holder
+// run (holder_reattach_on). done: attached (hc.fd is the new connection). why: "" when nothing
+// answered in time.
+@(private = "file")
+holder_connect_again :: proc(d: time.Duration) -> (why: string, done: bool) {
 	sync.lock(&hc.wmu)
 	if hc.fd >= 0 do sock_close(hc.fd)
 	hc.fd = -1
 	sync.unlock(&hc.wmu)
-	old_pid := hc.pid
-	deadline := time.tick_add(time.tick_now(), HOLDER_REATTACH_WAIT)
+	deadline := time.tick_add(time.tick_now(), d)
 	for time.tick_diff(time.tick_now(), deadline) > 0 {
 		fd, ok := sock_connect(hc.path)
 		if !ok {
 			time.sleep(20 * time.Millisecond)
 			continue
 		}
-		why, done := holder_reattach_on(fd, deadline)
+		w, done := holder_reattach_on(fd, deadline)
 		if done {
-			sync.lock(&hc.mu)
-			res := Holder_Upgrade_Result{holder_rev = hc.holder_rev, pid = hc.pid}
-			switch {
-			case hc.upgrade_error_seen != "":
-				res.adopted = true
-				res.error = strings.clone(hc.upgrade_error_seen)
-			case hc.pid != old_pid:
-				res.error = strings.clone("another process answered for the holder")
-			case:
-				res.ok = true
-			}
-			upgrade_finish_locked(res)
-			sync.unlock(&hc.mu)
-			upgrade_release()
-			holder_supervise_me() // a new image starts with no supervisor state
-			if autotest_active do fmt.printfln("[autotest] holder upgraded: ok %v, adopted %v, holder_rev %d", res.ok, res.adopted, res.holder_rev)
-			return true
+			release_again()
+			return "", true
 		}
-		if !strings.has_prefix(why, "retry") {
-			fmt.eprintln("Deckhand: session holder: after the upgrade:", why)
-			return false
-		}
+		if !strings.has_prefix(w, "retry") do return w, false
+		why = w
 		time.sleep(20 * time.Millisecond)
 	}
-	return false
+	return why, false
 }
 
 // One reattach attempt on a connected fd. done: attached (hc.fd is fd). Otherwise fd is closed;
@@ -1225,6 +1352,9 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 		h.eof, h.lost = true, true
 		h.exit = {}
 	}
+	held_ids_map(&hc.listed)
+	clear(&hc.listed)
+	for id in listed do hc.listed[id] = true
 	delete(hc.previous)
 	hc.previous = strings.clone(w.previous)
 	delete(hc.upgrade_error_seen)
@@ -1269,6 +1399,8 @@ holder_client_forget :: proc() {
 	delete(hc.held)
 	delete(hc.ack)
 	delete(hc.dying)
+	delete(hc.released)
+	delete(hc.listed)
 	delete(hc.instance)
 	delete(hc.previous)
 	delete(hc.tokens_why)
@@ -1293,7 +1425,7 @@ holder_successor_retry_tick :: proc() {
 		if t.status == .Not_Started do t.held = t.held_away
 		t.held_away = 0
 	}
-	fmt.eprintln("Deckhand: session holder: the successor's reservation lapsed: attaching again")
+	log_ln("Deckhand: session holder: the successor's reservation lapsed: attaching again")
 	holder_adopt_all()
 }
 
@@ -1336,7 +1468,7 @@ holder_replace :: proc(stop: bool) -> Result {
 	if exe := holder_pid_exe(pid); !strings.has_suffix(exe, "/" + HOLDER_BIN) {
 		return fail("that session holder is gone") // a reused pid is never signalled
 	}
-	fmt.eprintln("Deckhand: session holder: stopping the one from another build (pid", pid, ") as the user asked")
+	log_ln("Deckhand: session holder: stopping the one from another build (pid", pid, ") as the user asked")
 	posix.kill(posix.pid_t(pid), .SIGTERM)
 	deadline := time.tick_add(time.tick_now(), HOLDER_STOP_WAIT)
 	for posix.kill(posix.pid_t(pid), posix.Signal(0)) == .OK && time.tick_diff(time.tick_now(), deadline) > 0 do time.sleep(20 * time.Millisecond)
@@ -1368,7 +1500,7 @@ holder_hung_tick :: proc() {
 		n += 1
 	}
 	if n == 0 do return
-	fmt.eprintln("Deckhand: session holder: still not answering after", hw.PONG_TIMEOUT, "-", n, "tab(s) that waited for it start fresh")
+	log_ln("Deckhand: session holder: still not answering after", hw.PONG_TIMEOUT, "-", n, "tab(s) that waited for it start fresh")
 	window_toast(fmt.tprintf("The session holder still isn't answering: %d session%s that waited for it start fresh here.", n, n == 1 ? "" : "s"), err = true)
 	window_state_changed()
 }

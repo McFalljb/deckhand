@@ -1,0 +1,12 @@
+# tests/scripts/holder-stall.sh, run 1: a separate core keeps a fake pi in the session holder (a tick
+# every 0.3 s, and it echoes each line it reads); the window closes, the core runs on.
+wait 300
+ui_command {"type":"set_keep_sessions","on":true}
+assert_result ok true
+command {"type":"add_project","cwd":"$cwd/build/holder-stall/proj"}
+command {"type":"rescan"}
+command {"type":"open_session","project_id":$project,"pi_session_id":"ssss-1"}
+assert_result ok true
+waitfor stall-tick 3 15000
+dump holder-stall-1
+quit_window

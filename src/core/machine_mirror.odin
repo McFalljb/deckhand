@@ -514,7 +514,7 @@ mirror_ring :: proc(no: u64, m: ^Machine_Mirror, n: Notice, now: time.Tick) {
 	n := n
 	if m.rang_at == {} || time.tick_diff(m.rang_at, now) >= time.Minute do m.rang_at, m.rang_n = now, 0
 	if m.rang_n >= MIRROR_RING_PER_MIN {
-		if m.dropped == 0 || m.dropped % 50 == 0 do fmt.eprintfln("Deckhand: machine %s rings too often: %d not rung", machine_name(no), m.dropped + 1)
+		if m.dropped == 0 || m.dropped % 50 == 0 do log_fln("Deckhand: machine %s rings too often: %d not rung", machine_name(no), m.dropped + 1)
 		m.dropped += 1
 		notice_free(&n)
 		return

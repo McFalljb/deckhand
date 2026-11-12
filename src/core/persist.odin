@@ -95,7 +95,7 @@ persist_save :: proc() {
 	if text == persist.last_written do return
 	persist.writes += 1
 	if err := write_atomic(persist.path, text); err != "" {
-		fmt.eprintln("Deckhand: could not save the workspace:", err)
+		log_ln("Deckhand: could not save the workspace:", err)
 		return
 	}
 	delete(persist.last_written)
@@ -108,7 +108,7 @@ persist_quit :: proc() {
 	if persist.done do return
 	persist_save()
 	persist.done = true
-	if persist.path != "" && hook_env(.Script) != "" do fmt.eprintf("Deckhand: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
+	if persist.path != "" && hook_env(.Script) != "" do log_f("Deckhand: workspace save checks %d, writes %d\n", persist.checks, persist.writes)
 }
 
 // Writes `text` to `path` through a temp file in the same dir and a rename,
@@ -648,34 +648,34 @@ persist_load :: proc(fresh := false) {
 	start := time.tick_now()
 	fi, serr := os.stat(persist.path, context.temp_allocator)
 	if serr != nil {
-		fmt.eprintln("Deckhand: could not read the saved workspace:", serr)
+		log_ln("Deckhand: could not read the saved workspace:", serr)
 		return
 	}
 	if fi.type != .Regular || fi.size > WORKSPACE_MAX {
-		fmt.eprintln("Deckhand: saved workspace not restored:", fi.type != .Regular ? "not a regular file" : "file too big")
+		log_ln("Deckhand: saved workspace not restored:", fi.type != .Regular ? "not a regular file" : "file too big")
 		move_aside("bad")
 		return
 	}
 	data, err := os.read_entire_file(persist.path, context.temp_allocator)
 	if err != nil {
-		fmt.eprintln("Deckhand: could not read the saved workspace:", err)
+		log_ln("Deckhand: could not read the saved workspace:", err)
 		return
 	}
 	if rerr := workspace_restore(string(data)); rerr != "" {
-		fmt.eprintln("Deckhand: saved workspace not restored:", rerr)
+		log_ln("Deckhand: saved workspace not restored:", rerr)
 		move_aside("bad")
 		return
 	}
 	persist.last_written = strings.clone(string(data))
 	persist.restored_clean = true
-	fmt.eprintf("Deckhand: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
+	log_f("Deckhand: workspace restored (%d projects, %d sessions) in %.1f ms\n", len(state.projects), len(state.open_sessions), time.duration_milliseconds(time.tick_since(start)))
 }
 
 @(private = "file")
 move_aside :: proc(tag: string) {
 	to := fmt.tprintf("%s.%s-%d", persist.path, tag, time.time_to_unix(time.now()))
-	if err := os.rename(persist.path, to); err != nil do fmt.eprintln("Deckhand: could not move", persist.path, "aside:", err)
-	else do fmt.eprintln("Deckhand: kept the old workspace as", to)
+	if err := os.rename(persist.path, to); err != nil do log_ln("Deckhand: could not move", persist.path, "aside:", err)
+	else do log_ln("Deckhand: kept the old workspace as", to)
 }
 
 // Restores State from a workspace file's text through commands. Returns an
@@ -1121,14 +1121,14 @@ num_of :: proc(obj: json.Object, key: string) -> (f32, bool) {
 persist_after_layout :: proc(skip: bool) {
 	if persist.launch != {} && !persist.laid_out {
 		persist.laid_out = true
-		fmt.eprintf("Deckhand: first layout %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
+		log_f("Deckhand: first layout %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
 	}
 	id := persist.focus_tab
 	if id == 0 do return
 	persist.focus_tab = 0
 	if skip do return
 	run_command(Focus_Tab{tab_id = id}, {kind = .Internal})
-	if persist.launch != {} do fmt.eprintf("Deckhand: restored session started %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
+	if persist.launch != {} do log_f("Deckhand: restored session started %.1f ms after launch\n", time.duration_milliseconds(time.tick_since(persist.launch)))
 }
 
 // A dim line in a terminal before its child starts (restored shells).

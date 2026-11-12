@@ -796,7 +796,7 @@ machines_dropped :: proc() -> int {return mach.dropped}
 machines_load :: proc() {
 	heap := runtime.heap_allocator()
 	list, next, ok := machines_read(machines_path(), heap)
-	if !ok do fmt.eprintln("Deckhand: machines.json could not be read: no machines until it is fixed or removed")
+	if !ok do log_ln("Deckhand: machines.json could not be read: no machines until it is fixed or removed")
 	mach.next = next
 	mach.links = make([dynamic]^Mach_Link, heap)
 	for m in list {
@@ -974,7 +974,7 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	mlink_set(l, s, l.install_why != "" ? l.install_why : why)
 	if s == .Not_Installed && auto && state.settings.remote_machines {
 		if r := machine_install_start(l.no); !r.ok {
-			fmt.eprintln("Deckhand: machine", l.name, "install:", r.error)
+			log_ln("Deckhand: machine", l.name, "install:", r.error)
 			delete(l.install_why, heap)
 			l.install_why = strings.clone(r.error, heap)
 			mlink_set(l, s, l.install_why)
@@ -1154,7 +1154,7 @@ mlink_probe_done :: proc(l: ^Mach_Link, now: time.Tick) {
 		heap := runtime.heap_allocator()
 		delete(l.os, heap); delete(l.arch, heap); delete(l.core_path, heap)
 		l.os, l.arch, l.core_path = strings.clone(os_name, heap), strings.clone(arch, heap), strings.clone(machine_core_path_for(os_name), heap)
-		if w := machines_save(); w != "" do fmt.eprintln("Deckhand: machines:", w)
+		if w := machines_save(); w != "" do log_ln("Deckhand: machines:", w)
 		mlink_close(l)
 		l.phase = .Idle
 		l.next_at = now
@@ -1258,7 +1258,7 @@ mlink_state :: proc(l: ^Mach_Link, text: string, full: bool) {
 	}
 	checks_before := checks_key(&l.replica)
 	if e := replica_apply(&l.replica, text, runtime.heap_allocator(), MIRROR_READ_MAX); e != "" {
-		fmt.eprintfln("Deckhand: machine %s: its state was refused (%s)", l.name, text_clean(e, 200))
+		log_fln("Deckhand: machine %s: its state was refused (%s)", l.name, text_clean(e, 200))
 		if mirror_stream_refused(&l.stream, full, now) do mlink_send(l, window_msg_subscribe())
 		return
 	}

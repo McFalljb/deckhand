@@ -1338,6 +1338,17 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		p := project_by_cwd(rec.project)
 		if ch := chats_project(); p == nil && ch != nil && ch.cwd == rec.project do p = ch // a Claude chat
 		if p == nil do return fail("its project is not listed"), false
+		if rec.codex && claude_conversation_seen(p, rec.id) {
+			// Claude Code's own transcript has this id: the Codex claim goes and the row opens as
+			// the Claude conversation it is (codex.odin: ids are one space, Claude's transcript wins)
+			id := strings.clone(rec.id, context.temp_allocator)
+			codex_claim_drop(p, id)
+			f, ok := claude_disk_lookup(p, id)
+			if !ok do return fail("no such session in this project"), false
+			r, ch := claude_disk_resume(p, f, caller)
+			if !r.ok do return r, ch
+			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
+		}
 		if rec.codex {
 			// a Codex conversation (codex.odin): `codex resume <id>`, no flags, no account
 			if !codex_id_ok(rec.id) do return fail("not a Codex session id"), false

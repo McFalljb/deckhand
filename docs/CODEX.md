@@ -42,6 +42,8 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
 - No extra flags and no accounts: the user's own Codex settings (`~/.codex/config.toml`, profiles)
   apply as they are.
 - **Rename** changes Deckhand's title only, not Codex's own.
+- Conversation ids are one space across harnesses: when a Codex record and Claude Code's own
+  transcript share an id, Claude's transcript wins (its row resumes Claude Code, never codex).
 - Not on another machine: `"Codex tabs run on this Mac only for now …"` (refused before it is sent:
   an older core there would start Claude Code instead); the picker never lists it for one.
 - No hot-reload bars (Claude Code's file watching does not apply), no todos, subagents or

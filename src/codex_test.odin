@@ -329,6 +329,26 @@ codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
 	_, _, ct2 := core.claude_tab_of(tab2)
 	testing.expect(t, ct2 != nil && ct2.session_id == "", "the claim is gone")
 	_ = sess2
+	// a Codex record in this project over Claude Code's own transcript (closed, so no tab holds it):
+	// clicking the row resumes Claude Code, never codex
+	id_e := "0c1a0de0-1111-4222-8333-44445555aaaa"
+	_, sess4, tab4 := cx_codex_session(t, "ids-4")
+	pid4 := core.find_session(sess4).project_id
+	cwd4 := strings.clone(core.find_project(pid4).cwd, context.temp_allocator)
+	r = core.run_command(core.Claude_Session_Report{tab_id = tab4, session_id = id_e}, CX_SCRIPT)
+	testing.expect(t, r.ok, r.error)
+	core.run_command(core.Close_Session{session = sess4}, core.Caller{kind = .Internal})
+	d4 := fmt.tprintf("%s/projects/%s", cfg, core.claude_project_slug(cwd4))
+	os.make_directory_all(d4)
+	transcript(d4, cwd4, id_e)
+	r = core.run_command(core.Open_Session_Cmd{project_id = pid4, pi_session_id = id_e}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	re, _ := core.claude_record(id_e)
+	testing.expect(t, re != nil && !re.codex, "Claude Code's conversation")
+	if tid := core.claude_tab_of_session(id_e); tid != 0 {
+		_, tb4, _ := core.find_tab(tid)
+		testing.expect(t, tb4 != nil && !core.claude_tab_is_codex(tb4^), "a Claude tab, never codex resume")
+	} else do testing.fail_now(t, "no tab resumed it")
 	// a Codex conversation is never a Claude row whose transcript is gone (no Claude transcript)
 	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "codex work"}, CX_SCRIPT)
 	id_d := "0c1a0de0-1111-4222-8333-444455559999"

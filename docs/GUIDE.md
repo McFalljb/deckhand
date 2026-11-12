@@ -283,6 +283,16 @@ another machine, so start pi or Claude Code in a folder there and the project sh
 palette names the machine of its items that are on another one (*… · on nuc*). Click an open session to show it, or one of a project's sessions to open
 it there (**+ New session** under it starts one there, with what that machine has installed and its
 own Claude Code account), and work in its terminals as in a local tab.
+**New session on another machine.** The menu of one of this Mac's projects, sessions or open
+sessions (right click, or its **…**) has **New session on nuc in api** for each online machine with
+a project of the same folder name (`api`): the last part of its folder, exactly, upper and lower
+case as they are. When one machine has several, each shows its folder there (*New session on nuc
+in api (~/work/api)*). It does what **+ New session** under that project does: it selects it and
+starts a fresh session there, with that machine's coding agents and account. **New session on
+another machine…** in the palette does the same for the selected project (and says so when no
+machine has a project of that name). Nothing of this Mac's goes with it: not the conversation,
+not your uncommitted changes, not a path, account or git state. Push or sync your work yourself
+first, then pick it up there.
 While one of its sessions is on screen, the top bar shows a quiet **on <machine>** before its tabs,
 and the window's title and the tabs' tooltips start with the machine's name: what you type, paste and resize goes to
 that machine, and its output comes back here. **⌘T** (or **+** › New shell tab), **⌘W**,
@@ -2194,6 +2204,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 |---|---|---|
 | New chat | ⌘N | a new chat in the Chats folder |
 | New session | ⇧⌘N | a new session in the selected project (pi or Claude Code: a picker when both are installed) |
+| New session on another machine… |  | a fresh session in the project of the same folder name on an online machine ([Other machines](#projects-sessions-and-chats)) |
 | Chats: read-only |  | start chats read-only or as full pi |
 | Chats folder… |  | pick the folder chats run in |
 | Chats folder: back to the default |  | undo the above |

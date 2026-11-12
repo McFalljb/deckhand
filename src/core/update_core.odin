@@ -19,10 +19,10 @@ UPDATE_REPO :: "McFalljb/deckhand"
 UPDATE_API_URL :: "https://api.github.com/repos/" + UPDATE_REPO + "/releases/latest"
 UPDATE_DOWNLOAD_URL :: "https://github.com/" + UPDATE_REPO + "/releases/download/" // + tag/name
 UPDATE_RELEASES_URL :: "https://github.com/" + UPDATE_REPO + "/releases"
-// Deckhand's bundle id, kept from pi-desk until 0.2.1 (macOS keeps permissions and notification
+// Deckhand's bundle id, kept from pi-desk until a later release (macOS keeps permissions and notification
 // settings by it): what this build is.
 UPDATE_BUNDLE_ID :: "dev.pi-desk.app"
-// The bundle id from 0.2.1 on (the rename's second step: docs/DEVELOPING.md, "The rename"). An
+// The bundle id from that release on (the rename's second step: docs/DEVELOPING.md, "The rename"). An
 // update may have either, so 0.2.0 can take 0.2.1; Deckhand 0.1.6 and older take only the old one.
 UPDATE_BUNDLE_ID_NEXT :: "dev.deckhand.app"
 

@@ -932,7 +932,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
 		case Hit_Close_Session: ui_do(core.Close_Session{session = u64(hit)})
-		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add:
+		case Hit_Chat, Hit_Open_Row, Hit_Pin_Project, Hit_Pin_Session, Hit_New_In, Hit_Add_Project, Hit_Sort, Hit_Fold, Hit_Filter, Hit_Filter_Clear, Hit_Quick, Hit_Waiting_Filtered, Hit_More_Project, Hit_More_Session, Hit_More_Open, Hit_Show_More, Hit_Group, Hit_Kids, Hit_Info_Session, Hit_New_Job_In, Hit_Machine, Hit_Machine_Head, Hit_Machine_More, Hit_Machine_Add, Hit_Attention:
 			sidebar_click(hit, app.pointer)
 		case Hit_Agent:     drawer_click(hit)
 		case Hit_Files: // files_event took it
@@ -1179,6 +1179,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			case .A: // ⌘A alone; ⌥⌘A ⌥⇧⌘A: next, previous needing you (menubar.odin)
 				if alt do return false
 				if !ctrl do tf_select_all(f)
+			case .PERIOD: if alt do return false // ⌥⌘.: the Attention view (menubar.odin)
 			case .C: if s := tf_selected_text(f); s != "" do clipboard_set(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {
@@ -1230,10 +1231,10 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		case .END:       tf_end(f, shift)
 		case .UP:
 			if in_palette do palette_move(-1)
-			else do tf_home(f, shift)
+			else if !(in_filter && attention_step(-1)) do tf_home(f, shift) // the Attention view's rows (ui_sidebar.odin)
 		case .DOWN:
 			if in_palette do palette_move(1)
-			else do tf_end(f, shift)
+			else if !(in_filter && attention_step(1)) do tf_end(f, shift)
 		case .PAGE_UP:   if in_palette do palette_move(-PALETTE_ROWS)
 		case .PAGE_DOWN: if in_palette do palette_move(PALETTE_ROWS)
 		case .TAB:       if in_palette do palette_move(shift ? -1 : 1)

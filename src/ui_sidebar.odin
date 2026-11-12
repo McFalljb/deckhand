@@ -546,34 +546,47 @@ sidebar :: proc(cs: ^core.Open_Session, h: f32) {
 			files_panel(row_w) // ui_files.odin
 			return
 		}
+		attention := state.sidebar.view == .Attention
+		view_switch(row_w)
+		gap(SP_2)
 		filter_row(row_w)
 		gap(SP_2)
 		quick_chips(row_w)
-		waiting_filtered_row()
+		if !attention do waiting_filtered_row() // the Attention view lists every waiting session
 		gap(SP_2)
-		// one scrolling list: Open, Projects (a tree), Chats
+		// one scrolling list: Open, Projects (a tree), Chats; or the Attention view's
 		if clay.UI(clay.ID("nav"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
-			// this Mac's header over its own sections, while Machines over SSH is on (other machines
-			// below). Folded: only its waiting open sessions (as Open folded); its count while folded
-			// (the Open header counts them otherwise)
-			here_folded := state.settings.remote_machines && state.sidebar.folded[.This_Mac]
-			if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", here_folded ? len(core.sidebar_open()) : 0, text_w_max)
-			if here_folded {
-				// renaming a row it hides (the palette's Rename project): the field on top, as under a folded Projects
-				if state.focus_widget == "rename_project" || state.focus_widget == "rename_session" do rename_field_layout()
-				for s in core.sidebar_open() do if core.session_waiting(s.pi_session_id) do open_row(s, cs, text_w_max)
-			} else {
-				open_group(cs, text_w_max)
-				projects_section(cs, text_w_max, row_w)
-				gap(GAP_SECTION)
-				chats_section(cs, text_w_max, row_w)
-			}
-			machines_sections(cs, text_w_max) // other machines, each under its name (Machines over SSH)
+			if attention do attention_list(cs, text_w_max, row_w)
+			else do tree_list(cs, text_w_max, row_w)
 		}
+		if attention do attention_footer(text_w_max) // the way back, always in view
 	}
+}
+
+// The By project view: this Mac's Open, Projects and Chats (under its header while Machines over
+// SSH is on), then each other machine under its name.
+@(private = "file")
+tree_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
+	th := theme()
+	// this Mac's header over its own sections, while Machines over SSH is on (other machines
+	// below). Folded: only its waiting open sessions (as Open folded); its count while folded
+	// (the Open header counts them otherwise)
+	here_folded := state.settings.remote_machines && state.sidebar.folded[.This_Mac]
+	if state.settings.remote_machines do machine_header(0, th.done, core.machine_here_name(), "this Mac", "", here_folded ? len(core.sidebar_open()) : 0, text_w_max)
+	if here_folded {
+		// renaming a row it hides (the palette's Rename project): the field on top, as under a folded Projects
+		if state.focus_widget == "rename_project" || state.focus_widget == "rename_session" do rename_field_layout()
+		for s in core.sidebar_open() do if core.session_waiting(s.pi_session_id) do open_row(s, cs, text_w_max)
+	} else {
+		open_group(cs, text_w_max)
+		projects_section(cs, text_w_max, row_w)
+		gap(GAP_SECTION)
+		chats_section(cs, text_w_max, row_w)
+	}
+	machines_sections(cs, text_w_max) // other machines, each under its name (Machines over SSH)
 }
 
 // The filter field: text and placeholder, ⇧⌘F, a clear button while it holds text.
@@ -772,9 +785,12 @@ open_group :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 // you" or its age and its dot, or (hovered) its "…" and close buttons. Another machine's (remote)
 // has no buttons (its rows have no menu yet: sidebar_context) and no age (its session file is not
 // on this Mac); while that machine is not online (live false) it is greyed, without a status.
+// The Attention view's rows also name their machine (mach, in a column mach_w wide, before the
+// mark) and show the keyboard's row (key_sel) as hovered.
 @(private = "file")
-open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true) {
+open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true, mach := "", mach_w: f32 = 0, key_sel := false) {
 	th := theme()
+	mach_w := mach_w
 	append(&drawn.open, s.id)
 	k := u32(len(drawn.open) - 1) // ids follow the drawn rows (sidebar_hit)
 	id := clay.ID("open", k)
@@ -783,7 +799,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 	more_hover := !remote && ui_hover == Hit(Hit_More_Open(s.id))
 	row_hover := ui_hover == Hit(Hit_Open_Row(s.id))
 	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
-	bg, em := overlay(id, current, row_hover || hovered)
+	bg, em := overlay(id, current, row_hover || hovered || key_sel)
 	v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
 	if !live do v = {progress = -1} // what it showed last: no status
 	// it turned waiting, finished or error just now: a brief wash, its mark pops (by session: the
@@ -821,6 +837,10 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			right += text_w(tag, FONT_UI_SMALL)
 			n += 1
 		}
+		if mach_w > 0 {
+			right += mach_w
+			n += 1
+		}
 		room := text_w_max - px(KIND_ICON + HARNESS_ICON_SIZE) - right - f32(n - 1) * px(GAP_INLINE)
 		lead := fmt.tprintf("%s ·", place)
 		if !hovered && when_ != "" {
@@ -841,6 +861,12 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			}
 			room -= text_w(when_)
 		}
+		// a column too narrow for the machine's name too: the title keeps its room (the tooltip
+		// says where it runs)
+		if mach_w > 0 && room < px(48) {
+			room += mach_w + px(GAP_INLINE)
+			mach_w = 0
+		}
 		// the session the centre shows, from another project than the selected one: its place in the accent
 		elsewhere := current && !chat && s.project_id != state.selected_project
 		icon(ic, elsewhere ? th.accent : th.text_muted, KIND_ICON)
@@ -854,6 +880,12 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
 		if !hovered && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
+		// (not `mach_w > 0 && clay.UI()`: the element's close is deferred, opened or not)
+		if mach_w > 0 {
+			if clay.UI()({layout = {sizing = {clay.SizingFixed(mach_w), clay.SizingFit()}}}) {
+				clay.TextDynamic(clip(mach, mach_w, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+			}
+		}
 		status_mark_el(v, lit)
 		row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
 		row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
@@ -1324,6 +1356,9 @@ overlay_shadow :: proc(name: string, z: i16) {
 // Hits in the left column (after the menu, Home and the palette had theirs).
 sidebar_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("waitingfiltered")) do return Hit_Waiting_Filtered{}
+	for v in core.Sidebar_View do if clay.PointerOver(clay.ID("viewseg", u32(v))) do return Hit_Attention(v) // By project | Attention
+	if clay.PointerOver(clay.ID("attnidle")) do return Hit_Attention(ATTN_HIT_IDLE)
+	if clay.PointerOver(clay.ID("attnfoot")) do return Hit_Attention(ATTN_HIT_FOOTER)
 	if clay.PointerOver(clay.ID("filter_clear")) do return Hit_Filter_Clear{}
 	if clay.PointerOver(clay.ID("filter_box")) do return Hit_Filter{}
 	for _, i in QUICK_LABELS do if clay.PointerOver(clay.ID("chip", u32(i))) do return Hit_Quick(i)
@@ -1402,7 +1437,20 @@ sidebar_click :: proc(hit: Hit, at: [2]f32) {
 		menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine_Add:
 		machine_add_open()
+	case Hit_Attention:
+		switch int(h) {
+		case ATTN_HIT_IDLE:
+			attention_idle_open = !attention_idle_open
+			app.redraw = true
+		case ATTN_HIT_FOOTER: ui_do(core.Set_Sidebar_View{view = .Projects})
+		case:                 ui_do(core.Set_Sidebar_View{view = core.Sidebar_View(h)})
+		}
 	case Hit_Open_Row:
+		// the Attention view's: where ⌥⌘A would go in it (its tab of its tier)
+		if state.sidebar.view == .Attention {
+			attention_go(u64(h))
+			break
+		}
 		// focus it and show its project's sessions
 		if s := core.find_session(u64(h)); s != nil {
 			ui_do(core.Focus_Session{session = s.id, reopen = true}) // a dead pi starts again (dead_tab.odin)
@@ -1536,7 +1584,8 @@ filter_focus :: proc() {
 // Enter in the filter: the best-scoring row (sidebar_best_match). A project
 // is selected; a session or chat opens.
 filter_enter :: proc() {
-	if cmd := core.sidebar_best_match(); cmd != nil do ui_do(cmd)
+	if attention_enter() {} 	// the Attention view: its keyboard's row, else its first
+	else if cmd := core.sidebar_best_match(); cmd != nil do ui_do(cmd)
 	ui_do(core.Set_Focus{""})
 }
 
@@ -1867,4 +1916,214 @@ machine_sessions :: proc(cs: ^core.Open_Session, live: bool, label: string, text
 	session_rows(shown, state.selected_project, cs, "sess", text_w_max, TREE_INDENT, remote = true, live = live)
 	if more > 0 do action_row(clay.ID("showmore", 0), Hit_Show_More(0), .None, fmt.tprintf("Show %d more", more), TREE_INDENT, text_w_max)
 	if live do action_row(clay.ID("new"), Hit_New{}, .Plus, "New session", TREE_INDENT, text_w_max) // the harness picker (harness.odin)
+}
+
+// ---- the Attention view (state.sidebar.view; ⌥⌘., View › Attention view) ----
+
+SIDEBAR_VIEW_LABELS := [core.Sidebar_View]string{.Projects = "By project", .Attention = "Attention"}
+ATTENTION_LABELS := [core.Attention_Group]string{.Needs_You = "NEEDS YOU", .Finished = "FINISHED", .Working = "WORKING", .Idle = "IDLE"}
+
+// The Attention view's controls (Hit_Attention): its switch's two segments (a Sidebar_View), the
+// IDLE header (folds it), the footer (back to By project).
+ATTN_HIT_IDLE :: 2
+ATTN_HIT_FOOTER :: 3
+
+// Window state, not saved: IDLE shows its rows (folded by default; shown while filtering anyway),
+// and the row the keyboard is on (↑↓ in the filter field; an open session id, 0 = none).
+attention_idle_open: bool
+attention_sel: u64
+
+// By project | Attention, at the top of the Sessions tab: a two-segment switch in the left tabs'
+// style, a little lower.
+@(private = "file")
+view_switch :: proc(row_w: f32) {
+	th := theme()
+	if clay.UI(clay.ID("viewswitch"))({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(CHIP_H))}, padding = clay.PaddingAll(pu(2)), childGap = pu(2), childAlignment = {y = .Center}},
+		backgroundColor = cc(th.bg_field),
+		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
+	}) {
+		seg := (row_w - px(4 + 2)) / 2
+		for v in core.Sidebar_View {
+			id := clay.ID("viewseg", u32(v))
+			on := state.sidebar.view == v
+			bg, em := overlay(id, false, ui_hover == Hit(Hit_Attention(v)))
+			if on do bg = cc(mix(th.bg_elevated, th.text, TINT_SEGMENT))
+			if clay.UI(id)({
+				layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, childAlignment = {x = .Center, y = .Center}},
+				backgroundColor = bg,
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+			}) {
+				col := on ? th.text : mix(th.text_muted, th.text_secondary, em)
+				clay.TextDynamic(clip(SIDEBAR_VIEW_LABELS[v], seg - px(2 * SP_1), FONT_UI_SMALL), txt(col, FONT_UI_SMALL))
+			}
+		}
+	}
+}
+
+// The rows the Attention view shows now, in order: core.attention_rows without IDLE's while it is
+// folded (temp allocator).
+attention_shown :: proc() -> []core.Attention_Row {
+	rows := core.attention_rows()
+	if attention_idle_open || core.sidebar_filtering() do return rows
+	n := 0
+	for r in rows do if r.group != .Idle do n += 1
+	return rows[:n] // IDLE's rows are last
+}
+
+// Where a row of the Attention view says it runs (its machine column).
+@(private = "file")
+attention_machine :: proc(no: u64) -> string {return no == 0 ? "this Mac" : core.machine_name(no)}
+
+// The Attention view: every open session on this Mac and the other machines, one list by what
+// needs you (core.attention_rows: needing_you's order, so the top row is where ⌥⌘A goes next),
+// under small headers with their counts, an empty group left out:
+//
+//	NEEDS YOU  2      waiting for you, then errors; the longest waiting first
+//	FINISHED  1       finished, not seen yet
+//	WORKING  3
+//	IDLE  4 ›         every other open session (folded until opened; shown while filtering)
+//
+// Each row is the Open group's (open_row: its place, title, what it asks, its age and mark, the
+// current session selected; its menu as there), with a machine column while other machines are in
+// play. The filter and quick filters apply as to the Open group. Built once per layout, while shown.
+@(private = "file")
+attention_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
+	// renaming a project or a Claude session from the palette: the field on top (no tree here)
+	if state.focus_widget == "rename_project" || state.focus_widget == "rename_session" do rename_field_layout()
+	rows := core.attention_rows()
+	if len(rows) == 0 {
+		any_open := false
+		for s in state.open_sessions do if !s.home do any_open = true
+		if any_open do empty_state("No matching sessions", "Esc in the filter clears it", row_w)
+		else do attention_empty(row_w)
+		return
+	}
+	counts: [core.Attention_Group]int
+	for r in rows do counts[r.group] += 1
+	// the machine column while other machines are in play: as wide as its widest name, at most a
+	// quarter of the row (120 px), so the names line up
+	mach_w: f32
+	if state.settings.remote_machines && len(state.machines) > 0 {
+		for r in rows do mach_w = max(mach_w, text_w(attention_machine(r.session.machine), FONT_UI_SMALL))
+		mach_w = min(mach_w, px(120), text_w_max / 4)
+	}
+	keys := state.focus_widget == "sidebar_filter" // the keyboard's row shows while the filter has it
+	first := true
+	for g in core.Attention_Group {
+		if counts[g] == 0 do continue
+		if !first do gap(SP_2)
+		first = false
+		idle := g == .Idle
+		open := !idle || attention_idle_open || core.sidebar_filtering()
+		attention_header(g, counts[g], idle, open)
+		if !open do continue
+		for r in rows {
+			if r.group != g do continue
+			s := r.session
+			live := s.machine == 0
+			for m in state.machines do if m.no == s.machine do live = m.status == .Online
+			open_row(s, cs, text_w_max, remote = s.machine != 0, live = live, mach = attention_machine(s.machine), mach_w = mach_w, key_sel = keys && s.id == attention_sel)
+		}
+	}
+}
+
+// A group's header, in the section headers' style (nav_header): its name in small caps and its
+// count; IDLE's folds (a chevron while folded or hovered).
+@(private = "file")
+attention_header :: proc(g: core.Attention_Group, count: int, foldable, open: bool) {
+	th := theme()
+	id := foldable ? clay.ID("attnidle") : clay.ID("attnhead", u32(g))
+	hit := Hit(Hit_Attention(ATTN_HIT_IDLE))
+	_, em := overlay(id, false, foldable && ui_hover == hit)
+	if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), pu(PAD_ROW), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+		col := mix(th.text_muted, th.text_secondary, em)
+		clay.TextDynamic(ATTENTION_LABELS[g], txt(col, FONT_UI_SMALL | WEIGHT_HEADER))
+		clay.TextDynamic(fmt.tprint(count), txt(g == .Needs_You ? th.waiting : th.text_muted, FONT_UI_SMALL))
+		if foldable {
+			a := fade(id, 7, !open || ui_hover == hit ? 1 : 0, DUR_HOVER)
+			icon(open ? .Chevron_Down : .Chevron_Right, with_alpha(col, a), ICON_SIZE_SM - 2)
+		}
+	}
+}
+
+// Nothing open anywhere: what to do, with the empty centre's two buttons (their hits are the
+// Chats "+ New chat" row's and the Projects header's "+": the same pickers).
+@(private = "file")
+attention_empty :: proc(row_w: f32) {
+	th := theme()
+	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), pu(SP_2), pu(SP_2), pu(SP_2)}, childGap = pu(SP_3), layoutDirection = .TopToBottom}}) {
+		room := row_w - px(2 * SP_2)
+		lines, _ := wrap_clip("Nothing running. Start a chat or open a project.", room, 3)
+		cfg := txt(th.text_secondary)
+		cfg.wrapMode = .Newlines
+		clay.TextDynamic(lines, cfg)
+		chat_label, add_label := "New chat", "Add project…"
+		if a := action_by_id("new_chat"); a != nil do chat_label = action_label(a)
+		if a := action_by_id("add_project"); a != nil do add_label = action_label(a)
+		// side by side while both fit, else one under the other
+		both := text_w(chat_label, WEIGHT_BOLD) + text_w(add_label) + px(4 * SP_3 + SP_2)
+		if clay.UI()({layout = {childGap = pu(SP_2), layoutDirection = both <= room ? .LeftToRight : .TopToBottom}}) {
+			if c := core.chats_project(); c != nil do button(clay.ID("newchatrow"), chat_label, true, ui_hover == Hit(Hit_New_In(c.id)))
+			button(clay.ID("addproject"), add_label, false, ui_hover == Hit(Hit_Add_Project{}))
+		}
+	}
+}
+
+// "3 machines · By project" under the list: the way back to the tree, always in view.
+@(private = "file")
+attention_footer :: proc(text_w_max: f32) {
+	n := 1
+	if state.settings.remote_machines do n += len(state.machines)
+	label := n == 1 ? "This Mac · By project" : fmt.tprintf("%d machines · By project", n)
+	action_row(clay.ID("attnfoot"), Hit_Attention(ATTN_HIT_FOOTER), .None, label, 0, text_w_max)
+}
+
+// What a row of the Attention view opens: where ⌥⌘A would go in it (fleet_go: its tab of its
+// tier, another machine's through its row and tab), an idle one as the Open group's row does.
+attention_go :: proc(sid: u64) {
+	s := core.find_session(sid)
+	if s == nil do return
+	if core.session_need(s) != core.NEED_NONE do fleet_go(sid)
+	else do ui_do(core.Focus_Session{session = sid, reopen = true}) // a dead pi starts again (dead_tab.odin)
+}
+
+// ↑↓ in the filter field while the Attention view shows: the keyboard's row moves (wrapping round).
+// False: not this view (the field's own Home and End).
+attention_step :: proc(d: int) -> bool {
+	if state.sidebar.view != .Attention || state.layout.left_tab != .Sessions do return false
+	rows := attention_shown()
+	app.redraw = true
+	if len(rows) == 0 do return true
+	at := -1
+	for r, i in rows do if r.session.id == attention_sel do at = i
+	k := at < 0 ? (d > 0 ? 0 : len(rows) - 1) : (at + d + len(rows)) %% len(rows)
+	attention_sel = rows[k].session.id
+	return true
+}
+
+// Enter in the filter field while the Attention view shows: the keyboard's row, else the first
+// (where ⌥⌘A goes). False: not this view, or no row (the tree's best match then).
+attention_enter :: proc() -> bool {
+	if state.sidebar.view != .Attention || state.layout.left_tab != .Sessions do return false
+	rows := attention_shown()
+	if len(rows) == 0 do return false
+	sid := rows[0].session.id
+	for r in rows do if r.session.id == attention_sel do sid = r.session.id
+	attention_go(sid)
+	return true
+}
+
+// Toggle Attention view (⌥⌘., View menu, palette): on, showing the Sessions tab; off when it
+// already shows.
+attention_view_next :: proc() -> core.Sidebar_View {
+	shown := state.layout.left_open && state.layout.left_tab == .Sessions
+	return shown && state.sidebar.view == .Attention ? .Projects : .Attention
+}
+
+attention_view_toggle :: proc() {
+	v := attention_view_next()
+	if state.focus_widget == "files" do ui_do(core.Set_Focus{""}) // the Files or Settings tree had the keyboard
+	if !state.layout.left_open || state.layout.left_tab != .Sessions do ui_do(core.Set_Left_Tab{tab = .Sessions})
+	ui_do(core.Set_Sidebar_View{view = v})
 }

@@ -137,6 +137,10 @@ SORT_BY_NAMES := [Sort_By]string {
 	.Created = "created",
 	.Attention = "attention",
 }
+SIDEBAR_VIEW_NAMES := [Sidebar_View]string {
+	.Projects  = "projects",
+	.Attention = "attention",
+}
 FOLD_NAMES := [Sidebar_Fold]string {
 	.Open     = "open",
 	.Projects = "projects",
@@ -192,6 +196,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Set_Hidden:          return "set_hidden"
 	case Set_Sort:            return "set_sort"
 	case Set_Sidebar_Folded:  return "set_sidebar_folded"
+	case Set_Sidebar_View:    return "set_sidebar_view"
 	case Set_Row_Expanded:    return "set_row_expanded"
 	case Set_Filter:          return "set_filter"
 	case Reveal_Path:         return "reveal"
@@ -431,6 +436,8 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Set_Sidebar_Folded:
 		kv_str(&w, "section", FOLD_NAMES[c.section])
 		kv_bool(&w, "folded", c.folded)
+	case Set_Sidebar_View:
+		kv_str(&w, "view", SIDEBAR_VIEW_NAMES[c.view])
 	case Set_Row_Expanded:
 		kv_str(&w, "path", c.path)
 		kv_bool(&w, "expanded", c.expanded)
@@ -1439,6 +1446,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 		fo := obj_begin(b)
 		for f in Sidebar_Fold do kv_bool(&fo, FOLD_NAMES[f], sb.folded[f])
 		obj_end(&fo)
+		kv_str(&o, "view", SIDEBAR_VIEW_NAMES[sb.view])
 		kv_bool(&o, "show_hidden", sb.show_hidden)
 		key(&o, "expanded")
 		write_strings(b, sb.expanded[:])

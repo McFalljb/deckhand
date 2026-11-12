@@ -1462,7 +1462,9 @@ Hit :: union {
 	Hit_Jobs, // the Jobs tab (ui_jobs.odin)
 	Hit_Changes, // the Changes tab and the top bar's "±" (ui_changes.odin)
 	Hit_Fleet_Row, // a row of the empty centre's summary (ui_fleet.odin)
+	Hit_Attention, // the Sessions column's By project | Attention switch, IDLE's header, the footer (ui_sidebar.odin)
 }
+Hit_Attention :: distinct int // a core.Sidebar_View (the switch), ATTN_HIT_IDLE, ATTN_HIT_FOOTER
 Hit_Editor_Tool :: distinct int // button index
 Hit_Project :: distinct u64 // project id
 Hit_Session :: distinct string // pi session id

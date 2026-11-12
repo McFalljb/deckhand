@@ -1034,6 +1034,13 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		}
 	case Hit_Fleet_Row:
 		return fleet_row_tip(u64(x))
+	case Hit_Attention:
+		switch int(x) {
+		case ATTN_HIT_IDLE:   return attention_idle_open ? "Fold the idle sessions" : "Show the idle sessions", ""
+		case ATTN_HIT_FOOTER: return "Back to the tree: each machine, its projects and sessions", ""
+		case int(core.Sidebar_View.Attention): return "One list across every machine, by what needs you", "⌥⌘."
+		}
+		return "The tree: each machine, its projects and sessions", "⌥⌘."
 	case Hit_Open_Row:
 		s := core.find_session(u64(x))
 		if tip := dead_tab_hover_tip(core.session_pi_tab(s)); tip != "" do return tip, ""

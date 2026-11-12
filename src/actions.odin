@@ -676,6 +676,7 @@ ACTIONS := [?]Action {
 	}, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"files"}, true // the Files tab, with the keyboard (opens the left column)
 	}},
+	{id = "attention_view", label = "Toggle Attention view", keys = "⌥⌘.", make = proc() -> (core.Command, bool) {return core.Set_Sidebar_View{view = attention_view_next()}, true}, ui = attention_view_toggle}, // ui_sidebar.odin
 	{id = "show_sessions", label = "Sessions and projects", prepare = proc() {
 		if state.focus_widget == "files" do ui_do(core.Set_Focus{""}) // the Files or Settings tree had the keyboard
 	}, make = proc() -> (core.Command, bool) {

@@ -2439,6 +2439,5 @@ Planned; this guide covers each once it ships:
 - **Jobs after Stop All Sessions and across a restart of the Mac** (Deckhand Core started at
   login), heartbeat and no-agent check jobs, and Atlas's shared memory (design:
   [ATLAS.md](ATLAS.md)). Jobs already run while the window is closed.
-- **Sessions on other machines** in the same sidebar, over SSH, and **several windows**
-  ([ROADMAP.md](ROADMAP.md)).
+- **Several windows** on one Deckhand Core ([ROADMAP.md](ROADMAP.md)).
 - **Merging** from the Changes tab.

@@ -553,6 +553,58 @@ r1_auto_install_once :: proc(t: ^testing.T) {
 	testing.expect_value(t, p, Machine_Job.None)
 }
 
+// Why an add's install could not start (its note) goes once that no longer holds: an install of
+// that machine starts (so its cancel does not bring the old reason back), and a "too many
+// installs" reason goes when one of them ends. Nothing is copied: the stand-in ssh only waits.
+@(test)
+machine_install_note_not_stale :: proc(t: ^testing.T) {
+	when ODIN_OS != .Darwin do return
+	f := fixture_up(t)
+	defer fixture_down(&f)
+	fake_app(f.dir, "")
+	install_ssh_for_test = {"/bin/sh", "-c", `cat > /dev/null; exec sleep 60`, "ssh"}
+	why_of :: proc(no: u64) -> string {
+		for m in state.machines do if m.no == no {
+			_, why, _ := machine_status_text(m)
+			return why
+		}
+		return "<no machine>"
+	}
+	add :: proc(t: ^testing.T, a: Machine_Add) -> u64 {
+		r := machine_add_apply(a)
+		testing.expect(t, r.ok, r.error)
+		return r.created_id
+	}
+	// two installs run (the most at once); a third machine's add finds no core: its install waits
+	b := add(t, {name = "m3", via = "true"})
+	c := add(t, {name = "m4", via = "true"})
+	machine_status_set_for_test(f.no, .Not_Installed)
+	machine_status_set_for_test(b, .Not_Installed)
+	testing.expect(t, machine_install_apply({no = f.no}, {kind = .UI}).ok, "first install")
+	testing.expect(t, machine_install_apply({no = b}, {kind = .UI}).ok, "second install")
+	machine_outcome_for_test(c, {exited = true, exit_code = 127})
+	testing.expectf(t, strings.contains(why_of(c), "installs are running"), "busy: %q", why_of(c))
+	// one is cancelled: there is room again, the reason goes
+	machine_install_apply({no = f.no, cancel = true}, {kind = .UI})
+	testing.expect_value(t, tick_until(f.no, .Failed, 10 * time.Second), Machine_Job.Failed)
+	testing.expect_value(t, why_of(c), "Deckhand isn't installed there")
+	machine_outcome_for_test(c, {exited = true, exit_code = 127}) // the timer's next try
+	testing.expect_value(t, why_of(c), "Deckhand isn't installed there")
+
+	// a machine whose OS was not known: once known, its install starts; cancelled, the old reason
+	// does not come back on the next try
+	d := add(t, {target = "me@nuc.local"})
+	machine_outcome_for_test(d, {exited = true, exit_code = 127})
+	testing.expectf(t, strings.contains(why_of(d), "connect to it first"), "unknown OS: %q", why_of(d))
+	machine_probe_for_test(d, "Darwin arm64\n", 0)
+	machine_status_set_for_test(d, .Not_Installed)
+	testing.expect(t, machine_install_apply({no = d}, {kind = .UI}).ok, "Install… now")
+	machine_install_apply({no = d, cancel = true}, {kind = .UI})
+	testing.expect_value(t, tick_until(d, .Failed, 10 * time.Second), Machine_Job.Failed)
+	machine_outcome_for_test(d, {exited = true, exit_code = 127})
+	testing.expect_value(t, why_of(d), "Deckhand isn't installed there")
+}
+
 @(private = "file")
 fake_app :: proc(dir, version: string) {
 	app := fmt.tprintf("%s/core/Deckhand Core.app", dir)

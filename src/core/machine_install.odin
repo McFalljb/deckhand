@@ -98,6 +98,7 @@ Install_Kind :: enum u8 {
 }
 
 INSTALLS_MAX :: 2 // at once, every machine's
+INSTALLS_BUSY :: "installs are running: wait for one" // a start's refusal while INSTALLS_MAX run (after the count)
 INSTALL_FETCH_WAIT :: 31 * time.Minute // curl's own --max-time is 30 min
 INSTALL_COPY_WAIT :: 15 * time.Minute
 INSTALL_CLEAN_WAIT :: 30 * time.Second
@@ -554,6 +555,7 @@ machine_install_apply :: proc(c: Machine_Install, caller: Caller) -> Result {
 	if c.cancel {
 		j, _ := job_find(c.no)
 		if j != nil && job_active(j) do job_fail(j, "cancelled")
+		machine_install_why_clear(c.no) // why an install could not start: stale now (machines.odin)
 		return {ok = true}
 	}
 	return machine_install_start(c.no)
@@ -567,7 +569,7 @@ machine_install_start :: proc(no: u64) -> Result {
 	if j, _ := job_find(no); j != nil && job_active(j) do return fail(fmt.tprintf("%s is already being %s", f.name, MACHINE_JOB_NAMES[j.phase]))
 	n := 0
 	for j in inst.jobs do if job_active(j) do n += 1
-	if n >= INSTALLS_MAX do return fail(fmt.tprintf("%d installs are running: wait for one", INSTALLS_MAX))
+	if n >= INSTALLS_MAX do return fail(fmt.tprintf("%d %s", INSTALLS_MAX, INSTALLS_BUSY))
 	update := false
 	if f.status != .Not_Installed {
 		switch machine_update_offer(core_version(), f.version, f.status, f.skew, f.installed) {
@@ -613,6 +615,7 @@ machine_install_start :: proc(no: u64) -> Result {
 		job_set(j, .Fetching)
 		fetch_step(j)
 	}
+	machine_install_why_clear(no) // it started: why it could not before is stale (machines.odin)
 	return {ok = true}
 }
 
@@ -1015,6 +1018,10 @@ machine_install_tick :: proc(now: time.Tick) {
 		free(l, heap)
 		ordered_remove(&inst.lingers, i)
 	}
+	// one ended: a machine told that too many installs were running may install now
+	n := 0
+	for j in inst.jobs do if job_active(j) do n += 1
+	if n < INSTALLS_MAX do machine_install_why_clear(0)
 }
 
 // The core stops: every child ends now (≤ INSTALL_KILL_WAIT each, then SIGKILL), the local temp

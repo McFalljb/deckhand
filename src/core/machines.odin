@@ -982,6 +982,20 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	}
 }
 
+// Why an install could not start no longer holds (machine_install.odin): machine no's note goes
+// (an install of it started or was cancelled), or with no = 0 every machine's note that said too
+// many installs were running (one ended). Its status says the plain fact again.
+machine_install_why_clear :: proc(no: u64) {
+	heap := runtime.heap_allocator()
+	for l in mach.links {
+		if l.install_why == "" do continue
+		if no != 0 ? l.no != no : !strings.has_suffix(l.install_why, INSTALLS_BUSY) do continue
+		delete(l.install_why, heap)
+		l.install_why = ""
+		if l.status == .Not_Installed do mlink_set(l, .Not_Installed, MACHINE_NO_CORE)
+	}
+}
+
 // Starts l's probe or connect. False: it could not start (status set, retried later).
 @(private = "file")
 mlink_start :: proc(l: ^Mach_Link) {

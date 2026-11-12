@@ -1454,16 +1454,16 @@ machine_target_clean :: proc(s: string) -> string {
 
 // Why the add field's text cannot be used, in plain words with an example ("" = it can).
 machine_target_plain_error :: proc(target: string) -> string {
-	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like jb@nuc.local"
+	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like me@nuc.local"
 	if machine_target_error(target) == "" do return machine_target_part_missing(target) ? MACHINE_PART_ERROR : ""
 	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
 	if len(target) > 255 do return "That is too long for a machine's address"
-	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like jb@nuc.local: ssh's options go in ~/.ssh/config"
-	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like jb@nuc.local", text_clean(target, 40))
+	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like me@nuc.local: ssh's options go in ~/.ssh/config"
+	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like me@nuc.local", text_clean(target, 40))
 }
 
 // What Deckhand calls a machine unless the user names it: its target's host part (nuc for
-// jb@nuc.home.arpa), an ~/.ssh/config name as it is, an IP address whole. Temp (a slice).
+// me@nuc.home.arpa), an ~/.ssh/config name as it is, an IP address whole. Temp (a slice).
 machine_default_name :: proc(target: string) -> string {
 	h := target
 	if i := strings.last_index_byte(h, '@'); i >= 0 do h = h[i + 1:]
@@ -1499,7 +1499,7 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 	}
 	name := machine_name_clean(c.name)
 	if name == "" || name == strings.trim_space(c.target) {
-		name = machine_default_name(target) // nuc, not jb@nuc.home.arpa
+		name = machine_default_name(target) // nuc, not me@nuc.home.arpa
 		if machine_name_taken(name) do name = target // two machines called nuc: the second by its whole target
 	}
 	if w := machine_name_error(name); w != "" do return fail(w)

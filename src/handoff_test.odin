@@ -36,16 +36,16 @@ setup :: proc(f: ^Fixture) {
 	append(&state.projects, core.Project{id = 2, group = .Chats, cwd = strings.clone("/Users/me/chats/api"), label = strings.clone("api")})
 	state.selected_project = 1
 	state.machines = make([]core.Machine_View, 3)
-	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online, core_run = "r-nuc-1", checklist = NUC_CHECKS[:]}
-	state.machines[1] = {no = 4, name = "box", target = "jb@box", status = .Online, core_run = "r-box-1"}
+	state.machines[0] = {no = 3, name = "nuc", target = "me@nuc", status = .Online, core_run = "r-nuc-1", checklist = NUC_CHECKS[:]}
+	state.machines[1] = {no = 4, name = "box", target = "me@box", status = .Online, core_run = "r-box-1"}
 	state.machines[2] = {no = 5, name = "old", target = "old", status = .Offline}
-	remote_project(&f.r3, 7, "/home/jb/src/api")
-	remote_project(&f.r3, 8, "/home/jb/src/web")
-	remote_project(&f.r4, 7, "/home/jb/work/api")
+	remote_project(&f.r3, 7, "/home/me/src/api")
+	remote_project(&f.r3, 8, "/home/me/src/web")
+	remote_project(&f.r4, 7, "/home/me/work/api")
 	remote_project(&f.r4, 8, "/srv/api")
-	remote_project(&f.r4, 9, "/home/jb/API")
-	remote_project(&f.r4, 10, "/home/jb/a\x1bpi‮")
-	remote_project(&f.r5, 7, "/home/jb/api")
+	remote_project(&f.r4, 9, "/home/me/API")
+	remote_project(&f.r4, 10, "/home/me/a\x1bpi‮")
+	remote_project(&f.r5, 7, "/home/me/api")
 	core.mirror_merge(3, &f.r3, &f.m3)
 	core.mirror_merge(4, &f.r4, &f.m4)
 	core.mirror_merge(5, &f.r5, &f.m5)
@@ -142,15 +142,15 @@ handoff_matching :: proc(t: ^testing.T) {
 		for r in hostile.cwd do testing.expectf(t, r >= 0x20 && r != 0x7f && r != 0x202e, "cleaned: %q", hostile.cwd)
 		testing.expect(t, core.handoff_name(hostile.cwd) != "api", hostile.cwd)
 	}
-	testing.expect_value(t, core.handoff_short("/home/jb", "jb"), "~")
-	testing.expect_value(t, core.handoff_short("/Users/jb/x/y", "jb"), "~/x/y")
+	testing.expect_value(t, core.handoff_short("/home/me", "me"), "~")
+	testing.expect_value(t, core.handoff_short("/Users/me/x/y", "me"), "~/x/y")
 	testing.expect_value(t, core.handoff_short("/root/api", "root"), "~/api")
-	testing.expect_value(t, core.handoff_short("/opt/api", "jb"), "/opt/api")
+	testing.expect_value(t, core.handoff_short("/opt/api", "me"), "/opt/api")
 	// only the home of the user its link logs in as; not known: in full
-	testing.expect_value(t, core.handoff_short("/home/alice/api", "jb"), "/home/alice/api")
-	testing.expect_value(t, core.handoff_short("/home/jbx/api", "jb"), "/home/jbx/api")
-	testing.expect_value(t, core.handoff_short("/home/jb/api", ""), "/home/jb/api")
-	testing.expect_value(t, core.handoff_short("/root/api", "jb"), "/root/api")
+	testing.expect_value(t, core.handoff_short("/home/alice/api", "me"), "/home/alice/api")
+	testing.expect_value(t, core.handoff_short("/home/mex/api", "me"), "/home/mex/api")
+	testing.expect_value(t, core.handoff_short("/home/me/api", ""), "/home/me/api")
+	testing.expect_value(t, core.handoff_short("/root/api", "me"), "/root/api")
 	testing.expect_value(t, core.handoff_name("/"), "")
 	testing.expect_value(t, core.handoff_name(""), "")
 }
@@ -334,14 +334,14 @@ handoff_click_is_what_was_drawn :: proc(t: ^testing.T) {
 	menu_open(Menu_Project(1), {})
 	drawn_now()
 	at = row("New session on nuc in api")
-	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/other/api"
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/me/other/api"
 	menu_run(at)
 	core.inbox_drain()
 	testing.expect_value(t, toast.text, "That machine is no longer available")
 	testing.expect_value(t, state.selected_project, 1)
 	if menu.open do menu_close()
 	toast_clear()
-	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/src/api"
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/me/src/api"
 
 	// that machine's core restarted since the draw: the same
 	menu_open(Menu_Project(1), {})
@@ -425,7 +425,7 @@ handoff_folders_distinct :: proc(t: ^testing.T) {
 	core.mirror_unmerge(4)
 	clear(&f.r4.projects)
 	long := strings.concatenate({"/srv/", strings.repeat("deep/", 30, context.temp_allocator), "end/api"}, context.temp_allocator)
-	remote_project(&f.r4, 20, "/home/jb/work/api")
+	remote_project(&f.r4, 20, "/home/me/work/api")
 	remote_project(&f.r4, 21, "/home/alice/work/api")
 	remote_project(&f.r4, 22, long)
 	core.mirror_merge(4, &f.r4, &f.m4)
@@ -440,7 +440,7 @@ handoff_folders_distinct :: proc(t: ^testing.T) {
 	// the link's user not known (an ssh config name): every folder in full
 	state.machines[1].target = "box"
 	got = core.handoff_targets(1)
-	testing.expect_value(t, got[1].label, "New session on box in api (/home/jb/work/api)")
+	testing.expect_value(t, got[1].label, "New session on box in api (/home/me/work/api)")
 }
 
 // An open harness picker for another machine's project starts nothing once that machine's core
@@ -468,13 +468,13 @@ handoff_picker_restart :: proc(t: ^testing.T) {
 	toast_clear()
 
 	new_session_ui(pid(3, 7))
-	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/elsewhere/api"
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/me/elsewhere/api"
 	menu_run(pick())
 	core.inbox_drain()
 	testing.expect(t, !menu.open, "closed")
 	testing.expect_value(t, toast.text, "That machine restarted: choose the project again")
 	toast_clear()
-	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/jb/src/api"
+	if p := core.find_project(pid(3, 7)); p != nil do p.cwd = "/home/me/src/api"
 
 	// unchanged: it goes (the route says the machine's link is down here: not that toast)
 	new_session_ui(pid(3, 7))

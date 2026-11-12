@@ -38,16 +38,16 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	state.settings.remote_machines = true
 	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
 	state.machines = make([]core.Machine_View, 2)
-	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online}
+	state.machines[0] = {no = 3, name = "nuc", target = "me@nuc", status = .Online}
 	state.machines[1] = {no = 4, name = "box", target = "box", status = .Online}
 	r: core.State
-	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
-	s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/jb/garden"), title = strings.clone("Plant the beans")}
+	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/me/garden"), label = strings.clone("garden")})
+	s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me/garden"), title = strings.clone("Plant the beans")}
 	append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, waiting = true})
 	s.active_tab = 10
 	append(&r.open_sessions, s)
 	r.selected_project = 5
-	append(&r.sessions, core.Session{id = strings.clone("def"), path = strings.clone("/home/jb/.pi/def.jsonl"), title = strings.clone("Water the tomatoes"), when_ = strings.clone("2026-11-10 10:00"), modified = time.time_add(time.now(), -2 * time.Hour)})
+	append(&r.sessions, core.Session{id = strings.clone("def"), path = strings.clone("/home/me/.pi/def.jsonl"), title = strings.clone("Water the tomatoes"), when_ = strings.clone("2026-11-10 10:00"), modified = time.time_add(time.now(), -2 * time.Hour)})
 	m: core.Machine_Mirror
 	core.mirror_merge(3, &r, &m)
 	defer {
@@ -133,7 +133,7 @@ machine_rows_remote :: proc(t: ^testing.T) {
 
 	// a note under the header says what is wrong: no status beside the name, no pointer at the button
 	state.machines[0].status = .Needs_Login
-	state.machines[0].error = "jb@nuc: Permission denied (publickey)."
+	state.machines[0].error = "me@nuc: Permission denied (publickey)."
 	got = drawn_text()
 	testing.expectf(t, strings.contains(got, "nuc\n1\nLog in…\n") && strings.contains(got, "ssh wants a password or a key\n") && !strings.contains(got, "Needs you to log in"), "needs login: %q", got)
 	// an update to make on that machine: no button, the note (two lines, not cut) says what to do
@@ -217,16 +217,16 @@ machine_rows_review :: proc(t: ^testing.T) {
 	state.settings.remote_machines = true
 	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
 	state.machines = make([]core.Machine_View, 1)
-	state.machines[0] = {no = 3, name = "nuc", target = "jb@nuc", status = .Online}
+	state.machines[0] = {no = 3, name = "nuc", target = "me@nuc", status = .Online}
 	r: core.State
-	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/jb/garden"), label = strings.clone("garden")})
-	append(&r.projects, core.Project{id = 6, group = .Projects, cwd = strings.clone("/home/jb/orchard"), label = strings.clone("orchard")})
-	s := core.Open_Session{id = 9, project_id = 5, agent = .Claude, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/jb/garden"), title = strings.clone("Prune the roses")}
+	append(&r.projects, core.Project{id = 5, group = .Projects, cwd = strings.clone("/home/me/garden"), label = strings.clone("garden")})
+	append(&r.projects, core.Project{id = 6, group = .Projects, cwd = strings.clone("/home/me/orchard"), label = strings.clone("orchard")})
+	s := core.Open_Session{id = 9, project_id = 5, agent = .Claude, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me/garden"), title = strings.clone("Prune the roses")}
 	append(&s.tabs, core.Tab{id = 10, kind = core.Claude_Tab{}, title = strings.clone("claude"), status = .Running})
 	s.active_tab = 10
 	append(&r.open_sessions, s)
 	r.selected_project = 5
-	append(&r.sessions, core.Session{id = strings.clone("def"), path = strings.clone("/home/jb/.claude/def.jsonl"), title = strings.clone("Water the tomatoes"), when_ = strings.clone("2026-11-10 10:00"), modified = time.time_add(time.now(), -2 * time.Hour), claude = true})
+	append(&r.sessions, core.Session{id = strings.clone("def"), path = strings.clone("/home/me/.claude/def.jsonl"), title = strings.clone("Water the tomatoes"), when_ = strings.clone("2026-11-10 10:00"), modified = time.time_add(time.now(), -2 * time.Hour), claude = true})
 	m: core.Machine_Mirror
 	core.mirror_merge(3, &r, &m)
 	acct := fmt.tprintf("%s/pd-mrows-acct-%d", os.get_env("TMPDIR", context.temp_allocator), time.now()._nsec)

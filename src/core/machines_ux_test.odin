@@ -14,12 +14,12 @@ import "core:time"
 @(test)
 machines_ux_target_and_name :: proc(t: ^testing.T) {
 	// what people paste: a leading `ssh ` or `ssh://` (and a trailing /) is dropped
-	testing.expect_value(t, machine_target_clean("  ssh jb@nuc.home.arpa "), "jb@nuc.home.arpa")
-	testing.expect_value(t, machine_target_clean("ssh://jb@nuc/"), "jb@nuc")
+	testing.expect_value(t, machine_target_clean("  ssh me@nuc.home.arpa "), "me@nuc.home.arpa")
+	testing.expect_value(t, machine_target_clean("ssh://me@nuc/"), "me@nuc")
 	testing.expect_value(t, machine_target_clean("SSH nuc"), "nuc")
 	testing.expect_value(t, machine_target_clean("sshbox"), "sshbox")
 	// a port is refused, with how to use one (ssh reads host:2222 as a host's name)
-	for port in ([?]string{"ssh://jb@nuc:2222/", "jb@nuc:2222", "nuc:22"}) {
+	for port in ([?]string{"ssh://me@nuc:2222/", "me@nuc:2222", "nuc:22"}) {
 		w := machine_target_plain_error(machine_target_clean(port))
 		testing.expectf(t, strings.contains(w, "To use another port, add a Host entry to ~/.ssh/config and type its name here."), "%q: %q", port, w)
 		testing.expectf(t, machine_target_error(machine_target_clean(port)) != "", "%q taken", port)
@@ -27,7 +27,7 @@ machines_ux_target_and_name :: proc(t: ^testing.T) {
 	testing.expect_value(t, machine_target_error("fe80::1"), "") // an IPv6 address is not a port
 	// an empty side of the @, or a trailing :, is refused with what to type
 	// (the add field's check only: a target saved before is not refused at connect)
-	for half in ([?]string{"jb@", "@nuc", "jb@@nuc", "nuc:", "jb@nuc:", "ssh jb@"}) {
+	for half in ([?]string{"me@", "@nuc", "me@@nuc", "nuc:", "me@nuc:", "ssh me@"}) {
 		testing.expectf(t, machine_target_plain_error(machine_target_clean(half)) == MACHINE_PART_ERROR, "%q: %q", half, machine_target_plain_error(machine_target_clean(half)))
 		testing.expectf(t, machine_target_error(machine_target_clean(half)) == "", "%q: not checked again at connect", half)
 	}
@@ -38,17 +38,17 @@ machines_ux_target_and_name :: proc(t: ^testing.T) {
 		testing.expectf(t, w6 == "", "%q at connect: %q", v6, w6)
 	}
 	// a bad target says what is allowed, with an example
-	testing.expect_value(t, machine_target_plain_error("jb@nuc"), "")
-	for bad in ([?]string{"", "jb@nuc -p 22", "-oProxyCommand=x", "a;b", "$(id)"}) {
+	testing.expect_value(t, machine_target_plain_error("me@nuc"), "")
+	for bad in ([?]string{"", "me@nuc -p 22", "-oProxyCommand=x", "a;b", "$(id)"}) {
 		w := machine_target_plain_error(bad)
-		testing.expectf(t, w != "" && strings.contains(w, "like jb@nuc.local"), "%q: %q", bad, w)
+		testing.expectf(t, w != "" && strings.contains(w, "like me@nuc.local"), "%q: %q", bad, w)
 	}
-	testing.expect(t, strings.contains(machine_target_plain_error("jb@nuc -p 22"), "Type only the machine"), "options")
+	testing.expect(t, strings.contains(machine_target_plain_error("me@nuc -p 22"), "Type only the machine"), "options")
 	// the default name: the host part, never upper-cased; an alias as it is; an IP whole
-	testing.expect_value(t, machine_default_name("jb@nuc.home.arpa"), "nuc")
+	testing.expect_value(t, machine_default_name("me@nuc.home.arpa"), "nuc")
 	testing.expect_value(t, machine_default_name("studio-mac-mini.local"), "studio-mac-mini")
 	testing.expect_value(t, machine_default_name("nuc"), "nuc")
-	testing.expect_value(t, machine_default_name("jb@192.168.1.5"), "192.168.1.5")
+	testing.expect_value(t, machine_default_name("me@192.168.1.5"), "192.168.1.5")
 	testing.expect_value(t, machine_default_name("Lab-Box"), "Lab-Box")
 	// a name: one line, bounded
 	testing.expect_value(t, machine_name_clean("  my\tbox‮ "), "my box")
@@ -64,7 +64,7 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 	for w in ([?]Machine_Status{.Offline, .Needs_Update, .Not_Installed, .Taken, .Online, .Connecting}) do testing.expectf(t, !machine_status_waits_for_user(w), "%v does not", w)
 	// no status id reaches the user
 	for st in Machine_Status {
-		label, why, _ := machine_status_text({name = "nuc", target = "jb@nuc", status = st})
+		label, why, _ := machine_status_text({name = "nuc", target = "me@nuc", status = st})
 		testing.expectf(t, label != "" && !strings.contains(label, "_") && !strings.contains(why, "_"), "%v: %q %q", st, label, why)
 		for word in ([?]string{"core", "hub", "generation", "linger", "mux"}) do testing.expectf(t, !strings.contains(strings.to_lower(why, context.temp_allocator), word), "%v: %q says %s", st, why, word)
 	}
@@ -73,12 +73,12 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 		label, why, raw: string,
 	}
 	cases := []Case {
-		{{target = "jb@nuc-typo", status = .Offline, error = "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"}, "Offline", "Can't find a computer called nuc-typo", "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"},
+		{{target = "me@nuc-typo", status = .Offline, error = "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"}, "Offline", "Can't find a computer called nuc-typo", "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"},
 		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Connection refused"}, "Offline", "It refused the connection", "ssh: connect to host nuc port 22: Connection refused"},
 		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Operation timed out"}, "Offline", "The connection timed out", "ssh: connect to host nuc port 22: Operation timed out"},
 		{{target = "nuc", status = .Offline, error = "kex_exchange_identification: read: Connection reset by peer"}, "Offline", "The connection failed", "kex_exchange_identification: read: Connection reset by peer"},
 		{{target = "nuc", status = .Offline, error = "no answer from its core"}, "Offline", "Deckhand there did not answer", ""},
-		{{target = "nuc", status = .Needs_Login, error = "jb@nuc: Permission denied (publickey)."}, "Needs you to log in", "ssh wants a password or a key", "jb@nuc: Permission denied (publickey)."},
+		{{target = "nuc", status = .Needs_Login, error = "me@nuc: Permission denied (publickey)."}, "Needs you to log in", "ssh wants a password or a key", "me@nuc: Permission denied (publickey)."},
 		{{target = "nuc", status = .Refused, error = HUB_NOT_ALLOWED}, "Not allowed", "Turn on Allow other machines to connect on that machine", ""},
 		{{target = "nuc", status = .Unsupported, error = "FreeBSD amd64"}, "Not supported", "Not a Mac or Linux machine", "FreeBSD amd64"},
 		{{target = "nuc", status = .Taken, error = "viewed from Studio"}, "In use there", "Shown from Studio now: Take back shows it here", ""},
@@ -150,28 +150,28 @@ ux_down :: proc(f: ^Ux_Fixture) {
 machines_ux_add_rename_remove :: proc(t: ^testing.T) {
 	f := ux_up()
 	defer ux_down(&f)
-	r := machine_add_apply({target = "ssh jb@nuc.home.arpa"})
+	r := machine_add_apply({target = "ssh me@nuc.home.arpa"})
 	testing.expect(t, r.ok, r.error)
 	a := r.created_id
 	fa, _ := machine_facts(a)
-	testing.expect(t, fa.name == "nuc" && fa.target == "jb@nuc.home.arpa", fa.name)
-	r = machine_add_apply({target = "ssh://jb2@nuc.lan/"})
+	testing.expect(t, fa.name == "nuc" && fa.target == "me@nuc.home.arpa", fa.name)
+	r = machine_add_apply({target = "ssh://me2@nuc.lan/"})
 	testing.expect(t, r.ok, r.error)
 	fb, _ := machine_facts(r.created_id)
-	testing.expect(t, fb.name == "jb2@nuc.lan" && fb.target == "jb2@nuc.lan", "a second nuc: its whole target")
-	r = machine_add_apply({target = "jb@nuc.home.arpa"})
+	testing.expect(t, fb.name == "me2@nuc.lan" && fb.target == "me2@nuc.lan", "a second nuc: its whole target")
+	r = machine_add_apply({target = "me@nuc.home.arpa"})
 	testing.expect(t, !r.ok && strings.contains(r.error, "already in your machines"), r.error)
-	r = machine_add_apply({target = "jb@nuc x"})
+	r = machine_add_apply({target = "me@nuc x"})
 	testing.expect(t, !r.ok && strings.contains(r.error, "Type only the machine"), r.error)
 	// Rename: the name only, cleaned; the target stays; a taken name is refused
 	r = machine_rename_apply({no = a, name = "  Lab\tbox "})
 	testing.expect(t, r.ok, r.error)
 	fa, _ = machine_facts(a)
-	testing.expect(t, fa.name == "Lab box" && fa.target == "jb@nuc.home.arpa", fa.name)
+	testing.expect(t, fa.name == "Lab box" && fa.target == "me@nuc.home.arpa", fa.name)
 	r = machine_rename_apply({no = a, name = "JB2@NUC.LAN"})
 	testing.expect(t, !r.ok && strings.contains(r.error, "already called"), r.error)
 	saved, _, _ := machines_read(machines_path(), context.temp_allocator)
-	testing.expect(t, len(saved) == 2 && saved[0].name == "Lab box" && saved[0].target == "jb@nuc.home.arpa", "saved")
+	testing.expect(t, len(saved) == 2 && saved[0].name == "Lab box" && saved[0].target == "me@nuc.home.arpa", "saved")
 	// Remove asks first; the user's yes removes it
 	rr, _ := machine_remove_apply({no = a}, {kind = .UI})
 	testing.expect(t, !rr.ok && rr.error == "needs_confirmation" && strings.has_prefix(rr.confirm_summary, "Remove Lab box from Deckhand? Nothing on it is deleted"), rr.confirm_summary)
@@ -192,14 +192,14 @@ machines_ux_no_retry :: proc(t: ^testing.T) {
 	r := machine_add_apply({name = "m2", via = "true"})
 	testing.expect(t, r.ok, r.error)
 	no := r.created_id
-	testing.expect(t, machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "jb@nuc: Permission denied (publickey)."}), "needs_login waits")
+	testing.expect(t, machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "me@nuc: Permission denied (publickey)."}), "needs_login waits")
 	testing.expect(t, machine_outcome_for_test(no, {replied = true, ok = false, error = HUB_NOT_ALLOWED}), "refused waits")
 	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = "ssh: connect to host nuc port 22: Connection refused"}), "offline retries")
 	// a login's words earlier in ssh's output, then the network went: offline, and it retries
-	dropped := "(jb@nuc) Password: \nclient_loop: send disconnect: Broken pipe"
+	dropped := "(me@nuc) Password: \nclient_loop: send disconnect: Broken pipe"
 	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = dropped}, up = true), "up, then dropped: retries")
 	testing.expect(t, !machine_outcome_for_test(no, {exited = true, exit_code = 255, stderr = dropped}), "a later line that is not a login's: retries")
-	s, _ := machine_status_of({exited = true, exit_code = 255, stderr = "jb@nuc: Permission denied (publickey).", up = true})
+	s, _ := machine_status_of({exited = true, exit_code = 255, stderr = "me@nuc: Permission denied (publickey).", up = true})
 	testing.expect_value(t, s, Machine_Status.Offline)
 	machine_outcome_for_test(no, {replied = true, ok = false, error = HUB_NOT_ALLOWED})
 	testing.expect(t, !machine_retries_for_test(no), "refused: nothing runs")
@@ -263,7 +263,7 @@ machines_ux_install_cannot_start :: proc(t: ^testing.T) {
 	defer ux_down(&f)
 	install_here_for_test = {"darwin", "arm64"} // installs run from a Mac (the Linux CI too)
 	defer install_here_for_test = {}
-	r := machine_add_apply({target = "jb@nuc"})
+	r := machine_add_apply({target = "me@nuc"})
 	testing.expect(t, r.ok, r.error)
 	no := r.created_id
 	view :: proc(no: u64) -> Machine_View {

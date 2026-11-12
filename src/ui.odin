@@ -1639,27 +1639,118 @@ pane_draw_rect :: proc(p: ^core.Pane) -> [4]f32 {
 	return {b.x, b.y, b.width, b.height}
 }
 
-// A filled rectangle with rounded corners, drawn as one quad per pixel row
-// in the corners, with an anti-aliased edge pixel.
-draw_round_rect :: proc(x, y, w, h, radius: f32, col: core.Rgba) {
+// Where draw_round_rect and draw_border put their quads: draw_rect, or a test's recorder.
+Rect_Sink :: #type proc(x, y, w, h: f32, col: core.Rgba)
+
+// A corner's radius in whole px: at most half the box (a pill), 0 when under 1 px.
+corner_px :: proc(radius, w, h: f32) -> f32 {
 	r := math.floor(min(radius, w / 2, h / 2))
-	if r < 1 {
-		draw_rect(x, y, w, h, col)
+	return r < 1 ? 0 : r
+}
+
+// How far row i of a corner of radius r (row 0 the box's outer edge) starts in from the side:
+// the circle's edge at the row's centre.
+corner_inset :: proc(r: f32, i: int) -> f32 {
+	if f32(i) >= r do return 0
+	dy := r - f32(i) - 0.5
+	return r - math.sqrt(r * r - dy * dy)
+}
+
+// One pixel row of the cover between a and b px in from a side (a < b, fractional), each end's
+// partly covered pixel at its share of col's alpha. From the left side (x up) or the right (x + w
+// down), so a right corner is the left one mirrored to the pixel. A pixel under 1% is left out.
+row_span :: proc(x, w, row_y, a, b: f32, right: bool, col: core.Rgba, rect: Rect_Sink) {
+	put :: proc(x, w, row_y, from, n: f32, right: bool, col: core.Rgba, rect: Rect_Sink) {
+		rect(right ? x + w - from - n : x + from, row_y, n, 1, col)
+	}
+	if b - a <= 0.01 do return
+	full, last := math.ceil(a), math.floor(b)
+	if full > last { 	// both ends in one pixel
+		put(x, w, row_y, last, 1, right, with_alpha(col, b - a), rect)
 		return
 	}
-	draw_rect(x, y + r, w, h - 2 * r, col)
-	for i in 0 ..< int(r) {
-		dy := r - f32(i) - 0.5
-		inset := r - math.sqrt(r * r - dy * dy)
-		full := math.ceil(inset)
-		edge := with_alpha(col, full - inset)
-		rows := [2]f32{y + f32(i), y + h - 1 - f32(i)}
-		for row_y in rows {
-			draw_rect(x + full, row_y, w - 2 * full, 1, col)
-			if full - inset > 0.01 {
-				draw_rect(x + full - 1, row_y, 1, 1, edge)
-				draw_rect(x + w - full, row_y, 1, 1, edge)
+	if full - a > 0.01 do put(x, w, row_y, full - 1, 1, right, with_alpha(col, full - a), rect)
+	if last > full do put(x, w, row_y, full, last - full, right, col, rect)
+	if b - last > 0.01 do put(x, w, row_y, last, 1, right, with_alpha(col, b - last), rect)
+}
+
+// A filled rectangle with rounded corners (each its own radius), drawn as one quad per pixel row
+// in the corners, with an anti-aliased edge pixel.
+draw_round_rect :: proc(x, y, w, h: f32, radius: clay.CornerRadius, col: core.Rgba, rect: Rect_Sink = draw_rect) {
+	tl, tr := corner_px(radius.topLeft, w, h), corner_px(radius.topRight, w, h)
+	bl, br := corner_px(radius.bottomLeft, w, h), corner_px(radius.bottomRight, w, h)
+	top, bottom := max(tl, tr), max(bl, br)
+	if top + bottom == 0 {
+		rect(x, y, w, h, col)
+		return
+	}
+	if h - top - bottom > 0 do rect(x, y + top, w, h - top - bottom, col)
+	// rows from the top (y down) and from the bottom (y + h - 1 up)
+	ends := [2]struct {
+		l, r, n: f32,
+		up:      bool,
+	}{{tl, tr, top, false}, {bl, br, bottom, true}}
+	for e in ends {
+		for i in 0 ..< int(e.n) {
+			row_y := e.up ? y + h - 1 - f32(i) : y + f32(i)
+			l, r := corner_inset(e.l, i), corner_inset(e.r, i)
+			lf, rf := math.ceil(l), math.ceil(r)
+			rect(x + lf, row_y, w - lf - rf, 1, col)
+			if lf - l > 0.01 do rect(x + lf - 1, row_y, 1, 1, with_alpha(col, lf - l))
+			if rf - r > 0.01 do rect(x + w - rf, row_y, 1, 1, with_alpha(col, rf - r))
+		}
+	}
+}
+
+// A border inside the box: each side its own width, laid over the fill (draw_round_rect) and
+// following its corners. A corner is rounded where it has a radius and both of its sides have a
+// border narrower than the radius: rows of a ring, the fill's own outer edge (same rows, same
+// edge pixels) and inside it the inner curve (radius minus each side's width; an ellipse when
+// the two widths differ). Elsewhere sides stay straight: a lone side runs the box's full length,
+// and at a square corner the top and bottom run through while the left and right stop at them,
+// so no pixel is drawn twice (a see-through colour would darken there).
+draw_border :: proc(x, y, w, h: f32, bd: clay.BorderRenderData, rect: Rect_Sink = draw_rect) {
+	col := to_rgba(bd.color)
+	if col.a == 0 do return
+	t, b := f32(bd.width.top), f32(bd.width.bottom)
+	l, r := f32(bd.width.left), f32(bd.width.right)
+	round :: proc(radius, w, h, side_a, side_b: f32) -> f32 {
+		k := corner_px(radius, w, h)
+		return side_a > 0 && side_b > 0 && side_a < k && side_b < k ? k : 0
+	}
+	tl, tr := round(bd.cornerRadius.topLeft, w, h, t, l), round(bd.cornerRadius.topRight, w, h, t, r)
+	bl, br := round(bd.cornerRadius.bottomLeft, w, h, b, l), round(bd.cornerRadius.bottomRight, w, h, b, r)
+
+	if t > 0 && w - tl - tr > 0 do rect(x + tl, y, w - tl - tr, t, col)
+	if b > 0 && w - bl - br > 0 do rect(x + bl, y + h - b, w - bl - br, b, col)
+	// the left and right start below the top's straight run (or its rounded corner)
+	if l > 0 {
+		y0, y1 := tl > 0 ? tl : t, bl > 0 ? bl : b
+		if h - y0 - y1 > 0 do rect(x, y + y0, l, h - y0 - y1, col)
+	}
+	if r > 0 {
+		y0, y1 := tr > 0 ? tr : t, br > 0 ? br : b
+		if h - y0 - y1 > 0 do rect(x + w - r, y + y0, r, h - y0 - y1, col)
+	}
+
+	// The rounded corners. k: the radius; across: the width of the top or bottom; side: the left
+	// or right's. Row i lies within the top/bottom band (to the corner's end at k) or crosses the
+	// inner curve, an ellipse with radii k - side by k - across centred k in from both sides.
+	corners := [4]struct {
+		k, across, side: f32,
+		right, up:       bool,
+	}{{tl, t, l, false, false}, {tr, t, r, true, false}, {bl, b, l, false, true}, {br, b, r, true, true}}
+	for c in corners {
+		if c.k == 0 do continue
+		rx, ry := c.k - c.side, c.k - c.across
+		for i in 0 ..< int(c.k) {
+			row_y := c.up ? y + h - 1 - f32(i) : y + f32(i)
+			inner := c.k
+			if f32(i) >= c.across {
+				dy := (c.k - f32(i) - 0.5) / ry
+				inner = c.side + rx * (1 - math.sqrt(max(1 - dy * dy, 0)))
 			}
+			row_span(x, w, row_y, corner_inset(c.k, i), inner, c.right, col, rect)
 		}
 	}
 }
@@ -1682,7 +1773,7 @@ ui_draw :: proc(cmds: clay.ClayArray(clay.RenderCommand), from, to: i32) {
 		case .Rectangle:
 			rd := cmd.renderData.rectangle
 			if rd.backgroundColor.a == 0 do continue
-			draw_round_rect(b.x, b.y, b.width, b.height, rd.cornerRadius.topLeft, to_rgba(rd.backgroundColor))
+			draw_round_rect(b.x, b.y, b.width, b.height, rd.cornerRadius, to_rgba(rd.backgroundColor))
 		case .Text:
 			t := cmd.renderData.text
 			col := to_rgba(t.textColor)
@@ -1690,12 +1781,7 @@ ui_draw :: proc(cmds: clay.ClayArray(clay.RenderCommand), from, to: i32) {
 			kind, bold := font_id_split(t.fontId)
 			draw_text(b.x, b.y, string(t.stringContents.chars[:t.stringContents.length]), col, kind, bold, font_id_italic(t.fontId), font_id_semibold(t.fontId))
 		case .Border:
-			bd := cmd.renderData.border
-			col := to_rgba(bd.color)
-			draw_rect(b.x, b.y, b.width, f32(bd.width.top), col)
-			draw_rect(b.x, b.y + b.height - f32(bd.width.bottom), b.width, f32(bd.width.bottom), col)
-			draw_rect(b.x, b.y, f32(bd.width.left), b.height, col)
-			draw_rect(b.x + b.width - f32(bd.width.right), b.y, f32(bd.width.right), b.height, col)
+			draw_border(b.x, b.y, b.width, b.height, cmd.renderData.border)
 		case .ScissorStart:
 			sgl.end()
 			sgl.scissor_rect(i32(b.x), i32(b.y), i32(b.width), i32(b.height), true)

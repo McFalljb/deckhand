@@ -192,7 +192,7 @@ pulse :: proc() -> f32 {
 ui_wants_frame :: proc() -> bool {
 	again := panels_clamped
 	panels_clamped = false
-	return again || animating || flash_seen || shine_drawn || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+	return again || animating || flash_seen || shine_drawn || pane_motion.moving || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
 }
 
 // ---- flash: a one-shot 1 -> 0 ----
@@ -643,6 +643,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	}
 	cmds := clay.EndLayout(0)
 	spinning, flash_seen = motion_visible(cmds, w, h) // frames for a turning mark or a flash only where it is seen
+	pane_motion_layout(cs) // split panes: dim, the focus line's glide, a zoom's outline (ui_pane_motion.odin)
 	if panels_scroll_clamp() do panels_clamped = true // drawn again at the clamped offset (ui_wants_frame)
 	return cmds
 }
@@ -782,7 +783,9 @@ centre :: proc(cs: ^core.Open_Session) {
 		machine_bar() // another machine's session while it is not online (ui_dead_tab.odin)
 		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane
 		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
-			if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
+			// zoomed (zoom_pane): that pane alone fills the area; the others are not laid out (not drawn, not hit)
+			if zp := core.session_pane(cs, core.session_zoomed(cs)); zp != nil do pane_layout(cs, zp)
+			else if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
 			else do pane_layout(cs, core.session_focused_pane(cs))
 		}
 	}
@@ -879,21 +882,24 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	}
 }
 
-// A pane's own strip (the session is split): its tabs, then "+" (the new-tab menu, for it). The focused
-// pane's strip has an accent line along its bottom.
+// A pane's own strip (the session is split): its tabs, the zoomed pane's "⤢ 1 of 3" (a click
+// restores), then "+" (the new-tab menu, for it). The focused pane's accent line along its bottom
+// is drawn over the strips' border (ui_pane_motion.odin: it glides when the focus moves).
 @(private = "file")
 pane_strip_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 	th := theme()
-	focused := p.id == cs.focused_pane
+	zoomed := core.session_zoomed(cs) == p.id
+	zoom_label := zoomed ? pane_zoom_label(cs, p) : ""
 	// clipped across like the bars: many tabs in a narrow pane never widen it
 	if clay.UI(pid(p, "pane_strip"))({
 		clip = {horizontal = true},
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(TAB_STRIP_H))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}},
 		backgroundColor = cc(th.bg_app),
-		border = {color = cc(focused ? th.accent : th.border), width = {bottom = pu(core.BORDER_W)}},
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
 	}) {
 		new_w := px(TOOL_BUTTON + SP_1)
-		strip_tabs(cs, p, pane_width() - px(2 * SP_2) - new_w)
+		zoom_w := zoomed ? text_w(zoom_label, FONT_UI_SMALL) + px(2 * SP_2 + SP_1) : 0
+		strip_tabs(cs, p, pane_width() - px(2 * SP_2) - new_w - zoom_w)
 		hovered := ui_hover == Hit(Hit_Pane_New(p.id))
 		if clay.UI(pid(p, "pane_new"))({
 			layout = {sizing = {clay.SizingFixed(px(TOOL_BUTTON)), clay.SizingFixed(px(TOOL_BUTTON))}, childAlignment = {x = .Center, y = .Center}},
@@ -901,6 +907,19 @@ pane_strip_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 		}) {
 			icon(.Plus, th.text_secondary, ICON_SIZE_SM)
+		}
+		if zoomed {
+			spacer() // the marker at the strip's right end; "+" stays after the tabs
+			zid := pid(p, "pane_zoom")
+			zbg, zem := overlay(zid, false, ui_hover == Hit(Hit_Pane_Zoom(p.id)))
+			if clay.UI(zid)({
+				layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TAB_H - SP_1))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
+				backgroundColor = zbg,
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+				border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
+			}) {
+				clay.TextDynamic(zoom_label, txt(mix(th.text_secondary, th.text, zem), FONT_UI_SMALL))
+			}
 		}
 	}
 }
@@ -1383,6 +1402,7 @@ Hit :: union {
 	Hit_Tab,
 	Hit_Close_Tab,
 	Hit_Pane_New,
+	Hit_Pane_Zoom,
 	Hit_Pane_Divider,
 	Hit_Confirm,
 	Hit_Cancel,
@@ -1444,6 +1464,7 @@ Hit_New :: struct {}
 Hit_Tab :: distinct u64 // tab id
 Hit_Close_Tab :: distinct u64 // tab id (a pi tab's closes its session)
 Hit_Pane_New :: distinct u64 // a pane strip's "+": the new-tab menu, for that pane (pane id)
+Hit_Pane_Zoom :: distinct u64 // the zoomed pane's "⤢ 1 of 3": restores the layout (pane id)
 Hit_Pane_Divider :: distinct u64 // a divider between panes (its split's id)
 Hit_Confirm :: distinct string // confirmation token
 Hit_Cancel :: distinct string

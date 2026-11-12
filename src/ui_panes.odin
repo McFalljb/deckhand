@@ -177,12 +177,21 @@ pane_divider_release :: proc() {
 
 // ---- hits ----
 
-// A pane strip's "+" or a divider under the pointer.
+// A pane strip's "+" or the zoomed pane's "⤢ 1 of 3" under the pointer.
 pane_hit :: proc() -> Hit {
 	s := core.cur()
 	if s == nil || len(s.panes) <= 1 do return nil
-	for &p in s.panes do if clay.PointerOver(pid(&p, "pane_new")) do return Hit_Pane_New(p.id)
+	for &p in s.panes {
+		if core.pane_zoom_hidden(s, p.id) do continue // not laid out: its ids are last layout's
+		if clay.PointerOver(pid(&p, "pane_new")) do return Hit_Pane_New(p.id)
+		if clay.PointerOver(pid(&p, "pane_zoom")) do return Hit_Pane_Zoom(p.id)
+	}
 	return nil
+}
+
+// The zoomed pane's marker: the layout comes back.
+pane_zoom_click :: proc(h: Hit_Pane_Zoom) {
+	ui_do(core.Zoom_Pane{pane = u64(h), zoom = false})
 }
 
 // Its "+": the title bar's new-tab menu, its tabs opening in that pane (menu_run).
@@ -211,11 +220,12 @@ action_items :: proc(items: ^[dynamic]core.Menu_Item, ids: []string) {
 	}
 }
 
-// The new-tab menu's (the "+" or ⌄) last rows: Split pane right / down, for the pane it is in.
+// The new-tab menu's (the "+" or ⌄) last rows: Split pane right / down, for the pane it is in, and
+// Zoom pane / Restore panes once split.
 pane_split_items :: proc(items: ^[dynamic]core.Menu_Item) {
-	if !action_ok("split_right") && !action_ok("split_down") do return
+	if !action_ok("split_right") && !action_ok("split_down") && !action_ok("zoom_pane") do return
 	if len(items) > 0 do append(items, core.Menu_Item{sep = true})
-	action_items(items, {"split_right", "split_down"})
+	action_items(items, {"split_right", "split_down", "zoom_pane"})
 }
 
 // A tab's right click: the tab comes to the front (its pane focused), then its menu.
@@ -256,6 +266,8 @@ pane_key :: proc(e: ^sapp.Event) -> bool {
 		else if m == CMD | SH do id = "split_down"
 	case .W:
 		if m == CMD | SH do id = "close_pane"
+	case .ENTER, .KP_ENTER:
+		if m == CMD | SH do id = "zoom_pane" // ⇧⌘↩: ⌘ chords never reach a terminal's program
 	case .LEFT, .RIGHT, .UP, .DOWN:
 		names := [4]string{"left", "right", "up", "down"}
 		k := e.key_code == .LEFT ? 0 : e.key_code == .RIGHT ? 1 : e.key_code == .UP ? 2 : 3
@@ -369,11 +381,25 @@ pane_width :: proc() -> f32 {
 	if s == nil || len(s.panes) <= 1 do return centre_width()
 	p := ids_pane()
 	if p == nil do return centre_width()
+	if core.session_zoomed(s) == p.id do return app.centre.z > 0 ? app.centre.z : centre_width() // it alone fills the area
 	// its place in the tree in the centre (as laid out: not its content's last width, which a bar
 	// wider than the pane would feed back into)
 	if app.centre.z > 0 do for r in core.pane_rects(s, app.centre, px(core.BORDER_W), px(core.PANE_MIN_W), px(core.PANE_MIN_H)) do if r.pane == p.id do return r.rect.z
 	if p.rect.z > 0 do return p.rect.z
 	return centre_width()
+}
+
+// Every terminal tab of the session on screen to its pane's rect, hidden ones too, so a tab switch
+// never reflows (another machine's too: its core resizes them, machine_route.odin). A pane
+// another's zoom hides keeps its terminals' sizes (zoom_pane: only the zoomed pane's change, and
+// change back on restore).
+panes_fit_terms :: proc() {
+	vs := core.cur_view()
+	if vs == nil do return
+	for tab in vs.tabs do if tab.has_term && !core.pane_zoom_hidden(vs, tab.pane) {
+		r := term_target_rect(tab.id) // never another tab's bars (panes.odin)
+		if r.z > 0 do term_fit_rect(tab.id, r.x, r.y, r.z, r.w)
+	}
 }
 
 // The rect a terminal tab is sized to (framebuffer px). Shown in its pane of the current session:
@@ -429,6 +455,7 @@ pane_at :: proc(x, y: f32) -> ^core.Pane {
 	if s == nil do return nil
 	laid := false
 	for &p in s.panes {
+		if core.pane_zoom_hidden(s, p.id) do continue // another pane's zoom hides it: never hit
 		r := p.frame.z > 0 ? p.frame : p.rect
 		if r.z <= 0 do continue
 		laid = true

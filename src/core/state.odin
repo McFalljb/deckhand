@@ -200,6 +200,7 @@ Open_Session :: struct {
 	root:          int,
 	focused_pane:  u64, // the pane that gets the keyboard
 	pane_mru:      [dynamic]u64, // panes most recently focused last: where focus goes when one closes
+	zoomed_pane:   u64, // the pane filling the panes' area (zoom_pane; 0 = none): follows the session, never saved; cleared by a split, a close or focus moving to another pane (panes.odin)
 }
 
 // Left column and right panel sizes in logical px.
@@ -299,6 +300,7 @@ Settings :: struct {
 	term_text_pt:  int, // terminals' and the editor's text size in points (0 = the look's, TYPE_CODE_PX)
 	appearance:    Appearance, // light or dark: system (follows the OS), light, dark
 	reduce_motion: bool, // no fades, no pulse
+	dim_panes_off: bool, // split panes: the ones without the keyboard are not dimmed (default: dimmed; set_dim_panes)
 	text_size:     Text_Size, // the chrome's text (theme.odin); terminals keep their size
 	chats_readonly: bool, // chats' pi starts with its read tools only (chat_args) and PI_KIT_READONLY=1
 	claude_skip_permissions: bool, // the user's default flag for Claude tabs THEY start (claude_with_defaults); user-only, off by default

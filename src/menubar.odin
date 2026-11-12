@@ -123,6 +123,7 @@ MENUBAR := [?]Bar_Item {
 			{action = "look_ghostty", title = "Ghostty", check = proc() -> bool {return state.settings.theme == .Ghostty}},
 		}},
 		{action = "reduce_motion", check = proc() -> bool {return state.settings.reduce_motion}},
+		{action = "dim_panes", check = proc() -> bool {return !state.settings.dim_panes_off}},
 		SEP,
 		{action = "text_bigger"},
 		{action = "text_smaller"},
@@ -155,6 +156,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "split_down"},
 		{action = "close_pane"},
 		{action = "equalize_panes"},
+		{action = "zoom_pane"}, // its title follows: Zoom pane / Restore panes
 		{action = "focus_pane_left"},
 		{action = "focus_pane_right"},
 		{action = "focus_pane_up"},
@@ -388,6 +390,7 @@ parse_keys :: proc(keys: string) -> (k: Bar_Key, ok: bool) {
 	case "←": k.code, k.equiv = .LEFT, "\uF702" // NSLeftArrowFunctionKey
 	case "→": k.code, k.equiv = .RIGHT, "\uF703" // NSRightArrowFunctionKey
 	case "`": k.code, k.equiv = .GRAVE_ACCENT, "`"
+	case "↩": k.code, k.equiv = .ENTER, "\r" // Return
 	case:
 		if len(rest) != 1 do return {}, false
 		c := rest[0]

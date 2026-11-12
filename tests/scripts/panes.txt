@@ -59,7 +59,7 @@ divider pane 0 -200
 waitstate 3000 open_sessions.0.panes.0.rect.w 240
 # the right pane's "+": the new-tab menu (tab kinds only); its shell opens in that pane
 clickid pane_new#1
-assert_menurows New shell tab|New Claude tab — Claude Code not installed|New browser tab|New app tab…|-|Split pane right|Split pane down
+assert_menurows New shell tab|New Claude tab — Claude Code not installed|New browser tab|New app tab…|-|Split pane right|Split pane down|Zoom pane
 clickid menurow 0
 waitstate 5000 open_sessions.0.panes.1.tabs.# 2
 assert_state open_sessions.0.focused_pane $pane1
@@ -79,6 +79,21 @@ assert_state open_sessions.0.focused_pane $pane2
 key w cmd
 waitstate 5000 open_sessions.0.panes.# 2
 assert_state open_sessions.0.focused_pane $pane0
+# ⇧⌘↩: the pane with the keyboard fills the area, the other is not laid out (no rect); its strip's
+# "⤢ 1 of 2" restores the layout
+key enter cmd shift
+waitstate 3000 open_sessions.0.zoomed_pane $pane0
+assert_state open_sessions.0.panes.1.rect.w <missing>
+assert_drawn ⤢ 1 of 2
+wait 300
+assert_pane_cols 0
+shot panes/zoomed
+clickid pane_zoom
+wait 300
+assert_state open_sessions.0.zoomed_pane <missing>
+assert_state open_sessions.0.focused_pane $pane0
+assert_pane_cols 0
+assert_pane_cols 1
 # ⇧⌘W: unsplit; the right pane's shell joins the pi tab's pane
 key right cmd ctrl
 assert_state open_sessions.0.focused_pane $pane1

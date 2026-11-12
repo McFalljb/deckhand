@@ -582,7 +582,10 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   session has at most 8 panes, and a split needs room for two panes of at least 240 × 140
   points. Once split, each pane has its own strip of tabs (they leave the title bar), with a
   **+** whose menu opens a new shell, Claude, browser or app tab in that pane; the pane with the
-  keyboard has an accent line under its strip. Click in a pane to give it the keyboard (the click also acts there, so a click in a
+  keyboard has an accent line under its strip, which glides to the next pane's strip when the
+  keyboard moves. The other panes are dimmed slightly (their content, not their strip), so the one
+  you type in stands out; turn **Dim inactive panes** off in the gear's Display group, the View
+  menu or the palette. Click in a pane to give it the keyboard (the click also acts there, so a click in a
   shell starts a selection at once), or press ⌃⌘←, ⌃⌘→, ⌃⌘↑ or ⌃⌘↓ (**Focus pane left**,
   **Focus pane right**, **Focus pane up**, **Focus pane down**). A selection you drag from one
   pane over another stays in the pane where you pressed. ⌘1–⌘9, ⇧⌘] and ⇧⌘[ and ⌘W act on
@@ -609,6 +612,15 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
     equal. **Even out panes** (palette, Window menu) gives every pane equal room.
   - **To unsplit**, press ⇧⌘W (**Close pane (its tabs stay)**): the pane goes and its tabs join
     the pane next to it; nothing is closed.
+  - **To zoom a pane**, press ⇧⌘↩ (**Zoom pane**: Window menu, palette, or the end of the pane's
+    **+** menu): the pane with the keyboard fills the session's whole pane area for a while. Its
+    strip shows **⤢ 1 of 3** (which pane of how many); click it, press ⇧⌘↩ again or pick
+    **Restore panes** to bring the layout back. The other panes keep running at their sizes
+    behind it; only the zoomed pane's terminal is resized, and resized back when you restore.
+    Splitting, closing a pane, moving a tab to another pane or giving another pane the keyboard
+    (⌃⌘arrows, a tab of another pane picked in the palette or the left column) restores the
+    layout. A zoom stays with its session while you switch sessions, but is not remembered
+    when Deckhand restarts. Esc does not restore: terminals need it.
   - Browser and app tabs are live in every pane: pages load, play and scroll beside a shell,
     and each page or app fits its own pane. Only the pane with the keyboard gets your typing; a
     click in another pane's page gives that pane the keyboard and clicks there too.
@@ -1683,6 +1695,8 @@ window the list scrolls.
   panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
   keep their size. It applies at once and is remembered.
 - **Reduce motion**: no fades, slides, pulsing dots, turning marks, status flashes or copy shines.
+- **Dim inactive panes** (on by default): with split panes, the panes without the keyboard are
+  dimmed slightly. Reduce motion keeps the dim and drops its fade.
 
 **Notifications**
 
@@ -2063,6 +2077,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Appearance ▸ System, Light, Dark |  | |
 | Look ▸ Graphite, Warm, Ghostty |  | |
 | Reduce motion |  | |
+| Dim inactive panes |  | split panes: the ones without the keyboard dim slightly (on by default) |
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text (9–28 pt; remembered) |
 | Zoom page in, Zoom page out, Page actual size | ⌘+, ⌘−, ⌘0 with a browser tab on screen | the page's zoom |
 | Developer tools |  | DevTools for the browser tab on screen |
@@ -2084,6 +2099,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
+| Zoom pane (Restore panes while zoomed) | ⇧⌘↩ | the pane with the keyboard fills the pane area; again: the layout comes back |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | the neighbouring pane gets the keyboard |
 | Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | or into a new pane that way |
 | Bring all to front |  | |
@@ -2207,6 +2223,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |
+| Zoom pane, Restore panes | ⇧⌘↩ | |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | |
 | Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | |
 | Deckhand user guide |  | this guide in a Markdown tab |
@@ -2225,6 +2242,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Appearance: System, Appearance: Light, Appearance: Dark |  | light or dark |
 | Text size: Small, Text size: Medium, Text size: Default, Text size: Large |  | the chrome's text size |
 | Reduce motion |  | |
+| Dim inactive panes |  | on or off |
 | Rescan sessions |  | read pi's session store again (Claude rows are Deckhand's own history) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |

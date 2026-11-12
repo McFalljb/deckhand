@@ -360,6 +360,9 @@ ACTIONS := [?]Action {
 	{id = "reduce_motion", label = "Reduce motion", make = proc() -> (core.Command, bool) {
 		return core.Set_Reduce_Motion{!state.settings.reduce_motion}, true
 	}, detail = proc() -> string {return state.settings.reduce_motion ? "on" : "off"}, done = proc() -> string {return turns("Reduce motion", state.settings.reduce_motion)}},
+	{id = "dim_panes", label = "Dim inactive panes", make = proc() -> (core.Command, bool) {
+		return core.Set_Dim_Panes{on = state.settings.dim_panes_off}, true
+	}, detail = proc() -> string {return state.settings.dim_panes_off ? "off" : "on"}, done = proc() -> string {return turns("Dim inactive panes", !state.settings.dim_panes_off)}},
 	{id = "rescan", label = "Rescan sessions", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}, done = proc() -> string {return "Rescanning sessions…"}},
 	// login_env.odin: Dock and Finder launches only (a terminal's environment is that terminal's)
 	{id = "refresh_shell_env", label = "Refresh shell environment", make = proc() -> (core.Command, bool) {return core.Refresh_Shell_Env{}, true}, detail = proc() -> string {
@@ -533,6 +536,8 @@ ACTIONS := [?]Action {
 		if cs == nil || len(cs.panes) <= 1 do return nil, false
 		return core.Equalize_Panes{session = cs.id}, true
 	}},
+	// the focused pane fills the session's pane area, and back (ui_pane_motion.odin)
+	{id = "zoom_pane", label = "Zoom pane", keys = "⇧⌘↩", title = proc() -> string {return pane_zoomed_now() ? "Restore panes" : "Zoom pane"}, make = proc() -> (core.Command, bool) {return pane_zoom_action()}},
 	{id = "focus_pane_left", label = "Focus pane left", keys = "⌃⌘←", make = proc() -> (core.Command, bool) {return pane_focus_action(.Left)}},
 	{id = "focus_pane_right", label = "Focus pane right", keys = "⌃⌘→", make = proc() -> (core.Command, bool) {return pane_focus_action(.Right)}},
 	{id = "focus_pane_up", label = "Focus pane up", keys = "⌃⌘↑", make = proc() -> (core.Command, bool) {return pane_focus_action(.Up)}},

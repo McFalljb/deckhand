@@ -185,6 +185,7 @@ static void dump(NSMenu* m, NSMutableString* out, int depth) {
             switch (c) {
             case NSUpArrowFunctionKey: [key appendString:@"↑"]; break;
             case NSDownArrowFunctionKey: [key appendString:@"↓"]; break;
+            case '\r': [key appendString:@"↩"]; break;
             default: [key appendString:it.keyEquivalent.uppercaseString];
             }
         }

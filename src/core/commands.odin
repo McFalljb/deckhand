@@ -98,6 +98,10 @@ Set_Split :: struct {
 Equalize_Panes :: struct {
 	session: u64, // 0 = the current session
 }
+Zoom_Pane :: struct {
+	pane: u64, // 0 = the current session's focused pane
+	zoom: Maybe(bool), // true: it fills the panes' area; false: the layout comes back; unset: toggle
+}
 Copy_Selection :: struct {
 	tab_id: u64,
 }
@@ -340,6 +344,10 @@ Set_Theme :: struct {
 Set_Reduce_Motion :: struct {
 	on: bool,
 }
+// Split panes: the ones without the keyboard dim slightly (default on).
+Set_Dim_Panes :: struct {
+	on: bool,
+}
 // The terminal and editor text size in points (0 = the look's own).
 Set_Terminal_Text_Size :: struct {
 	pt: int,
@@ -506,6 +514,7 @@ Command :: union {
 	Move_Tab,
 	Set_Split,
 	Equalize_Panes,
+	Zoom_Pane,
 	Copy_Selection,
 	Terminal_Link, // a link in a terminal tab (term_links.odin)
 	Send_Text,
@@ -568,6 +577,7 @@ Command :: union {
 	Set_Close_Confirm,
 	Set_Theme,
 	Set_Reduce_Motion,
+	Set_Dim_Panes,
 	Set_Terminal_Text_Size,
 	Set_Appearance,
 	Set_Text_Size,
@@ -1625,6 +1635,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if state.settings.reduce_motion == c.on do return {ok = true}, false
 		state.settings.reduce_motion = c.on
 		return {ok = true}, true
+	case Set_Dim_Panes:
+		if state.settings.dim_panes_off == !c.on do return {ok = true}, false
+		state.settings.dim_panes_off = !c.on
+		return {ok = true}, true
 	case Set_Text_Size:
 		// the frame applies it (main.odin: fonts_apply when it changed)
 		if state.settings.text_size == c.size do return {ok = true}, false
@@ -1809,7 +1823,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return tab_host_apply(cmd, caller, request_id) // Markdown
 	case Show_File:
 		return show_file_apply(c, caller)
-	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes:
+	case Split_Pane, Close_Pane, Focus_Pane, Move_Tab, Set_Split, Equalize_Panes, Zoom_Pane:
 		return panes_apply(cmd, caller) // panes_commands.odin
 	case Terminal_Link:
 		return tab_host_apply(cmd, caller, request_id) // a browser tab or the default browser (term_links.odin)

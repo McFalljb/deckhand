@@ -4,7 +4,7 @@ import "core:fmt"
 import "core:slice"
 
 // The pane commands (docs/PROTOCOL.md "Panes"; docs/plans/split-panes.md §4): split_pane,
-// close_pane, focus_pane, move_tab, set_split, equalize_panes. Who: Anyone (the user, scripts,
+// close_pane, focus_pane, move_tab, set_split, equalize_panes, zoom_pane. Who: Anyone (the user, scripts,
 // control callers), never a pi or Claude tab's bridge nor an app (who_allows): agents do not
 // change the layout. Home has one pane and is refused. The layout is saved per session
 // (persist.odin write_panes; restored by panes_restore.odin).
@@ -105,6 +105,23 @@ panes_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) 
 		if s == nil do return fail("no such session"), false
 		if s.home do return fail(HOME_NOT_A_SESSION), false
 		panes_equalize(s)
+		return {ok = true}, true
+	case Zoom_Pane:
+		s, p := pane_find(c.pane)
+		if p == nil do return fail("no such pane"), false
+		if s.home do return fail(HOME_NOT_A_SESSION), false
+		zoomed := session_zoomed(s)
+		want := c.zoom.? or_else (zoomed != p.id) // unset: toggle this pane's zoom
+		if !want {
+			if zoomed == 0 do return {ok = true}, false
+			s.zoomed_pane = 0 // the layout comes back (whichever pane was zoomed)
+			return {ok = true}, true
+		}
+		if len(s.panes) <= 1 do return fail("one pane: nothing to zoom"), false
+		if zoomed == p.id do return {ok = true}, false
+		pane_focus(s, p.id) // the zoomed pane has the keyboard (another's zoom ends here)
+		s.zoomed_pane = p.id
+		focus_session(s.id, caller)
 		return {ok = true}, true
 	}
 	return fail("unknown command"), false

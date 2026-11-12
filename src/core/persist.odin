@@ -551,6 +551,7 @@ workspace_json :: proc() -> string {
 	close_obj(&w)
 	if st.theme != Theme_Id(0) do ks(&w, "theme", THEME_NAMES[st.theme])
 	if st.reduce_motion do kb(&w, "reduce_motion", true)
+	if st.dim_panes_off do kb(&w, "dim_panes", false)
 	if st.term_text_pt != 0 do ki(&w, "terminal_text_size", st.term_text_pt)
 	if st.appearance != .System do ks(&w, "appearance", APPEARANCE_NAMES[st.appearance])
 	if st.text_size != .Default do ks(&w, "text_size", TEXT_SIZE_NAMES[st.text_size])
@@ -716,6 +717,7 @@ workspace_restore :: proc(text: string) -> string {
 		}
 		if th, tok := enum_of(st, "theme", THEME_NAMES); tok do run(Set_Theme{name = th})
 		if rm, rok := st["reduce_motion"].(json.Boolean); rok do run(Set_Reduce_Motion{on = bool(rm)})
+		if dp, dok := st["dim_panes"].(json.Boolean); dok do run(Set_Dim_Panes{on = bool(dp)})
 		if pt, pok := num_of(st, "terminal_text_size"); pok do run(Set_Terminal_Text_Size{pt = int(pt)})
 		if ap, aok := enum_of(st, "appearance", APPEARANCE_NAMES); aok do run(Set_Appearance{mode = ap})
 		if ts, tok := enum_of(st, "text_size", TEXT_SIZE_NAMES); tok do run(Set_Text_Size{size = ts})

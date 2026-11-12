@@ -68,10 +68,12 @@ test_menu_key :: proc(chars: string, mods: u64, key_code: int, key_window := tru
 test_menu_dump :: proc() -> string {return ""}
 platform_reveal :: proc(path: string) {}
 platform_notify :: proc(title, body: string) {}
+platform_notify_front :: proc(title, body: string) {}
 platform_quiet :: proc() {}
 
 platform_activity :: proc(on: bool) {}
 platform_set_badge :: proc(n: int) {} // no Dock
+platform_play_sound :: proc(name: string) {} // macOS's system sounds only
 // no timer: frames tick the core
 platform_core_timer :: proc(every: time.Duration, fire: proc()) {}
 pid_cpu_seconds :: proc(pid: i32) -> f64 {return 0}

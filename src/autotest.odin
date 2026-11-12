@@ -321,6 +321,7 @@ autotest_platform :: proc() {
 	}
 	win_os.left_button = proc() -> bool {return autotest.left_down}
 	win_os.set_badge = nil // never the Dock's (scenes run beside the user's Deckhand)
+	win_os.play_sound = proc(name: string) {log("sound", name)} // never heard (scenes run beside the user)
 }
 
 autotest_paste_set :: proc(text: string) {

@@ -90,6 +90,7 @@ buttons_name_actions_once :: proc(t: ^testing.T) {
 		seen[info.action] = fmt.tprint(b)
 	}
 	for it in Pop_Item {
+		if it == .Bell_OS do continue // retired: not drawn (the grid's macOS column)
 		id := POP_ACTIONS[it]
 		testing.expectf(t, action_by_id(id) != nil, "popover row %v: no action %q", it, id)
 		testing.expectf(t, id not_in seen, "action %q has a toolbar button and a popover row", id)

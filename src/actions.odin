@@ -294,7 +294,7 @@ ACTIONS := [?]Action {
 	{id = "bell_finished", label = "Notify me about: Finished", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{finished = .Finished in state.settings.bell_off}, true
 	}, detail = proc() -> string {return .Finished in state.settings.bell_off ? "off" : "on"}},
-	{id = "bell_waiting", label = "Notify me about: Waiting", make = proc() -> (core.Command, bool) {
+	{id = "bell_waiting", label = "Notify me about: Needs you", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{waiting = .Waiting in state.settings.bell_off}, true
 	}, detail = proc() -> string {return .Waiting in state.settings.bell_off ? "off" : "on"}},
 	{id = "bell_errors", label = "Notify me about: Errors", make = proc() -> (core.Command, bool) {
@@ -303,9 +303,15 @@ ACTIONS := [?]Action {
 	{id = "bell_jobs", label = "Notify me about: Jobs", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{jobs = .Jobs in state.settings.bell_off}, true
 	}, detail = proc() -> string {return .Jobs in state.settings.bell_off ? "off" : "on"}},
-	{id = "bell_os", label = "Also notify in macOS", make = proc() -> (core.Command, bool) {
-		return core.Set_Bell{os = state.settings.bell_os_off}, true
-	}, detail = proc() -> string {return state.settings.bell_os_off ? "off" : "on (waiting, errors, exits, jobs that need you or failed)"}},
+	// the gear's grid (ui_toolbar.odin): each steps to the next choice
+	{id = "bell_os_waiting", label = "Needs you: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Waiting), true}, detail = proc() -> string {return bell_os_detail(.Waiting)}},
+	{id = "bell_os_finished", label = "Finished: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Finished), true}, detail = proc() -> string {return bell_os_detail(.Finished)}},
+	{id = "bell_os_errors", label = "Errors: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Errors), true}, detail = proc() -> string {return bell_os_detail(.Errors)}},
+	{id = "bell_os_jobs", label = "Jobs: macOS notification", make = proc() -> (core.Command, bool) {return bell_os_step(.Jobs), true}, detail = proc() -> string {return bell_os_detail(.Jobs)}},
+	{id = "bell_sound_waiting", label = "Needs you: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Waiting), true}, detail = proc() -> string {return bell_sound_detail(.Waiting)}},
+	{id = "bell_sound_finished", label = "Finished: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Finished), true}, detail = proc() -> string {return bell_sound_detail(.Finished)}},
+	{id = "bell_sound_errors", label = "Errors: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Errors), true}, detail = proc() -> string {return bell_sound_detail(.Errors)}},
+	{id = "bell_sound_jobs", label = "Jobs: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Jobs), true}, detail = proc() -> string {return bell_sound_detail(.Jobs)}},
 	{id = "bell_dock", label = "Badge Dock icon", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{dock = state.settings.bell_dock_off}, true
 	}, detail = proc() -> string {return state.settings.bell_dock_off ? "off" : "on (sessions waiting for you)"}},

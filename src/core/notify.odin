@@ -14,10 +14,18 @@ package core
 //     within NOTICE_COALESCE replaces its last one (the latest wins).
 //   - Focusing a session while the window is active marks its entries read
 //     (focus_session, and the window coming to the front).
-//   - Per-group toggles (Settings.bell_off) and OS notifications while
-//     Deckhand is in the background for the kinds that need the user
-//     (waiting, errors, exits, jobs that need you or failed;
-//     Settings.bell_os_off). Finished runs only go to the bell.
+//   - Per group (Bell_Group: needs you, finished, errors, jobs) three
+//     channels (notice_channels): the bell (Settings.bell_off), a macOS
+//     notification never, only while Deckhand is in the background, or
+//     always (Settings.bell_os), and a sound (Settings.bell_sound) that
+//     plays while Deckhand is in the background, or also in front when the
+//     group's macOS says always. Defaults (BELL_OS_DEFAULT,
+//     BELL_SOUND_DEFAULT): macOS in the background for needs you, errors and
+//     jobs, never for finished; a sound (Tink) for needs you only. A job's
+//     finished run is the job's own `notify` setting's (jobs.odin): the bell
+//     only. The sound is the window's (window_sound: one window.request per
+//     notice, never one for what a window finds in the bell when it attaches),
+//     paced with the macOS notifications and never more than one a second.
 //   - Not saved: entries are gone after a restart (their session ids would
 //     not survive it either).
 
@@ -63,9 +71,91 @@ notice_group :: proc(k: Notice_Kind) -> Bell_Group {
 	return .Finished
 }
 
-// The kinds that also raise an OS notification while Deckhand is in the
-// background (unless bell_os_off).
+// The kinds that need the user (a burst's summary counts them).
 NOTICE_OS_KINDS :: bit_set[Notice_Kind]{.Waiting, .Error, .Exited, .Job_Needs_You, .Job_Failed}
+
+// When a group's entries also raise a macOS notification ("background": Deckhand is not in
+// front). Default: the group's BELL_OS_DEFAULT (saved settings keep only what differs).
+Os_When :: enum u8 {
+	Default,
+	Never,
+	Background,
+	Always,
+}
+OS_WHEN_NAMES := [Os_When]string{.Default = "", .Never = "never", .Background = "background", .Always = "always"}
+
+// A group's sound: one of macOS's system sounds (/System/Library/Sounds, all there since
+// macOS 12), played by name. Default: the group's BELL_SOUND_DEFAULT.
+Bell_Sound :: enum u8 {
+	Default,
+	None,
+	Tink,
+	Glass,
+	Pop,
+	Ping,
+	Purr,
+	Hero,
+	Bottle,
+	Basso,
+}
+BELL_SOUND_NAMES := [Bell_Sound]string{.Default = "", .None = "none", .Tink = "tink", .Glass = "glass", .Pop = "pop", .Ping = "ping", .Purr = "purr", .Hero = "hero", .Bottle = "bottle", .Basso = "basso"}
+// As macOS names the sound (NSSound soundNamed:) and the gear shows it.
+BELL_SOUND_LABELS := [Bell_Sound]string{.Default = "", .None = "none", .Tink = "Tink", .Glass = "Glass", .Pop = "Pop", .Ping = "Ping", .Purr = "Purr", .Hero = "Hero", .Bottle = "Bottle", .Basso = "Basso"}
+
+// Today's behaviour (before per-group settings: waiting, errors, exits and jobs that need you
+// or failed notified in the background, finished runs never) and one sound, for needs you.
+BELL_OS_DEFAULT := [Bell_Group]Os_When{.Finished = .Never, .Waiting = .Background, .Errors = .Background, .Jobs = .Background}
+BELL_SOUND_DEFAULT := [Bell_Group]Bell_Sound{.Finished = .None, .Waiting = .Tink, .Errors = .None, .Jobs = .None}
+
+// Sounds never stack: at most one this often (a burst's first one plays).
+SOUND_FLOOR :: time.Second
+
+bell_os_when :: proc(st: Settings, g: Bell_Group) -> Os_When {
+	if st.bell_os_off do return .Never // an older core's (Settings.bell_os_off)
+	v := st.bell_os[g]
+	return v == .Default ? BELL_OS_DEFAULT[g] : v
+}
+
+// Every group's macOS is never: what older builds call "os": false (saved, and on the wire).
+bell_os_all_never :: proc(st: Settings) -> bool {
+	for g in Bell_Group do if bell_os_when(st, g) != .Never do return false
+	return true
+}
+
+bell_sound_of :: proc(st: Settings, g: Bell_Group) -> Bell_Sound {
+	v := st.bell_sound[g]
+	return v == .Default ? BELL_SOUND_DEFAULT[g] : v
+}
+
+// The choice after this one, as the gear's buttons step through them (never Default).
+os_when_next :: proc(v: Os_When) -> Os_When {return v == .Always ? .Never : Os_When(int(v) + 1)}
+bell_sound_next :: proc(v: Bell_Sound) -> Bell_Sound {return v == max(Bell_Sound) ? .None : Bell_Sound(int(v) + 1)}
+
+// Where an entry of this kind goes, given the settings and whether Deckhand is in front:
+//   - bell: its group is on (bell_off);
+//   - os: the group's macOS is always, or background while Deckhand is not in front;
+//   - sound (.None = none): the group's sound, while Deckhand is not in front, or in front
+//     too when its macOS is always.
+// A job's finished run raises neither (the job's own notify setting does: jobs.odin). Pacing
+// (notify_os) and the sound floor come after.
+Notice_Channels :: struct {
+	bell:  bool,
+	os:    bool,
+	front: bool, // the macOS notification is an "always" one: shown also while Deckhand is in front
+	sound: Bell_Sound,
+}
+
+notice_channels :: proc(st: Settings, kind: Notice_Kind, active: bool) -> (c: Notice_Channels) {
+	g := notice_group(kind)
+	c.bell = g not_in st.bell_off
+	c.sound = .None
+	if kind == .Job_Finished do return
+	w := bell_os_when(st, g)
+	c.os = w == .Always || (w == .Background && !active)
+	c.front = w == .Always
+	if s := bell_sound_of(st, g); s != .None && (w == .Always || !active) do c.sound = s
+	return
+}
 
 Notice :: struct {
 	id:            u64,
@@ -93,6 +183,9 @@ Notices :: struct {
 	os_recent:   [dynamic]Os_Recent,
 	burst_start: time.Time,
 	burst_n:     int, // notifications wanted in the burst so far
+	burst_need:  int, // of them, kinds that need the user (NOTICE_OS_KINDS): the summary's words
+	sounds:      int, // sounds asked of the window (tests)
+	sound_at:    time.Time, // the last one (SOUND_FLOOR)
 }
 Os_Recent :: struct {
 	session: u64,
@@ -145,13 +238,18 @@ Notifications_Clear :: struct {} // removes every entry
 Notify_Post :: struct { 	// internal: a job's result (notify_job_finished)
 	job: Job_Finished,
 }
-// The bell's settings (user only); unset fields keep their value.
+// The bell's settings (this Mac's user only: never an agent, never another machine); unset
+// fields keep their value.
 Set_Bell :: struct {
 	finished: Maybe(bool),
 	waiting:  Maybe(bool),
 	errors:   Maybe(bool),
 	jobs:     Maybe(bool),
-	os:       Maybe(bool), // OS notifications while in the background
+	// every group's macOS at once (the setting before per-group ones, and saved files from
+	// then): false = never, true = the defaults (BELL_OS_DEFAULT); before macos
+	os:       Maybe(bool),
+	macos:    [Bell_Group]Maybe(Os_When), // per group (Default: its default)
+	sound:    [Bell_Group]Maybe(Bell_Sound), // per group (Default: its default)
 	dock:     Maybe(bool), // the Dock icon's badge: the sessions waiting for you
 }
 
@@ -205,7 +303,7 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 		return {ok = true}, notice_post(n)
 	case Set_Bell:
 		st := &state.settings
-		was_off, was_os, was_dock := st.bell_off, st.bell_os_off, st.bell_dock_off
+		was_off, was_os, was_sound, was_dock, was_os_off := st.bell_off, st.bell_os, st.bell_sound, st.bell_dock_off, st.bell_os_off
 		vals := [Bell_Group]Maybe(bool){.Finished = c.finished, .Waiting = c.waiting, .Errors = c.errors, .Jobs = c.jobs}
 		for v, g in vals {
 			on, set := v.?
@@ -213,9 +311,17 @@ notify_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 			if on do st.bell_off -= {g}
 			else do st.bell_off += {g}
 		}
-		if on, set := c.os.?; set do st.bell_os_off = !on
+		if st.bell_os_off { 	// an older core's one switch: as per group
+			st.bell_os_off = false
+			for g in Bell_Group do st.bell_os[g] = .Never
+		}
+		if on, set := c.os.?; set do for g in Bell_Group do st.bell_os[g] = on ? .Default : .Never
+		// kept as Default when it is the default (saved files keep only what differs)
+		for v, g in c.macos do if w, set := v.?; set do st.bell_os[g] = w == BELL_OS_DEFAULT[g] ? .Default : w
+		for v, g in c.sound do if s, set := v.?; set do st.bell_sound[g] = s == BELL_SOUND_DEFAULT[g] ? .Default : s
 		if on, set := c.dock.?; set do st.bell_dock_off = !on
-		return {ok = true}, st.bell_off != was_off || st.bell_os_off != was_os || st.bell_dock_off != was_dock
+		st.bell_os_off = bell_os_all_never(st^)
+		return {ok = true}, st.bell_off != was_off || st.bell_os != was_os || st.bell_sound != was_sound || st.bell_dock_off != was_dock || was_os_off
 	}
 	return fail("unknown command"), false
 }
@@ -290,7 +396,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 // An entry for something Deckhand could not do for the user (no session,
 // no job): what, and why. In the bell whatever the groups: it answers the
 // user's own action (Send to Atlas: the only word of where the text went);
-// a macOS notification only while Errors is on.
+// its banner and sound as the Errors row says.
 notify_failed :: proc(what, why: string) {
 	notice_post(Notice{kind = .Error, place = notice_text(what), title = notice_text(why)}, any_group = true)
 }
@@ -375,8 +481,15 @@ notice_now :: proc() -> time.Time {
 notice_post :: proc(n: Notice, any_group := false) -> bool {
 	n := n
 	// quitting: pi processes ending are not news
-	group_off := notice_group(n.kind) in state.settings.bell_off
-	if app_quitting || (!any_group && group_off) {
+	ch := notice_channels(state.settings, n.kind, notify_window_active())
+	if app_quitting {
+		notice_free(&n)
+		return false
+	}
+	// not collected: its banner and sound still go as its row says (the columns are independent)
+	if !any_group && !ch.bell {
+		n.at = notice_now()
+		notify_os(n, ch)
 		notice_free(&n)
 		return false
 	}
@@ -399,18 +512,21 @@ notice_post :: proc(n: Notice, any_group := false) -> bool {
 		notice_free(&items[0])
 		ordered_remove(items, 0)
 	}
-	if !repeat && !group_off do notify_os(n) // (any_group: the bell entry only)
+	if !repeat do notify_os(n, ch)
 	return true
 }
 
-// At most one per session (or job) per NOTICE_COALESCE, whatever the kind;
-// of a burst (NOTICE_BURST_SINGLE + 1 or more wanted within NOTICE_BURST)
-// the first ones go out, then one summary for the rest, then nothing until
-// the burst is over.
+// The entry's macOS notification and sound (notice_channels). At most one
+// per session (or job) per NOTICE_COALESCE, whatever the kind; of a burst
+// (NOTICE_BURST_SINGLE + 1 or more wanted within NOTICE_BURST) the first
+// ones go out, then one summary for the rest, then nothing until the burst
+// is over. A sound plays with each that goes out, at most one per
+// SOUND_FLOOR.
 @(private = "file")
-notify_os :: proc(n: Notice) {
-	if !(n.kind in NOTICE_OS_KINDS) || state.settings.bell_os_off || platform.notify == nil do return
-	if notify_window_active() do return
+notify_os :: proc(n: Notice, ch: Notice_Channels) {
+	os := ch.os && platform.notify != nil
+	sound := ch.sound != .None && sound_reaches_window()
+	if !os && !sound do return
 	ns := &state.notices
 	#reverse for r, i in ns.os_recent do if time.diff(r.at, n.at) >= NOTICE_COALESCE {
 		delete(r.job_id)
@@ -419,23 +535,48 @@ notify_os :: proc(n: Notice) {
 	for r in ns.os_recent do if (n.session != 0 && r.session == n.session) || (n.job_id != "" && r.job_id == n.job_id) do return
 	append(&ns.os_recent, Os_Recent{session = n.session, job_id = strings.clone(n.job_id), at = n.at})
 	if ns.burst_n == 0 || time.diff(ns.burst_start, n.at) >= NOTICE_BURST {
-		ns.burst_start, ns.burst_n = n.at, 0
+		ns.burst_start, ns.burst_n, ns.burst_need = n.at, 0, 0
 	}
 	ns.burst_n += 1
+	if n.kind in NOTICE_OS_KINDS do ns.burst_need += 1
+	notify := ch.front && platform.notify_front != nil ? platform.notify_front : platform.notify
 	switch {
 	case ns.burst_n <= NOTICE_BURST_SINGLE:
 		title := n.place != "" ? fmt.tprintf("%s · %s", n.place, n.title) : n.title
-		platform.notify(title, notice_label(n))
+		if os do notify(title, notice_label(n))
 	case ns.burst_n == NOTICE_BURST_SINGLE + 1:
-		// the rest of the burst in one; the bell lists them
-		need := 0
-		for x in ns.items do if !x.read && x.kind in NOTICE_OS_KINDS do need += 1
-		platform.notify("Deckhand", fmt.tprintf("%d sessions need you", need))
+		// the rest of the burst in one, in words for what it holds; the bell lists them
+		fin := ns.burst_n - ns.burst_need
+		text: string
+		switch {
+		case fin == 0: text = fmt.tprintf("%d sessions need you", ns.burst_need)
+		case ns.burst_need == 0: text = fmt.tprintf("%d sessions finished", fin)
+		case: text = fmt.tprintf("%d sessions need you, %d finished", ns.burst_need, fin)
+		}
+		if os do notify("Deckhand", text)
 	case:
 		return
 	}
-	ns.os_sent += 1
+	if sound && sound_floor_ok(ns.sound_at, n.at) {
+		ns.sound_at = n.at
+		ns.sounds += 1
+		window_sound(BELL_SOUND_LABELS[ch.sound])
+	}
+	if os do ns.os_sent += 1
 	window_state_changed() // State.notices: not always inside a command that says it changed
+}
+
+// A sound may play at `now`: none played within SOUND_FLOOR before it (last: the last one's
+// time, zero = none yet).
+sound_floor_ok :: proc(last, now: time.Time) -> bool {
+	return last._nsec == 0 || time.diff(last, now) >= SOUND_FLOOR || time.diff(last, now) < 0
+}
+
+// A sound reaches this Mac's window: one is attached, and it is not another machine's core
+// viewing this one (a hub: that machine rings for this one's bell itself, machine_mirror.odin).
+@(private = "file")
+sound_reaches_window :: proc() -> bool {
+	return window_attached() && !window_link_hub()
 }
 
 // What happened, in words: "Finished", "Waiting for you", …
@@ -535,5 +676,18 @@ notify_write :: proc(b: ^strings.Builder, cmd: Command) {
 		for v, g in vals do if on, set := v.?; set do kv(b, BELL_GROUP_NAMES[g], on)
 		if on, set := c.os.?; set do kv(b, "os", on)
 		if on, set := c.dock.?; set do kv(b, "dock", on)
+		// {"macos":{"waiting":"always"},"sound":{"waiting":"tink"}}: the groups set
+		obj :: proc(b: ^strings.Builder, k: string, vals: [Bell_Group]Maybe($E), names: [E]string) {
+			n := 0
+			for v, g in vals do if x, set := v.?; set {
+				if n == 0 do fmt.sbprintf(b, `,"%s":{{`, k)
+				else do strings.write_byte(b, ',')
+				fmt.sbprintf(b, `"%s":"%s"`, BELL_GROUP_NAMES[g], names[x] != "" ? names[x] : "default")
+				n += 1
+			}
+			if n > 0 do strings.write_byte(b, '}')
+		}
+		obj(b, "macos", c.macos, OS_WHEN_NAMES)
+		obj(b, "sound", c.sound, BELL_SOUND_NAMES)
 	}
 }

@@ -380,6 +380,38 @@ get_images :: proc(r: ^Rd, k: string) -> []Prompt_Image {
 	return out
 }
 
+// set_notifications' "macos" and "sound": {"<group>": "<choice>"} for the groups it sets
+// ("default": the group's default). A missing object sets none; anything else is an error.
+@(private = "file")
+bell_choices :: proc(r: ^Rd, k: string, names: [$E]string) -> (out: [Bell_Group]Maybe(E)) {
+	v, has := r.obj[k]
+	if !has do return
+	o, ok := v.(json.Object)
+	if !ok {
+		if r.err == "" do r.err = strings.concatenate({k, " must be an object"}, context.temp_allocator)
+		return
+	}
+	for key, x in o {
+		g, gok := enum_by_name(key, BELL_GROUP_NAMES)
+		s, sok := x.(json.String)
+		e, eok := enum_by_name(string(s), names)
+		if string(s) == "default" do e, eok = {}, true
+		if !gok || !sok || !eok {
+			if r.err == "" do r.err = strings.concatenate({"unknown ", k, " ", key}, context.temp_allocator)
+			return
+		}
+		out[g] = e
+	}
+	return
+}
+
+@(private = "file")
+enum_by_name :: proc(s: string, names: [$E]string) -> (E, bool) {
+	if s == "" do return {}, false
+	for name, e in names do if name == s do return e, true
+	return {}, false
+}
+
 // An enum from its wire name (json_write.odin tables).
 @(private = "file")
 get_enum :: proc(r: ^Rd, k: string, names: [$E]string) -> E {
@@ -721,7 +753,11 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
 	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
 	case "notifications_clear": cmd = Notifications_Clear{}
-	case "set_notifications":   cmd = Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os"), dock = opt_bool(&r, "dock")}
+	case "set_notifications":
+		sb := Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os"), dock = opt_bool(&r, "dock")}
+		sb.macos = bell_choices(&r, "macos", OS_WHEN_NAMES)
+		sb.sound = bell_choices(&r, "sound", BELL_SOUND_NAMES)
+		cmd = sb
 	case "job_list":            cmd = Job_List{unread = opt_bool(&r, "unread").? or_else false}
 	case "job_runs":            cmd = Job_Runs{job = get_str(&r, "job"), limit = int(min(opt_u64(&r, "limit"), 1000))}
 	case "job_run_now":         cmd = Job_Run_Now{job = get_str(&r, "job")}
@@ -1056,7 +1092,12 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 		if bo, bok := st["bell"].(json.Object); bok {
 			br := Rd{obj = bo, a = allocator}
 			for g in Bell_Group do if !(opt_bool(&br, BELL_GROUP_NAMES[g]).? or_else true) do s.settings.bell_off += {g}
-			s.settings.bell_os_off = !(opt_bool(&br, "os").? or_else true)
+			// what applies per group, kept as Default where it is the default (notify.odin)
+			mac, sound := bell_choices(&br, "macos", OS_WHEN_NAMES), bell_choices(&br, "sound", BELL_SOUND_NAMES)
+			for g in Bell_Group {
+				if v, ok := mac[g].?; ok && v != BELL_OS_DEFAULT[g] do s.settings.bell_os[g] = v
+				if v, ok := sound[g].?; ok && v != BELL_SOUND_DEFAULT[g] do s.settings.bell_sound[g] = v
+			}
 			s.settings.bell_dock_off = !(opt_bool(&br, "dock").? or_else true)
 			if br.err != "" do return s, br.err
 		}

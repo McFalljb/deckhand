@@ -25,6 +25,7 @@ Win_OS :: struct {
 	set_clipboard_secret: proc(text: string) -> int,
 	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
 	set_badge:            proc(n: int), // the Dock icon's badge: n, none at 0 (macOS; nil elsewhere, in unit tests and scenes)
+	play_sound:           proc(name: string), // a macOS system sound by name (the bell's: play_bell_sound); nil in unit tests, logged in scenes
 }
 
 win_os: Win_OS
@@ -37,6 +38,16 @@ clipboard_text :: proc() -> string {
 }
 
 clipboard_set :: proc(text: string) {if win_os.set_clipboard != nil do win_os.set_clipboard(text)}
+
+// The bell's sound (core.BELL_SOUND_LABELS): the core's window.request for an entry, or the
+// gear previewing a choice. Only the names Deckhand offers reach macOS.
+play_bell_sound :: proc(name: string) {
+	if win_os.play_sound == nil do return
+	for l, s in core.BELL_SOUND_LABELS do if s > .None && l == name {
+		win_os.play_sound(name)
+		return
+	}
+}
 
 // The number on the Dock icon now (-1: not set yet).
 dock_badge_shown := -1

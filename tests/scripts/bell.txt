@@ -61,7 +61,8 @@ assert_state notifications.unread 0
 assert_screen aaaa-1
 command {"type":"notifications_list"}
 assert_result data.notifications.1.read true
-# the gear: "Notify me about" (finished off, then on again) and macOS notifications
+# the gear's grid: Bell (finished off, then on again), macOS and Sound for needs you
+# (pop ids: Bell_Finished 8, Os_Waiting 36, Sound_Waiting 40 in ui_toolbar.odin's Pop_Item)
 clickid settings
 wait 300
 shot bell/gear
@@ -70,10 +71,20 @@ eventually
 assert_state settings.bell.finished false
 clickid pop 8
 assert_state settings.bell.finished true
-clickid pop 12
-assert_state settings.bell.os false
-clickid pop 12
-assert_state settings.bell.os true
+assert_state settings.bell.macos.waiting background
+clickid pop 36
+eventually
+assert_state settings.bell.macos.waiting always
+clickid pop 36
+eventually
+assert_state settings.bell.macos.waiting never
+clickid pop 36
+eventually
+assert_state settings.bell.macos.waiting background
+assert_state settings.bell.sound.waiting tink
+clickid pop 40
+eventually
+assert_state settings.bell.sound.waiting glass
 key escape
 # another run ends in the background (aaaa-1, now behind bbbb-2): the badge. More than
 # NOTICE_COALESCE (10 s) after aaaa-1's first entry, or the new one replaces it (count 2, not 3)

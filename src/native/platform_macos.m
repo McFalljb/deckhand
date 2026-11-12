@@ -559,10 +559,25 @@ int dh_mac_test_panels(void) {
 // Test mode: whether sokol's view has an input context (input methods need one).
 int dh_mac_test_has_input_context(void) { return view.inputContext != nil; }
 
+// macOS shows a notification of the app in front only when its delegate says
+// so: only those sent as "always" ones (the bell's kinds whose macOS says
+// always: userInfo front) show while Deckhand is in front; any other that
+// arrives just as Deckhand comes to the front goes to Notification Center only.
+@interface DHNoteDelegate : NSObject <UNUserNotificationCenterDelegate>
+@end
+@implementation DHNoteDelegate
+- (void)userNotificationCenter:(UNUserNotificationCenter*)center
+       willPresentNotification:(UNNotification*)notification
+         withCompletionHandler:(void (^)(UNNotificationPresentationOptions))handler {
+    BOOL front = [notification.request.content.userInfo[@"front"] boolValue];
+    handler(front ? (UNNotificationPresentationOptionBanner | UNNotificationPresentationOptionList) : UNNotificationPresentationOptionNone);
+}
+@end
+
 // An OS notification from the agent. A bundled app (an identifier) uses the
 // user notification center, asking for permission once; a bare binary (the
 // dev build) cannot, so the Dock icon bounces once instead.
-void dh_mac_notify(const char* title, const char* body) {
+void dh_mac_notify(const char* title, const char* body, int front) {
     NSString* t = [NSString stringWithUTF8String:title] ?: @"";
     NSString* b = [NSString stringWithUTF8String:body] ?: @"";
     if (NSBundle.mainBundle.bundleIdentifier == nil) {
@@ -571,14 +586,18 @@ void dh_mac_notify(const char* title, const char* body) {
     }
     UNUserNotificationCenter* center = [UNUserNotificationCenter currentNotificationCenter];
     static BOOL asked;
+    static DHNoteDelegate* delegate;
     if (!asked) {
         asked = YES;
+        delegate = [DHNoteDelegate new]; // the center keeps it weakly
+        center.delegate = delegate;
         [center requestAuthorizationWithOptions:(UNAuthorizationOptionAlert | UNAuthorizationOptionSound)
                               completionHandler:^(BOOL granted, NSError* error) {}];
     }
     UNMutableNotificationContent* content = [UNMutableNotificationContent new];
     content.title = t;
     content.body = b;
+    if (front) content.userInfo = @{@"front" : @YES};
     UNNotificationRequest* req = [UNNotificationRequest requestWithIdentifier:[[NSUUID UUID] UUIDString] content:content trigger:nil];
     [center addNotificationRequest:req withCompletionHandler:nil];
 }
@@ -718,6 +737,16 @@ void dh_mac_activity(int on) {
 
 void dh_mac_set_badge(int n) {
     NSApp.dockTile.badgeLabel = n > 0 ? [NSString stringWithFormat:@"%d", n] : nil;
+}
+
+// ---- the bell's sounds (win_os.odin play_sound; core/notify.odin): a system sound by name ----
+
+void dh_mac_play_sound(const char* name) {
+    NSString* n = [NSString stringWithUTF8String:name];
+    NSSound* s = n.length ? [NSSound soundNamed:n] : nil; // one shared instance per name
+    if (s == nil) return;
+    [s stop]; // already playing: from the start
+    [s play];
 }
 
 // ---- Dock Quit, logout, restart, shutdown (main.odin's quit_route) ----

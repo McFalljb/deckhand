@@ -250,7 +250,7 @@ bell_settings_and_os :: proc(t: ^testing.T) {
 	testing.expect_value(t, state.settings.bell_off, bit_set[Bell_Group]{})
 	if e := workspace_restore(saved); e != "" do testing.expect(t, false, e)
 	testing.expect_value(t, state.settings.bell_off, bit_set[Bell_Group]{.Finished, .Jobs})
-	testing.expect(t, state.settings.bell_os_off, "os off restored")
+	for g in Bell_Group do testing.expectf(t, bell_os_when(state.settings, g) == .Never, "os off restored: %v", g)
 }
 
 @(test)
@@ -450,15 +450,298 @@ bell_failed_action_ignores_errors_off :: proc(t: ^testing.T) {
 	// a session's error is still not collected
 	run_command(Tab_Exited{tab_id = n_tab(a)})
 	testing.expect_value(t, len(state.notices.items), 1)
-	// in the background: the bell entry, but no macOS banner while Errors is off
+	// in the background: the bell entry, and its banner as the Errors row's macOS says
+	// (the columns are independent: Bell off does not silence it)
 	n_set_active(false)
 	n_later(11 * time.Second)
 	notify_failed("Send to Atlas", "pi started over: copied to the clipboard")
 	testing.expect_value(t, len(state.notices.items), 2)
-	testing.expect_value(t, len(n_os), 0)
-	// Errors on: the banner as for any error
-	run_command(Set_Bell{errors = true}, N_UI)
+	testing.expect_value(t, len(n_os), 1)
+	// Errors' macOS never: the bell entry only
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Errors = .Never}}, N_UI)
 	n_later(11 * time.Second)
 	notify_failed("Send to Atlas", "pi took too long: copied to the clipboard")
+	testing.expect_value(t, len(state.notices.items), 3)
+	testing.expect_value(t, len(n_os), 1)
+}
+
+// ---- per-group channels and sounds ----
+
+@(private = "file")
+n_sounds :: proc() -> (n: int) {
+	for op in fw.ops do if op == .Sound do n += 1
+	return
+}
+
+// Where each kind goes (notice_channels): the defaults in front and behind, then each
+// macOS choice and a sound, and a job's finished run never alerts.
+@(test)
+bell_channels_per_kind :: proc(t: ^testing.T) {
+	st: Settings
+	Want :: struct {
+		bell, os: bool,
+		sound:    Bell_Sound,
+	}
+	// defaults, Deckhand in the background
+	behind := [Notice_Kind]Want {
+		.Finished      = {true, false, .None},
+		.Waiting       = {true, true, .Tink},
+		.Error         = {true, true, .None},
+		.Exited        = {true, true, .None},
+		.Job_Finished  = {true, false, .None},
+		.Job_Needs_You = {true, true, .None},
+		.Job_Failed    = {true, true, .None},
+	}
+	for w, k in behind {
+		c := notice_channels(st, k, false)
+		testing.expectf(t, c.bell == w.bell && c.os == w.os && c.sound == w.sound, "%v behind: %v", k, c)
+		// in front: the bell only (macOS background, sounds only behind)
+		c = notice_channels(st, k, true)
+		testing.expectf(t, c.bell && !c.os && c.sound == .None, "%v in front: %v", k, c)
+	}
+	// Errors always, with Basso: in front too
+	st.bell_os[.Errors], st.bell_sound[.Errors] = .Always, .Basso
+	for k in ([]Notice_Kind{.Error, .Exited}) {
+		c := notice_channels(st, k, true)
+		testing.expectf(t, c.os && c.sound == .Basso, "%v always, in front: %v", k, c)
+	}
+	// Finished never with Glass: no banner, the sound behind only
+	st.bell_sound[.Finished] = .Glass
+	c := notice_channels(st, .Finished, false)
+	testing.expect(t, !c.os && c.sound == .Glass, "finished: a sound, no banner")
+	testing.expect_value(t, notice_channels(st, .Finished, true).sound, Bell_Sound.None)
+	// needs you: never, and no sound
+	st.bell_os[.Waiting], st.bell_sound[.Waiting] = .Never, .None
+	c = notice_channels(st, .Waiting, false)
+	testing.expect(t, !c.os && c.sound == .None, "needs you: silenced")
+	// Jobs always with Pop: needs you and failed, never a finished run (the job's own notify)
+	st.bell_os[.Jobs], st.bell_sound[.Jobs] = .Always, .Pop
+	testing.expect(t, notice_channels(st, .Job_Failed, true).os && notice_channels(st, .Job_Failed, true).sound == .Pop, "a failed job, always")
+	c = notice_channels(st, .Job_Finished, true)
+	testing.expect(t, c.bell && !c.os && c.sound == .None, "a finished job: the bell only")
+	// a group off: not collected (and then notice_post drops it before any alert)
+	st.bell_off = {.Errors}
+	testing.expect(t, !notice_channels(st, .Error, false).bell, "errors off")
+	// an older core's one switch off: every group never
+	st2: Settings
+	st2.bell_os_off = true
+	for g in Bell_Group do testing.expect_value(t, bell_os_when(st2, g), Os_When.Never)
+}
+
+// The old single switch, saved before per-group settings: off = every group never; on (never
+// saved: the default) = today's behaviour. New files keep only what differs from the defaults.
+@(test)
+bell_settings_migrate :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	base := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expect(t, !strings.contains(base, `"bell"`), "defaults: nothing saved")
+	old, n := strings.replace(base, `"settings":{`, `"settings":{"bell":{"os":false,"jobs":false},`, 1, context.temp_allocator)
+	if !testing.expect_value(t, n, true) do return
+	if e := workspace_restore(old); e != "" do testing.expect(t, false, e)
+	for g in Bell_Group do testing.expectf(t, bell_os_when(state.settings, g) == .Never, "old os off: %v never", g)
+	testing.expect_value(t, bell_sound_of(state.settings, .Waiting), Bell_Sound.Tink) // sounds: the defaults
+	testing.expect_value(t, state.settings.bell_off, bit_set[Bell_Group]{.Jobs})
+	// saved again in the new form
+	saved := strings.clone(workspace_json(), context.temp_allocator)
+	testing.expectf(t, strings.contains(saved, `"macos":{`) && strings.contains(saved, `"os":false`), "%s", saved) // os: for an older build
+	// an old file with the switch on (or none): the defaults, per group as before
+	state = State{}
+	old2, _ := strings.replace(base, `"settings":{`, `"settings":{"bell":{"os":true},`, 1, context.temp_allocator)
+	if e := workspace_restore(old2); e != "" do testing.expect(t, false, e)
+	testing.expect_value(t, state.settings.bell_os, [Bell_Group]Os_When{})
+	for g in Bell_Group do testing.expect_value(t, bell_os_when(state.settings, g), BELL_OS_DEFAULT[g])
+	// a choice equal to the default is kept as Default; others round-trip
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Finished = .Always, .Waiting = .Background}, sound = #partial [Bell_Group]Maybe(Bell_Sound){.Errors = .Basso, .Waiting = .Glass}}, N_UI)
+	testing.expect_value(t, state.settings.bell_os[.Waiting], Os_When.Default)
+	saved = strings.clone(workspace_json(), context.temp_allocator)
+	state = State{}
+	if e := workspace_restore(saved); e != "" do testing.expect(t, false, e)
+	testing.expect_value(t, bell_os_when(state.settings, .Finished), Os_When.Always)
+	testing.expect_value(t, bell_sound_of(state.settings, .Errors), Bell_Sound.Basso)
+	testing.expect_value(t, bell_sound_of(state.settings, .Waiting), Bell_Sound.Glass)
+	testing.expect_value(t, json_path(state_json(), "settings.bell.macos.finished"), "always")
+	testing.expect_value(t, json_path(state_json(), "settings.bell.sound.waiting"), "glass")
+	// on the wire: set_notifications parses and writes the groups back the same
+	cmd, err := parse_command(`{"type":"set_notifications","macos":{"jobs":"never","finished":"default"},"sound":{"waiting":"none"}}`)
+	testing.expect_value(t, err, "")
+	sb, _ := cmd.(Set_Bell)
+	testing.expect(t, sb.macos[.Jobs] == Os_When.Never && sb.macos[.Finished] == Os_When.Default && sb.macos[.Waiting] == nil, "macos parsed")
+	testing.expect(t, sb.sound[.Waiting] == Bell_Sound.None && sb.sound[.Jobs] == nil, "sound parsed")
+	b := strings.builder_make(context.temp_allocator)
+	notify_write(&b, sb)
+	again, aerr := parse_command(fmt.tprintf(`{{"type":"set_notifications"%s}}`, strings.to_string(b)))
+	testing.expect_value(t, aerr, "")
+	testing.expect_value(t, again.(Set_Bell), sb)
+	for bad in ([]string{`{"type":"set_notifications","sound":{"waiting":"Submarine"}}`, `{"type":"set_notifications","macos":{"nope":"never"}}`, `{"type":"set_notifications","macos":"never"}`}) {
+		_, e := parse_command(bad)
+		testing.expectf(t, e != "", "refused: %s", bad)
+	}
+}
+
+// A sound goes to the window once per entry that alerts, paced with the macOS notifications,
+// never twice within SOUND_FLOOR, never to a hub, and not while Deckhand is in front.
+@(test)
+bell_sounds :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	a, b := n_reset()
+	defer n_done()
+	// in front: needs you is quiet by default
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 0)
+	// behind: Tink, once; a finished run none
+	n_set_active(false)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 1)
+	testing.expect_value(t, fw.last.text, "Tink")
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle)
+	testing.expect_value(t, n_sounds(), 1)
+	// the floor: another session within a second rings its banner, not a second sound
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	n_later(500 * time.Millisecond)
+	n_status(a, .Working)
+	n_status(a, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 2)
+	testing.expect_value(t, state.notices.sounds, 2)
+	testing.expect(t, !sound_floor_ok(notice_now(), time.time_add(notice_now(), 999 * time.Millisecond)), "within the floor")
+	testing.expect(t, sound_floor_ok(notice_now(), time.time_add(notice_now(), time.Second)), "past it")
+	testing.expect(t, sound_floor_ok({}, notice_now()), "none yet")
+	// macOS never: the sound still plays behind (no banner)
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Waiting = .Never}}, N_UI)
+	os_before := len(n_os)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 3)
+	testing.expect_value(t, len(n_os), os_before)
+	// always: in front too
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Waiting = .Always}}, N_UI)
+	n_set_active(true)
+	run_command(Focus_Session{session = a}, N_UI)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 4)
+	testing.expect_value(t, len(n_os), os_before + 1)
+	// another machine's entry: the same rules
+	n_later(11 * time.Second)
+	notify_remote(Notice{kind = .Waiting, machine = 7, title = strings.clone("t"), place = strings.clone("nuc")})
+	testing.expect_value(t, n_sounds(), 5)
+	// none: silent
+	run_command(Set_Bell{sound = #partial [Bell_Group]Maybe(Bell_Sound){.Waiting = .None}}, N_UI)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, n_sounds(), 5)
+}
+
+// Nobody but this Mac's user changes the sounds or the macOS choices: not an agent (control), a
+// pi tab, a script, nor another machine (a hub's ui).
+@(test)
+bell_sound_settings_user_only :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	for c in ([]Caller{{kind = .Control}, {kind = .Script}, {kind = .Panel, tab_id = 1}, {kind = .UI, hub = true}, {kind = .Control, hub = true}}) {
+		r := run_command(Set_Bell{sound = #partial [Bell_Group]Maybe(Bell_Sound){.Finished = .Hero}, macos = #partial [Bell_Group]Maybe(Os_When){.Finished = .Always}}, c)
+		testing.expectf(t, !r.ok, "%v may not set sounds", c)
+	}
+	testing.expect_value(t, state.settings.bell_sound, [Bell_Group]Bell_Sound{})
+	testing.expect_value(t, state.settings.bell_os, [Bell_Group]Os_When{})
+	testing.expect(t, run_command(Set_Bell{sound = #partial [Bell_Group]Maybe(Bell_Sound){.Finished = .Hero}}, N_UI).ok, "the user's")
+	testing.expect_value(t, bell_sound_of(state.settings, .Finished), Bell_Sound.Hero)
+}
+
+// ---- review: compatibility, independent columns, the summary, banners in front ----
+
+// (1) An older build reads "os": false (rolled back to), and an older window reads bell_os_off
+// (attached through an update): both say off while every kind's macOS is never.
+@(test)
+bell_review_old_builds_see_off :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	run_command(Set_Bell{os = false}, N_UI)
+	testing.expect(t, strings.contains(workspace_json(), `"os":false`), "saved for an older build")
+	testing.expect(t, state.settings.bell_os_off, "streamed for an older window")
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Errors = .Background}}, N_UI)
+	testing.expect(t, !strings.contains(workspace_json(), `"os":false`), "one kind on: not off")
+	testing.expect(t, !state.settings.bell_os_off, "one kind on: not off on the wire")
+	testing.expect_value(t, bell_os_when(state.settings, .Waiting), Os_When.Never)
+}
+
+// (2) The columns are independent: Bell off still notifies and plays as the row says. An old
+// file's kinds that were off stay quiet (they never notified before).
+@(test)
+bell_review_columns_independent :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, b := n_reset()
+	defer n_done()
+	n_set_active(false)
+	run_command(Set_Bell{errors = false, sound = #partial [Bell_Group]Maybe(Bell_Sound){.Errors = .Basso}}, N_UI)
+	n_status(b, .Working)
+	n_status(b, .Error)
+	testing.expect_value(t, len(state.notices.items), 0) // not in the bell
+	testing.expect_value(t, len(n_os), 1) // the banner
+	testing.expect_value(t, n_sounds(), 1) // and the sound
+	// an old file (no "macos"): a kind that was off keeps no banner and no sound
+	base := strings.clone(workspace_json(), context.temp_allocator)
+	state.settings = {}
+	plain, _ := strings.replace(base, `"bell":{`, `"bell_was":{`, 1, context.temp_allocator)
+	old, _ := strings.replace(plain, `"settings":{`, `"settings":{"bell":{"waiting":false},`, 1, context.temp_allocator)
+	if e := workspace_restore(old); e != "" do testing.expect(t, false, e)
+	testing.expect_value(t, bell_os_when(state.settings, .Waiting), Os_When.Never)
+	testing.expect_value(t, bell_sound_of(state.settings, .Waiting), Bell_Sound.None)
+	testing.expect_value(t, bell_os_when(state.settings, .Errors), Os_When.Background)
+}
+
+// (3) A burst's summary says what it holds: finished runs are not "sessions that need you".
+@(test)
+bell_review_summary_words :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	n_reset()
+	defer n_done()
+	n_set_active(false)
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Finished = .Background}}, N_UI)
+	for i in 0 ..< 3 do notify_remote(Notice{kind = .Finished, machine = 7, title = fmt.aprintf("s%d", i), place = strings.clone("nuc")})
+	testing.expect_value(t, len(n_os), 3)
+	if len(n_os) == 3 do testing.expect_value(t, n_os[2], "Deckhand|3 sessions finished")
+	// a mixed burst says both
+	n_later(6 * time.Second)
+	clear(&n_os)
+	notify_remote(Notice{kind = .Finished, machine = 7, title = strings.clone("a"), place = strings.clone("nuc")})
+	notify_remote(Notice{kind = .Waiting, machine = 7, title = strings.clone("b"), place = strings.clone("nuc")})
+	notify_remote(Notice{kind = .Waiting, machine = 7, title = strings.clone("c"), place = strings.clone("nuc")})
+	if len(n_os) == 3 do testing.expect_value(t, n_os[2], "Deckhand|2 sessions need you, 1 finished")
+}
+
+@(private = "file")
+n_front: [dynamic]string
+
+// (4) Only a kind whose macOS says always asks to be shown while Deckhand is in front.
+@(test)
+bell_review_front_only_always :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	_, b := n_reset()
+	defer n_done()
+	clear(&n_front)
+	platform.notify_front = proc(title, body: string) {append(&n_front, fmt.aprintf("%s|%s", title, body))}
+	n_set_active(false)
+	n_status(b, .Working)
+	n_status(b, .Error) // background policy: a plain notification
+	testing.expect_value(t, len(n_os), 1)
+	testing.expect_value(t, len(n_front), 0)
+	run_command(Set_Bell{macos = #partial [Bell_Group]Maybe(Os_When){.Waiting = .Always}}, N_UI)
+	n_later(11 * time.Second)
+	n_status(b, .Working)
+	n_status(b, .Idle, waiting = true)
+	testing.expect_value(t, len(n_front), 1)
 	testing.expect_value(t, len(n_os), 1)
 }

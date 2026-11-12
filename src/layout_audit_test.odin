@@ -99,7 +99,10 @@ containers :: proc(overlay: bool) -> [dynamic]Box {
 	}
 	if overlay {
 		for name in ([]string{"settings_pop", "menu", "wt_menu", "wtnote", "bell_pop", "bell_head", "bell_markall", "bell_clear", "bell_list", "setup_box", "setup_head", "setup_body", "setup_foot"}) do one(&out, name)
-		for name in ([]string{"pop", "menurow", "wtrow", "wtmore", "wthead", "bellrow", "bell_group", "setupopt", "setupbtn"}) do for i in u32(0) ..< 64 do if !one(&out, name, i) && i > 16 do break
+		for i in u32(0) ..< u32(len(Pop_Item)) do one(&out, "pop", i) // some rows show only at times (Reload pi): every id
+		one(&out, "bell_grid_head")
+		for i in u32(0) ..< 4 do one(&out, "bell_grid_row", i)
+		for name in ([]string{"menurow", "wtrow", "wtmore", "wthead", "bellrow", "bell_group", "setupopt", "setupbtn"}) do for i in u32(0) ..< 64 do if !one(&out, name, i) && i > 16 do break
 		return out
 	}
 	for name in ([]string{"sidebar", "sidebar_top", "lefttabs", "filter_box", "quick", "nav", "tabs", "ed_tools", "right", "centre", "files_head", "wt_switch", "files_filter_box", "rename_field", "new", "newchatrow", "waitingfiltered", "search", "homebutton", "confirm_bar", "bell", "bell_badge", "jobs_head", "jobs_list", "jobs_paused", "jobs_limits", "drawer_notes_line"}) do one(&out, name)
@@ -911,6 +914,70 @@ settings_popover_short_window :: proc(t: ^testing.T) {
 	row := clay.GetElementData(clay.ID("pop", u32(Pop_Item.Control_Token)))
 	list = clay.GetElementData(clay.ID("settings_list"))
 	testing.expectf(t, row.found && inside_box(box_of(row.boundingBox), box_of(list.boundingBox)), "the selected last row %v shows in the list %v", row.boundingBox, list.boundingBox)
+}
+
+// The gear's Notifications grid at every text size: its header and four rows say what they
+// should (the defaults), its columns line up, every cell fits the popover and its row, and a
+// changed choice is drawn.
+@(test)
+settings_bell_grid :: proc(t: ^testing.T) {
+	context.allocator = au_reset("")
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	W, H :: 1280, 860
+	state.focus_widget = "settings"
+	defer {
+		state.focus_widget = ""
+		state.settings.text_size = .Default
+		fonts_apply(theme_font_config(theme()), 1)
+	}
+	texts_in :: proc(cmds: clay.ClayArray(clay.RenderCommand), id: clay.ElementId) -> string {
+		d := clay.GetElementData(id)
+		if !d.found do return "<none>"
+		b := box_of(d.boundingBox)
+		out := make([dynamic]string, context.temp_allocator)
+		for p in pieces(cmds) do if p.text != "" && inside_box(p.box, b) do append(&out, p.text)
+		return strings.join(out[:], " ", context.temp_allocator)
+	}
+	for size in core.Text_Size {
+		state.settings.text_size = size
+		fonts_apply(theme_font_config(theme()), 1)
+		_ = ui_layout(W, H)
+		cmds := ui_layout(W, H)
+		testing.expect_value(t, texts_in(cmds, clay.ID("bell_grid_head")), "Notify me about Bell macOS Sound")
+		want := [4]string{"Needs you background Tink", "Finished never none", "Errors background none", "Jobs background none"}
+		for g, i in BELL_GRID_ORDER do testing.expectf(t, texts_in(cmds, clay.ID("bell_grid_row", u32(g))) == want[i], "%v row %v: %q", size, g, texts_in(cmds, clay.ID("bell_grid_row", u32(g))))
+		pop := box_of(clay.GetElementData(clay.ID("settings_pop")).boundingBox)
+		x0: [3]f32
+		for g, i in BELL_GRID_ORDER {
+			row := box_of(clay.GetElementData(clay.ID("bell_grid_row", u32(g))).boundingBox)
+			cells := [3]Pop_Item{Pop_Item(int(Pop_Item.Bell_Finished) + int(g)), Pop_Item(int(Pop_Item.Os_Finished) + int(g)), Pop_Item(int(Pop_Item.Sound_Finished) + int(g))}
+			for it, c in cells {
+				d := clay.GetElementData(clay.ID("pop", u32(it)))
+				if !testing.expectf(t, d.found, "%v cell %v", size, it) do continue
+				b := box_of(d.boundingBox)
+				testing.expectf(t, inside_box(b, row) && inside_box(b, pop), "%v: %v %v leaves its row %v", size, it, b, row)
+				if i == 0 do x0[c] = b.x0
+				else do testing.expectf(t, abs(b.x0 - x0[c]) < 0.5, "%v: column %d not aligned (%v vs %v)", size, c, b.x0, x0[c])
+			}
+		}
+		report_bad := audit(cmds, fmt.tprintf("bell grid %v", size), W)
+		for b in report_bad do testing.expect(t, false, b)
+	}
+	// a changed choice shows (the replica is the State here)
+	state.settings.text_size = .Default
+	fonts_apply(theme_font_config(theme()), 1)
+	core.run_command(core.Set_Bell{macos = #partial [core.Bell_Group]Maybe(core.Os_When){.Jobs = .Always}, sound = #partial [core.Bell_Group]Maybe(core.Bell_Sound){.Jobs = .Basso}, jobs = false}, {kind = .UI})
+	_ = ui_layout(W, H)
+	cmds := ui_layout(W, H)
+	testing.expect_value(t, texts_in(cmds, clay.ID("bell_grid_row", u32(core.Bell_Group.Jobs))), "Jobs always Basso")
+	// the keyboard walks the grid row by row after Agent notifications
+	order := POP_ORDER
+	at := -1
+	for o, k in order do if o == .Notifications do at = k
+	testing.expect(t, at >= 0 && order[at + 1] == .Bell_Waiting && order[at + 2] == .Os_Waiting && order[at + 3] == .Sound_Waiting && order[at + 4] == .Bell_Finished, "grid order")
+	testing.expect(t, !pop_item_shown(.Bell_OS), "the old switch is not drawn")
+	label, _ := hit_tip(Hit_Pop(Pop_Item.Sound_Waiting))
+	testing.expectf(t, strings.contains(label, "background") && strings.contains(label, "always"), "the rule in the tip: %q", label)
 }
 
 // An error toast wraps to two lines inside its box; an info toast stays one line.

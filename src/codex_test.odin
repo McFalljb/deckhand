@@ -394,6 +394,19 @@ codex_generated_paste :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = mention}, CX_SCRIPT).error, "an @mention would open Codex's file or agent picker; send the name without @")
 	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = "/new"}, CX_SCRIPT).error, "text starting with / would be a Codex command (/ slash command, ! shell, $ skill): Deckhand sends only messages")
 	testing.expect(t, !core.run_command(core.Send_Text{tab_id = tab, text = mention}, core.Caller{kind = .UI, hub = true}).ok, "a hub's")
+	// a drop (generated: the window sets it for dropped paths only): the core decides, on its own
+	// state, right before writing; the reason comes back for the toast
+	cx_osc(tab, .Working)
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = "'/tmp/notes.txt' ", generated = true}, CX_UI).error, "Codex is working")
+	cx_osc(tab, .Idle)
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = mention, generated = true}, CX_UI).error, "an @mention would open Codex's file or agent picker; send the name without @")
+	testing.expect_value(t, core.json_path(core.command_wire_json(core.Send_Text{tab_id = tab, text = "x", generated = true}), "generated"), "true")
+	// the flag only ever makes the core stricter: claiming it gains a caller nothing (not set, a
+	// script is checked all the same; set on a shell tab, nothing changes)
+	testing.expect(t, !core.run_command(core.Send_Text{tab_id = tab, text = mention, generated = false}, CX_SCRIPT).ok)
+	ts, _, _ := core.find_tab(tab)
+	sh := core.run_command(core.New_Shell_Tab{session = ts.id}, CX_UI).created_id
+	testing.expect(t, core.run_command(core.Send_Text{tab_id = sh, text = "echo @x", generated = true}, CX_UI).ok, "not a Codex tab: as without it")
 	testing.expect(t, core.run_command(core.Send_Text{tab_id = tab, text = "@mine\n"}, CX_UI).ok, "the user's own ⌘V")
 	testing.expectf(t, strings.contains(cx_read_after(got, 100), "@mine"), "the user's paste went in")
 }

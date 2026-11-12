@@ -108,7 +108,9 @@ own process (`socket_claude_peer_ok`): a hook run by Codex's shared server, or a
 fails closed. Codex passes the environment to its hooks and commands; a sandboxed command cannot
 reach the socket anyway. In the session holder a Codex tab's process is recorded as `codex`
 (tokens.json, MAC'd), never `claude`: a saved tab relabelled in workspace.json never adopts a
-running codex as a Claude tab, nor the reverse.
+running codex as a Claude tab, nor the reverse. Without that record (tokens.json removed or failing
+its MAC) no held pi, Claude or Codex is adopted into an agent tab: workspace.json alone never says
+what a live process is.
 
 **One id, one harness**, decided by where it was first legitimately seen: a Codex tab never claims
 an id Deckhand knows as Claude Code's (its history, the disk index, a transcript of the project's
@@ -135,7 +137,8 @@ cancels it, and Codex working or blocked by then drops it.
 
 Everything else Deckhand puts into a Codex composer on its own goes through the same rule and only
 while Codex is not working or blocked (`codex_paste_refusal`): a file dropped on the tab (its path:
-`'/tmp/a @b.txt'` is refused, with the reason in a toast) and anyone's `send_text` but the user's
+`'/tmp/a @b.txt'` is refused: the window sends it as `send_text` with `generated`, the core
+decides on its own state and the window toasts its reason) and anyone's `send_text` but the user's
 own. The user's typing and ⌘V are theirs. Unicode look-alikes (a fullwidth `／`) are not checked: Codex does not read them as
 commands either.
 

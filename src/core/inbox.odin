@@ -139,7 +139,7 @@ command_clone :: proc(cmd: Command, allocator: runtime.Allocator) -> Command {
 	case Open_Session_Cmd:    return Open_Session_Cmd{project_id = c.project_id, pi_session_id = s(c.pi_session_id, allocator)}
 	case Close_Tab:           return Close_Tab{tab_id = c.tab_id, confirm = s(c.confirm, allocator), comments = c.comments}
 	case Close_Session:       return Close_Session{session = c.session, confirm = s(c.confirm, allocator), ask = c.ask, comments = c.comments}
-	case Send_Text:           return Send_Text{tab_id = c.tab_id, text = s(c.text, allocator)}
+	case Send_Text:           return Send_Text{tab_id = c.tab_id, text = s(c.text, allocator), generated = c.generated}
 	case Terminal_Link:       return Terminal_Link{tab_id = c.tab_id, url = s(c.url, allocator), external = c.external}
 	case Set_Focus:           return Set_Focus{widget = s(c.widget, allocator)}
 	case Focus_Take:          return Focus_Take{widget = s(c.widget, allocator)}

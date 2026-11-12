@@ -639,7 +639,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "focus_tab":           cmd = Focus_Tab{tab_id = get_u64(&r, "tab_id")}
 	case "copy_selection":      cmd = Copy_Selection{tab_id = get_u64(&r, "tab_id")}
 	case "terminal_link":       cmd = Terminal_Link{tab_id = get_u64(&r, "tab_id"), url = get_str(&r, "url"), external = opt_bool(&r, "external").? or_else false}
-	case "send_text":           cmd = Send_Text{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
+	case "send_text":           cmd = Send_Text{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text"), generated = opt_bool(&r, "generated").? or_else false}
 	case "set_focus":           cmd = Set_Focus{widget = get_str(&r, "widget", optional = true)}
 	case "set_layout":          cmd = Set_Layout{left_width = opt_f32(&r, "left_width"), right_width = opt_f32(&r, "right_width"), left_open = opt_bool(&r, "left_open"), right_open = opt_bool(&r, "right_open"), drawer_width = opt_f32(&r, "drawer_width"), drawer_pinned = opt_bool(&r, "drawer_pinned")}
 	case "set_panel":           cmd = Set_Panel{panel = get_str(&r, "panel"), open = get_bool(&r, "open")}

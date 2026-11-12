@@ -576,6 +576,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Send_Text:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
+		if c.generated do kv_bool(&w, "generated", true)
 	case Set_Focus:
 		kv_str(&w, "widget", c.widget)
 	case Focus_Take:

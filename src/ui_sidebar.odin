@@ -1663,12 +1663,9 @@ sidebar_drop :: proc(paths: []string, x, y: f32) {
 		strings.write_string(&b, shell_quote(p))
 		strings.write_byte(&b, ' ')
 	}
-	// a Codex composer: Deckhand's text, so Codex's rule (a path with " @x" would open its picker)
-	if why := core.codex_paste_refusal(tab, strings.to_string(b)); why != "" {
-		toast_show(fmt.tprintf("Not dropped into Codex: %s", why), err = true)
-		return
-	}
-	ui_do(core.Send_Text{tab.id, strings.to_string(b)})
+	// Deckhand's text, not the user's typing: the core applies a Codex composer's rule (a path with
+	// " @x" would open its picker) on its own state and says why not
+	if r := client_call(core.Send_Text{tab_id = tab.id, text = strings.to_string(b), generated = true}); !r.ok do toast_show(fmt.tprintf("Not dropped: %s", r.error), err = true)
 }
 
 // 'path' for a POSIX shell (a ' inside becomes '\'').

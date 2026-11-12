@@ -1141,7 +1141,7 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 	ct, is_claude := tab.kind.(core.Claude_Tab)
 	tag := ""
 	if is_claude {
-		ic = core.harness_icon(.Claude)
+		ic = core.harness_icon(ct.codex ? .Codex : .Claude)
 		// several accounts: which one (claude_accounts.odin)
 		tag = core.claude_account_tag(ct.account)
 		if tag != "" do label = fmt.tprintf("%s · %s", tab.title, tag)
@@ -1149,7 +1149,8 @@ tab_label :: proc(cs: ^core.Open_Session, tab: core.Tab) -> (ic: core.Icon, labe
 	// a Claude-only session's main tab: Claude and where it runs
 	if cs != nil && cs.agent == .Claude && len(cs.tabs) > 0 && cs.tabs[0].id == tab.id {
 		_, place := core.session_place(cs)
-		label = tag != "" ? fmt.tprintf("Claude · %s · %s", tag, place) : fmt.tprintf("Claude · %s", place)
+		who := is_claude && ct.codex ? "Codex" : "Claude"
+		label = tag != "" ? fmt.tprintf("%s · %s · %s", who, tag, place) : fmt.tprintf("%s · %s", who, place)
 	}
 	if is_claude {
 		// what the process started with (ct.readonly); a tab not started yet: what it will start as

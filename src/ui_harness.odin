@@ -422,6 +422,7 @@ new_session_ui :: proc(pid: u64, cwd := "", at: Maybe([2]f32) = nil) {
 	// looked up again (stat only): a harness installed since is offered
 	core.pi_installed_now()
 	core.claude_installed_now()
+	core.codex_installed_now()
 	items := core.new_session_choices(p, cwd)
 	switch len(items) {
 	case 0:

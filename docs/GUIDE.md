@@ -2099,7 +2099,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
-| Zoom pane (Restore panes while zoomed) | ⇧⌘↩ | the pane with the keyboard fills the pane area; again: the layout comes back |
+| Zoom pane, Restore panes | ⇧⌘↩ | the pane with the keyboard fills the pane area; pressed again, the layout comes back |
 | Focus pane left, Focus pane right, Focus pane up, Focus pane down | ⌃⌘←, ⌃⌘→, ⌃⌘↑, ⌃⌘↓ | the neighbouring pane gets the keyboard |
 | Move tab to the pane left, Move tab to the pane right, Move tab to the pane above, Move tab to the pane below | ⌃⇧⌘←, ⌃⇧⌘→, ⌃⇧⌘↑, ⌃⇧⌘↓ | or into a new pane that way |
 | Bring all to front |  | |

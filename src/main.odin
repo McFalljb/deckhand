@@ -483,6 +483,7 @@ frame :: proc "c" () {
 		autotest_step()
 	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
+	closed_tabs_settle() // the user's closes that went through (closed_tabs.odin)
 	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
@@ -931,7 +932,7 @@ event :: proc(e: ^sapp.Event) {
 			}
 		case Hit_Close_Tab: close_tab_click(u64(hit))
 		case Hit_Confirm:   if bar_click_ok(string(hit)) do confirm_pending(string(hit))
-		case Hit_Cancel:    if bar_click_ok(string(hit)) do ui_do(core.Cancel_Confirmation{string(hit)})
+		case Hit_Cancel:    if bar_click_ok(string(hit)) do cancel_pending(string(hit))
 		case Hit_Panel_Head: ui_do(core.Set_Panel_Collapsed{panel = string(hit), collapsed = !core.panel_collapsed(string(hit))})
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
@@ -1146,6 +1147,7 @@ confirm_pending :: proc(token: string) {
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		}
+		if p.caller.kind == .UI && !p.caller.hub do closed_tab_answered(p.command, true) // the user's own close: ⇧⌘T (closed_tabs.odin)
 		ui_do(cmd)
 		return
 	}
@@ -1563,4 +1565,10 @@ holder_ask_tick :: proc() {
 	}
 	stop := platform_ask("Another session holder is running", fmt.tprintf("%s\n\nStopping it ends its sessions. Otherwise Deckhand runs without one: tabs opened now stop when Deckhand quits.", text), "Stop It and Start a New One", "Keep It Running")
 	client_send(core.Holder_Replace{stop = stop})
+}
+
+// The user cancelled a pending command (the bar's Cancel).
+cancel_pending :: proc(token: string) {
+	for p in state.pending_confirmations do if p.token == token && p.caller.kind == .UI && !p.caller.hub do closed_tab_answered(p.command, false) // closed_tabs.odin
+	ui_do(core.Cancel_Confirmation{token})
 }

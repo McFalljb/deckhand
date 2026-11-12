@@ -6,11 +6,19 @@ package main
 // menu's "Close tab" (menu_run). Nothing else records: the menu bar's and the palette's Close tab,
 // the confirm bar, the comments prompt, agents, scripts and other machines.
 //
-// ⇧⌘T pops the newest and sends what a click would: its session to the front, then the open
+// A gesture records a PENDING entry, one per tab (a repeated × replaces it). It becomes
+// reopenable only when the tab goes as the result of that same flow: at once when no confirmation
+// was asked, or after the user's own Confirm (confirm_pending). Cancel (cancel_pending) drops it;
+// so does a confirmation that went away while the tab stayed, or the tab going while it asked and
+// the user had not confirmed (someone else closed it). closed_tabs_settle decides, every frame.
+//
+// ⇧⌘T pops the newest reopenable one and sends what a click would: its session to the front, then the open
 // command as the user. An entry whose tab still exists (its close was cancelled) or whose session
 // has closed is dropped and the next one taken. What each kind keeps and reopens:
 //   editor, Markdown   its file (open_file, markdown_open: the file as it is on disk now)
-//   browser            its address as State holds it, the same the workspace saves (browser_open)
+//   browser            its address as State holds it, the same the workspace saves (browser_open);
+//                      not a page at 127.0.0.1: another machine's page ("Open a machine's web
+//                      page…") is there, through an ssh forward that ends with its tab
 //   Claude             its Claude Code session id (new_claude_tab resume, its history's flags)
 //   Changes            its checkout (changes_open)
 //   shell              its folder: a NEW shell there ("Reopened a new terminal in …")
@@ -38,6 +46,9 @@ Closed_Tab :: struct {
 	session: u64,
 	what:    string, // owned: the folder, file, address, Claude session id or checkout
 	cwd:     string, // owned: a Claude tab's folder ("" = the session's)
+	pending:   bool, // the close is not done yet (see above)
+	asked:     bool, // its close asked the user (a confirmation of the user's for this tab was seen)
+	confirmed: bool, // the user confirmed it
 }
 
 closed_tabs: [dynamic]Closed_Tab // oldest first
@@ -64,6 +75,7 @@ closed_tab_record :: proc(tab_id: u64) {
 	case core.Markdown_Tab: x.kind, x.what = .Markdown, k.path
 	case core.Browser_Tab:
 		if k.url == "" || k.url == "about:blank" do return
+		if strings.has_prefix(k.url, "http://127.0.0.1:") || strings.has_prefix(k.url, "http://127.0.0.1/") do return // maybe another machine's page
 		x.kind, x.what = .Browser, core.browser_url_public(k.url)
 	case core.Claude_Tab:
 		if k.session_id == "" do return
@@ -72,6 +84,8 @@ closed_tab_record :: proc(tab_id: u64) {
 	case:                   return // app tabs and the rest
 	}
 	if x.what == "" do return
+	closed_tab_drop(tab_id) // a repeated ×: one entry
+	x.pending = true
 	x.what = strings.clone(x.what)
 	x.cwd = strings.clone(x.cwd)
 	if len(closed_tabs) >= CLOSED_TABS_MAX {
@@ -81,10 +95,65 @@ closed_tab_record :: proc(tab_id: u64) {
 	append(&closed_tabs, x)
 }
 
+@(private = "file")
+closed_tab_drop :: proc(tab_id: u64) {
+	for i := len(closed_tabs) - 1; i >= 0; i -= 1 do if closed_tabs[i].tab_id == tab_id {
+		closed_tab_free(closed_tabs[i])
+		ordered_remove(&closed_tabs, i)
+	}
+}
+
+// The user's own confirmation to close tab_id is waiting.
+@(private = "file")
+closed_tab_asking :: proc(tab_id: u64) -> bool {
+	for p in state.pending_confirmations {
+		if p.caller.kind != .UI || p.caller.hub do continue
+		if c, is := p.command.(core.Close_Tab); is && c.tab_id == tab_id do return true
+	}
+	return false
+}
+
+// Pending entries become reopenable or go (see above). Every frame; cheap with none pending.
+closed_tabs_settle :: proc() {
+	for i := len(closed_tabs) - 1; i >= 0; i -= 1 {
+		x := &closed_tabs[i]
+		if !x.pending do continue
+		asking := closed_tab_asking(x.tab_id)
+		if asking do x.asked = true
+		_, tab, _ := find_tab(x.tab_id)
+		keep := true
+		if tab == nil {
+			if x.confirmed || !x.asked do x.pending = false // the user's own close went through
+			else do keep = false // closed by someone else while it asked
+		} else if x.asked && !asking && !x.confirmed {
+			keep = false // cancelled, or the question went away: the tab stays
+		}
+		if !keep {
+			closed_tab_free(x^)
+			ordered_remove(&closed_tabs, i)
+		}
+	}
+}
+
+// The bar's Confirm or Cancel on a close the user asked for (main.odin confirm_pending,
+// cancel_pending).
+closed_tab_answered :: proc(cmd: core.Command, confirmed: bool) {
+	c, is := cmd.(core.Close_Tab)
+	if !is do return
+	if !confirmed {
+		closed_tab_drop(c.tab_id)
+		return
+	}
+	for &x in closed_tabs do if x.tab_id == c.tab_id && x.pending do x.confirmed = true
+}
+
 // ⇧⌘T.
 closed_tab_reopen :: proc() {
-	for len(closed_tabs) > 0 {
-		x := pop(&closed_tabs)
+	closed_tabs_settle()
+	for i := len(closed_tabs) - 1; i >= 0; i -= 1 {
+		if closed_tabs[i].pending do continue
+		x := closed_tabs[i]
+		ordered_remove(&closed_tabs, i)
 		defer closed_tab_free(x)
 		if _, still, _ := find_tab(x.tab_id); still != nil do continue // its close was cancelled
 		s := core.find_session(x.session)

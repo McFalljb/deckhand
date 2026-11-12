@@ -373,13 +373,13 @@ closed_tabs_confirmations :: proc(t: ^testing.T) {
 	testing.expect_value(t, r.error, "needs_confirmation")
 	if len(state.pending_confirmations) == 1 {
 		tok := strings.clone(state.pending_confirmations[0].token, context.temp_allocator)
-		ui_do(core.Close_Tab{tab_id = 10, confirm = tok}) // the bar's Confirm
+		confirm_pending(tok) // the bar's Confirm
 		core.inbox_drain()
 	}
 	_, gone, _ := core.find_tab(10)
 	testing.expect(t, gone == nil, "confirmed and closed")
 	testing.expect_value(t, len(closed_tabs), 0)
-	// the user's ×: it asks; the user cancels: the tab stays, ⇧⌘T skips it
+	// the user's ×: it asks; not answered yet: nothing to reopen (its entry waits)
 	close_tab_click(11)
 	core.inbox_drain()
 	testing.expect_value(t, len(closed_tabs), 1)
@@ -390,7 +390,7 @@ closed_tabs_confirmations :: proc(t: ^testing.T) {
 	core.inbox_drain()
 	testing.expect_value(t, len(core.find_session(100).tabs), n)
 	testing.expect_value(t, toast.text, "No closed tab to reopen")
-	testing.expect_value(t, len(closed_tabs), 0)
+	testing.expect(t, len(closed_tabs) == 1 && closed_tabs[0].pending, "still waiting for the answer")
 }
 
 // ⇧⌘T: newest first, in its session (brought to the front): a new shell in its folder (said so),
@@ -492,4 +492,72 @@ mark_all_read_race_and_authority :: proc(t: ^testing.T) {
 	testing.expect_value(t, err, "")
 	_, is := cmd.(core.Mark_All_Read)
 	testing.expect(t, is)
+}
+
+// Review round 3. × → Cancel → an agent closes the tab later: ⇧⌘T does not reopen it. × × → the
+// user's Confirm: exactly one entry.
+@(test)
+closed_tabs_cancel_and_repeat :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	state.settings.confirm_close[.Shell] = .Always
+	state.settings.confirm[.Control][.Tab_Close] = .Auto
+	running :: proc(id: u64) -> core.Tab {
+		x := kp_tab(id, core.Shell_Tab{}, cwd = "/tmp")
+		x.status = .Running
+		return x
+	}
+	kp_session(100, "/tmp", running(10), running(11))
+	state.current_session = 100
+	close_tab_click(10)
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 do cancel_pending(strings.clone(state.pending_confirmations[0].token, context.temp_allocator))
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 10}, {kind = .Control}).ok)
+	closed_tabs_settle()
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+
+	// × twice, one confirmation, the user's Confirm: one entry
+	close_tab_click(11)
+	core.inbox_drain()
+	close_tab_click(11)
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 do confirm_pending(strings.clone(state.pending_confirmations[0].token, context.temp_allocator))
+	core.inbox_drain()
+	closed_tabs_settle()
+	_, gone, _ := core.find_tab(11)
+	testing.expect(t, gone == nil, "closed")
+	testing.expect_value(t, len(closed_tabs), 1)
+	toast_clear()
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, toast.text, "Reopened a new terminal in /tmp")
+	toast_clear()
+	action_run("reopen_closed_tab")
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+}
+
+// Another machine's page ("Open a machine's web page…") is at 127.0.0.1 through an ssh forward
+// that ends with its tab: not kept.
+@(test)
+closed_tabs_not_machine_pages :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	kp_session(100, "/tmp", kp_tab(10, core.Browser_Tab{url = strings.clone("http://127.0.0.1:50123/app")}), kp_tab(11, core.Browser_Tab{url = strings.clone("http://localhost:3000/")}))
+	state.current_session = 100
+	close_tab_click(10)
+	close_tab_click(11)
+	core.inbox_drain()
+	closed_tabs_settle()
+	testing.expect_value(t, len(closed_tabs), 1)
+	if len(closed_tabs) == 1 do testing.expect_value(t, closed_tabs[0].what, "http://localhost:3000/")
 }

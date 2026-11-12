@@ -454,7 +454,8 @@ before.
   session info, Send to Atlas, Mark as unread (open sessions; Mark as read when it is), Hide and
   Close session.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
-  (Window menu or the palette: the tab you are in, if it is a terminal, else the session's): it
+  (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
+  session on this Mac, not another machine's): it
   keeps the accent-coloured dot until you look at it again. ⌥⇧⌘U (**Mark all as read**) clears
   finished and not seen on every open session on this Mac and says how many ("Marked 2 as read",
   or "Nothing unread"); a tab waiting for you, with an error or a question stays exactly as it
@@ -567,8 +568,11 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   (unsaved changes are gone), a browser tab its address, a Claude tab its conversation (resumed),
   a Changes tab its checkout, and a shell tab a **new** shell in its folder ("Reopened a new
   terminal in …": what ran there is gone). App tabs are not reopened: open them again from the
-  palette's **New app tab…**. The list is in the window's memory only, never saved; a tab whose
-  close you cancelled, or whose session you closed since, is skipped. With nothing to reopen it
+  palette's **New app tab…**; nor is another machine's page (**Open a machine's web page…**: its
+  connection ends with its tab), or any page at `127.0.0.1`, where those open. A close counts once
+  it happens: if it asks first and you press **Cancel**, it is forgotten, and pressing × again
+  while it asks is still one. The list is in the window's memory only, never saved; a tab whose
+  session you closed since is skipped. With nothing to reopen it
   says "No closed tab to reopen".
 - **Right-click a tab** for its menu: **Split pane right**, **Split pane down**, the **Move tab to
   the pane …** that apply, and **Close tab** (on the pi tab: **Close session**, which asks first).

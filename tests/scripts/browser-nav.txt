@@ -120,7 +120,7 @@ assert_state focus.id <missing>
 shot browser-nav/toolbar-annotate
 clickid annot_toggle
 assert_state open_sessions.0.tabs.1.mode browse
-# round 2: ⌘⇧. while the address field has the keyboard reaches Annotate (the field lets go)
+# round 2: ⇧⌘. while the address field has the keyboard reaches Annotate (the field lets go)
 wait 100
 clickid br_url_box
 assert_state focus.id browser_url

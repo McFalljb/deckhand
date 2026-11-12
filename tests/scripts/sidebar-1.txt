@@ -121,7 +121,7 @@ command {"type":"set_filter","show_hidden":false}
 rclickid proj 0
 clickmenu Copy path
 wait 100
-# ---- filter: ⌘⇧F, fuzzy, Esc clears
+# ---- filter: ⇧⌘F, fuzzy, Esc clears
 key f cmd shift
 eventually
 assert_state focus.id sidebar_filter

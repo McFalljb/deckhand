@@ -35,7 +35,7 @@ assert_not_drawn DUMMY-AUTH-SECRET
 hover lefttab 2
 eventually
 assert_tip pi's settings files ⌘,
-# ---- ⌘, again: back to Sessions; the gear's "Edit settings files…" shows it again
+# ---- ⌘, again: back to Sessions; the gear's "Settings…" shows it again
 key comma cmd
 eventually
 assert_state layout.left_tab sessions

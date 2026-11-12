@@ -8,7 +8,7 @@ waitfor ARGS: --session 15000
 # ---- the switch: Sessions | Files (button), the tree of the session's project
 hover lefttab 1
 eventually
-assert_tip Files ⌘⇧E
+assert_tip Files ⇧⌘E
 clickid lefttab 1
 wait 300
 assert_state layout.left_tab files

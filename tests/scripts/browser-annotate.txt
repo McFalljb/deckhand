@@ -57,7 +57,7 @@ web_title b=undefined p=element forged=0 cdp=false
 annot_assert sent Runtime.enable 0
 web_js document.title = 'Annotate fixture'
 web_title Annotate fixture
-# 3. Esc leaves; ⌘⇧. comes back
+# 3. Esc leaves; ⇧⌘. comes back
 annot_key escape
 assert_state open_sessions.0.tabs.1.mode browse
 annot_key cmd_shift_period

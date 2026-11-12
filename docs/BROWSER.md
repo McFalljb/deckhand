@@ -68,7 +68,7 @@ is opened.
 
 ### 1.2 Input, focus, IME
 
-- Deckhand takes its shortcuts first (⌘T/W/1–9, ⌘K, ⌘J, ⌃Tab, ⌘L, ⌘⇧.), then forwards the rest
+- Deckhand takes its shortcuts first (⌘T/W/1–9, ⌘K, ⌘J, ⌃Tab, ⌘L, ⇧⌘.), then forwards the rest
   to the focused browser tab.
 - Mouse and wheel go in view coordinates with modifiers; trackpads send pixel deltas.
 - Keys: CEF wants the macOS key code and characters, which sokol drops, so `platform_macos.m`
@@ -271,7 +271,7 @@ State reports each tab's `page`: `open`, `opening`, `waiting`, `unloaded` or `cl
 ### 3.1 Modes
 
 - **Browse** (default): input goes to the page.
-- **Comment** (**Annotate** or ⌘⇧.): hovering highlights the element under the pointer, a click
+- **Comment** (**Annotate** or ⇧⌘.): hovering highlights the element under the pointer, a click
   picks it, a drag draws an area. The page gets no clicks or keys. Esc closes the comment bar,
   then leaves. Comment mode is per-tab UI state; State shows `mode`, `annot_ready`, `doc_url` and
   `markers`.

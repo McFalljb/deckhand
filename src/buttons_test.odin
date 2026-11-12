@@ -124,8 +124,8 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	r := core.run_command(core.Add_Project{cwd = dir}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 
-	// no session open: the toolbar, minus the tab strip's; the empty state's New chat
-	for b in ([]Button{.Toggle_Left, .New_Chat, .Search, .Settings, .Toggle_Right, .Empty_New_Chat}) {
+	// no session open: the toolbar, minus the tab strip's; the empty state's New chat and Add project…
+	for b in ([]Button{.Toggle_Left, .New_Chat, .Search, .Settings, .Toggle_Right, .Empty_New_Chat, .Empty_Add_Project}) {
 		h, found := hit_at(BUTTONS[b].element)
 		testing.expectf(t, found, "%v: not laid out", b)
 		testing.expectf(t, h == Hit(Hit_Button(b)), "%v: a click at its centre hits %v", b, h)
@@ -169,6 +169,7 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 		// Reload all pi tabs, Restart all Claude tabs: only while such a tab runs (pop_item_shown);
 		// tests/scripts/claude-runtime.txt clicks the Claude one
 		if !pop_item_shown(it) do continue
+		popover.selected = int(it) // in view, should the list scroll (pop_scroll_to)
 		h, found := hit_at("pop", u32(it))
 		testing.expectf(t, found && h == Hit(Hit_Pop(it)), "popover %v: hits %v", it, h)
 		if it >= .Look_Graphite && it <= .Look_Ghostty do expect_tip(t, h, POP_ACTIONS[it])

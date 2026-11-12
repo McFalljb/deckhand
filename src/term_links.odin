@@ -382,7 +382,7 @@ term_tab_id :: proc(t: ^Term_View) -> u64 {return t.tab_id}
 // (the program and the selection never see it).
 term_link_mouse_down :: proc(t: ^Term_View, e: ^sapp.Event) -> bool {
 	// taken only as ⌘-click (open) or right-click / ⌃-click (the menu, as a
-	// right click everywhere on macOS); ⌘⌃-click and anything else stay the
+	// right click everywhere on macOS); ⌃⌘-click and anything else stay the
 	// program's (or the selection's)
 	cmd := e.modifiers & sapp.MODIFIER_SUPER != 0
 	ctrl := e.modifiers & sapp.MODIFIER_CTRL != 0

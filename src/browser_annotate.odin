@@ -1,7 +1,7 @@
 package main
 
 // Comment mode in browser tabs (docs/BROWSER.md §3, steps 4 and 6): Annotate (the bar's button,
-// or ⌘⇧.) turns it on; the element under the pointer is outlined, a click picks it, a drag
+// or ⇧⌘.) turns it on; the element under the pointer is outlined, a click picks it, a drag
 // picks an area, and the new-comment bar (ui_comments.odin) opens: Add makes a pending comment
 // (comments.odin) for the tab's session's pi with the crop taken at the pick. Esc closes the bar,
 // then leaves the mode. Each pending comment made here has a marker: a numbered badge (its number
@@ -702,7 +702,7 @@ in_pane :: proc(p: [4]f32, x, y: f32) -> bool {
 	return p.z > 0 && x >= p.x && y >= p.y && x < p.x + p.z && y < p.y + p.w
 }
 
-// The Annotate button, ⌘⇧., badge clicks, and in comment mode the mouse over the page and the
+// The Annotate button, ⇧⌘., badge clicks, and in comment mode the mouse over the page and the
 // keys (the page gets neither). True if it took the event.
 annot_event :: proc(p: ^core.Pane, e: ^sapp.Event) -> bool {
 	b := pane_browser(p)
@@ -926,7 +926,7 @@ annot_on :: proc(b: ^Browser) -> bool {
 annot_button_layout :: proc(b: ^Browser) {
 	if b.message != "" do return
 	a := annots[b.tab_id]
-	button(cid("annot_toggle"), "Annotate ⌘⇧.", a != nil && a.on, clay.PointerOver(cid("annot_toggle")))
+	button(cid("annot_toggle"), "Annotate ⇧⌘.", a != nil && a.on, clay.PointerOver(cid("annot_toggle")))
 }
 
 // ---- the state snapshot (json_write.odin, inside a browser tab's object) ----
@@ -964,7 +964,7 @@ annot_tab_facts :: proc(f: ^core.Browser_Facts, tab_id: u64) {
 //
 //   annot_move X Y             the pointer to page X,Y (logical px) through Deckhand's event path
 //   annot_drag X1 Y1 X2 Y2     a left drag in the page (press, two moves, release)
-//   annot_key cmd_shift_period | escape   ⌘⇧. or Esc through the event path
+//   annot_key cmd_shift_period | escape   ⇧⌘. or Esc through the event path
 //   annot_assert crop N W H    comment N's crop (1-based, the session on screen) is a PNG of
 //                              W×H logical px at this DPI (±2 px; scaled down past COMMENT_CROP_SIDE)
 //   annot_assert hover yes|no  whether the hover outline shows

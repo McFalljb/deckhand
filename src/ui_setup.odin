@@ -664,7 +664,7 @@ setup_tip :: proc(h: Hit_Setup) -> (string, string) {
 	case .Acct_Default: return "New Claude sessions start in this account unless their project last used another", ""
 	case .Acct_Path:    return "A Claude Code config folder anywhere (what CLAUDE_CONFIG_DIR names)", "Enter"
 	case .Acct_Add:     return "Add the folder typed here", "Enter"
-	case .Acct_Pick:    return "Pick a Claude Code config folder (hidden folders: ⌘⇧.)", ""
+	case .Acct_Pick:    return "Pick a Claude Code config folder (hidden folders: ⇧⌘.)", ""
 	case .Agent_Action, .Agent_Copy: return harness_step_tip(h), ""
 	case .Agent_Close:  return "Close the output (the checklist was checked again)", ""
 	}

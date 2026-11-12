@@ -1,6 +1,6 @@
 # Split panes (panes.odin, panes_commands.odin, ui_panes.odin; docs/plans/split-panes.md P2):
 # ⌘D and ⇧⌘D split with a new shell, typing goes to the focused pane's shell, ⌃⌘arrows and a
-# click move the keyboard, a pane divider's drag resizes the panes and their shells, ⇧⌃⌘arrows
+# click move the keyboard, a pane divider's drag resizes the panes and their shells, ⌃⇧⌘arrows
 # move a tab, ⌘W on a pane's last tab collapses it, ⇧⌘W unsplits. Run with tests/scripts/panes.sh.
 wait 1000
 waitfor ARGS: 15000
@@ -59,14 +59,14 @@ divider pane 0 -200
 waitstate 3000 open_sessions.0.panes.0.rect.w 240
 # the right pane's "+": the new-tab menu (tab kinds only); its shell opens in that pane
 clickid pane_new#1
-assert_menurows New shell tab|New Claude tab — Claude Code not installed|New browser tab|New app tab…
+assert_menurows New shell tab|New Claude tab — Claude Code not installed|New browser tab|New app tab…|-|Split pane right|Split pane down
 clickid menurow 0
 waitstate 5000 open_sessions.0.panes.1.tabs.# 2
 assert_state open_sessions.0.focused_pane $pane1
 key w cmd
 waitstate 5000 open_sessions.0.panes.1.tabs.# 1
 mousecell click 3 3 pane=2
-# ⌘T: a second shell in the bottom pane; ⇧⌃⌘← moves it to the pi tab's pane
+# ⌘T: a second shell in the bottom pane; ⌃⇧⌘← moves it to the pi tab's pane
 key t cmd
 waitstate 5000 open_sessions.0.panes.2.tabs.# 2
 key left cmd ctrl shift

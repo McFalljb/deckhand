@@ -1093,7 +1093,7 @@ panes_press_keeps_its_drag :: proc(t: ^testing.T) {
 }
 
 
-// The panes' actions: ⌘D splits right (a new shell: the command, not run here), ⇧⌃⌘arrows move
+// The panes' actions: ⌘D splits right (a new shell: the command, not run here), ⌃⇧⌘arrows move
 // the tab to the neighbour or split that way; ⇧⌘W closes the pane; ⌃⌘arrows only where a pane is.
 @(test)
 panes_actions :: proc(t: ^testing.T) {
@@ -1118,14 +1118,40 @@ panes_actions :: proc(t: ^testing.T) {
 	_, ok = pane_focus_action(.Left)
 	testing.expect(t, !ok, "one pane: no focus moves")
 	cmd, ok = pane_move_action(.Right)
-	testing.expect(t, ok && cmd.(core.Split_Pane).tab_id == x.browser, "one pane: ⇧⌃⌘→ splits with the tab")
+	testing.expect(t, ok && cmd.(core.Split_Pane).tab_id == x.browser, "one pane: ⌃⇧⌘→ splits with the tab")
 	for a in ACTIONS do if a.id == "close_pane" {
 		_, ok = a.make()
 		testing.expect(t, !ok, "⇧⌘W with one pane")
 	}
 	// the keys parse (the menu bar shows them)
-	k, kok := parse_keys("⇧⌃⌘←")
-	testing.expect(t, kok && k.code == .LEFT && k.mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT | sapp.MODIFIER_CTRL, "⇧⌃⌘←")
+	k, kok := parse_keys("⌃⇧⌘←")
+	testing.expect(t, kok && k.code == .LEFT && k.mods == sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT | sapp.MODIFIER_CTRL, "⌃⇧⌘←")
+}
+
+// Splitting has buttons too: the new-tab menu ("+", ⌄) ends with Split pane right / down, and a
+// tab's right click offers them, then its close (a pi tab's: its session, asked first).
+@(test)
+panes_split_in_menus :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	s := pt_one(1)
+	defer menu_close()
+	labels :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for it in menu_items() do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
+		return strings.to_string(b)
+	}
+	menu.target = Menu_New{}
+	testing.expectf(t, strings.has_suffix(labels(), "Split pane right|Split pane down|"), "the new-tab menu: %s", labels())
+	// tab_context focuses the tab first: the panes' actions act on it
+	core.run_command(core.Focus_Tab{s.tabs[1].id}, PT_UI)
+	menu.target = Menu_Tab(s.tabs[1].id)
+	testing.expect_value(t, labels(), "Split pane right|Split pane down|Move tab to the pane left|Move tab to the pane right|Move tab to the pane above|Move tab to the pane below|Close tab|")
+	core.run_command(core.Focus_Tab{s.tabs[0].id}, PT_UI)
+	menu.target = Menu_Tab(s.tabs[0].id)
+	testing.expectf(t, strings.has_prefix(labels(), "Split pane right|Split pane down|") && strings.has_suffix(labels(), "|Close session|"), "the pi tab's menu: %s", labels())
+	items := menu_items()
+	cs, ok := items[len(items) - 1].cmd.(core.Close_Session)
+	testing.expect(t, ok && cs.ask, "a pi tab's close asks, as its × does")
 }
 
 

@@ -874,6 +874,54 @@ confirm_bar_keeps_its_buttons :: proc(t: ^testing.T) {
 	state.layout.left_open = true
 }
 
+// The gear's popover in a short window: it stays inside the window and its rows scroll, the
+// keyboard's row kept in view; its groups have headers.
+@(test)
+settings_popover_short_window :: proc(t: ^testing.T) {
+	context.allocator = au_reset("")
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	W, H :: 1280, 600
+	state.focus_widget = "settings"
+	defer state.focus_widget = ""
+	_ = ui_layout(W, H) // anchors to the gear's last box
+	_ = ui_layout(W, H)
+	pop := clay.GetElementData(clay.ID("settings_pop"))
+	list := clay.GetElementData(clay.ID("settings_list"))
+	if !testing.expect(t, pop.found && list.found, "the popover and its list") do return
+	testing.expectf(t, inside_box(box_of(pop.boundingBox), Box{0, 0, W, H}), "the popover %v leaves the %vx%v window", pop.boundingBox, W, H)
+	for g in 0 ..< len(POP_GROUPS) do testing.expectf(t, clay.GetElementData(clay.ID("pop_head", u32(g))).found, "group header %d", g)
+	// the last row, picked with the keyboard, scrolls into the list's view
+	popover.selected = int(Pop_Item.Control_Token)
+	_ = ui_layout(W, H)
+	_ = ui_layout(W, H)
+	row := clay.GetElementData(clay.ID("pop", u32(Pop_Item.Control_Token)))
+	list = clay.GetElementData(clay.ID("settings_list"))
+	testing.expectf(t, row.found && inside_box(box_of(row.boundingBox), box_of(list.boundingBox)), "the selected last row %v shows in the list %v", row.boundingBox, list.boundingBox)
+}
+
+// An error toast wraps to two lines inside its box; an info toast stays one line.
+@(test)
+toast_error_wraps :: proc(t: ^testing.T) {
+	context.allocator = au_reset("")
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	defer toast_clear()
+	long := "No coding agent is installed on that machine: Settings › Machines lists what it needs, and a little more so it is surely longer than one line of the toast"
+	for err in ([]bool{true, false}) {
+		toast_show(long, err)
+		cmds := ui_layout(WINDOW_MIN_W, AUDIT_H)
+		d := clay.GetElementData(clay.ID("toast"))
+		if !testing.expect(t, d.found, "the toast") do continue
+		box := box_of(d.boundingBox)
+		lines := 0
+		for p in pieces(cmds) do if p.z == 29 && p.text != "" {
+			lines += 1
+			testing.expectf(t, inside_box(p.box, box), "err=%v: %q outside the toast %v", err, p.text, box)
+		}
+		testing.expectf(t, lines == (err ? 2 : 1), "err=%v: %d lines", err, lines)
+		testing.expect(t, inside_box(box, Box{0, 0, WINDOW_MIN_W, AUDIT_H}), "the toast is inside the window")
+	}
+}
+
 // The editor's changed-on-disk banner keeps its buttons inside the window
 // for a long file name (its message is cut with an ellipsis).
 @(test)

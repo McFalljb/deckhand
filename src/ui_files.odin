@@ -726,7 +726,7 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 			if p == core.FOLDER_PREV_ROW do return "Show the old main folder in Finder", ""
 			if p == core.CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
 			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
-			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⌘⇧.)", ""
+			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⇧⌘.)", ""
 			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this Mac" : "Let your other machines connect to this Mac over ssh, as you (asks first)", ""
 			if p == core.MACHINE_SSH_ROW do return "Turn on Machines over SSH: your machines connect again", ""
 			if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""

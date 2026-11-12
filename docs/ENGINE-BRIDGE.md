@@ -216,7 +216,7 @@ with two producers:
 ## 3. Input
 
 - **Routing** follows the browser's rules: Deckhand's shortcuts first (⌘T/W/1–9, ⌘K, ⌘J, ⌃Tab,
-  ⌘⇧.); keys go to the tab only while no widget has focus; the mouse never goes to it under the
+  ⇧⌘.); keys go to the tab only while no widget has focus; the mouse never goes to it under the
   palette, a menu, a sheet or Atlas's drawer; a click in the pane takes the keyboard back.
 - **Capture:** a press keeps sending moves and the release until the button goes up.
 - **Focus loss:** `focus {focused:false}` and synthesised key-ups and button-ups for everything

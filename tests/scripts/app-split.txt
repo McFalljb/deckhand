@@ -8,7 +8,7 @@ window front
 app_open build/fake-app
 app_waitstatus running 20000
 app_waitframe 5 20000
-# the app splits off right (⇧⌃⌘→); a page opens in the pi tab's pane, which gets the keyboard
+# the app splits off right (⌃⇧⌘→); a page opens in the pi tab's pane, which gets the keyboard
 key right cmd ctrl shift
 waitstate 5000 open_sessions.0.panes.# 2
 key left cmd ctrl

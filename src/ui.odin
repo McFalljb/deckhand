@@ -569,7 +569,10 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 					} else if empty {
 						clay.Text("No session open", txt(th.text_secondary))
 						clay.Text("Pick one on the left, or start a new chat", txt(th.text_muted))
-						if button_enabled(.Empty_New_Chat) do action_button(.Empty_New_Chat, true)
+						if clay.UI()({layout = {childGap = pu(SP_2)}}) {
+							if button_enabled(.Empty_New_Chat) do action_button(.Empty_New_Chat, true)
+							action_button(.Empty_Add_Project, false) // "Add project…", as the Projects header's "+"
+						}
 					}
 				}
 				changes_more_layout(p)

@@ -24,6 +24,7 @@ Win_OS :: struct {
 	// after it, for clear_clipboard_if. nil: set_clipboard (tests, test mode's own pasteboard)
 	set_clipboard_secret: proc(text: string) -> int,
 	clear_clipboard_if:   proc(count: int), // clears it if it still holds what that count put there
+	set_badge:            proc(n: int), // the Dock icon's badge: n, none at 0 (macOS; nil elsewhere, in unit tests and scenes)
 }
 
 win_os: Win_OS
@@ -36,3 +37,17 @@ clipboard_text :: proc() -> string {
 }
 
 clipboard_set :: proc(text: string) {if win_os.set_clipboard != nil do win_os.set_clipboard(text)}
+
+// The number on the Dock icon now (-1: not set yet).
+dock_badge_shown := -1
+
+// The Dock icon's badge: the sessions waiting for you (core.sessions_waiting_count), none at zero
+// or while Badge Dock icon is off (set_notifications dock). Set only when it changes; from each
+// frame and the window's timer (frames stop while hidden). The window owns the Dock tile: the
+// background core has none.
+dock_badge_update :: proc() {
+	n := state.settings.bell_dock_off ? 0 : core.sessions_waiting_count()
+	if n == dock_badge_shown do return
+	dock_badge_shown = n
+	if win_os.set_badge != nil do win_os.set_badge(n)
+}

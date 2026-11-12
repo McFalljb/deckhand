@@ -238,6 +238,7 @@ Pop_Item :: enum {
 	Control_Token, // a control token for `deckhand --ctl` onto the clipboard; drawn after Settings files; last so earlier rows keep their ids
 	Separate_Core, // run sessions in a background core (on by default; read at launch); last so earlier rows keep their ids
 	Remote_Machines, // Machines over SSH (machines.odin; on by default); last so earlier rows keep their ids
+	Bell_Dock, // the Dock icon's badge (win_os.odin); drawn after Also notify in macOS; last so earlier rows keep their ids
 }
 
 // The rows top to bottom, in their groups (POP_GROUPS): the keyboard walks them in this order.
@@ -248,7 +249,7 @@ POP_ORDER :: [len(Pop_Item)]Pop_Item {
 	.Text_Small, .Text_Medium, .Text_Default, .Text_Large,
 	.Reduce_Motion,
 	// Notifications
-	.Notifications, .Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS,
+	.Notifications, .Bell_Finished, .Bell_Waiting, .Bell_Errors, .Bell_Jobs, .Bell_OS, .Bell_Dock,
 	// Sessions: switches, then one-shot actions
 	.Agent_Model, .Chats_Readonly, .Chats_Folder, .Chats_Folder_Default, .Tidy_Projects,
 	.Keep_Sessions, .Separate_Core, .Remote_Machines,
@@ -274,6 +275,7 @@ POP_ACTIONS := [Pop_Item]string {
 	.Bell_Errors       = "bell_errors",
 	.Bell_Jobs         = "bell_jobs",
 	.Bell_OS           = "bell_os",
+	.Bell_Dock         = "bell_dock",
 	.Agent_Model       = "agent_model_pop",
 	.Chats_Readonly    = "chats_readonly",
 	.Chats_Folder      = "chats_dir",
@@ -538,6 +540,7 @@ settings_layout :: proc(w, h: f32) {
 			}
 		}
 		pop_row(.Bell_OS, !state.settings.bell_os_off)
+		pop_row(.Bell_Dock, !state.settings.bell_dock_off)
 		pop_head(2)
 		if pop_item_shown(.Agent_Model) do pop_row(.Agent_Model, nil)
 		pop_row(.Chats_Readonly, state.settings.chats_readonly)
@@ -921,34 +924,52 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 	return "", ""
 }
 
+TIP_WRAP_W :: 320 // logical px: a longer tooltip wraps
+TIP_LINES :: 6 // at most, per part (the last cut with an ellipsis)
+
 // The tooltip: a small box under the pointer (above it near the bottom
-// edge), clamped to the window.
+// edge), clamped to the window. A long one wraps at TIP_WRAP_W; its shortcut
+// stays on the right of its first line.
 tooltip_layout :: proc(w, h: f32) {
 	if !tip.shown || tip.off do return
 	label, keys := hit_tip(ui_hover)
 	if label == "" do return
 	th := theme()
-	// a second line (after "\n", muted): the raw text a plain first line came from (machine_tip)
+	// a second part (after "\n", muted): the raw text a plain first one came from (machine_tip)
 	first, _, second := strings.partition(label, "\n")
 	second = core.one_line(second, context.temp_allocator)
-	max_w := w - px(2 * SP_2 + SP_1)
-	tw := min(max(text_w(first, FONT_UI_SMALL), text_w(second, FONT_UI_SMALL)), max_w) + px(2 * SP_2) + (keys != "" ? text_w(keys) + px(SP_2) : 0)
-	th_px := px(TIP_H) * (second != "" ? 1.8 : 1)
+	keys_w := keys != "" ? text_w(keys, FONT_UI_SMALL) + px(SP_2) : 0
+	wrap_w := max(min(px(TIP_WRAP_W), w - px(2 * SP_2 + 2 * SP_1) - keys_w), px(40))
+	l1, n1 := wrap_clip(first, wrap_w, TIP_LINES, FONT_UI_SMALL)
+	l2, n2 := wrap_clip(second, wrap_w, TIP_LINES, FONT_UI_SMALL)
+	text_wd: f32
+	for l in strings.split_lines(l1, context.temp_allocator) do text_wd = max(text_wd, text_w(l, FONT_UI_SMALL))
+	for l in strings.split_lines(l2, context.temp_allocator) do text_wd = max(text_wd, text_w(l, FONT_UI_SMALL))
+	tw := min(text_wd, wrap_w) + px(2 * SP_2) + keys_w
+	kind, _ := font_id_split(FONT_UI_SMALL)
+	lines := n1 + n2
+	th_px := lines <= 1 ? px(TIP_H) : f32(lines) * text_line_height(kind) + px(2 * SP_1 + 2)
 	x := clamp(tip.at.x - px(SP_2), px(SP_1), max(w - tw - px(SP_1), 0))
 	y := tip.at.y + px(TIP_OFFSET)
 	if y + th_px > h do y = tip.at.y - px(TIP_OFFSET) - th_px
+	y = clamp(y, px(SP_1), max(h - th_px - px(SP_1), px(SP_1))) // on screen near the top and bottom edges
+	wrapped :: proc(col: core.Rgba) -> clay.TextElementConfig {
+		cfg := txt(col, FONT_UI_SMALL)
+		cfg.wrapMode = .Newlines
+		return cfg
+	}
 	if clay.UI(clay.ID("tooltip"))({
-		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(th_px)}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		layout = {sizing = {clay.SizingFit(), clay.SizingFixed(th_px)}, padding = {pu(SP_2), pu(SP_2), lines > 1 ? pu(SP_1) : 0, 0}, childGap = pu(SP_2), childAlignment = {y = lines > 1 ? .Top : .Center}},
 		backgroundColor = cc(th.bg_elevated),
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 		border = {color = cc(th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
 		floating = {attachTo = .Root, offset = {x, y}, zIndex = 30},
 	}) {
-		if second == "" {
-			clay.TextDynamic(label, txt(th.text, FONT_UI_SMALL))
+		if n2 == 0 {
+			clay.TextDynamic(l1, wrapped(th.text))
 		} else if clay.UI()({layout = {sizing = {clay.SizingFit(), clay.SizingFit()}, layoutDirection = .TopToBottom, childGap = pu(2)}}) {
-			clay.TextDynamic(clip(first, max_w, FONT_UI_SMALL), txt(th.text, FONT_UI_SMALL))
-			clay.TextDynamic(clip(second, max_w, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+			clay.TextDynamic(l1, wrapped(th.text))
+			clay.TextDynamic(l2, wrapped(th.text_muted))
 		}
 		if keys != "" do clay.TextDynamic(keys, txt(th.text_muted, FONT_UI_SMALL))
 	}

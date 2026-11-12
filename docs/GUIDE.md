@@ -266,7 +266,8 @@ and the link connects once you are in), **Connect**, **Take back**, **Install…
 install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
 and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Its **…**
 button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Open web page…**,
-**Rename…** and **Remove…**. Click a header (this Mac's too) to fold it, as Open, Projects and Chats
+**Rename…**, **Remove…** and **Machines settings…** (Settings › Machines). This Mac's **…** has
+**Add a machine…** and **Machines settings…**. Click a header (this Mac's too) to fold it, as Open, Projects and Chats
 fold: a folded machine shows only its sessions that wait for you, and its header counts its open
 sessions. This Mac's fold is saved; other machines' last until Deckhand quits.
 A machine that refuses this Mac says to turn on **Allow other machines to connect** on it, and
@@ -370,10 +371,12 @@ same for the most urgent of its tabs (a project's row: of its open sessions):
 | none | idle, not open, or not reporting yet |
 | pulsing blue-green | working |
 | amber, "Waiting for you" | it needs your answer: a pi dialog, or a program asking permission, a question or a login |
-| green | it finished while you were not looking (or you marked it unread); looking at the tab clears it |
+| blue (the accent: terracotta in Warm) | it finished while you were not looking (or you marked it unread); looking at the tab clears it |
 | faint amber | its last answer asked you a question |
 | red | its last run ended with an error |
 | grey | pi exited |
+
+Green is not a session's colour: it means a machine is online, or a job's last run went well.
 
 pi tabs report through Deckhand's pi integration ([pi in Deckhand](#pi-in-deckhand)). Any other program in a terminal tab can report too, with
 the OSC 7501 program status protocol: Claude Code (2.1.295 or newer) does by itself. When both
@@ -409,7 +412,7 @@ that wait for you visible.
   path and Hide. Sessions offer Pin, Reveal in Finder, Copy path (of the session file), Copy
   session info, Send to Atlas, Mark as unread (open sessions; Mark as read when it is), Hide and
   Close session.
-- **To come back to a session later**, use its **…** → **Mark as unread**: it keeps the green dot
+- **To come back to a session later**, use its **…** → **Mark as unread**: it keeps the accent-coloured dot
   until you look at it again.
 - **To start a job for a project**, click **New job…** under the selected project (below
   **+ New session**), or use its menu's **New job for this project…**: the [job
@@ -1369,7 +1372,9 @@ Deckhand…**. The header has **New job** (+, the [job sheet](#the-job-sheet)), 
 
 **Other machines' jobs** run on their own machine, on its schedule, even while this Mac sleeps.
 They are listed after this Mac's, under each machine's name (greyed while it is not online, with its
-status, such as *Offline*, where the count goes):
+status, such as *Offline*, where the count goes), then under whose they are there, as this Mac's
+are grouped: its project, Atlas, Chats or Other (a click folds one). So every job reads
+*On machine › project › job*:
 what each is up to and, when a run needs you, what for. They are read-only here: run, edit or
 pause them from a session on that machine. A run there that needs you rings the bell here.
 While Machines over SSH is on, this Mac's own jobs sit under a header of the same kind: *On* this
@@ -1527,8 +1532,8 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 | Waiting for you | a pi dialog opened, or its answer ended with a question |
 | Stopped with an error | pi's run ended with an error |
 | pi exited | pi's process exited |
-| Jobs | a job's run finished, needs you or failed ([Jobs](#jobs)) |
-| Another machine's | its own bell's entries, and its jobs that need you, named with the machine ([Machines over SSH](#projects-sessions-and-chats)) |
+| Jobs | a job's run finished, needs you or failed ([Jobs](#jobs)), named *project · job* (Atlas, Chats; nothing for Other) |
+| Another machine's | its own bell's entries, and its jobs that need you, named with the machine (a job: *machine · project · job*) ([Machines over SSH](#projects-sessions-and-chats)) |
 
 - The bell shows the unread count. Click it to see the entries, newest first, under Today and
   Earlier. Click an entry to go to that session (it reopens a closed one) and mark it read.
@@ -1544,6 +1549,8 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   (finished runs only go to the bell). Pacing: at most one per session every 10 seconds, and in a
   burst the first two, then one "N sessions need you" summary. A build run from the repo
   (no app bundle) bounces the Dock icon instead.
+- **The Dock icon's badge** (gear: **Badge Dock icon**, on by default): the number of open
+  sessions waiting for you, this Mac's and those of machines that are online; no badge at zero.
 - **Other machines** can't notify you themselves, so this Mac rings for them: each new entry of
   their bell once, and each job run there that needs you once (also one from while you were
   away, when it connects). What a machine already had the first time it connects, or after its
@@ -1579,7 +1586,7 @@ window the list scrolls.
 **Notifications**
 
 - **Agent notifications**: Atlas's macOS notifications.
-- **Notify me about** and **Also notify in macOS**: see [Notifications](#notifications).
+- **Notify me about**, **Also notify in macOS** and **Badge Dock icon**: see [Notifications](#notifications).
 
 **Sessions**
 
@@ -1915,6 +1922,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen |
 | New browser tab |  | a blank page, its address field ready |
 | Add project… |  | |
+| Add a machine… |  | the add field in Settings › Machines; while Machines over SSH is on |
 | Open file… | ⌘P | the current project's files |
 | Close tab | ⌘W | the pi tab: close the session, asks first; in Atlas: hide the drawer |
 | Close session |  | asks first |
@@ -2071,6 +2079,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Notify me about: Errors |  | bell group on/off |
 | Notify me about: Jobs |  | bell group on/off |
 | Also notify in macOS |  | macOS notifications for the bell |
+| Badge Dock icon |  | the number of sessions waiting for you on the Dock icon |
 | Toggle left column | ⌘B | |
 | Toggle right column | ⌥⌘B | |
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |

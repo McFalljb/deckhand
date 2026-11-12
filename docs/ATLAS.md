@@ -511,7 +511,8 @@ connect.
 **Their jobs and bells reach the user here**, because a remote core can't notify: this core
 rings for a job there that needs the user (once per run) and for each new entry of that machine's
 bell, naming the machine, at most 4 a minute per machine (PROTOCOL.md §5a "Other machines' jobs
-and bells"). The Jobs tab lists their jobs after this Mac's (which then sit under this Mac's own name), under each machine's name, read-only
+and bells"). The Jobs tab lists their jobs after this Mac's (which then sit under this Mac's own name), under each machine's name and then its owner there (project, Atlas, Chats, Other: `owner` and `project`
+in `machine_jobs`, display text only), read-only
 (what each is up to, and the first thing it needs you for). Everything that comes from another
 machine is untrusted: one line, no control, bidi or invisible characters, bounded, capped.
 

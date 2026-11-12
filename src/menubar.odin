@@ -71,6 +71,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "new_claude_tab"},
 		{action = "new_browser_tab"},
 		{action = "add_project"},
+		{action = "machine_add"}, // Machines over SSH (machines.odin): greyed while it is off
 		{action = "open_file"},
 		SEP,
 		{action = "close_tab"},

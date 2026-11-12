@@ -720,7 +720,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
 	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
 	case "notifications_clear": cmd = Notifications_Clear{}
-	case "set_notifications":   cmd = Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os")}
+	case "set_notifications":   cmd = Set_Bell{finished = opt_bool(&r, "finished"), waiting = opt_bool(&r, "waiting"), errors = opt_bool(&r, "errors"), jobs = opt_bool(&r, "jobs"), os = opt_bool(&r, "os"), dock = opt_bool(&r, "dock")}
 	case "job_list":            cmd = Job_List{unread = opt_bool(&r, "unread").? or_else false}
 	case "job_runs":            cmd = Job_Runs{job = get_str(&r, "job"), limit = int(min(opt_u64(&r, "limit"), 1000))}
 	case "job_run_now":         cmd = Job_Run_Now{job = get_str(&r, "job")}
@@ -1056,6 +1056,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 			br := Rd{obj = bo, a = allocator}
 			for g in Bell_Group do if !(opt_bool(&br, BELL_GROUP_NAMES[g]).? or_else true) do s.settings.bell_off += {g}
 			s.settings.bell_os_off = !(opt_bool(&br, "os").? or_else true)
+			s.settings.bell_dock_off = !(opt_bool(&br, "dock").? or_else true)
 			if br.err != "" do return s, br.err
 		}
 		if sr.err != "" do return s, sr.err

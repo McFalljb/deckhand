@@ -291,7 +291,7 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 	needs := proc(r: ^State, run: string) {
 		for &j in r.jobs do delete(j.needs_you)
 		clear(&r.jobs)
-		j := Job_Row{id = strings.clone("daily"), name = strings.clone("Dai​ly‮\nreport"), last_run = strings.clone(run), unread = 1, last_status = strings.clone("needs_you"), path = strings.clone("/home/me/jobs/daily.md")}
+		j := Job_Row{id = strings.clone("daily"), name = strings.clone("Dai​ly‮\nreport"), project = strings.clone("Gar‮den\x1b[31m\nnext"), last_run = strings.clone(run), unread = 1, last_status = strings.clone("needs_you"), path = strings.clone("/home/me/jobs/daily.md")}
 		append(&j.needs_you, strings.clone("sign the\x1b[31m form"))
 		append(&r.jobs, j)
 	}
@@ -311,9 +311,11 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 		testing.expect_value(t, j.id, "m3:daily")
 		testing.expect(t, j.path == "" && j.folder == "", "no paths")
 		testing.expect(t, !strings.contains(j.name, "​") && !strings.contains(j.name, "‮") && !strings.contains(j.name, "\n"), "its name: one line, nothing invisible")
+		testing.expect_value(t, j.owner, Job_Owner_Kind.Project)
+		testing.expectf(t, strings.has_prefix(j.project, "Gar") && !strings.contains(j.project, "‮") && !strings.contains(j.project, "\x1b") && !strings.contains(j.project, "\n"), "its project: cleaned, one line: %q", j.project)
 	}
 	for x in state.notices.items do if x.kind == .Job_Needs_You {
-		testing.expect(t, strings.has_prefix(x.title, "nuc · "), "it names the machine")
+		testing.expectf(t, strings.has_prefix(x.title, fmt.tprintf("nuc · %s · ", state.machine_jobs[0].project)), "it names the machine and the project: %q", x.title)
 		testing.expect(t, !strings.contains(x.summary, "\x1b") && x.run_dir == "", "cleaned, no folder")
 	}
 	// the same state again, a reconnect (the same core), a fresh full: nothing new rings
@@ -356,4 +358,26 @@ mirror_alerts_ring_once :: proc(t: ^testing.T) {
 	n := 0
 	for x in state.notices.items do if x.machine == 3 do n += 1
 	testing.expect_value(t, n, 0)
+}
+
+// Whose another machine's job is (display text only): for_project's words, a name, a path (that
+// machine's project with the folder, else its last part), else the deepest project holding its
+// folder (never one at a home folder), else Other.
+@(test)
+machine_job_owner_rules :: proc(t: ^testing.T) {
+	r: State
+	append(&r.projects, Project{id = 1, group = .Projects, cwd = "/home/jb/garden", name = "Veg"})
+	append(&r.projects, Project{id = 2, group = .Projects, cwd = "/home/jb"})
+	check :: proc(t: ^testing.T, r: ^State, project, folder: string, kind: Job_Owner_Kind, name: string, loc := #caller_location) {
+		k, n := machine_job_owner(Job_Row{project = project, folder = folder}, r)
+		testing.expectf(t, k == kind && n == name, "%q in %q: %v %q, want %v %q", project, folder, k, n, kind, name, loc = loc)
+	}
+	check(t, &r, "Atlas", "", .Atlas, "")
+	check(t, &r, "chats", "", .Chats, "")
+	check(t, &r, "none", "/home/jb/garden", .Other, "")
+	check(t, &r, "roses", "", .Project, "roses")
+	check(t, &r, "~/garden", "", .Project, "Veg")
+	check(t, &r, "/srv/orchard/", "", .Project, "orchard")
+	check(t, &r, "", "/home/jb/garden/beds", .Project, "Veg")
+	check(t, &r, "", "/home/jb/notes", .Other, "")
 }

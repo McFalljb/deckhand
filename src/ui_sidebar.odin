@@ -1313,6 +1313,7 @@ sidebar_hit :: proc() -> Hit {
 		if clay.PointerOver(clay.ID("open", u32(i))) do return Hit_Open_Row(id)
 	}
 	for path, i in drawn.group do if clay.PointerOver(clay.ID("grp", u32(i))) do return Hit_Group(path)
+	if state.settings.remote_machines && clay.PointerOver(clay.ID("machmore", 0)) do return Hit_Machine_More(0) // this Mac's "…"
 	if state.settings.remote_machines && clay.PointerOver(clay.ID("machhead", 0)) do return Hit_Machine_Head(0) // this Mac's
 	for m in state.machines {
 		if clay.PointerOver(clay.ID("machact", u32(m.no))) do return Hit_Machine(m.no)
@@ -1444,8 +1445,7 @@ sidebar_context :: proc(hit: Hit, at: [2]f32) -> bool {
 	case Hit_New_Job_In:
 		menu_open(Menu_Project(u64(h)), at)
 	case Hit_Machine_Head:
-		if h == 0 do return false // this Mac's: no menu
-		menu_open(Menu_Machine(u64(h)), at)
+		menu_open(Menu_Machine(u64(h)), at) // this Mac's: Add a machine…, Machines settings…
 	case Hit_Machine:      menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Machine_More: menu_open(Menu_Machine(u64(h)), at)
 	case Hit_Session:
@@ -1739,10 +1739,8 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 			room -= text_w(act, FONT_UI_SMALL) + px(2 * SP_2)
 			n += 1
 		}
-		if no != 0 {
-			room -= px(ROW_BUTTON)
-			n += 1
-		}
+		room -= px(ROW_BUTTON) // its "…"
+		n += 1
 		room -= f32(n - 1) * px(GAP_INLINE)
 		// its name (never cut to nothing: the status gives way first), its status
 		nw := text_w(name, FONT_UI_SMALL | WEIGHT_HEADER)
@@ -1765,14 +1763,14 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 				clay.TextDynamic(act, txt(mix(th.text_secondary, th.text, bem), FONT_UI_SMALL))
 			}
 		}
-		// every action has a button: its menu (Rename…, Remove…, Open web page…, Try again) here too
-		if no != 0 do row_button(clay.ID("machmore", u32(no)), "", true, ui_hover == Hit(Hit_Machine_More(no)), .More)
+		// every action has a button: its menu (Rename…, Remove…, Open web page…, Try again; this
+		// Mac's: Add a machine…, Machines settings…) here too
+		row_button(clay.ID("machmore", u32(no)), "", true, ui_hover == Hit(Hit_Machine_More(no)), .More)
 	}
 }
 
 MACHINE_HERE_TIP :: "This Mac. Other machines you add appear below it."
 
-@(private = "file")
 machine_dot :: proc(m: core.Machine_View) -> core.Rgba {
 	th := theme()
 	if core.machine_install_failed(m) do return th.error
@@ -1784,8 +1782,15 @@ machine_dot :: proc(m: core.Machine_View) -> core.Rgba {
 	return with_alpha(th.text_muted, EXITED_ALPHA)
 }
 
-// A machine header's right-click menu: what applies to it now.
+// A machine header's right-click menu: what applies to it now, then Settings' Machines group
+// (machines_settings). This Mac's (no 0): Add a machine… and Machines settings….
 machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
+	settings := core.Menu_Item{label = "Machines settings…", action = "machines_settings"}
+	if no == 0 {
+		append(items, core.Menu_Item{label = "Add a machine…", action = "machine_add"})
+		append(items, settings)
+		return
+	}
 	for m in state.machines do if m.no == no {
 		#partial switch m.status {
 		case .Needs_Login: append(items, core.Menu_Item{label = "Log in…", cmd = core.Machine_Login{no = no}})
@@ -1797,6 +1802,8 @@ machine_menu_items :: proc(no: u64, items: ^[dynamic]core.Menu_Item) {
 		if len(items) > 0 do append(items, core.Menu_Item{sep = true})
 		append(items, core.Menu_Item{label = "Rename…", rename = true})
 		append(items, core.Menu_Item{label = "Remove…", cmd = core.Machine_Remove{no = no}})
+		append(items, core.Menu_Item{sep = true})
+		append(items, settings)
 	}
 }
 

@@ -309,6 +309,7 @@ win_os_app :: proc() -> Win_OS {
 		clipboard_count = platform_clipboard_count,
 		set_clipboard_secret = platform_clipboard_set_secret,
 		clear_clipboard_if = platform_clipboard_clear_if,
+		set_badge = platform_set_badge,
 	}
 }
 
@@ -583,6 +584,7 @@ frame :: proc "c" () {
 	ui_draw_field_cursor(cmds)
 	draw_end()
 	update_window_title()
+	dock_badge_update() // the sessions waiting for you, on the Dock icon (win_os.odin)
 	font_upload() // glyphs added while drawing, before the pass that uses them
 
 	bg := theme().bg_app

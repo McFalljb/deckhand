@@ -39,6 +39,7 @@ package core
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
+import "core:path/filepath"
 import "core:strings"
 import "core:time"
 
@@ -168,6 +169,51 @@ text_clean_remote :: proc(s: string, max: int) -> string {
 	return strings.trim_space(text_clean(one_line(s, context.temp_allocator), max))
 }
 
+// Whose another machine's job is there (display only: never resolved against this Mac's projects,
+// never a path or an id): for_project's atlas, chats and none; else the project it names (the last
+// part of a path; that machine's rename when one of its projects has that folder); else, by its
+// folder, the deepest of that machine's projects holding it (not one at / or a home folder, as
+// jobs_owner.odin's rule); else Other. Its name is cleaned by the caller (temp).
+machine_job_owner :: proc(j: Job_Row, r: ^State) -> (Job_Owner_Kind, string) {
+	name_of :: proc(p: Project) -> string {return p.name != "" ? p.name : filepath.base(p.cwd)}
+	v := strings.trim_space(j.project)
+	switch strings.to_lower(v, context.temp_allocator) {
+	case "atlas": return .Atlas, ""
+	case "chats": return .Chats, ""
+	case "none":  return .Other, ""
+	}
+	if strings.has_prefix(v, "/") || strings.has_prefix(v, "~/") {
+		tail := strings.trim_right(v[1:], "/") // "~/x" matches a folder ending in "/x"
+		for p in r.projects do if p.group == .Projects && p.machine == 0 && (p.cwd == v || strings.has_suffix(p.cwd, tail)) do return .Project, name_of(p)
+		return .Project, filepath.base(strings.trim_right(v, "/"))
+	}
+	if v != "" do return .Project, v
+	best: Project
+	for p in r.projects {
+		if p.group != .Projects || p.machine != 0 || strings.count(strings.trim_right(p.cwd, "/"), "/") < 3 do continue // not /, /Users/x or /home/x
+		if path_within(j.folder, p.cwd) && len(p.cwd) > len(best.cwd) do best = p
+	}
+	if best.cwd != "" do return .Project, name_of(best)
+	return .Other, ""
+}
+
+// "<machine> · <owner> · <job>", without the owner when it is "" (heap or a).
+job_title_with_owner :: proc(machine, owner, job: string, a: runtime.Allocator) -> string {
+	if owner == "" do return fmt.aprintf("%s · %s", machine, job, allocator = a)
+	return fmt.aprintf("%s · %s · %s", machine, owner, job, allocator = a)
+}
+
+// A job's owner as a bell title's part ("" = Other: none).
+machine_job_owner_label :: proc(r: Job_Row) -> string {
+	switch r.owner {
+	case .Project: return r.project
+	case .Atlas:   return agent_name()
+	case .Chats:   return "Chats"
+	case .Other:   return ""
+	}
+	return ""
+}
+
 @(private = "file")
 remote_text :: proc(s: string, max: int, a: runtime.Allocator) -> string {
 	return strings.clone(text_clean_remote(s, max), a)
@@ -291,6 +337,9 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			last_run      = remote_text(j.last_run, 64, a),
 			unread        = clamp(j.unread, 0, 999),
 		}
+		kind, owner := machine_job_owner(j, r)
+		row.owner, row.project = kind, remote_text(owner, MIRROR_TEXT_MAX, a)
+		if row.owner == .Project && row.project == "" do row.owner = .Other
 		row.needs_you = make([dynamic]string, a)
 		for x in j.needs_you {
 			if len(row.needs_you) >= MIRROR_JOB_LINES do break
@@ -389,7 +438,7 @@ mirror_alerts :: proc(no: u64, r: ^State, m: ^Machine_Mirror, run: string) {
 			delete(prev, heap)
 			m.jobs_rang[j.id] = strings.clone(j.last_run, heap)
 		} else do m.jobs_rang[strings.clone(j.id, heap)] = strings.clone(j.last_run, heap)
-		n := Notice{kind = .Job_Needs_You, machine = no, job_id = strings.clone(j.id, heap), title = fmt.aprintf("%s · %s", machine_name(no), j.name, allocator = heap), summary = strings.clone(j.needs_you[0], heap)}
+		n := Notice{kind = .Job_Needs_You, machine = no, job_id = strings.clone(j.id, heap), title = job_title_with_owner(machine_name(no), machine_job_owner_label(j), j.name, heap), summary = strings.clone(j.needs_you[0], heap)}
 		mirror_ring(no, m, n, now)
 	}
 	// jobs it no longer has
@@ -415,7 +464,11 @@ remote_notice :: proc(no: u64, x: Notice) -> Notice {
 	n.summary = remote_text(x.summary, MIRROR_LINE_MAX, heap)
 	if x.job_id != "" {
 		n.job_id = fmt.aprintf("m%d:%s", no, text_clean_remote(x.job_id, 64), allocator = heap)
-		n.title = fmt.aprintf("%s · %s", machine_name(no), title, allocator = heap)
+		// its project, from its mirrored row, unless that machine's title says it already
+		owner := ""
+		for j in state.machine_jobs do if j.id == n.job_id do owner = machine_job_owner_label(j)
+		if strings.has_prefix(title, fmt.tprintf("%s · ", owner)) do owner = ""
+		n.title = job_title_with_owner(machine_name(no), owner, title, heap)
 		return n
 	}
 	n.title = strings.clone(title, heap)

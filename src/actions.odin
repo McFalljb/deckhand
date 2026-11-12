@@ -306,6 +306,9 @@ ACTIONS := [?]Action {
 	{id = "bell_os", label = "Also notify in macOS", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{os = state.settings.bell_os_off}, true
 	}, detail = proc() -> string {return state.settings.bell_os_off ? "off" : "on (waiting, errors, exits, jobs that need you or failed)"}},
+	{id = "bell_dock", label = "Badge Dock icon", make = proc() -> (core.Command, bool) {
+		return core.Set_Bell{dock = state.settings.bell_dock_off}, true
+	}, detail = proc() -> string {return state.settings.bell_dock_off ? "off" : "on (sessions waiting for you)"}},
 	{id = "toggle_left", label = "Toggle left column", keys = "⌘B", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{left_open = !state.layout.left_open}, true
 	}},

@@ -303,6 +303,7 @@ Settings :: struct {
 	notify_off:    bool, // no OS notifications from the agent while the window is in the background
 	bell_off:      bit_set[Bell_Group], // kinds the bell does not collect (notify.odin); default: all on
 	bell_os_off:   bool, // no OS notifications for bell entries (waiting, errors, jobs that need you) while in the background
+	bell_dock_off: bool, // no badge on the Dock icon (the sessions waiting for you: win_os.odin)
 	// jobs (jobs.odin; user-only)
 	// the main folder and its subfolders (folders.odin; user-only)
 	home_dir:      string, // the main folder: sessions/, jobs/, memory/, atlas/, chats/ ("" = not set)

@@ -216,7 +216,7 @@ status_color :: proc(st: core.Row_Status) -> core.Rgba {
 	case .Question: return with_alpha(th.waiting, QUESTION_ALPHA)
 	case .Error:    return th.error
 	case .Exited:   return with_alpha(th.text_muted, EXITED_ALPHA)
-	case .Unseen:   return th.done
+	case .Unseen:   return th.accent // "finished, not seen yet": the accent, as unread is in the Jobs tab and the bell (green is "online", "ran ok")
 	}
 	return {}
 }
@@ -484,6 +484,7 @@ centre :: proc(cs: ^core.Open_Session) {
 		reload_bars() // hot reload: pi settings changed, pi updated (ui_reload.odin)
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
+		machine_bar() // another machine's session while it is not online (ui_dead_tab.odin)
 		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane
 		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
 			if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
@@ -1195,6 +1196,7 @@ ui_hit :: proc() -> Hit {
 	if h := reload_hit(); h != nil do return h
 	if h := claude_reload_hit(); h != nil do return h
 	if h := dead_tab_hit(); h != nil do return h
+	if h := machine_bar_hit(); h != nil do return h
 	if h := changes_hit(); h != nil do return h
 	if h := editor_tool_hit(); h != nil do return h
 	if h := files_hit(); h != nil do return h

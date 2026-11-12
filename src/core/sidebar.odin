@@ -552,7 +552,8 @@ name_less :: proc(a, b: string) -> bool {
 }
 
 // The Open group: every open session of every project and Chats (never
-// Home), the current one first, then the most recently shown. It follows the
+// Home), the current one first (so answering one does not move the list under
+// the pointer), then those waiting for you, then the most recently shown. It follows the
 // filter (title or project name) and the quick filters; hidden does not
 // apply (an open session is in use).
 sidebar_open :: proc() -> []^Open_Session {
@@ -567,14 +568,38 @@ sidebar_open :: proc() -> []^Open_Session {
 		}
 		append(&rows, &s)
 	}
-	slice.stable_sort_by(rows[:], proc(a, b: ^Open_Session) -> bool {
-		ac, bc := a.id == state.current_session, b.id == state.current_session
-		if ac != bc do return ac
-		return a.shown_at > b.shown_at
-	})
+	open_order(rows[:])
 	return rows[:]
 }
 
+// The Open group's order (sidebar_open, machine_open_rows): the current session, the waiting ones,
+// then the most recently shown.
+@(private = "file")
+open_order :: proc(rows: []^Open_Session) {
+	slice.stable_sort_by(rows, proc(a, b: ^Open_Session) -> bool {
+		ac, bc := a.id == state.current_session, b.id == state.current_session
+		if ac != bc do return ac
+		aw, bw := session_quick_status(a) == .Waiting, session_quick_status(b) == .Waiting
+		if aw != bw do return aw
+		return a.shown_at > b.shown_at
+	})
+}
+
+// The open sessions waiting for you, this Mac's (Home's too) and those of other machines that are
+// online (an offline one's rows show what it last sent, not what waits now): the Dock badge's
+// number (ui.odin dock_badge_update).
+sessions_waiting_count :: proc() -> int {
+	n := 0
+	for &s in state.open_sessions {
+		if s.machine != 0 {
+			online := false
+			for m in state.machines do if m.no == s.machine do online = m.status == .Online
+			if !online do continue
+		}
+		if session_quick_status(&s) == .Waiting do n += 1
+	}
+	return n
+}
 
 // Another machine's open sessions (machine no), in the Open group's order and through the same
 // filter and quick filters: waiting ones always show (temp allocator).
@@ -590,11 +615,7 @@ machine_open_rows :: proc(no: u64) -> []^Open_Session {
 		}
 		append(&rows, &s)
 	}
-	slice.stable_sort_by(rows[:], proc(a, b: ^Open_Session) -> bool {
-		ac, bc := a.id == state.current_session, b.id == state.current_session
-		if ac != bc do return ac
-		return a.shown_at > b.shown_at
-	})
+	open_order(rows[:])
 	return rows[:]
 }
 

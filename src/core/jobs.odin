@@ -82,7 +82,7 @@ Job_Row :: struct {
 	id:            string,
 	name:          string,
 	path:          string, // the note
-	project:       string, // for_project as written ("" = none; the owner: jobs_owner.odin)
+	project:       string, // for_project as written ("" = none; the owner: jobs_owner.odin); another machine's: its owner's name as that machine has it (owner .Project; display text only, cleaned)
 	folder:        string, // where it runs (absolute)
 	schedule:      string,
 	enabled:       bool,
@@ -101,6 +101,7 @@ Job_Row :: struct {
 	recent:        [dynamic]string, // the note's run lines, newest first
 	needs_you:     [dynamic]string, // the last run's
 	machine:       u64, // another machine's (State.machine_jobs, machine_mirror.odin: read-only, its strings cleaned; 0 = this Mac's)
+	owner:         Job_Owner_Kind, // another machine's: whose it is there (machine_job_owner); unused for this Mac's
 }
 
 // ---- runtime ----

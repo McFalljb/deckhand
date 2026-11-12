@@ -15,6 +15,7 @@ package main
 import "base:runtime"
 import "core:fmt"
 import "core:mem/virtual"
+import "core:slice"
 import "core:strings"
 import "core"
 import clay "../build/clay-odin"
@@ -32,6 +33,7 @@ Jobs_Hit_Kind :: enum u8 {
 	Group_Fold, // its chevron
 	Group_New, // its "+": New job for it
 	Machine, // index: a machine's number (0 = this Mac): its "On <name>" header folds it
+	Machine_Group, // index: another machine's drawn owner row (ju.mgroups): folds it
 }
 Hit_Jobs :: struct {
 	what:  Jobs_Hit_Kind,
@@ -116,7 +118,8 @@ Jobs_Ui :: struct {
 	expanded:    string, // owned: the row shown open
 	limits_open: bool,
 	groups:      [dynamic]core.Job_Owner, // drawn group rows by slot (strings in the arena)
-	folded:      [dynamic]string, // owned: folded groups (job_owner_key); not saved
+	folded:      [dynamic]string, // owned: folded groups (job_owner_key; another machine's: machine_group_key); not saved
+	mgroups:     [dynamic]string, // another machine's drawn owner rows by slot: their fold keys (in the arena)
 }
 
 @(private = "file")
@@ -240,6 +243,7 @@ jobs_panel :: proc(row_w: f32) {
 	ju.drawn = make([dynamic]string, a)
 	ju.buttons = make(type_of(ju.buttons), a)
 	ju.groups = make([dynamic]core.Job_Owner, a)
+	ju.mgroups = make([dynamic]string, a)
 
 	// header: Jobs, unread, then the buttons
 	if clay.UI(clay.ID("jobs_head"))({
@@ -315,15 +319,16 @@ jobs_panel :: proc(row_w: f32) {
 			if folded do continue
 			for i in g.rows do job_row(state.jobs[i], g.owner, row_w, a)
 		}
-		machine_jobs_sections(row_w)
+		machine_jobs_sections(row_w, a)
 	}
 }
 
 // Other machines' jobs (machine_mirror.odin, M6-F), after this Mac's: under each machine's name,
+// then under their owner there (its project, Atlas, Chats, Other: as this Mac's are grouped),
 // read-only rows (what it is up to, and the first thing it needs you for). Greyed while that
 // machine is not online (what it showed last). Nothing here while no machine has jobs.
 @(private = "file")
-machine_jobs_sections :: proc(row_w: f32) {
+machine_jobs_sections :: proc(row_w: f32, a: runtime.Allocator) {
 	if len(state.machine_jobs) == 0 do return
 	th := theme()
 	inner := row_w - px(2 * PAD_ROW)
@@ -337,23 +342,105 @@ machine_jobs_sections :: proc(row_w: f32) {
 		jobs_machine_header(m.no, m.name, "", live ? fmt.tprintf("%d", n) : label, row_w)
 		if jobs_machine_folded(m.no) do continue
 		k := 0
-		for r in state.machine_jobs do if r.machine == m.no {
-			k += 1
-			if clay.UI(clay.ID("jobmachrow", u32(m.no) * 1000 + u32(k)))({
-				layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = px(JOB_ROW_H)})}, padding = {pu(PAD_ROW), pu(PAD_ROW), pu(SP_1), pu(SP_1)}, layoutDirection = .TopToBottom, childGap = pu(2)},
-			}) {
-				name_col := live ? th.text : th.text_secondary
-				if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_BUTTON))}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}}}) {
-					dot(live ? job_dot(r) : with_alpha(th.text_muted, EXITED_ALPHA))
-					clay.TextDynamic(clip(r.name, inner - px(DOT + GAP_INLINE)), txt(name_col))
-				}
-				line, col := job_line(r)
-				if len(r.needs_you) > 0 do line, col = fmt.tprintf("Needs you: %s", r.needs_you[0]), th.waiting
-				if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H - 6))}, padding = {pu(DOT + GAP_INLINE), 0, 0, 0}, childAlignment = {y = .Center}}}) {
-					clay.TextDynamic(clip(line, inner - px(DOT + GAP_INLINE), FONT_UI_SMALL), txt(live ? col : th.text_muted, FONT_UI_SMALL))
+		for g in machine_job_groups(m.no) {
+			key := machine_group_key(m.no, g.kind, g.label)
+			folded := core.list_index(ju.folded[:], key) >= 0
+			unread := false
+			for i in g.rows do if state.machine_jobs[i].unread > 0 do unread = true
+			machine_job_group_row(strings.clone(key, a), g.kind, g.label, len(g.rows), unread, folded, live, row_w)
+			if folded do continue
+			for i in g.rows {
+				r := state.machine_jobs[i]
+				k += 1
+				if clay.UI(clay.ID("jobmachrow", u32(m.no) * 1000 + u32(k)))({
+					layout = {sizing = {clay.SizingGrow(), clay.SizingFit({min = px(JOB_ROW_H)})}, padding = {pu(PAD_ROW), pu(PAD_ROW), pu(SP_1), pu(SP_1)}, layoutDirection = .TopToBottom, childGap = pu(2)},
+				}) {
+					name_col := live ? th.text : th.text_secondary
+					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_BUTTON))}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}}}) {
+						dot(live ? job_dot(r) : with_alpha(th.text_muted, EXITED_ALPHA))
+						clay.TextDynamic(clip(r.name, inner - px(DOT + GAP_INLINE)), txt(name_col))
+					}
+					line, col := job_line(r)
+					if len(r.needs_you) > 0 do line, col = fmt.tprintf("Needs you: %s", r.needs_you[0]), th.waiting
+					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H - 6))}, padding = {pu(DOT + GAP_INLINE), 0, 0, 0}, childAlignment = {y = .Center}}}) {
+						clay.TextDynamic(clip(line, inner - px(DOT + GAP_INLINE), FONT_UI_SMALL), txt(live ? col : th.text_muted, FONT_UI_SMALL))
+					}
 				}
 			}
 		}
+	}
+}
+
+// Another machine's owner group: its kind, its label as drawn, its rows (indices into
+// state.machine_jobs).
+@(private = "file")
+Machine_Job_Group :: struct {
+	kind:  core.Job_Owner_Kind,
+	label: string,
+	rows:  [dynamic]int,
+}
+
+// Machine no's jobs by owner, in this Mac's order: projects by name, then Atlas, Chats, Other (temp).
+@(private = "file")
+machine_job_groups :: proc(no: u64) -> []Machine_Job_Group {
+	groups := make([dynamic]Machine_Job_Group, context.temp_allocator)
+	for r, i in state.machine_jobs do if r.machine == no {
+		label := r.owner == .Project ? r.project : core.job_owner_label(core.Job_Owner{kind = r.owner})
+		at := -1
+		for g, j in groups do if g.kind == r.owner && g.label == label do at = j
+		if at < 0 {
+			append(&groups, Machine_Job_Group{kind = r.owner, label = label, rows = make([dynamic]int, context.temp_allocator)})
+			at = len(groups) - 1
+		}
+		append(&groups[at].rows, i)
+	}
+	slice.sort_by(groups[:], proc(a, b: Machine_Job_Group) -> bool {
+		if a.kind != b.kind do return a.kind < b.kind
+		return strings.to_lower(a.label, context.temp_allocator) < strings.to_lower(b.label, context.temp_allocator)
+	})
+	return groups[:]
+}
+
+// Its fold key (not saved; temp).
+@(private = "file")
+machine_group_key :: proc(no: u64, kind: core.Job_Owner_Kind, label: string) -> string {
+	return fmt.tprintf("machine:%d:%s:%s", no, core.JOB_OWNER_NAMES[kind], label)
+}
+
+// Another machine's owner row, drawn as this Mac's (job_group_row): its chevron, icon, name, a dot
+// while one is unread, its count. Read-only: a click folds it.
+@(private = "file")
+machine_job_group_row :: proc(key: string, kind: core.Job_Owner_Kind, label: string, n: int, unread, folded, live: bool, row_w: f32) {
+	th := theme()
+	slot := len(ju.mgroups)
+	append(&ju.mgroups, key)
+	id := clay.ID("jobmgroup", u32(slot))
+	hovered := ui_hover == Hit(Hit_Jobs{what = .Machine_Group, index = slot})
+	bg, em := overlay(id, false, hovered)
+	if clay.UI(id)({
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(ROW_H))}, padding = {pu(PAD_ROW - SP_1), pu(PAD_ROW), 0, 0}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}},
+		backgroundColor = bg,
+		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
+	}) {
+		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(TREE_CHEVRON + SP_1)), clay.SizingFixed(px(ROW_BUTTON))}, childAlignment = {x = .Center, y = .Center}}}) {
+			icon(folded ? .Chevron_Right : .Chevron_Down, th.text_muted, TREE_CHEVRON)
+		}
+		ic := core.Icon.Folder
+		switch kind {
+		case .Project: ic = .Folder
+		case .Atlas:   ic = .Compose
+		case .Chats:   ic = .Chat
+		case .Other:   ic = .Clock
+		}
+		icon(ic, th.text_muted, KIND_ICON)
+		count := fmt.tprintf("%d", n)
+		right := text_w(count) + (unread ? px(DOT + GAP_INLINE) : 0)
+		room := row_w - px(PAD_ROW - SP_1 + PAD_ROW + TREE_CHEVRON + SP_1 + KIND_ICON + 4 * GAP_INLINE) - right
+		col := live ? mix(th.text_secondary, th.text, em) : th.text_muted
+		clay.TextDynamic(clip(label, room, WEIGHT_BOLD), txt(col, WEIGHT_BOLD))
+		spacer()
+		if unread do dot(th.accent)
+		clay.TextDynamic(count, txt(th.text_muted))
 	}
 }
 
@@ -631,6 +718,7 @@ jobs_hit :: proc() -> Hit {
 	for _, i in ju.buttons do if clay.PointerOver(clay.ID("jobbtn", u32(i))) do return Hit_Jobs{what = .Button, index = i}
 	if clay.PointerOver(clay.ID("jobmach", 0)) do return Hit_Jobs{what = .Machine, index = 0}
 	for m in state.machines do if clay.PointerOver(clay.ID("jobmach", u32(m.no))) do return Hit_Jobs{what = .Machine, index = int(m.no)}
+	for _, i in ju.mgroups do if clay.PointerOver(clay.ID("jobmgroup", u32(i))) do return Hit_Jobs{what = .Machine_Group, index = i}
 	for _, i in ju.groups {
 		if clay.PointerOver(clay.ID("jobgroupnew", u32(i))) do return Hit_Jobs{what = .Group_New, index = i}
 		if clay.PointerOver(clay.ID("jobgroupfold", u32(i))) do return Hit_Jobs{what = .Group_Fold, index = i}
@@ -664,7 +752,7 @@ jobs_tip :: proc(h: Hit_Jobs) -> (label, keys: string) {
 			case .Other:   return "Jobs of no project: click to fold or unfold", ""
 			}
 		}
-	case .Group_Fold, .Machine: return "Fold or unfold", ""
+	case .Group_Fold, .Machine, .Machine_Group: return "Fold or unfold", ""
 	case .Group_New:
 		if h.index < len(ju.groups) do return fmt.tprintf("New job for %s", core.job_owner_label(ju.groups[h.index])), ""
 	case .Button:
@@ -732,6 +820,13 @@ jobs_click :: proc(h: Hit_Jobs) {
 		}
 	case .Group_Fold: group_fold(h.index)
 	case .Machine:    jobs_machine_fold(u64(h.index))
+	case .Machine_Group:
+		if h.index >= len(ju.mgroups) do return
+		key := ju.mgroups[h.index]
+		if at := core.list_index(ju.folded[:], key); at >= 0 {
+			delete(ju.folded[at])
+			ordered_remove(&ju.folded, at)
+		} else do append(&ju.folded, strings.clone(key))
 	case .Group_New:
 		if h.index < len(ju.groups) do ui_do(core.Job_Sheet{open = true, for_project = owner_value(ju.groups[h.index])})
 	case .Resume_All: ui_do(core.Jobs_Resume{})

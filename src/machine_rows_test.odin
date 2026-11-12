@@ -68,7 +68,13 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	got := drawn_text()
 	testing.expectf(t, strings.contains(got, "nuc\nOnline\n1\n"), "the header: %q", got)
 	testing.expect(t, !strings.contains(got, "Open web page…"), "no standing Open web page…")
-	testing.expect(t, clay_found("machmore", 3) && !clay_found("machmore", 0), "another machine's header has its …, this Mac's none")
+	testing.expect(t, clay_found("machmore", 3) && clay_found("machmore", 0), "every machine's header has its …, this Mac's too")
+	// their menus: Settings' Machines group from both; this Mac's adds a machine
+	menu_open(Menu_Machine(0), {})
+	testing.expect_value(t, menu_labels(), "Add a machine…|Machines settings…")
+	menu_open(Menu_Machine(3), {})
+	testing.expect_value(t, menu_labels(), "Open web page…|-|Rename…|Remove…|-|Machines settings…")
+	menu_close()
 	testing.expectf(t, strings.contains(got, "garden ·\nPlant the beans\nWaiting for you\n"), "its open row: %q", got)
 	testing.expectf(t, strings.contains(got, "\ngarden\n1\n"), "its project row with its open count: %q", got)
 
@@ -127,11 +133,15 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	// offline: one word, here and in the Jobs tab
 	state.machines[0].status, state.machines[0].error = .Offline, ""
 	testing.expect(t, strings.contains(drawn_text(), "nuc\nOffline\n"), "offline header")
-	append(&state.machine_jobs, core.Job_Row{id = "m3:nightly", machine = 3, name = "Nightly"})
+	append(&state.machine_jobs, core.Job_Row{id = "m3:nightly", machine = 3, name = "Nightly", owner = .Other})
+	append(&state.machine_jobs, core.Job_Row{id = "m3:beds", machine = 3, name = "Weed the beds", owner = .Project, project = "garden"})
 	state.settings.home_dir = "/tmp/pd-mrows-notes"
 	state.layout.left_tab = .Jobs
 	got = drawn_text()
 	testing.expectf(t, strings.contains(got, "On nuc\nOffline\n"), "the Jobs tab: %q", got)
+	// under their owner there, as this Mac's: On nuc › garden › Weed the beds, then Other
+	at_g, at_o := strings.index(got, "garden\n1\nWeed the beds\n"), strings.index(got, "Other\n1\nNightly\n")
+	testing.expectf(t, at_g >= 0 && at_o > at_g, "grouped by owner: %q", got)
 	state.layout.left_tab = .Sessions
 
 	// the palette names the machine its items are on
@@ -139,16 +149,39 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	for it in palette_items() do if it.id == sid && it.kind == .Session do found = strings.has_suffix(it.detail, "on nuc")
 	testing.expect(t, found, "the palette's item for its open session says on nuc")
 
-	// no overlap at the narrowest sidebar, in each state, hovered
+	// its session on screen while it is not online: a bar says so, with its header's button
+	state.current_session = sid
+	got = drawn_text()
+	testing.expectf(t, strings.contains(got, "nuc is offline: showing what it last sent\nConnect\n"), "offline bar: %q", got)
+	_ = ui_layout(2000, 1400)
+	testing.expect(t, clay.GetElementData(clay.ID("machine_bar_act")).found, "its button")
+	state.machines[0].status = .Connecting
+	testing.expect(t, strings.contains(drawn_text(), "nuc: Connecting… — showing what it last sent"), "connecting bar")
+	state.machines[0].status = .Online
+	testing.expect(t, !strings.contains(drawn_text(), "showing what it last sent"), "online: no bar")
+	state.machines[0].status = .Offline
+
+	// no overlap at the narrowest sidebar, in each state, hovered (its session on screen: the bar too)
 	state.layout.left_width = core.LEFT_MIN
 	for st in ([]core.Machine_Status{.Online, .Needs_Login, .Not_Installed, .Taken, .Offline}) {
 		state.machines[0].status = st
-		for h in ([]Hit{nil, Hit_Machine_Head(3), Hit_Machine_More(3), Hit_Open_Row(sid), Hit_Project(pid)}) {
+		for h in ([]Hit{nil, Hit_Machine_Head(3), Hit_Machine_More(3), Hit_Machine_More(0), Hit_Machine(3), Hit_Open_Row(sid), Hit_Project(pid)}) {
 			ui_hover = h
 			for bad in audit(ui_layout(800, 1400), fmt.tprintf("%v hover %v", st, h), 800) do testing.expect(t, false, bad)
 		}
 	}
 	ui_hover = nil
+	state.current_session = 0
+}
+
+@(private = "file")
+menu_labels :: proc() -> string {
+	b := strings.builder_make(context.temp_allocator)
+	for it, i in menu_items() {
+		if i > 0 do strings.write_byte(&b, '|')
+		strings.write_string(&b, it.sep ? "-" : it.label)
+	}
+	return strings.to_string(b)
 }
 
 @(private = "file")

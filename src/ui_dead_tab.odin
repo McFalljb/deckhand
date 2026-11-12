@@ -141,3 +141,50 @@ dead_tab_hover_tip :: proc(tab: ^core.Tab) -> string {
 	if !core.tab_is_dead(tab) do return ""
 	return fmt.tprintf("%s — open it again to restart", core.dead_tab_tip(tab))
 }
+
+// ---- another machine's session while that machine is not online (ui.odin's centre) ----
+
+// The machine whose session is on screen, while it is not online: its tabs show what it last sent.
+machine_bar_machine :: proc() -> (m: core.Machine_View, ok: bool) {
+	vs := core.cur_view()
+	if vs == nil || vs.machine == 0 do return {}, false
+	for x in state.machines do if x.no == vs.machine do return x, x.status != .Online
+	return {}, false
+}
+
+// What the bar says: "nuc is offline: showing what it last sent", else its status in the sidebar's
+// words ("nuc: Connecting… — showing what it last sent"). Its name was cleaned where it was kept.
+machine_bar_text :: proc(m: core.Machine_View) -> string {
+	label, _, _ := core.machine_status_text(m)
+	if label == "Offline" do return fmt.tprintf("%s is offline: showing what it last sent", m.name)
+	return fmt.tprintf("%s: %s — showing what it last sent", m.name, label)
+}
+
+// A thin bar over its pane, with the machine header's button (Connect, Log in…, Retry…): the same
+// command (machine_run_action).
+machine_bar :: proc() {
+	m, ok := machine_bar_machine()
+	if !ok do return
+	th := theme()
+	act := core.machine_action_label(m)
+	used := px(2 * TERM_PAD + DOT + 2 * SP_2)
+	if act != "" do used += text_w(act) + px(2 * SP_3 + SP_2)
+	if clay.UI(clay.ID("machine_bar"))({
+		clip = {horizontal = true},
+		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(EDITOR_BAR_H))}, padding = {pu(TERM_PAD), pu(TERM_PAD), 0, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}},
+		backgroundColor = cc(th.bg_elevated),
+		border = {color = cc(th.border), width = {bottom = pu(core.BORDER_W)}},
+	}) {
+		dot(machine_dot(m))
+		clay.TextDynamic(clip(machine_bar_text(m), max(centre_width() - used, px(40))), txt(th.text))
+		spacer()
+		if act != "" do button(clay.ID("machine_bar_act"), act, false, ui_hover == Hit(Hit_Machine(m.no)))
+	}
+}
+
+// Its button: Hit_Machine, as the sidebar header's (sidebar_click runs it, its tooltip says what it does).
+machine_bar_hit :: proc() -> Hit {
+	m, ok := machine_bar_machine()
+	if !ok || !clay.PointerOver(clay.ID("machine_bar_act")) do return nil
+	return Hit_Machine(m.no)
+}

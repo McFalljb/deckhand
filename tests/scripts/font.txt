@@ -1,5 +1,5 @@
 # Screenshot scene for the UI font (build/shots/font/, run with tests/scripts/font.sh):
-# the main window, palette, bell popover, gear and Settings tab, dark and light.
+# the main window, palette, bell popover, gear and Settings page, dark and light.
 # font.sh puts its TAG argument in the shot names (before, after, ...). The text
 # size steps at the end need a build with set_text_size.
 wait 1000

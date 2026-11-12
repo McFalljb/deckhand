@@ -552,89 +552,6 @@ clickmenu pi
 waitfor ARGS: --session-dir 15000
 assert_state open_sessions.# 6
 assert_state open_sessions.5.cwd $homedir/code/alpha-wt
-# ==== the Settings tab's rows ====
-clickid lefttab 2
-eventually
-assert_state layout.left_tab settings
-assert_files [pi (global)]\nsettings.json\nprompts\n
-rclickid frow 1
-eventually
-assert_menurows Open|Open in preview|-|Reveal in Finder|Copy path
-clipboard_clear
-clickmenu Copy path
-eventually
-assert_clipboard /.pi/agent/settings.json
-assert_toast Path copied
-rclickid frow 1
-revealed_clear
-clickmenu Reveal in Finder
-eventually
-assert_revealed /.pi/agent/settings.json
-rclickid frow 1
-clickmenu Open in preview
-eventually
-assert_state open_sessions.5.tabs.# 2
-assert_state open_sessions.5.tabs.1.title settings.json
-rclickid frow 1
-clickmenu Open
-wait 500
-assert_state open_sessions.5.tabs.# 2
-assert_state open_sessions.5.tabs.1.kind editor
-# a prompt: New file, Rename, Move to Trash, Markdown preview
-clickid frow 2
-eventually
-assert_files prompts/\n  fix.md\n
-rclickid frow 3
-eventually
-assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path
-clickmenu Open Markdown preview
-eventually
-assert_state open_sessions.5.tabs.# 3
-assert_state open_sessions.5.tabs.2.kind markdown
-rclickid frow 3
-clickmenu New file…
-eventually
-assert_state focus.id files_name
-type new.md
-key enter
-eventually
-assert_files   new.md\n
-assert_file $homedir/.pi/agent/prompts/new.md 
-rclickid frow 3
-clickmenu New folder…
-eventually
-assert_state focus.id files_name
-type sub
-key enter
-eventually
-assert_files   sub\n
-# rows: 0 [pi (global)], 1 settings.json, 2 prompts/, 3 sub, 4 fix.md, 5 new.md, 6 [This project], 7 .pi/settings.json (create)
-rclickid frow 5
-clickmenu Rename…
-eventually
-assert_state focus.id files_name
-type renamed
-key enter
-eventually
-assert_files   renamed.md\n
-rclickid frow 5
-clickmenu Move to Trash…
-eventually
-assert_state pending_confirmations.# 1
-clickid confirm_yes
-eventually
-assert_not_files renamed.md
-assert_files   fix.md\n
-# rows now: ... 5 [pi extensions (Deckhand's)], 6-8 its three toggles, 9 [This project],
-# 10 .pi/settings.json (create), 11 AGENTS.md (create)
-# a file to create: only Copy path (the row by its path: a group added above cannot move it)
-rclickid frow @code/alpha/AGENTS.md
-eventually
-assert_menurows Copy path
-clipboard_clear
-clickmenu Copy path
-eventually
-assert_clipboard /code/alpha/AGENTS.md
 # ==== jobs: the notes folder set, one job (m1, manual, fake pi) ====
 ui_command {"type":"set_pi_path","path":"$homedir/bin/pi"}
 ui_command {"type":"set_home_dir","path":"$homedir/notes"}
@@ -675,7 +592,7 @@ wait 300
 rclickid jobrow 0
 clickmenu Open note
 eventually
-assert_state open_sessions.5.tabs.4.title menu-job.md
+assert_state open_sessions.5.tabs.2.title menu-job.md
 # a run while Deckhand is behind: unread, so the menu offers Mark read
 window_active off
 rclickid jobrow 0
@@ -697,7 +614,7 @@ assert_revealed /jobs/m1/runs/
 rclickid jobrow 0
 clickmenu Open last report
 eventually
-assert_state open_sessions.5.tabs.5.title summary.md
+assert_state open_sessions.5.tabs.3.title summary.md
 rclickid jobrow 0
 clickmenu Delete…
 eventually

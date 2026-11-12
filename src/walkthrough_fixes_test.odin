@@ -2,7 +2,7 @@ package main
 
 // A first-time user's walkthrough of 0.3.0: a machine that refuses or is not supported offers Try
 // again (its row's button, the palette's Connect to a machine), and only when clicked; Add a
-// machine… with Machines over SSH off opens Settings at its row and says why, without turning it on.
+// machine… with Machines over SSH off opens Settings at Machines and says why, without turning it on.
 
 import "base:runtime"
 import "core:testing"
@@ -42,6 +42,7 @@ walkthrough_machine_try_again_and_add_off :: proc(t: ^testing.T) {
 	action_run("machine_add")
 	core.inbox_drain()
 	testing.expect_value(t, toast.text, "Turn on Machines over SSH to add a machine")
-	testing.expect_value(t, core.settings_ui.cursor, core.MACHINE_SSH_ROW)
+	testing.expect(t, settings_page_shown() && spage.section == .Machines, "the Settings page at Machines (its switch)")
 	testing.expect(t, !state.settings.remote_machines, "never turned on for the user")
+	settings_page_off()
 }

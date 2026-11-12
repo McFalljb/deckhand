@@ -77,7 +77,8 @@ deck_under :: proc() -> u64 {
 
 // Whether the deck shows: no session current, and one taken off screen by it (the core keeps which,
 // so a second window or a reattached one shows it too) or opened from the empty centre.
-deck_shown :: proc() -> bool {return core.cur_view() == nil && (deck_under() != 0 || deck.on)}
+// Never under the Settings page, which shows in the same place (ui_settings_page.odin): one at a time.
+deck_shown :: proc() -> bool {return core.cur_view() == nil && !spage.on && (deck_under() != 0 || deck.on)}
 
 // Toggle Deck view (⇧⌘\, the top bar's button, View menu, palette). Pressed again before the core
 // answered (a separate core): Show_No_Session again, which does nothing; the deck shows.
@@ -87,6 +88,7 @@ deck_toggle :: proc() {
 		return
 	}
 	peek_close() // one look at a time: the deck shows them all (ui_peek.odin)
+	settings_page_off() // the Settings page gives way (the session under it stays under the deck)
 	deck.sel, deck.scroll, deck.top = 0, false, true
 	ui_hover = nil // the pane's hover is not the deck's
 	if state.focus_widget != "" && state.focus_widget != "agent_input" do ui_do(core.Set_Focus{""}) // a field of the panes goes with them; the drawer's stays
@@ -112,7 +114,7 @@ deck_sync :: proc() {
 		return
 	}
 	under := deck_under() != 0
-	if deck.under && !under do deck.on = true
+	if deck.under && !under && !spage.on do deck.on = true
 	deck.under = under
 }
 

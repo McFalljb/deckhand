@@ -157,7 +157,7 @@ claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	case 1: return "Drop the waiting messages (nothing is sent)", ""
 	case 2:
 		t, _, hooks := status_tab(hit_pane())
-		if hooks do return "Show Claude Code's settings files (the Settings tab)", ""
+		if hooks do return "Show Claude Code's settings files (Settings → Coding agents)", ""
 		if t != nil do return fmt.tprintf("Copy “%s” to paste into a shell tab", status_update_command(t)), ""
 		return "", ""
 	}
@@ -172,7 +172,7 @@ claude_click :: proc(p: ^core.Pane, h: Hit_Claude) {
 		switch {
 		case h == 3 && pi: core.pi_status_dismiss(t)
 		case h == 3: core.claude_status_dismiss(t)
-		case hooks:  ui_do(core.Set_Left_Tab{tab = .Settings})
+		case hooks:  settings_page_open(.Agents)
 		case:
 			cmd := status_update_command(t)
 			if cmd == "" do return

@@ -1,6 +1,6 @@
 # The coding agents checklist (tests/scripts/harness-setup.sh, run 1): pi 1.5.0 from its installer
 # with all five recommended packages, Claude Code 2.1.300 from its native installer. Everything is
-# ticked and nothing offers an action but Codex's install (not installed here); the Settings tab's Coding agents group lists the same.
+# ticked and nothing offers an action but Codex's install (not installed here); the Settings page's Coding agents lists the same.
 wait 1500
 assert_state focus.id setup
 assert_state focus.step agents
@@ -48,11 +48,13 @@ assert_state focus.step main
 key escape
 eventually
 assert_state focus.step agents
-# Skip, then the Settings tab's Coding agents group
+# Skip, then the Settings page's Coding agents
 key escape
 eventually
 assert_state focus.kind terminal
-clickid lefttab 2
+key comma cmd
+wait 300
+clickid spi @Agents
 wait 500
 shot harness-setup/settings-installed-dark
 quit

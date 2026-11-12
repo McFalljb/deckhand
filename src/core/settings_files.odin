@@ -235,10 +235,12 @@ settings_agent_dir :: proc() -> string {
 	return d
 }
 
-// The project the tree shows: the session on screen's ("" = none, Home,
-// or a chat).
+// The project Settings shows: the session on screen's, else (the Settings page shows no session)
+// the one it was opened from, this Mac's only ("" = none, Home, a chat, another machine's).
 settings_project_cwd :: proc() -> string {
-	if cs := cur(); cs != nil && !cs.home {
+	cs := cur()
+	if cs == nil && state.current_session == 0 && state.shown_before != 0 do cs = find_session(state.shown_before)
+	if cs != nil && !cs.home && cs.machine == 0 {
 		if p := find_project(cs.project_id); p != nil && p.group == .Projects do return p.cwd
 	}
 	return ""
@@ -1000,15 +1002,10 @@ tree_row :: proc(v: ^Files_View, path, name: string, kind: Fs_Kind, note: string
 
 SETTINGS_FILTER_SCAN :: 5000 // entries looked at by a filter
 
-// Filter mode: the rows that are settings whose words match (settings_search: their label,
-// what they say, their group and their setting's name and keywords: "machine" keeps the machines),
-// with their buttons; then every file of the tree (open or not, ignored ones and node_modules
-// left out) whose path matches every word, best first, flat.
-@(private = "file")
-settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runtime.Allocator) {
-	ad := settings_agent_dir()
-	cwd := v.root
-	for h in settings_search(state.files.filter, rows) do if h.kind == .Row do settings_tree_row(v, h.row, a)
+// Every file of the listed files and folders (open or not, ignored ones and node_modules left
+// out, credentials never: settings_hidden), and of the project's .pi/ (cwd), at most
+// SETTINGS_FILTER_SCAN entries looked at (temp allocator).
+settings_scan_files :: proc(rows: []Settings_File_Row, cwd: string) -> []string {
 	Dir :: struct {
 		path:  string,
 		depth: int,
@@ -1031,7 +1028,8 @@ settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runti
 		if path_kind(q.path) != .Dir || seen[q.path] do continue
 		seen[q.path] = true
 		for e in files_dir(q.path, false).entries {
-			if e.ignored || e.name == "node_modules" do continue
+			// a git-ignored file too (a settings folder inside an ignored tree: a dotfiles repo's)
+			if e.name == "node_modules" || e.name == ".git" do continue
 			full := strings.concatenate({q.path, "/", e.name}, context.temp_allocator)
 			if settings_hidden(full) do continue
 			n += 1
@@ -1043,6 +1041,20 @@ settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runti
 			}
 		}
 	}
+	sf_has_ids = false
+	return files[:]
+}
+
+// Filter mode: the rows that are settings whose words match (settings_search: their label,
+// what they say, their group and their setting's name and keywords: "machine" keeps the machines),
+// with their buttons; then every file of the tree (open or not, ignored ones and node_modules
+// left out) whose path matches every word, best first, flat.
+@(private = "file")
+settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runtime.Allocator) {
+	ad := settings_agent_dir()
+	cwd := v.root
+	for h in settings_search(state.files.filter, rows) do if h.kind == .Row do settings_tree_row(v, h.row, a)
+	files := settings_scan_files(rows, cwd)
 	rel_of :: proc(p, ad, cwd: string) -> string {
 		if under(p, ad) do return p[len(ad) + 1:]
 		if cwd != "" && under(p, cwd) do return p[len(cwd) + 1:]
@@ -1090,7 +1102,7 @@ settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runti
 // A missing row's Create button: makes the file (never over one made since
 // the tree was drawn: O_EXCL; one that is there opens as it is), then opens
 // it. Only files the tree offers to create. The error shows over the tree.
-settings_create :: proc(path: string) {
+settings_create :: proc(path: string, session: u64 = 0) {
 	delete(sf_error)
 	sf_error = ""
 	row: Settings_File_Row
@@ -1117,11 +1129,11 @@ settings_create :: proc(path: string) {
 		settings_gen += 1
 	}
 	if replica_process { // a separate core's window: the core opens it (a failure shows as a toast)
-		if replica_ui_send != nil do replica_ui_send(Open_File{path = row.path}, "Open")
+		if replica_ui_send != nil do replica_ui_send(Open_File{path = row.path, session = session}, "Open")
 		window_state_changed()
 		return
 	}
-	res := run_command(Open_File{path = row.path}, {kind = .UI})
+	res := run_command(Open_File{path = row.path, session = session}, {kind = .UI})
 	if !res.ok do sf_error = strings.clone(fmt.tprintf("%s: %s", fs_display(row.path), res.error))
 	window_state_changed()
 }
@@ -1135,12 +1147,15 @@ sf_poll_at: time.Tick
 @(private = "file")
 sf_mtimes: map[string]i64 // folder (owned) -> its modification time at the last poll
 
-// While the Settings tab shows, every EDITOR_POLL (editor_tick): the shown
+// Set by the window while its Settings page shows (ui_settings_page.odin): the poll looks.
+settings_watch: bool
+
+// While the Settings page shows, every EDITOR_POLL (editor_tick): the shown
 // folders outside projects (the agent folder, its open folders) and the
 // project's folder and .pi/ are looked at; one whose time changed is listed
-// again. A few stats, no watcher on ~/.pi.
+// again (the page's search finds its files). A few stats, no watcher on ~/.pi.
 settings_poll :: proc() {
-	if !state.layout.left_open || state.layout.left_tab != .Settings do return
+	if !settings_watch do return
 	if time.tick_since(sf_poll_at) < EDITOR_POLL do return
 	sf_poll_at = time.tick_now()
 	if sf_look(record_only = false) {

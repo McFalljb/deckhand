@@ -61,14 +61,17 @@ files_state_gen: u64
 files_apply :: proc(cmd: Command, caller: Caller) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {
 	case Set_Left_Tab:
-		if state.layout.left_tab == c.tab && state.layout.left_open do return {ok = true}, false
-		if state.layout.left_tab != .Sessions && c.tab != .Sessions && state.layout.left_tab != c.tab && state.files.filter != "" {
+		// the Settings tab is gone (Settings is a page in the centre now: ui_settings_page.odin): an
+		// older caller's or a saved workspace's "settings" shows Sessions; the page opens for the user only
+		tab := c.tab == .Settings ? Left_Tab.Sessions : c.tab
+		if state.layout.left_tab == tab && state.layout.left_open do return {ok = true}, false
+		if state.layout.left_tab != .Sessions && tab != .Sessions && state.layout.left_tab != tab && state.files.filter != "" {
 			// between the two trees the filter starts over: it was typed for the other one (they share the field)
 			delete(state.files.filter)
 			state.files.filter = ""
 			files_state_gen += 1
 		}
-		state.layout.left_tab = c.tab
+		state.layout.left_tab = tab
 		state.layout.left_open = true // the tab must show
 		return {ok = true}, true
 	case Set_Files_Filter:

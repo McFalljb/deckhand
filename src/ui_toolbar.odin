@@ -535,8 +535,7 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 	}
 }
 
-// An on/off switch: a pill track, the knob at its end.
-@(private = "file")
+// An on/off switch: a pill track, the knob at its end (also the Settings page's).
 switch_control :: proc(on: bool) {
 	th := theme()
 	if clay.UI()({

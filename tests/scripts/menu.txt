@@ -175,12 +175,15 @@ assert_drawn Settings…
 shot menu/sheet
 key escape
 wait 200
-# ---- Settings… shows the Settings tab; Quit and Stop All Sessions asks while sessions run (⌘Q's
+# ---- Settings… shows the Settings page; Quit and Stop All Sessions asks while sessions run (⌘Q's
 # Quit asks too in process, but with a separate core only closes the window: quit_route_test.odin)
 menu settings
 eventually
-assert_state layout.left_tab settings
+assert_state focus.id settings_page
 assert_menu settings_tab checked
+key escape
+wait 300
+assert_menu settings_tab unchecked
 menu show_sessions
 menu quit_stop_sessions
 eventually

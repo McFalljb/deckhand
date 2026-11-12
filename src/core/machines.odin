@@ -1487,7 +1487,7 @@ machine_name_taken :: proc(name: string, but: u64 = 0) -> bool {
 
 machine_add_apply :: proc(c: Machine_Add) -> Result {
 	if !state.settings.remote_machines do return fail("turn on Settings › Machines over SSH first")
-	if !core_separate do return fail("machines need Sessions in a background core (the gear)")
+	if !core_separate do return fail("machines need Run sessions in a background core (the gear)")
 	if !mach.loaded do return fail("machines.json could not be read: fix or remove it first")
 	target := machine_target_clean(c.target)
 	if c.via != "" {

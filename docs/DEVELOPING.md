@@ -522,7 +522,7 @@ Deckhand Core.app       the core: State, commands, the control socket, persisten
 - **The holder** owns the PTYs, so sessions survive the core and the window. It relaunches a core
   that crashes (backoff 1–30 s, giving up after 6 failures in a row). Its own code is in
   [The session holder](#the-session-holder).
-- **In-process mode** is the opt-out (Settings › *Sessions in a background core* off, or
+- **In-process mode** is the opt-out (Settings › *Run sessions in a background core* off, or
   `DECKHAND_SEPARATE_CORE=0` in test and development builds): the window runs the core in its own
   process over the in-memory transport (`src/core/window_link.odin`), with the same messages.
 - **Quitting** goes through one table, `quit_route` in `src/main.odin`: ⌘Q, the Dock's Quit and

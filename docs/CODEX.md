@@ -36,7 +36,7 @@ it, never starting `claude` on its id) and its history entry with `"codex": true
   cannot reach Deckhand's socket; phase 2 brings a per-run stdio MCP server.
 - No comments: **Send now**, **Send and close** and Changes' review asks refuse a Codex tab
   (`"Codex tabs don't take comments yet …"`), and `claude.comments` is refused for it.
-- No read-only chats: a Codex tab in a chat while **Chats: read-only** is on is refused (Codex is
+- No read-only chats: a Codex tab in a chat while **Start chats read-only** is on is refused (Codex is
   not offered there).
 - No sessions found on disk (`~/.codex/sessions/`): only conversations Deckhand ran are listed.
 - No extra flags and no accounts: the user's own Codex settings (`~/.codex/config.toml`, profiles)

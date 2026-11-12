@@ -520,10 +520,9 @@ pop_row :: proc(it: Pop_Item, toggle: Maybe(bool)) {
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
 	}) {
-		label := action_label(a)
-		if it == .Keep_Sessions do label = "Keep sessions when quitting" // the full label is too wide for the gear at Large text
-		if it == .Separate_Core do label = "Sessions in a background core" // the full label is too wide too
-		clay.TextDynamic(label, txt(mix(th.text_secondary, th.text, em)))
+		// the registry's name (settings_registry.odin), cut short when it is too wide for the gear
+		room := px(POPOVER_W - 4 * SP_2) - (toggle != nil ? px(SWITCH_W + SP_2) : 0)
+		clay.TextDynamic(clip(action_label(a), room), txt(mix(th.text_secondary, th.text, em)))
 		spacer()
 		if on, ok := toggle.?; ok {
 			switch_control(on)

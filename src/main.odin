@@ -195,7 +195,7 @@ init :: proc "c" () {
 	client_attach() // the window as its core's client: `state` is the replica from here on (client.odin)
 	if fallback { // saved, so the next launch runs in process too
 		client_call(core.Set_Separate_Core{on = false})
-		toast_show("Sessions run in Deckhand itself: turn on Sessions in a background core in the gear to try it again")
+		toast_show("Sessions run in Deckhand itself: turn on Run sessions in a background core in the gear to try it again")
 	}
 	app.ready = true
 	app.redraw = true
@@ -235,7 +235,7 @@ init_separate :: proc(note := "") -> bool {
 			fmt.println("[autotest] core refused:", why)
 			os.exit(3)
 		}
-		if platform_ask("Deckhand can't start its background core", fmt.tprintf("%s. You can run your sessions in Deckhand itself instead (Sessions in a background core, in the gear, turns it on again).", why), "Run Sessions in Deckhand Itself", "Quit") {
+		if platform_ask("Deckhand can't start its background core", fmt.tprintf("%s. You can run your sessions in Deckhand itself instead (Run sessions in a background core, in the gear, turns it on again).", why), "Run Sessions in Deckhand Itself", "Quit") {
 			script_drain = core.inbox_drain
 			client_core_abandon()
 			return false

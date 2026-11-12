@@ -961,10 +961,7 @@ settings_tree_rows :: proc() -> []Files_Row {
 				group = r.group
 				append(&v.rows, Files_Row{head = true, name = strings.clone(settings_group_label(group, cwd), a)})
 			}
-			tree_row(v, r.path, r.label, r.kind == .Folder ? .Dir : .File, r.detail, !r.exists, a)
-			if r.button != "" do v.rows[len(v.rows) - 1].button = strings.clone(r.button, a)
-			v.rows[len(v.rows) - 1].reset, v.rows[len(v.rows) - 1].reveal, v.rows[len(v.rows) - 1].remove = r.reset, r.reveal, r.remove
-			v.rows[len(v.rows) - 1].make_default = r.make_default
+			settings_tree_row(v, r, a)
 			if r.group != "project" || r.label != ".pi/settings.json" do continue
 			// the rest of the project's .pi/ folder
 			dir := strings.concatenate({cwd, "/.pi"}, context.temp_allocator)
@@ -984,6 +981,15 @@ settings_tree_rows :: proc() -> []Files_Row {
 	return v.rows[:]
 }
 
+// A row of settings_file_rows in the tree, with its buttons.
+@(private = "file")
+settings_tree_row :: proc(v: ^Files_View, r: Settings_File_Row, a: runtime.Allocator) {
+	tree_row(v, r.path, r.label, r.kind == .Folder ? .Dir : .File, r.detail, !r.exists, a)
+	row := &v.rows[len(v.rows) - 1]
+	if r.button != "" do row.button = strings.clone(r.button, a)
+	row.reset, row.reveal, row.remove, row.make_default = r.reset, r.reveal, r.remove, r.make_default
+}
+
 @(private = "file")
 tree_row :: proc(v: ^Files_View, path, name: string, kind: Fs_Kind, note: string, missing: bool, a: runtime.Allocator) {
 	full := strings.clone(path, a)
@@ -994,12 +1000,15 @@ tree_row :: proc(v: ^Files_View, path, name: string, kind: Fs_Kind, note: string
 
 SETTINGS_FILTER_SCAN :: 5000 // entries looked at by a filter
 
-// Filter mode: every file of the tree (open or not, ignored ones and
-// node_modules left out) whose path matches every word, best first, flat.
+// Filter mode: the rows that are settings whose words match (settings_search: their label,
+// what they say, their group and their setting's name and keywords: "machine" keeps the machines),
+// with their buttons; then every file of the tree (open or not, ignored ones and node_modules
+// left out) whose path matches every word, best first, flat.
 @(private = "file")
 settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runtime.Allocator) {
 	ad := settings_agent_dir()
 	cwd := v.root
+	for h in settings_search(state.files.filter, rows) do if h.kind == .Row do settings_tree_row(v, h.row, a)
 	Dir :: struct {
 		path:  string,
 		depth: int,
@@ -1008,7 +1017,7 @@ settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runti
 	seen := make(map[string]bool, context.temp_allocator)
 	queue := make([dynamic]Dir, context.temp_allocator)
 	for r in rows {
-		if !r.exists do continue
+		if !r.exists || settings_setting_row(r.path) do continue
 		if r.kind == .Folder do append(&queue, Dir{r.path, 0})
 		else if !seen[r.path] {
 			seen[r.path] = true

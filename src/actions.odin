@@ -1,5 +1,6 @@
 package main
 
+import "base:runtime"
 import "core:fmt"
 import "core:os"
 import "core:strings"
@@ -65,13 +66,13 @@ ACTIONS := [?]Action {
 		if !handoff_action_ok() do return nil, false
 		return core.Select_Project{state.selected_project}, true
 	}, ui = handoff_action_ui},
-	{id = "chats_readonly", label = "Chats: read-only", make = proc() -> (core.Command, bool) {
+	{id = "chats_readonly", make = proc() -> (core.Command, bool) {
 		return core.Set_Chats_Readonly{on = !state.settings.chats_readonly}, true
 	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}, done = proc() -> string {return state.settings.chats_readonly ? "Chats: full access" : "Chats read-only"}},
-	{id = "claude_skip_permissions", label = "Claude Code: skip permissions in new tabs", make = proc() -> (core.Command, bool) {
+	{id = "claude_skip_permissions", make = proc() -> (core.Command, bool) {
 		return core.Set_Claude_Default_Flags{skip_permissions = !state.settings.claude_skip_permissions}, true
-	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "on: --dangerously-skip-permissions in the tabs you start" : "off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
-	{id = "chats_dir", label = "Chats folder…", pick_folder = true, make = proc() -> (core.Command, bool) {
+	}, detail = proc() -> string {return state.settings.claude_skip_permissions ? "Claude Code · on: --dangerously-skip-permissions in the tabs you start" : "Claude Code · off"}, done = proc() -> string {return turns("Skip permissions", state.settings.claude_skip_permissions)}},
+	{id = "chats_dir", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return core.Set_Folder{kind = .Chats, path = state.settings.folders[.Chats]}, true // listing
 		return core.Set_Folder{kind = .Chats, path = action_folder}, true
 	}, detail = proc() -> string {
@@ -220,12 +221,12 @@ ACTIONS := [?]Action {
 		if !core.atlas_offered() do return nil, false // Atlas runs on pi (harness.odin)
 		return core.Set_Home{open = true}, true // its terminal takes the keyboard
 	}},
-	// pi's own model selector in Atlas's terminal (agent.odin); the gear's row says "Atlas model…"
-	{id = "agent_model", label = "Atlas: change model", title = proc() -> string {return fmt.tprintf("%s: change model", core.agent_name())}, make = proc() -> (core.Command, bool) {
+	// pi's own model selector in Atlas's terminal (agent.odin)
+	{id = "agent_model", title = proc() -> string {return core.setting_title("atlas_model")}, make = proc() -> (core.Command, bool) {
 		if !core.atlas_offered() do return nil, false
 		return core.Agent_Model_Picker{}, true
 	}, detail = proc() -> string {m := core.agent_model_short(); return m != "" ? m : "pi's default"}},
-	{id = "agent_model_pop", label = "Atlas model…", title = proc() -> string {return fmt.tprintf("%s model…", core.agent_name())}, no_palette = true, make = proc() -> (core.Command, bool) {
+	{id = "agent_model_pop", label = "Atlas's model…", title = proc() -> string {return core.setting_title("atlas_model")}, no_palette = true, make = proc() -> (core.Command, bool) {
 		if !core.atlas_offered() do return nil, false
 		return core.Agent_Model_Picker{}, true
 	}, detail = proc() -> string {m := core.agent_model_short(); return m != "" ? m : "pi's default"}},
@@ -237,7 +238,7 @@ ACTIONS := [?]Action {
 		return core.Open_File{path = p}, true
 	}},
 	// Atlas's jobs (jobs.odin, ui_jobs.odin)
-	{id = "show_jobs", label = "Show jobs", make = proc() -> (core.Command, bool) {
+	{id = "show_jobs", make = proc() -> (core.Command, bool) {
 		return core.Set_Left_Tab{tab = .Jobs}, true
 	}, detail = proc() -> string {return state.jobs_unread > 0 ? fmt.tprintf("%d unread", state.jobs_unread) : ""}},
 	{id = "job_new", label = "New job", make = proc() -> (core.Command, bool) {
@@ -245,10 +246,10 @@ ACTIONS := [?]Action {
 		return core.Job_Sheet{open = true}, true // the job sheet (ui_job_sheet.odin)
 	}},
 	// the main folder and its subfolders (folders.odin), the first-run sheet (ui_setup.odin)
-	{id = "setup", label = "Set up Deckhand…", make = proc() -> (core.Command, bool) {
+	{id = "setup", make = proc() -> (core.Command, bool) {
 		return core.Setup_Sheet{open = true}, true
 	}, detail = proc() -> string {return state.settings.home_dir != "" ? core.fs_display(state.settings.home_dir) : "no main folder"}},
-	{id = "home_dir", label = "Main folder…", pick_folder = true, make = proc() -> (core.Command, bool) {
+	{id = "home_dir", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return core.Set_Home_Dir{path = state.settings.home_dir}, true // listing
 		return core.Set_Home_Dir{path = action_folder}, true
 	}, detail = proc() -> string {return state.settings.home_dir != "" ? core.fs_display(state.settings.home_dir) : "not set"}},
@@ -258,7 +259,7 @@ ACTIONS := [?]Action {
 		return core.Set_Folder{kind = folder_pick_kind, path = action_folder}, true
 	}},
 	// Settings → Claude accounts → Add account…: a Claude Code config folder (claude_accounts.odin)
-	{id = "claude_account_add", label = "Add Claude account…", pick_folder = true, make = proc() -> (core.Command, bool) {
+	{id = "claude_account_add", pick_folder = true, make = proc() -> (core.Command, bool) {
 		if action_folder == "" do return nil, false
 		return core.Add_Claude_Account{dir = action_folder}, true
 	}},
@@ -294,9 +295,9 @@ ACTIONS := [?]Action {
 	{id = "pin_agent", label = "Dock the agent's drawer", make = proc() -> (core.Command, bool) {
 		return core.Set_Layout{drawer_pinned = !state.layout.drawer_pinned}, true
 	}, detail = proc() -> string {return state.layout.drawer_pinned ? "pinned" : ""}},
-	{id = "agent_notify", label = "Agent notifications", make = proc() -> (core.Command, bool) {
+	{id = "agent_notify", title = proc() -> string {return core.setting_title("agent_notify")}, make = proc() -> (core.Command, bool) {
 		return core.Set_Notify{on = state.settings.notify_off}, true
-	}, detail = proc() -> string {return state.settings.notify_off ? "off" : "on"}, done = proc() -> string {return turns("Agent notifications", !state.settings.notify_off)}},
+	}, detail = proc() -> string {return state.settings.notify_off ? "off" : "on"}, done = proc() -> string {return turns(core.setting_title("agent_notify"), !state.settings.notify_off)}},
 	// the bell (notify.odin, ui_bell.odin)
 	{id = "notifications", label = "Notifications", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"notifications"}, true
@@ -330,7 +331,7 @@ ACTIONS := [?]Action {
 	{id = "bell_sound_finished", label = "Finished: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Finished), true}, detail = proc() -> string {return bell_sound_detail(.Finished)}},
 	{id = "bell_sound_errors", label = "Errors: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Errors), true}, detail = proc() -> string {return bell_sound_detail(.Errors)}},
 	{id = "bell_sound_jobs", label = "Jobs: sound", make = proc() -> (core.Command, bool) {return bell_sound_step(.Jobs), true}, detail = proc() -> string {return bell_sound_detail(.Jobs)}},
-	{id = "bell_dock", label = "Badge Dock icon", make = proc() -> (core.Command, bool) {
+	{id = "bell_dock", make = proc() -> (core.Command, bool) {
 		return core.Set_Bell{dock = state.settings.bell_dock_off}, true
 	}, detail = proc() -> string {return state.settings.bell_dock_off ? "off" : "on (sessions waiting for you)"}, done = proc() -> string {return turns("Dock badge", !state.settings.bell_dock_off)}},
 	{id = "toggle_left", label = "Toggle left column", keys = "⌘B", make = proc() -> (core.Command, bool) {
@@ -353,41 +354,41 @@ ACTIONS := [?]Action {
 	{id = "edit_claude_settings", label = "Edit Claude settings (settings.json)", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude", "settings.json")}},
 	{id = "edit_claude_md", label = "Edit global CLAUDE.md", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude", "CLAUDE.md")}},
 	{id = "edit_claude_project_settings", label = "Edit project Claude settings", make = proc() -> (core.Command, bool) {return core.settings_file_action("claude-project", ".claude/settings.json")}, detail = proc() -> string {return ".claude/settings.json"}},
-	{id = "shortcuts", label = "Keyboard shortcuts", keys = "⌘/", make = proc() -> (core.Command, bool) {
+	{id = "shortcuts", keys = "⌘/", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"shortcuts"}, true // the shortcuts sheet (ui_toolbar.odin)
 	}},
-	{id = "look_graphite", label = "Look: Graphite", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Graphite}, true}, detail = proc() -> string {return state.settings.theme == .Graphite ? "current" : ""}},
-	{id = "look_warm", label = "Look: Warm", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Warm}, true}, detail = proc() -> string {return state.settings.theme == .Warm ? "current" : ""}},
-	{id = "look_ghostty", label = "Look: Ghostty", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Ghostty}, true}, detail = proc() -> string {return state.settings.theme == .Ghostty ? "current" : ""}},
-	{id = "appearance_system", label = "Appearance: System", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.System}, true}, detail = proc() -> string {return state.settings.appearance == .System ? (state.system_light ? "current (light)" : "current (dark)") : ""}},
-	{id = "appearance_light", label = "Appearance: Light", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.Light}, true}, detail = proc() -> string {return state.settings.appearance == .Light ? "current" : ""}},
-	{id = "appearance_dark", label = "Appearance: Dark", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.Dark}, true}, detail = proc() -> string {return state.settings.appearance == .Dark ? "current" : ""}},
-	{id = "text_small", label = "Text size: Small", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Small}, true}, detail = proc() -> string {return state.settings.text_size == .Small ? "current" : ""}},
-	{id = "text_medium", label = "Text size: Medium", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Medium}, true}, detail = proc() -> string {return state.settings.text_size == .Medium ? "current" : ""}},
-	{id = "text_default", label = "Text size: Default", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Default}, true}, detail = proc() -> string {return state.settings.text_size == .Default ? "current" : ""}},
-	{id = "text_large", label = "Text size: Large", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Large}, true}, detail = proc() -> string {return state.settings.text_size == .Large ? "current" : ""}},
-	{id = "reduce_motion", label = "Reduce motion", make = proc() -> (core.Command, bool) {
+	{id = "look_graphite", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Graphite}, true}, detail = proc() -> string {return state.settings.theme == .Graphite ? "current" : ""}},
+	{id = "look_warm", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Warm}, true}, detail = proc() -> string {return state.settings.theme == .Warm ? "current" : ""}},
+	{id = "look_ghostty", make = proc() -> (core.Command, bool) {return core.Set_Theme{.Ghostty}, true}, detail = proc() -> string {return state.settings.theme == .Ghostty ? "current" : ""}},
+	{id = "appearance_system", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.System}, true}, detail = proc() -> string {return state.settings.appearance == .System ? (state.system_light ? "current (light)" : "current (dark)") : ""}},
+	{id = "appearance_light", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.Light}, true}, detail = proc() -> string {return state.settings.appearance == .Light ? "current" : ""}},
+	{id = "appearance_dark", make = proc() -> (core.Command, bool) {return core.Set_Appearance{.Dark}, true}, detail = proc() -> string {return state.settings.appearance == .Dark ? "current" : ""}},
+	{id = "text_small", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Small}, true}, detail = proc() -> string {return state.settings.text_size == .Small ? "current" : ""}},
+	{id = "text_medium", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Medium}, true}, detail = proc() -> string {return state.settings.text_size == .Medium ? "current" : ""}},
+	{id = "text_default", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Default}, true}, detail = proc() -> string {return state.settings.text_size == .Default ? "current" : ""}},
+	{id = "text_large", make = proc() -> (core.Command, bool) {return core.Set_Text_Size{.Large}, true}, detail = proc() -> string {return state.settings.text_size == .Large ? "current" : ""}},
+	{id = "reduce_motion", make = proc() -> (core.Command, bool) {
 		return core.Set_Reduce_Motion{!state.settings.reduce_motion}, true
 	}, detail = proc() -> string {return state.settings.reduce_motion ? "on" : "off"}, done = proc() -> string {return turns("Reduce motion", state.settings.reduce_motion)}},
-	{id = "dim_panes", label = "Dim inactive panes", make = proc() -> (core.Command, bool) {
+	{id = "dim_panes", make = proc() -> (core.Command, bool) {
 		return core.Set_Dim_Panes{on = state.settings.dim_panes_off}, true
 	}, detail = proc() -> string {return state.settings.dim_panes_off ? "off" : "on"}, done = proc() -> string {return turns("Dim inactive panes", !state.settings.dim_panes_off)}},
-	{id = "rescan", label = "Rescan sessions", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}, done = proc() -> string {return "Rescanning sessions…"}},
+	{id = "rescan", make = proc() -> (core.Command, bool) {return core.Rescan{}, true}, done = proc() -> string {return "Rescanning sessions…"}},
 	// login_env.odin: Dock and Finder launches only (a terminal's environment is that terminal's)
-	{id = "refresh_shell_env", label = "Refresh shell environment", make = proc() -> (core.Command, bool) {return core.Refresh_Shell_Env{}, true}, detail = proc() -> string {
+	{id = "refresh_shell_env", make = proc() -> (core.Command, bool) {return core.Refresh_Shell_Env{}, true}, detail = proc() -> string {
 		return core.login_env.gui ? "new tabs only" : "uses the terminal's"
 	}},
-	{id = "copy_control_token", label = "Copy a control token", make = proc() -> (core.Command, bool) {return core.Copy_Control_Token{}, true}, detail = proc() -> string {return "for deckhand --ctl"}},
-	{id = "separate_core", label = "Run sessions in a background core (at the next launch)", make = proc() -> (core.Command, bool) {
+	{id = "copy_control_token", make = proc() -> (core.Command, bool) {return core.Copy_Control_Token{}, true}, detail = proc() -> string {return "for deckhand --ctl"}},
+	{id = "separate_core", make = proc() -> (core.Command, bool) {
 		return core.Set_Separate_Core{on = !state.settings.separate_core}, true
 	}, detail = proc() -> string {return state.settings.separate_core ? "on" : "off"}},
 	// machines.odin (on by default): links to the machines in Settings › Machines
-	{id = "remote_machines", label = "Machines over SSH", make = proc() -> (core.Command, bool) {
+	{id = "remote_machines", make = proc() -> (core.Command, bool) {
 		return core.Set_Remote_Machines{on = !state.settings.remote_machines}, true
 	}, detail = proc() -> string {return state.settings.remote_machines ? "on" : "off"}},
 	// the machines themselves: the same add field, commands and Settings group as the sidebar's
 	// with Machines over SSH off: its Settings row (Turn on) and why, never turned on for the user
-	{id = "machine_add", label = "Add a machine…", make = proc() -> (core.Command, bool) {
+	{id = "machine_add", make = proc() -> (core.Command, bool) {
 		return core.Set_Left_Tab{tab = .Settings}, true
 	}, ui = proc() {
 		if state.settings.remote_machines {
@@ -415,7 +416,7 @@ ACTIONS := [?]Action {
 	{id = "use_previous_core", label = "Use previous core", make = proc() -> (core.Command, bool) {
 		return core.Core_Handover{to = core.CORE_PREVIOUS}, client_separate()
 	}, detail = proc() -> string {return "background core"}},
-	{id = "keep_sessions", label = "Keep sessions running when Deckhand quits", make = proc() -> (core.Command, bool) {
+	{id = "keep_sessions", make = proc() -> (core.Command, bool) {
 		return core.Set_Keep_Sessions{on = !state.settings.keep_sessions}, true
 	}, detail = proc() -> string {return state.settings.keep_sessions ? "on" : "off"}, done = proc() -> string {return turns("Keep sessions running", state.settings.keep_sessions)}},
 	// development builds only (holder_restart.odin, the core's): the session holder re-execs into
@@ -431,7 +432,7 @@ ACTIONS := [?]Action {
 	{id = "attach_window", label = "Attach window", make = proc() -> (core.Command, bool) {
 		return nil, core.TEST_HOOKS && client.detached
 	}, ui = client_reattach, detail = proc() -> string {return "development build: the window is the core's client again"}},
-	{id = "tidy_projects", label = "Tidy project list", make = proc() -> (core.Command, bool) {
+	{id = "tidy_projects", make = proc() -> (core.Command, bool) {
 		return core.Set_Tidy_Projects{on = state.settings.tidy_off}, true
 	}, detail = proc() -> string {return state.settings.tidy_off ? "off" : "on"}},
 	// Deckhand's own updates (update.odin)
@@ -439,7 +440,7 @@ ACTIONS := [?]Action {
 		if core.update_view().offered do return fmt.tprintf("%s available", core.update_view().release.version)
 		return core.update_view().current != "" ? fmt.tprintf("Deckhand %s", core.update_view().current) : ""
 	}},
-	{id = "update_checks", label = "Check for updates automatically", make = proc() -> (core.Command, bool) {
+	{id = "update_checks", make = proc() -> (core.Command, bool) {
 		return core.Set_Update_Check{on = core.update_view().checks_off}, true
 	}, detail = proc() -> string {return core.update_view().checks_off ? "off" : "on (about once a day)"}, done = proc() -> string {return turns("Update checks", !core.update_view().checks_off)}},
 	{id = "update_install", label = "Restart to update Deckhand", make = proc() -> (core.Command, bool) {
@@ -447,7 +448,7 @@ ACTIONS := [?]Action {
 		return core.Update_Install{}, true
 	}, detail = proc() -> string {return core.update_view().release.version}},
 	// hot reload (reload.odin): /reload every pi tab; restart them on a new pi
-	{id = "reload_all_pi", label = "Reload all pi tabs", make = proc() -> (core.Command, bool) {
+	{id = "reload_all_pi", make = proc() -> (core.Command, bool) {
 		for &s in state.open_sessions do if t := core.session_pi_tab(&s); t != nil && t.status == .Running do return core.Pi_Reload_All{}, true
 		return nil, false
 	}},
@@ -464,7 +465,7 @@ ACTIONS := [?]Action {
 		for x in core.running_claude() do if core.claude_reload_outdated(x.t) do return core.Claude_Restart_Changed{update = true}, true
 		return nil, false
 	}, detail = proc() -> string {return state.reload.claude.version != "" ? fmt.tprintf("Claude Code %s", core.claude_version_label(state.reload.claude.version)) : ""}},
-	{id = "restart_all_claude", label = "Restart all Claude tabs", make = proc() -> (core.Command, bool) {
+	{id = "restart_all_claude", make = proc() -> (core.Command, bool) {
 		if len(core.running_claude()) == 0 do return nil, false
 		return core.Claude_Restart_Changed{all = true}, true
 	}},
@@ -843,6 +844,14 @@ mark_unread :: proc() -> (core.Command, bool) {
 next_sort :: proc(sec: core.Sort_Section) -> core.Command {
 	by := state.sidebar.sort[sec]
 	return core.Set_Sort{section = sec, by = core.Sort_By((int(by) + 1) % len(core.Sort_By))}
+}
+
+// The labels of the actions that are settings come from the settings registry
+// (core/settings_registry.odin): one name on the page, in the palette, the menu bar and the gear.
+@(init)
+settings_labels_init :: proc "contextless" () {
+	context = runtime.default_context()
+	for &a in ACTIONS do if l := core.setting_action_label(a.id, context.allocator); l != "" do a.label = l
 }
 
 action_by_id :: proc(id: string) -> ^Action {

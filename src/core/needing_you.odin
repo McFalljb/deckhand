@@ -18,8 +18,8 @@ import "core:time"
 // machine in state.machines' order), each in the order opened (state.open_sessions). A visit
 // moves nothing (the time is the status's, not the focus's), so pressing again walks on and wraps
 // round (the Open group's own order puts the current session first and the most recently shown
-// next, which would bounce between two). The Attention view (attention_rows) lists the same order,
-// so its top row is always where ⌥⌘A goes next.
+// next, which would bounce between two). The Attention view (attention_rows) lists the same order:
+// ⌥⌘A walks it, starting after the current session.
 //
 // next_needing_target: the one after the current session in that order (before it, back), wrapping
 // round; the first (the last, back) when the current session needs nothing. The current session is
@@ -86,9 +86,20 @@ needing_less :: proc(a, b: Needing) -> bool {
 	return a.since._nsec < b.since._nsec
 }
 
-// Since when s has been at tier: the earliest status_since of its tabs of that tier ({}: none known).
-session_need_since :: proc(s: ^Open_Session, tier: int) -> (since: time.Time) {
-	for t in s.tabs do if t.status_since != {} && tab_tier(t) == tier && (since == {} || t.status_since._nsec < since._nsec) do since = t.status_since
+// Since when s has been at tier: its tier tab's status_since ({}: not known).
+session_need_since :: proc(s: ^Open_Session, tier: int) -> time.Time {
+	if t := session_tier_tab(s, tier); t != nil do return t.status_since
+	return {}
+}
+
+// The tab that puts s at tier in needing_you's order and that its Attention row draws (mark, age,
+// message): of its tabs at that tier, the longest so (the earliest known status_since), else the
+// first in tab order; nil: none is.
+session_tier_tab :: proc(s: ^Open_Session, tier: int) -> (best: ^Tab) {
+	for &t in s.tabs {
+		if tab_tier(t) != tier do continue
+		if best == nil || (t.status_since != {} && (best.status_since == {} || t.status_since._nsec < best.status_since._nsec)) do best = &t
+	}
 	return
 }
 

@@ -788,7 +788,7 @@ open_group :: proc(cs: ^core.Open_Session, text_w_max: f32) {
 // The Attention view's rows also name their machine (mach, in a column mach_w wide, before the
 // mark) and show the keyboard's row (key_sel) as hovered.
 @(private = "file")
-open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true, mach := "", mach_w: f32 = 0, key_sel := false) {
+open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32, remote := false, live := true, mach := "", mach_w: f32 = 0, key_sel := false, from: ^core.Tab = nil) {
 	th := theme()
 	mach_w := mach_w
 	append(&drawn.open, s.id)
@@ -801,6 +801,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
 	bg, em := overlay(id, current, row_hover || hovered || key_sel)
 	v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
+	if from != nil do v = core.tab_status_view(from^) // the Attention view's: the tab that put it in its group
 	if !live do v = {progress = -1} // what it showed last: no status
 	// it turned waiting, finished or error just now: a brief wash, its mark pops (by session: the
 	// row moves up when it turns waiting)
@@ -1976,7 +1977,7 @@ attention_shown :: proc() -> []core.Attention_Row {
 attention_machine :: proc(no: u64) -> string {return no == 0 ? "this Mac" : core.machine_name(no)}
 
 // The Attention view: every open session on this Mac and the other machines, one list by what
-// needs you (core.attention_rows: needing_you's order, so the top row is where ⌥⌘A goes next),
+// needs you (core.attention_rows: needing_you's order: ⌥⌘A walks it, from after the current session),
 // under small headers with their counts, an empty group left out:
 //
 //	NEEDS YOU  2      waiting for you, then errors; the longest waiting first
@@ -1989,6 +1990,7 @@ attention_machine :: proc(no: u64) -> string {return no == 0 ? "this Mac" : core
 // play. The filter and quick filters apply as to the Open group. Built once per layout, while shown.
 @(private = "file")
 attention_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
+	attention_scroll_to() // the keyboard's row moved: into view (by the last layout's boxes)
 	// renaming a project or a Claude session from the palette: the field on top (no tree here)
 	if state.focus_widget == "rename_project" || state.focus_widget == "rename_session" do rename_field_layout()
 	rows := core.attention_rows()
@@ -2023,7 +2025,8 @@ attention_list :: proc(cs: ^core.Open_Session, text_w_max, row_w: f32) {
 			s := r.session
 			live := s.machine == 0
 			for m in state.machines do if m.no == s.machine do live = m.status == .Online
-			open_row(s, cs, text_w_max, remote = s.machine != 0, live = live, mach = attention_machine(s.machine), mach_w = mach_w, key_sel = keys && s.id == attention_sel)
+			from := r.tier != core.NEED_NONE ? core.session_tier_tab(s, r.tier) : nil // the tab its place comes from
+			open_row(s, cs, text_w_max, remote = s.machine != 0, live = live, mach = attention_machine(s.machine), mach_w = mach_w, key_sel = keys && s.id == attention_sel, from = from)
 		}
 	}
 }
@@ -2099,15 +2102,35 @@ attention_step :: proc(d: int) -> bool {
 	for r, i in rows do if r.session.id == attention_sel do at = i
 	k := at < 0 ? (d > 0 ? 0 : len(rows) - 1) : (at + d + len(rows)) %% len(rows)
 	attention_sel = rows[k].session.id
+	attention_scroll = true
 	return true
 }
 
-// Enter in the filter field while the Attention view shows: the keyboard's row, else the first
-// (where ⌥⌘A goes). False: not this view, or no row (the tree's best match then).
+// The keyboard's row moved: the list scrolls it into view (attention_scroll_to, after the layout
+// that draws it, from its box and the list's).
+attention_scroll: bool
+
+attention_scroll_to :: proc() {
+	if !attention_scroll do return
+	k := -1 // its row's element: the rows are drawn in attention_shown's order (drawn.open is reset by now)
+	for r, i in attention_shown() do if r.session.id == attention_sel do k = i
+	sc := clay.GetScrollContainerData(clay.ID("nav"))
+	list, row := clay.GetElementData(clay.ID("nav")), clay.GetElementData(clay.ID("open", u32(max(k, 0))))
+	if k < 0 || !sc.found || !list.found || !row.found do return
+	attention_scroll = false
+	l, r := list.boundingBox, row.boundingBox
+	if r.y < l.y do sc.scrollPosition.y += l.y - r.y
+	else if r.y + r.height > l.y + l.height do sc.scrollPosition.y -= r.y + r.height - l.y - l.height
+	else do return
+	app.redraw = true // drawn again where it scrolled to
+}
+
+// Enter in the filter field while the Attention view shows: the keyboard's row, else the first;
+// no row: nothing (never the hidden tree's best match). False: not this view.
 attention_enter :: proc() -> bool {
 	if state.sidebar.view != .Attention || state.layout.left_tab != .Sessions do return false
 	rows := attention_shown()
-	if len(rows) == 0 do return false
+	if len(rows) == 0 do return true
 	sid := rows[0].session.id
 	for r in rows do if r.session.id == attention_sel do sid = r.session.id
 	attention_go(sid)

@@ -447,8 +447,8 @@ IDLE  4 ›
   error; **FINISHED** finished while you were not looking; **WORKING** is busy and needs nothing;
   **IDLE** is every other open session (folded: click its heading to show them). An empty group
   is left out.
-- Within a group, the one that has been in that state longest comes first. This is the same order
-  ⌥⌘A walks, so the top row is always where ⌥⌘A goes next.
+- Within a group, the one that has been in that state longest comes first. ⌥⌘A walks this same
+  order, starting after the session you are in.
 - Each row is an open session's row, as in the Open section: its project, title, how long, what it
   asks, its mark, and the machine it runs on when you have more than one. Click a row (or press
   Enter) to go to that session, on the tab that needs you. With the filter field focused (⇧⌘F),

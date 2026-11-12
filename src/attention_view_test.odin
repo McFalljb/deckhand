@@ -44,6 +44,7 @@ av_tab :: proc(id: u64, need := "", ago: time.Duration = 0) -> core.Tab {
 	case "error":   t.prog.state = .Error
 	case "unseen":  t.unseen = true
 	case "working": t.prog.state = .Working
+	case "question": t.kind, t.agent, t.question = core.Pi_Tab{}, .Idle, true
 	}
 	t.status_key = core.status_key(core.tab_status_view(t))
 	if ago > 0 do t.status_since = time.time_add(time.now(), -ago)
@@ -402,4 +403,84 @@ attention_mode_command_saved_and_key :: proc(t: ^testing.T) {
 	found := false
 	for a in ACTIONS do if a.id == "attention_view" && a.label == "Toggle Attention view" && !a.no_palette do found = true
 	testing.expect(t, found, "the palette's Toggle Attention view")
+}
+
+// The status marks drawn inside a box.
+@(private = "file")
+av_marks :: proc(cmds: clay.ClayArray(clay.RenderCommand), within: clay.BoundingBox) -> []core.Icon {
+	out := make([dynamic]core.Icon, context.temp_allocator)
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType != .Custom do continue
+		ic, _, _ := icon_of_command(c)
+		if ic < .Mark_Idle || ic > .Mark_Error do continue
+		x := c.boundingBox
+		if x.x >= within.x - 0.5 && x.y >= within.y - 0.5 && x.x + x.width <= within.x + within.width + 0.5 && x.y + x.height <= within.y + within.height + 0.5 do append(&out, ic)
+	}
+	return out[:]
+}
+
+// Review fixes: a question needs you as a waiting tab does (the filter and the Waiting chip keep
+// it, as the pill counts it); a row draws the tab that put it in its group (its mark, its age);
+// the keyboard's row scrolls into view; Enter with no rows opens nothing.
+@(test)
+attention_review_fixes :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	av_reset()
+	defer {
+		tf_set(&filter_field, "")
+		av_reset()
+	}
+	state.sidebar.view = .Attention
+	// 1. a question-only session survives a filter that does not match it, and the Waiting chip
+	av_session(100, "Asks a thing", av_tab(101, "question", 2 * time.Minute))
+	av_session(200, "Other", av_tab(201, "working", time.Minute))
+	core.run_command(core.Set_Filter{text = "other"}, AV_UI)
+	testing.expectf(t, av_same(av_ids(), []u64{100, 200}), "a question stays through the filter: %v", av_ids())
+	core.run_command(core.Set_Filter{text = "", waiting = true}, AV_UI)
+	testing.expectf(t, av_same(av_ids(), []u64{100}), "the Waiting chip keeps a question: %v", av_ids())
+	core.run_command(core.Set_Filter{waiting = false}, AV_UI)
+
+	// 2. a question and an unseen tab: under NEEDS YOU with the question's mark, not ✓; two
+	// waiting tabs (1m focused, 30m): the row says 30m, as it sorted
+	clear(&state.open_sessions)
+	av_session(300, "Mixed", av_tab(301, "unseen", time.Minute), av_tab(302, "question", 5 * time.Minute))
+	av_session(400, "Two waits", av_tab(401, "waiting", time.Minute), av_tab(402, "waiting", 30 * time.Minute))
+	state.layout.left_width = 420
+	cmds := ui_layout(1600, 900)
+	for sid, k in drawn.open {
+		b, _ := av_box("open", u32(k))
+		if sid == 300 do testing.expectf(t, len(av_marks(cmds, b)) == 1 && av_marks(cmds, b)[0] == .Mark_Question, "Mixed's mark: %v", av_marks(cmds, b))
+		if sid == 400 do testing.expectf(t, strings.contains(av_texts(cmds, b), "30m"), "Two waits' age: %q", av_texts(cmds, b))
+	}
+
+	// 3. many rows in a short window: ↓ to the last one scrolls it into the list's view
+	clear(&state.open_sessions)
+	for i in u64(0) ..< 40 do av_session(1000 + i * 10, fmt.tprintf("Job %d", i), av_tab(1001 + i * 10, "working", time.Duration(40 - i) * time.Minute))
+	filter_focus()
+	core.inbox_drain()
+	ev := sapp.Event{type = .KEY_DOWN, key_code = .DOWN}
+	for _ in 0 ..< 40 {
+		cmds = ui_layout(1200, 500)
+		widget_event(&ev)
+	}
+	for _ in 0 ..< 3 do cmds = ui_layout(1200, 500)
+	nav, _ := av_box("nav")
+	k := -1
+	for sid, i in drawn.open do if sid == attention_sel do k = i
+	testing.expect(t, k >= 0, "the keyboard's row is drawn")
+	if k >= 0 {
+		r, _ := av_box("open", u32(k))
+		testing.expectf(t, r.y >= nav.y - 0.5 && r.y + r.height <= nav.y + nav.height + 0.5, "the keyboard's row in view: row %v, list %v", r, nav)
+	}
+
+	// 4. no row matches: Enter opens nothing (not a closed session from the hidden history)
+	core.run_command(core.Set_Filter{text = "zebra"}, AV_UI)
+	append(&state.sessions, core.Session{id = strings.clone("zz"), path = strings.clone("/tmp/av-proj/zz.jsonl"), title = strings.clone("zebra crossing")})
+	n := len(state.open_sessions)
+	ev = {type = .KEY_DOWN, key_code = .ENTER}
+	widget_event(&ev)
+	core.inbox_drain()
+	testing.expect_value(t, len(state.open_sessions), n)
 }

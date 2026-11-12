@@ -730,16 +730,16 @@ session_row_status :: proc(s: ^Open_Session) -> (st: Row_Status, from: ^Tab) {
 }
 
 // What the quick filters (Running, Waiting) see of a session: waiting if any
-// of its tabs waits, else working if any works, else its dot. (Its dot shows
+// of its tabs needs the user's answer (tab_need's NEED_WAITING: blocked, or a
+// question, as ⌥⌘A and the pill count it), else working if any works, else its dot. (Its dot shows
 // the strongest by rank, which an unseen or errored tab may take from a
 // working one.)
 session_quick_status :: proc(s: ^Open_Session) -> Row_Status {
 	if s == nil do return .None
 	running := false
 	for t in s.tabs {
-		d := tab_status_view(t).dot
-		if d == .Waiting do return .Waiting
-		if d == .Running do running = true
+		if tab_need(t) == NEED_WAITING do return .Waiting // needing_you.odin: one "waits for you"
+		if tab_status_view(t).dot == .Running do running = true
 	}
 	if running do return .Running
 	st, _ := session_row_status(s)

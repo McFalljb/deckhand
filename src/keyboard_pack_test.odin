@@ -239,7 +239,7 @@ closed_tabs_authority_wire_and_menu :: proc(t: ^testing.T) {
 	testing.expect(t, action_ok("reopen_closed_tab"))
 }
 
-// ⌃⇥: the session shown before this one; again: back. ⌃⇧⇥: the one shown longest ago.
+// ⌥⌘`: the session shown before this one; again: back. ⌥⇧⌘`: the one shown longest ago.
 @(test)
 recent_session_toggle :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -274,19 +274,17 @@ recent_session_toggle :: proc(t: ^testing.T) {
 	cmd, ok := session_recent(false)
 	testing.expect(t, ok)
 	if fs, is := cmd.(core.Focus_Session); is do testing.expect(t, fs.session != 700)
-	// the key: ⌃⇥ and ⌃⇧⇥, from a terminal too
-	testing.expect_value(t, menubar_key_action(.TAB, u32(sapp.MODIFIER_CTRL)), "recent_session")
-	testing.expect_value(t, menubar_key_action(.TAB, u32(sapp.MODIFIER_CTRL | sapp.MODIFIER_SHIFT)), "least_recent_session")
-	k, kok := parse_keys("⌃⇥")
-	testing.expect(t, kok && k.code == .TAB && k.equiv == "\t" && k.ns_mods == NS_CONTROL)
+	// the key: ⌥⌘` (AppKit's equivalent "`")
+	k, kok := parse_keys("⌥⌘`")
+	testing.expect(t, kok && k.code == .GRAVE_ACCENT && k.equiv == "`" && k.ns_mods == NS_COMMAND | NS_OPTION)
 	was := state.current_session
-	e := sapp.Event{type = .KEY_DOWN, key_code = .TAB, modifiers = u32(sapp.MODIFIER_CTRL)}
+	e := sapp.Event{type = .KEY_DOWN, key_code = .GRAVE_ACCENT, modifiers = u32(sapp.MODIFIER_SUPER | sapp.MODIFIER_ALT)}
 	event(&e)
 	core.inbox_drain()
-	testing.expect(t, state.current_session != was, "⌃⇥ switched")
+	testing.expect(t, state.current_session != was, "⌥⌘` switched")
 }
 
-// ⇧⌘U marks the tab you are in; ⌥⇧⌘U clears every unseen mark on this Mac, never waiting.
+// ⇧⌘U marks the tab you are in; ⌥⇧⌘U clears finished-not-seen on this Mac, never a waiting tab's.
 @(test)
 mark_unread_and_all_read :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
@@ -314,16 +312,16 @@ mark_unread_and_all_read :: proc(t: ^testing.T) {
 	testing.expect(t, t11 != nil && t11.unseen)
 	testing.expect_value(t, menubar_key_action(.U, u32(sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT)), "mark_unread")
 
-	// ⌥⇧⌘U: this Mac's two sessions; the waiting tab still waits; another machine's untouched
+	// ⌥⇧⌘U: this Mac's two sessions; the waiting tab exactly as it was; another machine's untouched
 	action_run("mark_all_read")
 	core.inbox_drain()
 	testing.expect_value(t, toast.text, "Marked 2 as read")
-	for id in ([]u64{11, 12, 21}) {
+	for id in ([]u64{11, 21}) {
 		_, x, _ := core.find_tab(id)
 		testing.expectf(t, x != nil && !x.unseen, "tab %d still unseen", id)
 	}
 	_, w, _ := core.find_tab(12)
-	testing.expect(t, w != nil && core.tab_status_view(w^).dot == .Waiting, "waiting for you stays")
+	testing.expect(t, w != nil && w.unseen && core.tab_status_view(w^).dot == .Waiting, "waiting for you stays as it was")
 	_, r, _ := core.find_tab(31)
 	testing.expect(t, r != nil && r.unseen, "another machine's: its own")
 	action_run("mark_all_read")
@@ -373,4 +371,122 @@ open_session_nth :: proc(t: ^testing.T) {
 	for it in window do if it.action != "" do append(&ids, it.action)
 	joined := strings.join(ids[:], ",", context.temp_allocator)
 	testing.expect(t, strings.contains(joined, "prev_session,next_needing_you,prev_needing_you,recent_session,least_recent_session,session_1,session_2,session_3,session_4,session_5,session_6,mark_unread,mark_all_read"), joined)
+}
+
+// Review round 1. An app's declaration rewritten after its tab closed: ⇧⌘T does not run the
+// replacement (the closed tab's command and folder are what may reopen, nothing else).
+@(test)
+closed_tabs_app_declaration_changed :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	dir := kp_dir()
+	defer os.remove_all(dir)
+	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
+	apps := fmt.tprintf("%s/.deckhand/apps.json", dir)
+	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."]}]}`))
+	s := kp_session(100, dir, kp_tab(10, core.App_Tab{argv = kp_strings("godot", "--path", "."), cwd = strings.clone(dir)}, title = "game"))
+	state.current_session = 100
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 10}, KP_UI).ok)
+	testing.expect_value(t, len(core.closed_tabs), 1)
+	// an agent rewrites the declaration under the same name
+	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["sh","-c","evil"]}]}`))
+	n := len(s.tabs)
+	r := core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
+	testing.expect(t, r.created_id == 0, "nothing started")
+	testing.expect_value(t, len(core.find_session(100).tabs), n)
+	testing.expect_value(t, toast.text, "That app's command changed: open it from the project")
+	// its folder moved: the same
+	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."],"cwd":"sub"}]}`))
+	os.make_directory_all(fmt.tprintf("%s/sub", dir))
+	core.pane_add_tab(core.find_session(100), kp_tab(11, core.App_Tab{argv = kp_strings("godot", "--path", "."), cwd = strings.clone(dir)}, title = "game"))
+	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."]}]}`))
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 11}, KP_UI).ok)
+	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."],"cwd":"sub"}]}`))
+	toast_clear()
+	r = core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
+	testing.expect(t, r.created_id == 0, "nothing started")
+	testing.expect_value(t, toast.text, "That app's command changed: open it from the project")
+}
+
+// Mark all as read clears finished-not-seen only: an error not seen yet stays (and its record).
+@(test)
+mark_all_read_keeps_errors :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	errd := kp_tab(21, core.Shell_Tab{})
+	errd.status = .Running
+	errd.prog.state = .Error
+	errd.unseen = true
+	kp_session(200, "/tmp", errd)
+	kp_session(100, "/tmp")
+	state.current_session = 100
+	action_run("mark_all_read")
+	core.inbox_drain()
+	_, e, _ := core.find_tab(21)
+	testing.expect(t, e != nil && e.unseen, "the error is still not seen")
+	testing.expect(t, e != nil && core.tab_status_view(e^).dot == .Error)
+	testing.expect_value(t, toast.text, "Nothing unread")
+}
+
+// ⌃⇥ is the programs' (a Kitty-protocol vim, an app, a page): Recent session is ⌥⌘` instead.
+@(test)
+recent_session_keys_are_cmd_chords :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	S, A, SH, C := u32(sapp.MODIFIER_SUPER), u32(sapp.MODIFIER_ALT), u32(sapp.MODIFIER_SHIFT), u32(sapp.MODIFIER_CTRL)
+	testing.expect_value(t, menubar_key_action(.GRAVE_ACCENT, S | A), "recent_session")
+	testing.expect_value(t, menubar_key_action(.GRAVE_ACCENT, S | A | SH), "least_recent_session")
+	testing.expect_value(t, menubar_key_action(.TAB, C), "")
+	testing.expect_value(t, menubar_key_action(.GRAVE_ACCENT, S), "") // the system's window cycle
+	kp_session(100, "/tmp")
+	kp_session(200, "/tmp")
+	for id in ([]u64{100, 200}) do core.run_command(core.Focus_Session{session = id}, KP_UI)
+	e := sapp.Event{type = .KEY_DOWN, key_code = .TAB, modifiers = C}
+	event(&e)
+	core.inbox_drain()
+	testing.expect_value(t, state.current_session, u64(200)) // ⌃⇥ is not Deckhand's
+	e = sapp.Event{type = .KEY_DOWN, key_code = .GRAVE_ACCENT, modifiers = S | A}
+	event(&e)
+	core.inbox_drain()
+	testing.expect_value(t, state.current_session, u64(100))
+	// a text field passes it on
+	state.focus_widget = "sidebar_filter"
+	defer state.focus_widget = ""
+	testing.expect(t, !widget_event(&e))
+}
+
+// A close an agent asked for and the user confirmed is the agent's: not kept for ⇧⌘T. The user's
+// own close, confirmed, is.
+@(test)
+closed_tabs_confirmed_close_keeps_its_requester :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	state.settings.confirm_close[.Shell] = .Always
+	running :: proc(id: u64) -> core.Tab {
+		x := kp_tab(id, core.Shell_Tab{})
+		x.status = .Running
+		return x
+	}
+	kp_session(100, "/tmp", running(10), running(11))
+	state.current_session = 100
+	// the agent's: parked for the user, who confirms it in the bar (ui)
+	r := core.run_command(core.Close_Tab{tab_id = 10}, {kind = .Control})
+	testing.expect_value(t, r.error, "needs_confirmation")
+	testing.expect_value(t, len(state.pending_confirmations), 1)
+	if len(state.pending_confirmations) == 1 {
+		tok := strings.clone(state.pending_confirmations[0].token, context.temp_allocator)
+		r = core.run_command(core.Close_Tab{tab_id = 10, confirm = tok}, KP_UI)
+		testing.expect(t, r.ok, r.error)
+	}
+	testing.expect_value(t, len(core.closed_tabs), 0)
+	// the user's own, confirmed: kept
+	r = core.run_command(core.Close_Tab{tab_id = 11}, KP_UI)
+	testing.expect_value(t, r.error, "needs_confirmation")
+	r = core.run_command(core.Close_Tab{tab_id = 11, confirm = r.confirm_token}, KP_UI)
+	testing.expect(t, r.ok, r.error)
+	testing.expect_value(t, len(core.closed_tabs), 1)
 }

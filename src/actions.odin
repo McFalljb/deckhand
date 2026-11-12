@@ -561,9 +561,10 @@ ACTIONS := [?]Action {
 	// "finished, not seen" by hand (core/agent_status.odin's set_unread, as the row menu's Mark as unread)
 	{id = "mark_unread", label = "Mark as unread", keys = "⇧⌘U", make = mark_unread},
 	{id = "mark_all_read", label = "Mark all as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return nil, true}, ui = mark_all_read},
-	// the session shown before this one, as ⌘-Tab between two apps (shown_at); ⌃⇧⇥: the one shown longest ago
-	{id = "recent_session", label = "Recent session", keys = "⌃⇥", make = proc() -> (core.Command, bool) {return session_recent(false)}},
-	{id = "least_recent_session", label = "Least recent session", keys = "⌃⇧⇥", make = proc() -> (core.Command, bool) {return session_recent(true)}},
+	// the session shown before this one, as ⌘-Tab between two apps (shown_at); ⌥⇧⌘`: the one shown
+	// longest ago. ⌘ chords: ⌃⇥ is the programs' (a Kitty-protocol vim, an app, a page); ⌘` alone is macOS's
+	{id = "recent_session", label = "Recent session", keys = "⌥⌘`", make = proc() -> (core.Command, bool) {return session_recent(false)}},
+	{id = "least_recent_session", label = "Least recent session", keys = "⌥⇧⌘`", make = proc() -> (core.Command, bool) {return session_recent(true)}},
 	// the Open section's rows as ordered now (sidebar_open)
 	{id = "session_1", label = "Go to open session 1", keys = "⌥⌘1", make = proc() -> (core.Command, bool) {return session_nth(0)}, detail = proc() -> string {return session_nth_title(0)}},
 	{id = "session_2", label = "Go to open session 2", keys = "⌥⌘2", make = proc() -> (core.Command, bool) {return session_nth(1)}, detail = proc() -> string {return session_nth_title(1)}},
@@ -811,14 +812,15 @@ mark_unread :: proc() -> (core.Command, bool) {
 }
 
 // ⌥⇧⌘U: every tab of this Mac's open sessions that finished and was not seen is seen. Only that
-// mark: waiting for you, errors and questions are what the tab's program says, not this mark.
+// mark: a tab waiting for you, with an error or a question keeps its unseen flag too (an error's
+// record goes once it is seen: agent_status.odin).
 mark_all_read :: proc() {
 	ids := make([dynamic]u64, context.temp_allocator)
 	n := 0
 	for s in state.open_sessions {
 		if s.home || s.machine != 0 do continue
 		k := len(ids)
-		for t in s.tabs do if t.unseen do append(&ids, t.id)
+		for t in s.tabs do if t.unseen && core.tab_status_view(t).dot == .Unseen do append(&ids, t.id)
 		if len(ids) > k do n += 1
 	}
 	for id in ids do ui_do(core.Set_Unread{tab_id = id, unread = false})

@@ -726,15 +726,6 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
-	// ⌃⇥ ⌃⇧⇥: the recent sessions (actions.odin), from anywhere: a terminal gets a plain Tab for
-	// ⌃⇥ (no program here tells them apart), the editor and pages none
-	if e.type == .KEY_DOWN && e.key_code == .TAB && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT) == sapp.MODIFIER_CTRL {
-		ime_cancel()
-		if menu.open do menu_close()
-		if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
-		app.key_taken = true
-		return
-	}
 	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⌃⇧⌘arrows move the tab,
 	// ⇧⌘W unsplit; from anywhere but a text field
 	if e.type == .KEY_DOWN && state.focus_widget == "" && pane_key(e) {
@@ -1199,9 +1190,9 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			case .LEFT, .UP:     tf_home(f, shift)
 			case .RIGHT, .DOWN:  tf_end(f, shift)
 			case .BACKSPACE:     tf_delete_to_start(f)
-			case ._1 ..= ._9: // ⌥⌘1–⌥⌘6: the Open section's rows (menubar.odin)
+			case ._1 ..= ._9, .GRAVE_ACCENT: // ⌥⌘1–⌥⌘6, ⌥⌘` ⌥⇧⌘`: sessions (menubar.odin)
 				if alt do return false
-				if in_palette do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
+				if in_palette && e.key_code != .GRAVE_ACCENT do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
 			case .Q:             ui_do(core.Quit{})
 			}
 			return true

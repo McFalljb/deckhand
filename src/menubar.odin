@@ -302,7 +302,7 @@ menubar_tag :: proc(it: ^Bar_Item) -> int {
 }
 
 // The action whose menu shortcut a key press is (event(): keys that only the
-// menu bar knows, such as ⌘+ or ⇧⌘], and ⌃⇥ ⌃⇧⇥); "" = none.
+// menu bar knows, such as ⌘+ or ⇧⌘]); "" = none.
 menubar_key_action :: proc(code: sapp.Keycode, mods: u32) -> string {
 	m := mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT | sapp.MODIFIER_ALT | sapp.MODIFIER_CTRL)
 	for it in menubar_items() {
@@ -387,7 +387,7 @@ parse_keys :: proc(keys: string) -> (k: Bar_Key, ok: bool) {
 	case "↓": k.code, k.equiv = .DOWN, "\uF701" // NSDownArrowFunctionKey
 	case "←": k.code, k.equiv = .LEFT, "\uF702" // NSLeftArrowFunctionKey
 	case "→": k.code, k.equiv = .RIGHT, "\uF703" // NSRightArrowFunctionKey
-	case "⇥": k.code, k.equiv = .TAB, "\t"
+	case "`": k.code, k.equiv = .GRAVE_ACCENT, "`"
 	case:
 		if len(rest) != 1 do return {}, false
 		c := rest[0]

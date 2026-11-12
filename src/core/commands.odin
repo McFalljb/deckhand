@@ -1136,14 +1136,15 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if owns_tab(caller, c.tab_id) && !(is_app && c.tab_id != caller.tab_id) do return fail("a caller cannot close its own tab"), false
 		// comments made on it, not sent yet: the user picks send or drop in the close prompt, others say
 		if cr, go_on, cch := comments_close_check(s, tab.id, c.comments, caller); !go_on do return cr, cch
+		origin := caller // who asked for the close: a confirmed one's requester (confirm_gate)
 		if close_needs_confirm(tab^) {
 			why := "Its process is still running."
 			if _, is_ed := tab.kind.(Editor_Tab); is_ed do why = "Its unsaved changes will be lost."
-			gr, go_on, ch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("close %q in %s? %s", tab.title, session_where(s), why))
+			gr, go_on, ch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("close %q in %s? %s", tab.title, session_where(s), why), origin = &origin)
 			if !go_on do return gr, ch
 		}
 		comments_close_act(s, tab.id, c.comments) // send or drop them (the close is going ahead)
-		closed_tab_note(s, tab^, caller) // ⇧⌘T reopens it (closed_tabs.odin)
+		closed_tab_note(s, tab^, origin) // ⇧⌘T reopens the user's own (closed_tabs.odin)
 		claude_tab_gone(tab) // a Claude tab's held texts; its history entry is used now
 		tab_free_kind(tab)
 		drop_term(tab.id)
@@ -1966,7 +1967,9 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 // use it (the user, or a caller trusted for this class). With a token: it must
 // match a parked command with the same target, and the resending caller must
 // be the user or that same trusted caller.
-confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false) -> (r: Result, proceed: bool, changed: bool) {
+// origin (optional): set to the caller the confirmed command was parked for (its requester; the
+// user only confirmed it), else left as it is.
+confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false, origin: ^Caller = nil) -> (r: Result, proceed: bool, changed: bool) {
 	mode := force_ask ? Confirm_Mode.Ask : confirm_mode(caller, class) // force_ask: the user confirms, whatever the policy
 	if mode == .Auto do return {}, true, false
 	summary := asked_by(caller, what)
@@ -2002,6 +2005,7 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		by_user := caller.kind == .UI
 		by_trusted := !force_ask && caller == p.caller && confirm_mode(p.caller, p.class) == .Trusted
 		if !by_user && !by_trusted do return fail("only the user can confirm this, in Deckhand"), false, false
+		if origin != nil do origin^ = p.caller
 		ordered_remove(&state.pending_confirmations, i)
 		window_state_changed() // consumed: callers that go on (Quit) may answer "not changed"
 		return {}, true, true

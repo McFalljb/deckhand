@@ -63,9 +63,8 @@ menubar_built_from_the_action_table :: proc(t: ^testing.T) {
 		testing.expectf(t, ok && pk.equiv != "", "%s: shortcut %q does not parse", id, k)
 		// shortcuts are chords: a plain or ⌥ key is the terminal's (and text's)
 		testing.expectf(t, pk.mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL) != 0, "%s: %q is not a ⌘ or ⌃ chord", id, k)
-		// ⌃ without ⌘ is the terminal's (readline ⌃G, ⌃A…): a menu item would flash on every press;
-		// but ⌃⇥ (a terminal sends a plain Tab for it; terminal apps switch tabs with it)
-		testing.expectf(t, pk.mods & sapp.MODIFIER_SUPER != 0 || it.native != .None || pk.code == .TAB, "%s: %q is a ⌃ key without ⌘", id, k)
+		// ⌃ without ⌘ is the terminal's (readline ⌃G, ⌃A…): a menu item would flash on every press
+		testing.expectf(t, pk.mods & sapp.MODIFIER_SUPER != 0 || it.native != .None, "%s: %q is a ⌃ key without ⌘", id, k)
 		// ⌘⌫ ⌘← ⌘→ (and ⇧⌘← ⇧⌘→, ⌥⌘…) are the terminal's line editing: never a menu's; with ⌃ (the
 		// panes' ⌃⌘← ⌃⇧⌘←) they are not
 		testing.expectf(t, !(pk.code == .BACKSPACE || pk.code == .LEFT || pk.code == .RIGHT) || pk.mods & sapp.MODIFIER_CTRL != 0, "%s: %q is a terminal key", id, k)

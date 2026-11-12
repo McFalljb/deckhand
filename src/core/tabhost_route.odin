@@ -1031,7 +1031,7 @@ app_target :: proc(caller: Caller, tab_id: u64, readonly_check := false) -> (Res
 
 // new_app_tab's checks and what it runs: the session, the argv (an apps.json entry by name, an
 // argv, or a command line), its folder and title. The window then starts it under that tab id.
-@(private = "file")
+// (closed_tabs.odin: what a declared app resolves to now, against what its closed tab ran.)
 app_new_resolve :: proc(c: New_App_Tab, caller: Caller) -> (x: New_App_Tab, r: Result, bad: bool) {
 	s, serr := app_session(caller, c.session)
 	if s == nil do return {}, fail(serr), true

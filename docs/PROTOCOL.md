@@ -496,6 +496,27 @@ session** is an open session whose main (first) tab is a Claude tab and that has
 installed (snapshot `claude_installed: false`), with how to install it (`"Claude Code is not
 installed: install it with …"`).
 
+**Codex tabs** ([CODEX.md](CODEX.md), `src/core/codex.odin`) are Claude tabs with `"harness":
+"codex"`: `new_claude_tab` and `new_claude_session` take `harness` (`"claude"`, the default, or
+`"codex"`; anything else: `"harness must be claude or codex"`), with the same callers (anyone; an
+agent's opens behind). A Codex start runs `codex --no-daemon -C <cwd>` with Deckhand's hooks for
+that run (`codex resume <id> …` for `resume`, a `claude_resume` of its row, a restore); it is refused
+while Codex is not installed (`codex_installed: false`; `"Codex is not installed: install it with
+…"`), with `args` (`"Codex tabs take no extra flags yet …"`) or `account`, in a chat while chats are
+read-only (`"Codex can't run read-only yet …"`), for another machine's project (`"Codex tabs run on
+this Mac only for now …"`), and for a `resume` id that is not a UUID or is another harness's
+conversation (`"that id is another harness's conversation"`). A Codex older than 0.163.0 never
+starts (`"could not start Codex"`; the tab says why). Its hooks report with the same commands as
+the plugin's (`claude.session`: its `session_id` must be a UUID; `claude.turn`); `claude.comments`
+and `claude.attached` are refused for it, as are comments' Send now. `claude_prompt` text for a
+Codex tab is refused when its first non-blank character is `/`, `!` or `$`, or it has an `@word` or
+`$name` where a word starts; held text goes only while its OSC 7501 says it is not working or
+blocked (`held_wait` `"Codex is starting (or a dialog of its own is open)"` while it reports
+nothing) and its hooks, once they report, agree; `claude_held send` likewise. Snapshot: the tab
+entry and its `claude_sessions` entry add `"harness": "codex"`; a Codex tab adds `signed_out: true`
+while `codex login status` said signed out and its Codex has not reported OSC 7501 in this run;
+top level `codex_installed`.
+
 | Command | Args | Effect |
 |---|---|---|
 | `new_claude_tab` | `session`? \| `project_id`?, `cwd`?, `resume`?, `args`?, `account`? | open a Claude tab in `session`, or in `project_id`'s open session (the one on screen, else the most recently shown; none open: a new session is started for it). `cwd`: a folder inside the session's or its project's folder (`"cwd must be inside the session's project"`). `resume`: a Claude session id (`claude --resume`; a tab that already holds it is returned instead, started again in place if it exited, as `claude_resume`; a pi session's id or another open session's key is refused: `"that id is another session's"`). `args`: extra flags, the user's and scripts' only (`"only the user sets Claude Code's flags"`), at most 16; `--plugin-dir`, `--resume`/`-r`, `--continue`/`-c`, `--session-id`, `--fork-session`, `--print`/`-p` are refused. In a chat while chats are read-only, or resuming a conversation that ran read-only, `args` only from `--model`, `--effort`, `--fallback-model` (with values) and `--verbose` (`"… cannot go into a read-only chat …"`), and the tab starts read-only (`new_claude_session`). The user's and scripts' tabs come to the front; an agent's open behind. Home is refused. `created_id` = the tab |

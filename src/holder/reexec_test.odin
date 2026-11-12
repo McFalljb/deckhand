@@ -108,6 +108,18 @@ rig_hook :: proc(r: ^Rig, name: string, content := "") {
 	_ = os.write_entire_file(fmt.tprintf("%s/%s", r.hooks, name), transmute([]u8)content)
 }
 
+// A copy of from at path, mode set, for a holder to execve. Under the fork lock: a child another
+// test forks meanwhile (holder_test's orphan sleeper never execs) would keep the write fd, and on
+// Linux the holder's execve of the copy would fail with ETXTBSY ("the dry run failed: the new
+// image did not start"). Every fork in this package takes the lock.
+copy_exe :: proc(from, path: string, mode: posix.mode_t) {
+	b, _ := os.read_entire_file(from, context.temp_allocator)
+	sync_lock()
+	defer sync_unlock()
+	_ = os.write_entire_file(path, b)
+	posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), mode)
+}
+
 // The holder, started directly (its stderr in <dir>/holder.log), and its socket. nofile > 0: the
 // soft RLIMIT_NOFILE it is started with (a launchd-like 256). leak >= 0: an fd it inherits
 // without close-on-exec, as a careless launcher would hand it.
@@ -352,9 +364,7 @@ proc_ppid :: proc(pid: c.int) -> c.int {
 swapped_bin :: proc(r: ^Rig) -> string {
 	when ODIN_OS == .Linux {
 		p := fmt.tprintf("%s/core-swapped", r.dir)
-		b, _ := os.read_entire_file(r.bin, context.temp_allocator)
-		_ = os.write_entire_file(p, b)
-		posix.chmod(strings.clone_to_cstring(p, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH})
+		copy_exe(r.bin, p, {.IRUSR, .IWUSR, .IXUSR, .IRGRP, .IXGRP, .IROTH, .IWOTH, .IXOTH})
 		return p
 	} else {
 		return abs_path(SWAPPED_BIN)
@@ -488,15 +498,11 @@ adopt_case :: proc(t: ^testing.T, how: Adopt_How) {
 	if swap {
 		path = fmt.tprintf("%s/core-a", r.dir)
 		evil := fmt.tprintf("%s/core-evil", r.dir)
-		b, _ := os.read_entire_file(r.bin, context.temp_allocator)
-		_ = os.write_entire_file(path, b)
-		posix.chmod(strings.clone_to_cstring(path, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
-		b, _ = os.read_entire_file(swapped_bin(r), context.temp_allocator)
-		_ = os.write_entire_file(evil, b)
+		copy_exe(r.bin, path, {.IRUSR, .IWUSR, .IXUSR})
 		when ODIN_OS == .Linux {
-			posix.chmod(strings.clone_to_cstring(evil, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR, .IWOTH}) // any user may write it
+			copy_exe(swapped_bin(r), evil, {.IRUSR, .IWUSR, .IXUSR, .IWOTH}) // any user may write it
 		} else {
-			posix.chmod(strings.clone_to_cstring(evil, context.temp_allocator), {.IRUSR, .IWUSR, .IXUSR})
+			copy_exe(swapped_bin(r), evil, {.IRUSR, .IWUSR, .IXUSR})
 		}
 		rig_hook(r, "swap", evil)
 	} else if how == .Crash {

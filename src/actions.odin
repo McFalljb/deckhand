@@ -60,6 +60,11 @@ ACTIONS := [?]Action {
 		p := core.find_project(state.selected_project)
 		return p != nil ? fmt.tprintf("in %s", core.project_name(p^)) : ""
 	}},
+	// a fresh session in the project of the same name on another machine (ui_handoff.odin)
+	{id = "new_session_elsewhere", label = "New session on another machine…", make = proc() -> (core.Command, bool) {
+		if !handoff_action_ok() do return nil, false
+		return core.Select_Project{state.selected_project}, true
+	}, ui = handoff_action_ui},
 	{id = "chats_readonly", label = "Chats: read-only", make = proc() -> (core.Command, bool) {
 		return core.Set_Chats_Readonly{on = !state.settings.chats_readonly}, true
 	}, detail = proc() -> string {return state.settings.chats_readonly ? "on" : "off (full access)"}, done = proc() -> string {return state.settings.chats_readonly ? "Chats: full access" : "Chats read-only"}},

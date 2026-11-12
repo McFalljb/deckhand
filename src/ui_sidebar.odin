@@ -185,6 +185,7 @@ Menu_Target :: union {
 	Menu_Term_Link, // a link in a terminal (term_links.odin)
 	Menu_Machine, // another machine's header (right click)
 	Menu_Tab, // a tab (right click: ui_panes.odin)
+	Menu_Handoff, // the palette's New session on another machine…, several matches (ui_handoff.odin)
 }
 
 Menu_Machine :: distinct u64 // its number
@@ -199,6 +200,7 @@ menu: Menu
 
 menu_open :: proc(target: Menu_Target, at: [2]f32) {
 	menu_close()
+	handoff_drawn_clear() // what the last menu drew (ui_handoff.odin)
 	menu.target = target
 	if s, ok := target.(Menu_Session); ok do menu.target = Menu_Session{s.project_id, strings.clone(s.pi_session_id), strings.clone(s.info)}
 	if f, ok := target.(Menu_Files); ok do menu.target = Menu_Files{strings.clone(f.path)}
@@ -209,7 +211,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 		menu.target = m
 	}
 	if l, ok := target.(Menu_Term_Link); ok do menu.target = Menu_Term_Link{tab_id = l.tab_id, url = strings.clone(l.url)}
-	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd)}
+	if n, ok := target.(core.Menu_New_Session); ok do menu.target = core.Menu_New_Session{project_id = n.project_id, cwd = strings.clone(n.cwd), run = strings.clone(n.run), folder = strings.clone(n.folder)}
 	menu.at = at
 	menu.selected = -1
 	menu.open = true
@@ -225,7 +227,11 @@ menu_close :: proc() {
 	if j, ok := menu.target.(Menu_Job); ok do delete(j.id)
 	if m, ok := menu.target.(Menu_Browser); ok do delete(m.link)
 	if l, ok := menu.target.(Menu_Term_Link); ok do delete(l.url)
-	if n, ok := menu.target.(core.Menu_New_Session); ok do delete(n.cwd)
+	if n, ok := menu.target.(core.Menu_New_Session); ok {
+		delete(n.cwd)
+		delete(n.run)
+		delete(n.folder)
+	}
 	if w, ok := menu.target.(Menu_Worktree); ok {
 		delete(w.path)
 		delete(w.branch)
@@ -253,6 +259,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		pin_moves(&items, at, len(state.sidebar.pinned_projects), p.id, "")
 		// one "New session": the installed harnesses' picker (harness.odin)
 		append(&items, core.Menu_Item{label = "New session", picker = core.Menu_New_Session{project_id = p.id}})
+		handoff_items(&items, p.id) // New session on <machine> in <project> (ui_handoff.odin)
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
 		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
@@ -286,6 +293,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		}
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
+		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
 		claude_row := core.claude_row_record(t.project_id, t.pi_session_id) != nil // its info from Deckhand's history (claude_rows.odin)
 		if perr == "" || claude_row {
@@ -355,6 +363,8 @@ menu_items :: proc() -> []core.Menu_Item {
 		machine_menu_items(u64(t), &items)
 	case Menu_Tab:
 		tab_menu_items(u64(t), &items)
+	case Menu_Handoff:
+		handoff_items(&items, u64(t))
 	case Menu_Sort:
 		sec := core.Sort_Section(t)
 		for by in core.Sort_By do append(&items, core.Menu_Item{label = SORT_LABELS[by], check = state.sidebar.sort[sec] == by, cmd = core.Set_Sort{section = sec, by = by}})
@@ -375,9 +385,11 @@ menu_run :: proc(i: int) {
 		at := menu.at
 		cwd := strings.clone(ns.cwd, context.temp_allocator)
 		menu_close()
-		new_session_ui(ns.project_id, cwd, at)
+		if core.id_machine(ns.project_id) != 0 do handoff_run(i, at) // New session on <machine>…: what row i showed (ui_handoff.odin)
+		else do new_session_ui(ns.project_id, cwd, at)
 		return
 	}
+	if t, ok := target.(core.Menu_New_Session); ok && handoff_picker_stale(t) do return // that machine restarted (ui_handoff.odin)
 	if _, ok := target.(core.Menu_New_Session); ok do harness_used(it.cmd) // first next time
 	if n, ok := target.(Menu_New); ok && n.pane != 0 do ui_do(core.Focus_Pane{pane = n.pane}) // new tabs open in the focused pane
 	if it.rename {
@@ -1271,6 +1283,7 @@ menu_layout :: proc(w, h: f32) {
 		menu_close()
 		return
 	}
+	handoff_drawn_note(items) // what a click on a row acts on (ui_handoff.odin)
 	box_h := px(2 * PAD_OVERLAY)
 	// as wide as its longest row, between MENU_W and MENU_W_MAX (longer labels are cut)
 	need: f32 = 0

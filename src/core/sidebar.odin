@@ -179,11 +179,16 @@ sidebar_path :: proc(project_id: u64, pi_session_id: string) -> (path: string, e
 // The strongest status of a project's open sessions (agent_status.odin:
 // status_rank; waiting outranks everything): its row's dot.
 project_status :: proc(project_id: u64) -> Row_Status {
-	best := Row_Status.None
+	return project_status_view(project_id).dot
+}
+
+// The same, with the rest of that session's strongest tab's view (its row's mark).
+project_status_view :: proc(project_id: u64) -> Tab_Status_View {
+	best := Tab_Status_View{progress = -1}
 	for &s in state.open_sessions {
 		if s.home || s.project_id != project_id do continue
-		st, _ := session_row_status(&s)
-		if status_rank(st) > status_rank(best) do best = st
+		v := session_row_view(&s)
+		if status_rank(v.dot) > status_rank(best.dot) do best = v
 	}
 	return best
 }

@@ -42,4 +42,15 @@ Icon :: enum u8 {
 	Logo_Claude,
 	Harness_Pi, // "π": a bar on two legs
 	Harness_Claude, // a six-pointed asterisk
+	// status marks (agent_status.odin Status_Mark; ui.odin status_mark_el), in a MARK box
+	Mark_Idle, // a quiet small dot
+	Mark_Exited, // a faint dot
+	Mark_Working, // a quarter-and-a-bit arc on a faint track, turned by the element's step
+	Mark_Progress, // a ring with a pie inside, filled to the element's percent
+	Mark_Waiting, // a solid disc
+	Mark_Permission, // a shield
+	Mark_Question, // "?"
+	Mark_Auth, // a lock
+	Mark_Done, // a check
+	Mark_Error, // "!"
 }

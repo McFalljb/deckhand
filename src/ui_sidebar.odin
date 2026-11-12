@@ -783,28 +783,27 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 	hovered := !remote && (row_hover || close_hover || more_hover) // its buttons show
 	bg, em := overlay(id, current, row_hover || hovered)
 	if clay.UI(id)(row_cfg(bg)) {
-		st, _ := core.session_row_status(s) // the strongest of its tabs (agent_status.odin)
-		if !live do st = .None // what it showed last: no status
+		v := core.session_row_view(s) // the strongest of its tabs (agent_status.odin)
+		if !live do v = {progress = -1} // what it showed last: no status
+		st := v.dot
 		ic, place := core.session_place(s)
 		chat := ic == .Chat
-		when_ := ""
-		if st == .Waiting do when_ = "Waiting for you"
-		else if !remote do when_ = core.open_session_age(s)
+		title := core.open_session_title(s)
+		// how long its status has been what it is ("4m"), else how long ago it was used
+		age := status_age(v)
+		when_ := age
+		if st == .Waiting do when_ = age != "" ? fmt.tprintf("%s · %s", age, "Waiting for you") : "Waiting for you"
+		else if when_ == "" && !remote do when_ = core.open_session_age(s)
 		// an agent acts in one of its browser tabs the user does not see (browser_act.odin)
 		acting := !remote && st != .Waiting && browser_act_session_background(s)
 		if acting do when_ = browser_act_session_text(s) // the acting tab's harness
-		// children: icon, [place ·], harness icon, title, [tag], spacer, then time and dot, or the buttons
-		right: f32
-		n := 4 // icon, harness icon, title, spacer
+		// children: icon, [place ·], harness icon, title, [tag], spacer, then time and mark, or the buttons
+		right := px(MARK) // its mark: always there, so the row never moves when its status changes
+		n := 5 // icon, harness icon, title, spacer, mark
 		if hovered {
-			right = 2 * px(ROW_BUTTON)
+			right += 2 * px(ROW_BUTTON)
 			n += 2
 		} else if when_ != "" {
-			right = text_w(when_)
-			n += 1
-		}
-		if st != .None {
-			right += px(DOT)
 			n += 1
 		}
 		if !chat do n += 1
@@ -817,12 +816,29 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 			n += 1
 		}
 		room := text_w_max - px(KIND_ICON + HARNESS_ICON_SIZE) - right - f32(n - 1) * px(GAP_INLINE)
+		lead := fmt.tprintf("%s ·", place)
+		if !hovered && when_ != "" {
+			// waiting: what it asks, after its time, in the room the title leaves (the title keeps
+			// 60% of the row, or all it needs; at least 48 px of the message, else only the time)
+			if st == .Waiting && !acting {
+				need := text_w(title) + (chat ? 0 : text_w(lead) + px(GAP_INLINE))
+				give := room - min(need, room * 0.6)
+				prefix := age != "" ? fmt.tprintf("%s · ", age) : ""
+				what := v.msg != "" ? v.msg : "Waiting for you"
+				long := fmt.tprintf("%s%s", prefix, what)
+				switch {
+				case text_w(long) <= give:                            when_ = long
+				case v.msg != "" && give - text_w(prefix) >= px(48):  when_ = clip(long, give) // enough of it to read
+				case age != "":                                       when_ = age // the mark says waiting
+				case:                                                 when_ = "Waiting for you"
+				}
+			}
+			room -= text_w(when_)
+		}
 		// the session the centre shows, from another project than the selected one: its place in the accent
 		elsewhere := current && !chat && s.project_id != state.selected_project
 		icon(ic, elsewhere ? th.accent : th.text_muted, KIND_ICON)
-		title := core.open_session_title(s)
 		if !chat {
-			lead := fmt.tprintf("%s ·", place)
 			pw := min(text_w(lead), max(room * 0.4, room - text_w(title)))
 			clay.TextDynamic(clip(lead, pw), txt(elsewhere ? th.accent : th.text_muted))
 			room -= pw
@@ -832,7 +848,7 @@ open_row :: proc(s: ^core.Open_Session, cs: ^core.Open_Session, text_w_max: f32,
 		if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
 		if !hovered && when_ != "" do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : acting ? th.accent : th.text_muted))
-		if st != .None do dot(status_color(st))
+		status_mark_el(v)
 		row_button(clay.ID("openmore", k), "", hovered, more_hover, .More)
 		row_button(clay.ID("openclose", k), "", hovered, close_hover, .Close)
 	}
@@ -909,10 +925,12 @@ project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_
 	cfg.layout.padding.left = pu(PAD_ROW + indent)
 	kids_hover := ui_hover == Hit(Hit_Kids(p.id)) && !r.forced // kept open: not clickable
 	if clay.UI(id)(cfg) {
-		st := core.project_status(p.id)
-		if !live do st = .None
+		v := core.project_status_view(p.id) // its open sessions' strongest
+		if !live do v = {progress = -1}
+		st := v.dot
 		n_open := 0
 		for s in state.open_sessions do if !s.home && s.project_id == p.id do n_open += 1
+		marked := n_open > 0 || st != .None // a project with open sessions keeps its mark's room
 		right_text := r.hidden ? core.HIDE_REASON_TAGS[r.reason] : (n_open > 0 ? fmt.tprint(n_open) : "")
 		// children: chevron, folder, name, spacer, then count and dot, or three buttons
 		right: f32
@@ -924,8 +942,8 @@ project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_
 			right = text_w(right_text)
 			n += 1
 		}
-		if st != .None {
-			right += px(DOT)
+		if marked {
+			right += px(MARK)
 			n += 1
 		}
 		// a parent row: "N folders", a click opens or collapses its nested rows
@@ -952,7 +970,7 @@ project_row :: proc(r: core.Sidebar_Row, i: int, cs: ^core.Open_Session, text_w_
 			}
 		}
 		if right_text != "" && !hovered do clay.TextDynamic(right_text, txt(th.text_muted))
-		if st != .None do dot(status_color(st))
+		if marked do status_mark_el(v)
 		row_button(clay.ID("projpin", u32(i)), r.pin >= 0 ? "★" : "☆", hovered, pin_hover)
 		row_button(clay.ID("projnew", u32(i)), "", hovered, new_hover, .Plus)
 		row_button(clay.ID("projmore", u32(i)), "", hovered, more_hover, .More)
@@ -1108,8 +1126,10 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 			continue
 		}
 		if clay.UI(id)(cfg) {
-			st := core.session_status(s.id)
-			if !live do st = .None // what it showed last: no status
+			v := core.session_status_view(s.id)
+			if !live do v = {progress = -1} // what it showed last: no status
+			st := v.dot
+			marked := open_id != 0 || st != .None // an open session keeps its mark's room
 			// "needs you" outranks the time
 			when_ := st == .Waiting ? "Waiting for you" : (r.hidden ? "hidden" : rel_time(s.when_))
 			if st != .Waiting && !r.hidden && state.sidebar.sort[chat ? .Chats : .Sessions] == .Recent do when_ = core.ago(s.modified)
@@ -1132,8 +1152,8 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 				right += text_w(tag, FONT_UI_SMALL)
 				n += 1
 			}
-			if st != .None {
-				right += px(DOT)
+			if marked {
+				right += px(MARK)
 				n += 1
 			}
 			lead := px(HARNESS_ICON_SIZE)
@@ -1146,7 +1166,7 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 			if tag != "" do clay.TextDynamic(tag, txt(th.text_muted, FONT_UI_SMALL))
 			spacer()
 			if !hovered do clay.TextDynamic(when_, txt(st == .Waiting ? th.waiting : th.text_muted))
-			if st != .None do dot(status_color(st))
+			if marked do status_mark_el(v)
 			row_button(clay.ID(chat ? "chatpin" : "sesspin", u32(i)), r.pin >= 0 ? "★" : "☆", hovered, pin_hover)
 			if session_row_has_info(s^) do row_button(clay.ID(chat ? "chatinfo" : "sessinfo", u32(i)), "", hovered, info_hover, .Info) // a Claude row's: Deckhand's own record
 			row_button(clay.ID(chat ? "chatmore" : "sessmore", u32(i)), "", hovered, more_hover, .More)

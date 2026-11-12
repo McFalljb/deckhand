@@ -29,8 +29,9 @@ package core
 // machine (removed, or Machines over SSH off); a link that drops keeps them as last seen. Another machine's State is untrusted: every string is cleaned
 // (text_clean: printable, no bidi controls, bounded; what the sidebar draws or its filter matches, names,
 // folders and titles, text_clean_remote's, one line too), every list capped, an id that does not pack
-// is dropped, and a tab keeps only its kind and its status (no paths, URLs or runtime; of its OSC 7501 summary
-// and Claude hooks only the enums and time its dot is made of): the merged entries carry
+// is dropped, and a tab keeps only its kind and its status (no paths, URLs or runtime; of a Claude
+// tab's hooks only the enums its dot is made of; its OSC 7501 summary through mirror_prog: state,
+// kind, progress, app and message, cleaned and bounded; since when: mirror_since): the merged entries carry
 // nothing this Mac's core could act on. They are never saved (persist.odin), never started here
 // (term_start refuses their tab ids), and a command naming one runs on that machine, not here
 // (machine_route.odin, M6-C), except focusing one and selecting one of its projects (this Mac's
@@ -212,11 +213,39 @@ tab_kind_bare :: proc(k: Tab_Kind) -> Tab_Kind {
 	return Shell_Tab{}
 }
 
-// A tab's OSC 7501 summary as its dot needs it (tab_status_view): its state, kind and time;
-// none of its program's strings (app, title, message, id).
-mirror_prog :: proc(p: Prog_Summary) -> Prog_Summary {
-	if p.state > max(Prog_State) || p.kind > max(Prog_Kind) do return {}
-	return Prog_Summary{state = p.state, kind = p.kind, progress = -1, at = p.at}
+// A tab's OSC 7501 summary as another machine sent it, for its mark and tooltip only: a state and
+// kind this build knows (else none), progress in -1..100, its app and message cleaned and bounded,
+// no id or title, its time never ahead of this Mac's clock (heap or a).
+mirror_prog :: proc(p: Prog_Summary, now: time.Time, a: runtime.Allocator) -> Prog_Summary {
+	out := Prog_Summary{progress = -1}
+	if p.state < min(Prog_State) || p.state > max(Prog_State) || p.state == .None do return out
+	out.state = p.state
+	if p.state == .Blocked && p.kind >= min(Prog_Kind) && p.kind <= max(Prog_Kind) do out.kind = p.kind
+	if p.progress >= 0 && p.progress <= 100 do out.progress = p.progress
+	out.app = remote_text(p.app, PROG_APP_MAX, a)
+	out.msg = remote_text(p.msg, PROG_MSG_MAX, a)
+	out.records = clamp(p.records, 0, PROG_RECORDS_MAX)
+	if p.at._nsec > 0 do out.at = time.Time{min(p.at._nsec, now._nsec)}
+	return out
+}
+
+// What a mirrored tab's status was at the last merge.
+Mirror_Since :: struct {
+	key:   u16,
+	since: time.Time,
+}
+
+MIRROR_SINCE_MAX :: 365 * 24 * time.Hour // older than this by that machine's clock: not believed
+
+// Since when a mirrored tab's status has been what it is: unchanged since the last merge, as it
+// was; changed while this Mac watched, now (this Mac's clock, so skew cannot show); first seen,
+// that machine's own time, never ahead of now and never absurdly old ({} = not known).
+mirror_since :: proc(key: u16, theirs: time.Time, prev: Mirror_Since, seen: bool, now: time.Time) -> (u16, time.Time) {
+	if seen do return key, prev.key == key ? prev.since : now
+	if theirs._nsec <= 0 do return key, {}
+	if theirs._nsec > now._nsec do return key, now
+	if time.diff(theirs, now) > MIRROR_SINCE_MAX do return key, {}
+	return key, theirs
 }
 
 // Machine no's entries from r (its replica) into State, replacing what was there of it.
@@ -226,6 +255,10 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	// this Mac's view of them stays: when each was last shown (the Open group's order)
 	shown := make(map[u64]i64, 16, context.temp_allocator)
 	for s in state.open_sessions do if s.machine == no do shown[s.id] = s.shown_at
+	// and since when each tab's status has been what it is (mirror_since)
+	was := make(map[u64]Mirror_Since, 16, context.temp_allocator)
+	for s in state.open_sessions do if s.machine == no do for t in s.tabs do was[t.id] = {t.status_key, t.status_since}
+	now := time.now()
 	mirror_unmerge(no)
 	virtual.arena_free_all(&m.arena)
 	a := virtual.arena_allocator(&m.arena)
@@ -264,7 +297,11 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			if len(ns.tabs) >= MIRROR_TABS_MAX do break
 			tid, tok := id_pack(no, tab.id)
 			if !tok do continue
-			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = remote_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, prog = mirror_prog(tab.prog), pane = pane})
+			nt := Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = remote_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane}
+			nt.prog = mirror_prog(tab.prog, now, heap)
+			prev, seen := was[tid]
+			nt.status_key, nt.status_since = mirror_since(status_key(tab_status_view(nt)), tab.status_since, prev, seen, now)
+			append(&ns.tabs, nt)
 		}
 		if len(ns.tabs) == 0 { 	// an open session always has its main tab
 			wire_free(&ns, type_info_of(Open_Session), heap)

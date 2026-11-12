@@ -356,6 +356,20 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 		testing.expect(t, r.ok, r.error)
 	}
 
+	// status marks (status_marks_test.odin): r2's shell waits for a yes or no with a long
+	// question for 3 minutes (its tab's mark, its open row's "3m · …"), g1's pi works at 40%
+	if rs := core.find_session(open_session_of(pa, "r2")); rs != nil {
+		for &tb in rs.tabs do if _, is := tb.kind.(core.Shell_Tab); is {
+			tb.prog = {state = .Blocked, kind = .Permission, progress = -1, app = strings.clone("claude-code"), msg = strings.clone("Apply these edits to every file under src/importers and the folders with long names?")}
+			tb.status_key = core.status_key(core.tab_status_view(tb))
+			tb.status_since = time.time_add(time.now(), -3 * time.Minute)
+		}
+	}
+	if gs := core.find_session(open_session_of(pl, "g1")); gs != nil {
+		gs.tabs[0].prog = {state = .Working, progress = 40}
+		gs.tabs[0].status_key = core.status_key(core.tab_status_view(gs.tabs[0]))
+		gs.tabs[0].status_since = time.time_add(time.now(), -75 * time.Minute)
+	}
 	// the bell: entries of every kind (unread ones: the button's count), one
 	// from yesterday (the Earlier group), long titles
 	{

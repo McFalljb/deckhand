@@ -445,6 +445,56 @@ waiting_is_never_concealed :: proc(t: ^testing.T) {
 	testing.expect_value(t, names(core.sidebar_projects()), core.project_name(pa^))
 }
 
+// The texts the whole window draws, one per line.
+@(private = "file")
+sb_drawn :: proc() -> string {
+	cmds := ui_layout(2000, 1400)
+	b := strings.builder_make(context.temp_allocator)
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType != .Text do continue
+		tx := c.renderData.text
+		strings.write_string(&b, string(tx.stringContents.chars[:tx.stringContents.length]))
+		strings.write_byte(&b, '\n')
+	}
+	return strings.to_string(b)
+}
+
+// A question needs the user as a block does (tab_need, as the Attention view, the pill and ⌥⌘A
+// count it): a folded project tree and a folded Open group keep it, and the filter counts it.
+@(test)
+question_is_never_concealed :: proc(t: ^testing.T) {
+	data := sb_dir("data")
+	context.allocator = sb_reset(data)
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	defer state^ = core.State{}
+	home := sb_dir("home")
+	os.set_env("HOME", home)
+	a := sb_dir("qa")
+	sb_session(store_dir(home, a), a, "q-1", "asks you something", 1, time.Hour)
+	core.rescan_now()
+	pa := by_cwd(a)
+	core.run_command(core.Select_Project{project_id = pa.id})
+	r := core.run_command(core.Open_Session_Cmd{project_id = pa.id, pi_session_id = "q-1"}, {kind = .UI})
+	s := core.find_session(r.created_id)
+	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
+	project_row_click(pa.id) // the selected project's row: folds its sessions
+	state.sidebar.folded[.Open] = true
+	testing.expect(t, tree.folded)
+	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "folded: nothing needs you, nothing shows")
+	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle, question = true}, {kind = .Script})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, core.session_waiting("q-1"))
+	testing.expect_value(t, strings.count(sb_drawn(), "asks you something"), 2) // the Open row and the tree's
+	core.run_command(core.Set_Filter{text = "zzz"})
+	testing.expect_value(t, core.sidebar_waiting_filtered(), 1)
+	core.run_command(core.Set_Filter{text = ""})
+	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle}, {kind = .Script})
+	testing.expect(t, !core.session_waiting("q-1"))
+	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "answered: folded away again")
+	tree.folded = false
+}
+
 // Paths are resolved (pi runs in the real folder): a symlink adds the same
 // project the store has, and pins are kept by the real path.
 @(test)

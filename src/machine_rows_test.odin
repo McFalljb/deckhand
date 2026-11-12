@@ -105,6 +105,12 @@ machine_rows_remote :: proc(t: ^testing.T) {
 	testing.expectf(t, strings.contains(got, "Waiting for you") && !strings.contains(got, "\ngarden\n"), "folded: %q", got)
 	tab.waiting = false
 	testing.expect(t, !strings.contains(drawn_text(), "Plant the beans"), "folded: nothing that waits, nothing")
+	// a question needs the user as a block does (tab_need): its row stays as well (drawn as often
+	// as the waiting one was: the row and the empty centre's list)
+	tab.agent, tab.question = .Idle, true
+	testing.expect_value(t, strings.count(drawn_text(), "Plant the beans"), strings.count(got, "Plant the beans"))
+	tab.agent, tab.question = .Unknown, false
+	testing.expect(t, !strings.contains(drawn_text(), "Plant the beans"), "folded: the question answered, gone")
 	machine_fold_toggle(3)
 	testing.expect(t, !machine_folded(3), "unfolded")
 

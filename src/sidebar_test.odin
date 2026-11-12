@@ -477,21 +477,23 @@ question_is_never_concealed :: proc(t: ^testing.T) {
 	core.run_command(core.Select_Project{project_id = pa.id})
 	r := core.run_command(core.Open_Session_Cmd{project_id = pa.id, pi_session_id = "q-1"}, {kind = .UI})
 	s := core.find_session(r.created_id)
+	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle, question = true}, {kind = .Script})
+	testing.expect(t, r.ok, r.error)
+	testing.expect(t, core.session_waiting("q-1"))
+	// the filter takes it out of the list: counted ("1 waiting (filtered)")
+	core.run_command(core.Set_Filter{text = "zzz"})
+	n := core.sidebar_waiting_filtered()
+	testing.expectf(t, n == 1, "waiting (filtered): %d; filter %q, project %q, rows %q", n, state.sidebar.filter, core.project_name(pa^), names(core.sidebar_sessions(.Sessions)))
+	core.run_command(core.Set_Filter{text = ""})
+	// folded: the project's tree and the Open group keep it
 	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 400, .Sessions
 	project_row_click(pa.id) // the selected project's row: folds its sessions
 	state.sidebar.folded[.Open] = true
 	testing.expect(t, tree.folded)
-	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "folded: nothing needs you, nothing shows")
-	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle, question = true}, {kind = .Script})
-	testing.expect(t, r.ok, r.error)
-	testing.expect(t, core.session_waiting("q-1"))
 	testing.expect_value(t, strings.count(sb_drawn(), "asks you something"), 2) // the Open row and the tree's
-	core.run_command(core.Set_Filter{text = "zzz"})
-	testing.expect_value(t, core.sidebar_waiting_filtered(), 1)
-	core.run_command(core.Set_Filter{text = ""})
 	r = core.run_command(core.Pi_Status_Update{tab_id = s.tabs[0].id, agent = .Idle}, {kind = .Script})
 	testing.expect(t, !core.session_waiting("q-1"))
-	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "answered: folded away again")
+	testing.expect(t, !strings.contains(sb_drawn(), "asks you something"), "answered: folded away")
 	tree.folded = false
 }
 

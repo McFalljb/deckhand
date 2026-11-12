@@ -72,11 +72,13 @@ harness_install_apply :: proc(c: Harness_Install) -> Result {
 HARNESS_GUARD_PATHS := [Harness][2]string {
 	.Pi     = {`$_pa/bin/pi`, `$HOME/.pi/agent/bin/pi`},
 	.Claude = {`$HOME/.local/bin/claude`, `$HOME/.claude/local/claude`},
+	.Codex  = {`/opt/homebrew/bin/codex`, `/usr/local/bin/codex`}, // npm's global bin is on PATH: command -v finds it
 }
 
 HARNESS_BIN_NAMES := [Harness]string {
 	.Pi     = "pi",
 	.Claude = "claude",
+	.Codex  = "codex",
 }
 
 // After the click, Enter is not the terminal's for this long: the habitual Enter (Next) must not

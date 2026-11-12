@@ -60,6 +60,7 @@ Session :: struct {
 	account:  string, // Claude: its account's config folder ("" = the default)
 	found:    bool, // Claude: a transcript found on disk, not in Deckhand's history
 	gone:     bool, // Claude: Deckhand's history entry whose transcript is gone (greyed)
+	codex:    bool, // with claude: a Codex conversation (codex.odin), its row's icon and words
 }
 
 @(private = "file")

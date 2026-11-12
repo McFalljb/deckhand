@@ -172,6 +172,7 @@ Notice :: struct {
 	run_dir:       string, // jobs: where the run's output is
 	read:          bool,
 	claude:        bool, // .Exited: a Claude tab's, not pi's
+	codex:         bool, // .Exited: with claude, a Codex tab's (codex.odin)
 	machine:       u64, // another machine's (machine_mirror.odin's mirror_alerts: its strings cleaned there; 0 = this Mac's)
 }
 
@@ -389,6 +390,7 @@ notify_session :: proc(s: ^Open_Session, tab: ^Tab, kind: Notice_Kind, tab_shown
 		title         = notice_text(open_session_title(s)),
 		place         = notice_text(place),
 		claude        = claude,
+		codex         = claude && claude_tab_is_codex(tab^),
 	}
 	return notice_post(n)
 }
@@ -585,7 +587,7 @@ notice_label :: proc(n: Notice) -> string {
 	case .Finished:      return "Finished"
 	case .Waiting:       return "Waiting for you"
 	case .Error:         return n.session == 0 && n.job_id == "" ? "Did not work" : "Stopped with an error" // notify_failed's
-	case .Exited:        return n.claude ? "Claude exited" : "pi exited"
+	case .Exited:        return n.claude ? (n.codex ? "Codex exited" : "Claude exited") : "pi exited"
 	case .Job_Finished:  return "Job finished"
 	case .Job_Needs_You: return "Job needs you"
 	case .Job_Failed:    return "Job failed"

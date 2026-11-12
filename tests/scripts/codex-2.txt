@@ -1,0 +1,38 @@
+# Codex tabs, run 2 (tests/scripts/codex.sh): the same data dir. The Codex session comes back; shown,
+# its tab starts again on its conversation (codex resume <id>, its hooks trusted again); closed, its
+# row (marked Codex) resumes it.
+wait 1500
+window_active on
+assert_state open_sessions.# 1
+assert_state open_sessions.0.tabs.0.harness codex
+assert_state open_sessions.0.claude_session_id 01a1d0d6-5353-7ff3-9308-ff91070ad530
+assert_state claude_sessions.0.harness codex
+command {"type":"focus_session","session":$session,"reopen":true}
+waitfor resume 01a1d0d6-5353-7ff3-9308-ff91070ad530 10000
+waitfor FAKE CODEX TRUST OK 4 5000
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state idle
+# its next prompt: SessionStart says resume, the same id
+type and the CHANGELOG
+key enter
+waitfor PROMPT: and the CHANGELOG 10000
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_state open_sessions.0.claude_session_id 01a1d0d6-5353-7ff3-9308-ff91070ad530
+assert_state claude_sessions.# 1
+# closed: its row resumes it in a new Codex session
+ui_command {"type":"close_session","session":$session}
+ui_command {"type":"close_session","session":$session,"confirm":"$token"}
+eventually
+assert_state open_sessions.# 0
+assert_rows sessions tidy the README,Untitled session · 2026-10-30 10:00
+shot codex/row
+command {"type":"claude_resume","claude_session_id":"01a1d0d6-5353-7ff3-9308-ff91070ad530"}
+assert_result ok true
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.tabs.0.harness codex
+waitfor resume 01a1d0d6-5353-7ff3-9308-ff91070ad530 10000
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state idle
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

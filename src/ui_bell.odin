@@ -310,7 +310,7 @@ bell_activate :: proc(id: u64) {
 				// its pi exited: it starts again, as opening the session does (dead_tab.odin)
 				if t == core.session_pi_tab(s) && core.tab_is_dead(t) do ui_do(core.Pi_Restart{tab_id = t.id})
 				// a Claude tab that exited: Claude starts again (not while it is still not found)
-				if _, is := t.kind.(core.Claude_Tab); is && core.tab_is_dead(t) && (!core.exit_not_found(t.exit) || core.claude_installed_now()) do ui_do(core.Claude_Restart{tab_id = t.id})
+				if _, is := t.kind.(core.Claude_Tab); is && core.tab_is_dead(t) && (!core.exit_not_found(t.exit) || core.claude_tab_installed_now(t)) do ui_do(core.Claude_Restart{tab_id = t.id})
 			} else do ui_do(core.Focus_Session{session = s.id, reopen = true})
 		} else if n.pi_session_id != "" && core.find_project(n.project_id) != nil {
 			ui_do(core.Open_Session_Cmd{project_id = n.project_id, pi_session_id = n.pi_session_id})

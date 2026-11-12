@@ -1246,6 +1246,7 @@ Held_Kind :: enum u8 {
 	Shell,
 	Pi,
 	Claude,
+	Codex, // a Codex tab's codex (codex.odin): never adopted as a Claude tab, nor the reverse
 }
 
 HELD_KIND_NAMES := [Held_Kind]string {
@@ -1253,6 +1254,7 @@ HELD_KIND_NAMES := [Held_Kind]string {
 	.Shell   = "shell",
 	.Pi      = "pi",
 	.Claude  = "claude",
+	.Codex   = "codex",
 }
 
 Held_Start :: struct {
@@ -1620,6 +1622,7 @@ tokens_load :: proc(path: string, key: []u8) -> (ok: bool, why: string) {
 		case "shell":  st.kind = .Shell
 		case "pi":     st.kind = .Pi
 		case "claude": st.kind = .Claude
+		case "codex":  st.kind = .Codex
 		case:          return false, "bad kind"
 		}
 		if r, has := o["pi_ro"]; has {

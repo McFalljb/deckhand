@@ -64,6 +64,7 @@ Claude_Tab :: struct {
 	ended:      Claude_Ended, // how its last turn ended (Stop, StopFailure): a question or error dot (claude_rows.odin)
 	account:    string, // its Claude Code account's config folder (claude_accounts.odin; "" = the default); saved
 	resume_path: string, // a transcript found on disk: --resume takes its absolute path (claude_disk.odin); "" = by id
+	codex:      bool, // a Codex CLI tab (codex.odin): codex instead of claude; saved
 }
 
 // A Claude Code session Deckhand ran, for Resume (the project's "…" menu) and restore.
@@ -79,6 +80,7 @@ Claude_Record :: struct {
 	model:   string, // the model it last reported
 	readonly: bool, // it ran read-only: every resume of it is read-only too (§1a)
 	account: string, // its account's config folder (claude_accounts.odin); "" = the default (older entries)
+	codex:   bool, // a Codex conversation (codex.odin): resumed with `codex resume <id>`
 }
 
 CLAUDE_HISTORY_MAX :: 100
@@ -98,6 +100,7 @@ New_Claude_Tab :: struct {
 	resume:     string, // a Claude session id to resume ("" = a new conversation)
 	args:       []string, // extra flags; the user's (and scripts') only
 	account:    string, // a configured account's label or folder ("" = the resumed entry's, else the last used)
+	codex:      bool, // a Codex tab instead (codex.odin; wire: harness "codex"): no flags, no account
 }
 // A Claude-only session in a project (its main tab a Claude tab, no pi tab).
 New_Claude_Session :: struct {
@@ -105,6 +108,7 @@ New_Claude_Session :: struct {
 	cwd:        string,
 	args:       []string,
 	account:    string, // a configured account's label or folder ("" = the project's last used, else the last used)
+	codex:      bool, // a Codex-only session instead (codex.odin; wire: harness "codex"): no flags, no account
 }
 // A Deckhand title for a Claude session of the history (the user's; "" = none).
 Claude_Rename :: struct {
@@ -220,7 +224,7 @@ claude_typed :: proc(tab_id: u64) -> bool {
 claude_ready :: proc(tab: ^Tab, ct: ^Claude_Tab) -> (ok: bool, why: string) {
 	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
 	if tab.status != .Running do w = .Not_Running
-	return w == .None, CLAUDE_WAIT_WHY[w]
+	return w == .None, ct.codex ? CODEX_WAIT_WHY[w] : CLAUDE_WAIT_WHY[w]
 }
 
 // Why nothing can go into a Claude tab's prompt now (claude_ready).
@@ -248,6 +252,18 @@ CLAUDE_WAIT_WHY := [Claude_Wait]string {
 	.No_Paste    = "Claude's input does not take pasted text now",
 }
 
+CODEX_WAIT_WHY := [Claude_Wait]string {
+	.None        = "",
+	.Not_Running = "Codex is not running in this tab",
+	.Ro_Guard    = "",
+	.Sending     = "sending",
+	.Starting    = "Codex is starting (or a dialog of its own is open)",
+	.Working     = "Codex is working",
+	.Waiting     = "Codex is waiting for you",
+	.Typing      = "you are typing a message",
+	.No_Paste    = "Codex's input does not take pasted text now",
+}
+
 // claude_ready's answer from the core's runtime.
 claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
 	if tab.status != .Running do return .Not_Running
@@ -255,6 +271,27 @@ claude_wait_of :: proc(tab: ^Tab, ct: ^Claude_Tab) -> Claude_Wait {
 	// a read-only start: nothing goes in before its profile acked (a prompt before it stops the tab)
 	if rt.ro_need && !rt.ro_acked do return .Ro_Guard
 	if rt.enter_due != {} do return .Sending
+	if ct.codex {
+		// Codex (codex.odin) starts its session, and so its hooks, at the first prompt: before that
+		// its own OSC 7501 alone says it is idle. It must always say so (it reports nothing while a
+		// login or trust dialog is up), and the hooks, once they report, must agree: Enter during a
+		// turn would steer it.
+		v := tab_status_view(tab^)
+		if v.source != .Osc7501 do return .Starting
+		#partial switch v.state {
+		case .Blocked: return .Waiting
+		case .Working: return .Working
+		}
+		#partial switch ct.turn {
+		case .Working: return .Working
+		case .Waiting: return .Waiting
+		}
+		if rt.typed do return .Typing
+		t := term_of(tab.id)
+		if t == nil || !t.running do return .Not_Running
+		if !mode_on(t, 2004) do return .No_Paste
+		return .None
+	}
 	switch ct.turn {
 	case .Unknown: return .Starting
 	case .Working: return .Working
@@ -311,6 +348,7 @@ claude_command_text :: proc(text: string) -> string {
 claude_paste_message :: proc(tab: ^Tab, text: string, slash := false) -> string {
 	ct, is := &tab.kind.(Claude_Tab)
 	if !is do return "not a Claude tab"
+	if ct.codex do return CODEX_NO_COMMENTS // comments, review asks, /model: Claude's (codex.odin)
 	if ok, why := claude_ready(tab, ct); !ok do return why
 	if slash {
 		if text != CLAUDE_MODEL_COMMAND do return "not Deckhand's own command"
@@ -338,7 +376,14 @@ claude_tick :: proc() {
 			if rt.enter_due != {} && time.tick_since(rt.enter_due) >= 0 {
 				rt.enter_due = {}
 				claude_rt[tab.id] = rt
-				if t := term_of(tab.id); t != nil && t.running do pty_write(&t.pty, transmute([]u8)string("\r"))
+				// Codex working or blocked since the paste (its OSC 7501, or its hooks' permission): an
+				// Enter now would steer the turn or answer a dialog; dropped (the text stays typed)
+				enter := true
+				if ct.codex {
+					v := tab_status_view(tab)
+					if (v.source == .Osc7501 && (v.state == .Working || v.state == .Blocked)) || ct.turn == .Waiting do enter = false
+				}
+				if t := term_of(tab.id); enter && t != nil && t.running do pty_write(&t.pty, transmute([]u8)string("\r"))
 				window_state_changed()
 				continue
 			}
@@ -415,6 +460,7 @@ claude_tab_cmd :: proc() -> string {
 // restart): the user's default flags as the setting is now (claude_with_defaults), never saved;
 // a read-only start leaves them out and says so.
 claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cwd: string, flags := true, defaults := false) -> bool {
+	if ct.codex do return codex_start(s, t, tab_id, ct, cwd) // codex.odin: no plugin, flags, account or read-only profile
 	plugin := claude_plugin_dir()
 	if plugin == "" {
 		term_note(t, "Deckhand's Claude Code plugin is missing from this build (integrations/claude-code): rebuild Deckhand.")
@@ -477,25 +523,29 @@ claude_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, c
 		socket_forget_tab(tab_id)
 		return false
 	}
-	socket_claude_pid(tab_id, t.pty.pid)
-	claude_wait_started(tab_id) // waits on its earlier run end (claude_wait.odin)
-	ct.turn = .Unknown
-	ct.ended = .None // a new process: how the last one's turn ended is gone
-	window_state_changed() // a restart from a reload tick says nothing
-	rt := claude_rt[tab_id]
-	rt = {}
-	claude_rt[tab_id] = rt
-	claude_work_reset(tab_id) // a new process: its todos and subagents start empty (claude_panels.odin)
-	ct.guard_stopped = false
+	claude_run_started(tab_id, t, ct)
 	if ro {
 		// it must prove the profile loaded (its SessionStart hook acks this nonce)
-		rt = claude_rt[tab_id]
+		rt := claude_rt[tab_id]
 		rt.ro_need = true
 		copy(rt.ro_nonce[:], nonce)
 		claude_rt[tab_id] = rt
 		socket_tokens_ro(tab_id, true, false, nonce) // tokens.json: unconfirmed (an adopted copy is stopped)
 	}
 	return true
+}
+
+// A Claude or Codex tab's process started (its pid in t): its token's hellos must come from below
+// it, waits on the earlier run end, and the run's state starts afresh.
+claude_run_started :: proc(tab_id: u64, t: ^Term, ct: ^Claude_Tab) {
+	socket_claude_pid(tab_id, t.pty.pid)
+	claude_wait_started(tab_id) // waits on its earlier run end (claude_wait.odin)
+	ct.turn = .Unknown
+	ct.ended = .None // a new process: how the last one's turn ended is gone
+	window_state_changed() // a restart from a reload tick says nothing
+	claude_rt[tab_id] = {}
+	claude_work_reset(tab_id) // a new process: its todos and subagents start empty (claude_panels.odin)
+	ct.guard_stopped = false
 }
 
 // Comment crops copied for Claude (comments_claude_take) that are over a day old go.
@@ -780,6 +830,12 @@ claude_installed :: proc() -> bool {
 
 claude_recheck :: proc() {claude_found = .Unknown}
 
+// The installed check for the harness of a tab's (claude_missing or codex_missing).
+claude_tab_missing :: proc(tab: ^Tab, caller: Caller) -> (r: Result, missing: bool) {
+	if ct, is := tab.kind.(Claude_Tab); is && ct.codex do return codex_missing(caller)
+	return claude_missing(caller)
+}
+
 // claude_installed, with a cached "no" looked up again first: what a user's action asks (a Restart,
 // a click, a session shown: the user may have installed it since).
 claude_installed_now :: proc() -> bool {
@@ -874,6 +930,28 @@ claude_record :: proc(id: string) -> (^Claude_Record, int) {
 	return nil, -1
 }
 
+// A Claude tab of p's reports or resumes id: when a Codex tab claimed it but Claude Code's own
+// transcript of p's has it, the Codex claim was never legitimate (an id's harness is where it was
+// first legitimately seen): its record and the Codex tabs' hold on it go.
+codex_claim_drop :: proc(p: ^Project, id: string) {
+	rec, i := claude_record(id)
+	if rec == nil || !rec.codex do return
+	if _, ok := claude_disk_find(p, id); !ok do return
+	record_free(rec^)
+	ordered_remove(&state.claude_history, i)
+	for &s in state.open_sessions do for &tab in s.tabs {
+		ct, is := &tab.kind.(Claude_Tab)
+		if !is || !ct.codex || ct.session_id != id do continue
+		if s.agent == .Claude && s.tabs[0].id == tab.id && s.pi_session_id == id {
+			delete(s.pi_session_id)
+			s.pi_session_id = ""
+		}
+		delete(ct.session_id)
+		ct.session_id = ""
+	}
+	window_state_changed()
+}
+
 @(private = "file")
 record_free :: proc(r: Claude_Record) {
 	delete(r.id)
@@ -896,9 +974,10 @@ clone_strings :: proc(list: []string) -> []string {
 
 // The session id (and where it ran) goes to the front of the history; its title and flags stay.
 @(private = "file")
-history_touch :: proc(id, cwd, project: string, args: []string, readonly: bool, account: string) {
-	// every entry records its account's folder (the default's when the tab has none)
-	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), readonly = readonly, account = strings.clone(claude_account_dir(account))}
+history_touch :: proc(id, cwd, project: string, args: []string, readonly: bool, account: string, codex := false) {
+	// every entry records its account's folder (the default's when the tab has none); a Codex
+	// conversation has none (codex.odin)
+	rec := Claude_Record{id = strings.clone(id), cwd = strings.clone(cwd), project = strings.clone(project), used = time.now()._nsec / 1e9, args = clone_strings(args), readonly = readonly, account = codex ? "" : strings.clone(claude_account_dir(account)), codex = codex}
 	if old, i := claude_record(id); old != nil {
 		// its account stays (its transcript is in that folder)
 		if old.account != "" {
@@ -953,7 +1032,7 @@ claude_resume_open :: proc(id: string, caller: Caller) -> (r: Result, open: bool
 	if tab.status == .Exited {
 		if restart_waiting(tab.id) do return fail("this tab is restarting"), true // never an agent's flagless restart over the user's
 		if s.missing do return fail("this session is gone"), true
-		if mr, missing := claude_missing(caller); missing do return mr, true
+		if mr, missing := claude_tab_missing(tab, caller); missing do return mr, true
 		if rr := claude_tab_restart(s, tab, caller.kind == .UI); !rr.ok do return rr, true
 	}
 	if caller.kind == .UI || caller.kind == .Script do run_command(Focus_Tab{tab_id = tid}, {kind = caller.kind == .UI ? .UI : .Internal})
@@ -990,9 +1069,10 @@ claude_host :: proc(p: ^Project) -> ^Open_Session {
 // Opens a Claude tab in s. focus: the user's and scripts' tabs come to the front; an agent's
 // open behind (an agent never changes what the user sees).
 @(private = "file")
-claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "") -> (Result, bool) {
+claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", codex := false) -> (Result, bool) {
+	if codex && caller.hub do return fail(CODEX_REMOTE), false // every new Codex tab (a row's resume too): never a hub's (machine_route.odin)
 	focus := caller.kind == .UI || caller.kind == .Script
-	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path)}, title = strings.clone("Claude"), status = .Running}
+	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), codex = codex}, title = strings.clone(codex ? "Codex" : "Claude"), status = .Running}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
 	ct := &tab.kind.(Claude_Tab)
 	t := new_term(tab.id)
@@ -1001,7 +1081,7 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 		tab_free_kind(&tab)
 		delete(tab.title)
 		delete(tab.cwd)
-		return fail("could not start Claude Code"), false
+		return fail(codex ? "could not start Codex" : "could not start Claude Code"), false
 	}
 	pane_add_tab(s, tab, pane = open_pane(s, caller))
 	if focus {
@@ -1010,10 +1090,10 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 	}
 	if resume != "" {
 		p := find_project(s.project_id)
-		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, ct.readonly, account)
+		history_touch(resume, cwd, p != nil ? p.cwd : s.cwd, args, ct.readonly, account, codex)
 	}
 	// the next new session's default (claude_account_pick); the user's own choice
-	if caller.kind == .UI && account != "" && account != state.settings.claude_account_last {
+	if caller.kind == .UI && !codex && account != "" && account != state.settings.claude_account_last {
 		delete(state.settings.claude_account_last)
 		state.settings.claude_account_last = strings.clone(account)
 	}
@@ -1024,11 +1104,11 @@ claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, calle
 // given). focus: the user's and scripts' come to the front; an agent's open behind. created_id =
 // the session.
 @(private = "file")
-claude_open_session :: proc(p: ^Project, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "") -> (Result, bool) {
+claude_open_session :: proc(p: ^Project, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", codex := false) -> (Result, bool) {
 	append(&state.open_sessions, Open_Session{id = new_id(), agent = .Claude, project_id = p.id, cwd = strings.clone(p.cwd), pi_session_id = strings.clone(resume)})
 	s := &state.open_sessions[len(state.open_sessions) - 1]
 	id := s.id
-	r, _ := claude_open(s, cwd, resume, args, caller, account, resume_path)
+	r, _ := claude_open(s, cwd, resume, args, caller, account, resume_path, codex)
 	s = find_session(id)
 	if !r.ok {
 		delete(s.cwd)
@@ -1065,8 +1145,9 @@ claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = n
 // Claude tab first (its Claude session id is the session's), then its other tabs. A gone project
 // folder: "gone", never started.
 claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool) {
-	if !claude_id_ok(c.pi_session_id) do return fail("not a Claude session id"), false
 	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || claude_args_check(c.tabs[0].args) != "" do return fail("a Claude session's first tab is its Claude tab"), false
+	if !(c.tabs[0].codex ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
+	if c.tabs[0].codex && (len(c.tabs[0].args) > 0 || c.tabs[0].readonly) do return fail("a Codex tab has no flags and no read-only mode"), false // restore_tab drops it: never a session without its main tab
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
@@ -1133,7 +1214,7 @@ caller_label :: proc(caller: Caller) -> string {
 claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, changed: bool) {
 	#partial switch c in cmd {
 	case New_Claude_Tab:
-		if mr, missing := claude_missing(caller); missing do return mr, false
+		if mr, missing := claude_harness_missing(c.codex, caller); missing do return mr, false
 		s: ^Open_Session
 		if c.session != 0 {
 			s = find_session(c.session)
@@ -1152,6 +1233,12 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		} else do return fail("session or project_id is needed"), false
 		if s.home do return fail("Home has only its pi tab"), false
 		if s.missing do return fail("this session is gone"), false
+		if c.codex {
+			// Codex (codex.odin): no flags, no account, never read-only
+			if len(c.args) > 0 do return fail(CODEX_NO_FLAGS), false
+			if c.account != "" do return fail("a Codex tab has no Claude Code account"), false
+			if claude_chat_readonly(s) do return fail(CODEX_READONLY), false
+		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets Claude Code's flags"), false
 		if e := claude_args_check(c.args); e != "" do return fail(e), false
 		// read-only (a chat while chats are, or a conversation that ran read-only): the allowlist
@@ -1159,7 +1246,15 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if claude_readonly_known(c.resume) do ro = true
 		if ro do if e := claude_readonly_refusal(c.args); e != "" do return fail(e), false
 		if c.resume != "" {
-			if !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
+			if c.codex && !codex_id_ok(c.resume) do return fail("resume must be a Codex session id"), false
+			if !c.codex && !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
+			// a conversation resumes in its own harness only (codex.odin: one id, one harness)
+			if c.codex && claude_conversation_seen(find_project(s.project_id), c.resume) do return fail("that id is another harness's conversation"), false
+			if !c.codex do codex_claim_drop(find_project(s.project_id), c.resume)
+			if rec, _ := claude_record(c.resume); rec != nil && rec.codex != c.codex do return fail("that id is another harness's conversation"), false
+			if tid := claude_tab_of_session(c.resume); tid != 0 {
+				if _, ot, oct := claude_tab_of(tid); ot != nil && oct.codex != c.codex do return fail("that id is another harness's conversation"), false
+			}
 			if r, open := claude_resume_open(c.resume, caller); open do return r, r.ok
 			// a pi session's id, or another open session's key: never resumed as Claude
 			if claude_id_taken(s, nil, find_project(s.project_id), c.resume) do return fail("that id is another session's"), false
@@ -1174,6 +1269,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			if !within(p, fs_real(s.cwd)) && (pr == nil || !within(p, fs_real(pr.cwd))) do return fail("cwd must be inside the session's project"), false
 			cwd = p
 		}
+		if c.codex do return claude_open(s, cwd, c.resume, nil, caller, "", codex = true)
 		// its account: the one named (configured only), else the resumed entry's, else the default pick
 		account, aerr := claude_account_resolve(c.account)
 		if aerr != "" do return fail(aerr), false
@@ -1196,6 +1292,12 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			chats_instructions_ensure(date_stamp())
 		}
 		if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
+		if c.codex {
+			// Codex (codex.odin): no flags, no account, never read-only
+			if len(c.args) > 0 do return fail(CODEX_NO_FLAGS), false
+			if c.account != "" do return fail("a Codex session has no Claude Code account"), false
+			if p.group == .Chats && state.settings.chats_readonly do return fail(CODEX_READONLY), false
+		}
 		if len(c.args) > 0 && caller.kind != .UI && caller.kind != .Script && caller.kind != .Internal do return fail("only the user sets Claude Code's flags"), false
 		if e := claude_args_check(c.args); e != "" do return fail(e), false
 		if p.group == .Chats && state.settings.chats_readonly do if e := claude_readonly_refusal(c.args); e != "" do return fail(e), false
@@ -1208,6 +1310,10 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			// inside the project, or a checkout of its repository (a worktree's New session here, Claude Code picked)
 			if !within(at, fs_real(p.cwd)) && wt_checkout_err(p.cwd, at, listed = true) != "" do return fail("cwd must be inside the project or one of its repository's checkouts"), false
 			cwd = at
+		}
+		if c.codex {
+			if mr, missing := codex_missing(caller); missing do return mr, false
+			return claude_open_session(p, cwd, "", nil, caller, "", codex = true)
 		}
 		if mr, missing := claude_missing(caller); missing do return mr, false
 		account, aerr := claude_account_resolve(c.account)
@@ -1232,6 +1338,26 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		p := project_by_cwd(rec.project)
 		if ch := chats_project(); p == nil && ch != nil && ch.cwd == rec.project do p = ch // a Claude chat
 		if p == nil do return fail("its project is not listed"), false
+		if rec.codex && claude_conversation_seen(p, rec.id) {
+			// Claude Code's own transcript has this id: the Codex claim goes and the row opens as
+			// the Claude conversation it is (codex.odin: ids are one space, Claude's transcript wins)
+			id := strings.clone(rec.id, context.temp_allocator)
+			codex_claim_drop(p, id)
+			f, ok := claude_disk_lookup(p, id)
+			if !ok do return fail("no such session in this project"), false
+			r, ch := claude_disk_resume(p, f, caller)
+			if !r.ok do return r, ch
+			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
+		}
+		if rec.codex {
+			// a Codex conversation (codex.odin): `codex resume <id>`, no flags, no account
+			if !codex_id_ok(rec.id) do return fail("not a Codex session id"), false
+			if mr, missing := codex_missing(caller); missing do return mr, false
+			id := strings.clone(rec.id, context.temp_allocator)
+			r, ch := claude_open_session(p, claude_resume_cwd(rec, p), id, nil, caller, "", codex = true)
+			if !r.ok do return r, ch
+			return {ok = true, created_id = find_session(r.created_id).tabs[0].id}, true
+		}
 		if mr, missing := claude_missing(caller); missing do return mr, false
 		// under the account it ran in, while that is configured (never another account's folder)
 		if !claude_account_known(rec.account) do return fail(fmt.tprintf("its Claude account (%s) is no longer in Settings → Claude accounts", path_tilde(claude_account_dir(rec.account)))), false
@@ -1249,11 +1375,17 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	case Claude_Session_Report:
 		s, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
-		if !claude_id_ok(c.session_id) do return fail("session_id must be a Claude session id"), false
+		if !claude_tab_id_ok(ct, c.session_id) do return fail(ct.codex ? "session_id must be a Codex session id" : "session_id must be a Claude session id"), false
 		p := find_project(s.project_id)
 		project := p != nil ? p.cwd : s.cwd
+		// one id, one harness (codex.odin): Codex never takes Claude Code's; Claude Code's own
+		// transcript beats a Codex claim on its id
+		if ct.codex && claude_conversation_seen(p, c.session_id) do return fail("that id is another harness's conversation"), false
+		if !ct.codex do codex_claim_drop(p, c.session_id)
 		if rec, _ := claude_record(c.session_id); rec != nil && rec.project != project do return fail("that Claude session belongs to another project"), false
+		if rec, _ := claude_record(c.session_id); rec != nil && rec.codex != ct.codex do return fail("that id is another harness's conversation"), false
 		if claude_id_taken(s, tab, p, c.session_id) do return fail("that id is another session's"), false
+		if ct.codex do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		if ct.session_id != c.session_id {
 			delete(ct.session_id)
 			ct.session_id = strings.clone(c.session_id)
@@ -1264,7 +1396,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			s.pi_session_id = strings.clone(c.session_id)
 		}
 		cwd := tab.cwd != "" ? tab.cwd : s.cwd
-		history_touch(c.session_id, cwd, project, ct.args, ct.readonly, ct.account)
+		history_touch(c.session_id, cwd, project, ct.args, ct.readonly, ct.account, ct.codex)
 		if ct.readonly do claude_readonly_mark(c.session_id) // a new conversation of a read-only tab (/clear) too
 		if rt := claude_rt[tab.id]; rt.ro_need && !rt.ro_acked && rt.ro_due == {} {
 			rt.ro_due = time.tick_add(time.tick_now(), CLAUDE_ACK_AFTER_SESSION)
@@ -1276,6 +1408,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		ts, tab, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
 		was := ct.turn
+		if ct.codex do claude_status_heard(tab.id) // its hooks run (claude_status.odin)
 		defer if claude_status_turn(ts, tab, was, c.state, c.idle_prompt) do window_state_changed() // dots without OSC 7501 (claude_status.odin)
 		ended := claude_rows_turn(ct, c.state, c.question, c.idle_prompt) // the question and error dots (claude_rows.odin)
 		switch c.state {
@@ -1288,6 +1421,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			ct.turn = .Working
 			rt := claude_rt[tab.id]
 			rt.typed = false // the prompt the user typed went: the input is empty again
+			rt.enter_due = {} // a submission since a paste: its Enter is not due any more
 			claude_rt[tab.id] = rt
 			claude_work_submitted(tab) // finished subagents leave its panel
 			if r, _ := claude_record(ct.session_id); r != nil {
@@ -1303,11 +1437,13 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 	case Claude_Comments:
 		s, _, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
+		if ct.codex do return fail(CODEX_NO_COMMENTS), false
 		limit := c.max <= 0 ? CLAUDE_COMMENTS_MAX : min(c.max, CLAUDE_COMMENTS_MAX)
 		return comments_claude_take(s, max(limit, 4000)), false
 	case Claude_Attached:
 		s, _, ct := claude_tab_of(c.tab_id)
 		if ct == nil do return fail("no such Claude tab"), false
+		if ct.codex do return fail(CODEX_NO_COMMENTS), false
 		return {ok = true}, comments_claude_attached(s, c.attachment_id)
 	case Claude_Prompt:
 		_, tab, ct := claude_tab_of(c.tab_id)
@@ -1316,7 +1452,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if tab.status != .Running do return fail("Claude is not running in this tab"), false
 		text := strings.trim_right(c.text, " \t\r\n")
 		if text == "" do return fail("text is empty"), false
-		if why := claude_command_text(text); why != "" do return fail(why), false
+		if why := claude_tab_command_text(ct, text); why != "" do return fail(why), false
 		if len(text) > CLAUDE_PROMPT_MAX do return fail(fmt.tprintf("text is over %d KB", CLAUDE_PROMPT_MAX / 1024)), false
 		if len(ct.held) >= CLAUDE_HELD_MAX do return fail(fmt.tprintf("%d texts already wait for this Claude tab", CLAUDE_HELD_MAX)), false
 		hid := claude_held_id()
@@ -1336,6 +1472,12 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		case "send":
 			if len(ct.held) == 0 do return fail("nothing waits"), false
 			if tab.status != .Running do return fail("Claude is not running in this tab"), false
+			if ct.codex {
+				// Codex: only at an idle composer per OSC 7501 and the hooks (never into a running
+				// turn: Enter would steer it); Send now skips just the wait for what the user typed
+				if w := claude_wait_of(tab, ct); w != .None && w != .Typing do return fail(CODEX_WAIT_WHY[w]), false
+				return claude_apply(Claude_Deliver{tab_id = c.tab_id, force = true}, caller, request_id)
+			}
 			// the user's call goes into whatever they typed, never into a dialog (its Enter would
 			// pick the highlighted answer) nor before Claude is up
 			// only at an idle turn (a permission dialog can be up before its hook says so): Send now
@@ -1367,6 +1509,13 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		t := term_of(tab.id)
 		if t == nil || !t.running do return fail("Claude is not running in this tab"), false
 		h := ct.held[0]
+		if why := claude_tab_command_text(ct, h.text); why != "" { 	// held before the tab's rule changed: never pasted
+			ordered_remove(&ct.held, 0)
+			claude_wait_dropped(h.id)
+			delete(h.text)
+			delete(h.who)
+			return fail(why), true
+		}
 		ordered_remove(&ct.held, 0)
 		term_paste(t, h.text)
 		delete(h.text)
@@ -1400,7 +1549,8 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		for r in c.records {
 			// as a report would be: an id that can go into argv, no flags Deckhand sets, an absolute
 			// project, a one-line title of at most CLAUDE_TITLE_MAX
-			if !claude_id_ok(r.id) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
+			if !(r.codex ? codex_id_ok(r.id) : claude_id_ok(r.id)) || len(state.claude_history) >= CLAUDE_HISTORY_MAX do continue
+			if r.codex && (len(r.args) > 0 || r.readonly) do continue // a Codex conversation has neither
 			if claude_args_check(r.args) != "" || !strings.has_prefix(r.project, "/") do continue
 			if old, _ := claude_record(r.id); old != nil do continue
 			title := cut_utf8(strings.trim_space(one_line(r.title, context.temp_allocator)), CLAUDE_TITLE_MAX)
@@ -1408,8 +1558,8 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			// its account: an absolute folder, else "" (an older entry's): the default account as
 			// resolved when it is used, never a folder stamped at load (from inside a Claude session
 			// whose login shell did not answer, the environment's would be the parent session's)
-			acct := filepath.is_abs(r.account) ? r.account : ""
-			append(&state.claude_history, Claude_Record{id = strings.clone(r.id), cwd = strings.clone(r.cwd), project = strings.clone(r.project), title = strings.clone(title), used = r.used, args = clone_strings(r.args), named = r.named && title != "", transcript = strings.clone(claude_transcript_ok(r.transcript)), model = strings.clone(claude_model_clean(r.model)), readonly = r.readonly, account = strings.clone(acct)})
+			acct := filepath.is_abs(r.account) && !r.codex ? r.account : ""
+			append(&state.claude_history, Claude_Record{id = strings.clone(r.id), cwd = strings.clone(r.cwd), project = strings.clone(r.project), title = strings.clone(title), used = r.used, args = clone_strings(r.args), named = r.named && title != "", transcript = strings.clone(claude_transcript_ok(r.transcript)), model = strings.clone(claude_model_clean(r.model)), readonly = r.readonly, account = strings.clone(acct), codex = r.codex})
 		}
 		return {ok = true}, true
 	}
@@ -1472,8 +1622,10 @@ claude_command_write :: proc(b: ^strings.Builder, cmd: Command, redact: bool) {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, c.account)
 		}
+		if c.codex do strings.write_string(b, `,"harness":"codex"`)
 	case New_Claude_Session:
 		fmt.sbprintf(b, `,"project_id":%d`, c.project_id)
+		if c.codex do strings.write_string(b, `,"harness":"codex"`)
 		if c.account != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, c.account)
@@ -1538,8 +1690,8 @@ claude_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Co
 		return out
 	}
 	#partial switch c in cmd {
-	case New_Claude_Tab:        return New_Claude_Tab{session = c.session, project_id = c.project_id, cwd = s(c.cwd, allocator), resume = s(c.resume, allocator), args = ss(c.args, allocator), account = s(c.account, allocator)}
-	case New_Claude_Session:    return New_Claude_Session{project_id = c.project_id, cwd = s(c.cwd, allocator), args = ss(c.args, allocator), account = s(c.account, allocator)}
+	case New_Claude_Tab:        return New_Claude_Tab{session = c.session, project_id = c.project_id, cwd = s(c.cwd, allocator), resume = s(c.resume, allocator), args = ss(c.args, allocator), account = s(c.account, allocator), codex = c.codex}
+	case New_Claude_Session:    return New_Claude_Session{project_id = c.project_id, cwd = s(c.cwd, allocator), args = ss(c.args, allocator), account = s(c.account, allocator), codex = c.codex}
 	case Claude_Rename:         return Claude_Rename{claude_session_id = s(c.claude_session_id, allocator), title = s(c.title, allocator)}
 	case Claude_Resume:         return Claude_Resume{claude_session_id = s(c.claude_session_id, allocator)}
 	case Claude_Session_Report: return Claude_Session_Report{tab_id = c.tab_id, session_id = s(c.session_id, allocator), cwd = s(c.cwd, allocator), source = s(c.source, allocator), transcript_path = s(c.transcript_path, allocator), model = s(c.model, allocator)}
@@ -1548,7 +1700,7 @@ claude_command_clone :: proc(cmd: Command, allocator := context.allocator) -> Co
 	case Claude_Held_Op:        return Claude_Held_Op{tab_id = c.tab_id, op = s(c.op, allocator)}
 	case Claude_Restore_History:
 		out := make([]Claude_Record, len(c.records), allocator)
-		for r, i in c.records do out[i] = {id = s(r.id, allocator), cwd = s(r.cwd, allocator), project = s(r.project, allocator), title = s(r.title, allocator), used = r.used, args = ss(r.args, allocator), named = r.named, transcript = s(r.transcript, allocator), model = s(r.model, allocator), readonly = r.readonly, account = s(r.account, allocator)}
+		for r, i in c.records do out[i] = {id = s(r.id, allocator), cwd = s(r.cwd, allocator), project = s(r.project, allocator), title = s(r.title, allocator), used = r.used, args = ss(r.args, allocator), named = r.named, transcript = s(r.transcript, allocator), model = s(r.model, allocator), readonly = r.readonly, account = s(r.account, allocator), codex = r.codex}
 		return Claude_Restore_History{records = out, readonly_ids = ss(c.readonly_ids, allocator)}
 	case Claude_Readonly_Ack: return Claude_Readonly_Ack{tab_id = c.tab_id, nonce = s(c.nonce, allocator)}
 	}
@@ -1611,6 +1763,7 @@ claude_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	json_quote(b, ct.session_id)
 	fmt.sbprintf(b, `,"turn":"%s","held":%d,"typed":%v,"argc":%d`, CLAUDE_TURN_NAMES[ct.turn], len(ct.held), claude_typed(tab.id), len(ct.args))
 	if ct.readonly do strings.write_string(b, `,"readonly":true`)
+	if ct.codex do strings.write_string(b, `,"harness":"codex"`)
 	if tag := claude_account_tag(ct.account); tag != "" {
 		strings.write_string(b, `,"account":`)
 		json_quote(b, tag)
@@ -1644,6 +1797,7 @@ claude_history_json :: proc(b: ^strings.Builder, list: []Claude_Record, found, f
 		}
 		fmt.sbprintf(b, `,"used":%d,"open":%v`, r.used, claude_open_tab(r.id) != 0)
 		if r.readonly do strings.write_string(b, `,"readonly":true`)
+		if r.codex do strings.write_string(b, `,"harness":"codex"`)
 		if tag := claude_account_tag(r.account); tag != "" {
 			strings.write_string(b, `,"account":`)
 			json_quote(b, tag)

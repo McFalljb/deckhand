@@ -576,6 +576,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 	case Send_Text:
 		kv_u64(&w, "tab_id", c.tab_id)
 		kv_str(&w, "text", redact ? fmt.tprintf("<redacted %d bytes>", len(c.text)) : c.text)
+		if c.generated do kv_bool(&w, "generated", true)
 	case Set_Focus:
 		kv_str(&w, "widget", c.widget)
 	case Focus_Take:
@@ -1116,6 +1117,7 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.resume != "" do kv_str(&w, "resume", c.resume)
 		if len(c.args) > 0 do strs(&w, "args", c.args)
 		if c.account != "" do kv_str(&w, "account", c.account)
+		if c.codex do kv_str(&w, "harness", "codex")
 		obj_end(&w)
 		return
 	case New_Claude_Session:
@@ -1125,6 +1127,7 @@ write_command_wire :: proc(b: ^strings.Builder, cmd: Command) {
 		if c.cwd != "" do kv_str(&w, "cwd", c.cwd)
 		if len(c.args) > 0 do strs(&w, "args", c.args)
 		if c.account != "" do kv_str(&w, "account", c.account)
+		if c.codex do kv_str(&w, "harness", "codex")
 		obj_end(&w)
 		return
 	case Claude_Rename:
@@ -1622,6 +1625,7 @@ write_state :: proc(b: ^strings.Builder, s: State) {
 	kv_u64(&w, "shown_before", s.shown_before)
 	fmt.sbprintf(b, `,"pi_installed":%v`, pi_installed()) // pi found (harness.odin): stat, else the login shell's answer
 	fmt.sbprintf(b, `,"claude_installed":%v`, claude_installed()) // Claude Code found (claude.odin): new_claude_session would start
+	fmt.sbprintf(b, `,"codex_installed":%v`, codex_installed()) // Codex found (codex.odin): new_claude_session harness codex would start
 	if !writing_tab_view do claude_accounts_json(b) // the Claude Code accounts (claude_accounts.odin): labels and folders; the full snapshot only
 	if !writing_tab_view && len(s.machines) > 0 { // other machines over SSH (machines.odin): never their ssh target
 		strings.write_string(b, `,"machines":[`)

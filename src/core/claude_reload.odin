@@ -328,6 +328,7 @@ claude_version_label :: proc(v: string) -> string {
 // Whether a Claude tab started with another claude than the one on disk.
 claude_reload_outdated :: proc(t: ^Tab) -> bool {
 	v := state.reload.claude.ident
+	if claude_tab_is_codex(t^) do return false // claude's version is not Codex's (codex.odin)
 	return v != "" && t.reload.version != "" && t.reload.version != v
 }
 
@@ -435,7 +436,8 @@ running_claude :: proc() -> []Claude_Running {
 	for &s in state.open_sessions {
 		if s.home do continue
 		for &t in s.tabs {
-			if _, is := t.kind.(Claude_Tab); is && t.status == .Running do append(&out, Claude_Running{&s, &t})
+			// not Codex tabs (codex.odin): Claude Code's files and version are not theirs
+			if ct, is := t.kind.(Claude_Tab); is && !ct.codex && t.status == .Running do append(&out, Claude_Running{&s, &t})
 		}
 	}
 	return out[:]

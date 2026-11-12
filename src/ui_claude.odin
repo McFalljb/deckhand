@@ -133,15 +133,16 @@ status_bar :: proc(p: ^core.Pane) {
 		clay.TextDynamic(text, txt(th.text))
 		spacer()
 		button(cid(STATUS_IDS[1]), "Dismiss", false, ui_hover == Hit(Hit_Claude(3)))
-		// no command to copy for nix or mise (claude_update_command): their package manager updates it
-		if hooks || status_update_command(t) != "" do button(cid(STATUS_IDS[0]), go_label, true, ui_hover == Hit(Hit_Claude(2)))
+		// no command to copy for nix or mise (claude_update_command): their package manager updates it;
+		// a Codex tab's bars (signed out, hooks silent: codex.odin) say what to do in Codex itself
+		if !core.claude_tab_is_codex(t^) && (hooks || status_update_command(t) != "") do button(cid(STATUS_IDS[0]), go_label, true, ui_hover == Hit(Hit_Claude(2)))
 	}
 }
 
 claude_hit :: proc() -> Hit {
 	p := hit_pane() // the bars' hit tests: the pane under the pointer (ui_panes.odin)
 	if t, _, _ := status_tab(p); t != nil {
-		for id, i in STATUS_IDS do if clay.PointerOver(cid(id)) do return Hit_Claude(2 + i)
+		for id, i in STATUS_IDS do if clay.PointerOver(cid(id)) && !(i == 0 && core.claude_tab_is_codex(t^)) do return Hit_Claude(2 + i)
 	}
 	if t, _ := held_tab(p); t == nil do return nil
 	for id, i in CLAUDE_BAR_IDS do if clay.PointerOver(cid(id)) do return Hit_Claude(i)
@@ -150,7 +151,9 @@ claude_hit :: proc() -> Hit {
 
 claude_tip :: proc(h: Hit_Claude) -> (label, keys: string) {
 	switch h {
-	case 0: return "Send the first waiting message now, into whatever is typed in Claude's prompt", ""
+	case 0:
+		if t, _ := held_tab(hit_pane()); t != nil && core.claude_tab_is_codex(t^) do return "Send the first waiting message now (only while Codex is idle), into whatever is typed in its composer", ""
+		return "Send the first waiting message now, into whatever is typed in Claude's prompt", ""
 	case 1: return "Drop the waiting messages (nothing is sent)", ""
 	case 2:
 		t, _, hooks := status_tab(hit_pane())

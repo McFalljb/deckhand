@@ -1,0 +1,96 @@
+# Codex tabs, run 1 (tests/scripts/codex.sh; docs/CODEX.md): a fake codex (fake-codex.py) that checks
+# Deckhand's command line and runs its hooks lazily at the first prompt, as Codex 0.167.2 does.
+# + New session's picker lists Codex; its tab works before the first prompt (OSC 7501 only) and
+# gets its row with SessionStart; a permission is the waiting mark and a bell entry; held prompts
+# go only at Codex's idle, and commands, shell lines, skills and mentions never go; quit (run 2).
+wait 1500
+window_active on
+command {"type":"add_project","cwd":"$homedir/proj"}
+command {"type":"rescan"}
+wait 300
+assert_state codex_installed true
+# 1. + New session: the picker lists pi and Codex (Claude Code is not installed here); Codex (key 2)
+clickid new
+eventually
+assert_menurows pi|Codex
+shot codex/picker
+key 2
+eventually
+assert_state open_sessions.# 1
+assert_state open_sessions.0.agent claude
+assert_state open_sessions.0.tabs.# 1
+assert_state open_sessions.0.tabs.0.kind claude
+assert_state open_sessions.0.tabs.0.harness codex
+waitfor FAKE CODEX ARGS OK 10000
+waitfor FAKE CODEX TRUST OK 4 5000
+# 2. before the first prompt: Codex's own status, no session id, no row
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state idle
+assert_state open_sessions.0.tabs.0.turn unknown
+assert_state claude_sessions.# 0
+shot codex/new-tab
+# 3. the first prompt: SessionStart (lazy) with Codex's id, the row (Codex, its title), turn idle
+type tidy the README
+key enter
+waitfor PROMPT: tidy the README 10000
+waitstate 10000 open_sessions.0.claude_session_id 01a1d0d6-5353-7ff3-9308-ff91070ad530
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+assert_state open_sessions.0.tabs.0.claude_session_id 01a1d0d6-5353-7ff3-9308-ff91070ad530
+assert_state claude_sessions.# 1
+assert_state claude_sessions.0.harness codex
+assert_state claude_sessions.0.title tidy the README
+assert_state open_sessions.0.tabs.0.model gpt-5.5
+# 4. a permission while the window is behind: the waiting mark, ⌥⌘A's next, a bell entry; held
+# text waits for it
+window_active off
+type !perm
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state blocked
+waitstate 5000 open_sessions.0.tabs.0.turn waiting
+assert_state open_sessions.0.tabs.0.agent_status.dot waiting
+assert_state open_sessions.0.agent_status waiting
+command {"type":"notifications_list","limit":1}
+assert_result data.notifications.0.kind waiting
+command {"type":"next_needing_you"}
+assert_result data.tab_id $tab
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"from atlas"}
+assert_result ok true
+assert_state open_sessions.0.tabs.0.held 1
+assert_state open_sessions.0.tabs.0.held_wait Codex is waiting for you
+window_active on
+shot codex/permission
+# 5. what Deckhand never types into Codex's composer: a slash command, a shell line, a skill, a mention
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"/new"}
+assert_result ok false
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"\n  !rm -rf ~"}
+assert_result ok false
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"$deploy now"}
+assert_result ok false
+control_command {"type":"claude_prompt","tab_id":$tab,"text":"read @secrets.txt"}
+assert_result ok false
+assert_state open_sessions.0.tabs.0.held 1
+# 6. the user answers in the tab: the turn ends (done); what they typed into the dialog counts as
+# typing (as in a Claude tab), so the held text waits for their Send now, then goes as a paste
+type y
+key enter
+waitstate 10000 open_sessions.0.tabs.0.agent_status.osc7501.state done
+waitstate 5000 open_sessions.0.tabs.0.held_wait you are typing a message
+ui_command {"type":"claude_held","tab_id":$tab,"op":"send"}
+assert_result ok true
+waitfor PROMPT: from atlas 15000
+waitstate 10000 open_sessions.0.tabs.0.held 0
+waitstate 10000 open_sessions.0.tabs.0.turn idle
+waitstate 5000 open_sessions.0.tabs.0.agent_status.osc7501.state done
+assert_not_screen SLASH COMMAND RAN
+assert_not_screen SHELL MODE
+assert_not_screen MENTION POPUP
+# 7. Codex tabs take no comments and no flags yet; never on another machine (none here)
+ui_command {"type":"new_claude_tab","session":$session,"harness":"codex","args":["-m","o3"]}
+assert_result error Codex tabs take no extra flags yet: your own Codex settings (~/.codex/config.toml) apply
+# 8. its main tab's title and the tab's tooltip say Codex
+hover tab 0
+eventually
+assert_tip Codex · model gpt-5.5
+ui_command {"type":"quit"}
+assert_result error needs_confirmation
+ui_command {"type":"quit","confirm":"$token"}
+wait 2000

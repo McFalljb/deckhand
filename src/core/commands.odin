@@ -110,8 +110,9 @@ Copy_Selection :: struct {
 	tab_id: u64,
 }
 Send_Text :: struct {
-	tab_id: u64,
-	text:   string, // pasted into the tab (bracketed if the app asked)
+	tab_id:    u64,
+	text:      string, // pasted into the tab (bracketed if the app asked)
+	generated: bool, // Deckhand's text, not the user's (the window's file drop): a Codex composer's rule applies (codex.odin)
 }
 Set_Focus :: struct {
 	widget: string, // "" = the current tab's terminal; else a widget id (FOCUS_WIDGETS)
@@ -453,6 +454,7 @@ Restore_Tab :: struct {
 	args:  []string, // Claude tabs: the user's extra flags
 	readonly: bool, // Claude tabs: started with Deckhand's read-only profile (kept: claude.odin)
 	account: string, // Claude tabs: its account's config folder (claude_accounts.odin; "" = the default)
+	codex: bool, // Claude tabs: a Codex tab (codex.odin; saved as kind "codex")
 	pane:  Maybe(int), // with a layout: its saved pane, an index into the layout's panes (nil, unset = not known: the focused pane)
 	pane_active: bool, // with a layout: the tab its pane showed
 	held:  u32, // its process runs in the session holder's terminal `held` (adopted at launch)
@@ -1208,6 +1210,10 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if pty_foreground_busy(&t.pty) do return fail("a program is running in this tab; control callers type only at a shell prompt"), false
 		}
 		if tab.status != .Running do return fail("the tab's process has exited"), false
+		// a Codex composer: only the user's own paste goes in as it is (codex.odin), decided here on
+		// the core's own state right before writing. generated only ever adds the check (anyone
+		// may set it; leaving it out exempts only the user's own UI paste): claiming it gains nothing
+		if c.generated || caller.kind != .UI || caller.hub do if why := codex_paste_refusal(tab, c.text); why != "" do return fail(why), false
 		term_paste(t, c.text)
 		return {ok = true}, false // the child's screen changes, not State
 	case Set_Focus:
@@ -1980,13 +1986,13 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 		return pane_add_tab(s, Tab{id = new_id(), kind = Browser_Tab{url = strings.clone(url)}, title = strings.clone(rt.title != "" ? rt.title : "Browser"), status = .Not_Started}).id
 	}
 	if rt.kind == .Claude {
-		if rt.claude_id != "" && !claude_id_ok(rt.claude_id) do return 0
-		if claude_args_check(rt.args) != "" do return 0
+		if rt.claude_id != "" && !(rt.codex ? codex_id_ok(rt.claude_id) : claude_id_ok(rt.claude_id)) do return 0
+		if claude_args_check(rt.args) != "" || (rt.codex && (len(rt.args) > 0 || rt.readonly)) do return 0
 		args := make([]string, len(rt.args))
 		for a, i in rt.args do args[i] = strings.clone(a)
 		// its account: an absolute folder; checked again at its start (claude_start: configured only)
-		acct := filepath.is_abs(rt.account) ? rt.account : ""
-		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct)}, title = strings.clone("Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
+		acct := filepath.is_abs(rt.account) && !rt.codex ? rt.account : ""
+		return pane_add_tab(s, Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(rt.claude_id), args = args, readonly = rt.readonly, account = strings.clone(acct), codex = rt.codex}, title = strings.clone(rt.codex ? "Codex" : "Claude"), status = .Not_Started, cwd = strings.clone(rt.cwd)}).id
 	}
 	if rt.kind != .Shell do return 0
 	title := rt.title != "" ? strings.clone(rt.title) : fmt.aprintf("shell %d", len(s.tabs))
@@ -2417,10 +2423,10 @@ start_restored_tabs :: proc(s: ^Open_Session, claude := false) {
 			ok = term_start(t, {login_shell(), "-l"}, cwd, start = {kind = .Shell}) // a fresh terminal: the note goes after
 			if ok do term_note(t, "Restored tab: a new shell (the previous one's history is not kept).")
 		case Claude_Tab:
-			if !claude_installed_now() { // installed since it was restored: looked up again
+			if !claude_tab_installed_now(&tab) { // installed since it was restored: looked up again (its harness's: codex.odin)
 				// not installed (any more): nothing starts, the tab says why and shows as exited; no
 				// bell entry, no retry (Restart, once it is installed)
-				term_note(t, CLAUDE_MISSING)
+				term_note(t, tab.kind.(Claude_Tab).codex ? CODEX_MISSING : CLAUDE_MISSING)
 				tab.status, tab.exit = .Exited, {known = true, code = 127}
 				continue
 			}

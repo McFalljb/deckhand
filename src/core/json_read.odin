@@ -412,6 +412,20 @@ enum_by_name :: proc(s: string, names: [$E]string) -> (E, bool) {
 	return {}, false
 }
 
+// new_claude_tab's and new_claude_session's harness: "claude" (or none) or "codex" (codex.odin).
+@(private = "file")
+harness_codex :: proc(r: ^Rd) -> bool {
+	v, has := r.obj["harness"]
+	if !has do return false
+	s, _ := v.(json.String)
+	switch string(s) {
+	case "claude": return false
+	case "codex":  return true
+	}
+	if r.err == "" do r.err = "harness must be claude or codex"
+	return false
+}
+
 // An enum from its wire name (json_write.odin tables).
 @(private = "file")
 get_enum :: proc(r: ^Rd, k: string, names: [$E]string) -> E {
@@ -625,7 +639,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "focus_tab":           cmd = Focus_Tab{tab_id = get_u64(&r, "tab_id")}
 	case "copy_selection":      cmd = Copy_Selection{tab_id = get_u64(&r, "tab_id")}
 	case "terminal_link":       cmd = Terminal_Link{tab_id = get_u64(&r, "tab_id"), url = get_str(&r, "url"), external = opt_bool(&r, "external").? or_else false}
-	case "send_text":           cmd = Send_Text{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
+	case "send_text":           cmd = Send_Text{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text"), generated = opt_bool(&r, "generated").? or_else false}
 	case "set_focus":           cmd = Set_Focus{widget = get_str(&r, "widget", optional = true)}
 	case "set_layout":          cmd = Set_Layout{left_width = opt_f32(&r, "left_width"), right_width = opt_f32(&r, "right_width"), left_open = opt_bool(&r, "left_open"), right_open = opt_bool(&r, "right_open"), drawer_width = opt_f32(&r, "drawer_width"), drawer_pinned = opt_bool(&r, "drawer_pinned")}
 	case "set_panel":           cmd = Set_Panel{panel = get_str(&r, "panel"), open = get_bool(&r, "open")}
@@ -792,13 +806,13 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "comments_ask_cancel": cmd = Comments_Ask_Cancel{}
 	case "pi.attached":         cmd = Pi_Attached{tab_id = opt_u64(&r, "tab_id"), attachment_id = get_u64(&r, "attachment_id")}
 	// Claude Code tabs (claude.odin)
-	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true)}
+	case "new_claude_tab":      cmd = New_Claude_Tab{session = opt_u64(&r, "session"), project_id = opt_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), resume = get_str(&r, "resume", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
 	case "add_claude_account":  cmd = Add_Claude_Account{dir = get_str(&r, "dir"), label = get_str(&r, "label", optional = true)}
 	case "rename_claude_account": cmd = Rename_Claude_Account{account = get_str(&r, "account"), label = get_str(&r, "label", optional = true)}
 	case "remove_claude_account": cmd = Remove_Claude_Account{account = get_str(&r, "account")}
 	case "set_claude_account_default": cmd = Set_Claude_Account_Default{account = get_str(&r, "account", optional = true)}
 	case "claude_resume":       cmd = Claude_Resume{claude_session_id = get_str(&r, "claude_session_id")}
-	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true)}
+	case "new_claude_session":  cmd = New_Claude_Session{project_id = get_u64(&r, "project_id"), cwd = get_str(&r, "cwd", optional = true), args = get_strings(&r, "args"), account = get_str(&r, "account", optional = true), codex = harness_codex(&r)}
 	case "claude_rename":       cmd = Claude_Rename{claude_session_id = get_str(&r, "claude_session_id"), title = get_str(&r, "title")}
 	case "claude_wait_idle":    cmd = Claude_Wait_Idle{tab_id = get_u64(&r, "tab_id"), timeout_ms = opt_u64(&r, "timeout_ms"), prompt_id = opt_u64(&r, "prompt_id")}
 	case "claude_prompt":       cmd = Claude_Prompt{tab_id = get_u64(&r, "tab_id"), text = get_str(&r, "text")}
@@ -999,7 +1013,7 @@ state_from_json :: proc(text: string, allocator := context.allocator) -> (s: Sta
 				bt.can_forward = opt_bool(&t, "can_forward").? or_else false
 				tab.kind = bt
 			case "claude":
-				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true)}
+				tab.kind = Claude_Tab{session_id = get_str(&t, "claude_session_id", optional = true), codex = harness_codex(&t)}
 			case "app":
 				at := App_Tab{argv = get_strings(&t, "argv"), cwd = get_str(&t, "app_cwd", optional = true), exit_code = -1}
 				if s, has := t.obj["app_status"].(json.String); has do for name, k in APP_STATUS_NAMES do if name == s do at.app_status = k

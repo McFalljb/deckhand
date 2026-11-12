@@ -243,6 +243,11 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0)
 		stroke_line(P(ox, s, 6), t, P(ox, s, 5.5), P(oy, s, 13), sw, col, true)
 		stroke_line(P(ox, s, 10.5), t, P(ox, s, 10.5), P(oy, s, 11.5), sw, col, true)
 		stroke_line(P(ox, s, 10.5), P(oy, s, 11.5), P(ox, s, 12.5), P(oy, s, 13), sw, col, true)
+	case .Harness_Codex:
+		// a prompt: a chevron, then an underscore
+		stroke_line(P(ox, s, 3.5), P(oy, s, 4.5), P(ox, s, 7.5), P(oy, s, 8), sw, col, true)
+		stroke_line(P(ox, s, 7.5), P(oy, s, 8), P(ox, s, 3.5), P(oy, s, 11.5), sw, col, true)
+		stroke_line(P(ox, s, 9), P(oy, s, 12), P(ox, s, 13.5), P(oy, s, 12), sw, col, true)
 	case .Harness_Claude:
 		// an asterisk: three strokes through the middle
 		cx, cy, r := P(ox, s, 8), P(oy, s, 8), 5.5 * s

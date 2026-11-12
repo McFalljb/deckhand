@@ -340,7 +340,7 @@ fake_term :: proc(id: i64, tail: string) -> hw.Welcome_Terminal {
 // A clean State, the fake's tokens.json written as an earlier run would have (binds: term ->
 // what it was started as), then workspace `text` restored and holder_adopt_all run.
 @(private = "file")
-adopt_run :: proc(t: ^testing.T, f: ^core.Fake_Holder, text: string, binds: map[u32]core.Held_Start, clean := true) {
+adopt_run :: proc(t: ^testing.T, f: ^core.Fake_Holder, text: string, binds: map[u32]core.Held_Start, clean := true, tokens := true) {
 	for _, x in core.terms {
 		x.pty.held, x.running = 0, false // never a RELEASE or kill from here
 		core.term_free(x)
@@ -362,6 +362,7 @@ adopt_run :: proc(t: ^testing.T, f: ^core.Fake_Holder, text: string, binds: map[
 		core.socket_tokens_bind(tab, term, st)
 	}
 	core.socket_tokens_disable(false)
+	if !tokens do os.remove(path) // removed (or failing its MAC): nothing authenticated says what a terminal is
 	testing.expect_value(t, core.workspace_restore(text), "")
 	core.persist.restored_clean = clean
 	core.holder_adopt_all()
@@ -410,6 +411,64 @@ holder_adopt_checks_start :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.agent_model_starting, "m-applied")
 	_, f6 := core.socket_tokens_start_of(6)
 	testing.expect(t, !f6, "term 6 is no longer listed: pruned")
+}
+
+// A Codex tab's codex is recorded as "codex" (tokens.json, MAC'd), not "claude": a saved tab
+// relabelled from "codex" to "claude" (workspace.json is not MAC'd) never adopts a running codex as
+// a Claude tab (Claude's looser composer rule), nor the reverse; a Codex tab adopts its own.
+@(test)
+holder_adopt_codex_kind :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "codex\r\n"), fake_term(5, "codex\r\n"), fake_term(6, "claude\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("claude\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	binds[4] = {kind = .Codex} // relabelled "claude" below
+	binds[5] = {kind = .Codex}
+	binds[6] = {kind = .Claude} // relabelled "codex" below
+	id1, id2, id3 := "01a1d0d6-5353-7ff3-9308-ff91070ad531", "01a1d0d6-5353-7ff3-9308-ff91070ad532", "01a1d0d6-5353-7ff3-9308-ff91070ad533"
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"claude","claude_session_id":"%s","held":4}},{{"kind":"codex","claude_session_id":"%s","held":5}},{{"kind":"codex","claude_session_id":"%s","held":6}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, id1, id2, id3)
+	adopt_run(t, &f, text, binds)
+	s: ^core.Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 4, "restored")
+	if s == nil || len(s.tabs) != 4 do return
+	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running)
+	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "a codex never adopted as a Claude tab")
+	testing.expect(t, core.claude_tab_is_codex(s.tabs[2]) && core.term_of(s.tabs[2].id) != nil, "a Codex tab adopts its codex")
+	testing.expect(t, core.term_of(s.tabs[3].id) == nil, "a claude never adopted as a Codex tab")
+	st, _ := core.socket_tokens_start_of(5)
+	testing.expect_value(t, st.kind, core.Held_Kind.Codex)
+}
+
+// No authenticated record (tokens.json removed, or failing its MAC): workspace.json alone never
+// decides what a live agent process is, so no held pi, Claude or Codex is adopted into an agent tab
+// (the path of a terminal tokens.json does not vouch for: not adopted, the tab starts afresh when
+// shown); a shell tab still adopts its shell.
+@(test)
+holder_adopt_needs_record :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "codex\r\n"), fake_term(5, "sh\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("sh\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	binds[4] = {kind = .Codex}
+	binds[5] = {kind = .Shell}
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"claude","claude_session_id":"01a1d0d6-5353-7ff3-9308-ff91070ad531","held":4}},{{"kind":"shell","title":"a","cwd":"%s","held":5}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, proj)
+	adopt_run(t, &f, text, binds, clean = false, tokens = false)
+	s: ^core.Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 3, "restored")
+	if s == nil || len(s.tabs) != 3 do return
+	testing.expect(t, core.term_of(s.tabs[0].id) == nil, "no pi adopted without a record")
+	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "a relabelled codex is never adopted as a Claude tab")
+	testing.expect_value(t, s.tabs[2].status, core.Tab_Status.Running) // a shell has no harness
 }
 
 // Terminals no restored tab claims are hung up only when that is known to be safe: the saved

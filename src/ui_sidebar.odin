@@ -263,6 +263,7 @@ menu_items :: proc() -> []core.Menu_Item {
 		// Claude Code (claude.odin): a tab in the project's session (on screen, else its latest,
 		// else a new one), once per account while there are several; only while it is installed
 		if p.group == .Projects && core.claude_installed() do core.claude_account_items(&items, "New Claude tab", core.New_Claude_Tab{project_id = p.id})
+		if p.group == .Projects && core.codex_installed() do append(&items, core.Menu_Item{label = "New Codex tab", cmd = core.New_Claude_Tab{project_id = p.id, codex = true}}) // codex.odin
 		if core.folder_of(.Jobs) != "" do append(&items, core.Menu_Item{label = "New job for this project…", cmd = core.Job_Sheet{open = true, for_project = core.path_tilde(p.cwd)}})
 		append(&items, core.Menu_Item{label = "Rename…", rename = true})
 		sep(&items)
@@ -292,6 +293,7 @@ menu_items :: proc() -> []core.Menu_Item {
 			pin_moves(&items, at, len(state.sidebar.pinned_sessions), 0, t.pi_session_id)
 		}
 		if id := core.open_session_any(t.pi_session_id); id != 0 && core.claude_installed() do core.claude_account_items(&items, "New Claude tab here", core.New_Claude_Tab{session = id}) // claude.odin; read-only in a chat while chats are
+		if id := core.open_session_any(t.pi_session_id); id != 0 && core.codex_installed() && !core.codex_chat_refused(id) do append(&items, core.Menu_Item{label = "New Codex tab here", cmd = core.New_Claude_Tab{session = id, codex = true}}) // codex.odin
 		if r, _ := core.claude_record(t.pi_session_id); r != nil do append(&items, core.Menu_Item{label = "Rename…", rename = true}) // a Claude session's row: Deckhand's own title
 		handoff_items(&items, t.project_id) // New session on <machine> in <project> (ui_handoff.odin)
 		_, perr := core.sidebar_path(t.project_id, t.pi_session_id)
@@ -1661,7 +1663,9 @@ sidebar_drop :: proc(paths: []string, x, y: f32) {
 		strings.write_string(&b, shell_quote(p))
 		strings.write_byte(&b, ' ')
 	}
-	ui_do(core.Send_Text{tab.id, strings.to_string(b)})
+	// Deckhand's text, not the user's typing: the core applies a Codex composer's rule (a path with
+	// " @x" would open its picker) on its own state and says why not
+	if r := client_call(core.Send_Text{tab_id = tab.id, text = strings.to_string(b), generated = true}); !r.ok do toast_show(fmt.tprintf("Not dropped: %s", r.error), err = true)
 }
 
 // 'path' for a POSIX shell (a ' inside becomes '\'').

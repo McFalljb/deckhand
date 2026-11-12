@@ -1,8 +1,8 @@
 # Harnesses: what Deckhand ships, what it needs, what is optional
 
-Deckhand runs two agent harnesses, **pi** and **Claude Code**. For each it ships its own
-integration and loads it per tab, for that run only, so a user installs the harness and nothing
-else. This document covers what each integration does, how it is loaded, how it steps back when
+Deckhand runs three agent harnesses, **pi**, **Claude Code** and **Codex** (phase 1:
+[CODEX.md](CODEX.md)). For each it ships its own integration and loads it per tab, for that run
+only, so a user installs the harness and nothing else. This document covers what each integration does, how it is loaded, how it steps back when
 the user has something of their own, and how setup checks and installs the harnesses. §9 lists
 what still needs a check against a real pi.
 
@@ -11,6 +11,7 @@ Contents: 1. [Origin](#1-origin-pi-kit) ·
 3. [The pi integration](#3-the-pi-integration) ·
 4. [Overlap: how Deckhand steps back](#4-overlap-how-deckhand-steps-back) ·
 5. [Claude Code](#5-claude-code---plugin-dir) ·
+5a. [Codex](#5a-codex-hooks-per-run) ·
 6. [The harness manifest](#6-the-harness-manifest) ·
 7. [Install and update](#7-install-and-update) ·
 8. [pi-kit](#8-pi-kit) · 9. [Not verified](#9-not-verified-without-a-real-pi)
@@ -176,6 +177,22 @@ described in [CLAUDE.md](CLAUDE.md).
   off; `"<name>@inline": false` disables it. Deckhand's "hooks silent" bar catches all of these.
 - **Minimum Claude Code 2.1.295** (`CLAUDE_MIN_VERSION`): OSC 7501 and hook `onFailure`.
 
+## 5a. Codex: hooks per run
+
+Codex has no plugin folder to load from a path. Deckhand passes its hooks on the command line for
+that run (`-c hooks.<Event>=[…]`, the bundled `deckhand-cli` by absolute path) and trusts exactly
+those for that run in the same layer (`-c hooks.state={…}` with each hook's `trusted_hash`,
+Codex 0.167.2's recipe), so Codex shows no "Hooks need review" dialog for them and the user's own
+hooks keep their own trust. Nothing goes into `~/.codex`; `CODEX_HOME` is never set; the user's own
+settings (model, sandbox, approvals, profiles, `notify`, folder trust) apply untouched, and
+`--no-daemon` keeps the TUI and its hooks in the tab's own process tree. A Codex that changes the
+recipe shows its review dialog for Deckhand's hooks; status still works from its OSC 7501 and the
+tab's bar explains. The details: [CODEX.md](CODEX.md).
+
+- **Minimum Codex 0.163.0** (`CODEX_MIN_VERSION`): OSC 7501 program status. Older ones are not
+  started.
+- Codex starts its session at the first prompt: SessionStart (the session id, the row) comes then.
+
 ## 6. The harness manifest
 
 One data table, `HARNESS_MANIFEST` in
@@ -202,6 +219,7 @@ or `Third_Party`); `need` (`Required` or `Recommended`); `min_version`; `detect`
 | `rpiv-btw` | pi | third-party | recommended | — | `npm:@juicesharp/rpiv-btw…` in `packages` | `pi install npm:@juicesharp/rpiv-btw@2.15.0` | npmjs.com/package/@juicesharp/rpiv-btw; pin: a version in daily use; no advisories (juicesharp/rpiv-mono) |
 | `claude` | Claude Code | harness | required | 2.1.295 (`CLAUDE_MIN_VERSION`) | `claude` on the tabs' PATH or in `~/.local/bin`, `~/.claude/local`; version from where it links (`claude_version_of`) | `curl --proto '=https' --proto-redir '=https' -fsSL https://claude.ai/install.sh \| bash` | code.claude.com/docs/en/setup, "Native Install (Recommended)" |
 | `claude-plugin` | Claude Code | built in | required | (Claude 2.1.295) | `integrations/claude-code` in the build | — | §5 |
+| `codex` | Codex | harness | required | 0.163.0 (`CODEX_MIN_VERSION`) | `codex` on the tabs' PATH (npm's global bin); version from the npm package's `package.json` next to where it links, or Homebrew's `Caskroom/codex/<v>/`; signed in: `codex login status` (exit 1 = signed out, a note), run on a worker | `npm install -g @openai/codex@latest` | github.com/openai/codex README |
 
 Why these: pi-subagents and rpiv-todo feed the bundled `panels` extension's Subagents and Todos
 panels (§3); without them those panels stay empty. pi-ask-user (an `ask_user` tool), pi-web-access
@@ -209,7 +227,8 @@ panels (§3); without them those panels stay empty. pi-ask-user (an `ask_user` t
 Each install is pinned to an exact version; advisories were checked on GitHub (the global advisory
 database and each package's repository) when the pin was set. Claude Code needs nothing
 third-party: its plugin is sh and Deckhand's own CLI and loads with every Claude tab, so its
-Recommended list is empty and the sheet says "Nothing else to install".
+Recommended list is empty and the sheet says "Nothing else to install". Codex needs nothing
+either: its hooks are Deckhand's own CLI, passed per run (§5a).
 
 **States** (`Harness_Item_State`) and what each shows:
 
@@ -253,6 +272,10 @@ layout from where its binary links to, without running it (`install_layout`).
 | nix (`/nix/store/`) | `nix profile upgrade pi` (pi `docs/quickstart.md`) | none named | shown only |
 | mise (`/mise/installs/`) | none named | none named | shown only |
 | unknown | `pi update --self` | `claude update` | shown only |
+
+Codex (`install_layout(.Codex, …)`): npm global `npm install -g --prefix <prefix> @openai/codex@latest`,
+Homebrew `brew upgrade --cask codex`, bun and pnpm `add -g @openai/codex@latest`, all after a click
+as above; anything else (yarn, nix, mise, unknown) none named, shown only.
 
 The table gives the command's shape; the one shown and run is aimed at the copy Deckhand detected
 (`harness_plan`): the detected binary by absolute path (`/Users/me/.pi/agent/bin/pi update

@@ -893,7 +893,7 @@ event :: proc(e: ^sapp.Event) {
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
 		core.claude_note_typed(ktab)
-		if ktab != nil do ui_do(core.Send_Text{ktab.id, clipboard_text()})
+		if ktab != nil do ui_do(core.Send_Text{tab_id = ktab.id, text = clipboard_text()})
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))

@@ -245,7 +245,7 @@ runs; pi's own session id (`pi_session_id`, a UUID) is the identity that outlive
 | `zoom_pane` | `pane`?, `zoom`? | a pane (default: the current session's focused one) fills its session's pane area; its other panes are hidden (not drawn, not on screen) and keep running at their sizes. `zoom: false` brings the layout back, unset toggles. Zooming gives the pane the keyboard. A split, a close, or focusing another pane ends it. In State (`zoomed_pane`, get_state's `zoomed_pane` on the session's panes), never saved |
 | `copy_selection` | `tab_id` | side effect only |
 | `terminal_link` | `tab_id`, `url`, `external`? | **user only** (a ⌘-click on a link in a terminal tab, or its right-click menu; `src/term_links.odin`): with `external` (⌘-click, Open link) in the default browser; without it (⇧⌘-click, Open in browser tab) http and https open in a new browser tab of that tab's session, in front (→ its tab id), and from Home's terminal or without a working browser in the default browser; mailto in the mail app. Other schemes are refused (`"only http, https and mailto links open from a terminal"`) |
-| `send_text` | `tab_id`, `text` | pasted into the terminal (bracketed if asked); raw keystrokes into pi's TUI. From `control`: refused into a pi tab (`"send prompts to a pi tab with pi_prompt, not send_text"`) and into any tab of a session whose pi is `waiting` (`"pi in this session is waiting for the user"`); only at a shell prompt, never while another program runs in the tab's foreground (`"a program is running in this tab; …"`) |
+| `send_text` | `tab_id`, `text`, `generated`? | pasted into the terminal (bracketed if asked); raw keystrokes into pi's TUI. Into a Codex tab, anyone's but the user's own paste, and any with `generated: true` (the window's file drop), goes only under Codex's composer rule and while Codex is not working or blocked (the reason as the error); `generated` only ever adds that check. From `control`: refused into a pi tab (`"send prompts to a pi tab with pi_prompt, not send_text"`) and into any tab of a session whose pi is `waiting` (`"pi in this session is waiting for the user"`); only at a shell prompt, never while another program runs in the tab's foreground (`"a program is running in this tab; …"`) |
 | `set_focus` | `widget` (`""` = terminal) | widgets: `rename_project`, `palette` (the command palette; open while focused), `sidebar_filter`, `agent_input` (the agent's terminal; the user's only, and only while its drawer shows, `"the agent's drawer is shut"`), `settings` (the settings popover), `shortcuts` (the keyboard shortcuts sheet), `notifications` (the bell's popover), `files` (the Files or Settings tree: its keys), `files_filter`, `files_name` (the Files tab's filter and name fields); focusing `sidebar_filter` or `rename_project` shows a hidden left column on its Sessions tab, `files*` on its Files tab (or the Settings tab when that shows); `palette`, `settings`, `shortcuts` and `notifications` open for the user only (others: `"only the user opens the palette, settings, shortcuts and notifications"`; they take the user's keys); refused for `control` while `agent_input` has it (`"the agent's terminal has the keyboard"`) |
 | `set_layout` | `left_width`?, `right_width`?, `left_open`?, `right_open`?, `drawer_width`?, `drawer_pinned`? | logical px, clamped (left 200–480, right 240–560, the agent's drawer 320–900); on a small window the columns are drawn narrower so the centre keeps 360 px (the saved widths stay); `left_open`/`right_open` show or hide a column (⌘B, ⌥⌘B); pinned, the drawer is a column instead of sliding over |
 | `set_panel` | `panel`, `open` | opening one opens the right column |
@@ -495,6 +495,27 @@ session** is an open session whose main (first) tab is a Claude tab and that has
 `claude_resume`, `open_session` of a Claude session) is refused while Claude Code is not
 installed (snapshot `claude_installed: false`), with how to install it (`"Claude Code is not
 installed: install it with …"`).
+
+**Codex tabs** ([CODEX.md](CODEX.md), `src/core/codex.odin`) are Claude tabs with `"harness":
+"codex"`: `new_claude_tab` and `new_claude_session` take `harness` (`"claude"`, the default, or
+`"codex"`; anything else: `"harness must be claude or codex"`), with the same callers (anyone; an
+agent's opens behind). A Codex start runs `codex --no-daemon -C <cwd>` with Deckhand's hooks for
+that run (`codex resume <id> …` for `resume`, a `claude_resume` of its row, a restore); it is refused
+while Codex is not installed (`codex_installed: false`; `"Codex is not installed: install it with
+…"`), with `args` (`"Codex tabs take no extra flags yet …"`) or `account`, in a chat while chats are
+read-only (`"Codex can't run read-only yet …"`), for another machine's project (`"Codex tabs run on
+this Mac only for now …"`), and for a `resume` id that is not a UUID or is another harness's
+conversation (`"that id is another harness's conversation"`). A Codex older than 0.163.0 never
+starts (`"could not start Codex"`; the tab says why). Its hooks report with the same commands as
+the plugin's (`claude.session`: its `session_id` must be a UUID; `claude.turn`); `claude.comments`
+and `claude.attached` are refused for it, as are comments' Send now. `claude_prompt` text for a
+Codex tab is refused when its first non-blank character is `/`, `!` or `$`, or it has an `@word` or
+`$name` where a word starts; held text goes only while its OSC 7501 says it is not working or
+blocked (`held_wait` `"Codex is starting (or a dialog of its own is open)"` while it reports
+nothing) and its hooks, once they report, agree; `claude_held send` likewise. Snapshot: the tab
+entry and its `claude_sessions` entry add `"harness": "codex"`; a Codex tab adds `signed_out: true`
+while `codex login status` said signed out and its Codex has not reported OSC 7501 in this run;
+top level `codex_installed`.
 
 | Command | Args | Effect |
 |---|---|---|

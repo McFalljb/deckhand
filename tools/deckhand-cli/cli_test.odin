@@ -1092,3 +1092,46 @@ cli_reads_old_env_names :: proc(t: ^testing.T) {
 	p, k = tab_env(&c)
 	testing.expect(t, p == "/new.sock" && k == "", "a half-set new pair is not mixed with the old token")
 }
+
+// Codex's hooks (src/core/codex.odin passes them with -c): the same reports as Claude's, from
+// Codex's fields; NOTHING on stdout, whatever Deckhand answers (Codex would add a SessionStart's or
+// UserPromptSubmit's output to the model's context and read a Stop's or PermissionRequest's as a
+// decision); a SessionStart never says idle (it comes with the first prompt); never the comments.
+@(test)
+hook_codex :: proc(t: ^testing.T) {
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad530"
+	cases := [][3]string {
+		{"codex-session-start", fmt.aprintf(`{{"session_id":"%s","turn_id":"x","transcript_path":"/Users/u/.codex/sessions/2026/11/12/rollout-x-%s.jsonl","cwd":"/w/p","hook_event_name":"SessionStart","source":"startup","model":"gpt-5.5"}}`, sid, sid), fmt.aprintf(`{{"type":"claude.session","session_id":"%s","cwd":"/w/p","source":"startup","model":"gpt-5.5"}}`, sid)},
+		{"codex-prompt-submit", `{"session_id":"x","hook_event_name":"UserPromptSubmit","prompt":"  Fix the login bug\nSECRET second line"}`, `{"type":"claude.turn","state":"submitted","title":"Fix the login bug"}`},
+		{"codex-permission", `{"session_id":"x","hook_event_name":"PermissionRequest","tool_name":"exec","tool_input":{"command":"SECRET rm"}}`, `{"type":"claude.turn","state":"waiting"}`},
+		{"codex-stop", `{"session_id":"x","hook_event_name":"Stop","last_assistant_message":"SECRET Shall I go on?"}`, `{"type":"claude.turn","state":"idle","question":true}`},
+		{"codex-stop", `{"session_id":"x","hook_event_name":"Stop","last_assistant_message":"SECRET Done."}`, `{"type":"claude.turn","state":"idle"}`},
+	}
+	for k in cases {
+		f: Fake
+		// whatever Deckhand answers (a title, comments), nothing is printed
+		f.replies["claude.session"] = `{"ok":true,"data":{"title":"Mine"}}`
+		f.replies["claude.turn"] = `{"ok":true,"data":{"title":"Mine"}}`
+		c := test_ctx(&f, stdin = k[1])
+		testing.expect_value(t, run(&c, {"hook", k[0]}), 0)
+		testing.expectf(t, len(f.sent) == 1 && f.sent[0] == k[2], "%s: %v", k[0], f.sent)
+		for s in f.sent do testing.expect(t, !strings.contains(s, "SECRET") && !strings.contains(s, "transcript") && !strings.contains(s, "comments"))
+		testing.expectf(t, strings.to_string(c.out) == "", "%s printed %q", k[0], strings.to_string(c.out))
+	}
+	// a session id that is not a UUID (a Claude-style one, an injection): nothing sent
+	for bad in ([]string{"abc-1", "--resume", "01a1d0d6-5353-7ff3-9308-ff91070ad53z", "01a1d0d6-5353-7ff3-9308-ff91070ad530 x", ""}) {
+		f: Fake
+		c := test_ctx(&f, stdin = fmt.aprintf(`{{"session_id":%s,"source":"startup"}}`, quoted(bad)))
+		testing.expect_value(t, run(&c, {"hook", "codex-session-start"}), 0)
+		testing.expectf(t, len(f.sent) == 0, "%q: %v", bad, f.sent)
+		testing.expect_value(t, strings.to_string(c.out), "")
+	}
+	// outside Deckhand (no token): nothing at all
+	f: Fake
+	env := make(map[string]string)
+	env["HOME"] = "/x" // no DECKHAND_SOCKET or token
+	c := test_ctx(&f, stdin = `{"prompt":"x"}`, env = env)
+	testing.expect_value(t, run(&c, {"hook", "codex-prompt-submit"}), 0)
+	testing.expect_value(t, len(f.sent), 0)
+	testing.expect_value(t, strings.to_string(c.out), "")
+}

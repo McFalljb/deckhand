@@ -48,6 +48,24 @@ Status_Rt :: struct {
 	start:     u64, // the run it belongs to (claude_wait.odin's start count)
 	dismissed: bool, // the hooks bar, for this run
 	silent:    bool, // the bar was due at the last tick (a redraw when it becomes due)
+	// Codex tabs (codex.odin): their hooks start at the first prompt, so "silent" is counted from
+	// the first turn OSC 7501 reported, not from the prompt coming up
+	osc:       bool, // OSC 7501 reported in this run (Codex reports none behind its login screen)
+	worked:    time.Tick, // OSC 7501 first said working, blocked or done in this run ({} = not yet)
+	heard:     bool, // a hook reported in this run (claude_status_heard)
+	signed_out: bool, // the signed-out bar was due at the last tick
+}
+
+CODEX_HOOKS_SILENT :: "Deckhand's hooks aren't running in this Codex tab (Codex may be waiting for you to review them in a dialog, or a newer Codex trusts hooks differently): status still shows, but this conversation gets no row yet and can't resume, and held messages wait"
+CODEX_SIGNED_OUT :: "Codex is signed out: sign in on its screen in this tab (or run `codex login` in a terminal). Status, held messages and this conversation's row start once you are signed in"
+
+// A hook of the tab's reported (claude.session, claude.turn): its hooks run.
+claude_status_heard :: proc(tab_id: u64) {
+	r := rt_of(tab_id)
+	if !r.heard {
+		r.heard = true
+		window_state_changed()
+	}
 }
 
 @(private = "file")
@@ -123,6 +141,22 @@ claude_status_tick :: proc(now := time.Tick{}) {
 			if v := tab_status_view(tab); v.source == .Osc7501 && v.state != .Blocked do up = true
 			if up do r.up = now
 		}
+		if ct.codex {
+			if v := tab_status_view(tab); v.source == .Osc7501 {
+				if !r.osc {
+					r.osc = true
+					window_state_changed()
+					// signed in now (its composer is up): ask again at the next start
+					if codex_login_state() == .Signed_Out do codex_login_set(.Unknown)
+				}
+				if r.worked == {} && (v.state == .Working || v.state == .Blocked || v.state == .Done) do r.worked = now
+			}
+			out := codex_signed_out_due(&tab)
+			if out != r.signed_out {
+				r.signed_out = out
+				window_state_changed()
+			}
+		}
 		silent := claude_hooks_silent(&tab, now)
 		if silent != r.silent {
 			r.silent = silent
@@ -140,6 +174,13 @@ claude_status_tick :: proc(now := time.Tick{}) {
 claude_hooks_silent :: proc(tab: ^Tab, now := time.Tick{}) -> bool {
 	if replica_process do return tab.live.claude_quiet // the core's (Tab_Live)
 	ct, is := &tab.kind.(Claude_Tab)
+	if is && ct.codex && tab.status == .Running {
+		// Codex: no hook in this run, CLAUDE_HOOKS_GRACE after its first turn began (OSC 7501)
+		r, has := status_rt[tab.id]
+		if !has || r.start != claude_wait_run(tab.id) || r.heard || r.worked == {} do return false
+		now := now == {} ? time.tick_now() : now
+		return time.tick_diff(r.worked, now) >= CLAUDE_HOOKS_GRACE
+	}
 	if !is || tab.status != .Running || ct.readonly || ct.turn != .Unknown do return false
 	r, has := status_rt[tab.id]
 	if !has || r.start != claude_wait_run(tab.id) || r.up == {} do return false
@@ -195,9 +236,19 @@ claude_update_command_now :: proc() -> string {
 	return claude_update_command(real != "" ? real : b)
 }
 
+// Whether a running Codex tab's bar says it is signed out: `codex login status` said so (codex.odin)
+// and its OSC 7501 has not reported in this run (Codex reports none behind its login screen).
+codex_signed_out_due :: proc(tab: ^Tab) -> bool {
+	ct, is := tab.kind.(Claude_Tab)
+	if !is || !ct.codex || tab.status != .Running || codex_login_state() != .Signed_Out do return false
+	r, has := status_rt[tab.id]
+	return !(has && r.start == claude_wait_run(tab.id) && r.osc)
+}
+
 // The version a tab's Claude Code started with, when it is old ("" = new enough or unknown).
 @(private = "file")
 old_version :: proc(tab: ^Tab) -> string {
+	if ct, is := tab.kind.(Claude_Tab); is && ct.codex do return "" // Codex's rule is codex_start's
 	v := tab.reload.version
 	if !claude_version_below(v, CLAUDE_MIN_VERSION) do return ""
 	return v
@@ -209,6 +260,12 @@ claude_status_message :: proc(tab: ^Tab, now := time.Tick{}) -> string {
 	if tab == nil do return ""
 	if _, is := tab.kind.(Claude_Tab); !is || tab.status != .Running do return ""
 	if replica_process do return tab.live.claude_status // the core's (Tab_Live): its dismissals, its harness
+	if ct := tab.kind.(Claude_Tab); ct.codex {
+		if rt_of(tab.id).dismissed do return ""
+		if codex_signed_out_due(tab) do return CODEX_SIGNED_OUT
+		if claude_hooks_silent(tab, now) do return CODEX_HOOKS_SILENT
+		return "" // a Codex too old never starts (codex_start)
+	}
 	old := old_version(tab)
 	if claude_hooks_silent(tab, now) {
 		if rt_of(tab.id).dismissed do return ""
@@ -231,6 +288,10 @@ claude_status_dismiss :: proc(tab: ^Tab, now := time.Tick{}) {
 	window_state_changed()
 	if replica_process { // the core's runtime is in the other process: it dismisses it (Claude_Status_Dismiss)
 		if claude_status_dismiss_send != nil do claude_status_dismiss_send(tab.id)
+		return
+	}
+	if ct, is := tab.kind.(Claude_Tab); is && ct.codex {
+		rt_of(tab.id).dismissed = true // its bars, for this run
 		return
 	}
 	if claude_hooks_silent(tab, now) {
@@ -288,6 +349,7 @@ claude_status_tab_json :: proc(b: ^strings.Builder, tab: Tab) {
 	n := replica_process ? tab.live.claude_background : claude_background_running(tab.id) // a window's replica: the core's (Tab_Live)
 	if n > 0 do fmt.sbprintf(b, `,"background":%d`, n)
 	if claude_hooks_silent(&tab) do strings.write_string(b, `,"hooks":"silent"`)
+	if replica_process ? tab.live.codex_signed_out : codex_signed_out_due(&tab) do strings.write_string(b, `,"signed_out":true`) // a Codex tab behind its login screen (codex.odin; a window's replica: the core's Tab_Live)
 	if v := old_version(&tab); v != "" {
 		strings.write_string(b, `,"claude_version_old":`)
 		json_quote(b, v)

@@ -351,14 +351,16 @@ holder_adopt_all :: proc() {
 		switch _ in tab.kind {
 		case Shell_Tab:  kind = .Shell
 		case Pi_Tab:     kind = .Pi
-		case Claude_Tab: kind = .Claude
+		case Claude_Tab: kind = tab.kind.(Claude_Tab).codex ? .Codex : .Claude // a Codex tab's codex is its own kind
 		case Editor_Tab, Changes_Tab, Markdown_Tab, Browser_Tab, App_Tab:
 			continue
 		}
 		// what the terminal was started as (the MAC'd tokens.json): never into another kind of
-		// tab (workspace.json is not MAC'd: an edit could put a Claude's id on a shell tab)
+		// tab (workspace.json is not MAC'd: an edit could put a Claude's id on a shell tab). An
+		// agent tab needs that record (none without tokens.json: workspace.json never decides
+		// what a live pi, Claude or Codex is); a shell tab without tokens.json adopts as before
 		saved, known := socket_tokens_start_of(id)
-		if hc.tokens_loaded && (!known || saved.kind != kind) {
+		if (hc.tokens_loaded || kind != .Shell) && (!known || saved.kind != kind) {
 			log_ln("Deckhand: session holder: terminal", id, "was not started as this", HELD_KIND_NAMES[kind], "tab (tokens.json): not adopted")
 			continue
 		}

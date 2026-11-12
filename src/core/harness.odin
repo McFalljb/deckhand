@@ -30,6 +30,7 @@ import "core:time"
 HARNESS_KEYS := [Harness]string {
 	.Pi     = "pi",
 	.Claude = "claude",
+	.Codex  = "codex",
 }
 
 PI_INSTALL :: "npm install -g @earendil-works/pi-coding-agent"
@@ -178,9 +179,9 @@ Menu_New_Session :: struct {
 
 // Which harness a picker row's command starts.
 harness_of :: proc(cmd: Command) -> (h: Harness, ok: bool) {
-	#partial switch _ in cmd {
+	#partial switch c in cmd {
 	case New_Chat, Worktree_Session: return .Pi, true
-	case New_Claude_Session:         return .Claude, true
+	case New_Claude_Session:         return c.codex ? .Codex : .Claude, true
 	}
 	return {}, false
 }
@@ -191,8 +192,14 @@ harness_of :: proc(cmd: Command) -> (h: Harness, ok: bool) {
 new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 	out := make([dynamic]Menu_Item, context.temp_allocator)
 	if p == nil do return out[:]
-	order := [2]Harness{.Pi, .Claude}
-	if state.settings.last_harness == .Claude do order = {.Claude, .Pi}
+	// the last used first, then the others in their order
+	order: [len(Harness)]Harness
+	order[0] = state.settings.last_harness
+	n := 1
+	for h in Harness do if h != order[0] {
+		order[n] = h
+		n += 1
+	}
 	// another machine's project: what that machine has (its checklist), with its own account;
 	// never this Mac's harnesses, accounts or folders
 	if no := id_machine(p.id); no != 0 {
@@ -200,6 +207,7 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 		for h in order {
 			if h == .Pi && pi do append(&out, Menu_Item{label = HARNESSES[.Pi].name, icon = harness_icon(.Pi), cmd = New_Chat{project_id = p.id}})
 			if h == .Claude && claude && p.group == .Projects do append(&out, Menu_Item{label = HARNESSES[.Claude].name, icon = harness_icon(.Claude), cmd = New_Claude_Session{project_id = p.id}})
+			// never Codex: Codex tabs run on this Mac only for now (codex.odin, CODEX_REMOTE)
 		}
 		for &it, i in out do it.keys = fmt.tprint(i + 1)
 		return out[:]
@@ -229,6 +237,14 @@ new_session_choices :: proc(p: ^Project, cwd: string) -> []Menu_Item {
 					append(&out, Menu_Item{label = fmt.tprintf("%s · %s", HARNESSES[.Claude].name, a.label), icon = harness_icon(.Claude), cmd = c})
 				}
 			}
+		case .Codex:
+			// a project or a checkout of it; Chats only while chats are not read-only (Codex has no
+			// read-only mode yet: codex.odin)
+			if !codex_installed() do continue
+			if p.group == .Chats {
+				if cwd != "" || state.settings.chats_readonly do continue
+			} else if p.group != .Projects do continue
+			append(&out, Menu_Item{label = HARNESSES[.Codex].name, icon = harness_icon(.Codex), cmd = New_Claude_Session{project_id = p.id, cwd = cwd, codex = true}})
 		}
 	}
 	for &it, i in out do if i < 9 do it.keys = fmt.tprint(i + 1)

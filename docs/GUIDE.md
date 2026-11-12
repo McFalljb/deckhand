@@ -1075,6 +1075,33 @@ same: **Claude: send the waiting message now** and **Claude: drop the waiting me
 Closing a Claude tab asks first unless Claude is idle with nothing waiting. Its access to Deckhand
 ends when it closes or exits.
 
+### Codex tabs
+
+A Codex tab runs the [Codex CLI](https://github.com/openai/codex) (`codex`) in a terminal tab, in
+the session's folder, with your login shell's environment and **your own Codex settings**
+(`~/.codex/config.toml`: model, sandbox, approvals, profiles). Deckhand adds only its hooks, for
+that run, so it knows the conversation's id and when Codex is working or waiting for you; nothing
+is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
+
+- **Start one**: **New session** and pick **Codex** (listed once Codex is installed), or **New Codex
+  tab** in a project's or session's menu. A Codex-only session reads "Codex · <project>".
+- **Status**: Codex reports its own status, so its tab and session get the same marks, bell
+  entries and counts (**What needs you**, ⌥⌘A, the fleet pill) as a Claude tab.
+- **Its row**: Codex starts its conversation with your first message, so the row (titled by that
+  message) appears then. **Resume** from the row continues it (`codex resume`); a session that was
+  open when Deckhand quit comes back and resumes when you show it. **Rename…** changes Deckhand's
+  title only; Codex keeps its own.
+- **Messages from Atlas or a script** wait until Codex is idle and you have typed nothing, as for
+  Claude, and never go during a turn (Enter would steer it). Deckhand never types a slash command,
+  a `!` shell line, a `$skill` or an `@mention` into Codex: such a text is refused, with why.
+- **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
+  `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
+  in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
+  (`npm install -g @openai/codex@latest`), as does Settings → **Coding agents**.
+- **Not yet**: comments, the `deckhand` command inside Codex, read-only chats (Codex is not offered
+  in Chats while **Chats: read-only** is on), conversations found on disk, extra flags, and Codex
+  on another machine. [CODEX.md](CODEX.md) has the details.
+
 ### Comments for the agent
 
 You can point at part of a tab and write a note for the session's agent; the note waits and goes

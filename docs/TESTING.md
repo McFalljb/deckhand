@@ -134,6 +134,7 @@ Typical times and tags are in `tests/scenes.txt`; each script's header says what
 | `app-tab`, `app-calls`, `app-open` | app tabs: frames, input, resize, crash, restart; `app_call` under load; an agent opens only its project's declared app |
 | `comments` | pending comments from a page and the fake app reaching the agent |
 | `claude`, `claude-accounts`, `claude-feeds`, `claude-readonly`, `claude-runtime`, `claude-sessions`, `claude-wait` | Claude Code tabs with a fake claude running the plugin's hooks and CLI ([CLAUDE.md](CLAUDE.md)) |
+| `codex` | Codex tabs with a fake codex that checks Deckhand's command line (`--no-daemon`, the hooks' TOML and trust hashes) and runs its hooks at the first prompt; signed out, too old ([CODEX.md](CODEX.md)) |
 | `agent`, `run-home`, `agent-show`, `agent-status`, `panels`, `bell` | Atlas's drawer, show a file, OSC 7501 status, right-column panels, the bell |
 | `pi-chat-readonly` (smoke) | read-only pi chats; every pi start gets the bundled integration and `DECKHAND_*` |
 | `reload`, `dead-tab` | pi hot reload; a pi tab that exited |

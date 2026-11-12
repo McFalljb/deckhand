@@ -840,7 +840,7 @@ event :: proc(e: ^sapp.Event) {
 			case .Q: ui_do(core.Quit{})
 			// ⌘N: a chat (Chats; the harness picker, harness.odin); ⇧⌘N: a session in the selected project. ⌥⌘T: a Claude tab
 			case .N: if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("new_chat")
-			case .T: // ⇧⌘T: reopen the last closed tab (core/closed_tabs.odin)
+			case .T: // ⇧⌘T: reopen the last tab the user closed (closed_tabs.odin)
 				if e.modifiers & sapp.MODIFIER_SHIFT != 0 {
 					if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("reopen_closed_tab")
 				} else if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")

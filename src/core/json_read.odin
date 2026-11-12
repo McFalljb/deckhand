@@ -608,7 +608,6 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 	case "new_chat":            cmd = New_Chat{project_id = get_u64(&r, "project_id")}
 	case "focus_session":       cmd = Focus_Session{session = get_u64(&r, "session"), reopen = ui_flag(&r, "reopen")}
 	case "next_needing_you":    cmd = Next_Needing_You{back = opt_bool(&r, "back").? or_else false}
-	case "reopen_closed_tab":   cmd = Reopen_Closed_Tab{}
 	case "close_session":       cmd = Close_Session{session = get_u64(&r, "session"), confirm = get_str(&r, "confirm", optional = true), ask = ui_flag(&r, "ask"), comments = opt_comments(&r)}
 	case "new_shell_tab":       cmd = New_Shell_Tab{session = get_u64(&r, "session"), cwd = get_str(&r, "cwd", optional = true), pane = opt_u64(&r, "pane")}
 	case "split_pane":
@@ -751,6 +750,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 		cmd = sc
 	case "app_inspect":         cmd = App_Inspect{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
 	case "notifications_list":  cmd = Notifications_List{limit = int(min(opt_u64(&r, "limit"), NOTICES_MAX))}
+	case "mark_all_read":       cmd = Mark_All_Read{}
 	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
 	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
 	case "notifications_clear": cmd = Notifications_Clear{}

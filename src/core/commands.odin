@@ -496,7 +496,6 @@ Command :: union {
 	New_Chat,
 	Focus_Session,
 	Next_Needing_You,
-	Reopen_Closed_Tab,
 	Close_Session,
 	New_Shell_Tab,
 	Close_Tab,
@@ -585,6 +584,7 @@ Command :: union {
 	Tab_Exited,
 	Program_Status, // internal: a tab's OSC 7501 status (agent_status.odin)
 	Set_Unread, // "Mark as unread" (agent_status.odin)
+	Mark_All_Read, // ⌥⇧⌘U (mark_read.odin)
 	Rescan_Done,
 	Refresh_Shell_Env_Done,
 	Bridge_Done,
@@ -1072,8 +1072,6 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		focus_session(c.session, caller)
 		if c.reopen do restart_if_dead(s, caller.kind == .UI)
 		return {ok = true}, true
-	case Reopen_Closed_Tab:
-		return reopen_closed_tab(caller, request_id) // closed_tabs.odin
 	case Next_Needing_You:
 		s, tab := next_needing_target(c.back, hub = caller_from_hub(caller))
 		if s == nil || tab == nil {
@@ -1136,15 +1134,13 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		if owns_tab(caller, c.tab_id) && !(is_app && c.tab_id != caller.tab_id) do return fail("a caller cannot close its own tab"), false
 		// comments made on it, not sent yet: the user picks send or drop in the close prompt, others say
 		if cr, go_on, cch := comments_close_check(s, tab.id, c.comments, caller); !go_on do return cr, cch
-		origin := caller // who asked for the close: a confirmed one's requester (confirm_gate)
 		if close_needs_confirm(tab^) {
 			why := "Its process is still running."
 			if _, is_ed := tab.kind.(Editor_Tab); is_ed do why = "Its unsaved changes will be lost."
-			gr, go_on, ch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("close %q in %s? %s", tab.title, session_where(s), why), origin = &origin)
+			gr, go_on, ch := confirm_gate(cmd, .Tab_Close, caller, c.confirm, fmt.tprintf("close %q in %s? %s", tab.title, session_where(s), why))
 			if !go_on do return gr, ch
 		}
 		comments_close_act(s, tab.id, c.comments) // send or drop them (the close is going ahead)
-		closed_tab_note(s, tab^, origin) // ⇧⌘T reopens the user's own (closed_tabs.odin)
 		claude_tab_gone(tab) // a Claude tab's held texts; its history entry is used now
 		tab_free_kind(tab)
 		drop_term(tab.id)
@@ -1856,6 +1852,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		return notify_apply(cmd, caller)
 	case Program_Status, Set_Unread:
 		return status_apply(cmd, caller)
+	case Mark_All_Read:
+		return mark_all_read_apply(caller)
 	case Update_Check, Update_Skip, Update_Later, Update_Download, Update_Install, Set_Update_Check, Update_Env, Update_Tick, Update_Checked, Update_Prepared:
 		return update_apply(cmd, caller)
 	case Set_Home_Dir, Set_Folder, Setup_Sheet:
@@ -1967,9 +1965,7 @@ restore_tab :: proc(s: ^Open_Session, rt: Restore_Tab) -> u64 {
 // use it (the user, or a caller trusted for this class). With a token: it must
 // match a parked command with the same target, and the resending caller must
 // be the user or that same trusted caller.
-// origin (optional): set to the caller the confirmed command was parked for (its requester; the
-// user only confirmed it), else left as it is.
-confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false, origin: ^Caller = nil) -> (r: Result, proceed: bool, changed: bool) {
+confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, what: string, force_ask := false) -> (r: Result, proceed: bool, changed: bool) {
 	mode := force_ask ? Confirm_Mode.Ask : confirm_mode(caller, class) // force_ask: the user confirms, whatever the policy
 	if mode == .Auto do return {}, true, false
 	summary := asked_by(caller, what)
@@ -2005,7 +2001,6 @@ confirm_gate :: proc(cmd: Command, class: Command_Class, caller: Caller, token, 
 		by_user := caller.kind == .UI
 		by_trusted := !force_ask && caller == p.caller && confirm_mode(p.caller, p.class) == .Trusted
 		if !by_user && !by_trusted do return fail("only the user can confirm this, in Deckhand"), false, false
-		if origin != nil do origin^ = p.caller
 		ordered_remove(&state.pending_confirmations, i)
 		window_state_changed() // consumed: callers that go on (Quit) may answer "not changed"
 		return {}, true, true

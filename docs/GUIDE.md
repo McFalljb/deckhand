@@ -560,16 +560,16 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
   running a command, or an editor with unsaved changes.
 - **To reopen a tab you closed**, press ⇧⌘T (**Reopen closed tab**, File menu or the palette); again
-  for the one before, up to the last 10 you closed on this Mac, in the session it was in (brought
-  to the front). What comes back: an editor or Markdown tab opens its file as it is on disk now
-  (unsaved changes are gone), a browser tab its address, an app tab its app from the project's
-  `.deckhand/apps.json`, only while its command and folder there are still the ones it ran (else
-  "That app's command changed: open it from the project"; a command line you typed is not kept), a Claude tab its conversation
-  (resumed), a Changes tab its checkout, and a shell tab a **new** shell in its folder ("Reopened a
-  new terminal in …": what ran there is gone). The list is kept in memory only, never saved; a tab
-  whose session you closed since is skipped, and a tab closed on another machine, or one an agent
-  asked to close (even when you confirmed it), is not on it.
-  With nothing to reopen it says "No closed tab to reopen".
+  for the one before, up to the last 10, in the session it was in (brought to the front). The
+  window remembers only the tabs you close yourself with the tab's **×**, ⌘W or the tab's menu's
+  **Close tab**; not one an agent or a script closes (even when you confirm it), and not one on
+  another machine. What comes back: an editor or Markdown tab opens its file as it is on disk now
+  (unsaved changes are gone), a browser tab its address, a Claude tab its conversation (resumed),
+  a Changes tab its checkout, and a shell tab a **new** shell in its folder ("Reopened a new
+  terminal in …": what ran there is gone). App tabs are not reopened: open them again from the
+  palette's **New app tab…**. The list is in the window's memory only, never saved; a tab whose
+  close you cancelled, or whose session you closed since, is skipped. With nothing to reopen it
+  says "No closed tab to reopen".
 - **Right-click a tab** for its menu: **Split pane right**, **Split pane down**, the **Move tab to
   the pane …** that apply, and **Close tab** (on the pi tab: **Close session**, which asks first).
 - **To split the centre into panes**, press ⌘D (**Split pane right**) or ⇧⌘D (**Split pane
@@ -2024,7 +2024,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Open file… | ⌘P | the current project's files |
 | Close tab | ⌘W | the pi tab: close the session, asks first; in Atlas: hide the drawer |
 | Close session |  | asks first |
-| Reopen closed tab | ⇧⌘T | the last tab you closed on this Mac (up to 10; [To reopen a tab you closed](#tabs)) |
+| Reopen closed tab | ⇧⌘T | the last tab you closed with its ×, ⌘W or its menu (up to 10; [To reopen a tab you closed](#tabs)) |
 | Save | ⌘S | an editor tab with unsaved changes |
 
 **Edit**
@@ -2167,7 +2167,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |
-| Reopen closed tab | ⇧⌘T | the last tab you closed (its file, address, app or conversation; a shell: a new one in its folder) |
+| Reopen closed tab | ⇧⌘T | the last tab you closed (its file, address or conversation; a shell: a new one in its folder) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Ask Atlas… |  | open the drawer with the keyboard in it |
 | Atlas: change model |  | pi's model selector in Atlas |

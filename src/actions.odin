@@ -205,8 +205,8 @@ ACTIONS := [?]Action {
 		if cs == nil do return nil, false
 		return core.Close_Session{session = cs.id}, true
 	}},
-	// the core keeps the user's last closed tabs (core/closed_tabs.odin): "No closed tab to reopen" when none
-	{id = "reopen_closed_tab", label = "Reopen closed tab", keys = "⇧⌘T", make = proc() -> (core.Command, bool) {return core.Reopen_Closed_Tab{}, true}},
+	// the window remembers the tabs the user closed by hand (closed_tabs.odin): "No closed tab to reopen" when none
+	{id = "reopen_closed_tab", label = "Reopen closed tab", keys = "⇧⌘T", make = proc() -> (core.Command, bool) {return nil, true}, ui = closed_tab_reopen},
 	{id = "ask_agent", label = "Ask Atlas…", title = proc() -> string {return fmt.tprintf("Ask %s…", core.agent_name())}, make = proc() -> (core.Command, bool) {
 		if !core.atlas_offered() do return nil, false // Atlas runs on pi (harness.odin)
 		return core.Set_Home{open = true}, true // its terminal takes the keyboard
@@ -560,7 +560,8 @@ ACTIONS := [?]Action {
 	{id = "prev_needing_you", label = "Previous needing you", keys = "⌥⇧⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{back = true}, true}},
 	// "finished, not seen" by hand (core/agent_status.odin's set_unread, as the row menu's Mark as unread)
 	{id = "mark_unread", label = "Mark as unread", keys = "⇧⌘U", make = mark_unread},
-	{id = "mark_all_read", label = "Mark all as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return nil, true}, ui = mark_all_read},
+	// the core decides per tab as it applies (core/mark_read.odin): "Marked N as read", "Nothing unread"
+	{id = "mark_all_read", label = "Mark all as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return core.Mark_All_Read{}, true}},
 	// the session shown before this one, as ⌘-Tab between two apps (shown_at); ⌥⇧⌘`: the one shown
 	// longest ago. ⌘ chords: ⌃⇥ is the programs' (a Kitty-protocol vim, an app, a page); ⌘` alone is macOS's
 	{id = "recent_session", label = "Recent session", keys = "⌥⌘`", make = proc() -> (core.Command, bool) {return session_recent(false)}},
@@ -809,22 +810,6 @@ mark_unread :: proc() -> (core.Command, bool) {
 	if t := core.active_tab(); t != nil && core.tab_is_terminal(t^) do return core.Set_Unread{tab_id = t.id, unread = true}, true
 	if cs.pi_session_id == "" do return nil, false
 	return core.Set_Unread{pi_session_id = cs.pi_session_id, unread = true}, true
-}
-
-// ⌥⇧⌘U: every tab of this Mac's open sessions that finished and was not seen is seen. Only that
-// mark: a tab waiting for you, with an error or a question keeps its unseen flag too (an error's
-// record goes once it is seen: agent_status.odin).
-mark_all_read :: proc() {
-	ids := make([dynamic]u64, context.temp_allocator)
-	n := 0
-	for s in state.open_sessions {
-		if s.home || s.machine != 0 do continue
-		k := len(ids)
-		for t in s.tabs do if t.unseen && core.tab_status_view(t).dot == .Unseen do append(&ids, t.id)
-		if len(ids) > k do n += 1
-	}
-	for id in ids do ui_do(core.Set_Unread{tab_id = id, unread = false})
-	toast_show(n == 0 ? "Nothing unread" : fmt.tprintf("Marked %d as read", n))
 }
 
 // Recent → Name → Created → Recent.

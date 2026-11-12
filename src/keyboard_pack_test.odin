@@ -1,9 +1,10 @@
 package main
 
-// The keyboard pack: Reopen closed tab (⇧⌘T; core/closed_tabs.odin), Recent session (⌃⇥ ⌃⇧⇥),
-// Mark as unread (⇧⌘U), Mark all as read (⌥⇧⌘U) and Go to open session 1–6 (⌥⌘1–⌥⌘6): the stack
-// (order, cap, kinds, nothing secret kept, the user's closes only), reopening, the recent toggle,
-// the unread marks (waiting untouched), the Open section's rows, and the menus and keys.
+// The keyboard pack: Reopen closed tab (⇧⌘T; closed_tabs.odin, the window's), Recent session
+// (⌥⌘` ⌥⇧⌘`), Mark as unread (⇧⌘U), Mark all as read (⌥⇧⌘U; core/mark_read.odin) and Go to open
+// session 1–6 (⌥⌘1–⌥⌘6): only the user's three close gestures record (kinds, order, cap, nothing
+// secret, no app tabs), reopening, the recent toggle, the unread marks (waiting, errors untouched,
+// also when one arrives just before), the Open section's rows, and the menus and keys.
 
 import "base:runtime"
 import "core:fmt"
@@ -30,7 +31,8 @@ kp_reset :: proc() {
 	}
 	clear(&core.terms)
 	core.inbox_drain()
-	core.closed_tabs_clear()
+	closed_tabs_clear()
+	if menu.open do menu_close()
 	state^ = core.State{layout = {left_width = core.LEFT_WIDTH_DEFAULT, right_width = core.RIGHT_WIDTH_DEFAULT, left_open = true}}
 	toast_clear()
 	os.set_env("SHELL", "/bin/sh")
@@ -71,172 +73,6 @@ kp_strings :: proc(xs: ..string) -> []string {
 kp_tab :: proc(id: u64, kind: core.Tab_Kind, title := "tab", cwd := "") -> core.Tab {
 	context.allocator = runtime.heap_allocator()
 	return core.Tab{id = id, kind = kind, title = strings.clone(title), cwd = strings.clone(cwd), status = .Exited}
-}
-
-@(test)
-closed_tabs_kinds_order_cap_and_secrets :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	kp_reset()
-	defer kp_reset()
-	dir := kp_dir()
-	defer os.remove_all(dir)
-	// a declared app (apps.json) and its tab; a command line typed in the palette is not kept
-	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
-	_ = os.write_entire_file(fmt.tprintf("%s/.deckhand/apps.json", dir), transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."]}]}`))
-	game := kp_strings("godot", "--path", ".")
-	adhoc := kp_strings("/bin/sh", "-c", "TOKEN=s3cret serve")
-	kp_session(100, dir,
-		kp_tab(10, core.Shell_Tab{}, cwd = fmt.tprintf("%s/sub", dir)),
-		kp_tab(11, core.Editor_Tab{path = strings.clone("/x/a.odin")}),
-		kp_tab(12, core.Markdown_Tab{path = strings.clone("/x/README.md")}),
-		kp_tab(13, core.Browser_Tab{url = strings.clone("https://me:hunter2@example.com/p?q=1")}),
-		kp_tab(14, core.Browser_Tab{url = strings.clone("")}),
-		kp_tab(15, core.App_Tab{argv = game, cwd = strings.clone(dir)}, title = "game"),
-		kp_tab(16, core.App_Tab{argv = adhoc, cwd = strings.clone(dir)}, title = "serve"),
-		kp_tab(17, core.Claude_Tab{session_id = strings.clone("0b6a3c1e-0000-4000-8000-000000000001"), args = kp_strings("--model", "opus")}, cwd = dir),
-		kp_tab(18, core.Claude_Tab{}), // before Claude reported its session: nothing to resume
-		kp_tab(19, core.Changes_Tab{root = strings.clone(dir)}),
-		kp_tab(20, core.Shell_Tab{}), // the session's folder
-	)
-	state.current_session = 100
-	for id in 10 ..= u64(20) {
-		r := core.run_command(core.Close_Tab{tab_id = id}, KP_UI)
-		testing.expectf(t, r.ok, "close %d: %s", id, r.error)
-	}
-	Want :: struct {
-		kind: core.Closed_Kind,
-		what: string,
-	}
-	want := []Want {
-		{.Shell, fmt.tprintf("%s/sub", dir)},
-		{.Editor, "/x/a.odin"},
-		{.Markdown, "/x/README.md"},
-		{.Browser, "https://example.com/p?q=1"}, // no user:pass@
-		{.App, "game"}, // by name, never its command line
-		{.Claude, "0b6a3c1e-0000-4000-8000-000000000001"}, // its id only: no flags kept
-		{.Changes, dir},
-		{.Shell, dir},
-	}
-	testing.expect_value(t, len(core.closed_tabs), len(want))
-	for w, i in want {
-		if i >= len(core.closed_tabs) do break
-		x := core.closed_tabs[i]
-		testing.expectf(t, x.kind == w.kind && x.what == w.what && x.session == 100, "entry %d: %v %q, want %v %q", i, x.kind, x.what, w.kind, w.what)
-		testing.expectf(t, !strings.contains(x.what, "hunter2") && !strings.contains(x.what, "s3cret") && !strings.contains(x.cwd, "opus"), "entry %d keeps a secret", i)
-	}
-
-	// only the user's closes on this Mac: a script's, an agent's or a hub's are not kept
-	core.closed_tabs_clear()
-	s := core.find_session(100)
-	for id in 30 ..= u64(32) do core.pane_add_tab(s, kp_tab(id, core.Shell_Tab{}))
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 30}, {kind = .Script}).ok)
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 31}, {kind = .Control}).ok)
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 32}, {kind = .UI, hub = true}).ok)
-	testing.expect_value(t, len(core.closed_tabs), 0)
-
-	// at most CLOSED_TABS_MAX: the oldest goes
-	for i in 0 ..< u64(core.CLOSED_TABS_MAX + 2) {
-		id := 40 + i
-		core.pane_add_tab(s, kp_tab(id, core.Editor_Tab{path = strings.clone(fmt.tprintf("/x/%d", i))}))
-		testing.expect(t, core.run_command(core.Close_Tab{tab_id = id}, KP_UI).ok)
-	}
-	testing.expect_value(t, len(core.closed_tabs), core.CLOSED_TABS_MAX)
-	testing.expect_value(t, core.closed_tabs[0].what, "/x/2")
-	testing.expect_value(t, core.closed_tabs[core.CLOSED_TABS_MAX - 1].what, fmt.tprintf("/x/%d", core.CLOSED_TABS_MAX + 1))
-}
-
-@(test)
-closed_tabs_reopen :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	kp_reset()
-	defer kp_reset()
-	dir := kp_dir()
-	defer os.remove_all(dir)
-	path := fmt.tprintf("%s/a.txt", dir)
-	_ = os.write_entire_file(path, transmute([]u8)string("hello\n"))
-	kp_session(100, dir)
-	kp_session(200, dir)
-	state.current_session = 100
-
-	// nothing closed: a toast for the user, ok
-	r := core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.ok && r.created_id == 0)
-	testing.expect_value(t, toast.text, "No closed tab to reopen")
-	toast_clear()
-
-	// an editor tab: its file again, in its session, brought to the front
-	r = core.run_command(core.Open_File{path = path, session = 100}, KP_UI)
-	testing.expect(t, r.ok, r.error)
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = r.created_id}, KP_UI).ok)
-	// a shell tab, in the other session
-	s2 := core.find_session(200)
-	core.pane_add_tab(s2, kp_tab(210, core.Shell_Tab{}, cwd = dir))
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 210}, KP_UI).ok)
-	testing.expect_value(t, len(core.closed_tabs), 2)
-
-	// newest first: the shell, as a NEW shell in its folder, said so
-	r = core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, state.current_session, u64(200))
-	s2 = core.find_session(200)
-	_, sh, _ := core.find_tab(r.created_id)
-	testing.expect(t, sh != nil && sh.id != 210, "a new tab")
-	if sh != nil {
-		_, is_shell := sh.kind.(core.Shell_Tab)
-		testing.expect(t, is_shell)
-		testing.expect_value(t, core.session_focused_id(s2), sh.id)
-	}
-	testing.expect_value(t, toast.text, fmt.tprintf("Reopened a new terminal in %s", core.path_tilde(dir)))
-
-	// then the editor, in session 100
-	r = core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, state.current_session, u64(100))
-	_, ed, _ := core.find_tab(r.created_id)
-	if ed != nil {
-		et, is_ed := ed.kind.(core.Editor_Tab)
-		testing.expect(t, is_ed && et.path == path)
-	} else do testing.fail_now(t, "no editor tab")
-	testing.expect_value(t, len(core.closed_tabs), 0)
-
-	// a tab whose session has closed since is skipped
-	core.pane_add_tab(s2, kp_tab(220, core.Editor_Tab{path = strings.clone(path)}))
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 220}, KP_UI).ok)
-	for &s, i in state.open_sessions do if s.id == 200 {
-		ordered_remove(&state.open_sessions, i)
-		break
-	}
-	toast_clear()
-	r = core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.ok && r.created_id == 0)
-	testing.expect_value(t, toast.text, "No closed tab to reopen")
-}
-
-@(test)
-closed_tabs_authority_wire_and_menu :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	kp_reset()
-	defer kp_reset()
-	spec := core.command_spec("reopen_closed_tab")
-	testing.expect(t, spec != nil && spec.who == .User_Here, "the user's own, never a hub's")
-	testing.expect(t, core.caller_may(KP_UI, core.Reopen_Closed_Tab{}))
-	testing.expect(t, !core.caller_may({kind = .UI, hub = true}, core.Reopen_Closed_Tab{}), "never from another machine")
-	testing.expect(t, !core.caller_may({kind = .Control}, core.Reopen_Closed_Tab{}), "not an agent's")
-	testing.expect(t, !core.caller_may({kind = .Panel, tab_id = 5}, core.Reopen_Closed_Tab{}))
-	testing.expect_value(t, core.command_wire_json(core.Reopen_Closed_Tab{}), `{"type":"reopen_closed_tab"}`)
-	cmd, err := core.parse_command(`{"type":"reopen_closed_tab"}`, context.temp_allocator)
-	testing.expect_value(t, err, "")
-	_, is := cmd.(core.Reopen_Closed_Tab)
-	testing.expect(t, is)
-	// File menu, after Close session; always runs (the core says when there is nothing)
-	file: []Bar_Item
-	for top in MENUBAR do if top.title == "File" do file = top.sub
-	at := -1
-	for it, i in file do if it.action == "close_session" do at = i
-	testing.expect(t, at >= 0 && at + 1 < len(file) && file[at + 1].action == "reopen_closed_tab")
-	testing.expect_value(t, menubar_keys(menubar_find("reopen_closed_tab")), "⇧⌘T")
-	testing.expect_value(t, menubar_key_action(.T, u32(sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT)), "reopen_closed_tab")
-	testing.expect(t, action_ok("reopen_closed_tab"))
 }
 
 // ⌥⌘`: the session shown before this one; again: back. ⌥⇧⌘`: the one shown longest ago.
@@ -375,40 +211,6 @@ open_session_nth :: proc(t: ^testing.T) {
 
 // Review round 1. An app's declaration rewritten after its tab closed: ⇧⌘T does not run the
 // replacement (the closed tab's command and folder are what may reopen, nothing else).
-@(test)
-closed_tabs_app_declaration_changed :: proc(t: ^testing.T) {
-	context.allocator = runtime.heap_allocator()
-	kp_reset()
-	defer kp_reset()
-	dir := kp_dir()
-	defer os.remove_all(dir)
-	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
-	apps := fmt.tprintf("%s/.deckhand/apps.json", dir)
-	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."]}]}`))
-	s := kp_session(100, dir, kp_tab(10, core.App_Tab{argv = kp_strings("godot", "--path", "."), cwd = strings.clone(dir)}, title = "game"))
-	state.current_session = 100
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 10}, KP_UI).ok)
-	testing.expect_value(t, len(core.closed_tabs), 1)
-	// an agent rewrites the declaration under the same name
-	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["sh","-c","evil"]}]}`))
-	n := len(s.tabs)
-	r := core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.created_id == 0, "nothing started")
-	testing.expect_value(t, len(core.find_session(100).tabs), n)
-	testing.expect_value(t, toast.text, "That app's command changed: open it from the project")
-	// its folder moved: the same
-	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."],"cwd":"sub"}]}`))
-	os.make_directory_all(fmt.tprintf("%s/sub", dir))
-	core.pane_add_tab(core.find_session(100), kp_tab(11, core.App_Tab{argv = kp_strings("godot", "--path", "."), cwd = strings.clone(dir)}, title = "game"))
-	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."]}]}`))
-	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 11}, KP_UI).ok)
-	_ = os.write_entire_file(apps, transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot","--path","."],"cwd":"sub"}]}`))
-	toast_clear()
-	r = core.run_command(core.Reopen_Closed_Tab{}, KP_UI)
-	testing.expect(t, r.created_id == 0, "nothing started")
-	testing.expect_value(t, toast.text, "That app's command changed: open it from the project")
-}
-
 // Mark all as read clears finished-not-seen only: an error not seen yet stays (and its record).
 @(test)
 mark_all_read_keeps_errors :: proc(t: ^testing.T) {
@@ -460,33 +262,234 @@ recent_session_keys_are_cmd_chords :: proc(t: ^testing.T) {
 
 // A close an agent asked for and the user confirmed is the agent's: not kept for ⇧⌘T. The user's
 // own close, confirmed, is.
+// Only the user's own gestures record: a tab's ×, ⌘W and its menu's Close tab. Not the menu bar's or
+// the palette's Close tab, an agent's close (also confirmed by the user), a script's. The kinds kept,
+// their order and cap; nothing secret; app tabs never.
 @(test)
-closed_tabs_confirmed_close_keeps_its_requester :: proc(t: ^testing.T) {
+closed_tabs_only_the_users_gestures :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	dir := kp_dir()
+	defer os.remove_all(dir)
+	os.make_directory_all(fmt.tprintf("%s/.deckhand", dir))
+	_ = os.write_entire_file(fmt.tprintf("%s/.deckhand/apps.json", dir), transmute([]u8)string(`{"apps":[{"name":"game","argv":["godot"]}]}`))
+	kp_session(100, dir,
+		kp_tab(10, core.Shell_Tab{}, cwd = fmt.tprintf("%s/sub", dir)),
+		kp_tab(11, core.Editor_Tab{path = strings.clone("/x/a.odin")}),
+		kp_tab(12, core.Markdown_Tab{path = strings.clone("/x/README.md")}),
+		kp_tab(13, core.Browser_Tab{url = strings.clone("https://example.com/p?q=1")}),
+		kp_tab(14, core.Browser_Tab{url = strings.clone("")}),
+		kp_tab(15, core.App_Tab{argv = kp_strings("godot"), cwd = strings.clone(dir)}, title = "game"),
+		kp_tab(16, core.Claude_Tab{session_id = strings.clone("0b6a3c1e-0000-4000-8000-000000000001"), args = kp_strings("--model", "opus")}, cwd = dir),
+		kp_tab(17, core.Claude_Tab{}),
+		kp_tab(18, core.Changes_Tab{root = strings.clone(dir)}),
+		kp_tab(19, core.Shell_Tab{}),
+		kp_tab(20, core.Shell_Tab{}),
+		kp_tab(21, core.Shell_Tab{}),
+		kp_tab(22, core.Shell_Tab{}),
+		kp_tab(23, core.Shell_Tab{}),
+		kp_tab(24, core.Shell_Tab{}),
+	)
+	state.current_session = 100
+	// the × and ⌘W (close_tab_click), each kind
+	for id in 10 ..= u64(18) {
+		close_tab_click(id)
+		core.inbox_drain()
+	}
+	Want :: struct {
+		kind: Closed_Kind,
+		what: string,
+	}
+	want := []Want {
+		{.Shell, fmt.tprintf("%s/sub", dir)},
+		{.Editor, "/x/a.odin"},
+		{.Markdown, "/x/README.md"},
+		{.Browser, "https://example.com/p?q=1"},
+		{.Claude, "0b6a3c1e-0000-4000-8000-000000000001"}, // its id: no flags kept
+		{.Changes, dir},
+	}
+	testing.expect_value(t, len(closed_tabs), len(want)) // no blank page, app tab or id-less Claude tab
+	for w, i in want {
+		if i >= len(closed_tabs) do break
+		x := closed_tabs[i]
+		testing.expectf(t, x.kind == w.kind && x.what == w.what && x.session == 100, "entry %d: %v %q, want %v %q", i, x.kind, x.what, w.kind, w.what)
+		testing.expectf(t, !strings.contains(x.cwd, "opus"), "entry %d keeps a flag", i)
+	}
+	// ⌘W, as pressed
+	ui_do(core.Focus_Tab{19})
+	core.inbox_drain()
+	e := sapp.Event{type = .KEY_DOWN, key_code = .W, modifiers = u32(sapp.MODIFIER_SUPER)}
+	event(&e)
+	core.inbox_drain()
+	testing.expect(t, len(closed_tabs) == len(want) + 1 && closed_tabs[len(closed_tabs) - 1].tab_id == 19, "⌘W recorded")
+	// the tab menu's Close tab
+	menu_open(Menu_Tab(20), {10, 10})
+	at := -1
+	for it, i in menu_items() do if it.label == "Close tab" do at = i
+	testing.expect(t, at >= 0)
+	menu_run(at)
+	core.inbox_drain()
+	testing.expect(t, closed_tabs[len(closed_tabs) - 1].tab_id == 20, "the tab menu recorded")
+	n := len(closed_tabs)
+	// not: the menu bar's and the palette's Close tab, an agent's, a script's
+	ui_do(core.Focus_Tab{21})
+	core.inbox_drain()
+	action_run("close_tab")
+	core.inbox_drain()
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 22}, {kind = .Control}).ok)
+	testing.expect(t, core.run_command(core.Close_Tab{tab_id = 23}, {kind = .Script}).ok)
+	testing.expect_value(t, len(closed_tabs), n)
+	_, gone, _ := core.find_tab(21)
+	testing.expect(t, gone == nil, "the menu bar's close did close it")
+
+	// at most CLOSED_TABS_MAX: the oldest goes
+	s := core.find_session(100)
+	for i in 0 ..< u64(CLOSED_TABS_MAX) {
+		core.pane_add_tab(s, kp_tab(40 + i, core.Editor_Tab{path = strings.clone(fmt.tprintf("/y/%d", i))}))
+		close_tab_click(40 + i)
+		core.inbox_drain()
+	}
+	testing.expect_value(t, len(closed_tabs), CLOSED_TABS_MAX)
+	testing.expect_value(t, closed_tabs[0].what, "/y/0")
+}
+
+// An agent's close the user confirmed in the bar records nothing; the user's own ×, confirmed,
+// records; cancelled, its entry is skipped at ⇧⌘T (the tab is still there).
+@(test)
+closed_tabs_confirmations :: proc(t: ^testing.T) {
 	context.allocator = runtime.heap_allocator()
 	kp_reset()
 	defer kp_reset()
 	state.settings.confirm_close[.Shell] = .Always
 	running :: proc(id: u64) -> core.Tab {
-		x := kp_tab(id, core.Shell_Tab{})
+		x := kp_tab(id, core.Shell_Tab{}, cwd = "/tmp")
 		x.status = .Running
 		return x
 	}
-	kp_session(100, "/tmp", running(10), running(11))
+	kp_session(100, "/tmp", running(10), running(11), running(12))
 	state.current_session = 100
-	// the agent's: parked for the user, who confirms it in the bar (ui)
 	r := core.run_command(core.Close_Tab{tab_id = 10}, {kind = .Control})
 	testing.expect_value(t, r.error, "needs_confirmation")
-	testing.expect_value(t, len(state.pending_confirmations), 1)
 	if len(state.pending_confirmations) == 1 {
 		tok := strings.clone(state.pending_confirmations[0].token, context.temp_allocator)
-		r = core.run_command(core.Close_Tab{tab_id = 10, confirm = tok}, KP_UI)
-		testing.expect(t, r.ok, r.error)
+		ui_do(core.Close_Tab{tab_id = 10, confirm = tok}) // the bar's Confirm
+		core.inbox_drain()
 	}
-	testing.expect_value(t, len(core.closed_tabs), 0)
-	// the user's own, confirmed: kept
-	r = core.run_command(core.Close_Tab{tab_id = 11}, KP_UI)
-	testing.expect_value(t, r.error, "needs_confirmation")
-	r = core.run_command(core.Close_Tab{tab_id = 11, confirm = r.confirm_token}, KP_UI)
+	_, gone, _ := core.find_tab(10)
+	testing.expect(t, gone == nil, "confirmed and closed")
+	testing.expect_value(t, len(closed_tabs), 0)
+	// the user's ×: it asks; the user cancels: the tab stays, ⇧⌘T skips it
+	close_tab_click(11)
+	core.inbox_drain()
+	testing.expect_value(t, len(closed_tabs), 1)
+	_, still, _ := core.find_tab(11)
+	testing.expect(t, still != nil, "waiting for the answer")
+	n := len(core.find_session(100).tabs)
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, len(core.find_session(100).tabs), n)
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+	testing.expect_value(t, len(closed_tabs), 0)
+}
+
+// ⇧⌘T: newest first, in its session (brought to the front): a new shell in its folder (said so),
+// then the editor's file; a tab whose session closed since is skipped; nothing left: a toast.
+@(test)
+closed_tabs_reopen_sends_the_opens :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	dir := kp_dir()
+	defer os.remove_all(dir)
+	path := fmt.tprintf("%s/a.txt", dir)
+	_ = os.write_entire_file(path, transmute([]u8)string("hello\n"))
+	kp_session(100, dir)
+	kp_session(200, dir, kp_tab(210, core.Shell_Tab{}, cwd = dir))
+	state.current_session = 100
+	action_run("reopen_closed_tab")
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+	toast_clear()
+	r := core.run_command(core.Open_File{path = path, session = 100}, KP_UI)
 	testing.expect(t, r.ok, r.error)
-	testing.expect_value(t, len(core.closed_tabs), 1)
+	close_tab_click(r.created_id)
+	core.inbox_drain()
+	close_tab_click(210)
+	core.inbox_drain()
+	testing.expect_value(t, len(closed_tabs), 2)
+	state.current_session = 100
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, state.current_session, u64(200))
+	s2 := core.find_session(200)
+	focused := core.session_focused_tab(s2)
+	if focused != nil {
+		_, is_shell := focused.kind.(core.Shell_Tab)
+		testing.expect(t, is_shell && focused.id != 210, "a new shell")
+	} else do testing.fail_now(t, "no tab")
+	testing.expect_value(t, toast.text, fmt.tprintf("Reopened a new terminal in %s", core.path_tilde(dir)))
+	action_run("reopen_closed_tab")
+	core.inbox_drain()
+	testing.expect_value(t, state.current_session, u64(100))
+	ed := core.session_focused_tab(core.find_session(100))
+	if ed != nil {
+		et, is_ed := ed.kind.(core.Editor_Tab)
+		testing.expect(t, is_ed && et.path == path)
+	} else do testing.fail_now(t, "no editor tab")
+	// a tab whose session closed since: skipped
+	core.pane_add_tab(s2, kp_tab(220, core.Editor_Tab{path = strings.clone(path)}))
+	close_tab_click(220)
+	core.inbox_drain()
+	for &s, i in state.open_sessions do if s.id == 200 {
+		ordered_remove(&state.open_sessions, i)
+		break
+	}
+	toast_clear()
+	action_run("reopen_closed_tab")
+	testing.expect_value(t, toast.text, "No closed tab to reopen")
+	// the menus and the key
+	file: []Bar_Item
+	for top in MENUBAR do if top.title == "File" do file = top.sub
+	k := -1
+	for it, i in file do if it.action == "close_session" do k = i
+	testing.expect(t, k >= 0 && k + 1 < len(file) && file[k + 1].action == "reopen_closed_tab")
+	testing.expect_value(t, menubar_key_action(.T, u32(sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT)), "reopen_closed_tab")
+	testing.expect(t, action_ok("reopen_closed_tab"))
+}
+
+// mark_all_read decides in the core as it applies: an error that arrives after the window last saw
+// the tab finished (unseen) and before the command applies keeps its unseen flag and its record.
+// The user's at this Mac only; its count.
+@(test)
+mark_all_read_race_and_authority :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	kp_reset()
+	defer kp_reset()
+	x := kp_tab(21, core.Shell_Tab{})
+	x.status = .Running
+	x.unseen = true
+	kp_session(200, "/tmp", x)
+	kp_session(100, "/tmp")
+	state.current_session = 100
+	_, tab, _ := core.find_tab(21)
+	testing.expect(t, core.tab_status_view(tab^).dot == .Unseen, "what the window sees")
+	// the error arrives first, then the command
+	core.run_command(core.Program_Status{tab_id = 21, summary = {state = .Error}}, {kind = .Internal})
+	r := core.run_command(core.Mark_All_Read{}, KP_UI)
+	testing.expect(t, r.ok)
+	testing.expect_value(t, r.data, `{"count":0}`)
+	_, tab, _ = core.find_tab(21)
+	testing.expect(t, tab != nil && tab.unseen && core.tab_status_view(tab^).dot == .Error, "the error is kept, not seen")
+	testing.expect_value(t, toast.text, "Nothing unread")
+	// authority: the user at this Mac only
+	spec := core.command_spec("mark_all_read")
+	testing.expect(t, spec != nil && spec.who == .User_Here)
+	testing.expect(t, !core.caller_may({kind = .UI, hub = true}, core.Mark_All_Read{}))
+	testing.expect(t, !core.caller_may({kind = .Control}, core.Mark_All_Read{}))
+	testing.expect(t, !core.caller_may({kind = .Script}, core.Mark_All_Read{}))
+	testing.expect_value(t, core.command_wire_json(core.Mark_All_Read{}), `{"type":"mark_all_read"}`)
+	cmd, err := core.parse_command(`{"type":"mark_all_read"}`, context.temp_allocator)
+	testing.expect_value(t, err, "")
+	_, is := cmd.(core.Mark_All_Read)
+	testing.expect(t, is)
 }

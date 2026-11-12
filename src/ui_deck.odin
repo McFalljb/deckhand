@@ -314,7 +314,7 @@ deck_card :: proc(r: core.Attention_Row, i: int, w, h: f32) {
 		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(h)}, padding = clay.PaddingAll(pu(DECK_CARD_PAD)), layoutDirection = .TopToBottom},
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(edge), width = clay.BorderAll(pu(core.BORDER_W))},
+		border = {color = cc(edge), width = clay.BorderOutside(pu(core.BORDER_W))}, // Outside: BorderAll also rules a line between every child
 	}) {
 		small := FONT_UI_SMALL
 		// mark, [place ·] title, then its age, or (hovered) its "…" in the same box

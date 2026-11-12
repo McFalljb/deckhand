@@ -141,6 +141,7 @@ FOLD_NAMES := [Sidebar_Fold]string {
 	.Open     = "open",
 	.Projects = "projects",
 	.Chats    = "chats",
+	.This_Mac = "this_mac",
 }
 
 // ---- commands ----

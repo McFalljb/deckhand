@@ -788,6 +788,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return MACHINE_ADD_TIP, ""
 	case Hit_Machine: // its button: what it does
 		for m in state.machines do if m.no == u64(x) do return machine_action_tip(m), ""
+	case Hit_Machine_More:
+		return "More actions", ""
 	case Hit_Machine_Head: // its header: why, in plain words, then ssh's own
 		if x == 0 do return MACHINE_HERE_TIP, "" // this Mac's
 		for m in state.machines do if m.no == u64(x) do return machine_tip(m), ""

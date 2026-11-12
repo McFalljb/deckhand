@@ -1094,7 +1094,8 @@ Hit :: union {
 	Hit_Info_Session,
 	Hit_New_Job_In,
 	Hit_Machine, // another machine's button (ui_sidebar.odin)
-	Hit_Machine_Head, // its header: the tooltip says why, right click its menu
+	Hit_Machine_Head, // its header: the tooltip says why, a click folds it, right click its menu
+	Hit_Machine_More, // its header's "…": its menu
 	Hit_Machine_Add, // + Add a machine…
 	// the toolbar, settings popover, shortcuts sheet (ui_toolbar.odin)
 	Hit_Button,
@@ -1152,6 +1153,7 @@ Hit_Info_Session :: distinct string // a session row's ⓘ: its info menu (pi se
 Hit_New_Job_In :: distinct u64 // "New job…" under the selected project (project id)
 Hit_Machine :: distinct u64 // a machine row's button: Log in…, Connect, Take back… (machine number)
 Hit_Machine_Head :: distinct u64 // a machine's header (machine number)
+Hit_Machine_More :: distinct u64 // another machine's header's "…" (machine number)
 Hit_Machine_Add :: struct {}
 Hit_Button :: distinct Button
 Hit_Pop :: distinct Pop_Item

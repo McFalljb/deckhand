@@ -61,22 +61,22 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 		label, why, raw: string,
 	}
 	cases := []Case {
-		{{target = "jb@nuc-typo", status = .Offline, error = "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"}, "offline", "Can't find a computer called nuc-typo", "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"},
-		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Connection refused"}, "offline", "It refused the connection", "ssh: connect to host nuc port 22: Connection refused"},
-		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Operation timed out"}, "offline", "The connection timed out", "ssh: connect to host nuc port 22: Operation timed out"},
-		{{target = "nuc", status = .Offline, error = "kex_exchange_identification: read: Connection reset by peer"}, "offline", "The connection failed", "kex_exchange_identification: read: Connection reset by peer"},
-		{{target = "nuc", status = .Offline, error = "no answer from its core"}, "offline", "Deckhand there did not answer", ""},
-		{{target = "nuc", status = .Needs_Login, error = "jb@nuc: Permission denied (publickey)."}, "needs you to log in", "ssh wants a password or a key: Log in…", "jb@nuc: Permission denied (publickey)."},
-		{{target = "nuc", status = .Refused, error = HUB_NOT_ALLOWED}, "not allowed", "Turn on Allow other machines to connect on that Mac", ""},
-		{{target = "nuc", status = .Unsupported, error = "FreeBSD amd64"}, "not supported", "Not a Mac or Linux machine", "FreeBSD amd64"},
-		{{target = "nuc", status = .Taken, error = "viewed from Studio"}, "in use there", "Shown from Studio now: Take back shows it here", ""},
-		{{target = "nuc", status = .Needs_Update, error = "its core is newer: update Deckhand on this Mac"}, "needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""},
-		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "tar: Write error"}, "install failed", "Install failed: it could not write the files there (is its disk full?)", "tar: Write error"},
-		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "scp: write: No space left on device"}, "install failed", "Install failed: its disk is full", "scp: write: No space left on device"},
-		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "rsync: something odd"}, "install failed", "Install failed: the copy there did not work", "rsync: something odd"},
-		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "cancelled"}, "no Deckhand there", "Deckhand isn't installed there: Install…", ""},
-		{{target = "nuc", status = .Not_Installed, job = .Copying}, "installing…", "", ""},
-		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "installed, but its core refused this Mac: x"}, "install failed", "Install failed: it is installed, but it does not allow other machines to connect: turn on Allow other machines to connect there", ""},
+		{{target = "jb@nuc-typo", status = .Offline, error = "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"}, "Offline", "Can't find a computer called nuc-typo", "ssh: Could not resolve hostname nuc-typo: nodename nor servname provided, or not known"},
+		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Connection refused"}, "Offline", "It refused the connection", "ssh: connect to host nuc port 22: Connection refused"},
+		{{target = "nuc", status = .Offline, error = "ssh: connect to host nuc port 22: Operation timed out"}, "Offline", "The connection timed out", "ssh: connect to host nuc port 22: Operation timed out"},
+		{{target = "nuc", status = .Offline, error = "kex_exchange_identification: read: Connection reset by peer"}, "Offline", "The connection failed", "kex_exchange_identification: read: Connection reset by peer"},
+		{{target = "nuc", status = .Offline, error = "no answer from its core"}, "Offline", "Deckhand there did not answer", ""},
+		{{target = "nuc", status = .Needs_Login, error = "jb@nuc: Permission denied (publickey)."}, "Needs you to log in", "ssh wants a password or a key", "jb@nuc: Permission denied (publickey)."},
+		{{target = "nuc", status = .Refused, error = HUB_NOT_ALLOWED}, "Not allowed", "Turn on Allow other machines to connect on that Mac", ""},
+		{{target = "nuc", status = .Unsupported, error = "FreeBSD amd64"}, "Not supported", "Not a Mac or Linux machine", "FreeBSD amd64"},
+		{{target = "nuc", status = .Taken, error = "viewed from Studio"}, "In use there", "Shown from Studio now: Take back shows it here", ""},
+		{{target = "nuc", status = .Needs_Update, error = "its core is newer: update Deckhand on this Mac"}, "Needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""},
+		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "tar: Write error"}, "Install failed", "Install failed: it could not write the files there (is its disk full?)", "tar: Write error"},
+		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "scp: write: No space left on device"}, "Install failed", "Install failed: its disk is full", "scp: write: No space left on device"},
+		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "rsync: something odd"}, "Install failed", "Install failed: the copy there did not work", "rsync: something odd"},
+		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "cancelled"}, "No Deckhand there", "Deckhand isn't installed there", ""},
+		{{target = "nuc", status = .Not_Installed, job = .Copying}, "Installing…", "", ""},
+		{{target = "nuc", status = .Not_Installed, job = .Failed, job_note = "installed, but its core refused this Mac: x"}, "Install failed", "Install failed: it is installed, but it does not allow other machines to connect: turn on Allow other machines to connect there", ""},
 	}
 	for c, i in cases {
 		label, why, raw := machine_status_text(c.m)
@@ -88,6 +88,18 @@ machines_ux_status_words :: proc(t: ^testing.T) {
 	testing.expect_value(t, machine_action_label({status = .Unsupported}), "")
 	testing.expect_value(t, machine_action_label({status = .Needs_Login}), "Log in…")
 	testing.expect_value(t, machine_action_label({status = .Offline}), "Connect")
+	// no error: its label says Offline, nothing more
+	_, why0, _ := machine_status_text({target = "nuc", status = .Offline})
+	testing.expect_value(t, why0, "")
+	// a healthy machine has no button (Open web page… is in its header's menu); an update to make
+	// on that machine has none either: its sentence says what to do
+	testing.expect_value(t, machine_action_label({status = .Online}), "")
+	testing.expect_value(t, machine_action_label({status = .Needs_Update, update = .Command_Only}), "")
+	testing.expect_value(t, machine_action_label({status = .Needs_Update, update = .Button}), "Update")
+	for st in ([?]Machine_Status{.Online, .Needs_Update}) {
+		_, why, _ := machine_status_text({status = st, update = .Command_Only})
+		testing.expect_value(t, why, "Its Deckhand wasn't installed by Deckhand: update it on that machine")
+	}
 }
 
 when TEST_HOOKS {

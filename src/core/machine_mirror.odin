@@ -27,7 +27,8 @@ package core
 // text_clean_remote's (one line, no control, bidi or invisible characters, bounded); its job
 // lines and folders, a run's folder and a pi session id are dropped. What it rang goes with the
 // machine (removed, or Machines over SSH off); a link that drops keeps them as last seen. Another machine's State is untrusted: every string is cleaned
-// (text_clean: printable, no bidi controls, bounded), every list capped, an id that does not pack
+// (text_clean: printable, no bidi controls, bounded; what the sidebar draws or its filter matches, names,
+// folders and titles, text_clean_remote's, one line too), every list capped, an id that does not pack
 // is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
 // nothing this Mac's core could act on. They are never saved (persist.odin), never started here
 // (term_start refuses their tab ids), and a command naming one runs on that machine, not here
@@ -212,7 +213,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 		if p.group != .Projects do continue
 		id, ok := id_pack(no, p.id)
 		if !ok do continue
-		append(&m.projects, Project{id = id, machine = no, group = .Projects, name = mirror_text(p.name, MIRROR_TEXT_MAX, a), cwd = mirror_text(p.cwd, MIRROR_PATH_MAX, a), label = mirror_text(p.label, MIRROR_TEXT_MAX, a), newest = p.newest, created = p.created, missing = p.missing, repo = p.repo})
+		append(&m.projects, Project{id = id, machine = no, group = .Projects, name = remote_text(p.name, MIRROR_TEXT_MAX, a), cwd = remote_text(p.cwd, MIRROR_PATH_MAX, a), label = remote_text(p.label, MIRROR_TEXT_MAX, a), newest = p.newest, created = p.created, missing = p.missing, repo = p.repo})
 	}
 	for p in m.projects do append(&state.projects, p)
 
@@ -230,8 +231,8 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			pi_session_id = fmt.aprintf("m%d:%s", no, text_clean(os.pi_session_id, MIRROR_TEXT_MAX)),
 			session_dir   = mirror_text(os.session_dir, MIRROR_PATH_MAX, heap),
 			session_file  = mirror_text(os.session_file, MIRROR_PATH_MAX, heap),
-			cwd           = mirror_text(os.cwd, MIRROR_PATH_MAX, heap),
-			title         = mirror_text(os.title, MIRROR_TEXT_MAX, heap),
+			cwd           = remote_text(os.cwd, MIRROR_PATH_MAX, heap),
+			title         = remote_text(os.title, MIRROR_TEXT_MAX, heap),
 			missing       = os.missing,
 			shown_at      = shown[id] or_else 0,
 		}
@@ -240,7 +241,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			if len(ns.tabs) >= MIRROR_TABS_MAX do break
 			tid, tok := id_pack(no, tab.id)
 			if !tok do continue
-			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = mirror_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
+			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = remote_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
 		}
 		if len(ns.tabs) == 0 { 	// an open session always has its main tab
 			wire_free(&ns, type_info_of(Open_Session), heap)
@@ -262,7 +263,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	m.selected, _ = id_pack(no, r.selected_project)
 	for x in r.sessions {
 		if len(m.sessions) >= MIRROR_LIST_MAX do break
-		append(&m.sessions, Session{id = fmt.aprintf("m%d:%s", no, text_clean(x.id, MIRROR_TEXT_MAX), allocator = a), path = mirror_text(x.path, MIRROR_PATH_MAX, a), when_ = mirror_text(x.when_, 32, a), title = mirror_text(x.title, MIRROR_TEXT_MAX, a), untitled = mirror_text(x.untitled, MIRROR_TEXT_MAX, a), modified = x.modified, claude = x.claude})
+		append(&m.sessions, Session{id = fmt.aprintf("m%d:%s", no, text_clean(x.id, MIRROR_TEXT_MAX), allocator = a), path = mirror_text(x.path, MIRROR_PATH_MAX, a), when_ = remote_text(x.when_, 32, a), title = remote_text(x.title, MIRROR_TEXT_MAX, a), untitled = remote_text(x.untitled, MIRROR_TEXT_MAX, a), modified = x.modified, claude = x.claude})
 	}
 	mirror_sessions_show(no, m)
 

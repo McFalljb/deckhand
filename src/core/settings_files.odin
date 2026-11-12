@@ -408,23 +408,23 @@ MACHINE_CHECK_WORDS := [Harness_Item_State]string {
 }
 
 // What a machine's row offers, in the sidebar and in Settings ("" = nothing): Cancel while its
-// install or update runs, Retry after one failed, Update (M6-E), Keep running… (Linux linger
-// off), else what its status wants. Never Connect where it cannot work (refused, unsupported:
-// the row says what to do instead).
+// install or update runs, Retry after one failed, Update (M6-E; not one that must be made on that
+// machine), Keep running… (Linux linger off), else what its status wants. Never Connect where it
+// cannot work (refused, unsupported: the row says what to do instead). A healthy machine has none
+// (Open web page… is in its header's "…" menu).
 machine_action_label :: proc(m: Machine_View) -> string {
 	#partial switch m.job {
 	case .Fetching, .Verifying, .Copying, .Handing_Over: return "Cancel"
 	case .Cleaning: return ""
 	}
 	if machine_install_failed(m) do return "Retry"
-	if m.update != .None do return "Update"
+	if m.update == .Button do return "Update" // Command_Only: no button, its sentence says what to do there
 	if m.status == .Online && m.linger == .Off do return "Keep running…" // Linux: linger is off there
 	#partial switch m.status {
 	case .Needs_Login:   return "Log in…"
 	case .Not_Installed: return "Install…"
 	case .Taken:         return "Take back"
 	case .Offline:       return "Connect"
-	case .Online:        return "Open web page…" // a port of its own: machine_page.odin
 	}
 	return ""
 }

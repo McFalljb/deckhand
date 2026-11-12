@@ -315,10 +315,12 @@ What `release.sh` does:
   update key.
 - **Tests the update path:** the current release's updater installs the new zip
   (`tests/scripts/update-from-release.sh`, 1–2 min). A published binary has no update fixtures,
-  so the script builds the updater from the latest release's tag in a temporary worktree (as the
-  update scene does), offers it the new zip from `file://` with that tag's throwaway test key, and
-  checks the installed bundle. `--prev TAG` names the tag; `--skip-prev-updater` is only for a
-  first release.
+  so the script builds the updater from the latest release's tag in a temporary worktree (as that
+  tag's update scene does: its window, session holder and background core side by side; the core
+  runs the update, so it is built with the test define), offers it the new zip from `file://` with
+  that tag's throwaway test key, and checks the installed bundle. `--prev TAG` names the tag (0.2.0
+  or later: 0.1.6 and older had no separate core and are not supported); `--skip-prev-updater` is
+  only for a first release.
 - **Drafts** the GitHub Release with `gh --verify-tag` (the tag must be pushed; a re-run replaces a
   draft's files, never a published release's), then downloads both `.sig`s again and verifies them.
 

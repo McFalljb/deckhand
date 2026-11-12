@@ -28,6 +28,13 @@ assert_not_drawn npm/
 assert_not_drawn logs/
 assert_not_drawn sessions/
 shot settings/search-dark
+# ---- a file row's menu (right click), as the old Settings tab's: none of Rename or Trash for
+# pi's own config files
+rclickid spi @agent/settings.json
+eventually
+assert_menurows Open|Open in preview|-|Reveal in Finder|Copy path
+key escape
+wait 200
 # ---- a folder shows its files in the search; credentials stay hidden inside it
 clickid spi @agent/prompts
 eventually
@@ -36,6 +43,13 @@ assert_not_drawn token.json
 assert_not_drawn .env
 assert_not_drawn DUMMY-AUTH-SECRET
 shot settings/prompts-search
+# a prompt: New file… (the page's field, then it opens), Rename…, Move to Trash…
+rclickid spi @prompts/fix.md
+eventually
+assert_menurows Open|Open in preview|Open Markdown preview|-|New file…|New folder…|-|Rename…|Move to Trash…|-|Reveal in Finder|Copy path
+shot settings/menu-prompt
+key escape
+wait 200
 # Esc clears the search; typing searches inside folders too; still no credentials
 key escape
 wait 200

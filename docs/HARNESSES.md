@@ -86,7 +86,7 @@ does, in load order.
 **Loading** (`src/core/pi_integration.odin`). Every pi start (`start_pi`: a new tab, session or chat,
 Atlas, a restore, Restart, a dead tab's restart, a hot-reload restart) gets one
 `-e <dir>/extensions/<name>` per required extension, and per optional one turned on
-(`pi_extension_on`: the user's choice in the Settings tab's "pi extensions" group, `set_pi_extension`,
+(`pi_extension_on`: the user's choice on the Settings page (Coding agents › pi), `set_pi_extension`,
 else the manifest's `default`), in the manifest's order, before pi's own arguments. Each pi tab
 records which optional ones it started with; a later change marks it for the restart bar ("pi
 extensions changed — Restart N idle tabs"), since `-e` is fixed for a process's life. Atlas also

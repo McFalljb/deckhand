@@ -710,8 +710,8 @@ event :: proc(e: ^sapp.Event) {
 		else do ui_do(core.Set_Home{open = !state.home_open})
 		return
 	}
-	// ⌘, the Settings tab of the left column with the keyboard (again: back
-	// to Sessions) and ⌘/ keyboard shortcuts (again: closes), from anywhere;
+	// ⌘, the Settings page with the keyboard (again: back to the session it
+	// was opened from) and ⌘/ keyboard shortcuts (again: closes), from anywhere;
 	// in an editor tab with the keyboard ⌘/ toggles a comment instead (as in
 	// every code editor); the sheet is still on its button and in the
 	// palette. The gear's popover: a click on the gear.

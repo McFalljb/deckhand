@@ -25,7 +25,7 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 6. [Editor tabs](#editor-tabs)
 7. [The Files tab](#the-files-tab)
 8. [The Changes tab](#the-changes-tab)
-9. [The Settings tab](#the-settings-tab)
+9. [The Settings page](#the-settings-page)
 10. [Hot reload](#hot-reload)
 11. [Atlas](#atlas)
 12. [Jobs](#jobs)
@@ -42,11 +42,12 @@ File, Edit, View, Window, Help). When you forget one: **⌘K** searches every ac
 
 From left to right:
 
-- **The left column** (⌘B shows or hides it). Four tabs at its top: **Sessions** (your projects,
-  sessions and chats), **Files** (⇧⌘E), **Settings** (⌘,) and **Jobs** (a dot when a job's run
-  is unread). When the column is narrow the tabs show icons instead of names.
+- **The left column** (⌘B shows or hides it). Three tabs at its top: **Sessions** (your projects,
+  sessions and chats), **Files** (⇧⌘E) and **Jobs** (a dot when a job's run is unread). When the
+  column is narrow the tabs show icons instead of names.
 - **The centre**: the tabs of the session you are looking at, and the tab itself (pi, a shell, a
-  file or the session's changes).
+  file or the session's changes). **Settings** (⌘,) is a page here too: see
+  [The Settings page](#the-settings-page).
 - **The right column** (⌥⌘B): panels that the session's pi publishes, such as its todo list,
   background shells and subagents. Click a panel's heading to fold it.
 - **Atlas's drawer** (⌘J): slides in from the right, or stays as its own column when pinned.
@@ -54,7 +55,7 @@ From left to right:
 The top bar holds, from left to right: show/hide the left column (⌘B), New chat (⌘N), the
 search pill (⌘K), the session's tabs with **+** (new shell tab, ⌘T) and its **⌄** menu (new
 tab, chat or session), **±** (the session's [changed files](#the-changes-tab)), the
-[fleet pill](#what-needs-you-everywhere), the **bell**, the **gear** (quick settings), show/hide the right column
+[fleet pill](#what-needs-you-everywhere), the **bell**, the **gear** ([quick settings](#the-gear-quick-settings)), show/hide the right column
 (⌥⌘B) and Atlas (⌘J). Empty parts of the top bar move the window; a double-click there zooms
 it. Hover any button to see its name and shortcut.
 
@@ -93,7 +94,7 @@ Deckhand finds more than one Claude Code account):
    installer, Homebrew, npm, bun and pnpm installs; for the others it shows the command with
    **Copy**. Deckhand never runs `sudo`: an npm folder that needs it is left to you. A pi package
    installed from git or a local folder counts as found, without a version; one only in a
-   project's `.pi/settings.json` never counts. Settings → **Coding agents** lists the same, and its
+   project's `.pi/settings.json` never counts. Settings › **Coding agents** lists the same, and its
    **Install…** and **Update…** open this step.
 1. **The main folder**, where your notes, jobs, memory, Atlas's prompt and chats live (see
    [Your folders](#your-folders)):
@@ -114,7 +115,7 @@ Deckhand finds more than one Claude Code account):
    Type a folder's path (`~/…` or `/…`) and press **Add**, or **Add folder…** to pick one
    anywhere; a folder without Claude Code's files is added with a warning (Claude Code makes them
    at its first sign-in there). Nothing is written until **Done**, which saves the same list the
-   Settings tab edits. With one account (or none) there is no such step.
+   Settings page edits. With one account (or none) there is no such step.
 4. **Your folders**: the layout as a small tree. **Done** makes the missing folders, empty, and
    closes the sheet. Nothing already there is moved or changed. The step also says whether
    Claude Code is installed (Deckhand looks for `claude`, never runs it): Claude tabs need it,
@@ -124,9 +125,9 @@ Deckhand finds more than one Claude Code account):
    it says so too (see [pi in Deckhand](#pi-in-deckhand)).
 
 **Skip for now** (or Esc on the first step) closes it for good: jobs stay off, and the Jobs tab
-and Atlas's drawer offer **Set up Deckhand…**. Reopen it any time from the gear's **Set up
-Deckhand…**, the palette or the menu bar (Deckhand → Set up Deckhand…), or, while no main folder
-is set, the Settings tab's **Folders** group. It starts at the coding agents with your current
+and Atlas's drawer offer **Set up Deckhand…**. Reopen it any time from Settings › Deckhand
+(**Set up Deckhand…**), the palette or the menu bar (Deckhand → Set up Deckhand…), or, while no
+main folder is set, Settings › **Folders**. It starts at the coding agents with your current
 folders filled in, and Esc there closes it without changing anything. Enter goes to the next step (Done on the
 last), Esc goes back, ↑↓ change the choice.
 
@@ -198,8 +199,8 @@ comes up), the window offers **Use Previous Core** (the one from before the last
 Sessions in Deckhand Itself**. The palette's **Use previous core** does the first at any time;
 that choice holds until you install another version.
 
-**Settings that change this** (both on by default, both in the gear and the palette, and only
-you can change them):
+**Settings that change this** (both on by default, both in Settings › Sessions & chats and the
+palette, and only you can change them):
 
 - **Keep sessions running when Deckhand quits**:
   tabs' programs run in the session holder. Off, they stop whenever Deckhand Core stops.
@@ -235,7 +236,7 @@ settings. The Developer ID will close that gap.
   instructions** (`AGENTS.md`, which pi reads there besides your global one): in chats pi is a
   conversation partner and researcher, not a coding agent. It explains, looks things up and
   cites sources, and draws diagrams in text. Edit them with the palette's **Edit chat
-  instructions** or Settings → Chats.
+  instructions** or Settings › Sessions & chats.
 - An **open session** is a session running in Deckhand now, with its tabs.
 - A **Claude session** is a [Claude Code](#claude-code-tabs) conversation in a project. It is a
   session of its own, beside your pi sessions: its main tab is Claude, there is no pi tab.
@@ -255,8 +256,9 @@ The Sessions tab has three sections:
 the end of the sidebar (or **Add a machine…** in the palette) opens the add field in Settings ›
 Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
 (for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
-Deckhand calls it by its host's name (`nuc` for `me@nuc.local`); once it is added, the
-column goes back to Sessions, where it shows (an add started in Settings stays there).
+Deckhand calls it by its host's name (`nuc` for `me@nuc.local`); once it is added, Settings
+closes and you are back at your session, with the machine in the sidebar (an add started on the
+Settings page stays there).
 **Rename…** changes the name.
 While Machines over SSH is on, this Mac's own sections (Open, Projects, Chats) sit under a header
 of their own: a green dot, this Mac's name and *this Mac*. After them, each machine has its own, under its name, with a dot (green online,
@@ -377,7 +379,7 @@ your own hidden list is never changed.
 
 Under **Show hidden** every hidden project carries its reason: **temp**, **folder missing**, or
 **hidden** (hidden by you). To see every folder as its own top-level row again, turn off **Tidy
-project list** in the gear (or the palette); it is on by default and remembered.
+project list** in Settings › Sessions & chats (or the palette); it is on by default and remembered.
 
 ### Status marks
 
@@ -625,7 +627,10 @@ is waiting for you).
   narrow the list further. Esc in the field clears it.
 - **To pick up new pi sessions** started outside Deckhand, use the gear's "Rescan sessions".
 
-### Chats settings (the gear)
+### Chats settings
+
+In Settings › Sessions & chats, and the palette.
+
 
 - **Start chats read-only** starts chats as read-only. Off by default.
   - **pi** gets only its read tools (read, grep, find, ls) and `desk_show` (`--tools
@@ -645,8 +650,8 @@ is waiting for you).
     Claude Code), it stops the tab and says so.
 - **Chats folder…** picks another folder for new chats; chats already in the old folder stay
   there, and that folder becomes an ordinary project. **Chats folder: back to the default**
-  undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as the
-  Folders group's chats row (see [Your folders](#your-folders)).
+  undoes it (the main folder's `chats/`, or `~/Chats` without a main folder). The same as
+  Settings › Folders' chats row (see [Your folders](#your-folders)).
 
 ## Tabs
 
@@ -720,7 +725,7 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   **+** whose menu opens a new shell, Claude, browser or app tab in that pane; the pane with the
   keyboard has an accent line under its strip, which glides to the next pane's strip when the
   keyboard moves. The other panes are dimmed slightly (their content, not their strip), so the one
-  you type in stands out; turn **Dim inactive panes** off in the gear's Display group, the View
+  you type in stands out; turn **Dim inactive panes** off in Settings › Appearance, the View
   menu or the palette. Click in a pane to give it the keyboard (the click also acts there, so a click in a
   shell starts a selection at once), or press ⌃⌘←, ⌃⌘→, ⌃⌘↑ or ⌃⌘↓ (**Focus pane left**,
   **Focus pane right**, **Focus pane up**, **Focus pane down**). A selection you drag from one
@@ -952,7 +957,7 @@ installed (see [Everyday tasks](#everyday-tasks)); with only Claude Code install
 Code at once. It runs on its own in the project's folder: a session whose main tab is Claude,
 with no pi tab. You can open shell, browser and other tabs beside it as in any session. Its main
 tab closes with the session (the **×** on its row). **New chat** does the same in Chats
-(read-only while **Start chats read-only** is on: see [Chats settings](#chats-settings-the-gear)).
+(read-only while **Start chats read-only** is on: see [Chats settings](#chats-settings)).
 
 Every Claude conversation Deckhand ran in a project is a row of that project's session list,
 beside the pi sessions, marked **Claude**: its title is your first message (or the name you gave
@@ -993,7 +998,7 @@ Bedrock, Vertex) need no folder and keep working as before; Deckhand never store
   shell when it is set, else `~/.claude`. It is always there and cannot be removed.
 - Deckhand **finds** others by looking (no file is read) for Claude Code's account file in
   `~/.claude*` folders and in `~/.config/claude*` (or `$XDG_CONFIG_HOME/claude*`).
-- **Add account…** (Settings tab → **Claude accounts**, or the palette: **Add Claude account…**)
+- **Add account…** (Settings › Coding agents › Claude Code, or the palette: **Add Claude account…**)
   adds any folder, with a folder picker; not your home folder, nor one that holds a project,
   the main folder or the chats folder (Deckhand keeps an account's folder out of the editor and
   Files).
@@ -1002,11 +1007,11 @@ With one account nothing changes: no names on rows. With several, **New session*
 **Claude Code · Name** once per account (the project's last account first, else your default,
 else the last one used), the menus list one **New Claude tab · Name** row per account, and every
 Claude tab starts with its account's folder (`CLAUDE_CONFIG_DIR`, set again after your login
-profile ran; the default gets nothing). In the Settings tab, **Claude accounts** lists each one
-with **Rename…**, **✓** (make it the default), **×** (remove it from Deckhand's list; its folder
-is untouched), then **Add account…** and **Scan again** (look for folders again; with one
-account there is only a quiet **More accounts…** row); each account
-also has its own **Claude Code · Name (global)** group of settings files. Agents may start Claude
+profile ran; the default gets nothing). In Settings › Coding agents, the **Claude Code** card
+lists each account with **Rename…**, **Make default** and **Remove…** (from Deckhand's list; its
+folder is untouched), then **Add account…** and **Scan again** (look for
+folders again; with one account there is only a quiet **More accounts…** row); each account
+also has its own settings files. Agents may start Claude
 under an account you configured, never a folder of their own.
 
 **New Claude tab** opens a Claude tab in the session on screen instead (a pi session's, or a
@@ -1017,9 +1022,8 @@ flags. They start when you show them: if Atlas opens such a session first, its C
 wait ("not started") until you do, so your flags never run for an agent.
 
 **Skipping permission prompts by default.** If you want your own Claude tabs to start with
-`--dangerously-skip-permissions`, turn it on in the Settings tab (⌘,): the **Claude Code
-(global)** group shows **Default flags for new tabs**, and its **Skip permissions** row has
-**Turn on** / **Turn off** (or use the palette's **Skip permissions in new tabs**). It is off until you turn it on. With
+`--dangerously-skip-permissions`, turn on **Skip permissions in new tabs** in Settings › Coding
+agents › Claude Code (⌘,), or use the palette's **Skip permissions in new tabs**. It is off until you turn it on. With
 it, Claude edits files and runs commands without asking you first, so turn it on only if you
 trust what you run it on; Deckhand asks you to confirm when you turn it on. It applies each time
 you start Claude yourself: a new Claude tab, session or chat, your own resume, a restored tab when
@@ -1044,7 +1048,7 @@ it; when neither has it, it asks your login shell (`command -v pi`, as a pi tab'
 it: nvm, fnm, mise or pnpm set up in `~/.zprofile`), and until that answers, pi counts as
 installed. Without pi, **New session**, **New chat** and `deckhand DIR` start Claude Code at once (no picker), Atlas's
 button is not shown and ⌘J says that Atlas needs pi, and a job's run fails with "Jobs run pi,
-which was not found…" (Atlas and jobs run on pi for now). The Settings tab, the palette and the gear
+which was not found…" (Atlas and jobs run on pi for now). The Settings page, the palette and the gear
 show no pi rows (pi's files, Ask Atlas…, Reload all pi tabs). With neither pi nor Claude Code,
 **New session** says how to install either. After installing, use **Refresh shell
 environment** or restart Deckhand.
@@ -1100,7 +1104,7 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
 - **Bars over the tab**: *Codex is signed out* (sign in on Codex's own screen in the tab, or run
   `codex login`); *Deckhand's hooks aren't running* (Codex may be waiting for you to review them
   in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
-  (`npm install -g @openai/codex@latest`), as does Settings → **Coding agents**.
+  (`npm install -g @openai/codex@latest`), as does Settings › **Coding agents**.
 - **Not yet**: comments, the `deckhand` command inside Codex, read-only chats (Codex is not offered
   in Chats while **Start chats read-only** is on), conversations found on disk, extra flags, and Codex
   on another machine. [CODEX.md](CODEX.md) has the details.
@@ -1314,94 +1318,154 @@ Deckhand's own git reads never run your repository's hooks; only Commit does. Re
 does run the repository's configured clean filters (for example git-lfs) on changed files, as
 `git status` does in a terminal.
 
-## The Settings tab
+## The Settings page
 
-**⌘,** (or the gear's **Settings…**) shows your agents' settings as files, in groups.
-Its title names the one you have installed ("pi settings", "Claude Code settings"), or reads
-**Settings** with both. pi's groups (pi, this project's `.pi/`, extensions, Atlas) show only when
-pi is installed; Claude Code's once it has been used:
+**⌘,** opens Settings in the centre, in place of the session on screen. So do Deckhand ›
+Settings… in the menu bar, the palette's **Settings…** and the gear's **All settings…**. **⌘,**
+again, or Esc, goes back to the session you opened it from. Esc first closes an open name field,
+then clears the search, then goes back. Settings and the [Deck view](#what-needs-you-everywhere)
+(⇧⌘\) replace each other; they never stack. Showing any session closes it. Only you, at this
+window, open it: not Atlas or another agent, not a script, not another machine.
 
-- **pi (global)**: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
-  `modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
-  similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills` and
-  `extensions`. Only these: never sessions, logs or sign-ins.
-- **pi extensions (Deckhand's)**: extra pi extensions that ship with Deckhand, one row each with
-  what it does, whether it is on, its default and **Turn on** / **Turn off**. They apply to pi
-  tabs (not jobs). Only you can change them (Atlas and other agents can't). A change applies when
-  a pi tab next starts; running tabs
-  get the restart bar ("pi extensions changed — Restart N idle tabs"). Updating Deckhand
-  updates them.
-  - **guardrails** (on by default): your ask/block rules on shell commands (pi-kit's config
-    files: `~/.pi/agent/extensions/guardrails/config.json`, a project's `.pi/guardrails.json`;
-    with no rules nothing asks), read-only chats enforced, secret-looking strings redacted
-    from tool output, file reads included: the agent sees `[REDACTED]` where a key or token is.
-    So that a file it read is never saved with the marker in place of the real value, a write
-    or edit carrying `[REDACTED]` is refused once something was redacted in that session.
-    `/guardrails` lists the rules.
-  - **shell** (on by default): background shells, monitors and timers for the agent
-    (`bash_bg`, `monitor`, `wake_later`, `shell_stop`, `shell_list`, `/shells`), shown in a
-    **Shells** panel. A reload or restart waits until they end.
-  - **notes** (off by default): reminds the session to update its session note before pi
-    compacts its context, naming your notes folder (`PI_KIT_NOTES_DIR`, see
-    [Your folders](#your-folders)). Useful only if you keep session notes.
+On the left is a list of sections: **Appearance**, **Notifications**, **Coding agents**,
+**Machines**, **Sessions & chats**, **Atlas & jobs**, **Folders**, **Deckhand**, and last
+**This project · <name>**: the files of the project of the session you opened it from. Click a
+section to show it. The body shows the section as cards of controls (switches, choices and
+buttons), with a search box on top.
 
-  With pi-kit installed too (or any pi extension with the same tool names), Deckhand's copy
-  steps back where both would act: pi-kit's guardrails, notes and shell run instead of
-  Deckhand's, a notice in the tab says so once, and `/guardrails` and `/shells` are pi-kit's.
-  The Shells panel then shows pi-kit's shell. Your pi tab starts either way.
-- **This project** (the session on screen's project): its `.pi/` folder and instructions file.
-  A missing `.pi/settings.json` or `AGENTS.md` is dimmed with a **Create** button.
-- **Extensions**: each extension's config file and folder, when it has one.
-- **Atlas**: its prompt file `ATLAS.md`, `HEARTBEAT.md` when there is one, and its **Model**
-  (with **Change…**).
-- **Atlas's jobs**: every job note in the jobs folder (see [Jobs](#jobs)).
-- **Chats**: **Chat instructions (AGENTS.md)**, the chats folder's instructions (with
-  **Create** when missing).
-- **Folders**: the main folder and each of its subfolders (see [Your folders](#your-folders)).
-- **Claude Code (global)** (once Claude Code has a config folder, `~/.claude` or your
-  `CLAUDE_CONFIG_DIR`): `settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders
-  `agents`, `skills`, `commands`, `output-styles`, `rules`. With Claude Code installed, also
-  **Default flags for new tabs**, **Skip permissions** (**Turn on** / **Turn off** for
-  `--dangerously-skip-permissions`) and a warning line (see [Claude Code tabs](#claude-code-tabs)).
-- **Claude Code · project**: the project's `.claude/settings.json` (**Create** when missing),
-  `.claude/settings.local.json`, `CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` (may hold tokens).
-  A file pi reads too (a `CLAUDE.md` that is the project's instructions file) shows once.
-- **Coding agents** (last): the [first run](#the-first-run)'s checklist as rows: each harness
-  (its version and how it was installed, or **Not installed**) and, once installed, Deckhand's
-  integration (**Built in**) and the recommended items. **Install…**, **Update…** and **Show…**
-  open the setup sheet's coding agents step, where the command shows and runs. **Refresh** looks
-  again.
-- **Machines**: with the gear's **Machines over SSH** on (on by default; turn it off and Deckhand
-  keeps no link to any machine, and the group says *Machines over SSH is off* with **Turn on**:
-  your machines are kept). Until you add a machine nothing happens: no `ssh`, no process.
-  Each machine you added, with what is wrong and what to do in plain words, or its status
-  (*Online* and its Deckhand version); point at it for its ssh address and ssh's own words. Its
-  button is the sidebar's: **Connect** tries now, **Log in…**, **Take back** takes it from whoever
-  showed it last, and so on. The **×** removes it after you confirm: nothing on it is deleted, and
-  its sessions keep running there. **Add a machine…**: type `user@host` or a name from
-  `~/.ssh/config`, then Enter (a pasted `ssh me@nuc.local` or `ssh://me@nuc.local` works too). Deckhand runs
-  your own `ssh` with your `~/.ssh/config` (never edited), without prompts (`BatchMode`), and
-  starts that machine's Deckhand there. The newest
-  connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
-  <this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
-  use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
-  the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)). **Allow other machines to connect** (off by default,
-  separate from Machines over SSH): turn it on on the Mac you want to reach (**Turn on…** asks
-  first). Then another
-  machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
-  drive this Mac's sessions. Off, no other machine can. A machine you allow acts as you on this
-  Mac: it can type into its shells and prompt its sessions and its Atlas, and so reach the machines
-  this Mac reaches. It can't change the settings that bound it and your agents here: **Allow other
-  machines to connect**, **Machines over SSH**, the pi extensions (guardrails among them), Claude
-  Code's skip-permissions default and read-only chats; only you, at this Mac, change those (as
-  with your notifications and your machines list). Allow only machines you trust as yourself. A Linux machine (x86_64) runs its core as your
-  systemd user service `deckhand-core`, started when needed. Unless lingering is on for you there,
-  it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
-  keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a
-  session holder of their own (`deckhand-holder-…` in `systemctl --user list-units`).
-  Under each online machine, its coding agents (pi, Claude Code and their extras, as that
-  machine's own checklist has them) are listed read-only, each with **Copy** for the command that
-  installs or updates it there: open a shell tab on that machine and paste it.
+- **Every control runs what it ran before**: the same action as its row in the palette, the gear
+  or the menu bar, with the same confirmations. The page adds no settings of its own.
+- **Only you, at this Mac**: a row with this badge can be changed only by you, at this Mac: not by
+  Atlas or another agent, not by a script, not by another machine viewing this one. Among them:
+  **Allow other machines to connect**, **Machines over SSH**, the pi extensions, Claude Code's
+  skip-permissions default and read-only chats. **Next start** and **Next launch** badges say
+  when a change takes effect.
+- **Deckhand writes only its own settings.** pi's, Claude Code's and Codex's config are files:
+  under a card, **Advanced: open the file** lists them. Click one to open it in an ordinary
+  editor tab of the session you opened the page from (this Mac's sessions only; otherwise a toast
+  asks you to open a session on this Mac first). A missing file shows **Create**: it is made only
+  when you click, then opened. Rarely used files are under **All files… (N more)**. Clicking a
+  folder (`prompts/`, `skills/`, `extensions/`…) shows its files in the search.
+- **Search** ("Search settings and files") matches settings by their names, words and hints, and
+  files by name and path, including the files inside the listed folders and in the project's
+  `.pi/` (git-ignored ones too). It never finds credentials. Esc clears it.
+
+**Right-click a file or folder row** for the same menu as before: **Open**, **Open in preview**,
+**Open Markdown preview** (Markdown files), **New file…** and **New folder…** (inside `prompts/`
+and `skills/`), **Rename…** and **Move to Trash…** (only inside `prompts/`, `skills/`,
+`extensions/` and a project's `.pi/`, never pi's own config files; Trash asks first), **Reveal in
+Finder** and **Copy path**. A file still to create has only **Copy path**. New file, New folder
+and Rename open a name field at the top of the page: Enter saves, Esc cancels. A new file opens
+in an editor tab.
+
+**Refresh settings files** (the palette) reads the files again and opens the page.
+
+### Appearance
+
+- **Appearance**: System (follows macOS), Light or Dark.
+- **Look**: Graphite, Warm or Ghostty. The terminals follow the look, so pi blends in.
+- **Text size**: Small, Medium, Default or Large, for the sidebar, tabs, menus, popovers and
+  panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
+  keep their size. It applies at once and is remembered.
+- **Terminal and editor text**: the terminals' and the editor's size (also ⌘+, ⌘− and ⌘0).
+- **Reduce motion**: no fades, slides, pulsing dots, turning marks, status flashes or copy shines.
+- **Dim inactive panes** (on by default): with split panes, the panes without the keyboard are
+  dimmed slightly. Reduce motion keeps the dim and drops its fade.
+
+Appearance, Look and Text size are also in [the gear](#the-gear-quick-settings).
+
+### Notifications settings
+
+The **Notify me about** grid (Bell, macOS and Sound for each kind: Needs you, Finished, Errors,
+Jobs; point at a cell for its rule), **Badge the Dock icon** and **Atlas's notifications**
+(Atlas's macOS notifications while Deckhand is in the background). See
+[Notifications](#notifications).
+
+### Coding agents
+
+One card per coding agent: **pi**, **Claude Code** and **Codex**. Each starts with the
+[first run](#the-first-run)'s checklist: the harness (its version and how it was installed, or
+**Not installed**) and, once installed, Deckhand's integration (**Built in**) and the
+recommended items. **Install…**, **Update…** and **Show…** open the setup sheet's coding agents
+step, where the command shows and runs. **Refresh** looks again. pi's card shows only when pi is
+installed; Claude Code's files once it has been used.
+
+**pi.** Its files: `settings.json` (model, theme, packages…), `models.json` (may hold API keys),
+`modes.json`, `keybindings.json`, `mcp.json`, your global instructions file (`AGENTS.md` or
+similar), `SYSTEM.md`, `APPEND_SYSTEM.md`, and the folders `prompts`, `skills` and `extensions`.
+Only these: never sessions, logs or sign-ins. Each pi extension's config file and folder, when it
+has one, are here too.
+
+The card also has **Deckhand's pi extensions**: extra pi extensions that ship with Deckhand, each
+a switch with what it does and its default. They apply to pi tabs (not jobs). Only you can change
+them (Atlas and other agents can't). A change applies when a pi tab next starts; running tabs get
+the restart bar ("pi extensions changed — Restart N idle tabs"). Updating Deckhand updates them.
+
+- **Guardrails** (`guardrails`, on by default): your ask/block rules on shell commands (pi-kit's
+  config files: `~/.pi/agent/extensions/guardrails/config.json`, a project's
+  `.pi/guardrails.json`; with no rules nothing asks), read-only chats enforced, secret-looking
+  strings redacted from tool output, file reads included: the agent sees `[REDACTED]` where a key
+  or token is. So that a file it read is never saved with the marker in place of the real value,
+  a write or edit carrying `[REDACTED]` is refused once something was redacted in that session.
+  `/guardrails` lists the rules.
+- **Background shells** (`shell`, on by default): background shells, monitors and timers for the
+  agent (`bash_bg`, `monitor`, `wake_later`, `shell_stop`, `shell_list`, `/shells`), shown in a
+  **Shells** panel. A reload or restart waits until they end.
+- **Session-note reminder** (`notes`, off by default): reminds the session to update its session
+  note before pi compacts its context, naming your notes folder (`PI_KIT_NOTES_DIR`, see
+  [Your folders](#your-folders)). Useful only if you keep session notes.
+
+With pi-kit installed too (or any pi extension with the same tool names), Deckhand's copy steps
+back where both would act: pi-kit's guardrails, notes and shell run instead of Deckhand's, a
+notice in the tab says so once, and `/guardrails` and `/shells` are pi-kit's. The Shells panel
+then shows pi-kit's shell. Your pi tab starts either way.
+
+**Claude Code.** Once Claude Code has a config folder (`~/.claude` or your `CLAUDE_CONFIG_DIR`):
+`settings.json`, `CLAUDE.md`, `keybindings.json`, and the folders `agents`, `skills`, `commands`,
+`output-styles`, `rules`. With Claude Code installed, also **Skip permissions in new tabs** (for
+`--dangerously-skip-permissions`) with a warning line (see [Claude Code tabs](#claude-code-tabs)),
+and your [Claude accounts](#claude-accounts) with **Add Claude account…**; each account has its
+own files.
+
+**Codex.** Its version and how it was installed, as the checklist has it (see
+[Codex tabs](#codex-tabs)).
+
+### Machines
+
+**Machines over SSH** (on by default) shows other machines' sessions over `ssh`. Turn it off and
+Deckhand keeps no link to any machine, and the section says *Machines over SSH is off* with
+**Turn on**: your machines are kept. Until you add a machine nothing happens: no `ssh`, no process. **Your machines** lists each one you added
+with what is wrong and what to do in plain words, or its status (*Online* and its Deckhand
+version); point at it for its ssh address and ssh's own words. Its button is the sidebar's:
+**Connect** tries now, **Log in…**, **Take back** takes it from whoever showed it last, and so on.
+**Rename…** opens the page's name field. The **×** removes it after you confirm: nothing on it is
+deleted, and its sessions keep running there. **Add a machine…**: type `user@host` or a name from
+`~/.ssh/config` in the page's field, then Enter (a pasted `ssh me@nuc.local` or
+`ssh://me@nuc.local` works too). Deckhand runs your own `ssh` with your `~/.ssh/config` (never
+edited), without prompts (`BatchMode`), and starts that machine's Deckhand there. The newest
+connection wins: a Mac whose Deckhand window was showing its sessions shows **Viewed from
+<this Mac>** with **Take Back**; its sessions keep running either way. A remote machine can never
+use this Mac's clipboard, open links, notify or ask for a confirmation here. Its sessions show in
+the sidebar ([Projects, sessions and chats](#projects-sessions-and-chats)).
+
+**Allow other machines to connect to this Mac** (off by default, separate from Machines over SSH): turn it on
+on the Mac you want to reach (it asks first). Then another machine's Deckhand that logs in here
+over `ssh` as you (Remote Login on, your keys) can see and drive this Mac's sessions. Off, no
+other machine can. A machine you allow acts as you on this Mac: it can type into its shells and
+prompt its sessions and its Atlas, and so reach the machines this Mac reaches. It can't change the
+settings that bound it and your agents here: **Allow other machines to connect**, **Machines over
+SSH**, the pi extensions (guardrails among them), Claude Code's skip-permissions default and
+read-only chats; only you, at this Mac, change those (as with your notifications and your machines
+list). Allow only machines you trust as yourself.
+
+A Linux machine (x86_64) runs its core as your systemd user service `deckhand-core`, started when
+needed. Unless lingering is on for you there, it stops when you log out of that machine, and its
+jobs with it: `loginctl enable-linger` there keeps it running. Its sessions keep running when that
+core restarts or updates, as on a Mac: they run in a session holder of their own
+(`deckhand-holder-…` in `systemctl --user list-units`). Under each online machine, its coding
+agents (pi, Claude Code and their extras, as that machine's own checklist has them) are listed
+read-only, each with **Copy** for the command that installs or updates it there: open a shell tab
+on that machine and paste it.
 
 #### Installing and updating other machines
 
@@ -1424,9 +1488,49 @@ pi is installed; Claude Code's once it has been used:
   and its row offers **Keep running…**: a click asks that machine's login manager to turn it on
   for you (no password, no `sudo`). If it refuses, run `loginctl enable-linger` there yourself.
 
-Click a file to open it in an editor tab. Press ⌘, again to go back to Sessions.
+### Sessions & chats
 
-- **Credential files never show** here, also not inside an opened folder, and the editor refuses
+- **Keep sessions running when Deckhand quits** and **Run sessions in a background core** (both
+  on by default): see [How Deckhand runs](#how-deckhand-runs).
+- **Tidy project list** (on by default): hide temp and missing folders, nest subfolders and group
+  sibling folders (see [A tidy project list](#a-tidy-project-list)).
+- **Chats**: **Start chats read-only** and **Chats folder…** (see
+  [Chats settings](#chats-settings)), and the chats folder's instructions,
+  **Chat instructions (AGENTS.md)** (with **Create** when missing).
+- **Fix-ups**: **Rescan sessions**, **Refresh shell environment** (see
+  [Where Deckhand's environment comes from](#troubleshooting): new tabs only), **Reload all pi
+  tabs** and **Restart all Claude tabs** (see [Hot reload](#hot-reload)).
+
+### Atlas & jobs
+
+**Atlas's model…** (see [Its model](#its-model)), Atlas's prompt file `ATLAS.md` and
+`HEARTBEAT.md` when there is one, **Show jobs** (the Jobs tab), and every job note in the jobs
+folder (see [Jobs](#jobs)).
+
+### Folders
+
+The main folder (**Main folder…**) and **Subfolders**, each one default or yours: see [Your folders](#your-folders).
+While no main folder is set, it offers **Set up…**.
+
+### Deckhand
+
+- **Check for updates automatically** (on by default): see [Updates](#updates).
+- **Set up Deckhand…**: the [first run](#the-first-run) sheet again (coding agents, main folder,
+  chats).
+- **Keyboard shortcuts** (⌘/): the shortcuts sheet.
+- **Copy a control token**: for `deckhand --ctl` (see [Updates](#updates), "Release builds").
+
+### This project
+
+The files of the project of the session you opened the page from. pi's: its `.pi/` folder and
+instructions file; a missing `.pi/settings.json` or `AGENTS.md` shows **Create**. Claude Code's:
+the project's `.claude/settings.json` (**Create** when missing), `.claude/settings.local.json`,
+`CLAUDE.md`, `CLAUDE.local.md` and `.mcp.json` (may hold tokens). A file pi reads too (a
+`CLAUDE.md` that is the project's instructions file) shows once.
+
+### Files and safety
+
+- **Credential files never show** here, also not in the search, and the editor refuses
   them. For Claude Code that is everything of its own but its config: its sign-in
   (`.credentials.json`), its account and MCP state (`~/.claude.json` and its backups), and
   conversations, history, sessions and caches in its folder (`projects/`, `history.jsonl`…).
@@ -1439,7 +1543,6 @@ Click a file to open it in an editor tab. Press ⌘, again to go back to Session
   read it (after saving `ATLAS.md`, only Atlas). Claude Code applies its `settings.json` files and
   `keybindings.json` by itself; after saving a Claude file it reads only at start (`CLAUDE.md`,
   `.mcp.json`…), the Claude bar shows at once.
-- **Folders**: see [Your folders](#your-folders).
 
 ## Hot reload
 
@@ -1466,7 +1569,7 @@ folders above it. A change reaches only the tabs that read it: a project's `.pi/
 sessions, `ATLAS.md` only Atlas. Tabs whose pi integration did not connect (a pi older than
 1.4.0) cannot be reloaded from Deckhand; the bar says so: type `/reload` in them.
 
-**Reload all pi tabs** (the gear, or ⌘K) reloads every running pi tab the same way, changed or
+**Reload all pi tabs** (the gear while a pi tab runs, Settings › Sessions & chats, or ⌘K) reloads every running pi tab the same way, changed or
 not.
 
 **After a pi update.** Deckhand notes which pi version each tab started with. When pi on disk is
@@ -1474,7 +1577,7 @@ updated (for example `npm install -g` or `brew upgrade`), a bar says "pi updated
 Restart 2 idle tabs". **Restart** starts each idle tab's pi again on the same session; busy tabs
 restart once idle, with the same warning about background work. **Later** hides it until the
 next version. The same bar says "pi extensions changed" after you turn one of
-[Deckhand's pi extensions](#the-settings-tab) on or off. Before stopping a tab, Deckhand asks its
+[Deckhand's pi extensions](#coding-agents) on or off. Before stopping a tab, Deckhand asks its
 pi once more whether it is idle; if not, the tab waits. Atlas is a pi tab like the others: it is reloaded or restarted when idle, its
 session stays.
 
@@ -1503,11 +1606,11 @@ looking at where `claude` points (it never runs it). When Claude Code updates it
 "Claude Code updated to 2.1.301 — Restart 1 idle Claude tab", with the same **Restart** and
 **Later**.
 
-**Restart all Claude tabs** (the gear, or ⌘K) restarts every running Claude tab the same way,
+**Restart all Claude tabs** (the gear while a Claude tab runs, Settings › Sessions & chats, or ⌘K) restarts every running Claude tab the same way,
 changed or not; Deckhand asks first. The palette also has the bars' two restarts (**Restart Claude
 tabs for changed settings**, **Restart Claude tabs on the new Claude Code**) and **Edit Claude
 settings (settings.json)**, **Edit global CLAUDE.md** and **Edit project Claude settings** (`.claude/settings.json`),
-which open those files from the Settings tab. Deckhand only looks at file names and times here; it never reads Claude's credentials,
+which open those files from the Settings page. Deckhand only looks at file names and times here; it never reads Claude's credentials,
 account file or conversations.
 
 ## Atlas
@@ -1547,7 +1650,7 @@ when the build session finishes").
 
 ### Its model
 
-Click **Model** in the drawer's header (or **Atlas's model…** in the gear or the palette, or Settings → Atlas → **Change…**). It opens pi's own model selector (Ctrl+L) in
+Click **Model** in the drawer's header (or **Atlas's model…** in Settings › Atlas & jobs or the palette). It opens pi's own model selector (Ctrl+L) in
 Atlas's terminal. Your pick stays with Atlas's session.
 
 The `agent_model` setting ("provider/id", optionally ":thinking") is the model Atlas starts a
@@ -1559,15 +1662,15 @@ new session with; when it changes, Atlas uses it from its next start.
   (`<main folder>/atlas/ATLAS.md`) once the main folder is set (Deckhand copies the data dir's
   `atlas/ATLAS.md` there the first time, never over a file, and keeps the old one as a
   fallback); without a main folder, the data dir's copy is used and the drawer says so in a
-  line with **Set up Deckhand…**. Edit it in Settings → Atlas, or with the palette's "Atlas: edit prompt". Save, then
+  line with **Set up Deckhand…**. Edit it in Settings › Atlas & jobs, or with the palette's "Atlas: edit prompt". Save, then
   click **Reload** in the [hot-reload bar](#hot-reload) ("Atlas's prompt changed").
 - Your global **APPEND_SYSTEM.md** (pi's folder) is still added for Atlas, before ATLAS.md, as
   pi would.
 - Deckhand writes a starter ATLAS.md when there is none. When a Deckhand update ships a newer
   starter, Deckhand replaces your file only if you never edited it (it keeps the old one as
   `ATLAS.md.bak-<date>`). If you edited it, it is left alone. To get the newest starter
-  anyway, rename your file in Finder (to keep it), click **Create** on ATLAS.md in Settings →
-  Atlas, then **Reload** in the hot-reload bar.
+  anyway, rename your file in Finder (to keep it), click **Create** on ATLAS.md in Settings ›
+  Atlas & jobs, then **Reload** in the hot-reload bar.
 - This guide is copied to `atlas/GUIDE.md` in the data dir on every start, and Atlas is told
   where it is, so it can answer "how do I…" questions.
 
@@ -1771,7 +1874,7 @@ you.
 ### What a job may do
 
 `access: read` runs pi with its read-only tools (read, grep, find, ls; no bash, MCP or extension
-tools), as a read-only chat does (with the same limits: see [Chats settings](#chats-settings-the-gear)),
+tools), as a read-only chat does (with the same limits: see [Chats settings](#chats-settings)),
 and pi-kit's read-only mode where pi-kit is installed. It needs pi 1.0.4 or newer: on an older pi
 a read job fails with that message instead of starting. `access: full` runs pi with its normal tools and guardrails: an action the guardrails
 would ask you about is blocked instead, and the run reports it under "Needs you". A job never
@@ -1797,7 +1900,7 @@ The bell in the top bar collects what happened in sessions you were **not lookin
 - Looking at a session marks its entries read. Entries from the same session within 10 seconds
   replace each other, so a flapping session does not flood the list. At most 200 entries are
   kept, and they are not saved: the bell empties when Deckhand Core stops.
-- **To choose what you hear about**, use the gear's **Notify me about** grid, one row per kind
+- **To choose what you hear about**, use the **Notify me about** grid in Settings › Notifications, one row per kind
   (Needs you, Finished, Errors: errors and exits, Jobs: runs that need you or failed). Click a
   cell (or move to it with the arrow keys and press Enter or Space) to step to its next choice:
 
@@ -1825,7 +1928,7 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   (choosing one plays it). The rule: a sound plays while Deckhand is in the background, or also
   while it is in front when that kind's macOS says always. It is paced with the macOS
   notifications, and never more than one a second.
-- **The Dock icon's badge** (gear: **Badge the Dock icon**, on by default): the number of open
+- **The Dock icon's badge** (Settings › Notifications: **Badge the Dock icon**, on by default): the number of open
   sessions that need you (waiting for you, or stopped with an error), this Mac's and those of
   machines that are online: the same number as the [fleet pill](#what-needs-you-everywhere)'s
   first part; no badge at zero.
@@ -1849,49 +1952,27 @@ included. The full list is [below](#all-palette-actions).
 
 ### The gear: Quick settings
 
-Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes. Its rows come
-in four groups, switches first and one-shot actions at the end of their group; in a short
-window the list scrolls.
+Click the gear in the top bar. Arrow keys move, Enter or Space runs, Esc closes. It holds only
+what you change often:
 
 **Display**
 
 - **Appearance**: System (follows macOS), Light or Dark.
 - **Look**: Graphite, Warm or Ghostty (one swatch each). The terminals follow the look, so pi
   blends in.
-- **Text size**: Small, Medium, Default or Large, for the sidebar, tabs, menus, popovers and
-  panels (body and secondary text: 12/11, 13/11, 14/12, 15/13 pt). Terminals and the editor
-  keep their size. It applies at once and is remembered.
-- **Reduce motion**: no fades, slides, pulsing dots, turning marks, status flashes or copy shines.
-- **Dim inactive panes** (on by default): with split panes, the panes without the keyboard are
-  dimmed slightly. Reduce motion keeps the dim and drops its fade.
+- **Text size**: Small, Medium, Default or Large (see
+  [Settings › Appearance](#appearance)).
 
-**Notifications**
+**Now**
 
-- **Atlas's notifications**: Atlas's macOS notifications.
-- **Notify me about** (a grid: Bell, macOS and Sound for each kind) and **Badge the Dock icon**: see
-  [Notifications](#notifications).
-
-**Sessions**
-
-- **Atlas's model…**: see [Its model](#its-model).
-- **Start chats read-only**, **Chats folder…**: see [Chats settings](#chats-settings-the-gear).
-- **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
-  [A tidy project list](#a-tidy-project-list)). On by default.
-- **Keep sessions running when Deckhand quits** and **Run sessions in a background core**: see
-  [How Deckhand runs](#how-deckhand-runs). Both on by default.
-- **Machines over SSH**: other machines' sessions over `ssh` (on by default; nothing happens until
-  you add a machine; see [The Settings tab](#the-settings-tab), Machines).
 - **Rescan sessions**, and, while such a tab runs, **Reload all pi tabs** and **Restart all Claude
   tabs** (see [Hot reload](#hot-reload)), and **Refresh shell environment** (see
   [Where Deckhand's environment comes from](#troubleshooting): new tabs only).
 
-**Deckhand**
-
-- **Check for updates automatically**: see [Updates](#updates). On by default.
-- **Settings…** (⌘,): the left column's [Settings tab](#the-settings-tab).
-- **Keyboard shortcuts** (⌘/).
-- **Set up Deckhand…**: the [first run](#the-first-run) sheet again (coding agents, main folder, chats).
-- **Copy a control token**: for `deckhand --ctl` (see [Updates](#updates), "Release builds").
+Then, under a line, **All settings…** (⌘,) opens [the Settings page](#the-settings-page). Every
+other setting lives there (Reduce motion, Dim inactive panes, the notifications, Atlas's model,
+chats, Machines over SSH, updates, Set up Deckhand…, Copy a control token and the rest), and in
+the palette.
 
 ## Updates
 
@@ -1945,7 +2026,7 @@ is a new app to macOS after every rebuild. Who may control your sessions:
 
 **Release builds have no test or development switches**: no test mode, no `DECKHAND_*`
 overrides of where data and sockets live, and no token printed at start. To drive Deckhand from a
-terminal, take a token with **Copy a control token** (the gear): it puts `export
+terminal, take a token with **Copy a control token** (Settings › Deckhand, or the palette): it puts `export
 DECKHAND_SOCKET=… DECKHAND_TOKEN=…` on the clipboard for `deckhand --ctl`, which starts
 Deckhand Core if it isn't running.
 
@@ -1955,7 +2036,7 @@ read-only copy (App Translocation: move `Deckhand.app` to Applications with Find
 from there). A development build (`build/Deckhand.app`) does not check for updates.
 
 **Check for Updates…** is in the Deckhand menu and the palette; it checks now, whatever the
-setting. **Check for updates automatically** (the gear, or the palette) turns the daily check
+setting. **Check for updates automatically** (Settings › Deckhand, or the palette) turns the daily check
 off. Your choices (the setting, the skipped version, the last check's time) are in
 `<data dir>/update.json`.
 
@@ -2052,20 +2133,20 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 
 - Setting the main folder makes the missing subfolders, empty. Nothing else in it is touched,
   and Deckhand **never moves files**: when you pick another main folder, the old one stays where
-  it is and the Folders group shows it as **Old main folder** with **Reveal** (in Finder).
-- **Each subfolder can live elsewhere.** Settings tab → **Folders** lists the main folder and
+  it is and Settings › Folders shows it as **Old main folder** with **Reveal** (in Finder).
+- **Each subfolder can live elsewhere.** Settings › **Folders** lists the main folder and
   each subfolder with its path and whether it is the **default** (inside the main folder) or
   **custom**. Each row has **Change…** (a folder picker), **Reset** (the circular arrow: back to
   the default) and **Reveal in Finder** (the folder icon). The main folder's row has
   **Change…** (palette: "Main folder…"), or **Set up…** while none is set. A sessions folder
   must be named `sessions` (pi-kit writes `sessions/` inside its notes folder). A separate
-  chats folder is common: the chats row is the same as the gear's **Chats folder…**.
+  chats folder is common: the chats row is the same as **Chats folder…** in Settings › Sessions & chats.
 - **pi-kit's notes land here too.** Every pi tab and job run gets `PI_KIT_NOTES_DIR` set to the
   **sessions folder's parent**, so pi-kit's session notes go into `sessions/`. That is the main
   folder unless you moved `sessions/`: then it is the folder that holds your `sessions/` (and
   pi-kit's other notes go there too, not into the main folder). If
   your own environment sets `PI_KIT_NOTES_DIR` (Deckhand's, or your login shell's), yours wins:
-  Deckhand passes it on unchanged, and the Folders group shows it as a **PI_KIT_NOTES_DIR**
+  Deckhand passes it on unchanged, and Settings › Folders shows it as a **PI_KIT_NOTES_DIR**
   row. At start, scheduled jobs wait for your login shell's answer (up to 10 seconds) so a job
   due at launch gets your value, not the main folder.
 - **Chat instructions**: Deckhand writes a starter `AGENTS.md` into the chats folder when it has
@@ -2073,7 +2154,7 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
   file and never beside an `AGENTS.override.md` or `CLAUDE.md` there (pi would read those
   instead). It never writes one when the chats folder is your home folder, `/`, or a folder
   that holds a project or a job's folder: pi applies `AGENTS.md` to every folder below it, so
-  those pi tabs would be told they are not coding agents. Settings → Chats → **Chat
+  those pi tabs would be told they are not coding agents. Settings › Sessions & chats › **Chat
   instructions** still offers **Create** there if you want it. When an update ships a newer starter, Deckhand replaces yours only if you never
   edited it (keeping `AGENTS.md.bak-<date>`).
 
@@ -2089,7 +2170,7 @@ One **main folder** holds everything that is yours (new users: `~/Deckhand`; set
 ### Privacy
 
 - Deckhand never shows, opens or logs credential files (pi's sign-ins, private files in pi's
-  folder, `.env`), not in the Settings tab, the Files tab's editor, or to Atlas.
+  folder, `.env`), not on the Settings page, in the Files tab's editor, or to Atlas.
 - Connection tokens for the control socket are never logged or saved.
 - Deckhand's only network call of its own is the [update check](#updates) (and the download
   you start with **Update**), to GitHub. Only pi (and its extensions) talk to model providers.
@@ -2189,7 +2270,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 |---|---|---|
 | About Deckhand |  | |
 | Check for Updates… |  | checks now, whatever the setting ([Updates](#updates)) |
-| Settings… | ⌘, | the left column's Settings tab (again: back to Sessions) |
+| Settings… | ⌘, | the Settings page (again: back to the session) |
 | Set up Deckhand… |  | the first-run sheet: coding agents, main folder, chats (see [the first run](#the-first-run)) |
 | Hide Deckhand | ⌘H | |
 | Hide others | ⌥⌘H | Show all brings them back |
@@ -2237,7 +2318,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Sessions |  | the left column's Sessions tab |
 | Attention view | ⌥⌘. | the Sessions tab as one list across every machine, by what needs you, or back to the tree ([The Attention view](#what-needs-you-everywhere)) |
 | Deck view | ⇧⌘\ | the centre as a grid of cards, one per open session on every machine, or back to the session ([The Deck view](#what-needs-you-everywhere)) |
-| Files, Settings | ⇧⌘E (Files) | the left column's Files and Settings tabs (⇧⌘E again: back to Sessions; ⌘, is Deckhand › Settings…) |
+| Files, Settings | ⇧⌘E (Files) | Files: the left column's Files tab (⇧⌘E again: back to Sessions); Settings: the Settings page (⌘, is Deckhand › Settings…) |
 | Jobs |  | the left column's Jobs tab (Atlas's jobs) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Toggle right panels | ⌥⌘B | the right column |
@@ -2362,7 +2443,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Add a machine… |  | the add field in Settings › Machines (Machines over SSH off: its row there, to turn it on) |
 | Remove a machine… |  | asks which, then to confirm: nothing on it is deleted |
 | Connect to a machine |  | asks which: Connect, Log in…, Take back or Try again, as its button |
-| Machines settings… |  | Settings, at the Machines group |
+| Machines settings… |  | the Settings page, at Machines |
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |
@@ -2377,18 +2458,18 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Notifications |  | open the bell |
 | Notifications: mark all read |  | |
 | Notifications: clear |  | |
-| Finished: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
-| Needs you: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
-| Errors: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
-| Jobs: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
-| Needs you: macOS notification |  | the gear's grid: the next choice (never, background, always) |
-| Finished: macOS notification |  | the gear's grid: the next choice (never, background, always) |
-| Errors: macOS notification |  | the gear's grid: the next choice (never, background, always) |
-| Jobs: macOS notification |  | the gear's grid: the next choice (never, background, always) |
-| Needs you: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
-| Finished: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
-| Errors: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
-| Jobs: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Finished: bell |  | the Settings page's Notifications grid: this kind in the bell on/off (macOS and sound are separate) |
+| Needs you: bell |  | the Settings page's Notifications grid: this kind in the bell on/off (macOS and sound are separate) |
+| Errors: bell |  | the Settings page's Notifications grid: this kind in the bell on/off (macOS and sound are separate) |
+| Jobs: bell |  | the Settings page's Notifications grid: this kind in the bell on/off (macOS and sound are separate) |
+| Needs you: macOS notification |  | the Settings page's Notifications grid: the next choice (never, background, always) |
+| Finished: macOS notification |  | the Settings page's Notifications grid: the next choice (never, background, always) |
+| Errors: macOS notification |  | the Settings page's Notifications grid: the next choice (never, background, always) |
+| Jobs: macOS notification |  | the Settings page's Notifications grid: the next choice (never, background, always) |
+| Needs you: sound |  | the Settings page's Notifications grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Finished: sound |  | the Settings page's Notifications grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Errors: sound |  | the Settings page's Notifications grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
+| Jobs: sound |  | the Settings page's Notifications grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Badge the Dock icon |  | the number of sessions that need you on the Dock icon |
 | Toggle left column | ⌘B | |
 | Toggle right panels | ⌥⌘B | |
@@ -2411,7 +2492,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Deckhand user guide |  | this guide in a Markdown tab |
 | Markdown preview | ⇧⌘V | a `.md` file as a document, or its source |
 | Open in editor |  | edit the Markdown tab's file in an editor tab |
-| Settings… | ⌘, | the Settings tab |
+| Settings… | ⌘, | the Settings page (again: back to the session) |
 | Edit pi settings (settings.json) |  | |
 | Edit pi models (models.json) |  | |
 | Edit global AGENTS.md |  | |
@@ -2428,9 +2509,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Rescan sessions |  | read pi's session store again (Claude rows are Deckhand's own history) |
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
-| Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
-| Run sessions in a background core |  | on by default: on or off (the gear's row) |
-| Machines over SSH |  | on by default: on or off (the gear's row); see [The Settings tab](#the-settings-tab), Machines |
+| Keep sessions running when Deckhand quits |  | on by default: on or off (Settings › Sessions & chats) |
+| Run sessions in a background core |  | on by default: on or off (Settings › Sessions & chats) |
+| Machines over SSH |  | on by default: on or off; see [Settings › Machines](#machines) |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |
 | Detach window / Attach window |  | development builds only: the window plays gone, so agents' browser, app and file-view calls answer `no_window`; Attach window makes it the core's client again |
@@ -2465,7 +2546,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Collapse all folders, Refresh files |  | the Files tab |
 | Reveal in Finder |  | the Files tab's row, or the editor's file |
 | Reveal active file in Files |  | |
-| Collapse all settings folders, Refresh settings files |  | the Settings tab |
+| Refresh settings files |  | read the settings files again and open the Settings page |
 | Show jobs |  | the Jobs tab |
 | New job |  | the job sheet: a form that writes a job note |
 | Set up Deckhand… |  | the first-run sheet (coding agents, main folder, chats, summary) |

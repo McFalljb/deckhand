@@ -1,8 +1,8 @@
 package core
 
-// Settings as files: the left column's Settings tab (⌘, the gear's "Edit
-// settings files…", the palette) shows pi's settings files as a tree in
-// fixed groups, drawn and driven by the Files tab's code (ui_files.odin):
+// Settings as files: the rows of the Settings page (ui_settings_page.odin; ⌘,, the gear's All
+// settings…, the palette), in fixed groups that settings_registry.odin puts in its sections and
+// cards (the page opens or creates the files, never edits them):
 //
 //   pi (global)   the agent folder's settings files, by an allowlist
 //                 (SETTINGS_PI_FILES; the instructions file by the name pi

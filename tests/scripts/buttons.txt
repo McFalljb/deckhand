@@ -73,7 +73,7 @@ assert_state layout.right_open false
 clickid togglepanels
 eventually
 assert_state layout.right_open true
-# ---- the settings popover: every row (choices and switches keep it open)
+# ---- Quick settings (the gear): every row (choices keep it open)
 clickid settings
 eventually
 assert_state focus.id settings
@@ -96,41 +96,49 @@ assert_state settings.theme ghostty
 clickid pop 3
 eventually
 assert_state settings.theme graphite
-clickid pop 6
-eventually
-assert_state settings.reduce_motion true
-clickid pop 6
-eventually
-assert_state settings.reduce_motion false
-clickid pop 7
-eventually
-assert_state settings.notify false
-clickid pop 7
-eventually
-assert_state settings.notify true
-clickid pop 14
-eventually
-assert_state settings.chats_readonly true
-clickid pop 14
-wait 100
-assert_state settings.chats_readonly false
-assert_state focus.id settings
-# the folder picker (faked) after the popover closes
-pick_folder $homedir/Chats-elsewhere
-clickid pop 15
-eventually
-assert_state focus.kind terminal
-assert_state settings.folders.chats.path $homedir/Chats-elsewhere
-# back to ~/Chats: a row only while another folder is set; it keeps the popover open
-clickid settings
-wait 200
-shot buttons/settings-chats
-clickid pop 16
-wait 200
-assert_state settings.folders.chats.custom false
 assert_state focus.id settings
 clickid pop 17
 eventually
+assert_state focus.kind terminal
+# ---- the rest is on the Settings page: switches, the chats folder (picker faked), back to ~/Chats
+key comma cmd
+wait 300
+assert_state focus.id settings_page
+clickid spi @Appearance
+wait 200
+clickid spi @reduce_motion
+eventually
+assert_state settings.reduce_motion true
+clickid spi @reduce_motion
+eventually
+assert_state settings.reduce_motion false
+clickid spi @Notifications
+wait 200
+clickid spi @agent_notify
+eventually
+assert_state settings.notify false
+clickid spi @agent_notify
+eventually
+assert_state settings.notify true
+clickid spi @Sessions
+wait 200
+clickid spi @chats_readonly
+eventually
+assert_state settings.chats_readonly true
+clickid spi @chats_readonly
+eventually
+assert_state settings.chats_readonly false
+pick_folder $homedir/Chats-elsewhere
+clickid spi @chats_dir
+eventually
+assert_state settings.folders.chats.path $homedir/Chats-elsewhere
+wait 200
+shot buttons/settings-chats
+clickid spi @chats_dir_default
+eventually
+assert_state settings.folders.chats.custom false
+key escape
+wait 300
 assert_state focus.kind terminal
 # a shortcut while it is open closes it and runs
 clickid settings
@@ -156,13 +164,18 @@ wait 200
 clickid tab 0
 eventually
 assert_state focus.kind terminal
-# ---- the shortcuts sheet: from the popover, its close button, outside, ⌘/
+# ---- Quick settings' last row: All settings… (↑ from the top wraps to it)
 clickid settings
 wait 200
-# the list is taller than the window: ↑ picks the last row, which scrolls the Deckhand group into view
 key up
-wait 200
-clickid pop 18
+key enter
+eventually
+assert_state focus.id settings_page
+key escape
+wait 300
+assert_state focus.kind terminal
+# ---- the shortcuts sheet: its close button, outside, ⌘/
+key slash cmd
 eventually
 assert_state focus.id shortcuts
 shot buttons/shortcuts

@@ -1255,12 +1255,13 @@ sp_file_row :: proc(k: int, name, detail: string, missing: bool, button := "", l
 }
 
 // A scene's "spi @KEY" (autotest.odin script_index): a section by its name (Agents), an action's
-// id, a pi extension's name, a row's or a file's path by its end, a card's "All files…"
+// id (a notifications grid cell's too), a pi extension's name, a row's or a file's path by its end, a card's "All files…"
 // (Agents/pi); the last layout's item (-1: none).
 settings_page_slot :: proc(key: string) -> int {
 	for it, k in spage.items {
 		switch {
 		case it.do_ == .Nav: if fmt.tprint(it.section) == key do return k
+		case it.do_ == .Grid: if POP_ACTIONS[it.pop] == key do return k // a grid cell by its action (bell_os_waiting)
 		case it.action == key: return k
 		case it.path != "" && strings.has_suffix(it.path, key): return k
 		}

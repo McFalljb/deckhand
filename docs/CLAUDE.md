@@ -470,7 +470,7 @@ is valid; it learns nothing it can use from outside the tab.
   start Claude Code's own config and update checks). Each Claude tab records it when first seen
   running; another one on disk shows the update bar. Tests: `DECKHAND_CLAUDE_BIN`; none while
   `DECKHAND_CLAUDE_CMD` replaces claude.
-- **Never touched** (`claude_credential`, also via `settings_credential` for the Settings tab, the
+- **Never touched** (`claude_credential`, also via `settings_credential` for the Settings page, the
   editor, Files and the reload watchers): `.credentials.json`, `.claude.json` and its backups
   anywhere, and everything in a Claude config folder except `settings.json`, `settings.local.json`,
   `CLAUDE.md`, `keybindings.json` and the folders `agents`, `skills`, `commands`, `output-styles`,
@@ -485,8 +485,8 @@ is valid; it learns nothing it can use from outside the tab.
   user, whatever its confirm policy, and stays the agent's after the user's Confirm (its own
   session's tabs left out, no saved flags). `claude_reload_later` is the user's;
   `claude_restart`'s `pick_model` is honored for the user only.
-- **Settings tab**: "Claude Code (global)" and "Claude Code · <project>" groups (once the config
-  folder exists); Claude's settings JSON is saved only when valid (strict); a save of a
+- **Settings page**: Claude Code's files under Coding agents › Claude Code and This project (once
+  the config folder exists; ui_settings_page.odin); Claude's settings JSON is saved only when valid (strict); a save of a
   restart-class file shows the Claude bar at once.
 - **First run**: the notes folder may also be found in the config folder's `CLAUDE.md` (after
   pi's `AGENTS.md`; only the path is shown; the config folder itself never qualifies); step 3 says
@@ -634,8 +634,8 @@ terminal tab. Until then (an older Claude Code, §5a) they come from the hooks' 
   panels. When a full tab has had no turn report in this run (SessionStart's hook always sends
   one, also when Deckhand refuses its session id; a restored tab's saved id does not count) 20 s
   (`CLAUDE_HOOKS_GRACE`) after its prompt came up (bracketed paste on, or OSC 7501 other than
-  blocked), a bar over it names these causes, with **Show settings** (the Settings tab: the Claude
-  Code groups) and **Dismiss** (for this run of the tab); a redraw is scheduled when it becomes
+  blocked), a bar over it names these causes, with **Show settings** (the Settings page: Coding
+  agents) and **Dismiss** (for this run of the tab); a redraw is scheduled when it becomes
   due. A startup dialog (folder trust, login) may have bracketed paste on too, and hooks run only
   after it: Deckhand cannot tell the two apart from outside, so the bar waits the grace and also
   says to answer such a dialog first. The snapshot says `"hooks":"silent"`.

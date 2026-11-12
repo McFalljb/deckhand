@@ -104,7 +104,7 @@ dir_of :: proc(path: string) -> string {
 // git gutter of the shown editor once typing paused.
 editor_tick :: proc() {
 	core.fs_model_tick()
-	core.settings_poll() // the Settings tab's folders outside projects (settings_files.odin)
+	core.settings_poll() // while the Settings page shows: its folders outside projects (settings_files.odin)
 	// hot reload: pi's config files and version (reload.odin), and Claude Code's
 	// (claude_reload.odin); a separate core runs them itself (serve.odin)
 	if !client_separate() {

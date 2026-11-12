@@ -45,6 +45,11 @@ exit_not_found :: proc(e: Exit_Info) -> bool {
 
 // "pi exited (code 1)": the bar's text and the tab's and row's tooltip.
 dead_tab_tip :: proc(tab: ^Tab) -> string {
+	if ct, is_claude := tab.kind.(Claude_Tab); is_claude && ct.codex {
+		if exit_not_found(tab.exit) do return "Codex isn't installed (or not on your login PATH)"
+		if how := exit_text(tab.exit); how != "" do return fmt.tprintf("Codex exited (%s)", how)
+		return "Codex exited"
+	}
 	if _, is_claude := tab.kind.(Claude_Tab); is_claude {
 		if exit_not_found(tab.exit) do return "Claude Code isn't installed (or not on your login PATH)"
 		if how := exit_text(tab.exit); how != "" do return fmt.tprintf("Claude exited (%s)", how)
@@ -58,8 +63,9 @@ dead_tab_tip :: proc(tab: ^Tab) -> string {
 // "Restart with model…" is offered: pi or Claude failed, and another model may help
 // (not when the program itself was not found).
 dead_tab_offers_model :: proc(tab: ^Tab) -> bool {
-	#partial switch _ in tab.kind {
-	case Pi_Tab, Claude_Tab:
+	#partial switch k in tab.kind {
+	case Pi_Tab:
+	case Claude_Tab: if k.codex do return false // Codex has no model step yet (codex.odin)
 	case: return false
 	}
 	return exit_failed(tab.exit) && !exit_not_found(tab.exit)
@@ -94,7 +100,7 @@ restart_if_dead :: proc(s: ^Open_Session, user := false) {
 	again :: proc(s: ^Open_Session, tab: ^Tab, user: bool) {
 		if tab == nil do return
 		if _, is := tab.kind.(Claude_Tab); !is || !tab_is_dead(tab) do return
-		if exit_not_found(tab.exit) && !claude_installed_now() do return
+		if exit_not_found(tab.exit) && !claude_tab_installed_now(tab) do return
 		claude_tab_restart(s, tab, user)
 	}
 	// a Claude-only session's main tab, as a pi session's pi tab (claude.odin)
@@ -267,10 +273,12 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		append(&restart_waits, Restart_Wait{tab = tab.id, pid = t.hung_pid, since = time.tick_now(), claude = true, flags = flags, pick_model = pick_model})
 		return {ok = true, created_id = tab.id}
 	}
-	if exit_not_found(tab.exit) && !claude_installed_now() {
-		window_toast(CLAUDE_MISSING_HINT, err = true)
-		return fail(CLAUDE_MISSING_HINT)
+	if exit_not_found(tab.exit) && !claude_tab_installed_now(tab) {
+		hint := ct.codex ? CODEX_MISSING_HINT : CLAUDE_MISSING_HINT
+		window_toast(hint, err = true)
+		return fail(hint)
 	}
+	pick_model := pick_model && !ct.codex // Claude's /model only
 	forget_confirmations_for(tab.id)
 	socket_forget_tab(tab.id)
 	tab_clear_panels(tab)
@@ -285,8 +293,9 @@ claude_tab_restart :: proc(s: ^Open_Session, tab: ^Tab, flags: bool, pick_model 
 		drop_term(tab.id)
 		if old != nil do terms[tab.id] = old
 		tab.status, tab.exit = .Exited, exit
-		window_toast(fmt.tprintf("Restart %s: could not start Claude Code", session_where(s)), err = true)
-		return fail("could not start Claude Code")
+		what := ct.codex ? "Codex" : "Claude Code"
+		window_toast(fmt.tprintf("Restart %s: could not start %s", session_where(s), what), err = true)
+		return fail(fmt.tprintf("could not start %s", what))
 	}
 	if old != nil {
 		term_free(old)

@@ -119,6 +119,7 @@ sidebar_make_room :: proc(list: ^[dynamic]string, is_project: bool) -> bool {
 Harness :: enum u8 {
 	Pi,
 	Claude,
+	Codex, // a Codex CLI tab is a Claude tab record with codex set (codex.odin)
 }
 
 // A harness's name, its logo (an Icon that draws a logos.odin mark; .None while it has none)
@@ -131,6 +132,7 @@ Harness_Mark :: struct {
 HARNESSES := [Harness]Harness_Mark {
 	.Pi     = {name = "pi", logo = .Logo_Pi, glyph = .Harness_Pi},
 	.Claude = {name = "Claude Code", logo = .Logo_Claude if LOGO_CLAUDE_ON else .None, glyph = .Harness_Claude}, // logos.odin: LOGO_CLAUDE_ON
+	.Codex  = {name = "Codex", logo = .None, glyph = .Harness_Codex}, // no logo of its own: a plain prompt glyph
 }
 
 // The icon a harness shows: its logo, else its glyph.
@@ -141,11 +143,11 @@ harness_icon :: proc(h: Harness) -> Icon {return harness_mark_icon(HARNESSES[h])
 // drawn in the muted colour: a logo keeps its own colours and is never faded.
 harness_row_icon :: proc(h: Harness, dimmed: bool) -> Icon {return dimmed ? HARNESSES[h].glyph : harness_icon(h)}
 
-session_harness :: proc(s: Session) -> Harness {return s.claude ? .Claude : .Pi}
+session_harness :: proc(s: Session) -> Harness {return s.codex ? .Codex : s.claude ? .Claude : .Pi}
 
 // A Claude row's account label while there are several accounts ("" = no tag).
 session_account_tag :: proc(s: Session) -> string {
-	if !s.claude do return ""
+	if !s.claude || s.codex do return ""
 	return claude_account_tag(s.account)
 }
 
@@ -486,7 +488,7 @@ sessions_with_new :: proc(section: Sort_Section, list: []Session) -> []Session {
 claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 	row :: proc(r: Claude_Record) -> Session {
 		t := time.unix(r.used, 0)
-		s := Session{id = r.id, title = r.title, untitled = "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account}
+		s := Session{id = r.id, title = r.title, untitled = r.codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, account = r.account, codex = r.codex}
 		if f := claude_disk_of(r.id); f != nil {
 			if f.created != {} do s.when_ = utc_minute(f.created)
 			s.gone = f.gone
@@ -499,7 +501,8 @@ claude_rows :: proc(p: Project, out: ^[dynamic]Session) {
 		if o.home || o.agent != .Claude || o.project_id != p.id || o.pi_session_id == "" || session_listed(out[:], o.pi_session_id) do continue
 		if r, _ := claude_record(o.pi_session_id); r == nil {
 			t := time.unix(o.shown_at / 1e9, 0)
-			append(out, Session{id = o.pi_session_id, untitled = "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true})
+			codex := len(o.tabs) > 0 && claude_tab_is_codex(o.tabs[0])
+			append(out, Session{id = o.pi_session_id, untitled = codex ? "Untitled Codex session" : "Untitled Claude session", when_ = utc_minute(t), modified = t, claude = true, codex = codex})
 		}
 	}
 	claude_disk_rows(p, out)
@@ -813,6 +816,7 @@ open_session_title :: proc(s: ^Open_Session) -> string {
 	// a Claude-only session: its history entry's title (claude.odin; the first prompt, or the user's)
 	if s.agent == .Claude {
 		if r, _ := claude_record(s.pi_session_id); r != nil && r.title != "" do return strings.clone(r.title, context.temp_allocator)
+		if len(s.tabs) > 0 && claude_tab_is_codex(s.tabs[0]) do return "Untitled Codex session"
 		return "Untitled Claude session"
 	}
 	untitled := open_session_is_chat(s) ? "Untitled chat" : "Untitled session"

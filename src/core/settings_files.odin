@@ -97,7 +97,9 @@ settings_credential :: proc(path: string, ids: []Cred_Id = nil) -> bool {
 			}
 			if k, st := path_stat(p); k == .File && st.mode & 0o077 == 0 do return true
 		}
-		return claude_credential(p) // Claude Code's credentials, account state, transcripts (claude_reload.odin)
+		// Claude Code's credentials, account state, transcripts (claude_reload.odin); Codex's sign-in,
+		// sessions/ transcripts and state (codex.odin)
+		return claude_credential(p) || codex_credential(p)
 	}
 	clean, _ := filepath.clean(path, context.temp_allocator)
 	if check(clean) || check(fs_real(clean)) do return true
@@ -119,6 +121,7 @@ credential_ids :: proc() -> []Cred_Id {
 	add(&out, fmt.tprintf("%s/auth.json", ad))
 	add(&out, fmt.tprintf("%s/models-store.json", ad))
 	for p in claude_credential_files() do add(&out, p) // .credentials.json, .claude.json
+	for p in codex_credential_files() do add(&out, p) // Codex's auth.json (codex.odin)
 	for dir in ([2]string{ad, fmt.tprintf("%s/intercom", ad)}) {
 		entries, err := os.read_all_directory_by_path(dir, context.temp_allocator)
 		if err != nil do continue

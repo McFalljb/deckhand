@@ -153,6 +153,13 @@ HARNESS_MANIFEST := [?]Harness_Row {
 		why = "Session ids, comments, held messages, panels and the read-only guard in Claude tabs (loaded with --plugin-dir)",
 		source = "integrations/claude-code (ships in Deckhand.app)",
 	},
+	{
+		harness = .Codex, id = "codex", name = "Codex", kind = .Harness, need = .Required, min_version = CODEX_MIN_VERSION, detect = .Binary,
+		install = CODEX_INSTALL_COMMAND,
+		update = {.Unknown = "", .Managed = "", .Brew = "{pm} upgrade --cask codex", .Npm = "{pm} install -g --prefix {prefix} @openai/codex@latest", .Bun = "{pm} add -g @openai/codex@latest", .Pnpm = "{pm} add -g @openai/codex@latest", .Yarn = "", .Nix = "", .Mise = ""},
+		why = "Runs Codex tabs and sessions (Deckhand's hooks load with each tab, nothing is installed in ~/.codex)",
+		source = "https://github.com/openai/codex (README: npm install -g @openai/codex)",
+	},
 }
 
 // pi's official installer (README "Getting started"; it pins pi's dependencies and installs Node
@@ -188,6 +195,8 @@ install_layout :: proc(h: Harness, real, agent_dir: string) -> Install_Layout {
 		if strings.contains(real, "/node_modules/") do return .Npm
 	case .Claude:
 		if strings.contains(real, "/claude/versions/") do return .Managed
+		if strings.contains(real, "/node_modules/") do return .Npm
+	case .Codex:
 		if strings.contains(real, "/node_modules/") do return .Npm
 	}
 	return .Unknown
@@ -325,6 +334,7 @@ harness_update_bare :: proc(r: Harness_Row, layout: Install_Layout, real: string
 // The harness binary Deckhand would start, by stat: the PATH new tabs get (none in test mode,
 // detect_path), then each harness's install folders. "" = not found this way.
 harness_binary :: proc(h: Harness) -> string {
+	if h == .Codex do return codex_binary() // codex.odin
 	name := h == .Pi ? "pi" : "claude"
 	if h == .Claude {
 		if b := hook_env(.Claude_Bin); filepath.is_abs(b) do return b
@@ -340,6 +350,7 @@ harness_binary :: proc(h: Harness) -> string {
 			dir := fmt.tprintf("%s/%s", home, d)
 			if exe_in(dir, name) do return fmt.tprintf("%s/%s", dir, name)
 		}
+	case .Codex:
 	}
 	return ""
 }
@@ -353,6 +364,8 @@ harness_version_of :: proc(h: Harness, bin: string) -> string {
 	case .Claude:
 		v, _ := claude_version_of(bin)
 		return v
+	case .Codex:
+		return codex_version_of(bin)
 	}
 	return ""
 }
@@ -492,6 +505,7 @@ Harness_Facts :: struct {
 	agent_dir: string,
 	integration: [Harness]bool, // the bundled integration is in this build
 	packages:  map[string]Pi_Package_Found, // pi packages by name (temp)
+	codex_signed_out: bool, // `codex login status` said signed out (codex.odin)
 }
 
 harness_facts_now :: proc() -> Harness_Facts {
@@ -500,7 +514,11 @@ harness_facts_now :: proc() -> Harness_Facts {
 	if r := fs_real(f.agent_dir); r != "" do f.agent_dir = r // binaries are compared by their real path
 	f.packages = make(map[string]Pi_Package_Found, allocator = context.temp_allocator)
 	for h in Harness {
-		f.installed[h] = h == .Pi ? pi_installed() : claude_installed()
+		switch h {
+		case .Pi:     f.installed[h] = pi_installed()
+		case .Claude: f.installed[h] = claude_installed()
+		case .Codex:  f.installed[h] = codex_installed()
+		}
 		b := harness_binary(h)
 		f.bin[h] = b
 		if b != "" {
@@ -513,6 +531,11 @@ harness_facts_now :: proc() -> Harness_Facts {
 	if f.installed[.Pi] && f.version[.Pi] == "" do f.version[.Pi] = state.reload.pi_version // found by the login shell only
 	f.integration[.Pi] = pi_integration_dir() != ""
 	f.integration[.Claude] = claude_plugin_dir() != ""
+	f.integration[.Codex] = claude_cli_path() != "" // its hooks are the bundled CLI (codex.odin)
+	if f.installed[.Codex] && f.version[.Codex] != "" && !claude_version_below(f.version[.Codex], CODEX_MIN_VERSION) {
+		codex_login_check() // once per recheck, on a worker: the next refresh shows its answer
+		f.codex_signed_out = codex_login_state() == .Signed_Out
+	}
 	project := settings_project_cwd() // the project on screen's .pi/settings.json too
 	for r in HARNESS_MANIFEST do if r.detect == .Pi_Package do f.packages[r.detect_arg] = pi_package_find(f.agent_dir, r.detect_arg, project)
 	return f
@@ -535,6 +558,7 @@ harness_checklist :: proc(f: Harness_Facts) -> []Harness_Item {
 			it.version, it.where_ = f.version[h], f.bin[h]
 			it.layout = f.bin[h] != "" ? install_layout(h, f.real[h], f.agent_dir) : .Unknown
 			it.state = .Ok
+			if h == .Codex && f.codex_signed_out do it.note = "Signed out: sign in on Codex's own screen in a Codex tab, or run `codex login` in a terminal"
 			if r.min_version != "" && claude_version_below(it.version, r.min_version) {
 				it.state, it.action = .Too_Old, .Update
 				p := harness_plan(r, .Update, it.layout, f.bin[h], f.real[h])
@@ -627,6 +651,7 @@ harness_checklist_refresh :: proc(full := false, bump := true) {
 	if full {
 		pi_recheck()
 		claude_recheck()
+		codex_recheck()
 	}
 	f := harness_facts_probe != nil ? harness_facts_probe() : harness_facts_now()
 	items_pi_asking = harness_facts_probe == nil && pi_lookup_state() == .Asking

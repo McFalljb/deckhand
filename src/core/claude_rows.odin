@@ -151,7 +151,7 @@ claude_rows_apply :: proc(cmd: Command, caller: Caller) -> (Result, bool) {
 claude_tab_tip :: proc(tab: Tab) -> string {
 	ct, is := tab.kind.(Claude_Tab)
 	if !is || ct.model == "" do return ""
-	return fmt.tprintf("Claude Code · model %s", ct.model)
+	return fmt.tprintf("%s · model %s", ct.codex ? "Codex" : "Claude Code", ct.model)
 }
 
 // The snapshot's model of a Claude tab (claude_tab_json).

@@ -335,7 +335,9 @@ workspace_json :: proc() -> string {
 			if j > 0 do strings.write_byte(&w.b, ',')
 			if tab.id == s.active_tab do active = j
 			open_obj(&w)
-			ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
+			// a Codex tab (codex.odin) is "codex": an older Deckhand drops it rather than start claude on its id
+			if ct, is_cl := tab.kind.(Claude_Tab); is_cl && ct.codex do ks(&w, "kind", "codex")
+			else do ks(&w, "kind", TAB_KIND_NAMES[tab_kind_id(tab.kind)])
 			if held := tab_held(tab.id); held != 0 {
 				ki(&w, "held", int(held)) // its process runs on in the session holder
 				if pt, is_pi := tab.kind.(Pi_Tab); is_pi && pt.readonly do kb(&w, "readonly", true) // as it was started (adopted: kept)
@@ -471,6 +473,7 @@ workspace_json :: proc() -> string {
 			if r.transcript != "" do ks(&w, "transcript", r.transcript)
 			if r.model != "" do ks(&w, "model", r.model)
 			if r.account != "" do ks(&w, "account", r.account)
+			if r.codex do kb(&w, "codex", true) // a Codex conversation (codex.odin)
 			if len(r.args) > 0 {
 				k(&w, "args")
 				write_strings(&w.b, r.args)
@@ -872,15 +875,15 @@ workspace_restore :: proc(text: string) -> string {
 				if url != "" do append(&tabs, Restore_Tab{kind = .Browser, cwd = url, title = one_line(title, context.temp_allocator), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j]})
 				continue
 			}
-			if kind == "claude" {
-				// Claude Code: resumed with --resume once its session is focused (claude.odin)
+			if kind == "claude" || kind == "codex" {
+				// Claude Code: resumed with --resume once its session is focused (claude.odin); Codex: codex resume (codex.odin)
 				id, _ := to["claude_session_id"].(json.String)
 				cwd, _ := to["cwd"].(json.String)
 				args := make([dynamic]string, context.temp_allocator)
 				if a, aok := to["args"].(json.Array); aok do for v in a do if x, xok := v.(json.String); xok do append(&args, string(x))
 				ro, _ := to["readonly"].(json.Boolean)
 				acct, _ := to["account"].(json.String)
-				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
+				append(&tabs, Restore_Tab{kind = .Claude, cwd = cwd, claude_id = id, args = args[:], readonly = bool(ro), account = string(acct), codex = kind == "codex", active = i64(j) == i64(want_active), pane = known(tab_pane[j]), pane_active = pane_active[j], held = held})
 				continue
 			}
 			if kind != "shell" do continue // the pi tab is always made; unknown kinds are dropped
@@ -968,10 +971,11 @@ workspace_restore :: proc(text: string) -> string {
 			transcript, _ := o["transcript"].(json.String)
 			model, _ := o["model"].(json.String)
 			acct, _ := o["account"].(json.String)
+			codex, _ := o["codex"].(json.Boolean)
 			args := make([dynamic]string, context.temp_allocator)
 			if a, aok := o["args"].(json.Array); aok do for x in a do if xs, xok := x.(json.String); xok do append(&args, string(xs))
 			if id == "" || !strings.has_prefix(project, "/") || claude_args_check(args[:]) != "" do continue
-			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), readonly = bool(ro), account = string(acct)})
+			append(&recs, Claude_Record{id = id, cwd = cwd, project = project, title = one_line(title, context.temp_allocator), used = i64(used), args = args[:], named = bool(named), transcript = string(transcript), model = string(model), readonly = bool(ro), account = string(acct), codex = bool(codex)})
 		}
 	}
 	if list, is := root["claude_readonly_ids"].(json.Array); is {

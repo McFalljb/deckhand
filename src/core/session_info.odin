@@ -166,7 +166,7 @@ session_info_build :: proc(project_id: u64, pi_session_id: string) -> (f: Sessio
 @(private = "file")
 claude_facts :: proc(project_id: u64, rec: ^Claude_Record) -> (f: Session_Facts, text: string, err: string) {
 	f.id = strings.clone(rec.id, context.temp_allocator)
-	f.agent = "Claude Code"
+	f.agent = rec.codex ? "Codex" : "Claude Code"
 	f.file, _ = claude_transcript_file(rec)
 	if p := find_project(project_id); p != nil do f.project = project_display(p^)
 	f.cwd = strings.clone(rec.cwd, context.temp_allocator)

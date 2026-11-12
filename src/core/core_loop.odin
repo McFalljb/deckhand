@@ -259,6 +259,7 @@ tab_live_tick :: proc() {
 			l.claude_wait = claude_wait_of(&tab, ct)
 			l.claude_typed = claude_typed(tab.id)
 			l.claude_quiet = claude_hooks_silent(&tab) && !claude_status_dismissed(tab.id)
+			l.codex_signed_out = codex_signed_out_due(&tab)
 			l.claude_restart = claude_restart_class(&tab)
 			l.claude_status = claude_status_message(&tab)
 			l.claude_background = claude_background_running(tab.id)

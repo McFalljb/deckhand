@@ -207,6 +207,10 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 	#partial switch c in cmd {
 	case Select_Project, Copy_Selection:
 		return {}, false // this Mac's view; the window's own copy's selection
+	case New_Claude_Session:
+		if c.codex do return fail(CODEX_REMOTE), true // codex.odin: this Mac only (an older core there would start claude)
+	case New_Claude_Tab:
+		if c.codex do return fail(CODEX_REMOTE), true
 	case Focus_Session:
 		// this Mac's view; the user's goes there too, so its restored tabs start
 		if caller.kind == .UI && !caller.hub do machine_link_send_text(no, hub_command_json(Focus_Session{session = id_local(c.session), reopen = c.reopen}, "", .UI))

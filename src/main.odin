@@ -588,7 +588,7 @@ frame :: proc "c" () {
 	ui_draw_field_cursor(cmds)
 	draw_end()
 	update_window_title()
-	dock_badge_update() // the sessions waiting for you, on the Dock icon (win_os.odin)
+	dock_badge_update(core.fleet_need(fleet)) // the sessions that need you, on the Dock icon: this frame's count (win_os.odin)
 	font_upload() // glyphs added while drawing, before the pass that uses them
 
 	bg := theme().bg_app

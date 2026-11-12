@@ -1,14 +1,16 @@
 package main
 
-// The fleet (ui_fleet.odin, core/needing_you.odin fleet_counts): one count over needing_you's tiers
+// The fleet (ui_fleet.odin, core/needing_you.odin fleet_tally): one count over needing_you's tiers
 // for the pill, the machine headers, the empty centre and the Dock; offline machines left out; the
 // pill drawn, hidden, collapsed and steady; a machine header's mini-counts; the empty centre's rows
 // and buttons; the spinner's frames with only the pill turning.
 
 import "base:runtime"
 import "core:fmt"
+import "core:mem"
 import "core:strings"
 import "core:testing"
+import "core:time"
 import "core"
 import clay "../build/clay-odin"
 
@@ -51,6 +53,36 @@ fl_session :: proc(id: u64, title: string, tabs: ..core.Tab) {
 	core.session_panes_init(&s)
 	append(&state.open_sessions, s)
 	append(&state.sessions, core.Session{id = s.pi_session_id, path = strings.clone(fmt.tprintf("/tmp/fl-proj/%d.jsonl", id)), title = s.title})
+}
+
+// The counts, all or one machine's (0: this Mac's), from core.fleet_tally; and checked against
+// the navigation order's tiers (needing_you) every time.
+@(private = "file")
+fl_counts :: proc(only: Maybe(u64) = nil, loc := #caller_location) -> core.Fleet {
+	per := make([]core.Fleet, len(state.machines) + 1, context.temp_allocator)
+	all := core.fleet_tally(per)
+	from_list, from_list_one: core.Fleet
+	no, one := only.?
+	for x in core.needing_you(working = true) {
+		f := &from_list
+		for _ in 0 ..< 2 {
+			switch x.tier {
+			case core.NEED_WAITING: f.waiting += 1
+			case core.NEED_ERROR:   f.errors += 1
+			case core.NEED_UNSEEN:  f.unseen += 1
+			case core.NEED_WORKING: f.working += 1
+			}
+			if !one || x.session.machine != no do break
+			f = &from_list_one
+		}
+	}
+	assert(all == from_list, "the tally agrees with needing_you's tiers", loc)
+	if !one do return all
+	k := 0
+	if no != 0 do for m, i in state.machines do if m.no == no do k = i + 1
+	if no != 0 && k == 0 do return {}
+	assert(per[k] == from_list_one, "one machine's tally agrees with needing_you's", loc)
+	return per[k]
 }
 
 @(private = "file")
@@ -116,11 +148,11 @@ fleet_counts_tiers_and_agreement :: proc(t: ^testing.T) {
 	fl_session(500, "e", fl_tab(501), fl_tab(502, "working"))
 	fl_session(600, "f", fl_tab(601, "working"), fl_tab(602, "waiting")) // once, at its most urgent
 	fl_session(700, "g", fl_tab(701)) // nothing
-	f := core.fleet_counts()
+	f := fl_counts()
 	testing.expect_value(t, f, core.Fleet{waiting = 3, errors = 1, unseen = 1, working = 1})
 	testing.expect_value(t, core.fleet_need(f), 4)
 	testing.expect_value(t, core.sessions_waiting_count(), 4) // the Dock says what the pill says
-	testing.expect_value(t, core.fleet_counts(0), f) // all of it this Mac's
+	testing.expect_value(t, fl_counts(0), f) // all of it this Mac's
 
 	// the same order as ⌥⌘A: its sessions first, then the working ones
 	need := core.needing_you()
@@ -142,10 +174,10 @@ fleet_counts_tiers_and_agreement :: proc(t: ^testing.T) {
 		if s != nil do for &tb in s.tabs do tb.prog.state, tb.prog.kind, tb.question = .None, .None, false
 	}
 	// Home never counts
-	before := core.fleet_counts()
+	before := fl_counts()
 	state.open_sessions[len(state.open_sessions) - 1].home = true
 	state.open_sessions[len(state.open_sessions) - 1].tabs[0].prog.state = .Error
-	testing.expect_value(t, core.fleet_counts(), before)
+	testing.expect_value(t, fl_counts(), before)
 }
 
 // Another machine's sessions count while it is online; an offline one's never.
@@ -180,10 +212,10 @@ fleet_counts_machines :: proc(t: ^testing.T) {
 		core.replica_free(&r4, runtime.heap_allocator())
 		fl_reset()
 	}
-	testing.expect_value(t, core.fleet_counts(), core.Fleet{waiting = 1, working = 1})
-	testing.expect_value(t, core.fleet_counts(0), core.Fleet{working = 1})
-	testing.expect_value(t, core.fleet_counts(3), core.Fleet{waiting = 1})
-	testing.expect_value(t, core.fleet_counts(4), core.Fleet{}) // offline: none
+	testing.expect_value(t, fl_counts(), core.Fleet{waiting = 1, working = 1})
+	testing.expect_value(t, fl_counts(0), core.Fleet{working = 1})
+	testing.expect_value(t, fl_counts(3), core.Fleet{waiting = 1})
+	testing.expect_value(t, fl_counts(4), core.Fleet{}) // offline: none
 	testing.expect_value(t, core.sessions_waiting_count(), 1)
 
 	// the headers: this Mac's says one working, nuc's one waiting, box's nothing
@@ -295,7 +327,7 @@ fleet_pill_drawn :: proc(t: ^testing.T) {
 	// an error among them: the waiting mark in the error colour, and its words
 	core.find_session(400).tabs[0].prog = {state = .Error, progress = -1}
 	_ = ui_layout(1600, 900)
-	parts, n := fleet_parts(core.fleet_counts())
+	parts, n := fleet_parts(fl_counts())
 	testing.expect_value(t, n, 2)
 	testing.expect_value(t, parts[0].mark, core.Status_Mark.Waiting)
 	testing.expect_value(t, parts[0].col, theme().error)
@@ -303,7 +335,7 @@ fleet_pill_drawn :: proc(t: ^testing.T) {
 	testing.expect_value(t, label, "2 need you (1 error), 1 working: click to go to the next")
 	// errors alone: the error mark
 	core.find_session(200).tabs[0].prog = {state = .Error, progress = -1}
-	parts, _ = fleet_parts(core.fleet_counts())
+	parts, _ = fleet_parts(fl_counts())
 	testing.expect_value(t, parts[0].mark, core.Status_Mark.Error)
 
 	// a compact bar: the most urgent part alone
@@ -421,4 +453,56 @@ fleet_pill_spin_frames :: proc(t: ^testing.T) {
 	core.find_session(200).tabs[0].prog = {}
 	_ = ui_layout(1400, 900)
 	testing.expect(t, !ui_spinning(), "nothing works: no frames")
+}
+
+// Counting is one pass with no allocation (it runs every frame, the spinner's too): nothing is
+// allocated with a tracking allocator in both slots, and its cost per frame for a large fleet.
+@(test)
+fleet_tally_no_alloc_and_cost :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	fl_reset()
+	defer fl_reset()
+	needs := []string{"", "working", "waiting", "error", "unseen", "question"}
+	N :: 300
+	for i in 0 ..< N {
+		id := u64(1000 + i * 10)
+		fl_session(id, fmt.tprintf("s%d", i), fl_tab(id + 1, needs[i % len(needs)]), fl_tab(id + 2), fl_tab(id + 3, i % 7 == 0 ? "working" : ""))
+	}
+	per := make([]core.Fleet, 1)
+	defer delete(per)
+	track: mem.Tracking_Allocator
+	mem.tracking_allocator_init(&track, runtime.heap_allocator())
+	defer mem.tracking_allocator_destroy(&track)
+	all: core.Fleet
+	{
+		context.allocator = mem.tracking_allocator(&track)
+		context.temp_allocator = mem.tracking_allocator(&track)
+		all = core.fleet_tally(per)
+	}
+	testing.expectf(t, track.total_allocation_count == 0, "allocations: %d", track.total_allocation_count)
+	testing.expect_value(t, all, fl_counts())
+	testing.expect_value(t, per[0], all)
+	// what it costs per frame: N sessions of 3 tabs
+	REPS :: 200
+	t0 := time.tick_now()
+	for _ in 0 ..< REPS do all = core.fleet_tally(per)
+	tally := time.duration_microseconds(time.tick_since(t0)) / REPS
+	// before this change the Dock badge already made one such pass every frame (each open
+	// session's session_quick_status): the tally takes its place
+	t0 = time.tick_now()
+	n := 0
+	for _ in 0 ..< REPS do for &x in state.open_sessions do if core.session_quick_status(&x) == .Waiting do n += 1
+	before := time.duration_microseconds(time.tick_since(t0)) / REPS
+	// and a frame with the pill turning and the sidebar hidden (its layout, all of it)
+	state.layout.left_open = false
+	state.current_session = 1000
+	_ = ui_layout(1400, 900)
+	testing.expect(t, ui_spinning(), "the pill turns")
+	t0 = time.tick_now()
+	for _ in 0 ..< 20 do _ = ui_layout(1400, 900)
+	frame := time.duration_microseconds(time.tick_since(t0)) / 20
+	fmt.printfln("fleet: tally of %d sessions × 3 tabs: %.1f µs (the Dock's pass it replaces: %.1f µs); a spinner frame's layout (sidebar hidden): %.0f µs", N, tally, before, frame)
+	_ = n
+	testing.expectf(t, tally < 2000, "the tally stays cheap: %.1f µs", tally) // loose: a busy CI runner
 }

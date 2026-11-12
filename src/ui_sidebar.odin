@@ -1771,7 +1771,7 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 		nw := text_w(name, FONT_UI_SMALL | WEIGHT_HEADER)
 		// its mini-counts, where the whole name still fits beside them (else the most urgent alone,
 		// else none): they give way before the name, the status before them
-		counts := core.fleet_counts(no)
+		counts := fleet_of(no) // this frame's (ui_fleet.odin)
 		counts_compact := false
 		counts_w: f32 = 0
 		if core.fleet_any(counts) {

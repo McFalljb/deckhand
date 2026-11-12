@@ -605,7 +605,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	pulse_drawn = pulse_step()
 	age_minute_drawn = age_minute()
 	ui_win_w = w
-	fleet = core.fleet_counts() // the pill, the machine headers' and the empty centre's (ui_fleet.odin)
+	fleet_tally_frame() // once per frame: the pill's, the machine headers', the Dock's (ui_fleet.odin)
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"

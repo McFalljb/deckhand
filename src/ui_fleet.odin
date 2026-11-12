@@ -1,7 +1,7 @@
 package main
 
 // The fleet: what needs you and what works, on this Mac and every online machine, from one core
-// function (core/needing_you.odin fleet_counts, over needing_you's tiers), so the pill, the
+// count (core/needing_you.odin fleet_tally, over needing_you's tiers), so the pill, the
 // machine headers, the empty centre, the Dock's badge and ⌥⌘A never disagree.
 //
 //   - the pill (top bar, left of the bell): "◉2 ✓1 ◜3": needs you (waiting, or an error), finished
@@ -13,14 +13,32 @@ package main
 //   - the empty centre ("No session open") while anything needs you or works: the counts in words,
 //     up to FLEET_ROWS sessions in needing_you's order (each goes where ⌥⌘A would), Go to next.
 
+import "base:runtime"
 import "core:fmt"
 import "core:math"
 import "core:strings"
 import "core"
 import clay "../build/clay-odin"
 
-// This frame's counts (ui_layout).
+// This frame's counts (ui_layout: fleet_tally_frame), all and per machine (fleet_per[0]: this
+// Mac's, fleet_per[i + 1]: state.machines[i]'s). Counted once per frame in one pass, without
+// allocating; the ordered list (core.needing_you) is built only for a click and for the empty
+// centre while it is drawn.
 fleet: core.Fleet
+fleet_per: [dynamic]core.Fleet
+
+fleet_tally_frame :: proc() {
+	if fleet_per.allocator.procedure == nil do fleet_per.allocator = runtime.heap_allocator()
+	if len(fleet_per) != len(state.machines) + 1 do resize(&fleet_per, len(state.machines) + 1) // grows with the machines only
+	fleet = core.fleet_tally(fleet_per[:])
+}
+
+// One machine's counts this frame (0: this Mac's).
+fleet_of :: proc(no: u64) -> core.Fleet {
+	if no == 0 do return len(fleet_per) > 0 ? fleet_per[0] : {}
+	for m, i in state.machines do if m.no == no && i + 1 < len(fleet_per) do return fleet_per[i + 1]
+	return {}
+}
 
 FLEET_ROWS :: 5 // the empty centre's rows, at most
 FLEET_ROW_W :: 460 // the empty centre's rows' width, at most (logical px)

@@ -592,8 +592,8 @@ open_order :: proc(rows: []^Open_Session) {
 
 // The open sessions that need you (waiting for you, or stopped with an error), this Mac's and
 // those of other machines that are online: the Dock badge's number (win_os.odin
-// dock_badge_update), the same as the top bar's pill (needing_you.odin fleet_counts).
-sessions_waiting_count :: proc() -> int {return fleet_need(fleet_counts())}
+// dock_badge_update), the same as the top bar's pill (needing_you.odin fleet_tally).
+sessions_waiting_count :: proc() -> int {return fleet_need(fleet_tally())}
 
 // Another machine's open sessions (machine no), in the Open group's order and through the same
 // filter and quick filters: waiting ones always show (temp allocator).

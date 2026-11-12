@@ -254,6 +254,8 @@ machines_ux_reachable_asks :: proc(t: ^testing.T) {
 machines_ux_install_cannot_start :: proc(t: ^testing.T) {
 	f := ux_up()
 	defer ux_down(&f)
+	install_here_for_test = {"darwin", "arm64"} // installs run from a Mac (the Linux CI too)
+	defer install_here_for_test = {}
 	r := machine_add_apply({target = "jb@nuc"})
 	testing.expect(t, r.ok, r.error)
 	no := r.created_id

@@ -526,11 +526,6 @@ on_cef_closed :: proc "c" (id: c.int) {
 	app.redraw = true
 }
 
-// Every page lets go of what it holds (a cover opened over them: ui_cover.odin).
-browsers_release_input :: proc() {
-	for _, b in browsers do if b.cef != 0 do release_input(b)
-}
-
 // Lets go of what the page holds: the keys and buttons pressed in it get
 // their releases (the page lost the keyboard, or the tab went away).
 @(private = "file")
@@ -588,7 +583,7 @@ browser_tick :: proc() {
 // The page has Deckhand's keyboard: its tab is the focused one (panes.odin) and no widget has
 // the keyboard.
 browser_wants_keys :: proc(b: ^Browser) -> bool {
-	return core.tab_focused(b.tab_id) && state.focus_widget == "" && !cover_is_open() // a cover has the keyboard (ui_cover.odin)
+	return core.tab_focused(b.tab_id) && state.focus_widget == ""
 }
 
 BROWSER_WAIT_MESSAGE :: "Too many open pages: this one opens when another closes"

@@ -352,37 +352,53 @@ bell_peek_ok :: proc(id: u64) -> bool {
 	return false
 }
 
-// Input while the popover is open: it takes everything but shortcuts. Up
-// and Down move, Enter opens, Esc or a click outside (or on the bell) closes.
+// Input while the popover is open (popover_event): Up and Down move, Enter opens, Esc or a click
+// outside (or on the bell) closes; a shortcut closes it and runs as usual.
 bell_event :: proc(e: ^sapp.Event) -> bool {
-	#partial switch e.type {
-	case .KEY_DOWN:
-		app.redraw = true
-		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			ui_do(core.Set_Focus{""}) // a shortcut closes it and runs as usual
-			return false
-		}
+	return popover_event(e, close = proc() {ui_do(core.Set_Focus{""})}, keys = proc(e: ^sapp.Event) {
 		#partial switch e.key_code {
-		case .ESCAPE: ui_do(core.Set_Focus{""})
 		case .UP:     if bell.n > 0 do bell.selected = bell.selected <= 0 ? bell.n - 1 : bell.selected - 1
 		case .DOWN, .TAB:
 			if bell.n > 0 do bell.selected = (bell.selected + 1) %% bell.n
 		case .ENTER, .KP_ENTER, .SPACE:
 			if bell.selected >= 0 && bell.selected < bell.n do bell_activate(bell.rows[bell.selected])
 		}
+	}, click = proc(h: Hit) -> bool {
+		b, ok := h.(Hit_Bell)
+		if ok do bell_click(b)
+		return ok
+	}, scroll = proc(e: ^sapp.Event) {
+		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
+		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+	})
+}
+
+// The input of a popover that takes the keys and the pointer while it shows (the bell's, a
+// peek's: ui_peek.odin). A ⌘ chord closes it and goes on below (false: handled as usual); Esc
+// closes it; any other key is its own (keys); a click on its own controls is its (click: true),
+// anywhere else closes it; the wheel is its own (scroll; nil: nothing); releases, characters and
+// pastes go nowhere. True: taken.
+popover_event :: proc(e: ^sapp.Event, close: proc(), keys: proc(e: ^sapp.Event), click: proc(h: Hit) -> bool, scroll: proc(e: ^sapp.Event) = nil) -> bool {
+	#partial switch e.type {
+	case .KEY_DOWN:
+		app.redraw = true
+		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
+			close() // a shortcut closes it and runs as usual
+			return false
+		}
+		app.key_taken = true // its character and release go nowhere
+		if e.key_code == .ESCAPE do close()
+		else do keys(e)
 		return true
 	case .MOUSE_MOVE:
 		set_hover(chrome_hit({e.mouse_x, e.mouse_y}), false)
 		return true
 	case .MOUSE_DOWN:
-		h := chrome_hit({e.mouse_x, e.mouse_y})
-		if b, ok := h.(Hit_Bell); ok do bell_click(b)
-		else do ui_do(core.Set_Focus{""}) // outside (or the bell again): closes
+		if !click(chrome_hit({e.mouse_x, e.mouse_y})) do close() // outside: closes
 		app.redraw = true
 		return true
 	case .MOUSE_SCROLL:
-		clay.SetPointerState({e.mouse_x, e.mouse_y}, false)
-		clay.UpdateScrollContainers(false, {e.scroll_x, e.scroll_y} * SCROLL_STEP * app.dpi, 1.0 / 60)
+		if scroll != nil do scroll(e)
 		app.redraw = true
 		return true
 	case .KEY_UP, .CHAR, .CLIPBOARD_PASTED, .MOUSE_UP:

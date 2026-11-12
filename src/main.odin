@@ -496,7 +496,6 @@ frame :: proc "c" () {
 	left_down := win_os.left_button == nil || win_os.left_button()
 	if t != nil do term_drag_tick(t, left_down) // a selection dragged past the grid's edge scrolls
 	if at != nil do term_drag_tick(at, left_down)
-	if pv != nil do term_drag_tick(pv, left_down)
 	shown_changed := false // a terminal in another pane on screen (panes.odin)
 	for x in views_on_screen() do if x != t && x.changed do shown_changed = true
 	if ((t != nil && t.changed) || shown_changed || (at != nil && at.changed && drawer_laid_out) || (pv != nil && pv.changed)) && time.tick_since(app.last_draw) > OUTPUT_FRAME do app.redraw = true
@@ -659,13 +658,10 @@ event :: proc(e: ^sapp.Event) {
 	defer client.busy -= 1
 	client_before_event() // the replica holds what timers did since the last frame (client.odin)
 	defer client_drain()
-	defer cover_event_end()
 	// the press's pane lets go (ui_panes.odin); leaving the window keeps it (the release may come back)
 	defer if e.type == .MOUSE_UP || e.type == .UNFOCUSED do pane_release()
 	if e.type == .UNFOCUSED do pane_divider_release() // a divider drag ends where it is
 	term_links_event(e) // ⌘ down or up, before anything takes the key (term_links.odin)
-	// right after a cover opened or closed, keys, buttons and pastes go nowhere until all are up (ui_cover.odin)
-	if cover_track(e) do return
 	drags_follow_focus() // a tab switch the last event or a command made
 	if e.type == .MOUSE_DOWN do count_click(e.mouse_x, e.mouse_y)
 	if e.type == .MOUSE_DOWN || e.type == .KEY_DOWN || e.type == .MOUSE_SCROLL do tip_dismiss()
@@ -684,9 +680,9 @@ event :: proc(e: ^sapp.Event) {
 			if e.type == .FILES_DROPPED || job_sheet_event(e) do return // dropped files: sidebar_drop refuses them too
 		}
 	}
-	// a cover (a peek, ui_cover.odin) takes every key, click and paste: nothing under it gets one;
-	// a ⌘ chord that is not its own closes it and goes on below
-	if cover_event(e) do return
+	// a peek (ui_peek.odin) is for looking: like the bell's popover it takes the keys and clicks
+	// (nothing reaches its terminal or what is under it); a ⌘ chord not its own closes it and goes on
+	if peek_event(e) do return
 	// ⌘K opens the palette from anywhere, and closes it
 	if e.type == .KEY_DOWN && e.key_code == .K && only_cmd {
 		ime_cancel()
@@ -894,7 +890,8 @@ event :: proc(e: ^sapp.Event) {
 	case .CHAR:
 		if kt != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(kt, e)
 	case .CLIPBOARD_PASTED:
-		if ktab != nil do tab_paste(ktab.id)
+		core.claude_note_typed(ktab)
+		if ktab != nil do ui_do(core.Send_Text{ktab.id, clipboard_text()})
 	case .FILES_DROPPED:
 		paths := make([]string, sapp.get_num_dropped_files(), context.temp_allocator)
 		for &p, i in paths do p = string(sapp.get_dropped_file_path(i32(i)))
@@ -969,7 +966,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Button:    button_click(Button(hit))
 		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
 		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
-		case Hit_Peek: // the peek takes its panel's clicks (its cover: ui_cover.odin)
+		case Hit_Peek: // peek_event takes the panel's clicks first
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)
@@ -1009,16 +1006,13 @@ event :: proc(e: ^sapp.Event) {
 		// the session on screen is seen now: its bell entries are read
 		if core.notify_wants_seen(state.current_session) do client_internal(core.Notifications_Mark_Read{session = state.current_session})
 		for id in core.status_wants_seen() do client_internal(core.Set_Unread{tab_id = id, unread = false}) // agent_status.odin
-		if cover_is_open() { 	// a cover has the keyboard (cover_close gives the one under it back)
-			if cv := cover_target_view(); cv != nil do term_focus(cv, true)
-		} else if kt != nil do term_focus(kt, true)
+		if kt != nil do term_focus(kt, true)
 	case .UNFOCUSED:
 		app.window_active = false
 		for _, x in term_views {
 			term_cancel_drag(x) // its release may go to another app
 			term_link_clear(x) // and ⌘'s
 		}
-		if cv := cover_target_view(); cv != nil && cv != kt do term_focus(cv, false)
 		if kt != nil do term_focus(kt, false)
 	case .QUIT_REQUESTED:
 		// a separate core: the window closes, the core and its sessions run on (quit_route)
@@ -1374,7 +1368,7 @@ utf16_unit :: proc(pending: ^u32, cp: u32) -> (rune, bool) {
 ime_commit :: proc(text: string) {
 	if !autotest_allows_input() do return
 	ime_set_marked("", 0)
-	if cover_ime_commit(text) { 	// a cover has the keyboard, over any field: its target, or nowhere (ui_cover.odin)
+	if peek_is_open() { 	// a peek is for looking: the text goes nowhere (ui_peek.odin)
 	} else if f, _, _ := focused_field(); f != nil {
 		tf_insert(f, text)
 		if state.focus_widget == "palette" do palette_edited()
@@ -1390,7 +1384,7 @@ ime_commit :: proc(text: string) {
 
 ime_set_marked :: proc(text: string, caret: int) {
 	if !autotest_allows_input() do return
-	if cover_set_marked(text, caret) do return // a cover's: drawn at its target, never in a field under it (ui_cover.odin)
+	if text != "" && peek_is_open() do return // a peek takes no text: no composition under it either (ui_peek.odin)
 	if text == ime.marked do return
 	delete(ime.marked)
 	ime.marked = strings.clone(text)
@@ -1400,20 +1394,16 @@ ime_set_marked :: proc(text: string, caret: int) {
 }
 
 ime_cancel :: proc() {
-	if m, _ := cover_marked(); ime.marked == "" && m == "" do return
+	if ime.marked == "" do return
 	platform_ime_cancel()
 	ime_set_marked("", 0)
 }
 
 // Option starts dead keys (é, ü) in text fields; in a terminal it is Alt.
-ime_option_composes :: proc() -> bool {return !cover_is_open() && (state.focus_widget != "" || active_editor() != nil)}
+ime_option_composes :: proc() -> bool {return state.focus_widget != "" || active_editor() != nil}
 
 // The candidate window's anchor: the field caret, else the terminal cursor.
 ime_anchor :: proc() -> [4]f32 {
-	if cover_is_open() {
-		if v := cover_target_view(); v != nil do return {v.cursor_px.x, v.cursor_px.y, font.cell_w, font.cell_h}
-		return {}
-	}
 	if state.focus_widget == "" {
 		if t := key_view(); t != nil do return {t.cursor_px.x, t.cursor_px.y, font.cell_w, font.cell_h}
 	}

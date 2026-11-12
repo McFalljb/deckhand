@@ -37,13 +37,6 @@ drawer_ui: struct {
 	mouse: bool, // a press in Atlas's terminal: moves and the release go there
 }
 
-// A press in Atlas's terminal owns the pointer (moves and the release go there).
-drawer_mouse_held :: proc() -> bool {return drawer_ui.mouse}
-
-// The drawer lets go of the pointer (a cover opened: ui_cover.odin; its terminal's press is
-// released with every terminal's). set: tests.
-drawer_release_input :: proc(set := false) {drawer_ui.mouse = set}
-
 @(private = "file")
 hovered :: proc(h: Hit_Agent) -> bool {return ui_hover == Hit(h)}
 
@@ -343,5 +336,5 @@ drawer_event :: proc(e: ^sapp.Event) -> bool {
 
 // An overlay (palette, menu, popover, sheet) covers the pointer.
 over_overlay :: proc() -> bool {
-	return palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || cover_is_open()
+	return palette_is_open() || menu.open || settings_open() || shortcuts_open() || setup_open() || peek_is_open()
 }

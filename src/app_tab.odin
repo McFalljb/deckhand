@@ -1368,11 +1368,6 @@ send_input :: proc(a: ^App_Proc, line: string) {
 	if app_sock_send(a.tab_id, line) do a.inputs += 1
 }
 
-// Every app lets go of what it holds (a cover opened over them: ui_cover.odin).
-apps_release_input :: proc() {
-	for _, a in apps do app_release_input(a)
-}
-
 // Lets go of what the app holds: key-ups and button-ups for everything
 // still pressed, then focus off (focus loss, a hidden tab, a closed tab).
 app_release_input :: proc(a: ^App_Proc) {
@@ -1404,7 +1399,7 @@ app_focus_tick :: proc() {
 // The app has the keyboard: its tab is the focused one (panes.odin), it runs, no widget has the
 // keyboard, the job sheet is shut and the window is in front.
 app_wants_keys :: proc(a: ^App_Proc) -> bool {
-	return core.tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && !cover_is_open() && app.window_active
+	return core.tab_focused(a.tab_id) && a.pid != 0 && state.focus_widget == "" && !job_sheet_open() && app.window_active
 }
 
 @(private = "file")

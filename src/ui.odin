@@ -1514,7 +1514,7 @@ Hit_Pop :: distinct Pop_Item
 Hit_Sheet_Close :: struct {}
 
 ui_hit :: proc() -> Hit {
-	if h, covered := cover_hit(); covered do return h // a cover (a peek): nothing under it is hit (ui_cover.odin)
+	if peek_is_open() do return peek_hit() // a peek's scrim covers everything: nothing under it is hit (ui_peek.odin)
 	if palette_is_open() {
 		// the palette covers everything: nothing under it is hit
 		for i in palette.first ..< palette.first + PALETTE_ROWS do if clay.PointerOver(clay.ID("palrow", u32(i))) do return Hit_Palette_Row(i)

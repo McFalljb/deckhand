@@ -347,7 +347,6 @@ kitty_flags :: proc(t: ^Term_View) -> u8 {
 }
 
 term_key_down :: proc(t: ^Term_View, e: ^sapp.Event) {
-	if !e.key_repeat do hold(t, e.key_code)
 	if s := mac_key_text(e.key_code, e.modifiers, kitty_flags(t) != 0); s != "" {
 		t.char_handled = true
 		term_view_input(t, transmute([]u8)s)
@@ -371,45 +370,11 @@ term_key_down :: proc(t: ^Term_View, e: ^sapp.Event) {
 }
 
 term_key_up :: proc(t: ^Term_View, e: ^sapp.Event) {
-	for i := 0; i < t.held_n; i += 1 do if t.held[i] == e.key_code {
-		t.held_n -= 1
-		t.held[i] = t.held[t.held_n]
-		break
-	}
 	if t.gt == nil do return
 	if mac_key_text(e.key_code, e.modifiers, kitty_flags(t) != 0) != "" do return // its press was text, not a key
 	key, unshifted := map_key(e.key_code)
 	if key == .Unidentified do return
 	send_key(t, .Release, key, to_mods(e.modifiers), unshifted, "")
-}
-
-// A key pressed in t (its release is owed: term_release_input).
-@(private = "file")
-hold :: proc(t: ^Term_View, k: sapp.Keycode) {
-	for i in 0 ..< t.held_n do if t.held[i] == k do return
-	if t.held_n < len(t.held) {
-		t.held[t.held_n] = k
-		t.held_n += 1
-	}
-}
-
-// t lets go of what it holds (it lost the keyboard and the pointer: a cover opened over it, or
-// closed): the releases of keys pressed in it, its mouse press's release, a selection drag ends.
-term_release_input :: proc(t: ^Term_View) {
-	for t.held_n > 0 {
-		up := sapp.Event{type = .KEY_UP, key_code = t.held[t.held_n - 1]}
-		term_key_up(t, &up)
-	}
-	if t.mouse_down {
-		b: sapp.Mousebutton = .LEFT
-		#partial switch t.mouse_button {
-		case .Right:  b = .RIGHT
-		case .Middle: b = .MIDDLE
-		}
-		up := sapp.Event{type = .MOUSE_UP, mouse_button = b, mouse_x = app.pointer.x, mouse_y = app.pointer.y}
-		term_mouse_up(t, &up)
-	}
-	term_cancel_drag(t)
 }
 
 term_char :: proc(t: ^Term_View, e: ^sapp.Event) {

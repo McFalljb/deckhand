@@ -473,35 +473,30 @@ IDLE  4 ›
 
 ### Peek
 
-**Peek** shows one tab of another session in a panel over the centre, live, so you can read it
-and answer it without leaving what you are doing: the session on screen, its panes and its zoom
-stay as they are, dimmed behind the panel. It shows the tab that needs you (the one its Attention
-row shows; for an idle session, its focused tab). The panel's header has its mark, its project
-and title, the machine it runs on when you have more than one, how long it has been so, and
-**Open** and **Close**.
+**Peek** shows one tab of another session in a panel over the centre, live, so you can see where
+it is without leaving what you are doing: the session on screen, its panes and its zoom stay as
+they are, dimmed behind the panel. It shows the tab that needs you (the one its Attention row
+shows; for an idle session, its focused tab). The panel's header has its mark, its project and
+title, the machine it runs on when you have more than one, how long it has been so, and **Open**
+and **Close**; a session waiting for you says "Open to answer" under it.
 
 - **To peek**, press Space on the row you picked with ↑ and ↓ in the Attention view (filter field
   focused, ⇧⌘F); or hover a row of the Attention view, of the centre's list (with no session open)
   or of the notifications and click its eye; or choose **Peek** in an open session's **…** menu.
   **Peek at next needing you** (⌃⌥⌘A, Window menu or the palette) peeks at where ⌥⌘A would go.
-- **While peeking**, everything you type goes to the peeked tab, Esc and Enter included (an
-  agent's question needs them), and so do clicks, drags and the wheel in it. The peek's own keys
-  are ⌘ chords, which never reach a program:
+- **Peek is for looking**: nothing you type, paste or click reaches the peeked tab. **Open (⌘↩) to
+  answer**. Its keys work like the notifications popover's:
 
   | Keys | What they do |
   |---|---|
   | ⌘↩ | **Open**: the peeked tab becomes the tab on screen, and the peek closes |
-  | ⌘W | **Close** the peek (never the tab under it) |
+  | Esc | **Close** the peek |
+  | ⌘W | close the peek (never the tab under it) |
   | ⌥⌘A, ⌃⌥⌘A | peek at the next one that needs you; ⌥⇧⌘A the one before |
-  | ⌘C, ⌘V | copy its selection, paste into it |
-  | ⌘⌫, ⌘←, ⌘→ | line editing in it, as in any terminal |
 
-  Any other ⌘ shortcut closes the peek and then does what it does. A click outside the panel
-  closes it. Nothing under the panel gets a key, click, paste, dictation or input-method text
-  while it shows. Right after a peek closes, keys still held down are ignored until released
-  (holding ⌘W or Enter does nothing more). When it closes, the keyboard is back where it was (a terminal, an
-  editor, a field); **Open** gives it to the tab it opens. Hiding or minimizing the window (⌘H,
-  ⌘M) or going full screen (⌃⌘F) leaves the peek open, and typing goes on into it.
+  Any other ⌘ shortcut closes the peek and then does what it does; other keys do nothing. A click
+  outside the panel closes it. When it closes, the keyboard is where it was (a terminal, an
+  editor, a field).
 - **What can be peeked**: a pi, Claude Code or shell tab of an open session other than the one on
   screen, on this Mac or on another machine that is online. Browser, app and editor tabs are not
   peeked: their rows have no eye, and a click opens them as before. The peek closes by itself

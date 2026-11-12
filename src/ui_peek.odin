@@ -1,36 +1,28 @@
 package main
 
-// Peek (docs/GUIDE.md "Peek"): look at and answer a session that needs you without leaving what
-// you are doing. A panel over the centre shows ONE terminal tab of another open session, live,
-// and the keyboard and the mouse go to it; the session on screen, its panes, its zoom and what
-// has the keyboard there are left exactly as they are. Window state only (peek): nothing in the
-// core, nothing saved.
+// Peek (docs/GUIDE.md "Peek"): look at a session that needs you without leaving what you are
+// doing. A panel over the centre shows ONE terminal tab of another open session, live; the
+// session on screen, its panes, its zoom and what has the keyboard there are left exactly as they
+// are. Peek is for looking: nothing is ever sent to the peeked terminal (no key, text, paste or
+// mouse report); to answer, Open it. Window state only (peek): nothing in the core, nothing saved.
 //
 // What can be peeked (peek_tab_of, peek_ok): a terminal tab (pi, Claude Code, a shell) whose
 // terminal the core has, of an open session that is not the one on screen, on this Mac or on
-// another machine while it is online. Its terminal is streamed as a tab on screen is: the
-// window's term.attach (term_view_of), which for another machine's tab starts that tab's relay on
-// demand (machine_route.odin), so what is typed takes exactly the path a tab on screen's input
-// takes (its stream's DATA; a paste is the user's send_text), with the same authority. Its tab:
-// the one the session's Attention row shows (core.session_tier_tab), else its focused one; "Peek
-// at next needing you" takes the tab ⌥⌘A would go to.
+// another machine while it is online. Its terminal is streamed as a tab on screen is (the window's
+// term.attach, term_view_of; another machine's tab's relay starts on demand, machine_route.odin).
+// Its tab: the one the session's Attention row shows (core.session_tier_tab), else its focused
+// one; "Peek at next needing you" takes the tab ⌥⌘A would go to.
 //
 // Entry points: Space on the Attention view's keyboard row; the eye button on a hovered row of
 // the Attention view, of the empty centre's list and of the bell's popover; "Peek" in a session
 // row's menu; Peek at next needing you (⌃⌥⌘A, Window menu, palette).
 //
-// It is a cover (ui_cover.odin): opening it lets go of what had the input, nothing under it gets
-// a key, click, composition or paste while it shows, keys held as it closes go nowhere (its quiet gate), and
-// what had the keyboard has it again after.
-//
-// Keys while peeking (peek_input, the cover's event: before anything else takes a key): everything goes to the
-// peeked terminal, Esc and Enter included (agents' prompts need them), except ⌘ chords, which
-// never reach programs: ⌘↩ Open (it becomes the tab on screen, as fleet_go goes there), ⌘W
-// Close, ⌥⌘A or ⌃⌥⌘A the next one needing you (⇧⌥⌘A the one before), ⌘C copies its selection,
-// ⌘V pastes into it, ⌘⌫ ⌘← ⌘→ edit its line as in a pane; any other ⌘ chord closes the peek and
-// then does what it does. A click outside the panel (the scrim) only closes it. Nothing here
-// moves the keyboard's owner (state.focus_widget, the focused pane), so closing returns to it;
-// Open gives the keyboard to the tab it opens. ⌘H, ⌘M and ⌃⌘F (the system's) leave it open.
+// Input (peek_event, before anything else in event()): the bell popover's (popover_event,
+// ui_bell.odin): Esc closes; ⌘↩ Opens (the tab on screen, as fleet_go goes there); ⌥⌘A or ⌃⌥⌘A
+// the next one needing you, ⇧⌥⌘A the one before; ⌘W closes the peek (never the tab under it);
+// any other ⌘ chord closes it and is then handled as usual; other keys do nothing; a click outside
+// the panel closes it; the wheel does nothing (scrolling a terminal can send keys to its program).
+// An input method's text goes nowhere (main.odin ime_commit).
 //
 // Sizes (peek_after_layout): a tab this window has laid out (term_fits) is never resized: its
 // grid is drawn 1:1 (cells on whole pixels, text as crisp as in a pane), the panel grown to show
@@ -126,16 +118,19 @@ peek_open_session :: proc(sid: u64) -> bool {
 	return peek_open_tab(s, peek_tab_of(s))
 }
 
-// Peeks at tab of s (another peek is replaced).
+// Peeks at tab of s (another peek is replaced). A palette or popover with the keyboard closes.
 peek_open_tab :: proc(s: ^core.Open_Session, tab: ^core.Tab) -> bool {
 	if !peek_ok(s, tab) do return false
+	if menu.open do menu_close()
+	switch state.focus_widget {
+	case "palette", "settings", "shortcuts", "notifications": ui_do(core.Set_Focus{""})
+	}
 	switching := peek_is_open()
 	if switching && peek.tab == tab.id do return true
-	if switching do peek_let_go() // the cover stays: from one peek to the next
-	cover_open(PEEK_COVER) // what had the input lets go (ui_cover.odin)
+	ime_cancel() // a composition belongs to what had the keyboard
 	peek = {session = s.id, tab = tab.id, opened = time.tick_now()}
 	if switching do peek.opened = {} // from one peek to the next: no fade
-	if v := term_view_of(tab.id); v != nil && !v.focused && app.window_active do term_focus(v, true)
+	_ = term_view_of(tab.id) // attached now: it shows from the next frame
 	peek_seen(s, tab)
 	set_hover(nil, false) // the row's eye under the scrim is not hovered now
 	app.redraw = true
@@ -143,36 +138,14 @@ peek_open_tab :: proc(s: ^core.Open_Session, tab: ^core.Tab) -> bool {
 	return true
 }
 
-// The peek closes; the keyboard is where it was (cover_close gives it back), unless restore is
-// false (Open: the keyboard goes with the tab).
-peek_close :: proc(restore := true) {
+// The peek closes; the keyboard is where it was (nothing moved it).
+peek_close :: proc() {
 	if !peek_is_open() do return
-	peek_let_go()
 	peek = {}
 	peek_moving = false
-	cover_close(restore)
 	set_hover(nil, false)
 	app.redraw = true
 	if core.autotest_active do fmt.println("[autotest] peek closed")
-}
-
-// The peeked terminal lets go: its press is released, its focus goes (it is not on screen now).
-@(private = "file")
-peek_let_go :: proc() {
-	v := term_view_peek(peek.tab)
-	if v == nil do return
-	term_release_input(v)
-	if v.focused && v != key_view() do term_focus(v, false)
-}
-
-// The peek as a cover (ui_cover.odin).
-@(private = "file")
-PEEK_COVER :: Cover_Hooks {
-	event  = peek_input,
-	hit    = peek_hit,
-	action = peek_action,
-	close  = proc() {peek_close()},
-	target = proc() -> u64 {return peek.tab},
 }
 
 // Open (⌘↩): the peeked tab becomes the tab on screen, as fleet_go goes to a session (another
@@ -180,13 +153,9 @@ PEEK_COVER :: Cover_Hooks {
 peek_go :: proc() {
 	s := find_session(peek.session)
 	tid := peek.tab
-	if s == nil {
-		peek_close()
-		return
-	}
+	peek_close()
+	if s == nil do return
 	sid, local, focused := s.id, s.machine == 0, core.session_focused_id(s) // (no pointer held across a command)
-	peek_close(restore = false)
-	if state.focus_widget != "" do ui_do(core.Set_Focus{""}) // the keyboard goes with the tab
 	if local {
 		ui_do(core.Focus_Tab{tab_id = tid})
 		return
@@ -226,10 +195,10 @@ peek_next :: proc(back := false) {
 	toast_show(peek_is_open() ? "Nothing else needs you" : "Nothing to peek at: what needs you is on screen, or not a terminal")
 }
 
-// An action run while peeking (action_run via cover_action: the menu bar's items clicked): the
-// peek's own are handled here (true); any other closes the peek (cover_action) and then runs.
-@(private = "file")
+// An action run while peeking (action_run: the menu bar's items clicked): the peek's own are
+// handled here (true); any other closes the peek first and then runs.
 peek_action :: proc(id: string) -> bool {
+	if !peek_is_open() do return false
 	switch id {
 	case "peek_next_needing_you", "next_needing_you":
 		peek_next()
@@ -241,6 +210,7 @@ peek_action :: proc(id: string) -> bool {
 		peek_close()
 		return true
 	}
+	peek_close()
 	return false
 }
 
@@ -296,7 +266,7 @@ peek_progress :: proc() -> f32 {
 // grown to show v's grid whole when its size is settled (a layout here gave it, or it is another
 // machine's, never resized), at most the centre less the margins (the window's when the centre
 // is too small).
-peek_box :: proc(w, h: f32, v: ^Term_View, remote := false) -> [4]f32 {
+peek_box :: proc(w, h: f32, v: ^Term_View, remote := false, note := false) -> [4]f32 {
 	c := [4]f32{0, 0, w, h}
 	if d := clay.GetElementData(clay.ID("centre")); d.found do c = {d.boundingBox.x, d.boundingBox.y, d.boundingBox.width, d.boundingBox.height}
 	m := px(PEEK_MARGIN)
@@ -306,7 +276,7 @@ peek_box :: proc(w, h: f32, v: ^Term_View, remote := false) -> [4]f32 {
 	if v != nil && v.cols > 0 && v.rows > 0 && (remote || peek.tab in term_fits) {
 		inset := 2 * px(PEEK_PAD)
 		want_w = max(want_w, f32(v.cols) * font.cell_w + 2 * term_pad() + inset)
-		want_h = max(want_h, f32(v.rows) * font.cell_h + 2 * term_pad() + inset + px(PEEK_HEAD_H))
+		want_h = max(want_h, f32(v.rows) * font.cell_h + 2 * term_pad() + inset + px(PEEK_HEAD_H) + (note ? px(PEEK_NOTE_H) : 0))
 	}
 	bw := math.floor(min(max(want_w, px(PEEK_MIN_W)), max_w))
 	bh := math.floor(min(max(want_h, px(PEEK_MIN_H)), max_h))
@@ -329,7 +299,8 @@ peek_layout :: proc(w, h: f32) {
 	if s == nil || tab == nil do return
 	th := theme()
 	e := peek_progress()
-	b := peek_box(w, h, term_view_peek(peek.tab), remote = s.machine != 0)
+	waiting := core.tab_need(tab^) == core.NEED_WAITING
+	b := peek_box(w, h, term_view_peek(peek.tab), remote = s.machine != 0, note = waiting)
 	b.y += math.round((1 - e) * px(PEEK_RISE))
 	if clay.UI(clay.ID("peek_scrim"))({
 		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(h)}},
@@ -345,6 +316,13 @@ peek_layout :: proc(w, h: f32) {
 	}) {
 		overlay_shadow("peek_shadow", PEEK_Z_BOX)
 		peek_header(s, tab, b.z - 2 * px(PEEK_PAD))
+		if waiting { 	// it waits for an answer: answering is Open's
+			if clay.UI(clay.ID("peek_note"))({
+				layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(PEEK_NOTE_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childAlignment = {y = .Center}},
+			}) {
+				clay.TextDynamic("Open to answer", txt(th.text_muted, FONT_UI_SMALL))
+			}
+		}
 		if clay.UI(clay.ID("peek_term"))({
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}},
 			backgroundColor = cc(core.term_colors().bg), // until its first snapshot draws
@@ -370,7 +348,7 @@ peek_header :: proc(s: ^core.Open_Session, tab: ^core.Tab, inner_w: f32) {
 	pad := px(SP_2) + px(SP_1)
 	keys := true
 	room :: proc(inner_w, pad, gap: f32, keys: bool, mach, age: string) -> f32 {
-		r := inner_w - pad - px(MARK) - head_button_w("Open", keys ? "⌘↩" : "", true) - head_button_w("Close", keys ? "⌘W" : "", false) - 4 * gap // mark, title, spacer, Open, Close: four gaps
+		r := inner_w - pad - px(MARK) - head_button_w("Open", keys ? "⌘↩" : "", true) - head_button_w("Close", keys ? "Esc" : "", false) - 4 * gap // mark, title, spacer, Open, Close: four gaps
 		if mach != "" do r -= text_w(mach, FONT_UI_SMALL) + gap
 		if age != "" do r -= text_w(age, FONT_UI_SMALL) + gap
 		return r
@@ -390,7 +368,7 @@ peek_header :: proc(s: ^core.Open_Session, tab: ^core.Tab, inner_w: f32) {
 		if age != "" do clay.TextDynamic(age, txt(th.text_muted, FONT_UI_SMALL))
 		spacer()
 		button(clay.ID("peek_open"), "Open", true, ui_hover == Hit(Hit_Peek(.Open)), keys ? "⌘↩" : "")
-		button(clay.ID("peek_close"), "Close", false, ui_hover == Hit(Hit_Peek(.Close)), keys ? "⌘W" : "")
+		button(clay.ID("peek_close"), "Close", false, ui_hover == Hit(Hit_Peek(.Close)), keys ? "Esc" : "")
 	}
 }
 
@@ -419,14 +397,7 @@ peek_after_layout :: proc() {
 	v.y = gh > a.w ? a.y + a.w - math.ceil(gh) : a.y
 }
 
-// Inside the terminal's part of the panel (what is drawn there is hit there).
-peek_in_term :: proc(x, y: f32) -> bool {
-	a := peek.area
-	return a.z > 0 && x >= a.x && x < a.x + a.z && y >= a.y && y < a.y + a.w
-}
-
-// The terminal, clipped to its area, and an input method's composition at its cursor (frame,
-// after the panel's own commands, at the panel's fade).
+// The terminal, clipped to its area (frame, after the panel's own commands, at the panel's fade).
 peek_draw :: proc() {
 	v := peek_view()
 	a := peek.area
@@ -435,7 +406,6 @@ peek_draw :: proc() {
 	sgl.scissor_rect(i32(a.x), i32(a.y), i32(a.z), i32(a.w), true)
 	sgl.begin_quads()
 	term_draw(v)
-	if m, caret := cover_marked(); m != "" do term_draw_marked(v, m, caret)
 	sgl.end()
 	sgl.scissor_rect(0, 0, 1 << 15, 1 << 15, true)
 	sgl.begin_quads()
@@ -454,8 +424,7 @@ peek_commands :: proc(cmds: clay.ClayArray(clay.RenderCommand)) -> (from, to: i3
 
 // ---- hits and input ----
 
-// What the pointer is over while peeking (ui_hit via cover_hit: nothing under the scrim is hit).
-@(private = "file")
+// What the pointer is over while peeking (ui_hit, first: nothing under the scrim is hit).
 peek_hit :: proc() -> Hit {
 	if clay.PointerOver(clay.ID("peek_open")) do return Hit_Peek(.Open)
 	if clay.PointerOver(clay.ID("peek_close")) do return Hit_Peek(.Close)
@@ -465,12 +434,12 @@ peek_hit :: proc() -> Hit {
 peek_tip :: proc(h: Hit_Peek) -> (string, string) {
 	#partial switch Peek_Button(h) {
 	case .Open:  return "Open it here: the tab on screen", "⌘↩"
-	case .Close: return "Close the peek", "⌘W"
+	case .Close: return "Close the peek", "Esc"
 	}
 	return "", ""
 }
 
-PEEK_ROW_TIP :: "Peek: look and answer without leaving what you are doing"
+PEEK_ROW_TIP :: "Peek: look without leaving what you are doing"
 
 // The peek's own ⌘ chords. True: taken.
 @(private = "file")
@@ -482,115 +451,45 @@ peek_key :: proc(e: ^sapp.Event) -> bool {
 		peek_go()
 	case .W:
 		if m != sapp.MODIFIER_SUPER do return false
-		peek_close()
+		peek_close() // the peek, never the tab under it
 	case .A:
 		switch m {
 		case sapp.MODIFIER_SUPER | sapp.MODIFIER_ALT, sapp.MODIFIER_SUPER | sapp.MODIFIER_ALT | sapp.MODIFIER_CTRL: peek_next()
 		case sapp.MODIFIER_SUPER | sapp.MODIFIER_ALT | sapp.MODIFIER_SHIFT: peek_next(back = true)
 		case: return false
 		}
-	case .C:
-		if m != sapp.MODIFIER_SUPER do return false
-		ui_do(core.Copy_Selection{peek.tab}) // the window's copy's selection (core.window_term_selection)
-	case .V:
-		if m != sapp.MODIFIER_SUPER do return false // the paste itself comes as CLIPBOARD_PASTED
 	case:
 		return false
 	}
 	return true
 }
 
-// Input while peeking (the cover's event: cover_event, before anything else takes it). True:
-// taken. Only the peeked terminal and the panel's buttons get anything; a ⌘ chord that is not the
-// peek's closes it and goes on (false), as do events that are not input (focus, resize, quit).
-// (Pastes are the cover's: cover_event.)
-@(private = "file")
-peek_input :: proc(e: ^sapp.Event) -> bool {
+// Input while peeking (main.odin event, before anything else takes it): its own ⌘ chords, then
+// the bell popover's (popover_event). Nothing reaches the peeked terminal. True: taken.
+peek_event :: proc(e: ^sapp.Event) -> bool {
 	if !peek_is_open() do return false
-	peek_tick() // its tab, session or machine went: closed
-	if !peek_is_open() {
-		// input meant for it goes nowhere (a key held into it does not go on below); the rest goes on
-		#partial switch e.type {
-		case .KEY_DOWN, .KEY_UP, .CHAR, .MOUSE_DOWN, .MOUSE_UP, .MOUSE_SCROLL, .FILES_DROPPED:
-			if e.type == .KEY_DOWN do app.key_taken = true
-			return true
-		}
-		return false
-	}
-	v := term_view_of(peek.tab)
-	_, tab, _ := find_tab(peek.tab)
-	#partial switch e.type {
-	case .KEY_DOWN:
+	peek_tick() // its tab, session or machine went: closed, and this event goes where it would
+	if !peek_is_open() do return false
+	if e.type == .KEY_DOWN {
 		app.key_in_widget, app.key_taken = false, false
-		if e.modifiers & sapp.MODIFIER_SUPER != 0 {
-			if peek_key(e) {
-				app.key_taken = true // its release goes nowhere
-				app.redraw = true
-				return true
-			}
-			// ⌘⌫ ⌘← ⌘→: line editing in the peeked program, as in a pane (mac_key_text)
-			if mac_key_text(e.key_code, e.modifiers, false) != "" {
-				if v != nil {
-					core.claude_note_typed(tab)
-					term_key_down(v, e)
-				}
-				return true
-			}
-			peek_close() // another ⌘ chord: the peek closes, and the chord does what it does
-			return false
-		}
-		if v != nil {
-			// as a pane's terminal: a Claude tab's prompt holds text now (Enter and Esc add none)
-			if e.key_code != .ENTER && e.key_code != .KP_ENTER && e.key_code != .ESCAPE do core.claude_note_typed(tab)
-			term_key_down(v, e)
-		}
-		return true
-	case .KEY_UP:
-		// (a key whose press opened or closed a peek, or was the peek's: its release goes nowhere)
-		if !app.key_taken && v != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_key_up(v, e)
-		return true
-	case .CHAR:
-		if !app.key_taken && v != nil && e.modifiers & sapp.MODIFIER_SUPER == 0 do term_char(v, e)
-		return true
-	case .MOUSE_DOWN:
-		app.pointer = {e.mouse_x, e.mouse_y}
-		app.redraw = true
-		if peek_in_term(e.mouse_x, e.mouse_y) {
-			if v == nil do return true
-			// ⌘-click opens a link; a right click's link menu would open under the panel: the program's
-			if e.modifiers & sapp.MODIFIER_SUPER != 0 && term_link_mouse_down(v, e) do return true
-			term_mouse_down(v, e, app.clicks)
+		if e.modifiers & sapp.MODIFIER_SUPER != 0 && peek_key(e) {
+			app.key_taken = true // its release goes nowhere
+			app.redraw = true
 			return true
 		}
-		if h, ok := chrome_hit(app.pointer).(Hit_Peek); ok {
-			#partial switch Peek_Button(h) {
+	}
+	if e.type == .FILES_DROPPED || e.type == .MOUSE_LEAVE || e.type == .MOUSE_ENTER do return true
+	if e.type == .MOUSE_DOWN || e.type == .MOUSE_MOVE do app.pointer = {e.mouse_x, e.mouse_y} // (click reads it)
+	return popover_event(e, close = peek_close, keys = proc(e: ^sapp.Event) {}, click = proc(h: Hit) -> bool {
+		if b, ok := h.(Hit_Peek); ok {
+			#partial switch Peek_Button(b) {
 			case .Open:  peek_go()
 			case .Close: peek_close()
 			}
 			return true
 		}
-		if !inside(clay.ID("peek_box"), e.mouse_x, e.mouse_y) do peek_close() // the scrim: it closes, nothing else
-		return true
-	case .MOUSE_UP:
-		if v != nil do term_mouse_up(v, e) // only a press it took (Term_View.mouse_down)
-		return true
-	case .MOUSE_MOVE:
-		app.pointer = {e.mouse_x, e.mouse_y}
-		over := peek_in_term(e.mouse_x, e.mouse_y)
-		set_hover(over ? nil : chrome_hit(app.pointer), over)
-		// over its terminal, or a press in it held: outside, the program hears nothing
-		if v != nil && (over || v.mouse_down) do term_mouse_move(v, e)
-		return true
-	case .MOUSE_SCROLL:
-		if v != nil && peek_in_term(e.mouse_x, e.mouse_y) do term_scroll(v, e)
-		return true
-	case .MOUSE_LEAVE:
-		set_hover(nil, false)
-		return true
-	case .FILES_DROPPED, .MOUSE_ENTER:
-		return true
-	}
-	return false
+		return inside(clay.ID("peek_box"), app.pointer.x, app.pointer.y) // in the panel: nothing; outside: closes
+	})
 }
 
 // ---- entry points ----

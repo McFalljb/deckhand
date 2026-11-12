@@ -226,7 +226,7 @@ eventually
 assert_tip Search or run a command ⌘K
 hover togglepanels
 eventually
-assert_tip Toggle right column ⌥⌘B
+assert_tip Toggle right panels ⌥⌘B
 hover toggleleft
 eventually
 assert_tip Toggle left column ⌘B
@@ -247,7 +247,7 @@ assert_tip More actions
 # a click hides it until the pointer moves to another control
 hover togglepanels
 eventually
-assert_tip Toggle right column ⌥⌘B
+assert_tip Toggle right panels ⌥⌘B
 clickid togglepanels
 wait 700
 assert_tip

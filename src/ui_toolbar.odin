@@ -794,7 +794,7 @@ shortcut_rows :: proc() -> []Shortcut_Row {
 		for &s in it.sub do add(rows, &s)
 		keys := menubar_keys(it)
 		if it.sub != nil || keys == "" do return
-		if it.action == "tab_1" do append(rows, Shortcut_Row{"Go to tab 1–9", "⌘1–⌘9", false})
+		if it.action == "tab_1" do append(rows, Shortcut_Row{"Tab 1–9", "⌘1–⌘9", false})
 		if strings.has_prefix(it.action, "tab_") do return // one row for the nine
 		append(rows, Shortcut_Row{menubar_item_title(it), keys, false})
 	}

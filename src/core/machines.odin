@@ -104,6 +104,8 @@ Machine_Login :: struct {
 	no: u64,
 }
 
+MACHINE_NO_CORE :: "no Deckhand core at its path" // a Not_Installed link's error (machine_status_of)
+
 Machine_Status :: enum u8 {
 	Connecting,
 	Online,
@@ -207,7 +209,15 @@ machine_target_error :: proc(target: string) -> string {
 		if !ok do return "a target holds only letters, digits and . _ - @ :"
 	}
 	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
+	if machine_target_part_missing(target) do return MACHINE_PART_ERROR
 	return ""
+}
+
+MACHINE_PART_ERROR :: "Type both sides of user@host, like jb@nuc.local"
+
+// user@, @host, a@@b, host: — a side of the @ (or what follows a trailing :) left empty.
+machine_target_part_missing :: proc(target: string) -> bool {
+	return strings.has_prefix(target, "@") || strings.has_suffix(target, "@") || strings.contains(target, "@@") || strings.has_suffix(target, ":")
 }
 
 MACHINE_PORT_ERROR :: "To use another port, add a Host entry to ~/.ssh/config and type its name here."
@@ -397,7 +407,7 @@ machine_status_of :: proc(o: Machine_Outcome) -> (s: Machine_Status, why: string
 			if strings.contains(last, p) do return .Needs_Login, last
 		}
 	}
-	if o.exited && (o.exit_code == 127 || o.exit_code == 126) do return .Not_Installed, "no Deckhand core at its path"
+	if o.exited && (o.exit_code == 127 || o.exit_code == 126) do return .Not_Installed, MACHINE_NO_CORE
 	return .Offline, last != "" ? last : "the connection ended"
 }
 
@@ -429,11 +439,14 @@ machine_status_text :: proc(m: Machine_View) -> (label, why, raw: string) {
 	case .Needs_Update:
 		if strings.contains(m.error, "newer") do return "Needs an update", "Its Deckhand is newer than this Mac's: update Deckhand on this Mac", ""
 		return "Needs an update", "Its Deckhand is too old for this Mac", ""
-	case .Not_Installed: return "No Deckhand there", "Deckhand isn't installed there", ""
+	case .Not_Installed:
+		// its add's install could not start: why (mlink_down), else the plain fact
+		if m.error != "" && m.error != MACHINE_NO_CORE do return "No Deckhand there", fmt.tprintf("Deckhand isn't installed there. %s", sentence_case(m.error)), ""
+		return "No Deckhand there", "Deckhand isn't installed there", ""
 	case .Taken:
 		if strings.has_prefix(m.error, "viewed from ") do return "In use there", fmt.tprintf("Shown from %s now: Take back shows it here", m.error[len("viewed from "):]), ""
 		return "In use there", "Its own window is showing it: Take back shows it here", ""
-	case .Refused:       return "Not allowed", "Turn on Allow other machines to connect on that Mac", ""
+	case .Refused:       return "Not allowed", "Turn on Allow other machines to connect on that machine", ""
 	case .Unsupported:   return "Not supported", "Not a Mac or Linux machine", m.error
 	}
 	return "", "", ""
@@ -626,6 +639,7 @@ Mach_Link :: struct {
 	core_run:  string, // heap: its last hello's run id (`core`; "" = an older core's, none)
 	linger:    Linger, // its last hello's machine.linger (Linux), or what linger --enable said
 	auto_install: bool, // added by the user: its first attempt's finding of no core starts an install (M6-E); any status but connecting clears it (mlink_set)
+	install_why: string, // heap: why that install could not start (its note while it has no core: machine_status_text); "" = none
 	drain_skew: cw.Skew, // Draining: the hello's
 	login_until: time.Tick, // Log in… ran: while its control socket is not there yet (≤ MACHINE_LOGIN_WAIT), looked for once a second; there, the link connects
 }
@@ -948,10 +962,21 @@ mlink_down :: proc(l: ^Mach_Link, o: Machine_Outcome) {
 	l.phase = .Idle
 	l.next_at = time.tick_add(time.tick_now(), machine_backoff_down(&l.backoff, time.tick_now()))
 	if machine_status_waits_for_user(s) do l.phase, l.backoff = .Stopped, {} // until the user's Connect, Log in… or an edit
-	mlink_set(l, s, why)
-	// added by the user and no core there: its install starts, once (machine_install.odin)
+	// added by the user and no core there: its install starts, once (machine_install.odin); when it
+	// cannot, why is its note (plain words) while it still has no core, not only stderr
+	heap := runtime.heap_allocator()
+	if s != .Not_Installed {
+		delete(l.install_why, heap)
+		l.install_why = ""
+	}
+	mlink_set(l, s, l.install_why != "" ? l.install_why : why)
 	if s == .Not_Installed && auto && state.settings.remote_machines {
-		if r := machine_install_start(l.no); !r.ok do fmt.eprintln("Deckhand: machine", l.name, "install:", r.error)
+		if r := machine_install_start(l.no); !r.ok {
+			fmt.eprintln("Deckhand: machine", l.name, "install:", r.error)
+			delete(l.install_why, heap)
+			l.install_why = strings.clone(r.error, heap)
+			mlink_set(l, s, l.install_why)
+		}
 	}
 }
 
@@ -1408,7 +1433,7 @@ mlink_find :: proc(no: u64) -> (^Mach_Link, int) {
 @(private = "file")
 mlink_free :: proc(l: ^Mach_Link) {
 	heap := runtime.heap_allocator()
-	for s in ([?]string{l.name, l.target, l.os, l.arch, l.core_path, l.via, l.version, l.error, l.core_run}) do delete(s, heap)
+	for s in ([?]string{l.name, l.target, l.os, l.arch, l.core_path, l.via, l.version, l.error, l.core_run, l.install_why}) do delete(s, heap)
 	delete(l.inbuf)
 	delete(l.errbuf)
 	free(l, heap)
@@ -1430,6 +1455,7 @@ machine_target_plain_error :: proc(target: string) -> string {
 	if target == "" do return "Type a machine: user@host or a name from ~/.ssh/config, like jb@nuc.local"
 	if machine_target_error(target) == "" do return ""
 	if machine_target_has_port(target) do return MACHINE_PORT_ERROR
+	if machine_target_part_missing(target) do return MACHINE_PART_ERROR
 	if len(target) > 255 do return "That is too long for a machine's address"
 	if strings.contains_any(target, " \t") || target[0] == '-' do return "Type only the machine, like jb@nuc.local: ssh's options go in ~/.ssh/config"
 	return fmt.tprintf("%q can't be used: type user@host or a name from ~/.ssh/config (letters, digits and . _ - @), like jb@nuc.local", text_clean(target, 40))
@@ -1497,7 +1523,7 @@ machine_add_apply :: proc(c: Machine_Add) -> Result {
 
 // What Remove asks first.
 machine_remove_question :: proc(name: string) -> string {
-	return fmt.tprintf("Remove %s from Deckhand? Nothing on it is deleted, and its sessions keep running there. You can add it again any time.", name)
+	return fmt.tprintf("Remove %s from Deckhand? Nothing on it is deleted, and its sessions keep running there. Its web pages open here close, and an install running now stops. You can add it again any time.", name)
 }
 
 machine_remove_apply :: proc(c: Machine_Remove, caller: Caller) -> (Result, bool) {

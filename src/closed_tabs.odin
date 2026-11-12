@@ -2,9 +2,10 @@ package main
 
 // Reopen closed tab (⇧⌘T; actions.odin): the window remembers the tabs the user closed by hand, at
 // most CLOSED_TABS_MAX, newest last, in the window's memory only (never saved, never sent).
-// Recorded ONLY by the user's own close gestures: a tab's × and ⌘W (close_tab_click) and the tab
-// menu's "Close tab" (menu_run). Nothing else records: the menu bar's and the palette's Close tab,
-// the confirm bar, the comments prompt, agents, scripts and other machines.
+// Recorded ONLY by the user's own close gestures: a tab's × and ⌘W (close_tab_click), the tab
+// menu's "Close tab" (menu_run), and the menu bar's and the palette's Close tab (the close_tab
+// action's prepare: only the user runs actions). Nothing else records: the confirm bar, the
+// comments prompt, agents, scripts, control callers and other machines.
 //
 // A gesture records a PENDING entry, one per tab (a repeated × replaces it). It becomes
 // reopenable only when the tab goes as the result of that same flow: at once when no confirmation

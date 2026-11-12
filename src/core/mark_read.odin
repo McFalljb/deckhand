@@ -1,6 +1,6 @@
 package core
 
-// Mark all as read (mark_all_read; ⌥⇧⌘U): every tab of this Mac's open sessions whose status is
+// Mark all sessions as read (mark_all_read; ⌥⇧⌘U): every tab of this Mac's open sessions whose status is
 // "finished, not seen" right now (tab_status_view's Unseen dot) is seen. Decided here, in one
 // command, against the core's State as it applies: a tab waiting for the user, with an error or a
 // question is never touched, whatever the window last saw (an error that arrived a moment before

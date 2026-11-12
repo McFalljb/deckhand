@@ -71,7 +71,7 @@ MENUBAR := [?]Bar_Item {
 		{action = "new_claude_tab"},
 		{action = "new_browser_tab"},
 		{action = "add_project"},
-		{action = "machine_add"}, // Machines over SSH (machines.odin): greyed while it is off
+		{action = "machine_add"}, // Machines over SSH (machines.odin): while it is off, Settings' row to turn it on
 		{action = "open_file"},
 		SEP,
 		{action = "close_tab"},
@@ -107,7 +107,7 @@ MENUBAR := [?]Bar_Item {
 		{id = "settings_tab", action = "settings", title = "Settings", no_key = true, check = proc() -> bool {return left_tab_shown(.Settings)}},
 		{action = "show_jobs", title = "Jobs", check = proc() -> bool {return left_tab_shown(.Jobs)}},
 		{action = "changes_open"}, // "Show changes"
-		{action = "toggle_right", title = "Toggle right panels", check = proc() -> bool {return state.layout.right_open}},
+		{action = "toggle_right", check = proc() -> bool {return state.layout.right_open}},
 		SEP,
 		{action = "palette", title = "Command palette"},
 		{action = "notifications"},

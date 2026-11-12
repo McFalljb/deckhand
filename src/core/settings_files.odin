@@ -409,8 +409,9 @@ MACHINE_CHECK_WORDS := [Harness_Item_State]string {
 
 // What a machine's row offers, in the sidebar and in Settings ("" = nothing): Cancel while its
 // install or update runs, Retry after one failed, Update (M6-E; not one that must be made on that
-// machine), Keep running… (Linux linger off), else what its status wants. Never Connect where it
-// cannot work (refused, unsupported: the row says what to do instead). A healthy machine has none
+// machine), Keep running… (Linux linger off), else what its status wants. Refused and unsupported:
+// Try again (after the fix on that machine; the row says what to do), only when the user clicks it:
+// never on a timer (machine_status_waits_for_user). A healthy machine has none
 // (Open web page… is in its header's "…" menu).
 machine_action_label :: proc(m: Machine_View) -> string {
 	#partial switch m.job {
@@ -425,6 +426,7 @@ machine_action_label :: proc(m: Machine_View) -> string {
 	case .Not_Installed: return "Install…"
 	case .Taken:         return "Take back"
 	case .Offline:       return "Connect"
+	case .Refused, .Unsupported: return "Try again"
 	}
 	return ""
 }

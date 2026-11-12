@@ -263,7 +263,7 @@ amber when it needs you, red when its install failed, grey offline), its status 
 words) or, when something is wrong, a note of up to two lines under it that says what, and a button
 when there is something to do: **Log in…** (ssh wants a password, a host key or a
 code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no session is open,
-and the link connects once you are in), **Connect**, **Take back**, **Install…**, **Retry** (an
+and the link connects once you are in), **Connect**, **Take back**, **Try again**, **Install…**, **Retry** (an
 install that failed), **Update** or **Keep running…** (see [Installing and updating other machines](#installing-and-updating-other-machines)),
 and **Cancel** while an install runs. Point at its name for why, and ssh's own words. Its **…**
 button (or a right click on it) has **Connect**, **Log in…** or **Take back**, **Open web page…**,
@@ -272,8 +272,8 @@ button (or a right click on it) has **Connect**, **Log in…** or **Take back**,
 fold: a folded machine shows only its sessions that wait for you, and its header counts its open
 sessions. This Mac's fold is saved; other machines' last until Deckhand quits.
 A machine that refuses this Mac says to turn on **Allow other machines to connect** on it, and
-one that is not a Mac or Linux says so; neither offers Connect (right-click › **Try again** after
-you fixed it). Deckhand does not keep retrying a machine that needs you (to log in, or to allow
+one that is not a Mac or Linux says so; its button (and its **…** menu) says **Try again**, for
+after you have fixed it on that machine. Deckhand does not keep retrying a machine that needs you (to log in, or to allow
 this Mac): it tries again when you click. An offline machine is retried on its own, less and less
 often. Under it are its open sessions, then its projects, drawn as this Mac's are (the status
 mark, how long it has been so and what it asks; an open session's age is not known here) and thinned by the filter and
@@ -504,8 +504,10 @@ NEEDS YOU  2
   marked seen: a session that finishes meanwhile stays unread. Shortcuts that act on a tab (⌘W,
   ⌘T, split…) do nothing, as with no session open; the ones that go somewhere (⌥⌘A, the session
   shortcuts, ⌥⌘`) go there, and the deck goes. The window's title is "Deckhand" and the Open
-  section has no current row while it shows. If you quit with the deck showing, Deckhand opens
-  next time on the session you were in.
+  section has no current row while it shows. If ⌘Q closes only the window while the deck
+  shows (the default), the window comes back to the deck; if Deckhand Core stops too (**Quit
+  Deckhand and Stop All Sessions…**, ⌘Q with the background core off, a restart of the Mac),
+  Deckhand opens next time on the session you were in.
 - [Peek](#peek) works over the deck: **Peek** in a card's **…** menu, or ⌃⌥⌘A, shows that session
   in its panel over the cards (the session you were in too); Esc closes the peek and leaves the
   deck, **Open** (⌘↩) goes to the session and the deck goes too. Opening the deck closes a peek.
@@ -520,11 +522,14 @@ it is without leaving what you are doing: the session on screen, its panes and i
 they are, dimmed behind the panel. It shows the tab that needs you (the one its Attention row
 shows; for an idle session, its focused tab). The panel's header has its mark, its project and
 title, the machine it runs on when you have more than one, how long it has been so, and **Open**
-and **Close**; a session waiting for you says "Open to answer" under it.
+and **Close**; under it, "Looking only · ⌘↩ to open" ("Open to answer" when the session
+is waiting for you).
 
 - **To peek**, press Space on the row you picked with ↑ and ↓ in the Attention view (filter field
   focused, ⇧⌘F); or hover a row of the Attention view, of the centre's list (with no session open)
-  or of the notifications and click its eye; or choose **Peek** in an open session's **…** menu.
+  or of the notifications and click its eye; or choose **Peek** in an open session's **…** menu
+  (this Mac's rows: another machine's open rows in the sidebar have no menu yet, so peek at those
+  from the Attention view or ⌃⌥⌘A).
   **Peek at next needing you** (⌃⌥⌘A, Window menu or the palette) peeks at where ⌥⌘A would go.
 - **Peek is for looking**: nothing you type, paste or click reaches the peeked tab. **Open (⌘↩) to
   answer**. Its keys work like the notifications popover's:
@@ -580,7 +585,7 @@ and **Close**; a session waiting for you says "Open to answer" under it.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
   (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
   session on this Mac, not another machine's): it
-  keeps the finished check mark (the accent) until you look at it again. ⌥⇧⌘U (**Mark all as read**) clears
+  keeps the finished check mark (the accent) until you look at it again. ⌥⇧⌘U (**Mark all sessions as read**) clears
   finished and not seen on every open session on this Mac and says how many ("Marked 2 as read",
   or "Nothing unread"); a tab waiting for you, with an error or a question stays exactly as it
   is until you look at it. Other machines' sessions keep theirs.
@@ -687,8 +692,8 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   running a command, or an editor with unsaved changes.
 - **To reopen a tab you closed**, press ⇧⌘T (**Reopen closed tab**, File menu or the palette); again
   for the one before, up to the last 10, in the session it was in (brought to the front). The
-  window remembers only the tabs you close yourself with the tab's **×**, ⌘W or the tab's menu's
-  **Close tab**; not one an agent or a script closes (even when you confirm it), and not one on
+  window remembers only the tabs you close yourself with the tab's **×**, ⌘W, the tab's menu's
+  **Close tab**, or **Close tab** in the File menu or the palette; not one an agent or a script closes (even when you confirm it), and not one on
   another machine. What comes back: an editor or Markdown tab opens its file as it is on disk now
   (unsaved changes are gone), a browser tab its address, a Claude tab its conversation (resumed),
   a Changes tab its checkout, and a shell tab a **new** shell in its folder ("Reopened a new
@@ -2164,11 +2169,11 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | New Claude tab | ⌥⌘T | Claude Code in the session on screen |
 | New browser tab |  | a blank page, its address field ready |
 | Add project… |  | |
-| Add a machine… |  | the add field in Settings › Machines; while Machines over SSH is on |
+| Add a machine… |  | the add field in Settings › Machines; with Machines over SSH off, its row there, to turn it on |
 | Open file… | ⌘P | the current project's files |
 | Close tab | ⌘W | the pi tab: close the session, asks first; in Atlas: hide the drawer |
 | Close session |  | asks first |
-| Reopen closed tab | ⇧⌘T | the last tab you closed with its ×, ⌘W or its menu (up to 10; [To reopen a tab you closed](#tabs)) |
+| Reopen closed tab | ⇧⌘T | the last tab you closed yourself: its ×, ⌘W, its menu, File › Close Tab or the palette (up to 10; [To reopen a tab you closed](#tabs)) |
 | Save | ⌘S | an editor tab with unsaved changes |
 
 **Edit**
@@ -2231,7 +2236,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Peek at next needing you | ⌃⌥⌘A | where ⌥⌘A would go, in a panel over the centre, without leaving the session on screen; look only, nothing you type reaches it ([Peek](#peek)) |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | the last one you looked at; the oldest |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
-| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this Mac only: the tab (or session) on screen; every open session on this Mac |
+| Mark as unread, Mark all sessions as read | ⇧⌘U, ⌥⇧⌘U | this Mac only: the tab (or session) on screen; every open session on this Mac |
 | Bring all to front |  | |
 
 **Help**
@@ -2317,10 +2322,10 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Browser: show downloads folder |  | the folder downloads go to, in Finder |
 | New app tab… |  | a program that draws into the tab (asks for the command) |
 | Open a machine's web page… |  | a page an online machine serves on its own `127.0.0.1` (asks for the port), in a local browser tab through its ssh connection; see [Projects, sessions and chats](#projects-sessions-and-chats) |
-| Add a machine… |  | the add field in Settings › Machines (Machines over SSH on) |
+| Add a machine… |  | the add field in Settings › Machines (Machines over SSH off: its row there, to turn it on) |
 | Remove a machine… |  | asks which, then to confirm: nothing on it is deleted |
-| Connect to a machine |  | asks which: Connect, Log in… or Take back, as its button |
-| Machines settings |  | Settings, at the Machines group |
+| Connect to a machine |  | asks which: Connect, Log in…, Take back or Try again, as its button |
+| Machines settings… |  | Settings, at the Machines group |
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |
@@ -2335,10 +2340,10 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Notifications |  | open the bell |
 | Notifications: mark all read |  | |
 | Notifications: clear |  | |
-| Notify me about: Finished |  | bell group on/off |
-| Notify me about: Needs you |  | bell group on/off |
-| Notify me about: Errors |  | bell group on/off |
-| Notify me about: Jobs |  | bell group on/off |
+| Finished: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
+| Needs you: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
+| Errors: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
+| Jobs: bell |  | the gear's grid: this kind in the bell on/off (macOS and sound are separate) |
 | Needs you: macOS notification |  | the gear's grid: the next choice (never, background, always) |
 | Finished: macOS notification |  | the gear's grid: the next choice (never, background, always) |
 | Errors: macOS notification |  | the gear's grid: the next choice (never, background, always) |
@@ -2349,7 +2354,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Jobs: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Badge Dock icon |  | the number of sessions that need you on the Dock icon |
 | Toggle left column | ⌘B | |
-| Toggle right column | ⌥⌘B | |
+| Toggle right panels | ⌥⌘B | |
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | |
@@ -2357,7 +2362,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Peek at next needing you | ⌃⌥⌘A | [Peek](#peek) at where ⌥⌘A would go |
 | Recent session, Least recent session | `` ⌥⌘` ``, `` ⌥⇧⌘` `` | |
 | Go to open session 1–6 | ⌥⌘1–⌥⌘6 | |
-| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | |
+| Mark as unread, Mark all sessions as read | ⇧⌘U, ⌥⇧⌘U | |
 | Toggle Attention view | ⌥⌘. | the Sessions tab by what needs you, or by project |
 | Toggle Deck view | ⇧⌘\ | the centre as a grid of every open session, or back |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
@@ -2410,7 +2415,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Pin session, Unpin session, Hide session |  | the session on screen |
 | Sort projects (next order), Sort sessions (next order), Sort chats (next order) |  | Recent → Name → Created |
 | Quit Deckhand | ⌘Q | |
-| Quit Deckhand and Stop All Sessions… |  | the session holder's sessions too |
+| Quit Deckhand and Stop All Sessions… |  | stops every session too, kept ones included (asks) |
 | Open file… | ⌘P | |
 | Save | ⌘S | |
 | Find in file | ⌘F | |

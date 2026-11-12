@@ -125,11 +125,11 @@ machine_data_dir_for :: proc(os_name: string) -> string {
 // How a core gets to a machine of os_name/arch from this one, or why it cannot.
 machine_install_plan :: proc(here_os, here_arch, os_name, arch: string) -> (kind: Install_Kind, why: string) {
 	if here_os != "darwin" do return {}, "installs run from a Mac"
-	if os_name == "" do return {}, "this machine's OS is not known yet"
+	if os_name == "" do return {}, "that machine's OS is not known yet: connect to it first"
 	if os_name == here_os && arch == here_arch do return .Copy_App, ""
 	if os_name == "linux" && arch == "amd64" do return .Tarball, ""
-	if os_name == "linux" do return {}, "Deckhand has no Linux core for this machine's processor yet (x86_64 only)"
-	return {}, "Deckhand has no core for this Mac's processor"
+	if os_name == "linux" do return {}, "Deckhand has no Linux core for that machine's processor yet (x86_64 only)"
+	return {}, "Deckhand has no core for that machine's processor"
 }
 
 // The Update button's rule. here, there: this Mac's core's version and the machine's ("" or not

@@ -1138,7 +1138,8 @@ files_name_error :: proc(name: string) -> string {
 // Enter in the name field: create or rename; an error keeps the field.
 files_commit_edit :: proc() {
 	name := strings.trim_space(tf_text(&files_name_field))
-	if fu.edit == .None || (fu.edit == .Rename && name == "") {
+	// an empty Add a machine field stays open with what to type (the core's error)
+	if fu.edit == .None || (fu.edit == .Rename && name == "" && fu.target != core.MACHINE_ADD_ROW) {
 		files_cancel_edit()
 		return
 	}

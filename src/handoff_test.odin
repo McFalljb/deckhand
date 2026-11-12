@@ -281,7 +281,7 @@ handoff_palette_action :: proc(t: ^testing.T) {
 	state.selected_project = 1
 	state.machines[0].status = .Offline
 	action_run("new_session_elsewhere")
-	testing.expect_value(t, toast.text, "No other machine has a project called api")
+	testing.expect_value(t, toast.text, "No online machine has a project called api")
 	testing.expect(t, !menu.open, "no menu")
 	// another machine's project or Chats selected: not listed
 	state.selected_project = 2

@@ -377,10 +377,11 @@ machine_palette_results :: proc(query: string) -> []Palette_Item {
 	return out[:]
 }
 
-// What "Connect to a machine" lists: a machine whose button connects (Connect, Take back, Log in…).
+// What "Connect to a machine" lists: a machine whose button connects (Connect, Take back, Log in…,
+// Try again).
 machine_connectable :: proc(m: core.Machine_View) -> bool {
 	switch core.machine_action_label(m) {
-	case "Connect", "Take back", "Log in…": return true
+	case "Connect", "Take back", "Log in…", "Try again": return true
 	}
 	return false
 }

@@ -6,24 +6,31 @@ package main
 // centre's place (its summary line kept; its buttons too when it was opened with no session shown).
 //
 //	8 sessions · 2 need you · 1 finished · 3 working
-//	NEEDS YOU  2
+//	NEEDS YOU  2 ─────────────────────────────────────────────────────────
 //	┌──────────────────────────────┐ ┌──────────────────────────────┐
 //	│ ⚿  web · Login page       3m │ │ ?  api · Schema           9m │
-//	│ this Mac · Claude Code       │ │ nuc · pi                     │
-//	│ Apply these edits?           │ │ Which index?                 │
-//	│                              │ │                              │
-//	│ 3 tabs · 1 working           │ │ 1 tab                        │
+//	│ Apply these edits to the     │ │ Which index should orders    │
+//	│ login form and its tests?    │ │ use: (created_at) alone, or… │
+//	│ ✳ Claude Code [mac] ● 2 tabs │ │ π pi [nuc]                   │
 //	└──────────────────────────────┘ └──────────────────────────────┘
-//	WORKING  1
+//	WORKING  1 ───────────────────────────────────────────────────────────
 //	…
 //
 // The cards follow the Attention view's order (core.attention_rows: needs you, finished, working,
-// idle; ⌥⌘A's within them), each group under its label on a row of its own. A card: the mark of
-// the tab that placed it (session_tier_tab) with its place, title and age; the machine (only while
-// other machines are in play) and the harness; that tab's message (the mirror's cleaned text for
-// another machine's), else its status in plain words; what the other tabs are doing. Every card
-// is the same size whatever it holds, so nothing moves when a status changes; the session it was
-// opened from is outlined in the accent; a card flashes as its row does (status_flash, by session).
+// idle; ⌥⌘A's within them), each group under its label and a hairline on a row of its own. Every
+// card is DECK_CARD_W wide (as many columns as fit, never stretched; one column: up to
+// DECK_CARD_W_ONE). A card: the mark of the tab that placed it (session_tier_tab) with its place,
+// title and how long its status has been so (the waiting or error colour while it needs you); that
+// tab's message (the mirror's cleaned text for another machine's), else its status in plain words:
+// two lines on a card that needs you, one on a working or finished one, none on an idle one; then
+// the harness's glyph and name, the machine as a chip (only while other machines are in play) and,
+// with more than one tab, what the others are doing as dots and "N tabs". A card that needs you is
+// tinted with its status colour (an error's red, else waiting's) with a hairline of it; an idle
+// one is quieter. A card's height depends only on its group (deck_card_h), so nothing moves while
+// a status holds. The session it was opened from is outlined in the accent (1 px, inside); the
+// keyboard's card has a DECK_RING accent ring outside it; a card flashes as its row does
+// (status_flash, by session). Hovered: Peek (the look-only peek: ui_peek.odin) and "…" (this Mac's
+// only: its row's menu) in its age's place.
 //
 // A click or Enter goes where its Attention row goes (attention_go); ←→↑↓ move the keyboard's card
 // across the grid (scrolled into view); Esc, the toggle or the button goes back to the session it
@@ -47,6 +54,7 @@ import sapp "../vendor/sokol-odin/sokol/app"
 
 Hit_Deck_Card :: distinct u64 // a card: its open session id
 Hit_Deck_More :: distinct u64 // a card's "…": its row's menu (open session id)
+// (a card's Peek is Hit_Peek_Row, as a row's eye: main.odin opens the peek)
 
 // A card as the last layout placed it: its session, its grid row (across every group) and column.
 Deck_Card :: struct {
@@ -68,6 +76,13 @@ deck: Deck
 
 // Its button shows in the top bar (fleet_pill_decide: it gives way in a bar too narrow for it).
 deck_btn_shown := true
+
+// The deck with nothing open: what to do (as the empty centre says it).
+DECK_EMPTY_TITLE :: "No sessions open"
+DECK_EMPTY_TEXT :: "Start a chat or open a project. Sessions on your other machines show here too while they are online."
+DECK_EMPTY_TOP :: 72 // above its icon
+DECK_EMPTY_ICON :: 2 * ICON_SIZE
+DECK_EMPTY_TEXT_W :: 340 // its words wrap at this width
 
 // The session it was opened from (the core's state.shown_before: Show_No_Session), while open.
 deck_under :: proc() -> u64 {
@@ -116,14 +131,16 @@ deck_sync :: proc() {
 	deck.under = under
 }
 
-// The columns that fit in w px (at least one): each card at least DECK_CARD_MIN_W wide.
+// The columns that fit in w px (at least one): DECK_CARD_W cards, DECK_GAP apart.
 deck_columns :: proc(w: f32) -> int {
-	return max(1, int(math.floor((w + px(DECK_GAP)) / px(DECK_CARD_MIN_W + DECK_GAP))))
+	return max(1, int(math.floor((w + px(DECK_GAP)) / px(DECK_CARD_W + DECK_GAP))))
 }
 
-// A card's width for cols columns in w px (whole px: every card the same).
+// A card's width for cols columns in w px: DECK_CARD_W, never stretched to fill; one column: up
+// to DECK_CARD_W_ONE, and never wider than w (whole px: every card the same).
 deck_card_w :: proc(w: f32, cols: int) -> f32 {
-	return math.floor((w - f32(cols - 1) * px(DECK_GAP)) / f32(cols))
+	if cols <= 1 do return math.floor(min(w, px(DECK_CARD_W_ONE)))
+	return px(DECK_CARD_W)
 }
 
 @(private = "file")
@@ -132,15 +149,31 @@ line_h :: proc(weight: u16) -> f32 {
 	return text_line_height(kind)
 }
 
-// The title line's height: a line of body text, or the "…" button where it is taller.
+// The title line's height: a line of body text, or the Peek and "…" buttons where they are taller.
 @(private = "file")
 title_h :: proc() -> f32 {return max(line_h(WEIGHT_REGULAR), px(ROW_BUTTON))}
 
-// Every card's height: its padding, the title line, the machine and harness, DECK_BODY_LINES of
-// message and the footer, with their gaps; the same whatever a card holds.
-deck_card_h :: proc() -> f32 {
-	small := line_h(FONT_UI_SMALL)
-	return px(2 * DECK_CARD_PAD + SP_1 + 2 * SP_2) + title_h() + small + f32(DECK_BODY_LINES) * line_h(WEIGHT_REGULAR) + small
+// The meta line's height: a small line, or the harness's glyph where it is taller.
+@(private = "file")
+meta_h :: proc() -> f32 {return max(line_h(FONT_UI_SMALL), px(HARNESS_ICON_SIZE))}
+
+// The lines of message a card of group g shows: needs you DECK_BODY_LINES, working and finished
+// one, idle none.
+deck_body_lines :: proc(g: core.Attention_Group) -> int {
+	switch g {
+	case .Needs_You:          return DECK_BODY_LINES
+	case .Finished, .Working: return 1
+	case .Idle:               return 0
+	}
+	return 0
+}
+
+// A card's height in group g: its padding, the title line, its message's lines (their room kept)
+// and the meta line, SP_1 apart. It depends on the group only, so nothing moves while a status holds.
+deck_card_h :: proc(g: core.Attention_Group) -> f32 {
+	h := px(2 * DECK_CARD_PAD_Y + SP_1) + title_h() + meta_h()
+	if n := deck_body_lines(g); n > 0 do h += px(SP_1) + f32(n) * line_h(WEIGHT_REGULAR)
+	return h
 }
 
 // The cards in order (temp allocator): the Attention view's order, every session the fleet counts.
@@ -177,24 +210,31 @@ deck_body :: proc(v: core.Tab_Status_View) -> string {
 	return deck_words(v)
 }
 
-// "this Mac · Claude Code": the machine while other machines are in play, then the harness.
-deck_meta :: proc(s: ^core.Open_Session) -> string {
-	harness := core.HARNESSES[s.agent == .Claude ? core.Harness.Claude : core.Harness.Pi].name
-	if !(state.settings.remote_machines && len(state.machines) > 0) do return harness
-	return fmt.tprintf("%s · %s", s.machine == 0 ? "this Mac" : core.machine_name(s.machine), harness)
+// The machine a card names in its chip while other machines are in play ("this Mac" or its name),
+// else "".
+deck_machine :: proc(s: ^core.Open_Session) -> string {
+	if !(state.settings.remote_machines && len(state.machines) > 0) do return ""
+	return s.machine == 0 ? "this Mac" : core.machine_name(s.machine)
 }
 
-// "3 tabs · 1 waiting · 1 working": its tabs, then what the others (not the card's own) are doing.
-deck_footer :: proc(s: ^core.Open_Session, from: ^core.Tab) -> string {
-	n := [5]int{}
-	for &t in s.tabs do if &t != from do n[core.tab_tier(t)] += 1
-	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "%d %s", len(s.tabs), len(s.tabs) == 1 ? "tab" : "tabs")
-	if n[core.NEED_WAITING] > 0 do fmt.sbprintf(&b, " · %d waiting", n[core.NEED_WAITING])
-	if n[core.NEED_ERROR] > 0 do fmt.sbprintf(&b, " · %d %s", n[core.NEED_ERROR], n[core.NEED_ERROR] == 1 ? "error" : "errors")
-	if n[core.NEED_UNSEEN] > 0 do fmt.sbprintf(&b, " · %d finished", n[core.NEED_UNSEEN])
-	if n[core.NEED_WORKING] > 0 do fmt.sbprintf(&b, " · %d working", n[core.NEED_WORKING])
-	return strings.to_string(b)
+// What the session's other tabs (not the card's own) are doing: a dot's colour for each status
+// among them (waiting, error, finished, working), in that order; none: one quiet dot. Only with
+// more than one tab (n 0: nothing to say).
+deck_others :: proc(s: ^core.Open_Session, from: ^core.Tab) -> (dots: [4]core.Rgba, n: int) {
+	if len(s.tabs) <= 1 do return
+	th := theme()
+	tiers := [5]int{}
+	for &t in s.tabs do if &t != from do tiers[core.tab_tier(t)] += 1
+	cols := [4]core.Rgba{th.waiting, th.error, status_color(.Unseen), th.running}
+	for need, i in ([4]int{core.NEED_WAITING, core.NEED_ERROR, core.NEED_UNSEEN, core.NEED_WORKING}) do if tiers[need] > 0 {
+		dots[n] = cols[i]
+		n += 1
+	}
+	if n == 0 {
+		dots[0] = with_alpha(th.text_muted, 0.45)
+		n = 1
+	}
+	return
 }
 
 // "8 sessions · 2 need you · 1 finished · 3 working".
@@ -202,6 +242,21 @@ deck_summary :: proc(n: int) -> string {
 	head := fmt.tprintf("%d %s", n, n == 1 ? "session" : "sessions")
 	if words := fleet_words(fleet, " · "); words != "" do return fmt.tprintf("%s · %s", head, words)
 	return head
+}
+
+// A card's fill and its hairline edge (alpha 0: none) by its group: needs you tinted with its
+// status colour (err: the error's red, else waiting's), idle quieter, the others bg_elevated.
+deck_fill :: proc(g: core.Attention_Group, err: bool) -> (fill, edge: core.Rgba) {
+	th := theme()
+	#partial switch g {
+	case .Needs_You:
+		c := err ? th.error : th.waiting
+		c.a = 255
+		return mix(th.bg_elevated, c, core.theme_is_light() ? DECK_TINT_LIGHT : DECK_TINT_DARK), with_alpha(c, DECK_EDGE_ALPHA)
+	case .Idle:
+		return mix(th.bg_elevated, th.bg_app, DECK_IDLE_FILL), {}
+	}
+	return th.bg_elevated, {}
 }
 
 // ---- layout ----
@@ -222,21 +277,18 @@ deck_layout :: proc() {
 	cols := deck_columns(inner)
 	deck.cols = cols
 	cw := deck_card_w(inner, cols)
-	ch := deck_card_h()
 	if clay.UI(clay.ID("deck"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom}, backgroundColor = cc(th.bg_app)}) {
-		// the summary line; with no session open, the empty centre's buttons under it
-		if clay.UI(clay.ID("deckhead"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(DECK_PAD), pu(DECK_PAD), pu(DECK_PAD), pu(SP_2)}, childGap = pu(SP_3), layoutDirection = .TopToBottom}}) {
-			if len(rows) > 0 do clay.TextDynamic(clip(deck_summary(len(rows)), inner), txt(th.text_secondary))
-			if len(rows) == 0 {
-				lines, _ := wrap_clip("Nothing running. Start a chat or open a project.", inner, 3)
-				cfg := txt(th.text_secondary)
-				cfg.wrapMode = .Newlines
-				clay.TextDynamic(lines, cfg)
-			}
-			if deck_under() == 0 || len(rows) == 0 do deck_buttons(inner) // opened with no session shown
+		if len(rows) == 0 {
+			deck_empty(inner)
+			return
 		}
-		if len(rows) == 0 do return
+		// the summary line; opened with no session shown, the empty centre's buttons under it
+		if clay.UI(clay.ID("deckhead"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(DECK_PAD), pu(DECK_PAD), pu(DECK_PAD), pu(SP_2)}, childGap = pu(SP_3), layoutDirection = .TopToBottom}}) {
+			clay.TextDynamic(clip(deck_summary(len(rows)), inner), txt(th.text_secondary))
+			if deck_under() == 0 do deck_buttons(inner)
+		}
 		if clay.UI(clay.ID("deckscroll"))({
+			// SP_1 above the first row: room for the keyboard's ring (DECK_RING_GAP + DECK_RING)
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, padding = {pu(DECK_PAD), pu(DECK_PAD), pu(SP_1), pu(DECK_PAD)}, childGap = pu(DECK_GAP), layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = clay.GetScrollOffset()},
 		}) {
@@ -246,7 +298,8 @@ deck_layout :: proc() {
 				g := rows[at].group
 				end := at
 				for end < len(rows) && rows[end].group == g do end += 1
-				deck_label(g, end - at, at == 0)
+				deck_label(g, end - at, at == 0, inner)
+				ch := deck_card_h(g)
 				for start := at; start < end; start += cols {
 					if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, childGap = pu(DECK_GAP)}}) {
 						for k in start ..< min(start + cols, end) {
@@ -259,6 +312,22 @@ deck_layout :: proc() {
 				at = end
 			}
 		}
+	}
+}
+
+// Nothing open: the deck's icon, what to do, and the empty centre's buttons, centred.
+@(private = "file")
+deck_empty :: proc(room: f32) {
+	th := theme()
+	if clay.UI(clay.ID("deckempty"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(DECK_PAD), pu(DECK_PAD), pu(DECK_EMPTY_TOP), pu(DECK_PAD)}, childGap = pu(SP_3), childAlignment = {x = .Center}, layoutDirection = .TopToBottom}}) {
+		icon(.Deck, th.text_muted, DECK_EMPTY_ICON)
+		clay.TextDynamic(clip(DECK_EMPTY_TITLE, room, WEIGHT_HEADER), txt(th.text, WEIGHT_HEADER))
+		lines, _ := wrap_clip(DECK_EMPTY_TEXT, min(room, px(DECK_EMPTY_TEXT_W)), 4)
+		cfg := txt(th.text_secondary)
+		cfg.wrapMode = .Newlines
+		cfg.textAlignment = .Center
+		clay.TextDynamic(lines, cfg)
+		deck_buttons(room)
 	}
 }
 
@@ -278,49 +347,67 @@ deck_buttons :: proc(room: f32) {
 	}
 }
 
-// A group's label on a row of its own: "NEEDS YOU  2" in the Attention view's headers' style.
+// A group's label on a row of its own: "NEEDS YOU  2" in the Attention view's headers' style, then
+// a hairline across the rest of the row.
 @(private = "file")
-deck_label :: proc(g: core.Attention_Group, n: int, first: bool) {
+deck_label :: proc(g: core.Attention_Group, n: int, first: bool, room: f32) {
 	th := theme()
 	// a little more room above a group than between its rows (none above the first)
 	top := first ? 0 : pu(SP_2)
-	if clay.UI(clay.ID("decklabel", u32(g)))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {0, 0, top, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+	if clay.UI(clay.ID("decklabel", u32(g)))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {0, 0, top, 0}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 		clay.TextDynamic(ATTENTION_LABELS[g], txt(th.text_muted, FONT_UI_SMALL | WEIGHT_HEADER))
 		clay.TextDynamic(fmt.tprint(n), txt(g == .Needs_You ? th.waiting : th.text_muted, FONT_UI_SMALL))
+		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(core.BORDER_W))}}, backgroundColor = cc(th.border)}) {}
 	}
 }
 
-// One card, w by h px (every card's size): see the top of this file.
+// One card, w by h px (its group's height): see the top of this file.
 @(private = "file")
 deck_card :: proc(r: core.Attention_Row, i: int, w, h: f32) {
 	th := theme()
 	s := r.session
+	g := r.group
 	id := clay.ID("deckcard", u32(i))
 	more_id := clay.ID("deckmore", u32(i))
 	v, from := card_view(r)
 	remote := s.machine != 0
+	need := g == .Needs_You
+	err := need && r.tier == core.NEED_ERROR
 	current := s.id == deck_under() // the session it was opened from
+	can_peek := peek_tab_of(s) != nil // the look-only peek (ui_peek.odin): this Mac's and an online machine's
 	more_hover := !remote && ui_hover == Hit(Hit_Deck_More(s.id))
-	hovered := ui_hover == Hit(Hit_Deck_Card(s.id)) || more_hover
+	peek_hover := can_peek && ui_hover == Hit(Hit_Peek_Row(s.id))
+	hovered := ui_hover == Hit(Hit_Deck_Card(s.id)) || more_hover || peek_hover
 	key_sel := s.id == deck.sel
-	// hovered or the keyboard's: lifted by the hover tint; a status turning: the row's flash
-	lift := fade(id, 0, hovered || key_sel ? 1 : 0, DUR_HOVER)
+	// its group's fill; hovered: lifted by the hover tint; a status turning: the row's flash
+	fill, edge := deck_fill(g, err)
+	if current do edge = th.accent
+	lift := fade(id, 0, hovered ? 1 : 0, DUR_HOVER)
 	lit := status_flash(id, s.id ~ SALT_FLASH_ROW, v, s.machine)
-	bg := flash_wash(cc(mix(th.bg_elevated, {th.hover.r, th.hover.g, th.hover.b, 255}, lift * f32(th.hover.a) / 255)), v.dot, lit)
-	edge := current ? th.accent : (key_sel ? th.text_muted : th.border)
-	pad := px(DECK_CARD_PAD)
-	room := w - 2 * pad
+	bg := flash_wash(cc(mix(fill, {th.hover.r, th.hover.g, th.hover.b, 255}, lift * f32(th.hover.a) / 255)), v.dot, lit)
+	room := w - 2 * px(DECK_CARD_PAD)
+	small := FONT_UI_SMALL
 	if clay.UI(id)({
-		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(h)}, padding = clay.PaddingAll(pu(DECK_CARD_PAD)), layoutDirection = .TopToBottom},
+		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(h)}, padding = {pu(DECK_CARD_PAD), pu(DECK_CARD_PAD), pu(DECK_CARD_PAD_Y), pu(DECK_CARD_PAD_Y)}, childGap = pu(SP_1), layoutDirection = .TopToBottom},
 		backgroundColor = bg,
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
-		border = {color = cc(edge), width = clay.BorderOutside(pu(core.BORDER_W))}, // Outside: BorderAll also rules a line between every child
+		border = {color = cc(edge), width = edge.a > 0 ? clay.BorderOutside(pu(core.BORDER_W)) : {}}, // Outside: BorderAll also rules a line between every child
 	}) {
-		small := FONT_UI_SMALL
-		// mark, [place ·] title, then its age, or (hovered) its "…" in the same box
+		// the keyboard's card: a ring outside it (in the gap around it; clipped with the grid)
+		if key_sel {
+			o := px(DECK_RING + DECK_RING_GAP)
+			if clay.UI(clay.ID("deckring", u32(i)))({
+				layout = {sizing = {clay.SizingFixed(w + 2 * o), clay.SizingFixed(h + 2 * o)}},
+				floating = {attachTo = .Parent, offset = {-o, -o}, pointerCaptureMode = .Passthrough, clipTo = .AttachedParent},
+				cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD) + o),
+				border = {color = cc(th.accent), width = clay.BorderOutside(pu(DECK_RING))},
+			}) {}
+		}
+		// mark, [place ·] title, then how long it has been so, or (hovered) Peek and "…" in its place
 		age := status_age(v)
 		if age == "" && r.tier == core.NEED_NONE && !remote do age = core.open_session_age(s)
-		right := max(text_w("00m", small), text_w("now", small), px(ROW_BUTTON))
+		// the right box: as wide as both buttons whatever it shows, so the title never moves
+		right := max(text_w("00m", small), 2 * px(ROW_BUTTON) + px(SP_1))
 		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(title_h())}, childGap = pu(SP_2), childAlignment = {y = .Center}}}) {
 			status_mark_el(v, lit)
 			ic, place := core.session_place(s)
@@ -335,35 +422,73 @@ deck_card :: proc(r: core.Attention_Row, i: int, w, h: f32) {
 				clay.TextDynamic(clip(lead, pw), txt(th.text_muted))
 				left -= pw
 			}
-			clay.TextDynamic(clip(title, left, WEIGHT_HEADER), txt(th.text, WEIGHT_HEADER))
+			if g == .Idle do clay.TextDynamic(clip(title, left), txt(th.text_secondary))
+			else do clay.TextDynamic(clip(title, left, WEIGHT_HEADER), txt(th.text, WEIGHT_HEADER))
 			spacer()
-			if clay.UI()({layout = {sizing = {clay.SizingFixed(right), clay.SizingFit()}, childAlignment = {x = .Right, y = .Center}}}) {
-				if hovered && !remote {
-					mbg, _ := overlay(more_id, false, more_hover)
-					if clay.UI(more_id)({
-						layout = {sizing = {clay.SizingFixed(px(ROW_BUTTON)), clay.SizingFixed(px(ROW_BUTTON))}, childAlignment = {x = .Center, y = .Center}},
-						backgroundColor = mbg,
-						cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-					}) {
-						icon(.More, more_hover ? th.text : th.text_muted, ICON_SIZE_SM)
+			if clay.UI()({layout = {sizing = {clay.SizingFixed(right), clay.SizingFit()}, childGap = pu(SP_1), childAlignment = {x = .Right, y = .Center}}}) {
+				if hovered && (can_peek || !remote) {
+					if can_peek do peek_row_button(clay.ID("deckpeek", u32(i)), true, peek_hover)
+					if !remote {
+						mbg, _ := overlay(more_id, false, more_hover)
+						if clay.UI(more_id)({
+							layout = {sizing = {clay.SizingFixed(px(ROW_BUTTON)), clay.SizingFixed(px(ROW_BUTTON))}, childAlignment = {x = .Center, y = .Center}},
+							backgroundColor = mbg,
+							cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
+						}) {
+							icon(.More, more_hover ? th.text : th.text_muted, ICON_SIZE_SM)
+						}
 					}
 				} else if age != "" {
-					clay.TextDynamic(clip(age, right, small), txt(th.text_muted, small))
+					age_col := err ? th.error : (need ? th.waiting : th.text_muted)
+					clay.TextDynamic(clip(age, right, small), txt(age_col, small))
 				}
 			}
 		}
-		gap(SP_1)
-		clay.TextDynamic(clip(deck_meta(s), room, small), txt(th.text_muted, small))
-		gap(SP_2)
-		// the message, up to DECK_BODY_LINES lines (its room kept, so every card is the same)
-		if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(f32(DECK_BODY_LINES) * line_h(WEIGHT_REGULAR))}}}) {
-			lines, _ := wrap_clip(deck_body(v), room, DECK_BODY_LINES)
-			cfg := txt(th.text_secondary)
-			cfg.wrapMode = .Newlines
-			clay.TextDynamic(lines, cfg)
+		// the message: its group's lines (their room kept); body text while it needs you
+		if n := deck_body_lines(g); n > 0 {
+			if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(f32(n) * line_h(WEIGHT_REGULAR))}}}) {
+				lines, _ := wrap_clip(deck_body(v), room, n)
+				cfg := txt(need ? th.text : th.text_secondary)
+				cfg.wrapMode = .Newlines
+				clay.TextDynamic(lines, cfg)
+			}
 		}
-		gap(SP_2)
-		clay.TextDynamic(clip(deck_footer(s, from), room, small), txt(th.text_muted, small))
+		deck_meta_line(s, from, room)
+	}
+}
+
+// A card's last line: the harness's glyph and name, the machine's chip (while other machines are
+// in play), then (more than one tab) what the others do as dots and "N tabs".
+@(private = "file")
+deck_meta_line :: proc(s: ^core.Open_Session, from: ^core.Tab, room: f32) {
+	th := theme()
+	small := FONT_UI_SMALL
+	harness := core.HARNESSES[core.open_session_harness(s)]
+	mach := deck_machine(s)
+	dots, ndots := deck_others(s, from)
+	tabs := ndots > 0 ? fmt.tprintf("%d tabs", len(s.tabs)) : ""
+	// the parts: glyph, name, [chip,] spacer, [dots and tabs]
+	parts := 3 + (mach != "" ? 1 : 0) + (ndots > 0 ? 1 : 0)
+	tabs_w := ndots > 0 ? f32(ndots) * px(DOT + SP_1) + text_w(tabs, small) : 0
+	left := room - px(HARNESS_ICON_SIZE) - tabs_w - f32(parts - 1) * px(GAP_INLINE)
+	chip_w: f32
+	if mach != "" do chip_w = max(0, min(text_w(mach, small) + px(2 * SP_1), max(left * 0.5, left - text_w(harness.name, small))))
+	name_w := max(0, left - chip_w)
+	if clay.UI()({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(meta_h())}, childGap = pu(GAP_INLINE), childAlignment = {y = .Center}}}) {
+		icon(harness.glyph, th.text_muted, HARNESS_ICON_SIZE)
+		clay.TextDynamic(clip(harness.name, name_w, small), txt(th.text_muted, small))
+		if mach != "" {
+			if clay.UI()({layout = {sizing = {clay.SizingFixed(chip_w), clay.SizingFit()}, padding = {pu(SP_1), pu(SP_1), 0, 0}}, backgroundColor = cc(th.selected), cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM))}) {
+				clay.TextDynamic(clip(mach, chip_w - px(2 * SP_1), small), txt(th.text_secondary, small))
+			}
+		}
+		spacer()
+		if ndots > 0 {
+			if clay.UI()({layout = {childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
+				for c in dots[:ndots] do dot(c)
+				clay.TextDynamic(tabs, txt(th.text_muted, small))
+			}
+		}
 	}
 }
 
@@ -391,6 +516,7 @@ deck_scroll_to :: proc() {
 deck_hit :: proc() -> Hit {
 	if !deck_shown() do return nil
 	for c, i in deck.cards {
+		if clay.PointerOver(clay.ID("deckpeek", u32(i))) && peek_tab_of(find_session(c.sid)) != nil do return Hit_Peek_Row(c.sid) // its Peek (main.odin: peek_open_session)
 		if clay.PointerOver(clay.ID("deckmore", u32(i))) do return Hit_Deck_More(c.sid)
 		if clay.PointerOver(clay.ID("deckcard", u32(i))) do return Hit_Deck_Card(c.sid)
 	}

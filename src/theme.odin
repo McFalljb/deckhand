@@ -154,10 +154,19 @@ CODE_PAD :: SP_2 // inside code blocks
 BADGE_H :: 16 // unread count on the top bar button
 // The Deck view (ui_deck.odin): the centre as a grid of session cards.
 DECK_PAD :: SP_4 // around the grid
-DECK_CARD_MIN_W :: 260 // as many columns as fit at this width or wider
+DECK_CARD_W :: 288 // every card's width: as many columns as fit, never stretched
+DECK_CARD_W_ONE :: 360 // one column only: up to this wide (the centre's width, less its padding)
 DECK_GAP :: SP_3 // between cards, across and down
-DECK_CARD_PAD :: SP_3 // inside a card
-DECK_BODY_LINES :: 3 // the agent's message: at most this many lines (every card keeps their room)
+DECK_CARD_PAD :: SP_3 // inside a card, left and right
+DECK_CARD_PAD_Y :: 10 // and above and below
+DECK_BODY_LINES :: 2 // the agent's message on a card that needs you (working and finished: one; idle: none)
+DECK_RING :: 2 // the keyboard's card: an accent ring this wide,
+DECK_RING_GAP :: 2 // this far outside the card (inside the grid's top padding: SP_1)
+// Needs you (and errors): the card's fill tinted with its status colour, with a hairline of it
+DECK_TINT_DARK :: 0.09
+DECK_TINT_LIGHT :: 0.07
+DECK_EDGE_ALPHA :: 0.30
+DECK_IDLE_FILL :: 0.55 // an idle card's fill: bg_elevated this far towards bg_app (quieter)
 
 // ---- motion ----
 DUR_HOVER :: 120 * time.Millisecond // hover fades, ease-out

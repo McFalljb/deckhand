@@ -231,7 +231,7 @@ menu_open :: proc(target: Menu_Target, at: [2]f32) {
 	handoff_drawn_clear() // what the last menu drew (ui_handoff.odin)
 	menu.target = target
 	if s, ok := target.(Menu_Session); ok do menu.target = Menu_Session{s.project_id, strings.clone(s.pi_session_id), strings.clone(s.info), s.session}
-	if f, ok := target.(Menu_Files); ok do menu.target = Menu_Files{strings.clone(f.path)}
+	if f, ok := target.(Menu_Files); ok do menu.target = Menu_Files{strings.clone(f.path), f.page}
 	if w, ok := target.(Menu_Worktree); ok do menu.target = Menu_Worktree{strings.clone(w.path), strings.clone(w.branch)}
 	if j, ok := target.(Menu_Job); ok do menu.target = Menu_Job{strings.clone(j.id)}
 	if m, ok := target.(Menu_Browser); ok {
@@ -381,7 +381,7 @@ menu_items :: proc() -> []core.Menu_Item {
 	case Menu_Editor:
 		editor_menu_items(u64(t), &items)
 	case Menu_Files:
-		files_menu_items(t.path, &items)
+		files_menu_items(t.path, &items, t.page)
 	case Menu_Worktree:
 		wt_menu_items(t, &items)
 	case Menu_Job:
@@ -455,10 +455,26 @@ menu_run :: proc(i: int) {
 			toast_show(fmt.tprintf("Copied: %s", it.copy))
 		}
 	} else if it.files != .None {
-		if t, ok := target.(Menu_Files); ok && files_step(strings.clone(t.path, context.temp_allocator), it.files) do toast_show("Path copied")
+		if t, ok := target.(Menu_Files); ok {
+			p := strings.clone(t.path, context.temp_allocator)
+			if t.page ? settings_page_file_step(p, it.files) : files_step(p, it.files) do toast_show("Path copied")
+		}
 	} else if it.cmd != nil {
 		// a tab's menu: Close tab is the user's own close (⇧⌘T reopens it: closed_tabs.odin)
 		if _, on_tab := target.(Menu_Tab); on_tab do if ct, is := it.cmd.(core.Close_Tab); is do closed_tab_record(ct.tab_id)
+		// a Settings page row's Open: its session shown again (the page goes), as the row's click
+		if f, ok := target.(Menu_Files); ok && f.page {
+			s := settings_page_session()
+			#partial switch _ in it.cmd {
+			case core.Open_File, core.Markdown_Open:
+				if s == 0 {
+					toast_show("Open a session on this Mac first: settings files open in its editor tabs")
+					menu_close()
+					return
+				}
+				ui_do(core.Focus_Session{session = s})
+			}
+		}
 		ui_do_menu(it.cmd, it.label)
 	} else if mm, ok := target.(Menu_Machine); ok && it.label == "Open web page…" {
 		palette_open_pages(u64(mm)) // the palette asks for the port

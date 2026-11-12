@@ -924,6 +924,7 @@ event :: proc(e: ^sapp.Event) {
 			if b, ok := hit.(Hit_Button); ok && Button(b) == .New_Tab do button_click(.New_Menu) // "+": its menu
 			else if tb, ok1 := hit.(Hit_Tab); ok1 do tab_context(u64(tb), app.pointer) // ui_panes.odin
 			else if j, ok2 := hit.(Hit_Jobs); ok2 do jobs_context(j, app.pointer)
+			else if k, ok3 := hit.(Hit_Spage); ok3 do settings_page_context(int(k), app.pointer) // a file row's menu
 			else do sidebar_context(hit, app.pointer)
 			return
 		}

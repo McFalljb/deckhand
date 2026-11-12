@@ -230,3 +230,56 @@ settings_page_layout_audit :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, problems == 0, "%d layout problems", problems)
 }
+
+// The old Settings tab's row menu, on the page's file rows (right click): pi's own config files have
+// no Rename or Trash; a prompt has New file…, Rename… and Move to Trash…; New file… opens the page's
+// field, and Enter makes the file and opens it in the session the page was opened from.
+@(test)
+settings_page_file_menu :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sp_test_setup()
+	defer sp_test_setup()
+	defer menu_close()
+	labels :: proc() -> string {
+		b := strings.builder_make(context.temp_allocator)
+		for it in menu_items() do if !it.sep do fmt.sbprintf(&b, "%s|", it.label)
+		return strings.to_string(b)
+	}
+	settings_page_open(.Agents)
+	core.inbox_drain()
+	_ = ui_layout(1600, 900)
+	k := -1
+	for it, i in spage.items do if it.do_ == .Open && strings.has_suffix(it.path, "agent/settings.json") do k = i
+	if !testing.expect(t, k >= 0, "settings.json listed") do return
+	settings_page_context(k, {10, 10})
+	testing.expect_value(t, labels(), "Open|Open in preview|Reveal in Finder|Copy path|")
+	menu_close()
+	// a prompt (in its folder's search)
+	tf_set(&spage.search, "fix")
+	_ = ui_layout(1600, 900)
+	k = -1
+	for it, i in spage.items do if it.do_ == .Open && strings.has_suffix(it.path, "prompts/fix.md") do k = i
+	if !testing.expect(t, k >= 0, "fix.md found") do return
+	settings_page_context(k, {10, 10})
+	testing.expect_value(t, labels(), "Open|Open in preview|Open Markdown preview|New file…|New folder…|Rename…|Move to Trash…|Reveal in Finder|Copy path|")
+	n := -1
+	for it, i in menu_items() do if it.label == "New file…" do n = i
+	menu_run(n)
+	testing.expect(t, !menu.open, "the menu closed")
+	testing.expect_value(t, spage.edit.kind, Sp_Edit_Kind.New_File)
+	testing.expect(t, strings.has_suffix(spage.edit.target, ".pi/agent/prompts"), "in prompts/")
+	_ = ui_layout(1600, 900)
+	testing.expect(t, clay.GetElementData(clay.ID("sp_edit_box")).found, "its field shows")
+	f, _, _ := focused_field()
+	testing.expect(t, f == &spage.edit.field, "the field has the keyboard")
+	tf_set(&spage.edit.field, "new.md")
+	enter := sp_key(.ENTER)
+	settings_page_key(&enter)
+	core.inbox_drain()
+	testing.expect(t, os.exists(fmt.tprintf("%s/.pi/agent/prompts/new.md", os.get_env("HOME", context.temp_allocator))), "made")
+	_ = ui_layout(1600, 900)
+	testing.expect(t, !settings_page_shown(), "opened: the session shows")
+	s := core.find_session(10)
+	testing.expect(t, s != nil && len(s.tabs) == 2 && s.tabs[1].title == "new.md", "in the session it was opened from")
+}

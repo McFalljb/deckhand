@@ -111,6 +111,7 @@ LEFT_TAB_LABELS := [core.Left_Tab]string {
 
 Menu_Files :: struct {
 	path: string, // owned (menu_close frees it)
+	page: bool, // a Settings page row's (settings_page_context): the old Settings tab's items
 }
 
 Files_Edit_Mode :: enum u8 {
@@ -1009,36 +1010,40 @@ files_menu_at :: proc(path: string, at: [2]f32) {
 // project's .pi/ (settings_row_editable), never pi's own config files.
 files_may_change :: proc(path: string) -> bool {return !on_settings() || core.settings_row_editable(path)}
 
-// The Settings tab's row menu: Open, New file/folder in prompts/ and
-// skills/, Rename and Move to Trash where files_may_change, Reveal, Copy path.
+// A Settings page file row's menu (the old Settings tab's): Open, New file/folder in prompts/ and
+// skills/, Rename and Move to Trash only inside prompts/, skills/, extensions/ and a project's .pi/
+// (settings_row_editable: never pi's own config files), Reveal, Copy path. Opens go to the session
+// the page was opened from (settings_page_session).
 @(private = "file")
 settings_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item) {
+	files_session :: settings_page_session
 	kind := core.path_kind(path)
 	is_dir := kind == .Dir
 	sep :: proc(items: ^[dynamic]core.Menu_Item) {append(items, core.Menu_Item{sep = true})}
 	if kind == .File {
-		append(items, core.Menu_Item{label = "Open", keys = "↩", cmd = core.Open_File{path = path, session = files_session()}})
-		append(items, core.Menu_Item{label = "Open in preview", keys = "Space", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
+		append(items, core.Menu_Item{label = "Open", cmd = core.Open_File{path = path, session = files_session()}})
+		append(items, core.Menu_Item{label = "Open in preview", cmd = core.Open_File{path = path, session = files_session(), preview = true}})
 		if core.md_is_markdown_path(path) do append(items, core.Menu_Item{label = "Open Markdown preview", cmd = core.Markdown_Open{path = path, session = files_session()}})
 		sep(items)
 	}
-	if core.settings_new_ok(is_dir ? path : filepath.dir(path)) {
+	if kind != .Missing && core.settings_new_ok(is_dir ? path : filepath.dir(path)) {
 		append(items, core.Menu_Item{label = "New file…", files = .New_File})
 		append(items, core.Menu_Item{label = "New folder…", files = .New_Folder})
 		sep(items)
 	}
-	if files_may_change(path) {
-		append(items, core.Menu_Item{label = "Rename…", keys = "F2", files = .Rename})
-		append(items, core.Menu_Item{label = "Move to Trash…", keys = "⌘⌫", cmd = core.Delete_Path{path = path}})
+	if kind != .Missing && core.settings_row_editable(path) {
+		append(items, core.Menu_Item{label = "Rename…", files = .Rename})
+		append(items, core.Menu_Item{label = "Move to Trash…", cmd = core.Delete_Path{path = path}})
 		sep(items)
 	}
 	if kind != .Missing do append(items, core.Menu_Item{label = "Reveal in Finder", cmd = core.Reveal_In_Finder{path = path}})
 	append(items, core.Menu_Item{label = "Copy path", files = .Copy_Path})
 }
 
-// The row menu's items for path (ui_sidebar.odin's menu draws and runs them).
-files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item) {
-	if on_settings() {
+// The row menu's items for path (ui_sidebar.odin's menu draws and runs them); page: a Settings
+// page row's.
+files_menu_items :: proc(path: string, items: ^[dynamic]core.Menu_Item, page := false) {
+	if page {
 		settings_menu_items(path, items)
 		return
 	}

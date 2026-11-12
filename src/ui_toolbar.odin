@@ -34,6 +34,8 @@ Button :: enum {
 	Empty_New_Chat, // the centre's empty state
 	Empty_Close, // the centre when the session is gone
 	Empty_Add_Project, // the centre's empty state: the Projects header's "+"
+	Fleet, // the fleet pill: what needs you and what works, on every machine (ui_fleet.odin)
+	Empty_Next, // the centre's empty state while something needs you: Go to next (⌥⌘A)
 }
 
 Button_Info :: struct {
@@ -54,6 +56,8 @@ BUTTONS := [Button]Button_Info {
 	.Empty_New_Chat = {"emptynew", "new_chat", .None},
 	.Empty_Close    = {"emptyclose", "close_session", .None},
 	.Empty_Add_Project = {"emptyadd", "add_project", .None},
+	.Fleet          = {"fleetpill", "next_needing_you", .None}, // drawn by fleet_pill; its tooltip in words (fleet_tip)
+	.Empty_Next     = {"emptynext", "next_needing_you", .None},
 }
 
 NEW_MENU_TIP :: "New tab, chat or session"
@@ -86,7 +90,9 @@ button_click :: proc(b: Button) {
 		new_session_ui(c.id, at = [2]f32{bb.x, bb.y + bb.height + px(SP_1)})
 	case .Empty_Add_Project:
 		add_project_dialog() // as the Projects header's "+" (ui_sidebar.odin)
-	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close:
+	case .Fleet:
+		fleet_click()
+	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close, .Empty_Next:
 		action_run(BUTTONS[b].action)
 	}
 }
@@ -185,7 +191,7 @@ search_wide :: proc(cs: ^core.Open_Session, bar_w: f32) -> bool {
 // Top bar buttons under the pointer (enabled ones only).
 toolbar_hit :: proc() -> Hit {
 	for b in Button {
-		if b == .Empty_New_Chat || b == .Empty_Close || b == .Empty_Add_Project do continue
+		if b == .Empty_New_Chat || b == .Empty_Close || b == .Empty_Add_Project || b == .Empty_Next do continue
 		if clay.PointerOver(clay.ID(BUTTONS[b].element)) && button_enabled(b) do return Hit_Button(b)
 	}
 	return nil
@@ -193,10 +199,10 @@ toolbar_hit :: proc() -> Hit {
 
 // The centre's empty-state buttons.
 empty_hit :: proc() -> Hit {
-	for b in ([]Button{.Empty_New_Chat, .Empty_Close, .Empty_Add_Project}) {
+	for b in ([]Button{.Empty_New_Chat, .Empty_Close, .Empty_Add_Project, .Empty_Next}) {
 		if clay.PointerOver(clay.ID(BUTTONS[b].element)) && button_enabled(b) do return Hit_Button(b)
 	}
-	return nil
+	return fleet_row_hit() // its rows (ui_fleet.odin)
 }
 
 // ---- settings popover ----
@@ -935,6 +941,7 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 	#partial switch x in h {
 	case Hit_Button:
 		if Button(x) == .New_Menu do return NEW_MENU_TIP, ""
+		if Button(x) == .Fleet do return fleet_tip()
 		return act(BUTTONS[Button(x)].action)
 	case Hit_Agent:
 		return drawer_tip(x)
@@ -1017,6 +1024,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 			if ts != nil && ts.machine != 0 do tip = tip != "" ? fmt.tprintf("On %s · %s", core.machine_name(ts.machine), tip) : fmt.tprintf("On %s", core.machine_name(ts.machine))
 			return tip, ""
 		}
+	case Hit_Fleet_Row:
+		return fleet_row_tip(u64(x))
 	case Hit_Open_Row:
 		s := core.find_session(u64(x))
 		if tip := dead_tab_hover_tip(core.session_pi_tab(s)); tip != "" do return tip, ""

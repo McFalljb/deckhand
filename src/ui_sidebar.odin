@@ -1738,8 +1738,9 @@ wrapped_note :: proc(text: string, text_w_max: f32) {
 	}
 }
 
-// A machine's header: its dot, its name, its status (or "this Mac"), a count (its open sessions)
-// and a fold chevron (shown while folded or hovered: a click folds it, as Open, Projects and Chats
+// A machine's header: its dot, its name, its status (or "this Mac"), its mini-counts (what needs
+// you and what works there, as the top bar's pill: ui_fleet.odin; none while it is offline), a
+// count (its open sessions) and a fold chevron (shown while folded or hovered: a click folds it, as Open, Projects and Chats
 // fold), then its button and, for another machine, its "…" (the right-click menu). no 0 = this Mac.
 @(private = "file")
 machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, count: int, text_w_max: f32) {
@@ -1753,7 +1754,7 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 	}) {
 		dot(dot_col)
 		cnt := count > 0 ? fmt.tprint(count) : ""
-		// children: dot, name, status, [count], chevron, spacer, [button], [more]
+		// children: dot, name, status, [mini-counts], [count], chevron, spacer, [button], [more]
 		n := 6
 		room := text_w_max - px(DOT + ICON_SIZE_SM - 2)
 		if cnt != "" {
@@ -1767,12 +1768,29 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 		room -= px(ROW_BUTTON) // its "…"
 		n += 1
 		room -= f32(n - 1) * px(GAP_INLINE)
-		// its name (never cut to nothing: the status gives way first), its status
 		nw := text_w(name, FONT_UI_SMALL | WEIGHT_HEADER)
+		// its mini-counts, where the whole name still fits beside them (else the most urgent alone,
+		// else none): they give way before the name, the status before them
+		counts := fleet_of(no) // this frame's (ui_fleet.odin)
+		counts_compact := false
+		counts_w: f32 = 0
+		if core.fleet_any(counts) {
+			for compact in ([]bool{false, true}) {
+				w := fleet_counts_w(counts, compact, FONT_UI_SMALL, px(HEAD_COUNTS_GAP))
+				if room - nw - px(GAP_INLINE) >= w {
+					counts_w, counts_compact = w, compact
+					break
+				}
+			}
+		}
+		if counts_w > 0 do room -= counts_w + px(GAP_INLINE)
+		// its name (never cut to nothing: the status gives way first), its status
 		name_w := max(min(nw, max(room * 0.6, room - text_w(label, FONT_UI_SMALL))), min(nw, px(48)))
+		if counts_w > 0 do name_w = nw // the room above was kept for it
 		col := mix(th.text_secondary, th.text, em)
 		clay.TextDynamic(clip(name, name_w, FONT_UI_SMALL | WEIGHT_HEADER), txt(col, FONT_UI_SMALL | WEIGHT_HEADER))
 		if lw := room - name_w; label != "" && lw > px(SP_6) do clay.TextDynamic(clip(label, lw, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
+		if counts_w > 0 do fleet_counts_el(counts, counts_compact, FONT_UI_SMALL, px(HEAD_COUNTS_GAP), th.text_muted)
 		if cnt != "" do clay.TextDynamic(cnt, txt(th.text_muted, FONT_UI_SMALL))
 		a := fade(id, 7, folded || ui_hover == hit ? 1 : 0, DUR_HOVER)
 		icon(folded ? .Chevron_Right : .Chevron_Down, with_alpha(col, a), ICON_SIZE_SM - 2)
@@ -1793,6 +1811,8 @@ machine_header :: proc(no: u64, dot_col: core.Rgba, name, label, act: string, co
 		row_button(clay.ID("machmore", u32(no)), "", true, ui_hover == Hit(Hit_Machine_More(no)), .More)
 	}
 }
+
+HEAD_COUNTS_GAP :: SP_2 // between a machine header's mini-counts
 
 MACHINE_HERE_TIP :: "This Mac. Other machines you add appear below it."
 

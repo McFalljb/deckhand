@@ -28,6 +28,7 @@ NEED_NONE :: 0
 NEED_WAITING :: 1
 NEED_ERROR :: 2
 NEED_UNSEEN :: 3
+NEED_WORKING :: 4 // needs nothing, but works: the fleet's counts and the empty centre's rows only
 
 tab_need :: proc(t: Tab) -> int {
 	#partial switch tab_status_view(t).dot {
@@ -53,19 +54,20 @@ needing_machine_ok :: proc(no: u64, hub: bool) -> bool {
 	return false
 }
 
-// The open sessions that need the user, in the order above (temp allocator).
-needing_you :: proc(hub := false) -> []Needing {
+// The open sessions that need the user, in the order above (temp allocator). working: then those
+// where something works and nothing needs the user (NEED_WORKING, last), for the fleet's counts.
+needing_you :: proc(hub := false, working := false) -> []Needing {
 	out := make([dynamic]Needing, context.temp_allocator)
-	add :: proc(out: ^[dynamic]Needing, no: u64) {
+	add :: proc(out: ^[dynamic]Needing, no: u64, working: bool) {
 		for &s in state.open_sessions {
 			if s.home || s.machine != no do continue
-			best := NEED_NONE
-			for t in s.tabs do if n := tab_need(t); n != NEED_NONE && (best == NEED_NONE || n < best) do best = n
+			best := session_need(&s)
+			if best == NEED_WORKING && !working do continue
 			if best != NEED_NONE do append(out, Needing{session = &s, tier = best})
 		}
 	}
-	if needing_machine_ok(0, hub) do add(&out, 0)
-	for m in state.machines do if needing_machine_ok(m.no, hub) do add(&out, m.no)
+	if needing_machine_ok(0, hub) do add(&out, 0, working)
+	for m in state.machines do if needing_machine_ok(m.no, hub) do add(&out, m.no, working)
 	// by tier; stable, so each tier keeps the machines' and the opening order
 	for i in 1 ..< len(out) {
 		x := out[i]
@@ -107,8 +109,75 @@ next_needing_target :: proc(back := false, hub := false) -> (s: ^Open_Session, t
 		}
 		return s, tabs[(j + 1) % m]
 	}
-	tier := list[k].tier
-	if focused != nil && tab_need(focused^) == tier do return s, focused
-	for &t in s.tabs do if tab_need(t) == tier do return s, &t
-	return s, nil // not reached: the session has a tab of its tier
+	return s, session_need_tab(s, list[k].tier)
+}
+
+// A tab's tier with working (NEED_WORKING) after the three that need the user.
+tab_tier :: proc(t: Tab) -> int {
+	n := tab_need(t)
+	if n == NEED_NONE && tab_status_view(t).dot == .Running do return NEED_WORKING
+	return n
+}
+
+// A session's tier: its most urgent tab's (NEED_NONE: nothing needs the user and nothing works).
+session_need :: proc(s: ^Open_Session) -> int {
+	best := NEED_NONE
+	for t in s.tabs do if n := tab_tier(t); n != NEED_NONE && (best == NEED_NONE || n < best) do best = n
+	return best
+}
+
+// The tab of s that has its tier: the focused tab when it does, else the first in tab order (nil:
+// none does).
+session_need_tab :: proc(s: ^Open_Session, tier: int) -> ^Tab {
+	if f := session_focused_tab(s); f != nil && tab_tier(f^) == tier do return f
+	for &t in s.tabs do if tab_tier(t) == tier do return &t
+	return nil
+}
+
+// The fleet: how many open sessions need the user, by tier, and how many work, over the sessions
+// needing_you counts (this Mac's and online machines'; each session once, at its most urgent tier).
+// The top bar's pill, the machine headers, the empty centre, the Dock's badge and ⌥⌘A all read it
+// from here, so they never disagree.
+Fleet :: struct {
+	waiting, errors, unseen, working: int,
+}
+
+// "Needs you": waiting for the user, or stopped with an error.
+fleet_need :: proc(f: Fleet) -> int {return f.waiting + f.errors}
+
+fleet_any :: proc(f: Fleet) -> bool {return f.waiting + f.errors + f.unseen + f.working > 0}
+
+// The counts, in one pass over the open sessions with no list, no sort and no allocation (they
+// are read every frame): every machine that counts, and in per[0] this Mac's and in per[i + 1]
+// state.machines[i]'s (an offline one's stay zero). The same sessions and tiers as needing_you's,
+// so the counts always agree with ⌥⌘A's order (fleet_test.odin checks it).
+fleet_tally :: proc(per: []Fleet = nil) -> (all: Fleet) {
+	for &f in per do f = {}
+	for &s in state.open_sessions {
+		if s.home do continue
+		k := 0 // per's index: this Mac's
+		if s.machine != 0 {
+			k = -1
+			for m, i in state.machines do if m.no == s.machine {
+				if m.status == .Online do k = i + 1
+				break
+			}
+			if k < 0 do continue // offline, or gone: what it last showed, not what waits now
+		}
+		tier := session_need(&s)
+		if tier == NEED_NONE do continue
+		fleet_add(&all, tier)
+		if k < len(per) do fleet_add(&per[k], tier)
+	}
+	return
+}
+
+@(private = "file")
+fleet_add :: proc(f: ^Fleet, tier: int) {
+	switch tier {
+	case NEED_WAITING: f.waiting += 1
+	case NEED_ERROR:   f.errors += 1
+	case NEED_UNSEEN:  f.unseen += 1
+	case NEED_WORKING: f.working += 1
+	}
 }

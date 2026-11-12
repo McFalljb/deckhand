@@ -491,6 +491,21 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 						report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d menu %v", w, look, light ? "light" : "dark", cols, target), w)[:], &problems)
 						menu_close()
 					}
+					// the fleet (ui_fleet.odin): the pill hovered; no session on screen: the empty
+					// centre's summary (r2 waits, g1 works), a row hovered
+					{
+						prev := state.current_session
+						for hv in ([]Hit{Hit_Button(.Fleet), nil, Hit_Fleet_Row(open_session_of(pl, "g1"))}) {
+							if hv == nil do state.current_session = 0
+							ui_hover = hv
+							cmds := ui_layout(w, AUDIT_H)
+							report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d fleet hover %v session %d", w, look, light ? "light" : "dark", cols, hv, state.current_session), w)[:], &problems)
+						}
+						if !clay.GetElementData(clay.ID("fleetrow", 1)).found do testing.expectf(t, false, "w=%.0f cols=%d: the empty centre lists what runs", w, cols)
+						if !clay.GetElementData(clay.ID("fleetpill")).found do testing.expectf(t, false, "w=%.0f cols=%d: the pill", w, cols)
+						ui_hover = nil
+						state.current_session = prev
+					}
 					// Atlas's drawer: its header (name, status, model, Model, 📌, ×), idle and working
 					state.home_open = true
 					state.settings.reduce_motion = true // in place, not sliding

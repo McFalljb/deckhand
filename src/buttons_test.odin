@@ -83,9 +83,9 @@ buttons_name_actions_once :: proc(t: ^testing.T) {
 		info := BUTTONS[b]
 		if info.action == "" do continue
 		testing.expectf(t, action_by_id(info.action) != nil, "button %v: no action %q", b, info.action)
-		expect_tip(t, Hit_Button(b), info.action)
+		if b != .Fleet do expect_tip(t, Hit_Button(b), info.action) // the pill's says its counts in words (fleet_tip)
 		// the empty states repeat a toolbar action on purpose (a bigger target)
-		if b == .Empty_New_Chat || b == .Empty_Close do continue
+		if b == .Empty_New_Chat || b == .Empty_Close || b == .Empty_Next do continue
 		testing.expectf(t, info.action not_in seen, "action %q has two toolbar buttons (%s, %v)", info.action, seen[info.action], b)
 		seen[info.action] = fmt.tprint(b)
 	}

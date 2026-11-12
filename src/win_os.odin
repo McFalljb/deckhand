@@ -52,12 +52,12 @@ play_bell_sound :: proc(name: string) {
 // The number on the Dock icon now (-1: not set yet).
 dock_badge_shown := -1
 
-// The Dock icon's badge: the sessions waiting for you (core.sessions_waiting_count), none at zero
+// The Dock icon's badge: the sessions that need you (core.sessions_waiting_count), none at zero
 // or while Badge Dock icon is off (set_notifications dock). Set only when it changes; from each
-// frame and the window's timer (frames stop while hidden). The window owns the Dock tile: the
-// background core has none.
-dock_badge_update :: proc() {
-	n := state.settings.bell_dock_off ? 0 : core.sessions_waiting_count()
+// frame (count: the frame's own, fleet_tally_frame) and the window's timer (frames stop while
+// hidden: counted there, one pass). The window owns the Dock tile: the background core has none.
+dock_badge_update :: proc(count := -1) {
+	n := state.settings.bell_dock_off ? 0 : (count >= 0 ? count : core.sessions_waiting_count())
 	if n == dock_badge_shown do return
 	dock_badge_shown = n
 	if win_os.set_badge != nil do win_os.set_badge(n)

@@ -563,7 +563,7 @@ machine_install_apply :: proc(c: Machine_Install, caller: Caller) -> Result {
 machine_install_start :: proc(no: u64) -> Result {
 	f, ok := machine_facts(no)
 	if !ok do return fail(fmt.tprintf("no machine %d", no))
-	if !core_separate do return fail("machines need Sessions in a background core (the gear)")
+	if !core_separate do return fail("machines need Run sessions in a background core (the gear)")
 	if j, _ := job_find(no); j != nil && job_active(j) do return fail(fmt.tprintf("%s is already being %s", f.name, MACHINE_JOB_NAMES[j.phase]))
 	n := 0
 	for j in inst.jobs do if job_active(j) do n += 1

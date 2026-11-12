@@ -201,10 +201,9 @@ that choice holds until you install another version.
 **Settings that change this** (both on by default, both in the gear and the palette, and only
 you can change them):
 
-- **Keep sessions when quitting** (the palette's **Keep sessions running when Deckhand quits**):
+- **Keep sessions running when Deckhand quits**:
   tabs' programs run in the session holder. Off, they stop whenever Deckhand Core stops.
-- **Sessions in a background core** (the palette's **Run sessions in a background core (at the
-  next launch)**): off, Deckhand runs as one program again, and ⌘Q asks while sessions run (Keep
+- **Run sessions in a background core** (applies at the next launch): off, Deckhand runs as one program again, and ⌘Q asks while sessions run (Keep
   sessions still keeps them in the holder). It takes effect once Deckhand Core has stopped (**Quit
   Deckhand and Stop All Sessions…**).
 
@@ -624,7 +623,7 @@ is waiting for you).
 
 ### Chats settings (the gear)
 
-- **Chats: read-only** starts chats as read-only. Off by default.
+- **Start chats read-only** starts chats as read-only. Off by default.
   - **pi** gets only its read tools (read, grep, find, ls) and `desk_show` (`--tools
     read,grep,find,ls,desk_show --exclude-tools 'mcp__*' --no-mcp`), plus pi-kit's read-only
     guardrails (`PI_KIT_READONLY=1`) when pi-kit is installed. The model cannot edit, write or run
@@ -949,7 +948,7 @@ installed (see [Everyday tasks](#everyday-tasks)); with only Claude Code install
 Code at once. It runs on its own in the project's folder: a session whose main tab is Claude,
 with no pi tab. You can open shell, browser and other tabs beside it as in any session. Its main
 tab closes with the session (the **×** on its row). **New chat** does the same in Chats
-(read-only while **Chats: read-only** is on: see [Chats settings](#chats-settings-the-gear)).
+(read-only while **Start chats read-only** is on: see [Chats settings](#chats-settings-the-gear)).
 
 Every Claude conversation Deckhand ran in a project is a row of that project's session list,
 beside the pi sessions, marked **Claude**: its title is your first message (or the name you gave
@@ -1016,7 +1015,7 @@ wait ("not started") until you do, so your flags never run for an agent.
 **Skipping permission prompts by default.** If you want your own Claude tabs to start with
 `--dangerously-skip-permissions`, turn it on in the Settings tab (⌘,): the **Claude Code
 (global)** group shows **Default flags for new tabs**, and its **Skip permissions** row has
-**Turn on** / **Turn off** (or use the palette's **Claude Code: skip permissions in new tabs**). It is off until you turn it on. With
+**Turn on** / **Turn off** (or use the palette's **Skip permissions in new tabs**). It is off until you turn it on. With
 it, Claude edits files and runs commands without asking you first, so turn it on only if you
 trust what you run it on; Deckhand asks you to confirm when you turn it on. It applies each time
 you start Claude yourself: a new Claude tab, session or chat, your own resume, a restored tab when
@@ -1099,7 +1098,7 @@ is installed in or written to `~/.codex`. Codex 0.163.0 or later is needed.
   in a dialog). A Codex older than 0.163.0 does not start: the tab says how to update
   (`npm install -g @openai/codex@latest`), as does Settings → **Coding agents**.
 - **Not yet**: comments, the `deckhand` command inside Codex, read-only chats (Codex is not offered
-  in Chats while **Chats: read-only** is on), conversations found on disk, extra flags, and Codex
+  in Chats while **Start chats read-only** is on), conversations found on disk, extra flags, and Codex
   on another machine. [CODEX.md](CODEX.md) has the details.
 
 ### Comments for the agent
@@ -1518,7 +1517,7 @@ when the build session finishes").
 - **The header** shows its status (starting…, working…, needs you, error, stopped) and its model.
 - The top bar's Atlas button counts the runs that finished while the drawer was shut, and is
   tinted while Atlas waits for you. While Deckhand is in the background, Atlas finishing or
-  asking raises a macOS notification (gear: **Agent notifications**).
+  asking raises a macOS notification (gear: **Atlas's notifications**).
 - **Where it works**: Atlas starts in your [main folder](#your-folders), or in the data dir's
   `home/` while no main folder is set or it cannot be reached; never in your home folder (`~`),
   even if you made `~` the main folder.
@@ -1539,8 +1538,7 @@ when the build session finishes").
 
 ### Its model
 
-Click **Model** in the drawer's header (or the gear's **Atlas model…**, the palette's "Atlas:
-change model", or Settings → Atlas → **Change…**). It opens pi's own model selector (Ctrl+L) in
+Click **Model** in the drawer's header (or **Atlas's model…** in the gear or the palette, or Settings → Atlas → **Change…**). It opens pi's own model selector (Ctrl+L) in
 Atlas's terminal. Your pick stays with Atlas's session.
 
 The `agent_model` setting ("provider/id", optionally ":thinking") is the model Atlas starts a
@@ -1818,7 +1816,7 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   (choosing one plays it). The rule: a sound plays while Deckhand is in the background, or also
   while it is in front when that kind's macOS says always. It is paced with the macOS
   notifications, and never more than one a second.
-- **The Dock icon's badge** (gear: **Badge Dock icon**, on by default): the number of open
+- **The Dock icon's badge** (gear: **Badge the Dock icon**, on by default): the number of open
   sessions that need you (waiting for you, or stopped with an error), this Mac's and those of
   machines that are online: the same number as the [fleet pill](#what-needs-you-everywhere)'s
   first part; no badge at zero.
@@ -1860,17 +1858,17 @@ window the list scrolls.
 
 **Notifications**
 
-- **Agent notifications**: Atlas's macOS notifications.
-- **Notify me about** (a grid: Bell, macOS and Sound for each kind) and **Badge Dock icon**: see
+- **Atlas's notifications**: Atlas's macOS notifications.
+- **Notify me about** (a grid: Bell, macOS and Sound for each kind) and **Badge the Dock icon**: see
   [Notifications](#notifications).
 
 **Sessions**
 
-- **Atlas model…**: see [Its model](#its-model).
-- **Chats: read-only**, **Chats folder…**: see [Chats settings](#chats-settings-the-gear).
+- **Atlas's model…**: see [Its model](#its-model).
+- **Start chats read-only**, **Chats folder…**: see [Chats settings](#chats-settings-the-gear).
 - **Tidy project list**: hide temp and missing folders, nest subfolders and group sibling folders (see
   [A tidy project list](#a-tidy-project-list)). On by default.
-- **Keep sessions when quitting** and **Sessions in a background core**: see
+- **Keep sessions running when Deckhand quits** and **Run sessions in a background core**: see
   [How Deckhand runs](#how-deckhand-runs). Both on by default.
 - **Machines over SSH**: other machines' sessions over `ssh` (on by default; nothing happens until
   you add a machine; see [The Settings tab](#the-settings-tab), Machines).
@@ -2151,7 +2149,7 @@ window's errors go to the terminal you started Deckhand from. A pi session's own
 
 **Deckhand says it can't start its background core.** The message says why. **Use Previous Core**
 goes back to the core from before the last update; **Run Sessions in Deckhand Itself** turns off
-[Sessions in a background core](#how-deckhand-runs) so Deckhand runs as one program. `run/core.log`
+[Run sessions in a background core](#how-deckhand-runs) so Deckhand runs as one program. `run/core.log`
 has the details.
 
 **Deckhand says another process holds `core.lock` or `instance.lock`.** The message names the
@@ -2334,7 +2332,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | New chat | ⌘N | a new chat in the Chats folder |
 | New session | ⇧⌘N | a new session in the selected project (pi or Claude Code: a picker when both are installed) |
 | New session on another machine… |  | a fresh session in the project of the same folder name on an online machine ([Other machines](#projects-sessions-and-chats)) |
-| Chats: read-only |  | start chats read-only or as full pi |
+| Start chats read-only |  | start chats read-only or as full pi |
 | Chats folder… |  | pick the folder chats run in |
 | Chats folder: back to the default |  | undo the above |
 | New shell tab | ⌘T | a shell in the session's folder |
@@ -2362,11 +2360,11 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Reopen closed tab | ⇧⌘T | the last tab you closed (its file, address or conversation; a shell: a new one in its folder) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Ask Atlas… |  | open the drawer with the keyboard in it |
-| Atlas: change model |  | pi's model selector in Atlas |
+| Atlas's model… |  | pi's model selector in Atlas |
 | Atlas: edit prompt |  | open ATLAS.md |
 | Toggle Atlas | ⌘J | show or hide the drawer |
 | Dock the agent's drawer |  | pin or unpin the drawer |
-| Agent notifications |  | Atlas's macOS notifications on/off |
+| Atlas's notifications |  | Atlas's macOS notifications on/off |
 | Notifications |  | open the bell |
 | Notifications: mark all read |  | |
 | Notifications: clear |  | |
@@ -2382,7 +2380,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Finished: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Errors: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Jobs: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
-| Badge Dock icon |  | the number of sessions that need you on the Dock icon |
+| Badge the Dock icon |  | the number of sessions that need you on the Dock icon |
 | Toggle left column | ⌘B | |
 | Toggle right panels | ⌥⌘B | |
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |
@@ -2422,7 +2420,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Refresh shell environment |  | ask your login shell for its environment again (started from the Dock or Finder); new tabs use it, open tabs keep theirs |
 | Tidy project list |  | on or off: see [A tidy project list](#a-tidy-project-list) |
 | Keep sessions running when Deckhand quits |  | on by default: on or off (the gear's row) |
-| Run sessions in a background core (at the next launch) |  | on by default: on or off (the gear's row) |
+| Run sessions in a background core |  | on by default: on or off (the gear's row) |
 | Machines over SSH |  | on by default: on or off (the gear's row); see [The Settings tab](#the-settings-tab), Machines |
 | Use previous core |  | a background core only: hand the sessions to the core from before the last update |
 | Restart session holder |  | development builds only, with a session holder running: upgrade it in place to the holder you built |

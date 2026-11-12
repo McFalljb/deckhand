@@ -44,7 +44,7 @@ CODEX_MISSING_NOTE :: " — Codex not installed"
 CODEX_HOOK_TIMEOUT :: 10 // seconds; the CLI gives up sooner (its hello and call timeouts)
 CODEX_REMOTE :: "Codex tabs run on this Mac only for now: another machine's project can't start one"
 CODEX_NO_FLAGS :: "Codex tabs take no extra flags yet: your own Codex settings (~/.codex/config.toml) apply"
-CODEX_READONLY :: "Codex can't run read-only yet, and Chats: read-only is on: start Codex in a project, or turn read-only chats off"
+CODEX_READONLY :: "Codex can't run read-only yet, and Start chats read-only is on: start Codex in a project, or turn read-only chats off"
 CODEX_NO_COMMENTS :: "Codex tabs don't take comments yet: send them to a pi or Claude tab, or copy them"
 
 // One hook Deckhand passes to a Codex tab: Codex's event name (the -c key), its snake_case name

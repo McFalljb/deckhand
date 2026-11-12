@@ -727,7 +727,7 @@ claude_readonly_args :: proc(args: []string) -> (kept: []string, refused: string
 
 // Why these flags cannot go to a read-only tab ("" = they can).
 claude_readonly_refusal :: proc(args: []string) -> string {
-	if _, bad := claude_readonly_args(args); bad != "" do return fmt.tprintf("%s cannot go into a read-only chat (only --model, --effort, --fallback-model and --verbose go along; Chats: read-only is on)", bad)
+	if _, bad := claude_readonly_args(args); bad != "" do return fmt.tprintf("%s cannot go into a read-only chat (only --model, --effort, --fallback-model and --verbose go along; Start chats read-only is on)", bad)
 	return ""
 }
 
@@ -790,7 +790,7 @@ claude_readonly_refuses :: proc(caller: Caller, cmd: Command) -> string {
 	}
 	_, _, ct := claude_tab_of(caller.tab_id)
 	if ct == nil || !ct.readonly do return ""
-	return "a read-only chat's Claude may read pages and apps, not act on them (Chats: read-only is on)"
+	return "a read-only chat's Claude may read pages and apps, not act on them (Start chats read-only is on)"
 }
 
 // ---- is Claude Code installed? ----

@@ -51,11 +51,11 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   - **Claude chats.** `new_claude_session` with the Chats `project_id` (**New chat**'s picker:
     **+ New chat**, ⌘N, the **⌄** menu, File, the palette) starts one in the chats folder; its row
     is in Chats, marked Claude. A Claude tab may open in a pi chat too (**New Claude tab**). With
-    **Chats: read-only** on, they start read-only (§1a).
+    **Start chats read-only** on, they start read-only (§1a).
   - **Who.** `new_claude_session` is `Anyone` (the user, Atlas, scripts; never a pi or Claude
     tab). An agent's opens behind the user's view and cannot pass flags.
 - **Default flags** (`set_claude_default_flags`, user-only, off by default: Settings' "Claude Code
-  (global)" group and the palette's **Claude Code: skip permissions in new tabs**). Turning it on
+  (global)" group and the palette's **Skip permissions in new tabs**). Turning it on
   is confirmed. It adds `--dangerously-skip-permissions` after the tab's flags at each start the
   USER makes (`new_claude_tab`, `new_claude_session`, `claude_resume` with caller `ui`, a
   restored tab shown, the user's restart). It is never saved into a tab's or a record's flags, so
@@ -85,7 +85,7 @@ running when the window closes (⌘Q), when the core restarts, and through an up
   for pi) and gets the same arguments as `"$@"`. `tests/scripts/fake-claude.py` is a fake claude
   that runs the plugin's hooks with Claude Code's JSON and logs what it got.
 
-## 1a. Read-only Claude (chats while Chats: read-only is on)
+## 1a. Read-only Claude (chats while Start chats read-only is on)
 
 **When.** A Claude tab starts read-only (`claude_tab_readonly`) when it started read-only before
 (`Claude_Tab.readonly`, saved with the tab), its session is a chat while

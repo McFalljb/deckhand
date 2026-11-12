@@ -784,3 +784,58 @@ settings_files_claude_every_config_folder :: proc(t: ^testing.T) {
 	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/notes.md", proj)), "HOME by another name")
 	testing.expect(t, core.settings_credential(fmt.tprintf("%s/projects/-p/s.jsonl", dflt)), "~/.claude still")
 }
+
+// The settings registry (core/settings_registry.odin) and the window's actions agree: every action
+// a setting names exists, takes its label from the registry, and sends the setting's command.
+@(test)
+settings_registry_actions :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	setup()
+	for a in ACTIONS do testing.expectf(t, a.label != "", "action %s has no label", a.id)
+	check :: proc(t: ^testing.T, s: ^core.Setting, id: string, own_label: bool) {
+		a := action_by_id(id)
+		testing.expectf(t, a != nil, "setting %s: no action %s", s.id, id)
+		if a == nil do return
+		if own_label do testing.expectf(t, a.label == core.setting_action_label(id), "action %s: %q, the registry says %q", id, a.label, core.setting_action_label(id))
+		if a.ui != nil || a.pick_folder do return // a UI step first (a field, a folder picker)
+		cmd, ok := a.make()
+		if ok && cmd != nil do testing.expectf(t, core.command_type(cmd) == s.command || !own_label, "action %s sends %s, setting %s says %s", id, core.command_type(cmd), s.id, s.command)
+	}
+	for &s in core.SETTINGS {
+		if s.action != "" do check(t, &s, s.action, true)
+		for c in s.choices do check(t, &s, c.action, true)
+		for x in s.also do check(t, &s, x, false)
+	}
+	testing.expect_value(t, action_label(action_by_id("agent_notify")), "Atlas's notifications")
+	testing.expect_value(t, action_label(action_by_id("chats_readonly")), "Start chats read-only")
+}
+
+// Every file and row the Settings tab lists has a section and is found by searching its name, and
+// the tab's filter keeps the setting rows its words match.
+@(test)
+settings_registry_reaches_every_row :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	setup()
+	state.settings.remote_machines = true
+	rows := core.settings_file_rows()
+	testing.expect(t, len(rows) > 10, "rows listed")
+	for r in rows {
+		_, _, ok := core.settings_group_section(r.group)
+		testing.expectf(t, ok, "%s (%s) has no section", r.label, r.group)
+		found := false
+		for h in core.settings_search(r.label, rows) do if (h.kind == .File || h.kind == .Row) && h.row.path == r.path do found = true
+		testing.expectf(t, found, "search %q does not find its row (%s)", r.label, r.path)
+	}
+	// the tab's filter: a setting row by its words (before, only file paths matched)
+	delete(state.files.filter)
+	state.files.filter = strings.clone("allow other machines")
+	core.files_state_gen += 1
+	defer {
+		delete(state.files.filter)
+		state.files.filter = ""
+		core.files_state_gen += 1
+	}
+	found := false
+	for r in core.settings_tree_rows() do if r.path == core.MACHINE_REACH_ROW do found = r.button != ""
+	testing.expect(t, found, "the filter keeps Allow other machines, with its button")
+}

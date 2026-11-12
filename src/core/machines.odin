@@ -8,7 +8,7 @@ package core
 //
 // The registry is <data>/machines.json (0600): {"next":N,"machines":[{no, name, target, os, arch,
 // core_path, via?}]}. Numbers come from `next`, 1-8191, never reused (M6-B packs them into ids).
-// machine_add, machine_remove and machine_connect are the user's only (who = .User); `via` (a
+// every machine_* command is this Mac's user's only (who = .User_Here: never from a hub); `via` (a
 // command run in place of `ssh … connect`) is taken only in development and test builds.
 //
 // The link: the user's own `ssh` (their ~/.ssh/config: the target is an alias or user@host, never

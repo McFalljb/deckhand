@@ -64,6 +64,14 @@ window_request_run :: proc(q: core.Window_Request) -> (r: core.Window_Reply) {
 		tab_view_moved(q.tab_id, q.path)
 	case .Files_Deleted:
 		tab_views_files_deleted(q.path)
+	case .Path_Changed:
+		// a separate core's own file command: the listings here read it again now, not when the
+		// watcher gets to it (in process the core's model is this one: done already)
+		// and a frame, to read them: the command may have sent this window no delta (changed false)
+		if client_separate() {
+			core.fs_model_changed(q.path)
+			app.redraw = true
+		}
 	case .Changes_Diff:
 		if tab_view_changes_diff(q.tab_id, q.path, q.text, q.message) do app.redraw = true
 	case .Changes_Rewind:

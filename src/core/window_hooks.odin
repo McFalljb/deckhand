@@ -92,6 +92,7 @@ Window_Op :: enum u8 {
 	Viewed_From, // another machine's Deckhand took this core (text: its name): the window shows Viewed from <machine> with Take back, and does not reconnect until then
 	App_Boxes, // a separate core: tab_id's app sent new tab.boxes (text: {"boxes":[…]}), drawn while inspected
 	Sound, // a bell entry's sound (text: its name, BELL_SOUND_LABELS), played by the window (notify.odin)
+	Path_Changed, // a separate core's own file command changed path: the window's file model forgets it (its watcher may lag)
 }
 
 Window_Request :: struct {
@@ -225,6 +226,8 @@ window_view_goto :: proc(tab_id: u64, line: int, anchor: string) {
 window_view_drop :: proc(tab_id: u64) {if !window_link_hub() do ask({op = .View_Drop, tab_id = tab_id})}
 window_view_moved :: proc(tab_id: u64, path: string) {if !window_link_hub() do ask({op = .View_Moved, tab_id = tab_id, path = path})}
 window_files_deleted :: proc(under: string) {ask({op = .Files_Deleted, path = under})}
+// this machine's window only: a hub (another machine viewing this one) gets no path (§8.2)
+window_path_changed :: proc(path: string) {if !window_link_hub() do ask({op = .Path_Changed, path = path})}
 window_changes_diff :: proc(tab_id: u64, path, text: string, message := "") {
 	ask({op = .Changes_Diff, tab_id = tab_id, path = path, text = text, message = message})
 }

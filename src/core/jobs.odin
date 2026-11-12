@@ -1338,7 +1338,7 @@ jobs_running_changed :: proc() {
 // one-line summary, run folder; the bell sends the OS notification for runs
 // that need the user or failed, paced) and Deckhand's own OS notification
 // for what the bell does not notify (a finished run with `notify: always`,
-// the auto-pause nudge, anything while the bell's Jobs group is off). Never
+// the auto-pause nudge). Never
 // a notice to Atlas. Nothing but the event and the record at quit.
 @(private = "file")
 jobs_deliver :: proc(j: ^Job, e: Job_Event, nudge: bool) {
@@ -1354,7 +1354,8 @@ jobs_deliver :: proc(j: ^Job, e: Job_Event, nudge: bool) {
 		else if attention do st = .Failed
 		notify_job_finished({job_id = e.job, title = e.title, status = st, summary = e.headline, run_dir = e.run_dir})
 	}
-	if push && (!bell || !attention) do jobs_notify(fmt.tprintf("%s: %s", e.title, e.status), e.headline, attention)
+	// push implies the bell (notify is not .Never), which notifies what needs attention itself
+	if push && !attention do jobs_notify(fmt.tprintf("%s: %s", e.title, e.status), e.headline, attention)
 	if nudge do jobs_notify(fmt.tprintf("%s is paused", e.title), fmt.tprintf("%d failures in a row. Resume it in the Jobs tab.", j.failures), true)
 }
 

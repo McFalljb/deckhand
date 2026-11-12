@@ -576,7 +576,7 @@ and **Close**; a session waiting for you says "Open to answer" under it.
   Pin, New session, New job for this project…, Rename…, the session order, Reveal in Finder, Copy
   path and Hide. Sessions offer Pin, Reveal in Finder, Copy path (of the session file), Copy
   session info, Send to Atlas, [Peek](#peek) (open sessions that can be peeked), Mark as unread
-  (open sessions; Mark as read when it is), Hide and Close session.
+  (open sessions on this Mac; Mark as read when it is), Hide and Close session.
 - **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
   (Window menu or the palette: the tab you are in, if it is a terminal, else the session's; a
   session on this Mac, not another machine's): it
@@ -2439,6 +2439,5 @@ Planned; this guide covers each once it ships:
 - **Jobs after Stop All Sessions and across a restart of the Mac** (Deckhand Core started at
   login), heartbeat and no-agent check jobs, and Atlas's shared memory (design:
   [ATLAS.md](ATLAS.md)). Jobs already run while the window is closed.
-- **Sessions on other machines** in the same sidebar, over SSH, and **several windows**
-  ([ROADMAP.md](ROADMAP.md)).
+- **Several windows** on one Deckhand Core ([ROADMAP.md](ROADMAP.md)).
 - **Merging** from the Changes tab.

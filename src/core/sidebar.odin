@@ -149,7 +149,16 @@ session_account_tag :: proc(s: Session) -> string {
 	return claude_account_tag(s.account)
 }
 
-session_waiting :: proc(id: string) -> bool {return session_status(id) == .Waiting}
+// Whether a session needs the user's answer (tab_need's NEED_WAITING: blocked, or its agent asked a
+// question), as the Attention view, the fleet pill and ⌥⌘A count it: what a folded section, a
+// folded machine and the Waiting chip keep in view.
+session_waiting :: proc(id: string) -> bool {
+	if id == "" do return false
+	for &s in state.open_sessions do if s.pi_session_id == id do return session_quick_status(&s) == .Waiting
+	// a Claude session open as a tab of a pi session (its row in the left column): that tab's
+	if tab_id := claude_open_tab(id); tab_id != 0 do if _, tab, _ := find_tab(tab_id); tab != nil do return tab_need(tab^) == NEED_WAITING
+	return false
+}
 
 // Listed (the selected project's or a chat) or open.
 session_known :: proc(id: string) -> bool {

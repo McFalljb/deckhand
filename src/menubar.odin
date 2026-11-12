@@ -165,6 +165,8 @@ MENUBAR := [?]Bar_Item {
 		SEP,
 		{action = "next_session"},
 		{action = "prev_session"},
+		{action = "next_needing_you"},
+		{action = "prev_needing_you"},
 		SEP,
 		{id = "front", title = "Bring all to front", native = .Front},
 	}},

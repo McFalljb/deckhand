@@ -570,8 +570,10 @@ editor_key :: proc(e: ^Editor, ev: ^sapp.Event) -> bool {
 	app.redraw = true
 	if cmd {
 		#partial switch ev.key_code {
-		case .A:      ed_select_all(e)
-		case .C:      if s := copy_text(e); s != "" && win_os.set_clipboard != nil do win_os.set_clipboard(s)
+		case .A:
+			if alt do return false // ⌥⌘A ⌥⇧⌘A: next, previous needing you (menubar.odin)
+			ed_select_all(e)
+		case .C:     if s := copy_text(e); s != "" && win_os.set_clipboard != nil do win_os.set_clipboard(s)
 		case .X:
 			if e.readonly do return true
 			lo, hi := ed_copy_range(e)

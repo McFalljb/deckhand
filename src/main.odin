@@ -362,6 +362,7 @@ on_system_appearance :: proc(light: bool) {
 // UI actions go through the inbox like every other caller; event() drains it
 // right after, so they apply in order before the next event.
 ui_do :: proc(cmd: core.Command) {
+	deck_follow(cmd) // a session or tab opened: the Deck view goes (ui_deck.odin)
 	if window_only_quit(cmd) do return
 	if lost_core_save(cmd) do return
 	// a separate core: which widget has the keyboard is the core's (state.focus_widget), so the
@@ -569,7 +570,9 @@ frame :: proc "c" () {
 	ui_draw(cmds, 0, drawer_at)
 	typing := state.focus_widget == "" // no text field has the keyboard
 	// the tab each pane shows, in its pane (pages and apps too); marked text in the focused one's (panes.odin)
-	if cs := core.cur(); cs != nil && len(cs.panes) > 1 {
+	if deck.shown {
+		// the Deck view takes the centre: no pane draws (ui_deck.odin)
+	} else if cs := core.cur(); cs != nil && len(cs.panes) > 1 {
 		panes_draw(cs, t, typing) // and their dim, the focus line, a zoom's outline (ui_pane_motion.odin)
 	} else if p := core.focused_pane(); p != nil {
 		pane_draw(p, t, typing)
@@ -805,6 +808,7 @@ event :: proc(e: ^sapp.Event) {
 	if shortcuts_open() && shortcuts_event(e) do return
 	if setup_open() && setup_event(e) do return // the first-run sheet (ui_setup.odin)
 	if bell_open() && bell_event(e) do return
+	if deck_event(e) do return // the Deck view: its keys, the pointer over it; nothing reaches the panes under it (ui_deck.odin)
 	// a press on a pane divider drags it; a press in a pane without the keyboard focuses it first,
 	// then acts in it, a page or an app too (click-through: ui_panes.odin)
 	if e.type == .MOUSE_DOWN && e.mouse_button == .LEFT && !over_overlay() && !(state.home_open && inside(clay.ID("drawer"), e.mouse_x, e.mouse_y)) {
@@ -968,6 +972,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
 		case Hit_Peek_Row:  peek_open_session(u64(hit)) // a row's eye: Peek (ui_peek.odin)
 		case Hit_Peek: // peek_event takes the panel's clicks first
+		case Hit_Deck_Card, Hit_Deck_More: deck_click(hit, app.pointer) // (deck_event takes them first)
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)

@@ -606,6 +606,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	age_minute_drawn = age_minute()
 	ui_win_w = w
 	fleet_tally_frame() // once per frame: the pill's, the machine headers', the Dock's (ui_fleet.odin)
+	deck_sync() // another session opened: the Deck view goes (ui_deck.odin)
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
@@ -782,10 +783,12 @@ centre :: proc(cs: ^core.Open_Session) {
 		claude_reload_bars() // and Claude Code's (ui_claude_reload.odin)
 		comments_bars() // pending comments: the close prompt, the strip and its list (ui_comments.odin)
 		machine_bar() // another machine's session while it is not online (ui_dead_tab.odin)
-		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane
+		// the session's panes (panes.odin): its layout tree, or its one (implicit) pane; the Deck view
+		// in their place (ui_deck.odin: not laid out, they keep their sizes and run on)
 		if clay.UI(clay.ID("panes"))({layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}}}) {
+			if deck.shown do deck_layout(cs)
 			// zoomed (zoom_pane): that pane alone fills the area; the others are not laid out (not drawn, not hit)
-			if zp := core.session_pane(cs, core.session_zoomed(cs)); zp != nil do pane_layout(cs, zp)
+			else if zp := core.session_pane(cs, core.session_zoomed(cs)); zp != nil do pane_layout(cs, zp)
 			else if cs != nil && len(cs.nodes) > 0 && len(cs.panes) > 0 do pane_tree_layout(cs, cs.root)
 			else do pane_layout(cs, core.session_focused_pane(cs))
 		}
@@ -1047,6 +1050,7 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 		spacer()
 		search_pill(wide)
 		spacer()
+		if deck_btn_shown do tool_button(.Deck, deck.shown) // the Deck view: every session as a card (ui_deck.odin; it gives way in a narrow bar: fleet_pill_decide)
 		fleet_pill() // what needs you and what works, on every machine (ui_fleet.odin)
 		bell_button() // the notification centre (ui_bell.odin)
 		tool_button(.Settings, settings_open())
@@ -1192,6 +1196,7 @@ bar_compact: bool
 // buttons (the search pill as an icon), the agent's button, the gaps.
 top_bar_fixed_w :: proc() -> f32 {
 	w := px(2 * TERM_PAD) + 5 * px(TOOL_BUTTON + SP_1) + px(NEW_MENU_W + SP_1) + bell_extra_w()
+	if deck_btn_shown do w += px(TOOL_BUTTON + SP_1) // the Deck view's button, while it shows
 	if pw := fleet_pill_w(); pw > 0 do w += pw + px(SP_1) // the fleet pill, while it shows
 	w += px(SP_2 + SP_3 + AVATAR - 6 + SP_2 + MARK + SP_2) // the agent's button with a status mark
 	if !bar_compact do w += text_w(core.agent_name()) + px(SP_2) // and its name
@@ -1466,6 +1471,8 @@ Hit :: union {
 	Hit_Attention, // the Sessions column's By project | Attention switch, IDLE's header, the footer (ui_sidebar.odin)
 	Hit_Peek, // a peek's header buttons (ui_peek.odin)
 	Hit_Peek_Row, // a row's eye button: peek at its session (ui_peek.odin)
+	Hit_Deck_Card, // a card of the Deck view (ui_deck.odin)
+	Hit_Deck_More, // its "…"
 }
 Hit_Attention :: distinct int // a core.Sidebar_View (the switch), ATTN_HIT_IDLE, ATTN_HIT_FOOTER
 Hit_Editor_Tool :: distinct int // button index
@@ -1534,6 +1541,7 @@ ui_hit :: proc() -> Hit {
 	if h := pane_hit(); h != nil do return h // a pane strip's "+" (ui_panes.odin)
 	if clay.PointerOver(clay.ID("homebutton")) do return Hit_Home{}
 	if state.home_open && clay.PointerOver(clay.ID("drawer")) do return drawer_hit() // nothing under the drawer is hit
+	if h := deck_hit(); h != nil do return h // the Deck view's cards (ui_deck.odin)
 	if h := empty_hit(); h != nil do return h
 	if clay.PointerOver(clay.ID("new")) do return Hit_New{}
 	if len(state.pending_confirmations) > 0 {

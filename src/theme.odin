@@ -152,6 +152,12 @@ CHAT_GAP :: SP_3 // between chat items
 CHAT_FIELD_LINES :: 8 // message field lines shown before it scrolls with the caret
 CODE_PAD :: SP_2 // inside code blocks
 BADGE_H :: 16 // unread count on the top bar button
+// The Deck view (ui_deck.odin): the centre as a grid of session cards.
+DECK_PAD :: SP_4 // around the grid
+DECK_CARD_MIN_W :: 260 // as many columns as fit at this width or wider
+DECK_GAP :: SP_3 // between cards, across and down
+DECK_CARD_PAD :: SP_3 // inside a card
+DECK_BODY_LINES :: 3 // the agent's message: at most this many lines (every card keeps their room)
 
 // ---- motion ----
 DUR_HOVER :: 120 * time.Millisecond // hover fades, ease-out

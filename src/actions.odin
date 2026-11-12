@@ -683,6 +683,7 @@ ACTIONS := [?]Action {
 	}, make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"files"}, true // the Files tab, with the keyboard (opens the left column)
 	}},
+	{id = "deck_view", label = "Toggle Deck view", keys = "⇧⌘\\", make = proc() -> (core.Command, bool) {return nil, true}, ui = deck_toggle}, // the window's own: no command (ui_deck.odin)
 	{id = "attention_view", label = "Toggle Attention view", keys = "⌥⌘.", make = proc() -> (core.Command, bool) {return core.Set_Sidebar_View{view = attention_view_next()}, true}, ui = attention_view_toggle}, // ui_sidebar.odin
 	{id = "show_sessions", label = "Sessions and projects", prepare = proc() {
 		if state.focus_widget == "files" do ui_do(core.Set_Focus{""}) // the Files or Settings tree had the keyboard
@@ -880,6 +881,7 @@ SHORTCUTS_EXTRA := [?]struct {
 	{"Editor", "Editor: go to line (as ⌘L)", "⌃G"},
 	{"Editor", "Editor: indent, outdent", "⌘], ⌘["},
 	{"Editor", "Editor: start, end of the file", "⌘↑, ⌘↓"},
+	{"Deck view", "Deck view: move between the cards, open one, back", "←→↑↓, ↩, Esc"},
 	{"Files tab", "Files: move to Trash", "⌘⌫"},
 	{"Files tab", "Files: rename", "F2"},
 }

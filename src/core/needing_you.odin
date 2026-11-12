@@ -130,16 +130,22 @@ attention_group :: proc(tier: int) -> Attention_Group {
 // its first row is where ⌥⌘A goes), then every other open session but Home, idle, the most
 // recently shown first (an offline machine's too: what it showed last). Through the left column's
 // filter and quick filters as the Open group's rows (open_row_shown: waiting work always shows).
-attention_rows :: proc() -> []Attention_Row {
+// deck: the Deck view's cards (ui_deck.odin): the same order, past no filter, and only the
+// sessions the fleet counts (this Mac's and online machines'; never an offline one's last view).
+attention_rows :: proc(deck := false) -> []Attention_Row {
 	out := make([dynamic]Attention_Row, context.temp_allocator)
 	words := filter_words()
-	for x in needing_you(working = true) do if open_row_shown(x.session, words) do append(&out, Attention_Row{x.session, attention_group(x.tier), x.tier})
+	shown :: proc(s: ^Open_Session, words: []string, deck: bool) -> bool {
+		if deck do return needing_machine_ok(s.machine, false)
+		return open_row_shown(s, words)
+	}
+	for x in needing_you(working = true) do if shown(x.session, words, deck) do append(&out, Attention_Row{x.session, attention_group(x.tier), x.tier})
 	first_idle := len(out)
 	for &s in state.open_sessions {
 		if s.home do continue
 		listed := false
 		for r in out[:first_idle] do if r.session == &s do listed = true
-		if !listed && open_row_shown(&s, words) do append(&out, Attention_Row{&s, .Idle, NEED_NONE})
+		if !listed && shown(&s, words, deck) do append(&out, Attention_Row{&s, .Idle, NEED_NONE})
 	}
 	slice.stable_sort_by(out[first_idle:], proc(a, b: Attention_Row) -> bool {return a.session.shown_at > b.session.shown_at})
 	return out[:]

@@ -54,4 +54,5 @@ Icon :: enum u8 {
 	Mark_Done, // a check
 	Mark_Error, // "!"
 	Eye, // an eye: Peek (ui_peek.odin)
+	Deck, // four cards, two by two: the Deck view (ui_deck.odin)
 }

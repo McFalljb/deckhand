@@ -207,6 +207,9 @@ draw_icon :: proc(ic: core.Icon, x, y, w, h: f32, col: core.Rgba, param: u8 = 0)
 		stroke_line(c, P(oy, s, 3), c, P(oy, s, 13.5), sw, col)
 		stroke_line(P(ox, s, 8), P(oy, s, 10.5), c, P(oy, s, 13.5), sw, col, true)
 		stroke_line(c, P(oy, s, 13.5), P(ox, s, 14), P(oy, s, 10.5), sw, col, true)
+	case .Deck:
+		// four cards, two by two
+		for gx in ([]f32{2.5, 9}) do for gy in ([]f32{2.5, 9}) do stroke_rect(X(ox, s, sw, gx), X(oy, s, sw, gy), X(ox, s, sw, gx + 4.5), X(oy, s, sw, gy + 4.5), sw, col)
 	case .Collapse_All:
 		stroke_rect(X(ox, s, sw, 2.5), X(oy, s, sw, 2.5), X(ox, s, sw, 13.5), X(oy, s, sw, 13.5), sw, col)
 		d := X(oy, s, sw, 8)

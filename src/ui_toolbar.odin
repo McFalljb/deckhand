@@ -36,6 +36,7 @@ Button :: enum {
 	Empty_Add_Project, // the centre's empty state: the Projects header's "+"
 	Fleet, // the fleet pill: what needs you and what works, on every machine (ui_fleet.odin)
 	Empty_Next, // the centre's empty state while something needs you: Go to next (⌥⌘A)
+	Deck, // the Deck view: every open session as a card (ui_deck.odin)
 }
 
 Button_Info :: struct {
@@ -58,6 +59,7 @@ BUTTONS := [Button]Button_Info {
 	.Empty_Add_Project = {"emptyadd", "add_project", .None},
 	.Fleet          = {"fleetpill", "next_needing_you", .None}, // drawn by fleet_pill; its tooltip in words (fleet_tip)
 	.Empty_Next     = {"emptynext", "next_needing_you", .None},
+	.Deck           = {"deckbtn", "deck_view", .Deck}, // selected while the deck shows
 }
 
 NEW_MENU_TIP :: "New tab, chat or session"
@@ -92,7 +94,7 @@ button_click :: proc(b: Button) {
 		add_project_dialog() // as the Projects header's "+" (ui_sidebar.odin)
 	case .Fleet:
 		fleet_click()
-	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close, .Empty_Next:
+	case .Toggle_Left, .Search, .New_Tab, .Toggle_Right, .Empty_Close, .Empty_Next, .Deck:
 		action_run(BUTTONS[b].action)
 	}
 }
@@ -1038,6 +1040,10 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return peek_tip(x)
 	case Hit_Peek_Row:
 		return PEEK_ROW_TIP, ""
+	case Hit_Deck_Card:
+		return deck_tip(u64(x))
+	case Hit_Deck_More:
+		return "More", ""
 	case Hit_Attention:
 		switch int(x) {
 		case ATTN_HIT_IDLE:   return attention_idle_open ? "Fold the idle sessions" : "Show the idle sessions", ""

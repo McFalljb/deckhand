@@ -789,6 +789,17 @@ machines_load :: proc() {
 	machines_publish()
 }
 
+// This machine's name, as it gives itself to other machines (machine_from_name; the sidebar's and
+// the Jobs tab's header over its own rows): the core's (a replica's live section) or this process's.
+machine_here_name :: proc() -> string {
+	if replica_process do return state.live.machine != "" ? state.live.machine : "mac"
+	if mach.from != "" do return mach.from
+	host: [256]u8
+	name := "mac"
+	if posix.gethostname(&host[0], len(host) - 1) == .OK do name = string(cstring(&host[0]))
+	return machine_from_name(name)
+}
+
 // The machines section, from the links (after any change a window should see).
 @(private = "file")
 machines_publish :: proc() {

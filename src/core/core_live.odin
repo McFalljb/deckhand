@@ -18,6 +18,7 @@ Core_Live :: struct {
 	watch:    []string, // pi's config folders the window's file watcher watches for hot reload (reload_watch_dirs)
 	holder_restart: bool, // the palette offers Restart session holder (holder_restart_available)
 	checklist: []Harness_Check_Live, // viewed from another machine (a hub): this machine's coding agents checklist, which its row shows (M6-E)
+	machine:   string, // this machine's name (machine_here_name): the sidebar's and the Jobs tab's header over its own rows
 }
 
 // One row of the checklist, as another machine's Deckhand shows it (read-only, Copy).
@@ -128,6 +129,7 @@ live_make :: proc(a: runtime.Allocator) -> Core_Live {
 	l.watch = make([]string, len(dirs), a)
 	for d, i in dirs do l.watch[i] = strings.clone(d, a)
 	l.holder_restart = holder_restart_available()
+	l.machine = strings.clone(machine_here_name(), a)
 	if window_link_hub() {
 		l.checklist = make([]Harness_Check_Live, len(harness_items), a)
 		for it, i in harness_items do l.checklist[i] = {id = strings.clone(HARNESS_MANIFEST[it.row].id, a), state = it.state, command = strings.clone(it.command, a)}

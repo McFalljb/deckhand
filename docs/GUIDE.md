@@ -253,7 +253,8 @@ the end of the sidebar (or **Add a machine…** in the palette) opens the add fi
 Machines. Type how you reach it with ssh, `user@host` or a name from `~/.ssh/config`, then Enter
 (for another port, add a `Host` entry with its `Port` to `~/.ssh/config` and type that name).
 Deckhand calls it by its host's name (`nuc` for `jb@nuc.home.arpa`); **Rename…** changes that.
-After this Mac's sections, each machine has its own, under its name, with a dot (green online,
+While Machines over SSH is on, this Mac's own sections (Open, Projects, Chats) sit under a header
+of their own: a green dot, this Mac's name and *this Mac*. After them, each machine has its own, under its name, with a dot (green online,
 amber when it needs you, red when its install failed, grey offline), what is wrong in plain words,
 and a button when there is something to do: **Log in…** (ssh wants a password, a host key or a
 code: a shell tab here runs `ssh` to it so you can answer, in a new chat if no session is open,
@@ -1355,6 +1356,8 @@ Deckhand…**. The header has **New job** (+, the [job sheet](#the-job-sheet)), 
 They are listed after this Mac's, under each machine's name (greyed while it is not connected):
 what each is up to and, when a run needs you, what for. They are read-only here: run, edit or
 pause them from a session on that machine. A run there that needs you rings the bell here.
+While Machines over SSH is on, this Mac's own jobs sit under a header of the same kind: *On* this
+Mac's name, *this Mac*, and their count.
 
 Jobs are grouped by **who they belong to**: each of your projects that has jobs (by name), then
 **Atlas**, **Chats** and **Other**. A group's row shows its name and how many jobs it has (a dot

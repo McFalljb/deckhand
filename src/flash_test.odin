@@ -251,6 +251,9 @@ status_flash_drawn :: proc(t: ^testing.T) {
 	}
 	state.settings.reduce_motion = false
 	flash_quiet(time.time_add(time.now(), -time.Minute))
+	// the flashes' clock held: a layout a busy machine makes late still sees the ages set here
+	// (a 600 ms flash once ended before its first layout at load 22)
+	flash_hold_for_test(true)
 	cmds := ui_layout(1400, 900)
 	row0, tab0 := bg_of(cmds, "open", 0), bg_of(cmds, "tab", 1)
 	row_box, tab_box := clay.GetElementData(clay.ID("open", 0)).boundingBox, clay.GetElementData(clay.ID("tab", 1)).boundingBox

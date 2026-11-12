@@ -38,3 +38,27 @@ client_wait_is_bounded :: proc(t: ^testing.T) {
 	for k in client.abandoned do delete(k, heap)
 	client.sock = nil
 }
+
+// A separate core's path_changed (its own file command) reaches an idle window: the listings
+// forget the path and a frame is asked for, so the Files tree reads it again even when the command
+// sent this window no state delta (a control caller's file, changed = false).
+@(test)
+client_path_changed_redraws :: proc(t: ^testing.T) {
+	fds: [2]posix.FD
+	testing.expect(t, posix.socketpair(.UNIX, .STREAM, .IP, &fds) == .OK)
+	defer posix.close(fds[1])
+	saved, saved_redraw := client, app.redraw
+	defer {
+		client = saved
+		app.redraw = saved_redraw
+	}
+	client = {}
+	sock: cw.Sock_Transport
+	cw.sock_open(&sock, fds[0])
+	defer cw.sock_destroy(&sock)
+	client.sock = &sock // a separate core's window
+	app.redraw = false
+	window_request_run({op = .Path_Changed, path = "/tmp/dh-path-changed/n.md"})
+	testing.expect(t, app.redraw, "an idle window was not asked to draw the Files tree again")
+	client.sock = nil
+}

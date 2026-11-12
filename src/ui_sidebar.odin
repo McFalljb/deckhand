@@ -1129,7 +1129,8 @@ session_rows :: proc(rows: []core.Sidebar_Row, project_id: u64, cs: ^core.Open_S
 			v := core.session_status_view(s.id)
 			if !live do v = {progress = -1} // what it showed last: no status
 			st := v.dot
-			marked := open_id != 0 || st != .None // an open session keeps its mark's room
+			// an open session keeps its mark's room (a Claude session open as a tab of a pi one too)
+			marked := open_id != 0 || st != .None || (s.claude && core.claude_open_tab(s.id) != 0)
 			// "needs you" outranks the time
 			when_ := st == .Waiting ? "Waiting for you" : (r.hidden ? "hidden" : rel_time(s.when_))
 			if st != .Waiting && !r.hidden && state.sidebar.sort[chat ? .Chats : .Sessions] == .Recent do when_ = core.ago(s.modified)

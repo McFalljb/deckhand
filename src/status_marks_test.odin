@@ -161,8 +161,9 @@ status_mirror_cleaned_and_skew_safe :: proc(t: ^testing.T) {
 	old := time.time_add(now, -time.Hour)
 	_, s = core.mirror_since(k, time.time_add(now, time.Hour), {key = k, since = old}, true, now)
 	testing.expect(t, s == old, "unchanged: kept, whatever their clock says")
-	_, s = core.mirror_since(k, old, {key = k + 1, since = old}, true, now)
-	testing.expect(t, s == now, "changed while watched: now")
+	last := time.time_add(now, -time.Minute)
+	_, s = core.mirror_since(k, old, {key = k + 1, since = old, at = last}, true, now)
+	testing.expect(t, s == last, "changed since the last merge: not before it")
 
 	// through a merge: the tab's mark and message as this Mac shows them
 	state^ = core.State{}
@@ -304,4 +305,103 @@ status_marks_drawn :: proc(t: ^testing.T) {
 	sm_report(sh_id, {state = .Done})
 	testing.expect(t, has_mark(marks_drawn(ui_layout(2000, 900)), .Mark_Done), "done, not seen")
 	testing.expect_value(t, box_of_id("open", 0), row_idle)
+}
+
+// Review 1: a status that changed while the link was down (or between two deltas) keeps that
+// machine's own time for the change, bounded by when this Mac last saw the old status and by now.
+@(test)
+status_mirror_change_keeps_their_time :: proc(t: ^testing.T) {
+	now := time.now()
+	k := u16(3)
+	seen_at := time.time_add(now, -4 * time.Hour) // the last merge that showed the old status
+	prev := core.Mirror_Since{key = k + 1, since = time.time_add(now, -5 * time.Hour), at = seen_at}
+	_, s := core.mirror_since(k, time.time_add(now, -3 * time.Hour), prev, true, now)
+	testing.expectf(t, s == time.time_add(now, -3 * time.Hour), "theirs, inside the bounds: %v", s)
+	_, s = core.mirror_since(k, time.time_add(now, -6 * time.Hour), prev, true, now)
+	testing.expect(t, s == seen_at, "before the last time the old status was seen: that time")
+	_, s = core.mirror_since(k, time.time_add(now, time.Hour), prev, true, now)
+	testing.expect(t, s == now, "ahead: now")
+	_, s = core.mirror_since(k, {}, prev, true, now)
+	testing.expect(t, s == now, "none sent: now")
+}
+
+// Review 2: a Claude session open as a tab of a pi session keeps its row's mark room while idle.
+@(test)
+status_marks_claude_tab_row_steady :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sid, _, _ := sm_reset()
+	defer {
+		core.platform = {}
+		state^ = core.State{}
+	}
+	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 300, .Sessions
+	s := core.find_session(sid)
+	append(&s.tabs, core.Tab{id = core.new_id(), kind = core.Claude_Tab{session_id = "cl-1"}, title = "claude", status = .Running})
+	ctab := s.tabs[len(s.tabs) - 1].id
+	append(&state.sessions, core.Session{id = "cl-1", claude = true, path = "/tmp/sm-proj/cl-1.jsonl", title = "A Claude session with a title long enough to be cut"})
+	row_line :: proc() -> string {
+		for l in strings.split_lines(texts_drawn(ui_layout(1400, 900)), context.temp_allocator) do if strings.has_prefix(l, "A Claude session") do return l
+		return ""
+	}
+	idle := row_line()
+	testing.expect(t, idle != "", "its row")
+	sm_report(ctab, {state = .Working, progress = -1})
+	testing.expect_value(t, row_line(), idle)
+}
+
+// Review 3: Atlas's button keeps one width whether or not its agent has a status.
+@(test)
+status_marks_atlas_button_steady :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sm_reset()
+	defer {
+		core.platform = {}
+		state^ = core.State{}
+	}
+	home := core.Open_Session{id = core.new_id(), home = true, pi_session_id = "home", cwd = "/tmp"}
+	append(&home.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "Atlas", status = .Running, agent = .Idle})
+	home.active_tab = home.tabs[0].id
+	append(&state.open_sessions, home)
+	state.home = home.id
+	_ = ui_layout(2000, 900)
+	d := clay.GetElementData(clay.ID("homebutton"))
+	if !d.found do return // no pi here: no button to check
+	idle := d.boundingBox
+	core.home_tab().agent = .Working
+	_ = ui_layout(2000, 900)
+	testing.expect_value(t, clay.GetElementData(clay.ID("homebutton")).boundingBox, idle)
+}
+
+// Review 4: a turning mark asks for frames only while one is on screen and motion is on.
+@(test)
+status_marks_spin_frames :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sid, _, sh_id := sm_reset()
+	defer {
+		core.platform = {}
+		state^ = core.State{}
+		state.settings.reduce_motion = false
+	}
+	state.layout.left_open, state.layout.left_width, state.layout.left_tab = true, 300, .Sessions
+	sm_report(sh_id, {state = .Working, progress = -1})
+	_ = ui_layout(1400, 900)
+	testing.expect(t, ui_spinning(), "a working tab on screen turns")
+	state.settings.reduce_motion = true
+	_ = ui_layout(1400, 900)
+	testing.expect(t, !ui_spinning(), "Reduce motion: still, no frames for it")
+	state.settings.reduce_motion = false
+	// another session in front: the working one's only mark is its row, out of sight below
+	other := core.Open_Session{id = core.new_id(), project_id = state.selected_project, pi_session_id = "pi-other", cwd = "/tmp/sm-proj"}
+	append(&other.tabs, core.Tab{id = core.new_id(), kind = core.Pi_Tab{}, title = "pi", status = .Running})
+	other.active_tab = other.tabs[0].id
+	append(&state.open_sessions, other)
+	state.current_session = other.id
+	_ = ui_layout(1400, 900)
+	testing.expect(t, ui_spinning(), "its row on screen turns")
+	_ = sid
+	_ = ui_layout(1400, 60)
+	testing.expect(t, !ui_spinning(), "its row out of sight: no frames")
 }

@@ -137,6 +137,7 @@ Machine_Mirror :: struct {
 	projects: [dynamic]Project, // in arena; State's entries are copies of these (apply_scan adds them again)
 	sessions: [dynamic]Session, // in arena: its selected project's (state.sessions while that is selected here)
 	selected: u64, // its selected project (packed)
+	merged_at: time.Time, // its last merge (mirror_since: a change after it happened after then)
 	jobs:     [dynamic]Job_Row, // in arena; State.machine_jobs holds copies
 	// what rang here (mirror_alerts): heap, kept across reconnects, gone with the machine
 	bell_based: bool, // bell_seen is set for bell_run
@@ -233,15 +234,21 @@ mirror_prog :: proc(p: Prog_Summary, now: time.Time, a: runtime.Allocator) -> Pr
 Mirror_Since :: struct {
 	key:   u16,
 	since: time.Time,
+	at:    time.Time, // when this Mac last saw it so (that merge)
 }
 
 MIRROR_SINCE_MAX :: 365 * 24 * time.Hour // older than this by that machine's clock: not believed
 
 // Since when a mirrored tab's status has been what it is: unchanged since the last merge, as it
-// was; changed while this Mac watched, now (this Mac's clock, so skew cannot show); first seen,
-// that machine's own time, never ahead of now and never absurdly old ({} = not known).
+// was; changed since then (a delta, or a link that was down a while), that machine's own time
+// for it, bounded by when this Mac last saw the old status and by now (none sent: now); first
+// seen, that machine's own time, never ahead of now and never absurdly old ({} = not known).
 mirror_since :: proc(key: u16, theirs: time.Time, prev: Mirror_Since, seen: bool, now: time.Time) -> (u16, time.Time) {
-	if seen do return key, prev.key == key ? prev.since : now
+	if seen && prev.key == key do return key, prev.since
+	if seen {
+		if theirs._nsec <= 0 || theirs._nsec > now._nsec do return key, now
+		return key, time.Time{max(theirs._nsec, prev.at._nsec)}
+	}
 	if theirs._nsec <= 0 do return key, {}
 	if theirs._nsec > now._nsec do return key, now
 	if time.diff(theirs, now) > MIRROR_SINCE_MAX do return key, {}
@@ -257,8 +264,9 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 	for s in state.open_sessions do if s.machine == no do shown[s.id] = s.shown_at
 	// and since when each tab's status has been what it is (mirror_since)
 	was := make(map[u64]Mirror_Since, 16, context.temp_allocator)
-	for s in state.open_sessions do if s.machine == no do for t in s.tabs do was[t.id] = {t.status_key, t.status_since}
+	for s in state.open_sessions do if s.machine == no do for t in s.tabs do was[t.id] = {t.status_key, t.status_since, m.merged_at}
 	now := time.now()
+	defer m.merged_at = now
 	mirror_unmerge(no)
 	virtual.arena_free_all(&m.arena)
 	a := virtual.arena_allocator(&m.arena)

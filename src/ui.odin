@@ -190,7 +190,39 @@ pulse :: proc() -> f32 {
 ui_wants_frame :: proc() -> bool {
 	again := panels_clamped
 	panels_clamped = false
-	return again || animating || (pulsing && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+	return again || animating || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+}
+
+@(private = "file")
+spinning: bool // a working mark turns where it can be seen (spin_visible): draw at PULSE_FPS
+
+// Whether the last layout has a turning mark on screen (tests).
+ui_spinning :: proc() -> bool {return spinning}
+
+// Whether a working mark is drawn where it can be seen: inside the window and the list that
+// clips it. Motion off (Reduce motion): it holds still, and asks for nothing.
+@(private = "file")
+spin_visible :: proc(cmds: clay.ClayArray(clay.RenderCommand), w, h: f32) -> bool {
+	if state.settings.reduce_motion do return false
+	clip := [4]f32{0, 0, w, h}
+	stack: [dynamic][4]f32
+	stack.allocator = context.temp_allocator
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		b := c.boundingBox
+		#partial switch c.commandType {
+		case .ScissorStart:
+			append(&stack, clip)
+			clip = {max(clip[0], b.x), max(clip[1], b.y), min(clip[2], b.x + b.width), min(clip[3], b.y + b.height)}
+		case .ScissorEnd:
+			if len(stack) > 0 do clip = pop(&stack)
+		case .Custom:
+			ic, _, _ := icon_of_command(c)
+			if ic != .Mark_Working do continue
+			if b.x < clip[2] && b.x + b.width > clip[0] && b.y < clip[3] && b.y + b.height > clip[1] do return true
+		}
+	}
+	return false
 }
 
 @(private = "file")
@@ -275,13 +307,12 @@ mark_color :: proc(m: core.Status_Mark, st: core.Row_Status) -> core.Rgba {
 	return status_color(st)
 }
 
-// A working mark's step: it turns at PULSE_FPS while one is drawn (pulse's redraws); still under
+// A working mark's step: it turns at PULSE_FPS while one is on screen (spin_visible); still under
 // Reduce motion.
 @(private = "file")
 spin_step :: proc() -> u8 {
-	pulsing = true
 	if state.settings.reduce_motion do return 0
-	return u8(pulse_step() % SPIN_STEPS)
+	return u8(pulse_step() % SPIN_STEPS) // its frames: spin_visible, after the layout
 }
 
 // A status's mark (core.status_mark), MARK px square: every state the same box, so a row or tab
@@ -424,6 +455,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		tooltip_layout(w, h)
 	}
 	cmds := clay.EndLayout(0)
+	spinning = spin_visible(cmds, w, h) // frames for a turning mark only where it is seen
 	if panels_scroll_clamp() do panels_clamped = true // drawn again at the clamped offset (ui_wants_frame)
 	return cmds
 }
@@ -970,9 +1002,11 @@ agent_button :: proc() {
 	}) {
 		avatar(AVATAR - 6)
 		if !bar_compact do clay.TextDynamic(core.agent_name(), txt(needs ? th.waiting : mix(th.text_secondary, th.text, em)))
-		if ht := core.home_tab(); ht != nil && !needs {
-			if v := core.tab_status_view(ht^); v.dot != .None do status_mark_el(v)
-		}
+		// its status mark's box in every state (top_bar_fixed_w counts it): nothing moves when it changes
+		v := core.Tab_Status_View{progress = -1}
+		if ht := core.home_tab(); ht != nil && !needs do v = core.tab_status_view(ht^)
+		if v.dot != .None do status_mark_el(v)
+		else if clay.UI()({layout = {sizing = {clay.SizingFixed(px(MARK)), clay.SizingFixed(px(MARK))}}}) {}
 		if !state.home_open && ch.unread > 0 {
 			n := ch.unread > 99 ? "99+" : fmt.tprint(ch.unread)
 			if clay.UI(clay.ID("agent_unread"))({

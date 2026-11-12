@@ -205,6 +205,8 @@ ACTIONS := [?]Action {
 		if cs == nil do return nil, false
 		return core.Close_Session{session = cs.id}, true
 	}},
+	// the window remembers the tabs the user closed by hand (closed_tabs.odin): "No closed tab to reopen" when none
+	{id = "reopen_closed_tab", label = "Reopen closed tab", keys = "⇧⌘T", make = proc() -> (core.Command, bool) {return nil, true}, ui = closed_tab_reopen},
 	{id = "ask_agent", label = "Ask Atlas…", title = proc() -> string {return fmt.tprintf("Ask %s…", core.agent_name())}, make = proc() -> (core.Command, bool) {
 		if !core.atlas_offered() do return nil, false // Atlas runs on pi (harness.odin)
 		return core.Set_Home{open = true}, true // its terminal takes the keyboard
@@ -556,6 +558,21 @@ ACTIONS := [?]Action {
 	// the core picks where (core/needing_you.odin): "Nothing needs you" when nothing does
 	{id = "next_needing_you", label = "Next needing you", keys = "⌥⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{}, true}},
 	{id = "prev_needing_you", label = "Previous needing you", keys = "⌥⇧⌘A", make = proc() -> (core.Command, bool) {return core.Next_Needing_You{back = true}, true}},
+	// "finished, not seen" by hand (core/agent_status.odin's set_unread, as the row menu's Mark as unread)
+	{id = "mark_unread", label = "Mark as unread", keys = "⇧⌘U", make = mark_unread},
+	// the core decides per tab as it applies (core/mark_read.odin): "Marked N as read", "Nothing unread"
+	{id = "mark_all_read", label = "Mark all as read", keys = "⌥⇧⌘U", make = proc() -> (core.Command, bool) {return core.Mark_All_Read{}, true}},
+	// the session shown before this one, as ⌘-Tab between two apps (shown_at); ⌥⇧⌘`: the one shown
+	// longest ago. ⌘ chords: ⌃⇥ is the programs' (a Kitty-protocol vim, an app, a page); ⌘` alone is macOS's
+	{id = "recent_session", label = "Recent session", keys = "⌥⌘`", make = proc() -> (core.Command, bool) {return session_recent(false)}},
+	{id = "least_recent_session", label = "Least recent session", keys = "⌥⇧⌘`", make = proc() -> (core.Command, bool) {return session_recent(true)}},
+	// the Open section's rows as ordered now (sidebar_open)
+	{id = "session_1", label = "Go to open session 1", keys = "⌥⌘1", make = proc() -> (core.Command, bool) {return session_nth(0)}, detail = proc() -> string {return session_nth_title(0)}},
+	{id = "session_2", label = "Go to open session 2", keys = "⌥⌘2", make = proc() -> (core.Command, bool) {return session_nth(1)}, detail = proc() -> string {return session_nth_title(1)}},
+	{id = "session_3", label = "Go to open session 3", keys = "⌥⌘3", make = proc() -> (core.Command, bool) {return session_nth(2)}, detail = proc() -> string {return session_nth_title(2)}},
+	{id = "session_4", label = "Go to open session 4", keys = "⌥⌘4", make = proc() -> (core.Command, bool) {return session_nth(3)}, detail = proc() -> string {return session_nth_title(3)}},
+	{id = "session_5", label = "Go to open session 5", keys = "⌥⌘5", make = proc() -> (core.Command, bool) {return session_nth(4)}, detail = proc() -> string {return session_nth_title(4)}},
+	{id = "session_6", label = "Go to open session 6", keys = "⌥⌘6", make = proc() -> (core.Command, bool) {return session_nth(5)}, detail = proc() -> string {return session_nth_title(5)}},
 	// the guide's copy in the data dir (agent.odin), in a Markdown tab: read-only (editor_load)
 	{id = "user_guide", label = "Deckhand user guide", make = proc() -> (core.Command, bool) {
 		p := core.agent_guide_path()
@@ -755,6 +772,44 @@ session_step :: proc(d: int) -> (core.Command, bool) {
 	if len(rows) == 0 || (len(rows) == 1 && rows[0].id == state.current_session) do return nil, false
 	for s, i in rows do if s.id == state.current_session do return core.Focus_Session{session = rows[(i + d + len(rows)) % len(rows)].id}, true
 	return core.Focus_Session{session = rows[0].id}, true
+}
+
+// The open session shown most recently before the current one (least: the one shown longest ago),
+// this Mac's or an online machine's; Home never.
+session_recent :: proc(least: bool) -> (core.Command, bool) {
+	best: ^core.Open_Session
+	for &s in state.open_sessions {
+		if s.home || s.id == state.current_session do continue
+		if s.machine != 0 {
+			online := false
+			for m in state.machines do if m.no == s.machine do online = m.status == .Online
+			if !online do continue
+		}
+		if best == nil || (least ? s.shown_at < best.shown_at : s.shown_at > best.shown_at) do best = &s
+	}
+	if best == nil do return nil, false
+	return core.Focus_Session{session = best.id}, true
+}
+
+// The Open section's i-th row (this Mac's sessions, ordered as the sidebar shows them).
+session_nth :: proc(i: int) -> (core.Command, bool) {
+	rows := core.sidebar_open()
+	if i >= len(rows) do return nil, false
+	return core.Focus_Session{session = rows[i].id}, true
+}
+
+session_nth_title :: proc(i: int) -> string {
+	rows := core.sidebar_open()
+	return i < len(rows) ? core.open_session_title(rows[i]) : ""
+}
+
+// ⇧⌘U: the focused tab (a terminal), else the session's (its active tab, or its main tab).
+mark_unread :: proc() -> (core.Command, bool) {
+	cs := core.cur()
+	if cs == nil || cs.home do return nil, false
+	if t := core.active_tab(); t != nil && core.tab_is_terminal(t^) do return core.Set_Unread{tab_id = t.id, unread = true}, true
+	if cs.pi_session_id == "" do return nil, false
+	return core.Set_Unread{pi_session_id = cs.pi_session_id, unread = true}, true
 }
 
 // Recent → Name → Created → Recent.

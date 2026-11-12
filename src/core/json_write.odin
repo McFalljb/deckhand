@@ -243,6 +243,7 @@ command_type :: proc(cmd: Command) -> string {
 	case Tab_Exited:          return "tab_exited"
 	case Program_Status:      return "program_status"
 	case Set_Unread:          return "set_unread"
+	case Mark_All_Read:       return "mark_all_read"
 	case Rescan_Done:         return "rescan_done"
 	case Refresh_Shell_Env_Done: return "refresh_shell_env_done"
 	case Bridge_Done:         return "bridge_done"
@@ -669,6 +670,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		if c.tab_id != 0 do kv_u64(&w, "tab_id", c.tab_id)
 		if c.pi_session_id != "" do kv_str(&w, "pi_session_id", c.pi_session_id)
 		kv_bool(&w, "unread", c.unread)
+	case Mark_All_Read:
 	case Rescan_Done:
 		kv_u64(&w, "request_id", c.request_id)
 	case Refresh_Shell_Env_Done:

@@ -104,7 +104,10 @@ close_tab_click :: proc(tab_id: u64) {
 	s, _, i := find_tab(tab_id)
 	if s == nil do return
 	if i == 0 do ui_do(core.Close_Session{session = s.id, ask = true})
-	else do ui_do(core.Close_Tab{tab_id = tab_id})
+	else {
+		closed_tab_record(tab_id) // the user's own close: ⇧⌘T reopens it (closed_tabs.odin)
+		ui_do(core.Close_Tab{tab_id = tab_id})
+	}
 }
 
 // A square icon button (the chevron is narrow).

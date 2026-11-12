@@ -750,6 +750,7 @@ command_from_value_as :: proc(v: json.Value, ui: bool, allocator: runtime.Alloca
 		cmd = sc
 	case "app_inspect":         cmd = App_Inspect{tab_id = get_u64(&r, "tab_id"), on = get_bool(&r, "on")}
 	case "notifications_list":  cmd = Notifications_List{limit = int(min(opt_u64(&r, "limit"), NOTICES_MAX))}
+	case "mark_all_read":       cmd = Mark_All_Read{}
 	case "set_unread":          cmd = Set_Unread{tab_id = opt_u64(&r, "tab_id"), pi_session_id = get_str(&r, "pi_session_id", optional = true), unread = get_bool(&r, "unread")}
 	case "notifications_mark_read": cmd = Notifications_Mark_Read{id = opt_u64(&r, "id"), session = opt_u64(&r, "session"), all = opt_bool(&r, "all").? or_else false}
 	case "notifications_clear": cmd = Notifications_Clear{}

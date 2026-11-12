@@ -483,6 +483,7 @@ frame :: proc "c" () {
 		autotest_step()
 	} else do core.core_tick() // inbox, the test step, terminals, persistence, jobs, Claude (core_loop.odin)
 	client_after_tick() // what the tick changed, into the window's replica (client.odin)
+	closed_tabs_settle() // the user's closes that went through (closed_tabs.odin)
 	term_views_tick() // hidden tabs' terminal copies detach; a snapshot's history (term_view_stream.odin)
 	editor_tick() // files changed on disk, git gutter (editor_watch.odin)
 	browser_debug_tick() // DECKHAND_DEBUG_BROWSER (browser.odin, spike)
@@ -840,8 +841,10 @@ event :: proc(e: ^sapp.Event) {
 			case .Q: ui_do(core.Quit{})
 			// ⌘N: a chat (Chats; the harness picker, harness.odin); ⇧⌘N: a session in the selected project. ⌥⌘T: a Claude tab
 			case .N: if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("new_chat")
-			case .T:
-				if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
+			case .T: // ⇧⌘T: reopen the last tab the user closed (closed_tabs.odin)
+				if e.modifiers & sapp.MODIFIER_SHIFT != 0 {
+					if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("reopen_closed_tab")
+				} else if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
 				else if cs != nil do ui_do(core.New_Shell_Tab{session = cs.id})
 			case .L: // a browser tab: its URL field (browser_nav.odin); else the menu bar's (Go to line)
 				if tab_browser() != nil do browser_url_focus()
@@ -853,7 +856,9 @@ event :: proc(e: ^sapp.Event) {
 				if e.modifiers & sapp.MODIFIER_ALT != 0 do ui_do(core.Set_Layout{right_open = !state.layout.right_open})
 				else do ui_do(core.Set_Layout{left_open = !state.layout.left_open})
 			case ._1 ..= ._9:
-				if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
+				if e.modifiers & sapp.MODIFIER_ALT != 0 { 	// ⌥⌘1–⌥⌘6: the Open section's rows (actions.odin)
+					if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
+				} else if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
 			case .BACKSPACE, .LEFT, .RIGHT: // ⌘⌫ ⌘← ⌘→ alone: line editing (term.odin, mac_key_text)
 				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" {
 					core.claude_note_typed(ktab)
@@ -927,7 +932,7 @@ event :: proc(e: ^sapp.Event) {
 			}
 		case Hit_Close_Tab: close_tab_click(u64(hit))
 		case Hit_Confirm:   if bar_click_ok(string(hit)) do confirm_pending(string(hit))
-		case Hit_Cancel:    if bar_click_ok(string(hit)) do ui_do(core.Cancel_Confirmation{string(hit)})
+		case Hit_Cancel:    if bar_click_ok(string(hit)) do cancel_pending(string(hit))
 		case Hit_Panel_Head: ui_do(core.Set_Panel_Collapsed{panel = string(hit), collapsed = !core.panel_collapsed(string(hit))})
 		case Hit_Palette_Row: // only while the palette has focus (widget_event)
 		case Hit_Home:      ui_do(core.Set_Home{open = !state.home_open})
@@ -1142,6 +1147,7 @@ confirm_pending :: proc(token: string) {
 		case core.Machine_Remove: cmd = core.Machine_Remove{no = c.no, confirm = token}
 		case core.Set_Machines_Reachable: cmd = core.Set_Machines_Reachable{on = c.on, confirm = token}
 		}
+		if p.caller.kind == .UI && !p.caller.hub do closed_tab_answered(p.command, true) // the user's own close: ⇧⌘T (closed_tabs.odin)
 		ui_do(cmd)
 		return
 	}
@@ -1186,7 +1192,9 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			case .LEFT, .UP:     tf_home(f, shift)
 			case .RIGHT, .DOWN:  tf_end(f, shift)
 			case .BACKSPACE:     tf_delete_to_start(f)
-			case ._1 ..= ._9:    if in_palette do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
+			case ._1 ..= ._9, .GRAVE_ACCENT: // ⌥⌘1–⌥⌘6, ⌥⌘` ⌥⇧⌘`: sessions (menubar.odin)
+				if alt do return false
+				if in_palette && e.key_code != .GRAVE_ACCENT do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
 			case .Q:             ui_do(core.Quit{})
 			}
 			return true
@@ -1557,4 +1565,10 @@ holder_ask_tick :: proc() {
 	}
 	stop := platform_ask("Another session holder is running", fmt.tprintf("%s\n\nStopping it ends its sessions. Otherwise Deckhand runs without one: tabs opened now stop when Deckhand quits.", text), "Stop It and Start a New One", "Keep It Running")
 	client_send(core.Holder_Replace{stop = stop})
+}
+
+// The user cancelled a pending command (the bar's Cancel).
+cancel_pending :: proc(token: string) {
+	for p in state.pending_confirmations do if p.token == token && p.caller.kind == .UI && !p.caller.hub do closed_tab_answered(p.command, false) // closed_tabs.odin
+	ui_do(core.Cancel_Confirmation{token})
 }

@@ -409,6 +409,8 @@ menu_run :: proc(i: int) {
 	} else if it.files != .None {
 		if t, ok := target.(Menu_Files); ok && files_step(strings.clone(t.path, context.temp_allocator), it.files) do toast_show("Path copied")
 	} else if it.cmd != nil {
+		// a tab's menu: Close tab is the user's own close (⇧⌘T reopens it: closed_tabs.odin)
+		if _, on_tab := target.(Menu_Tab); on_tab do if ct, is := it.cmd.(core.Close_Tab); is do closed_tab_record(ct.tab_id)
 		ui_do_menu(it.cmd, it.label)
 	} else if mm, ok := target.(Menu_Machine); ok && it.label == "Open web page…" {
 		palette_open_pages(u64(mm)) // the palette asks for the port

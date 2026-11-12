@@ -263,6 +263,14 @@ The causes seen so far, and the rule each one taught:
 - **Order that depends on the clock** (commits in the same second). Give fixtures fixed dates.
 - **Rows found by position.** Use `clickid`/`rclickid NAME @PATH`, so a new row above can't move it.
 - **A fake's writes in the wrong order** (argv before env). Write what the test reads last.
+- **A file watcher's backlog.** A scene that makes 10,000 files just before the app starts queues
+  their FSEvents ahead of everything after; under load they took over 10 s to drain, and the Files
+  tab of a separate core's window waited behind them for Deckhand's own New file, rename and
+  delete (`files`, `menus`). Deckhand's own changes now reach the window at once
+  (`window.request` `path_changed`); a script waits for a condition, never a fixed time.
+- **A file written while another test thread forks** (the holder tests): a child that never
+  execs keeps the write fd, and on Linux an execve of that file fails with ETXTBSY. Write
+  executables under `fork_lock`.
 
 A failure seen once and not reproduced (`browser-slots`' stray UDP socket, `browser-rlz`'s access
 times) is left to the runner's **FLAKY** report.

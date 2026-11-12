@@ -597,12 +597,13 @@ eventually
 assert_state focus.id files_name
 type new.md
 key enter
-wait 800
+eventually
 assert_files   new.md\n
 assert_file $homedir/.pi/agent/prompts/new.md 
 rclickid frow 3
 clickmenu New folder…
-wait 300
+eventually
+assert_state focus.id files_name
 type sub
 key enter
 eventually
@@ -621,7 +622,7 @@ clickmenu Move to Trash…
 eventually
 assert_state pending_confirmations.# 1
 clickid confirm_yes
-wait 800
+eventually
 assert_not_files renamed.md
 assert_files   fix.md\n
 # rows now: ... 5 [pi extensions (Deckhand's)], 6-8 its three toggles, 9 [This project],

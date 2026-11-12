@@ -65,7 +65,7 @@ assert_selection notes
 type todo
 shot files/rename
 key enter
-wait 300
+eventually
 assert_files   todo.md\n
 assert_not_files notes.md
 assert_state open_sessions.0.tabs.3.title todo.md
@@ -76,7 +76,7 @@ assert_state pending_confirmations.# 1
 assert_files   todo.md\n
 shot files/delete-confirm
 clickid confirm_yes
-wait 300
+eventually
 assert_state pending_confirmations.# 0
 assert_not_files todo.md
 # ---- the row menu ("…" on hover, right click): open a terminal in src
@@ -96,7 +96,7 @@ paste pwd\n
 waitfor proj/src 5000
 # a file made outside Deckhand shows up (the watcher); src stays open
 paste touch external.c\n
-wait 1500
+eventually
 assert_files   external.c\n
 assert_files src/\n
 # ---- drag main.c onto the terminal: its quoted path is pasted

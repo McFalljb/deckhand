@@ -307,6 +307,9 @@ case "$MODE" in
     # `when TEST_HOOKS`, as odin build compiles _test files too): the Mac's and the Linux tarball's
     odin check src/coremain -define:DECKHAND_TEST_HOOKS=false
     odin check src/coremain -target:linux_amd64 -define:DECKHAND_TEST_HOOKS=false -define:DECKHAND_VERSION=1.2.3
+    # and the app itself (release.sh's DECKHAND_RELEASE=1 build): a window test using a hook-only helper
+    # stopped the 0.3.0 release build after every other check had passed
+    odin check src -define:DECKHAND_TEST_HOOKS=false
     # the core and the holder link no window code (docs/plans/background-core.md §10.2): the check,
     # then its test (each forbidden import planted in a temporary tree)
     scripts/check-core-boundary.sh

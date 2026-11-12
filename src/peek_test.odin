@@ -49,6 +49,7 @@ pk_view :: proc(tab: u64, cols, rows: u16) -> ^Term_View {
 	gh.terminal_new(nil, &v.gt, cols, rows)
 	core.gt_setup(v.gt, core.term_colors())
 	v.cols, v.rows, v.tab_id = cols, rows, tab
+	v.snapshots = 1 // its first snapshot drew
 	term_views[tab] = v
 	append(&pk_views, v)
 	term_view_input_hook = pk_hook
@@ -59,6 +60,8 @@ pk_reset :: proc() {
 	context.allocator = runtime.heap_allocator()
 	peek = {}
 	peek_moving = false
+	away := sapp.Event{type = .UNFOCUSED} // no button down, no key held from another test
+	_ = peek_event(&away)
 	for v in pk_views {
 		delete_key(&term_views, v.tab_id)
 		term_view_free(v)
@@ -483,6 +486,7 @@ peek_steps_with_next_needing_you :: proc(t: ^testing.T) {
 	pk_session(300, "Page", pk_tab(301, "waiting", 5 * time.Minute, kind = "browser"))
 	pk_session(400, "Shorter", pk_tab(401, "waiting", 3 * time.Minute))
 	pk_session(500, "Done", pk_tab(501, "unseen", time.Minute))
+	_ = pk_view(501, 80, 24)
 	state.current_session = 100
 	peek_next()
 	testing.expect_value(t, peek.tab, u64(201))
@@ -490,6 +494,7 @@ peek_steps_with_next_needing_you :: proc(t: ^testing.T) {
 	testing.expect_value(t, peek.tab, u64(401)) // the page's session is passed over
 	pk_key(.A, sapp.MODIFIER_ALT | sapp.MODIFIER_SUPER)
 	testing.expect_value(t, peek.tab, u64(501))
+	peek_tick() // (a frame: it has shown)
 	core.inbox_drain()
 	_, t5, _ := find_tab(501)
 	testing.expect(t, !t5.unseen, "finished, seen once peeked: it needs nothing now")
@@ -529,7 +534,9 @@ peek_seen_and_sizes :: proc(t: ^testing.T) {
 	pk_session(300, "Waiting", pk_tab(301, "waiting", time.Minute))
 	state.current_session = 100
 	append(&state.notices.items, core.Notice{id = 5, kind = .Finished, session = 200, tab_id = 201, title = strings.clone("Finished"), at = time.now()})
+	_ = pk_view(201, 80, 24)
 	testing.expect(t, peek_open_session(200), "peeks")
+	peek_tick() // (a frame: it has shown)
 	core.inbox_drain()
 	_, t2, _ := find_tab(201)
 	testing.expect(t, !t2.unseen, "seen once peeked")
@@ -608,6 +615,7 @@ peek_seen_and_sizes :: proc(t: ^testing.T) {
 	append(&state.notices.items, core.Notice{id = 90, kind = .Waiting, session = rsess.id, tab_id = rtab, machine = 3, title = strings.clone("Remote"), at = time.now()})
 	append(&state.notices.items, core.Notice{id = 91, kind = .Waiting, session = rsess.id, tab_id = rtab, machine = 4, title = strings.clone("Other"), at = time.now()})
 	testing.expect(t, peek_open_session(rsess.id), "peeks at another machine's tab")
+	peek_tick()
 	core.inbox_drain()
 	testing.expect(t, state.notices.items[0].read, "another machine's entry read")
 	testing.expect(t, !state.notices.items[1].read, "not another machine's with the same ids")
@@ -746,4 +754,101 @@ peek_panel_layout_and_hits :: proc(t: ^testing.T) {
 	}
 	testing.expectf(t, problems == 0, "%d layout problems", problems)
 	state.layout.left_open, state.layout.right_open = true, false
+}
+
+// The review's five: an input method's composition is dropped in the platform too while peeking,
+// and when a peek opens and closes; holding the peek's own ⌘W or Esc does not repeat into what is
+// under it once it closed (a new press does); a peek does not open while a mouse button is down
+// (its release would be lost); a key that arrives as its tab goes (closed before it) goes nowhere;
+// seen only once its terminal has shown.
+@(test)
+peek_edges :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	pk_reset()
+	defer pk_reset()
+	pk_session(100, "Here", pk_tab(101), pk_tab(102))
+	pk_session(200, "There", pk_tab(201, "unseen", 3 * time.Minute))
+	state.current_session = 100
+	_ = pk_view(101, 80, 24)
+	b := pk_view(201, 80, 24)
+	key :: proc(k: sapp.Keycode, mods: u32 = 0, repeat := false, up := false) {
+		e := sapp.Event{type = up ? .KEY_UP : .KEY_DOWN, key_code = k, modifiers = mods, key_repeat = repeat}
+		event(&e)
+	}
+
+	// 5. seen only once its terminal has shown (a snapshot drew)
+	append(&state.notices.items, core.Notice{id = 7, kind = .Finished, session = 200, tab_id = 201, title = strings.clone("There"), at = time.now()})
+	b.snapshots = 0
+	testing.expect(t, peek_open_session(200), "peeks")
+	peek_tick()
+	core.inbox_drain()
+	_, t2, _ := find_tab(201)
+	testing.expect(t, t2.unseen && !state.notices.items[0].read, "not seen before it showed")
+	b.snapshots = 1
+	peek_tick()
+	core.inbox_drain()
+	_, t2, _ = find_tab(201)
+	testing.expect(t, !t2.unseen && state.notices.items[0].read, "seen once it showed")
+
+	// 1. a composition while peeking is dropped in the platform too; opening and closing drop one
+	n := ime.os_cancels
+	ime_set_marked("か", 1)
+	testing.expect_value(t, ime.marked, "")
+	testing.expect(t, ime.os_cancels > n, "dropped in the platform's input method too")
+	n = ime.os_cancels
+	peek_close()
+	testing.expect(t, ime.os_cancels > n, "closing drops a composition")
+	n = ime.os_cancels
+	testing.expect(t, peek_open_session(200), "peeks")
+	testing.expect(t, ime.os_cancels > n, "opening drops a composition")
+
+	// 2. ⌘W held: the first closes the peek, its repeats close nothing under it
+	key(.W, sapp.MODIFIER_SUPER)
+	testing.expect(t, !peek_is_open(), "⌘W closed it")
+	for _ in 0 ..< 3 do key(.W, sapp.MODIFIER_SUPER, repeat = true)
+	key(.W, sapp.MODIFIER_SUPER, up = true)
+	core.inbox_drain()
+	testing.expect_value(t, len(find_session(100).tabs), 2)
+	testing.expect_value(t, len(state.pending_confirmations), 0)
+	// Esc held: closes it, its repeats do not reach the terminal under it; pressed again, they do
+	testing.expect(t, peek_open_session(200), "peeks")
+	_ = pk_take(101)
+	key(.ESCAPE)
+	testing.expect(t, !peek_is_open(), "Esc closed it")
+	for _ in 0 ..< 3 do key(.ESCAPE, repeat = true)
+	key(.ESCAPE, up = true)
+	testing.expect_value(t, pk_take(101), "")
+	key(.ESCAPE)
+	testing.expect_value(t, pk_take(101), "\x1b")
+	key(.ESCAPE, up = true)
+
+	// 3. a button down (a divider or a program's drag): ⌃⌥⌘A does nothing until it is up
+	w := &find_session(200).tabs[0] // it waits for you now: ⌃⌥⌘A peeks at it
+	w.prog.state, w.prog.kind = .Blocked, .Permission
+	w.status_key = core.status_key(core.tab_status_view(w^))
+	press := sapp.Event{type = .MOUSE_DOWN, mouse_button = .LEFT, mouse_x = 5, mouse_y = 5}
+	event(&press)
+	key(.A, sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SUPER)
+	testing.expect(t, !peek_is_open(), "no peek while a button is down")
+	press.type = .MOUSE_UP
+	event(&press)
+	key(.A, sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT | sapp.MODIFIER_SUPER)
+	testing.expect(t, peek_is_open(), "after the release it peeks")
+
+	// 4. a key that arrives as its tab goes (its state update came first): nowhere
+	_ = pk_take(101)
+	find_session(200).tabs[0].has_term = false // its terminal went
+	key(.ESCAPE)
+	testing.expect(t, !peek_is_open(), "closed")
+	testing.expect_value(t, pk_take(101), "")
+	find_session(200).tabs[0].has_term = true
+	testing.expect(t, peek_open_session(200), "peeks")
+	find_session(200).tabs[0].has_term = false
+	key(.W, sapp.MODIFIER_SUPER)
+	core.inbox_drain()
+	testing.expect(t, !peek_is_open(), "closed")
+	testing.expect_value(t, len(find_session(100).tabs), 2)
+	testing.expect_value(t, len(state.pending_confirmations), 0)
+	find_session(200).tabs[0].has_term = true
 }

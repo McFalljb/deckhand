@@ -61,6 +61,7 @@ Ime :: struct {
 	marked:     string, // "" = none (heap)
 	caret:      int, // byte offset in marked
 	caret_rect: [4]f32, // last drawn caret (framebuffer px): the candidate window goes under it
+	os_cancels: int, // compositions dropped in the platform's input method too (tests)
 }
 ime: Ime
 
@@ -1384,7 +1385,10 @@ ime_commit :: proc(text: string) {
 
 ime_set_marked :: proc(text: string, caret: int) {
 	if !autotest_allows_input() do return
-	if text != "" && peek_is_open() do return // a peek takes no text: no composition under it either (ui_peek.odin)
+	if text != "" && peek_is_open() { 	// a peek takes no text: no composition, here or in the platform (ui_peek.odin)
+		ime_os_cancel()
+		return
+	}
 	if text == ime.marked do return
 	delete(ime.marked)
 	ime.marked = strings.clone(text)
@@ -1395,8 +1399,14 @@ ime_set_marked :: proc(text: string, caret: int) {
 
 ime_cancel :: proc() {
 	if ime.marked == "" do return
-	platform_ime_cancel()
+	ime_os_cancel()
 	ime_set_marked("", 0)
+}
+
+// The platform's input method drops its composition.
+ime_os_cancel :: proc() {
+	ime.os_cancels += 1
+	platform_ime_cancel()
 }
 
 // Option starts dead keys (é, ü) in text fields; in a terminal it is Alt.

@@ -359,6 +359,31 @@ run_hook :: proc(c: ^Ctx, event: string) {
 		if d := cut_field(ti, "description", HOOK_TEXT_MAX); d != "" do jw_str(&w, "description", d)
 		if cm := cut_field(ti, "command", HOOK_TEXT_MAX); cm != "" do jw_str(&w, "command", cm)
 		report(c, event, &w)
+	// Codex's hooks (Deckhand passes them per run with -c: src/core/codex.odin). The same reports as
+	// Claude's, with Codex's own field names (the same as Claude Code's); NEVER anything on stdout:
+	// Codex would add a SessionStart's or UserPromptSubmit's output to the model's context, and read
+	// a Stop's or PermissionRequest's as a decision. SessionStart comes with the first prompt (Codex
+	// starts its session lazily): the turn is reported by UserPromptSubmit just after, never idle here.
+	case "codex-session-start":
+		sid := cut_field(input, "session_id", 64)
+		if !codex_uuid(sid) {
+			hook_fail(c, event, "no Codex session_id on stdin")
+			return
+		}
+		w := jw_begin()
+		jw_str(&w, "type", "claude.session")
+		jw_str(&w, "session_id", sid)
+		if cwd := get_text(input, "cwd"); cwd != "" && len(cwd) <= HOOK_PATH_MAX do jw_str(&w, "cwd", cwd)
+		if src := cut_field(input, "source", 32); src != "" do jw_str(&w, "source", src)
+		if m := get_text(input, "model"); m != "" && len(m) <= HOOK_MODEL_MAX do jw_str(&w, "model", m)
+		hook_call(c, event, jw_end(&w))
+	case "codex-prompt-submit":
+		prompt, _ := get_str(input, "prompt")
+		hook_call(c, event, turn_cmd("submitted", title_of(prompt, HOOK_TITLE_MAX)))
+	case "codex-permission":
+		hook_call(c, event, turn_cmd("waiting"))
+	case "codex-stop":
+		hook_call(c, event, turn_cmd("idle", question = ends_with_question(get_text(input, "last_assistant_message"))))
 	case "notification":
 		kind, _ := get_str(input, "notification_type")
 		switch kind {
@@ -371,4 +396,16 @@ run_hook :: proc(c: ^Ctx, event: string) {
 	case:
 		hook_fail(c, event, "unknown hook event")
 	}
+}
+
+// A Codex session id: a UUID, 8-4-4-4-12 hex digits (Deckhand checks it again: codex_id_ok).
+codex_uuid :: proc(id: string) -> bool {
+	if len(id) != 36 do return false
+	for i in 0 ..< 36 {
+		c := id[i]
+		if i == 8 || i == 13 || i == 18 || i == 23 {
+			if c != '-' do return false
+		} else if !(c >= '0' && c <= '9' || c >= 'a' && c <= 'f' || c >= 'A' && c <= 'F') do return false
+	}
+	return true
 }

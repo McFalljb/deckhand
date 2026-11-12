@@ -460,7 +460,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	n := 0
 	for c in cands {
 		rec, _ := claude_record(c.id)
-		if rec != nil {
+		if rec != nil && !rec.codex { // a Codex claim on Claude Code's own transcript never hides it (codex_claim_drop)
 			// Deckhand's own: its row is the history's; only what the file tells
 			append(out, Claude_Disk{id = strings.clone(c.id), account = strings.clone(c.account), modified = c.modified, created = c.created})
 			continue
@@ -480,7 +480,7 @@ claude_disk_scan :: proc(p: ^Project, chats: bool) {
 	}
 	// history entries of this project whose transcript is gone (stat only)
 	for r in state.claude_history {
-		if r.project != p.cwd do continue
+		if r.project != p.cwd || r.codex do continue // a Codex conversation has no Claude transcript (codex.odin)
 		have := false
 		for f in out do if f.id == r.id do have = true
 		if have do continue
@@ -516,8 +516,13 @@ claude_disk_of :: proc(id: string) -> ^Claude_Disk {
 // A found transcript of project p's with this id: the listed rows first, else by stat in each
 // account's folders for p (an agent's open_session of a project not selected). Temp.
 claude_disk_lookup :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
+	if r, _ := claude_record(id); r != nil && !r.codex do return {}, false
+	return claude_disk_find(p, id)
+}
+
+// claude_disk_lookup whatever Deckhand's history says (codex.odin: whose conversation an id is).
+claude_disk_find :: proc(p: ^Project, id: string) -> (f: Claude_Disk, ok: bool) {
 	if p == nil || !claude_id_ok(id) do return {}, false
-	if r, _ := claude_record(id); r != nil do return {}, false
 	list := p.group == .Chats ? state.claude_disk_chats[:] : (p.id == state.selected_project ? state.claude_disk[:] : nil)
 	for x in list do if x.listed && x.id == id do return x, true
 	for a in claude_accounts() {
@@ -577,6 +582,7 @@ claude_disk_resume :: proc(p: ^Project, f: Claude_Disk, caller: Caller) -> (Resu
 	if mr, missing := claude_missing(caller); missing do return mr, false
 	if !claude_account_known(f.account) do return fail("its Claude account is no longer in Settings → Claude accounts"), false
 	if p.missing || !os.is_dir(p.cwd) do return fail("the project's folder is gone"), false
+	codex_claim_drop(p, f.id) // Claude Code's transcript: a Codex claim on its id goes (claude.odin)
 	r, ch := claude_open_disk(p, f, caller)
 	if !r.ok do return r, ch
 	if rec, _ := claude_record(f.id); rec != nil && rec.title == "" && f.title != "" do rec.title = strings.clone(f.title)

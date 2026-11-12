@@ -1663,6 +1663,11 @@ sidebar_drop :: proc(paths: []string, x, y: f32) {
 		strings.write_string(&b, shell_quote(p))
 		strings.write_byte(&b, ' ')
 	}
+	// a Codex composer: Deckhand's text, so Codex's rule (a path with " @x" would open its picker)
+	if why := core.codex_paste_refusal(tab, strings.to_string(b)); why != "" {
+		toast_show(fmt.tprintf("Not dropped into Codex: %s", why), err = true)
+		return
+	}
 	ui_do(core.Send_Text{tab.id, strings.to_string(b)})
 }
 

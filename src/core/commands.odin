@@ -1209,6 +1209,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if pty_foreground_busy(&t.pty) do return fail("a program is running in this tab; control callers type only at a shell prompt"), false
 		}
 		if tab.status != .Running do return fail("the tab's process has exited"), false
+		// a Codex composer: only the user's own paste goes in as it is (codex.odin)
+		if caller.kind != .UI || caller.hub do if why := codex_paste_refusal(tab, c.text); why != "" do return fail(why), false
 		term_paste(t, c.text)
 		return {ok = true}, false // the child's screen changes, not State
 	case Set_Focus:

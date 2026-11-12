@@ -248,7 +248,7 @@ codex_start :: proc(s: ^Open_Session, t: ^Term, tab_id: u64, ct: ^Claude_Tab, cw
 	append(&argv, ..args)
 	env := make([dynamic]string, context.temp_allocator)
 	append(&env, ..pi_extra_env(socket_claude_env(tab_id, cli)))
-	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Claude}) {
+	if !term_start(t, argv[:], cwd, env_with_legacy(env[:]), {kind = .Codex}) { // tokens.json: never adopted as a Claude tab
 		socket_forget_tab(tab_id)
 		return false
 	}
@@ -452,8 +452,25 @@ CODEX_CONFIG_FILES := [?]string{"config.toml", "AGENTS.md", "AGENTS.override.md"
 CODEX_CONFIG_FOLDERS := [?]string{"prompts", "skills", "rules"}
 
 // Whether p (clean, absolute) is Codex's sign-in or state rather than the user's config.
+// Codex's sign-in file as Codex finds it: $CODEX_HOME/auth.json (as tabs get it, absolute; HOME or
+// above too), else ~/.codex/auth.json. "" = no HOME. Temp.
+codex_auth_file :: proc() -> string {
+	if h, ok := env_lookup(child_base_env(), "CODEX_HOME"); ok && filepath.is_abs(h) {
+		return strings.concatenate({strings.trim_right(h, "/"), "/auth.json"}, context.temp_allocator)
+	}
+	home := strings.trim_right(os.get_env("HOME", context.temp_allocator), "/")
+	if home == "" do return ""
+	return strings.concatenate({home, "/.codex/auth.json"}, context.temp_allocator)
+}
+
 codex_credential :: proc(p: string) -> bool {
 	if filepath.base(p) == "auth.json" && filepath.base(filepath.dir(p)) == ".codex" do return true
+	// the sign-in where Codex keeps it, CODEX_HOME's even when that is HOME or above (codex_home
+	// is not then); symlinks followed
+	if a := codex_auth_file(); a != "" {
+		ra := fs_real(a)
+		if p == a || (ra != "" && (p == ra || fs_real(p) == ra)) do return true
+	}
 	home := codex_home()
 	if home == "" do return false
 	for c in ([2]string{home, fs_real(home)}) {
@@ -470,6 +487,7 @@ codex_credential :: proc(p: string) -> bool {
 codex_credential_files :: proc() -> []string {
 	out := make([dynamic]string, context.temp_allocator)
 	if h := codex_home(); h != "" do append(&out, strings.concatenate({h, "/auth.json"}, context.temp_allocator))
+	if a := codex_auth_file(); a != "" && (len(out) == 0 || out[0] != a) do append(&out, a)
 	return out[:]
 }
 
@@ -487,4 +505,30 @@ claude_harness_missing :: proc(codex: bool, caller: Caller) -> (r: Result, missi
 codex_chat_refused :: proc(id: u64) -> bool {
 	s := find_session(id)
 	return s != nil && claude_chat_readonly(s)
+}
+
+// Why text Deckhand puts into a Codex tab's composer on its own initiative (a dropped file's path,
+// anyone's send_text but the user's own) cannot go now ("" = it can; not a Codex tab: ""): the
+// composer rule (codex_command_text), and Codex not working or blocked (Enter or a paste mid-turn
+// would steer it; a dialog would take it). The user typing beside it is fine: it is added to
+// their text, never sent. Held prompts have their own, stricter path (Claude_Deliver).
+codex_paste_refusal :: proc(tab: ^Tab, text: string) -> string {
+	ct, is := &tab.kind.(Claude_Tab)
+	if !is || !ct.codex do return ""
+	if why := codex_command_text(text); why != "" do return why
+	w := replica_process ? tab.live.claude_wait : claude_wait_of(tab, ct) // a window's replica: the core's (Tab_Live)
+	if tab.status != .Running do w = .Not_Running
+	if w == .Typing do w = .None
+	return CODEX_WAIT_WHY[w]
+}
+
+// ---- one id, one harness ----
+
+// Whether id is a Claude Code conversation Deckhand can see: its history's, the disk index's, or a
+// transcript of p's (by stat, claude_disk_find; no scan). A Codex tab never claims one.
+claude_conversation_seen :: proc(p: ^Project, id: string) -> bool {
+	if r, _ := claude_record(id); r != nil && !r.codex do return true
+	if claude_disk_of(id) != nil do return true
+	_, ok := claude_disk_find(p, id)
+	return ok
 }

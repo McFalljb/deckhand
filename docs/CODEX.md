@@ -106,7 +106,15 @@ A Codex tab gets a Claude tab's environment and token (`DECKHAND_SOCKET`,
 written to disk. A hello with it is refused unless the connecting process descends from the tab's
 own process (`socket_claude_peer_ok`): a hook run by Codex's shared server, or any other process,
 fails closed. Codex passes the environment to its hooks and commands; a sandboxed command cannot
-reach the socket anyway.
+reach the socket anyway. In the session holder a Codex tab's process is recorded as `codex`
+(tokens.json, MAC'd), never `claude`: a saved tab relabelled in workspace.json never adopts a
+running codex as a Claude tab, nor the reverse.
+
+**One id, one harness**, decided by where it was first legitimately seen: a Codex tab never claims
+an id Deckhand knows as Claude Code's (its history, the disk index, a transcript of the project's
+by stat), for its report or a `resume`; and a Codex claim on an id that Claude Code's own
+transcript has never keeps Claude from it (the Claude tab's report, or opening the transcript's
+row, drops the claim). A hub never makes a Codex tab here, even with this machine's own ids.
 
 ## 4. Text Deckhand types into Codex's composer
 
@@ -122,7 +130,13 @@ skips only that last one). Enter during a turn would steer it, so a turn never t
 - control characters other than tab and newline.
 
 A later line starting with `/` or `!` is plain text: Codex reads a command only at the start of
-the composer. Unicode look-alikes (a fullwidth `／`) are not checked: Codex does not read them as
+the composer. The held text's Enter goes only if nothing changed after its paste: a submission
+cancels it, and Codex working or blocked by then drops it.
+
+Everything else Deckhand puts into a Codex composer on its own goes through the same rule and only
+while Codex is not working or blocked (`codex_paste_refusal`): a file dropped on the tab (its path:
+`'/tmp/a @b.txt'` is refused, with the reason in a toast) and anyone's `send_text` but the user's
+own. The user's typing and ⌘V are theirs. Unicode look-alikes (a fullwidth `／`) are not checked: Codex does not read them as
 commands either.
 
 ## 5. Installed, version, signed in
@@ -140,7 +154,8 @@ commands either.
 
 ## 6. Credentials
 
-`~/.codex/auth.json` (and `CODEX_HOME`'s, when the user sets one; never HOME or above), anything
+`~/.codex/auth.json` (and `CODEX_HOME`'s, when the user sets one: its whole folder, never HOME or
+above; with `CODEX_HOME` at HOME or above, `$CODEX_HOME/auth.json` itself), anything
 named `.codex/auth.json`, and everything in Codex's folder but its config (`config.toml`,
 `AGENTS.md`, `AGENTS.override.md`, `prompts/`, `skills/`, `rules/`) is refused wherever Deckhand
 refuses Claude's credentials (`settings_credential`: open, show, upload, list, watch, hard links by

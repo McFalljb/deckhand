@@ -201,6 +201,13 @@ machine_route :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resu
 		}
 		return {}, false
 	}
+	// a hub's Codex tab, even with this machine's own ids: never (codex.odin, CODEX_REMOTE)
+	if caller.hub {
+		#partial switch c in cmd {
+		case New_Claude_Session: if c.codex do return fail(CODEX_REMOTE), true
+		case New_Claude_Tab:     if c.codex do return fail(CODEX_REMOTE), true
+		}
+	}
 	no, mixed := command_machine(cmd)
 	if mixed do return fail("this names ids on two machines"), true
 	if no == 0 do return {}, false

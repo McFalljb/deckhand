@@ -269,6 +269,182 @@ codex_session_start_and_row :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.run_command(core.Claude_Session_Report{tab_id = cl.created_id, session_id = sid}, CX_SCRIPT).error, "that id is another harness's conversation")
 }
 
+// One id, one harness, decided by where it was first legitimately seen: a Codex tab never claims a
+// Claude conversation Deckhand can see on disk (its report and a Codex resume are refused, nothing
+// recorded), and a Codex claim on an id that turns out to be Claude Code's own transcript never
+// keeps the Claude tab from it (the Claude tab's report wins; the Codex claim goes).
+@(test)
+codex_claude_ids_not_claimed :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	cfg := cx_dir("claude-cfg")
+	os.set_env("CLAUDE_CONFIG_DIR", cfg)
+	_, sess, tab := cx_codex_session(t, "ids")
+	p := core.find_project(core.find_session(sess).project_id)
+	d := fmt.tprintf("%s/projects/%s", cfg, core.claude_project_slug(p.cwd))
+	os.make_directory_all(d)
+	transcript :: proc(d, cwd, id: string) {
+		line := fmt.tprintf(`{{"parentUuid":null,"isSidechain":false,"userType":"external","cwd":%q,"sessionId":%q,"type":"user","message":{{"role":"user","content":"claude work"}},"uuid":"u1","timestamp":"2026-11-01T10:00:00.000Z"}}`+"\n", cwd, id)
+		_ = os.write_entire_file(fmt.tprintf("%s/%s.jsonl", d, id), transmute([]u8)line)
+	}
+	id_a := "0c1a0de0-1111-4222-8333-444455556666"
+	transcript(d, p.cwd, id_a)
+	r := core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = id_a}, CX_SCRIPT)
+	testing.expect_value(t, r.error, "that id is another harness's conversation")
+	testing.expect_value(t, len(state.claude_history), 0)
+	r = core.run_command(core.New_Claude_Tab{session = sess, codex = true, resume = id_a}, CX_SCRIPT)
+	testing.expect_value(t, r.error, "that id is another harness's conversation")
+	testing.expect_value(t, len(state.claude_history), 0)
+	// the reverse: a Codex claim first (no transcript yet), then Claude Code's own transcript and
+	// its Claude tab's report: the Claude tab gets it, the Codex claim goes
+	id_b := "0c1a0de0-1111-4222-8333-444455557777"
+	r = core.run_command(core.Claude_Session_Report{tab_id = tab, session_id = id_b}, CX_SCRIPT)
+	testing.expect(t, r.ok, r.error)
+	cl := core.run_command(core.New_Claude_Tab{session = sess}, CX_UI)
+	testing.expect(t, cl.ok, cl.error)
+	transcript(d, p.cwd, id_b)
+	r = core.run_command(core.Claude_Session_Report{tab_id = cl.created_id, session_id = id_b}, CX_SCRIPT)
+	testing.expect(t, r.ok, r.error)
+	rec, _ := core.claude_record(id_b)
+	testing.expect(t, rec != nil && !rec.codex, "Claude Code's conversation now")
+	_, _, ct := core.claude_tab_of(tab)
+	testing.expect(t, ct != nil && ct.session_id == "", "the Codex claim is gone")
+	testing.expect_value(t, core.claude_tab_of_session(id_b), cl.created_id)
+	// another project's Claude transcript (not scanned, so Codex here could claim its id): its own
+	// project's row still opens it in Claude Code, and the claim goes
+	other := cx_dir("ids-other")
+	opid := core.run_command(core.Add_Project{cwd = other}, CX_UI).created_id
+	ocwd := strings.clone(core.find_project(opid).cwd, context.temp_allocator)
+	od := fmt.tprintf("%s/projects/%s", cfg, core.claude_project_slug(ocwd))
+	os.make_directory_all(od)
+	id_c := "0c1a0de0-1111-4222-8333-444455558888"
+	transcript(od, ocwd, id_c)
+	_, sess2, tab2 := cx_codex_session(t, "ids-2")
+	r = core.run_command(core.Claude_Session_Report{tab_id = tab2, session_id = id_c}, CX_SCRIPT)
+	testing.expect(t, r.ok, r.error) // nothing of the other project's is looked at from here
+	r = core.run_command(core.Open_Session_Cmd{project_id = opid, pi_session_id = id_c}, CX_UI)
+	testing.expect(t, r.ok, r.error)
+	rc, _ := core.claude_record(id_c)
+	testing.expect(t, rc != nil && !rc.codex, "Claude Code's row opens it")
+	_, _, ct2 := core.claude_tab_of(tab2)
+	testing.expect(t, ct2 != nil && ct2.session_id == "", "the claim is gone")
+	_ = sess2
+	// a Codex conversation is never a Claude row whose transcript is gone (no Claude transcript)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted", title = "codex work"}, CX_SCRIPT)
+	id_d := "0c1a0de0-1111-4222-8333-444455559999"
+	_, sess3, tab3 := cx_codex_session(t, "ids-3")
+	core.run_command(core.Claude_Session_Report{tab_id = tab3, session_id = id_d}, CX_SCRIPT)
+	core.run_command(core.Claude_Turn_Report{tab_id = tab3, state = "submitted", title = "codex work"}, CX_SCRIPT)
+	core.run_command(core.Select_Project{project_id = core.find_session(sess3).project_id}, CX_UI)
+	core.claude_disk_rescan()
+	core.claude_disk_wait()
+	f := core.claude_disk_of(id_d)
+	testing.expect(t, f == nil || !f.gone, "a Codex row is not greyed as gone")
+}
+
+// A hub (another machine's Deckhand) never starts a Codex tab here, even with this machine's own
+// ids (Codex tabs run on the Mac the user works at only, for now): refused before anything runs.
+@(test)
+codex_hub_refused :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	_, sess, _ := cx_codex_session(t, "hub")
+	pid := core.find_session(sess).project_id
+	n := len(state.open_sessions)
+	hub := core.Caller{kind = .UI, hub = true}
+	testing.expect_value(t, core.run_command(core.New_Claude_Session{project_id = pid, codex = true}, hub).error, core.CODEX_REMOTE)
+	testing.expect_value(t, core.run_command(core.New_Claude_Tab{session = sess, codex = true}, hub).error, core.CODEX_REMOTE)
+	testing.expect_value(t, len(state.open_sessions), n)
+	testing.expect_value(t, len(core.find_session(sess).tabs), 1)
+	// nor from a Codex row (its resume makes a new Codex tab)
+	main_tab := core.find_session(sess).tabs[0].id
+	sid := "01a1d0d6-5353-7ff3-9308-ff91070ad5aa"
+	core.run_command(core.Claude_Session_Report{tab_id = main_tab, session_id = sid}, CX_SCRIPT)
+	core.run_command(core.Close_Session{session = sess}, core.Caller{kind = .Internal})
+	testing.expect_value(t, core.run_command(core.Claude_Resume{claude_session_id = sid}, hub).error, core.CODEX_REMOTE)
+	testing.expect_value(t, len(state.open_sessions), n - 1)
+	// this machine's own callers still can
+	testing.expect(t, core.run_command(core.Claude_Resume{claude_session_id = sid}, CX_UI).ok)
+}
+
+// Text Deckhand puts into a Codex composer on its own initiative goes through the one rule
+// (codex_paste_refusal: the composer rule, and only while Codex is not working or blocked): a
+// dropped file's path, anyone's send_text but the user's. The user's own typing and ⌘V are theirs.
+@(test)
+codex_generated_paste :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	dir := cx_dir("paste")
+	got := fmt.tprintf("%s/stdin", dir)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf("exec cat > %s", got))
+	_, _, tab := cx_codex_session(t, "paste")
+	_, tb, _ := core.claude_tab_of(tab)
+	cx_paste_mode(tab)
+	cx_osc(tab, .Idle)
+	mention := "'/tmp/example @README.txt' "
+	testing.expect_value(t, core.codex_paste_refusal(tb, mention), "an @mention would open Codex's file or agent picker; send the name without @")
+	testing.expect_value(t, core.codex_paste_refusal(tb, "'/tmp/notes.txt' "), "")
+	// the user typing first: a drop still goes in beside it
+	core.claude_note_typed(tb)
+	testing.expect_value(t, core.codex_paste_refusal(tb, "'/tmp/notes.txt' "), "")
+	cx_osc(tab, .Working)
+	testing.expect_value(t, core.codex_paste_refusal(tb, "'/tmp/notes.txt' "), "Codex is working")
+	cx_osc(tab, .Idle)
+	// send_text: a script's and a hub's go through the rule; the user's own paste is theirs
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = mention}, CX_SCRIPT).error, "an @mention would open Codex's file or agent picker; send the name without @")
+	testing.expect_value(t, core.run_command(core.Send_Text{tab_id = tab, text = "/new"}, CX_SCRIPT).error, "text starting with / would be a Codex command (/ slash command, ! shell, $ skill): Deckhand sends only messages")
+	testing.expect(t, !core.run_command(core.Send_Text{tab_id = tab, text = mention}, core.Caller{kind = .UI, hub = true}).ok, "a hub's")
+	testing.expect(t, core.run_command(core.Send_Text{tab_id = tab, text = "@mine\n"}, CX_UI).ok, "the user's own ⌘V")
+	testing.expectf(t, strings.contains(cx_read_after(got, 100), "@mine"), "the user's paste went in")
+}
+
+// The Enter after a held text's paste is written only if nothing changed meanwhile: a submission
+// (the hooks' submitted) cancels it, and Codex working or blocked by then drops it (an Enter
+// during a turn would steer it).
+@(test)
+codex_delayed_enter_rechecked :: proc(t: ^testing.T) {
+	context.allocator = cx_reset()
+	defer cx_done()
+	dir := cx_dir("enter")
+	got := fmt.tprintf("%s/stdin", dir)
+	os.set_env("DECKHAND_CODEX_CMD", fmt.tprintf("stty raw -echo; exec cat > %s", got))
+	_, _, tab := cx_codex_session(t, "enter")
+	cx_paste_mode(tab)
+	time.sleep(100 * time.Millisecond) // stty ran
+	enters :: proc(s: string) -> int {return strings.count(s, "\r")}
+	now :: proc(path: string) -> string { 	// what codex got, without a tick (cx_read_after ticks: the Enter would go)
+		time.sleep(40 * time.Millisecond)
+		data, _ := os.read_entire_file(path, context.temp_allocator)
+		return string(data)
+	}
+	// 1. Codex reports working between the paste and its Enter: no Enter
+	testing.expect(t, core.run_command(core.Claude_Prompt{tab_id = tab, text = "first"}, CX_CONTROL).ok)
+	cx_osc(tab, .Idle)
+	core.claude_tick()
+	testing.expectf(t, strings.contains(now(got), "first"), "pasted")
+	cx_osc(tab, .Working)
+	time.sleep(core.CLAUDE_ENTER_DELAY + 20 * time.Millisecond)
+	core.claude_tick()
+	testing.expect_value(t, enters(cx_read_after(got, 100)), 0)
+	// 2. a submission between the paste and its Enter: cancelled
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	cx_osc(tab, .Idle)
+	testing.expect(t, core.run_command(core.Claude_Prompt{tab_id = tab, text = "second"}, CX_CONTROL).ok)
+	core.claude_tick()
+	testing.expectf(t, strings.contains(now(got), "second"), "pasted")
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "submitted"}, CX_SCRIPT)
+	time.sleep(core.CLAUDE_ENTER_DELAY + 20 * time.Millisecond)
+	core.claude_tick()
+	testing.expect_value(t, enters(cx_read_after(got, 100)), 0)
+	// 3. nothing changed: the Enter goes
+	core.run_command(core.Claude_Turn_Report{tab_id = tab, state = "idle"}, CX_SCRIPT)
+	testing.expect(t, core.run_command(core.Claude_Prompt{tab_id = tab, text = "third"}, CX_CONTROL).ok)
+	core.claude_tick()
+	time.sleep(core.CLAUDE_ENTER_DELAY + 20 * time.Millisecond)
+	core.claude_tick()
+	testing.expect_value(t, enters(cx_read_after(got, 100)), 1)
+}
+
 // Resume from its row: `codex resume <id>` in a Codex-only session of its project; flags and
 // accounts never; a Claude conversation's id is not a Codex one.
 @(test)
@@ -466,6 +642,16 @@ codex_credential_guard :: proc(t: ^testing.T) {
 	link := fmt.tprintf("%s/innocent.json", home)
 	posix.link(strings.clone_to_cstring(fmt.tprintf("%s/.codex/auth.json", home), context.temp_allocator), strings.clone_to_cstring(link, context.temp_allocator))
 	testing.expect(t, core.settings_credential(link, core.credential_ids()), "a hard link to auth.json")
+	// CODEX_HOME is HOME (or above it): Codex's sign-in is $CODEX_HOME/auth.json, refused there too
+	// (its folder is not all Codex's: only that file), and by inode
+	os.set_env("CODEX_HOME", home)
+	defer os.unset_env("CODEX_HOME")
+	_ = os.write_entire_file(fmt.tprintf("%s/auth.json", home), transmute([]u8)string("{}"))
+	testing.expect(t, core.settings_credential(fmt.tprintf("%s/auth.json", home)), "$CODEX_HOME/auth.json")
+	testing.expect(t, !core.settings_credential(fmt.tprintf("%s/proj/notes.md", home)), "the rest of HOME is not Codex's")
+	link2 := fmt.tprintf("%s/innocent2.json", home)
+	posix.link(strings.clone_to_cstring(fmt.tprintf("%s/auth.json", home), context.temp_allocator), strings.clone_to_cstring(link2, context.temp_allocator))
+	testing.expect(t, core.settings_credential(link2, core.credential_ids()), "a hard link to $CODEX_HOME/auth.json")
 }
 
 // The wire: harness "codex" on new_claude_session and new_claude_tab (anything else refused); the
@@ -527,4 +713,13 @@ codex_wire_and_persist :: proc(t: ^testing.T) {
 	// a saved Codex tab with flags or a non-UUID id is not restored
 	r := core.run_command(core.Restore_Session{project_id = pid, pi_session_id = "abc-1", agent = .Claude, tabs = {{kind = .Claude, claude_id = "abc-1", codex = true}}}, core.Caller{kind = .Internal})
 	testing.expect(t, !r.ok, "not a Codex session id")
+	// a saved Codex main tab with flags or read-only (a Codex tab has neither) is skipped cleanly:
+	// refused before anything is restored, never a session without its main tab
+	n := len(state.open_sessions)
+	bid := "01a1d0d6-5353-7ff3-9308-ff91070ad5ff"
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, args = {"-m", "o3"}}, {kind = .Shell}}}, core.Caller{kind = .Internal})
+	testing.expect(t, !r.ok, "flags")
+	r = core.run_command(core.Restore_Session{project_id = pid, pi_session_id = bid, agent = .Claude, tabs = {{kind = .Claude, claude_id = bid, codex = true, readonly = true}}}, core.Caller{kind = .Internal})
+	testing.expect(t, !r.ok, "read-only")
+	testing.expect_value(t, len(state.open_sessions), n)
 }

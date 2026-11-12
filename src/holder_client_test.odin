@@ -412,6 +412,37 @@ holder_adopt_checks_start :: proc(t: ^testing.T) {
 	testing.expect(t, !f6, "term 6 is no longer listed: pruned")
 }
 
+// A Codex tab's codex is recorded as "codex" (tokens.json, MAC'd), not "claude": a saved tab
+// relabelled from "codex" to "claude" (workspace.json is not MAC'd) never adopts a running codex as
+// a Claude tab (Claude's looser composer rule), nor the reverse; a Codex tab adopts its own.
+@(test)
+holder_adopt_codex_kind :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "pi\r\n"), fake_term(4, "codex\r\n"), fake_term(5, "codex\r\n"), fake_term(6, "claude\r\n")}, tails = {transmute([]u8)string("pi\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("codex\r\n"), transmute([]u8)string("claude\r\n")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	proj := adopt_proj()
+	defer os.remove(proj)
+	binds := make(map[u32]core.Held_Start, context.temp_allocator)
+	binds[3] = {kind = .Pi}
+	binds[4] = {kind = .Codex} // relabelled "claude" below
+	binds[5] = {kind = .Codex}
+	binds[6] = {kind = .Claude} // relabelled "codex" below
+	id1, id2, id3 := "01a1d0d6-5353-7ff3-9308-ff91070ad531", "01a1d0d6-5353-7ff3-9308-ff91070ad532", "01a1d0d6-5353-7ff3-9308-ff91070ad533"
+	text := fmt.tprintf(`{{"v":1,"holder":"%s","projects":[{{"cwd":"%s","added":true}}],"open_sessions":[{{"pi_session_id":"aaaa-1","cwd":"%s","session_dir":"","project":"%s","tabs":[{{"kind":"pi","held":3}},{{"kind":"claude","claude_session_id":"%s","held":4}},{{"kind":"codex","claude_session_id":"%s","held":5}},{{"kind":"codex","claude_session_id":"%s","held":6}}],"active_tab":0}}]}}`, f.instance, proj, proj, proj, id1, id2, id3)
+	adopt_run(t, &f, text, binds)
+	s: ^core.Open_Session
+	for &x in state.open_sessions do if !x.home do s = &x
+	testing.expect(t, s != nil && len(s.tabs) == 4, "restored")
+	if s == nil || len(s.tabs) != 4 do return
+	testing.expect_value(t, s.tabs[0].status, core.Tab_Status.Running)
+	testing.expect(t, core.term_of(s.tabs[1].id) == nil, "a codex never adopted as a Claude tab")
+	testing.expect(t, core.claude_tab_is_codex(s.tabs[2]) && core.term_of(s.tabs[2].id) != nil, "a Codex tab adopts its codex")
+	testing.expect(t, core.term_of(s.tabs[3].id) == nil, "a claude never adopted as a Codex tab")
+	st, _ := core.socket_tokens_start_of(5)
+	testing.expect_value(t, st.kind, core.Held_Kind.Codex)
+}
+
 // Terminals no restored tab claims are hung up only when that is known to be safe: the saved
 // workspace restored cleanly and listed them (or they already ended). Otherwise (--fresh, a
 // workspace moved aside, a crash before the first save) they keep running in the holder, their

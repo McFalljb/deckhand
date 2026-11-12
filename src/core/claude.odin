@@ -376,7 +376,14 @@ claude_tick :: proc() {
 			if rt.enter_due != {} && time.tick_since(rt.enter_due) >= 0 {
 				rt.enter_due = {}
 				claude_rt[tab.id] = rt
-				if t := term_of(tab.id); t != nil && t.running do pty_write(&t.pty, transmute([]u8)string("\r"))
+				// Codex working or blocked since the paste (its OSC 7501, or its hooks' permission): an
+				// Enter now would steer the turn or answer a dialog; dropped (the text stays typed)
+				enter := true
+				if ct.codex {
+					v := tab_status_view(tab)
+					if (v.source == .Osc7501 && (v.state == .Working || v.state == .Blocked)) || ct.turn == .Waiting do enter = false
+				}
+				if t := term_of(tab.id); enter && t != nil && t.running do pty_write(&t.pty, transmute([]u8)string("\r"))
 				window_state_changed()
 				continue
 			}
@@ -923,6 +930,28 @@ claude_record :: proc(id: string) -> (^Claude_Record, int) {
 	return nil, -1
 }
 
+// A Claude tab of p's reports or resumes id: when a Codex tab claimed it but Claude Code's own
+// transcript of p's has it, the Codex claim was never legitimate (an id's harness is where it was
+// first legitimately seen): its record and the Codex tabs' hold on it go.
+codex_claim_drop :: proc(p: ^Project, id: string) {
+	rec, i := claude_record(id)
+	if rec == nil || !rec.codex do return
+	if _, ok := claude_disk_find(p, id); !ok do return
+	record_free(rec^)
+	ordered_remove(&state.claude_history, i)
+	for &s in state.open_sessions do for &tab in s.tabs {
+		ct, is := &tab.kind.(Claude_Tab)
+		if !is || !ct.codex || ct.session_id != id do continue
+		if s.agent == .Claude && s.tabs[0].id == tab.id && s.pi_session_id == id {
+			delete(s.pi_session_id)
+			s.pi_session_id = ""
+		}
+		delete(ct.session_id)
+		ct.session_id = ""
+	}
+	window_state_changed()
+}
+
 @(private = "file")
 record_free :: proc(r: Claude_Record) {
 	delete(r.id)
@@ -1041,6 +1070,7 @@ claude_host :: proc(p: ^Project) -> ^Open_Session {
 // open behind (an agent never changes what the user sees).
 @(private = "file")
 claude_open :: proc(s: ^Open_Session, cwd, resume: string, args: []string, caller: Caller, account: string, resume_path := "", codex := false) -> (Result, bool) {
+	if codex && caller.hub do return fail(CODEX_REMOTE), false // every new Codex tab (a row's resume too): never a hub's (machine_route.odin)
 	focus := caller.kind == .UI || caller.kind == .Script
 	tab := Tab{id = new_id(), kind = Claude_Tab{session_id = strings.clone(resume), args = clone_strings(args), account = strings.clone(account), resume_path = strings.clone(resume_path), codex = codex}, title = strings.clone(codex ? "Codex" : "Claude"), status = .Running}
 	if cwd != s.cwd do tab.cwd = strings.clone(cwd)
@@ -1117,6 +1147,7 @@ claude_resume_cwd :: proc(rec: ^Claude_Record, p: ^Project, s: ^Open_Session = n
 claude_restore_session :: proc(p: ^Project, c: Restore_Session) -> (Result, bool) {
 	if len(c.tabs) == 0 || c.tabs[0].kind != .Claude || c.tabs[0].claude_id != c.pi_session_id || claude_args_check(c.tabs[0].args) != "" do return fail("a Claude session's first tab is its Claude tab"), false
 	if !(c.tabs[0].codex ? codex_id_ok(c.pi_session_id) : claude_id_ok(c.pi_session_id)) do return fail("not a Claude session id"), false
+	if c.tabs[0].codex && (len(c.tabs[0].args) > 0 || c.tabs[0].readonly) do return fail("a Codex tab has no flags and no read-only mode"), false // restore_tab drops it: never a session without its main tab
 	if claude_open_tab(c.pi_session_id) != 0 do return fail("this session is already open"), false
 	s := Open_Session{agent = .Claude, pi_session_id = strings.clone(c.pi_session_id), project_id = p.id, cwd = strings.clone(p.cwd), restored = true, missing = !os.is_dir(p.cwd)}
 	restore_tabs(&s, c.tabs, c.layout) // its main tab is c.tabs[0], with its own saved pane
@@ -1217,7 +1248,9 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if c.resume != "" {
 			if c.codex && !codex_id_ok(c.resume) do return fail("resume must be a Codex session id"), false
 			if !c.codex && !claude_id_ok(c.resume) do return fail("resume must be a Claude session id"), false
-			// a conversation resumes in its own harness only
+			// a conversation resumes in its own harness only (codex.odin: one id, one harness)
+			if c.codex && claude_conversation_seen(find_project(s.project_id), c.resume) do return fail("that id is another harness's conversation"), false
+			if !c.codex do codex_claim_drop(find_project(s.project_id), c.resume)
 			if rec, _ := claude_record(c.resume); rec != nil && rec.codex != c.codex do return fail("that id is another harness's conversation"), false
 			if tid := claude_tab_of_session(c.resume); tid != 0 {
 				if _, ot, oct := claude_tab_of(tid); ot != nil && oct.codex != c.codex do return fail("that id is another harness's conversation"), false
@@ -1334,6 +1367,10 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 		if !claude_tab_id_ok(ct, c.session_id) do return fail(ct.codex ? "session_id must be a Codex session id" : "session_id must be a Claude session id"), false
 		p := find_project(s.project_id)
 		project := p != nil ? p.cwd : s.cwd
+		// one id, one harness (codex.odin): Codex never takes Claude Code's; Claude Code's own
+		// transcript beats a Codex claim on its id
+		if ct.codex && claude_conversation_seen(p, c.session_id) do return fail("that id is another harness's conversation"), false
+		if !ct.codex do codex_claim_drop(p, c.session_id)
 		if rec, _ := claude_record(c.session_id); rec != nil && rec.project != project do return fail("that Claude session belongs to another project"), false
 		if rec, _ := claude_record(c.session_id); rec != nil && rec.codex != ct.codex do return fail("that id is another harness's conversation"), false
 		if claude_id_taken(s, tab, p, c.session_id) do return fail("that id is another session's"), false
@@ -1373,6 +1410,7 @@ claude_apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Resul
 			ct.turn = .Working
 			rt := claude_rt[tab.id]
 			rt.typed = false // the prompt the user typed went: the input is empty again
+			rt.enter_due = {} // a submission since a paste: its Enter is not due any more
 			claude_rt[tab.id] = rt
 			claude_work_submitted(tab) // finished subagents leave its panel
 			if r, _ := claude_record(ct.session_id); r != nil {

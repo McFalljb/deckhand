@@ -155,6 +155,7 @@ command_type :: proc(cmd: Command) -> string {
 	case New_Chat:            return "new_chat"
 	case Focus_Session:       return "focus_session"
 	case Next_Needing_You:    return "next_needing_you"
+	case Reopen_Closed_Tab:   return "reopen_closed_tab"
 	case Close_Session:       return "close_session"
 	case New_Shell_Tab:       return "new_shell_tab"
 	case Close_Tab:           return "close_tab"
@@ -389,6 +390,7 @@ write_command :: proc(b: ^strings.Builder, cmd: Command, redact := false) {
 		kv_u64(&w, "session", c.session)
 	case Next_Needing_You:
 		if c.back do kv_bool(&w, "back", true)
+	case Reopen_Closed_Tab:
 	case Close_Session:
 		kv_u64(&w, "session", c.session)
 		token(&w, c.confirm, redact)

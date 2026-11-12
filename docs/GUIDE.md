@@ -453,8 +453,12 @@ before.
   path and Hide. Sessions offer Pin, Reveal in Finder, Copy path (of the session file), Copy
   session info, Send to Atlas, Mark as unread (open sessions; Mark as read when it is), Hide and
   Close session.
-- **To come back to a session later**, use its **…** → **Mark as unread**: it keeps the accent-coloured dot
-  until you look at it again.
+- **To come back to a session later**, use its **…** → **Mark as unread**, or press ⇧⌘U in it
+  (Window menu or the palette: the tab you are in, if it is a terminal, else the session's): it
+  keeps the accent-coloured dot until you look at it again. ⌥⇧⌘U (**Mark all as read**) clears
+  that dot on every open session on this Mac and says how many ("Marked 2 as read", or "Nothing
+  unread"); waiting for you, errors and questions stay, since they are what the tab's program
+  says, not a mark. Other machines' sessions keep theirs.
 - **To start a job for a project**, click **New job…** under the selected project (below
   **+ New session**), or use its menu's **New job for this project…**: the [job
   sheet](#the-job-sheet) opens with that project chosen.
@@ -536,6 +540,16 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   address field. Type an address and press Enter (or **Go**). See [Browser tabs](#browser-tabs).
 - **To switch tabs**, click one or press ⌘1–⌘9; ⇧⌘] and ⇧⌘[ go to the next and previous tab.
   ⌥⌘↓ and ⌥⌘↑ go to the next and previous open session (Window menu).
+- **To go back to the session you were just in**, press ⌃⇥ (**Recent session**, Window menu or the
+  palette): it switches between the last two sessions you looked at, as ⌘-Tab does between apps,
+  on this Mac or an online machine. ⌃⇧⇥ (**Least recent session**) goes to the one you looked at
+  longest ago, so pressing it again walks through them all. In a terminal ⌃⇥ is Deckhand's (a
+  terminal would get a plain Tab for it).
+- **To go to an open session by its place**, press ⌥⌘1 to ⌥⌘6: the first to sixth row of the
+  sidebar's Open section as it is ordered now (the session on screen is row 1, then those waiting
+  for you, then the most recently shown). In the Window menu and the palette they are Go to open
+  session 1 (⌥⌘1), Go to open session 2 (⌥⌘2), Go to open session 3 (⌥⌘3), Go to open session 4
+  (⌥⌘4), Go to open session 5 (⌥⌘5) and Go to open session 6 (⌥⌘6).
 - **To go to what needs you**, press ⌥⌘A (**Next needing you**, Window menu or the palette): the
   next open session that needs you, on this Mac or another machine that is online, with the tab
   that needs you on screen. Waiting for you (a permission, a question, a login) comes first, then
@@ -545,6 +559,15 @@ Each open session has one **pi tab** (always first) and any number of **shell ta
   needing you**) goes back. With nothing needing you it says "Nothing needs you".
 - **To close a tab**, click its **×** or press ⌘W. Closing a tab that is busy asks first: a shell
   running a command, or an editor with unsaved changes.
+- **To reopen a tab you closed**, press ⇧⌘T (**Reopen closed tab**, File menu or the palette); again
+  for the one before, up to the last 10 you closed on this Mac, in the session it was in (brought
+  to the front). What comes back: an editor or Markdown tab opens its file as it is on disk now
+  (unsaved changes are gone), a browser tab its address, an app tab its app from the project's
+  `.deckhand/apps.json` (a command line you typed is not kept), a Claude tab its conversation
+  (resumed), a Changes tab its checkout, and a shell tab a **new** shell in its folder ("Reopened a
+  new terminal in …": what ran there is gone). The list is kept in memory only, never saved; a tab
+  whose session you closed since is skipped, and a tab closed on another machine is not on it.
+  With nothing to reopen it says "No closed tab to reopen".
 - **Right-click a tab** for its menu: **Split pane right**, **Split pane down**, the **Move tab to
   the pane …** that apply, and **Close tab** (on the pi tab: **Close session**, which asks first).
 - **To split the centre into panes**, press ⌘D (**Split pane right**) or ⇧⌘D (**Split pane
@@ -1971,7 +1994,8 @@ pi tab), and switches show a checkmark (the columns, Atlas, the appearance and t
 A shortcut works the same whether you press it or pick its menu item, and it goes first to
 whatever has the keyboard: ⌘C copies from the text field, the editor or the terminal you are in;
 ⌘W in Atlas's drawer hides the drawer. Keys that belong to the terminal (⌘⌫, ⌘←, ⌘→ and the ⌥
-keys) have no menu item and always reach the terminal. The tables below follow the menus.
+keys) have no menu item and always reach the terminal; ⌃⇥ and ⌃⇧⇥ are Deckhand's (a terminal
+would only get a plain Tab). The tables below follow the menus.
 
 **Deckhand**
 
@@ -1999,6 +2023,7 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Open file… | ⌘P | the current project's files |
 | Close tab | ⌘W | the pi tab: close the session, asks first; in Atlas: hide the drawer |
 | Close session |  | asks first |
+| Reopen closed tab | ⇧⌘T | the last tab you closed on this Mac (up to 10; [To reopen a tab you closed](#tabs)) |
 | Save | ⌘S | an editor tab with unsaved changes |
 
 **Edit**
@@ -2048,6 +2073,9 @@ keys) have no menu item and always reach the terminal. The tables below follow t
 | Tab 1, Tab 2, Tab 3, Tab 4, Tab 5, Tab 6, Tab 7, Tab 8, Tab 9 | ⌘1, ⌘2, ⌘3, ⌘4, ⌘5, ⌘6, ⌘7, ⌘8, ⌘9 (⌘1–⌘9) | the pane with the keyboard's tabs; in the palette: run its rows |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | in the Open section's order |
 | Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | waiting for you, then errors, then finished and not seen, on every online machine ([To go to what needs you](#tabs)) |
+| Recent session, Least recent session | ⌃⇥, ⌃⇧⇥ | the last one you looked at; the oldest |
+| Go to open session 1–6 | ⌥⌘1–⌥⌘6 | the Open section's rows |
+| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | this tab; this Mac's sessions |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | a new shell in the new pane |
 | Close pane (its tabs stay) | ⇧⌘W | its tabs join the pane next to it |
 | Even out panes |  | every pane gets equal room |
@@ -2138,6 +2166,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Inspect app boxes |  | the app tab's **Inspect**: its boxes and their labels over it |
 | Close tab | ⌘W | close the current (non-pi) tab |
 | Close session |  | close the session on screen (asks) |
+| Reopen closed tab | ⇧⌘T | the last tab you closed (its file, address, app or conversation; a shell: a new one in its folder) |
 | Show changes |  | the Changes tab of the session's checkout |
 | Ask Atlas… |  | open the drawer with the keyboard in it |
 | Atlas: change model |  | pi's model selector in Atlas |
@@ -2167,6 +2196,9 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Next tab, Previous tab | ⇧⌘], ⇧⌘[ | |
 | Next session, Previous session | ⌥⌘↓, ⌥⌘↑ | |
 | Next needing you, Previous needing you | ⌥⌘A, ⌥⇧⌘A | |
+| Recent session, Least recent session | ⌃⇥, ⌃⇧⇥ | |
+| Go to open session 1–6 | ⌥⌘1–⌥⌘6 | |
+| Mark as unread, Mark all as read | ⇧⌘U, ⌥⇧⌘U | |
 | Split pane right, Split pane down | ⌘D, ⇧⌘D | |
 | Close pane (its tabs stay) | ⇧⌘W | |
 | Even out panes |  | |

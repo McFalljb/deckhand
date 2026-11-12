@@ -76,6 +76,7 @@ MENUBAR := [?]Bar_Item {
 		SEP,
 		{action = "close_tab"},
 		{action = "close_session"},
+		{action = "reopen_closed_tab"},
 		SEP,
 		{action = "save_file", ok = proc() -> bool {return editor_dirty(tab_editor())}},
 	}},
@@ -167,6 +168,16 @@ MENUBAR := [?]Bar_Item {
 		{action = "prev_session"},
 		{action = "next_needing_you"},
 		{action = "prev_needing_you"},
+		{action = "recent_session"},
+		{action = "least_recent_session"},
+		{action = "session_1"},
+		{action = "session_2"},
+		{action = "session_3"},
+		{action = "session_4"},
+		{action = "session_5"},
+		{action = "session_6"},
+		{action = "mark_unread"},
+		{action = "mark_all_read"},
 		SEP,
 		{id = "front", title = "Bring all to front", native = .Front},
 	}},
@@ -291,7 +302,7 @@ menubar_tag :: proc(it: ^Bar_Item) -> int {
 }
 
 // The action whose menu shortcut a key press is (event(): keys that only the
-// menu bar knows, such as ⌘+ or ⇧⌘]); "" = none.
+// menu bar knows, such as ⌘+ or ⇧⌘], and ⌃⇥ ⌃⇧⇥); "" = none.
 menubar_key_action :: proc(code: sapp.Keycode, mods: u32) -> string {
 	m := mods & (sapp.MODIFIER_SUPER | sapp.MODIFIER_SHIFT | sapp.MODIFIER_ALT | sapp.MODIFIER_CTRL)
 	for it in menubar_items() {
@@ -376,6 +387,7 @@ parse_keys :: proc(keys: string) -> (k: Bar_Key, ok: bool) {
 	case "↓": k.code, k.equiv = .DOWN, "\uF701" // NSDownArrowFunctionKey
 	case "←": k.code, k.equiv = .LEFT, "\uF702" // NSLeftArrowFunctionKey
 	case "→": k.code, k.equiv = .RIGHT, "\uF703" // NSRightArrowFunctionKey
+	case "⇥": k.code, k.equiv = .TAB, "\t"
 	case:
 		if len(rest) != 1 do return {}, false
 		c := rest[0]

@@ -726,6 +726,15 @@ event :: proc(e: ^sapp.Event) {
 		app.key_taken = true
 		return
 	}
+	// ⌃⇥ ⌃⇧⇥: the recent sessions (actions.odin), from anywhere: a terminal gets a plain Tab for
+	// ⌃⇥ (no program here tells them apart), the editor and pages none
+	if e.type == .KEY_DOWN && e.key_code == .TAB && e.modifiers & (sapp.MODIFIER_SUPER | sapp.MODIFIER_CTRL | sapp.MODIFIER_ALT) == sapp.MODIFIER_CTRL {
+		ime_cancel()
+		if menu.open do menu_close()
+		if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
+		app.key_taken = true
+		return
+	}
 	// the panes' keys (ui_panes.odin): ⌘D ⇧⌘D split, ⌃⌘arrows focus, ⌃⇧⌘arrows move the tab,
 	// ⇧⌘W unsplit; from anywhere but a text field
 	if e.type == .KEY_DOWN && state.focus_widget == "" && pane_key(e) {
@@ -840,8 +849,10 @@ event :: proc(e: ^sapp.Event) {
 			case .Q: ui_do(core.Quit{})
 			// ⌘N: a chat (Chats; the harness picker, harness.odin); ⇧⌘N: a session in the selected project. ⌥⌘T: a Claude tab
 			case .N: if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("new_chat")
-			case .T:
-				if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
+			case .T: // ⇧⌘T: reopen the last closed tab (core/closed_tabs.odin)
+				if e.modifiers & sapp.MODIFIER_SHIFT != 0 {
+					if e.modifiers & sapp.MODIFIER_ALT == 0 do action_run("reopen_closed_tab")
+				} else if e.modifiers & sapp.MODIFIER_ALT != 0 do action_run("new_claude_tab")
 				else if cs != nil do ui_do(core.New_Shell_Tab{session = cs.id})
 			case .L: // a browser tab: its URL field (browser_nav.odin); else the menu bar's (Go to line)
 				if tab_browser() != nil do browser_url_focus()
@@ -853,7 +864,9 @@ event :: proc(e: ^sapp.Event) {
 				if e.modifiers & sapp.MODIFIER_ALT != 0 do ui_do(core.Set_Layout{right_open = !state.layout.right_open})
 				else do ui_do(core.Set_Layout{left_open = !state.layout.left_open})
 			case ._1 ..= ._9:
-				if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
+				if e.modifiers & sapp.MODIFIER_ALT != 0 { 	// ⌥⌘1–⌥⌘6: the Open section's rows (actions.odin)
+					if id := menubar_key_action(e.key_code, e.modifiers); id != "" do action_run(id)
+				} else if cmd, ok := tab_nth(int(e.key_code) - int(sapp.Keycode._1)); ok do ui_do(cmd) // in the focused pane (actions.odin)
 			case .BACKSPACE, .LEFT, .RIGHT: // ⌘⌫ ⌘← ⌘→ alone: line editing (term.odin, mac_key_text)
 				if kt != nil && mac_key_text(e.key_code, e.modifiers, false) != "" {
 					core.claude_note_typed(ktab)
@@ -1186,7 +1199,9 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 			case .LEFT, .UP:     tf_home(f, shift)
 			case .RIGHT, .DOWN:  tf_end(f, shift)
 			case .BACKSPACE:     tf_delete_to_start(f)
-			case ._1 ..= ._9:    if in_palette do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
+			case ._1 ..= ._9: // ⌥⌘1–⌥⌘6: the Open section's rows (menubar.odin)
+				if alt do return false
+				if in_palette do palette_run_index(palette.first + int(e.key_code) - int(sapp.Keycode._1))
 			case .Q:             ui_do(core.Quit{})
 			}
 			return true

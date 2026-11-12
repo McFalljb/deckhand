@@ -496,6 +496,7 @@ Command :: union {
 	New_Chat,
 	Focus_Session,
 	Next_Needing_You,
+	Reopen_Closed_Tab,
 	Close_Session,
 	New_Shell_Tab,
 	Close_Tab,
@@ -1071,6 +1072,8 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 		focus_session(c.session, caller)
 		if c.reopen do restart_if_dead(s, caller.kind == .UI)
 		return {ok = true}, true
+	case Reopen_Closed_Tab:
+		return reopen_closed_tab(caller, request_id) // closed_tabs.odin
 	case Next_Needing_You:
 		s, tab := next_needing_target(c.back, hub = caller_from_hub(caller))
 		if s == nil || tab == nil {
@@ -1140,6 +1143,7 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			if !go_on do return gr, ch
 		}
 		comments_close_act(s, tab.id, c.comments) // send or drop them (the close is going ahead)
+		closed_tab_note(s, tab^, caller) // ⇧⌘T reopens it (closed_tabs.odin)
 		claude_tab_gone(tab) // a Claude tab's held texts; its history entry is used now
 		tab_free_kind(tab)
 		drop_term(tab.id)

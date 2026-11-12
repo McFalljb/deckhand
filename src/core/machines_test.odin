@@ -180,14 +180,14 @@ machines_scan_round1 :: proc(t: ^testing.T) {
 	testing.expect_value(t, strings.join(va, " ", context.temp_allocator), fmt.tprintf("build/deckhand-core-serve connect --from Some-Mac --core %s", id))
 }
 
-// The setting that opens the hub door: off by default, the user's only.
+// The setting that opens the hub door: off by default, the user's only at this Mac (never a hub's).
 @(test)
 machines_reachable_setting :: proc(t: ^testing.T) {
 	testing.expect(t, !machines_reachable_default_on, "off by default")
 	found := false
 	for e in COMMAND_SPECS do if e.type == "set_machines_reachable" {
 		found = true
-		testing.expect_value(t, e.who, Command_Who.User)
+		testing.expect_value(t, e.who, Command_Who.User_Here)
 	}
 	testing.expect(t, found, "set_machines_reachable is a command")
 }

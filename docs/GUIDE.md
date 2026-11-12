@@ -1386,7 +1386,10 @@ pi is installed; Claude Code's once it has been used:
   machine's Deckhand that logs in here over `ssh` as you (Remote Login on, your keys) can see and
   drive this Mac's sessions. Off, no other machine can. A machine you allow acts as you on this
   Mac: it can type into its shells and prompt its sessions and its Atlas, and so reach the machines
-  this Mac reaches. Allow only machines you trust as yourself. A Linux machine (x86_64) runs its core as your
+  this Mac reaches. It can't change the settings that bound it and your agents here: **Allow other
+  machines to connect**, **Machines over SSH**, the pi extensions (guardrails among them), Claude
+  Code's skip-permissions default and read-only chats; only you, at this Mac, change those (as
+  with your notifications and your machines list). Allow only machines you trust as yourself. A Linux machine (x86_64) runs its core as your
   systemd user service `deckhand-core`, started when needed. Unless lingering is on for you there,
   it stops when you log out of that machine, and its jobs with it: `loginctl enable-linger` there
   keeps it running. Its sessions keep running when that core restarts or updates, as on a Mac: they run in a

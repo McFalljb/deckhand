@@ -286,21 +286,25 @@ route_on_behalf_lowers :: proc(t: ^testing.T) {
 		for i := len(rt_win) - 1; i >= 0; i -= 1 do if json_path(rt_win[i].payload, "type") == "result" do return rt_win[i].payload
 		return ""
 	}
-	user_only := `{"type":"set_remote_machines","on":true}`
+	user_only := `{"type":"set_tidy_projects","on":false}`
 	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"control"}`, user_only))
-	testing.expect(t, json_path(last_result(), "result.ok") == "false" && !state.settings.remote_machines, "control can't change a user-only setting")
-	// a machine_* command: never from a hub, not even as ui (User_Here)
-	for ob in ([]string{`{"kind":"control"}`, `{"kind":"ui"}`}) {
-		rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(ob, `{"type":"machine_connect","no":3}`))
-		testing.expect(t, json_path(last_result(), "result.ok") == "false" && strings.contains(last_result(), "not allowed"), "machine_* from a hub: refused")
+	testing.expect(t, json_path(last_result(), "result.ok") == "false" && !state.settings.tidy_off, "control can't change a user-only setting")
+	// a machine_* command, and the settings that bound other machines and agents here: never from
+	// a hub, not even as ui (User_Here)
+	for here in ([]string{`{"type":"machine_connect","no":3}`, `{"type":"set_remote_machines","on":true}`, `{"type":"set_machines_reachable","on":false}`}) {
+		for ob in ([]string{`{"kind":"control"}`, `{"kind":"ui"}`}) {
+			rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(ob, here))
+			testing.expect(t, json_path(last_result(), "result.ok") == "false" && strings.contains(last_result(), "not allowed"), "from a hub: refused")
+		}
 	}
+	testing.expect(t, !state.settings.remote_machines, "Machines over SSH: unchanged")
 	for ob in ([]string{"", `{"kind":"none"}`, `{"kind":"internal"}`, `{"kind":"panel"}`, `{"kind":"script"}`, `{}`}) {
 		rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(ob, user_only))
 		testing.expect(t, strings.contains(last_result(), "on_behalf"), "on_behalf none, missing, script (claude.* reports) or another kind: refused")
 	}
-	testing.expect(t, !state.settings.remote_machines, "nothing changed")
+	testing.expect(t, !state.settings.tidy_off, "nothing changed")
 	rt_window_send(cw.JSON_CHANNEL, .Data, hub_cmd(`{"kind":"ui"}`, user_only))
-	testing.expect(t, json_path(last_result(), "result.ok") == "true" && state.settings.remote_machines, "ui: the user's")
+	testing.expect(t, json_path(last_result(), "result.ok") == "true" && state.settings.tidy_off, "ui: the user's")
 	rt_window_send(cw.JSON_CHANNEL, .Data, `{"v":1,"type":"window.command","id":"w","now":true,"command":{"focus_take":{"widget":"x"}}}`)
 	testing.expect(t, strings.contains(last_result(), "not a hub's"), "a hub's window.command is refused (never internal)")
 	// review round 1: a window's other messages (the tab_host caller, a call's answer, a request's

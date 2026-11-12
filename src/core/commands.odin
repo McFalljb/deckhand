@@ -1083,10 +1083,12 @@ apply :: proc(cmd: Command, caller: Caller, request_id: u64) -> (r: Result, chan
 			return {ok = true, data = data}, true
 		}
 		// another machine's: as a click on its row, then on its tab (machine_route.odin: the
-		// session is focused here and there; the tab, on that machine)
+		// session is focused here and there; the tab, on that machine, and its answer is this one's)
 		if r := run_command(Focus_Session{session = s.id}, caller); !r.ok do return r, false
-		if session_focused_id(s) != tab.id do run_command(Focus_Tab{tab_id = tab.id}, caller)
-		return {ok = true, data = data}, false
+		if session_focused_id(s) == tab.id do return {ok = true, data = data}, false
+		r := run_command(Focus_Tab{tab_id = tab.id}, caller, request_id) // pending: its finished has this request's id
+		if r.ok do r.data = data
+		return r, false
 	case Close_Session:
 		s := find_session(c.session)
 		if s == nil do return fail("no such session"), false

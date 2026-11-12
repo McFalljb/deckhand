@@ -29,7 +29,8 @@ package core
 // machine (removed, or Machines over SSH off); a link that drops keeps them as last seen. Another machine's State is untrusted: every string is cleaned
 // (text_clean: printable, no bidi controls, bounded; what the sidebar draws or its filter matches, names,
 // folders and titles, text_clean_remote's, one line too), every list capped, an id that does not pack
-// is dropped, and a tab keeps only its kind (no paths, URLs or runtime): the merged entries carry
+// is dropped, and a tab keeps only its kind and its status (no paths, URLs or runtime; of its OSC 7501 summary
+// and Claude hooks only the enums and time its dot is made of): the merged entries carry
 // nothing this Mac's core could act on. They are never saved (persist.odin), never started here
 // (term_start refuses their tab ids), and a command naming one runs on that machine, not here
 // (machine_route.odin, M6-C), except focusing one and selecting one of its projects (this Mac's
@@ -190,7 +191,8 @@ remote_status :: proc(s: string) -> string {
 	return job_status_icon(s) != "•" ? s : "unknown"
 }
 
-// A tab's kind without what it holds (paths, URLs, accounts): which kind it is, only.
+// A tab's kind without what it holds (paths, URLs, accounts): which kind it is, and for a Claude
+// tab only the two enums its dot is made of.
 @(private = "file")
 tab_kind_bare :: proc(k: Tab_Kind) -> Tab_Kind {
 	switch _ in k {
@@ -201,9 +203,20 @@ tab_kind_bare :: proc(k: Tab_Kind) -> Tab_Kind {
 	case Markdown_Tab: return Markdown_Tab{}
 	case Browser_Tab:  return Browser_Tab{}
 	case App_Tab:      return App_Tab{}
-	case Claude_Tab:   return Claude_Tab{}
+	case Claude_Tab:
+		// its hooks' turn and how its last turn ended: what its dot is made of (claude_status_dot,
+		// tab_status_view), so its row and next_needing_you see a permission or an error
+		ct := k.(Claude_Tab)
+		return Claude_Tab{turn = ct.turn <= max(Claude_Turn) ? ct.turn : .Unknown, ended = ct.ended <= max(Claude_Ended) ? ct.ended : .None}
 	}
 	return Shell_Tab{}
+}
+
+// A tab's OSC 7501 summary as its dot needs it (tab_status_view): its state, kind and time;
+// none of its program's strings (app, title, message, id).
+mirror_prog :: proc(p: Prog_Summary) -> Prog_Summary {
+	if p.state > max(Prog_State) || p.kind > max(Prog_Kind) do return {}
+	return Prog_Summary{state = p.state, kind = p.kind, progress = -1, at = p.at}
 }
 
 // Machine no's entries from r (its replica) into State, replacing what was there of it.
@@ -251,7 +264,7 @@ mirror_merge :: proc(no: u64, r: ^State, m: ^Machine_Mirror) {
 			if len(ns.tabs) >= MIRROR_TABS_MAX do break
 			tid, tok := id_pack(no, tab.id)
 			if !tok do continue
-			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = remote_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, pane = pane})
+			append(&ns.tabs, Tab{id = tid, machine = no, kind = tab_kind_bare(tab.kind), title = remote_text(tab.title, MIRROR_TEXT_MAX, heap), status = tab.status, exit = tab.exit, agent = tab.agent, waiting = tab.waiting, question = tab.question, unseen = tab.unseen, output_recent = tab.output_recent, has_term = tab.has_term, prog = mirror_prog(tab.prog), pane = pane})
 		}
 		if len(ns.tabs) == 0 { 	// an open session always has its main tab
 			wire_free(&ns, type_info_of(Open_Session), heap)

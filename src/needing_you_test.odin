@@ -278,3 +278,118 @@ needing_you_action_menu_and_authority :: proc(t: ^testing.T) {
 	// always runs (the core says when nothing needs you): listed in the palette
 	testing.expect(t, action_ok("next_needing_you") && action_ok("prev_needing_you"))
 }
+
+// Another machine's tabs whose status comes from OSC 7501 (a shell's program) or Claude Code's
+// hooks (its turn waits on a permission; its last turn ended on an error): the mirror keeps what
+// the dot is made of, so the sidebar row and the key agree on them.
+@(test)
+needing_you_remote_osc_and_claude_status :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	nn_reset()
+	state.settings.remote_machines = true
+	state.machines = make([]core.Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	r: core.State
+	m: core.Machine_Mirror
+	add :: proc(r: ^core.State, id: u64, tab: core.Tab) {
+		s := core.Open_Session{id = id, project_id = 5, pi_session_id = strings.clone(fmt.tprintf("x%d", id)), cwd = strings.clone("/home/me"), title = strings.clone("there")}
+		append(&s.tabs, tab)
+		s.active_tab = tab.id
+		append(&r.open_sessions, s)
+	}
+	osc := core.Tab{id = 11, kind = core.Shell_Tab{}, title = strings.clone("sh"), status = .Running}
+	osc.prog.state, osc.prog.kind = .Blocked, .Permission
+	add(&r, 10, osc)
+	add(&r, 20, core.Tab{id = 21, kind = core.Claude_Tab{turn = .Waiting}, title = strings.clone("claude"), status = .Running})
+	add(&r, 30, core.Tab{id = 31, kind = core.Claude_Tab{ended = .Error}, title = strings.clone("claude"), status = .Running})
+	core.mirror_merge(3, &r, &m)
+	defer {
+		core.mirror_unmerge(3)
+		core.mirror_free(&m)
+		core.replica_free(&r, runtime.heap_allocator())
+		nn_reset()
+	}
+	Want :: struct {
+		id: u64,
+		st: core.Row_Status,
+	}
+	for w in ([]Want{{10, .Waiting}, {20, .Waiting}, {30, .Error}}) {
+		id, st := w.id, w.st
+		sid, _ := core.id_pack(3, id)
+		row, _ := core.session_row_status(core.find_session(sid))
+		testing.expectf(t, row == st, "session %d: the row shows %v, want %v", id, row, st)
+	}
+	s10, _ := core.id_pack(3, 10)
+	s20, _ := core.id_pack(3, 20)
+	s30, _ := core.id_pack(3, 30)
+	order := nn_order()
+	testing.expectf(t, nn_same(order, {s10, s20, s30}), "order %v", order)
+}
+
+// Going to another machine's tab says what happened to it: a caller whose focus_tab may not go
+// there (a script) gets that refusal, not success; the user's is forwarded (pending, then its
+// finished with this request's id).
+@(test)
+needing_you_remote_focus_result :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	nn_reset()
+	state.settings.remote_machines = true
+	state.machines = make([]core.Machine_View, 1)
+	state.machines[0] = {no = 3, name = "nuc", status = .Online}
+	r: core.State
+	m: core.Machine_Mirror
+	s := core.Open_Session{id = 9, project_id = 5, pi_session_id = strings.clone("abc"), cwd = strings.clone("/home/me"), title = strings.clone("there")}
+	append(&s.tabs, core.Tab{id = 10, kind = core.Pi_Tab{}, title = strings.clone("pi"), status = .Running, agent = .Idle})
+	append(&s.tabs, core.Tab{id = 11, kind = core.Pi_Tab{}, title = strings.clone("pi 2"), status = .Running, waiting = true})
+	s.active_tab = 10
+	append(&r.open_sessions, s)
+	core.mirror_merge(3, &r, &m)
+	core.machine_test_links.on = true
+	core.machine_test_links.up = make(map[u64]bool)
+	core.machine_test_links.up[3] = true
+	defer {
+		core.machine_route_down(3, gone = true)
+		core.machine_test_links.on = false
+		for x in core.machine_test_links.texts do delete(x)
+		clear(&core.machine_test_links.texts)
+		delete(core.machine_test_links.up)
+		core.mirror_unmerge(3)
+		core.mirror_free(&m)
+		core.replica_free(&r, runtime.heap_allocator())
+		nn_reset()
+	}
+	res := core.run_command(core.Next_Needing_You{}, {kind = .Script})
+	testing.expect(t, !res.ok, "a script's focus_tab there is refused: so is this")
+	testing.expect(t, strings.contains(res.error, "another machine"), res.error)
+	state.current_session = 0
+	res = core.run_command(core.Next_Needing_You{}, NN_UI, 77)
+	testing.expect(t, res.ok, res.error)
+	testing.expect(t, res.pending, "forwarded: its finished comes later")
+}
+
+// A text field with the keyboard (the sidebar filter, a browser's address): ⌘A alone selects all;
+// ⌥⌘A and ⌥⇧⌘A pass on to the menu bar (next, previous needing you), and ⌃⌘A selects nothing.
+@(test)
+needing_you_keys_pass_text_fields :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	nn_reset()
+	defer {
+		tf_set(&filter_field, "")
+		nn_reset()
+	}
+	state.focus_widget = "sidebar_filter"
+	S, A, SH, C := u32(sapp.MODIFIER_SUPER), u32(sapp.MODIFIER_ALT), u32(sapp.MODIFIER_SHIFT), u32(sapp.MODIFIER_CTRL)
+	for mods in ([]u32{S | A, S | A | SH, S | C}) {
+		tf_set(&filter_field, "abc")
+		tf_end(&filter_field, false) // tf_set selects all: nothing selected
+		e := sapp.Event{type = .KEY_DOWN, key_code = .A, modifiers = mods}
+		took := widget_event(&e)
+		testing.expectf(t, tf_selected_text(&filter_field) == "", "mods %x: selected %q", mods, tf_selected_text(&filter_field))
+		if mods & A != 0 do testing.expectf(t, !took, "mods %x: the field kept it", mods)
+	}
+	tf_set(&filter_field, "abc")
+	tf_end(&filter_field, false)
+	e := sapp.Event{type = .KEY_DOWN, key_code = .A, modifiers = S}
+	testing.expect(t, widget_event(&e))
+	testing.expect_value(t, tf_selected_text(&filter_field), "abc")
+}

@@ -1154,6 +1154,7 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 	shift := e.modifiers & sapp.MODIFIER_SHIFT != 0
 	cmd := e.modifiers & sapp.MODIFIER_SUPER != 0
 	alt := e.modifiers & sapp.MODIFIER_ALT != 0
+	ctrl := e.modifiers & sapp.MODIFIER_CTRL != 0
 	before := strings.clone(tf_text(f), context.temp_allocator)
 	defer {
 		// a changed query starts over at the best match
@@ -1168,7 +1169,9 @@ widget_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		if cmd {
 			#partial switch e.key_code {
-			case .A: tf_select_all(f)
+			case .A: // ⌘A alone; ⌥⌘A ⌥⇧⌘A: next, previous needing you (menubar.odin)
+				if alt do return false
+				if !ctrl do tf_select_all(f)
 			case .C: if s := tf_selected_text(f); s != "" do clipboard_set(s)
 			case .X:
 				if s := tf_selected_text(f); s != "" {

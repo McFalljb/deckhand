@@ -68,6 +68,11 @@ cx_reset :: proc(version := "0.167.2") -> runtime.Allocator {
 	os.set_env("DECKHAND_CLAUDE_CMD", "sleep 30")
 	os.set_env("DECKHAND_CODEX_CMD", "sleep 30")
 	os.set_env("DECKHAND_CODEX_BIN", cx_fake_install(cx_dir("bin"), version))
+	// a Claude tab beside it (one test) needs Deckhand's plugin: the checkout's, as on CI (no
+	// build/claude-code next to the test binary there); never the user's real Claude folder
+	wd, _ := os.get_working_directory(context.temp_allocator)
+	os.set_env("DECKHAND_CLAUDE_PLUGIN", fmt.tprintf("%s/integrations/claude-code", wd))
+	os.set_env("CLAUDE_CONFIG_DIR", fmt.tprintf("%s/deckhand-cx-no-claude-config", strings.trim_right(os.get_env("TMPDIR", context.temp_allocator), "/")))
 	core.claude_found = .Yes
 	core.codex_found = .Yes
 	core.codex_login_set(.Signed_In) // never asks (a stand-in would only sleep)

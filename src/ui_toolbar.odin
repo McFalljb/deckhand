@@ -359,7 +359,7 @@ pop_run :: proc(it: Pop_Item) {
 	if preview != .None do play_bell_sound(core.BELL_SOUND_LABELS[preview])
 }
 
-// ---- the Notifications grid: per group, Bell (on/off), macOS (never, background, always), Sound ----
+// ---- the Notifications grid (the Settings page's): per group, Bell (on/off), macOS (never, background, always), Sound ----
 
 // Its rows top to bottom, and what each is called.
 BELL_GRID_ORDER :: [4]core.Bell_Group{.Waiting, .Finished, .Errors, .Jobs}
@@ -381,80 +381,8 @@ bell_sound_step :: proc(g: core.Bell_Group) -> core.Set_Bell {
 }
 bell_sound_detail :: proc(g: core.Bell_Group) -> string {return core.BELL_SOUND_LABELS[core.bell_sound_of(state.settings, g)]}
 
-// The columns' widths: each fits its widest choice, so the columns line up.
-@(private = "file")
-bell_grid_cols :: proc() -> (bell, mac, sound: f32) {
-	pad := px(2 * (SP_1 + 2))
-	bell = max(px(SWITCH_W + 2 * SP_1), text_w("Bell", FONT_UI_SMALL))
-	mac = text_w("macOS", FONT_UI_SMALL)
-	for n in core.OS_WHEN_NAMES do mac = max(mac, text_w(n, FONT_UI_SMALL) + pad)
-	sound = text_w("Sound", FONT_UI_SMALL)
-	for n in core.BELL_SOUND_LABELS do sound = max(sound, text_w(n, FONT_UI_SMALL) + pad)
-	return
-}
-
-@(private = "file")
-bell_grid :: proc() {
-	th := theme()
-	bw, mw, sw := bell_grid_cols()
-	row :: proc() -> clay.ElementDeclaration {
-		return {layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POPOVER_ROW_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}
-	}
-	head :: proc(text: string, w: f32) {
-		if clay.UI()({layout = {sizing = {clay.SizingFixed(w), clay.SizingFit()}, childAlignment = {x = .Center}}}) {
-			clay.TextDynamic(text, txt(theme().text_muted, FONT_UI_SMALL))
-		}
-	}
-	// the header: what the columns are
-	if clay.UI(clay.ID("bell_grid_head"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(POP_HEAD_H))}, padding = {pu(SP_2), pu(SP_1), 0, 0}, childGap = pu(SP_1), childAlignment = {y = .Center}}}) {
-		pop_label("Notify me about")
-		spacer()
-		head("Bell", bw)
-		head("macOS", mw)
-		head("Sound", sw)
-	}
-	for g in BELL_GRID_ORDER {
-		if clay.UI(clay.ID("bell_grid_row", u32(g)))(row()) {
-			clay.TextDynamic(BELL_GRID_LABELS[g], txt(th.text_secondary))
-			spacer()
-			// Bell: a switch in a cell the size of the column
-			it := Pop_Item(int(Pop_Item.Bell_Finished) + int(g))
-			id := pop_id(it)
-			bg, _ := overlay(id, false, pop_hovered(it))
-			if clay.UI(id)({
-				layout = {sizing = {clay.SizingFixed(bw), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
-				backgroundColor = bg,
-				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			}) {
-				switch_control(g not_in state.settings.bell_off)
-			}
-			w := core.bell_os_when(state.settings, g)
-			grid_chip(Pop_Item(int(Pop_Item.Os_Finished) + int(g)), core.OS_WHEN_NAMES[w], w != .Never, mw)
-			s := core.bell_sound_of(state.settings, g)
-			grid_chip(Pop_Item(int(Pop_Item.Sound_Finished) + int(g)), core.BELL_SOUND_LABELS[s], s != .None, sw)
-		}
-	}
-}
-
-// One of the grid's choices: a chip that steps to the next choice (accent-tinted unless off).
-@(private = "file")
-grid_chip :: proc(it: Pop_Item, text: string, on: bool, w: f32) {
-	th := theme()
-	id := pop_id(it)
-	bg, em := overlay(id, false, pop_hovered(it))
-	if on do bg = cc(mix(th.bg_elevated, th.accent, 0.22 + 0.14 * em))
-	if clay.UI(id)({
-		layout = {sizing = {clay.SizingFixed(w), clay.SizingFixed(px(CHIP_SMALL_H))}, childAlignment = {x = .Center, y = .Center}},
-		backgroundColor = bg,
-		cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-		border = {color = cc(on ? with_alpha(th.accent, 0.6) : th.border), width = clay.BorderOutside(pu(core.BORDER_W))},
-	}) {
-		clay.TextDynamic(text, txt(on ? th.text : mix(th.text_muted, th.text_secondary, em), FONT_UI_SMALL))
-	}
-}
-
-// The grid's tooltips: what the cell is now, what a click does, and the rule.
-@(private = "file")
+// The grid's tooltips (the Settings page's Notifications grid): what the cell is now, what a
+// click does, and the rule.
 bell_grid_tip :: proc(it: Pop_Item) -> string {
 	switch {
 	case it >= .Bell_Finished && it <= .Bell_Jobs:
@@ -971,6 +899,8 @@ hit_tip :: proc(h: Hit) -> (label, keys: string) {
 		return "Show all", ""
 	case Hit_Divider:
 		return "Drag to resize, double-click to reset", ""
+	case Hit_Spage:
+		return settings_page_tip(int(x)), ""
 	case Hit_Pop:
 		if Pop_Item(x) == .Reload_Pi do return "Reload every idle pi tab now (/reload); busy ones once idle", ""
 		if Pop_Item(x) == .Restart_Claude do return "Restart every idle Claude tab now (each resumes its conversation; background work stops); busy ones once idle", ""

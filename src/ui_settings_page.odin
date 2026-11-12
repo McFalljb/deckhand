@@ -1041,6 +1041,13 @@ sp_file_edit :: proc() {
 	if sp_card("") do sp_edit_row(title, "name")
 }
 
+// An item's tooltip: the notifications grid's cells say what they are and the rule ("": none).
+settings_page_tip :: proc(k: int) -> string {
+	if k < 0 || k >= len(spage.items) do return ""
+	if it := spage.items[k]; it.do_ == .Grid do return bell_grid_tip(it.pop)
+	return ""
+}
+
 // A right click on a file or folder row: the old Settings tab's row menu (ui_files.odin
 // settings_menu_items: the same commands and confirmations).
 settings_page_context :: proc(k: int, at: [2]f32) {

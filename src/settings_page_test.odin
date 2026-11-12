@@ -283,3 +283,51 @@ settings_page_file_menu :: proc(t: ^testing.T) {
 	s := core.find_session(10)
 	testing.expect(t, s != nil && len(s.tabs) == 2 && s.tabs[1].title == "new.md", "in the session it was opened from")
 }
+
+// The Notifications grid (on the page now, not the gear) at every text size: its columns line up
+// and every cell stays in the page's body; a changed choice is drawn; a cell's tooltip says the rule.
+@(test)
+settings_page_bell_grid :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	if !testing.expect(t, audit_ui(), "fonts") do return
+	sp_test_setup()
+	defer {
+		state.settings.text_size = .Default
+		fonts_apply(theme_font_config(theme()), 1)
+		sp_test_setup()
+	}
+	settings_page_open(.Notifications)
+	core.inbox_drain()
+	for size in core.Text_Size {
+		state.settings.text_size = size
+		fonts_apply(theme_font_config(theme()), 1)
+		_ = ui_layout(WINDOW_MIN_W, AUDIT_H)
+		_ = ui_layout(WINDOW_MIN_W, AUDIT_H)
+		body := clay.GetElementData(clay.ID("spbody")).boundingBox
+		x0: [3]f32
+		cells := 0
+		for it, k in spage.items do if it.do_ == .Grid {
+			d := clay.GetElementData(clay.ID("spi", u32(k)))
+			if !testing.expectf(t, d.found, "%v cell %v", size, it.pop) do continue
+			b := d.boundingBox
+			testing.expectf(t, b.x >= body.x && b.x + b.width <= body.x + body.width, "%v: %v %v leaves the page %v", size, it.pop, b, body)
+			c := it.pop >= .Sound_Finished ? 2 : it.pop >= .Os_Finished ? 1 : 0
+			if x0[c] == 0 do x0[c] = b.x + b.width / 2
+			else do testing.expectf(t, abs(b.x + b.width / 2 - x0[c]) < 0.5, "%v: column %d not aligned", size, c)
+			cells += 1
+		}
+		testing.expectf(t, cells == 12, "%v: %d cells", size, cells)
+	}
+	core.run_command(core.Set_Bell{sound = #partial [core.Bell_Group]Maybe(core.Bell_Sound){.Jobs = .Basso}}, {kind = .UI})
+	cmds := ui_layout(1600, 900)
+	found := false
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType == .Text && string(c.renderData.text.stringContents.chars[:c.renderData.text.stringContents.length]) == "Basso" do found = true
+	}
+	testing.expect(t, found, "the changed sound is drawn")
+	for it, k in spage.items do if it.do_ == .Grid && it.pop == .Sound_Waiting {
+		tip := settings_page_tip(k)
+		testing.expectf(t, strings.contains(tip, "background") && strings.contains(tip, "always"), "the rule in the tip: %q", tip)
+	}
+}

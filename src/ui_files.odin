@@ -1,11 +1,10 @@
 package main
 
-// The left column's tab switch (Sessions | Files | Settings) and the two
-// trees: the Files tab and the Settings tab (settings_files.odin builds its
-// rows; the same rows, keys, filter and menus here). The header (the
-// project's name, or the Settings tab's title, and their buttons), the filter field,
+// The left column's tab switch (Sessions | Files | Jobs) and the Files tab's
+// tree. The header (the project's name and its buttons), the filter field,
 // then the tree (files.odin) as a virtualised list: only the rows in view
-// are laid out.
+// are laid out. (Settings is a page in the centre: ui_settings_page.odin; the
+// Settings_Row_Op handlers and the row menu below are its.)
 // Every action is a command (ui_do) or an action from actions.odin, and has
 // a button: the header's, the row's "…" and the right-click menu.
 //
@@ -29,20 +28,15 @@ import sapp "../vendor/sokol-odin/sokol/app"
 Files_Hit_Kind :: enum u8 {
 	Tab_Sessions,
 	Tab_Files,
-	Tab_Settings,
+	Tab_Settings, // not drawn (the old Settings tab): kept for LEFT_TAB_HITS
 	Tab_Jobs,
-	Tool, // index: Files_Tool, or Settings_Tool on the Settings tab
+	Tool, // index: Files_Tool
 	Filter,
 	Filter_Clear,
 	Row,
 	More,
 	List, // empty space in the list
 	Name, // the inline name field
-	Create, // a missing settings file's Create button (index: the drawn slot)
-	Folder_Reset, // a Folders row's Reset (folders.odin)
-	Folder_Reveal, // a Folders row's Reveal in Finder
-	Account_Remove, // a Claude account's Remove (claude_accounts.odin)
-	Account_Default, // a Claude account's Make default
 	Retry, // a folder that could not be listed: list it again (index: the drawn slot)
 	// the checkout switcher and its menu (ui_worktrees.odin)
 	Switcher,
@@ -72,22 +66,6 @@ FILES_TOOLS := [Files_Tool]struct {
 	.Collapse_All = {"files_collapse_all", .Collapse_All},
 	.Refresh      = {"files_refresh", .Refresh},
 	.Reveal       = {"files_reveal_finder", .Reveal},
-}
-
-// The Settings tab's header buttons.
-Settings_Tool :: enum {
-	Collapse_All,
-	Refresh,
-	Reveal,
-}
-
-SETTINGS_TOOLS := [Settings_Tool]struct {
-	action: string,
-	icon:   core.Icon,
-}{
-	.Collapse_All = {"settings_collapse_all", .Collapse_All},
-	.Refresh      = {"settings_refresh", .Refresh},
-	.Reveal       = {"settings_reveal_finder", .Reveal},
 }
 
 LEFT_TAB_HITS := [core.Left_Tab]Files_Hit_Kind {
@@ -151,12 +129,6 @@ fu: Files_Ui
 // The Files tab shows now.
 files_shown :: proc() -> bool {return state.layout.left_open && state.layout.left_tab == .Files}
 
-// The Settings tab shows now.
-settings_shown :: proc() -> bool {return state.layout.left_open && state.layout.left_tab == .Settings}
-
-@(private = "file")
-on_settings :: proc() -> bool {return state.layout.left_tab == .Settings}
-
 // ---- layout ----
 
 // The segmented switch under the title bar: Sessions | Files | Jobs (Settings is a page in the
@@ -199,7 +171,7 @@ left_tabs_switch :: proc() {
 	}
 }
 
-// The Files or Settings tab: header, filter, the tree. Below the switch in the column.
+// The Files tab: header, filter, the tree. Below the switch in the column.
 files_panel :: proc(row_w_: f32) {
 	row_w := row_w_
 	th := theme()
@@ -208,15 +180,12 @@ files_panel :: proc(row_w_: f32) {
 	a := virtual.arena_allocator(&fu.arena)
 	fu.drawn = make([dynamic]string, a)
 	fu.drawn_dir = make([dynamic]bool, a)
-	settings := on_settings()
 	v := core.tree_view()
-	root := settings ? "" : core.files_root()
-	if !settings do files_follow_active(root)
+	root := core.files_root()
+	files_follow_active(root)
 
 	// header: the folder's name, then its buttons
-	if settings {
-		settings_head(row_w)
-	} else if clay.UI(clay.ID("files_head"))({
+	if clay.UI(clay.ID("files_head"))({
 		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), 0, 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
 	}) {
 		// the folder's name on the left (as the Sessions tab's project rows: a folder), the buttons on the right
@@ -241,21 +210,15 @@ files_panel :: proc(row_w_: f32) {
 			}
 		}
 	}
-	if !settings && root != "" {
+	if root != "" {
 		wt_switcher(row_w) // which checkout the tree shows (ui_worktrees.odin)
 		gap(SP_1)
 	}
 	files_filter_row(row_w)
 	gap(SP_1)
-	if settings && core.sf_error != "" {
-		if clay.UI(clay.ID("sf_error"))({layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, padding = {pu(SP_2), pu(SP_1), 0, pu(SP_1)}}}) {
-			clay.TextDynamic(core.sf_error, txt(th.error, FONT_UI_SMALL))
-		}
-	}
 	if fu.edit == .New_File || fu.edit == .New_Folder do files_new_row(root)
-	if settings && machine_editing() do machine_edit_row(row_w)
 
-	if !settings && root == "" {
+	if root == "" {
 		empty_state("No project", "Pick a project or open a session", row_w)
 		return
 	}
@@ -278,10 +241,7 @@ files_panel :: proc(row_w_: f32) {
 			layout = {sizing = {clay.SizingGrow(), clay.SizingGrow()}, layoutDirection = .TopToBottom},
 			clip = {vertical = true, childOffset = {0, -px(offset)}},
 		}) {
-			if len(rows) == 0 && settings {
-				if state.files.filter != "" do empty_state("No matching settings files", "Esc in the filter clears it", row_w)
-				else do empty_state("No settings files", settings_empty_hint(), row_w)
-			} else if len(rows) == 0 {
+			if len(rows) == 0 {
 				d := core.files_dir(root, false)
 				if state.files.filter != "" do empty_state("No matching files", "Esc in the filter clears it", row_w)
 				else if d.err != "" do empty_state("Cannot list this folder", d.err, row_w)
@@ -305,58 +265,7 @@ files_panel :: proc(row_w_: f32) {
 	}
 }
 
-// The Settings tab's header, its tooltip and its empty state: they name the harness installed, or
-// neither when both are (or none).
-settings_title :: proc() -> string {
-	pi, cl := core.pi_installed(), core.claude_installed()
-	if pi && !cl do return "pi settings"
-	if cl && !pi do return "Claude Code settings"
-	return "Settings"
-}
-settings_tip :: proc() -> string {
-	pi, cl := core.pi_installed(), core.claude_installed()
-	if pi && !cl do return "pi's settings files"
-	if cl && !pi do return "Claude Code's settings files"
-	return "Settings files"
-}
-settings_empty_hint :: proc() -> string {
-	pi, cl := core.pi_installed(), core.claude_installed()
-	if pi && !cl do return "pi makes them as you use it"
-	if cl && !pi do return "Claude Code makes them as you use it"
-	if pi && cl do return "pi and Claude Code make them as you use them"
-	return "Your agents make them as you use them"
-}
-
-// The Settings tab's header: its title, then its buttons.
-@(private = "file")
-settings_head :: proc(row_w: f32) {
-	th := theme()
-	if clay.UI(clay.ID("files_head"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(HEADER_H))}, padding = {pu(PAD_ROW), 0, 0, 0}, childGap = pu(GAP_BUTTONS), childAlignment = {y = .Center}},
-	}) {
-		room := row_w - px(PAD_ROW + KIND_ICON + GAP_INLINE + GAP_GROUP) - f32(len(Settings_Tool)) * px(FILES_TOOL + GAP_BUTTONS)
-		icon(.Sliders, th.text_muted, KIND_ICON)
-		if clay.UI()({layout = {sizing = {clay.SizingFixed(px(GAP_INLINE - GAP_BUTTONS)), clay.SizingFit()}}}) {}
-		clay.TextDynamic(clip(settings_title(), room, WEIGHT_BOLD), txt(th.text_secondary, WEIGHT_BOLD))
-		if clay.UI()({layout = {sizing = {clay.SizingGrow({min = px(GAP_GROUP - 2 * GAP_BUTTONS)}), clay.SizingFit()}}}) {}
-		for tool in Settings_Tool {
-			id := clay.ID("settool", u32(tool))
-			enabled := action_ok(SETTINGS_TOOLS[tool].action)
-			hovered := enabled && ui_hover == Hit(Hit_Files{what = .Tool, index = int(tool)})
-			bg, em := overlay(id, false, hovered)
-			if clay.UI(id)({
-				layout = {sizing = {clay.SizingFixed(px(FILES_TOOL)), clay.SizingFixed(px(FILES_TOOL))}, childAlignment = {x = .Center, y = .Center}},
-				backgroundColor = bg,
-				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			}) {
-				col := enabled ? mix(th.text_muted, th.text, em) : with_alpha(th.text_muted, DISABLED_ALPHA)
-				icon(SETTINGS_TOOLS[tool].icon, col, ICON_SIZE_SM)
-			}
-		}
-	}
-}
-
-// Test mode (autotest's `@PATH` row index): the slot of the drawn Files/Settings row whose path
+// Test mode (autotest's `@PATH` row index): the slot of the drawn Files row whose path
 // ends with suffix (a whole path component or more), else -1.
 files_drawn_slot :: proc(suffix: string) -> int {
 	for p, i in fu.drawn {
@@ -400,22 +309,11 @@ files_row :: proc(r: core.Files_Row, slot: int, row_w: f32, a: runtime.Allocator
 		}
 		return
 	}
-	if r.head {
-		// a group of the Settings tab
-		if clay.UI(id)({layout = {sizing = {clay.SizingGrow(), clay.SizingFixed(px(FILES_ROW_H))}, padding = {pu(SP_2), pu(SP_1), pu(SP_1), 0}, childAlignment = {y = .Center}}}) {
-			clay.TextDynamic(clip(r.name, row_w - px(SP_2 + SP_1), WEIGHT_HEADER), txt(th.text_muted, WEIGHT_HEADER))
-		}
-		return
-	}
 	v := core.tree_view()
 	more_hover := ui_hover == Hit(Hit_Files{what = .More, index = slot})
 	hovered := ui_hover == Hit(Hit_Files{what = .Row, index = slot}) || more_hover
 	selected := r.path == v.cursor
 	active := r.path == v.active_file
-	if on_settings() {
-		e := tab_editor()
-		active = e != nil && e.view == .File && e.path == r.path
-	}
 	bg, em := overlay(id, selected, hovered)
 	focused := state.focus_widget == "files" && selected
 	if clay.UI(id)({
@@ -435,14 +333,9 @@ files_row :: proc(r: core.Files_Row, slot: int, row_w: f32, a: runtime.Allocator
 		dot_file := strings.has_prefix(r.name, ".")
 		if r.ignored || dot_file do col = with_alpha(th.text_muted, r.ignored ? 0.7 : 1)
 		if active do col = th.text
-		if r.missing do col = with_alpha(th.text_muted, 0.8) // not there yet
 		weight: u16 = active ? WEIGHT_BOLD : WEIGHT_REGULAR
-		blabel := r.button != "" ? r.button : "Create" // a missing file's Create, or a setting row's button
-		create_w := r.missing || r.button != "" ? text_w(blabel, FONT_UI_SMALL) + px(2 * SP_2) : 0
-		// a Folders row's icon buttons (Reset, Reveal in Finder) before its Change…
-		icons_w := f32(int(r.reset) + int(r.reveal) + int(r.remove) + int(r.make_default)) * px(ROW_BUTTON - SP_1 + SP_1)
-		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - max(px(ROW_BUTTON + SP_1), create_w + icons_w + px(SP_1))
-		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" && !machine_editing() {
+		room := row_w - px(2 * SP_2 + FILES_INDENT * f32(r.depth) + SP_3 + SP_1) - px(ROW_BUTTON + SP_1)
+		if fu.edit == .Rename && fu.target == r.path && state.focus_widget == "files_name" {
 			files_name_box(room)
 		} else if r.rel != "" {
 			// filter results: the name, then its folder
@@ -450,46 +343,11 @@ files_row :: proc(r: core.Files_Row, slot: int, row_w: f32, a: runtime.Allocator
 			nw := min(text_w(r.name, weight), room)
 			clay.TextDynamic(clip(r.name, nw, weight), txt(col, weight))
 			if dir != "." do clay.TextDynamic(clip(dir, room - nw - px(SP_1), FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
-		} else if r.note != "" {
-			// a settings file: its name, then what it is
-			nw := min(text_w(r.name, weight), room)
-			clay.TextDynamic(clip(r.name, nw, weight), txt(col, weight))
-			if nr := room - nw - px(SP_1); nr > px(SP_6) do clay.TextDynamic(clip(r.note, nr, FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
 		} else {
 			clay.TextDynamic(clip(r.name, room, weight), txt(col, weight))
 		}
 		spacer()
-		for b in ([]struct {
-				on:   bool,
-				what: Files_Hit_Kind,
-				name: string,
-				ic:   core.Icon,
-			}{{r.reset, .Folder_Reset, "freset", .Refresh}, {r.reveal, .Folder_Reveal, "freveal", .Reveal}, {r.make_default, .Account_Default, "fdefault", .Check}, {r.remove, .Account_Remove, "fremove", .Close}}) {
-			if !b.on do continue
-			bid := clay.ID(b.name, u32(slot))
-			bh := ui_hover == Hit(Hit_Files{what = b.what, index = slot})
-			bbg, bem := overlay(bid, false, bh)
-			if clay.UI(bid)({
-				layout = {sizing = {clay.SizingFixed(px(ROW_BUTTON - SP_1)), clay.SizingFixed(px(ROW_BUTTON - SP_1))}, childAlignment = {x = .Center, y = .Center}},
-				backgroundColor = bbg,
-				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			}) {
-				icon(b.ic, mix(th.text_muted, th.text, bem), ICON_SIZE_SM)
-			}
-		}
-		if r.missing || r.button != "" {
-			cid := clay.ID("fcreate", u32(slot))
-			ch := ui_hover == Hit(Hit_Files{what = .Create, index = slot})
-			cbg, cem := overlay(cid, false, ch)
-			if ch == false do cbg = cc(mix(th.bg_elevated, th.text, TINT_BUTTON))
-			if clay.UI(cid)({
-				layout = {sizing = {clay.SizingFixed(create_w), clay.SizingFixed(px(FILES_ROW_H - 4))}, childAlignment = {x = .Center, y = .Center}},
-				backgroundColor = cbg,
-				cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
-			}) {
-				clay.TextDynamic(blabel, txt(mix(th.text_secondary, th.text, cem), FONT_UI_SMALL))
-			}
-		} else if hovered && !(on_settings() && core.settings_setting_row(r.path)) {
+		if hovered {
 			mid := clay.ID("fmore", u32(slot))
 			mbg, _ := overlay(mid, false, more_hover)
 			if clay.UI(mid)({
@@ -537,12 +395,12 @@ files_filter_row :: proc(row_w: f32) {
 		}) {
 			icon(.Search, focused ? th.text_secondary : th.text_muted, ICON_SIZE_SM)
 			if focused {
-				field_text(clay.ID("files_filter_text"), &files_filter_field, on_settings() ? "Filter settings" : "Filter files")
+				field_text(clay.ID("files_filter_text"), &files_filter_field, "Filter files")
 			} else {
 				room := row_w - px(3 * SP_2 + SP_6 + ICON_SIZE_SM)
 				text := state.files.filter
 				if text != "" do clay.TextDynamic(clip(text, room), txt(th.text))
-				else do clay.TextDynamic(clip(on_settings() ? "Filter settings" : "Filter files", room), txt(th.text_muted))
+				else do clay.TextDynamic(clip("Filter files", room), txt(th.text_muted))
 			}
 			spacer()
 			if state.files.filter != "" {
@@ -574,15 +432,7 @@ files_new_row :: proc(root: string) {
 	}
 }
 
-// A machine's add or rename field (Settings › Machines; the sidebar's + Add a machine…, its
-// header's Rename…, the palette): its own block above the list, with its error under it.
-machine_editing :: proc() -> bool {
-	if fu.edit != .Rename do return false
-	_, ok := core.machine_row_no(fu.target)
-	return ok || fu.target == core.MACHINE_ADD_ROW
-}
-
-// Opens the add field (no = 0) or machine no's rename field, in the Settings tab.
+// Opens the add field (no = 0) or machine no's rename field: Settings › Machines.
 machine_edit_begin :: proc(no: u64 = 0) {
 	settings_page_open(.Machines) // Settings › Machines, its field (ui_settings_page.odin)
 	if no == 0 {
@@ -590,25 +440,6 @@ machine_edit_begin :: proc(no: u64 = 0) {
 		return
 	}
 	for m in state.machines do if m.no == no do sp_edit_begin(.Rename_Machine, fmt.tprintf("%s%d", core.MACHINE_ROW, no), m.name)
-}
-
-@(private = "file")
-machine_edit_row :: proc(row_w: f32) {
-	th := theme()
-	title := "Add a machine"
-	if no, ok := core.machine_row_no(fu.target); ok do for m in state.machines do if m.no == no do title = fmt.tprintf("Rename %s", m.name)
-	if clay.UI(clay.ID("machine_edit"))({
-		layout = {sizing = {clay.SizingGrow(), clay.SizingFit()}, layoutDirection = .TopToBottom, padding = {pu(SP_2), pu(SP_1), 0, pu(SP_1)}, childGap = pu(2)},
-	}) {
-		clay.TextDynamic(clip(title, row_w - px(SP_3), FONT_UI_SMALL), txt(th.text_muted, FONT_UI_SMALL))
-		if state.focus_widget == "files_name" do files_name_box(0, fu.target == core.MACHINE_ADD_ROW ? "user@host or an ~/.ssh/config name" : "")
-		if fu.edit_err != "" {
-			cfg := txt(th.error, FONT_UI_SMALL)
-			cfg.wrapMode = .Newlines
-			text, _ := wrap_clip(fu.edit_err, row_w - px(SP_3), 4, FONT_UI_SMALL)
-			clay.TextDynamic(text, cfg)
-		}
-	}
 }
 
 // The name field (rename in a row, or new file/folder): accent ring.
@@ -697,12 +528,8 @@ files_scroll_to :: proc(i, n: int, center := false) {
 files_hit :: proc() -> Hit {
 	for tab in core.Left_Tab do if tab != .Settings && clay.PointerOver(clay.ID("lefttab", u32(tab))) do return Hit_Files{what = LEFT_TAB_HITS[tab]}
 	if state.layout.left_tab == .Sessions || state.layout.left_tab == .Jobs do return nil
-	if on_settings() {
-		for tool in Settings_Tool do if clay.PointerOver(clay.ID("settool", u32(tool))) && action_ok(SETTINGS_TOOLS[tool].action) do return Hit_Files{what = .Tool, index = int(tool)}
-	} else {
-		for tool in Files_Tool do if clay.PointerOver(clay.ID("filestool", u32(tool))) && action_ok(FILES_TOOLS[tool].action) do return Hit_Files{what = .Tool, index = int(tool)}
-	}
-	if !on_settings() && clay.PointerOver(clay.ID("wt_switch")) do return Hit_Files{what = .Switcher}
+	for tool in Files_Tool do if clay.PointerOver(clay.ID("filestool", u32(tool))) && action_ok(FILES_TOOLS[tool].action) do return Hit_Files{what = .Tool, index = int(tool)}
+	if clay.PointerOver(clay.ID("wt_switch")) do return Hit_Files{what = .Switcher}
 	if clay.PointerOver(clay.ID("files_filter_clear")) do return Hit_Files{what = .Filter_Clear}
 	if clay.PointerOver(clay.ID("files_filter_box")) do return Hit_Files{what = .Filter}
 	if clay.PointerOver(clay.ID("files_name_box")) do return Hit_Files{what = .Name}
@@ -710,11 +537,6 @@ files_hit :: proc() -> Hit {
 	for p, i in fu.drawn {
 		if clay.PointerOver(clay.ID("fretry", u32(i))) do return Hit_Files{what = .Retry, index = i} // an error row (drawn "")
 		if p == "" do continue
-		if clay.PointerOver(clay.ID("fcreate", u32(i))) do return Hit_Files{what = .Create, index = i}
-		if clay.PointerOver(clay.ID("freset", u32(i))) do return Hit_Files{what = .Folder_Reset, index = i}
-		if clay.PointerOver(clay.ID("freveal", u32(i))) do return Hit_Files{what = .Folder_Reveal, index = i}
-		if clay.PointerOver(clay.ID("fremove", u32(i))) do return Hit_Files{what = .Account_Remove, index = i}
-		if clay.PointerOver(clay.ID("fdefault", u32(i))) do return Hit_Files{what = .Account_Default, index = i}
 		if clay.PointerOver(clay.ID("fmore", u32(i))) do return Hit_Files{what = .More, index = i}
 		if clay.PointerOver(clay.ID("frow", u32(i))) do return Hit_Files{what = .Row, index = i}
 	}
@@ -726,86 +548,13 @@ files_tip :: proc(h: Hit_Files) -> (label, keys: string) {
 	case .Tab_Sessions: return "Projects and sessions", ""
 	case .Tab_Files:
 		if a := action_by_id("show_files"); a != nil do return a.label, a.keys
-	case .Tab_Settings:
-		if a := action_by_id("settings"); a != nil do return settings_tip(), a.keys
 	case .Tab_Jobs:
 		return state.jobs_unread > 0 ? fmt.tprintf("%s's jobs: %d unread", core.agent_name(), state.jobs_unread) : fmt.tprintf("%s's jobs", core.agent_name()), ""
 	case .Tool:
-		id := on_settings() ? SETTINGS_TOOLS[Settings_Tool(h.index)].action : FILES_TOOLS[Files_Tool(h.index)].action
-		if a := action_by_id(id); a != nil do return action_label(a), a.keys
-	case .Create:
-		if h.index >= 0 && h.index < len(fu.drawn) && fu.drawn[h.index] == core.ATLAS_MODEL_ROW do return "Open pi's model selector in Atlas", "⌃L"
-		if h.index >= 0 && h.index < len(fu.drawn) && strings.has_prefix(fu.drawn[h.index], core.PI_EXT_ROW) {
-			name := fu.drawn[h.index][len(core.PI_EXT_ROW):]
-			return fmt.tprintf("%s %s in the pi tabs started from now on (running tabs: the restart bar)", core.pi_extension_on(name) ? "Turn off" : "Turn on", name), ""
-		}
-		if h.index >= 0 && h.index < len(fu.drawn) && fu.drawn[h.index] == core.CLAUDE_FLAGS_ROW {
-			if a := action_by_id("claude_skip_permissions"); a != nil do return state.settings.claude_skip_permissions ? "New Claude tabs you start ask before tools again (open tabs keep their flags)" : "Start the Claude tabs you start with --dangerously-skip-permissions (never agents' tabs or read-only chats)", a.keys
-		}
-		if h.index >= 0 && h.index < len(fu.drawn) {
-			p := fu.drawn[h.index]
-			if tip := harness_settings_tip(p, true); tip != "" do return tip, ""
-			if p == core.FOLDER_MAIN_ROW do return state.settings.home_dir != "" ? "Pick another main folder (nothing is moved; the old one is offered in Finder)" : "Set up Deckhand: choose the main folder", ""
-			if p == core.FOLDER_PREV_ROW do return "Show the old main folder in Finder", ""
-			if p == core.CLAUDE_ACCOUNT_SCAN_ROW do return "Look for Claude Code config folders again (by their account files; nothing is read)", ""
-			if p == core.CLAUDE_ACCOUNT_MORE_ROW do return "Add another Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names). Rescan sessions finds new ones in ~/.claude*", ""
-			if p == core.CLAUDE_ACCOUNT_ADD_ROW do return "Add a Claude Code account: pick its config folder (what CLAUDE_CONFIG_DIR names; hidden folders: ⇧⌘.)", ""
-			if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "Stop other machines from connecting to this Mac" : "Let your other machines connect to this Mac over ssh, as you (asks first)", ""
-			if p == core.MACHINE_SSH_ROW do return "Turn on Machines over SSH: your machines connect again", ""
-			if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
-			if no, ok := core.machine_row_no(p); ok do for m in state.machines do if m.no == no do return machine_action_tip(m), ""
-			if strings.has_prefix(p, core.CLAUDE_ACCOUNT_ROW) do return "Rename this account (its name in Deckhand only)", ""
-			if k, ok := core.folder_row_kind(p); ok do return fmt.tprintf("Pick the %s folder (%s)", core.FOLDER_NAMES[k], core.FOLDER_DOES[k]), ""
-		}
-		return "Create this file, then open it", ""
-	case .Row:
-		// the Settings tab's rows: where the file is and what it is
-		if !on_settings() || h.index < 0 || h.index >= len(fu.drawn) || fu.drawn[h.index] == "" do break
-		p := fu.drawn[h.index]
-		if tip := harness_settings_tip(p, false); tip != "" do return tip, ""
-		if p == core.ATLAS_MODEL_ROW do return fmt.tprintf("%s's model: %s", core.agent_name(), core.sf_model_note()), ""
-		// Machines: what a row is, in plain words (never its id)
-		if no, ok := core.machine_row_no(p); ok do for m in state.machines do if m.no == no do return machine_tip(m), ""
-		if no, id, ok := core.machine_check_row(p); ok do for m in state.machines do if m.no == no do for c in m.checklist do if c.id == id {
-			r, _ := core.harness_row(id)
-			return fmt.tprintf("%s on %s: %s (as that machine's own list says)", r.name, m.name, core.MACHINE_CHECK_WORDS[c.state]), ""
-		}
-		if p == core.MACHINE_ADD_ROW do return MACHINE_ADD_TIP, ""
-		if p == core.MACHINE_SSH_ROW do return "Machines over SSH is off: Deckhand keeps no link to your machines, and keeps the list", ""
-		if p == core.MACHINE_REACH_ROW do return state.settings.machines_reachable ? "On: another machine that logs in here over ssh as you can see and drive this Mac's sessions" : "Off: no other machine can reach this Mac's sessions", ""
-		if p == core.CLAUDE_FLAGS_HEAD_ROW || p == core.CLAUDE_FLAGS_ROW || p == core.CLAUDE_FLAGS_WARN_ROW do return fmt.tprintf("Default Claude Code flags for new tabs: %s. Only the tabs you start (new tab, session, chat, your resume); never agents', panels' or apps', nor a read-only chat. With it, Claude edits files and runs commands without asking.", state.settings.claude_skip_permissions ? "--dangerously-skip-permissions" : "none"), ""
-		if strings.has_prefix(p, core.PI_EXT_ROW) {
-			name := p[len(core.PI_EXT_ROW):]
-			for e in core.pi_integration_optional() do if e.name == name do return fmt.tprintf("%s: %s. %s; default %s. Deckhand ships it and loads it into pi tabs, not jobs (pi -e); a change applies at a tab's next start.", e.name, e.does, e.on ? "On" : "Off", e.default_on ? "on" : "off"), ""
-		}
-		if p == core.FOLDER_MAIN_ROW do return fmt.tprintf("Main folder: %s", state.settings.home_dir != "" ? core.fs_display(state.settings.home_dir) : "not set"), ""
-		if p == core.FOLDER_ENV_ROW do return "Your environment sets PI_KIT_NOTES_DIR: Deckhand passes it on as it is", ""
-		if p == core.FOLDER_PREV_ROW do return fmt.tprintf("The main folder before: %s", core.fs_display(state.home_dir_prev)), ""
-		if k, ok := core.folder_row_kind(p); ok {
-			f := core.folder_of(k)
-			return fmt.tprintf("%s: %s (%s)", core.FOLDER_DOES[k], f != "" ? core.fs_display(f) : "no main folder", core.folder_custom(k) ? "custom" : "default"), ""
-		}
-		for r in core.settings_tree_rows() do if r.path == p && r.note != "" do return fmt.tprintf("%s: %s", core.fs_display(p), r.note), ""
-		return core.fs_display(p), ""
-	case .Folder_Reset:
-		if h.index >= 0 && h.index < len(fu.drawn) {
-			if k, ok := core.folder_row_kind(fu.drawn[h.index]); ok {
-				st := state.settings
-				st.folders[k] = ""
-				d := core.folder_path(st, k)
-				return fmt.tprintf("Reset to the default (%s)", d != "" ? core.fs_display(d) : "none"), ""
-			}
-		}
-	case .Folder_Reveal: return "Reveal in Finder", ""
+		if a := action_by_id(FILES_TOOLS[Files_Tool(h.index)].action); a != nil do return action_label(a), a.keys
 	case .Retry:
 		if r, ok := files_error_row(h.index); ok do return fmt.tprintf("%s. Retry lists the folder again", r.error), ""
-	case .Account_Remove:
-		if h.index >= 0 && h.index < len(fu.drawn) {
-			if _, ok := core.machine_row_no(fu.drawn[h.index]); ok do return "Remove this machine from Deckhand (asks first; nothing on it is deleted)", ""
-		}
-		return "Remove this account from Deckhand's list (its folder is not touched)", ""
-	case .Account_Default: return "Make this the default account: new Claude sessions start in it unless their project last used another", ""
-	case .Filter:       return on_settings() ? "Filter settings files" : "Filter files", ""
+	case .Filter:       return "Filter files", ""
 	case .Filter_Clear: return "Clear the filter", "Esc"
 	case .More:         return "More actions", ""
 	case .Switcher, .Wt_Row, .Wt_More: return wt_tip(h)
@@ -831,22 +580,17 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		app.redraw = true
 		right := e.mouse_button == .RIGHT || (e.mouse_button == .LEFT && e.modifiers & sapp.MODIFIER_CTRL != 0)
 		if right {
-			if (h.what == .Row || h.what == .More) && fu.drawn[h.index] != "" && !core.settings_setting_row(fu.drawn[h.index]) do files_menu_at(fu.drawn[h.index], app.pointer)
-			else if h.what == .List && !on_settings() do files_menu_at(core.files_root(), app.pointer)
+			if (h.what == .Row || h.what == .More) && fu.drawn[h.index] != "" do files_menu_at(fu.drawn[h.index], app.pointer)
+			else if h.what == .List do files_menu_at(core.files_root(), app.pointer)
 			return true
 		}
 		if e.mouse_button != .LEFT do return true
 		switch h.what {
 		case .Tab_Sessions: ui_do(core.Set_Left_Tab{tab = .Sessions})
 		case .Tab_Files:    ui_do(core.Set_Left_Tab{tab = .Files})
-		case .Tab_Settings: ui_do(core.Set_Left_Tab{tab = .Settings})
+		case .Tab_Settings: // not drawn
 		case .Tab_Jobs:     ui_do(core.Set_Left_Tab{tab = .Jobs})
-		case .Tool:         action_run(on_settings() ? SETTINGS_TOOLS[Settings_Tool(h.index)].action : FILES_TOOLS[Files_Tool(h.index)].action)
-		case .Create:          settings_row_op(fu.drawn[h.index], .Button)
-		case .Folder_Reset:    settings_row_op(fu.drawn[h.index], .Reset)
-		case .Account_Remove:  settings_row_op(fu.drawn[h.index], .Remove)
-		case .Account_Default: settings_row_op(fu.drawn[h.index], .Default)
-		case .Folder_Reveal:   settings_row_op(fu.drawn[h.index], .Reveal)
+		case .Tool:         action_run(FILES_TOOLS[Files_Tool(h.index)].action)
 		case .Filter:
 			if state.focus_widget != "files_filter" {
 				tf_set(&files_filter_field, state.files.filter)
@@ -867,7 +611,6 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			core.files_select_in(core.tree_view(), p)
 			core.tree_view().reveal = false
 			if state.focus_widget != "files" do ui_do(core.Set_Focus{"files"})
-			if core.settings_setting_row(p) do return true // a setting, not a file: nothing to open or drag
 			delete(fu.press_path)
 			fu.press_path = strings.clone(p)
 			fu.press, fu.press_dir, fu.press_at, fu.press_clicks = true, fu.drawn_dir[h.index], {e.mouse_x, e.mouse_y}, app.clicks
@@ -907,7 +650,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 			if fu.press_dir {
 				if fu.press_clicks == 1 do files_toggle(p)
 			} else {
-				if core.path_kind(p) == .File do ui_do(core.Open_File{path = p, session = files_session(), preview = fu.press_clicks < 2}) // a missing settings file: its Create button
+				if core.path_kind(p) == .File do ui_do(core.Open_File{path = p, session = files_session(), preview = fu.press_clicks < 2})
 			}
 		}
 		return true
@@ -915,7 +658,7 @@ files_event :: proc(e: ^sapp.Event) -> bool {
 		files_drag_cancel() // a press that leaves the window is dropped (its release may never come)
 		return false
 	case .MOUSE_SCROLL:
-		if !(files_shown() || settings_shown()) || !inside(clay.ID("files_list"), e.mouse_x, e.mouse_y) do return false
+		if !files_shown() || !inside(clay.ID("files_list"), e.mouse_x, e.mouse_y) do return false
 		v := core.tree_view()
 		v.scroll -= e.scroll_y * SCROLL_STEP
 		_, _, v.scroll = core.files_visible(len(v.rows), v.scroll, fu.view_h, FILES_ROW_H)
@@ -967,12 +710,11 @@ files_key :: proc(e: ^sapp.Event) -> bool {
 	case .ENTER, .KP_ENTER, .SPACE:
 		if i < 0 do break
 		if rows[i].kind == .Dir do files_toggle(rows[i].path)
-		else if rows[i].button != "" && !settings_folder_button(rows[i].path) do action_run("agent_model")
-		else if !rows[i].missing do ui_do(core.Open_File{path = rows[i].path, session = files_session(), preview = e.key_code == .SPACE})
+		else do ui_do(core.Open_File{path = rows[i].path, session = files_session(), preview = e.key_code == .SPACE})
 	case .F2:
-		if i >= 0 && files_may_change(rows[i].path) do files_step(rows[i].path, .Rename)
+		if i >= 0 do files_step(rows[i].path, .Rename)
 	case .BACKSPACE, .DELETE:
-		if i >= 0 && (cmd || e.key_code == .DELETE) && files_may_change(rows[i].path) do ui_do(core.Delete_Path{path = rows[i].path})
+		if i >= 0 && (cmd || e.key_code == .DELETE) do ui_do(core.Delete_Path{path = rows[i].path})
 	}
 	return true
 }
@@ -1004,11 +746,6 @@ files_session :: proc() -> u64 {
 files_menu_at :: proc(path: string, at: [2]f32) {
 	menu_open(Menu_Files{path = path}, at) // menu_open keeps its own copy
 }
-
-// Whether rename and delete may be offered for path: always in the Files
-// tab; in the Settings tab only inside prompts/, skills/, extensions/ and a
-// project's .pi/ (settings_row_editable), never pi's own config files.
-files_may_change :: proc(path: string) -> bool {return !on_settings() || core.settings_row_editable(path)}
 
 // A Settings page file row's menu (the old Settings tab's): Open, New file/folder in prompts/ and
 // skills/, Rename and Move to Trash only inside prompts/, skills/, extensions/ and a project's .pi/
@@ -1106,18 +843,11 @@ files_step :: proc(path: string, step: core.Files_Step) -> (copied: bool) {
 files_new_target :: proc() -> string {
 	root := core.files_root()
 	p := core.files_ui.cursor
-	if on_settings() {
-		// the Settings tab: the selected prompts/ or skills/ folder (else none)
-		p = core.settings_ui.cursor
-		dir := core.path_kind(p) == .Dir ? p : filepath.dir(p)
-		return p != "" && core.settings_new_ok(dir) ? dir : ""
-	}
 	if p == "" || !strings.has_prefix(p, root) do return root
 	return core.path_kind(p) == .Dir ? p : filepath.dir(p)
 }
 
 files_begin_edit :: proc(mode: Files_Edit_Mode, target, text: string, focus := true) {
-	machine_add_back = false // machine_add_open sets it after
 	fu.edit = mode
 	delete(fu.target)
 	fu.target = strings.clone(target)
@@ -1147,49 +877,14 @@ files_name_error :: proc(name: string) -> string {
 // Enter in the name field: create or rename; an error keeps the field.
 files_commit_edit :: proc() {
 	name := strings.trim_space(tf_text(&files_name_field))
-	// an empty Add a machine field stays open with what to type (the core's error)
-	if fu.edit == .None || (fu.edit == .Rename && name == "" && fu.target != core.MACHINE_ADD_ROW) {
+	if fu.edit == .None || (fu.edit == .Rename && name == "") {
 		files_cancel_edit()
-		return
-	}
-	// a machine (Settings → Machines): its ssh target (Add a machine…; the core cleans it and names
-	// it), or its new name (Rename…). Not a file name: no file rule applies
-	if machine_editing() {
-		ar: core.Result
-		if no, ok := core.machine_row_no(fu.target); ok do ar = ui_run(core.Machine_Rename{no = no, name = name})
-		else do ar = ui_run(core.Machine_Add{target = name})
-		if !ar.ok {
-			delete(fu.edit_err)
-			fu.edit_err = strings.clone(ar.error)
-			app.redraw = true
-			return
-		}
-		fu.edit = .None
-		delete(fu.edit_err)
-		fu.edit_err = ""
-		ui_do(core.Set_Focus{"files"})
-		// added from the sidebar's row or the palette: back to Sessions, where it now shows
-		if machine_add_back && fu.target == core.MACHINE_ADD_ROW do ui_do(core.Set_Left_Tab{tab = .Sessions})
-		machine_add_back = false
 		return
 	}
 	if err := files_name_error(name); err != "" {
 		delete(fu.edit_err)
 		fu.edit_err = strings.clone(err)
 		app.redraw = true
-		return
-	}
-	// a Claude account's name (Settings → Claude accounts): no file is renamed
-	if fu.edit == .Rename && strings.has_prefix(fu.target, core.CLAUDE_ACCOUNT_ROW) {
-		ar := ui_run(core.Rename_Claude_Account{account = fu.target[len(core.CLAUDE_ACCOUNT_ROW):], label = name})
-		if !ar.ok {
-			delete(fu.edit_err)
-			fu.edit_err = strings.clone(ar.error)
-			app.redraw = true
-			return
-		}
-		fu.edit = .None
-		ui_do(core.Set_Focus{"files"})
 		return
 	}
 	r: core.Result
@@ -1223,7 +918,6 @@ files_commit_edit :: proc() {
 }
 
 files_cancel_edit :: proc() {
-	machine_add_back = false
 	fu.edit = .None
 	delete(fu.edit_err)
 	fu.edit_err = ""
@@ -1256,13 +950,7 @@ files_filter_key :: proc(key: sapp.Keycode) -> bool {
 		return true
 	case .ENTER, .KP_ENTER, .DOWN:
 		rows := core.tree_rows()
-		first := 0
-		for first < len(rows) && rows[first].head do first += 1 // the Settings tab's headings
-		if first > 0 && first < len(rows) {
-			core.files_select_in(core.tree_view(), rows[first].path)
-			files_scroll_to(first, len(rows))
-			if key != .DOWN && rows[first].kind == .File && state.files.filter != "" do ui_do(core.Open_File{path = rows[first].path, session = files_session()})
-		} else if len(rows) > 0 && rows[0].more == 0 {
+		if len(rows) > 0 && rows[0].more == 0 {
 			core.files_select_in(core.tree_view(), rows[0].path)
 			files_scroll_to(0, len(rows))
 			// Enter while filtering opens the best match
@@ -1371,12 +1059,11 @@ settings_folder_button :: proc(path: string) -> bool {
 	return false
 }
 
-// Where a keyboard move to row `to` lands: past the Settings tab's group
-// headings and folders' error rows (no file of their own), on in the
+// Where a keyboard move to row `to` lands: past folders' error rows (no file of their own), on in the
 // direction of travel (back: upwards), else the other way; -1 = nowhere.
 files_move_target :: proc(rows: []core.Files_Row, to: int, back: bool) -> int {
 	if len(rows) == 0 do return -1
-	skip :: proc(r: core.Files_Row) -> bool {return r.head || r.error != ""}
+	skip :: proc(r: core.Files_Row) -> bool {return r.error != ""}
 	j := clamp(to, 0, len(rows) - 1)
 	if rows[j].more > 0 && j > 0 do j -= 1
 	step := back ? -1 : 1

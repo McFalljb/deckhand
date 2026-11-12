@@ -629,33 +629,7 @@ layout_no_overlap :: proc(t: ^testing.T, part: int) {
 					}
 					ui_hover = nil
 					state.focus_widget = ""
-					// the Settings tab, its folders open, a row hovered (its "…"), a missing file's Create
-					if state.layout.left_open {
-						state.layout.left_tab = .Settings
-						cmds = ui_layout(w, AUDIT_H)
-						for slot in 0 ..< 48 {
-							ui_hover = Hit_Files{what = .Row, index = slot}
-							cmds = ui_layout(w, AUDIT_H)
-							report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d settings hover %d", w, look, light ? "light" : "dark", cols, slot), w)[:], &problems)
-						}
-						// the Folders group's buttons, hovered (folders.odin)
-						for slot in 0 ..< 48 do for what in ([]Files_Hit_Kind{.Folder_Reset, .Folder_Reveal}) {
-							if state.settings.text_size != .Default do break
-							ui_hover = Hit_Files{what = what, index = slot}
-							cmds = ui_layout(w, AUDIT_H)
-							report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d settings %v %d", w, look, light ? "light" : "dark", cols, what, slot), w)[:], &problems)
-						}
-						if !clay.GetElementData(clay.ID("freset", 0)).found {
-							found := false
-							for i in u32(0) ..< 64 do if clay.GetElementData(clay.ID("freset", i)).found do found = true
-							testing.expectf(t, found, "w=%.0f: a custom folder has its Reset", w)
-						}
-						ui_hover = Hit_Files{what = .Create, index = 9}
-						cmds = ui_layout(w, AUDIT_H)
-						report(t, audit(cmds, fmt.tprintf("w=%.0f %v %s cols=%d settings create", w, look, light ? "light" : "dark", cols), w)[:], &problems)
-						ui_hover = nil
-						state.layout.left_tab = .Sessions
-					}
+					// (Settings: the page's own audit, settings_page_test.odin)
 				}
 			}
 		}
@@ -906,8 +880,8 @@ confirm_bar_keeps_its_buttons :: proc(t: ^testing.T) {
 	state.layout.left_open = true
 }
 
-// The gear's popover in a short window: it stays inside the window and its rows scroll, the
-// keyboard's row kept in view; its groups have headers.
+// Quick settings (the gear) in a short window: it stays inside the window and its rows scroll,
+// the keyboard's row kept in view; its groups have headers.
 @(test)
 settings_popover_short_window :: proc(t: ^testing.T) {
 	context.allocator = au_reset("")
@@ -923,76 +897,12 @@ settings_popover_short_window :: proc(t: ^testing.T) {
 	testing.expectf(t, inside_box(box_of(pop.boundingBox), Box{0, 0, W, H}), "the popover %v leaves the %vx%v window", pop.boundingBox, W, H)
 	for g in 0 ..< len(POP_GROUPS) do testing.expectf(t, clay.GetElementData(clay.ID("pop_head", u32(g))).found, "group header %d", g)
 	// the last row, picked with the keyboard, scrolls into the list's view
-	popover.selected = int(Pop_Item.Control_Token)
+	popover.selected = int(Pop_Item.Settings_Files)
 	_ = ui_layout(W, H)
 	_ = ui_layout(W, H)
-	row := clay.GetElementData(clay.ID("pop", u32(Pop_Item.Control_Token)))
+	row := clay.GetElementData(clay.ID("pop", u32(Pop_Item.Settings_Files)))
 	list = clay.GetElementData(clay.ID("settings_list"))
 	testing.expectf(t, row.found && inside_box(box_of(row.boundingBox), box_of(list.boundingBox)), "the selected last row %v shows in the list %v", row.boundingBox, list.boundingBox)
-}
-
-// The gear's Notifications grid at every text size: its header and four rows say what they
-// should (the defaults), its columns line up, every cell fits the popover and its row, and a
-// changed choice is drawn.
-@(test)
-settings_bell_grid :: proc(t: ^testing.T) {
-	context.allocator = au_reset("")
-	if !testing.expect(t, audit_ui(), "fonts") do return
-	W, H :: 1280, 860
-	state.focus_widget = "settings"
-	defer {
-		state.focus_widget = ""
-		state.settings.text_size = .Default
-		fonts_apply(theme_font_config(theme()), 1)
-	}
-	texts_in :: proc(cmds: clay.ClayArray(clay.RenderCommand), id: clay.ElementId) -> string {
-		d := clay.GetElementData(id)
-		if !d.found do return "<none>"
-		b := box_of(d.boundingBox)
-		out := make([dynamic]string, context.temp_allocator)
-		for p in pieces(cmds) do if p.text != "" && inside_box(p.box, b) do append(&out, p.text)
-		return strings.join(out[:], " ", context.temp_allocator)
-	}
-	for size in core.Text_Size {
-		state.settings.text_size = size
-		fonts_apply(theme_font_config(theme()), 1)
-		_ = ui_layout(W, H)
-		cmds := ui_layout(W, H)
-		testing.expect_value(t, texts_in(cmds, clay.ID("bell_grid_head")), "Notify me about Bell macOS Sound")
-		want := [4]string{"Needs you background Tink", "Finished never none", "Errors background none", "Jobs background none"}
-		for g, i in BELL_GRID_ORDER do testing.expectf(t, texts_in(cmds, clay.ID("bell_grid_row", u32(g))) == want[i], "%v row %v: %q", size, g, texts_in(cmds, clay.ID("bell_grid_row", u32(g))))
-		pop := box_of(clay.GetElementData(clay.ID("settings_pop")).boundingBox)
-		x0: [3]f32
-		for g, i in BELL_GRID_ORDER {
-			row := box_of(clay.GetElementData(clay.ID("bell_grid_row", u32(g))).boundingBox)
-			cells := [3]Pop_Item{Pop_Item(int(Pop_Item.Bell_Finished) + int(g)), Pop_Item(int(Pop_Item.Os_Finished) + int(g)), Pop_Item(int(Pop_Item.Sound_Finished) + int(g))}
-			for it, c in cells {
-				d := clay.GetElementData(clay.ID("pop", u32(it)))
-				if !testing.expectf(t, d.found, "%v cell %v", size, it) do continue
-				b := box_of(d.boundingBox)
-				testing.expectf(t, inside_box(b, row) && inside_box(b, pop), "%v: %v %v leaves its row %v", size, it, b, row)
-				if i == 0 do x0[c] = b.x0
-				else do testing.expectf(t, abs(b.x0 - x0[c]) < 0.5, "%v: column %d not aligned (%v vs %v)", size, c, b.x0, x0[c])
-			}
-		}
-		report_bad := audit(cmds, fmt.tprintf("bell grid %v", size), W)
-		for b in report_bad do testing.expect(t, false, b)
-	}
-	// a changed choice shows (the replica is the State here)
-	state.settings.text_size = .Default
-	fonts_apply(theme_font_config(theme()), 1)
-	core.run_command(core.Set_Bell{macos = #partial [core.Bell_Group]Maybe(core.Os_When){.Jobs = .Always}, sound = #partial [core.Bell_Group]Maybe(core.Bell_Sound){.Jobs = .Basso}, jobs = false}, {kind = .UI})
-	_ = ui_layout(W, H)
-	cmds := ui_layout(W, H)
-	testing.expect_value(t, texts_in(cmds, clay.ID("bell_grid_row", u32(core.Bell_Group.Jobs))), "Jobs always Basso")
-	// the keyboard walks the grid row by row after Agent notifications
-	order := POP_ORDER
-	at := -1
-	for o, k in order do if o == .Notifications do at = k
-	testing.expect(t, at >= 0 && order[at + 1] == .Bell_Waiting && order[at + 2] == .Os_Waiting && order[at + 3] == .Sound_Waiting && order[at + 4] == .Bell_Finished, "grid order")
-	testing.expect(t, !pop_item_shown(.Bell_OS), "the old switch is not drawn")
-	label, _ := hit_tip(Hit_Pop(Pop_Item.Sound_Waiting))
-	testing.expectf(t, strings.contains(label, "background") && strings.contains(label, "always"), "the rule in the tip: %q", label)
 }
 
 // An error toast wraps to two lines inside its box; an info toast stays one line.

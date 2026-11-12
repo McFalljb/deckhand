@@ -672,7 +672,7 @@ shell_is_posix_more :: proc(t: ^testing.T) {
 
 
 // The wording names the harness that applies, or neither: someone with one harness reads nothing
-// about the other (the Settings tab, the palette's settings rows, the gear's reload row, details).
+// about the other (Settings' files, the palette's settings rows, the gear's reload row, details).
 @(test)
 wording_names_installed_harness :: proc(t: ^testing.T) {
 	context.allocator = h_reset()
@@ -688,21 +688,12 @@ wording_names_installed_harness :: proc(t: ^testing.T) {
 	// pi only
 	core.pi_installed_probe = proc() -> bool {return true}
 	core.claude_installed_probe = proc() -> bool {return false}
-	testing.expect_value(t, settings_title(), "pi settings")
-	testing.expect_value(t, settings_tip(), "pi's settings files")
-	testing.expect(t, strings.contains(settings_empty_hint(), "pi"), settings_empty_hint())
 	testing.expect(t, has_pi_rows(), "pi's files listed")
 	// Claude Code only: no pi rows, no pi in the words
 	core.pi_installed_probe = proc() -> bool {return false}
 	core.claude_installed_probe = proc() -> bool {return true}
-	testing.expect_value(t, settings_title(), "Claude Code settings")
-	testing.expect_value(t, settings_tip(), "Claude Code's settings files")
-	testing.expect(t, !strings.contains(settings_empty_hint(), "pi"), settings_empty_hint())
 	testing.expect(t, !has_pi_rows(), "no pi groups without pi")
-	// both, or neither: neutral
 	h_both()
-	testing.expect_value(t, settings_title(), "Settings")
-	testing.expect_value(t, settings_tip(), "Settings files")
 	// details that named pi for everyone
 	if a := action_by_id("chats_readonly"); a != nil && a.detail != nil do testing.expect(t, !strings.contains(a.detail(), "pi"), a.detail())
 	testing.expect(t, !strings.contains(RIGHT_EMPTY_HINT, "pi"), RIGHT_EMPTY_HINT)

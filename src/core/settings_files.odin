@@ -862,26 +862,10 @@ settings_new_ok :: proc(dir: string) -> bool {
 	return false
 }
 
-// The open folders inside the project's .pi/ (they live in the project's tree).
-settings_open_pi_dirs :: proc() -> []string {
-	out := make([dynamic]string, context.temp_allocator)
-	cwd := settings_project_cwd()
-	if cwd == "" do return out[:]
-	pi := strings.concatenate({cwd, "/.pi"}, context.temp_allocator)
-	root, rel := files_expand_key(pi)
-	if root == "" do return out[:]
-	for d in files_expanded_dirs(root) {
-		if d == rel || (strings.has_prefix(d, rel) && d[len(rel)] == '/') do append(&out, strings.concatenate({root, "/", d}, context.temp_allocator))
-	}
-	return out[:]
-}
-
 // ---- the tree's rows ----
 
 // Bumped when the poll sees a change in a shown folder (the rows are rebuilt).
 settings_gen: u64
-@(private = "file")
-sf_built_gen: u64
 @(private = "file")
 sf_ids: []Cred_Id // the sign-in files' ids, read once per rebuild
 @(private = "file")
@@ -916,88 +900,6 @@ settings_group_label :: proc(group, cwd: string) -> string {
 	}
 	if strings.has_prefix(group, "claude:") do return fmt.tprintf("Claude Code · %s (global)", group[len("claude:"):])
 	return group
-}
-
-@(private = "file")
-sf_model: string // the model the rows were built with
-@(private = "file")
-sf_machines: string // ...and the machines (settings_machines_key)
-
-@(private = "file")
-settings_machines_key :: proc() -> string {
-	if !state.settings.remote_machines && !state.settings.machines_reachable do return ""
-	b := strings.builder_make(context.temp_allocator)
-	fmt.sbprintf(&b, "%v%v;", state.settings.remote_machines, state.settings.machines_reachable)
-	for m in state.machines {
-		fmt.sbprintf(&b, "%d|%s|%v|%s|%s|%v|%s|%v|%v;", m.no, m.name, m.status, m.version, m.error, m.job, m.job_note, m.update, m.linger)
-		for c in m.checklist do fmt.sbprintf(&b, "%s|%v|%s;", c.id, c.state, c.command)
-	}
-	return strings.to_string(b)
-}
-
-
-// The Settings tab's rows (settings_ui), rebuilt only when what they show changed.
-settings_tree_rows :: proc() -> []Files_Row {
-	v := &settings_ui
-	cwd := settings_project_cwd()
-	model := agent_model() // the Atlas group's model row
-	machines := settings_machines_key() // the Machines group follows its links' status
-	if v.built && v.root == cwd && v.state_gen == files_state_gen && v.cache_gen == files_cache_gen && sf_built_gen == settings_gen && model == sf_model && machines == sf_machines do return v.rows[:]
-	delete(sf_model)
-	sf_model = strings.clone(model)
-	delete(sf_machines)
-	sf_machines = strings.clone(machines)
-	virtual.arena_destroy(&v.arena)
-	_ = virtual.arena_init_growing(&v.arena)
-	a := virtual.arena_allocator(&v.arena)
-	v.rows = make([dynamic]Files_Row, a)
-	v.root = strings.clone(cwd, a)
-	sf_has_ids = false
-	rows := settings_file_rows()
-	if state.files.filter != "" {
-		settings_filter_rows(v, rows, a)
-	} else {
-		group := ""
-		for r in rows {
-			if r.group != group {
-				group = r.group
-				append(&v.rows, Files_Row{head = true, name = strings.clone(settings_group_label(group, cwd), a)})
-			}
-			settings_tree_row(v, r, a)
-			if r.group != "project" || r.label != ".pi/settings.json" do continue
-			// the rest of the project's .pi/ folder
-			dir := strings.concatenate({cwd, "/.pi"}, context.temp_allocator)
-			if path_kind(dir) != .Dir do continue
-			for e in files_dir(dir, false).entries {
-				full := strings.concatenate({dir, "/", e.name}, context.temp_allocator)
-				if e.name == "settings.json" || settings_hidden(full) do continue
-				tree_row(v, full, strings.concatenate({".pi/", e.name}, context.temp_allocator), e.kind, "", false, a)
-			}
-		}
-	}
-	files_walk_done()
-	sf_has_ids = false
-	sf_look(record_only = true) // what was listed is the poll's baseline
-	v.state_gen, v.cache_gen, v.built = files_state_gen, files_cache_gen, true
-	sf_built_gen = settings_gen
-	return v.rows[:]
-}
-
-// A row of settings_file_rows in the tree, with its buttons.
-@(private = "file")
-settings_tree_row :: proc(v: ^Files_View, r: Settings_File_Row, a: runtime.Allocator) {
-	tree_row(v, r.path, r.label, r.kind == .Folder ? .Dir : .File, r.detail, !r.exists, a)
-	row := &v.rows[len(v.rows) - 1]
-	if r.button != "" do row.button = strings.clone(r.button, a)
-	row.reset, row.reveal, row.remove, row.make_default = r.reset, r.reveal, r.remove, r.make_default
-}
-
-@(private = "file")
-tree_row :: proc(v: ^Files_View, path, name: string, kind: Fs_Kind, note: string, missing: bool, a: runtime.Allocator) {
-	full := strings.clone(path, a)
-	open := kind == .Dir && !missing && files_is_open(full)
-	append(&v.rows, Files_Row{path = full, name = strings.clone(name, a), kind = kind, note = strings.clone(note, a), missing = missing, expanded = open})
-	if open do files_walk(v, full, "", 1, false, nil, a, settings = true)
 }
 
 SETTINGS_FILTER_SCAN :: 5000 // entries looked at by a filter
@@ -1047,56 +949,6 @@ settings_scan_files :: proc(rows: []Settings_File_Row, cwd: string) -> []string 
 
 // Filter mode: the rows that are settings whose words match (settings_search: their label,
 // what they say, their group and their setting's name and keywords: "machine" keeps the machines),
-// with their buttons; then every file of the tree (open or not, ignored ones and node_modules
-// left out) whose path matches every word, best first, flat.
-@(private = "file")
-settings_filter_rows :: proc(v: ^Files_View, rows: []Settings_File_Row, a: runtime.Allocator) {
-	ad := settings_agent_dir()
-	cwd := v.root
-	for h in settings_search(state.files.filter, rows) do if h.kind == .Row do settings_tree_row(v, h.row, a)
-	files := settings_scan_files(rows, cwd)
-	rel_of :: proc(p, ad, cwd: string) -> string {
-		if under(p, ad) do return p[len(ad) + 1:]
-		if cwd != "" && under(p, cwd) do return p[len(cwd) + 1:]
-		return fs_display(p)
-	}
-	words := strings.fields(state.files.filter, context.temp_allocator)
-	Hit :: struct {
-		i, score: int,
-	}
-	hits := make([dynamic]Hit, context.temp_allocator)
-	for f, i in files {
-		rel := rel_of(f, ad, cwd)
-		total := 0
-		ok := true
-		for w in words {
-			if s, _, hit := fuzzy_score(w, filepath.base(f)); hit {
-				total += 2 * s
-				continue
-			}
-			s, _, hit := fuzzy_score(w, rel)
-			if !hit {
-				ok = false
-				break
-			}
-			total += s
-		}
-		if ok do append(&hits, Hit{i, total})
-	}
-	slice.sort_by(hits[:], proc(x, y: Hit) -> bool {
-		if x.score != y.score do return x.score > y.score
-		return x.i < y.i
-	})
-	for h, k in hits {
-		if k >= FILES_FILTER_MAX {
-			append(&v.rows, Files_Row{path = strings.clone(ad, a), more = len(hits) - k})
-			break
-		}
-		full := strings.clone(files[h.i], a)
-		append(&v.rows, Files_Row{path = full, name = full[len(full) - len(filepath.base(full)):], rel = strings.clone(rel_of(full, ad, cwd), a), kind = .File})
-	}
-}
-
 // ---- Create, the poll, the palette ----
 
 // A missing row's Create button: makes the file (never over one made since
@@ -1209,5 +1061,3 @@ settings_file_action :: proc(group, label: string) -> (Command, bool) {
 	return nil, false
 }
 
-// The Atlas group's model row as shown (its tooltip).
-sf_model_note :: proc() -> string {return sf_model != "" ? sf_model : "pi's default"}

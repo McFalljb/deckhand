@@ -156,14 +156,15 @@ text_size_field_math :: proc(t: ^testing.T) {
 	}
 }
 
-// The keyboard walks the gear's rows top to bottom: every row once.
+// The keyboard walks Quick settings' rows top to bottom: each row once, All settings… last.
 @(test)
 gear_keyboard_order :: proc(t: ^testing.T) {
 	seen: [Pop_Item]int
 	for it in POP_ORDER do seen[it] += 1
-	for it in Pop_Item do testing.expectf(t, seen[it] == 1, "%v is %d times in POP_ORDER", it, seen[it])
+	for it in Pop_Item do testing.expectf(t, seen[it] <= 1, "%v is %d times in POP_ORDER", it, seen[it])
 	order := POP_ORDER
 	testing.expect_value(t, order[6], Pop_Item.Text_Small) // right under Look
+	testing.expect_value(t, order[len(order) - 1], Pop_Item.Settings_Files)
 }
 
 // A size change reaches the layout at once: Clay's cached text widths are

@@ -737,31 +737,16 @@ ACTIONS := [?]Action {
 	}, prepare = proc() {
 		if !files_shown() do ui_do(core.Set_Left_Tab{tab = .Files})
 	}},
-	// the Settings tab (settings_files.odin, drawn by ui_files.odin)
-	{id = "settings_collapse_all", label = "Collapse all settings folders", make = proc() -> (core.Command, bool) {
-		ad := core.settings_agent_dir()
-		if len(core.files_expanded_dirs(ad)) == 0 && len(core.settings_open_pi_dirs()) == 0 do return nil, false
-		return core.Files_Collapse_All{root = ad}, true
-	}, prepare = proc() {
-		// the project's .pi/ folders are in the project's tree: closed one by one
-		for p in core.settings_open_pi_dirs() do ui_do(core.Files_Expand{path = p, expanded = false})
-	}, done = proc() -> string {return "Folders collapsed"}},
 	{id = "settings_refresh", label = "Refresh settings files", make = proc() -> (core.Command, bool) {
 		return core.Set_Focus{"settings_page"}, true
 	}, ui = settings_page_open_default, prepare = proc() {
-		// every listing of the tree is read again
+		// every listing the page's search reads is read again
 		ad := core.settings_agent_dir()
 		core.files_path_changed(ad)
 		for d in core.files_cached_dirs(ad) do core.files_path_changed(d)
 		if cwd := core.settings_project_cwd(); cwd != "" do core.fs_model_changed(strings.concatenate({cwd, "/.pi"}, context.temp_allocator))
 		core.harness_checklist_refresh() // the Coding agents group looks again (ui_harness.odin)
 		core.settings_gen += 1
-	}},
-	{id = "settings_reveal_finder", label = "Reveal in Finder", no_palette = true, make = proc() -> (core.Command, bool) {
-		p := core.settings_ui.cursor // a row of the tree (Reveal_In_Finder checks it again)
-		if p == "" || !os.exists(p) do p = core.settings_agent_dir()
-		if !os.exists(p) do return nil, false
-		return core.Reveal_In_Finder{path = p}, true
 	}},
 	{id = "reveal_file", label = "Reveal in Finder", make = proc() -> (core.Command, bool) {
 		e := tab_editor()

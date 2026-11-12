@@ -160,13 +160,12 @@ buttons_reachable_in_layout :: proc(t: ^testing.T) {
 	}
 	core.run_command(core.Set_Layout{left_open = true}, {kind = .UI})
 
-	// the settings popover: every row and choice (back to ~/Chats shows while
-	// another folder is set); the looks' tooltips
+	// Quick settings: every row and choice; the looks' tooltips
 	r = core.run_command(core.Set_Folder{kind = .Chats, path = dir}, {kind = .UI})
 	testing.expect(t, r.ok, r.error)
 	core.run_command(core.Set_Focus{"settings"}, {kind = .UI})
 	_ = ui_layout(1400, 860) // the popover anchors to the button's last box
-	for it in Pop_Item {
+	for it in POP_ORDER {
 		// Reload all pi tabs, Restart all Claude tabs: only while such a tab runs (pop_item_shown);
 		// tests/scripts/claude-runtime.txt clicks the Claude one
 		if !pop_item_shown(it) do continue

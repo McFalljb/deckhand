@@ -592,7 +592,7 @@ wait 300
 rclickid jobrow 0
 clickmenu Open note
 eventually
-assert_state open_sessions.5.tabs.2.title menu-job.md
+assert_state open_sessions.5.tabs.1.title menu-job.md
 # a run while Deckhand is behind: unread, so the menu offers Mark read
 window_active off
 rclickid jobrow 0
@@ -614,7 +614,7 @@ assert_revealed /jobs/m1/runs/
 rclickid jobrow 0
 clickmenu Open last report
 eventually
-assert_state open_sessions.5.tabs.3.title summary.md
+assert_state open_sessions.5.tabs.2.title summary.md
 rclickid jobrow 0
 clickmenu Delete…
 eventually

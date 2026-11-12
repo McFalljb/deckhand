@@ -60,6 +60,10 @@ Fake_Holder :: struct {
 	drop:            bool,
 	rejoin_instance: string,
 	rejoin_output:   []u8,
+	rejoin_delay:    time.Duration, // the second WELCOME waits this long (the core is reattaching meanwhile)
+	relisten_delay:  time.Duration, // after the drop the socket is gone this long (connects fail: the core waits with no connection)
+	deaf:            bool, // (atomic) the fake reads nothing more until it drops: what the app sends stays unread, as with a holder that drops a core
+	upgrade_drops:   bool, // UPGRADE: the fake closes as a pong-timeout drop does (no upgrade: the next WELCOME says crash)
 	hellos:    int, // HELLOs so far (atomic)
 	helloed:   bool, // a HELLO came (atomic)
 	key:       [32]u8,
@@ -178,6 +182,12 @@ fake_holder_main :: proc(data: rawptr) {
 		fake_serve(f)
 		sock_close(fd)
 		f.cfd = -1
+		if f.relisten_delay > 0 && sync.atomic_load(&f.drop) && sync.atomic_load(&f.hellos) == 1 {
+			sock_close(f.lfd)
+			sock_unlink(f.path)
+			time.sleep(f.relisten_delay)
+			f.lfd, _ = sock_listen(f.path)
+		}
 		free_all(context.temp_allocator)
 	}
 }
@@ -191,6 +201,10 @@ fake_serve :: proc(f: ^Fake_Holder) {
 	hello := false
 	for !sync.atomic_load(&f.stop) {
 		if hello && sync.atomic_load(&f.hellos) == 1 && sync.atomic_load(&f.drop) do return // the holder's conn_drop: closed, nothing more
+		if hello && sync.atomic_load(&f.hellos) == 1 && sync.atomic_load(&f.deaf) {
+			time.sleep(10 * time.Millisecond)
+			continue
+		}
 		if hello && f.no_read {
 			time.sleep(10 * time.Millisecond)
 			continue
@@ -221,6 +235,7 @@ fake_serve :: proc(f: ^Fake_Holder) {
 				case .Silent, .Hangup:
 				case .Welcome:
 					rejoin := sync.atomic_load(&f.hellos) > 1
+					if rejoin && f.rejoin_delay > 0 do time.sleep(f.rejoin_delay)
 					w := hw.Welcome{wire = hw.WIRE, instance = rejoin && f.rejoin_instance != "" ? f.rejoin_instance : f.instance, pid = i64(posix.getpid()), holder_rev = 1, previous = f.upgraded ? "upgrade" : rejoin ? "crash" : f.previous, hmac_key = string(hex.encode(f.key[:], context.temp_allocator)), terminals = f.terms}
 					out := make([dynamic]u8, context.temp_allocator)
 					hw.encode(&out, .Welcome, 0, w)
@@ -251,6 +266,12 @@ fake_serve :: proc(f: ^Fake_Holder) {
 			case .Ping:
 				if !f.upgraded do fake_send(f, .Pong, 0, hw.Empty{})
 			case .Upgrade:
+				if f.upgrade_drops {
+					sync.lock(&f.mu)
+					append(&f.got, g)
+					sync.unlock(&f.mu)
+					return // a drop, not an exec: the same image answers the next HELLO
+				}
 				f.upgraded = true
 				sync.lock(&f.mu)
 				append(&f.got, g)

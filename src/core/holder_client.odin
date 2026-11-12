@@ -122,9 +122,11 @@ Holder_Client :: struct {
 	adopt_done:    bool, // the launch's adopt ran: terminals a later WELCOME lists are kept unseen
 	unreachable:   bool, // a holder answered but did not attach (Warn_Running): it may run kept sessions
 	path:      string, // the socket connected to (an upgrade reconnects to it)
+	listed:    map[u32]bool, // the last reattach's WELCOME terminals (release_again)
 	holder_rev: i64, // WELCOME.holder_rev
 	upgrading: bool, // UPGRADE sent, no outcome yet: frames wait in pending (wmu)
 	rejoining: bool, // the holder dropped us and the reader attaches again: frames wait in pending (wmu)
+	released:  map[u32]bool, // terminals this core RELEASEd (or gave up spawning): sent again to a holder that still lists them after a reattach (mu)
 	stuck:     bool, // a send blocked for SO_SNDTIMEO: the holder does not read (hung), so the end is no drop to rejoin after
 	upgrade_told: bool, // the user was told a tab opened meanwhile is not kept (holder_wanted)
 	pending:   [dynamic]u8, // whole frames held back during an upgrade (wmu), sent after it
@@ -820,6 +822,10 @@ holder_spawn :: proc(argv: []string, cwd: string, env: []string, cols, rows: u16
 	else {
 		delete_key(&hc.held, id)
 		held_free(h)
+		if sent {
+			held_ids_map(&hc.released)
+			hc.released[id] = true
+		}
 	}
 	sync.unlock(&hc.mu)
 	if sent && !ok do holder_send(.Release, id, hw.Empty{}) // a late SPAWNED: nothing keeps it
@@ -883,6 +889,10 @@ holder_release :: proc(id: u32) {
 		if !handed && !h.eof && h.pid > 0 do append(&hc.dying, h.pid)
 		delete_key(&hc.held, id)
 		held_free(h)
+	}
+	if !handed {
+		held_ids_map(&hc.released)
+		hc.released[id] = true // its RELEASE may be lost if the holder drops us now (holder_connect_again)
 	}
 	sync.unlock(&hc.mu)
 	if !handed do holder_send(.Release, id, hw.Empty{})
@@ -951,10 +961,12 @@ holder_goodbye :: proc(mode: string, pump: proc(data: rawptr) = nil, data: rawpt
 	hw.encode(&out, .Goodbye, 0, hw.Goodbye{mode = mode, successor = successor})
 	deadline := time.tick_add(time.tick_now(), holder_quit_upgrade_wait)
 	sync.lock(&hc.wmu)
-	for hc.upgrading && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
+	// a rejoin too (holder_rejoin): its GOODBYE goes on the new connection; a failed rejoin loses
+	// the holder (lost: nothing to say goodbye to, as today)
+	for (hc.upgrading || hc.rejoining) && !sync.atomic_load(&hc.lost) && !sync.atomic_load(&hc.handed) {
 		sync.unlock(&hc.wmu)
 		if time.tick_diff(time.tick_now(), deadline) <= 0 {
-			log_ln("Deckhand: session holder: still upgrading at quit: leaving it the sessions (no GOODBYE)")
+			log_ln("Deckhand: session holder: still upgrading or reattaching at quit: leaving it the sessions (no GOODBYE)")
 			holder_leave()
 			return false
 		}
@@ -1049,11 +1061,11 @@ holder_upgrade :: proc(path: string) -> Holder_Upgrade_Result {
 	hw.encode(&out, .Upgrade, 0, hw.Upgrade{path = path})
 	sync.lock(&hc.wmu)
 	sync.lock(&hc.mu)
-	if !hc.on || hc.lost || hc.handed || hc.fd < 0 || hc.upgrading {
-		busy := hc.upgrading
+	if !hc.on || hc.lost || hc.handed || hc.fd < 0 || hc.upgrading || hc.rejoining {
+		why := hc.upgrading ? "an upgrade is already running" : hc.rejoining ? "the session holder is reattaching: try again" : "no session holder is attached"
 		sync.unlock(&hc.mu)
 		sync.unlock(&hc.wmu)
-		return {error = strings.clone(busy ? "an upgrade is already running" : "no session holder is attached")}
+		return {error = strings.clone(why)}
 	}
 	hc.upgrading, hc.up_done, hc.upgrade_told = true, false, false
 	sync.unlock(&hc.mu)
@@ -1139,6 +1151,10 @@ holder_reattach :: proc() -> bool {
 	sync.lock(&hc.mu)
 	res := Holder_Upgrade_Result{holder_rev = hc.holder_rev, pid = hc.pid}
 	switch {
+	case hc.previous == "crash":
+		// the holder dropped this core (its pong timeout) before it took the UPGRADE: the same
+		// image answered, nothing was upgraded (#108)
+		res.error = strings.clone("the session holder dropped the connection before the upgrade: nothing was upgraded")
 	case hc.upgrade_error_seen != "":
 		res.adopted = true
 		res.error = strings.clone(hc.upgrade_error_seen)
@@ -1195,6 +1211,33 @@ holder_rejoin :: proc(why: string) -> bool {
 	return true
 }
 
+// hc's id sets live on the heap whatever allocator the calling thread has (as hc.rx, rx_reset).
+@(private = "file")
+held_ids_map :: proc(m: ^map[u32]bool) {
+	if m.allocator.procedure == nil do m^ = make(map[u32]bool, runtime.heap_allocator())
+}
+
+// After a reattach: a terminal this core released that the holder still lists never got its
+// RELEASE (it went out in the gap and was lost, or sat unread when the holder dropped us): sent
+// again (queued: rejoining or upgrading is set, so it goes out right after the reattach). Kept and
+// claimed terminals are still in hc.held, never in released.
+@(private = "file")
+release_again :: proc() {
+	again := make([dynamic]u32, context.temp_allocator)
+	sync.lock(&hc.mu)
+	gone := make([dynamic]u32, context.temp_allocator)
+	for id in hc.released {
+		if hc.listed[id] && hc.held[id] == nil do append(&again, id)
+		else do append(&gone, id) // gone from the holder: forgotten
+	}
+	for id in gone do delete_key(&hc.released, id)
+	sync.unlock(&hc.mu)
+	for id in again {
+		log_fln("Deckhand: session holder: terminal %d was released but still runs there: RELEASE again", id)
+		holder_send(.Release, id, hw.Empty{})
+	}
+}
+
 // The current connection closed: connect to hc.path again until d has passed, as the same holder
 // run (holder_reattach_on). done: attached (hc.fd is the new connection). why: "" when nothing
 // answered in time.
@@ -1212,7 +1255,10 @@ holder_connect_again :: proc(d: time.Duration) -> (why: string, done: bool) {
 			continue
 		}
 		w, done := holder_reattach_on(fd, deadline)
-		if done do return "", true
+		if done {
+			release_again()
+			return "", true
+		}
 		if !strings.has_prefix(w, "retry") do return w, false
 		why = w
 		time.sleep(20 * time.Millisecond)
@@ -1306,6 +1352,9 @@ holder_reattach_on :: proc(fd: Sock_Fd, deadline: time.Tick) -> (why: string, do
 		h.eof, h.lost = true, true
 		h.exit = {}
 	}
+	held_ids_map(&hc.listed)
+	clear(&hc.listed)
+	for id in listed do hc.listed[id] = true
 	delete(hc.previous)
 	hc.previous = strings.clone(w.previous)
 	delete(hc.upgrade_error_seen)
@@ -1350,6 +1399,8 @@ holder_client_forget :: proc() {
 	delete(hc.held)
 	delete(hc.ack)
 	delete(hc.dying)
+	delete(hc.released)
+	delete(hc.listed)
 	delete(hc.instance)
 	delete(hc.previous)
 	delete(hc.tokens_why)

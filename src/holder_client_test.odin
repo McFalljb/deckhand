@@ -685,6 +685,97 @@ holder_rejoin_other_instance_refused :: proc(t: ^testing.T) {
 	testing.expect_value(t, core.fake_holder_count(&f, .Spawn), 0)
 }
 
+// Review #117, 1: Quit Deckhand and Stop All Sessions while the core reattaches: the GOODBYE waits
+// for the reattach and goes to the holder on the new connection (not dropped while fd is -1).
+@(test)
+holder_quit_during_rejoin_says_goodbye :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}, relisten_delay = 400 * time.Millisecond}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	sync.atomic_store(&f.drop, true)
+	if !testing.expect(t, core.wait_until(2000, proc() -> bool {return sync.atomic_load(&core.hc.rejoining)}), "no rejoin") do return
+	core.holder_shutdown()
+	fp := &f
+	said := false
+	for _ in 0 ..< 200 {
+		for g in core.fake_holder_got(fp) do if g.kind == .Goodbye && g.mode == "shutdown" && g.conn == 2 do said = true
+		if said do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, said, "the GOODBYE{shutdown} never reached the holder after the reattach")
+}
+
+// Review #117, 2: an upgrade asked for while the core reattaches is refused at once (try again),
+// never sent ahead of the new connection's HELLO, and leaves nothing upgrading: input flows after.
+@(test)
+holder_upgrade_during_rejoin_refused :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}, rejoin_delay = 400 * time.Millisecond}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	sync.atomic_store(&f.drop, true)
+	if !testing.expect(t, core.wait_until(2000, proc() -> bool {return sync.atomic_load(&core.hc.rejoining)}), "no rejoin") do return
+	r := core.holder_upgrade("/fake/deckhand-core")
+	defer delete(r.error)
+	testing.expectf(t, !r.ok && strings.contains(r.error, "reattaching"), "upgrade during a rejoin: ok %v %q", r.ok, r.error)
+	testing.expect(t, !core.holder_upgrading(), "left upgrading")
+	testing.expect(t, core.wait_until(3000, proc() -> bool {return !sync.atomic_load(&core.hc.rejoining) && core.hc.on}), "not reattached")
+	core.holder_input(3, transmute([]u8)string("after"))
+	fp := &f
+	typed := false
+	for _ in 0 ..< 200 {
+		for g in core.fake_holder_got(fp) do if g.kind == .Input && g.conn == 2 do typed = true
+		if typed do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, typed, "input did not flow after the refused upgrade")
+	testing.expect_value(t, core.fake_holder_count(fp, .Upgrade), 0)
+}
+
+// Review #117, 2: an UPGRADE the holder never took (it dropped this core, unread) is answered on the
+// reattach by the same image with previous = crash: reported as not upgraded, nothing left upgrading.
+@(test)
+holder_upgrade_answered_by_a_drop :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, "")}, upgrade_drops = true}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	r := core.holder_upgrade("/fake/deckhand-core")
+	defer delete(r.error)
+	testing.expectf(t, !r.ok && strings.contains(r.error, "nothing was upgraded"), "ok %v %q", r.ok, r.error)
+	testing.expect(t, !core.holder_upgrading(), "left upgrading")
+	testing.expect(t, core.hc.on && !sync.atomic_load(&core.hc.lost), "not attached")
+}
+
+// Review #117, 3: a tab closed while the holder is dropping this core: its RELEASE sat unread when
+// the holder closed the connection. After the reattach the holder still lists that terminal, so
+// its RELEASE goes again; a terminal this core still holds is not released.
+@(test)
+holder_release_lost_in_drop_resent :: proc(t: ^testing.T) {
+	context.allocator = runtime.heap_allocator()
+	f := core.Fake_Holder{mode = .Welcome, terms = {fake_term(3, ""), fake_term(4, "")}}
+	core.fake_holder_start(t, &f)
+	defer core.fake_holder_stop(&f)
+	if !testing.expect(t, core.holder_wanted(), "attached") do return
+	sync.atomic_store(&f.deaf, true)
+	core.holder_release(3)
+	sync.atomic_store(&f.drop, true)
+	fp := &f
+	again := false
+	for _ in 0 ..< 300 {
+		for g in core.fake_holder_got(fp) do if g.kind == .Release && g.terminal == 3 && g.conn == 2 do again = true
+		if again do break
+		time.sleep(10 * time.Millisecond)
+	}
+	testing.expect(t, again, "terminal 3's RELEASE was not sent again after the reattach")
+	testing.expect_value(t, core.fake_holder_count(fp, .Release, 4), 0)
+	testing.expect(t, !sync.atomic_load(&core.hc.lost), "lost")
+}
+
 @(private = "file")
 term_shows :: proc(tab_id: u64, text: string) -> bool {
 	tm := core.term_of(tab_id)

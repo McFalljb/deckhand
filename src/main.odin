@@ -946,6 +946,7 @@ event :: proc(e: ^sapp.Event) {
 		case Hit_Pane_Divider: // pane_divider_press took it
 		case Hit_Jobs:      jobs_click(hit)
 		case Hit_Button:    button_click(Button(hit))
+		case Hit_Fleet_Row: fleet_go(u64(hit)) // as ⌥⌘A would go there (ui_fleet.odin)
 		case Hit_Menu_Row, Hit_Divider, Hit_Pop, Hit_Sheet_Close, Hit_Setup, Hit_Job_Sheet, Hit_Editor_Tool, Hit_Bell, Hit_Changes: // menu_event, the divider, the popover, the sheet and the editor take these first
 		}
 		clay.SetPointerState(app.pointer, false)

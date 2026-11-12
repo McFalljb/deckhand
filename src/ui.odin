@@ -501,6 +501,12 @@ status_mark_el :: proc(v: core.Tab_Status_View, flash: f32 = 0) {
 	icon(MARK_ICONS[m], mark_color(m, v.dot), MARK, param, flash_pop(flash))
 }
 
+// A mark in a colour of its own (the fleet's counts, ui_fleet.odin): working turns as every
+// working mark does (spin_visible gives it frames only where it is seen).
+mark_el :: proc(m: core.Status_Mark, col: core.Rgba) {
+	icon(MARK_ICONS[m], col, MARK, m == .Working ? spin_step() : 0)
+}
+
 // ---- building blocks ----
 
 SALT_SELECT :: 0x9e3779b9
@@ -599,6 +605,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	pulse_drawn = pulse_step()
 	age_minute_drawn = age_minute()
 	ui_win_w = w
+	fleet = core.fleet_counts() // the pill, the machine headers' and the empty centre's (ui_fleet.odin)
 	clay.SetLayoutDimensions({w, h})
 	clay.BeginLayout()
 	cs := core.cur_view() // another machine's session too: its tab bar and "Connecting…"
@@ -855,6 +862,8 @@ pane_layout :: proc(cs: ^core.Open_Session, p: ^core.Pane) {
 						// another machine's session: its terminals are relayed; its other tabs show there only
 						clay.Text("Shown on its machine only", txt(th.text_secondary))
 						clay.TextDynamic(fmt.tprintf("This tab runs on %s. Its terminals work from here; this kind of tab does not yet.", core.machine_name(cs.machine)), txt(th.text_muted))
+					} else if empty && cs == nil && core.fleet_any(fleet) {
+						fleet_empty_layout() // what runs and what needs you, instead of the bare prompt (ui_fleet.odin)
 					} else if empty {
 						clay.Text("No session open", txt(th.text_secondary))
 						clay.Text("Pick one on the left, or start a new chat", txt(th.text_muted))
@@ -939,7 +948,7 @@ confirm_bar :: proc(pc: core.Pending_Confirmation) {
 	}
 }
 
-button :: proc(id: clay.ElementId, label: string, primary, hovered: bool) {
+button :: proc(id: clay.ElementId, label: string, primary, hovered: bool, keys := "") {
 	th := theme()
 	bg: clay.Color
 	col := th.text
@@ -956,8 +965,14 @@ button :: proc(id: clay.ElementId, label: string, primary, hovered: bool) {
 		cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 	}) {
 		clay.TextDynamic(label, txt(col, primary ? WEIGHT_BOLD : WEIGHT_REGULAR))
+		if keys != "" { 	// its shortcut, quieter, after a gap
+			if clay.UI()({layout = {sizing = {clay.SizingFixed(px(SP_2)), clay.SizingFit()}}}) {}
+			clay.TextDynamic(keys, txt(with_alpha(col, KEYS_ALPHA), FONT_UI_SMALL))
+		}
 	}
 }
+
+KEYS_ALPHA :: 0.7 // a button's shortcut beside its label
 
 // The top bar: (the left column's buttons while it is hidden), the tabs of
 // the open session (pi tab first, then shells; later browser, markdown, app
@@ -970,6 +985,7 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 	{
 		left, _ := column_widths()
 		bar_compact = w - left * app.dpi < px(TOP_BAR_COMPACT_W)
+		fleet_pill_decide(cs, w - left * app.dpi) // the pill whole, its most urgent part, or none: where the tabs keep their room (ui_fleet.odin)
 		changes_button_decide(cs, w - left * app.dpi) // the "±" only where the tabs keep their room
 	}
 	if clay.UI(clay.ID("tabs"))({
@@ -981,10 +997,9 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 		if !state.layout.left_open do lights_buttons(px(LIGHTS_X + LIGHTS_W + SP_2 - TERM_PAD), px(SP_2))
 		if cs != nil {
 			// another machine's session: one quiet marker of where it runs, before its tabs
-			marker_w: f32 = 0
+			marker_w := remote_marker_w(cs)
 			if cs.machine != 0 {
 				label := clip(fmt.tprintf("on %s", core.machine_name(cs.machine)), px(140), FONT_UI_SMALL)
-				marker_w = text_w(label, FONT_UI_SMALL) + px(2 * SP_2 + SP_1)
 				if clay.UI(clay.ID("remote_marker"))({
 					layout = {sizing = {clay.SizingFit(), clay.SizingFixed(px(TAB_H - SP_1))}, padding = {pu(SP_2), pu(SP_2), 0, 0}, childAlignment = {y = .Center}},
 					cornerRadius = clay.CornerRadiusAll(px(RADIUS_SM)),
@@ -1006,11 +1021,18 @@ tab_strip :: proc(cs: ^core.Open_Session, w: f32) {
 		spacer()
 		search_pill(wide)
 		spacer()
+		fleet_pill() // what needs you and what works, on every machine (ui_fleet.odin)
 		bell_button() // the notification centre (ui_bell.odin)
 		tool_button(.Settings, settings_open())
 		tool_button(.Toggle_Right)
 		agent_button() // far right
 	}
+}
+
+// The width of the "on <machine>" marker before another machine's session's tabs (0: this Mac's).
+remote_marker_w :: proc(cs: ^core.Open_Session) -> f32 {
+	if cs == nil || cs.machine == 0 do return 0
+	return text_w(clip(fmt.tprintf("on %s", core.machine_name(cs.machine)), px(140), FONT_UI_SMALL), FONT_UI_SMALL) + px(2 * SP_2 + SP_1)
 }
 
 // The tabs of a strip: every tab of cs (p nil: the top bar of a session with one pane) or pane p's
@@ -1129,7 +1151,8 @@ tab_max_w :: proc(cs: ^core.Open_Session, room: f32, p: ^core.Pane = nil) -> (ma
 	for tab in cs.tabs {
 		if p != nil && tab.pane != p.id do continue
 		ic, label, extra := tab_label(cs, tab)
-		natural += clamp(text_w(label) + tab_fixed_w(ic, tab_shows_mark(tab), false, extra), px(TAB_MIN_W), px(TAB_MAX_W))
+		// as drawn (strip_tabs): its title up to TAB_MAX_W besides its parts, and its close button
+		natural += clamp(text_w(label) + tab_fixed_w(ic, tab_shows_mark(tab), false, extra), px(TAB_MIN_W), px(TAB_MAX_W) + tab_close_w())
 	}
 	if natural <= avail do return px(TAB_MAX_W), false
 	return clamp((avail - tab_close_w()) / n, px(TAB_MIN_W), px(TAB_MAX_W)), true
@@ -1143,6 +1166,7 @@ bar_compact: bool
 // buttons (the search pill as an icon), the agent's button, the gaps.
 top_bar_fixed_w :: proc() -> f32 {
 	w := px(2 * TERM_PAD) + 5 * px(TOOL_BUTTON + SP_1) + px(NEW_MENU_W + SP_1) + bell_extra_w()
+	if pw := fleet_pill_w(); pw > 0 do w += pw + px(SP_1) // the fleet pill, while it shows
 	w += px(SP_2 + SP_3 + AVATAR - 6 + SP_2 + MARK + SP_2) // the agent's button with a status mark
 	if !bar_compact do w += text_w(core.agent_name()) + px(SP_2) // and its name
 	if changes_btn_shown do w += changes_button_w(core.cur()) // the "±" button (ui_changes.odin), when it fits
@@ -1411,6 +1435,7 @@ Hit :: union {
 	Hit_Bell, // the bell's popover (ui_bell.odin)
 	Hit_Jobs, // the Jobs tab (ui_jobs.odin)
 	Hit_Changes, // the Changes tab and the top bar's "±" (ui_changes.odin)
+	Hit_Fleet_Row, // a row of the empty centre's summary (ui_fleet.odin)
 }
 Hit_Editor_Tool :: distinct int // button index
 Hit_Project :: distinct u64 // project id

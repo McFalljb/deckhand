@@ -52,7 +52,7 @@ play_bell_sound :: proc(name: string) {
 // The number on the Dock icon now (-1: not set yet).
 dock_badge_shown := -1
 
-// The Dock icon's badge: the sessions waiting for you (core.sessions_waiting_count), none at zero
+// The Dock icon's badge: the sessions that need you (core.sessions_waiting_count), none at zero
 // or while Badge Dock icon is off (set_notifications dock). Set only when it changes; from each
 // frame and the window's timer (frames stop while hidden). The window owns the Dock tile: the
 // background core has none.

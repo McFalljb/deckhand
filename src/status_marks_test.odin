@@ -402,6 +402,15 @@ status_marks_spin_frames :: proc(t: ^testing.T) {
 	_ = ui_layout(1400, 900)
 	testing.expect(t, ui_spinning(), "its row on screen turns")
 	_ = sid
-	_ = ui_layout(1400, 60)
-	testing.expect(t, !ui_spinning(), "its row out of sight: no frames")
+	// its row out of sight: the top bar's pill (ui_fleet.odin) still shows it working, and turns
+	cmds := ui_layout(1400, 60)
+	pill := clay.GetElementData(clay.ID("fleetpill")).boundingBox
+	for i in 0 ..< cmds.length {
+		c := &cmds.internalArray[i]
+		if c.commandType != .Custom do continue
+		if ic, _, _ := icon_of_command(c); ic != .Mark_Working do continue
+		b := c.boundingBox
+		testing.expectf(t, b.x >= pill.x && b.x + b.width <= pill.x + pill.width && b.y >= pill.y && b.y + b.height <= pill.y + pill.height, "the only working mark on screen is the pill's: %v", b)
+	}
+	testing.expect(t, ui_spinning(), "the pill turns")
 }

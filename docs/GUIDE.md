@@ -53,7 +53,8 @@ From left to right:
 
 The top bar holds, from left to right: show/hide the left column (⌘B), New chat (⌘N), the
 search pill (⌘K), the session's tabs with **+** (new shell tab, ⌘T) and its **⌄** menu (new
-tab, chat or session), **±** (the session's [changed files](#the-changes-tab)), the **bell**, the **gear** (quick settings), show/hide the right column
+tab, chat or session), **±** (the session's [changed files](#the-changes-tab)), the
+[fleet pill](#what-needs-you-everywhere), the **bell**, the **gear** (quick settings), show/hide the right column
 (⌥⌘B) and Atlas (⌘J). Empty parts of the top bar move the window; a double-click there zooms
 it. Hover any button to see its name and shortcut.
 
@@ -398,6 +399,33 @@ what it said, where it came from (pi bridge or OSC 7501) and for how long.
 
 Waiting work is never hidden: hidden rows, folded sections and filters always leave sessions
 that wait for you visible.
+
+### What needs you, everywhere
+
+**The fleet pill** sits in the top bar, left of the bell, whenever anything is going on in your
+open sessions, on this Mac and on every machine that is online. It counts sessions, each once, at
+its most urgent:
+
+| Part | Counts |
+|---|---|
+| a solid disc and a number (amber; red when an error is among them; **!** when all are errors) | sessions that need you: waiting for you (a permission, a question, a login) or stopped with an error |
+| a check and a number (the accent) | sessions that finished while you were not looking |
+| a turning arc and a number | sessions where something is working and nothing needs you |
+
+A part with nothing to count is left out, and with nothing going on there is no pill. When the
+top bar is narrow it shows only its most urgent part. Hover it to read the counts in words ("2
+need you, 1 finished, 3 working"). Click it to go to the next session that needs you, as ⌥⌘A
+does ([To go to what needs you](#tabs)); when only work is going on, a click goes to the next
+working session. The same numbers are on the Dock icon (the sessions that need you) and next to
+each machine's name in the left column (that machine's alone, also while it is folded; an
+offline machine shows none, and on a narrow column they give way before the name).
+
+**With no session open**, the centre shows the same counts in words instead of "No session
+open", and up to five of those sessions, the ones that need you first (in ⌥⌘A's order): each
+with its mark, its project and title, which machine it runs on (when you have more than one) and
+for how long. Click a row to go there. **Go to next** (⌥⌘A) shows while something needs you,
+next to **New chat** and **Add project…**. With nothing going on, it says "No session open" as
+before.
 
 ### Everyday tasks
 
@@ -1590,7 +1618,9 @@ The bell in the top bar collects what happened in sessions you were **not lookin
   while it is in front when that kind's macOS says always. It is paced with the macOS
   notifications, and never more than one a second.
 - **The Dock icon's badge** (gear: **Badge Dock icon**, on by default): the number of open
-  sessions waiting for you, this Mac's and those of machines that are online; no badge at zero.
+  sessions that need you (waiting for you, or stopped with an error), this Mac's and those of
+  machines that are online: the same number as the [fleet pill](#what-needs-you-everywhere)'s
+  first part; no badge at zero.
 - **Other machines** can't notify you themselves, so this Mac rings for them: each new entry of
   their bell once, and each job run there that needs you once (also one from while you were
   away, when it connects), with this Mac's bell, macOS and sound choices for its kind. What a
@@ -2130,7 +2160,7 @@ Everything ⌘K can run. Some only appear when they apply (for example Save need
 | Finished: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Errors: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
 | Jobs: sound |  | the gear's grid: the next sound (none, Tink, Glass, Pop, Ping, Purr, Hero, Bottle, Basso) |
-| Badge Dock icon |  | the number of sessions waiting for you on the Dock icon |
+| Badge Dock icon |  | the number of sessions that need you on the Dock icon |
 | Toggle left column | ⌘B | |
 | Toggle right column | ⌥⌘B | |
 | Bigger text, Smaller text, Actual text size | ⌘+, ⌘−, ⌘0 | the terminals' and the editor's text |

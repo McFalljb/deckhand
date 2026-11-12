@@ -7,8 +7,10 @@ package main
 // are framebuffer pixels; every size and colour comes from theme.odin.
 //
 // Motion: hover and selection fade (ease-out), a pulsing dot for running
-// tabs. Both only redraw while they move (ui_wants_frame); nothing animates
-// while idle, and Settings.reduce_motion turns both off.
+// tabs, a one-shot flash when a status turns waiting, finished or error (and
+// a copied terminal selection's shine). Each only redraws while it moves and
+// is seen (ui_wants_frame); nothing animates while idle, and
+// Settings.reduce_motion turns them all off.
 
 import "core:fmt"
 import "core:math"
@@ -190,7 +192,172 @@ pulse :: proc() -> f32 {
 ui_wants_frame :: proc() -> bool {
 	again := panels_clamped
 	panels_clamped = false
-	return again || animating || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+	return again || animating || flash_seen || shine_drawn || ((pulsing || spinning) && pulse_step() != pulse_drawn) || (ages_shown && age_minute() != age_minute_drawn)
+}
+
+// ---- flash: a one-shot 1 -> 0 ----
+
+Flash :: struct {
+	stamp: i64, // what it last saw (0 = at rest)
+	t0:    time.Tick, // when stamp last changed to a non-zero one; {} = done
+}
+
+FLASHES_MAX :: 512 // entries kept; past it the ones at rest go (flash_prune)
+FLASH_LIT_MAX :: 16
+
+@(private = "file")
+flashes: map[u64]Flash
+@(private = "file")
+flash_lit: [FLASH_LIT_MAX]u32 // the elements that host a running flash this layout (flash_host)
+@(private = "file")
+flash_lit_n: int
+@(private = "file")
+flash_seen: bool // one of them is drawn where it can be seen (motion_visible): draw the next frame
+@(private = "file")
+shine_drawn: bool // a terminal drew a copy shine this frame (term_draw): draw the next one
+
+// 1 the frame stamp changes for key (to anything but 0), decaying linearly to 0 over dur; 0 at
+// rest, for stamp 0 and under Reduce motion. A key first seen with a stamp starts too (the caller
+// decides what is new: status_flash). No allocation but a new key's entry; the table is bounded.
+flash :: proc(key: u64, stamp: i64, dur: time.Duration = DUR_FLASH) -> f32 {
+	return flash_at(key, stamp, dur, time.tick_now())
+}
+
+flash_at :: proc(key: u64, stamp: i64, dur: time.Duration, now: time.Tick) -> f32 {
+	f, seen := flashes[key]
+	if !seen || f.stamp != stamp {
+		if !seen && len(flashes) >= FLASHES_MAX do flash_prune()
+		f = {stamp = stamp}
+		if stamp != 0 && !state.settings.reduce_motion do f.t0 = now
+		flashes[key] = f
+	}
+	if f.t0 == {} do return 0
+	if state.settings.reduce_motion {
+		flashes[key] = {stamp = stamp}
+		return 0
+	}
+	k := f32(time.duration_seconds(time.tick_diff(f.t0, now)) / time.duration_seconds(dur))
+	if k >= 1 || k < 0 {
+		flashes[key] = {stamp = stamp}
+		return 0
+	}
+	return 1 - k
+}
+
+// Entries at rest go (a running one stays): the table never grows past FLASHES_MAX for long.
+@(private = "file")
+flash_prune :: proc() {
+	rest := make([dynamic]u64, context.temp_allocator)
+	for k, f in flashes do if f.t0 == {} do append(&rest, k)
+	for k in rest do delete_key(&flashes, k)
+}
+
+// The element id drawing a running flash: frames come while it is on screen (motion_visible).
+flash_host :: proc(id: clay.ElementId) {
+	if flash_lit_n < FLASH_LIT_MAX do flash_lit[flash_lit_n] = id.id
+	flash_lit_n += 1 // past the table: frames, seen or not (motion_visible)
+}
+
+// A terminal drew a shine (term_view.odin): the next frame is drawn too.
+shine_frame :: proc() {shine_drawn = true}
+
+// Whether the last layout has a running flash where it can be seen (tests).
+ui_flashing :: proc() -> bool {return flash_seen}
+
+// Every flash back to its start (tests: n ms ago).
+flash_age_for_test :: proc(d: time.Duration) {
+	for _, &f in flashes do if f.t0 != {} do f.t0 = time.tick_add(f.t0, -d)
+}
+
+flashes_for_test :: proc() -> map[u64]Flash {return flashes}
+
+flash_reset_for_test :: proc() {
+	clear(&flashes)
+	flash_quiet_until = {}
+	clear(&flash_machines)
+}
+
+// ---- status flash: a row or tab whose status turns waiting, finished or error ----
+
+// Statuses before this began with the window's link (flash_quiet): a connect's rows stay still.
+@(private = "file")
+flash_quiet_until: time.Time
+
+Flash_Machine :: struct {
+	live:  bool,
+	until: time.Time,
+}
+@(private = "file")
+flash_machines: map[u64]Flash_Machine
+
+// The window's link to the core is (again) up: statuses that came with it do not flash.
+flash_quiet :: proc(now := time.Time{}) {
+	now := now != {} ? now : time.now()
+	flash_quiet_until = time.time_add(now, FLASH_SETTLE)
+}
+
+// The statuses that flash: the ones that ask for the user (waiting, a question, finished not seen,
+// an error). Working and idle change too often.
+status_flashes :: proc(dot: core.Row_Status) -> bool {
+	#partial switch dot {
+	case .Waiting, .Question, .Unseen, .Error: return true
+	}
+	return false
+}
+
+// The colour a status washes its row and tab in.
+flash_color :: proc(dot: core.Row_Status) -> core.Rgba {
+	th := theme()
+	#partial switch dot {
+	case .Waiting, .Question: return th.waiting
+	case .Error:              return th.error
+	case .Unseen:             return th.accent
+	}
+	return {}
+}
+
+// A row's or tab's flash for its status v (1 -> 0; key: what it is, stable across reorders),
+// drawn on element host. machine: whose status (0 = this Mac's), live: that machine is online.
+// It starts when v's status began (since) a moment ago, as a status that flashes, after that
+// machine's link settled; a repeat report keeps since, so it never starts again.
+status_flash :: proc(host: clay.ElementId, key: u64, v: core.Tab_Status_View, machine: u64 = 0, live := true, now := time.Time{}) -> f32 {
+	now := now != {} ? now : time.now()
+	if flash_quiet_until == {} do flash_quiet(now) // the window's first frames
+	quiet := flash_quiet_until
+	if machine != 0 {
+		m, seen := flash_machines[machine]
+		if !seen || (live && !m.live) do m.until = time.time_add(now, FLASH_SETTLE) // its link came up
+		m.live = live
+		flash_machines[machine] = m
+		if time.diff(quiet, m.until) > 0 do quiet = m.until
+	}
+	stamp: i64
+	if live && status_flashes(v.dot) && v.since != {} && time.diff(v.since, now) < FLASH_FRESH && time.diff(quiet, v.since) > 0 do stamp = v.since._nsec
+	r := flash(key, stamp)
+	if r > 0 do flash_host(host)
+	return r
+}
+
+// bg with a status's wash over it, at FLASH_ALPHA * r² (r: status_flash's 1 -> 0, so it eases out).
+flash_wash :: proc(bg: clay.Color, dot: core.Row_Status, r: f32) -> clay.Color {
+	if r <= 0 do return bg
+	c := flash_color(dot)
+	wa := FLASH_ALPHA * r * r * f32(c.a) / 255
+	ba := bg.a / 255
+	oa := wa + ba * (1 - wa)
+	if oa <= 0 do return bg
+	out: clay.Color
+	for i in 0 ..< 3 do out[i] = (f32(c[i]) * wa + bg[i] * ba * (1 - wa)) / oa
+	out[3] = oa * 255
+	return out
+}
+
+// A mark's size while it flashes (r 1 -> 0): it grows to 1 + FLASH_POP soon after the start and
+// settles back to 1 by FLASH_POP_PART of the flash (a fast rise, a slower settle); 1 at rest.
+flash_pop :: proc(r: f32) -> f32 {
+	k := (1 - r) / FLASH_POP_PART
+	if r <= 0 || k >= 1 do return 1
+	return 1 + FLASH_POP * math.sin(math.PI * math.sqrt(max(k, 0)))
 }
 
 @(private = "file")
@@ -199,30 +366,36 @@ spinning: bool // a working mark turns where it can be seen (spin_visible): draw
 // Whether the last layout has a turning mark on screen (tests).
 ui_spinning :: proc() -> bool {return spinning}
 
-// Whether a working mark is drawn where it can be seen: inside the window and the list that
-// clips it. Motion off (Reduce motion): it holds still, and asks for nothing.
+// Whether a working mark (spin) and a running flash's element (lit: flash_host) are drawn where
+// they can be seen: inside the window and the list that clips them. Motion off (Reduce motion):
+// they hold still, and ask for nothing.
 @(private = "file")
-spin_visible :: proc(cmds: clay.ClayArray(clay.RenderCommand), w, h: f32) -> bool {
-	if state.settings.reduce_motion do return false
+motion_visible :: proc(cmds: clay.ClayArray(clay.RenderCommand), w, h: f32) -> (spin, lit: bool) {
+	if state.settings.reduce_motion do return false, false
+	if flash_lit_n > FLASH_LIT_MAX do lit = true // more than the table holds: frames until they end
 	clip := [4]f32{0, 0, w, h}
 	stack: [dynamic][4]f32
 	stack.allocator = context.temp_allocator
 	for i in 0 ..< cmds.length {
 		c := &cmds.internalArray[i]
 		b := c.boundingBox
+		seen := b.x < clip[2] && b.x + b.width > clip[0] && b.y < clip[3] && b.y + b.height > clip[1]
 		#partial switch c.commandType {
 		case .ScissorStart:
 			append(&stack, clip)
 			clip = {max(clip[0], b.x), max(clip[1], b.y), min(clip[2], b.x + b.width), min(clip[3], b.y + b.height)}
 		case .ScissorEnd:
 			if len(stack) > 0 do clip = pop(&stack)
+		case .Rectangle:
+			// a washed row or tab (its background is drawn while the wash shows)
+			if !lit && seen do for x in flash_lit[:min(flash_lit_n, FLASH_LIT_MAX)] do if x == c.id do lit = true
 		case .Custom:
 			ic, _, _ := icon_of_command(c)
-			if ic != .Mark_Working do continue
-			if b.x < clip[2] && b.x + b.width > clip[0] && b.y < clip[3] && b.y + b.height > clip[1] do return true
+			if ic == .Mark_Working && seen do spin = true
 		}
+		if spin && lit do break
 	}
-	return false
+	return
 }
 
 @(private = "file")
@@ -316,20 +489,26 @@ spin_step :: proc() -> u8 {
 }
 
 // A status's mark (core.status_mark), MARK px square: every state the same box, so a row or tab
-// never moves when its status changes.
-status_mark_el :: proc(v: core.Tab_Status_View) {
+// never moves when its status changes. flash: its row's status_flash (the mark pops: flash_pop,
+// drawn larger about its centre; the box stays).
+status_mark_el :: proc(v: core.Tab_Status_View, flash: f32 = 0) {
 	m := core.status_mark(v)
 	param: u8
 	#partial switch m {
 	case .Working:  param = spin_step()
 	case .Progress: param = u8(clamp(v.progress, 0, 1) * 100 + 0.5)
 	}
-	icon(MARK_ICONS[m], mark_color(m, v.dot), MARK, param)
+	icon(MARK_ICONS[m], mark_color(m, v.dot), MARK, param, flash_pop(flash))
 }
 
 // ---- building blocks ----
 
 SALT_SELECT :: 0x9e3779b9
+// status_flash keys: a tab's and an open row's flash are their own (by tab or session id, never
+// the element's index: rows reorder when they turn waiting)
+SALT_FLASH_TAB :: 0x5bd1e995_00000000
+SALT_FLASH_ROW :: 0x27d4eb2f_00000000
+SALT_SHINE :: 0x165667b1_00000000
 
 // Background of a row/tab/button: selection and hover overlays, faded.
 overlay :: proc(id: clay.ElementId, selected, hovered: bool) -> (bg: clay.Color, emphasis: f32) {
@@ -415,6 +594,7 @@ ui_layout_pass: u64
 ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 	ui_layout_pass += 1
 	animating, pulsing, ages_shown = false, false, false
+	flash_lit_n, shine_drawn = 0, false
 	drawer_laid_out = false
 	pulse_drawn = pulse_step()
 	age_minute_drawn = age_minute()
@@ -455,7 +635,7 @@ ui_layout :: proc(w, h: f32) -> clay.ClayArray(clay.RenderCommand) {
 		tooltip_layout(w, h)
 	}
 	cmds := clay.EndLayout(0)
-	spinning = spin_visible(cmds, w, h) // frames for a turning mark only where it is seen
+	spinning, flash_seen = motion_visible(cmds, w, h) // frames for a turning mark or a flash only where it is seen
 	if panels_scroll_clamp() do panels_clamped = true // drawn again at the clamped offset (ui_wants_frame)
 	return cmds
 }
@@ -852,6 +1032,9 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 		ic, label, extra := tab_label(cs, tab)
 		view := tab_strip_view(tab, active)
 		show_mark := tab_shows_mark(tab)
+		// it turned waiting, finished or error just now: a brief wash, its mark pops
+		lit := show_mark ? status_flash(id, tab.id ~ SALT_FLASH_TAB, view, tab.machine) : 0
+		bg = flash_wash(bg, view.dot, lit)
 		dirty := editor_dirty(editor_of(tab.id))
 		font: u16 = WEIGHT_REGULAR
 		if et, is := tab.kind.(core.Editor_Tab); is && et.preview do font |= FONT_ITALIC // a preview: the next one replaces it
@@ -871,7 +1054,7 @@ strip_tabs :: proc(cs: ^core.Open_Session, p: ^core.Pane, room: f32) {
 			backgroundColor = bg,
 			cornerRadius = clay.CornerRadiusAll(px(RADIUS_MD)),
 		}) {
-			if show_mark do status_mark_el(view)
+			if show_mark do status_mark_el(view, lit)
 			if dirty do dot(th.text_secondary) // unsaved changes
 			col := mix(th.text_secondary, th.text, em)
 			if tab.status != .Running do col = th.text_muted
@@ -1469,7 +1652,8 @@ ui_draw :: proc(cmds: clay.ClayArray(clay.RenderCommand), from, to: i32) {
 			sgl.begin_quads()
 		case .Custom:
 			ic, col, param := icon_of_command(cmd)
-			draw_icon(ic, b.x, b.y, b.width, b.height, col, param)
+			x, y, iw, ih := icon_draw_box(cmd) // a flashing mark pops about its centre (status_mark_el)
+			draw_icon(ic, x, y, iw, ih, col, param)
 		case .None, .Image, .OverlayColorStart, .OverlayColorEnd:
 		}
 	}

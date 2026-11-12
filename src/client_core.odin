@@ -227,6 +227,7 @@ client_core_subscribe :: proc() -> string {
 	for !got_full && !client.lost && time.tick_diff(time.tick_now(), deadline) > 0 do client_io(50)
 	if !got_full do return "Deckhand's background core sent no state"
 	client_facts()
+	flash_quiet() // the statuses that came with it are not news (ui.odin status_flash)
 	return ""
 }
 
